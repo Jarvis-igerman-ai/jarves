@@ -1,6 +1,6 @@
 # NOW — S1.T03R4: Assembly & print-shop readiness (Issue #4 follow-up)
 
-**Status:** S1.T03R5 decision recorded (`docs/reviews/S1_T03R5_DESIGN_DECISION.md`: Pi in base, corrected simple build). CAD implementation NOT started (usage limit reached). Approved by user 17 Oct 2026.
+**Status:** S1.T03R5 architecture review delivered (`docs/reviews/S1_T03R5_ARCHITECTURE_REVIEW.md`, recommends R5b "structural base cover", no chassis). Awaiting approval before CAD. Approved by user 17 Oct 2026.
 
 ## Goal
 JARVES must be realistically printable by an ordinary Haifa/Krayot 3D-printing service, affordable, and practical for a beginner to assemble at home (see `docs/PROJECT_PRINCIPLES.md` → "Local print-shop feasibility").

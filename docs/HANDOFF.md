@@ -1,6 +1,10 @@
 # Current handoff — 17 October 2026
 
-## Active milestone — S1.T03R5 decision made, CAD implementation not started
+## Active milestone — S1.T03R5 architecture review delivered (R5b), awaiting approval before CAD
+
+- [S1_T03R5_ARCHITECTURE_REVIEW.md](reviews/S1_T03R5_ARCHITECTURE_REVIEW.md): the chassis table is removed (the base cover top is made structural); 7 printed parts + 2 snap blanks, about 25 screws + 12 nuts, 2 screw types; the mic board's own 5 W amp drives 1 plug-in speaker (connector type unconfirmed); microSD reachable through the rear door.
+- **Decision R5-1 (USER):** approve R5b for CAD implementation. Open spec items: speaker connector type, mono output, mic board current draw, mounting holes from Seeed files.
+
 
 User chose (17 Oct 2026): improve the simple Pi-in-base build. Engineering decision recorded in [S1_T03R5_DESIGN_DECISION.md](reviews/S1_T03R5_DESIGN_DECISION.md). Next agent: implement it in CAD (see its "Next" section). The R4 notes below are history.
 

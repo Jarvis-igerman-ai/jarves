@@ -1,5 +1,7 @@
 # JARVES S1.T03R5 — engineering decision: Pi in the base, corrected (CAD not yet implemented)
 
+> **Refined by [S1_T03R5_ARCHITECTURE_REVIEW.md](S1_T03R5_ARCHITECTURE_REVIEW.md) (R5b): the chassis table is removed and the base cover top made structural; the fastener and amp plan in that file supersedes this one.**
+
 **Status:** decision made by the engineering agent (Claude Opus 5.5) per the user's 17 Oct 2026 direction, which is to improve the earlier simple build rather than switch architecture. **The CAD round has NOT started yet**: the usage limit was reached. Nothing purchased, printed or contacted.
 
 ## Decision
