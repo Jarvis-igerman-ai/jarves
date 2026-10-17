@@ -25,6 +25,13 @@
 - The same *face scene/state machine* should be reused on the future device if Godot on Raspberry Pi passes performance tests. Blender/FreeCAD never run on-device.
 - Do not implement later stages. `docs/NOW.md` alone grants current scope.
 
+## Change propagation — mandatory
+- For every user-reported issue, identify the **owning source layer** before editing: FreeCAD = physical geometry, dimensions, printability and mounts; Blender = materials, visual finish and exported asset appearance; Godot = viewer interactions, rendering and runtime UI; Python Core/DevicePort = behavior and hardware abstraction when those stages exist.
+- **Feedback may travel backward** to any upstream owner. Apply the fix at the authoritative layer, then regenerate/reimport **only affected downstream outputs** and run focused checks at changed boundaries. Never patch a geometry/fit defect solely in Blender or Godot.
+- No need to propagate a local-only fix upstream: Godot UI/camera changes stay in Godot; Blender-only material changes need only refresh downstream visuals, not FreeCAD.
+- On handoff describe: problem → root cause/owning layer → files changed → downstream artifacts refreshed → checks actually passed or not tested. Mark unverified physical claims explicitly.
+- Don't silently expand the approved milestone while propagating a correction; request approval if a necessary fix materially changes scope.
+
 ## Closeout housekeeping
 - On milestone completion, record acceptance evidence and linked commit/PR in the Issue; close completed Issues, leave blocked/unfinished ones open with reason. Avoid duplicate Issues and check stale open work periodically.
 - Review changes for tracked caches, duplicate generated files, temporary artifacts and scratch outputs; ignore or clean **only clearly safe** disposable artifacts in scope. Never do sweeping deletion of source, essential renders or historical data without approval. Update README links if authoritative file locations change.
