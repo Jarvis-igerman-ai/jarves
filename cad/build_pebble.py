@@ -161,21 +161,47 @@ floor_box = box("_FloorBox", -300, -300, -1, 600, 600, 1 + 4)
 tube_hole_b = cyl("_BaseTubeHole", V["TubeR"] + 1, 10, Vector(0, 0, V["BaseH"] - 6))
 SPK = [(-1, "L"), (1, "R")]
 spk_holes = []
-for sgn, s in SPK:
+SPK_Z = 34.0                                   # speaker centre height (band 18..62)
+for sgn, s in SPK:                             # 9 x 5 grille of Ø3.5 holes per speaker, hidden behind the fabric
     th = math.radians(-90 + sgn * 35)
     d = Vector(math.cos(th), math.sin(th), 0)
-    spk_holes.append(cyl(f"_SpkHole_{s}", 23, 12, Vector(d.x * 97, d.y * 97, 33), d))
+    tg = Vector(-d.y, d.x, 0)
+    for i in range(9):
+        for j in range(5):
+            c = d * 96 + tg * (-24 + 6 * i)
+            spk_holes.append(cyl(f"_SpkHole_{s}_{i}_{j}", 1.75, 12, Vector(c.x, c.y, SPK_Z - 13 + 6.5 * j), d))
+# --- removable LED status ring on the upper base shoulder (groove z 74..80, above the rear door)
+LED_Z0, LED_Z1 = 74.0, 80.0
+backer = ring("_LED_Backer", 96, 84, 72, 10)                      # local wall thickening behind the groove
+led_groove = ring("_LED_Groove", 112, 90, LED_Z0, LED_Z1 - LED_Z0)
+led_wire = cyl("_LED_WireHole", 2, 14, Vector(0, 80, 77), Vector(0, 1, 0))
 door_box = box("_DoorBox", -55, 80, 12, 110, 40, 60)
-shell_raw = boolean("Cut", "_Base_ShellRaw", b_out, [b_in, floor_box, tube_hole_b] + spk_holes)
+shell_body = boolean("Cut", "_Base_ShellBody", b_out, [b_in, floor_box, tube_hole_b] + spk_holes)
+shell_bk = multi("Fuse", "_Base_ShellBacked", [shell_body, backer])
+shell_raw = boolean("Cut", "_Base_ShellRaw", shell_bk, [led_groove, led_wire])
 boolean("Cut", "Base_Shell", shell_raw, [door_box], "exterior")
 door_raw = multi("Common", "_Door_Raw", [shell_raw, door_box])
 vents = [box(f"_Vent_{i}", -30, 80, 22 + i * 7, 60, 40, 3) for i in range(5)]
 usbc = box("_USBC_Hole", 33, 80, 18, 10, 40, 4)
 boolean("Cut", "Base_Door", door_raw, vents + [usbc], "exterior")   # 2 captive M3 thumb screws (not modelled)
-light = ring("_LightRingCut", 96, 92, -1, 4.5)
-floor_raw = multi("Common", "_Floor_Raw", [b_out, floor_box])
-boolean("Cut", "Base_Floor", floor_raw, [light], "structure")      # carries posts, Pi, ballast pocket
-ring("Base_LightRing", 95.5, 92.5, 0.5, 3, "exterior")              # LED diffuser ring placeholder
+multi("Common", "Base_Floor", [b_out, floor_box], "structure")    # carries posts, Pi, pods, ballast pocket
+
+
+def led_half(name, side, cat):                 # diffuser / blank cover half (front -y or back +y), flush with shoulder
+    cone = obj("Cone", f"_{name}_cone", props=dict(Radius1=100.4, Radius2=95.2, Height=LED_Z1 - LED_Z0 - 0.4,
+                                                   Placement=App.Placement(Vector(0, 0, LED_Z0 + 0.2), Rotation())))
+    bore = cyl(f"_{name}_bore", 91.4, 10, Vector(0, 0, LED_Z0 - 2))
+    rng = boolean("Cut", f"_{name}_ring", cone, [bore])
+    half = box(f"_{name}_half", -150, -150.2 if side < 0 else 0.2, 0, 300, 150, 200)
+    return multi("Common", name, [rng, half], cat)
+
+
+led_half("LED_Diffuser_Front", -1, "exterior")                    # translucent PETG, snap-in from outside
+led_half("LED_Diffuser_Back", 1, "exterior")
+led_half("LED_Blank_Front", -1, "alternate")                      # opaque printed blank cover (same groove)
+led_half("LED_Blank_Back", 1, "alternate")
+ring("LED_Strip", 91.2, 90.0, LED_Z0 + 1, 3.5, "component")        # addressable LED strip placeholder (no SKU)
+box("LED_Connector", 26, 82, 60, 15, 8, 8, "component")           # detachable 3-pin connector, reachable via rear door
 band_raw = ring("_Band_Ring", V["BaseR"] + 1.5, V["BaseR"], 18, 44)
 band_gap = box("_BandDoorGap", -62, 0, 0, 124, 200, 100)          # band stops either side of the rear door
 boolean("Cut", "Base_Band", band_raw, [band_gap], "exterior")     # fabric speaker band (frame not modelled)
@@ -198,19 +224,76 @@ for sgn, s in SPK:
     rot = Rotation(Vector(0, 0, 1), math.degrees(th) - 90)   # local +y = radial outward
     ux, uy = math.cos(th), math.sin(th)                       # radial unit
     px, py = -uy, ux                                          # tangential unit
-    # pod: 60 wide (tangential) x 38 deep (radial 54..92) x 42 high; local +x maps to -tangential
-    org = Vector(ux * 54 + px * 30, uy * 54 + py * 30, 12)
-    box(f"Speaker_Pod_{s}", org.x, org.y, org.z, 60, 38, 42, "component", rot)
-    cyl(f"Speaker_Driver_{s}", 25, 5, Vector(ux * 92, uy * 92, 33), Vector(ux, uy, 0), "component")
+    # sealed pod: 60 wide (tangential) x 32 deep (radial 54..86) x 42 high; local +x maps to -tangential
+    org = Vector(ux * 54 + px * 30, uy * 54 + py * 30, 13)
+    box(f"Speaker_Pod_{s}", org.x, org.y, org.z, 60, 32, 42, "component", rot)
+    obj("Cone", f"Speaker_Driver_{s}", props=dict(Radius1=12, Radius2=24, Height=10, Placement=App.Placement(
+        Vector(ux * 86, uy * 86, SPK_Z), Rotation(Vector(0, 0, 1), Vector(ux, uy, 0)))), cat="component")
 
 doc.recompute()
 bad = [o.Name for o in doc.Objects if "Invalid" in o.State or not o.isValid()]
 if bad:
     raise RuntimeError(f"recompute errors: {bad}")
+# ---------------- assembly metadata: kind, step, explode offset (mm, CAD frame), print / fit note ----------------
+# kind: printed | purchased (stock part, e.g. tube, fabric, acrylic, standoffs) | placeholder (electronics, no SKU)
+#       | reserved (empty volume) | alternate (swap-in part, not installed with its counterpart)
+H = (0, 0, 200)                                # whole head lifts this much in the exploded view
+META = {
+    "Base_Floor": ("printed", 1, (0, 0, -90), "print flat, bottom down; rubber feet + ballast pocket (feet not modelled)"),
+    "Bridge_Post_FL": ("printed", 2, (0, 0, -50), "print upright; M3 from underside of floor"),
+    "Pi_Standoff_1": ("purchased", 2, (0, 0, -60), "M2.5 brass standoff 6 mm"),
+    "Pi_5": ("placeholder", 3, (0, 0, -35), "Raspberry Pi 5 + Active Cooler envelope; 4x M2.5x6"),
+    "Reserve_SSD_USB": ("reserved", 3, (-40, 0, -35), "RESERVED: M.2-in-USB enclosure (not installed)"),
+    "Reserve_M2_HAT": ("reserved", 3, (0, 0, -15), "RESERVED: official M.2 HAT+ stack height (not installed)"),
+    "Speaker_Pod_L": ("printed", 4, (-45, -55, -30), "sealed pod; print open side up; 2x M3 to floor"),
+    "Speaker_Driver_L": ("placeholder", 4, (-60, -75, -30), "full-range driver ~Ø50 envelope (no SKU)"),
+    "LED_Connector": ("placeholder", 5, (0, 60, -10), "detachable 3-pin LED connector, behind rear door"),
+    "Bridge_Plate": ("printed", 6, (0, 0, 0), "print flat; 4x M3 to posts"),
+    "Neck_Flange_Low": ("printed", 6, (0, 0, 20), "print flat; 4x M3 to bridge + 2x M3 set screws to tube"),
+    "Neck_Tube": ("purchased", 6, (0, 0, 45), "Al 6061 tube Ø40x2 cut to length; anti-rotation flat (UNVERIFIED)"),
+    "Base_Shell": ("printed", 7, (0, 0, 70), "print top-down; lowered over the neck tube; 4x M3 from underside"),
+    "Base_Band": ("purchased", 7, (0, 0, 70), "fabric wrap over the grille, ends at the rear door"),
+    "Base_Door": ("printed", 7, (0, 80, 70), "print flat (outer face down); 2 captive M3 thumb screws + hooks"),
+    "LED_Strip": ("placeholder", 8, (0, 0, 95), "addressable LED strip in groove (no SKU; 5 V, signal level UNVERIFIED)"),
+    "LED_Diffuser_Front": ("printed", 8, (0, -55, 105), "translucent PETG half ring; snap-in from outside (UNVERIFIED)"),
+    "LED_Diffuser_Back": ("printed", 8, (0, 55, 105), "translucent PETG half ring; snap-in from outside (UNVERIFIED)"),
+    "LED_Blank_Front": ("alternate", 8, (0, -55, 105), "opaque blank cover half - replaces diffuser if LED removed"),
+    "LED_Blank_Back": ("alternate", 8, (0, 55, 105), "opaque blank cover half - replaces diffuser if LED removed"),
+    "Neck_Collar": ("printed", 9, (0, 0, 120), "cosmetic sleeve, slides over tube"),
+    "Neck_Flange_High": ("printed", 9, (0, 0, 145), "print flat; head floor screws into it (4x M3 + inserts)"),
+    "Head_Back": ("printed", 10, (0, 70, 0), "rear dome; print open side down; screws to top flange"),
+    "Head_Spine_Foot": ("printed", 11, (0, 15, 0), "2x M3 through head floor"),
+    "Head_Spine": ("printed", 11, (0, 15, 0), "print flat; carries display / camera / mic mounts"),
+    "Display_Panel": ("placeholder", 12, (0, -110, 0), "5in round display envelope (measured STEP; no SKU lock)"),
+    "Display_Driver": ("placeholder", 12, (0, -95, 0), "display driver board envelope"),
+    "Keepout_Display_Cable": ("reserved", 12, (0, -80, 0), "RESERVED: HDMI plug + bend room"),
+    "Camera_Module": ("placeholder", 12, (0, -110, 15), "Camera Module 3 Wide envelope; CSI ribbon length UNVERIFIED"),
+    "Mic_Board": ("placeholder", 12, (0, 0, 60), "2-mic-class board envelope under crown (no SKU)"),
+    "Head_Front": ("printed", 13, (0, -95, 0), "face bezel; print face-down; 4x M3 to rear dome"),
+    "Face_Cover": ("purchased", 13, (0, -160, 0), "laser-cut tinted acrylic 3 mm (camera window UNVERIFIED)"),
+    "Mic_Cap": ("printed", 14, (0, 0, 110), "print flat; port holes aligned to chosen mic board"),
+}
+for side in ("R",):                            # mirror left-hand entries
+    META["Speaker_Pod_R"] = ("printed", 4, (45, -55, -30), META["Speaker_Pod_L"][3])
+    META["Speaker_Driver_R"] = ("placeholder", 4, (60, -75, -30), META["Speaker_Driver_L"][3])
+for nm in ("FR", "RL", "RR"):
+    META[f"Bridge_Post_{nm}"] = META["Bridge_Post_FL"]
+for k in ("2", "3", "4"):
+    META[f"Pi_Standoff_{k}"] = META["Pi_Standoff_1"]
+missing = sorted(set(CATS) - set(META))
+if missing:
+    raise RuntimeError(f"parts without assembly metadata: {missing}")
 sh.set("E1", "categories")
 for i, (k, c) in enumerate(sorted(CATS.items()), start=2):  # stored for export / downstream checks
+    kind, step, ex, note = META[k]
+    if step >= 10:                             # head sub-assembly rides on the head lift
+        ex = tuple(a + b for a, b in zip(ex, H))
     sh.set(f"E{i}", k)
     sh.set(f"F{i}", c)
+    sh.set(f"G{i}", kind)
+    sh.set(f"H{i}", str(step))
+    sh.set(f"I{i}", "'" + ",".join(f"{v:g}" for v in ex))
+    sh.set(f"J{i}", "'" + note)
 doc.recompute()
 doc.saveAs(OUT)
 print("saved", OUT, "parts", len(CATS))

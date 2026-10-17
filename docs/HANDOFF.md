@@ -1,114 +1,99 @@
 # Current handoff — 17 October 2026
 
-## Active milestone — DELIVERED, awaiting user visual review
+## Active milestone — S1.T03R3 DELIVERED, awaiting user review
 
-**S1.T03R2 — Pebble A visual redesign, [Issue #4](https://github.com/igalgerman/JARVIS/issues/4).** Review candidate delivered (Claude Opus 5.5); commit `9919e59` plus merges. No purchase, no SKU lock, no manufacturing release, no microphone distance decision; S1.T04 and #2 not started.
+**S1.T03R3 — LED ring, speaker grille, exploded assembly & service review** (round 2 of [Issue #4](https://github.com/igalgerman/JARVIS/issues/4); scope in [NOW.md](NOW.md)).
+**Models:** Opus 5.5 for design, CAD, integration and review. A Sonnet subagent handled the Godot exploded view, LED/blank swap and screenshot export, and was verified independently.
+**Not covered:** no purchase, no SKU lock, no manufacturing release, no physical validation.
 
-**Source of truth:** [NOW.md](NOW.md) controls current scope and approval; [ROADMAP.md](ROADMAP.md) is planning only; [PROJECT_PRINCIPLES.md](PROJECT_PRINCIPLES.md) and [AGENTS.md](../AGENTS.md) govern execution.
-
-- **Read first:** `docs/reviews/S1_T03R2_PEBBLE_VISUAL.md`. It covers before/after, multi-angle previews, what is real vs only visual, check evidence, printing, known issues, and where changes go.
-- **Run:** `godot\run_viewer.cmd`. Toggles for shell / structure / components / reserved volumes; finish A/B/C; view buttons.
+- **Read first:**
+  - [docs/reviews/S1_T03R3_ASSEMBLY_REVIEW.md](reviews/S1_T03R3_ASSEMBLY_REVIEW.md): image links, LED ring, speaker fix, assembly, engineering review, checks, known issues.
+  - [docs/reviews/PEBBLE_PARTS_INVENTORY.md](reviews/PEBBLE_PARTS_INVENTORY.md): auto-generated printed / purchased / placeholder / reserved / alternate parts, fasteners, 14-step sequence.
+- **Images:**
+  - `godot/previews/r3/*.png` (13 views: front, side, rear, ¾, top, interior, exploded ¾ / side / front, LED close-up, blank close-up, finish A/B).
+  - `blender/renders/pebble_r3_{hero_C,rear_C,exploded_3q,exploded_side}.png`.
+- **Run:**
+  - `godot\run_viewer.cmd`: new toggles for **Exploded view** (with slider) and **Blank cover instead of LED ring**; views include Top and LED close-up.
+  - `godot\export_previews.cmd` re-exports all review images.
 - **Rebuild pipeline:**
   1. `freecadcmd cad\build_pebble.py`
-  2. `freecadcmd cad\export_meshes.py`
-  3. `blender -b --python blender\build_scene.py` (about 8 min with renders; `-- --no-render` for a fast export)
-  4. Godot assets sync automatically.
-- **Checks actually run** (all PASS; each exits nonzero on failure):
+  2. `freecadcmd cad\export_meshes.py` (also regenerates the inventory)
+  3. `blender -b --python blender\build_scene.py` (`-- --no-render` for a fast export, `-- --only-exploded` for 2 renders)
+  4. `godot\export_previews.cmd`
+- **Checks actually run** (all PASS, nonzero on failure):
 
-| Check | What it covers |
+| Check | Result |
 |---|---|
-| `cad\smoke_test.py` | blockout + Pebble, including the HeadRX regression |
-| `cad\check_pebble.py` | containment, collisions, 16 load-path contacts, 220 mm bed |
-| `blender\smoke_blender.py` | 39 parts vs CAD manifest, worst 0.28 mm, Godot sync |
-| `godot\check_viewer.cmd` | parts/scale, toggles, picking, finishes |
-| Negative test | a broken script exits 1 instead of hanging |
+| `cad\smoke_test.py` | PASS |
+| `cad\check_pebble.py` | PASS: containment, collisions, 16 load-path contacts, LED connector reachable via rear door, blank cover = exact drop-in, 220 mm bed; W215 × D218.5 × H292 mm |
+| `blender\smoke_blender.py` | PASS: 44 parts, worst 0.28 mm, Godot sync |
+| `godot\check_viewer.cmd` | PASS: explode error 0.000 mm, LED/blank swap, picking |
+| `export_previews.cmd` | 13/13 images |
 
 - **Problem → owning layer → fix:**
-  - Floating head → FreeCAD → continuous head → spine → seat → flange → Al tube → flange → bridge → posts → floor path.
-  - Fabric band covering the rear door → FreeCAD → band stops at the door.
-  - Smooth-shading gradients → Blender → normals smoothed by angle.
-  - Godot check hanging on a script error → Godot → frame limit plus PASS-line check.
-- **New files:**
-  - `cad/{build_pebble.py,check_pebble.py,JARVIS_pebble.FCStd}`
-  - `blender/{finishes.json,JARVIS_manifest.json,renders/pebble_*.png}`
-  - `godot/assets/{JARVIS_manifest.json,finishes.json}`, `godot/previews/pebble_*.png`
-  - `docs/reviews/S1_T03R2_PEBBLE_VISUAL.md`
+  - LED ring hidden under the base → FreeCAD → groove on the upper shoulder with snap-in halves, backer ring, wire hole, connector behind the door, blank cover.
+  - Wheel-like speakers → FreeCAD → perforated grille windows behind the fabric, cone drivers at band height.
+  - Parts sinking below the floor in the exploded view → Blender/Godot → +100 mm lift.
+  - Finish C as default → Blender (`finishes.json`).
 - **Changed:**
-  - `cad/{export_meshes.py,smoke_test.py}`
-  - `blender/{build_scene.py,smoke_blender.py,JARVIS.blend,JARVIS.glb}`
-  - `godot/{main.gd,check_viewer.cmd,README.md,assets/JARVIS.glb}`
-  - `README.md`, `docs/{HANDOFF,NOW}.md`
-  - The old blockout files and S1.T02 renders are kept unchanged as "before".
-- **Overall size (PROVISIONAL):** W215 × D218.5 × H291.5 mm.
-- **UNVERIFIED:** strength, tip-over safety and tolerances; heat; acoustics; camera behind the tinted cover; cable bends. Mic, Pi, speaker and SSD are placeholder boxes.
-- **Cleanup suggestions (not done, need approval):** the S1.T02 renders and `godot/previews/JARVIS_viewer_*.png` are now "before" images. The blockout pipeline (`cad/build_blockout.py`, `check_layout.py`) could be archived later.
+  - `cad/{build_pebble.py,check_pebble.py,export_meshes.py,JARVIS_pebble.FCStd}`
+  - `blender/{build_scene.py,smoke_blender.py,finishes.json,JARVIS.blend,JARVIS.glb,JARVIS_manifest.json}`
+  - `godot/{main.gd,README.md,export_previews.cmd (new),assets/*}`
+  - `docs/reviews/{S1_T03R3_ASSEMBLY_REVIEW.md,PEBBLE_PARTS_INVENTORY.md}` (new)
+  - `docs/{NOW,HANDOFF}.md`
+- **UNVERIFIED:**
+  - strength of the neck seat, set screws and inserts;
+  - snap tabs, LED diffusion and power;
+  - speaker pod volume (about 0.06 L) and grille acoustics;
+  - HDMI plug through the tube, CSI length;
+  - heat;
+  - microSD access (blocked).
+- **Cleanup suggestions** (not done, need approval): the R2 images `godot/previews/pebble_*.png` and `blender/renders/pebble_{front,side,rear,interior,finish_*}.png` are superseded history.
 - **CI:** still not active (#2).
 
-**Future work parked:** #2 CI; #5 evidence-based library evaluation before software implementation; #6 minimal Core integration; #7 face/voice; #8 hardware prototype preparation. Do not open duplicate speculative issues.
+**Future work parked:** #2 CI; #5 library evaluation; #6 minimal Core integration; #7 face/voice; #8 hardware prototype preparation.
 
-**Agent transition (Claude Code ↔ Codex):** one writer at a time. Finish and commit current work, update this handoff with the actual changed paths, checks and blockers, then have the receiving agent pull the latest. Feedback travels back to the owning source (FreeCAD/Blender/Godot/Core), followed by *only necessary* downstream rebuilds and focused tests.
+**Agent transition (Claude Code ↔ Codex):** one writer at a time. Commit, record changed paths, checks and blockers here, then the receiving agent pulls. Feedback goes to the owning source layer, followed by only the necessary downstream rebuilds.
 
-## User visual feedback and next review requirements — 17 Oct 2026
+## Decision queue (updated 17 Oct 2026 after S1.T03R3)
 
-User inspected the actual Godot Pebble A screenshots (front, 3/4, side, rear, shell-hidden front/side/top/rear). **Likes the appearance very much; prefers finish C (white head / sky-blue base / navy band), approves the current side head profile.** Preserve these choices; do not propose head reshaping or A/B finish again without a concrete reason. Finish C is a visual preference, **not final filament/material/procurement approval**.
-
-**Review observations (from screenshots; not verified physical defects):** the bottom speaker openings look somewhat wheel-like; verify speaker grille/enclosure presentation, rear service cover and ventilation accessibility, neck cable/strength/fastener path and stability. No major shape redesign requested. Need a comprehensible standalone printable-part inventory and exploded assembly illustration/sequence identifying printed, purchased and placeholder parts, fastening, cable access and print orientation. These are **proposed deliverables for a separately approved follow-up**; do not silently implement outside NOW.
-
-**Automatic visual evidence:** future visual milestones should export real Godot/Blender snapshots and link them in the handoff/review so user need not take screenshots. Keep render cost bounded; headless images complement but do not replace the user's interactive visual check. Follow AGENTS.md.
-
-**Question follow-up:** overall look = ANSWERED (liked); side head profile = ANSWERED (keep current); finish = ANSWERED (prefer C); light ring location = OPEN, not yet approved; mic crown = needs explanation and later component gate. Purchases, exact listening range, printer and hardware SKU remain DEFERRED. Suggestions for ring elevation and no protruding crown are recommendations, not user decisions.
-
-## Decision queue — management triage (17 Oct 2026; no user visual approval yet)
-
-| Agent question | Recommendation / reason | Status / revisit gate |
+| Question | Recommendation / reason | Status |
 |---|---|---|
-| 1. Overall appearance and proportions | Keep Pebble A as the review baseline, not as a final visual sign-off; inspect the actual Godot front/side/3/4/rear views before selecting changes. | **USER DECISION REQUIRED** — interactive visual review, Issue #4 |
-| 2. Side-profile half-dome | Provisional preference: try a subtly rounder/deeper back before any large face restructuring, **only after** user confirms what looks wrong. Extra depth raises size/fit tradeoffs. | **USER DECISION REQUIRED** — Issue #4 feedback |
-| 3. Finish A/B/C | Provisional recommendation: compare A (Pearl/Graphite) and B (warm ivory) first; no colour approved. | **USER DECISION REQUIRED** — Issue #4 feedback |
-| 4. Light ring | Provisional recommendation: test moving it to a visible upper-base edge, avoiding unverified electronics claims; do not change CAD yet. | **USER DECISION REQUIRED** — Issue #4 feedback |
-| 5. Flat mic crown / raised XVF3800 pod | Keep current flat crown provisionally; avoid locking a +15 mm pod until microphone selection and aesthetic approval. | **DEFERRED** — visual review if user objects; final geometry after mic research |
-| 6a. Imported mic vs local alternatives | Specialist microphone import remains a candidate, **not approved**; verify current availability, performance and costs before selection. | **DEFERRED** — hardware research gate |
-| 6b. Local 5-inch vs imported 4-inch display | Continue with 5-inch design envelope as a provisional CAD assumption, **not a final SKU choice**. | **DEFERRED** — hardware fit and sourcing gate |
-| 6c. Bench-test purchases | No purchases or authorization inferred. Recommend low-cost bench tests before enclosure fabrication, after separate approval. | **DEFERRED** — hardware purchasing gate |
-| 6d. Printer, bed and material | No printer selected; preserve 220 mm design compatibility and split-part fallback. | **DEFERRED** — print planning gate |
-| 6e. Room placement/listening range | Room 35–50 m² is estimated; required pickup range/placement not decided. Do not promise 3–5 m. | **DEFERRED** — acoustics test planning |
+| Overall appearance and proportions | Keep Pebble A | **ANSWERED**: user likes it |
+| Side profile | Keep current | **ANSWERED** |
+| Finish | C is the default; A/B kept only for comparison | **ANSWERED**: C, visual preference only |
+| Light ring location | Upper base shoulder, removable halves + blank cover (implemented R3) | **ANSWERED** (user chose upper rim); look **USER DECISION REQUIRED** in R3 review |
+| R3-1: Speaker look | The grille behind the fabric should remove the "wheel" look | **USER DECISION REQUIRED**: confirm in viewer |
+| R3-2: Exploded view / inventory clarity | Enough detail for this stage? | **USER DECISION REQUIRED** |
+| R3-3: Neck seat | Recommend a larger seat adapter ring plus anti-rotation flat (CAD change, small) | **USER DECISION REQUIRED**: approve for the next round |
+| R3-4: microSD not reachable | Recommend USB/SSD boot or network updates rather than redesigning around the slot | **DEFERRED**: software/hardware prototype stage (#8) |
+| Mic crown / XVF3800 pod | Keep flat crown provisionally | **DEFERRED**: mic research gate |
+| Imported mic vs local | Not approved | **DEFERRED**: hardware research gate |
+| 5″ display envelope | Provisional CAD assumption only | **DEFERRED**: hardware fit/sourcing gate |
+| Bench-test purchases | None authorised | **DEFERRED**: purchasing gate |
+| Printer / bed / material | Keep 220 mm compatibility + split fallback | **DEFERRED**: print planning gate |
+| Room placement / listening range | Undecided; no 3–5 m promise | **DEFERRED**: acoustics test planning |
 
-**Rule:** Technical suggestions above are recommendations only, not implementation authorization. For the active #4 visual review, collect the user's feedback on the overall appearance, side profile, finish and light ring together; update this queue after their response. Do not re-ask deferred hardware questions at every visual iteration. Follow `AGENTS.md` mandatory question handling.
-
-## Questions for the user
-1. **Overall look:** does Pebble A now feel cute, friendly and premium enough? What should change first: head shape, face size/position, base height, or neck?
-2. **Side profile:** the head reads as a half-dome behind a flat face. Do you prefer (a) a deeper, rounder back head, (b) a gently curved face rim, or (c) keep it as is?
-3. **Finish direction:** A Pearl/graphite/silver, B Warm ivory/oat/brass, C White/sky-blue/navy, or a mix (name which parts)?
-4. **Light ring:** keep it under the base, move it up (e.g. to the top of the base), or drop it?
-5. **Mic crown:** is a small flat top cap OK? If the 4-mic XVF3800 is chosen later, a raised crown pod of about +15 mm is needed (see the S1.T03R1 review).
-6. **Still open from S1.T03R1 (below):** acceptance of an imported mic, local 5″ display vs the compact 4″ variant, bench-test purchase approval, and printer model/bed/material.
+## Questions for the user (R3, grouped)
+1. Does the new **LED ring** on the upper base edge look right (see `r3_led_closeup.png` / `r3_3q.png`), and is the **blank cover** look acceptable when the LEDs are not fitted?
+2. Do the **speakers** now look clean? The fabric band is unbroken outside; the grille shows only in exploded and shell-hidden views.
+3. Is the **exploded view + parts inventory** clear enough, or do you want labels or a step-by-step picture series next?
+4. May the next round add the **neck seat adapter ring + anti-rotation flat**, and model the screw bosses and snap tabs (still no physical claims)?
 
 ---
 
-## Archived S1.T03R1 research handoff (historical reference; superseded as active status)
-
-- **Task:** S1.T03R1, Pebble A component selection & engineering fit review (Issue #3). **Status:** review delivered, awaiting user decisions. Research and design only.
-- **Read:** `docs/reviews/S1_T03R1_ENGINEERING_REVIEW.md`. Reproduce with `freecadcmd design\review\pebble_fit_study.py` and `freecadcmd design\review\pebble_layout.py`.
-- **Evidence:**
-  - Measured from manufacturer STEP files: 5″ display Ø150 × 18.05; 4″ display Ø126 × 18.2; XVF3800 PCB about 100.5 × 101.8, 9.03 thick.
-  - Israel stock, checked 2026-10-17: Piitel lists the 5″ round HDMI display at ₪590 incl. VAT. No local far-field mic array or round DSI display was found (import-only).
-- **Key findings:**
-  - The local 5″ display needs a W215 head.
-  - The XVF3800 needs a raised crown pod.
-  - Base layout is tight.
-  - The Pi 5 USB power budget may be exceeded (measure).
-- **Unverified:**
-  - Pi 5 USB current limit (recalled, not fetched).
-  - CSI cable lengths and HDMI plug size.
-  - Import VAT and shipping.
-  - All masses, strength, thermal and acoustic figures.
-- **Decision questions** from that round (still open):
-  1. Imported mic (XVF3800 recommended) vs ReSpeaker Lite vs local-only.
-  2. Local 5″ size (about H299 × W215 × D210) vs compact 4″ (about H285 × W205 × D200).
-  3. Crown pod look.
-  4. Bench-test purchase approval.
-  5. Printer.
-  6. Room details (voice distance now explicitly undecided).
+## User visual feedback (17 Oct 2026, from S1.T03R2 screenshots — recorded by management)
+User likes the appearance very much, prefers **finish C**, and approves the current side head profile; do not propose head reshaping or A/B again without a concrete reason. Observations to investigate: wheel-like speaker openings, rear service and ventilation access, neck cable/strength/fastener path; requested a printable-part inventory and an exploded assembly with sequence (both delivered in R3). Future visual milestones must auto-export real snapshots.
 
 ## User decision — optional status-light ring (17 Oct 2026)
-User chose to **improve the ring's visibility/position** on the upper rim of the base rather than removing it. Keep LED lighting a **fully removable option**: nonstructural module, accessible detachable wiring and a printable blank cover to preserve appearance when removed. Avoid choosing a specific LED board, committing to diameter/power, purchasing parts or making irreversible CAD changes before an approved follow-up. For sourcing reference only: locally listed WS2812B ring (16 LEDs) or 5 V addressable LED strip; size, Pi GPIO signal levels, 5 V supply/current and thermal requirements must be verified. Suggested follow-up: validate circular base perimeter and diffusion, then a modest assembly-friendly design. This resolves the user-choice portion of the prior 'light ring' question.
+Improve the ring's position on the upper rim of the base rather than removing it. Keep LED lighting a **fully removable option**: nonstructural module, accessible detachable wiring and a printable blank cover. No LED board, diameter/power commitment or purchase yet. Sourcing reference only: a locally listed WS2812B ring (16 LEDs) or a 5 V addressable strip; size, Pi GPIO signal level, 5 V current and thermal limits must be verified. **R3 implements the geometry only.**
+
+## Archived S1.T03R1 research handoff (historical reference)
+See [docs/reviews/S1_T03R1_ENGINEERING_REVIEW.md](reviews/S1_T03R1_ENGINEERING_REVIEW.md). Summary:
+- **Measured from STEP files:** 5″ display Ø150 × 18.05; 4″ display Ø126 × 18.2; XVF3800 PCB about 100.5 × 101.8 × 9.03.
+- **Sourcing:** Piitel ₪590 for the 5″ display (2026-10-17). No local far-field mic array found.
+- **Findings:**
+  - The 5″ display needs a W215 head.
+  - The XVF3800 needs a raised crown pod.
+  - The Pi 5 USB power budget may be exceeded.
+- **Open hardware questions** (all DEFERRED in the queue above): imported mic, display variant, bench purchases, printer, room/listening range.

@@ -3,7 +3,8 @@ extends Node3D
 # assets/JARVIS_manifest.json (part -> category + CAD bbox in mm) + assets/finishes.json (PROVISIONAL finishes).
 # Left-drag orbit | right/middle-drag pan | wheel zoom | click selects a part.
 # CLI (after "--"):  --check  (print PASS/FAIL, exit code)  |  --shot=<png> [--hide-shell] [--select=<Part>]
-#                    [--show-reserved] [--finish=<key>] [--view=front|side|rear|three_quarter]
+#                    [--show-reserved] [--finish=<key>] [--view=front|side|rear|three_quarter|top|led_closeup]
+#                    [--exploded | --exploded=<0..1>] [--blank-led]
 
 const GLB := "res://assets/JARVIS.glb"
 const MANIFEST := "res://assets/JARVIS_manifest.json"
@@ -11,7 +12,13 @@ const FINISHES := "res://assets/finishes.json"
 const LAYERS := {"exterior": "Outer shell", "structure": "Structure (neck / spine / chassis)",
 	"component": "Components (envelopes)", "reserved": "Reserved volumes (SSD, cable)"}
 const HOME := {"yaw": 0.55, "pitch": 0.22, "dist": 1.05, "target": Vector3(0, 0.15, 0)}
-const VIEWS := {"front": [0.0, 0.08], "side": [PI / 2.0, 0.08], "rear": [PI, 0.08], "three_quarter": [0.55, 0.22]}
+# view -> [yaw, pitch, dist, target]
+const VIEWS := {"front": [0.0, 0.08, 1.05, Vector3(0, 0.15, 0)], "side": [PI / 2.0, 0.08, 1.05, Vector3(0, 0.15, 0)],
+	"rear": [PI, 0.08, 1.05, Vector3(0, 0.15, 0)], "three_quarter": [0.55, 0.22, 1.05, Vector3(0, 0.15, 0)],
+	"top": [0.0, 1.5, 1.05, Vector3(0, 0.15, 0)], "led_closeup": [0.55, 0.35, 0.45, Vector3(0, 0.075, 0)]}
+const EXPLODE_VIEW := {"target": Vector3(0, 0.38, 0), "dist": 1.5}
+const EXPLODE_LIFT := 0.10  # m, global +Y lift per unit factor so downward offsets stay above the ground
+const LED_RING := ["LED_Diffuser_Front", "LED_Diffuser_Back", "LED_Strip"]
 
 var parts := {}      # name -> MeshInstance3D
 var bodies := {}     # name -> StaticBody3D (click collision)
@@ -32,6 +39,13 @@ var info: Label
 var press_pos := Vector2.ZERO
 var dragging := false
 var hl_mat: StandardMaterial3D
+var blank_led := false
+var explode_factor := 0.0
+var exploded := false
+var orig_pos := {}   # name -> original global origin
+var blank_chk: CheckButton
+var explode_chk: CheckButton
+var explode_slider: HSlider
 
 
 func _ready() -> void:
@@ -49,11 +63,14 @@ func _ready() -> void:
 		cat[n] = manifest.parts[n].category if manifest.parts.has(n) else "exterior"
 		parts[n].create_trimesh_collision()
 		bodies[n] = parts[n].get_child(parts[n].get_child_count() - 1)
+	for n in parts:
+		orig_pos[n] = parts[n].global_transform.origin
 	_build_ui()
 	_apply_finish(fin.default)
 	_apply_visibility()
 	_update_camera()
 	var args := OS.get_cmdline_user_args()
+	var view := ""
 	for a in args:
 		if a == "--hide-shell":
 			_set_layer(false, "exterior")
@@ -63,8 +80,16 @@ func _ready() -> void:
 			_select(a.substr(9))
 		elif a.begins_with("--finish="):
 			_apply_finish(a.substr(9))
+		elif a == "--blank-led":
+			_set_blank(true)
+		elif a == "--exploded":
+			_set_explode(true, 1.0)
+		elif a.begins_with("--exploded="):
+			_set_explode(true, float(a.substr(11)))
 		elif a.begins_with("--view="):
-			_set_view(a.substr(7))
+			view = a.substr(7)
+	if view != "":
+		_set_view(view)
 	if "--check" in args:
 		_run_check()
 	else:
@@ -170,6 +195,22 @@ func _build_ui() -> void:
 		finish_btn.set_item_metadata(finish_btn.item_count - 1, k)
 	finish_btn.item_selected.connect(func(i): _apply_finish(finish_btn.get_item_metadata(i)))
 	box.add_child(finish_btn)
+	blank_chk = CheckButton.new()
+	blank_chk.text = "Blank cover instead of LED ring"
+	blank_chk.toggled.connect(_set_blank)
+	box.add_child(blank_chk)
+	explode_chk = CheckButton.new()
+	explode_chk.text = "Exploded view"
+	explode_chk.toggled.connect(func(on): _set_explode(on, explode_slider.value if on else 0.0, true))
+	box.add_child(explode_chk)
+	explode_slider = HSlider.new()
+	explode_slider.min_value = 0.0
+	explode_slider.max_value = 1.0
+	explode_slider.step = 0.01
+	explode_slider.value = 1.0
+	explode_slider.custom_minimum_size = Vector2(300, 20)
+	explode_slider.value_changed.connect(func(v): if exploded: _set_explode(true, v))
+	box.add_child(explode_slider)
 	var views := HBoxContainer.new()
 	for v in VIEWS:
 		var b := Button.new()
@@ -193,9 +234,44 @@ func _set_layer(on: bool, c: String) -> void:
 	_apply_visibility()
 
 
+func _part_visible(n: String) -> bool:
+	var c: String = cat[n]
+	if c == "alternate":
+		return blank_led and shown["exterior"]
+	if blank_led and n in LED_RING:
+		return false
+	return shown.get(c, true)
+
+
+func _set_blank(on: bool) -> void:
+	blank_led = on
+	if blank_chk and blank_chk.button_pressed != on:
+		blank_chk.set_pressed_no_signal(on)
+	_apply_visibility()
+
+
+func _set_explode(on: bool, f: float = 1.0, set_camera: bool = false) -> void:
+	exploded = on
+	explode_factor = clampf(f, 0.0, 1.0) if on else 0.0
+	for n in parts:
+		var e: Array = manifest.parts[n].get("explode_mm", [0, 0, 0]) if manifest.parts.has(n) else [0, 0, 0]
+		var d := Vector3(e[0], e[2], -e[1]) / 1000.0 * explode_factor + Vector3(0, EXPLODE_LIFT * explode_factor, 0)
+		var gt: Transform3D = parts[n].global_transform
+		gt.origin = orig_pos[n] + d
+		parts[n].global_transform = gt
+	if explode_chk and explode_chk.button_pressed != on:
+		explode_chk.set_pressed_no_signal(on)
+	if explode_slider and on and not is_equal_approx(explode_slider.value, explode_factor):
+		explode_slider.set_value_no_signal(explode_factor)
+	if on or set_camera:
+		target = EXPLODE_VIEW.target if on else HOME.target
+		dist = EXPLODE_VIEW.dist if on else HOME.dist
+		_update_camera()
+
+
 func _apply_visibility() -> void:
 	for n in parts:
-		var vis: bool = shown.get(cat[n], true)
+		var vis: bool = _part_visible(n)
 		parts[n].visible = vis
 		bodies[n].collision_layer = 1 if vis else 0
 	if selected != "" and not parts[selected].visible:
@@ -223,6 +299,9 @@ func _apply_finish(key: String) -> void:
 			m.emission_enabled = true
 			m.emission = Color(s.emit[0], s.emit[1], s.emit[2])
 			m.emission_energy_multiplier = s.get("strength", 5) * 0.4
+		if s.get("alpha", 1.0) < 1.0:
+			m.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+			m.albedo_color.a = s.alpha
 		parts[n].material_override = m
 	if finish_btn:
 		for i in finish_btn.item_count:
@@ -234,8 +313,11 @@ func _set_view(v: String) -> void:
 	if VIEWS.has(v):
 		yaw = VIEWS[v][0]
 		pitch = VIEWS[v][1]
-		dist = HOME.dist
-		target = HOME.target
+		dist = VIEWS[v][2]
+		target = VIEWS[v][3]
+		if exploded and v != "led_closeup":
+			dist = EXPLODE_VIEW.dist
+			target = EXPLODE_VIEW.target
 		_update_camera()
 
 
@@ -353,8 +435,9 @@ func _run_check() -> void:
 		# 2. layer toggles
 		_set_layer(false, "exterior")
 		for n in parts:
-			if parts[n].visible != (cat[n] != "exterior" and shown[cat[n]]):
+			if parts[n].visible != (cat[n] != "exterior" and cat[n] != "alternate" and shown[cat[n]]):
 				errs.append(n + " visibility wrong with shell off")
+		await _check_new(errs)
 		# 3. picking through the stack: shell off, side view -> Pi_5
 		var got: String = await _pick_center("Pi_5", PI / 2.0, 0.0, 0.8)
 		if got != "Pi_5":
@@ -378,3 +461,47 @@ func _run_check() -> void:
 				errs.append("finish %s not applied" % k)
 	print("CHECK RESULT: ", "FAIL " + "; ".join(errs) if errs else "PASS (%d parts, %d finishes)" % [parts.size(), fin.finishes.size()])
 	get_tree().quit(1 if errs else 0)
+
+
+func _check_new(errs: Array[String]) -> void:
+	# a. alternates hidden by default, LED diffusers visible; blank cover swaps them
+	_set_layer(true, "exterior")
+	for n in ["LED_Blank_Front", "LED_Blank_Back"]:
+		if parts[n].visible:
+			errs.append(n + " visible by default")
+	for n in LED_RING:
+		if not parts[n].visible:
+			errs.append(n + " hidden by default")
+	_set_blank(true)
+	for n in ["LED_Blank_Front", "LED_Blank_Back"]:
+		if not parts[n].visible:
+			errs.append(n + " not shown with blank cover")
+	for n in LED_RING:
+		if parts[n].visible:
+			errs.append(n + " still visible with blank cover")
+	_set_blank(false)
+	if parts["LED_Blank_Front"].visible or not parts["LED_Diffuser_Front"].visible:
+		errs.append("blank cover toggle off did not restore")
+	# b. explode
+	var c0: Vector3 = _part_aabb("Head_Back").get_center()
+	var e: Array = manifest.parts["Head_Back"].explode_mm
+	var want := Vector3(e[0], e[2], -e[1]) / 1000.0 + Vector3(0, EXPLODE_LIFT, 0)
+	_set_explode(true, 1.0)
+	var d1: float = (_part_aabb("Head_Back").get_center() - c0 - want).length()
+	if d1 > 0.001:
+		errs.append("explode factor 1 Head_Back off by %.2f mm" % (d1 * 1000.0))
+	# c. picking in exploded state
+	await get_tree().physics_frame
+	await get_tree().physics_frame
+	for n in ["Mic_Cap", "Head_Back"]:
+		var got: String = await _pick_center(n, 0.55, 0.3, 1.2)
+		if got != n:
+			errs.append("exploded pick %s returned '%s'" % [n, got])
+	_set_explode(false, 0.0)
+	var d0: float = (_part_aabb("Head_Back").get_center() - c0).length()
+	if d0 > 0.0001:
+		errs.append("explode factor 0 not restored (%.3f mm)" % (d0 * 1000.0))
+	await get_tree().physics_frame
+	await get_tree().physics_frame
+	print("explode err %.3f mm, restore err %.4f mm" % [d1 * 1000.0, d0 * 1000.0])
+	_set_layer(false, "exterior")

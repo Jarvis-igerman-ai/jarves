@@ -2,10 +2,10 @@
  "model": "cad/JARVIS_pebble.FCStd",
  "units": "mm",
  "frame": "Z up, front -Y",
- "exterior_bbox_mm": [
+ "installed_bbox_mm": [
   -107.66,
   -106.57,
-  0.43,
+  -0.08,
   107.67,
   112.12,
   292.17
@@ -20,18 +20,34 @@
     106.57,
     86.67,
     62.07
-   ]
+   ],
+   "kind": "purchased",
+   "step": 7,
+   "explode_mm": [
+    0.0,
+    0.0,
+    70.0
+   ],
+   "note": "fabric wrap over the grille, ends at the rear door"
   },
   "Base_Door": {
    "category": "exterior",
    "bbox_mm": [
     -55.28,
-    81.48,
+    81.51,
     11.72,
     55.28,
     105.28,
-    72.16
-   ]
+    72.13
+   ],
+   "kind": "printed",
+   "step": 7,
+   "explode_mm": [
+    0.0,
+    80.0,
+    70.0
+   ],
+   "note": "print flat (outer face down); 2 captive M3 thumb screws + hooks"
   },
   "Base_Floor": {
    "category": "structure",
@@ -42,29 +58,34 @@
     104.01,
     104.01,
     4.08
-   ]
-  },
-  "Base_LightRing": {
-   "category": "exterior",
-   "bbox_mm": [
-    -95.57,
-    -95.57,
-    0.43,
-    95.57,
-    95.57,
-    3.57
-   ]
+   ],
+   "kind": "printed",
+   "step": 1,
+   "explode_mm": [
+    0.0,
+    0.0,
+    -90.0
+   ],
+   "note": "print flat, bottom down; rubber feet + ballast pocket (feet not modelled)"
   },
   "Base_Shell": {
    "category": "exterior",
    "bbox_mm": [
-    -105.11,
-    -105.11,
+    -105.12,
+    -105.12,
     3.92,
-    105.11,
-    105.11,
-    85.11
-   ]
+    105.12,
+    105.12,
+    85.08
+   ],
+   "kind": "printed",
+   "step": 7,
+   "explode_mm": [
+    0.0,
+    0.0,
+    70.0
+   ],
+   "note": "print top-down; lowered over the neck tube; 4x M3 from underside"
   },
   "Bridge_Plate": {
    "category": "structure",
@@ -75,7 +96,15 @@
     70.0,
     65.0,
     60.0
-   ]
+   ],
+   "kind": "printed",
+   "step": 6,
+   "explode_mm": [
+    0.0,
+    0.0,
+    0.0
+   ],
+   "note": "print flat; 4x M3 to posts"
   },
   "Bridge_Post_FL": {
    "category": "structure",
@@ -86,7 +115,15 @@
     -63.0,
     -23.0,
     56.0
-   ]
+   ],
+   "kind": "printed",
+   "step": 2,
+   "explode_mm": [
+    0.0,
+    0.0,
+    -50.0
+   ],
+   "note": "print upright; M3 from underside of floor"
   },
   "Bridge_Post_FR": {
    "category": "structure",
@@ -97,7 +134,15 @@
     73.0,
     -23.0,
     56.0
-   ]
+   ],
+   "kind": "printed",
+   "step": 2,
+   "explode_mm": [
+    0.0,
+    0.0,
+    -50.0
+   ],
+   "note": "print upright; M3 from underside of floor"
   },
   "Bridge_Post_RL": {
    "category": "structure",
@@ -108,7 +153,15 @@
     -63.0,
     60.0,
     56.0
-   ]
+   ],
+   "kind": "printed",
+   "step": 2,
+   "explode_mm": [
+    0.0,
+    0.0,
+    -50.0
+   ],
+   "note": "print upright; M3 from underside of floor"
   },
   "Bridge_Post_RR": {
    "category": "structure",
@@ -119,7 +172,15 @@
     73.0,
     60.0,
     56.0
-   ]
+   ],
+   "kind": "printed",
+   "step": 2,
+   "explode_mm": [
+    0.0,
+    0.0,
+    -50.0
+   ],
+   "note": "print upright; M3 from underside of floor"
   },
   "Camera_Module": {
    "category": "component",
@@ -130,7 +191,15 @@
     12.5,
     -4.17,
     287.5
-   ]
+   ],
+   "kind": "placeholder",
+   "step": 12,
+   "explode_mm": [
+    0.0,
+    -110.0,
+    215.0
+   ],
+   "note": "Camera Module 3 Wide envelope; CSI ribbon length UNVERIFIED"
   },
   "Display_Driver": {
    "category": "component",
@@ -141,7 +210,15 @@
     41.0,
     1.48,
     215.5
-   ]
+   ],
+   "kind": "placeholder",
+   "step": 12,
+   "explode_mm": [
+    0.0,
+    -95.0,
+    200.0
+   ],
+   "note": "display driver board envelope"
   },
   "Display_Panel": {
    "category": "component",
@@ -152,7 +229,15 @@
     75.05,
     -5.02,
     262.55
-   ]
+   ],
+   "kind": "placeholder",
+   "step": 12,
+   "explode_mm": [
+    0.0,
+    -110.0,
+    200.0
+   ],
+   "note": "5in round display envelope (measured STEP; no SKU lock)"
   },
   "Face_Cover": {
    "category": "exterior",
@@ -163,7 +248,15 @@
     92.06,
     -16.51,
     289.06
-   ]
+   ],
+   "kind": "purchased",
+   "step": 13,
+   "explode_mm": [
+    0.0,
+    -160.0,
+    200.0
+   ],
+   "note": "laser-cut tinted acrylic 3 mm (camera window UNVERIFIED)"
   },
   "Head_Back": {
    "category": "exterior",
@@ -174,7 +267,15 @@
     107.53,
     112.12,
     292.16
-   ]
+   ],
+   "kind": "printed",
+   "step": 10,
+   "explode_mm": [
+    0.0,
+    70.0,
+    200.0
+   ],
+   "note": "rear dome; print open side down; screws to top flange"
   },
   "Head_Front": {
    "category": "exterior",
@@ -185,7 +286,15 @@
     107.67,
     5.17,
     292.17
-   ]
+   ],
+   "kind": "printed",
+   "step": 13,
+   "explode_mm": [
+    0.0,
+    -95.0,
+    200.0
+   ],
+   "note": "face bezel; print face-down; 4x M3 to rear dome"
   },
   "Head_Spine": {
    "category": "structure",
@@ -196,7 +305,15 @@
     30.0,
     33.0,
     251.5
-   ]
+   ],
+   "kind": "printed",
+   "step": 11,
+   "explode_mm": [
+    0.0,
+    15.0,
+    200.0
+   ],
+   "note": "print flat; carries display / camera / mic mounts"
   },
   "Head_Spine_Foot": {
    "category": "structure",
@@ -207,7 +324,15 @@
     12.0,
     28.0,
     121.5
-   ]
+   ],
+   "kind": "printed",
+   "step": 11,
+   "explode_mm": [
+    0.0,
+    15.0,
+    200.0
+   ],
+   "note": "2x M3 through head floor"
   },
   "Keepout_Display_Cable": {
    "category": "reserved",
@@ -218,7 +343,129 @@
     41.0,
     26.48,
     215.5
-   ]
+   ],
+   "kind": "reserved",
+   "step": 12,
+   "explode_mm": [
+    0.0,
+    -80.0,
+    200.0
+   ],
+   "note": "RESERVED: HDMI plug + bend room"
+  },
+  "LED_Blank_Back": {
+   "category": "alternate",
+   "bbox_mm": [
+    -100.52,
+    0.08,
+    74.08,
+    100.52,
+    100.52,
+    79.92
+   ],
+   "kind": "alternate",
+   "step": 8,
+   "explode_mm": [
+    0.0,
+    55.0,
+    105.0
+   ],
+   "note": "opaque blank cover half - replaces diffuser if LED removed"
+  },
+  "LED_Blank_Front": {
+   "category": "alternate",
+   "bbox_mm": [
+    -100.52,
+    -100.52,
+    74.08,
+    100.52,
+    -0.08,
+    79.92
+   ],
+   "kind": "alternate",
+   "step": 8,
+   "explode_mm": [
+    0.0,
+    -55.0,
+    105.0
+   ],
+   "note": "opaque blank cover half - replaces diffuser if LED removed"
+  },
+  "LED_Connector": {
+   "category": "component",
+   "bbox_mm": [
+    26.0,
+    82.0,
+    60.0,
+    41.0,
+    90.0,
+    68.0
+   ],
+   "kind": "placeholder",
+   "step": 5,
+   "explode_mm": [
+    0.0,
+    60.0,
+    -10.0
+   ],
+   "note": "detachable 3-pin LED connector, behind rear door"
+  },
+  "LED_Diffuser_Back": {
+   "category": "exterior",
+   "bbox_mm": [
+    -100.52,
+    0.08,
+    74.08,
+    100.52,
+    100.52,
+    79.92
+   ],
+   "kind": "printed",
+   "step": 8,
+   "explode_mm": [
+    0.0,
+    55.0,
+    105.0
+   ],
+   "note": "translucent PETG half ring; snap-in from outside (UNVERIFIED)"
+  },
+  "LED_Diffuser_Front": {
+   "category": "exterior",
+   "bbox_mm": [
+    -100.52,
+    -100.52,
+    74.08,
+    100.52,
+    -0.08,
+    79.92
+   ],
+   "kind": "printed",
+   "step": 8,
+   "explode_mm": [
+    0.0,
+    -55.0,
+    105.0
+   ],
+   "note": "translucent PETG half ring; snap-in from outside (UNVERIFIED)"
+  },
+  "LED_Strip": {
+   "category": "component",
+   "bbox_mm": [
+    -91.26,
+    -91.26,
+    74.94,
+    91.26,
+    91.26,
+    78.56
+   ],
+   "kind": "placeholder",
+   "step": 8,
+   "explode_mm": [
+    0.0,
+    0.0,
+    95.0
+   ],
+   "note": "addressable LED strip in groove (no SKU; 5 V, signal level UNVERIFIED)"
   },
   "Mic_Board": {
    "category": "component",
@@ -229,7 +476,15 @@
     43.0,
     37.0,
     280.5
-   ]
+   ],
+   "kind": "placeholder",
+   "step": 12,
+   "explode_mm": [
+    0.0,
+    0.0,
+    260.0
+   ],
+   "note": "2-mic-class board envelope under crown (no SKU)"
   },
   "Mic_Cap": {
    "category": "exterior",
@@ -240,7 +495,15 @@
     37.03,
     37.03,
     292.02
-   ]
+   ],
+   "kind": "printed",
+   "step": 14,
+   "explode_mm": [
+    0.0,
+    0.0,
+    310.0
+   ],
+   "note": "print flat; port holes aligned to chosen mic board"
   },
   "Neck_Collar": {
    "category": "exterior",
@@ -251,7 +514,15 @@
     32.02,
     32.02,
     102.02
-   ]
+   ],
+   "kind": "printed",
+   "step": 9,
+   "explode_mm": [
+    0.0,
+    0.0,
+    120.0
+   ],
+   "note": "cosmetic sleeve, slides over tube"
   },
   "Neck_Flange_High": {
    "category": "structure",
@@ -262,7 +533,15 @@
     45.03,
     45.03,
     108.03
-   ]
+   ],
+   "kind": "printed",
+   "step": 9,
+   "explode_mm": [
+    0.0,
+    0.0,
+    145.0
+   ],
+   "note": "print flat; head floor screws into it (4x M3 + inserts)"
   },
   "Neck_Flange_Low": {
    "category": "structure",
@@ -273,7 +552,15 @@
     35.02,
     35.02,
     66.02
-   ]
+   ],
+   "kind": "printed",
+   "step": 6,
+   "explode_mm": [
+    0.0,
+    0.0,
+    20.0
+   ],
+   "note": "print flat; 4x M3 to bridge + 2x M3 set screws to tube"
   },
   "Neck_Tube": {
    "category": "structure",
@@ -284,7 +571,15 @@
     20.01,
     20.01,
     108.01
-   ]
+   ],
+   "kind": "purchased",
+   "step": 6,
+   "explode_mm": [
+    0.0,
+    0.0,
+    45.0
+   ],
+   "note": "Al 6061 tube \u00d840x2 cut to length; anti-rotation flat (UNVERIFIED)"
   },
   "Pi_5": {
    "category": "component",
@@ -295,7 +590,15 @@
     28.0,
     73.0,
     31.0
-   ]
+   ],
+   "kind": "placeholder",
+   "step": 3,
+   "explode_mm": [
+    0.0,
+    0.0,
+    -35.0
+   ],
+   "note": "Raspberry Pi 5 + Active Cooler envelope; 4x M2.5x6"
   },
   "Pi_Standoff_1": {
    "category": "structure",
@@ -306,7 +609,15 @@
     -22.0,
     -6.0,
     10.0
-   ]
+   ],
+   "kind": "purchased",
+   "step": 2,
+   "explode_mm": [
+    0.0,
+    0.0,
+    -60.0
+   ],
+   "note": "M2.5 brass standoff 6 mm"
   },
   "Pi_Standoff_2": {
    "category": "structure",
@@ -317,7 +628,15 @@
     27.0,
     -6.0,
     10.0
-   ]
+   ],
+   "kind": "purchased",
+   "step": 2,
+   "explode_mm": [
+    0.0,
+    0.0,
+    -60.0
+   ],
+   "note": "M2.5 brass standoff 6 mm"
   },
   "Pi_Standoff_3": {
    "category": "structure",
@@ -328,7 +647,15 @@
     -22.0,
     52.0,
     10.0
-   ]
+   ],
+   "kind": "purchased",
+   "step": 2,
+   "explode_mm": [
+    0.0,
+    0.0,
+    -60.0
+   ],
+   "note": "M2.5 brass standoff 6 mm"
   },
   "Pi_Standoff_4": {
    "category": "structure",
@@ -339,7 +666,15 @@
     27.0,
     52.0,
     10.0
-   ]
+   ],
+   "kind": "purchased",
+   "step": 2,
+   "explode_mm": [
+    0.0,
+    0.0,
+    -60.0
+   ],
+   "note": "M2.5 brass standoff 6 mm"
   },
   "Reserve_M2_HAT": {
    "category": "reserved",
@@ -350,7 +685,15 @@
     28.0,
     73.0,
     52.0
-   ]
+   ],
+   "kind": "reserved",
+   "step": 3,
+   "explode_mm": [
+    0.0,
+    0.0,
+    -15.0
+   ],
+   "note": "RESERVED: official M.2 HAT+ stack height (not installed)"
   },
   "Reserve_SSD_USB": {
    "category": "reserved",
@@ -361,51 +704,91 @@
     -34.0,
     73.0,
     16.0
-   ]
+   ],
+   "kind": "reserved",
+   "step": 3,
+   "explode_mm": [
+    -40.0,
+    0.0,
+    -35.0
+   ],
+   "note": "RESERVED: M.2-in-USB enclosure (not installed)"
   },
   "Speaker_Driver_L": {
    "category": "component",
    "bbox_mm": [
-    -76.13,
-    -93.81,
-    7.98,
-    -32.27,
-    -61.01,
-    58.02
-   ]
+    -74.88,
+    -92.56,
+    9.84,
+    -35.25,
+    -63.41,
+    58.16
+   ],
+   "kind": "placeholder",
+   "step": 4,
+   "explode_mm": [
+    -60.0,
+    -75.0,
+    -30.0
+   ],
+   "note": "full-range driver ~\u00d850 envelope (no SKU)"
   },
   "Speaker_Driver_R": {
    "category": "component",
    "bbox_mm": [
-    32.27,
-    -93.81,
-    7.98,
-    76.13,
-    -61.01,
-    58.02
-   ]
+    35.25,
+    -92.56,
+    9.84,
+    74.88,
+    -63.41,
+    58.16
+   ],
+   "kind": "placeholder",
+   "step": 4,
+   "explode_mm": [
+    60.0,
+    -75.0,
+    -30.0
+   ],
+   "note": "full-range driver ~\u00d850 envelope (no SKU)"
   },
   "Speaker_Pod_L": {
    "category": "component",
    "bbox_mm": [
-    -77.34,
-    -92.57,
-    12.0,
+    -73.9,
+    -87.65,
+    13.0,
     -6.4,
     -27.03,
-    54.0
-   ]
+    55.0
+   ],
+   "kind": "printed",
+   "step": 4,
+   "explode_mm": [
+    -45.0,
+    -55.0,
+    -30.0
+   ],
+   "note": "sealed pod; print open side up; 2x M3 to floor"
   },
   "Speaker_Pod_R": {
    "category": "component",
    "bbox_mm": [
     6.4,
-    -92.57,
-    12.0,
-    77.34,
+    -87.65,
+    13.0,
+    73.9,
     -27.03,
-    54.0
-   ]
+    55.0
+   ],
+   "kind": "printed",
+   "step": 4,
+   "explode_mm": [
+    45.0,
+    -55.0,
+    -30.0
+   ],
+   "note": "sealed pod; print open side up; 2x M3 to floor"
   },
   "Face_Eye_L": {
    "category": "exterior",
@@ -417,7 +800,15 @@
     -19.37,
     221.5
    ],
-   "visual_only": true
+   "visual_only": true,
+   "kind": "placeholder",
+   "step": 13,
+   "explode_mm": [
+    0.0,
+    -160.0,
+    200.0
+   ],
+   "note": "visual face placeholder (real face = Godot face scene, later)"
   },
   "Face_Eye_R": {
    "category": "exterior",
@@ -429,7 +820,15 @@
     -19.37,
     221.5
    ],
-   "visual_only": true
+   "visual_only": true,
+   "kind": "placeholder",
+   "step": 13,
+   "explode_mm": [
+    0.0,
+    -160.0,
+    200.0
+   ],
+   "note": "visual face placeholder (real face = Godot face scene, later)"
   },
   "Face_Smile": {
    "category": "exterior",
@@ -441,7 +840,15 @@
     -18.37,
     169.3
    ],
-   "visual_only": true
+   "visual_only": true,
+   "kind": "placeholder",
+   "step": 13,
+   "explode_mm": [
+    0.0,
+    -160.0,
+    200.0
+   ],
+   "note": "visual face placeholder (real face = Godot face scene, later)"
   }
  },
  "blender": "5.2.2 LTS"

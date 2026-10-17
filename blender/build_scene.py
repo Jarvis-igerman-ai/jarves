@@ -3,7 +3,7 @@
 # blender/finishes.json (PROVISIONAL colour treatments). Units: STL mm -> scene metres. Part names = CAD names.
 # Outputs: blender/JARVIS.blend, blender/JARVIS.glb, blender/JARVIS_manifest.json, blender/renders/pebble_*.png;
 # also syncs JARVIS.glb + JARVIS_manifest.json + finishes.json into godot/assets/.
-# Run: blender -b --python blender/build_scene.py            (add `-- --no-render` to skip Cycles renders)
+# Run: blender -b --python blender/build_scene.py   (`-- --no-render` skips renders, `-- --only-exploded` renders 2)
 import json
 import math
 import os
@@ -47,9 +47,9 @@ def set_mat(m, spec, alpha=1.0):
             pass
 
 
-def new_mat(name, spec, alpha=1.0):
+def new_mat(name, spec, alpha=None):
     m = bpy.data.materials.new(name)
-    set_mat(m, spec, alpha)
+    set_mat(m, spec, spec.get("alpha", 1.0) if alpha is None else alpha)
     return m
 
 
@@ -176,7 +176,10 @@ bpy.ops.export_scene.gltf(filepath=glb, export_format="GLB", use_selection=True,
 man = dict(manifest)
 man["parts"] = dict(manifest["parts"])
 for o in face:
-    man["parts"][o.name] = {"category": "exterior", "bbox_mm": bbox_mm(o), "visual_only": True}
+    man["parts"][o.name] = {"category": "exterior", "bbox_mm": bbox_mm(o), "visual_only": True,
+                            "kind": "placeholder", "step": manifest["parts"]["Face_Cover"]["step"],
+                            "explode_mm": manifest["parts"]["Face_Cover"]["explode_mm"],
+                            "note": "visual face placeholder (real face = Godot face scene, later)"}
 man["blender"] = bpy.app.version_string
 with open(os.path.join(out, "JARVIS_manifest.json"), "w") as fh:
     json.dump(man, fh, indent=1)
@@ -201,15 +204,24 @@ def apply_finish(key):
             set_mat(role_mats[role], spec)
 
 
-if not no_render:
+def explode(on):
+    for o in list(parts.values()) + face:
+        e = man["parts"][o.name]["explode_mm"] if on else (0, 0, 0)
+        lift = 100 if on else 0                # keep downward-exploded parts above the floor
+        o.location = (e[0] / 1000, e[1] / 1000, (e[2] + lift) / 1000)
+
+
+if not no_render:  # bounded S1.T03R3 review set (Godot exports the full screenshot set)
     os.makedirs(renders, exist_ok=True)
-    shell = {n for n, o in parts.items() if o["category"] == "exterior"} | {o.name for o in face}
+    alt = {n for n, i in man["parts"].items() if i["category"] == "alternate"}
     apply_finish(DEFAULT)
-    for view, loc in (("front", (0, -0.9, 0.18)), ("side", (0.9, 0, 0.18)), ("rear", (0, 0.9, 0.18))):
-        shot(os.path.join(renders, f"pebble_{view}.png"), loc, hide={"reserved"})
-    shot(os.path.join(renders, "pebble_interior.png"), (-0.55, -0.65, 0.42), hide=shell)
-    for key in FINISHES:
-        apply_finish(key)
-        shot(os.path.join(renders, f"pebble_finish_{key}.png"), (0.55, -0.72, 0.34), hide={"reserved"})
-    apply_finish(DEFAULT)
+    if "--only-exploded" not in sys.argv:
+        shot(os.path.join(renders, "pebble_r3_hero_C.png"), (0.55, -0.72, 0.34), hide={"reserved"} | alt)
+        shot(os.path.join(renders, "pebble_r3_rear_C.png"), (-0.35, 0.85, 0.3), hide={"reserved"} | alt)
+    explode(True)
+    target.location = (0, 0, 0.36)
+    cam.data.lens = 45
+    shot(os.path.join(renders, "pebble_r3_exploded_3q.png"), (0.8, -1.05, 0.62), hide={"reserved"} | alt)
+    shot(os.path.join(renders, "pebble_r3_exploded_side.png"), (1.3, 0, 0.38), hide={"reserved"} | alt)
+    explode(False)
 print("scene built; parts:", len(parts), "+ face", len(face))

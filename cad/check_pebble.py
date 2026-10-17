@@ -10,7 +10,9 @@ HEAD_INSIDE = ["Display_Panel", "Display_Driver", "Keepout_Display_Cable", "Came
                "Head_Spine", "Head_Spine_Foot"]
 BASE_INSIDE = ["Pi_5", "Reserve_M2_HAT", "Reserve_SSD_USB", "Speaker_Pod_L", "Speaker_Pod_R", "Speaker_Driver_L",
                "Speaker_Driver_R", "Bridge_Plate", "Neck_Flange_Low", "Bridge_Post_FL", "Bridge_Post_FR",
-               "Bridge_Post_RL", "Bridge_Post_RR", "Pi_Standoff_1", "Pi_Standoff_2", "Pi_Standoff_3", "Pi_Standoff_4"]
+               "Bridge_Post_RL", "Bridge_Post_RR", "Pi_Standoff_1", "Pi_Standoff_2", "Pi_Standoff_3", "Pi_Standoff_4",
+               "LED_Strip", "LED_Connector"]
+ALTERNATES = {"LED_Blank_Front": "LED_Diffuser_Front", "LED_Blank_Back": "LED_Diffuser_Back"}
 # head -> table: every link must touch (distance 0) so nothing floats
 LOAD_PATH = [("Head_Spine", "Head_Spine_Foot"), ("Head_Spine_Foot", "Head_Back"), ("Head_Front", "Neck_Flange_High"),
              ("Head_Back", "Neck_Flange_High"), ("Neck_Flange_High", "Neck_Tube"), ("Neck_Tube", "Neck_Flange_Low"),
@@ -19,7 +21,7 @@ LOAD_PATH = [("Head_Spine", "Head_Spine_Foot"), ("Head_Spine_Foot", "Head_Back")
              ("Pi_Standoff_1", "Base_Floor"), ("Face_Cover", "Head_Front"), ("Mic_Cap", "Head_Front"),
              ("Base_Door", "Base_Shell")]
 PRINTED = ["Head_Front", "Head_Back", "Mic_Cap", "Base_Shell", "Base_Door", "Base_Floor", "Neck_Collar",
-           "Neck_Flange_High", "Neck_Flange_Low", "Head_Spine", "Bridge_Plate", "Speaker_Pod_L", "Base_LightRing"]
+           "Neck_Flange_High", "Neck_Flange_Low", "Head_Spine", "Bridge_Plate", "Speaker_Pod_L", "LED_Diffuser_Front"]
 BED = 220.0  # common hobby bed (e.g. 220-256 mm); printer NOT selected
 
 
@@ -52,7 +54,15 @@ def check(doc):
             v = S(n).cut(S(void)).Volume
             if v > TOL:
                 fails.append(f"{n} outside {void} by {v:.1f} mm3")
-    for a, b in itertools.combinations(sorted(cats), 2):
+    for a, b in ALTERNATES.items():           # swap-in parts must be drop-in replacements
+        ba, bb = S(a).BoundBox, S(b).BoundBox
+        if abs(S(a).Volume - S(b).Volume) > 1 or (ba.Center - bb.Center).Length > 0.01:
+            fails.append(f"{a} is not a drop-in replacement for {b}")
+    door, conn = S("_DoorBox").BoundBox, S("LED_Connector").BoundBox
+    if not (door.XMin <= conn.XMin and conn.XMax <= door.XMax and door.ZMin <= conn.ZMin and conn.ZMax <= door.ZMax):
+        fails.append("LED_Connector not reachable through the rear door opening")
+    real = [n for n in sorted(cats) if cats[n] != "alternate"]
+    for a, b in itertools.combinations(real, 2):
         if not S(a).BoundBox.intersect(S(b).BoundBox):
             continue
         v = S(a).common(S(b)).Volume
@@ -75,7 +85,7 @@ def check(doc):
         fails.append(f"exceeds {BED:.0f} mm bed: {big}")
     ext = None
     for n, c in cats.items():
-        if c == "exterior":
+        if c in ("exterior", "structure"):   # installed physical parts (floor is structure)
             bb = S(n).optimalBoundingBox()
             ext = bb if ext is None else ext.united(bb)
     report.append(f"overall exterior: W {ext.XLength:.1f} x D {ext.YLength:.1f} x H {ext.ZLength:.1f} mm (PROVISIONAL)")

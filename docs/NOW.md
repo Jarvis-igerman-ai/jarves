@@ -1,25 +1,19 @@
-# NOW — S1.T03R2: JARVES Pebble A visual redesign
+# NOW — S1.T03R3: Pebble A assembly & detail review (round 2 of Issue #4)
 
-**Status:** REVIEW CANDIDATE DELIVERED 2026-10-17 (`docs/reviews/S1_T03R2_PEBBLE_VISUAL.md`), awaiting user visual feedback. Was: APPROVED FOR IMPLEMENTATION (17 Oct 2026). GitHub [Issue #4](https://github.com/igalgerman/JARVIS/issues/4) is the only current implementation milestone. One implementing agent.
+**Status:** DELIVERED 2026-10-17 (`docs/reviews/S1_T03R3_ASSEMBLY_REVIEW.md`), awaiting user review. Approved by user 17 Oct 2026 (chat instruction). Parent: [Issue #4](https://github.com/igalgerman/JARVIS/issues/4). One implementing owner.
 
-## Mission
-Deliver a **runnable improved Godot appearance review** using a more beautiful, cute, friendly and impressive Pebble A design, while preserving plausible physical buildability. The user must be able to interact with the revised model and provide numerous visual feedback rounds.
+## Keep (user decisions)
+Current overall Pebble A design, current side profile, **finish C** (white head / sky-blue base / navy band) as the review default. Finish C is a visual preference, not a material/procurement approval.
 
 ## Approved work
-- Fix the disconnected CAD head via plausible structural neck/spine/chassis geometry in FreeCAD; mark physical loads/tolerances UNVERIFIED.
-- Shape Pebble A surfaces and serviceable body/rear shell in CAD; keep component envelopes flexible and local-sourcing constraints intact.
-- Refresh CAD-derived Blender assets and two or three provisional **finish/color treatments** with concise previews (not distinct full engineering builds).
-- Reimport to Godot, preserve existing interactive controls, provide quick Windows run instructions.
-- Use focused structural and downstream integration checks, verify files/commit, update docs/HANDOFF.md and stop for user visual review.
+1. Move the LED status ring to the **upper base rim**; make it a **removable, nonstructural module** with a detachable connector and a **printable blank cover**. No LED SKU, diameter/power commitment or purchase.
+2. Replace the wheel-like speaker openings with a cleaner grille/speaker presentation (FreeCAD geometry first).
+3. Exploded assembly view + inventory of printed parts, purchased components, placeholders and fasteners, with a clear assembly/disassembly sequence and print orientation. Flag every unverified mechanical detail.
+4. Automatic export of all review screenshots (incl. exploded views) with direct file links.
+5. Review neck mounting, cable routing, rear service access and printability (no physical-validation claims).
 
-## Important constraints
-- Voice pickup distance is NOT decided; past 3–5 m is research-only. Do not optimize geometry or component choices to a fixed acoustic distance yet.
-- At completion, reconcile and close the active Issue only when acceptance checks pass, otherwise document blockers. Keep the repo free of temporary build/cache files without risky bulk deletions.
-- No final display/mic/speaker selection, procurement or mandated prices. Israel-first sourcing remains a research constraint, not a product lock.
-- No final printable manufacturing release, no AI/voice backend, no new motor/sensor functions.
-- Don't grow geometry unless justified by component fit, stability or maintainability. Reserve space for a future compact SSD and wiring without installing or oversized construction.
-- Don't delete existing repository assets, folders, historical docs or render sources in a cleanup sweep. Keep generated caches/temporary files out of commits and report cleanup suggestions separately.
-- Read AGENTS.md, this file, and docs/PROJECT_PRINCIPLES.md (targeted). Work autonomously within this issue. Do not start #2 (CI) or later stages.
+## Not in scope
+Purchases, final SKUs, microphone distance, manufacturing release, software/AI/voice, CI (#2), later issues (#5–#8).
 
 ## Completion gate
-Link actual commit to #4, show multi-angle previews and a working viewer, list design/fit unknowns and targeted check evidence, then STOP for user's feedback.
+Targeted checks pass (CAD / Blender / Godot), images exported and linked, HANDOFF decision queue updated, evidence on Issue #4, then STOP for user review.

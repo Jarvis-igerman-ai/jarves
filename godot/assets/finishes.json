@@ -1,5 +1,5 @@
 {
- "note": "PROVISIONAL colour/finish treatments for visual review only - not product decisions (Issue #4). Used by blender/build_scene.py and the Godot viewer.",
+ "note": "PROVISIONAL colour/finish treatments for visual review only - not product decisions (Issue #4). Used by blender/build_scene.py and the Godot viewer. User prefers finish C (17 Oct 2026; visual preference only).",
  "roles": {
   "Head_Front": "shell",
   "Head_Back": "shell",
@@ -9,11 +9,14 @@
   "Neck_Collar": "accent",
   "Face_Cover": "glass",
   "Base_Band": "band",
-  "Base_LightRing": "light",
   "Face_Eye_L": "face",
   "Face_Eye_R": "face",
   "Face_Smile": "face",
-  "Neck_Flange_High": "accent"
+  "Neck_Flange_High": "accent",
+  "LED_Diffuser_Front": "led",
+  "LED_Diffuser_Back": "led",
+  "LED_Blank_Front": "base",
+  "LED_Blank_Back": "base"
  },
  "finishes": {
   "A_Pearl_Graphite": {
@@ -68,22 +71,6 @@
     "metal": 0.0,
     "coat": 0.0
    },
-   "light": {
-    "color": [
-     0.3,
-     0.7,
-     1.0
-    ],
-    "rough": 0.3,
-    "metal": 0.0,
-    "coat": 0.0,
-    "emit": [
-     0.35,
-     0.75,
-     1.0
-    ],
-    "strength": 6
-   },
    "face": {
     "color": [
      0.25,
@@ -109,6 +96,23 @@
     "rough": 0.22,
     "metal": 0.0,
     "coat": 0.8
+   },
+   "led": {
+    "color": [
+     0.3,
+     0.7,
+     1.0
+    ],
+    "rough": 0.3,
+    "metal": 0.0,
+    "coat": 0.0,
+    "emit": [
+     0.35,
+     0.75,
+     1.0
+    ],
+    "strength": 6,
+    "alpha": 0.85
    }
   },
   "B_Warm_Sand": {
@@ -163,22 +167,6 @@
     "metal": 0.0,
     "coat": 0.0
    },
-   "light": {
-    "color": [
-     1.0,
-     0.7,
-     0.35
-    ],
-    "rough": 0.3,
-    "metal": 0.0,
-    "coat": 0.0,
-    "emit": [
-     1.0,
-     0.65,
-     0.3
-    ],
-    "strength": 5
-   },
    "face": {
     "color": [
      0.95,
@@ -204,6 +192,23 @@
     "rough": 0.5,
     "metal": 0.0,
     "coat": 0.2
+   },
+   "led": {
+    "color": [
+     1.0,
+     0.7,
+     0.35
+    ],
+    "rough": 0.3,
+    "metal": 0.0,
+    "coat": 0.0,
+    "emit": [
+     1.0,
+     0.65,
+     0.3
+    ],
+    "strength": 5,
+    "alpha": 0.85
    }
   },
   "C_Sky_Pastel": {
@@ -258,22 +263,6 @@
     "metal": 0.0,
     "coat": 0.0
    },
-   "light": {
-    "color": [
-     0.4,
-     0.85,
-     1.0
-    ],
-    "rough": 0.3,
-    "metal": 0.0,
-    "coat": 0.0,
-    "emit": [
-     0.4,
-     0.85,
-     1.0
-    ],
-    "strength": 5
-   },
    "face": {
     "color": [
      0.25,
@@ -299,8 +288,25 @@
     "rough": 0.4,
     "metal": 0.0,
     "coat": 0.4
+   },
+   "led": {
+    "color": [
+     0.4,
+     0.85,
+     1.0
+    ],
+    "rough": 0.3,
+    "metal": 0.0,
+    "coat": 0.0,
+    "emit": [
+     0.4,
+     0.85,
+     1.0
+    ],
+    "strength": 5,
+    "alpha": 0.85
    }
   }
  },
- "default": "A_Pearl_Graphite"
+ "default": "C_Sky_Pastel"
 }
