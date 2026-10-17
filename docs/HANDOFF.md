@@ -48,6 +48,23 @@
 
 **Agent transition (Claude Code ↔ Codex):** one writer at a time. Finish and commit current work, update this handoff with the actual changed paths, checks and blockers, then have the receiving agent pull the latest. Feedback travels back to the owning source (FreeCAD/Blender/Godot/Core), followed by *only necessary* downstream rebuilds and focused tests.
 
+## Decision queue — management triage (17 Oct 2026; no user visual approval yet)
+
+| Agent question | Recommendation / reason | Status / revisit gate |
+|---|---|---|
+| 1. Overall appearance and proportions | Keep Pebble A as the review baseline, not as a final visual sign-off; inspect the actual Godot front/side/3/4/rear views before selecting changes. | **USER DECISION REQUIRED** — interactive visual review, Issue #4 |
+| 2. Side-profile half-dome | Provisional preference: try a subtly rounder/deeper back before any large face restructuring, **only after** user confirms what looks wrong. Extra depth raises size/fit tradeoffs. | **USER DECISION REQUIRED** — Issue #4 feedback |
+| 3. Finish A/B/C | Provisional recommendation: compare A (Pearl/Graphite) and B (warm ivory) first; no colour approved. | **USER DECISION REQUIRED** — Issue #4 feedback |
+| 4. Light ring | Provisional recommendation: test moving it to a visible upper-base edge, avoiding unverified electronics claims; do not change CAD yet. | **USER DECISION REQUIRED** — Issue #4 feedback |
+| 5. Flat mic crown / raised XVF3800 pod | Keep current flat crown provisionally; avoid locking a +15 mm pod until microphone selection and aesthetic approval. | **DEFERRED** — visual review if user objects; final geometry after mic research |
+| 6a. Imported mic vs local alternatives | Specialist microphone import remains a candidate, **not approved**; verify current availability, performance and costs before selection. | **DEFERRED** — hardware research gate |
+| 6b. Local 5-inch vs imported 4-inch display | Continue with 5-inch design envelope as a provisional CAD assumption, **not a final SKU choice**. | **DEFERRED** — hardware fit and sourcing gate |
+| 6c. Bench-test purchases | No purchases or authorization inferred. Recommend low-cost bench tests before enclosure fabrication, after separate approval. | **DEFERRED** — hardware purchasing gate |
+| 6d. Printer, bed and material | No printer selected; preserve 220 mm design compatibility and split-part fallback. | **DEFERRED** — print planning gate |
+| 6e. Room placement/listening range | Room 35–50 m² is estimated; required pickup range/placement not decided. Do not promise 3–5 m. | **DEFERRED** — acoustics test planning |
+
+**Rule:** Technical suggestions above are recommendations only, not implementation authorization. For the active #4 visual review, collect the user's feedback on the overall appearance, side profile, finish and light ring together; update this queue after their response. Do not re-ask deferred hardware questions at every visual iteration. Follow `AGENTS.md` mandatory question handling.
+
 ## Questions for the user
 1. **Overall look:** does Pebble A now feel cute, friendly and premium enough? What should change first: head shape, face size/position, base height, or neck?
 2. **Side profile:** the head reads as a half-dome behind a flat face. Do you prefer (a) a deeper, rounder back head, (b) a gently curved face rim, or (c) keep it as is?
