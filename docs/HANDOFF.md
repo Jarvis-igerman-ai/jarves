@@ -1,11 +1,13 @@
 # Current handoff
-Task: S1.T01b — CAD component layout + modular enclosure (CAD milestone). S1.T01a done earlier.
-Status: DONE, awaiting review. Blender milestone NOT started.
-Changed files: cad/build_blockout.py (extended generator), cad/JARVIS_blockout.FCStd (regenerated), cad/check_layout.py, cad/render_preview.py, cad/JARVIS_layout_preview.png, cad/JARVIS_blockout_preview.png, cad/ASSUMPTIONS.md, docs/NOW.md, docs/HANDOFF.md.
-Result: hollow Head_Front/Head_Back/Body_Shell, removable Door_Rear, Pi_Tray; envelopes for Pi 5, display, mic array, camera, 2 speaker drivers, spare USB-hub volume. Head/Body kept as envelope refs.
-Rebuild: `"C:\Users\97254\AppData\Local\Programs\FreeCAD 1.1\bin\freecadcmd.exe" cad\build_blockout.py` then `cad\check_layout.py`, `cad\render_preview.py`.
-Verification: check_layout.py PASS — all components inside cavities, no collisions among parts, Pi ports inside door opening. Gaps: Pi port→rear wall 25, Pi→shell 9, camera→display 1, mic→head 2.1 mm.
-Limitations: body height changed 110→79 and head Ø190→200 (head clearance); camera board forced display 8 mm low; Pi 5 size not datasheet-verified; mic/display/speaker sizes PROVISIONAL; no neck/cable path, fasteners, vents, acoustics or thermals; shells not manufacturing-ready.
-Git: branch main, private GitHub igalgerman/JARVIS; one commit per milestone.
-Next (not started): Blender visual-asset milestone, after user approval.
+Task: S1.T02 — Blender visual scene from CAD (after S1.T01a/b CAD milestone + quality gate).
+Status: DONE, awaiting review. Godot (S1.T03) NOT started.
+Changed files: cad/export_meshes.py, blender/{build_scene.py,smoke_blender.py,JARVIS.blend,JARVIS.glb,JARVIS_render.png,JARVIS_internals_render.png}, cad/smoke_test.py, cad/check_layout.py (non-zero exit), cad/build_blockout.py (JARVIS_CAD_OUT override), ci/cad-smoke.yml, .gitignore, docs/{NOW,HANDOFF}.md.
+Tools (user-scope, no admin): FreeCAD 1.1.4 (winget); Blender 5.2.2 portable ZIP in %LOCALAPPDATA%\Programs\Blender-5.2.2 (official, SHA256 verified; winget MSI needs admin).
+Smoke tests (run before DONE):
+- CAD: `"C:\Users\97254\AppData\Local\Programs\FreeCAD 1.1\bin\freecadcmd.exe" cad\smoke_test.py` -> PASS (~2 s: generate, validity, containment/collisions, Width 200->220 regression on temp copy). Negative case (Pi moved into wall) -> exit 1.
+- Blender: `"...\Blender-5.2.2\blender-5.2.2-windows-x64\blender.exe" -b --python blender\smoke_blender.py` -> PASS (17 CAD parts + face placeholder present with materials; envelope 200x160x280 mm).
+Rebuild assets: `freecadcmd cad\export_meshes.py` then `blender -b --python blender\build_scene.py` (~100 s, Cycles CPU, 2 renders).
+CI: BLOCKED — gh token lacks `workflow` scope, so push of .github/workflows was rejected. Workflow parked at ci/cad-smoke.yml (untested on a runner; apt freecad-python3 on ubuntu-24.04 assumed). USER ACTION: run `gh auth refresh -h github.com -s workflow`, then move it to .github/workflows/ and check the run.
+Limitations: CAD dims PROVISIONAL (see cad/ASSUMPTIONS.md); renders are a visual blockout, not product art; screen face is a visual placeholder; no textures/vents/seams; glTF materials simple.
+Next (not started): S1.T03 Godot interactive 3D assembly, after user approval.
 User approval: PENDING
