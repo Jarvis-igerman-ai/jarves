@@ -1,4 +1,4 @@
-# JARVIS Stage 1 — minimal architecture contract
+# JARVES Stage 1 — minimal architecture contract
 
 ## Responsibilities
 - **FreeCAD**: authoritative parametric manufacturing geometry and named independent parts (`.FCStd`); future STEP/STL per part.
