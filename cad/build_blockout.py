@@ -5,7 +5,7 @@ import os
 import FreeCAD as App
 from FreeCAD import Vector, Rotation
 
-OUT = os.path.join(os.path.dirname(os.path.abspath(__file__)), "JARVIS_blockout.FCStd")
+OUT = os.environ.get("JARVIS_CAD_OUT") or os.path.join(os.path.dirname(os.path.abspath(__file__)), "JARVIS_blockout.FCStd")
 doc = App.newDocument("JARVIS_blockout")
 
 # Parameter list (mm). Edit here or in the "Params" spreadsheet.
@@ -137,6 +137,6 @@ box("Reserve_USB_Hub", "50 mm", "45 mm", "20 mm", "-90 mm", "20 mm", "5 mm")  # 
 doc.recompute()
 bad = [o.Name for o in doc.Objects if "Invalid" in o.State or not o.isValid()]
 if bad:
-    raise SystemExit(f"recompute errors: {bad}")
+    raise RuntimeError(f"recompute errors: {bad}")
 doc.saveAs(OUT)
 print("saved", OUT)

@@ -1,0 +1,11 @@
+name: cad-smoke
+on: [push, pull_request]
+jobs:
+  smoke:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install FreeCAD (headless)
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends freecad-python3
+      - name: CAD smoke test
+        run: QT_QPA_PLATFORM=offscreen freecadcmd cad/smoke_test.py
