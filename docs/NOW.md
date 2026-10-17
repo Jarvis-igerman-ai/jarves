@@ -3,7 +3,7 @@
 **Status:** executed; review candidate delivered (see HANDOFF.md), awaiting user review. **Previous:** S1.T02 Blender reported DONE; review the assets as part of this visual milestone. **Owner:** one implementing agent.
 
 ## Objective
-Build the smallest useful **runnable Windows Godot 3D viewer** of the stationary Peri/JARVIS robot from the existing CAD-derived `blender/JARVIS.glb`, for hands-on user visual review.
+Build the smallest useful **runnable Windows Godot 3D viewer** of the stationary JARVES/JARVES robot from the existing CAD-derived `blender/JARVIS.glb`, for hands-on user visual review.
 
 ## Approved milestone scope
 1. Import existing GLB, preserve stable part identity, verify CAD-mm → Godot-meter scale.
