@@ -1,9 +1,13 @@
 # Current handoff — 17 October 2026
 
-## Active milestone — S1.T03R5 architecture review delivered (R5b), awaiting approval before CAD
+## Active milestone — S1.T03R5b APPROVED: CAD implementation + bounded verification (not started yet)
+
+- **User approval (17 Oct 2026):** [Issue #4 approval and detailed acceptance criteria](https://github.com/igalgerman/JARVIS/issues/4#issuecomment-6240553020). The next implementing Claude/Codex agent may proceed to R5b CAD/slicer/real renders, targeted sources+geometry+assembly+power/cable checks and independent review when consequential. This does NOT mean work has already begun.
+- **No purchases, printing or vendor outreach** until separate user approval. Deliver a readable assembly guide, real project views and verified-vs-unverified risks; then stop for review.
+
 
 - [S1_T03R5_ARCHITECTURE_REVIEW.md](reviews/S1_T03R5_ARCHITECTURE_REVIEW.md): the chassis table is removed (the base cover top is made structural); 7 printed parts + 2 snap blanks, about 25 screws + 12 nuts, 2 screw types; the mic board's own 5 W amp drives 1 plug-in speaker (connector type unconfirmed); microSD reachable through the rear door.
-- **Decision R5-1 (USER):** approve R5b for CAD implementation. Open spec items: speaker connector type, mono output, mic board current draw, mounting holes from Seeed files.
+- **Decision R5-1 (USER):** APPROVED for CAD implementation on 17 Oct 2026. Open spec items: speaker connector type, mono output, mic board current draw, mounting holes from Seeed files.
 
 
 User chose (17 Oct 2026): improve the simple Pi-in-base build. Engineering decision recorded in [S1_T03R5_DESIGN_DECISION.md](reviews/S1_T03R5_DESIGN_DECISION.md). Next agent: implement it in CAD (see its "Next" section). The R4 notes below are history.
