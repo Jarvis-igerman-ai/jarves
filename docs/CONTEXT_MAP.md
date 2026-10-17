@@ -2,6 +2,7 @@
 
 | Need | Read only |
 |---|---|
+| Durable project principles, printability, Israel sourcing and user decisions | `PROJECT_PRINCIPLES.md` |
 | Current scope / next action | `NOW.md` (always) |
 | Layer boundaries and model pipeline | `ARCHITECTURE.md` |
 | Simulated vs physical GPIO/camera/audio contracts | `DEVICE_CONTRACT.md` |
