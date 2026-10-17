@@ -1,6 +1,6 @@
 # NOW — S1.T03: Godot interactive 3D digital twin
 
-**Status:** executed; review candidate delivered (see HANDOFF.md), awaiting user review. **Previous:** S1.T02 Blender reported DONE; review the assets as part of this visual milestone. **Owner:** one implementing agent.
+**Status:** executed; review candidate delivered. User review produced Issue #3; design review delivered in `docs/reviews/S1_DESIGN_REVIEW.md`, awaiting concept selection (no redesign implemented). **Previous:** S1.T02 Blender reported DONE; review the assets as part of this visual milestone. **Owner:** one implementing agent.
 
 ## Objective
 Build the smallest useful **runnable Windows Godot 3D viewer** of the stationary JARVES/JARVES robot from the existing CAD-derived `blender/JARVIS.glb`, for hands-on user visual review.

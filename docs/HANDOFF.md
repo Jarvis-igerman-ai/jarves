@@ -1,10 +1,12 @@
 # Current handoff
-Task: S1.T03 — Godot interactive 3D review viewer (GitHub Issue #1). Status: DONE as a REVIEW CANDIDATE, awaiting user review. S1.T04 / Issue #2 NOT started.
-Run: `godot\run_viewer.cmd` (Godot 4.7.2 via `winget install GodotEngine.GodotEngine`, no editor needed). Left-drag orbit, right-drag pan, wheel zoom, click = part name + bbox mm, toggles: outer shell / internal components, Reset view. See godot/README.md.
-Changed files: godot/{project.godot,main.tscn,main.gd,assets/JARVIS.glb (copy of blender/JARVIS.glb),run_viewer.cmd,check_viewer.cmd,README.md,previews/*.png}, docs/{NOW,HANDOFF}.md.
-Check: `godot\check_viewer.cmd` -> `CHECK RESULT: PASS (20 parts)` exit 0: all CAD part names + 3 face placeholders found; envelope 200.0 x 280.0 x 160.0 mm (mm->m scale verified); shell/internal toggles; ray-pick Pi_5 (shell off) and Speaker_L (shell on) return correct names. Windowed screenshots in godot/previews/ (viewed). Earlier CAD/Blender smoke tests unchanged and not re-run (no upstream change).
-Assumptions: GLB loaded at runtime via GLTFDocument (no import cache); front of robot faces +Z in Godot; dimensions stay PROVISIONAL.
-Known review items (not fixed; triage per docs/ROADMAP.md): Body_Shell/box faces show smooth-shading gradients (Blender layer: needs flat/auto-smooth normals); screen face is a static placeholder; no packaged .exe (would need Godot export templates, not installed); no exploded view (out of scope); render quality is blockout level.
-CI: still NOT active. Enabling needs (1) user to run `gh auth refresh -h github.com -s workflow`, (2) move ci/cad-smoke.yml to .github/workflows/, (3) validate FreeCAD (apt freecad-python3 0.21 on ubuntu-24.04) actually runs smoke_test.py on a runner. Local smoke tests remain the gate.
-Next proposed (not started): review round of user observations (route to FreeCAD/Blender/Godot), then S1.T04 only after approval.
+Task: S1 design review — GitHub Issue #3 (JARVES visual redesign, head mount, room-scale audio). Status: REVIEW DELIVERED, awaiting user concept selection. **No redesign implemented**; S1.T04 not started.
+Model: Claude Opus 5.5 (`claude-opus-5-5`), selected by the user via /model for this review.
+Read first: `docs/reviews/S1_DESIGN_REVIEW.md` (findings, 3 concepts, mount, rear/service, acoustics, layer plan, decisions needed).
+Changed files: docs/reviews/S1_DESIGN_REVIEW.md, design/concepts/{build_concepts.py,concept_A_views.png,concept_B_views.png,concept_C_views.png,concepts_hero.png}, design/review/{make_diagrams.py,head_mount_and_rear_service.png}, docs/{HANDOFF,NOW}.md.
+Regenerate: `blender -b --python design\concepts\build_concepts.py` (~4 min, Cycles CPU, 4 renders); `freecadcmd design\review\make_diagrams.py`.
+Checks: FreeCAD measurement on cad/JARVIS_blockout.FCStd: head zmin 80.0 mm, body zmax 79.0 mm, min distance 1.0 mm, common volume 0 -> head is unconnected (confirms user's side-view observation). Concept renders and diagram inspected visually. CAD/Blender/Godot assets and their smoke tests unchanged (not re-run; no upstream change).
+Assumptions/limits: concepts are Blender visual geometry, not CAD and not fit-checked; sizes approximate/PROVISIONAL; masses, loads, tolerances, thermal and acoustic figures UNVERIFIED; no far-field performance promised.
+Decisions needed (see review §7): concept choice, envelope relaxation (B H≈320 / C W≈232), display SKU + drawing, mic array choice, room size/talking distance.
+Next proposed (not started): implement the selected concept upstream-first (FreeCAD -> Blender -> Godot), routine execution on Sonnet.
+CI: still not active (needs `workflow` token scope + runner validation; see previous notes).
 User approval: PENDING
