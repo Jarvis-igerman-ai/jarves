@@ -37,6 +37,11 @@
 - Treat **GitHub Issues as the task ledger**: each issue states scope, acceptance, evidence and linked commits/PR. On completion, record what was verified, remaining follow-ups and exact commit, then **close the issue** when acceptance is satisfied; otherwise keep open with explicit blockers or split a follow-up issue. Do not leave completed work open indefinitely. Never delete issues to tidy: use closed history, avoid duplications, and periodically review stale open issues.
 - Keep README as a concise navigation index and docs/HANDOFF.md as the latest status; archive superseded details rather than duplicating or repeatedly rewriting everything. Avoid a massive context load.
 
+## Model and tool portability
+- Preserve a **provider-neutral workflow** across Claude Code and Codex: GitHub Issue scope → short plan → targeted changes → focused tests → linked commit → concise handoff → approval gate. The repository, not chat history, carries durable decisions.
+- Spend premium reasoning selectively on architecture, design judgement and hard troubleshooting; routine coding/validation/docs use the cheaper suitable model **when it truly saves overall effort**. Do not prescribe the same vendor/version for different tools or trigger repeated context reloads for trivial savings.
+- For a switch between agents, finish the current write, commit, update `docs/HANDOFF.md`, and make sure the next agent pulls before changing anything. One active implementer at a time.
+
 ## Agent operating contract
 - Scope is governed by `docs/NOW.md`. GitHub Issues record proposals, decisions, review findings and commit links; an Issue is not automatic permission to implement every future stage.
 - Plan briefly, work in approved **milestone bundles** without interrupting for every tiny subtask, ask only at blockers/material decisions, use focused checks and modest token budgets; do not implement speculative functionality.
