@@ -1,0 +1,11 @@
+# JARVIS blockout assumptions (S1.T01a) — ALL PROVISIONAL / UNVERIFIED, not a fit drawing
+- Envelope H280 x W200 x D160 mm: PROVISIONAL starting point from NOW.md; not measured.
+- Head: disc Ø190 mm, axis front-back, depth D minus screen; body: box W x D x 110 mm (PROVISIONAL).
+- Screen opening Ø150 mm, 3 mm thick; camera Ø8 mm above screen; mic Ø20 mm at head top (PROVISIONAL, positions illustrative).
+- Two speaker regions Ø50 mm at X=±W/4 on body front; rear door 0.6W x 0.6·BodyH (PROVISIONAL).
+- Head/body are simple primitives (no spherical/curved shell, no neck joint); stationary only.
+- Geometry matches the reference silhouette only loosely; image is not dimensional.
+- Edit parameters in spreadsheet `Params` (or `cad/build_blockout.py`); rebuild: `freecadcmd cad\build_blockout.py`.
+- REQUEST before any fit claim: actual display (active area, outline, thickness), speaker size/depth, mic and camera modules.
+- REQUEST: Raspberry Pi/board + battery/PSU sizes, connector/cable clearances, door latch/hinge, wall thickness, print volume.
+- No STEP/STL exported; nothing here is production-ready.
