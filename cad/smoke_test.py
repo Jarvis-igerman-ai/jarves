@@ -87,11 +87,11 @@ def pebble_regression():  # HeadRX 107.5 -> 112 must widen the head shells and k
     copy = os.path.join(tmp, "pebble_copy.FCStd")
     shutil.copy(pebble, copy)
     d = App.openDocument(copy)
-    w0 = d.Head_Back.Shape.optimalBoundingBox().XLength
+    w0 = d.Head_Front.Shape.optimalBoundingBox().XLength   # head body carries the full width (R5b)
     row = next(i for i in range(1, 40) if d.Params.get(f"A{i}") == "HeadRX")
     d.Params.set(f"B{row}", "=112 mm")
     d.recompute()
-    w1 = d.Head_Back.Shape.optimalBoundingBox().XLength
+    w1 = d.Head_Front.Shape.optimalBoundingBox().XLength
     assert abs(w1 - w0 - 9) < 0.5, f"head width {w0:.1f}->{w1:.1f}"
     fails, _, _ = plib["check"](d)
     assert not fails, "; ".join(fails)

@@ -58,15 +58,10 @@ FIXED = {
     "structure": {"color": [0.22, 0.23, 0.25], "rough": 0.6},           # printed PETG structure
     "component": {"color": [0.05, 0.30, 0.14], "rough": 0.45},          # PCB-green envelopes
     "reserved": {"color": [0.55, 0.35, 0.80], "rough": 0.5},            # translucent purple reservations
+    "alternate": {"color": [0.85, 0.9, 0.95], "rough": 0.4},            # optional swap-in parts
 }
-SPECIAL = {"Neck_Tube": {"color": [0.75, 0.76, 0.78], "rough": 0.3, "metal": 1.0},
-           "Display_Panel": {"color": [0.02, 0.02, 0.03], "rough": 0.2},
-           "Speaker_Pod_L": {"color": [0.12, 0.12, 0.13], "rough": 0.6},
-           "Speaker_Pod_R": {"color": [0.12, 0.12, 0.13], "rough": 0.6},
-           "Speaker_Driver_L": {"color": [0.03, 0.03, 0.03], "rough": 0.7},
-           "Speaker_Driver_R": {"color": [0.03, 0.03, 0.03], "rough": 0.7}}
-for k in ("1", "2", "3", "4"):
-    SPECIAL[f"Pi_Standoff_{k}"] = {"color": [0.8, 0.65, 0.3], "rough": 0.3, "metal": 1.0}
+SPECIAL = {"Display_Panel": {"color": [0.006, 0.008, 0.014], "rough": 0.08, "coat": 1.0},   # display glass = face
+           "Speaker_Module": {"color": [0.12, 0.12, 0.13], "rough": 0.6}}
 role_mats = {role: new_mat(f"Finish_{role}", spec) for role, spec in FINISHES[DEFAULT].items() if role != "label"}
 
 # ---------------- import CAD parts ----------------
@@ -82,7 +77,7 @@ for n, info in manifest["parts"].items():
         mat = new_mat(f"M_{n}", SPECIAL[n])
     else:
         mat = bpy.data.materials.get(f"Cat_{cat}") or new_mat(f"Cat_{cat}", FIXED[cat],
-                                                              0.35 if cat == "reserved" else 1.0)
+                                                              0.35 if cat in ("reserved", "alternate") else 1.0)
     o.data.materials.append(mat)
     bpy.context.view_layer.objects.active = o
     bpy.ops.object.shade_smooth_by_angle(angle=math.radians(30))   # crisp flats, smooth curves
@@ -97,10 +92,9 @@ def bbox_mm(o):
            [round(max(p[i] for p in pts) * 1000, 2) for i in range(3)]
 
 
-# ---------------- visual-only face placeholder on the cover (real face = Godot face scene, later) ----------------
-cover = bbox_mm(parts["Face_Cover"])
+# ---------------- visual-only face placeholder on the display glass (real face = Godot face scene, later) ----------
 disp = bbox_mm(parts["Display_Panel"])
-fy = cover[1] / 1000 - 0.0004
+fy = disp[1] / 1000 - 0.0004                      # just in front of the display glass, inside the face opening
 cz = (disp[2] + disp[5]) / 2000
 face = []
 for name, x in (("Face_Eye_L", -0.033), ("Face_Eye_R", 0.033)):
@@ -177,8 +171,8 @@ man = dict(manifest)
 man["parts"] = dict(manifest["parts"])
 for o in face:
     man["parts"][o.name] = {"category": "exterior", "bbox_mm": bbox_mm(o), "visual_only": True,
-                            "kind": "placeholder", "step": manifest["parts"]["Face_Cover"]["step"],
-                            "explode_mm": manifest["parts"]["Face_Cover"]["explode_mm"],
+                            "kind": "placeholder", "step": manifest["parts"]["Display_Panel"]["step"],
+                            "explode_mm": manifest["parts"]["Display_Panel"]["explode_mm"],
                             "note": "visual face placeholder (real face = Godot face scene, later)"}
 man["blender"] = bpy.app.version_string
 with open(os.path.join(out, "JARVIS_manifest.json"), "w") as fh:
@@ -211,17 +205,17 @@ def explode(on):
         o.location = (e[0] / 1000, e[1] / 1000, (e[2] + lift) / 1000)
 
 
-if not no_render:  # bounded S1.T03R3 review set (Godot exports the full screenshot set)
+if not no_render:  # bounded R5b review set (Godot exports the full screenshot set)
     os.makedirs(renders, exist_ok=True)
     alt = {n for n, i in man["parts"].items() if i["category"] == "alternate"}
     apply_finish(DEFAULT)
     if "--only-exploded" not in sys.argv:
-        shot(os.path.join(renders, "pebble_r3_hero_C.png"), (0.55, -0.72, 0.34), hide={"reserved"} | alt)
-        shot(os.path.join(renders, "pebble_r3_rear_C.png"), (-0.35, 0.85, 0.3), hide={"reserved"} | alt)
+        shot(os.path.join(renders, "pebble_r5_hero_C.png"), (0.55, -0.72, 0.34), hide={"reserved"} | alt)
+        shot(os.path.join(renders, "pebble_r5_rear_C.png"), (-0.35, 0.85, 0.3), hide={"reserved"} | alt)
     explode(True)
     target.location = (0, 0, 0.36)
     cam.data.lens = 45
-    shot(os.path.join(renders, "pebble_r3_exploded_3q.png"), (0.8, -1.05, 0.62), hide={"reserved"} | alt)
-    shot(os.path.join(renders, "pebble_r3_exploded_side.png"), (1.3, 0, 0.38), hide={"reserved"} | alt)
+    shot(os.path.join(renders, "pebble_r5_exploded_3q.png"), (0.8, -1.05, 0.62), hide={"reserved"} | alt)
+    shot(os.path.join(renders, "pebble_r5_exploded_side.png"), (1.3, 0, 0.38), hide={"reserved"} | alt)
     explode(False)
 print("scene built; parts:", len(parts), "+ face", len(face))

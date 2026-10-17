@@ -4,13 +4,13 @@ extends Node3D
 # Left-drag orbit | right/middle-drag pan | wheel zoom | click selects a part.
 # CLI (after "--"):  --check  (print PASS/FAIL, exit code)  |  --shot=<png> [--hide-shell] [--select=<Part>]
 #                    [--show-reserved] [--finish=<key>] [--view=front|side|rear|three_quarter|top|led_closeup]
-#                    [--exploded | --exploded=<0..1>] [--blank-led]
-#   Assembly images: --step=<1..14> | --part=<Name> | --overview  (UI hidden; combine with --shot=); --list-parts=<kind,...> prints PARTLIST lines
+#                    [--exploded | --exploded=<0..1>] [--led-ring]  (optional LED ring instead of the default blank)
+#   Assembly images: --step=<1..N> | --part=<Name> | --overview  (UI hidden; combine with --shot=); --list-parts=<kind,...> prints PARTLIST lines
 
 const GLB := "res://assets/JARVIS.glb"
 const MANIFEST := "res://assets/JARVIS_manifest.json"
 const FINISHES := "res://assets/finishes.json"
-const LAYERS := {"exterior": "Outer shell", "structure": "Structure (neck / spine / chassis)",
+const LAYERS := {"exterior": "Outer shell", "structure": "Structure (neck column / tray / retainer)",
 	"component": "Components (envelopes)", "reserved": "Reserved volumes (SSD, cable)"}
 const HOME := {"yaw": 0.55, "pitch": 0.22, "dist": 1.05, "target": Vector3(0, 0.15, 0)}
 # view -> [yaw, pitch, dist, target]
@@ -19,7 +19,8 @@ const VIEWS := {"front": [0.0, 0.08, 1.05, Vector3(0, 0.15, 0)], "side": [PI / 2
 	"top": [0.0, 1.5, 1.05, Vector3(0, 0.15, 0)], "led_closeup": [0.55, 0.35, 0.45, Vector3(0, 0.075, 0)]}
 const EXPLODE_VIEW := {"target": Vector3(0, 0.38, 0), "dist": 1.5}
 const EXPLODE_LIFT := 0.10  # m, global +Y lift per unit factor so downward offsets stay above the ground
-const LED_RING := ["LED_Diffuser_Front", "LED_Diffuser_Back", "LED_Strip"]
+const LED_RING := ["LED_Diffuser_Front", "LED_Diffuser_Back", "LED_Strip", "LED_Connector"]
+const BLANKS := ["LED_Blank_Front", "LED_Blank_Back"]
 
 var parts := {}      # name -> MeshInstance3D
 var bodies := {}     # name -> StaticBody3D (click collision)
@@ -96,7 +97,7 @@ func _ready() -> void:
 			_select(a.substr(9))
 		elif a.begins_with("--finish="):
 			_apply_finish(a.substr(9))
-		elif a == "--blank-led":
+		elif a == "--led-ring":
 			_set_blank(true)
 		elif a == "--exploded":
 			_set_explode(true, 1.0)
@@ -108,7 +109,7 @@ func _ready() -> void:
 		_set_view(view)
 	for a in args:
 		if a.begins_with("--step="):
-			_apply_step(clampi(int(a.substr(7)), 1, 14))
+			_apply_step(clampi(int(a.substr(7)), 1, manifest.steps.size()))
 		elif a.begins_with("--part="):
 			_apply_part(a.substr(7))
 		elif a == "--overview":
@@ -204,7 +205,7 @@ func _build_ui() -> void:
 	var box := VBoxContainer.new()
 	panel.add_child(box)
 	var title := Label.new()
-	title.text = "JARVES Pebble A - visual review (S1.T03R2)\nShapes from CAD; sizes & finishes PROVISIONAL"
+	title.text = "JARVES Pebble A - R5b review (S1.T03R5)\nShapes from CAD; sizes & finishes PROVISIONAL"
 	box.add_child(title)
 	for c in LAYERS:
 		var chk := CheckButton.new()
@@ -220,7 +221,7 @@ func _build_ui() -> void:
 	finish_btn.item_selected.connect(func(i): _apply_finish(finish_btn.get_item_metadata(i)))
 	box.add_child(finish_btn)
 	blank_chk = CheckButton.new()
-	blank_chk.text = "Blank cover instead of LED ring"
+	blank_chk.text = "Optional LED ring fitted (default: blank ring)"
 	blank_chk.toggled.connect(_set_blank)
 	box.add_child(blank_chk)
 	explode_chk = CheckButton.new()
@@ -262,7 +263,7 @@ func _part_visible(n: String) -> bool:
 	var c: String = cat[n]
 	if c == "alternate":
 		return blank_led and shown["exterior"]
-	if blank_led and n in LED_RING:
+	if blank_led and n in BLANKS:
 		return false
 	return shown.get(c, true)
 
@@ -507,13 +508,13 @@ func _apply_step(sn: int) -> void:
 	var d := _fit_camera(frame, 0.6, 0.38)
 	for n in fresh:
 		if _pid(n) == "":
-			continue  # face details ride along with Face_Cover, no label/arrow
+			continue  # face details ride along with the display, no label/arrow
 		var pulled_c: Vector3 = _part_aabb(n).get_center()
 		var off := _step_offset(n)
 		_add_arrow(pulled_c, pulled_c - off, d)
 		_add_label(_pid(n), pulled_c, d, true)
 	var txt: String = str(manifest.get("steps", {}).get(str(sn), ""))
-	_overlay("Step %d / 14" % sn, txt, LEGEND)
+	_overlay("Step %d / %d" % [sn, manifest.steps.size()], txt, LEGEND)
 
 
 func _apply_part(pn: String) -> void:
@@ -771,13 +772,13 @@ func _run_check() -> void:
 			errs.append("pick Pi_5 returned '%s'" % got)
 		# shell on, front view -> fabric band and face cover
 		_set_layer(true, "exterior")
-		got = await _pick_center("Base_Band", 0.0, 0.0, 1.0)
-		if got != "Base_Band":
-			errs.append("pick Base_Band returned '%s'" % got)
+		got = await _pick_center("Base_Shell_Band", PI / 2.0, 0.0, 1.0)  # side: front has the grille
+		if got != "Base_Shell_Band":
+			errs.append("pick Base_Shell_Band returned '%s'" % got)
 		got = await _pick_center("Display_Panel", 0.0, 0.0, 1.0)
-		if got != "Face_Cover":
+		if got != "Display_Panel":
 			errs.append("pick face returned '%s'" % got)
-		if selected != "Face_Cover" or not info.text.contains("Face_Cover"):
+		if selected != "Display_Panel" or not info.text.contains("Display_Panel"):
 			errs.append("selection label not updated")
 		# 4. finish switch applies the palette from finishes.json
 		for k in fin.finishes:
@@ -807,24 +808,24 @@ func _run_check() -> void:
 
 
 func _check_new(errs: Array[String]) -> void:
-	# a. alternates hidden by default, LED diffusers visible; blank cover swaps them
+	# a. default = blank ring visible, optional LED ring hidden; the LED toggle swaps them
 	_set_layer(true, "exterior")
-	for n in ["LED_Blank_Front", "LED_Blank_Back"]:
-		if parts[n].visible:
-			errs.append(n + " visible by default")
-	for n in LED_RING:
+	for n in BLANKS:
 		if not parts[n].visible:
 			errs.append(n + " hidden by default")
-	_set_blank(true)
-	for n in ["LED_Blank_Front", "LED_Blank_Back"]:
-		if not parts[n].visible:
-			errs.append(n + " not shown with blank cover")
 	for n in LED_RING:
 		if parts[n].visible:
-			errs.append(n + " still visible with blank cover")
+			errs.append(n + " visible by default")
+	_set_blank(true)
+	for n in BLANKS:
+		if parts[n].visible:
+			errs.append(n + " still visible with the LED ring fitted")
+	for n in ["LED_Diffuser_Front", "LED_Diffuser_Back"]:
+		if not parts[n].visible:
+			errs.append(n + " not shown with the LED ring fitted")
 	_set_blank(false)
-	if parts["LED_Blank_Front"].visible or not parts["LED_Diffuser_Front"].visible:
-		errs.append("blank cover toggle off did not restore")
+	if not parts["LED_Blank_Front"].visible or parts["LED_Diffuser_Front"].visible:
+		errs.append("LED toggle off did not restore the blank ring")
 	# b. explode
 	var c0: Vector3 = _part_aabb("Head_Back").get_center()
 	var e: Array = manifest.parts["Head_Back"].explode_mm
@@ -836,8 +837,9 @@ func _check_new(errs: Array[String]) -> void:
 	# c. picking in exploded state
 	await get_tree().physics_frame
 	await get_tree().physics_frame
-	for n in ["Mic_Cap", "Head_Back"]:
-		var got: String = await _pick_center(n, 0.55, 0.3, 1.2)
+	for pk in [["Head_Front", PI / 2.0], ["Head_Back", PI]]:
+		var n: String = pk[0]
+		var got: String = await _pick_center(n, pk[1], 0.3, 1.2)
 		if got != n:
 			errs.append("exploded pick %s returned '%s'" % [n, got])
 	_set_explode(false, 0.0)

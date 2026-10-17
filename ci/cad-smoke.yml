@@ -1,11 +1,51 @@
-name: cad-smoke
+name: jarves-checks
+# Parked copy: GitHub only runs it from .github/workflows/ (needs a token with the `workflow` scope, Issue #2).
+# Same checks as the local pipeline; each job exits non-zero on failure. Not yet run on a GitHub runner.
 on: [push, pull_request]
 jobs:
-  smoke:
+  cad:
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
-      - name: Install FreeCAD (headless)
-        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends freecad-python3
-      - name: CAD smoke test
-        run: QT_QPA_PLATFORM=offscreen freecadcmd cad/smoke_test.py
+      - name: Install FreeCAD 1.1.4 (same version as local; apt only ships 0.21)
+        run: |
+          curl -sSLO https://github.com/FreeCAD/FreeCAD/releases/download/1.1.4/FreeCAD_1.1.4-Linux-x86_64-py311.AppImage
+          curl -sSL https://github.com/FreeCAD/FreeCAD/releases/download/1.1.4/FreeCAD_1.1.4-Linux-x86_64-py311.AppImage-SHA256.txt | sha256sum -c -
+          chmod +x FreeCAD_*.AppImage && ./FreeCAD_*.AppImage --appimage-extract > /dev/null
+          echo "FC=$PWD/squashfs-root/usr/bin/freecadcmd" >> "$GITHUB_ENV"
+      - name: CAD smoke test (blockout + Pebble build, check_pebble, HeadRX regression)
+        run: QT_QPA_PLATFORM=offscreen "$FC" cad/smoke_test.py
+      - name: Pebble checks (fit, collisions, load path, Pi access, neck bore, bed size)
+        run: |
+          QT_QPA_PLATFORM=offscreen "$FC" cad/build_pebble.py
+          QT_QPA_PLATFORM=offscreen "$FC" cad/check_pebble.py | tee check.txt
+          grep -q "RESULT: PASS" check.txt
+      - name: Mesh export + mechanical estimates run cleanly
+        run: |
+          QT_QPA_PLATFORM=offscreen "$FC" cad/export_meshes.py
+          QT_QPA_PLATFORM=offscreen "$FC" cad/mech_estimates.py | tee mech.txt
+          grep -q "MECH DONE" mech.txt
+  blender:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Blender 5.2.2
+        run: |
+          curl -sSL https://download.blender.org/release/Blender5.2/blender-5.2.2-linux-x64.tar.xz | tar xJ
+          sudo apt-get update && sudo apt-get install -y --no-install-recommends libxi6 libxkbcommon0 libxrender1 libsm6 libgl1 libegl1
+      - name: Blender smoke (committed .glb vs CAD manifest, materials, Godot asset sync, renders present)
+        run: ./blender-5.2.2-linux-x64/blender -b --python blender/smoke_blender.py
+  godot:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Godot 4.7.2
+        run: |
+          curl -sSLO https://github.com/godotengine/godot/releases/download/4.7.2-stable/Godot_v4.7.2-stable_linux.x86_64.zip
+          unzip -q Godot_*.zip && echo "GODOT=$PWD/Godot_v4.7.2-stable_linux.x86_64" >> "$GITHUB_ENV"
+      - name: Import assets
+        run: '"$GODOT" --headless --path godot --import'
+      - name: Viewer check (parts, picking, exploded view, LED/blank swap)
+        run: |
+          "$GODOT" --headless --path godot --quit-after 3000 -- --check | tee viewer.txt
+          grep -q "CHECK RESULT: PASS" viewer.txt

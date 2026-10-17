@@ -1,5 +1,5 @@
 @echo off
-rem Export the LEGO-style assembly instruction images into docs\assembly\img\ (step_01..14, overview_labeled, parts\<pid>_<Name>).
+rem Export the LEGO-style assembly instruction images into docs\assembly\img\ (step_01..07, overview_labeled, parts\<pid>_<Name>).
 rem Set GODOT_EXE (windowed) / GODOT_CON (console) to override the winget-installed Godot 4.7.x.
 setlocal
 if "%GODOT_EXE%"=="" for /d %%D in ("%LOCALAPPDATA%\Microsoft\WinGet\Packages\GodotEngine.GodotEngine_*") do set "GODOT_EXE=%%D\Godot_v4.7.2-stable_win64.exe"
@@ -13,7 +13,7 @@ set "RES=--resolution 1280x900"
 set "EXPECT=%TEMP%\jarves_expected.txt"
 if exist "%EXPECT%" del "%EXPECT%"
 
-for %%S in (01 02 03 04 05 06 07 08 09 10 11 12 13 14) do (
+for %%S in (01 02 03 04 05 06 07) do (
   call :shot "%OUT%\step_%%S.png" "--step=%%S"
 )
 call :shot "%OUT%\overview_labeled.png" "--overview"

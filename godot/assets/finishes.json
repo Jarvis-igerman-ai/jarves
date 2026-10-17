@@ -1,22 +1,20 @@
 {
- "note": "PROVISIONAL colour/finish treatments for visual review only - not product decisions (Issue #4). Used by blender/build_scene.py and the Godot viewer. User prefers finish C (17 Oct 2026; visual preference only).",
+ "note": "PROVISIONAL colour/finish treatments for visual review only - not product decisions. User prefers C. Navy band and dark face ring are colour-change zones of the same prints (R5b).",
  "roles": {
   "Head_Front": "shell",
   "Head_Back": "shell",
+  "Head_Face_Zone": "face_ring",
   "Base_Shell": "base",
+  "Base_Shell_Band": "band",
   "Base_Door": "shell2",
-  "Mic_Cap": "accent",
-  "Neck_Collar": "accent",
-  "Face_Cover": "glass",
-  "Base_Band": "band",
-  "Face_Eye_L": "face",
-  "Face_Eye_R": "face",
-  "Face_Smile": "face",
-  "Neck_Flange_High": "accent",
+  "Neck_Column": "accent",
+  "LED_Blank_Front": "base",
+  "LED_Blank_Back": "base",
   "LED_Diffuser_Front": "led",
   "LED_Diffuser_Back": "led",
-  "LED_Blank_Front": "base",
-  "LED_Blank_Back": "base"
+  "Face_Eye_L": "face",
+  "Face_Eye_R": "face",
+  "Face_Smile": "face"
  },
  "finishes": {
   "A_Pearl_Graphite": {
@@ -50,16 +48,6 @@
     "rough": 0.28,
     "metal": 0.85,
     "coat": 0.0
-   },
-   "glass": {
-    "color": [
-     0.006,
-     0.008,
-     0.014
-    ],
-    "rough": 0.08,
-    "metal": 0.0,
-    "coat": 1.0
    },
    "band": {
     "color": [
@@ -113,6 +101,16 @@
     ],
     "strength": 6,
     "alpha": 0.85
+   },
+   "face_ring": {
+    "color": [
+     0.02,
+     0.022,
+     0.03
+    ],
+    "rough": 0.25,
+    "metal": 0.0,
+    "coat": 0.6
    }
   },
   "B_Warm_Sand": {
@@ -146,16 +144,6 @@
     "rough": 0.3,
     "metal": 1.0,
     "coat": 0.0
-   },
-   "glass": {
-    "color": [
-     0.01,
-     0.008,
-     0.006
-    ],
-    "rough": 0.1,
-    "metal": 0.0,
-    "coat": 0.9
    },
    "band": {
     "color": [
@@ -209,10 +197,20 @@
     ],
     "strength": 5,
     "alpha": 0.85
+   },
+   "face_ring": {
+    "color": [
+     0.02,
+     0.022,
+     0.03
+    ],
+    "rough": 0.25,
+    "metal": 0.0,
+    "coat": 0.6
    }
   },
   "C_Sky_Pastel": {
-   "label": "C - White head / sky-blue base / navy fabric",
+   "label": "C - White head / sky-blue base / navy band",
    "shell": {
     "color": [
      0.95,
@@ -242,16 +240,6 @@
     "rough": 0.4,
     "metal": 0.0,
     "coat": 0.3
-   },
-   "glass": {
-    "color": [
-     0.005,
-     0.008,
-     0.016
-    ],
-    "rough": 0.08,
-    "metal": 0.0,
-    "coat": 1.0
    },
    "band": {
     "color": [
@@ -305,6 +293,16 @@
     ],
     "strength": 5,
     "alpha": 0.85
+   },
+   "face_ring": {
+    "color": [
+     0.02,
+     0.022,
+     0.03
+    ],
+    "rough": 0.25,
+    "metal": 0.0,
+    "coat": 0.6
    }
   }
  },

@@ -42,7 +42,7 @@ for f in ("JARVIS.glb", "JARVIS_manifest.json", "finishes.json"):
     src = os.path.join(b, f)
     if not filecmp.cmp(src, os.path.join(root, "godot", "assets", f), shallow=False):
         errors.append(f"godot/assets/{f} out of sync with blender/{f}")
-for f in ["JARVIS.blend"] + [f"renders/pebble_r3_{v}.png" for v in ("hero_C", "rear_C", "exploded_3q",
+for f in ["JARVIS.blend"] + [f"renders/pebble_r5_{v}.png" for v in ("hero_C", "rear_C", "exploded_3q",
                                                                       "exploded_side")]:
     if not os.path.exists(os.path.join(b, f)):
         errors.append(f"missing blender/{f}")

@@ -18,9 +18,9 @@
  "margin_mm": 16.0,
  "parts": [
   {
-   "pid": "A01",
-   "name": "LED_Blank_Back",
-   "file": "print/stl/options/A01_LED_Blank_Back.stl",
+   "pid": "A02",
+   "name": "LED_Diffuser_Back",
+   "file": "print/stl/options/A02_LED_Diffuser_Back.stl",
    "dims_mm": [
     200.8,
     100.2,
@@ -34,8 +34,8 @@
    "grams": 10.99,
    "support_grams": 0.0,
    "hours": 0.98,
-   "colour": "sky blue",
-   "note": "opaque blank cover half - replaces diffuser if LED removed",
+   "colour": "natural/translucent PETG",
+   "note": "optional translucent half when LEDs are fitted",
    "optional": true,
    "split": false,
    "error": null,
@@ -45,9 +45,9 @@
    ]
   },
   {
-   "pid": "A02",
-   "name": "LED_Blank_Front",
-   "file": "print/stl/options/A02_LED_Blank_Front.stl",
+   "pid": "A03",
+   "name": "LED_Diffuser_Front",
+   "file": "print/stl/options/A03_LED_Diffuser_Front.stl",
    "dims_mm": [
     200.8,
     100.2,
@@ -61,8 +61,8 @@
    "grams": 10.99,
    "support_grams": 0.0,
    "hours": 0.99,
-   "colour": "sky blue",
-   "note": "opaque blank cover half - replaces diffuser if LED removed",
+   "colour": "natural/translucent PETG",
+   "note": "optional translucent half when LEDs are fitted",
    "optional": true,
    "split": false,
    "error": null,
@@ -78,168 +78,60 @@
    "dims_mm": [
     207.9,
     207.8,
-    4.0
+    11.0
    ],
    "fit": {
     "250x210 (Prusa MK3/MK4 class; 3D Lab Haifa stated max 250x210x220)": false,
     "220x220 (Ender-3 class)": false,
     "256x256 (Bambu P1S/X1C/A1 class)": true
    },
-   "grams": 96.15,
+   "grams": 99.71,
    "support_grams": 0.3,
-   "hours": 7.57,
-   "colour": "any (internal)",
-   "note": "print flat, bottom down; rubber feet + ballast pocket (feet not modelled)",
+   "hours": 8.05,
+   "colour": "any colour (internal)",
+   "note": "TRAY: print flat; Pi bosses (M2.5 self-tap), intake slots, 4 cover screws",
    "optional": false,
    "split": false,
    "error": null,
    "price_ils": [
-    132,
-    179
+    136,
+    184
    ]
   },
   {
    "pid": "P02",
-   "name": "Speaker_Pod_L",
-   "file": "print/stl/P02_Speaker_Pod_L.stl",
+   "name": "Neck_Column",
+   "file": "print/stl/P02_Neck_Column.stl",
    "dims_mm": [
-    67.5,
-    60.6,
-    42.0
+    90.0,
+    90.0,
+    49.7
    ],
    "fit": {
     "250x210 (Prusa MK3/MK4 class; 3D Lab Haifa stated max 250x210x220)": true,
     "220x220 (Ender-3 class)": true,
     "256x256 (Bambu P1S/X1C/A1 class)": true
    },
-   "grams": 29.53,
-   "support_grams": 0.0,
-   "hours": 2.17,
-   "colour": "any (internal)",
-   "note": "sealed pod; print open side up; 2x M3 to floor",
+   "grams": 59.57,
+   "support_grams": 1.2,
+   "hours": 4.99,
+   "colour": "sky blue",
+   "note": "print flange-down; 45 deg saddle flare under the head (3 hidden nut pockets); 3x M3x12 up into cover bosses",
    "optional": false,
    "split": false,
    "error": null,
    "price_ils": [
-    30,
-    60
+    98,
+    133
    ]
   },
   {
    "pid": "P03",
-   "name": "Speaker_Pod_R",
-   "file": "print/stl/P03_Speaker_Pod_R.stl",
-   "dims_mm": [
-    67.5,
-    60.6,
-    42.0
-   ],
-   "fit": {
-    "250x210 (Prusa MK3/MK4 class; 3D Lab Haifa stated max 250x210x220)": true,
-    "220x220 (Ender-3 class)": true,
-    "256x256 (Bambu P1S/X1C/A1 class)": true
-   },
-   "grams": 29.55,
-   "support_grams": 0.0,
-   "hours": 2.17,
-   "colour": "any (internal)",
-   "note": "sealed pod; print open side up; 2x M3 to floor",
-   "optional": false,
-   "split": false,
-   "error": null,
-   "price_ils": [
-    30,
-    60
-   ]
-  },
-  {
-   "pid": "P04",
-   "name": "Bridge_Plate",
-   "file": "print/stl/P04_Bridge_Plate.stl",
-   "dims_mm": [
-    140.0,
-    100.0,
-    4.0
-   ],
-   "fit": {
-    "250x210 (Prusa MK3/MK4 class; 3D Lab Haifa stated max 250x210x220)": true,
-    "220x220 (Ender-3 class)": true,
-    "256x256 (Bambu P1S/X1C/A1 class)": true
-   },
-   "grams": 41.37,
-   "support_grams": 0.0,
-   "hours": 3.32,
-   "colour": "any (internal)",
-   "note": "print flat; 4x M3 to standoffs + 4x M3 bolt/nut to lower flange",
-   "optional": false,
-   "split": false,
-   "error": null,
-   "price_ils": [
-    30,
-    60
-   ]
-  },
-  {
-   "pid": "P05",
-   "name": "Neck_Flange_Low",
-   "file": "print/stl/P05_Neck_Flange_Low.stl",
-   "dims_mm": [
-    70.0,
-    69.9,
-    6.0
-   ],
-   "fit": {
-    "250x210 (Prusa MK3/MK4 class; 3D Lab Haifa stated max 250x210x220)": true,
-    "220x220 (Ender-3 class)": true,
-    "256x256 (Bambu P1S/X1C/A1 class)": true
-   },
-   "grams": 10.73,
-   "support_grams": 0.0,
-   "hours": 0.95,
-   "colour": "any (internal)",
-   "note": "print flat; keyed bore fits tube flat; 4x M3 bolt + nut through bridge",
-   "optional": false,
-   "split": false,
-   "error": null,
-   "price_ils": [
-    30,
-    60
-   ]
-  },
-  {
-   "pid": "P06",
-   "name": "Base_Door",
-   "file": "print/stl/P06_Base_Door.stl",
-   "dims_mm": [
-    110.0,
-    60.0,
-    23.4
-   ],
-   "fit": {
-    "250x210 (Prusa MK3/MK4 class; 3D Lab Haifa stated max 250x210x220)": true,
-    "220x220 (Ender-3 class)": true,
-    "256x256 (Bambu P1S/X1C/A1 class)": true
-   },
-   "grams": 28.68,
-   "support_grams": 7.9,
-   "hours": 3.14,
-   "colour": "sky blue",
-   "note": "print flat (outer face down); 2 captive M3 thumb screws + hooks",
-   "optional": false,
-   "split": false,
-   "error": null,
-   "price_ils": [
-    30,
-    60
-   ]
-  },
-  {
-   "pid": "P07",
    "name": "Base_Shell",
-   "file": "print/stl/P07_Base_Shell.stl",
+   "file": "print/stl/P03_Base_Shell.stl",
    "dims_mm": [
     210.0,
-    210.0,
+    209.7,
     81.0
    ],
    "fit": {
@@ -247,23 +139,23 @@
     "220x220 (Ender-3 class)": false,
     "256x256 (Bambu P1S/X1C/A1 class)": true
    },
-   "grams": 290.99,
-   "support_grams": 42.3,
-   "hours": 25.62,
-   "colour": "sky blue",
-   "note": "print top-down; 3 floor bosses with M3 inserts; split F/B for 250x210 beds",
+   "grams": 301.31,
+   "support_grams": 38.6,
+   "hours": 26.33,
+   "colour": "sky blue + navy band (2 filament changes, printed top-down)",
+   "note": "COVER: print top-down; ribbed 6 mm top, 3 nut bosses; 4x M3x12 from underside",
    "optional": false,
    "split": false,
    "error": null,
    "price_ils": [
-    326,
-    480
+    338,
+    497
    ]
   },
   {
-   "pid": "P08",
-   "name": "LED_Diffuser_Back",
-   "file": "print/stl/P08_LED_Diffuser_Back.stl",
+   "pid": "P04",
+   "name": "LED_Blank_Back",
+   "file": "print/stl/P04_LED_Blank_Back.stl",
    "dims_mm": [
     200.8,
     100.2,
@@ -277,8 +169,8 @@
    "grams": 10.99,
    "support_grams": 0.0,
    "hours": 0.98,
-   "colour": "natural / translucent",
-   "note": "translucent PETG half ring; snap-in from outside (UNVERIFIED)",
+   "colour": "sky blue",
+   "note": "blank ring half, snap-in (default)",
    "optional": false,
    "split": false,
    "error": null,
@@ -288,9 +180,9 @@
    ]
   },
   {
-   "pid": "P09",
-   "name": "LED_Diffuser_Front",
-   "file": "print/stl/P09_LED_Diffuser_Front.stl",
+   "pid": "P05",
+   "name": "LED_Blank_Front",
+   "file": "print/stl/P05_LED_Blank_Front.stl",
    "dims_mm": [
     200.8,
     100.2,
@@ -304,35 +196,8 @@
    "grams": 10.99,
    "support_grams": 0.0,
    "hours": 0.99,
-   "colour": "natural / translucent",
-   "note": "translucent PETG half ring; snap-in from outside (UNVERIFIED)",
-   "optional": false,
-   "split": false,
-   "error": null,
-   "price_ils": [
-    30,
-    60
-   ]
-  },
-  {
-   "pid": "P10",
-   "name": "Neck_Collar",
-   "file": "print/stl/P10_Neck_Collar.stl",
-   "dims_mm": [
-    64.0,
-    64.0,
-    17.0
-   ],
-   "fit": {
-    "250x210 (Prusa MK3/MK4 class; 3D Lab Haifa stated max 250x210x220)": true,
-    "220x220 (Ender-3 class)": true,
-    "256x256 (Bambu P1S/X1C/A1 class)": true
-   },
-   "grams": 17.42,
-   "support_grams": 0.0,
-   "hours": 1.37,
    "colour": "sky blue",
-   "note": "cosmetic sleeve, slides over tube",
+   "note": "blank ring half, snap-in (default)",
    "optional": false,
    "split": false,
    "error": null,
@@ -342,24 +207,24 @@
    ]
   },
   {
-   "pid": "P11",
-   "name": "Neck_Flange_High",
-   "file": "print/stl/P11_Neck_Flange_High.stl",
+   "pid": "P06",
+   "name": "Display_Retainer",
+   "file": "print/stl/P06_Display_Retainer.stl",
    "dims_mm": [
-    90.0,
-    90.0,
-    11.0
+    165.0,
+    149.0,
+    4.0
    ],
    "fit": {
     "250x210 (Prusa MK3/MK4 class; 3D Lab Haifa stated max 250x210x220)": true,
     "220x220 (Ender-3 class)": true,
     "256x256 (Bambu P1S/X1C/A1 class)": true
    },
-   "grams": 23.03,
+   "grams": 15.96,
    "support_grams": 0.0,
-   "hours": 1.95,
-   "colour": "sky blue",
-   "note": "print flat (saddle up); keyed bore, 2 pins, 4 M3 heat-set inserts",
+   "hours": 1.46,
+   "colour": "any colour (internal)",
+   "note": "print flat; 4x M3x10 self-tap into face-wall bosses",
    "optional": false,
    "split": false,
    "error": null,
@@ -369,132 +234,78 @@
    ]
   },
   {
-   "pid": "P12",
-   "name": "Head_Back",
-   "file": "print/stl/P12_Head_Back.stl",
-   "dims_mm": [
-    214.8,
-    184.0,
-    107.0
-   ],
-   "fit": {
-    "250x210 (Prusa MK3/MK4 class; 3D Lab Haifa stated max 250x210x220)": true,
-    "220x220 (Ender-3 class)": false,
-    "256x256 (Bambu P1S/X1C/A1 class)": true
-   },
-   "grams": 281.04,
-   "support_grams": 48.5,
-   "hours": 23.98,
-   "colour": "white",
-   "note": "rear dome; print open side down; 4 seam inserts; 2x M3 into flange",
-   "optional": false,
-   "split": false,
-   "error": null,
-   "price_ils": [
-    315,
-    464
-   ]
-  },
-  {
-   "pid": "P13",
-   "name": "Head_Spine",
-   "file": "print/stl/P13_Head_Spine.stl",
-   "dims_mm": [
-    60.0,
-    130.0,
-    6.0
-   ],
-   "fit": {
-    "250x210 (Prusa MK3/MK4 class; 3D Lab Haifa stated max 250x210x220)": true,
-    "220x220 (Ender-3 class)": true,
-    "256x256 (Bambu P1S/X1C/A1 class)": true
-   },
-   "grams": 27.49,
-   "support_grams": 0.0,
-   "hours": 2.11,
-   "colour": "any (internal)",
-   "note": "print flat; carries display / camera / mic mounts",
-   "optional": false,
-   "split": false,
-   "error": null,
-   "price_ils": [
-    30,
-    60
-   ]
-  },
-  {
-   "pid": "P14",
-   "name": "Head_Spine_Foot",
-   "file": "print/stl/P14_Head_Spine_Foot.stl",
-   "dims_mm": [
-    24.0,
-    10.5,
-    6.0
-   ],
-   "fit": {
-    "250x210 (Prusa MK3/MK4 class; 3D Lab Haifa stated max 250x210x220)": true,
-    "220x220 (Ender-3 class)": true,
-    "256x256 (Bambu P1S/X1C/A1 class)": true
-   },
-   "grams": 1.19,
-   "support_grams": 0.0,
-   "hours": 0.11,
-   "colour": "any (internal)",
-   "note": "2x M3 through head floor",
-   "optional": false,
-   "split": false,
-   "error": null,
-   "price_ils": [
-    30,
-    60
-   ]
-  },
-  {
-   "pid": "P15",
+   "pid": "P07",
    "name": "Head_Front",
-   "file": "print/stl/P15_Head_Front.stl",
+   "file": "print/stl/P07_Head_Front.stl",
    "dims_mm": [
     215.0,
     184.0,
-    24.6
+    69.6
    ],
    "fit": {
     "250x210 (Prusa MK3/MK4 class; 3D Lab Haifa stated max 250x210x220)": true,
     "220x220 (Ender-3 class)": false,
     "256x256 (Bambu P1S/X1C/A1 class)": true
    },
-   "grams": 60.94,
-   "support_grams": 1.0,
-   "hours": 5.37,
-   "colour": "white",
-   "note": "face bezel; print face-down; 4x M3x12 into rear-dome inserts; 2x M3 into flange",
+   "grams": 211.38,
+   "support_grams": 8.5,
+   "hours": 17.87,
+   "colour": "white + dark face ring (filament change after the face layers, printed face-down)",
+   "note": "HEAD BODY: print face-down; seat ring, 3 seat holes, retainer + mic bosses, lid nuts",
    "optional": false,
    "split": false,
    "error": null,
    "price_ils": [
-    99,
-    135
+    240,
+    300
    ]
   },
   {
-   "pid": "P16",
-   "name": "Mic_Cap",
-   "file": "print/stl/P16_Mic_Cap.stl",
+   "pid": "P08",
+   "name": "Head_Back",
+   "file": "print/stl/P08_Head_Back.stl",
    "dims_mm": [
-    74.0,
-    74.0,
-    3.0
+    192.4,
+    174.5,
+    69.0
    ],
    "fit": {
     "250x210 (Prusa MK3/MK4 class; 3D Lab Haifa stated max 250x210x220)": true,
     "220x220 (Ender-3 class)": true,
     "256x256 (Bambu P1S/X1C/A1 class)": true
    },
-   "grams": 11.68,
-   "support_grams": 0.0,
-   "hours": 0.96,
+   "grams": 183.46,
+   "support_grams": 48.0,
+   "hours": 16.73,
+   "colour": "white",
+   "note": "SERVICE LID: print open side down; 2 hooks + 2x M3x16 into body nuts",
+   "optional": false,
+   "split": false,
+   "error": null,
+   "price_ils": [
+    214,
+    290
+   ]
+  },
+  {
+   "pid": "P09",
+   "name": "Base_Door",
+   "file": "print/stl/P09_Base_Door.stl",
+   "dims_mm": [
+    110.0,
+    66.0,
+    23.4
+   ],
+   "fit": {
+    "250x210 (Prusa MK3/MK4 class; 3D Lab Haifa stated max 250x210x220)": true,
+    "220x220 (Ender-3 class)": true,
+    "256x256 (Bambu P1S/X1C/A1 class)": true
+   },
+   "grams": 31.86,
+   "support_grams": 8.8,
+   "hours": 3.43,
    "colour": "sky blue",
-   "note": "print flat; port holes aligned to chosen mic board",
+   "note": "rear door: 2 hooks + 1x M3; vents; PSU cable notch",
    "optional": false,
    "split": false,
    "error": null,
@@ -504,9 +315,9 @@
    ]
   },
   {
-   "pid": "P07f",
+   "pid": "P03f",
    "name": "Base_Shell (front half)",
-   "file": "print/stl/split/P07f_Base_Shell_front.stl",
+   "file": "print/stl/split/P03f_Base_Shell_front.stl",
    "dims_mm": [
     210.0,
     105.0,
@@ -517,26 +328,26 @@
     "220x220 (Ender-3 class)": false,
     "256x256 (Bambu P1S/X1C/A1 class)": true
    },
-   "grams": 161.23,
-   "support_grams": 24.4,
-   "hours": 14.56,
+   "grams": 165.79,
+   "support_grams": 21.4,
+   "hours": 14.72,
    "colour": "sky blue",
    "note": "SPLIT fallback - needs 2 splice plates + 4 M3 screws per seam (not modelled)",
    "optional": false,
    "split": true,
    "error": null,
    "price_ils": [
-    193,
-    261
+    198,
+    267
    ]
   },
   {
-   "pid": "P07b",
+   "pid": "P03b",
    "name": "Base_Shell (back half)",
-   "file": "print/stl/split/P07b_Base_Shell_back.stl",
+   "file": "print/stl/split/P03b_Base_Shell_back.stl",
    "dims_mm": [
     210.0,
-    105.0,
+    104.7,
     81.0
    ],
    "fit": {
@@ -544,17 +355,17 @@
     "220x220 (Ender-3 class)": false,
     "256x256 (Bambu P1S/X1C/A1 class)": true
    },
-   "grams": 130.54,
-   "support_grams": 16.8,
-   "hours": 11.6,
+   "grams": 136.98,
+   "support_grams": 17.6,
+   "hours": 12.35,
    "colour": "sky blue",
    "note": "SPLIT fallback - needs 2 splice plates + 4 M3 screws per seam (not modelled)",
    "optional": false,
    "split": true,
    "error": null,
    "price_ils": [
-    165,
-    223
+    171,
+    231
    ]
   },
   {
@@ -564,24 +375,24 @@
    "dims_mm": [
     207.9,
     103.9,
-    4.0
+    11.0
    ],
    "fit": {
     "250x210 (Prusa MK3/MK4 class; 3D Lab Haifa stated max 250x210x220)": true,
     "220x220 (Ender-3 class)": false,
     "256x256 (Bambu P1S/X1C/A1 class)": true
    },
-   "grams": 49.02,
+   "grams": 51.66,
    "support_grams": 0.1,
-   "hours": 3.89,
+   "hours": 4.05,
    "colour": "any (internal)",
    "note": "SPLIT fallback - needs 2 splice plates + 4 M3 screws per seam (not modelled)",
    "optional": false,
    "split": true,
    "error": null,
    "price_ils": [
-    88,
-    120
+    91,
+    123
    ]
   },
   {
@@ -591,23 +402,23 @@
    "dims_mm": [
     207.9,
     103.9,
-    4.0
+    10.0
    ],
    "fit": {
     "250x210 (Prusa MK3/MK4 class; 3D Lab Haifa stated max 250x210x220)": true,
     "220x220 (Ender-3 class)": false,
     "256x256 (Bambu P1S/X1C/A1 class)": true
    },
-   "grams": 49.05,
+   "grams": 49.73,
    "support_grams": 0.1,
-   "hours": 3.92,
+   "hours": 4.13,
    "colour": "any (internal)",
    "note": "SPLIT fallback - needs 2 splice plates + 4 M3 screws per seam (not modelled)",
    "optional": false,
    "split": true,
    "error": null,
    "price_ils": [
-    88,
+    89,
     120
    ]
   }

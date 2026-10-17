@@ -1,9 +1,57 @@
-# Current handoff — 17 October 2026
+# Current handoff — 18 October 2026
 
-## Active milestone — S1.T03R5b APPROVED: CAD implementation + bounded verification (not started yet)
+## S1.T03R5b — CAD implementation DELIVERED, waiting for user review
 
-- **User approval (17 Oct 2026):** [Issue #4 approval and detailed acceptance criteria](https://github.com/igalgerman/JARVIS/issues/4#issuecomment-6240553020). The next implementing Claude/Codex agent may proceed to R5b CAD/slicer/real renders, targeted sources+geometry+assembly+power/cable checks and independent review when consequential. This does NOT mean work has already begun.
-- **No purchases, printing or vendor outreach** until separate user approval. Deliver a readable assembly guide, real project views and verified-vs-unverified risks; then stop for review.
+- **Read first:**
+  - [S1_T03R5B_IMPLEMENTATION_REVIEW.md](reviews/S1_T03R5B_IMPLEMENTATION_REVIEW.md): what was built, a status for each check, joints, electronics and power, the 5 neck cables, printing, BOM, costs and risks.
+  - [assembly/ASSEMBLY_GUIDE.md](assembly/ASSEMBLY_GUIDE.md): what you receive, what to buy, tools, 7 illustrated steps, service.
+  - [PEBBLE_PARTS_INVENTORY.md](reviews/PEBBLE_PARTS_INVENTORY.md): auto-generated part IDs, 26 screws + 13 nuts.
+- **Results:**
+  - 9 printed parts.
+  - 925 g PETG, 80.8 h, ₪1,146–1,644 print estimate.
+  - Electronics ≈ ₪1,790–2,090; total ≈ ₪2,970–3,790. **Not a quote.**
+  - Joint SF ≥ 3.0 at a 20 N push (assumed 150 N per nut).
+  - Tip-over 34°.
+- **Images:**
+  - `blender/renders/pebble_r5_*.png` (4)
+  - `godot/previews/r5/*.png` (12)
+  - `docs/assembly/img/` (overview, steps 1–7, parts)
+- **Checks (all PASS):**
+  - `cad\smoke_test.py` (incl. the HeadRX regression, fixed by making the saddle clearance follow Params)
+  - `cad\check_pebble.py`
+  - `cad\mech_estimates.py`
+  - `blender\smoke_blender.py` (28 parts, 0.00 mm)
+  - `godot\check_viewer.cmd`
+  - slicer: 15 jobs
+- **Rebuild:**
+  1. `freecadcmd cad\build_pebble.py`
+  2. `freecadcmd cad\export_meshes.py`
+  3. `freecadcmd print\build_print_package.py`
+  4. `freecadcmd cad\mech_estimates.py`
+  5. `blender -b --python blender\build_scene.py`
+  6. `godot\export_previews.cmd`
+  7. `godot\export_instructions.cmd`
+- **CI (user request):** `ci/cad-smoke.yml` now has 3 jobs.
+  - cad: FreeCAD 1.1.4 AppImage with SHA check; smoke, check_pebble, export, mech.
+  - blender: smoke.
+  - godot: import + viewer check.
+  - **Not active, never run on a runner.** To enable, run `gh auth refresh -h github.com -s workflow` and move the file to `.github/workflows/` (Issue #2).
+- **Not done / unverified:**
+  - Camera bosses, door hooks and the speaker strap are not modelled.
+  - Speaker lead plug and length.
+  - Heat, acoustics, and nut and snap strength (test print recommended).
+- **No purchase, printing or supplier contact.**
+
+## Questions for the user (R5b review — answer these first)
+1. Does the R5b result look right (renders + `godot\run_viewer.cmd`), with the exterior unchanged?
+2. **Base print:** find a shop with a 256 mm printer for the one-piece Ø210 base (recommended), or accept the split base (seam + 2 joints)?
+3. May the next step be a **₪50–100 test print** (neck + nut-pocket coupon + snap ring segment) once a shop is chosen? Needs your separate approval.
+4. **Speaker lead:** accept a ready-made extension cable if the Seeed lead is too short (decided after the plug type is confirmed)?
+5. Grant the GitHub `workflow` scope so CI can be switched on?
+
+## Previous: R5b approval (17 Oct 2026)
+
+- **User approval (17 Oct 2026):** [Issue #4 approval and detailed acceptance criteria](https://github.com/igalgerman/JARVIS/issues/4#issuecomment-6240553020).
 
 
 - [S1_T03R5_ARCHITECTURE_REVIEW.md](reviews/S1_T03R5_ARCHITECTURE_REVIEW.md): the chassis table is removed (the base cover top is made structural); 7 printed parts + 2 snap blanks, about 25 screws + 12 nuts, 2 screw types; the mic board's own 5 W amp drives 1 plug-in speaker (connector type unconfirmed); microSD reachable through the rear door.

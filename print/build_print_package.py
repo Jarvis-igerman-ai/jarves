@@ -29,12 +29,16 @@ while True:
     except Exception:
         break
     parts[n] = dict(cat=sh.get(f"F{i}"), kind=sh.get(f"G{i}"), step=int(float(sh.get(f"H{i}"))),
-                    note=str(sh.get(f"J{i}")), pid=sh.get(f"K{i}"), rot=str(sh.get(f"L{i}")))
+                    note=str(sh.get(f"J{i}")), pid=sh.get(f"K{i}"), rot=str(sh.get(f"L{i}")),
+                    group=sh.get(f"M{i}"))
     i += 1
 fin = json.load(open(os.path.join(root, "blender", "finishes.json")))
-ROLE_COLOUR_C = {"shell": "white", "base": "sky blue", "shell2": "sky blue", "accent": "sky blue",
-                 "led": "natural / translucent", "glass": "-", "band": "-"}
-BLANKS = {"LED_Blank_Front", "LED_Blank_Back"}   # printed alternates (only if the LED ring is not fitted)
+COLOUR_C = {  # finish C per print (colour change = one filament swap at a layer height, single extruder)
+    "Head_Front": "white + dark face ring (filament change after the face layers, printed face-down)",
+    "Head_Back": "white", "Neck_Column": "sky blue", "Base_Door": "sky blue", "LED_Blank_Front": "sky blue",
+    "LED_Blank_Back": "sky blue", "Base_Shell": "sky blue + navy band (2 filament changes, printed top-down)",
+    "LED_Diffuser_Front": "natural/translucent PETG", "LED_Diffuser_Back": "natural/translucent PETG"}
+OPTIONAL = {"LED_Diffuser_Front", "LED_Diffuser_Back"}   # only when the optional LED ring is fitted
 
 # bed classes (usable X x Y x Z mm) and fit margin: 5 mm brim each side + 3 mm safety each side
 BEDS = {"250x210 (Prusa MK3/MK4 class; 3D Lab Haifa stated max 250x210x220)": (250, 210, 220),
@@ -112,20 +116,33 @@ def tier_price(grams):
 
 
 jobs = []
-for n, p in sorted(parts.items(), key=lambda kv: kv[1]["pid"]):
-    if p["kind"] == "printed" or n in BLANKS:
-        role = fin["roles"].get(n)
-        colour = ROLE_COLOUR_C.get(fin["roles"].get(n), "any (internal)") if role else "any (internal)"
-        s = oriented(doc.getObject(n).Shape, p["rot"])
-        sub = "options" if n in BLANKS else ""
-        path = os.path.join(pdir, "stl", sub, f"{p['pid']}_{n}.stl")
-        write_stl(s, path)
-        jobs.append(dict(pid=p["pid"], name=n, file=os.path.relpath(path, root).replace("\\", "/"), shape=s,
-                         colour=colour, note=p["note"], optional=n in BLANKS, split=False))
+import Part
+import shutil
+shutil.rmtree(os.path.join(pdir, "stl"), ignore_errors=True)       # no stale STLs from older designs
+for sub in ("stl", "stl/options", "stl/split"):
+    os.makedirs(os.path.join(pdir, sub), exist_ok=True)
+leaders = sorted((n for n, p in parts.items() if (p["kind"] == "printed" or n in OPTIONAL) and p["group"] == n),
+                 key=lambda n: parts[n]["pid"])
+for n in leaders:                                   # one STL per physical print: colour zones are fused back in
+    p = parts[n]
+    members = [m for m, q in parts.items() if q["group"] == n]
+    shp = doc.getObject(members[0]).Shape
+    for m in members[1:]:
+        shp = shp.fuse(doc.getObject(m).Shape)
+    s = oriented(shp.removeSplitter() if len(members) > 1 else shp, p["rot"])
+    sub = "options" if n in OPTIONAL else ""
+    path = os.path.join(pdir, "stl", sub, f"{p['pid']}_{n}.stl")
+    write_stl(s, path)
+    jobs.append(dict(pid=p["pid"], name=n, file=os.path.relpath(path, root).replace("\\", "/"), shape=s,
+                     colour=COLOUR_C.get(n, "any colour (internal)"), note=p["note"], optional=n in OPTIONAL,
+                     split=False))
 # split fallback for printers whose bed cannot take the Ø210 base parts (front/back halves at y = 0)
 for n in ("Base_Shell", "Base_Floor"):
     p = parts[n]
     full = doc.getObject(n).Shape
+    for m, q in parts.items():
+        if q["group"] == n and m != n:
+            full = full.fuse(doc.getObject(m).Shape)
     for half, y0 in (("front", -300), ("back", 0)):
         cutter = App.ActiveDocument.addObject("Part::Box", "_tmpcut")
         cutter.Length, cutter.Width, cutter.Height = 600, 300, 600

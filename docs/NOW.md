@@ -1,6 +1,8 @@
 # NOW — S1.T03R4: Assembly & print-shop readiness (Issue #4 follow-up)
 
-**Status:** **R5b APPROVED for CAD implementation + focused no-purchase feasibility checks** by user, 17 Oct 2026 ([authorization in Issue #4](https://github.com/igalgerman/JARVIS/issues/4#issuecomment-6240553020)). Design basis: `docs/reviews/S1_T03R5_ARCHITECTURE_REVIEW.md` (Pi in base; structural ribbed base cover; no separate chassis). **No purchase, supplier contact or physical print authorized.**
+**Status (18 Oct 2026):** R5b CAD implementation **delivered — STOPPED for user review**. See [S1_T03R5B_IMPLEMENTATION_REVIEW.md](reviews/S1_T03R5B_IMPLEMENTATION_REVIEW.md) and [assembly/ASSEMBLY_GUIDE.md](assembly/ASSEMBLY_GUIDE.md). Next work waits for the answers in HANDOFF.
+
+**Previous status:** **R5b APPROVED for CAD implementation + focused no-purchase feasibility checks** by user, 17 Oct 2026 ([authorization in Issue #4](https://github.com/igalgerman/JARVIS/issues/4#issuecomment-6240553020)). Design basis: `docs/reviews/S1_T03R5_ARCHITECTURE_REVIEW.md` (Pi in base; structural ribbed base cover; no separate chassis). **No purchase, supplier contact or physical print authorized.**
 
 ## Goal
 JARVES must be realistically printable by an ordinary Haifa/Krayot 3D-printing service, affordable, and practical for a beginner to assemble at home (see `docs/PROJECT_PRINCIPLES.md` → "Local print-shop feasibility").
