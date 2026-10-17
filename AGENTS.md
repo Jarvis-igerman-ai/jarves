@@ -25,6 +25,11 @@
 - The same *face scene/state machine* should be reused on the future device if Godot on Raspberry Pi passes performance tests. Blender/FreeCAD never run on-device.
 - Do not implement later stages. `docs/NOW.md` alone grants current scope.
 
+## Closeout housekeeping
+- On milestone completion, record acceptance evidence and linked commit/PR in the Issue; close completed Issues, leave blocked/unfinished ones open with reason. Avoid duplicate Issues and check stale open work periodically.
+- Review changes for tracked caches, duplicate generated files, temporary artifacts and scratch outputs; ignore or clean **only clearly safe** disposable artifacts in scope. Never do sweeping deletion of source, essential renders or historical data without approval. Update README links if authoritative file locations change.
+- Spoken-distance expectations are undecided; earlier 3–5 m is only an exploratory research scenario, not a fixed requirement.
+
 ## End-of-task response: 6 lines max
 Outcome; changed files; one command to reproduce; check actually run/result; blockers/UNVERIFIED; proposed next task (NOT started).
 Update `docs/HANDOFF.md` succinctly, then stop for user approval.
