@@ -1,0 +1,448 @@
+{
+ "model": "cad/JARVIS_pebble.FCStd",
+ "units": "mm",
+ "frame": "Z up, front -Y",
+ "exterior_bbox_mm": [
+  -107.66,
+  -106.57,
+  0.43,
+  107.67,
+  112.12,
+  292.17
+ ],
+ "parts": {
+  "Base_Band": {
+   "category": "exterior",
+   "bbox_mm": [
+    -106.56,
+    -106.57,
+    17.93,
+    106.57,
+    86.67,
+    62.07
+   ]
+  },
+  "Base_Door": {
+   "category": "exterior",
+   "bbox_mm": [
+    -55.28,
+    81.48,
+    11.72,
+    55.28,
+    105.28,
+    72.16
+   ]
+  },
+  "Base_Floor": {
+   "category": "structure",
+   "bbox_mm": [
+    -104.01,
+    -104.01,
+    -0.08,
+    104.01,
+    104.01,
+    4.08
+   ]
+  },
+  "Base_LightRing": {
+   "category": "exterior",
+   "bbox_mm": [
+    -95.57,
+    -95.57,
+    0.43,
+    95.57,
+    95.57,
+    3.57
+   ]
+  },
+  "Base_Shell": {
+   "category": "exterior",
+   "bbox_mm": [
+    -105.11,
+    -105.11,
+    3.92,
+    105.11,
+    105.11,
+    85.11
+   ]
+  },
+  "Bridge_Plate": {
+   "category": "structure",
+   "bbox_mm": [
+    -70.0,
+    -35.0,
+    56.0,
+    70.0,
+    65.0,
+    60.0
+   ]
+  },
+  "Bridge_Post_FL": {
+   "category": "structure",
+   "bbox_mm": [
+    -73.0,
+    -33.0,
+    4.0,
+    -63.0,
+    -23.0,
+    56.0
+   ]
+  },
+  "Bridge_Post_FR": {
+   "category": "structure",
+   "bbox_mm": [
+    63.0,
+    -33.0,
+    4.0,
+    73.0,
+    -23.0,
+    56.0
+   ]
+  },
+  "Bridge_Post_RL": {
+   "category": "structure",
+   "bbox_mm": [
+    -73.0,
+    50.0,
+    4.0,
+    -63.0,
+    60.0,
+    56.0
+   ]
+  },
+  "Bridge_Post_RR": {
+   "category": "structure",
+   "bbox_mm": [
+    63.0,
+    50.0,
+    4.0,
+    73.0,
+    60.0,
+    56.0
+   ]
+  },
+  "Camera_Module": {
+   "category": "component",
+   "bbox_mm": [
+    -12.5,
+    -16.57,
+    263.5,
+    12.5,
+    -4.17,
+    287.5
+   ]
+  },
+  "Display_Driver": {
+   "category": "component",
+   "bbox_mm": [
+    -44.5,
+    -5.07,
+    157.5,
+    41.0,
+    1.48,
+    215.5
+   ]
+  },
+  "Display_Panel": {
+   "category": "component",
+   "bbox_mm": [
+    -75.05,
+    -16.62,
+    112.45,
+    75.05,
+    -5.02,
+    262.55
+   ]
+  },
+  "Face_Cover": {
+   "category": "exterior",
+   "bbox_mm": [
+    -92.06,
+    -19.63,
+    110.94,
+    92.06,
+    -16.51,
+    289.06
+   ]
+  },
+  "Head_Back": {
+   "category": "exterior",
+   "bbox_mm": [
+    -107.53,
+    4.83,
+    107.83,
+    107.53,
+    112.12,
+    292.16
+   ]
+  },
+  "Head_Front": {
+   "category": "exterior",
+   "bbox_mm": [
+    -107.66,
+    -19.74,
+    107.83,
+    107.67,
+    5.17,
+    292.17
+   ]
+  },
+  "Head_Spine": {
+   "category": "structure",
+   "bbox_mm": [
+    -30.0,
+    27.0,
+    121.5,
+    30.0,
+    33.0,
+    251.5
+   ]
+  },
+  "Head_Spine_Foot": {
+   "category": "structure",
+   "bbox_mm": [
+    -12.0,
+    22.0,
+    111.0,
+    12.0,
+    28.0,
+    121.5
+   ]
+  },
+  "Keepout_Display_Cable": {
+   "category": "reserved",
+   "bbox_mm": [
+    -44.5,
+    1.48,
+    157.5,
+    41.0,
+    26.48,
+    215.5
+   ]
+  },
+  "Mic_Board": {
+   "category": "component",
+   "bbox_mm": [
+    -43.0,
+    -3.0,
+    268.5,
+    43.0,
+    37.0,
+    280.5
+   ]
+  },
+  "Mic_Cap": {
+   "category": "exterior",
+   "bbox_mm": [
+    -37.03,
+    -37.03,
+    288.97,
+    37.03,
+    37.03,
+    292.02
+   ]
+  },
+  "Neck_Collar": {
+   "category": "exterior",
+   "bbox_mm": [
+    -32.02,
+    -32.02,
+    84.98,
+    32.02,
+    32.02,
+    102.02
+   ]
+  },
+  "Neck_Flange_High": {
+   "category": "structure",
+   "bbox_mm": [
+    -45.03,
+    -45.03,
+    101.97,
+    45.03,
+    45.03,
+    108.03
+   ]
+  },
+  "Neck_Flange_Low": {
+   "category": "structure",
+   "bbox_mm": [
+    -35.02,
+    -35.02,
+    59.98,
+    35.02,
+    35.02,
+    66.02
+   ]
+  },
+  "Neck_Tube": {
+   "category": "structure",
+   "bbox_mm": [
+    -20.01,
+    -20.01,
+    59.99,
+    20.01,
+    20.01,
+    108.01
+   ]
+  },
+  "Pi_5": {
+   "category": "component",
+   "bbox_mm": [
+    -28.0,
+    -12.0,
+    10.0,
+    28.0,
+    73.0,
+    31.0
+   ]
+  },
+  "Pi_Standoff_1": {
+   "category": "structure",
+   "bbox_mm": [
+    -27.0,
+    -11.0,
+    4.0,
+    -22.0,
+    -6.0,
+    10.0
+   ]
+  },
+  "Pi_Standoff_2": {
+   "category": "structure",
+   "bbox_mm": [
+    22.0,
+    -11.0,
+    4.0,
+    27.0,
+    -6.0,
+    10.0
+   ]
+  },
+  "Pi_Standoff_3": {
+   "category": "structure",
+   "bbox_mm": [
+    -27.0,
+    47.0,
+    4.0,
+    -22.0,
+    52.0,
+    10.0
+   ]
+  },
+  "Pi_Standoff_4": {
+   "category": "structure",
+   "bbox_mm": [
+    22.0,
+    47.0,
+    4.0,
+    27.0,
+    52.0,
+    10.0
+   ]
+  },
+  "Reserve_M2_HAT": {
+   "category": "reserved",
+   "bbox_mm": [
+    -28.0,
+    -12.0,
+    31.0,
+    28.0,
+    73.0,
+    52.0
+   ]
+  },
+  "Reserve_SSD_USB": {
+   "category": "reserved",
+   "bbox_mm": [
+    -62.0,
+    -2.0,
+    4.0,
+    -34.0,
+    73.0,
+    16.0
+   ]
+  },
+  "Speaker_Driver_L": {
+   "category": "component",
+   "bbox_mm": [
+    -76.13,
+    -93.81,
+    7.98,
+    -32.27,
+    -61.01,
+    58.02
+   ]
+  },
+  "Speaker_Driver_R": {
+   "category": "component",
+   "bbox_mm": [
+    32.27,
+    -93.81,
+    7.98,
+    76.13,
+    -61.01,
+    58.02
+   ]
+  },
+  "Speaker_Pod_L": {
+   "category": "component",
+   "bbox_mm": [
+    -77.34,
+    -92.57,
+    12.0,
+    -6.4,
+    -27.03,
+    54.0
+   ]
+  },
+  "Speaker_Pod_R": {
+   "category": "component",
+   "bbox_mm": [
+    6.4,
+    -92.57,
+    12.0,
+    77.34,
+    -27.03,
+    54.0
+   ]
+  },
+  "Face_Eye_L": {
+   "category": "exterior",
+   "bbox_mm": [
+    -47.0,
+    -20.57,
+    181.5,
+    -19.0,
+    -19.37,
+    221.5
+   ],
+   "visual_only": true
+  },
+  "Face_Eye_R": {
+   "category": "exterior",
+   "bbox_mm": [
+    19.0,
+    -20.57,
+    181.5,
+    47.0,
+    -19.37,
+    221.5
+   ],
+   "visual_only": true
+  },
+  "Face_Smile": {
+   "category": "exterior",
+   "bbox_mm": [
+    -18.4,
+    -23.17,
+    149.1,
+    18.4,
+    -18.37,
+    169.3
+   ],
+   "visual_only": true
+  }
+ },
+ "blender": "5.2.2 LTS"
+}

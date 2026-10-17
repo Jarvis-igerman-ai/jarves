@@ -1,7 +1,8 @@
 # JARVIS CAD smoke test (fast, headless, one process). Exits non-zero on any failure.
 # Run: freecadcmd cad/smoke_test.py   (Windows: "C:\...\FreeCAD 1.1\bin\freecadcmd.exe" cad\smoke_test.py)
-# Covers: generation, recompute/validity, geometric checks, one parameter-change regression on a temp copy.
-# Never touches cad/JARVIS_blockout.FCStd.
+# Covers blockout (S1.T01) and Pebble A (S1.T03R2): generation, validity, geometric checks, one parameter
+# regression each on a temp copy.
+# Never touches the committed .FCStd files.
 import os
 import sys
 import shutil
@@ -62,6 +63,43 @@ def regression():  # Width 200 -> 220 must widen body, move speakers, and keep t
 
 run("geometric checks", geometry)
 run("parameter-change regression (Width 220)", regression)
+
+# ---- Pebble A (S1.T03R2) ----
+pebble = os.path.join(tmp, "pebble.FCStd")
+os.environ["JARVIS_PEBBLE_OUT"] = pebble
+plib = {"__name__": "check_pebble_lib"}
+exec(compile(open(os.path.join(here, "check_pebble.py")).read(), "check_pebble.py", "exec"), plib)
+
+
+def pebble_generate():
+    exec(compile(open(os.path.join(here, "build_pebble.py")).read(), "build_pebble.py", "exec"),
+         {"__name__": "build_pebble"})
+    assert os.path.getsize(pebble) > 1000, "pebble FCStd not written"
+
+
+def pebble_geometry():
+    fails, report, _ = plib["check"](App.openDocument(pebble))
+    print("\n".join("     " + r for r in report if not r.startswith("print part")))
+    assert not fails, "; ".join(fails)
+
+
+def pebble_regression():  # HeadRX 107.5 -> 112 must widen the head shells and keep every check passing
+    copy = os.path.join(tmp, "pebble_copy.FCStd")
+    shutil.copy(pebble, copy)
+    d = App.openDocument(copy)
+    w0 = d.Head_Back.Shape.optimalBoundingBox().XLength
+    row = next(i for i in range(1, 40) if d.Params.get(f"A{i}") == "HeadRX")
+    d.Params.set(f"B{row}", "=112 mm")
+    d.recompute()
+    w1 = d.Head_Back.Shape.optimalBoundingBox().XLength
+    assert abs(w1 - w0 - 9) < 0.5, f"head width {w0:.1f}->{w1:.1f}"
+    fails, _, _ = plib["check"](d)
+    assert not fails, "; ".join(fails)
+
+
+run("pebble generate + recompute valid", pebble_generate)
+run("pebble checks (containment, collisions, load path, print size)", pebble_geometry)
+run("pebble parameter regression (HeadRX 112)", pebble_regression)
 shutil.rmtree(tmp, ignore_errors=True)
 print("SMOKE RESULT:", "FAIL " + "; ".join(errors) if errors else "PASS")
 sys.stdout.flush()

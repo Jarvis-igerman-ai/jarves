@@ -1,6 +1,6 @@
 # NOW — S1.T03R2: JARVES Pebble A visual redesign
 
-**Status:** APPROVED FOR IMPLEMENTATION (17 Oct 2026). GitHub [Issue #4](https://github.com/igalgerman/JARVIS/issues/4) is the only current implementation milestone. One implementing agent.
+**Status:** REVIEW CANDIDATE DELIVERED 2026-10-17 (`docs/reviews/S1_T03R2_PEBBLE_VISUAL.md`), awaiting user visual feedback. Was: APPROVED FOR IMPLEMENTATION (17 Oct 2026). GitHub [Issue #4](https://github.com/igalgerman/JARVIS/issues/4) is the only current implementation milestone. One implementing agent.
 
 ## Mission
 Deliver a **runnable improved Godot appearance review** using a more beautiful, cute, friendly and impressive Pebble A design, while preserving plausible physical buildability. The user must be able to interact with the revised model and provide numerous visual feedback rounds.

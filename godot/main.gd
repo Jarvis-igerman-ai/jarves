@@ -1,61 +1,84 @@
 extends Node3D
-# JARVIS S1.T03 review viewer. Loads the CAD-derived GLB (metres, part names = CAD names).
+# JARVES review viewer (S1.T03R2 Pebble A). Loads the CAD-derived GLB (metres, part names = CAD names) and
+# assets/JARVIS_manifest.json (part -> category + CAD bbox in mm) + assets/finishes.json (PROVISIONAL finishes).
 # Left-drag orbit | right/middle-drag pan | wheel zoom | click selects a part.
 # CLI (after "--"):  --check  (print PASS/FAIL, exit code)  |  --shot=<png> [--hide-shell] [--select=<Part>]
+#                    [--show-reserved] [--finish=<key>] [--view=front|side|rear|three_quarter]
 
 const GLB := "res://assets/JARVIS.glb"
-const EXTERIOR := ["Head_Front", "Head_Back", "Body_Shell", "Door_Rear", "Screen", "Camera", "Mic_Top",
-	"Speaker_L", "Speaker_R", "Face_Eye_L", "Face_Eye_R", "Face_Mouth"]
-const INTERNAL := ["Display_Module", "Camera_Module", "Mic_Array", "Pi_5", "Pi_Tray", "Speaker_Driver_L",
-	"Speaker_Driver_R", "Reserve_USB_Hub"]
-const ENVELOPE_PARTS := ["Head_Front", "Head_Back", "Body_Shell", "Door_Rear", "Screen"]
-const HOME := {"yaw": 0.6, "pitch": 0.2, "dist": 0.85, "target": Vector3(0, 0.14, 0)}
+const MANIFEST := "res://assets/JARVIS_manifest.json"
+const FINISHES := "res://assets/finishes.json"
+const LAYERS := {"exterior": "Outer shell", "structure": "Structure (neck / spine / chassis)",
+	"component": "Components (envelopes)", "reserved": "Reserved volumes (SSD, cable)"}
+const HOME := {"yaw": 0.55, "pitch": 0.22, "dist": 1.05, "target": Vector3(0, 0.15, 0)}
+const VIEWS := {"front": [0.0, 0.08], "side": [PI / 2.0, 0.08], "rear": [PI, 0.08], "three_quarter": [0.55, 0.22]}
 
 var parts := {}      # name -> MeshInstance3D
 var bodies := {}     # name -> StaticBody3D (click collision)
+var cat := {}        # name -> category
+var manifest := {}
+var fin := {}
+var finish_key := ""
+var shown := {"exterior": true, "structure": true, "component": true, "reserved": false}
+var checks := {}
+var finish_btn: OptionButton
 var cam: Camera3D
 var yaw: float = HOME.yaw
 var pitch: float = HOME.pitch
 var dist: float = HOME.dist
 var target: Vector3 = HOME.target
 var selected := ""
-var show_shell := true
-var show_internal := true
 var info: Label
-var chk_shell: CheckButton
-var chk_int: CheckButton
 var press_pos := Vector2.ZERO
 var dragging := false
 var hl_mat: StandardMaterial3D
 
 
 func _ready() -> void:
+	manifest = _json(MANIFEST)
+	fin = _json(FINISHES)
 	_build_environment()
 	var model := _load_model()
-	if model == null:
-		push_error("Could not load " + GLB)
+	if model == null or manifest.is_empty() or fin.is_empty():
+		push_error("Could not load GLB / manifest / finishes")
 		get_tree().quit(2)
 		return
 	add_child(model)
 	_collect(model)
 	for n in parts:
+		cat[n] = manifest.parts[n].category if manifest.parts.has(n) else "exterior"
 		parts[n].create_trimesh_collision()
 		bodies[n] = parts[n].get_child(parts[n].get_child_count() - 1)
 	_build_ui()
+	_apply_finish(fin.default)
 	_apply_visibility()
 	_update_camera()
 	var args := OS.get_cmdline_user_args()
 	for a in args:
 		if a == "--hide-shell":
-			_set_shell(false)
+			_set_layer(false, "exterior")
+		elif a == "--show-reserved":
+			_set_layer(true, "reserved")
 		elif a.begins_with("--select="):
 			_select(a.substr(9))
+		elif a.begins_with("--finish="):
+			_apply_finish(a.substr(9))
+		elif a.begins_with("--view="):
+			_set_view(a.substr(7))
 	if "--check" in args:
 		_run_check()
 	else:
 		for a in args:
 			if a.begins_with("--shot="):
 				_take_shot(a.substr(7))
+
+
+func _json(path: String) -> Dictionary:
+	var f := FileAccess.open(path, FileAccess.READ)
+	if f == null:
+		return {}
+	var d = JSON.parse_string(f.get_as_text())
+	return d if d is Dictionary else {}
 
 
 func _load_model() -> Node3D:
@@ -76,38 +99,44 @@ func _collect(n: Node) -> void:
 func _build_environment() -> void:
 	var env := Environment.new()
 	env.background_mode = Environment.BG_COLOR
-	env.background_color = Color(0.16, 0.18, 0.22)
+	env.background_color = Color(0.17, 0.18, 0.21)
 	env.ambient_light_source = Environment.AMBIENT_SOURCE_COLOR
-	env.ambient_light_color = Color(0.75, 0.8, 0.9)
-	env.ambient_light_energy = 0.55
+	env.ambient_light_color = Color(0.78, 0.8, 0.86)
+	env.ambient_light_energy = 0.5
 	env.tonemap_mode = Environment.TONE_MAPPER_FILMIC
+	env.glow_enabled = true
+	env.glow_intensity = 0.4
 	var we := WorldEnvironment.new()
 	we.environment = env
 	add_child(we)
 	var key := DirectionalLight3D.new()
-	key.rotation_degrees = Vector3(-45, 35, 0)
-	key.light_energy = 0.9
+	key.rotation_degrees = Vector3(-42, 30, 0)
+	key.light_energy = 0.95
 	key.shadow_enabled = true
 	key.directional_shadow_max_distance = 3.0
 	add_child(key)
 	var fill := DirectionalLight3D.new()
-	fill.rotation_degrees = Vector3(-20, -140, 0)
+	fill.rotation_degrees = Vector3(-15, -130, 0)
 	fill.light_energy = 0.35
 	add_child(fill)
+	var rim := DirectionalLight3D.new()
+	rim.rotation_degrees = Vector3(-30, 180, 0)
+	rim.light_energy = 0.4
+	add_child(rim)
 	var ground := MeshInstance3D.new()
 	var plane := PlaneMesh.new()
 	plane.size = Vector2(3, 3)
 	ground.mesh = plane
 	var gm := StandardMaterial3D.new()
-	gm.albedo_color = Color(0.3, 0.31, 0.34)
-	gm.roughness = 0.9
+	gm.albedo_color = Color(0.33, 0.33, 0.35)
+	gm.roughness = 0.85
 	ground.material_override = gm
 	ground.position.y = -0.0005
 	add_child(ground)
 	cam = Camera3D.new()
 	cam.near = 0.01
 	cam.far = 20.0
-	cam.fov = 40.0
+	cam.fov = 35.0
 	add_child(cam)
 	hl_mat = StandardMaterial3D.new()
 	hl_mat.albedo_color = Color(1.0, 0.7, 0.1, 0.45)
@@ -126,64 +155,88 @@ func _build_ui() -> void:
 	var box := VBoxContainer.new()
 	panel.add_child(box)
 	var title := Label.new()
-	title.text = "JARVIS review viewer (S1.T03)\nCAD dimensions PROVISIONAL - not a fit drawing"
+	title.text = "JARVES Pebble A - visual review (S1.T03R2)\nShapes from CAD; sizes & finishes PROVISIONAL"
 	box.add_child(title)
-	chk_shell = CheckButton.new()
-	chk_shell.text = "Outer shell"
-	chk_shell.button_pressed = true
-	chk_shell.toggled.connect(_set_shell)
-	box.add_child(chk_shell)
-	chk_int = CheckButton.new()
-	chk_int.text = "Internal components"
-	chk_int.button_pressed = true
-	chk_int.toggled.connect(_set_internal)
-	box.add_child(chk_int)
-	var reset := Button.new()
-	reset.text = "Reset view"
-	reset.pressed.connect(_reset_view)
-	box.add_child(reset)
+	for c in LAYERS:
+		var chk := CheckButton.new()
+		chk.text = LAYERS[c]
+		chk.button_pressed = shown[c]
+		chk.toggled.connect(_set_layer.bind(c))
+		box.add_child(chk)
+		checks[c] = chk
+	finish_btn = OptionButton.new()
+	for k in fin.finishes:
+		finish_btn.add_item(fin.finishes[k].label)
+		finish_btn.set_item_metadata(finish_btn.item_count - 1, k)
+	finish_btn.item_selected.connect(func(i): _apply_finish(finish_btn.get_item_metadata(i)))
+	box.add_child(finish_btn)
+	var views := HBoxContainer.new()
+	for v in VIEWS:
+		var b := Button.new()
+		b.text = v.replace("_", " ").capitalize()
+		b.pressed.connect(_set_view.bind(v))
+		views.add_child(b)
+	box.add_child(views)
 	info = Label.new()
 	info.text = "Click a part to identify it."
-	info.custom_minimum_size = Vector2(300, 60)
+	info.custom_minimum_size = Vector2(330, 60)
 	box.add_child(info)
 	var help := Label.new()
 	help.text = "Left-drag: orbit   Right-drag: pan   Wheel: zoom"
 	box.add_child(help)
 
 
-func _set_shell(on: bool) -> void:
-	show_shell = on
-	if chk_shell and chk_shell.button_pressed != on:
-		chk_shell.set_pressed_no_signal(on)
+func _set_layer(on: bool, c: String) -> void:
+	shown[c] = on
+	if checks.has(c) and checks[c].button_pressed != on:
+		checks[c].set_pressed_no_signal(on)
 	_apply_visibility()
-
-
-func _set_internal(on: bool) -> void:
-	show_internal = on
-	if chk_int and chk_int.button_pressed != on:
-		chk_int.set_pressed_no_signal(on)
-	_apply_visibility()
-
-
-func _is_visible_part(n: String) -> bool:
-	return (n in EXTERIOR and show_shell) or (n in INTERNAL and show_internal)
 
 
 func _apply_visibility() -> void:
 	for n in parts:
-		var vis := _is_visible_part(n)
+		var vis: bool = shown.get(cat[n], true)
 		parts[n].visible = vis
 		bodies[n].collision_layer = 1 if vis else 0
-	if selected != "" and not _is_visible_part(selected):
+	if selected != "" and not parts[selected].visible:
 		_select("")
 
 
-func _reset_view() -> void:
-	yaw = HOME.yaw
-	pitch = HOME.pitch
-	dist = HOME.dist
-	target = HOME.target
-	_update_camera()
+func _apply_finish(key: String) -> void:
+	if not fin.finishes.has(key):
+		push_error("unknown finish " + key)
+		return
+	finish_key = key
+	var f: Dictionary = fin.finishes[key]
+	for n in parts:
+		if not fin.roles.has(n):
+			continue
+		var s: Dictionary = f[fin.roles[n]]
+		var m := StandardMaterial3D.new()
+		m.albedo_color = Color(s.color[0], s.color[1], s.color[2])
+		m.roughness = s.get("rough", 0.5)
+		m.metallic = s.get("metal", 0.0)
+		if s.get("coat", 0.0) > 0.0:
+			m.clearcoat_enabled = true
+			m.clearcoat = s.coat
+		if s.has("emit"):
+			m.emission_enabled = true
+			m.emission = Color(s.emit[0], s.emit[1], s.emit[2])
+			m.emission_energy_multiplier = s.get("strength", 5) * 0.4
+		parts[n].material_override = m
+	if finish_btn:
+		for i in finish_btn.item_count:
+			if finish_btn.get_item_metadata(i) == key:
+				finish_btn.select(i)
+
+
+func _set_view(v: String) -> void:
+	if VIEWS.has(v):
+		yaw = VIEWS[v][0]
+		pitch = VIEWS[v][1]
+		dist = HOME.dist
+		target = HOME.target
+		_update_camera()
 
 
 func _update_camera() -> void:
@@ -197,6 +250,13 @@ func _part_aabb(n: String) -> AABB:
 	return mi.global_transform * mi.get_aabb()
 
 
+func _cad_aabb(n: String) -> AABB:  # manifest bbox (CAD mm, Z up, front -Y) -> Godot metres (Y up, front +Z)
+	var b: Array = manifest.parts[n].bbox_mm
+	var lo := Vector3(b[0], b[2], -b[4]) / 1000.0
+	var hi := Vector3(b[3], b[5], -b[1]) / 1000.0
+	return AABB(lo, hi - lo)
+
+
 func _select(n: String) -> void:
 	if selected != "" and parts.has(selected):
 		parts[selected].material_overlay = null
@@ -208,8 +268,7 @@ func _select(n: String) -> void:
 		return
 	parts[n].material_overlay = hl_mat
 	var s := _part_aabb(n).size * 1000.0
-	info.text = "Part: %s  (%s)\nW %.1f x H %.1f x D %.1f mm (bbox, PROVISIONAL)" % [
-		n, "internal" if n in INTERNAL else "exterior", s.x, s.y, s.z]
+	info.text = "Part: %s  (%s)\nW %.1f x H %.1f x D %.1f mm (bbox, PROVISIONAL)" % [n, cat[n], s.x, s.y, s.z]
 
 
 func _pick(pos: Vector2) -> String:
@@ -250,60 +309,72 @@ func _unhandled_input(e: InputEvent) -> void:
 
 
 func _take_shot(path: String) -> void:
-	for i in 8:
+	for i in 10:
 		await get_tree().process_frame
 	get_viewport().get_texture().get_image().save_png(path)
 	print("screenshot ", path)
 	get_tree().quit(0)
 
 
+func _pick_center(n: String, y: float, p: float, d: float) -> String:
+	yaw = y
+	pitch = p
+	dist = d
+	target = _part_aabb(n).get_center()
+	_update_camera()
+	await get_tree().physics_frame
+	return _pick(cam.unproject_position(_part_aabb(n).get_center()))
+
+
 func _run_check() -> void:
 	await get_tree().physics_frame
 	await get_tree().physics_frame
 	var errs: Array[String] = []
-	for n in EXTERIOR + INTERNAL:
+	# 1. every manifest part present; CAD mm -> Godot m bbox match per part (tessellation tolerance 1.5 mm)
+	var worst := 0.0
+	for n in manifest.parts:
 		if not parts.has(n):
 			errs.append("missing part " + n)
+			continue
+		var a := _part_aabb(n)
+		var b := _cad_aabb(n)
+		var dev := maxf((a.position - b.position).abs()[(a.position - b.position).abs().max_axis_index()],
+			(a.end - b.end).abs()[(a.end - b.end).abs().max_axis_index()])
+		worst = maxf(worst, dev)
+		if dev > 0.0015:
+			errs.append("%s bbox off by %.1f mm" % [n, dev * 1000.0])
+	print("parts: %d in GLB, %d in manifest; worst bbox deviation %.2f mm" % [parts.size(), manifest.parts.size(), worst * 1000.0])
 	if errs.is_empty():
-		# 1. CAD mm -> Godot m: shell envelope should be W200 x H280 x D160 mm (x, y, z in Godot axes)
-		var bb := _part_aabb(ENVELOPE_PARTS[0])
-		for n in ENVELOPE_PARTS:
-			bb = bb.merge(_part_aabb(n))
-		var want := Vector3(0.200, 0.280, 0.160)
-		print("envelope mm: ", bb.size * 1000.0)
-		var diff := (bb.size - want).abs()
-		if maxf(diff.x, maxf(diff.y, diff.z)) > 0.005:
-			errs.append("scale/envelope mismatch %s vs %s" % [bb.size, want])
-		# 2. toggles
-		_set_shell(false)
-		for n in EXTERIOR:
-			if parts[n].visible:
-				errs.append(n + " still visible with shell off")
-		for n in INTERNAL:
-			if not parts[n].visible:
-				errs.append(n + " hidden with internals on")
-		# 3. picking: side view (+X), shell off -> click Pi_5 centre returns Pi_5
-		yaw = PI / 2.0
-		pitch = 0.0
-		dist = 0.7
-		target = Vector3(0, 0.03, 0)
-		_update_camera()
-		await get_tree().physics_frame
-		var got := _pick(cam.unproject_position(_part_aabb("Pi_5").get_center()))
+		var ext: AABB = _part_aabb("Head_Back")
+		for n in parts:
+			if cat[n] == "exterior":
+				ext = ext.merge(_part_aabb(n))
+		print("exterior envelope mm (W x H x D): ", ext.size * 1000.0)
+		# 2. layer toggles
+		_set_layer(false, "exterior")
+		for n in parts:
+			if parts[n].visible != (cat[n] != "exterior" and shown[cat[n]]):
+				errs.append(n + " visibility wrong with shell off")
+		# 3. picking through the stack: shell off, side view -> Pi_5
+		var got: String = await _pick_center("Pi_5", PI / 2.0, 0.0, 0.8)
 		if got != "Pi_5":
 			errs.append("pick Pi_5 returned '%s'" % got)
-		# shell on, front view: click Speaker_L grille centre
-		_set_shell(true)
-		yaw = 0.0
-		pitch = 0.05
-		dist = 0.9
-		target = Vector3(0, 0.14, 0)
-		_update_camera()
-		await get_tree().physics_frame
-		got = _pick(cam.unproject_position(_part_aabb("Speaker_L").get_center()))
-		if got != "Speaker_L":
-			errs.append("pick Speaker_L returned '%s'" % got)
-		if selected != "Speaker_L" or not info.text.contains("Speaker_L"):
+		# shell on, front view -> fabric band and face cover
+		_set_layer(true, "exterior")
+		got = await _pick_center("Base_Band", 0.0, 0.0, 1.0)
+		if got != "Base_Band":
+			errs.append("pick Base_Band returned '%s'" % got)
+		got = await _pick_center("Display_Panel", 0.0, 0.0, 1.0)
+		if got != "Face_Cover":
+			errs.append("pick face returned '%s'" % got)
+		if selected != "Face_Cover" or not info.text.contains("Face_Cover"):
 			errs.append("selection label not updated")
-	print("CHECK RESULT: ", "FAIL " + "; ".join(errs) if errs else "PASS (%d parts)" % parts.size())
+		# 4. finish switch applies the palette from finishes.json
+		for k in fin.finishes:
+			_apply_finish(k)
+			var want: Array = fin.finishes[k][fin.roles["Base_Shell"]].color
+			var m: StandardMaterial3D = parts["Base_Shell"].material_override
+			if m == null or not m.albedo_color.is_equal_approx(Color(want[0], want[1], want[2])):
+				errs.append("finish %s not applied" % k)
+	print("CHECK RESULT: ", "FAIL " + "; ".join(errs) if errs else "PASS (%d parts, %d finishes)" % [parts.size(), fin.finishes.size()])
 	get_tree().quit(1 if errs else 0)

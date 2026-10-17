@@ -1,0 +1,306 @@
+{
+ "note": "PROVISIONAL colour/finish treatments for visual review only - not product decisions (Issue #4). Used by blender/build_scene.py and the Godot viewer.",
+ "roles": {
+  "Head_Front": "shell",
+  "Head_Back": "shell",
+  "Base_Shell": "base",
+  "Base_Door": "shell2",
+  "Mic_Cap": "accent",
+  "Neck_Collar": "accent",
+  "Face_Cover": "glass",
+  "Base_Band": "band",
+  "Base_LightRing": "light",
+  "Face_Eye_L": "face",
+  "Face_Eye_R": "face",
+  "Face_Smile": "face",
+  "Neck_Flange_High": "accent"
+ },
+ "finishes": {
+  "A_Pearl_Graphite": {
+   "label": "A - Pearl white / graphite fabric / silver",
+   "shell": {
+    "color": [
+     0.93,
+     0.92,
+     0.9
+    ],
+    "rough": 0.22,
+    "metal": 0.0,
+    "coat": 0.8
+   },
+   "shell2": {
+    "color": [
+     0.86,
+     0.85,
+     0.83
+    ],
+    "rough": 0.3,
+    "metal": 0.0,
+    "coat": 0.5
+   },
+   "accent": {
+    "color": [
+     0.78,
+     0.79,
+     0.81
+    ],
+    "rough": 0.28,
+    "metal": 0.85,
+    "coat": 0.0
+   },
+   "glass": {
+    "color": [
+     0.006,
+     0.008,
+     0.014
+    ],
+    "rough": 0.08,
+    "metal": 0.0,
+    "coat": 1.0
+   },
+   "band": {
+    "color": [
+     0.2,
+     0.2,
+     0.21
+    ],
+    "rough": 0.95,
+    "metal": 0.0,
+    "coat": 0.0
+   },
+   "light": {
+    "color": [
+     0.3,
+     0.7,
+     1.0
+    ],
+    "rough": 0.3,
+    "metal": 0.0,
+    "coat": 0.0,
+    "emit": [
+     0.35,
+     0.75,
+     1.0
+    ],
+    "strength": 6
+   },
+   "face": {
+    "color": [
+     0.25,
+     0.6,
+     0.95
+    ],
+    "rough": 0.3,
+    "metal": 0.0,
+    "coat": 0.0,
+    "emit": [
+     0.3,
+     0.72,
+     1.0
+    ],
+    "strength": 10
+   },
+   "base": {
+    "color": [
+     0.93,
+     0.92,
+     0.9
+    ],
+    "rough": 0.22,
+    "metal": 0.0,
+    "coat": 0.8
+   }
+  },
+  "B_Warm_Sand": {
+   "label": "B - Warm ivory / oat fabric / brass",
+   "shell": {
+    "color": [
+     0.9,
+     0.86,
+     0.79
+    ],
+    "rough": 0.5,
+    "metal": 0.0,
+    "coat": 0.2
+   },
+   "shell2": {
+    "color": [
+     0.84,
+     0.79,
+     0.72
+    ],
+    "rough": 0.5,
+    "metal": 0.0,
+    "coat": 0.2
+   },
+   "accent": {
+    "color": [
+     0.82,
+     0.64,
+     0.38
+    ],
+    "rough": 0.3,
+    "metal": 1.0,
+    "coat": 0.0
+   },
+   "glass": {
+    "color": [
+     0.01,
+     0.008,
+     0.006
+    ],
+    "rough": 0.1,
+    "metal": 0.0,
+    "coat": 0.9
+   },
+   "band": {
+    "color": [
+     0.58,
+     0.5,
+     0.4
+    ],
+    "rough": 0.95,
+    "metal": 0.0,
+    "coat": 0.0
+   },
+   "light": {
+    "color": [
+     1.0,
+     0.7,
+     0.35
+    ],
+    "rough": 0.3,
+    "metal": 0.0,
+    "coat": 0.0,
+    "emit": [
+     1.0,
+     0.65,
+     0.3
+    ],
+    "strength": 5
+   },
+   "face": {
+    "color": [
+     0.95,
+     0.65,
+     0.3
+    ],
+    "rough": 0.3,
+    "metal": 0.0,
+    "coat": 0.0,
+    "emit": [
+     1.0,
+     0.68,
+     0.35
+    ],
+    "strength": 10
+   },
+   "base": {
+    "color": [
+     0.9,
+     0.86,
+     0.79
+    ],
+    "rough": 0.5,
+    "metal": 0.0,
+    "coat": 0.2
+   }
+  },
+  "C_Sky_Pastel": {
+   "label": "C - White head / sky-blue base / navy fabric",
+   "shell": {
+    "color": [
+     0.95,
+     0.95,
+     0.95
+    ],
+    "rough": 0.25,
+    "metal": 0.0,
+    "coat": 0.7
+   },
+   "shell2": {
+    "color": [
+     0.55,
+     0.72,
+     0.92
+    ],
+    "rough": 0.45,
+    "metal": 0.0,
+    "coat": 0.3
+   },
+   "accent": {
+    "color": [
+     0.55,
+     0.72,
+     0.92
+    ],
+    "rough": 0.4,
+    "metal": 0.0,
+    "coat": 0.3
+   },
+   "glass": {
+    "color": [
+     0.005,
+     0.008,
+     0.016
+    ],
+    "rough": 0.08,
+    "metal": 0.0,
+    "coat": 1.0
+   },
+   "band": {
+    "color": [
+     0.13,
+     0.2,
+     0.36
+    ],
+    "rough": 0.95,
+    "metal": 0.0,
+    "coat": 0.0
+   },
+   "light": {
+    "color": [
+     0.4,
+     0.85,
+     1.0
+    ],
+    "rough": 0.3,
+    "metal": 0.0,
+    "coat": 0.0,
+    "emit": [
+     0.4,
+     0.85,
+     1.0
+    ],
+    "strength": 5
+   },
+   "face": {
+    "color": [
+     0.25,
+     0.75,
+     0.95
+    ],
+    "rough": 0.3,
+    "metal": 0.0,
+    "coat": 0.0,
+    "emit": [
+     0.35,
+     0.85,
+     1.0
+    ],
+    "strength": 10
+   },
+   "base": {
+    "color": [
+     0.55,
+     0.72,
+     0.92
+    ],
+    "rough": 0.4,
+    "metal": 0.0,
+    "coat": 0.4
+   }
+  }
+ },
+ "default": "A_Pearl_Graphite"
+}
