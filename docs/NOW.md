@@ -1,16 +1,23 @@
-# NOW — S1.T03R1: JARVES Pebble A component selection and engineering fit review
+# NOW — S1.T03R2: JARVES Pebble A visual redesign
 
-**Status:** REVIEW DELIVERED 2026-10-17 (`docs/reviews/S1_T03R1_ENGINEERING_REVIEW.md`), awaiting user decisions. Was: APPROVED for research/design ONLY. Owner: one agent. Parent: [Issue #3](https://github.com/igalgerman/JARVIS/issues/3).
+**Status:** APPROVED FOR IMPLEMENTATION (17 Oct 2026). GitHub [Issue #4](https://github.com/igalgerman/JARVIS/issues/4) is the only current implementation milestone. One implementing agent.
 
-## Confirmed brief
-Pebble **A** with premium, cute/friendly appearance, flat display face facet and flat top microphone cap. Slightly enlarged envelope is permissible only for compelling fit, stability or acoustics. Target room **35–50 m²**, talking distance **3–5 m**. No final screen or mic board selected, no hardware purchase authorized.
+## Mission
+Deliver a **runnable improved Godot appearance review** using a more beautiful, cute, friendly and impressive Pebble A design, while preserving plausible physical buildability. The user must be able to interact with the revised model and provide numerous visual feedback rounds.
 
-## Deliverables
-1. Compare **2–3 purchasable display SKUs** with actual manufacturer mechanical data, screen size, Raspberry Pi 5 interfaces, power, current price and supply risks. Recommend one; don't invent specifications.
-2. Compare **XVF3800** with at least 1–2 microphone array alternatives, assessing dimensional fit, AEC and playback reference loop, far-field beamforming, acoustic ports, Pi support, real availability and costs. Recommend one with explicit limitations.
-3. Proposed Pebble dimensions / section / head support, mount and cabling concept, rear access, vents and speakers; flag unverified tolerances, strength, thermals and actual component-fit questions.
-4. Bench validation plan in **35–50 m²** with **3–5 m** speaking, TV/music, playback leakage and barge-in. Distinguish theoretical feasibility from real tested performance.
-5. Short ranked decisions still needed, sources and handoff. Link commit to #3.
+## Approved work
+- Fix the disconnected CAD head via plausible structural neck/spine/chassis geometry in FreeCAD; mark physical loads/tolerances UNVERIFIED.
+- Shape Pebble A surfaces and serviceable body/rear shell in CAD; keep component envelopes flexible and local-sourcing constraints intact.
+- Refresh CAD-derived Blender assets and two or three provisional **finish/color treatments** with concise previews (not distinct full engineering builds).
+- Reimport to Godot, preserve existing interactive controls, provide quick Windows run instructions.
+- Use focused structural and downstream integration checks, verify files/commit, update docs/HANDOFF.md and stop for user visual review.
 
-## Scope guard
-**No full CAD → Blender → Godot redesign, purchases, AI/voice backend, or S1.T04.** Research and design decisions only. Work autonomously in this bounded milestone. Stop after evidence and recommendation, requesting user approval for chosen hardware before fit-dependent implementation. Follow AGENTS.md; update docs/HANDOFF.md with exact artifacts.
+## Important constraints
+- No final display/mic/speaker selection, procurement or mandated prices. Israel-first sourcing remains a research constraint, not a product lock.
+- No final printable manufacturing release, no AI/voice backend, no new motor/sensor functions.
+- Don't grow geometry unless justified by component fit, stability or maintainability. Reserve space for a future compact SSD and wiring without installing or oversized construction.
+- Don't delete existing repository assets, folders, historical docs or render sources in a cleanup sweep. Keep generated caches/temporary files out of commits and report cleanup suggestions separately.
+- Read AGENTS.md, this file, and docs/PROJECT_PRINCIPLES.md (targeted). Work autonomously within this issue. Do not start #2 (CI) or later stages.
+
+## Completion gate
+Link actual commit to #4, show multi-angle previews and a working viewer, list design/fit unknowns and targeted check evidence, then STOP for user's feedback.
