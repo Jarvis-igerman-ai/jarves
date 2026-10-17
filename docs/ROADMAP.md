@@ -7,7 +7,7 @@
 | 1. FreeCAD | enclosure, slots, internals, fit assumptions | parametric CAD and part exports | blockout done; geometry provisional |
 | 2. Blender | CAD-based materials, lighting and renderable model | blend, glb and renders | S1.T02 agent-reported DONE; review pending |
 | 3. Godot | interactive Windows digital twin | orbit/zoom, part inspection, shell/internal views, basic face placeholder | next; not started |
-| 4. Simulated behaviors | Python Core, assistant, state, voice and mocked devices | working simulated interactions | future |
+| 4. Simulated behaviors | **First: evidence-based evaluation of mature libraries ([Issue #5](https://github.com/igalgerman/JARVIS/issues/5)); then** Python Core, assistant, state, voice and mocked devices | reviewed dependency shortlist, small proofs, then working simulated interactions | future, NOT approved |
 | 5. Physical robot | verified dimensions, printed enclosure, Pi/peripheral integration | stationary hardware prototype | future |
 
 ## Iterative visual review and rework (important)
