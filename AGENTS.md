@@ -44,6 +44,15 @@
 - Review changes for tracked caches, duplicate generated files, temporary artifacts and scratch outputs; ignore or clean **only clearly safe** disposable artifacts in scope. Never do sweeping deletion of source, essential renders or historical data without approval. Update README links if authoritative file locations change.
 - Spoken-distance expectations are undecided; earlier 3–5 m is only an exploratory research scenario, not a fixed requirement.
 
+## Mandatory question handling at every handoff
+
+- At every milestone completion, review **every** question left by the implementing agent, including questions carried forward from previous handoffs. Never silently omit one or treat a proposed default as user approval.
+- Maintain a compact **Decision queue** in `docs/HANDOFF.md`: question, agent recommendation with one concrete rationale/tradeoff, status (**ANSWERED / USER DECISION REQUIRED / DEFERRED / BLOCKED**), and the recorded answer or exact next gate. Resolve technical/operational questions using available project evidence and existing user decisions; do not repeatedly ask questions already answered.
+- **User-owned choices** (appearance, personality, purchases, final component lock, budget and physical risk acceptance) require real user confirmation. Offer an informed provisional recommendation, but do not silently choose on their behalf. Questions that cannot be judged without trying the interactive viewer stay **USER DECISION REQUIRED**.
+- **Deferred questions** must state why they are not needed for the active milestone and which future stage will revisit them. A deferred question does **not** block unrelated work.
+- The orchestrating/review agent must explicitly address every handoff question before authorizing further implementation: answer from established evidence, get the minimum necessary user decision in one grouped review, or explicitly defer it. No unanswered question may disappear between Claude Code, Codex and ChatGPT.
+- Keep the user-facing closeout short: summarize only material pending decisions and link the complete queue rather than repeating a long questionnaire. Do not start the next milestone without its required approvals.
+
 ## End-of-task response: 6 lines max
 Outcome; changed files; one command to reproduce; check actually run/result; blockers/UNVERIFIED; proposed next task (NOT started).
 Update `docs/HANDOFF.md` succinctly, then stop for user approval.
