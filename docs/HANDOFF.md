@@ -7,3 +7,4 @@ One verification + result: on a temp copy, set Params width 200→220 mm; recomp
 UNVERIFIED/blockers: all dimensions PROVISIONAL (H280 W200 D160); no hardware fit verified; head is a disc primitive, not a final shell; preview was matplotlib projection (no GUI render).
 Recommended next task (not started): S1.T01b — component envelopes and clearance checks, only after approval.
 User approval: PENDING
+Git: repo on branch main, private GitHub igalgerman/JARVIS; commit each approved task. Review ZIP (untracked): JARVIS_S1_T01a_REVIEW.zip
