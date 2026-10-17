@@ -17,7 +17,10 @@
 10. Claude Code and Codex: **one implementing owner at a time**. Optional second-agent review only when requested, based on a specific diff; never concurrent conflicting edits.
 
 ## Design constraints
-- JARVIS is currently stationary. NO motors, servos, wheels, drive simulation or navigation.
+- For design, sourcing, printability, assembly, acoustics, component selection or service tasks, read `docs/PROJECT_PRINCIPLES.md` after the two default entry files. Explain physical choices to the user in plain language and flag what must be physically tested.
+- The user buys hardware in Israel: require credible local stock, VAT-inclusive ILS price, warranty, delivery and available substitutes. Import-only options are fallback, never assume local availability. No final SKU or purchasing approval yet.
+
+- JARVES is currently stationary. NO motors, servos, wheels, drive simulation or navigation.
 - CAD model (FreeCAD) defines geometry; Blender creates visual assets; Godot simulates interactions; Python Core handles behavior; physical I/O behind one DevicePort boundary.
 - The same *face scene/state machine* should be reused on the future device if Godot on Raspberry Pi passes performance tests. Blender/FreeCAD never run on-device.
 - Do not implement later stages. `docs/NOW.md` alone grants current scope.
