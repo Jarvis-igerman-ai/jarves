@@ -4,6 +4,20 @@
 **Status:** review artifacts only. **No CAD/Blender/Godot redesign has been implemented.** Waiting for the user to choose a concept.
 **Scope guard:** these are visual concepts plus a mechanical/acoustic analysis. All sizes are approximate and PROVISIONAL. All loads, masses, tolerances and acoustic figures are UNVERIFIED.
 
+## Summary for the managing agent
+- **Delivered:** commit `874f8a2` on `main` (Refs #3), with a summary comment on Issue #3. No redesign has been implemented, and S1.T04 has not started.
+- **CAD finding:** measured in FreeCAD, the head sits 1.0 mm above the body with zero contact, so it is unconnected. The rear has no fasteners, vents, power inlet or cable route. Every internal part is an envelope placeholder, and no wiring is modelled. The purple block (`Reserve_USB_Hub`) is spare volume, not a device.
+- **Concepts:**
+  - **A Pebble:** orb head, puck base with fabric band, closest to the reference.
+  - **B Lantern:** flat-face soft-square head, fabric column, wood plinth. Best audio and easiest to build, but H≈320.
+  - **C Buddy:** ear pods and cheeks, the cutest. Weakest audio, W≈232.
+- **Recommendation:** A with a flat face facet and a flat mic cap, both borrowed from B.
+- **Mount:** a head spine plate, a hollow neck tube with two M3 flanges, and a base chassis plate. Cables run inside the neck. The load path and tip-over estimate are UNVERIFIED.
+- **Acoustics:** a 4-mic array on top of the head, front-firing speakers, and AEC reference routed through the XVF3800. Room size is unknown, no far-field performance is promised, and validation plan V1–V5 is in §5.
+- **Next step:** after the user's choice, work upstream first (FreeCAD → Blender → Godot). Routine execution can run on Sonnet.
+- **Blocked on user decisions (§7):** concept, envelope relaxation, display SKU and drawing, mic array choice, room size and talking distance.
+- **Checks:** the head–body gap was measured in FreeCAD, and all renders and the diagram were inspected visually. Existing CAD/Blender/Godot assets and smoke tests are unchanged and were not re-run. CI is still inactive.
+
 Artifacts:
 - `design/concepts/concepts_hero.png`: the three concepts side by side, 3/4 view.
 - `design/concepts/concept_{A,B,C}_views.png`: orthographic front / side (+X) / rear views for each concept.
