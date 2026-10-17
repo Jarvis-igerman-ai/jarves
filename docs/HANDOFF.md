@@ -109,3 +109,6 @@ User inspected the actual Godot Pebble A screenshots (front, 3/4, side, rear, sh
   4. Bench-test purchase approval.
   5. Printer.
   6. Room details (voice distance now explicitly undecided).
+
+## User decision — optional status-light ring (17 Oct 2026)
+User chose to **improve the ring's visibility/position** on the upper rim of the base rather than removing it. Keep LED lighting a **fully removable option**: nonstructural module, accessible detachable wiring and a printable blank cover to preserve appearance when removed. Avoid choosing a specific LED board, committing to diameter/power, purchasing parts or making irreversible CAD changes before an approved follow-up. For sourcing reference only: locally listed WS2812B ring (16 LEDs) or 5 V addressable LED strip; size, Pi GPIO signal levels, 5 V supply/current and thermal requirements must be verified. Suggested follow-up: validate circular base perimeter and diffusion, then a modest assembly-friendly design. This resolves the user-choice portion of the prior 'light ring' question.
