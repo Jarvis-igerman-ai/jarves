@@ -23,7 +23,8 @@ while True:  # build_pebble.py stores name/category/kind/step/explode/note in co
         break
     cats[n] = sh.get(f"F{i}")
     meta[n] = {"kind": sh.get(f"G{i}"), "step": int(float(sh.get(f"H{i}"))),
-               "explode_mm": [float(v) for v in str(sh.get(f"I{i}")).split(",")], "note": str(sh.get(f"J{i}"))}
+               "explode_mm": [float(v) for v in str(sh.get(f"I{i}")).split(",")], "note": str(sh.get(f"J{i}")),
+               "pid": sh.get(f"K{i}"), "print_rot": str(sh.get(f"L{i}"))}
     i += 1
 parts, ext = {}, None
 for n, c in sorted(cats.items()):
@@ -34,7 +35,15 @@ for n, c in sorted(cats.items()):
                 **meta[n]}
     if c in ("exterior", "structure"):         # installed physical parts (floor is structure)
         ext = b if ext is None else ext.united(b)
-manifest = {"model": "cad/JARVIS_pebble.FCStd", "units": "mm", "frame": "Z up, front -Y",
+STEPS = {1: "Base floor (+ rubber feet, optional ballast)", 2: "Hex standoffs and Pi standoffs onto the floor",
+         3: "Pi 5 on standoffs (SSD / M.2 HAT+ spaces stay RESERVED)", 4: "Speaker pods + drivers onto the floor",
+         5: "LED connector clipped behind the rear door position", 6: "Bridge plate, lower flange, aluminium neck tube",
+         7: "Base shell lowered over the tube (screws from underside), fabric band, rear door",
+         8: "LED strip into the shoulder groove, wire through hole to connector; snap in diffuser halves (or blank cover)",
+         9: "Neck collar and saddle top flange on the tube (key onto the flat)", 10: "Head rear dome onto the top flange",
+         11: "Head spine onto the head floor", 12: "Display, camera, mic board onto the spine; connect cables",
+         13: "Face bezel with acrylic cover closes the head from the front", 14: "Mic cap into the crown"}
+manifest = {"model": "cad/JARVIS_pebble.FCStd", "units": "mm", "frame": "Z up, front -Y", "steps": STEPS,
             "installed_bbox_mm": [round(v, 2) for v in (ext.XMin, ext.YMin, ext.ZMin, ext.XMax, ext.YMax, ext.ZMax)],
             "parts": parts}
 with open(os.path.join(out, "manifest.json"), "w") as fh:
@@ -42,24 +51,18 @@ with open(os.path.join(out, "manifest.json"), "w") as fh:
 print(f"exported {len(parts)} parts to {out}")
 
 # ---------------- human-readable inventory (auto-generated from the CAD metadata) ----------------
-STEPS = {1: "Base floor (+ rubber feet, optional ballast)", 2: "Bridge posts and Pi standoffs onto the floor",
-         3: "Pi 5 on standoffs (SSD / M.2 HAT+ spaces stay RESERVED)", 4: "Speaker pods + drivers onto the floor",
-         5: "LED connector clipped behind the rear door position", 6: "Bridge plate, lower flange, aluminium neck tube",
-         7: "Base shell lowered over the tube (screws from underside), fabric band, rear door",
-         8: "LED strip into the shoulder groove, wire through hole to connector; snap in diffuser halves (or blank cover)",
-         9: "Neck collar and top flange on the tube", 10: "Head rear dome onto the top flange",
-         11: "Head spine onto the head floor", 12: "Display, camera, mic board onto the spine; connect cables",
-         13: "Face bezel with acrylic cover closes the head from the front", 14: "Mic cap into the crown"}
 FASTENERS = [
-    ("Head floor -> top flange", "4x M3x10 + heat-set inserts in flange", "UNVERIFIED pull-out"),
-    ("Spine foot -> head floor", "2x M3x8", "UNVERIFIED"),
-    ("Face bezel <-> rear dome", "4x M3x8 into inserts (chin + sides)", "access with face removed"),
+    ("Head floor -> saddle top flange", "4x M3x10 into M3 heat-set inserts (2 front + 2 rear half) + 2 Ø4 locating pins",
+     "modelled; UNVERIFIED pull-out/twist"),
+    ("Spine foot -> head floor", "2x M3x8", "not modelled"),
+    ("Face bezel <-> rear dome", "4x M3x12 through counterbored bosses into M3 inserts in rear-dome bosses",
+     "modelled; access with face removed"),
     ("Face cover", "clamped by bezel lip + 4 clips (no glue)", "UNVERIFIED"),
     ("Mic cap", "3x M2x6 or snap ring", "UNVERIFIED"),
-    ("Flanges <-> Al tube", "2x M3 set screws per flange on a filed flat", "UNVERIFIED anti-rotation"),
-    ("Lower flange -> bridge", "4x M3x10 into inserts", ""),
-    ("Bridge -> posts / posts -> floor", "4x M3x8 each, floor screws from underside", ""),
-    ("Base shell -> floor", "4x M3x10 from underside (shell bosses NOT modelled)", "UNVERIFIED"),
+    ("Flanges <-> Al tube", "keyed D-bore on a 1 mm filed flat (+ optional M3 set screw)", "modelled; UNVERIFIED fit"),
+    ("Lower flange -> bridge", "4x M3x16 bolt + nut through flange and bridge", "modelled holes"),
+    ("Bridge -> standoffs -> floor", "4x M3x50 F-F hex standoffs, 8x M3x8 screws (top + underside)", "modelled holes"),
+    ("Base shell -> floor", "3x M3x8 from underside into M3 inserts in shell bosses", "modelled"),
     ("Rear door", "2x captive M3 thumb screws + 2 bottom hooks", "tool-free service"),
     ("Pi 5", "4x M2.5x6 onto brass standoffs", ""),
     ("Speaker pods -> floor", "2x M3x8 each + gasket", "UNVERIFIED acoustic seal"),
@@ -78,16 +81,18 @@ for kind, title in (("printed", "Printed parts (FDM; printer/material not chosen
     rows = sorted((v["step"], k) for k, v in parts.items() if v["kind"] == kind)
     if not rows:
         continue
-    L += [f"## {title}", "", "| Part | Step | Size W x D x H (mm) | Notes / print orientation |", "|---|---|---|---|"]
+    L += [f"## {title}", "", "| ID | Part | Step | Size W x D x H (mm) | Notes / print orientation |",
+          "|---|---|---|---|---|"]
     for step, k in rows:
         bb = parts[k]["bbox_mm"]
-        L.append(f"| `{k}` | {step} | {bb[3] - bb[0]:.0f} x {bb[4] - bb[1]:.0f} x {bb[5] - bb[2]:.0f} | {parts[k]['note']} |")
+        L.append(f"| **{parts[k]['pid']}** | `{k}` | {step} | {bb[3] - bb[0]:.0f} x {bb[4] - bb[1]:.0f} x "
+                 f"{bb[5] - bb[2]:.0f} | {parts[k]['note']} |")
     L.append("")
 L += ["## Fasteners (not modelled in CAD)", "", "| Joint | Fastener | Status |", "|---|---|---|"]
 L += [f"| {a} | {b} | {c} |" for a, b, c in FASTENERS]
 L += ["", "## Assembly sequence (disassembly = reverse)", ""]
 for s, txt in STEPS.items():
-    L.append(f"{s}. **{txt}** — " + ", ".join(f"`{k}`" for k, v in sorted(parts.items()) if v["step"] == s))
+    L.append(f"{s}. **{txt}** — " + ", ".join(f"{v['pid']} `{k}`" for k, v in sorted(parts.items()) if v["step"] == s))
 L += ["", "**Service access:** Pi ports, LED connector and power inlet through the rear door (thumb screws); "
       "LED ring halves pop out from outside; display/camera/mic by removing the face bezel (4 screws); "
       "full base access by removing the head (4 screws on the top flange) and the base-shell screws underneath."]

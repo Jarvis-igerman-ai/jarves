@@ -17,3 +17,8 @@ Review candidate, not product sign-off. Shows the **Pebble A** design (S1.T03R2)
   - the finish switching.
 - **Screenshots:** `Godot.exe --path godot -- --view=front --finish=B_Warm_Sand --shot=out.png`.
 - The GLB is loaded at runtime (GLTFDocument), so no import cache is required. A packaged .exe would need Godot export templates, which are not installed.
+- **Assembly instruction images:** `godot\export_instructions.cmd` writes `docs\assembly\img\step_01..14.png`, `overview_labeled.png` and `parts\<pid>_<Name>.png` (every printed/purchased part), then verifies each file exists and is non-empty (exit 1 otherwise). It drives these CLI modes (UI hidden; add `--shot=<png>`):
+  - `--step=<1..14>`: parts of earlier steps faded at their final position, the current step's parts pulled out along `explode_mm` with an orange arrow and a pid label (P printed, B bought, E electronics), later/reserved/alternate parts hidden; title and manifest step text overlaid, camera auto-framed (head steps >= 10 frame the head).
+  - `--part=<Name>`: solo preview with pid, name, bbox size, kind and note.
+  - `--overview`: exploded robot with a pid label on every part.
+  - `--list-parts=printed,purchased`: prints `PARTLIST <pid> <Name>` lines and quits.

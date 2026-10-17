@@ -117,11 +117,29 @@ inner = multi("Common", "_Head_Void", [ellipsoid("_HeadE_i", f"{S}Wall"), clip("
 face_open = cyl("_FaceOpening", V["FaceR"] - 4, 10, Vector(0, -F - 5, HC), Vector(0, 1, 0))
 crown_open = cyl("_CrownOpening", V["CrownR"] - 3, 10, Vector(0, 0, HC + ZC - 6))
 tube_hole_h = cyl("_HeadTubeHole", V["TubeR"] + 1, 10, Vector(0, 0, SEAT - 2))
-head_shell = boolean("Cut", "_Head_Shell", outer, [inner, face_open, crown_open, tube_hole_h])
+# R4 mechanical details: 4x M3 seat holes (into top-flange inserts), 2 anti-rotation pin holes, seam bosses
+SEAT_PTS = [(25 * math.cos(math.radians(a)), 25 * math.sin(math.radians(a))) for a in (45, 135, 225, 315)]
+PIN_PTS = [(-26, 20), (26, 20)]
+seat_holes = [cyl(f"_SeatHole_{i}", 1.7, 14, Vector(x, y, SEAT - 3)) for i, (x, y) in enumerate(SEAT_PTS)]
+pin_holes = [cyl(f"_PinHole_{i}", 2.15, 10, Vector(x, y, SEAT - 1)) for i, (x, y) in enumerate(PIN_PTS)]
+head_shell = boolean("Cut", "_Head_Shell", outer, [inner, face_open, crown_open, tube_hole_h] + seat_holes + pin_holes)
 split_f = box("_SplitFront", -300, -300, 0, 600, 300 + V["SplitY"], 600)
 split_b = box("_SplitBack", -300, V["SplitY"], 0, 600, 300, 600)
-multi("Common", "Head_Front", [head_shell, split_f], "exterior")   # face bezel + front half (print face-down)
-multi("Common", "Head_Back", [head_shell, split_b], "exterior")    # rear dome (service cover)
+SY = V["SplitY"]
+SEAM = [  # 4 boss pairs on the head seam: front = clearance + counterbore, back = heat-set insert
+    (0.955 * (V["HeadRX"] - 3) * math.cos(math.radians(a)), HC + 0.955 * (V["HeadRZ"] - 3) * math.sin(math.radians(a)))
+    for a in (25, 155, 205, 335)]
+fb = [cyl(f"_SeamBossF_{i}", 5, 12, Vector(x, SY - 12, z), Vector(0, 1, 0)) for i, (x, z) in enumerate(SEAM)]
+fh = [cyl(f"_SeamHoleF_{i}", 1.7, 14, Vector(x, SY - 13, z), Vector(0, 1, 0)) for i, (x, z) in enumerate(SEAM)]
+fcb = [cyl(f"_SeamCbF_{i}", 3.2, 6, Vector(x, SY - 13, z), Vector(0, 1, 0)) for i, (x, z) in enumerate(SEAM)]
+bb = [cyl(f"_SeamBossB_{i}", 5, 12, Vector(x, SY, z), Vector(0, 1, 0)) for i, (x, z) in enumerate(SEAM)]
+bh = [cyl(f"_SeamInsB_{i}", 2.0, 9, Vector(x, SY - 1, z), Vector(0, 1, 0)) for i, (x, z) in enumerate(SEAM)]
+hf_raw = multi("Common", "_HeadFront_raw", [head_shell, split_f])
+hb_raw = multi("Common", "_HeadBack_raw", [head_shell, split_b])
+hf_b = multi("Fuse", "_HeadFront_bossed", [hf_raw] + fb)
+hb_b = multi("Fuse", "_HeadBack_bossed", [hb_raw] + bb)
+boolean("Cut", "Head_Front", hf_b, fh + fcb, "exterior")         # face bezel + front half (print face-down)
+boolean("Cut", "Head_Back", hb_b, bh, "exterior")                # rear dome (print open side down)
 fc = cyl("_FaceCoverDisc", V["FaceR"] - 4, V["Wall"], Vector(0, -F, HC), Vector(0, 1, 0))
 fclip = box("_FaceCoverClip", -300, -300, SEAT + V["Wall"], 600, 600, HC + ZC - V["Wall"] - SEAT - V["Wall"])
 multi("Common", "Face_Cover", [fc, fclip], "exterior")             # tinted acrylic cover lens (PROVISIONAL)
@@ -132,14 +150,37 @@ boolean("Cut", "Mic_Cap", mic_cap, ports, "exterior")               # port patte
 
 # ---------------- neck / load path ----------------
 ring("Neck_Collar", 32, V["TubeR"] + 0.5, V["BaseH"], V["NeckGap"], "exterior")       # cosmetic satin sleeve
-ring("Neck_Flange_High", 45, V["TubeR"], SEAT - V["FlangeT"], V["FlangeT"], "structure")
-ring("Neck_Flange_Low", 35, V["TubeR"], 60, V["FlangeT"], "structure")
-ring("Neck_Tube", V["TubeR"], V["TubeR"] - 2, 60, SEAT - 60, "structure")           # Al 6061 Ø40x2, ends at head seat
+FLAT_X = V["TubeR"] - 1                         # 1 mm anti-rotation flat filed on the tube (+x side)
+
+
+def keyed_flange(name, r_out, z0, holes, extra=()):
+    rng = ring(f"_{name}_ring", r_out, V["TubeR"], z0, V["FlangeT"])
+    key = multi("Common", f"_{name}_key", [cyl(f"_{name}_keyc", V["TubeR"], V["FlangeT"], Vector(0, 0, z0)),
+                                           box(f"_{name}_keyb", FLAT_X, -50, z0 - 1, 50, 100, V["FlangeT"] + 2)])
+    body = multi("Fuse", f"_{name}_body", [rng, key] + list(extra))
+    return boolean("Cut", name, body, holes, "structure")
+
+
+saddle_c = cyl("_Saddle_c", 45, 12, Vector(0, 0, SEAT))
+saddle = boolean("Cut", "_Saddle", saddle_c,
+                 [doc.getObject("_HeadE_o"), cyl("_Saddle_bore", V["TubeR"], 14, Vector(0, 0, SEAT - 1))])
+pins = [cyl(f"_Pin_{i}", 2.0, 5, Vector(x, y, SEAT)) for i, (x, y) in enumerate(PIN_PTS)]
+ins_hi = [cyl(f"_FlangeHiIns_{i}", 2.0, 8, Vector(x, y, SEAT - V["FlangeT"] - 1)) for i, (x, y) in enumerate(SEAT_PTS)]
+keyed_flange("Neck_Flange_High", 45, SEAT - V["FlangeT"], ins_hi, [saddle] + pins)   # saddle follows the head underside
+LOW_PTS = [(28 * math.cos(math.radians(a)), 28 * math.sin(math.radians(a))) for a in (45, 135, 225, 315)]
+keyed_flange("Neck_Flange_Low", 35, 60,
+             [cyl(f"_FlangeLoHole_{i}", 1.7, 8, Vector(x, y, 59)) for i, (x, y) in enumerate(LOW_PTS)])
+tube_ring = ring("_Tube_ring", V["TubeR"], V["TubeR"] - 2, 60, SEAT - 60)
+boolean("Cut", "Neck_Tube", tube_ring, [box("_Tube_flat", FLAT_X, -50, 50, 50, 100, 100)], "structure")  # Al 6061 Ø40x2
 box("Head_Spine", -30, 27, HC - 80, 60, 6, 130, "structure")                       # carries display/camera/mic mounts
 box("Head_Spine_Foot", -12, 22, SEAT + V["Wall"], 24, 6, HC - 80 - SEAT - V["Wall"], "structure")
-box("Bridge_Plate", -70, -35, 56, 140, 100, 4, "structure")
-for nm, (x, y) in {"FL": (-68, -28), "FR": (68, -28), "RL": (-68, 55), "RR": (68, 55)}.items():
-    cyl(f"Bridge_Post_{nm}", 5, 52, Vector(x, y, 4), cat="structure")
+POSTS = {"FL": (-68, -28), "FR": (68, -28), "RL": (-68, 55), "RR": (68, 55)}
+bridge_raw = box("_Bridge_raw", -70, -35, 56, 140, 100, 4)
+boolean("Cut", "Bridge_Plate", bridge_raw,   # M3 through-holes: 4 to standoffs, 4 for the lower flange (bolt + nut)
+        [cyl(f"_BridgeHole_{k}", 1.7, 8, Vector(x, y, 55)) for k, (x, y) in POSTS.items()] +
+        [cyl(f"_BridgeFl_{i}", 1.7, 8, Vector(x, y, 55)) for i, (x, y) in enumerate(LOW_PTS)], "structure")
+for nm, (x, y) in POSTS.items():               # purchased M3 hex standoffs (female-female), screws top and bottom
+    cyl(f"Bridge_Post_{nm}", 3.2, 52, Vector(x, y, 4), cat="structure")
 
 
 # ---------------- base: rounded puck shell, floor, rear door, band, light ring ----------------
@@ -177,14 +218,23 @@ led_groove = ring("_LED_Groove", 112, 90, LED_Z0, LED_Z1 - LED_Z0)
 led_wire = cyl("_LED_WireHole", 2, 14, Vector(0, 80, 77), Vector(0, 1, 0))
 door_box = box("_DoorBox", -55, 80, 12, 110, 40, 60)
 shell_body = boolean("Cut", "_Base_ShellBody", b_out, [b_in, floor_box, tube_hole_b] + spk_holes)
-shell_bk = multi("Fuse", "_Base_ShellBacked", [shell_body, backer])
+FLOOR_BOSS = [(96.5 * math.cos(math.radians(a)), 96.5 * math.sin(math.radians(a))) for a in (15, 165, 270)]
+fbosses = [cyl(f"_FloorBoss_{i}", 5, 12, Vector(x, y, 4)) for i, (x, y) in enumerate(FLOOR_BOSS)]
+fins = [cyl(f"_FloorIns_{i}", 2.0, 10, Vector(x, y, 3)) for i, (x, y) in enumerate(FLOOR_BOSS)]
+shell_bk0 = multi("Fuse", "_Base_ShellBacked0", [shell_body, backer] + fbosses)
+shell_bk = boolean("Cut", "_Base_ShellBacked", shell_bk0, fins)
 shell_raw = boolean("Cut", "_Base_ShellRaw", shell_bk, [led_groove, led_wire])
 boolean("Cut", "Base_Shell", shell_raw, [door_box], "exterior")
 door_raw = multi("Common", "_Door_Raw", [shell_raw, door_box])
 vents = [box(f"_Vent_{i}", -30, 80, 22 + i * 7, 60, 40, 3) for i in range(5)]
 usbc = box("_USBC_Hole", 33, 80, 18, 10, 40, 4)
 boolean("Cut", "Base_Door", door_raw, vents + [usbc], "exterior")   # 2 captive M3 thumb screws (not modelled)
-multi("Common", "Base_Floor", [b_out, floor_box], "structure")    # carries posts, Pi, pods, ballast pocket
+floor_raw = multi("Common", "_Floor_raw", [b_out, floor_box])
+floor_holes = ([cyl(f"_FloorHole_{i}", 1.7, 8, Vector(x, y, -2)) for i, (x, y) in enumerate(FLOOR_BOSS)] +
+               [cyl(f"_FloorPost_{k}", 1.7, 8, Vector(x, y, -2)) for k, (x, y) in POSTS.items()] +
+               [cyl(f"_FloorPi_{i}", 1.4, 8, Vector(x, y, -2)) for i, (x, y) in
+                enumerate([(-24.5, -8.5), (24.5, -8.5), (-24.5, 49.5), (24.5, 49.5)])])
+boolean("Cut", "Base_Floor", floor_raw, floor_holes, "structure")  # carries standoffs, Pi, pods; screws from underside
 
 
 def led_half(name, side, cat):                 # diffuser / blank cover half (front -y or back +y), flush with shoulder
@@ -240,7 +290,7 @@ if bad:
 H = (0, 0, 200)                                # whole head lifts this much in the exploded view
 META = {
     "Base_Floor": ("printed", 1, (0, 0, -90), "print flat, bottom down; rubber feet + ballast pocket (feet not modelled)"),
-    "Bridge_Post_FL": ("printed", 2, (0, 0, -50), "print upright; M3 from underside of floor"),
+    "Bridge_Post_FL": ("purchased", 2, (0, 0, -50), "M3 hex standoff F-F ~50-52 mm (brass/alu); M3 screw each end"),
     "Pi_Standoff_1": ("purchased", 2, (0, 0, -60), "M2.5 brass standoff 6 mm"),
     "Pi_5": ("placeholder", 3, (0, 0, -35), "Raspberry Pi 5 + Active Cooler envelope; 4x M2.5x6"),
     "Reserve_SSD_USB": ("reserved", 3, (-40, 0, -35), "RESERVED: M.2-in-USB enclosure (not installed)"),
@@ -248,10 +298,10 @@ META = {
     "Speaker_Pod_L": ("printed", 4, (-45, -55, -30), "sealed pod; print open side up; 2x M3 to floor"),
     "Speaker_Driver_L": ("placeholder", 4, (-60, -75, -30), "full-range driver ~Ø50 envelope (no SKU)"),
     "LED_Connector": ("placeholder", 5, (0, 60, -10), "detachable 3-pin LED connector, behind rear door"),
-    "Bridge_Plate": ("printed", 6, (0, 0, 0), "print flat; 4x M3 to posts"),
-    "Neck_Flange_Low": ("printed", 6, (0, 0, 20), "print flat; 4x M3 to bridge + 2x M3 set screws to tube"),
-    "Neck_Tube": ("purchased", 6, (0, 0, 45), "Al 6061 tube Ø40x2 cut to length; anti-rotation flat (UNVERIFIED)"),
-    "Base_Shell": ("printed", 7, (0, 0, 70), "print top-down; lowered over the neck tube; 4x M3 from underside"),
+    "Bridge_Plate": ("printed", 6, (0, 0, 0), "print flat; 4x M3 to standoffs + 4x M3 bolt/nut to lower flange"),
+    "Neck_Flange_Low": ("printed", 6, (0, 0, 20), "print flat; keyed bore fits tube flat; 4x M3 bolt + nut through bridge"),
+    "Neck_Tube": ("purchased", 6, (0, 0, 45), "Al tube Ø40x2 cut to ~48 mm; file 1 mm flat full length (anti-rotation)"),
+    "Base_Shell": ("printed", 7, (0, 0, 70), "print top-down; 3 floor bosses with M3 inserts; split F/B for 250x210 beds"),
     "Base_Band": ("purchased", 7, (0, 0, 70), "fabric wrap over the grille, ends at the rear door"),
     "Base_Door": ("printed", 7, (0, 80, 70), "print flat (outer face down); 2 captive M3 thumb screws + hooks"),
     "LED_Strip": ("placeholder", 8, (0, 0, 95), "addressable LED strip in groove (no SKU; 5 V, signal level UNVERIFIED)"),
@@ -260,8 +310,8 @@ META = {
     "LED_Blank_Front": ("alternate", 8, (0, -55, 105), "opaque blank cover half - replaces diffuser if LED removed"),
     "LED_Blank_Back": ("alternate", 8, (0, 55, 105), "opaque blank cover half - replaces diffuser if LED removed"),
     "Neck_Collar": ("printed", 9, (0, 0, 120), "cosmetic sleeve, slides over tube"),
-    "Neck_Flange_High": ("printed", 9, (0, 0, 145), "print flat; head floor screws into it (4x M3 + inserts)"),
-    "Head_Back": ("printed", 10, (0, 70, 0), "rear dome; print open side down; screws to top flange"),
+    "Neck_Flange_High": ("printed", 9, (0, 0, 145), "print flat (saddle up); keyed bore, 2 pins, 4 M3 heat-set inserts"),
+    "Head_Back": ("printed", 10, (0, 70, 0), "rear dome; print open side down; 4 seam inserts; 2x M3 into flange"),
     "Head_Spine_Foot": ("printed", 11, (0, 15, 0), "2x M3 through head floor"),
     "Head_Spine": ("printed", 11, (0, 15, 0), "print flat; carries display / camera / mic mounts"),
     "Display_Panel": ("placeholder", 12, (0, -110, 0), "5in round display envelope (measured STEP; no SKU lock)"),
@@ -269,7 +319,7 @@ META = {
     "Keepout_Display_Cable": ("reserved", 12, (0, -80, 0), "RESERVED: HDMI plug + bend room"),
     "Camera_Module": ("placeholder", 12, (0, -110, 15), "Camera Module 3 Wide envelope; CSI ribbon length UNVERIFIED"),
     "Mic_Board": ("placeholder", 12, (0, 0, 60), "2-mic-class board envelope under crown (no SKU)"),
-    "Head_Front": ("printed", 13, (0, -95, 0), "face bezel; print face-down; 4x M3 to rear dome"),
+    "Head_Front": ("printed", 13, (0, -95, 0), "face bezel; print face-down; 4x M3x12 into rear-dome inserts; 2x M3 into flange"),
     "Face_Cover": ("purchased", 13, (0, -160, 0), "laser-cut tinted acrylic 3 mm (camera window UNVERIFIED)"),
     "Mic_Cap": ("printed", 14, (0, 0, 110), "print flat; port holes aligned to chosen mic board"),
 }
@@ -280,12 +330,24 @@ for nm in ("FR", "RL", "RR"):
     META[f"Bridge_Post_{nm}"] = META["Bridge_Post_FL"]
 for k in ("2", "3", "4"):
     META[f"Pi_Standoff_{k}"] = META["Pi_Standoff_1"]
+# print orientation for exported STL: rotation (axis, degrees) that puts the best face on the bed
+PRINT_ROT = {"Head_Front": ("X", 90), "Head_Back": ("X", 90), "Base_Shell": ("X", 180), "Base_Door": ("X", -90),
+             "Head_Spine": ("X", 90), "Head_Spine_Foot": ("X", 90)}
+PREFIX = {"printed": "P", "purchased": "B", "placeholder": "E", "reserved": "R", "alternate": "A"}
 missing = sorted(set(CATS) - set(META))
 if missing:
     raise RuntimeError(f"parts without assembly metadata: {missing}")
+PID, counters = {}, {}
+for k in sorted(CATS, key=lambda n: (META[n][1], n)):          # part numbers follow the assembly order
+    pre = PREFIX[META[k][0]]
+    counters[pre] = counters.get(pre, 0) + 1
+    PID[k] = f"{pre}{counters[pre]:02d}"
 sh.set("E1", "categories")
 for i, (k, c) in enumerate(sorted(CATS.items()), start=2):  # stored for export / downstream checks
     kind, step, ex, note = META[k]
+    sh.set(f"K{i}", PID[k])
+    rot = PRINT_ROT.get(k, ("Z", 0))
+    sh.set(f"L{i}", f"'{rot[0]},{rot[1]}")
     if step >= 10:                             # head sub-assembly rides on the head lift
         ex = tuple(a + b for a, b in zip(ex, H))
     sh.set(f"E{i}", k)

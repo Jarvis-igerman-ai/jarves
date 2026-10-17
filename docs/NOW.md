@@ -1,19 +1,22 @@
-# NOW — S1.T03R3: Pebble A assembly & detail review (round 2 of Issue #4)
+# NOW — S1.T03R4: Assembly & print-shop readiness (Issue #4 follow-up)
 
-**Status:** DELIVERED 2026-10-17 (`docs/reviews/S1_T03R3_ASSEMBLY_REVIEW.md`), awaiting user review. Approved by user 17 Oct 2026 (chat instruction). Parent: [Issue #4](https://github.com/igalgerman/JARVIS/issues/4). One implementing owner.
+**Status:** PAUSED at design-direction gate (user request 17 Oct 2026): `docs/reviews/S1_T03R4_SIMPLE_BUILD_PROPOSAL.md` awaits approval before any further CAD redesign. Originally approved 17 Oct 2026. One integration owner. Parent: [Issue #4](https://github.com/igalgerman/JARVIS/issues/4).
 
-## Keep (user decisions)
-Current overall Pebble A design, current side profile, **finish C** (white head / sky-blue base / navy band) as the review default. Finish C is a visual preference, not a material/procurement approval.
+## Goal
+JARVES must be realistically printable by an ordinary Haifa/Krayot 3D-printing service, affordable, and practical for a beginner to assemble at home (see `docs/PROJECT_PRINCIPLES.md` → "Local print-shop feasibility").
+
+## Keep
+Pebble A, finish C, current head proportions, R3 speaker grilles and removable LED ring. No unnecessary redesign.
 
 ## Approved work
-1. Move the LED status ring to the **upper base rim**; make it a **removable, nonstructural module** with a detachable connector and a **printable blank cover**. No LED SKU, diameter/power commitment or purchase.
-2. Replace the wheel-like speaker openings with a cleaner grille/speaker presentation (FreeCAD geometry first).
-3. Exploded assembly view + inventory of printed parts, purchased components, placeholders and fasteners, with a clear assembly/disassembly sequence and print orientation. Flag every unverified mechanical detail.
-4. Automatic export of all review screenshots (incl. exploded views) with direct file links.
-5. Review neck mounting, cable routing, rear service access and printability (no physical-validation claims).
+1. Mechanical reliability: stronger neck seat + anti-rotation; review/model fasteners, screw bosses, insert holes, snap-fits, cable routing; flag what needs physical tests.
+2. LEGO-style assembly instructions: numbered parts, step images with arrows, printed/purchased/electronic marking, tools, difficulty.
+3. Practical printing: export real printable STL (printed parts only), check bed fit with margin, orientation, supports, tolerances; real slicer estimates (time, grams, supports); split fallback for 210–215 mm parts; simplify where it saves cost/effort.
+4. Haifa print-shop feasibility: 2–3 real local services (research only, no contact), quote-ready package, per-part and total ILS **estimate** with assumptions.
+5. Auto-exported assembly diagrams, exploded views, per-part previews with direct links; focused checks only.
 
 ## Not in scope
-Purchases, final SKUs, microphone distance, manufacturing release, software/AI/voice, CI (#2), later issues (#5–#8).
+Purchases, contacting suppliers, physical printing, final SKUs, software features, CI.
 
 ## Completion gate
-Targeted checks pass (CAD / Blender / Godot), images exported and linked, HANDOFF decision queue updated, evidence on Issue #4, then STOP for user review.
+Plain-language answers (Haifa printability, cost range from evidence, assembly difficulty, what remains unverified); HANDOFF + Issue updated; commit; STOP for user review.

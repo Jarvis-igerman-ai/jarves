@@ -5,6 +5,7 @@ extends Node3D
 # CLI (after "--"):  --check  (print PASS/FAIL, exit code)  |  --shot=<png> [--hide-shell] [--select=<Part>]
 #                    [--show-reserved] [--finish=<key>] [--view=front|side|rear|three_quarter|top|led_closeup]
 #                    [--exploded | --exploded=<0..1>] [--blank-led]
+#   Assembly images: --step=<1..14> | --part=<Name> | --overview  (UI hidden; combine with --shot=); --list-parts=<kind,...> prints PARTLIST lines
 
 const GLB := "res://assets/JARVIS.glb"
 const MANIFEST := "res://assets/JARVIS_manifest.json"
@@ -46,11 +47,26 @@ var orig_pos := {}   # name -> original global origin
 var blank_chk: CheckButton
 var explode_chk: CheckButton
 var explode_slider: HSlider
+var ground: MeshInstance3D
+var ui_layer: CanvasLayer
+var extras: Array = []   # step/overview helper nodes (arrows, labels), freed on re-apply
+var step_mode := false
+var leader_layer: CanvasLayer
+var label_px: Array = []  # screen positions of placed Label3Ds (overlap avoidance)
 
 
 func _ready() -> void:
 	manifest = _json(MANIFEST)
 	fin = _json(FINISHES)
+	for a in OS.get_cmdline_user_args():
+		if a.begins_with("--list-parts="):  # print "PARTLIST <pid> <Name>" for the given kinds, then quit
+			var kinds := a.substr(13).split(",")
+			for n in manifest.get("parts", {}):
+				var p: Dictionary = manifest.parts[n]
+				if p.get("pid", "") != "" and p.get("kind", "") in kinds:
+					print("PARTLIST %s %s" % [p.pid, n])
+			get_tree().quit(0)
+			return
 	_build_environment()
 	var model := _load_model()
 	if model == null or manifest.is_empty() or fin.is_empty():
@@ -90,6 +106,13 @@ func _ready() -> void:
 			view = a.substr(7)
 	if view != "":
 		_set_view(view)
+	for a in args:
+		if a.begins_with("--step="):
+			_apply_step(clampi(int(a.substr(7)), 1, 14))
+		elif a.begins_with("--part="):
+			_apply_part(a.substr(7))
+		elif a == "--overview":
+			_apply_overview()
 	if "--check" in args:
 		_run_check()
 	else:
@@ -148,7 +171,7 @@ func _build_environment() -> void:
 	rim.rotation_degrees = Vector3(-30, 180, 0)
 	rim.light_energy = 0.4
 	add_child(rim)
-	var ground := MeshInstance3D.new()
+	ground = MeshInstance3D.new()
 	var plane := PlaneMesh.new()
 	plane.size = Vector2(3, 3)
 	ground.mesh = plane
@@ -160,7 +183,7 @@ func _build_environment() -> void:
 	add_child(ground)
 	cam = Camera3D.new()
 	cam.near = 0.01
-	cam.far = 20.0
+	cam.far = 200.0
 	cam.fov = 35.0
 	add_child(cam)
 	hl_mat = StandardMaterial3D.new()
@@ -173,6 +196,7 @@ func _build_environment() -> void:
 
 func _build_ui() -> void:
 	var layer := CanvasLayer.new()
+	ui_layer = layer
 	add_child(layer)
 	var panel := PanelContainer.new()
 	panel.position = Vector2(12, 12)
@@ -398,6 +422,309 @@ func _take_shot(path: String) -> void:
 	get_tree().quit(0)
 
 
+const STEP_PULL := 0.6      # fraction of explode_mm used for the parts of the current step
+const STEP_LIFT := 0.06     # m, upward offset added to the pulled-out parts (also the fallback when explode ~ 0)
+const ARROW_COLOR := Color(1.0, 0.45, 0.0)
+const LEGEND := "P = printed     B = bought     E = electronics (placeholder)"
+
+
+func _kind(n: String) -> String:
+	return manifest.parts[n].get("kind", "") if manifest.parts.has(n) else ""
+
+
+func _pid(n: String) -> String:
+	return manifest.parts[n].get("pid", "") if manifest.parts.has(n) else ""
+
+
+func _hidden_in_instructions(n: String) -> bool:
+	return _kind(n) in ["reserved", "alternate"] or cat[n] in ["reserved", "alternate"]
+
+
+func _clear_extras() -> void:
+	for e in extras:
+		if is_instance_valid(e):
+			e.queue_free()
+	extras.clear()
+	leader_layer = null
+
+
+func _move_part(n: String, d: Vector3) -> void:
+	var gt: Transform3D = parts[n].global_transform
+	gt.origin = orig_pos[n] + d
+	parts[n].global_transform = gt
+
+
+func _reset_scene_state() -> void:
+	_clear_extras()
+	_apply_finish(finish_key if finish_key != "" else fin.default)
+	for n in parts:
+		_move_part(n, Vector3.ZERO)
+		parts[n].visible = true
+		bodies[n].collision_layer = 0
+	ground.visible = true
+	ground.scale = Vector3(40, 1, 40)
+	label_px.clear()
+	step_mode = true
+	if ui_layer:
+		ui_layer.visible = false
+	_select("")
+
+
+func _step_offset(n: String) -> Vector3:
+	var e: Array = manifest.parts[n].get("explode_mm", [0, 0, 0])
+	var o := Vector3(e[0], e[2], -e[1]) / 1000.0 * STEP_PULL + Vector3(0, STEP_LIFT, 0)
+	return o if o.length() >= 0.05 else Vector3(0, 0.08, 0)  # keep a visible gap/arrow when explode ~ cancels the lift
+
+
+func _fade(n: String) -> void:
+	var m = parts[n].material_override
+	if m is StandardMaterial3D:
+		var f: StandardMaterial3D = m.duplicate()
+		var a: float = f.albedo_color.a
+		f.albedo_color = f.albedo_color.lerp(Color(0.82, 0.83, 0.86), 0.45)
+		f.albedo_color.a = a
+		f.emission_enabled = false
+		parts[n].material_override = f
+
+
+func _apply_step(sn: int) -> void:
+	_reset_scene_state()
+	var frame: Array = []
+	var fresh: Array = []
+	for n in parts:
+		var s: int = int(manifest.parts[n].get("step", 1)) if manifest.parts.has(n) else 99
+		var vis: bool = not _hidden_in_instructions(n) and s <= sn
+		parts[n].visible = vis
+		if not vis:
+			continue
+		if s == sn:
+			_move_part(n, _step_offset(n))
+			fresh.append(n)
+		else:
+			_fade(n)
+		if sn < 10 or s == sn or _part_aabb(n).end.y > 0.105:
+			frame.append(_part_aabb(n))
+	var d := _fit_camera(frame, 0.6, 0.38)
+	for n in fresh:
+		if _pid(n) == "":
+			continue  # face details ride along with Face_Cover, no label/arrow
+		var pulled_c: Vector3 = _part_aabb(n).get_center()
+		var off := _step_offset(n)
+		_add_arrow(pulled_c, pulled_c - off, d)
+		_add_label(_pid(n), pulled_c, d, true)
+	var txt: String = str(manifest.get("steps", {}).get(str(sn), ""))
+	_overlay("Step %d / 14" % sn, txt, LEGEND)
+
+
+func _apply_part(pn: String) -> void:
+	if not parts.has(pn):
+		push_error("unknown part " + pn)
+		return
+	_reset_scene_state()
+	ground.visible = false
+	for n in parts:
+		parts[n].visible = (n == pn)
+	_fit_camera([_part_aabb(pn)], 0.6, 0.35)
+	var p: Dictionary = manifest.parts[pn]
+	var b: Array = p.bbox_mm
+	var body := "%.1f x %.1f x %.1f mm  (W x D x H)   kind: %s\n%s" % [b[3] - b[0], b[4] - b[1], b[5] - b[2], p.get("kind", ""), p.get("note", "")]
+	_overlay("%s  %s" % [p.get("pid", ""), pn], body, "")
+
+
+func _apply_overview() -> void:
+	_reset_scene_state()
+	for n in parts:
+		parts[n].visible = not _hidden_in_instructions(n)
+	_set_explode(true, 1.0)
+	var frame: Array = []
+	for n in parts:
+		if parts[n].visible:
+			frame.append(_part_aabb(n))
+	var d := _fit_camera(frame, 0.55, 0.3, 1.3)
+	for n in parts:
+		if parts[n].visible and _pid(n) != "":
+			_add_label(_pid(n), _part_aabb(n).get_center(), d, false, 0.6)
+	_overlay("JARVES Pebble A - part numbers", "", LEGEND)
+
+
+# Place the camera on a yaw/pitch 3/4 view and pull back until every AABB corner is inside the safe screen area
+# (top ~20% is reserved for the overlay text). Returns the distance.
+func _fit_camera(boxes: Array, y: float, p: float, margin: float = 1.0) -> float:
+	var all: AABB = boxes[0]
+	for b in boxes:
+		all = all.merge(b)
+	yaw = y
+	pitch = p
+	target = all.get_center()
+	var vs := get_viewport().get_visible_rect().size
+	var tv := tan(deg_to_rad(cam.fov) * 0.5)
+	var th := tv * vs.x / vs.y
+	var d := 0.25
+	while d < 8.0:
+		dist = d
+		_update_camera()
+		var inv := cam.global_transform.affine_inverse()
+		var ok := true
+		for b in boxes:
+			for i in 8:
+				var c: Vector3 = inv * b.get_endpoint(i)
+				var z := -c.z
+				if z <= 0.02 or absf(c.x / (z * th)) > 0.9 or absf(c.y / (z * tv)) > 0.66:
+					ok = false
+					break
+			if not ok:
+				break
+		if ok:
+			break
+		d *= 1.02
+	d *= margin
+	dist = d
+	_update_camera()
+	target += cam.global_transform.basis.y * (0.17 * d * tv)  # content moves down, leaving room for the title
+	_update_camera()
+	return d
+
+
+# Find a free screen spot for a label (optionally starting to the right of its part), nearest-first, avoiding earlier
+# labels; draws a leader line when the label ends up away from its part.
+func _declutter(pos: Vector3, side: bool, sc: float) -> Vector3:
+	var depth := (pos - cam.global_position).dot(-cam.global_transform.basis.z)
+	var home := cam.unproject_position(pos)
+	var vs := get_viewport().get_visible_rect().size
+	var start := home + (Vector2(90.0 * sc, 0) if side else Vector2.ZERO)
+	var bw := 150.0 * sc
+	var bh := 78.0 * sc
+	var offs: Array = []
+	for ix in range(-8, 9):
+		for iy in range(-8, 9):
+			offs.append(Vector2(ix * bw * 0.55, iy * bh * 0.8))
+	offs.sort_custom(func(a, b): return a.length_squared() < b.length_squared())
+	var sp := start
+	for o in offs:
+		var c: Vector2 = start + o
+		if c.y < 100.0 or c.y > vs.y - 60.0 or c.x < 40.0 or c.x > vs.x - 90.0:
+			continue
+		var clash := false
+		for q in label_px:
+			if absf(q.x - c.x) < bw and absf(q.y - c.y) < bh:
+				clash = true
+				break
+		if not clash:
+			sp = c
+			break
+	label_px.append(sp)
+	if sp.distance_to(home) > 40.0 * sc:
+		if leader_layer == null or not is_instance_valid(leader_layer):
+			leader_layer = CanvasLayer.new()
+			leader_layer.layer = 4
+			add_child(leader_layer)
+			extras.append(leader_layer)
+		var ln2 := Line2D.new()
+		ln2.points = PackedVector2Array([home, sp])
+		ln2.width = 3.0
+		ln2.default_color = Color(1.0, 0.95, 0.5)
+		leader_layer.add_child(ln2)
+		var dot := Polygon2D.new()
+		var pts := PackedVector2Array()
+		for i in 12:
+			pts.append(home + Vector2(cos(i * TAU / 12.0), sin(i * TAU / 12.0)) * 5.0)
+		dot.polygon = pts
+		dot.color = Color(1.0, 0.95, 0.5)
+		leader_layer.add_child(dot)
+	return cam.project_position(sp, depth)
+
+
+func _add_label(text: String, pos: Vector3, d: float, side: bool = false, sc: float = 1.0) -> void:
+	var l := Label3D.new()
+	l.text = text
+	l.billboard = BaseMaterial3D.BILLBOARD_ENABLED
+	l.no_depth_test = true
+	l.font_size = 96
+	l.pixel_size = d * 0.00055 * sc
+	l.outline_size = 28
+	l.outline_modulate = Color(0, 0, 0)
+	l.modulate = Color(1.0, 0.95, 0.5)
+	l.render_priority = 20
+	l.outline_render_priority = 19
+	l.position = _declutter(pos, side, sc)
+	add_child(l)
+	extras.append(l)
+
+
+func _arrow_mat() -> StandardMaterial3D:
+	var m := StandardMaterial3D.new()
+	m.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	m.albedo_color = ARROW_COLOR
+	m.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	m.no_depth_test = true
+	m.render_priority = 10
+	return m
+
+
+func _add_arrow(from: Vector3, to: Vector3, d: float) -> void:
+	var v := to - from
+	var ln := v.length()
+	if ln < 0.005:
+		return
+	var dir := v / ln
+	var r := d * 0.006
+	var head := minf(ln * 0.45, r * 5.0)
+	var ref := Vector3.RIGHT if absf(dir.dot(Vector3.RIGHT)) < 0.9 else Vector3.FORWARD
+	var bx := ref.cross(dir).normalized()
+	var bs := Basis(bx, dir, bx.cross(dir))
+	var mat := _arrow_mat()
+	var shaft := MeshInstance3D.new()
+	var cm := CylinderMesh.new()
+	cm.top_radius = r
+	cm.bottom_radius = r
+	cm.height = ln - head
+	cm.radial_segments = 16
+	shaft.mesh = cm
+	shaft.material_override = mat
+	shaft.transform = Transform3D(bs, from + dir * (ln - head) * 0.5)
+	add_child(shaft)
+	var cone := MeshInstance3D.new()
+	var cn := CylinderMesh.new()
+	cn.top_radius = 0.0
+	cn.bottom_radius = r * 2.6
+	cn.height = head
+	cn.radial_segments = 20
+	cone.mesh = cn
+	cone.material_override = mat
+	cone.transform = Transform3D(bs, to - dir * head * 0.5)
+	add_child(cone)
+	extras.append(shaft)
+	extras.append(cone)
+
+
+func _overlay(title: String, body: String, legend: String) -> void:
+	var layer := CanvasLayer.new()
+	layer.layer = 5
+	add_child(layer)
+	extras.append(layer)
+	var vs := get_viewport().get_visible_rect().size
+	var t := _ov_label(title, 56, Vector2(24, 12), vs.x - 48)
+	layer.add_child(t)
+	if body != "":
+		layer.add_child(_ov_label(body, 26, Vector2(26, 82), vs.x - 52))
+	if legend != "":
+		layer.add_child(_ov_label(legend, 22, Vector2(26, vs.y - 40), vs.x - 52))
+
+
+func _ov_label(text: String, fs: int, pos: Vector2, w: float) -> Label:
+	var l := Label.new()
+	l.text = text
+	l.position = pos
+	l.custom_minimum_size = Vector2(w, 0)
+	l.size = Vector2(w, 10)
+	l.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	l.add_theme_font_size_override("font_size", fs)
+	l.add_theme_color_override("font_color", Color(1, 1, 1))
+	l.add_theme_color_override("font_outline_color", Color(0, 0, 0))
+	l.add_theme_constant_override("outline_size", maxi(4, fs / 6))
+	return l
+
+
 func _pick_center(n: String, y: float, p: float, d: float) -> String:
 	yaw = y
 	pitch = p
@@ -459,6 +786,22 @@ func _run_check() -> void:
 			var m: StandardMaterial3D = parts["Base_Shell"].material_override
 			if m == null or not m.albedo_color.is_equal_approx(Color(want[0], want[1], want[2])):
 				errs.append("finish %s not applied" % k)
+			# 5. assembly step mode (last: leaves the scene in step state)
+			_apply_step(7)
+			var n_lbl := 0
+			for e in extras:
+				if e is Label3D:
+					n_lbl += 1
+			var want_lbl := 0
+			for n in parts:
+				var s: int = int(manifest.parts[n].get("step", 1))
+				var want_vis: bool = s <= 7 and not _hidden_in_instructions(n)
+				if parts[n].visible != want_vis:
+					errs.append("step 7: %s visible=%s, expected %s" % [n, parts[n].visible, want_vis])
+				if want_vis and s == 7 and _pid(n) != "":
+					want_lbl += 1
+			if n_lbl != want_lbl or want_lbl == 0:
+				errs.append("step 7: %d labels, expected %d" % [n_lbl, want_lbl])
 	print("CHECK RESULT: ", "FAIL " + "; ".join(errs) if errs else "PASS (%d parts, %d finishes)" % [parts.size(), fin.finishes.size()])
 	get_tree().quit(1 if errs else 0)
 
