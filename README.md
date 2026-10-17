@@ -11,6 +11,7 @@ A cute, friendly, premium-looking stationary home companion. **Simulation first,
 | Latest implementation, tests, risks and handoff | [HANDOFF](docs/HANDOFF.md) |
 | Current design and component discussion | [Issue #3](https://github.com/igalgerman/JARVIS/issues/3) and [design review](docs/reviews/S1_DESIGN_REVIEW.md) |
 | Milestones | [ROADMAP](docs/ROADMAP.md) |
+| **Engineering challenges, simulations and staged safety/quality reviews** | [ENGINEERING_REVIEW_GATES](docs/ENGINEERING_REVIEW_GATES.md) |
 | FreeCAD → Blender → Godot → Core boundaries | [ARCHITECTURE](docs/ARCHITECTURE.md) |
 | Rules for agents and selective reading | [AGENTS](AGENTS.md), [CONTEXT_MAP](docs/CONTEXT_MAP.md) |
 | Interactive viewer instructions | [godot/README](godot/README.md) |
@@ -32,7 +33,9 @@ After each milestone, link commits and test evidence to its Issue, close work th
 
 ## How we work
 
-**User approves appearance after hands-on simulation. Agents own technical explanations and evidence**, with plain-language comparisons; do not ask for blind sign-off on electronics or 3D printing. Prioritize simple printable replaceable parts, assembly instructions, fit evidence, and small physical test prints before full fabrication.
+**User approves appearance after hands-on simulation. Agents own technical explanations and evidence**, with plain-language comparisons; do not ask for blind sign-off on electronics or 3D printing. Prioritize simple printable replaceable parts, assembly instructions, and fit evidence; perform physical tests when risk-justified and separately approved, before claiming real-world safety or performance.
+
+**Progressive reviews, not endless redesign:** follow [the engineering review and simulation gates](docs/ENGINEERING_REVIEW_GATES.md) as the relevant milestones arrive: focused pre-CAD challenge, mechanical/print/assembly simulations, project-generated visual reviews, software fault simulation, purchase-readiness checks, physical safety/acoustic tests and final acceptance. Bring in an independent read-only reviewer at consequential decision gates, not for each small edit. Record evidence, unresolved risks and the next safe decision point; do not start unapproved stages or buy hardware just to explore alternatives.
 
 An approved milestone is worked autonomously in bounded steps with targeted checks; stop at its approval boundary. Fix geometry in FreeCAD, visual finish in Blender, scene interactions in Godot. Full details in [permanent principles](docs/PROJECT_PRINCIPLES.md).
 
