@@ -1,4 +1,4 @@
-# JARVIS — agent contract (Claude Code / Codex)
+# JARVES — agent contract (Claude Code / Codex)
 
 ## Read budget
 - First read **only** `AGENTS.md` and `docs/NOW.md`. Do not recursively read docs, browse the archive, or scan the entire repo.
