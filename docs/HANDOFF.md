@@ -101,11 +101,12 @@ The user clarified mid-milestone that the target is a **consumer-style build**: 
 | R3-1: Speaker look | The grille behind the fabric should remove the "wheel" look | **USER DECISION REQUIRED**: confirm in viewer |
 | R3-2: Exploded view / inventory clarity | Enough detail for this stage? | **USER DECISION REQUIRED** |
 | R3-3: Neck seat | Superseded: the R4 proposal replaces the tube/flange neck with one printed neck | **SUPERSEDED** by R4-1 |
-| **R4-1: Architecture** | Approve the 6-part simple build instead of refining the current one (no inserts, metal, acrylic, fabric, glue) | **USER DECISION REQUIRED** |
-| R4-2: Navy band | Clip-on navy half-rings (keeps finish C) vs single-colour base (simplest, cheaper) | **USER DECISION REQUIRED** |
-| R4-3: LED ring | Printed blank ring now, plug-in LED add-on later | **USER DECISION REQUIRED** |
-| R4-4: Camera | USB camera module (plug-in) instead of the Pi ribbon camera | **USER DECISION REQUIRED** |
-| R4-5: Base printing | Shop with 256 mm printers (one piece) vs split base parts for 250 × 210 printers | **USER DECISION REQUIRED** |
+| **R4-1: Architecture** | **B "head module + passive base"** (Pi in the head, printed neck column on the floor tray, 2 cables down the neck); fallback A′ (Pi in base) if the head heat test fails. Earlier 6-part proposal superseded. | **USER DECISION REQUIRED** |
+| R4-2: Navy band / face ring | Mid-print colour change (0 extra parts); single colour if the shop can't (clip-on halves rejected: rattle risk over speakers) | **USER DECISION REQUIRED** |
+| R4-3: LED ring | Printed blank ring now, plug-in LED add-on later (needs a no-solder 5 V / data solution) | **USER DECISION REQUIRED** |
+| R4-4: Camera | With B, Camera Module 3 on its short standard ribbon (no USB load); USB camera only for fallback A′ | **ANSWERED by engineering** (follows R4-1) |
+| R4-5: Base size / printing | Keep Ø210 + 256 mm shop (preferred) vs Ø194 base (fits 250 × 210, small visual change) vs split | **USER DECISION REQUIRED** (after shop gate G1) |
+| R4-7: Mic envelope | XVF3800 + raised crown pod vs ReSpeaker Lite under flat crown | **USER DECISION REQUIRED** (then gate G5) |
 | R4-6: Contact vendors | Prepare quote requests only after the design is approved; no contact without separate OK | **DEFERRED**: after R4-1 |
 | R3-4: microSD not reachable | Recommend USB/SSD boot or network updates rather than redesigning around the slot | **DEFERRED**: software/hardware prototype stage (#8) |
 | Mic crown / XVF3800 pod | Keep flat crown provisionally | **DEFERRED**: mic research gate |
@@ -115,12 +116,16 @@ The user clarified mid-milestone that the target is a **consumer-style build**: 
 | Printer / bed / material | Keep 220 mm compatibility + split fallback | **DEFERRED**: print planning gate |
 | Room placement / listening range | Undecided; no 3–5 m promise | **DEFERRED**: acoustics test planning |
 
-## Questions for the user (R4 — answer these first)
-1. Approve the **simple 6-part build** as the direction? (recommended)
-2. Navy band: **clip-on navy half-rings** or a **single-colour base**?
-3. LED ring: **blank first, LEDs later** (recommended), or LEDs required now?
-4. Camera: **USB camera module** (recommended)?
-5. Base: look for a **shop with 256 mm printers** (recommended), or accept **split** base parts?
+## Questions for the user (R4 FINAL — answer these first; supersede the earlier R4 list)
+Context: [S1_T03R4_FINAL_RECOMMENDATION.md](reviews/S1_T03R4_FINAL_RECOMMENDATION.md). An independent read-only reviewer formed its own alternatives first; I challenged them and made the final call.
+1. Approve **architecture B: "head module + passive base"** as the direction for the next CAD round?
+   - The Pi, display, camera and mic sit in the head, which can be tested on the table before closing.
+   - The base is a speaker stand with a printed neck column.
+   - Only 2 cables go down the neck. (recommended)
+2. **Base size:** keep Ø210 and find a shop with 256 mm printers (recommended), or accept a slightly smaller Ø194 base that fits 250 × 210 printers?
+3. **Mic envelope:** XVF3800 with a small raised crown pod (best pickup), or ReSpeaker Lite under today's flat crown (keeps the silhouette)?
+4. **Colours by mid-print colour change** (navy band, dark face ring), with a single colour if the shop can't do it?
+5. **LED ring:** a printed blank first, LEDs later as a plug-in add-on? (recommended)
 
 ## Questions for the user (R3, still open but lower priority)
 1. Does the new **LED ring** on the upper base edge look right (see `r3_led_closeup.png` / `r3_3q.png`), and is the **blank cover** look acceptable when the LEDs are not fitted?

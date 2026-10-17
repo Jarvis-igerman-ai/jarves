@@ -1,5 +1,7 @@
 # JARVES — simplest viable build: design-direction review (S1.T03R4)
 
+> **Superseded in part (17 Oct 2026):** see [S1_T03R4_FINAL_RECOMMENDATION.md](S1_T03R4_FINAL_RECOMMENDATION.md). An independent review found flaws in this proposal: the mic under the flat crown, the neck seat on the head seam and the thin base top, the closing/service sequence, and the USB camera load. It recommends putting the Pi in the head ("head module + passive base").
+
 **Status:** recommendation for your approval. **No further CAD redesign until you approve.** Nothing purchased, no supplier contacted, nothing printed.
 **Models:** Claude Opus 5.5 for the engineering judgement and this review. Delegated research: Haiku for the vendor search and Sonnet for the Godot image tooling, both re-checked by me.
 **Appearance preserved:** Pebble A shape, head proportions, side profile, finish C colours, speaker grille look, optional LED ring.
