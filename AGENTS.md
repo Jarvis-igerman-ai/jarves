@@ -31,6 +31,9 @@
 9. Never commit credentials. Keep external network access, microphone/camera permissions and destructive changes under explicit control.
 10. Claude Code and Codex: **one implementing owner at a time**. Optional second-agent review only when requested, based on a specific diff; never concurrent conflicting edits.
 
+## Future runtime operability gate (mandatory when software scope is approved)
+- Before implementing any Python Core, DevicePort, admin UI, networking or runtime service, read `docs/JARVES_CONTROLS_DIAGNOSTICS_REQUIREMENTS.md`. From the **first running Core↔Godot integration**, include bounded structured local logs, truthful health/error states, targeted disconnect/recovery tests, privacy-safe diagnostic export and a documented no-network troubleshooting path appropriate to the approved slice. Do not postpone all observability to the final hardware build or add heavyweight monitoring infrastructure. This rule **does not authorize** software work during the current mechanical milestone.
+
 ## Design constraints
 - For design, sourcing, printability, assembly, acoustics, component selection or service tasks, read `docs/PROJECT_PRINCIPLES.md` after the two default entry files. Explain physical choices to the user in plain language and flag what must be physically tested.
 - The user buys hardware in Israel: require credible local stock, VAT-inclusive ILS price, warranty, delivery and available substitutes. Import-only options are fallback, never assume local availability. No final SKU or purchasing approval yet.
