@@ -1,4 +1,23 @@
-# Current handoff
+# Current handoff — 17 October 2026
+
+## Active authorized milestone
+
+**S1.T03R2 — Pebble A visual redesign, [Issue #4](https://github.com/igalgerman/JARVIS/issues/4).** Approved for implementation in [NOW.md](NOW.md). One implementing agent; this management/documentation update does not establish implementation progress, test success, or visual approval.
+
+**Source of truth:** [NOW.md](NOW.md) controls current scope and approval; [ROADMAP.md](ROADMAP.md) is planning only; [PROJECT_PRINCIPLES.md](PROJECT_PRINCIPLES.md) and [AGENTS.md](../AGENTS.md) govern execution. The previous S1.T03R1 decision-request below is historical, **not the active authorization gate**. No part SKU, purchase, microphone distance, printable release or software feature is approved.
+
+**Completion pending:** FreeCAD source geometry and credible head-to-body load path → downstream Blender appearance/color variants → Windows Godot interactive viewer; focused evidence, multi-angle screenshots, commit linked to #4, remaining physically UNVERIFIED assumptions, and user visual review. Do not mark #4 completed without acceptance evidence. Avoid disrupting any agent's in-progress implementation.
+
+**Future work parked:** #2 CI; #5 evidence-based library evaluation before software implementation; #6 minimal Core integration; #7 face/voice; #8 hardware prototype preparation. Do not open duplicate speculative issues. Close verified completed issues with evidence at milestone boundaries, retain history, and do not bulk-delete project assets.
+
+**Agent transition (Claude Code ↔ Codex):** one writer at a time; finish/commit current work, update this handoff with actual changed paths, checks and blockers, then have receiving agent pull the latest. Feedback travels back to the owning source (FreeCAD/Blender/Godot/Core), followed by *only necessary* downstream rebuild and focused tests.
+
+**Next implementing-agent action:** read NOW and Issue #4, check branch/worktree for current progress, and continue only the approved visual milestone; replace this status with factual commits/tests on delivery. No implementation completion has been verified by this documentation update.
+
+---
+
+## Archived S1.T03R1 research handoff (historical reference; superseded as active status)
+
 Task: S1.T03R1 — Pebble A component selection & engineering fit review (Issue #3). Status: REVIEW DELIVERED, awaiting user decisions. **Research/design only: no purchase, no SKU lock, no CAD/Blender/Godot redesign; S1.T04 not started.**
 Model: Claude Opus 5.5 (`claude-opus-5-5`).
 Read first: `docs/reviews/S1_T03R1_ENGINEERING_REVIEW.md` (bottom line, display/mic tables with Israel sourcing, fit study, dimensions, structure, assembly, cables/power, cooling, SSD, risks, validation plan, checklist, decisions, sources).
