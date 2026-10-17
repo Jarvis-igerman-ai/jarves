@@ -5,6 +5,7 @@
 | Durable project principles, printability, Israel sourcing and user decisions | `PROJECT_PRINCIPLES.md` |
 | Current scope / next action | `NOW.md` (always) |
 | Layer boundaries and model pipeline | `ARCHITECTURE.md` |
+| JARVES user controls, optional touch, phone/PC admin, safe shutdown, debug logging, remote connection and offline recovery | `JARVES_CONTROLS_DIAGNOSTICS_REQUIREMENTS.md` |
 | Simulated vs physical GPIO/camera/audio contracts | `DEVICE_CONTRACT.md` |
 | Face renderer same on desktop/device | `FACE_RUNTIME.md` |
 | Historical decisions and alternatives | `archive/DECISIONS.md` |
