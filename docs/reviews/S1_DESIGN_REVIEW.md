@@ -4,6 +4,8 @@
 **Status:** review artifacts only. **No CAD/Blender/Godot redesign has been implemented.** Waiting for the user to choose a concept.
 **Scope guard:** these are visual concepts plus a mechanical/acoustic analysis. All sizes are approximate and PROVISIONAL. All loads, masses, tolerances and acoustic figures are UNVERIFIED.
 
+> **Update 2026-10-17 (S1.T03R1):** see [`S1_T03R1_ENGINEERING_REVIEW.md`](S1_T03R1_ENGINEERING_REVIEW.md), which supersedes component sizes and the mic-cap recommendation below. The measured XVF3800 is about 100.5×101.8×9 mm, not 108×108×18. A flush flat cap is not workable with short ports, so a raised crown pod is proposed. The locally available 5″ display drives a W215 head. Israel sourcing has been added.
+
 ## Summary for the managing agent
 - **Delivered:** commit `874f8a2` on `main` (Refs #3), with a summary comment on Issue #3. No redesign has been implemented, and S1.T04 has not started.
 - **CAD finding:** measured in FreeCAD, the head sits 1.0 mm above the body with zero contact, so it is unconnected. The rear has no fasteners, vents, power inlet or cable route. Every internal part is an envelope placeholder, and no wiring is modelled. The purple block (`Reserve_USB_Hub`) is spare volume, not a device.

@@ -1,6 +1,6 @@
 # NOW — S1.T03R1: JARVES Pebble A component selection and engineering fit review
 
-**Status:** APPROVED for research/design ONLY. Owner: one agent. Parent: [Issue #3](https://github.com/igalgerman/JARVIS/issues/3).
+**Status:** REVIEW DELIVERED 2026-10-17 (`docs/reviews/S1_T03R1_ENGINEERING_REVIEW.md`), awaiting user decisions. Was: APPROVED for research/design ONLY. Owner: one agent. Parent: [Issue #3](https://github.com/igalgerman/JARVIS/issues/3).
 
 ## Confirmed brief
 Pebble **A** with premium, cute/friendly appearance, flat display face facet and flat top microphone cap. Slightly enlarged envelope is permissible only for compelling fit, stability or acoustics. Target room **35–50 m²**, talking distance **3–5 m**. No final screen or mic board selected, no hardware purchase authorized.
