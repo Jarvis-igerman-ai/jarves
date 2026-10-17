@@ -48,6 +48,16 @@
 
 **Agent transition (Claude Code ↔ Codex):** one writer at a time. Finish and commit current work, update this handoff with the actual changed paths, checks and blockers, then have the receiving agent pull the latest. Feedback travels back to the owning source (FreeCAD/Blender/Godot/Core), followed by *only necessary* downstream rebuilds and focused tests.
 
+## User visual feedback and next review requirements — 17 Oct 2026
+
+User inspected the actual Godot Pebble A screenshots (front, 3/4, side, rear, shell-hidden front/side/top/rear). **Likes the appearance very much; prefers finish C (white head / sky-blue base / navy band), approves the current side head profile.** Preserve these choices; do not propose head reshaping or A/B finish again without a concrete reason. Finish C is a visual preference, **not final filament/material/procurement approval**.
+
+**Review observations (from screenshots; not verified physical defects):** the bottom speaker openings look somewhat wheel-like; verify speaker grille/enclosure presentation, rear service cover and ventilation accessibility, neck cable/strength/fastener path and stability. No major shape redesign requested. Need a comprehensible standalone printable-part inventory and exploded assembly illustration/sequence identifying printed, purchased and placeholder parts, fastening, cable access and print orientation. These are **proposed deliverables for a separately approved follow-up**; do not silently implement outside NOW.
+
+**Automatic visual evidence:** future visual milestones should export real Godot/Blender snapshots and link them in the handoff/review so user need not take screenshots. Keep render cost bounded; headless images complement but do not replace the user's interactive visual check. Follow AGENTS.md.
+
+**Question follow-up:** overall look = ANSWERED (liked); side head profile = ANSWERED (keep current); finish = ANSWERED (prefer C); light ring location = OPEN, not yet approved; mic crown = needs explanation and later component gate. Purchases, exact listening range, printer and hardware SKU remain DEFERRED. Suggestions for ring elevation and no protruding crown are recommendations, not user decisions.
+
 ## Decision queue — management triage (17 Oct 2026; no user visual approval yet)
 
 | Agent question | Recommendation / reason | Status / revisit gate |
