@@ -16,6 +16,18 @@ Audio *streams* and raw camera frames MUST use appropriate streams/references, n
 For manufacturing: `FreeCAD -> STL/3MF -> print/slice`; not `Blender -> STL`.
 FreeCAD unit: mm; Godot: meters (`1000 mm = 1 m`). Stable, readable part IDs across exports.
 
+## Bidirectional review and downstream consistency
+
+**Production flow:** FreeCAD → Blender → Godot; separately, FreeCAD → manufacturing export → slicer/print. Python Core → DevicePort integrates behavior and devices when that work is authorized.
+
+**Review flow:** A defect discovered anywhere may require a correction in an earlier owning layer. Diagnose first, correct the **source of truth**, then regenerate and verify affected downstream consumers:
+- Mechanical form, structural mount, dimensions, cable clearance: **FreeCAD → Blender → Godot** (and manufacturing outputs if they exist).
+- Surface finish, colors, material presentation: **Blender → Godot** only.
+- Camera navigation, viewer interaction, runtime face/UI: **Godot** only, except when underlying assets or geometry are actually wrong.
+- Behavior or device contracts: **Core/DevicePort** and affected UI/integration checks only.
+
+**Never reverse-export visual mesh edits into authoritative FreeCAD dimensions.** Avoid unnecessary full rebuilds. Record the owner, changed dependencies, validation and still-provisional assumptions in the issue/handoff. Physical proof requires real tests.
+
 ## Product transition (not current implementation)
 `Python Core` and device event semantics remain; active device adapter changes. Godot 3D simulator is not required on the product screen, but the face animation scene/state schema should be shared. Godot ARM64 performance on Pi 5 is **UNVERIFIED**; if inadequate, replace display adapter only, preserve behavior contract. FreeCAD/Blender not installed on robot.
 

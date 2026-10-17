@@ -27,10 +27,20 @@
 
 ## Evidence and purchasing gates
 - Mark every relevant claim as **VERIFIED BY SOURCE**, **PROVISIONAL**, or **REQUIRES PHYSICAL TEST**. State source and date when applicable. A vendor performance claim is not a validated result.
-- Living room target **35–50 m²**, speaking range **3–5 m**; this is a **test target**, not a guarantee. Test with TV/music, barge-in, echo and reverberation later.
+- Room size estimate **35–50 m²**; **required voice pickup distance is NOT YET DECIDED**. Earlier 3–5 m was exploratory, not an approved specification. Revisit later with placement, room acoustics, realistic cost/complexity tradeoffs and tests with TV/music, barge-in and echo. Do not hard-code 5 m into hardware selection.
 - Compare 2–3 display options and XVF3800 vs alternatives, but **do not finalize SKU, price ceiling, purchases or color palette** until the user has reviewed the options.
 - Before buying or printing the full enclosure: provide a **human-readable BOM**, labelled internal/exploded view, fit checks, step-by-step assembly pictures, top 3–5 failure risks, and a plan for cheap **small test prints** (mount, insert and connector samples). Evidence must support sign-off.
 - If large size/expense/complexity is proposed, show the tangible benefit and a simpler alternative. Prefer a modest A Pebble envelope.
+
+## Repository and issue hygiene (persistent rule)
+- At each **completed milestone**, review tracked files/diffs: keep source, essential reproducible assets, working previews and key decisions; exclude caches, binaries/installers, temporary renders, debug dumps, duplicate exports and local environments through appropriate ignore rules. Do not indiscriminately delete existing tracked files or history. Propose substantial cleanup separately before destructive changes.
+- Treat **GitHub Issues as the task ledger**: each issue states scope, acceptance, evidence and linked commits/PR. On completion, record what was verified, remaining follow-ups and exact commit, then **close the issue** when acceptance is satisfied; otherwise keep open with explicit blockers or split a follow-up issue. Do not leave completed work open indefinitely. Never delete issues to tidy: use closed history, avoid duplications, and periodically review stale open issues.
+- Keep README as a concise navigation index and docs/HANDOFF.md as the latest status; archive superseded details rather than duplicating or repeatedly rewriting everything. Avoid a massive context load.
+
+## Model and tool portability
+- Preserve a **provider-neutral workflow** across Claude Code and Codex: GitHub Issue scope → short plan → targeted changes → focused tests → linked commit → concise handoff → approval gate. The repository, not chat history, carries durable decisions.
+- Spend premium reasoning selectively on architecture, design judgement and hard troubleshooting; routine coding/validation/docs use the cheaper suitable model **when it truly saves overall effort**. Do not prescribe the same vendor/version for different tools or trigger repeated context reloads for trivial savings.
+- For a switch between agents, finish the current write, commit, update `docs/HANDOFF.md`, and make sure the next agent pulls before changing anything. One active implementer at a time.
 
 ## Agent operating contract
 - Scope is governed by `docs/NOW.md`. GitHub Issues record proposals, decisions, review findings and commit links; an Issue is not automatic permission to implement every future stage.

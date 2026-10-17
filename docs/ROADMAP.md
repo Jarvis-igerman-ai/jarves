@@ -1,33 +1,25 @@
-# JARVES / JARVES Roadmap
+# JARVES — roadmap and milestones
 
-> Planning document only. The **current approved scope** lives in `docs/NOW.md`.
+> Planning and future backlog only. **Only [docs/NOW.md](NOW.md) authorizes work.** Future Issues are NOT permission to start them.
 
-| Milestone | Scope | Output | Status |
+## Current and upcoming
+
+| Stage | Goal | Issue | State |
 |---|---|---|---|
-| 1. FreeCAD | enclosure, slots, internals, fit assumptions | parametric CAD and part exports | blockout done; geometry provisional |
-| 2. Blender | CAD-based materials, lighting and renderable model | blend, glb and renders | S1.T02 agent-reported DONE; review pending |
-| 3. Godot | interactive Windows digital twin | orbit/zoom, part inspection, shell/internal views, basic face placeholder | next; not started |
-| 4. Simulated behaviors | Python Core, assistant, state, voice and mocked devices | working simulated interactions | future |
-| 5. Physical robot | verified dimensions, printed enclosure, Pi/peripheral integration | stationary hardware prototype | future |
+| 1. CAD / visual baseline | FreeCAD structural and printable geometry, Blender visuals | [#3](https://github.com/igalgerman/JARVIS/issues/3) | Preliminary design review delivered; unresolved engineering choices |
+| 2. Interactive Windows viewer | Orbit, part inspection, shell/interior visibility | [#1](https://github.com/igalgerman/JARVIS/issues/1) | Initial viewer implemented; review/follow-up pending |
+| **3. Visual design iteration — NOW** | Pebble A mechanical source update → Blender → Godot, interactive review | [#4](https://github.com/igalgerman/JARVIS/issues/4) | **Approved; current milestone** |
+| Parallel foundation (separate approval) | Minimal real GitHub Actions CAD smoke | [#2](https://github.com/igalgerman/JARVIS/issues/2) | Open, no active CI |
+| 4. Software research | Evidence-based review of high-quality maintained libraries and SDKs | [#5](https://github.com/igalgerman/JARVIS/issues/5) | Parked |
+| 5. Software skeleton | Godot ↔ Python Core ↔ mocked DevicePort, single working scenario | [#6](https://github.com/igalgerman/JARVIS/issues/6) | Parked; after #5 |
+| 6. Face + voice | User-reviewed expressions, speech prototype, measured tradeoffs | [#7](https://github.com/igalgerman/JARVIS/issues/7) | Parked; after #5 and #6 |
+| 7. Physical readiness | Locally available components, verified fit, test coupons, assembly plan | [#8](https://github.com/igalgerman/JARVIS/issues/8) | Parked; requires explicit purchase/print gates |
+| 8. Physical build | Printed and assembled stationary robot with tested Pi/peripherals | New issue **only when approved** | Not scheduled |
 
-## Iterative visual review and rework (important)
+## Design feedback workflow
+Work forward **FreeCAD → Blender → Godot**, but process feedback back to the **owning source layer** (geometry and mounts in FreeCAD, finishes in Blender, runtime/UI in Godot, behavior in Core/DevicePort). Re-export only affected downstream assets; focused verification at boundaries; user approval after each review round. Never patch physical geometry only in Godot. Manufacturing path is FreeCAD → slicer → 3D print.
 
-The first Godot demo is **not** a final sign-off. Expect multiple user review rounds and corrections to earlier layers. The cycle is:
+## Durable rules
+Read [AGENTS.md](../AGENTS.md) for agent execution policy and [PROJECT_PRINCIPLES.md](PROJECT_PRINCIPLES.md) for design, buildability, Israel sourcing, budget and repository hygiene. Avoid premature part selection: no final display/mic/SSD choice, no hardware orders or print approval. Exact listening range is undecided. Library research first, then software implementation rather than reinventing systems.
 
-1. Show a runnable Godot build, screenshots/video and short list of what is implemented vs provisional.
-2. Collect the user's observations, preferably annotated with screenshot, part name, expected result and severity.
-3. Triage each issue to its **source-of-truth layer**:
-   - **FreeCAD**: shape, dimensions, mechanical clearance, mounting positions, fit and manufacturing constraints.
-   - **Blender**: material, color, styling, visual finish, lighting and render asset errors.
-   - **Godot**: interactions, import/scaling, camera, scene wiring, runtime graphics and UI.
-   - **Python Core/DevicePort** (when introduced): behavior, event flow, simulated devices.
-4. Fix **upstream first**; if FreeCAD changes, repeat the appropriate CAD → Blender → Godot export/import steps. Never hide a geometry mistake with a visual-only patch.
-5. Run focused validation of changed layers plus one downstream integration check. Present a fresh reviewable build, short changelog and open issues.
-6. Repeat until the user approves the **review milestone**. Approval applies to the specified milestone, not the entire final product.
-
-Batch related notes into review rounds to minimize context switches and token use. Do not make the agents request permission for each small fix **within an approved review round**. Escalate breaking architecture changes, significant new scope, costs, or blockers.
-
-## Next approval gate
-Review `blender/JARVIS_render.png`, `blender/JARVIS_internals_render.png` and the glb. Agent reports CAD and Blender smoke checks passed; ensure failures produce nonzero exit codes. Then explicitly approve S1.T03 if acceptable. S1.T03 should build the smallest useful Godot inspector; do not silently start voice, AI, networking or hardware.
-
-Refer to `docs/ARCHITECTURE.md` and `docs/HANDOFF.md` for technical details and known limitations.
+Keep the README concise; record tests, actual commits, blockers and handoff in [HANDOFF.md](HANDOFF.md). Close Issues whose acceptance criteria are completed; don't delete history or create overlapping speculative tasks.

@@ -25,7 +25,10 @@ FreeCAD CAD blockout, Blender renders/concepts and a working Windows Godot viewe
 
 **Current gate:** verify realistic display and microphone options, assembly, printability, exact internal fit, accessible wiring and cooling, possible future SSD space and practical risk tests. User buys parts **in Israel**: prefer easy local procurement with actual stock, VAT-inclusive pricing, warranty, delivery and credible substitutions. Imports are fallback only. No fixed budget, final component SKU or purchase authorization.
 
-Living room target: 35–50 m², speech at 3–5 m; this is a testing goal, not a guarantee. GitHub Actions CI is not active ([Issue #2](https://github.com/igalgerman/JARVIS/issues/2)).
+Room estimate: 35–50 m². **Voice pickup distance undecided**: revisit realistic range, device placement and acoustics later; previous 3–5 m is an exploratory scenario, not a binding requirement. GitHub Actions CI is not active ([Issue #2](https://github.com/igalgerman/JARVIS/issues/2)).
+
+## Repository hygiene
+After each milestone, link commits and test evidence to its Issue, close work that meets acceptance, and keep open blockers visible. Exclude caches, throwaway outputs and duplicate builds; never mass-delete valuable project files or history without review. [Persistent rules](docs/PROJECT_PRINCIPLES.md).
 
 ## How we work
 

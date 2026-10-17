@@ -4,6 +4,13 @@
 - First read **only** `AGENTS.md` and `docs/NOW.md`. Do not recursively read docs, browse the archive, or scan the entire repo.
 - If the task requires more information, open **only the specific file** named in `docs/CONTEXT_MAP.md`. Never load documents "just in case".
 
+## Model selection and token budget — Claude Code AND Codex
+- **Reasoning-first, execution-efficient:** use the strongest *actually available* model for bounded architecture, difficult mechanical/design decisions, and stubborn cross-layer failures. Use an appropriate faster/cheaper available model for routine edits, exports, focused tests and documentation. Do not assume Claude model names or subscription quotas apply to Codex; use equivalent roles, not fictional cross-provider model IDs.
+- Prefer **one implementing owner** and a compact approved plan. Avoid repeatedly switching models when reloading context would negate savings; a hard task may be cheaper end-to-end on a stronger model.
+- Escalate to stronger reasoning only when warranted by complexity or repeated failure (within the two-attempt debugging limit). No automatic premium-model chains or duplicated agent reviews.
+- Both Claude Code and Codex must use **the same GitHub Issues, commits, docs/NOW.md, docs/HANDOFF.md and source-of-truth pipeline**. Handoff between tools: stop current writer, commit a clean state, record tests/blockers and next action, then let the other tool pull and resume. Never have both agents editing the same files concurrently.
+- Neither agent can inspect the other's remaining quota without explicit available data. Do not invent token savings or model availability. Report model used when known; user decides whether to spend premium quota.
+
 ## Execution rules (mandatory)
 1. **One approved task per session.** Work only within the scope and files of `docs/NOW.md`. When done, STOP; do not auto-start the next task.
 2. Before writing code, output **up to five short plan steps**, impacted files and **one verification action**. If requirements are ambiguous or unverified critical data is needed, ask first.
@@ -24,6 +31,18 @@
 - CAD model (FreeCAD) defines geometry; Blender creates visual assets; Godot simulates interactions; Python Core handles behavior; physical I/O behind one DevicePort boundary.
 - The same *face scene/state machine* should be reused on the future device if Godot on Raspberry Pi passes performance tests. Blender/FreeCAD never run on-device.
 - Do not implement later stages. `docs/NOW.md` alone grants current scope.
+
+## Change propagation — mandatory
+- For every user-reported issue, identify the **owning source layer** before editing: FreeCAD = physical geometry, dimensions, printability and mounts; Blender = materials, visual finish and exported asset appearance; Godot = viewer interactions, rendering and runtime UI; Python Core/DevicePort = behavior and hardware abstraction when those stages exist.
+- **Feedback may travel backward** to any upstream owner. Apply the fix at the authoritative layer, then regenerate/reimport **only affected downstream outputs** and run focused checks at changed boundaries. Never patch a geometry/fit defect solely in Blender or Godot.
+- No need to propagate a local-only fix upstream: Godot UI/camera changes stay in Godot; Blender-only material changes need only refresh downstream visuals, not FreeCAD.
+- On handoff describe: problem → root cause/owning layer → files changed → downstream artifacts refreshed → checks actually passed or not tested. Mark unverified physical claims explicitly.
+- Don't silently expand the approved milestone while propagating a correction; request approval if a necessary fix materially changes scope.
+
+## Closeout housekeeping
+- On milestone completion, record acceptance evidence and linked commit/PR in the Issue; close completed Issues, leave blocked/unfinished ones open with reason. Avoid duplicate Issues and check stale open work periodically.
+- Review changes for tracked caches, duplicate generated files, temporary artifacts and scratch outputs; ignore or clean **only clearly safe** disposable artifacts in scope. Never do sweeping deletion of source, essential renders or historical data without approval. Update README links if authoritative file locations change.
+- Spoken-distance expectations are undecided; earlier 3–5 m is only an exploratory research scenario, not a fixed requirement.
 
 ## End-of-task response: 6 lines max
 Outcome; changed files; one command to reproduce; check actually run/result; blockers/UNVERIFIED; proposed next task (NOT started).
