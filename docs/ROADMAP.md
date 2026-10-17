@@ -1,4 +1,4 @@
-# JARVIS / Peri Roadmap
+# JARVES / JARVES Roadmap
 
 > Planning document only. The **current approved scope** lives in `docs/NOW.md`.
 
