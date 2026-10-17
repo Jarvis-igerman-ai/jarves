@@ -1,6 +1,10 @@
 # Current handoff — 17 October 2026
 
-## Active milestone — S1.T03R4 PAUSED at the design-direction gate (awaiting user approval)
+## Active milestone — S1.T03R5 decision made, CAD implementation not started
+
+User chose (17 Oct 2026): improve the simple Pi-in-base build. Engineering decision recorded in [S1_T03R5_DESIGN_DECISION.md](reviews/S1_T03R5_DESIGN_DECISION.md). Next agent: implement it in CAD (see its "Next" section). The R4 notes below are history.
+
+## Previous: S1.T03R4 design-direction gate
 
 The user clarified mid-milestone that the target is a **consumer-style build**: place ready-made modules, plug in ready-made cables, close with a screwdriver. That means no soldering, glue, drilling, cutting, filing, custom cables or specialist tools. They asked for a simplest-design recommendation **before** any further CAD redesign.
 
