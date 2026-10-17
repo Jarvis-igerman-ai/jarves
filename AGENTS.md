@@ -4,6 +4,13 @@
 - First read **only** `AGENTS.md` and `docs/NOW.md`. Do not recursively read docs, browse the archive, or scan the entire repo.
 - If the task requires more information, open **only the specific file** named in `docs/CONTEXT_MAP.md`. Never load documents "just in case".
 
+## Model selection and token budget — Claude Code AND Codex
+- **Reasoning-first, execution-efficient:** use the strongest *actually available* model for bounded architecture, difficult mechanical/design decisions, and stubborn cross-layer failures. Use an appropriate faster/cheaper available model for routine edits, exports, focused tests and documentation. Do not assume Claude model names or subscription quotas apply to Codex; use equivalent roles, not fictional cross-provider model IDs.
+- Prefer **one implementing owner** and a compact approved plan. Avoid repeatedly switching models when reloading context would negate savings; a hard task may be cheaper end-to-end on a stronger model.
+- Escalate to stronger reasoning only when warranted by complexity or repeated failure (within the two-attempt debugging limit). No automatic premium-model chains or duplicated agent reviews.
+- Both Claude Code and Codex must use **the same GitHub Issues, commits, docs/NOW.md, docs/HANDOFF.md and source-of-truth pipeline**. Handoff between tools: stop current writer, commit a clean state, record tests/blockers and next action, then let the other tool pull and resume. Never have both agents editing the same files concurrently.
+- Neither agent can inspect the other's remaining quota without explicit available data. Do not invent token savings or model availability. Report model used when known; user decides whether to spend premium quota.
+
 ## Execution rules (mandatory)
 1. **One approved task per session.** Work only within the scope and files of `docs/NOW.md`. When done, STOP; do not auto-start the next task.
 2. Before writing code, output **up to five short plan steps**, impacted files and **one verification action**. If requirements are ambiguous or unverified critical data is needed, ask first.
