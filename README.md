@@ -17,11 +17,11 @@ A cute, friendly, premium-looking stationary home companion. **Simulation first,
 
 ## Current snapshot — 17 October 2026
 
-FreeCAD CAD blockout, Blender renders/concepts and a working Windows Godot viewer exist. On the configured PC launch `godot/run_viewer.cmd`.
+**Pebble A visual review candidate** (Issue #4): CAD `cad/JARVIS_pebble.FCStd` (generator `cad/build_pebble.py`) → Blender (`blender/finishes.json`, renders in `blender/renders/`) → Godot viewer. On the configured PC launch `godot/run_viewer.cmd`. Review summary: [S1_T03R2_PEBBLE_VISUAL](docs/reviews/S1_T03R2_PEBBLE_VISUAL.md). The old blockout (`cad/JARVIS_blockout.FCStd`) is kept as "before".
 
-**Design direction:** improved A Pebble: cute, friendly and premium, with a practical flat display face and mic top. Colors, finishes, precise model and components remain undecided. Expect multiple visual review rounds after the user tries the simulator.
+**Design direction:** improved A Pebble: cute, friendly and premium, with a practical flat display face and mic top. Three finishes are provisional; colors, precise model and components remain undecided. Expect multiple visual review rounds.
 
-**Critical physical problem:** current CAD head is separated from the body by 1 mm. A genuinely strong, serviceable head/neck/chassis connection has not been built or physically validated.
+**Physical status:** the CAD head is now connected through a continuous neck/spine/chassis load path (geometry-checked). Strength, tip safety and tolerances are **not physically validated**.
 
 **Current gate:** verify realistic display and microphone options, assembly, printability, exact internal fit, accessible wiring and cooling, possible future SSD space and practical risk tests. User buys parts **in Israel**: prefer easy local procurement with actual stock, VAT-inclusive pricing, warranty, delivery and credible substitutions. Imports are fallback only. No fixed budget, final component SKU or purchase authorization.
 
