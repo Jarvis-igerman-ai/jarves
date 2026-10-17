@@ -1,6 +1,6 @@
 # NOW — S1.T03: Godot interactive 3D digital twin
 
-**Status:** APPROVED by user (17 Oct 2026), awaiting agent execution. **Previous:** S1.T02 Blender reported DONE; review the assets as part of this visual milestone. **Owner:** one implementing agent.
+**Status:** executed; review candidate delivered (see HANDOFF.md), awaiting user review. **Previous:** S1.T02 Blender reported DONE; review the assets as part of this visual milestone. **Owner:** one implementing agent.
 
 ## Objective
 Build the smallest useful **runnable Windows Godot 3D viewer** of the stationary Peri/JARVIS robot from the existing CAD-derived `blender/JARVIS.glb`, for hands-on user visual review.
