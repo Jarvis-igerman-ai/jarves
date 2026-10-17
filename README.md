@@ -1,4 +1,4 @@
-# JARVIS / Peri
+# JARVES / JARVES
 
 Stationary personal companion robot: **simulation first**, physical prototype later.
 
