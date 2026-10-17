@@ -1,6 +1,6 @@
 # NOW — S1.T03R4: Assembly & print-shop readiness (Issue #4 follow-up)
 
-**Status:** S1.T03R5 architecture review delivered (`docs/reviews/S1_T03R5_ARCHITECTURE_REVIEW.md`, recommends R5b "structural base cover", no chassis). Awaiting approval before CAD. Approved by user 17 Oct 2026.
+**Status:** **R5b APPROVED for CAD implementation + focused no-purchase feasibility checks** by user, 17 Oct 2026 ([authorization in Issue #4](https://github.com/igalgerman/JARVIS/issues/4#issuecomment-6240553020)). Design basis: `docs/reviews/S1_T03R5_ARCHITECTURE_REVIEW.md` (Pi in base; structural ribbed base cover; no separate chassis). **No purchase, supplier contact or physical print authorized.**
 
 ## Goal
 JARVES must be realistically printable by an ordinary Haifa/Krayot 3D-printing service, affordable, and practical for a beginner to assemble at home (see `docs/PROJECT_PRINCIPLES.md` → "Local print-shop feasibility").
@@ -17,6 +17,13 @@ Pebble A, finish C, current head proportions, R3 speaker grilles and removable L
 
 ## Not in scope
 Purchases, contacting suppliers, physical printing, final SKUs, software features, CI.
+
+
+## R5b implementation acceptance (user-approved, bounded)
+- Implement **real parametric CAD and accessible novice assembly** for the R5b structure. Verify joint load path, realistic fastener/nut/tool access, component STEP fit and cable routing (including the mic-in-head to speaker-in-base lead). Fix genuine problems at the CAD owner; do not force a number of parts or screws.
+- Research vendor-documented plug-and-play mic→speaker compatibility, amplifier and USB-power budgets, connector and ribbon fit; source only credible evidence. Clearly flag physical unknowns.
+- Produce revised printer-ready **draft** part exports, actual slicer report, cost **estimate**, correct visual exports to Blender/Godot, exploded view and illustrated assembly/BOM. Preserve the accepted exterior and optional LED.
+- Follow [engineering review gates](ENGINEERING_REVIEW_GATES.md) with **targeted no-purchase checks**; don't require exploratory purchases just to choose architecture. Hand off measured vs estimated vs untested results, commit and **stop at the next user review**.
 
 ## Completion gate
 Plain-language answers (Haifa printability, cost range from evidence, assembly difficulty, what remains unverified); HANDOFF + Issue updated; commit; STOP for user review.
