@@ -19,6 +19,12 @@
 - Leave **modest, justified** expansion room and accessible connections, not arbitrary empty bulk. Evaluate a future **M.2 SSD + adapter, 2.5-inch SSD, or external USB SSD**; do **not** install or lock one now. Consider added power, cabling, heat and center of mass.
 - Design for adequate ventilation, acoustic isolation, accessible wiring/power strain relief and realistic tolerances. Model/diagram where useful but do not overspecify beyond the approved milestone.
 
+## Israel-first procurement — mandatory
+- The user lives in **Israel** and wants parts easy to source locally. **Prioritize verified inventory at Israeli retailers**, VAT-inclusive ILS prices, reasonable local delivery, warranty and return options.
+- For each significant display, mic, speaker, power or storage recommendation, record a real product URL, seller, checked date, availability, delivered cost and (if possible) a locally obtainable alternative. Distinguish in-stock locally from "ships to Israel", preorder and speculative listings.
+- Import-only specialist parts are fallback options with explicit risks, never unnoticed single points of dependency. Do not make cosmetic/mechanical commitments to unavailable parts.
+- No fixed budget or final component/vendor choice has been approved. Present options and leave the purchase decision to the user.
+
 ## Evidence and purchasing gates
 - Mark every relevant claim as **VERIFIED BY SOURCE**, **PROVISIONAL**, or **REQUIRES PHYSICAL TEST**. State source and date when applicable. A vendor performance claim is not a validated result.
 - Living room target **35–50 m²**, speaking range **3–5 m**; this is a **test target**, not a guarantee. Test with TV/music, barge-in, echo and reverberation later.
