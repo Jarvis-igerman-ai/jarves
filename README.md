@@ -12,6 +12,7 @@ A cute, friendly, premium-looking stationary home companion. **Simulation first,
 | Current design and component discussion | [Issue #3](https://github.com/igalgerman/JARVIS/issues/3) and [design review](docs/reviews/S1_DESIGN_REVIEW.md) |
 | Milestones | [ROADMAP](docs/ROADMAP.md) |
 | **Engineering challenges, simulations and staged safety/quality reviews** | [ENGINEERING_REVIEW_GATES](docs/ENGINEERING_REVIEW_GATES.md) |
+| **Future personal assistant, Skills, YouTube Music, controls and diagnostics** | [JARVES software requirements](docs/JARVES_CONTROLS_DIAGNOSTICS_REQUIREMENTS.md) |
 | FreeCAD → Blender → Godot → Core boundaries | [ARCHITECTURE](docs/ARCHITECTURE.md) |
 | Rules for agents and selective reading | [AGENTS](AGENTS.md), [CONTEXT_MAP](docs/CONTEXT_MAP.md) |
 | Interactive viewer instructions | [godot/README](godot/README.md) |
