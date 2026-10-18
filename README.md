@@ -24,6 +24,8 @@ A cute, friendly, premium-looking stationary home companion. **Simulation first,
 **Software SW-V1 (in review):**
 - A working Python Core (`core/`) runs the face (Godot) end to end.
 - Everything is ready for OpenAI GPT-Live voice + GPT-6 agent + web search, but those need your `OPENAI_API_KEY`.
+- Or connect your **ChatGPT plan** (`jarves chatgpt login`): text on the plan, with voice local or on the API key ("combined").
+- CI is active: [jarves-checks](https://github.com/igalgerman/JARVIS/actions/workflows/jarves-checks.yml), with Core tests, CAD, Blender and Godot on every push.
 - Offline it handles Hebrew commands, memory, diagnostics and the YouTube Music skill via Pear Desktop (needs a one-time "Allow").
 - Quick start: `core\run_core.cmd`, then `godot\run_face.cmd`. Details: [core/README](core/README.md).
 
@@ -37,7 +39,7 @@ A cute, friendly, premium-looking stationary home companion. **Simulation first,
 
 **Current gate:** verify realistic display and microphone options, assembly, printability, exact internal fit, accessible wiring and cooling, possible future SSD space and practical risk tests. User buys parts **in Israel**: prefer easy local procurement with actual stock, VAT-inclusive pricing, warranty, delivery and credible substitutions. Imports are fallback only. No fixed budget, final component SKU or purchase authorization.
 
-Room estimate: 35–50 m². **Voice pickup distance undecided**: revisit realistic range, device placement and acoustics later; previous 3–5 m is an exploratory scenario, not a binding requirement. GitHub Actions CI: workflow ready in `ci/cad-smoke.yml` but not active until the `workflow` token scope is granted ([Issue #2](https://github.com/igalgerman/JARVIS/issues/2)).
+Room estimate: 35–50 m². **Voice pickup distance undecided**: revisit realistic range, device placement and acoustics later; previous 3–5 m is an exploratory scenario, not a binding requirement. GitHub Actions CI is active since 18 Oct 2026 (`.github/workflows/jarves-checks.yml`, [Issue #2](https://github.com/igalgerman/JARVIS/issues/2)).
 
 ## Repository hygiene
 After each milestone, link commits and test evidence to its Issue, close work that meets acceptance, and keep open blockers visible. Exclude caches, throwaway outputs and duplicate builds; never mass-delete valuable project files or history without review. [Persistent rules](docs/PROJECT_PRINCIPLES.md).

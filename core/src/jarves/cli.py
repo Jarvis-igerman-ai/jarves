@@ -157,7 +157,8 @@ def cmd_music(a, cfg, home) -> int:
 
 def cmd_ask(a, cfg, home) -> int:
     """One-shot question through the full brain + Skills, without Godot."""
-    from .brain import AgentBrain, Brain
+    from .app import make_agent
+    from .brain import Brain
     from .memory import MemoryStore
     from .skills import SkillRegistry
     from .skills.builtin import ClockSkill, MemorySkill
@@ -168,10 +169,56 @@ def cmd_ask(a, cfg, home) -> int:
     reg.register(ClockSkill())
     reg.register(MemorySkill(mem))
     reg.register(MusicSkill(PearDesktopPlayer(cfg.music.pear_url, home / "pear_client_id"), cfg.music.max_volume))
-    agent = AgentBrain(cfg.ai, reg, mem, cfg.assistant_name) if cfg.ai.provider == "openai" else None
+    agent = make_agent(cfg, reg, mem, home)
     r = asyncio.run(Brain(reg, agent).respond(" ".join(a.text)))
     print(f"[{r.source}{'/' + r.tool if r.tool else ''} {r.code}] {r.text}")
     return 0 if r.ok else 1
+
+
+def cmd_chatgpt(a, cfg, home) -> int:
+    """Sign in with ChatGPT: the user's own browser consent; tokens stay in <state_dir>/chatgpt (never logged)."""
+    from .brain import BrainUnavailable
+    from .chatgpt_auth import ChatGPTAuth, ChatGPTAuthError
+    logs.setup(home / "logs", cfg.log.level, console=False)
+    auth = ChatGPTAuth(home)
+
+    async def go() -> int:
+        try:
+            if a.action == "login":
+                print("Opening your browser to connect JARVES to your ChatGPT plan (official OpenAI sign-in).")
+                st = await auth.sign_in()
+                print(f"connected: {st['email'] or 'ChatGPT account'}")
+                if not st["plan_usage"]:
+                    print("Plan usage was NOT granted, so JARVES cannot use your plan. Run login again and allow it,"
+                          " or use an API key.")
+                    return 1
+                await _models(auth)
+                if cfg.ai.connection == "api_key":
+                    print('To use it, set ai.connection = "chatgpt" (or "combined") in config.toml and restart the Core.')
+            elif a.action == "logout":
+                ok = await auth.sign_out(forget=a.forget)
+                print("disconnected" + ("" if ok else " locally (remote revocation not confirmed: you can also remove"
+                                        " JARVES in ChatGPT Settings > Connected apps)"))
+            elif a.action == "status":
+                st = auth.status()
+                print(json.dumps({**st, "ai.connection": cfg.ai.connection,
+                                  "models": [m["slug"] for m in auth.load().get("models", [])]}, indent=1))
+                return 0 if st["signed_in"] else 1
+            elif a.action == "models":
+                await _models(auth)
+            return 0
+        except (ChatGPTAuthError, BrainUnavailable) as e:
+            print(f"{e.code}: {e.message}. {e.action}")
+            return 1
+
+    async def _models(auth) -> None:
+        from .chatgpt_brain import ChatGPTBrain
+        from .memory import MemoryStore
+        from .skills import SkillRegistry
+        b = ChatGPTBrain(cfg.ai, SkillRegistry(), MemoryStore(home / "memory.db"), auth)
+        models = await b.list_models()
+        print("models on your plan: " + (", ".join(m["slug"] for m in models) or "(none)"))
+    return asyncio.run(go())
 
 
 def cmd_say(a, cfg, home) -> int:
@@ -213,6 +260,9 @@ def main(argv: list[str] | None = None) -> int:
     mu = sub.add_parser("music", help="Pear Desktop pairing and manual control")
     mu.add_argument("action", choices=["pair", "status", "play", "pause", "resume", "next"])
     mu.add_argument("query", nargs="?", default="")
+    g = sub.add_parser("chatgpt", help="connect / disconnect your ChatGPT plan (Sign in with ChatGPT)")
+    g.add_argument("action", choices=["login", "logout", "status", "models"])
+    g.add_argument("--forget", action="store_true", help="logout: also forget this app registration")
     q = sub.add_parser("ask", help="ask one question (brain + Skills, no Godot)")
     q.add_argument("text", nargs="+")
     s = sub.add_parser("say", help="speak a sentence with the configured voice")
@@ -225,7 +275,7 @@ def main(argv: list[str] | None = None) -> int:
         print(f"CONFIG ERROR: {e}", file=sys.stderr)
         return 2
     return {"run": cmd_run, "stop": cmd_stop, "status": cmd_status, "diag": cmd_diag, "memory": cmd_memory, "music": cmd_music,
-            "ask": cmd_ask, "say": cmd_say}[a.cmd](a, cfg, home)
+            "ask": cmd_ask, "say": cmd_say, "chatgpt": cmd_chatgpt}[a.cmd](a, cfg, home)
 
 
 if __name__ == "__main__":

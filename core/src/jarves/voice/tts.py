@@ -90,12 +90,13 @@ class EspeakTTS:
         return wav_to_np(r.stdout)
 
 
-def tts_chain(vc) -> list:
-    """Engines in quality order for VoiceConfig.tts_engine."""
+def tts_chain(vc, allow_cloud: bool = True) -> list:
+    """Engines in quality order for VoiceConfig.tts_engine. allow_cloud=False (ChatGPT-plan-only connection)
+    keeps speech local so nothing is billed to an API key."""
     from .realtime import RealtimeSpeaker
-    cloud = RealtimeSpeaker(vc.speech_model, vc.voice, vc.language)
+    cloud = [RealtimeSpeaker(vc.speech_model, vc.voice, vc.language)] if allow_cloud else []
     local = ([WinRTTTS(vc.tts_voice_hint)] if sys.platform == "win32" else []) + [EspeakTTS(vc.language)]
-    return {"auto": [cloud] + local, "openai": [cloud], "local": local, "none": []}[vc.tts_engine]
+    return {"auto": cloud + local, "openai": cloud, "local": local, "none": []}[vc.tts_engine]
 
 
 class FallbackTTS:

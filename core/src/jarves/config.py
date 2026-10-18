@@ -34,7 +34,13 @@ class LinkConfig(_Strict):
 class AIConfig(_Strict):
     # Model IDs checked 2026-10-18 at developers.openai.com/api/docs/models/all (GPT-6 = current flagship family)
     provider: Literal["openai", "offline"] = "openai"
-    text_model: str = "gpt-6-luna"          # backend for typed chat and GPT-Live delegation; "gpt-6.1-sol" = smarter
+    # How JARVES pays for AI (user's explicit choice; never switched automatically):
+    #   api_key  = everything on OPENAI_API_KEY (pay-as-you-go): GPT-6 text + GPT-Live voice
+    #   chatgpt  = text on your ChatGPT plan (Sign in with ChatGPT); voice stays local; no API spending at all
+    #   combined = text on your ChatGPT plan + GPT-Live voice and cloud speech billed to OPENAI_API_KEY
+    connection: Literal["api_key", "chatgpt", "combined"] = "api_key"
+    chatgpt_model: str = ""                 # "" = first model your plan lists (`jarves chatgpt models`)
+    text_model: str = "gpt-6-luna"          # API-key backend for typed chat and GPT-Live delegation; "gpt-6.1-sol" = smarter
     web_search: bool = True
     max_turns: int = Field(6, ge=1, le=20)
     timeout_s: float = Field(30, gt=0, le=120)
@@ -134,3 +140,8 @@ def load_config(path: Path | None = None) -> tuple[Config, Path]:
 
 def openai_key_present() -> bool:
     return bool(os.environ.get("OPENAI_API_KEY", "").strip())
+
+
+def api_billing_allowed(ai: AIConfig) -> bool:
+    """True when the user's connection choice permits billable API calls AND a key is set."""
+    return ai.provider == "openai" and ai.connection in ("api_key", "combined") and openai_key_present()

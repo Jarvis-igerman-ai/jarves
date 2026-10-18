@@ -8,7 +8,7 @@ from pathlib import Path
 
 from . import __version__, logs
 from .brain import AgentBrain, Brain
-from .config import Config, openai_key_present
+from .config import Config, api_billing_allowed
 from .deviceport import INBOUND, DevicePort
 from .health import Health
 from .link import GodotLink, load_token
@@ -21,11 +21,24 @@ from .voice.stt import STTUnavailable, WhisperSTT
 from .voice.tts import FallbackTTS, TTSUnavailable, tts_chain
 
 
+def make_agent(cfg: Config, registry: SkillRegistry, memory: MemoryStore, home: Path, transport=None):
+    """Text brain for the user's chosen connection (ai.connection); None when AI is off."""
+    if cfg.ai.provider != "openai":
+        return None
+    if cfg.ai.connection in ("chatgpt", "combined"):
+        from .chatgpt_auth import ChatGPTAuth
+        from .chatgpt_brain import ChatGPTBrain
+        return ChatGPTBrain(cfg.ai, registry, memory, ChatGPTAuth(home, transport=transport), cfg.assistant_name,
+                            transport=transport)
+    return AgentBrain(cfg.ai, registry, memory, cfg.assistant_name)
+
+
 class Core:
     def __init__(self, cfg: Config, home: Path, *, audio=None, player=None, stt=None, tts=None,
-                 live_factory=None, console_logs: bool = True, use_real_audio: bool = True) -> None:
+                 live_factory=None, console_logs: bool = True, use_real_audio: bool = True, ai_transport=None) -> None:
         self.cfg, self.home = cfg, home
         self._audio, self._player, self._stt, self._tts = audio, player, stt, tts
+        self._ai_transport = ai_transport          # tests inject a mock HTTP transport for the ChatGPT route
         self._live_factory = live_factory          # tests inject a fake live session
         self.console_logs, self.use_real_audio = console_logs, use_real_audio
         self.stop_event = asyncio.Event()
@@ -58,7 +71,7 @@ class Core:
             self.music = None
             self.health.set("music", "disabled", "music.provider = none")
 
-        self.agent = AgentBrain(c.ai, self.registry, self.memory, c.assistant_name) if c.ai.provider == "openai" else None
+        self.agent = make_agent(c, self.registry, self.memory, self.home, self._ai_transport)
         self.brain = Brain(self.registry, self.agent)
         self._check_ai()
 
@@ -73,10 +86,12 @@ class Core:
         self.dev.check_audio()
         self.health.set("mic", "ok", "software mute off")
 
-        self.tts = self._tts or FallbackTTS(tts_chain(c.voice))
+        self.tts = self._tts or FallbackTTS(tts_chain(c.voice, allow_cloud=c.ai.connection != "chatgpt"))
         ok, quality, detail = self.tts.check()
         self.health.set("speech_out", ("ok" if quality == "cloud" else "degraded") if ok else "unavailable",
-                        detail, "" if quality == "cloud" else "set OPENAI_API_KEY for the high-quality voice")
+                        detail, "" if quality == "cloud" else
+                        ("ChatGPT plan has no voice; use ai.connection = \"combined\" + OPENAI_API_KEY for the premium voice"
+                         if c.ai.connection == "chatgpt" else "set OPENAI_API_KEY for the high-quality voice"))
         self.stt = self._stt or WhisperSTT(c.voice.stt_model, c.voice.stt_fallback_model, c.voice.stt_compute,
                                            c.voice.language)
         self._select_voice_mode()
@@ -111,7 +126,7 @@ class Core:
         s = self.health.snapshot(self.home)
         s.update(version=__version__, voice_mode=self.voice_mode, face_state=self.dev.face_state,
                  mic_muted=self.dev.mic_muted, live_session=self.live is not None,
-                 ai_requests_today=self.memory.usage_today("ai_requests"),
+                 ai_connection=self.cfg.ai.connection, ai_requests_today=self.memory.usage_today("ai_requests"),
                  voice_minutes_today=round(self.memory.usage_today("voice_seconds") / 60, 1))
         return s
 
@@ -120,8 +135,10 @@ class Core:
             self.health.set("ai", "disabled", "ai.provider = offline; built-in commands only")
             return
         ok, code, action = self.agent.available()
-        if ok:
-            self.health.set("ai", "ok", f"OpenAI {self.cfg.ai.text_model} (web search {'on' if self.cfg.ai.web_search else 'off'})")
+        if ok and hasattr(self.agent, "describe"):
+            self.health.set("ai", "ok", self.agent.describe())
+        elif ok:
+            self.health.set("ai", "ok", f"OpenAI API key, {self.cfg.ai.text_model} (web search {'on' if self.cfg.ai.web_search else 'off'})")
         else:
             self.health.set("ai", "unavailable", f"{code}: {action}", action)
 
@@ -130,15 +147,19 @@ class Core:
         if m == "off":
             self.voice_mode = "off"
             self.health.set("voice", "disabled", "voice.mode = off")
-        elif m in ("live", "realtime") and openai_key_present() and self.cfg.ai.provider == "openai":
+        elif m in ("live", "realtime") and api_billing_allowed(self.cfg.ai):
             self.voice_mode = m
             model = self.cfg.voice.live_model if m == "live" else self.cfg.voice.realtime_model
-            self.health.set("voice", "ok", f"{model} (tap talk to start a conversation)")
+            billed = " — voice billed to your API key" if self.cfg.ai.connection == "combined" else ""
+            self.health.set("voice", "ok", f"{model} (tap talk to start a conversation){billed}")
         else:
             self.voice_mode = "push_to_talk"
-            why = "" if m == "push_to_talk" else "no OPENAI_API_KEY: "
+            plan_only = self.cfg.ai.connection == "chatgpt"
+            why = "" if m == "push_to_talk" else ("ChatGPT plan has no live voice: " if plan_only else "no OPENAI_API_KEY: ")
+            act = ("for live voice choose ai.connection = \"combined\" and set OPENAI_API_KEY" if plan_only
+                   else "set OPENAI_API_KEY for live conversation")
             self.health.set("voice", "degraded" if why else "ok", f"{why}offline push-to-talk ({self.cfg.voice.stt_model})",
-                            "set OPENAI_API_KEY for live conversation" if why else "")
+                            act if why else "")
 
     def _voice_budget_left_s(self) -> float:
         return self.cfg.ai.daily_realtime_minutes * 60 - self.memory.usage_today("voice_seconds")

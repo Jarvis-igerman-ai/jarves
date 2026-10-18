@@ -1,6 +1,6 @@
 # NOW — SW-V1: Real assistant software + CI (approved 18 October 2026)
 
-**Status (18 Oct 2026): SW-V1 implemented — STOPPED for the single user review.** See [SW_V1_REVIEW](reviews/SW_V1_REVIEW.md). Pending user actions: OpenAI key, Pear "Allow", CI `workflow` scope. Next work waits for the review.
+**Status (18 Oct 2026): SW-V1 implemented — STOPPED for the single user review.** See [SW_V1_REVIEW](reviews/SW_V1_REVIEW.md). Pending user actions: OpenAI key, Pear "Allow". The CI `workflow` scope was granted and CI is active and green. Added on the user's direct request: the ChatGPT-plan connection (`chatgpt` / `combined`), implemented and offline-tested; the user still needs to run `jarves chatgpt login`. Next work waits for the review.
 
 **Original status: APPROVED / NEXT IMPLEMENTING AGENT MAY START.** User explicitly authorized a **large autonomous software work package** and activation of real GitHub Actions CI, while the user is away. **Read [SW_V1_WORK_PACKAGE.md](SW_V1_WORK_PACKAGE.md)** for the precise phased scope WP0–WP5, acceptance criteria, spending/privacy limits and uninterrupted execution policy. This approval supersedes the earlier parked status of Issues [#2](https://github.com/igalgerman/JARVIS/issues/2), [#5](https://github.com/igalgerman/JARVIS/issues/5), [#6](https://github.com/igalgerman/JARVIS/issues/6) and [#7](https://github.com/igalgerman/JARVIS/issues/7) **only within SW-V1**.
 

@@ -4,7 +4,30 @@
 
 **Confirmed by user:** JARVES must support **both** OpenAI API billing with user-supplied key and user-authorized ChatGPT Plus/eligible plan usage via official Sign in with ChatGPT OAuth. **Do not interpret this as a request for automatic paid fallback.** User must be able to choose a connection mode and understand which account/limits/costs apply. OAuth-based eligible Responses AI requests are possible for local personal tools, but ChatGPT plan usage does **not** cover GPT-Live/Realtime/audio input or transcription routes; combine with local STT/TTS only if an approved implementation finds the quality acceptable, or use the independently billable API voice path. Preserve offline behavior. See [controls & diagnostics requirements](JARVES_CONTROLS_DIAGNOSTICS_REQUIREMENTS.md#18-oct-2026--confirmed-user-choice-both-chatgpt-plan-and-api-connection-options) for source-backed integration/limitations.
 
-**Status:** USER CHOICE ANSWERED; ChatGPT OAuth adapter **NOT IMPLEMENTED**, tests NOT RUN. Existing SW-V1 API live path remains blocked on API key; do not claim ChatGPT Plus has already been connected. This is a future **separately scoped software work item** pending review/approval in `docs/NOW.md`. No automated model/provider switching, no external login or paid API calls approved by this entry.
+**Status (later 18 Oct, after the user asked for it directly: "i want option combined connect with gpt"):** **IMPLEMENTED, offline-tested; NOT yet connected live.**
+- **Connection modes.** `ai.connection` is one of:
+  - `api_key` (default, unchanged);
+  - `chatgpt`: plan text plus local voice, with zero API spending;
+  - `combined`: plan text plus GPT-Live voice billed to the API key, labelled in status.
+- **Explicit choice only.** The mode is set by the user. There is no automatic switching, and a plan limit pauses AI (`CHATGPT_LIMIT`) instead of falling back to the API.
+- **Code.** `core/src/jarves/chatgpt_auth.py` implements the official OAuth flow:
+  - PKCE S256, loopback `127.0.0.1:1455/auth/callback`, dynamic client registration, stable `urn:uuid` host ID.
+  - JWKS-verified ID token, with nonce and audience checks; the plan scope is checked before any inference.
+  - Rotating refresh, serialized by a cross-process lock; revocation on logout.
+  - Tokens are stored only in `<state>/chatgpt/account.json`.
+- **Brain.** `core/src/jarves/chatgpt_brain.py`:
+  - Calls `POST /v1/responses` with `store:false` and `stream:true`, sending stateless history.
+  - Groups the Skills in a `jarves` namespace.
+  - Drops web search if the plan disallows it.
+  - Picks the model from `GET /v1/models`.
+  - Maps every documented error code.
+- **CLI.** `jarves chatgpt login|logout|status|models`.
+- **Tests.** 21 new tests in `core/tests/test_chatgpt.py` use mock OAuth/Responses servers and a local RSA key; **67 PASS** in total.
+- **UNVERIFIED (user action):** run `uv --directory core run jarves chatgpt login` once and allow plan usage. Real plan eligibility, the model list, web-search availability and Hebrew quality on the plan are untested.
+
+## CI ACTIVE — 18 October 2026 (Issue #2 closed)
+
+`.github/workflows/jarves-checks.yml` first run [39140216460](https://github.com/igalgerman/JARVIS/actions/runs/39140216460): **all 5 jobs PASS**. The jobs are Core pytest on Ubuntu and on Windows, FreeCAD 1.1.4, Blender 5.2.2 and Godot 4.7.2. Actions were then upgraded (`checkout@v7`, `setup-uv@v10`) to clear the Node 20 deprecation warning.
 
 ## SW-V1 DELIVERED — STOPPED for the single user review
 
@@ -33,7 +56,8 @@
 - **Blocked (user):**
   1. `OPENAI_API_KEY`: live voice, AI and search are untested.
   2. Pear "Allow" click + YouTube sign-in: real playback.
-  3. `gh auth refresh -s workflow`: CI.
+  3. ~~`gh auth refresh -s workflow`: CI.~~ Done; CI active.
+  4. Optional: `jarves chatgpt login` to use the ChatGPT plan (`ai.connection = "chatgpt"` or `"combined"`).
 - **Unverified:**
   - GPT-Live Hebrew quality.
   - Real mic speech (level ≈ 0 in the test).
@@ -53,7 +77,8 @@
 | SW-2: Voice name/personality | `marin` default, warm playful Hebrew persona | **USER DECISION REQUIRED** (taste) |
 | SW-3: Daily cost ceilings | 30 voice min + 200 AI requests per day | **USER DECISION REQUIRED** (budget) |
 | SW-4: Offline STT model | `small` (4 s, minor errors) vs ivrit-ai turbo (accurate, 19 s) | **ANSWERED by measurement**: `small`; revisit on the Pi (#8) |
-| SW-5: CI activation | Grant the `workflow` scope; next agent activates and reports run URL | **BLOCKED** (user permission) |
+| SW-5: CI activation | Grant the `workflow` scope; next agent activates and reports run URL | **DONE**: run 39140216460 green |
+| SW-7: Which connection by default? | Keep `api_key` for the best voice; `combined` if you want answers on your Plus plan with premium voice; `chatgpt` for zero API cost | **USER DECISION REQUIRED** after trying `jarves chatgpt login` |
 | SW-6: Music provider | Pear Desktop API (no cookies/extraction); Music Assistant rejected for now | **ANSWERED by engineering**; pairing = user action |
 
 ## Questions for the user (SW-V1, answer these first)

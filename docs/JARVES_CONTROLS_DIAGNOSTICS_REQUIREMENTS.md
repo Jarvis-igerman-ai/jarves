@@ -6,6 +6,8 @@
 
 ## 18 Oct 2026 — CONFIRMED user choice: both ChatGPT-plan and API connection options
 
+**Status 18 Oct 2026: IMPLEMENTED as `ai.connection` = `api_key` | `chatgpt` | `combined` (see HANDOFF); live sign-in pending the user.**
+
 **Requirement:** JARVES must offer **both** (1) "Continue with ChatGPT" user-authorized ChatGPT plan usage **where eligible** and (2) a separately configured **OpenAI API key** pay-as-you-go path. Neither replaces the other. Show the current connection, capabilities and usage/cost source plainly. Let the user manually select either; **never silently fall back from ChatGPT plan limits to billable API or credits**, and never assume Plus includes normal API billing. No login, keys, paid live calls or implementation are authorized merely by recording this choice; `docs/NOW.md` remains the implementation gate.
 
 **Documented scope and limits (official docs checked 18 Oct 2026):**

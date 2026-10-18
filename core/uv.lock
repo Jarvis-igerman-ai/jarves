@@ -598,6 +598,7 @@ dependencies = [
     { name = "numpy" },
     { name = "openai-agents" },
     { name = "pydantic" },
+    { name = "pyjwt", extra = ["crypto"] },
     { name = "websockets" },
 ]
 
@@ -625,6 +626,7 @@ requires-dist = [
     { name = "numpy", specifier = ">=2" },
     { name = "openai-agents", specifier = ">=0.24.0,<0.25" },
     { name = "pydantic", specifier = ">=2.12,<3" },
+    { name = "pyjwt", extras = ["crypto"], specifier = ">=2.10" },
     { name = "sounddevice", marker = "extra == 'voice'", specifier = ">=0.5" },
     { name = "websockets", specifier = ">=15,<17" },
     { name = "winrt-runtime", marker = "sys_platform == 'win32' and extra == 'voice'", specifier = ">=3.2" },

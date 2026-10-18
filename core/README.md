@@ -18,7 +18,23 @@ On the Pi, also run `sudo apt install libportaudio2 espeak-ng`.
 setx OPENAI_API_KEY "sk-..."         # then open a new terminal
 ```
 
-Without a key, JARVES runs **offline**: commands only (music, time, memory, status), local Whisper `small` push-to-talk and the robotic local voice.
+**Or use your ChatGPT plan (Plus etc.) instead of, or together with, a key.** This uses the official "Sign in with ChatGPT" for open-source local tools. You choose the connection in `config.toml` → `[ai] connection`; JARVES never switches it on its own:
+
+| `connection` | Text answers (+ Skills, web search where your plan allows) | Voice | Billed to |
+|---|---|---|---|
+| `api_key` (default) | GPT-6 on your API key | GPT-Live (premium) | API key |
+| `chatgpt` | your ChatGPT plan | local push-to-talk + local voice (the plan has no live voice/audio) | ChatGPT plan only |
+| `combined` | your ChatGPT plan | GPT-Live (premium) | text → plan; voice → API key |
+
+```powershell
+uv run jarves chatgpt login      # opens your browser; you approve "plan usage" for JARVES
+uv run jarves chatgpt status     # who is connected, which models your plan offers
+uv run jarves chatgpt logout     # revokes and deletes the tokens
+```
+
+The sign-in tokens stay only in `%LOCALAPPDATA%\jarves\chatgpt\` and are never written to logs. JARVES doesn't see your ChatGPT chats, memories or files. When the plan limit is reached, JARVES says so and uses offline commands only; it does **not** switch to the API key.
+
+Without a key or ChatGPT, JARVES runs **offline**: commands only (music, time, memory, status), local Whisper `small` push-to-talk and the robotic local voice.
 
 ## Run
 
@@ -58,4 +74,4 @@ Without a key, JARVES runs **offline**: commands only (music, time, memory, stat
 
 ## Tests
 
-`uv run pytest -q` runs 46 offline tests: units, the Core over a real WebSocket, fault injection and GPT-Live delegation. Paid APIs are never called.
+`uv run pytest -q` runs 67 offline tests: units, the Core over a real WebSocket, fault injection, GPT-Live delegation and Sign in with ChatGPT (mock OAuth/Responses servers). Paid APIs are never called. CI: [jarves-checks](../.github/workflows/jarves-checks.yml) runs them on Ubuntu and Windows on every push.

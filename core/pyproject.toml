@@ -8,6 +8,7 @@ dependencies = [
     "websockets>=15,<17",           # Godot <-> Core localhost link (pinned below 17 by openai-agents)
     "pydantic>=2.12,<3",
     "httpx>=0.27",
+    "pyjwt[crypto]>=2.10",           # Sign in with ChatGPT: verify the OpenAI ID token (RS256, JWKS)
     "numpy>=2",
 ]
 

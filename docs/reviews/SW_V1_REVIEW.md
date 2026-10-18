@@ -18,9 +18,10 @@
 | GPT-Live voice (`gpt-live-1` → `gpt-6-luna` + web search + Skills) | Session config and the delegated function-call round trip tested offline against the official SDK types | **BLOCKED: needs API key** |
 | Realtime alternative (`gpt-realtime-2.1`), cloud speech (`gpt-realtime-2.1-mini`), typed AI chat (`gpt-6-luna`) | Implemented on the Agents SDK 0.24 | **BLOCKED: needs API key** |
 | YouTube Music via Pear Desktop | Real Pear 3.12.0 (SHA-512 verified) runs; API on 127.0.0.1 only; unauthenticated → 401; JARVES reports "not paired" truthfully | **BLOCKED: one "Allow" click** (+ YouTube sign-in for Premium) |
-| CI | Workflow ready (`ci/cad-smoke.yml`: Core pytest on Ubuntu + Windows, CAD, Blender, Godot); clean-clone `uv sync --frozen` + 46 tests PASS locally | **BLOCKED: token lacks `workflow` scope**; never run on GitHub |
+| Sign in with ChatGPT (`ai.connection` = `chatgpt` / `combined`) | Official OAuth + plan Responses route against mock servers: PKCE, ID-token checks, refresh/revoke, tools, limits, no API fallback (21 tests) | **Implemented; needs your `jarves chatgpt login`** |
+| CI | [jarves-checks run 39140216460](https://github.com/igalgerman/JARVIS/actions/runs/39140216460): Core pytest Ubuntu + Windows, CAD, Blender, Godot | **Runs: all 5 jobs PASS** |
 
-**Tests:** 46 offline pytest tests PASS. They cover:
+**Tests:** 67 offline pytest tests PASS (46 SW-V1 + 21 Sign in with ChatGPT). They cover:
 - config errors;
 - redaction and rotation;
 - memory;
@@ -37,7 +38,8 @@ No test calls a paid API.
 
 1. **API key:** run `setx OPENAI_API_KEY "sk-..."` and restart the Core. This unlocks GPT-Live voice, the GPT-6 agent and web search. Then try Hebrew: if GPT-Live sounds wrong, set `voice.mode = "realtime"`.
 2. **Music:** start Pear Desktop (`%LOCALAPPDATA%\Programs\PearDesktop-3.12.0\app\YouTube Music.exe`), sign in to YouTube, run `uv --directory core run jarves music pair`, then click **Allow**.
-3. **CI:** run `! gh auth refresh -h github.com -s workflow`. The next agent then copies `ci/cad-smoke.yml` to `.github/workflows/` and reports the first real run.
+3. ~~**CI:** grant the `workflow` scope.~~ Done on 18 Oct; CI is active and green.
+4. **Optional, ChatGPT plan:** run `uv --directory core run jarves chatgpt login` and allow plan usage. Then set `[ai] connection = "chatgpt"` (zero API cost, local voice) or `"combined"` (plan answers + GPT-Live voice on the key). See [core/README](../../core/README.md).
 
 ## Cost (your OpenAI account)
 

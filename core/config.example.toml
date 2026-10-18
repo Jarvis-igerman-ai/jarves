@@ -5,6 +5,11 @@ assistant_name = "JARVES"
 
 [ai]
 provider = "openai"            # "offline" = built-in commands only, no cloud calls
+connection = "api_key"         # who pays (your choice, never switched automatically):
+                               #   api_key  = OPENAI_API_KEY for everything (GPT-6 text + GPT-Live voice)
+                               #   chatgpt  = your ChatGPT plan for text (`jarves chatgpt login`); local voice; no API spending
+                               #   combined = ChatGPT plan for text + GPT-Live voice billed to OPENAI_API_KEY
+chatgpt_model = ""             # "" = first model your plan lists (`jarves chatgpt models`)
 text_model = "gpt-6-luna"      # GPT-6 backend (checked 2026-10-18); "gpt-6.1-sol" for harder reasoning
 web_search = true
 daily_request_limit = 200      # hard ceiling on AI requests per day (cost guard)
