@@ -1,5 +1,33 @@
 # Current handoff — 18 October 2026
 
+## Issue #9 review fixes + user requests (later on 18 Oct): integrated
+
+All Issue #9 findings were reproduced in the code, with no false positives except part of CR-06; each is fixed with offline tests.
+
+| ID | Fix | Main tests |
+|---|---|---|
+| CR-01 | A central `budget.py` reserves before every paid request and counts in-flight ones. It covers the API agent (SDK model wrapper), each ChatGPT-plan request, GPT-Live delegated backend responses and cloud speech; failed or cancelled sent requests are counted. One budget is shared through `app.py`. | `test_budget.py`, `test_voice_faults.py` |
+| CR-02 | Live/Realtime sessions finalize once, whoever ends them. `on_end` frees `core.live`, sets health and notifies the user; Talk restarts a session. | `test_voice_faults.py`, `test_core::test_remote_close_frees_live_slot_and_restarts` |
+| CR-03 | Enforced `permission` (read, action or destructive); model-requested deletes always need confirmation; unknown connectors are denied; side effects are shielded from cancellation. | `test_security.py` |
+| CR-04 | `billing_routes()` / `billing_summary()`; status shows who pays for typed vs spoken use; the combined-mode text is fixed. | `test_budget.py`, `test_chatgpt::test_status_reports_who_pays` |
+| CR-05 | `error` and `responses_validation_failed` mark voice degraded with an action; fatal codes end the session. | `test_voice_faults.py` |
+| CR-06 | Bounded mic (2 s) and speaker (12 s) queues with drop counters, and flush on interrupt. Partly a false positive: GPT-Live has no interruption event, so a documented heuristic is used. | `test_voice_faults.py` |
+| CR-07 | All `account.json` writes share one locked read-modify-write; the model cache moved to `models.json`. | `test_security.py` |
+| CR-08 | Roles (face / cli) with per-role allow-lists and 4403 for unknown clients; confirmations are bound to the face connection that was asked. | `test_security.py` |
+| CR-09 | Redaction at any depth, plus `safe_fields` for device events. | `test_security.py`, `test_units` |
+| CR-10 | New CI job **Core-Godot E2E (real processes)**: round trip, wrong token rejected (4401), orderly stop. Windows launcher smoke test. | CI |
+| CR-11 | `Core.stop` refuses new work, denies pending confirmations, waits briefly for in-flight work, then cancels and awaits every task and drains tools. | `test_core::test_shutdown_during_pending_confirmation_denies` |
+
+**User requests in the same batch:**
+- **"Hey Jarvis" wake word:** pyopen-wakeword 1.1.0 (Apache-2.0), detected on the device.
+- **Greeting:** says hello and explains how to talk.
+- **Feedback:** an activity line and mic level bar, and a `MIC_SILENT` warning.
+- **Terminal logs:** levels and module filters, plus `jarvis logs`.
+- **`jarvis` launcher:** runs in the foreground; with a Core already running it opens the face and follows the log.
+- **Room simulation:** Subagent D, still in progress.
+
+**Not verified (mock tests only):** real OpenAI calls, ChatGPT sign-in, the real mic, the real wake-word mic, Pear playback, and the Pi. On the user's run on 18 Oct, GPT-Live started but no speech was received for 10 minutes. That points to a silent microphone (Windows privacy setting or input device); a real check is needed.
+
 ## Product decision after SW-V1 review — 18 October 2026
 
 **Confirmed by user:** JARVES must support **both** OpenAI API billing with user-supplied key and user-authorized ChatGPT Plus/eligible plan usage via official Sign in with ChatGPT OAuth. **Do not interpret this as a request for automatic paid fallback.** User must be able to choose a connection mode and understand which account/limits/costs apply. OAuth-based eligible Responses AI requests are possible for local personal tools, but ChatGPT plan usage does **not** cover GPT-Live/Realtime/audio input or transcription routes; combine with local STT/TTS only if an approved implementation finds the quality acceptable, or use the independently billable API voice path. Preserve offline behavior. See [controls & diagnostics requirements](JARVES_CONTROLS_DIAGNOSTICS_REQUIREMENTS.md#18-oct-2026--confirmed-user-choice-both-chatgpt-plan-and-api-connection-options) for source-backed integration/limitations.

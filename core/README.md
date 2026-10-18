@@ -40,6 +40,15 @@ Without a key or ChatGPT, JARVES runs **offline**: commands only (music, time, m
 
 ## Run
 
+**Talk:** say **"Hey Jarvis"**, then your question. It is detected on this PC and nothing is sent until it hears that. You can also hold Space, or type. The bar under the face shows the mic level; if it stays empty, check Windows Settings → Privacy & security → Microphone.
+
+**Terminal logs:**
+- `jarvis --log-level debug` sets the level: `error`, `warning`, `info` (default), `debug` or `verbose`.
+- `jarvis --module voice,wake` shows only those modules; `--hide link` hides one.
+- `jarvis logs -f --module ai` follows the log of a JARVES that is already running.
+
+The modules are `core`, `voice`, `live`, `realtime`, `wake`, `ai`, `chatgpt`, `skills`, `music`, `link`, `tts`, `budget` and `device`. Errors always show.
+
 **Simplest:** type `jarvis` in any terminal (`C:\work\jarvis` is on your PATH). The first time, it asks how to connect and signs you in. `jarvis setup` changes that choice and `jarvis stop` stops JARVES. Any other word is passed to the Core, e.g. `jarvis status` or `jarvis chatgpt status`.
 
 Manual steps:
