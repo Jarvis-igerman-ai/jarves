@@ -9,6 +9,9 @@ const BLUE := Color(0.42, 0.74, 1.0)
 const RED := Color(1.0, 0.35, 0.3)
 
 var state := "idle"
+var connection := "OFFLINE"
+var _speech_level := 0.0
+var _speech_seen := -1000
 var t := 0.0
 var _blink := 1.0          # 1 open .. 0 closed
 var _next_blink := 2.5
@@ -30,10 +33,20 @@ func set_state(s: String) -> void:
 		queue_redraw()
 
 
+func set_connection(value: String) -> void:
+	connection = value
+	queue_redraw()
+
+
+func set_speech_level(level: float) -> void:
+	_speech_level = clampf(level, 0.0, 1.0)
+	_speech_seen = Time.get_ticks_msec()
+
+
 func _process(delta: float) -> void:
 	t += delta
 	var target_open := 1.0
-	var target_look := Vector2(sin(t * 0.37) * 0.15, sin(t * 0.23) * 0.08)
+	var target_look := Vector2.ZERO
 	var target_brow := 0.0
 	var target_mouth := 0.0
 	var target_col := BLUE
@@ -44,14 +57,14 @@ func _process(delta: float) -> void:
 			target_open = 1.12
 			target_look = Vector2.ZERO
 			target_brow = 0.35
-			target_ring = 0.65 + 0.35 * sin(t * 5.0)
+			target_ring = 0.7
 		"thinking":
 			target_open = 0.72
 			target_look = Vector2(0.55, -0.55)
 			target_brow = -0.25
 			target_ring = 0.3
 		"speaking":
-			target_mouth = 0.25 + 0.75 * absf(sin(t * 11.0) * sin(t * 4.3 + 1.0))
+			target_mouth = _speech_level if Time.get_ticks_msec() - _speech_seen < 250 else 0.0
 			target_ring = 0.35
 		"happy":
 			target_happy = 1.0
@@ -78,7 +91,7 @@ func _process(delta: float) -> void:
 			_blink = 1.0
 	elif t > _next_blink and state != "listening":
 		_blink_t = 0.0
-		_next_blink = t + _rng.randf_range(2.2, 5.5)
+		_next_blink = t + _rng.randf_range(4.0, 7.0)
 	queue_redraw()
 
 
@@ -126,6 +139,14 @@ func _draw() -> void:
 	_eye(c + Vector2(-ex, ey), u, -1.0)
 	_eye(c + Vector2(ex, ey), u, 1.0)
 	var mc := c + Vector2(0, u * 0.13)
+	var status_color := Color(0.3, 0.85, 0.65)
+	if connection in ["OFFLINE", "UNAVAILABLE", "ERROR"]:
+		status_color = RED
+	elif connection in ["CONNECTING", "MUTED", "SAY HEY JARVIS"]:
+		status_color = Color(1.0, 0.72, 0.3)
+	draw_circle(c + Vector2(0, u * 0.265), u * 0.012, status_color)
+	draw_string(ThemeDB.fallback_font, c + Vector2(-u * 0.36, u * 0.33), connection,
+		HORIZONTAL_ALIGNMENT_CENTER, u * 0.72, int(u * 0.033), status_color)
 	if _mouth > 0.06:
 		var h := u * 0.055 * _mouth
 		draw_set_transform(mc, 0.0, Vector2(1.0, maxf(h / (u * 0.05), 0.05)))

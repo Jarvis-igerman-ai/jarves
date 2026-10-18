@@ -58,6 +58,7 @@ class Core:
         self.stopping = False
         self._greeted = False
         self.voice_mode = "off"
+        self._voice_connecting = False
         self.startup = {"phase": "starting", "ready": False, "detail": "Loading JARVES..."}
         self._startup_t0 = time.monotonic()
         self._startup_signature = hashlib.sha256(json.dumps([
@@ -199,6 +200,8 @@ class Core:
                  startup=startup,
                  face_state=self.dev.face_state,
                  mic_muted=self.dev.mic_muted, live_session=self.live is not None,
+                 voice_connecting=self._voice_connecting,
+                 wake_listening=getattr(self, "_wake_mic_active", False),
                  ai_connection=self.cfg.ai.connection, billing=billing_routes(self.cfg.ai, self.cfg.voice),
                  ai_requests_today=self.memory.usage_today("ai_requests"),
                  voice_minutes_today=round(self.memory.usage_today("voice_seconds") / 60, 1))
@@ -266,20 +269,23 @@ class Core:
                 logs.warn("core", "STARTUP_TIMING_CACHE_FAILED", "could not save startup duration estimate")
         await self.dev.face_set_state(self.dev.face_state)
         await self.link.send_face("status", self.snapshot())
-        if (self.cfg.voice.greeting or self.cfg.voice.activation == "conversation") and not self._greeted:
+        if self.cfg.voice.activation == "conversation" and not self._greeted:
             self._greeted = True
             self._run_busy(self.greet())
+        elif self.cfg.voice.activation == "wake_word" and self.cfg.voice.greeting and not self._greeted:
+            self._greeted = True
+            await self.link.send_face("assistant.text", {"text": self.how_to_talk(), "code": "GREETING"})
 
     def how_to_talk(self) -> str:
         if self.cfg.voice.activation == "conversation":
             return "השיחה נפתחת אוטומטית. אפשר לדבר בלי מילת הפעלה."
         if self.wake is not None:
-            return "תגיד \"היי ג'ארבס\" ואז דבר, או כתוב לי."
+            return "תגיד \"היי ג'ארוויס\", המתן לחיבור ואז דבר."
         if self.voice_mode in ("live", "realtime"):
-            return "לחץ על Talk כדי להתחיל שיחה, או כתוב לי."
+            return "הפעל זיהוי מילת הפעלה בהגדרות הקול כדי לדבר."
         if self.voice_mode == "push_to_talk":
-            return "החזק רווח ודבר, או כתוב לי."
-        return "כתוב לי בתיבה למטה."
+            return "הקול המקומי זמין דרך מילת ההפעלה כשהמיקרופון מוכן."
+        return "הקול אינו זמין. בדוק את המצב באפשרויות."
 
     async def greet(self) -> None:
         hello = f"שלום! אני {self.cfg.assistant_name}."
@@ -513,7 +519,10 @@ class Core:
                                     "raise ai.daily_realtime_minutes or use push-to-talk")
             return
         v = self.cfg.voice
-        audio_io = StreamingAudio(v.input_device, v.output_device) if self.use_real_audio else None
+        async def output_level(level: float) -> None:
+            await self.link.send_face("speaker.level", {"level": round(level, 3)})
+
+        audio_io = StreamingAudio(v.input_device, v.output_device, on_output_level=output_level) if self.use_real_audio else None
         max_s = min(v.session_max_s, self._voice_budget_left_s())
 
         def usage(seconds: float) -> None:
@@ -529,10 +538,10 @@ class Core:
                 self.live = None                   # any end (user, remote close, error, budget) frees the slot
             logs.info("voice", "LIVE_ENDED", f"live conversation ended ({reason})")
             if self.startup["ready"] and not self.stopping:
-                self._startup_stage("failed", "Voice session ended. Use Talk to reconnect, or restart JARVES.")
+                self._startup_stage("running", "Waiting for Hey Jarvis")
             if reason.startswith("error:") or reason == "remote_closed":
-                self.health.set("voice", "degraded", f"live conversation ended: {reason}", "tap Talk to start again")
-                self._spawn(self.notify_error("LIVE_ENDED", "השיחה החיה נותקה", "לחץ Talk כדי להתחיל שוב"))
+                self.health.set("voice", "degraded", f"live conversation ended: {reason}", "check internet; say Hey Jarvis to retry")
+                self._spawn(self.notify_error("LIVE_ENDED", "השיחה החיה נותקה", "בדוק חיבור ואמור היי ג׳ארוויס כדי לנסות שוב"))
             elif reason == "budget":
                 self._spawn(self.notify_error("AI_BUDGET", "הגעתי למגבלת השימוש היומית", "ai.daily_request_limit"))
             await self.link.broadcast("status", self.snapshot())
@@ -553,13 +562,16 @@ class Core:
             live = LiveVoice(self.registry, self.agent.instructions, model=v.live_model, voice=v.voice,
                              backend_model=self.cfg.ai.text_model, web_search=self.cfg.ai.web_search,
                              name=self.cfg.assistant_name, half_duplex=v.half_duplex, max_session_s=max_s,
-                             audio_io=audio_io, **common, **extra)
+                             audio_io=audio_io, idle_disconnect_s=v.idle_disconnect_s, **common, **extra)
         else:
             from .voice.realtime import RealtimeVoice
             live = RealtimeVoice(v.realtime_model, self.agent.instructions, self.registry.realtime_tools(),
-                                 v.language, v.voice, v.half_duplex, audio_io, max_session_s=max_s, **common, **extra)
+                                 v.language, v.realtime_voice, v.half_duplex, audio_io, max_session_s=max_s,
+                                 idle_disconnect_s=v.idle_disconnect_s, **common, **extra)
         live_ref[0] = live
         logs.new_cid()
+        self._voice_connecting = True
+        await self.link.broadcast("status", self.snapshot())
         try:
             await live.start()
         except BudgetExceeded as e:                 # F1: no unit can be reserved ahead -> no session at all
@@ -573,12 +585,16 @@ class Core:
                 return                              # on_end already told the user
             await self.notify_error("LIVE_START_FAILED", "live voice could not start", "check the internet / API key")
             return
+        finally:
+            self._voice_connecting = False
+            await self.link.broadcast("status", self.snapshot())
         if getattr(live, "running", True) is False:
             return                                  # ended during start (on_end already handled it)
         if self.stopping:
             await live.stop()
             return
         self.live = live
+        await self.link.broadcast("status", self.snapshot())
         if not hold_output and self.cfg.voice.activation == "conversation":
             self._startup_stage("running", "Voice ready")
 
@@ -607,6 +623,16 @@ class Core:
                 self._startup_stage("waiting_audio", "Loading greeting audio...")
                 await self.live.wait_ready()
                 self._greeted = True                 # greeting comes from this same live session, never a second TTS call
+            elif self.use_real_audio and self.voice_mode != "off":
+                self._startup_stage("loading", "Preparing local wake microphone...")
+                deadline = time.monotonic() + 20
+                while not getattr(self, "_wake_mic_ready", False):
+                    wake_health = self.health.components.get("wake_word")
+                    if self.wake is None or (wake_health and wake_health.status in ("unavailable", "degraded")):
+                        raise RuntimeError("wake listener unavailable; see jarvis status")
+                    if time.monotonic() >= deadline:
+                        raise RuntimeError("wake microphone did not become ready")
+                    await asyncio.sleep(0.05)
             self._startup_stage("ready", "Ready. Opening the room...")
         except BaseException:
             self._startup_stage("failed", "Startup failed; the room remains closed. See logs / jarvis status.")
@@ -628,7 +654,7 @@ class Core:
         except WakeWordUnavailable as e:
             ok, msg = False, e.message
         if not ok:
-            self.health.set("wake_word", "unavailable", msg, "uv sync --extra voice; hold Space to talk meanwhile")
+            self.health.set("wake_word", "unavailable", msg, "check wake/audio setup: jarvis status; uv sync --extra voice")
             logs.warn("wake", "WAKE_UNAVAILABLE", msg)
             return
         self.wake = WakeListener(det, self._on_wake, v.wake_cooldown_s)
@@ -690,6 +716,10 @@ class Core:
                     peak_level = max(peak_level, level_meter(chunk))
                     if first_frame:
                         first_frame = False
+                        self._wake_mic_ready = True
+                        self._wake_mic_active = True
+                        self.health.set("wake_word", "ok", "local wake microphone active")
+                        await self.link.broadcast("status", self.snapshot())
                         logs.info("wake", "WAKE_LISTENING", "microphone active; waiting for Hey Jarvis")
                     if time.monotonic() - last_report >= 15:
                         logs.info("wake", "WAKE_HEALTH", "wake listener running", frames=self.wake.stats.frames,
@@ -714,6 +744,8 @@ class Core:
             except AudioUnavailable as e:
                 logs.warn("wake", e.code, e.message, action=e.action)
                 self.health.set("audio", "unavailable", e.message, e.action)
+                self._wake_mic_active = False
+                await self.link.broadcast("status", self.snapshot())
                 await asyncio.sleep(5)
             except asyncio.CancelledError:
                 raise
@@ -722,12 +754,13 @@ class Core:
                 self.health.set("wake_word", "degraded", "wake word loop crashed; retrying", "see logs")
                 await asyncio.sleep(2)
             finally:
+                self._wake_mic_active = False
                 self.listening = False
                 self.wake.pause()
                 await chunks.aclose()
                 mic.close()
             if woke and self.voice_mode in ("live", "realtime"):
-                await self._start_live()
+                await self._start_live(greeting="כן, אני מקשיב." if self.voice_mode == "live" else None)
 
     # ------------------------------------------------------------------ confirmation for side effects
     async def ask_confirm(self, prompt: str, timeout: float = 20) -> bool:

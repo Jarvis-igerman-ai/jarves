@@ -1,3 +1,7 @@
+## Voice selection correction — checked 18 October 2026
+
+User delegated the masculine/Jarvis-like voice choice. Selected **vesper** for existing GPT-Live: official table describes British English, masculine, natural. Kept **cedar** separately for Realtime/read-aloud because Live and Realtime voice lists differ. No model/provider/dependency change. Sources: [Live voice list](https://developers.openai.com/api/docs/guides/live-conversations), [Realtime recommended voices](https://developers.openai.com/api/docs/guides/realtime-conversations). Calm delivery instructions added; accent, Hebrew intelligibility and subjective preference require a real listening review. No actor identity imitation claimed.
+
 # SW-V1 technology decision (WP1, Issue #5)
 
 **Checked 18 Oct 2026** against official docs, model lists and package registries, not training memory. Per the user's rule ([AGENTS.md](../../AGENTS.md#best-in-class-technology-mandatory--user-decision-18-oct-2026)), this is the newest best-in-class stack in one coherent OpenAI vendor stack. Cloud is primary because the target is a Raspberry Pi 5; local components are **fallback only**.

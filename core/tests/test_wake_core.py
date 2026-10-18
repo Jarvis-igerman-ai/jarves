@@ -78,6 +78,7 @@ async def test_wake_starts_live_conversation(home, cfg, monkeypatch):
     class FakeLive:
         def __init__(self, core, on_state, on_transcript, on_usage, **kw):
             self.on_state = on_state
+            self.on_end = kw["on_end"]
 
         async def start(self):
             started.append(1)
@@ -93,6 +94,15 @@ async def test_wake_starts_live_conversation(home, cfg, monkeypatch):
             await asyncio.sleep(0.02)
         assert started and c.live is not None
         assert FakeMic.closed >= 1                                   # wake mic released for the live session
+        session = c.live
+        c._startup_stage("ready", "test")
+        await session.on_end("idle")
+        assert c.live is None and c.snapshot()["startup"]["ready"]
+        for _ in range(100):
+            if c.snapshot()["wake_listening"]:
+                break
+            await asyncio.sleep(0.01)
+        assert c.snapshot()["wake_listening"]  # quiet end resumes the local mic without a click
     finally:
         await c.stop()
 
@@ -122,6 +132,6 @@ async def test_wake_unavailable_is_reported(home, cfg):
     await c.start()
     try:
         w = c.snapshot()["components"]["wake_word"]
-        assert w["status"] == "unavailable" and "Space" in w["action"] and c.wake is None
+        assert w["status"] == "unavailable" and "jarvis status" in w["action"] and c.wake is None
     finally:
         await c.stop()

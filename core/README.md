@@ -44,13 +44,15 @@ Without a key or ChatGPT, JARVES runs **offline**: commands only (music, time, m
 
 ## Run
 
-**Talk:** `voice.activation` selects one of two modes. **Mode 1, `wake_word`:** say **"Hey Jarvis"**, then your question; the wake word is detected locally. **Mode 2, `conversation`:** opening the window says hello and starts live conversation automatically; no wake word or click is required. Mode 2 requires configured live API voice and uses its existing daily/session budget. This PC is set to **mode 2 at the user's request**. Set `activation = "wake_word"` under `[voice]` to switch back. Software Mic mute stops capture; type if voice is unavailable.
+**Talk:** say **"Hey Jarvis"**, wait for **Voice connected / Listening**, then speak naturally. Wake detection runs locally; cloud voice opens only after the wake phrase. Three quiet minutes after playback/tool work return to local wake listening. Session/day cost limits still apply. This PC now uses `voice.activation = "wake_word"`; `conversation` remains available for automatic startup. The trained wake phrase is **Hey Jarvis**, not a verified arbitrary "Hello Jarvis" detector. Speech during the connection handshake is not buffered: wait for the listening cue.
+
+The main status and face show local wake, connecting, listening, thinking, speaking, muted and disconnected states. **Options** reveals diagnostics/captions/software mute and simulator inspection controls. No Space/Talk button or typing box is needed or displayed. The face mouth follows actual streamed speaker levels; silence closes it, including when updates stop. Vesper is the selected masculine British GPT-Live voice; Cedar is the compatible Realtime/read-aloud fallback. Hebrew voice quality remains subject to listening review.
 
 **Close the window to stop:** the desktop sends an authenticated shutdown request, ends live voice and speaker playback, and the Core exits normally. The launcher returns to the terminal without Ctrl+C / "Terminate batch job?". Repeated-launch log followers finish on `CORE_STOPPED`; ordinary connection loss still reconnects instead of being treated as a close.
 
 **Startup:** `jarvis` first opens a lightweight **loading screen with a progress bar**. The 3D room is loaded only after the Core is initialized and, for mode 2, GPT-Live is connected and actual greeting audio has arrived. Greeting audio is held in the existing bounded memory queue; the physical mic and speakers are not opened until the room connects. There is no separate cloud-TTS greeting request. If voice cannot become ready, the room stays closed and the terminal reports the failure. Closing even the loading window cancels startup and stops the owned Core.
 
-Progress advances at startup milestones. ETA is approximate, based on a prior successful start with the same activation/voice settings; first start says **Estimating…**, and an overrun says **Finishing startup…**, never fake readiness. `%LOCALAPPDATA%\jarves\startup_timing.json` contains only the settings fingerprint and successful startup seconds. It is safe to remove to reset the estimate. No persistent audio/conversation cache is created. The portable `status.startup` payload exposes phase/progress/elapsed/ETA/readiness for a future hardware boot display; no Pi boot/display integration is implemented yet.
+Progress advances at startup milestones; ETA text is removed at the user's request. Wake-mode startup waits for actual local microphone frames, not merely the configured detector. It does not open a paid greeting session at boot. Timing-only cache metadata remains private; no audio/conversation cache is created. Hardware can consume the same startup/status events, but Pi validation is still pending.
 
 **Terminal logs:**
 - `jarvis --log-level debug` sets the level: `error`, `warning`, `info` (default), `debug` or `verbose`.
@@ -61,7 +63,7 @@ The modules are `core`, `voice`, `live`, `realtime`, `wake`, `ai`, `chatgpt`, `s
 
 **Simplest:** type `jarvis` in a terminal with `C:\work\jarvis` on your PATH. This shows loading progress, then the **room with the actual CAD-derived model and live face**, and runs the Core with terminal logs. The first time, it asks how to connect and signs you in. `jarvis setup` changes that choice and `jarvis stop` stops JARVES. Any other word is passed to the Core, e.g. `jarvis status` or `jarvis chatgpt status`. Manual `uv run jarves run --desktop` uses the same readiness gate; `uv run jarves run` remains the headless/manual Core.
 
-Cloud voice skips offline recognition model loading. Full controls remain onscreen. Cloud reply/greeting speech streams to one output device stream as audio arrives; local speech engines remain buffered fallbacks. Each run appends to the rotated log below. `CORE_READY.ms`, `SPEECH_SYNTH_START`, `SPEECH_FIRST_AUDIO.ms`, `SPEECH_SYNTH_READY.ms` and `SPEECH_PLAY_START` separate startup, first-audio and full-generation/playback delays. Cloud connection/first-audio latency remains provider-dependent. Launcher errors before Core starts appear in the terminal. In mode 1, `WAKE_LISTENING` confirms mic frames are arriving and `WAKE_HEALTH` reports bounded frame/level/score counters every 15 s, without saving audio.
+Cloud voice skips offline recognition model loading. Options are collapsed by default. Cloud reply/greeting speech streams to one output device stream as audio arrives; local speech engines remain buffered fallbacks. Each run appends to the rotated log below. `CORE_READY.ms`, `SPEECH_SYNTH_START`, `SPEECH_FIRST_AUDIO.ms`, `SPEECH_SYNTH_READY.ms` and `SPEECH_PLAY_START` separate startup, first-audio and full-generation/playback delays. Cloud connection/first-audio latency remains provider-dependent. Launcher errors before Core starts appear in the terminal. In mode 1, `WAKE_LISTENING` confirms mic frames are arriving and `WAKE_HEALTH` reports bounded frame/level/score counters every 15 s, without saving audio.
 
 **Explore skills:** ask "What can you do?" or "Show me how to use your music skill." The AI is instructed to explain only the tools it has, check current service status and offer one example or walkthrough at a time. Current tools cover time, status, explicit personal memory and music control; web search depends on the active AI connection. Gmail/Calendar and other unimplemented integrations are not claimed.
 
@@ -71,7 +73,7 @@ Manual steps:
 |---|---|
 | 1. Core | `core\run_core.cmd` (or `uv run jarves run`) |
 | 2. Face | `godot\run_face.cmd` (face display) or `godot\run_viewer.cmd` (3D twin with face + assistant panel) |
-| 3. Talk | **Hold Space** or the Talk button. With a key, a tap starts a GPT-Live conversation and another tap ends it. Or type in the box. |
+| 3. Talk | Say **Hey Jarvis**, wait for the listening cue, then ask your question. |
 | Stop | `uv run jarves stop` |
 
 ## YouTube Music (Pear Desktop)

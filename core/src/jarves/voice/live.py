@@ -43,6 +43,7 @@ BARGE_IN_MIN_S = 0.5        # assistant audio must have been playing this long b
 
 FRONT_INSTRUCTIONS = """You are {name}, a warm, witty home robot on the user's desk. Speak natural Israeli Hebrew by
 default; switch only if the user speaks another language. Keep turns short and conversational.
+Use a composed adult masculine delivery, measured pace, clear diction and restrained dry wit.
 Delegate to the backend for: current information (news, weather, prices, facts you are unsure of), music control,
 questions about your skills/capabilities and which services are actually connected,
 remembering/forgetting things, the time, and JARVES status. While the backend works, say a very short filler
@@ -149,6 +150,23 @@ class SessionLifecycle:
         self._tasks, self._end_task, self.end_reason = [], None, None
         self._ended = asyncio.Event()
         self._active = True
+        self._last_activity = time.monotonic()
+        self._backend_busy = False
+
+    def note_activity(self) -> None:
+        self._last_activity = time.monotonic()
+
+    async def _idle_watchdog(self) -> None:
+        while self.running:
+            await asyncio.sleep(min(1.0, self.idle_disconnect_s))
+            audio = getattr(self, "audio_io", None)
+            if (self._backend_busy or time.monotonic() < self._speaking_until
+                    or (audio is not None and audio.queued_s() > 0)):
+                self.note_activity()
+            elif time.monotonic() - self._last_activity >= self.idle_disconnect_s:
+                logs.info(self._log_area, "VOICE_IDLE", "quiet conversation returned to local wake listening")
+                self._request_end("idle")
+                return
 
     def _spawn(self, coro, name: str) -> asyncio.Task:
         t = asyncio.get_running_loop().create_task(coro, name=f"{self._log_area}.{name}")
@@ -259,7 +277,7 @@ class LiveVoice(SessionLifecycle):
     _log_area = "live"
 
     def __init__(self, registry: SkillRegistry, backend_instructions: Callable[[], str], *, model: str = "gpt-live-1",
-                 voice: str = "marin", backend_model: str = "gpt-6-luna", web_search: bool = True,
+                 voice: str = "vesper", backend_model: str = "gpt-6-luna", web_search: bool = True,
                  name: str = "JARVES", half_duplex: bool = True, max_session_s: float = 600,
                  audio_io=None, on_state: Callable[[str], Awaitable[None]] | None = None,
                  on_transcript: Callable[[str, str], Awaitable[None]] | None = None,
@@ -267,7 +285,7 @@ class LiveVoice(SessionLifecycle):
                  on_end: Callable[[str], Awaitable[None]] | None = None,
                  on_health: Callable[[str, str, str], Any] | None = None,
                  budget: "Budget | None" = None, start_timeout_s: float = 15, close_timeout_s: float = 5,
-                 greeting: str | None = None, hold_output: bool = False) -> None:
+                 greeting: str | None = None, hold_output: bool = False, idle_disconnect_s: float = 180) -> None:
         self.registry, self.backend_instructions = registry, backend_instructions
         self.model, self.voice, self.backend_model, self.web_search = model, voice, backend_model, web_search
         self.name, self.half_duplex, self.max_session_s = name, half_duplex, max_session_s
@@ -275,6 +293,7 @@ class LiveVoice(SessionLifecycle):
         self.on_state, self.on_transcript, self.on_usage = on_state, on_transcript, on_usage
         self.start_timeout_s, self.close_timeout_s = start_timeout_s, close_timeout_s
         self.greeting, self.hold_output = greeting, hold_output
+        self.idle_disconnect_s = idle_disconnect_s
         self._client = client
         self._clock = time.monotonic                 # tests inject a fake clock
         self._init_lifecycle(on_end, on_health, budget)
@@ -408,6 +427,7 @@ class LiveVoice(SessionLifecycle):
             self._spawn(self._mic(), "mic")
             self._spawn(self._player(), "player")
         self._spawn(self._watchdog(), "watchdog")
+        self._spawn(self._idle_watchdog(), "idle")
         logs.info("live", "LIVE_STARTED", f"GPT-Live session started ({self.model} -> {self.backend_model})")
         await self._state("listening")
 
@@ -442,6 +462,10 @@ class LiveVoice(SessionLifecycle):
             if not self.running:
                 return
             gated = self._gated()
+            if not gated:
+                from .wakeword import rms
+                if rms(chunk) > 0.015:
+                    self.note_activity()
             await self.conn.session.input_audio.append(audio=base64.b64encode(silence if gated else chunk).decode())
             if self._speech_pending and time.monotonic() >= self._speaking_until:
                 self._speech_pending = False
@@ -455,6 +479,7 @@ class LiveVoice(SessionLifecycle):
         await self.audio_io.run_player(RATE)
 
     def _play(self, pcm: bytes) -> None:
+        self.note_activity()
         self._speech_pending = True
         now = time.monotonic()
         if now > self._speaking_until:
@@ -519,6 +544,7 @@ class LiveVoice(SessionLifecycle):
                 await self._state("speaking")
             self._play(base64.b64decode(g("delta")))
         elif t == "session.input_transcript.delta":
+            self.note_activity()
             now = time.monotonic()
             if (not self._in_text and not self._gated() and now < self._speaking_until
                     and now - self._turn_audio_t0 >= BARGE_IN_MIN_S):
@@ -528,6 +554,7 @@ class LiveVoice(SessionLifecycle):
                 await self.on_transcript("assistant", self._out_text.strip())
                 self._out_text = ""
         elif t == "session.output_transcript.delta":
+            self.note_activity()
             if self._in_text and self.on_transcript:
                 await self.on_transcript("user", self._in_text.strip())
                 self._in_text = ""
@@ -602,8 +629,12 @@ class LiveVoice(SessionLifecycle):
     async def _backend_event(self, inner: dict, delegation_id: str | None) -> None:
         it = inner.get("type")
         if it == "response.created":
+            self._backend_busy = True
+            self.note_activity()
             await self._state("thinking")
         elif it in ("response.completed", "response.failed", "response.incomplete"):
+            self._backend_busy = False
+            self.note_activity()
             # One delegated backend response finished (billed whether or not it succeeded) -> count it.
             self._stats["backend_responses"] += 1
             if self.budget is not None and not self._budget_settled:

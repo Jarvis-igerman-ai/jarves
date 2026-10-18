@@ -69,7 +69,7 @@ func _e2e() -> void:
 		# Exercise the same notification as the OS window close button.
 		ui.notification(NOTIFICATION_WM_CLOSE_REQUEST)
 		return
-	ui._send_text("מה השעה?")
+	ui.link.send("user.text", {"text": "מה השעה?"})
 	t0 = Time.get_ticks_msec()
 	while (replies.is_empty() or states.is_empty() or states[-1] != "idle") and Time.get_ticks_msec() - t0 < 20000:
 		await get_tree().process_frame
@@ -88,6 +88,23 @@ func _check() -> void:
 			await get_tree().process_frame
 		if face.state != st:
 			ok = false
+	# Silence must keep the mouth closed even if a stale speaking state remains.
+	face.set_state("speaking")
+	face.set_speech_level(0.0)
+	face._process(1.0)
+	ok = ok and face._mouth < 0.01
+	face.set_speech_level(0.8)
+	face._process(1.0)
+	ok = ok and face._mouth > 0.5
+	face._speech_seen = -1000
+	face._process(1.0)
+	ok = ok and face._mouth < 0.01 and not ui.options_box.visible
+	ui._on_link(true, "test")
+	ui._on_message("status", {"live_session": true, "face_state": "listening"})
+	ok = ok and ui.connection.text == "Voice connected" and face.connection == "LISTENING"
+	ui._on_link(false, "test disconnect")
+	ok = ok and face.connection == "OFFLINE"
+	face.set_state(face.STATES[-1])
 	face.set_state("not-a-state")
 	ok = ok and face.state == face.STATES[-1]
 	await get_tree().create_timer(0.5).timeout

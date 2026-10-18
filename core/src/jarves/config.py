@@ -57,7 +57,9 @@ class VoiceConfig(_Strict):
     live_model: str = "gpt-live-1"
     realtime_model: str = "gpt-realtime-2.1"
     speech_model: str = "gpt-realtime-2.1-mini"   # speaks typed replies (OpenAI's TTS successor)
-    voice: str = "marin"
+    voice: str = "vesper"
+    realtime_voice: str = "cedar"          # Realtime has a different supported voice list from Live
+    idle_disconnect_s: int = Field(180, ge=30, le=600)
     half_duplex: bool = True               # mic gated while JARVES speaks (laptop speakers); False with headphones/AEC mic
     session_max_s: int = Field(600, ge=30, le=3600)
     tts_engine: Literal["auto", "openai", "local", "none"] = "auto"

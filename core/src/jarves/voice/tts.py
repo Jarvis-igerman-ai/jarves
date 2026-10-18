@@ -140,7 +140,7 @@ def tts_chain(vc, allow_cloud: bool = True, budget=None) -> list:
     """Engines in quality order for VoiceConfig.tts_engine. allow_cloud=False (ChatGPT-plan-only connection)
     keeps speech local so nothing is billed to an API key. budget: the shared Budget meters cloud speech."""
     from .realtime import RealtimeSpeaker
-    cloud = [RealtimeSpeaker(vc.speech_model, vc.voice, vc.language)] if allow_cloud else []
+    cloud = [RealtimeSpeaker(vc.speech_model, vc.realtime_voice, vc.language)] if allow_cloud else []
     local = ([WinRTTTS(vc.tts_voice_hint)] if sys.platform == "win32" else []) + [EspeakTTS(vc.language)]
     return _metered({"auto": cloud + local, "openai": cloud, "local": local, "none": []}[vc.tts_engine], budget)
 

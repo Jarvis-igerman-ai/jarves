@@ -49,11 +49,13 @@ class RealtimeVoice(SessionLifecycle):
                  on_usage: Callable[[float], None] | None = None, max_session_s: float = 600, *,
                  on_end: Callable[[str], Awaitable[None]] | None = None,
                  on_health: Callable[[str, str, str], Any] | None = None,
-                 budget: "Budget | None" = None, runner_factory: Callable | None = None) -> None:
+                 budget: "Budget | None" = None, runner_factory: Callable | None = None,
+                 idle_disconnect_s: float = 180) -> None:
         self.model, self.instructions, self.tools = model, instructions, tools
         self.language, self.voice, self.half_duplex = language, voice, half_duplex
         self.audio_io, self.on_state, self.on_transcript, self.on_usage = audio_io, on_state, on_transcript, on_usage
         self.max_session_s = max_session_s
+        self.idle_disconnect_s = idle_disconnect_s
         self._runner_factory = runner_factory or _runner
         self._init_lifecycle(on_end, on_health, budget)
         self.session = None
@@ -86,6 +88,7 @@ class RealtimeVoice(SessionLifecycle):
         self.running, self._t0 = True, time.monotonic()
         self._spawn(self._events(), "events")
         self._spawn(self._watchdog(), "watchdog")
+        self._spawn(self._idle_watchdog(), "idle")
         if self.audio_io is not None:
             self._spawn(self._mic(), "mic")
             self._spawn(self.audio_io.run_player(RATE), "player")
@@ -109,6 +112,10 @@ class RealtimeVoice(SessionLifecycle):
             if not self.running:
                 return
             gated = self.half_duplex and time.monotonic() < self._speaking_until + 0.4
+            if not gated:
+                from .wakeword import rms
+                if rms(chunk) > 0.015:
+                    self.note_activity()
             await self.session.send_audio(silence if gated else chunk)
 
     async def _events(self) -> None:
@@ -138,6 +145,7 @@ class RealtimeVoice(SessionLifecycle):
         if t != "audio":
             logs.verbose("realtime", "RT_EVENT", str(t))
         if t == "audio":
+            self.note_activity()
             if time.monotonic() > self._speaking_until:
                 await self._state("speaking")
             data = ev.audio.data
@@ -154,8 +162,14 @@ class RealtimeVoice(SessionLifecycle):
         elif t == "audio_end":
             await self._state("listening")
         elif t == "tool_start":
+            self._backend_busy = True
+            self.note_activity()
             await self._state("thinking")
+        elif t == "tool_end":
+            self._backend_busy = False
+            self.note_activity()
         elif t == "history_added" and self.on_transcript:
+            self.note_activity()
             item = ev.item
             for c in getattr(item, "content", []) or []:
                 txt = getattr(c, "transcript", None) or getattr(c, "text", None)

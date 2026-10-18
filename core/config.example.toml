@@ -18,7 +18,9 @@ daily_realtime_minutes = 30    # hard ceiling on live-voice minutes per day (cos
 [voice]
 activation = "wake_word"       # mode 1: Hey Jarvis; mode 2: "conversation" greets and opens cloud voice
 mode = "live"                  # live (GPT-Live) | realtime (gpt-realtime-2.1) | push_to_talk (offline) | off
-voice = "marin"
+voice = "vesper"              # GPT-Live masculine British voice
+realtime_voice = "cedar"       # separate supported Realtime/read-aloud voice
+idle_disconnect_s = 180        # quiet time after speech/tools, then local wake
 half_duplex = true             # set false with headphones or an echo-cancelling mic (enables barge-in)
 session_max_s = 600
 tts_engine = "auto"            # auto (cloud, then local fallback) | openai | local | none

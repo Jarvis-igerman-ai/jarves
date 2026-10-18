@@ -6,6 +6,8 @@
 
 The user explicitly authorized one sustained implementation package: **[SW_V1_WORK_PACKAGE.md](SW_V1_WORK_PACKAGE.md)**. It covers **#2 CI → #5 library choice → #6 real Core/Godot → #7 Hebrew voice/face → the first YouTube Music Skill → integration testing and handoff**. The agent proceeds automatically between related phases; no new approval at each checkpoint. R5b remains a software baseline, not an approved physical print. No new subscriptions or account connections without consent.
 
+Latest #7 correction: hands-free wake/conversation with 180 s quiet timeout; persistent truthful connection/activity cues shared with face display; playback-driven mouth; Vesper/Cedar; collapsed Options; no ETA; closer camera. Offline checks and actual renders delivered, live human/physical review still open. See HANDOFF; no subsequent milestone started.
+
 ## Current and upcoming
 
 | Stage | Goal | Issue | State |

@@ -10,10 +10,10 @@ Raspberry Pi OS 64-bit, the same face scene/state machine occupies the 1080x1080
 
 ### State events
 `face.set_state`: `idle`, `listening`, `thinking`, `speaking`, `happy`, `error`.
-Optional future inputs: gaze target, amplitude envelope, blink. Do not pre-implement unrequested inputs.
+`speaker.level` carries a bounded normalized RMS envelope from streamed playback (no audio content). Mouth closes after 250 ms without an update. Shared face shows connection/activity labels and status color in both presentations. Natural blinks remain; idle eyes do not wander or simulate speech.
 
 ### Visual fidelity
 Reference is `assets/JARVIS_visual_reference.png`. Create animatable screen content, not pre-rendered eyes painted into shell texture. CAD governs screen opening & placement; Godot/Blender must preserve dimensions. Color/lighting can vary; shell geometry must match CAD.
 
 ### Current scope
-**NOT NOW.** Do not start Godot or face implementation during the active FreeCAD blockout.
+SW-V1 software corrections are authorized by `docs/NOW.md`. Face/connection cues run in the Windows twin and face app; physical display performance remains UNVERIFIED.

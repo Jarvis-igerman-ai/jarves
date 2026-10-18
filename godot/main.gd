@@ -30,7 +30,7 @@ const RoomScript := preload("res://room/room.gd")
 # room camera presets around the device (target = device middle): [yaw, pitch, dist, fov]
 # desk: standing person (eye 1.6 m above the floor) ~1.6 m away; sofa: seated eye ~1.15 m, 3 m away; closeup: 0.6 m
 const ROOM_TARGET := Vector3(0, 0.15, 0)
-const ROOM_CAMS := {"desk": [0.42, 0.41, 1.75, 52.0], "sofa": [0.05, 0.083, 3.0, 48.0], "closeup": [0.38, 0.12, 0.62, 35.0]}
+const ROOM_CAMS := {"conversation": [0.30, 0.16, 0.9, 42.0], "desk": [0.42, 0.41, 1.75, 52.0], "sofa": [0.05, 0.083, 3.0, 48.0], "closeup": [0.38, 0.12, 0.62, 35.0]}
 # CLI flags that ask for the plain inspection (studio) view unless --room is also given
 const STUDIO_FLAGS := ["--studio", "--hide-shell", "--show-reserved", "--overview"]
 const STUDIO_PREFIXES := ["--view=", "--exploded", "--step=", "--part="]
@@ -69,10 +69,11 @@ var leader_layer: CanvasLayer
 var label_px: Array = []  # screen positions of placed Label3Ds (overlap avoidance)
 var face: Control         # live face (face/face.gd) rendered onto the display glass
 var face_quad: MeshInstance3D
+var inspection_panel: PanelContainer
 var assistant: PanelContainer
 var room: Node3D           # room/room.gd
 var room_on := false
-var room_cam := "desk"
+var room_cam := "conversation"
 var studio: Node3D         # studio lights + grey ground
 var we: WorldEnvironment
 var env_studio: Environment
@@ -255,6 +256,8 @@ func _build_ui() -> void:
 	ui_layer = layer
 	add_child(layer)
 	var panel := PanelContainer.new()
+	inspection_panel = panel
+	panel.visible = false
 	panel.position = Vector2(12, 12)
 	layer.add_child(panel)
 	var box := VBoxContainer.new()
@@ -352,6 +355,7 @@ func _build_face() -> void:
 	assistant = AssistantUI.new()
 	assistant.face = face
 	ui_layer.add_child(assistant)
+	assistant.options_toggled.connect(func(on): inspection_panel.visible = on)
 	assistant.set_anchors_and_offsets_preset(Control.PRESET_TOP_RIGHT, Control.PRESET_MODE_MINSIZE, 12)
 
 

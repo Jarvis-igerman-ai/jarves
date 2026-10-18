@@ -4,7 +4,6 @@ const CoreLink := preload("res://face/core_link.gd")
 var link: Node
 var progress: ProgressBar
 var detail: Label
-var eta: Label
 var _poll := 0.0
 var _opening := false
 
@@ -35,10 +34,6 @@ func _ready() -> void:
 	progress.custom_minimum_size = Vector2(520, 22)
 	progress.value = 5
 	box.add_child(progress)
-	eta = Label.new()
-	eta.text = "Estimating time..."
-	eta.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	box.add_child(eta)
 	link = CoreLink.new()
 	link.client_name = "cli"
 	link.message.connect(_message)
@@ -64,11 +59,6 @@ func _message(type: String, payload: Dictionary) -> void:
 	var startup: Dictionary = payload.get("startup", {})
 	progress.value = startup.get("progress", 5)
 	detail.text = startup.get("detail", "Waiting for JARVES readiness...")
-	var remaining = startup.get("eta_s")
-	eta.text = "Estimating time..." if remaining == null else (
-		"About %d seconds remaining (estimate)" % remaining if remaining > 0 else "Finishing startup...")
-	if startup.get("phase", "") == "failed":
-		eta.text = "Startup failed. Check the terminal log."
 	if startup.get("ready", false):
 		if "--loading-check" in OS.get_cmdline_user_args():
 			print("LOADING CHECK RESULT: PASS (read-only status reached readiness)")

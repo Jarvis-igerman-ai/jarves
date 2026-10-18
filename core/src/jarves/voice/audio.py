@@ -156,9 +156,10 @@ class StreamingAudio:
     """
 
     def __init__(self, input_device=None, output_device=None, *, rate: int = 24000, mic_max_s: float = 2.0,
-                 speaker_max_s: float = 12.0) -> None:
+                 speaker_max_s: float = 12.0, on_output_level=None) -> None:
         self.inp, self.out = input_device, output_device
         self.rate, self.mic_max_s, self.speaker_max_s = rate, mic_max_s, speaker_max_s
+        self.on_output_level = on_output_level
         self._open = True
         # mic (filled from the PortAudio thread via call_soon_threadsafe -> _mic_push on the loop thread)
         self._mic_q: deque[bytes] = deque()
@@ -266,6 +267,10 @@ class StreamingAudio:
                 data = await self._spk_get(piece)
                 if data is None:
                     return
+                if self.on_output_level is not None:
+                    samples = np.frombuffer(data, dtype="<i2").astype(np.float32) / 32768
+                    level = min(1.0, float(np.sqrt(np.mean(samples ** 2))) * 5) if len(samples) else 0.0
+                    await self.on_output_level(level)
                 await asyncio.to_thread(out.write, data)
 
     # ------------------------------------------------------------------ lifecycle / health
