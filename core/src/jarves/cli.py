@@ -284,6 +284,10 @@ def cmd_chatgpt(a, cfg, home) -> int:
 
 
 CONNECTIONS = {"1": "chatgpt", "2": "combined", "3": "api_key"}
+# Issue #13: GPT-Live starts delegated backend requests server-side; JARVES counts them but cannot strictly cap
+# them, so a provider-side limit is the real hard ceiling.
+SPEND_LIMIT_ADVICE = ("IMPORTANT: set a monthly spend limit for your OpenAI project (platform.openai.com > "
+                      "Settings > Limits). JARVES's daily limits are a local guard; live voice can exceed them slightly.")
 
 
 def set_connection(path: Path, connection: str) -> None:
@@ -326,6 +330,8 @@ def cmd_setup(a, cfg, home) -> int:
     if conn in ("combined", "api_key") and not openai_key_present():
         if _ask_key(home) != 0:
             print("No key saved. JARVES runs offline until you run:  jarvis key")
+    if conn in ("combined", "api_key"):
+        print(SPEND_LIMIT_ADVICE)
     if conn in ("chatgpt", "combined") and not ChatGPTAuth(home).status()["plan_usage"]:
         print("Now sign in to ChatGPT in the browser window and click Allow.")
         a.action, a.forget = "login", False

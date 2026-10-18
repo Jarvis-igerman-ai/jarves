@@ -1,5 +1,19 @@
 # Current handoff — 18 October 2026
 
+## Issue #13: GPT-Live overruns, disconnect accounting, reservation lifecycle (18 Oct, night)
+
+- **Overlapping delegations (P1).**
+  - The first delegation without reserved credit now closes the session **immediately**, instead of after the answer. Every server-started delegation is counted exactly once; continuations are never sent without a reservation.
+  - The exposure is **not strictly bounded** (the API has no client gate), so the docs were corrected and `jarvis setup` / the README now **require a provider-side spend limit**.
+  - Test: 3 overlapping delegations with limit 1, in all 6 completion orders: 3 counted, 2 overruns, no continuation sent.
+- **Voice time after a disconnect (P1/P2).** GPT-Live usage now comes from the server's final `session.closed` figure. If that never arrives, it is the larger of the last reported usage and the wall-clock time since `session.started`, capped at the session limit plus 60 s, and it is reported exactly once.
+- **Reservation lifecycle (P2).**
+  - Expiry now happens only when the **owner process is gone** (checked with `OpenProcess`/`GetExitCodeProcess` on Windows, `kill(pid, 0)` on POSIX), with a 6-hour hard backstop.
+  - Settlement is once only: committing a row that expiry already counted adds nothing.
+  - Usage is settled on the reservation's own day.
+  - Tests: an active owner past 1 hour, a crashed owner, the hard backstop, midnight, release after expiry, and real-process crashes.
+- **Evidence:** `core/tests/test_issue13.py`, `test_budget_mp.py`.
+
 ## Real-microphone QA with a USB webcam mic (18 Oct, night)
 
 The user plugged in a "2K HD Camera" USB webcam with a mic, and it became the default input.
@@ -29,7 +43,7 @@ The user plugged in a "2K HD Camera" USB webcam with a mic, and it became the de
     - every continuation is reserved before `response.create`;
     - when no credit can be reserved, the mic input is closed and the session ends after that answer;
     - with 0 units left, no session starts.
-  - **Remaining exposure:** speech already sent can start at most one extra delegation. It is counted (`budget_overrun`), never free.
+  - **Remaining exposure:** ~~at most one extra delegation~~ **Corrected in #13: this is not strictly bounded by the client.** The server can start several delegations before the client sees them. All of them are counted (`budget_overrun`), and the session closes at the first one without credit. A **provider-side spend limit is required** for API-key use.
   - **Full fix:** client-mode delegation, where JARVES runs the backend itself. That is a separate design item.
   - Tests in `test_voice_faults.py`: boundary, concurrent delegations, refill, continuation, sharing a unit with the CLI.
 - **F2: `jarvis say`.** It now uses the same `make_tts(cfg, budget)` as the Core. Plan-only mode never uses paid speech, even with a key. Tests: `test_say_billing.py`.

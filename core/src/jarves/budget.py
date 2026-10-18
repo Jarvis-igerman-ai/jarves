@@ -11,13 +11,18 @@ Usage reported after the fact (session seconds) is recorded with record().
 Cross-process (F3): reservations are ROWS in the same SQLite file as the usage counters. reserve() runs
 `BEGIN IMMEDIATE` (one writer across all JARVES processes: Core, `jarvis ask`, `jarvis say`), sums committed usage
 + live reservations, and inserts its row only if the limit allows - so two processes can never both take the last
-unit. A reservation left by a crashed process expires after RESERVATION_TTL_S and is then COUNTED (conservative:
-it may have been sent), never silently freed. The provider-side project spend limit remains the final safety layer.
+unit. Expiry (#13): a reservation is expired only when its OWNER PROCESS IS GONE (crash) or it is older than
+HARD_TTL_S (backstop for PID reuse); a long-running live owner keeps its reservation. Expired rows are COUNTED
+(conservative: it may have been sent), never silently freed, and settlement counts a row at most once (an owner
+committing a row that expiry already counted adds nothing). Usage is settled on the reservation's own day.
+The provider-side project spend limit remains the final safety layer.
 """
 from __future__ import annotations
 
+import ctypes
 import os
 import sqlite3
+import sys
 import time
 import uuid
 from dataclasses import dataclass, field
@@ -28,7 +33,32 @@ from .config import AIConfig
 from .memory import MemoryStore
 
 KINDS = ("ai_requests", "voice_seconds")
-RESERVATION_TTL_S = 600          # longer than any request timeout (<= 240 s) incl. a delegated voice turn
+HARD_TTL_S = 6 * 3600            # backstop only: a reservation of a LIVE owner is never expired before this
+RESERVATION_TTL_S = HARD_TTL_S   # (old name)
+
+
+def pid_alive(pid: int) -> bool:
+    """Is process `pid` still running? Never sends a signal (os.kill on Windows would terminate it)."""
+    if pid == os.getpid():
+        return True
+    if sys.platform == "win32":
+        k32 = ctypes.windll.kernel32
+        h = k32.OpenProcess(0x1000, False, pid)          # PROCESS_QUERY_LIMITED_INFORMATION
+        if not h:
+            return ctypes.get_last_error() == 5 or k32.GetLastError() == 5   # access denied = exists
+        try:
+            code = ctypes.c_ulong()
+            ok = k32.GetExitCodeProcess(h, ctypes.byref(code))
+            return bool(ok) and code.value == 259                           # STILL_ACTIVE
+        finally:
+            k32.CloseHandle(h)
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True
+    return True
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS reservations (id TEXT PRIMARY KEY, day TEXT NOT NULL, kind TEXT NOT NULL,
@@ -53,6 +83,7 @@ class Reservation:
     kind: str
     n: int
     id: str = field(default_factory=lambda: uuid.uuid4().hex)
+    day: str = field(default_factory=lambda: date.today().isoformat())
     done: bool = field(default=False)
 
     def commit(self, actual: int | None = None) -> int:
@@ -76,8 +107,9 @@ class Reservation:
 
 
 class Budget:
-    def __init__(self, memory: MemoryStore, ai: AIConfig) -> None:
+    def __init__(self, memory: MemoryStore, ai: AIConfig, *, clock=time.time, alive=pid_alive) -> None:
         self.memory, self.ai = memory, ai
+        self._clock, self._alive = clock, alive          # tests inject a fake clock / liveness
         self._path = memory.path
         self._db = sqlite3.connect(self._path, timeout=15, isolation_level=None, check_same_thread=False)
         self._db.executescript(SCHEMA)
@@ -104,15 +136,19 @@ class Budget:
             cur.execute("ROLLBACK")
             raise
 
-    @staticmethod
-    def _expire(cur, now: float) -> None:
-        """Stale reservations (crashed process) are counted, not freed: they may have been sent."""
-        for day, kind, n in cur.execute("SELECT day, kind, SUM(n) FROM reservations WHERE created < ? "
-                                        "GROUP BY day, kind", (now - RESERVATION_TTL_S,)).fetchall():
+    def _expire(self, cur, now: float) -> None:
+        """Reservations whose owner process is gone (or older than HARD_TTL_S) are counted, not freed: they may
+        have been sent. A live owner's reservation is left alone, however long its request/session runs."""
+        me = os.getpid()
+        for rid, day, kind, n, pid, created in cur.execute(
+                "SELECT id, day, kind, n, pid, created FROM reservations").fetchall():
+            if now - created <= HARD_TTL_S and (pid == me or self._alive(pid)):
+                continue
+            cur.execute("DELETE FROM reservations WHERE id = ?", (rid,))
             cur.execute("INSERT INTO usage (day, kind, count) VALUES (?, ?, ?) "
                         "ON CONFLICT(day, kind) DO UPDATE SET count = count + excluded.count", (day, kind, n))
-            logs.warn("budget", "BUDGET_STALE_RESERVATION", "expired reservation counted", kind=kind, n=n)
-        cur.execute("DELETE FROM reservations WHERE created < ?", (now - RESERVATION_TTL_S,))
+            logs.warn("budget", "BUDGET_STALE_RESERVATION", "reservation of a stopped process counted",
+                      kind=kind, n=n, owner_pid=pid, age_s=round(now - created))
 
     @staticmethod
     def _used(cur, kind: str, day: str) -> int:
@@ -125,14 +161,16 @@ class Budget:
                            (day, kind)).fetchone()[0]
 
     def _settle(self, r: Reservation, count: int) -> int:
-        day = date.today().isoformat()
-
+        """Settle once: if expiry already counted this row (it is gone), the owner's commit adds nothing."""
         def go(cur):
-            cur.execute("DELETE FROM reservations WHERE id = ?", (r.id,))
-            if count > 0:
+            gone = cur.execute("DELETE FROM reservations WHERE id = ?", (r.id,)).rowcount == 0
+            if gone:
+                logs.warn("budget", "BUDGET_ALREADY_SETTLED", "reservation was already counted by expiry", kind=r.kind)
+            elif count > 0:                         # the reservation's own day (a request across midnight)
                 cur.execute("INSERT INTO usage (day, kind, count) VALUES (?, ?, ?) "
-                            "ON CONFLICT(day, kind) DO UPDATE SET count = count + excluded.count", (day, r.kind, count))
-            return self._used(cur, r.kind, day)
+                            "ON CONFLICT(day, kind) DO UPDATE SET count = count + excluded.count",
+                            (r.day, r.kind, count))
+            return self._used(cur, r.kind, date.today().isoformat())
         return self._tx(go)
 
     # ------------------------------------------------------------------ public API
@@ -158,10 +196,10 @@ class Budget:
     def reserve(self, kind: str = "ai_requests", n: int = 1) -> Reservation:
         """Atomically (across processes): raise BudgetExceeded unless used + held + n <= limit, else hold n."""
         r = Reservation(self, kind, n)
-        day, limit = date.today().isoformat(), self.limit(kind)
+        day, limit = r.day, self.limit(kind)
 
         def go(cur):
-            now = time.time()
+            now = self._clock()
             self._expire(cur, now)
             used = self._used(cur, kind, day)
             if used + self._held(cur, kind, day) + n > limit:

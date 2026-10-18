@@ -137,6 +137,7 @@ class SessionLifecycle:
             r.commit()
         if hasattr(self, "_pending"):
             self._pending = []
+        self._budget_settled = True     # a stray completion after this was already counted above
 
     # subclasses implement
     async def _close_transport(self, reason: str) -> None: ...
@@ -272,6 +273,7 @@ class LiveVoice(SessionLifecycle):
         self.on_state, self.on_transcript, self.on_usage = on_state, on_transcript, on_usage
         self.start_timeout_s, self.close_timeout_s = start_timeout_s, close_timeout_s
         self._client = client
+        self._clock = time.monotonic                 # tests inject a fake clock
         self._init_lifecycle(on_end, on_health, budget)
         self.conn = None
         self._cm = None
@@ -281,21 +283,26 @@ class LiveVoice(SessionLifecycle):
         self._started = asyncio.Event()
         self._closed = asyncio.Event()
         self.usage_s = 0.0
+        self._usage_final = False       # True once session.closed carried the server's final usage
+        self._t_started: float | None = None
         self._speaking_until = 0.0
         self._turn_audio_t0 = 0.0
         self._out_text = ""
         self._in_text = ""
         self._stats = {"backend_responses": 0, "barge_ins": 0, "errors": 0, "budget_overrun": 0}
-        # F1 budget: GPT-Live "responses" delegation is started BY THE SERVER (no documented client approval or
-        # cancel), so JARVES keeps one unit RESERVED AHEAD ("credit") while the mic is open. Each delegation
-        # consumes the credit; a new credit is reserved at once. If that fails, mic input is closed (a new
-        # delegation needs new user speech) and the session ends after the current answer. Continuations
-        # (response.create after a tool) are reserved BEFORE sending. Residual exposure: speech already sent
-        # before the close could start at most one extra delegation (counted, stats "budget_overrun").
+        # Budget (#9 F1, #13): GPT-Live "responses" delegation is started BY THE SERVER; the official docs offer no
+        # client approval or cancel for it. What the client CAN control, it does: one unit is RESERVED AHEAD
+        # ("credit") before a session starts and while the mic is open; each delegation consumes it and a new
+        # one is reserved at once; continuations (response.create after a tool) are reserved BEFORE sending.
+        # When the credit cannot be refilled the mic input is closed and the session ends after that answer;
+        # the FIRST delegation that arrives without credit closes the session immediately. Delegations the
+        # server had already started are still counted (stats "budget_overrun"), so the overshoot is NOT
+        # strictly bounded by the client: production use needs a provider-side project spend limit.
         self._credit = None
         self._pending: list = []        # reservations of dispatched backend responses (FIFO)
         self._input_closed = False
         self._end_after_answer = False
+        self._budget_settled = False
 
     def session_config(self) -> dict:
         tools: list[dict] = live_tools(self.registry)
@@ -315,7 +322,15 @@ class LiveVoice(SessionLifecycle):
             await self.on_state(s)
 
     def _usage_seconds(self) -> float:
-        return self.usage_s
+        """Voice time for the daily budget (#13). The server's FINAL figure (session.closed) wins. Otherwise (network
+        drop, crash, remote close without usage) count conservatively: the larger of the last reported usage and
+        the wall-clock time since session.started, capped at the session limit + 60 s. Reported once (finalize)."""
+        if self._usage_final:
+            return self.usage_s
+        if self._t_started is None:
+            return self.usage_s
+        elapsed = min(self._clock() - self._t_started, self.max_session_s + 60)
+        return max(self.usage_s, elapsed)
 
     # ------------------------------------------------------------------ lifecycle
     async def start(self) -> None:
@@ -447,6 +462,8 @@ class LiveVoice(SessionLifecycle):
         g = lambda k, d=None: _get(ev, k, d)    # noqa: E731
         if t == "session.started":
             self._started.set()
+            if self._t_started is None:
+                self._t_started = self._clock()
             await self._health("ok", f"GPT-Live connected ({self.model} -> {self.backend_model})", "")
         elif t == "session.output_audio.delta":
             if time.monotonic() > self._speaking_until:
@@ -477,6 +494,7 @@ class LiveVoice(SessionLifecycle):
             usage = g("usage")
             if usage is not None:
                 self.usage_s = float(_get(usage, "seconds", self.usage_s) or 0)
+                self._usage_final = True
             server_reason = str(g("reason") or "")
             self._closed.set()
             if self._end_task is None:          # not requested by us
@@ -509,10 +527,14 @@ class LiveVoice(SessionLifecycle):
         if self._credit is not None:
             self._pending.append(self._credit)
             self._credit = None
-        else:                                       # started although no credit was held (residual race)
+        else:                                       # server started it although no credit was held
             self._stats["budget_overrun"] += 1
-            logs.warn("live", "AI_BUDGET_OVERRUN", "a delegated request started with no reserved credit")
+            logs.warn("live", "AI_BUDGET_OVERRUN", "a delegated request started with no reserved credit; "
+                      "ending the session now", overruns=self._stats["budget_overrun"])
             self._pending.append(_Counted(self.budget))
+            self._input_closed = True
+            await self._budget_exhausted(where)     # close now: don't wait for answers that may start more work
+            return
         try:
             self._credit = self.budget.reserve("ai_requests")
         except BudgetExceeded:
@@ -535,7 +557,7 @@ class LiveVoice(SessionLifecycle):
         elif it in ("response.completed", "response.failed", "response.incomplete"):
             # One delegated backend response finished (billed whether or not it succeeded) -> count it.
             self._stats["backend_responses"] += 1
-            if self.budget is not None:
+            if self.budget is not None and not self._budget_settled:
                 if self._pending:
                     self._pending.pop(0).commit()
                 else:                               # a backend response we never saw start: count it anyway

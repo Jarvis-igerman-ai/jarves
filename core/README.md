@@ -18,6 +18,10 @@ On the Pi, also run `sudo apt install libportaudio2 espeak-ng`.
 jarvis key        # paste the key; saved in %LOCALAPPDATA%\jarves\secrets.env (outside the project, never logged)
 ```
 
+> **Required: set a monthly spend limit** for your OpenAI project (platform.openai.com → Settings → Limits).
+> - **Local guard:** JARVES's daily limits (`ai.daily_request_limit`, `ai.daily_realtime_minutes`) reserve before every request it sends.
+> - **Not a hard cap:** in a GPT-Live conversation, OpenAI's server starts backend requests itself. The API offers no way to block them in advance. JARVES counts every one and ends the conversation at the limit, but a few extra requests can slip through.
+
 You can also edit that file yourself; it holds one line, `OPENAI_API_KEY=sk-...`. If the `OPENAI_API_KEY` environment variable is set, it takes priority. `jarvis key --remove` deletes the key.
 
 **Or use your ChatGPT plan (Plus etc.) instead of, or together with, a key.** This uses the official "Sign in with ChatGPT" for open-source local tools. You choose the connection in `config.toml` → `[ai] connection`; JARVES never switches it on its own:

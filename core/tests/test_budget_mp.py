@@ -1,10 +1,11 @@
+import pytest
 """F3: the daily budget holds across PROCESSES (Core + `jarvis ask` + `jarvis say` share one SQLite file)."""
 import subprocess
 import sys
 import textwrap
 import time
 
-from jarves.budget import RESERVATION_TTL_S, Budget, BudgetExceeded
+from jarves.budget import Budget, BudgetExceeded
 from jarves.config import AIConfig
 from jarves.memory import MemoryStore
 
@@ -46,21 +47,19 @@ def test_parallel_processes_never_exceed_limit(tmp_path):
     assert b.used("ai_requests") == 3 and b.held("ai_requests") == 0
 
 
-def test_crashed_process_reservation_stays_held_then_counted(tmp_path):
+def test_crashed_process_reservations_are_counted_not_freed(tmp_path):
+    """Two processes die holding reservations (#13: owner-liveness expiry). Their units are never handed out
+    again for free: as soon as any process runs the budget they are COUNTED; the limit still holds."""
     outs, db = run_children(tmp_path, 2, mode="crash")
     assert sorted(outs) == ["RESERVED-CRASH", "RESERVED-CRASH"], outs
     b = Budget(MemoryStore(db), AIConfig(daily_request_limit=3))
-    assert b.held("ai_requests") == 2 and b.remaining("ai_requests") == 1     # not freed by the crash
-    b._db.execute("UPDATE reservations SET created = created - ?", (RESERVATION_TTL_S + 1,))
-    r = b.reserve()                                   # expiry runs inside the reserve transaction
-    assert b.used("ai_requests") == 2                 # stale reservations COUNTED (may have been sent)
+    assert b.used("ai_requests") + b.held("ai_requests") == 2             # held or already counted, never freed
+    r = b.reserve()                                   # expiry of dead owners runs inside the reserve transaction
+    assert b.used("ai_requests") == 2 and b.held("ai_requests") == 1
     r.commit()
     assert b.used("ai_requests") == 3 and b.held("ai_requests") == 0
-    try:
+    with pytest.raises(BudgetExceeded):
         b.reserve()
-        raise AssertionError("limit exceeded")
-    except BudgetExceeded:
-        pass
 
 
 def test_two_budget_objects_share_inflight(tmp_path):
