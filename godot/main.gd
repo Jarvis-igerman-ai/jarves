@@ -350,6 +350,12 @@ func _build_face() -> void:
 		parts["Display_Panel"].add_child(face_quad)   # follows the exploded view
 		var ctr := bb.get_center()
 		face_quad.global_transform = Transform3D(Basis.IDENTITY, Vector3(ctr.x, ctr.y, bb.end.z + 0.0008))  # facing +Z (front), ignores GLB node rotation
+	for a in OS.get_cmdline_user_args():   # face preview without a Core (screenshots); the Core overrides both
+		if a.begins_with("--face-state="):
+			face.set_state(a.substr(13))
+		elif a.begins_with("--face-link="):
+			face.set_link(a.substr(12))
+	face.snap()
 	if "--no-core" in OS.get_cmdline_user_args():
 		return
 	assistant = AssistantUI.new()

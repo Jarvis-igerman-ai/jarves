@@ -4,6 +4,7 @@ extends PanelContainer
 ## confirmation prompts. All behaviour lives in the Python Core; this is only UI + the link.
 
 const CoreLink := preload("res://face/core_link.gd")
+const FaceScript := preload("res://face/face.gd")
 
 var link: Node
 var face: Control                 # face.gd instance to drive (set by the owner)
@@ -56,6 +57,12 @@ func _ready() -> void:
 	status_lbl.custom_minimum_size = Vector2(330, 0)
 	status_lbl.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	options_box.add_child(status_lbl)
+	var legend := Label.new()
+	legend.text = LINK_LEGEND
+	legend.modulate = Color(1, 1, 1, 0.6)
+	legend.custom_minimum_size = Vector2(330, 0)
+	legend.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	options_box.add_child(legend)
 	activity = Label.new()
 	activity.text = "Connecting to JARVES..."
 	activity.add_theme_font_size_override("font_size", 22)
@@ -124,8 +131,11 @@ func _on_link(connected: bool, detail: String) -> void:
 		activity.text = "JARVES is not running: " + detail
 		if face:
 			face.set_state("idle")
-			face.set_connection("OFFLINE")
-		connection.text = "Offline · Core disconnected"
+			face.set_link("offline")
+		connection.text = "● " + LINK_CAPTION["offline"]
+		connection.modulate = face_link_color("offline")
+	else:
+		_show_activity(_state)
 
 
 func _on_message(t: String, p: Dictionary) -> void:
@@ -140,15 +150,18 @@ func _on_message(t: String, p: Dictionary) -> void:
 		"assistant.activity":
 			activity.text = str(p.get("text", ""))
 			if activity.text.contains("Loading voice"):
-				connection.text = "Connecting to voice · please wait"
+				connection.text = "● " + LINK_CAPTION["connecting"]
+				connection.modulate = face_link_color("connecting")
 				if face:
-					face.set_connection("CONNECTING")
+					face.set_link("connecting")
 		"speaker.level":
 			if face:
 				face.set_speech_level(float(p.get("level", 0.0)))
 		"mic.level":
 			level_bar.value = float(p.get("level", 0.0))
 			_level_seen = Time.get_ticks_msec()
+			if face:
+				face.set_mic_level(level_bar.value)
 		"assistant.text":
 			_say("JARVES", str(p.get("text", "")))
 		"user.transcript":
@@ -175,31 +188,50 @@ const ACTIVITY := {
 }
 
 
+## Status dot on the face (face.gd DOT colours). Captions live only in this panel, never on the face.
+const LINK_CAPTION := {
+	"ready": "Ready · voice link up", "live": "Live conversation connected",
+	"connecting": "Connecting to voice · please wait", "degraded": "Voice degraded · open Options",
+	"offline": "Offline · Core disconnected", "error": "Problem · open Options for details",
+	"muted": "Microphone muted (software)",
+}
+const LINK_LEGEND := "Face dot: green = ready · blue pulse = live conversation · amber = connecting/degraded · red = offline/error · grey slashed = mic muted"
+
+
+static func link_state_for(linked: bool, st: Dictionary, face_state: String) -> String:
+	# one truthful link state from the Core `status` snapshot (core/src/jarves/app.py snapshot())
+	if not linked:
+		return "offline"
+	if st.get("mic_muted", false):
+		return "muted"
+	if st.get("live_session", false):
+		return "live"
+	if st.get("voice_connecting", false) or st.is_empty():
+		return "connecting"
+	if face_state == "error":
+		return "error"
+	var comps: Dictionary = st.get("components", {})
+	var voice := str(comps.get("voice", {}).get("status", ""))
+	var wake := str(comps.get("wake_word", {}).get("status", ""))
+	if voice in ["unavailable", "degraded"] or wake in ["unavailable", "degraded"]:
+		return "degraded"
+	if voice == "ok" or (wake == "ok" and st.get("wake_listening", false)):
+		return "ready"
+	return "degraded"
+
+
+static func face_link_color(ls: String) -> Color:
+	return FaceScript.DOT.get(ls, Color.WHITE)
+
+
 func _show_activity(state: String) -> void:
 	_state = state
-	var label := "OFFLINE"
-	if not _linked:
-		connection.text = "Offline · Core disconnected"
-	elif last_status.get("mic_muted", false):
-		connection.text = "Microphone muted (software)"
-		label = "MUTED"
-	elif last_status.get("voice_connecting", false):
-		connection.text = "Connecting to voice · please wait"
-		label = "CONNECTING"
-	elif last_status.get("live_session", false):
-		connection.text = "Voice connected"
-		label = state.to_upper() if state != "idle" else "LISTENING"
-	else:
-		var wake: Dictionary = last_status.get("components", {}).get("wake_word", {})
-		if wake.get("status", "") == "ok" and last_status.get("wake_listening", false):
-			connection.text = "Local wake ready · voice disconnected"
-			label = "SAY HEY JARVIS"
-		else:
-			connection.text = "Voice unavailable · open Options"
-			label = "UNAVAILABLE"
-	activity.text = ACTIVITY.get(state, state) if last_status.get("live_session", false) else label.capitalize()
+	var ls := link_state_for(_linked, last_status, state)
+	connection.text = "● " + LINK_CAPTION[ls]
+	connection.modulate = face_link_color(ls)
+	activity.text = ACTIVITY.get(state, state) if ls in ["live", "ready"] else LINK_CAPTION[ls]
 	if face:
-		face.set_connection(label)
+		face.set_link(ls)
 	if state != "listening" and Time.get_ticks_msec() - _level_seen > 500:
 		level_bar.value = 0.0
 
