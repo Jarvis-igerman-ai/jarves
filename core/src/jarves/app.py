@@ -7,7 +7,8 @@ import uuid
 from pathlib import Path
 
 from . import __version__, logs
-from .brain import AgentBrain, Brain
+from .brain import AgentBrain, Brain, billing_routes
+from .budget import Budget
 from .config import Config, api_billing_allowed
 from .deviceport import INBOUND, DevicePort
 from .health import Health
@@ -21,7 +22,7 @@ from .voice.stt import STTUnavailable, WhisperSTT
 from .voice.tts import FallbackTTS, TTSUnavailable, tts_chain
 
 
-def make_agent(cfg: Config, registry: SkillRegistry, memory: MemoryStore, home: Path, transport=None):
+def make_agent(cfg: Config, registry: SkillRegistry, memory: MemoryStore, home: Path, transport=None, budget=None):
     """Text brain for the user's chosen connection (ai.connection); None when AI is off."""
     if cfg.ai.provider != "openai":
         return None
@@ -29,8 +30,8 @@ def make_agent(cfg: Config, registry: SkillRegistry, memory: MemoryStore, home: 
         from .chatgpt_auth import ChatGPTAuth
         from .chatgpt_brain import ChatGPTBrain
         return ChatGPTBrain(cfg.ai, registry, memory, ChatGPTAuth(home, transport=transport), cfg.assistant_name,
-                            transport=transport)
-    return AgentBrain(cfg.ai, registry, memory, cfg.assistant_name)
+                            transport=transport, budget=budget)
+    return AgentBrain(cfg.ai, registry, memory, cfg.assistant_name, budget=budget)
 
 
 class Core:
@@ -73,7 +74,8 @@ class Core:
             self.music = None
             self.health.set("music", "disabled", "music.provider = none")
 
-        self.agent = make_agent(c, self.registry, self.memory, self.home, self._ai_transport)
+        self.budget = Budget(self.memory, c.ai)      # ONE shared budget: in-flight counts span brain, TTS and voice
+        self.agent = make_agent(c, self.registry, self.memory, self.home, self._ai_transport, self.budget)
         self.brain = Brain(self.registry, self.agent)
         self._check_ai()
 
@@ -88,7 +90,8 @@ class Core:
         self.dev.check_audio()
         self.health.set("mic", "ok", "software mute off")
 
-        self.tts = self._tts or FallbackTTS(tts_chain(c.voice, allow_cloud=c.ai.connection != "chatgpt"))
+        self.tts = self._tts or FallbackTTS(tts_chain(c.voice, allow_cloud=c.ai.connection != "chatgpt", budget=self.budget),
+                                             budget=self.budget)
         ok, quality, detail = self.tts.check()
         self.health.set("speech_out", ("ok" if quality == "cloud" else "degraded") if ok else "unavailable",
                         detail, "" if quality == "cloud" else
@@ -150,7 +153,8 @@ class Core:
         s = self.health.snapshot(self.home)
         s.update(version=__version__, voice_mode=self.voice_mode, face_state=self.dev.face_state,
                  mic_muted=self.dev.mic_muted, live_session=self.live is not None,
-                 ai_connection=self.cfg.ai.connection, ai_requests_today=self.memory.usage_today("ai_requests"),
+                 ai_connection=self.cfg.ai.connection, billing=billing_routes(self.cfg.ai, self.cfg.voice),
+                 ai_requests_today=self.memory.usage_today("ai_requests"),
                  voice_minutes_today=round(self.memory.usage_today("voice_seconds") / 60, 1))
         return s
 
@@ -186,7 +190,7 @@ class Core:
                             act if why else "")
 
     def _voice_budget_left_s(self) -> float:
-        return self.cfg.ai.daily_realtime_minutes * 60 - self.memory.usage_today("voice_seconds")
+        return self.budget.remaining("voice_seconds")
 
     async def _health_loop(self) -> None:
         while True:
@@ -373,7 +377,7 @@ class Core:
         max_s = min(v.session_max_s, self._voice_budget_left_s())
 
         def usage(seconds: float) -> None:
-            self.memory.bump_usage("voice_seconds", int(seconds))
+            self.budget.record("voice_seconds", int(round(seconds)))
 
         async def on_transcript(role: str, text: str) -> None:
             await self.link.send_face("user.transcript" if role == "user" else "assistant.text",

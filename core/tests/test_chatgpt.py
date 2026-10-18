@@ -393,3 +393,18 @@ def test_setup_writes_connection_keeping_other_settings(tmp_path):
     set_connection(p, "api_key")
     raw = tomllib.loads(p.read_text(encoding="utf-8"))
     assert raw["ai"] == {"connection": "api_key", "web_search": False} and raw["voice"]["voice"] == "cedar"
+
+
+@pytest.mark.parametrize("connection,typed,spoken,backend", [
+    ("api_key", "api_key", "api_key", "api_key"),
+    ("chatgpt", "chatgpt_plan", "local", "chatgpt_plan"),
+    ("combined", "chatgpt_plan", "api_key", "api_key"),       # CR-04: spoken turns are billed to the key
+])
+async def test_status_reports_who_pays(home, cfg, monkeypatch, connection, typed, spoken, backend):
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-test-not-real")
+    c = await _core(home, cfg, connection)
+    try:
+        b = c.snapshot()["billing"]
+        assert (b["typed_text"], b["spoken_voice"], b["voice_backend"]) == (typed, spoken, backend)
+    finally:
+        await c.stop()
