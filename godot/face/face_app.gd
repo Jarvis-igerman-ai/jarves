@@ -183,6 +183,108 @@ func _simulate(f: Control, seconds: float, each_frame := Callable()) -> Dictiona
 		"gaze_path_per_min": path * 60.0 / seconds, "breath": (y_max - y_min) * 0.5}
 
 
+func _reaction_checks(errs: Array) -> void:
+	# face.emotion: each reaction is distinct, eases in, holds `ms`, eases back; a new one replaces it smoothly
+	var f := _new_face(false, 31)
+	_simulate(f, 1.0)
+	var base: Dictionary = f._v.duplicate()
+	var sig := {}
+	for em in f.EMOTIONS:
+		f.set_emotion(em, 1500)
+		var m := _simulate(f, 1.0)
+		var v: Dictionary = f._v
+		sig[em] = [snappedf(v.smile, 0.05), snappedf(v.curve, 0.05), snappedf(v.open, 0.05), v.lid_tilt.snapped(Vector2(0.05, 0.05)),
+			snappedf(v.mouth_w, 0.005), snappedf(f._fx.y, 0.1), snappedf(f._fx.z, 0.1)]
+		if m.breath > 0.01:
+			errs.append("%s bounces too much (%.2f%% r)" % [em, m.breath * 100.0])
+		_simulate(f, 2.0)          # 1.5 s hold - 1 s elapsed + ease out
+		if absf(f._v.smile - base.smile) > 0.05 or absf(f._v.curve - base.curve) > 0.05 or f.emotion != "":
+			errs.append("%s does not ease back to the state" % em)
+	for a in f.EMOTIONS:
+		for b in f.EMOTIONS:
+			if a < b and str(sig[a]) == str(sig[b]):
+				errs.append("reactions %s and %s look identical" % [a, b])
+	if sig.laugh[1] < 0.8 or sig.cry[5] < 0.8 or sig.love[6] < 0.8 or sig.surprised[2] < 1.15 or sig.sad[0] > -0.2:
+		errs.append("reaction features missing (laugh crescent / tears / heart / wide eyes / sad frown): %s" % [sig])
+	# replacing laugh with cry half-way must not jump (largest per-frame change of the mouth curve)
+	f.set_emotion("laugh", 3000)
+	_simulate(f, 1.0)
+	var jump := [0.0, f._v.smile]
+	f.set_emotion("cry", 3000)
+	_simulate(f, 1.0, func(x: Control) -> void:
+		jump[0] = maxf(jump[0], absf(x._v.smile - jump[1]))
+		jump[1] = x._v.smile)
+	if jump[0] > 0.15 or f._v.smile > -0.4:
+		errs.append("reaction replacement jumps (%.2f per frame) or does not land (%.2f)" % [jump[0], f._v.smile])
+	# asleep: no reactions
+	f.set_link("offline")
+	f.set_emotion("laugh", 3000)
+	_simulate(f, 1.0)
+	if f._v.curve > 0.05:
+		errs.append("reaction shown while asleep")
+	f.free()
+	# the Core message reaches the face
+	ui._on_link(true, "test")
+	face.set_link("ready")
+	ui._on_message("face.emotion", {"emotion": "surprised", "ms": 800})
+	if face.emotion != "surprised" or absf(face._emo_len - 0.8) > 0.001:
+		errs.append("face.emotion message not applied")
+	ui._on_message("face.emotion", {"emotion": "nonsense"})
+	_settle(120)
+	if face.emotion != "":
+		errs.append("unknown emotion / reaction end not handled")
+
+
+func _activity_checks(errs: Array) -> void:
+	# assistant.activity {kind, text, detail?} -> pill on the lower arc, fades in/out, Hebrew RTL, never when idle
+	var pill: Control = face.activity
+	face.set_link("ready")
+	face.set_state("thinking")
+	ui._on_message("assistant.activity", {"kind": "searching", "text": "מחפש ברשת"})
+	_settle(30)
+	if not pill.is_active() or pill.alpha < 0.9 or not pill._rtl or not pill.visible:
+		errs.append("activity pill not shown (alpha %.2f, rtl %s)" % [pill.alpha, pill._rtl])
+	ui._on_message("assistant.activity", {"kind": "done", "text": ""})
+	_settle(120)
+	if pill.is_active() or pill.alpha > 0.0 or pill.visible:
+		errs.append("activity pill not cleared by done (alpha %.2f)" % pill.alpha)
+	ui._on_message("assistant.activity", {"text": "Loading voice connection..."})      # legacy: panel only
+	_settle(10)
+	if pill.is_active():
+		errs.append("legacy activity (no kind) shown on the face")
+	ui._on_message("assistant.activity", {"kind": "thinking", "text": "חושב..."})
+	ui._on_message("face.set_state", {"state": "idle"})
+	_settle(120)
+	if pill.is_active() or pill.alpha > 0.0:
+		errs.append("text stays on an idle face")
+	ui._on_message("assistant.activity", {"kind": "music", "text": "מנגן", "detail": "Bohemian Rhapsody - Queen"})
+	ui._on_message("face.set_state", {"state": "speaking"})
+	ui._on_message("face.set_state", {"state": "idle"})
+	_settle(30)
+	if not pill.is_active() or pill.detail == "":
+		errs.append("music pill (title - artist) not kept while playing")
+	ui._on_message("assistant.activity", {"kind": "music", "text": ""})
+	_settle(120)
+	if pill.is_active() or pill.alpha > 0.0:
+		errs.append("empty text does not clear the pill")
+	# geometry: the pill stays below the mouth and inside the round screen
+	face.set_activity("music", "מנגן עכשיו", "שיר ארוך מאוד עם שם ארוך מאוד - אמן עם שם ארוך")
+	pill.alpha = 1.0
+	var g: Dictionary = pill.layout()
+	var r: Rect2 = g.rect
+	var s: float = face.size.y
+	var top_unit := r.position.y / (s * 0.5) - 1.0
+	var corners := [r.position, Vector2(r.end.x, r.position.y), r.end, Vector2(r.position.x, r.end.y)]
+	for c in corners:
+		if (c / (s * 0.5) - Vector2.ONE).length() > 0.97:
+			errs.append("activity pill leaves the round screen")
+			break
+	if top_unit < 0.5:
+		errs.append("activity pill too high (top %.2f, mouth at 0.36..0.5)" % top_unit)
+	face.set_activity("done", "")
+	_settle(120)
+
+
 func _new_face(lively: bool, seed_value: int, st := "idle") -> Control:
 	var f: Control = Face.new()
 	f.set_lively(lively)
@@ -362,12 +464,15 @@ func _check() -> void:
 	face.set_state("not-a-state")
 	if face.state != face.STATES[-1]:
 		errs.append("invalid state accepted")
-	# the face itself contains no text/labels: only the shader canvas
+	# the face has no Label nodes: the shader canvas + the activity pill (TextLine, hidden when idle)
 	for n in face.get_children():
 		if n is Label or n is RichTextLabel:
 			errs.append("text node on the face")
-	if face.get_child_count() != 1 or not (face.get_child(0).material is ShaderMaterial):
-		errs.append("face shader canvas missing")
+	if face.get_child_count() != 2 or not (face.get_child(0).material is ShaderMaterial) \
+			or face.activity == null or face.get_child(1) != face.activity:
+		errs.append("face shader canvas / activity pill missing")
+	_reaction_checks(errs)
+	_activity_checks(errs)
 	# sleeping face never blinks
 	var fz := _new_face(false, 21)
 	fz.set_link("offline")

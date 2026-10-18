@@ -42,10 +42,30 @@ uniform float wave_speed = 0.5;        // rim halo shimmer speed
 uniform float spin_speed = 1.2;        // thinking comet, rad/s
 uniform float tear_thresh = 0.97;      // error glitch: higher = rarer tears
 uniform float dot_speed = 0.6;         // status-dot pulse / breathe speed
+// transient reactions (face.gd REACT)
+uniform float cry = 0.0;               // 0..1: tears sliding down from the outer lower lids
+uniform float tear_hz = 0.28;          // tear cycles per second per eye
+uniform float mouth_o = 0.0;           // 0..1: blend the mouth into a small round "o" (surprised)
+uniform float heart = 0.0;             // 0..1: heart-shaped glints in the eyes (love)
 
 float sd_rbox(vec2 p, vec2 b, float r) {
 	vec2 q = abs(p) - b + r;
 	return length(max(q, 0.0)) + min(max(q.x, q.y), 0.0) - r;
+}
+
+float dot2(vec2 v) { return dot(v, v); }
+
+// heart (Inigo Quilez), y up, tip at the origin, about 1 unit tall
+float sd_heart(vec2 p) {
+	p.x = abs(p.x);
+	if (p.y + p.x > 1.0) return sqrt(dot2(p - vec2(0.25, 0.75))) - sqrt(2.0) / 4.0;
+	return sqrt(min(dot2(p - vec2(0.0, 1.0)), dot2(p - 0.5 * max(p.x + p.y, 0.0)))) * sign(p.x - p.y);
+}
+
+// a falling drop: round bottom, tapered top (y down)
+float sd_drop(vec2 q, float r) {
+	q.y *= q.y < 0.0 ? 0.5 : 1.0;
+	return length(q) - r;
 }
 
 float sd_segment(vec2 p, vec2 a, vec2 b) {
@@ -98,7 +118,13 @@ vec3 eye_shade(vec2 q, vec2 hs, float d) {
 	vec2 hp = n - vec2(-0.34, -0.5) + look * 0.06;
 	float s1 = smoothstep(1.0, 0.45, length(hp / vec2(0.3, 0.17)));
 	float s2 = smoothstep(1.0, 0.3, length((n - vec2(0.36, 0.42) + look * 0.04) / 0.075));
-	c = mix(c, vec3(1.0), clamp(s1 * 0.75 + s2 * 0.7, 0.0, 1.0) * max(iris, 0.5));
+	if (heart > 0.001) {
+		vec2 hq = (n - vec2(-0.3, -0.36) + look * 0.06) * vec2(1.0, hs.y / hs.x) / 0.42;
+		float hm = smoothstep(0.06, -0.06, sd_heart(vec2(hq.x, 0.5 - hq.y) * 1.0));
+		s1 = mix(s1, hm, heart);
+		c = mix(c, vec3(1.0, 0.84, 0.92), clamp(s1 * 0.85, 0.0, 1.0) * heart);
+	}
+	c = mix(c, vec3(1.0), clamp(s1 * 0.75 * (1.0 - heart) + s2 * 0.7, 0.0, 1.0) * max(iris, 0.5));
 	return c;
 }
 
@@ -118,7 +144,14 @@ float mouth_sdf(vec2 p) {
 	// first-order distance correction along the curve only (keeps the halo even, no streaks off the ends)
 	by /= mix(sqrt(1.0 + slope * slope), 1.0, clamp(abs(by) * 10.0 + max(abs(q.x) - w, 0.0) * 20.0, 0.0, 1.0));
 	vec2 b = vec2(abs(q.x) - w, by);
-	return length(max(b, 0.0)) + min(max(b.x, b.y), 0.0) - t0;
+	float d = length(max(b, 0.0)) + min(max(b.x, b.y), 0.0) - t0;
+	if (mouth_o > 0.001) {   // surprised: a small round "o" (ellipse, first-order distance)
+		vec2 ro = vec2(0.042, 0.052);
+		vec2 qo = (q - vec2(0.0, 0.014)) / ro;
+		float dO = (length(qo) - 1.0) * length(qo) / max(length(qo / ro), 1e-3);
+		d = mix(d, dO, mouth_o);
+	}
+	return d;
 }
 
 void fragment() {
@@ -176,6 +209,26 @@ void fragment() {
 
 	col = mix(col, eyes * bright, eye_a);
 	col = mix(col, mouth * bright, ma);
+
+	// --- tears (cry): a drop slides from the outer lower lid down the cheek, with a soft shine and a wet trail
+	if (cry > 0.001) {
+		for (int i = 0; i < 2; i++) {
+			float side = i == 0 ? -1.0 : 1.0;
+			float ph = fract(t * tear_hz + (i == 0 ? 0.0 : 0.47));
+			vec2 st = vec2(side * (eye_gap + eye_half.x * 0.55), eye_y + eye_half.y * 0.72) + offs;
+			float fall = ph * ph * 0.3;                     // gravity: starts slow, speeds up
+			vec2 tp = st + vec2(side * fall * 0.06, fall);
+			float ta = smoothstep(0.0, 0.18, ph) * (1.0 - smoothstep(0.7, 1.0, ph)) * cry;
+			float r0 = 0.019 * (0.6 + 0.4 * smoothstep(0.0, 0.25, ph));
+			float td = sd_drop(p - tp, r0);
+			float trail = sd_segment(p, st, tp - vec2(0.0, r0)) - 0.005;
+			col += eye_col * exp(-max(td, 0.0) * 60.0) * 0.35 * ta;
+			col = mix(col, eye_col * 0.6 + vec3(0.06, 0.1, 0.14), smoothstep(aa, -aa, trail) * 0.25 * ta);
+			vec3 dc = mix(eye_col * 0.75 + vec3(0.05), eye_col * 1.1 + vec3(0.15), smoothstep(-r0, r0, p.y - tp.y));
+			dc = mix(dc, vec3(1.0), smoothstep(0.008, 0.0, length(p - tp - vec2(-0.006, -0.004))) * 0.9);
+			col = mix(col, dc, smoothstep(aa, -aa, td) * ta);
+		}
+	}
 
 	// --- rim halo (listening reacts to the mic, error pulses) and the thinking comet
 	float ang = atan(p.y, p.x);

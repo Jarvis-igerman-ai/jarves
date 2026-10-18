@@ -72,13 +72,25 @@ const LIVELY := {
 	"wave_amt": 0.22, "wave_speed": 1.0, "spin_speed": 2.6, "error_pulse": 0.25, "error_hz": 0.64,
 	"tear_thresh": 0.86, "dot_speed": 1.0,
 }
+## Transient emotional reactions (face.emotion {emotion, ms}); same for CALM and --lively. They ease in, hold for
+## `ms`, then ease back to the current state; a new reaction replaces the running one by cross-fading.
+const REACT := {
+	"ease_in": 0.25, "ease_out": 0.7,       # s (the expression smoothing adds ~0.15 s on top)
+	"replace_time": 0.45,                   # cross-fade when a new reaction replaces a running one
+	"default_ms": 3500,
+	"laugh_bounce": 0.009, "laugh_hz": 2.0,  # gentle chuckle bounce: <1 % of the radius, 2 per second
+	"cry_tremble": 0.003, "cry_hz": 5.5,     # small lip tremble
+	"tear_hz": 0.28,                         # one tear slides down roughly every 3.5 s per eye
+}
 ## look units -> displacement of the iris centre in face-radius units (eye shift + iris shift inside the eye)
 const GAZE_TO_RADIUS := Vector2(0.065 + 0.3 * 0.165, 0.05 + 0.22 * 0.23)
 # ------------------------------------------------------------------------------------------------------------
 
 const STATES := ["idle", "listening", "thinking", "speaking", "happy", "error"]
 const LINKS := ["ready", "live", "connecting", "degraded", "offline", "error", "muted"]
+const EMOTIONS := ["laugh", "cry", "surprised", "love", "sad"]
 const SHADER := preload("res://face/face.gdshader")
+const ActivityPill := preload("res://face/face_activity.gd")
 const BLUE := Color(0.36, 0.78, 1.0)
 const HAPPY := Color(0.42, 0.88, 1.0)
 const RED := Color(1.0, 0.36, 0.28)
@@ -125,6 +137,13 @@ var _look := Vector2.ZERO           # final gaze sent to the shader (state look 
 var _v := {}                        # smoothed shader values
 var _mat: ShaderMaterial
 var _rng := RandomNumberGenerator.new()
+var emotion := ""                   # running reaction ("" = none)
+var _emo_t0 := -100.0
+var _emo_len := 0.0                 # s; <= 0 = hold (previews)
+var _emo_prev := ""                 # reaction being replaced (cross-faded out)
+var _emo_prev_w := 0.0
+var activity: Control               # face_activity.gd pill on the lower arc
+var _fx := Vector3.ZERO             # smoothed reaction extras: x laugh bounce, y tears, z heart glints
 
 
 func _init() -> void:
@@ -138,10 +157,80 @@ func _init() -> void:
 	_mat.shader = SHADER
 	canvas.material = _mat
 	add_child(canvas)
+	activity = ActivityPill.new()
+	add_child(activity)
 	_drift_ph = Vector2(_rng.randf() * TAU, _rng.randf() * TAU)
 	set_lively("--lively" in args)
 	_v = _targets()
 	_apply()
+
+
+func _ready() -> void:
+	# preview flags (twin: main.gd, display: face_app.gd); the Core overrides them once connected
+	for a in OS.get_cmdline_user_args():
+		if a.begins_with("--face-emotion=") or a.begins_with("--emotion="):
+			set_emotion(a.get_slice("=", 1), 0)
+		elif a.begins_with("--face-activity=") or a.begins_with("--activity="):
+			# --activity=kind|text|detail
+			var parts := a.substr(a.find("=") + 1).split("|")
+			var smp: Array = ActivityPill.SAMPLES.get(parts[0], [parts[0], ""])
+			set_activity(parts[0], parts[1] if parts.size() > 1 else smp[0], parts[2] if parts.size() > 2 else smp[1])
+			activity.alpha = 1.0
+
+
+func set_emotion(e: String, ms := -1) -> void:
+	# transient reaction; ms < 0 -> default length, ms == 0 -> hold (previews); "" / unknown -> ease out now
+	if not (e in EMOTIONS):
+		if emotion != "":
+			_emo_len = maxf(t - _emo_t0, REACT.ease_in)
+		return
+	_emo_prev = emotion
+	_emo_prev_w = _emo_weight()
+	emotion = e
+	_emo_t0 = t
+	_emo_len = (REACT.default_ms if ms < 0 else ms) / 1000.0
+
+
+func set_activity(kind: String, text: String, detail := "") -> void:
+	activity.set_activity(kind, text, detail)
+
+
+func _emo_weight() -> float:
+	if emotion == "" or is_asleep():
+		return 0.0
+	var dt := t - _emo_t0
+	var w_in := smoothstep(0.0, REACT.replace_time if _emo_prev_w > 0.0 else REACT.ease_in, dt)
+	if _emo_len <= 0.0:
+		return w_in
+	return w_in * (1.0 - smoothstep(_emo_len, _emo_len + REACT.ease_out, dt))
+
+
+func _emotion_targets(e: Dictionary) -> Dictionary:
+	# expression of the running reaction, built on top of the state expression
+	var r := e.duplicate()
+	match emotion:
+		"laugh":   # squinted ^ ^ eyes, open grin, rosy cheeks
+			r.col = HAPPY; r.lid_low = Vector2(0.34, 0.34); r.curve = 1.0; r.iris = 0.3; r.lid_up = Vector2.ZERO
+			r.lid_tilt = Vector2.ZERO; r.smile = 1.0; r.mouth_w = 0.135; r.mouth_x = 0.0
+			r.mouth_open = maxf(0.62, _mouth); r.blush = 0.7; r.glow = 1.2; r.ambient = 1.3; r.look = Vector2.ZERO
+		"cry":     # worried lids, wet downcast eyes, trembling frown, tears
+			r.col = Color(0.42, 0.72, 1.0); r.lid_up = Vector2(0.2, 0.2); r.lid_tilt = Vector2(-0.7, -0.7)
+			r.lid_low = Vector2(0.14, 0.14); r.curve = 0.0; r.smile = -0.7; r.mouth_w = 0.075; r.mouth_x = 0.0
+			r.mouth_open = maxf(0.12, _mouth); r.look = Vector2(0.0, 0.3); r.open = 0.92; r.blush = 0.0
+			r.glow = 0.9; r.ambient = 0.85
+		"sad":     # mild: a little worried, softer, looking down
+			r.lid_up = Vector2(0.14, 0.14); r.lid_tilt = Vector2(-0.45, -0.45); r.lid_low = Vector2(0.06, 0.06)
+			r.curve = 0.0; r.smile = -0.4; r.mouth_w = 0.07; r.look = Vector2(0.0, 0.32); r.open = 0.94
+			r.glow = 0.9; r.ambient = 0.85; r.blush = 0.0
+		"surprised":   # wide eyes, small "o"
+			r.open = 1.22; r.w = 1.06; r.lid_up = Vector2.ZERO; r.lid_tilt = Vector2(-0.12, -0.12); r.curve = 0.0
+			r.lid_low = Vector2.ZERO; r.smile = 0.0; r.mouth_w = 0.05; r.mouth_x = 0.0; r.mouth_o = 1.0
+			r.mouth_open = maxf(0.6, _mouth); r.look = Vector2.ZERO; r.glow = 1.2; r.iris = 1.0
+		"love":    # soft happy eyes, warm blush, heart glints
+			r.lid_low = Vector2(0.2, 0.2); r.curve = 0.0; r.lid_up = Vector2.ZERO; r.lid_tilt = Vector2.ZERO
+			r.smile = 0.85; r.mouth_w = 0.1; r.blush = 1.0; r.glow = 1.15; r.ambient = 1.25; r.iris = 1.0
+			r.look = Vector2.ZERO
+	return r
 
 
 func reseed(seed_value: int) -> void:
@@ -160,6 +249,8 @@ func set_state(s: String) -> void:
 	if s in STATES and s != state:
 		state = s
 		_pop_t0 = t
+		if s == "idle" and activity.kind != "music":
+			activity.set_activity("done", "")     # the turn is over: no text on an idle face (music may stay)
 		_next_saccade = t + (0.4 if lively else _rng.randf_range(0.6, 1.2))
 		if not lively and cfg.saccade_amp.get(s, Vector2.ZERO) == Vector2.ZERO:
 			_start_saccade(Vector2.ZERO)      # attentive states: eyes come back to the person
@@ -184,6 +275,8 @@ func snap() -> void:
 	# jump straight to the current expression (previews/screenshots; live use always transitions)
 	_v = _targets()
 	_look = _v.look
+	var w := _emo_weight()
+	_fx = Vector3(w if emotion == "laugh" else 0.0, w if emotion == "cry" else 0.0, w if emotion == "love" else 0.0)
 	_apply()
 
 
@@ -206,7 +299,7 @@ func _targets() -> Dictionary:
 		"col": BLUE, "bright": 1.0, "glow": 1.0, "open": 1.0, "w": 1.0, "lid_up": Vector2.ZERO,
 		"lid_tilt": Vector2.ZERO, "lid_low": Vector2.ZERO, "curve": 0.0, "sleep": 0.0, "iris": 1.0,
 		"smile": 0.55, "mouth_open": 0.0, "mouth_w": 0.085, "mouth_x": 0.0, "mouth_a": 1.0, "ring": 0.0,
-		"ring_col": BLUE, "spin": 0.0, "blush": 0.0, "jitter": 0.0, "look": Vector2.ZERO, "ambient": 1.0,
+		"ring_col": BLUE, "spin": 0.0, "blush": 0.0, "jitter": 0.0, "look": Vector2.ZERO, "ambient": 1.0, "mouth_o": 0.0,
 	}
 	match state:
 		"listening":
@@ -230,6 +323,24 @@ func _targets() -> Dictionary:
 		e.col = SLEEP; e.bright = 0.55 + cfg.sleep_pulse * sin(t * TAU / cfg.sleep_period); e.glow = 0.6
 		e.sleep = 1.0; e.iris = 0.0; e.smile = 0.15; e.mouth_w = 0.04; e.mouth_open = 0.0; e.mouth_a = 0.0
 		e.ring = 0.0; e.spin = 0.0; e.blush = 0.0; e.jitter = 0.0; e.look = Vector2(0.0, 0.25); e.ambient = 0.5
+	var w := _emo_weight()
+	var pw := _emo_prev_w * (1.0 - smoothstep(0.0, REACT.replace_time, t - _emo_t0)) if not is_asleep() else 0.0
+	if pw > 0.0:          # cross-fade: the old reaction hands over directly to the new one
+		var cur := emotion
+		emotion = _emo_prev
+		var rp := _emotion_targets(e)
+		emotion = cur
+		for key in e:
+			var a = e[key]
+			e[key] = a.lerp(rp[key], pw / maxf(1.0 - w, 1e-3) if w < 0.999 else 0.0) if (a is Vector2 or a is Color) \
+					else lerpf(a, rp[key], pw / maxf(1.0 - w, 1e-3) if w < 0.999 else 0.0)
+	elif _emo_prev_w > 0.0:
+		_emo_prev_w = 0.0
+	if w > 0.0:
+		var r := _emotion_targets(e)
+		for key in e:
+			var a = e[key]
+			e[key] = a.lerp(r[key], w) if (a is Vector2 or a is Color) else lerpf(a, r[key], w)
 	return e
 
 
@@ -269,6 +380,15 @@ func _process(delta: float) -> void:
 			sin(TAU * cfg.drift_hz.y * t + _drift_ph.y))
 	var target_look: Vector2 = _v.look + off * (0.0 if is_asleep() else 1.0)
 	_look = target_look if not lively else _look.lerp(target_look, 1.0 - exp(-delta * 16.0))
+	if emotion != "" and _emo_len > 0.0 and t - _emo_t0 > _emo_len + REACT.ease_out:
+		emotion = ""
+	# reaction-only extras, faded with the same smoothing as the expression
+	var k2 := 1.0 - exp(-delta * cfg.expr_rate)
+	var w := _emo_weight()
+	_fx = _fx.lerp(Vector3(w if emotion == "laugh" else 0.0, w if emotion == "cry" else 0.0,
+			w if emotion == "love" else 0.0), k2)
+	activity.accent = _v.col
+	activity.step(delta, t, is_asleep())
 	_apply()
 
 
@@ -352,6 +472,8 @@ func _apply() -> void:
 	var b := breath()
 	var o: float = _v.open * _blink * (1.0 + cfg.breath_open * b + cfg.pop_open * _pop)
 	var w: float = _v.w * (1.0 - cfg.pop_w * _pop)
+	var bounce: float = -_fx.x * REACT.laugh_bounce * (0.5 - 0.5 * cos(TAU * REACT.laugh_hz * t))
+	var tremble: float = _fx.y * REACT.cry_tremble * sin(TAU * REACT.cry_hz * t)
 	var m := _mat
 	m.set_shader_parameter("t", t)
 	m.set_shader_parameter("low_quality", low_quality)
@@ -359,7 +481,7 @@ func _apply() -> void:
 	m.set_shader_parameter("bright", _v.bright)
 	m.set_shader_parameter("glow", _v.glow * (1.0 + cfg.breath_glow * b))
 	m.set_shader_parameter("eye_half", Vector2(0.165 * w, 0.23))
-	m.set_shader_parameter("eye_y", -0.1 + cfg.breath_y * b)
+	m.set_shader_parameter("eye_y", -0.1 + cfg.breath_y * b + bounce)
 	m.set_shader_parameter("look", _look)
 	m.set_shader_parameter("open", Vector2(o, o))
 	m.set_shader_parameter("lid_up", _v.lid_up)
@@ -371,7 +493,7 @@ func _apply() -> void:
 	m.set_shader_parameter("mouth_smile", _v.smile)
 	m.set_shader_parameter("mouth_open", _v.mouth_open)
 	m.set_shader_parameter("mouth_w", _v.mouth_w)
-	m.set_shader_parameter("mouth_pos", Vector2(_v.mouth_x, 0.36 + cfg.breath_mouth * b))
+	m.set_shader_parameter("mouth_pos", Vector2(_v.mouth_x, 0.36 + cfg.breath_mouth * b + bounce * 1.3 + tremble))
 	m.set_shader_parameter("mouth_alpha", _v.mouth_a)
 	m.set_shader_parameter("ambient", _v.ambient)
 	m.set_shader_parameter("ring", maxf(_v.ring, 0.0))
@@ -379,6 +501,10 @@ func _apply() -> void:
 	m.set_shader_parameter("spin", _v.spin)
 	m.set_shader_parameter("blush", _v.blush)
 	m.set_shader_parameter("jitter", _v.jitter)
+	m.set_shader_parameter("cry", _fx.y)
+	m.set_shader_parameter("tear_hz", REACT.tear_hz)
+	m.set_shader_parameter("heart", _fx.z)
+	m.set_shader_parameter("mouth_o", _v.mouth_o)
 	m.set_shader_parameter("wave_amt", cfg.wave_amt)
 	m.set_shader_parameter("wave_speed", cfg.wave_speed)
 	m.set_shader_parameter("spin_speed", cfg.spin_speed)
