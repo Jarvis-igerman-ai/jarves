@@ -33,7 +33,7 @@ DEVICE_EVENTS = frozenset({"button.down", "button.up", "mic.mute_changed", "pres
                            "network.changed"})
 ALLOWED: dict[str, frozenset[str]] = {
     "face": frozenset({"talk.down", "talk.up", "user.text", "mic.set_mute", "status.request", "confirm.reply",
-                       "debug.enable"}) | DEVICE_EVENTS,
+                       "debug.enable", "desktop.close"}) | DEVICE_EVENTS,
     "cli": frozenset({"status.request", "core.shutdown", "debug.enable"}),
 }
 KNOWN_TYPES = frozenset().union(*ALLOWED.values())

@@ -49,6 +49,7 @@ class AIConfig(_Strict):
 
 
 class VoiceConfig(_Strict):
+    activation: Literal["wake_word", "conversation"] = "wake_word"
     # live = OpenAI GPT-Live (best, full duplex); realtime = gpt-realtime-2.1 via Agents SDK (alternative);
     # push_to_talk = offline fallback (local STT). Without OPENAI_API_KEY the Core uses push_to_talk.
     mode: Literal["live", "realtime", "push_to_talk", "off"] = "live"

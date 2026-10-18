@@ -68,5 +68,20 @@ class DevicePort:
         if self.audio is not None:
             self.audio.stop_playback()
 
+    async def speaker_play_stream(self, chunks) -> bool:
+        if self.audio is None:
+            return False
+
+        async def scaled():
+            async for samples, rate in chunks:
+                yield samples * self.speaker_volume, rate
+
+        if hasattr(self.audio, "play_stream"):
+            return await self.audio.play_stream(scaled())
+        async for samples, rate in scaled():
+            if not await self.audio.play(samples, rate):
+                return False
+        return True
+
     def speaker_set_volume(self, v: float) -> None:
         self.speaker_volume = max(0.0, min(1.0, float(v)))

@@ -88,12 +88,28 @@ def cmd_logs(a, cfg, home) -> int:
         print(f"no log yet at {path}")
         return 1
     with path.open(encoding="utf-8", errors="replace") as f:
-        for line in f.readlines()[-a.lines:]:
+        history = f.readlines()[-a.lines:]
+        for line in history:
             show(line)
+        until_stopped = getattr(a, "until_stopped", False)
+        def stopped(lines):
+            state = None
+            for line in lines:
+                try:
+                    code = json.loads(line).get("code")
+                except ValueError:
+                    continue
+                if code in ("CORE_STARTING", "CORE_READY", "CORE_STOPPED"):
+                    state = code
+            return state == "CORE_STOPPED"
+        if until_stopped and stopped(history):
+            return 0
         while a.follow:
             line = f.readline()
             if line:
                 show(line)
+                if until_stopped and stopped([line]):
+                    return 0
             else:
                 try:
                     _time.sleep(0.3)
@@ -434,6 +450,7 @@ def main(argv: list[str] | None = None) -> int:
     log_opts(lg)
     lg.add_argument("-f", "--follow", action="store_true")
     lg.add_argument("-n", "--lines", type=int, default=50)
+    lg.add_argument("--until-stopped", action="store_true", help="finish following when the Core stops")
     sub.add_parser("stop", help="orderly shutdown of the running Core")
     sub.add_parser("status", help="live health from the running Core, or the last stale snapshot")
     d = sub.add_parser("diag", help="write a redacted support bundle (zip)")

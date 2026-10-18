@@ -4,6 +4,7 @@ from __future__ import annotations
 import asyncio
 import time
 import uuid
+from contextlib import aclosing
 from pathlib import Path
 
 from . import __version__, logs
@@ -132,6 +133,7 @@ class Core:
         if self.stopping:
             return
         self.stopping = True
+        self.dev.speaker_stop()
         self.health.mark("stopping")
         logs.info("core", "CORE_STOPPING", "Core stopping")
         for fut, _ in list(self._confirm.values()):
@@ -173,7 +175,8 @@ class Core:
     # ------------------------------------------------------------------ health
     def snapshot(self) -> dict:
         s = self.health.snapshot(self.home)
-        s.update(version=__version__, voice_mode=self.voice_mode, face_state=self.dev.face_state,
+        s.update(version=__version__, voice_mode=self.voice_mode, voice_activation=self.cfg.voice.activation,
+                 face_state=self.dev.face_state,
                  mic_muted=self.dev.mic_muted, live_session=self.live is not None,
                  ai_connection=self.cfg.ai.connection, billing=billing_routes(self.cfg.ai, self.cfg.voice),
                  ai_requests_today=self.memory.usage_today("ai_requests"),
@@ -232,11 +235,13 @@ class Core:
     async def _face_connected(self) -> None:
         await self.dev.face_set_state(self.dev.face_state)
         await self.link.send_face("status", self.snapshot())
-        if self.cfg.voice.greeting and not self._greeted:
+        if (self.cfg.voice.greeting or self.cfg.voice.activation == "conversation") and not self._greeted:
             self._greeted = True
             self._run_busy(self.greet())
 
     def how_to_talk(self) -> str:
+        if self.cfg.voice.activation == "conversation":
+            return "השיחה נפתחת אוטומטית. אפשר לדבר בלי מילת הפעלה."
         if self.wake is not None:
             return "תגיד \"היי ג'ארבס\" ואז דבר, או כתוב לי."
         if self.voice_mode in ("live", "realtime"):
@@ -249,7 +254,16 @@ class Core:
         hello = f"שלום! אני {self.cfg.assistant_name}."
         text = f"{hello} {self.how_to_talk()}"
         await self.link.send_face("assistant.text", {"text": text, "source": "core", "ok": True, "code": "GREETING"})
-        await self.speak(hello)
+        if self.cfg.voice.greeting:
+            await self.speak(f'{hello} תגיד היי ג׳ארוויס כדי לדבר איתי.' if self.wake is not None else hello)
+        if self.cfg.voice.activation == "conversation":
+            if self.voice_mode in ("live", "realtime"):
+                await self._start_live()
+            else:
+                self.health.set("conversation", "unavailable", "automatic conversation needs live cloud voice",
+                                "configure API voice, or select voice.activation = wake_word for local speech")
+                await self.link.broadcast("status", self.snapshot())
+            return
         await self.set_face("happy")
         await asyncio.sleep(1.0)
         await self.set_face("idle")
@@ -288,8 +302,10 @@ class Core:
         elif t == "debug.enable":
             logs.enable_debug(min(int(p.get("minutes", self.cfg.log.debug_minutes)), self.cfg.log.debug_minutes))
             logs.info("core", "DEBUG_ENABLED", "temporary DEBUG logging enabled")
-        elif t == "core.shutdown":
+        elif t in ("core.shutdown", "desktop.close"):
             logs.info("core", "SHUTDOWN_REQUESTED", "shutdown requested by an authenticated client")
+            if t == "desktop.close":
+                await self.link.reply(ws, "desktop.closed", {})
             self.stop_event.set()
         elif t in INBOUND:
             logs.info("device", "DEVICE_EVENT", f"device event {t}", **logs.safe_fields(p, allow=("id", "muted", "state")))
@@ -416,6 +432,32 @@ class Core:
     async def speak(self, text: str) -> None:
         if not text or self.dev.audio is None:
             return
+        if hasattr(self.tts, "stream"):
+            t0 = time.monotonic()
+            logs.info("tts", "SPEECH_SYNTH_START", "generating streamed speech")
+
+            async def chunks():
+                first = True
+                async with aclosing(self.tts.stream(text)) as source:
+                    async for samples, rate in source:
+                        if first:
+                            first = False
+                            logs.info("tts", "SPEECH_FIRST_AUDIO", "first speech audio received",
+                                      ms=round((time.monotonic() - t0) * 1000))
+                            await self.set_face("speaking")
+                            logs.info("tts", "SPEECH_PLAY_START", "starting streamed speaker playback")
+                        yield samples, rate
+                logs.info("tts", "SPEECH_SYNTH_READY", "speech stream complete",
+                          ms=round((time.monotonic() - t0) * 1000))
+
+            try:
+                async with aclosing(chunks()) as source:
+                    await self.dev.speaker_play_stream(source)
+            except TTSUnavailable as e:
+                self.health.set("speech_out", "unavailable", e.message, e.action)
+            except AudioUnavailable as e:
+                self.health.set("audio", "unavailable", e.message, e.action)
+            return
         try:
             t0 = time.monotonic()
             logs.info("tts", "SPEECH_SYNTH_START", "generating speech")
@@ -500,6 +542,9 @@ class Core:
     # ------------------------------------------------------------------ "Hey Jarvis" wake word
     def _setup_wake(self) -> None:
         v = self.cfg.voice
+        if v.activation == "conversation":
+            self.health.set("wake_word", "disabled", "conversation mode: no wake word required")
+            return
         if not v.wake_enabled or self.voice_mode == "off" or not (self._wake_audio or self.use_real_audio):
             self.health.set("wake_word", "disabled", "wake word off (voice.wake_enabled / voice.mode)")
             return
@@ -511,6 +556,7 @@ class Core:
             ok, msg = False, e.message
         if not ok:
             self.health.set("wake_word", "unavailable", msg, "uv sync --extra voice; hold Space to talk meanwhile")
+            logs.warn("wake", "WAKE_UNAVAILABLE", msg)
             return
         self.wake = WakeListener(det, self._on_wake, v.wake_cooldown_s)
         self._woke = False
@@ -539,11 +585,19 @@ class Core:
     async def _wake_loop(self) -> None:
         """One local mic stream at 16 kHz: wake word -> live conversation, or capture-until-silence -> answer.
         The stream is closed (device released) while muted, during a live session and while JARVES answers."""
-        from .voice.wakeword import capture_until_silence
+        from .voice.wakeword import capture_until_silence, level_meter
         v = self.cfg.voice
         load = getattr(self.wake.detector, "load", None)
         if load is not None:
-            await load()
+            try:
+                await load()
+            except Exception:
+                logs.error("wake", "WAKE_LOAD_FAILED", "wake listener failed to initialize", exc=True)
+                self.health.set("wake_word", "unavailable", "wake listener failed to initialize", "see logs; use Talk")
+                return
+        last_report = time.monotonic()
+        peak_score = 0.0
+        peak_level = 0.0
         while not self.stopping:
             if not self._wake_should_listen():
                 await asyncio.sleep(0.2)
@@ -553,11 +607,21 @@ class Core:
             woke = False
             try:
                 self.wake.resume()
+                first_frame = True
                 async for chunk in chunks:
                     if not self._wake_should_listen():
                         break
                     self._woke = False
                     await self.wake.process(chunk)
+                    peak_score = max(peak_score, self.wake.stats.last_score)
+                    peak_level = max(peak_level, level_meter(chunk))
+                    if first_frame:
+                        first_frame = False
+                        logs.info("wake", "WAKE_LISTENING", "microphone active; waiting for Hey Jarvis")
+                    if time.monotonic() - last_report >= 15:
+                        logs.info("wake", "WAKE_HEALTH", "wake listener running", frames=self.wake.stats.frames,
+                                  peak_score=round(peak_score, 3), peak_level=round(peak_level, 3))
+                        last_report, peak_score, peak_level = time.monotonic(), 0.0, 0.0
                     if self.wake.stats.frames % 25 == 0:
                         logs.verbose("wake", "WAKE_SCORE", "wake word score", score=round(self.wake.stats.last_score, 3))
                     if self._woke:
@@ -575,6 +639,7 @@ class Core:
                         self.wake.note_false_trigger()
                     self._run_busy(self._transcribe_and_answer(cap.audio))
             except AudioUnavailable as e:
+                logs.warn("wake", e.code, e.message, action=e.action)
                 self.health.set("audio", "unavailable", e.message, e.action)
                 await asyncio.sleep(5)
             except asyncio.CancelledError:

@@ -11,6 +11,7 @@ import shutil
 import subprocess
 import sys
 import wave
+from contextlib import aclosing
 
 import numpy as np
 
@@ -112,6 +113,22 @@ class MeteredTTS:
         finally:
             res.commit()
 
+    async def stream(self, text: str):
+        from ..budget import BudgetExceeded
+        try:
+            res = self.budget.reserve("ai_requests")
+        except BudgetExceeded as e:
+            raise TTSUnavailable("TTS_BUDGET", f"cloud speech skipped: {e}", e.action) from e
+        try:
+            if hasattr(self.engine, "stream"):
+                async with aclosing(self.engine.stream(text)) as source:
+                    async for chunk in source:
+                        yield chunk
+            else:
+                yield await self.engine.synth(text)
+        finally:
+            res.commit()
+
 
 def _metered(engines: list, budget) -> list:
     if budget is None:
@@ -174,4 +191,36 @@ class FallbackTTS:
                 err = x
                 over_budget = over_budget or x.code == "TTS_BUDGET"
                 logs.warn("tts", x.code, f"{e.name}: {x.message}", action=x.action)
+        raise err or TTSUnavailable("TTS_NONE", "no speech engine available", "set OPENAI_API_KEY")
+
+    async def stream(self, text: str):
+        """Fallback only before the first audio; never replay a partially spoken reply."""
+        err, over_budget = None, False
+        for e in self.usable or self.engines:
+            if over_budget and e.quality == "cloud":
+                continue
+            emitted = False
+            try:
+                if hasattr(e, "stream"):
+                    async with aclosing(e.stream(text)) as source:
+                        async for chunk in source:
+                            emitted = True
+                            if self.last_used != e.name:
+                                logs.info("tts", "TTS_ENGINE", f"speaking with {e.name} ({e.quality})")
+                            self.last_used = e.name
+                            yield chunk
+                else:
+                    chunk = await e.synth(text)
+                    emitted = True
+                    if self.last_used != e.name:
+                        logs.info("tts", "TTS_ENGINE", f"speaking with {e.name} ({e.quality})")
+                    self.last_used = e.name
+                    yield chunk
+                return
+            except TTSUnavailable as e_error:
+                if emitted:
+                    raise
+                err = e_error
+                over_budget = over_budget or err.code == "TTS_BUDGET"
+                logs.warn("tts", err.code, f"{e.name}: {err.message}", action=err.action)
         raise err or TTSUnavailable("TTS_NONE", "no speech engine available", "set OPENAI_API_KEY")

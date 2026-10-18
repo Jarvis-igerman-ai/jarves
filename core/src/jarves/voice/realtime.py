@@ -188,24 +188,32 @@ class RealtimeSpeaker:
         return True, f"{self.model} voice {self.voice}"
 
     async def synth(self, text: str) -> tuple[np.ndarray, int]:
+        from contextlib import aclosing
+        chunks = []
+        async with aclosing(self.stream(text)) as source:
+            async for samples, _rate in source:
+                chunks.append(samples)
+        return np.concatenate(chunks) if chunks else np.zeros(0, np.float32), RATE
+
+    async def stream(self, text: str):
         from .tts import TTSUnavailable
         instr = ("You are a text-to-speech voice. Read the user's message aloud EXACTLY as written, in natural, warm "
                  "Israeli Hebrew (or the message's language). Do not add, answer or comment on anything.")
-        chunks: list[bytes] = []
+        received = False
         try:
             runner = _runner(self.model, self.voice, self.language, instr, [])
             async with await runner.run() as session:
                 await session.send_message(text)
 
-                async def collect():
+                async with asyncio.timeout(self.timeout):
                     async for ev in session:
                         if ev.type == "audio":
-                            chunks.append(ev.audio.data)
-                        elif ev.type == "audio_end" and chunks:
+                            received = True
+                            yield np.frombuffer(ev.audio.data, "<i2").astype(np.float32) / 32768.0, RATE
+                        elif ev.type == "audio_end" and received:
                             return
                         elif ev.type == "error":
                             raise TTSUnavailable("TTS_FAILED", f"realtime speech error: {str(ev.error)[:150]}")
-                await asyncio.wait_for(collect(), self.timeout)
         except TTSUnavailable:
             raise
         except asyncio.TimeoutError as e:
@@ -213,5 +221,5 @@ class RealtimeSpeaker:
         except Exception as e:
             raise TTSUnavailable("TTS_OFFLINE", f"cloud speech unavailable ({type(e).__name__})",
                                  "check OPENAI_API_KEY and the internet") from e
-        pcm = b"".join(chunks)
-        return np.frombuffer(pcm, "<i2").astype(np.float32) / 32768.0, RATE
+        if not received:
+            raise TTSUnavailable("TTS_NO_AUDIO", "cloud speech ended without audio", "check the speech model")

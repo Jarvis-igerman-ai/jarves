@@ -20,9 +20,12 @@ var confirm: ConfirmationDialog
 var _confirm_id := ""
 var _talk_held := false
 var last_status := {}
+var _closing := false
+var _close_ack := false
 
 
 func _ready() -> void:
+	get_tree().auto_accept_quit = false
 	link = CoreLink.new()
 	link.name = "CoreLink"
 	add_child(link)
@@ -88,6 +91,24 @@ func _ready() -> void:
 	_set_controls(false)
 
 
+func _notification(what: int) -> void:
+	if what == NOTIFICATION_WM_CLOSE_REQUEST and not _closing:
+		_close_desktop()
+
+
+func _close_desktop() -> void:
+	_closing = true
+	_set_controls(false)
+	if link and link.connected:
+		link.send("desktop.close")
+		var deadline := Time.get_ticks_msec() + 1500
+		while not _close_ack and link.connected and Time.get_ticks_msec() < deadline:
+			await get_tree().process_frame
+	if link:
+		link.stop()
+	get_tree().quit(0)
+
+
 func _set_controls(on: bool) -> void:
 	talk_btn.disabled = not on
 	mute_chk.disabled = not on
@@ -132,6 +153,9 @@ func _on_link(connected: bool, detail: String) -> void:
 
 
 func _on_message(t: String, p: Dictionary) -> void:
+	if t == "desktop.closed":
+		_close_ack = true
+		return
 	match t:
 		"face.set_state":
 			if face:
@@ -171,6 +195,8 @@ const ACTIVITY := {
 func _show_activity(state: String) -> void:
 	if state == "idle" and last_status.get("voice_mode", "") in ["live", "realtime"] and last_status.get("live_session", false):
 		activity.text = "Conversation on: just talk. Tap Talk to end."
+	elif state == "idle" and last_status.get("voice_activation", "") == "conversation":
+		activity.text = "Conversation not active. Check status below; Talk can restart it."
 	else:
 		activity.text = ACTIVITY.get(state, state)
 	if state != "listening" and Time.get_ticks_msec() - _level_seen > 500:

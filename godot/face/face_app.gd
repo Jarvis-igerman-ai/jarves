@@ -32,7 +32,7 @@ func _ready() -> void:
 	if "--check" in args:
 		_check()
 		return
-	if "--e2e" in args:
+	if "--e2e" in args or "--e2e-close" in args:
 		_e2e()
 		return
 	for a in args:
@@ -64,6 +64,10 @@ func _e2e() -> void:
 	if not ui.link.connected:
 		print("E2E RESULT: FAIL (not connected: %s)" % ui.link.detail)
 		get_tree().quit(1)
+		return
+	if "--e2e-close" in OS.get_cmdline_user_args():
+		# Exercise the same notification as the OS window close button.
+		ui.notification(NOTIFICATION_WM_CLOSE_REQUEST)
 		return
 	ui._send_text("מה השעה?")
 	t0 = Time.get_ticks_msec()

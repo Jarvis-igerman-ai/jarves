@@ -122,9 +122,9 @@ jobs:
           JARVES_HOME="$RUNNER_TEMP/bad" timeout 90 "$GODOT" --headless --path godot res://face/face_app.tscn -- --e2e | tee bad.txt || true
           grep -q "E2E RESULT: FAIL" bad.txt && grep -q "rejected the token" bad.txt
           (cd core && uv run jarves status || true) | grep -Eq '"core": "(ready|degraded)"'   # Core survived the bad client (offline = degraded)
-      - name: Orderly shutdown through the authenticated link
+      - name: Window close stops the Core through the authenticated link
         run: |
-          (cd core && uv run jarves stop)
+          timeout 30 "$GODOT" --headless --path godot res://face/face_app.tscn -- --e2e-close
           for i in $(seq 30); do grep -q CORE_STOPPED "$JARVES_HOME/logs/jarves.log" && break; sleep 0.5; done
           grep -q CORE_STOPPED "$JARVES_HOME/logs/jarves.log"
           ! (cd core && uv run jarves status)                                 # now reports NOT running

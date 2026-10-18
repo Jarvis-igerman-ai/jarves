@@ -44,7 +44,9 @@ Without a key or ChatGPT, JARVES runs **offline**: commands only (music, time, m
 
 ## Run
 
-**Talk:** say **"Hey Jarvis"**, then your question. It is detected on this PC and nothing is sent until it hears that. You can also hold Space, or type. The bar under the face shows the mic level; if it stays empty, check Windows Settings → Privacy & security → Microphone.
+**Talk:** `voice.activation` selects one of two modes. **Mode 1, `wake_word`:** say **"Hey Jarvis"**, then your question; the wake word is detected locally. **Mode 2, `conversation`:** opening the window says hello and starts live conversation automatically; no wake word or click is required. Mode 2 requires configured live API voice and uses its existing daily/session budget. This PC is set to **mode 2 at the user's request**. Set `activation = "wake_word"` under `[voice]` to switch back. Software Mic mute stops capture; type if voice is unavailable.
+
+**Close the window to stop:** the desktop sends an authenticated shutdown request, ends live voice and speaker playback, and the Core exits normally. The launcher returns to the terminal without Ctrl+C / "Terminate batch job?". Repeated-launch log followers finish on `CORE_STOPPED`; ordinary connection loss still reconnects instead of being treated as a close.
 
 **Terminal logs:**
 - `jarvis --log-level debug` sets the level: `error`, `warning`, `info` (default), `debug` or `verbose`.
@@ -55,7 +57,9 @@ The modules are `core`, `voice`, `live`, `realtime`, `wake`, `ai`, `chatgpt`, `s
 
 **Simplest:** type `jarvis` in a terminal with `C:\work\jarvis` on your PATH. This opens the **room with the actual CAD-derived model and live face**, and runs the Core with terminal logs. The first time, it asks how to connect and signs you in. `jarvis setup` changes that choice and `jarvis stop` stops JARVES. Any other word is passed to the Core, e.g. `jarvis status` or `jarvis chatgpt status`.
 
-Cloud voice skips offline recognition model loading. The spoken greeting is brief; full controls remain onscreen. Each run appends to the rotated log below. `CORE_READY.ms`, `SPEECH_SYNTH_START`, `SPEECH_SYNTH_READY.ms` and `SPEECH_PLAY_START` separate startup, speech-generation and playback delays. Cloud speech still depends on network/provider latency; its full audio is generated before playback. Launcher errors before Core starts appear in the terminal.
+Cloud voice skips offline recognition model loading. Full controls remain onscreen. Cloud reply/greeting speech streams to one output device stream as audio arrives; local speech engines remain buffered fallbacks. Each run appends to the rotated log below. `CORE_READY.ms`, `SPEECH_SYNTH_START`, `SPEECH_FIRST_AUDIO.ms`, `SPEECH_SYNTH_READY.ms` and `SPEECH_PLAY_START` separate startup, first-audio and full-generation/playback delays. Cloud connection/first-audio latency remains provider-dependent. Launcher errors before Core starts appear in the terminal. In mode 1, `WAKE_LISTENING` confirms mic frames are arriving and `WAKE_HEALTH` reports bounded frame/level/score counters every 15 s, without saving audio.
+
+**Explore skills:** ask "What can you do?" or "Show me how to use your music skill." The AI is instructed to explain only the tools it has, check current service status and offer one example or walkthrough at a time. Current tools cover time, status, explicit personal memory and music control; web search depends on the active AI connection. Gmail/Calendar and other unimplemented integrations are not claimed.
 
 Manual steps:
 
@@ -87,7 +91,7 @@ Manual steps:
 **Config:** optional `%LOCALAPPDATA%\jarves\config.toml` ([template](config.example.toml)). Unknown keys, secrets or a non-loopback host are rejected with a clear message.
 
 **Privacy:**
-- The mic opens only while you talk.
+- Mode 1 listens locally for the wake word; mode 2 opens the mic for the live conversation after the greeting. Software mute stops capture, and closing the window requests Core/session shutdown.
 - Software mute is **not** a hardware privacy switch.
 - No audio or transcripts are written to disk.
 - Memory holds only what you ask JARVES to remember.

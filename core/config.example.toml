@@ -16,6 +16,7 @@ daily_request_limit = 200      # hard ceiling on AI requests per day (cost guard
 daily_realtime_minutes = 30    # hard ceiling on live-voice minutes per day (cost guard)
 
 [voice]
+activation = "wake_word"       # mode 1: Hey Jarvis; mode 2: "conversation" greets and opens cloud voice
 mode = "live"                  # live (GPT-Live) | realtime (gpt-realtime-2.1) | push_to_talk (offline) | off
 voice = "marin"
 half_duplex = true             # set false with headphones or an echo-cancelling mic (enables barge-in)

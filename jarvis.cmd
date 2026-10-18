@@ -16,7 +16,7 @@ if not "%FIRST%"=="" if not "%FIRST:~0,1%"=="-" ( %J% %* & exit /b )
 if not "%ERRORLEVEL%"=="1" (
   echo JARVES is already running: opening the room and following its log.
   call "%~dp0godot\run_viewer.cmd"
-  %J% logs -f %*
+  %J% logs -f --until-stopped %*
   exit /b
 )
 uv --directory "%C%" sync -q --extra voice || ( echo Could not install JARVES packages. & pause & exit /b 1 )

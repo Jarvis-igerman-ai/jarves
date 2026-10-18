@@ -110,6 +110,39 @@ class SoundDeviceAudio:
     def stop_playback(self) -> None:
         self._stop_play.set()
 
+    async def play_stream(self, chunks) -> bool:
+        """One output stream for all deltas; never open a microphone or save audio."""
+        self._stop_play.clear()
+        out, stream_rate = None, None
+        try:
+            async for samples, rate in chunks:
+                if self._stop_play.is_set():
+                    return False
+                try:
+                    if out is None:
+                        stream_rate = rate
+                        out = self._sd().OutputStream(samplerate=rate, channels=1, dtype="float32", device=self.out)
+                        out.start()
+                    if rate != stream_rate:
+                        raise ValueError("speech sample rate changed mid-stream")
+                    data = np.clip(samples * self.volume, -1, 1).astype(np.float32).reshape(-1, 1)
+                    for offset in range(0, len(data), max(1, rate // 10)):
+                        if self._stop_play.is_set():
+                            return False
+                        await asyncio.to_thread(out.write, data[offset:offset + max(1, rate // 10)])
+                except AudioUnavailable:
+                    raise
+                except Exception as e:
+                    raise AudioUnavailable("AUDIO_SPEAKER_UNAVAILABLE", f"cannot stream audio: {e}",
+                                           "check the speaker/output device") from e
+            return True
+        finally:
+            if out is not None:
+                try:
+                    out.abort() if self._stop_play.is_set() else out.stop()
+                finally:
+                    out.close()
+
 
 class StreamingAudio:
     """Continuous PCM16 mic/speaker streams for live voice sessions (GPT-Live / Realtime).
