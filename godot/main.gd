@@ -6,6 +6,8 @@ extends Node3D
 #                    [--show-reserved] [--finish=<key>] [--view=front|side|rear|three_quarter|top|led_closeup]
 #                    [--exploded | --exploded=<0..1>] [--led-ring]  (optional LED ring instead of the default blank)
 #   Assembly images: --step=<1..N> | --part=<Name> | --overview  (UI hidden; combine with --shot=); --list-parts=<kind,...> prints PARTLIST lines
+#   Room simulation (default view): --studio | --room | --evening | --cam=desk|sofa|closeup | --low | --gi | --hide-ui
+#   Keys: R room/studio  N day/evening  C camera preset  H hide UI
 
 const GLB := "res://assets/JARVIS.glb"
 const MANIFEST := "res://assets/JARVIS_manifest.json"
@@ -24,6 +26,14 @@ const BLANKS := ["LED_Blank_Front", "LED_Blank_Back"]
 const STATIC_FACE := ["Face_Eye_L", "Face_Eye_R", "Face_Smile"]   # Blender placeholder, replaced by the live face
 const FaceScript := preload("res://face/face.gd")
 const AssistantUI := preload("res://face/assistant_ui.gd")
+const RoomScript := preload("res://room/room.gd")
+# room camera presets around the device (target = device middle): [yaw, pitch, dist, fov]
+# desk: standing person (eye 1.6 m above the floor) ~1.6 m away; sofa: seated eye ~1.15 m, 3 m away; closeup: 0.6 m
+const ROOM_TARGET := Vector3(0, 0.15, 0)
+const ROOM_CAMS := {"desk": [0.42, 0.41, 1.75, 52.0], "sofa": [0.05, 0.083, 3.0, 48.0], "closeup": [0.38, 0.12, 0.62, 35.0]}
+# CLI flags that ask for the plain inspection (studio) view unless --room is also given
+const STUDIO_FLAGS := ["--studio", "--hide-shell", "--show-reserved", "--overview"]
+const STUDIO_PREFIXES := ["--view=", "--exploded", "--step=", "--part="]
 
 var parts := {}      # name -> MeshInstance3D
 var bodies := {}     # name -> StaticBody3D (click collision)
@@ -60,6 +70,14 @@ var label_px: Array = []  # screen positions of placed Label3Ds (overlap avoidan
 var face: Control         # live face (face/face.gd) rendered onto the display glass
 var face_quad: MeshInstance3D
 var assistant: PanelContainer
+var room: Node3D           # room/room.gd
+var room_on := false
+var room_cam := "desk"
+var studio: Node3D         # studio lights + grey ground
+var we: WorldEnvironment
+var env_studio: Environment
+var face_vp: SubViewport
+var room_chk: CheckButton
 
 
 func _ready() -> void:
@@ -88,12 +106,36 @@ func _ready() -> void:
 		bodies[n] = parts[n].get_child(parts[n].get_child_count() - 1)
 	for n in parts:
 		orig_pos[n] = parts[n].global_transform.origin
+	var args := OS.get_cmdline_user_args()
+	room = RoomScript.new()
+	add_child(room)
+	room.build(_device_aabb().position.y)   # desk top = lowest point of the device as exported
+	if "--low" in args:
+		room.set_quality(false)
+	if "--gi" in args:
+		room.set_gi(true)
 	_build_ui()
 	_build_face()
 	_apply_finish(fin.default)
 	_apply_visibility()
 	_update_camera()
-	var args := OS.get_cmdline_user_args()
+	var want_room := true
+	for a in args:
+		if a in STUDIO_FLAGS:
+			want_room = false
+		for pre in STUDIO_PREFIXES:
+			if a.begins_with(pre):
+				want_room = false
+	if "--room" in args:
+		want_room = true
+	if "--evening" in args:
+		room.set_evening(true)
+	for a in args:
+		if a.begins_with("--cam=") and ROOM_CAMS.has(a.substr(6)):
+			room_cam = a.substr(6)
+	_set_room(want_room)
+	if "--hide-ui" in args:
+		ui_layer.visible = false
 	var view := ""
 	for a in args:
 		if a == "--hide-shell":
@@ -123,6 +165,8 @@ func _ready() -> void:
 			_apply_overview()
 	if "--check" in args:
 		_run_check()
+	elif "--bench" in args:
+		_bench()
 	else:
 		for a in args:
 			if a.begins_with("--shot="):
@@ -162,23 +206,27 @@ func _build_environment() -> void:
 	env.tonemap_mode = Environment.TONE_MAPPER_FILMIC
 	env.glow_enabled = true
 	env.glow_intensity = 0.4
-	var we := WorldEnvironment.new()
+	env_studio = env
+	we = WorldEnvironment.new()
 	we.environment = env
 	add_child(we)
+	studio = Node3D.new()
+	studio.name = "Studio"
+	add_child(studio)
 	var key := DirectionalLight3D.new()
 	key.rotation_degrees = Vector3(-42, 30, 0)
 	key.light_energy = 0.95
 	key.shadow_enabled = true
 	key.directional_shadow_max_distance = 3.0
-	add_child(key)
+	studio.add_child(key)
 	var fill := DirectionalLight3D.new()
 	fill.rotation_degrees = Vector3(-15, -130, 0)
 	fill.light_energy = 0.35
-	add_child(fill)
+	studio.add_child(fill)
 	var rim := DirectionalLight3D.new()
 	rim.rotation_degrees = Vector3(-30, 180, 0)
 	rim.light_energy = 0.4
-	add_child(rim)
+	studio.add_child(rim)
 	ground = MeshInstance3D.new()
 	var plane := PlaneMesh.new()
 	plane.size = Vector2(3, 3)
@@ -188,7 +236,7 @@ func _build_environment() -> void:
 	gm.roughness = 0.85
 	ground.material_override = gm
 	ground.position.y = -0.0005
-	add_child(ground)
+	studio.add_child(ground)
 	cam = Camera3D.new()
 	cam.near = 0.01
 	cam.far = 200.0
@@ -250,12 +298,26 @@ func _build_ui() -> void:
 		b.pressed.connect(_set_view.bind(v))
 		views.add_child(b)
 	box.add_child(views)
+	var rbox := HBoxContainer.new()
+	room_chk = CheckButton.new()
+	room_chk.text = "Room (R)"
+	room_chk.toggled.connect(_set_room)
+	rbox.add_child(room_chk)
+	var eve := Button.new()
+	eve.text = "Day / evening (N)"
+	eve.pressed.connect(_toggle_evening)
+	rbox.add_child(eve)
+	var cb := Button.new()
+	cb.text = "Camera (C)"
+	cb.pressed.connect(_next_room_cam)
+	rbox.add_child(cb)
+	box.add_child(rbox)
 	info = Label.new()
 	info.text = "Click a part to identify it."
 	info.custom_minimum_size = Vector2(330, 60)
 	box.add_child(info)
 	var help := Label.new()
-	help.text = "Left-drag: orbit   Right-drag: pan   Wheel: zoom"
+	help.text = "Left-drag: orbit   Right-drag: pan   Wheel: zoom\nR room/studio   N day/evening   C desk/sofa/close-up   H UI"
 	box.add_child(help)
 
 
@@ -265,6 +327,7 @@ func _build_face() -> void:
 	vp.size = Vector2i(720, 720)
 	vp.transparent_bg = true
 	vp.render_target_update_mode = SubViewport.UPDATE_ALWAYS
+	face_vp = vp
 	face = FaceScript.new()
 	face.size = Vector2(720, 720)
 	vp.add_child(face)
@@ -290,6 +353,65 @@ func _build_face() -> void:
 	assistant.face = face
 	ui_layer.add_child(assistant)
 	assistant.set_anchors_and_offsets_preset(Control.PRESET_TOP_RIGHT, Control.PRESET_MODE_MINSIZE, 12)
+
+
+func _device_aabb() -> AABB:  # outer shell envelope at the assembled position (metres)
+	var a := AABB()
+	var first := true
+	for n in parts:
+		if cat.get(n, "exterior") != "exterior":
+			continue
+		var gt: Transform3D = parts[n].global_transform
+		if orig_pos.has(n):
+			gt.origin = orig_pos[n]
+		var b: AABB = gt * parts[n].get_aabb()
+		a = b if first else a.merge(b)
+		first = false
+	return a
+
+
+func _set_room(on: bool) -> void:
+	room_on = on
+	room.set_active(on)
+	studio.visible = not on
+	we.environment = room.current_env() if on else env_studio
+	if room_chk and room_chk.button_pressed != on:
+		room_chk.set_pressed_no_signal(on)
+	if on:
+		_apply_room_cam(room_cam)
+	else:
+		cam.fov = 35.0
+		yaw = HOME.yaw
+		pitch = HOME.pitch
+		dist = HOME.dist
+		target = HOME.target
+		_update_camera()
+
+
+func _apply_room_cam(k: String) -> void:
+	room_cam = k
+	var c: Array = ROOM_CAMS[k]
+	yaw = c[0]
+	pitch = c[1]
+	dist = c[2]
+	cam.fov = c[3]
+	target = ROOM_TARGET
+	_update_camera()
+
+
+func _next_room_cam() -> void:
+	var keys := ROOM_CAMS.keys()
+	if not room_on:
+		_set_room(true)
+		return
+	_apply_room_cam(keys[(keys.find(room_cam) + 1) % keys.size()])
+
+
+func _toggle_evening() -> void:
+	room.set_evening(not room.evening)
+	if not room_on:
+		_set_room(true)
+	we.environment = room.current_env()
 
 
 func _set_layer(on: bool, c: String) -> void:
@@ -391,6 +513,8 @@ func _set_view(v: String) -> void:
 func _update_camera() -> void:
 	var off := Vector3(cos(pitch) * sin(yaw), sin(pitch), cos(pitch) * cos(yaw)) * dist
 	cam.position = target + off
+	if room_on:
+		cam.position = room.clamp_inside(cam.position)   # orbit/zoom never leaves the room
 	cam.look_at(target, Vector3.UP)
 
 
@@ -426,10 +550,23 @@ func _pick(pos: Vector2) -> String:
 	var hit := get_world_3d().direct_space_state.intersect_ray(q)
 	var n := "" if hit.is_empty() else String(hit.collider.get_parent().name)
 	_select(n)
+	if n != "" and not parts.has(n) and info:
+		info.text = "Room: %s (not part of the device)" % n.replace("_", " ")
 	return n
 
 
 func _unhandled_input(e: InputEvent) -> void:
+	if e is InputEventKey and e.pressed and not e.echo:
+		match e.keycode:
+			KEY_R:
+				_set_room(not room_on)
+			KEY_N:
+				_toggle_evening()
+			KEY_C:
+				_next_room_cam()
+			KEY_H:
+				ui_layer.visible = not ui_layer.visible
+		return
 	if e is InputEventMouseButton:
 		match e.button_index:
 			MOUSE_BUTTON_WHEEL_UP:
@@ -455,6 +592,21 @@ func _unhandled_input(e: InputEvent) -> void:
 		elif e.button_mask & (MOUSE_BUTTON_MASK_RIGHT | MOUSE_BUTTON_MASK_MIDDLE):
 			target += (-cam.global_transform.basis.x * e.relative.x + cam.global_transform.basis.y * e.relative.y) * dist * 0.0012
 			_update_camera()
+
+
+func _bench() -> void:  # --bench: render 300 frames, print fps + scene cost, quit (for the Pi 5 budget)
+	Engine.max_fps = 0
+	DisplayServer.window_set_vsync_mode(DisplayServer.VSYNC_DISABLED)
+	for i in 60:
+		await get_tree().process_frame
+	var t0 := Time.get_ticks_usec()
+	for i in 300:
+		await get_tree().process_frame
+	var fps := 300.0 / ((Time.get_ticks_usec() - t0) / 1e6)
+	print("BENCH room=%s fps=%.1f draw_calls=%d primitives=%d objects=%d video_mem_MB=%.0f" % [room_on, fps,
+		Performance.get_monitor(Performance.RENDER_TOTAL_DRAW_CALLS_IN_FRAME), Performance.get_monitor(Performance.RENDER_TOTAL_PRIMITIVES_IN_FRAME),
+		Performance.get_monitor(Performance.RENDER_TOTAL_OBJECTS_IN_FRAME), Performance.get_monitor(Performance.RENDER_VIDEO_MEM_USED) / 1048576.0])
+	get_tree().quit(0)
 
 
 func _take_shot(path: String) -> void:
@@ -498,6 +650,7 @@ func _move_part(n: String, d: Vector3) -> void:
 
 
 func _reset_scene_state() -> void:
+	_set_room(false)   # assembly images always use the plain studio view
 	_clear_extras()
 	_apply_finish(finish_key if finish_key != "" else fin.default)
 	for n in parts:
@@ -796,6 +949,7 @@ func _run_check() -> void:
 		if dev > 0.0015:
 			errs.append("%s bbox off by %.1f mm" % [n, dev * 1000.0])
 	print("parts: %d in GLB, %d in manifest; worst bbox deviation %.2f mm" % [parts.size(), manifest.parts.size(), worst * 1000.0])
+	await _check_room(errs)   # room simulation (default view); leaves the viewer in studio mode for the checks below
 	if errs.is_empty():
 		var ext: AABB = _part_aabb("Head_Back")
 		for n in parts:
@@ -847,6 +1001,82 @@ func _run_check() -> void:
 				errs.append("step 7: %d labels, expected %d" % [n_lbl, want_lbl])
 	print("CHECK RESULT: ", "FAIL " + "; ".join(errs) if errs else "PASS (%d parts, %d finishes)" % [parts.size(), fin.finishes.size()])
 	get_tree().quit(1 if errs else 0)
+
+
+func _check_room(errs: Array[String]) -> void:
+	# a. the room is the default view and has its main pieces
+	if room == null or not room_on or not room.visible:
+		errs.append("room is not the default view")
+		return
+	for nm in ["Floor", "Ceiling", "Wall_Back", "Wall_Left_Low", "Window_Glass", "Desk_Top", "Chair", "Bookshelf", "Plant",
+			"Rug", "Sofa", "Pendant", "Sun", "Pendant_Light"]:
+		if room.find_child(nm, true, false) == null:
+			errs.append("room: missing " + nm)
+	# b. device stands on the desk top (+-1 cm) and inside its footprint; desk ~75 cm above the floor
+	var dev := _device_aabb()
+	var dm: MeshInstance3D = room.desk_top_mesh
+	var desk: AABB = dm.global_transform * dm.get_aabb()
+	var fm: MeshInstance3D = room.find_child("Floor", true, false)
+	var floor_y: float = (fm.global_transform * fm.get_aabb()).end.y
+	var gap := dev.position.y - desk.end.y
+	if absf(gap) > 0.01:
+		errs.append("device bottom %.1f mm from the desk top" % (gap * 1000.0))
+	if dev.position.x < desk.position.x or dev.end.x > desk.end.x or dev.position.z < desk.position.z or dev.end.z > desk.end.z:
+		errs.append("device footprint not on the desk")
+	if absf(desk.end.y - floor_y - 0.75) > 0.03:
+		errs.append("desk height %.0f mm" % ((desk.end.y - floor_y) * 1000.0))
+	print("room: desk top %.0f mm above floor, device gap %.2f mm" % [(desk.end.y - floor_y) * 1000.0, gap * 1000.0])
+	# c. the live face renders through its SubViewport and every camera preset sees it unobstructed
+	if face_quad == null or face_vp == null or face_vp.render_target_update_mode != SubViewport.UPDATE_ALWAYS \
+			or (face_quad.material_override as StandardMaterial3D).albedo_texture != face_vp.get_texture():
+		errs.append("live face SubViewport not wired to the display")
+	await get_tree().physics_frame
+	var vs := get_viewport().get_visible_rect().size
+	for k in ROOM_CAMS:
+		_apply_room_cam(k)
+		await get_tree().physics_frame
+		await get_tree().physics_frame
+		var fc := face_quad.global_position
+		var cp := cam.global_position
+		var eye_y := cp.y - floor_y
+		if cam.is_position_behind(fc):
+			errs.append("cam %s: face behind the camera" % k)
+			continue
+		var sp := cam.unproject_position(fc)
+		var edge := cam.unproject_position(fc + face_quad.global_basis.x * 0.066)
+		if sp.x < vs.x * 0.05 or sp.x > vs.x * 0.95 or sp.y < vs.y * 0.05 or sp.y > vs.y * 0.95:
+			errs.append("cam %s: face off screen at %s" % [k, sp])
+		if (edge - sp).length() * 2.0 < vs.y * 0.03:
+			errs.append("cam %s: face too small on screen" % k)
+		if (cp - fc).normalized().dot(face_quad.global_basis.z) < 0.5:
+			errs.append("cam %s: face not turned to the camera" % k)
+		var q := PhysicsRayQueryParameters3D.create(cp, fc + (fc - cp).normalized() * 0.02)
+		var hit := get_world_3d().direct_space_state.intersect_ray(q)
+		var by := "" if hit.is_empty() else String(hit.collider.get_parent().name)
+		if by != "Display_Panel":
+			errs.append("cam %s: view of the face blocked by '%s'" % [k, by])
+		print("room cam %s: eye %.2f m above floor, %.2f m from face, face %.1f%% of screen height, ray hits %s" % [k, eye_y, cp.distance_to(fc), (edge - sp).length() * 200.0 / vs.y, by])
+	_apply_room_cam("desk")
+	if absf(cam.global_position.y - floor_y - 1.6) > 0.1 or cam.global_position.distance_to(face_quad.global_position) > 2.0:
+		errs.append("desk view is not at standing eye height ~1.5-2 m from the device")
+	# d. day / evening lighting
+	room.set_evening(true)
+	we.environment = room.current_env()
+	if room.sun.visible or not room.pendant.visible or not room.pendant.shadow_enabled or we.environment != room.env_eve:
+		errs.append("evening lighting not applied")
+	room.set_evening(false)
+	we.environment = room.current_env()
+	if not room.sun.visible or room.pendant.visible or we.environment != room.env_day:
+		errs.append("day lighting not restored")
+	# e. studio toggle hides the room and its collision
+	_set_room(false)
+	if room.visible or not studio.visible or we.environment != env_studio:
+		errs.append("studio toggle failed")
+	for b in room.bodies:
+		if b.collision_layer != 0:
+			errs.append("room collision still active in studio")
+			break
+	await get_tree().physics_frame
 
 
 func _check_new(errs: Array[String]) -> void:
