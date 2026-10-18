@@ -20,7 +20,7 @@
 - A requested image/export is **not** evidence of a successful real run until its files and source synchronization are checked. Use targeted checks and report failure; do not inflate cost by rerunning the entire rendering pipeline.
 
 ## Execution rules (mandatory)
-1. **One approved task per session.** Work only within the scope and files of `docs/NOW.md`. When done, STOP; do not auto-start the next task.
+1. **Only approved scope per session.** Work only within the scope and files authorized by `docs/NOW.md`. Normally finish one approved task and STOP; **when NOW explicitly authorizes a bounded multi-stage/multi-Issue work package (such as SW-V1), autonomously proceed through its defined phases and commit checkpoints, stopping only for material blockers or its final review gate.** Do not auto-start anything beyond the approved bundle.
 2. Before writing code, output **up to five short plan steps**, impacted files and **one verification action**. If requirements are ambiguous or unverified critical data is needed, ask first.
 3. No unrequested features, refactors, abstractions, frameworks, migrations, future hardware adapters, "nice-to-have" UI, or unrelated cleanup. Suggest separately, do not implement.
 4. Prefer smallest working change. Reuse code. Do not turn a simple task into a multi-agent operation.
