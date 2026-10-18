@@ -9,7 +9,8 @@ from pydantic import BaseModel, Field
 from ..memory import MemoryStore
 from . import Skill, Tool, ToolResult
 
-HE_DAYS = ["שני", "שלישי", "רביעי", "חמישי", "שישי", "שבת", "ראשון"]
+FORGET_LIMIT = 50          # most memories one `forget` by text may delete
+HE_DAYS =["שני", "שלישי", "רביעי", "חמישי", "שישי", "שבת", "ראשון"]
 
 
 class ClockSkill(Skill):
@@ -21,7 +22,7 @@ class ClockSkill(Skill):
             t = datetime.now().astimezone()
             return ToolResult(True, f"השעה {t:%H:%M}, יום {HE_DAYS[t.weekday()]} {t:%d.%m.%Y}",
                               {"iso": t.isoformat(timespec="minutes")})
-        return [Tool("get_time", "Current local date and time.", now)]
+        return [Tool("get_time", "Current local date and time.", now, permission="read")]
 
 
 class RememberArgs(BaseModel):
@@ -61,23 +62,37 @@ class MemorySkill(Skill):
                 ok = self.store.delete(a.id)
                 return ToolResult(ok, "מחקתי." if ok else "לא מצאתי את הזיכרון הזה.", code="ok" if ok else "NOT_FOUND")
             if a.match:
-                rows = self.store.search(a.match, 50)
+                rows = self.store.search(a.match, FORGET_LIMIT)
                 for r in rows:
                     self.store.delete(r["id"])
                 return ToolResult(bool(rows), f"מחקתי {len(rows)} זיכרונות." if rows else "לא מצאתי זיכרון כזה.",
                                   {"deleted": len(rows)}, "ok" if rows else "NOT_FOUND")
             return ToolResult(False, "מה למחוק?", code="TOOL_BAD_ARGS")
 
+        async def forget_impact(a: ForgetArgs) -> tuple[int | None, str]:
+            if a.id is not None:
+                return 1, f"למחוק את זיכרון מספר {a.id}? / Delete memory #{a.id}?"
+            if a.match:
+                n = len(self.store.search(a.match, FORGET_LIMIT))
+                return n, f"למחוק {n} זיכרונות התואמים ל\"{a.match}\"? / Delete {n} matching memories?"
+            return 0, ""
+
         async def forget_all(_):
             n = self.store.clear()
             return ToolResult(True, f"מחקתי את כל הזיכרונות ({n}).", {"deleted": n})
 
+        async def forget_all_impact(_) -> tuple[int | None, str]:
+            return None, f"למחוק את כל הזיכרונות ({self.store.count()})? / Delete all memories?"
+
         return [
             Tool("remember", "Store a fact ONLY when the user explicitly asks you to remember it.", remember,
-                 RememberArgs, side_effect=True),
-            Tool("recall", "List or search what the user asked you to remember.", recall, RecallArgs),
-            Tool("forget", "Delete one memory by id or by matching text.", forget, ForgetArgs, side_effect=True),
-            Tool("forget_all", "Delete ALL stored memories.", forget_all, side_effect=True,
+                 RememberArgs, permission="action"),
+            Tool("recall", "List or search what the user asked you to remember.", recall, RecallArgs,
+                 permission="read"),
+            Tool("forget", "Delete one memory by id or by matching text (asks the user to confirm).", forget,
+                 ForgetArgs, permission="destructive", impact=forget_impact),
+            Tool("forget_all", "Delete ALL stored memories (asks the user to confirm).", forget_all,
+                 permission="destructive", impact=forget_all_impact,
                  confirm="למחוק את כל הזיכרונות? / Delete all memories?"),
         ]
 
@@ -98,4 +113,4 @@ class StatusSkill(Skill):
             parts = [f"{k}: {v['detail'] or v['status']}" for k, v in bad.items()]
             return ToolResult(True, "בעיות: " + "; ".join(parts), {"core": s["core"], "problems": bad})
         return [Tool("get_status", "Report JARVES component health (what works, what is broken, what to try).",
-                     status)]
+                     status, permission="read")]

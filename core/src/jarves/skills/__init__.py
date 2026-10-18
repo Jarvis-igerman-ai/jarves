@@ -1,17 +1,40 @@
-"""Minimal Skills interface: a Skill is a named group of tools with validated arguments, explicit side-effect
-flags and optional user confirmation. The same tools are exposed to the OpenAI agent, the realtime voice agent
+"""Minimal Skills interface: a Skill is a named group of tools with validated arguments, an enforced permission
+policy and optional user confirmation. The same tools are exposed to the OpenAI agent, the realtime voice agent
 and the offline intent router, so adding a Skill never requires Core changes.
+
+Permission policy (Issue #9 CR-03), enforced centrally in `SkillRegistry.call`, never by prompt text:
+
+- ``read``        - no side effects; always allowed.
+- ``action``      - changes something outside the conversation (player, a new memory). Allowed only when the tool
+                    is pre-authorized by the registry policy (`allowed_actions`); otherwise denied (TOOL_FORBIDDEN).
+                    A future connector (e-mail, calendar...) is therefore denied until it is explicitly allowed.
+- ``destructive`` - deletes/irreversibly changes user data. From the model it ALWAYS needs `registry.confirm`
+                    approval. From the user (origin="user": the deterministic command parser matched the user's own
+                    words) it needs approval when it affects more than one record or everything.
+- missing/unknown permission - denied by default.
+
+A tool's `confirm` prompt, when set, is always asked (any origin).
+Action/destructive handlers run shielded from cancellation of the calling turn (the timeout still applies), so a
+pre-empted turn or a shutdown never aborts a half-done side effect; read tools stay normally cancellable.
 """
 from __future__ import annotations
 
 import asyncio
 import json
 from dataclasses import dataclass, field
-from typing import Any, Awaitable, Callable
+from typing import Any, Awaitable, Callable, Literal
 
 from pydantic import BaseModel, ValidationError
 
 from .. import logs
+
+Permission = Literal["read", "action", "destructive"]
+PERMISSIONS = ("read", "action", "destructive")
+Origin = Literal["model", "user"]
+
+# Low-risk actions pre-authorized by policy (reversible, user-visible, no data loss).
+DEFAULT_ALLOWED_ACTIONS = frozenset({"remember", "music_play", "music_pause", "music_resume", "music_next",
+                                     "music_stop", "music_volume"})
 
 
 @dataclass
@@ -29,15 +52,24 @@ class NoArgs(BaseModel):
     pass
 
 
+# (validated args) -> (records the call would affect, or None for "everything/unknown"; confirmation prompt)
+ImpactFn = Callable[[Any], Awaitable[tuple[int | None, str]]]
+
+
 @dataclass
 class Tool:
     name: str
     description: str
     handler: Callable[[Any], Awaitable[ToolResult]]
     args: type[BaseModel] = NoArgs
-    side_effect: bool = False          # changes something outside the conversation (player, data)
-    confirm: str | None = None         # if set, the user must approve this prompt first
+    permission: str | None = None      # "read" | "action" | "destructive"; missing/anything else is denied
+    confirm: str | None = None         # if set, the user must approve this prompt first (any origin)
     timeout_s: float = 10.0
+    impact: ImpactFn | None = None     # destructive tools: how many records this call would affect
+
+    @property
+    def side_effect(self) -> bool:     # read-only view of the old flag
+        return self.permission in ("action", "destructive")
 
 
 class Skill:
@@ -60,11 +92,14 @@ async def _deny(_: str) -> bool:
 
 
 class SkillRegistry:
-    def __init__(self, disabled: set[str] | None = None) -> None:
+    def __init__(self, disabled: set[str] | None = None,
+                 allowed_actions: set[str] | frozenset[str] | None = None) -> None:
         self.skills: dict[str, Skill] = {}
         self._tools: dict[str, tuple[Skill, Tool]] = {}
         self.disabled = disabled or set()
+        self.allowed_actions = set(DEFAULT_ALLOWED_ACTIONS if allowed_actions is None else allowed_actions)
         self.confirm: ConfirmFn = _deny       # replaced by the Core (asks the user via Godot/voice)
+        self._inflight: set[asyncio.Future] = set()
 
     def register(self, skill: Skill) -> None:
         if skill.name in self.skills:
@@ -85,7 +120,40 @@ class SkillRegistry:
         st = self._tools.get(name)
         return st[1] if st and st[0].name not in self.disabled else None
 
-    async def call(self, name: str, raw_args: dict | str | None = None) -> ToolResult:
+    async def _authorize(self, tool: Tool, args: BaseModel, origin: str) -> ToolResult | None:
+        """None = allowed to run; otherwise the refusal to return."""
+        perm = tool.permission
+        if origin not in ("model", "user") or perm not in PERMISSIONS or (
+                perm == "action" and tool.name not in self.allowed_actions):
+            logs.warn("skills", "TOOL_FORBIDDEN", f"{tool.name} is not authorized by policy; denied",
+                      tool=tool.name, permission=str(perm), origin=str(origin))
+            return ToolResult(False, f"{tool.name} is not allowed", code="TOOL_FORBIDDEN")
+        prompt = tool.confirm
+        if perm == "destructive":
+            count, impact_prompt = (await tool.impact(args)) if tool.impact else (None, "")
+            if origin == "model" or count is None or count > 1:
+                prompt = prompt or impact_prompt or f"{tool.description} - approve?"
+        if prompt and not await self.confirm(prompt):
+            logs.info("skills", "TOOL_DECLINED", f"{tool.name} not confirmed by user", tool=tool.name, origin=origin)
+            return ToolResult(False, "cancelled: the user did not confirm", code="TOOL_DECLINED")
+        return None
+
+    async def _run(self, tool: Tool, args: BaseModel) -> ToolResult:
+        if tool.permission == "read":
+            return await asyncio.wait_for(tool.handler(args), tool.timeout_s)
+        # side effect: survives cancellation of the calling turn, but still honours the tool timeout
+        task = asyncio.ensure_future(tool.handler(args))
+        self._inflight.add(task)
+        task.add_done_callback(self._inflight.discard)
+        try:
+            return await asyncio.wait_for(asyncio.shield(task), tool.timeout_s)
+        except TimeoutError:
+            task.cancel()
+            raise
+
+    async def call(self, name: str, raw_args: dict | str | None = None, *, origin: Origin = "model") -> ToolResult:
+        """Run a tool under the permission policy. origin="user" only when the deterministic command parser matched
+        the user's own words; everything from a model (text agent, voice agent, ChatGPT plan) is "model"."""
         st = self._tools.get(name)
         if st is None:
             return ToolResult(False, f"unknown tool {name}", code="TOOL_UNKNOWN")
@@ -96,32 +164,41 @@ class SkillRegistry:
             if isinstance(raw_args, str):
                 raw_args = json.loads(raw_args or "{}")
             args = tool.args.model_validate(raw_args or {})
-        except (ValidationError, ValueError) as e:
-            logs.warn("skills", "TOOL_BAD_ARGS", f"invalid arguments for {name}", error=str(e)[:200])
+        except ValidationError as e:        # never log the input values (may be private)
+            bad = [".".join(map(str, err.get("loc", ()))) for err in e.errors(include_input=False)]
+            logs.warn("skills", "TOOL_BAD_ARGS", f"invalid arguments for {name}", bad_fields=bad)
             return ToolResult(False, f"invalid arguments for {name}", code="TOOL_BAD_ARGS")
-        if tool.confirm:
-            if not await self.confirm(tool.confirm):
-                logs.info("skills", "TOOL_DECLINED", f"{name} not confirmed by user")
-                return ToolResult(False, "cancelled: the user did not confirm", code="TOOL_DECLINED")
+        except ValueError:
+            logs.warn("skills", "TOOL_BAD_ARGS", f"invalid arguments for {name}")
+            return ToolResult(False, f"invalid arguments for {name}", code="TOOL_BAD_ARGS")
+        refused = await self._authorize(tool, args, origin)
+        if refused is not None:
+            return refused
         try:
-            res = await asyncio.wait_for(tool.handler(args), tool.timeout_s)
-        except asyncio.TimeoutError:
+            res = await self._run(tool, args)
+        except TimeoutError:
             res = ToolResult(False, f"{name} timed out", code="TOOL_TIMEOUT")
         except Exception as e:  # a broken Skill must never take down the Core
             logs.error("skills", "TOOL_CRASH", f"{name} raised", exc=True)
             res = ToolResult(False, f"{name} failed: {type(e).__name__}", code="TOOL_CRASH")
         log = logs.info if res.ok else logs.warn
-        log("skills", "TOOL_RESULT", f"{name} -> {res.code}", tool=name, ok=res.ok)
+        log("skills", "TOOL_RESULT", f"{name} -> {res.code}", tool=name, ok=res.ok, origin=origin)
         return res
+
+    async def drain(self, timeout_s: float = 5.0) -> None:
+        """Wait for shielded side effects still running (for an orderly Core shutdown)."""
+        pending = [t for t in self._inflight if not t.done()]
+        if pending:
+            await asyncio.wait(pending, timeout=timeout_s)
 
     # --- adapters
     def agent_tools(self) -> list:
-        """FunctionTools for the OpenAI Agents SDK (text agent)."""
+        """FunctionTools for the OpenAI Agents SDK (text agent). Every call from here is origin="model"."""
         from agents import FunctionTool
 
         def make(t: Tool):
             async def invoke(_ctx, args_json: str) -> str:
-                return (await self.call(t.name, args_json)).to_model()
+                return (await self.call(t.name, args_json, origin="model")).to_model()
             return FunctionTool(name=t.name, description=t.description, params_json_schema=t.args.model_json_schema(),
                                 on_invoke_tool=invoke, strict_json_schema=False)
         return [make(t) for t in self.tools()]

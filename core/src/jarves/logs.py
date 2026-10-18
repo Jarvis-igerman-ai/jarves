@@ -24,13 +24,80 @@ _PATTERNS = [
     (re.compile(r"eyJ[A-Za-z0-9_\-]+\.[A-Za-z0-9_\-]+\.[A-Za-z0-9_\-]+"), "<jwt>"),
     (re.compile(r"(?i)\b(api[_-]?key|token|secret|password|cookie)(\"?\s*[:=]\s*\"?)[^\s\",}]+"), r"\1\2***"),
 ]
-_SENSITIVE_FIELDS = {"text", "transcript", "query", "audio", "token", "api_key", "secret", "password", "cookie"}
+# Field names whose VALUE is private content or a credential, at any nesting depth (compared case-insensitively).
+_SENSITIVE_FIELDS = {
+    # user content
+    "text", "transcript", "transcription", "query", "q", "search", "match", "phrase", "utterance", "prompt",
+    "instructions", "input", "output", "content", "contents", "message", "messages", "body", "subject", "snippet",
+    "note", "notes", "memory", "memories", "fact", "title", "artist", "lyrics", "summary", "arguments", "delta",
+    "audio", "pcm", "wav", "recipient", "recipients", "cc", "bcc", "sender",
+    # identity
+    "email", "login_hint", "name", "full_name", "phone", "address", "location", "sub", "subject_id",
+    # credentials
+    "token", "access_token", "refresh_token", "id_token", "id_token_hint", "api_key", "apikey", "secret",
+    "client_secret", "password", "passcode", "cookie", "cookies", "authorization", "auth", "code_verifier",
+    "verifier", "nonce", "credentials",
+}
+# ...and any field name containing one of these fragments.
+_SENSITIVE_FRAGMENTS = ("token", "secret", "password", "cookie", "api_key", "apikey", "credential", "auth")
+_MAX_DEPTH = 8
 
 
 def redact(s: str) -> str:
     for pat, rep in _PATTERNS:
         s = pat.sub(rep, s)
     return s
+
+
+def is_sensitive(key: object) -> bool:
+    k = str(key).lower()
+    return k in _SENSITIVE_FIELDS or any(f in k for f in _SENSITIVE_FRAGMENTS)
+
+
+def _mask(v: object) -> str:
+    return f"<{len(v) if isinstance(v, (str, bytes, list, tuple, dict)) else len(str(v))} chars>"
+
+
+def scrub(value: object, depth: int = 0) -> object:
+    """Recursively replace values under sensitive keys (any depth) by their length; redact secrets in strings."""
+    if depth > _MAX_DEPTH:
+        return "<nested>"
+    if isinstance(value, dict):
+        return {str(k): (_mask(v) if is_sensitive(k) and v is not None else scrub(v, depth + 1))
+                for k, v in value.items()}
+    if isinstance(value, (list, tuple, set, frozenset)):
+        return [scrub(v, depth + 1) for v in value]
+    if isinstance(value, (bytes, bytearray)):
+        return f"<{len(value)} bytes>"
+    if isinstance(value, str):
+        return redact(value)
+    if value is None or isinstance(value, (bool, int, float)):
+        return value
+    return redact(str(value))
+
+
+def safe_fields(payload: object, allow: tuple[str, ...] | set[str] | frozenset[str] = ()) -> dict:
+    """Only allow-listed top-level keys with scalar values (bool/int/float, short non-sensitive strings).
+
+    For logging device/link payloads: everything else is reported only by key name, never by value.
+    Usage: logs.info("device", "DEVICE_EVENT", "...", **logs.safe_fields(p, allow=("id", "muted")))
+    """
+    if not isinstance(payload, dict):
+        return {}
+    out: dict = {}
+    for k, v in payload.items():
+        if k not in allow or is_sensitive(k):
+            continue
+        if v is None or isinstance(v, (bool, int, float)):
+            out[k] = v
+        elif isinstance(v, str) and len(v) <= 64:
+            out[k] = redact(v)
+        else:
+            out[k] = _mask(v)
+    dropped = sorted(str(k) for k in payload if k not in out)
+    if dropped:
+        out["omitted_keys"] = dropped[:20]
+    return out
 
 
 def new_cid() -> str:
@@ -53,8 +120,8 @@ class JsonFormatter(logging.Formatter):
              "level": r.levelname, "component": getattr(r, "component", r.name), "code": getattr(r, "code", "-"),
              "msg": r.getMessage(), "cid": getattr(r, "cid", None) or _cid.get(), "session": _SESSION}
         for k, v in (getattr(r, "fields", None) or {}).items():
-            # private content is replaced by its length, never written
-            d[k] = f"<{len(str(v))} chars>" if k in _SENSITIVE_FIELDS and v is not None else v
+            # private content (at any depth) is replaced by its length, never written
+            d[k] = _mask(v) if is_sensitive(k) and v is not None else scrub(v)
         if r.exc_info:
             d["exc"] = self.formatException(r.exc_info).splitlines()[-1]
         return redact(json.dumps(d, ensure_ascii=False, default=str))

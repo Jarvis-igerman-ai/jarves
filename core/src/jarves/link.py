@@ -2,12 +2,20 @@
 
 Envelope (both directions): {"type": "...", "payload": {...}, "cid": "optional correlation id"}.
 First client message must be {"type": "hello", "payload": {"token": "...", "client": "godot"|"cli"}} within 3 s.
+
+Roles (Issue #9 CR-08): after the hello the declared `client` maps to a role ("godot" -> face, "cli" -> cli);
+anything else is closed with 4403. Each role may only send its allow-listed message types; a known type sent by
+the wrong role gets error LINK_FORBIDDEN and is never dispatched. The dispatcher receives the sending `Client`
+(`.id`, `.role`, `.ws`), so the Core can bind a confirmation to the face connection that was asked
+(`face_client_id()`).
 """
 from __future__ import annotations
 
 import asyncio
+import inspect
 import json
 import secrets
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Awaitable, Callable
 
@@ -18,7 +26,29 @@ from . import logs
 from .health import Health
 
 PROTOCOL = 1
-Handler = Callable[[str, dict, "ServerConnection"], Awaitable[None]]
+
+ROLES = {"godot": "face", "cli": "cli"}
+# Device events (keep in sync with deviceport.INBOUND; a test asserts it).
+DEVICE_EVENTS = frozenset({"button.down", "button.up", "mic.mute_changed", "presence.changed", "light.changed",
+                           "network.changed"})
+ALLOWED: dict[str, frozenset[str]] = {
+    "face": frozenset({"talk.down", "talk.up", "user.text", "mic.set_mute", "status.request", "confirm.reply",
+                       "debug.enable"}) | DEVICE_EVENTS,
+    "cli": frozenset({"status.request", "core.shutdown", "debug.enable"}),
+}
+KNOWN_TYPES = frozenset().union(*ALLOWED.values())
+
+
+@dataclass(eq=False)
+class Client:
+    id: str                    # random per connection; never reused
+    role: str                  # "face" | "cli"
+    ws: ServerConnection
+
+
+# New dispatcher signature: on_message(msg, client) with msg = {"type": str, "payload": dict, "cid": str|None}.
+# The legacy (type, payload, ws) signature is still accepted (detected by arity).
+Handler = Callable[..., Awaitable[None]]
 
 
 def load_token(path: Path) -> str:
@@ -31,14 +61,28 @@ def load_token(path: Path) -> str:
     return path.read_text(encoding="utf-8").strip()
 
 
+def _arity(fn: Callable) -> int:
+    try:
+        ps = inspect.signature(fn).parameters.values()
+    except (TypeError, ValueError):
+        return 3
+    return sum(1 for p in ps if p.kind in (p.POSITIONAL_ONLY, p.POSITIONAL_OR_KEYWORD))
+
+
 class GodotLink:
     def __init__(self, host: str, port: int, token: str, health: Health, on_message: Handler,
                  on_face_connected: Callable[[], Awaitable[None]] | None = None) -> None:
         self.host, self.port, self.token = host, port, token
         self.health, self.on_message, self.on_face_connected = health, on_message, on_face_connected
+        self._legacy = _arity(on_message) >= 3
         self.face: ServerConnection | None = None
+        self.face_client: Client | None = None
         self.clients: set[ServerConnection] = set()
         self._server = None
+
+    def face_client_id(self) -> str | None:
+        """Id of the currently connected face (bind confirm.request/confirm.reply to it); None if no face."""
+        return self.face_client.id if self.face_client else None
 
     async def start(self) -> None:
         try:
@@ -62,24 +106,31 @@ class GodotLink:
             raw = await asyncio.wait_for(ws.recv(), 3)
             msg = json.loads(raw)
             p = msg.get("payload") or {}
+            if not isinstance(p, dict):
+                raise ValueError("payload must be an object")
             if msg.get("type") != "hello" or not secrets.compare_digest(str(p.get("token", "")), self.token):
                 logs.warn("link", "LINK_AUTH_FAILED", "client rejected: bad or missing token")
                 await ws.close(4401, "unauthorized")
                 return
-            client = p.get("client", "godot")
-        except (asyncio.TimeoutError, ValueError, websockets.ConnectionClosed):
+            role = ROLES.get(str(p.get("client", "")))
+        except (asyncio.TimeoutError, ValueError, AttributeError, websockets.ConnectionClosed):
             logs.warn("link", "LINK_HANDSHAKE_FAILED", "client did not complete the hello handshake")
             await ws.close(4400, "handshake required")
             return
+        if role is None:
+            logs.warn("link", "LINK_ROLE_REJECTED", "client rejected: unknown client type")
+            await ws.close(4403, "unknown client")
+            return
+        client = Client(secrets.token_hex(8), role, ws)
         self.clients.add(ws)
-        if client == "godot":
+        if role == "face":
             if self.face is not None and self.face is not ws:
                 await self.face.close(4000, "replaced by a newer face client")
-            self.face = ws
+            self.face, self.face_client = ws, client
             self.health.set("face_link", "ok", f"Godot face connected (protocol {p.get('protocol', '?')})")
             logs.info("link", "LINK_FACE_CONNECTED", "Godot face connected")
-        await self._send(ws, "hello.ok", {"protocol": PROTOCOL, "client": client})
-        if client == "godot" and self.on_face_connected:
+        await self._send(ws, "hello.ok", {"protocol": PROTOCOL, "client": str(p.get("client")), "role": role})
+        if role == "face" and self.on_face_connected:
             await self.on_face_connected()
         try:
             async for raw in ws:
@@ -94,8 +145,20 @@ class GodotLink:
                     continue
                 if m.get("cid"):
                     logs.set_cid(str(m["cid"])[:32])
+                if t not in KNOWN_TYPES:
+                    await self._send(ws, "error", {"code": "LINK_UNKNOWN_TYPE",
+                                                   "message": f"unknown message type {t[:64]}"})
+                    continue
+                if t not in ALLOWED[role]:
+                    logs.warn("link", "LINK_FORBIDDEN", f"{role} client may not send {t}", role=role)
+                    await self._send(ws, "error", {"code": "LINK_FORBIDDEN",
+                                                   "message": f"{t} is not allowed for this client"})
+                    continue
                 try:
-                    await self.on_message(t, payload, ws)
+                    if self._legacy:
+                        await self.on_message(t, payload, ws)
+                    else:
+                        await self.on_message({"type": t, "payload": payload, "cid": m.get("cid")}, client)
                 except Exception:
                     logs.error("link", "LINK_HANDLER_ERROR", f"handler for {t} failed", exc=True)
                     await self._send(ws, "error", {"code": "CORE_INTERNAL", "message": f"{t} failed; see logs"})
@@ -104,7 +167,7 @@ class GodotLink:
         finally:
             self.clients.discard(ws)
             if ws is self.face:
-                self.face = None
+                self.face, self.face_client = None, None
                 self.health.set("face_link", "unavailable", "Godot face disconnected",
                                 "restart godot\\run_face.cmd; it reconnects automatically")
                 logs.warn("link", "LINK_FACE_DISCONNECTED", f"Godot face disconnected ({peer})")
@@ -120,8 +183,8 @@ class GodotLink:
     async def send_face(self, t: str, payload: dict) -> bool:
         return await self._send(self.face, t, payload) if self.face else False
 
-    async def reply(self, ws: ServerConnection, t: str, payload: dict) -> bool:
-        return await self._send(ws, t, payload)
+    async def reply(self, to: ServerConnection | Client, t: str, payload: dict) -> bool:
+        return await self._send(to.ws if isinstance(to, Client) else to, t, payload)
 
     async def broadcast(self, t: str, payload: dict) -> None:
         for ws in list(self.clients):

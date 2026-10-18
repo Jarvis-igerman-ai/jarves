@@ -344,14 +344,14 @@ class MusicSkill(Skill):
 
         return [
             Tool("music_play", "Search YouTube Music and start playing the best match (song/artist).", play,
-                 PlayArgs, side_effect=True, timeout_s=25),
-            Tool("music_pause", "Pause music.", simple("pause", "השהיתי."), side_effect=True),
-            Tool("music_resume", "Resume music.", simple("resume", "ממשיך לנגן."), side_effect=True),
-            Tool("music_next", "Skip to the next track.", simple("next", "השיר הבא."), side_effect=True),
+                 PlayArgs, permission="action", timeout_s=25),
+            Tool("music_pause", "Pause music.", simple("pause", "השהיתי."), permission="action"),
+            Tool("music_resume", "Resume music.", simple("resume", "ממשיך לנגן."), permission="action"),
+            Tool("music_next", "Skip to the next track.", simple("next", "השיר הבא."), permission="action"),
             Tool("music_stop", "Stop music (pauses the player).", simple("pause", "עצרתי את המוזיקה."),
-                 side_effect=True),
-            Tool("music_volume", "Set the music volume (0-100).", volume, VolumeArgs, side_effect=True),
-            Tool("music_status", "What is playing now.", status),
+                 permission="action"),
+            Tool("music_volume", "Set the music volume (0-100).", volume, VolumeArgs, permission="action"),
+            Tool("music_status", "What is playing now.", status, permission="read"),
         ]
 
     async def health(self) -> tuple[str, str]:
