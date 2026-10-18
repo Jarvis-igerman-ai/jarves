@@ -1,3 +1,16 @@
+## Real YouTube Music playback verified — 18 Oct 2026 (night)
+
+- **Setup:** the user paired Pear Desktop 3.12 (`jarvis music pair` + Allow, signed in to YouTube).
+- **Real playback via JARVES's Hebrew commands, on merged `main` `d071a65`:**
+  - "נגן את שלמה ארצי" played "תתארו לכם" and was confirmed.
+  - "נגן את עומר אדם" played "שני משוגעים" and was confirmed.
+  - Volume, next and pause all worked.
+- **Two bugs found and fixed on the way** (commit `94954cc`):
+  - the queue-insert race made Pear play the wrong song;
+  - a false "not confirmed" came from YouTube's song counterpart (different videoId) and slow buffering.
+- **Evidence:** CI [39163447349](https://github.com/igalgerman/JARVIS/actions/runs/39163447349) is green, 6/6 jobs; 219 tests pass.
+- **Launching Pear:** `jarvis music open`, the Start-menu entry or the desktop shortcut "Pear Desktop (YouTube Music)".
+
 ## Voice-only usability and visible connection — 18 Oct 2026
 
 - **Outcome / owners:** Python Core owns wake→connect→conversation→idle return and actual mic readiness. Godot owns visible status, face motion, loading UI and camera. Fixed stale connection snapshots (up to 20 s previously), normal idle incorrectly failing startup, speech animation running from time rather than playback, and wake-mode boot spending/delaying on an unnecessary separate greeting. No CAD/Blender geometry or material change.
