@@ -1,3 +1,28 @@
+## Overnight batch 18–19 Oct: real conversation fixes, calm face, silent testing
+
+**User asks addressed:** the voice never answered; the hello was slow; "open connected"; no strange pauses; "disconnect only on long idle"; "the face moves too much / not natural"; laugh and cry at what is said; info on the screen; "all tests silent and headless".
+
+**Root causes found by real two-sided tests (not by guessing):**
+- **GPT-Live streams audio continuously, silence included.** JARVES treated every chunk as "JARVES is speaking", so the mic stayed muted for the whole session (the model never heard the user) and a ~3.5 s playback backlog never drained. Now only chunks above rms 0.004 count as speech (`live.py`, tests in `test_voice_faults.py`).
+- **The cloud-voice greeting was slow** because `import agents.realtime` took 6–15 s. The greeting is now cached on disk and the libraries are pre-loaded.
+- **In connected mode nothing listened after an idle end.** The wake word is now on in both modes.
+
+**Now (measured on this PC, real GPT-Live, silent virtual audio, `core/tools/silent_live.py`):**
+- 12-turn Hebrew conversation: **12/12 answered in ONE session**, dead air 0.36 s average / 1.01 s max, 0 disconnects, idle disconnect after 23 s of quiet (set to 25 s for the test). Three web-search turns have a 1–2 s quiet gap after the "checking" sentence.
+- Context kept in the session ("what did I say about my favourite colour?" answered).
+- Acoustic path (speakers → real webcam mic → wake word → GPT-Live): reconnect chime 0.5 s after "Hey Jarvis", connected 1.1 s, answers ~1.7 s.
+- The Opus 5.5 tuning agent's report and sources are in [LIVE_CONVERSATION_TUNING](reviews/LIVE_CONVERSATION_TUNING.md): backend `reasoning.effort = none`, `service_tier = priority` (about $0.0005 per lookup), time answered locally, short "checking" notes, new config fields `ai.voice_reasoning_effort`, `ai.voice_service_tier`, `ai.voice_max_output_tokens`, `voice.progress_after_s`, `voice.echo_tail_s`.
+
+**Features:** connected-on-open (`activation = "conversation"` is set on this PC); wake chime plus ready chime; no 10-minute stop (`session_max_s = 3600`) and an automatic resume when the server closes an active session; `face.emotion` (laugh, cry, sad, surprised, love) and `assistant.activity` (thinking, searching, music, time, memory, connecting) for the new face; `jarvis doctor`, `jarvis wake test --apply`, `jarvis logs`, readable terminal logs with levels and modules, privacy mode.
+
+**Face (Opus 5.5):** a premium shader face with a connection dot and no instruction text, then calmer motion (blinks every 4–7 s, saccades every 3–8 s, breathing 0.3 %), reactions with tears, and an info pill on the lower arc. The headless fuzz test `test_face_protocol_godot.py` found and fixed crashes on malformed messages; it runs in CI.
+
+**Known limits (honest):**
+- The Live API has **no turn-detection / VAD settings** (checked the SDK types). The model sometimes starts answering on a pause and the echo guard then mutes the rest of the sentence; occasionally it announces a lookup that then does not start (1 in 3 web turns in one run). Mitigations: stricter instructions; headphones plus `half_duplex = false` removes the guard.
+- The silent tests use a Windows voice for "the user" and virtual audio: real voices, rooms and the real mic will differ. Not yet verified live: your real voice on GPT-Live in Hebrew, and the Pi.
+- Wake word: your pronunciation scored low on the stock "hey jarvis" model (peak ~0.17); the threshold on this PC is 0.15 via `jarvis wake test`. A trained custom model is the real fix (not done).
+- `service_tier = priority` costs more per backend call; set `ai.voice_service_tier = "auto"` to turn it off.
+
 ## Real YouTube Music playback verified — 18 Oct 2026 (night)
 
 - **Setup:** the user paired Pear Desktop 3.12 (`jarvis music pair` + Allow, signed in to YouTube).

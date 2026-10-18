@@ -44,15 +44,26 @@ Without a key or ChatGPT, JARVES runs **offline**: commands only (music, time, m
 
 ## Run
 
-**Talk:** say **"Hey Jarvis"**, wait for **Voice connected / Listening**, then speak naturally. Wake detection runs locally; cloud voice opens only after the wake phrase. Three quiet minutes after playback/tool work return to local wake listening. Session/day cost limits still apply. This PC now uses `voice.activation = "wake_word"`; `conversation` remains available for automatic startup. The trained wake phrase is **Hey Jarvis**, not a verified arbitrary "Hello Jarvis" detector. Speech during the connection handshake is not buffered: wait for the listening cue.
+**Two ways to talk** (`[voice] activation` in `config.toml`; this PC uses `conversation`):
+
+| Mode | What happens |
+|---|---|
+| `conversation` (connected on open) | `jarvis` opens **already connected**: the greeting is spoken by the live session (~0.5 s after the face appears) and you just talk. One conversation stays open (no time limit, only the daily-minutes budget) and ends only after `idle_disconnect_s` of quiet (default 3 min). If the server closes it while you are talking, JARVES reconnects by itself. After an idle end, say **"Hey Jarvis"**: a soft chime sounds at once, a second chime ~1 s later means "connected, talk now" (no spoken delay). |
+| `wake_word` (silent until called) | Silent; says hello once at start (cached after the first run, so it is instant). Say **"Hey Jarvis"** (chime, then talk). |
+
+`voice.chime = false` turns the chimes off. The wake phrase is trained for **"Hey Jarvis"**. If it does not catch your voice, run **`jarvis wake test --apply`** (live score bar, saves a threshold for your voice and mic). **`jarvis doctor`** checks the key, ChatGPT sign-in, microphone (warns on silence), wake model and Pear and says what to fix; `jarvis doctor --live` also opens one real GPT-Live session (~1 cent, asks first).
+
+**Face reactions and screen info:** the face laughs at jokes, cries at sad news and shows surprise or affection (from what is said); a small pill on the lower arc shows what JARVES is doing ("חושב…", "מחפש ברשת…", the song playing, "מתחבר…"). The corner dot shows the connection: green ready, blue live, amber connecting/degraded, red offline, grey muted.
+
+**Silent tests (no speakers, no mic, safe at night):** `uv run python tools/silent_live.py` runs a scripted 12-turn Hebrew conversation against the **real GPT-Live** through a virtual mic/speaker and prints dead air and pauses per turn (`--idle-check` also tests the idle disconnect; costs about $0.05 per voice minute). `GODOT_EXE=<godot console exe> uv run pytest tests/test_face_protocol_godot.py` feeds the real headless face every kind of message, including broken ones.
 
 The main status and face show local wake, connecting, listening, thinking, speaking, muted and disconnected states. **Options** reveals diagnostics/captions/software mute and simulator inspection controls. No Space/Talk button or typing box is needed or displayed. The face mouth follows actual streamed speaker levels; silence closes it, including when updates stop. Vesper is the selected masculine British GPT-Live voice; Cedar is the compatible Realtime/read-aloud fallback. Hebrew voice quality remains subject to listening review.
 
 **Close the window to stop:** the desktop sends an authenticated shutdown request, ends live voice and speaker playback, and the Core exits normally. The launcher returns to the terminal without Ctrl+C / "Terminate batch job?". Repeated-launch log followers finish on `CORE_STOPPED`; ordinary connection loss still reconnects instead of being treated as a close.
 
-**Startup:** `jarvis` first opens a lightweight **loading screen with a progress bar**. The 3D room is loaded only after the Core is initialized and, for mode 2, GPT-Live is connected and actual greeting audio has arrived. Greeting audio is held in the existing bounded memory queue; the physical mic and speakers are not opened until the room connects. There is no separate cloud-TTS greeting request. If voice cannot become ready, the room stays closed and the terminal reports the failure. Closing even the loading window cancels startup and stops the owned Core.
+**Startup:** `jarvis` first opens a lightweight **loading screen with a progress bar**. The 3D room is loaded only after the Core is initialized and, for mode 2, GPT-Live is connected and actual greeting audio has arrived. Greeting audio is held in the existing bounded memory queue; the physical mic and speakers are not opened until the room connects. In `conversation` mode the greeting comes from the live session (no separate request). If voice cannot become ready, the room stays closed and the terminal reports the failure. Closing even the loading window cancels startup and stops the owned Core.
 
-Progress advances at startup milestones; ETA text is removed at the user's request. Wake-mode startup waits for actual local microphone frames, not merely the configured detector. It does not open a paid greeting session at boot. Timing-only cache metadata remains private; no audio/conversation cache is created. Hardware can consume the same startup/status events, but Pi validation is still pending.
+Progress advances at startup milestones; ETA text is removed at the user's request. Wake-mode startup waits for actual local microphone frames, not merely the configured detector. Its hello is one short cloud speech request, cached on disk (`cache/`, fixed sentence only, never your speech or conversation). Timing-only cache metadata remains private. Hardware can consume the same startup/status events, but Pi validation is still pending.
 
 **Terminal logs:**
 - `jarvis --log-level debug` sets the level: `error`, `warning`, `info` (default), `debug` or `verbose`.

@@ -11,12 +11,14 @@ from test_voice_faults import FakeClient, FakeLiveConn, Rec, loud, make_live
     ("חה חה חה זה היה טוב", "jarves", "laugh"),
     ("חחח", "user", "laugh"),
     ("hahaha that is funny", "jarves", "laugh"),
-    ("אני עצוב היום", "user", "cry"),
+    ("אני עצוב היום", "user", "sad"),
+    ("אני קצת עצוב היום, הכלב שלי חולה", "user", "cry"),           # sick pet: full crying
+    ("זה באמת לא פשוט. אני כאן איתך", "jarves", "sad"),
     ("סבא שלי נפטר השבוע", "user", "cry"),
     ("מצטער לשמוע, זה נורא", "jarves", "cry"),
     ("וואו, לא ייאמן", "jarves", "surprised"),
     ("אני אוהב אותך", "user", "love"),
-    ("אני עצוב וגם חחח", "user", "cry"),                 # sad news wins over a nervous laugh
+    ("אני עצוב וגם חחח", "user", "sad"),                 # sad news wins over a nervous laugh
     # must NOT fire: everyday words
     ("אבל אני לא יודע", "user", None),                   # "but" is not sad
     ("אני מצטער, לא הבנתי", "jarves", None),             # an apology is not grief

@@ -68,7 +68,9 @@ Feelings: laugh softly ("חה חה") at the user's jokes and after the punchline
 with sad news; sound happy for good news. Natural and brief, never theatrical.
 Say numbers, times and dates the way Israelis say them aloud (14:30 -> "שתיים וחצי", 347 -> "שלוש מאות
 ארבעים ושבע").
-Keep listening while the user pauses to think; do not treat a cough or background noise as a request."""
+Keep listening while the user pauses to think; do not treat a cough or background noise as a request.
+If a question sounds cut off, wait a moment for the rest instead of answering the fragment. NEVER say you are
+checking something unless you start that lookup in the same turn: announcing a check without delegating is a bug."""
 
 # Errors after which the session cannot do useful work -> end it (others: log + degraded + continue).
 FATAL_ERROR_TYPES = {"authentication_error", "permission_error"}
