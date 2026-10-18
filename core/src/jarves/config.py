@@ -67,6 +67,12 @@ class VoiceConfig(_Strict):
     stt_compute: str = "int8"
     tts_voice_hint: str = "he-IL"
     greeting: bool = True                  # say hello + how to talk when the face first connects
+    # "Hey Jarvis" wake word: detected ON THIS DEVICE (pyopen-wakeword, openWakeWord model); no audio leaves the
+    # device until it triggers. Software mute stops it and releases the microphone.
+    wake_enabled: bool = True
+    wake_word: str = "hey_jarvis"
+    wake_threshold: float = Field(0.5, ge=0, le=1)
+    wake_cooldown_s: float = Field(2.0, ge=0, le=30)
     record_max_s: float = Field(15, gt=0, le=60)
     input_device: int | str | None = None
     output_device: int | str | None = None
@@ -79,8 +85,14 @@ class MusicConfig(_Strict):
     max_volume: int = Field(70, ge=0, le=100)
 
 
+LogLevel = Literal["ERROR", "WARNING", "INFO", "DEBUG", "VERBOSE"]
+
+
 class LogConfig(_Strict):
-    level: Literal["DEBUG", "INFO", "WARNING", "ERROR"] = "INFO"
+    level: LogLevel = "INFO"                  # log file
+    console_level: LogLevel = "INFO"          # terminal (`jarvis --log-level debug` overrides)
+    modules: list[str] = []                   # terminal: show only these modules, e.g. ["voice", "wake"]
+    hide: list[str] = []                      # terminal: hide these modules, e.g. ["link"]
     max_bytes: int = Field(1_000_000, ge=10_000, le=50_000_000)
     backups: int = Field(5, ge=1, le=50)
     debug_minutes: int = Field(30, ge=1, le=240)

@@ -36,8 +36,22 @@ def _ws_call(home: Path, port: int, msg: dict, expect: str, timeout: float = 5) 
         return None
 
 
+def _apply_log_args(a, cfg) -> None:
+    if getattr(a, "log_level", None):
+        cfg.log.console_level = a.log_level.upper()
+    if getattr(a, "module", None):
+        cfg.log.modules = [m for m in a.module.split(",") if m]
+    if getattr(a, "hide", None):
+        cfg.log.hide = [m for m in a.hide.split(",") if m]
+
+
 def cmd_run(a, cfg, home) -> int:
     from .app import Core
+    _apply_log_args(a, cfg)
+    print(f"JARVES Core starting. Terminal log: {cfg.log.console_level}"
+          + (f", modules {','.join(cfg.log.modules)}" if cfg.log.modules else "")
+          + (f", hiding {','.join(cfg.log.hide)}" if cfg.log.hide else "")
+          + ". Stop: Ctrl+C or `jarvis stop`.", file=sys.stderr)
     core = Core(cfg, home)
     try:
         asyncio.run(core.run())
@@ -46,6 +60,45 @@ def cmd_run(a, cfg, home) -> int:
     except OSError as e:
         print(f"Core failed to start: {e}", file=sys.stderr)
         return 2
+    return 0
+
+
+def cmd_logs(a, cfg, home) -> int:
+    """Read the JSON log file with the terminal formatter; filter by level/module; -f follows a running Core."""
+    import logging as _logging
+    import time as _time
+    path = home / "logs" / "jarves.log"
+    lvl = logs.level_no((a.log_level or "INFO").upper())
+    flt = logs.ModuleFilter(lvl, (a.module or "").split(","), (a.hide or "").split(","))
+    fmt = logs.ConsoleFormatter(color=sys.stdout.isatty())
+
+    def show(line: str) -> None:
+        try:
+            d = json.loads(line)
+        except ValueError:
+            return
+        lv = d.get("level", "INFO")
+        r = _logging.LogRecord("jarves", logs.level_no(lv) if lv in logs.LEVELS else 20, "", 0, d.get("msg", ""), None, None)
+        r.created = datetime.fromisoformat(d["ts"]).timestamp() if d.get("ts") else _time.time()
+        r.component, r.code = d.get("component", "-"), d.get("code", "-")
+        r.fields = {k: v for k, v in d.items() if k not in ("ts", "level", "component", "code", "msg", "session", "cid")}
+        if flt.filter(r):
+            print(fmt.format(r), flush=True)
+    if not path.exists():
+        print(f"no log yet at {path}")
+        return 1
+    with path.open(encoding="utf-8", errors="replace") as f:
+        for line in f.readlines()[-a.lines:]:
+            show(line)
+        while a.follow:
+            line = f.readline()
+            if line:
+                show(line)
+            else:
+                try:
+                    _time.sleep(0.3)
+                except KeyboardInterrupt:
+                    return 0
     return 0
 
 
@@ -334,7 +387,15 @@ def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(prog="jarves", description="JARVES assistant Core")
     ap.add_argument("--config", type=Path, help="config.toml (default: <JARVES_HOME>/config.toml)")
     sub = ap.add_subparsers(dest="cmd", required=True)
-    sub.add_parser("run", help="start the Core (Godot face connects to it)")
+    def log_opts(p):
+        p.add_argument("--log-level", type=str.upper, choices=logs.LEVELS, help="terminal log level")
+        p.add_argument("--module", help="show only these modules, comma separated (e.g. voice,wake,ai)")
+        p.add_argument("--hide", help="hide these modules, comma separated (e.g. link)")
+    log_opts(sub.add_parser("run", help="start the Core (Godot face connects to it)"))
+    lg = sub.add_parser("logs", help="show the log (filter by --log-level / --module; -f to follow)")
+    log_opts(lg)
+    lg.add_argument("-f", "--follow", action="store_true")
+    lg.add_argument("-n", "--lines", type=int, default=50)
     sub.add_parser("stop", help="orderly shutdown of the running Core")
     sub.add_parser("status", help="live health from the running Core, or the last stale snapshot")
     d = sub.add_parser("diag", help="write a redacted support bundle (zip)")
@@ -368,7 +429,7 @@ def main(argv: list[str] | None = None) -> int:
         print(f"CONFIG ERROR: {e}", file=sys.stderr)
         return 2
     return {"run": cmd_run, "stop": cmd_stop, "status": cmd_status, "diag": cmd_diag, "memory": cmd_memory, "music": cmd_music,
-            "ask": cmd_ask, "say": cmd_say, "chatgpt": cmd_chatgpt, "setup": cmd_setup, "key": cmd_key}[a.cmd](a, cfg, home)
+            "ask": cmd_ask, "say": cmd_say, "chatgpt": cmd_chatgpt, "setup": cmd_setup, "logs": cmd_logs, "key": cmd_key}[a.cmd](a, cfg, home)
 
 
 if __name__ == "__main__":

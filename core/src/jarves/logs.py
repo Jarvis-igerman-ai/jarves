@@ -1,6 +1,8 @@
 """Bounded structured JSON-lines logging with secret redaction and correlation IDs.
 
-Log file: <state_dir>/logs/jarves.log (rotated). Never logs raw audio, transcripts or secrets.
+Log file: <state_dir>/logs/jarves.log (rotated, JSON lines). Terminal: readable coloured lines with its own
+level (ERROR/WARNING/INFO/DEBUG/VERBOSE) and per-module filters (show only / hide components).
+Never logs raw audio, transcripts or secrets.
 """
 from __future__ import annotations
 
@@ -14,6 +16,18 @@ import time
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
+
+VERBOSE = 5                       # below DEBUG: per-message / per-event traces
+logging.addLevelName(VERBOSE, "VERBOSE")
+LEVELS = ("ERROR", "WARNING", "INFO", "DEBUG", "VERBOSE")
+
+
+def level_no(name: str) -> int:
+    name = name.upper()
+    if name not in LEVELS:
+        raise ValueError(f"log level must be one of {', '.join(LEVELS)}")
+    return VERBOSE if name == "VERBOSE" else getattr(logging, name)
+
 
 _cid: contextvars.ContextVar[str] = contextvars.ContextVar("cid", default="-")
 _SESSION = uuid.uuid4().hex[:8]
@@ -127,14 +141,60 @@ class JsonFormatter(logging.Formatter):
         return redact(json.dumps(d, ensure_ascii=False, default=str))
 
 
+class ConsoleFormatter(logging.Formatter):
+    """`19:20:01 INFO    voice   LIVE_STARTED   GPT-Live session started   score=0.9` (same redaction as the file)."""
+    COLORS = {"ERROR": "31", "WARNING": "33", "INFO": "32", "DEBUG": "36", "VERBOSE": "90"}
+
+    def __init__(self, color: bool) -> None:
+        super().__init__()
+        self.color = color
+
+    def format(self, r: logging.LogRecord) -> str:
+        comp = getattr(r, "component", r.name)
+        extra = []
+        for k, v in (getattr(r, "fields", None) or {}).items():
+            v = _mask(v) if is_sensitive(k) and v is not None else scrub(v)
+            extra.append(f"{k}={json.dumps(v, ensure_ascii=False, default=str) if not isinstance(v, str) else v}")
+        lvl = f"{r.levelname:<7}"
+        if self.color:
+            lvl = f"[{self.COLORS.get(r.levelname, '0')}m{lvl}[0m"
+            comp_s = f"[1m{comp:<8}[0m"
+        else:
+            comp_s = f"{comp:<8}"
+        line = (f"{datetime.fromtimestamp(r.created).strftime('%H:%M:%S')} {lvl} {comp_s} "
+                f"{getattr(r, 'code', '-'):<22} {r.getMessage()}" + ("   " + " ".join(extra) if extra else ""))
+        if r.exc_info:
+            line += "   exc=" + self.formatException(r.exc_info).splitlines()[-1]
+        return redact(line)
+
+
+class ModuleFilter(logging.Filter):
+    """Terminal filter: minimum level + only/hide by component (module) name, e.g. only={'voice','wake'}."""
+
+    def __init__(self, level: int, only=(), hide=()) -> None:
+        super().__init__()
+        self.level = level
+        self.only = {m.strip().lower() for m in only if m.strip()}
+        self.hide = {m.strip().lower() for m in hide if m.strip()}
+
+    def filter(self, r: logging.LogRecord) -> bool:
+        comp = str(getattr(r, "component", r.name)).lower()
+        if r.levelno >= logging.ERROR:          # errors always show, whatever the module filter
+            return r.levelno >= self.level
+        return r.levelno >= self.level and (not self.only or comp in self.only) and comp not in self.hide
+
+
 _logger = logging.getLogger("jarves")
 _debug_until = 0.0
 _base_level = logging.INFO
+_console: ModuleFilter | None = None
+_console_base = logging.INFO
 
 
 def setup(log_dir: Path, level: str = "INFO", max_bytes: int = 1_000_000, backups: int = 5,
-          console: bool = True) -> Path:
-    global _base_level
+          console: bool = True, console_level: str | None = None, only=(), hide=()) -> Path:
+    """File gets `level` (JSON); the terminal gets `console_level` (default = level) filtered by module."""
+    global _base_level, _console, _console_base
     log_dir.mkdir(parents=True, exist_ok=True)
     path = log_dir / "jarves.log"
     for h in list(_logger.handlers):
@@ -143,12 +203,21 @@ def setup(log_dir: Path, level: str = "INFO", max_bytes: int = 1_000_000, backup
     fh = logging.handlers.RotatingFileHandler(path, maxBytes=max_bytes, backupCount=backups, encoding="utf-8")
     fh.setFormatter(JsonFormatter())
     _logger.addHandler(fh)
+    _base_level = level_no(level)
+    fh.setLevel(_base_level)
+    _console = None
     if console:
         ch = logging.StreamHandler(sys.stderr)
-        ch.setFormatter(JsonFormatter())
+        color = hasattr(sys.stderr, "isatty") and sys.stderr.isatty()
+        if color and sys.platform == "win32":
+            import os
+            os.system("")                      # enable ANSI colours in the Windows console
+        ch.setFormatter(ConsoleFormatter(color))
+        _console_base = level_no(console_level or level)
+        _console = ModuleFilter(_console_base, only, hide)
+        ch.addFilter(_console)
         _logger.addHandler(ch)
-    _base_level = getattr(logging, level)
-    _logger.setLevel(_base_level)
+    _logger.setLevel(min(_base_level, _console_base if console else _base_level))
     _logger.propagate = False
     return path
 
@@ -157,14 +226,20 @@ def enable_debug(minutes: int) -> None:
     """Temporary DEBUG; reverts automatically on the next log call after expiry."""
     global _debug_until
     _debug_until = time.time() + minutes * 60
-    _logger.setLevel(logging.DEBUG)
+    _logger.setLevel(min(logging.DEBUG, _logger.level))
+    for h in _logger.handlers:
+        if isinstance(h, logging.handlers.RotatingFileHandler):
+            h.setLevel(logging.DEBUG)
 
 
 def log(component: str, code: str, msg: str, level: int = logging.INFO, exc: bool = False, **fields) -> None:
     global _debug_until
     if _debug_until and time.time() > _debug_until:
         _debug_until = 0.0
-        _logger.setLevel(_base_level)
+        for h in _logger.handlers:
+            if isinstance(h, logging.handlers.RotatingFileHandler):
+                h.setLevel(_base_level)
+        _logger.setLevel(min(_base_level, _console_base if _console else _base_level))
     _logger.log(level, msg, exc_info=exc, extra={"component": component, "code": code, "fields": fields})
 
 
@@ -182,3 +257,8 @@ def error(component: str, code: str, msg: str, exc: bool = False, **f) -> None:
 
 def debug(component: str, code: str, msg: str, **f) -> None:
     log(component, code, msg, logging.DEBUG, **f)
+
+
+def verbose(component: str, code: str, msg: str, **f) -> None:
+    if _logger.isEnabledFor(VERBOSE):
+        log(component, code, msg, VERBOSE, **f)

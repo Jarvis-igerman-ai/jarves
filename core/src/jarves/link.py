@@ -174,6 +174,8 @@ class GodotLink:
 
     @staticmethod
     async def _send(ws: ServerConnection, t: str, payload: dict) -> bool:
+        if t != "mic.level":
+            logs.verbose("link", "MSG_OUT", t, keys=sorted(payload)[:8])
         try:
             await ws.send(json.dumps({"type": t, "payload": payload, "cid": logs.get_cid()}, ensure_ascii=False))
             return True

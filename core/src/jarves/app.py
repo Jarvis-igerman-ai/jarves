@@ -36,10 +36,13 @@ def make_agent(cfg: Config, registry: SkillRegistry, memory: MemoryStore, home: 
 
 class Core:
     def __init__(self, cfg: Config, home: Path, *, audio=None, player=None, stt=None, tts=None,
-                 live_factory=None, console_logs: bool = True, use_real_audio: bool = True, ai_transport=None) -> None:
+                 live_factory=None, console_logs: bool = True, use_real_audio: bool = True, ai_transport=None,
+                 wake_detector=None, wake_audio=None) -> None:
         self.cfg, self.home = cfg, home
         self._audio, self._player, self._stt, self._tts = audio, player, stt, tts
         self._ai_transport = ai_transport          # tests inject a mock HTTP transport for the ChatGPT route
+        self._wake_detector, self._wake_audio = wake_detector, wake_audio   # tests inject fakes
+        self.wake = None                           # WakeListener when the wake word is active
         self._live_factory = live_factory          # tests inject a fake live session
         self.console_logs, self.use_real_audio = console_logs, use_real_audio
         self.stop_event = asyncio.Event()
@@ -56,7 +59,8 @@ class Core:
     # ------------------------------------------------------------------ lifecycle
     async def start(self) -> None:
         c = self.cfg
-        self.log_path = logs.setup(self.home / "logs", c.log.level, c.log.max_bytes, c.log.backups, self.console_logs)
+        self.log_path = logs.setup(self.home / "logs", c.log.level, c.log.max_bytes, c.log.backups, self.console_logs,
+                                  c.log.console_level, c.log.modules, c.log.hide)
         logs.new_cid()
         logs.info("core", "CORE_STARTING", f"JARVES Core {__version__} starting", home=str(self.home))
         self.health = Health(self.home / "health.json")
@@ -103,6 +107,7 @@ class Core:
         self._select_voice_mode()
 
         self._bg.append(asyncio.create_task(self._health_loop()))
+        self._setup_wake()
         self.health.mark("ready")
         logs.info("core", "CORE_READY", f"Core ready (voice: {self.voice_mode})", log=str(self.log_path))
 
@@ -217,6 +222,8 @@ class Core:
             self._run_busy(self.greet())
 
     def how_to_talk(self) -> str:
+        if self.wake is not None:
+            return "תגיד \"היי ג'ארבס\" ואז דבר, או כתוב לי."
         if self.voice_mode in ("live", "realtime"):
             return "לחץ על Talk כדי להתחיל שיחה, או כתוב לי."
         if self.voice_mode == "push_to_talk":
@@ -237,6 +244,7 @@ class Core:
     async def on_message(self, msg: dict, client) -> None:
         """Dispatch an authenticated, role-checked message (link.py enforces the per-role allow-list)."""
         t, p, ws = msg["type"], msg.get("payload") or {}, client
+        logs.verbose("link", "MSG_IN", t, role=client.role)
         if self.stopping and t != "status.request":
             await self.link.reply(ws, "error", {"code": "CORE_STOPPING", "message": "JARVES is shutting down"})
             return
@@ -299,6 +307,8 @@ class Core:
 
     async def set_muted(self, muted: bool) -> None:
         self.dev.set_mic_muted(muted)
+        if self.wake is not None:
+            self.wake.mute() if muted else self.wake.unmute()
         if muted and self.live is not None:
             await self.live.stop()
             self.live = None
@@ -463,6 +473,100 @@ class Core:
         if getattr(live, "running", True) is False:
             return                                  # ended during start (on_end already handled it)
         self.live = live
+
+    # ------------------------------------------------------------------ "Hey Jarvis" wake word
+    def _setup_wake(self) -> None:
+        v = self.cfg.voice
+        if not v.wake_enabled or self.voice_mode == "off" or not (self._wake_audio or self.use_real_audio):
+            self.health.set("wake_word", "disabled", "wake word off (voice.wake_enabled / voice.mode)")
+            return
+        from .voice.wakeword import WakeListener, WakeWordUnavailable, make_detector
+        try:
+            det = self._wake_detector or make_detector(v.wake_word, v.wake_threshold)
+            ok, msg = det.check() if hasattr(det, "check") else (True, "")
+        except WakeWordUnavailable as e:
+            ok, msg = False, e.message
+        if not ok:
+            self.health.set("wake_word", "unavailable", msg, "uv sync --extra voice; hold Space to talk meanwhile")
+            return
+        self.wake = WakeListener(det, self._on_wake, v.wake_cooldown_s)
+        self._woke = False
+        self.health.set("wake_word", "ok", f"say \"Hey Jarvis\" (detected on this device, {v.wake_word})")
+        self._bg.append(asyncio.create_task(self._wake_loop()))
+
+    async def _on_wake(self, score: float) -> None:
+        self._woke = True
+        logs.info("wake", "WAKE_WORD", "wake word heard", score=round(score, 2))
+
+    async def _levels(self, chunks):
+        """Pass mic chunks through, sending the face a ~5 Hz mic level for the level bar."""
+        from .voice.wakeword import level_meter
+        last = 0.0
+        async for c in chunks:
+            now = time.monotonic()
+            if now - last > 0.2 and self.link.face is not None:
+                last = now
+                await self.link.send_face("mic.level", {"level": round(level_meter(c), 3)})
+            yield c
+
+    def _wake_should_listen(self) -> bool:
+        return not (self.dev.mic_muted or self.live is not None or self.listening or self.stopping
+                    or (self._busy is not None and not self._busy.done()))
+
+    async def _wake_loop(self) -> None:
+        """One local mic stream at 16 kHz: wake word -> live conversation, or capture-until-silence -> answer.
+        The stream is closed (device released) while muted, during a live session and while JARVES answers."""
+        from .voice.wakeword import capture_until_silence
+        v = self.cfg.voice
+        load = getattr(self.wake.detector, "load", None)
+        if load is not None:
+            await load()
+        while not self.stopping:
+            if not self._wake_should_listen():
+                await asyncio.sleep(0.2)
+                continue
+            mic = self._wake_audio() if self._wake_audio else StreamingAudio(v.input_device, v.output_device, rate=16000)
+            chunks = self._levels(mic.mic_chunks(16000, 2560))      # 80 ms chunks
+            woke = False
+            try:
+                self.wake.resume()
+                async for chunk in chunks:
+                    if not self._wake_should_listen():
+                        break
+                    self._woke = False
+                    await self.wake.process(chunk)
+                    if self.wake.stats.frames % 25 == 0:
+                        logs.verbose("wake", "WAKE_SCORE", "wake word score", score=round(self.wake.stats.last_score, 3))
+                    if self._woke:
+                        woke = True
+                        break
+                if woke and self.voice_mode == "push_to_talk":
+                    logs.new_cid()
+                    self.listening = True
+                    self.dev.speaker_stop()
+                    await self.set_face("listening")
+                    await self.link.send_face("assistant.activity", {"text": "כן? אני מקשיב..."})
+                    cap = await capture_until_silence(chunks, max_s=v.record_max_s)
+                    self.listening = False
+                    if cap.speech_ms == 0 and cap.too_quiet:
+                        self.wake.note_false_trigger()
+                    self._run_busy(self._transcribe_and_answer(cap.audio))
+            except AudioUnavailable as e:
+                self.health.set("audio", "unavailable", e.message, e.action)
+                await asyncio.sleep(5)
+            except asyncio.CancelledError:
+                raise
+            except Exception:
+                logs.error("wake", "WAKE_LOOP_ERROR", "wake word loop failed; retrying", exc=True)
+                self.health.set("wake_word", "degraded", "wake word loop crashed; retrying", "see logs")
+                await asyncio.sleep(2)
+            finally:
+                self.listening = False
+                self.wake.pause()
+                await chunks.aclose()
+                mic.close()
+            if woke and self.voice_mode in ("live", "realtime"):
+                await self._start_live()
 
     # ------------------------------------------------------------------ confirmation for side effects
     async def ask_confirm(self, prompt: str, timeout: float = 20) -> bool:

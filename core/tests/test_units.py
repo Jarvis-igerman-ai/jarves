@@ -297,3 +297,23 @@ def test_cli_setup_paths(tmp_path, monkeypatch, capsys):
     (tmp_path / "config.toml").write_text("[ai]\nconnection = \"chatgpt\"\n", encoding="utf-8")
     assert _cli(tmp_path, monkeypatch, "setup", "--if-needed") == 0        # signed out later: hint, no forced login
     assert "jarvis chatgpt login" in capsys.readouterr().out
+
+
+def test_console_levels_and_module_filter(tmp_path, capsys):
+    from jarves import logs
+    logs.setup(tmp_path, "INFO", console=True, console_level="VERBOSE", only=("voice",), hide=())
+    logs.verbose("voice", "V1", "voice trace")
+    logs.info("link", "L1", "link info hidden")
+    logs.error("link", "E1", "errors always show")
+    logs.info("voice", "S1", "secret", text="private words", token="sk-abcdefghijklmnop")
+    err = capsys.readouterr().err
+    assert "V1" in err and "E1" in err and "L1" not in err
+    assert "private words" not in err and "sk-abcdefghijklmnop" not in err
+    file = (tmp_path / "jarves.log").read_text(encoding="utf-8")
+    assert "V1" not in file and "L1" in file                         # file keeps its own level (INFO)
+    logs.setup(tmp_path, "INFO", console=True, console_level="WARNING", hide=("link",))
+    logs.info("voice", "I2", "below warning")
+    logs.warn("link", "W2", "hidden module")
+    logs.warn("ai", "W3", "shown")
+    err = capsys.readouterr().err
+    assert "I2" not in err and "W2" not in err and "W3" in err

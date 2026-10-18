@@ -1,12 +1,23 @@
 @echo off
-rem jarvis          start JARVES (asks how to connect the first time)
-rem jarvis setup    change ChatGPT / API key choice
-rem jarvis stop     stop
-rem jarvis <other>  any Core command, e.g. jarvis status, jarvis ask "מה השעה"
-set "J=uv --directory "%~dp0core" run jarves"
-if not "%~1"=="" ( %J% %* & exit /b )
+rem jarvis                                start JARVES here, with live logs in this terminal (Ctrl+C stops)
+rem jarvis --log-level debug             levels: error, warning, info, debug, verbose
+rem jarvis --module voice,wake --hide link   show only / hide modules
+rem jarvis setup ^| stop ^| status ^| key ^| logs -f ^| ^<any Core command^>
+setlocal
+set "C=%~dp0core"
+rem --no-sync: never reinstall while a Core is running (its jarves.exe is locked); install happens on start below
+set "J=uv --directory "%C%" run --no-sync jarves"
+if not exist "%C%\.venv" uv --directory "%C%" sync -q --extra voice
+set "FIRST=%~1"
+if not "%FIRST%"=="" if not "%FIRST:~0,1%"=="-" ( %J% %* & exit /b )
+%J% status >nul 2>&1
+if not "%ERRORLEVEL%"=="1" (
+  echo JARVES is already running: opening the face and following its log.
+  call "%~dp0godot\run_face.cmd"
+  %J% logs -f %*
+  exit /b
+)
+uv --directory "%C%" sync -q --extra voice || ( echo Could not install JARVES packages. & pause & exit /b 1 )
 %J% setup --if-needed || ( pause & exit /b 1 )
-start "JARVES Core" /min cmd /c "%~dp0core\run_core.cmd"
-timeout /t 4 /nobreak >nul
-call "%~dp0godot\run_face.cmd"
-echo JARVES is running. Hold SPACE to talk, or type.  Stop: jarvis stop
+start "" /b cmd /c "timeout /t 4 /nobreak >nul & call "%~dp0godot\run_face.cmd""
+%J% run %*

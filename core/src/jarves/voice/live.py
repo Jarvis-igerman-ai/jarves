@@ -407,6 +407,8 @@ class LiveVoice(SessionLifecycle):
 
     async def handle_event(self, ev) -> None:
         t = _get(ev, "type")
+        if t != "session.output_audio.delta":
+            logs.verbose("live", "LIVE_EVENT", str(t))
         g = lambda k, d=None: _get(ev, k, d)    # noqa: E731
         if t == "session.started":
             self._started.set()

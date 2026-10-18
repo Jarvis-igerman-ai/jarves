@@ -135,6 +135,8 @@ class RealtimeVoice(SessionLifecycle):
 
     async def handle_event(self, ev) -> None:
         t = ev.type
+        if t != "audio":
+            logs.verbose("realtime", "RT_EVENT", str(t))
         if t == "audio":
             if time.monotonic() > self._speaking_until:
                 await self._state("speaking")

@@ -35,7 +35,7 @@ jobs:
         if: runner.os == 'Windows'
         shell: cmd
         run: |
-          call ..\jarvis.cmd --help || exit /b 1
+          call ..\jarvis.cmd setup --help || exit /b 1
           call ..\jarvis.cmd status > status.txt
           type status.txt
           findstr /C:"Core is NOT running" status.txt || exit /b 1
