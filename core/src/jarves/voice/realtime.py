@@ -10,11 +10,15 @@ from __future__ import annotations
 
 import asyncio
 import time
-from typing import Awaitable, Callable
+from typing import TYPE_CHECKING, Any, Awaitable, Callable
 
 import numpy as np
 
 from .. import logs
+from .live import ERROR_ACTIONS, GENERIC_ACTION, SessionLifecycle, error_info, is_fatal
+
+if TYPE_CHECKING:
+    from ..budget import Budget
 
 RATE = 24000
 CHUNK_BYTES = 4800
@@ -33,97 +37,137 @@ def _runner(model: str, voice: str, language: str, instructions: str, tools: lis
         }})
 
 
-class RealtimeVoice:
+class RealtimeVoice(SessionLifecycle):
+    """Lifecycle (CR-02) is shared with LiveVoice: one idempotent finalize for user stop, remote close (the
+    session's event stream ends), transport exception, task crash and the watchdog. Usage = wall-clock seconds."""
+    _log_area = "realtime"
+
     def __init__(self, model: str, instructions: Callable[[], str], tools: list, language: str = "he",
                  voice: str = "marin", half_duplex: bool = True, audio_io=None,
                  on_state: Callable[[str], Awaitable[None]] | None = None,
                  on_transcript: Callable[[str, str], Awaitable[None]] | None = None,
-                 on_usage: Callable[[float], None] | None = None, max_session_s: float = 600) -> None:
+                 on_usage: Callable[[float], None] | None = None, max_session_s: float = 600, *,
+                 on_end: Callable[[str], Awaitable[None]] | None = None,
+                 on_health: Callable[[str, str, str], Any] | None = None,
+                 budget: "Budget | None" = None, runner_factory: Callable | None = None) -> None:
         self.model, self.instructions, self.tools = model, instructions, tools
         self.language, self.voice, self.half_duplex = language, voice, half_duplex
         self.audio_io, self.on_state, self.on_transcript, self.on_usage = audio_io, on_state, on_transcript, on_usage
         self.max_session_s = max_session_s
+        self._runner_factory = runner_factory or _runner
+        self._init_lifecycle(on_end, on_health, budget)
         self.session = None
-        self._tasks: list[asyncio.Task] = []
         self._speaking_until = 0.0
         self._t0 = 0.0
-        self.running = False
+        self._stats = {"barge_ins": 0, "errors": 0}
 
     async def _state(self, s: str) -> None:
         if self.on_state:
             await self.on_state(s)
 
+    def _usage_seconds(self) -> float:
+        return time.monotonic() - self._t0 if self._t0 else 0.0
+
     async def start(self) -> None:
-        runner = _runner(self.model, self.voice, self.language, self.instructions(), self.tools)
-        self.session = await runner.run()
-        await self.session.enter()
+        if self._active:
+            if self._end_task is None:
+                raise RuntimeError("realtime session already running")
+            await self.wait_ended()
+        self._reset_lifecycle()
+        self._speaking_until, self._t0 = 0.0, 0.0
+        self._stats = {"barge_ins": 0, "errors": 0}
+        try:
+            runner = self._runner_factory(self.model, self.voice, self.language, self.instructions(), self.tools)
+            self.session = await runner.run()
+            await self.session.enter()
+        except BaseException as e:
+            await self.stop(f"error:{getattr(e, 'code', None) or type(e).__name__}")
+            raise
         self.running, self._t0 = True, time.monotonic()
-        loop = asyncio.get_running_loop()
-        self._tasks = [loop.create_task(self._events()), loop.create_task(self._watchdog())]
+        self._spawn(self._events(), "events")
+        self._spawn(self._watchdog(), "watchdog")
         if self.audio_io is not None:
-            self._tasks += [loop.create_task(self._mic()), loop.create_task(self.audio_io.run_player(RATE))]
+            self._spawn(self._mic(), "mic")
+            self._spawn(self.audio_io.run_player(RATE), "player")
         logs.info("realtime", "RT_STARTED", f"realtime session started ({self.model})")
+        await self._health("ok", f"realtime voice connected ({self.model})", "")
         await self._state("listening")
 
-    async def stop(self) -> None:
-        if not self.running:
-            return
-        self.running = False
-        for t in self._tasks:
-            t.cancel()
-        self._tasks = []
-        if self.session is not None:
-            try:
-                await self.session.close()
-            except Exception:
-                pass
-            self.session = None
-        if self.audio_io is not None:
-            self.audio_io.close()
-        if self.on_usage:
-            self.on_usage(time.monotonic() - self._t0)
-        logs.info("realtime", "RT_STOPPED", "realtime session stopped")
-        await self._state("idle")
+    async def _release(self) -> None:
+        session, self.session = self.session, None
+        if session is not None:
+            await session.close()
 
     async def _watchdog(self) -> None:
         await asyncio.sleep(self.max_session_s)
-        asyncio.get_running_loop().create_task(self.stop())
+        logs.info("realtime", "RT_TIME_LIMIT", "session time limit reached")
+        self._request_end("timeout")
 
     async def _mic(self) -> None:
         silence = bytes(CHUNK_BYTES)
         async for chunk in self.audio_io.mic_chunks(RATE, CHUNK_BYTES):
+            if not self.running:
+                return
             gated = self.half_duplex and time.monotonic() < self._speaking_until + 0.4
             await self.session.send_audio(silence if gated else chunk)
 
     async def _events(self) -> None:
-        async for ev in self.session:
-            t = ev.type
-            if t == "audio":
-                if time.monotonic() > self._speaking_until:
-                    await self._state("speaking")
-                data = ev.audio.data
-                self._speaking_until = max(self._speaking_until, time.monotonic()) + len(data) / 2 / RATE
-                if self.audio_io is not None:
-                    self.audio_io.enqueue(data)
-            elif t == "audio_interrupted":
-                if self.audio_io is not None:
-                    self.audio_io.flush()
-                self._speaking_until = 0.0
-                logs.info("realtime", "RT_BARGE_IN", "user interrupted JARVES")
-                await self._state("listening")
-            elif t == "audio_end":
-                await self._state("listening")
-            elif t == "tool_start":
-                await self._state("thinking")
-            elif t == "history_added" and self.on_transcript:
-                item = ev.item
-                for c in getattr(item, "content", []) or []:
-                    txt = getattr(c, "transcript", None) or getattr(c, "text", None)
-                    if txt:
-                        await self.on_transcript(getattr(item, "role", ""), txt)
-            elif t == "error":
-                logs.error("realtime", "RT_ERROR", f"realtime error: {str(ev.error)[:200]}")
-                await self._state("error")
+        in_handler = False
+        try:
+            async for ev in self.session:
+                in_handler = True
+                await self.handle_event(ev)
+                in_handler = False
+        except asyncio.CancelledError:
+            raise
+        except Exception as e:
+            if self.running:
+                code = getattr(e, "code", None) or type(e).__name__
+                what = "internal error" if in_handler else "connection lost"
+                logs.error("realtime", "RT_CONNECTION_LOST", f"realtime {what}: {type(e).__name__}: {str(e)[:150]}")
+                await self._health("degraded", f"realtime voice stopped: {what} ({type(e).__name__})",
+                                   "check the internet; tap to start a new conversation")
+                self._request_end(f"error:{code}")
+        else:
+            if self.running:
+                logs.warn("realtime", "RT_REMOTE_CLOSED", "realtime session closed by the server")
+                self._request_end("remote_closed")
+
+    async def handle_event(self, ev) -> None:
+        t = ev.type
+        if t == "audio":
+            if time.monotonic() > self._speaking_until:
+                await self._state("speaking")
+            data = ev.audio.data
+            self._speaking_until = max(self._speaking_until, time.monotonic()) + len(data) / 2 / RATE
+            if self.audio_io is not None:
+                self.audio_io.enqueue(data)
+        elif t == "audio_interrupted":
+            if self.audio_io is not None:
+                self.audio_io.flush()
+            self._speaking_until = 0.0
+            self._stats["barge_ins"] += 1
+            logs.info("realtime", "RT_BARGE_IN", "user interrupted JARVES")
+            await self._state("listening")
+        elif t == "audio_end":
+            await self._state("listening")
+        elif t == "tool_start":
+            await self._state("thinking")
+        elif t == "history_added" and self.on_transcript:
+            item = ev.item
+            for c in getattr(item, "content", []) or []:
+                txt = getattr(c, "transcript", None) or getattr(c, "text", None)
+                if txt:
+                    await self.on_transcript(getattr(item, "role", ""), txt)
+        elif t == "error":
+            code, msg, etype = error_info(ev.error)
+            self._stats["errors"] += 1
+            fatal = is_fatal(code, etype)
+            logs.error("realtime", "RT_ERROR", f"realtime error {code}: {msg}", fatal=fatal)
+            await self._health("degraded", f"realtime voice error {code}: {msg}",
+                               ERROR_ACTIONS.get(code, GENERIC_ACTION))
+            if fatal:
+                self._request_end(f"error:{code}")
 
 
 class RealtimeSpeaker:
