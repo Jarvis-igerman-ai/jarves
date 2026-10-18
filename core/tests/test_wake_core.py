@@ -1,5 +1,8 @@
 """Wake word wired into the Core, with a fake mic and FakeDetector (offline, no model, no hardware)."""
 import asyncio
+import time
+
+import pytest
 
 import numpy as np
 
@@ -225,5 +228,68 @@ async def test_connected_mode_wake_word_is_the_way_back_in_after_the_session_end
         assert sessions[1].kw.get("greeting") is None                       # no spoken "yes?": talk right away
         await asyncio.sleep(0.6)
         assert [n for n, _ in audio.played][:2] == [2400, 4800]              # wake chime (0.10 s), ready chime (0.20 s)
+    finally:
+        await c.stop()
+
+
+async def _conversation_core(home, cfg, monkeypatch):
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-test-not-real")
+    cfg.voice.activation, cfg.voice.wake_enabled = "conversation", False
+    sessions = []
+
+    class FakeLive:
+        def __init__(self, core, on_state, on_transcript, on_usage, on_end=None, **kw):
+            self.on_state, self.on_end, self.running, self._last_activity = on_state, on_end, False, time.monotonic()
+            sessions.append(self)
+
+        async def start(self):
+            self.running = True
+
+        async def stop(self):
+            self.running = False
+
+        async def wait_ready(self):
+            return
+
+        def present(self):
+            pass
+    c = Core(cfg, home, audio=SimAudio(), player=FakePlayer(), stt=FakeSTT(), tts=FakeTTS(), console_logs=False,
+             use_real_audio=False, live_factory=FakeLive)
+    await c.start()
+    await c.prepare_desktop()
+    return c, sessions
+
+
+async def test_server_close_in_the_middle_of_a_conversation_resumes_smoothly(home, cfg, monkeypatch):
+    c, sessions = await _conversation_core(home, cfg, monkeypatch)
+    try:
+        await sessions[0].on_end("remote_closed")                  # server closed it while the user was active
+        for _ in range(40):
+            await asyncio.sleep(0.1)
+            if len(sessions) == 2:
+                break
+        assert len(sessions) == 2 and c.live is sessions[1]       # back in the same conversation, no wake word
+    finally:
+        await c.stop()
+
+
+@pytest.mark.parametrize("reason", ["idle", "user", "budget", "error:invalid_api_key"])
+async def test_real_ends_do_not_resume(home, cfg, monkeypatch, reason):
+    c, sessions = await _conversation_core(home, cfg, monkeypatch)
+    try:
+        await sessions[0].on_end(reason)
+        await asyncio.sleep(1.0)
+        assert len(sessions) == 1 and c.live is None
+    finally:
+        await c.stop()
+
+
+async def test_resume_is_limited_when_the_server_keeps_closing(home, cfg, monkeypatch):
+    c, sessions = await _conversation_core(home, cfg, monkeypatch)
+    try:
+        for n in range(1, 6):
+            await sessions[-1].on_end("remote_closed")
+            await asyncio.sleep(0.8)
+        assert len(sessions) == 4                                  # first + at most 3 resumes
     finally:
         await c.stop()

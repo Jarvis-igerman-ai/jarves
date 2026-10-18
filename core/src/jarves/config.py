@@ -61,7 +61,9 @@ class VoiceConfig(_Strict):
     realtime_voice: str = "cedar"          # Realtime has a different supported voice list from Live
     idle_disconnect_s: int = Field(180, ge=30, le=600)
     half_duplex: bool = True               # mic gated while JARVES speaks (laptop speakers); False with headphones/AEC mic
-    session_max_s: int = Field(600, ge=30, le=3600)
+    # One conversation stays open until it is quiet for idle_disconnect_s. This is only a safety ceiling per
+    # session; the real cost guard is ai.daily_realtime_minutes (a session never outlives the day's budget).
+    session_max_s: int = Field(3600, ge=30, le=3600)
     tts_engine: Literal["auto", "openai", "local", "none"] = "auto"
     # offline FALLBACK STT, measured 2026-10-18 on a Ryzen 3 5300U (int8, 2 s Hebrew phrase):
     # "small" ~4 s, minor errors; "ivrit-ai/whisper-large-v3-turbo-ct2" accurate but ~19 s. Pi 5: UNTESTED.

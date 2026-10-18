@@ -81,6 +81,7 @@ class Core:
         self.voice_mode = "off"
         self._voice_connecting = False
         self._hold_wake_until = 0.0     # connected-on-open mode: wake word waits until the first live session ended
+        self._rollovers: list[float] = []   # times of automatic session resumes (loop guard)
         self.startup = {"phase": "starting", "ready": False, "detail": "Loading JARVES..."}
         self._startup_t0 = time.monotonic()
         self._startup_signature = hashlib.sha256(json.dumps([
@@ -551,6 +552,22 @@ class Core:
         except AudioUnavailable as e:
             self.health.set("audio", "unavailable", e.message, e.action)
 
+    def _rollover_allowed(self) -> bool:
+        now = time.monotonic()
+        self._rollovers = [t for t in self._rollovers if now - t < 600]
+        if len(self._rollovers) >= 3:
+            logs.warn("voice", "LIVE_RESUME_LIMIT", "conversation keeps being closed by the server; not resuming again")
+            return False
+        self._rollovers.append(now)
+        return True
+
+    async def _resume_live(self) -> None:
+        await asyncio.sleep(0.4)
+        if self.stopping or self.live is not None or self._voice_connecting:
+            return
+        logs.info("voice", "LIVE_RESUMED", "conversation was closed while active: reconnecting")
+        await self._start_live()
+
     async def _chime(self, kind: str) -> None:
         """Short soft chime: "wake" = heard you, "ready" = connected, talk now."""
         if not self.cfg.voice.chime or self.dev.audio is None:
@@ -597,6 +614,12 @@ class Core:
             if self.live is live_ref[0]:
                 self.live = None                   # any end (user, remote close, error, budget) frees the slot
             logs.info("voice", "LIVE_ENDED", f"live conversation ended ({reason})")
+            # Smooth conversation: the server closing a session (or a time limit) while the user is in the middle
+            # of talking must not drop them out - reconnect at once. Idle / user / error / budget end for real.
+            last = getattr(live_ref[0], "_last_activity", 0.0)
+            if (reason in ("remote_closed", "timeout") and not self.stopping and self.cfg.voice.activation == "conversation"
+                    and time.monotonic() - last < 60 and self._rollover_allowed()):
+                self._spawn(self._resume_live())
             if self.startup["ready"] and not self.stopping:
                 self._startup_stage("running", "Waiting for Hey Jarvis")
             if reason.startswith("error:") or reason == "remote_closed":
