@@ -1,5 +1,14 @@
 # Current handoff — 18 October 2026
 
+## NEW ACTIVE BUNDLE — SW-V1 software implementation + real CI (USER APPROVED)
+
+**Authority:** [NOW](NOW.md) and [SW-V1 work package](SW_V1_WORK_PACKAGE.md); user authorized work while away on **#2 + #5 + #6 + #7 plus the first YouTube Music Skill**, with automatic continuation between phases and bounded tests/commits. This supersedes the old R5b 'stop for review' as a **software sequencing** gate, not as a physical manufacturing sign-off.
+
+**First implementing action:** sync latest branch; read `AGENTS.md` + `docs/NOW.md` + `docs/SW_V1_WORK_PACKAGE.md`; take the short research/CI phase into working software, not another docs-only output. Existing R5b code stays as baseline. CI runner activation requires write permissions under `.github/workflows/`; if denied, record blocker and continue SW. No hardware purchases, account sign-ins, paid API spend or supplier contacts.
+
+**Deliverable:** working Python Core↔Godot, a maintainable Hebrew voice/AI assistant to the extent existing authorized credentials enable, persistent memory, modular Skills and reusable YouTube Music integration candidate, live CI proof if possible, targeted fault tests, accurate known-blocker list. One final user review.
+
+---
 ## S1.T03R5b — CAD implementation DELIVERED, waiting for user review
 
 - **Read first:**
