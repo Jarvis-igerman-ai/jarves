@@ -19,6 +19,12 @@
 - **Subagents are optional, not automatic.** Delegate only narrowly specified, independently checkable, read-only or non-overlapping tasks when parallelism clearly saves cost/time. One writer owns the integration, no concurrent modifications of the same files, no duplicated context-loading, no multi-agent debates or unnecessary reviews. Never assume model routing/subagent selection is supported; report the model actually used and fall back to single-agent execution.
 - A requested image/export is **not** evidence of a successful real run until its files and source synchronization are checked. Use targeted checks and report failure; do not inflate cost by rerunning the entire rendering pipeline.
 
+## Best-in-class technology (mandatory — user decision, 18 Oct 2026)
+- For **every stage** (AI models, voice, speech, agents, libraries, tools, CAD/render/print tooling, hardware candidates), **research the newest best-in-class option before choosing**: check official docs/model lists/changelogs dated now, not training memory. Never default to older generations (e.g. gpt-4o-era models) when a newer recommended one exists.
+- Prefer one coherent, maintained vendor stack where it is best (currently **OpenAI**: Agents SDK, GPT-Live voice, GPT-6 family backend, hosted web search) over mixing vendors without a measured quality reason.
+- Cloud/paid APIs are acceptable for quality; local components must be best-in-class or clearly labelled **fallback**. Target runtime is Raspberry Pi 5 — heavy local models are fallback only.
+- Record the chosen model/library IDs, the date checked and the source link in the relevant decision doc; re-check at each milestone and upgrade when a better recommended version appears. Keep costs metered and keys in the environment only.
+
 ## Execution rules (mandatory)
 1. **Only approved scope per session.** Work only within the scope and files authorized by `docs/NOW.md`. Normally finish one approved task and STOP; **when NOW explicitly authorizes a bounded multi-stage/multi-Issue work package (such as SW-V1), autonomously proceed through its defined phases and commit checkpoints, stopping only for material blockers or its final review gate.** Do not auto-start anything beyond the approved bundle.
 2. Before writing code, output **up to five short plan steps**, impacted files and **one verification action**. If requirements are ambiguous or unverified critical data is needed, ask first.

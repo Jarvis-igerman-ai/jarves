@@ -1,0 +1,27 @@
+# JARVES Core settings. Copy to %LOCALAPPDATA%\jarves\config.toml (Windows) or ~/.local/state/jarves/config.toml.
+# Every key is optional; unknown keys are rejected. NEVER put API keys here: set OPENAI_API_KEY in the environment.
+
+assistant_name = "JARVES"
+
+[ai]
+provider = "openai"            # "offline" = built-in commands only, no cloud calls
+text_model = "gpt-6-luna"      # GPT-6 backend (checked 2026-10-18); "gpt-6.1-sol" for harder reasoning
+web_search = true
+daily_request_limit = 200      # hard ceiling on AI requests per day (cost guard)
+daily_realtime_minutes = 30    # hard ceiling on live-voice minutes per day (cost guard)
+
+[voice]
+mode = "live"                  # live (GPT-Live) | realtime (gpt-realtime-2.1) | push_to_talk (offline) | off
+voice = "marin"
+half_duplex = true             # set false with headphones or an echo-cancelling mic (enables barge-in)
+session_max_s = 600
+tts_engine = "auto"            # auto (cloud, then local fallback) | openai | local | none
+stt_model = "ivrit-ai/whisper-large-v3-turbo-ct2"   # offline fallback only; on a Pi use "small"
+
+[music]
+provider = "pear"              # Pear Desktop (YouTube Music) local API Server plugin
+pear_url = "http://127.0.0.1:26538"
+max_volume = 70
+
+[log]
+level = "INFO"
