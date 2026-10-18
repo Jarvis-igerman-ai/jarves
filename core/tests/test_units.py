@@ -234,6 +234,11 @@ async def test_pear_adapter_protocol(tmp_path):
                                              "songDuration": 200, "elapsedSeconds": 1})
         return httpx.Response(204)
     p = PearDesktopPlayer("http://127.0.0.1:26538", tmp_path / "id", transport=httpx.MockTransport(handler))
+    from jarves.skills.music import MusicError
+    with pytest.raises(MusicError) as e:            # unpaired: no automatic pairing dialog
+        await p.search("artzi")
+    assert e.value.code == "MUSIC_NOT_PAIRED" and not any(x[1].startswith("/auth/") for x in seen)
+    await p.pair()                                  # explicit user-initiated pairing
     tracks = await p.search("artzi")
     await p.play_track(tracks[0])
     assert ("POST", "/api/v1/queue") in seen and ("POST", "/api/v1/play") in seen

@@ -111,23 +111,48 @@ class PearDesktopPlayer:
     async def close(self) -> None:
         await self._client.aclose()
 
+    @property
+    def _paired_marker(self) -> Path:
+        return self.id_file.with_name(self.id_file.name + ".paired")
+
     async def pair(self, wait_s: float = 60) -> None:
-        """Request a token; on first use the user must click 'Allow' in Pear Desktop's dialog."""
+        """Explicit, user-initiated pairing (`jarves music pair`): Pear Desktop shows an Allow/Deny dialog the
+        first time; the user's click is the authorization. Never called automatically for an unpaired client."""
         try:
             r = await self._client.post(f"/auth/{self.client_id()}", timeout=wait_s)
         except httpx.TransportError as e:
             raise MusicError("MUSIC_PLAYER_OFFLINE", "Pear Desktop is not reachable",
                              "start Pear Desktop and enable Plugins > API Server (host 127.0.0.1, port 26538)") from e
         if r.status_code == 403:
+            self._paired_marker.unlink(missing_ok=True)
             raise MusicError("MUSIC_PAIR_DENIED", "pairing was denied in Pear Desktop", "run `jarves music pair` and click Allow")
         if r.status_code != 200:
             raise MusicError("MUSIC_PAIR_FAILED", f"pairing failed (HTTP {r.status_code})")
         self._token = r.json()["accessToken"]
+        self._paired_marker.write_text("paired by user approval in Pear Desktop\n", encoding="utf-8")
         logs.info("music", "MUSIC_PAIRED", "paired with Pear Desktop API server")
 
+    async def _ensure_token(self) -> None:
+        if self._token is not None:
+            return
+        if not self._paired_marker.exists():
+            # never pop Pear's approval dialog from background/automatic calls
+            if not await self.reachable():
+                raise MusicError("MUSIC_PLAYER_OFFLINE", "Pear Desktop is not reachable",
+                                 "start Pear Desktop and enable Plugins > API Server (host 127.0.0.1, port 26538)")
+            raise MusicError("MUSIC_NOT_PAIRED", "JARVES is not paired with Pear Desktop yet",
+                             "run `jarves music pair` once and click Allow in Pear Desktop")
+        await self.pair(wait_s=self.timeout)    # already-approved id: Pear returns a token without a dialog
+
+    async def reachable(self) -> bool:
+        try:
+            await self._client.get("/api/v1/song")     # 401 without a token still proves the server is up
+            return True
+        except httpx.TransportError:
+            return False
+
     async def _req(self, method: str, path: str, json: dict | None = None, retry: bool = True) -> httpx.Response:
-        if self._token is None:
-            await self.pair(wait_s=self.timeout)
+        await self._ensure_token()
         try:
             r = await self._client.request(method, f"/api/v1{path}", json=json,
                                            headers={"Authorization": f"Bearer {self._token}"})
@@ -228,6 +253,10 @@ class FakePlayer:
         return self.np
 
 
+async def _false() -> bool:
+    return False
+
+
 # ------------------------------------------------------------------ Skill
 class PlayArgs(BaseModel):
     query: str = Field(..., min_length=1, max_length=200, description="Song, artist or 'artist song' to play")
@@ -257,6 +286,7 @@ class MusicSkill(Skill):
             logs.warn("music", e.code, e.message, action=e.action)
             msg = {"MUSIC_PLAYER_OFFLINE": "נגן המוזיקה לא פועל. צריך להפעיל את Pear Desktop.",
                    "MUSIC_PAIR_DENIED": "החיבור לנגן נדחה. צריך לאשר אותו ב-Pear Desktop.",
+                   "MUSIC_NOT_PAIRED": "עוד לא חיברו אותי לנגן המוזיקה. צריך להריץ jarves music pair ולאשר.",
                    "MUSIC_TIMEOUT": "נגן המוזיקה לא עונה."}.get(e.code, "יש בעיה בנגן המוזיקה.")
             return ToolResult(False, msg, {"action": e.action}, e.code)
 
@@ -327,6 +357,8 @@ class MusicSkill(Skill):
     async def health(self) -> tuple[str, str]:
         try:
             await self.player.now_playing()
-            return "ok", f"{self.player.name} reachable"
+            return "ok", f"{self.player.name} reachable and paired"
         except MusicError as e:
+            if e.code == "MUSIC_NOT_PAIRED" and await getattr(self.player, "reachable", _false)():
+                return "degraded", f"{self.player.name} running but not paired; {e.action}"
             return "unavailable", f"{e.message}; {e.action}"
