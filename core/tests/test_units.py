@@ -271,3 +271,29 @@ def test_secrets_file_loads_key_env_wins(tmp_path, monkeypatch):
     assert load_secrets(tmp_path) == [] and os.environ["OPENAI_API_KEY"] == "sk-env"   # real env wins
     save_secret("OPENAI_API_KEY", "sk-new", tmp_path)
     assert secrets_file(tmp_path).read_text(encoding="utf-8").count("OPENAI_API_KEY=") == 1
+
+
+def _cli(home, monkeypatch, *argv, stdin=""):
+    import io
+    from jarves import cli
+    monkeypatch.setenv("JARVES_HOME", str(home))
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    monkeypatch.setattr("sys.stdin", io.StringIO(stdin))
+    monkeypatch.setattr("getpass.getpass", lambda prompt="": "")
+    return cli.main(list(argv))
+
+
+def test_cli_setup_paths(tmp_path, monkeypatch, capsys):
+    (tmp_path / "config.toml").write_text("[ai]\nconnection = 'nope'\n", encoding="utf-8")
+    assert _cli(tmp_path, monkeypatch, "setup") == 2                       # invalid config -> clear error
+    assert "CONFIG ERROR" in capsys.readouterr().err
+    (tmp_path / "config.toml").write_text("api_key = 'sk-x'\n", encoding="utf-8")
+    assert _cli(tmp_path, monkeypatch, "setup") == 2                       # secrets in config rejected
+    (tmp_path / "config.toml").unlink()
+    assert _cli(tmp_path, monkeypatch, "setup", stdin="9\n") == 1          # bad choice
+    assert not (tmp_path / "setup_done").exists()
+    assert _cli(tmp_path, monkeypatch, "setup", stdin="3\n") == 0          # api key mode, key skipped
+    assert "jarvis key" in capsys.readouterr().out and (tmp_path / "setup_done").exists()
+    (tmp_path / "config.toml").write_text("[ai]\nconnection = \"chatgpt\"\n", encoding="utf-8")
+    assert _cli(tmp_path, monkeypatch, "setup", "--if-needed") == 0        # signed out later: hint, no forced login
+    assert "jarvis chatgpt login" in capsys.readouterr().out

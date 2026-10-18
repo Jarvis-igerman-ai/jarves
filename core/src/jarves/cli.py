@@ -245,6 +245,12 @@ def cmd_setup(a, cfg, home) -> int:
     from .chatgpt_auth import ChatGPTAuth
     path = a.config or home / "config.toml"
     if a.if_needed and (home / "setup_done").exists():
+        conn = cfg.ai.connection
+        if conn in ("chatgpt", "combined") and not ChatGPTAuth(home).status()["plan_usage"]:
+            print("ChatGPT is not connected, so JARVES starts with offline commands only.\n"
+                  "Reconnect any time:  jarvis chatgpt login   (or change mode: jarvis setup)")
+        if conn in ("combined", "api_key") and not openai_key_present():
+            print("No OpenAI API key saved, so live voice is off.  Add it:  jarvis key")
         return 0
     print("How should JARVES connect?\n"
           "  1  My ChatGPT plan          (no extra cost, simple voice)\n"

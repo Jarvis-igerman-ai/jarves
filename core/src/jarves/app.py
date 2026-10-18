@@ -47,6 +47,8 @@ class Core:
         self._busy: asyncio.Task | None = None
         self._confirm: dict[str, asyncio.Future] = {}
         self._bg: list[asyncio.Task] = []
+        self._tasks: set[asyncio.Task] = set()     # short fire-and-forget tasks (error notices); awaited on stop
+        self.stopping = False
         self.voice_mode = "off"
 
     # ------------------------------------------------------------------ lifecycle
@@ -100,13 +102,35 @@ class Core:
         self.health.mark("ready")
         logs.info("core", "CORE_READY", f"Core ready (voice: {self.voice_mode})", log=str(self.log_path))
 
-    async def stop(self) -> None:
+    async def stop(self, grace_s: float = 3.0) -> None:
+        """Orderly shutdown (CR-11): refuse new work, end voice, deny pending confirmations, let an in-flight
+        request finish briefly (tool side effects are not cut mid-way), cancel and AWAIT every task, then close IO."""
+        if self.stopping:
+            return
+        self.stopping = True
         self.health.mark("stopping")
         logs.info("core", "CORE_STOPPING", "Core stopping")
+        for fut in list(self._confirm.values()):
+            if not fut.done():
+                fut.set_result(False)              # pending confirmation = denied, never approved by shutdown
+        self._confirm.clear()
         if self.live is not None:
-            await self.live.stop()
-        for t in self._bg:
+            live, self.live = self.live, None
+            try:
+                await asyncio.wait_for(live.stop(), 5)
+            except Exception:
+                logs.error("voice", "LIVE_STOP_FAILED", "live voice did not stop cleanly", exc=True)
+        busy = self._busy
+        if busy is not None and not busy.done():
+            done, _ = await asyncio.wait({busy}, timeout=grace_s)
+            if not done:
+                busy.cancel()
+                logs.warn("core", "CORE_TASK_CANCELLED", "in-flight request cancelled by shutdown")
+            await asyncio.gather(busy, return_exceptions=True)
+        tasks = [t for t in self._bg + list(self._tasks) if not t.done()]
+        for t in tasks:
             t.cancel()
+        await asyncio.gather(*tasks, return_exceptions=True)
         await self.link.stop()
         if self.music is not None and hasattr(self.music.player, "close"):
             await self.music.player.close()
@@ -187,6 +211,9 @@ class Core:
         await self.dev.face_set_state(state)
 
     async def on_message(self, t: str, p: dict, ws) -> None:
+        if self.stopping and t != "status.request":
+            await self.link.reply(ws, "error", {"code": "CORE_STOPPING", "message": "JARVES is shutting down"})
+            return
         if t in ("talk.down",) or (t == "button.down" and p.get("id") == "action"):
             await self.talk_down()
         elif t in ("talk.up",) or (t == "button.up" and p.get("id") == "action"):
@@ -215,10 +242,21 @@ class Core:
             await self.link.reply(ws, "error", {"code": "LINK_UNKNOWN_TYPE", "message": f"unknown message type {t}"})
 
     def _run_busy(self, coro) -> None:
+        if self.stopping:
+            coro.close()
+            return
         if self._busy and not self._busy.done():
-            self._busy.cancel()
+            self._busy.cancel()                # a new request preempts thinking; tool calls are shielded in the registry
         self._busy = asyncio.create_task(coro)
         self._busy.add_done_callback(self._busy_done)
+
+    def _spawn(self, coro) -> None:
+        if self.stopping:
+            coro.close()
+            return
+        t = asyncio.get_running_loop().create_task(coro)
+        self._tasks.add(t)
+        t.add_done_callback(self._tasks.discard)
 
     def _busy_done(self, task: asyncio.Task) -> None:
         if task.cancelled() or task.exception() is None:
@@ -226,7 +264,7 @@ class Core:
         e = task.exception()
         logs.log("core", "CORE_TASK_CRASH", f"request failed: {type(e).__name__}: {str(e)[:200]}", 40)
         self.health.set("core_tasks", "degraded", f"last request crashed ({type(e).__name__})", "see logs; try again")
-        asyncio.get_running_loop().create_task(self.notify_error("CORE_INTERNAL", "internal error", "try again"))
+        self._spawn(self.notify_error("CORE_INTERNAL", "internal error", "try again"))
 
     async def set_muted(self, muted: bool) -> None:
         self.dev.set_mic_muted(muted)
@@ -367,7 +405,7 @@ class Core:
 
     # ------------------------------------------------------------------ confirmation for side effects
     async def ask_confirm(self, prompt: str, timeout: float = 20) -> bool:
-        if self.link.face is None:
+        if self.link.face is None or self.stopping:
             return False
         cid = uuid.uuid4().hex[:8]
         fut = asyncio.get_running_loop().create_future()

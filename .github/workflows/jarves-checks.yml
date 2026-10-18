@@ -31,6 +31,14 @@ jobs:
         run: uv sync --frozen
       - name: pytest (offline; fakes for OpenAI, audio and the music player)
         run: uv run pytest -q
+      - name: jarvis.cmd launcher smoke (Windows)
+        if: runner.os == 'Windows'
+        shell: cmd
+        run: |
+          call ..\jarvis.cmd --help || exit /b 1
+          call ..\jarvis.cmd status > status.txt
+          type status.txt
+          findstr /C:"Core is NOT running" status.txt || exit /b 1
   cad:
     runs-on: ubuntu-24.04
     timeout-minutes: 25
@@ -80,3 +88,46 @@ jobs:
         run: |
           "$GODOT" --headless --path godot --quit-after 3000 res://face/face_app.tscn -- --check | tee face.txt
           grep -q "FACE CHECK RESULT: PASS" face.txt
+  e2e:
+    name: Core-Godot E2E (real processes)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+      - uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884  # v10.3.0
+        with:
+          enable-cache: true
+      - name: Install Core + Godot 4.7.2
+        run: |
+          (cd core && uv sync --frozen)
+          curl -sSLO https://github.com/godotengine/godot/releases/download/4.7.2-stable/Godot_v4.7.2-stable_linux.x86_64.zip
+          unzip -q Godot_*.zip && echo "GODOT=$PWD/Godot_v4.7.2-stable_linux.x86_64" >> "$GITHUB_ENV"
+          echo "JARVES_HOME=$RUNNER_TEMP/jarves" >> "$GITHUB_ENV"
+      - name: Import assets
+        run: '"$GODOT" --headless --path godot --import'
+      - name: Start the Core (offline, no keys, no audio, no music)
+        run: |
+          mkdir -p "$JARVES_HOME"
+          printf '[voice]\nmode = "off"\n\n[music]\nprovider = "none"\n' > "$JARVES_HOME/config.toml"
+          (cd core && nohup uv run jarves run > "$RUNNER_TEMP/core.out" 2>&1 &)
+          for i in $(seq 60); do grep -q CORE_READY "$JARVES_HOME/logs/jarves.log" 2>/dev/null && break; sleep 0.5; done
+          grep -q CORE_READY "$JARVES_HOME/logs/jarves.log" || { cat "$RUNNER_TEMP/core.out"; exit 1; }
+      - name: E2E pass - face asks "what time is it", gets a reply and face states
+        run: |
+          timeout 90 "$GODOT" --headless --path godot res://face/face_app.tscn -- --e2e | tee e2e.txt
+          grep -q "E2E RESULT: PASS" e2e.txt
+      - name: E2E negative - wrong token is rejected (4401), face never connects
+        run: |
+          mkdir -p "$RUNNER_TEMP/bad" && echo wrong-token > "$RUNNER_TEMP/bad/link_token"
+          JARVES_HOME="$RUNNER_TEMP/bad" timeout 90 "$GODOT" --headless --path godot res://face/face_app.tscn -- --e2e | tee bad.txt || true
+          grep -q "E2E RESULT: FAIL" bad.txt && grep -q "rejected the token" bad.txt
+          (cd core && uv run jarves status || true) | grep -Eq '"core": "(ready|degraded)"'   # Core survived the bad client (offline = degraded)
+      - name: Orderly shutdown through the authenticated link
+        run: |
+          (cd core && uv run jarves stop)
+          for i in $(seq 30); do grep -q CORE_STOPPED "$JARVES_HOME/logs/jarves.log" && break; sleep 0.5; done
+          grep -q CORE_STOPPED "$JARVES_HOME/logs/jarves.log"
+          ! (cd core && uv run jarves status)                                 # now reports NOT running
+      - name: Core log on failure
+        if: failure()
+        run: cat "$RUNNER_TEMP/core.out"; tail -50 "$JARVES_HOME/logs/jarves.log" || true
