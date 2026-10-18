@@ -4,6 +4,8 @@ from __future__ import annotations
 import asyncio
 import time
 import uuid
+import hashlib
+import json
 from contextlib import aclosing
 from pathlib import Path
 
@@ -56,6 +58,18 @@ class Core:
         self.stopping = False
         self._greeted = False
         self.voice_mode = "off"
+        self.startup = {"phase": "starting", "ready": False, "detail": "Loading JARVES..."}
+        self._startup_t0 = time.monotonic()
+        self._startup_signature = hashlib.sha256(json.dumps([
+            "live-greeting-v1", cfg.voice.activation, cfg.voice.mode, cfg.voice.live_model, cfg.voice.voice,
+            cfg.voice.greeting]).encode()).hexdigest()
+        self._startup_estimate = None
+        try:
+            timing = json.loads((home / "startup_timing.json").read_text(encoding="utf-8"))
+            if isinstance(timing, dict) and timing.get("signature") == self._startup_signature and 0 < float(timing["seconds"]) < 300:
+                self._startup_estimate = float(timing["seconds"])
+        except (OSError, ValueError, TypeError, KeyError):
+            pass
 
     # ------------------------------------------------------------------ lifecycle
     async def start(self) -> None:
@@ -126,6 +140,8 @@ class Core:
         self.health.mark("ready")
         logs.info("core", "CORE_READY", f"Core ready (voice: {self.voice_mode})", log=str(self.log_path),
                   ms=round((time.monotonic() - started_at) * 1000))
+        self._startup_stage("ready" if self.voice_mode == "off" else "core_ready",
+                            "Core ready (voice off)" if self.voice_mode == "off" else "Core loaded. Preparing voice...")
 
     async def stop(self, grace_s: float = 3.0) -> None:
         """Orderly shutdown (CR-11): refuse new work, end voice, deny pending confirmations, let an in-flight
@@ -175,7 +191,12 @@ class Core:
     # ------------------------------------------------------------------ health
     def snapshot(self) -> dict:
         s = self.health.snapshot(self.home)
+        startup = dict(self.startup)
+        startup["elapsed_s"] = round(time.monotonic() - self._startup_t0, 1)
+        startup["eta_s"] = (max(0, round(self._startup_estimate - startup["elapsed_s"]))
+                            if self._startup_estimate is not None else None)
         s.update(version=__version__, voice_mode=self.voice_mode, voice_activation=self.cfg.voice.activation,
+                 startup=startup,
                  face_state=self.dev.face_state,
                  mic_muted=self.dev.mic_muted, live_session=self.live is not None,
                  ai_connection=self.cfg.ai.connection, billing=billing_routes(self.cfg.ai, self.cfg.voice),
@@ -233,6 +254,16 @@ class Core:
 
     # ------------------------------------------------------------------ face / UI messages
     async def _face_connected(self) -> None:
+        if self.startup["ready"] and self.live is not None and hasattr(self.live, "present"):
+            self.live.present()
+        if self.startup["phase"] == "ready":
+            self._startup_stage("running", "Ready")
+            seconds = round(time.monotonic() - self._startup_t0, 2)
+            try:
+                (self.home / "startup_timing.json").write_text(json.dumps({
+                    "signature": self._startup_signature, "seconds": seconds}), encoding="utf-8")
+            except OSError:
+                logs.warn("core", "STARTUP_TIMING_CACHE_FAILED", "could not save startup duration estimate")
         await self.dev.face_set_state(self.dev.face_state)
         await self.link.send_face("status", self.snapshot())
         if (self.cfg.voice.greeting or self.cfg.voice.activation == "conversation") and not self._greeted:
@@ -473,7 +504,10 @@ class Core:
         except AudioUnavailable as e:
             self.health.set("audio", "unavailable", e.message, e.action)
 
-    async def _start_live(self) -> None:
+    async def _start_live(self, *, greeting: str | None = None, hold_output: bool = False) -> None:
+        if self.stopping:
+            return
+        await self.link.send_face("assistant.activity", {"text": "Loading voice connection..."})
         if self._voice_budget_left_s() <= 0:
             await self.notify_error("VOICE_BUDGET", "daily live-voice limit reached",
                                     "raise ai.daily_realtime_minutes or use push-to-talk")
@@ -494,6 +528,8 @@ class Core:
             if self.live is live_ref[0]:
                 self.live = None                   # any end (user, remote close, error, budget) frees the slot
             logs.info("voice", "LIVE_ENDED", f"live conversation ended ({reason})")
+            if self.startup["ready"] and not self.stopping:
+                self._startup_stage("failed", "Voice session ended. Use Talk to reconnect, or restart JARVES.")
             if reason.startswith("error:") or reason == "remote_closed":
                 self.health.set("voice", "degraded", f"live conversation ended: {reason}", "tap Talk to start again")
                 self._spawn(self.notify_error("LIVE_ENDED", "השיחה החיה נותקה", "לחץ Talk כדי להתחיל שוב"))
@@ -508,6 +544,8 @@ class Core:
         ended = [False]
         common = dict(on_state=self.set_face, on_transcript=on_transcript, on_usage=usage)
         extra = dict(on_end=on_end, on_health=on_health, budget=self.budget)
+        if greeting is not None or hold_output:
+            extra.update(greeting=greeting, hold_output=hold_output)
         if self._live_factory is not None:
             live = self._live_factory(self, **common, **extra)
         elif self.voice_mode == "live":
@@ -537,7 +575,42 @@ class Core:
             return
         if getattr(live, "running", True) is False:
             return                                  # ended during start (on_end already handled it)
+        if self.stopping:
+            await live.stop()
+            return
         self.live = live
+        if not hold_output and self.cfg.voice.activation == "conversation":
+            self._startup_stage("running", "Voice ready")
+
+    def _startup_stage(self, phase: str, detail: str) -> None:
+        progress = {"starting": 5, "core_ready": 25, "loading": 45, "waiting_audio": 70,
+                    "ready": 90, "running": 100}.get(phase, self.startup.get("progress", 0))
+        self.startup = {"phase": phase, "ready": phase in ("ready", "running"), "detail": detail,
+                        "progress": progress}
+        logs.info("core", "STARTUP_STAGE", detail, phase=phase)
+
+    async def prepare_desktop(self) -> None:
+        """Essential readiness gate, reusable by a future display; it does not launch Godot itself."""
+        self._startup_stage("loading", "Loading voice...")
+        try:
+            if self.use_real_audio and self.voice_mode != "off":
+                audio = self.health.components.get("audio")
+                if audio is None or audio.status != "ok":
+                    raise RuntimeError("audio device is not ready; run jarvis status")
+            if self.cfg.voice.activation == "conversation":
+                if self.voice_mode != "live":
+                    raise RuntimeError("automatic desktop startup currently requires live voice; check voice/API settings")
+                hello = f"שלום! אני {self.cfg.assistant_name}. איך אפשר לעזור?" if self.cfg.voice.greeting else None
+                await self._start_live(greeting=hello, hold_output=True)
+                if self.live is None or not hasattr(self.live, "wait_ready"):
+                    raise RuntimeError("live voice did not become ready; check logs and API limits")
+                self._startup_stage("waiting_audio", "Loading greeting audio...")
+                await self.live.wait_ready()
+                self._greeted = True                 # greeting comes from this same live session, never a second TTS call
+            self._startup_stage("ready", "Ready. Opening the room...")
+        except BaseException:
+            self._startup_stage("failed", "Startup failed; the room remains closed. See logs / jarvis status.")
+            raise
 
     # ------------------------------------------------------------------ "Hey Jarvis" wake word
     def _setup_wake(self) -> None:

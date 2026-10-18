@@ -48,6 +48,10 @@ Without a key or ChatGPT, JARVES runs **offline**: commands only (music, time, m
 
 **Close the window to stop:** the desktop sends an authenticated shutdown request, ends live voice and speaker playback, and the Core exits normally. The launcher returns to the terminal without Ctrl+C / "Terminate batch job?". Repeated-launch log followers finish on `CORE_STOPPED`; ordinary connection loss still reconnects instead of being treated as a close.
 
+**Startup:** `jarvis` first opens a lightweight **loading screen with a progress bar**. The 3D room is loaded only after the Core is initialized and, for mode 2, GPT-Live is connected and actual greeting audio has arrived. Greeting audio is held in the existing bounded memory queue; the physical mic and speakers are not opened until the room connects. There is no separate cloud-TTS greeting request. If voice cannot become ready, the room stays closed and the terminal reports the failure. Closing even the loading window cancels startup and stops the owned Core.
+
+Progress advances at startup milestones. ETA is approximate, based on a prior successful start with the same activation/voice settings; first start says **Estimating…**, and an overrun says **Finishing startup…**, never fake readiness. `%LOCALAPPDATA%\jarves\startup_timing.json` contains only the settings fingerprint and successful startup seconds. It is safe to remove to reset the estimate. No persistent audio/conversation cache is created. The portable `status.startup` payload exposes phase/progress/elapsed/ETA/readiness for a future hardware boot display; no Pi boot/display integration is implemented yet.
+
 **Terminal logs:**
 - `jarvis --log-level debug` sets the level: `error`, `warning`, `info` (default), `debug` or `verbose`.
 - `jarvis --module voice,wake` shows only those modules; `--hide link` hides one.
@@ -55,7 +59,7 @@ Without a key or ChatGPT, JARVES runs **offline**: commands only (music, time, m
 
 The modules are `core`, `voice`, `live`, `realtime`, `wake`, `ai`, `chatgpt`, `skills`, `music`, `link`, `tts`, `budget` and `device`. Errors always show.
 
-**Simplest:** type `jarvis` in a terminal with `C:\work\jarvis` on your PATH. This opens the **room with the actual CAD-derived model and live face**, and runs the Core with terminal logs. The first time, it asks how to connect and signs you in. `jarvis setup` changes that choice and `jarvis stop` stops JARVES. Any other word is passed to the Core, e.g. `jarvis status` or `jarvis chatgpt status`.
+**Simplest:** type `jarvis` in a terminal with `C:\work\jarvis` on your PATH. This shows loading progress, then the **room with the actual CAD-derived model and live face**, and runs the Core with terminal logs. The first time, it asks how to connect and signs you in. `jarvis setup` changes that choice and `jarvis stop` stops JARVES. Any other word is passed to the Core, e.g. `jarvis status` or `jarvis chatgpt status`. Manual `uv run jarves run --desktop` uses the same readiness gate; `uv run jarves run` remains the headless/manual Core.
 
 Cloud voice skips offline recognition model loading. Full controls remain onscreen. Cloud reply/greeting speech streams to one output device stream as audio arrives; local speech engines remain buffered fallbacks. Each run appends to the rotated log below. `CORE_READY.ms`, `SPEECH_SYNTH_START`, `SPEECH_FIRST_AUDIO.ms`, `SPEECH_SYNTH_READY.ms` and `SPEECH_PLAY_START` separate startup, first-audio and full-generation/playback delays. Cloud connection/first-audio latency remains provider-dependent. Launcher errors before Core starts appear in the terminal. In mode 1, `WAKE_LISTENING` confirms mic frames are arriving and `WAKE_HEALTH` reports bounded frame/level/score counters every 15 s, without saving audio.
 

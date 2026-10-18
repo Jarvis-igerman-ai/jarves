@@ -112,6 +112,10 @@ jobs:
           (cd core && nohup uv run jarves run > "$RUNNER_TEMP/core.out" 2>&1 &)
           for i in $(seq 60); do grep -q CORE_READY "$JARVES_HOME/logs/jarves.log" 2>/dev/null && break; sleep 0.5; done
           grep -q CORE_READY "$JARVES_HOME/logs/jarves.log" || { cat "$RUNNER_TEMP/core.out"; exit 1; }
+      - name: Loading screen waits for read-only startup readiness
+        run: |
+          timeout 30 "$GODOT" --headless --path godot res://loading.tscn -- --loading-check | tee loading.txt
+          grep -q "LOADING CHECK RESULT: PASS" loading.txt
       - name: E2E pass - face asks "what time is it", gets a reply and face states
         run: |
           timeout 90 "$GODOT" --headless --path godot res://face/face_app.tscn -- --e2e | tee e2e.txt

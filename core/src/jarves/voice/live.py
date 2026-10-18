@@ -266,13 +266,15 @@ class LiveVoice(SessionLifecycle):
                  on_usage: Callable[[float], None] | None = None, client=None,
                  on_end: Callable[[str], Awaitable[None]] | None = None,
                  on_health: Callable[[str, str, str], Any] | None = None,
-                 budget: "Budget | None" = None, start_timeout_s: float = 15, close_timeout_s: float = 5) -> None:
+                 budget: "Budget | None" = None, start_timeout_s: float = 15, close_timeout_s: float = 5,
+                 greeting: str | None = None, hold_output: bool = False) -> None:
         self.registry, self.backend_instructions = registry, backend_instructions
         self.model, self.voice, self.backend_model, self.web_search = model, voice, backend_model, web_search
         self.name, self.half_duplex, self.max_session_s = name, half_duplex, max_session_s
         self.audio_io = audio_io                    # StreamingAudio (mic/speaker) or None in tests
         self.on_state, self.on_transcript, self.on_usage = on_state, on_transcript, on_usage
         self.start_timeout_s, self.close_timeout_s = start_timeout_s, close_timeout_s
+        self.greeting, self.hold_output = greeting, hold_output
         self._client = client
         self._clock = time.monotonic                 # tests inject a fake clock
         self._init_lifecycle(on_end, on_health, budget)
@@ -281,6 +283,10 @@ class LiveVoice(SessionLifecycle):
         self._reset_session()
 
     def _reset_session(self) -> None:
+        self._first_audio = asyncio.Event()
+        self._presented = asyncio.Event()
+        if not self.hold_output:
+            self._presented.set()
         self._started = asyncio.Event()
         self._closed = asyncio.Event()
         self.usage_s = 0.0
@@ -288,6 +294,7 @@ class LiveVoice(SessionLifecycle):
         self._t_started: float | None = None
         self._speaking_until = 0.0
         self._turn_audio_t0 = 0.0
+        self._speech_pending = False
         self._out_text = ""
         self._in_text = ""
         self._stats = {"backend_responses": 0, "barge_ins": 0, "errors": 0, "budget_overrun": 0}
@@ -309,7 +316,7 @@ class LiveVoice(SessionLifecycle):
         tools: list[dict] = live_tools(self.registry)
         if self.web_search:
             tools.append({"type": "web_search"})
-        return {
+        config = {
             "model": self.model,
             "instructions": FRONT_INSTRUCTIONS.format(name=self.name),
             "audio": {"format": {"type": "audio/pcm", "rate": RATE}, "output": {"voice": self.voice}},
@@ -317,6 +324,33 @@ class LiveVoice(SessionLifecycle):
                 "model": self.backend_model, "instructions": self.backend_instructions(), "tools": tools,
                 "tool_choice": "auto", "parallel_tool_calls": False, "text": {"verbosity": "low"}}},
         }
+        if self.greeting:
+            config["input"] = [{"type": "message", "role": "developer", "content": [{
+                "type": "input_text", "text": f"Greet now in natural Israeli Hebrew. Say: {self.greeting} "
+                                               "Begin immediately, then pause and listen. Do not delegate this greeting."}]}]
+        return config
+
+    async def wait_ready(self, timeout: float = 15) -> None:
+        """A requested greeting is ready only after actual output audio, not merely session.started."""
+        if not self.greeting:
+            return
+        audio = asyncio.create_task(self._first_audio.wait())
+        ended = asyncio.create_task(self._ended.wait())
+        try:
+            await asyncio.wait({audio, ended}, timeout=timeout, return_when=asyncio.FIRST_COMPLETED)
+            if not self._first_audio.is_set() or not self.running:
+                raise RuntimeError("live greeting audio was not received; check voice/network logs")
+        finally:
+            audio.cancel()
+            ended.cancel()
+            await asyncio.gather(audio, ended, return_exceptions=True)
+
+    def present(self) -> None:
+        """Release buffered startup output and allow real microphone capture after the display connects."""
+        if self.audio_io is not None:
+            self._speaking_until = time.monotonic() + self.audio_io.queued_s()
+            self._turn_audio_t0 = time.monotonic()
+        self._presented.set()
 
     async def _state(self, s: str) -> None:
         if self.on_state:
@@ -399,30 +433,44 @@ class LiveVoice(SessionLifecycle):
 
     async def _mic(self) -> None:
         silence = bytes(CHUNK_BYTES)
+        # Live needs input audio (silence is sufficient) to produce its startup greeting. Do not open the
+        # physical microphone while the desktop is still loading; the existing bounded output queue holds it.
+        while self.running and not self._presented.is_set():
+            await self.conn.session.input_audio.append(audio=base64.b64encode(silence).decode())
+            await asyncio.sleep(0.1)
         async for chunk in self.audio_io.mic_chunks(RATE, CHUNK_BYTES):
             if not self.running:
                 return
             gated = self._gated()
             await self.conn.session.input_audio.append(audio=base64.b64encode(silence if gated else chunk).decode())
+            if self._speech_pending and time.monotonic() >= self._speaking_until:
+                self._speech_pending = False
+                await self._state("listening")
 
     def _gated(self) -> bool:                   # half-duplex echo guard on speakers; budget input close (F1)
         return self._input_closed or (self.half_duplex and time.monotonic() < self._speaking_until + 0.4)
 
     async def _player(self) -> None:
+        await self._presented.wait()
         await self.audio_io.run_player(RATE)
 
     def _play(self, pcm: bytes) -> None:
+        self._speech_pending = True
         now = time.monotonic()
         if now > self._speaking_until:
             self._turn_audio_t0 = now
         self._speaking_until = max(self._speaking_until, now) + len(pcm) / 2 / RATE
         if self.audio_io is not None:
             self.audio_io.enqueue(pcm)
+        if pcm and not self._first_audio.is_set():
+            self._first_audio.set()
+            logs.info("live", "LIVE_FIRST_AUDIO", "first live-session output audio received")
 
     async def interrupt(self) -> None:
         """Barge-in: drop queued assistant speech immediately."""
         flushed = self.audio_io.flush() if self.audio_io is not None else 0
         self._speaking_until = 0.0
+        self._speech_pending = False
         self._stats["barge_ins"] += 1
         logs.info("live", "LIVE_BARGE_IN", "user interrupted JARVES", flushed_bytes=flushed)
         await self._state("listening")

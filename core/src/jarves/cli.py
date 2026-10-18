@@ -4,6 +4,7 @@ from __future__ import annotations
 import argparse
 import asyncio
 import json
+import os
 import platform
 import subprocess
 import sys
@@ -54,13 +55,60 @@ def cmd_run(a, cfg, home) -> int:
           + ". Stop: Ctrl+C or `jarvis stop`.", file=sys.stderr)
     core = Core(cfg, home)
     try:
-        asyncio.run(core.run())
+        asyncio.run(_run_desktop(core) if getattr(a, "desktop", False) else core.run())
     except KeyboardInterrupt:
         pass
     except OSError as e:
         print(f"Core failed to start: {e}", file=sys.stderr)
         return 2
+    except RuntimeError as e:
+        print(f"JARVES could not become ready: {e}", file=sys.stderr)
+        return 2
     return 0
+
+
+async def _launch_viewer(port: int):
+    """Own this one child process so closing even the loading window ends this desktop session."""
+    override = os.environ.get("GODOT_EXE", "").strip('"')
+    package_root = Path(os.environ.get("LOCALAPPDATA", "")) / "Microsoft/WinGet/Packages"
+    candidates = [Path(override)] if override else package_root.glob(
+        "GodotEngine.GodotEngine_*/Godot_v4.7.2-stable_win64.exe")
+    executable = next((p for p in candidates if p.is_file()), None)
+    if executable is None:
+        raise RuntimeError("Godot was not found; set GODOT_EXE or install the existing Godot build")
+    project = Path(__file__).resolve().parents[3] / "godot"
+    return await asyncio.create_subprocess_exec(str(executable), "--path", str(project), "res://loading.tscn",
+                                               "--", f"--core-port={port}",
+                                               env={k: v for k, v in os.environ.items() if k != "OPENAI_API_KEY"})
+
+
+async def _run_desktop(core, launcher=None) -> None:
+    print("Loading JARVES... the room opens after voice is ready.", flush=True)
+    viewer = await (launcher or _launch_viewer)(core.cfg.link.port)
+    viewer_done = asyncio.create_task(viewer.wait())
+    stop = asyncio.create_task(core.stop_event.wait())
+
+    async def boot():
+        await core.start()
+        await core.prepare_desktop()
+
+    startup = asyncio.create_task(boot())
+    try:
+        done, _ = await asyncio.wait({startup, viewer_done, stop}, return_when=asyncio.FIRST_COMPLETED)
+        if startup in done:
+            await startup
+            await asyncio.wait({viewer_done, stop}, return_when=asyncio.FIRST_COMPLETED)
+    finally:
+        if not startup.done():
+            startup.cancel()
+        await asyncio.gather(startup, return_exceptions=True)
+        if hasattr(core, "dev"):
+            await core.stop()
+        if viewer.returncode is None:
+            viewer.terminate()
+        await asyncio.gather(viewer_done, return_exceptions=True)
+        stop.cancel()
+        await asyncio.gather(stop, return_exceptions=True)
 
 
 def cmd_logs(a, cfg, home) -> int:
@@ -445,7 +493,9 @@ def main(argv: list[str] | None = None) -> int:
         p.add_argument("--log-level", type=str.upper, choices=logs.LEVELS, help="terminal log level")
         p.add_argument("--module", help="show only these modules, comma separated (e.g. voice,wake,ai)")
         p.add_argument("--hide", help="hide these modules, comma separated (e.g. link)")
-    log_opts(sub.add_parser("run", help="start the Core (Godot face connects to it)"))
+    run = sub.add_parser("run", help="start the Core (Godot face connects to it)")
+    log_opts(run)
+    run.add_argument("--desktop", action="store_true", help="show loading progress, prepare voice, then open the room")
     lg = sub.add_parser("logs", help="show the log (filter by --log-level / --module; -f to follow)")
     log_opts(lg)
     lg.add_argument("-f", "--follow", action="store_true")

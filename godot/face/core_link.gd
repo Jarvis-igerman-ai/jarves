@@ -7,6 +7,7 @@ signal message(type: String, payload: Dictionary)
 
 const PROTOCOL := 1
 var url := "ws://127.0.0.1:8765"
+var client_name := "godot"   # loading screen uses read-only CLI role; never triggers the face greeting
 var ws := WebSocketPeer.new()
 var connected := false
 var detail := "not connected"
@@ -90,7 +91,7 @@ func _process(_d: float) -> void:
 					ws.close(1000, "no token")
 					_schedule("Core token missing in %s (start the Core first)" % state_dir())
 					return
-				ws.send_text(JSON.stringify({"type": "hello", "payload": {"token": tok, "client": "godot",
+				ws.send_text(JSON.stringify({"type": "hello", "payload": {"token": tok, "client": client_name,
 						"protocol": PROTOCOL}}))
 				_hello_sent = true
 			while ws.get_available_packet_count() > 0:
