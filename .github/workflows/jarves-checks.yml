@@ -105,6 +105,8 @@ jobs:
           echo "JARVES_HOME=$RUNNER_TEMP/jarves" >> "$GITHUB_ENV"
       - name: Import assets
         run: '"$GODOT" --headless --path godot --import'
+      - name: Face protocol test (real face, headless; every message incl. malformed must not break it)
+        run: (cd core && GODOT_EXE="$GODOT" uv run pytest -q tests/test_face_protocol_godot.py)
       - name: Start the Core (offline, no keys, no audio, no music)
         run: |
           mkdir -p "$JARVES_HOME"
