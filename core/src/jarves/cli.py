@@ -185,8 +185,30 @@ def cmd_memory(a, cfg, home) -> int:
     return 0
 
 
+PEAR_DOWNLOAD = "https://github.com/pear-devs/pear-desktop/releases"
+
+
+def find_pear() -> Path | None:
+    """Pear Desktop executable: the portable copy in %LOCALAPPDATA%\\Programs, or a normal install."""
+    import os
+    local = Path(os.environ.get("LOCALAPPDATA", Path.home() / "AppData" / "Local"))
+    cands = sorted((local / "Programs").glob("PearDesktop-*/app/YouTube Music.exe"), reverse=True)
+    cands += [local / "Programs" / "youtube-music" / "YouTube Music.exe",
+              local / "Programs" / "pear-desktop" / "Pear Desktop.exe"]
+    return next((c for c in cands if c.exists()), None)
+
+
 def cmd_music(a, cfg, home) -> int:
     from .skills.music import MusicError, PearDesktopPlayer
+    if a.action == "open":
+        exe = find_pear()
+        if exe is None:
+            print(f"Pear Desktop not found. Download it from {PEAR_DOWNLOAD}")
+            return 1
+        subprocess.Popen([str(exe)], cwd=str(exe.parent), creationflags=getattr(subprocess, "DETACHED_PROCESS", 0))
+        print(f"Opening Pear Desktop ({exe}).\n"
+              "First time: sign in to YouTube inside Pear, then run:  jarvis music pair   and click Allow.")
+        return 0
     p = PearDesktopPlayer(cfg.music.pear_url, home / "pear_client_id", cfg.music.timeout_s)
 
     async def go():
@@ -422,7 +444,7 @@ def main(argv: list[str] | None = None) -> int:
     m.add_argument("id", nargs="?")
     m.add_argument("--yes", action="store_true")
     mu = sub.add_parser("music", help="Pear Desktop pairing and manual control")
-    mu.add_argument("action", choices=["pair", "status", "play", "pause", "resume", "next"])
+    mu.add_argument("action", choices=["open", "pair", "status", "play", "pause", "resume", "next"])
     mu.add_argument("query", nargs="?", default="")
     g = sub.add_parser("chatgpt", help="connect / disconnect your ChatGPT plan (Sign in with ChatGPT)")
     g.add_argument("action", choices=["login", "logout", "status", "models"])

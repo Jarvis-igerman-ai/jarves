@@ -66,7 +66,7 @@ Manual steps:
 
 ## YouTube Music (Pear Desktop)
 
-1. Use Pear Desktop 3.12.0 from [github.com/pear-devs/pear-desktop](https://github.com/pear-devs/pear-desktop/releases). A verified portable copy is in `%LOCALAPPDATA%\Programs\PearDesktop-3.12.0\app\YouTube Music.exe`.
+1. Open it with **`jarvis music open`**. It uses Pear Desktop 3.12.0 from [github.com/pear-devs/pear-desktop](https://github.com/pear-devs/pear-desktop/releases). A verified portable copy is in `%LOCALAPPDATA%\Programs\PearDesktop-3.12.0\app\YouTube Music.exe`.
 2. Sign in to YouTube Music inside Pear. This is your own action; JARVES never touches your login.
 3. In Pear, enable Plugins → **API Server**. This is already enabled on this PC, on 127.0.0.1:26538 with approval required.
 4. Run `uv run jarves music pair` and click **Allow** in Pear's dialog. This is needed once.
