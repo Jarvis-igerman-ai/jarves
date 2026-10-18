@@ -61,6 +61,18 @@ def _text(runs_holder: dict | None) -> str:
     return "".join(r.get("text", "") for r in runs_holder.get("runs", []))
 
 
+def parse_queue(resp: dict) -> list[tuple[str, bool]]:
+    """Pear GET /api/v1/queue -> [(videoId, selected)]. Items are playlistPanelVideoRenderer, optionally wrapped
+    in playlistPanelVideoWrapperRenderer.primaryRenderer (shape checked on Pear 3.12.0, 18 Oct 2026)."""
+    out = []
+    for it in (resp or {}).get("items") or []:
+        r = it.get("playlistPanelVideoRenderer") or \
+            ((it.get("playlistPanelVideoWrapperRenderer") or {}).get("primaryRenderer") or {}).get("playlistPanelVideoRenderer")
+        if r and r.get("videoId"):
+            out.append((r["videoId"], bool(r.get("selected"))))
+    return out
+
+
 def parse_search(resp: dict, limit: int = 5) -> list[Track]:
     """Extract playable songs/videos from a YouTube Music search response (innertube JSON)."""
     out: list[Track] = []
@@ -173,13 +185,36 @@ class PearDesktopPlayer:
         r = await self._req("POST", "/search", {"query": query})
         return parse_search(r.json())
 
-    async def play_track(self, track: Track) -> None:
+    async def queue(self) -> list[tuple[str, bool]]:
+        """Current Pear queue as (videoId, selected) in order."""
+        r = await self._req("GET", "/queue")
+        if r.status_code != 200 or not r.content:
+            return []
+        return parse_queue(r.json())
+
+    async def play_track(self, track: Track, wait_s: float = 3.0) -> None:
+        """Insert after the current song, then jump to THAT queue index. QA 18 Oct on real Pear 3.12: the insert
+        lands asynchronously, so pressing "next" right away skipped to the OLD next song; we wait for the
+        inserted item to appear and select it by index instead."""
         await self._req("POST", "/queue", {"videoId": track.video_id, "insertPosition": "INSERT_AFTER_CURRENT_VIDEO"})
-        np = await self.now_playing()
-        if np is None:                 # empty queue: the inserted track is the only one
-            await self._req("PATCH", "/queue", {"index": 0})
-        elif np.video_id != track.video_id:
-            await self._req("POST", "/next")
+        deadline = asyncio.get_running_loop().time() + wait_s
+        idx = None
+        while True:
+            q = await self.queue()
+            cur = next((i for i, (_, sel) in enumerate(q) if sel), -1)
+            after = [i for i, (vid, _) in enumerate(q) if vid == track.video_id and i > cur]
+            idx = after[0] if after else next((i for i, (vid, _) in enumerate(q) if vid == track.video_id), None)
+            if idx is not None or asyncio.get_running_loop().time() > deadline:
+                break
+            await asyncio.sleep(0.2)
+        if idx is not None:
+            await self._req("PATCH", "/queue", {"index": idx})
+        else:                          # queue not readable: previous behaviour
+            np = await self.now_playing()
+            if np is None:
+                await self._req("PATCH", "/queue", {"index": 0})
+            elif np.video_id != track.video_id:
+                await self._req("POST", "/next")
         await self.resume()
 
     async def pause(self) -> None:
@@ -270,7 +305,7 @@ class MusicSkill(Skill):
     name = "music"
     description = "Play music in the user's YouTube Music player (Pear Desktop)"
 
-    def __init__(self, player: MusicPlayer, max_volume: int = 70, verify_tries: int = 8) -> None:
+    def __init__(self, player: MusicPlayer, max_volume: int = 70, verify_tries: int = 16) -> None:
         self.player = player
         self.verify_tries = verify_tries
         self.max_volume = max_volume
@@ -290,15 +325,23 @@ class MusicSkill(Skill):
                    "MUSIC_TIMEOUT": "נגן המוזיקה לא עונה."}.get(e.code, "יש בעיה בנגן המוזיקה.")
             return ToolResult(False, msg, {"action": e.action}, e.code)
 
-    async def _verify_playing(self, video_id: str) -> NowPlaying | None:
-        """Truthful status: report success only when the player itself says this track is playing."""
+    @staticmethod
+    def _same_track(np: NowPlaying, t: Track) -> bool:
+        """Same videoId, or the same title: YouTube Music swaps a music video for its "song" counterpart (a
+        different videoId) when it plays it - seen on real Pear 3.12, 18 Oct 2026."""
+        norm = lambda x: " ".join((x or "").casefold().split())     # noqa: E731
+        return np.video_id == t.video_id or (bool(norm(np.title)) and norm(np.title) == norm(t.title))
+
+    async def _verify_playing(self, t: Track) -> NowPlaying | None:
+        """Truthful status: report success only when the player itself says this track is playing. Polls up to
+        verify_tries x 0.5 s (a fresh track can take several seconds to buffer) and returns at once when it is."""
         np = None
         for _ in range(self.verify_tries):
             np = await self.player.now_playing()
-            if np and np.video_id == video_id and not np.paused:
+            if np and self._same_track(np, t) and not np.paused:
                 return np
             await asyncio.sleep(0.5)
-        return np if np and np.video_id == video_id and not np.paused else None
+        return None
 
     def tools(self) -> list[Tool]:
         p = self.player
@@ -310,7 +353,7 @@ class MusicSkill(Skill):
                     return ToolResult(False, f"לא מצאתי את \"{a.query}\".", code="MUSIC_NOT_FOUND")
                 t = found[0]
                 await p.play_track(t)
-                np = await self._verify_playing(t.video_id)
+                np = await self._verify_playing(t)
                 if np is None:
                     return ToolResult(False, "ביקשתי מהנגן לנגן, אבל הוא לא מדווח שהשיר מתנגן.",
                                       {"track": asdict(t)}, "MUSIC_NOT_CONFIRMED")
