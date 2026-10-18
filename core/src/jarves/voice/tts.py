@@ -90,20 +90,52 @@ class EspeakTTS:
         return wav_to_np(r.stdout)
 
 
-def tts_chain(vc, allow_cloud: bool = True) -> list:
+class MeteredTTS:
+    """Cloud engine behind the shared Budget: 1 ai_requests unit reserved per synth, committed after the attempt
+    (success or failure). Over budget -> TTSUnavailable("TTS_BUDGET") without contacting the provider."""
+
+    def __init__(self, engine, budget) -> None:
+        self.engine, self.budget = engine, budget
+        self.name, self.quality = engine.name, engine.quality
+
+    def check(self) -> tuple[bool, str]:
+        return self.engine.check()
+
+    async def synth(self, text: str) -> tuple[np.ndarray, int]:
+        from ..budget import BudgetExceeded
+        try:
+            res = self.budget.reserve("ai_requests")
+        except BudgetExceeded as e:
+            raise TTSUnavailable("TTS_BUDGET", f"cloud speech skipped: {e}", e.action) from e
+        try:
+            return await self.engine.synth(text)
+        finally:
+            res.commit()
+
+
+def _metered(engines: list, budget) -> list:
+    if budget is None:
+        return engines
+    return [MeteredTTS(e, budget) if e.quality == "cloud" and not isinstance(e, MeteredTTS) else e for e in engines]
+
+
+def tts_chain(vc, allow_cloud: bool = True, budget=None) -> list:
     """Engines in quality order for VoiceConfig.tts_engine. allow_cloud=False (ChatGPT-plan-only connection)
-    keeps speech local so nothing is billed to an API key."""
+    keeps speech local so nothing is billed to an API key. budget: the shared Budget meters cloud speech."""
     from .realtime import RealtimeSpeaker
     cloud = [RealtimeSpeaker(vc.speech_model, vc.voice, vc.language)] if allow_cloud else []
     local = ([WinRTTTS(vc.tts_voice_hint)] if sys.platform == "win32" else []) + [EspeakTTS(vc.language)]
-    return {"auto": cloud + local, "openai": cloud, "local": local, "none": []}[vc.tts_engine]
+    return _metered({"auto": cloud + local, "openai": cloud, "local": local, "none": []}[vc.tts_engine], budget)
 
 
 class FallbackTTS:
-    """Tries engines in quality order; if the cloud engine fails, that reply uses the next one."""
+    """Tries engines in quality order; if the cloud engine fails, that reply uses the next one.
+    With a budget, cloud engines are metered; once over budget every cloud engine is skipped for that reply
+    and a local engine speaks (TTS_BUDGET) - never another paid provider."""
 
-    def __init__(self, engines: list) -> None:
-        self.engines = engines
+    def __init__(self, engines: list, budget=None) -> None:
+        self.engines = _metered(engines, budget)
+        self.budget = budget
         self.usable: list = []
         self.last_used = ""
 
@@ -120,7 +152,10 @@ class FallbackTTS:
 
     async def synth(self, text: str) -> tuple[np.ndarray, int]:
         err = None
+        over_budget = False
         for e in self.usable or self.engines:
+            if over_budget and e.quality == "cloud":
+                continue
             try:
                 out = await e.synth(text)
                 if self.last_used != e.name:
@@ -129,5 +164,6 @@ class FallbackTTS:
                 return out
             except TTSUnavailable as x:
                 err = x
+                over_budget = over_budget or x.code == "TTS_BUDGET"
                 logs.warn("tts", x.code, f"{e.name}: {x.message}", action=x.action)
         raise err or TTSUnavailable("TTS_NONE", "no speech engine available", "set OPENAI_API_KEY")

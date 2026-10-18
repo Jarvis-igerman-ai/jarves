@@ -3,16 +3,18 @@
 1. CommandRouter: deterministic Hebrew/English commands (music, memory, time, status) -> Skill tools directly.
    Free, instant, works with no internet or AI key.
 2. AgentBrain: OpenAI Agents SDK agent (Responses API) with the same Skill tools + hosted web search.
-   Metered by a persisted daily request ceiling; SDK trace upload disabled for privacy.
+   Every model call (each SDK attempt) reserves one `ai_requests` unit from the shared Budget before it is sent
+   (BudgetedModel), so the daily ceiling holds mid-run and across concurrent turns. SDK trace upload disabled.
 """
 from __future__ import annotations
 
 import asyncio
 import re
 from dataclasses import dataclass
-from typing import Callable
+from typing import Any, AsyncIterator, Callable
 
 from . import logs
+from .budget import Budget, BudgetExceeded
 from .config import AIConfig, openai_key_present
 from .memory import MemoryStore
 from .skills import SkillRegistry, ToolResult
@@ -81,9 +83,113 @@ Facts the user asked you to remember:
 {memories}"""
 
 
+# ------------------------------------------------------------------ billing truth (CR-04)
+def billing_routes(ai: AIConfig, voice: Any = None) -> dict[str, str]:
+    """Who pays for what, per configured connection. Values: "api_key" | "chatgpt_plan" | "local" | "off".
+
+    typed_text    - answers to typed questions (deterministic commands are always local and free)
+    spoken_voice  - the spoken conversation itself (GPT-Live/Realtime session, or local push-to-talk STT)
+    voice_backend - reasoning / tools / web search behind spoken questions
+    reply_speech  - speech that reads typed replies aloud
+    No silent paid fallback: the chatgpt connection has no API-key route at all.
+    `voice` (optional VoiceConfig) refines the voice routes for voice.mode / voice.tts_engine.
+    """
+    if ai.provider != "openai":
+        r = {"typed_text": "local", "spoken_voice": "local", "voice_backend": "local", "reply_speech": "local"}
+    elif ai.connection == "api_key":
+        r = {"typed_text": "api_key", "spoken_voice": "api_key", "voice_backend": "api_key", "reply_speech": "api_key"}
+    elif ai.connection == "chatgpt":
+        # the plan has no voice: local push-to-talk STT, transcript answered by the plan text brain, local speech
+        r = {"typed_text": "chatgpt_plan", "spoken_voice": "local", "voice_backend": "chatgpt_plan",
+             "reply_speech": "local"}
+    else:  # combined: GPT-Live delegates its reasoning/web search to the API-key backend, NOT to the plan
+        r = {"typed_text": "chatgpt_plan", "spoken_voice": "api_key", "voice_backend": "api_key",
+             "reply_speech": "api_key"}
+    if voice is not None:
+        mode = getattr(voice, "mode", "live")
+        if mode == "off":
+            r["spoken_voice"] = r["voice_backend"] = "off"
+        elif mode == "push_to_talk" and r["spoken_voice"] == "api_key":
+            r["spoken_voice"] = "local"                    # local STT; the transcript goes to the typed-text brain
+            r["voice_backend"] = r["typed_text"]
+        engine = getattr(voice, "tts_engine", "auto")
+        if engine == "none":
+            r["reply_speech"] = "off"
+        elif engine == "local":
+            r["reply_speech"] = "local"
+    return r
+
+
+ROUTE_LABEL = {"api_key": "API key, billed", "chatgpt_plan": "ChatGPT plan", "local": "local, free", "off": "off"}
+
+
+def billing_summary(ai: AIConfig, voice: Any = None) -> str:
+    """One human line from billing_routes(), e.g. for health/status text."""
+    r = billing_routes(ai, voice)
+    if ai.provider == "openai" and ai.connection == "combined" and r["spoken_voice"] == "api_key":
+        return ("typed answers: ChatGPT plan; spoken conversation (GPT-Live voice + its backend reasoning/web "
+                f"search): API key, billed; speech for typed replies: {ROUTE_LABEL[r['reply_speech']]}")
+    return (f"typed answers: {ROUTE_LABEL[r['typed_text']]}; spoken conversation: {ROUTE_LABEL[r['spoken_voice']]}"
+            f" (its reasoning/web search: {ROUTE_LABEL[r['voice_backend']]}); "
+            f"speech for typed replies: {ROUTE_LABEL[r['reply_speech']]}")
+
+
+def _budgeted_model_cls():
+    """BudgetedModel subclasses the SDK Model ABC; built lazily so importing brain.py stays light."""
+    global _BudgetedModel
+    if _BudgetedModel is not None:
+        return _BudgetedModel
+    from agents.models.interface import Model
+
+    class BudgetedModel(Model):
+        """Wraps the SDK model: every get_response/stream_response attempt (including SDK-managed retries)
+        reserves 1 ai_requests unit before it is sent and commits it afterwards, also on failure/cancel.
+        Raises BudgetExceeded instead of sending once used + in-flight reaches the daily ceiling."""
+
+        def __init__(self, inner: Model, budget: Budget) -> None:
+            self.inner, self.budget = inner, budget
+
+        async def get_response(self, *args, **kwargs):
+            res = self.budget.reserve("ai_requests")
+            try:
+                return await self.inner.get_response(*args, **kwargs)
+            finally:
+                res.commit()            # sent or unknown -> counted (conservative)
+
+        async def stream_response(self, *args, **kwargs) -> AsyncIterator[Any]:
+            res = self.budget.reserve("ai_requests")
+            try:
+                async for ev in self.inner.stream_response(*args, **kwargs):
+                    yield ev
+            finally:
+                res.commit()
+
+        def get_retry_advice(self, request):
+            return self.inner.get_retry_advice(request)
+
+        async def _cleanup_on_run_end(self, owner: object) -> None:
+            await self.inner._cleanup_on_run_end(owner)
+
+        async def close(self) -> None:
+            await self.inner.close()
+
+    _BudgetedModel = BudgetedModel
+    return BudgetedModel
+
+
+_BudgetedModel = None
+
+
 class AgentBrain:
-    def __init__(self, cfg: AIConfig, registry: SkillRegistry, memory: MemoryStore, name: str = "JARVES") -> None:
+    connection = "api_key"
+
+    def __init__(self, cfg: AIConfig, registry: SkillRegistry, memory: MemoryStore, name: str = "JARVES",
+                 budget: Budget | None = None, *, model: Any = None) -> None:
+        """budget: the Core's shared Budget (None = own Budget on the same persisted counter).
+        model: optional SDK Model to wrap instead of the provider default (tests pass agents.testing models)."""
         self.cfg, self.registry, self.memory, self.name = cfg, registry, memory, name
+        self.budget = budget or Budget(memory, cfg)
+        self._inner_model = model
         self._session = None
         self._agent = None
 
@@ -92,11 +198,15 @@ class AgentBrain:
             return False, "AI_DISABLED", "AI provider is set to offline in config"
         if not openai_key_present():
             return False, "AI_NO_KEY", "run `jarvis key` to save your OpenAI API key, then restart"
-        if self.cfg.daily_request_limit and self.memory.usage_today("ai_requests") >= self.cfg.daily_request_limit:
-            return False, "AI_BUDGET", f"daily AI request limit ({self.cfg.daily_request_limit}) reached; raise ai.daily_request_limit"
         if self.cfg.daily_request_limit == 0:
             return False, "AI_BUDGET", "ai.daily_request_limit is 0"
+        if self.budget.exhausted("ai_requests"):
+            return False, "AI_BUDGET", f"daily AI request limit ({self.cfg.daily_request_limit}) reached; raise ai.daily_request_limit"
         return True, "ok", ""
+
+    def describe(self) -> str:
+        ws = "on" if self.cfg.web_search else "off"
+        return f"OpenAI API key, {self.cfg.text_model} (web search {ws}) — {billing_summary(self.cfg)}"
 
     def instructions(self) -> str:
         mems = self.memory.list(20)
@@ -104,12 +214,14 @@ class AgentBrain:
 
     def _build(self):
         from agents import Agent, SQLiteSession, WebSearchTool, set_tracing_disabled
+        from agents.models.multi_provider import MultiProvider
         set_tracing_disabled(True)
         tools = self.registry.agent_tools()
         if self.cfg.web_search:
             tools.append(WebSearchTool())
+        inner = self._inner_model or MultiProvider().get_model(self.cfg.text_model)
         self._agent = Agent(name=self.name, instructions=lambda ctx, agent: self.instructions(),
-                            model=self.cfg.text_model, tools=tools)
+                            model=_budgeted_model_cls()(inner, self.budget), tools=tools)
         self._session = self._session or SQLiteSession("conversation")   # in RAM only; cleared on restart
 
     def reset_conversation(self) -> None:
@@ -139,11 +251,10 @@ class AgentBrain:
             raise BrainUnavailable("AI_ERROR", f"OpenAI error HTTP {e.status_code}", "see logs") from e
         except MaxTurnsExceeded as e:
             raise BrainUnavailable("AI_MAX_TURNS", "the request needed too many steps", "ask more simply") from e
-        finally:
-            pass
-        n = max(1, len(getattr(res, "raw_responses", []) or []))
-        used = self.memory.bump_usage("ai_requests", n)
-        logs.info("ai", "AI_REPLY", "agent replied", model_calls=n, used_today=used)
+        except BudgetExceeded as e:     # raised by BudgetedModel instead of sending the next model call
+            raise BrainUnavailable("AI_BUDGET", str(e), e.action) from e
+        n = len(getattr(res, "raw_responses", []) or [])   # already counted per call by BudgetedModel
+        logs.info("ai", "AI_REPLY", "agent replied", model_calls=n, used_today=self.budget.used("ai_requests"))
         return str(res.final_output or "").strip()
 
 
@@ -168,6 +279,7 @@ class Brain:
     async def respond(self, text: str) -> Reply:
         intent = match_intent(text)
         if intent and self.registry.get(intent.tool):
+            # LEAD (CR-03): once Subagent C's registry.call(origin=...) is merged, pass origin="user" here.
             res: ToolResult = await self.registry.call(intent.tool, intent.args)
             return Reply(res.message, "command", intent.tool, res.ok, res.code)
         if self.agent is None:
