@@ -1,31 +1,25 @@
-# NOW — S1.T03R4: Assembly & print-shop readiness (Issue #4 follow-up)
+# NOW — SW-V1: Real assistant software + CI (approved 18 October 2026)
 
-**Status (18 Oct 2026):** R5b CAD implementation **delivered — STOPPED for user review**. See [S1_T03R5B_IMPLEMENTATION_REVIEW.md](reviews/S1_T03R5B_IMPLEMENTATION_REVIEW.md) and [assembly/ASSEMBLY_GUIDE.md](assembly/ASSEMBLY_GUIDE.md). Next work waits for the answers in HANDOFF.
-
-**Previous status:** **R5b APPROVED for CAD implementation + focused no-purchase feasibility checks** by user, 17 Oct 2026 ([authorization in Issue #4](https://github.com/igalgerman/JARVIS/issues/4#issuecomment-6240553020)). Design basis: `docs/reviews/S1_T03R5_ARCHITECTURE_REVIEW.md` (Pi in base; structural ribbed base cover; no separate chassis). **No purchase, supplier contact or physical print authorized.**
+**Status: APPROVED / NEXT IMPLEMENTING AGENT MAY START.** User explicitly authorized a **large autonomous software work package** and activation of real GitHub Actions CI, while the user is away. **Read [SW_V1_WORK_PACKAGE.md](SW_V1_WORK_PACKAGE.md)** for the precise phased scope WP0–WP5, acceptance criteria, spending/privacy limits and uninterrupted execution policy. This approval supersedes the earlier parked status of Issues [#2](https://github.com/igalgerman/JARVIS/issues/2), [#5](https://github.com/igalgerman/JARVIS/issues/5), [#6](https://github.com/igalgerman/JARVIS/issues/6) and [#7](https://github.com/igalgerman/JARVIS/issues/7) **only within SW-V1**.
 
 ## Goal
-JARVES must be realistically printable by an ordinary Haifa/Krayot 3D-printing service, affordable, and practical for a beginner to assemble at home (see `docs/PROJECT_PRINCIPLES.md` → "Local print-shop feasibility").
+Deliver a usable **persistent Hebrew-speaking JARVES assistant** rather than another design-only demo: maintained agent tooling and built-in web search where permitted; minimal durable personal memory and secure modular Skills; actual Core↔Godot face integration, voice input/output, first **YouTube Music Skill** using the user's already-paid YouTube Premium and reusable existing player software where feasible. **Do not require Spotify Premium**. Also put focused tests into genuine active GitHub Actions CI **if workflow permissions allow**.
 
-## Keep
-Pebble A, finish C, current head proportions, R3 speaker grilles and removable LED ring. No unnecessary redesign.
+## Authorized sequential bundle — do not stop after a single phase
+1. **WP0 / #2 CI:** validate and activate existing CAD/Blender/Godot smoke checks at `.github/workflows/` where permission permits; add software CI as code is created. A run and log are required before claiming CI works. Missing `workflow` permission is a reportable blocker, **not a reason to halt software work**.
+2. **WP1 / #5 concise library/SDK research:** choose evidence-backed, maintainable stack for agents, voice, Godot IPC, memory, web tools and YouTube Music player; record decision, then **implement immediately** without a new approval gate.
+3. **WP2 / #6 working production-oriented Python Core:** real state, testable Godot↔Core↔DevicePort, persistent memory, minimal Skills/tool interface, diagnostics, privacy/cost controls and failure recovery.
+4. **WP3 / #7 voice and face:** actual Hebrew listening/speaking and face states, tool use/search with appropriately authorized API/provider; document prerequisites and build real fallback behavior.
+5. **WP4 first music Skill:** attempt genuine YouTube Music search→playback→pause/next/volume through a reused compliant/maintainable player (e.g. evaluate Pear Desktop/Music Assistant). Distinguish actual playback from mock tests or mere media buttons; no browser cookie theft, streaming extraction, or false success claims.
+6. **WP5 stabilization and review:** run focused offline/functional tests, true CI evidence if activated, real README/setup, concise product walkthrough, commits, issue updates and final handoff; STOP for one user review.
 
-## Approved work
-1. Mechanical reliability: stronger neck seat + anti-rotation; review/model fasteners, screw bosses, insert holes, snap-fits, cable routing; flag what needs physical tests.
-2. LEGO-style assembly instructions: numbered parts, step images with arrows, printed/purchased/electronic marking, tools, difficulty.
-3. Practical printing: export real printable STL (printed parts only), check bed fit with margin, orientation, supports, tolerances; real slicer estimates (time, grams, supports); split fallback for 210–215 mm parts; simplify where it saves cost/effort.
-4. Haifa print-shop feasibility: 2–3 real local services (research only, no contact), quote-ready package, per-part and total ILS **estimate** with assumptions.
-5. Auto-exported assembly diagrams, exploded views, per-part previews with direct links; focused checks only.
+## Operating policy
+- This is **one explicitly approved multi-issue milestone**, so continue through work packages without approvals between phases. One writer; commit coherent checkpoints; targeted tests, concise logs and bounded debugging; take normal technical decisions independently.
+- **Read [requirements](JARVES_CONTROLS_DIAGNOSTICS_REQUIREMENTS.md) and [AGENTS](../AGENTS.md)** at relevant points, plus the work package. Preserve existing source ownership: FreeCAD structure, Blender visuals, Godot interface/face, Python Core/DevicePort assistant behavior. No wasteful full repo scanning.
+- The R5b CAD implementation (commit [1592383](https://github.com/igalgerman/JARVIS/commit/159238314db800fb737969138bef6169f3fa15b7)) is a **sufficient software development baseline**, **NOT print/purchase readiness**. Record unmodeled camera bosses, door hooks, speaker strap, acoustic/thermal/power and structural physical risks for later hardware review [#8](https://github.com/igalgerman/JARVIS/issues/8). Don't hold SW hostage to these.
+- **No hardware orders, printer/vendor contact, physical tests or manufacturing release.** No new paid subscription, unsanctioned paid API credits, personal Google/YouTube account login, Gmail/Calendar integration or external side effects. No credentials or personal content in source or logs. Actual paid/live or account-bound integrations will require user-provided permissions and can remain honestly BLOCKED while user is absent.
+- If token/tool permissions prevent CI activation, document exactly what the user must approve, and work on independent software scope. Do not fake passing CI. Flag major privacy/safety blockers; don't keep asking about ordinary engineering choices.
+- End with a short, evidence-linked summary describing what **actually runs**, setup requirements, failed and successful tests, cost drivers, open blockers and next safe steps. No false “V1 done” if real prerequisites prevent it.
 
-## Not in scope
-Purchases, contacting suppliers, physical printing, final SKUs, software features, CI.
-
-
-## R5b implementation acceptance (user-approved, bounded)
-- Implement **real parametric CAD and accessible novice assembly** for the R5b structure. Verify joint load path, realistic fastener/nut/tool access, component STEP fit and cable routing (including the mic-in-head to speaker-in-base lead). Fix genuine problems at the CAD owner; do not force a number of parts or screws.
-- Research vendor-documented plug-and-play mic→speaker compatibility, amplifier and USB-power budgets, connector and ribbon fit; source only credible evidence. Clearly flag physical unknowns.
-- Produce revised printer-ready **draft** part exports, actual slicer report, cost **estimate**, correct visual exports to Blender/Godot, exploded view and illustrated assembly/BOM. Preserve the accepted exterior and optional LED.
-- Follow [engineering review gates](ENGINEERING_REVIEW_GATES.md) with **targeted no-purchase checks**; don't require exploratory purchases just to choose architecture. Hand off measured vs estimated vs untested results, commit and **stop at the next user review**.
-
-## Completion gate
-Plain-language answers (Haifa printability, cost range from evidence, assembly difficulty, what remains unverified); HANDOFF + Issue updated; commit; STOP for user review.
+## Previous milestone (not approved for production fabrication)
+R5b CAD implemented on 18 Oct 2026 under [Issue #4](https://github.com/igalgerman/JARVIS/issues/4), with [implementation review](reviews/S1_T03R5B_IMPLEMENTATION_REVIEW.md) and [assembly guide](assembly/ASSEMBLY_GUIDE.md). User elected to **advance software before resolving later physical-print readiness details**. Do not erase old design evidence or assume physical safety.
