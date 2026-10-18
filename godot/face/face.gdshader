@@ -36,6 +36,12 @@ uniform vec2 dot_pos = vec2(0.0, 0.84);
 uniform float dot_pulse = 0.0;         // expanding ring (live conversation)
 uniform float dot_breathe = 0.0;       // slow brightness breathing (connecting)
 uniform float dot_slash = 0.0;         // muted: hollow ring + slash
+// motion speeds / amounts (face.gd CALM / LIVELY tuning block)
+uniform float wave_amt = 0.1;          // rim halo shimmer depth
+uniform float wave_speed = 0.5;        // rim halo shimmer speed
+uniform float spin_speed = 1.2;        // thinking comet, rad/s
+uniform float tear_thresh = 0.97;      // error glitch: higher = rarer tears
+uniform float dot_speed = 0.6;         // status-dot pulse / breathe speed
 
 float sd_rbox(vec2 p, vec2 b, float r) {
 	vec2 q = abs(p) - b + r;
@@ -120,7 +126,7 @@ void fragment() {
 	float aa = max(fwidth(p.x), 1e-4) * 1.2;
 	float r = length(p);
 	// error glitch: rare thin horizontal tears
-	float tear = step(0.86, fract(sin(floor(t * 9.0) * 91.7) * 4375.85));
+	float tear = step(tear_thresh, fract(sin(floor(t * 9.0) * 91.7) * 4375.85));
 	p.x += jitter * tear * 0.018 * sin(p.y * 60.0 + t * 40.0);
 
 	// --- screen: deep navy, lighter in the middle, vignette towards the bezel
@@ -174,10 +180,10 @@ void fragment() {
 	// --- rim halo (listening reacts to the mic, error pulses) and the thinking comet
 	float ang = atan(p.y, p.x);
 	float rd = abs(r - 0.935);
-	float wave = 0.78 + 0.22 * sin(ang * 3.0 + t * 1.7) * sin(ang * 2.0 - t * 1.1);
+	float wave = 1.0 - wave_amt + wave_amt * sin(ang * 3.0 + t * 1.7 * wave_speed) * sin(ang * 2.0 - t * 1.1 * wave_speed);
 	col += ring_col * ring * wave * (exp(-rd * 90.0) * 0.75 + (low_quality ? 0.0 : exp(-rd * 16.0) * 0.28));
 	if (spin > 0.001) {
-		float head = t * 2.6;
+		float head = t * spin_speed;
 		float lag = mod(head - ang, 6.28318);
 		float tail = exp(-lag * 1.3) + 0.35 * exp(-mod(head + 3.14159 - ang, 6.28318) * 2.2);
 		col += eye_col * spin * tail * (exp(-rd * 120.0) * 1.1 + exp(-rd * 25.0) * 0.25);
@@ -187,7 +193,7 @@ void fragment() {
 	vec2 dq = p - dot_pos;
 	float dl = length(dq);
 	float dr = 0.03;
-	float breathe = 1.0 - dot_breathe * (0.45 + 0.45 * sin(t * 3.2));
+	float breathe = 1.0 - dot_breathe * (0.45 + 0.45 * sin(t * 3.2 * dot_speed));
 	float dfill = dl - dr;
 	float dring = abs(dl - dr * 0.86) - dr * 0.24;
 	vec2 sd = vec2(0.7071, -0.7071) * dr * 1.45;
@@ -200,7 +206,7 @@ void fragment() {
 		col *= mix(1.0, 0.25, smoothstep(aa, -aa, gap) * step(dl, dr * 1.25));
 	}
 	if (dot_pulse > 0.001) {
-		float ph = fract(t * 0.75);
+		float ph = fract(t * 0.75 * dot_speed);
 		float pr = dr + ph * 0.075;
 		col += dot_col * dot_pulse * (1.0 - ph) * (exp(-abs(dl - pr) * 140.0) * 0.9);
 	}
