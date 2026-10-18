@@ -21,7 +21,7 @@
   - Drops web search if the plan disallows it.
   - Picks the model from `GET /v1/models`.
   - Maps every documented error code.
-- **CLI.** `jarves chatgpt login|logout|status|models`.
+- **CLI.** `jarves chatgpt login|logout|status|models`, plus `jarves setup` (first-run choice). The one-word launcher `jarvis` is `jarvis.cmd` in the repo root, which is on the user PATH.
 - **Tests.** 21 new tests in `core/tests/test_chatgpt.py` use mock OAuth/Responses servers and a local RSA key; **67 PASS** in total.
 - **UNVERIFIED (user action):** run `uv --directory core run jarves chatgpt login` once and allow plan usage. Real plan eligibility, the model list, web-search availability and Hebrew quality on the plan are untested.
 

@@ -38,6 +38,10 @@ Without a key or ChatGPT, JARVES runs **offline**: commands only (music, time, m
 
 ## Run
 
+**Simplest:** type `jarvis` in any terminal (`C:\work\jarvis` is on your PATH). The first time, it asks how to connect and signs you in. `jarvis setup` changes that choice and `jarvis stop` stops JARVES. Any other word is passed to the Core, e.g. `jarvis status` or `jarvis chatgpt status`.
+
+Manual steps:
+
 | Step | Command |
 |---|---|
 | 1. Core | `core\run_core.cmd` (or `uv run jarves run`) |

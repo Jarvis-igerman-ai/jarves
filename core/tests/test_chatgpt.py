@@ -379,3 +379,17 @@ async def test_combined_without_key_falls_back_to_local_voice(home, cfg):
         assert c.voice_mode == "push_to_talk"
     finally:
         await c.stop()
+
+
+def test_setup_writes_connection_keeping_other_settings(tmp_path):
+    import tomllib
+    from jarves.cli import set_connection
+    from jarves.config import load_config
+    p = tmp_path / "config.toml"
+    set_connection(p, "chatgpt")
+    assert load_config(p)[0].ai.connection == "chatgpt"
+    p.write_text('assistant_name = "J"\n\n[ai]\nweb_search = false\n\n[voice]\nvoice = "cedar"\n', encoding="utf-8")
+    set_connection(p, "combined")
+    set_connection(p, "api_key")
+    raw = tomllib.loads(p.read_text(encoding="utf-8"))
+    assert raw["ai"] == {"connection": "api_key", "web_search": False} and raw["voice"]["voice"] == "cedar"

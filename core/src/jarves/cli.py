@@ -221,6 +221,53 @@ def cmd_chatgpt(a, cfg, home) -> int:
     return asyncio.run(go())
 
 
+CONNECTIONS = {"1": "chatgpt", "2": "combined", "3": "api_key"}
+
+
+def set_connection(path: Path, connection: str) -> None:
+    """Write `[ai] connection = ...` into config.toml, keeping everything else in the file."""
+    import re
+    text = path.read_text(encoding="utf-8") if path.exists() else ""
+    line = f'connection = "{connection}"'
+    if re.search(r"(?m)^connection\s*=.*$", text):
+        text = re.sub(r"(?m)^connection\s*=.*$", line, text, count=1)
+    elif re.search(r"(?m)^\[ai\]\s*$", text):
+        text = re.sub(r"(?m)^\[ai\]\s*$", "[ai]\n" + line, text, count=1)
+    else:
+        text = text.rstrip() + ("\n\n" if text.strip() else "") + f"[ai]\n{line}\n"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(text, encoding="utf-8")
+
+
+def cmd_setup(a, cfg, home) -> int:
+    """First-run wizard: choose who pays for AI, connect ChatGPT if needed."""
+    from .chatgpt_auth import ChatGPTAuth
+    path = a.config or home / "config.toml"
+    if a.if_needed and (home / "setup_done").exists():
+        return 0
+    print("How should JARVES connect?\n"
+          "  1  My ChatGPT plan          (no extra cost, simple voice)\n"
+          "  2  ChatGPT plan + API key   (best voice, voice billed to the key)\n"
+          "  3  API key only             (best everything, billed to the key)")
+    choice = input("Choose 1, 2 or 3 [1]: ").strip() or "1"
+    conn = CONNECTIONS.get(choice)
+    if conn is None:
+        print("Please run again and type 1, 2 or 3.")
+        return 1
+    set_connection(path, conn)
+    if conn in ("combined", "api_key") and not openai_key_present():
+        print('Note: no OPENAI_API_KEY yet. Run:  setx OPENAI_API_KEY "sk-..."  then reopen this window.')
+    if conn in ("chatgpt", "combined") and not ChatGPTAuth(home).status()["plan_usage"]:
+        print("Now sign in to ChatGPT in the browser window and click Allow.")
+        a.action, a.forget = "login", False
+        cfg.ai.connection = conn
+        if cmd_chatgpt(a, cfg, home) != 0:
+            return 1
+    (home / "setup_done").write_text(conn, encoding="utf-8")
+    print(f"Done: connection = {conn}. Change it any time with:  jarvis setup")
+    return 0
+
+
 def cmd_say(a, cfg, home) -> int:
     from .voice.audio import SoundDeviceAudio
     from .voice.tts import FallbackTTS, tts_chain
@@ -263,6 +310,8 @@ def main(argv: list[str] | None = None) -> int:
     g = sub.add_parser("chatgpt", help="connect / disconnect your ChatGPT plan (Sign in with ChatGPT)")
     g.add_argument("action", choices=["login", "logout", "status", "models"])
     g.add_argument("--forget", action="store_true", help="logout: also forget this app registration")
+    su = sub.add_parser("setup", help="choose how JARVES connects (ChatGPT plan / API key) and sign in")
+    su.add_argument("--if-needed", action="store_true", help="only on the first run")
     q = sub.add_parser("ask", help="ask one question (brain + Skills, no Godot)")
     q.add_argument("text", nargs="+")
     s = sub.add_parser("say", help="speak a sentence with the configured voice")
@@ -275,7 +324,7 @@ def main(argv: list[str] | None = None) -> int:
         print(f"CONFIG ERROR: {e}", file=sys.stderr)
         return 2
     return {"run": cmd_run, "stop": cmd_stop, "status": cmd_status, "diag": cmd_diag, "memory": cmd_memory, "music": cmd_music,
-            "ask": cmd_ask, "say": cmd_say, "chatgpt": cmd_chatgpt}[a.cmd](a, cfg, home)
+            "ask": cmd_ask, "say": cmd_say, "chatgpt": cmd_chatgpt, "setup": cmd_setup}[a.cmd](a, cfg, home)
 
 
 if __name__ == "__main__":

@@ -27,7 +27,7 @@ A cute, friendly, premium-looking stationary home companion. **Simulation first,
 - Or connect your **ChatGPT plan** (`jarves chatgpt login`): text on the plan, with voice local or on the API key ("combined").
 - CI is active: [jarves-checks](https://github.com/igalgerman/JARVIS/actions/workflows/jarves-checks.yml), with Core tests, CAD, Blender and Godot on every push.
 - Offline it handles Hebrew commands, memory, diagnostics and the YouTube Music skill via Pear Desktop (needs a one-time "Allow").
-- Quick start: `core\run_core.cmd`, then `godot\run_face.cmd`. Details: [core/README](core/README.md).
+- **Quick start: type `jarvis`.** The first time, it asks how to connect: (1) ChatGPT plan, (2) plan + API-key voice, or (3) API key. Then it starts the Core and the face. Other commands: `jarvis setup`, `jarvis stop`, `jarvis status`. Details: [core/README](core/README.md).
 
 ## Earlier snapshot — 17 October 2026
 
