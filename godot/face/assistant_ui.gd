@@ -9,6 +9,7 @@ var link: Node
 var face: Control                 # face.gd instance to drive (set by the owner)
 var status_lbl: Label
 var caption: Label
+var who: Label                   # "JARVES" / "You" kept OUT of the caption so Hebrew lays out right-to-left
 var activity: Label              # big, plain-language "what is JARVES doing now"
 var level_bar: ProgressBar       # live microphone level while listening
 var _level_seen := 0.0
@@ -50,6 +51,9 @@ func _ready() -> void:
 	level_bar.custom_minimum_size = Vector2(330, 10)
 	level_bar.tooltip_text = "Microphone level"
 	box.add_child(level_bar)
+	who = Label.new()
+	who.modulate = Color(1, 1, 1, 0.6)
+	box.add_child(who)
 	caption = Label.new()
 	caption.custom_minimum_size = Vector2(330, 60)
 	caption.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
@@ -102,7 +106,7 @@ func _send_text(t: String) -> void:
 	if t == "" or not link.connected:
 		return
 	link.send("user.text", {"text": t})
-	caption.text = "You: " + t
+	_say("You", t)
 	entry.text = ""
 
 
@@ -139,9 +143,9 @@ func _on_message(t: String, p: Dictionary) -> void:
 			level_bar.value = float(p.get("level", 0.0))
 			_level_seen = Time.get_ticks_msec()
 		"assistant.text":
-			caption.text = "JARVES: " + str(p.get("text", ""))
+			_say("JARVES", str(p.get("text", "")))
 		"user.transcript":
-			caption.text = "You: " + str(p.get("text", ""))
+			_say("You (heard)", str(p.get("text", "")))
 		"error":
 			caption.text = "! %s: %s %s" % [p.get("code", ""), p.get("message", ""), p.get("action", "")]
 			activity.text = "Problem: %s. %s" % [p.get("message", ""), p.get("action", "")]
@@ -173,6 +177,24 @@ func _show_activity(state: String) -> void:
 		level_bar.value = 0.0
 
 
+func _say(speaker: String, text: String) -> void:
+	who.text = speaker
+	caption.text = text
+	# QA 18 Oct: TEXT_DIRECTION_AUTO still laid Hebrew out left-to-right, so pick the direction explicitly
+	var rtl := false
+	for ch in text:
+		var c := ch.unicode_at(0)
+		if c >= 0x0590 and c <= 0x05FF:
+			rtl = true
+			break
+	caption.text_direction = Control.TEXT_DIRECTION_RTL if rtl else Control.TEXT_DIRECTION_LTR
+	caption.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT if rtl else HORIZONTAL_ALIGNMENT_LEFT
+
+
+const FRIENDLY := {"ai": "AI answers", "voice": "Voice", "speech_in": "Speech recognition", "speech_out": "Voice output",
+	"mic": "Microphone", "audio": "Audio device", "music": "Music", "wake_word": "\"Hey Jarvis\"", "face_link": "Face link"}
+
+
 func _show_status(p: Dictionary) -> void:
 	var lines := ["Core: %s   voice: %s%s" % [p.get("core", "?"), p.get("voice_mode", "?"),
 			"   (mic muted)" if p.get("mic_muted", false) else ""]]
@@ -180,6 +202,8 @@ func _show_status(p: Dictionary) -> void:
 	for k in comps:
 		var c: Dictionary = comps[k]
 		if c.get("status", "") in ["unavailable", "degraded"]:
-			lines.append("- %s: %s" % [k, c.get("detail", "")])
+			# one short line per problem, with what to do; full detail stays in `jarvis status`
+			var act: String = str(c.get("action", ""))
+			lines.append("- %s: %s" % [FRIENDLY.get(k, k), act if act != "" else str(c.get("detail", "")).substr(0, 60)])
 	status_lbl.text = "\n".join(lines)
 	mute_chk.set_pressed_no_signal(p.get("mic_muted", false))

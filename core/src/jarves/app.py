@@ -95,6 +95,19 @@ class Core:
         self.dev.check_audio()
         self.health.set("mic", "ok", "software mute off")
 
+        self.stt = self._stt or WhisperSTT(c.voice.stt_model, c.voice.stt_fallback_model, c.voice.stt_compute,
+                                           c.voice.language)
+        if self._stt is None and self.use_real_audio and c.voice.mode != "off":
+            # Load the offline STT model BEFORE any Windows speech (WinRT) call: QA on 18 Oct found that loading
+            # CTranslate2 in a worker thread after WinRT was used crashes the process (access violation).
+            # Preloading also makes the first spoken answer faster.
+            try:
+                await self.stt.ensure_loaded()
+                self.health.set("speech_in", "ok", f"offline STT {self.stt.loaded_name}")
+            except (STTUnavailable, ImportError) as e:
+                self.health.set("speech_in", "unavailable", getattr(e, "message", str(e)),
+                                getattr(e, "action", "uv sync --extra voice"))
+
         self.tts = self._tts or FallbackTTS(tts_chain(c.voice, allow_cloud=c.ai.connection != "chatgpt", budget=self.budget),
                                              budget=self.budget)
         ok, quality, detail = self.tts.check()
@@ -102,8 +115,6 @@ class Core:
                         detail, "" if quality == "cloud" else
                         ("ChatGPT plan has no voice; use ai.connection = \"combined\" + OPENAI_API_KEY for the premium voice"
                          if c.ai.connection == "chatgpt" else "run `jarvis key` for the high-quality voice"))
-        self.stt = self._stt or WhisperSTT(c.voice.stt_model, c.voice.stt_fallback_model, c.voice.stt_compute,
-                                           c.voice.language)
         self._select_voice_mode()
 
         self._bg.append(asyncio.create_task(self._health_loop()))

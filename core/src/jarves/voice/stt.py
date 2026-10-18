@@ -11,6 +11,14 @@ import numpy as np
 
 from .. import logs
 
+# Import CTranslate2/faster-whisper EAGERLY, before anything can load WinRT (Windows speech). QA on 18 Oct 2026
+# reproduced 2/2: importing faster_whisper after WinRT was used, then building a model, crashes the process
+# with an access violation; importing it first: 2/2 fine. app.py imports this module before voice.tts.
+try:
+    import faster_whisper as _fw  # noqa: F401
+except ImportError:              # voice extra not installed (CI): STT reports unavailable when used
+    _fw = None
+
 
 class STTUnavailable(Exception):
     def __init__(self, code: str, message: str, action: str = "") -> None:
@@ -48,6 +56,7 @@ class WhisperSTT:
         if self._model is not None:
             return
         if self._loading is None:
+            logs.info("stt", "STT_LOADING", f"loading speech model {self.model_name} (first run may download it)")
             self._loading = asyncio.create_task(asyncio.to_thread(self._load_sync))
         try:
             self._model = await self._loading
