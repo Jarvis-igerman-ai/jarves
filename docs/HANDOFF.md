@@ -44,7 +44,7 @@ The user plugged in a "2K HD Camera" USB webcam with a mic, and it became the de
     - when no credit can be reserved, the mic input is closed and the session ends after that answer;
     - with 0 units left, no session starts.
   - **Remaining exposure:** ~~at most one extra delegation~~ **Corrected in #13: this is not strictly bounded by the client.** The server can start several delegations before the client sees them. All of them are counted (`budget_overrun`), and the session closes at the first one without credit. A **provider-side spend limit is required** for API-key use.
-  - **Full fix:** client-mode delegation, where JARVES runs the backend itself. That is a separate design item.
+  - **Full fix:** client-mode delegation, where JARVES runs the backend itself, is tracked in [#14](https://github.com/igalgerman/JARVIS/issues/14).
   - Tests in `test_voice_faults.py`: boundary, concurrent delegations, refill, continuation, sharing a unit with the CLI.
 - **F2: `jarvis say`.** It now uses the same `make_tts(cfg, budget)` as the Core. Plan-only mode never uses paid speech, even with a key. Tests: `test_say_billing.py`.
 - **Real-component QA on this PC (zero cost).**
