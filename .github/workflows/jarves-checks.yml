@@ -1,0 +1,82 @@
+name: jarves-checks
+# CI for Issue #2. No secrets used; no paid API calls (all AI/voice tests are offline fakes).
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  core:
+    name: Python Core tests (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, windows-2025]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: core
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
+      - name: Install (locked, no voice extras)
+        run: uv sync --frozen
+      - name: pytest (offline; fakes for OpenAI, audio and the music player)
+        run: uv run pytest -q
+  cad:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install FreeCAD 1.1.4 (same version as local; apt only ships 0.21)
+        run: |
+          curl -sSLO https://github.com/FreeCAD/FreeCAD/releases/download/1.1.4/FreeCAD_1.1.4-Linux-x86_64-py311.AppImage
+          curl -sSL https://github.com/FreeCAD/FreeCAD/releases/download/1.1.4/FreeCAD_1.1.4-Linux-x86_64-py311.AppImage-SHA256.txt | sha256sum -c -
+          chmod +x FreeCAD_*.AppImage && ./FreeCAD_*.AppImage --appimage-extract > /dev/null
+          echo "FC=$PWD/squashfs-root/usr/bin/freecadcmd" >> "$GITHUB_ENV"
+      - name: CAD smoke test (blockout + Pebble build, check_pebble, HeadRX regression)
+        run: QT_QPA_PLATFORM=offscreen "$FC" cad/smoke_test.py
+      - name: Mesh export + mechanical estimates
+        run: |
+          QT_QPA_PLATFORM=offscreen "$FC" cad/build_pebble.py
+          QT_QPA_PLATFORM=offscreen "$FC" cad/export_meshes.py
+          QT_QPA_PLATFORM=offscreen "$FC" cad/mech_estimates.py | tee mech.txt
+          grep -q "MECH DONE" mech.txt
+  blender:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Blender 5.2.2
+        run: |
+          curl -sSL https://download.blender.org/release/Blender5.2/blender-5.2.2-linux-x64.tar.xz | tar xJ
+          sudo apt-get update && sudo apt-get install -y --no-install-recommends libxi6 libxkbcommon0 libxrender1 libsm6 libgl1 libegl1
+      - name: Blender smoke (committed .glb vs CAD manifest, materials, Godot asset sync, renders present)
+        run: ./blender-5.2.2-linux-x64/blender -b --python blender/smoke_blender.py
+  godot:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Godot 4.7.2
+        run: |
+          curl -sSLO https://github.com/godotengine/godot/releases/download/4.7.2-stable/Godot_v4.7.2-stable_linux.x86_64.zip
+          unzip -q Godot_*.zip && echo "GODOT=$PWD/Godot_v4.7.2-stable_linux.x86_64" >> "$GITHUB_ENV"
+      - name: Import assets
+        run: '"$GODOT" --headless --path godot --import'
+      - name: Viewer check (parts, picking, exploded view, LED/blank swap, live face)
+        run: |
+          "$GODOT" --headless --path godot --quit-after 3000 -- --check --no-core | tee viewer.txt
+          grep -q "CHECK RESULT: PASS" viewer.txt
+      - name: Face display self-test
+        run: |
+          "$GODOT" --headless --path godot --quit-after 3000 res://face/face_app.tscn -- --check | tee face.txt
+          grep -q "FACE CHECK RESULT: PASS" face.txt
