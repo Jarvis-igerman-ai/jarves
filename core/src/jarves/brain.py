@@ -91,7 +91,7 @@ class AgentBrain:
         if self.cfg.provider != "openai":
             return False, "AI_DISABLED", "AI provider is set to offline in config"
         if not openai_key_present():
-            return False, "AI_NO_KEY", "set the OPENAI_API_KEY environment variable and restart"
+            return False, "AI_NO_KEY", "run `jarvis key` to save your OpenAI API key, then restart"
         if self.cfg.daily_request_limit and self.memory.usage_today("ai_requests") >= self.cfg.daily_request_limit:
             return False, "AI_BUDGET", f"daily AI request limit ({self.cfg.daily_request_limit}) reached; raise ai.daily_request_limit"
         if self.cfg.daily_request_limit == 0:

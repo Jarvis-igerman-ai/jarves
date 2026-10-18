@@ -12,7 +12,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from . import __version__, logs
-from .config import ConfigError, load_config, openai_key_present, state_dir
+from .config import (ConfigError, load_config, load_secrets, openai_key_present, save_secret, secrets_file,
+                     state_dir)
 from .health import read_snapshot
 
 
@@ -256,7 +257,8 @@ def cmd_setup(a, cfg, home) -> int:
         return 1
     set_connection(path, conn)
     if conn in ("combined", "api_key") and not openai_key_present():
-        print('Note: no OPENAI_API_KEY yet. Run:  setx OPENAI_API_KEY "sk-..."  then reopen this window.')
+        if _ask_key(home) != 0:
+            print("No key saved. JARVES runs offline until you run:  jarvis key")
     if conn in ("chatgpt", "combined") and not ChatGPTAuth(home).status()["plan_usage"]:
         print("Now sign in to ChatGPT in the browser window and click Allow.")
         a.action, a.forget = "login", False
@@ -266,6 +268,38 @@ def cmd_setup(a, cfg, home) -> int:
     (home / "setup_done").write_text(conn, encoding="utf-8")
     print(f"Done: connection = {conn}. Change it any time with:  jarvis setup")
     return 0
+
+
+def _ask_key(home) -> int:
+    import getpass
+    print("Paste your OpenAI API key (from platform.openai.com/api-keys). It is hidden while you paste.")
+    key = getpass.getpass("API key: ").strip()
+    if not key:
+        return 1
+    if not key.startswith("sk-"):
+        print("That does not look like an OpenAI key (it should start with sk-). Nothing saved.")
+        return 1
+    print(f"saved to {save_secret('OPENAI_API_KEY', key, home)} (private to your Windows user, not in the project)")
+    return 0
+
+
+def cmd_key(a, cfg, home) -> int:
+    """Store / remove the OpenAI API key in <state_dir>/secrets.env."""
+    path = secrets_file(home)
+    if a.remove:
+        if path.exists():
+            lines = [l for l in path.read_text(encoding="utf-8-sig").splitlines()
+                     if l.partition("=")[0].strip() != "OPENAI_API_KEY"]
+            path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+        print("key removed (restart JARVES)")
+        return 0
+    if a.show_path:
+        print(path)
+        return 0
+    rc = _ask_key(home)
+    if rc == 0:
+        print("Restart JARVES to use it:  jarvis stop  then  jarvis")
+    return rc
 
 
 def cmd_say(a, cfg, home) -> int:
@@ -312,19 +346,23 @@ def main(argv: list[str] | None = None) -> int:
     g.add_argument("--forget", action="store_true", help="logout: also forget this app registration")
     su = sub.add_parser("setup", help="choose how JARVES connects (ChatGPT plan / API key) and sign in")
     su.add_argument("--if-needed", action="store_true", help="only on the first run")
+    k = sub.add_parser("key", help="save your OpenAI API key in a private file (secrets.env)")
+    k.add_argument("--remove", action="store_true")
+    k.add_argument("--show-path", action="store_true")
     q = sub.add_parser("ask", help="ask one question (brain + Skills, no Godot)")
     q.add_argument("text", nargs="+")
     s = sub.add_parser("say", help="speak a sentence with the configured voice")
     s.add_argument("text", nargs="+")
     a = ap.parse_args(argv)
     home = state_dir()
+    load_secrets(home)
     try:
         cfg, _ = load_config(a.config)
     except ConfigError as e:
         print(f"CONFIG ERROR: {e}", file=sys.stderr)
         return 2
     return {"run": cmd_run, "stop": cmd_stop, "status": cmd_status, "diag": cmd_diag, "memory": cmd_memory, "music": cmd_music,
-            "ask": cmd_ask, "say": cmd_say, "chatgpt": cmd_chatgpt, "setup": cmd_setup}[a.cmd](a, cfg, home)
+            "ask": cmd_ask, "say": cmd_say, "chatgpt": cmd_chatgpt, "setup": cmd_setup, "key": cmd_key}[a.cmd](a, cfg, home)
 
 
 if __name__ == "__main__":

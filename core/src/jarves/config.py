@@ -138,6 +138,47 @@ def load_config(path: Path | None = None) -> tuple[Config, Path]:
         raise ConfigError(f"{path}: invalid settings: {msgs}") from e
 
 
+SECRET_ENV = ("OPENAI_API_KEY",)
+
+
+def secrets_file(home: Path | None = None) -> Path:
+    """User-private key file OUTSIDE the repo: <state_dir>/secrets.env with lines like OPENAI_API_KEY=sk-..."""
+    return (home or state_dir()) / "secrets.env"
+
+
+def load_secrets(home: Path | None = None) -> list[str]:
+    """Load allowed keys from secrets.env into the environment; a real environment variable wins."""
+    loaded = []
+    try:
+        lines = secrets_file(home).read_text(encoding="utf-8-sig").splitlines()
+    except OSError:
+        return loaded
+    for line in lines:
+        k, sep, v = line.strip().partition("=")
+        k, v = k.strip().removeprefix("export ").strip(), v.strip().strip('"').strip("'")
+        if sep and k in SECRET_ENV and v and not os.environ.get(k, "").strip():
+            os.environ[k] = v
+            loaded.append(k)
+    return loaded
+
+
+def save_secret(name: str, value: str, home: Path | None = None) -> Path:
+    if name not in SECRET_ENV:
+        raise ValueError(f"unsupported secret {name}")
+    path = secrets_file(home)
+    keep = []
+    if path.exists():
+        keep = [l for l in path.read_text(encoding="utf-8-sig").splitlines() if l.partition("=")[0].strip() != name]
+    tmp = path.with_suffix(".tmp")
+    fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    with os.fdopen(fd, "w", encoding="utf-8") as f:
+        f.write("# JARVES private keys (never commit or share this file)\n" if not keep else "")
+        f.write("\n".join(keep + [f"{name}={value.strip()}"]) + "\n")
+    os.replace(tmp, path)
+    os.environ[name] = value.strip()
+    return path
+
+
 def openai_key_present() -> bool:
     return bool(os.environ.get("OPENAI_API_KEY", "").strip())
 

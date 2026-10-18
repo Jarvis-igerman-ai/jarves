@@ -15,8 +15,10 @@ On the Pi, also run `sudo apt install libportaudio2 espeak-ng`.
 **Best quality (recommended).** Give JARVES your OpenAI key. It is read from the environment only and never stored in files or logs:
 
 ```powershell
-setx OPENAI_API_KEY "sk-..."         # then open a new terminal
+jarvis key        # paste the key; saved in %LOCALAPPDATA%\jarves\secrets.env (outside the project, never logged)
 ```
+
+You can also edit that file yourself; it holds one line, `OPENAI_API_KEY=sk-...`. If the `OPENAI_API_KEY` environment variable is set, it takes priority. `jarvis key --remove` deletes the key.
 
 **Or use your ChatGPT plan (Plus etc.) instead of, or together with, a key.** This uses the official "Sign in with ChatGPT" for open-source local tools. You choose the connection in `config.toml` → `[ai] connection`; JARVES never switches it on its own:
 

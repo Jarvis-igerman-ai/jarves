@@ -1,3 +1,4 @@
+import os
 import asyncio
 import json
 import logging
@@ -257,3 +258,16 @@ async def test_pear_offline(tmp_path):
     with pytest.raises(MusicError) as e:
         await p.now_playing()
     assert e.value.code == "MUSIC_PLAYER_OFFLINE"
+
+
+def test_secrets_file_loads_key_env_wins(tmp_path, monkeypatch):
+    from jarves.config import load_secrets, save_secret, secrets_file
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    assert load_secrets(tmp_path) == []
+    secrets_file(tmp_path).write_text('# c\nOPENAI_API_KEY="sk-file"\nOTHER=x\n', encoding="utf-8")
+    assert load_secrets(tmp_path) == ["OPENAI_API_KEY"] and os.environ["OPENAI_API_KEY"] == "sk-file"
+    assert "OTHER" not in os.environ
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-env")
+    assert load_secrets(tmp_path) == [] and os.environ["OPENAI_API_KEY"] == "sk-env"   # real env wins
+    save_secret("OPENAI_API_KEY", "sk-new", tmp_path)
+    assert secrets_file(tmp_path).read_text(encoding="utf-8").count("OPENAI_API_KEY=") == 1

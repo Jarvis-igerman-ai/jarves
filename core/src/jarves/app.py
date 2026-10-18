@@ -91,7 +91,7 @@ class Core:
         self.health.set("speech_out", ("ok" if quality == "cloud" else "degraded") if ok else "unavailable",
                         detail, "" if quality == "cloud" else
                         ("ChatGPT plan has no voice; use ai.connection = \"combined\" + OPENAI_API_KEY for the premium voice"
-                         if c.ai.connection == "chatgpt" else "set OPENAI_API_KEY for the high-quality voice"))
+                         if c.ai.connection == "chatgpt" else "run `jarvis key` for the high-quality voice"))
         self.stt = self._stt or WhisperSTT(c.voice.stt_model, c.voice.stt_fallback_model, c.voice.stt_compute,
                                            c.voice.language)
         self._select_voice_mode()
@@ -157,7 +157,7 @@ class Core:
             plan_only = self.cfg.ai.connection == "chatgpt"
             why = "" if m == "push_to_talk" else ("ChatGPT plan has no live voice: " if plan_only else "no OPENAI_API_KEY: ")
             act = ("for live voice choose ai.connection = \"combined\" and set OPENAI_API_KEY" if plan_only
-                   else "set OPENAI_API_KEY for live conversation")
+                   else "run `jarvis key` for live conversation")
             self.health.set("voice", "degraded" if why else "ok", f"{why}offline push-to-talk ({self.cfg.voice.stt_model})",
                             act if why else "")
 
