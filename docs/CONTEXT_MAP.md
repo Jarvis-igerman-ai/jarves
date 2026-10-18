@@ -8,6 +8,8 @@
 | JARVES user controls, optional touch, phone/PC admin, safe shutdown, debug logging, remote connection and offline recovery | `JARVES_CONTROLS_DIAGNOSTICS_REQUIREMENTS.md` |
 | Simulated vs physical GPIO/camera/audio contracts | `DEVICE_CONTRACT.md` |
 | Face renderer same on desktop/device | `FACE_RUNTIME.md` |
+| Assistant software: stack, models, costs (checked dates) | `reviews/SW_V1_TECH_DECISION.md` |
+| Run/debug the Core, Skills, music pairing | `../core/README.md` |
 | Historical decisions and alternatives | `archive/DECISIONS.md` |
 | Component slots/fit/assembly | `archive/MECHANICAL.md` |
 | Connections, power, Pi vs PC, USB bridge | `archive/HARDWARE.md` |

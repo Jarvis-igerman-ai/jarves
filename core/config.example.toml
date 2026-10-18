@@ -16,7 +16,7 @@ voice = "marin"
 half_duplex = true             # set false with headphones or an echo-cancelling mic (enables barge-in)
 session_max_s = 600
 tts_engine = "auto"            # auto (cloud, then local fallback) | openai | local | none
-stt_model = "ivrit-ai/whisper-large-v3-turbo-ct2"   # offline fallback only; on a Pi use "small"
+stt_model = "small"            # offline fallback only (~4 s/phrase on a Ryzen 3); accurate but slow: "ivrit-ai/whisper-large-v3-turbo-ct2" (~19 s)
 
 [music]
 provider = "pear"              # Pear Desktop (YouTube Music) local API Server plugin

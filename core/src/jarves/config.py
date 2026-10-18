@@ -54,9 +54,10 @@ class VoiceConfig(_Strict):
     half_duplex: bool = True               # mic gated while JARVES speaks (laptop speakers); False with headphones/AEC mic
     session_max_s: int = Field(600, ge=30, le=3600)
     tts_engine: Literal["auto", "openai", "local", "none"] = "auto"
-    # offline fallback STT (PC: ivrit-ai Hebrew Whisper; Pi: choose a smaller model, e.g. "small")
-    stt_model: str = "ivrit-ai/whisper-large-v3-turbo-ct2"
-    stt_fallback_model: str = "small"
+    # offline FALLBACK STT, measured 2026-10-18 on a Ryzen 3 5300U (int8, 2 s Hebrew phrase):
+    # "small" ~4 s, minor errors; "ivrit-ai/whisper-large-v3-turbo-ct2" accurate but ~19 s. Pi 5: UNTESTED.
+    stt_model: str = "small"
+    stt_fallback_model: str = "tiny"
     stt_compute: str = "int8"
     tts_voice_hint: str = "he-IL"
     record_max_s: float = Field(15, gt=0, le=60)

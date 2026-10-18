@@ -17,8 +17,17 @@ A cute, friendly, premium-looking stationary home companion. **Simulation first,
 | FreeCAD → Blender → Godot → Core boundaries | [ARCHITECTURE](docs/ARCHITECTURE.md) |
 | Rules for agents and selective reading | [AGENTS](AGENTS.md), [CONTEXT_MAP](docs/CONTEXT_MAP.md) |
 | Interactive viewer instructions | [godot/README](godot/README.md) |
+| **Run the assistant (Core + face), setup, troubleshooting** | [core/README](core/README.md) · [SW-V1 review](docs/reviews/SW_V1_REVIEW.md) |
 
-## Current snapshot — 17 October 2026
+## Current snapshot — 18 October 2026
+
+**Software SW-V1 (in review):**
+- A working Python Core (`core/`) runs the face (Godot) end to end.
+- Everything is ready for OpenAI GPT-Live voice + GPT-6 agent + web search, but those need your `OPENAI_API_KEY`.
+- Offline it handles Hebrew commands, memory, diagnostics and the YouTube Music skill via Pear Desktop (needs a one-time "Allow").
+- Quick start: `core\run_core.cmd`, then `godot\run_face.cmd`. Details: [core/README](core/README.md).
+
+## Earlier snapshot — 17 October 2026
 
 **Pebble A visual review candidate** (Issue #4): CAD `cad/JARVIS_pebble.FCStd` (generator `cad/build_pebble.py`) → Blender (`blender/finishes.json`, renders in `blender/renders/`) → Godot viewer. On the configured PC launch `godot/run_viewer.cmd`. Review summary: [S1_T03R2_PEBBLE_VISUAL](docs/reviews/S1_T03R2_PEBBLE_VISUAL.md). The old blockout (`cad/JARVIS_blockout.FCStd`) is kept as "before".
 
@@ -28,7 +37,7 @@ A cute, friendly, premium-looking stationary home companion. **Simulation first,
 
 **Current gate:** verify realistic display and microphone options, assembly, printability, exact internal fit, accessible wiring and cooling, possible future SSD space and practical risk tests. User buys parts **in Israel**: prefer easy local procurement with actual stock, VAT-inclusive pricing, warranty, delivery and credible substitutions. Imports are fallback only. No fixed budget, final component SKU or purchase authorization.
 
-Room estimate: 35–50 m². **Voice pickup distance undecided**: revisit realistic range, device placement and acoustics later; previous 3–5 m is an exploratory scenario, not a binding requirement. GitHub Actions CI is not active ([Issue #2](https://github.com/igalgerman/JARVIS/issues/2)).
+Room estimate: 35–50 m². **Voice pickup distance undecided**: revisit realistic range, device placement and acoustics later; previous 3–5 m is an exploratory scenario, not a binding requirement. GitHub Actions CI: workflow ready in `ci/cad-smoke.yml` but not active until the `workflow` token scope is granted ([Issue #2](https://github.com/igalgerman/JARVIS/issues/2)).
 
 ## Repository hygiene
 After each milestone, link commits and test evidence to its Issue, close work that meets acceptance, and keep open blockers visible. Exclude caches, throwaway outputs and duplicate builds; never mass-delete valuable project files or history without review. [Persistent rules](docs/PROJECT_PRINCIPLES.md).

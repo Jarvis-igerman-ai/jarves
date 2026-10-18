@@ -1,6 +1,63 @@
 # Current handoff — 18 October 2026
 
-## NEW ACTIVE BUNDLE — SW-V1 software implementation + real CI (USER APPROVED)
+## SW-V1 DELIVERED — STOPPED for the single user review
+
+- **Read first:**
+  - [SW_V1_REVIEW.md](reviews/SW_V1_REVIEW.md): what actually runs, the evidence, your 3 pending actions, cost and the Hebrew walkthrough.
+  - [SW_V1_TECH_DECISION.md](reviews/SW_V1_TECH_DECISION.md): stack, model IDs, sources and check dates.
+  - [core/README](../core/README.md): setup, run and troubleshooting.
+- **Stack (user directive: newest best-in-class, OpenAI-only):**
+  - OpenAI GPT-Live `gpt-live-1` voice → Responses delegation to `gpt-6-luna` + web search + JARVES Skills.
+  - Alternative: `gpt-realtime-2.1` on Agents SDK 0.24.
+  - Typed chat: Agents SDK `gpt-6-luna`.
+  - Speech for typed replies: `gpt-realtime-2.1-mini`.
+  - Local Whisper/WinRT/espeak are fallback only.
+  - Music: Pear Desktop 3.12.0 API Server.
+- **Runs now (offline, this PC):**
+  - Core + Godot face E2E PASS.
+  - 6 face states, in the twin and standalone.
+  - Hebrew commands, memory, diagnostics, local voice in and out.
+  - 46 tests PASS; clean clone with the lockfile PASS; `check_viewer` PASS.
+- **Changed:**
+  - `core/` (new Python package + tests).
+  - `godot/face/*`, `godot/main.gd`, `godot/run_face.cmd`, `godot/previews/face/`.
+  - `ci/cad-smoke.yml`.
+  - `AGENTS.md` + `CLAUDE.md` (best-in-class rule).
+  - README, CONTEXT_MAP.
+- **Blocked (user):**
+  1. `OPENAI_API_KEY`: live voice, AI and search are untested.
+  2. Pear "Allow" click + YouTube sign-in: real playback.
+  3. `gh auth refresh -s workflow`: CI.
+- **Unverified:**
+  - GPT-Live Hebrew quality.
+  - Real mic speech (level ≈ 0 in the test).
+  - Pi 5 performance.
+  - Echo/barge-in on speakers (half-duplex default).
+- **Environment changes on this PC:**
+  - Python 3.12 via uv.
+  - The Hebrew Whisper models downloaded to the HF cache.
+  - Pear Desktop portable in `%LOCALAPPDATA%\Programs\PearDesktop-3.12.0`, with its API Server plugin enabled on 127.0.0.1 and approval required. Pre-authorizing the client was denied by the safety classifier, correctly, so pairing stays with the user.
+  - `7zr.exe` in `%LOCALAPPDATA%\Programs\7zr`.
+
+### Decision queue additions (SW-V1)
+
+| Question | Recommendation | Status |
+|---|---|---|
+| SW-1: Voice engine for Hebrew | GPT-Live first; switch to `gpt-realtime-2.1` if its Hebrew sounds worse | **USER DECISION REQUIRED** after trying with a key |
+| SW-2: Voice name/personality | `marin` default, warm playful Hebrew persona | **USER DECISION REQUIRED** (taste) |
+| SW-3: Daily cost ceilings | 30 voice min + 200 AI requests per day | **USER DECISION REQUIRED** (budget) |
+| SW-4: Offline STT model | `small` (4 s, minor errors) vs ivrit-ai turbo (accurate, 19 s) | **ANSWERED by measurement**: `small`; revisit on the Pi (#8) |
+| SW-5: CI activation | Grant the `workflow` scope; next agent activates and reports run URL | **BLOCKED** (user permission) |
+| SW-6: Music provider | Pear Desktop API (no cookies/extraction); Music Assistant rejected for now | **ANSWERED by engineering**; pairing = user action |
+
+## Questions for the user (SW-V1, answer these first)
+1. Please do the 3 actions in [SW_V1_REVIEW](reviews/SW_V1_REVIEW.md#your-actions-to-finish-v1-about-5-minutes): API key, Pear Allow, CI scope.
+2. After hearing GPT-Live in Hebrew: keep it, or switch to `gpt-realtime-2.1`? And do you like the voice `marin`?
+3. Are the cost ceilings OK (30 voice minutes and 200 AI requests per day)?
+4. Do you approve the face look ([previews](../godot/previews/face/))?
+
+---
+## Previous: SW-V1 approval brief (USER APPROVED)
 
 **Authority:** [NOW](NOW.md) and [SW-V1 work package](SW_V1_WORK_PACKAGE.md); user authorized work while away on **#2 + #5 + #6 + #7 plus the first YouTube Music Skill**, with automatic continuation between phases and bounded tests/commits. This supersedes the old R5b 'stop for review' as a **software sequencing** gate, not as a physical manufacturing sign-off.
 

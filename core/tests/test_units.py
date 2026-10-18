@@ -134,7 +134,7 @@ async def test_registry_validation_errors_and_isolation():
     ("play songs by Queen", "music_play", {"query": "Queen"}),
     ("עצור", "music_pause", {}), ("תמשיך", "music_resume", {}), ("השיר הבא", "music_next", {}),
     ("תעלה את הווליום ל 40", "music_volume", {"percent": 40}), ("מה מתנגן עכשיו?", "music_status", {}),
-    ("מה השעה?", "get_time", {}), ("תזכור שאני אוהב קפה", "remember", {"text": "אני אוהב קפה"}),
+    ("מה השעה?", "get_time", {}), ("מה שעה?", "get_time", {}), ("תזכור שאני אוהב קפה", "remember", {"text": "אני אוהב קפה"}),
     ("מה אתה זוכר עליי", "recall", {}), ("תשכח את הכל", "forget_all", {}), ("תשכח שאני אוהב קפה", "forget", {"match": "אני אוהב קפה"}),
     ("סטטוס", "get_status", {}),
 ])

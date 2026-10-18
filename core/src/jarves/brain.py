@@ -52,7 +52,7 @@ _RULES: list[tuple[str, re.Pattern, Callable[[re.Match], dict]]] = [
      lambda m: {}),
     ("music_play", re.compile(r"^(?:תנגן|נגן|תשים|שים(?!\s+לב)|play)\s+(?:לי\s+)?(?:את\s+)?(?:(?:שירים|שיר|מוזיקה)\s+של\s+|songs?\s+by\s+|music\s+by\s+)?(.+)$", _FLAGS),
      lambda m: {"query": m.group(1).strip()}),
-    ("get_time", re.compile(r"^(?:מה\s+השעה|כמה\s+השעה|what time is it|what'?s the time)\??$", _FLAGS), lambda m: {}),
+    ("get_time", re.compile(r"^(?:מה\s+(?:ה)?שעה|כמה\s+(?:ה)?שעה|what time is it|what'?s the time)\??$", _FLAGS), lambda m: {}),
     ("get_status", re.compile(r"^(?:מה\s+המצב\s+שלך|סטטוס|בדיקת\s+מערכת|status|self[- ]?check)\??$", _FLAGS),
      lambda m: {}),
 ]
