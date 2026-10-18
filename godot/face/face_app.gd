@@ -394,6 +394,10 @@ func _check() -> void:
 	# the mouth only moves with real audio, the status dot is truthful, and no text is drawn on the face.
 	var errs: Array = []
 	var looks := {}
+	# The self-test must not depend on a real Core link: on CI (Linux) the refused connection arrives at once and
+	# flips the face to its offline/sleeping look mid-test. Stop the link polling; the dot cases below call
+	# ui._on_link() themselves.
+	ui.link.set_process(false)
 	face.set_link("ready")
 	for st in face.STATES:
 		face.set_state(st)
