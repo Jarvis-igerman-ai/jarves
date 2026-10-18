@@ -203,7 +203,7 @@ def cmd_chatgpt(a, cfg, home) -> int:
             elif a.action == "status":
                 st = auth.status()
                 print(json.dumps({**st, "ai.connection": cfg.ai.connection,
-                                  "models": [m["slug"] for m in auth.load().get("models", [])]}, indent=1))
+                                  "models": [m["slug"] for m in auth.models()]}, indent=1))
                 return 0 if st["signed_in"] else 1
             elif a.action == "models":
                 await _models(auth)

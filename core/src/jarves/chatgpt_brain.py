@@ -111,8 +111,7 @@ class ChatGPTBrain:
     async def _pick_model(self) -> str:
         if self.model:
             return self.model
-        # Subagent C moves the model cache out of the token file behind auth.models(); old auth keeps load()["models"]
-        cached = self.auth.models() if hasattr(self.auth, "models") else self.auth.load().get("models")
+        cached = self.auth.models()
         models = cached or await self.list_models()
         if not models:
             raise BrainUnavailable("CHATGPT_NO_MODELS", "your ChatGPT plan lists no models for this app",

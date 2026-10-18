@@ -35,3 +35,4 @@ build/
 
 # Generated print STLs (regenerate: freecadcmd print/build_print_package.py)
 print/stl/
+.claude/

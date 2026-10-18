@@ -153,7 +153,7 @@ async def test_live_mode_toggle_and_budget(home, cfg, monkeypatch):
     started = []
 
     class FakeLive:
-        def __init__(self, core, on_state, on_transcript, on_usage):
+        def __init__(self, core, on_state, on_transcript, on_usage, **kw):
             self.on_state, self.on_usage = on_state, on_usage
 
         async def start(self):
@@ -223,3 +223,54 @@ async def test_silent_mic_is_reported_not_ignored(home, cfg):
         assert err["code"] == "MIC_SILENT" and c.snapshot()["components"]["mic"]["status"] == "degraded"
     finally:
         await c.stop()
+
+
+async def test_remote_close_frees_live_slot_and_restarts(home, cfg, monkeypatch):
+    """CR-02 at Core level: a server-side close clears core.live, marks voice degraded, and Talk starts anew."""
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-test-not-real")
+    sessions = []
+
+    class FakeLive:
+        def __init__(self, core, on_state, on_transcript, on_usage, on_end, on_health, budget):
+            self.on_state, self.on_end, self.running = on_state, on_end, False
+            sessions.append(self)
+
+        async def start(self):
+            self.running = True
+            await self.on_state("listening")
+
+        async def stop(self):
+            self.running = False
+
+        async def remote_close(self):
+            self.running = False
+            await self.on_end("remote_closed")
+    c = Core(cfg, home, audio=SimAudio(), player=FakePlayer(), stt=FakeSTT(), tts=FakeTTS(), console_logs=False,
+             use_real_audio=False, live_factory=FakeLive)
+    await c.start()
+    try:
+        f = await open_face(c)
+        await f.send("talk.down")
+        await f.wait("face.set_state", lambda p: p["state"] == "listening")
+        await sessions[0].remote_close()
+        assert c.live is None and c.snapshot()["components"]["voice"]["status"] == "degraded"
+        assert (await f.wait("error"))["code"] == "LIVE_ENDED"
+        await f.send("talk.down")                                  # not stuck: a new session starts
+        await f.wait("face.set_state", lambda p: p["state"] == "listening")
+        assert len(sessions) == 2 and c.live is sessions[1]
+    finally:
+        await c.stop()
+
+
+async def test_shutdown_during_pending_confirmation_denies(home, cfg):
+    c = Core(cfg, home, audio=SimAudio(), player=FakePlayer(), stt=FakeSTT(), tts=FakeTTS(), console_logs=False,
+             use_real_audio=False)
+    await c.start()
+    f = await open_face(c)
+    c.memory.add("a")
+    c.memory.add("b")
+    await f.send("user.text", {"text": "תשכח את הכל"})
+    await f.wait("confirm.request")
+    await c.stop()                                                  # nobody answered; shutdown must deny
+    from jarves.memory import MemoryStore
+    assert MemoryStore(home / "memory.db").count() == 2          # nothing deleted

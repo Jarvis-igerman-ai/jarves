@@ -46,7 +46,7 @@ class Core:
         self.live = None
         self.listening = False
         self._busy: asyncio.Task | None = None
-        self._confirm: dict[str, asyncio.Future] = {}
+        self._confirm: dict[str, tuple[asyncio.Future, str]] = {}   # request id -> (answer, face client id)
         self._bg: list[asyncio.Task] = []
         self._tasks: set[asyncio.Task] = set()     # short fire-and-forget tasks (error notices); awaited on stop
         self.stopping = False
@@ -114,7 +114,7 @@ class Core:
         self.stopping = True
         self.health.mark("stopping")
         logs.info("core", "CORE_STOPPING", "Core stopping")
-        for fut in list(self._confirm.values()):
+        for fut, _ in list(self._confirm.values()):
             if not fut.done():
                 fut.set_result(False)              # pending confirmation = denied, never approved by shutdown
         self._confirm.clear()
@@ -135,6 +135,7 @@ class Core:
         for t in tasks:
             t.cancel()
         await asyncio.gather(*tasks, return_exceptions=True)
+        await self.registry.drain()                 # shielded side effects finish before the store closes
         await self.link.stop()
         if self.music is not None and hasattr(self.music.player, "close"):
             await self.music.player.close()
@@ -233,7 +234,9 @@ class Core:
     async def set_face(self, state: str) -> None:
         await self.dev.face_set_state(state)
 
-    async def on_message(self, t: str, p: dict, ws) -> None:
+    async def on_message(self, msg: dict, client) -> None:
+        """Dispatch an authenticated, role-checked message (link.py enforces the per-role allow-list)."""
+        t, p, ws = msg["type"], msg.get("payload") or {}, client
         if self.stopping and t != "status.request":
             await self.link.reply(ws, "error", {"code": "CORE_STOPPING", "message": "JARVES is shutting down"})
             return
@@ -250,9 +253,14 @@ class Core:
         elif t == "status.request":
             await self.link.reply(ws, "status", self.snapshot())
         elif t == "confirm.reply":
-            fut = self._confirm.pop(str(p.get("id")), None)
-            if fut and not fut.done():
-                fut.set_result(bool(p.get("approved")))
+            req = self._confirm.get(str(p.get("id")))
+            if req is None or req[1] != client.id:      # only the face that was asked may answer
+                logs.warn("core", "CONFIRM_SPOOFED", "confirmation reply from a client that was not asked",
+                          role=client.role)
+                return
+            self._confirm.pop(str(p.get("id")), None)
+            if not req[0].done():
+                req[0].set_result(p.get("approved") is True)
         elif t == "debug.enable":
             logs.enable_debug(min(int(p.get("minutes", self.cfg.log.debug_minutes)), self.cfg.log.debug_minutes))
             logs.info("core", "DEBUG_ENABLED", "temporary DEBUG logging enabled")
@@ -260,7 +268,7 @@ class Core:
             logs.info("core", "SHUTDOWN_REQUESTED", "shutdown requested by an authenticated client")
             self.stop_event.set()
         elif t in INBOUND:
-            logs.info("device", "DEVICE_EVENT", f"device event {t}", payload=p)
+            logs.info("device", "DEVICE_EVENT", f"device event {t}", **logs.safe_fields(p, allow=("id", "muted", "state")))
         else:
             await self.link.reply(ws, "error", {"code": "LINK_UNKNOWN_TYPE", "message": f"unknown message type {t}"})
 
@@ -409,19 +417,38 @@ class Core:
             await self.link.send_face("user.transcript" if role == "user" else "assistant.text",
                                       {"text": text, "source": self.voice_mode})
 
+        async def on_end(reason: str) -> None:
+            ended[0] = True
+            if self.live is live_ref[0]:
+                self.live = None                   # any end (user, remote close, error, budget) frees the slot
+            logs.info("voice", "LIVE_ENDED", f"live conversation ended ({reason})")
+            if reason.startswith("error:") or reason == "remote_closed":
+                self.health.set("voice", "degraded", f"live conversation ended: {reason}", "tap Talk to start again")
+                self._spawn(self.notify_error("LIVE_ENDED", "השיחה החיה נותקה", "לחץ Talk כדי להתחיל שוב"))
+            elif reason == "budget":
+                self._spawn(self.notify_error("AI_BUDGET", "הגעתי למגבלת השימוש היומית", "ai.daily_request_limit"))
+            await self.link.broadcast("status", self.snapshot())
+
+        def on_health(status: str, detail: str, action: str = "") -> None:
+            self.health.set("voice", status, detail, action)
+
+        live_ref: list = [None]
+        ended = [False]
         common = dict(on_state=self.set_face, on_transcript=on_transcript, on_usage=usage)
+        extra = dict(on_end=on_end, on_health=on_health, budget=self.budget)
         if self._live_factory is not None:
-            live = self._live_factory(self, **common)
+            live = self._live_factory(self, **common, **extra)
         elif self.voice_mode == "live":
             from .voice.live import LiveVoice
             live = LiveVoice(self.registry, self.agent.instructions, model=v.live_model, voice=v.voice,
                              backend_model=self.cfg.ai.text_model, web_search=self.cfg.ai.web_search,
                              name=self.cfg.assistant_name, half_duplex=v.half_duplex, max_session_s=max_s,
-                             audio_io=audio_io, **common)
+                             audio_io=audio_io, **common, **extra)
         else:
             from .voice.realtime import RealtimeVoice
             live = RealtimeVoice(v.realtime_model, self.agent.instructions, self.registry.realtime_tools(),
-                                 v.language, v.voice, v.half_duplex, audio_io, max_session_s=max_s, **common)
+                                 v.language, v.voice, v.half_duplex, audio_io, max_session_s=max_s, **common, **extra)
+        live_ref[0] = live
         logs.new_cid()
         try:
             await live.start()
@@ -429,17 +456,22 @@ class Core:
             logs.error("voice", "LIVE_START_FAILED", f"live voice failed to start: {type(e).__name__}: {str(e)[:150]}")
             self.health.set("voice", "degraded", f"live voice failed: {type(e).__name__}",
                             "check OPENAI_API_KEY/internet; push-to-talk still works")
+            if ended[0]:
+                return                              # on_end already told the user
             await self.notify_error("LIVE_START_FAILED", "live voice could not start", "check the internet / API key")
             return
+        if getattr(live, "running", True) is False:
+            return                                  # ended during start (on_end already handled it)
         self.live = live
 
     # ------------------------------------------------------------------ confirmation for side effects
     async def ask_confirm(self, prompt: str, timeout: float = 20) -> bool:
-        if self.link.face is None or self.stopping:
+        face_id = self.link.face_client_id()
+        if face_id is None or self.stopping:
             return False
-        cid = uuid.uuid4().hex[:8]
+        cid = uuid.uuid4().hex
         fut = asyncio.get_running_loop().create_future()
-        self._confirm[cid] = fut
+        self._confirm[cid] = (fut, face_id)
         await self.link.send_face("confirm.request", {"id": cid, "prompt": prompt})
         try:
             return await asyncio.wait_for(fut, timeout)

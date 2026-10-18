@@ -279,8 +279,8 @@ class Brain:
     async def respond(self, text: str) -> Reply:
         intent = match_intent(text)
         if intent and self.registry.get(intent.tool):
-            # LEAD (CR-03): once Subagent C's registry.call(origin=...) is merged, pass origin="user" here.
-            res: ToolResult = await self.registry.call(intent.tool, intent.args)
+            # the deterministic parser matched the user's own words -> origin "user" (CR-03 policy)
+            res: ToolResult = await self.registry.call(intent.tool, intent.args, origin="user")
             return Reply(res.message, "command", intent.tool, res.ok, res.code)
         if self.agent is None:
             return Reply(OFFLINE_HELP, "offline", ok=False, code="AI_DISABLED")
