@@ -55,7 +55,7 @@ def bootstrap(args) -> Path:
     v = cfg.setdefault("voice", {})
     v.update(activation="conversation", wake_enabled=False, chime=False)
     if args.idle_s:
-        v["idle_disconnect_s"] = args.idle_s
+        v["idle_disconnect_s"] = max(30, int(args.idle_s))      # config minimum; a shorter test value is set below
     cfg["link"] = {"port": 8793}
     cfg["music"] = {"provider": "none"}
     cfg["log"] = {"level": "VERBOSE", "privacy": False}
@@ -236,6 +236,8 @@ async def main() -> None:
     from jarves.voice.tts import WinRTTTS
     app_mod.StreamingAudio = VirtualAudio                       # the live session uses the virtual mic/speaker
     cfg, _ = load_config()
+    if args.idle_s:                                             # test-only: may be below the config minimum (30 s)
+        object.__setattr__(cfg.voice, "idle_disconnect_s", int(args.idle_s))
     he = WinRTTTS("he-IL")
     picked = [int(x) for x in args.turns.split(",")] if args.turns else list(range(1, len(SCRIPT) + 1))
 
@@ -245,7 +247,12 @@ async def main() -> None:
     await core.prepare_desktop()
     face = FaceClient(home, cfg.link.port)
     await face.start()                                           # -> Core calls live.present(): greeting plays (virtual)
-    await quiet(2.0, 40, core)
+    # The greeting only starts playing AFTER present(). Wait for it to start AND finish: a user talking over it is
+    # gated out by the half-duplex echo guard (the turn-1 "no answer" of the first silent runs).
+    t_wait = time.time()
+    while not VirtualAudio.play_log and time.time() - t_wait < 20:
+        await asyncio.sleep(0.05)
+    await quiet(1.5, 40, core)
     greet = events(home)
     print(f"\nconnected in {time.time() - t_start:.1f} s; session open: {core.live is not None}")
     results = []
@@ -269,6 +276,14 @@ async def main() -> None:
                 break
             await asyncio.sleep(0.05)
         await quiet(2.5, 90, core)
+        for _ in range(3):        # a backend answer finished after the last sound: wait for it to be spoken
+            done = [stamp(e) for e in events(home)[mark:] if e["code"] == "LIVE_BACKEND_DONE"]
+            if not done or VirtualAudio.last_play > max(done):
+                break
+            t_w = time.time()
+            while VirtualAudio.last_play <= max(done) and time.time() - t_w < 15:
+                await asyncio.sleep(0.1)
+            await quiet(2.5, 90, core)
         t_done = VirtualAudio.last_play
         ev = events(home)[mark:]
         segs = segments(t_q_end - 0.2, t_done + 0.5)
@@ -283,6 +298,9 @@ async def main() -> None:
             "heard_as": next((e.get("text") for e in ev if e["code"] == "LIVE_USER_SAID"), None),
             "jarves_said": " / ".join(e.get("text", "") for e in ev if e["code"] == "LIVE_JARVES_SAID")[:160],
             "tools": [e["msg"].replace("backend called ", "") for e in ev if e["code"] == "LIVE_TOOL_CALL"],
+            "delegations": sum(1 for e in ev if e["code"] == "LIVE_EVENT" and e["msg"] == "session.delegation.created"),
+            "backend_s": [e.get("backend_s") for e in ev if e["code"] == "LIVE_BACKEND_DONE"],
+            "speech_segments_s": [[round(a - t_q_end, 1), round(b - t_q_end, 1)] for a, b in segs],
             "activity": sorted({m[2].get("kind") for m in acts}),
             "emotions": emos,
             "session_still_open": core.live is not None,
@@ -290,7 +308,8 @@ async def main() -> None:
         results.append(row)
         print(f"\n#{n} [{what}] asked: {text}\n   dead air {row['dead_air_s']} s | answer {row['answer_s']} s | "
               f"pauses {pauses} | open {row['session_still_open']}\n   heard: {row['heard_as']}\n   said: {row['jarves_said']}\n"
-              f"   tools {row['tools']} | screen {row['activity']} | face {emos}", flush=True)
+              f"   tools {row['tools']} | delegations {row['delegations']} backend_s {row['backend_s']} | "
+              f"screen {row['activity']} | face {emos}\n   speech segments {row['speech_segments_s']}", flush=True)
         await asyncio.sleep(1.5)
 
     idle = None
@@ -306,6 +325,8 @@ async def main() -> None:
     ended = [e for e in events(home) if e["code"] == "LIVE_ENDED"]
     summary = {
         "turns": len(results), "voice_minutes": snap.get("voice_minutes_today"), "ai_requests": snap.get("ai_requests_today"),
+        "session_wall_minutes": round((time.time() - t_start) / 60, 2),   # upper bound of billed voice time so far
+        "progress_notes": sum(1 for e in events(home) if e["code"] == "LIVE_PROGRESS"),
         "disconnects_during_turns": sum(1 for r in results if not r["session_still_open"]),
         "dead_air_avg_s": round(float(np.mean([r["dead_air_s"] for r in results if r["dead_air_s"]])), 2) if results else None,
         "dead_air_max_s": max([r["dead_air_s"] for r in results if r["dead_air_s"]], default=None),

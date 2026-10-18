@@ -46,6 +46,12 @@ class AIConfig(_Strict):
     timeout_s: float = Field(30, gt=0, le=120)
     daily_request_limit: int = Field(200, ge=0)   # hard cost ceiling: model requests per local day (0 = AI off)
     daily_realtime_minutes: int = Field(30, ge=0)  # hard cost ceiling for live voice minutes per local day
+    # GPT-Live backend (Responses delegation) speed, measured 2026-10-19 (docs/reviews/LIVE_CONVERSATION_TUNING.md):
+    # the model default effort is "medium"; spoken lookups need the lowest effort that still answers correctly.
+    voice_reasoning_effort: Literal["none", "minimal", "low", "medium", "high", "xhigh", ""] = "none"  # "" = model default
+    # "priority" = Fast mode (up to 2.5x faster, 2x token price; gpt-6-luna is ~$0.0005 per lookup). "" = account default
+    voice_service_tier: Literal["", "auto", "default", "flex", "priority"] = "priority"
+    voice_max_output_tokens: int = Field(800, ge=0, le=8000)   # per delegated answer (incl. reasoning); 0 = no cap
 
 
 class VoiceConfig(_Strict):
@@ -61,6 +67,13 @@ class VoiceConfig(_Strict):
     realtime_voice: str = "cedar"          # Realtime has a different supported voice list from Live
     idle_disconnect_s: int = Field(180, ge=30, le=600)
     half_duplex: bool = True               # mic gated while JARVES speaks (laptop speakers); False with headphones/AEC mic
+    echo_tail_s: float = Field(0.4, ge=0, le=2)    # half-duplex: mic stays gated this long after JARVES stops (room echo)
+    # GPT-Live gets the local time as silent context once a minute (session.thinking.append), so "what time is it"
+    # is answered at once instead of a ~2-3 s backend round trip.
+    clock_context: bool = True
+    # A backend lookup still running after this long with nothing said: ask GPT-Live for ONE short "almost there"
+    # (session.commentary.append). 0 = off.
+    progress_after_s: float = Field(2.5, ge=0, le=30)
     # One conversation stays open until it is quiet for idle_disconnect_s. This is only a safety ceiling per
     # session; the real cost guard is ai.daily_realtime_minutes (a session never outlives the day's budget).
     session_max_s: int = Field(3600, ge=30, le=3600)

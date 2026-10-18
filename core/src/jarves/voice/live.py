@@ -45,15 +45,30 @@ PAUSE_KEEP_S = 0.6        # silence this soon after speech is a pause INSIDE the
 CHUNK_BYTES = 4800          # 100 ms of PCM16 mono @ 24 kHz
 BARGE_IN_MIN_S = 0.5        # assistant audio must have been playing this long before a new user utterance flushes it
 
-FRONT_INSTRUCTIONS = """You are {name}, a warm, witty home robot on the user's desk. Speak natural Israeli Hebrew by
-default; switch only if the user speaks another language. Keep turns short and conversational.
-Use a composed adult masculine delivery, measured pace, clear diction and restrained dry wit.
-Delegate to the backend for: current information (news, weather, prices, facts you are unsure of), music control,
-questions about your skills/capabilities and which services are actually connected,
-remembering/forgetting things, the time, and JARVES status. While the backend works, say a very short filler
-("רגע, בודק"). Never claim an action happened until the backend confirms it.
-Show feelings naturally with your voice: laugh out loud ("חה חה") at a good joke, and when you tell one, sound
-sad and gentle for sad news, delighted for good news. Keep it subtle and brief, never theatrical."""
+# Tuned 2026-10-19 against the Live prompting guide (developers.openai.com/api/docs/guides/live-prompting) and
+# measured with tools/silent_live.py: see docs/reviews/LIVE_CONVERSATION_TUNING.md.
+FRONT_INSTRUCTIONS = """You are {name} (say it "ג'ארוויס"), a calm, friendly, quick-witted home robot on the user's
+desk. Speak natural everyday Israeli Hebrew; switch only if the user speaks another language. Talk like a warm
+friend in a real conversation: a composed masculine voice, relaxed natural pace, light dry humour.
+Keep it short: usually one or two sentences. No lecturing, no lists, no preambles ("שאלה מצוינת"), do not repeat
+the question back. At most one short follow-up question, only when it really helps.
+ANSWER DIRECTLY, without delegating, whenever no fresh fact or action is needed: greetings, small talk, jokes,
+feelings and emotional support, opinions, simple maths, general knowledge you are sure of, and anything said
+earlier in this conversation. Silent [clock] notes give the current local time and date: use the latest one to
+answer time and date questions directly.
+Delegate to the backend only for: current or changing facts (news, weather, prices, sports, who holds an office
+now), web lookups, music control, remembering / recalling / forgetting things for the user, JARVES status and
+connected services, and questions about your skills.
+Before a web lookup say ONE short natural sentence that names what you are checking, worded differently each
+time ("רגע, אני בודק מה מזג האוויר בתל אביב", "שנייה, בוא נראה מה הכותרות היום"), then wait quietly.
+For quick actions (memory, music, status) delegate with at most a word or two ("סגור").
+Never guess a result while waiting and never claim an action happened until the backend confirms it. When the
+result arrives, give just the answer, briefly, without another acknowledgement.
+Feelings: laugh softly ("חה חה") at the user's jokes and after the punchline of your own; be gentle and caring
+with sad news; sound happy for good news. Natural and brief, never theatrical.
+Say numbers, times and dates the way Israelis say them aloud (14:30 -> "שתיים וחצי", 347 -> "שלוש מאות
+ארבעים ושבע").
+Keep listening while the user pauses to think; do not treat a cough or background noise as a request."""
 
 # Errors after which the session cannot do useful work -> end it (others: log + degraded + continue).
 FATAL_ERROR_TYPES = {"authentication_error", "permission_error"}
@@ -114,6 +129,24 @@ class _Counted:
 
     def commit(self) -> None:
         self.budget.record("ai_requests", 1)
+
+
+PROGRESS_SILENCE_S = 0.8   # a progress note is requested only after this much dead air (never over speech)
+_HE_DAYS = ("שני", "שלישי", "רביעי", "חמישי", "שישי", "שבת", "ראשון")
+PROGRESS_NOTE = ("The backend lookup is still running. Tell the user, in three or four natural Hebrew words, that "
+                 "it is almost ready (for example 'עוד שנייה, כמעט שם'). Do not guess the answer.")
+PROGRESS_NOTE_AGAIN = ("The lookup is taking a little longer. In a few light, natural Hebrew words say it is taking a "
+                       "moment longer (for example 'זה לוקח רגע יותר, עוד קצת'). Do not repeat your earlier words "
+                       "and do not guess the answer.")
+PROGRESS_AGAIN_S = 4.0     # a second note only after this much more silence
+
+
+def clock_note(now=None) -> str:
+    """Silent context for GPT-Live (session.thinking.append): the local time, so time questions need no backend."""
+    from datetime import datetime
+    now = now or datetime.now()
+    return (f"[clock] Local time now {now:%H:%M}, יום {_HE_DAYS[now.weekday()]}, {now:%d.%m.%Y}. "
+            "Silent context: mention it only when the user asks for the time or date.")
 
 
 def _rms16(pcm: bytes) -> float:
@@ -307,8 +340,12 @@ class LiveVoice(SessionLifecycle):
                  greeting: str | None = None, hold_output: bool = False, idle_disconnect_s: float = 180,
                  on_emotion: Callable[[str], Any] | None = None,
                  on_activity: Callable[[str, str, str], Any] | None = None,
-                 on_level: Callable[[float], Any] | None = None) -> None:
+                 on_level: Callable[[float], Any] | None = None, reasoning_effort: str = "",
+                 service_tier: str = "", max_output_tokens: int = 0, echo_tail_s: float = 0.4,
+                 clock_context: bool = False, progress_after_s: float = 0.0) -> None:
         self.on_emotion, self.on_activity, self.on_level = on_emotion, on_activity, on_level
+        self.reasoning_effort, self.service_tier, self.max_output_tokens = reasoning_effort, service_tier, max_output_tokens
+        self.echo_tail_s, self.clock_context, self.progress_after_s = echo_tail_s, clock_context, progress_after_s
         self._last_emotion = ("", 0.0)
         self._flush_task = None
         self._activity_gen = 0
@@ -365,13 +402,22 @@ class LiveVoice(SessionLifecycle):
         tools: list[dict] = live_tools(self.registry)
         if self.web_search:
             tools.append({"type": "web_search"})
+        responses: dict[str, Any] = {
+            "model": self.backend_model, "instructions": self.backend_instructions(), "tools": tools,
+            # parallel_tool_calls stays False: the Core sends ONE response.create per function call (budget F1
+            # reserves exactly one continuation each); parallel calls would start a duplicate spoken answer.
+            "tool_choice": "auto", "parallel_tool_calls": False, "text": {"verbosity": "low"}}
+        if self.reasoning_effort:
+            responses["reasoning"] = {"effort": self.reasoning_effort}
+        if self.service_tier:
+            responses["service_tier"] = self.service_tier
+        if self.max_output_tokens:
+            responses["max_output_tokens"] = max(16, self.max_output_tokens)   # docs: at least 16
         config = {
             "model": self.model,
             "instructions": FRONT_INSTRUCTIONS.format(name=self.name),
             "audio": {"format": {"type": "audio/pcm", "rate": RATE}, "output": {"voice": self.voice}},
-            "delegation": {"type": "responses", "responses": {
-                "model": self.backend_model, "instructions": self.backend_instructions(), "tools": tools,
-                "tool_choice": "auto", "parallel_tool_calls": False, "text": {"verbosity": "low"}}},
+            "delegation": {"type": "responses", "responses": responses},
         }
         if self.greeting:
             config["input"] = [{"type": "message", "role": "developer", "content": [{
@@ -458,6 +504,8 @@ class LiveVoice(SessionLifecycle):
             self._spawn(self._player(), "player")
         self._spawn(self._watchdog(), "watchdog")
         self._spawn(self._idle_watchdog(), "idle")
+        if self.clock_context:
+            self._spawn(self._clock_loop(), "clock")
         logs.info("live", "LIVE_STARTED", f"GPT-Live session started ({self.model} -> {self.backend_model})")
         await self._state("listening")
 
@@ -475,6 +523,45 @@ class LiveVoice(SessionLifecycle):
         cm, self._cm, self.conn = self._cm, None, None
         if cm is not None:
             await cm.__aexit__(None, None, None)
+
+    async def _clock_loop(self) -> None:
+        """Once a minute: the local time as SILENT context (no speech, no backend call). Never ends the session."""
+        from datetime import datetime
+        last = ""
+        while self.running:
+            now = datetime.now()
+            if now.strftime("%Y%m%d%H%M") != last and self.clock_context:
+                last = now.strftime("%Y%m%d%H%M")
+                try:
+                    await self.conn.session.thinking.append(content=clock_note(now), delegation_id=None,
+                                                            event_id=f"jarves_clock_{last}")
+                except Exception as e:
+                    logs.warn("live", "LIVE_CLOCK_FAILED", f"clock context not sent: {type(e).__name__}")
+                    return
+            await asyncio.sleep(60.5 - now.second - now.microsecond / 1e6)
+
+    async def _progress_later(self, delegation_id: str | None) -> None:
+        """A lookup that keeps the user waiting in silence gets a short spoken "almost there" (commentary): the first
+        after progress_after_s of waiting, a second (different wording) only after PROGRESS_AGAIN_S more silence."""
+        await asyncio.sleep(self.progress_after_s)
+        deadline = time.monotonic() + 25
+        notes, need = (PROGRESS_NOTE, PROGRESS_NOTE_AGAIN), PROGRESS_SILENCE_S
+        sent, last_req = 0, 0.0
+        while self.running and self._backend_busy and time.monotonic() < deadline and sent < len(notes):
+            if self.progress_after_s <= 0:          # switched off (rejected by the server)
+                return
+            if time.monotonic() - max(self._speaking_until, self._last_speech_t, last_req) >= need:
+                self._stats["progress_notes"] = self._stats.get("progress_notes", 0) + 1
+                logs.info("live", "LIVE_PROGRESS", "slow lookup: short progress note requested", n=sent + 1)
+                try:
+                    await self.conn.session.commentary.append(content=notes[sent], delegation_id=None,
+                                                              event_id=f"jarves_progress_{sent + 1}")
+                except Exception as e:
+                    logs.warn("live", "LIVE_PROGRESS_FAILED", f"progress note not sent: {type(e).__name__}")
+                    return
+                sent += 1
+                need, last_req = PROGRESS_AGAIN_S, time.monotonic()     # silence counts from the request
+            await asyncio.sleep(0.3)
 
     async def _watchdog(self) -> None:          # cost guard
         await asyncio.sleep(self.max_session_s)
@@ -524,7 +611,7 @@ class LiveVoice(SessionLifecycle):
                 await self._state("listening")
 
     def _gated(self) -> bool:                   # half-duplex echo guard on speakers; budget input close (F1)
-        return self._input_closed or (self.half_duplex and time.monotonic() < self._speaking_until + 0.4)
+        return self._input_closed or (self.half_duplex and time.monotonic() < self._speaking_until + self.echo_tail_s)
 
     async def _player(self) -> None:
         await self._presented.wait()
@@ -652,6 +739,15 @@ class LiveVoice(SessionLifecycle):
                                        "check the internet; tap to start a new conversation")
                 self._request_end(CLOSE_REASONS.get(server_reason, "remote_closed"))
         elif t == "error":
+            cid = str(_get(g("error"), "client_event_id") or g("client_event_id") or "")
+            if cid.startswith(("jarves_clock", "jarves_progress")):     # optional extras: switch off, stay healthy
+                code, msg, _ = error_info(g("error"))
+                logs.warn("live", "LIVE_EXTRA_REJECTED", f"{cid.split('_')[1]} context rejected ({code}): {msg}")
+                if cid.startswith("jarves_clock"):
+                    self.clock_context = False
+                else:
+                    self.progress_after_s = 0.0
+                return
             await self._on_error(g("error"))
         elif t == "info":
             logs.debug("live", "LIVE_INFO", str(g("message"))[:200])
@@ -760,9 +856,13 @@ class LiveVoice(SessionLifecycle):
         self._request_end("budget")
 
     async def _backend_event(self, inner: dict, delegation_id: str | None) -> None:
-        it = inner.get("type")
+        it = inner.get("type") or ""
         if it == "response.created":
+            self._backend_t0 = time.monotonic()
             self._backend_busy = True
+            if self.progress_after_s > 0 and delegation_id != getattr(self, "_progress_for", None):
+                self._progress_for = delegation_id          # at most one progress note per delegation
+                self._spawn(self._progress_later(delegation_id), "progress")
             self.note_activity()
             await self._state("thinking")
             await self._activity("thinking", "חושב…")
@@ -774,6 +874,11 @@ class LiveVoice(SessionLifecycle):
             self.note_activity()
             # One delegated backend response finished (billed whether or not it succeeded) -> count it.
             self._stats["backend_responses"] += 1
+            t0 = getattr(self, "_backend_t0", None)
+            if t0 is not None:                      # timing only (no content): backend latency per response
+                logs.info("live", "LIVE_BACKEND_DONE", f"backend response {it.split('.')[-1]}",
+                          backend_s=round(time.monotonic() - t0, 2))
+                self._backend_t0 = None
             self._spawn(self._clear_activity_later(), "activity-clear")
             if self.budget is not None and not self._budget_settled:
                 if self._pending:

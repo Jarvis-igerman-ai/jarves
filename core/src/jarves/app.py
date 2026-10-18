@@ -656,7 +656,11 @@ class Core:
                              backend_model=self.cfg.ai.text_model, web_search=self.cfg.ai.web_search,
                              name=self.cfg.assistant_name, half_duplex=v.half_duplex, max_session_s=max_s,
                              audio_io=audio_io, idle_disconnect_s=v.idle_disconnect_s, on_emotion=on_emotion,
-                             on_activity=on_activity, on_level=on_level, **common, **extra)
+                             on_activity=on_activity, on_level=on_level,
+                             reasoning_effort=self.cfg.ai.voice_reasoning_effort,
+                             service_tier=self.cfg.ai.voice_service_tier,
+                             max_output_tokens=self.cfg.ai.voice_max_output_tokens, echo_tail_s=v.echo_tail_s,
+                             clock_context=v.clock_context, progress_after_s=v.progress_after_s, **common, **extra)
         else:
             from .voice.realtime import RealtimeVoice
             live = RealtimeVoice(v.realtime_model, self.agent.instructions, self.registry.realtime_tools(),
