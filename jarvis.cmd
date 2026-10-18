@@ -9,7 +9,9 @@ rem --no-sync: never reinstall while a Core is running (its jarves.exe is locked
 set "J=uv --directory "%C%" run --no-sync jarves"
 if not exist "%C%\.venv" uv --directory "%C%" sync -q --extra voice
 set "FIRST=%~1"
+if "%FIRST%"=="" goto launch
 if not "%FIRST%"=="" if not "%FIRST:~0,1%"=="-" ( %J% %* & exit /b )
+:launch
 %J% status >nul 2>&1
 if not "%ERRORLEVEL%"=="1" (
   echo JARVES is already running: opening the face and following its log.

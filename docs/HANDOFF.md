@@ -1,5 +1,13 @@
 # Current handoff — 18 October 2026
 
+## CMD launcher diagnosis (18 Oct)
+
+- Follow-up: user's PowerShell resolves `jarvis`, but plain launch failed with `The syntax of the command is incorrect.` Reproduced in an isolated CMD trace: substring expansion on the undefined `FIRST` variable corrupts the argument-dispatch line. Fixed at the Windows launcher owner (`jarvis.cmd`) by jumping to startup before that expansion when no argument is supplied.
+- Focused CMD routing check from `C:\Users\97254` passed for no arguments, `--log-level debug`, `status`, and an already-running Core. Core/uv/face actions were substituted with echoes; no real microphone, paid API or GUI startup was tested. No downstream assets needed refreshing. Final-commit CI remains unverified.
+- `jarvis.cmd` exists, but `C:\work\jarvis` is absent from both the current process PATH and the saved user PATH. From outside the project, `where jarvis` cannot find it; the README's PATH claim does not match this machine.
+- Verified `cmd.exe /d /c "C:\work\jarvis\jarvis.cmd status"`: launcher responds; Core is currently stopped. Historical health output is stale, not evidence of current component failures.
+- Run from any CMD with `C:\work\jarvis\jarvis.cmd`, or add the project directory to PATH. No runtime code or persistent Windows settings changed. Existing music source/test edits were left untouched.
+
 ## Issue #13: GPT-Live overruns, disconnect accounting, reservation lifecycle (18 Oct, night)
 
 - **Overlapping delegations (P1).**
