@@ -15,7 +15,8 @@ import random
 import httpx
 
 from . import logs
-from .brain import INSTRUCTIONS, BrainUnavailable
+from .brain import INSTRUCTIONS, BrainUnavailable, billing_summary
+from .budget import Budget, BudgetExceeded
 from .chatgpt_auth import RESOURCE, ChatGPTAuth, ChatGPTAuthError
 from .config import AIConfig
 from .memory import MemoryStore
@@ -50,8 +51,11 @@ class ChatGPTBrain:
     connection = "chatgpt"
 
     def __init__(self, cfg: AIConfig, registry: SkillRegistry, memory: MemoryStore, auth: ChatGPTAuth,
-                 name: str = "JARVES", *, transport: httpx.AsyncBaseTransport | None = None) -> None:
+                 name: str = "JARVES", *, transport: httpx.AsyncBaseTransport | None = None,
+                 budget: Budget | None = None) -> None:
         self.cfg, self.registry, self.memory, self.auth, self.name = cfg, registry, memory, auth, name
+        self.budget = budget or Budget(memory, cfg)     # shared Core Budget; None = own one on the same counter
+        self.connection = cfg.connection if cfg.connection in ("chatgpt", "combined") else "chatgpt"
         self._transport = transport
         self.history: list[dict] = []
         self.web_search = cfg.web_search
@@ -70,14 +74,16 @@ class ChatGPTBrain:
             return False, "CHATGPT_NO_PLAN_USAGE", "run `jarves chatgpt login` and allow plan usage, or use an API key"
         if self.paused_code:
             return False, self.paused_code, "ChatGPT plan limit reached: see ChatGPT Settings > Usage; switch to the API key only if you choose to"
-        if self.cfg.daily_request_limit == 0 or self.memory.usage_today("ai_requests") >= self.cfg.daily_request_limit:
+        if self.cfg.daily_request_limit == 0 or self.budget.exhausted("ai_requests"):
             return False, "AI_BUDGET", f"daily AI request limit ({self.cfg.daily_request_limit}) reached; raise ai.daily_request_limit"
         return True, "ok", ""
 
     def describe(self) -> str:
         st = self.auth.status()
         ws = "on" if self.web_search else f"off{self.web_search_note}"
-        return f"ChatGPT plan ({st['email'] or 'signed in'}), model {self.model or 'auto'}, web search {ws}"
+        cfg = self.cfg.model_copy(update={"connection": self.connection})
+        return (f"ChatGPT plan ({st['email'] or 'signed in'}), model {self.model or 'auto'}, web search {ws} — "
+                f"{billing_summary(cfg)}")
 
     def instructions(self) -> str:
         mems = self.memory.list(20)
@@ -105,7 +111,9 @@ class ChatGPTBrain:
     async def _pick_model(self) -> str:
         if self.model:
             return self.model
-        models = self.auth.load().get("models") or await self.list_models()
+        # Subagent C moves the model cache out of the token file behind auth.models(); old auth keeps load()["models"]
+        cached = self.auth.models() if hasattr(self.auth, "models") else self.auth.load().get("models")
+        models = cached or await self.list_models()
         if not models:
             raise BrainUnavailable("CHATGPT_NO_MODELS", "your ChatGPT plan lists no models for this app",
                                    "check your plan, or use an API key")
@@ -122,17 +130,32 @@ class ChatGPTBrain:
         return tools
 
     async def _stream(self, body: dict) -> dict:
-        """One streamed request; returns the completed response object, raises BrainUnavailable otherwise."""
-        token = await self.auth.access_token()
+        """One streamed request; returns the completed response object, raises BrainUnavailable otherwise.
+
+        Budget: reserve 1 ai_requests unit BEFORE sending (BudgetExceeded propagates; nothing is sent). The unit is
+        released only when the request provably never left (sign-in/token failure, TCP connect failure); once sent
+        it is committed whatever happens next (HTTP error, broken stream, cancellation)."""
+        res = self.budget.reserve("ai_requests")
+        try:
+            token = await self.auth.access_token()
+        except BaseException:
+            res.release()
+            raise
         headers = {"Authorization": f"Bearer {token}", "Accept": "text/event-stream"}
         lines: list[str] = []
-        async with self._client() as c:
-            async with c.stream("POST", "/responses", json=body, headers=headers) as r:
-                if r.status_code != 200:
-                    await r.aread()
-                    self._raise_http(r)
-                async for line in r.aiter_lines():
-                    lines.append(line)
+        try:
+            async with self._client() as c:
+                async with c.stream("POST", "/responses", json=body, headers=headers) as r:
+                    if r.status_code != 200:
+                        await r.aread()
+                        self._raise_http(r)
+                    async for line in r.aiter_lines():
+                        lines.append(line)
+        except httpx.ConnectError:
+            res.release()                 # connection never established: the request was not sent
+            raise
+        finally:
+            res.commit()                  # no-op after release
         final = None
         for ev in parse_sse(lines):
             t = ev.get("type", "")
@@ -206,6 +229,8 @@ class ChatGPTBrain:
             return await asyncio.wait_for(self._turns(text), self.cfg.timeout_s * 2)
         except asyncio.TimeoutError as e:
             raise BrainUnavailable("AI_TIMEOUT", "the AI did not answer in time", "try again; check the network") from e
+        except BudgetExceeded as e:       # next /responses request (incl. a retry) would pass the daily ceiling
+            raise BrainUnavailable("AI_BUDGET", str(e), e.action) from e
         except ChatGPTAuthError as e:
             raise BrainUnavailable(e.code, e.message, e.action) from e
         except httpx.HTTPError as e:
@@ -218,9 +243,9 @@ class ChatGPTBrain:
         for _ in range(self.cfg.max_turns):
             body = {"model": model, "instructions": self.instructions(), "input": self.history + turn,
                     "tools": self._tools(), "store": False, "stream": True}
-            resp = await self._request(body)
+            resp = await self._request(body)          # each attempt reserved + counted inside _stream
             calls += 1
-            used = self.memory.bump_usage("ai_requests", 1)
+            used = self.budget.used("ai_requests")
             outputs = [o for o in resp.get("output", []) if o.get("type") in ("message", "function_call")]
             fcalls = [o for o in outputs if o["type"] == "function_call"]
             turn += [self._clean(o) for o in outputs]
