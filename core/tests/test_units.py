@@ -317,3 +317,33 @@ def test_console_levels_and_module_filter(tmp_path, capsys):
     logs.warn("ai", "W3", "shown")
     err = capsys.readouterr().err
     assert "I2" not in err and "W2" not in err and "W3" in err
+
+
+def test_privacy_mode_off_shows_content_but_never_credentials(tmp_path):
+    from jarves import logs
+    logs.setup(tmp_path, "INFO", console=False, privacy=False)          # development default
+    logs.info("stt", "STT_DONE", "transcribed", text="מה השעה", query="weather", token="tok-abcdef", api_key="k1")
+    line = (tmp_path / "jarves.log").read_text(encoding="utf-8").splitlines()[-1]
+    assert "מה השעה" in line and "weather" in line                    # full info for the developer
+    assert "tok-abcdef" not in line and '"k1"' not in line              # credentials masked in BOTH modes
+    logs.info("x", "K", "key sk-abcdefghijklmnopqrst in message")
+    assert "sk-abcdefghijklmnopqrst" not in (tmp_path / "jarves.log").read_text(encoding="utf-8")
+    logs.setup(tmp_path, "INFO", console=False, privacy=True)
+    logs.info("stt", "STT_DONE", "transcribed", text="סוד פרטי")
+    assert "סוד פרטי" not in (tmp_path / "jarves.log").read_text(encoding="utf-8")
+    logs.set_privacy(True)
+
+
+def test_diag_bundle_masks_content_even_when_logged_in_full(tmp_path, monkeypatch):
+    import json as _json
+    import zipfile
+    from jarves import cli, logs
+    monkeypatch.setenv("JARVES_HOME", str(tmp_path))
+    logs.setup(tmp_path / "logs", "INFO", console=False, privacy=False)
+    logs.info("stt", "STT_DONE", "transcribed", text="הכתובת שלי היא רחוב הרצל")
+    logs.set_privacy(True)
+    assert "רחוב הרצל" in (tmp_path / "logs" / "jarves.log").read_text(encoding="utf-8")
+    out = tmp_path / "d.zip"
+    assert cli.main(["diag", "--out", str(out)]) == 0
+    recent = zipfile.ZipFile(out).read("recent.log").decode("utf-8")
+    assert "רחוב הרצל" not in recent and _json.loads(recent.splitlines()[-1])["text"].startswith("<")

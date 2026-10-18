@@ -143,6 +143,14 @@ def _git_rev() -> str:
         return "unknown"
 
 
+def _private_line(line: str) -> str:
+    """Support bundles are for sharing: mask personal content even if the log was written with privacy off."""
+    try:
+        return json.dumps(logs.scrub(json.loads(line), private=True), ensure_ascii=False)
+    except ValueError:
+        return logs.redact(line)
+
+
 def cmd_diag(a, cfg, home) -> int:
     """User-initiated, redacted support bundle (no secrets, no transcripts, no audio)."""
     out = Path(a.out or home / f"jarves-diag-{datetime.now():%Y%m%d-%H%M%S}.zip")
@@ -157,7 +165,7 @@ def cmd_diag(a, cfg, home) -> int:
     with zipfile.ZipFile(out, "w", zipfile.ZIP_DEFLATED) as z:
         z.writestr("info.json", logs.redact(json.dumps(info, indent=1, ensure_ascii=False)))
         z.writestr("health.json", logs.redact(json.dumps(snap, indent=1, ensure_ascii=False)))
-        z.writestr("recent.log", "\n".join(logs.redact(l) for l in lines))
+        z.writestr("recent.log", "\n".join(_private_line(l) for l in lines))
     print(f"wrote {out} ({len(lines)} log lines, redacted). Review it before sharing.")
     return 0
 
@@ -217,7 +225,7 @@ def cmd_ask(a, cfg, home) -> int:
     from .skills import SkillRegistry
     from .skills.builtin import ClockSkill, MemorySkill
     from .skills.music import MusicSkill, PearDesktopPlayer
-    logs.setup(home / "logs", cfg.log.level, console=False)
+    logs.setup(home / "logs", cfg.log.level, console=False, privacy=cfg.log.privacy)
     mem = MemoryStore(home / "memory.db")
     reg = SkillRegistry()
     reg.register(ClockSkill())
@@ -233,7 +241,7 @@ def cmd_chatgpt(a, cfg, home) -> int:
     """Sign in with ChatGPT: the user's own browser consent; tokens stay in <state_dir>/chatgpt (never logged)."""
     from .brain import BrainUnavailable
     from .chatgpt_auth import ChatGPTAuth, ChatGPTAuthError
-    logs.setup(home / "logs", cfg.log.level, console=False)
+    logs.setup(home / "logs", cfg.log.level, console=False, privacy=cfg.log.privacy)
     auth = ChatGPTAuth(home)
 
     async def go() -> int:
@@ -366,7 +374,7 @@ def cmd_say(a, cfg, home) -> int:
     from .memory import MemoryStore
     from .voice.audio import SoundDeviceAudio
     from .voice.tts import make_tts
-    logs.setup(home / "logs", cfg.log.level, console=False)
+    logs.setup(home / "logs", cfg.log.level, console=False, privacy=cfg.log.privacy)
     t = make_tts(cfg, Budget(MemoryStore(home / "memory.db"), cfg.ai))   # same mode + shared budget as the Core
     ok, q, d = t.check()
     print(f"speech: {q} ({d})")

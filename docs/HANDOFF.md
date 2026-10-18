@@ -1,5 +1,21 @@
 # Current handoff — 18 October 2026
 
+## Real-microphone QA with a USB webcam mic (18 Oct, night)
+
+The user plugged in a "2K HD Camera" USB webcam with a mic, and it became the default input.
+- **Mic:** the speaker tone reached it at peak about 1.0. The Realtek laptop mic now also shows signal (0.14–0.19).
+- **Wake word through the air:** speakers → webcam mic → openWakeWord. "Hey Jarvis" woke it 4 out of 4 times while JARVES was not speaking (scores 0.83–1.0). "What time is it" and "Good morning" gave no false wake. CPU is about 14–25 ms per 80 ms frame.
+- **Offline Hebrew speech recognition through the air:** synthetic WinRT Hebrew voice played from the speakers.
+
+| Model | Recognised as commands | Time per phrase |
+|---|---|---|
+| `small` | 1 of 5 | about 8 s |
+| ivrit-ai turbo | 2 of 5 | about 19 s |
+
+  So **offline recognition is too weak and too slow for daily use**. A real human voice may score better, but that is untested.
+- **Who this affects:** modes 2 and 3 (`combined` / `api_key`) don't use local recognition at all, because "Hey Jarvis" opens a GPT-Live conversation. Only mode 1 (ChatGPT plan only) and fully offline use rely on it, since the plan has no audio route.
+- **Logs:** privacy mode was added (`[log] privacy`). It is off by default for development, so logs show full content. Credentials are masked in both modes, and `jarvis diag` always masks content.
+
 ## Issue #9 follow-up F1–F3 + real-component QA (18 Oct, evening)
 
 - **F3: cross-process budget.**

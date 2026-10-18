@@ -38,8 +38,9 @@ _PATTERNS = [
     (re.compile(r"eyJ[A-Za-z0-9_\-]+\.[A-Za-z0-9_\-]+\.[A-Za-z0-9_\-]+"), "<jwt>"),
     (re.compile(r"(?i)\b(api[_-]?key|token|secret|password|cookie)(\"?\s*[:=]\s*\"?)[^\s\",}]+"), r"\1\2***"),
 ]
-# Field names whose VALUE is private content or a credential, at any nesting depth (compared case-insensitively).
-_SENSITIVE_FIELDS = {
+# Field names whose VALUE is private CONTENT (masked only in privacy mode) or a CREDENTIAL (ALWAYS masked),
+# at any nesting depth (compared case-insensitively).
+_CONTENT_FIELDS = {
     # user content
     "text", "transcript", "transcription", "query", "q", "search", "match", "phrase", "utterance", "prompt",
     "instructions", "input", "output", "content", "contents", "message", "messages", "body", "subject", "snippet",
@@ -47,12 +48,13 @@ _SENSITIVE_FIELDS = {
     "audio", "pcm", "wav", "recipient", "recipients", "cc", "bcc", "sender",
     # identity
     "email", "login_hint", "name", "full_name", "phone", "address", "location", "sub", "subject_id",
-    # credentials
+}
+_CREDENTIAL_FIELDS = {
     "token", "access_token", "refresh_token", "id_token", "id_token_hint", "api_key", "apikey", "secret",
     "client_secret", "password", "passcode", "cookie", "cookies", "authorization", "auth", "code_verifier",
     "verifier", "nonce", "credentials",
 }
-# ...and any field name containing one of these fragments.
+# ...and any field name containing one of these fragments is a credential.
 _SENSITIVE_FRAGMENTS = ("token", "secret", "password", "cookie", "api_key", "apikey", "credential", "auth")
 _MAX_DEPTH = 8
 
@@ -63,24 +65,46 @@ def redact(s: str) -> str:
     return s
 
 
-def is_sensitive(key: object) -> bool:
+# Privacy mode (log.privacy): True = mask user content (what was said/heard/answered); False = full content for
+# development. Credentials (keys, tokens, passwords, cookies) are masked in BOTH modes. Library default: True.
+_privacy = True
+
+
+def set_privacy(on: bool) -> None:
+    global _privacy
+    _privacy = bool(on)
+
+
+def privacy() -> bool:
+    return _privacy
+
+
+def is_credential(key: object) -> bool:
     k = str(key).lower()
-    return k in _SENSITIVE_FIELDS or any(f in k for f in _SENSITIVE_FRAGMENTS)
+    return k in _CREDENTIAL_FIELDS or any(f in k for f in _SENSITIVE_FRAGMENTS)
+
+
+def is_sensitive(key: object, private: bool | None = None) -> bool:
+    """Should this field's value be masked? Credentials always; content only in privacy mode."""
+    if is_credential(key):
+        return True
+    return (_privacy if private is None else private) and str(key).lower() in _CONTENT_FIELDS
 
 
 def _mask(v: object) -> str:
     return f"<{len(v) if isinstance(v, (str, bytes, list, tuple, dict)) else len(str(v))} chars>"
 
 
-def scrub(value: object, depth: int = 0) -> object:
-    """Recursively replace values under sensitive keys (any depth) by their length; redact secrets in strings."""
+def scrub(value: object, depth: int = 0, private: bool | None = None) -> object:
+    """Recursively replace values under sensitive keys (any depth) by their length; redact secrets in strings.
+    `private` overrides the current privacy mode (e.g. True for a support bundle meant for sharing)."""
     if depth > _MAX_DEPTH:
         return "<nested>"
     if isinstance(value, dict):
-        return {str(k): (_mask(v) if is_sensitive(k) and v is not None else scrub(v, depth + 1))
+        return {str(k): (_mask(v) if is_sensitive(k, private) and v is not None else scrub(v, depth + 1, private))
                 for k, v in value.items()}
     if isinstance(value, (list, tuple, set, frozenset)):
-        return [scrub(v, depth + 1) for v in value]
+        return [scrub(v, depth + 1, private) for v in value]
     if isinstance(value, (bytes, bytearray)):
         return f"<{len(value)} bytes>"
     if isinstance(value, str):
@@ -192,9 +216,10 @@ _console_base = logging.INFO
 
 
 def setup(log_dir: Path, level: str = "INFO", max_bytes: int = 1_000_000, backups: int = 5,
-          console: bool = True, console_level: str | None = None, only=(), hide=()) -> Path:
+          console: bool = True, console_level: str | None = None, only=(), hide=(), privacy: bool = True) -> Path:
     """File gets `level` (JSON); the terminal gets `console_level` (default = level) filtered by module."""
     global _base_level, _console, _console_base
+    set_privacy(privacy)
     log_dir.mkdir(parents=True, exist_ok=True)
     path = log_dir / "jarves.log"
     for h in list(_logger.handlers):

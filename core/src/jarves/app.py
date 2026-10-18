@@ -60,7 +60,7 @@ class Core:
     async def start(self) -> None:
         c = self.cfg
         self.log_path = logs.setup(self.home / "logs", c.log.level, c.log.max_bytes, c.log.backups, self.console_logs,
-                                  c.log.console_level, c.log.modules, c.log.hide)
+                                  c.log.console_level, c.log.modules, c.log.hide, privacy=c.log.privacy)
         logs.new_cid()
         logs.info("core", "CORE_STARTING", f"JARVES Core {__version__} starting", home=str(self.home))
         self.health = Health(self.home / "health.json")

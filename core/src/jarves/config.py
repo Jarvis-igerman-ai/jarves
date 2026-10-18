@@ -93,6 +93,9 @@ class LogConfig(_Strict):
     console_level: LogLevel = "INFO"          # terminal (`jarvis --log-level debug` overrides)
     modules: list[str] = []                   # terminal: show only these modules, e.g. ["voice", "wake"]
     hide: list[str] = []                      # terminal: hide these modules, e.g. ["link"]
+    # privacy = true masks what you said/heard/answered in logs (for daily use / sharing). Development default
+    # false: full content. API keys, tokens and passwords are masked in BOTH modes; `jarvis diag` always masks.
+    privacy: bool = False
     max_bytes: int = Field(1_000_000, ge=10_000, le=50_000_000)
     backups: int = Field(5, ge=1, le=50)
     debug_minutes: int = Field(30, ge=1, le=240)
