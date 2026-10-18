@@ -140,25 +140,46 @@ func _on_link(connected: bool, detail: String) -> void:
 		_show_activity(_state)
 
 
+## Defensive readers: a malformed message must never break the face. The Core sends clean data, but a protocol
+## hiccup, a version mismatch or a bug must not take the display down (tests/test_face_protocol_godot.py).
+static func _str(v, d := "") -> String:
+	if v == null:
+		return d
+	return v if typeof(v) == TYPE_STRING else str(v)
+
+
+static func _num(v, d := 0.0) -> float:
+	if typeof(v) != TYPE_INT and typeof(v) != TYPE_FLOAT:
+		return d
+	var f := float(v)
+	return d if (is_nan(f) or is_inf(f)) else f
+
+
+static func _dict(v) -> Dictionary:
+	return v if typeof(v) == TYPE_DICTIONARY else {}
+
+
 func _on_message(t: String, p: Dictionary) -> void:
 	if t == "desktop.closed":
 		_close_ack = true
 		return
 	match t:
 		"face.set_state":
+			var st := _str(p.get("state"), "idle")
 			if face:
-				face.set_state(p.get("state", "idle"))
-			_show_activity(str(p.get("state", "idle")))
+				face.set_state(st)
+			_show_activity(st)
 		"face.emotion":
 			# transient reaction {emotion: laugh|cry|surprised|love|sad, ms}; eases back to the current state
 			if face:
-				face.set_emotion(str(p.get("emotion", "")), int(p.get("ms", -1)))
+				face.set_emotion(_str(p.get("emotion")), clampi(int(_num(p.get("ms"), -1.0)), -1, 60000))
 		"assistant.activity":
 			# {kind?, text, detail?}: with a kind it is also shown on the face (pill on the lower arc);
 			# kind "done" or an empty text clears it. Without a kind it stays a panel-only message.
+			var words := _str(p.get("text")).substr(0, 200)
 			if face and p.has("kind"):
-				face.set_activity(str(p.get("kind", "")), str(p.get("text", "")), str(p.get("detail", "")))
-			activity.text = str(p.get("text", ""))
+				face.set_activity(_str(p.get("kind")), words, _str(p.get("detail")).substr(0, 200))
+			activity.text = words
 			if activity.text == "":
 				activity.text = ACTIVITY.get(_state, _state)
 			if activity.text.contains("Loading voice"):
@@ -168,22 +189,22 @@ func _on_message(t: String, p: Dictionary) -> void:
 					face.set_link("connecting")
 		"speaker.level":
 			if face:
-				face.set_speech_level(float(p.get("level", 0.0)))
+				face.set_speech_level(clampf(_num(p.get("level")), 0.0, 1.0))
 		"mic.level":
-			level_bar.value = float(p.get("level", 0.0))
+			level_bar.value = clampf(_num(p.get("level")), 0.0, 1.0)
 			_level_seen = Time.get_ticks_msec()
 			if face:
 				face.set_mic_level(level_bar.value)
 		"assistant.text":
-			_say("JARVES", str(p.get("text", "")))
+			_say("JARVES", _str(p.get("text")).substr(0, 1500))
 		"user.transcript":
-			_say("You (heard)", str(p.get("text", "")))
+			_say("You (heard)", _str(p.get("text")).substr(0, 1500))
 		"error":
-			caption.text = "! %s: %s %s" % [p.get("code", ""), p.get("message", ""), p.get("action", "")]
-			activity.text = "Problem: %s. %s" % [p.get("message", ""), p.get("action", "")]
+			caption.text = "! %s: %s %s" % [_str(p.get("code")), _str(p.get("message")), _str(p.get("action"))]
+			activity.text = "Problem: %s. %s" % [_str(p.get("message")), _str(p.get("action"))]
 		"confirm.request":
-			_confirm_id = str(p.get("id", ""))
-			confirm.dialog_text = str(p.get("prompt", "Confirm?"))
+			_confirm_id = _str(p.get("id"))
+			confirm.dialog_text = _str(p.get("prompt"), "Confirm?")
 			confirm.popup_centered()
 		"status":
 			last_status = p
@@ -222,9 +243,9 @@ static func link_state_for(linked: bool, st: Dictionary, face_state: String) -> 
 		return "connecting"
 	if face_state == "error":
 		return "error"
-	var comps: Dictionary = st.get("components", {})
-	var voice := str(comps.get("voice", {}).get("status", ""))
-	var wake := str(comps.get("wake_word", {}).get("status", ""))
+	var comps := _dict(st.get("components"))
+	var voice := str(_dict(comps.get("voice")).get("status", ""))
+	var wake := str(_dict(comps.get("wake_word")).get("status", ""))
 	if voice in ["unavailable", "degraded"] or wake in ["unavailable", "degraded"]:
 		return "degraded"
 	if voice == "ok" or (wake == "ok" and st.get("wake_listening", false)):
@@ -269,14 +290,14 @@ const FRIENDLY := {"ai": "AI answers", "voice": "Voice", "speech_in": "Speech re
 func _show_status(p: Dictionary) -> void:
 	var lines := ["Core: %s   voice: %s%s" % [p.get("core", "?"), p.get("voice_mode", "?"),
 			"   (mic muted)" if p.get("mic_muted", false) else ""]]
-	var comps: Dictionary = p.get("components", {})
+	var comps := _dict(p.get("components"))
 	for k in comps:
-		var c: Dictionary = comps[k]
+		var c := _dict(comps[k])
 		if c.get("status", "") in ["unavailable", "degraded"]:
 			# one short line per problem, with what to do; full detail stays in `jarvis status`
 			var act: String = str(c.get("action", ""))
 			lines.append("- %s: %s" % [FRIENDLY.get(k, k), act if act != "" else str(c.get("detail", "")).substr(0, 60)])
 	status_lbl.text = "\n".join(lines)
-	mute_chk.set_pressed_no_signal(p.get("mic_muted", false))
+	mute_chk.set_pressed_no_signal(bool(p.get("mic_muted", false)))
 
-	_show_activity(str(p.get("face_state", _state)))
+	_show_activity(_str(p.get("face_state"), _state))

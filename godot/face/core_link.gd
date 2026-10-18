@@ -95,8 +95,12 @@ func _process(_d: float) -> void:
 						"protocol": PROTOCOL}}))
 				_hello_sent = true
 			while ws.get_available_packet_count() > 0:
-				var parsed = JSON.parse_string(ws.get_packet().get_string_from_utf8())
-				if typeof(parsed) != TYPE_DICTIONARY:
+				# JSON.new().parse (not parse_string): a bad frame is dropped quietly instead of an engine ERROR line
+				var json := JSON.new()
+				if json.parse(ws.get_packet().get_string_from_utf8()) != OK:
+					continue
+				var parsed = json.data
+				if typeof(parsed) != TYPE_DICTIONARY or typeof(parsed.get("type")) != TYPE_STRING:
 					continue
 				var t: String = parsed.get("type", "")
 				var p: Dictionary = parsed.get("payload", {}) if typeof(parsed.get("payload")) == TYPE_DICTIONARY else {}
