@@ -50,6 +50,7 @@ class Core:
         self._bg: list[asyncio.Task] = []
         self._tasks: set[asyncio.Task] = set()     # short fire-and-forget tasks (error notices); awaited on stop
         self.stopping = False
+        self._greeted = False
         self.voice_mode = "off"
 
     # ------------------------------------------------------------------ lifecycle
@@ -210,6 +211,24 @@ class Core:
     async def _face_connected(self) -> None:
         await self.dev.face_set_state(self.dev.face_state)
         await self.link.send_face("status", self.snapshot())
+        if self.cfg.voice.greeting and not self._greeted:
+            self._greeted = True
+            self._run_busy(self.greet())
+
+    def how_to_talk(self) -> str:
+        if self.voice_mode in ("live", "realtime"):
+            return "לחץ על Talk כדי להתחיל שיחה, או כתוב לי."
+        if self.voice_mode == "push_to_talk":
+            return "החזק רווח ודבר, או כתוב לי."
+        return "כתוב לי בתיבה למטה."
+
+    async def greet(self) -> None:
+        text = f"שלום! אני {self.cfg.assistant_name}. {self.how_to_talk()}"
+        await self.link.send_face("assistant.text", {"text": text, "source": "core", "ok": True, "code": "GREETING"})
+        await self.speak(text)
+        await self.set_face("happy")
+        await asyncio.sleep(1.0)
+        await self.set_face("idle")
 
     async def set_face(self, state: str) -> None:
         await self.dev.face_set_state(state)
@@ -330,7 +349,14 @@ class Core:
             await self.notify_error(e.code, e.message, e.action)
             return
         if not text:
-            await self.link.send_face("assistant.text", {"text": "לא שמעתי. נסה שוב.", "source": "core"})
+            peak = float(abs(audio).max()) if getattr(audio, "size", 0) else 0.0
+            if peak < 0.003:     # true silence: the mic delivers nothing (privacy setting, wrong/disabled device)
+                self.health.set("mic", "degraded", "microphone delivers silence",
+                                "Windows: Settings > Privacy & security > Microphone (allow desktop apps); check the input device")
+                await self.notify_error("MIC_SILENT", "לא מגיע קול מהמיקרופון",
+                                        "בדוק הרשאות מיקרופון ב-Windows ואת התקן הקלט")
+                return
+            await self.link.send_face("assistant.text", {"text": "לא הבנתי. נסה שוב, קצת יותר קרוב.", "source": "core"})
             await self.set_face("idle")
             return
         await self.link.send_face("user.transcript", {"text": text})

@@ -51,6 +51,7 @@ def home(tmp_path, monkeypatch):
 def cfg():
     c = Config()
     c.link.port = free_port()
+    c.voice.greeting = False      # the greeting has its own test
     return c
 
 

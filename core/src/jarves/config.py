@@ -66,6 +66,7 @@ class VoiceConfig(_Strict):
     stt_fallback_model: str = "tiny"
     stt_compute: str = "int8"
     tts_voice_hint: str = "he-IL"
+    greeting: bool = True                  # say hello + how to talk when the face first connects
     record_max_s: float = Field(15, gt=0, le=60)
     input_device: int | str | None = None
     output_device: int | str | None = None

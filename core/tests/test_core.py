@@ -187,3 +187,39 @@ async def test_cli_shutdown_and_status(core):
     await ws.send(json.dumps({"type": "hello", "payload": {"token": core.link.token, "client": "cli"}}))
     await ws.send(json.dumps({"type": "core.shutdown", "payload": {}}))
     await asyncio.wait_for(core.stop_event.wait(), 3)
+
+
+async def test_greeting_on_first_face_connect(home, cfg):
+    cfg.voice.greeting = True
+    tts = FakeTTS()
+    c = Core(cfg, home, audio=SimAudio(), player=FakePlayer(), stt=FakeSTT(), tts=tts, console_logs=False,
+             use_real_audio=False)
+    await c.start()
+    try:
+        f = await open_face(c)
+        g = await f.wait("assistant.text", lambda p: p.get("code") == "GREETING")
+        assert "JARVES" in g["text"] and "רווח" in g["text"]          # says how to talk in this mode
+        await f.wait("face.set_state", lambda p: p["state"] == "idle")
+        assert tts.spoken and tts.spoken[0] == g["text"]
+        await f.ws.close()
+        f2 = await open_face(c)                                       # reconnect: no second greeting
+        await f2.send("status.request")
+        await f2.wait("status")
+        assert not any(m["type"] == "assistant.text" for m in f2.msgs)
+    finally:
+        await c.stop()
+
+
+async def test_silent_mic_is_reported_not_ignored(home, cfg):
+    c = Core(cfg, home, audio=SimAudio(), player=FakePlayer(), stt=FakeSTT(text=""), tts=FakeTTS(),
+             console_logs=False, use_real_audio=False)
+    await c.start()
+    try:
+        f = await open_face(c)
+        await f.send("talk.down")
+        await f.wait("face.set_state", lambda p: p["state"] == "listening")
+        await f.send("talk.up")
+        err = await f.wait("error")
+        assert err["code"] == "MIC_SILENT" and c.snapshot()["components"]["mic"]["status"] == "degraded"
+    finally:
+        await c.stop()

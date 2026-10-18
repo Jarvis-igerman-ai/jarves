@@ -9,6 +9,9 @@ var link: Node
 var face: Control                 # face.gd instance to drive (set by the owner)
 var status_lbl: Label
 var caption: Label
+var activity: Label              # big, plain-language "what is JARVES doing now"
+var level_bar: ProgressBar       # live microphone level while listening
+var _level_seen := 0.0
 var entry: LineEdit
 var talk_btn: Button
 var mute_chk: CheckButton
@@ -34,6 +37,19 @@ func _ready() -> void:
 	status_lbl.custom_minimum_size = Vector2(330, 0)
 	status_lbl.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	box.add_child(status_lbl)
+	activity = Label.new()
+	activity.text = "Connecting to JARVES..."
+	activity.add_theme_font_size_override("font_size", 22)
+	activity.custom_minimum_size = Vector2(330, 0)
+	activity.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	activity.text_direction = Control.TEXT_DIRECTION_AUTO
+	box.add_child(activity)
+	level_bar = ProgressBar.new()
+	level_bar.max_value = 1.0
+	level_bar.show_percentage = false
+	level_bar.custom_minimum_size = Vector2(330, 10)
+	level_bar.tooltip_text = "Microphone level"
+	box.add_child(level_bar)
 	caption = Label.new()
 	caption.custom_minimum_size = Vector2(330, 60)
 	caption.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
@@ -106,6 +122,7 @@ func _on_link(connected: bool, detail: String) -> void:
 	_set_controls(connected)
 	if not connected:
 		status_lbl.text = "Core: " + detail
+		activity.text = "JARVES is not running: " + detail
 		if face:
 			face.set_state("idle")
 
@@ -115,12 +132,19 @@ func _on_message(t: String, p: Dictionary) -> void:
 		"face.set_state":
 			if face:
 				face.set_state(p.get("state", "idle"))
+			_show_activity(str(p.get("state", "idle")))
+		"assistant.activity":
+			activity.text = str(p.get("text", ""))
+		"mic.level":
+			level_bar.value = float(p.get("level", 0.0))
+			_level_seen = Time.get_ticks_msec()
 		"assistant.text":
 			caption.text = "JARVES: " + str(p.get("text", ""))
 		"user.transcript":
 			caption.text = "You: " + str(p.get("text", ""))
 		"error":
 			caption.text = "! %s: %s %s" % [p.get("code", ""), p.get("message", ""), p.get("action", "")]
+			activity.text = "Problem: %s. %s" % [p.get("message", ""), p.get("action", "")]
 		"confirm.request":
 			_confirm_id = str(p.get("id", ""))
 			confirm.dialog_text = str(p.get("prompt", "Confirm?"))
@@ -128,6 +152,25 @@ func _on_message(t: String, p: Dictionary) -> void:
 		"status":
 			last_status = p
 			_show_status(p)
+
+
+const ACTIVITY := {
+	"idle": "Ready. Say \"Hey Jarvis\", hold Space, or type.",
+	"listening": "Listening... speak now",
+	"thinking": "Thinking...",
+	"speaking": "Speaking",
+	"happy": "Done",
+	"error": "Something went wrong (see below)",
+}
+
+
+func _show_activity(state: String) -> void:
+	if state == "idle" and last_status.get("voice_mode", "") in ["live", "realtime"] and last_status.get("live_session", false):
+		activity.text = "Conversation on: just talk. Tap Talk to end."
+	else:
+		activity.text = ACTIVITY.get(state, state)
+	if state != "listening" and Time.get_ticks_msec() - _level_seen > 500:
+		level_bar.value = 0.0
 
 
 func _show_status(p: Dictionary) -> void:
