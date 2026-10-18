@@ -2,17 +2,21 @@
 
 > Planning and future backlog only. **Only [docs/NOW.md](NOW.md) authorizes work.** Future Issues are NOT permission to start them.
 
+## Active software bundle — approved 18 October 2026
+
+The user explicitly authorized one sustained implementation package: **[SW_V1_WORK_PACKAGE.md](SW_V1_WORK_PACKAGE.md)**. It covers **#2 CI → #5 library choice → #6 real Core/Godot → #7 Hebrew voice/face → the first YouTube Music Skill → integration testing and handoff**. The agent proceeds automatically between related phases; no new approval at each checkpoint. R5b remains a software baseline, not an approved physical print. No new subscriptions or account connections without consent.
+
 ## Current and upcoming
 
 | Stage | Goal | Issue | State |
 |---|---|---|---|
 | 1. CAD / visual baseline | FreeCAD structural and printable geometry, Blender visuals | [#3](https://github.com/igalgerman/JARVIS/issues/3) | Preliminary design review delivered; unresolved engineering choices |
 | 2. Interactive Windows viewer | Orbit, part inspection, shell/interior visibility | [#1](https://github.com/igalgerman/JARVIS/issues/1) | Initial viewer implemented; review/follow-up pending |
-| **3. Visual design iteration — NOW** | Pebble A mechanical source update → Blender → Godot, interactive review | [#4](https://github.com/igalgerman/JARVIS/issues/4) | **Approved; current milestone** |
-| Parallel foundation (separate approval) | Minimal real GitHub Actions CAD smoke | [#2](https://github.com/igalgerman/JARVIS/issues/2) | Open, no active CI |
-| 4. Software research | Evidence-based review of maintained agent/voice/Skill tooling, **YouTube Music first using existing projects** (Pear Desktop, Music Assistant, or an appropriate Skill/MCP only after feasibility/terms/security evaluation). User has YouTube Premium and does **not** want Spotify Premium. | [#5](https://github.com/igalgerman/JARVIS/issues/5) | Parked; separate approval required |
-| 5. Software skeleton | Godot ↔ Python Core ↔ mocked DevicePort, single working scenario | [#6](https://github.com/igalgerman/JARVIS/issues/6) | Parked; after #5 |
-| 6. Face + voice | User-reviewed expressions, speech prototype, measured tradeoffs | [#7](https://github.com/igalgerman/JARVIS/issues/7) | Parked; after #5 and #6 |
+| 3. Visual design iteration — CAD delivered | Pebble A mechanical source update → Blender → Godot, interactive review | [#4](https://github.com/igalgerman/JARVIS/issues/4) | CAD baseline delivered; physical sign-off deferred |
+| **Active WP0: CI** | Minimal real GitHub Actions CAD smoke | [#2](https://github.com/igalgerman/JARVIS/issues/2) | User-approved activation; verify real runner + report permission blocker |
+| **Active WP1: Software research** | Evidence-based review of maintained agent/voice/Skill tooling, **YouTube Music first using existing projects** (Pear Desktop, Music Assistant, or an appropriate Skill/MCP only after feasibility/terms/security evaluation). User has YouTube Premium and does **not** want Spotify Premium. | [#5](https://github.com/igalgerman/JARVIS/issues/5) | Approved; proceed to implementation autonomously |
+| **Active WP2: Core/DevicePort/Godot** | Godot ↔ Python Core ↔ mocked DevicePort, single working scenario | [#6](https://github.com/igalgerman/JARVIS/issues/6) | Approved after WP1 without another gate |
+| **Active WP3: Face + voice** | User-reviewed expressions, speech prototype, measured tradeoffs | [#7](https://github.com/igalgerman/JARVIS/issues/7) | Approved after WP2 without another gate |
 | 7. Physical readiness | Locally available components, verified fit, test coupons, assembly plan | [#8](https://github.com/igalgerman/JARVIS/issues/8) | Parked; requires explicit purchase/print gates |
 | 8. Physical build | Printed and assembled stationary robot with tested Pi/peripherals | New issue **only when approved** | Not scheduled |
 
