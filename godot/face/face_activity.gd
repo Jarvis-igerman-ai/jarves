@@ -6,12 +6,12 @@ extends Control
 ## Sizes are fractions of the face size S, chosen for a ~13 cm round screen read at 1-3 m:
 ## the icon (large, simple) carries the meaning at 3 m, the words are readable from ~1-1.5 m.
 
-const KINDS := ["thinking", "searching", "reading", "music", "time", "memory", "tool"]
+const KINDS := ["thinking", "searching", "reading", "music", "time", "memory", "tool", "connecting"]
 ## preview samples (--activity=<kind> without text); the Core sends its own words
 const SAMPLES := {
 	"thinking": ["חושב...", ""], "searching": ["מחפש ברשת", ""], "reading": ["קורא את הדף", ""],
 	"music": ["מנגן עכשיו", "Bohemian Rhapsody · Queen"], "time": ["בודק את השעה", ""],
-	"memory": ["נזכר...", ""], "tool": ["מפעיל כלי", ""],
+	"memory": ["נזכר...", ""], "tool": ["מפעיל כלי", ""], "connecting": ["מתחבר...", ""],
 }
 const TEXT_SIZE := 0.058        # main words, x S  (42 px at 720)
 const DETAIL_SIZE := 0.037      # detail line, x S (27 px at 720)
@@ -214,6 +214,13 @@ func _icon(k: String, c: Vector2, ic: float, col: Color) -> void:
 				pts.append(c + Vector2(cos(ang), sin(ang)) * rr)
 			draw_colored_polygon(pts, col)
 			draw_circle(c + Vector2(u * 0.62, -u * 0.62), u * 0.12, col)
+		"connecting":
+			# a signal: three arcs that light up one after another (1.2 s cycle) above a dot
+			draw_circle(c + Vector2(0.0, u * 0.62), lw * 0.9, col)
+			for i in 3:
+				var rr := u * (0.42 + 0.34 * i)
+				var a := 0.3 + 0.7 * clampf(sin(TAU * (_t / 1.2 - i * 0.16)) * 0.5 + 0.5, 0.0, 1.0)
+				draw_arc(c + Vector2(0.0, u * 0.62), rr, -PI * 0.78, -PI * 0.22, 20, Color(col, col.a * a), lw, true)
 		"tool":
 			draw_arc(c, u * 0.38, 0.0, TAU, 32, col, lw, true)
 			for i in 8:
