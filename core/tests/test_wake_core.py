@@ -174,3 +174,56 @@ async def test_near_miss_is_logged_with_score_and_hint(home, cfg, caplog):
         assert summary and summary[0]["activation"] == "wake_word" and "api_key" in summary[0]
     finally:
         await c.stop()
+
+
+async def test_connected_mode_wake_word_is_the_way_back_in_after_the_session_ends(home, cfg, monkeypatch):
+    """Open connected (greeting in a live session). While it is open the wake mic stays closed; when the session
+    ends (idle) 'Hey Jarvis' reconnects it - with a wake chime, then a ready chime, and NO spoken delay."""
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-test-not-real")
+    cfg.voice.activation, cfg.voice.wake_enabled, cfg.voice.chime = "conversation", True, True
+    sessions, audio = [], SimAudio()
+
+    class FakeLive:
+        def __init__(self, core, on_state, on_transcript, on_usage, on_end=None, **kw):
+            self.on_state, self.on_end, self.running, self.kw = on_state, on_end, False, kw
+            sessions.append(self)
+
+        async def start(self):
+            self.running = True
+            await self.on_state("listening")
+
+        async def stop(self):
+            self.running = False
+
+        async def wait_ready(self):
+            return
+
+        def present(self):
+            pass
+
+    def script():
+        yield bytes(CHUNK)
+        yield FakeDetector.marker_chunk()
+        for _ in range(400):
+            yield bytes(CHUNK)
+    FakeMic.opened = FakeMic.closed = 0
+    c = Core(cfg, home, audio=audio, player=FakePlayer(), stt=FakeSTT(), tts=FakeTTS(), console_logs=False,
+             use_real_audio=False, live_factory=FakeLive, wake_detector=FakeDetector(), wake_audio=lambda: FakeMic(script))
+    await c.start()
+    try:
+        assert c.snapshot()["components"]["wake_word"]["status"] == "ok"     # wake is ON in connected mode
+        await c.prepare_desktop()
+        assert len(sessions) == 1 and c.live is sessions[0] and sessions[0].kw.get("hold_output") is True
+        await asyncio.sleep(1.5)
+        assert len(sessions) == 1 and FakeMic.opened == 0                    # wake mic closed during the conversation
+        await sessions[0].on_end("idle")                                     # quiet for 3 minutes: back to wake mode
+        for _ in range(60):
+            await asyncio.sleep(0.1)
+            if len(sessions) == 2:
+                break
+        assert len(sessions) == 2                                            # "Hey Jarvis" opened a new conversation
+        assert sessions[1].kw.get("greeting") is None                       # no spoken "yes?": talk right away
+        await asyncio.sleep(0.6)
+        assert [n for n, _ in audio.played][:2] == [2400, 4800]              # wake chime (0.10 s), ready chime (0.20 s)
+    finally:
+        await c.stop()

@@ -69,6 +69,7 @@ class VoiceConfig(_Strict):
     stt_fallback_model: str = "tiny"
     stt_compute: str = "int8"
     tts_voice_hint: str = "he-IL"
+    chime: bool = True                     # soft sound when "Hey Jarvis" is heard and when the conversation is ready
     greeting: bool = True                  # say hello + how to talk when the face first connects
     # "Hey Jarvis" wake word: detected ON THIS DEVICE (pyopen-wakeword, openWakeWord model); no audio leaves the
     # device until it triggers. Software mute stops it and releases the microphone.

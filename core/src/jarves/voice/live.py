@@ -260,6 +260,10 @@ class SessionLifecycle:
                 audio.close()
             except Exception:
                 pass
+        if getattr(self, "_flush_task", None) is not None:
+            self._flush_task.cancel()
+        if hasattr(self, "_flush_transcripts"):
+            self._flush_transcripts()
         self._settle_budget()
         seconds = self._usage_seconds()
         try:
@@ -306,6 +310,7 @@ class LiveVoice(SessionLifecycle):
                  on_level: Callable[[float], Any] | None = None) -> None:
         self.on_emotion, self.on_activity, self.on_level = on_emotion, on_activity, on_level
         self._last_emotion = ("", 0.0)
+        self._flush_task = None
         self._activity_gen = 0
         self.registry, self.backend_instructions = registry, backend_instructions
         self.model, self.voice, self.backend_model, self.web_search = model, voice, backend_model, web_search
@@ -609,6 +614,7 @@ class LiveVoice(SessionLifecycle):
                     and now - self._turn_audio_t0 >= BARGE_IN_MIN_S):
                 await self.interrupt()          # new user utterance over still-queued assistant speech
             self._in_text += g("delta") or ""
+            self._schedule_flush()
             if self._out_text:
                 logs.info("live", "LIVE_JARVES_SAID", "JARVES said", text=self._out_text.strip())
                 if self.on_transcript:
@@ -624,6 +630,7 @@ class LiveVoice(SessionLifecycle):
                 self._in_text = ""
             self._out_text += g("delta") or ""
             await self._emote("jarves", self._out_text[-80:])
+            self._schedule_flush()
         elif t == "session.delegation.created":
             if self.budget is not None and _get(g("delegation"), "target") == "responses":
                 await self._take_credit("delegation")
@@ -683,6 +690,27 @@ class LiveVoice(SessionLifecycle):
             self._end_after_answer = True
             logs.warn("live", "AI_BUDGET", f"no budget for another request ({where}); mic input closed, "
                       "ending after this answer", action="raise ai.daily_request_limit")
+
+    def _schedule_flush(self, delay: float = 2.0) -> None:
+        """Log what was said once the speaker has been quiet for `delay` s (instead of at the next turn)."""
+        if self._flush_task is not None:
+            self._flush_task.cancel()
+        self._flush_task = asyncio.get_running_loop().create_task(self._flush_later(delay))
+
+    async def _flush_later(self, delay: float) -> None:
+        try:
+            await asyncio.sleep(delay)
+        except asyncio.CancelledError:
+            return
+        self._flush_transcripts()
+
+    def _flush_transcripts(self) -> None:
+        if self._in_text.strip():
+            logs.info("live", "LIVE_USER_SAID", "you said (as GPT-Live heard it)", text=self._in_text.strip())
+            self._in_text = ""
+        if self._out_text.strip():
+            logs.info("live", "LIVE_JARVES_SAID", "JARVES said", text=self._out_text.strip())
+            self._out_text = ""
 
     async def _emote(self, role: str, text: str) -> None:
         """Face reaction to what was said (laugh at a joke, cry at sad news...). Same reaction at most every 5 s."""

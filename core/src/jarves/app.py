@@ -80,6 +80,7 @@ class Core:
         self._greeted = False
         self.voice_mode = "off"
         self._voice_connecting = False
+        self._hold_wake_until = 0.0     # connected-on-open mode: wake word waits until the first live session ended
         self.startup = {"phase": "starting", "ready": False, "detail": "Loading JARVES..."}
         self._startup_t0 = time.monotonic()
         self._startup_signature = hashlib.sha256(json.dumps([
@@ -550,7 +551,25 @@ class Core:
         except AudioUnavailable as e:
             self.health.set("audio", "unavailable", e.message, e.action)
 
-    async def _start_live(self, *, greeting: str | None = None, hold_output: bool = False) -> None:
+    async def _chime(self, kind: str) -> None:
+        """Short soft chime: "wake" = heard you, "ready" = connected, talk now."""
+        if not self.cfg.voice.chime or self.dev.audio is None:
+            return
+        import numpy as _np
+        rate = 24000
+        notes = {"wake": [(880, 0.10)], "ready": [(660, 0.08), (990, 0.12)]}.get(kind, [])
+        parts = []
+        for hz, dur in notes:
+            t = _np.arange(int(rate * dur)) / rate
+            env = _np.minimum(1.0, _np.minimum(t / 0.008, (dur - t) / 0.03))      # soft attack and release
+            parts.append((_np.sin(2 * _np.pi * hz * t) * env * 0.22).astype(_np.float32))
+        if parts:
+            try:
+                await self.dev.speaker_play(_np.concatenate(parts), rate)
+            except Exception:
+                logs.debug("tts", "CHIME_FAILED", "could not play the chime")
+
+    async def _start_live(self, *, greeting: str | None = None, hold_output: bool = False, ack: bool = False) -> None:
         if self.stopping:
             return
         await self.link.send_face("assistant.activity", {"text": "Loading voice connection..."})
@@ -574,6 +593,7 @@ class Core:
 
         async def on_end(reason: str) -> None:
             ended[0] = True
+            self._hold_wake_until = 0.0
             if self.live is live_ref[0]:
                 self.live = None                   # any end (user, remote close, error, budget) frees the slot
             logs.info("voice", "LIVE_ENDED", f"live conversation ended ({reason})")
@@ -638,6 +658,8 @@ class Core:
             return
         finally:
             self._voice_connecting = False
+            if ack:
+                await self.link.send_face("assistant.activity", {"kind": "done", "text": "", "detail": ""})
             await self.link.broadcast("status", self.snapshot())
         if getattr(live, "running", True) is False:
             return                                  # ended during start (on_end already handled it)
@@ -646,6 +668,10 @@ class Core:
             return
         self.live = live
         await self.link.broadcast("status", self.snapshot())
+        if ack:
+            await self.link.send_face("assistant.activity", {"kind": "done", "text": "", "detail": ""})
+            self._spawn(self._chime("ready"))
+            await self.set_face("listening")
         if not hold_output and self.cfg.voice.activation == "conversation":
             self._startup_stage("running", "Voice ready")
 
@@ -729,9 +755,6 @@ class Core:
     # ------------------------------------------------------------------ "Hey Jarvis" wake word
     def _setup_wake(self) -> None:
         v = self.cfg.voice
-        if v.activation == "conversation":
-            self.health.set("wake_word", "disabled", "conversation mode: no wake word required")
-            return
         if not v.wake_enabled or self.voice_mode == "off" or not (self._wake_audio or self.use_real_audio):
             self.health.set("wake_word", "disabled", "wake word off (voice.wake_enabled / voice.mode)")
             return
@@ -747,6 +770,8 @@ class Core:
             return
         self.wake = WakeListener(det, self._on_wake, v.wake_cooldown_s)
         self._woke = False
+        if v.activation == "conversation" and self.voice_mode == "live":
+            self._hold_wake_until = time.monotonic() + 45     # the session opens now; "Hey Jarvis" is for AFTER it ends
         self.health.set("wake_word", "ok", f"say \"Hey Jarvis\" (detected on this device, {v.wake_word})")
         self._bg.append(asyncio.create_task(self._wake_loop()))
 
@@ -767,6 +792,7 @@ class Core:
 
     def _wake_should_listen(self) -> bool:
         return not (self.dev.mic_muted or self.live is not None or self.listening or self.stopping
+                    or self._voice_connecting or time.monotonic() < self._hold_wake_until
                     or (self._busy is not None and not self._busy.done()))
 
     async def _wake_loop(self) -> None:
@@ -860,7 +886,12 @@ class Core:
                 await chunks.aclose()
                 mic.close()
             if woke and self.voice_mode in ("live", "realtime"):
-                await self._start_live(greeting="כן, אני מקשיב." if self.voice_mode == "live" else None)
+                # instant feedback (the connection takes ~2 s): chime + attentive face + "connecting"; no spoken
+                # "yes?" so the user can talk the moment the second chime sounds
+                self._spawn(self._chime("wake"))
+                await self.set_face("listening")
+                await self.link.send_face("assistant.activity", {"kind": "connecting", "text": "מתחבר…", "detail": ""})
+                await self._start_live(ack=True)
 
     # ------------------------------------------------------------------ confirmation for side effects
     async def ask_confirm(self, prompt: str, timeout: float = 20) -> bool:
