@@ -1,5 +1,11 @@
 # Current handoff — 18 October 2026
 
+## Product decision after SW-V1 review — 18 October 2026
+
+**Confirmed by user:** JARVES must support **both** OpenAI API billing with user-supplied key and user-authorized ChatGPT Plus/eligible plan usage via official Sign in with ChatGPT OAuth. **Do not interpret this as a request for automatic paid fallback.** User must be able to choose a connection mode and understand which account/limits/costs apply. OAuth-based eligible Responses AI requests are possible for local personal tools, but ChatGPT plan usage does **not** cover GPT-Live/Realtime/audio input or transcription routes; combine with local STT/TTS only if an approved implementation finds the quality acceptable, or use the independently billable API voice path. Preserve offline behavior. See [controls & diagnostics requirements](JARVES_CONTROLS_DIAGNOSTICS_REQUIREMENTS.md#18-oct-2026--confirmed-user-choice-both-chatgpt-plan-and-api-connection-options) for source-backed integration/limitations.
+
+**Status:** USER CHOICE ANSWERED; ChatGPT OAuth adapter **NOT IMPLEMENTED**, tests NOT RUN. Existing SW-V1 API live path remains blocked on API key; do not claim ChatGPT Plus has already been connected. This is a future **separately scoped software work item** pending review/approval in `docs/NOW.md`. No automated model/provider switching, no external login or paid API calls approved by this entry.
+
 ## SW-V1 DELIVERED — STOPPED for the single user review
 
 - **Read first:**
