@@ -58,6 +58,7 @@ class Core:
 
     # ------------------------------------------------------------------ lifecycle
     async def start(self) -> None:
+        started_at = time.monotonic()
         c = self.cfg
         self.log_path = logs.setup(self.home / "logs", c.log.level, c.log.max_bytes, c.log.backups, self.console_logs,
                                   c.log.console_level, c.log.modules, c.log.hide, privacy=c.log.privacy)
@@ -86,7 +87,6 @@ class Core:
 
         self.link = GodotLink(c.link.host, c.link.port, load_token(self.home / "link_token"), self.health,
                               self.on_message, self._face_connected)
-        await self.link.start()
 
         audio = self._audio
         if audio is None and self.use_real_audio and c.voice.mode != "off":
@@ -97,7 +97,8 @@ class Core:
 
         self.stt = self._stt or WhisperSTT(c.voice.stt_model, c.voice.stt_fallback_model, c.voice.stt_compute,
                                            c.voice.language)
-        if self._stt is None and self.use_real_audio and c.voice.mode != "off":
+        self._select_voice_mode()
+        if self._stt is None and self.use_real_audio and self.voice_mode == "push_to_talk":
             # Load the offline STT model BEFORE any Windows speech (WinRT) call: QA on 18 Oct found that loading
             # CTranslate2 in a worker thread after WinRT was used crashes the process (access violation).
             # Preloading also makes the first spoken answer faster.
@@ -107,6 +108,8 @@ class Core:
             except (STTUnavailable, ImportError) as e:
                 self.health.set("speech_in", "unavailable", getattr(e, "message", str(e)),
                                 getattr(e, "action", "uv sync --extra voice"))
+        elif self.voice_mode in ("live", "realtime"):
+            self.health.set("speech_in", "ok", "cloud voice; offline speech model not loaded")
 
         self.tts = self._tts or make_tts(c, self.budget)
         ok, quality, detail = self.tts.check()
@@ -114,12 +117,14 @@ class Core:
                         detail, "" if quality == "cloud" else
                         ("ChatGPT plan has no voice; use ai.connection = \"combined\" + OPENAI_API_KEY for the premium voice"
                          if c.ai.connection == "chatgpt" else "run `jarvis key` for the high-quality voice"))
-        self._select_voice_mode()
 
+        # Accept the room/face connection only after audio and speech are initialized.
+        await self.link.start()
         self._bg.append(asyncio.create_task(self._health_loop()))
         self._setup_wake()
         self.health.mark("ready")
-        logs.info("core", "CORE_READY", f"Core ready (voice: {self.voice_mode})", log=str(self.log_path))
+        logs.info("core", "CORE_READY", f"Core ready (voice: {self.voice_mode})", log=str(self.log_path),
+                  ms=round((time.monotonic() - started_at) * 1000))
 
     async def stop(self, grace_s: float = 3.0) -> None:
         """Orderly shutdown (CR-11): refuse new work, end voice, deny pending confirmations, let an in-flight
@@ -241,9 +246,10 @@ class Core:
         return "כתוב לי בתיבה למטה."
 
     async def greet(self) -> None:
-        text = f"שלום! אני {self.cfg.assistant_name}. {self.how_to_talk()}"
+        hello = f"שלום! אני {self.cfg.assistant_name}."
+        text = f"{hello} {self.how_to_talk()}"
         await self.link.send_face("assistant.text", {"text": text, "source": "core", "ok": True, "code": "GREETING"})
-        await self.speak(text)
+        await self.speak(hello)
         await self.set_face("happy")
         await asyncio.sleep(1.0)
         await self.set_face("idle")
@@ -411,12 +417,16 @@ class Core:
         if not text or self.dev.audio is None:
             return
         try:
+            t0 = time.monotonic()
+            logs.info("tts", "SPEECH_SYNTH_START", "generating speech")
             samples, rate = await self.tts.synth(text)
+            logs.info("tts", "SPEECH_SYNTH_READY", "speech generated", ms=round((time.monotonic() - t0) * 1000))
         except TTSUnavailable as e:
             self.health.set("speech_out", "unavailable", e.message, e.action)
             return
         await self.set_face("speaking")
         try:
+            logs.info("tts", "SPEECH_PLAY_START", "starting speaker playback", audio_s=round(len(samples) / rate, 2))
             await self.dev.speaker_play(samples, rate)
         except AudioUnavailable as e:
             self.health.set("audio", "unavailable", e.message, e.action)

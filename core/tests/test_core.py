@@ -200,7 +200,7 @@ async def test_greeting_on_first_face_connect(home, cfg):
         g = await f.wait("assistant.text", lambda p: p.get("code") == "GREETING")
         assert "JARVES" in g["text"] and "רווח" in g["text"]          # says how to talk in this mode
         await f.wait("face.set_state", lambda p: p["state"] == "idle")
-        assert tts.spoken and tts.spoken[0] == g["text"]
+        assert tts.spoken == ["שלום! אני JARVES."]  # short spoken greeting; full instructions stay onscreen
         await f.ws.close()
         f2 = await open_face(c)                                       # reconnect: no second greeting
         await f2.send("status.request")

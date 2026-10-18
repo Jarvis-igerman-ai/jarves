@@ -53,7 +53,9 @@ Without a key or ChatGPT, JARVES runs **offline**: commands only (music, time, m
 
 The modules are `core`, `voice`, `live`, `realtime`, `wake`, `ai`, `chatgpt`, `skills`, `music`, `link`, `tts`, `budget` and `device`. Errors always show.
 
-**Simplest:** type `jarvis` in any terminal (`C:\work\jarvis` is on your PATH). The first time, it asks how to connect and signs you in. `jarvis setup` changes that choice and `jarvis stop` stops JARVES. Any other word is passed to the Core, e.g. `jarvis status` or `jarvis chatgpt status`.
+**Simplest:** type `jarvis` in a terminal with `C:\work\jarvis` on your PATH. This opens the **room with the actual CAD-derived model and live face**, and runs the Core with terminal logs. The first time, it asks how to connect and signs you in. `jarvis setup` changes that choice and `jarvis stop` stops JARVES. Any other word is passed to the Core, e.g. `jarvis status` or `jarvis chatgpt status`.
+
+Cloud voice skips offline recognition model loading. The spoken greeting is brief; full controls remain onscreen. Each run appends to the rotated log below. `CORE_READY.ms`, `SPEECH_SYNTH_START`, `SPEECH_SYNTH_READY.ms` and `SPEECH_PLAY_START` separate startup, speech-generation and playback delays. Cloud speech still depends on network/provider latency; its full audio is generated before playback. Launcher errors before Core starts appear in the terminal.
 
 Manual steps:
 

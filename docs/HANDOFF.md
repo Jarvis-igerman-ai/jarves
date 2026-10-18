@@ -1,5 +1,23 @@
 # Current handoff — 18 October 2026
 
+## User review: slow initial speech + desktop room (18 Oct)
+
+- **Evidence / owners:** last real run: `CORE_STARTING` 21:32:25.026 → offline STT load 4.2 s → `CORE_READY` 21:32:30.721 → face connected 21:32:32.397 → synthesized greeting ready (`TTS_ENGINE`) 21:32:44.456. These timestamps identify delays; the log has no earlier launcher timing. Windows launcher chose the face-only scene; Core unnecessarily loaded offline recognition in combined/cloud mode and synthesized the full instructions before any playback.
+- **Correction:** `jarvis.cmd` opens `godot/run_viewer.cmd` on both routes and removes the fixed 4-second delay. `core/src/jarves/app.py` selects voice mode before preloading STT (local fallback only), starts the link after speech initialization to avoid early-client races, speaks only a short hello while keeping instructions onscreen, and logs startup/synthesis/playback timings. No model/provider/billing choice, geometry or materials changed; eager CTranslate2 import remains for Windows safety.
+- **Checks actually passed:** 7 targeted offline startup/greeting cases (cloud live/realtime, plan-only, missing-key fallback, explicit local, voice off, greeting/reconnect); isolated fresh/already-running CMD routes both open room without a timer; `git diff --check`. No paid/live API, mic, speaker or interactive user approval claimed. Cloud TTS still buffers the full generated audio; post-fix latency remains **UNVERIFIED** until a real run.
+- **Actual project renders:** [room](../godot/previews/startup/room.png), [close-up](../godot/previews/startup/closeup.png), [front](../godot/previews/startup/front.png), [side](../godot/previews/startup/side.png), [rear](../godot/previews/startup/rear.png), [3/4 / selected default finish C](../godot/previews/startup/three_quarter.png), [internals](../godot/previews/startup/internals.png). Seven files verified nonempty (1,717,807 bytes total); room and close-up visually inspected. Automated hidden-window Godot 4.7.2 GL compatibility captures, `--no-core`; not hands-on UI confirmation or headless dummy images. Godot source/assets are unchanged from baseline `e4c54b1`; no CAD/Blender regeneration was needed. Reproduce: Godot `--path godot --rendering-method gl_compatibility -- --no-core --room --hide-ui --shot=<absolute PNG>` (other flags in `godot/main.gd`).
+- **Logs:** normal Core runs append to `%LOCALAPPDATA%\jarves\logs\jarves.log` with bounded rotation. New events: `CORE_READY.ms`, `SPEECH_SYNTH_START`, `SPEECH_SYNTH_READY.ms`, `SPEECH_PLAY_START`. Pre-Core launcher failures remain terminal-only. Existing unrelated music source/test edits are excluded.
+- **Issue / final evidence:** belongs to open #7; final-commit CI pending. Do not close real voice/face integration on offline tests.
+
+### Decision queue — this correction (older unresolved questions below remain carried forward)
+
+| Question | Recommendation / rationale | Status / answer or next gate |
+|---|---|---|
+| Desktop room or face-only? | Existing room/model view reuses the same live face. | **ANSWERED**: user explicitly prefers room with actual model; now launcher default. |
+| Can the last run be diagnosed? | Rotated structured local log plus timing events isolates delays without logging raw audio. | **ANSWERED**: last run inspected; location and pre-Core limitation explained. |
+| Is speech fast enough now? | Measure the next real run before changing voice/provider or adding streaming complexity. | **USER DECISION REQUIRED**: user restarts with `jarvis stop`, then `jarvis`, and judges responsiveness; inspect new timing events. No live improvement claimed yet. |
+| Older appearance / hardware choices? | This correction changes launch selection and Core startup only. | **DEFERRED** unchanged to their existing visual/hardware gates below; no new approval inferred. |
+
 ## CMD launcher diagnosis (18 Oct)
 
 - Follow-up: user's PowerShell resolves `jarvis`, but plain launch failed with `The syntax of the command is incorrect.` Reproduced in an isolated CMD trace: substring expansion on the undefined `FIRST` variable corrupts the argument-dispatch line. Fixed at the Windows launcher owner (`jarvis.cmd`) by jumping to startup before that expansion when no argument is supplied.
