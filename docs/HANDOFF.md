@@ -1,5 +1,30 @@
 # Current handoff — 18 October 2026
 
+## Issue #9 follow-up F1–F3 + real-component QA (18 Oct, evening)
+
+- **F3: cross-process budget.**
+  - `budget.py` now keeps reservations as SQLite rows, taken in a `BEGIN IMMEDIATE` transaction, so the Core, `jarvis ask` and `jarvis say` share one atomic gate.
+  - A crashed process's reservations expire after 10 min and are **counted**, not freed.
+  - Tests: `test_budget_mp.py` (8 real processes race for 3 units, exactly 3 succeed; crash and stale cases; two instances).
+- **F1: GPT-Live delegation.**
+  - The docs show no way to approve or cancel a Responses delegation before the server sends it ([live-delegation guide](https://developers.openai.com/api/docs/guides/live-delegation), checked 18 Oct). It is an **API limit**.
+  - Safest fallback now:
+    - one unit is **reserved ahead** as credit before a session can start, and every delegation consumes it;
+    - every continuation is reserved before `response.create`;
+    - when no credit can be reserved, the mic input is closed and the session ends after that answer;
+    - with 0 units left, no session starts.
+  - **Remaining exposure:** speech already sent can start at most one extra delegation. It is counted (`budget_overrun`), never free.
+  - **Full fix:** client-mode delegation, where JARVES runs the backend itself. That is a separate design item.
+  - Tests in `test_voice_faults.py`: boundary, concurrent delegations, refill, continuation, sharing a unit with the CLI.
+- **F2: `jarvis say`.** It now uses the same `make_tts(cfg, budget)` as the Core. Plan-only mode never uses paid speech, even with a key. Tests: `test_say_billing.py`.
+- **Real-component QA on this PC (zero cost).**
+  - **The laptop mic records digital silence** (-80 dB) on every API and driver, while Windows reports it unmuted at 80% with privacy allowed. This points to a **hardware mic switch or key, or a driver problem**: a user check is needed.
+  - The speakers were verified via Stereo Mix (peak 0.22 for a test tone).
+  - With speech injected instead of the mic, the full chain passed: real Core, real wake word (0.99), real Hebrew STT, real Windows voice on the speakers and the real Godot face.
+  - **Bug found and fixed:** importing faster-whisper after WinRT crashed the process (2/2 reproductions).
+  - **UI fixes:** Hebrew captions now lay out right-to-left, and the status lines are friendlier.
+- **Issue rule** recorded in `AGENTS.md` ("Issue lifecycle"). ROADMAP is synced with the Issues.
+
 ## Issue #9 review fixes + user requests (later on 18 Oct): integrated
 
 All Issue #9 findings were reproduced in the code, with no false positives except part of CR-06; each is fixed with offline tests.

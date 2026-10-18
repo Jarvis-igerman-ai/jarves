@@ -7,7 +7,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from jarves.budget import Budget
+from jarves.budget import Budget, BudgetExceeded
 from jarves.config import AIConfig
 from jarves.memory import MemoryStore
 from jarves.skills import SkillRegistry
@@ -479,14 +479,93 @@ async def test_delegated_tool_call_budget_exhausted_ends_session(tmp_path):
     assert any("ai.daily_request_limit" in h[2] for h in rec.health)
 
 
-async def test_delegation_created_when_exhausted_ends_session(tmp_path):
+def deleg(i):
+    return {"type": "session.delegation.created", "offset_ms": 10,
+            "delegation": {"id": f"d{i}", "target": "responses", "type": "delegation"}}
+
+
+def done(i):
+    return {"type": "response.event", "delegation_id": f"d{i}", "event": {"type": "response.completed"}}
+
+
+async def test_no_budget_session_does_not_start(tmp_path):
+    """F1 boundary: with 0 units left nothing is reserved, so no live session (and no delegation) can begin."""
     rec, client, b = Rec(), FakeClient(), budget(tmp_path, 0)
     lv = make_live(rec, client, budget=b)
+    with pytest.raises(BudgetExceeded):
+        await lv.start()
+    assert client.conns == [] and b.held("ai_requests") == 0        # never even connected
+
+
+async def test_credit_reserved_ahead_one_unit_left(tmp_path):
+    """Limit 1: the session's credit IS the last unit. The first delegation uses it, the refill fails -> mic input
+    closed and the session ends after that answer. Usage never exceeds the limit."""
+    rec, client, b = Rec(), FakeClient(), budget(tmp_path, 1)
+    lv = make_live(rec, client, budget=b)
     await lv.start()
-    client.conn.push({"type": "session.delegation.created", "offset_ms": 10,
-                      "delegation": {"id": "d1", "target": "responses", "type": "delegation"}})
+    assert b.held("ai_requests") == 1 and b.remaining("ai_requests") == 0      # reserved BEFORE any delegation
+    await lv.handle_event(deleg(1))
+    assert lv._input_closed and lv._gated()                                   # no new user turns
+    await lv.handle_event(done(1))
     await settle(lv)
-    assert rec.ends == ["budget"]
+    assert rec.ends == ["budget"] and b.used("ai_requests") == 1 and b.held("ai_requests") == 0
+    assert lv.stats()["budget_overrun"] == 0
+
+
+async def test_concurrent_delegations_with_one_unit_left(tmp_path):
+    """Two delegations created back to back (speech already sent before the input closed) with 1 unit: the
+    second has no credit -> counted as a documented overrun, never silently free, and the session ends."""
+    rec, client, b = Rec(), FakeClient(), budget(tmp_path, 1)
+    lv = make_live(rec, client, budget=b)
+    await lv.start()
+    await lv.handle_event(deleg(1))
+    await lv.handle_event(deleg(2))
+    await lv.handle_event(done(1))
+    await lv.handle_event(done(2))
+    await settle(lv)
+    assert rec.ends == ["budget"] and lv.stats()["budget_overrun"] == 1
+    assert b.used("ai_requests") == 2 and b.held("ai_requests") == 0          # both counted
+
+
+async def test_credit_refills_while_budget_lasts(tmp_path):
+    rec, client, b = Rec(), FakeClient(), budget(tmp_path, 5)
+    lv = make_live(rec, client, budget=b)
+    await lv.start()
+    for i in range(3):
+        await lv.handle_event(deleg(i))
+        await lv.handle_event(done(i))
+    assert b.used("ai_requests") == 3 and b.held("ai_requests") == 1          # next credit already reserved
+    assert not lv._input_closed and rec.ends == []
+    await lv.stop()
+    await settle(lv)
+    assert b.used("ai_requests") == 3 and b.held("ai_requests") == 0          # unused credit released, not billed
+
+
+async def test_continuation_reserved_before_send_and_counted_on_failure(tmp_path):
+    rec, client, b = Rec(), FakeClient(), budget(tmp_path, 3)
+    lv = make_live(rec, client, budget=b)
+    await lv.start()
+    await lv.handle_event(deleg(1))
+    held_before = b.held("ai_requests")
+    await lv.handle_event({"type": "response.event", "delegation_id": "d1", "event": {
+        "type": "response.output_item.done",
+        "item": {"type": "function_call", "name": "get_time", "call_id": "c1", "arguments": "{}"}}})
+    assert b.held("ai_requests") == held_before + 1                           # reserved before response.create
+    assert ("response.create", None) in client.conn.sent
+    await lv.handle_event(done(1))
+    await lv.handle_event({"type": "response.event", "delegation_id": "d1", "event": {"type": "response.failed"}})
+    assert b.used("ai_requests") == 2                                         # failed continuation still counted
+
+
+async def test_live_and_cli_share_last_unit(tmp_path):
+    """Another process/instance (e.g. `jarvis ask`) cannot take the unit a live session holds as credit."""
+    rec, client, b = Rec(), FakeClient(), budget(tmp_path, 1)
+    lv = make_live(rec, client, budget=b)
+    await lv.start()
+    other = budget(tmp_path, 1)
+    with pytest.raises(BudgetExceeded):
+        other.reserve()
+    await lv.stop()
 
 
 async def test_tool_call_within_budget_runs(tmp_path):

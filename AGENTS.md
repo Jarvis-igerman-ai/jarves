@@ -56,8 +56,18 @@
 - On handoff describe: problem → root cause/owning layer → files changed → downstream artifacts refreshed → checks actually passed or not tested. Mark unverified physical claims explicitly.
 - Don't silently expand the approved milestone while propagating a correction; request approval if a necessary fix materially changes scope.
 
+## Issue lifecycle (mandatory — user rule, 18 Oct 2026; Claude Code AND Codex)
+1. Every completed task needs **evidence**: implementation, tests and a commit link. Final CI evidence is the GitHub Actions run URL of the **final commit**, not an older run and not local pytest.
+2. Tick completed checklist items `[x]` in the relevant Issue; leave unfinished items unticked.
+3. Close an Issue **only** when all its acceptance criteria are satisfied and verified.
+4. If work remains, keep the Issue **open** and state the exact blocker (who or what is needed).
+5. No duplicate Issues, and don't leave completed Issues open.
+6. Work deferred to another milestone: first create or link a narrowly scoped follow-up Issue, then close the original if everything else is done.
+7. Keep GitHub Issues, `docs/NOW.md`, `docs/HANDOFF.md` and `docs/ROADMAP.md` consistent with each other.
+8. Never close hardware or real-world integration items (real mic, live API, account sign-in, playback, Pi, prints) on mock or unit tests alone.
+
 ## Closeout housekeeping
-- On milestone completion, record acceptance evidence and linked commit/PR in the Issue; close completed Issues, leave blocked/unfinished ones open with reason. Avoid duplicate Issues and check stale open work periodically.
+- On milestone completion, follow **Issue lifecycle** above.
 - Review changes for tracked caches, duplicate generated files, temporary artifacts and scratch outputs; ignore or clean **only clearly safe** disposable artifacts in scope. Never do sweeping deletion of source, essential renders or historical data without approval. Update README links if authoritative file locations change.
 - Spoken-distance expectations are undecided; earlier 3–5 m is only an exploratory research scenario, not a fixed requirement.
 

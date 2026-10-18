@@ -90,7 +90,7 @@ async def test_plan_failed_stream_counted(tmp_path):
     b, mem = plan_brain(tmp_path, srv.handler)
     with pytest.raises(BrainUnavailable):
         await b.reply("x")
-    assert mem.usage_today("ai_requests") == 1 and b.budget._inflight["ai_requests"] == 0
+    assert mem.usage_today("ai_requests") == 1 and b.budget.held("ai_requests") == 0
 
 
 async def test_plan_cancelled_after_send_counted(tmp_path):
@@ -106,7 +106,7 @@ async def test_plan_cancelled_after_send_counted(tmp_path):
     t.cancel()
     with pytest.raises(asyncio.CancelledError):
         await t
-    assert mem.usage_today("ai_requests") == 1 and b.budget._inflight["ai_requests"] == 0
+    assert mem.usage_today("ai_requests") == 1 and b.budget.held("ai_requests") == 0
 
 
 async def test_plan_not_sent_is_not_counted(tmp_path):
@@ -177,7 +177,7 @@ async def test_agent_failed_call_counted(tmp_path, monkeypatch):
     b, mem, _ = agent_brain(tmp_path, [RuntimeError("provider blew up")], 10, monkeypatch)
     with pytest.raises(RuntimeError):
         await b.reply("x")
-    assert mem.usage_today("ai_requests") == 1 and b.budget._inflight["ai_requests"] == 0
+    assert mem.usage_today("ai_requests") == 1 and b.budget.held("ai_requests") == 0
 
 
 async def test_agent_and_plan_share_budget_concurrently(tmp_path, monkeypatch):

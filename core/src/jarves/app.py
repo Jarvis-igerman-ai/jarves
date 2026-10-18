@@ -8,7 +8,7 @@ from pathlib import Path
 
 from . import __version__, logs
 from .brain import AgentBrain, Brain, billing_routes
-from .budget import Budget
+from .budget import Budget, BudgetExceeded
 from .config import Config, api_billing_allowed
 from .deviceport import INBOUND, DevicePort
 from .health import Health
@@ -19,7 +19,7 @@ from .skills.builtin import ClockSkill, MemorySkill, StatusSkill
 from .skills.music import MusicSkill, PearDesktopPlayer
 from .voice.audio import AudioUnavailable, SoundDeviceAudio, StreamingAudio
 from .voice.stt import STTUnavailable, WhisperSTT
-from .voice.tts import FallbackTTS, TTSUnavailable, tts_chain
+from .voice.tts import TTSUnavailable, make_tts
 
 
 def make_agent(cfg: Config, registry: SkillRegistry, memory: MemoryStore, home: Path, transport=None, budget=None):
@@ -108,8 +108,7 @@ class Core:
                 self.health.set("speech_in", "unavailable", getattr(e, "message", str(e)),
                                 getattr(e, "action", "uv sync --extra voice"))
 
-        self.tts = self._tts or FallbackTTS(tts_chain(c.voice, allow_cloud=c.ai.connection != "chatgpt", budget=self.budget),
-                                             budget=self.budget)
+        self.tts = self._tts or make_tts(c, self.budget)
         ok, quality, detail = self.tts.check()
         self.health.set("speech_out", ("ok" if quality == "cloud" else "degraded") if ok else "unavailable",
                         detail, "" if quality == "cloud" else
@@ -473,6 +472,9 @@ class Core:
         logs.new_cid()
         try:
             await live.start()
+        except BudgetExceeded as e:                 # F1: no unit can be reserved ahead -> no session at all
+            await self.notify_error(e.code, "הגעתי למגבלת השימוש היומית", e.action)
+            return
         except Exception as e:
             logs.error("voice", "LIVE_START_FAILED", f"live voice failed to start: {type(e).__name__}: {str(e)[:150]}")
             self.health.set("voice", "degraded", f"live voice failed: {type(e).__name__}",

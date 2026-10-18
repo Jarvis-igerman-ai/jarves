@@ -362,10 +362,12 @@ def cmd_key(a, cfg, home) -> int:
 
 
 def cmd_say(a, cfg, home) -> int:
+    from .budget import Budget
+    from .memory import MemoryStore
     from .voice.audio import SoundDeviceAudio
-    from .voice.tts import FallbackTTS, tts_chain
+    from .voice.tts import make_tts
     logs.setup(home / "logs", cfg.log.level, console=False)
-    t = FallbackTTS(tts_chain(cfg.voice))
+    t = make_tts(cfg, Budget(MemoryStore(home / "memory.db"), cfg.ai))   # same mode + shared budget as the Core
     ok, q, d = t.check()
     print(f"speech: {q} ({d})")
     if not ok:

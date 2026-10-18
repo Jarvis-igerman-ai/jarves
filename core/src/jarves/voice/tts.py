@@ -128,6 +128,14 @@ def tts_chain(vc, allow_cloud: bool = True, budget=None) -> list:
     return _metered({"auto": cloud + local, "openai": cloud, "local": local, "none": []}[vc.tts_engine], budget)
 
 
+def make_tts(cfg, budget) -> "FallbackTTS":
+    """THE way to build speech output (Core and `jarvis say`, F2): honours the user's connection mode and meters
+    cloud speech on the shared Budget. ai.connection = "chatgpt" never uses billable API speech, even if an
+    OPENAI_API_KEY is present; ai.provider = "offline" is local only too."""
+    allow_cloud = cfg.ai.provider == "openai" and cfg.ai.connection != "chatgpt"
+    return FallbackTTS(tts_chain(cfg.voice, allow_cloud=allow_cloud, budget=budget), budget=budget)
+
+
 class FallbackTTS:
     """Tries engines in quality order; if the cloud engine fails, that reply uses the next one.
     With a budget, cloud engines are metered; once over budget every cloud engine is skipped for that reply

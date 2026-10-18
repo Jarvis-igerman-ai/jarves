@@ -31,6 +31,7 @@ import time
 from typing import TYPE_CHECKING, Any, Awaitable, Callable
 
 from .. import logs
+from ..budget import BudgetExceeded
 from ..skills import SkillRegistry, ToolResult
 
 if TYPE_CHECKING:
@@ -97,6 +98,16 @@ def error_info(err: Any) -> tuple[str, str, str]:
     return code, msg, str(_get(err, "type") or "")
 
 
+class _Counted:
+    """Stands in for a reservation of a request that started without one: commit() just counts it."""
+
+    def __init__(self, budget) -> None:
+        self.budget = budget
+
+    def commit(self) -> None:
+        self.budget.record("ai_requests", 1)
+
+
 def is_fatal(code: str, etype: str) -> bool:
     return code in FATAL_ERROR_CODES or etype in FATAL_ERROR_TYPES
 
@@ -115,6 +126,17 @@ class SessionLifecycle:
         self._active = False            # between start() and the end of _finalize()
         self.end_reason: str | None = None
         self.running = False
+
+    def _settle_budget(self) -> None:
+        """Session over: unused credit was never sent -> released; dispatched-but-unfinished -> counted."""
+        credit = getattr(self, "_credit", None)
+        if credit is not None:
+            credit.release()
+            self._credit = None
+        for r in getattr(self, "_pending", []):
+            r.commit()
+        if hasattr(self, "_pending"):
+            self._pending = []
 
     # subclasses implement
     async def _close_transport(self, reason: str) -> None: ...
@@ -203,6 +225,7 @@ class SessionLifecycle:
                 audio.close()
             except Exception:
                 pass
+        self._settle_budget()
         seconds = self._usage_seconds()
         try:
             await _call(getattr(self, "on_usage", None), seconds)
@@ -262,7 +285,17 @@ class LiveVoice(SessionLifecycle):
         self._turn_audio_t0 = 0.0
         self._out_text = ""
         self._in_text = ""
-        self._stats = {"backend_responses": 0, "barge_ins": 0, "errors": 0}
+        self._stats = {"backend_responses": 0, "barge_ins": 0, "errors": 0, "budget_overrun": 0}
+        # F1 budget: GPT-Live "responses" delegation is started BY THE SERVER (no documented client approval or
+        # cancel), so JARVES keeps one unit RESERVED AHEAD ("credit") while the mic is open. Each delegation
+        # consumes the credit; a new credit is reserved at once. If that fails, mic input is closed (a new
+        # delegation needs new user speech) and the session ends after the current answer. Continuations
+        # (response.create after a tool) are reserved BEFORE sending. Residual exposure: speech already sent
+        # before the close could start at most one extra delegation (counted, stats "budget_overrun").
+        self._credit = None
+        self._pending: list = []        # reservations of dispatched backend responses (FIFO)
+        self._input_closed = False
+        self._end_after_answer = False
 
     def session_config(self) -> dict:
         tools: list[dict] = live_tools(self.registry)
@@ -291,6 +324,8 @@ class LiveVoice(SessionLifecycle):
                 raise RuntimeError("live session already running")
             await self.wait_ended()                 # a previous session is still finalizing
         self._reset_session()
+        if self.budget is not None:
+            self._credit = self.budget.reserve("ai_requests")   # raises BudgetExceeded: session not started
         self._reset_lifecycle()
         try:
             if self._client is None:
@@ -354,8 +389,8 @@ class LiveVoice(SessionLifecycle):
             gated = self._gated()
             await self.conn.session.input_audio.append(audio=base64.b64encode(silence if gated else chunk).decode())
 
-    def _gated(self) -> bool:                   # half-duplex echo guard on speakers
-        return self.half_duplex and time.monotonic() < self._speaking_until + 0.4
+    def _gated(self) -> bool:                   # half-duplex echo guard on speakers; budget input close (F1)
+        return self._input_closed or (self.half_duplex and time.monotonic() < self._speaking_until + 0.4)
 
     async def _player(self) -> None:
         await self.audio_io.run_player(RATE)
@@ -432,9 +467,8 @@ class LiveVoice(SessionLifecycle):
                 self._in_text = ""
             self._out_text += g("delta") or ""
         elif t == "session.delegation.created":
-            if (self.budget is not None and _get(g("delegation"), "target") == "responses"
-                    and self.budget.exhausted("ai_requests")):
-                await self._budget_exhausted("delegation")
+            if self.budget is not None and _get(g("delegation"), "target") == "responses":
+                await self._take_credit("delegation")
         elif t == "response.event":
             await self._backend_event(g("event") or {}, g("delegation_id"))
         elif t == "session.usage.updated":
@@ -470,6 +504,23 @@ class LiveVoice(SessionLifecycle):
         if fatal:
             self._request_end(f"error:{code}")
 
+    async def _take_credit(self, where: str) -> None:
+        """The server started a delegated backend response: the held credit pays for it; reserve the next."""
+        if self._credit is not None:
+            self._pending.append(self._credit)
+            self._credit = None
+        else:                                       # started although no credit was held (residual race)
+            self._stats["budget_overrun"] += 1
+            logs.warn("live", "AI_BUDGET_OVERRUN", "a delegated request started with no reserved credit")
+            self._pending.append(_Counted(self.budget))
+        try:
+            self._credit = self.budget.reserve("ai_requests")
+        except BudgetExceeded:
+            self._input_closed = True               # no new user turns -> no new delegations
+            self._end_after_answer = True
+            logs.warn("live", "AI_BUDGET", f"no budget for another request ({where}); mic input closed, "
+                      "ending after this answer", action="raise ai.daily_request_limit")
+
     async def _budget_exhausted(self, where: str) -> None:
         logs.warn("live", "AI_BUDGET", f"daily AI request limit reached ({where}); ending live session",
                   action="raise ai.daily_request_limit")
@@ -485,25 +536,43 @@ class LiveVoice(SessionLifecycle):
             # One delegated backend response finished (billed whether or not it succeeded) -> count it.
             self._stats["backend_responses"] += 1
             if self.budget is not None:
-                self.budget.record("ai_requests", 1)
+                if self._pending:
+                    self._pending.pop(0).commit()
+                else:                               # a backend response we never saw start: count it anyway
+                    self._stats["budget_overrun"] += 1
+                    self.budget.record("ai_requests", 1)
             if it == "response.failed":
                 await self._on_error(_get(inner.get("response"), "error") or {"code": "response_failed"}, True)
+            if self._end_after_answer and not self._pending:
+                await self._budget_exhausted("last reserved answer finished")
         elif it == "response.output_item.done":
             item = inner.get("item") or {}
             if item.get("type") != "function_call":
                 return
             name, call_id = item.get("name", ""), item.get("call_id", "")
             logs.info("live", "LIVE_TOOL_CALL", f"backend called {name}", delegation=delegation_id)
-            if self.budget is not None and self.budget.exhausted("ai_requests"):
-                res = ToolResult(False, "daily AI request limit reached; the conversation will end now",
-                                 code="AI_BUDGET")
-                await self.conn.response.item.create(item={"type": "function_call_output", "call_id": call_id,
-                                                           "output": res.to_model()})
-                await self._budget_exhausted(f"tool {name}")   # no response.create: that would be another paid call
-                return
+            nxt = None
+            if self.budget is not None:
+                try:
+                    nxt = self.budget.reserve("ai_requests")    # the continuation is reserved BEFORE it is sent
+                except BudgetExceeded:
+                    res = ToolResult(False, "daily AI request limit reached; the conversation will end now",
+                                     code="AI_BUDGET")
+                    await self.conn.response.item.create(item={"type": "function_call_output", "call_id": call_id,
+                                                               "output": res.to_model()})
+                    await self._budget_exhausted(f"tool {name}")   # no response.create: that would be paid
+                    return
             res = await self.registry.call(name, item.get("arguments") or "{}")
             await self.conn.response.item.create(item={"type": "function_call_output", "call_id": call_id,
                                                        "output": res.to_model()})
-            await self.conn.response.create()
+            if nxt is not None:
+                self._pending.append(nxt)
+            try:
+                await self.conn.response.create()
+            except Exception:
+                if nxt is not None and nxt in self._pending:
+                    self._pending.remove(nxt)
+                    nxt.commit()                # send outcome unknown -> counted (conservative)
+                raise
         elif it == "error":
             await self._on_error(inner.get("error") or inner, True)
