@@ -347,3 +347,56 @@ def test_diag_bundle_masks_content_even_when_logged_in_full(tmp_path, monkeypatc
     assert cli.main(["diag", "--out", str(out)]) == 0
     recent = zipfile.ZipFile(out).read("recent.log").decode("utf-8")
     assert "רחוב הרצל" not in recent and _json.loads(recent.splitlines()[-1])["text"].startswith("<")
+
+
+async def test_pear_play_selects_inserted_index_despite_async_insert(tmp_path):
+    """Real Pear 3.12 race (QA 18 Oct): the inserted song shows up in the queue a moment later; pressing "next"
+    immediately played the OLD next song. JARVES must wait for it and PATCH its exact index."""
+    def item(vid, sel=False):
+        return {"playlistPanelVideoWrapperRenderer": {"primaryRenderer": {"playlistPanelVideoRenderer": {
+            "videoId": vid, "selected": sel}}}}
+    state = {"q": [item("CUR", True), item("OLDNEXT")], "polls": 0, "patched": None, "nexted": False}
+
+    def handler(req: httpx.Request):
+        if req.url.path.startswith("/auth/"):
+            return httpx.Response(200, json={"accessToken": "tok"})
+        if req.url.path == "/api/v1/queue" and req.method == "POST":
+            state["pending"] = json.loads(req.content)["videoId"]
+            return httpx.Response(204)
+        if req.url.path == "/api/v1/queue" and req.method == "GET":
+            state["polls"] += 1
+            if state["polls"] >= 3 and state.get("pending"):         # insert lands asynchronously
+                state["q"].insert(1, item(state.pop("pending")))
+            return httpx.Response(200, json={"items": state["q"], "autoPlaying": False})
+        if req.url.path == "/api/v1/queue" and req.method == "PATCH":
+            state["patched"] = json.loads(req.content)["index"]
+            return httpx.Response(204)
+        if req.url.path == "/api/v1/next":
+            state["nexted"] = True
+        return httpx.Response(204)
+    p = PearDesktopPlayer("http://127.0.0.1:26538", tmp_path / "id", transport=httpx.MockTransport(handler))
+    await p.pair()
+    from jarves.skills.music import Track
+    await p.play_track(Track("ARTZI", "Tetaru Lachem", "Shlomo Artzi"))
+    assert state["patched"] == 1 and not state["nexted"] and state["polls"] >= 3
+    await p.close()
+
+
+async def test_music_play_confirms_song_counterpart_with_other_video_id():
+    """YouTube Music plays the 'song' counterpart (different videoId, same title) of a searched music video."""
+    from jarves.skills.music import FakePlayer, MusicSkill, NowPlaying, Track
+    p = FakePlayer()
+    t = Track("VIDEO1", "Tetaru Lachem", "Shlomo Artzi")
+    p.catalog = [t]
+
+    async def search(q):
+        return [t]
+
+    async def play_track(track):
+        p.np = NowPlaying("Tetaru  lachem", "Shlomo Artzi", "SONG_COUNTERPART", False, 0, 200)
+    p.search, p.play_track = search, play_track
+    s = MusicSkill(p, verify_tries=2)
+    res = await next(x for x in s.tools() if x.name == "music_play").handler(type("A", (), {"query": "artzi"})())
+    assert res.ok and "Tetaru" in res.message
+    p.np = NowPlaying("Other song", "X", "OTHER", False, 0, 200)
+    assert MusicSkill._same_track(p.np, t) is False
