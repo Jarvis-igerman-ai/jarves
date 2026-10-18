@@ -61,6 +61,26 @@ def cmd_status(a, cfg, home) -> int:
     return 0 if live["core"] == "ready" else 3
 
 
+def cmd_stop(a, cfg, home) -> int:
+    """Orderly Core shutdown through the authenticated local link."""
+    import websockets
+    from websockets.asyncio.client import connect
+
+    async def go():
+        token = (home / "link_token").read_text(encoding="utf-8").strip()
+        async with connect(f"ws://127.0.0.1:{cfg.link.port}", open_timeout=3) as ws:
+            await ws.send(json.dumps({"type": "hello", "payload": {"token": token, "client": "cli"}}))
+            await ws.send(json.dumps({"type": "core.shutdown", "payload": {}}))
+            await asyncio.sleep(0.5)
+    try:
+        asyncio.run(go())
+    except (OSError, FileNotFoundError, websockets.WebSocketException):
+        print("Core is not running")
+        return 1
+    print("shutdown requested")
+    return 0
+
+
 def _git_rev() -> str:
     try:
         return subprocess.run(["git", "rev-parse", "--short", "HEAD"], capture_output=True, text=True,
@@ -181,6 +201,7 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--config", type=Path, help="config.toml (default: <JARVES_HOME>/config.toml)")
     sub = ap.add_subparsers(dest="cmd", required=True)
     sub.add_parser("run", help="start the Core (Godot face connects to it)")
+    sub.add_parser("stop", help="orderly shutdown of the running Core")
     sub.add_parser("status", help="live health from the running Core, or the last stale snapshot")
     d = sub.add_parser("diag", help="write a redacted support bundle (zip)")
     d.add_argument("--out")
@@ -203,7 +224,7 @@ def main(argv: list[str] | None = None) -> int:
     except ConfigError as e:
         print(f"CONFIG ERROR: {e}", file=sys.stderr)
         return 2
-    return {"run": cmd_run, "status": cmd_status, "diag": cmd_diag, "memory": cmd_memory, "music": cmd_music,
+    return {"run": cmd_run, "stop": cmd_stop, "status": cmd_status, "diag": cmd_diag, "memory": cmd_memory, "music": cmd_music,
             "ask": cmd_ask, "say": cmd_say}[a.cmd](a, cfg, home)
 
 

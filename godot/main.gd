@@ -21,6 +21,9 @@ const EXPLODE_VIEW := {"target": Vector3(0, 0.38, 0), "dist": 1.5}
 const EXPLODE_LIFT := 0.10  # m, global +Y lift per unit factor so downward offsets stay above the ground
 const LED_RING := ["LED_Diffuser_Front", "LED_Diffuser_Back", "LED_Strip", "LED_Connector"]
 const BLANKS := ["LED_Blank_Front", "LED_Blank_Back"]
+const STATIC_FACE := ["Face_Eye_L", "Face_Eye_R", "Face_Smile"]   # Blender placeholder, replaced by the live face
+const FaceScript := preload("res://face/face.gd")
+const AssistantUI := preload("res://face/assistant_ui.gd")
 
 var parts := {}      # name -> MeshInstance3D
 var bodies := {}     # name -> StaticBody3D (click collision)
@@ -54,6 +57,9 @@ var extras: Array = []   # step/overview helper nodes (arrows, labels), freed on
 var step_mode := false
 var leader_layer: CanvasLayer
 var label_px: Array = []  # screen positions of placed Label3Ds (overlap avoidance)
+var face: Control         # live face (face/face.gd) rendered onto the display glass
+var face_quad: MeshInstance3D
+var assistant: PanelContainer
 
 
 func _ready() -> void:
@@ -83,6 +89,7 @@ func _ready() -> void:
 	for n in parts:
 		orig_pos[n] = parts[n].global_transform.origin
 	_build_ui()
+	_build_face()
 	_apply_finish(fin.default)
 	_apply_visibility()
 	_update_camera()
@@ -252,6 +259,39 @@ func _build_ui() -> void:
 	box.add_child(help)
 
 
+func _build_face() -> void:
+	# live animated face on the display glass + assistant controls (Core link); same face as face_app.tscn
+	var vp := SubViewport.new()
+	vp.size = Vector2i(720, 720)
+	vp.transparent_bg = true
+	vp.render_target_update_mode = SubViewport.UPDATE_ALWAYS
+	face = FaceScript.new()
+	face.size = Vector2(720, 720)
+	vp.add_child(face)
+	add_child(vp)
+	if parts.has("Display_Panel"):
+		var bb := _cad_aabb("Display_Panel")
+		var q := QuadMesh.new()
+		q.size = Vector2(0.132, 0.132)       # = CAD face opening (r66)
+		var m := StandardMaterial3D.new()
+		m.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+		m.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+		m.albedo_texture = vp.get_texture()
+		face_quad = MeshInstance3D.new()
+		face_quad.name = "LiveFace"
+		face_quad.mesh = q
+		face_quad.material_override = m
+		parts["Display_Panel"].add_child(face_quad)   # follows the exploded view
+		var ctr := bb.get_center()
+		face_quad.global_transform = Transform3D(Basis.IDENTITY, Vector3(ctr.x, ctr.y, bb.end.z + 0.0008))  # facing +Z (front), ignores GLB node rotation
+	if "--no-core" in OS.get_cmdline_user_args():
+		return
+	assistant = AssistantUI.new()
+	assistant.face = face
+	ui_layer.add_child(assistant)
+	assistant.set_anchors_and_offsets_preset(Control.PRESET_TOP_RIGHT, Control.PRESET_MODE_MINSIZE, 12)
+
+
 func _set_layer(on: bool, c: String) -> void:
 	shown[c] = on
 	if checks.has(c) and checks[c].button_pressed != on:
@@ -261,6 +301,8 @@ func _set_layer(on: bool, c: String) -> void:
 
 func _part_visible(n: String) -> bool:
 	var c: String = cat[n]
+	if n in STATIC_FACE and face_quad != null:
+		return false
 	if c == "alternate":
 		return blank_led and shown["exterior"]
 	if blank_led and n in BLANKS:
