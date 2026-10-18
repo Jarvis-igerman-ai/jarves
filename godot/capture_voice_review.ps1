@@ -25,7 +25,7 @@ foreach ($view in $views) {
 }
 $sourceFiles = @('main.gd','loading.gd','face/assistant_ui.gd','face/face.gd','room/room.gd','assets/JARVIS.glb','assets/finishes.json')
 $sourceHashes = [ordered]@{}
-foreach ($relative in $sourceFiles) { $sourceHashes[$relative] = (Get-FileHash -Algorithm SHA256 -LiteralPath (Join-Path $project $relative)).Hash }
+foreach ($relative in $sourceFiles) { $sourceHashes[$relative] = [Convert]::ToHexString([Security.Cryptography.SHA256]::HashData([Text.Encoding]::UTF8.GetBytes((Get-Content -Raw -LiteralPath (Join-Path $project $relative)).Replace([string][char]13+[char]10,[string][char]10)))) }
 $imageHashes = [ordered]@{}
 foreach ($view in $views) { $imageHashes[$view.name+'.png'] = (Get-FileHash -Algorithm SHA256 -LiteralPath (Join-Path $outDir ($view.name+'.png'))).Hash }
-[ordered]@{method='actual Godot GL compatibility, hidden window; no live audio/API'; source_sha256=$sourceHashes; image_sha256=$imageHashes} | ConvertTo-Json -Depth 4 | Set-Content -LiteralPath (Join-Path $outDir 'evidence.json') -Encoding utf8
+[ordered]@{method='actual Godot GL compatibility, hidden window; no live audio/API'; source_line_endings='LF'; source_sha256=$sourceHashes; image_sha256=$imageHashes} | ConvertTo-Json -Depth 4 | Set-Content -LiteralPath (Join-Path $outDir 'evidence.json') -Encoding utf8
