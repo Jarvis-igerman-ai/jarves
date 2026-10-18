@@ -214,14 +214,20 @@ class RealtimeSpeaker:
         instr = ("You are a text-to-speech voice. Read the user's message aloud EXACTLY as written, in natural, warm "
                  "Israeli Hebrew (or the message's language). Do not add, answer or comment on anything.")
         received = False
+        t0 = time.monotonic()
         try:
             runner = _runner(self.model, self.voice, self.language, instr, [])
             async with await runner.run() as session:
+                t_conn = time.monotonic()
                 await session.send_message(text)
 
                 async with asyncio.timeout(self.timeout):
                     async for ev in session:
                         if ev.type == "audio":
+                            if not received:
+                                logs.info("tts", "TTS_CLOUD_PHASES", "cloud speech phases",
+                                          connect_ms=round((t_conn - t0) * 1000),
+                                          first_audio_ms=round((time.monotonic() - t_conn) * 1000))
                             received = True
                             yield np.frombuffer(ev.audio.data, "<i2").astype(np.float32) / 32768.0, RATE
                         elif ev.type == "audio_end" and received:

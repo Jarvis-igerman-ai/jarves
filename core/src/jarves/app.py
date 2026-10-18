@@ -21,6 +21,7 @@ from .skills import SkillRegistry
 from .skills.builtin import ClockSkill, MemorySkill, StatusSkill
 from .skills.music import MusicSkill, PearDesktopPlayer
 from .voice.audio import AudioUnavailable, SoundDeviceAudio, StreamingAudio
+from .voice.speechcache import SpeechCache
 from .voice.stt import STTUnavailable, WhisperSTT
 from .voice.tts import TTSUnavailable, make_tts
 
@@ -73,6 +74,7 @@ class Core:
         self._busy: asyncio.Task | None = None
         self._confirm: dict[str, tuple[asyncio.Future, str]] = {}   # request id -> (answer, face client id)
         self._bg: list[asyncio.Task] = []
+        self._speech_cache = SpeechCache(home)
         self._tasks: set[asyncio.Task] = set()     # short fire-and-forget tasks (error notices); awaited on stop
         self.stopping = False
         self._greeted = False
@@ -156,6 +158,8 @@ class Core:
         # Accept the room/face connection only after audio and speech are initialized.
         await self.link.start()
         self._bg.append(asyncio.create_task(self._health_loop()))
+        if self.use_real_audio and openai_key_present() and self.cfg.ai.provider == "openai":
+            self._bg.append(asyncio.create_task(asyncio.to_thread(self._prewarm)))
         self._setup_wake()
         self._log_summary()
         self.health.mark("ready")
@@ -313,7 +317,8 @@ class Core:
         text = f"{hello} {self.how_to_talk()}"
         await self.link.send_face("assistant.text", {"text": text, "source": "core", "ok": True, "code": "GREETING"})
         if self.cfg.voice.greeting:
-            await self.speak(f'{hello} תגיד היי ג׳ארוויס כדי לדבר איתי.' if self.wake is not None else hello)
+            await self.speak(f'{hello} תגיד היי ג׳ארוויס כדי לדבר איתי.' if self.wake is not None else hello,
+                             cache=True)
         if self.cfg.voice.activation == "conversation":
             if self.voice_mode in ("live", "realtime"):
                 await self._start_live()
@@ -487,9 +492,21 @@ class Core:
             await asyncio.sleep(1.2)
             await self.set_face("idle")
 
-    async def speak(self, text: str) -> None:
+    async def speak(self, text: str, cache: bool = False) -> None:
+        """Speak `text`. cache=True is for FIXED phrases only (the greeting): a cached copy of the cloud voice
+        plays instantly; a miss streams from the cloud and saves the result for the next start."""
         if not text or self.dev.audio is None:
             return
+        ckey = SpeechCache.key(text, self.cfg.voice.voice, self.cfg.voice.speech_model) if cache else None
+        if ckey and (hit := self._speech_cache.get(ckey)) is not None:
+            logs.info("tts", "SPEECH_CACHE_HIT", "playing the cached greeting (instant)", audio_s=round(len(hit[0]) / hit[1], 1))
+            await self.set_face("speaking")
+            try:
+                await self.dev.speaker_play(*hit)
+            except AudioUnavailable as e:
+                self.health.set("audio", "unavailable", e.message, e.action)
+            return
+        saved: list = []
         if hasattr(self.tts, "stream"):
             t0 = time.monotonic()
             logs.info("tts", "SPEECH_SYNTH_START", "generating streamed speech")
@@ -498,6 +515,7 @@ class Core:
                 first = True
                 async with aclosing(self.tts.stream(text)) as source:
                     async for samples, rate in source:
+                        saved.append((samples, rate))
                         if first:
                             first = False
                             logs.info("tts", "SPEECH_FIRST_AUDIO", "first speech audio received",
@@ -511,6 +529,7 @@ class Core:
             try:
                 async with aclosing(chunks()) as source:
                     await self.dev.speaker_play_stream(source)
+                self._maybe_cache(ckey, saved)
             except TTSUnavailable as e:
                 self.health.set("speech_out", "unavailable", e.message, e.action)
             except AudioUnavailable as e:
@@ -572,6 +591,16 @@ class Core:
 
         live_ref: list = [None]
         ended = [False]
+        async def on_emotion(emotion: str) -> None:
+            from .emotion import DURATION_MS
+            await self.link.send_face("face.emotion", {"emotion": emotion, "ms": DURATION_MS.get(emotion, 3000)})
+
+        async def on_activity(kind: str, text: str = "", detail: str = "") -> None:
+            await self.link.send_face("assistant.activity", {"kind": kind, "text": text, "detail": detail})
+
+        async def on_level(level: float) -> None:
+            await self.link.send_face("mic.level", {"level": round(level, 3)})
+
         common = dict(on_state=self.set_face, on_transcript=on_transcript, on_usage=usage)
         extra = dict(on_end=on_end, on_health=on_health, budget=self.budget)
         if greeting is not None or hold_output:
@@ -583,7 +612,8 @@ class Core:
             live = LiveVoice(self.registry, self.agent.instructions, model=v.live_model, voice=v.voice,
                              backend_model=self.cfg.ai.text_model, web_search=self.cfg.ai.web_search,
                              name=self.cfg.assistant_name, half_duplex=v.half_duplex, max_session_s=max_s,
-                             audio_io=audio_io, idle_disconnect_s=v.idle_disconnect_s, **common, **extra)
+                             audio_io=audio_io, idle_disconnect_s=v.idle_disconnect_s, on_emotion=on_emotion,
+                             on_activity=on_activity, on_level=on_level, **common, **extra)
         else:
             from .voice.realtime import RealtimeVoice
             live = RealtimeVoice(v.realtime_model, self.agent.instructions, self.registry.realtime_tools(),
@@ -658,6 +688,29 @@ class Core:
         except BaseException:
             self._startup_stage("failed", "Startup failed; the room remains closed. See logs / jarvis status.")
             raise
+
+    def _maybe_cache(self, ckey, saved) -> None:
+        """Keep a fixed phrase only when the CLOUD voice produced it (a local fallback is fast anyway)."""
+        if not ckey or not saved or not str(getattr(self.tts, "last_used", "")).startswith("openai"):
+            return
+        try:
+            import numpy as _np
+            self._speech_cache.put(ckey, _np.concatenate([s for s, _ in saved]), saved[0][1])
+            logs.info("tts", "SPEECH_CACHE_SAVED", "greeting cached: next start speaks instantly")
+        except Exception:
+            logs.warn("tts", "SPEECH_CACHE_FAILED", "could not cache the greeting", exc=True)
+
+    def _prewarm(self) -> None:
+        """Import the heavy cloud-voice libraries in a worker thread right at start-up. QA 18 Oct: importing
+        agents.realtime on first use took 6 s (13 s on a busy PC) and delayed the first spoken word."""
+        t0 = time.monotonic()
+        try:
+            import agents.realtime  # noqa: F401
+            import openai  # noqa: F401
+            from .voice import live, realtime  # noqa: F401
+            logs.info("core", "PREWARM_DONE", "cloud voice libraries loaded", ms=round((time.monotonic() - t0) * 1000))
+        except Exception as e:
+            logs.warn("core", "PREWARM_FAILED", f"{type(e).__name__}: {str(e)[:120]}")
 
     def _log_summary(self) -> None:
         """One INFO line that answers "what is this JARVES going to do?" (visible in the terminal at startup)."""

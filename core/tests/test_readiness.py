@@ -15,6 +15,10 @@ from jarves.voice.audio import SimAudio
 from jarves.voice.live import LiveVoice
 from test_voice_faults import FakeAudio, FakeClient
 
+def _loud(nbytes):
+    import numpy as np
+    return (np.sin(np.arange(nbytes // 2) * 2 * np.pi * 220 / 24000) * 0.3 * 32767).astype("<i2").tobytes()
+
 
 async def test_live_greeting_is_buffered_without_opening_mic_until_presented():
     opened = []
@@ -38,7 +42,7 @@ async def test_live_greeting_is_buffered_without_opening_mic_until_presented():
         waiting = asyncio.create_task(voice.wait_ready(timeout=1))
         await asyncio.sleep(0.02)
         assert not waiting.done() and opened == [] and client.conn.mic_frames > 0  # generated silence only
-        client.conn.push({"type": "session.output_audio.delta", "delta": base64.b64encode(bytes(4800)).decode()})
+        client.conn.push({"type": "session.output_audio.delta", "delta": base64.b64encode(_loud(4800)).decode()})
         await waiting
         assert opened == [] and audio.enqueued
         voice.present()

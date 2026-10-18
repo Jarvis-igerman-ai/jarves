@@ -38,6 +38,10 @@ if TYPE_CHECKING:
     from ..budget import Budget
 
 RATE = 24000
+# GPT-Live streams audio CONTINUOUSLY in real time, silence included (QA 18 Oct 2026: 5.0 s of audio per 5 s, all
+# session long). Only chunks LOUDER than this (rms, 0..1; speech is ~0.03-0.3) count as JARVES speaking.
+SPEECH_RMS = 0.004
+PAUSE_KEEP_S = 0.6        # silence this soon after speech is a pause INSIDE the utterance: keep it, else drop it
 CHUNK_BYTES = 4800          # 100 ms of PCM16 mono @ 24 kHz
 BARGE_IN_MIN_S = 0.5        # assistant audio must have been playing this long before a new user utterance flushes it
 
@@ -47,7 +51,9 @@ Use a composed adult masculine delivery, measured pace, clear diction and restra
 Delegate to the backend for: current information (news, weather, prices, facts you are unsure of), music control,
 questions about your skills/capabilities and which services are actually connected,
 remembering/forgetting things, the time, and JARVES status. While the backend works, say a very short filler
-("רגע, בודק"). Never claim an action happened until the backend confirms it."""
+("רגע, בודק"). Never claim an action happened until the backend confirms it.
+Show feelings naturally with your voice: laugh out loud ("חה חה") at a good joke, and when you tell one, sound
+sad and gentle for sad news, delighted for good news. Keep it subtle and brief, never theatrical."""
 
 # Errors after which the session cannot do useful work -> end it (others: log + degraded + continue).
 FATAL_ERROR_TYPES = {"authentication_error", "permission_error"}
@@ -108,6 +114,15 @@ class _Counted:
 
     def commit(self) -> None:
         self.budget.record("ai_requests", 1)
+
+
+def _rms16(pcm: bytes) -> float:
+    """RMS level (0..1) of little-endian int16 PCM."""
+    if len(pcm) < 2:
+        return 0.0
+    import numpy as _np
+    a = _np.frombuffer(pcm[: len(pcm) // 2 * 2], "<i2").astype(_np.float32) / 32768.0
+    return float(_np.sqrt(_np.mean(a * a)))
 
 
 def is_fatal(code: str, etype: str) -> bool:
@@ -285,7 +300,13 @@ class LiveVoice(SessionLifecycle):
                  on_end: Callable[[str], Awaitable[None]] | None = None,
                  on_health: Callable[[str, str, str], Any] | None = None,
                  budget: "Budget | None" = None, start_timeout_s: float = 15, close_timeout_s: float = 5,
-                 greeting: str | None = None, hold_output: bool = False, idle_disconnect_s: float = 180) -> None:
+                 greeting: str | None = None, hold_output: bool = False, idle_disconnect_s: float = 180,
+                 on_emotion: Callable[[str], Any] | None = None,
+                 on_activity: Callable[[str, str, str], Any] | None = None,
+                 on_level: Callable[[float], Any] | None = None) -> None:
+        self.on_emotion, self.on_activity, self.on_level = on_emotion, on_activity, on_level
+        self._last_emotion = ("", 0.0)
+        self._activity_gen = 0
         self.registry, self.backend_instructions = registry, backend_instructions
         self.model, self.voice, self.backend_model, self.web_search = model, voice, backend_model, web_search
         self.name, self.half_duplex, self.max_session_s = name, half_duplex, max_session_s
@@ -303,6 +324,10 @@ class LiveVoice(SessionLifecycle):
 
     def _reset_session(self) -> None:
         self._first_audio = asyncio.Event()
+        self._audio_in_s = 0.0
+        self._speech_in_s = 0.0
+        self._silence_rms_max = 0.0
+        self._last_speech_t = 0.0
         self._presented = asyncio.Event()
         if not self.hold_output:
             self._presented.set()
@@ -458,15 +483,37 @@ class LiveVoice(SessionLifecycle):
         while self.running and not self._presented.is_set():
             await self.conn.session.input_audio.append(audio=base64.b64encode(silence).decode())
             await asyncio.sleep(0.1)
+        from .wakeword import rms
+        sent = silenced = 0
+        peak = 0.0
+        last_level = 0.0
+        t_diag = time.monotonic()
         async for chunk in self.audio_io.mic_chunks(RATE, CHUNK_BYTES):
             if not self.running:
                 return
             gated = self._gated()
-            if not gated:
-                from .wakeword import rms
-                if rms(chunk) > 0.015:
-                    self.note_activity()
+            level = rms(chunk)
+            if self.on_level is not None and time.monotonic() - last_level >= 0.2:
+                last_level = time.monotonic()
+                from .wakeword import level_meter
+                await _call(self.on_level, 0.0 if gated else level_meter(chunk))
+            if not gated and level > 0.015:
+                self.note_activity()
             await self.conn.session.input_audio.append(audio=base64.b64encode(silence if gated else chunk).decode())
+            sent += 1
+            silenced += gated
+            peak = max(peak, 0.0 if gated else level)
+            if time.monotonic() - t_diag >= 5:                # what the model actually receives (debugging aid)
+                logs.info("live", "LIVE_MIC", "microphone audio sent to GPT-Live (last 5 s)", frames=sent,
+                          silenced=silenced, peak_rms=round(peak, 3), input_closed=self._input_closed,
+                          speaking=time.monotonic() < self._speaking_until,
+                          gate_closed_for_s=round(max(0.0, self._speaking_until - time.monotonic()), 1),
+                          model_audio_in_s=round(self._audio_in_s, 1), model_speech_s=round(self._speech_in_s, 1),
+                          silence_rms_max=round(self._silence_rms_max, 4),
+                          speaker_queue_s=round(self.audio_io.queued_s(), 1))
+                self._audio_in_s = self._speech_in_s = self._silence_rms_max = 0.0
+                sent = silenced = 0
+                peak, t_diag = 0.0, time.monotonic()
             if self._speech_pending and time.monotonic() >= self._speaking_until:
                 self._speech_pending = False
                 await self._state("listening")
@@ -479,17 +526,28 @@ class LiveVoice(SessionLifecycle):
         await self.audio_io.run_player(RATE)
 
     def _play(self, pcm: bytes) -> None:
-        self.note_activity()
-        self._speech_pending = True
+        """Queue server audio. SILENCE (the continuous stream between utterances) must not mute the mic, count as
+        activity, trigger "speaking" or build a playback backlog (that backlog was a permanent ~3.5 s delay)."""
         now = time.monotonic()
-        if now > self._speaking_until:
-            self._turn_audio_t0 = now
-        self._speaking_until = max(self._speaking_until, now) + len(pcm) / 2 / RATE
-        if self.audio_io is not None:
-            self.audio_io.enqueue(pcm)
-        if pcm and not self._first_audio.is_set():
-            self._first_audio.set()
-            logs.info("live", "LIVE_FIRST_AUDIO", "first live-session output audio received")
+        dur = len(pcm) / 2 / RATE
+        self._audio_in_s += dur
+        if _rms16(pcm) > SPEECH_RMS:
+            self.note_activity()
+            self._speech_pending = True
+            self._speech_in_s += dur
+            if now > self._speaking_until:
+                self._turn_audio_t0 = now
+            self._speaking_until = max(self._speaking_until, now) + dur
+            self._last_speech_t = now
+            if self.audio_io is not None:
+                self.audio_io.enqueue(pcm)
+            if not self._first_audio.is_set():
+                self._first_audio.set()
+                logs.info("live", "LIVE_FIRST_AUDIO", "first live-session output audio received")
+            return
+        self._silence_rms_max = max(self._silence_rms_max, _rms16(pcm))
+        if self.audio_io is not None and now - self._last_speech_t < PAUSE_KEEP_S:
+            self.audio_io.enqueue(pcm)             # a natural pause inside the sentence: keep its length
 
     async def interrupt(self) -> None:
         """Barge-in: drop queued assistant speech immediately."""
@@ -540,9 +598,10 @@ class LiveVoice(SessionLifecycle):
                 self._t_started = self._clock()
             await self._health("ok", f"GPT-Live connected ({self.model} -> {self.backend_model})", "")
         elif t == "session.output_audio.delta":
-            if time.monotonic() > self._speaking_until:
+            pcm = base64.b64decode(g("delta"))
+            if _rms16(pcm) > SPEECH_RMS and time.monotonic() > self._speaking_until:
                 await self._state("speaking")
-            self._play(base64.b64decode(g("delta")))
+            self._play(pcm)
         elif t == "session.input_transcript.delta":
             self.note_activity()
             now = time.monotonic()
@@ -550,15 +609,21 @@ class LiveVoice(SessionLifecycle):
                     and now - self._turn_audio_t0 >= BARGE_IN_MIN_S):
                 await self.interrupt()          # new user utterance over still-queued assistant speech
             self._in_text += g("delta") or ""
-            if self._out_text and self.on_transcript:
-                await self.on_transcript("assistant", self._out_text.strip())
+            if self._out_text:
+                logs.info("live", "LIVE_JARVES_SAID", "JARVES said", text=self._out_text.strip())
+                if self.on_transcript:
+                    await self.on_transcript("assistant", self._out_text.strip())
                 self._out_text = ""
         elif t == "session.output_transcript.delta":
             self.note_activity()
-            if self._in_text and self.on_transcript:
-                await self.on_transcript("user", self._in_text.strip())
+            if self._in_text:
+                logs.info("live", "LIVE_USER_SAID", "you said (as GPT-Live heard it)", text=self._in_text.strip())
+                await self._emote("user", self._in_text)
+                if self.on_transcript:
+                    await self.on_transcript("user", self._in_text.strip())
                 self._in_text = ""
             self._out_text += g("delta") or ""
+            await self._emote("jarves", self._out_text[-80:])
         elif t == "session.delegation.created":
             if self.budget is not None and _get(g("delegation"), "target") == "responses":
                 await self._take_credit("delegation")
@@ -619,6 +684,46 @@ class LiveVoice(SessionLifecycle):
             logs.warn("live", "AI_BUDGET", f"no budget for another request ({where}); mic input closed, "
                       "ending after this answer", action="raise ai.daily_request_limit")
 
+    async def _emote(self, role: str, text: str) -> None:
+        """Face reaction to what was said (laugh at a joke, cry at sad news...). Same reaction at most every 5 s."""
+        if self.on_emotion is None:
+            return
+        from ..emotion import detect_emotion
+        emo = detect_emotion(text, role)
+        now = time.monotonic()
+        if emo and not (self._last_emotion[0] == emo and now - self._last_emotion[1] < 5.0):
+            self._last_emotion = (emo, now)
+            logs.info("live", "LIVE_EMOTION", f"reacting: {emo}", role=role)
+            await _call(self.on_emotion, emo)
+
+    async def _activity(self, kind: str, text: str = "", detail: str = "") -> None:
+        """What JARVES is doing, for the screen (thinking / searching / music ...). kind "done" clears it."""
+        self._activity_gen += 1
+        if self.on_activity is not None:
+            await _call(self.on_activity, kind, text, detail)
+
+    async def _tool_activity(self, name: str, res) -> None:
+        """Screen text for a Skill call (res=None: starting; else: finished)."""
+        if name.startswith("music_"):
+            if res is not None and res.ok and name == "music_play":
+                np = ((res.data or {}).get("now_playing") or {})
+                await self._activity("music", "מנגן", f"{np.get('title', '')} – {np.get('artist', '')}".strip(" –"))
+            elif res is None:
+                await self._activity("music", {"music_play": "מחפש שיר…", "music_next": "השיר הבא…",
+                                               "music_pause": "משהה…", "music_resume": "ממשיך…",
+                                               "music_volume": "מכוונן עוצמה…"}.get(name, "מוזיקה…"))
+        elif res is None:
+            kind, text = ({"get_time": ("time", "בודק שעה…"), "remember": ("memory", "זוכר…"),
+                           "recall": ("memory", "נזכר…"), "forget": ("memory", "מוחק מהזיכרון…"),
+                           "forget_all": ("memory", "מוחק מהזיכרון…")}.get(name, ("tool", "עובד על זה…")))
+            await self._activity(kind, text)
+
+    async def _clear_activity_later(self, delay: float = 3.5) -> None:
+        gen = self._activity_gen
+        await asyncio.sleep(delay)
+        if gen == self._activity_gen and self.running:
+            await self._activity("done")
+
     async def _budget_exhausted(self, where: str) -> None:
         logs.warn("live", "AI_BUDGET", f"daily AI request limit reached ({where}); ending live session",
                   action="raise ai.daily_request_limit")
@@ -632,11 +737,16 @@ class LiveVoice(SessionLifecycle):
             self._backend_busy = True
             self.note_activity()
             await self._state("thinking")
+            await self._activity("thinking", "חושב…")
+        elif it.startswith("response.web_search_call") or (
+                it == "response.output_item.added" and (inner.get("item") or {}).get("type") == "web_search_call"):
+            await self._activity("searching", "מחפש ברשת…")
         elif it in ("response.completed", "response.failed", "response.incomplete"):
             self._backend_busy = False
             self.note_activity()
             # One delegated backend response finished (billed whether or not it succeeded) -> count it.
             self._stats["backend_responses"] += 1
+            self._spawn(self._clear_activity_later(), "activity-clear")
             if self.budget is not None and not self._budget_settled:
                 if self._pending:
                     self._pending.pop(0).commit()
@@ -664,7 +774,9 @@ class LiveVoice(SessionLifecycle):
                                                                "output": res.to_model()})
                     await self._budget_exhausted(f"tool {name}")   # no response.create: that would be paid
                     return
+            await self._tool_activity(name, None)
             res = await self.registry.call(name, item.get("arguments") or "{}")
+            await self._tool_activity(name, res)
             await self.conn.response.item.create(item={"type": "function_call_output", "call_id": call_id,
                                                        "output": res.to_model()})
             if nxt is not None:

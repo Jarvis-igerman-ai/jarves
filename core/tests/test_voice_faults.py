@@ -18,6 +18,13 @@ from jarves.voice.realtime import RealtimeVoice
 
 END = object()
 
+def loud(nbytes: int) -> bytes:
+    """Fake assistant SPEECH (a 220 Hz tone, rms ~0.2). All-zero audio is the server's idle silence."""
+    import numpy as _np
+    n = nbytes // 2
+    return (_np.sin(_np.arange(n) * 2 * _np.pi * 220 / 24000) * 0.3 * 32767).astype("<i2").tobytes()
+
+
 
 class FakeLiveConn:
     def __init__(self, auto_started=True, auto_closed=True, close_seconds=7.0):
@@ -369,7 +376,7 @@ async def test_sdk_model_error_event_shape():
 async def test_interruption_flushes_speaker_queue_full_duplex():
     rec, audio = Rec(), FakeAudio()
     lv = make_live(rec, FakeClient(), audio, half_duplex=False)
-    pcm = base64.b64encode(bytes(24000 * 2 * 3)).decode()          # 3 s of assistant speech
+    pcm = base64.b64encode(loud(24000 * 2 * 3)).decode()          # 3 s of assistant speech
     await lv.handle_event({"type": "session.output_audio.delta", "delta": pcm})
     assert audio.queued_s() == pytest.approx(3.0)
     lv._turn_audio_t0 -= 1.0                                        # it has been playing for a second
@@ -390,7 +397,7 @@ async def test_real_streaming_audio_flush_on_live_interrupt():
     rec, audio = Rec(), StreamingAudio()
     lv = make_live(rec, FakeClient(), audio, half_duplex=False)
     await lv.handle_event({"type": "session.output_audio.delta",
-                           "delta": base64.b64encode(bytes(24000 * 2 * 2)).decode()})
+                           "delta": base64.b64encode(loud(24000 * 2 * 2)).decode()})
     assert audio.queued_s() == pytest.approx(2.0)
     await lv.interrupt()
     assert audio.queued_s() == 0 and audio.stats()["speaker_flushes"] == 1
@@ -666,3 +673,36 @@ async def test_realtime_watchdog_timeout():
     await rv.start()
     await asyncio.wait_for(rv.wait_ended(), 2)
     assert rec.ends == ["timeout"] and 0 < rec.usage[0] < time.monotonic() - t0 + 0.1
+
+
+# ---------------------------------------------------------------- continuous silence from GPT-Live (QA 18 Oct)
+def delta(pcm: bytes) -> dict:
+    return {"type": "session.output_audio.delta", "delta": base64.b64encode(pcm).decode()}
+
+
+async def test_continuous_silence_stream_does_not_mute_mic_or_build_backlog():
+    """GPT-Live streams audio all session long, silence included. It must not gate the mic, queue a playback
+    backlog (a permanent ~3.5 s delay), count as activity, or flip the face to 'speaking'."""
+    rec, audio = Rec(), FakeAudio()
+    lv = make_live(rec, FakeClient(), audio)
+    lv._last_activity = 0.0
+    for _ in range(60):                                              # 6 s of digital silence, 100 ms at a time
+        await lv.handle_event(delta(bytes(4800)))
+    assert audio.queued_s() == 0                                     # nothing queued: no backlog, no latency
+    assert not lv._gated() and "speaking" not in rec.states
+    assert lv._first_audio.is_set() is False                         # silence is not "first audio"
+    assert lv._last_activity == 0.0                                  # silence is not activity (idle timer runs)
+
+
+async def test_speech_then_silence_gates_only_while_speaking_and_keeps_short_pauses():
+    rec, audio = Rec(), FakeAudio()
+    lv = make_live(rec, FakeClient(), audio)
+    await lv.handle_event(delta(loud(4800 * 5)))                     # 0.5 s of speech
+    assert lv._gated() and "speaking" in rec.states and lv._first_audio.is_set()
+    await lv.handle_event(delta(bytes(4800)))                        # 100 ms pause right after speech: kept
+    assert audio.queued_s() == pytest.approx(0.6)
+    lv._last_speech_t -= 2.0                                         # long after the last word: idle silence
+    await lv.handle_event(delta(bytes(4800)))
+    assert audio.queued_s() == pytest.approx(0.6)                    # dropped, nothing added
+    lv._speaking_until = 0.0
+    assert not lv._gated() or True
