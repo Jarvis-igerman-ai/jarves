@@ -56,7 +56,7 @@ func _e2e() -> void:
 	ui.link.message.connect(func(t, p):
 		if t == "face.set_state":
 			states.append(p.get("state"))
-		elif t == "assistant.text":
+		elif t == "assistant.text" and p.get("code", "") != "GREETING":
 			replies.append(p))
 	var t0 := Time.get_ticks_msec()
 	while not ui.link.connected and Time.get_ticks_msec() - t0 < 15000:
