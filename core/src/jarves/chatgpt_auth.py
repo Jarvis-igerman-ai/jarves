@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import asyncio
 import base64
+import contextlib
 import hashlib
 import json
 import os
@@ -25,6 +26,7 @@ import uuid
 import webbrowser
 from dataclasses import dataclass
 from pathlib import Path
+from typing import AsyncIterator, Callable
 from urllib.parse import parse_qs, urlencode, urlparse
 
 import httpx
@@ -61,15 +63,43 @@ def pkce_pair() -> tuple[str, str]:
 
 def _write_private(path: Path, data: dict) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
-    tmp = path.with_suffix(".tmp")
+    tmp = path.with_name(f"{path.name}.{secrets.token_hex(4)}.tmp")     # unique: concurrent writers never clash
     fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
     with os.fdopen(fd, "w", encoding="utf-8") as f:
         json.dump(data, f)
-    os.replace(tmp, path)
+    try:
+        for attempt in range(20):
+            try:
+                os.replace(tmp, path)
+                break
+            except PermissionError:          # Windows: a reader has the target open for a moment
+                if attempt == 19:
+                    raise
+                time.sleep(0.01 * (attempt + 1))
+    finally:
+        tmp.unlink(missing_ok=True)
     try:
         os.chmod(path, 0o600)       # no-op on Windows; %LOCALAPPDATA% is already per-user
     except OSError:
         pass
+
+
+def _read_json(path: Path) -> dict:
+    for attempt in range(20):
+        try:
+            d = json.loads(path.read_text(encoding="utf-8"))
+            return d if isinstance(d, dict) else {}
+        except FileNotFoundError:
+            return {}
+        except PermissionError:              # Windows: the file is being replaced right now
+            time.sleep(0.01 * (attempt + 1))
+        except (OSError, ValueError):
+            return {}
+    return {}
+
+
+LOCK_STALE_S = 30
+LOCK_WAIT_S = 15
 
 
 @dataclass
@@ -78,10 +108,17 @@ class _Callback:
 
 
 class ChatGPTAuth:
+    """Storage contract (Issue #9 CR-07): every write of account.json (sign-in, refresh, revoke/clear, sign-out)
+    is a read-modify-write under `_account_lock()` - an in-process asyncio lock plus the cross-process lock file
+    `chatgpt/refresh.lock` (same file the refresh always used, so older CLIs still interoperate). The model cache
+    lives separately in `chatgpt/models.json` (no secrets), so caching models can never overwrite credentials."""
+
     def __init__(self, home: Path, *, transport: httpx.AsyncBaseTransport | None = None,
                  jwks_client=None, open_browser=webbrowser.open) -> None:
         self.dir = home / "chatgpt"
         self.file = self.dir / "account.json"
+        self.models_file = self.dir / "models.json"
+        self.lock_file = self.dir / "refresh.lock"
         self._transport = transport
         self._jwks = jwks_client
         self._open_browser = open_browser
@@ -89,13 +126,68 @@ class ChatGPTAuth:
 
     # ------------------------------------------------------------------ storage
     def load(self) -> dict:
-        try:
-            return json.loads(self.file.read_text(encoding="utf-8"))
-        except (OSError, ValueError):
-            return {}
+        return _read_json(self.file)
 
     def _save(self, acct: dict) -> None:
+        """Raw write; callers hold `_account_lock()` (tests use it to seed state)."""
+        acct = {k: v for k, v in acct.items() if k != "models"}      # model cache never lives with secrets
         _write_private(self.file, acct)
+
+    @contextlib.asynccontextmanager
+    async def _account_lock(self) -> AsyncIterator[None]:
+        """Exclusive access to account.json across tasks of this process AND other processes (Core + CLI)."""
+        async with self._lock:
+            self.dir.mkdir(parents=True, exist_ok=True)
+            deadline = time.time() + LOCK_WAIT_S
+            while True:
+                try:
+                    fd = os.open(self.lock_file, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+                    os.close(fd)
+                    break
+                except FileExistsError:
+                    try:
+                        if time.time() - self.lock_file.stat().st_mtime > LOCK_STALE_S:
+                            self.lock_file.unlink(missing_ok=True)        # holder crashed
+                            continue
+                    except OSError:
+                        pass
+                    if time.time() > deadline:
+                        raise ChatGPTAuthError("CHATGPT_REFRESH_BUSY", "ChatGPT account file is locked", "try again")
+                    await asyncio.sleep(0.05)
+                except PermissionError:          # Windows: lock file is being deleted by its holder
+                    await asyncio.sleep(0.05)
+            try:
+                yield
+            finally:
+                try:
+                    self.lock_file.unlink(missing_ok=True)
+                except OSError:
+                    pass
+
+    async def _update(self, fn: Callable[[dict], dict | None]) -> dict | None:
+        """The one locked read-modify-write: fn(current) returns the new account, or None to delete the file."""
+        async with self._account_lock():
+            new = fn(self.load())
+            if new is None:
+                self.file.unlink(missing_ok=True)
+            else:
+                self._save(new)
+            return new
+
+    def models(self) -> list[dict]:
+        """Cached model list (from models.json; never stored with tokens)."""
+        m = _read_json(self.models_file).get("models")
+        return m if isinstance(m, list) else []
+
+    def save_models(self, models: list[dict]) -> None:
+        """Whole-file atomic replace of the secret-free cache; cannot touch account.json."""
+        _write_private(self.models_file, {"models": list(models), "saved_at": time.time()})
+
+    def _forget_models(self) -> None:
+        try:
+            self.models_file.unlink(missing_ok=True)
+        except OSError:
+            pass
 
     def host_id(self) -> str:
         p = self.dir / "host_id"
@@ -103,7 +195,12 @@ class ChatGPTAuth:
             return p.read_text(encoding="utf-8").strip()
         hid = f"urn:uuid:{uuid.uuid4()}"
         self.dir.mkdir(parents=True, exist_ok=True)
-        p.write_text(hid, encoding="utf-8")
+        try:                                   # create-once: a concurrent process keeps the first ID
+            fd = os.open(p, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+        except FileExistsError:
+            return p.read_text(encoding="utf-8").strip()
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            f.write(hid)
         return hid
 
     def status(self) -> dict:
@@ -212,9 +309,16 @@ class ChatGPTAuth:
             logs.info("chatgpt", "CHATGPT_ACCOUNT_SWITCH", "signed in with a different ChatGPT account")
         acct = {"issuer": ISSUER, "client_id": client_id, "ext_agent_host_id": self.host_id(),
                 "subject": claims["sub"], "email": claims.get("email", ""), "id_token": tok["id_token"],
-                "models": [], "saved_at": time.time()}
+                "saved_at": time.time()}
         acct.update(self._token_fields(tok))
-        self._save(acct)
+
+        def store(cur: dict) -> dict:
+            if cur.get("client_id") and cur["client_id"] != client_id:
+                raise ChatGPTAuthError("CHATGPT_CLIENT_MISMATCH", "sign-in returned a different app registration",
+                                       "try again; if it repeats, run `jarves chatgpt logout --forget`")
+            return acct
+        await self._update(store)
+        self._forget_models()                 # the model list belongs to the previous session/account
         st = self.status()
         logs.info("chatgpt", "CHATGPT_SIGNED_IN", "ChatGPT connected", plan_usage=st["plan_usage"])
         return st
@@ -265,29 +369,14 @@ class ChatGPTAuth:
                                    "run `jarves chatgpt login` and allow plan usage, or use an API key")
         if a.get("expires_at", 0) - time.time() > REFRESH_MARGIN_S:
             return a["access_token"]
-        async with self._lock:
-            return await self._refresh_locked()
+        return await self._refresh()
 
-    async def _refresh_locked(self) -> str:
-        lock = self.dir / "refresh.lock"
-        deadline = time.time() + 15
-        while True:                           # cross-process: the Core and the CLI share one rotating token
-            try:
-                fd = os.open(lock, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
-                os.close(fd)
-                break
-            except FileExistsError:
-                try:
-                    if time.time() - lock.stat().st_mtime > 30:
-                        lock.unlink(missing_ok=True)
-                        continue
-                except OSError:
-                    pass
-                if time.time() > deadline:
-                    raise ChatGPTAuthError("CHATGPT_REFRESH_BUSY", "token refresh is locked", "try again")
-                await asyncio.sleep(0.2)
-        try:
-            a = self.load()                   # another process may have refreshed already
+    async def _refresh(self) -> str:
+        """Refresh under the account lock: the Core and the CLI share one rotating refresh token."""
+        async with self._account_lock():
+            a = self.load()                   # another process may have refreshed - or signed out - already
+            if not a.get("refresh_token"):
+                raise ChatGPTAuthError("CHATGPT_SIGNED_OUT", "not connected to ChatGPT", "run `jarves chatgpt login`")
             if a.get("expires_at", 0) - time.time() > REFRESH_MARGIN_S:
                 return a["access_token"]
             try:
@@ -296,51 +385,51 @@ class ChatGPTAuth:
             except ChatGPTAuthError as e:
                 err = e.code.removeprefix("oauth:")
                 if err in TERMINAL_REFRESH_ERRORS:
-                    self._clear_tokens(a)
+                    self._save(self._without_tokens(self.load()))
                     logs.warn("chatgpt", "CHATGPT_SESSION_ENDED", f"refresh rejected ({err})")
                     raise ChatGPTAuthError("CHATGPT_SIGNED_OUT", "the ChatGPT connection ended",
                                            "run `jarves chatgpt login` to reconnect") from e
                 if e.code == "CHATGPT_OFFLINE":
                     raise
                 raise ChatGPTAuthError("CHATGPT_REFRESH_FAILED", e.message, "see logs") from e
-            a.update(self._token_fields(tok))        # access, expiry, scopes and rotating refresh token together
-            if not tok.get("refresh_token"):
-                a["refresh_token"] = self.load().get("refresh_token", "")
-            a["saved_at"] = time.time()
-            self._save(a)
+            cur = self.load()                 # re-read under the lock, then merge only the token fields
+            if not cur.get("refresh_token") or cur.get("client_id") != a.get("client_id"):
+                raise ChatGPTAuthError("CHATGPT_SIGNED_OUT", "the ChatGPT connection ended",
+                                       "run `jarves chatgpt login` to reconnect")
+            fields = self._token_fields(tok)  # access, expiry, scopes and rotating refresh token together
+            if not fields["refresh_token"]:
+                fields["refresh_token"] = cur["refresh_token"]
+            cur.update(fields, saved_at=time.time())
+            self._save(cur)
             logs.info("chatgpt", "CHATGPT_REFRESHED", "ChatGPT access renewed")
-            return a["access_token"]
-        finally:
-            lock.unlink(missing_ok=True)
+            return cur["access_token"]
 
-    def _clear_tokens(self, a: dict) -> None:
+    @staticmethod
+    def _without_tokens(a: dict) -> dict:
         """Keep client ID, host ID, account label and ID token (for id_token_hint); drop usable tokens."""
-        for k in ("access_token", "refresh_token", "expires_at", "scopes"):
-            a.pop(k, None)
-        self._save(a)
+        return {k: v for k, v in a.items() if k not in ("access_token", "refresh_token", "expires_at", "scopes")}
 
-    def mark_revoked(self) -> None:
-        a = self.load()
-        if a:
-            self._clear_tokens(a)
-
-    def save_models(self, models: list[dict]) -> None:
-        a = self.load()
-        if a:
-            a["models"] = models
-            self._save(a)
+    async def mark_revoked(self) -> None:
+        await self._update(lambda a: self._without_tokens(a) if a else None)
 
     async def sign_out(self, forget: bool = False) -> bool:
-        """Revoke the refresh token remotely, then clear locally. Returns True if revocation was confirmed."""
-        a = self.load()
+        """Clear locally first (under the account lock, so no in-flight refresh can resurrect tokens), then revoke
+        the refresh token remotely. Returns True if revocation was confirmed."""
+        taken: dict = {}
+
+        def clear(a: dict) -> dict | None:
+            taken.update(a)
+            return None if forget or not a else self._without_tokens(a)
+        await self._update(clear)
+        self._forget_models()
         confirmed = False
-        if a.get("refresh_token"):
+        if taken.get("refresh_token"):
             for attempt in range(3):
                 try:
                     async with self._client() as c:
-                        r = await c.post(REVOKE_URL, data={"token": a["refresh_token"],
+                        r = await c.post(REVOKE_URL, data={"token": taken["refresh_token"],
                                                            "token_type_hint": "refresh_token",
-                                                           "client_id": a["client_id"]})
+                                                           "client_id": taken["client_id"]})
                     if r.status_code == 200:
                         confirmed = True
                         break
@@ -349,9 +438,5 @@ class ChatGPTAuth:
                 except httpx.HTTPError:
                     pass
                 await asyncio.sleep(0.5 * (attempt + 1))
-        if forget:
-            self.file.unlink(missing_ok=True)
-        elif a:
-            self._clear_tokens(a)
         logs.info("chatgpt", "CHATGPT_SIGNED_OUT", "ChatGPT disconnected", revoked=confirmed)
         return confirmed

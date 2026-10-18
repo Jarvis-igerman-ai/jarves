@@ -276,7 +276,7 @@ async def test_plan_brain_tool_round_trip(tmp_path, monkeypatch):
     await b.reply("תודה")                                     # history carried statelessly in input
     assert srv.bodies[2]["input"][0]["content"] == "כמה זמן נשאר עד הערב?"
     assert mem.usage_today("ai_requests") == 3
-    assert b.auth.load()["models"][0]["slug"] == "gpt-6.1-sol"
+    assert b.auth.models()[0]["slug"] == "gpt-6.1-sol" and "models" not in b.auth.load()   # no models beside secrets
 
 
 async def test_plan_limit_pauses_without_api_fallback(tmp_path, monkeypatch):

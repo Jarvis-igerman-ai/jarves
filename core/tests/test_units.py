@@ -95,9 +95,9 @@ class EchoSkill(Skill):
         async def slow(_):
             await asyncio.sleep(5)
             return ToolResult(True, "late")
-        return [Tool("echo", "echo a word", echo, A), Tool("boom", "crashes", boom),
-                Tool("slow", "too slow", slow, timeout_s=0.05),
-                Tool("danger", "needs ok", echo, A, side_effect=True, confirm="sure?")]
+        return [Tool("echo", "echo a word", echo, A, permission="read"), Tool("boom", "crashes", boom, permission="read"),
+                Tool("slow", "too slow", slow, timeout_s=0.05, permission="read"),
+                Tool("danger", "needs ok", echo, A, permission="destructive", confirm="sure?")]
 
 
 async def test_registry_validation_errors_and_isolation():
