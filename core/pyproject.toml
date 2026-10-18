@@ -16,6 +16,7 @@ dependencies = [
 voice = [
     "sounddevice>=0.5",                 # PortAudio mic/speaker (Windows + Linux)
     "faster-whisper>=1.2",              # offline STT (Hebrew via ivrit-ai models)
+    "pyopen-wakeword>=1.1,<2",          # offline "hey jarvis" wake word (openWakeWord models + bundled TFLite C lib)
     "winrt-runtime>=3.2; sys_platform == 'win32'",
     "winrt-Windows.Media.SpeechSynthesis>=3.2; sys_platform == 'win32'",
     "winrt-Windows.Storage.Streams>=3.2; sys_platform == 'win32'",
