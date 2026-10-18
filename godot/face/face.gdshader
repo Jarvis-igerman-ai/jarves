@@ -36,10 +36,36 @@ uniform vec2 dot_pos = vec2(0.0, 0.84);
 uniform float dot_pulse = 0.0;         // expanding ring (live conversation)
 uniform float dot_breathe = 0.0;       // slow brightness breathing (connecting)
 uniform float dot_slash = 0.0;         // muted: hollow ring + slash
+// motion speeds / amounts (face.gd CALM / LIVELY tuning block)
+uniform float wave_amt = 0.1;          // rim halo shimmer depth
+uniform float wave_speed = 0.5;        // rim halo shimmer speed
+uniform float spin_speed = 1.2;        // thinking comet, rad/s
+uniform float tear_thresh = 0.97;      // error glitch: higher = rarer tears
+uniform float dot_speed = 0.6;         // status-dot pulse / breathe speed
+// transient reactions (face.gd REACT)
+uniform float cry = 0.0;               // 0..1: tears sliding down from the outer lower lids
+uniform float tear_hz = 0.28;          // tear cycles per second per eye
+uniform float mouth_o = 0.0;           // 0..1: blend the mouth into a small round "o" (surprised)
+uniform float heart = 0.0;             // 0..1: heart-shaped glints in the eyes (love)
 
 float sd_rbox(vec2 p, vec2 b, float r) {
 	vec2 q = abs(p) - b + r;
 	return length(max(q, 0.0)) + min(max(q.x, q.y), 0.0) - r;
+}
+
+float dot2(vec2 v) { return dot(v, v); }
+
+// heart (Inigo Quilez), y up, tip at the origin, about 1 unit tall
+float sd_heart(vec2 p) {
+	p.x = abs(p.x);
+	if (p.y + p.x > 1.0) return sqrt(dot2(p - vec2(0.25, 0.75))) - sqrt(2.0) / 4.0;
+	return sqrt(min(dot2(p - vec2(0.0, 1.0)), dot2(p - 0.5 * max(p.x + p.y, 0.0)))) * sign(p.x - p.y);
+}
+
+// a falling drop: round bottom, tapered top (y down)
+float sd_drop(vec2 q, float r) {
+	q.y *= q.y < 0.0 ? 0.5 : 1.0;
+	return length(q) - r;
 }
 
 float sd_segment(vec2 p, vec2 a, vec2 b) {
@@ -92,7 +118,13 @@ vec3 eye_shade(vec2 q, vec2 hs, float d) {
 	vec2 hp = n - vec2(-0.34, -0.5) + look * 0.06;
 	float s1 = smoothstep(1.0, 0.45, length(hp / vec2(0.3, 0.17)));
 	float s2 = smoothstep(1.0, 0.3, length((n - vec2(0.36, 0.42) + look * 0.04) / 0.075));
-	c = mix(c, vec3(1.0), clamp(s1 * 0.75 + s2 * 0.7, 0.0, 1.0) * max(iris, 0.5));
+	if (heart > 0.001) {
+		vec2 hq = (n - vec2(-0.3, -0.36) + look * 0.06) * vec2(1.0, hs.y / hs.x) / 0.42;
+		float hm = smoothstep(0.06, -0.06, sd_heart(vec2(hq.x, 0.5 - hq.y) * 1.0));
+		s1 = mix(s1, hm, heart);
+		c = mix(c, vec3(1.0, 0.84, 0.92), clamp(s1 * 0.85, 0.0, 1.0) * heart);
+	}
+	c = mix(c, vec3(1.0), clamp(s1 * 0.75 * (1.0 - heart) + s2 * 0.7, 0.0, 1.0) * max(iris, 0.5));
 	return c;
 }
 
@@ -112,7 +144,14 @@ float mouth_sdf(vec2 p) {
 	// first-order distance correction along the curve only (keeps the halo even, no streaks off the ends)
 	by /= mix(sqrt(1.0 + slope * slope), 1.0, clamp(abs(by) * 10.0 + max(abs(q.x) - w, 0.0) * 20.0, 0.0, 1.0));
 	vec2 b = vec2(abs(q.x) - w, by);
-	return length(max(b, 0.0)) + min(max(b.x, b.y), 0.0) - t0;
+	float d = length(max(b, 0.0)) + min(max(b.x, b.y), 0.0) - t0;
+	if (mouth_o > 0.001) {   // surprised: a small round "o" (ellipse, first-order distance)
+		vec2 ro = vec2(0.042, 0.052);
+		vec2 qo = (q - vec2(0.0, 0.014)) / ro;
+		float dO = (length(qo) - 1.0) * length(qo) / max(length(qo / ro), 1e-3);
+		d = mix(d, dO, mouth_o);
+	}
+	return d;
 }
 
 void fragment() {
@@ -120,7 +159,7 @@ void fragment() {
 	float aa = max(fwidth(p.x), 1e-4) * 1.2;
 	float r = length(p);
 	// error glitch: rare thin horizontal tears
-	float tear = step(0.86, fract(sin(floor(t * 9.0) * 91.7) * 4375.85));
+	float tear = step(tear_thresh, fract(sin(floor(t * 9.0) * 91.7) * 4375.85));
 	p.x += jitter * tear * 0.018 * sin(p.y * 60.0 + t * 40.0);
 
 	// --- screen: deep navy, lighter in the middle, vignette towards the bezel
@@ -171,13 +210,33 @@ void fragment() {
 	col = mix(col, eyes * bright, eye_a);
 	col = mix(col, mouth * bright, ma);
 
+	// --- tears (cry): a drop slides from the outer lower lid down the cheek, with a soft shine and a wet trail
+	if (cry > 0.001) {
+		for (int i = 0; i < 2; i++) {
+			float side = i == 0 ? -1.0 : 1.0;
+			float ph = fract(t * tear_hz + (i == 0 ? 0.0 : 0.47));
+			vec2 st = vec2(side * (eye_gap + eye_half.x * 0.55), eye_y + eye_half.y * 0.72) + offs;
+			float fall = ph * ph * 0.3;                     // gravity: starts slow, speeds up
+			vec2 tp = st + vec2(side * fall * 0.06, fall);
+			float ta = smoothstep(0.0, 0.18, ph) * (1.0 - smoothstep(0.7, 1.0, ph)) * cry;
+			float r0 = 0.019 * (0.6 + 0.4 * smoothstep(0.0, 0.25, ph));
+			float td = sd_drop(p - tp, r0);
+			float trail = sd_segment(p, st, tp - vec2(0.0, r0)) - 0.005;
+			col += eye_col * exp(-max(td, 0.0) * 60.0) * 0.35 * ta;
+			col = mix(col, eye_col * 0.6 + vec3(0.06, 0.1, 0.14), smoothstep(aa, -aa, trail) * 0.25 * ta);
+			vec3 dc = mix(eye_col * 0.75 + vec3(0.05), eye_col * 1.1 + vec3(0.15), smoothstep(-r0, r0, p.y - tp.y));
+			dc = mix(dc, vec3(1.0), smoothstep(0.008, 0.0, length(p - tp - vec2(-0.006, -0.004))) * 0.9);
+			col = mix(col, dc, smoothstep(aa, -aa, td) * ta);
+		}
+	}
+
 	// --- rim halo (listening reacts to the mic, error pulses) and the thinking comet
 	float ang = atan(p.y, p.x);
 	float rd = abs(r - 0.935);
-	float wave = 0.78 + 0.22 * sin(ang * 3.0 + t * 1.7) * sin(ang * 2.0 - t * 1.1);
+	float wave = 1.0 - wave_amt + wave_amt * sin(ang * 3.0 + t * 1.7 * wave_speed) * sin(ang * 2.0 - t * 1.1 * wave_speed);
 	col += ring_col * ring * wave * (exp(-rd * 90.0) * 0.75 + (low_quality ? 0.0 : exp(-rd * 16.0) * 0.28));
 	if (spin > 0.001) {
-		float head = t * 2.6;
+		float head = t * spin_speed;
 		float lag = mod(head - ang, 6.28318);
 		float tail = exp(-lag * 1.3) + 0.35 * exp(-mod(head + 3.14159 - ang, 6.28318) * 2.2);
 		col += eye_col * spin * tail * (exp(-rd * 120.0) * 1.1 + exp(-rd * 25.0) * 0.25);
@@ -187,7 +246,7 @@ void fragment() {
 	vec2 dq = p - dot_pos;
 	float dl = length(dq);
 	float dr = 0.03;
-	float breathe = 1.0 - dot_breathe * (0.45 + 0.45 * sin(t * 3.2));
+	float breathe = 1.0 - dot_breathe * (0.45 + 0.45 * sin(t * 3.2 * dot_speed));
 	float dfill = dl - dr;
 	float dring = abs(dl - dr * 0.86) - dr * 0.24;
 	vec2 sd = vec2(0.7071, -0.7071) * dr * 1.45;
@@ -200,7 +259,7 @@ void fragment() {
 		col *= mix(1.0, 0.25, smoothstep(aa, -aa, gap) * step(dl, dr * 1.25));
 	}
 	if (dot_pulse > 0.001) {
-		float ph = fract(t * 0.75);
+		float ph = fract(t * 0.75 * dot_speed);
 		float pr = dr + ph * 0.075;
 		col += dot_col * dot_pulse * (1.0 - ph) * (exp(-abs(dl - pr) * 140.0) * 0.9);
 	}

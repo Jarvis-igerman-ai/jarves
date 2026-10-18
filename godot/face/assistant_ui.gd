@@ -132,6 +132,8 @@ func _on_link(connected: bool, detail: String) -> void:
 		if face:
 			face.set_state("idle")
 			face.set_link("offline")
+			face.set_activity("done", "")
+			face.set_emotion("")
 		connection.text = "● " + LINK_CAPTION["offline"]
 		connection.modulate = face_link_color("offline")
 	else:
@@ -147,8 +149,18 @@ func _on_message(t: String, p: Dictionary) -> void:
 			if face:
 				face.set_state(p.get("state", "idle"))
 			_show_activity(str(p.get("state", "idle")))
+		"face.emotion":
+			# transient reaction {emotion: laugh|cry|surprised|love|sad, ms}; eases back to the current state
+			if face:
+				face.set_emotion(str(p.get("emotion", "")), int(p.get("ms", -1)))
 		"assistant.activity":
+			# {kind?, text, detail?}: with a kind it is also shown on the face (pill on the lower arc);
+			# kind "done" or an empty text clears it. Without a kind it stays a panel-only message.
+			if face and p.has("kind"):
+				face.set_activity(str(p.get("kind", "")), str(p.get("text", "")), str(p.get("detail", "")))
 			activity.text = str(p.get("text", ""))
+			if activity.text == "":
+				activity.text = ACTIVITY.get(_state, _state)
 			if activity.text.contains("Loading voice"):
 				connection.text = "● " + LINK_CAPTION["connecting"]
 				connection.modulate = face_link_color("connecting")
