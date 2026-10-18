@@ -74,7 +74,9 @@ class VoiceConfig(_Strict):
     # device until it triggers. Software mute stops it and releases the microphone.
     wake_enabled: bool = True
     wake_word: str = "hey_jarvis"
-    wake_threshold: float = Field(0.5, ge=0, le=1)
+    # 0.5 is the model's textbook value, but real voices/accents/mics ("hi garvis") often peak at 0.2-0.4:
+    # QA 18 Oct saw a real user peak at 0.17. Run `jarvis wake test` to calibrate to YOUR voice and mic.
+    wake_threshold: float = Field(0.35, ge=0, le=1)
     wake_cooldown_s: float = Field(2.0, ge=0, le=30)
     record_max_s: float = Field(15, gt=0, le=60)
     input_device: int | str | None = None

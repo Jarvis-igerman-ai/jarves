@@ -199,8 +199,8 @@ async def test_greeting_on_first_face_connect(home, cfg):
         f = await open_face(c)
         g = await f.wait("assistant.text", lambda p: p.get("code") == "GREETING")
         assert g["text"] and "רווח" not in g["text"]
-        assert c.dev.face_state == "idle"
-        assert tts.spoken == []  # wake mode stays quiet and ready instead of opening a separate cloud greeting
+        await f.wait("face.set_state", lambda p: p["state"] == "idle")
+        assert len(tts.spoken) == 1 and "JARVES" in tts.spoken[0]        # said hello ONCE
         await f.ws.close()
         f2 = await open_face(c)                                       # reconnect: no second greeting
         await f2.send("status.request")

@@ -400,3 +400,20 @@ async def test_music_play_confirms_song_counterpart_with_other_video_id():
     assert res.ok and "Tetaru" in res.message
     p.np = NowPlaying("Other song", "X", "OTHER", False, 0, 200)
     assert MusicSkill._same_track(p.np, t) is False
+
+
+def test_set_toml_value_keeps_everything_else(tmp_path):
+    import tomllib
+    from jarves.cli import set_toml_value
+    p = tmp_path / "config.toml"
+    set_toml_value(p, "voice", "wake_threshold", "0.24")                      # file missing -> created
+    assert tomllib.loads(p.read_text(encoding="utf-8"))["voice"]["wake_threshold"] == 0.24
+    p.write_text('# mine\n[ai]\nconnection = "combined"\n\n[voice]\nvoice = "vesper"\nwake_threshold = 0.5  \n\n[music]\nprovider = "pear"\n',
+                 encoding="utf-8")
+    set_toml_value(p, "voice", "wake_threshold", "0.3")
+    set_toml_value(p, "voice", "idle_disconnect_s", "99")                     # new key in an existing section
+    set_toml_value(p, "log", "privacy", "true")                               # new section
+    raw = tomllib.loads(p.read_text(encoding="utf-8"))
+    assert raw["voice"] == {"voice": "vesper", "wake_threshold": 0.3, "idle_disconnect_s": 99}
+    assert raw["ai"]["connection"] == "combined" and raw["music"]["provider"] == "pear" and raw["log"]["privacy"] is True
+    assert p.read_text(encoding="utf-8").startswith("# mine")

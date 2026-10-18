@@ -12,7 +12,7 @@ from pathlib import Path
 from . import __version__, logs
 from .brain import AgentBrain, Brain, billing_routes
 from .budget import Budget, BudgetExceeded
-from .config import Config, api_billing_allowed
+from .config import Config, api_billing_allowed, openai_key_present
 from .deviceport import INBOUND, DevicePort
 from .health import Health
 from .link import GodotLink, load_token
@@ -35,6 +35,25 @@ def make_agent(cfg: Config, registry: SkillRegistry, memory: MemoryStore, home: 
         return ChatGPTBrain(cfg.ai, registry, memory, ChatGPTAuth(home, transport=transport), cfg.assistant_name,
                             transport=transport, budget=budget)
     return AgentBrain(cfg.ai, registry, memory, cfg.assistant_name, budget=budget)
+
+
+NEAR_MISS_MIN = 0.12          # a wake score at/above this but below the threshold is logged (WAKE_NEAR_MISS)
+
+
+def _mic_name(device) -> str:
+    try:
+        import sounddevice as sd
+        return str(sd.query_devices(device, kind="input")["name"])[:60]
+    except Exception:
+        return "unknown"
+
+
+def _speaker_name(device) -> str:
+    try:
+        import sounddevice as sd
+        return str(sd.query_devices(device, kind="output")["name"])[:60]
+    except Exception:
+        return "unknown"
 
 
 class Core:
@@ -138,6 +157,7 @@ class Core:
         await self.link.start()
         self._bg.append(asyncio.create_task(self._health_loop()))
         self._setup_wake()
+        self._log_summary()
         self.health.mark("ready")
         logs.info("core", "CORE_READY", f"Core ready (voice: {self.voice_mode})", log=str(self.log_path),
                   ms=round((time.monotonic() - started_at) * 1000))
@@ -274,7 +294,8 @@ class Core:
             self._run_busy(self.greet())
         elif self.cfg.voice.activation == "wake_word" and self.cfg.voice.greeting and not self._greeted:
             self._greeted = True
-            await self.link.send_face("assistant.text", {"text": self.how_to_talk(), "code": "GREETING"})
+            logs.info("core", "GREETING", "saying hello (once per start)", speech="cloud" if (self.cfg.ai.provider == "openai" and self.cfg.ai.connection != "chatgpt") else "local")
+            self._run_busy(self.greet())      # busy => the wake mic is closed while JARVES talks (no self-trigger)
 
     def how_to_talk(self) -> str:
         if self.cfg.voice.activation == "conversation":
@@ -638,6 +659,20 @@ class Core:
             self._startup_stage("failed", "Startup failed; the room remains closed. See logs / jarvis status.")
             raise
 
+    def _log_summary(self) -> None:
+        """One INFO line that answers "what is this JARVES going to do?" (visible in the terminal at startup)."""
+        v, a = self.cfg.voice, self.cfg.ai
+        from .chatgpt_auth import ChatGPTAuth
+        plan = ChatGPTAuth(self.home).status()
+        logs.info("core", "STARTUP_SUMMARY", "configuration in effect",
+                  connection=a.connection, voice_mode=self.voice_mode, activation=v.activation,
+                  wake=f"{v.wake_word}@{v.wake_threshold}" if self.wake is not None else "off",
+                  mic=_mic_name(v.input_device), speaker=_speaker_name(v.output_device),
+                  api_key="set" if openai_key_present() else "missing",
+                  chatgpt="signed-in" if plan.get("plan_usage") else "not connected",
+                  greeting=v.greeting, music=self.cfg.music.provider,
+                  say="Hey Jarvis" if self.wake is not None else "(see jarvis doctor)")
+
     # ------------------------------------------------------------------ "Hey Jarvis" wake word
     def _setup_wake(self) -> None:
         v = self.cfg.voice
@@ -697,6 +732,7 @@ class Core:
         last_report = time.monotonic()
         peak_score = 0.0
         peak_level = 0.0
+        near_t, near_n = 0.0, 0
         while not self.stopping:
             if not self._wake_should_listen():
                 await asyncio.sleep(0.2)
@@ -713,17 +749,28 @@ class Core:
                     self._woke = False
                     await self.wake.process(chunk)
                     peak_score = max(peak_score, self.wake.stats.last_score)
-                    peak_level = max(peak_level, level_meter(chunk))
+                    if self.wake.stats.frames > 8:           # skip the mic's start-up pop (~0.6 s) in the level stats
+                        peak_level = max(peak_level, level_meter(chunk))
                     if first_frame:
                         first_frame = False
                         self._wake_mic_ready = True
                         self._wake_mic_active = True
                         self.health.set("wake_word", "ok", "local wake microphone active")
                         await self.link.broadcast("status", self.snapshot())
-                        logs.info("wake", "WAKE_LISTENING", "microphone active; waiting for Hey Jarvis")
+                        logs.info("wake", "WAKE_LISTENING", "microphone active; waiting for Hey Jarvis",
+                                  mic=_mic_name(v.input_device), threshold=self.wake.detector.threshold)
+                    sc = self.wake.stats.last_score
+                    if (not self._woke and sc >= NEAR_MISS_MIN and sc < self.wake.detector.threshold
+                            and time.monotonic() - near_t > 2.0):
+                        near_t, near_n = time.monotonic(), near_n + 1
+                        logs.info("wake", "WAKE_NEAR_MISS", "heard something like the wake word but not sure enough",
+                                  score=round(sc, 2), needs=self.wake.detector.threshold,
+                                  hint="say \"Hey Jarvis\" clearly, or run `jarvis wake test` to calibrate")
                     if time.monotonic() - last_report >= 15:
                         logs.info("wake", "WAKE_HEALTH", "wake listener running", frames=self.wake.stats.frames,
-                                  peak_score=round(peak_score, 3), peak_level=round(peak_level, 3))
+                                  peak_score=round(peak_score, 3), peak_level=round(peak_level, 3),
+                                  threshold=self.wake.detector.threshold, near_misses=near_n,
+                                  mic=_mic_name(v.input_device))
                         last_report, peak_score, peak_level = time.monotonic(), 0.0, 0.0
                     if self.wake.stats.frames % 25 == 0:
                         logs.verbose("wake", "WAKE_SCORE", "wake word score", score=round(self.wake.stats.last_score, 3))

@@ -135,3 +135,42 @@ async def test_wake_unavailable_is_reported(home, cfg):
         assert w["status"] == "unavailable" and "jarvis status" in w["action"] and c.wake is None
     finally:
         await c.stop()
+
+
+class QuietNearMiss(FakeDetector):
+    """Scores 0.2 (below the 0.5 threshold) on the marker frame and exposes it like the real detector does."""
+    last_score = 0.0
+
+    def feed(self, pcm):
+        hit = bool((np.frombuffer(pcm, np.int16) == self.MARKER).any())
+        self.last_score = 0.2 if hit else 0.0
+        return None
+
+
+async def test_near_miss_is_logged_with_score_and_hint(home, cfg, caplog):
+    """User said 'hi garvis': score 0.17 < threshold. It must be visible in the log, not silently ignored."""
+    import json as _json
+
+    def near():
+        yield bytes(CHUNK)
+        yield FakeDetector.marker_chunk()
+        for _ in range(5):
+            yield bytes(CHUNK)
+    cfg.voice.wake_enabled = True
+    FakeMic.opened = FakeMic.closed = 0
+    c = Core(cfg, home, audio=SimAudio(), player=FakePlayer(), stt=FakeSTT(), tts=FakeTTS(), console_logs=False,
+             use_real_audio=False, wake_detector=QuietNearMiss(threshold=0.5), wake_audio=lambda: FakeMic(near))
+    await c.start()
+    try:
+        for _ in range(100):
+            await asyncio.sleep(0.1)
+            lines = [_json.loads(l) for l in (home / "logs" / "jarves.log").read_text(encoding="utf-8").splitlines()]
+            hit = [l for l in lines if l["code"] == "WAKE_NEAR_MISS"]
+            if hit:
+                break
+        assert hit and hit[0]["score"] == 0.2 and hit[0]["needs"] == 0.5 and "jarvis wake test" in hit[0]["hint"]
+        assert not [l for l in lines if l["code"] == "WAKE_WORD"]        # no false wake
+        summary = [l for l in lines if l["code"] == "STARTUP_SUMMARY"]
+        assert summary and summary[0]["activation"] == "wake_word" and "api_key" in summary[0]
+    finally:
+        await c.stop()

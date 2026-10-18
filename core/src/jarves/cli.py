@@ -461,6 +461,208 @@ def cmd_key(a, cfg, home) -> int:
     return rc
 
 
+def set_toml_value(path: Path, section: str, key: str, literal: str) -> None:
+    """Set `key = literal` inside `[section]` of a TOML file, keeping everything else (comments included)."""
+    import re
+    text = path.read_text(encoding="utf-8") if path.exists() else ""
+    line = f"{key} = {literal}"
+    m = re.search(rf"(?ms)^\[{re.escape(section)}\]\s*$(.*?)(?=^\[|\Z)", text)
+    if m:
+        body = m.group(1)
+        if re.search(rf"(?m)^{re.escape(key)}\s*=.*$", body):
+            body = re.sub(rf"(?m)^{re.escape(key)}\s*=.*$", line, body, count=1)
+        else:
+            body = "\n" + line + body
+        text = text[:m.start(1)] + body + text[m.end(1):]
+    else:
+        text = text.rstrip() + ("\n\n" if text.strip() else "") + f"[{section}]\n{line}\n"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(text, encoding="utf-8")
+
+
+def cmd_wake(a, cfg, home) -> int:
+    """Calibrate "Hey Jarvis" to YOUR voice and mic: live score bar, then a recommended threshold."""
+    import time as _time
+    from .voice.audio import AudioUnavailable, StreamingAudio
+    from .voice.wakeword import WakeWordUnavailable, level_meter, make_detector
+    v = cfg.voice
+
+    async def go() -> int:
+        try:
+            det = make_detector(v.wake_word, 1.01)          # never "triggers": we only read the raw score
+            await det.load()
+        except WakeWordUnavailable as e:
+            print(f"{e.code}: {e.message}. {e.action}")
+            return 1
+        from .app import _mic_name
+        print(f"Microphone: {_mic_name(v.input_device)}   current threshold: {v.wake_threshold}")
+        print(f'Say "Hey Jarvis" 3-4 times with a pause between, normally, from where you will sit.  ({a.seconds} s)\n')
+        mic = StreamingAudio(v.input_device, v.output_device, rate=16000)
+        peaks: list[float] = []
+        cur_peak, best, loud = 0.0, 0.0, 0.0
+        t_end = _time.monotonic() + a.seconds
+        gap = 0
+        try:
+            async for chunk in mic.mic_chunks(16000, 2560):
+                det.feed(chunk)
+                sc, lv = det.last_score, level_meter(chunk)
+                loud = max(loud, lv)
+                if sc > 0.1:
+                    cur_peak, gap = max(cur_peak, sc), 0
+                else:
+                    gap += 1
+                    if gap > 8 and cur_peak > 0:                     # ~0.6 s of quiet closes one utterance
+                        peaks.append(cur_peak)
+                        cur_peak = 0.0
+                best = max(best, sc)
+                bar = "#" * int(sc * 30)
+                mark = "  <-- heard it" if sc >= v.wake_threshold else ""
+                print(f"\r mic {'|' * int(lv * 12):<12} wake {sc:4.2f} {bar:<30} best {best:4.2f}{mark}   ", end="", flush=True)
+                if _time.monotonic() >= t_end:
+                    break
+        except AudioUnavailable as e:
+            print(f"\n{e.code}: {e.message}. {e.action}")
+            return 1
+        finally:
+            mic.close()
+        if cur_peak > 0:
+            peaks.append(cur_peak)
+        print("\n")
+        if loud < 0.05:
+            print("The microphone is (almost) silent: check Windows Settings > Privacy & security > Microphone, the "
+                  "selected input device, and that it is not muted.  Run `jarvis doctor`.")
+            return 1
+        if not peaks or best < 0.15:
+            print(f"Never heard it (best score {best:.2f}). Try: say it clearer as \"HEY JAR-VIS\", closer to the mic, or "
+                  "pick another microphone (voice.input_device in config.toml).")
+            return 1
+        rec = round(min(0.5, max(0.15, 0.6 * min(peaks))), 2)
+        print(f"Heard {len(peaks)} attempt(s), scores {', '.join(f'{x:.2f}' for x in peaks)}.")
+        print(f"Recommended wake_threshold = {rec}   (now {v.wake_threshold}).  Lower = easier to trigger, but more false wakes.")
+        if a.apply:
+            set_toml_value(Path(a.config) if a.config else home / "config.toml", "voice", "wake_threshold", str(rec))
+            print("Saved. Restart JARVES to use it.")
+        else:
+            print("Apply it with:  jarvis wake test --apply")
+        return 0
+    return asyncio.run(go())
+
+
+def cmd_doctor(a, cfg, home) -> int:
+    """Check every part and say exactly what to fix. Free and offline unless --live (then ~1 cent, asks first)."""
+    import time as _time
+    rows: list[tuple[str, str, str]] = []
+
+    def add(level: str, what: str, detail: str = "") -> None:
+        rows.append((level, what, detail))
+        icon = {"ok": "[ OK ]", "warn": "[WARN]", "fail": "[FAIL]", "info": "[ .. ]"}[level]
+        print(f"{icon} {what}" + (f"\n         {detail}" if detail else ""), flush=True)
+
+    print(f"JARVES doctor  (version {__version__}, state dir {home})\n")
+    add("ok", f"connection mode: {cfg.ai.connection}")
+    key = openai_key_present()
+    if cfg.ai.connection in ("api_key", "combined"):
+        add("ok" if key else "fail", "OpenAI API key " + ("found" if key else "MISSING"),
+            "" if key else "run:  jarvis key")
+    from .chatgpt_auth import ChatGPTAuth
+    st = ChatGPTAuth(home).status()
+    if cfg.ai.connection in ("chatgpt", "combined"):
+        ok = st.get("plan_usage")
+        add("ok" if ok else "fail", "ChatGPT plan " + (f"connected ({st.get('email') or 'signed in'})" if ok else "NOT connected"),
+            "" if ok else "run:  jarvis chatgpt login")
+    live = _ws_call(home, cfg.link.port, {"type": "status.request", "payload": {}}, "status")
+    add("info", "Core is " + ("running" if live else "not running (start it with: jarvis)"))
+
+    # --- microphone: level while you stay quiet (digital silence = hardware/privacy problem)
+    try:
+        import numpy as np
+        import sounddevice as sd
+        from .app import _mic_name, _speaker_name
+        add("info", f"default microphone: {_mic_name(cfg.voice.input_device)}   speaker: {_speaker_name(cfg.voice.output_device)}")
+        rec = sd.rec(int(16000 * 1.5), samplerate=16000, channels=1, dtype="float32", device=cfg.voice.input_device)
+        sd.wait()
+        peak = float(np.abs(rec).max())
+        if peak < 0.0005:
+            add("fail", "microphone records SILENCE", "check the mic key/switch/shutter, Windows Settings > Privacy & "
+                "security > Microphone (allow desktop apps), and the input device (voice.input_device)")
+        else:
+            add("ok", f"microphone hears sound (room peak {peak:.4f})")
+        if a.sound:
+            import numpy as np
+            tone = (0.25 * np.sin(np.arange(int(24000 * 0.5)) * 2 * np.pi * 523 / 24000)).astype("float32")
+            sd.play(tone, 24000, device=cfg.voice.output_device)
+            sd.wait()
+            add("info", "played a short beep on the speakers: did you hear it?")
+    except Exception as e:
+        add("fail", f"audio check failed: {type(e).__name__}: {str(e)[:100]}", "uv sync --extra voice; check the audio devices")
+
+    # --- wake word
+    try:
+        from .voice.wakeword import make_detector
+        ok, msg = make_detector(cfg.voice.wake_word, cfg.voice.wake_threshold).check()
+        add("ok" if ok else "fail", "wake word model: " + msg, "" if ok else "uv sync --extra voice")
+        add("info", f"wake threshold {cfg.voice.wake_threshold}: if \"Hey Jarvis\" is not recognised run  jarvis wake test")
+    except Exception as e:
+        add("fail", f"wake word: {type(e).__name__}: {str(e)[:100]}")
+
+    # --- music
+    if cfg.music.provider == "pear":
+        import httpx
+        try:
+            httpx.get(cfg.music.pear_url + "/api/v1/song", timeout=2)
+            paired = (home / "pear_client_id.paired").exists()
+            add("ok" if paired else "warn", "Pear Desktop is running" + ("" if paired else " but NOT paired"),
+                "" if paired else "run:  jarvis music pair  (and click Allow in Pear)")
+        except httpx.HTTPError:
+            add("warn", "Pear Desktop is not running (music unavailable)", "run:  jarvis music open")
+
+    # --- optional real (billable) GPT-Live smoke test
+    if a.live:
+        if not key:
+            add("fail", "live smoke test needs an API key", "run:  jarvis key")
+        else:
+            print("\nLIVE test: opens ONE real GPT-Live session for ~8 seconds, no audio. Cost: about 1 cent of your API credit.")
+            if input("Type yes to run it: ").strip().lower() == "yes":
+                asyncio.run(_live_smoke(cfg, add))
+            else:
+                add("info", "live test skipped")
+    bad = [r for r in rows if r[0] == "fail"]
+    print(f"\n{len(bad)} problem(s) found." if bad else "\nAll checks passed.")
+    return 1 if bad else 0
+
+
+async def _live_smoke(cfg, add) -> None:
+    """Real session using the exact production config; reports delegation/validation errors the docs say arrive later."""
+    import time as _time
+    from .skills import SkillRegistry
+    from .skills.builtin import ClockSkill
+    from .voice.live import LiveVoice
+    reg = SkillRegistry()
+    reg.register(ClockSkill())
+    problems: list[str] = []
+
+    def on_health(status, detail, action=""):
+        if status != "ok":
+            problems.append(f"{detail} -> {action}")
+    v = cfg.voice
+    lv = LiveVoice(reg, lambda: "test", model=v.live_model, voice=v.voice, backend_model=cfg.ai.text_model,
+                   web_search=cfg.ai.web_search, name=cfg.assistant_name, half_duplex=True, max_session_s=20,
+                   audio_io=None, on_health=on_health)
+    t0 = _time.monotonic()
+    try:
+        await lv.start()
+        add("ok", f"GPT-Live connected in {(_time.monotonic() - t0):.1f} s ({v.live_model}, voice {v.voice})")
+        await asyncio.sleep(4)                       # delegation settings are validated AFTER session.started
+        await lv.stop()
+        if problems:
+            add("fail", "GPT-Live rejected a setting: " + problems[0])
+        else:
+            add("ok", f"backend delegation accepted ({cfg.ai.text_model}, web search {'on' if cfg.ai.web_search else 'off'})")
+    except Exception as e:
+        add("fail", f"GPT-Live could not start: {type(e).__name__}: {str(e)[:160]}",
+            "check the key, project access to the live model, billing and the model name in config.toml")
+
+
 def cmd_say(a, cfg, home) -> int:
     from .budget import Budget
     from .memory import MemoryStore
@@ -516,6 +718,13 @@ def main(argv: list[str] | None = None) -> int:
     g = sub.add_parser("chatgpt", help="connect / disconnect your ChatGPT plan (Sign in with ChatGPT)")
     g.add_argument("action", choices=["login", "logout", "status", "models"])
     g.add_argument("--forget", action="store_true", help="logout: also forget this app registration")
+    wk = sub.add_parser("wake", help="calibrate the \"Hey Jarvis\" wake word to your voice and microphone")
+    wk.add_argument("action", choices=["test"])
+    wk.add_argument("--seconds", type=int, default=20)
+    wk.add_argument("--apply", action="store_true", help="save the recommended threshold to config.toml")
+    dr = sub.add_parser("doctor", help="check microphone, wake word, keys, music; say what to fix")
+    dr.add_argument("--sound", action="store_true", help="also play a beep on the speakers")
+    dr.add_argument("--live", action="store_true", help="also open one real GPT-Live session (~1 cent, asks first)")
     su = sub.add_parser("setup", help="choose how JARVES connects (ChatGPT plan / API key) and sign in")
     su.add_argument("--if-needed", action="store_true", help="only on the first run")
     k = sub.add_parser("key", help="save your OpenAI API key in a private file (secrets.env)")
@@ -534,7 +743,8 @@ def main(argv: list[str] | None = None) -> int:
         print(f"CONFIG ERROR: {e}", file=sys.stderr)
         return 2
     return {"run": cmd_run, "stop": cmd_stop, "status": cmd_status, "diag": cmd_diag, "memory": cmd_memory, "music": cmd_music,
-            "ask": cmd_ask, "say": cmd_say, "chatgpt": cmd_chatgpt, "setup": cmd_setup, "logs": cmd_logs, "key": cmd_key}[a.cmd](a, cfg, home)
+            "ask": cmd_ask, "say": cmd_say, "chatgpt": cmd_chatgpt, "setup": cmd_setup, "logs": cmd_logs, "key": cmd_key,
+            "wake": cmd_wake, "doctor": cmd_doctor}[a.cmd](a, cfg, home)
 
 
 if __name__ == "__main__":
