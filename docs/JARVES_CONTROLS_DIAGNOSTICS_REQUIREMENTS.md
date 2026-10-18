@@ -4,6 +4,18 @@
 
 **User's core requirement:** JARVES should feel like a conversational companion, **not a tablet**, yet remain controllable and diagnosable when speech, internet, Wi-Fi, a remote computer, or an internal service fails. A pretty face with no fallback controls or debug path is **not acceptable**. Default to simple, repairable and privacy-preserving solutions.
 
+## 18 Oct 2026 — CONFIRMED user choice: both ChatGPT-plan and API connection options
+
+**Requirement:** JARVES must offer **both** (1) "Continue with ChatGPT" user-authorized ChatGPT plan usage **where eligible** and (2) a separately configured **OpenAI API key** pay-as-you-go path. Neither replaces the other. Show the current connection, capabilities and usage/cost source plainly. Let the user manually select either; **never silently fall back from ChatGPT plan limits to billable API or credits**, and never assume Plus includes normal API billing. No login, keys, paid live calls or implementation are authorized merely by recording this choice; `docs/NOW.md` remains the implementation gate.
+
+**Documented scope and limits (official docs checked 18 Oct 2026):**
+- Sign in with ChatGPT is documented for **open-source and locally hosted personal tools** with consent, OAuth PKCE, dynamic registration, per-host ID, secure token refresh/storage, separate `chatgpt.tokens.use.direct` plan-usage grant, and account-specific model discovery; do not use web-session cookies or internal ChatGPT endpoints. Relevant implementation: https://developers.openai.com/siwc/token-sharing-open-source ; https://developers.openai.com/siwc/token-sharing-open-source/sign-in .
+- ChatGPT-plan usage allows **eligible** requests via public `POST /v1/responses` using OAuth bearer, `store:false`, `stream:true`. Support is limited and subject to model, plan and policy; don't hard-code assumed GPT-6 model access. https://developers.openai.com/siwc/token-sharing-open-source/models-and-inference .
+- In the preview, **audio/video input, transcription endpoints, Realtime and GPT-Live routes are not included** in ChatGPT plan usage. The separate API path is required for live cloud voice, unless an independently legal/available voice route is deliberately approved; local STT/TTS may make a hybrid pathway (plan text reasoning + local voice), but latency/quality are untested. No promise of full premium live voice on Plus. https://developers.openai.com/siwc/token-sharing-open-source/preview-limitations .
+- Design one bounded provider interface for **text reasoning and supported tools** with explicit capability matrix. The existing API implementation must remain intact; ChatGPT auth and Responses adapter must be isolated and optional. Preserve JARVES Skills, diagnostic redaction, local memory and Godot face. Do not require ChatGPT sign-in to use offline commands.
+- Show **ChatGPT plan usage caps** and available models as returned, plus configured API spending limits. Handle OAuth expiration, revoked permissions, plan exhaustion, model/tool unsupported error and user switch without crashes or hidden charges. The user chooses whether to reconnect or switch source. Sign-in does **not** reveal the user's prior ChatGPT chats/memories/files or an API key.
+- When later approved as an implementation milestone, test authorization/refresh, consent denial, Responses streaming success/failure, daily limits, cancellation, sensitive token handling, API switch and a clearly labeled **local STT/TTS + ChatGPT text** proof of concept. Only claim live cloud voice after an actual API-key test. Do not invent a third option or bypass permissions.
+
 ## 1. Confirmed product direction vs uncommitted details
 
 | Topic | Product direction / requirement | Decisions still open |
