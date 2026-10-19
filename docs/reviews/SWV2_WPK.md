@@ -55,7 +55,7 @@ Screenshots (automatic headless Edge captures, not a hands-on check), `docs/revi
 `wpk_connections_reconnect_dark.png`.
 
 ## Tests
-`python -m pytest core/tests -q`: **562 passed, 3 skipped**. New: `tests/test_google_setup.py` (17: full first run
+`python -m pytest core/tests -q`: **789 passed, 3 skipped** (after merging swv2-integrate; 562 before). New: `tests/test_google_setup.py` (17: full first run
 with fake Downloads/browser/Google, resume after `q`, weekly reconnect, already connected, calendar-only,
 access_denied fix, disabled API, Web client rejected, download timeout, gcloud yes/no, voice help + live pickup,
 feature reason, Connections/Home API, no secrets/address served), `tests/test_privacy.py` (6).
@@ -90,3 +90,6 @@ $0 (no paid API calls; no Google login).
 - Side effect during development: one manual smoke run of the CLI opened a real browser tab on
   console.cloud.google.com/projectcreate and put "JARVES home" on the clipboard (defaults were bound at import
   time; fixed so tests/fakes always win). No login, nothing submitted.
+
+- Merge with swv2-integrate: WP-M1's runtime page (`pageHome`) is kept as **Controls** (`#/runtime`); WP-K Home is the start page; all nav entries from M1-M6 kept, with Hebrew labels.
+
