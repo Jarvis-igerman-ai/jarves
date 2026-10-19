@@ -1188,8 +1188,25 @@ def api_report_op(ctx, m, body):
     return 400, {"error": "op must be speak or delete"}
 
 
+def api_sched_settings(ctx, m, body):
+    s, b = _ctx_sched(ctx), body or {}
+    try:
+        if "timezone" in b:
+            s.db.set_setting("scheduler.timezone", zone(str(b["timezone"])).key, actor="dashboard")
+        if "max_age_s" in b:
+            s.db.set_setting("scheduler.max_age_s", max(0.0, min(float(b["max_age_s"]), 7 * 86400.0)),
+                             actor="dashboard")
+    except ScheduleError as e:
+        return 400, {"error": e.message, "code": e.code}
+    except (TypeError, ValueError):
+        return 400, {"error": "max_age_s must be a number of seconds"}
+    return 200, {"settings": s.db.settings("scheduler."),
+                 "note": "applies to NEW jobs; existing jobs keep their own zone (edit them to change it)"}
+
+
 def dashboard_routes(register) -> None:
     register("GET", r"/api/jobs", api_jobs)
+    register("POST", r"/api/scheduler/settings", api_sched_settings)
     register("POST", r"/api/jobs", api_job_create)
     register("POST", r"/api/schedule/parse", api_schedule_parse)
     register("POST", r"/api/jobs/([0-9a-f]{1,40})", api_job_op)

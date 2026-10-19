@@ -29,7 +29,7 @@ from . import scheduler as sched_mod
 from .userdata import open_db
 
 AUTONOMY_SYNC_S = 600.0
-ROADMAP_ISSUE = "https://github.com/igalgerman/JARVIS/issues/17"     # replaced by the M3 Pi issue when created
+ROADMAP_ISSUE = "https://github.com/igalgerman/JARVIS/issues/23"     # M3 Raspberry Pi verification (real issue)
 _UNVERIFIED_PI = ("pure Python + SQLite + tzdata, no Windows-only code; not run on a Raspberry Pi yet "
                   "(no device in the test setup)")
 _WIN_EVIDENCE = "core/tests/test_m3_*.py (unit + fault injection on Windows); no real-restart run yet"
@@ -159,6 +159,13 @@ class Operations:
                                 | alerts_mod.ALLOWED_ACTIONS | autonomy_mod.ALLOWED_ACTIONS)
         self._task: asyncio.Task | None = None
         self._synced = 0.0
+        try:                                         # truthful health: no zone data = no correct schedule times
+            tz = self.scheduler.tz()
+            n = len(self.db.rows("SELECT id FROM jobs WHERE status='active'"))
+            core.health.set("scheduler", "ok", f"{n} active job(s), time zone {tz.key}")
+        except sched_mod.ScheduleError as e:
+            core.health.set("scheduler", "unavailable", e.message, "uv sync (installs tzdata), or set the "
+                                                                   "time zone on the dashboard Jobs page")
 
     def start(self) -> None:
         self._task = asyncio.get_running_loop().create_task(self.scheduler.run(self._after_tick), name="operations")

@@ -108,6 +108,8 @@ class Ctx:
         self.store.close()
         if self._own_memory and self._memory is not None:
             self._memory.close()
+        if getattr(self, "_userdata", None) is not None:     # WP-M3 plugin connection (userdata.ctx_db)
+            self._userdata.close()
 
 
 # ---------------------------------------------------------------------- conversations

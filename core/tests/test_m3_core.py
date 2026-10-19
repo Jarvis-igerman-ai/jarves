@@ -113,6 +113,11 @@ async def test_dashboard_m3_apis_over_http(home):
         assert r.status == 200 and json.loads(body)["status"] == "active"
         jobs = get(d, "/api/jobs")
         assert jobs["jobs"][0]["next_run_local"] and jobs["timezone"] == "Asia/Jerusalem"
+        r, _ = req(d, "POST", "/api/scheduler/settings", headers={"X-Jarves": "1"}, body={"timezone": "Mars/Base"})
+        assert r.status == 400
+        r, _ = req(d, "POST", "/api/scheduler/settings", headers={"X-Jarves": "1"}, body={"timezone": "Europe/London"})
+        assert r.status == 200 and get(d, "/api/jobs")["timezone"] == "Europe/London"
+        req(d, "POST", "/api/scheduler/settings", headers={"X-Jarves": "1"}, body={"timezone": "Asia/Jerusalem"})
         r, body = req(d, "POST", "/api/schedule/parse", headers={"X-Jarves": "1"}, body={"when": "every monday at 10"})
         assert json.loads(body)["spec"] == "0 10 * * 1"
         r, body = req(d, "POST", "/api/notes", headers={"X-Jarves": "1"}, body={"title": "a", "text": "b"})

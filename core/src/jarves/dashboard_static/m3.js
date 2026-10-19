@@ -47,12 +47,15 @@
         r.error ? ` ${r.error}` : ""));
       return el("tr", {}, el("td", {}, el("b", { dir: "auto" }, j.name), el("div", { class: "small", dir: "auto" }, j.task),
           el("div", { class: "small muted" }, `${j.action} · skills: ${j.skills.join(", ") || "none"} · max ${j.max_requests} AI request(s)/run · retries ${j.retries} · max age ${Math.round(j.max_age_s / 3600)} h`)),
-        el("td", { dir: "auto" }, j.human, el("div", { class: "small muted" }, j.spec + " · " + j.tz)),
+        el("td", {}, el("div", { dir: "auto" }, j.human), el("div", { class: "small muted", dir: "ltr" }, j.spec + " · " + j.tz)),
         el("td", {}, statusPill(j.status), el("div", { class: "small" }, j.next_run_local ? "next: " + j.next_run_local : (j.upcoming_local || []).join(" | "))),
         el("td", {}, j.last_outcome ? statusPill(j.last_outcome) : "—", el("div", { class: "small muted" }, j.last_run_local || ""), runs),
         el("td", {}, buttons, m));
     });
-    render(header("Jobs", `Scheduled reminders and reports. Time zone ${d.timezone}, now ${d.now_local}. ${d.note}`), form,
+    const tzIn = el("input", { type: "text", value: d.timezone, style: "width:150px", "aria-label": "Default time zone" });
+    const tzMsg = msgSpan();
+    const tzSave = el("button", { type: "button", onclick: () => act(tzMsg, () => post("/api/scheduler/settings", { timezone: tzIn.value })) }, "Set zone");
+    render(header("Jobs", `Scheduled reminders and reports. Now ${d.now_local}. ${d.note}`, tzIn, tzSave, tzMsg), form,
       el("div", { class: "card" }, rows.length ? el("table", {}, el("thead", {}, el("tr", {}, el("th", {}, "Job"), el("th", {}, "When"),
         el("th", {}, "Status"), el("th", {}, "Last run"), el("th", {}, ""))), el("tbody", {}, rows)) : el("div", { class: "empty" }, "No jobs yet.")));
   }
