@@ -376,3 +376,70 @@ async def test_trim_never_overlaps_a_play_and_gives_way(tmp_path):
     last_delete_before = max(i for i, e in enumerate(events) if e == "delete" and i < first_play)
     assert all(e != "delete" for e in events[first_play:events.index("patch") + 1])     # no delete between insert and jump
     await p.close()
+
+
+# ---------------------------------------------------------------- campaign findings, 19 Oct (real Pear)
+class ScriptedPlayer:
+    """Player whose behaviour per video id is scripted: which candidates actually start, whether pause takes effect."""
+
+    def __init__(self, playable, pause_ignored=0):
+        from jarves.skills.music import NowPlaying, Track
+        self.NowPlaying, self.Track = NowPlaying, Track
+        self.playable, self.pause_ignored, self.pause_calls = set(playable), pause_ignored, 0
+        self.np = NowPlaying("Old", "X", "OLD", False, 5, 200)
+        self.requested = []
+
+    async def search(self, q):
+        return [self.Track(v, f"Song {v}", "Artist") for v in ("A", "B", "C", "D")]
+
+    async def play_track(self, t):
+        self.requested.append(t.video_id)
+        if t.video_id in self.playable:
+            self.np = self.NowPlaying(t.title, "Artist", t.video_id, False, 1, 200)
+        else:                                    # unavailable video: the player stays on something else
+            self.np = self.NowPlaying("Other", "Y", "OTHER", False, 1, 200)
+
+    async def pause(self):
+        self.pause_calls += 1
+        if self.pause_calls > self.pause_ignored:
+            self.np.paused = True
+
+    async def resume(self):
+        self.np.paused = False
+
+    async def next(self):
+        pass
+
+    async def set_volume(self, v):
+        pass
+
+    async def now_playing(self):
+        return self.np
+
+
+def _tool(skill, name):
+    return next(t for t in skill.tools() if t.name == name)
+
+
+async def test_play_tries_the_next_candidate_when_the_first_cannot_play():
+    from jarves.skills.music import MusicSkill
+    p = ScriptedPlayer(playable={"B"})
+    res = await _tool(MusicSkill(p, verify_tries=2), "music_play").handler(type("A", (), {"query": "x"})())
+    assert res.ok and "Song B" in res.message and p.requested == ["A", "B"]
+
+
+async def test_play_reports_honestly_when_no_candidate_starts():
+    from jarves.skills.music import MusicSkill
+    p = ScriptedPlayer(playable=set())
+    res = await _tool(MusicSkill(p, verify_tries=2), "music_play").handler(type("A", (), {"query": "x"})())
+    assert not res.ok and res.code == "MUSIC_NOT_CONFIRMED" and res.data["tried"] == 3 and p.requested == ["A", "B", "C"]
+
+
+async def test_pause_is_verified_pressed_again_and_never_claimed_falsely():
+    from jarves.skills.music import MusicSkill
+    ignored_once = ScriptedPlayer(playable={"A"}, pause_ignored=1)         # first press ignored (track still loading)
+    res = await _tool(MusicSkill(ignored_once, verify_tries=8), "music_pause").handler(type("A", (), {})())
+    assert res.ok and ignored_once.pause_calls == 2 and ignored_once.np.paused
+    never = ScriptedPlayer(playable={"A"}, pause_ignored=99)
+    res = await _tool(MusicSkill(never, verify_tries=3), "music_pause").handler(type("A", (), {})())
+    assert not res.ok and res.code == "MUSIC_NOT_CONFIRMED"                # it must NOT say "paused"

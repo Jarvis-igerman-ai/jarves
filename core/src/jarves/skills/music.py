@@ -525,13 +525,13 @@ class MusicSkill(Skill):
                 logs.debug("music", "QUEUE_TRIM_FAILED", "could not trim the player's queue")
         self._trim_task = asyncio.get_running_loop().create_task(go())
 
-    async def _verify_playing(self, t: Track) -> NowPlaying | None:
+    async def _verify_playing(self, t: Track, tries: int | None = None) -> NowPlaying | None:
         """Truthful status: report success only when the player itself says this track is playing. Polls up to
         verify_tries x 0.5 s (a fresh track can take several seconds to buffer) and returns at once when it is."""
         # Not usable as a progress signal: Pear's elapsedSeconds stays 0 while really playing and is refreshed only
         # on events (QA 19 Oct: 0 for ~9 s, then 9 right after a pause). Requiring it gave false "not confirmed".
         np = None
-        for _ in range(self.verify_tries):
+        for _ in range(tries or self.verify_tries):
             np = await self.player.now_playing()
             if np and self._same_track(np, t) and not np.paused:
                 return np
@@ -546,12 +546,22 @@ class MusicSkill(Skill):
                 found = await p.search(a.query)
                 if not found:
                     return ToolResult(False, f"לא מצאתי את \"{a.query}\".", code="MUSIC_NOT_FOUND")
-                t = found[0]
-                await p.play_track(t)
-                np = await self._verify_playing(t)
+                # Some YouTube results cannot play (region / availability; real Pear, 19 Oct: "Get Lucky" top result,
+                # Pear then skipped to an unrelated song). Try the next candidates instead of giving up (max 3).
+                np, t, tried = None, found[0], []
+                for cand in found[:3]:
+                    if any(clean_title(cand.title) == clean_title(u.title) for u in tried):
+                        continue                              # the same song again (another upload): not a new try
+                    tried.append(cand)
+                    t = cand
+                    await p.play_track(cand)
+                    np = await self._verify_playing(cand, tries=None if len(tried) == 1 else max(2, self.verify_tries * 3 // 4))
+                    if np is not None:
+                        break
+                    logs.info("music", "MUSIC_CANDIDATE_FAILED", f"candidate {len(tried)} did not start; trying the next")
                 if np is None:
                     return ToolResult(False, "ביקשתי מהנגן לנגן, אבל הוא לא מדווח שהשיר מתנגן.",
-                                      {"track": asdict(t)}, "MUSIC_NOT_CONFIRMED")
+                                      {"track": asdict(t), "tried": len(tried)}, "MUSIC_NOT_CONFIRMED")
                 self._plays += 1
                 if self._plays % 6 == 1:                    # amortised: the first play, then every 6th
                     self._spawn_trim()
@@ -573,7 +583,22 @@ class MusicSkill(Skill):
                         return nothing(op == "pause")
                     await getattr(p, op)()
                     if op == "pause":
-                        return ToolResult(True, ok_msg)
+                        # a pause pressed while a track is still loading can be ignored by the player (real Pear, 19 Oct:
+                        # "השהיתי" was said while it kept playing). Verify with the player, press once more, else say so.
+                        loop = asyncio.get_running_loop()
+                        t0, pressed_again = loop.time(), False
+                        limit = 4.0 if self.verify_tries >= 10 else 0.4 * max(2, self.verify_tries)
+                        while True:
+                            now = await p.now_playing()
+                            if now is None or now.paused:
+                                return ToolResult(True, ok_msg)
+                            if loop.time() - t0 > limit:
+                                break
+                            if not pressed_again and loop.time() - t0 > 1.5:
+                                pressed_again = True
+                                await p.pause()
+                            await asyncio.sleep(0.3)
+                        return ToolResult(False, "ביקשתי מהנגן להשהות, אבל הוא עדיין מנגן.", code="MUSIC_NOT_CONFIRMED")
                     # real Pear 3.12: "next" shows up after 0.9-3.3 s and is occasionally dropped while a track is
                     # loading -> poll ~7 s and press it once more if nothing changed after ~4 s
                     loop = asyncio.get_running_loop()
