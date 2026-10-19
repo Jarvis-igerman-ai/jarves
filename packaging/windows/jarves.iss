@@ -52,8 +52,8 @@ english.TaskPath=Add the "jarvis" command to my PATH (for jarvis key / setup / d
 hebrew.TaskPath=הוסף את הפקודה jarvis ל-PATH (עבור jarvis key / setup / doctor)
 english.TaskAutostart=Start JARVES when I sign in to Windows
 hebrew.TaskAutostart=הפעל את JARVES כשאני נכנס ל-Windows
-english.RunSetup=Set up JARVES now (connection, OpenAI key)
-hebrew.RunSetup=הגדר את JARVES עכשיו (חיבור, מפתח OpenAI)
+english.RunSetup=Set up JARVES now (name, voice, connection and key, choose every add-on)
+hebrew.RunSetup=הגדר את JARVES עכשיו (שם, קול, חיבור ומפתח, בחירת כל התוספים)
 english.GetPear=Get Pear Desktop for music (optional, separate app)
 hebrew.GetPear=הורד את Pear Desktop למוזיקה (אופציונלי, תוכנה נפרדת)
 english.AskPurge=Also delete your JARVES data (memory, settings, saved keys, logs) in:%n%1%n%nChoose No to keep it for a later reinstall.
@@ -85,6 +85,9 @@ Name: "{userdesktop}\JARVES"; Filename: "{app}\jarvis.cmd"; WorkingDir: "{app}";
 ; Autostart (ticked by default, owner decision) is the runtime's own mechanism: WP-M1 `jarvis autostart on|off`.
 Filename: "{cmd}"; Parameters: "/c """"{app}\jarvis.cmd"" autostart on"""; Tasks: autostart; Flags: runhidden waituntilterminated
 Filename: "{cmd}"; Parameters: "/k """"{app}\jarvis.cmd"" setup"""; WorkingDir: "{app}"; Description: "{cm:RunSetup}"; Flags: postinstall nowait skipifsilent
+; Silent installs: JARVES-Setup.exe /VERYSILENT /SETUPANSWERS=C:\path\answers.json applies a setup answers file (no
+; secrets in it; see docs/INSTALL_TEST.md). Without /SETUPANSWERS= the command does nothing (exit 0).
+Filename: "{cmd}"; Parameters: "/c """"{app}\jarvis.cmd"" setup --answers ""{param:SETUPANSWERS|}"""""; WorkingDir: "{app}"; Check: WizardSilent; Flags: runhidden waituntilterminated
 Filename: "https://github.com/pear-devs/pear-desktop/releases"; Description: "{cm:GetPear}"; Flags: postinstall shellexec nowait skipifsilent unchecked
 
 [UninstallRun]

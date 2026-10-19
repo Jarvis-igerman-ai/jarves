@@ -319,7 +319,7 @@ class Wizard:
         self.state = {} if restart else read_state(self.home)
         self.lang = lang or self.answers.get("language") or self.state.get("language") or "he"
         self.actions = {"ask_key": _ask_key, "chatgpt_login": None, "google_start": None, "prepare": _prepare,
-                        **(actions or {})}
+                        "autostart": _autostart, **(actions or {})}
         self.notes: list[str] = []          # "do later" lines collected for the summary
         self.changed: list[str] = []        # what this run changed (for the log and tests)
         self._memory = None
@@ -632,6 +632,12 @@ class Wizard:
                 ok, detail = self.actions["prepare"](fid, self.f, self.home)
                 if not ok and detail:
                     self.notes.append(f"{fid}: {detail}")
+            if fid == "autostart":              # the switch AND the OS entry, like `jarvis autostart on|off`
+                try:
+                    self.actions["autostart"](on)
+                except (NotImplementedError, OSError) as e:
+                    self.notes.append(f"autostart: {e}")
+                    continue
             self.f.set(fid, on, by="setup")
             self.changed.append(f"{fid}={'on' if on else 'off'}")
         for fid, on in want.items():
@@ -739,6 +745,15 @@ def _prepare(fid: str, f: feat.Features, home: Path) -> tuple[bool, str]:
     if fid not in CAMERA_FEATURES and fid != "wake_word":
         return True, ""
     return prepare(fid, f, home)
+
+
+def _autostart(on: bool) -> None:
+    from .runtime import autostart as au
+    ad = au.adapter()
+    if on:
+        ad.enable()
+    else:
+        ad.disable()
 
 
 def _privacy_on(cfg, home: Path) -> bool:
