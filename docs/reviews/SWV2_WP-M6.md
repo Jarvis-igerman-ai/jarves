@@ -21,7 +21,7 @@ All four downloads are pinned by URL + SHA256 in `packaging/build_windows.ps1` (
 - `packaging/payload_check.py` — fails the build on secrets.env, tokens, OAuth files, *.db, *.log, user config,
   `logs/ chatgpt/ backups/ workspace/` folders, and on `sk-…`, GitHub tokens or private keys in JARVES's own files.
 - `packaging/windows/jarves.iss` — per-user install, Start-menu (JARVES, setup, dashboard, doctor, update check,
-  uninstall), tasks PATH / autostart (calls WP-M1 `jarvis autostart on|off`) / desktop icon; first-run hook =
+  uninstall), tasks PATH / **start at login (ticked by default, owner decision; WP-M1 `jarvis autostart on|off`)** / desktop icon; first-run hook =
   post-install "Set up JARVES now" (`jarvis setup` → connection choice + `jarvis key`) and `setup --if-needed` on
   first start; upgrade stops the Core and replaces `python\`+`face\` cleanly; uninstall keeps
   `%LOCALAPPDATA%\jarves` unless the user says Yes (default No) or passes `/PURGE=1` silently.
@@ -64,10 +64,31 @@ Recorded in `updates.PLATFORMS` (features.register has no `targets` field yet; p
   artifact scoping, provenance verify, notes, payload scan, installer policy, SHA256 pins, approval gate, checksum
   refusal, backup without credentials, once-per-version notice, private-repo/offline = "unavailable".
 - CI on throwaway branch `ci/m6-packaging-test` (deleted afterwards): see "CI evidence" below.
+- Full Core suite after merging swv2-integrate (incl. WP-M1/M3/M5): **785 passed, 5 skipped**.
+- Real API spend: $0 (no paid calls).
 
 ## CI evidence
 
-(filled in below after the run)
+Throwaway branch `ci/m6-packaging-test` (temporary workflow running the same `installer` job + a publish dry-run;
+branch deleted afterwards, runs kept as evidence):
+
+- run 1 https://github.com/igalgerman/JARVIS/actions/runs/39286506912 — FAIL, real finding: Godot **release
+  templates refuse a scene path on the command line** ("compiled without support for path overrides"), so the
+  desktop launch (`res://loading.tscn`) would have broken on a user PC. Fix: `face\override.cfg` sets the main scene
+  to the loading screen; launchers pass no scene; the smoke switches override.cfg for the self-check scenes.
+- run 2 https://github.com/igalgerman/JARVIS/actions/runs/39288057608 — FAIL in the smoke script itself
+  (`Set-Content` parameter error in the override helper) → .NET file writes.
+- run 3 https://github.com/igalgerman/JARVIS/actions/runs/39290421823 — **PASS** (both jobs). 169 MB installer
+  `JARVES-Setup-0.1.0.3.exe` sha256 `08e52b3a…e1da48`; build ~5 min with a warm tool cache, smoke ~4 min. All smoke
+  checks OK: install, Start menu, `--version` (commit + build time + channel), status, features, doctor, offline
+  Core READY, **exported face loading screen reaches the installed Core**, stop, room + face self-checks, upgrade,
+  uninstall keeps data, reinstall with **start at login** → `HKCU\…\Run\JARVES = <app>\python\pythonw.exe -m jarves
+  run --background`, `/PURGE=1` removes data and the Run entry. Publish dry-run: `VERIFY OK`, notes, prune listing
+  (no releases yet). Its artifact `jarves-windows-installer-main` (expires 2 Nov) is a usable test download until
+  the first real release exists.
+
+`package.yml` itself (workflow_run) can only run once it is on `main`; its steps are the dry-run ones plus
+`gh release create` and a real prune. First real evidence = the first green `main` run after the merge.
 
 ## Open questions for the owner
 
@@ -82,11 +103,13 @@ Recorded in `updates.PLATFORMS` (features.register has no `targets` field yet; p
 
 ## Integration hooks (outside WP-M6 files)
 
-- `core/src/jarves/cli.py`: `--version`; `update` subcommand; `_launch_viewer` uses `JARVES_FACE_EXE` (installed
-  face) before `GODOT_EXE`/WinGet; `_git_rev` falls back to the build's commit.
+- `core/src/jarves/cli.py`: `--version`; `update` subcommand; `_git_rev` falls back to the build's commit.
+- `core/src/jarves/runtime/viewer.py` (WP-M1): `launch_godot` starts the installed exported face
+  (`JARVES_FACE_EXE` or `<app>\face\JARVES Face.exe` beside the bundled python, so autostarted Cores find it too)
+  without a scene argument; dev checkouts are unchanged.
 - `core/src/jarves/dashboard.py`: `"jarves.updates"` in `PLUGIN_MODULES`. Dashboard UI page/footer (WP-B) can show
   `GET /api/updates` (`notice`, `latest`, install button → POST with `approve: true`).
-- WP-M1: installer calls `jarvis autostart on|off` (missing command is harmless); tray may show
+- WP-M1: installer calls `jarvis autostart on|off` (verified in CI); tray may show
   `UpdateChecker(home).notice()` and call `mark_notified()`. Core start may call `UpdateChecker(home).check()` in a
   background thread when `features.active("update_check")` (cached daily; not wired in app.py by WP-M6).
 - WP-M5: `backup.startup_checkpoint` compares `__version__` (always `0.1.0`); comparing

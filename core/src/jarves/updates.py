@@ -49,7 +49,8 @@ PI_ISSUE = "https://github.com/igalgerman/JARVIS/issues/19"
 PLATFORMS = {
     "windows_installer": {
         "windows": {"status": "implemented_unverified",
-                    "evidence": "CI: jarves-checks `installer` job (silent install/run/uninstall on windows-2025); "
+                    "evidence": "CI silent install/run/uninstall on windows-2025: "
+                                "https://github.com/igalgerman/JARVIS/actions/runs/39290421823; "
                                 "a clean second PC is the owner's test (docs/INSTALL_TEST.md)"},
         "linux_arm64_pi": {"status": "planned", "blocker": "no Linux ARM64 package/systemd service yet (M7)",
                            "roadmap_issue": PI_ISSUE}},

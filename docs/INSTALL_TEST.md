@@ -8,7 +8,8 @@ uv or Godot). About 15 minutes. / רשימה קצרה לבדיקת המתקין,
 - **After the merge to `main`:** GitHub → *Releases* → the newest `JARVES <version> (Windows)` →
   `JARVES-Setup-<version>.exe` (+ `.sha256`). Only the newest 3 builds are kept.
 - **Before that:** GitHub → *Actions* → the run → *Artifacts* → `jarves-windows-installer-main` (zip; contains
-  the same files). The repository is private, so you must be signed in to GitHub.
+  the same files). The repository is private, so you must be signed in to GitHub. A test build that passed all
+  CI checks: https://github.com/igalgerman/JARVIS/actions/runs/39290421823 (artifact kept until 2 Nov 2026).
 
 - **אחרי המיזוג ל-main:** בגיטהאב → Releases → הגרסה העליונה → `JARVES-Setup-<version>.exe`.
 - **לפני כן:** Actions → הריצה → Artifacts → `jarves-windows-installer-main`.
@@ -24,7 +25,7 @@ Get-FileHash .\JARVES-Setup-*.exe     # must equal the SHA256 in the release not
    *"Windows protected your PC"* → click **More info** → **Run anyway**. (Expected; no admin password is asked.)
    / המתקין עדיין לא חתום: יופיע "Windows protected your PC" → **More info** → **Run anyway**. לא תתבקש סיסמת מנהל.
 2. Choose the language, keep the folder (`%LOCALAPPDATA%\Programs\JARVES`), choose tasks:
-   *Add jarvis to PATH* (recommended), *Start JARVES when I sign in* (optional), desktop icon (optional).
+   *Add jarvis to PATH* (recommended), *Start JARVES when I sign in* (ticked by default; untick if you do not want it), desktop icon (optional). / "הפעלה בכניסה ל-Windows" מסומן כברירת מחדל, אפשר לבטל.
 3. At the end leave **"Set up JARVES now"** checked: a window asks how JARVES connects (ChatGPT plan / API key) and,
    for an API key, lets you paste it (`jarvis key`). / בסוף השאר מסומן "Set up JARVES now": בחירת חיבור והדבקת מפתח.
 
