@@ -78,6 +78,11 @@ class Face:
         return [m["payload"]["state"] for m in self.msgs if m["type"] == "face.set_state"]
 
 
+async def drain_tools(lv):
+    """Live Skill calls run in their own task (they never block the event loop): wait for them."""
+    await asyncio.gather(*[t for t in list(lv._tasks) if "tool-" in t.get_name()], return_exceptions=True)
+
+
 async def open_face(core, token=None):
     ws = await connect(f"ws://127.0.0.1:{core.cfg.link.port}")
     await ws.send(json.dumps({"type": "hello", "payload": {"token": token or core.link.token, "client": "godot",
