@@ -8,6 +8,7 @@ const FaceScript := preload("res://face/face.gd")
 
 var link: Node
 var face: Control                 # face.gd instance to drive (set by the owner)
+var appearance: Control           # appearance.gd (face_app only; the 3D twin keeps the face on its glass)
 var status_lbl: Label
 var caption: Label
 var who: Label                   # "JARVES" / "You" kept OUT of the caption so Hebrew lays out right-to-left
@@ -175,6 +176,11 @@ func _on_message(t: String, p: Dictionary) -> void:
 	if t == "desktop.closed":
 		_close_ack = true
 		return
+	if t == "display.close":
+		# the Core hides the window ("hide yourself", tray, dashboard, Core quitting); the Core itself keeps running
+		if not _closing:
+			_close_desktop()
+		return
 	match t:
 		"face.set_state":
 			var st := _str(p.get("state"), "idle")
@@ -189,6 +195,10 @@ func _on_message(t: String, p: Dictionary) -> void:
 			# camera: where the person is {x, y: -1..1, confidence: 0..1}; confidence 0 = stop tracking
 			if face:
 				face.set_gaze(_num(p.get("x")), _num(p.get("y")), clampf(_num(p.get("confidence")), 0.0, 1.0))
+		"appearance.set":
+			# {mode: face|avatar2d|avatar3d|hidden}; anything else is ignored (the current presentation stays)
+			if appearance:
+				appearance.set_mode(p.get("mode"))
 		"camera.indicator":
 			# {on, flash}: the camera is streaming / a photo was just taken (software indicator)
 			if face:

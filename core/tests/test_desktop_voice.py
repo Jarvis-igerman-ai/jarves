@@ -49,7 +49,10 @@ async def test_hands_free_activation_and_close(home, cfg, monkeypatch, activatio
         assert speech.spoken == ["שלום! אני ג'ארוויס."]   # both modes greet audibly, exactly once
         await face.send("desktop.close")
         await face.wait("desktop.closed")
-        await asyncio.wait_for(core.stop_event.wait(), 1)
+        # SW-V2 M1: closing the window only hides JARVES; the Core and any conversation keep running
+        await asyncio.sleep(0.2)
+        assert not core.stop_event.is_set() and not core.stopping
+        assert len(stopped) == 0
         await face.ws.close()
     finally:
         await core.stop()

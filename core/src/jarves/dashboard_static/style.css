@@ -219,3 +219,7 @@ button.big { font-size: 15px; padding: 9px 18px; }
 .step ul { margin: 6px 0 0; padding-inline-start: 18px; color: var(--text-2); }
 .fix { border-color: var(--serious); }
 @media (max-width: 760px) { .topbar { padding: 10px 16px; } }
+
+/* Home (M1 runtime): controls + voice side by side */
+.grid2.home { grid-template-columns: 1fr 1fr; margin-bottom: 14px; }
+@media (max-width: 760px) { .grid2.home { grid-template-columns: 1fr; } }

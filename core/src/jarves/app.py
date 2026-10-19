@@ -65,11 +65,16 @@ def _speaker_name(device) -> str:
 class Core:
     def __init__(self, cfg: Config, home: Path, *, audio=None, player=None, stt=None, tts=None,
                  live_factory=None, console_logs: bool = True, use_real_audio: bool = True, ai_transport=None,
-                 wake_detector=None, wake_audio=None) -> None:
+                 wake_detector=None, wake_audio=None, runtime_mode: str = "foreground", viewer_launcher=None,
+                 tray_factory=None, autostart=None) -> None:
         self.cfg, self.home = cfg, home
         self._audio, self._player, self._stt, self._tts = audio, player, stt, tts
         self._ai_transport = ai_transport          # tests inject a mock HTTP transport for the ChatGPT route
         self._wake_detector, self._wake_audio = wake_detector, wake_audio   # tests inject fakes
+        # always-on runtime (runtime/): "foreground" (terminal), "desktop" (`jarvis`), "background" (no window)
+        self.runtime_mode = runtime_mode
+        self._runtime_fakes = dict(launcher=viewer_launcher, tray_factory=tray_factory, autostart=autostart)
+        self.runtime = None
         self.wake = None                           # WakeListener when the wake word is active
         self._live_factory = live_factory          # tests inject a fake live session
         self.console_logs, self.use_real_audio = console_logs, use_real_audio
@@ -110,6 +115,8 @@ class Core:
         c = self.cfg
         self.log_path = logs.setup(self.home / "logs", c.log.level, c.log.max_bytes, c.log.backups, self.console_logs,
                                   c.log.console_level, c.log.modules, c.log.hide, privacy=c.log.privacy)
+        from . import backup, usage                     # SW-V2 M5: checkpoint BEFORE the stores open/migrate
+        backup.startup_checkpoint(self.home)
         self.history = store.attach(self.home, c)       # conversation history + self-diagnosis (log sink)
         logs.new_cid()
         logs.info("core", "CORE_STARTING", f"JARVES Core {__version__} starting", home=str(self.home))
@@ -131,6 +138,9 @@ class Core:
         self.registry.register(StatusSkill(self.snapshot))
         self.registry.register(feat.make_skill(self.features, self.registry))
         self.registry.allowed_actions |= {"feature_set"}   # policy per risk lives in the tool (features.py)
+        usage.attach(self.home)                          # M5: usage meters ("כמה נשאר לי?") + daily local backup
+        self.registry.register(usage.make_skill(self.home, c))
+        self._backup_auto = backup.start_auto(self.home, self.health)
         if c.music.provider != "none" or self.features.enabled("music") or self._player is not None:
             player = self._player or PearDesktopPlayer(c.music.pear_url, self.home / "pear_client_id", c.music.timeout_s)
             self.music = MusicSkill(player, c.music.max_volume, trim_queue=c.music.trim_queue,
@@ -167,6 +177,8 @@ class Core:
         if self.tasks is not None:
             self.registry.allowed_actions |= {"task_start", "task_cancel"}
             self.registry.register(TaskSkill(self.tasks))
+        from .operations import attach as ops_attach    # WP-M3: scheduler, reports, notes, files, alerts, autonomy
+        self.ops = ops_attach(self)
         self._write_tools_md()                          # after every Skill is registered
         self._retry_lookup = make_retry_lookup(c, self.budget)
         self._check_ai()
@@ -175,6 +187,10 @@ class Core:
                               self.on_message, self._face_connected)
         from .camera import wire as camera_wire              # WP-J camera: switches default OFF (camera/wire.py)
         self.camera = camera_wire.attach(self)
+        from . import appearance                             # WP-M2: face / 2D / 3D avatar / hidden (appearance.py)
+        self.appearance = appearance.attach(self)
+        from .skills import generated                        # WP-M2: approved generated Skills (skills/generated.py)
+        self.generated_skills = generated.attach(self)
 
         audio = self._audio
         if audio is None and self.use_real_audio and c.voice.mode != "off":
@@ -182,6 +198,9 @@ class Core:
         self.dev = DevicePort(audio, self.link, self.health)
         self.dev.check_audio()
         self.health.set("mic", "ok", "software mute off")
+        from . import runtime as runtime_mod            # M1: display/tray/autostart/resume; restores a saved mute
+        self.runtime = runtime_mod.attach(self, mode=self.runtime_mode, **self._runtime_fakes)
+        self._write_tools_md()                          # again: camera + display Skills registered after the first
 
         self.stt = self._stt or WhisperSTT(c.voice.stt_model, c.voice.stt_fallback_model, c.voice.stt_compute,
                                            c.voice.language)
@@ -251,6 +270,8 @@ class Core:
         await asyncio.gather(*tasks, return_exceptions=True)
         if getattr(self, "tasks", None) is not None:
             await self.tasks.shutdown()             # running background tasks end as "cancelled" (stored)
+        if getattr(self, "ops", None) is not None:
+            await self.ops.stop()                   # running jobs stop; the next start resumes or marks them
         await self.registry.drain()                 # shielded side effects finish before the store closes
         if getattr(self, "camera", None) is not None:
             await self.camera.stop()                # sensor closed, indicator off, faces.db closed
@@ -260,6 +281,8 @@ class Core:
             await asyncio.wait_for(self.curator.run("shutdown"), 3)
         except Exception:
             logs.warn("memory", "CURATOR_SHUTDOWN_FAILED", "memory curator did not finish at shutdown")
+        if self.runtime is not None:
+            await self.runtime.stop()               # closes the window it opened; tray/dashboard off; state saved
         await self.link.stop()
         if self._dashboard is not None:              # WP-H: the in-Core dashboard shares memory.db
             await asyncio.to_thread(self._dashboard.stop)
@@ -269,6 +292,8 @@ class Core:
         self.budget.close()          # QA 19 Oct (suite_voice): its own SQLite handle kept memory.db locked after stop
         self.health.mark("stopped")
         logs.info("core", "CORE_STOPPED", "Core stopped cleanly")
+        if getattr(self, "_backup_auto", None) is not None:
+            self._backup_auto.stop.set()                # M5 automatic backup thread
         store.detach(getattr(self, "history", None))
 
     async def run(self) -> None:
@@ -289,6 +314,7 @@ class Core:
                  startup=startup,
                  face_state=self.dev.face_state,
                  mic_muted=self.dev.mic_muted, live_session=self.live is not None,
+                 runtime=self.runtime.view() if self.runtime is not None else None,
                  voice_connecting=self._voice_connecting,
                  wake_listening=getattr(self, "_wake_mic_active", False),
                  ai_connection=self.cfg.ai.connection, billing=billing_routes(self.cfg.ai, self.cfg.voice),
@@ -443,10 +469,14 @@ class Core:
             logs.enable_debug(min(int(p.get("minutes", self.cfg.log.debug_minutes)), self.cfg.log.debug_minutes))
             logs.info("core", "DEBUG_ENABLED", "temporary DEBUG logging enabled")
         elif t in ("core.shutdown", "desktop.close"):
-            logs.info("core", "SHUTDOWN_REQUESTED", "shutdown requested by an authenticated client")
             if t == "desktop.close":
                 await self.link.reply(ws, "desktop.closed", {})
+                if self.runtime is not None and self.runtime.window_closed():
+                    return                         # M1: the window is only a display; the Core keeps running
+            logs.info("core", "SHUTDOWN_REQUESTED", "shutdown requested by an authenticated client")
             self.stop_event.set()
+        elif t == "runtime.set":
+            await self.link.reply(ws, "runtime.state", await self.runtime.apply(p, by=client.role))
         elif t == "ui.open_dashboard":               # WP-H: the face's Dashboard button
             try:
                 url = await self.open_dashboard()
@@ -505,6 +535,8 @@ class Core:
 
     async def set_muted(self, muted: bool) -> None:
         self.dev.set_mic_muted(muted)
+        if self.runtime is not None:
+            self.runtime.note_muted(muted)        # persists: still muted after a restart
         if self.wake is not None:
             self.wake.mute() if muted else self.wake.unmute()
         if muted and self.live is not None:
@@ -966,6 +998,7 @@ class Core:
     def _wake_should_listen(self) -> bool:
         return not (not self.cfg.voice.wake_enabled or self.dev.mic_muted or self.live is not None or self.listening or self.stopping
                     or self._voice_connecting or time.monotonic() < self._hold_wake_until
+                    or (self.runtime is not None and self.runtime.recovering)
                     or (self._busy is not None and not self._busy.done()))
 
     async def _wake_loop(self) -> None:
@@ -990,7 +1023,8 @@ class Core:
                 await asyncio.sleep(0.2)
                 continue
             mic = self._wake_audio() if self._wake_audio else StreamingAudio(v.input_device, v.output_device, rate=16000)
-            chunks = self._levels(mic.mic_chunks(16000, 2560))      # 80 ms chunks
+            from .runtime.power import stall_guard          # unplugged headset / after sleep: no frames -> re-open
+            chunks = self._levels(stall_guard(mic.mic_chunks(16000, 2560), self.cfg.runtime.mic_stall_s))  # 80 ms
             woke = False
             try:
                 self.wake.resume()
@@ -1045,6 +1079,8 @@ class Core:
                 self.health.set("audio", "unavailable", e.message, e.action)
                 self._wake_mic_active = False
                 await self.link.broadcast("status", self.snapshot())
+                if e.code == "AUDIO_MIC_STALLED" and self.runtime is not None:
+                    await self.runtime.recover_audio("mic_stalled")     # re-scan devices (new default mic)
                 await asyncio.sleep(5)
             except asyncio.CancelledError:
                 raise
