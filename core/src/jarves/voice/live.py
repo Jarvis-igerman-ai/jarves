@@ -1063,6 +1063,8 @@ class LiveVoice(SessionLifecycle):
 
     def _remember_user(self, text: str) -> None:
         self._user_turns = (self._user_turns + [text.strip()])[-3:]
+        if hasattr(self.registry, "new_turn"):
+            self.registry.new_turn()       # WP-G: the user spoke again -> side effects allowed after mail/calendar text
 
     async def _show(self, kind: str, text: str) -> None:
         """Backend stage on the screen; the elapsed-time ticker refreshes its detail line."""

@@ -127,6 +127,8 @@ class Core:
         self.workspace = wsp.Workspace(self.home / "workspace")
         self.settings = Settings(self.memory, {"voice.voice": c.voice.voice})
         self.registry.register(SettingsSkill(self.workspace, self.settings, self.registry, self._on_voice_change))
+        from .skills.google import register_google      # WP-G: only when the user connected Google (no network)
+        self.google = register_google(self.registry, self.home, self.health)
         self.workspace.write_generated("TOOLS.md", wsp.tools_markdown(self.registry, self.settings.view()))
         self.workspace.listeners.append(lambda name: self._spawn(wsp.note_live(self.live, self.workspace, name)))
 
