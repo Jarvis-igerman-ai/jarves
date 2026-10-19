@@ -378,3 +378,88 @@ def test_b11_session_of_a_stopped_core_is_not_stretched_by_other_processes():
     a = next(s for s in st.sessions() if s["core_session"] == "procA")
     assert a["ended"] - a["started"] < 1 and a["end_reason"] == "core_stopped"     # was ~45 min (false $2.27)
     st.close()
+
+
+# ------------------------------------------------------------------ B12: action claimed without any tool (lead's silent run)
+def test_b12_action_claim_detection():
+    from jarves.voice.live import action_claim
+    assert action_claim("רשמתי לי שהצבע האהוב עליך הוא כחול.") == "רשמתי"
+    assert action_claim("הגברתי לשבעים אחוז") == "הגברתי"
+    assert action_claim("I saved it for you.") == "saved"
+    for no in ("לא רשמתי את זה.", "כבר רשמתי את זה קודם.", "שמתי לב שאתה עייף.", "בדקתי, המצלמה דלוקה.",
+               "רוצה שארשום?", "השעה חמש."):
+        assert action_claim(no) == "", no
+
+
+async def test_b12_claim_without_tool_is_flagged_and_corrected(monkeypatch, caplog):
+    monkeypatch.setattr(live_mod, "ANNOUNCE_USER_QUIET_S", 0.0)
+    lv, sent = make_live()
+    await lv.handle_event({"type": "session.input_transcript.delta", "delta": "תזכור שהצבע האהוב עליי כחול"})
+    await lv.handle_event({"type": "session.output_transcript.delta", "delta": "רשמתי לי שהצבע האהוב עליך הוא כחול."})
+    lv._flush_transcripts()
+    await asyncio.sleep(2.0)
+    notes = [s for s in sent.items if s[0] == "commentary"]
+    assert len(notes) == 1 and "רשמתי" in notes[0][1] and "NOT done" in notes[0][1]
+    assert lv._stats["false_action_claims"] == 1
+    await _cleanup(lv)
+
+
+class Remember(Skill):
+    name = "mem"
+
+    def tools(self):
+        async def remember(_):
+            return ToolResult(True, "saved")
+        return [Tool("remember", "remember", remember, permission="action")]
+
+
+async def test_b12_claim_after_a_real_tool_result_is_fine():
+    reg = SkillRegistry(allowed_actions={"remember"})
+    reg.register(Remember())
+    lv, sent = make_live(reg)
+
+    class Conn:
+        def __init__(self, base):
+            self.session = base.session
+            self.response = SimpleNamespace(item=SimpleNamespace(create=self._noop), create=self._noop2)
+
+        async def _noop(self, item):
+            pass
+
+        async def _noop2(self):
+            pass
+    lv.conn = Conn(lv.conn)
+    await lv.handle_event({"type": "session.input_transcript.delta", "delta": "תזכור שהצבע האהוב עליי כחול"})
+    await lv._run_tool("remember", "c1", "{}", {"sent": False})
+    await lv.handle_event({"type": "session.output_transcript.delta", "delta": "רשמתי לי שהצבע האהוב עליך כחול."})
+    lv._flush_transcripts()
+    await asyncio.sleep(0.5)
+    assert not [s for s in sent.items if s[0] == "commentary"] and "false_action_claims" not in lv._stats
+    await _cleanup(lv)
+
+
+async def test_b12_claimed_memory_is_saved_by_the_core_from_the_users_own_words():
+    saved = []
+
+    class Mem(Skill):
+        name = "mem"
+
+        def tools(self):
+            async def remember(a):
+                saved.append(a)
+                return ToolResult(True, "saved")
+            from pydantic import BaseModel
+
+            class A(BaseModel):
+                text: str
+            return [Tool("remember", "remember", remember, args=A, permission="action")]
+    reg = SkillRegistry(allowed_actions={"remember"})
+    reg.register(Mem())
+    lv, sent = make_live(reg)
+    await lv.handle_event({"type": "session.input_transcript.delta", "delta": "תזכור שהצבע האהוב עליי הוא כחול"})
+    await lv.handle_event({"type": "session.output_transcript.delta", "delta": "רשמתי לי שהצבע האהוב עליך הוא כחול."})
+    lv._flush_transcripts()
+    await asyncio.sleep(0.5)
+    assert [a.text for a in saved] == ["הצבע האהוב עליי הוא כחול"]
+    assert not [s for s in sent.items if s[0] == "commentary"]          # now true: nothing to correct
+    await _cleanup(lv)

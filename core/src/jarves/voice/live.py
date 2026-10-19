@@ -92,7 +92,9 @@ Deleting or forgetting needs the user's approval on the screen first: before the
 "deleting it now" or "done"; then say plainly whether it was deleted or not. The same for any action that may
 ask for approval (switching a feature or the camera off, sending, inviting): never "מכבה" / "שולח" before the
 result says it happened.
-Never guess a result while waiting and never claim an action happened until the backend confirms it. When the
+Never guess a result while waiting and never claim an action happened until the backend confirms it. "רשמתי",
+"זכרתי", "שמרתי", "הגברתי", "שמתי לך" are claims: say them only after you delegated in THIS turn and the result
+says it worked ("תזכור ש..." / "remember that..." ALWAYS goes to the backend; you have no memory of your own). When the
 result arrives, give just the answer, briefly, without another acknowledgement.
 Background tasks: when the backend says a task runs in the background, tell the user so in one sentence and go
 on talking normally; when a silent [task] note arrives, give its result naturally at that moment. While waiting
@@ -197,6 +199,18 @@ DELIVERY_MAX_WAIT_S = 20.0      # JARVES still talking at the window end: wait a
 DELIVERY_NOTE = ("The backend answer below finished several seconds ago but has not been said yet. Give the user "
                  "just this answer now, briefly, in natural Hebrew, without another acknowledgement, without "
                  "excuses and without delegating again.\nResult: {answer}")
+# False action claims (SW-V3 P0.1, lead's silent run 20 Oct): "remember that my favourite colour is blue" got
+# "רשמתי לי שהצבע האהוב עליך הוא כחול" with NO delegation and NO tool call; memory stayed empty.
+CLAIM_VERBS_HE = ("רשמתי", "זכרתי", "שמרתי", "הגברתי", "הנמכתי", "החלשתי", r"שמתי(?!\s+לב)", "הפעלתי", "פתחתי",
+                  "סגרתי", "הדלקתי", "כיביתי",
+                  "עצרתי", "השהיתי", "השתקתי", "שיניתי", "עדכנתי", "קבעתי", "יצרתי", "שלחתי", "מחקתי", "הוספתי",
+                  "ביטלתי", "הסרתי", "ניגנתי", "תזמנתי", "הגדרתי")
+CLAIM_SETTLE_MAX_S = 10.0       # wait this long for a running tool / backend before judging a claim
+CLAIM_TURN_SLACK_S = 5.0        # an action result this soon before the user turn's first word still belongs to it
+FALSE_CLAIM_NOTE = ("Correction needed: you just told the user that you did something ('{verb}'), but no tool did it "
+                    "in this turn, so nothing was saved or changed. Do it now by delegating to the backend (it has "
+                    "the tool), then confirm with the real result; if you cannot, tell the user plainly in one short "
+                    "Hebrew sentence that it was NOT done. Do not apologise at length.")
 _FILLER_STEMS = ("בודק", "בודקת", "מחפש", "מחפשת", "רגע", "שנייה", "שניה", "כמעט", "לוקח", "ממתין", "מתעכב", "checking",
                  "moment", "second", "almost")
 PROGRESS_MIN_RESPONSE_S = 1.5   # the CURRENT backend response must have run this long (fast continuations: none)
@@ -232,6 +246,29 @@ def _join(prev: str, delta: str) -> str:
             and not (prev[-1] == "." and len(prev) > 1 and prev[-2].isdigit() and delta[0].isdigit())):
         return " " + delta
     return delta
+
+
+_CLAIM_RE = None
+
+
+def action_claim(text: str) -> str:
+    """The first-person PAST-tense side-effect verb an utterance claims ("רשמתי", "הגברתי", "I saved"), else "".
+    Questions, conditionals, negations and "already" (an earlier turn) are not claims."""
+    import re
+    global _CLAIM_RE
+    if _CLAIM_RE is None:
+        he = "|".join(CLAIM_VERBS_HE)
+        _CLAIM_RE = (re.compile(rf"(?<![֐-׿])({he})(?![֐-׿])"),
+                     re.compile(r"\bI(?:'ve| have)?\s+(saved|remembered|noted|set|turned|changed|added|sent|deleted|"
+                                r"played|paused|stopped|created|scheduled|muted|wrote)\b", re.I))
+    for sentence in re.split(r"[.!?\n]+", text or ""):
+        if re.search(r"(?<![֐-׿])(?:לא|כבר|אם|אולי)(?![֐-׿])|\b(?:not|already|if)\b", sentence, re.I):
+            continue
+        for rx in _CLAIM_RE:
+            m = rx.search(sentence)
+            if m:
+                return m.group(1)
+    return ""
 
 
 def _words(text: str) -> set[str]:
@@ -558,6 +595,9 @@ class LiveVoice(SessionLifecycle):
         self._said_all = ""             # every assistant word shown/spoken this session (answer-delivery check)
         self._delegations = 0           # delegations created (a new one = the user moved on)
         self._user_turn_n = 0           # user utterances started
+        self._turn_t0 = self._out_turn_t0 = 0.0   # start of the current user turn / of the turn being answered
+        self._action_times: list[float] = []      # successful action/destructive tool results (monotonic)
+        self._claim_flagged_turn = -1
 
     def session_config(self) -> dict:
         tools: list[dict] = live_tools(self.registry)
@@ -956,6 +996,8 @@ class LiveVoice(SessionLifecycle):
                 await self._state("speaking")
             self._play(pcm)
             if audible and self._held_text:         # the held words are being spoken now: show them
+                if not self._out_text:
+                    self._out_turn_t0 = self._turn_t0
                 self._out_text += self._held_text
                 self._said_all += self._held_text
                 self._held_text = ""
@@ -969,6 +1011,7 @@ class LiveVoice(SessionLifecycle):
                 # flush let "louder" after a mail read reach its tool call first and be refused as untrusted.
                 self._new_turn()
                 self._user_turn_n += 1
+                self._turn_t0 = now
             if (not self._in_text and not self._gated() and now < self._speaking_until
                     and now - self._turn_audio_t0 >= BARGE_IN_MIN_S):
                 await self.interrupt()          # new user utterance over still-queued assistant speech
@@ -976,6 +1019,7 @@ class LiveVoice(SessionLifecycle):
             self._schedule_flush()
             if self._out_text:
                 logs.info("live", "LIVE_JARVES_SAID", "JARVES said", text=self._out_text.strip(), **self._take_reply_wait())
+                self._check_claim(self._out_text)
                 if self.on_transcript:
                     await self.on_transcript("assistant", self._out_text.strip())
                 self._out_text = ""
@@ -995,6 +1039,8 @@ class LiveVoice(SessionLifecycle):
                 self._schedule_flush()
                 return
             d = _join(self._out_text, g("delta") or "")
+            if not self._out_text:
+                self._out_turn_t0 = self._turn_t0        # the user turn this assistant utterance answers
             self._out_text += d
             self._said_all += d
             await self._emote("jarves", self._out_text[-80:])
@@ -1108,6 +1154,7 @@ class LiveVoice(SessionLifecycle):
             self._in_text = ""
         if self._out_text.strip():
             logs.info("live", "LIVE_JARVES_SAID", "JARVES said", text=self._out_text.strip(), **self._take_reply_wait())
+            self._check_claim(self._out_text)
             out.append(("assistant", self._out_text.strip()))
             self._out_text = ""
         return out
@@ -1358,6 +1405,50 @@ class LiveVoice(SessionLifecycle):
         elif it == "error":
             await self._on_error(inner.get("error") or inner, True)
 
+    def _check_claim(self, text: str) -> None:
+        """An assistant utterance just finished: if it claims a side effect ("רשמתי לי ש...") while no action tool
+        succeeded for that user turn, flag it and make GPT-Live do it or take it back (see action_claim)."""
+        verb = action_claim(text)
+        if not verb or not self.running or self._claim_flagged_turn == self._user_turn_n:
+            return
+        try:
+            self._spawn(self._verify_claim(verb, self._out_turn_t0, self._user_turn_n), "claim-check")
+        except RuntimeError:                       # no running loop (sync test paths)
+            pass
+
+    async def _verify_claim(self, verb: str, turn_t0: float, turn_n: int) -> None:
+        t_end = time.monotonic() + CLAIM_SETTLE_MAX_S   # a tool still running / a result on its way: wait for it
+        while self.running and time.monotonic() < t_end and (self._tools_running or self._backend_busy):
+            await asyncio.sleep(0.2)
+        if any(t >= turn_t0 - CLAIM_TURN_SLACK_S for t in self._action_times):
+            return
+        if self._claim_flagged_turn == turn_n or not self.running:
+            return
+        self._claim_flagged_turn = turn_n
+        self._stats["false_action_claims"] = self._stats.get("false_action_claims", 0) + 1
+        logs.warn("live", "LIVE_FALSE_ACTION_CLAIM", "JARVES claimed an action that no tool performed in this turn",
+                  verb=verb, delegations=self._delegations)
+        if await self._make_claim_true():
+            return
+        await self.announce(FALSE_CLAIM_NOTE.format(verb=verb), max_wait_s=10.0, tag="claim")
+
+    async def _make_claim_true(self) -> bool:
+        """The user's own words were a plain "תזכור ש..." (the deterministic parser matches them): the Core saves it
+        itself, as the user's request (origin "user"), so the spoken "רשמתי" becomes true. Silent run 20 Oct: a
+        correction note alone made GPT-Live say "let me verify" but not delegate until the next turn."""
+        from ..brain import match_intent
+        text = self._user_turns[-1] if self._user_turns else ""
+        intent = match_intent(text) if text else None
+        if intent is None or intent.tool != "remember" or self.registry.get("remember") is None:
+            return False
+        ROUTE.set(VOICE_ROUTE)
+        res = await self.registry.call("remember", intent.args, origin="user")
+        if not res.ok:
+            return False
+        self._action_times.append(time.monotonic())
+        logs.info("live", "LIVE_CLAIM_FIXED", "the claimed memory was saved by the Core from the user's own words")
+        return True
+
     async def _watch_delivery(self, answer: str, mark: tuple[int, int, int]) -> None:
         """After a completed backend answer: if GPT-Live said only fillers (or nothing) within DELIVERY_WINDOW_S, and
         the user did not move on (no new utterance or delegation), hand it the answer once."""
@@ -1390,6 +1481,8 @@ class LiveVoice(SessionLifecycle):
         ROUTE.set(VOICE_ROUTE)                  # own task: the untrusted-content taint is this conversation's
         await self._tool_activity(name, None)
         res = await self.registry.call(name, arguments)
+        if res.ok and getattr(self.registry.get(name), "permission", "read") in ("action", "destructive"):
+            self._action_times.append(time.monotonic())     # real side effects (false-claim check)
         await self._tool_activity(name, res)
         await self.conn.response.item.create(item={"type": "function_call_output", "call_id": call_id,
                                                    "output": res.to_model()})
