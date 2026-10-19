@@ -10,6 +10,11 @@ Latest #7 correction: hands-free wake/conversation with 180 s quiet timeout; per
 
 ## Current and upcoming
 
+19 Oct complete retained-log quality review: [report](reviews/ALL_RETAINED_LOGS_19OCT2026.md), all988 records and
+100 voice text entries with history/backup reconciliation. Recommended P0: correct full-exit intent and recover
+when a completed backend does not produce an answer. Further diagnostics/grounding/startup/voice improvements
+are prioritized under existing #7/#17. This checkpoint delivers analysis, not runtime changes or new live tests.
+
 19 Oct text CLI request: standalone `jarvis execute "..."` uses existing text AI, budget, memory/Google tools
 and terminal confirmations with no Core/device startup. Optional interactive mode keeps follow-up context.
 Camera report correction is limited to grounded status instructions and the module CLI's real switch source;
