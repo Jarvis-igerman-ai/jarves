@@ -50,6 +50,8 @@ jobs:
     timeout-minutes: 45
     env:
       CHANNEL: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' && 'main' || 'pr' }}
+      # WP-O: public R2 folder baked in as the default update source (docs/RELEASE_HOSTING.md); unset = GitHub
+      JARVES_UPDATE_BASE_URL: ${{ vars.JARVES_UPDATE_BASE_URL }}
     steps:
       - uses: actions/checkout@v7
       - uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884  # v10.3.0

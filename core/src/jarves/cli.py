@@ -1032,7 +1032,7 @@ def cmd_update(a, cfg, home) -> int:
     """jarvis update [check | install | status]: notify + ask approval (D16); never installs on its own."""
     from .features import Features
     from .updates import UpdateChecker, UpdateError, launch_installer, version_line
-    u = UpdateChecker(home)
+    u = UpdateChecker(home, cfg=cfg)
     print(version_line())
     if a.action == "status":
         s = u.status()

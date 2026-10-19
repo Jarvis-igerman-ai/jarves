@@ -215,6 +215,21 @@ class RuntimeConfig(_Strict):
     mic_stall_s: float = Field(6, ge=0, le=60)       # wake mic silent (no frames at all) this long = re-open; 0 = off
 
 
+class UpdateConfig(_Strict):
+    """Where the update check looks (SW-V2 WP-O, docs/RELEASE_HOSTING.md). "" = GitHub releases (the private repo
+    needs JARVES_UPDATE_TOKEN); otherwise an HTTPS folder holding the signed latest.json (Cloudflare R2)."""
+    base_url: str = ""                    # e.g. "https://pub-<id>.r2.dev/jarves/windows"
+    public_key: str = ""                  # extra trusted Ed25519 key (base64); the built-in keys always count
+
+    @field_validator("base_url")
+    @classmethod
+    def _https_only(cls, v: str) -> str:
+        v = v.strip().rstrip("/")
+        if v and not v.startswith("https://"):
+            raise ValueError("update.base_url must start with https://")
+        return v
+
+
 class Config(_Strict):
     assistant_name: str = "JARVES"
     # how the name is SAID (and written in Hebrew speech/greetings): the voice read the Latin "JARVES" letter by
@@ -229,6 +244,7 @@ class Config(_Strict):
     history: HistoryConfig = HistoryConfig()
     camera: CameraConfig = CameraConfig()
     runtime: RuntimeConfig = RuntimeConfig()
+    update: UpdateConfig = UpdateConfig()
 
 
 SECRET_KEYS = ("api_key", "apikey", "token", "secret", "password", "cookie")

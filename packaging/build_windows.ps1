@@ -96,6 +96,9 @@ try {
 } finally { Pop-Location }
 $info = [ordered]@{ version = $Version; commit = $Commit; built = $Built; channel = $Channel; platform = "windows-x86_64"
                     python = "3.12.15+20261013"; godot = "4.7.2-stable" }
+# WP-O: default update source baked into the build (repo variable JARVES_UPDATE_BASE_URL, public, not a secret);
+# a PC's config.toml [update] base_url still wins. Empty = GitHub releases.
+if ($env:JARVES_UPDATE_BASE_URL) { $info["update_base_url"] = $env:JARVES_UPDATE_BASE_URL.Trim().TrimEnd("/") }
 $info | ConvertTo-Json | Set-Content -Encoding utf8NoBOM (Join-Path $Stage "python\Lib\site-packages\jarves\_build_info.json")
 Run $Py @("-I", "-c", "import jarves.cli, jarves.updates; print(jarves.updates.version_line())")
 
