@@ -180,6 +180,10 @@ class Core:
                               self.on_message, self._face_connected)
         from .camera import wire as camera_wire              # WP-J camera: switches default OFF (camera/wire.py)
         self.camera = camera_wire.attach(self)
+        from . import appearance                             # WP-M2: face / 2D / 3D avatar / hidden (appearance.py)
+        self.appearance = appearance.attach(self)
+        from .skills import generated                        # WP-M2: approved generated Skills (skills/generated.py)
+        self.generated_skills = generated.attach(self)
 
         audio = self._audio
         if audio is None and self.use_real_audio and c.voice.mode != "off":

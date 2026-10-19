@@ -61,6 +61,8 @@ _RULES: list[tuple[str, re.Pattern, Callable[[re.Match], dict]]] = [
 ]
 from .skills.google import INTENT_RULES as _GOOGLE_RULES   # WP-G: "מה יש לי מחר ביומן", "יש מיילים חשובים"
 _RULES += _GOOGLE_RULES
+from .appearance import INTENT_RULES as _APPEARANCE_RULES   # WP-M2: "תחליף לאווטאר תלת מימד"
+_RULES += _APPEARANCE_RULES
 _STRIP =re.compile(r"^(?:jarves|jarvis|ג'?ארב(?:י|ו)ס)[,\s]+|[.!?,\s]+$", _FLAGS)
 
 
