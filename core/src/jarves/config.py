@@ -79,7 +79,7 @@ class VoiceConfig(_Strict):
     # GPT-Live gets the local time as silent context once a minute (session.thinking.append), so "what time is it"
     # is answered at once instead of a ~2-3 s backend round trip.
     clock_context: bool = True
-    # A backend lookup still running after this long with nothing said: ask GPT-Live for ONE short "almost there"
+    # A backend lookup still running after this long with nothing said: ask GPT-Live for ONE short neutral "still checking"
     # (session.commentary.append). 0 = off.
     progress_after_s: float = Field(2.5, ge=0, le=30)
     # Hard deadline for one delegated backend response (web lookups measured 2-13 s): after it the Core gives up on
