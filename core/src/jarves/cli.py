@@ -46,16 +46,45 @@ def _apply_log_args(a, cfg) -> None:
         cfg.log.hide = [m for m in a.hide.split(",") if m]
 
 
+EXIT_ALREADY_RUNNING = 3      # systemd: RestartPreventExitStatus=3 (runtime/autostart.py)
+
+
+def _quiet_streams() -> None:
+    """pythonw.exe (background Core) has no console: sys.stdout/stderr are None and any print would crash."""
+    for name in ("stdout", "stderr"):
+        if getattr(sys, name) is None:
+            setattr(sys, name, open(os.devnull, "w", encoding="utf-8"))
+
+
 def cmd_run(a, cfg, home) -> int:
     from .app import Core
+    from .runtime.lock import AlreadyRunning, InstanceLock
+    background = getattr(a, "background", False)
+    if background:
+        _quiet_streams()
     _apply_log_args(a, cfg)
-    print(f"JARVES Core starting. Terminal log: {cfg.log.console_level}"
-          + (f", modules {','.join(cfg.log.modules)}" if cfg.log.modules else "")
-          + (f", hiding {','.join(cfg.log.hide)}" if cfg.log.hide else "")
-          + ". Stop: Ctrl+C or `jarvis stop`.", file=sys.stderr)
-    core = Core(cfg, home)
+    mode = "background" if background else ("desktop" if getattr(a, "desktop", False) else "foreground")
+    lock = InstanceLock(home)
     try:
-        asyncio.run(_run_desktop(core) if getattr(a, "desktop", False) else core.run())
+        lock.acquire(mode)              # one Core per user: autostart, `jarvis start` and `jarvis` never double up
+    except AlreadyRunning as e:
+        print(f"{e}. Use `jarvis status`, `jarvis show` or `jarvis stop`.", file=sys.stderr)
+        if getattr(a, "show", False):
+            _ws_call(home, cfg.link.port, {"type": "runtime.set", "payload": {"display": "show"}}, "runtime.state")
+        return EXIT_ALREADY_RUNNING
+    if not background:
+        print(f"JARVES Core starting. Terminal log: {cfg.log.console_level}"
+              + (f", modules {','.join(cfg.log.modules)}" if cfg.log.modules else "")
+              + (f", hiding {','.join(cfg.log.hide)}" if cfg.log.hide else "")
+              + ". Stop: Ctrl+C or `jarvis stop`.", file=sys.stderr)
+    core = Core(cfg, home, console_logs=not background, runtime_mode=mode)
+    try:
+        if mode == "desktop":
+            asyncio.run(_run_desktop(core))
+        elif mode == "background":
+            asyncio.run(_run_background(core, show=getattr(a, "show", False)))
+        else:
+            asyncio.run(core.run())
     except KeyboardInterrupt:
         pass
     except OSError as e:
@@ -64,22 +93,36 @@ def cmd_run(a, cfg, home) -> int:
     except RuntimeError as e:
         print(f"JARVES could not become ready: {e}", file=sys.stderr)
         return 2
+    finally:
+        lock.release()
     return 0
 
 
+async def _run_background(core, show: bool = False) -> None:
+    """No console, no window: the tray (when available), the local wake word and the link stay up until Quit /
+    `jarvis stop`. Nothing billable opens while idle: a voice session only starts after "Hey Jarvis"."""
+    await core.start()
+    try:
+        core._startup_stage("ready", "Ready (running in the background)")   # a window opened later shows at once
+        if show:
+            await core.runtime.show("start")
+        await core.stop_event.wait()
+    finally:
+        await core.stop()
+
+
 async def _launch_viewer(port: int):
-    """Own this one child process so closing even the loading window ends this desktop session."""
-    override = os.environ.get("GODOT_EXE", "").strip('"')
-    package_root = Path(os.environ.get("LOCALAPPDATA", "")) / "Microsoft/WinGet/Packages"
-    candidates = [Path(override)] if override else package_root.glob(
-        "GodotEngine.GodotEngine_*/Godot_v4.7.2-stable_win64.exe")
-    executable = next((p for p in candidates if p.is_file()), None)
-    if executable is None:
-        raise RuntimeError("Godot was not found; set GODOT_EXE or install the existing Godot build")
-    project = Path(__file__).resolve().parents[3] / "godot"
-    return await asyncio.create_subprocess_exec(str(executable), "--path", str(project), "res://loading.tscn",
-                                               "--", f"--core-port={port}",
-                                               env={k: v for k, v in os.environ.items() if k != "OPENAI_API_KEY"})
+    """The loading window + room (runtime/viewer.py finds Godot: GODOT_EXE, WinGet, PATH)."""
+    from .runtime.viewer import launch_godot
+    return await launch_godot(port)
+
+
+def _keeps_running(core) -> bool:
+    """M1: with the background_core switch on (default) closing the window only hides JARVES."""
+    feats = getattr(core, "features", None)
+    if feats is not None:
+        return feats.enabled("background_core")
+    return bool(getattr(getattr(core.cfg, "runtime", None), "keep_running", False))
 
 
 async def _run_desktop(core, launcher=None) -> None:
@@ -95,9 +138,18 @@ async def _run_desktop(core, launcher=None) -> None:
     startup = asyncio.create_task(boot())
     try:
         done, _ = await asyncio.wait({startup, viewer_done, stop}, return_when=asyncio.FIRST_COMPLETED)
+        if viewer_done in done and startup not in done and stop not in done and _keeps_running(core):
+            # closed during loading: JARVES keeps starting in the background (tray / "Hey Jarvis" / jarvis show)
+            done, _ = await asyncio.wait({startup, stop}, return_when=asyncio.FIRST_COMPLETED)
         if startup in done:
             await startup
-            await asyncio.wait({viewer_done, stop}, return_when=asyncio.FIRST_COMPLETED)
+            if _keeps_running(core):
+                rt = getattr(core, "runtime", None)
+                if rt is not None and viewer.returncode is None:
+                    rt.viewer.adopt(viewer)          # Show/Hide/tray manage the window this session opened
+                await stop
+            else:
+                await asyncio.wait({viewer_done, stop}, return_when=asyncio.FIRST_COMPLETED)
     finally:
         if not startup.done():
             startup.cancel()
@@ -166,17 +218,109 @@ def cmd_logs(a, cfg, home) -> int:
     return 0
 
 
+def runtime_summary(rt: dict | None) -> str:
+    """One line for the four separate states (spec 4.1): Core, display, mic, alerts."""
+    if not rt:
+        return "runtime: unknown"
+    c, d, m, al, vo = (rt.get(k) or {} for k in ("core", "display", "mic", "alerts", "voice"))
+    voice = ("in conversation" if vo.get("live_session") else "listening for Hey Jarvis (local, no cloud)"
+             if vo.get("wake_listening") else f"voice {vo.get('mode', '?')}")
+    return (f"Core {c.get('state', '?')} ({c.get('mode', '?')}, pid {c.get('pid', '?')}) | window {d.get('state', '?')}"
+            f" | mic {'MUTED' if m.get('muted') else 'on'} | alerts {'PAUSED' if al.get('paused') else 'on'}"
+            f" | {voice} | tray {(rt.get('tray') or {}).get('state', '?')}")
+
+
 def cmd_status(a, cfg, home) -> int:
     live = _ws_call(home, cfg.link.port, {"type": "status.request", "payload": {}}, "status")
     if live is None:
+        from .runtime import read_state
         snap = read_snapshot(home / "health.json")
         print("Core is NOT running (no answer on the local link).")
+        prefs = read_state(home).get("prefs") or {}
+        if prefs:
+            print(f"Saved choices: window {'hidden' if prefs.get('display_hidden') else 'shown'}, mic "
+                  f"{'muted' if prefs.get('mic_muted') else 'on'}, alerts {'paused' if prefs.get('alerts_paused') else 'on'}")
         if snap:
             print(f"Last snapshot is {snap['age_s']} s old (stale, not current truth):")
             print(json.dumps(snap, indent=1, ensure_ascii=False))
         return 1
-    print(json.dumps(live, indent=1, ensure_ascii=False))
+    print(runtime_summary(live.get("runtime")))
+    if not getattr(a, "brief", False):
+        print(json.dumps(live, indent=1, ensure_ascii=False))
     return 0 if live["core"] == "ready" else 3
+
+
+def _background_spawn(home: Path, show: bool) -> None:
+    """Start a window-less Core as its own process (pythonw on Windows: no console), detached from this terminal."""
+    from .runtime.autostart import core_command
+    flags = 0
+    if sys.platform == "win32":
+        flags = (subprocess.DETACHED_PROCESS | subprocess.CREATE_NEW_PROCESS_GROUP | subprocess.CREATE_NO_WINDOW)
+    cmd = core_command(["--show"] if show else [])
+    kw = dict(stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, close_fds=True,
+              start_new_session=sys.platform != "win32", cwd=str(home))
+    try:        # leave `uv run`'s job object, or the Core would be killed when this short command exits
+        subprocess.Popen(cmd, creationflags=flags | getattr(subprocess, "CREATE_BREAKAWAY_FROM_JOB", 0), **kw)
+    except OSError:
+        subprocess.Popen(cmd, creationflags=flags, **kw)
+
+
+def cmd_start(a, cfg, home) -> int:
+    """jarvis start [--show]: JARVES in the background (tray icon, "Hey Jarvis"), returning the terminal at once."""
+    import time as _time
+    st = _ws_call(home, cfg.link.port, {"type": "status.request", "payload": {}}, "status", timeout=2)
+    if st is not None:
+        print("JARVES is already running.  " + runtime_summary(st.get("runtime")))
+        if a.show:
+            _ws_call(home, cfg.link.port, {"type": "runtime.set", "payload": {"display": "show"}}, "runtime.state")
+        return 0
+    _background_spawn(home, a.show)
+    deadline = _time.monotonic() + a.wait
+    while _time.monotonic() < deadline:
+        _time.sleep(0.5)
+        st = _ws_call(home, cfg.link.port, {"type": "status.request", "payload": {}}, "status", timeout=2)
+        if st is not None:
+            print("JARVES started in the background.  " + runtime_summary(st.get("runtime")))
+            print("Tray icon: Dashboard, Show/Hide, Mute, Pause alerts, Status, Diagnostics, Quit.  Stop: jarvis stop")
+            return 0
+    print(f"JARVES did not answer within {a.wait} s. See: jarvis logs -n 80", file=sys.stderr)
+    return 1
+
+
+def cmd_display(a, cfg, home) -> int:
+    """jarvis show | hide: open or close the window; the Core keeps running either way."""
+    what = "show" if a.cmd == "show" else "hide"
+    r = _ws_call(home, cfg.link.port, {"type": "runtime.set", "payload": {"display": what}}, "runtime.state", timeout=8)
+    if r is None:
+        print("JARVES is not running. Start it with: jarvis start" + (" --show" if what == "show" else ""))
+        return 1
+    res = (r.get("applied") or {}).get("display") or {}
+    print(f"{what}: {res.get('detail', '?')}" + ("" if res.get("ok", True) else "  (failed)"))
+    return 0 if res.get("ok", True) else 1
+
+
+def cmd_autostart(a, cfg, home) -> int:
+    """jarvis autostart on | off | status: start JARVES invisibly at login (the user's choice; default off)."""
+    from .features import Features
+    from .runtime import autostart as au
+    import jarves.runtime  # noqa: F401  (registers the autostart feature)
+    ad = au.adapter()
+    if a.action == "status":
+        d = ad.describe()
+        print(f"autostart: {'ON' if d.get('enabled') else 'off'} ({d.get('mechanism') or 'not supported'})"
+              + (f"\n  {d['entry']}" if d.get("entry") else "") + (f"\n  note: {d['note']}" if d.get("note") else ""))
+        return 0
+    try:
+        if a.action == "on":
+            where = ad.enable()
+            print(f"JARVES will start in the background when you log in.\n  {where}")
+        else:
+            print("autostart removed." if ad.disable() else "autostart was not on.")
+    except NotImplementedError as e:
+        print(str(e), file=sys.stderr)
+        return 2
+    Features(cfg, home).set("autostart", a.action == "on", by="cli")     # the dashboard shows the same choice
+    return 0
 
 
 def cmd_stop(a, cfg, home) -> int:
@@ -802,13 +946,23 @@ def main(argv: list[str] | None = None) -> int:
     run = sub.add_parser("run", help="start the Core (Godot face connects to it)")
     log_opts(run)
     run.add_argument("--desktop", action="store_true", help="show loading progress, prepare voice, then open the room")
+    run.add_argument("--background", action="store_true", help="no console, no window: tray + wake word (autostart)")
+    run.add_argument("--show", action="store_true", help="with --background: also open the window")
+    sta = sub.add_parser("start", help="start JARVES in the background (tray, wake word) and return")
+    sta.add_argument("--show", action="store_true", help="also open the window")
+    sta.add_argument("--wait", type=int, default=90, help="seconds to wait for the Core to answer")
+    sub.add_parser("show", help="open the JARVES window (the Core keeps running)")
+    sub.add_parser("hide", help="close the JARVES window (the Core keeps running)")
+    au = sub.add_parser("autostart", help="start JARVES invisibly at login: on / off / status")
+    au.add_argument("action", choices=["on", "off", "status"])
     lg = sub.add_parser("logs", help="show the log (filter by --log-level / --module; -f to follow)")
     log_opts(lg)
     lg.add_argument("-f", "--follow", action="store_true")
     lg.add_argument("-n", "--lines", type=int, default=50)
     lg.add_argument("--until-stopped", action="store_true", help="finish following when the Core stops")
     sub.add_parser("stop", help="orderly shutdown of the running Core")
-    sub.add_parser("status", help="live health from the running Core, or the last stale snapshot")
+    stp = sub.add_parser("status", help="live health from the running Core, or the last stale snapshot")
+    stp.add_argument("--brief", action="store_true", help="only the one-line runtime summary")
     d = sub.add_parser("diag", help="write a redacted support bundle (zip)")
     d.add_argument("--out")
     d.add_argument("--lines", type=int, default=500)
@@ -870,7 +1024,8 @@ def main(argv: list[str] | None = None) -> int:
             "ask": cmd_ask, "say": cmd_say, "chatgpt": cmd_chatgpt, "setup": cmd_setup, "logs": cmd_logs, "key": cmd_key,
             "wake": cmd_wake, "doctor": cmd_doctor, "cost": cmd_cost, "dashboard": cmd_dashboard,
             "diagnose": cmd_diagnose, "features": cmd_features, "google": cmd_google,
-            "backup": cmd_backup, "restore": cmd_restore, "usage": cmd_usage}[a.cmd](a, cfg, home)
+            "backup": cmd_backup, "restore": cmd_restore, "usage": cmd_usage, "start": cmd_start,
+            "show": cmd_display, "hide": cmd_display, "autostart": cmd_autostart}[a.cmd](a, cfg, home)
 
 
 if __name__ == "__main__":

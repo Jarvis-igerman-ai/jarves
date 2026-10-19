@@ -40,6 +40,21 @@ class FakeTTS:
         return np.zeros(1600, np.float32), 16000
 
 
+@pytest.fixture(autouse=True)
+def _no_real_autostart(monkeypatch):
+    """Never touch the real HKCU Run key / systemd user units from a test (runtime/autostart.py)."""
+    from jarves.runtime import autostart as au
+
+    class Reg(dict):
+        def set(self, name, value):
+            self[name] = value
+
+        def delete(self, name):
+            return self.pop(name, None) is not None
+    monkeypatch.setattr(au, "adapter", lambda: au.WindowsAutostart(Reg(), ["pythonw.exe", "-m", "jarves", "run",
+                                                                           "--background"]))
+
+
 @pytest.fixture
 def home(tmp_path, monkeypatch):
     monkeypatch.setenv("JARVES_HOME", str(tmp_path))
