@@ -75,5 +75,55 @@ already covered; until they merge the guide says "not in this version yet".
 - Rule for everyone: a new `features.register(...)` needs a guide in `guides/data/` or
   `test_every_registered_feature_has_exactly_one_guide` fails.
 
+- `capabilities.py` (WP-M4): issue #25 added to KNOWN_ISSUES (created with `gh issue create`).
+- After the swv2-integrate merge: WP-K's `home.js` calls `window.guidesSetupCard()` (one line); the guides link
+  WP-K's Home privacy switch, Connections page and the M1 Controls page (`#/runtime`); the privacy probe reads
+  WP-K's privacy flag file.
+
 ## Tests and evidence
-See the bottom of this file (filled in after the runs).
+- `core/tests/test_guides.py` (24 tests, offline): every registered feature has exactly one guide (fails for a new
+  feature without one), required topics, Hebrew present in every title / sentence / step / phrase / problem, every
+  link / page / action / check valid, find by Hebrew/English/alias, live state follows switches and probes, platform
+  status from feature targets, briefing cap + hot update + TOOLS.md index, Test now checks (backup verify, Pear,
+  camera, AI key, admin key with a fake Costs API), dashboard API, scripted help conversation (Google: step 1 ->
+  "done" while not connected = "not yet" -> connected -> step 2 opens Connections -> finished), risky step needs
+  on-screen approval, setup_hint on FEATURE_OFF and on MUSIC_PLAYER_OFFLINE, suggestions (once per conversation, not
+  again within 7 days, again after, snooze, dismiss, quiet hours, "stop suggesting", failing feature first), the
+  running Core (help tools registered, TOOLS.md has the guide index, backend instructions have the briefing),
+  configurable workweek.
+- Full suite after merging swv2-integrate: 882 passed, 3 skipped, 4 failed. 2 failures fixed (capabilities: #25
+  added). The other 2 (`test_core.py::test_push_to_talk_music_flow`, `test_features.py::test_core_follows_switches`)
+  only fail when nothing listens on Pear's port 127.0.0.1:26538 (the user's Pear was closed during the run); with a
+  dummy listener on that port both pass. They existed before this package (music probe = TCP to Pear).
+  Before the merge: 790 passed, 3 skipped.
+- Headless captures (automatic, not a hands-on check), `python tools/guides_screens.py`:
+  `docs/reviews/swv2_guides/guides_index_he.png`, `guides_index_en.png` (dark), `guides_guide_music_he.png`,
+  `guides_guide_google_calendar_he.png`, `guides_guide_camera_en.png` (dark), `guides_guide_api_budget_he.png`,
+  `guides_home_checklist.png` (WP-K Home + checklist), `guides_features_links.png`.
+- Real silent GPT-Live run (`tools/silent_help.py`, virtual mic/speaker, nothing played):
+  run 1: "איך אני מחבר את גוגל?" -> backend `explain_feature` -> "תפתח טרמינל ותקליד jarvis Google start ... תוודא
+  בעמוד Connections שגוגל מסומן כ-OK" (PASS); "מה אתה יכול לעשות?" -> answered sensibly but the script's keyword list
+  was too narrow (FAIL on the list only; widened). Run 2: both PASS ("...חיפושי מידע, תזכורות, פתקים, קבצים וזיכרון
+  ... רק צריך לחבר את יומן גוגל"). Results: `docs/reviews/swv2_guides/silent_help_run1.json`, `silent_help_run2.json`.
+  Cost: $0.0486 + $0.0486 = **about $0.10** (0.93 voice min each, 4 small backend responses each). Nothing else paid.
+
+## Windows / Raspberry Pi
+- Guides, help Skill, suggestions, hints: pure Python + stdlib TOML, no platform code. Windows:
+  implemented_unverified (offline tests + one silent live run, no hands-on user check yet). Pi:
+  implemented_unverified, follow-up https://github.com/igalgerman/JARVIS/issues/25 (also the hands-on checks and a
+  real admin key).
+
+## Open questions for the user
+1. Suggestion frequency: at most one per conversation and the same one at most once a week (`SUGGEST_EVERY_DAYS` =
+   7). OK, or rarer?
+2. Monthly API budget: the guide button sets the suggested $20 (your "yes for now"); it is NOT set automatically.
+   Should a fresh install set $20 by itself?
+3. Guides open in Hebrew by default (English toggle). OK?
+4. "ימי חול" default Sunday-Thursday (Israel), switchable to Monday-Friday on the Jobs page. OK?
+
+## Not done / limits
+- The front voice model gets only a short note (what needs setup + "delegate help questions"); the full briefing is
+  in the backend instructions, fixed per conversation by GPT-Live (a switch flipped mid-conversation reaches the
+  next one; TOOLS.md and tool errors with setup_hint follow at once).
+- "Test now" never plays music or takes a picture; wake word / chimes only check the device and package.
+- Music's Windows / Pi status shows "not yet verified" because the music feature declares no targets (owner WP-E).

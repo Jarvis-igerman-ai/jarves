@@ -167,7 +167,7 @@
   const nav = document.getElementById("nav");
   const badge = el("span", { class: "count", id: "guideCount", title: "features that need setup" });
   if (nav && !nav.querySelector('[data-page="guides"]')) {
-    const a = el("a", { href: "#/guides", "data-page": "guides" }, "Guides ", badge);
+    const a = el("a", { href: "#/guides", "data-page": "guides" }, el("span", {}, "Guides ", el("small", { class: "he" }, "מדריכים")), " ", badge);
     const after = nav.querySelector('[data-page="features"]');
     after ? after.after(a) : nav.append(a);
   }
