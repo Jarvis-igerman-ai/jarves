@@ -285,7 +285,7 @@ class Core:
     # ------------------------------------------------------------------ face / UI messages
     async def _face_connected(self) -> None:
         if self.startup["ready"] and self.live is not None and hasattr(self.live, "present"):
-            self.live.present()
+            self._spawn(self._present_after_delay(self.live))
         if self.startup["phase"] == "ready":
             self._startup_stage("running", "Ready")
             seconds = round(time.monotonic() - self._startup_t0, 2)
@@ -315,11 +315,22 @@ class Core:
             return "הקול המקומי זמין דרך מילת ההפעלה כשהמיקרופון מוכן."
         return "הקול אינו זמין. בדוק את המצב באפשרויות."
 
+    def hello_text(self, question: bool = False) -> str:
+        """The spoken hello: always the Hebrew-written name (19 Oct: "אני JARVES" was mispronounced)."""
+        return f"שלום! אני {self.cfg.assistant_name_spoken}." + (" איך אפשר לעזור?" if question else "")
+
+    async def _present_after_delay(self, live) -> None:
+        """Release the held live greeting a beat after the room is ready instead of the same instant."""
+        await asyncio.sleep(self.cfg.voice.greeting_delay_s)
+        if self.live is live:
+            live.present()
+
     async def greet(self) -> None:
-        hello = f"שלום! אני {self.cfg.assistant_name}."
+        hello = self.hello_text()
         text = f"{hello} {self.how_to_talk()}"
         await self.link.send_face("assistant.text", {"text": text, "source": "core", "ok": True, "code": "GREETING"})
         if self.cfg.voice.greeting:
+            await asyncio.sleep(self.cfg.voice.greeting_delay_s)     # a beat after the room is ready (cache stays instant)
             await self.speak(f'{hello} תגיד היי ג׳ארוויס כדי לדבר איתי.' if self.wake is not None else hello,
                              cache=True)
         if self.cfg.voice.activation == "conversation":
@@ -660,7 +671,8 @@ class Core:
             from .voice.live import LiveVoice
             live = LiveVoice(self.registry, self.agent.instructions, model=v.live_model, voice=v.voice,
                              backend_model=self.cfg.ai.text_model, web_search=self.cfg.ai.web_search,
-                             name=self.cfg.assistant_name, half_duplex=v.half_duplex, max_session_s=max_s,
+                             name=self.cfg.assistant_name, spoken_name=self.cfg.assistant_name_spoken,
+                             half_duplex=v.half_duplex, max_session_s=max_s,
                              audio_io=audio_io, idle_disconnect_s=v.idle_disconnect_s, on_emotion=on_emotion,
                              on_activity=on_activity, on_level=on_level,
                              reasoning_effort=self.cfg.ai.voice_reasoning_effort,
@@ -727,7 +739,7 @@ class Core:
             if self.cfg.voice.activation == "conversation":
                 if self.voice_mode != "live":
                     raise RuntimeError("automatic desktop startup currently requires live voice; check voice/API settings")
-                hello = f"שלום! אני {self.cfg.assistant_name}. איך אפשר לעזור?" if self.cfg.voice.greeting else None
+                hello = self.hello_text(question=True) if self.cfg.voice.greeting else None
                 await self._start_live(greeting=hello, hold_output=True)
                 if self.live is None or not hasattr(self.live, "wait_ready"):
                     raise RuntimeError("live voice did not become ready; check logs and API limits")

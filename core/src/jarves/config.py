@@ -87,6 +87,8 @@ class VoiceConfig(_Strict):
     wake_no_speech_s: float = Field(12, ge=0, le=120)   # a wake-started conversation where nobody speaks ends after this (false wake); 0 = off
     chime: bool = True                     # soft sound when "Hey Jarvis" is heard and when the conversation is ready
     greeting: bool = True                  # say hello + how to talk when the face first connects
+    # the hello starts this long after the face/room is ready (19 Oct: starting the same instant felt abrupt)
+    greeting_delay_s: float = Field(0.5, ge=0, le=5)
     # "Hey Jarvis" wake word: detected ON THIS DEVICE (pyopen-wakeword, openWakeWord model); no audio leaves the
     # device until it triggers. Software mute stops it and releases the microphone.
     wake_enabled: bool = True
@@ -125,6 +127,9 @@ class LogConfig(_Strict):
 
 class Config(_Strict):
     assistant_name: str = "JARVES"
+    # how the name is SAID (and written in Hebrew speech/greetings): the voice read the Latin "JARVES" letter by
+    # letter / wrongly in the 19 Oct session. Written forms (logs, window titles) keep assistant_name.
+    assistant_name_spoken: str = "ג'ארוויס"
     link: LinkConfig = LinkConfig()
     ai: AIConfig = AIConfig()
     voice: VoiceConfig = VoiceConfig()

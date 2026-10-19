@@ -46,7 +46,7 @@ async def test_hands_free_activation_and_close(home, cfg, monkeypatch, activatio
         else:                                  # wake mode: says hello once (no live session), then idles
             await face.wait("face.set_state", lambda p: p["state"] == "idle")
         assert len(started) == expected
-        assert speech.spoken == ["שלום! אני JARVES."]     # both modes greet audibly, exactly once
+        assert speech.spoken == ["שלום! אני ג'ארוויס."]   # both modes greet audibly, exactly once
         await face.send("desktop.close")
         await face.wait("desktop.closed")
         await asyncio.wait_for(core.stop_event.wait(), 1)
