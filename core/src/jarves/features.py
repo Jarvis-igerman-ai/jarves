@@ -202,9 +202,9 @@ def _probe_camera(c: ProbeCtx) -> tuple[bool, str]:
         return True, ""
     if comp.get("status") == "unavailable":
         return False, comp.get("detail") or "no camera connected"
-    if sys.platform.startswith("linux") and any(Path("/dev").glob("video*")):
-        return True, ""
-    return False, "no camera connected"
+    from .camera.backends import probe
+    result = probe(getattr(getattr(c.cfg, "camera", None), "backend", "auto"))
+    return result.available, "" if result.available else "; ".join(x for x in (result.detail, result.action) if x)
 
 
 def _skill_installed(*names: str) -> Probe:
@@ -218,6 +218,9 @@ def _skill_installed(*names: str) -> Probe:
 
 def _google(scope: str, *skill_names: str) -> Probe:
     installed = _skill_installed(*skill_names)
+    scope_field = {"calendar": "calendar", "calendar write": "calendar_write", "contacts": "contacts",
+                   "gmail read": "gmail_read", "gmail send": "gmail_send"}[scope]
+    consent_command = "jarvis google login" + {"calendar_write": " --calendar-write", "contacts": " --contacts"}.get(scope_field, "")
 
     def probe(c: ProbeCtx) -> tuple[bool, str]:
         # WP-K: the token lives in <home>/google/token.json (google_auth); the reason tells him what to SAY
@@ -229,6 +232,9 @@ def _google(scope: str, *skill_names: str) -> Probe:
         if not st["connected"]:
             return False, (f"Google account not connected ({scope}); tell the user: \"תריץ במחשב {START_COMMAND}, "
                            f"ואני אדריך אותך\"")
+        if not st.get(scope_field, False):
+            return False, (f"Google consent required for {scope}: run `{consent_command}` and approve the requested "
+                           "permission in the browser. No sign-in or permission change was performed.")
         return installed(c)
     return probe
 
@@ -261,10 +267,14 @@ register("diagnosis_llm_pass", "אבחון עצמי בעזרת המודל", "Sel
          about="after each conversation one small model request looks for problems the rules miss")
 register("google_calendar", "יומן גוגל", "Google Calendar", True, probe=_google("calendar", "calendar"),
          needs=["google_account"], risk="medium", skills=["calendar"], about="read and add calendar events")
-register("gmail_read", "קריאת מיילים", "Read Gmail", True, probe=_google("gmail", "gmail"),
+register("google_contacts", "אנשי קשר בגוגל", "Google Contacts", False,
+         probe=_google("contacts", "google_contacts"), needs=["google_account"], risk="medium",
+         skills=["google_contacts"], tools=["google_contacts_search"],
+         about="search contact names and email addresses, read-only; separate Contacts consent and People API required")
+register("gmail_read", "קריאת מיילים", "Read Gmail", True, probe=_google("gmail read", "gmail"),
          needs=["google_account"], risk="medium", tools=["gmail_search", "gmail_read"], about="read your e-mail")
-register("gmail_send", "שליחת מיילים", "Send Gmail", False, probe=_google("gmail", "gmail"),
-         needs=["google_account", "gmail_read"], risk="high", tools=["gmail_send", "gmail_draft"],
+register("gmail_send", "שליחת מיילים", "Send Gmail", False, probe=_google("gmail send", "gmail"),
+         needs=["google_account", "gmail_read"], risk="high", tools=["gmail_send_draft", "gmail_create_draft"],
          about="send e-mail in your name")
 register("camera", "מצלמה", "Camera", False, probe=_probe_camera, needs=["camera_device"], risk="high",
          skills=["camera"], about="look through the camera when asked")
@@ -288,7 +298,7 @@ register("voice_change", "החלפת קול", "Voice change", True, probe=_probe
 # SW-V2 WP-M4 (status per platform: capabilities.py)
 register("calendar_write", "הוספה ועדכון ביומן", "Calendar: add and update events", False,
          probe=_google("calendar write", "calendar_write"), needs=["google_calendar"], risk="high",
-         tools=["calendar_create_event", "calendar_update_event"],
+         tools=["calendar_create_event", "calendar_update_event", "calendar_share_event"],
          about="create and change events after reading them back to you; never deletes (needs a new Google "
                "sign-in with the events permission)")
 register("dashboard_lan", "לוח בקרה ברשת הביתית", "Dashboard on the home network", False, risk="high",
@@ -611,7 +621,9 @@ class Features:
 
     def front_note(self, limit: int = 600) -> str:
         """Short line for GPT-Live's own instructions (the voice model answers "do you have a camera?" itself)."""
-        off = [f"{f.title_he} ({why})" for f, why in self.unavailable_summary()]
+        # Keep privacy-sensitive state visible before long setup guidance; full reasons stay in FEATURES.md.
+        unavailable = sorted(self.unavailable_summary(), key=lambda item: item[0].risk != "high")
+        off = [f"{f.title_he} ({why[:80] + '…' if len(why) > 80 else why})" for f, why in unavailable]
         if not off:
             return ""
         text = "Features that are OFF or not available right now: " + "; ".join(off)

@@ -29,10 +29,10 @@ from html import unescape
 from html.parser import HTMLParser
 from pathlib import Path
 from typing import Callable
-from urllib.parse import quote
+from urllib.parse import quote, urlsplit
 
 import httpx
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 from .. import logs
 from ..google_auth import (CALENDAR_SCOPES, CALENDAR_WRITE, GMAIL_COMPOSE, GMAIL_READ, NOT_CONNECTED_HE, START_COMMAND,
@@ -170,14 +170,15 @@ class GoogleApi:
     def __init__(self, auth: GoogleAuth, transport: httpx.AsyncBaseTransport | None = None) -> None:
         self.auth, self._transport = auth, transport
 
-    async def request(self, method: str, url: str, need, *, params=None, json_body=None) -> dict:
+    async def request(self, method: str, url: str, need, *, params=None, json_body=None, etag=None) -> dict:
         calendar_guard(method, url, json_body)        # hard no-delete rule, before any token is fetched
         for attempt in (1, 2):
             token = await self.auth.access_token(need, force_refresh=attempt == 2)
             try:
                 async with httpx.AsyncClient(timeout=8, transport=self._transport) as c:
                     r = await c.request(method, url, params=params, json=json_body,
-                                        headers={"Authorization": f"Bearer {token}"})
+                                        headers={"Authorization": f"Bearer {token}",
+                                                 **({"If-Match": etag} if etag else {})})
             except httpx.HTTPError as e:
                 raise GoogleAuthError("GOOGLE_OFFLINE", f"cannot reach Google ({type(e).__name__})",
                                       "check the internet", "אין לי חיבור לגוגל כרגע.") from e
@@ -216,6 +217,12 @@ def calendar_guard(method: str, url: str, body=None) -> None:
         logs.error("google", "CALENDAR_DELETE_FORBIDDEN", "a calendar delete/cancel was refused", method=method)
         raise GoogleAuthError("CALENDAR_DELETE_FORBIDDEN", "deleting calendar events is not allowed", "",
                               "אני לא מוחק אירועים מהיומן. אפשר למחוק ישירות ב-Google Calendar.")
+    if method.upper() not in ("GET", "HEAD"):
+        allowed = re.fullmatch(r"/calendars/[^/]+/events" + (r"/[^/]+" if method.upper() == "PATCH" else ""), path)
+        fields = {"summary", "start", "end", "recurrence", "reminders", "location", "description", "attendees"}
+        if method.upper() not in ("POST", "PATCH") or not allowed or not isinstance(body, dict) or set(body) - fields:
+            raise GoogleAuthError("CALENDAR_WRITE_FORBIDDEN", "unsupported calendar write path or fields", "",
+                                  "אפשר ליצור, לעדכן או לשתף אירוע בלבד; לא לשנות הרשאות של יומן.")
 
 
 def _fail(e: GoogleAuthError) -> ToolResult:
@@ -554,6 +561,33 @@ HANDLE_TTL_S = 1800
 DEFAULT_TZ_NAME = "Asia/Jerusalem"
 
 
+def _guest_emails(values: list[str]) -> list[str]:
+    out, seen = [], set()
+    for value in values:
+        address = value.strip()
+        if len(address) > 254 or any(ord(c) < 32 or ord(c) == 127 for c in address) or not _EMAIL.fullmatch(address):
+            raise ValueError("guests must contain plain email addresses")
+        if address.casefold() not in seen:
+            seen.add(address.casefold())
+            out.append(address)
+    return out
+
+
+def _event_link(value) -> str | None:
+    """Only return a Google-supplied Calendar link, never construct one from an event id."""
+    if not isinstance(value, str) or len(value) > 4096 or any(c.isspace() or ord(c) < 32 for c in value):
+        return None
+    try:
+        parsed = urlsplit(value)
+        if (parsed.scheme == "https" and parsed.netloc in ("calendar.google.com", "www.google.com")
+                and parsed.path == "/calendar/event"
+                and "\\" not in value):
+            return value
+    except ValueError:
+        pass
+    return None
+
+
 class CreateArgs(BaseModel):
     title: str = Field(..., min_length=1, max_length=120)
     day: str = Field(..., max_length=40, description="today | tomorrow | a weekday | YYYY-MM-DD | D.M (resolved locally)")
@@ -567,6 +601,10 @@ class CreateArgs(BaseModel):
                                         description="popup reminders, minutes before (e.g. [10]); [] = calendar default")
     location: str = Field("", max_length=120)
     description: str = Field("", max_length=1000)
+    guests: list[str] = Field(default_factory=list, max_length=100,
+                              description="Plain email addresses, explicitly chosen by the user; sends invitations")
+
+    _validate_guests = field_validator("guests")(_guest_emails)
 
 
 class FindArgs(BaseModel):
@@ -586,6 +624,15 @@ class UpdateArgs(BaseModel):
     location: str | None = Field(None, max_length=120)
     description: str | None = Field(None, max_length=1000)
     reminder_minutes: list[int] | None = Field(None, max_length=5)
+
+
+class ShareArgs(BaseModel):
+    handle: str = Field(..., pattern=r"^e\d{1,3}$")
+    guests: list[str] = Field(..., min_length=1, max_length=100)
+    scope: str | None = Field(None, pattern="^(this|series)$",
+                              description="For recurring events ASK whether this occurrence or the whole series")
+
+    _validate_guests = field_validator("guests")(_guest_emails)
 
 
 def _hm(s: str) -> tuple[int, int]:
@@ -675,9 +722,13 @@ class CalendarWriter:
         rem = self._reminders(a.reminder_minutes)
         if rem:
             body["reminders"] = rem
+        if a.guests:
+            body["attendees"] = [{"email": email} for email in a.guests]
         rem_he = ("תזכורת " + ", ".join(f"{m} דקות לפני" for m in a.reminder_minutes)) if a.reminder_minutes \
             else "תזכורת רגילה של היומן"
         readback = f"ליצור ביומן \"{cal['name']}\": \"{a.title}\", {when}, {rec}, {rem_he}?"
+        if a.guests:
+            readback += " לשלוח הזמנות בדוא״ל אל: " + ", ".join(a.guests) + "?"
         return {"op": "create", "calendar": cal, "body": body, "readback": readback,
                 "url": f"{CAL_API}/calendars/{_q(cal['id'])}/events"}
 
@@ -703,6 +754,7 @@ class CalendarWriter:
                 view = {"handle": h, "when": "all day " + f"{s:%a %d.%m}" if all_day else f"{s:%a %d.%m %H:%M}",
                         "title": clean_text(ev.get("summary", "") or "(ללא כותרת)", 120), "calendar": cal["name"],
                         "recurring": bool(ev.get("recurringEventId") or ev.get("recurrence"))}
+                view["htmlLink"] = _event_link(ev.get("htmlLink"))
                 self._handles[h] = {"calendar_id": cal["id"], "calendar": cal["name"], "event_id": ev["id"],
                                     "master_id": ev.get("recurringEventId") or (ev["id"] if ev.get("recurrence")
                                                                                  else None),
@@ -770,10 +822,50 @@ class CalendarWriter:
                 "url": f"{CAL_API}/calendars/{_q(h['calendar_id'])}/events/{_q(target)}",
                 "calendar": {"id": h["calendar_id"], "name": h["calendar"]}}
 
+    async def plan_share(self, a: ShareArgs) -> dict:
+        h = self._handles.get(a.handle)
+        if h is None or self._clock() - h["t"] > HANDLE_TTL_S:
+            raise GoogleAuthError("CALENDAR_UNKNOWN_EVENT", "unknown event handle", "",
+                                  "קודם אחפש את האירוע ביומן ואקריא לך אותו.")
+        if h["recurring"] and a.scope is None:
+            raise GoogleAuthError("CALENDAR_SCOPE_NEEDED", "recurring event: scope not chosen", "",
+                                  "להזמין רק לפעם הזאת, או לכל הסדרה?")
+        series = h["recurring"] and a.scope == "series"
+        target = h["master_id"] if series else h["event_id"]
+        url = f"{CAL_API}/calendars/{_q(h['calendar_id'])}/events/{_q(target)}"
+        ev = await self.api.request("GET", url, CALENDAR_SCOPES)
+        attendees = ev.get("attendees", [])
+        etag = ev.get("etag")
+        if (ev.get("status") == "cancelled" or ev.get("attendeesOmitted") or not isinstance(attendees, list)
+                or any(not isinstance(x, dict) or not isinstance(x.get("email"), str) for x in attendees)
+                or not isinstance(etag, str) or not etag or len(etag) > 256 or "\r" in etag or "\n" in etag):
+            raise GoogleAuthError("CALENDAR_INCOMPLETE_EVENT", "cannot safely preserve the event guest list", "",
+                                  "אין לי תמונת אירוע מלאה ועדכנית; לא שיניתי את המוזמנים. צריך לחפש שוב.")
+        preserved = _guest_emails([x["email"] for x in attendees])
+        known = {x.casefold() for x in preserved}
+        added = [email for email in a.guests if email.casefold() not in known]
+        if not added:
+            raise GoogleAuthError("CALENDAR_ALREADY_SHARED", "all guests already invited", "",
+                                  "כל הכתובות האלה כבר מוזמנות לאירוע; לא שלחתי הזמנה נוספת.")
+        merged = [dict(x) for x in attendees] + [{"email": email} for email in added]
+        if len(merged) > 200:
+            raise GoogleAuthError("CALENDAR_TOO_MANY_GUESTS", "guest list exceeds the supported limit", "",
+                                  "יש יותר מדי מוזמנים; אפשר לשתף ישירות ב-Google Calendar.")
+        title = clean_text(ev.get("summary") or "(ללא כותרת)", 120)
+        scope = "כל הסדרה" if series else "רק הפעם הזאת" if h["recurring"] else "אירוע יחיד"
+        start, all_day = _event_time(ev, "start", self.tz)
+        when = _he_date(start) + (" כל היום" if all_day else f" {start:%H:%M}") if start else "זמן לא ידוע"
+        readback = (f"לשתף ביומן \"{h['calendar']}\" את \"{title}\", {when} ({scope})? לשלוח הזמנות בדוא״ל אל: "
+                    + ", ".join(added) + ". לשמור את המוזמנים הקיימים: " + (", ".join(preserved) or "אין") + "?")
+        return {"op": "share", "body": {"attendees": merged}, "readback": readback, "series": series,
+                "url": url, "etag": etag, "calendar": {"id": h["calendar_id"], "name": h["calendar"]}}
+
     async def commit(self, plan: dict) -> dict:
         """Send the approved plan; return Google's stored event, read back."""
         method = "POST" if plan["op"] == "create" else "PATCH"
-        ev = await self.api.request(method, plan["url"], (CALENDAR_WRITE,), json_body=plan["body"])
+        ev = await self.api.request(method, plan["url"], (CALENDAR_WRITE,), json_body=plan["body"],
+                                    params={"sendUpdates": "all"} if plan["body"].get("attendees") else None,
+                                    etag=plan.get("etag"))
         s, all_day = _event_time(ev, "start", self.tz)
         e, _ = _event_time(ev, "end", self.tz)
         when = ("כל היום " + _he_date(s)) if all_day else (f"{_he_date(s)} {s:%H:%M}" + (f"-{e:%H:%M}" if e else "")) \
@@ -784,6 +876,9 @@ class CalendarWriter:
                   "timezone": (ev.get("start") or {}).get("timeZone", self.tz_name), "recurrence": rec,
                   "reminders": [o.get("minutes") for o in rem.get("overrides", [])] if not rem.get("useDefault", True)
                   else "default", "calendar": plan["calendar"]["name"]}
+        stored["guests"] = [x["email"] for x in ev.get("attendees", []) if isinstance(x, dict)
+                            and isinstance(x.get("email"), str) and _EMAIL.fullmatch(x["email"])]
+        stored["htmlLink"] = _event_link(ev.get("htmlLink"))
         logs.info("google", "CALENDAR_WRITTEN", f"calendar event {plan['op']}d after the user's approval",
                   op=plan["op"], series=plan.get("series", False))
         verb = "יצרתי" if plan["op"] == "create" else "עדכנתי"
@@ -812,7 +907,8 @@ class CalendarWriteSkill(Skill):
             self._plans = {k: v for k, v in self._plans.items() if now - v["t"] < 120}
             key = kind + a.model_dump_json()
             if key not in self._plans:
-                plan = await (self.w.plan_create(a) if kind == "create" else self.w.plan_update(a))
+                planner = {"create": self.w.plan_create, "update": self.w.plan_update, "share": self.w.plan_share}[kind]
+                plan = await planner(a)
                 self._plans[key] = {**plan, "t": now}
             return self._plans[key]
 
@@ -838,7 +934,9 @@ class CalendarWriteSkill(Skill):
                 finally:
                     self._plans.pop(kind + a.model_dump_json(), None)
                 return ToolResult(True, r["message"], {"stored": r["stored"],
-                                                       "rule": "Tell the user exactly what was stored."})
+                                                       "rule": "Tell the user exactly what was stored. Use only the "
+                                                       "returned htmlLink; if absent, no verified event link is "
+                                                       "available. Gmail sending needs separate confirmation."})
             return fn
 
         async def find(a: FindArgs) -> ToolResult:
@@ -850,18 +948,24 @@ class CalendarWriteSkill(Skill):
                 return ToolResult(False, "לא הבנתי איזה יום.", code="CALENDAR_BAD_DAY")
             return ToolResult(True, f"מצאתי {len(evs)} אירועים." if evs else "לא מצאתי אירוע כזה.",
                               {"untrusted_events": evs, "note": UNTRUSTED_NOTE + " Use the handle with "
-                               "calendar_update_event after the user confirms which event and, for recurring "
+                               "calendar_update_event or calendar_share_event after the user confirms which event and, for recurring "
                                "ones, whether only this occurrence or the whole series."})
         return [
-            Tool("calendar_find_events", "Find events the user wants to CHANGE (returns handles e1, e2...). "
+            Tool("calendar_find_events", "Find events to change, share or obtain their real Calendar link (handles e1, e2...). "
                  + UNTRUSTED_NOTE, find, FindArgs, permission="read", timeout_s=15, untrusted_output=True),
             Tool("calendar_create_event", "Add an event to the user's Google Calendar. The user hears a read-back "
-                 "(calendar, title, day, time, time zone, repeat, reminder) and approves on the screen first.",
+                 "(calendar, title, day, time, time zone, repeat, reminder, optional guest email invitations) "
+                 "and approves on the screen first.",
                  run("create"), CreateArgs, permission="destructive", impact=impact("create"), timeout_s=40),
             Tool("calendar_update_event", "Change an event found by calendar_find_events (title, time, place, "
                  "reminder). For a recurring event ask 'only this time or the whole series?' and pass scope. "
                  "There is NO way to delete events.", run("update"), UpdateArgs, permission="destructive",
                  impact=impact("update"), timeout_s=40),
+            Tool("calendar_share_event", "Invite explicitly chosen guest email addresses to a found event. "
+                 "Preserves existing guests; sends Calendar invitations only after exact user confirmation. "
+                 "For recurring events ASK this occurrence or series. Returns the real Calendar htmlLink if available; "
+                 "emailing that link through Gmail requires a separate draft/send confirmation.", run("share"),
+                 ShareArgs, permission="destructive", impact=impact("share"), timeout_s=40),
         ]
 
 
@@ -899,13 +1003,27 @@ class GoogleConnectSkill(Skill):
                 self.registry.disabled.add(self.name)          # its "not connected" text is no longer true
                 return ToolResult(True, "גוגל מחובר עכשיו. תשאל אותי שוב ואבדוק.", {"connected": True},
                                   code="GOOGLE_NOW_CONNECTED")
+            if auth.status().get("client_source") == "app":
+                return ToolResult(False, "פותחים את לוח הבקרה, נכנסים לחיבורים ולוחצים Connect Google. "
+                                  "בוחרים חשבון ומאשרים את ההרשאות בדפדפן.",
+                                  {"setup": "app", "dashboard_page": "connections", "connected": False},
+                                  code="GOOGLE_NOT_CONNECTED")
+            from ..updates import build_info
+            if not auth.client() and build_info().get("commit"):
+                return ToolResult(False, "בחבילת ההתקנה הזאת חסרה הגדרת החיבור לגוגל. "
+                                  "צריך לפנות למפתח JARVES לעדכון החבילה; לא צריך ליצור פרויקט בגוגל בעצמך.",
+                                  {"setup": "maintainer_required", "connected": False},
+                                  code="GOOGLE_APP_NOT_CONFIGURED")
             return ToolResult(False, NOT_CONNECTED_HE, {"command": START_COMMAND}, code="GOOGLE_NOT_CONNECTED")
         return [Tool("google_connect_help", "Google Calendar and Gmail are NOT connected yet. Call this whenever the "
                      "user asks about their calendar, meetings, schedule or e-mail; say its answer (how to connect: "
-                     f"'תריץ במחשב {START_COMMAND}').", help_, permission="read")]
+                     "use its returned setup instructions; app users use Connect Google, developer builds may "
+                     f"use {START_COMMAND}).", help_, permission="read")]
 
 
 def _register_connected(registry, auth: GoogleAuth, transport, health, calendar_kw: dict) -> None:
+    from .contacts import register_contacts
+    register_contacts(registry, auth, transport)
     granted = set(auth.load().get("scopes", []))
     api = GoogleApi(auth, transport)
     if all(s in granted for s in CALENDAR_SCOPES):

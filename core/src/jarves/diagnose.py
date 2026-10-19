@@ -127,6 +127,16 @@ class Finder:
         """A request answered only by "checking..." fillers (or progress notes) for longer than history.stall_s,
         and silence while such a request is pending."""
         progress = [e["ts"] for e in events if e["code"] == "LIVE_PROGRESS"]
+        # Older runs have only aggregate speech counters. A bucket with speech cannot prove silence within
+        # that bucket; retain that uncertainty instead of labelling spoken answer time as measured dead air.
+        speech_windows = []
+        previous = s["started"]
+        for e in events:
+            if e["code"] == "LIVE_MIC":
+                fields = json.loads(e.get("fields") or "{}")
+                if (fields.get("model_speech_s") or 0) > 0:
+                    speech_windows.append((previous, e["ts"]))
+                previous = e["ts"]
         consumed = -1
         for i, u in enumerate(turns):
             if i <= consumed or u["role"] != "user" or u.get("text") is None:
@@ -136,7 +146,12 @@ class Finder:
                 t = turns[j]
                 if t["role"] == "assistant":
                     if substantive(t):
-                        stop, outcome = t["ts"], "answered late"
+                        stop, outcome = t.get("audio_started") or t["ts"], "answered late"
+                        if not t.get("audio_started") and waiting:
+                            # No intervening assistant transcript after the last filler: the first subsequent
+                            # speech bucket bounds answer onset from above (never assume its exact onset).
+                            stop = min([stop] + [b for a, b in speech_windows
+                                               if waiting[-1]["ts"] <= a and b <= t["ts"]])
                         break
                     if is_waiting(t["text"]):
                         waiting.append(t)
@@ -154,13 +169,23 @@ class Finder:
             window = sorted([u["ts"], stop] + [t["ts"] for t in turns[i + 1:j]] +
                             [x["ts"] for x in tools + dels if u["ts"] <= x["ts"] <= stop] +
                             [p for p in progress if u["ts"] <= p <= stop])
-            gap, gap_at = max(((b - a, a) for a, b in zip(window, window[1:])), default=(0.0, u["ts"]))
+            intervals = [(x, x) for x in window if u["ts"] <= x <= stop]
+            intervals += [(max(u["ts"], a), min(stop, b)) for a, b in speech_windows
+                          if a < stop and b > u["ts"]]
+            intervals += [(max(u["ts"], t["audio_started"]), min(stop, t["audio_ended"]))
+                          for t in turns[i + 1:j + 1] if t.get("audio_started") is not None
+                          and t.get("audio_ended") is not None and t["audio_started"] < stop]
+            cursor, gap, gap_at = u["ts"], 0.0, u["ts"]
+            for a, b in sorted(intervals):
+                if a - cursor > gap:
+                    gap, gap_at = a - cursor, cursor
+                cursor = max(cursor, b)
             if dur >= self.h.stall_s:
                 sev = "high" if dur >= 60 or impatient or outcome.startswith("never") else "medium"
                 done = [d for d in dels if u["ts"] <= d["ts"] <= stop]
                 self.issue(sid, end, "backend_stall", "stall", sev, f"Request stalled {dur:.0f} s ({outcome})",
-                           f"\"{_quote(u)}\" got only progress fillers ({len(waiting)}) for {dur:.0f} s. Nothing in "
-                           "the log says what the backend was doing (needs a web-search watchdog / progress log).",
+                           f"\"{_quote(u)}\" got only progress fillers ({len(waiting)}) for {dur:.0f} s before "
+                           "answer audio began (or its first recorded speech bucket for older logs).",
                            {"at": _clock(u["ts"]), "seconds": round(dur, 1), "request": _quote(u),
                             "fillers": [f"{_clock(t['ts'])} {_quote(t)}" for t in waiting][:MAX_EVIDENCE_TURNS],
                             "impatience": [f"{_clock(t['ts'])} {_quote(t)}" for t in impatient],

@@ -12,6 +12,44 @@ uv sync --extra voice                # locked dependencies; Python 3.12 is insta
 
 On the Pi, also run `sudo apt install libportaudio2 espeak-ng`.
 
+### Google Calendar and Gmail setup
+
+**For distributed JARVES apps:** the release maintainer supplies one app-owned **Desktop OAuth client** to
+`packaging/build_windows.ps1 -GoogleOAuthClientFile <private-path-to-app-client.json>`. The build writes only its
+public-client registration fields into the installed package (`_google_app_client.json`), never user tokens or
+the developer's private state. Do not use a personal testing client for public releases. Do not commit the JSON.
+On a fresh installation, **Connect Google → choose account → approve permissions** now goes straight to Google's
+browser consent flow; neither gcloud nor the seven Cloud Console steps are shown. Account tokens stay in each
+user's private state directory. An explicitly imported private Desktop client takes precedence for development.
+
+**Public release gate:** the maintainer must first supply the app-owned client, register the JARVES brand and
+public homepage/privacy-policy domain, and complete Google's applicable scope verification. Gmail read/compose
+are restricted scopes; transmitting restricted data through cloud AI must be disclosed and reviewed and may
+require a security assessment. A local token store alone does not prove the whole data path is local. No app
+client or Google approval has been provisioned by this code change, no public release has been made, and no
+seven-day expiry guarantee is inferred for a bundled client. Keep the same app client registration across upgrades.
+Sources checked **2026-10-19**: [Desktop public clients and PKCE](https://developers.google.com/identity/protocols/oauth2/native-app),
+[restricted-scope verification](https://developers.google.com/identity/protocols/oauth2/production-readiness/restricted-scope-verification).
+
+**Developer / bring-your-own-client setup** (when the release has no app-owned client):
+Run `jarvis google start`. Install the [Google Cloud CLI](https://docs.cloud.google.com/sdk/docs/install-sdk)
+and run `gcloud auth login` with the account that owns your project first. When `gcloud` is on PATH, the wizard
+defaults to CLI setup: list accessible projects, choose an existing project by number or `n` to create one,
+then enable Calendar/Gmail APIs. It verifies the selection again on resume; choosing a different project resets
+the old project's checkmarks. Calendar-only setup enables only Calendar. Declining CLI setup, or having no
+CLI installed, uses the manual browser route. No automatic CLI installation or billing setup occurs.
+
+Consent settings, test users, scopes and the Desktop OAuth client still use Google's browser pages; sign-in
+requires your approval. If CLI setup fails, the wizard stops before browser setup: check internet access,
+run `gcloud auth login`, verify `gcloud projects list`, and retry. It does not print raw CLI output or credentials.
+Saved progress is in the private state directory's `google/setup.json`; bounded local logs are under `logs/`
+(`GOOGLE_SETUP_CLI_FAILED` identifies a failed CLI operation). No network means setup cannot finish, but saved
+progress remains available for the next run. Existing connected accounts only run the existing self-check.
+
+CLI choice checked **2026-10-19** against the official [project listing](https://docs.cloud.google.com/sdk/gcloud/reference/projects/list),
+[API enablement](https://docs.cloud.google.com/sdk/gcloud/reference/services/enable) and
+[Desktop OAuth setup](https://developers.google.com/workspace/guides/create-credentials) documentation.
+
 **Best quality (recommended).** Give JARVES your OpenAI key. It is read from the environment only and never stored in files or logs:
 
 ```powershell
@@ -98,6 +136,71 @@ Manual steps:
 5. Say or type "נגן את שלמה ארצי". JARVES reports "playing" only when Pear confirms the track is playing.
 
 ## Troubleshooting (works without network)
+
+### Runtime setup and feature references
+
+The runtime workspace includes read-only generated references: `SETUP.md`, built from
+[`src/jarves/setup_guide.md`](src/jarves/setup_guide.md), and `FEATURES.md`, built from the actual
+feature-switch catalog. Setup guidance covers JARVES installation, AI connections, Google, music/Pear,
+voice and wake word, camera, dashboard, Skills, updates, backups and offline diagnostics. These are
+references for guided help; they do not add general installer, shell or browser tools.
+
+The backend receives bounded summaries and can fetch the full documents with the existing
+`workspace_read` tool, following `next_offset` for pagination. The voice frontend delegates setup/help
+questions to that backend. Generated references refresh at startup; `FEATURES.md` also refreshes when
+switches change. Existing personal workspace documents are preserved. Restart a running Core to load
+changed source. Use `jarvis --help` (or `jarvis -h`) for all subcommands and `jarvis features` for switches.
+
+`jarvis features on ID` checks readiness before changing the switch, including when it is already on.
+Source checkouts automatically install missing locked camera/wake dependencies and the verified official
+SFace model when needed. Stop Core first if installation is required. Existing extras are preserved;
+installed apps with missing bundled dependencies need repair/update. Hardware, Google consent, Pear
+startup/pairing and per-person face enrollment still require the user. A readiness probe never opens sensors.
+Calendar editing consent: `jarvis google login --calendar-write`, then `jarvis features on calendar_write`.
+
+### Text requests while JARVES is stopped
+
+`jarvis execute "add a calendar event tomorrow at 10 called Dentist"` runs one natural-language text
+request and exits. No running Core, face window, microphone, speaker or camera service is needed or started.
+It uses your configured AI connection and existing request budget, saved memory/relationships, Google
+connection, feature gates and terminal confirmations. It does not acquire missing account permissions.
+Use `jarvis execute --interactive "add a calendar event tomorrow"` for follow-up details in the same
+conversation; enter an empty line to finish. In a single request, include the needed details or rerun with
+the requested clarification. Exit status describes request processing; read the response for actual tool results.
+
+Supported text-mode tools include Calendar, Gmail, Contacts, local memory, clock, music through an existing
+Pear service, workspace/settings and feature inspection. Runtime camera capture, voice, face, scheduler
+and background tasks require their normal running services and are not started by this command. Feature
+activation remains `jarvis features on ID`. The older `jarvis ask` has a smaller tool set; use `execute` for
+natural-language Google actions. Text-mode capability references stay in memory and preserve Core's
+generated tool files. No new model, provider or dependency was selected.
+
+### Contacts and event invitations
+
+Say “remember my wife's email is …” to save an explicit relationship/address in ordinary local memory.
+JARVES uses `contact_lookup` before addressing mail or inviting someone; multiple matches require your choice.
+The remembered contact survives restarts and can be removed through the existing memory controls.
+CLI: `jarvis contacts remember "my wife" --email spouse@example.com` (example only),
+`jarvis contacts lookup "my wife"`, and `jarvis contacts forget MEMORY_ID`.
+
+Google Contacts search is separate and off by default. Enable **People API** in the app's Cloud project,
+run `jarvis google login --contacts`, approve read-only Contacts access, then
+`jarvis features on google_contacts` and restart Core. `jarvis contacts search "Dana"` returns bounded
+name/email candidates; it does not import, edit contacts or infer relationships. Existing Google grants are
+requested again during incremental consent; actual returned grants determine readiness.
+
+Calendar tools can invite guests to a new or selected existing event after exact read-back confirmation.
+Sharing preserves existing guests, requires a choice for recurring events, and returns Google's event link
+when available. Emailing that link uses the separate confirmed Gmail draft/send flow.
+CLI: `jarvis calendar create --help`, `jarvis calendar share --help`, `jarvis mail draft --help`.
+`mail draft --send` offers confirmation and sending in one process; without it only a draft is created.
+No whole-calendar access is granted, and API acceptance does not prove delivery or attendance.
+
+Official API references checked **2026-10-19**: [People searchContacts](https://developers.google.com/people/api/rest/v1/people/searchContacts)
+(read-only scope, warmup and names/email mask), [Calendar invitations](https://developers.google.com/workspace/calendar/api/guides/create-events)
+(`sendUpdates=all`), [event links](https://developers.google.com/workspace/calendar/api/v3/reference/events#resource).
+Existing `httpx` REST integration is reused; no new dependency or model selected. Live contact lookup/invitation
+delivery remains unverified until the user authorizes account-bound tests.
 
 | Need | Command |
 |---|---|

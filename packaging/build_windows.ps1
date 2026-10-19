@@ -19,6 +19,7 @@ param(
     [string]$Commit = "",
     [string]$Cache = (Join-Path ([IO.Path]::GetTempPath()) "jarves-build-cache"),
     [string]$Out = "",
+    [string]$GoogleOAuthClientFile = "",  # explicitly supplied app-owned Desktop client; never private user state
     [switch]$SkipFace,
     [switch]$SkipInstaller
 )
@@ -84,8 +85,8 @@ $Py = Join-Path $Stage "python\python.exe"
 $req = Join-Path $Out "requirements.txt"
 Push-Location (Join-Path $Repo "core")
 try {
-    Step "locked wheels (uv.lock, extras voice + camera, no dev)"
-    Run "uv" @("export", "--frozen", "--no-dev", "--extra", "voice", "--extra", "camera", "--no-emit-project",
+    Step "locked wheels (uv.lock, extras voice + camera + tray, no dev)"
+    Run "uv" @("export", "--frozen", "--no-dev", "--extra", "voice", "--extra", "camera", "--extra", "tray", "--no-emit-project",
                "--format", "requirements-txt", "-o", $req)
     Run "uv" @("pip", "install", "--python", $Py, "--break-system-packages", "--require-hashes", "--compile-bytecode",
                "-r", $req)
@@ -100,6 +101,20 @@ $info = [ordered]@{ version = $Version; commit = $Commit; built = $Built; channe
 # a PC's config.toml [update] base_url still wins. Empty = GitHub releases.
 if ($env:JARVES_UPDATE_BASE_URL) { $info["update_base_url"] = $env:JARVES_UPDATE_BASE_URL.Trim().TrimEnd("/") }
 $info | ConvertTo-Json | Set-Content -Encoding utf8NoBOM (Join-Path $Stage "python\Lib\site-packages\jarves\_build_info.json")
+if ($GoogleOAuthClientFile) {
+    Step "app-owned Google Desktop OAuth client (public-client configuration, no user tokens)"
+    $googleConfig = Get-Content -LiteralPath $GoogleOAuthClientFile -Raw | ConvertFrom-Json
+    $googleClient = $googleConfig.installed
+    if (-not $googleClient -or $googleClient.client_id -isnot [string] -or
+        $googleClient.client_id -notmatch '^[A-Za-z0-9_-]+\.apps\.googleusercontent\.com$' -or
+        ($googleClient.client_secret -and $googleClient.client_secret -isnot [string])) {
+        throw "GoogleOAuthClientFile must be an app-owned Desktop OAuth client JSON, not a web/service account client"
+    }
+    # Desktop apps are public clients (Google native-app OAuth docs). Ship only these registration values;
+    # never copy arbitrary JSON, tokens, accounts or the developer's private state directory into a release.
+    @{ installed = @{ client_id = $googleClient.client_id; client_secret = [string]$googleClient.client_secret } } |
+        ConvertTo-Json | Set-Content -Encoding utf8NoBOM (Join-Path $Stage "python\Lib\site-packages\jarves\_google_app_client.json")
+}
 Run $Py @("-I", "-c", "import jarves.cli, jarves.updates; print(jarves.updates.version_line())")
 
 # ---------------------------------------------------------------- Godot face (headless export, official template)

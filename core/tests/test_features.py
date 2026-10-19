@@ -57,9 +57,15 @@ def test_camera_reported_by_a_skill_makes_it_available(home):
 def test_google_needs_token_and_connector(home):
     f = make(home, skills=lambda: set())
     ok, why = f.available("gmail_read")
-    assert not ok and why.startswith("Google account not connected (gmail)") and "jarvis google start" in why
+    assert not ok and why.startswith("Google account not connected (gmail read)") and "jarvis google start" in why
     (home / "google").mkdir()                       # WP-K: the real token file of google_auth (was google_token.json)
     (home / "google" / "token.json").write_text('{"refresh_token": "1//x", "scopes": []}', encoding="utf-8")
+    f.invalidate()
+    ok, why = f.available("gmail_read")
+    assert not ok and "Google consent required for gmail read" in why
+    from jarves.google_auth import GMAIL_READ
+    (home / "google" / "token.json").write_text(json.dumps({"refresh_token": "1//x", "scopes": [GMAIL_READ]}),
+                                                encoding="utf-8")
     f.invalidate()
     ok, why = f.available("gmail_read")
     assert not ok and "not installed" in why
@@ -229,15 +235,19 @@ async def test_voice_tool_policy(home):
 
 
 def test_capabilities_text_is_truthful(home):
-    f = make(home)
+    comps = {"camera": {"status": "unavailable", "detail": "camera unplugged"}}
+    f = make(home, components=lambda: comps)
     md = f.capabilities_markdown()
     assert "## Features" in md and "מצלמה / Camera (camera): turned off" in md
     f.set("camera", True)
     md = f.capabilities_markdown()
     ok, why = f.available("camera")
-    assert ok or f"(camera): {why}" in md
+    assert not ok and f"(camera): {why}" in md
     note = f.front_note()
     assert "מצלמה" in note and len(note) < 800
+    comps["camera"] = {"status": "ok"}
+    f.invalidate()
+    assert f.active("camera") and "מצלמה (" not in f.front_note()
 
 
 def test_register_api_for_other_packages(home):
@@ -289,11 +299,13 @@ def test_dashboard_routes(home):
         ctx.close()
 
 
-async def test_core_follows_switches(home, cfg):
+async def test_core_follows_switches(home, cfg, monkeypatch):
     from conftest import FakeSTT, FakeTTS
     from jarves.app import Core
     from jarves.skills.music import FakePlayer
     from jarves.voice.audio import SimAudio
+    # The injected player is ready without the user's real Pear process or localhost API.
+    monkeypatch.setattr(CATALOG["music"], "probe", lambda ctx: (True, ""))
     mem = MemoryStore(home / "memory.db")
     mem.set_setting("override:curator.auto", "off")          # pre-WP-I switch: adopted
     mem.close()
@@ -306,11 +318,14 @@ async def test_core_follows_switches(home, cfg):
         assert not c.features.enabled("memory_curator") and not c.curator.enabled("curator.auto")
         assert "features_list" in {t.name for t in c.registry.tools()}
         tools_md = (home / "workspace" / "TOOLS.md").read_text(encoding="utf-8")
-        assert "## Features" in tools_md and "camera" in tools_md
+        features_md = (home / "workspace" / "FEATURES.md").read_text(encoding="utf-8")
+        assert "features_list" in tools_md and "## Features" not in tools_md
+        assert "## Features" in features_md and "camera" in features_md
+        assert "[FEATURES.md -" in c.workspace.section("backend")
         assert "music_play" in {t.name for t in c.registry.tools()}
         r = await c.registry.call("feature_set", {"id": "music", "on": False})
         assert r.ok and "music_play" not in {t.name for t in c.registry.tools()}
-        assert "Music (music): turned off" in (home / "workspace" / "TOOLS.md").read_text(encoding="utf-8")
+        assert "Music (music): turned off" in (home / "workspace" / "FEATURES.md").read_text(encoding="utf-8")
         assert (await c.registry.call("music_play", {"query": "x"})).code == "FEATURE_OFF"
         await c.registry.call("feature_set", {"id": "chimes", "on": True})
         assert cfg.voice.chime is True                       # live: the next chime plays

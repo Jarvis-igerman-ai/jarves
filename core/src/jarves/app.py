@@ -139,6 +139,9 @@ class Core:
         self.registry.gate = self.features.gate          # inactive features: tools not offered, calls refused
         self.registry.register(ClockSkill())
         self.registry.register(MemorySkill(self.memory))
+        from .skills.local_contacts import LocalContactsSkill
+        self.registry.register(LocalContactsSkill(self.memory))
+        self.registry.allowed_actions.add("contact_remember")
         self.registry.register(StatusSkill(self.snapshot))
         self.registry.register(feat.make_skill(self.features, self.registry))
         self.registry.allowed_actions |= {"feature_set"}   # policy per risk lives in the tool (features.py)
@@ -1113,8 +1116,15 @@ class Core:
         return {k: {"status": v.status, "detail": v.detail} for k, v in h.components.items()} if h else {}
 
     def _write_tools_md(self) -> None:
-        self.workspace.write_generated("TOOLS.md", wsp.tools_markdown(self.registry, self.settings.view())
-                                       + "\n" + self.features.capabilities_markdown())
+        self.workspace.write_generated("TOOLS.md", wsp.tools_markdown(self.registry, self.settings.view()))
+        catalog = ["# JARVES features", "Generated from the actual feature catalog; not a promise of readiness.",
+                   "Use features_list / get_status for current state; read this full file with workspace_read.",
+                   "All feature IDs: " + ", ".join(feat.CATALOG) + ".",
+                   self.features.capabilities_markdown(), "## What each feature does"]
+        for f in feat.CATALOG.values():
+            catalog.append(f"- {f.id} / {f.title_en}: {f.about or f.title_en}. "
+                           f"Needs: {', '.join(f.needs) or 'none'}. Risk: {f.risk}. Applies: {f.applies}.")
+        self.workspace.write_generated("FEATURES.md", "\n".join(catalog) + "\n")
 
     def _feature_changed(self, fid: str, on: bool) -> None:
         """A switch changed (voice tool, dashboard, CLI): apply what is cheap now; the rest says when it applies."""

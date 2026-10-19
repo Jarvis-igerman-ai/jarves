@@ -60,6 +60,8 @@ KEEP_INFO = {"LIVE_STARTED", "LIVE_FIRST_AUDIO", "LIVE_EARLY_RESPONSE", "LIVE_PR
              "VOICE_NO_SPEECH", "VOICE_IDLE", "LIVE_ENDED", "WAKE_WORD", "RT_STARTED", "RT_BARGE_IN", "GREETING",
              "CORE_READY", "CORE_STOPPED", "LIVE_BACKEND_DONE", "LIVE_TASK", "TASK_STARTED", "TASK_DONE"}
 KEEP_INFO |= {"LIVE_BACKEND_STALL", "LIVE_BACKEND_RETRY", "LIVE_BACKEND_LATE", "LIVE_DELEGATION", "TASK_FINISHED"}
+# Legacy logs carry five-second speech counters rather than per-reply audio intervals.
+KEEP_INFO.add("LIVE_MIC")
 # Backend request traces (brain.BackendTrace, SW-V2 WP-C): prefix -> delegation kind. The DONE record carries the
 # exact model, service tier, usage_in/usage_out/usage_cached and web_searches (calls, billed $10/1k).
 # CHATGPT_BACKEND_* is not listed: plan requests cost $0 API and the typed reply is already counted by AI_REPLY.
@@ -121,6 +123,10 @@ class Store:
         have = {r[1] for r in self._db.execute("PRAGMA table_info(delegations)")}
         if "response_id" not in have:              # SW-V2 WP-H: open backend requests (store.db migrated in place)
             self._db.execute("ALTER TABLE delegations ADD COLUMN response_id TEXT")
+        turn_columns = {r[1] for r in self._db.execute("PRAGMA table_info(turns)")}
+        for column in ("audio_started", "audio_ended"):
+            if column not in turn_columns:
+                self._db.execute(f"ALTER TABLE turns ADD COLUMN {column} REAL")
         self._db.commit()
         self.tier, self.backend_model = tier, backend_model
         self._cur: str | None = None              # open live session id
@@ -165,8 +171,10 @@ class Store:
                 if sid is None:
                     sid = self._open(d, ts, "live")
                 role = "user" if code == "LIVE_USER_SAID" else "assistant"
-                self._db.execute("INSERT INTO turns (session_id, ts, role, text, chars, wait_s) VALUES (?,?,?,?,?,?)",
-                                 (sid, ts, role, text, n, _num(d.get("wait_s"))))
+                self._db.execute("INSERT INTO turns (session_id, ts, role, text, chars, wait_s, audio_started, "
+                                 "audio_ended) VALUES (?,?,?,?,?,?,?,?)",
+                                 (sid, ts, role, text, n, _num(d.get("wait_s")),
+                                  _num(d.get("audio_started")), _num(d.get("audio_ended"))))
             elif code == "LIVE_TOOL_CALL":
                 name = str(d.get("tool") or str(d.get("msg", "")).rsplit(" ", 1)[-1])
                 args = d.get("args")

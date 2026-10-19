@@ -74,10 +74,17 @@ def make(home, g, b, answers=(), **kw):
     out, clip = [], []
     it = iter(answers)
     auth = GoogleAuth(home, transport=g.transport(), open_browser=b.open_consent)
-    wz = google_setup.Wizard(home, Config(), auth=auth, ask=lambda _p: next(it, ""), say=out.append,
+    prompts = []
+
+    def ask(prompt):
+        prompts.append(prompt)
+        return next(it, "")
+
+    wz = google_setup.Wizard(home, Config(), auth=auth, ask=ask, say=out.append,
                              open_url=b.open_console, clipboard=lambda t: clip.append(t) or True,
                              downloads=b.downloads, sleep=lambda s: None, which=lambda n: None,
                              watch_timeout_s=kw.pop("watch_timeout_s", 2), **kw)
+    wz.test_prompts = prompts
     return wz, out, clip
 
 
@@ -110,7 +117,9 @@ def test_first_time_walks_every_step_takes_the_download_signs_in_checks_and_enab
     st = google_setup.load_state(home)
     assert st["completed_at"] and st["check"]["calendar"] == "ok" and set(st["steps"]) == set(google_setup.STEP_IDS)
     # spoken-style summary with example phrases; never the secret, a token or the address
-    assert "מה יש לי מחר ביומן?" in text and "jarvis google start" in text
+    assert "What is on my calendar tomorrow?" in text and "jarvis google start" in text
+    assert not any("\u0590" <= c <= "\u05ff" for c in text + "".join(wz.test_prompts))
+    assert "[1/7] Create a Google Cloud project" in text and "Browser page: https://" in text
     assert "GOCSPX" not in text and "1//rt-secret" not in text and "ya29" not in text and "me@example.com" not in text
 
 
@@ -124,7 +133,7 @@ def test_quit_is_resumable_and_done_steps_are_skipped(home, dl):
     wz2, out2, _ = make(home, g, b2, answers=[""] * 10)
     assert wz2.run() == 0
     assert "/projectcreate" not in " ".join(b2.opened) and any("gmail.googleapis.com" in u for u in b2.opened)
-    assert sum("(כבר נעשה)" in line for line in out2) == 2
+    assert sum("Done earlier:" in line for line in out2) == 2
 
 
 def test_weekly_reconnect_only_signs_in_again(home, dl):
@@ -135,7 +144,7 @@ def test_weekly_reconnect_only_signs_in_again(home, dl):
     wz, out, _ = make(home, g, b)
     assert wz.run() == 0
     assert b.opened == [] and GoogleAuth(home).status()["connected"]          # no console steps at all
-    assert any("7 ימים" in line for line in out)
+    assert any("7 days" in line for line in out)
 
 
 def test_already_connected_only_checks(home, dl):
@@ -164,7 +173,7 @@ def test_access_denied_explains_test_user_and_opens_audience(home, dl):
     wz, out, _ = make(home, g, b, answers=["q"])
     assert wz.run() == 1
     text = "\n".join(out)
-    assert "משתמשי הבדיקה" in text and "test user" in text
+    assert "test user" in text
     assert any(u.split("?")[0].endswith("/auth/audience") for u in b.opened)
     assert google_setup.load_state(home)["last_error"] == "GOOGLE_CONSENT_DENIED"
 
@@ -203,12 +212,13 @@ def test_gcloud_used_only_when_installed_and_the_user_agrees(home, dl):
 
     class R:
         returncode = 0
-    wz, out, _ = make(home, g, b, answers=["", "y"] + [""] * 10)
+        stdout = "[]"
+    wz, out, _ = make(home, g, b, answers=["", "", "n"] + [""] * 10)
     wz.which = lambda n: "C:/gcloud/gcloud.cmd"
     wz.run_cmd = lambda args, **kw: ran.append(args) or R()
     assert wz.run() == 0
-    assert ran[0][1:3] == ["projects", "create"] and ran[1][1:3] == ["services", "enable"]
-    assert "calendar-json.googleapis.com" in ran[1] and "gmail.googleapis.com" in ran[1]
+    assert [r[1:3] for r in ran] == [["projects", "list"], ["projects", "create"], ["services", "enable"]]
+    assert "calendar-json.googleapis.com" in ran[2] and "gmail.googleapis.com" in ran[2]
     assert not any("/projectcreate" in u or "enableapi" in u for u in b.opened)   # those steps were done by gcloud
     pid = google_setup.load_state(home)["project_id"]
     assert pid.startswith("jarves-home-") and any(f"project={pid}" in u for u in b.opened)
@@ -221,6 +231,64 @@ def test_gcloud_used_only_when_installed_and_the_user_agrees(home, dl):
     assert ran == []
 
 
+@pytest.mark.parametrize("calendar_only", [False, True])
+def test_gcloud_resume_selects_accessible_project_and_resets_old_checkmarks(home, dl, calendar_only):
+    google_setup.save_state(home, {"email": "me@example.com", "project_id": "wrong-project",
+                                  "steps": {s: 1 for s in google_setup.STEP_IDS}})
+    wz, out, _ = make(home, Google(), Browser(dl), answers=["", "1", "q"], calendar_only=calendar_only)
+    wz.which = lambda _: "gcloud"
+    ran = []
+
+    def run(args, **kw):
+        ran.append(args)
+        return type("R", (), {"returncode": 0, "stdout": json.dumps([
+            {"projectId": "jarves-home-123456", "name": "JARVES home", "lifecycleState": "ACTIVE"}])})()
+
+    wz.run_cmd = run
+    assert wz.run() == 1  # user stops at the first remaining browser page
+    st = google_setup.load_state(home)
+    assert st["project_id"] == "jarves-home-123456"
+    assert set(st["steps"]) == {"project", "calendar_api"} | (set() if calendar_only else {"gmail_api"})
+    assert len(ran) == 2 and ran[1][1:3] == ["services", "enable"]
+    assert ("gmail.googleapis.com" in ran[1]) is not calendar_only
+    assert wz.open_url.__self__.opened == [google_setup.step_url("branding", st["project_id"])]
+    assert any("not accessible" in line for line in out)
+
+
+@pytest.mark.parametrize("failure", ["list", "invalid_json", "enable", "timeout"])
+def test_gcloud_failure_stops_before_browser_without_exposing_raw_output(home, dl, failure):
+    wz, out, _ = make(home, Google(), Browser(dl), answers=["", "", "1"])
+    wz.which = lambda _: "gcloud"
+
+    def run(args, **kw):
+        if failure == "timeout":
+            raise google_setup.subprocess.TimeoutExpired(args, 180)
+        listing = args[1:3] == ["projects", "list"]
+        failed = failure == ("list" if listing else "enable")
+        return type("R", (), {"returncode": 1 if failed else 0, "stderr": "private-secret",
+                              "stdout": "private-secret" if failure == "invalid_json" or failed else
+                              '[{"projectId":"jarves-home-123456","name":"JARVES home"}]'})()
+
+    wz.run_cmd = run
+    assert wz.run() == 1
+    assert not wz.open_url.__self__.opened
+    assert "private-secret" not in "\n".join(out)
+    assert any("gcloud" in line for line in out)
+    assert not google_setup.load_state(home)["steps"].get("calendar_api")
+
+
+def test_gcloud_resume_same_project_preserves_consent_progress(home, dl):
+    google_setup.save_state(home, {"project_id": "jarves-home-123456", "email": "me@example.com",
+                                  "steps": {"project": 1, "branding": 1}})
+    wz, _, _ = make(home, Google(), Browser(dl), answers=["", "", "q"])
+    wz.which = lambda _: "gcloud"
+    wz.run_cmd = lambda *a, **kw: type("R", (), {"returncode": 0, "stdout":
+        '[{"projectId":"jarves-home-123456","name":"JARVES home"}]'})()
+    assert wz.run() == 1
+    assert google_setup.load_state(home)["steps"]["branding"] == 1
+    assert wz.open_url.__self__.opened == [google_setup.step_url("audience", "jarves-home-123456")]
+
+
 def test_testing_days_left_and_fixes():
     now = time.time()
     assert google_setup.testing_days_left(now - 2 * 86400, now) == 5.0
@@ -230,6 +298,100 @@ def test_testing_days_left_and_fixes():
         f = google_setup.fix_for(code)
         assert f["he"] and f["en"]
     assert google_setup.fix_for("oauth:invalid_grant")["en"].endswith("jarvis google start")
+
+
+@pytest.fixture
+def app_client(tmp_path, monkeypatch):
+    from jarves import google_auth
+    path = tmp_path / "release-oauth.json"
+    path.write_text(json.dumps(CLIENT), encoding="utf-8")
+    monkeypatch.setattr(google_auth, "APP_CLIENT_FILE", path)
+    return path
+
+
+def test_new_user_with_app_client_goes_straight_to_consent_without_cloud_setup(home, dl, app_client):
+    g, b = Google(), Browser(dl)
+    wz, out, clip = make(home, g, b)
+    wz.ask = lambda _: pytest.fail("App connection must not ask setup questions")
+    wz.which = lambda _: pytest.fail("App connection must not need gcloud")
+    assert wz.run() == 0
+    assert not b.opened and not clip and not wz.auth.client_file.exists()
+    assert wz.auth.status()["client_source"] == "app"
+    assert wz.auth.file.exists() and wz.auth.load()["refresh_token"]
+    assert "7 days" not in "\n".join(out)
+    # One app registration, separate user token stores; never expose registration values in status/checklist.
+    other = GoogleAuth(home / "another-user")
+    assert other.client() and not other.load() and not other.status()["connected"]
+    public = json.dumps(google_setup.checklist(home))
+    assert "GOCSPX" not in public and "123-abc" not in public and "rt-secret" not in public
+
+
+def test_app_client_dashboard_offers_connect_without_developer_steps(dash, home, dl, app_client, monkeypatch):
+    st, data = send(dash, "GET", "/api/google/setup")
+    assert st == 200 and data["app_client"] and data["state"] == "ready_to_sign_in"
+    assert data["steps"] == [] and "Connect Google" in data["next_en"]
+    assert data["testing_days_left"] is None
+    called = []
+    monkeypatch.setattr(google_setup, "_login_thread", lambda *args: called.append(args))
+    try:
+        st, result = send(dash, "POST", "/api/google/start")
+        assert st == 200 and result["started"] and called
+        assert not GoogleAuth(home).client_file.exists()
+    finally:
+        google_setup._LOGIN["running"] = False
+
+
+@pytest.mark.parametrize("invalid", [{"web": CLIENT["installed"]}, {"installed": {"client_id": 123}},
+                                    {"installed": {"client_id": "not-a-google-client"}},
+                                    {"installed": {"client_id": CLIENT["installed"]["client_id"], "client_secret": {}}}])
+def test_invalid_release_client_is_not_used(home, app_client, invalid):
+    app_client.write_text(json.dumps(invalid), encoding="utf-8")
+    auth = GoogleAuth(home)
+    assert not auth.client() and not auth.status()["client_configured"]
+
+
+def test_private_client_override_takes_precedence_over_app_registration(home, app_client):
+    other = {"installed": {"client_id": "private.apps.googleusercontent.com", "client_secret": "private"}}
+    p = home / "private-input.json"
+    p.write_text(json.dumps(other), encoding="utf-8")
+    auth = GoogleAuth(home)
+    auth.import_client(p)
+    assert auth.client() == other["installed"]
+    assert auth.status()["client_source"] == "private" and not google_setup.checklist(home)["app_client"]
+
+
+async def test_app_user_google_help_uses_connect_button_instead_of_developer_cli(home, app_client):
+    reg = SkillRegistry()
+    register_google(reg, home)
+    result = await reg.call("google_connect_help", {})
+    assert not result.ok and result.data["setup"] == "app"
+    assert "Connect Google" in result.message and "command" not in result.data
+
+
+async def test_installed_app_missing_google_registration_reports_maintainer_blocker(home, monkeypatch):
+    from jarves import updates
+    monkeypatch.setattr(updates, "build_info", lambda: {"commit": "release-build"})
+    reg = SkillRegistry()
+    register_google(reg, home)
+    result = await reg.call("google_connect_help", {})
+    assert result.code == "GOOGLE_APP_NOT_CONFIGURED" and not result.ok
+    assert result.data["setup"] == "maintainer_required" and "command" not in result.data
+
+
+def test_explicit_calendar_write_consent_can_precede_feature_enable(home, monkeypatch):
+    from argparse import Namespace
+    from jarves import google_auth
+    requested = []
+
+    async def sign_in(self, scopes):
+        requested.extend(scopes)
+        return {"scopes": [google_auth.short_scope(s) for s in scopes]}
+
+    monkeypatch.setattr(google_auth.GoogleAuth, "sign_in", sign_in)
+    args = Namespace(action="login", client=None, calendar_only=True, calendar_write=True)
+    assert google_auth.cmd_google(args, Config(), home) == 0
+    assert google_auth.CALENDAR_WRITE in requested
+    assert not Features(Config(), home).enabled("calendar_write")
 
 
 # ---------------------------------------------------------------------- voice: not connected -> how to connect
@@ -247,7 +409,9 @@ async def test_not_connected_he_says_how_to_connect_and_picks_up_a_new_connectio
 def test_feature_reason_tells_him_what_to_say(home):
     f = Features(Config(), home)
     assert "jarvis google start" in f.reason("google_calendar")
-    assert "jarvis google start" in f.front_note(2000)
+    # Voice summaries bound each reason; the complete setup command remains in the generated feature reference.
+    assert "jarvis google start" in f.capabilities_markdown()
+    assert "Features that are OFF" in f.front_note(2000)
 
 
 # ---------------------------------------------------------------------- dashboard Connections + Home

@@ -16,8 +16,10 @@ Console deep links checked 2026-10-19 against Google's Calendar API Python quick
 (developers.google.com/workspace/calendar/api/quickstart/python): flows/enableapi?apiid=..., auth/branding,
 auth/audience, auth/scopes, auth/clients ("Google Auth platform"). gcloud can only do the first two steps
 (`gcloud projects create`, `gcloud services enable`); the consent screen and a Desktop OAuth client have no public
-gcloud/API for personal accounts, so those stay manual. gcloud is used only when it is already installed AND the
-user says yes.
+gcloud/API for personal accounts, so those stay manual. Installed gcloud is the default route (with confirmation),
+including on resume: list accessible projects, select/create one, and enable APIs before opening console pages.
+CLI references checked 2026-10-19: https://docs.cloud.google.com/sdk/gcloud/reference/projects/list and
+https://docs.cloud.google.com/sdk/gcloud/reference/services/enable .
 
 The dashboard Connections page shows the same checklist (dashboard_routes below). Nothing here prints or logs
 tokens, the client secret or the e-mail address.
@@ -327,9 +329,8 @@ class Wizard:
 
     # --- output helpers
     def _h(self, he: str, en: str = "") -> None:
-        self.say(he)
         if en:
-            self.say("   " + en)
+            self.say(en)
 
     def _save(self) -> None:
         save_state(self.home, self.state)
@@ -414,62 +415,104 @@ class Wizard:
     # --- console steps
     def _email(self) -> str:
         if not self.state.get("email"):
-            e = (self._text("מה כתובת הג'ימייל שלך? (נשמרת רק במחשב הזה; Enter לדלג)  Your Gmail address: ") or "").strip()
+            e = (self._text("Your Gmail address (saved only on this computer; Enter to skip): ") or "").strip()
             if "@" in e:
                 self.state["email"] = e
                 self._save()
         return self.state.get("email", "")
 
-    def _gcloud(self) -> None:
-        """Optional: create the project + enable both APIs with an INSTALLED gcloud, only after a yes."""
-        if "project" in self.state["steps"]:
-            return
+    def _gcloud(self) -> bool:
+        """Validate/select the project even on resume; never open stale links after a CLI failure."""
         exe = self.which("gcloud")
         if not exe:
-            return
-        a = self._choice("gcloud מותקן אצלך. ליצור את הפרויקט ולהפעיל את ה-APIs אוטומטית? (y = כן, Enter = לא)  "
-                         "gcloud is installed: create the project and enable the APIs for you? [y/N] ")
-        if a not in ("y", "yes", "כ", "כן"):
-            return
-        pid = f"jarves-home-{secrets.randbelow(10**6):06d}"
-        apis = ["calendar-json.googleapis.com"] + ([] if self.calendar_only else ["gmail.googleapis.com"])
-        for args, label in (([exe, "projects", "create", pid, f"--name={PROJECT_NAME}"], "project"),
-                            ([exe, "services", "enable", *apis, "--project", pid], "apis")):
+            self.say("Google Cloud CLI is not installed/on PATH. Install it for automatic project/API setup: "
+                     "https://docs.cloud.google.com/sdk/docs/install-sdk . Using browser setup for now.")
+            return True
+        a = self._choice("Use Google Cloud CLI to select/create your project and enable its APIs? [Y/n] ")
+        if a in ("q", "quit", "exit"):
+            return False
+        if a not in ("", "y", "yes"):
+            return True
+
+        def command(args):
             try:
-                r = self.run_cmd(args, capture_output=True, text=True, timeout=180)
-                ok = r.returncode == 0
+                result = self.run_cmd([exe, *args], capture_output=True, text=True, timeout=180)
+                if result.returncode == 0:
+                    return result
             except (OSError, subprocess.SubprocessError):
-                ok = False
-            if not ok:
-                self._h("gcloud לא הצליח (אולי צריך קודם gcloud auth login). ממשיכים ידנית, זה פשוט.",
-                        "gcloud failed (maybe run `gcloud auth login` first). Continuing by hand; it is easy.")
-                return
-            if label == "project":
-                self.state["project_id"] = pid
-                self.state["steps"]["project"] = time.time()
-            else:
-                self.state["steps"]["calendar_api"] = time.time()
-                if not self.calendar_only:
-                    self.state["steps"]["gmail_api"] = time.time()
-            self._save()
-        self._h("gcloud יצר את הפרויקט " + pid + " והפעיל את ה-APIs.",
-                "gcloud created project " + pid + " and enabled the APIs.")
+                pass
+            # Never print raw command output: it can contain account details or credentials.
+            self.say("Google Cloud CLI could not complete this step. Check your network and project permissions. "
+                     "Run `gcloud auth login` with the account that owns your project, then run " + START_COMMAND +
+                     " again. Progress is saved; no browser steps were opened.")
+            logs.info("google", "GOOGLE_SETUP_CLI_FAILED", "Google CLI setup failed", operation=args[0])
+            return None
+
+        result = command(["projects", "list", "--format=json", "--limit=100"])
+        if result is None:
+            return False
+        try:
+            projects = json.loads(result.stdout)
+            if not isinstance(projects, list) or any(
+                    not isinstance(p, dict) or not isinstance(p.get("projectId"), str) for p in projects):
+                raise ValueError("invalid project list")
+            projects = [p for p in projects if p.get("lifecycleState", "ACTIVE") == "ACTIVE"]
+        except (ValueError, TypeError):
+            self.say("Google Cloud CLI returned an invalid project list. Run `gcloud projects list`, then try again.")
+            return False
+        saved = self.state.get("project_id", "")
+        default = next((str(i) for i, p in enumerate(projects, 1) if p["projectId"] == saved), "")
+        self.say("Choose the project you created (project IDs can differ from their display names):")
+        for i, p in enumerate(projects, 1):
+            self.say(f"  {i}. {p.get('name', '')} [{p['projectId']}]")
+        if saved and not default:
+            self.say("The saved project is not accessible to the active CLI account. Select the correct project.")
+        choice = self._choice("Project number" + (f" [Enter = {default}]" if default else "") +
+                              ", n = create a new JARVES project, q = stop: ") or default
+        if choice == "n":
+            pid = f"jarves-home-{secrets.randbelow(10**6):06d}"
+            if command(["projects", "create", pid, f"--name={PROJECT_NAME}", "--quiet"]) is None:
+                return False
+        elif choice.isascii() and choice.isdigit() and 1 <= int(choice) <= len(projects):
+            pid = projects[int(choice) - 1]["projectId"]
+        else:
+            self.say("Stopped without changing the project. Run " + START_COMMAND + " again to select a project.")
+            return False
+        if pid != saved:
+            # Consent/client and API checkmarks belong to the old project, not the newly selected one.
+            self.state["steps"] = {}
+        self.state["project_id"] = pid
+        self.state["steps"]["project"] = time.time()
+        self._save()
+        apis = ["calendar-json.googleapis.com"] + ([] if self.calendar_only else ["gmail.googleapis.com"])
+        if command(["services", "enable", *apis, "--project", pid, "--quiet"]) is None:
+            return False
+        self.state["steps"]["calendar_api"] = time.time()
+        if not self.calendar_only:
+            self.state["steps"]["gmail_api"] = time.time()
+        self._save()
+        self.say("Google Cloud CLI selected project " + pid + " and enabled the APIs. "
+                 "Only consent settings and the Desktop OAuth client remain in the browser.")
+        return True
 
     def _console_steps(self) -> bool:
         steps = self.steps()
         self._h("עוברים על " + str(len(steps)) + " שלבים קצרים בדפדפן. אני פותח כל דף ומעתיק לך מה להדביק.",
-                f"{len(steps)} short steps in the browser. I open each page and copy what to paste.")
+                f"{len(steps)} setup steps. Google Cloud CLI handles project/API setup when installed; "
+                "I open each remaining browser page and copy what to paste.")
         self._email()
-        self._gcloud()
+        if not self._gcloud():
+            return False
         for i, s in enumerate(steps, 1):
             if s["id"] in self.state["steps"]:
-                self._h(f"[{i}/{len(steps)}] ✓ {s['title_he']} (כבר נעשה)", f"done earlier: {s['title_en']}")
+                self._h(f"[{i}/{len(steps)}] ✓ {s['title_he']} (כבר נעשה)",
+                        f"[{i}/{len(steps)}] Done earlier: {s['title_en']}")
                 continue
             url = step_url(s["id"], self.state.get("project_id", ""))
             self.say("")
-            self._h(f"[{i}/{len(steps)}] {s['title_he']}", s["title_en"])
+            self._h(f"[{i}/{len(steps)}] {s['title_he']}", f"[{i}/{len(steps)}] {s['title_en']}")
             for he, en in zip(s["clicks_he"], s["clicks_en"]):
-                self._h(f"  • {he}", f"  ({en})")
+                self._h(f"  • {he}", f"  - {en}")
             value = s["copy"].replace("{scopes}", scopes_text(self.calendar_only)).replace(
                 "{email}", self.state.get("email", ""))
             if value:
@@ -478,9 +521,8 @@ class Wizard:
                 else:
                     self._h("  להעתיק: " + value, "  Copy this: " + value)
             self.open_url(url)
-            self._h("  הדף נפתח בדפדפן: " + url, "")
-            a = self._choice("  Enter = סיימתי · s = לדלג · q = לעצור ולהמשיך אחר כך   (Enter = done, s = skip, "
-                             "q = stop) ")
+            self._h("  הדף נפתח בדפדפן: " + url, "  Browser page: " + url)
+            a = self._choice("  Enter = done, s = skip, q = stop and continue later: ")
             if a in ("q", "quit", "exit"):
                 self._save()
                 self._h("עצרנו. מריצים שוב " + START_COMMAND + " וממשיכים מכאן.",
@@ -489,7 +531,7 @@ class Wizard:
             if a in ("s", "skip"):
                 continue
             if s["id"] == "project" and not self.state.get("project_id"):
-                pid = (self._text("  אם רואים את ה-Project ID, אפשר להדביק אותו (Enter לדלג)  Project ID (optional): ")
+                pid = (self._text("  Project ID (optional; Enter to skip): ")
                        or "").strip()
                 if pid and all(c.isalnum() or c == "-" for c in pid):
                     self.state["project_id"] = pid
@@ -500,7 +542,7 @@ class Wizard:
     def _wait_for_client(self) -> bool:
         since = self.state.get("started_at", time.time())
         self._h("מחכה לקובץ client_secret...json בתיקיית ההורדות (" + str(self.downloads) + "). Ctrl+C לעצור.",
-                "Waiting for client_secret...json in Downloads. Ctrl+C to stop.")
+                "Waiting for client_secret...json in Downloads (" + str(self.downloads) + "). Ctrl+C to stop.")
         deadline = time.monotonic() + self.watch_timeout_s
         while time.monotonic() < deadline:
             p = find_client_json([self.downloads, self.auth.dir, self.home], since)
@@ -531,14 +573,14 @@ class Wizard:
                 self._h("לא הצלחנו: " + fx["he"], fx["en"])
                 if fx["url"]:
                     self.open_url(step_url(fx["step"], self.state.get("project_id", "")))
-                    self._h("  פתחתי את הדף לתיקון: " + fx["url"], "")
-                if attempt == 2 or self._choice("  Enter = לנסות שוב · q = לעצור   (Enter = retry, q = stop) ") \
+                    self._h("  פתחתי את הדף לתיקון: " + fx["url"], "  Opened the page to fix this: " + fx["url"])
+                if attempt == 2 or self._choice("  Enter = retry, q = stop: ") \
                         in ("q", "quit", "exit"):
                     return 1
         missing = [short_scope(s) for s in self.scopes if short_scope(s) not in st["scopes"]]
         if missing:
             fx = fix_for("GOOGLE_SCOPE_MISSING")
-            self._h(fx["he"] + " (" + ", ".join(missing) + ")", fx["en"])
+            self._h(fx["he"] + " (" + ", ".join(missing) + ")", fx["en"] + " (" + ", ".join(missing) + ")")
             if not st["calendar"]:
                 return 1
         return self._finish()
@@ -565,9 +607,14 @@ class Wizard:
         on = enable_features(self.home, self.cfg, gmail=gmail, send=self.send and gmail)
         self.state["completed_at"] = time.time()
         self._save()
-        st = self.auth.status()
+        app_client = self.auth.status().get("client_source") == "app"
         self.say("")
-        self.say(summary_he(st["scopes"], "gmail_send" in on))
+        self.say("Google is connected. You can ask: \"What is on my calendar tomorrow?\"" +
+                 (" or \"Are there important emails?\" I ask before reading email aloud." if gmail else ".") +
+                 (" Email sending is on: I read back the draft and wait for your confirmation." if "gmail_send" in on
+                  else " Email sending is off; enable it on the dashboard Features page.") +
+                 (" If Google asks you to reconnect, run " + START_COMMAND + " again." if app_client else
+                  " In Testing mode Google disconnects every 7 days; run " + START_COMMAND + " again to reconnect."))
         self.say("   (features on: " + ", ".join(on) + ")")
         self._h("אם JARVES כבר רץ ולא רואה את היומן: jarvis stop ואז jarvis.",
                 "If JARVES is already running and does not see it yet: jarvis stop, then jarvis.")
@@ -583,16 +630,17 @@ def checklist(home: Path) -> dict:
     """Everything the Connections page shows. Reads local files only; never contacts Google, never an address."""
     auth = GoogleAuth(home)
     st, ss = auth.status(), load_state(home)
+    app_client = st["client_source"] == "app"
     pid = ss.get("project_id", "")
     cal_only = bool(ss.get("calendar_only"))
     steps = [{"id": s["id"], "title_he": s["title_he"], "title_en": s["title_en"], "clicks_he": s["clicks_he"],
               "clicks_en": s["clicks_en"], "url": step_url(s["id"], pid), "gmail": bool(s.get("gmail")),
               "copy": s["copy"].replace("{scopes}", scopes_text(cal_only)).replace("{email}", ""),
               "done": s["id"] in ss["steps"] or (s["id"] == "client" and st["client_configured"])}
-             for s in STEPS]
+             for s in STEPS] if not app_client else []
     chk = (ss.get("check") or {}) if st["connected"] else {}      # an old result says nothing after a disconnect
     err =st["last_error"] or ss.get("last_error", "")
-    days = testing_days_left(st["connected_at"]) if st["connected"] else None
+    days = testing_days_left(st["connected_at"]) if st["connected"] and not app_client else None
     if st["connected"] and chk.get("calendar") == "ok":
         nxt_he, nxt_en, state = "הכל מחובר. אפשר לשאול: \"מה יש לי מחר ביומן?\"", \
             "All connected. Try: \"What's on my calendar tomorrow?\"", "connected"
@@ -609,10 +657,13 @@ def checklist(home: Path) -> dict:
         nxt_he, nxt_en, state = "מריצים במחשב: " + START_COMMAND + " (הוא מדריך צעד אחר צעד), או עוברים על השלבים כאן.", \
             "Run " + START_COMMAND + " on this computer (it guides you step by step), or follow the steps here.", \
             "not_connected"
+    if app_client and not st["connected"]:
+        nxt_he, nxt_en = "לוחצים לחיבור גוגל ובוחרים את החשבון שלך.", "Press Connect Google and choose your account."
     with _LOGIN_LOCK:
         login = dict(_LOGIN)
     return {"state": state, "next_he": nxt_he, "next_en": nxt_en, "steps": steps, "project_id": pid,
-            "calendar_only": cal_only, "client_configured": st["client_configured"], "signed_in": st["connected"],
+            "calendar_only": cal_only, "app_client": app_client,
+            "client_configured": st["client_configured"], "signed_in": st["connected"],
             "needs_reconnect": st["needs_reconnect"], "scopes": st["scopes"], "calendar": st["calendar"],
             "gmail_read": st["gmail_read"], "gmail_send": st["gmail_send"],
             "check": {"calendar": chk.get("calendar", "not_run"), "gmail": chk.get("gmail", "not_run"),
@@ -620,11 +671,15 @@ def checklist(home: Path) -> dict:
             "last_error": err, "fix": fix_for(err) if err else None, "connected_at": st["connected_at"],
             "testing_days_left": days, "start_command": START_COMMAND, "gcloud_installed": bool(shutil.which("gcloud")),
             "login": login, "message_he": st["message_he"],
-            "explain_en": "JARVES uses your own free Google Cloud app, so only you have access. The keys stay on "
+            "explain_en": ("Connect your Google account to JARVES in your browser. Choose your account and review "
+                           "the requested permissions. Your account tokens stay on this device; no Cloud project, "
+                           "CLI installation or key-file download is needed." if app_client else
+                          "JARVES uses your own free Google Cloud app, so only you have access. The keys stay on "
                           "this computer. While the app is in Testing mode Google disconnects it every 7 days; "
-                          "then press Reconnect (one minute).",
-            "explain_he": "JARVES משתמש באפליקציה פרטית שלך בגוגל קלאוד (חינם), כך שרק לך יש גישה. המפתחות נשמרים "
-                          "רק במחשב הזה. במצב Testing גוגל מנתק כל 7 ימים; אז לוחצים Reconnect (דקה)."}
+                          "then press Reconnect (one minute)."),
+            "explain_he": ("מחברים את חשבון גוגל בדפדפן, בוחרים חשבון ומאשרים הרשאות. פרטי החיבור נשמרים במכשיר."
+                           if app_client else "JARVES משתמש באפליקציה פרטית שלך בגוגל קלאוד (חינם), כך שרק לך יש גישה. "
+                           "המפתחות נשמרים רק במחשב הזה. במצב Testing גוגל מנתק כל 7 ימים; אז לוחצים Reconnect (דקה).")}
 
 
 def _login_thread(home: Path, scopes, open_browser) -> None:

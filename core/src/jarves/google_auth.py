@@ -45,6 +45,7 @@ _G = "https://www.googleapis.com/auth/"
 CALENDAR_SCOPES = (_G + "calendar.events.readonly", _G + "calendar.calendarlist.readonly")
 GMAIL_READ = _G + "gmail.readonly"
 GMAIL_COMPOSE = _G + "gmail.compose"
+CONTACTS_READ = _G + "contacts.readonly"      # separate opt-in; never included in the default scope set
 ALL_SCOPES = CALENDAR_SCOPES + (GMAIL_READ, GMAIL_COMPOSE)
 # Calendar WRITE (SW-V2 D05, WP-M4): asked for ONLY when the calendar_write switch is on (`jarvis google login
 # --calendar-write`). Google has no "create/update but not delete" scope (checked 2026-10-19 at
@@ -54,6 +55,7 @@ ALL_SCOPES = CALENDAR_SCOPES + (GMAIL_READ, GMAIL_COMPOSE)
 CALENDAR_WRITE = _G + "calendar.events"
 REFRESH_MARGIN_S = 120
 START_COMMAND = "jarvis google start"           # WP-K: the one command for first connect AND the weekly reconnect
+APP_CLIENT_FILE = Path(__file__).with_name("_google_app_client.json")  # injected into release payload, never source
 RECONNECT_HE = f"צריך לחבר מחדש את גוגל: תריץ במחשב {START_COMMAND}, או לחץ Reconnect בדף הניהול."
 NOT_CONNECTED_HE = f"גוגל עוד לא מחובר. כדי לחבר, תריץ במחשב {START_COMMAND}, ואני אדריך אותך צעד אחר צעד."
 
@@ -87,12 +89,25 @@ class GoogleAuth:
         _write_private(self.file, d)
 
     def client(self) -> dict:
-        """The Desktop OAuth client ({client_id, client_secret}); {} when not configured yet."""
+        """Private developer override, otherwise the release's app-owned Desktop OAuth public client."""
         d = _read_json(self.client_file)
         c = d.get("installed") or d
         if not isinstance(c, dict) or not c.get("client_id"):
+            c = self.app_client()
+        if not c:
             return {}
         return {"client_id": c["client_id"], "client_secret": c.get("client_secret", "")}
+
+    @staticmethod
+    def app_client() -> dict:
+        """Only Desktop app config; never use a web client, service account or end-user tokens."""
+        c = _read_json(APP_CLIENT_FILE).get("installed")
+        if not isinstance(c, dict):
+            return {}
+        cid, secret = c.get("client_id"), c.get("client_secret", "")
+        if not isinstance(cid, str) or not cid.endswith(".apps.googleusercontent.com") or not isinstance(secret, str):
+            return {}
+        return {"client_id": cid, "client_secret": secret}
 
     def import_client(self, path: Path) -> None:
         """Copy the client_secret_*.json the user downloaded from Google Cloud (Desktop app type only)."""
@@ -125,8 +140,13 @@ class GoogleAuth:
               "client_configured": bool(self.client()), "scopes": [short_scope(s) for s in scopes],
               "calendar": all(s in scopes for s in CALENDAR_SCOPES), "gmail_read": GMAIL_READ in scopes,
               "gmail_send": GMAIL_COMPOSE in scopes, "calendar_write": CALENDAR_WRITE in scopes,
+              "contacts": CONTACTS_READ in scopes,
               "last_error": t.get("last_error", ""),
               "last_error_at": t.get("last_error_at", 0), "connected_at": t.get("connected_at", 0)}
+        private = _read_json(self.client_file)
+        private = private.get("installed") or private
+        st["client_source"] = ("private" if isinstance(private, dict) and private.get("client_id") else
+                               "app" if self.app_client() else "")
         st["message_he"] = ("" if connected else RECONNECT_HE if st["needs_reconnect"] else NOT_CONNECTED_HE)
         return st
 
@@ -193,6 +213,10 @@ class GoogleAuth:
 
     async def sign_in(self, scopes=ALL_SCOPES, timeout_s: float = 300) -> dict:
         """Interactive: the user's own consent in the browser. Returns status()."""
+        # Incremental permission requests must not replace previously consented Calendar/Gmail/Contacts grants.
+        # Existing scopes are requested again, never assumed granted: complete() stores Google's actual response.
+        previous = self.load().get("scopes", [])
+        scopes = tuple(dict.fromkeys((*scopes, *(s for s in previous if isinstance(s, str) and s.startswith(_G)))))
         client = self.client()
         if not client:
             dl = self.find_client_download()
@@ -439,9 +463,14 @@ def add_cli(sub) -> None:
     g.add_argument("--restart", action="store_true", help="start: forget the saved progress and begin again")
     g.add_argument("--calendar-write", action="store_true",
                    help="login: also allow adding/changing events (needs `jarvis features on calendar_write`)")
+    g.add_argument("--contacts", action="store_true",
+                   help="login: separately opt in to read-only contact name/email search; does not enable the feature")
 
 
 def cmd_google(a, cfg, home) -> int:
+    if getattr(a, "contacts", False) and a.action != "login":
+        print("Use jarvis google login --contacts to request read-only Contacts consent; no change was made.")
+        return 2
     if a.action in ("start", "test"):
         from . import google_setup                     # WP-K: the guided wizard and the live self-check
         if a.action == "start":
@@ -467,13 +496,18 @@ def cmd_google(a, cfg, home) -> int:
                 print("Google will warn that the app is unverified: it is your own app, choose Continue.")
                 need = CALENDAR_SCOPES if a.calendar_only else ALL_SCOPES
                 if getattr(a, "calendar_write", False):
-                    from .features import Features
-                    if not Features(cfg, home).enabled("calendar_write"):
-                        print("Calendar writing is switched off. Turn it on first: jarvis features on calendar_write")
-                        return 1
+                    # Explicit login flag requests Google's consent; execution still requires the separate
+                    # feature switch and per-event confirmation. Requiring the switch here creates a cycle:
+                    # feature-on waits for consent, while consent waits for feature-on.
                     need = need + (CALENDAR_WRITE,)
                     print("Also asking to ADD and CHANGE events. JARVES never deletes events (enforced in JARVES; "
                           "Google's permission itself would allow it).")
+                    print("This permission request does not turn on calendar editing; after approval run "
+                          "jarvis features on calendar_write.")
+                if getattr(a, "contacts", False):
+                    need = need + (CONTACTS_READ,)
+                    print("Also asking to READ contact names and email addresses. This does not change contacts or "
+                          "turn on contact search; after approval run jarvis features on google_contacts.")
                 st = await auth.sign_in(need)
                 print("connected: " + ", ".join(st["scopes"]))
                 if any(short_scope(s) not in st["scopes"] for s in need):

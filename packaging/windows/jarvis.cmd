@@ -13,6 +13,7 @@ if "%FIRST%"=="" goto launch
 if not "%FIRST:~0,1%"=="-" ( %J% %* & exit /b )
 if "%FIRST%"=="--version" ( %J% %* & exit /b )
 if "%FIRST%"=="--help" ( %J% %* & exit /b )
+if "%FIRST%"=="-h" ( %J% %* & exit /b )
 :launch
 %J% status >nul 2>&1
 if not "%ERRORLEVEL%"=="1" (
