@@ -316,6 +316,9 @@ class Features:
         self._mtime: float | None = None
         self._checked = 0.0
         self._probe_cache: dict[str, tuple[float, bool, str]] = {}
+        self._defaults: dict[str, tuple[bool, str]] = {}
+        for fid in CONFIG_MIRROR.values():
+            self.default(fid)                   # legacy config values, before anything mirrors onto cfg
         self.listeners: list[Callable[[str, bool], None]] = []   # (id, enabled) after a change by this process
         self._load()
 
@@ -390,19 +393,22 @@ class Features:
         return CATALOG[fid]
 
     def default(self, fid: str) -> tuple[bool, str]:
-        """(value, source) when the user never switched it: the legacy config.toml value, else the default."""
+        """(value, source) when the user never switched it: the legacy config.toml value, else the default.
+        Cached on first use, i.e. before apply_to_config mirrors the switches back onto the same Config."""
+        if fid not in self._defaults:
+            self._defaults[fid] = self._default(fid)
+        return self._defaults[fid]
+
+    def _default(self, fid: str) -> tuple[bool, str]:
         f = self.feature(fid)
         if f.config and self.cfg is not None and not f.config.startswith("settings:"):
-            if f.config == "music.provider":
-                val = _cfg_get(self.cfg, f.config)
-                if val is not None:
-                    return val != "none", "config"
-            else:
-                val = _cfg_get(self.cfg, f.config)
-                if isinstance(val, bool):
-                    section, _, key = f.config.partition(".")
-                    explicit = key in getattr(getattr(self.cfg, section, None), "model_fields_set", set())
-                    return val, "config" if explicit else "default"
+            val = _cfg_get(self.cfg, f.config)
+            section, _, key = f.config.partition(".")
+            src = "config" if key in getattr(getattr(self.cfg, section, None), "model_fields_set", set()) else "default"
+            if f.config == "music.provider" and isinstance(val, str):
+                return val != "none", src
+            if isinstance(val, bool):
+                return val, src
         return f.default_enabled, "default"
 
     def enabled(self, fid: str) -> bool:

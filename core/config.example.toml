@@ -1,5 +1,9 @@
 # JARVES Core settings. Copy to %LOCALAPPDATA%\jarves\config.toml (Windows) or ~/.local/state/jarves/config.toml.
 # Every key is optional; unknown keys are rejected. NEVER put API keys here: set OPENAI_API_KEY in the environment.
+# On/off switches (music, web search, wake word, greeting, chimes, background tasks, camera, Gmail...) live in
+# `jarvis features` / the dashboard Features page (<data dir>/features.json). The old keys below (ai.web_search,
+# ai.tasks_enabled, voice.wake_enabled, voice.greeting, voice.chime, music.provider = "none") still work: they set
+# the switch's default until you flip it there.
 
 assistant_name = "JARVES"
 

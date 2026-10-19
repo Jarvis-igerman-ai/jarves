@@ -879,6 +879,7 @@ class Core:
                   api_key="set" if openai_key_present() else "missing",
                   chatgpt="signed-in" if plan.get("plan_usage") else "not connected",
                   greeting=v.greeting, music=self.cfg.music.provider,
+                  features_off=[f.id for f, _ in self.features.unavailable_summary()],
                   say="Hey Jarvis" if self.wake is not None else "(see jarvis doctor)")
 
     # ------------------------------------------------------------------ "Hey Jarvis" wake word
