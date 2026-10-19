@@ -272,6 +272,21 @@ register("voice_change", "החלפת קול", "Voice change", True, probe=_probe
 # The voice/CLI legacy keys that a Features instance mirrors back onto the loaded Config (read live by the Core).
 CONFIG_MIRROR = {"voice.wake_enabled": "wake_word", "voice.greeting": "greeting", "voice.chime": "chimes",
                  "ai.web_search": "web_search", "ai.tasks_enabled": "background_tasks"}
+# Settings Skill keys (WP-D, memory.db overrides) that are feature switches now.
+SETTING_FEATURES = {"curator.auto": "memory_curator", "curator.llm": "memory_llm_pass"}
+
+
+def legacy_settings(memory) -> dict[str, bool]:
+    """Old memory.db `override:curator.*` values, adopted once by Features.import_legacy."""
+    out = {}
+    for key, fid in SETTING_FEATURES.items():
+        try:
+            v = memory.get_setting(f"override:{key}")
+        except Exception:
+            v = None
+        if v in ("on", "off"):
+            out[fid] = v == "on"
+    return out
 
 
 def _cfg_get(cfg, dotted: str):
@@ -341,6 +356,12 @@ class Features:
                 for fid in set(before) | set(self._state["enabled"]):
                     if before.get(fid) != self._state["enabled"].get(fid) and fid in CATALOG:
                         self._notify(fid)
+
+    def poll(self) -> None:
+        """Pick up a change written by another process (dashboard, CLI) and tell the listeners."""
+        with self._lock:
+            self._checked = 0.0
+            self._refresh()
 
     def _save(self) -> None:
         if self.path is None:
@@ -580,6 +601,21 @@ def active(fid: str) -> bool:
 def detach() -> None:
     global _current
     _current = None
+
+
+def attach_live(live, features: Features) -> None:
+    """Add the off/unavailable features to a LiveVoice's instructions (built at session start)."""
+    orig = getattr(live, "session_config", None)
+    if orig is None:
+        return
+
+    def session_config() -> dict:
+        cfg = orig()
+        note = features.front_note()
+        if note:
+            cfg["instructions"] = f"{cfg.get('instructions', '')}\n\n{note}"
+        return cfg
+    live.session_config = session_config
 
 
 # ---------------------------------------------------------------------- the voice Skill

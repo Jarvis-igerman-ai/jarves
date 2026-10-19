@@ -352,6 +352,29 @@ async function pageWorkspace(name) {
   } else body.replaceChildren(el("b", {}, name), el("div", { style: "height:10px" }),
     f.text ? el("pre", { class: "file", dir: "auto" }, f.text) : el("div", { class: "empty" }, "This file does not exist yet."));
 }
+async function pageFeatures() {
+  const d = await api("/api/features");
+  const when = { live: "now", next_session: "next conversation", restart: "next Core start" };
+  const rows = d.features.map((f) => {
+    const msg = el("span", { class: "muted small" });
+    const sw = el("button", { type: "button", class: "switch", "aria-pressed": f.enabled ? "true" : "false",
+      "aria-label": `${f.title_en}: ${f.enabled ? "on" : "off"}`, onclick: async () => {
+        if (!f.enabled && f.risk === "high" && !confirm(`Turn on ${f.title_en}? This is a high-risk feature.`)) return;
+        try { await api("/api/features/" + encodeURIComponent(f.id), { method: "POST", body: JSON.stringify({ enabled: !f.enabled }) }); route(true); }
+        catch (e) { msg.textContent = "Not changed: " + e.message; }
+      } }, f.enabled ? "On" : "Off");
+    const badge = !f.enabled ? pill("plain", "off") : f.available ? pill("ok", "active") : pill("unavailable", "unavailable");
+    return el("tr", {}, el("td", {}, sw),
+      el("td", {}, el("b", {}, f.title_en), " ", el("span", { class: "muted", dir: "auto" }, f.title_he),
+        el("div", { class: "muted small" }, f.about), f.requested ? el("div", { class: "small" }, "JARVES was asked to turn this on: approve here.") : null),
+      el("td", {}, badge, f.reason ? el("div", { class: "small", dir: "auto" }, f.reason) : null),
+      el("td", {}, pill(f.risk, f.risk)),
+      el("td", { class: "muted small" }, `applies: ${when[f.applies] || f.applies}` + (f.source !== "user" ? ` · from ${f.source}` : ""), msg));
+  });
+  render(header("Features", "Switch what JARVES may do. 'Unavailable' means the device, account or service is missing; he tells you why. " + d.note),
+    el("div", { class: "card" }, el("table", {}, el("thead", {}, el("tr", {}, el("th", {}, "Switch"), el("th", {}, "Feature"),
+      el("th", {}, "Status"), el("th", {}, "Risk"), el("th", {}, "Takes effect"))), el("tbody", {}, rows))));
+}
 async function pageSettings() {
   const d = await api("/api/settings");
   const sections = Object.entries(d.config).map(([sec, v]) => {
@@ -377,6 +400,7 @@ async function route(refresh) {
     else if (page === "memory") await pageMemory();
     else if (page === "skills") await pageSkills();
     else if (page === "workspace") await pageWorkspace(arg);
+    else if (page === "features") await pageFeatures();
     else if (page === "settings") await pageSettings();
     else await pageConversations();
   } catch (e) { if (refresh !== true) fail(e); }

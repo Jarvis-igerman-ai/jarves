@@ -101,6 +101,8 @@ class SkillRegistry:
         self.disabled = disabled or set()
         self.allowed_actions = set(DEFAULT_ALLOWED_ACTIONS if allowed_actions is None else allowed_actions)
         self.confirm: ConfirmFn = _deny       # replaced by the Core (asks the user via Godot/voice)
+        # feature switches (features.py): (skill, tool) -> None to offer/run it, or why the feature is not active
+        self.gate: Callable[[str, str], str | None] | None = None
         self._inflight: set[asyncio.Future] = set()
 
     def register(self, skill: Skill) -> None:
@@ -115,12 +117,23 @@ class SkillRegistry:
             self._tools[t.name] = (skill, t)
         logs.info("skills", "SKILL_REGISTERED", f"skill {skill.name} registered", tools=[t.name for t in tools])
 
+    def _gated(self, skill: Skill, tool: Tool) -> str | None:
+        if self.gate is None:
+            return None
+        try:
+            return self.gate(skill.name, tool.name)
+        except Exception:          # a broken switch check must not hide every tool or crash a turn
+            logs.error("skills", "FEATURE_GATE_FAILED", f"feature check failed for {tool.name}", exc=True)
+            return None
+
     def tools(self) -> list[Tool]:
-        return [t for s, t in self._tools.values() if s.name not in self.disabled]
+        """Tools offered to the model: disabled Skills and inactive features are left out (read at each call, so a
+        switch flipped mid-conversation shows on the next tool list)."""
+        return [t for s, t in self._tools.values() if s.name not in self.disabled and self._gated(s, t) is None]
 
     def get(self, name: str) -> Tool | None:
         st = self._tools.get(name)
-        return st[1] if st and st[0].name not in self.disabled else None
+        return st[1] if st and st[0].name not in self.disabled and self._gated(*st) is None else None
 
     async def _authorize(self, tool: Tool, args: BaseModel, origin: str) -> ToolResult | None:
         """None = allowed to run; otherwise the refusal to return."""
@@ -162,6 +175,10 @@ class SkillRegistry:
         skill, tool = st
         if skill.name in self.disabled:
             return ToolResult(False, f"skill {skill.name} is disabled", code="SKILL_DISABLED")
+        off = self._gated(skill, tool)
+        if off is not None:        # the model may still hold an older tool list: refuse truthfully
+            logs.info("skills", "FEATURE_OFF", f"{name} refused: {off}", tool=name)
+            return ToolResult(False, f"not available: {off}", code="FEATURE_OFF")
         try:
             if isinstance(raw_args, str):
                 raw_args = json.loads(raw_args or "{}")

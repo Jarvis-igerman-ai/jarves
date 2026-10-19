@@ -22,6 +22,7 @@ from .skills.builtin import ClockSkill, MemorySkill, StatusSkill
 from .skills.music import MusicSkill, PearDesktopPlayer
 from .skills.settings import Settings, SettingsSkill
 from . import workspace as wsp
+from . import features as feat
 from .curator import Curator, openai_extractor
 from .voice.audio import AudioUnavailable, SoundDeviceAudio, StreamingAudio
 from .voice.speechcache import SpeechCache
@@ -109,29 +110,40 @@ class Core:
         logs.info("core", "CORE_STARTING", f"JARVES Core {__version__} starting", home=str(self.home))
         self.health = Health(self.home / "health.json")
         self.memory = MemoryStore(self.home / "memory.db")
+        # SW-V2 WP-I feature switches: ONE source of truth (features.json over the legacy config.toml keys); the
+        # loaded cfg mirrors them so code reading cfg.voice.greeting / cfg.ai.web_search follows the switches.
+        self.features = feat.attach(feat.Features(c, self.home, components=self._health_components,
+                                                  skills=lambda: set(self.registry.skills)))
+        self.features.import_legacy(feat.legacy_settings(self.memory))
+        self.features.apply_to_config(c)
+        self.features.listeners.append(self._feature_changed)
 
         self.registry = SkillRegistry()
         self.registry.confirm = self.ask_confirm
+        self.registry.gate = self.features.gate          # inactive features: tools not offered, calls refused
         self.registry.register(ClockSkill())
         self.registry.register(MemorySkill(self.memory))
         self.registry.register(StatusSkill(self.snapshot))
-        if c.music.provider != "none" or self._player is not None:
+        self.registry.register(feat.make_skill(self.features, self.registry))
+        self.registry.allowed_actions |= {"feature_set"}   # policy per risk lives in the tool (features.py)
+        if c.music.provider != "none" or self.features.enabled("music") or self._player is not None:
             player = self._player or PearDesktopPlayer(c.music.pear_url, self.home / "pear_client_id", c.music.timeout_s)
             self.music = MusicSkill(player, c.music.max_volume, trim_queue=c.music.trim_queue,
                                     volume_step=c.music.volume_step)
             self.registry.register(self.music)
         else:
             self.music = None
-            self.health.set("music", "disabled", "music.provider = none")
+            self.health.set("music", "disabled", "music switched off (jarvis features on music)")
         # WP-D workspace/memory: persona files, self-settings Skill, background memory curator
         self.workspace = wsp.Workspace(self.home / "workspace")
         self.settings = Settings(self.memory, {"voice.voice": c.voice.voice})
+        self.settings.features = self.features           # curator.* settings are feature switches now
         self.registry.register(SettingsSkill(self.workspace, self.settings, self.registry, self._on_voice_change))
-        self.workspace.write_generated("TOOLS.md", wsp.tools_markdown(self.registry, self.settings.view()))
         self.workspace.listeners.append(lambda name: self._spawn(wsp.note_live(self.live, self.workspace, name)))
 
         self.budget = Budget(self.memory, c.ai)      # ONE shared budget: in-flight counts span brain, TTS and voice
-        self.curator = Curator(self.memory, self.workspace, enabled=lambda k: self.settings.get(k) == "on",
+        self.curator = Curator(self.memory, self.workspace, enabled=lambda k: self.features.active(feat.SETTING_FEATURES[k])
+                               if k in feat.SETTING_FEATURES else self.settings.get(k) == "on",
                                llm=openai_extractor(c.ai.text_model, self.budget) if api_billing_allowed(c.ai) else None)
         self.agent = make_agent(c, self.registry, self.memory, self.home, self._ai_transport, self.budget)
         if self.agent is not None:
@@ -145,6 +157,7 @@ class Core:
         if self.tasks is not None:
             self.registry.allowed_actions |= {"task_start", "task_cancel"}
             self.registry.register(TaskSkill(self.tasks))
+        self._write_tools_md()                          # after every Skill is registered
         self._retry_lookup = make_retry_lookup(c, self.budget)
         self._check_ai()
 
@@ -310,6 +323,7 @@ class Core:
                     self.health.set("music", st, d, "" if st == "ok" else "start Pear Desktop with the API Server plugin")
                 if not self.listening and self.live is None:
                     self.dev.check_audio()
+                self.features.poll()            # a switch flipped on the dashboard / CLI reaches the Core here
                 self._check_ai()
                 await self.link.broadcast("status", self.snapshot())
             except Exception:
@@ -728,6 +742,7 @@ class Core:
                                  idle_disconnect_s=v.idle_disconnect_s, **common, **extra)
         live_ref[0] = live
         wsp.attach_live(live, self.workspace, self.memory)   # persona files + known facts in the voice instructions
+        feat.attach_live(live, self.features)                 # what is off / unavailable, so he says so truthfully
         logs.new_cid()
         self._voice_connecting = True
         await self.link.broadcast("status", self.snapshot())
@@ -905,7 +920,7 @@ class Core:
             yield c
 
     def _wake_should_listen(self) -> bool:
-        return not (self.dev.mic_muted or self.live is not None or self.listening or self.stopping
+        return not (not self.cfg.voice.wake_enabled or self.dev.mic_muted or self.live is not None or self.listening or self.stopping
                     or self._voice_connecting or time.monotonic() < self._hold_wake_until
                     or (self._busy is not None and not self._busy.done()))
 
@@ -1006,6 +1021,32 @@ class Core:
                 await self.set_face("listening")
                 await self.link.send_face("assistant.activity", {"kind": "connecting", "text": "מתחבר…", "detail": ""})
                 await self._start_live(ack=True)
+
+    # ------------------------------------------------------------------ feature switches (features.py)
+    def _health_components(self) -> dict:
+        h = getattr(self, "health", None)
+        return {k: {"status": v.status, "detail": v.detail} for k, v in h.components.items()} if h else {}
+
+    def _write_tools_md(self) -> None:
+        self.workspace.write_generated("TOOLS.md", wsp.tools_markdown(self.registry, self.settings.view())
+                                       + "\n" + self.features.capabilities_markdown())
+
+    def _feature_changed(self, fid: str, on: bool) -> None:
+        """A switch changed (voice tool, dashboard, CLI): apply what is cheap now; the rest says when it applies."""
+        self.features.apply_to_config(self.cfg)
+        self.features.invalidate()
+        if getattr(self.agent, "_agent", None) is not None:
+            self.agent._agent = None                # AgentBrain rebuilds its tool list on the next request
+        if getattr(self, "workspace", None) is not None:
+            self._write_tools_md()
+        if fid == "wake_word" and on and self.wake is None and getattr(self, "dev", None) is not None and not self.stopping:
+            self._setup_wake()
+        elif fid == "wake_word" and not on and getattr(self, "health", None) is not None:
+            self.health.set("wake_word", "disabled", "wake word switched off")   # the wake loop releases the mic
+        restart = ((fid == "music" and on and getattr(self, "music", None) is None)
+                   or (fid == "background_tasks" and on and getattr(self, "tasks", None) is None))
+        logs.info("features", "FEATURE_APPLIED", f"{fid} {'on' if on else 'off'}"
+                  + (" (takes effect at the next Core start)" if restart else ""), feature=fid, on=on)
 
     # ------------------------------------------------------------------ voice change ("תחליף קול")
     def _on_voice_change(self, voice: str, restart_now: bool) -> None:

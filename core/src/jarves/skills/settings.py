@@ -50,10 +50,17 @@ class Settings:
     def __init__(self, memory: MemoryStore, config_defaults: dict[str, str] | None = None) -> None:
         self.memory = memory
         self.config_defaults = config_defaults or {}
+        self.features = None          # features.Features (set by the Core): curator.* are feature switches
+
+    def _feature(self, key: str) -> str | None:
+        from ..features import SETTING_FEATURES
+        return SETTING_FEATURES.get(key) if self.features is not None else None
 
     def get(self, key: str) -> str:
         if key not in ALLOWED:
             raise KeyError(key)
+        if fid := self._feature(key):
+            return "on" if self.features.enabled(fid) else "off"
         _, _, default = ALLOWED[key]
         return self.memory.get_setting(f"override:{key}") or default or self.config_defaults.get(key, "")
 
@@ -64,10 +71,18 @@ class Settings:
         value = str(value).strip().lower()
         if choices is not None and value not in choices:
             raise WorkspaceError(f"{key} must be one of: {', '.join(choices)}")
+        if fid := self._feature(key):
+            if value == "on" and self.features.feature(fid).risk != "low":
+                raise WorkspaceError(f"{key} is the feature switch {fid}: turning it on needs the user's approval "
+                                     f"(use feature_set, or the dashboard Features page)")
+            self.features.set(fid, value == "on", by="voice")
+            return value
         self.memory.set_setting(f"override:{key}", value)
         return value
 
     def reset(self, key: str) -> bool:
+        if fid := self._feature(key):
+            self.features.reset(fid)
         return self.memory.delete_setting(f"override:{key}")
 
     def view(self) -> dict:
