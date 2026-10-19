@@ -410,7 +410,18 @@ def review_skip_reason(store: Store, cfg, sid: str, *, have_client: bool = False
         return f"daily maximum reached ({h.llm_review_daily_max})"
     if store.meta(f"llm_reviewed:{sid}"):
         return "already reviewed"
+    # SW-V3 P0.1 (review Q05): "reviewed" used to be written BEFORE the request, so a failed or interrupted
+    # review blocked every retry. Now: pending while it runs, reviewed only after its result is saved.
+    pending = float(store.meta(f"llm_review_pending:{sid}") or 0)
+    if pending and time.time() - pending < REVIEW_PENDING_STALE_S:
+        return "review in progress"
+    if int(store.meta(f"llm_review_attempts:{sid}") or 0) >= REVIEW_MAX_ATTEMPTS:
+        return f"review failed {REVIEW_MAX_ATTEMPTS} times: {store.meta(f'llm_review_failed:{sid}') or 'unknown'}"
     return None
+
+
+REVIEW_PENDING_STALE_S = 120.0    # a pending mark older than this belongs to an interrupted review (retry allowed)
+REVIEW_MAX_ATTEMPTS = 2           # bounded retries: each attempt may be billed
 
 
 def llm_review(store: Store, cfg, sid: str, *, client=None, budget=None) -> list[dict]:
@@ -428,9 +439,11 @@ def llm_review(store: Store, cfg, sid: str, *, client=None, budget=None) -> list
         from .memory import MemoryStore
         own_budget = budget = Budget(MemoryStore(Path(store.path).parent / "memory.db"), cfg.ai)
     day_key = f"llm_review:{date.today().isoformat()}"
+    attempts_key = f"llm_review_attempts:{sid}"
     with store._lock:
-        store._set_meta(day_key, str(int(store.meta(day_key) or 0) + 1))
-        store._set_meta(f"llm_reviewed:{sid}", str(time.time()))
+        store._set_meta(day_key, str(int(store.meta(day_key) or 0) + 1))     # an attempt may be billed: counted
+        store._set_meta(attempts_key, str(int(store.meta(attempts_key) or 0) + 1))
+        store._set_meta(f"llm_review_pending:{sid}", str(time.time()))
         store.commit()
     t0 = time.monotonic()
     try:
@@ -442,6 +455,10 @@ def llm_review(store: Store, cfg, sid: str, *, client=None, budget=None) -> list
                                         max_output_tokens=900, reasoning={"effort": "low"})
     except Exception as e:                         # budget reached, network, API: the rules' findings stand
         logs.warn("diagnose", "DIAGNOSE_LLM_FAILED", f"AI review failed: {type(e).__name__}", conversation=sid)
+        with store._lock:
+            store._set_meta(f"llm_review_pending:{sid}", "")
+            store._set_meta(f"llm_review_failed:{sid}", type(e).__name__)
+            store.commit()
         return []
     finally:
         if own_budget is not None:
@@ -468,6 +485,8 @@ def llm_review(store: Store, cfg, sid: str, *, client=None, budget=None) -> list
         f.issue(sid, end, "ai:" + hashlib.sha1(title.lower().encode("utf-8")).hexdigest()[:12], "ai_review",
                 sev if sev in SEVERITY else "low", f"AI review: {title}", str(it.get("detail", ""))[:400],
                 {"quote": str(it.get("quote", ""))[:300], "source": f"AI review ({model}); it can be wrong"})
+    store._set_meta(f"llm_reviewed:{sid}", str(time.time()))      # only now: the outcome is saved
+    store._set_meta(f"llm_review_pending:{sid}", "")
     store.commit()
     logs.info("diagnose", "DIAGNOSE_LLM_DONE", f"AI review found {len(f.found)} issue(s)", conversation=sid,
               model=model, usage_in=usage["in"], usage_out=usage["out"], found=len(f.found))

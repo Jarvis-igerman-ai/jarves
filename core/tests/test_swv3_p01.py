@@ -263,3 +263,56 @@ async def test_b04_transcript_of_the_same_turn_keeps_the_taint():
     await lv.handle_event({"type": "session.input_transcript.delta", "delta": "תקרא לי את המייל"})
     assert (await asyncio.create_task(voice_call("louder"))).code == "TOOL_UNTRUSTED_TURN"
     await _cleanup(lv)
+
+
+# ------------------------------------------------------------------ B05: failed AI review recorded as "reviewed"
+def test_b05_failed_review_is_not_marked_reviewed_and_retries_are_bounded(home):
+    from test_wph_costs import _Client, _voice_session
+    from jarves import diagnose
+    from jarves.budget import Budget
+    from jarves.config import Config
+    from jarves.memory import MemoryStore
+    from jarves.store import Store
+    cfg = Config()
+    st = Store(home / "store.db", backend_model="gpt-6-luna")
+    sid = _voice_session(st, 1_760_000_000.0)
+    mem = MemoryStore(home / "memory.db")
+    budget = Budget(mem, cfg.ai)
+
+    class Down:
+        class responses:
+            @staticmethod
+            def create(**kw):
+                raise ConnectionError("network down")
+    assert diagnose.llm_review(st, cfg, sid, client=Down(), budget=budget) == []
+    assert not st.meta(f"llm_reviewed:{sid}")                          # the old code said "already reviewed"
+    assert diagnose.review_skip_reason(st, cfg, sid, have_client=True) is None   # one retry allowed
+    cl = _Client()
+    assert len(diagnose.llm_review(st, cfg, sid, client=cl, budget=budget)) == 1 and st.meta(f"llm_reviewed:{sid}")
+    sid2 = _voice_session(st, 1_760_100_000.0)
+    for _ in range(3):
+        diagnose.llm_review(st, cfg, sid2, client=Down(), budget=budget)
+    assert "failed 2 times" in diagnose.review_skip_reason(st, cfg, sid2, have_client=True)
+    budget.close()
+    mem.close()
+    st.close()
+
+
+# ------------------------------------------------------------------ B06: an older missing conversation never imported
+def test_b06_import_backfills_a_missing_older_conversation_exactly_once():
+    from pathlib import Path
+    from jarves.store import Store
+    fixture = Path(__file__).parent / "fixtures" / "session_2026-10-19.jsonl"
+    st = Store(":memory:", tier="priority", backend_model="gpt-6-luna")
+    st.ingest({"ts": "2026-10-19T19:33:05+00:00", "code": "LIVE_STARTED", "session": "newer001",
+               "msg": "GPT-Live session started (gpt-live-1 -> gpt-6-luna)"})
+    st.ingest({"ts": "2026-10-19T19:33:10+00:00", "code": "LIVE_USER_SAID", "session": "newer001", "text": "שלום"})
+    st.ingest({"ts": "2026-10-19T19:36:26+00:00", "code": "VOICE_ENDED", "session": "newer001", "voice_seconds": 200})
+    skip = st.newest_ts()
+    assert st.ingest_log(fixture, skip) == []                          # the old behaviour: skipped forever
+    ended = st.ingest_log(fixture, skip, backfill=True)
+    assert len(ended) == 1 and len(st.sessions()) == 2
+    turns = st.x("SELECT COUNT(*) FROM turns").fetchone()[0]
+    assert st.ingest_log(fixture, st.newest_ts(), backfill=True) == []   # idempotent
+    assert st.x("SELECT COUNT(*) FROM turns").fetchone()[0] == turns and len(st.sessions()) == 2
+    st.close()

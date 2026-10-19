@@ -309,19 +309,40 @@ class Store:
                    "UNION ALL SELECT MAX(last_event) FROM sessions UNION ALL SELECT MAX(ts) FROM tool_calls)").fetchone()
         return r[0] or 0.0
 
-    def ingest_log(self, path: Path, skip_until: float = 0.0) -> list[str]:
+    def missing_conversations(self, recs: list[dict], skip_until: float) -> set[str]:
+        """Core processes (log "session") with conversation text at or before skip_until that history does not
+        know at all. SW-V3 P0.1 (review Q06): one global newest timestamp skipped a whole older conversation
+        (26 turns of 19 Oct 17:13) forever once a newer session existed. Idempotent: a backfilled process then
+        has its sessions row (core_session) and is never imported twice; processes already known are untouched."""
+        talk = {d.get("session") for d in recs if d.get("code") in ("LIVE_USER_SAID", "LIVE_JARVES_SAID")
+                and parse_ts(d.get("ts")) <= skip_until and d.get("session")}
+        if not talk:
+            return set()
+        known = {r[0] for r in self.x("SELECT DISTINCT core_session FROM sessions WHERE core_session IS NOT NULL")}
+        return talk - known
+
+    def ingest_log(self, path: Path, skip_until: float = 0.0, *, backfill: bool = False) -> list[str]:
         """Replay a jarves.log (JSON lines; rotated files too). Records at or before `skip_until` are skipped
-        (already recorded live). Returns the ids of sessions that ended."""
+        (already recorded live), except, with backfill, whole older conversations history never recorded
+        (missing_conversations). Returns the ids of sessions that ended."""
         ended = []
+        recs = []
         for line in Path(path).read_text(encoding="utf-8", errors="replace").splitlines():
             try:
                 d = json.loads(line)
             except ValueError:
                 continue
-            if isinstance(d, dict) and parse_ts(d.get("ts")) > skip_until:
+            if isinstance(d, dict):
+                recs.append(d)
+        missing = self.missing_conversations(recs, skip_until) if backfill else set()
+        for d in recs:
+            if parse_ts(d.get("ts")) > skip_until or d.get("session") in missing:
                 sid = self.ingest(d)
                 if sid:
                     ended.append(sid)
+        if missing:
+            logs.info("store", "HISTORY_BACKFILLED", f"added {len(missing)} older conversation(s) missing from "
+                      "history", processes=sorted(missing))
         self.commit()
         return ended
 

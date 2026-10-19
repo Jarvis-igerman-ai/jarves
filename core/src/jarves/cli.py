@@ -1059,7 +1059,7 @@ def cmd_diagnose(a, cfg, home) -> int:
         if a.import_log is not None:
             files = [Path(a.import_log)] if a.import_log else _log_files(home)
             skip = st.newest_ts()
-            n = sum(len(st.ingest_log(f, skip)) for f in files)
+            n = sum(len(st.ingest_log(f, skip, backfill=True)) for f in files)
             print(f"imported {n} conversation(s) from {len(files)} log file(s)")
         found = diagnose.run(st, cfg, days=a.days)
         issues = st.issues("open")
