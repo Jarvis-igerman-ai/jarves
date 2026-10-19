@@ -43,3 +43,4 @@ core/src/jarves/_google_app_client.json
 dist/
 
 .wrangler/
+.playwright-mcp/
