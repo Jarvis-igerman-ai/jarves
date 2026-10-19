@@ -7,8 +7,8 @@
                  published by .github/workflows/package.yml after a green `main`; PR builds never appear there.
                  Result and "already told the user" state live in <state_dir>/updates.json.
 - install        only after an explicit approval (CLI `jarvis update install` asks "yes"; the dashboard button is
-                 the user's click). Steps: download -> verify SHA256 (refuse without a checksum) -> local backup of the
-                 databases and settings -> stop the Core -> start the normal installer window (the user sees it).
+                 the user's click). Steps: download -> verify SHA256 (refuse without a checksum) -> verified local backup
+                 (jarves.backup.checkpoint, WP-M5) -> stop the Core -> start the normal installer window (the user sees it).
                  The installer keeps user data (it lives in <state_dir>, not in the program folder).
 
 Private repository: anonymous requests cannot see the releases (GitHub answers 404). A user may put a read-only
@@ -27,8 +27,6 @@ import hashlib
 import json
 import os
 import re
-import sqlite3
-import shutil
 import subprocess
 import sys
 import time
@@ -44,10 +42,6 @@ ASSET_RE = re.compile(r"^JARVES-Setup-(\d+(?:\.\d+){1,3})\.exe$")
 CHECK_INTERVAL_S = 24 * 3600
 STATE_FILE = "updates.json"
 BUILD_INFO = Path(__file__).with_name("_build_info.json")
-# What a pre-update backup keeps: user data and settings. Credentials stay where they are (secrets.env, OAuth
-# tokens) - an update does not touch them, and a backup folder must never become a copy of the keys.
-BACKUP_FILES = ("config.toml", "features.json", "setup_done")
-NO_BACKUP = ("secrets.env", "link_token", "google_token.json", "google_oauth.json", "pear_client_id")
 
 # Windows / Pi status of the M6 features (spec section 5). jarves.features has no targets field yet, so this is
 # the record the capability matrix (WP-M4) reads; the issue is real (created with `gh issue create`).
@@ -298,40 +292,13 @@ def launch_installer(path: str | Path) -> None:
 
 # ---------------------------------------------------------------------- backup before update / migration
 def backup_before_update(home: Path, label: str) -> Path:
-    """Consistent copy of every SQLite db (sqlite3 backup API, so a running Core's WAL is included) plus the plain
-    settings files into <home>/backups/<label>-<time>/; each copy passes `PRAGMA integrity_check`. Credentials are
-    never copied (NO_BACKUP). A full scheduled backup/restore is WP-M5's; this is the minimum before an install."""
-    home = Path(home)
-    dest = home / "backups" / f"{re.sub(r'[^A-Za-z0-9._-]', '_', label)}-{datetime.now():%Y%m%d-%H%M%S}"
-    dest.mkdir(parents=True, exist_ok=True)
-    copied = []
-    for db in sorted(home.glob("*.db")):
-        target = dest / db.name
-        src = sqlite3.connect(f"file:{db}?mode=ro", uri=True)
-        try:
-            dst = sqlite3.connect(target)
-            try:
-                src.backup(dst)
-                if dst.execute("PRAGMA integrity_check").fetchone()[0] != "ok":
-                    raise UpdateError("UPDATE_BACKUP_BAD", f"backup of {db.name} failed its integrity check")
-            finally:
-                dst.close()
-        finally:
-            src.close()
-        copied.append(db.name)
-    for name in BACKUP_FILES:
-        if name not in NO_BACKUP and (home / name).is_file():
-            shutil.copy2(home / name, dest / name)
-            copied.append(name)
-    if (home / "workspace").is_dir():
-        shutil.copytree(home / "workspace", dest / "workspace")
-        copied.append("workspace/")
-    (dest / "BACKUP.json").write_text(json.dumps({"label": label, "created": datetime.now(timezone.utc).isoformat(),
-                                                  "from_version": build_info()["version"], "files": copied},
-                                                 indent=1), encoding="utf-8")
-    logs.info("updates", "UPDATE_BACKUP_DONE", f"backup before update: {len(copied)} item(s)", path=dest.name)
-    return dest
-
+    """WP-M5's verified pre-migration backup (jarves.backup.checkpoint: SQLite-safe copies, integrity check, no
+    credentials). Any failure stops the update: no install without a verified restore point."""
+    from . import backup
+    try:
+        return backup.checkpoint(Path(home), label)
+    except backup.BackupError as e:
+        raise UpdateError("UPDATE_BACKUP_FAILED", f"backup before the update failed ({e.code}); not installing") from e
 
 # ---------------------------------------------------------------------- feature switch + dashboard
 def _register_feature() -> None:

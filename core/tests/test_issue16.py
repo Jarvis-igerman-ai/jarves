@@ -92,6 +92,98 @@ async def test_unrelated_top_result_is_skipped_even_when_the_page_mentions_the_q
     await p.close()
 
 
+def test_rows_with_the_id_only_in_the_watch_endpoint_are_playable():
+    """Real Pear 19 Oct 2026, "ABBA Dancing Queen": no row had playlistItemData, so the answer parsed to nothing
+    and JARVES said "not found"."""
+    from jarves.skills.music import parse_search
+
+    def row(vid, title, sub, where):
+        r = {"flexColumns": [{"musicResponsiveListItemFlexColumnRenderer": {"text": {"runs": [{"text": title}]}}},
+                             {"musicResponsiveListItemFlexColumnRenderer": {"text": {"runs": [{"text": sub}]}}}]}
+        if where == "nav":
+            r["navigationEndpoint"] = {"watchEndpoint": {"videoId": vid}}
+        elif where == "overlay":
+            r["overlay"] = {"musicItemThumbnailOverlayRenderer": {"content": {"musicPlayButtonRenderer": {
+                "playNavigationEndpoint": {"watchEndpoint": {"videoId": vid}}}}}}
+        else:
+            r["navigationEndpoint"] = {"browseEndpoint": {"browseId": "album"}}
+        return {"musicResponsiveListItemRenderer": r}
+    resp = {"contents": [row("A1", "Dancing Queen", "שיר • ABBA • 3:51", "nav"),
+                         row("A2", "Dancing Queen (Live)", "סרטון • ABBA", "overlay"),
+                         row(None, "Gold", "אלבום • ABBA • 1992", "album")]}
+    assert [(t.video_id, t.title) for t in parse_search(resp)] == [("A1", "Dancing Queen"), ("A2", "Dancing Queen (Live)")]
+
+
+def test_songs_inside_an_artist_card_inherit_the_artist_name():
+    """Real Pear 19 Oct 2026, "נועה קירל": the Hebrew artist card lists songs whose rows say only "שיר • 3:24"."""
+    from jarves.skills.music import parse_search
+    resp = {"musicCardShelfRenderer": {
+        "title": {"runs": [{"text": "נועה קירל", "navigationEndpoint": {"browseEndpoint": {}}}]},
+        "subtitle": {"runs": [{"text": "אומן/ית"}]},
+        "contents": [{"musicResponsiveListItemRenderer": {"playlistItemData": {"videoId": "T1"}, "flexColumns": [
+            {"musicResponsiveListItemFlexColumnRenderer": {"text": {"runs": [{"text": "טרילילי טרללה"}]}}},
+            {"musicResponsiveListItemFlexColumnRenderer": {"text": {"runs": [{"text": "שיר • 3:24"}]}}}]}}]}}
+    t = parse_search(resp)
+    assert [x.video_id for x in t] == ["T1"] and track_is_relevant(t[0], "נועה קירל")
+    # the player then names the artist in Latin with a Hebrew "and": cannot compare -> the title decides
+    np = NowPlaying("טרילילי טרללה", "Noa Kirel ו-Ilan Peled", "other", False)
+    assert artists_match(np.artist, t[0]) is None and MusicSkill._same_track(np, t[0])
+
+
+def test_hebrew_ui_subtitles_still_compare_latin_artists():
+    t = Track("v", "Hello", "שיר • Lionel Richie • 4:09")
+    assert artists_match("Adele", t) is False
+    assert artists_match("Daft Punk, Pharrell Williams & Nile Rodgers",
+                         Track("v", "Get Lucky", "שיר • Daft Punk‏, Pharrell Williams ו-Nile Rodgers • 4:09")) is True
+
+
+async def test_one_slow_status_answer_does_not_fail_the_confirm():
+    class Hiccup(FakePlayer):
+        n = 0
+
+        async def now_playing(self):
+            self.n += 1
+            if self.n == 1:
+                from jarves.skills.music import MusicError
+                raise MusicError("MUSIC_TIMEOUT", "slow")
+            return await super().now_playing()
+    r, _ = _reg(Hiccup(), verify_tries=4)
+    assert (await r.call("music_play", {"query": "Song One"})).ok
+
+
+async def test_a_result_the_player_skips_fails_fast_and_the_next_one_is_tried():
+    """Real Pear 19 Oct 2026: an unplayable "Get Lucky" made Pear jump to "Love Again"; JARVES polled 8 s per try
+    and ran out of time. A third song playing on two polls = this result failed."""
+    class Skips(FakePlayer):
+        async def play_track(self, t):
+            self.calls.append(f"play:{t.video_id}")
+            self.np = NowPlaying("Love Again", "Dua Lipa", "LOVE", False) if t.video_id == "bad" else \
+                NowPlaying(t.title, t.subtitle, t.video_id, False)
+    fp = Skips([Track("bad", "Get Lucky (Radio Edit)", "Daft Punk"), Track("good", "Get Lucky", "Daft Punk")])
+    fp.np = NowPlaying("Old", "X", "OLD", False)
+    r, _ = _reg(fp, verify_tries=16)
+    t = time.monotonic()
+    res = await r.call("music_play", {"query": "get lucky"})
+    assert res.ok and res.data["now_playing"]["video_id"] == "good" and time.monotonic() - t < 3.0
+
+
+async def test_a_timed_out_play_request_is_checked_not_given_up():
+    from jarves.skills.music import MusicError
+
+    class LateAnswer(FakePlayer):
+        async def play_track(self, t):
+            await super().play_track(t)                  # the command landed...
+            raise MusicError("MUSIC_TIMEOUT", "slow")    # ...but Pear's answer timed out
+    r, _ = _reg(LateAnswer(), verify_tries=2)
+    assert (await r.call("music_play", {"query": "Song One"})).ok
+
+    class Dead(FakePlayer):
+        async def play_track(self, t):
+            raise MusicError("MUSIC_TIMEOUT", "slow")
+    res = await _reg(Dead(), verify_tries=2)[0].call("music_play", {"query": "Song"})
+    assert not res.ok and res.code == "MUSIC_NOT_CONFIRMED" and "deadline_s" in res.data
+
+
 # ---------------------------------------------------------------- P1: honest playback wording
 async def test_play_result_says_the_player_reports_it_not_that_it_is_audible():
     r, _ = _reg(FakePlayer(), verify_tries=2)

@@ -149,23 +149,33 @@ def parse_search(resp: dict, limit: int = 5) -> list[Track]:
             seen.add(vid)
             out.append(Track(vid, title or vid, sub))
 
-    def walk(o) -> None:
+    def walk(o, under: str = "") -> None:
         if isinstance(o, dict):
             card = o.get("musicCardShelfRenderer")
             if card:   # "top result"
                 ep = (card.get("title", {}).get("runs") or [{}])[0].get("navigationEndpoint", {})
                 add(ep.get("watchEndpoint", {}).get("videoId"), _text(card.get("title")), _text(card.get("subtitle")))
+                # the songs listed INSIDE an artist card omit the artist ("שיר • 3:24"): they inherit the card's name
+                # (real Pear 19 Oct 2026, "נועה קירל": the card is Hebrew, every row only says "Noa Kirel" or nothing)
+                walk(card.get("contents"), _text(card.get("title")))
+                return
             item = o.get("musicResponsiveListItemRenderer")
             if item:
-                vid = (item.get("playlistItemData") or {}).get("videoId")
+                # songs/videos carry the id in playlistItemData, or (real Pear 19 Oct 2026, "ABBA Dancing Queen":
+                # every row) only in the row's watch endpoint / play-button overlay; albums/artists have neither
+                vid = (item.get("playlistItemData") or {}).get("videoId") or \
+                    ((item.get("navigationEndpoint") or {}).get("watchEndpoint") or {}).get("videoId") or \
+                    (((((item.get("overlay") or {}).get("musicItemThumbnailOverlayRenderer") or {}).get("content") or {})
+                      .get("musicPlayButtonRenderer") or {}).get("playNavigationEndpoint", {}).get("watchEndpoint") or {}).get("videoId")
                 cols = item.get("flexColumns") or []
                 txt = [_text(c.get("musicResponsiveListItemFlexColumnRenderer", {}).get("text")) for c in cols]
-                add(vid, txt[0] if txt else "", " ".join(txt[1:2]))
+                sub = " ".join(txt[1:2])
+                add(vid, txt[0] if txt else "", f"{sub} • {under}" if under else sub)
             for v in o.values():
-                walk(v)
+                walk(v, under)
         elif isinstance(o, list):
             for v in o:
-                walk(v)
+                walk(v, under)
     walk(resp)
     return out
 
@@ -231,7 +241,7 @@ def track_is_relevant(t: Track, query: str) -> bool:
     return any(_word_in(w, tokens) for w in words)
 
 
-_ARTIST_SPLIT = re.compile(r"\s*(?:,|&|•|·|/|\+|\bfeat\.?|\bft\.?|\band\b|\bx\b)\s*")
+_ARTIST_SPLIT = re.compile(r"\s*(?:,|&|•|·|/|\+|\bfeat\.?|\bft\.?|\band\b|\bx\b|\sו-)\s*")
 _KIND_WORDS = {"song", "video", "single", "ep", "album", "שיר", "סרטון", "סינגל", "אלבום", "topic", "vevo"}
 
 
@@ -241,18 +251,20 @@ def _artist_names(s: str) -> list[str]:
 
 
 def _script(s: str) -> str:
-    return "he" if any("֐" <= c <= "׿" for c in s) else "latin"
+    """'he', 'latin' or 'mixed' (Pear's Hebrew UI writes "Noa Kirel ו-Ilan Peled": names Latin, the "and" Hebrew)."""
+    he, latin = any("֐" <= c <= "׿" for c in s), any("a" <= c <= "z" for c in s.casefold())
+    return "mixed" if he and latin else "he" if he else "latin"
 
 
 def artists_match(player_artist: str, searched: Track) -> bool | None:
     """Do the artist the player reports and the searched candidate (its subtitle line / title) agree?
     None = cannot tell (an empty side, or Hebrew vs Latin spelling of what may be the same artist)."""
     names = _artist_names(player_artist)
-    other = clean_title(f"{searched.subtitle} {searched.title}")
-    if not names or not searched.subtitle.strip() or _script(" ".join(names)) != _script(searched.subtitle):
+    segs = _artist_names(searched.subtitle)          # the subtitle's name parts ("שיר", "4:09", "3M views" left out)
+    script = _script(" ".join(names))
+    if not names or not segs or script == "mixed" or script != _script(" ".join(segs)):
         return None
-    flat = other.replace(" ", "")
-    segs = _artist_names(searched.subtitle)
+    flat = clean_title(f"{searched.subtitle} {searched.title}").replace(" ", "")
     return any(n in flat for n in names) or any(s in n or n in s for s in segs for n in names if len(s) >= 3)
 
 
@@ -597,6 +609,7 @@ class MusicSkill(Skill):
         self.verify_tries = verify_tries
         self._plays = 0
         self._trim_task: asyncio.Task | None = None
+        self._moved_on = ""          # set by _verify_playing: the song the player skipped to instead
         # Issue #16: trimming removes PLAYED items from Pear's queue (its visible history). Config music.trim_queue.
         self.trim_queue = trim_queue
         self.volume_step = volume_step
@@ -662,19 +675,41 @@ class MusicSkill(Skill):
             await self.player.close()
 
     async def _verify_playing(self, t: Track, tries: int | None = None,
-                              deadline: float | None = None) -> NowPlaying | None:
+                              deadline: float | None = None, known: set[str] | None = None) -> NowPlaying | None:
         """Truthful status: success only when the player itself says THIS track (id, or title + artist) is playing.
         Polls up to tries x 0.5 s (a fresh track can take seconds to buffer), never past `deadline` (loop time).
         Issue #16 P1: Pear has NO live progress signal. Its elapsedSeconds (REST, and the position in the
         /api/v1/ws events) is refreshed only on state events: 19 Oct 2026, a song really played 27 s -> 36 s while
         both read 27 the whole time, so a stalled video and a playing one look the same, and requiring progress gave
         0/10 false "not confirmed" (QA 19 Oct). What is confirmed is therefore "the player reports this song
-        playing"; results say so (data playback = "player_reports_playing") and never claim it is audible."""
+        playing"; results say so (data playback = "player_reports_playing") and never claim it is audible.
+        known: songs the player showed before (the previous song, earlier failed tries). A song NOT in it playing on
+        two polls in a row means the player skipped an unplayable result (real Pear 19 Oct: "Daft Punk Get Lucky"
+        -> "Love Again"): give up on this candidate at once (self._moved_on = that song) instead of polling 8 s."""
         loop = asyncio.get_running_loop()
+        self._moved_on, other = "", ""
         for _ in range(tries or self.verify_tries):
-            np = await self.player.now_playing()
+            try:
+                np = await (self.player.now_playing() if deadline is None else
+                            asyncio.wait_for(self.player.now_playing(), max(0.3, deadline - loop.time())))
+            except TimeoutError:
+                np = None                                     # the deadline ran out mid-poll
+            except MusicError as e:
+                # one slow answer while Pear switches songs (S11, real Pear 19 Oct: MUSIC_TIMEOUT mid-confirm) is not
+                # a verdict; keep polling inside the deadline. Offline / unpaired still fail at once.
+                if e.code != "MUSIC_TIMEOUT":
+                    raise
+                np = None
             if np and self._same_track(np, t) and not np.paused:
                 return np
+            if known is not None and np and np.video_id and not np.paused and np.video_id not in known:
+                if other == np.video_id:
+                    self._moved_on = other
+                    logs.info("music", "MUSIC_PLAYER_SKIPPED", "the player moved on to another song; result not playable")
+                    return None
+                other = np.video_id
+            else:
+                other = ""
             if deadline is not None and loop.time() + 0.5 > deadline:
                 break
             await asyncio.sleep(0.5)
@@ -700,8 +735,15 @@ class MusicSkill(Skill):
                     return ToolResult(False, f"לא מצאתי את \"{a.query}\".", code="MUSIC_NOT_FOUND")
                 # Some YouTube results cannot play (region / availability; real Pear, 19 Oct: "Get Lucky" top result,
                 # Pear then skipped to an unrelated song). Try the next candidates instead of giving up (max 3).
-                np, t, tried, out_of_time = None, found[0], [], False
-                for cand in found[:3]:
+                np, t, tried, out_of_time, slow = None, found[0], [], False, False
+                seen: set[str] = set()                        # songs the player showed that are NOT a skip-on
+                with contextlib.suppress(MusicError):
+                    was = await asyncio.wait_for(p.now_playing(), max(0.3, min(3.0, left() - MIN_CANDIDATE_S)))
+                    if was is not None and was.video_id:
+                        seen.add(was.video_id)
+                for cand in found:
+                    if len(tried) >= 3:
+                        break
                     if any(clean_title(cand.title) == clean_title(u.title) for u in tried):
                         continue                              # the same song again (another upload): not a new try
                     if tried and left() < MIN_CANDIDATE_S:
@@ -714,16 +756,36 @@ class MusicSkill(Skill):
                     except TimeoutError:
                         out_of_time = True
                         break
-                    np = await self._verify_playing(cand, None if len(tried) == 1 else max(2, self.verify_tries * 3 // 4),
-                                                    deadline=deadline)
+                    except MusicError as e:
+                        # one Pear request timing out while it loads a video (S02/S11 re-run, 19 Oct) is not a verdict:
+                        # the command may have landed, so check what plays; offline / unpaired still fail at once
+                        if e.code != "MUSIC_TIMEOUT" or left() < 1.0:
+                            raise
+                        logs.info("music", "MUSIC_PLAY_SLOW", "a player request timed out during the play; checking anyway")
+                        slow = True
+                    # every try gets the full window (a slow Pear needed 4-9 s per switch in the 19 Oct campaign), only
+                    # the deadline bounds it; a result the player skips fails fast (known songs, see _verify_playing)
+                    np = await self._verify_playing(cand, deadline=deadline, known=seen)
                     if np is not None:
                         break
+                    if self._moved_on:
+                        seen.add(self._moved_on)
                     logs.info("music", "MUSIC_CANDIDATE_FAILED", f"candidate {len(tried)} did not start; trying the next")
+                if np is None and tried:
+                    # a slow player may have started an EARLIER try after we moved on (S11, real Pear 19 Oct: "נועה
+                    # קירל" ended on the 2nd candidate, reported "not confirmed"): one last look before saying no
+                    with contextlib.suppress(MusicError, TimeoutError):
+                        last = await asyncio.wait_for(p.now_playing(), max(0.3, min(2.0, left())))
+                        hit = next((u for u in tried if last and not last.paused and self._same_track(last, u)), None)
+                        if hit is not None:
+                            np, t = last, hit
                 if np is None:
-                    if out_of_time or left() <= 0.5:
+                    if out_of_time or slow or left() <= 0.5:
                         logs.warn("music", "MUSIC_PLAY_DEADLINE", "the player was too slow; stopped trying candidates",
                                   tried=len(tried), budget_s=self.play_budget_s)
-                        return ToolResult(False, "הנגן איטי מדי כרגע: ביקשתי לנגן, אבל לא קיבלתי ממנו אישור בזמן.",
+                        msg = (f"ניסיתי {len(tried)} גרסאות של השיר, ואף אחת לא התחילה לנגן בזמן." if len(tried) > 1
+                               else "הנגן איטי מדי כרגע: ביקשתי לנגן, אבל לא קיבלתי ממנו אישור בזמן.")
+                        return ToolResult(False, msg,
                                           {"track": asdict(t), "tried": len(tried), "deadline_s": self.play_budget_s,
                                            "note": "the player may still start this song late"}, "MUSIC_NOT_CONFIRMED")
                     return ToolResult(False, "ביקשתי מהנגן לנגן, אבל הוא לא מדווח שהשיר מתנגן.",
@@ -787,6 +849,12 @@ class MusicSkill(Skill):
                             pressed_again = True
                             logs.info("music", "MUSIC_NEXT_RETRY", "next not reflected after 4 s; pressing again")
                             await p.next()
+                        # real Pear 19 Oct (S07): a resume right after a pause was applied only ~9 s later; POST /play
+                        # is not a toggle, so pressing it once more is safe
+                        if op == "resume" and not pressed_again and loop.time() - t0 > 2.5:
+                            pressed_again = True
+                            logs.info("music", "MUSIC_RESUME_RETRY", "resume not reflected after 2.5 s; pressing again")
+                            await p.resume()
                         await asyncio.sleep(0.3)
                     what = "לעבור לשיר הבא" if op == "next" else "להמשיך לנגן"
                     return ToolResult(False, f"ביקשתי מהנגן {what}, אבל הוא לא מדווח שזה קרה.", code="MUSIC_NOT_CONFIRMED")

@@ -3,6 +3,7 @@ import hashlib
 import json
 import sqlite3
 import sys
+import zipfile
 
 import pytest
 
@@ -110,14 +111,13 @@ def test_install_needs_approval_checksum_and_backs_up_first(tmp_path, monkeypatc
     assert not (home / "updates").exists()             # nothing downloaded without approval
     r = u.prepare_install(approved=True)
     assert open(r["installer"], "rb").read() == EXE
-    bak = home / "backups"
-    (folder,) = list(bak.iterdir())
-    names = {p.name for p in folder.iterdir()}
-    assert {"memory.db", "config.toml", "BACKUP.json"} <= names
+    from jarves import backup
+    rep = backup.verify(r["backup"])                   # WP-M5's verified pre-migration archive
+    assert rep["ok"], rep["errors"]
+    with zipfile.ZipFile(r["backup"]) as z:
+        names = {n.split("/")[-1] for n in z.namelist()}
+    assert {"memory.db", "config.toml"} <= names
     assert "secrets.env" not in names and "link_token" not in names   # credentials never copied
-    copy = sqlite3.connect(folder / "memory.db")
-    assert copy.execute("select t from m").fetchone()[0] == "likes tea"
-    copy.close()
 
 
 @pytest.mark.parametrize("gh,code", [

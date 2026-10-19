@@ -6,6 +6,8 @@
 <title>JARVES Dashboard</title>
 <link rel="stylesheet" href="/static/style.css">
 <script src="/static/app.js" defer></script>
+<script src="/static/pages.js" defer></script>
+<script src="/static/usage.js" defer></script>
 </head>
 <body>
 <div class="shell">
@@ -13,7 +15,9 @@
     <div class="brand"><span class="dot" id="coreDot" title="Core state"></span>JARVES</div>
     <nav id="nav">
       <a href="#/conversations" data-page="conversations">Conversations</a>
+      <a href="#/logs" data-page="logs">Logs</a>
       <a href="#/costs" data-page="costs">Costs</a>
+      <a href="#/tasks" data-page="tasks">Background tasks</a>
       <a href="#/issues" data-page="issues">Issues <span class="count" id="issueCount"></span></a>
       <a href="#/memory" data-page="memory">Memory</a>
       <a href="#/skills" data-page="skills">Skills &amp; tools</a>

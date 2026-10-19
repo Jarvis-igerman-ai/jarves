@@ -25,7 +25,8 @@ def test_defaults_privacy_features_off(home):
     for fid in ("music", "web_search", "background_tasks", "memory_curator", "wake_word", "greeting", "chimes",
                 "dashboard", "workspace_agent_edit", "voice_change", "google_calendar", "gmail_read"):
         assert f.enabled(fid), fid
-    assert not f.enabled("memory_llm_pass") and not f.enabled("diagnosis_llm_pass")
+    assert not f.enabled("memory_llm_pass")
+    assert f.enabled("diagnosis_llm_pass")         # WP-H brief: AI review ON by default (budgeted, max/day)
 
 
 def test_enabled_and_available_are_separate(home):

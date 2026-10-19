@@ -240,8 +240,10 @@ register("memory_curator", "למידה מהשיחות", "Learn from conversation
 register("memory_llm_pass", "למידה בעזרת המודל", "Memory LLM pass", False, probe=_api_billing,
          needs=["memory_curator", "openai_api"], risk="medium", config="settings:curator.llm",
          about="also asks the backend model to extract facts after a conversation (one paid request)")
-register("diagnosis_llm_pass", "אבחון עצמי בעזרת המודל", "Self-diagnosis LLM pass", False, probe=_api_billing,
-         needs=["openai_api"], risk="medium", about="lets self-diagnosis ask the model about odd conversations")
+# WP-H: ON by default (user decision in the SW-V2 brief); default follows history.llm_review; budgeted, max/day
+register("diagnosis_llm_pass", "אבחון עצמי בעזרת המודל", "Self-diagnosis LLM pass", True, probe=_api_billing,
+         needs=["openai_api"], risk="medium", config="history.llm_review",
+         about="after each conversation one small model request looks for problems the rules miss")
 register("google_calendar", "יומן גוגל", "Google Calendar", True, probe=_google("calendar", "calendar"),
          needs=["google_account"], risk="medium", skills=["calendar"], about="read and add calendar events")
 register("gmail_read", "קריאת מיילים", "Read Gmail", True, probe=_google("gmail", "gmail"),

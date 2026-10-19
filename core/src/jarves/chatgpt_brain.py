@@ -14,7 +14,7 @@ import random
 
 import httpx
 
-from . import logs
+from . import logs, usage
 from .brain import INSTRUCTIONS, BackendTrace, BrainUnavailable, billing_summary
 from .budget import Budget, BudgetExceeded
 from .chatgpt_auth import RESOURCE, ChatGPTAuth, ChatGPTAuthError
@@ -160,6 +160,7 @@ class ChatGPTBrain:
         try:
             async with self._client() as c:
                 async with c.stream("POST", "/responses", json=body, headers=headers) as r:
+                    usage.observe_headers("chatgpt_plan", r.headers)    # M5: rate-limit headers, if any
                     if r.status_code != 200:
                         await r.aread()
                         self._raise_http(r)
