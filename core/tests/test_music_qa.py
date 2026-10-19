@@ -1,6 +1,7 @@
 """Regressions from the pre-use music QA on real Pear Desktop 3.12 (19 Oct 2026, tools/suite_music.py)."""
 from __future__ import annotations
 
+import asyncio
 import httpx
 import pytest
 
@@ -285,3 +286,93 @@ async def test_next_that_does_not_change_the_song_is_not_claimed():
     await reg.call("music_play", {"query": "Song One"})
     r = await reg.call("music_next")
     assert not r.ok and r.code == "MUSIC_NOT_CONFIRMED"
+
+
+# ---------------------------------------------------------------- queue growth (19 Oct campaign finding)
+async def test_trim_history_removes_only_played_items_and_is_bounded(tmp_path):
+    import httpx
+    import json as _json
+    from jarves.skills.music import PearDesktopPlayer
+
+    def item(v, sel=False):
+        return {"playlistPanelVideoRenderer": {"videoId": v, "selected": sel}}
+    state = {"q": [item(f"H{i}") for i in range(30)] + [item("NOW", True)] + [item("N1"), item("N2")], "deleted": []}
+
+    def handler(req: httpx.Request):
+        if req.url.path.startswith("/auth/"):
+            return httpx.Response(200, json={"accessToken": "t"})
+        if req.url.path == "/api/v1/queue" and req.method == "GET":
+            return httpx.Response(200, json={"items": state["q"]})
+        if req.url.path == "/api/v1/queue/0" and req.method == "DELETE":
+            state["deleted"].append(state["q"].pop(0)["playlistPanelVideoRenderer"]["videoId"])
+            return httpx.Response(204)
+        return httpx.Response(204)
+    p = PearDesktopPlayer("http://127.0.0.1:26538", tmp_path / "id", transport=httpx.MockTransport(handler))
+    await p.pair()
+    n = await p.trim_history(keep_before=3, max_deletes=400)
+    ids = [x["playlistPanelVideoRenderer"]["videoId"] for x in state["q"]]
+    assert n == 27 and ids == ["H27", "H28", "H29", "NOW", "N1", "N2"]       # history trimmed to 3; now + upcoming kept
+    assert await p.trim_history(keep_before=3) == 0                          # nothing more to trim
+    state["q"][:0] = [item(f"X{i}") for i in range(500)]
+    assert await p.trim_history(keep_before=3, max_deletes=40) == 40         # bounded per call
+    await p.close()
+
+
+async def test_music_skill_trims_in_the_background_after_a_successful_play():
+    from jarves.skills.music import FakePlayer, MusicSkill, Track
+    p = FakePlayer()
+    t = Track("V1", "שיר", "אמן")
+    p.catalog = [t]
+    trimmed = []
+
+    async def trim_history():
+        trimmed.append(1)
+        return 5
+    p.trim_history = trim_history
+    s = MusicSkill(p, verify_tries=2)
+    play = next(x for x in s.tools() if x.name == "music_play")
+    res = await play.handler(type("A", (), {"query": "שיר"})())
+    assert res.ok
+    await asyncio.sleep(0.1)
+    assert trimmed == [1]                                                  # first play trims; it never fails the play
+
+
+async def test_trim_never_overlaps_a_play_and_gives_way(tmp_path):
+    """Real-Pear finding: trimming while a play jumped to a queue index shifted positions and the play failed."""
+    import httpx
+    from jarves.skills.music import PearDesktopPlayer, Track
+
+    def item(v, sel=False):
+        return {"playlistPanelVideoRenderer": {"videoId": v, "selected": sel}}
+    events = []
+    state = {"q": [item(f"H{i}") for i in range(40)] + [item("NOW", True)]}
+
+    def handler(req: httpx.Request):
+        if req.url.path.startswith("/auth/"):
+            return httpx.Response(200, json={"accessToken": "t"})
+        if req.url.path == "/api/v1/queue" and req.method == "GET":
+            return httpx.Response(200, json={"items": state["q"]})
+        if req.url.path == "/api/v1/queue/0" and req.method == "DELETE":
+            events.append("delete")
+            state["q"].pop(0)
+            return httpx.Response(204)
+        if req.url.path == "/api/v1/queue" and req.method == "POST":
+            state["q"].append(item("NEW"))
+            events.append("insert")
+            return httpx.Response(204)
+        if req.url.path == "/api/v1/queue" and req.method == "PATCH":
+            events.append("patch")
+            return httpx.Response(204)
+        return httpx.Response(204)
+    p = PearDesktopPlayer("http://127.0.0.1:26538", tmp_path / "id", transport=httpx.MockTransport(handler))
+    await p.pair()
+    trim = asyncio.create_task(p.trim_history(keep_before=3, max_deletes=30))
+    await asyncio.sleep(0.4)                                       # the trim is mid-way
+    await p.play_track(Track("NEW", "x", "y"), wait_s=1.0)         # a play arrives: the trim must give way, not interleave
+    n = await trim
+    assert 0 < n < 30                                              # it stopped early for the play
+    first_play = events.index("insert")
+    assert "delete" not in events[first_play:first_play + 3] or events.index("patch") > first_play
+    last_delete_before = max(i for i, e in enumerate(events) if e == "delete" and i < first_play)
+    assert all(e != "delete" for e in events[first_play:events.index("patch") + 1])     # no delete between insert and jump
+    await p.close()

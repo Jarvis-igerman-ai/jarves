@@ -341,3 +341,19 @@ heard 'עכשיו תנגן את עומר אדם'; said 'סגור. / עוד שנ�
 - V01: music activity details [] vs pear 'תתארו לכם' -> False
 - V06: music activity details [] vs pear 'תתארו לכם' -> False
 
+
+## Lead follow-up (19 Oct 2026): the queue-growth root cause
+
+The campaign's remaining failures (S04, S07, S10, S11, K01) were all one product problem: **every play inserts a
+song into Pear's queue and nothing ever removed it**. ~250 plays left a 207-item queue (3.3 MB per read), which made Pear
+and `next`/confirm slow.
+
+- **Fix:** `PearDesktopPlayer.trim_history()` removes only PLAYED history (`DELETE /queue/0`; the playing song stays
+  selected, verified on Pear 3.12), in small paced batches (12 per call, one call on the first play and every 6th play, in the
+  background). A shared lock keeps trims and index-based plays/next from overlapping, and a trim gives way to a waiting play.
+- **What went wrong on the way (honest):** my first cleanup deleted ~170 items in one burst and wedged Pear's player and queue
+  API for minutes; I restarted Pear (sign-in and pairing survived, queue back to 51 items) and made the trim gentle. A second
+  real run then failed one play because a trim overlapped it: that is what the lock fixes.
+- **Verified on the real Pear at volume 0 after the fix:** 12/12 plays confirmed (Hebrew and English artists, songs, a vague
+  request), confirm latency 1.2-4.6 s (median ~2 s), queue steady at 47-56 items (~0.9 MB). Pear left paused, volume restored to 8.
+- Not re-run after the fix: the 15-minute soak and the voice-driven music scenarios (they need a fresh long run).

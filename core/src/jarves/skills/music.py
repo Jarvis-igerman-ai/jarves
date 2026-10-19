@@ -7,6 +7,7 @@ stream extraction. Pairing uses a random client id that the user approves once i
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import re
 import secrets
 from dataclasses import asdict, dataclass
@@ -184,6 +185,8 @@ class PearDesktopPlayer:
         self.id_file = client_id_file
         self.timeout = timeout_s
         self._token: str | None = None
+        self._qlock = asyncio.Lock()
+        self._waiters = 0
         self._client = httpx.AsyncClient(base_url=self.base, timeout=timeout_s, transport=transport)
 
     def client_id(self) -> str:
@@ -193,6 +196,32 @@ class PearDesktopPlayer:
 
     async def close(self) -> None:
         await self._client.aclose()
+
+    async def trim_history(self, keep_before: int = 3, max_deletes: int = 12) -> int:
+        """Drop PLAYED history from Pear's queue so it stays small. Found by the music campaign (19 Oct 2026): every
+        play inserts a song and nothing ever removed it; ~250 plays left a 207-item queue whose every read was 3.3 MB,
+        which made Pear (and next/confirm) slow. DELETE /queue/0 removes the oldest item; the playing song stays
+        selected (verified on Pear 3.12). Only items BEFORE the current one are touched; never the current or upcoming.
+        Small paced batches on purpose: a burst of ~170 deletes on a 200-item queue wedged Pear's player for minutes
+        (19 Oct), while 12 per call (every 6th play) keeps a normal queue small without ever stressing it.
+        Returns how many items were removed."""
+        async with self._qlock:
+            return await self._trim(keep_before, max_deletes)
+
+    async def _trim(self, keep_before: int, max_deletes: int) -> int:
+        q = await self.queue()
+        cur = next((i for i, (_, sel) in enumerate(q) if sel), -1)
+        n = min(max(0, cur - keep_before), max_deletes)
+        done = 0
+        for _ in range(n):
+            if self._waiters:                      # a play/next is waiting: give way at once
+                break
+            r = await self._req("DELETE", "/queue/0")
+            if r.status_code >= 400:
+                break
+            done += 1
+            await asyncio.sleep(0.15)
+        return done
 
     @property
     def _paired_marker(self) -> Path:
@@ -274,7 +303,22 @@ class PearDesktopPlayer:
         except MusicError:
             return []
 
+    @contextlib.asynccontextmanager
+    async def _exclusive(self):
+        """Index-based queue operations (play_track, next) and the background trim must never overlap: deleting items
+        shifts the positions a PATCH /queue jump relies on (real Pear, 19 Oct: a play right after a trim failed)."""
+        self._waiters += 1
+        try:
+            async with self._qlock:
+                yield
+        finally:
+            self._waiters -= 1
+
     async def play_track(self, track: Track, wait_s: float = 3.0) -> None:
+        async with self._exclusive():
+            await self._play_track(track, wait_s)
+
+    async def _play_track(self, track: Track, wait_s: float = 3.0) -> None:
         """Insert after the current song, then jump to THAT queue index. QA 18 Oct on real Pear 3.12: the insert
         lands asynchronously, so pressing "next" right away skipped to the OLD next song; we wait for the
         inserted item to appear and select it by index instead.
@@ -335,6 +379,10 @@ class PearDesktopPlayer:
         await self._req("POST", "/play")
 
     async def next(self) -> None:
+        async with self._exclusive():
+            await self._next()
+
+    async def _next(self) -> None:
         """Next DIFFERENT song: back-to-back copies of the current one (left by earlier inserts) are skipped by
         selecting the first other item; otherwise Pear's own next (it also handles autoplay at the queue end)."""
         q = await self.queue()
@@ -430,6 +478,8 @@ class MusicSkill(Skill):
     def __init__(self, player: MusicPlayer, max_volume: int = 70, verify_tries: int = 16) -> None:
         self.player = player
         self.verify_tries = verify_tries
+        self._plays = 0
+        self._trim_task = None
         self.max_volume = max_volume
         self.last_error: MusicError | None = None
 
@@ -460,6 +510,21 @@ class MusicSkill(Skill):
         a, b = base_title(np.title), base_title(t.title)
         return bool(a) and a == b
 
+    def _spawn_trim(self) -> None:
+        """Keep the player's queue small in the background (never blocks or fails a play)."""
+        trim = getattr(self.player, "trim_history", None)
+        if trim is None or (self._trim_task is not None and not self._trim_task.done()):
+            return
+
+        async def go() -> None:
+            try:
+                n = await trim()
+                if n:
+                    logs.debug("music", "QUEUE_TRIMMED", f"removed {n} played items from the player's queue")
+            except Exception:
+                logs.debug("music", "QUEUE_TRIM_FAILED", "could not trim the player's queue")
+        self._trim_task = asyncio.get_running_loop().create_task(go())
+
     async def _verify_playing(self, t: Track) -> NowPlaying | None:
         """Truthful status: report success only when the player itself says this track is playing. Polls up to
         verify_tries x 0.5 s (a fresh track can take several seconds to buffer) and returns at once when it is."""
@@ -487,6 +552,9 @@ class MusicSkill(Skill):
                 if np is None:
                     return ToolResult(False, "ביקשתי מהנגן לנגן, אבל הוא לא מדווח שהשיר מתנגן.",
                                       {"track": asdict(t)}, "MUSIC_NOT_CONFIRMED")
+                self._plays += 1
+                if self._plays % 6 == 1:                    # amortised: the first play, then every 6th
+                    self._spawn_trim()
                 return ToolResult(True, f"מנגן: {np.title} – {np.artist}", {"now_playing": asdict(np)})
             return await self._guard(go())
 
