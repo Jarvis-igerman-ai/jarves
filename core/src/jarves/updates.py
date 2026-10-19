@@ -116,6 +116,13 @@ def build_info() -> dict:
     return info
 
 
+def is_installed_build() -> bool:
+    """True in a packaged/installed copy (packaging/build_windows.ps1 writes _build_info.json; a frozen exe counts
+    too). Dev checkouts have neither. Installed builds ignore update-source env overrides and the config key, and
+    launch only installers verified against the signed manifest."""
+    return bool(getattr(sys, "frozen", False)) or BUILD_INFO.is_file()
+
+
 def version_line() -> str:
     b = build_info()
     extra = [f"commit {b['commit'][:12]}" if b.get("commit") else None, f"built {b['built']}" if b.get("built") else None,
@@ -233,13 +240,17 @@ class UpdateChecker:
                  now: Callable[[], float] = time.time, current: str | None = None, cfg=None,
                  base_url: str | None = None, public_keys: list[str] | tuple[str, ...] | None = None) -> None:
         self.home = Path(home)
-        self.repo = repo or os.environ.get("JARVES_UPDATE_REPO") or REPO
+        self.installed = is_installed_build()
+        dev_env = (lambda k: "") if self.installed else (lambda k: os.environ.get(k) or "")   # dev checkouts only
+        self.repo = repo or dev_env("JARVES_UPDATE_REPO") or REPO
         self.http = http or _httpx_get
         self.now = now
         self.current = current or build_info()["version"]
         self.path = self.home / STATE_FILE
         ucfg = getattr(cfg, "update", None)
-        extra = str(getattr(ucfg, "public_key", "") or "").strip()
+        # An extra trusted key from config.toml is for dev/testing only: an installed build trusts only the keys
+        # it was built with (a local file must not be able to add trust).
+        extra = "" if self.installed else str(getattr(ucfg, "public_key", "") or "").strip()
         self.public_keys = tuple(public_keys if public_keys is not None else UPDATE_PUBLIC_KEYS) + \
             ((extra,) if extra else ())
         # Order: explicit argument > env JARVES_UPDATE_BASE_URL > config [update] base_url > the build's default
@@ -248,7 +259,7 @@ class UpdateChecker:
         base = base_url if base_url is not None else (
             os.environ.get("JARVES_UPDATE_BASE_URL") or getattr(ucfg, "base_url", "")
             or str(build_info().get("update_base_url") or "")
-            or (public_releases_url(os.environ.get("JARVES_RELEASES_REPO") or DEFAULT_RELEASES_REPO)
+            or (public_releases_url(dev_env("JARVES_RELEASES_REPO") or DEFAULT_RELEASES_REPO)
                 if self.public_keys else ""))
         if base and not base.strip().startswith("https://"):
             base = ""                                      # never fetch an update manifest over plain HTTP
@@ -412,7 +423,14 @@ class UpdateChecker:
         if not s["available"]:
             raise UpdateError("UPDATE_NONE", "no newer version is known (run a check first)")
         rel = s["latest"]
-        if rel.get("source") == "hosted":
+        signed = rel.get("source") == "hosted"
+        if not signed and self.installed:
+            # A GitHub release's SHA256 / digest come from the same release as the installer: they catch
+            # corruption, not a malicious release. Installed builds launch only what the signed manifest names.
+            raise UpdateError("UPDATE_UNSIGNED", "this update has no signed manifest, so it is not installed "
+                                                 "automatically; download it by hand and check its SHA256 "
+                                                 "(docs/RELEASE_HOSTING.md)")
+        if signed:
             # Re-read and re-verify the signed manifest now: the SHA256 we check against is never taken from the
             # local cache file alone.
             rel = release_from_manifest(self._fetch_manifest(), self.base_url, self.current)
@@ -420,11 +438,21 @@ class UpdateChecker:
                 raise UpdateError("UPDATE_NONE", "the update server no longer offers a newer version")
         exe = self.download(rel)
         bak = backup_before_update(self.home, f"pre-update-{self.current}-to-{rel['version']}")
-        return {"installer": str(exe), "backup": str(bak), "version": rel["version"]}
+        return {"installer": str(exe), "backup": str(bak), "version": rel["version"], "signed": signed,
+                "sha256": hashlib.sha256(exe.read_bytes()).hexdigest()}   # = the verified value (download checked)
 
 
-def launch_installer(path: str | Path) -> None:
-    """Start the normal (visible) setup window, detached, so the user sees and confirms every step."""
+def launch_installer(path: str | Path, verified: dict | None = None) -> None:
+    """Start the normal (visible) setup window, detached, so the user sees and confirms every step. `verified` is
+    prepare_install()'s result; an installed build refuses to start anything without a signed, verified result
+    whose SHA256 still matches the file on disk (checked again right before launch)."""
+    if is_installed_build():
+        if not verified or verified.get("signed") is not True or Path(verified.get("installer") or "") != Path(path):
+            raise UpdateError("UPDATE_UNSIGNED", "not starting an installer that was not verified against the "
+                                                 "signed update manifest")
+        if hashlib.sha256(Path(path).read_bytes()).hexdigest() != verified.get("sha256"):
+            raise UpdateError("UPDATE_CHECKSUM_MISMATCH", "the installer changed after it was verified; not "
+                                                          "starting it")
     flags = getattr(subprocess, "DETACHED_PROCESS", 0) | getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0)
     subprocess.Popen([str(path)], creationflags=flags, close_fds=True)
     logs.info("updates", "UPDATE_INSTALLER_STARTED", "installer started after user approval", installer=Path(path).name)
@@ -483,9 +511,9 @@ def api_updates_install(ctx, m, body):
     """POST {"approve": true}: the dashboard click is the approval. Downloads, verifies, backs up, starts setup."""
     try:
         r = _checker(ctx).prepare_install((body or {}).get("approve") is True)
+        launch_installer(r["installer"], verified=r)
     except UpdateError as e:
         return 409, {"error": e.message, "code": e.code}
-    launch_installer(r["installer"])
     return 200, {**r, "note": "the setup window is open; it closes JARVES, keeps your data and can start it again"}
 
 

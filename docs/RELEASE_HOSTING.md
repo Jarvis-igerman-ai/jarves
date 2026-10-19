@@ -48,8 +48,15 @@ You create the repo, the token and the key; you type every value yourself. Claud
   key too. Only newer versions are offered.
 - The token is fine-grained: **Contents: write on `jarvis-releases` only**. It cannot read the private source repo.
 - No GitHub token is ever sent by the app. The check sends no personal data, only one HTTPS download.
-- Until the public key is built into the app, PCs keep using the private repo's releases (needs
-  `JARVES_UPDATE_TOKEN`) exactly as before. Nothing is trusted without a key.
+- **Installed builds start only a signed update.** A release's own SHA256 / GitHub digest come from the same
+  place as the installer, so they catch corruption but not a malicious release. An installed JARVES therefore
+  starts the setup only when it was verified against the signed manifest, and it hashes the file again right
+  before starting it. Installed builds also ignore the `JARVES_UPDATE_REPO` / `JARVES_RELEASES_REPO` environment
+  overrides and the config `public_key`; only the keys built into the app count (those are for dev checkouts).
+  גרסה מותקנת מפעילה רק עדכון חתום, ובודקת את ה-SHA256 שוב רגע לפני ההפעלה.
+- Until the public key is built into the app, PCs still check the private repo's releases (needs
+  `JARVES_UPDATE_TOKEN`) and tell you about a new version, but an installed build does not install it
+  automatically (`UPDATE_UNSIGNED`): download it by hand and check `Get-FileHash`. Nothing is trusted without a key.
 
 Why sign at all if it is GitHub? HTTPS proves the file came from github.com, not that our CI made it. Anyone with
 write access to the releases repo (or a leaked token) could upload a different installer. The signature closes that.

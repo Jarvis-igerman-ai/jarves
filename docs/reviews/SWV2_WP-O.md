@@ -25,6 +25,18 @@ app-side verification and their tests are kept unchanged.
 so **every** release counted as pinned and `prune` never deleted a release. `is_pinned` now ignores the
 code-quoted mention. Regression test: `test_generated_notes_do_not_pin_every_release`.
 
+## Reviewer findings fixed
+
+- `package.yml` publish job (`contents: write`): `actions/checkout` and `actions/download-artifact` are pinned to full
+  commit SHAs (`3d3c42e5…` = v7.0.1, `9000827c…` = v8.0.2, resolved with `gh api repos/actions/<x>/commits/<tag>`).
+- `updates.py`: signature verification is **mandatory in installed builds** (`is_installed_build()` =
+  `_build_info.json` present or frozen). `prepare_install` refuses a release without a verified signed manifest
+  (`UPDATE_UNSIGNED`; the notice still shows). `launch_installer(path, verified=r)` refuses without a signed
+  `prepare_install` result for that exact path and re-hashes the file just before starting it (catches a swap
+  after verification). Installed builds ignore `JARVES_UPDATE_REPO`, `JARVES_RELEASES_REPO` and config
+  `update.public_key` (dev checkouts only). CLI and dashboard pass `verified=r`.
+  Tests: `test_installed_build_*` (3).
+
 ## What was built
 
 - `packaging/release.py`: `keygen --out FILE`; `public-publish --dir dist --keep 3` (stdlib GitHub client
@@ -52,7 +64,7 @@ code-quoted mention. Regression test: `test_generated_notes_do_not_pin_every_rel
 
 ## Tests
 
-- `core/tests/test_release_hosting.py` (18): fake GitHub REST server (auth, drafts, latest, tags, upload_url
+- `core/tests/test_release_hosting.py` (21): fake GitHub REST server (auth, drafts, latest, tags, upload_url
   template, deletes, paging); publish 5 versions → newest 3 + pinned kept, foreign tag untouched, pruned tags
   deleted, draft published only after the 4 POSTs, no secret in the log; half-done draft re-run completes;
   older build never replaces newer; wrong token → 401; tampered dist / bad repo refuse; signing round trip
@@ -60,7 +72,7 @@ code-quoted mention. Regression test: `test_generated_notes_do_not_pin_every_rel
   unavailable; approval + SHA/size refusal; cached release re-verified at install; manifest policy; source
   switch; config + build default; default = public repo once a key is trusted; **end to end CI publish → app
   check → install** using only `https://github.com/<repo>/releases/...` downloads; the pin regression.
-- `test_release_hosting.py` + `test_updates.py` + `test_packaging.py`: 39 passed.
+- `test_release_hosting.py` + `test_updates.py` + `test_packaging.py`: 42 passed.
 - Full suite after the merge (before the R2 → GitHub switch, same code otherwise): 1020 passed, 8 failed, 6 skipped.
   None of the 8 are in WP-O files. They reproduce on `swv2-integrate`: `test_core::test_push_to_talk_music_flow`
   (fails on unmodified `swv2-integrate` too); `test_guides` x4 + `test_capabilities` (feature `google_contacts`

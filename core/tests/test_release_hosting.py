@@ -467,3 +467,59 @@ def test_generated_notes_do_not_pin_every_release():
     for body in (release.notes(info, "https://ci"), release.public_notes(info)):
         assert "[pinned]" in body and not release.is_pinned({"name": "JARVES 0.1.0.5", "body": body})
         assert release.is_pinned({"name": "JARVES 0.1.0.5", "body": body + "\nrollback [pinned]"})
+
+
+# ---------------------------------------------------------------------- installed builds: signature is mandatory
+@pytest.fixture
+def installed(tmp_path, monkeypatch):
+    bi = tmp_path / "_build_info.json"
+    bi.write_text(json.dumps({"version": "0.1.0.8", "channel": "main"}), encoding="utf-8")
+    monkeypatch.setattr(updates, "BUILD_INFO", bi)
+    monkeypatch.setattr(sys, "platform", "win32")
+    monkeypatch.setattr(updates, "backup_before_update", lambda home, label: home / "bak.zip")
+    started = []
+    monkeypatch.setattr(updates.subprocess, "Popen", lambda *a, **k: started.append(a))
+    return started
+
+
+def test_installed_build_ignores_env_repo_and_config_key(tmp_path, monkeypatch, installed):
+    monkeypatch.setenv("JARVES_UPDATE_REPO", "attacker/fake")
+    monkeypatch.setenv("JARVES_RELEASES_REPO", "attacker/fake")
+    monkeypatch.delenv("JARVES_UPDATE_BASE_URL", raising=False)
+    cfg = Config.model_validate({"update": {"public_key": "attackerkey="}})
+    u = UpdateChecker(tmp_path, cfg=cfg, public_keys=["builtin="])
+    assert u.installed and u.repo == updates.REPO and u.public_keys == ("builtin=",)
+    assert u.base_url == BASE                                       # default public repo, not the env override
+    monkeypatch.setattr(updates, "BUILD_INFO", tmp_path / "missing.json")
+    dev = UpdateChecker(tmp_path, cfg=cfg, public_keys=["builtin="])
+    assert dev.repo == "attacker/fake" and dev.public_keys[-1] == "attackerkey="   # dev checkout: allowed
+
+
+def test_installed_build_never_installs_an_unsigned_github_release(tmp_path, installed):
+    from test_updates import FakeGitHub
+    from test_updates import release as gh_release
+    u = UpdateChecker(tmp_path, http=FakeGitHub([gh_release("0.1.0.9")]), current="0.1.0.8", public_keys=[])
+    assert u.check(force=True)["available"]                         # still told about it
+    with pytest.raises(UpdateError) as e:
+        u.prepare_install(approved=True)
+    assert e.value.code == "UPDATE_UNSIGNED" and not installed
+    with pytest.raises(UpdateError) as e:
+        updates.launch_installer(tmp_path / "x.exe")                # no verified result -> never started
+    assert e.value.code == "UPDATE_UNSIGNED" and not installed
+
+
+def test_installed_build_launches_only_the_verified_signed_installer(tmp_path, installed):
+    host, pub = _hosted(tmp_path)
+    u = UpdateChecker(tmp_path, http=host, current="0.1.0.8", base_url=BASE, public_keys=[pub])
+    u.check(force=True)
+    r = u.prepare_install(approved=True)
+    assert r["signed"] is True and r["sha256"] == hashlib.sha256(b"MZ new").hexdigest()
+    Path(r["installer"]).write_bytes(b"MZ swapped after verify")
+    with pytest.raises(UpdateError) as e:
+        updates.launch_installer(r["installer"], verified=r)
+    assert e.value.code == "UPDATE_CHECKSUM_MISMATCH" and not installed
+    Path(r["installer"]).write_bytes(b"MZ new")
+    with pytest.raises(UpdateError):
+        updates.launch_installer(tmp_path / "other.exe", verified=r)  # a different path than the verified one
+    updates.launch_installer(r["installer"], verified=r)
+    assert installed == [([r["installer"]],)]
