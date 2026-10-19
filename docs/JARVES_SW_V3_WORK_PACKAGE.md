@@ -72,6 +72,12 @@
 - Read `docs/plans/FEATURE_SUGGESTIONS.md`, deduplicate against V2, rank practical value/effort, and implement only small high-value candidates that do not destabilize P0 work. Suggested first candidates after de-duplication: timers/alarms, shopping/to-do lists, morning briefing, useful conversation recall.
 - Important home/safety integrations such as Pikud HaOref alerts require authoritative reliability analysis and must not silently replace official alert channels. Defer broad Home Assistant/IoT or personal-data integrations until individual approval.
 
+**P1.5 — Lightweight simulation UI/UX audit (budget-conscious).**
+- In addition to the Dashboard redesign, assess the **actual Godot JARVES simulator** (face, 2D avatar, 3D avatar, startup/connection/listening states and information overlays) for visual quality, usability, coherence and legibility.
+- If the named **Fable** model is available under the user's Claude Max plan, spend **one bounded, read-only review** on **4–6 real project screenshots or short captures**, not imagined mockups. Provide **at most five concrete, prioritized findings**; avoid repetitive Fable iterations or a full visual redesign.
+- Opus 5.5 (when available) owns only worthwhile high-impact implementation fixes; a cheaper suitable agent can run Godot previews/checks. Preserve existing 3D/CAD source ownership and do not overhaul mechanical geometry as part of this UX audit.
+- **Quota gate:** lower priority than P0 Dashboard, real-conversation bug fixes, performance, integration and QA. Skip or defer Fable review when token/headroom is tight; a normal Opus review is an acceptable fallback. Report test evidence and unverified Pi visual performance honestly.
+
 ### P2 — AFTER P0/P1: higher-risk, higher-cost exploration and phased rollout
 
 **P2.1 — Virtual computer for the agent.**
