@@ -177,6 +177,10 @@ class Core:
         if self.agent is not None:
             wsp.augment_instructions(self.agent, self.workspace)
         self.brain = Brain(self.registry, self.agent)
+        if self.agent is not None:                      # dashboard: what he was given in each typed conversation
+            from . import context_trace
+            context_trace.attach_brain(self.agent, home=self.home, cfg=c, memory=self.memory, registry=self.registry,
+                                       feats=self.features)
         # Background tasks (SW-V2 WP-C, tasks.py): research runs while the conversation goes on
         from .tasks import TaskSkill, make_retry_lookup, make_task_manager
         self.tasks = make_task_manager(c, self.agent, self.budget, self.home, on_update=self._tasks_changed,
@@ -305,6 +309,8 @@ class Core:
         if getattr(self, "_backup_auto", None) is not None:
             self._backup_auto.stop.set()                # M5 automatic backup thread
         store.detach(getattr(self, "history", None))
+        from . import context_trace
+        context_trace.close_home(self.home)             # its own store.db handle (conversation context)
 
     async def run(self) -> None:
         await self.start()
@@ -836,6 +842,9 @@ class Core:
         feat.attach_live(live, self.features)                 # what is off / unavailable, so he says so truthfully
         if getattr(self, "guides", None) is not None:         # WP-L: help questions -> backend; one suggestion
             self.guides.attach_live(live)
+        from . import context_trace                           # LAST: records the final instructions + notes sent
+        context_trace.attach_live(live, home=self.home, cfg=self.cfg, memory=self.memory, workspace=self.workspace,
+                                  registry=self.registry, feats=self.features)
         logs.new_cid()
         self._voice_connecting = True
         await self.link.broadcast("status", self.snapshot())

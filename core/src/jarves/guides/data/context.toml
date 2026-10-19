@@ -1,0 +1,28 @@
+order = 37
+category = "system"
+pages = ["conversations", "context"]
+features = ["context_trace"]
+aliases = ["הקשר", "context", "מה הוא ידע", "למה הוא אמר", "why did he say", "instructions", "הוראות", "prompt"]
+links = ["diagnosis", "privacy", "persona", "memory"]
+title_he = "מה הוא ידע בכל שיחה"
+title_en = "What he knew in each conversation"
+what_he = "בכל שיחה בלוח הבקרה יש כפתור \"הקשר\": ההוראות שג'ארביס קיבל, הזיכרונות, הכלים, ההערות שנוספו במהלך השיחה, ולמה הוא אמר משהו."
+what_en = "Every conversation in the dashboard has a Context button: the instructions JARVES was given, the memories, the tools, the notes added during the conversation, and why he said something."
+say = []
+expect_he = "רשימת חלקים עם גודל, ציר זמן של שינויים לפי תורות השיחה, השוואה בין ההתחלה לסוף, חיפוש וייצוא."
+expect_en = "A list of parts with their size, a timeline of changes aligned with the turns, start-versus-end comparison, search and export."
+cost_he = "חינם: נשמר רק במחשב, בלי בקשות נוספות."
+cost_en = "Free: kept on this computer only, no extra requests."
+privacy_he = "מפתחות, סיסמאות ומיילים לא נשמרים לעולם. כשמצב פרטיות פועל נשמרים רק שמות, גדלים וטביעות, בלי טקסט."
+privacy_en = "Keys, passwords and e-mail addresses are never stored. With privacy mode on only names, sizes and hashes are kept, no text."
+
+[[steps]]
+he = "פתחו שיחה בעמוד Conversations ולחצו על \"Context\"."
+en = "Open a conversation on the Conversations page and press Context."
+action = "open:#/conversations"
+
+[[steps]]
+he = "ודאו שהמתג \"ההקשר של כל שיחה\" דולק (הוא חל מהשיחה הבאה)."
+en = "Keep the Conversation context view switch on (it applies from the next conversation)."
+action = "feature_on:context_trace"
+check = "enabled:context_trace"

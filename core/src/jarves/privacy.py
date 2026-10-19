@@ -142,6 +142,8 @@ def mask_history(ctx, *, prune_backups: bool = False) -> dict:
                 st.x("UPDATE events SET fields = ? WHERE id = ?", (json.dumps(new, ensure_ascii=False), r["id"]))
                 ev += 1
         st.commit()
+        from . import context_trace                 # the conversation context: sizes and hashes stay
+        context_trace.mask_all(st._db)
     _secure_purge(st)
     lines = mask_logs(ctx.home)
     backups = _backup_residue(ctx.home, prune_backups)
@@ -160,6 +162,8 @@ def delete_conversations(ctx, *, prune_backups: bool = False) -> dict:
         st.x("UPDATE delegations SET session_id = NULL")          # costs stay true
         st.x("DELETE FROM sessions")
         st.commit()
+        from . import context_trace                 # and what he was given in them
+        context_trace.delete_all(st._db)
     _secure_purge(st)
     lines = mask_logs(ctx.home)
     backups = _backup_residue(ctx.home, prune_backups)
