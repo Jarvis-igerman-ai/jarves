@@ -50,7 +50,9 @@ def clean_relpath(raw: str) -> PurePosixPath:
     """Validate a user/model-supplied relative path (no filesystem access)."""
     if not isinstance(raw, str):
         raise _deny("path must be text")
-    p = raw.replace("\\", "/").strip()
+    p = raw.replace("\\", "/")
+    if p != p.strip():
+        raise _deny("path starts or ends with a space")
     if not p or p in (".", "/"):
         return PurePosixPath(".")
     if len(p) > MAX_PATH_CHARS:

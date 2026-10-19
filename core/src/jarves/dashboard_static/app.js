@@ -402,6 +402,7 @@ async function route(refresh) {
     else if (page === "workspace") await pageWorkspace(arg);
     else if (page === "features") await pageFeatures();
     else if (page === "settings") await pageSettings();
+    else if (window.JARVES_PAGES && window.JARVES_PAGES[page]) await window.JARVES_PAGES[page](arg);   // plugin pages (m3.js)
     else await pageConversations();
   } catch (e) { if (refresh !== true) fail(e); }
 }

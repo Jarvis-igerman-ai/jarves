@@ -169,7 +169,8 @@ class Autonomy:
                              json.dumps(params), risk, status, self.clock()))
             pid = cur.lastrowid
             self.db.audit("autonomy", "proposal_new", pid, {"issue": issue["fingerprint"], "level": level})
-            logs.info("autonomy", "PROPOSAL_NEW", "diagnostic proposal", proposal=pid, applier=applier, level=level)
+            logs.info("autonomy", "PROPOSAL_NEW", "diagnostic proposal", proposal=pid, applier=applier,
+                      autonomy=level)
             if level == "approved_low_risk" and applier and risk == "low" and applier in self.grants():
                 self.decide(pid, True, by="autonomy")
                 self._alert(pid, "low", f"שיניתי: {title}", "לפי ההרשאה שנתת. אפשר לבטל בלוח הבקרה.")

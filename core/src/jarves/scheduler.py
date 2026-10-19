@@ -863,6 +863,7 @@ class Scheduler:
         level("scheduler", f"JOB_{state.upper()}", f"job run {state}", job=job["id"], run=run["id"], report=rid,
               late=late, attempts=run["attempts"], error=None if err is None else err.code)
         delivery = _j(job["delivery"], ["report"])
+        self.poke()                                  # the loop delivers the alert now, not at the next poll
         if err is not None:
             self._alert(f"jobfail:{job['id']}", "normal", "job_failed", f"המשימה \"{job['name']}\" נכשלה",
                         f"{err.code}. הפרטים בלוח הבקרה.")
