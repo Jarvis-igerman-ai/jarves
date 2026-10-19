@@ -1150,7 +1150,7 @@ def cmd_update(a, cfg, home) -> int:
     """jarvis update [check | install | status]: notify + ask approval (D16); never installs on its own."""
     from .features import Features
     from .updates import UpdateChecker, UpdateError, launch_installer, version_line
-    u = UpdateChecker(home)
+    u = UpdateChecker(home, cfg=cfg)
     print(version_line())
     if a.action == "status":
         s = u.status()
@@ -1183,7 +1183,11 @@ def cmd_update(a, cfg, home) -> int:
     print(f"Verified {Path(r['installer']).name}; backup in {r['backup']}")
     if _ws_call(home, cfg.link.port, {"type": "status.request", "payload": {}}, "status") is not None:
         cmd_stop(a, cfg, home)
-    launch_installer(r["installer"])
+    try:
+        launch_installer(r["installer"], verified=r)
+    except UpdateError as e:
+        print(f"{e.code}: {e.message}")
+        return 1
     print("Setup is open. Follow it; JARVES can start again at the end.")
     return 0
 
