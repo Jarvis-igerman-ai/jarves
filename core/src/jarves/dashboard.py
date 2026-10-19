@@ -39,7 +39,8 @@ STATIC = Path(__file__).with_name("dashboard_static")
 COOKIE = "jarves_dash"
 _EMAIL = re.compile(r"[\w.+-]+@[\w-]+\.[\w.-]+")
 _ROUTES: list[tuple[str, re.Pattern, object]] = []
-PLUGIN_MODULES = ("jarves.workspace", "jarves.curator", "jarves.memory", "jarves.features", "jarves.google_auth")
+PLUGIN_MODULES = ("jarves.workspace", "jarves.curator", "jarves.memory", "jarves.features", "jarves.google_auth",
+                  "jarves.google_setup", "jarves.privacy", "jarves.overview")     # WP-K: Connections, privacy, Home
 MEMORY_UNDO_KEEP = 30
 
 

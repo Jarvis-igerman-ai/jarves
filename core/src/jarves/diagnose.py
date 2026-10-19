@@ -377,7 +377,7 @@ def review_skip_reason(store: Store, cfg, sid: str, *, have_client: bool = False
         return f"the feature {REVIEW_FEATURE} is switched off (dashboard Features page)"
     if feats is None and not h.llm_review:
         return "history.llm_review is off"
-    if cfg.log.privacy:
+    if cfg.log.privacy or logs.runtime_privacy():             # WP-K: the dashboard switch applies at once
         return "log.privacy is on (the review needs the transcript)"
     if not have_client and not api_billing_allowed(cfg.ai):
         return "no API key route (ai.connection / OPENAI_API_KEY)"

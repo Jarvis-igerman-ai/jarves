@@ -7,29 +7,35 @@
 <link rel="stylesheet" href="/static/style.css">
 <script src="/static/app.js" defer></script>
 <script src="/static/pages.js" defer></script>
+<script src="/static/home.js" defer></script>
 </head>
 <body>
 <div class="shell">
   <aside class="side">
     <div class="brand"><span class="dot" id="coreDot" title="Core state"></span>JARVES</div>
     <nav id="nav">
-      <a href="#/conversations" data-page="conversations">Conversations</a>
-      <a href="#/logs" data-page="logs">Logs</a>
-      <a href="#/costs" data-page="costs">Costs</a>
-      <a href="#/tasks" data-page="tasks">Background tasks</a>
-      <a href="#/issues" data-page="issues">Issues <span class="count" id="issueCount"></span></a>
-      <a href="#/memory" data-page="memory">Memory</a>
-      <a href="#/skills" data-page="skills">Skills &amp; tools</a>
-      <a href="#/features" data-page="features">Features</a>
-      <a href="#/workspace" data-page="workspace">Workspace</a>
-      <a href="#/settings" data-page="settings">Settings</a>
+      <a href="#/home" data-page="home"><span>Home <small class="he">בית</small></span></a>
+      <a href="#/connections" data-page="connections"><span>Connections <small class="he">חיבורים</small></span></a>
+      <a href="#/conversations" data-page="conversations"><span>Conversations <small class="he">שיחות</small></span></a>
+      <a href="#/features" data-page="features"><span>Features <small class="he">יכולות</small></span></a>
+      <a href="#/issues" data-page="issues"><span>Issues <small class="he">בעיות</small></span> <span class="count" id="issueCount"></span></a>
+      <a href="#/costs" data-page="costs"><span>Costs <small class="he">עלויות</small></span></a>
+      <a href="#/memory" data-page="memory"><span>Memory <small class="he">זיכרון</small></span></a>
+      <a href="#/tasks" data-page="tasks"><span>Background tasks <small class="he">משימות</small></span></a>
+      <a href="#/logs" data-page="logs"><span>Logs <small class="he">יומן מערכת</small></span></a>
+      <a href="#/skills" data-page="skills"><span>Skills &amp; tools <small class="he">כלים</small></span></a>
+      <a href="#/workspace" data-page="workspace"><span>Workspace <small class="he">קבצים</small></span></a>
+      <a href="#/settings" data-page="settings"><span>Settings <small class="he">הגדרות</small></span></a>
     </nav>
     <div class="side-foot">
       <button id="themeBtn" class="ghost" type="button">Theme: auto</button>
       <div class="muted small" id="footInfo"></div>
     </div>
   </aside>
-  <main id="main" aria-live="polite"><div class="muted">Loading…</div></main>
+  <div class="content">
+    <div id="topbar" class="topbar" aria-live="polite"></div>
+    <main id="main" aria-live="polite"><div class="muted">Loading…</div></main>
+  </div>
 </div>
 <div id="tip" class="tip" role="tooltip" hidden></div>
 </body>

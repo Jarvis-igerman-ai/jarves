@@ -33,7 +33,8 @@ import httpx
 from pydantic import BaseModel, Field
 
 from .. import logs
-from ..google_auth import CALENDAR_SCOPES, GMAIL_COMPOSE, GMAIL_READ, GoogleAuth, GoogleAuthError
+from ..google_auth import (CALENDAR_SCOPES, GMAIL_COMPOSE, GMAIL_READ, NOT_CONNECTED_HE, START_COMMAND, GoogleAuth,
+                           GoogleAuthError)
 from . import NoArgs, Skill, Tool, ToolResult
 
 CAL_API = "https://www.googleapis.com/calendar/v3"
@@ -189,7 +190,7 @@ class GoogleApi:
                 pass
             if r.status_code == 403 and "insufficient" in reason.lower() + r.text[:300].lower():
                 raise GoogleAuthError("GOOGLE_SCOPE_MISSING", "a Google permission was not granted",
-                                      "run `jarvis google login`", "חסרה לי הרשאה מגוגל. צריך לחבר מחדש את גוגל.")
+                                      "run `jarvis google start`", "חסרה לי הרשאה מגוגל. צריך לחבר מחדש את גוגל.")
             if r.status_code == 404:
                 raise GoogleAuthError("GOOGLE_NOT_FOUND", "not found in Google", "", "לא מצאתי את זה.")
             logs.warn("google", "GOOGLE_API_ERROR", f"Google API returned {r.status_code}", status=r.status_code,
@@ -197,7 +198,7 @@ class GoogleApi:
             await self.auth._record_error(f"GOOGLE_API_{r.status_code}")
             raise GoogleAuthError("GOOGLE_API_ERROR", f"Google API error {r.status_code}", "try again later",
                                   "גוגל לא ענה כמו שצריך. נסה שוב עוד מעט.")
-        raise GoogleAuthError("GOOGLE_AUTH_EXPIRED", "Google rejected the access", "run `jarvis google login`")
+        raise GoogleAuthError("GOOGLE_AUTH_EXPIRED", "Google rejected the access", "run `jarvis google start`")
 
 
 def _fail(e: GoogleAuthError) -> ToolResult:
@@ -535,8 +536,39 @@ def register_google(registry, home: Path, health=None, transport: httpx.AsyncBas
     auth = GoogleAuth(home, transport=transport)
     if not auth.known():
         if health is not None:
-            health.set("google", "disabled", "Google not connected", "jarvis google login (docs/GOOGLE_SETUP.md)")
+            health.set("google", "disabled", "Google not connected", "jarvis google start (docs/GOOGLE_SETUP.md)")
+        if "google_connect" not in registry.skills:   # WP-K: he says exactly how to connect
+            registry.register(GoogleConnectSkill(registry, home, health, transport, calendar_kw))
         return None
+    _register_connected(registry, auth, transport, health, calendar_kw)
+    return auth
+
+
+class GoogleConnectSkill(Skill):
+    """Registered while Google was never connected: one tool that tells the user how to connect (WP-K). If the user
+    connected meanwhile (jarvis google start in another window), the real Calendar/Gmail Skills are added at once."""
+    name = "google_connect"
+    description = "How to connect Google Calendar / Gmail (not connected yet)"
+
+    def __init__(self, registry, home: Path, health, transport, calendar_kw: dict) -> None:
+        self.registry, self.home, self.health = registry, home, health
+        self.transport, self.calendar_kw = transport, calendar_kw
+
+    def tools(self) -> list[Tool]:
+        async def help_(_a):
+            auth = GoogleAuth(self.home, transport=self.transport)
+            if auth.known() and "calendar" not in self.registry.skills and "gmail" not in self.registry.skills:
+                _register_connected(self.registry, auth, self.transport, self.health, self.calendar_kw)
+                self.registry.disabled.add(self.name)          # its "not connected" text is no longer true
+                return ToolResult(True, "גוגל מחובר עכשיו. תשאל אותי שוב ואבדוק.", {"connected": True},
+                                  code="GOOGLE_NOW_CONNECTED")
+            return ToolResult(False, NOT_CONNECTED_HE, {"command": START_COMMAND}, code="GOOGLE_NOT_CONNECTED")
+        return [Tool("google_connect_help", "Google Calendar and Gmail are NOT connected yet. Call this whenever the "
+                     "user asks about their calendar, meetings, schedule or e-mail; say its answer (how to connect: "
+                     f"'תריץ במחשב {START_COMMAND}').", help_, permission="read")]
+
+
+def _register_connected(registry, auth: GoogleAuth, transport, health, calendar_kw: dict) -> None:
     granted = set(auth.load().get("scopes", []))
     api = GoogleApi(auth, transport)
     if all(s in granted for s in CALENDAR_SCOPES):
@@ -549,8 +581,7 @@ def register_google(registry, home: Path, health=None, transport: httpx.AsyncBas
     if health is not None:
         health.set("google", "ok" if st["connected"] else "degraded",
                    "connected: " + ", ".join(st["scopes"]) if st["connected"] else st["message_he"],
-                   "" if st["connected"] else "jarvis google login")
-    return auth
+                   "" if st["connected"] else "jarvis google start")
 
 
 _F = re.IGNORECASE
