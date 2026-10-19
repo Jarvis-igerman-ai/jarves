@@ -1,7 +1,8 @@
 ﻿; JARVES Windows installer (Inno Setup 7.1). Built by packaging/build_windows.ps1:
 ;   ISCC /DAppVersion=0.1.0.57 /DStage=<dist\stage> /DOutDir=<dist> /DCommit=<sha> jarves.iss
 ; Per user, no admin: {autopf} = %LOCALAPPDATA%\Programs. User data stays in %LOCALAPPDATA%\jarves (or JARVES_HOME)
-; and survives upgrade and uninstall; only "remove my data" (asked, default No; silent: /PURGE=1) deletes it.
+; and survives upgrade and uninstall; only "remove my data" (asked, default No; silent: /PURGE=1) deletes it, and
+; only a real JARVES data folder (purge_guard.iss: never a drive root / the profile; config.toml|store.db|memory.db).
 ; Not signed (no code-signing certificate yet): Windows SmartScreen shows "Windows protected your PC" ->
 ; "More info" -> "Run anyway". See docs/INSTALL_TEST.md.
 
@@ -160,6 +161,8 @@ begin
     AddToPath(ExpandConstant('{app}'));
 end;
 
+#include "purge_guard.iss"
+
 function PurgeRequested(): Boolean;
 var
   I: Integer;
@@ -181,6 +184,12 @@ begin
     Dir := DataDir();
     if not DirExists(Dir) then
       exit;
+    if not IsDataDirSafeToPurge(Dir) then
+    begin
+      // never DelTree a drive root, the profile or a folder without JARVES data in it (JARVES_HOME can be anything)
+      Log('JARVES data folder kept (not a JARVES data folder, or a protected folder): ' + Dir);
+      exit;
+    end;
     if UninstallSilent() then
     begin
       if PurgeRequested() then
