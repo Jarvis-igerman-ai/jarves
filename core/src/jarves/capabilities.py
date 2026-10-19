@@ -177,6 +177,10 @@ for _fid, _w, _p, _perm, _set in [
      ["read"], ""),
     ("camera_when_away", _win("planned", blocker="no away-watch Skill yet"), _pi("planned", "no away-watch Skill yet"),
      ["read"], ""),
+    ("camera_preview", _win("implemented_unverified", "UNIT test_privacy_state.py (fake camera) + headless face "
+                            "screenshots docs/reviews/swv2_privacy/", "never shown with a real webcam yet"),
+     _pi("implemented_unverified", "picamera2 preview frames never run on Pi Camera hardware"), ["read"],
+     "Home page / the face's camera buttons"),
     ("wake_word", _win("verified_on_device", "HANDOFF 'Wake word through the air': speakers -> webcam mic, 4/4, "
                        "CPU 14-25 ms/frame (owner's own voice peaked ~0.17: threshold calibrated)"),
      _pi("implemented_unverified", "pyopen-wakeword linux-aarch64 wheel; Pi mic array/acoustics/CPU not measured"),

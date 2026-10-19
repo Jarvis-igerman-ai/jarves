@@ -135,6 +135,9 @@ def attach(core, *, mode: str = "foreground", launcher=None, tray_factory=None, 
     core.registry.allowed_actions |= {"show_yourself", "hide_yourself"}
     core.registry.register(make_skill(rt))
     core.features.listeners.append(lambda fid, on: _feature_changed(rt, fid, on))
+    from .privacy_state import PrivacyPublisher         # privacy.state for the face / room / dashboard strip
+    core.privacy_state = PrivacyPublisher(core)
+    core.privacy_state.start()
     rt.start()
     sync_autostart(rt)
     return rt
