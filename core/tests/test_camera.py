@@ -463,7 +463,8 @@ async def test_core_attaches_camera_switched_off(core):
     face = await open_face(core)
     await asyncio.sleep(0.2)
     r = await core.registry.call("camera_status", {})
-    assert r.ok and r.data["enabled"] is False and r.data["indicator"] is False
+    assert not r.ok and r.code == "FEATURE_OFF"                    # even the status tool is gated while it is off
+    assert core.camera.status()["enabled"] is False and core.camera.status()["indicator"] is False
     r = await core.registry.call("camera_describe", {})
     assert not r.ok and r.code in ("CAMERA_DISABLED", "CAMERA_UNAVAILABLE", "FEATURE_OFF")
     await face.send("presence.changed", {"present": True})
