@@ -405,12 +405,12 @@ func _appearance_checks(errs: Array) -> String:
 		a3.apply_pose(x.pose())
 	_simulate(f, 1.0)
 	feed_both.call(f)
-	var idle_eye: float = a3.eyes[0].scale.y
+	var idle_eye: float = a3.eye_h
 	f.set_state("happy")
 	_simulate(f, 1.5)
 	feed_both.call(f)
-	if a2.mouth_curve < 0.8 or a3.eyes[0].scale.y > idle_eye * 0.9:
-		errs.append("avatars do not show the happy expression (smile %.2f, eye %.2f vs %.2f)" % [a2.mouth_curve, a3.eyes[0].scale.y, idle_eye])
+	if a2.mouth_curve < 0.8 or a3.eye_h > idle_eye * 0.9:
+		errs.append("avatars do not show the happy expression (smile %.2f, eye %.2f vs %.2f)" % [a2.mouth_curve, a3.eye_h, idle_eye])
 	f.set_state("speaking")
 	_simulate(f, 1.0, func(x: Control) -> void: x.set_speech_level(0.8))
 	feed_both.call(f)
@@ -422,7 +422,7 @@ func _appearance_checks(errs: Array) -> String:
 	f.set_state("error")
 	_simulate(f, 1.0)
 	feed_both.call(f)
-	if a3.eye_mat.albedo_color.r < 0.9:
+	if a3.eye_col.r < 0.9:
 		errs.append("3D avatar ignores the expression colour")
 	f.set_state("idle")
 	f.set_link("offline")
