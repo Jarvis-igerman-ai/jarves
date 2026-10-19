@@ -688,6 +688,7 @@ def register_feature() -> None:
                              "evidence": "core/tests/test_usage.py (unit + dashboard HTTP); no live plan-limit event "
                                          "observed yet"},
                  "linux_arm64_pi": {"status": "implemented_unverified",
+                                    "roadmap_issue": "https://github.com/igalgerman/JARVIS/issues/22",
                                     "blocker": "pure Python + SQLite, no platform code; not yet run on a Pi"}}
 
 

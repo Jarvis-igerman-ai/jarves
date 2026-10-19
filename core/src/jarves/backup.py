@@ -617,6 +617,7 @@ def register_feature() -> None:
                              "evidence": "core/tests/test_backup.py (fault injection, isolated restore); real-profile "
                                          "restore drill by the user pending"},
                  "linux_arm64_pi": {"status": "implemented_unverified",
+                                    "roadmap_issue": "https://github.com/igalgerman/JARVIS/issues/22",
                                     "blocker": "stdlib zip + SQLite backup API only; SD/SSD restore drill on a Pi "
                                                "not done"}}
 
