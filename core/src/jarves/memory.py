@@ -119,6 +119,9 @@ class MemoryStore:
         return [dict(r) for r in self._x("SELECT * FROM memories WHERE text LIKE ? ORDER BY id DESC LIMIT ?",
                                          (f"%{q}%", limit))]
 
+    def by_kind(self, kind: str) -> list[dict]:
+        return [dict(r) for r in self._x("SELECT * FROM memories WHERE kind = ? ORDER BY id DESC", (kind,))]
+
     def update(self, mid: int, text: str) -> bool:
         return self._x("UPDATE memories SET text = ?, updated = ? WHERE id = ?", (text.strip(), _now(), mid)).rowcount > 0
 

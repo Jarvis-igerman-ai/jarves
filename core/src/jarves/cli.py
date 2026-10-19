@@ -388,6 +388,81 @@ def cmd_memory(a, cfg, home) -> int:
     return 0
 
 
+def cmd_personal(a, cfg, home) -> int:
+    """Contact, event and email tools with the same validation, switches and read-back policy as voice."""
+    from .memory import MemoryStore
+    from .skills import SkillRegistry
+    from .skills.builtin import MemorySkill
+    from .skills.local_contacts import LocalContactsSkill
+    from .skills.google import register_google
+
+    memory = MemoryStore(home / "memory.db")
+    reg = SkillRegistry()
+    reg.gate = _cli_features(cfg, home).gate
+    reg.register(MemorySkill(memory))
+    reg.register(LocalContactsSkill(memory))
+    reg.allowed_actions.add("contact_remember")
+
+    async def confirm(prompt):
+        return input(prompt + "\nType yes to confirm: ").strip().lower() == "yes"
+    reg.confirm = confirm
+
+    async def run():
+        if a.cmd == "contacts" and a.action != "search":
+            if a.action == "remember":
+                return await reg.call("contact_remember", {"label": a.label, "email": a.email, "name": a.name}, origin="user")
+            if a.action == "forget":
+                row = memory.get(a.id)
+                if not row or row.get("kind") != "contact":
+                    from .skills import ToolResult
+                    return ToolResult(False, "No contact with that memory id.", code="NOT_FOUND")
+                # Use model origin here to require confirmation even for deleting a single record.
+                return await reg.call("forget", {"id": a.id}, origin="model")
+            return await reg.call("contact_lookup", {"query": a.query}, origin="user")
+        auth = register_google(reg, home)
+        if auth is None:
+            return await reg.call("google_connect_help", {}, origin="user")
+        if a.cmd == "contacts":
+            from .skills.contacts import register_contacts
+            register_contacts(reg, auth)
+            if reg.get("google_contacts_search") is None:
+                from .skills import ToolResult
+                return ToolResult(False, "Google Contacts unavailable: " + _cli_features(cfg, home).reason("google_contacts"),
+                                  code="FEATURE_OFF")
+            return await reg.call("google_contacts_search", {"query": a.query, "limit": a.limit}, origin="user")
+        if a.cmd == "mail":
+            drafted = await reg.call("gmail_create_draft", {"to": a.to, "subject": a.subject, "body": a.body}, origin="user")
+            if not drafted.ok or not a.send:
+                return drafted
+            print(drafted.to_model())
+            return await reg.call("gmail_send_draft", {"draft_id": drafted.data["draft_id"]}, origin="user")
+        if a.action == "create":
+            return await reg.call("calendar_create_event", {"title": a.title, "day": a.day, "start": a.start,
+                                  "duration_min": a.duration, "calendar": a.calendar, "guests": a.guest}, origin="user")
+        found = await reg.call("calendar_find_events", {"day": a.day, "query": a.query}, origin="user")
+        if not found.ok or a.action == "find":
+            return found
+        events = found.data.get("untrusted_events", [])
+        if not events:
+            return found
+        print(json.dumps(events, ensure_ascii=False, indent=2))
+        handle = input("Enter the exact event handle to share (blank cancels): ").strip()
+        if not any(e.get("handle") == handle for e in events):
+            from .skills import ToolResult
+            return ToolResult(False, "No event selected; nothing shared.", code="TOOL_CANCELLED")
+        return await reg.call("calendar_share_event", {"handle": handle, "guests": a.guest, "scope": a.scope}, origin="user")
+
+    try:
+        result = asyncio.run(run())
+        print(result.to_model())
+        return 0 if result.ok else 1
+    except (EOFError, KeyboardInterrupt):
+        print("Cancelled.")
+        return 1
+    finally:
+        memory.close()
+
+
 PEAR_DOWNLOAD = "https://github.com/pear-devs/pear-desktop/releases"
 
 
@@ -455,6 +530,9 @@ def cmd_ask(a, cfg, home) -> int:
     reg = SkillRegistry()
     reg.register(ClockSkill())
     reg.register(MemorySkill(mem))
+    from .skills.local_contacts import LocalContactsSkill
+    reg.register(LocalContactsSkill(mem))
+    reg.allowed_actions.add("contact_remember")
     reg.register(MusicSkill(PearDesktopPlayer(cfg.music.pear_url, home / "pear_client_id"), cfg.music.max_volume))
     agent = make_agent(cfg, reg, mem, home)
     r = asyncio.run(Brain(reg, agent).respond(" ".join(a.text)))
@@ -1122,6 +1200,42 @@ def main(argv: list[str] | None = None) -> int:
     m.add_argument("action", choices=["list", "delete", "clear"])
     m.add_argument("id", nargs="?")
     m.add_argument("--yes", action="store_true")
+    co = sub.add_parser("contacts", help="remember relationships locally / search opt-in Google Contacts")
+    cs = co.add_subparsers(dest="action", required=True)
+    cr = cs.add_parser("remember", help="save an explicitly provided relationship and email locally")
+    cr.add_argument("label", help='relationship or alias, e.g. "my wife"')
+    cr.add_argument("--email", required=True)
+    cr.add_argument("--name", default="")
+    cl = cs.add_parser("lookup", help="look up remembered relationship/name/email")
+    cl.add_argument("query")
+    cf = cs.add_parser("forget", help="delete one saved contact after confirmation")
+    cf.add_argument("id", type=int, help="memory_id from lookup")
+    cg = cs.add_parser("search", help="search Google Contacts (requires contacts consent and feature)")
+    cg.add_argument("query")
+    cg.add_argument("--limit", type=int, default=5)
+    cal = sub.add_parser("calendar", help="find/create events or invite guests, with exact confirmation")
+    cals = cal.add_subparsers(dest="action", required=True)
+    cc = cals.add_parser("create", help="create an event; --guest sends a Calendar invitation after approval")
+    cc.add_argument("--title", required=True)
+    cc.add_argument("--day", required=True)
+    cc.add_argument("--start", help="HH:MM; omitted = all day")
+    cc.add_argument("--duration", type=int, default=60, help="minutes")
+    cc.add_argument("--calendar", default="primary")
+    cc.add_argument("--guest", action="append", default=[], help="plain email; repeat for more guests")
+    for action in ("find", "share"):
+        cp = cals.add_parser(action, help="find events" if action == "find" else "choose an event and invite guests")
+        cp.add_argument("--day", default="week")
+        cp.add_argument("--query", default="")
+        if action == "share":
+            cp.add_argument("--guest", action="append", required=True)
+            cp.add_argument("--scope", choices=["this", "series"], help="required choice for a recurring event")
+    mail = sub.add_parser("mail", help="draft mail and optionally send after exact confirmation")
+    ms = mail.add_subparsers(dest="action", required=True)
+    md = ms.add_parser("draft", help="create a Gmail draft; does not send")
+    md.add_argument("--to", required=True)
+    md.add_argument("--subject", required=True)
+    md.add_argument("--body", required=True)
+    md.add_argument("--send", action="store_true", help="also offer read-back and sending in this session; asks confirmation")
     mu = sub.add_parser("music", help="Pear Desktop pairing and manual control")
     mu.add_argument("action", choices=["open", "pair", "status", "play", "pause", "resume", "next"])
     mu.add_argument("query", nargs="?", default="")
@@ -1186,6 +1300,7 @@ def main(argv: list[str] | None = None) -> int:
         print(f"CONFIG ERROR: {e}", file=sys.stderr)
         return 2
     return {"run": cmd_run, "stop": cmd_stop, "status": cmd_status, "diag": cmd_diag, "memory": cmd_memory, "music": cmd_music,
+            "contacts": cmd_personal, "calendar": cmd_personal, "mail": cmd_personal,
             "ask": cmd_ask, "say": cmd_say, "chatgpt": cmd_chatgpt, "setup": cmd_setup, "logs": cmd_logs, "key": cmd_key,
             "wake": cmd_wake, "doctor": cmd_doctor, "cost": cmd_cost, "dashboard": cmd_dashboard,
             "diagnose": cmd_diagnose, "features": cmd_features, "google": cmd_google,

@@ -409,7 +409,9 @@ async def test_not_connected_he_says_how_to_connect_and_picks_up_a_new_connectio
 def test_feature_reason_tells_him_what_to_say(home):
     f = Features(Config(), home)
     assert "jarvis google start" in f.reason("google_calendar")
-    assert "jarvis google start" in f.front_note(2000)
+    # Voice summaries bound each reason; the complete setup command remains in the generated feature reference.
+    assert "jarvis google start" in f.capabilities_markdown()
+    assert "Features that are OFF" in f.front_note(2000)
 
 
 # ---------------------------------------------------------------------- dashboard Connections + Home

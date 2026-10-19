@@ -10,6 +10,11 @@ Latest #7 correction: hands-free wake/conversation with 180 s quiet timeout; per
 
 ## Current and upcoming
 
+19 Oct user-requested Google extension: explicitly remembered relationships plus optional read-only People API
+contact lookup, confirmed event guests/sharing and Gmail event links. Implemented in the Python Core;
+live Contacts consent/search and invitation/email delivery remain unverified. No whole-calendar sharing or
+automatic directory import. Current evidence and gates are in HANDOFF; broader #17 remains open.
+
 | Stage | Goal | Issue | State |
 |---|---|---|---|
 | 1. CAD / visual baseline | FreeCAD structural and printable geometry, Blender visuals | [#3](https://github.com/igalgerman/JARVIS/issues/3) | Preliminary design review delivered; unresolved engineering choices |

@@ -45,6 +45,7 @@ _G = "https://www.googleapis.com/auth/"
 CALENDAR_SCOPES = (_G + "calendar.events.readonly", _G + "calendar.calendarlist.readonly")
 GMAIL_READ = _G + "gmail.readonly"
 GMAIL_COMPOSE = _G + "gmail.compose"
+CONTACTS_READ = _G + "contacts.readonly"      # separate opt-in; never included in the default scope set
 ALL_SCOPES = CALENDAR_SCOPES + (GMAIL_READ, GMAIL_COMPOSE)
 # Calendar WRITE (SW-V2 D05, WP-M4): asked for ONLY when the calendar_write switch is on (`jarvis google login
 # --calendar-write`). Google has no "create/update but not delete" scope (checked 2026-10-19 at
@@ -139,6 +140,7 @@ class GoogleAuth:
               "client_configured": bool(self.client()), "scopes": [short_scope(s) for s in scopes],
               "calendar": all(s in scopes for s in CALENDAR_SCOPES), "gmail_read": GMAIL_READ in scopes,
               "gmail_send": GMAIL_COMPOSE in scopes, "calendar_write": CALENDAR_WRITE in scopes,
+              "contacts": CONTACTS_READ in scopes,
               "last_error": t.get("last_error", ""),
               "last_error_at": t.get("last_error_at", 0), "connected_at": t.get("connected_at", 0)}
         private = _read_json(self.client_file)
@@ -211,6 +213,10 @@ class GoogleAuth:
 
     async def sign_in(self, scopes=ALL_SCOPES, timeout_s: float = 300) -> dict:
         """Interactive: the user's own consent in the browser. Returns status()."""
+        # Incremental permission requests must not replace previously consented Calendar/Gmail/Contacts grants.
+        # Existing scopes are requested again, never assumed granted: complete() stores Google's actual response.
+        previous = self.load().get("scopes", [])
+        scopes = tuple(dict.fromkeys((*scopes, *(s for s in previous if isinstance(s, str) and s.startswith(_G)))))
         client = self.client()
         if not client:
             dl = self.find_client_download()
@@ -457,9 +463,14 @@ def add_cli(sub) -> None:
     g.add_argument("--restart", action="store_true", help="start: forget the saved progress and begin again")
     g.add_argument("--calendar-write", action="store_true",
                    help="login: also allow adding/changing events (needs `jarvis features on calendar_write`)")
+    g.add_argument("--contacts", action="store_true",
+                   help="login: separately opt in to read-only contact name/email search; does not enable the feature")
 
 
 def cmd_google(a, cfg, home) -> int:
+    if getattr(a, "contacts", False) and a.action != "login":
+        print("Use jarvis google login --contacts to request read-only Contacts consent; no change was made.")
+        return 2
     if a.action in ("start", "test"):
         from . import google_setup                     # WP-K: the guided wizard and the live self-check
         if a.action == "start":
@@ -493,6 +504,10 @@ def cmd_google(a, cfg, home) -> int:
                           "Google's permission itself would allow it).")
                     print("This permission request does not turn on calendar editing; after approval run "
                           "jarvis features on calendar_write.")
+                if getattr(a, "contacts", False):
+                    need = need + (CONTACTS_READ,)
+                    print("Also asking to READ contact names and email addresses. This does not change contacts or "
+                          "turn on contact search; after approval run jarvis features on google_contacts.")
                 st = await auth.sign_in(need)
                 print("connected: " + ", ".join(st["scopes"]))
                 if any(short_scope(s) not in st["scopes"] for s in need):

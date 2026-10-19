@@ -158,6 +158,33 @@ installed apps with missing bundled dependencies need repair/update. Hardware, G
 startup/pairing and per-person face enrollment still require the user. A readiness probe never opens sensors.
 Calendar editing consent: `jarvis google login --calendar-write`, then `jarvis features on calendar_write`.
 
+### Contacts and event invitations
+
+Say “remember my wife's email is …” to save an explicit relationship/address in ordinary local memory.
+JARVES uses `contact_lookup` before addressing mail or inviting someone; multiple matches require your choice.
+The remembered contact survives restarts and can be removed through the existing memory controls.
+CLI: `jarvis contacts remember "my wife" --email spouse@example.com` (example only),
+`jarvis contacts lookup "my wife"`, and `jarvis contacts forget MEMORY_ID`.
+
+Google Contacts search is separate and off by default. Enable **People API** in the app's Cloud project,
+run `jarvis google login --contacts`, approve read-only Contacts access, then
+`jarvis features on google_contacts` and restart Core. `jarvis contacts search "Dana"` returns bounded
+name/email candidates; it does not import, edit contacts or infer relationships. Existing Google grants are
+requested again during incremental consent; actual returned grants determine readiness.
+
+Calendar tools can invite guests to a new or selected existing event after exact read-back confirmation.
+Sharing preserves existing guests, requires a choice for recurring events, and returns Google's event link
+when available. Emailing that link uses the separate confirmed Gmail draft/send flow.
+CLI: `jarvis calendar create --help`, `jarvis calendar share --help`, `jarvis mail draft --help`.
+`mail draft --send` offers confirmation and sending in one process; without it only a draft is created.
+No whole-calendar access is granted, and API acceptance does not prove delivery or attendance.
+
+Official API references checked **2026-10-19**: [People searchContacts](https://developers.google.com/people/api/rest/v1/people/searchContacts)
+(read-only scope, warmup and names/email mask), [Calendar invitations](https://developers.google.com/workspace/calendar/api/guides/create-events)
+(`sendUpdates=all`), [event links](https://developers.google.com/workspace/calendar/api/v3/reference/events#resource).
+Existing `httpx` REST integration is reused; no new dependency or model selected. Live contact lookup/invitation
+delivery remains unverified until the user authorizes account-bound tests.
+
 | Need | Command |
 |---|---|
 | What's wrong now | `uv run jarves status` (live health, or the last snapshot marked **stale** if the Core is down) |

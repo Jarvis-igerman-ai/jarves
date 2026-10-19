@@ -59,11 +59,15 @@ class FakeCalendar:
         if req.method == "GET" and eid is None:
             return httpx.Response(200, json={"items": copy.deepcopy(EVENTS.get(cid, []))})
         if req.method == "GET":
-            return httpx.Response(200, json=MASTERS[eid])
+            base = MASTERS.get(eid) or next(e for e in EVENTS[cid] if e["id"] == eid)
+            return httpx.Response(200, json={"etag": '"revision1"', **copy.deepcopy(base)})
         body = json.loads(req.content)
+        if req.headers.get("If-Match") and getattr(self, "changed", False):
+            return httpx.Response(412, json={"error": {"code": 412, "status": "conditionNotMet"}})
         self.writes.append((req.method, path, body))
         if req.method == "POST":
-            return httpx.Response(200, json={"id": "new1", "status": "confirmed", **body})
+            return httpx.Response(200, json={"id": "new1", "status": "confirmed",
+                                            "htmlLink": "https://www.google.com/calendar/event?eid=real-google-id", **body})
         if req.method == "PATCH":
             base = MASTERS.get(eid) or next(e for e in EVENTS[cid] if e["id"] == eid)
             return httpx.Response(200, json={**copy.deepcopy(base), **body})
@@ -134,6 +138,100 @@ async def test_create_all_day_and_reader_calendar_refused(setup, fake):
     assert not r.ok and r.code == "CALENDAR_UNKNOWN" and len(fake.writes) == 1
 
 
+async def test_create_guests_confirmed_before_invitations_and_returns_google_link(setup, fake):
+    args = {"title": "Dinner", "day": "tomorrow", "guests": ["friend@example.com", "FRIEND@example.com"]}
+    async def approve(prompt):
+        assert fake.writes == []
+        assert "friend@example.com" in prompt
+        return True
+    setup.confirm = approve
+    result = await setup.call("calendar_create_event", args)
+    assert result.ok
+    assert fake.writes[-1][2]["attendees"] == [{"email": "friend@example.com"}]
+    assert fake.calls[-1].url.params["sendUpdates"] == "all"
+    assert result.data["stored"]["guests"] == ["friend@example.com"]
+    assert result.data["stored"]["htmlLink"] == "https://www.google.com/calendar/event?eid=real-google-id"
+
+
+@pytest.mark.parametrize("guests", [["not-an-email"], ["Name <friend@example.com>"],
+                                    ["friend@example.com\r\nBcc:other@example.com"], ["a@example.com,b@example.com"],
+                                    ["a\x00@example.com"]])
+async def test_invalid_guests_rejected_without_confirmation_or_requests(setup, fake, guests):
+    setup.confirm = Confirm(True)
+    result = await setup.call("calendar_create_event", {"title": "Dinner", "day": "tomorrow", "guests": guests})
+    assert result.code == "TOOL_BAD_ARGS" and not fake.calls and not setup.confirm.prompts
+
+
+async def test_share_preserves_guests_and_requires_exact_confirmation(setup, fake, monkeypatch):
+    existing = {"email": "existing@example.com", "responseStatus": "accepted", "optional": True}
+    monkeypatch.setitem(EVENTS["me@example.com"][0], "attendees", [existing])
+    monkeypatch.setitem(EVENTS["me@example.com"][0], "htmlLink", "https://calendar.google.com/calendar/event?eid=stored")
+    handles = await _handles(setup)
+    handle = handles["רופא שיניים"]["handle"]
+    assert handles["רופא שיניים"]["htmlLink"] == "https://calendar.google.com/calendar/event?eid=stored"
+    args = {"handle": handle, "guests": ["new@example.com"]}
+    setup.confirm = Confirm(False)
+    assert (await setup.call("calendar_share_event", args)).code == "TOOL_DECLINED"
+    assert not fake.writes
+    for value in ("new@example.com", "existing@example.com", "רופא שיניים", "21.10.2026", "09:00"):
+        assert value in setup.confirm.prompts[0]
+    setup.confirm = Confirm(True)
+    result = await setup.call("calendar_share_event", args)
+    assert result.ok
+    assert fake.writes[-1][2] == {"attendees": [existing, {"email": "new@example.com"}]}
+    assert fake.calls[-1].headers["If-Match"] == '"revision1"'
+    assert fake.calls[-1].url.params["sendUpdates"] == "all"
+    assert result.data["stored"]["guests"] == ["existing@example.com", "new@example.com"]
+    assert result.data["stored"]["htmlLink"] == "https://calendar.google.com/calendar/event?eid=stored"
+
+
+async def test_share_recurring_event_needs_explicit_scope_and_full_guest_snapshot(setup, fake, monkeypatch):
+    handles = await _handles(setup)
+    setup.confirm = Confirm(True)
+    args = {"handle": handles["יוגה"]["handle"], "guests": ["new@example.com"]}
+    assert (await setup.call("calendar_share_event", args)).code == "CALENDAR_SCOPE_NEEDED"
+    assert not fake.writes
+    monkeypatch.setitem(MASTERS["yoga"], "attendeesOmitted", True)
+    assert (await setup.call("calendar_share_event", {**args, "scope": "series"})).code == "CALENDAR_INCOMPLETE_EVENT"
+    assert not fake.writes
+
+
+async def test_share_does_not_overwrite_guest_changes_during_confirmation(setup, fake):
+    handles = await _handles(setup)
+    async def approve(_):
+        assert not fake.writes
+        fake.changed = True           # another Calendar client changes guests while the user reviews the plan
+        return True
+    setup.confirm = approve
+    result = await setup.call("calendar_share_event", {"handle": handles["רופא שיניים"]["handle"],
+                                                      "guests": ["new@example.com"]})
+    assert not result.ok and result.code == "GOOGLE_API_ERROR" and not fake.writes
+    patches = [call for call in fake.calls if call.method == "PATCH"]
+    assert len(patches) == 1 and patches[0].headers["If-Match"] == '"revision1"'
+
+
+@pytest.mark.parametrize("link,valid", [("https://www.google.com/calendar/event?eid=abc", True),
+                                        ("https://calendar.google.com/calendar/event?eid=abc", True),
+                                        (None, False), ("http://calendar.google.com/calendar/event?eid=x", False),
+                                        ("https://calendar.google.com.evil.test/calendar/event?eid=x", False),
+                                        ("https://calendar.google.com@evil.test/calendar/event?eid=x", False),
+                                        ("https://calendar.google.com:444/calendar/event?eid=x", False),
+                                        ("https://www.google.com/redirect?url=https://evil.test", False),
+                                        ("https://calendar.google.com/calendar/event?eid=x\n", False)])
+async def test_found_event_link_is_real_or_absent_without_synthesis(setup, monkeypatch, link, valid):
+    monkeypatch.setitem(EVENTS["me@example.com"][0], "htmlLink", link)
+    handles = await _handles(setup)
+    assert handles["רופא שיניים"]["htmlLink"] == (link if valid else None)
+
+
+@pytest.mark.parametrize("path,body", [("/calendars/primary/acl", {"role": "owner"}),
+                                     ("/calendars/primary/events/e1", {"guestsCanModify": True}),
+                                     ("/users/me/calendarList/primary", {"selected": True})])
+def test_calendar_guard_blocks_acl_and_unapproved_event_metadata(path, body):
+    with pytest.raises(GoogleAuthError, match="unsupported calendar write"):
+        calendar_guard("PATCH", CAL + path, body)
+
+
 async def test_model_writes_refused_right_after_reading_calendar_text(setup, fake):
     setup.confirm = Confirm(True)
     assert (await setup.call("calendar_find_events", {"day": "week"})).ok
@@ -193,7 +291,7 @@ async def test_update_declined_and_unknown_handle(setup, fake):
 # ---------------------------------------------------------------------- no delete, anywhere
 def test_no_delete_tool_exists(setup):
     names = [t.name for t in setup.tools()]
-    assert names == ["calendar_find_events", "calendar_create_event", "calendar_update_event"]
+    assert names == ["calendar_find_events", "calendar_create_event", "calendar_update_event", "calendar_share_event"]
     assert not any(re.search(r"delet|remov|cancel|clear|move", n) for n in names)
 
 
