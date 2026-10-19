@@ -1,7 +1,7 @@
-"""WP-O release hosting on Cloudflare R2: SigV4 (AWS test vectors), a local S3 stub (no Cloudflare, no network),
-signed latest.json round trip CI -> app, retention with pins, clean skip without secrets, hosted update check."""
+"""WP-O release hosting in a separate PUBLIC GitHub repo (release files only): a local fake GitHub REST server
+(no GitHub, no network), signed latest.json round trip CI -> app, retention with pins, clean skip without
+secrets, hosted update check + approval-gated install, end to end from the CI publish to the app's install."""
 import base64
-import datetime as dt
 import hashlib
 import importlib.util
 import json
@@ -22,112 +22,142 @@ from jarves.config import Config, ConfigError, load_config
 from jarves.updates import UpdateChecker, UpdateError
 
 ROOT = Path(__file__).resolve().parents[2]
-spec = importlib.util.spec_from_file_location("pkg_release_r2", ROOT / "packaging" / "release.py")
+spec = importlib.util.spec_from_file_location("pkg_release_public", ROOT / "packaging" / "release.py")
 release = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(release)
 
-EMPTY = "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
-AK, SK = "AKIAIOSFODNN7EXAMPLE", "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY"
-VECTOR_TIME = dt.datetime(2013, 5, 24, tzinfo=dt.timezone.utc)
+REPO = "igalgerman/jarvis-releases"
+TOKEN = "github_pat_fake_releases_token"
 
 
-def _sig(h):
-    return h["Authorization"].rsplit("Signature=", 1)[1]
+# ---------------------------------------------------------------------- local fake GitHub (REST + uploads)
+class GitHubStub:
+    """The REST calls public_publish makes, with GitHub's shapes: releases (draft/latest), tags, asset uploads via
+    the release's upload_url template, deletes. Rejects any request without the right Bearer token."""
 
-
-# ---------------------------------------------------------------------- SigV4 against AWS's published examples
-def test_sigv4_matches_aws_documented_examples():
-    get = release.sigv4("GET", "https://examplebucket.s3.amazonaws.com/test.txt", {"Range": "bytes=0-9"}, EMPTY,
-                        AK, SK, region="us-east-1", now=VECTOR_TIME)
-    assert _sig(get) == "f0e8bdb87c964420e857bd35b5d6ed310bd44f0170aba48dd91039c6036bdb41"
-    assert "SignedHeaders=host;range;x-amz-content-sha256;x-amz-date" in get["Authorization"]
-    body = b"Welcome to Amazon S3."
-    put = release.sigv4("PUT", "https://examplebucket.s3.amazonaws.com/test$file.text",
-                        {"Date": "Fri, 24 May 2013 00:00:00 GMT", "x-amz-storage-class": "REDUCED_REDUNDANCY"},
-                        hashlib.sha256(body).hexdigest(), AK, SK, region="us-east-1", now=VECTOR_TIME)
-    assert _sig(put) == "98ad721746da40c64f1a55b78f14c238d841ea1380cd77a1b5971af0ece108bd"
-    lst = release.sigv4("GET", "https://examplebucket.s3.amazonaws.com/?max-keys=2&prefix=J", {}, EMPTY, AK, SK,
-                        region="us-east-1", now=VECTOR_TIME)
-    assert _sig(lst) == "34b48302e7b5fa45bde8084f4b7868a86f0a534bc59db6670ed5711ef69dc6f7"
-
-
-# ---------------------------------------------------------------------- local S3 stub (moto-style, in-process)
-class S3Stub:
-    """Path-style S3 subset (PUT/GET/DELETE object, ListObjectsV2 with paging) that checks every request's SigV4
-    signature and payload hash. Two keys per page so pagination is exercised."""
-
-    def __init__(self, bucket="jarves-releases", access=AK, secret=SK):
-        self.bucket, self.access, self.secret = bucket, access, secret
-        self.objects: dict[str, tuple[bytes, dict]] = {}
+    def __init__(self, repo=REPO, token=TOKEN):
+        self.repo, self.token = repo, token
+        self.releases: list[dict] = []          # newest last
+        self.blobs: dict[int, bytes] = {}       # asset id -> bytes
+        self.tags: set[str] = set()
         self.log: list[tuple[str, str]] = []
+        self._id = 100
         stub = self
 
         class H(BaseHTTPRequestHandler):
             def log_message(self, *a):
                 pass
 
-            def _deny(self, code, what):
+            def _send(self, code, obj=None):
+                body = json.dumps(obj).encode() if obj is not None else b""
                 self.send_response(code)
+                self.send_header("Content-Type", "application/json")
+                self.send_header("Content-Length", str(len(body)))
                 self.end_headers()
-                self.wfile.write(f"<Error><Code>{what}</Code></Error>".encode())
+                self.wfile.write(body)
 
             def _handle(self):
-                u = urllib.parse.urlsplit(self.path)
                 n = int(self.headers.get("Content-Length") or 0)
                 body = self.rfile.read(n) if n else b""
-                auth = self.headers.get("Authorization", "")
-                m = re.match(r"AWS4-HMAC-SHA256 Credential=([^/]+)/(\d{8})/auto/s3/aws4_request, "
-                             r"SignedHeaders=([^,]+), Signature=([0-9a-f]{64})$", auth)
-                if not m or m.group(1) != stub.access:
-                    return self._deny(403, "InvalidAccessKeyId")
-                if hashlib.sha256(body).hexdigest() != self.headers.get("x-amz-content-sha256"):
-                    return self._deny(400, "XAmzContentSHA256Mismatch")
-                names = m.group(3).split(";")
-                hdrs = {k: self.headers[k] for k in names if k not in ("host", "x-amz-date", "x-amz-content-sha256")}
-                when = dt.datetime.strptime(self.headers["x-amz-date"], "%Y%m%dT%H%M%SZ").replace(
-                    tzinfo=dt.timezone.utc)
-                again = release.sigv4(self.command, f"http://{self.headers['Host']}{self.path}", hdrs,
-                                      self.headers["x-amz-content-sha256"], stub.access, stub.secret, now=when)
-                if _sig(again) != m.group(4):
-                    return self._deny(403, "SignatureDoesNotMatch")
-                parts = urllib.parse.unquote(u.path).lstrip("/").split("/", 1)
-                if parts[0] != stub.bucket:
-                    return self._deny(404, "NoSuchBucket")
-                key = parts[1] if len(parts) > 1 else ""
-                stub.log.append((self.command, key or u.query))
-                if self.command == "PUT":
-                    stub.objects[key] = (body, {"type": self.headers.get("Content-Type"),
-                                                "cache": self.headers.get("Cache-Control")})
-                    self.send_response(200)
-                    self.end_headers()
-                elif self.command == "DELETE":
-                    stub.objects.pop(key, None)
-                    self.send_response(204)
-                    self.end_headers()
-                elif key:
-                    if key not in stub.objects:
-                        return self._deny(404, "NoSuchKey")
-                    self.send_response(200)
-                    self.end_headers()
-                    self.wfile.write(stub.objects[key][0])
-                else:
-                    q = dict(urllib.parse.parse_qsl(u.query))
-                    keys = sorted(k for k in stub.objects if k.startswith(q.get("prefix", "")))
-                    start = int(q.get("continuation-token", "0"))
-                    page, more = keys[start:start + 2], start + 2 < len(keys)
-                    xml = "".join(f"<Contents><Key>{k}</Key></Contents>" for k in page)
-                    nxt = f"<NextContinuationToken>{start + 2}</NextContinuationToken>" if more else ""
-                    self.send_response(200)
-                    self.end_headers()
-                    self.wfile.write((f'<ListBucketResult xmlns="http://s3.amazonaws.com/doc/2006-03-01/">'
-                                      f"<IsTruncated>{'true' if more else 'false'}</IsTruncated>{xml}{nxt}"
-                                      "</ListBucketResult>").encode())
+                if self.headers.get("Authorization") != f"Bearer {stub.token}":
+                    return self._send(401, {"message": "Bad credentials"})
+                u = urllib.parse.urlsplit(self.path)
+                stub.log.append((self.command, u.path))
+                return self._send(*stub.route(self.command, u.path, dict(urllib.parse.parse_qsl(u.query)), body,
+                                              self.headers.get("Content-Type")))
 
-            do_PUT = do_GET = do_DELETE = _handle
+            do_GET = do_POST = do_PATCH = do_DELETE = _handle
 
         self.server = ThreadingHTTPServer(("127.0.0.1", 0), H)
-        self.endpoint = f"http://127.0.0.1:{self.server.server_address[1]}"
+        self.base = f"http://127.0.0.1:{self.server.server_address[1]}"
         threading.Thread(target=self.server.serve_forever, daemon=True).start()
+
+    def nid(self):
+        self._id += 1
+        return self._id
+
+    def view(self, r):
+        return {**r, "upload_url": f"{self.base}/uploads/repos/{self.repo}/releases/{r['id']}/assets{{?name,label}}"}
+
+    def latest(self):
+        pub = [r for r in self.releases if not r["draft"]]
+        flagged = [r for r in pub if r.get("latest")]
+        return (flagged or pub or [None])[-1]
+
+    def route(self, method, path, q, body, ctype):
+        pre = f"/repos/{self.repo}"
+        up = re.fullmatch(rf"/uploads{pre}/releases/(\d+)/assets", path)
+        if up and method == "POST":
+            r = next(x for x in self.releases if x["id"] == int(up.group(1)))
+            if any(a["name"] == q["name"] for a in r["assets"]):
+                return 422, {"message": "already_exists"}
+            a = {"id": self.nid(), "name": q["name"], "size": len(body), "content_type": ctype}
+            self.blobs[a["id"]] = body
+            r["assets"].append(a)
+            return 201, a
+        if not path.startswith(pre):
+            return 404, {"message": "Not Found"}
+        p = path[len(pre):]
+        if method == "GET" and p == "/releases/latest":
+            r = self.latest()
+            return (200, self.view(r)) if r else (404, {"message": "Not Found"})
+        if method == "GET" and p.startswith("/releases/tags/"):
+            r = next((x for x in self.releases if x["tag_name"] == p.rsplit("/", 1)[1]), None)
+            return (200, self.view(r)) if r else (404, {"message": "Not Found"})
+        if method == "GET" and p == "/releases":
+            per, page = int(q.get("per_page", 30)), int(q.get("page", 1))
+            items = list(reversed(self.releases))[(page - 1) * per: page * per]
+            return 200, [self.view(r) for r in items]
+        if method == "POST" and p == "/releases":
+            d = json.loads(body)
+            r = {"id": self.nid(), "tag_name": d["tag_name"], "name": d["name"], "body": d["body"],
+                 "draft": d["draft"], "prerelease": d["prerelease"], "assets": [], "latest": False,
+                 "created_at": f"2026-10-19T10:00:{len(self.releases):02d}Z"}
+            self.releases.append(r)
+            self.tags.add(d["tag_name"])
+            return 201, self.view(r)
+        m = re.fullmatch(r"/releases/(\d+)", p)
+        if m and method == "PATCH":
+            r = next(x for x in self.releases if x["id"] == int(m.group(1)))
+            d = json.loads(body)
+            r["draft"] = d.get("draft", r["draft"])
+            if d.get("make_latest") == "true":
+                for x in self.releases:
+                    x["latest"] = x is r
+            return 200, self.view(r)
+        if m and method == "DELETE":
+            self.releases = [x for x in self.releases if x["id"] != int(m.group(1))]
+            return 204, None
+        m = re.fullmatch(r"/releases/assets/(\d+)", p)
+        if m and method == "DELETE":
+            for r in self.releases:
+                r["assets"] = [a for a in r["assets"] if a["id"] != int(m.group(1))]
+            return 204, None
+        m = re.fullmatch(r"/git/refs/tags/(.+)", p)
+        if m and method == "DELETE":
+            if m.group(1) not in self.tags:
+                return 404, {"message": "Reference does not exist"}
+            self.tags.discard(m.group(1))
+            return 204, None
+        return 404, {"message": "Not Found"}
+
+    def asset(self, tag, name):
+        r = next(x for x in self.releases if x["tag_name"] == tag)
+        return self.blobs[next(a["id"] for a in r["assets"] if a["name"] == name)]
+
+    def downloads(self):
+        """What anonymous https://github.com/<repo>/releases/... download links would serve (the app's view)."""
+        files = {}
+        for r in self.releases:
+            if r["draft"]:
+                continue
+            for a in r["assets"]:
+                files[f"https://github.com/{self.repo}/releases/download/{r['tag_name']}/{a['name']}"] = \
+                    self.blobs[a["id"]]
+        lt = self.latest()
+        for a in (lt or {}).get("assets", []):
+            files[f"https://github.com/{self.repo}/releases/latest/download/{a['name']}"] = self.blobs[a["id"]]
+        return files
 
     def close(self):
         self.server.shutdown()
@@ -135,8 +165,8 @@ class S3Stub:
 
 
 @pytest.fixture
-def s3():
-    stub = S3Stub()
+def gh():
+    stub = GitHubStub()
     yield stub
     stub.close()
 
@@ -152,7 +182,7 @@ def _keypair():
 
 def _dist(tmp_path, version, data=None):
     d = tmp_path / f"dist-{version}"
-    d.mkdir()
+    d.mkdir(parents=True)
     exe = d / f"JARVES-Setup-{version}.exe"
     exe.write_bytes(data or f"MZ installer {version}".encode())
     sha = hashlib.sha256(exe.read_bytes()).hexdigest()
@@ -164,76 +194,83 @@ def _dist(tmp_path, version, data=None):
     return d
 
 
-def _env(stub, pem, **kw):
-    return {"R2_ACCOUNT_ID": "0123456789abcdef", "R2_ACCESS_KEY_ID": stub.access,
-            "R2_SECRET_ACCESS_KEY": stub.secret, "R2_BUCKET": stub.bucket, "R2_PUBLIC_BASE": "https://pub-x.r2.dev",
-            "JARVES_UPDATE_SIGNING_KEY": pem, "R2_ENDPOINT": stub.endpoint, **kw}
+def _publish(stub, dist, pem, keep=3, token=TOKEN, **env):
+    client = release.GitHub(stub.repo, token, api_base=stub.base)
+    return release.public_publish(dist, keep=keep, gh=client,
+                                  env={"RELEASES_TOKEN": token, "JARVES_UPDATE_SIGNING_KEY": pem, **env})
 
 
 # ---------------------------------------------------------------------- CI side
 def test_skips_cleanly_without_secrets_and_warns_on_partial(capsys):
-    assert release.r2_publish(Path("does-not-matter"), env={}) == 0
-    assert "SKIPPED - no R2 secrets" in capsys.readouterr().out
-    assert release.r2_publish(Path("does-not-matter"), env={"R2_BUCKET": "b", "R2_ACCOUNT_ID": " "}) == 0
+    assert release.public_publish(Path("does-not-matter"), env={}) == 0
+    assert "SKIPPED - secrets RELEASES_TOKEN and JARVES_UPDATE_SIGNING_KEY are not set" in capsys.readouterr().out
+    assert release.public_publish(Path("does-not-matter"), env={"RELEASES_TOKEN": "github_pat_SECRETVALUE",
+                                                                "JARVES_UPDATE_SIGNING_KEY": " "}) == 0
     out = capsys.readouterr().out
-    assert out.startswith("::warning::") and "R2_ACCESS_KEY_ID" in out and "R2_ACCOUNT_ID" in out
+    assert out.startswith("::warning::") and "JARVES_UPDATE_SIGNING_KEY" in out and "SECRETVALUE" not in out
 
 
-def test_publish_uploads_signed_manifest_and_keeps_newest_three_plus_pins(tmp_path, s3, capsys):
+def test_publish_releases_signed_manifest_and_keeps_newest_three_plus_pinned(tmp_path, gh, capsys):
     pem, pub = _keypair()
-    prefix = "jarves/windows"
-    s3.objects[f"{prefix}/pinned.txt"] = (b"# rollback point\nwin-v0.1.0.1\n", {})
-    s3.objects["other/JARVES-Setup-0.0.0.1.exe"] = (b"not ours", {})            # other folder: never touched
-    s3.objects[f"{prefix}/notes.txt"] = (b"owner file", {})
+    gh.releases.append({"id": 1, "tag_name": "win-v0.1.0.0", "name": "JARVES 0.1.0.0 [pinned]", "body": "",
+                        "draft": False, "prerelease": False, "assets": [], "latest": False, "created_at": "2026-01"})
+    gh.releases.append({"id": 2, "tag_name": "notes-2026", "name": "owner notes", "body": "", "draft": False,
+                        "prerelease": False, "assets": [], "latest": False, "created_at": "2026-02"})
     for v in ("0.1.0.1", "0.1.0.2", "0.1.0.3", "0.1.0.4", "0.1.0.5"):
-        assert release.r2_publish(_dist(tmp_path, v), keep=3, env=_env(s3, pem)) == 0
+        assert _publish(gh, _dist(tmp_path, v), pem) == 0
     out = capsys.readouterr().out
-    assert pem.split("\n")[1] not in out and s3.secret not in out                 # no secret in the log
-    exes = sorted(k for k in s3.objects if k.startswith(prefix) and k.endswith(".exe"))
-    assert exes == [f"{prefix}/JARVES-Setup-0.1.0.{n}.exe" for n in (1, 3, 4, 5)]  # 0.1.0.1 pinned, 0.1.0.2 pruned
-    assert f"{prefix}/JARVES-Setup-0.1.0.2.exe.sha256" not in s3.objects
-    assert {"other/JARVES-Setup-0.0.0.1.exe", f"{prefix}/notes.txt", f"{prefix}/pinned.txt"} <= set(s3.objects)
-    body, meta = s3.objects[f"{prefix}/latest.json"]
-    assert meta["type"] == "application/json"
-    m = updates.verify_manifest(json.loads(body), [pub])                          # CI signature -> app verify
-    exe = s3.objects[f"{prefix}/JARVES-Setup-0.1.0.5.exe"][0]
+    assert pem.split("\n")[1] not in out and TOKEN not in out                     # no secret in the log
+    tags = sorted(r["tag_name"] for r in gh.releases)
+    assert tags == ["notes-2026", "win-v0.1.0.0", "win-v0.1.0.3", "win-v0.1.0.4", "win-v0.1.0.5"]
+    assert "win-v0.1.0.1" not in gh.tags and "win-v0.1.0.2" not in gh.tags      # tags of pruned releases gone
+    assert gh.latest()["tag_name"] == "win-v0.1.0.5" and not gh.latest()["draft"]
+    names = sorted(a["name"] for a in gh.latest()["assets"])
+    assert names == ["JARVES-Setup-0.1.0.5.exe", "JARVES-Setup-0.1.0.5.exe.sha256", "latest.json"]
+    m = updates.verify_manifest(json.loads(gh.asset("win-v0.1.0.5", "latest.json")), [pub])  # CI sig -> app verify
+    exe = gh.asset("win-v0.1.0.5", "JARVES-Setup-0.1.0.5.exe")
     assert m["version"] == "0.1.0.5" and m["sha256"] == hashlib.sha256(exe).hexdigest() and m["size"] == len(exe)
-    assert m["url"] == "https://pub-x.r2.dev/jarves/windows/JARVES-Setup-0.1.0.5.exe"
+    assert m["url"] == f"https://github.com/{REPO}/releases/download/win-v0.1.0.5/JARVES-Setup-0.1.0.5.exe"
     assert m["commit"] and m["built"] and m["channel"] == "main"
-    # order: installer before manifest (a PC never sees a manifest whose installer is missing)
-    puts = [k for c, k in s3.log if c == "PUT"]
-    last = max(i for i, k in enumerate(puts) if k == f"{prefix}/latest.json")
-    assert puts.index(f"{prefix}/JARVES-Setup-0.1.0.5.exe") < last == len(puts) - 1
+    # draft first, published only after every file is uploaded
+    calls = [(c, p) for c, p in gh.log if p.endswith("/releases") and c == "POST" or "/uploads/" in p or c == "PATCH"]
+    last = [i for i, (c, p) in enumerate(calls) if c == "PATCH"][-1]
+    assert [c for c, _ in calls[last - 4:last + 1]] == ["POST", "POST", "POST", "POST", "PATCH"]
 
 
-def test_rerun_of_an_older_build_does_not_replace_a_newer_manifest(tmp_path, s3, capsys):
+def test_rerun_is_idempotent_and_older_build_never_replaces_newer(tmp_path, gh, capsys):
     pem, _ = _keypair()
-    release.r2_publish(_dist(tmp_path, "0.1.0.7"), env=_env(s3, pem))
-    release.r2_publish(_dist(tmp_path, "0.1.0.6"), env=_env(s3, pem))
-    assert "already has the newer 0.1.0.7" in capsys.readouterr().out
-    assert json.loads(s3.objects["jarves/windows/latest.json"][0])["manifest"]["version"] == "0.1.0.7"
-    assert "jarves/windows/JARVES-Setup-0.1.0.6.exe" not in s3.objects
+    _publish(gh, _dist(tmp_path, "0.1.0.7"), pem)
+    gh.releases[-1]["draft"] = True                                   # a run that died before publishing
+    gh.releases[-1]["assets"] = gh.releases[-1]["assets"][:1]
+    assert _publish(gh, _dist(tmp_path / "again", "0.1.0.7"), pem) == 0
+    assert len(gh.releases) == 1 and not gh.releases[0]["draft"] and len(gh.releases[0]["assets"]) == 3
+    _publish(gh, _dist(tmp_path, "0.1.0.6"), pem)
+    assert "already has the newer win-v0.1.0.7" in capsys.readouterr().out
+    assert [r["tag_name"] for r in gh.releases] == ["win-v0.1.0.7"]
 
 
-def test_wrong_credentials_fail_loudly(tmp_path, s3):
+def test_wrong_token_fails_loudly(tmp_path, gh):
     pem, _ = _keypair()
-    with pytest.raises(release.S3Error, match="403"):
-        release.r2_publish(_dist(tmp_path, "0.1.0.7"), env=_env(s3, pem, R2_SECRET_ACCESS_KEY="wrong"))
+    with pytest.raises(release.GitHubError, match="401"):
+        _publish(gh, _dist(tmp_path, "0.1.0.7"), pem, token="wrong")
 
 
-def test_custom_prefix_and_retention_unit():
-    keys = [f"p/JARVES-Setup-0.1.0.{n}.exe" for n in range(1, 7)] + ["p/JARVES-Setup-0.1.0.6.exe.sha256",
-                                                                     "p/sub/JARVES-Setup-0.1.0.1.exe", "p/latest.json"]
-    gone = release.r2_to_prune(keys, "p", 3, {"0.1.0.2"}, "0.1.0.6")
-    assert gone == ["p/JARVES-Setup-0.1.0.1.exe", "p/JARVES-Setup-0.1.0.3.exe"]
-    assert release.parse_pins("0.1.0.5\nJARVES-Setup-0.2.0.1.exe # keep\n# 9.9.9.9\n") == {"0.1.0.5", "0.2.0.1"}
+def test_bad_repo_name_and_tampered_dist_refuse(tmp_path):
+    pem, _ = _keypair()
+    env = {"RELEASES_TOKEN": TOKEN, "JARVES_UPDATE_SIGNING_KEY": pem}
+    with pytest.raises(SystemExit, match="RELEASES_REPO"):
+        release.public_publish(tmp_path, env={**env, "RELEASES_REPO": "x/../y?z"})
+    d = _dist(tmp_path, "0.1.0.7")
+    (d / "JARVES-Setup-0.1.0.7.exe").write_bytes(b"swapped after the tests")
+    with pytest.raises(SystemExit, match="SHA256"):
+        release.public_publish(d, env=env)
 
 
 # ---------------------------------------------------------------------- signing round trip
 def _manifest(**kw):
     m = {"product": "jarves", "platform": "windows-x64", "channel": "main", "version": "0.1.0.9",
          "installer": "JARVES-Setup-0.1.0.9.exe", "sha256": hashlib.sha256(b"MZ new").hexdigest(), "size": 6,
-         "url": "https://pub-x.r2.dev/jarves/windows/JARVES-Setup-0.1.0.9.exe", "commit": "abc", "built": "now",
+         "url": f"https://github.com/{REPO}/releases/download/win-v0.1.0.9/JARVES-Setup-0.1.0.9.exe", "commit": "abc", "built": "now",
          "published": "2026-10-19T10:00:00+00:00", "notes_he": "גרסה חדשה"}
     m.update(kw)
     return m
@@ -276,7 +313,7 @@ def test_keygen_writes_private_key_once_and_returns_public(tmp_path):
 
 
 # ---------------------------------------------------------------------- app side: hosted source
-BASE = "https://pub-x.r2.dev/jarves/windows"
+BASE = f"https://github.com/{REPO}/releases/latest/download"
 
 
 class FakeHost:
@@ -296,7 +333,7 @@ def _hosted(tmp_path, exe=b"MZ new", served=None, **kw):
     env = release.sign_manifest(_manifest(**{"sha256": hashlib.sha256(exe).hexdigest(), "size": len(exe), **kw}),
                                 pem)
     host = FakeHost({f"{BASE}/latest.json": json.dumps(env).encode(),
-                     f"{BASE}/JARVES-Setup-0.1.0.9.exe": served if served is not None else exe})
+                     env["manifest"]["url"]: served if served is not None else exe})
     return host, pub
 
 
@@ -360,7 +397,7 @@ def test_cached_release_is_reverified_at_install_time(tmp_path, monkeypatch):
 
 
 def test_manifest_must_be_stable_windows_https(tmp_path):
-    for kw in ({"channel": "pr"}, {"url": "http://pub-x.r2.dev/a.exe"}, {"installer": "evil.exe"}, {"size": 0}):
+    for kw in ({"channel": "pr"}, {"url": "http://example.com/a.exe"}, {"installer": "evil.exe"}, {"size": 0}):
         host, pub = _hosted(tmp_path, **kw)
         s = UpdateChecker(tmp_path, http=host, current="0.1.0.8", base_url=BASE, public_keys=[pub]).check(force=True)
         assert not s["available"] and s["error"], kw
@@ -393,3 +430,40 @@ def test_config_update_base_url(tmp_path, monkeypatch):
     assert UpdateChecker(tmp_path, cfg=cfg).base_url == BASE
     monkeypatch.setenv("JARVES_UPDATE_BASE_URL", "http://plain.example")
     assert UpdateChecker(tmp_path, cfg=Config()).base_url == ""         # plain HTTP is never used
+
+
+def test_default_source_is_the_public_repo_once_a_key_is_trusted(tmp_path, monkeypatch):
+    for k in ("JARVES_UPDATE_BASE_URL", "JARVES_RELEASES_REPO"):
+        monkeypatch.delenv(k, raising=False)
+    monkeypatch.setattr(updates, "BUILD_INFO", tmp_path / "none.json")
+    assert UpdateChecker(tmp_path, current="0.1.0.8", public_keys=[]).source.startswith("github:")   # no key yet
+    u = UpdateChecker(tmp_path, current="0.1.0.8", public_keys=["k="])
+    assert u.base_url == BASE and u.source == f"hosted:{BASE}"
+    assert UpdateChecker(tmp_path, cfg=Config(), current="0.1.0.8", public_keys=["k="]).base_url == BASE
+
+
+def test_end_to_end_ci_publish_then_app_check_and_install(tmp_path, gh, monkeypatch):
+    """CI publishes into the fake public repo; the app (anonymous downloads only) finds, verifies and installs."""
+    monkeypatch.setattr(sys, "platform", "win32")
+    monkeypatch.setattr(updates, "backup_before_update", lambda home, label: home / "bak.zip")
+    pem, pub = _keypair()
+    _publish(gh, _dist(tmp_path, "0.1.0.9", b"MZ the real build"), pem)
+    host = FakeHost(gh.downloads())
+    home = tmp_path / "home"
+    home.mkdir()
+    u = UpdateChecker(home, http=host, current="0.1.0.8", public_keys=[pub])
+    s = u.check(force=True)
+    assert s["available"] and s["latest"]["version"] == "0.1.0.9", s["error"]
+    assert all("Authorization" not in h for _, h in host.calls)                   # anonymous
+    assert all(url.startswith(f"https://github.com/{REPO}/releases/") for url, _ in host.calls)  # no REST API
+    r = u.prepare_install(approved=True)
+    assert Path(r["installer"]).read_bytes() == b"MZ the real build"
+
+
+def test_generated_notes_do_not_pin_every_release():
+    """Regression: the notes explain `[pinned]`; that mention must not pin (it made prune keep everything)."""
+    info = {"version": "0.1.0.5", "commit": "abc", "built": "now", "installer": "JARVES-Setup-0.1.0.5.exe",
+            "sha256": "0" * 64, "size": 1 << 20}
+    for body in (release.notes(info, "https://ci"), release.public_notes(info)):
+        assert "[pinned]" in body and not release.is_pinned({"name": "JARVES 0.1.0.5", "body": body})
+        assert release.is_pinned({"name": "JARVES 0.1.0.5", "body": body + "\nrollback [pinned]"})

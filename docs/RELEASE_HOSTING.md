@@ -1,114 +1,95 @@
-# Release hosting on Cloudflare R2 / אחסון גרסאות ההתקנה ב-Cloudflare R2
+# Release hosting in a public releases repo / אחסון גרסאות ההתקנה במאגר ציבורי
 
-Issue #17 (SW-V2 WP-O). The GitHub repository is private, so another PC can neither download a GitHub Release
-nor check it for updates. After every green `main` build, `.github/workflows/package.yml` also uploads the tested
-installer to a **public Cloudflare R2 bucket** together with a **signed `latest.json`**. JARVES on any PC reads that
-file over HTTPS, checks the signature with a key built into the app, tells you about a new version, and installs it
-only after you approve (SHA256 + size checked, backup first).
+Issue #17 (SW-V2 WP-O). The source repository `igalgerman/JARVIS` is private, so another PC can neither download
+its releases nor check them for updates. After every green `main` build, `.github/workflows/package.yml` also
+publishes the tested installer as a release of a **separate public repository that holds only release files**
+(default `igalgerman/jarvis-releases`, **no source code**), together with a **signed `latest.json`**. JARVES on any
+PC downloads that file anonymously over HTTPS, checks the signature with a key built into the app, tells you about
+a new version, and installs it only after you approve (SHA256 + size checked, backup first).
 
-המאגר ב-GitHub פרטי, ולכן מחשב אחר לא יכול להוריד ממנו גרסה או לבדוק עדכונים. אחרי כל בנייה ירוקה של `main`,
-ה-workflow מעלה את קובץ ההתקנה שנבדק לדלי (bucket) ציבורי ב-Cloudflare R2, יחד עם קובץ `latest.json` חתום.
-ג'ארוויס בכל מחשב קורא את הקובץ ב-HTTPS, מוודא את החתימה עם מפתח ציבורי שבנוי בתוך התוכנה, מודיע על גרסה חדשה,
-ומתקין רק אחרי שאישרת.
+המאגר `igalgerman/JARVIS` פרטי, ולכן מחשב אחר לא יכול להוריד ממנו גרסה או לבדוק עדכונים. אחרי כל בנייה ירוקה של
+`main`, ה-workflow מפרסם את קובץ ההתקנה שנבדק כגרסה (release) במאגר **ציבורי נפרד שמכיל רק קבצי התקנה**
+(ברירת מחדל `igalgerman/jarvis-releases`, **בלי קוד מקור**), יחד עם קובץ `latest.json` חתום. ג'ארוויס בכל מחשב
+מוריד את הקובץ ב-HTTPS בלי התחברות, בודק את החתימה עם מפתח שבנוי בתוך התוכנה, מודיע על גרסה חדשה, ומתקין רק
+אחרי שאישרתם.
 
-Nothing here needs Claude to log in anywhere: **you** create the account and type every value. Claude never sees the
-keys. / את החשבון ואת כל הערכים מקלידים **אתם**; Claude לא רואה את המפתחות.
+**Cost: free.** Public repositories and their release files are free on GitHub (each file must be under 2 GiB; the
+installer is ~170 MB). No card, no other account. / **עלות: חינם.** אין כרטיס אשראי ואין חשבון נוסף.
 
-## Cost / עלות (checked 19 Oct 2026, developers.cloudflare.com/r2/pricing)
+You create the repo, the token and the key; you type every value yourself. Claude never sees the secrets.
+את המאגר, הטוקן והמפתח יוצרים **אתם**, ואת כל הערכים מקלידים בעצמכם. Claude לא רואה את הסודות.
 
-| Free every month / חינם בכל חודש | Our use / השימוש שלנו |
+## How it works / איך זה עובד
+
+| Where / איפה | What / מה |
 |---|---|
-| 10 GB-month storage (Standard class only) | 3 installers x ~170 MB = ~0.5 GB |
-| 1 million Class A operations (upload, list, delete) | ~10 per release |
-| 10 million Class B operations (download, read) | a few per PC per day |
-| Egress (downloads) free, no cap | |
+| `igalgerman/JARVIS` (private) | code, CI, the private release (unchanged, stays as the fallback) |
+| `igalgerman/jarvis-releases` (public) | releases `win-v<version>`, each with `JARVES-Setup-<v>.exe`, `.exe.sha256`, `latest.json`; newest 3 kept |
+| Each PC | once a day: `https://github.com/igalgerman/jarvis-releases/releases/latest/download/latest.json` |
 
-Beyond the free tier: $0.015/GB-month. Cloudflare may ask for a payment method (card or PayPal) the first time you
-open R2, even for the free plan; it charges nothing while usage stays inside the free tier.
-ייתכן ש-Cloudflare תבקש אמצעי תשלום בפעם הראשונה שפותחים R2, גם בתוכנית החינמית. לא יחויב כלום כל עוד נשארים
-בתוך המכסה החינמית.
+- That address is a plain file download, not the GitHub API, so the anonymous API limit (60 per hour) does not
+  apply. JARVES checks at most once a day anyway. / זו הורדת קובץ רגילה ולא ה-API, כך שמגבלת 60 בקשות בשעה לא
+  רלוונטית; וג'ארוויס בודק לכל היותר פעם ביום.
+- CI first creates the release as a **draft**, uploads the 3 files, and only then publishes it as "latest". So a PC
+  never sees a release with missing files. A re-run of an older build never replaces a newer release.
+- Retention: the newest 3 `win-v*` releases (and their tags) are kept. A release whose **title or notes contain
+  `[pinned]`** is never deleted and does not count towards the 3. Releases with other tag names are never touched.
+  שמירה: 3 הגרסאות האחרונות. גרסה שבכותרת או בהערות שלה כתוב `[pinned]` לא נמחקת לעולם.
 
-## Security design / תכנון האבטחה (why it is safe on a public bucket)
+## Security / אבטחה
 
-- The bucket is **readable by anyone who knows the URL; only CI can write** (API token scoped to this one bucket).
 - `latest.json` = `{"manifest": {version, commit, built, sha256, size, installer, url, ...}, "signature": {...}}`.
   The signature is **Ed25519** over the canonical manifest. The private key exists only as the GitHub secret
-  `JARVES_UPDATE_SIGNING_KEY` (and your offline backup); the public key is built into the app
+  `JARVES_UPDATE_SIGNING_KEY` (and your offline backup). The public key is built into the app
   (`UPDATE_PUBLIC_KEYS` in `core/src/jarves/updates.py`).
-- The app refuses an unsigned or wrongly signed manifest ("unavailable", never "update available"), then checks the
-  downloaded installer against the **SHA256 and size inside the signed manifest**, re-reading the manifest at
-  install time. So even a leaked R2 token, a hijacked domain or a wrong `base_url` cannot make a PC install
-  something else. Older versions are never offered (version must be newer).
-- The path can be made hard to guess (optional repo variable `R2_PREFIX`, e.g. `jarves/windows-8f3k2q`). That only
-  hides the download from strangers; it is **not** a secret and not what keeps you safe; the signature is.
-- No GitHub token is ever sent to R2. No personal data is sent: the check is one HTTPS GET of `latest.json`.
+- The app refuses an unsigned or wrongly signed manifest ("unavailable", never "update available"). It then checks
+  the downloaded installer against the **SHA256 and size inside the signed manifest**, and re-reads the manifest at
+  install time. So even a leaked `RELEASES_TOKEN` cannot make a PC install something else. It needs the signing
+  key too. Only newer versions are offered.
+- The token is fine-grained: **Contents: write on `jarvis-releases` only**. It cannot read the private source repo.
+- No GitHub token is ever sent by the app. The check sends no personal data, only one HTTPS download.
+- Until the public key is built into the app, PCs keep using the private repo's releases (needs
+  `JARVES_UPDATE_TOKEN`) exactly as before. Nothing is trusted without a key.
 
-Why not just "HTTPS is enough"? HTTPS proves you talk to r2.dev, not that the file was made by our CI. Why not
-Sigstore/minisign? They need extra tools on the PC; Ed25519 is already in the app (`cryptography`) and in CI
-(`cryptography` or OpenSSL 3), one key, one file.
+Why sign at all if it is GitHub? HTTPS proves the file came from github.com, not that our CI made it. Anyone with
+write access to the releases repo (or a leaked token) could upload a different installer. The signature closes that.
 
 ---
 
 ## Step by step / שלב אחר שלב
 
-### 1. Cloudflare account / חשבון Cloudflare
+### 1. Create the public releases repo / יצירת המאגר הציבורי
 
-1. Open https://dash.cloudflare.com/sign-up → email + password → **Create Account**.
-   פתחו https://dash.cloudflare.com/sign-up ← אימייל וסיסמה ← **Create Account**.
-2. Click the link in the verification email. / לחצו על הקישור במייל האימות.
-3. You do **not** need to add a website/domain. If the dashboard offers "Add a domain", skip it.
-   לא צריך להוסיף אתר או דומיין. אם מוצע "Add a domain", דלגו.
+1. Open https://github.com/new
+2. **Owner**: `igalgerman`. **Repository name**: `jarvis-releases`.
+3. **Description** (optional): `JARVES Windows installers (release files only)`.
+4. Choose **Public**.
+5. Turn on **Add a README file** (a release needs at least one commit to attach its tag to).
+6. **Create repository**.
 
-### 2. Turn on R2 / הפעלת R2
+פתחו https://github.com/new ← Owner: `igalgerman` ← שם: `jarvis-releases` ← **Public** ← סמנו **Add a README file**
+(גרסה צריכה לפחות commit אחד) ← **Create repository**.
 
-1. In the left menu: **Storage & databases → R2 Object Storage** (older menus: **R2**).
-   בתפריט השמאלי: **Storage & databases ← R2 Object Storage**.
-2. If asked, choose the free plan and add a payment method (see "Cost"). / אם מתבקש, בחרו בתוכנית החינמית והוסיפו
-   אמצעי תשלום (ראו "עלות").
+Never push source code to this repo. It holds only what CI uploads. / לא מעלים לשם קוד מקור; רק מה שה-CI מעלה.
 
-### 3. Create the bucket / יצירת הדלי
+### 2. Fine-grained token for CI / טוקן מוגבל ל-CI
 
-1. **Create bucket**. Name: `jarves-releases` (lowercase). Location: **Automatic**.
-   **Default storage class: Standard** (the free tier does not cover Infrequent Access) → **Create bucket**.
-   **Create bucket** ← שם: `jarves-releases` ← מיקום: **Automatic** ← סוג אחסון: **Standard** ← **Create bucket**.
+1. Open https://github.com/settings/personal-access-tokens/new
+   (or: your picture → **Settings** → **Developer settings** → **Personal access tokens** → **Fine-grained tokens**
+   → **Generate new token**).
+2. **Token name**: `jarves-ci-releases`. **Expiration**: 1 year (put a reminder in your calendar), or
+   **No expiration** if offered and you prefer.
+3. **Resource owner**: `igalgerman`.
+4. **Repository access**: **Only select repositories** → choose **`igalgerman/jarvis-releases`** only.
+5. **Permissions** → **Repository permissions** → **Contents**: **Read and write**. (**Metadata: Read-only** is
+   added automatically.) Leave everything else at **No access**.
+6. **Generate token**. Copy it now; GitHub shows it **once**. This value is **RELEASES_TOKEN**.
 
-### 4. Public read access / גישת קריאה ציבורית
+פתחו https://github.com/settings/personal-access-tokens/new ← שם: `jarves-ci-releases` ← תוקף: שנה ←
+**Only select repositories** ← רק `jarvis-releases` ← **Contents: Read and write** ← **Generate token**.
+העתיקו מיד; הטוקן מוצג **פעם אחת בלבד**.
 
-Pick one / בחרו אחת:
-
-- **r2.dev (simplest, no domain needed)**: bucket → **Settings** → **Public Development URL** → **Enable** → type
-  `allow` → **Allow**. Copy the URL shown, like `https://pub-0123abcd....r2.dev`.
-  It is rate-limited and meant for light use; fine for a few home PCs.
-  דלי ← **Settings** ← **Public Development URL** ← **Enable** ← הקלידו `allow` ← **Allow**. העתיקו את הכתובת
-  `https://pub-....r2.dev`. מתאים לכמה מחשבים בבית.
-- **Custom domain (if you have a domain on Cloudflare)**: bucket → **Settings** → **Custom Domains** → **Add** →
-  e.g. `releases.example.com` → **Continue** → **Connect Domain**; wait for **Active**. Use `https://releases.example.com`.
-  דומיין משלכם (אם יש דומיין ב-Cloudflare): **Settings ← Custom Domains ← Add**, חכו ל-**Active**.
-
-This URL (without a trailing `/`) is **R2_PUBLIC_BASE**. / הכתובת הזאת (בלי `/` בסוף) היא **R2_PUBLIC_BASE**.
-
-### 5. Account ID / מזהה החשבון
-
-R2 overview page → right side **Account Details** → **Account ID** → copy. (It is also the first part of the S3 API
-address `https://<ACCOUNT_ID>.r2.cloudflarestorage.com`.) This is **R2_ACCOUNT_ID**.
-בעמוד הראשי של R2, בצד ימין **Account Details ← Account ID** ← העתיקו. זה **R2_ACCOUNT_ID**.
-
-### 6. API token for CI (this bucket only) / טוקן API ל-CI (רק לדלי הזה)
-
-1. R2 overview → **Account Details** → **API Tokens: Manage** → **Create Account API token**
-   (or **Create User API token**).
-2. Name: `jarves-ci`. **Permissions: Object Read & Write**. **Specify bucket(s): Apply to specific buckets only →
-   `jarves-releases`**. TTL: Forever (or a date you will remember to renew). Client IP filtering: leave empty
-   (GitHub's runners change IPs). → **Create API Token**.
-3. The next page shows the values **once**. Copy:
-   - **Access Key ID** → **R2_ACCESS_KEY_ID**
-   - **Secret Access Key** → **R2_SECRET_ACCESS_KEY**
-   (Ignore "Token value" and the endpoint; they are not needed.)
-
-שם: `jarves-ci` ← הרשאות: **Object Read & Write** ← **Apply to specific buckets only** ← `jarves-releases` ←
-**Create API Token**. בעמוד הבא הערכים מוצגים **פעם אחת בלבד**: העתיקו **Access Key ID** ו-**Secret Access Key**.
-
-### 7. Signing key / מפתח חתימה (on your PC, in the repo folder)
+### 3. Signing key / מפתח חתימה (on your PC, in the repo folder)
 
 PowerShell, in `C:\work\jarvis`:
 
@@ -119,84 +100,79 @@ core\.venv\Scripts\python.exe packaging\release.py keygen --out "$env:USERPROFIL
 It writes the **private** key to that file (it refuses to overwrite an existing key) and prints the **public** key
 and its key id. / הפקודה כותבת את המפתח **הפרטי** לקובץ ומדפיסה את המפתח **הציבורי**.
 
-- Save the `.pem` file in your password manager (if it is lost, PCs need a new app version to trust a new key).
+- Save the `.pem` file in your password manager. If it is lost, PCs need a new app version to trust a new key.
   שמרו את קובץ ה-`.pem` במנהל הסיסמאות.
-- The printed public key is **not secret**: give it to Claude (or paste it into `UPDATE_PUBLIC_KEYS` in
-  `core/src/jarves/updates.py`) and commit, so the next installer trusts it. Until then hosted updates report
-  "unavailable" on purpose. / המפתח הציבורי **אינו סודי**: מסרו אותו ל-Claude כדי שייכנס לגרסה הבאה.
+- The printed public key is **not secret**. Give it to Claude (or paste it into `UPDATE_PUBLIC_KEYS` in
+  `core/src/jarves/updates.py`) and merge, so the next installer trusts it and checks the public repo by default.
+  המפתח הציבורי **אינו סודי**: מסרו אותו ל-Claude כדי שייכנס לגרסה הבאה.
 
-### 8. GitHub secrets / סודות ב-GitHub (values typed by you)
+### 4. GitHub secrets on the private repo / סודות במאגר הפרטי (values typed by you)
 
-PowerShell, logged in with `gh auth login`. Each `gh secret set` asks "Paste your secret" — paste the value and press
+PowerShell, logged in with `gh auth login`. Each `gh secret set` asks "Paste your secret". Paste the value and press
 Enter. The values never appear on screen or in the repo.
-כל פקודה מבקשת "Paste your secret" — הדביקו את הערך ולחצו Enter.
+כל פקודה מבקשת "Paste your secret". הדביקו את הערך ולחצו Enter.
 
 ```powershell
-gh secret set R2_ACCOUNT_ID        --repo igalgerman/JARVIS
-gh secret set R2_ACCESS_KEY_ID     --repo igalgerman/JARVIS
-gh secret set R2_SECRET_ACCESS_KEY --repo igalgerman/JARVIS
-gh secret set R2_BUCKET            --repo igalgerman/JARVIS     # jarves-releases
-gh secret set R2_PUBLIC_BASE       --repo igalgerman/JARVIS     # https://pub-....r2.dev (no trailing /)
+gh secret set RELEASES_TOKEN --repo igalgerman/JARVIS
 Get-Content -Raw "$env:USERPROFILE\jarves-update-signing.pem" | gh secret set JARVES_UPDATE_SIGNING_KEY --repo igalgerman/JARVIS
-gh secret list --repo igalgerman/JARVIS                        # names only; all 6 should be listed
+gh secret list --repo igalgerman/JARVIS          # names only; both should be listed
 ```
 
-Optional, public (not secret) repo variables / משתנים אופציונליים, לא סודיים:
+Optional, only if the releases repo has a different name (public variable, not a secret):
 
 ```powershell
-gh variable set R2_PREFIX --repo igalgerman/JARVIS --body "jarves/windows"        # or a hard-to-guess folder
-gh variable set JARVES_UPDATE_BASE_URL --repo igalgerman/JARVIS --body "https://pub-....r2.dev/jarves/windows"
+gh variable set RELEASES_REPO --repo igalgerman/JARVIS --body "igalgerman/jarvis-releases"
 ```
 
-`JARVES_UPDATE_BASE_URL` = `R2_PUBLIC_BASE` + `/` + prefix (default prefix `jarves/windows`). When set, every new
-installer checks R2 by default, so other PCs need no config edit.
-כשמוגדר, כל מתקין חדש בודק עדכונים ב-R2 מעצמו, בלי לערוך הגדרות במחשבים האחרים.
+Without the secrets, the step logs `Public releases: SKIPPED ...` and succeeds. The private release is still
+published, as before. With only one of the two it shows a yellow warning naming the missing one, and also skips.
+בלי הסודות השלב כותב `SKIPPED` ומצליח; הגרסה במאגר הפרטי ממשיכה להתפרסם כרגיל.
 
-Without the secrets the R2 step logs `R2 hosting: SKIPPED` and the GitHub Release is still published (fallback).
-With only some of them it shows a yellow warning naming the missing ones and also skips.
-
-### 9. Test / בדיקה
+### 5. Test / בדיקה
 
 1. Merge a PR to `main` (or re-run the last **jarves-package** run: Actions → jarves-package → Re-run all jobs).
-2. Open the run → step **Host on Cloudflare R2**. Expected log:
-   `R2 hosting: uploaded JARVES-Setup-<v>.exe (...) + signed latest.json (key <id>) -> https://.../latest.json`.
-3. Open `https://<R2_PUBLIC_BASE>/jarves/windows/latest.json` in a browser: JSON with `version`, `sha256`, `url`.
-4. In Cloudflare → R2 → `jarves-releases` → **Objects**: the installer, its `.sha256`, `latest.json`.
+2. Open the run → step **Publish to the public releases repo**. Expected log:
+   `Public releases: published win-v<v> in igalgerman/jarvis-releases (... + signed latest.json, key <id>) -> ...`
+3. Open https://github.com/igalgerman/jarvis-releases/releases: the release with 3 files, marked **Latest**.
+4. Open https://github.com/igalgerman/jarvis-releases/releases/latest/download/latest.json in a browser: it
+   downloads JSON with `version`, `sha256`, `url`.
 
-### 10. Another PC / מחשב אחר
+### 6. Another PC / מחשב אחר
 
-1. Download the installer from the `url` inside `latest.json`. Check it in PowerShell:
-   `Get-FileHash .\JARVES-Setup-<v>.exe` must equal `sha256` in `latest.json`. Install (SmartScreen: More info → Run
-   anyway; the installer is not code-signed yet).
-2. If the build has no default source (variable `JARVES_UPDATE_BASE_URL` was not set), add to
+1. Download `JARVES-Setup-<v>.exe` from https://github.com/igalgerman/jarvis-releases/releases/latest
+   (no GitHub account needed). Check it in PowerShell: `Get-FileHash .\JARVES-Setup-<v>.exe` must equal the SHA256
+   in the release notes. Install it (SmartScreen: More info → Run anyway; the installer is not code-signed yet).
+2. `jarvis update check` → "Up to date" or "New version ...". `jarvis update install` asks "yes" first.
+   Builds made after step 3's public key was added check the public repo with no config change.
+3. Custom hosting (optional): any HTTPS folder that serves the same signed `latest.json` works:
    `%LOCALAPPDATA%\jarves\config.toml`:
    ```toml
    [update]
-   base_url = "https://pub-....r2.dev/jarves/windows"
+   base_url = "https://example.org/jarves"      # the folder that holds latest.json
    ```
-3. `jarvis update check` → "Up to date" or "New version ...". `jarvis update install` asks "yes" first.
-   הורידו מהקישור שב-`latest.json`, בדקו `Get-FileHash`, התקינו. אחר כך `jarvis update check`.
+
+הורידו מ-https://github.com/igalgerman/jarvis-releases/releases/latest (לא צריך חשבון GitHub), בדקו
+`Get-FileHash`, התקינו. אחר כך `jarvis update check`. ההתקנה תמיד שואלת קודם.
 
 ## Keep / pin a version / שמירת גרסה
 
-R2 keeps the newest 3 installers. To keep an older one as a rollback point, create a text file `pinned.txt` with one
-version per line (e.g. `0.1.0.57`) and upload it to the same folder (bucket → Objects → `jarves/windows/` →
-**Upload**). Pinned versions are never deleted and do not count towards the 3. Nothing outside
-`<prefix>/JARVES-Setup-*` is ever deleted.
-הדלי שומר את 3 הגרסאות האחרונות. כדי לשמור גרסה ישנה, העלו `pinned.txt` עם מספר גרסה בכל שורה.
+Open the release in `jarvis-releases` → **Edit** (pencil) → add `[pinned]` to the title or the notes → **Update
+release**. Pinned releases are never deleted and do not count towards the 3.
+פתחו את הגרסה ← **Edit** ← הוסיפו `[pinned]` לכותרת או להערות ← **Update release**.
 
 ## Rotate or revoke / החלפה או ביטול
 
-- R2 token leaked: Cloudflare → R2 → Manage API tokens → **Delete** → create a new one (step 6) → `gh secret set` again.
-  The signature still protects PCs meanwhile.
+- Token leaked or expired: https://github.com/settings/personal-access-tokens → the token → **Regenerate** (or
+  **Delete** and create a new one, step 2) → `gh secret set RELEASES_TOKEN --repo igalgerman/JARVIS` again. The
+  signature still protects PCs meanwhile.
 - Signing key leaked: run `keygen` again, put the new public key in `UPDATE_PUBLIC_KEYS` **and remove the old one**,
-  replace the secret `JARVES_UPDATE_SIGNING_KEY`, merge. PCs still on an older build trust the old key until they
-  install the new build, so install it on each PC by hand once (download + `Get-FileHash`, step 10).
+  replace the secret `JARVES_UPDATE_SIGNING_KEY`, merge. PCs on an older build trust the old key until they install
+  the new build, so install it on each PC by hand once (download + `Get-FileHash`, step 6).
 - Planned rotation (no leak): keep both keys in `UPDATE_PUBLIC_KEYS` for one release, then switch the secret.
 
 ## Files / קבצים
 
-`.github/workflows/package.yml` (step "Host on Cloudflare R2"), `packaging/release.py` (`keygen`, `r2-publish`,
-SigV4 S3 client, Ed25519 signing, retention), `core/src/jarves/updates.py` (hosted source, signature + SHA256 +
+`.github/workflows/package.yml` (step "Publish to the public releases repo"), `packaging/release.py` (`keygen`,
+`public-publish`, Ed25519 signing, retention), `core/src/jarves/updates.py` (public source, signature + SHA256 +
 size), `core/src/jarves/config.py` (`[update] base_url`, `public_key`), `core/tests/test_release_hosting.py`
-(AWS SigV4 test vectors, local S3 stub, signing round trip; no Cloudflare).
+(local fake GitHub API, signing round trip, CI-to-app end to end; no network).

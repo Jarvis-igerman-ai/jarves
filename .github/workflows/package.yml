@@ -55,18 +55,15 @@ jobs:
             --notes-file notes.md --latest dist/JARVES-Setup-*.exe dist/JARVES-Setup-*.exe.sha256 dist/build-info.json
       - name: Retention - keep the newest 3 (pinned exempt)
         run: python3 packaging/release.py prune --keep 3
-      # WP-O (docs/RELEASE_HOSTING.md): the same verified files + a signed latest.json to Cloudflare R2, so PCs
-      # without GitHub access can download and check for updates. Runs even if the GitHub steps failed (it only
-      # needs the verified artifact). Without the secrets it logs "SKIPPED" and succeeds; GitHub stays the fallback.
-      # Retention in R2: newest 3 installers; versions in <prefix>/pinned.txt are never deleted.
-      - name: Host on Cloudflare R2 (signed latest.json, keep newest 3)
+      # WP-O (docs/RELEASE_HOSTING.md): the same verified installer + a signed latest.json as a release of the
+      # separate PUBLIC repo (release files only, no source), so PCs without access to this private repo can
+      # download and check for updates. Free. Runs even if the private-repo steps failed (it only needs the
+      # verified artifact). Without the secrets it logs "SKIPPED" and succeeds; the private release stays the
+      # fallback. Retention there: newest 3 releases; "[pinned]" in a release's title/notes keeps it.
+      - name: Publish to the public releases repo (signed latest.json, keep newest 3)
         if: ${{ always() && steps.verify.outcome == 'success' }}
         env:
-          R2_ACCOUNT_ID: ${{ secrets.R2_ACCOUNT_ID }}
-          R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
-          R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
-          R2_BUCKET: ${{ secrets.R2_BUCKET }}
-          R2_PUBLIC_BASE: ${{ secrets.R2_PUBLIC_BASE }}
-          R2_PREFIX: ${{ vars.R2_PREFIX }}
+          RELEASES_TOKEN: ${{ secrets.RELEASES_TOKEN }}
+          RELEASES_REPO: ${{ vars.RELEASES_REPO }}
           JARVES_UPDATE_SIGNING_KEY: ${{ secrets.JARVES_UPDATE_SIGNING_KEY }}
-        run: python3 packaging/release.py r2-publish --dir dist --keep 3
+        run: python3 packaging/release.py public-publish --dir dist --keep 3

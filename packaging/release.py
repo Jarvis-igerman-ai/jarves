@@ -10,20 +10,20 @@ Retention never touches: drafts, releases with other tag prefixes (e.g. future `
 or notes contain "[pinned]" (rollback pins; they also do not count towards the 3), and any other artifact name.
 Needs GITHUB_TOKEN (contents: write, actions: write) and GITHUB_REPOSITORY.
 
-Release hosting outside the private repo (WP-O, docs/RELEASE_HOSTING.md): Cloudflare R2 through its S3 API.
+Release hosting outside the private repo (WP-O, docs/RELEASE_HOSTING.md): a separate PUBLIC GitHub repo that holds
+only release files (default igalgerman/jarvis-releases, no source code). Free; no card.
   keygen --out FILE                     new Ed25519 signing key (PEM, for the CI secret) + the public key to embed
-  r2-publish --dir DIST [--keep 3]      upload installer + .sha256, then the signed latest.json, then prune old
-                                        installers in R2. Skips cleanly (exit 0, clear log) without the secrets.
+  public-publish --dir DIST [--keep 3]  release win-v<v> there (draft -> installer + .sha256 + signed latest.json ->
+                                        published as latest), then keep the newest 3 (pinned exempt). Needs secrets
+                                        RELEASES_TOKEN (fine-grained, Contents: write on that repo only) and
+                                        JARVES_UPDATE_SIGNING_KEY; skips cleanly (exit 0, clear log) without them.
 
-R2 layout (public bucket, read-only for the world; only CI can write):
-  <prefix>/JARVES-Setup-<v>.exe  <prefix>/JARVES-Setup-<v>.exe.sha256  <prefix>/latest.json  [<prefix>/pinned.txt]
 latest.json = {"format": 1, "manifest": {version, commit, built, sha256, size, installer, url, ...},
                "signature": {"alg": "ed25519", "key_id", "sig"}}; the signature covers SIGN_DOMAIN + the canonical
-JSON of "manifest" (sorted keys, no spaces, ASCII). The app (core/src/jarves/updates.py) holds the public key and
-refuses an unsigned/mis-signed manifest, then checks the installer's SHA256 + size from the signed manifest.
-Retention in R2: newest `keep` versions + every version listed in <prefix>/pinned.txt (one per line) + the one in
-latest.json; nothing outside `<prefix>/JARVES-Setup-*` is ever deleted. S3 signing (SigV4) is stdlib; Ed25519 uses
-`cryptography` when importable, else the `openssl` CLI (OpenSSL 3, present on the Ubuntu runners).
+JSON of "manifest" (sorted keys, no spaces, ASCII). The app (core/src/jarves/updates.py) downloads
+https://github.com/<repo>/releases/latest/download/latest.json anonymously, refuses an unsigned/mis-signed
+manifest, then checks the installer's SHA256 + size from the signed manifest. Ed25519 uses `cryptography` when
+importable, else the `openssl` CLI (OpenSSL 3, present on the Ubuntu runners).
 """
 from __future__ import annotations
 
@@ -31,7 +31,6 @@ import argparse
 import base64
 import datetime as _dt
 import hashlib
-import hmac
 import json
 import os
 import re
@@ -41,17 +40,15 @@ import tempfile
 import urllib.error
 import urllib.parse
 import urllib.request
-import xml.etree.ElementTree as ET
 from pathlib import Path
 
 TAG_PREFIX = "win-v"
 ARTIFACT = "jarves-windows-installer-main"
 PIN = "[pinned]"
 SIGN_DOMAIN = b"jarves-update-manifest-v1\n"      # same constant in core/src/jarves/updates.py
-R2_SECRETS = ("R2_ACCOUNT_ID", "R2_ACCESS_KEY_ID", "R2_SECRET_ACCESS_KEY", "R2_BUCKET", "R2_PUBLIC_BASE",
-              "JARVES_UPDATE_SIGNING_KEY")
-R2_DEFAULT_PREFIX = "jarves/windows"
-EXE_RE = re.compile(r"^JARVES-Setup-(\d+(?:\.\d+){1,3})\.exe(\.sha256)?$")
+PUBLIC_SECRETS = ("RELEASES_TOKEN", "JARVES_UPDATE_SIGNING_KEY")
+DEFAULT_RELEASES_REPO = "igalgerman/jarvis-releases"   # same default in core/src/jarves/updates.py
+MANIFEST = "latest.json"
 
 
 def version_key(tag: str) -> tuple[int, ...]:
@@ -63,7 +60,10 @@ def version_key(tag: str) -> tuple[int, ...]:
 
 
 def is_pinned(r: dict) -> bool:
-    return PIN in (r.get("name") or "") or PIN in (r.get("body") or "")
+    # The generated notes explain pinning as `[pinned]` (in backticks); that mention is not a pin, or every
+    # release would be kept forever.
+    text = f"{r.get('name') or ''}\n{r.get('body') or ''}".replace(f"`{PIN}`", "")
+    return PIN in text
 
 
 def releases_to_prune(releases: list[dict], keep: int = 3) -> list[dict]:
@@ -162,101 +162,63 @@ def prune(keep: int, dry: bool) -> int:
     return 0
 
 
-# ---------------------------------------------------------------------- R2 (S3 API, SigV4, stdlib)
-def _q(s: str, safe: str = "") -> str:
-    return urllib.parse.quote(s, safe=safe)        # RFC 3986 unreserved stay as-is (Python 3.7+)
-
-
-def sigv4(method: str, url: str, headers: dict, payload_sha256: str, access_key: str, secret_key: str,
-          region: str = "auto", service: str = "s3", now: _dt.datetime | None = None) -> dict:
-    """AWS Signature Version 4 headers for one request (R2 accepts region "auto"). Returns the headers to send."""
-    now = now or _dt.datetime.now(_dt.timezone.utc)
-    amz_date = now.strftime("%Y%m%dT%H%M%SZ")
-    day = amz_date[:8]
-    u = urllib.parse.urlsplit(url)
-    h = {k.lower().strip(): " ".join(str(v).split()) for k, v in headers.items()}
-    h.update({"host": u.netloc, "x-amz-date": amz_date, "x-amz-content-sha256": payload_sha256})
-    names = sorted(h)
-    query = sorted((_q(k), _q(v)) for k, v in urllib.parse.parse_qsl(u.query, keep_blank_values=True))
-    canonical = "\n".join([method, _q(urllib.parse.unquote(u.path) or "/", "/"), "&".join(f"{k}={v}" for k, v in query),
-                           "".join(f"{k}:{h[k]}\n" for k in names), ";".join(names), payload_sha256])
-    scope = f"{day}/{region}/{service}/aws4_request"
-    to_sign = "\n".join(["AWS4-HMAC-SHA256", amz_date, scope, hashlib.sha256(canonical.encode()).hexdigest()])
-    key = ("AWS4" + secret_key).encode()
-    for part in (day, region, service, "aws4_request"):
-        key = hmac.new(key, part.encode(), hashlib.sha256).digest()
-    sig = hmac.new(key, to_sign.encode(), hashlib.sha256).hexdigest()
-    out = {k: v for k, v in headers.items() if k.lower() != "host"}
-    out.update({"x-amz-date": amz_date, "x-amz-content-sha256": payload_sha256,
-                "Authorization": f"AWS4-HMAC-SHA256 Credential={access_key}/{scope}, SignedHeaders={';'.join(names)}, "
-                                 f"Signature={sig}"})
-    return out
-
-
-class S3Error(Exception):
+# ---------------------------------------------------------------------- public releases repo (GitHub REST, urllib)
+class GitHubError(Exception):
     pass
 
 
-class S3:
-    """The few S3 calls the release needs, path-style (`<endpoint>/<bucket>/<key>`), as R2 documents them."""
+class GitHub:
+    """Minimal GitHub REST client for the PUBLIC releases repo, authenticated with RELEASES_TOKEN (fine-grained,
+    Contents: write on that one repo). `api_base` is overridable for the offline tests' local stub."""
 
-    def __init__(self, endpoint: str, bucket: str, access_key: str, secret_key: str, region: str = "auto"):
-        self.endpoint, self.bucket = endpoint.rstrip("/"), bucket
-        self.access_key, self.secret_key, self.region = access_key, secret_key, region
+    def __init__(self, repo: str, token: str, api_base: str = "https://api.github.com"):
+        self.repo, self.token, self.api_base = repo, token, api_base.rstrip("/")
 
-    def _call(self, method: str, key: str = "", query: dict | None = None, body: bytes | Path | None = None,
-              headers: dict | None = None) -> tuple[int, bytes]:
-        url = f"{self.endpoint}/{_q(self.bucket)}" + (f"/{_q(key, '/')}" if key else "")
-        if query:
-            url += "?" + "&".join(f"{_q(k)}={_q(str(v))}" for k, v in query.items())
-        headers = dict(headers or {})
-        if isinstance(body, Path):
-            digest, size = sha256(body), body.stat().st_size
-        else:
-            digest, size = hashlib.sha256(body or b"").hexdigest(), len(body or b"")
-        signed = sigv4(method, url, headers, digest, self.access_key, self.secret_key, self.region)
+    def call(self, method: str, url: str, data: bytes | dict | None = None, content_type: str = "application/json",
+             ok404: bool = False) -> object:
+        if not url.startswith("http"):
+            url = f"{self.api_base}/repos/{self.repo}{url}"
+        body = json.dumps(data).encode() if isinstance(data, dict) else data
+        h = {"Authorization": f"Bearer {self.token}", "Accept": "application/vnd.github+json",
+             "X-GitHub-Api-Version": "2022-11-28", "User-Agent": "jarves-release"}
         if body is not None:
-            signed["Content-Length"] = str(size)
-        fh = body.open("rb") if isinstance(body, Path) else None
+            h["Content-Type"] = content_type
+        req = urllib.request.Request(url, data=body, method=method, headers=h)
         try:
-            req = urllib.request.Request(url, data=fh if fh else body, method=method, headers=signed)
-            try:
-                with urllib.request.urlopen(req, timeout=600) as r:
-                    return r.status, r.read()
-            except urllib.error.HTTPError as e:
-                return e.code, e.read()
-        finally:
-            if fh:
-                fh.close()
+            with urllib.request.urlopen(req, timeout=600) as r:
+                raw = r.read()
+        except urllib.error.HTTPError as e:
+            if ok404 and e.code == 404:
+                return None
+            msg = e.read()[:300].decode("utf-8", "replace")
+            raise GitHubError(f"{method} {url.split('?')[0]}: HTTP {e.code} {msg}") from None
+        return json.loads(raw) if raw else {}
 
-    def _ok(self, what: str, code: int, data: bytes) -> bytes:
-        if not 200 <= code < 300:
-            msg = re.search(rb"<Code>([^<]+)</Code>", data or b"")
-            raise S3Error(f"{what}: HTTP {code} {msg.group(1).decode() if msg else ''}".strip())
-        return data
-
-    def put(self, key: str, body: bytes | Path, content_type: str, cache_control: str = "") -> None:
-        h = {"Content-Type": content_type, **({"Cache-Control": cache_control} if cache_control else {})}
-        self._ok(f"PUT {key}", *self._call("PUT", key, body=body, headers=h))
-
-    def get(self, key: str) -> bytes | None:
-        code, data = self._call("GET", key)
-        return None if code == 404 else self._ok(f"GET {key}", code, data)
-
-    def delete(self, key: str) -> None:
-        self._ok(f"DELETE {key}", *self._call("DELETE", key))
-
-    def list(self, prefix: str) -> list[str]:
-        keys, token = [], None
+    def releases(self) -> list[dict]:
+        out, page = [], 1
         while True:
-            q = {"list-type": "2", "prefix": prefix, **({"continuation-token": token} if token else {})}
-            root = ET.fromstring(self._ok(f"LIST {prefix}", *self._call("GET", query=q)))
-            for e in root.iter():
-                e.tag = e.tag.rsplit("}", 1)[-1]           # drop the S3 XML namespace
-            keys += [c.findtext("Key") for c in root.findall("Contents")]
-            token = root.findtext("NextContinuationToken")
-            if (root.findtext("IsTruncated") or "").lower() != "true" or not token:
-                return keys
+            items = self.call("GET", f"/releases?per_page=100&page={page}") or []
+            out += items
+            if len(items) < 100:
+                return out
+            page += 1
+
+    def upload(self, rel: dict, name: str, data: bytes, content_type: str) -> None:
+        for a in rel.get("assets") or []:
+            if a.get("name") == name:                       # re-run: replace a half-uploaded asset
+                self.call("DELETE", f"/releases/assets/{a['id']}")
+        base = re.sub(r"\{.*\}$", "", rel["upload_url"])
+        self.call("POST", f"{base}?name={urllib.parse.quote(name)}", data, content_type)
+
+
+def public_notes(info: dict) -> str:
+    return (f"JARVES {info['version']} for Windows (64-bit), stable channel. Built {info.get('built')} (UTC) from "
+            f"commit {str(info.get('commit'))[:12]}.\n\n"
+            f"- Installer: `{info['installer']}` ({round(info['size'] / 1048576)} MB)\n"
+            f"- SHA256: `{info['sha256']}` (PowerShell: `Get-FileHash {info['installer']}`)\n"
+            f"- `{MANIFEST}` is the Ed25519-signed update manifest JARVES checks before offering an update.\n\n"
+            "Per-user install, no admin. **Not code-signed yet**: SmartScreen -> More info -> Run anyway.\n"
+            f"Only the newest 3 releases are kept; `{PIN}` in a release's title or notes keeps it.\n")
 
 
 # ---------------------------------------------------------------------- signed manifest (Ed25519)
@@ -330,79 +292,54 @@ def build_manifest(info: dict, exe: Path, url: str, now: _dt.datetime | None = N
             "published": (now or _dt.datetime.now(_dt.timezone.utc)).isoformat(timespec="seconds")}
 
 
-# ---------------------------------------------------------------------- R2 retention + publish
-def _vt(v: str) -> tuple[int, ...]:
-    parts = tuple(int(x) for x in v.split("."))
-    return parts + (0,) * (4 - len(parts))
-
-
-def parse_pins(text: str) -> set[str]:
-    """pinned.txt: one version per line ("0.1.0.5", "win-v0.1.0.5" or the installer name); '#' starts a comment."""
-    out = set()
-    for line in (text or "").splitlines():
-        m = re.search(r"\d+(?:\.\d+){1,3}", line.split("#", 1)[0])
-        if m:
-            out.add(m.group(0))
-    return out
-
-
-def r2_to_prune(keys: list[str], prefix: str, keep: int, pinned: set[str], current: str | None) -> list[str]:
-    """Installer objects (+ their .sha256) beyond the newest `keep` versions. Pinned versions and the version in
-    latest.json are always kept (pins do not count towards `keep`); any other key (other folders, latest.json, pinned.txt) is never listed."""
-    versions: dict[str, list[str]] = {}
-    for k in keys:
-        head, _, name = k.rpartition("/")
-        m = EXE_RE.match(name)
-        if head == prefix and m:
-            versions.setdefault(m.group(1), []).append(k)
-    rest = sorted((v for v in versions if v not in pinned), key=_vt, reverse=True)
-    return sorted(k for v in rest[keep:] if v != current for k in versions[v])
-
-
-def r2_publish(dist: Path, keep: int = 3, env: dict | None = None, s3: S3 | None = None) -> int:
+# ---------------------------------------------------------------------- publish to the public releases repo
+def public_publish(dist: Path, keep: int = 3, env: dict | None = None, gh: GitHub | None = None) -> int:
+    """Release the verified installer in the public releases repo: draft -> installer + .sha256 + signed
+    latest.json -> published as "latest" -> prune to the newest `keep` (pinned exempt). Exit 0 + a clear log
+    without the secrets (the private-repo release stays the fallback)."""
     env = os.environ if env is None else env
-    missing = [k for k in R2_SECRETS if not str(env.get(k) or "").strip()]
-    if len(missing) == len(R2_SECRETS):
-        print("R2 hosting: SKIPPED - no R2 secrets are set, so the GitHub Release is the only download "
-              "(set them up: docs/RELEASE_HOSTING.md)")
+    missing = [k for k in PUBLIC_SECRETS if not str(env.get(k) or "").strip()]
+    if len(missing) == len(PUBLIC_SECRETS):
+        print("Public releases: SKIPPED - secrets RELEASES_TOKEN and JARVES_UPDATE_SIGNING_KEY are not set, so the "
+              "private-repo release is the only download (set them up: docs/RELEASE_HOSTING.md)")
         return 0
     if missing:
-        print(f"::warning::R2 hosting: SKIPPED - missing secrets {', '.join(missing)} (docs/RELEASE_HOSTING.md); "
-              "the GitHub Release was still published")
+        print(f"::warning::Public releases: SKIPPED - missing secret {', '.join(missing)} "
+              "(docs/RELEASE_HOSTING.md); the private-repo release was still published")
         return 0
+    repo = str(env.get("RELEASES_REPO") or "").strip() or DEFAULT_RELEASES_REPO
+    if not re.fullmatch(r"[\w.-]+/[\w.-]+", repo):
+        raise SystemExit(f"Public releases: bad RELEASES_REPO {repo!r}")
     info = json.loads((dist / "build-info.json").read_text(encoding="utf-8-sig"))
     exe = dist / str(info["installer"])
     if sha256(exe) != info.get("sha256"):
-        raise SystemExit("R2 hosting: installer SHA256 does not match build-info.json; not uploading")
-    prefix = (str(env.get("R2_PREFIX") or "").strip() or R2_DEFAULT_PREFIX).strip("/")
-    base = f"{env['R2_PUBLIC_BASE'].strip().rstrip('/')}/{prefix}"
-    if not base.startswith("https://"):
-        raise SystemExit("R2 hosting: R2_PUBLIC_BASE must start with https://")
-    s3 = s3 or S3(str(env.get("R2_ENDPOINT") or f"https://{env['R2_ACCOUNT_ID'].strip()}.r2.cloudflarestorage.com"),
-                  env["R2_BUCKET"].strip(), env["R2_ACCESS_KEY_ID"].strip(), env["R2_SECRET_ACCESS_KEY"].strip())
-    old = s3.get(f"{prefix}/latest.json")
-    try:
-        old_v = json.loads(old)["manifest"]["version"] if old else None
-    except (ValueError, KeyError, TypeError):
-        old_v = None
-    if old_v and _vt(old_v) > _vt(info["version"]):
-        print(f"R2 hosting: latest.json already has the newer {old_v}; not replacing it with {info['version']}")
+        raise SystemExit("Public releases: installer SHA256 does not match build-info.json; not uploading")
+    gh = gh or GitHub(repo, env["RELEASES_TOKEN"].strip())
+    tag = f"{TAG_PREFIX}{info['version']}"
+    latest = gh.call("GET", "/releases/latest", ok404=True)
+    newest = version_key((latest or {}).get("tag_name", ""))
+    if newest and newest > version_key(tag):
+        print(f"Public releases: {repo} already has the newer {latest['tag_name']}; not publishing {tag}")
         return 0
-    envelope = sign_manifest(build_manifest(info, exe, f"{base}/{exe.name}"), env["JARVES_UPDATE_SIGNING_KEY"])
-    s3.put(f"{prefix}/{exe.name}", exe, "application/vnd.microsoft.portable-executable",
-           "public, max-age=31536000, immutable")
-    s3.put(f"{prefix}/{exe.name}.sha256", f"{info['sha256']}  {exe.name}\n".encode(), "text/plain; charset=utf-8",
-           "public, max-age=31536000, immutable")
-    # latest.json last: a PC never sees a manifest whose installer is not uploaded yet.
-    s3.put(f"{prefix}/latest.json", json.dumps(envelope, indent=1).encode(), "application/json",
-           "public, max-age=300")
-    print(f"R2 hosting: uploaded {exe.name} ({info['size']} bytes) + signed latest.json "
-          f"(key {envelope['signature']['key_id']}) -> {base}/latest.json")
-    pins = parse_pins((s3.get(f"{prefix}/pinned.txt") or b"").decode("utf-8", "replace"))
-    for k in r2_to_prune(s3.list(f"{prefix}/"), prefix, keep, pins, info["version"]):
-        print(f"R2 hosting: delete old {k}")
-        s3.delete(k)
-    print(f"R2 hosting: done. On each PC: config.toml [update] base_url = \"{base}\"")
+    url = f"https://github.com/{repo}/releases/download/{tag}/{exe.name}"
+    envelope = sign_manifest(build_manifest(info, exe, url), env["JARVES_UPDATE_SIGNING_KEY"])
+    rel = gh.call("GET", f"/releases/tags/{tag}", ok404=True)
+    if rel is None:     # a draft first: nobody sees a release whose files are not all uploaded yet
+        rel = gh.call("POST", "/releases", {"tag_name": tag, "name": f"JARVES {info['version']}",
+                                            "body": public_notes(info), "draft": True, "prerelease": False})
+    gh.upload(rel, exe.name, exe.read_bytes(), "application/vnd.microsoft.portable-executable")
+    gh.upload(rel, exe.name + ".sha256", f"{info['sha256']}  {exe.name}\n".encode(), "text/plain")
+    gh.upload(rel, MANIFEST, json.dumps(envelope, indent=1).encode(), "application/json")
+    gh.call("PATCH", f"/releases/{rel['id']}", {"draft": False, "make_latest": "true"})
+    print(f"Public releases: published {tag} in {repo} ({info['size']} bytes + signed {MANIFEST}, key "
+          f"{envelope['signature']['key_id']}) -> https://github.com/{repo}/releases/latest/download/{MANIFEST}")
+    for r in releases_to_prune(gh.releases(), keep):
+        if r.get("tag_name") == tag:
+            continue
+        print(f"Public releases: delete old {r['tag_name']}")
+        gh.call("DELETE", f"/releases/{r['id']}")
+        if gh.call("DELETE", f"/git/refs/tags/{r['tag_name']}", ok404=True) is None:
+            print(f"  tag {r['tag_name']} was already gone")
     return 0
 
 
@@ -411,7 +348,7 @@ def main(argv: list[str] | None = None) -> int:
     sub = ap.add_subparsers(dest="cmd", required=True)
     kg = sub.add_parser("keygen")
     kg.add_argument("--out", type=Path, required=True)
-    rp = sub.add_parser("r2-publish")
+    rp = sub.add_parser("public-publish")
     rp.add_argument("--dir", type=Path, required=True)
     rp.add_argument("--keep", type=int, default=3)
     v = sub.add_parser("verify")
@@ -431,10 +368,10 @@ def main(argv: list[str] | None = None) -> int:
         print(f"Public key (not secret, embed in core/src/jarves/updates.py UPDATE_PUBLIC_KEYS): {pub}")
         print(f"Key id: {key_id(base64.b64decode(pub))}")
         return 0
-    if a.cmd == "r2-publish":
+    if a.cmd == "public-publish":
         if a.keep < 1:
             raise SystemExit("--keep must be at least 1")
-        return r2_publish(a.dir, a.keep)
+        return public_publish(a.dir, a.keep)
     if a.cmd == "verify":
         info = verify(a.dir, a.commit)
         print(f"VERIFY OK: {info['installer']} {info['version']} {info['sha256']}")

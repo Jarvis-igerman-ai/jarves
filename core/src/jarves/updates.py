@@ -15,14 +15,15 @@ Private repository: anonymous requests cannot see the releases (GitHub answers 4
 fine-grained token in secrets.env as JARVES_UPDATE_TOKEN (never shipped in the installer); otherwise the check
 reports "unavailable" truthfully instead of "up to date".
 
-Hosted releases (WP-O, docs/RELEASE_HOSTING.md): config `[update] base_url = "https://.../jarves/windows"` (or env
-JARVES_UPDATE_BASE_URL) switches the source to a public Cloudflare R2 folder that package.yml fills. The check reads
-<base_url>/latest.json over HTTPS: {"manifest": {...}, "signature": {"alg": "ed25519", "key_id", "sig"}}. The
-signature (made in CI with a key that exists only as a GitHub secret) must verify against a public key built into
-this app (UPDATE_PUBLIC_KEYS, plus an optional config `update.public_key`); without a valid signature the check is
-"unavailable", never "update available". The signed manifest pins the installer's SHA256 and size, so the download
-can come from any mirror. The path is public and unguessable-but-not-secret; integrity rests on the signature, not
-on the URL. No GitHub token is ever sent to that host.
+Public releases (WP-O, docs/RELEASE_HOSTING.md): package.yml also publishes every green `main` build to a separate
+PUBLIC repo that holds only release files (DEFAULT_RELEASES_REPO). Once this build trusts a signing key, the check
+reads https://github.com/<repo>/releases/latest/download/latest.json anonymously (a plain download, not the REST
+API, so no rate limit applies; at most once a day anyway): {"manifest": {...}, "signature": {"alg": "ed25519",
+"key_id", "sig"}}. The signature (made in CI with a key that exists only as a GitHub secret) must verify against a
+public key built into this app (UPDATE_PUBLIC_KEYS, plus an optional config `update.public_key`); without a valid
+signature the check is "unavailable", never "update available". The signed manifest pins the installer's SHA256
+and size. Config `[update] base_url` (or env JARVES_UPDATE_BASE_URL) points the same check at any other HTTPS folder
+holding latest.json (custom hosting). No GitHub token is ever sent for this source.
 
 Interface for other packages (tray, voice greeting, scheduler):
     from jarves.updates import UpdateChecker
@@ -58,6 +59,11 @@ SIGN_DOMAIN = b"jarves-update-manifest-v1\n"      # same constant in packaging/r
 # half exists only as the GitHub secret JARVES_UPDATE_SIGNING_KEY (`python packaging/release.py keygen`). Empty
 # until the owner creates the key: a hosted source then reports "unavailable" (no key = no trust).
 UPDATE_PUBLIC_KEYS: tuple[str, ...] = ()
+DEFAULT_RELEASES_REPO = "igalgerman/jarvis-releases"   # public, release files only (same default in release.py)
+
+
+def public_releases_url(repo: str = DEFAULT_RELEASES_REPO) -> str:
+    return f"https://github.com/{repo}/releases/latest/download"
 
 # Windows / Pi status of the M6 features (spec section 5). jarves.features has no targets field yet, so this is
 # the record the capability matrix (WP-M4) reads; the issue is real (created with `gh issue create`).
@@ -163,7 +169,7 @@ class UpdateError(Exception):
         self.code, self.message = code, message
 
 
-# ---------------------------------------------------------------------- hosted manifest (R2), Ed25519-signed
+# ---------------------------------------------------------------------- hosted manifest (public releases repo), Ed25519-signed
 def canonical(manifest: dict) -> bytes:
     """The exact signed bytes (same function in packaging/release.py)."""
     return SIGN_DOMAIN + json.dumps(manifest, sort_keys=True, separators=(",", ":"), ensure_ascii=True).encode("ascii")
@@ -233,17 +239,20 @@ class UpdateChecker:
         self.current = current or build_info()["version"]
         self.path = self.home / STATE_FILE
         ucfg = getattr(cfg, "update", None)
-        # Order: explicit argument > env JARVES_UPDATE_BASE_URL > config [update] base_url > the build's default
-        # (CI variable baked into _build_info.json) > "" (GitHub releases).
-        base = base_url if base_url is not None else (os.environ.get("JARVES_UPDATE_BASE_URL")
-                                                      or getattr(ucfg, "base_url", "")
-                                                      or str(build_info().get("update_base_url") or ""))
-        if base and not base.strip().startswith("https://"):
-            base = ""                                      # never fetch an update manifest over plain HTTP
-        self.base_url = base.strip().rstrip("/")
         extra = str(getattr(ucfg, "public_key", "") or "").strip()
         self.public_keys = tuple(public_keys if public_keys is not None else UPDATE_PUBLIC_KEYS) + \
             ((extra,) if extra else ())
+        # Order: explicit argument > env JARVES_UPDATE_BASE_URL > config [update] base_url > the build's default
+        # (CI variable baked into _build_info.json) > the public releases repo once a signing key is trusted >
+        # "" (releases of the private repo, needs JARVES_UPDATE_TOKEN).
+        base = base_url if base_url is not None else (
+            os.environ.get("JARVES_UPDATE_BASE_URL") or getattr(ucfg, "base_url", "")
+            or str(build_info().get("update_base_url") or "")
+            or (public_releases_url(os.environ.get("JARVES_RELEASES_REPO") or DEFAULT_RELEASES_REPO)
+                if self.public_keys else ""))
+        if base and not base.strip().startswith("https://"):
+            base = ""                                      # never fetch an update manifest over plain HTTP
+        self.base_url = base.strip().rstrip("/")
         # A different source invalidates the cached answer (e.g. base_url was just set).
         self.source = f"hosted:{self.base_url}" if self.base_url else f"github:{self.repo}"
 

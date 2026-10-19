@@ -60,5 +60,5 @@ resume_gap_s = 30               # a wall-clock jump this large = the computer sl
 mic_stall_s = 6                 # the wake mic sends nothing this long (unplugged headset) = re-open it; 0 = off
 
 [update]                        # where `jarvis update` looks (docs/RELEASE_HOSTING.md); install always asks first
-base_url = ""                   # "" = the build's default or GitHub releases; e.g. "https://pub-<id>.r2.dev/jarves/windows"
+base_url = ""                   # "" = the public releases repo (github.com/igalgerman/jarvis-releases); or any HTTPS folder with latest.json
 public_key = ""                 # extra trusted Ed25519 public key (base64); the keys built into the app always count

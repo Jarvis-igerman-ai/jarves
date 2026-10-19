@@ -217,8 +217,9 @@ class RuntimeConfig(_Strict):
 
 class UpdateConfig(_Strict):
     """Where the update check looks (SW-V2 WP-O, docs/RELEASE_HOSTING.md). "" = GitHub releases (the private repo
-    needs JARVES_UPDATE_TOKEN); otherwise an HTTPS folder holding the signed latest.json (Cloudflare R2)."""
-    base_url: str = ""                    # e.g. "https://pub-<id>.r2.dev/jarves/windows"
+    needs JARVES_UPDATE_TOKEN) or, once the app trusts a signing key, the public releases repo; otherwise any
+    HTTPS folder holding the signed latest.json (custom hosting)."""
+    base_url: str = ""                    # e.g. "https://github.com/igalgerman/jarvis-releases/releases/latest/download"
     public_key: str = ""                  # extra trusted Ed25519 key (base64); the built-in keys always count
 
     @field_validator("base_url")

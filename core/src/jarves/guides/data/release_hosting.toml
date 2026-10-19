@@ -1,31 +1,31 @@
 order = 62
 category = "system"
 features = []
-aliases = ["הורדה", "מחשב אחר", "אחסון גרסאות", "R2", "cloudflare", "release hosting", "download", "another pc"]
+aliases = ["הורדה", "מחשב אחר", "אחסון גרסאות", "מאגר גרסאות", "jarvis-releases", "release hosting", "download", "another pc"]
 links = ["updates"]
 title_he = "הורדה ועדכונים במחשב אחר"
 title_en = "Download and updates on another PC"
-what_he = "גרסאות ההתקנה נשמרות גם בדלי ציבורי ב-Cloudflare R2, כך שמחשב בלי גישה ל-GitHub יכול להוריד ולבדוק עדכונים."
-what_en = "Installers are also stored in a public Cloudflare R2 bucket, so a PC without GitHub access can download and check for updates."
+what_he = "גרסאות ההתקנה מתפרסמות גם במאגר ציבורי נפרד ב-GitHub (רק קבצי התקנה, בלי קוד), כך שכל מחשב יכול להוריד ולבדוק עדכונים בלי חשבון."
+what_en = "Installers are also published in a separate public GitHub repo (release files only, no code), so any PC can download and check for updates without an account."
 say = [["יש עדכון?", "Is there an update?"]]
 expect_he = "הקובץ latest.json חתום. ג'ארוויס בודק את החתימה ואת ה-SHA256, ומתקין רק אחרי שאישרתם."
 expect_en = "latest.json is signed. JARVES checks the signature and the SHA256 and installs only after you approve."
-cost_he = "חינם בתוך המכסה החינמית של R2 (10GB). ייתכן שיתבקש אמצעי תשלום בהפעלה."
-cost_en = "Free inside R2's free tier (10 GB). Cloudflare may ask for a payment method when R2 is first enabled."
-privacy_he = "הבדיקה היא קריאה אחת של latest.json ב-HTTPS; לא נשלח שום מידע אישי ולא נשלח טוקן של GitHub."
-privacy_en = "The check is one HTTPS read of latest.json; no personal data and no GitHub token is sent."
+cost_he = "חינם: מאגר ציבורי וקבצי גרסאות ב-GitHub לא עולים כסף, ואין צורך בכרטיס אשראי."
+cost_en = "Free: a public GitHub repo and its release files cost nothing; no card needed."
+privacy_he = "הבדיקה היא הורדה אחת של latest.json ב-HTTPS, פעם ביום לכל היותר; לא נשלח שום מידע אישי ולא נשלח טוקן."
+privacy_en = "The check is one HTTPS download of latest.json, at most once a day; no personal data and no token is sent."
 
 [[steps]]
-he = "הבעלים מקים פעם אחת: חשבון Cloudflare, דלי R2 ציבורי, טוקן לדלי בלבד, ו-6 סודות ב-GitHub (docs/RELEASE_HOSTING.md)."
-en = "The owner sets up once: a Cloudflare account, a public R2 bucket, a token for that bucket only, and 6 GitHub secrets (docs/RELEASE_HOSTING.md)."
+he = "הבעלים מקים פעם אחת: מאגר ציבורי jarvis-releases, טוקן שמוגבל רק אליו, מפתח חתימה, ו-2 סודות ב-GitHub (docs/RELEASE_HOSTING.md)."
+en = "The owner sets up once: a public jarvis-releases repo, a token limited to it, a signing key, and 2 GitHub secrets (docs/RELEASE_HOSTING.md)."
 
 [[steps]]
-he = "במחשב האחר: הורידו את קובץ ההתקנה מהקישור שב-latest.json, בדקו Get-FileHash, והתקינו."
-en = "On the other PC: download the installer from the link in latest.json, check Get-FileHash, install."
+he = "במחשב האחר: הורידו את קובץ ההתקנה מ-github.com/igalgerman/jarvis-releases/releases/latest, בדקו Get-FileHash, והתקינו."
+en = "On the other PC: download the installer from github.com/igalgerman/jarvis-releases/releases/latest, check Get-FileHash, install."
 
 [[steps]]
-he = "אם צריך, הוסיפו ל-config.toml את [update] base_url עם כתובת התיקייה ב-R2, ואז jarvis update check."
-en = "If needed, add [update] base_url with the R2 folder address to config.toml, then run jarvis update check."
+he = "בדקו עדכונים: jarvis update check. ההתקנה (jarvis update install) תמיד שואלת קודם."
+en = "Check for updates: jarvis update check. Installing (jarvis update install) always asks first."
 action = "command:jarvis update check"
 
 [[problems]]
@@ -34,8 +34,14 @@ en = "The update check says unavailable / signing key."
 fix_he = "בגרסה הזאת עדיין אין מפתח ציבורי לחתימה. התקינו גרסה חדשה יותר שנבנתה אחרי שנוסף המפתח."
 fix_en = "This build has no update signing key yet. Install a newer build made after the key was added."
 
+[[problems]]
+he = "בדיקת העדכון אומרת שהחתימה לא תקינה (not signed by a trusted key)."
+en = "The update check says the signature is not trusted."
+fix_he = "לא מתקינים. ייתכן שהמפתח הוחלף: הורידו את הגרסה האחרונה ידנית מהמאגר הציבורי ובדקו Get-FileHash."
+fix_en = "Do not install. The key may have been rotated: download the newest build by hand from the public repo and check Get-FileHash."
+
 [platform]
 windows = "implemented_unverified"
-windows_note_en = "CI upload + signed manifest tested against a local S3 stub; needs the owner's R2 bucket and secrets"
+windows_note_en = "CI publish + signed manifest tested against a local fake GitHub API; needs the owner's public repo, token and key"
 pi = "planned"
 pi_note_en = "no Pi package yet (#19)"
