@@ -1,3 +1,6 @@
+            # jarves.features already registers camera / face_recognition / camera_when_away (probe reads the
+            # `camera` health component CameraService sets), so nothing is registered there a second time.
+
 """Camera feature switches (dashboard-switchable, ALL default OFF):
 
 - `camera`            - camera on at all (presence, gaze, "מה זה?", reading text)
@@ -82,11 +85,8 @@ class Switches:
         for id, he, en, risk in SWITCHES:
             p = probes.get(id)
             self.local.register(id, he, en, False, p, risk)
-            if self._f is not None:
-                try:
-                    self._f.register(id, he, en, False, p, risk)
-                except ValueError:      # already registered (Core restart in the same process, tests)
-                    pass
+            # jarves.features already registers camera / face_recognition / camera_when_away (its probe reads the
+            # `camera` health component CameraService sets), so they are not registered there a second time.
 
     def active(self, id: str) -> bool:
         """Switched on AND available. Any failure of the switch backend counts as OFF (privacy default)."""
