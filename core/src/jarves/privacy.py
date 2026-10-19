@@ -15,6 +15,7 @@ Two one-way actions (each needs {"confirm": true}):
 from __future__ import annotations
 
 import json
+import sqlite3
 from pathlib import Path
 
 from . import config_edit, logs
@@ -86,9 +87,48 @@ def mask_logs(home: Path) -> int:
     return n
 
 
-def mask_history(ctx) -> dict:
+def _secure_purge(st) -> None:
+    """After masking / deleting: drop the undo journal (it still held the removed text), overwrite freed pages
+    (secure_delete), compact the file (VACUUM) and truncate the write-ahead log, so the words do not survive in
+    the meta journal, in free pages or in store.db-wal. Best effort: a running Core may hold a lock (logged)."""
+    with st._lock:
+        st.x("DELETE FROM meta WHERE key = 'memory_undo'")        # old fact text / deleted memory rows for undo
+        st.commit()
+        try:
+            st.x("PRAGMA secure_delete=ON")
+            st._db.execute("VACUUM")
+            st.x("PRAGMA wal_checkpoint(TRUNCATE)")
+            st.commit()
+        except sqlite3.Error as e:
+            logs.warn("privacy", "PRIVACY_PURGE_PARTIAL", "could not fully compact store.db (Core may hold it)",
+                      error=type(e).__name__)
+
+
+def _backup_residue(home: Path, prune: bool) -> dict:
+    """Backups taken before the purge still hold the old text. Report how many, and delete them if the user asked
+    (masking the store.db snapshot inside each archive is not attempted; pruning is the honest, reliable option)."""
+    from . import backup
+    items = backup.list_backups(home)
+    removed: list[str] = []
+    if prune:
+        for b in items:
+            try:
+                (backup.backup_dir(home) / b["name"]).unlink()
+                removed.append(b["name"])
+            except OSError:
+                pass
+        if removed:
+            logs.info("privacy", "PRIVACY_BACKUPS_PRUNED", "backups holding the removed data deleted",
+                      removed=len(removed))
+    return {"backups_with_old_data": len(items), "backups_removed": len(removed),
+            "backups_hint": None if (prune or not items) else
+            f"{len(items)} backup(s) still contain this data; re-run with prune_backups to delete them"}
+
+
+def mask_history(ctx, *, prune_backups: bool = False) -> dict:
     st = ctx.store
     with st._lock:
+        st.x("PRAGMA secure_delete=ON")
         turns = st.x("UPDATE turns SET text = NULL WHERE text IS NOT NULL").rowcount
         args = st.x("UPDATE tool_calls SET args = NULL WHERE args IS NOT NULL").rowcount
         ev = 0
@@ -102,25 +142,30 @@ def mask_history(ctx) -> dict:
                 st.x("UPDATE events SET fields = ? WHERE id = ?", (json.dumps(new, ensure_ascii=False), r["id"]))
                 ev += 1
         st.commit()
+    _secure_purge(st)
     lines = mask_logs(ctx.home)
+    backups = _backup_residue(ctx.home, prune_backups)
     logs.info("privacy", "PRIVACY_MASKED_HISTORY", "existing history masked", turns=turns, tool_args=args,
               events=ev, log_lines=lines)
-    return {"ok": True, "turns": turns, "tool_args": args, "events": ev, "log_lines": lines}
+    return {"ok": True, "turns": turns, "tool_args": args, "events": ev, "log_lines": lines, **backups}
 
 
-def delete_conversations(ctx) -> dict:
+def delete_conversations(ctx, *, prune_backups: bool = False) -> dict:
     st = ctx.store
     with st._lock:
+        st.x("PRAGMA secure_delete=ON")
         n = st.rows("SELECT COUNT(*) n FROM sessions")[0]["n"]
         for table in ("turns", "tool_calls", "issue_hits", "events"):
             st.x(f"DELETE FROM {table}")
         st.x("UPDATE delegations SET session_id = NULL")          # costs stay true
         st.x("DELETE FROM sessions")
         st.commit()
+    _secure_purge(st)
     lines = mask_logs(ctx.home)
+    backups = _backup_residue(ctx.home, prune_backups)
     logs.info("privacy", "PRIVACY_DELETED_CONVERSATIONS", "all stored conversations deleted", sessions=n,
               log_lines=lines)
-    return {"ok": True, "deleted": n, "log_lines": lines}
+    return {"ok": True, "deleted": n, "log_lines": lines, **backups}
 
 
 # ---------------------------------------------------------------------- dashboard routes
@@ -136,9 +181,10 @@ def dashboard_routes(register) -> None:
 
     def confirmed(fn):
         def h(ctx, _m, body):
-            if (body or {}).get("confirm") is not True:
+            body = body or {}
+            if body.get("confirm") is not True:
                 return 400, {"error": "this cannot be undone: send {\"confirm\": true}"}
-            return 200, fn(ctx)
+            return 200, fn(ctx, prune_backups=bool(body.get("prune_backups")))
         return h
     register("GET", r"/api/privacy", get)
     register("POST", r"/api/privacy", post)

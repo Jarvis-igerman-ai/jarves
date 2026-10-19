@@ -5,9 +5,11 @@ the same PC is never touched. No audio is played, no network service is called, 
 
   1 clean install (/VERYSILENT, per user, no tasks)      -> files, Start-menu entry, uninstaller present
   2 jarvis --version / status / features / doctor         -> build identity, "NOT running", update_check listed
+  2b jarvis setup --check-addons                          -> every add-on's code, models and data are installed
   3 offline Core start + orderly stop through the link    -> CORE_READY / CORE_STOPPED in the log
   4 exported face: loading screen reaches the Core; room + face self-checks (headless) -> "... RESULT: PASS"
-  5 upgrade: same installer again over the install         -> still runs
+  5 upgrade: same installer again over the install         -> still runs; /SETUPANSWERS= applies wizard answers;
+                                                             setup --defaults re-run keeps them (idempotent)
   6 uninstall (silent)                                     -> program folder gone, user data KEPT
   7 install + uninstall /PURGE=1                           -> user data removed only when asked
 
@@ -38,9 +40,9 @@ function Jarvis([string[]]$argv, [int]$timeoutS = 120) {
     if (-not $p.WaitForExit($timeoutS * 1000)) { $p.Kill($true); return @{ code = -1; text = "TIMEOUT" } }
     return @{ code = $p.ExitCode; text = (Get-Content $out -Raw -ErrorAction SilentlyContinue) + "" }
 }
-function Install([string]$tasks = "") {
+function Install([string]$tasks = "", [string[]]$extra = @()) {
     $p = Start-Process $Installer -Wait -PassThru -ArgumentList (@("/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART",
-        "/SP-", "/TASKS=`"$tasks`"", "/DIR=`"$App`"", "/LOG=`"$(Join-Path $Work "install-$(Get-Random).log")`""))
+        "/SP-", "/TASKS=`"$tasks`"", "/DIR=`"$App`"", "/LOG=`"$(Join-Path $Work "install-$(Get-Random).log")`"") + $extra)
     return $p.ExitCode
 }
 function Uninstall([string[]]$extra = @()) {
@@ -83,6 +85,11 @@ $r = Jarvis @("status")
 Check ($r.text -match "Core is NOT running") "jarvis status (not running)"
 $r = Jarvis @("features")
 Check ($r.text -match "update_check") "jarvis features lists update_check"
+# 2b every add-on shipped in the payload: imports (OpenCV, PortAudio, wake models, tray, tzdata...), YuNet, dashboard
+#    and guide data. No camera or microphone is opened, nothing is downloaded.
+$r = Jarvis @("setup", "--check-addons")
+Check ($r.code -eq 0 -and $r.text -match "ADDON CHECK: PASS") "all add-ons are in the installed app (jarvis setup --check-addons)"
+if ($r.text -notmatch "ADDON CHECK: PASS") { $r.text }
 if (-not $SkipDoctor) {
     $r = Jarvis @("doctor") 180
     Check ($r.text -match "JARVES doctor" -and $r.text -match "(problem\(s\) found|All checks passed)") "jarvis doctor completes"
@@ -133,8 +140,18 @@ if (Test-Path $face) {
     Check ($o -match "FACE CHECK RESULT: PASS") "exported face self-check"
     if ($o -notmatch "FACE CHECK RESULT: PASS") { Tail $o }
 }
-# 5 upgrade in place
-Check ((Install) -eq 0) "upgrade over the existing install"
+# 5 upgrade in place, with a setup answers file (the silent-install path of the first-run wizard)
+$answers = Join-Path $Work "answers.json"
+'{"language": "en", "connection": "chatgpt", "display_name": "SmokeMax", "spoken_name": "Max","features": {"chimes": false, "camera": false}}' |
+    Set-Content -Encoding utf8NoBOM $answers
+Check ((Install "" @("/SETUPANSWERS=`"$answers`"")) -eq 0) "upgrade over the existing install with /SETUPANSWERS"
+$ident = Get-Content (Join-Path $Home_ "identity.json") -Raw -Encoding utf8 -ErrorAction SilentlyContinue
+$feats = Get-Content (Join-Path $Home_ "features.json") -Raw -Encoding utf8 -ErrorAction SilentlyContinue
+Check (($ident -match "SmokeMax") -and ($feats -match '"chimes": false')) "installer applied the setup answers (name, add-on switch)"
+$r = Jarvis @("setup", "--defaults", "--lang", "en")
+Check ($r.code -eq 0 -and $r.text -match "Setup complete") "jarvis setup --defaults re-run completes"
+$ident2 = Get-Content (Join-Path $Home_ "identity.json") -Raw -Encoding utf8 -ErrorAction SilentlyContinue
+Check ($ident2 -eq $ident) "re-run with defaults keeps the earlier choices (idempotent)"
 $r = Jarvis @("--version")
 Check ($r.code -eq 0) "runs after upgrade"
 New-Item -ItemType File -Force (Join-Path $Home_ "memory.db") | Out-Null

@@ -32,7 +32,7 @@ from pathlib import Path
 from urllib.parse import parse_qs, unquote, urlsplit
 
 from . import __version__, config_edit, diagnose, logs, logview
-from .dashboard_auth import (DEVICE_COOKIE, DEVICE_IDLE_S, LAN_PORT, PUBLIC_PATHS, Access, client_allowed,
+from .dashboard_auth import (DEVICE_COOKIE, device_body_ok, DEVICE_IDLE_S, LAN_PORT, PUBLIC_PATHS, Access, client_allowed,
                              is_loopback, lan_ip, parse_cookies)
 from .health import read_snapshot
 from .skills import Skill, Tool, ToolResult
@@ -46,8 +46,11 @@ PLUGIN_MODULES = ("jarves.workspace", "jarves.curator", "jarves.memory", "jarves
                   "jarves.google_setup", "jarves.privacy", "jarves.overview",
                   "jarves.usage", "jarves.backup", "jarves.appearance", "jarves.skills.generated",
                   "jarves.operations", "jarves.runtime", "jarves.updates",
-                  "jarves.identity", "jarves.dashboard_auth", "jarves.guides")     # WP-L: Guides pages
+                  "jarves.identity", "jarves.dashboard_auth", "jarves.guides",     # WP-L: Guides pages
+                  "jarves.setup_wizard")                                         # SW-V3: Setup & add-ons page
 MEMORY_UNDO_KEEP = 30
+MEMORY_UNDO_TTL_S = 24 * 3600                        # the undo button works for 24 h, then the entry is purged
+UNDO_PURGE_EVERY_S = 3600
 
 
 def register(method: str, pattern: str, handler) -> None:
@@ -83,6 +86,7 @@ class Ctx:
         self._workspace, self._settings = workspace, settings
         self.logs = logview.LogReader(home)
         self.lock = threading.Lock()                  # memory undo journal
+        self.clock = time.time                        # tests inject a fake clock
         self.access = None                 # dashboard_auth.Access (set by Dashboard)
         self.port = 0
         self._tl = threading.local()       # per-request principal (the server is threaded)
@@ -416,15 +420,35 @@ def export_logs(ctx: Ctx, q) -> bytes:
 
 # ---------------------------------------------------------------------- memory (edit, delete, forget, undo)
 def _undo_log(ctx: Ctx) -> list[dict]:
+    """The journal minus entries older than MEMORY_UNDO_TTL_S (an expired entry can never be undone, even before
+    the purge has rewritten the row)."""
     try:
-        return json.loads(ctx.store.meta("memory_undo") or "[]")
+        log = json.loads(ctx.store.meta("memory_undo") or "[]")
     except ValueError:
         return []
+    now = ctx.clock()
+    return [e for e in log if isinstance(e, dict) and now - float(e.get("at") or 0) < MEMORY_UNDO_TTL_S]
+
+
+def purge_memory_undo(ctx: Ctx) -> int:
+    """Owner decision (B): deleted facts must not sit in the undo journal forever. Drops every entry older than 24 h
+    from store.db (meta memory_undo); runs on dashboard start, hourly while it runs, and on every journal write."""
+    with ctx.lock:
+        try:
+            raw = json.loads(ctx.store.meta("memory_undo") or "[]")
+        except ValueError:
+            raw = []
+        keep = _undo_log(ctx)
+        if len(keep) != len(raw):
+            with ctx.store._lock:
+                ctx.store._set_meta("memory_undo", json.dumps(keep, ensure_ascii=False))
+                ctx.store.commit()
+        return len(raw) - len(keep)
 
 
 def _push_undo(ctx: Ctx, entry: dict) -> None:
     with ctx.store._lock:
-        log = (_undo_log(ctx) + [{**entry, "at": time.time()}])[-MEMORY_UNDO_KEEP:]
+        log = (_undo_log(ctx) + [{**entry, "at": ctx.clock()}])[-MEMORY_UNDO_KEEP:]
         ctx.store._set_meta("memory_undo", json.dumps(log, ensure_ascii=False))
         ctx.store.commit()
 
@@ -727,7 +751,13 @@ class Handler(BaseHTTPRequestHandler):
     def _pair(self, ip: str) -> None:
         """POST /api/pair {code, name} from a phone on the LAN -> device cookie (dashboard_auth.Access.pair)."""
         try:
-            body = json.loads(self.rfile.read(min(int(self.headers.get("Content-Length") or 0), 4096)) or b"{}")
+            n = int(self.headers.get("Content-Length") or 0)
+        except ValueError:
+            n = -1
+        if n < 0 or n > 4096:                            # rfile.read(-1) would block the thread until EOF
+            return self._json(400, {"error": "bad Content-Length"})
+        try:
+            body = json.loads(self.rfile.read(n) or b"{}")
         except ValueError:
             return self._json(400, {"error": "invalid JSON"})
         got = self.access.pair(str(body.get("code", "")), str(body.get("name", "")), ip)
@@ -798,13 +828,22 @@ class Handler(BaseHTTPRequestHandler):
             return self._json(403, {"error": "missing X-Jarves header"})
         body = None
         if self.command in ("POST", "PUT"):
-            n = int(self.headers.get("Content-Length") or 0)
+            try:
+                n = int(self.headers.get("Content-Length") or 0)
+            except ValueError:
+                n = -1
+            if n < 0:                                    # a negative length -> rfile.read(-1) blocks forever
+                return self._json(400, {"error": "bad Content-Length"})
             if n > 1_000_000:
                 return self._json(413, {"error": "too large"})
             try:
                 body = json.loads(self.rfile.read(n) or b"{}")
             except ValueError:
                 return self._json(400, {"error": "invalid JSON"})
+        if who["kind"] == "device" and self.command not in ("GET", "HEAD") \
+                and not device_body_ok(self.ctx, self.command, url.path, body):
+            a.audit("refused_privilege", principal=who["id"], method=self.command, path=url.path)
+            return self._json(403, {"error": "only the computer itself can do this"})
         for method, rx, fn in _ROUTES:
             mt = rx.match(url.path)
             if mt and method == self.command:
@@ -848,7 +887,21 @@ class Dashboard:
             self.access.audit("lan_mode_started", host=lan_host, port=self.port)
         self._thread: threading.Thread | None = None
 
+    def _housekeeping(self) -> None:
+        try:
+            purge_memory_undo(self.ctx)
+        except Exception as e:
+            logs.warn("dashboard", "UNDO_PURGE_FAILED", "could not purge the memory undo journal",
+                      error=type(e).__name__)
+
+    def _housekeeping_loop(self) -> None:
+        while not self._stop_evt.wait(UNDO_PURGE_EVERY_S):
+            self._housekeeping()
+
     def start(self) -> "Dashboard":
+        self._housekeeping()                         # on every dashboard start
+        self._stop_evt = threading.Event()
+        threading.Thread(target=self._housekeeping_loop, name="jarves-dashboard-housekeeping", daemon=True).start()
         self._thread = threading.Thread(target=self.httpd.serve_forever, name="jarves-dashboard", daemon=True)
         self._thread.start()
         return self
@@ -861,6 +914,7 @@ class Dashboard:
         self.httpd.serve_forever()
 
     def stop(self) -> None:
+        getattr(self, "_stop_evt", threading.Event()).set()
         self.httpd.shutdown()
         self.httpd.server_close()
         self.ctx.close()

@@ -6,6 +6,7 @@
 - `camera`            - camera on at all (presence, gaze, "מה זה?", reading text)
 - `face_recognition`  - recognise enrolled people (each person still opts in by voice)
 - `camera_when_away`  - keep the camera on while nobody is home (default off: away = camera OFF)
+- `camera_preview`    - "What does he see?" local preview while the user keeps it open (default ON, needs `camera`)
 
 They are registered with WP-I's `jarves.features` (interface: register(id, title_he, title_en, default_enabled,
 probe, risk) and active(id)) when that module exists, so the dashboard lists them and shows "unavailable" while
@@ -23,7 +24,9 @@ SWITCHES = (
     ("camera", "מצלמה", "Camera", "medium"),
     ("face_recognition", "זיהוי פנים (באישור כל אדם)", "Face recognition (each person opts in)", "high"),
     ("camera_when_away", "מצלמה כשאין איש בבית", "Camera while nobody is home", "high"),
+    ("camera_preview", "מה הוא רואה? (תצוגת מצלמה)", "What does he see? (camera preview)", "low"),
 )
+DEFAULT_ON = frozenset({"camera_preview"})      # harmless alone: it needs the `camera` switch, which is OFF
 
 
 class LocalSwitches:
@@ -84,7 +87,7 @@ class Switches:
     def register_all(self, probes: dict[str, ProbeFn]) -> None:
         for id, he, en, risk in SWITCHES:
             p = probes.get(id)
-            self.local.register(id, he, en, False, p, risk)
+            self.local.register(id, he, en, id in DEFAULT_ON, p, risk)
             # jarves.features already registers camera / face_recognition / camera_when_away (its probe reads the
             # `camera` health component CameraService sets), so they are not registered there a second time.
 

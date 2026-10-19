@@ -98,5 +98,20 @@ def encode_still(frame: Frame, max_side: int = 1280) -> tuple[str, bytes]:
     return "image/png", _png(px)
 
 
+def encode_preview(frame: Frame, max_side: int = 320, quality: int = 70) -> tuple[str, bytes, int, int]:
+    """(mime, bytes, width, height) of one small preview image for the local "What does he see?" window, in RAM.
+    Without OpenCV the PNG fallback is halved again so a frame stays small on the local link."""
+    try:
+        import cv2
+        px = downscale(frame.pixels, max_side)
+        ok, buf = cv2.imencode(".jpg", cv2.cvtColor(px, cv2.COLOR_RGB2BGR), [cv2.IMWRITE_JPEG_QUALITY, quality])
+        if ok:
+            return "image/jpeg", buf.tobytes(), int(px.shape[1]), int(px.shape[0])
+    except ImportError:
+        pass
+    px = downscale(frame.pixels, max(80, max_side // 2))
+    return "image/png", _png(np.ascontiguousarray(px)), int(px.shape[1]), int(px.shape[0])
+
+
 def data_url(mime: str, data: bytes) -> str:
     return f"data:{mime};base64,{base64.b64encode(data).decode('ascii')}"

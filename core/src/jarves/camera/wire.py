@@ -47,6 +47,75 @@ def greeting(name: str | None, hour: int | None = None) -> str:
     return f"{word}, {name}!" if name else f"{word}!"
 
 
+FACE_PREVIEW_S = 20.0           # the face asks for this long; the service caps any opening at PREVIEW_MAX_S
+ENABLE_PROMPT = "להדליק את המצלמה? / Turn the camera on?"
+
+
+async def on_link(core, t: str, p: dict, client) -> None:
+    """Privacy strip messages (link.py allow-lists the roles):
+    camera.preview {open: bool, seconds?}  -> camera.preview_state {open, reason?, seconds_left?, last_seen, frame?}
+        face: frames follow as camera.preview_frame; cli (dashboard): {open, start: true} opens it, each later
+        {open: true} poll keeps it open PREVIEW_LEASE_S and the reply carries the latest frame.
+    camera.set_enabled {on: bool} (face)   -> camera.enabled {on, active, reason}
+        off at once; on only after the person confirms on the screen (same approval as the voice feature_set)."""
+    from .service import PREVIEW_LEASE_S, PREVIEW_MAX_S
+    svc: CameraService | None = getattr(core, "camera", None)
+    if svc is None:
+        await core.link.reply(client, "error", {"code": "CAMERA_UNAVAILABLE", "message": "no camera service"})
+        return
+    if t == "camera.preview":
+        if p.get("open") is True and client.role == "cli" and p.get("start") is not True and not svc.preview_active():
+            st = {"open": False, "reason": "timeout"}       # a poll never re-opens a preview that ended (the cap)
+        elif p.get("open") is True:
+            secs = p.get("seconds")
+            secs = (float(secs) if isinstance(secs, (int, float)) and not isinstance(secs, bool) and secs == secs
+                    else FACE_PREVIEW_S)
+            st = svc.preview_open(min(max(secs, 1.0), PREVIEW_MAX_S) if client.role == "face" else PREVIEW_LEASE_S,
+                                  by=client.role)
+        else:
+            await svc.preview_close("closed")
+            st = {"open": False, "reason": "closed"}
+        st["last_seen"] = svc.last_seen
+        if client.role == "cli" and st["open"] and svc.preview_frame is not None:
+            st["frame"] = svc.preview_frame
+        await core.link.reply(client, "camera.preview_state", st)
+    elif t == "camera.set_enabled":
+        on = p.get("on")
+        if not isinstance(on, bool):
+            await core.link.reply(client, "error", {"code": "LINK_BAD_MESSAGE", "message": "on must be true or false"})
+            return
+        if not on:
+            await svc.preview_close("camera_off")
+            core.features.set("camera", False, by="face")
+            await _reply_enabled(core, client)
+        elif core.features.enabled("camera"):
+            await _reply_enabled(core, client)
+        else:
+            # Not awaited here: the confirmation answer arrives on this same connection (the handler must return).
+            core._spawn(_enable_after_confirm(core, client))
+    privacy = getattr(core, "privacy_state", None)
+    if privacy is not None:
+        await privacy.push(force=True)
+
+
+async def _enable_after_confirm(core, client) -> None:
+    if await core.ask_confirm(ENABLE_PROMPT):
+        core.features.set("camera", True, by="face")
+    else:
+        core.features.request("camera", by="face")       # the dashboard shows it for approval
+        logs.info("camera", "CAMERA_ENABLE_DECLINED", "camera switch not turned on: not confirmed on the screen")
+    await _reply_enabled(core, client)
+    privacy = getattr(core, "privacy_state", None)
+    if privacy is not None:
+        await privacy.push(force=True)
+
+
+async def _reply_enabled(core, client) -> None:
+    st = core.features.status("camera")
+    await core.link.reply(client, "camera.enabled", {"on": st["enabled"], "active": st["active"],
+                                                      "reason": st["reason"]})
+
+
 def attach(core) -> CameraService:
     from ..config import api_billing_allowed
     from ..skills.camera import CameraSkill

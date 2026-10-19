@@ -15,6 +15,8 @@ LAN mode (`jarvis dashboard --lan`, needs the `dashboard_lan` switch, default OF
   is burnt.
 - device sessions: every write needs X-Jarves + X-CSRF-Token (per-device token from GET /api/session).
 - least privilege: devices cannot pair other devices, list/revoke others, read the audit log or switch LAN mode.
+  They may manage scheduler jobs (never approve a tool job), flip low-risk switches and commit calendar
+  create/update (see _DEVICE_WRITE_OK and device_body_ok).
 - rate limit: 240 requests/minute per client address (429).
 - audit: <state_dir>/dashboard_audit.jsonl (size-bounded): pairing, revocation, refused pairing, every write
   (principal, method, path, status; never bodies or secrets).
@@ -26,6 +28,7 @@ import hashlib
 import ipaddress
 import json
 import os
+import re
 import secrets
 import socket
 import threading
@@ -50,6 +53,25 @@ LOOPBACK_HOSTS = ("127.0.0.1", "localhost", "::1")
 PUBLIC_PATHS = {("GET", "/pair"), ("POST", "/api/pair"), ("GET", "/static/pair.js"), ("GET", "/static/style.css"),
                 ("GET", "/static/m4.css")}
 ADMIN_ONLY = ("/api/devices", "/api/audit", "/api/features/dashboard_lan")
+# A paired phone (device role) gets an ALLOWLIST, never a denylist: reads only, plus the explicit low-risk writes
+# below. Everything a denylist used to let through by omission - approving/granting/enabling a generated Skill,
+# installing an update, adding a folder grant or reading a file, switching a risky feature (camera, gmail_send...)
+# on, stopping the Core, deleting/restoring data, editing config.toml, running a backup/restore - is now refused
+# by default because it is not on the list. These stay the computer's own job (loopback session).
+DEVICE_READ_DENY = ADMIN_ONLY + ("/api/files", "/api/backup")       # not even readable from a phone
+_DEVICE_WRITE_OK = re.compile(
+    r"/api/diagnose"                                               # run self-diagnosis
+    r"|/api/issues/\d+"                                            # change an issue's status
+    r"|/api/memory|/api/memory/\d+|/api/memory/undo|/api/memory/forget-session"   # memory facts (all reversible)
+    r"|/api/notes|/api/notes/\d+"                                  # notes
+    r"|/api/alerts/(?:pause|resume|test|dismiss_all|\d+)"          # alert controls
+    r"|/api/session/[^/]+/review"                                  # ask for an AI review of one conversation
+    # owner decision 20 Oct (A): a paired phone may also manage scheduler jobs, flip LOW-risk switches and commit
+    # calendar create/update. Method + path are matched here; the body-dependent limits live in device_body_ok().
+    r"|/api/jobs|/api/jobs/[0-9a-f]{1,40}|/api/schedule/parse"
+    r"|/api/features/[a-z0-9_]+"
+    r"|/api/calendar/(?:preview|commit)")
+_DEVICE_JOB_OPS = ("pause", "resume", "approve", "delete")           # never run_now / edit from a phone
 
 
 def _hash(s: str) -> str:
@@ -269,12 +291,47 @@ class Access:
         return None
 
     def allowed(self, who: dict, method: str, path: str) -> bool:
-        """Least privilege for paired devices."""
+        """Least privilege for paired devices: an ALLOWLIST (reads + a few safe writes), default-deny."""
         if who["kind"] == "local":
-            return True
+            return True                               # the owner on this computer (loopback) can do anything
         if path == f"/api/devices/{who['id']}/revoke" and method == "POST":
             return True                               # a phone may un-pair itself
-        return not any(path == p or path.startswith(p + "/") for p in ADMIN_ONLY)
+        if any(path == p or path.startswith(p + "/") for p in DEVICE_READ_DENY):
+            return False                              # device/audit/LAN admin, file browser and backups: never
+        if method in ("GET", "HEAD"):
+            return True                               # any other read
+        return bool(_DEVICE_WRITE_OK.fullmatch(path))  # only the explicitly safe writes; everything else refused
+
+
+def device_body_ok(ctx, method: str, path: str, body) -> bool:
+    """Body-dependent limits for a paired phone, checked after the allowlist (the owner on loopback is exempt).
+    - scheduler job ops: only pause/resume/approve/delete; a TOOL job (side effects) is never activated from a phone,
+      it needs the on-screen approval on the computer. Reminder/research jobs are fine.
+    - feature switches: only features whose risk is 'low', never dashboard_lan (also in ADMIN_ONLY).
+    - calendar: preview/commit only, create/update only (there is no delete; calendar_write must be on)."""
+    b = body if isinstance(body, dict) else {}
+    m = re.fullmatch(r"/api/jobs/([0-9a-f]{1,40})", path)
+    if method == "POST" and m:
+        op = b.get("op")
+        if op not in _DEVICE_JOB_OPS:
+            return False
+        if op in ("approve", "resume"):
+            from .scheduler import _ctx_sched
+            try:
+                job = _ctx_sched(ctx).job(m.group(1))
+            except Exception:
+                return False
+            if job is not None and job.get("action") == "tool":
+                return False
+        return True
+    m = re.fullmatch(r"/api/features/([a-z0-9_]+)", path)
+    if method == "POST" and m:
+        from .features import CATALOG
+        f = CATALOG.get(m.group(1))
+        return f is not None and f.risk == "low" and f.id != "dashboard_lan"
+    if method == "POST" and path == "/api/calendar/preview":
+        return b.get("op", "create") in ("create", "update")
+    return True
 
 
 def parse_cookies(header: str) -> dict:

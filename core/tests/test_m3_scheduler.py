@@ -516,3 +516,151 @@ def test_voice_cannot_create_tool_jobs():
     from pydantic import ValidationError
     with pytest.raises(ValidationError):
         S.PreviewArgs(when="כל בוקר ב-8", task="x" * 3, kind="tool")
+
+
+# ---------------------------------------------------------------------- review #6: resume = approve (confirm)
+async def test_voice_resume_of_a_tool_job_needs_the_onscreen_confirm_and_never_activates_drafts(db):
+    clock = Clock(ts(JLM, 2026, 10, 19, 7, 0))
+    fx = SideEffects()
+    reg = SkillRegistry(allowed_actions=set(S.ALLOWED_ACTIONS) | {"side_act"})
+    reg.register(fx)
+    s = make(db, clock, FakeResearch(), registry=reg)
+    for sk in S.make_skills(s, reg):
+        reg.register(sk)
+    asked, answer = [], [False]
+
+    async def confirm(prompt):
+        asked.append(prompt)
+        return answer[0]
+    reg.confirm = confirm
+    tool_job = s.preview("כל בוקר ב-8", "", action="tool", tool="side_act", tool_args={"text": "a"})
+    s.approve(tool_job["id"], by="dashboard")
+    s.pause(tool_job["id"], by="dashboard")
+    r = await reg.call("job_control", {"job_id": tool_job["id"], "op": "resume"})
+    assert not r.ok and r.code == "JOB_NEEDS_APPROVAL" and len(asked) == 1
+    assert s.job(tool_job["id"])["status"] == "paused"                  # declined on screen: stays paused
+    answer[0] = True
+    r = await reg.call("job_control", {"job_id": tool_job["id"], "op": "resume"})
+    assert r.ok and s.job(tool_job["id"])["status"] == "active" and len(asked) == 2
+    # a draft is never activated by "resume" (that is schedule_approve, after the user's clear yes)
+    draft = s.preview("כל בוקר ב-9", "חדשות")
+    r = await reg.call("job_control", {"job_id": draft["id"], "op": "resume"})
+    assert not r.ok and r.code == "JOB_NOT_APPROVED" and s.job(draft["id"])["status"] == "draft"
+    # a paused research job (no side effect) resumes by voice without a screen prompt
+    s.approve(draft["id"], by="voice")
+    s.pause(draft["id"], by="voice")
+    r = await reg.call("job_control", {"job_id": draft["id"], "op": "resume"})
+    assert r.ok and s.job(draft["id"])["status"] == "active" and len(asked) == 2
+
+
+# ---------------------------------------------------------------------- review #4: plan research charged once
+async def test_plan_research_job_is_charged_once_against_the_daily_limit(db):
+    from types import SimpleNamespace
+    from jarves.tasks import PlanResearchRunner
+
+    class Shared:                                      # the Core's daily Budget: counts what is reserved
+        def __init__(self):
+            self.n = 0
+
+        def reserve(self, kind="ai_requests", n=1):
+            self.n += n
+            return S._NoReservation()
+
+    class Brain:                                       # ChatGPTBrain: _stream reserves the shared budget itself
+        def __init__(self, shared):
+            self.shared = shared
+
+        async def lookup(self, question, instructions, on_event=None):
+            self.shared.reserve("ai_requests")
+            return "שלושה דברים חדשים"
+
+    shared = Shared()
+    research = S.make_research(SimpleNamespace(runner=PlanResearchRunner(Brain(shared), "inst", retries=0)))
+    jb = S.JobBudget(shared, 2)
+    assert (await research("חדשות AI", jb)).text
+    assert shared.n == 1 and jb.used == 1              # one request: one daily unit, one job unit
+    await research("חדשות AI", jb)
+    with pytest.raises(S.BudgetExceeded):              # the job cap still applies on the plan
+        await research("חדשות AI", jb)
+    assert shared.n == 2
+    # the same through a real scheduled run
+    clock = Clock(ts(JLM, 2026, 10, 19, 7, 0))
+    shared2 = Shared()
+    s = S.Scheduler(db, research=S.make_research(SimpleNamespace(
+        runner=PlanResearchRunner(Brain(shared2), "inst", retries=0))), clock=clock, budget=shared2)
+    jid = s.preview("כל בוקר ב-8", "חדשות AI")["id"]
+    s.approve(jid, by="voice")
+    clock.t = ts(JLM, 2026, 10, 19, 8, 0, 20)
+    await s.tick()
+    await settle(s)
+    assert s.runs(jid)[0]["state"] == "done" and shared2.n == 1
+
+
+# ---------------------------------------------------------------------- review #3: catch-up must not stall the tick
+def _walk_latest_due(kind, spec, tz, first_due, now):
+    """The old reference: walk every missed occurrence (slow, but obviously right)."""
+    occ, missed = first_due, 0
+    while True:
+        nxt = S.next_after(kind, spec, tz, occ)
+        if nxt is None or nxt > now:
+            return occ, missed
+        occ, missed = nxt, missed + 1
+
+
+@pytest.mark.parametrize("spec,tz,start,days", [
+    ("*/5 * * * *", JLM, (2026, 3, 25, 0, 5), 4),          # Jerusalem spring forward (27 Mar 2026)
+    ("*/5 * * * *", JLM, (2026, 10, 23, 0, 5), 4),         # Jerusalem fall back (25 Oct 2026)
+    ("*/15 * * * *", NY, (2026, 3, 7, 0, 0), 3),           # New York gap: 02:00..02:45 collapse into 03:00
+    ("30 2 * * *", NY, (2026, 3, 6, 2, 30), 5),            # the 02:30 that does not exist on 8 Mar
+    ("30 1 * * *", NY, (2026, 10, 30, 1, 30), 5),          # the 01:30 that happens twice on 1 Nov
+    ("0 * * * *", NY, (2026, 10, 31, 0, 0), 3),
+    ("0 8 * * 1-5", JLM, (2026, 1, 5, 8, 0), 40),
+    ("15 9 1 * *", JLM, (2026, 1, 1, 9, 15), 200),
+])
+def test_latest_due_matches_the_walk_across_dst(spec, tz, start, days):
+    first = S.next_after("cron", spec, tz, ts(tz, *start) - 1)
+    for k in range(1, days * 24, 9):                      # many "now" points, on and off occurrences
+        for now in (first + k * 3600 + 17, S.next_after("cron", spec, tz, first + k * 3600)):
+            assert S.latest_due("cron", spec, tz, first, now) == _walk_latest_due("cron", spec, tz, first, now)
+    assert S.latest_due("cron", spec, tz, first, first) == (first, 0)
+    assert S.latest_due("cron", spec, tz, first, first - 60) == (first, 0)
+    once = "2026-10-20T09:00"
+    assert S.latest_due("once", once, JLM, ts(JLM, 2026, 10, 20, 9), ts(JLM, 2026, 12, 1)) == \
+        (ts(JLM, 2026, 10, 20, 9), 0)
+
+
+def test_latest_due_is_fast_after_months_off():
+    """A */5 job after 6 months off walked ~52k occurrences synchronously on the tick (18 s: voice/face stalled)."""
+    import time as _t
+    first = ts(JLM, 2026, 1, 1, 0, 5)
+    now = ts(JLM, 2026, 7, 1, 12, 3)
+    t0 = _t.perf_counter()
+    occ, missed = S.latest_due("cron", "*/5 * * * *", JLM, first, now)
+    assert _t.perf_counter() - t0 < 0.3
+    assert local(occ, JLM).strftime("%d.%m %H:%M") == "01.07 12:00"
+    # every 5-minute slot of real time counted (the spring-forward hour on 27 Mar has no wall-clock slots)
+    assert missed == round((occ - first) / 300)
+
+
+async def test_week_off_catch_up_runs_once_late_without_stalling_the_tick(db):
+    import time as _t
+    clock = Clock(ts(JLM, 2026, 10, 1, 7, 0))
+    s = make(db, clock, FakeResearch())
+    jid = s.preview("כל 15 דקות", "מחירים", max_age_s=6 * 3600)["id"]
+    s.approve(jid, by="voice")
+    await s.stop()
+    clock.t = ts(JLM, 2026, 10, 8, 9, 7)               # a week off
+    research = FakeResearch()
+    s2 = make(db, clock, research)
+    t0 = _t.perf_counter()
+    await s2.tick()
+    assert _t.perf_counter() - t0 < 0.5
+    await settle(s2)
+    await s2.tick()
+    await settle(s2)
+    runs = s2.runs(jid)
+    assert len(runs) == 1 and research.calls == 1 and runs[0]["late"] == 1 and runs[0]["trigger"] == "catch_up"
+    assert local(runs[0]["scheduled_for"], JLM).strftime("%d %H:%M") == "08 09:00"
+    assert runs[0]["missed"] == _walk_latest_due("cron", "*/15 * * * *", JLM, ts(JLM, 2026, 10, 1, 7, 15),
+                                                 clock.t)[1]
+    assert s2.job(jid)["next_run"] == ts(JLM, 2026, 10, 8, 9, 15)

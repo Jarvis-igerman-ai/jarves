@@ -1,0 +1,45 @@
+order = 71
+category = "privacy"
+features = ["camera_preview"]
+aliases = ["מה הוא רואה", "המיקרופון פתוח", "המצלמה דולקת", "פס פרטיות", "privacy strip", "is the mic on",
+           "is the camera on", "what does he see", "camera preview"]
+links = ["camera", "privacy", "wake_word", "runtime"]
+pages = ["home"]
+title_he = "מה פועל עכשיו: מיקרופון, מצלמה, ענן"
+title_en = "What is on now: mic, camera, cloud"
+what_he = "פס קטן בראש המסך (פנים, אווטאר, חלון החדר ועמוד הבית) מראה תמיד אם המיקרופון מאזין, אם המצלמה דולקת, אם הוא מדבר ואם קול נשלח לענן ברגע זה. כפתור \"מה הוא רואה?\" מציג את תמונת המצלמה על המסך."
+what_en = "A small strip at the top of the screen (face, avatar, room window and the Home page) always shows whether the mic is listening, whether the camera is on, whether he is speaking and whether audio is going to the cloud right now. The \"What does he see?\" button shows the camera picture on the screen."
+say = [["המיקרופון פתוח עכשיו?", "Is the microphone on right now?"], ["מה אתה רואה?", "What do you see?"]]
+expect_he = "כתום = קולט עכשיו (מיקרופון או מצלמה). אדום-כתום = יוצא מהמכשיר (קול לענן, צילום). כחול = רק במכשיר (מילת הפעלה). אפור עם קו = כבוי או מושתק. כל מצב גם כתוב במילים."
+expect_en = "Orange = capturing now (mic or camera). Red-orange = leaving the device (audio to the cloud, a photo). Blue = on this device only (wake word). Grey with a slash = off or muted. Every state is also written in words."
+cost_he = "חינם. תצוגת המצלמה מקומית ולא נשלחת לענן."
+cost_en = "Free. The camera preview is local and never sent to the cloud."
+privacy_he = "התצוגה המקדימה נשארת בזיכרון בלבד, לא נשמרת ולא נשלחת לענן, ונסגרת לבד אחרי 20 שניות. המצב בפס נלקח מהמצב האמיתי של החיישנים, לא ממה שביקשו."
+privacy_en = "The preview stays in memory only, is never saved or sent to the cloud, and closes by itself after 20 seconds. The strip shows the real sensor state, not what was requested."
+
+[[steps]]
+he = "הסתכלו על הפס בראש המסך: מיקרופון, מצלמה, רמקול וענן. לחיצה על המיקרופון משתיקה או מחזירה אותו."
+en = "Look at the strip at the top of the screen: mic, camera, speaker and cloud. Click the mic to mute or unmute it."
+
+[[steps]]
+he = "לחיצה על המצלמה מדליקה אותה (צריך לאשר על המסך) או מכבה אותה מיד."
+en = "Click the camera to turn it on (you confirm on the screen) or off at once."
+check = "enabled:camera"
+
+[[steps]]
+he = "לחצו \"מה הוא רואה?\" כדי לראות את תמונת המצלמה. היא נסגרת לבד אחרי 20 שניות, או בלחיצה."
+en = "Press \"What does he see?\" to see the camera picture. It closes by itself after 20 seconds, or when you click."
+action = "feature_on:camera_preview"
+check = "active:camera_preview"
+
+[[problems]]
+he = "כתוב \"לא ידוע\" בפס"
+en = "The strip says \"unknown\""
+fix_he = "החלון לא מקבל עדכונים מג'ארביס. בדקו שהוא פועל (סמל המגש או jarvis status)."
+fix_en = "The window gets no updates from JARVES. Check that he is running (tray icon or jarvis status)."
+
+[[problems]]
+he = "כפתור \"מה הוא רואה?\" אפור"
+en = "The \"What does he see?\" button is grey"
+fix_he = "המצלמה כבויה או לא מחוברת. הדליקו את המתג \"מצלמה\" וחברו מצלמה."
+fix_en = "The camera is off or not connected. Turn the Camera switch on and connect a camera."

@@ -290,9 +290,11 @@ def test_cli_setup_paths(tmp_path, monkeypatch, capsys):
     (tmp_path / "config.toml").write_text("api_key = 'sk-x'\n", encoding="utf-8")
     assert _cli(tmp_path, monkeypatch, "setup") == 2                       # secrets in config rejected
     (tmp_path / "config.toml").unlink()
-    assert _cli(tmp_path, monkeypatch, "setup", stdin="9\n") == 1          # bad choice
+    from jarves import features
+    monkeypatch.setattr(features.Features, "available", lambda self, fid: (True, ""))   # no device probes here
+    assert _cli(tmp_path, monkeypatch, "setup", stdin="9\n") == 1          # bad language choice, then input ends
     assert not (tmp_path / "setup_done").exists()
-    assert _cli(tmp_path, monkeypatch, "setup", stdin="3\n") == 0          # api key mode, key skipped
+    assert _cli(tmp_path, monkeypatch, "setup", "--restart", stdin="1\n3\n") == 0   # Hebrew, api key, key skipped
     assert "jarvis key" in capsys.readouterr().out and (tmp_path / "setup_done").exists()
     (tmp_path / "config.toml").write_text("[ai]\nconnection = \"chatgpt\"\n", encoding="utf-8")
     assert _cli(tmp_path, monkeypatch, "setup", "--if-needed") == 0        # signed out later: hint, no forced login

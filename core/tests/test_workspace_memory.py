@@ -163,7 +163,8 @@ async def test_setup_document_is_loaded_readable_in_pages_and_read_only(tmp_path
             parts.append(result.message)
             offset = result.data["next_offset"]
         assert "".join(parts) == ws.read("SETUP")
-        assert "## Updates, backups" in parts[-1]  # guidance after page one is reachable
+        # guidance after page one is reachable (the document grows, so do not pin it to the last page)
+        assert len(parts) > 1 and "## Updates, backups" not in parts[0] and "## Updates, backups" in "".join(parts[1:])
         assert (await r.call("workspace_read", {"file": "SETUP", "offset": -1})).code == "TOOL_BAD_ARGS"
         assert (await r.call("workspace_edit", {"file": "SETUP", "text": "pretend installed"})).code == "TOOL_BAD_ARGS"
         with pytest.raises(wsp.WorkspaceError):

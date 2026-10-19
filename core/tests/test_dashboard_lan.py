@@ -139,6 +139,45 @@ def test_pairing_device_session_csrf_privileges_and_revocation(lan, home):
     assert cookie.split("=", 1)[1] not in audit and code not in audit and s["csrf"] not in audit
 
 
+def test_device_role_is_an_allowlist_not_a_denylist(lan):
+    """Reviewer item 2: a paired phone must NOT approve/grant/enable generated skills, install updates, add folder
+    grants or read files, switch risky features on, stop the Core, delete/restore data, edit config or run backups.
+    An allowlist: reads work, a few safe writes work, everything else is 403 from a device session."""
+    code = new_code(lan)
+    _, cookie, _ = pair(lan, code, "Galaxy")
+    _, s = jget(lan, "/api/session", cookie=cookie)
+    w = {"X-Jarves": "1", "X-CSRF-Token": s["csrf"]}
+    post = lambda path, body=None: req(lan, "POST", path, cookie=cookie, headers=w, body=body or {})[0].status
+    put = lambda path, body=None: req(lan, "PUT", path, cookie=cookie, headers=w, body=body or {})[0].status
+
+    # DENIED high-risk writes (would be let through by a denylist)
+    assert post("/api/skills/generated/anything/approve", {"sha256": "x"}) == 403
+    assert post("/api/skills/generated/anything/grant") == 403
+    assert post("/api/skills/generated/anything/enable") == 403
+    assert post("/api/updates/install") == 403
+    assert post("/api/files/grants", {"path": "C:/"}) == 403
+    assert post("/api/files/grants/1") == 403
+    for feat in ("camera", "camera_when_away", "gmail_send"):
+        assert post("/api/features/" + feat, {"enabled": True}) == 403
+    assert post("/api/runtime/stop") == 403
+    assert post("/api/privacy/delete-conversations", {"confirm": True}) == 403
+    assert post("/api/privacy/mask-history", {"confirm": True}) == 403
+    assert put("/api/settings", {"values": {"log.privacy": True}}) == 403
+    assert post("/api/settings/undo") == 403
+    assert post("/api/backup") == 403
+
+    # DENIED reads a phone must not see
+    assert jget(lan, "/api/files", cookie=cookie)[0] == 403
+    assert jget(lan, "/api/files/read?name=x", cookie=cookie)[0] == 403
+    assert jget(lan, "/api/backup", cookie=cookie)[0] == 403
+
+    # ALLOWED: ordinary reads and the explicit low-risk writes
+    assert jget(lan, "/api/features", cookie=cookie)[0] == 200
+    assert jget(lan, "/api/settings", cookie=cookie)[0] == 200
+    assert post("/api/diagnose") == 200
+    assert post("/api/memory", {"text": "buy milk"}) != 403         # a safe write reaches its handler
+
+
 def test_wrong_codes_are_limited_then_the_code_is_burnt(lan, monkeypatch):
     code = new_code(lan)
     for _ in range(dashboard_auth.CODE_TRIES_PER_IP):

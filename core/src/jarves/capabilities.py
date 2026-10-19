@@ -34,7 +34,7 @@ TRACKING = "https://github.com/igalgerman/JARVIS/issues/17"
 PI_ROADMAP = "https://github.com/igalgerman/JARVIS/issues/18"
 # Every roadmap issue a feature may link: checked to exist with `gh issue list` on LAST_CHECKED (#19-#23 were
 # created by the other SW-V2 packages for their own Pi gaps). Add a number only after the issue exists.
-KNOWN_ISSUES = {TRACKING, PI_ROADMAP, *(f"https://github.com/igalgerman/JARVIS/issues/{n}" for n in (19, 20, 21, 22, 23, 25))}   # 25: WP-L
+KNOWN_ISSUES = {TRACKING, PI_ROADMAP, *(f"https://github.com/igalgerman/JARVIS/issues/{n}" for n in (19, 20, 21, 22, 23, 25, 28))}   # 25: WP-L, 28: privacy strip
 _ISSUE_URL = re.compile(r"^https://github\.com/igalgerman/JARVIS/issues/\d+$")
 LAST_CHECKED = "2026-10-19"
 
@@ -167,6 +167,9 @@ for _fid, _w, _p, _perm, _set in [
      ["read"], "dashboard Calendar page"),
     ("calendar_write", _win("implemented_unverified", "UNIT test_calendar_write.py", _NO_GOOGLE),
      _pi("planned", _PI_OAUTH), ["destructive (always confirmed)"], "dashboard Calendar page"),
+    ("google_contacts", _win("implemented_unverified", "UNIT test_contacts.py",
+                             _NO_GOOGLE + "; People API + Contacts consent not checked live"),
+     _pi("planned", _PI_OAUTH), ["read"], "jarvis google login --contacts"),
     ("gmail_read", _win("implemented_unverified", "UNIT test_google.py", _NO_GOOGLE), _pi("planned", _PI_OAUTH),
      ["read"], ""),
     ("gmail_send", _win("implemented_unverified", "UNIT test_google.py", _NO_GOOGLE), _pi("planned", _PI_OAUTH),
@@ -177,6 +180,11 @@ for _fid, _w, _p, _perm, _set in [
      ["read"], ""),
     ("camera_when_away", _win("planned", blocker="no away-watch Skill yet"), _pi("planned", "no away-watch Skill yet"),
      ["read"], ""),
+    ("camera_preview", _win("implemented_unverified", "UNIT test_privacy_state.py (fake camera) + headless face "
+                            "screenshots docs/reviews/swv2_privacy/", "never shown with a real webcam yet"),
+     {"status": "implemented_unverified", "blocker": "picamera2 preview frames and the round-screen strip layout "
+      "never run on Pi hardware", "roadmap_issue": "https://github.com/igalgerman/JARVIS/issues/28"}, ["read"],
+     "Home page / the face's camera buttons"),
     ("wake_word", _win("verified_on_device", "HANDOFF 'Wake word through the air': speakers -> webcam mic, 4/4, "
                        "CPU 14-25 ms/frame (owner's own voice peaked ~0.17: threshold calibrated)"),
      _pi("implemented_unverified", "pyopen-wakeword linux-aarch64 wheel; Pi mic array/acoustics/CPU not measured"),

@@ -48,6 +48,8 @@ async def test_core_registers_m3_skills_and_features(core):
 
 
 async def test_reminder_is_spoken_then_shown_on_the_face(core):
+    # quiet hours (default 22:00-07:00) turn speech into a popup: keep the test independent of the wall clock
+    core.ops.alerts.update_settings({"quiet_enabled": False}, by="user")
     r = await core.registry.call("schedule_preview", {"when": "בעוד 5 דקות", "task": "להתקשר לאמא",
                                                       "kind": "reminder"})
     assert r.ok

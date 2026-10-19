@@ -325,6 +325,7 @@ class Core:
                  face_state=self.dev.face_state,
                  mic_muted=self.dev.mic_muted, live_session=self.live is not None,
                  runtime=self.runtime.view() if self.runtime is not None else None,
+                 privacy=self.privacy_state.state() if getattr(self, "privacy_state", None) else None,
                  voice_connecting=self._voice_connecting,
                  wake_listening=getattr(self, "_wake_mic_active", False),
                  ai_connection=self.cfg.ai.connection, billing=billing_routes(self.cfg.ai, self.cfg.voice),
@@ -487,6 +488,9 @@ class Core:
             self.stop_event.set()
         elif t == "runtime.set":
             await self.link.reply(ws, "runtime.state", await self.runtime.apply(p, by=client.role))
+        elif t in ("camera.preview", "camera.set_enabled"):   # privacy strip buttons (camera/wire.py)
+            from .camera import wire as camera_wire
+            await camera_wire.on_link(self, t, p, client)
         elif t == "ui.open_dashboard":               # WP-H: the face's Dashboard button
             try:
                 url = await self.open_dashboard()

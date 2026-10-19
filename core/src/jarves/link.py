@@ -35,9 +35,12 @@ DEVICE_EVENTS = frozenset({"button.down", "button.up", "mic.mute_changed", "pres
 CLOSE_GRACE_S = 10.0       # a face disconnect this soon after a requested close is the close itself, not a fault
 ALLOWED: dict[str, frozenset[str]] = {
     "face": frozenset({"talk.down", "talk.up", "user.text", "mic.set_mute", "status.request", "confirm.reply",
-                       "debug.enable", "desktop.close", "ui.open_dashboard"}) | DEVICE_EVENTS,
-    # runtime.set (M1): show/hide the window, software mute, pause alerts - the CLI, dashboard and tray route
-    "cli": frozenset({"status.request", "core.shutdown", "debug.enable", "runtime.set"}),
+                       "debug.enable", "desktop.close", "ui.open_dashboard",
+                       # privacy strip: "What does he see?" preview, camera switch (on = asks on screen first)
+                       "camera.preview", "camera.set_enabled"}) | DEVICE_EVENTS,
+    # runtime.set (M1): show/hide the window, software mute, pause alerts - the CLI, dashboard and tray route;
+    # camera.preview: the dashboard Home preview (each poll keeps it open a few seconds and returns the last frame)
+    "cli": frozenset({"status.request", "core.shutdown", "debug.enable", "runtime.set", "camera.preview"}),
 }
 KNOWN_TYPES = frozenset().union(*ALLOWED.values())
 
