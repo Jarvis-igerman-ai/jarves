@@ -54,6 +54,7 @@ ALL_SCOPES = CALENDAR_SCOPES + (GMAIL_READ, GMAIL_COMPOSE)
 CALENDAR_WRITE = _G + "calendar.events"
 REFRESH_MARGIN_S = 120
 START_COMMAND = "jarvis google start"           # WP-K: the one command for first connect AND the weekly reconnect
+APP_CLIENT_FILE = Path(__file__).with_name("_google_app_client.json")  # injected into release payload, never source
 RECONNECT_HE = f"צריך לחבר מחדש את גוגל: תריץ במחשב {START_COMMAND}, או לחץ Reconnect בדף הניהול."
 NOT_CONNECTED_HE = f"גוגל עוד לא מחובר. כדי לחבר, תריץ במחשב {START_COMMAND}, ואני אדריך אותך צעד אחר צעד."
 
@@ -87,12 +88,25 @@ class GoogleAuth:
         _write_private(self.file, d)
 
     def client(self) -> dict:
-        """The Desktop OAuth client ({client_id, client_secret}); {} when not configured yet."""
+        """Private developer override, otherwise the release's app-owned Desktop OAuth public client."""
         d = _read_json(self.client_file)
         c = d.get("installed") or d
         if not isinstance(c, dict) or not c.get("client_id"):
+            c = self.app_client()
+        if not c:
             return {}
         return {"client_id": c["client_id"], "client_secret": c.get("client_secret", "")}
+
+    @staticmethod
+    def app_client() -> dict:
+        """Only Desktop app config; never use a web client, service account or end-user tokens."""
+        c = _read_json(APP_CLIENT_FILE).get("installed")
+        if not isinstance(c, dict):
+            return {}
+        cid, secret = c.get("client_id"), c.get("client_secret", "")
+        if not isinstance(cid, str) or not cid.endswith(".apps.googleusercontent.com") or not isinstance(secret, str):
+            return {}
+        return {"client_id": cid, "client_secret": secret}
 
     def import_client(self, path: Path) -> None:
         """Copy the client_secret_*.json the user downloaded from Google Cloud (Desktop app type only)."""
@@ -127,6 +141,10 @@ class GoogleAuth:
               "gmail_send": GMAIL_COMPOSE in scopes, "calendar_write": CALENDAR_WRITE in scopes,
               "last_error": t.get("last_error", ""),
               "last_error_at": t.get("last_error_at", 0), "connected_at": t.get("connected_at", 0)}
+        private = _read_json(self.client_file)
+        private = private.get("installed") or private
+        st["client_source"] = ("private" if isinstance(private, dict) and private.get("client_id") else
+                               "app" if self.app_client() else "")
         st["message_he"] = ("" if connected else RECONNECT_HE if st["needs_reconnect"] else NOT_CONNECTED_HE)
         return st
 

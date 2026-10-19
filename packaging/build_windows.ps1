@@ -19,6 +19,7 @@ param(
     [string]$Commit = "",
     [string]$Cache = (Join-Path ([IO.Path]::GetTempPath()) "jarves-build-cache"),
     [string]$Out = "",
+    [string]$GoogleOAuthClientFile = "",  # explicitly supplied app-owned Desktop client; never private user state
     [switch]$SkipFace,
     [switch]$SkipInstaller
 )
@@ -97,6 +98,20 @@ try {
 $info = [ordered]@{ version = $Version; commit = $Commit; built = $Built; channel = $Channel; platform = "windows-x86_64"
                     python = "3.12.15+20261013"; godot = "4.7.2-stable" }
 $info | ConvertTo-Json | Set-Content -Encoding utf8NoBOM (Join-Path $Stage "python\Lib\site-packages\jarves\_build_info.json")
+if ($GoogleOAuthClientFile) {
+    Step "app-owned Google Desktop OAuth client (public-client configuration, no user tokens)"
+    $googleConfig = Get-Content -LiteralPath $GoogleOAuthClientFile -Raw | ConvertFrom-Json
+    $googleClient = $googleConfig.installed
+    if (-not $googleClient -or $googleClient.client_id -isnot [string] -or
+        $googleClient.client_id -notmatch '^[A-Za-z0-9_-]+\.apps\.googleusercontent\.com$' -or
+        ($googleClient.client_secret -and $googleClient.client_secret -isnot [string])) {
+        throw "GoogleOAuthClientFile must be an app-owned Desktop OAuth client JSON, not a web/service account client"
+    }
+    # Desktop apps are public clients (Google native-app OAuth docs). Ship only these registration values;
+    # never copy arbitrary JSON, tokens, accounts or the developer's private state directory into a release.
+    @{ installed = @{ client_id = $googleClient.client_id; client_secret = [string]$googleClient.client_secret } } |
+        ConvertTo-Json | Set-Content -Encoding utf8NoBOM (Join-Path $Stage "python\Lib\site-packages\jarves\_google_app_client.json")
+}
 Run $Py @("-I", "-c", "import jarves.cli, jarves.updates; print(jarves.updates.version_line())")
 
 # ---------------------------------------------------------------- Godot face (headless export, official template)

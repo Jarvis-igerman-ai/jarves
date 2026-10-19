@@ -300,6 +300,66 @@ def test_testing_days_left_and_fixes():
     assert google_setup.fix_for("oauth:invalid_grant")["en"].endswith("jarvis google start")
 
 
+@pytest.fixture
+def app_client(tmp_path, monkeypatch):
+    from jarves import google_auth
+    path = tmp_path / "release-oauth.json"
+    path.write_text(json.dumps(CLIENT), encoding="utf-8")
+    monkeypatch.setattr(google_auth, "APP_CLIENT_FILE", path)
+    return path
+
+
+def test_new_user_with_app_client_goes_straight_to_consent_without_cloud_setup(home, dl, app_client):
+    g, b = Google(), Browser(dl)
+    wz, out, clip = make(home, g, b)
+    wz.ask = lambda _: pytest.fail("App connection must not ask setup questions")
+    wz.which = lambda _: pytest.fail("App connection must not need gcloud")
+    assert wz.run() == 0
+    assert not b.opened and not clip and not wz.auth.client_file.exists()
+    assert wz.auth.status()["client_source"] == "app"
+    assert wz.auth.file.exists() and wz.auth.load()["refresh_token"]
+    assert "7 days" not in "\n".join(out)
+    # One app registration, separate user token stores; never expose registration values in status/checklist.
+    other = GoogleAuth(home / "another-user")
+    assert other.client() and not other.load() and not other.status()["connected"]
+    public = json.dumps(google_setup.checklist(home))
+    assert "GOCSPX" not in public and "123-abc" not in public and "rt-secret" not in public
+
+
+def test_app_client_dashboard_offers_connect_without_developer_steps(dash, home, dl, app_client, monkeypatch):
+    st, data = send(dash, "GET", "/api/google/setup")
+    assert st == 200 and data["app_client"] and data["state"] == "ready_to_sign_in"
+    assert data["steps"] == [] and "Connect Google" in data["next_en"]
+    assert data["testing_days_left"] is None
+    called = []
+    monkeypatch.setattr(google_setup, "_login_thread", lambda *args: called.append(args))
+    try:
+        st, result = send(dash, "POST", "/api/google/start")
+        assert st == 200 and result["started"] and called
+        assert not GoogleAuth(home).client_file.exists()
+    finally:
+        google_setup._LOGIN["running"] = False
+
+
+@pytest.mark.parametrize("invalid", [{"web": CLIENT["installed"]}, {"installed": {"client_id": 123}},
+                                    {"installed": {"client_id": "not-a-google-client"}},
+                                    {"installed": {"client_id": CLIENT["installed"]["client_id"], "client_secret": {}}}])
+def test_invalid_release_client_is_not_used(home, app_client, invalid):
+    app_client.write_text(json.dumps(invalid), encoding="utf-8")
+    auth = GoogleAuth(home)
+    assert not auth.client() and not auth.status()["client_configured"]
+
+
+def test_private_client_override_takes_precedence_over_app_registration(home, app_client):
+    other = {"installed": {"client_id": "private.apps.googleusercontent.com", "client_secret": "private"}}
+    p = home / "private-input.json"
+    p.write_text(json.dumps(other), encoding="utf-8")
+    auth = GoogleAuth(home)
+    auth.import_client(p)
+    assert auth.client() == other["installed"]
+    assert auth.status()["client_source"] == "private" and not google_setup.checklist(home)["app_client"]
+
+
 # ---------------------------------------------------------------------- voice: not connected -> how to connect
 async def test_not_connected_he_says_how_to_connect_and_picks_up_a_new_connection(home):
     reg = SkillRegistry()

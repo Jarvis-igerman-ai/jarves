@@ -607,12 +607,14 @@ class Wizard:
         on = enable_features(self.home, self.cfg, gmail=gmail, send=self.send and gmail)
         self.state["completed_at"] = time.time()
         self._save()
+        app_client = self.auth.status().get("client_source") == "app"
         self.say("")
         self.say("Google is connected. You can ask: \"What is on my calendar tomorrow?\"" +
                  (" or \"Are there important emails?\" I ask before reading email aloud." if gmail else ".") +
                  (" Email sending is on: I read back the draft and wait for your confirmation." if "gmail_send" in on
                   else " Email sending is off; enable it on the dashboard Features page.") +
-                 " In Testing mode Google disconnects every 7 days; run " + START_COMMAND + " again to reconnect.")
+                 (" If Google asks you to reconnect, run " + START_COMMAND + " again." if app_client else
+                  " In Testing mode Google disconnects every 7 days; run " + START_COMMAND + " again to reconnect."))
         self.say("   (features on: " + ", ".join(on) + ")")
         self._h("אם JARVES כבר רץ ולא רואה את היומן: jarvis stop ואז jarvis.",
                 "If JARVES is already running and does not see it yet: jarvis stop, then jarvis.")
@@ -628,16 +630,17 @@ def checklist(home: Path) -> dict:
     """Everything the Connections page shows. Reads local files only; never contacts Google, never an address."""
     auth = GoogleAuth(home)
     st, ss = auth.status(), load_state(home)
+    app_client = st["client_source"] == "app"
     pid = ss.get("project_id", "")
     cal_only = bool(ss.get("calendar_only"))
     steps = [{"id": s["id"], "title_he": s["title_he"], "title_en": s["title_en"], "clicks_he": s["clicks_he"],
               "clicks_en": s["clicks_en"], "url": step_url(s["id"], pid), "gmail": bool(s.get("gmail")),
               "copy": s["copy"].replace("{scopes}", scopes_text(cal_only)).replace("{email}", ""),
               "done": s["id"] in ss["steps"] or (s["id"] == "client" and st["client_configured"])}
-             for s in STEPS]
+             for s in STEPS] if not app_client else []
     chk = (ss.get("check") or {}) if st["connected"] else {}      # an old result says nothing after a disconnect
     err =st["last_error"] or ss.get("last_error", "")
-    days = testing_days_left(st["connected_at"]) if st["connected"] else None
+    days = testing_days_left(st["connected_at"]) if st["connected"] and not app_client else None
     if st["connected"] and chk.get("calendar") == "ok":
         nxt_he, nxt_en, state = "הכל מחובר. אפשר לשאול: \"מה יש לי מחר ביומן?\"", \
             "All connected. Try: \"What's on my calendar tomorrow?\"", "connected"
@@ -654,10 +657,13 @@ def checklist(home: Path) -> dict:
         nxt_he, nxt_en, state = "מריצים במחשב: " + START_COMMAND + " (הוא מדריך צעד אחר צעד), או עוברים על השלבים כאן.", \
             "Run " + START_COMMAND + " on this computer (it guides you step by step), or follow the steps here.", \
             "not_connected"
+    if app_client and not st["connected"]:
+        nxt_he, nxt_en = "לוחצים לחיבור גוגל ובוחרים את החשבון שלך.", "Press Connect Google and choose your account."
     with _LOGIN_LOCK:
         login = dict(_LOGIN)
     return {"state": state, "next_he": nxt_he, "next_en": nxt_en, "steps": steps, "project_id": pid,
-            "calendar_only": cal_only, "client_configured": st["client_configured"], "signed_in": st["connected"],
+            "calendar_only": cal_only, "app_client": app_client,
+            "client_configured": st["client_configured"], "signed_in": st["connected"],
             "needs_reconnect": st["needs_reconnect"], "scopes": st["scopes"], "calendar": st["calendar"],
             "gmail_read": st["gmail_read"], "gmail_send": st["gmail_send"],
             "check": {"calendar": chk.get("calendar", "not_run"), "gmail": chk.get("gmail", "not_run"),
@@ -665,11 +671,15 @@ def checklist(home: Path) -> dict:
             "last_error": err, "fix": fix_for(err) if err else None, "connected_at": st["connected_at"],
             "testing_days_left": days, "start_command": START_COMMAND, "gcloud_installed": bool(shutil.which("gcloud")),
             "login": login, "message_he": st["message_he"],
-            "explain_en": "JARVES uses your own free Google Cloud app, so only you have access. The keys stay on "
+            "explain_en": ("Connect your Google account to JARVES in your browser. Choose your account and review "
+                           "the requested permissions. Your account tokens stay on this device; no Cloud project, "
+                           "CLI installation or key-file download is needed." if app_client else
+                          "JARVES uses your own free Google Cloud app, so only you have access. The keys stay on "
                           "this computer. While the app is in Testing mode Google disconnects it every 7 days; "
-                          "then press Reconnect (one minute).",
-            "explain_he": "JARVES משתמש באפליקציה פרטית שלך בגוגל קלאוד (חינם), כך שרק לך יש גישה. המפתחות נשמרים "
-                          "רק במחשב הזה. במצב Testing גוגל מנתק כל 7 ימים; אז לוחצים Reconnect (דקה)."}
+                          "then press Reconnect (one minute)."),
+            "explain_he": ("מחברים את חשבון גוגל בדפדפן, בוחרים חשבון ומאשרים הרשאות. פרטי החיבור נשמרים במכשיר."
+                           if app_client else "JARVES משתמש באפליקציה פרטית שלך בגוגל קלאוד (חינם), כך שרק לך יש גישה. "
+                           "המפתחות נשמרים רק במחשב הזה. במצב Testing גוגל מנתק כל 7 ימים; אז לוחצים Reconnect (דקה).")}
 
 
 def _login_thread(home: Path, scopes, open_browser) -> None:

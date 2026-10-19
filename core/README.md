@@ -14,6 +14,24 @@ On the Pi, also run `sudo apt install libportaudio2 espeak-ng`.
 
 ### Google Calendar and Gmail setup
 
+**For distributed JARVES apps:** the release maintainer supplies one app-owned **Desktop OAuth client** to
+`packaging/build_windows.ps1 -GoogleOAuthClientFile <private-path-to-app-client.json>`. The build writes only its
+public-client registration fields into the installed package (`_google_app_client.json`), never user tokens or
+the developer's private state. Do not use a personal testing client for public releases. Do not commit the JSON.
+On a fresh installation, **Connect Google → choose account → approve permissions** now goes straight to Google's
+browser consent flow; neither gcloud nor the seven Cloud Console steps are shown. Account tokens stay in each
+user's private state directory. An explicitly imported private Desktop client takes precedence for development.
+
+**Public release gate:** the maintainer must first supply the app-owned client, register the JARVES brand and
+public homepage/privacy-policy domain, and complete Google's applicable scope verification. Gmail read/compose
+are restricted scopes; transmitting restricted data through cloud AI must be disclosed and reviewed and may
+require a security assessment. A local token store alone does not prove the whole data path is local. No app
+client or Google approval has been provisioned by this code change, no public release has been made, and no
+seven-day expiry guarantee is inferred for a bundled client. Keep the same app client registration across upgrades.
+Sources checked **2026-10-19**: [Desktop public clients and PKCE](https://developers.google.com/identity/protocols/oauth2/native-app),
+[restricted-scope verification](https://developers.google.com/identity/protocols/oauth2/production-readiness/restricted-scope-verification).
+
+**Developer / bring-your-own-client setup** (when the release has no app-owned client):
 Run `jarvis google start`. Install the [Google Cloud CLI](https://docs.cloud.google.com/sdk/docs/install-sdk)
 and run `gcloud auth login` with the account that owns your project first. When `gcloud` is on PATH, the wizard
 defaults to CLI setup: list accessible projects, choose an existing project by number or `n` to create one,
