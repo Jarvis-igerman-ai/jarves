@@ -407,3 +407,15 @@ These were fixed in the suite, not the product:
 | 1019-083456 | 21,30,24,25,26,28,29 | 8.2 min | 12.4 min |
 | 1019-085302 | 28,4,16,29,24 | 2.6 min | 3.0 min |
 | 1019-085616 | 24 | 0.5 min | 0.7 min |
+
+## Re-runs after the fixes (19 Oct 2026, lead engineer, live GPT-Live, silent virtual audio)
+
+| # | Scenario | Result | Number |
+|---|---|---|---|
+| 17 | very long utterance (40.6 s story) | **PASS** (was FAIL) | heard in full, answered (mentioned the place from the story). Fix: model audio that starts while the user is still talking is dropped and the mic gate stays open |
+| 21 | wake word x3 | **PASS** | scores 0.40-0.41, connected in 2.3-3.0 s, 3/3 answered correctly |
+| 30 | 6-minute idle soak, then reconnect | **PASS** (was FAIL) | 402 s, 26 WAKE_HEALTH, 0 false wakes, then "Hey Jarvis" + question worked |
+| 31 | false wake (nobody speaks) closes | **PASS** (new) | session closed 14.8 s after opening (`wake_no_speech_s = 12`), the next real wake worked |
+| 22 / 23 | false wakes on similar-sounding names | **still FAIL (model limit)** | 4/20 at the 0.15 threshold ("hey Travis", "Jarvis", "hey Jarvie", "Hey Charles"); Hebrew never triggers. A false wake now costs about 12 s of voice (~$0.01) instead of 3 minutes. A custom wake model is the real fix |
+
+Overall: 29 of 31 scenarios pass; the 2 remaining are the wake-word model limit above.
