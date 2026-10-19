@@ -1,5 +1,5 @@
 // JARVES dashboard pages for WP-M3: Jobs, Reports, Notes, Files, Alerts, Autonomy. Uses the helpers of app.js
-// (el, api, render, header, pill, day, clock, route); registered in window.JARVES_PAGES (app.js router fallback).
+// (el, api, render, header, pill, day, clock, route) and registers its pages in PAGES (pages.js).
 "use strict";
 
 (function () {
@@ -188,6 +188,6 @@
         el("td", { class: "small muted" }, when(a.ts)), el("td", {}, a.actor), el("td", {}, a.action), el("td", { class: "small" }, `${a.target || ""} ${a.detail || ""}`)))))));
   }
 
-  window.JARVES_PAGES = Object.assign(window.JARVES_PAGES || {}, {
+  Object.assign(PAGES, {          // pages.js registry; the app.js router checks it first
     jobs: pageJobs, reports: pageReports, notes: pageNotes, files: pageFiles, alerts: pageAlerts, autonomy: pageAutonomy });
 })();

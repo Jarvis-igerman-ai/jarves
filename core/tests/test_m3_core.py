@@ -101,7 +101,7 @@ async def test_dashboard_m3_apis_over_http(home):
     try:
         assert "jarves.operations" in d.plugins
         r, body = req(d, "GET", "/static/m3.js")
-        assert r.status == 200 and b"JARVES_PAGES" in body
+        assert r.status == 200 and b"Object.assign(PAGES" in body
         r, body = req(d, "POST", "/api/jobs", headers={"X-Jarves": "1"},
                       body={"when": "כל בוקר ב-8", "task": "חדשות AI", "action": "research"})
         assert r.status == 200

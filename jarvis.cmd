@@ -3,6 +3,7 @@ rem jarvis                                start JARVES here, with live logs in t
 rem jarvis --log-level debug             levels: error, warning, info, debug, verbose
 rem jarvis --module voice,wake --hide link   show only / hide modules
 rem jarvis setup ^| stop ^| status ^| key ^| logs -f ^| ^<any Core command^>
+rem jarvis dashboard                      open the local dashboard (conversations, logs, costs, memory, settings)
 setlocal
 set "C=%~dp0core"
 rem --no-sync: never reinstall while a Core is running (its jarves.exe is locked); install happens on start below

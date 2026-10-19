@@ -1403,6 +1403,11 @@ def table(results: list[Result]) -> str:
     return "\n".join(lines)
 
 
+def _as_list(v) -> list:
+    """details are a list; a stored result may hold a dict (KeyError on slicing in the 19 Oct #16 re-run)."""
+    return v if isinstance(v, list) else [v] if v else []
+
+
 def _md(v) -> str:
     return str(v).replace("|", "/").replace("\n", " ")
 
@@ -1450,7 +1455,7 @@ def write_report(store: dict, notes: list[str]) -> None:
         for x in failed:
             out.append(f"### {x.n}. {x.name}")
             out.append(f"- Key: {_md(x.key)}")
-            for d in x.details[:30]:
+            for d in _as_list(x.details)[:30]:
                 if isinstance(d, dict) and "asked" in d:
                     out.append(f"- asked `{_md(d['asked'][:70])}` heard `{_md(d['heard'][:80])}` said "
                                f"`{_md(d['said'][:140])}` dead air {d['dead_air_s']} s, tools {d['tools']}, screen "
@@ -1466,7 +1471,7 @@ def write_report(store: dict, notes: list[str]) -> None:
     for x in results:
         out.append(f"<details><summary>{x.n}. {x.name}: {'SKIP' if x.ok is None else 'PASS' if x.ok else 'FAIL'}"
                    f"</summary>\n")
-        for d in x.details[:40]:
+        for d in _as_list(x.details)[:40]:
             if isinstance(d, dict) and "asked" in d:
                 out.append(f"- `{_md(d['asked'][:60])}` -> said `{_md(d['said'][:160])}` (dead air "
                            f"{d['dead_air_s']} s, answer {d['answer_s']} s, backend {d['backend_s']}, screen "

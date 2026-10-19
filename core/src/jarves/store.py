@@ -59,9 +59,19 @@ KEEP_INFO = {"LIVE_STARTED", "LIVE_FIRST_AUDIO", "LIVE_EARLY_RESPONSE", "LIVE_PR
              "LIVE_RESUMED", "LIVE_REMOTE_CLOSED", "LIVE_TIME_LIMIT", "LIVE_CONFIRM_NOTE", "VOICE_ENDED",
              "VOICE_NO_SPEECH", "VOICE_IDLE", "LIVE_ENDED", "WAKE_WORD", "RT_STARTED", "RT_BARGE_IN", "GREETING",
              "CORE_READY", "CORE_STOPPED", "LIVE_BACKEND_DONE", "LIVE_TASK", "TASK_STARTED", "TASK_DONE"}
+KEEP_INFO |= {"LIVE_BACKEND_STALL", "LIVE_BACKEND_RETRY", "LIVE_BACKEND_LATE", "LIVE_DELEGATION", "TASK_FINISHED"}
+# Backend request traces (brain.BackendTrace, SW-V2 WP-C): prefix -> delegation kind. The DONE record carries the
+# exact model, service tier, usage_in/usage_out/usage_cached and web_searches (calls, billed $10/1k).
+# CHATGPT_BACKEND_* is not listed: plan requests cost $0 API and the typed reply is already counted by AI_REPLY.
+_TRACE_KINDS = {"LIVE_BACKEND": "voice", "LIVE_RETRY_BACKEND": "retry", "TASK_BACKEND": "task"}
+BACKEND_START = {f"{p}_START": k for p, k in _TRACE_KINDS.items()}
+BACKEND_DONE = {f"{p}_DONE": k for p, k in _TRACE_KINDS.items()}
+KEEP_INFO |= set(BACKEND_DONE)
 _MASKED = re.compile(r"^<(\d+) chars>$")
 _MODELS = re.compile(r"\(([^()\s]+)\s*->\s*([^()\s]+)\)")
 OPEN_SESSION_STALE_S = 600          # an "open" session with no event for this long is not shown as live
+TYPED_GAP_S = 600                   # typed exchanges closer than this belong to one typed conversation
+TYPED_KINDS = ("typed", "voice_local")
 
 
 def parse_ts(ts: str | float | None) -> float:
@@ -88,6 +98,15 @@ def _num(v):
     return v if isinstance(v, (int, float)) and not isinstance(v, bool) else None
 
 
+def usage(d: dict) -> dict:
+    """Token usage and web-search calls from a log record. Current names (usage_in/usage_out/usage_cached,
+    web_searches) first, then the older ones (input_tokens... are masked by logs.scrub, kept for old imports)."""
+    def first(*keys):
+        return next((_num(d.get(k)) for k in keys if _num(d.get(k)) is not None), None)
+    return {"in": first("usage_in", "input_tokens"), "out": first("usage_out", "output_tokens"),
+            "cached": first("usage_cached", "cached_tokens"), "searches": first("web_searches", "searches")}
+
+
 class Store:
     """All access goes through one connection guarded by a lock (writer thread, CLI and dashboard each own one)."""
 
@@ -99,11 +118,15 @@ class Store:
         if self.path != ":memory:":
             self._db.execute("PRAGMA journal_mode=WAL")
         self._db.executescript(SCHEMA)
+        have = {r[1] for r in self._db.execute("PRAGMA table_info(delegations)")}
+        if "response_id" not in have:              # SW-V2 WP-H: open backend requests (store.db migrated in place)
+            self._db.execute("ALTER TABLE delegations ADD COLUMN response_id TEXT")
         self._db.commit()
         self.tier, self.backend_model = tier, backend_model
         self._cur: str | None = None              # open live session id
         self._pending_tools: dict[str, list[int]] = {}
         self._last_user_ts: float | None = None
+        self._typed: tuple[str, float, str] | None = None   # open typed conversation (id, last reply ts, kind)
 
     def close(self) -> None:
         with self._lock:
@@ -164,23 +187,26 @@ class Store:
                     self._db.execute("INSERT INTO tool_calls (session_id, ts, name, ok, code, origin, done_ts) "
                                      "VALUES (?,?,?,?,?,?,?)", (sid, ts, name, int(bool(d.get("ok"))), rc,
                                                                 d.get("origin"), ts))
-            elif code == "LIVE_BACKEND_DONE":
-                status = str(d.get("msg", "")).rsplit(" ", 1)[-1]
-                model = d.get("model") or (self._session_backend(sid) if sid else None) or self.backend_model
-                self._db.execute(
-                    "INSERT INTO delegations (session_id, ts, kind, model, tier, status, duration_s, input_tokens, "
-                    "cached_tokens, output_tokens, web_searches) VALUES (?,?,?,?,?,?,?,?,?,?,?)",
-                    (sid, ts, "voice", model, d.get("tier") or self.tier, status, _num(d.get("backend_s")),
-                     _num(d.get("input_tokens")), _num(d.get("cached_tokens")), _num(d.get("output_tokens")),
-                     _num(d.get("web_searches"))))
+            elif code in BACKEND_START:
+                rid = d.get("response_id")
+                if rid:                            # open row: a request that never finishes still shows (stall)
+                    self._db.execute(
+                        "INSERT INTO delegations (session_id, ts, kind, model, tier, status, response_id) "
+                        "VALUES (?,?,?,?,?,?,?)", (sid, ts, BACKEND_START[code], d.get("model") or
+                                                  self._default_model(sid), None, "started", str(rid)))
+            elif code in BACKEND_DONE:
+                self._backend_done(d, sid, ts, BACKEND_DONE[code])
             elif code == "AI_REPLY":
                 plan = "chatgpt" in str(d.get("msg", "")).lower()
+                u = usage(d)
                 self._db.execute(
                     "INSERT INTO delegations (session_id, ts, kind, model, tier, status, calls, billed, input_tokens, "
-                    "output_tokens) VALUES (?,?,?,?,?,?,?,?,?,?)",
+                    "cached_tokens, output_tokens, web_searches, duration_s) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)",
                     (sid, ts, "text", d.get("model") or self.backend_model, "", "completed",
-                     int(_num(d.get("model_calls")) or 1), 0 if plan else 1, _num(d.get("input_tokens")),
-                     _num(d.get("output_tokens"))))
+                     int(_num(d.get("model_calls")) or 1), 0 if plan else 1, u["in"], u["cached"], u["out"],
+                     u["searches"], _num(d.get("duration_s"))))
+            elif code == "REPLY" and sid is None:
+                self._typed_reply(d, ts)
             elif code == "SKILL_REGISTERED":
                 skills = json.loads(self.meta("skills") or "{}")
                 name = str(d.get("msg", "")).removeprefix("skill ").removesuffix(" registered")
@@ -200,9 +226,55 @@ class Store:
                 ended, self._cur, self._pending_tools = sid, None, {}
         return ended
 
+    def _typed_reply(self, d: dict, ts: float) -> None:
+        """A typed (or push-to-talk) exchange outside a live conversation: core REPLY carries the user's words
+        (utterance) and the answer (text). Exchanges less than TYPED_GAP_S apart form one "typed" conversation;
+        the AI_REPLY / TOOL_RESULT rows logged just before it are attached to it."""
+        t_user = ts - (_num(d.get("ms")) or 0) / 1000
+        kind = "typed" if d.get("typed", True) else "voice_local"
+        sid = None
+        if self._typed and self._typed[2] == kind and t_user - self._typed[1] <= TYPED_GAP_S:
+            sid = self._typed[0]
+        if sid is None:
+            sid = f"{d.get('session') or 'x'}-{datetime.fromtimestamp(t_user).strftime('%Y%m%d-%H%M%S')}-{kind[0]}"
+            self._db.execute("INSERT OR IGNORE INTO sessions (id, core_session, kind, started, model, backend_model, "
+                             "tier, voice_seconds, last_event) VALUES (?,?,?,?,?,?,?,?,?)",
+                             (sid, d.get("session"), kind, t_user, None, self.backend_model, "", 0, ts))
+        for role, key, t in (("user", "utterance", t_user), ("assistant", "text", ts)):
+            text, n = _text(d.get(key))
+            self._db.execute("INSERT INTO turns (session_id, ts, role, text, chars) VALUES (?,?,?,?,?)",
+                             (sid, t, role, text, n))
+        for table in ("delegations", "tool_calls"):
+            self._db.execute(f"UPDATE {table} SET session_id = ? WHERE session_id IS NULL AND ts BETWEEN ? AND ?",
+                             (sid, t_user - 1, ts))
+        self._db.execute("UPDATE sessions SET ended = ?, last_event = ?, end_reason = 'typed' WHERE id = ?",
+                         (ts, ts, sid))
+        self._typed = (sid, ts, kind)
+
     def _session_backend(self, sid: str) -> str | None:
         r = self._db.execute("SELECT backend_model FROM sessions WHERE id = ?", (sid,)).fetchone()
         return r[0] if r else None
+
+    def _default_model(self, sid: str | None) -> str:
+        return (self._session_backend(sid) if sid else None) or self.backend_model
+
+    def _backend_done(self, d: dict, sid: str | None, ts: float, kind: str) -> None:
+        """Finish the open row of this response (matched by response_id), or add one (old logs had no START)."""
+        status = str(d.get("msg", "")).rsplit(" ", 1)[-1]
+        u = usage(d)
+        tier = d.get("tier") or (self.tier if kind in ("voice", "retry") else "")
+        rid = d.get("response_id")
+        row = self._db.execute("SELECT id, model, session_id FROM delegations WHERE response_id = ? AND status = "
+                               "'started' ORDER BY id DESC LIMIT 1", (str(rid),)).fetchone() if rid else None
+        model = d.get("model") or (row["model"] if row else None) or self._default_model(sid)
+        vals = (model, tier, status, _num(d.get("backend_s")), u["in"], u["cached"], u["out"], u["searches"])
+        if row is not None:
+            self._db.execute("UPDATE delegations SET model=?, tier=?, status=?, duration_s=?, input_tokens=?, "
+                             "cached_tokens=?, output_tokens=?, web_searches=? WHERE id = ?", (*vals, row["id"]))
+        else:
+            self._db.execute("INSERT INTO delegations (session_id, ts, kind, model, tier, status, duration_s, "
+                             "input_tokens, cached_tokens, output_tokens, web_searches, response_id) "
+                             "VALUES (?,?,?,?,?,?,?,?,?,?,?,?)", (sid, ts, kind, *vals, rid))
 
     def _open(self, d: dict, ts: float, kind: str) -> str:
         if self._cur:
@@ -322,7 +394,10 @@ def delegation_cost(row: dict, pricing) -> float:
     if not row.get("billed", 1):
         return 0.0                                # ChatGPT plan: no API spending
     models = _price_table(pricing)
-    p = models.get(row.get("model") or "") or models.get("gpt-6-luna")
+    name = row.get("model") or ""
+    # the server reports dated snapshots ("gpt-6-sol-2026-09-01"): use the longest configured prefix
+    p = models.get(name) or next((models[k] for k in sorted(models, key=len, reverse=True) if name.startswith(k)),
+                                 None) or models.get("gpt-6-luna")
     calls = row.get("calls") or 1
     tin = row.get("input_tokens")
     tout = row.get("output_tokens")
@@ -345,9 +420,11 @@ def session_cost(store: Store, sess: dict, pricing) -> dict:
     voice = secs / 60 * per_min
     dels = store.rows("SELECT * FROM delegations WHERE session_id = ?", (sess["id"],))
     backend = sum(delegation_cost(r, pricing) for r in dels)
+    searches = sum(r.get("web_searches") or 0 for r in dels if r.get("billed", 1))
     return {"voice": round(voice, 5), "backend": round(backend, 5), "total": round(voice + backend, 5),
             "voice_minutes": round(secs / 60, 2), "backend_responses": len(dels),
-            "estimated_tokens": any(r.get("input_tokens") is None for r in dels),
+            "estimated_tokens": any(r.get("input_tokens") is None and r.get("billed", 1) for r in dels),
+            "web_searches": searches, "web_search_usd": round(searches * pricing.web_search_per_call, 5),
             "web_searches_counted": any(r.get("web_searches") is not None for r in dels)}
 
 
@@ -355,20 +432,25 @@ def daily_costs(store: Store, pricing, days: int = 30) -> list[dict]:
     """Per local day: conversations, voice minutes, voice/backend/text USD (estimates), newest first."""
     out: dict[str, dict] = {}
     start = (datetime.now() - timedelta(days=days - 1)).replace(hour=0, minute=0, second=0, microsecond=0)
+
+    def day_row(day: str) -> dict:
+        return out.setdefault(day, {"day": day, "sessions": 0, "voice_minutes": 0.0, "voice": 0.0, "backend": 0.0,
+                                    "text": 0.0, "web_searches": 0})
     for s in store.rows("SELECT * FROM sessions WHERE started >= ?", (start.timestamp(),)):
-        day = datetime.fromtimestamp(s["started"]).date().isoformat()
+        d = day_row(datetime.fromtimestamp(s["started"]).date().isoformat())
         c = session_cost(store, s, pricing)
-        d = out.setdefault(day, {"day": day, "sessions": 0, "voice_minutes": 0.0, "voice": 0.0, "backend": 0.0,
-                                 "text": 0.0})
         d["sessions"] += 1
+        d["web_searches"] += c["web_searches"]
+        if s.get("kind") in TYPED_KINDS:              # typed chat: its backend cost is the "typed" column
+            d["text"] += c["backend"]
+            continue
         d["voice_minutes"] += c["voice_minutes"]
         d["voice"] += c["voice"]
         d["backend"] += c["backend"]
     for r in store.rows("SELECT * FROM delegations WHERE session_id IS NULL AND ts >= ?", (start.timestamp(),)):
-        day = datetime.fromtimestamp(r["ts"]).date().isoformat()
-        d = out.setdefault(day, {"day": day, "sessions": 0, "voice_minutes": 0.0, "voice": 0.0, "backend": 0.0,
-                                 "text": 0.0})
-        d["text"] += delegation_cost(r, pricing)
+        d = day_row(datetime.fromtimestamp(r["ts"]).date().isoformat())
+        d["text"] += delegation_cost(r, pricing)        # typed chat and background tasks outside a conversation
+        d["web_searches"] += (r.get("web_searches") or 0) if r.get("billed", 1) else 0
     for d in out.values():
         d["total"] = d["voice"] + d["backend"] + d["text"]
         for k in ("voice_minutes", "voice", "backend", "text", "total"):
@@ -386,6 +468,7 @@ class StoreSink(logging.Handler):
         self.store, self.cfg = store, cfg
         self._fmt = logs.JsonFormatter()
         self._q: queue.SimpleQueue = queue.SimpleQueue()
+        self.reviews: list = []                         # AI review threads started (None = skipped)
         self._thread = threading.Thread(target=self._run, name="jarves-store", daemon=True)
         self._thread.start()
 
@@ -408,6 +491,7 @@ class StoreSink(logging.Handler):
                     self.store.commit()
                     from . import diagnose
                     diagnose.run(self.store, self.cfg, [ended])
+                    self.reviews.append(diagnose.schedule_review(self.store, self.cfg, ended))   # AI pass, own thread
             except Exception as e:                    # never log from here (it would feed back into the sink)
                 print(f"jarves history: {type(e).__name__}: {str(e)[:120]}", flush=True)
         self.store.commit()
@@ -416,6 +500,9 @@ class StoreSink(logging.Handler):
         if self._thread.is_alive():
             self._q.put(None)
             self._thread.join(timeout=5)
+        for th in self.reviews:                       # a running AI review gets a moment to save its findings
+            if th is not None and th.is_alive():
+                th.join(timeout=3)
         super().close()
 
 
