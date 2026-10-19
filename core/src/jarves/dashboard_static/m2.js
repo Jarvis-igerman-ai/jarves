@@ -45,6 +45,8 @@ PAGES.newskills = async function (arg) {
         r.upgrade_of ? pill("plain", `new version of v${r.upgrade_of}`) : null,
         el("span", { class: "muted small" }, `proposed by ${(x.meta || {}).proposed_by || "?"}`)),
       el("div", { dir: "auto", style: "margin-top:6px" }, r.summary_he || ""), el("div", { class: "muted small" }, r.summary_en || ""),
+      r.has_code ? el("div", { class: "small", style: "margin-top:6px;color:#b45309" },
+        "⚠ This Skill includes Python code. It runs in a restricted child process (no OS modules, no file/network except what you grant), but on Windows the code is NOT OS-sandboxed: approve only code you understand.") : null,
       (r.errors || []).length ? el("ul", { class: "small" }, r.errors.map((e) => el("li", {}, e))) : null,
       (r.warnings || []).length ? el("ul", { class: "small muted" }, r.warnings.map((e) => el("li", {}, "Warning: " + e))) : null);
     const files = el("div", {});
@@ -76,6 +78,8 @@ PAGES.newskills = async function (arg) {
         "aria-label": `${s.title}: ${s.enabled ? "on" : "off"}`, onclick: () => act(s.id, s.enabled ? "disable" : "enable", {}, s.enabled ? "Disabled." : "Enabled.") },
         s.enabled ? "On" : "Off"), el("b", {}, s.title), pill("plain", "v" + s.version), el("span", { class: "muted small" }, s.description)),
       el("div", { dir: "auto", class: "small", style: "margin-top:6px" }, s.summary_he),
+      s.has_code ? el("div", { class: "small", style: "margin-top:6px;color:#b45309" },
+        "⚠ Runs Python code; on Windows it is NOT OS-sandboxed.") : null,
       el("div", { class: "small", style: "margin-top:6px" }, "Tools: ", s.tools.map((t) => el("code", { style: "margin-right:8px" }, `${t.name} (${t.permission})`))),
       el("div", { style: "margin-top:8px" }, el("b", { class: "small" }, "Grants: "), caps.length ? caps : el("span", { class: "muted small" }, "requests nothing "),
         hasActions ? el("label", { class: "small" }, actCb, " allow its action tools") : null, " ", save),

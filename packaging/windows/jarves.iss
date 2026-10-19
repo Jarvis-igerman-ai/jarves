@@ -1,7 +1,8 @@
 ﻿; JARVES Windows installer (Inno Setup 7.1). Built by packaging/build_windows.ps1:
 ;   ISCC /DAppVersion=0.1.0.57 /DStage=<dist\stage> /DOutDir=<dist> /DCommit=<sha> jarves.iss
 ; Per user, no admin: {autopf} = %LOCALAPPDATA%\Programs. User data stays in %LOCALAPPDATA%\jarves (or JARVES_HOME)
-; and survives upgrade and uninstall; only "remove my data" (asked, default No; silent: /PURGE=1) deletes it.
+; and survives upgrade and uninstall; only "remove my data" (asked, default No; silent: /PURGE=1) deletes it, and
+; only a real JARVES data folder (purge_guard.iss: never a drive root / the profile; config.toml|store.db|memory.db).
 ; Not signed (no code-signing certificate yet): Windows SmartScreen shows "Windows protected your PC" ->
 ; "More info" -> "Run anyway". See docs/INSTALL_TEST.md.
 
@@ -52,8 +53,8 @@ english.TaskPath=Add the "jarvis" command to my PATH (for jarvis key / setup / d
 hebrew.TaskPath=הוסף את הפקודה jarvis ל-PATH (עבור jarvis key / setup / doctor)
 english.TaskAutostart=Start JARVES when I sign in to Windows
 hebrew.TaskAutostart=הפעל את JARVES כשאני נכנס ל-Windows
-english.RunSetup=Set up JARVES now (connection, OpenAI key)
-hebrew.RunSetup=הגדר את JARVES עכשיו (חיבור, מפתח OpenAI)
+english.RunSetup=Set up JARVES now (name, voice, connection and key, choose every add-on)
+hebrew.RunSetup=הגדר את JARVES עכשיו (שם, קול, חיבור ומפתח, בחירת כל התוספים)
 english.GetPear=Get Pear Desktop for music (optional, separate app)
 hebrew.GetPear=הורד את Pear Desktop למוזיקה (אופציונלי, תוכנה נפרדת)
 english.AskPurge=Also delete your JARVES data (memory, settings, saved keys, logs) in:%n%1%n%nChoose No to keep it for a later reinstall.
@@ -85,6 +86,9 @@ Name: "{userdesktop}\JARVES"; Filename: "{app}\jarvis.cmd"; WorkingDir: "{app}";
 ; Autostart (ticked by default, owner decision) is the runtime's own mechanism: WP-M1 `jarvis autostart on|off`.
 Filename: "{cmd}"; Parameters: "/c """"{app}\jarvis.cmd"" autostart on"""; Tasks: autostart; Flags: runhidden waituntilterminated
 Filename: "{cmd}"; Parameters: "/k """"{app}\jarvis.cmd"" setup"""; WorkingDir: "{app}"; Description: "{cm:RunSetup}"; Flags: postinstall nowait skipifsilent
+; Silent installs: JARVES-Setup.exe /VERYSILENT /SETUPANSWERS=C:\path\answers.json applies a setup answers file (no
+; secrets in it; see docs/INSTALL_TEST.md). Without /SETUPANSWERS= the command does nothing (exit 0).
+Filename: "{cmd}"; Parameters: "/c """"{app}\jarvis.cmd"" setup --answers ""{param:SETUPANSWERS|}"""""; WorkingDir: "{app}"; Check: WizardSilent; Flags: runhidden waituntilterminated
 Filename: "https://github.com/pear-devs/pear-desktop/releases"; Description: "{cm:GetPear}"; Flags: postinstall shellexec nowait skipifsilent unchecked
 
 [UninstallRun]
@@ -160,6 +164,8 @@ begin
     AddToPath(ExpandConstant('{app}'));
 end;
 
+#include "purge_guard.iss"
+
 function PurgeRequested(): Boolean;
 var
   I: Integer;
@@ -181,6 +187,12 @@ begin
     Dir := DataDir();
     if not DirExists(Dir) then
       exit;
+    if not IsDataDirSafeToPurge(Dir) then
+    begin
+      // never DelTree a drive root, the profile or a folder without JARVES data in it (JARVES_HOME can be anything)
+      Log('JARVES data folder kept (not a JARVES data folder, or a protected folder): ' + Dir);
+      exit;
+    end;
     if UninstallSilent() then
     begin
       if PurgeRequested() then

@@ -78,6 +78,28 @@ def test_page_and_static_files_with_strict_headers(dash):
     assert b".innerHTML" not in req(dash, "GET", "/static/app.js")[1]    # all text via textContent
 
 
+def test_negative_content_length_is_rejected_not_hung(dash):
+    """Reviewer item 12: a negative Content-Length used to reach rfile.read(-1) and block the worker thread until
+    EOF. It must be refused promptly with 400 on both the authenticated handler and the /api/pair path."""
+    import socket
+    token = dash.url.split("t=")[1]
+    raw = (f"POST /api/diagnose HTTP/1.1\r\nHost: 127.0.0.1:{dash.port}\r\nX-Jarves: 1\r\n"
+           f"Cookie: {dashboard.COOKIE}={token}\r\nContent-Length: -1\r\nConnection: close\r\n\r\n")
+    s = socket.create_connection(("127.0.0.1", dash.port), timeout=5)
+    try:
+        s.sendall(raw.encode())
+        s.settimeout(5)                                   # if the fix regressed this read would time out (hang)
+        resp = b""
+        while b"\r\n\r\n" not in resp:
+            chunk = s.recv(4096)
+            if not chunk:
+                break
+            resp += chunk
+    finally:
+        s.close()
+    assert b" 400 " in resp.split(b"\r\n", 1)[0], resp[:80]
+
+
 def test_conversations_and_transcript(dash):
     sessions = get(dash, "/api/sessions")
     assert len(sessions) == 1

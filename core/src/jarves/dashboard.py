@@ -47,6 +47,7 @@ PLUGIN_MODULES = ("jarves.workspace", "jarves.curator", "jarves.memory", "jarves
                   "jarves.usage", "jarves.backup", "jarves.appearance", "jarves.skills.generated",
                   "jarves.operations", "jarves.runtime", "jarves.updates",
                   "jarves.identity", "jarves.dashboard_auth", "jarves.guides",     # WP-L: Guides pages
+                  "jarves.setup_wizard",                                         # SW-V3: Setup & add-ons page
                   "jarves.context_trace")                                          # his context per conversation
 MEMORY_UNDO_KEEP = 30
 
@@ -728,7 +729,13 @@ class Handler(BaseHTTPRequestHandler):
     def _pair(self, ip: str) -> None:
         """POST /api/pair {code, name} from a phone on the LAN -> device cookie (dashboard_auth.Access.pair)."""
         try:
-            body = json.loads(self.rfile.read(min(int(self.headers.get("Content-Length") or 0), 4096)) or b"{}")
+            n = int(self.headers.get("Content-Length") or 0)
+        except ValueError:
+            n = -1
+        if n < 0 or n > 4096:                            # rfile.read(-1) would block the thread until EOF
+            return self._json(400, {"error": "bad Content-Length"})
+        try:
+            body = json.loads(self.rfile.read(n) or b"{}")
         except ValueError:
             return self._json(400, {"error": "invalid JSON"})
         got = self.access.pair(str(body.get("code", "")), str(body.get("name", "")), ip)
@@ -799,7 +806,12 @@ class Handler(BaseHTTPRequestHandler):
             return self._json(403, {"error": "missing X-Jarves header"})
         body = None
         if self.command in ("POST", "PUT"):
-            n = int(self.headers.get("Content-Length") or 0)
+            try:
+                n = int(self.headers.get("Content-Length") or 0)
+            except ValueError:
+                n = -1
+            if n < 0:                                    # a negative length -> rfile.read(-1) blocks forever
+                return self._json(400, {"error": "bad Content-Length"})
             if n > 1_000_000:
                 return self._json(413, {"error": "too large"})
             try:

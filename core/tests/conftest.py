@@ -41,6 +41,13 @@ class FakeTTS:
 
 
 @pytest.fixture(autouse=True)
+def _update_keys_are_hermetic(monkeypatch):
+    """The shipped public key must not change what update tests expect; tests pass their own keys explicitly."""
+    from jarves import updates
+    monkeypatch.setattr(updates, "UPDATE_PUBLIC_KEYS", ())
+
+
+@pytest.fixture(autouse=True)
 def _pear_probe_is_hermetic(monkeypatch):
     """The music feature probe pings Pear's real port; tests must not depend on whether Pear runs on this PC."""
     from jarves import features as feat

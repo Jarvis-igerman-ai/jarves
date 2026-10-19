@@ -21,6 +21,11 @@ en = "Say \"what is not set up yet?\" or start from the \"What should I do first
 action = "open:#/guides"
 
 [[steps]]
+he = "לבחור מחדש שם, קול ואת כל התוספים (מה פועל ומה כבוי): הריצו jarvis setup או פתחו את \"הגדרה ותוספים\"."
+en = "To choose the name, voice and every add-on (on or off) again: run jarvis setup or open Setup & add-ons."
+action = "open:#/setup"
+
+[[steps]]
 he = "לא רוצים הצעות? אמרו \"תפסיק להציע\" או כבו את \"הצעות עזרה בהגדרה\"."
 en = "No suggestions? Say \"stop suggesting\" or switch off Setup suggestions."
 check = "enabled:proactive_help"

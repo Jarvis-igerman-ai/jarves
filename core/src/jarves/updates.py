@@ -15,6 +15,16 @@ Private repository: anonymous requests cannot see the releases (GitHub answers 4
 fine-grained token in secrets.env as JARVES_UPDATE_TOKEN (never shipped in the installer); otherwise the check
 reports "unavailable" truthfully instead of "up to date".
 
+Public releases (WP-O, docs/RELEASE_HOSTING.md): package.yml also publishes every green `main` build to a separate
+PUBLIC repo that holds only release files (DEFAULT_RELEASES_REPO). Once this build trusts a signing key, the check
+reads https://github.com/<repo>/releases/latest/download/latest.json anonymously (a plain download, not the REST
+API, so no rate limit applies; at most once a day anyway): {"manifest": {...}, "signature": {"alg": "ed25519",
+"key_id", "sig"}}. The signature (made in CI with a key that exists only as a GitHub secret) must verify against a
+public key built into this app (UPDATE_PUBLIC_KEYS, plus an optional config `update.public_key`); without a valid
+signature the check is "unavailable", never "update available". The signed manifest pins the installer's SHA256
+and size. Config `[update] base_url` (or env JARVES_UPDATE_BASE_URL) points the same check at any other HTTPS folder
+holding latest.json (custom hosting). No GitHub token is ever sent for this source.
+
 Interface for other packages (tray, voice greeting, scheduler):
     from jarves.updates import UpdateChecker
     u = UpdateChecker(home); u.check()          # cheap when fresh (cached), safe to call at Core start
@@ -23,6 +33,7 @@ Interface for other packages (tray, voice greeting, scheduler):
 """
 from __future__ import annotations
 
+import base64
 import hashlib
 import json
 import os
@@ -42,6 +53,17 @@ ASSET_RE = re.compile(r"^JARVES-Setup-(\d+(?:\.\d+){1,3})\.exe$")
 CHECK_INTERVAL_S = 24 * 3600
 STATE_FILE = "updates.json"
 BUILD_INFO = Path(__file__).with_name("_build_info.json")
+MANIFEST = "latest.json"
+SIGN_DOMAIN = b"jarves-update-manifest-v1\n"      # same constant in packaging/release.py
+# Ed25519 public keys (base64 of the raw 32 bytes) whose signatures this app trusts for latest.json. The private
+# half exists only as the GitHub secret JARVES_UPDATE_SIGNING_KEY (`python packaging/release.py keygen`). Empty
+# until the owner creates the key: a hosted source then reports "unavailable" (no key = no trust).
+UPDATE_PUBLIC_KEYS: tuple[str, ...] = ("k95ZucnexPDgELN5ylkcxR0fy38QH5EsQs90yIpY/Go=",)   # key id a2bfe35a27dcd5fd
+DEFAULT_RELEASES_REPO = "igalgerman/jarvis-releases"   # public, release files only (same default in release.py)
+
+
+def public_releases_url(repo: str = DEFAULT_RELEASES_REPO) -> str:
+    return f"https://github.com/{repo}/releases/latest/download"
 
 # Windows / Pi status of the M6 features (spec section 5). jarves.features has no targets field yet, so this is
 # the record the capability matrix (WP-M4) reads; the issue is real (created with `gh issue create`).
@@ -87,10 +109,18 @@ def build_info() -> dict:
     try:
         raw = json.loads(BUILD_INFO.read_text(encoding="utf-8"))
         if isinstance(raw, dict):
-            info.update({k: raw[k] for k in ("version", "commit", "built", "channel", "platform") if k in raw})
+            info.update({k: raw[k] for k in ("version", "commit", "built", "channel", "platform", "update_base_url")
+                         if k in raw})
     except (OSError, ValueError):
         pass
     return info
+
+
+def is_installed_build() -> bool:
+    """True in a packaged/installed copy (packaging/build_windows.ps1 writes _build_info.json; a frozen exe counts
+    too). Dev checkouts have neither. Installed builds ignore update-source env overrides and the config key, and
+    launch only installers verified against the signed manifest."""
+    return bool(getattr(sys, "frozen", False)) or BUILD_INFO.is_file()
 
 
 def version_line() -> str:
@@ -146,15 +176,96 @@ class UpdateError(Exception):
         self.code, self.message = code, message
 
 
+# ---------------------------------------------------------------------- hosted manifest (public releases repo), Ed25519-signed
+def canonical(manifest: dict) -> bytes:
+    """The exact signed bytes (same function in packaging/release.py)."""
+    return SIGN_DOMAIN + json.dumps(manifest, sort_keys=True, separators=(",", ":"), ensure_ascii=True).encode("ascii")
+
+
+def key_id(public_raw: bytes) -> str:
+    return hashlib.sha256(public_raw).hexdigest()[:16]
+
+
+def verify_manifest(envelope: object, public_keys: list[str] | tuple[str, ...]) -> dict:
+    """The manifest inside a latest.json envelope, only if an Ed25519 signature by one of `public_keys` covers it."""
+    from cryptography.exceptions import InvalidSignature
+    from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PublicKey
+    if not public_keys:
+        raise UpdateError("UPDATE_NO_KEY", "this build has no update signing key, so a hosted update cannot be "
+                                           "trusted (docs/RELEASE_HOSTING.md)")
+    if not isinstance(envelope, dict) or not isinstance(envelope.get("manifest"), dict) \
+            or not isinstance(envelope.get("signature"), dict):
+        raise UpdateError("UPDATE_BAD_MANIFEST", "latest.json is not a signed JARVES manifest")
+    sig = envelope["signature"]
+    if sig.get("alg") != "ed25519":
+        raise UpdateError("UPDATE_BAD_SIGNATURE", f"unsupported signature algorithm {sig.get('alg')!r}")
+    try:
+        raw_sig = base64.b64decode(str(sig.get("sig") or ""), validate=True)
+    except ValueError:
+        raise UpdateError("UPDATE_BAD_SIGNATURE", "latest.json signature is not base64") from None
+    msg = canonical(envelope["manifest"])
+    for k in public_keys:
+        try:
+            pub = base64.b64decode(k.strip(), validate=True)
+            Ed25519PublicKey.from_public_bytes(pub).verify(raw_sig, msg)
+            return envelope["manifest"]
+        except (ValueError, InvalidSignature):
+            continue
+    raise UpdateError("UPDATE_BAD_SIGNATURE", "latest.json is not signed by a trusted JARVES key; not using it")
+
+
+def release_from_manifest(m: dict, base_url: str, current: str) -> dict | None:
+    """The same release shape pick_release() returns, from a verified manifest; None when not newer."""
+    v, name, url = str(m.get("version") or ""), str(m.get("installer") or ""), str(m.get("url") or "")
+    sha, size = str(m.get("sha256") or "").lower(), m.get("size")
+    if m.get("product") != "jarves" or m.get("platform") != "windows-x64" or m.get("channel") != "main":
+        raise UpdateError("UPDATE_BAD_MANIFEST", "latest.json is not a stable JARVES Windows release")
+    if not ASSET_RE.match(name) or ASSET_RE.match(name).group(1) != v or not re.fullmatch(r"[0-9a-f]{64}", sha) \
+            or not isinstance(size, int) or size <= 0:
+        raise UpdateError("UPDATE_BAD_MANIFEST", "latest.json is missing the version, installer, SHA256 or size")
+    if not url:
+        url = f"{base_url}/{name}"
+    if not url.startswith("https://"):
+        raise UpdateError("UPDATE_BAD_MANIFEST", "the installer link is not HTTPS")
+    if not is_newer(v, current):
+        return None
+    return {"version": v, "tag": f"{TAG_PREFIX}{v}", "page": None, "published": m.get("published"),
+            "commit": m.get("commit"), "built": m.get("built"), "notes": "", "source": "hosted",
+            "asset": {"name": name, "api_url": None, "download_url": url, "size": size, "digest": f"sha256:{sha}"},
+            "sha256_asset": None}
+
+
 class UpdateChecker:
     def __init__(self, home: Path, *, repo: str | None = None, http: Http | None = None,
-                 now: Callable[[], float] = time.time, current: str | None = None) -> None:
+                 now: Callable[[], float] = time.time, current: str | None = None, cfg=None,
+                 base_url: str | None = None, public_keys: list[str] | tuple[str, ...] | None = None) -> None:
         self.home = Path(home)
-        self.repo = repo or os.environ.get("JARVES_UPDATE_REPO") or REPO
+        self.installed = is_installed_build()
+        dev_env = (lambda k: "") if self.installed else (lambda k: os.environ.get(k) or "")   # dev checkouts only
+        self.repo = repo or dev_env("JARVES_UPDATE_REPO") or REPO
         self.http = http or _httpx_get
         self.now = now
         self.current = current or build_info()["version"]
         self.path = self.home / STATE_FILE
+        ucfg = getattr(cfg, "update", None)
+        # An extra trusted key from config.toml is for dev/testing only: an installed build trusts only the keys
+        # it was built with (a local file must not be able to add trust).
+        extra = "" if self.installed else str(getattr(ucfg, "public_key", "") or "").strip()
+        self.public_keys = tuple(public_keys if public_keys is not None else UPDATE_PUBLIC_KEYS) + \
+            ((extra,) if extra else ())
+        # Order: explicit argument > env JARVES_UPDATE_BASE_URL > config [update] base_url > the build's default
+        # (CI variable baked into _build_info.json) > the public releases repo once a signing key is trusted >
+        # "" (releases of the private repo, needs JARVES_UPDATE_TOKEN).
+        base = base_url if base_url is not None else (
+            os.environ.get("JARVES_UPDATE_BASE_URL") or getattr(ucfg, "base_url", "")
+            or str(build_info().get("update_base_url") or "")
+            or (public_releases_url(dev_env("JARVES_RELEASES_REPO") or DEFAULT_RELEASES_REPO)
+                if self.public_keys else ""))
+        if base and not base.strip().startswith("https://"):
+            base = ""                                      # never fetch an update manifest over plain HTTP
+        self.base_url = base.strip().rstrip("/")
+        # A different source invalidates the cached answer (e.g. base_url was just set).
+        self.source = f"hosted:{self.base_url}" if self.base_url else f"github:{self.repo}"
 
     # --- state
     def _load(self) -> dict:
@@ -171,6 +282,9 @@ class UpdateChecker:
         os.replace(tmp, self.path)
 
     def _headers(self, accept: str = "application/vnd.github+json") -> dict:
+        if self.base_url:                                  # hosted source: never send a GitHub token elsewhere
+            return {"Accept": "*/*" if accept.startswith("application/vnd.github") else accept,
+                    "User-Agent": f"jarves/{self.current}"}
         h = {"Accept": accept, "User-Agent": f"jarves/{self.current}", "X-GitHub-Api-Version": "2022-11-28"}
         token = os.environ.get("JARVES_UPDATE_TOKEN", "").strip()
         if token:
@@ -179,33 +293,61 @@ class UpdateChecker:
 
     def status(self) -> dict:
         d = self._load()
-        rel = d.get("release")
+        rel = d.get("release") if d.get("source", self.source) == self.source else None
         # A cached release that is no longer newer (this copy was updated meanwhile) is not an update.
         available = bool(rel and is_newer(rel.get("version", ""), self.current))
         return {"current": self.current, "build": build_info(), "available": available,
                 "latest": rel if available else None, "checked_at": d.get("checked_at"), "error": d.get("error"),
-                "notified": d.get("notified"), "repo": self.repo, "policy": "notify_and_ask"}
+                "notified": d.get("notified"), "repo": self.repo, "source": self.source, "policy": "notify_and_ask"}
 
     # --- check
-    def check(self, force: bool = False) -> dict:
-        d = self._load()
-        if not force and d.get("checked_at") and self.now() - float(d.get("checked_ts") or 0) < CHECK_INTERVAL_S:
-            return self.status()
+    def _check_github(self) -> tuple[str | None, dict | None]:
         url = f"https://api.github.com/repos/{self.repo}/releases?per_page=30"
-        err, rel = None, None
         try:
             code, body = self.http(url, self._headers())
-            if code == 200 and isinstance(body, list):
-                rel = pick_release(body, self.current)
-            elif code in (401, 403, 404):
-                err = ("releases not reachable (private repository or rate limit). Ask the owner for access or set "
-                       "JARVES_UPDATE_TOKEN (read-only) in secrets.env")
-            else:
-                err = f"GitHub answered HTTP {code}"
         except Exception as e:          # network down, DNS, TLS: an update check never breaks anything
-            err = f"no connection to GitHub ({type(e).__name__})"
+            return f"no connection to GitHub ({type(e).__name__})", None
+        if code == 200 and isinstance(body, list):
+            return None, pick_release(body, self.current)
+        if code in (401, 403, 404):
+            return ("releases not reachable (private repository or rate limit). Ask the owner for access or set "
+                    "JARVES_UPDATE_TOKEN (read-only) in secrets.env, or [update] base_url"), None
+        return f"GitHub answered HTTP {code}", None
+
+    def _fetch_manifest(self) -> dict:
+        """GET + verify <base_url>/latest.json; returns the verified manifest or raises UpdateError."""
+        url = f"{self.base_url}/{MANIFEST}"
+        if not url.startswith("https://"):
+            raise UpdateError("UPDATE_BAD_SOURCE", "update.base_url must be an https:// address")
+        try:
+            code, body = self.http(url, self._headers("application/json"))
+        except Exception as e:
+            raise UpdateError("UPDATE_OFFLINE", f"no connection to the update server ({type(e).__name__})") from None
+        if code != 200:
+            raise UpdateError("UPDATE_HTTP", f"the update server answered HTTP {code} for {MANIFEST}")
+        if isinstance(body, (bytes, bytearray)):
+            try:
+                body = json.loads(bytes(body).decode("utf-8"))
+            except ValueError:
+                raise UpdateError("UPDATE_BAD_MANIFEST", f"{MANIFEST} is not JSON") from None
+        return verify_manifest(body, self.public_keys)
+
+    def _check_hosted(self) -> tuple[str | None, dict | None]:
+        try:
+            return None, release_from_manifest(self._fetch_manifest(), self.base_url, self.current)
+        except UpdateError as e:
+            return e.message, None
+
+    def check(self, force: bool = False) -> dict:
+        d = self._load()
+        if not force and d.get("checked_at") and d.get("source", self.source) == self.source \
+                and self.now() - float(d.get("checked_ts") or 0) < CHECK_INTERVAL_S:
+            return self.status()
+        err, rel = self._check_hosted() if self.base_url else self._check_github()
+        if d.get("source", self.source) != self.source:
+            d.pop("release", None)                         # an answer from the old source is not this source's
         d.update({"checked_at": datetime.now(timezone.utc).isoformat(timespec="seconds"), "checked_ts": self.now(),
-                  "error": err})
+                  "error": err, "source": self.source})
         if err is None:
             d["release"] = rel
         self._save(d)
@@ -263,6 +405,8 @@ class UpdateChecker:
         got = hashlib.sha256(data).hexdigest()
         if got != want:
             raise UpdateError("UPDATE_CHECKSUM_MISMATCH", "the downloaded installer does not match its SHA256")
+        if rel.get("source") == "hosted" and len(data) != rel["asset"].get("size"):
+            raise UpdateError("UPDATE_CHECKSUM_MISMATCH", "the downloaded installer has the wrong size")
         out = self.home / "updates" / rel["asset"]["name"]
         out.parent.mkdir(parents=True, exist_ok=True)
         out.write_bytes(data)
@@ -279,13 +423,36 @@ class UpdateChecker:
         if not s["available"]:
             raise UpdateError("UPDATE_NONE", "no newer version is known (run a check first)")
         rel = s["latest"]
+        signed = rel.get("source") == "hosted"
+        if not signed and self.installed:
+            # A GitHub release's SHA256 / digest come from the same release as the installer: they catch
+            # corruption, not a malicious release. Installed builds launch only what the signed manifest names.
+            raise UpdateError("UPDATE_UNSIGNED", "this update has no signed manifest, so it is not installed "
+                                                 "automatically; download it by hand and check its SHA256 "
+                                                 "(docs/RELEASE_HOSTING.md)")
+        if signed:
+            # Re-read and re-verify the signed manifest now: the SHA256 we check against is never taken from the
+            # local cache file alone.
+            rel = release_from_manifest(self._fetch_manifest(), self.base_url, self.current)
+            if rel is None:
+                raise UpdateError("UPDATE_NONE", "the update server no longer offers a newer version")
         exe = self.download(rel)
         bak = backup_before_update(self.home, f"pre-update-{self.current}-to-{rel['version']}")
-        return {"installer": str(exe), "backup": str(bak), "version": rel["version"]}
+        return {"installer": str(exe), "backup": str(bak), "version": rel["version"], "signed": signed,
+                "sha256": hashlib.sha256(exe.read_bytes()).hexdigest()}   # = the verified value (download checked)
 
 
-def launch_installer(path: str | Path) -> None:
-    """Start the normal (visible) setup window, detached, so the user sees and confirms every step."""
+def launch_installer(path: str | Path, verified: dict | None = None) -> None:
+    """Start the normal (visible) setup window, detached, so the user sees and confirms every step. `verified` is
+    prepare_install()'s result; an installed build refuses to start anything without a signed, verified result
+    whose SHA256 still matches the file on disk (checked again right before launch)."""
+    if is_installed_build():
+        if not verified or verified.get("signed") is not True or Path(verified.get("installer") or "") != Path(path):
+            raise UpdateError("UPDATE_UNSIGNED", "not starting an installer that was not verified against the "
+                                                 "signed update manifest")
+        if hashlib.sha256(Path(path).read_bytes()).hexdigest() != verified.get("sha256"):
+            raise UpdateError("UPDATE_CHECKSUM_MISMATCH", "the installer changed after it was verified; not "
+                                                          "starting it")
     flags = getattr(subprocess, "DETACHED_PROCESS", 0) | getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0)
     subprocess.Popen([str(path)], creationflags=flags, close_fds=True)
     logs.info("updates", "UPDATE_INSTALLER_STARTED", "installer started after user approval", installer=Path(path).name)
@@ -309,15 +476,15 @@ def _register_feature() -> None:
     import inspect
     kw = {"targets": PLATFORMS["update_check"]} if "targets" in inspect.signature(features.register).parameters else {}
     features.register("update_check", "בדיקת עדכונים", "Update check", True, risk="low",
-                      about="looks for a newer JARVES on GitHub once a day (read-only); installs only after you "
-                            "approve", **kw)
+                      about="looks for a newer JARVES once a day (GitHub, or the signed release folder in "
+                            "update.base_url; read-only); installs only after you approve", **kw)
 
 
 _register_feature()
 
 
 def _checker(ctx) -> UpdateChecker:
-    return UpdateChecker(ctx.home)
+    return UpdateChecker(ctx.home, cfg=getattr(ctx, "cfg", None))
 
 
 def _enabled(ctx) -> bool:
@@ -344,9 +511,9 @@ def api_updates_install(ctx, m, body):
     """POST {"approve": true}: the dashboard click is the approval. Downloads, verifies, backs up, starts setup."""
     try:
         r = _checker(ctx).prepare_install((body or {}).get("approve") is True)
+        launch_installer(r["installer"], verified=r)
     except UpdateError as e:
         return 409, {"error": e.message, "code": e.code}
-    launch_installer(r["installer"])
     return 200, {**r, "note": "the setup window is open; it closes JARVES, keeps your data and can start it again"}
 
 

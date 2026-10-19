@@ -26,10 +26,41 @@ Get-FileHash .\JARVES-Setup-*.exe     # must equal the SHA256 in the release not
    / המתקין עדיין לא חתום: יופיע "Windows protected your PC" → **More info** → **Run anyway**. לא תתבקש סיסמת מנהל.
 2. Choose the language, keep the folder (`%LOCALAPPDATA%\Programs\JARVES`), choose tasks:
    *Add jarvis to PATH* (recommended), *Start JARVES when I sign in* (ticked by default; untick if you do not want it), desktop icon (optional). / "הפעלה בכניסה ל-Windows" מסומן כברירת מחדל, אפשר לבטל.
-3. At the end leave **"Set up JARVES now"** checked: a window asks how JARVES connects (ChatGPT plan / API key) and,
-   for an API key, lets you paste it (`jarvis key`). / בסוף השאר מסומן "Set up JARVES now": בחירת חיבור והדבקת מפתח.
+3. At the end leave **"Set up JARVES now"** checked: the setup wizard (`jarvis setup`, Hebrew first, English on
+   request; Enter = the recommended answer) asks, in order: language → connection (ChatGPT plan / API key /
+   both) + paste the key or sign in → the assistant's written and spoken name and how he should address you →
+   wake phrase ("Hey Jarvis" is the only built-in one; your own phrase is trained later with `jarvis wake train`)
+   → voice → **every add-on ON/OFF**, grouped (Core / Voice / Music / Google / Camera & privacy / Automation /
+   Dashboard & phone / Updates & backup), each with what it does, cost/privacy and whether it is available on this
+   PC (camera found or not, Pear running or not + download link, Google needs `jarvis google start`) → privacy mode
+   → monthly API budget → offer to connect Google now or later → summary and "what to do next".
+   Camera, face recognition, camera-when-away, sending mail, calendar writes and the phone (LAN) dashboard stay
+   **OFF** unless you type yes. Run `jarvis setup` again any time to change a choice (it keeps the others), or use
+   the dashboard page **Setup & add-ons**. If you stop half-way, the next `jarvis setup` continues where it stopped.
+   / בסוף השאר מסומן "Set up JARVES now": אשף הגדרה בעברית — חיבור ומפתח, שם, מילת הפעלה, קול, ובחירה של כל
+   תוסף (פועל/כבוי) עם הסבר וזמינות. מצלמה, זיהוי פנים, שליחת מיילים, כתיבה ליומן ולוח בקרה ברשת כבויים עד
+   שמאשרים במפורש. אפשר להריץ שוב `jarvis setup` בכל זמן.
 
 **Expected / צפוי:** Start menu → *JARVES* folder with JARVES, setup, dashboard, doctor, update check, uninstall.
+
+**Check that every add-on is in the install / לבדוק שכל התוספים הותקנו:** `jarvis setup --check-addons` → one line
+per add-on and `ADDON CHECK: PASS` (opens no camera or microphone, downloads nothing; CI runs the same check on
+every installer build).
+
+**Silent install with your choices / התקנה שקטה עם הבחירות שלך:**
+```powershell
+JARVES-Setup-<version>.exe /VERYSILENT /SETUPANSWERS=C:\path\answers.json
+```
+`answers.json` (no keys or passwords in it; an API key is taken from the `OPENAI_API_KEY` environment variable
+only with `"api_key_from_env": true`; Google and ChatGPT sign-in always need you at the keyboard):
+```json
+{"language": "he", "connection": "combined", "display_name": "JARVES", "spoken_name": "ג'ארוויס",
+ "address_me": "איגל, בלשון זכר", "wake_model": "hey_jarvis", "voice": "live:vesper",
+ "features": {"music": true, "camera": false, "gmail_send": false}, "privacy_mode": false,
+ "monthly_budget_usd": 20}
+```
+Every key is optional (missing = recommended/current). The same file works with `jarvis setup --answers FILE`;
+`jarvis setup --defaults` takes every recommended answer without questions.
 
 ## 3. Use it / שימוש
 
