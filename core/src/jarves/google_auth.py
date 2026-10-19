@@ -329,6 +329,18 @@ def google_status(home: Path) -> dict:
     return GoogleAuth(home).status()
 
 
+def dashboard_routes(register) -> None:
+    """Dashboard plugin (jarves.dashboard PLUGIN_MODULES): GET /api/google = status (with the Hebrew reconnect
+    line), POST /api/google/disconnect = revoke + delete. Connecting stays `jarvis google login` (browser consent)."""
+    def get(ctx, _m, _body):
+        return 200, {**google_status(ctx.home), "connect_command": "jarvis google login"}
+
+    def disconnect(ctx, _m, _body):
+        return 200, {"revoked": asyncio.run(GoogleAuth(ctx.home).sign_out()), **google_status(ctx.home)}
+    register("GET", r"/api/google", get)
+    register("POST", r"/api/google/disconnect", disconnect)
+
+
 # ---------------------------------------------------------------------- CLI (`jarvis google ...`)
 def add_cli(sub) -> None:
     g = sub.add_parser("google", help="connect / disconnect Google Calendar + Gmail (your own Google Cloud app)")

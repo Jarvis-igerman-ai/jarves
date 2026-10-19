@@ -502,6 +502,29 @@ async def test_brain_offline_calendar_and_mail(setup):
     assert r.ok and "לשאול אם להקריא" in r.text
 
 
+def test_dashboard_google_status_route(home):
+    """Dashboard plugin route: status with the Hebrew reconnect line; never tokens or the client secret."""
+    import http.client
+    from jarves import dashboard
+    from jarves.config import Config
+    seed(home, needs_reconnect=True)
+    GoogleAuth(home)._save({"needs_reconnect": True, "scopes": list(ALL_SCOPES), "last_error": "GOOGLE_AUTH_EXPIRED"})
+    d = dashboard.Dashboard(home, Config()).start()
+    try:
+        c = http.client.HTTPConnection("127.0.0.1", d.port, timeout=5)
+        c.request("GET", "/api/google", headers={"Host": f"127.0.0.1:{d.port}",
+                                                 "Cookie": f"{dashboard.COOKIE}={d.url.split('t=')[1]}"})
+        r = c.getresponse()
+        body = r.read().decode()
+        c.close()
+    finally:
+        d.stop()
+    assert r.status == 200, body
+    st = json.loads(body)
+    assert st["needs_reconnect"] is True and st["message_he"] == RECONNECT_HE and st["client_configured"] is True
+    assert "GOCSPX" not in body and "rt-secret" not in body
+
+
 def test_cli_status_not_connected(home, capsys):
     from jarves.cli import main
     assert main(["google", "status"]) == 1
