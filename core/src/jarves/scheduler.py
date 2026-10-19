@@ -482,10 +482,12 @@ class JobBudget:
     def __init__(self, inner, limit: int) -> None:
         self.inner, self.limit, self.used = inner, max(0, int(limit)), 0
 
-    def reserve(self, kind: str = "ai_requests", n: int = 1):
+    def reserve(self, kind: str = "ai_requests", n: int = 1, *, shared: bool = True):
+        """shared=False: count against the job cap only (the ChatGPT plan, where ChatGPTBrain._stream reserves
+        the shared daily budget per request itself; reserving it here too charged each request twice)."""
         if self.used + n > self.limit:
             raise BudgetExceeded(f"job:{kind}", self.limit, self.used)
-        res = self.inner.reserve(kind, n) if self.inner is not None else _NoReservation()
+        res = self.inner.reserve(kind, n) if self.inner is not None and shared else _NoReservation()
         self.used += n
         return res
 
@@ -1271,7 +1273,8 @@ def make_research(tasks_manager) -> ResearchFn | None:
             r.budget, r.area, r.prefix = budget, "scheduler", "JOB_BACKEND"
             return await r(task)
         if isinstance(base, PlanResearchRunner):
-            res = budget.reserve("ai_requests")          # counts against the job cap (plan: no API spending)
+            # the job cap only: the brain reserves the shared daily budget per request (review #4: no double charge)
+            res = budget.reserve("ai_requests", shared=False)
             try:
                 return await r(task)
             finally:

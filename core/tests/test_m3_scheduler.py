@@ -518,6 +518,49 @@ def test_voice_cannot_create_tool_jobs():
         S.PreviewArgs(when="כל בוקר ב-8", task="x" * 3, kind="tool")
 
 
+# ---------------------------------------------------------------------- review #4: plan research charged once
+async def test_plan_research_job_is_charged_once_against_the_daily_limit(db):
+    from types import SimpleNamespace
+    from jarves.tasks import PlanResearchRunner
+
+    class Shared:                                      # the Core's daily Budget: counts what is reserved
+        def __init__(self):
+            self.n = 0
+
+        def reserve(self, kind="ai_requests", n=1):
+            self.n += n
+            return S._NoReservation()
+
+    class Brain:                                       # ChatGPTBrain: _stream reserves the shared budget itself
+        def __init__(self, shared):
+            self.shared = shared
+
+        async def lookup(self, question, instructions, on_event=None):
+            self.shared.reserve("ai_requests")
+            return "שלושה דברים חדשים"
+
+    shared = Shared()
+    research = S.make_research(SimpleNamespace(runner=PlanResearchRunner(Brain(shared), "inst", retries=0)))
+    jb = S.JobBudget(shared, 2)
+    assert (await research("חדשות AI", jb)).text
+    assert shared.n == 1 and jb.used == 1              # one request: one daily unit, one job unit
+    await research("חדשות AI", jb)
+    with pytest.raises(S.BudgetExceeded):              # the job cap still applies on the plan
+        await research("חדשות AI", jb)
+    assert shared.n == 2
+    # the same through a real scheduled run
+    clock = Clock(ts(JLM, 2026, 10, 19, 7, 0))
+    shared2 = Shared()
+    s = S.Scheduler(db, research=S.make_research(SimpleNamespace(
+        runner=PlanResearchRunner(Brain(shared2), "inst", retries=0))), clock=clock, budget=shared2)
+    jid = s.preview("כל בוקר ב-8", "חדשות AI")["id"]
+    s.approve(jid, by="voice")
+    clock.t = ts(JLM, 2026, 10, 19, 8, 0, 20)
+    await s.tick()
+    await settle(s)
+    assert s.runs(jid)[0]["state"] == "done" and shared2.n == 1
+
+
 # ---------------------------------------------------------------------- review #3: catch-up must not stall the tick
 def _walk_latest_due(kind, spec, tz, first_due, now):
     """The old reference: walk every missed occurrence (slow, but obviously right)."""
