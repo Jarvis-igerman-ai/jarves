@@ -74,6 +74,22 @@ def test_backup_contents_and_no_credentials(profile):
     assert man["contains_credentials"] is False and backup.verify(p)["ok"]
 
 
+def test_paired_device_tokens_are_never_archived(profile):
+    """Reviewer item 14: dashboard_devices.json holds device token HASHES and per-device CSRF secrets. It must be
+    excluded from the archive (like secrets.env), not shipped where a backup could be shared."""
+    (profile / "dashboard_devices.json").write_text(json.dumps({"version": 1, "devices": [
+        {"id": "abc", "token_hash": "deadbeef" * 8, "csrf": "super-secret-csrf-value"}]}), encoding="utf-8")
+    p = backup.create(profile, "manual")
+    got = names(p)
+    assert not any(n.endswith("dashboard_devices.json") for n in got)
+    with zipfile.ZipFile(p) as z:
+        blob = b"".join(z.read(n) for n in z.namelist())
+        man = json.loads(z.read("manifest.json"))
+    assert b"super-secret-csrf-value" not in blob and b"deadbeef" not in blob
+    assert "dashboard_devices.json" in {e["name"] for e in man["excluded"]}
+    assert backup.verify(p)["ok"]
+
+
 def test_sqlite_snapshot_is_consistent_under_a_live_writer(profile):
     stop = threading.Event()
 
