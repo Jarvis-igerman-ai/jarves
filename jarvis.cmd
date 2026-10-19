@@ -6,6 +6,7 @@ rem jarvis start [--show]                JARVES in the background: no window, tr
 rem jarvis stop ^| status ^| show ^| hide    stop it / its four states / open or close the window (Core keeps running)
 rem jarvis autostart on ^| off ^| status     start invisibly when you log in to Windows (default off)
 rem jarvis setup ^| key ^| logs -f ^| ^<any Core command^>
+rem jarvis dashboard                      open the local dashboard (home, conversations, logs, costs, memory, settings)
 rem Closing the window only hides JARVES; Quit in the tray (or jarvis stop) stops him.
 setlocal
 set "C=%~dp0core"

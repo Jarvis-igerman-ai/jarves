@@ -150,6 +150,39 @@ textarea.file { width: 100%; min-height: 50vh; font: 13px/1.55 ui-monospace, Con
 /* Features page (WP-I): on/off switch */
 .switch { min-width: 52px; border-radius: 999px; }
 .switch[aria-pressed="true"] { background: var(--good); border-color: var(--good); color: #fff; }
+/* WP-H: filters, editors, diffs, logs */
+input, select { font: inherit; color: var(--text); background: var(--surface); border: 1px solid var(--line); border-radius: 8px;
+  padding: 5px 8px; }
+input:focus, select:focus, textarea:focus, button:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+input.narrow { width: 90px; } input.wide { width: 100%; }
+.filters { display: flex; flex-wrap: wrap; gap: 10px 14px; align-items: flex-end; margin-bottom: 12px; }
+.field { display: flex; flex-direction: column; gap: 3px; font-size: 12px; color: var(--text-2); }
+.check { display: flex; gap: 6px; align-items: center; font-size: 13px; color: var(--text-2); padding-bottom: 6px; }
+.pager { margin-top: 12px; }
+button:disabled { opacity: .5; cursor: default; }
+.button-link { border: 1px solid var(--line); border-radius: 8px; padding: 6px 12px; color: var(--text); }
+.mono { font-family: ui-monospace, Consolas, monospace; }
+pre.diff { font: 12.5px/1.5 ui-monospace, Consolas, monospace; background: var(--surface-2); border-radius: 8px; padding: 10px;
+  overflow: auto; max-height: 50vh; unicode-bidi: plaintext; white-space: pre-wrap; margin: 6px 0 0; }
+pre.diff .add { background: color-mix(in srgb, var(--good) 18%, transparent); }
+pre.diff .del { background: color-mix(in srgb, var(--critical) 18%, transparent); }
+pre.diff .hunk { color: var(--muted); }
+pre.args { font: 12px/1.45 ui-monospace, Consolas, monospace; background: var(--surface-2); border-radius: 6px; padding: 6px 8px;
+  white-space: pre-wrap; word-break: break-word; margin: 4px 0 0; max-height: 40vh; overflow: auto; text-align: start; }
+pre.raw { max-height: 75vh; }
+details.chip-d { border: 1px solid var(--line); background: var(--surface); border-radius: 8px; padding: 2px 8px;
+  font-size: 12px; max-width: 520px; }
+details.chip-d > summary { cursor: pointer; font-family: ui-monospace, Consolas, monospace; }
+details.chip-d[open] { padding-bottom: 6px; }
+details.chip-d.fail { border-color: var(--critical); } details.chip-d.fail > summary { color: var(--critical); }
+details.chip-d.slow { border-color: var(--serious); }
+details.card > summary { cursor: pointer; font-weight: 600; }
+table.log td { padding: 6px 8px; font-size: 13px; }
+table.log tr.lvl-error td:first-child { box-shadow: inset 3px 0 var(--critical); }
+table.log tr.lvl-warning td:first-child { box-shadow: inset 3px 0 var(--serious); }
+tr.detail td { background: var(--surface-2); }
+.nowrap { white-space: nowrap; }
+.card > .row > input:not([type]) { flex: 1; min-width: 240px; }
 
 /* Home (M1 runtime): controls + voice side by side */
 .grid2.home { grid-template-columns: 1fr 1fr; margin-bottom: 14px; }

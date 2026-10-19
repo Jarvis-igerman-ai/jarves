@@ -64,7 +64,6 @@ class Runtime:
         self.tray = None
         self.tray_state, self.tray_reason = "off", ""
         self.autostart = autostart if autostart is not None else autostart_mod.adapter()
-        self.dashboard = None
         self.started = time.time()
         self.state = "running"
         self.resumes = 0
@@ -98,12 +97,6 @@ class Runtime:
         if self.core.link.face is not None:
             await self.core.link.send_face("display.close", {"reason": "core_stopping"})
         await self.viewer.close(grace_s=2.0)
-        if self.dashboard is not None:
-            try:
-                await asyncio.to_thread(self.dashboard.stop)
-            except Exception:
-                pass
-            self.dashboard = None
         if self.tray is not None:
             await asyncio.to_thread(self.tray.stop)
             self.tray = None
@@ -183,7 +176,8 @@ class Runtime:
                       "cloud_connection_open": live or bool(core._voice_connecting),
                       "detail": "wake word off" if core.wake is None else ""},
             "tray": {"state": self.tray_state, "reason": self.tray_reason},
-            "dashboard": {"enabled": core.features.enabled("dashboard"), "running": self.dashboard is not None},
+            "dashboard": {"enabled": core.features.enabled("dashboard"),
+                          "running": getattr(core, "_dashboard", None) is not None},
             "health": snap_core, "resumes": self.resumes, "ts": time.time(),
         }
 
@@ -309,14 +303,7 @@ class Runtime:
         if not self.core.features.enabled("dashboard"):
             self._notify("The dashboard is switched off (jarvis features on dashboard)")
             return None
-        if self.dashboard is None:
-            from ..dashboard import Dashboard
-            self.dashboard = await asyncio.to_thread(lambda: Dashboard(self.home, self.core.cfg).start())
-            logs.info("runtime", "DASHBOARD_STARTED", "dashboard started from the tray (this computer only)",
-                      port=self.dashboard.port)
-        import webbrowser
-        await asyncio.to_thread(webbrowser.open, self.dashboard.url)
-        return self.dashboard.url
+        return await self.core.open_dashboard()      # the Core's in-process dashboard (WP-H), opened in the browser
 
     def _write_diag(self) -> str:
         from types import SimpleNamespace

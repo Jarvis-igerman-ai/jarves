@@ -451,11 +451,12 @@ async function pageSettings() {
 // ---------------------------------------------------------------- router
 async function route(refresh) {
   clearInterval(timer); timer = null;
-  const [page, arg] = location.hash.replace(/^#\/?/, "").split("/").map(decodeURIComponent);
-  for (const a of document.querySelectorAll("nav a"))
-    a.classList.toggle("active", a.dataset.page === (page === "session" ? "conversations" : page || "home"));
+  const [page, arg] = location.hash.replace(/^#\/?/, "").split("?")[0].split("/").map(decodeURIComponent);
+  const navPage = { session: "conversations", raw: "conversations", note: "workspace" }[page] || page || "home";
+  for (const a of document.querySelectorAll("nav a")) a.classList.toggle("active", a.dataset.page === navPage);
   try {
-    if (page === "home" || !page) await pageHome();
+    if (page === "home" || !page) await pageHome();                    // M1: the default page
+    else if (typeof PAGES !== "undefined" && PAGES[page]) await PAGES[page](arg, refresh);  // pages.js
     else if (page === "session") await pageSession(arg, refresh === true && (window.innerHeight + window.scrollY >= document.body.scrollHeight - 40));
     else if (page === "costs") await pageCosts();
     else if (page === "issues") await pageIssues(arg);
@@ -468,5 +469,6 @@ async function route(refresh) {
   } catch (e) { if (refresh !== true) fail(e); }
 }
 window.addEventListener("hashchange", () => route());
-refreshOverview().then(() => route());
+// after every deferred script (pages.js) has run
+document.addEventListener("DOMContentLoaded", () => refreshOverview().then(() => route()));
 setInterval(refreshOverview, 15000);

@@ -1,24 +1,61 @@
 # Pre-use test report: music (Pear Desktop / YouTube Music)
 
-Generated 2026-10-19 13:33 by `core/tools/suite_music.py` against the REAL Pear Desktop on this PC, silently (Pear volume 0, watchdog cap 3, restored at the end; virtual mic/speaker for voice).
+Generated 2026-10-19 19:00 by `core/tools/suite_music.py` against the REAL Pear Desktop on this PC, silently (Pear volume 0, watchdog cap 3, restored at the end; virtual mic/speaker for voice).
 
-**Result: 20/23 scenarios PASS.**
+## Issue #16 re-run (19 Oct 2026 evening, WP-E): read this first
+
+The table below holds the LATEST run of each row: the 18:56-19:00 run, made while **Pear itself had stalled**.
+It is not the best evidence for the code. All runs on this build (real Pear 3.12, volume 0 with the watchdog, Pear
+restored to slider 70 and paused after each run, 0 volume violations):
+
+| Run (19 Oct) | Build | skill S01-S13 | errors/robust | Notes |
+|---|---|---|---|---|
+| run 1 | #16 fixes | 12/13 | 7/7 | S07/S08 PASS (not re-verified before). S11 7/10: "נועה קירל" artist-script bug, "ABBA Dancing Queen" parsed to nothing, one Pear timeout. Fixed. |
+| run 2 | + search/artist fixes | 11/13 | (not run) | S11 9/10 (ABBA and Noa Kirel now play). S07: Pear applied a resume ~9 s late. Fixed (press /play again). |
+| run 3 | + fail-fast, final look | S07/S10/S11 only: 1/3 | (not run) | S11 9/10. Two plays answered MUSIC_TIMEOUT: a Pear request timed out (5 s) during the play. Fixed (check anyway). |
+| run 4 | same | 10/13 | (not run) | "Daft Punk Get Lucky" played the stalled Radio Edit (Rgrt_8mXrK8) and it was reported playing. Every request after it timed out: S02, S11 2x, S07 stop. |
+| run 5, 18:56 (table) | + timeout check | 4/13 | 7/7 | **Pear stalled**: GET /queue took 14.9 s (1 MB answer), a video sat at elapsed 0 ignoring pause, and the suite could not pause it. K01 (5 min soak) stopped after 5 s on a timeout. Afterwards a skip + pause left Pear paused at slider 70, unmuted. |
+
+What this shows:
+- **P1 (stalled playback reported as playing) is confirmed on real Pear and is a limit of Pear's API.** Pear has no
+  live progress signal. `elapsedSeconds` (REST) and `position` (`/api/v1/ws`, token as `?token=`) only change on
+  state events. In a muted probe a song really played 27 s -> 36 s while both read 27 the whole time. So a stalled
+  video and a playing one look the same. Results now say `playback: "player_reports_playing"` with a note that
+  JARVES cannot hear the speakers. An ignored pause (the stall's visible symptom) gets an actionable message:
+  "restart Pear Desktop".
+- **Volume scale measured** (paused): slider -> state 0->0 (muted), 10->2, 20->5, 30->8, 40->13, 50->20, 60->29,
+  70->40, 80->55, 90->74, 100->100. The 10·sqrt(state) estimate is off by 5-7 points mid-range, so JARVES uses this
+  table (`_VOLUME_CURVE`). POST /volume 0 mutes and any other POST unmutes. toggle-mute keeps the slider.
+- **Still open on real Pear:** a clean full run after a Pear restart (S01-S13 + K01 soak), and the voice rows
+  V01-V10 on this build (not re-run: Pear had stalled and free RAM was ~850 MB of 7.5 GB). The new `music_mute` /
+  `music_unmute` / relative volume were exercised on real Pear only through scripted probes (paused): volume
+  table, mute/unmute, restore. They were not driven by voice.
+
+**Result of the latest rows: 23/31 scenarios PASS.**
 
 | # | Group | Scenario | Result | Key number | Time | Run at |
 |---|---|---|---|---|---|---|
-| S01 | skill | play Hebrew artist: שלמה ארצי | PASS | confirm 2.4 s | 2.4 s | 10-19 13:29 |
-| S02 | skill | play Hebrew artist: עומר אדם | PASS | confirm 2.9 s | 2.9 s | 10-19 13:29 |
-| S03 | skill | play English artist+song: Queen Bohemian Rhapsody | PASS | confirm 2.2 s | 2.2 s | 10-19 13:29 |
-| S04 | skill | play English artist: Beatles | PASS | confirm 2.4 s | 2.4 s | 10-19 13:29 |
-| S05 | skill | play a mood: משהו רגוע | PASS | confirm 2.4 s | 2.4 s | 10-19 13:29 |
-| S06 | skill | play a different song while one is playing (queue-index fix) | PASS | confirm 2.3 s | 3.9 s | 10-19 13:29 |
-| S07 | skill | pause, resume, next, stop vs Pear state | **FAIL** | pause FAIL, resume 0.0s, next 0.0s, stop FAIL | 21.4 s | 10-19 13:30 |
-| S08 | skill | status tool text matches Pear (playing and paused) | **FAIL** | mismatch | 9.3 s | 10-19 13:30 |
-| S09 | skill | volume 0 and 2 on real Pear; cap enforced (fake player, max 70) | PASS | cap 70 held (7/7) | 3.3 s | 10-19 13:30 |
-| S10 | skill | rapid play -> next -> pause -> resume -> next (no waits) | **FAIL** | sequence 8.6 s, in sync=True | 8.6 s | 10-19 13:30 |
-| S11 | skill | 10 different searches back to back (confirm latency each) | PASS | 10/10 ok; median 2.3 s, max 5.8 s | 26.5 s | 10-19 13:30 |
-| S12 | skill | nonsense query -> honest 'not found' | PASS | MUSIC_NOT_FOUND in 0.4 s | 0.4 s | 10-19 13:30 |
-| S13 | skill | pause / next / resume / status when nothing is playing -> graceful | PASS | 5/5 graceful | 0.3 s | 10-19 13:30 |
+| S01 | skill | play Hebrew artist: שלמה ארצי | **FAIL** | confirm 21.0 s | 21.0 s | 10-19 18:56 |
+| S02 | skill | play Hebrew artist: עומר אדם | PASS | confirm 10.0 s | 10.0 s | 10-19 18:56 |
+| S03 | skill | play English artist+song: Queen Bohemian Rhapsody | PASS | confirm 5.7 s | 5.7 s | 10-19 18:57 |
+| S04 | skill | play English artist: Beatles | PASS | confirm 5.3 s | 5.3 s | 10-19 18:57 |
+| S05 | skill | play a mood: משהו רגוע | PASS | confirm 18.8 s | 18.8 s | 10-19 18:57 |
+| S06 | skill | play a different song while one is playing (queue-index fix) | PASS | confirm 5.5 s | 14.7 s | 10-19 18:57 |
+| S07 | skill | pause, resume, next, stop vs Pear state | **FAIL** | pause 0.0s, resume 0.0s, next FAIL, stop FAIL | 26.4 s | 10-19 18:58 |
+| S08 | skill | status tool text matches Pear (playing and paused) | **FAIL** | mismatch | 9.2 s | 10-19 18:58 |
+| S09 | skill | volume 0 and 2 on real Pear; cap enforced (fake player, max 70) | PASS | cap 70 held (7/7) | 3.2 s | 10-19 18:58 |
+| S10 | skill | rapid play -> next -> pause -> resume -> next (no waits) | **FAIL** | sequence 33.0 s, in sync=True | 39.1 s | 10-19 18:59 |
+| S11 | skill | 10 different searches back to back (confirm latency each) | **FAIL** | 0/10 ok; median 5.0 s, max 5.0 s | 50.2 s | 10-19 18:59 |
+| S12 | skill | nonsense query -> honest 'not found' | **FAIL** | MUSIC_TIMEOUT in 5.0 s | 5.0 s | 10-19 18:59 |
+| S13 | skill | pause / next / resume / status when nothing is playing -> graceful | **FAIL** | misleading reply | 12.3 s | 10-19 19:00 |
+| E01 | errors | Pear unreachable (port 26599) -> MUSIC_PLAYER_OFFLINE, Hebrew | PASS | 3/3 offline + health unavailable | 8.3 s | 10-19 19:00 |
+| E02 | errors | unpaired id at the real port -> MUSIC_NOT_PAIRED, no /auth (no dialog) | PASS | /auth calls 0, 5 requests | 0.1 s | 10-19 19:00 |
+| E03 | errors | 401 -> silent re-pair (mock), no loop; 403 on /auth -> PAIR_DENIED | PASS | re-pair 1 auth; no loop; deny honoured | 0.5 s | 10-19 19:00 |
+| R01 | robust | search edge cases: empty, no videoIds, malformed JSON, 500, timeout, 204 | PASS | 8/8 sensible | 0.1 s | 10-19 19:00 |
+| R02 | robust | now_playing edge cases: 204, malformed, missing fields, Unicode/RTL titles | PASS | no crash, RTL kept | 0.9 s | 10-19 19:00 |
+| R03 | robust | video result vs its 'song' counterpart (other videoId / title suffix) | PASS | 4/4 honest | 2.4 s | 10-19 19:00 |
+| R04 | robust | queue endpoint broken / slow -> play still works or fails honestly | PASS | no crash | 6.2 s | 10-19 19:00 |
+| K01 | soak | long soak: alternating play/next/pause/resume/status at volume 0 | **FAIL** | CRASH MusicError | 5.1 s | 10-19 19:00 |
 | V01 | voice | voice: 'נגן את שלמה ארצי' -> Pear plays the artist | PASS | Pear 2.6 s, dead air 1.13 s | 15.2 s | 10-19 13:33 |
 | V02 | voice | voice: 'עצור' -> paused | PASS | Pear 1.66 s, dead air 1.22 s | 15.2 s | 10-19 13:33 |
 | V03 | voice | voice: 'תמשיך' -> resumed | PASS | Pear 1.45 s, dead air 1.21 s | 15.2 s | 10-19 13:33 |
@@ -34,16 +71,16 @@ Generated 2026-10-19 13:33 by `core/tools/suite_music.py` against the REAL Pear 
 
 | Query | Latency |
 |---|---|
-| Adele Hello | 2.3 s |
-| Coldplay Yellow | 2.3 s |
-| אריק איינשטיין אוהב להיות בבית | 2.2 s |
-| Michael Jackson Billie Jean | 2.3 s |
-| שלום חנוך | 2.3 s |
-| Daft Punk Get Lucky | 5.8 s |
-| עידן רייכל | 2.2 s |
-| Eminem Lose Yourself | 2.3 s |
-| נועה קירל | 2.3 s |
-| ABBA Dancing Queen | 2.3 s |
+| Adele Hello | 5.0 s |
+| Coldplay Yellow | 5.0 s |
+| אריק איינשטיין אוהב להיות בבית | 5.0 s |
+| Michael Jackson Billie Jean | 5.0 s |
+| שלום חנוך | 5.0 s |
+| Daft Punk Get Lucky | 5.0 s |
+| עידן רייכל | 5.0 s |
+| Eminem Lose Yourself | 5.0 s |
+| נועה קירל | 5.0 s |
+| ABBA Dancing Queen | 5.0 s |
 
 ## Voice turns: dead air and time until Pear actually played
 
@@ -90,98 +127,157 @@ Environment facts (Pear Desktop 3.12, precise-volume plugin on):
 
 ## Safety
 
-- Final Pear state: `{"pause_workaround": ["skipped stuck fRFEiZhAVO0", "skipped stuck BSTsnWoslP4"], "paused": true, "volume_posted": 28, "volume": {"state": 8, "isMuted": false}, "max_volume_seen_during_tests": 8, "volume_violations": 1}`
+- Final Pear state: `{"pause_workaround": ["skipped stuck xUNqsfFUwhY", "skipped stuck xUNqsfFUwhY"], "pause_error": "MusicError('Pear Desktop did not answer in time')", "volume": "left at 0 because Pear could not be paused", "max_volume_seen_during_tests": 0, "volume_violations": 0}`
 
 ## Evidence per scenario
 
-### S01 play Hebrew artist: שלמה ארצי - PASS
-תתארו לכם – שלמה ארצי
-- tool: ok=True code=ok msg='מנגן: תתארו לכם – שלמה ארצי' (2.4 s)
-- pear /song: title='תתארו לכם' artist='שלמה ארצי' id=G2cWvgK1m6M paused=False
+### S01 play Hebrew artist: שלמה ארצי - FAIL
+Dancing Queen – ABBA
+- tool: ok=False code=MUSIC_NOT_CONFIRMED msg='ניסיתי 2 גרסאות של השיר, ואף אחת לא התחילה לנגן בזמן.' (21.0 s)
+- pear /song: title='Dancing Queen' artist='ABBA' id=YkLLcIKhJ64 paused=True
 
 ### S02 play Hebrew artist: עומר אדם - PASS
 שני משוגעים – עומר אדם
-- tool: ok=True code=ok msg='מנגן: שני משוגעים – עומר אדם' (2.9 s)
+- tool: ok=True code=ok msg='מנגן: שני משוגעים – עומר אדם' (10.0 s)
 - pear /song: title='שני משוגעים' artist='עומר אדם' id=fRFEiZhAVO0 paused=False
 
 ### S03 play English artist+song: Queen Bohemian Rhapsody - PASS
 Bohemian Rhapsody – Queen
-- tool: ok=True code=ok msg='מנגן: Bohemian Rhapsody – Queen' (2.2 s)
+- tool: ok=True code=ok msg='מנגן: Bohemian Rhapsody – Queen' (5.7 s)
 - pear /song: title='Bohemian Rhapsody' artist='Queen' id=BSTsnWoslP4 paused=False
 
 ### S04 play English artist: Beatles - PASS
-Get Back (Remastered 2009) – The Beatles
-- tool: ok=True code=ok msg='מנגן: Get Back (Remastered 2009) – The Beatles' (2.4 s)
-- pear /song: title='Get Back (Remastered 2009)' artist='The Beatles' id=IKJqecxswCA paused=False
+Here Comes The Sun (Remastered 2009) – The Beatles
+- tool: ok=True code=ok msg='מנגן: Here Comes The Sun (Remastered 2009) – The Beatles' (5.3 s)
+- pear /song: title='Here Comes The Sun (Remastered 2009)' artist='The Beatles' id=xUNqsfFUwhY paused=False
 
 ### S05 play a mood: משהו רגוע - PASS
-משהו קטן וטוב – משינה
-- tool: ok=True code=ok msg='מנגן: משהו קטן וטוב – משינה' (2.4 s)
-- pear /song: title='משהו קטן וטוב' artist='משינה' id=SpOQwxDvddM paused=False
+משהו בשביל מישהו – חוה אלברשטיין
+- tool: ok=True code=ok msg='מנגן: משהו בשביל מישהו – חוה אלברשטיין' (18.8 s)
+- pear /song: title='משהו בשביל מישהו' artist='חוה אלברשטיין' id=HDwmZqpjry0 paused=False
 
 ### S06 play a different song while one is playing (queue-index fix) - PASS
 old next=BSTsnWoslP4, now=BciS5krYL80 'Hotel California'
-- tool: ok=True code=ok msg='מנגן: Bohemian Rhapsody – Queen' (1.5 s)
+- tool: ok=True code=ok msg='מנגן: Bohemian Rhapsody – Queen' (9.0 s)
 - pear /song: title='Bohemian Rhapsody' artist='Queen' id=BSTsnWoslP4 paused=False
-- tool: ok=True code=ok msg='מנגן: Hotel California – Eagles' (2.3 s)
+- tool: ok=True code=ok msg='מנגן: Hotel California – Eagles' (5.5 s)
 - pear /song: title='Hotel California' artist='Eagles' id=BciS5krYL80 paused=False
-- queue len 39, selected 3, old next BSTsnWoslP4
+- queue len 58, selected 4, old next BSTsnWoslP4
 
 ### S07 pause, resume, next, stop vs Pear state - FAIL
-- music_pause: ok=False msg='ביקשתי מהנגן להשהות, אבל הוא עדיין מנגן.' tool 4.04s; pear reached state after never s: 'Hotel California' paused=False
-- music_resume: ok=True msg='ממשיך לנגן: Hotel California – Eagles' tool 0.01s; pear reached state after 0.00 s: 'Hotel California' paused=False
-- music_next: ok=True msg='השיר הבא: Bohemian Rhapsody – Queen' tool 1.00s; pear reached state after 0.00 s: 'Bohemian Rhapsody' paused=False
-- music_stop: ok=False msg='ביקשתי מהנגן להשהות, אבל הוא עדיין מנגן.' tool 4.09s; pear reached state after never s: 'Bohemian Rhapsody' paused=False
+- music_pause: ok=True msg='השהיתי.' tool 0.33s; pear reached state after 0.01 s: 'Hotel California' paused=True
+- music_resume: ok=True msg='ממשיך לנגן: Hotel California – Eagles' tool 0.34s; pear reached state after 0.00 s: 'Hotel California' paused=False
+- music_next: ok=False msg='ביקשתי מהנגן לעבור לשיר הבא, אבל הוא לא מדווח שזה קרה.' tool 9.41s; pear reached state after never s: 'Hotel California' paused=False
+- music_stop: ok=False msg='ביקשתי מהנגן להשהות, אבל הוא עדיין מדווח שהוא מנגן. אם זה נמשך, כדאי לסגור ולפתוח מחדש את Pear Desktop.' tool 4.15s; pear reached state after never s: 'Hotel California' paused=False
 
 ### S08 status tool text matches Pear (playing and paused) - FAIL
-- status='מתנגן: Bohemian Rhapsody – Queen' (0.00s) vs pear title='Bohemian Rhapsody' paused=False
-- status='מתנגן: Bohemian Rhapsody – Queen' (0.00s) vs pear title='Bohemian Rhapsody' paused=False
+- status='מתנגן: Hotel California – Eagles. עוצמה 0 מתוך 100, מושתק.' (0.01s) vs pear title='Hotel California' paused=False
+- status='מתנגן: Hotel California – Eagles. עוצמה 0 מתוך 100, מושתק.' (0.02s) vs pear title='Hotel California' paused=False
 
 ### S09 volume 0 and 2 on real Pear; cap enforced (fake player, max 70) - PASS
-- real: asked 2: 'עוצמת המוזיקה 2'; pear reports {'state': 0, 'isMuted': False} after 3.0s
-- real: asked 0: 'עוצמת המוזיקה 0'; pear reports {'state': 0, 'isMuted': True} after 0.2s
-- real, max_volume=3: asked 50 -> 'עוצמת המוזיקה 3 (מוגבל ל-3)', data {'volume': 3}
-- fake: asked 100: code=ok msg='עוצמת המוזיקה 70 (מוגבל ל-70)' player volume 70 OK
-- fake: asked 71: code=ok msg='עוצמת המוזיקה 70 (מוגבל ל-70)' player volume 70 OK
-- fake: asked 70: code=ok msg='עוצמת המוזיקה 70' player volume 70 OK
-- fake: asked 50: code=ok msg='עוצמת המוזיקה 50' player volume 50 OK
-- fake: asked 0: code=ok msg='עוצמת המוזיקה 0' player volume 0 OK
+- real: asked 2: 'העוצמה עכשיו 2 מתוך 100.'; pear reports {'state': 0, 'isMuted': True} after 3.1s
+- real: asked 0: 'העוצמה עכשיו 0 מתוך 100.'; pear reports {'state': 0, 'isMuted': True} after 0.0s
+- real, max_volume=3: asked 50 -> 'העוצמה עכשיו 3 מתוך 100. (התקרה שהוגדרה היא 3)', data {'volume': 3, 'previous': 0, 'max_volume': 3, 'changed': True, 'capped': True, 'muted': True}
+- fake: asked 100: code=ok msg='העוצמה עכשיו 70 מתוך 100. (התקרה שהוגדרה היא 70)' player volume 70 OK
+- fake: asked 71: code=ok msg='העוצמה כבר 70 מתוך 100, וזו התקרה שהוגדרה (70); לא הגברתי.' player volume 70 OK
+- fake: asked 70: code=ok msg='העוצמה עכשיו 70 מתוך 100.' player volume 70 OK
+- fake: asked 50: code=ok msg='העוצמה עכשיו 50 מתוך 100.' player volume 50 OK
+- fake: asked 0: code=ok msg='העוצמה עכשיו 0 מתוך 100.' player volume 0 OK
 - fake: asked 150: code=TOOL_BAD_ARGS msg='invalid arguments for music_volume' player volume 0 OK
 - fake: asked -1: code=TOOL_BAD_ARGS msg='invalid arguments for music_volume' player volume 0 OK
 
 ### S10 rapid play -> next -> pause -> resume -> next (no waits) - FAIL
-- play: ok=True 'מנגן: Viva La Vida – Coldplay' 2.5s
-- music_next: ok=True "השיר הבא: Can't Hold Us – מקלמור וראיין לואיס" 0.98s -> pear "Can't Hold Us" paused=False
-- music_pause: ok=False 'ביקשתי מהנגן להשהות, אבל הוא עדיין מנגן.' 4.07s -> pear "Can't Hold Us" paused=False
-- music_resume: ok=True "ממשיך לנגן: Can't Hold Us – מקלמור וראיין לואיס" 0.01s -> pear "Can't Hold Us" paused=False
-- music_next: ok=True 'השיר הבא: שני משוגעים – Omer Adam' 0.99s -> pear 'שני משוגעים' paused=False
-- settled: pear 'שני משוגעים' paused=False; status 'מתנגן: שני משוגעים – Omer Adam'
+- play: ok=False 'הנגן איטי מדי כרגע: ביקשתי לנגן, אבל לא קיבלתי ממנו אישור בזמן.' 18.8s
+- music_next: ok=False 'נגן המוזיקה לא עונה.' 5.03s -> pear 'Here Comes The Sun (Remastered 2009)' paused=False
+- music_pause: ok=False 'ביקשתי מהנגן להשהות, אבל הוא עדיין מדווח שהוא מנגן. אם זה נמשך, כדאי לסגור ולפתוח מחדש את Pear Desktop.' 4.08s -> pear 'Here Comes The Sun (Remastered 2009)' paused=False
+- music_resume: ok=True 'ממשיך לנגן: Here Comes The Sun (Remastered 2009) – The Beatles' 0.02s -> pear 'Here Comes The Sun (Remastered 2009)' paused=False
+- music_next: ok=False 'נגן המוזיקה לא עונה.' 5.01s -> pear 'Here Comes The Sun (Remastered 2009)' paused=False
+- settled: pear 'Here Comes The Sun (Remastered 2009)' paused=False; status 'מתנגן: Here Comes The Sun (Remastered 2009) – The Beatles. עוצמה 0 מתוך 100, מושתק.'
 
-### S11 10 different searches back to back (confirm latency each) - PASS
-latencies: 2.3, 2.3, 2.2, 2.3, 2.3, 5.8, 2.2, 2.3, 2.3, 2.3
-- 'Adele Hello': OK rel=yes 2.34 s -> 'Hello' / 'Adele' | tool: ok=True code=ok msg='מנגן: Hello – Adele' (2.3 s)
-- 'Coldplay Yellow': OK rel=yes 2.31 s -> 'Yellow' / 'Coldplay' | tool: ok=True code=ok msg='מנגן: Yellow – Coldplay' (2.3 s)
-- 'אריק איינשטיין אוהב להיות בבית': OK rel=yes 2.24 s -> 'אוהב להיות בבית' / 'Arik Einstein ו-Miki Gavrielov' | tool: ok=True code=ok msg='מנגן: אוהב להיות בבית – Arik Einstein ו-Miki Gavrielov' (2.2 s)
-- 'Michael Jackson Billie Jean': OK rel=yes 2.31 s -> 'Billie Jean' / 'Michael Jackson' | tool: ok=True code=ok msg='מנגן: Billie Jean – Michael Jackson' (2.3 s)
-- 'שלום חנוך': OK rel=yes 2.32 s -> 'בלי לומר מילה' / 'Shalom Hanoch' | tool: ok=True code=ok msg='מנגן: בלי לומר מילה – Shalom Hanoch' (2.3 s)
-- 'Daft Punk Get Lucky': OK rel=yes 5.83 s -> 'Get Lucky (Radio Edit - feat. Pharrell Williams and Nile Rodgers)' / 'Daft Punk, Pharrell Williams ו-Nile Rodgers' | tool: ok=True code=ok msg='מנגן: Get Lucky (Radio Edit - feat. Pharrell Williams and Nile Rodgers) – Daft Punk, Pharrell Williams ו-Nile Rodgers' (5.8 s)
-- 'עידן רייכל': OK rel=yes 2.22 s -> "Mi'Ma'amakim (Out of the Depths)" / 'Idan Raichel' | tool: ok=True code=ok msg="מנגן: Mi'Ma'amakim (Out of the Depths) – Idan Raichel" (2.2 s)
-- 'Eminem Lose Yourself': OK rel=yes 2.29 s -> 'Lose Yourself' / 'Eminem' | tool: ok=True code=ok msg='מנגן: Lose Yourself – Eminem' (2.3 s)
-- 'נועה קירל': OK rel=yes 2.29 s -> 'Unicorn' / 'Noa Kirel וכאן - תאגיד השידור הישראלי' | tool: ok=True code=ok msg='מנגן: Unicorn – Noa Kirel וכאן - תאגיד השידור הישראלי' (2.3 s)
-- 'ABBA Dancing Queen': OK rel=yes 2.34 s -> 'Dancing Queen' / 'ABBA' | tool: ok=True code=ok msg='מנגן: Dancing Queen – ABBA' (2.3 s)
+### S11 10 different searches back to back (confirm latency each) - FAIL
+latencies: 5.0, 5.0, 5.0, 5.0, 5.0, 5.0, 5.0, 5.0, 5.0, 5.0
+- 'Adele Hello': FAIL rel=NO 5.03 s -> 'Here Comes The Sun (Remastered 2009)' / 'The Beatles' | tool: ok=False code=MUSIC_TIMEOUT msg='נגן המוזיקה לא עונה.' (5.0 s)
+- 'Coldplay Yellow': FAIL rel=NO 5.02 s -> 'Here Comes The Sun (Remastered 2009)' / 'The Beatles' | tool: ok=False code=MUSIC_TIMEOUT msg='נגן המוזיקה לא עונה.' (5.0 s)
+- 'אריק איינשטיין אוהב להיות בבית': FAIL rel=NO 5.01 s -> 'Here Comes The Sun (Remastered 2009)' / 'The Beatles' | tool: ok=False code=MUSIC_TIMEOUT msg='נגן המוזיקה לא עונה.' (5.0 s)
+- 'Michael Jackson Billie Jean': FAIL rel=NO 5.02 s -> 'Here Comes The Sun (Remastered 2009)' / 'The Beatles' | tool: ok=False code=MUSIC_TIMEOUT msg='נגן המוזיקה לא עונה.' (5.0 s)
+- 'שלום חנוך': FAIL rel=NO 5.01 s -> 'Here Comes The Sun (Remastered 2009)' / 'The Beatles' | tool: ok=False code=MUSIC_TIMEOUT msg='נגן המוזיקה לא עונה.' (5.0 s)
+- 'Daft Punk Get Lucky': FAIL rel=NO 5.02 s -> 'Here Comes The Sun (Remastered 2009)' / 'The Beatles' | tool: ok=False code=MUSIC_TIMEOUT msg='נגן המוזיקה לא עונה.' (5.0 s)
+- 'עידן רייכל': FAIL rel=NO 5.01 s -> 'Here Comes The Sun (Remastered 2009)' / 'The Beatles' | tool: ok=False code=MUSIC_TIMEOUT msg='נגן המוזיקה לא עונה.' (5.0 s)
+- 'Eminem Lose Yourself': FAIL rel=NO 5.01 s -> 'Here Comes The Sun (Remastered 2009)' / 'The Beatles' | tool: ok=False code=MUSIC_TIMEOUT msg='נגן המוזיקה לא עונה.' (5.0 s)
+- 'נועה קירל': FAIL rel=NO 5.02 s -> 'Here Comes The Sun (Remastered 2009)' / 'The Beatles' | tool: ok=False code=MUSIC_TIMEOUT msg='נגן המוזיקה לא עונה.' (5.0 s)
+- 'ABBA Dancing Queen': FAIL rel=NO 5.02 s -> 'Here Comes The Sun (Remastered 2009)' / 'The Beatles' | tool: ok=False code=MUSIC_TIMEOUT msg='נגן המוזיקה לא עונה.' (5.0 s)
 
-### S12 nonsense query -> honest 'not found' - PASS
-לא מצאתי את "asdkjhqwe zzxxcc".
-- tool: ok=False code=MUSIC_NOT_FOUND msg='לא מצאתי את "asdkjhqwe zzxxcc".' data={} (0.4s)
-- pear before 'Dancing Queen' -> after 'Dancing Queen'
+### S12 nonsense query -> honest 'not found' - FAIL
+נגן המוזיקה לא עונה.
+- tool: ok=False code=MUSIC_TIMEOUT msg='נגן המוזיקה לא עונה.' data={'action': 'check that the app is not frozen'} (5.0s)
+- pear before 'Here Comes The Sun (Remastered 2009)' -> after 'Here Comes The Sun (Remastered 2009)'
 
-### S13 pause / next / resume / status when nothing is playing -> graceful - PASS
+### S13 pause / next / resume / status when nothing is playing -> graceful - FAIL
 - fake (nothing playing) music_pause: ok=True code=ok 'שום דבר לא מתנגן כרגע.' OK
 - fake (nothing playing) music_next: ok=False code=MUSIC_NOTHING_PLAYING 'שום דבר לא מתנגן כרגע. אפשר לבקש ממני שיר.' OK
 - fake (nothing playing) music_resume: ok=False code=MUSIC_NOTHING_PLAYING 'שום דבר לא מתנגן כרגע. אפשר לבקש ממני שיר.' OK
 - fake (nothing playing) music_stop: ok=True code=ok 'שום דבר לא מתנגן כרגע.' OK
-- fake (nothing playing) music_status: ok=True code=ok 'שום דבר לא מתנגן כרגע.' OK
-- real pause-while-paused: ok=True 'השהיתי.'; pear paused=True
+- fake (nothing playing) music_status: ok=True code=ok 'שום דבר לא מתנגן כרגע. עוצמה 50 מתוך 100.' OK
+- real pause-while-paused: ok=False 'ביקשתי מהנגן להשהות, אבל הוא עדיין מדווח שהוא מנגן. אם זה נמשך, כדאי לסגור ולפתוח מחדש את Pear Desktop.'; pear paused=False
+
+### E01 Pear unreachable (port 26599) -> MUSIC_PLAYER_OFFLINE, Hebrew - PASS
+- music_play: code=MUSIC_PLAYER_OFFLINE 'נגן המוזיקה לא פועל. צריך להפעיל את Pear Desktop.' 2.04s
+- music_pause: code=MUSIC_PLAYER_OFFLINE 'נגן המוזיקה לא פועל. צריך להפעיל את Pear Desktop.' 2.03s
+- music_status: code=MUSIC_PLAYER_OFFLINE 'נגן המוזיקה לא פועל. צריך להפעיל את Pear Desktop.' 2.05s
+- health: ('unavailable', 'Pear Desktop is not reachable; start Pear Desktop and enable Plugins > API Server (host 127.0.0.1, port 26538)')
+
+### E02 unpaired id at the real port -> MUSIC_NOT_PAIRED, no /auth (no dialog) - PASS
+- music_play: code=MUSIC_NOT_PAIRED 'עוד לא חיברו אותי לנגן המוזיקה. צריך להריץ jarves music pair ולאשר.'
+- music_next: code=MUSIC_NOT_PAIRED 'עוד לא חיברו אותי לנגן המוזיקה. צריך להריץ jarves music pair ולאשר.'
+- music_status: code=MUSIC_NOT_PAIRED 'עוד לא חיברו אותי לנגן המוזיקה. צריך להריץ jarves music pair ולאשר.'
+- health: ('degraded', 'pear running but not paired; run `jarves music pair` once and click Allow in Pear Desktop'); requests: [('GET', '/api/v1/song', 401), ('GET', '/api/v1/song', 401), ('GET', '/api/v1/song', 401), ('GET', '/api/v1/song', 401), ('GET', '/api/v1/song', 401)]
+
+### E03 401 -> silent re-pair (mock), no loop; 403 on /auth -> PAIR_DENIED - PASS
+- token rotated: status ok=True 'מתנגן: Song One – Artist A.'; requests [('GET', '/api/v1/song'), ('POST', '/auth/jarves-mock'), ('GET', '/api/v1/song'), ('GET', '/api/v1/volume')]
+- always 401: code=MUSIC_PLAYER_ERROR 'יש בעיה בנגן המוזיקה.'; 3 requests (no loop) [('GET', '/api/v1/song'), ('POST', '/auth/jarves-mock'), ('GET', '/api/v1/song')]
+- 403 on /auth: code=MUSIC_PAIR_DENIED 'החיבור לנגן נדחה. צריך לאשר אותו ב-Pear Desktop.'; marker removed=True
+- after deny (no marker): code=MUSIC_NOT_PAIRED 'עוד לא חיברו אותי לנגן המוזיקה. צריך להריץ jarves music pair ולאשר.'; auth calls after: [('POST', '/auth/jarves-mock')]
+
+### R01 search edge cases: empty, no videoIds, malformed JSON, 500, timeout, 204 - PASS
+- empty results: code=MUSIC_NOT_FOUND 'לא מצאתי את "Song One".' OK
+- only artist/browse results: code=MUSIC_NOT_FOUND 'לא מצאתי את "Song One".' OK
+- malformed JSON: code=MUSIC_PLAYER_ERROR 'יש בעיה בנגן המוזיקה.' OK
+- JSON array: code=MUSIC_NOT_FOUND 'לא מצאתי את "Song One".' OK
+- HTTP 500: code=MUSIC_PLAYER_ERROR 'יש בעיה בנגן המוזיקה.' OK
+- HTTP 204 empty: code=MUSIC_NOT_FOUND 'לא מצאתי את "Song One".' OK
+- timeout: code=MUSIC_TIMEOUT 'נגן המוזיקה לא עונה.' OK
+- connection reset: code=MUSIC_PLAYER_OFFLINE 'נגן המוזיקה לא פועל. צריך להפעיל את Pear Desktop.' OK
+
+### R02 now_playing edge cases: 204, malformed, missing fields, Unicode/RTL titles - PASS
+- 204 (nothing): ok 'שום דבר לא מתנגן כרגע.'
+- malformed JSON: ok=False code=MUSIC_PLAYER_ERROR 'יש בעיה בנגן המוזיקה.' OK
+- missing fields: ok=True code=ok 'שום דבר לא מתנגן כרגע.' OK
+- null fields: ok=True code=ok 'שום דבר לא מתנגן כרגע.' OK
+- string durations: ok=True code=ok 'מתנגן: X – Y.' OK
+- RTL/emoji title: play ok=True 'מנגן: \u200fשיר\u200f של \u202bאהבה\u202c 🎵 (Live) – ארטיסט \u200eA\u200e'; status 'מתנגן: \u200fשיר\u200f של \u202bאהבה\u202c 🎵 (Live) – ארטיסט \u200eA\u200e.'
+- bidi marks / spaces differ (other id): ok=True code=ok 'מנגן: שני  משוגעים\u200f – עומר אדם'
+
+### R03 video result vs its 'song' counterpart (other videoId / title suffix) - PASS
+- same title, other id: searched 'Bohemian Rhapsody' played 'Bohemian Rhapsody': ok=True code=ok 'מנגן: Bohemian Rhapsody – Queen' OK
+- video title has '(Official Video)': searched 'Bohemian Rhapsody (Official Video)' played 'Bohemian Rhapsody': ok=True code=ok 'מנגן: Bohemian Rhapsody – Queen' OK
+- '[Official Music Video]' + remaster: searched 'Hotel California [Official Music Video]' played 'Hotel California (2013 Remaster)': ok=True code=ok 'מנגן: Hotel California (2013 Remaster) – Queen' OK
+- a different song entirely: searched 'Bohemian Rhapsody' played 'Another One Bites the Dust': ok=False code=MUSIC_NOT_CONFIRMED 'ביקשתי מהנגן לנגן, אבל הוא לא מדווח שהשיר מתנגן.' OK
+
+### R04 queue endpoint broken / slow -> play still works or fails honestly - PASS
+- queue malformed: ok=True code=ok 'מנגן: Song One – Artist A' 3.0s OK
+- queue 500: ok=False code=MUSIC_PLAYER_ERROR 'יש בעיה בנגן המוזיקה.' 0.0s OK
+- queue empty body: ok=True code=ok 'מנגן: Song One – Artist A' 3.1s OK
+
+### K01 long soak: alternating play/next/pause/resume/status at volume 0 - FAIL
+Pear Desktop did not answer in time
+-     q0 = len(await c.player.queue())
+-              ^^^^^^^^^^^^^^^^^^^^^^
+-   File "C:\work\jarvis\.claude\worktrees\agent-a764419aef9a54f07\core\src\jarves\skills\music.py", line 390, in queue
+-     r = await self._req("GET", "/queue")
+-         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+-   File "C:\work\jarvis\.claude\worktrees\agent-a764419aef9a54f07\core\src\jarves\skills\music.py", line 364, in _req
+-     raise MusicError("MUSIC_TIMEOUT", "Pear Desktop did not answer in time", "check that the app is not frozen") from e
+- jarves.skills.music.MusicError: Pear Desktop did not answer in time
 
 ### V01 voice: 'נגן את שלמה ארצי' -> Pear plays the artist - PASS
 heard 'נגיד את שלמה ארצי'; said "רגע. / מנגן עכשיו את 'תתארו לכם' של שלמה ארצי."
@@ -261,12 +357,3 @@ heard 'עכשיו תנגן את עומר אדם'; said "אוקיי. רגע, אנ
 - V07: music activity details ["Can't Hold Us – מקלמור וראיין לואיס"] vs pear "Can't Hold Us" -> True
 - V09: music activity details ['שני משוגעים – עומר אדם'] vs pear 'שני משוגעים' -> True
 
-
-## Second follow-up (19 Oct 2026): what the fresh-Pear re-run found
-
-After restarting Pear the skill/voice scenarios were re-run once: **22/30 PASS**. Plays confirmed in 1.9-7.4 s (S01-S06 pass; S11 median 2.3 s). Two product problems were visible and fixed in code, with offline tests:
-
-- **`music_pause` claimed "השהיתי" while Pear kept playing** (S07/S08). A pause pressed while a track is still loading can be ignored. Now the pause is verified with the player, pressed once more, and if it still did not happen JARVES says so (`MUSIC_NOT_CONFIRMED`) instead of claiming it.
-- **A result that cannot play** (S11 "Daft Punk Get Lucky": the top YouTube result did not start and Pear skipped to an unrelated song). `music_play` now tries up to 3 distinct candidates, each verified, and only then reports it honestly.
-
-**NOT re-verified live after these two fixes:** the re-run was stopped by the OS because the PC ran out of memory (free RAM ~1 GB of 7.5 GB), and afterwards Pear's player was stuck (elapsed 0, ignoring pause), so the voice-driven scenarios V01/V03/V05/V09/V10 and the 15-minute soak are still open. If Pear does not start a song tomorrow: close and reopen it (the menu entry or the desktop shortcut).
