@@ -49,6 +49,7 @@ func _set_link(c: bool, d: String) -> void:
 
 func _connect() -> void:
 	ws = WebSocketPeer.new()
+	ws.inbound_buffer_size = 1 << 20     # camera preview frames (~10-200 kB) exceed the 64 kB default
 	_hello_sent = false
 	_was_open = false
 	var err := ws.connect_to_url(url)
