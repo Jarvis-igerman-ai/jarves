@@ -29,15 +29,14 @@ PLATFORM_STATUS: dict[str, dict] = {
         "linux_arm64_pi": {"status": "implemented_unverified", "blocker": "fcntl lock tested on CI-style unit tests "
                            "only, not on a Pi", "roadmap_issue": ISSUE_PI}},
     "display_control": {
-        "windows": {"status": "implemented_unverified", "blocker": "the real Godot face closes itself on "
-                    "display.close (headless test); spawning the window was tested with a fake process: one "
-                    "hands-on show/hide on the PC is pending",
-                    "evidence": "core/tests/test_runtime.py, core/tests/test_face_protocol_godot.py"},
+        "windows": {"status": "verified_on_device",
+                    "evidence": "owner hands-on show/hide/close check on the Windows PC, 19 Oct 2026; "
+                    "core/tests/test_runtime.py, core/tests/test_face_protocol_godot.py"},
         "linux_arm64_pi": {"status": "planned", "blocker": "Godot performance on the Pi is unmeasured "
                            "(renderer portability, spec 4.2)", "roadmap_issue": ISSUE_PI}},
     "tray_icon": {
-        "windows": {"status": "implemented_unverified", "blocker": "menu logic tested headless; the icon itself "
-                    "needs a hands-on look and click", "evidence": "core/tests/test_runtime.py"},
+        "windows": {"status": "verified_on_device", "evidence": "owner hands-on tray icon and menu check on the "
+                    "Windows PC, 19 Oct 2026; core/tests/test_runtime.py"},
         "linux_arm64_pi": {"status": "not_applicable", "equivalent": "dashboard Home page (show/hide, mute, "
                            "pause alerts, status, quit)", "roadmap_issue": ISSUE_PI}},
     "autostart": {
