@@ -11,6 +11,7 @@ import json
 import os
 import shutil
 import subprocess
+import sys
 import time
 from pathlib import Path
 
@@ -22,8 +23,9 @@ STALE_MIN = 90
 
 def run(args: list[str], cwd: Path = REPO, timeout: int = 60) -> str:
     try:
+        flags = subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0   # no flashing console windows
         r = subprocess.run(args, cwd=cwd, capture_output=True, text=True, timeout=timeout, encoding="utf-8",
-                           errors="replace")
+                           errors="replace", creationflags=flags)
         return (r.stdout or "").strip()
     except Exception as e:  # noqa: BLE001 - a monitor must never crash
         return f"ERR {e}"
@@ -93,7 +95,7 @@ def main() -> None:
         for r in rows:
             sig = f"{r['ahead']}/{r['dirty']}"
             if seen.get(r["name"]) not in (None, sig) and r["dirty"] == 0 and r["ahead"] != "0":
-                events.append(f"{r['name']}: new commit ({r['ahead']} ahead)")
+                pass                                   # progress is in status.md; no popup for ordinary commits
             seen[r["name"]] = sig
         for x in runs:
             key = "ci:" + x
