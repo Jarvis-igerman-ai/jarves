@@ -832,7 +832,9 @@ def main(argv: list[str] | None = None) -> int:
     g = sub.add_parser("chatgpt", help="connect / disconnect your ChatGPT plan (Sign in with ChatGPT)")
     g.add_argument("action", choices=["login", "logout", "status", "models"])
     g.add_argument("--forget", action="store_true", help="logout: also forget this app registration")
-    wk = sub.add_parser("wake", help="calibrate the \"Hey Jarvis\" wake word to your voice and microphone")
+    from .google_auth import add_cli as add_google_cli, cmd_google
+    add_google_cli(sub)                       # WP-G: jarvis google login / status / logout
+    wk = sub.add_parser("wake",help="calibrate the \"Hey Jarvis\" wake word to your voice and microphone")
     wk.add_argument("action", choices=["test"])
     wk.add_argument("--seconds", type=int, default=20)
     wk.add_argument("--apply", action="store_true", help="save the recommended threshold to config.toml")
@@ -872,7 +874,7 @@ def main(argv: list[str] | None = None) -> int:
     return {"run": cmd_run, "stop": cmd_stop, "status": cmd_status, "diag": cmd_diag, "memory": cmd_memory, "music": cmd_music,
             "ask": cmd_ask, "say": cmd_say, "chatgpt": cmd_chatgpt, "setup": cmd_setup, "logs": cmd_logs, "key": cmd_key,
             "wake": cmd_wake, "doctor": cmd_doctor, "cost": cmd_cost, "dashboard": cmd_dashboard,
-            "diagnose": cmd_diagnose, "features": cmd_features}[a.cmd](a, cfg, home)
+            "diagnose": cmd_diagnose, "features": cmd_features, "google": cmd_google}[a.cmd](a, cfg, home)
 
 
 if __name__ == "__main__":

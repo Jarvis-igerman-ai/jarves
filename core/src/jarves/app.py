@@ -139,6 +139,8 @@ class Core:
         self.settings = Settings(self.memory, {"voice.voice": c.voice.voice})
         self.settings.features = self.features           # curator.* settings are feature switches now
         self.registry.register(SettingsSkill(self.workspace, self.settings, self.registry, self._on_voice_change))
+        from .skills.google import register_google      # WP-G: only when the user connected Google (no network)
+        self.google = register_google(self.registry, self.home, self.health)
         self.workspace.listeners.append(lambda name: self._spawn(wsp.note_live(self.live, self.workspace, name)))
 
         self.budget = Budget(self.memory, c.ai)      # ONE shared budget: in-flight counts span brain, TTS and voice
