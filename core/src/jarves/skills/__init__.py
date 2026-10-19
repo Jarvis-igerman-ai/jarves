@@ -34,13 +34,9 @@ Origin = Literal["model", "user"]
 
 # Low-risk actions pre-authorized by policy (reversible, user-visible, no data loss).
 DEFAULT_ALLOWED_ACTIONS = frozenset({"remember", "music_play", "music_pause", "music_resume", "music_next",
-<<<<<<< HEAD
-                                     "music_stop", "music_volume",
+                                     "music_stop", "music_volume", "music_mute", "music_unmute",
                                      # settings Skill: one appended line (backed up, undoable) / allowlisted keys
                                      "workspace_note", "set_voice", "set_setting"})
-=======
-                                     "music_stop", "music_volume", "music_mute", "music_unmute"})
->>>>>>> worktree-agent-a764419aef9a54f07
 
 
 @dataclass
