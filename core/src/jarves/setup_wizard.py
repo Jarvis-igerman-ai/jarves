@@ -650,7 +650,8 @@ class Wizard:
         from . import privacy
         cur = _privacy_on(self.cfg, self.home)
         self.say("\n" + self.t("privacy_note"))
-        on = self.yesno("privacy_mode", self.t("privacy"), cur)
+        # A fresh install recommends privacy ON (nothing needs the words yet); a re-run offers the current choice.
+        on = self.yesno("privacy_mode", self.t("privacy"), True if self.first else cur)
         if on != cur:
             privacy.set_privacy(SimpleNamespace(home=self.home, cfg=self.cfg, config_path=self.config_path), on)
             self.changed.append(f"privacy={'on' if on else 'off'}")
