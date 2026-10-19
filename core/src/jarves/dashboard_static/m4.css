@@ -3,6 +3,10 @@
 .m4-tabs .pill { padding: 3px 12px; }
 .m4-matrix td { font-size: 13px; }
 .m4-matrix td:first-child { min-width: 200px; }
+main:has(.m4-matrix) { max-width: none; }          /* nine columns: use the whole width */
+.m4-matrix td[data-label="Blocker"] { min-width: 220px; max-width: 320px; }
+.m4-matrix td[data-label="Windows"] { max-width: 260px; }
+.m4-matrix td[data-label="Health"] { max-width: 170px; }
 tr.m4-attn td:first-child { box-shadow: inset 3px 0 0 var(--serious); }
 .m4-form { display: flex; flex-wrap: wrap; gap: 10px; align-items: flex-end; margin: 6px 0; }
 .m4-field { display: flex; flex-direction: column; gap: 2px; }
@@ -19,6 +23,8 @@ button[disabled] { opacity: .5; cursor: not-allowed; }
 .m4-pair button { width: 100%; padding: 12px; font-size: 16px; margin-top: 12px; }
 /* phones: the matrix becomes one card per feature, buttons get finger-sized */
 @media (max-width: 760px) {
+  .shell { grid-template-columns: minmax(0, 1fr); }      /* a long word must not widen the page */
+  main { min-width: 0; overflow-wrap: anywhere; }
   button, .switch, nav a { min-height: 40px; }
   .m4-matrix thead { display: none; }
   .m4-matrix, .m4-matrix tbody, .m4-matrix tr, .m4-matrix td { display: block; width: 100%; }
