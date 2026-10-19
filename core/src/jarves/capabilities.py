@@ -34,7 +34,7 @@ TRACKING = "https://github.com/igalgerman/JARVIS/issues/17"
 PI_ROADMAP = "https://github.com/igalgerman/JARVIS/issues/18"
 # Every roadmap issue a feature may link: checked to exist with `gh issue list` on LAST_CHECKED (#19-#23 were
 # created by the other SW-V2 packages for their own Pi gaps). Add a number only after the issue exists.
-KNOWN_ISSUES = {TRACKING, PI_ROADMAP, *(f"https://github.com/igalgerman/JARVIS/issues/{n}" for n in (19, 20, 21, 22, 23, 25))}   # 25: WP-L
+KNOWN_ISSUES = {TRACKING, PI_ROADMAP, *(f"https://github.com/igalgerman/JARVIS/issues/{n}" for n in (19, 20, 21, 22, 23, 25, 28))}   # 25: WP-L, 28: privacy strip
 _ISSUE_URL = re.compile(r"^https://github\.com/igalgerman/JARVIS/issues/\d+$")
 LAST_CHECKED = "2026-10-19"
 
@@ -179,7 +179,8 @@ for _fid, _w, _p, _perm, _set in [
      ["read"], ""),
     ("camera_preview", _win("implemented_unverified", "UNIT test_privacy_state.py (fake camera) + headless face "
                             "screenshots docs/reviews/swv2_privacy/", "never shown with a real webcam yet"),
-     _pi("implemented_unverified", "picamera2 preview frames never run on Pi Camera hardware"), ["read"],
+     {"status": "implemented_unverified", "blocker": "picamera2 preview frames and the round-screen strip layout "
+      "never run on Pi hardware", "roadmap_issue": "https://github.com/igalgerman/JARVIS/issues/28"}, ["read"],
      "Home page / the face's camera buttons"),
     ("wake_word", _win("verified_on_device", "HANDOFF 'Wake word through the air': speakers -> webcam mic, 4/4, "
                        "CPU 14-25 ms/frame (owner's own voice peaked ~0.17: threshold calibrated)"),
