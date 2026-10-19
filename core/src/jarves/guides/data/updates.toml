@@ -1,0 +1,27 @@
+order = 61
+category = "system"
+features = ["update_check"]
+aliases = ["עדכון", "עדכונים", "התקנה", "update", "updates", "installer", "install"]
+links = ["backup", "runtime"]
+title_he = "התקנה ועדכונים"
+title_en = "Install and updates"
+what_he = "ג'ארביס בודק אם יש גרסה חדשה, אומר לכם, ומעדכן רק אחרי שאישרתם."
+what_en = "JARVES checks for a new version, tells you, and updates only after you approve."
+say = [["יש עדכון?", "Is there an update?"]]
+expect_he = "לפני עדכון נשמר גיבוי. אם משהו נכשל, חוזרים לגרסה הקודמת."
+expect_en = "A backup is made before an update. If something fails, the previous version comes back."
+cost_he = "חינם."
+cost_en = "Free."
+privacy_he = "הבדיקה שואלת רק מה הגרסה האחרונה; לא נשלח שום מידע אישי."
+privacy_en = "The check only asks what the latest version is; no personal data is sent."
+
+[[steps]]
+he = "התקנה ראשונה: הריצו את קובץ ההתקנה של ג'ארביס, או jarvis מתוך התיקייה של הפרויקט."
+en = "First install: run the JARVES installer, or jarvis from the project folder."
+
+[[steps]]
+he = "ודאו שהמתג \"בדיקת עדכונים\" דולק. כשיש עדכון הוא שואל אתכם."
+en = "Keep the Update check switch on. When there is an update he asks you."
+action = "feature_on:update_check"
+check = "enabled:update_check"
+

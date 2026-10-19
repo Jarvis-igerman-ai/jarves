@@ -1,0 +1,32 @@
+order = 32
+category = "everyday"
+pages = ["notes", "files"]
+features = ["notes", "files"]
+aliases = ["פתקים", "פתק", "הערות", "קבצים", "מסמך", "notes", "files", "sandbox"]
+links = ["scheduler", "backup"]
+title_he = "פתקים וקבצים"
+title_en = "Notes and files"
+what_he = "ג'ארביס רושם לכם פתקים, וכותב מסמכים רק בתיקייה פרטית משלו."
+what_en = "JARVES keeps notes for you and writes documents only in his own private folder."
+say = [["תרשום פתק: לקנות חלב", "Make a note: buy milk"], ["מה רשמתי על החופשה?", "What did I note about the vacation?"], ["תכתוב לי סיכום ותשמור כקובץ", "Write me a summary and save it as a file"]]
+expect_he = "הפתקים מופיעים בעמוד Notes. קבצים בעמוד Files. בתיקיות שלכם הוא נוגע רק אחרי שאישרתם."
+expect_en = "Notes show on the Notes page, files on the Files page. He touches your own folders only after you approve."
+cost_he = "חינם."
+cost_en = "Free."
+privacy_he = "הכול נשמר במחשב. יש מגבלת גודל לתיקייה."
+privacy_en = "Everything stays on this computer. The folder has a size limit."
+
+[[steps]]
+he = "אמרו \"תרשום פתק\" ומה לרשום."
+en = "Say \"make a note\" and what to write."
+check = "active:notes"
+
+[[steps]]
+he = "פתחו את עמוד Notes כדי לראות, לערוך ולייצא."
+en = "Open the Notes page to see, edit and export."
+action = "open:#/notes"
+
+[[steps]]
+he = "רוצים שהוא ישתמש בתיקייה שלכם? אשרו אותה בעמוד Files."
+en = "Want him to use one of your folders? Approve it on the Files page."
+action = "open:#/files"

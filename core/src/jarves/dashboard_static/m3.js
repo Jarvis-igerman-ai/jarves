@@ -55,7 +55,15 @@
     const tzIn = el("input", { type: "text", value: d.timezone, style: "width:150px", "aria-label": "Default time zone" });
     const tzMsg = msgSpan();
     const tzSave = el("button", { type: "button", onclick: () => act(tzMsg, () => post("/api/scheduler/settings", { timezone: tzIn.value })) }, "Set zone");
-    render(header("Jobs", `Scheduled reminders and reports. Now ${d.now_local}. ${d.note}`, tzIn, tzSave, tzMsg), form,
+    // WP-L: the two other scheduler settings the guide explains (missed-job max age, what "ימי חול" means)
+    const ageIn = el("input", { type: "number", min: "0", max: "168", step: "1", value: String(Math.round((d.max_age_s || 21600) / 3600)), style: "width:70px", "aria-label": "Missed job max age (hours)" });
+    const wwIn = el("select", { "aria-label": "Workdays (ימי חול)" }, el("option", { value: "0-4" }, "ימי חול = Sun-Thu"), el("option", { value: "1-5" }, "ימי חול = Mon-Fri"));
+    wwIn.value = d.workweek || "0-4";
+    const setSave = el("button", { type: "button", onclick: () => act(tzMsg, () => post("/api/scheduler/settings", { max_age_s: Number(ageIn.value) * 3600, workweek: wwIn.value })) }, "Save");
+    const settings = el("div", { class: "card small", style: "margin-bottom:12px" }, el("b", {}, "Settings "),
+      "A missed job (computer off) runs once if not older than ", ageIn, " hours · ", wwIn, " ", setSave,
+      " ", el("a", { href: "#/guide/scheduler" }, "Guide"));
+    render(header("Jobs", `Scheduled reminders and reports. Now ${d.now_local}. ${d.note}`, tzIn, tzSave, tzMsg), settings, form,
       el("div", { class: "card" }, rows.length ? el("table", {}, el("thead", {}, el("tr", {}, el("th", {}, "Job"), el("th", {}, "When"),
         el("th", {}, "Status"), el("th", {}, "Last run"), el("th", {}, ""))), el("tbody", {}, rows)) : el("div", { class: "empty" }, "No jobs yet.")));
   }

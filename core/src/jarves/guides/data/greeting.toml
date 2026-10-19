@@ -1,0 +1,21 @@
+order = 4
+category = "voice"
+features = ["greeting"]
+aliases = ["ברכה", "ברכת פתיחה", "hello", "greeting"]
+title_he = "ברכת פתיחה"
+title_en = "Greeting"
+what_he = "כשהפנים עולות, ג'ארביס אומר שלום קצר."
+what_en = "When the face starts, JARVES says a short hello."
+say = [["תפסיק להגיד שלום כשאתה עולה", "Stop saying hello when you start"]]
+expect_he = "משפט קצר אחד כשהחלון נפתח."
+expect_en = "One short sentence when the window opens."
+cost_he = "כמה שניות של קול (פחות מסנט)."
+cost_en = "A few seconds of voice (under a cent)."
+privacy_he = "אין."
+privacy_en = "None."
+
+[[steps]]
+he = "הדליקו או כבו את המתג \"ברכת פתיחה\"."
+en = "Switch Greeting on or off."
+action = "feature_on:greeting"
+check = "enabled:greeting"

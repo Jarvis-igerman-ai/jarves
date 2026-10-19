@@ -1,0 +1,34 @@
+order = 70
+category = "privacy"
+probe = "privacy"
+optional = true
+aliases = ["פרטיות", "privacy", "מה נשמר", "מי שומע", "what is stored"]
+links = ["camera", "memory", "backup", "dashboard"]
+title_he = "פרטיות"
+title_en = "Privacy"
+what_he = "מה נשמר ואיפה: הכול במחשב שלכם, ורק מה שצריך נשלח ל-OpenAI בזמן שיחה."
+what_en = "What is kept and where: everything on your computer; only what is needed goes to OpenAI during a conversation."
+say = [["מה אתה שומר עליי?", "What do you keep about me?"], ["תפעיל מצב פרטיות", "Turn on privacy mode"]]
+expect_he = "במצב פרטיות היומן שומר רק אורך וזמנים, לא מה שנאמר. המצלמה ושליחת מיילים כבויות מראש."
+expect_en = "In privacy mode the history keeps only lengths and timings, not what was said. Camera and sending e-mail are off by default."
+cost_he = "חינם."
+cost_en = "Free."
+privacy_he = "קול נשלח ל-OpenAI רק אחרי \"היי ג'ארביס\". מפתחות נשמרים בקובץ פרטי ולא מופיעים ביומן או בלוח הבקרה."
+privacy_en = "Audio goes to OpenAI only after \"Hey Jarvis\". Keys are in a private file and never in logs or the dashboard."
+
+[[steps]]
+he = "בעמוד הבית יש מתג \"פרטיות\": לחיצה אחת, ומיד רק אורך וזמנים נשמרים. שם אפשר גם להסתיר את מה שנשמר קודם."
+en = "The Home page has a Privacy switch: one click, and from then on only lengths and timings are kept. You can also mask what was kept before."
+action = "open:#/home"
+check = "probe:privacy"
+
+[[steps]]
+he = "עברו על עמוד Features: מה דולק ומה כבוי."
+en = "Go over the Features page: what is on and what is off."
+action = "open:#/features"
+
+[platform]
+windows = "implemented_unverified"
+windows_note_en = "privacy mode tested in core/tests (history and logs)"
+pi = "implemented_unverified"
+pi_note_en = "same code; not run on a Pi yet"

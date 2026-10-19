@@ -1,0 +1,41 @@
+order = 40
+category = "camera"
+features = ["camera"]
+aliases = ["מצלמה", "תסתכל", "camera", "webcam", "look"]
+links = ["face_recognition", "camera_when_away", "privacy"]
+title_he = "מצלמה"
+title_en = "Camera"
+what_he = "ג'ארביס מסתכל דרך המצלמה רק כשמבקשים ממנו, למשל \"מה אתה רואה?\". כבויה מראש."
+what_en = "JARVES looks through the camera only when you ask, e.g. \"what do you see?\". Off by default."
+say = [["תסתכל, מה אתה רואה?", "Look, what do you see?"], ["מה אני מחזיק ביד?", "What am I holding?"]]
+expect_he = "נורית המצלמה נדלקת רק בזמן שהוא מסתכל, ונכבית מיד אחר כך."
+expect_en = "The camera light turns on only while he looks, and off right after."
+test = "camera"
+test_he = "הבדיקה מחפשת מצלמה ולא מצלמת כלום. כשהמתג כבוי, הנורית חייבת להיות כבויה."
+test_en = "The check looks for a camera and takes no picture. With the switch off, the light must be off."
+cost_he = "תמונה אחת לשאלה, כמה סנטים."
+cost_en = "One picture per question, a few cents."
+privacy_he = "תמונה נשלחת ל-OpenAI רק כשביקשתם. שום תמונה לא נשמרת במחשב."
+privacy_en = "A picture is sent to OpenAI only when you asked. No picture is stored."
+
+[[steps]]
+he = "חברו מצלמה (USB או המובנית)."
+en = "Connect a camera (USB or built-in)."
+check = "available:camera"
+
+[[steps]]
+he = "הדליקו את המתג \"מצלמה\" (סיכון גבוה: צריך אישור שלכם על המסך)."
+en = "Turn the Camera switch on (high risk: needs your approval on the screen)."
+action = "feature_on:camera"
+check = "enabled:camera"
+
+[[steps]]
+he = "לחצו \"בדוק עכשיו\" ואז אמרו \"מה אתה רואה?\"."
+en = "Press Test now, then say \"what do you see?\"."
+action = "test"
+
+[[problems]]
+he = "הוא אומר שאין מצלמה"
+en = "He says there is no camera"
+fix_he = "חברו מחדש את המצלמה וסגרו תוכנות אחרות שמשתמשות בה (זום, טימס)."
+fix_en = "Reconnect the camera and close other apps using it (Zoom, Teams)."
