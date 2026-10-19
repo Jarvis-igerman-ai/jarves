@@ -111,6 +111,8 @@ class SkillRegistry:
         self.confirm: ConfirmFn = _deny       # replaced by the Core (asks the user via Godot/voice)
         # feature switches (features.py): (skill, tool) -> None to offer/run it, or why the feature is not active
         self.gate: Callable[[str, str], str | None] | None = None
+        # WP-L guides: (skill, tool, failed result) -> machine-readable setup hint added as data["setup_hint"]
+        self.setup_hint: Callable[[str, str, "ToolResult"], dict | None] | None = None
         self._inflight: set[asyncio.Future] = set()
         self._untrusted_at: float | None = None   # monotonic time untrusted text entered this turn
         self.clock = time.monotonic
@@ -214,7 +216,7 @@ class SkillRegistry:
         off = self._gated(skill, tool)
         if off is not None:        # the model may still hold an older tool list: refuse truthfully
             logs.info("skills", "FEATURE_OFF", f"{name} refused: {off}", tool=name)
-            return ToolResult(False, f"not available: {off}", code="FEATURE_OFF")
+            return self._hinted(skill, tool, ToolResult(False, f"not available: {off}", code="FEATURE_OFF"))
         try:
             if isinstance(raw_args, str):
                 raw_args = json.loads(raw_args or "{}")
@@ -240,6 +242,18 @@ class SkillRegistry:
             self._untrusted_at = self.clock()
         log = logs.info if res.ok else logs.warn
         log("skills", "TOOL_RESULT", f"{name} -> {res.code}", tool=name, ok=res.ok, origin=origin)
+        return self._hinted(skill, tool, res) if not res.ok else res
+
+    def _hinted(self, skill: Skill, tool: Tool, res: ToolResult) -> ToolResult:
+        if self.setup_hint is None or "setup_hint" in res.data:
+            return res
+        try:
+            hint = self.setup_hint(skill.name, tool.name, res)
+        except Exception:          # a broken hint must never change the result
+            logs.error("skills", "SETUP_HINT_FAILED", f"setup hint failed for {tool.name}", exc=True)
+            return res
+        if hint:
+            res.data = {**res.data, "setup_hint": hint}
         return res
 
     async def drain(self, timeout_s: float = 5.0) -> None:

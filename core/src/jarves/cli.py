@@ -674,20 +674,36 @@ def _ask_key(home) -> int:
     return 0
 
 
+def _ask_admin_key(home) -> int:
+    """WP-L guide "Real API bill": the optional read-only OpenAI Admin key for the Costs API (usage.py)."""
+    import getpass
+    print("Paste your OpenAI ADMIN key (platform.openai.com/settings/organization/admin-keys, Read only).\n"
+          "It is only used to read this month's real cost. It is hidden while you paste.")
+    key = getpass.getpass("Admin key: ").strip()
+    if not key:
+        return 1
+    if not key.startswith("sk-admin-"):
+        print("That does not look like an OpenAI admin key (it should start with sk-admin-). Nothing saved.")
+        return 1
+    print(f"saved to {save_secret('OPENAI_ADMIN_KEY', key, home)} (private to your Windows user, not in the project)")
+    return 0
+
+
 def cmd_key(a, cfg, home) -> int:
-    """Store / remove the OpenAI API key in <state_dir>/secrets.env."""
+    """Store / remove the OpenAI API key (or with --admin the read-only Admin key) in <state_dir>/secrets.env."""
     path = secrets_file(home)
+    name = "OPENAI_ADMIN_KEY" if getattr(a, "admin", False) else "OPENAI_API_KEY"
     if a.remove:
         if path.exists():
             lines = [l for l in path.read_text(encoding="utf-8-sig").splitlines()
-                     if l.partition("=")[0].strip() != "OPENAI_API_KEY"]
+                     if l.partition("=")[0].strip() != name]
             path.write_text("\n".join(lines) + "\n", encoding="utf-8")
-        print("key removed (restart JARVES)")
+        print(f"{'admin ' if name != 'OPENAI_API_KEY' else ''}key removed (restart JARVES)")
         return 0
     if a.show_path:
         print(path)
         return 0
-    rc = _ask_key(home)
+    rc = _ask_admin_key(home) if name == "OPENAI_ADMIN_KEY" else _ask_key(home)
     if rc == 0:
         print("Restart JARVES to use it:  jarvis stop  then  jarvis")
     return rc
@@ -1283,6 +1299,7 @@ def main(argv: list[str] | None = None) -> int:
     k = sub.add_parser("key", help="save your OpenAI API key in a private file (secrets.env)")
     k.add_argument("--remove", action="store_true")
     k.add_argument("--show-path", action="store_true")
+    k.add_argument("--admin", action="store_true", help="the optional read-only Admin key (real monthly API bill)")
     q = sub.add_parser("ask", help="ask one question (brain + Skills, no Godot)")
     ex = sub.add_parser("execute", help="run a text request with JARVES stopped; Google/memory/tools, terminal confirmations")
     ex.add_argument("text", nargs="+", help='request, e.g. "add a calendar event tomorrow at 10"')

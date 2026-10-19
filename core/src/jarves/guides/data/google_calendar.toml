@@ -1,0 +1,50 @@
+order = 20
+category = "google"
+pages = ["connections"]
+features = ["google_calendar", "calendar_write"]
+checklist = 4
+suggest = true
+aliases = ["גוגל", "google", "יומן", "calendar", "פגישות", "connect google", "לחבר את גוגל"]
+links = ["gmail", "scheduler"]
+title_he = "יומן גוגל"
+title_en = "Google Calendar"
+what_he = "ג'ארביס קורא את היומן שלכם, ואחרי אישור שלכם גם מוסיף או מעדכן פגישה. הוא אף פעם לא מוחק."
+what_en = "JARVES reads your calendar and, after you confirm, can add or update an event. He never deletes."
+say = [["מה יש לי ביומן מחר?", "What's on my calendar tomorrow?"], ["תקבע לי פגישה עם דני ביום שלישי בעשר", "Book a meeting with Danny on Tuesday at ten"]]
+expect_he = "הוא מקריא את הפגישות. לפני הוספה הוא אומר מה בדיוק יוסיף ומחכה ל\"כן\"."
+expect_en = "He reads your events. Before adding one he says exactly what he will add and waits for \"yes\"."
+test_he = "הבדיקה בודקת שהחשבון מחובר. בדיקה מלאה מול גוגל יש בעמוד Connections."
+test_en = "The check sees that the account is connected. The full live check is on the Connections page."
+cost_he = "חינם."
+cost_en = "Free."
+privacy_he = "הגישה נשמרת רק במחשב. אפשר לנתק בכל רגע בעמוד Connections."
+privacy_en = "The sign-in is kept only on this computer. Disconnect any time on the Connections page."
+
+[[steps]]
+he = "בטרמינל הקלידו jarvis google start. הוא מוביל אתכם צעד אחר צעד (או פתחו את עמוד Connections)."
+en = "In a terminal type jarvis google start. It walks you through it step by step (or open the Connections page)."
+action = "command:jarvis google start"
+check = "available:google_calendar"
+
+[[steps]]
+he = "פתחו את עמוד Connections בלוח הבקרה ובדקו שגוגל מסומן OK."
+en = "Open the Connections page in the dashboard and check Google shows OK."
+action = "open:#/connections"
+
+[[steps]]
+he = "ודאו שהמתג \"יומן גוגל\" דולק. הוספת פגישות היא מתג נפרד."
+en = "Make sure the Google Calendar switch is on. Adding events is a separate switch."
+action = "feature_on:google_calendar"
+check = "active:google_calendar"
+
+[[problems]]
+he = "אחרי שבוע הוא מבקש להתחבר שוב"
+en = "After a week he asks to sign in again"
+fix_he = "זה רגיל לאפליקציה במצב בדיקה של גוגל. הריצו שוב jarvis google start (רק התחברות)."
+fix_en = "That is normal for a Google app in testing mode. Run jarvis google start again (sign-in only)."
+
+[[problems]]
+he = "הוא אומר שגוגל לא מחובר"
+en = "He says Google is not connected"
+fix_he = "הריצו jarvis google start. הוא ממשיך מאיפה שעצרתם."
+fix_en = "Run jarvis google start. It continues where you stopped."

@@ -1,0 +1,38 @@
+order = 52
+category = "costs"
+probe = "budget"
+checklist = 6
+aliases = ["תקציב", "תקציב חודשי", "budget", "monthly budget", "spend limit"]
+links = ["api_bill", "usage"]
+title_he = "תקציב API חודשי"
+title_en = "Monthly API budget"
+what_he = "קובעים כמה מותר להוציא על ה-API בחודש (הצעה: 20 דולר), וג'ארביס מתריע ב-75%, 90% ו-100%."
+what_en = "Set how much the API may cost a month (suggested: $20), and JARVES alerts at 75%, 90% and 100%."
+say = [["כמה נשאר מהתקציב?", "How much budget is left?"]]
+expect_he = "ב-75% וב-90% מופיעה שורה שקטה על המסך, וב-100% הוא אומר לכם בקול (כל אחת פעם אחת בחודש). הוא לא עוצר לבד את OpenAI. את האחוזים אפשר לשנות בעמוד Usage."
+expect_en = "At 75% and 90% a quiet line shows on the screen; at 100% he tells you aloud (each once a month). He does not block OpenAI himself. The percents can be changed on the Usage page."
+cost_he = "חינם."
+cost_en = "Free."
+privacy_he = "אין."
+privacy_en = "None."
+
+[[steps]]
+he = "קבעו תקציב חודשי. ההצעה: 20 דולר (הכפתור כאן). סכום אחר: בעמוד Usage, או jarvis usage budget 30."
+en = "Set a monthly budget. Suggested: $20 (the button here). Another amount: on the Usage page, or jarvis usage budget 30."
+action = "set_budget:20"
+check = "probe:budget"
+
+[[steps]]
+he = "מומלץ גם לקבוע מגבלה באתר של OpenAI (Settings, Limits). רק היא באמת עוצרת חיובים."
+en = "Also set a limit on OpenAI's site (Settings, Limits). Only that one really stops charges."
+
+[[steps]]
+he = "לחשבון מדויק ולא הערכה: מדריך \"החשבון האמיתי של ה-API\"."
+en = "For the exact bill instead of an estimate: guide \"Real API bill\"."
+action = "open:#/guide/api_bill"
+
+[platform]
+windows = "implemented_unverified"
+windows_note_en = "core/tests/test_usage.py; no real 75% alert observed yet"
+pi = "implemented_unverified"
+pi_note_en = "pure Python; not run on a Pi yet"

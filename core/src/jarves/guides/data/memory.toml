@@ -1,0 +1,39 @@
+order = 30
+category = "memory"
+pages = ["memory"]
+features = ["memory_curator", "memory_llm_pass"]
+aliases = ["זיכרון", "תזכור", "memory", "remember", "למידה", "learn"]
+links = ["persona", "privacy"]
+title_he = "זיכרון ולמידה מהשיחות"
+title_en = "Memory and learning from conversations"
+what_he = "ג'ארביס זוכר דברים חשובים שסיפרתם לו, גם בלי שאמרתם \"תזכור\"."
+what_en = "JARVES keeps the important things you told him, even without saying \"remember\"."
+say = [["תזכור שאני לא אוכל בשר", "Remember that I don't eat meat"], ["מה אתה זוכר עליי?", "What do you remember about me?"], ["תשכח את זה", "Forget that"]]
+expect_he = "אחרי השיחה הוא שומר עובדות קצרות. אפשר לראות, לתקן ולמחוק אותן בעמוד Memory."
+expect_en = "After the conversation he keeps short facts. See, fix and delete them on the Memory page."
+cost_he = "חינם. \"למידה בעזרת המודל\" (כבוי מראש) עולה בקשה קטנה אחת לשיחה."
+cost_en = "Free. The optional \"Memory LLM pass\" (off by default) costs one small request per conversation."
+privacy_he = "הזיכרון נשמר רק במחשב."
+privacy_en = "Memory stays on this computer."
+
+[[steps]]
+he = "ודאו שהמתג \"למידה מהשיחות\" דולק."
+en = "Make sure the Learn from conversations switch is on."
+action = "feature_on:memory_curator"
+check = "enabled:memory_curator"
+
+[[steps]]
+he = "פתחו את עמוד Memory כדי לראות מה הוא זוכר."
+en = "Open the Memory page to see what he remembers."
+action = "open:#/memory"
+
+[[steps]]
+he = "רוצים למידה חכמה יותר? הדליקו \"למידה בעזרת המודל\" (בקשה קטנה בתשלום)."
+en = "Want smarter learning? Turn on Memory LLM pass (one small paid request)."
+action = "feature_on:memory_llm_pass"
+
+[[problems]]
+he = "הוא זכר משהו לא נכון"
+en = "He remembered something wrong"
+fix_he = "אמרו \"תשכח את זה\" או מחקו בעמוד Memory."
+fix_en = "Say \"forget that\" or delete it on the Memory page."

@@ -82,9 +82,10 @@ PAGES.home = async function () {
     el("div", { dir: "auto" }, lc.first_user || "(nothing said)"),
     el("div", { class: "muted small" }, `${day(lc.started)} ${clock(lc.started)} · ${secs(lc.duration_s)} · ${usd(lc.cost)}` + (lc.issues ? ` · ${lc.issues} issue(s)` : "")),
     el("div", { class: "actions" }, el("a", { class: "button-link", href: "#/session/" + encodeURIComponent(lc.id) }, "Open · לפתוח"))) : null;
+  const setup = typeof window.guidesSetupCard === "function" ? await window.guidesSetupCard() : null;   // WP-L checklist
   render(el("div", { class: "big-status" }, el("span", { class: "lamp " + lampOf(d.status) }),
     el("div", {}, el("div", { class: "title", dir: "rtl" }, d.status_he), el("div", { class: "muted" }, d.status_en + (d.live ? " · talking now" : "")))),
-    next, tiles, el("div", { class: "grid-home" }, conns, feats), el("div", { class: "grid-home" }, privacyCard(d.privacy), last));
+    next, setup, tiles, el("div", { class: "grid-home" }, conns, feats), el("div", { class: "grid-home" }, privacyCard(d.privacy), last));
   timer = setInterval(() => route(true), 15000);
 };
 

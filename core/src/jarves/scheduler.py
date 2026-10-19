@@ -296,8 +296,12 @@ def describe(kind: str, spec: str, tz: ZoneInfo | None = None) -> str:
     return f"לפי cron: {spec}"
 
 
-def parse_when(text: str, now: datetime) -> Schedule:
-    """A spoken / typed schedule (Hebrew or English) -> Schedule. `now` is aware, in the job's zone."""
+WORKWEEKS = {"0-4": "Sunday-Thursday", "1-5": "Monday-Friday"}     # setting scheduler.workweek ("ימי חול")
+
+
+def parse_when(text: str, now: datetime, workweek: str = "0-4") -> Schedule:
+    """A spoken / typed schedule (Hebrew or English) -> Schedule. `now` is aware, in the job's zone.
+    workweek: the cron weekdays of "ימי חול" (setting scheduler.workweek; Israel default Sunday-Thursday)."""
     raw = str(text or "").strip()
     if not raw:
         raise ScheduleError("SCHEDULE_EMPTY", "מתי? צריך זמן או תדירות")
@@ -373,7 +377,8 @@ def parse_when(text: str, now: datetime) -> Schedule:
             raise ScheduleError("SCHEDULE_NEEDS_TIME", "באיזו שעה?")
         h, mi = hm
         if re.search(r"ימי חול|ימי עבודה|יום עבודה|יום חול", t):
-            return cron(f"{mi} {h} * * 0-4")                 # Israeli work week: Sunday-Thursday
+            ww = workweek if workweek in WORKWEEKS else "0-4"
+            return cron(f"{mi} {h} * * {ww}")                # default Israeli work week: Sunday-Thursday
         if re.search(r"\bweekdays\b|\bworkdays\b", t):
             return cron(f"{mi} {h} * * 1-5")
         if re.search(r"סוף שבוע|סופ\"?ש", t):
@@ -527,7 +532,7 @@ class Scheduler:
         if not task and action != "tool":
             raise ScheduleError("JOB_EMPTY", "מה לעשות בזמן הזה?")
         tz = self.tz(tz_name)
-        sched = parse_when(when, self.now_local(tz))
+        sched = parse_when(when, self.now_local(tz), self.db.setting("scheduler.workweek"))
         if action == "tool":
             if not tool:
                 raise ScheduleError("JOB_NO_TOOL", "a tool job needs the tool name")
@@ -606,7 +611,7 @@ class Scheduler:
         sets: dict[str, Any] = {}
         if "when" in fields and fields["when"]:
             tz = self.tz(fields.get("tz") or job["tz"])
-            s = parse_when(fields["when"], self.now_local(tz))
+            s = parse_when(fields["when"], self.now_local(tz), self.db.setting("scheduler.workweek"))
             sets.update(kind=s.kind, spec=s.spec, human=s.human, tz=tz.key)
             if job["status"] == "active":
                 sets["next_run"] = next_after(s.kind, s.spec, tz, self.clock())
@@ -1107,6 +1112,7 @@ def api_jobs(ctx, m, body):
         v["runs"] = s.runs(j["id"], 10)
         jobs.append(v)
     return 200, {"jobs": jobs, "timezone": s.tz().key, "now_local": fmt_local(s.clock(), s.tz()),
+                 "max_age_s": s.db.setting("scheduler.max_age_s"), "workweek": s.db.setting("scheduler.workweek"),
                  "note": "The Core runs due jobs (checked at least every 30 s); missed jobs run once after start-up "
                          "when not older than their max age, labelled late."}
 
@@ -1127,7 +1133,7 @@ def api_schedule_parse(ctx, m, body):
     s = _ctx_sched(ctx)
     try:
         tz = s.tz((body or {}).get("tz") or None)
-        sc = parse_when(str((body or {}).get("when", "")), s.now_local(tz))
+        sc = parse_when(str((body or {}).get("when", "")), s.now_local(tz), s.db.setting("scheduler.workweek"))
     except ScheduleError as e:
         return 400, {"error": e.message, "code": e.code}
     return 200, {"kind": sc.kind, "spec": sc.spec, "human": sc.human,
@@ -1196,6 +1202,10 @@ def api_sched_settings(ctx, m, body):
         if "max_age_s" in b:
             s.db.set_setting("scheduler.max_age_s", max(0.0, min(float(b["max_age_s"]), 7 * 86400.0)),
                              actor="dashboard")
+        if "workweek" in b:                       # WP-L guide: "ימי חול" = Sunday-Thursday or Monday-Friday
+            if b["workweek"] not in WORKWEEKS:
+                return 400, {"error": "workweek must be 0-4 (Sunday-Thursday) or 1-5 (Monday-Friday)"}
+            s.db.set_setting("scheduler.workweek", b["workweek"], actor="dashboard")
     except ScheduleError as e:
         return 400, {"error": e.message, "code": e.code}
     except (TypeError, ValueError):

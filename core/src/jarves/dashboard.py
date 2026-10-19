@@ -46,7 +46,7 @@ PLUGIN_MODULES = ("jarves.workspace", "jarves.curator", "jarves.memory", "jarves
                   "jarves.google_setup", "jarves.privacy", "jarves.overview",
                   "jarves.usage", "jarves.backup", "jarves.appearance", "jarves.skills.generated",
                   "jarves.operations", "jarves.runtime", "jarves.updates",
-                  "jarves.identity", "jarves.dashboard_auth")
+                  "jarves.identity", "jarves.dashboard_auth", "jarves.guides")     # WP-L: Guides pages
 MEMORY_UNDO_KEEP = 30
 
 

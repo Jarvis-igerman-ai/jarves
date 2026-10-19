@@ -69,6 +69,7 @@ CREATE INDEX IF NOT EXISTS alerts_k ON alerts (dedupe_key, ts);
 DEFAULTS: dict[str, Any] = {
     "scheduler.timezone": "Asia/Jerusalem",     # the owner's zone; DST handled by zoneinfo (tzdata)
     "scheduler.max_age_s": 6 * 3600,            # default for new jobs: a missed run older than this is skipped
+    "scheduler.workweek": "0-4",                # "ימי חול": cron weekdays, Sunday-Thursday (or "1-5")
     "alerts.quiet_start": "22:00",
     "alerts.quiet_end": "07:00",
     "alerts.quiet_enabled": True,

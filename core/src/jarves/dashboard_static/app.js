@@ -367,7 +367,8 @@ async function pageFeatures() {
     const badge = !f.enabled ? pill("plain", "off") : f.available ? pill("ok", "active") : pill("unavailable", "unavailable");
     return el("tr", {}, el("td", {}, sw),
       el("td", {}, el("b", {}, f.title_en), " ", el("span", { class: "muted", dir: "auto" }, f.title_he),
-        el("div", { class: "muted small" }, f.about), f.requested ? el("div", { class: "small" }, "JARVES was asked to turn this on: approve here.") : null),
+        el("div", { class: "muted small" }, f.about, " · ", el("a", { href: "#/guide-for/" + encodeURIComponent(f.id) }, "Guide")),
+        f.requested ? el("div", { class: "small" }, "JARVES was asked to turn this on: approve here.") : null),
       el("td", {}, badge, f.reason ? el("div", { class: "small", dir: "auto" }, f.reason) : null),
       el("td", {}, pill(f.risk, f.risk)),
       el("td", { class: "muted small" }, `applies: ${when[f.applies] || f.applies}` + (f.source !== "user" ? ` · from ${f.source}` : ""), msg));
@@ -453,7 +454,7 @@ async function pageSettings() {
 async function route(refresh) {
   clearInterval(timer); timer = null;
   const [page, arg] = location.hash.replace(/^#\/?/, "").split("?")[0].split("/").map(decodeURIComponent);
-  const navPage = { session: "conversations", raw: "conversations", note: "workspace" }[page] || page || "home";  // WP-K Home = default
+  const navPage = { session: "conversations", raw: "conversations", note: "workspace", guide: "guides" }[page] || page || "home";  // WP-K Home = default
   for (const a of document.querySelectorAll("nav a")) a.classList.toggle("active", a.dataset.page === navPage);
   try {
     if (page === "runtime") await pageHome();                    // M1 runtime controls (WP-K: "Controls" in the nav)
