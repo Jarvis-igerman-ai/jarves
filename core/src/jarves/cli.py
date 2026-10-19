@@ -69,6 +69,10 @@ def cmd_run(a, cfg, home) -> int:
 
 async def _launch_viewer(port: int):
     """Own this one child process so closing even the loading window ends this desktop session."""
+    face = os.environ.get("JARVES_FACE_EXE", "").strip('"')      # installed build: the exported face (M6)
+    if face and Path(face).is_file():
+        return await asyncio.create_subprocess_exec(face, "res://loading.tscn", "--", f"--core-port={port}",
+                                                   env={k: v for k, v in os.environ.items() if k != "OPENAI_API_KEY"})
     override = os.environ.get("GODOT_EXE", "").strip('"')
     package_root = Path(os.environ.get("LOCALAPPDATA", "")) / "Microsoft/WinGet/Packages"
     candidates = [Path(override)] if override else package_root.glob(
@@ -200,6 +204,9 @@ def cmd_stop(a, cfg, home) -> int:
 
 
 def _git_rev() -> str:
+    from .updates import build_info
+    if build_info().get("commit"):                 # installed build: no git, the build records its commit
+        return build_info()["commit"][:12]
     try:
         return subprocess.run(["git", "rev-parse", "--short", "HEAD"], capture_output=True, text=True,
                               cwd=Path(__file__).parent, timeout=5).stdout.strip() or "unknown"
@@ -796,6 +803,48 @@ def cmd_dashboard(a, cfg, home) -> int:
     return 0
 
 
+def cmd_update(a, cfg, home) -> int:
+    """jarvis update [check | install | status]: notify + ask approval (D16); never installs on its own."""
+    from .features import Features
+    from .updates import UpdateChecker, UpdateError, launch_installer, version_line
+    u = UpdateChecker(home)
+    print(version_line())
+    if a.action == "status":
+        s = u.status()
+    elif not Features(cfg, home).enabled("update_check"):
+        print("The update check is switched off. Turn it on with: jarvis features on update_check")
+        return 1
+    else:
+        s = u.check(force=True)
+    if s["error"]:
+        print(f"Update check unavailable: {s['error']}")
+        return 1
+    if not s["available"]:
+        print(f"Up to date (checked {s['checked_at'] or 'never'}).")
+        return 0
+    rel = s["latest"]
+    print(f"New version {rel['version']} ({rel['published'] or ''})  {rel['page'] or ''}")
+    if a.action != "install":
+        print("Install it with:  jarvis update install   (asks first; your data is kept and backed up)")
+        return 0
+    print("This downloads the installer, checks its SHA256, backs up your data, stops JARVES and opens the setup "
+          "window.")
+    if not a.yes and input("Type yes to continue: ").strip().lower() != "yes":
+        print("Not installed.")
+        return 1
+    try:
+        r = u.prepare_install(approved=True)
+    except UpdateError as e:
+        print(f"{e.code}: {e.message}")
+        return 1
+    print(f"Verified {Path(r['installer']).name}; backup in {r['backup']}")
+    if _ws_call(home, cfg.link.port, {"type": "status.request", "payload": {}}, "status") is not None:
+        cmd_stop(a, cfg, home)
+    launch_installer(r["installer"])
+    print("Setup is open. Follow it; JARVES can start again at the end.")
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     for stream in (sys.stdout, sys.stderr):      # Hebrew output on Windows consoles
         try:
@@ -804,6 +853,8 @@ def main(argv: list[str] | None = None) -> int:
             pass
     ap = argparse.ArgumentParser(prog="jarves", description="JARVES assistant Core")
     ap.add_argument("--config", type=Path, help="config.toml (default: <JARVES_HOME>/config.toml)")
+    from .updates import version_line
+    ap.add_argument("--version", action="version", version=version_line())
     sub = ap.add_subparsers(dest="cmd", required=True)
     def log_opts(p):
         p.add_argument("--log-level", type=str.upper, choices=logs.LEVELS, help="terminal log level")
@@ -863,6 +914,9 @@ def main(argv: list[str] | None = None) -> int:
     dg.add_argument("--days", type=int, default=30)
     dg.add_argument("--import-log", nargs="?", const="", default=None, metavar="PATH",
                     help="first read conversations from jarves.log (default: the current log and its rotations)")
+    up = sub.add_parser("update", help="check GitHub for a newer JARVES; install only after you approve")
+    up.add_argument("action", nargs="?", default="check", choices=["check", "install", "status"])
+    up.add_argument("--yes", action="store_true", help="install: you already approved (no question)")
     a = ap.parse_args(argv)
     home = state_dir()
     load_secrets(home)
@@ -874,7 +928,8 @@ def main(argv: list[str] | None = None) -> int:
     return {"run": cmd_run, "stop": cmd_stop, "status": cmd_status, "diag": cmd_diag, "memory": cmd_memory, "music": cmd_music,
             "ask": cmd_ask, "say": cmd_say, "chatgpt": cmd_chatgpt, "setup": cmd_setup, "logs": cmd_logs, "key": cmd_key,
             "wake": cmd_wake, "doctor": cmd_doctor, "cost": cmd_cost, "dashboard": cmd_dashboard,
-            "diagnose": cmd_diagnose, "features": cmd_features, "google": cmd_google}[a.cmd](a, cfg, home)
+            "diagnose": cmd_diagnose, "features": cmd_features, "google": cmd_google,
+            "update": cmd_update}[a.cmd](a, cfg, home)
 
 
 if __name__ == "__main__":
