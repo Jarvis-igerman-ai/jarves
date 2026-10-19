@@ -20,7 +20,7 @@ from .budget import Budget, BudgetExceeded
 from .chatgpt_auth import RESOURCE, ChatGPTAuth, ChatGPTAuthError
 from .config import AIConfig
 from .memory import MemoryStore
-from .skills import SkillRegistry
+from .skills import SkillRegistry, bounded_ai
 
 NAMESPACE = "jarves"
 MAX_HISTORY_ITEMS = 40
@@ -249,7 +249,7 @@ class ChatGPTBrain:
         if not ok:
             raise BrainUnavailable(code, action, action)
         try:
-            return await asyncio.wait_for(self._turns(text), self.cfg.timeout_s * 2)
+            return await bounded_ai(self._turns(text), self.cfg.timeout_s * 2, self.registry)
         except asyncio.TimeoutError as e:
             raise BrainUnavailable("AI_TIMEOUT", "the AI did not answer in time", "try again; check the network") from e
         except BudgetExceeded as e:       # next /responses request (incl. a retry) would pass the daily ceiling

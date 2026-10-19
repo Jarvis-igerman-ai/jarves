@@ -18,7 +18,7 @@ from . import logs
 from .budget import Budget, BudgetExceeded
 from .config import AIConfig, openai_key_present
 from .memory import MemoryStore
-from .skills import SkillRegistry, ToolResult
+from .skills import ROUTE, SkillRegistry, ToolResult, bounded_ai
 
 
 class BrainUnavailable(Exception):
@@ -102,7 +102,13 @@ Before claiming a camera is connected/disconnected or responding to an open-came
 when available. A disabled photo/recognition tool is not evidence that the webcam is disconnected. If no camera
 status tool is provided, explain that this session cannot verify or control the camera; never invent its state.
 Use web search for current facts (news, weather, prices); one quick search is enough for a spoken answer; name
-the source in two or three words only when it matters.
+the source in two or three words only when it matters. Answer the question actually asked: a CURRENT score/state
+("מה התוצאה", "מה המצב") means the latest reported value with its time ("נכון לדקה 60: אחת-אפס"), not only a
+final result; if no reliable value is found, say so plainly once. On a repeat request, search for the one fact
+still missing; never state a precise number, score or source you did not find in this turn's search.
+Window and app: hide_yourself only hides the window (still listening); quit_jarves quits the JARVES app
+completely ("תסגור את עצמך לגמרי", "שט דאון"); open_dashboard only opens the dashboard and is never a way to
+close anything. If the user's meaning is unclear between hiding and quitting, ask once.
 Background tasks: when the user asks for real RESEARCH (compare several options, check many sources, "בדוק לעומק",
 "תחקור", a summary of a long topic: anything likely to take more than about 15 seconds), call `task_start` with a
 self-contained description instead of searching yourself, then say in one short sentence that you are on it in the
@@ -441,8 +447,8 @@ class AgentBrain:
         t0 = time.monotonic()
         logs.info("ai", "AI_REQUEST", "agent request started", model=self.cfg.text_model)
         try:
-            res = await asyncio.wait_for(Runner.run(self._agent, text, session=self._session, max_turns=self.cfg.max_turns),
-                                         self.cfg.timeout_s)
+            res = await bounded_ai(Runner.run(self._agent, text, session=self._session, max_turns=self.cfg.max_turns),
+                                   self.cfg.timeout_s, self.registry)
         except asyncio.TimeoutError as e:
             raise BrainUnavailable("AI_TIMEOUT", "the AI did not answer in time", "try again; check the network") from e
         except openai.AuthenticationError as e:
@@ -490,6 +496,15 @@ def speakable(text: str) -> str:
 # ------------------------------------------------------------------ facade
 OFFLINE_HELP = ("אני עובד כרגע בלי בינה מלאכותית, אז אני מבין רק פקודות: נגן, עצור, הבא, עוצמה, מה השעה, "
                 "תזכור ש..., מה אתה זוכר, סטטוס.")
+# Temporary failures: the AI is configured, this one request failed. Never claim "no AI" for them.
+TRANSIENT_REPLY = {
+    "AI_TIMEOUT": "לא קיבלתי תשובה בזמן, אז לא סיימתי את הבקשה. אפשר לנסות שוב.",
+    "AI_OFFLINE": "אין לי כרגע חיבור לשירות הבינה המלאכותית. בדוק את האינטרנט ונסה שוב.",
+    "AI_RATE_LIMIT": "השירות עמוס כרגע. נסה שוב בעוד דקה.",
+    "CHATGPT_UNAVAILABLE": "השירות של ChatGPT לא זמין כרגע. נסה שוב מאוחר יותר.",
+    "AI_ERROR": "משהו השתבש מול שירות הבינה המלאכותית, והבקשה לא הושלמה. אפשר לנסות שוב.",
+    "AI_MAX_TURNS": "הבקשה דרשה יותר מדי שלבים ולא הושלמה. נסה לבקש בצורה פשוטה יותר.",
+}
 
 
 @dataclass
@@ -514,9 +529,14 @@ class Brain:
             return Reply(res.message, "command", intent.tool, res.ok, res.code)
         if self.agent is None:
             return Reply(OFFLINE_HELP, "offline", ok=False, code="AI_DISABLED")
+        token = ROUTE.set("text")          # this conversation's untrusted-content taint is its own (skills.ROUTE)
         try:
             answer = await self.agent.reply(text)
             return Reply((speakable(answer) if spoken else answer) or "…", "ai")
         except BrainUnavailable as e:
             logs.warn("ai", e.code, e.message, action=e.action)
-            return Reply(OFFLINE_HELP, "offline", ok=False, code=e.code)
+            # SW-V3 P0.1: a timeout or network error is not "working without AI": say what really happened
+            msg = TRANSIENT_REPLY.get(e.code, OFFLINE_HELP)
+            return Reply(msg, "offline", ok=False, code=e.code)
+        finally:
+            ROUTE.reset(token)

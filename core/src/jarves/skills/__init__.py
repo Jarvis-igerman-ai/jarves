@@ -25,6 +25,7 @@ pre-empted turn or a shutdown never aborts a half-done side effect; read tools s
 from __future__ import annotations
 
 import asyncio
+import contextvars
 import json
 import time
 from dataclasses import dataclass, field
@@ -44,6 +45,35 @@ DEFAULT_ALLOWED_ACTIONS = frozenset({"remember", "music_play", "music_pause", "m
                                      # settings Skill: one appended line (backed up, undoable) / allowlisted keys
                                      "workspace_note", "set_voice", "set_setting"})
 UNTRUSTED_GRACE_S = 3.0    # see SkillRegistry.new_turn
+# Which conversation a tool call belongs to ("voice", "text", default "default": scheduler / other callers). The
+# untrusted-content taint is kept per route. A contextvar: tasks spawned by a route inherit it.
+ROUTE: contextvars.ContextVar[str] = contextvars.ContextVar("jarves_skill_route", default="default")
+
+
+async def bounded_ai(aw, timeout_s: float, registry: "SkillRegistry | None"):
+    """asyncio.wait_for for an AI turn whose deadline excludes the time a human spent on registry.confirm
+    (real typed session 19 Oct: an approval answered after minutes became "the AI did not answer in time")."""
+    task = asyncio.ensure_future(aw)
+    loop = asyncio.get_running_loop()
+    base = registry.confirm_elapsed() if registry is not None else 0.0
+    deadline = loop.time() + timeout_s
+    try:
+        while True:
+            done, _ = await asyncio.wait({task}, timeout=max(0.0, deadline - loop.time()))
+            if task in done:
+                return task.result()
+            human = registry.confirm_elapsed() - base if registry is not None else 0.0
+            if registry is not None and (human > 0 or registry._confirming_since is not None):
+                deadline += human
+                base += human
+                if deadline - loop.time() <= 0:     # still waiting on the person: keep waiting
+                    deadline = loop.time() + 0.5
+                continue
+            raise asyncio.TimeoutError
+    finally:
+        if not task.done():
+            task.cancel()
+            await asyncio.gather(task, return_exceptions=True)
 
 
 @dataclass
@@ -114,14 +144,48 @@ class SkillRegistry:
         # WP-L guides: (skill, tool, failed result) -> machine-readable setup hint added as data["setup_hint"]
         self.setup_hint: Callable[[str, str, "ToolResult"], dict | None] | None = None
         self._inflight: set[asyncio.Future] = set()
-        self._untrusted_at: float | None = None   # monotonic time untrusted text entered this turn
+        # monotonic time untrusted text entered the current turn, PER ROUTE (SW-V3 P0.1: one shared taint let a
+        # mail read in the voice conversation refuse a scheduled job's action, and vice versa)
+        self._untrusted: dict[str, float] = {}
         self.clock = time.monotonic
+        # human approval time (registry.confirm) is not AI time: Brain timeouts add it back (bounded_ai)
+        self.confirm_wait_s = 0.0
+        self._confirming_since: float | None = None
 
-    def new_turn(self) -> None:
-        """The user said something new: side effects are allowed again. A taint younger than UNTRUSTED_GRACE_S is
-        kept: a voice transcript can complete just after the tool of that same turn returned."""
-        if self._untrusted_at is not None and self.clock() - self._untrusted_at >= UNTRUSTED_GRACE_S:
-            self._untrusted_at = None
+    @property
+    def _untrusted_at(self) -> float | None:
+        return self._untrusted.get(ROUTE.get())
+
+    @_untrusted_at.setter
+    def _untrusted_at(self, value: float | None) -> None:
+        if value is None:
+            self._untrusted.pop(ROUTE.get(), None)
+        else:
+            self._untrusted[ROUTE.get()] = value
+
+    def new_turn(self, route: str | None = None) -> None:
+        """The user said something new on `route` (default: the caller's ROUTE): side effects are allowed again
+        there. A taint younger than UNTRUSTED_GRACE_S is kept: a voice transcript can complete just after the tool
+        of that same turn returned."""
+        key = route or ROUTE.get()
+        at = self._untrusted.get(key)
+        if at is not None and self.clock() - at >= UNTRUSTED_GRACE_S:
+            self._untrusted.pop(key, None)
+
+    async def _ask(self, prompt: str) -> bool:
+        """registry.confirm, with the human's thinking time recorded (it must never count as an AI timeout)."""
+        t0 = time.monotonic()
+        self._confirming_since = t0
+        try:
+            return await self.confirm(prompt)
+        finally:
+            self._confirming_since = None
+            self.confirm_wait_s += time.monotonic() - t0
+
+    def confirm_elapsed(self) -> float:
+        """Total human approval time so far, including an approval still open."""
+        open_s = time.monotonic() - self._confirming_since if self._confirming_since is not None else 0.0
+        return self.confirm_wait_s + open_s
 
     def register(self, skill: Skill) -> None:
         if skill.name in self.skills:
@@ -186,7 +250,7 @@ class SkillRegistry:
             count, impact_prompt = (await tool.impact(args)) if tool.impact else (None, "")
             if origin == "model" or count is None or count > 1:
                 prompt = prompt or impact_prompt or f"{tool.description} - approve?"
-        if prompt and not await self.confirm(prompt):
+        if prompt and not await self._ask(prompt):
             logs.info("skills", "TOOL_DECLINED", f"{tool.name} not confirmed by user", tool=tool.name, origin=origin)
             return ToolResult(False, "cancelled: the user did not confirm", code="TOOL_DECLINED")
         return None

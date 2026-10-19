@@ -14,6 +14,9 @@ from .skills.local_contacts import LocalContactsSkill
 from .skills.settings import Settings, SettingsSkill
 
 
+CONFIRM_WORDS = ("yes", "y", "כן")       # an explicit yes only; Enter / anything else cancels
+
+
 class _FeatureRead(Skill):
     name = "features"
     description = "Read configured feature availability; activation uses jarvis features"
@@ -54,8 +57,11 @@ async def execute(cfg, home: Path, text: str, *, interactive=False, read=input, 
     async def confirm(prompt):
         try:
             # Terminal-only session: synchronous input leaves no abandoned stdin thread on cancellation.
-            answer = read(prompt + "\nType yes to confirm: ")
-            return answer.strip().lower() == "yes"
+            answer = read(prompt + "\nType yes (כן) to confirm, anything else cancels: ")
+            ok = answer.strip().lower() in CONFIRM_WORDS
+            if not ok:
+                write("Not confirmed: nothing was done.")
+            return ok
         except EOFError:
             return False
     registry.confirm = confirm

@@ -12,8 +12,12 @@ under "runtime". The face gets {"type": "display.close"} when the Core hides it.
 """
 from __future__ import annotations
 
-from .. import features as feat
+import asyncio
+
+from .. import features as feat, logs
 from .service import Runtime, alerts_paused, current, read_state
+
+QUIT_DELAY_S = 4.0      # a voice quit stops the Core this long after the tool result (the goodbye is spoken first)
 
 ISSUE_PI = "https://github.com/igalgerman/JARVIS/issues/20"
 EVIDENCE = "docs/reviews/SWV2_WP-M1.md"
@@ -122,18 +126,44 @@ def make_skill(rt: Runtime):
                 Tool("show_yourself", "Open my window (face/room) on the screen when the user asks to see me "
                      "(\"show yourself\", \"תופיע\", \"תראה את עצמך\").", show, permission="action", timeout_s=20),
                 Tool("hide_yourself", "Close my window when the user asks me to hide (\"hide yourself\", "
-                     "\"תיעלם\", \"תסתתר\"). I keep running and listening.", hide, permission="action",
+                     "\"תיעלם\", \"תסתתר\"). I keep running and listening. NOT for quitting / shutting down / "
+                     "closing the app completely: that is quit_jarves.", hide, permission="action",
                      timeout_s=10),
             ]
 
-    return DisplaySkill()
+    class AppSkill(Skill):
+        # separate from "display" (its feature gate): quitting must work without a display / Godot
+        name = "app"
+        description = "Quit the JARVES app completely when the user asks"
+
+        def tools(self) -> list[Tool]:
+            async def quit_(_):
+                # SW-V3 P0.1 (real session 19 Oct): "שט דאון. תסגור" opened the dashboard and "לסגור את האפליקציה
+                # לגמרי" could only hide the window: there was no tool for the user's real request. The same
+                # orderly stop as Quit in the tray, a moment later so the goodbye sentence is still spoken.
+                logs.info("runtime", "QUIT_REQUESTED", "quit requested by voice", by="voice")
+                asyncio.get_running_loop().call_later(QUIT_DELAY_S, rt.core.stop_event.set)
+                return ToolResult(True, "אני נסגר עכשיו לגמרי ומפסיק להקשיב. כדי להפעיל אותי שוב, פתח את "
+                                  "ג'ארוויס במחשב.", {"stopping_in_s": QUIT_DELAY_S})
+
+            return [
+                Tool("quit_jarves", "Quit the JARVES app completely (the Core stops, the microphone closes, no more "
+                     "listening) when the user explicitly asks to quit, exit, shut down or close JARVES / the app "
+                     "entirely (\"תסגור את עצמך לגמרי\", \"לסגור את האפליקציה\", \"שט דאון\", \"צא\", \"quit\"). "
+                     "Never the computer itself. If the user only wants the window gone or the conversation to "
+                     "end, or it is unclear which, ask once first. Never open the dashboard instead.", quit_,
+                     permission="action", timeout_s=5),
+            ]
+
+    return DisplaySkill(), AppSkill()
 
 
 def attach(core, *, mode: str = "foreground", launcher=None, tray_factory=None, autostart=None) -> Runtime:
     """Called from Core.start once DevicePort exists (before the wake word is set up)."""
     rt = Runtime(core, mode=mode, launcher=launcher, tray_factory=tray_factory, autostart=autostart)
-    core.registry.allowed_actions |= {"show_yourself", "hide_yourself"}
-    core.registry.register(make_skill(rt))
+    core.registry.allowed_actions |= {"show_yourself", "hide_yourself", "quit_jarves"}
+    for skill in make_skill(rt):
+        core.registry.register(skill)
     core.features.listeners.append(lambda fid, on: _feature_changed(rt, fid, on))
     rt.start()
     sync_autostart(rt)

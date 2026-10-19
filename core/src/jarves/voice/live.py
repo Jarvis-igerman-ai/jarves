@@ -32,7 +32,9 @@ from typing import TYPE_CHECKING, Any, Awaitable, Callable
 
 from .. import logs
 from ..budget import BudgetExceeded
-from ..skills import SkillRegistry, ToolResult
+from ..skills import ROUTE, SkillRegistry, ToolResult
+
+VOICE_ROUTE = "voice"
 
 if TYPE_CHECKING:
     from ..budget import Budget
@@ -72,7 +74,9 @@ date questions directly.
 Delegate to the backend for: ANY calculation with a number above ten (it computes exactly; never do sums in your
 head, say only "רגע"), current or changing facts (news, weather, prices, sports, who holds an office now), web
 lookups, music control, remembering / recalling / forgetting things for the user, JARVES status and connected
-services, questions about your skills, and opening your dashboard on the screen.
+services, questions about your skills, opening your dashboard on the screen, showing or hiding your window,
+and quitting the JARVES app. Hiding the window, ending the chat and quitting the app completely are three
+different requests: "shut down" / "close yourself completely" means quit the app, never the dashboard.
 Before a web lookup say ONE short natural sentence that names what you are checking, worded differently each
 time ("רגע, אני בודק מה מזג האוויר בתל אביב", "שנייה, בוא נראה מה הכותרות היום"), then wait quietly.
 Actions (music, volume, memory, status): quick ones (volume, pause, next, remember, status) return in about a
@@ -179,7 +183,20 @@ PROGRESS_NOTE = ("The backend lookup is still running. Tell the user, in three o
 PROGRESS_NOTE_AGAIN = ("The lookup is taking longer than usual. In a few light, natural Hebrew words say it is "
                        "taking a bit longer (for example 'זה לוקח קצת יותר זמן'). Do not repeat your earlier words, "
                        "do not promise it is almost ready and do not guess the answer.")
-PROGRESS_AGAIN_S = 4.0     # a second note only after this much more silence
+PROGRESS_AGAIN_S = 6.0     # a second note only after this much more silence
+PROGRESS_AFTER_LEADIN_S = 4.0   # first note: silence needed when JARVES already said a lead-in for this lookup
+PROGRESS_LEADIN_WINDOW_S = 2.0  # speech this soon before the backend response started counts as its lead-in
+# Answer delivery (SW-V3 P0.1, review Q02, real session 19 Oct 17:15): the backend COMPLETED an Intel-news answer in
+# 4.9 s, but GPT-Live only spoke progress phrases ("עוד שנייה, כמעט שם", "רגע אני בודק...") and never the answer.
+# After a completed backend answer the Core checks that something substantive was said; if only fillers were,
+# it hands the answer to GPT-Live once (commentary) instead of leaving the user waiting forever.
+DELIVERY_WINDOW_S = 7.0         # time after the backend answer for GPT-Live to start saying it
+DELIVERY_MAX_WAIT_S = 20.0      # JARVES still talking at the window end: wait at most this long for quiet
+DELIVERY_NOTE = ("The backend answer below finished several seconds ago but has not been said yet. Give the user "
+                 "just this answer now, briefly, in natural Hebrew, without another acknowledgement, without "
+                 "excuses and without delegating again.\nResult: {answer}")
+_FILLER_STEMS = ("בודק", "בודקת", "מחפש", "מחפשת", "רגע", "שנייה", "שניה", "כמעט", "לוקח", "ממתין", "מתעכב", "checking",
+                 "moment", "second", "almost")
 PROGRESS_MIN_RESPONSE_S = 1.5   # the CURRENT backend response must have run this long (fast continuations: none)
 CONFIRM_NOTE_AFTER_S = 2.5      # an on-screen approval still unanswered after this long gets ONE spoken hint
 CONFIRM_NOTE = ("A tool is waiting for the user's approval on the screen and will NOT run without it. In a few "
@@ -204,6 +221,44 @@ def clock_note(now=None) -> str:
     now = now or datetime.now()
     return (f"[clock] Local time now {now:%H:%M}, יום {_HE_DAYS[now.weekday()]}, {now:%d.%m.%Y}. "
             "Silent context: mention it only when the user asks for the time or date.")
+
+
+def _join(prev: str, delta: str) -> str:
+    """Two responses spoken back to back reach one caption ("שנייה.רשמתי" in the 19 Oct logs):
+    put a space after the sentence end (never inside a decimal number like 3.5)."""
+    if (prev and delta and prev[-1] in ".!?" and not delta[0].isspace() and delta[0] not in ".!?,:;\"'”״)"
+            and not (prev[-1] == "." and len(prev) > 1 and prev[-2].isdigit() and delta[0].isdigit())):
+        return " " + delta
+    return delta
+
+
+def _words(text: str) -> set[str]:
+    import re
+    out = set()
+    for w in re.findall(r"[\w֐-׿]+", (text or "").lower()):
+        if len(w) >= 3:
+            out.add(w)
+            if len(w) >= 4 and w[0] in "והבלמשכ":       # Hebrew one-letter prefixes (ו/ה/ב/ל/מ/ש/כ)
+                out.add(w[1:])
+    return out
+
+
+def answer_said(answer: str, said: str) -> bool:
+    """Did the assistant speech after a backend answer actually carry an answer (not only "still checking")?
+    A sentence without filler words ("בודק", "רגע", "כמעט"...) of two or more words counts (GPT-Live rephrases:
+    digits become words, so no exact match is required). A filler sentence ("רגע אני בודק מה קורה במניית אינטל"
+    names the topic, not the result) counts only when it carries a number of the answer."""
+    import re
+    nums = set(re.findall(r"\d+", answer or ""))
+    for sentence in re.split(r"[.!?\n]+", said or ""):
+        w = _words(sentence)
+        if not w:
+            continue
+        if nums and nums & set(re.findall(r"\d+", sentence)):
+            return True
+        if not any(s in w for s in _FILLER_STEMS) and len(sentence.split()) >= 2:
+            return True
+    return False
 
 
 def _rms16(pcm: bytes) -> float:
@@ -498,6 +553,9 @@ class LiveVoice(SessionLifecycle):
         self._retry_task: asyncio.Task | None = None
         self._ticker: asyncio.Task | None = None
         self._shown: tuple[str, str] = ("", "")
+        self._said_all = ""             # every assistant word shown/spoken this session (answer-delivery check)
+        self._delegations = 0           # delegations created (a new one = the user moved on)
+        self._user_turn_n = 0           # user utterances started
 
     def session_config(self) -> dict:
         tools: list[dict] = live_tools(self.registry)
@@ -665,6 +723,7 @@ class LiveVoice(SessionLifecycle):
     async def _progress_later(self, delegation_id: str | None) -> None:
         """A lookup that keeps the user waiting in silence gets a short spoken "almost there" (commentary): the first
         after progress_after_s of waiting, a second (different wording) only after PROGRESS_AGAIN_S more silence."""
+        t_start = time.monotonic()
         await asyncio.sleep(self.progress_after_s)
         deadline = time.monotonic() + 25
         notes, need = (PROGRESS_NOTE, PROGRESS_NOTE_AGAIN), PROGRESS_SILENCE_S
@@ -672,6 +731,12 @@ class LiveVoice(SessionLifecycle):
         while self.running and self._backend_busy and time.monotonic() < deadline and sent < len(notes):
             if self.progress_after_s <= 0:          # switched off (rejected by the server)
                 return
+            if sent == 0:
+                # SW-V3 P0.1 (real session 19 Oct, 3 of 3 web lookups): the spoken lead-in ("בודק שוב.") was followed
+                # 0.8 s later by "עדיין בודק." and then "זה לוקח קצת יותר זמן." before an 8 s answer. A lead-in
+                # already told the user; the first note then needs a longer real silence.
+                spoke = self._last_speech_t >= t_start - PROGRESS_LEADIN_WINDOW_S
+                need = PROGRESS_AFTER_LEADIN_S if spoke else PROGRESS_SILENCE_S
             # QA 19 Oct (suite_voice): a note requested 50 ms before a fast continuation finished was spoken INSTEAD
             # of the answer ("almost ready", then nothing). Only a response that has itself run a while gets one,
             # and never while the user is being asked to approve something on the screen.
@@ -890,12 +955,18 @@ class LiveVoice(SessionLifecycle):
             self._play(pcm)
             if audible and self._held_text:         # the held words are being spoken now: show them
                 self._out_text += self._held_text
+                self._said_all += self._held_text
                 self._held_text = ""
                 await self._emote("jarves", self._out_text[-80:])
         elif t == "session.input_transcript.delta":
             self.note_activity()
             self._heard_user = True
             now = time.monotonic()
+            if not self._in_text:
+                # SW-V3 P0.1 (review): the new user turn starts at its FIRST transcript delta. Waiting for the
+                # flush let "louder" after a mail read reach its tool call first and be refused as untrusted.
+                self._new_turn()
+                self._user_turn_n += 1
             if (not self._in_text and not self._gated() and now < self._speaking_until
                     and now - self._turn_audio_t0 >= BARGE_IN_MIN_S):
                 await self.interrupt()          # new user utterance over still-queued assistant speech
@@ -921,12 +992,15 @@ class LiveVoice(SessionLifecycle):
                 self._held_text += g("delta") or ""
                 self._schedule_flush()
                 return
-            self._out_text += g("delta") or ""
+            d = _join(self._out_text, g("delta") or "")
+            self._out_text += d
+            self._said_all += d
             await self._emote("jarves", self._out_text[-80:])
             self._schedule_flush()
         elif t == "session.delegation.created":
             logs.info("live", "LIVE_DELEGATION", "GPT-Live delegated work", target=str(_get(g("delegation"), "target")),
                       delegation=str(_get(g("delegation"), "id") or ""))
+            self._delegations += 1
             if self.budget is not None and _get(g("delegation"), "target") == "responses":
                 await self._take_credit("delegation")
         elif t == "response.event":
@@ -1087,8 +1161,12 @@ class LiveVoice(SessionLifecycle):
 
     def _remember_user(self, text: str) -> None:
         self._user_turns = (self._user_turns + [text.strip()])[-3:]
+        self._new_turn()
+
+    def _new_turn(self) -> None:
         if hasattr(self.registry, "new_turn"):
-            self.registry.new_turn()       # WP-G: the user spoke again -> side effects allowed after mail/calendar text
+            # WP-G: the user spoke again -> side effects allowed after mail/calendar text (this conversation only)
+            self.registry.new_turn(VOICE_ROUTE)
 
     async def _show(self, kind: str, text: str) -> None:
         """Backend stage on the screen; the elapsed-time ticker refreshes its detail line."""
@@ -1240,6 +1318,10 @@ class LiveVoice(SessionLifecycle):
             # One delegated backend response finished (billed whether or not it succeeded) -> count it.
             self._stats["backend_responses"] += 1
             self._backend_t0 = None
+            answer = (getattr(tr, "text", "") or "").strip() if tr is not None else ""
+            if it == "response.completed" and answer and getattr(tr, "stage", "") != "tool":
+                self._spawn(self._watch_delivery(answer, (len(self._said_all), self._delegations, self._user_turn_n)),
+                            "delivery-watch")
             self._trace = None
             self._spawn(self._clear_activity_later(), "activity-clear")
             self._settle_one()
@@ -1274,6 +1356,25 @@ class LiveVoice(SessionLifecycle):
         elif it == "error":
             await self._on_error(inner.get("error") or inner, True)
 
+    async def _watch_delivery(self, answer: str, mark: tuple[int, int, int]) -> None:
+        """After a completed backend answer: if GPT-Live said only fillers (or nothing) within DELIVERY_WINDOW_S, and
+        the user did not move on (no new utterance or delegation), hand it the answer once."""
+        start, deleg, turns = mark            # taken when the answer completed (this task starts later)
+        await asyncio.sleep(DELIVERY_WINDOW_S)
+        t_end = time.monotonic() + DELIVERY_MAX_WAIT_S
+        while self.running and time.monotonic() < t_end and (
+                time.monotonic() < self._speaking_until + 0.5 or self._tools_running or self._backend_busy):
+            await asyncio.sleep(0.25)
+        if not self.running or self._delegations != deleg or self._user_turn_n != turns:
+            return
+        said = self._said_all[start:]
+        if answer_said(answer, said):
+            return
+        self._stats["undelivered_answers"] = self._stats.get("undelivered_answers", 0) + 1
+        logs.warn("live", "LIVE_ANSWER_UNDELIVERED", "the backend answer was not said; handing it to GPT-Live again",
+                  window_s=DELIVERY_WINDOW_S, said_chars=len(said.strip()), answer_chars=len(answer))
+        await self.announce(DELIVERY_NOTE.format(answer=answer[:600]), max_wait_s=15.0, tag="delivery")
+
     def _settle_one(self) -> None:
         """A delegated backend response finished: commit its reservation (FIFO)."""
         if self.budget is not None and not self._budget_settled:
@@ -1284,6 +1385,7 @@ class LiveVoice(SessionLifecycle):
                 self.budget.record("ai_requests", 1)
 
     async def _run_tool(self, name: str, call_id: str, arguments: str, state: dict) -> None:
+        ROUTE.set(VOICE_ROUTE)                  # own task: the untrusted-content taint is this conversation's
         await self._tool_activity(name, None)
         res = await self.registry.call(name, arguments)
         await self._tool_activity(name, res)
