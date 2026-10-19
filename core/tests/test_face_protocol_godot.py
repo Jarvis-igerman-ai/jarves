@@ -118,3 +118,38 @@ async def test_face_survives_every_protocol_message(tmp_path):
     bad = [l for l in out.splitlines() if "SCRIPT ERROR" in l or "Parse Error" in l or l.startswith("ERROR:")]
     assert len(sent) == len(messages())
     assert not bad, "the face logged script errors:\n" + "\n".join(bad[:12])
+
+
+async def test_face_closes_itself_on_display_close(tmp_path):
+    """SW-V2 M1 "hide yourself": the Core sends display.close; the real face says desktop.close and exits by itself
+    (exit code 0, not killed), so the Core never has to terminate it."""
+    port = free_port()
+    (tmp_path / "link_token").write_text("t" * 24, encoding="utf-8")
+    got = []
+
+    async def core(ws):
+        await ws.recv()
+        await ws.send(json.dumps({"type": "hello.ok", "payload": {"protocol": 1}}))
+        await asyncio.sleep(1.0)
+        await ws.send(json.dumps({"type": "display.close", "payload": {"reason": "hide"}}))
+        try:
+            while True:
+                m = json.loads(await asyncio.wait_for(ws.recv(), 10))
+                got.append(m["type"])
+                if m["type"] == "desktop.close":
+                    await ws.send(json.dumps({"type": "desktop.closed", "payload": {}}))
+        except Exception:
+            pass
+
+    env = {**os.environ, "JARVES_HOME": str(tmp_path)}
+    async with serve(core, "127.0.0.1", port):
+        proc = await asyncio.create_subprocess_exec(
+            GODOT, "--headless", "--path", str(GODOT_DIR), "res://face/face_app.tscn", "--", f"--core-port={port}",
+            stdout=asyncio.subprocess.DEVNULL, stderr=asyncio.subprocess.DEVNULL, env=env)
+        try:
+            rc = await asyncio.wait_for(proc.wait(), 60)
+        finally:
+            if proc.returncode is None:
+                proc.terminate()
+                await proc.wait()
+    assert "desktop.close" in got and rc == 0

@@ -220,8 +220,15 @@ def _google(scope: str, *skill_names: str) -> Probe:
     installed = _skill_installed(*skill_names)
 
     def probe(c: ProbeCtx) -> tuple[bool, str]:
-        if c.home is None or not any((c.home / n).is_file() for n in ("google_token.json", "google_oauth.json")):
-            return False, f"Google account not connected ({scope})"
+        # WP-K: the token lives in <home>/google/token.json (google_auth); the reason tells him what to SAY
+        from .google_auth import START_COMMAND, GoogleAuth
+        st = GoogleAuth(c.home).status() if c.home is not None else {"connected": False, "needs_reconnect": False}
+        if st["needs_reconnect"]:
+            return False, (f"Google connection expired ({scope}); tell the user: \"צריך לחבר מחדש את גוגל: תריץ "
+                           f"במחשב {START_COMMAND}\"")
+        if not st["connected"]:
+            return False, (f"Google account not connected ({scope}); tell the user: \"תריץ במחשב {START_COMMAND}, "
+                           f"ואני אדריך אותך\"")
         return installed(c)
     return probe
 

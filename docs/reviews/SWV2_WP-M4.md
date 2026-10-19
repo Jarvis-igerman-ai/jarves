@@ -124,7 +124,7 @@ Automatic headless Edge captures, not a hands-on check (`core/tools/m4_dashboard
 
 - New tests: `test_capabilities.py`, `test_calendar_write.py`, `test_identity.py`, `test_wake_train.py`, `test_dashboard_lan.py`.
 - Changed: `test_security.py` renames its sample tool `wipe_calendar` to `wipe_notes`, because the new guardrail now refuses calendar-delete tools.
-- Full suite: see the final report (`python -m pytest tests -q`, run from `core/` with the main venv and `PYTHONPATH=src`).
+- Full suite after merging swv2-integrate (61a3b0e): **862 passed, 3 skipped** (`python -m pytest tests -q`, run from `core/` with the main venv and `PYTHONPATH=src`).
 
 ## Integration hooks (files owned by others; smallest changes)
 
