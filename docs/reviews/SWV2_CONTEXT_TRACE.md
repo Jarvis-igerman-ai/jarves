@@ -53,7 +53,8 @@ roadmap issue #18.
 - `dashboard.py`: `"jarves.context_trace"` added to `PLUGIN_MODULES`.
 - `privacy.py`: `context_trace.mask_all(st._db)` in `mask_history`, `context_trace.delete_all(st._db)` in
   `delete_conversations`.
-- `dashboard_static/index.html`: `context.css` + `context.js` (after guides.js).
+- `dashboard_static/index.html`: `context.css` + `context.js` (after setup.js).
+- `setup_wizard.py`: `context_trace` in the "dashboard" group and in `BUNDLE`.
 - No edit to `voice/live.py` or `brain.py`: the trace wraps `live.session_config`, `live._run_tool`, `live.on_end`
   and taps `conn.session.thinking/commentary.append` + `conn.response.item.create` on the instance. This relies on
   `LiveVoice.start()` opening the connection BEFORE it calls `session_config()` (true today); if that order changes,
@@ -65,7 +66,7 @@ roadmap issue #18.
   clock / task / tool-result / workspace / end events, diff), secrets + e-mails never in store.db (file bytes
   scanned), privacy mode (no text anywhere, names kept), retention, privacy actions, typed chat, switch off /
   history off, HTTP routes over real HTTP, uncaptured sessions, lossless block split.
-- Full suite: 1025 passed, 3 skipped (before the final merge; re-run after it, see the report).
+- Full suite after the final `swv2-integrate` merge: 1090 passed, 3 skipped.
 - Real silent GPT-Live run (`tools/silent_live.py --turns 6,7`, virtual audio, ~0.6 min, about $0.03): the
   conversation's context was captured and linked to its transcript: 17 blocks, ~12.4k estimated tokens at the
   start, of which the backend tool definitions are ~6.6k; 59 tools offered, 7 left out (camera switched off).
