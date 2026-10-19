@@ -18,6 +18,10 @@ for %%M in (face avatar2d avatar3d) do (
   call :shot %%M_offline "--appearance=%%M" "--state=idle" "--link=offline"
   call :shot %%M_laugh "--appearance=%%M" "--state=idle" "--link=live" "--emotion=laugh"
   call :shot %%M_searching "--appearance=%%M" "--state=thinking" "--link=live" "--activity=searching"
+  call :shot %%M_cry "--appearance=%%M" "--state=idle" "--link=live" "--emotion=cry"
+  call :shot %%M_sad "--appearance=%%M" "--state=idle" "--link=live" "--emotion=sad"
+  call :shot %%M_surprised "--appearance=%%M" "--state=idle" "--link=live" "--emotion=surprised"
+  call :shot %%M_love "--appearance=%%M" "--state=idle" "--link=live" "--emotion=love"
 )
 call :shot hidden "--appearance=hidden" "--state=idle" "--link=ready"
 set "MISSING=0"
