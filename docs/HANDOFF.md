@@ -13,6 +13,10 @@ Merged so far (436 tests pass): WP-A conversation quality, WP-B store/cost/dashb
 - Typed-chat background tasks in combined mode: use the ChatGPT plan.
 - Tiny "שניה…" lead-in acceptable; task result waits up to 5 min for a quiet moment.
 
+- Self-diagnosis: add the model pass, ON by default (budgeted).
+- Dashboard: opened on request by `jarvis` AND a face button; edit workspace files + delete learned facts, with undo.
+- Merge: PR from `swv2-integrate` -> main after green CI + independent agent review.
+
 ### Questions for the user
 - Listen to the warmer persona/greeting wording and the new voices (no GPT-Live voice is documented for Hebrew).
 ## Overnight batch 18–19 Oct: real conversation fixes, calm face, silent testing
