@@ -27,6 +27,8 @@ Merged so far (436 tests pass): WP-A conversation quality, WP-B store/cost/dashb
 
 - Feature suggestions (docs/plans/FEATURE_SUGGESTIONS.md): owner is reading the list; build nothing from it until they choose. Already said: YES to an outbound-only Telegram channel; owner HAS Home Assistant (need URL/version/devices when starting #7); rocket alerts (#21) wait for their reading. Avatars: 2D good but improvable, 3D "creepy" -> WP-N restyle running.
 
+- Late 19 Oct answers: phone dashboard stays HTTP for now (HTTPS before the robot is in the house); owner will record ~20 wake-phrase samples later; 3D avatar = cute robot (kept); 2D keeps iris eyes; installer: camera included, build only on main merges/packaging changes, unsigned for now, releases hosted on Cloudflare R2 (wrangler login done; bucket + public access + 5 GitHub secrets pending, agent WP-O building CI upload). Still open/in progress: WP-L (guides + self-aware help), WP-O (R2 hosting), full-suite re-run after disk was freed (C: was full -> 16 spurious failures), independent code review, CI, PR to main, long music/voice scenarios on fresh Pear, tray first-close notice, weekday setting, music_restart_player, Issue #16 stays open until review.
+
 ### Questions for the user
 - Listen to the warmer persona/greeting wording and the new voices (no GPT-Live voice is documented for Hebrew).
 ## Overnight batch 18–19 Oct: real conversation fixes, calm face, silent testing
