@@ -32,12 +32,32 @@ def sanitize(text: str) -> str:
     return _EMAIL.sub("<email>", logs.redact(text))
 
 
+_TOKEN_LIKE = re.compile(r"^[A-Za-z0-9_.:+\-]{0,64}$")      # codes, states, model ids, numbers, ISO times
+
+
+def _strict(v, depth: int = 0):
+    """Issue #15: free-form text (the "msg" sentence, provider error messages, nested payloads) is never shared.
+    Only identifier-like strings survive; everything else becomes its length. Numbers and booleans stay."""
+    if depth > 8:
+        return "<nested>"
+    if isinstance(v, dict):
+        return {str(k): _strict(x, depth + 1) for k, x in v.items()}
+    if isinstance(v, list):
+        return [_strict(x, depth + 1) for x in v]
+    if isinstance(v, str):
+        return v if _TOKEN_LIKE.match(v) else f"<{len(v)} chars>"
+    return v
+
+
 def private_line(line: str) -> str:
-    """One log line for sharing: content masked even if written with privacy off; credentials always."""
+    """One log line for sharing: structured fields only (code, level, component, timings, ids); every sentence,
+    whatever its field, is reduced to its length, even if the log was written with privacy off. A line that is not
+    JSON is dropped to its length too (no guessing which words are private)."""
     try:
-        return sanitize(json.dumps(logs.scrub(json.loads(line), private=True), ensure_ascii=False))
+        d = json.loads(line)
     except ValueError:
-        return sanitize(line)
+        return json.dumps({"unparsed": f"<{len(line)} chars>"})
+    return sanitize(json.dumps(_strict(logs.scrub(d, private=True)), ensure_ascii=False))
 
 
 def _dump(obj) -> str:

@@ -208,11 +208,9 @@ def _git_rev() -> str:
 
 
 def _private_line(line: str) -> str:
-    """Support bundles are for sharing: mask personal content even if the log was written with privacy off."""
-    try:
-        return json.dumps(logs.scrub(json.loads(line), private=True), ensure_ascii=False)
-    except ValueError:
-        return logs.redact(line)
+    """Support bundles are for sharing (old name; the rule lives in diagbundle.private_line, issue #15)."""
+    from .diagbundle import private_line
+    return private_line(line)
 
 
 def cmd_diag(a, cfg, home) -> int:

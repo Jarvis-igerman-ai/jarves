@@ -68,7 +68,7 @@
         el("tbody", {}, d.meters.filter((m) => m.provider === g).map((m) => el("tr", {},
           el("td", {}, el("b", {}, m.title), el("div", { class: "muted small" }, `${m.metric} (${m.unit})`),
             m.state === "limit_reached" ? pill("fail", "limit reached") : null, m.state === "stale" ? pill("medium", "stale") : null),
-          el("td", { class: "num" }, `${m.used_text} / ${m.limit_text}`, el("div", { class: "small" }, m.percent_text),
+          el("td", { class: "num" }, `${m.used_text} / ${m.limit_text}`, m.limit !== null ? el("div", { class: "small" }, m.percent_text) : null,
             m.limit_source ? el("div", { class: "muted small" }, "limit: " + m.limit_source) : null),
           el("td", {}, bar(m)),
           el("td", { class: "small" }, m.window_text, el("div", { class: "muted" }, "reset: " + m.reset_text)),
