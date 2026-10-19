@@ -131,6 +131,29 @@ def test_one_way_actions_need_confirmation_mask_and_delete(env, home):
     assert h["last_conversation"] is None and h["today"]["cost"] > 0
 
 
+def test_privacy_purges_the_undo_journal_and_offers_backup_pruning(env, home):
+    """Reviewer item 10: deleted / masked text must not survive in the store.db `memory_undo` journal, and the
+    user is told that older backups still hold it and can prune them (confirmed)."""
+    d, sink = env
+    typed("הסוד שלי הוא 1234", "שמרתי")
+    flush(sink)
+    # the memory edit/forget undo journal holds removed fact text verbatim
+    with sink.store._lock:
+        sink.store._set_meta("memory_undo", json.dumps([{"op": "delete", "rows": [{"id": 1, "text": "הסוד שלי"}]}]))
+        sink.store.commit()
+    assert sink.store.meta("memory_undo") is not None
+    # a backup taken before the purge still contains the data
+    (home / "backups").mkdir(exist_ok=True)
+    (home / "backups" / "jarves-backup-20260101-000000-manual.zip").write_bytes(b"PK\x03\x04 old data")
+    st, r = send(d, "POST", "/api/privacy/mask-history", {"confirm": True})
+    assert st == 200 and r["backups_with_old_data"] == 1 and r["backups_removed"] == 0 and r["backups_hint"]
+    assert sink.store.meta("memory_undo") is None                      # the journal is gone
+    # ask again, this time pruning the backups
+    st, r = send(d, "POST", "/api/privacy/delete-conversations", {"confirm": True, "prune_backups": True})
+    assert st == 200 and r["backups_removed"] == 1
+    assert not list((home / "backups").glob("*.zip"))
+
+
 def test_masking_rewrites_a_log_file_the_core_holds_open(home):
     (home / "logs").mkdir()
     p = home / "logs" / "jarves.log"
