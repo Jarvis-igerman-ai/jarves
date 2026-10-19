@@ -10,6 +10,7 @@ dependencies = [
     "httpx>=0.27",
     "pyjwt[crypto]>=2.10",           # Sign in with ChatGPT: verify the OpenAI ID token (RS256, JWKS)
     "numpy>=2",
+    "tzdata>=2025.2",                # IANA time zones for zoneinfo (Windows has none built in): scheduler DST
 ]
 
 [project.optional-dependencies]

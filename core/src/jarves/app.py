@@ -172,6 +172,8 @@ class Core:
         if self.tasks is not None:
             self.registry.allowed_actions |= {"task_start", "task_cancel"}
             self.registry.register(TaskSkill(self.tasks))
+        from .operations import attach as ops_attach    # WP-M3: scheduler, reports, notes, files, alerts, autonomy
+        self.ops = ops_attach(self)
         self._write_tools_md()                          # after every Skill is registered
         self._retry_lookup = make_retry_lookup(c, self.budget)
         self._check_ai()
@@ -260,6 +262,8 @@ class Core:
         await asyncio.gather(*tasks, return_exceptions=True)
         if getattr(self, "tasks", None) is not None:
             await self.tasks.shutdown()             # running background tasks end as "cancelled" (stored)
+        if getattr(self, "ops", None) is not None:
+            await self.ops.stop()                   # running jobs stop; the next start resumes or marks them
         await self.registry.drain()                 # shielded side effects finish before the store closes
         if getattr(self, "camera", None) is not None:
             await self.camera.stop()                # sensor closed, indicator off, faces.db closed

@@ -40,7 +40,8 @@ COOKIE = "jarves_dash"
 _EMAIL = re.compile(r"[\w.+-]+@[\w-]+\.[\w.-]+")
 _ROUTES: list[tuple[str, re.Pattern, object]] = []
 PLUGIN_MODULES = ("jarves.workspace", "jarves.curator", "jarves.memory", "jarves.features", "jarves.google_auth",
-                  "jarves.usage", "jarves.backup", "jarves.appearance", "jarves.skills.generated")
+                  "jarves.usage", "jarves.backup", "jarves.appearance", "jarves.skills.generated",
+                  "jarves.operations")
 MEMORY_UNDO_KEEP = 30
 
 
@@ -108,6 +109,8 @@ class Ctx:
         self.store.close()
         if self._own_memory and self._memory is not None:
             self._memory.close()
+        if getattr(self, "_userdata", None) is not None:     # WP-M3 plugin connection (userdata.ctx_db)
+            self._userdata.close()
 
 
 # ---------------------------------------------------------------------- conversations
