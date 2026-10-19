@@ -54,7 +54,10 @@ def test_backend_trace_logs_every_stage_and_maps_screen_activity(caplog):
     assert tr.reasoning and tr.text == "מניית אינטל עלתה היום." and tr.status == "completed"
     text = codes(caplog)
     done = next(r for r in caplog.records if getattr(r, "code", "") == "LIVE_BACKEND_DONE")
-    assert done.fields["input_tokens"] == 120 and done.fields["searches"] == 1 and "backend_s" in done.fields
+    assert done.fields["usage_in"] == 120 and done.fields["usage_reasoning"] == 8 and done.fields["searches"] == 1
+    assert "backend_s" in done.fields
+    from jarves import logs
+    assert logs.scrub(done.fields)["usage_out"] == 30                 # not masked like a credential
     for code in ("LIVE_BACKEND_START", "LIVE_BACKEND_WEB_SEARCH", "LIVE_BACKEND_WEB_SEARCH_DONE",
                  "LIVE_BACKEND_READING", "LIVE_BACKEND_REASONING", "LIVE_BACKEND_WRITING", "LIVE_BACKEND_DONE"):
         assert code in text, code
@@ -194,9 +197,31 @@ async def test_announce_waits_until_the_user_is_quiet():
     t = asyncio.create_task(lv.announce("[task] result", tag="abc"))
     await asyncio.sleep(0.5)
     assert not sent.items
-    ok = await asyncio.wait_for(t, 3)
-    assert ok and sent.items[-1][1] == "[task] result" and sent.items[-1][3] == "jarves_task_abc"
+    ok = await asyncio.wait_for(t, 5)
+    assert ok and sent.items[-1][1] == "[task] result" and sent.items[-1][3] == "jarves_task_abc_1"
     await _cleanup(lv)
+
+
+async def test_announcement_rejected_as_too_long_is_resent_shorter():
+    """Real GPT-Live run 19 Oct: 'Context append text must not exceed 500 tokens' -> the result was never spoken."""
+    lv, sent, _ = make_live()
+    long_note = "[task] instructions first.\nResult: " + "א" * 1500
+    t = asyncio.create_task(lv.announce(long_note, tag="t1"))
+    while not sent.items:
+        await asyncio.sleep(0.02)
+    assert len(sent.items[0][1]) == live_mod.NOTE_MAX_CHARS
+    await lv.handle_event({"type": "error", "error": {"code": "invalid_value", "client_event_id": sent.items[0][3],
+                                                      "message": "Context append text must not exceed 500 tokens."}})
+    assert await asyncio.wait_for(t, 5) is True
+    assert len(sent.items) == 2 and sent.items[1][1].startswith("[task] instructions first.")
+    assert len(sent.items[1][1]) == live_mod.NOTE_MAX_CHARS // 2
+    await _cleanup(lv)
+
+
+def test_announcement_fits_the_commentary_limit():
+    from jarves.tasks import Task
+    note = announcement(Task("a", "x" * 500, status="done", result="ב" * 3000))
+    assert len(note) < live_mod.NOTE_MAX_CHARS and note.index("Result:") > note.index("Do not delegate")
 
 
 async def test_announce_gives_up_when_the_session_ends():

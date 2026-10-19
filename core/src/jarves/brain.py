@@ -103,6 +103,12 @@ def _d(obj: Any) -> dict:
     return dump() if callable(dump) else {}
 
 
+def usage_fields(u: dict) -> dict:
+    """Token usage as LOG fields: names containing "token" are masked as credentials by logs.scrub."""
+    return {"usage_in": u.get("input_tokens", 0), "usage_out": u.get("output_tokens", 0),
+            **({"usage_reasoning": u["reasoning_tokens"]} if "reasoning_tokens" in u else {})}
+
+
 def short(text: str, n: int = 48) -> str:
     text = " ".join(str(text or "").split())
     return text if len(text) <= n else text[: n - 1] + "…"
@@ -232,8 +238,8 @@ class BackendTrace:
         if self.quiet:
             return
         level(self.area, f"{self.prefix}_DONE", f"backend response {status}", backend_s=self.elapsed(),
-              **{"searches": len(self.queries), "sources": self.sources, "pages": self.pages, **self.usage,
-                 **self.ids, **extra})
+              **{"searches": len(self.queries), "sources": self.sources, "pages": self.pages,
+                 **usage_fields(self.usage), **self.ids, **extra})
 
 
 # ------------------------------------------------------------------ billing truth (CR-04)
@@ -415,7 +421,7 @@ class AgentBrain:
             for k in tokens:
                 tokens[k] += int(getattr(u, k, 0) or 0)
         logs.info("ai", "AI_REPLY", "agent replied", model_calls=len(raw), used_today=self.budget.used("ai_requests"),
-                  duration_s=round(time.monotonic() - t0, 2), **tokens)
+                  duration_s=round(time.monotonic() - t0, 2), **usage_fields(tokens))
         return str(res.final_output or "").strip()
 
 

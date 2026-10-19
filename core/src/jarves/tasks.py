@@ -28,7 +28,7 @@ from typing import Any, Awaitable, Callable
 from pydantic import BaseModel, Field
 
 from . import logs
-from .brain import BackendTrace, _d, short, speakable
+from .brain import BackendTrace, _d, short, speakable, usage_fields
 from .budget import BudgetExceeded
 from .skills import Skill, Tool, ToolResult
 
@@ -44,7 +44,8 @@ LOOKUP_INSTRUCTIONS = """Answer the user's question for {name}, a home robot tha
 current facts, then reply in one or two short natural spoken Hebrew sentences, no markdown, no URLs, no "let me
 check". If you cannot find it, say so in one sentence."""
 
-STORE_MAX_BYTES = 1_000_000       # tasks.jsonl is trimmed to its newest STORE_KEEP lines beyond this
+ANNOUNCE_RESULT_CHARS = 600       # Hebrew is ~2-3 characters per token; the whole note must stay under 500 tokens
+STORE_MAX_BYTES = 1_000_000      # tasks.jsonl is trimmed to its newest STORE_KEEP lines beyond this
 STORE_KEEP = 500
 ACTIVE = ("queued", "running")
 FINISHED = ("done", "failed", "timeout", "cancelled")
@@ -239,13 +240,16 @@ class TaskRefused(Exception):
 
 def announcement(task: Task) -> str:
     """Commentary for GPT-Live (voice/live.py announce): it words the result naturally."""
+    # Instructions FIRST, the result LAST: commentary is limited to 500 tokens (real GPT-Live run 19 Oct rejected
+    # a 1200-character Hebrew result), and live.announce() shortens a rejected note from the end.
     if task.status == "done":
-        return (f"[task] A background task the user asked for has finished. Task: {short(task.description, 200)}\n"
-                f"Result: {task.result[:1200]}\nAt this natural pause tell the user, in one to three short natural "
-                "Hebrew sentences, that the background check is ready and give the result. Do not delegate it "
-                "again and do not search again.")
-    return (f"[task] The background task \"{short(task.description, 200)}\" could not be finished ({task.error or task.status}). "
-            "Tell the user briefly and honestly in Hebrew, and ask whether to try again. Do not delegate now.")
+        return ("[task] A background task the user asked for has finished. At this natural pause tell the user, in "
+                "one to three short natural Hebrew sentences, that the background check is ready and give the "
+                "result. Do not delegate it again and do not search again.\n"
+                f"Task: {short(task.description, 120)}\nResult: {task.result[:ANNOUNCE_RESULT_CHARS]}")
+    return ("[task] A background task could not be finished. Tell the user briefly and honestly in Hebrew, and ask "
+            f"whether to try again. Do not delegate now.\nTask: {short(task.description, 120)} "
+            f"({task.error or task.status})")
 
 
 class TaskManager:
@@ -368,7 +372,7 @@ class TaskManager:
             self._jobs.pop(task.id, None)
         level = logs.info if task.status == "done" else logs.warn
         level("tasks", f"TASK_{task.status.upper()}", f"background task {task.status}", task=task.id,
-              duration_s=task.elapsed(), attempts=task.attempts, error=task.error, **task.usage)
+              duration_s=task.elapsed(), attempts=task.attempts, error=task.error, **usage_fields(task.usage))
         self._persist(task)
         self._emit()
         if task.status != "cancelled" and self.on_finished is not None and not self._closed:

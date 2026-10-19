@@ -159,8 +159,9 @@ CONFIRM_NOTE = ("A tool is waiting for the user's approval on the screen and wil
 # outcome. Honest failure wording is fixed by the user's request.
 STALL_FAIL_NOTE = ("The backend lookup failed: it got no result in time. Tell the user honestly, in exactly these "
                    "words: 'לא הצלחתי להביא את זה, ננסה שוב?'. Do not say 'one more moment' and do not guess.")
-STALL_RESULT_NOTE = ("The backend lookup finished. Result: {answer}\nGive the user just this answer now, briefly, in "
-                     "natural Hebrew, without another acknowledgement and without delegating again.")
+STALL_RESULT_NOTE = ("The backend lookup finished. Give the user just this answer now, briefly, in natural Hebrew, "
+                     "without another acknowledgement and without delegating again.\nResult: {answer}")
+NOTE_MAX_CHARS = 1000           # commentary is limited to 500 tokens; Hebrew is ~2-3 characters per token
 RETRY_DEADLINE_S = 25.0         # the Core's own retry of a stalled lookup
 ANNOUNCE_USER_QUIET_S = 1.5     # a background-task announcement waits until the user has been quiet this long
 
@@ -855,6 +856,7 @@ class LiveVoice(SessionLifecycle):
                 # optional extras: clock/progress are switched off; stall/task notes are only logged; stay healthy
                 code, msg, _ = error_info(g("error"))
                 logs.warn("live", "LIVE_EXTRA_REJECTED", f"{cid.split('_')[1]} context rejected ({code}): {msg}")
+                self._rejected = (getattr(self, "_rejected", set()) | {cid})
                 if cid.startswith("jarves_clock"):
                     self.clock_context = False
                 elif cid.startswith("jarves_progress"):
@@ -1050,14 +1052,10 @@ class LiveVoice(SessionLifecycle):
                           retry_s=round(time.monotonic() - t0, 1), detail=str(e)[:120])
             finally:
                 self._tools_running = max(0, self._tools_running - 1)
-        content = STALL_RESULT_NOTE.format(answer=answer[:1200]) if answer else STALL_FAIL_NOTE
+        content = STALL_RESULT_NOTE.format(answer=answer[:600]) if answer else STALL_FAIL_NOTE
         self._stats["stall_answers" if answer else "stall_failures"] = self._stats.get(
             "stall_answers" if answer else "stall_failures", 0) + 1
-        try:
-            await self.conn.session.commentary.append(content=content, delegation_id=None,
-                                                      event_id=f"jarves_stall_{self._stats['backend_stalls']}")
-        except Exception as e:
-            logs.warn("live", "LIVE_PROGRESS_FAILED", f"stall outcome not sent: {type(e).__name__}")
+        await self._send_note(content, str(self._stats["backend_stalls"]), prefix="jarves_stall")
         await self._activity("done")
 
     async def announce(self, content: str, *, max_wait_s: float = 300.0, tag: str = "") -> bool:
@@ -1072,17 +1070,32 @@ class LiveVoice(SessionLifecycle):
                     or now - self._last_user_voice < ANNOUNCE_USER_QUIET_S or now < self._speaking_until + 0.8
                     or (audio is not None and audio.queued_s() > 0))
             if not busy:
-                n = self._stats["announcements"] = self._stats.get("announcements", 0) + 1
-                try:
-                    await self.conn.session.commentary.append(content=content[:2000], delegation_id=None,
-                                                              event_id=f"jarves_task_{tag or n}")
-                except Exception as e:
-                    logs.warn("live", "LIVE_ANNOUNCE_FAILED", f"announcement not sent: {type(e).__name__}")
-                    return False
-                logs.info("live", "LIVE_ANNOUNCE", "background task result handed to GPT-Live", task=tag)
+                return await self._send_note(content, tag)
+            await asyncio.sleep(0.25)
+        return False
+
+    async def _send_note(self, content: str, tag: str, prefix: str = "jarves_task") -> bool:
+        """Commentary that must arrive: the server validates it AFTER the send (error with our event id, e.g. "must
+        not exceed 500 tokens"), so wait briefly for a rejection and resend once shortened (notes put their
+        instructions first and the result last, so the cut only shortens the result)."""
+        content = content[:NOTE_MAX_CHARS]
+        for attempt in (1, 2):
+            n = self._stats["announcements"] = self._stats.get("announcements", 0) + 1
+            eid = f"{prefix}_{tag or 'x'}_{n}"
+            try:
+                await self.conn.session.commentary.append(content=content, delegation_id=None, event_id=eid)
+            except Exception as e:
+                logs.warn("live", "LIVE_ANNOUNCE_FAILED", f"announcement not sent: {type(e).__name__}")
+                return False
+            t0 = time.monotonic()
+            while time.monotonic() - t0 < 1.5 and eid not in getattr(self, "_rejected", set()) and self.running:
+                await asyncio.sleep(0.1)
+            if eid not in getattr(self, "_rejected", set()):
+                logs.info("live", "LIVE_ANNOUNCE" if prefix == "jarves_task" else "LIVE_NOTE",
+                          "note handed to GPT-Live", task=tag, chars=len(content))
                 self.note_activity()
                 return True
-            await asyncio.sleep(0.25)
+            content = content[: len(content) // 2]
         return False
 
     async def _backend_event(self, inner: dict, delegation_id: str | None) -> None:
