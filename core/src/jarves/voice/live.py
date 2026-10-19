@@ -733,6 +733,7 @@ class LiveVoice(SessionLifecycle):
             self._speech_in_s += dur
             if now > self._speaking_until:
                 self._turn_audio_t0 = now
+                self._note_reply_wait(now)
             self._speaking_until = max(self._speaking_until, now) + dur
             self._last_speech_t = now
             if self.audio_io is not None:
@@ -744,6 +745,17 @@ class LiveVoice(SessionLifecycle):
         self._silence_rms_max = max(self._silence_rms_max, _rms16(pcm))
         if self.audio_io is not None and now - self._last_speech_t < PAUSE_KEEP_S:
             self.audio_io.enqueue(pcm)             # a natural pause inside the sentence: keep its length
+
+    def _note_reply_wait(self, now: float) -> None:
+        """History/diagnosis (store.py): silence from the user's last voice to the first audio of this reply."""
+        heard = getattr(self, "_last_user_voice", 0.0)
+        if heard and heard > getattr(self, "_wait_ref", 0.0):
+            self._reply_wait_s = round(now - heard, 2)
+        self._wait_ref = now
+
+    def _take_reply_wait(self) -> dict:
+        w, self._reply_wait_s = getattr(self, "_reply_wait_s", None), None
+        return {} if w is None else {"wait_s": w}
 
     async def interrupt(self) -> None:
         """Barge-in: drop queued assistant speech immediately."""
@@ -810,7 +822,7 @@ class LiveVoice(SessionLifecycle):
             self._in_text += g("delta") or ""
             self._schedule_flush()
             if self._out_text:
-                logs.info("live", "LIVE_JARVES_SAID", "JARVES said", text=self._out_text.strip())
+                logs.info("live", "LIVE_JARVES_SAID", "JARVES said", text=self._out_text.strip(), **self._take_reply_wait())
                 if self.on_transcript:
                     await self.on_transcript("assistant", self._out_text.strip())
                 self._out_text = ""
@@ -922,7 +934,7 @@ class LiveVoice(SessionLifecycle):
             out.append(("user", self._in_text.strip()))
             self._in_text = ""
         if self._out_text.strip():
-            logs.info("live", "LIVE_JARVES_SAID", "JARVES said", text=self._out_text.strip())
+            logs.info("live", "LIVE_JARVES_SAID", "JARVES said", text=self._out_text.strip(), **self._take_reply_wait())
             out.append(("assistant", self._out_text.strip()))
             self._out_text = ""
         return out
