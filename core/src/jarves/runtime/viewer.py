@@ -36,12 +36,25 @@ def find_godot(override: str = "") -> Path | None:
     return None
 
 
+def installed_face() -> Path:
+    """Where the WP-M6 installer puts the exported face: <app>\\face, beside the bundled <app>\\python."""
+    return Path(sys.executable).resolve().parent.parent / "face" / "JARVES Face.exe"
+
+
 async def launch_godot(port: int, exe: str = "", scene: str = "res://loading.tscn"):
     """Start the room/face window (no console window of its own on Windows); the API key is never passed on."""
+    flags = getattr(__import__("subprocess"), "CREATE_NO_WINDOW", 0) if sys.platform == "win32" else 0
+    # WP-M6 installed build: the exported face ({app}\face, next to {app}\python; jarvis.cmd also sets
+    # JARVES_FACE_EXE, autostart does not). It starts at the loading screen via its override.cfg, because release
+    # templates refuse a scene path argument.
+    face = os.environ.get("JARVES_FACE_EXE", "").strip('"') or str(installed_face())
+    if not exe and face and Path(face).is_file() and scene == "res://loading.tscn":
+        return await asyncio.create_subprocess_exec(
+            face, "--", f"--core-port={port}",
+            env={k: v for k, v in os.environ.items() if k != "OPENAI_API_KEY"}, creationflags=flags)
     executable = find_godot(exe)
     if executable is None:
         raise RuntimeError("Godot was not found; set GODOT_EXE or runtime.viewer_exe, or install the Godot build")
-    flags = getattr(__import__("subprocess"), "CREATE_NO_WINDOW", 0) if sys.platform == "win32" else 0
     return await asyncio.create_subprocess_exec(
         str(executable), "--path", str(PROJECT), scene, "--", f"--core-port={port}",
         env={k: v for k, v in os.environ.items() if k != "OPENAI_API_KEY"}, creationflags=flags)

@@ -39,6 +39,48 @@ jobs:
           call ..\jarvis.cmd status > status.txt
           type status.txt
           findstr /C:"Core is NOT running" status.txt || exit /b 1
+  installer:
+    # SW-V2 M6: build the real Windows installer and smoke-test it (silent per-user install into a temp dir,
+    # --version/status/features/doctor, offline Core start/stop, exported face self-checks, upgrade, uninstall keeps
+    # data, /PURGE=1). On `main` the tested artifact is what .github/workflows/package.yml publishes; PR artifacts are
+    # CI-only (3 days) and never become releases.
+    name: Windows installer (build + silent install smoke)
+    needs: core
+    runs-on: windows-2025
+    timeout-minutes: 45
+    env:
+      CHANNEL: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' && 'main' || 'pr' }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884  # v10.3.0
+        with:
+          enable-cache: true
+      - name: Cache pinned build tools (Python, Godot editor + Windows template, Inno Setup; SHA256-pinned)
+        uses: actions/cache@v6
+        with:
+          path: ${{ runner.temp }}/jarves-build-cache
+          key: jarves-build-tools-${{ hashFiles('packaging/build_windows.ps1') }}
+      - name: Build installer
+        shell: pwsh
+        run: |
+          $base = (Select-String -Path core/pyproject.toml -Pattern '^version\s*=\s*"([^"]+)"').Matches[0].Groups[1].Value
+          $v = "$base.${{ github.run_number }}"
+          ./packaging/build_windows.ps1 -Version $v -Channel $env:CHANNEL -Commit $env:GITHUB_SHA `
+            -Cache "$env:RUNNER_TEMP/jarves-build-cache" -Out dist
+          "VERSION=$v" >> $env:GITHUB_ENV
+      - name: Silent install / run / upgrade / uninstall smoke
+        shell: pwsh
+        run: ./packaging/smoke_windows.ps1 -Installer "dist/JARVES-Setup-$env:VERSION.exe" -Version $env:VERSION -RequireFace -CheckAutostart
+      - uses: actions/upload-artifact@v7
+        with:
+          name: jarves-windows-installer-${{ env.CHANNEL }}
+          path: |
+            dist/JARVES-Setup-*.exe
+            dist/JARVES-Setup-*.exe.sha256
+            dist/build-info.json
+          retention-days: ${{ env.CHANNEL == 'main' && 14 || 3 }}
+          compression-level: 0
+          if-no-files-found: error
   cad:
     runs-on: ubuntu-24.04
     timeout-minutes: 25
