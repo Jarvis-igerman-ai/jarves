@@ -407,11 +407,11 @@ def calendar_routes(register) -> None:
         token = _secrets.token_urlsafe(12)
         ctx._calendar_plans = {k: v for k, v in ctx._calendar_plans.items() if time.time() - v["t"] < 300}
         ctx._calendar_plans[token] = {**plan, "t": time.time()}
-        return 200, {"readback": plan["readback"], "token": token, "expires_s": 300}
+        return 200, {"readback": plan["readback"], "preview_id": token, "expires_s": 300}
 
     def commit(ctx, _m, body):
         writer(ctx)
-        plan = ctx._calendar_plans.pop(str((body or {}).get("token", "")), None)
+        plan = ctx._calendar_plans.pop(str((body or {}).get("preview_id", "")), None)
         if plan is None or time.time() - plan["t"] > 300:
             return 409, {"error": "preview expired or unknown: preview again"}
         if not switch_on(ctx):

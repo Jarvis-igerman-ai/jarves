@@ -21,7 +21,8 @@ function el(tag, attrs, ...kids) {
 }
 async function api(path, opts = {}) {
   const r = await fetch(path, { credentials: "same-origin", ...opts,
-    headers: { "Content-Type": "application/json", ...(opts.method && opts.method !== "GET" ? { "X-Jarves": "1" } : {}) } });
+    headers: { "Content-Type": "application/json", ...(opts.method && opts.method !== "GET"
+      ? { "X-Jarves": "1", "X-CSRF-Token": window.JARVES_CSRF || "" } : {}) } });   // CSRF: paired phones (m4.js)
   const data = await r.json().catch(() => ({ error: r.statusText }));
   if (!r.ok) throw new Error(data.error || r.statusText);
   return data;
@@ -394,7 +395,8 @@ async function route(refresh) {
   for (const a of document.querySelectorAll("nav a"))
     a.classList.toggle("active", a.dataset.page === (page === "session" ? "conversations" : page || "conversations"));
   try {
-    if (page === "session") await pageSession(arg, refresh === true && (window.innerHeight + window.scrollY >= document.body.scrollHeight - 40));
+    if (window.JARVES_PAGES && window.JARVES_PAGES[page]) await window.JARVES_PAGES[page](arg, refresh);   // m4.js etc.
+    else if (page === "session") await pageSession(arg, refresh === true && (window.innerHeight + window.scrollY >= document.body.scrollHeight - 40));
     else if (page === "costs") await pageCosts();
     else if (page === "issues") await pageIssues(arg);
     else if (page === "memory") await pageMemory();

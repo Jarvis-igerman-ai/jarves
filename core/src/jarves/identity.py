@@ -301,7 +301,7 @@ def dashboard_routes(register) -> None:
                                                 by="dashboard")
         except IdentityError as e:
             return 400, {"error": str(e)}
-        return (200 if r["ok"] else 409), r
+        return (200, r) if r["ok"] else (409, {**r, "error": r["reason"]})
 
     def wake(ctx, _m, body):
         b = body or {}

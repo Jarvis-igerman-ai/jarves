@@ -184,7 +184,14 @@ WAKE_PHRASE = {
     "current": "hey_jarvis", "spoken": "Hey Jarvis",
     "targets": {"windows": asdict(Target("verified_on_device", MATRIX["wake_word"].targets["windows"].evidence)),
                 "linux_arm64_pi": asdict(MATRIX["wake_word"].targets["linux_arm64_pi"])},
-    "custom": asdict(Target("blocked", blocker="a custom phrase needs a trained wake model and acoustic tests on "
-                            "each platform (FUTURE_IDEAS F03); changing the name does NOT change the wake phrase",
-                            roadmap_issue=PI_ROADMAP)),
+    # `jarvis wake train "<phrase>"` (voice/wake_train.py): local synthetic samples -> small head on openWakeWord's
+    # frozen front end. Changing the NAME alone never changes the phrase; the user trains and picks a phrase.
+    "custom": {
+        "windows": asdict(Target("implemented_unverified", evidence="trained on this PC 2026-10-19 from 4 local "
+                                 "Windows voices (synthetic held-out voice: recall 96 %, 0 false wakes): "
+                                 "docs/reviews/SWV2_WP-M4.md", blocker="never tried with a real voice and mic: run "
+                                 "`jarvis wake test --model ...` and `--false-wakes 30`")),
+        "linux_arm64_pi": asdict(Target("implemented_unverified", blocker="numpy head + espeak-ng voices; never "
+                                        "trained or run on a Pi", roadmap_issue=PI_ROADMAP)),
+    },
 }
