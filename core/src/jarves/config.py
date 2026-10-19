@@ -52,6 +52,14 @@ class AIConfig(_Strict):
     # "priority" = Fast mode (up to 2.5x faster, 2x token price; gpt-6-luna is ~$0.0005 per lookup). "" = account default
     voice_service_tier: Literal["", "auto", "default", "flex", "priority"] = "priority"
     voice_max_output_tokens: int = Field(800, ge=0, le=8000)   # per delegated answer (incl. reasoning); 0 = no cap
+    # Reasoning summaries in the DEBUG log ("how he thinks"): requested wherever the backend reasons (not with
+    # effort "none"). "" = off.
+    reasoning_summary: Literal["", "auto", "concise", "detailed"] = "auto"
+    # Background tasks (tasks.py): research runs in the Core while the conversation goes on.
+    tasks_enabled: bool = True
+    task_max_running: int = Field(3, ge=1, le=10)
+    task_timeout_s: float = Field(180, ge=10, le=900)
+    research_reasoning_effort: Literal["none", "minimal", "low", "medium", "high", "xhigh", ""] = "low"
 
 
 class VoiceConfig(_Strict):
@@ -74,6 +82,9 @@ class VoiceConfig(_Strict):
     # A backend lookup still running after this long with nothing said: ask GPT-Live for ONE short "almost there"
     # (session.commentary.append). 0 = off.
     progress_after_s: float = Field(2.5, ge=0, le=30)
+    # Hard deadline for one delegated backend response (web lookups measured 2-13 s): after it the Core gives up on
+    # it, retries ONCE itself (own 25 s deadline) and then says the result or "לא הצלחתי להביא את זה". 0 = off.
+    backend_deadline_s: float = Field(25, ge=0, le=120)
     # One conversation stays open until it is quiet for idle_disconnect_s. This is only a safety ceiling per
     # session; the real cost guard is ai.daily_realtime_minutes (a session never outlives the day's budget).
     session_max_s: int = Field(3600, ge=30, le=3600)

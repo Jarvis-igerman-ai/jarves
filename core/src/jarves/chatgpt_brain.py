@@ -15,7 +15,7 @@ import random
 import httpx
 
 from . import logs
-from .brain import INSTRUCTIONS, BrainUnavailable, billing_summary
+from .brain import INSTRUCTIONS, BackendTrace, BrainUnavailable, billing_summary
 from .budget import Budget, BudgetExceeded
 from .chatgpt_auth import RESOURCE, ChatGPTAuth, ChatGPTAuthError
 from .config import AIConfig
@@ -128,8 +128,10 @@ class ChatGPTBrain:
             tools.append({"type": "web_search"})
         return tools
 
-    async def _stream(self, body: dict) -> dict:
+    async def _stream(self, body: dict, on_event=None) -> dict:
         """One streamed request; returns the completed response object, raises BrainUnavailable otherwise.
+        Each event is traced (BackendTrace: logged stages, usage, duration) as it ARRIVES and passed to
+        on_event(event) for live progress (background tasks).
 
         Budget: reserve 1 ai_requests unit BEFORE sending (BudgetExceeded propagates; nothing is sent). The unit is
         released only when the request provably never left (sign-in/token failure, TCP connect failure); once sent
@@ -141,7 +143,20 @@ class ChatGPTBrain:
             res.release()
             raise
         headers = {"Authorization": f"Bearer {token}", "Accept": "text/event-stream"}
-        lines: list[str] = []
+        trace = BackendTrace("chatgpt", "CHATGPT_BACKEND", model=body.get("model", ""))
+        events: list[dict] = []
+        data: list[str] = []
+
+        def take(line: str) -> None:
+            if line.startswith("data:"):
+                data.append(line[5:].strip())
+            elif line == "" and data:
+                for ev in parse_sse(["data: " + "\n".join(data)]):
+                    events.append(ev)
+                    trace.feed(ev)
+                    if on_event is not None:
+                        on_event(ev)
+                data.clear()
         try:
             async with self._client() as c:
                 async with c.stream("POST", "/responses", json=body, headers=headers) as r:
@@ -149,7 +164,8 @@ class ChatGPTBrain:
                         await r.aread()
                         self._raise_http(r)
                     async for line in r.aiter_lines():
-                        lines.append(line)
+                        take(line)
+                    take("")
         except httpx.ConnectError:
             res.release()                 # connection never established: the request was not sent
             raise
@@ -157,7 +173,7 @@ class ChatGPTBrain:
             res.commit()                  # no-op after release
         final = None
         items: dict[int, dict] = {}        # output_index -> finished item (message / function_call / reasoning)
-        for ev in parse_sse(lines):
+        for ev in events:
             t = ev.get("type", "")
             if t == "response.output_item.done" and isinstance(ev.get("item"), dict):
                 items[int(ev.get("output_index", len(items)))] = ev["item"]
@@ -209,15 +225,15 @@ class ChatGPTBrain:
             raise BrainUnavailable("AI_RATE_LIMIT", "ChatGPT rate limit reached", "wait a minute")
         raise BrainUnavailable("AI_ERROR", f"ChatGPT plan error {code or status}", "see logs")
 
-    async def _request(self, body: dict) -> dict:
+    async def _request(self, body: dict, on_event=None) -> dict:
         """Bounded backoff for temporary unavailability; drops web search once if the route rejects it."""
         for attempt in range(3):
             try:
-                return await self._stream(body)
+                return await self._stream(body, on_event)
             except BrainUnavailable as e:
                 if e.code == "CHATGPT_UNSUPPORTED" and self.web_search and "web_search" in (e.action + e.message):
                     self.web_search, self.web_search_note = False, " (not allowed on your plan)"
-                    body = {**body, "tools": self._tools()}
+                    body = {**body, "tools": [t for t in body.get("tools", []) if t.get("type") != "web_search"]}
                     logs.info("chatgpt", "CHATGPT_NO_WEB_SEARCH", "web search not allowed on this plan; continuing without")
                     continue
                 if e.code == "CHATGPT_UNAVAILABLE" and attempt < 2:
@@ -265,6 +281,18 @@ class ChatGPTBrain:
                 res = await self.registry.call(plain_tool_name(fc), fc.get("arguments") or "{}")
                 turn.append({"type": "function_call_output", "call_id": fc["call_id"], "output": res.to_model()})
         raise BrainUnavailable("AI_MAX_TURNS", "the request needed too many steps", "ask more simply")
+
+    async def lookup(self, question: str, instructions: str, on_event=None) -> str:
+        """One stateless web-search request on the plan (background tasks, tasks.PlanResearchRunner): no history,
+        no device tools, nothing added to the conversation."""
+        ok, code, action = self.available()
+        if not ok:
+            raise BrainUnavailable(code, action, action)
+        body = {"model": await self._pick_model(), "instructions": instructions,
+                "input": [{"role": "user", "content": question}], "store": False, "stream": True,
+                "tools": [{"type": "web_search"}] if self.web_search else []}
+        resp = await self._request(body, on_event)
+        return self._text([o for o in resp.get("output", []) if o.get("type") == "message"])
 
     @staticmethod
     def _clean(o: dict) -> dict:

@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import asyncio
 import re
+import time
 from dataclasses import dataclass
 from typing import Any, AsyncIterator, Callable
 
@@ -82,11 +83,157 @@ request; for "what do you remember (about me)" call `recall` with NO query (it l
 literal text match). Never claim an action succeeded unless the tool result says ok=true; if a tool fails, say what to try.
 Use web search for current facts (news, weather, prices); one quick search is enough for a spoken answer; name
 the source in two or three words only when it matters.
+Background tasks: when the user asks for real RESEARCH (compare several options, check many sources, "בדוק לעומק",
+"תחקור", a summary of a long topic: anything likely to take more than about 15 seconds), call `task_start` with a
+self-contained description instead of searching yourself, then say in one short sentence that you are on it in the
+background and will tell them when it is ready (the result is announced automatically). Use `task_status` for
+"what about the task?" and `task_cancel` when asked to stop one. Quick facts are never background tasks.
 When asked what you can do or about your skills, explain only the tools actually provided to you and web search
 if available. Check get_status before claiming a service is connected. Offer a short example and walk through
 one skill at a time when asked; distinguish supported abilities from services that still need setup.
 Facts the user asked you to remember:
 {memories}"""
+
+
+# ------------------------------------------------------------------ backend progress (SW-V2 WP-C)
+def _d(obj: Any) -> dict:
+    if isinstance(obj, dict):
+        return obj
+    dump = getattr(obj, "model_dump", None)
+    return dump() if callable(dump) else {}
+
+
+def short(text: str, n: int = 48) -> str:
+    text = " ".join(str(text or "").split())
+    return text if len(text) <= n else text[: n - 1] + "…"
+
+
+class BackendTrace:
+    """Follows the stream events of ONE backend (Responses API) request, whichever route sent it (GPT-Live
+    delegation, a background task, the ChatGPT plan): logs every stage (start, web search in_progress/searching/
+    completed with its query, sources opened, writing, reasoning summary, usage tokens, failure, duration) and turns
+    it into screen activity. `feed()` returns (kind, text) when the visible stage changes, else None; kinds are the
+    face pill's ("thinking", "searching", "reading"). Query/answer/summary text goes into content fields only, so
+    privacy mode masks it. Real session 19 Oct: a 90 s web lookup logged NOTHING at INFO; now every stage does."""
+
+    def __init__(self, area: str, prefix: str = "BACKEND", clock=time.monotonic, quiet: bool = False,
+                 **ids: Any) -> None:
+        """quiet: progress mapping only, no log lines (the route already traces the same stream)."""
+        self.area, self.prefix, self._clock, self.ids = area, prefix, clock, {k: v for k, v in ids.items() if v}
+        self.quiet = quiet
+        self.t0 = clock()
+        self.stage = "starting"
+        self.queries: list[str] = []
+        self.sources = 0
+        self.pages = 0
+        self.text = ""
+        self.usage: dict = {}
+        self.status = ""
+        self.error = ""
+        self.reasoning: list[str] = []
+        self._wrote = False
+
+    def elapsed(self) -> float:
+        return round(self._clock() - self.t0, 1)
+
+    def _log(self, level, code: str, msg: str, **f) -> None:
+        if self.quiet:
+            return
+        level(self.area, f"{self.prefix}_{code}", msg, **{"elapsed_s": self.elapsed(), **self.ids, **f})
+
+    def _set(self, stage: str, kind: str, text: str) -> tuple[str, str]:
+        self.stage = stage
+        return kind, text
+
+    def feed(self, ev: Any) -> tuple[str, str] | None:
+        ev = _d(ev)
+        t = str(ev.get("type") or "")
+        item = _d(ev.get("item"))
+        if t in ("response.created", "response.queued"):
+            resp = _d(ev.get("response"))
+            self.ids.setdefault("response_id", resp.get("id") or "")
+            self._log(logs.info, "START", "backend request started", model=resp.get("model") or "")
+            return self._set("thinking", "thinking", "חושב…")
+        if t.startswith("response.web_search_call."):
+            status = t.rsplit(".", 1)[-1]
+            self._log(logs.info, "WEB_SEARCH", f"web search {status}", status=status)
+            if status in ("in_progress", "searching") and self.stage != "searching":
+                return self._set("searching", "searching", "מחפש ברשת…")
+            return None
+        if item.get("type") == "web_search_call":
+            action = _d(item.get("action"))
+            kind = action.get("type") or ""
+            if t == "response.output_item.added" and not action:
+                return self._set("searching", "searching", "מחפש ברשת…")
+            if kind == "search":
+                q = action.get("query") or "; ".join(action.get("queries") or [])
+                srcs = len(action.get("sources") or [])
+                if t == "response.output_item.done":
+                    if q and q not in self.queries:
+                        self.queries.append(q)
+                    self.sources += srcs
+                    self._log(logs.info, "WEB_SEARCH_DONE", "web search finished", query=q, sources=srcs,
+                              status=item.get("status") or "")
+                if q:
+                    return self._set("searching", "searching", f"מחפש: {short(q)}")
+                return None
+            if kind in ("open_page", "find_in_page") and t == "response.output_item.done":
+                self.pages += 1
+                self._log(logs.info, "READING", "reading a source page", action=kind, pages=self.pages)
+                return self._set("reading", "reading", "קורא מקורות…")
+            return None
+        if t == "response.output_item.added" and item.get("type") == "reasoning" and self.stage == "starting":
+            return self._set("thinking", "thinking", "חושב…")
+        if t == "response.reasoning_summary_text.done":
+            summary = str(ev.get("text") or "").strip()
+            if summary:
+                self.reasoning.append(summary)
+                self._log(logs.debug, "REASONING", "backend reasoning summary", summary=summary[:600])
+            return None
+        if t == "response.output_text.delta" and not self._wrote:
+            self._wrote = True
+            self._log(logs.info, "WRITING", "backend started writing the answer")
+            return self._set("writing", "thinking", "מנסח תשובה…")
+        if t == "response.output_text.done":
+            self.text = str(ev.get("text") or "")
+            self._log(logs.debug, "TEXT", "backend answer text", text=self.text[:600], chars=len(self.text))
+            return None
+        if t == "response.output_item.done" and item.get("type") == "function_call":
+            self.stage = "tool"             # the caller runs the tool and shows its own activity
+            return None
+        if t in ("response.completed", "response.failed", "response.incomplete"):
+            self.finish(t.split(".")[-1], _d(ev.get("response")))
+            return None
+        if t == "error":
+            err = _d(ev.get("error")) or ev
+            self.error = str(err.get("code") or "error")
+            self._log(logs.warn, "ERROR", f"backend stream error {self.error}", message=str(err.get("message"))[:200])
+        return None
+
+    def finish(self, status: str, resp: dict | None = None) -> None:
+        """Log the outcome once: status, duration, searches, usage tokens, the failure reason."""
+        if self.status:
+            return
+        resp = resp or {}
+        self.status = status
+        u = _d(resp.get("usage"))
+        if u:
+            self.usage = {"input_tokens": u.get("input_tokens", 0), "output_tokens": u.get("output_tokens", 0),
+                          "reasoning_tokens": _d(u.get("output_tokens_details")).get("reasoning_tokens", 0)}
+        extra: dict[str, Any] = {}
+        if status == "failed":
+            err = _d(resp.get("error"))
+            self.error = str(err.get("code") or "response_failed")
+            extra["error"], extra["reason"] = self.error, str(err.get("message") or "")[:200]
+        elif status == "incomplete":
+            self.error = str(_d(resp.get("incomplete_details")).get("reason") or "incomplete")
+            extra["reason"] = self.error
+        level = logs.info if status == "completed" else logs.warn
+        if self.quiet:
+            return
+        level(self.area, f"{self.prefix}_DONE", f"backend response {status}", backend_s=self.elapsed(),
+              **{"searches": len(self.queries), "sources": self.sources, "pages": self.pages, **self.usage,
+                 **self.ids, **extra})
 
 
 # ------------------------------------------------------------------ billing truth (CR-04)
@@ -242,6 +389,8 @@ class AgentBrain:
         from agents.exceptions import MaxTurnsExceeded
         if self._agent is None:
             self._build()
+        t0 = time.monotonic()
+        logs.info("ai", "AI_REQUEST", "agent request started", model=self.cfg.text_model)
         try:
             res = await asyncio.wait_for(Runner.run(self._agent, text, session=self._session, max_turns=self.cfg.max_turns),
                                          self.cfg.timeout_s)
@@ -259,8 +408,14 @@ class AgentBrain:
             raise BrainUnavailable("AI_MAX_TURNS", "the request needed too many steps", "ask more simply") from e
         except BudgetExceeded as e:     # raised by BudgetedModel instead of sending the next model call
             raise BrainUnavailable("AI_BUDGET", str(e), e.action) from e
-        n = len(getattr(res, "raw_responses", []) or [])   # already counted per call by BudgetedModel
-        logs.info("ai", "AI_REPLY", "agent replied", model_calls=n, used_today=self.budget.used("ai_requests"))
+        raw = getattr(res, "raw_responses", []) or []      # already counted per call by BudgetedModel
+        tokens = {"input_tokens": 0, "output_tokens": 0}
+        for r in raw:
+            u = getattr(r, "usage", None)
+            for k in tokens:
+                tokens[k] += int(getattr(u, k, 0) or 0)
+        logs.info("ai", "AI_REPLY", "agent replied", model_calls=len(raw), used_today=self.budget.used("ai_requests"),
+                  duration_s=round(time.monotonic() - t0, 2), **tokens)
         return str(res.final_output or "").strip()
 
 

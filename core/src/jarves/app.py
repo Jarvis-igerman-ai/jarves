@@ -122,6 +122,15 @@ class Core:
         self.budget = Budget(self.memory, c.ai)      # ONE shared budget: in-flight counts span brain, TTS and voice
         self.agent = make_agent(c, self.registry, self.memory, self.home, self._ai_transport, self.budget)
         self.brain = Brain(self.registry, self.agent)
+        # Background tasks (SW-V2 WP-C, tasks.py): research runs while the conversation goes on
+        from .tasks import TaskSkill, make_retry_lookup, make_task_manager
+        self.tasks = make_task_manager(c, self.agent, self.budget, self.home, on_update=self._tasks_changed,
+                                       on_finished=self._task_finished)
+        self._announcing: set[str] = set()
+        if self.tasks is not None:
+            self.registry.allowed_actions |= {"task_start", "task_cancel"}
+            self.registry.register(TaskSkill(self.tasks))
+        self._retry_lookup = make_retry_lookup(c, self.budget)
         self._check_ai()
 
         self.link = GodotLink(c.link.host, c.link.port, load_token(self.home / "link_token"), self.health,
@@ -200,6 +209,8 @@ class Core:
         for t in tasks:
             t.cancel()
         await asyncio.gather(*tasks, return_exceptions=True)
+        if getattr(self, "tasks", None) is not None:
+            await self.tasks.shutdown()             # running background tasks end as "cancelled" (stored)
         await self.registry.drain()                 # shielded side effects finish before the store closes
         await self.link.stop()
         if self.music is not None and hasattr(self.music.player, "close"):
@@ -667,7 +678,9 @@ class Core:
                              service_tier=self.cfg.ai.voice_service_tier,
                              max_output_tokens=self.cfg.ai.voice_max_output_tokens, echo_tail_s=v.echo_tail_s,
                              clock_context=v.clock_context, progress_after_s=v.progress_after_s,
-                             no_speech_timeout_s=(v.wake_no_speech_s if ack else 0), **common, **extra)
+                             no_speech_timeout_s=(v.wake_no_speech_s if ack else 0),
+                             backend_deadline_s=v.backend_deadline_s, retry_lookup=self._retry_lookup,
+                             reasoning_summary=self.cfg.ai.reasoning_summary, **common, **extra)
         else:
             from .voice.realtime import RealtimeVoice
             live = RealtimeVoice(v.realtime_model, self.agent.instructions, self.registry.realtime_tools(),
@@ -702,12 +715,32 @@ class Core:
             return
         self.live = live
         await self.link.broadcast("status", self.snapshot())
+        for task in (self.tasks.unannounced() if self.tasks is not None else []):
+            self._spawn(self._task_finished(task))     # finished while no conversation was open
         if ack:
             await self.link.send_face("assistant.activity", {"kind": "done", "text": "", "detail": ""})
             self._spawn(self._chime("ready"))
             await self.set_face("listening")
         if not hold_output and self.cfg.voice.activation == "conversation":
             self._startup_stage("running", "Voice ready")
+
+    async def _tasks_changed(self, views: list[dict]) -> None:
+        """Background task list for the screen (tasks.py docstring: message shape)."""
+        await self.link.send_face("tasks.update", {"tasks": views})
+
+    async def _task_finished(self, task) -> None:
+        """A background task finished: GPT-Live says it at a good moment; without a conversation it waits for
+        the next one (and stays on the screen / in tasks.jsonl)."""
+        from .tasks import announcement
+        live = self.live
+        if task.announced or task.id in self._announcing or live is None or not hasattr(live, "announce"):
+            return
+        self._announcing.add(task.id)
+        try:
+            if await live.announce(announcement(task), tag=task.id):
+                self.tasks.mark_announced(task)
+        finally:
+            self._announcing.discard(task.id)
 
     def _startup_stage(self, phase: str, detail: str) -> None:
         progress = {"starting": 5, "core_ready": 25, "loading": 45, "waiting_audio": 70,
