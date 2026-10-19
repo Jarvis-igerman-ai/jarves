@@ -16,7 +16,7 @@ from .. import features as feat
 from .service import Runtime, alerts_paused, current, read_state
 
 ISSUE_PI = "https://github.com/igalgerman/JARVIS/issues/20"
-EVIDENCE = "docs/reviews/SWV2_M1.md"
+EVIDENCE = "docs/reviews/SWV2_WP-M1.md"
 
 # Truthful status per target (spec 5). "verified_on_device" only with a real run on that device.
 PLATFORM_STATUS: dict[str, dict] = {
@@ -29,8 +29,10 @@ PLATFORM_STATUS: dict[str, dict] = {
         "linux_arm64_pi": {"status": "implemented_unverified", "blocker": "fcntl lock tested on CI-style unit tests "
                            "only, not on a Pi", "roadmap_issue": ISSUE_PI}},
     "display_control": {
-        "windows": {"status": "implemented_unverified", "blocker": "Godot spawn/close tested with a fake viewer; "
-                    "needs one hands-on show/hide on the PC", "evidence": "core/tests/test_runtime.py"},
+        "windows": {"status": "implemented_unverified", "blocker": "the real Godot face closes itself on "
+                    "display.close (headless test); spawning the window was tested with a fake process: one "
+                    "hands-on show/hide on the PC is pending",
+                    "evidence": "core/tests/test_runtime.py, core/tests/test_face_protocol_godot.py"},
         "linux_arm64_pi": {"status": "planned", "blocker": "Godot performance on the Pi is unmeasured "
                            "(renderer portability, spec 4.2)", "roadmap_issue": ISSUE_PI}},
     "tray_icon": {
