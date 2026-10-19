@@ -20,6 +20,9 @@ from .memory import MemoryStore
 from .skills import SkillRegistry
 from .skills.builtin import ClockSkill, MemorySkill, StatusSkill
 from .skills.music import MusicSkill, PearDesktopPlayer
+from .skills.settings import Settings, SettingsSkill
+from . import workspace as wsp
+from .curator import Curator, openai_extractor
 from .voice.audio import AudioUnavailable, SoundDeviceAudio, StreamingAudio
 from .voice.speechcache import SpeechCache
 from .voice.stt import STTUnavailable, WhisperSTT
@@ -118,9 +121,19 @@ class Core:
         else:
             self.music = None
             self.health.set("music", "disabled", "music.provider = none")
+        # WP-D workspace/memory: persona files, self-settings Skill, background memory curator
+        self.workspace = wsp.Workspace(self.home / "workspace")
+        self.settings = Settings(self.memory, {"voice.voice": c.voice.voice})
+        self.registry.register(SettingsSkill(self.workspace, self.settings, self.registry, self._on_voice_change))
+        self.workspace.write_generated("TOOLS.md", wsp.tools_markdown(self.registry, self.settings.view()))
+        self.workspace.listeners.append(lambda name: self._spawn(wsp.note_live(self.live, self.workspace, name)))
 
         self.budget = Budget(self.memory, c.ai)      # ONE shared budget: in-flight counts span brain, TTS and voice
+        self.curator = Curator(self.memory, self.workspace, enabled=lambda k: self.settings.get(k) == "on",
+                               llm=openai_extractor(c.ai.text_model, self.budget) if api_billing_allowed(c.ai) else None)
         self.agent = make_agent(c, self.registry, self.memory, self.home, self._ai_transport, self.budget)
+        if self.agent is not None:
+            wsp.augment_instructions(self.agent, self.workspace)
         self.brain = Brain(self.registry, self.agent)
         self._check_ai()
 
@@ -201,6 +214,12 @@ class Core:
             t.cancel()
         await asyncio.gather(*tasks, return_exceptions=True)
         await self.registry.drain()                 # shielded side effects finish before the store closes
+        self.curator.cancel()
+        try:                                        # what this run learned is kept (rules only: no network now)
+            self.curator.llm = None
+            await asyncio.wait_for(self.curator.run("shutdown"), 3)
+        except Exception:
+            logs.warn("memory", "CURATOR_SHUTDOWN_FAILED", "memory curator did not finish at shutdown")
         await self.link.stop()
         if self.music is not None and hasattr(self.music.player, "close"):
             await self.music.player.close()
@@ -497,6 +516,8 @@ class Core:
         reply = await self.brain.respond(text)
         logs.info("core", "REPLY", f"reply via {reply.source}", tool=reply.tool, ok=reply.ok, result=reply.code,
                   ms=round((time.monotonic() - t0) * 1000), text=reply.text)
+        self.curator.observe("user", text)
+        self.curator.observe("assistant", reply.text, idle=self.live is None)   # typed chat: curate when quiet
         await self.link.send_face("assistant.text", {"text": reply.text, "source": reply.source, "ok": reply.ok,
                                                      "code": reply.code})
         if self.live is None:
@@ -622,6 +643,7 @@ class Core:
             self.budget.record("voice_seconds", int(round(seconds)))
 
         async def on_transcript(role: str, text: str) -> None:
+            self.curator.observe(role, text, live=True)
             await self.link.send_face("user.transcript" if role == "user" else "assistant.text",
                                       {"text": text, "source": self.voice_mode})
 
@@ -631,6 +653,8 @@ class Core:
             if self.live is live_ref[0]:
                 self.live = None                   # any end (user, remote close, error, budget) frees the slot
             logs.info("voice", "LIVE_ENDED", f"live conversation ended ({reason})")
+            if not self.stopping:
+                self._spawn(self.curator.run(f"live_{reason}"))   # learn durable facts from this conversation
             # Smooth conversation: the server closing a session (or a time limit) while the user is in the middle
             # of talking must not drop them out - reconnect at once. Idle / user / error / budget end for real.
             last = getattr(live_ref[0], "_last_activity", 0.0)
@@ -669,7 +693,8 @@ class Core:
             live = self._live_factory(self, **common, **extra)
         elif self.voice_mode == "live":
             from .voice.live import LiveVoice
-            live = LiveVoice(self.registry, self.agent.instructions, model=v.live_model, voice=v.voice,
+            live = LiveVoice(self.registry, self.agent.instructions, model=v.live_model,
+                             voice=self.settings.get("voice.voice") or v.voice,   # "תחליף קול" override
                              backend_model=self.cfg.ai.text_model, web_search=self.cfg.ai.web_search,
                              name=self.cfg.assistant_name, spoken_name=self.cfg.assistant_name_spoken,
                              half_duplex=v.half_duplex, max_session_s=max_s,
@@ -686,6 +711,7 @@ class Core:
                                  v.language, v.realtime_voice, v.half_duplex, audio_io, max_session_s=max_s,
                                  idle_disconnect_s=v.idle_disconnect_s, **common, **extra)
         live_ref[0] = live
+        wsp.attach_live(live, self.workspace, self.memory)   # persona files + known facts in the voice instructions
         logs.new_cid()
         self._voice_connecting = True
         await self.link.broadcast("status", self.snapshot())
@@ -944,6 +970,27 @@ class Core:
                 await self.set_face("listening")
                 await self.link.send_face("assistant.activity", {"kind": "connecting", "text": "מתחבר…", "detail": ""})
                 await self._start_live(ack=True)
+
+    # ------------------------------------------------------------------ voice change ("תחליף קול")
+    def _on_voice_change(self, voice: str, restart_now: bool) -> None:
+        """GPT-Live fixes the voice per session: the override applies to the next session, or now via a restart."""
+        logs.info("voice", "VOICE_CHANGED", f"voice set to {voice}", voice=voice, restart=restart_now)
+        if restart_now and self.live is not None and self.voice_mode == "live":
+            self._spawn(self._restart_live_for_voice(self.live))
+
+    async def _restart_live_for_voice(self, live) -> None:
+        await asyncio.sleep(1.0)                      # let the tool result reach the conversation first
+        deadline = time.monotonic() + 20
+        while time.monotonic() < deadline and self.live is live and (
+                getattr(live, "_tools_running", 0) or getattr(live, "_pending", None)
+                or time.monotonic() < getattr(live, "_speaking_until", 0.0) + 1.0):
+            await asyncio.sleep(0.25)                 # the confirmation sentence is still being spoken
+        if self.live is not live or self.stopping:
+            return
+        await live.stop("voice_change")
+        await live.wait_ended() if hasattr(live, "wait_ended") else None
+        self.live = None
+        await self._start_live(greeting="זה הקול החדש שלי. מה דעתך?")
 
     # ------------------------------------------------------------------ confirmation for side effects
     async def ask_confirm(self, prompt: str, timeout: float = 20) -> bool:

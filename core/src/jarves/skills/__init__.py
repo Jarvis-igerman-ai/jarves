@@ -34,7 +34,9 @@ Origin = Literal["model", "user"]
 
 # Low-risk actions pre-authorized by policy (reversible, user-visible, no data loss).
 DEFAULT_ALLOWED_ACTIONS = frozenset({"remember", "music_play", "music_pause", "music_resume", "music_next",
-                                     "music_stop", "music_volume"})
+                                     "music_stop", "music_volume",
+                                     # settings Skill: one appended line (backed up, undoable) / allowlisted keys
+                                     "workspace_note", "set_voice", "set_setting"})
 
 
 @dataclass

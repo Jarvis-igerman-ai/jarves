@@ -47,7 +47,7 @@ class MemorySkill(Skill):
 
     def tools(self) -> list[Tool]:
         async def remember(a: RememberArgs):
-            mid = self.store.add(a.text)
+            mid, _ = self.store.upsert(a.text, source="user", confidence=1.0)   # no duplicates
             return ToolResult(True, "זכרתי.", {"id": mid})
 
         async def recall(a: RecallArgs):
@@ -55,7 +55,8 @@ class MemorySkill(Skill):
             if not rows:
                 return ToolResult(True, "אין לי זיכרונות שמורים.", {"items": []})
             return ToolResult(True, "; ".join(r["text"] for r in rows),
-                              {"items": [{"id": r["id"], "text": r["text"]} for r in rows]})
+                              {"items": [{"id": r["id"], "text": r["text"], "source": r.get("source", "user"),
+                                          "learned": r["created"][:10]} for r in rows]})
 
         async def forget(a: ForgetArgs):
             if a.id is not None:
