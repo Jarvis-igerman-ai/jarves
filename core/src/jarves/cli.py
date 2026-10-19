@@ -257,9 +257,12 @@ def _background_spawn(home: Path, show: bool) -> None:
     if sys.platform == "win32":
         flags = (subprocess.DETACHED_PROCESS | subprocess.CREATE_NEW_PROCESS_GROUP | subprocess.CREATE_NO_WINDOW)
     cmd = core_command(["--show"] if show else [])
-    subprocess.Popen(cmd, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
-                     close_fds=True, creationflags=flags, start_new_session=sys.platform != "win32",
-                     cwd=str(home))
+    kw = dict(stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, close_fds=True,
+              start_new_session=sys.platform != "win32", cwd=str(home))
+    try:        # leave `uv run`'s job object, or the Core would be killed when this short command exits
+        subprocess.Popen(cmd, creationflags=flags | getattr(subprocess, "CREATE_BREAKAWAY_FROM_JOB", 0), **kw)
+    except OSError:
+        subprocess.Popen(cmd, creationflags=flags, **kw)
 
 
 def cmd_start(a, cfg, home) -> int:

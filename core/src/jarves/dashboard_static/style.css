@@ -150,3 +150,7 @@ textarea.file { width: 100%; min-height: 50vh; font: 13px/1.55 ui-monospace, Con
 /* Features page (WP-I): on/off switch */
 .switch { min-width: 52px; border-radius: 999px; }
 .switch[aria-pressed="true"] { background: var(--good); border-color: var(--good); color: #fff; }
+
+/* Home (M1 runtime): controls + voice side by side */
+.grid2.home { grid-template-columns: 1fr 1fr; margin-bottom: 14px; }
+@media (max-width: 760px) { .grid2.home { grid-template-columns: 1fr; } }
