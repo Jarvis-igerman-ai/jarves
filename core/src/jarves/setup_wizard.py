@@ -69,7 +69,7 @@ GROUPS: tuple[tuple[str, str, str, tuple[str, ...]], ...] = (
     ("voice", "קול", "Voice", ("wake_word", "greeting", "chimes", "voice_change")),
     ("music", "מוזיקה", "Music", ("music",)),
     ("google", "גוגל", "Google", GOOGLE_FEATURES),
-    ("camera", "מצלמה ופרטיות", "Camera & privacy", ("camera", "face_recognition", "camera_when_away")),
+    ("camera", "מצלמה ופרטיות", "Camera & privacy", ("camera", "camera_preview", "face_recognition", "camera_when_away")),
     ("automation", "אוטומציה", "Automation", ("scheduler", "reports", "notes", "files", "proactive_alerts",
                                               "autonomy")),
     ("dashboard", "לוח בקרה וטלפון", "Dashboard & phone", ("dashboard", "dashboard_lan", "context_trace")),
@@ -226,7 +226,7 @@ def hint(fid: str, ok: bool, why: str) -> dict:
     if fid in GOOGLE_FEATURES:
         return {"command": "jarvis google start", "he": "צריך לחבר את גוגל:  jarvis google start",
                 "en": "Google must be connected:  jarvis google start"}
-    if fid in ("camera", "face_recognition", "camera_when_away"):
+    if fid in ("camera", "camera_preview", "face_recognition", "camera_when_away"):
         return {"he": "מצלמה: " + why, "en": "Camera: " + why}
     return {}
 
@@ -842,6 +842,7 @@ BUNDLE: dict[str, list[Callable[[], tuple[bool, str]]]] = {
     # SFace (38.7 MB) is downloaded, SHA256-pinned, on the first switch-on (feature_setup.prepare), not shipped.
     "face_recognition": [_mod("cv2"), _mod("jarves.camera.faces")],
     "camera_when_away": [_mod("cv2"), _mod("jarves.camera.presence")],
+    "camera_preview": [_mod("cv2"), _mod("jarves.camera.frames")],
     "wake_word": [_mod("sounddevice"), _mod("pyopen_wakeword"), _data("pyopen_wakeword", "models/hey_jarvis.tflite"),
                   _mod("jarves.voice.wake_train")],
     "greeting": [_mod("jarves.voice.tts")],
