@@ -167,6 +167,11 @@ func _on_message(t: String, p: Dictionary) -> void:
 	if t == "desktop.closed":
 		_close_ack = true
 		return
+	if t == "display.close":
+		# the Core hides the window ("hide yourself", tray, dashboard, Core quitting); the Core itself keeps running
+		if not _closing:
+			_close_desktop()
+		return
 	match t:
 		"face.set_state":
 			var st := _str(p.get("state"), "idle")

@@ -29,6 +29,10 @@ camera = [
     # camera itself uses the apt package python3-picamera2 (libcamera), not pip. Checked 2026-10-19 (PyPI).
     "opencv-python-headless>=4.12",
 ]
+tray = [
+    "pillow>=11",
+    "pystray>=0.19.5,<0.20",
+]
 
 [project.scripts]
 jarves = "jarves.cli:main"

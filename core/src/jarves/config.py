@@ -197,6 +197,16 @@ class CameraConfig(_Strict):
     vision_model: str = ""                              # "" = ai.text_model (gpt-6-luna, text+image input)
 
 
+class RuntimeConfig(_Strict):
+    """Always-on desktop runtime (SW-V2 M1, jarves/runtime/). The switches `background_core`, `tray_icon` and
+    `autostart` (jarvis features / dashboard) win over keep_running / tray once the user sets them."""
+    keep_running: bool = True             # closing the window only hides it; Quit (tray) / `jarvis stop` stop the Core
+    tray: bool = True                     # notification-area icon in background/desktop mode
+    viewer_exe: str = ""                  # Godot executable for the window ("" = GODOT_EXE / WinGet / PATH)
+    resume_gap_s: float = Field(30, ge=5, le=3600)   # wall-clock jump this large = the computer slept
+    mic_stall_s: float = Field(6, ge=0, le=60)       # wake mic silent (no frames at all) this long = re-open; 0 = off
+
+
 class Config(_Strict):
     assistant_name: str = "JARVES"
     # how the name is SAID (and written in Hebrew speech/greetings): the voice read the Latin "JARVES" letter by
@@ -210,6 +220,7 @@ class Config(_Strict):
     pricing: PricingConfig = PricingConfig()
     history: HistoryConfig = HistoryConfig()
     camera: CameraConfig = CameraConfig()
+    runtime: RuntimeConfig = RuntimeConfig()
 
 
 SECRET_KEYS = ("api_key", "apikey", "token", "secret", "password", "cookie")
