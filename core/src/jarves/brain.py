@@ -59,7 +59,9 @@ _RULES: list[tuple[str, re.Pattern, Callable[[re.Match], dict]]] = [
     ("get_status", re.compile(r"^(?:מה\s+המצב\s+שלך|סטטוס|בדיקת\s+מערכת|status|self[- ]?check)\??$", _FLAGS),
      lambda m: {}),
 ]
-_STRIP = re.compile(r"^(?:jarves|jarvis|ג'?ארב(?:י|ו)ס)[,\s]+|[.!?,\s]+$", _FLAGS)
+from .skills.google import INTENT_RULES as _GOOGLE_RULES   # WP-G: "מה יש לי מחר ביומן", "יש מיילים חשובים"
+_RULES += _GOOGLE_RULES
+_STRIP =re.compile(r"^(?:jarves|jarvis|ג'?ארב(?:י|ו)ס)[,\s]+|[.!?,\s]+$", _FLAGS)
 
 
 def match_intent(text: str) -> Intent | None:
@@ -475,6 +477,7 @@ class Brain:
         self.registry, self.agent = registry, agent
 
     async def respond(self, text: str) -> Reply:
+        self.registry.new_turn()           # WP-G: a new user turn (untrusted mail/calendar text no longer blocks actions)
         intent = match_intent(text)
         if intent and self.registry.get(intent.tool):
             # the deterministic parser matched the user's own words -> origin "user" (CR-03 policy)

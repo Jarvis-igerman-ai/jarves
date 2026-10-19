@@ -742,7 +742,42 @@ def cmd_diagnose(a, cfg, home) -> int:
     return 0
 
 
+def _cli_features(cfg, home):
+    from .features import Features
+    from .health import read_snapshot
+
+    def components() -> dict:
+        snap = read_snapshot(home / "health.json") or {}
+        return (snap.get("components") or {}) if snap.get("age_s", 1e9) < 120 else {}
+    return Features(cfg, home, components=components)
+
+
+def cmd_features(a, cfg, home) -> int:
+    """jarvis features [list | on ID | off ID | reset ID]: the user's switches (the running Core follows them)."""
+    from .features import CATALOG
+    f = _cli_features(cfg, home)
+    if a.action != "list":
+        if not a.id or a.id not in CATALOG:
+            print(f"unknown feature {a.id!r}. Known: {', '.join(CATALOG)}", file=sys.stderr)
+            return 2
+        s = f.reset(a.id) if a.action == "reset" else f.set(a.id, a.action == "on", by="cli")
+        when = {"live": "now", "next_session": "from the next conversation", "restart": "at the next Core start"}
+        print(f"{a.id}: {'on' if s['enabled'] else 'off'} (takes effect {when[s['applies']]})"
+              + ("" if s["available"] or not s["enabled"] else f"; not available: {s['reason']}"))
+        return 0
+    for s in f.list():
+        state = "ACTIVE" if s["active"] else ("off" if not s["enabled"] else "unavailable")
+        print(f"{s['id']:<22} {state:<12} {s['risk']:<7} {s['title_en']}"
+              + (f"  - {s['reason']}" if s["reason"] and not s["active"] else "")
+              + (f"  [from {s['source']}]" if s["source"] != "default" else ""))
+    print("change: jarvis features on|off|reset ID   (or the dashboard Features page)")
+    return 0
+
+
 def cmd_dashboard(a, cfg, home) -> int:
+    if not _cli_features(cfg, home).enabled("dashboard"):
+        print("The dashboard is switched off. Turn it on with: jarvis features on dashboard", file=sys.stderr)
+        return 1
     from .dashboard import Dashboard
     dash = Dashboard(home, cfg, a.port)
     print(f"JARVES dashboard (this computer only; the link holds a one-time key, do not share it):\n  {dash.url}\n"
@@ -795,7 +830,9 @@ def main(argv: list[str] | None = None) -> int:
     g = sub.add_parser("chatgpt", help="connect / disconnect your ChatGPT plan (Sign in with ChatGPT)")
     g.add_argument("action", choices=["login", "logout", "status", "models"])
     g.add_argument("--forget", action="store_true", help="logout: also forget this app registration")
-    wk = sub.add_parser("wake", help="calibrate the \"Hey Jarvis\" wake word to your voice and microphone")
+    from .google_auth import add_cli as add_google_cli, cmd_google
+    add_google_cli(sub)                       # WP-G: jarvis google login / status / logout
+    wk = sub.add_parser("wake",help="calibrate the \"Hey Jarvis\" wake word to your voice and microphone")
     wk.add_argument("action", choices=["test"])
     wk.add_argument("--seconds", type=int, default=20)
     wk.add_argument("--apply", action="store_true", help="save the recommended threshold to config.toml")
@@ -817,6 +854,9 @@ def main(argv: list[str] | None = None) -> int:
     db = sub.add_parser("dashboard", help="local web dashboard: conversations, costs, issues, memory, skills")
     db.add_argument("--port", type=int, default=0, help="default: a free port")
     db.add_argument("--no-open", action="store_true", help="do not open the browser")
+    fe = sub.add_parser("features", help="feature switches: list / on ID / off ID / reset ID")
+    fe.add_argument("action", nargs="?", default="list", choices=["list", "on", "off", "reset"])
+    fe.add_argument("id", nargs="?")
     dg = sub.add_parser("diagnose", help="self-diagnosis: find problems in recent conversations")
     dg.add_argument("--days", type=int, default=30)
     dg.add_argument("--import-log", nargs="?", const="", default=None, metavar="PATH",
@@ -832,7 +872,7 @@ def main(argv: list[str] | None = None) -> int:
     return {"run": cmd_run, "stop": cmd_stop, "status": cmd_status, "diag": cmd_diag, "memory": cmd_memory, "music": cmd_music,
             "ask": cmd_ask, "say": cmd_say, "chatgpt": cmd_chatgpt, "setup": cmd_setup, "logs": cmd_logs, "key": cmd_key,
             "wake": cmd_wake, "doctor": cmd_doctor, "cost": cmd_cost, "dashboard": cmd_dashboard,
-            "diagnose": cmd_diagnose}[a.cmd](a, cfg, home)
+            "diagnose": cmd_diagnose, "features": cmd_features, "google": cmd_google}[a.cmd](a, cfg, home)
 
 
 if __name__ == "__main__":

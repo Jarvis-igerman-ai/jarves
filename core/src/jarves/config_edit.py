@@ -20,29 +20,27 @@ from .config import Config, ConfigError, _find_secrets
 
 BACKUPS = 10
 # key -> (group, plain-language label). Never: keys, links, devices, model routing that changes billing silently.
+# On/off switches that are features (greeting, chimes, background tasks, AI review, wake word...) live on the
+# dashboard Features page (features.py), not here, so there is one switch per thing.
 EDITABLE: dict[str, tuple[str, str]] = {
     "voice.backend_deadline_s": ("Conversation", "Give up on a stuck lookup after (s), then retry once"),
     "voice.idle_disconnect_s": ("Conversation", "End a quiet conversation after (s)"),
-    "voice.greeting": ("Conversation", "Say hello when the face connects"),
     "voice.greeting_delay_s": ("Conversation", "Pause before the hello (s)"),
     "voice.progress_after_s": ("Conversation", "Say \"still checking\" after (s) of a silent lookup (0 = never)"),
     "voice.session_max_s": ("Conversation", "Longest single conversation (s)"),
     "voice.half_duplex": ("Conversation", "Mute the mic while JARVES speaks (laptop speakers)"),
-    "voice.chime": ("Wake word", "Soft sound when \"Hey Jarvis\" is heard"),
     "voice.wake_threshold": ("Wake word", "Wake-word sensitivity threshold (lower = more sensitive)"),
     "voice.wake_no_speech_s": ("Wake word", "Close a wake with no speech after (s)"),
     "ai.daily_request_limit": ("Cost limits", "AI requests per day (hard ceiling)"),
     "ai.daily_realtime_minutes": ("Cost limits", "Voice minutes per day (hard ceiling)"),
     "ai.voice_service_tier": ("AI", "Backend speed tier for spoken lookups (priority = Fast, 2x price)"),
     "ai.voice_reasoning_effort": ("AI", "Backend reasoning effort for spoken lookups"),
-    "ai.tasks_enabled": ("AI", "Background research tasks"),
     "ai.task_timeout_s": ("AI", "Background task time limit (s)"),
     "music.max_volume": ("Music", "Maximum music volume (%)"),
     "music.volume_step": ("Music", "Louder / quieter step (%)"),
     "log.privacy": ("Privacy & logs", "Privacy mode: never keep what was said (logs, history)"),
     "log.level": ("Privacy & logs", "Log file level"),
     "history.keep_days": ("Privacy & logs", "Keep conversation history for (days)"),
-    "history.llm_review": ("Self-diagnosis", "AI review after each conversation (one small request)"),
     "history.llm_review_daily_max": ("Self-diagnosis", "AI reviews per day at most"),
     "history.dead_air_s": ("Self-diagnosis", "Flag silence longer than (s)"),
     "history.stall_s": ("Self-diagnosis", "Flag a request without an answer after (s)"),

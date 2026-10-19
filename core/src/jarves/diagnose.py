@@ -354,10 +354,28 @@ def review_input(store: Store, sid: str) -> str | None:
     return "Already found:\n" + ("\n".join(f"- {k}" for k in known) or "- nothing") + "\n\nConversation:\n" + text
 
 
+REVIEW_FEATURE = "diagnosis_llm_pass"         # jarves.features switch (WP-I); its default is history.llm_review
+
+
+def _features(store: Store, cfg):
+    """The feature switches of the store's data dir (features.json, shared with the Core / CLI / dashboard)."""
+    f = getattr(store, "_features", None)
+    if f is None:
+        try:
+            from .features import Features
+        except ImportError:
+            return None
+        f = store._features = Features(cfg, Path(store.path).parent) if store.path != ":memory:" else Features(cfg)
+    return f
+
+
 def review_skip_reason(store: Store, cfg, sid: str, *, have_client: bool = False) -> str | None:
     from .config import api_billing_allowed
     h = cfg.history
-    if not h.llm_review:
+    feats = _features(store, cfg)
+    if feats is not None and not feats.enabled(REVIEW_FEATURE):
+        return f"the feature {REVIEW_FEATURE} is switched off (dashboard Features page)"
+    if feats is None and not h.llm_review:
         return "history.llm_review is off"
     if cfg.log.privacy:
         return "log.privacy is on (the review needs the transcript)"

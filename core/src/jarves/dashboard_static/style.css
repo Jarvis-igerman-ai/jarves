@@ -147,3 +147,6 @@ textarea.file { width: 100%; min-height: 50vh; font: 13px/1.55 ui-monospace, Con
   nav { flex-direction: row; flex-wrap: wrap; } .side-foot { display: none; }
   main { padding: 16px; } .msg { max-width: 92%; } .grid2, .kv { grid-template-columns: 1fr; }
 }
+/* Features page (WP-I): on/off switch */
+.switch { min-width: 52px; border-radius: 999px; }
+.switch[aria-pressed="true"] { background: var(--good); border-color: var(--good); color: #fff; }

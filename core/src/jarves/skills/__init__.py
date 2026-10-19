@@ -14,6 +14,9 @@ Permission policy (Issue #9 CR-03), enforced centrally in `SkillRegistry.call`, 
 - missing/unknown permission - denied by default.
 
 A tool's `confirm` prompt, when set, is always asked (any origin).
+Untrusted content (WP-G): after a tool with `untrusted_output` (mail, calendar text written by others) returned in
+the current user turn, the registry refuses model-origin action/destructive tools (TOOL_UNTRUSTED_TURN) until the
+user speaks again (`new_turn`), so text inside a mail can never trigger a side effect by itself.
 Action/destructive handlers run shielded from cancellation of the calling turn (the timeout still applies), so a
 pre-empted turn or a shutdown never aborts a half-done side effect; read tools stay normally cancellable.
 """
@@ -21,6 +24,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import time
 from dataclasses import dataclass, field
 from typing import Any, Awaitable, Callable, Literal
 
@@ -37,6 +41,7 @@ DEFAULT_ALLOWED_ACTIONS = frozenset({"remember", "music_play", "music_pause", "m
                                      "music_stop", "music_volume", "music_mute", "music_unmute",
                                      # settings Skill: one appended line (backed up, undoable) / allowlisted keys
                                      "workspace_note", "set_voice", "set_setting"})
+UNTRUSTED_GRACE_S = 3.0    # see SkillRegistry.new_turn
 
 
 @dataclass
@@ -68,6 +73,7 @@ class Tool:
     confirm: str | None = None         # if set, the user must approve this prompt first (any origin)
     timeout_s: float = 10.0
     impact: ImpactFn | None = None     # destructive tools: how many records this call would affect
+    untrusted_output: bool = False     # returns third-party text (mail, calendar): see SkillRegistry.new_turn
 
     @property
     def side_effect(self) -> bool:     # read-only view of the old flag
@@ -101,7 +107,17 @@ class SkillRegistry:
         self.disabled = disabled or set()
         self.allowed_actions = set(DEFAULT_ALLOWED_ACTIONS if allowed_actions is None else allowed_actions)
         self.confirm: ConfirmFn = _deny       # replaced by the Core (asks the user via Godot/voice)
+        # feature switches (features.py): (skill, tool) -> None to offer/run it, or why the feature is not active
+        self.gate: Callable[[str, str], str | None] | None = None
         self._inflight: set[asyncio.Future] = set()
+        self._untrusted_at: float | None = None   # monotonic time untrusted text entered this turn
+        self.clock = time.monotonic
+
+    def new_turn(self) -> None:
+        """The user said something new: side effects are allowed again. A taint younger than UNTRUSTED_GRACE_S is
+        kept: a voice transcript can complete just after the tool of that same turn returned."""
+        if self._untrusted_at is not None and self.clock() - self._untrusted_at >= UNTRUSTED_GRACE_S:
+            self._untrusted_at = None
 
     def register(self, skill: Skill) -> None:
         if skill.name in self.skills:
@@ -115,12 +131,23 @@ class SkillRegistry:
             self._tools[t.name] = (skill, t)
         logs.info("skills", "SKILL_REGISTERED", f"skill {skill.name} registered", tools=[t.name for t in tools])
 
+    def _gated(self, skill: Skill, tool: Tool) -> str | None:
+        if self.gate is None:
+            return None
+        try:
+            return self.gate(skill.name, tool.name)
+        except Exception:          # a broken switch check must not hide every tool or crash a turn
+            logs.error("skills", "FEATURE_GATE_FAILED", f"feature check failed for {tool.name}", exc=True)
+            return None
+
     def tools(self) -> list[Tool]:
-        return [t for s, t in self._tools.values() if s.name not in self.disabled]
+        """Tools offered to the model: disabled Skills and inactive features are left out (read at each call, so a
+        switch flipped mid-conversation shows on the next tool list)."""
+        return [t for s, t in self._tools.values() if s.name not in self.disabled and self._gated(s, t) is None]
 
     def get(self, name: str) -> Tool | None:
         st = self._tools.get(name)
-        return st[1] if st and st[0].name not in self.disabled else None
+        return st[1] if st and st[0].name not in self.disabled and self._gated(*st) is None else None
 
     async def _authorize(self, tool: Tool, args: BaseModel, origin: str) -> ToolResult | None:
         """None = allowed to run; otherwise the refusal to return."""
@@ -130,6 +157,11 @@ class SkillRegistry:
             logs.warn("skills", "TOOL_FORBIDDEN", f"{tool.name} is not authorized by policy; denied",
                       tool=tool.name, permission=str(perm), origin=str(origin))
             return ToolResult(False, f"{tool.name} is not allowed", code="TOOL_FORBIDDEN")
+        if perm != "read" and origin == "model" and self._untrusted_at is not None:
+            logs.warn("skills", "TOOL_UNTRUSTED_TURN", f"{tool.name} refused: mail/calendar text was read this turn",
+                      tool=tool.name)
+            return ToolResult(False, "I just read mail or calendar text written by others, so I take no action in "
+                              "this turn. Ask the user to say the request again.", code="TOOL_UNTRUSTED_TURN")
         prompt = tool.confirm
         if perm == "destructive":
             count, impact_prompt = (await tool.impact(args)) if tool.impact else (None, "")
@@ -162,6 +194,10 @@ class SkillRegistry:
         skill, tool = st
         if skill.name in self.disabled:
             return ToolResult(False, f"skill {skill.name} is disabled", code="SKILL_DISABLED")
+        off = self._gated(skill, tool)
+        if off is not None:        # the model may still hold an older tool list: refuse truthfully
+            logs.info("skills", "FEATURE_OFF", f"{name} refused: {off}", tool=name)
+            return ToolResult(False, f"not available: {off}", code="FEATURE_OFF")
         try:
             if isinstance(raw_args, str):
                 raw_args = json.loads(raw_args or "{}")
@@ -183,6 +219,8 @@ class SkillRegistry:
         except Exception as e:  # a broken Skill must never take down the Core
             logs.error("skills", "TOOL_CRASH", f"{name} raised", exc=True)
             res = ToolResult(False, f"{name} failed: {type(e).__name__}", code="TOOL_CRASH")
+        if tool.untrusted_output and res.ok:
+            self._untrusted_at = self.clock()
         log = logs.info if res.ok else logs.warn
         log("skills", "TOOL_RESULT", f"{name} -> {res.code}", tool=name, ok=res.ok, origin=origin)
         return res

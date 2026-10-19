@@ -39,7 +39,7 @@ STATIC = Path(__file__).with_name("dashboard_static")
 COOKIE = "jarves_dash"
 _EMAIL = re.compile(r"[\w.+-]+@[\w-]+\.[\w.-]+")
 _ROUTES: list[tuple[str, re.Pattern, object]] = []
-PLUGIN_MODULES = ("jarves.workspace", "jarves.curator", "jarves.memory", "jarves.features")
+PLUGIN_MODULES = ("jarves.workspace", "jarves.curator", "jarves.memory", "jarves.features", "jarves.google_auth")
 MEMORY_UNDO_KEEP = 30
 
 
@@ -96,6 +96,11 @@ class Ctx:
         if self._settings is None:
             from .skills.settings import Settings
             self._settings = Settings(self.memory, {"voice.voice": self.cfg.voice.voice})
+            try:                                      # curator.* are feature switches (WP-I features.py)
+                from .features import _ctx_features
+                self._settings.features = _ctx_features(self)
+            except ImportError:
+                pass
         return self._settings
 
     def close(self) -> None:
