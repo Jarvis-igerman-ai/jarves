@@ -58,7 +58,10 @@ def test_session_config_passes_backend_speed_settings():
 def test_front_instructions_answer_directly_and_use_the_clock():
     text = make()[0].session_config()["instructions"]
     assert "ANSWER DIRECTLY" in text and "[clock]" in text
-    assert "the time" not in text.split("Delegate to the backend only for:")[1].split("\n")[0]
+    delegate = text.split("Delegate to the backend for:")[1].split("\n\n")[0]
+    assert "the time" not in delegate.split("\n")[0]
+    # QA 19 Oct (suite_voice): answered in its head, GPT-Live said 23+19 = 32 and 125+75 = 195
+    assert "ANY calculation" in delegate and "simple maths" not in text
 
 
 def test_clock_note_has_time_day_and_date():
@@ -91,6 +94,7 @@ async def test_rejected_clock_context_is_switched_off_without_degrading():
 
 async def test_progress_note_once_when_lookup_is_slow_and_silent(monkeypatch):
     monkeypatch.setattr(live_mod, "PROGRESS_SILENCE_S", 0.0)
+    monkeypatch.setattr(live_mod, "PROGRESS_MIN_RESPONSE_S", 0.0)
     lv, sent, _ = make(progress_after_s=0.05)
     await lv._backend_event({"type": "response.created"}, "d1")
     await asyncio.sleep(0.2)
@@ -105,6 +109,7 @@ async def test_progress_note_once_when_lookup_is_slow_and_silent(monkeypatch):
 async def test_very_slow_lookup_gets_a_second_different_note(monkeypatch):
     monkeypatch.setattr(live_mod, "PROGRESS_SILENCE_S", 0.0)
     monkeypatch.setattr(live_mod, "PROGRESS_AGAIN_S", 0.1)
+    monkeypatch.setattr(live_mod, "PROGRESS_MIN_RESPONSE_S", 0.0)
     lv, sent, _ = make(progress_after_s=0.02)
     await lv._backend_event({"type": "response.created"}, "d1")
     await asyncio.sleep(0.6)

@@ -205,6 +205,7 @@ class Core:
         if self.music is not None and hasattr(self.music.player, "close"):
             await self.music.player.close()
         self.memory.close()
+        self.budget.close()          # QA 19 Oct (suite_voice): its own SQLite handle kept memory.db locked after stop
         self.health.mark("stopped")
         logs.info("core", "CORE_STOPPED", "Core stopped cleanly")
 
@@ -589,6 +590,11 @@ class Core:
     async def _start_live(self, *, greeting: str | None = None, hold_output: bool = False, ack: bool = False) -> None:
         if self.stopping:
             return
+        if self.live is not None or self._voice_connecting:
+            # QA 19 Oct (suite_voice): a face connecting after a failed startup started a SECOND live session while
+            # the first was still open (two billed sessions, one never heard). One conversation at a time.
+            logs.info("voice", "LIVE_ALREADY_RUNNING", "a live conversation is already open; not starting another")
+            return
         await self.link.send_face("assistant.activity", {"text": "Loading voice connection..."})
         if self._voice_budget_left_s() <= 0:
             await self.notify_error("VOICE_BUDGET", "daily live-voice limit reached",
@@ -740,6 +746,12 @@ class Core:
             self._startup_stage("ready", "Ready. Opening the room...")
         except BaseException:
             self._startup_stage("failed", "Startup failed; the room remains closed. See logs / jarvis status.")
+            if self.live is not None:               # a half-ready session must not stay open (and billed) unheard
+                live, self.live = self.live, None
+                try:
+                    await asyncio.wait_for(live.stop(), 8)
+                except Exception:
+                    logs.warn("voice", "LIVE_STOP_FAILED", "half-started live voice did not stop cleanly")
             raise
 
     def _maybe_cache(self, ckey, saved) -> None:
@@ -929,9 +941,18 @@ class Core:
         fut = asyncio.get_running_loop().create_future()
         self._confirm[cid] = (fut, face_id)
         await self.link.send_face("confirm.request", {"id": cid, "prompt": prompt})
+        live = self.live
+        if live is not None and hasattr(live, "confirm_pending"):
+            try:                                    # voice-only user: JARVES says "approve it on the screen"
+                await live.confirm_pending(prompt)
+            except Exception:
+                logs.warn("voice", "LIVE_CONFIRM_NOTE_FAILED", "could not tell the voice session about the confirmation")
         try:
             return await asyncio.wait_for(fut, timeout)
         except asyncio.TimeoutError:
+            logs.info("core", "CONFIRM_TIMEOUT", "no answer to the confirmation: treated as NO", timeout_s=timeout)
             return False
         finally:
             self._confirm.pop(cid, None)
+            if live is not None and hasattr(live, "confirm_done"):
+                live.confirm_done()

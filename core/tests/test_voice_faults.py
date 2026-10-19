@@ -6,6 +6,7 @@ import time
 from types import SimpleNamespace
 
 import pytest
+from conftest import drain_tools
 
 from jarves.budget import Budget, BudgetExceeded
 from jarves.config import AIConfig
@@ -558,6 +559,7 @@ async def test_continuation_reserved_before_send_and_counted_on_failure(tmp_path
         "type": "response.output_item.done",
         "item": {"type": "function_call", "name": "get_time", "call_id": "c1", "arguments": "{}"}}})
     assert b.held("ai_requests") == held_before + 1                           # reserved before response.create
+    await drain_tools(lv)
     assert ("response.create", None) in client.conn.sent
     await lv.handle_event(done(1))
     await lv.handle_event({"type": "response.event", "delegation_id": "d1", "event": {"type": "response.failed"}})
@@ -582,6 +584,7 @@ async def test_tool_call_within_budget_runs(tmp_path):
     await lv.handle_event({"type": "response.event", "delegation_id": "d1", "event": {
         "type": "response.output_item.done",
         "item": {"type": "function_call", "name": "get_time", "call_id": "c1", "arguments": "{}"}}})
+    await drain_tools(lv)
     assert json.loads(client_conn.sent[0][1]["output"])["ok"] and client_conn.sent[1][0] == "response.create"
 
 

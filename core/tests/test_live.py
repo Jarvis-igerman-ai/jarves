@@ -1,6 +1,8 @@
 """GPT-Live adapter: session config and delegated function-call round trip (offline, fake connection)."""
 import json
 
+from conftest import drain_tools
+
 from jarves.memory import MemoryStore
 from jarves.skills import SkillRegistry
 from jarves.skills.builtin import ClockSkill, MemorySkill
@@ -55,6 +57,7 @@ async def test_delegated_function_call_runs_skill_and_resumes(tmp_path):
         "type": "response.output_item.done",
         "item": {"type": "function_call", "name": "remember", "call_id": "c1",
                  "arguments": json.dumps({"text": "אני גר בחיפה"})}}})
+    await drain_tools(lv)
     assert mem.search("חיפה")
     kind, item = lv.conn.sent[0]
     assert kind == "response.item.create" and item["call_id"] == "c1" and json.loads(item["output"])["ok"]

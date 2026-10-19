@@ -43,7 +43,8 @@ RATE = 24000
 SPEECH_RMS = 0.004
 PAUSE_KEEP_S = 0.6        # silence this soon after speech is a pause INSIDE the utterance: keep it, else drop it
 CHUNK_BYTES = 4800          # 100 ms of PCM16 mono @ 24 kHz
-BARGE_IN_MIN_S = 0.5        # assistant audio must have been playing this long before a new user utterance flushes it
+ENERGY_EXTEND_S = 30.0      # loud mic input without any transcribed speech keeps a session open at most this long
+BARGE_IN_MIN_S = 0.5       # assistant audio must have been playing this long before a new user utterance flushes it
 
 # Tuned 2026-10-19 against the Live prompting guide (developers.openai.com/api/docs/guides/live-prompting) and
 # measured with tools/silent_live.py: see docs/reviews/LIVE_CONVERSATION_TUNING.md.
@@ -53,15 +54,18 @@ friend in a real conversation: a composed masculine voice, relaxed natural pace,
 Keep it short: usually one or two sentences. No lecturing, no lists, no preambles ("שאלה מצוינת"), do not repeat
 the question back. At most one short follow-up question, only when it really helps.
 ANSWER DIRECTLY, without delegating, whenever no fresh fact or action is needed: greetings, small talk, jokes,
-feelings and emotional support, opinions, simple maths, general knowledge you are sure of, and anything said
-earlier in this conversation. Silent [clock] notes give the current local time and date: use the latest one to
-answer time and date questions directly.
-Delegate to the backend only for: current or changing facts (news, weather, prices, sports, who holds an office
-now), web lookups, music control, remembering / recalling / forgetting things for the user, JARVES status and
-connected services, and questions about your skills.
+feelings and emotional support, opinions, general knowledge you are sure of, and anything said earlier in this
+conversation. Silent [clock] notes give the current local time and date: use the latest one to answer time and
+date questions directly.
+Delegate to the backend for: ANY calculation with a number above ten (it computes exactly; never do sums in your
+head, say only "רגע"), current or changing facts (news, weather, prices, sports, who holds an office now), web
+lookups, music control, remembering / recalling / forgetting things for the user, JARVES status and connected
+services, and questions about your skills.
 Before a web lookup say ONE short natural sentence that names what you are checking, worded differently each
 time ("רגע, אני בודק מה מזג האוויר בתל אביב", "שנייה, בוא נראה מה הכותרות היום"), then wait quietly.
 For quick actions (memory, music, status) delegate with at most a word or two ("סגור").
+Deleting or forgetting needs the user's approval on the screen first: before the result say only "רגע", never
+"deleting it now" or "done"; then say plainly whether it was deleted or not.
 Never guess a result while waiting and never claim an action happened until the backend confirms it. When the
 result arrives, give just the answer, briefly, without another acknowledgement.
 Feelings: laugh softly ("חה חה") at the user's jokes and after the punchline of your own; be gentle and caring
@@ -69,7 +73,9 @@ with sad news; sound happy for good news. Natural and brief, never theatrical.
 Say numbers, times and dates the way Israelis say them aloud (14:30 -> "שתיים וחצי", 347 -> "שלוש מאות
 ארבעים ושבע").
 Keep listening while the user pauses to think; do not treat a cough or background noise as a request.
-If a question sounds cut off, wait a moment for the rest instead of answering the fragment. NEVER say you are
+If a question sounds cut off, wait a moment for the rest instead of answering the fragment. When the user tells
+a longer story, stay completely silent until they finish or ask something: no "I'm listening", no "mm", no
+comments in their pauses (your voice mutes their microphone, so anything you say cuts them off). NEVER say you are
 checking something unless you start that lookup in the same turn: announcing a check without delegating is a bug."""
 
 # Errors after which the session cannot do useful work -> end it (others: log + degraded + continue).
@@ -141,6 +147,11 @@ PROGRESS_NOTE_AGAIN = ("The lookup is taking a little longer. In a few light, na
                        "moment longer (for example 'זה לוקח רגע יותר, עוד קצת'). Do not repeat your earlier words "
                        "and do not guess the answer.")
 PROGRESS_AGAIN_S = 4.0     # a second note only after this much more silence
+PROGRESS_MIN_RESPONSE_S = 1.5   # the CURRENT backend response must have run this long (fast continuations: none)
+CONFIRM_NOTE_AFTER_S = 2.5      # an on-screen approval still unanswered after this long gets ONE spoken hint
+CONFIRM_NOTE = ("A tool is waiting for the user's approval on the screen and will NOT run without it. In a few "
+                "natural Hebrew words ask the user to approve it on the screen (for example 'צריך את האישור שלך "
+                "על המסך'). Do not say it is done and do not guess the outcome.")
 
 
 def clock_note(now=None) -> str:
@@ -210,10 +221,15 @@ class SessionLifecycle:
         while self.running:
             await asyncio.sleep(min(1.0, self.idle_disconnect_s))
             audio = getattr(self, "audio_io", None)
-            if (self._backend_busy or time.monotonic() < self._speaking_until
+            if (self._backend_busy or getattr(self, "_tools_running", 0) or time.monotonic() < self._speaking_until
                     or (audio is not None and audio.queued_s() > 0)):
                 self.note_activity()
-            elif time.monotonic() - self._last_activity >= self.idle_disconnect_s:
+            # Mic energy alone (fan, TV, coughs) extends the session at most ENERGY_EXTEND_S past the last REAL
+            # activity (speech transcribed, JARVES speaking, backend/tool work). QA 19 Oct (suite_voice): a session
+            # opened by a false wake stayed open 3 min 16 s on room noise instead of ending after 15 s.
+            energy = min(getattr(self, "_last_energy", 0.0), self._last_activity + ENERGY_EXTEND_S)
+            if time.monotonic() - max(self._last_activity, energy) >= self.idle_disconnect_s and not (
+                    self._backend_busy or getattr(self, "_tools_running", 0)):
                 logs.info(self._log_area, "VOICE_IDLE", "quiet conversation returned to local wake listening")
                 self._request_end("idle")
                 return
@@ -399,6 +415,8 @@ class LiveVoice(SessionLifecycle):
         self._input_closed = False
         self._end_after_answer = False
         self._budget_settled = False
+        self._tools_running = 0         # Skill calls in flight (run in their own task, never blocking events)
+        self._confirm_pending = False   # a destructive tool waits for the user's approval on the screen
 
     def session_config(self) -> dict:
         tools: list[dict] = live_tools(self.registry)
@@ -422,9 +440,14 @@ class LiveVoice(SessionLifecycle):
             "delegation": {"type": "responses", "responses": responses},
         }
         if self.greeting:
+            # The first [clock] note travels INSIDE the greeting message: QA 19 Oct (suite_voice) found that a
+            # session.thinking.append sent right after session.started suppressed the pending greeting (no audio
+            # for 15+ s, startup failed) until the next clock note, a minute later, nudged the model.
+            clock = f" {clock_note()}" if self.clock_context else ""
             config["input"] = [{"type": "message", "role": "developer", "content": [{
                 "type": "input_text", "text": f"Greet now in natural Israeli Hebrew. Say: {self.greeting} "
-                                               "Begin immediately, then pause and listen. Do not delegate this greeting."}]}]
+                                               "Begin immediately, then pause and listen. Do not delegate this greeting."
+                                               f"{clock}"}]}]
         return config
 
     async def wait_ready(self, timeout: float = 15) -> None:
@@ -530,6 +553,14 @@ class LiveVoice(SessionLifecycle):
         """Once a minute: the local time as SILENT context (no speech, no backend call). Never ends the session."""
         from datetime import datetime
         last = ""
+        if self.greeting:
+            # the greeting message already carries this minute's clock; send nothing until the greeting was spoken
+            # (an extra event before it suppresses the greeting, see session_config)
+            last = datetime.now().strftime("%Y%m%d%H%M")
+            deadline = time.monotonic() + 45
+            while self.running and time.monotonic() < deadline and (
+                    not self._first_audio.is_set() or time.monotonic() < self._speaking_until + 1.0):
+                await asyncio.sleep(0.25)
         while self.running:
             now = datetime.now()
             if now.strftime("%Y%m%d%H%M") != last and self.clock_context:
@@ -552,7 +583,13 @@ class LiveVoice(SessionLifecycle):
         while self.running and self._backend_busy and time.monotonic() < deadline and sent < len(notes):
             if self.progress_after_s <= 0:          # switched off (rejected by the server)
                 return
-            if time.monotonic() - max(self._speaking_until, self._last_speech_t, last_req) >= need:
+            # QA 19 Oct (suite_voice): a note requested 50 ms before a fast continuation finished was spoken INSTEAD
+            # of the answer ("almost ready", then nothing). Only a response that has itself run a while gets one,
+            # and never while the user is being asked to approve something on the screen.
+            t0 = getattr(self, "_backend_t0", None)
+            young = t0 is None or time.monotonic() - t0 < PROGRESS_MIN_RESPONSE_S
+            if (not young and not self._confirm_pending
+                    and time.monotonic() - max(self._speaking_until, self._last_speech_t, last_req) >= need):
                 self._stats["progress_notes"] = self._stats.get("progress_notes", 0) + 1
                 logs.info("live", "LIVE_PROGRESS", "slow lookup: short progress note requested", n=sent + 1)
                 try:
@@ -592,7 +629,7 @@ class LiveVoice(SessionLifecycle):
                 from .wakeword import level_meter
                 await _call(self.on_level, 0.0 if gated else level_meter(chunk))
             if not gated and level > 0.015:
-                self.note_activity()
+                self._last_energy = time.monotonic()      # bounded by ENERGY_EXTEND_S (see _idle_watchdog)
             await self.conn.session.input_audio.append(audio=base64.b64encode(silence if gated else chunk).decode())
             sent += 1
             silenced += gated
@@ -800,15 +837,27 @@ class LiveVoice(SessionLifecycle):
             await asyncio.sleep(delay)
         except asyncio.CancelledError:
             return
-        self._flush_transcripts()
+        self._flush_task = None                 # a new delta must not cancel the send below
+        # QA 19 Oct (suite_voice): the answer text reached the face only when the user spoke AGAIN (one turn late,
+        # the last answer never). The quiet-time flush now also sends it to the screen.
+        for role, text in self._flush_transcripts():
+            if self.on_transcript is not None and self.running:
+                try:
+                    await self.on_transcript(role, text)
+                except Exception as e:
+                    logs.debug("live", "LIVE_TRANSCRIPT_SEND_FAILED", f"transcript not sent: {type(e).__name__}")
 
-    def _flush_transcripts(self) -> None:
+    def _flush_transcripts(self) -> list[tuple[str, str]]:
+        out = []
         if self._in_text.strip():
             logs.info("live", "LIVE_USER_SAID", "you said (as GPT-Live heard it)", text=self._in_text.strip())
+            out.append(("user", self._in_text.strip()))
             self._in_text = ""
         if self._out_text.strip():
             logs.info("live", "LIVE_JARVES_SAID", "JARVES said", text=self._out_text.strip())
+            out.append(("assistant", self._out_text.strip()))
             self._out_text = ""
+        return out
 
     async def _emote(self, role: str, text: str) -> None:
         """Face reaction to what was said (laugh at a joke, cry at sad news...). Same reaction at most every 5 s."""
@@ -909,19 +958,54 @@ class LiveVoice(SessionLifecycle):
                                                                "output": res.to_model()})
                     await self._budget_exhausted(f"tool {name}")   # no response.create: that would be paid
                     return
-            await self._tool_activity(name, None)
-            res = await self.registry.call(name, item.get("arguments") or "{}")
-            await self._tool_activity(name, res)
-            await self.conn.response.item.create(item={"type": "function_call_output", "call_id": call_id,
-                                                       "output": res.to_model()})
-            if nxt is not None:
-                self._pending.append(nxt)
-            try:
-                await self.conn.response.create()
-            except Exception:
-                if nxt is not None and nxt in self._pending:
-                    self._pending.remove(nxt)
-                    nxt.commit()                # send outcome unknown -> counted (conservative)
-                raise
+                self._pending.append(nxt)       # FIFO after this response's own unit; an end-after-answer waits
+            # QA 19 Oct (suite_voice): the Skill ran INSIDE the event loop, so a 20 s confirmation (or a slow tool)
+            # froze all audio, transcripts and usage events. It now runs in its own task.
+            self._tools_running += 1
+            state = {"sent": False}
+            t = self._spawn(self._run_tool(name, call_id, item.get("arguments") or "{}", state), f"tool-{name}")
+            t.add_done_callback(lambda task: self._tool_finished(task, nxt, state))
         elif it == "error":
             await self._on_error(inner.get("error") or inner, True)
+
+    async def _run_tool(self, name: str, call_id: str, arguments: str, state: dict) -> None:
+        await self._tool_activity(name, None)
+        res = await self.registry.call(name, arguments)
+        await self._tool_activity(name, res)
+        await self.conn.response.item.create(item={"type": "function_call_output", "call_id": call_id,
+                                                   "output": res.to_model()})
+        state["sent"] = True
+        await self.conn.response.create()
+
+    def _tool_finished(self, task: asyncio.Task, nxt, state: dict) -> None:
+        """Runs even when the task was cancelled before it started: settle the reserved continuation."""
+        self._tools_running = max(0, self._tools_running - 1)
+        self.note_activity()
+        failed = task.cancelled() or task.exception() is not None
+        if failed and nxt is not None and nxt in self._pending:
+            self._pending.remove(nxt)
+            nxt.commit() if state["sent"] else nxt.release()   # outcome unknown -> counted; never sent -> freed
+
+    async def confirm_pending(self, prompt: str) -> None:
+        """The Core is asking the user to approve a destructive tool on the screen. If it is still unanswered after
+        CONFIRM_NOTE_AFTER_S, JARVES says so (once). No progress notes meanwhile. QA 19 Oct: a note sent at once was
+        spoken INSTEAD of the result when the user approved quickly, so a fast answer gets no note at all."""
+        self._confirm_pending = True
+        self._confirm_gen = getattr(self, "_confirm_gen", 0) + 1
+        if self.running and self.conn is not None:
+            self._spawn(self._confirm_note_later(self._confirm_gen), "confirm-note")
+
+    async def _confirm_note_later(self, gen: int) -> None:
+        await asyncio.sleep(CONFIRM_NOTE_AFTER_S)
+        if not (self.running and self._confirm_pending and gen == getattr(self, "_confirm_gen", 0)):
+            return
+        try:
+            await self.conn.session.commentary.append(content=CONFIRM_NOTE, delegation_id=None,
+                                                      event_id="jarves_progress_confirm")
+            logs.info("live", "LIVE_CONFIRM_NOTE", "asked the user to approve on the screen")
+        except Exception as e:
+            logs.warn("live", "LIVE_PROGRESS_FAILED", f"confirmation note not sent: {type(e).__name__}")
+
+    def confirm_done(self) -> None:
+        self._confirm_pending = False
+        self.note_activity()
