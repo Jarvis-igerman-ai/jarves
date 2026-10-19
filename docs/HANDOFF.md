@@ -19,6 +19,8 @@ Merged so far (436 tests pass): WP-A conversation quality, WP-B store/cost/dashb
 - Dashboard: opened on request by `jarvis` AND a face button; edit workspace files + delete learned facts, with undo.
 - Merge: PR from `swv2-integrate` -> main after green CI + independent agent review.
 
+- Spec (docs/JARVES_SW_V2_IMPLEMENTATION_SPEC.md) review decisions: Markdown Skills = extend our own SkillRegistry (no other agent's work exists); calendar may also create/update events with confirmation, NEVER delete; dashboard on home LAN with pairing+login; CI should build the Windows installer after a merged green PR and keep the 3 latest (M6); updates: notify + ask approval; Pear closed -> offer to start it; medium-risk features enabled by voice need on-screen approval; camera greeting off (configurable); email search says count + senders then asks before reading; keep httpx for Google; face model download after one confirmation; keep the camera indicator ring.
+
 ### Questions for the user
 - Listen to the warmer persona/greeting wording and the new voices (no GPT-Live voice is documented for Hebrew).
 ## Overnight batch 18–19 Oct: real conversation fixes, calm face, silent testing
