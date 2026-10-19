@@ -327,9 +327,8 @@ class Wizard:
 
     # --- output helpers
     def _h(self, he: str, en: str = "") -> None:
-        self.say(he)
         if en:
-            self.say("   " + en)
+            self.say(en)
 
     def _save(self) -> None:
         save_state(self.home, self.state)
@@ -414,7 +413,7 @@ class Wizard:
     # --- console steps
     def _email(self) -> str:
         if not self.state.get("email"):
-            e = (self._text("מה כתובת הג'ימייל שלך? (נשמרת רק במחשב הזה; Enter לדלג)  Your Gmail address: ") or "").strip()
+            e = (self._text("Your Gmail address (saved only on this computer; Enter to skip): ") or "").strip()
             if "@" in e:
                 self.state["email"] = e
                 self._save()
@@ -427,8 +426,7 @@ class Wizard:
         exe = self.which("gcloud")
         if not exe:
             return
-        a = self._choice("gcloud מותקן אצלך. ליצור את הפרויקט ולהפעיל את ה-APIs אוטומטית? (y = כן, Enter = לא)  "
-                         "gcloud is installed: create the project and enable the APIs for you? [y/N] ")
+        a = self._choice("gcloud is installed: create the project and enable the APIs for you? [y/N] ")
         if a not in ("y", "yes", "כ", "כן"):
             return
         pid = f"jarves-home-{secrets.randbelow(10**6):06d}"
@@ -463,13 +461,14 @@ class Wizard:
         self._gcloud()
         for i, s in enumerate(steps, 1):
             if s["id"] in self.state["steps"]:
-                self._h(f"[{i}/{len(steps)}] ✓ {s['title_he']} (כבר נעשה)", f"done earlier: {s['title_en']}")
+                self._h(f"[{i}/{len(steps)}] ✓ {s['title_he']} (כבר נעשה)",
+                        f"[{i}/{len(steps)}] Done earlier: {s['title_en']}")
                 continue
             url = step_url(s["id"], self.state.get("project_id", ""))
             self.say("")
-            self._h(f"[{i}/{len(steps)}] {s['title_he']}", s["title_en"])
+            self._h(f"[{i}/{len(steps)}] {s['title_he']}", f"[{i}/{len(steps)}] {s['title_en']}")
             for he, en in zip(s["clicks_he"], s["clicks_en"]):
-                self._h(f"  • {he}", f"  ({en})")
+                self._h(f"  • {he}", f"  - {en}")
             value = s["copy"].replace("{scopes}", scopes_text(self.calendar_only)).replace(
                 "{email}", self.state.get("email", ""))
             if value:
@@ -478,9 +477,8 @@ class Wizard:
                 else:
                     self._h("  להעתיק: " + value, "  Copy this: " + value)
             self.open_url(url)
-            self._h("  הדף נפתח בדפדפן: " + url, "")
-            a = self._choice("  Enter = סיימתי · s = לדלג · q = לעצור ולהמשיך אחר כך   (Enter = done, s = skip, "
-                             "q = stop) ")
+            self._h("  הדף נפתח בדפדפן: " + url, "  Browser page: " + url)
+            a = self._choice("  Enter = done, s = skip, q = stop and continue later: ")
             if a in ("q", "quit", "exit"):
                 self._save()
                 self._h("עצרנו. מריצים שוב " + START_COMMAND + " וממשיכים מכאן.",
@@ -489,7 +487,7 @@ class Wizard:
             if a in ("s", "skip"):
                 continue
             if s["id"] == "project" and not self.state.get("project_id"):
-                pid = (self._text("  אם רואים את ה-Project ID, אפשר להדביק אותו (Enter לדלג)  Project ID (optional): ")
+                pid = (self._text("  Project ID (optional; Enter to skip): ")
                        or "").strip()
                 if pid and all(c.isalnum() or c == "-" for c in pid):
                     self.state["project_id"] = pid
@@ -500,7 +498,7 @@ class Wizard:
     def _wait_for_client(self) -> bool:
         since = self.state.get("started_at", time.time())
         self._h("מחכה לקובץ client_secret...json בתיקיית ההורדות (" + str(self.downloads) + "). Ctrl+C לעצור.",
-                "Waiting for client_secret...json in Downloads. Ctrl+C to stop.")
+                "Waiting for client_secret...json in Downloads (" + str(self.downloads) + "). Ctrl+C to stop.")
         deadline = time.monotonic() + self.watch_timeout_s
         while time.monotonic() < deadline:
             p = find_client_json([self.downloads, self.auth.dir, self.home], since)
@@ -531,14 +529,14 @@ class Wizard:
                 self._h("לא הצלחנו: " + fx["he"], fx["en"])
                 if fx["url"]:
                     self.open_url(step_url(fx["step"], self.state.get("project_id", "")))
-                    self._h("  פתחתי את הדף לתיקון: " + fx["url"], "")
-                if attempt == 2 or self._choice("  Enter = לנסות שוב · q = לעצור   (Enter = retry, q = stop) ") \
+                    self._h("  פתחתי את הדף לתיקון: " + fx["url"], "  Opened the page to fix this: " + fx["url"])
+                if attempt == 2 or self._choice("  Enter = retry, q = stop: ") \
                         in ("q", "quit", "exit"):
                     return 1
         missing = [short_scope(s) for s in self.scopes if short_scope(s) not in st["scopes"]]
         if missing:
             fx = fix_for("GOOGLE_SCOPE_MISSING")
-            self._h(fx["he"] + " (" + ", ".join(missing) + ")", fx["en"])
+            self._h(fx["he"] + " (" + ", ".join(missing) + ")", fx["en"] + " (" + ", ".join(missing) + ")")
             if not st["calendar"]:
                 return 1
         return self._finish()
@@ -565,9 +563,12 @@ class Wizard:
         on = enable_features(self.home, self.cfg, gmail=gmail, send=self.send and gmail)
         self.state["completed_at"] = time.time()
         self._save()
-        st = self.auth.status()
         self.say("")
-        self.say(summary_he(st["scopes"], "gmail_send" in on))
+        self.say("Google is connected. You can ask: \"What is on my calendar tomorrow?\"" +
+                 (" or \"Are there important emails?\" I ask before reading email aloud." if gmail else ".") +
+                 (" Email sending is on: I read back the draft and wait for your confirmation." if "gmail_send" in on
+                  else " Email sending is off; enable it on the dashboard Features page.") +
+                 " In Testing mode Google disconnects every 7 days; run " + START_COMMAND + " again to reconnect.")
         self.say("   (features on: " + ", ".join(on) + ")")
         self._h("אם JARVES כבר רץ ולא רואה את היומן: jarvis stop ואז jarvis.",
                 "If JARVES is already running and does not see it yet: jarvis stop, then jarvis.")

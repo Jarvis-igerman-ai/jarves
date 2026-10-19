@@ -1,3 +1,9 @@
+## Google wizard terminal correction (19 Oct 2026)
+
+- User reported broken Hebrew in `jarvis google start` and requested English only, commit and push. Owner: Python Core CLI; `core/src/jarves/google_setup.py` now prints English messages, numbered steps, prompts, recovery links and completion summary. Shared dashboard/voice Hebrew remains available. No downstream asset refresh needed.
+- Verification: `core/.venv/Scripts/python.exe -m pytest core/tests/test_google_setup.py -q` — **17 passed**, offline fake browser/Google; first run was blocked by sandbox temporary-folder permissions, approved rerun passed. Existing first-time test verifies no Hebrew in wizard output or input prompts. Real Google login remains unverified. Final-commit CI unavailable: this branch has no open PR and CI triggers only on main pushes or PRs; no CI success claimed. PR/merge remains the broader SW-V2 review gate.
+- Decision queue: English-only terminal wizard — **ANSWERED**, explicitly requested by user. Earlier decisions/questions below remain unchanged. No next milestone started; Issue #17 remains open for its wider acceptance criteria.
+
 ## SW-V2 (19 Oct 2026) — Issue #17: IN PROGRESS on branch `swv2-integrate`
 
 Merged so far (436 tests pass): WP-A conversation quality, WP-B store/cost/dashboard/diagnosis, WP-C backend trace + deadline/retry + background tasks, WP-D workspace files + curator + settings skill, WP-E part (Issue #16 fixes, volume/mute), WP-F Google/camera plans. Reports: `docs/reviews/SWV2_*.md`, `CONVERSATION_LOG_REVIEW_19OCT.md`.

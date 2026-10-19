@@ -74,10 +74,17 @@ def make(home, g, b, answers=(), **kw):
     out, clip = [], []
     it = iter(answers)
     auth = GoogleAuth(home, transport=g.transport(), open_browser=b.open_consent)
-    wz = google_setup.Wizard(home, Config(), auth=auth, ask=lambda _p: next(it, ""), say=out.append,
+    prompts = []
+
+    def ask(prompt):
+        prompts.append(prompt)
+        return next(it, "")
+
+    wz = google_setup.Wizard(home, Config(), auth=auth, ask=ask, say=out.append,
                              open_url=b.open_console, clipboard=lambda t: clip.append(t) or True,
                              downloads=b.downloads, sleep=lambda s: None, which=lambda n: None,
                              watch_timeout_s=kw.pop("watch_timeout_s", 2), **kw)
+    wz.test_prompts = prompts
     return wz, out, clip
 
 
@@ -110,7 +117,9 @@ def test_first_time_walks_every_step_takes_the_download_signs_in_checks_and_enab
     st = google_setup.load_state(home)
     assert st["completed_at"] and st["check"]["calendar"] == "ok" and set(st["steps"]) == set(google_setup.STEP_IDS)
     # spoken-style summary with example phrases; never the secret, a token or the address
-    assert "מה יש לי מחר ביומן?" in text and "jarvis google start" in text
+    assert "What is on my calendar tomorrow?" in text and "jarvis google start" in text
+    assert not any("\u0590" <= c <= "\u05ff" for c in text + "".join(wz.test_prompts))
+    assert "[1/7] Create a Google Cloud project" in text and "Browser page: https://" in text
     assert "GOCSPX" not in text and "1//rt-secret" not in text and "ya29" not in text and "me@example.com" not in text
 
 
@@ -124,7 +133,7 @@ def test_quit_is_resumable_and_done_steps_are_skipped(home, dl):
     wz2, out2, _ = make(home, g, b2, answers=[""] * 10)
     assert wz2.run() == 0
     assert "/projectcreate" not in " ".join(b2.opened) and any("gmail.googleapis.com" in u for u in b2.opened)
-    assert sum("(כבר נעשה)" in line for line in out2) == 2
+    assert sum("Done earlier:" in line for line in out2) == 2
 
 
 def test_weekly_reconnect_only_signs_in_again(home, dl):
@@ -135,7 +144,7 @@ def test_weekly_reconnect_only_signs_in_again(home, dl):
     wz, out, _ = make(home, g, b)
     assert wz.run() == 0
     assert b.opened == [] and GoogleAuth(home).status()["connected"]          # no console steps at all
-    assert any("7 ימים" in line for line in out)
+    assert any("7 days" in line for line in out)
 
 
 def test_already_connected_only_checks(home, dl):
@@ -164,7 +173,7 @@ def test_access_denied_explains_test_user_and_opens_audience(home, dl):
     wz, out, _ = make(home, g, b, answers=["q"])
     assert wz.run() == 1
     text = "\n".join(out)
-    assert "משתמשי הבדיקה" in text and "test user" in text
+    assert "test user" in text
     assert any(u.split("?")[0].endswith("/auth/audience") for u in b.opened)
     assert google_setup.load_state(home)["last_error"] == "GOOGLE_CONSENT_DENIED"
 
