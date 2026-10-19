@@ -40,6 +40,7 @@ COOKIE = "jarves_dash"
 _EMAIL = re.compile(r"[\w.+-]+@[\w-]+\.[\w.-]+")
 _ROUTES: list[tuple[str, re.Pattern, object]] = []
 PLUGIN_MODULES = ("jarves.workspace", "jarves.curator", "jarves.memory", "jarves.features", "jarves.google_auth",
+                  "jarves.google_setup", "jarves.privacy", "jarves.overview",
                   "jarves.usage", "jarves.backup", "jarves.appearance", "jarves.skills.generated",
                   "jarves.operations", "jarves.runtime")
 MEMORY_UNDO_KEEP = 30

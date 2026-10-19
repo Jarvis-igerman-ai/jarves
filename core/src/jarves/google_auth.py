@@ -47,8 +47,9 @@ GMAIL_READ = _G + "gmail.readonly"
 GMAIL_COMPOSE = _G + "gmail.compose"
 ALL_SCOPES = CALENDAR_SCOPES + (GMAIL_READ, GMAIL_COMPOSE)
 REFRESH_MARGIN_S = 120
-RECONNECT_HE = "צריך לחבר מחדש את גוגל. אפשר מדף הניהול, או בפקודה jarvis google login."
-NOT_CONNECTED_HE = "גוגל עוד לא מחובר. אפשר לחבר מדף הניהול, או בפקודה jarvis google login."
+START_COMMAND = "jarvis google start"           # WP-K: the one command for first connect AND the weekly reconnect
+RECONNECT_HE = f"צריך לחבר מחדש את גוגל: תריץ במחשב {START_COMMAND}, או לחץ Reconnect בדף הניהול."
+NOT_CONNECTED_HE = f"גוגל עוד לא מחובר. כדי לחבר, תריץ במחשב {START_COMMAND}, ואני אדריך אותך צעד אחר צעד."
 
 
 class GoogleAuthError(Exception):
@@ -190,7 +191,7 @@ class GoogleAuth:
             dl = self.find_client_download()
             if dl is None:
                 raise GoogleAuthError("GOOGLE_NO_CLIENT", "no Google OAuth client configured",
-                                      "follow docs/GOOGLE_SETUP.md, then run `jarvis google login --client <file>`")
+                                      "run `jarvis google start` (it guides you; docs/GOOGLE_SETUP.md)")
             self.import_client(dl)
             client = self.client()
         verifier, challenge = pkce_pair()
@@ -205,7 +206,7 @@ class GoogleAuth:
                 await asyncio.wait_for(done.wait(), timeout_s)
             except asyncio.TimeoutError as e:
                 raise GoogleAuthError("GOOGLE_SIGNIN_TIMEOUT", "Google sign-in was not completed in time",
-                                      "run `jarvis google login` again") from e
+                                      "run `jarvis google start` again") from e
         finally:
             server.close()
         return await self.complete(got, state, verifier, redirect_uri, scopes)
@@ -215,7 +216,7 @@ class GoogleAuth:
             raise GoogleAuthError("GOOGLE_BAD_STATE", "sign-in callback did not match this attempt", "try again")
         if p.get("error"):
             code = "GOOGLE_CONSENT_DENIED" if p["error"] == "access_denied" else "GOOGLE_SIGNIN_ERROR"
-            raise GoogleAuthError(code, f"sign-in ended: {p['error']}", "run `jarvis google login` to try again")
+            raise GoogleAuthError(code, f"sign-in ended: {p['error']}", "run `jarvis google start` to try again")
         client = self.client()
         if not p.get("code") or not client:
             raise GoogleAuthError("GOOGLE_SIGNIN_ERROR", "sign-in callback had no code", "try again")
@@ -257,15 +258,15 @@ class GoogleAuth:
         if not t.get("refresh_token"):
             if t.get("needs_reconnect"):
                 raise GoogleAuthError("GOOGLE_AUTH_EXPIRED", "the Google connection expired",
-                                      "run `jarvis google login`", RECONNECT_HE)
-            raise GoogleAuthError("GOOGLE_NOT_CONNECTED", "Google is not connected", "run `jarvis google login`",
+                                      "run `jarvis google start`", RECONNECT_HE)
+            raise GoogleAuthError("GOOGLE_NOT_CONNECTED", "Google is not connected", "run `jarvis google start`",
                                   NOT_CONNECTED_HE)
         missing = [s for s in need if s not in t.get("scopes", [])]
         if missing:
             logs.warn("google", "GOOGLE_SCOPE_MISSING", "a Google permission was not granted",
                       missing=[short_scope(s) for s in missing])
             raise GoogleAuthError("GOOGLE_SCOPE_MISSING", "a Google permission was not granted",
-                                  "run `jarvis google login` and allow all requested permissions",
+                                  "run `jarvis google start` and allow all requested permissions",
                                   "לא קיבלתי מגוגל הרשאה לזה. צריך לחבר מחדש את גוגל ולאשר את כל ההרשאות.")
         if not force_refresh and t.get("expires_at", 0) - time.time() > REFRESH_MARGIN_S:
             return t["access_token"]
@@ -276,7 +277,7 @@ class GoogleAuth:
         t = self.load()
         if not client:
             raise GoogleAuthError("GOOGLE_NO_CLIENT", "Google OAuth client file is missing",
-                                  "run `jarvis google login --client <file>`", RECONNECT_HE)
+                                  "run `jarvis google start --client <file>`", RECONNECT_HE)
         try:
             tok = await self._token({"grant_type": "refresh_token", "refresh_token": t.get("refresh_token", ""),
                                      **client})
@@ -287,13 +288,13 @@ class GoogleAuth:
                 logs.warn("google", "GOOGLE_AUTH_EXPIRED", "Google connection expired; the user must reconnect",
                           reason=e.code.removeprefix("oauth:"))
                 raise GoogleAuthError("GOOGLE_AUTH_EXPIRED", "the Google connection expired",
-                                      "run `jarvis google login`", RECONNECT_HE) from e
+                                      "run `jarvis google start`", RECONNECT_HE) from e
             await self._record_error(e.code)
             raise
         async with self._lock:
             cur = self.load()
             if not cur.get("refresh_token"):         # signed out meanwhile
-                raise GoogleAuthError("GOOGLE_NOT_CONNECTED", "Google is not connected", "run `jarvis google login`",
+                raise GoogleAuthError("GOOGLE_NOT_CONNECTED", "Google is not connected", "run `jarvis google start`",
                                       NOT_CONNECTED_HE)
             cur.update(access_token=tok["access_token"], expires_at=time.time() + float(tok.get("expires_in", 3600)))
             if tok.get("scope"):
@@ -331,9 +332,9 @@ def google_status(home: Path) -> dict:
 
 def dashboard_routes(register) -> None:
     """Dashboard plugin (jarves.dashboard PLUGIN_MODULES): GET /api/google = status (with the Hebrew reconnect
-    line), POST /api/google/disconnect = revoke + delete. Connecting stays `jarvis google login` (browser consent)."""
+    line), POST /api/google/disconnect = revoke + delete. Connecting stays `jarvis google start` (browser consent)."""
     def get(ctx, _m, _body):
-        return 200, {**google_status(ctx.home), "connect_command": "jarvis google login"}
+        return 200, {**google_status(ctx.home), "connect_command": "jarvis google start"}
 
     def disconnect(ctx, _m, _body):
         return 200, {"revoked": asyncio.run(GoogleAuth(ctx.home).sign_out()), **google_status(ctx.home)}
@@ -343,13 +344,31 @@ def dashboard_routes(register) -> None:
 
 # ---------------------------------------------------------------------- CLI (`jarvis google ...`)
 def add_cli(sub) -> None:
-    g = sub.add_parser("google", help="connect / disconnect Google Calendar + Gmail (your own Google Cloud app)")
-    g.add_argument("action", choices=["login", "status", "logout"])
-    g.add_argument("--client", help="login: the client_secret_*.json downloaded from Google Cloud (Desktop app)")
-    g.add_argument("--calendar-only", action="store_true", help="login: ask only for the Calendar permissions")
+    g = sub.add_parser("google", help="connect Google Calendar + Gmail: `jarvis google start` guides you step by step "
+                                      "(also the weekly reconnect)")
+    g.add_argument("action", choices=["start", "login", "status", "test", "logout"],
+                   help="start = guided setup / reconnect (recommended); login = sign-in only; test = live check")
+    g.add_argument("--client", help="the client_secret_*.json downloaded from Google Cloud (Desktop app)")
+    g.add_argument("--calendar-only", action="store_true", help="ask only for the Calendar permissions")
+    g.add_argument("--send", action="store_true", help="start: also switch on sending mail (off by default)")
+    g.add_argument("--downloads", help="start: the folder your browser downloads to (default: ~/Downloads)")
+    g.add_argument("--restart", action="store_true", help="start: forget the saved progress and begin again")
 
 
 def cmd_google(a, cfg, home) -> int:
+    if a.action in ("start", "test"):
+        from . import google_setup                     # WP-K: the guided wizard and the live self-check
+        if a.action == "start":
+            return google_setup.cmd_start(a, cfg, home)
+        logs.setup(home / "logs", cfg.log.level, console=False, privacy=cfg.log.privacy)
+        if not GoogleAuth(home).status()["connected"]:
+            print(NOT_CONNECTED_HE)
+            return 1
+        chk = google_setup.run_check(home, cfg)
+        print(json.dumps({k: chk[k] for k in ("calendar", "gmail", "error")}, ensure_ascii=False))
+        if not chk["ok"]:
+            print(chk["fix"]["he"] + "\n" + chk["fix"]["en"])
+        return 0 if chk["ok"] else 1
     logs.setup(home / "logs", cfg.log.level, console=False, privacy=cfg.log.privacy)
     auth = GoogleAuth(home)
 

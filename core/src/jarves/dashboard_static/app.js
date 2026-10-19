@@ -452,11 +452,12 @@ async function pageSettings() {
 async function route(refresh) {
   clearInterval(timer); timer = null;
   const [page, arg] = location.hash.replace(/^#\/?/, "").split("?")[0].split("/").map(decodeURIComponent);
-  const navPage = { session: "conversations", raw: "conversations", note: "workspace" }[page] || page || "home";
+  const navPage = { session: "conversations", raw: "conversations", note: "workspace" }[page] || page || "home";  // WP-K Home = default
   for (const a of document.querySelectorAll("nav a")) a.classList.toggle("active", a.dataset.page === navPage);
   try {
-    if (page === "home" || !page) await pageHome();                    // M1: the default page
-    else if (typeof PAGES !== "undefined" && PAGES[page]) await PAGES[page](arg, refresh);  // pages.js
+    if (page === "runtime") await pageHome();                    // M1 runtime controls (WP-K: "Controls" in the nav)
+    else if (typeof PAGES !== "undefined" && PAGES[page || "home"]) await PAGES[page || "home"](arg, refresh);  // pages.js, home.js
+    else if (!page || page === "home") await pageHome();
     else if (page === "session") await pageSession(arg, refresh === true && (window.innerHeight + window.scrollY >= document.body.scrollHeight - 40));
     else if (page === "costs") await pageCosts();
     else if (page === "issues") await pageIssues(arg);
