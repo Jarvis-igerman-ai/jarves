@@ -118,6 +118,10 @@ class MusicConfig(_Strict):
     pear_url: str = "http://127.0.0.1:26538"
     timeout_s: float = Field(5, gt=0, le=30)
     max_volume: int = Field(70, ge=0, le=100)
+    volume_step: int = Field(10, ge=1, le=50)      # "louder"/"quieter" move the slider this many points
+    # Every 6th play removes up to 12 already-PLAYED items from Pear's queue (its visible play history) so the
+    # queue stays small and fast; current and upcoming songs are never touched. false = never edit the queue.
+    trim_queue: bool = True
 
 
 LogLevel = Literal["ERROR", "WARNING", "INFO", "DEBUG", "VERBOSE"]

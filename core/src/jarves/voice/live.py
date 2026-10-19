@@ -45,6 +45,8 @@ PAUSE_KEEP_S = 0.6        # silence this soon after speech is a pause INSIDE the
 CHUNK_BYTES = 4800          # 100 ms of PCM16 mono @ 24 kHz
 USER_TALKING_S = 0.5        # the user counts as "still talking" this long after the last loud mic chunk
 ENERGY_EXTEND_S = 30.0      # loud mic input without any transcribed speech keeps a session open at most this long
+NO_SPEECH_TALKING_S = 1.5   # mic voice this recent postpones the false-wake cutoff (pauses between words included)
+DROP_CAPTION_TAIL_S = 1.0   # assistant text this soon after dropped early audio belongs to it: not captioned
 BARGE_IN_MIN_S = 0.5       # assistant audio must have been playing this long before a new user utterance flushes it
 
 # Tuned 2026-10-19 against the Live prompting guide (developers.openai.com/api/docs/guides/live-prompting) and
@@ -263,13 +265,18 @@ class SessionLifecycle:
             # Mic energy alone (fan, TV, coughs) extends the session at most ENERGY_EXTEND_S past the last REAL
             # activity (speech transcribed, JARVES speaking, backend/tool work). QA 19 Oct (suite_voice): a session
             # opened by a false wake stayed open 3 min 16 s on room noise instead of ending after 15 s.
+            quiet_for = time.monotonic() - max(self._t_ready, self._speaking_until)
             if (self.no_speech_timeout_s and not self._heard_user and not self._backend_busy
-                    and not getattr(self, "_tools_running", 0)
-                    and time.monotonic() - max(self._t_ready, self._speaking_until) >= self.no_speech_timeout_s):
-                logs.info(self._log_area, "VOICE_NO_SPEECH", "the conversation opened but nobody spoke: closing "
-                          "(false wake?)", after_s=round(time.monotonic() - self._t_ready, 1))
-                self._request_end("no_speech")
-                return
+                    and not getattr(self, "_tools_running", 0) and quiet_for >= self.no_speech_timeout_s):
+                # Issue #16: the transcript of a long FIRST utterance can lag behind the speech. While the mic hears
+                # the user talking right now the cutoff waits, at most ENERGY_EXTEND_S more, so room noise still
+                # cannot hold a false-wake session open for minutes.
+                talking = time.monotonic() - getattr(self, "_last_user_voice", 0.0) < NO_SPEECH_TALKING_S
+                if not (talking and quiet_for < self.no_speech_timeout_s + ENERGY_EXTEND_S):
+                    logs.info(self._log_area, "VOICE_NO_SPEECH", "the conversation opened but nobody spoke: closing "
+                              "(false wake?)", after_s=round(time.monotonic() - self._t_ready, 1), mic_active=talking)
+                    self._request_end("no_speech")
+                    return
             energy = min(getattr(self, "_last_energy", 0.0), self._last_activity + ENERGY_EXTEND_S)
             if time.monotonic() - max(self._last_activity, energy) >= self.idle_disconnect_s and not (
                     self._backend_busy or getattr(self, "_tools_running", 0)):
@@ -458,6 +465,7 @@ class LiveVoice(SessionLifecycle):
         self._turn_audio_t0 = 0.0
         self._speech_pending = False
         self._out_text = ""
+        self._held_text = ""            # assistant text whose audio has not played yet while the user talks
         self._in_text = ""
         self._stats = {"backend_responses": 0, "barge_ins": 0, "errors": 0, "budget_overrun": 0}
         # Budget (#9 F1, #13): GPT-Live "responses" delegation is started BY THE SERVER; the official docs offer no
@@ -750,6 +758,15 @@ class LiveVoice(SessionLifecycle):
                       "dropped it and kept the microphone open")
         return True
 
+    def _hold_caption(self) -> bool:
+        """Assistant text arriving now may belong to audio that _drop_early drops: during/just after a drop, or
+        while the user is talking and JARVES is not audibly speaking yet. The audio/transcript deltas handled here
+        carry no response id that ties text to audio, so this is time-based: text of a dropped answer that arrives
+        more than DROP_CAPTION_TAIL_S after its audio can still be shown (limit, PRE_USE_TEST_REPORT_VOICE.md)."""
+        now = time.monotonic()
+        return now < self._drop_until + DROP_CAPTION_TAIL_S or (
+            now - self._last_user_voice < USER_TALKING_S and now >= self._speaking_until)
+
     def _play(self, pcm: bytes) -> None:
         """Queue server audio. SILENCE (the continuous stream between utterances) must not mute the mic, count as
         activity, trigger "speaking" or build a playback backlog (that backlog was a permanent ~3.5 s delay)."""
@@ -837,10 +854,20 @@ class LiveVoice(SessionLifecycle):
         elif t == "session.output_audio.delta":
             pcm = base64.b64decode(g("delta"))
             if self._drop_early(pcm):
+                if self._held_text:                 # its words were never heard: no caption, no face reaction
+                    self._stats["dropped_caption_chars"] = self._stats.get("dropped_caption_chars", 0) + len(self._held_text)
+                    logs.debug("live", "LIVE_CAPTION_DROPPED", "caption of a dropped early answer discarded",
+                               text=self._held_text.strip())
+                    self._held_text = ""
                 return
-            if _rms16(pcm) > SPEECH_RMS and time.monotonic() > self._speaking_until:
+            audible = _rms16(pcm) > SPEECH_RMS
+            if audible and time.monotonic() > self._speaking_until:
                 await self._state("speaking")
             self._play(pcm)
+            if audible and self._held_text:         # the held words are being spoken now: show them
+                self._out_text += self._held_text
+                self._held_text = ""
+                await self._emote("jarves", self._out_text[-80:])
         elif t == "session.input_transcript.delta":
             self.note_activity()
             self._heard_user = True
@@ -864,6 +891,12 @@ class LiveVoice(SessionLifecycle):
                 if self.on_transcript:
                     await self.on_transcript("user", self._in_text.strip())
                 self._in_text = ""
+            if self._hold_caption():
+                # Issue #16: while the user is still talking an early answer's AUDIO is dropped (_drop_early); its
+                # text must not reach the caption/face either. Held until its audio really plays, else discarded.
+                self._held_text += g("delta") or ""
+                self._schedule_flush()
+                return
             self._out_text += g("delta") or ""
             await self._emote("jarves", self._out_text[-80:])
             self._schedule_flush()
@@ -963,6 +996,11 @@ class LiveVoice(SessionLifecycle):
 
     def _flush_transcripts(self) -> list[tuple[str, str]]:
         out = []
+        if self._held_text.strip():             # text whose audio never played: it was not said, do not caption it
+            self._stats["dropped_caption_chars"] = self._stats.get("dropped_caption_chars", 0) + len(self._held_text)
+            logs.debug("live", "LIVE_UNSPOKEN_TEXT", "assistant text without played audio not shown",
+                       text=self._held_text.strip())
+        self._held_text = ""
         if self._in_text.strip():
             self._remember_user(self._in_text)
             logs.info("live", "LIVE_USER_SAID", "you said (as GPT-Live heard it)", text=self._in_text.strip())
