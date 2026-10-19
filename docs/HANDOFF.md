@@ -95,6 +95,8 @@ Merged so far (436 tests pass): WP-A conversation quality, WP-B store/cost/dashb
 
 - Late 19 Oct answers: phone dashboard stays HTTP for now (HTTPS before the robot is in the house); owner will record ~20 wake-phrase samples later; 3D avatar = cute robot (kept); 2D keeps iris eyes; installer: camera included, build only on main merges/packaging changes, unsigned for now, releases hosted on Cloudflare R2 (wrangler login done; bucket + public access + 5 GitHub secrets pending, agent WP-O building CI upload). Still open/in progress: WP-L (guides + self-aware help), WP-O (R2 hosting), full-suite re-run after disk was freed (C: was full -> 16 spurious failures), independent code review, CI, PR to main, long music/voice scenarios on fresh Pear, tray first-close notice, weekday setting, music_restart_player, Issue #16 stays open until review.
 
+- Multi-device + remote (owner, 20 Oct): ONE brain (PC Core), MANY satellites (phones/Pi = mic+speaker+screen+camera) usable in parallel, each routed to the Core; remote use from the owner's main phone over a private VPN (Tailscale, free personal plan; nothing exposed to the internet); remote scope = talk, read reports/dashboard, approve or reject actions; risky settings stay on the PC. Roadmap: OnePlus 11 first. Research/design agent produces docs/plans/MULTI_DEVICE_REMOTE.md before any code.
+
 ### Questions for the user
 - Listen to the warmer persona/greeting wording and the new voices (no GPT-Live voice is documented for Hebrew).
 ## Overnight batch 18–19 Oct: real conversation fixes, calm face, silent testing
