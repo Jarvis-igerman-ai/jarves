@@ -58,6 +58,20 @@ With synchronized installations, choose which JARVES should announce a reminder 
 
 After local automatic backups are proven, consider an explicitly authorized encrypted off-device destination. Never silently back up sensitive notes, credentials, calendar information or generated content to an external service.
 
+## F10 — ChatGPT history and personal memory import (DEFERRED by owner, 19 October 2026)
+
+**Status: FUTURE BACKLOG ONLY. NOT PART OF SW-V3 DEVELOPMENT.** The owner requested the official ChatGPT export. ChatGPT confirmed it is preparing the archive and will email a download link; the archive has not been supplied to JARVES. Do not perform architecture research, model analysis, indexing or implementation for this future task now. Do not ask the owner for the ZIP or block active SW-V3 deliverables. Preserve existing notes/memory functionality and tests.
+
+### Preserved owner decisions and recommended future design
+
+- **Data sources:** download one official ChatGPT export ZIP when emailed. Optionally copy the ChatGPT Memory summary separately into memory-summary.md; do not assume the ZIP contains the entire Memory summary.
+- **Agreed Windows staging folder:** `%LOCALAPPDATA%\jarves\imports\chatgpt\`. Owner may create it manually later and place the original ZIP there unextracted, plus optional memory-summary.md. The importer has not yet been built.
+- **Recommended three layers:** (1) short current, approved personal context always available; (2) searchable structured long-term memory with source, date, confidence, updates and deletion; (3) a complete local searchable archive of ChatGPT conversations, keeping full source/role/thread/date provenance.
+- **Architecture and retrieval:** preferably evaluate reusing existing JARVES SQLite conventions and FTS5, with local offline ingestion and no model calls for bulk indexing. JARVES should search past relevant discussions/decisions automatically when user questions warrant it, using a few relevant source-linked excerpts instead of pushing the entire archive into context. Test Hebrew/English recall and stale or contradictory facts. Only add local semantic retrieval if justified by actual results.
+- **Review and privacy:** memory summary may seed editable owner-reviewed context; distinguish user-provided facts from assistant guesses, especially sensitive data. Dashboard import progress, search, approved memory proposals, edit/delete and source links. Keep ZIP/database private, outside Git and CI. No unapproved transmission of full archives or costly provider usage.
+- **Later technical decision:** once the owner *explicitly reactivates* this item, Opus may refine the recommended design and make technical implementation decisions without asking about ordinary architecture details. Opus must not analyze every historical chat; use economical local indexing and scoped retrieval.
+- **Reactivation:** separate owner-approved milestone/issue with Pi roadmap and tests. Not active now.
+
 ---
 
 **Backlog rule:** Every idea promoted to active work gets its own agreed scope, GitHub issue, acceptance criteria, and Windows/Pi support plan. Leaving it here does not mean it has been forgotten.
