@@ -72,7 +72,7 @@ GROUPS: tuple[tuple[str, str, str, tuple[str, ...]], ...] = (
     ("camera", "מצלמה ופרטיות", "Camera & privacy", ("camera", "face_recognition", "camera_when_away")),
     ("automation", "אוטומציה", "Automation", ("scheduler", "reports", "notes", "files", "proactive_alerts",
                                               "autonomy")),
-    ("dashboard", "לוח בקרה וטלפון", "Dashboard & phone", ("dashboard", "dashboard_lan")),
+    ("dashboard", "לוח בקרה וטלפון", "Dashboard & phone", ("dashboard", "dashboard_lan", "context_trace")),
     ("updates", "עדכונים וגיבוי", "Updates & backup", ("update_check", "backup")),
 )
 ANSWER_KEYS = {"language", "connection", "api_key_from_env", "display_name", "spoken_name", "address_me",
@@ -850,6 +850,7 @@ BUNDLE: dict[str, list[Callable[[], tuple[bool, str]]]] = {
     "dashboard": [_mod("jarves.dashboard"), _data("jarves", "dashboard_static/index.html"),
                   _data("jarves", "dashboard_static/setup.js")],
     "dashboard_lan": [_mod("jarves.dashboard_auth"), _data("jarves", "dashboard_static/pair.html")],
+    "context_trace": [_mod("jarves.context_trace"), _data("jarves", "dashboard_static/context.js")],
     "workspace_agent_edit": [_mod("jarves.workspace"), _data("jarves", "setup_guide.md")],
     "assistant_identity": [_mod("jarves.identity")],
     "appearance": [_mod("jarves.appearance")],
