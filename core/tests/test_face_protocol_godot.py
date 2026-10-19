@@ -52,12 +52,25 @@ def messages():
         {"x": "left", "y": None, "confidence": "high"}, {"x": 0, "y": 0, "confidence": 0}, {})]
     out += [m("camera.indicator", p) for p in (
         {"on": True, "flash": True}, {"on": True}, {"on": "yes", "flash": 1}, {"on": None}, {}, {"on": False})]
+    # appearance (WP-M2): every presentation, then malformed modes; a speaking level / emotion reach the avatars too
+    for mode in ("avatar2d", "avatar3d", "hidden", "face", "avatar3d"):
+        out.append(m("appearance.set", {"mode": mode}))
+        out.append(m("face.set_state", {"state": "speaking"}))
+        out.append(m("speaker.level", {"level": 0.6}))
+        out.append(m("face.emotion", {"emotion": "laugh", "ms": 300}))
+    out += [m("appearance.set", p) for p in (
+        {"mode": "AVATAR3D"}, {"mode": 3}, {"mode": None}, {"mode": ["face"]}, {"mode": {"a": 1}}, {"mode": "x" * 5000},
+        {"mode": True}, {})]
+    out.append(m("appearance.set", {"mode": "avatar2d"}))
     out += [m("mic.level", {"level": v}) for v in (0, 0.5, 1, -3, 99, "x", None)]
     out += [m("speaker.level", {"level": v}) for v in (0, 0.7, 5, -1, "loud")]
     out.append(m("assistant.text", {"text": "שלום! " * 800, "source": "live"}))
     out.append(m("user.transcript", {"text": "מה השעה"}))
     out.append(m("error", {"code": "X", "message": "boom", "action": "retry"}))
     out.append(m("confirm.request", {"id": "c1", "prompt": "למחוק הכל?"}))
+    out += [m("dashboard.opened", p) for p in (
+        {"url": "http://127.0.0.1:5000/", "browser": True}, {"url": "http://127.0.0.1:5000/", "browser": False},
+        {"url": None, "browser": "yes"}, {})]
     out.append(m("no.such.type", {"a": 1}))
     out.append("this is not json {{{")
     out.append(json.dumps([1, 2, 3]))

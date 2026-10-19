@@ -322,6 +322,26 @@ func is_asleep() -> bool:
 	return link_state == "offline"
 
 
+## The shared expression / activity / speech-level / gaze output every presentation draws (appearance.gd:
+## face, 2D avatar, 3D avatar). Blinks, saccades, breathing, reactions and the mouth envelope are computed ONCE
+## here, so each avatar moves exactly as calmly as the face and a switch never changes the behaviour.
+## Units: open/blink 0..1 (x the state openness), look = face look units (GAZE_TO_RADIUS), smile -1..1,
+## mouth_open 0..mouth_max, breath -1..1, laugh/cry/heart = reaction weights 0..1.
+func pose() -> Dictionary:
+	return {"state": state, "link": link_state, "asleep": is_asleep(), "emotion": emotion, "t": t,
+		"blink": _blink, "open": _v.open * _blink, "look": _look, "col": _v.col, "bright": _v.bright,
+		"glow": _v.glow, "lid_up": _v.lid_up, "lid_tilt": _v.lid_tilt, "lid_low": _v.lid_low, "curve": _v.curve,
+		"sleep": _v.sleep, "iris": _v.iris, "smile": _v.smile, "mouth_open": _v.mouth_open, "mouth_w": _v.mouth_w,
+		"mouth_x": _v.mouth_x, "mouth_o": _v.mouth_o, "ring": maxf(_v.ring, 0.0), "spin": _v.spin, "blush": _v.blush,
+		"breath": breath(), "laugh": _fx.x, "cry": _fx.y, "heart": _fx.z, "camera_on": camera_on,
+		"tracking": _track_w, "dot": DOT[link_state]}
+
+
+func set_canvas_visible(on: bool) -> void:
+	# the face's own shader canvas (child 0); the activity pill stays, so avatars show it too
+	get_child(0).visible = on
+
+
 func dot_color() -> Color:
 	return DOT[link_state]
 

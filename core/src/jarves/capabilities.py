@@ -9,7 +9,7 @@ Statuses (spec section 1):
 - not_applicable           only for device-specific UI mechanics that have an equivalent control.
 
 Rules (validated by `problems()`, tested in test_capabilities.py):
-- every status other than verified_on_device / not_applicable has a `blocker`;
+- every Pi gap, and every planned / blocked status, has a `blocker`;
 - every non-verified Pi status links a roadmap issue that EXISTS (created with `gh issue create`, never invented);
 - a feature with no declared matrix shows "planned" with "platform status not declared" (never silently hidden).
 
@@ -32,7 +32,9 @@ READY = ("verified_on_device", "not_applicable")
 # Real issues (created 2026-10-19 by WP-M4). Add new ones here only after `gh issue create` returned the URL.
 TRACKING = "https://github.com/igalgerman/JARVIS/issues/17"
 PI_ROADMAP = "https://github.com/igalgerman/JARVIS/issues/18"
-KNOWN_ISSUES = {TRACKING, PI_ROADMAP}
+# Every roadmap issue a feature may link: checked to exist with `gh issue list` on LAST_CHECKED (#19-#23 were
+# created by the other SW-V2 packages for their own Pi gaps). Add a number only after the issue exists.
+KNOWN_ISSUES = {TRACKING, PI_ROADMAP, *(f"https://github.com/igalgerman/JARVIS/issues/{n}" for n in (19, 20, 21, 22, 23))}
 _ISSUE_URL = re.compile(r"^https://github\.com/igalgerman/JARVIS/issues/\d+$")
 LAST_CHECKED = "2026-10-19"
 
@@ -75,8 +77,28 @@ def declare(fid: str, *, windows, linux_arm64_pi, permissions: list[str] | None 
     return c
 
 
+def _from_feature(fid: str) -> Capability | None:
+    """Other packages also set `features.register(..., targets=...)` / `feature.targets = {...}` directly: that
+    dict is read here, so there is one matrix whichever way a package declared it."""
+    from .features import CATALOG
+    f = CATALOG.get(fid)
+    raw = getattr(f, "targets", None) if f is not None else None
+    if not raw:
+        return None
+    base = MATRIX.get(fid)
+    tg = {}
+    for name in TARGETS:
+        v = dict(raw.get(name) or {})
+        try:
+            tg[name] = Target(**{k: v[k] for k in ("status", "evidence", "blocker", "roadmap_issue") if k in v})
+        except (TypeError, ValueError):
+            tg[name] = Target("planned", blocker=f"invalid status declared: {v.get('status')!r}")
+    return Capability(tg, base.permissions if base else [], base.settings if base else "",
+                      base.last_checked if base else LAST_CHECKED)
+
+
 def get(fid: str) -> Capability:
-    c = MATRIX.get(fid)
+    c = _from_feature(fid) or MATRIX.get(fid)
     if c is not None:
         return c
     missing = Target("planned", blocker="platform status not declared yet (spec section 5)",
@@ -99,7 +121,10 @@ def problems(fid: str) -> list[str]:
     for name, t in c.targets.items():
         if t.status == "verified_on_device" and not t.evidence:
             out.append(f"{name}: verified without evidence")
-        if t.status not in READY and not t.blocker:
+        # Pi: every gap needs its blocker (spec 1). Windows: "built, not verified" may rely on its evidence line;
+        # planned / blocked always say why.
+        if not t.blocker and (t.status in ("planned", "blocked") or
+                              (name == "linux_arm64_pi" and t.status not in READY)):
             out.append(f"{name}: {t.status} without a blocker")
         if name == "linux_arm64_pi" and t.status not in READY and t.roadmap_issue not in KNOWN_ISSUES:
             out.append(f"{name}: no real roadmap issue linked")
@@ -135,8 +160,9 @@ for _fid, _w, _p, _perm, _set in [
      _pi("implemented_unverified"), ["action"], ""),
     ("memory_llm_pass", _win("implemented_unverified", "UNIT", "no real paid extraction checked"),
      _pi("implemented_unverified"), ["action"], ""),
-    ("diagnosis_llm_pass", _win("planned", blocker="switch only: no LLM diagnosis pass is wired yet"),
-     _pi("planned", "not built on any platform yet"), ["read"], ""),
+    ("diagnosis_llm_pass", _win("implemented_unverified", "UNIT test_dashboard_wph.py (diagnose.py LLM review)",
+                                "no real paid review checked"),
+     _pi("implemented_unverified"), ["read"], "config history.llm_review"),
     ("google_calendar", _win("implemented_unverified", "UNIT test_google.py", _NO_GOOGLE), _pi("planned", _PI_OAUTH),
      ["read"], "dashboard Calendar page"),
     ("calendar_write", _win("implemented_unverified", "UNIT test_calendar_write.py", _NO_GOOGLE),

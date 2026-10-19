@@ -1,9 +1,17 @@
-# Pre-use voice test report (silent, headless) — 2026-10-19 12:32
+# Pre-use voice test report (silent, headless) — 2026-10-19 19:14
 
 Produced by `core/tools/suite_voice.py`. Virtual mic with locally synthesised speech (WinRT, never played), virtual speaker (measured, never played), fake face client; REAL Core, GPT-Live, backend model and web search, Skills, budget and openWakeWord. No real microphone, speaker, Godot window or OS volume.
 Each row is the LATEST run of that scenario (runs are listed at the end; live voice is capped, so scenarios ran in groups).
 
-**Result: 26/30 PASS, 4 FAIL, 0 skipped.** Live voice over all 7 suite runs (conservative wall time while a session was open or connecting): **34.0 min ≈ $1.70** plus backend tokens.
+**Result: 29/31 PASS, 2 FAIL, 0 skipped.** Live voice over all 12 suite runs (conservative wall time while a session was open or connecting): **42.8 min ≈ $2.14** plus backend tokens.
+
+## Issue #16 re-run (19 Oct 2026 evening, WP-E, integrated SW-V2 build)
+
+- Re-run on this build: scenarios **1, 17, 19, 22, 23, 31** (2.1 live minutes, about $0.11). All other rows are from earlier builds and were NOT re-run (live budget).
+- **17 long utterance PASS** (40.6 s of speech, answered, names Eilat); **19 noise PASS** (40 s, JARVES silent); **31 false wake PASS** (closed after 14.9 s, the next real wake answered). The no-speech cutoff now also waits while the microphone hears the user talking, bounded at +30 s (Issue #16 risk 1).
+- **22/23 FAIL = known openWakeWord limit, not a regression:** 4/20 false wakes at threshold 0.15 ("hey Travis", "Jarvis", "hey Jarvie, no", "Hey Charles, come here"), 3/20 at 0.35; 10/10 detections at both.
+- Offline, deterministic regressions for both #16 voice risks are in `core/tests/test_issue16.py`: 20 s and 35 s of continuous speech with the transcript delayed to the end are not cut off (they FAIL with the old rule), room noise still closes by ~50 s, and the caption/face never shows words of dropped early audio (held until the audio plays, else discarded). Limit: text of a dropped answer that arrives more than 1 s after its audio can still be captioned (the events carry no shared response id).
+
 
 ## Bugs found and fixed (product), each with an offline regression test in `core/tests/test_suite_voice_fixes.py`
 
@@ -37,9 +45,10 @@ These were fixed in the suite, not the product:
 - **30 six-minute idle soak**: the wake listener stayed alive (no errors) and reconnected and answered afterwards ("מדריד"). But room noise caused 1 false wake (score 0.16) at threshold 0.15. That session's 3-minute noise lock-in is bug 9 (fixed offline, not re-run live).
 - 21 (wake x3) is **re-judged** from its stored measurements after the harness threshold fix, not re-run.
 
+
 | # | Scenario | Result | Key number | Time | Live voice | Run |
 |---|---|---|---|---|---|---|
-| 1 | greeting | **PASS** | dead air 0.0 s (first sound at face connect; greeting buffered), greeting 1.9 s | 12 s | 0.1 min | pre-store run 2 (after greeting fix) |
+| 1 | greeting | **PASS** | dead air 0.51 s, greeting 2.2 s | 14 s | 0.1 min | 1019-190230 |
 | 2 | smalltalk | **PASS** | 3/3 answered, dead air avg -0.46 s (0.24, 0.20, -1.81: JARVES started before the question ended) | 38 s | 0.6 min | pre-store run 2 |
 | 3 | time_date | **PASS** | hour ok ('שבע חמישים וארבע בבוקר'), day ok ('יום שני, תשע עשרה באוקטובר'), delegations 0 | 15 s | 0.2 min | pre-store run 2 |
 | 4 | maths | **PASS** | 4/4 correct | 48 s | 0.8 min | 1019-085302 |
@@ -55,20 +64,21 @@ These were fixed in the suite, not the product:
 | 14 | forget_timeout | **PASS** | confirm.request 1, before 1 after 1 -> kept; outcome spoken True; speech during the wait 1.6 s; declined logs 1 | 67 s | 1.0 min | 1019-081444 |
 | 15 | long_conversation | **PASS** | 25/26 answered, 8/10 correct, disconnects 0, context name=True city=True plan=True, requests 2 vs backend done 2, voice 278 s vs wall 278 s | 282 s | 4.6 min | 1019-081934 |
 | 16 | rapid_fire | **PASS** | 6/6 answered (audio), 6/6 correct in order, dead air [0.38, 0.43, 0.48, 0.45, 0.35, 0.34] | 31 s | 0.5 min | 1019-085302 |
-| 17 | long_utterance | **FAIL** | utterance 40.6 s, answered True, Eilat False, dead air -36.87 s | 52 s | 0.9 min | 1019-081934 |
+| 17 | long_utterance | **PASS** | utterance 40.6 s, answered True, Eilat True, dead air -0.06 s | 48 s | 0.8 min | 1019-190230 |
 | 18 | english_switch | **PASS** | english 8/0 latin/hebrew letters (Canberra True), hebrew 6/0 | 14 s | 0.2 min | 1019-081934 |
-| 19 | noise_robustness | **PASS** | JARVES spoke 0.0 s, delegations 0, said [], heard-as [] | 45 s | 0.8 min | 1019-081934 |
+| 19 | noise_robustness | **PASS** | JARVES spoke 0.0 s, delegations 0, said [], heard-as [] | 45 s | 0.8 min | 1019-190230 |
 | 20 | idle_disconnect | **PASS** | open after 8 s True, after 10 s True; ended 15.1 s after the last sound (['live conversation ended (idle)']) | 54 s | 0.9 min | 1019-081444 |
-| 21 | wake_word_x3 | **PASS** | RE-JUDGED from the stored run (answered() threshold fixed 0.5 -> 0.3 s; no new live run): 3/3 full cycles, answer audio [0.3, 0.4, 0.3] s, correct 3/3; scores [0.41, 0.4, 0.41]; connect [3.1, 1.9, 1.9] s; correct 3/3 | 88 s | 1.3 min | 1019-083456 |
-| 22 | wake_false_positives | **FAIL** | 4/20 false wakes ['hey Travis', 'Jarvis', 'hey Jarvie, no', 'Hey Charles, come here'] | 85 s | 0.1 min | 1019-082827 |
-| 23 | wake_thresholds | **FAIL** | 0.15: detect 10/10, false 4/20; 0.35: detect 10/10, false 3/20 | 242 s | 0.5 min | 1019-082827 |
+| 21 | wake_word_x3 | **PASS** | 3/3 full cycles; scores [0.41, 0.41, 0.4]; connect [3.0, 2.3, 2.4] s; correct 3/3 | 89 s | 1.3 min | 1019-124526 |
+| 22 | wake_false_positives | **FAIL** | 4/20 false wakes ['hey Travis', 'Jarvis', 'hey Jarvie, no', 'Hey Charles, come here'] | 89 s | 0.0 min | 1019-190230 |
+| 23 | wake_thresholds | **FAIL** | 0.15: detect 10/10, false 4/20; 0.35: detect 10/10, false 3/20 | 277 s | 0.0 min | 1019-190230 |
 | 24 | software_mute | **PASS** | live stopped True, open mics after mute [], muted wake phrase -> lost / woke False; after unmute woke True connected True answered True | 42 s | 0.5 min | 1019-085616 |
 | 25 | budget_voice | **PASS** | face errors ['VOICE_BUDGET'], sessions 1, ended ['live conversation ended (timeout)'], voice 60 s, db {'ai_requests': 2, 'voice_seconds': 60, 'reservations': 0} | 82 s | 1.1 min | 1019-083456 |
 | 26 | budget_requests | **PASS** | face errors ['AI_BUDGET'], ended ['live conversation ended (budget)'], db {'ai_requests': 2, 'voice_seconds': 27, 'reservations': 0} | 34 s | 0.5 min | 1019-083456 |
 | 27 | face_protocol | **PASS** | 121 states, 9 turns, not-listening at turn end [], late returns [], mic.level 4.1 Hz, bad [] | 0 s | 0.0 min | 1019-081934 |
 | 28 | start_stop_x5 | **PASS** | 5/5 clean cycles; leftovers [] | 69 s | 0.8 min | 1019-085302 |
 | 29 | log_privacy | **PASS** | privacy on: 12 content words checked, leaked []; key in logs: no (7 homes scanned); face texts 5 | 32 s | 0.4 min | 1019-085302 |
-| 30 | idle_soak_6min | **FAIL** | soak 392 s: WAKE_HEALTH 13, false wakes 1, errors []; then woke True answered False | 407 s | 3.7 min | 1019-083456 |
+| 30 | idle_soak_6min | **PASS** | soak 402 s: WAKE_HEALTH 26, false wakes 0, errors []; then woke True answered True | 417 s | 0.4 min | 1019-124526 |
+| 31 | false_wake_closes | **PASS** | woke True, opened True, closed after 14.9 s, VOICE_NO_SPEECH 1; next real wake connected True, answered True | 31 s | 0.4 min | 1019-190230 |
 
 ## Scenarios: description and PASS criteria
 
@@ -102,22 +112,19 @@ These were fixed in the suite, not the product:
 - **28. start_stop_x5**: Core start -> greeting -> (question) -> stop, 5 cycles in one process. PASS if: every cycle: greeting heard, CORE_STOPPED logged, port 8793 free, no leftover asyncio tasks, memory.db not held open (rename works).
 - **29. log_privacy**: Logs hygiene: log.privacy = true hides transcripts; the API key never appears. PASS if: privacy on: none of the spoken/heard words (>= 4 letters) and no key in jarves.log; privacy off (every other run of this suite): the key never appears.
 - **30. idle_soak_6min**: 6-minute idle soak with room tone/noise on the wake mic, then 'Hey Jarvis' reconnect. PASS if: wake listener alive the whole time (WAKE_HEALTH every ~15 s), no false wake, no errors, then wake -> session -> answer.
+- **31. false_wake_closes**: A wake with NOBODY speaking (false wake) ends after ~12 s instead of idling for minutes; then a real wake works. PASS if: VOICE_NO_SPEECH logged 10-20 s after the session opened, session closed, the next 'Hey Jarvis' + question works.
 
 ## Failures with evidence
 
-### 17. long_utterance
-- Key: utterance 40.6 s, answered True, Eilat False, dead air -36.87 s
-- asked `אני רוצה לספר לך משהו קטן שקרה לי. אתמול בבוקר קמתי מוקדם, הכנתי לעצמי` heard `אני רוצה לספר לך משהו קטן שקרה לי אתמול בבוקר לעצמי קפה חזק, ויצאתי לטיול ארוך ע` said `בטח, אני מקש / יב. / נשמע אחלה בוקר. / תאריך את הצעדים, שב לנשום עמוק, אני איתך. / איזה / קטע! / מפגשים כאלה זה... / כאילו / העולם מחזיר לך ` dead air -36.87 s, tools [], screen [], face [], open True
-
 ### 22. wake_false_positives
 - Key: 4/20 false wakes ['hey Travis', 'Jarvis', 'hey Jarvie, no', 'Hey Charles, come here']
-- {"kind": "neg", "text": "hey Travis", "voice": null, "speed": 1.0, "level": 0.6, "mic": "cut@16000", "woke": true, "score": 0.15, "near_miss": []}
+- {"kind": "neg", "text": "hey Travis", "voice": null, "speed": 1.0, "level": 0.6, "mic": "cut@16000", "woke": true, "score": 0.17, "near_miss": []}
 - {"kind": "neg", "text": "hey service", "voice": null, "speed": 1.0, "level": 0.6, "mic": "16000", "woke": false, "score": null, "near_miss": []}
 - {"kind": "neg", "text": "Jarvis", "voice": null, "speed": 1.0, "level": 0.6, "mic": "cut@16000", "woke": true, "score": 0.26, "near_miss": []}
 - {"kind": "neg", "text": "hey Jarvie, no", "voice": null, "speed": 1.0, "level": 0.6, "mic": "cut@16000", "woke": true, "score": 0.66, "near_miss": [0.14]}
 - {"kind": "neg", "text": "Hey Charles, come here", "voice": null, "speed": 1.0, "level": 0.6, "mic": "cut@16000", "woke": true, "score": 0.41, "near_miss": [0.14]}
 - {"kind": "neg", "text": "Harvest season is here", "voice": null, "speed": 1.0, "level": 0.6, "mic": "16000", "woke": false, "score": null, "near_miss": []}
-- {"kind": "neg", "text": "Have a nice day", "voice": null, "speed": 1.0, "level": 0.6, "mic": "lost", "woke": false, "score": null, "near_miss": []}
+- {"kind": "neg", "text": "Have a nice day", "voice": null, "speed": 1.0, "level": 0.6, "mic": "16000", "woke": false, "score": null, "near_miss": []}
 - {"kind": "neg", "text": "Hey, how are you doing?", "voice": null, "speed": 1.0, "level": 0.6, "mic": "16000", "woke": false, "score": null, "near_miss": []}
 - {"kind": "neg", "text": "A jar of peanut butter", "voice": null, "speed": 1.0, "level": 0.6, "mic": "16000", "woke": false, "score": null, "near_miss": []}
 - {"kind": "neg", "text": "Let's watch Jurassic Park", "voice": null, "speed": 1.0, "level": 0.6, "mic": "16000", "woke": false, "score": null, "near_miss": []}
@@ -131,28 +138,27 @@ These were fixed in the suite, not the product:
 - {"kind": "neg", "text": "תדליק את האור בסלון", "voice": null, "speed": 1.0, "level": 0.6, "mic": "16000", "woke": false, "score": null, "near_miss": []}
 - {"kind": "neg", "text": "הרבה עבודה היום במשרד", "voice": null, "speed": 1.0, "level": 0.6, "mic": "16000", "woke": false, "score": null, "near_miss": []}
 - {"kind": "neg", "text": "הבאתי לך חרוזים", "voice": null, "speed": 1.0, "level": 0.6, "mic": "16000", "woke": false, "score": null, "near_miss": []}
-- log: `[1019-082827-01-wakefp15] LINK_FACE_DISCONNECTED Godot face disconnected (local)`
+- log: `[1019-190230-01-main] LINK_FACE_DISCONNECTED Godot face disconnected (local)`
+- log: `[1019-190230-02-wakefp15] LINK_FACE_DISCONNECTED Godot face disconnected (local)`
 
 ### 23. wake_thresholds
 - Key: 0.15: detect 10/10, false 4/20; 0.35: detect 10/10, false 3/20
-- {"threshold": 0.15, "false_wakes": 4, "negatives": 20, "detected": 10, "positives": 10, "false_wake_texts": ["hey Travis", "Jarvis", "hey Jarvie, no", "Hey Charles, come here"], "lost": 1}
+- {"threshold": 0.15, "false_wakes": 4, "negatives": 20, "detected": 10, "positives": 10, "false_wake_texts": ["hey Travis", "Jarvis", "hey Jarvie, no", "Hey Charles, come here"], "lost": 0}
 - {"threshold": 0.35, "false_wakes": 3, "negatives": 20, "detected": 10, "positives": 10, "false_wake_texts": ["Jarvis", "hey Jarvie, no", "Hey Charles, come here"], "lost": 0}
-- {"offline_peaks": [["hey Travis", 0.489], ["hey service", 0.098], ["Jarvis", 0.993], ["hey Jarvie, no", 0.987], ["Hey Charles, come here", 0.254], ["Harvest season is here", 0.001], ["Have a nice day", 0.0], ["Hey, how are you doing?", 0.002], ["A jar of peanut butter", 0.001], ["Let's watch Jurassic Park", 0.0], ["Hey there, good morning", 0.001], ["Service, please", 0.0], ["היי, מה נשמע?", 0.0],
-- log: `[1019-082827-01-wakefp15] LINK_FACE_DISCONNECTED Godot face disconnected (local)`
-- log: `[1019-082827-02-wakefp15] LINK_FACE_DISCONNECTED Godot face disconnected (local)`
-- log: `[1019-082827-03-wakefp35] LINK_FACE_DISCONNECTED Godot face disconnected (local)`
-
-### 30. idle_soak_6min
-- Key: soak 392 s: WAKE_HEALTH 13, false wakes 1, errors []; then woke True answered False
-- {"mic": "cut@16000", "wake_logged": true, "score": 0.42, "connected": true, "connect_s": 2.2, "chimes": ["wake", "ready"], "answered": false, "correct": true}
-- asked `מה בירת ספרד?` heard `מה בירת ספרד` said `מדריד.` dead air 0.31 s, tools [], screen [], face [], open True
-- log: `[1019-083456-01-wake] LINK_FACE_DISCONNECTED Godot face disconnected (local)`
+- {"offline_peaks": [["hey Travis", 0.453], ["hey service", 0.098], ["Jarvis", 0.993], ["hey Jarvie, no", 0.987], ["Hey Charles, come here", 0.254], ["Harvest season is here", 0.001], ["Have a nice day", 0.0], ["Hey, how are you doing?", 0.002], ["A jar of peanut butter", 0.001], ["Let's watch Jurassic Park", 0.0], ["Hey there, good morning", 0.001], ["Service, please", 0.0], ["היי, מה נשמע?", 0.0],
+- log: `[1019-190230-02-wakefp15] LINK_FACE_DISCONNECTED Godot face disconnected (local)`
+- log: `[1019-190230-03-wakefp15] LINK_FACE_DISCONNECTED Godot face disconnected (local)`
+- log: `[1019-190230-04-wakefp35] LINK_FACE_DISCONNECTED Godot face disconnected (local)`
 
 
 ## Per-scenario details
 
 <details><summary>1. greeting: PASS</summary>
 
+- "boot to face 8.0 s"
+- "greeting first sound 0.51 s after face connect"
+- "greeting audio 2.2 s"
+- "greeting said: שלום! אני ג'ארוויס. איך אפשר לעזור?"
 
 </details>
 
@@ -273,9 +279,9 @@ These were fixed in the suite, not the product:
 
 </details>
 
-<details><summary>17. long_utterance: FAIL</summary>
+<details><summary>17. long_utterance: PASS</summary>
 
-- `אני רוצה לספר לך משהו קטן שקרה לי. אתמול בבוקר קמתי מוקדם, ה` -> said `בטח, אני מקש / יב. / נשמע אחלה בוקר. / תאריך את הצעדים, שב לנשום עמוק, אני איתך. / איזה / קטע! / מפגשים כאלה זה... / כאילו / העולם מחזיר לך פרצוף מוכר, נכון? אי` (dead air -36.87 s, answer 44.9 s, backend [], screen [], face [])
+- `אני רוצה לספר לך משהו קטן שקרה לי. אתמול בבוקר קמתי מוקדם, ה` -> said `אהה / אילת, כן? / אני ממש מקנא בך, זה נשמע יום מעולה.` (dead air -0.06 s, answer 3.5 s, backend [], screen [], face [])
 
 </details>
 
@@ -301,21 +307,21 @@ These were fixed in the suite, not the product:
 
 <details><summary>21. wake_word_x3: PASS</summary>
 
-- {"mic": "cut@16000", "wake_logged": true, "score": 0.41, "connected": true, "connect_s": 3.1, "chimes": ["wake", "ready"], "answered": false, "correct": true, "turn": {"label": "after-wake", "asked": "כמה זה שלוש ועוד ארבע?", "mic": "24000", "q_s": 2.3, "dead_air_s": 0.51, "answer_s": 0.7, "speech_s": 0.3, "heard": "כמה זה שלוש ועוד ארבע", "said": "שבע.", "tools": [], "delegations": 0, "backend_s": [], "activity": [], "emotions": [], "face_end": "listening", "busy_end": [false, 0], "open": true, "errors": []}}
-- {"mic": "cut@16000", "wake_logged": true, "score": 0.4, "connected": true, "connect_s": 1.9, "chimes": ["wake", "ready"], "answered": false, "correct": true, "turn": {"label": "after-wake", "asked": "מה בירת איטליה?", "mic": "24000", "q_s": 1.8, "dead_air_s": 0.38, "answer_s": 0.8, "speech_s": 0.4, "heard": "מה בירת איט ליה", "said": "רומ / א.", "tools": [], "delegations": 0, "backend_s": [], "activity": [], "emotions": [], "face_end": "listening", "busy_end": [false, 0], "open": true, "errors": []}}
-- {"mic": "cut@16000", "wake_logged": true, "score": 0.41, "connected": true, "connect_s": 1.9, "chimes": ["wake", "ready"], "answered": false, "correct": true, "turn": {"label": "after-wake", "asked": "מה ההפך של גדול?", "mic": "24000", "q_s": 2.1, "dead_air_s": 0.3, "answer_s": 0.8, "speech_s": 0.3, "heard": "מה ההפך של גדול", "said": "קטן.", "tools": [], "delegations": 0, "backend_s": [], "activity": [], "emotions": [], "face_end": "listening", "busy_end": [false, 0], "open": true, "errors": []}}
+- {"mic": "cut@16000", "wake_logged": true, "score": 0.41, "connected": true, "connect_s": 3.0, "chimes": ["wake", "ready"], "answered": true, "correct": true, "turn": {"label": "after-wake", "asked": "כמה זה שלוש ועוד ארבע?", "mic": "24000", "q_s": 2.3, "dead_air_s": 1.03, "answer_s": 1.0, "speech_s": 0.5, "heard": "כמה זה שלוש ועוד", "said": "שבע.", "tools": [], "delegations": 0, "backend_s": [], "activity": [], "emotions": [], "face_end": "listening", "busy_end": [false, 0], "open": true, "errors": []}}
+- {"mic": "cut@16000", "wake_logged": true, "score": 0.41, "connected": true, "connect_s": 2.3, "chimes": ["wake", "ready"], "answered": true, "correct": true, "turn": {"label": "after-wake", "asked": "מה בירת איטליה?", "mic": "24000", "q_s": 1.8, "dead_air_s": 0.3, "answer_s": 1.3, "speech_s": 0.7, "heard": "מה בירת איטל יה", "said": "רומ / א, ברור.", "tools": [], "delegations": 0, "backend_s": [], "activity": [], "emotions": [], "face_end": "listening", "busy_end": [false, 0], "open": true, "errors": []}}
+- {"mic": "cut@16000", "wake_logged": true, "score": 0.4, "connected": true, "connect_s": 2.4, "chimes": ["wake", "ready"], "answered": true, "correct": true, "turn": {"label": "after-wake", "asked": "מה ההפך של גדול?", "mic": "24000", "q_s": 2.1, "dead_air_s": 0.5, "answer_s": 1.0, "speech_s": 0.5, "heard": "מה ההפך של גדול", "said": "קטן.", "tools": [], "delegations": 0, "backend_s": [], "activity": [], "emotions": [], "face_end": "listening", "busy_end": [false, 0], "open": true, "errors": []}}
 
 </details>
 
 <details><summary>22. wake_false_positives: FAIL</summary>
 
-- {"kind": "neg", "text": "hey Travis", "voice": null, "speed": 1.0, "level": 0.6, "mic": "cut@16000", "woke": true, "score": 0.15, "near_miss": []}
+- {"kind": "neg", "text": "hey Travis", "voice": null, "speed": 1.0, "level": 0.6, "mic": "cut@16000", "woke": true, "score": 0.17, "near_miss": []}
 - {"kind": "neg", "text": "hey service", "voice": null, "speed": 1.0, "level": 0.6, "mic": "16000", "woke": false, "score": null, "near_miss": []}
 - {"kind": "neg", "text": "Jarvis", "voice": null, "speed": 1.0, "level": 0.6, "mic": "cut@16000", "woke": true, "score": 0.26, "near_miss": []}
 - {"kind": "neg", "text": "hey Jarvie, no", "voice": null, "speed": 1.0, "level": 0.6, "mic": "cut@16000", "woke": true, "score": 0.66, "near_miss": [0.14]}
 - {"kind": "neg", "text": "Hey Charles, come here", "voice": null, "speed": 1.0, "level": 0.6, "mic": "cut@16000", "woke": true, "score": 0.41, "near_miss": [0.14]}
 - {"kind": "neg", "text": "Harvest season is here", "voice": null, "speed": 1.0, "level": 0.6, "mic": "16000", "woke": false, "score": null, "near_miss": []}
-- {"kind": "neg", "text": "Have a nice day", "voice": null, "speed": 1.0, "level": 0.6, "mic": "lost", "woke": false, "score": null, "near_miss": []}
+- {"kind": "neg", "text": "Have a nice day", "voice": null, "speed": 1.0, "level": 0.6, "mic": "16000", "woke": false, "score": null, "near_miss": []}
 - {"kind": "neg", "text": "Hey, how are you doing?", "voice": null, "speed": 1.0, "level": 0.6, "mic": "16000", "woke": false, "score": null, "near_miss": []}
 - {"kind": "neg", "text": "A jar of peanut butter", "voice": null, "speed": 1.0, "level": 0.6, "mic": "16000", "woke": false, "score": null, "near_miss": []}
 - {"kind": "neg", "text": "Let's watch Jurassic Park", "voice": null, "speed": 1.0, "level": 0.6, "mic": "16000", "woke": false, "score": null, "near_miss": []}
@@ -334,9 +340,9 @@ These were fixed in the suite, not the product:
 
 <details><summary>23. wake_thresholds: FAIL</summary>
 
-- {"threshold": 0.15, "false_wakes": 4, "negatives": 20, "detected": 10, "positives": 10, "false_wake_texts": ["hey Travis", "Jarvis", "hey Jarvie, no", "Hey Charles, come here"], "lost": 1}
+- {"threshold": 0.15, "false_wakes": 4, "negatives": 20, "detected": 10, "positives": 10, "false_wake_texts": ["hey Travis", "Jarvis", "hey Jarvie, no", "Hey Charles, come here"], "lost": 0}
 - {"threshold": 0.35, "false_wakes": 3, "negatives": 20, "detected": 10, "positives": 10, "false_wake_texts": ["Jarvis", "hey Jarvie, no", "Hey Charles, come here"], "lost": 0}
-- {"offline_peaks": [["hey Travis", 0.489], ["hey service", 0.098], ["Jarvis", 0.993], ["hey Jarvie, no", 0.987], ["Hey Charles, come here", 0.254], ["Harvest season is here", 0.001], ["Have a nice day", 0.0], ["Hey, how are you doing?", 0.002], ["A jar of peanut butter", 0.001], ["Let's watch Jurassic Park", 0.0], ["Hey there, good morning", 0.001], ["Service, please", 0.0], ["היי, מה נשמע?", 0.0], ["ג'רוויס", 0.0], ["תגיד לי מה השעה", 0.0], ["היי טרוויס", 0.0], ["איזה יום יפה היום", 0.0], ["תדליק את האור בסלון", 0.0], ["הרבה עבודה היום במשרד", 0.0], ["הבאתי לך חרוזים", 0.0], ["Hey Jarvis [Davi
+- {"offline_peaks": [["hey Travis", 0.453], ["hey service", 0.098], ["Jarvis", 0.993], ["hey Jarvie, no", 0.987], ["Hey Charles, come here", 0.254], ["Harvest season is here", 0.001], ["Have a nice day", 0.0], ["Hey, how are you doing?", 0.002], ["A jar of peanut butter", 0.001], ["Let's watch Jurassic Park", 0.0], ["Hey there, good morning", 0.001], ["Service, please", 0.0], ["היי, מה נשמע?", 0.0], ["ג'רוויס", 0.0], ["תגיד לי מה השעה", 0.0], ["היי טרוויס", 0.0], ["איזה יום יפה היום", 0.0], ["תדליק את האור בסלון", 0.0], ["הרבה עבודה היום במשרד", 0.0], ["הבאתי לך חרוזים", 0.0], ["Hey Jarvis [Davi
 
 </details>
 
@@ -389,10 +395,16 @@ These were fixed in the suite, not the product:
 
 </details>
 
-<details><summary>30. idle_soak_6min: FAIL</summary>
+<details><summary>30. idle_soak_6min: PASS</summary>
 
-- {"mic": "cut@16000", "wake_logged": true, "score": 0.42, "connected": true, "connect_s": 2.2, "chimes": ["wake", "ready"], "answered": false, "correct": true}
-- `מה בירת ספרד?` -> said `מדריד.` (dead air 0.31 s, answer 0.9 s, backend [], screen [], face [])
+- {"mic": "cut@16000", "wake_logged": true, "score": 0.37, "connected": true, "connect_s": 2.6, "chimes": ["wake", "ready"], "answered": true, "correct": true}
+- `מה בירת ספרד?` -> said `מדר / יד.` (dead air 0.0 s, answer 0.9 s, backend [], screen [], face [])
+
+</details>
+
+<details><summary>31. false_wake_closes: PASS</summary>
+
+- {"closed_after_s": 14.9, "next": {"mic": "cut@16000", "wake_logged": true, "score": 0.42, "connected": true, "connect_s": 2.9, "chimes": ["wake", "ready"], "answered": true, "correct": true}}
 
 </details>
 
@@ -407,6 +419,11 @@ These were fixed in the suite, not the product:
 | 1019-083456 | 21,30,24,25,26,28,29 | 8.2 min | 12.4 min |
 | 1019-085302 | 28,4,16,29,24 | 2.6 min | 3.0 min |
 | 1019-085616 | 24 | 0.5 min | 0.7 min |
+| 1019-123542 | 17,22 | 0.9 min | 2.4 min |
+| 1019-123905 | 31 | 3.6 min | 3.7 min |
+| 1019-124303 | 31 | 0.4 min | 0.6 min |
+| 1019-124526 | 21,30 | 1.7 min | 8.4 min |
+| 1019-190230 | 1,17,19,22,23,31 | 2.1 min | 8.4 min |
 
 ## Re-runs after the fixes (19 Oct 2026, lead engineer, live GPT-Live, silent virtual audio)
 

@@ -10,6 +10,7 @@ Raspberry Pi OS 64-bit, the same face scene/state machine occupies the 1080x1080
 
 ### State events
 `face.set_state`: `idle`, `listening`, `thinking`, `speaking`, `happy`, `error`.
+`appearance.set {mode: face|avatar2d|avatar3d|hidden}` picks the presentation; face.gd stays the one behaviour driver and every avatar draws its `pose()` (see `APPEARANCE.md`).
 `speaker.level` carries a bounded normalized RMS envelope from streamed playback (no audio content). Mouth closes after 250 ms without an update. Shared face shows connection/activity labels and status color in both presentations. Natural blinks remain; idle eyes do not wander or simulate speech.
 
 ### Visual fidelity

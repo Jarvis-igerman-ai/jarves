@@ -6,16 +6,26 @@ tools, slow or failed backend calls, early-response drops, user confusion ("לא
 understand ("סגור" said again and again), the user repeating himself, false wakes, errors and high cost.
 Issues are DEDUPLICATED by fingerprint: the same problem in another conversation raises its count, never a new row;
 re-running on the same conversation changes nothing. A resolved issue that happens again is reopened.
-No LLM pass yet (rules only, $0). Text rules need transcripts: with log.privacy on, only timing rules apply.
+Text rules need transcripts: with log.privacy on, only timing rules apply.
+
+Optional AI review (history.llm_review, ON by default; SW-V2 WP-H): after the rules, ONE short backend request per
+finished voice conversation (gpt-6-luna by default) reads the transcript and adds problems the rules miss. It runs
+in its own thread (never blocks the log writer), only on the API-key route, reserves one `ai_requests` unit from
+the shared daily Budget first, at most history.llm_review_daily_max a day, and is skipped with log.privacy on.
+Its findings are labelled "AI review" (kind ai_review) and its exact cost is added to the conversation.
 """
 from __future__ import annotations
 
 import difflib
+import hashlib
 import json
 import re
+import threading
 import time
-from datetime import datetime
+from datetime import date, datetime
+from pathlib import Path
 
+from . import logs
 from .store import Store, daily_costs, session_cost
 
 SEVERITY = {"low": 0, "medium": 1, "high": 2}
@@ -296,3 +306,158 @@ def run(store: Store, cfg, session_ids: list[str] | None = None, days: int = 30)
                     f"Above pricing.daily_alert_usd (${cfg.pricing.daily_alert_usd:.2f}).", {"day": d})
     store.commit()
     return f.found
+
+
+# ---------------------------------------------------------------------- optional AI review (one request)
+REVIEW_INSTRUCTIONS = """You review one conversation between a user and JARVES, a Hebrew-speaking home voice
+assistant (GPT-Live voice, a backend model for lookups/tools). Find PROBLEMS in how JARVES behaved that a user
+would notice: wrong or made-up answers, ignoring what the user asked, misunderstanding, contradictions, claiming
+an action happened without a tool result, awkward or confusing wording, unnatural Hebrew, bad tone, repeating
+itself, long waits without explanation, a tool or lookup that should have been used but was not.
+Do NOT repeat problems in "Already found". Report only real problems you can quote; nothing if it went well.
+Answer with JSON only: {"issues": [{"title": "short English title", "severity": "low|medium|high",
+"detail": "what went wrong and what JARVES should do instead (1-2 sentences)", "quote": "the exact words"}]}
+(at most 5 issues; empty list if none)."""
+REVIEW_INPUT_CHARS = 9000
+REVIEW_KINDS = ("live", "realtime")
+
+
+def _mmss(t0: float, ts: float) -> str:
+    s = max(0, int(ts - t0))
+    return f"{s // 60:02d}:{s % 60:02d}"
+
+
+def review_input(store: Store, sid: str) -> str | None:
+    """Compact, redacted transcript for the AI review, or None (privacy mode / nothing to review)."""
+    s = store.session(sid)
+    if s is None or s.get("kind") not in REVIEW_KINDS:
+        return None
+    tl = store.timeline(sid)
+    turns = tl["turns"]
+    if sum(t["role"] == "user" for t in turns) < 2 or any(t.get("text") is None for t in turns):
+        return None                                 # too short, or privacy mode: never send what we do not keep
+    t0 = s["started"]
+    items = [(t["ts"], f"[{_mmss(t0, t['ts'])}] {'USER' if t['role'] == 'user' else 'JARVES'}"
+              + (f" (reply after {t['wait_s']:.1f} s)" if t.get("wait_s") else "") + f": {t['text']}") for t in turns]
+    items += [(t["ts"], f"[{_mmss(t0, t['ts'])}] TOOL {t['name']} {t.get('args') or ''} -> "
+               f"{'ok' if t.get('ok') else (t.get('code') or 'no result')} {t.get('duration_s') or ''}") for t in tl["tools"]]
+    items += [(d["ts"], f"[{_mmss(t0, d['ts'])}] BACKEND {d.get('kind')} {d.get('status')} "
+               f"{d.get('duration_s') or '?'} s, web searches {d.get('web_searches') or 0}") for d in tl["delegations"]]
+    items += [(e["ts"], f"[{_mmss(t0, e['ts'])}] {e['level']} {e['code']}: {e['msg'][:120]}") for e in tl["events"]
+              if e["level"] in ("WARNING", "ERROR")]
+    text = "\n".join(line for _, line in sorted(items, key=lambda x: x[0]))
+    text = re.sub(r"[\w.+-]+@[\w-]+\.[\w.-]+", "<email>", logs.redact(text))
+    if len(text) > REVIEW_INPUT_CHARS:
+        text = text[:REVIEW_INPUT_CHARS // 3] + "\n...\n" + text[-REVIEW_INPUT_CHARS * 2 // 3:]
+    hits = {r["fingerprint"] for r in store.rows("SELECT fingerprint FROM issue_hits WHERE session_id = ?", (sid,))}
+    known = [i["title"] for i in store.issues(None) if i["fingerprint"] in hits]
+    return "Already found:\n" + ("\n".join(f"- {k}" for k in known) or "- nothing") + "\n\nConversation:\n" + text
+
+
+REVIEW_FEATURE = "diagnosis_llm_pass"         # jarves.features switch (WP-I); its default is history.llm_review
+
+
+def _features(store: Store, cfg):
+    """The feature switches of the store's data dir (features.json, shared with the Core / CLI / dashboard)."""
+    f = getattr(store, "_features", None)
+    if f is None:
+        try:
+            from .features import Features
+        except ImportError:
+            return None
+        f = store._features = Features(cfg, Path(store.path).parent) if store.path != ":memory:" else Features(cfg)
+    return f
+
+
+def review_skip_reason(store: Store, cfg, sid: str, *, have_client: bool = False) -> str | None:
+    from .config import api_billing_allowed
+    h = cfg.history
+    feats = _features(store, cfg)
+    if feats is not None and not feats.enabled(REVIEW_FEATURE):
+        return f"the feature {REVIEW_FEATURE} is switched off (dashboard Features page)"
+    if feats is None and not h.llm_review:
+        return "history.llm_review is off"
+    if cfg.log.privacy:
+        return "log.privacy is on (the review needs the transcript)"
+    if not have_client and not api_billing_allowed(cfg.ai):
+        return "no API key route (ai.connection / OPENAI_API_KEY)"
+    if int(store.meta(f"llm_review:{date.today().isoformat()}") or 0) >= h.llm_review_daily_max:
+        return f"daily maximum reached ({h.llm_review_daily_max})"
+    if store.meta(f"llm_reviewed:{sid}"):
+        return "already reviewed"
+    return None
+
+
+def llm_review(store: Store, cfg, sid: str, *, client=None, budget=None) -> list[dict]:
+    """Run the AI review for one finished conversation (blocking; see schedule_review). Returns new findings."""
+    why = review_skip_reason(store, cfg, sid, have_client=client is not None)
+    text = None if why else review_input(store, sid)
+    if why or text is None:
+        logs.debug("diagnose", "DIAGNOSE_LLM_SKIPPED", f"AI review skipped: {why or 'nothing to review'}",
+                   conversation=sid)
+        return []
+    model = cfg.history.llm_review_model or cfg.ai.text_model
+    own_budget = None
+    if budget is None:
+        from .budget import Budget
+        from .memory import MemoryStore
+        own_budget = budget = Budget(MemoryStore(Path(store.path).parent / "memory.db"), cfg.ai)
+    day_key = f"llm_review:{date.today().isoformat()}"
+    with store._lock:
+        store._set_meta(day_key, str(int(store.meta(day_key) or 0) + 1))
+        store._set_meta(f"llm_reviewed:{sid}", str(time.time()))
+        store.commit()
+    t0 = time.monotonic()
+    try:
+        if client is None:
+            import openai
+            client = openai.OpenAI(timeout=30)
+        with budget.reserve("ai_requests"):
+            r = client.responses.create(model=model, instructions=REVIEW_INSTRUCTIONS, input=text, store=False,
+                                        max_output_tokens=900, reasoning={"effort": "low"})
+    except Exception as e:                         # budget reached, network, API: the rules' findings stand
+        logs.warn("diagnose", "DIAGNOSE_LLM_FAILED", f"AI review failed: {type(e).__name__}", conversation=sid)
+        return []
+    finally:
+        if own_budget is not None:
+            own_budget.memory.close()
+            own_budget.close()
+    u = getattr(r, "usage", None)
+    usage = {"in": int(getattr(u, "input_tokens", 0) or 0), "out": int(getattr(u, "output_tokens", 0) or 0),
+             "cached": int(getattr(getattr(u, "input_tokens_details", None), "cached_tokens", 0) or 0)}
+    store.x("INSERT INTO delegations (session_id, ts, kind, model, tier, status, duration_s, input_tokens, "
+            "cached_tokens, output_tokens, web_searches) VALUES (?,?,?,?,?,?,?,?,?,?,0)",
+            (sid, time.time(), "review", str(getattr(r, "model", "") or model), "", "completed",
+             round(time.monotonic() - t0, 2), usage["in"], usage["cached"], usage["out"]))
+    raw = (getattr(r, "output_text", "") or "").strip()
+    try:
+        found = json.loads(raw[raw.find("{"): raw.rfind("}") + 1] if "{" in raw else "{}").get("issues", [])
+    except ValueError:
+        found = []
+    s = store.session(sid) or {}
+    end = s.get("ended") or s.get("last_event") or time.time()
+    f = Finder(store, cfg)
+    for it in [x for x in found if isinstance(x, dict) and str(x.get("title", "")).strip()][:5]:
+        title = " ".join(str(it["title"]).split())[:120]
+        sev = str(it.get("severity", "low")).lower()
+        f.issue(sid, end, "ai:" + hashlib.sha1(title.lower().encode("utf-8")).hexdigest()[:12], "ai_review",
+                sev if sev in SEVERITY else "low", f"AI review: {title}", str(it.get("detail", ""))[:400],
+                {"quote": str(it.get("quote", ""))[:300], "source": f"AI review ({model}); it can be wrong"})
+    store.commit()
+    logs.info("diagnose", "DIAGNOSE_LLM_DONE", f"AI review found {len(f.found)} issue(s)", conversation=sid,
+              model=model, usage_in=usage["in"], usage_out=usage["out"], found=len(f.found))
+    return f.found
+
+
+def schedule_review(store: Store, cfg, sid: str) -> threading.Thread | None:
+    """Start the AI review in a daemon thread (the store's writer thread must never wait on the network)."""
+    if review_skip_reason(store, cfg, sid) is not None:
+        return None
+    def go() -> None:
+        try:
+            llm_review(store, cfg, sid)
+        except Exception as e:                     # e.g. the store closed at Core shutdown mid-review
+            print(f"jarves AI review: {type(e).__name__}: {str(e)[:120]}", flush=True)
+    th = threading.Thread(target=go, name="jarves-ai-review", daemon=True)
+    th.start()
+    return th

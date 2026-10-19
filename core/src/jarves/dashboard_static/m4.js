@@ -234,7 +234,6 @@
       el("div", { class: "card m4-scroll" }, audit.length ? el("table", {}, el("tbody", {}, audit)) : el("div", { class: "empty" }, "Nothing logged yet.")));
   }
 
-  window.JARVES_PAGES = Object.assign(window.JARVES_PAGES || {}, {
-    features: pageFeatures, identity: pageIdentity, calendar: pageCalendar, devices: pageDevices,
-  });
+  // the router (app.js) checks PAGES (pages.js, WP-H) first
+  Object.assign(PAGES, { features: pageFeatures, identity: pageIdentity, calendar: pageCalendar, devices: pageDevices });
 })();

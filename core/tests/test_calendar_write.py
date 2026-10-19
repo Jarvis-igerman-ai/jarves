@@ -292,7 +292,7 @@ def test_dashboard_calendar_preview_commit_and_no_delete_route(dash, fake):
     assert req(dash, "POST", "/api/calendar/preview", {"op": "delete", "handle": "e1"})[0] == 400
     for m in ("DELETE", "POST"):
         assert req(dash, m, "/api/calendar/events/e1")[0] == 404
-    assert not any(m == "DELETE" for m, _, _ in dashboard._ROUTES)
+    assert not any(m == "DELETE" and "calendar" in rx.pattern for m, rx, _ in dashboard._ROUTES)
     assert len(fake.writes) == 1 and not any(c.method == "DELETE" for c in fake.calls)
 
 

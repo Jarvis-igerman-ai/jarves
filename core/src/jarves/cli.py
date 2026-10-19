@@ -208,29 +208,21 @@ def _git_rev() -> str:
 
 
 def _private_line(line: str) -> str:
-    """Support bundles are for sharing: mask personal content even if the log was written with privacy off."""
-    try:
-        return json.dumps(logs.scrub(json.loads(line), private=True), ensure_ascii=False)
-    except ValueError:
-        return logs.redact(line)
+    """Support bundles are for sharing (old name; the rule lives in diagbundle.private_line, issue #15)."""
+    from .diagbundle import private_line
+    return private_line(line)
 
 
 def cmd_diag(a, cfg, home) -> int:
     """User-initiated, redacted support bundle (no secrets, no transcripts, no audio)."""
+    from . import diagbundle                    # SW-V2 M5: sanitized, size-bounded bundle
     out = Path(a.out or home / f"jarves-diag-{datetime.now():%Y%m%d-%H%M%S}.zip")
     snap = _ws_call(home, cfg.link.port, {"type": "status.request", "payload": {}}, "status") or read_snapshot(home / "health.json")
-    info = {"version": __version__, "commit": _git_rev(), "created": datetime.now(timezone.utc).isoformat(),
-            "python": sys.version.split()[0], "platform": platform.platform(), "openai_key_present": openai_key_present(),
-            "config": json.loads(cfg.model_dump_json())}
-    lines = []
-    logf = home / "logs" / "jarves.log"
-    if logf.exists():
-        lines = logf.read_text(encoding="utf-8", errors="replace").splitlines()[-a.lines:]
-    with zipfile.ZipFile(out, "w", zipfile.ZIP_DEFLATED) as z:
-        z.writestr("info.json", logs.redact(json.dumps(info, indent=1, ensure_ascii=False)))
-        z.writestr("health.json", logs.redact(json.dumps(snap, indent=1, ensure_ascii=False)))
-        z.writestr("recent.log", "\n".join(_private_line(l) for l in lines))
-    print(f"wrote {out} ({len(lines)} log lines, redacted). Review it before sharing.")
+    man = diagbundle.build(home, cfg, out, lines=a.lines, max_bytes=int(a.max_mb * 1024 * 1024), status=snap,
+                           commit=_git_rev())
+    print(f"wrote {out} ({man['bytes'] / 1024:.0f} KB, {man['log_lines']} log lines"
+          + (f", {man['log_lines_cut_for_size']} older lines cut for size" if man["log_lines_cut_for_size"] else "")
+          + "; personal content and credentials masked). Review it before sharing.")
     return 0
 
 
@@ -772,10 +764,8 @@ def _history(cfg, home):
 
 def _log_files(home: Path) -> list[Path]:
     """jarves.log and its rotations, oldest first."""
-    base = home / "logs" / "jarves.log"
-    rotated = sorted(base.parent.glob("jarves.log.*"), key=lambda p: int(p.suffix[1:]) if p.suffix[1:].isdigit() else 0,
-                     reverse=True)
-    return [p for p in rotated + [base] if p.is_file()]
+    from .logview import log_files
+    return log_files(home)
 
 
 def cmd_cost(a, cfg, home) -> int:
@@ -917,6 +907,7 @@ def main(argv: list[str] | None = None) -> int:
     d = sub.add_parser("diag", help="write a redacted support bundle (zip)")
     d.add_argument("--out")
     d.add_argument("--lines", type=int, default=500)
+    d.add_argument("--max-mb", type=float, default=5.0, help="size limit of the bundle (default 5 MB)")
     m = sub.add_parser("memory", help="list / delete / clear what JARVES remembers")
     m.add_argument("action", choices=["list", "delete", "clear"])
     m.add_argument("id", nargs="?")
@@ -929,6 +920,10 @@ def main(argv: list[str] | None = None) -> int:
     g.add_argument("--forget", action="store_true", help="logout: also forget this app registration")
     from .google_auth import add_cli as add_google_cli, cmd_google
     add_google_cli(sub)                       # WP-G: jarvis google login / status / logout
+    from .backup import add_cli as add_backup_cli, cmd_backup, cmd_restore
+    from .usage import add_cli as add_usage_cli, cmd_usage
+    add_backup_cli(sub)                       # SW-V2 M5: jarvis backup / restore
+    add_usage_cli(sub)                        # SW-V2 M5: jarvis usage
     wk = sub.add_parser("wake", help="calibrate the wake word to your voice and mic, or train a new wake phrase")
     wk.add_argument("action", choices=["test", "train"])
     wk.add_argument("phrase", nargs="*", help="train: the new phrase in Latin letters, e.g. \"hey max\"")
@@ -979,7 +974,8 @@ def main(argv: list[str] | None = None) -> int:
     return {"run": cmd_run, "stop": cmd_stop, "status": cmd_status, "diag": cmd_diag, "memory": cmd_memory, "music": cmd_music,
             "ask": cmd_ask, "say": cmd_say, "chatgpt": cmd_chatgpt, "setup": cmd_setup, "logs": cmd_logs, "key": cmd_key,
             "wake": cmd_wake, "doctor": cmd_doctor, "cost": cmd_cost, "dashboard": cmd_dashboard,
-            "diagnose": cmd_diagnose, "features": cmd_features, "google": cmd_google}[a.cmd](a, cfg, home)
+            "diagnose": cmd_diagnose, "features": cmd_features, "google": cmd_google,
+            "backup": cmd_backup, "restore": cmd_restore, "usage": cmd_usage}[a.cmd](a, cfg, home)
 
 
 if __name__ == "__main__":

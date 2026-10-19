@@ -4,12 +4,15 @@ extends Control
 ## --state=<s> / --link=<ready|live|connecting|degraded|offline|error|muted> / --level=<0..1> (preview without
 ## the Core: the link no longer drives the face), --shot=<png> (screenshot then quit), --check (self-test),
 ## --low (cheaper face shader), --lively (old busier motion), --seed=<n> (repeatable motion),
-## --seq=<png> [--seq-frames=8 --seq-span=12 | --seq-blink] (contact sheet of frames on a simulated clock, then quit).
+## --seq=<png> [--seq-frames=8 --seq-span=12 | --seq-blink] (contact sheet of frames on a simulated clock, then quit),
+## --appearance=<face|avatar2d|avatar3d|hidden> (start presentation; the Core's appearance.set overrides it).
 
 const Face := preload("res://face/face.gd")
 const AssistantUI := preload("res://face/assistant_ui.gd")
+const Appearance := preload("res://face/appearance.gd")
 
 var face: Control
+var appearance: Control          # face / avatar2d / avatar3d / hidden (appearance.gd); face.gd drives them all
 var ui: PanelContainer
 var _preview_level := -1.0
 
@@ -20,7 +23,12 @@ func _ready() -> void:
 	bg.set_anchors_preset(Control.PRESET_FULL_RECT)
 	add_child(bg)
 	face = Face.new()
-	add_child(face)
+	appearance = Appearance.new()
+	appearance.name = "Appearance"
+	appearance.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	add_child(appearance)
+	appearance.add_child(face)
+	appearance.setup(face)
 	ui = AssistantUI.new()
 	ui.position = Vector2(12, 12)
 	var args := OS.get_cmdline_user_args()
@@ -40,8 +48,11 @@ func _ready() -> void:
 			_preview_level = float(a.substr(8))
 		elif a.begins_with("--seed="):
 			face.reseed(int(a.substr(7)))
+		elif a.begins_with("--appearance="):
+			appearance.set_mode(a.substr(13))
 	if not preview:
 		ui.face = face
+		ui.appearance = appearance
 	if preview and not link_given:
 		face.set_link("ready")
 	add_child(ui)
@@ -77,8 +88,7 @@ func _process(_delta: float) -> void:
 func _layout() -> void:
 	var s := get_viewport_rect().size
 	var d: float = min(s.x, s.y)
-	face.size = Vector2(d, d)
-	face.position = (s - face.size) / 2.0
+	appearance.layout(Rect2((s - Vector2(d, d)) / 2.0, Vector2(d, d)))
 
 
 func _e2e() -> void:
@@ -346,6 +356,113 @@ func _activity_checks(errs: Array) -> void:
 	_settle(120)
 
 
+func _appearance_checks(errs: Array) -> String:
+	# appearance.set: every presentation draws the SAME face.pose(); a switch never touches the face state;
+	# malformed modes are ignored; hidden draws nothing; avatars blink/move exactly as calmly as the face.
+	face.set_link("ready")
+	face.set_state("happy")
+	_settle(60)
+	var canvas: Control = face.get_child(0)
+	for m in appearance.MODES:
+		ui._on_message("appearance.set", {"mode": m})
+		await get_tree().process_frame
+		if appearance.mode != m:
+			errs.append("appearance.set %s not applied" % m)
+		if face.state != "happy" or face.link_state != "ready":
+			errs.append("switching to %s changed the face state/link" % m)
+		var av: Control = appearance.avatar
+		var ok := false
+		match m:
+			"face":
+				ok = canvas.visible and face.visible and av == null
+			"avatar2d":
+				ok = av != null and av.get_script() == appearance.Avatar2D and not canvas.visible and face.visible
+			"avatar3d":
+				ok = av != null and av.get_script() == appearance.Avatar3D and not canvas.visible and face.visible
+			"hidden":
+				ok = av == null and not face.visible
+		if not ok:
+			errs.append("presentation %s not shown correctly" % m)
+	ui._on_message("appearance.set", {"mode": "avatar2d"})
+	face.set_activity("searching", "מחפש ברשת")
+	_settle(30)
+	if not face.activity.visible or face.activity.alpha < 0.9:
+		errs.append("activity pill hidden in avatar mode")
+	face.set_activity("done", "")
+	var n0: int = appearance.switches
+	for bad in [{"mode": 7}, {"mode": null}, {"mode": "AVATAR3D"}, {"mode": ["face"]}, {}, {"mode": "a".repeat(5000)},
+			{"mode": {"x": 1}}, {"mode": 3.5}, {"mode": true}]:
+		ui._on_message("appearance.set", bad)
+	ui._on_message("appearance.set", {"mode": "avatar2d"})        # same mode again: no rebuild
+	if appearance.mode != "avatar2d" or appearance.switches != n0:
+		errs.append("malformed / repeated appearance.set changed the presentation")
+	# the contract reaches both avatars: expressions, speech level, sleep, colour
+	var f := _new_face(false, 7)
+	var a2: Control = appearance.Avatar2D.new()
+	var a3: Control = appearance.Avatar3D.new()
+	var feed_both := func(x: Control) -> void:
+		a2.apply_pose(x.pose())
+		a3.apply_pose(x.pose())
+	_simulate(f, 1.0)
+	feed_both.call(f)
+	var idle_eye: float = a3.eyes[0].scale.y
+	f.set_state("happy")
+	_simulate(f, 1.5)
+	feed_both.call(f)
+	if a2.mouth_curve < 0.8 or a3.eyes[0].scale.y > idle_eye * 0.9:
+		errs.append("avatars do not show the happy expression (smile %.2f, eye %.2f vs %.2f)" % [a2.mouth_curve, a3.eyes[0].scale.y, idle_eye])
+	f.set_state("speaking")
+	_simulate(f, 1.0, func(x: Control) -> void: x.set_speech_level(0.8))
+	feed_both.call(f)
+	var talk := [a2.mouth_gap, a3.mouth_gap]
+	_simulate(f, 0.6)
+	feed_both.call(f)
+	if talk[0] < 0.03 or talk[1] < 0.03 or a2.mouth_gap > 0.01 or a3.mouth_gap > 0.01:
+		errs.append("avatar mouths do not follow the speech level (open %s, closed %.3f / %.3f)" % [talk, a2.mouth_gap, a3.mouth_gap])
+	f.set_state("error")
+	_simulate(f, 1.0)
+	feed_both.call(f)
+	if a3.eye_mat.albedo_color.r < 0.9:
+		errs.append("3D avatar ignores the expression colour")
+	f.set_state("idle")
+	f.set_link("offline")
+	_simulate(f, 2.0)
+	feed_both.call(f)
+	if a2.eye_open > 0.1 or a3.eye_open > 0.1:
+		errs.append("avatars do not sleep when offline")
+	f.free()
+	# motion budget: identical blink count to the driver, head motion tiny (the eyes do the looking)
+	var g := _new_face(false, 11)
+	var meas := {"b2": 0, "b3": 0, "open2": true, "open3": true, "head2": 0.0, "head3": 0.0}
+	var watch := func(x: Control) -> void:
+		feed_both.call(x)
+		var o2: bool = a2.eye_open > 0.3
+		var o3: bool = a3.eye_open > 0.3
+		if meas.open2 and not o2:
+			meas.b2 += 1
+		if meas.open3 and not o3:
+			meas.b3 += 1
+		meas.open2 = o2
+		meas.open3 = o3
+		meas.head2 = maxf(meas.head2, a2.head_off.length())
+		meas.head3 = maxf(meas.head3, a3.head_rot.length())
+	var mo := _simulate(g, 120.0, watch)
+	var driver: float = mo.blinks_per_min * 2.0
+	if absf(meas.b2 - driver) > 1.0 or absf(meas.b3 - driver) > 1.0:
+		errs.append("avatar blinks (%d / %d) differ from the face driver (%.0f)" % [meas.b2, meas.b3, driver])
+	if mo.blinks_per_min < 8.0 or mo.blinks_per_min > 16.0:
+		errs.append("avatar blink rate %.1f/min outside 8..16" % mo.blinks_per_min)
+	if meas.head2 > 0.02 or meas.head3 > 0.06:
+		errs.append("avatar head moves too much (2D %.1f%% r, 3D %.1f deg)" % [meas.head2 * 100.0, rad_to_deg(meas.head3)])
+	g.free()
+	a2.free()
+	a3.free()
+	ui._on_message("appearance.set", {"mode": "face"})
+	face.set_state("idle")
+	return "appearance: modes %s, avatar blinks %d/%d per 2 min (face %.0f), head motion 2D %.2f%% r / 3D %.2f deg" % [
+		",".join(appearance.MODES), meas.b2, meas.b3, driver, meas.head2 * 100.0, rad_to_deg(meas.head3)]
+
+
 func _new_face(lively: bool, seed_value: int, st := "idle") -> Control:
 	var f: Control = Face.new()
 	f.set_lively(lively)
@@ -539,6 +656,7 @@ func _check() -> void:
 	_reaction_checks(errs)
 	_activity_checks(errs)
 	print(_gaze_checks(errs))
+	print(await _appearance_checks(errs))
 	# sleeping face never blinks
 	var fz := _new_face(false, 21)
 	fz.set_link("offline")
