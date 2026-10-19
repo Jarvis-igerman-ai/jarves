@@ -103,6 +103,9 @@ Manual steps:
 | Logs | `%LOCALAPPDATA%\jarves\logs\jarves.log` (JSON lines, UTC, component/code/correlation ID, rotated 5 × 1 MB, secrets/transcripts redacted) |
 | Support bundle | `uv run jarves diag` (zip with redacted logs + health + config; review before sharing) |
 | Memory | `uv run jarves memory list` / `delete <id>` / `clear`. You can also say "תשכח את הכל", which asks for confirmation. |
+| Dashboard | `jarvis dashboard` opens a local page (this computer only, one-time key in the link): every conversation with what you said / what he said, tools, reply delays, silences and cost; Costs; Issues; Memory; Skills & tools with health; Workspace files; Settings (read-only). Dark mode follows Windows or the Theme button. |
+| Cost | `jarvis cost` (per day and per conversation; **estimates** from `[pricing]`: GPT-Live $0.05/min + backend tokens, checked 2026-10-19; your OpenAI bill is the truth) |
+| Self-diagnosis | Runs after every conversation; `jarvis diagnose` on demand (`--import-log` first reads older conversations from jarves.log). Finds stalls, dead air, confusing fillers, misunderstandings, tool/backend failures, early-response drops, false wakes, high cost. |
 | One-shot test | `uv run jarves ask "מה השעה"` · `uv run jarves say "שלום"` · `uv run jarves music status` |
 
 **Config:** optional `%LOCALAPPDATA%\jarves\config.toml` ([template](config.example.toml)). Unknown keys, secrets or a non-loopback host are rejected with a clear message.
@@ -110,7 +113,7 @@ Manual steps:
 **Privacy:**
 - Mode 1 listens locally for the wake word; mode 2 opens the mic for the live conversation after the greeting. Software mute stops capture, and closing the window requests Core/session shutdown.
 - Software mute is **not** a hardware privacy switch.
-- No audio or transcripts are written to disk.
+- No audio is written to disk. Conversation history (`store.db`: what was said, tools, timings, issues) follows `log.privacy`: with privacy on only lengths and timings are kept. `[history] enabled = false` turns it off; `keep_days` (default 90) bounds it. `jarves diag` never includes it.
 - Memory holds only what you ask JARVES to remember.
 - The Agents SDK trace upload is disabled.
 

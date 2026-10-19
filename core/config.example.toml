@@ -33,3 +33,15 @@ max_volume = 70
 
 [log]
 level = "INFO"
+
+[history]                      # conversation history for `jarvis dashboard`, `jarvis cost`, self-diagnosis
+enabled = true                 # follows log.privacy: privacy on = only lengths and timings, never what was said
+keep_days = 90
+dead_air_s = 5                 # self-diagnosis: silence before a reply / while a request is pending
+stall_s = 20                   # a request with no real answer for this long is an issue
+
+[pricing]                      # cost ESTIMATES (USD), checked 2026-10-19 at developers.openai.com/api/docs/pricing
+session_alert_usd = 0.50       # self-diagnosis flags a conversation above this
+daily_alert_usd = 2.00         # ...and a day above this
+# voice_per_minute = { "gpt-live-1" = 0.05 }
+# models."gpt-6-luna" = { input = 0.10, cached_input = 0.01, output = 0.50 }   # per 1M tokens

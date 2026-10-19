@@ -1,0 +1,32 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>JARVES Dashboard</title>
+<link rel="stylesheet" href="/static/style.css">
+<script src="/static/app.js" defer></script>
+</head>
+<body>
+<div class="shell">
+  <aside class="side">
+    <div class="brand"><span class="dot" id="coreDot" title="Core state"></span>JARVES</div>
+    <nav id="nav">
+      <a href="#/conversations" data-page="conversations">Conversations</a>
+      <a href="#/costs" data-page="costs">Costs</a>
+      <a href="#/issues" data-page="issues">Issues <span class="count" id="issueCount"></span></a>
+      <a href="#/memory" data-page="memory">Memory</a>
+      <a href="#/skills" data-page="skills">Skills &amp; tools</a>
+      <a href="#/workspace" data-page="workspace">Workspace</a>
+      <a href="#/settings" data-page="settings">Settings</a>
+    </nav>
+    <div class="side-foot">
+      <button id="themeBtn" class="ghost" type="button">Theme: auto</button>
+      <div class="muted small" id="footInfo"></div>
+    </div>
+  </aside>
+  <main id="main" aria-live="polite"><div class="muted">Loading…</div></main>
+</div>
+<div id="tip" class="tip" role="tooltip" hidden></div>
+</body>
+</html>
