@@ -50,19 +50,26 @@ MAX_HTTP = 200_000
 CALL_TIMEOUT_S = 10.0
 MAX_RPC = 50
 USER_ROUTES = ("dashboard", "cli", "user")          # who may approve / grant / enable (never "voice" or "model")
-ALLOWED_IMPORTS = ("json", "math", "re", "datetime", "statistics", "random", "string", "textwrap", "itertools",
+# `string` is NOT here: string.Formatter().get_field("0._os.system", (random,), {}) walks attributes out of the
+# sandbox (get_field/get_value use getattr on the field name) and passes a naive AST check. Anything that formats
+# with a runtime field name is a getattr primitive and stays out.
+ALLOWED_IMPORTS = ("json", "math", "re", "datetime", "statistics", "random", "textwrap", "itertools",
                    "functools", "collections", "decimal", "fractions", "unicodedata", "calendar", "zoneinfo")
 FORBIDDEN_NAMES = frozenset({"eval", "exec", "compile", "open", "__import__", "globals", "locals", "vars", "getattr",
                              "setattr", "delattr", "input", "breakpoint", "help", "memoryview", "exit", "quit",
                              "type", "object", "super", "classmethod", "staticmethod", "property", "dir", "id",
-                             "print", "bytearray", "bytes", "__builtins__", "__loader__", "__spec__", "__file__"})
-# attribute names that lead out of the allowed modules (typing.sys, enum.sys...) or into frames / code objects
+                             "print", "bytearray", "bytes", "__builtins__", "__loader__", "__spec__", "__file__",
+                             "Formatter"})       # string.Formatter is a getattr primitive (see ALLOWED_IMPORTS)
+# attribute names that lead out of the allowed modules (typing.sys, enum.sys...) or into frames / code objects, and
+# any getattr-by-string route: str.format*/Formatter walk a field path with getattr; operator.*getter build one.
 FORBIDDEN_ATTRS = frozenset({"sys", "os", "modules", "builtins", "inspect", "importlib", "subprocess", "socket",
                              "ctypes", "marshal", "pickle", "shutil", "system", "popen", "spawn", "loader", "spec",
                              "code", "frame", "globals", "locals", "copyreg", "enum", "mro", "format", "format_map",
                              "f_back", "f_globals", "f_locals", "f_builtins", "gi_frame", "gi_code", "cr_frame",
                              "co_code", "tb_frame", "tb_next", "func_globals", "register", "exec", "eval", "compile",
-                             "open", "getattr", "setattr", "delattr", "vars", "type"})
+                             "open", "getattr", "setattr", "delattr", "vars", "type",
+                             "get_field", "get_value", "vformat", "convert_field", "format_field", "parse",
+                             "attrgetter", "methodcaller", "itemgetter"})
 CTX_METHODS = {"storage_get": "storage", "storage_set": "storage", "http_get": "network", "now": None, "log": None}
 ARG_TYPES = {"string": str, "integer": int, "number": float, "boolean": bool}
 # D05 + mail policy: a generated Skill can never delete calendar events or send mail, whatever it is granted.
@@ -426,9 +433,11 @@ class GeneratedSkills:
         version = int(st.get("version", 0)) + 1
         vd = self.installed / sid / "versions" / str(version)
         vd.mkdir(parents=True, exist_ok=False)
-        shutil.copy2(d / "SKILL.md", vd / "SKILL.md")
+        # Write the EXACT bytes we just validated and whose sha256 the owner confirmed - never re-read the draft
+        # files from disk (a concurrent propose() could swap them between the check and the copy: TOCTOU).
+        (vd / "SKILL.md").write_text(md, encoding="utf-8")
         if py is not None:
-            shutil.copy2(d / "skill.py", vd / "skill.py")
+            (vd / "skill.py").write_text(py, encoding="utf-8")
         _write_json(vd / "report.json", rep)
         hist = list(st.get("history") or [])
         hist.append({"version": version, "sha256": rep["sha256"], "approved_by": by, "ts": time.time()})
@@ -506,6 +515,7 @@ class GeneratedSkills:
         rep = self.report(sid)
         return {"id": sid, "title": rep.get("title", sid), "description": rep.get("description", ""),
                 "version": st.get("version"), "enabled": bool(st.get("enabled")), "grants": st.get("grants") or {},
+                "has_code": bool(rep.get("has_code")),
                 "requested": rep.get("capabilities", []), "tools": rep.get("tools", []),
                 "permissions": rep.get("permissions", []), "summary_he": rep.get("summary_he", ""),
                 "summary_en": rep.get("summary_en", ""), "last_error": st.get("last_error"),
@@ -574,7 +584,7 @@ class _Broker:
             _write_json(self.data_path, data)
             return True
         if op == "http_get":
-            from urllib.parse import urlsplit
+            from urllib.parse import urlsplit, urlunsplit
             url = str(args.get("url", ""))
             u = urlsplit(url)
             host = (u.hostname or "").lower()
@@ -585,16 +595,27 @@ class _Broker:
             if client is not None:                       # tests inject a fake client
                 r = await client.get(url)
                 return {"status": r.status_code, "text": r.text[:MAX_HTTP]}
-            await _public_host(host)                     # a granted name must not point into the LAN / loopback
+            # DNS-rebinding defence: resolve ONCE, verify every answer is public, then CONNECT to that exact IP.
+            # Resolving again inside httpx would let the name flip to a LAN/loopback address between check and use.
+            ip = await _public_host(host)
             import httpx
+            port = u.port or 443
+            netloc = f"[{ip}]:{port}" if ":" in ip else f"{ip}:{port}"
+            pinned = urlunsplit((u.scheme, netloc, u.path or "/", u.query, ""))   # URL points at the checked IP
             async with httpx.AsyncClient(follow_redirects=False, timeout=8.0) as c:
-                async with c.stream("GET", url) as r:
+                # Host header + SNI/cert hostname stay the real name; we never follow redirects, so a 3xx to an
+                # internal host is returned to the Skill as text, never re-resolved and fetched by us.
+                req = c.build_request("GET", pinned, headers={"Host": host}, extensions={"sni_hostname": host})
+                r = await c.send(req, stream=True)
+                try:
                     buf = b""
                     async for chunk in r.aiter_bytes():
                         buf += chunk
                         if len(buf) >= MAX_HTTP:
                             break
                     return {"status": r.status_code, "text": buf[:MAX_HTTP].decode(r.encoding or "utf-8", "replace")}
+                finally:
+                    await r.aclose()
         if op == "now":
             from datetime import datetime
             return datetime.now().astimezone().isoformat(timespec="seconds")
@@ -604,17 +625,104 @@ class _Broker:
         raise PermissionError(f"unknown ctx call {op}")
 
 
-async def _public_host(host: str) -> None:
+async def _public_host(host: str) -> str:
+    """Resolve `host`, refuse if ANY answer is non-public, and return one verified public IP to connect to."""
     import ipaddress
     import socket
     infos = await asyncio.get_running_loop().getaddrinfo(host, 443, type=socket.SOCK_STREAM)
+    if not infos:
+        raise PermissionError(f"{host} does not resolve")
     for info in infos:
         ip = ipaddress.ip_address(info[4][0])
         if not ip.is_global:
             raise PermissionError(f"{host} resolves to a non-public address; refused")
+    return infos[0][4][0]
 
 
 _CHILD = Path(__file__).with_name("sandbox_child.py")
+WIN_JOB_MEM_BYTES = 512 << 20          # mirrors the POSIX RLIMIT_AS the child sets on Linux
+
+
+def _win_job_limit(pid: int):
+    """Cheap OS hardening on Windows: put the child in a Job Object that caps its memory and forbids it to spawn
+    more processes, and kills the whole job when our handle closes (so a timeout / crash of the parent reaps it).
+    Returns the job handle to keep alive, or None. Fails open (logs): the AST/import/builtins layers still hold.
+
+    NOT done here (tracked, lower value than the restrictions already in place): a restricted token or a
+    low-integrity child. Those need a CreateProcess with a custom token, which asyncio's subprocess does not expose;
+    a from-scratch CreateProcessAsUser/CreateRestrictedToken launcher is a lot of surface for little gain now that
+    the child has no OS modules, no open/eval and an empty environment. Documented for the Pi work too (issue #21)."""
+    if sys.platform != "win32":
+        return None
+    try:
+        import ctypes
+        from ctypes import wintypes
+        k32 = ctypes.WinDLL("kernel32", use_last_error=True)
+        # Declare handle types: the defaults are c_int (32-bit), which TRUNCATES 64-bit HANDLEs and makes the whole
+        # thing fail or, worse, act on the wrong handle. Get this right or do not touch the child at all.
+        k32.OpenProcess.restype = wintypes.HANDLE
+        k32.OpenProcess.argtypes = [wintypes.DWORD, wintypes.BOOL, wintypes.DWORD]
+        k32.CreateJobObjectW.restype = wintypes.HANDLE
+        k32.CreateJobObjectW.argtypes = [wintypes.LPVOID, wintypes.LPCWSTR]
+        k32.SetInformationJobObject.restype = wintypes.BOOL
+        k32.SetInformationJobObject.argtypes = [wintypes.HANDLE, ctypes.c_int, wintypes.LPVOID, wintypes.DWORD]
+        k32.AssignProcessToJobObject.restype = wintypes.BOOL
+        k32.AssignProcessToJobObject.argtypes = [wintypes.HANDLE, wintypes.HANDLE]
+        k32.CloseHandle.restype = wintypes.BOOL
+        k32.CloseHandle.argtypes = [wintypes.HANDLE]
+        k32.IsProcessInJob.restype = wintypes.BOOL
+        k32.IsProcessInJob.argtypes = [wintypes.HANDLE, wintypes.HANDLE, ctypes.POINTER(wintypes.BOOL)]
+        k32.GetCurrentProcess.restype = wintypes.HANDLE
+        # If WE are already inside a job (CI, a test harness, some launchers), putting the child in a nested job of
+        # our own can have the OS tear the child down before it runs. That is worse than no job, so skip and lean on
+        # the AST/import/builtins layers. A normally-launched Core (Explorer, tray, service) is not in a job.
+        in_job = wintypes.BOOL()
+        if k32.IsProcessInJob(k32.GetCurrentProcess(), None, ctypes.byref(in_job)) and in_job.value:
+            return None
+        PROCESS_SET_QUOTA, PROCESS_TERMINATE = 0x0100, 0x0001
+        h_proc = k32.OpenProcess(PROCESS_SET_QUOTA | PROCESS_TERMINATE, False, pid)
+        if not h_proc:
+            return None
+        try:
+            h_job = k32.CreateJobObjectW(None, None)
+            if not h_job:
+                return None
+
+            class _BASIC(ctypes.Structure):
+                _fields_ = [("PerProcessUserTimeLimit", ctypes.c_int64), ("PerJobUserTimeLimit", ctypes.c_int64),
+                            ("LimitFlags", wintypes.DWORD), ("MinimumWorkingSetSize", ctypes.c_size_t),
+                            ("MaximumWorkingSetSize", ctypes.c_size_t), ("ActiveProcessLimit", wintypes.DWORD),
+                            ("Affinity", ctypes.POINTER(ctypes.c_ulong)), ("PriorityClass", wintypes.DWORD),
+                            ("SchedulingClass", wintypes.DWORD)]
+
+            class _IO(ctypes.Structure):
+                _fields_ = [("ReadOperationCount", ctypes.c_uint64), ("WriteOperationCount", ctypes.c_uint64),
+                            ("OtherOperationCount", ctypes.c_uint64), ("ReadTransferCount", ctypes.c_uint64),
+                            ("WriteTransferCount", ctypes.c_uint64), ("OtherTransferCount", ctypes.c_uint64)]
+
+            class _EXT(ctypes.Structure):
+                _fields_ = [("BasicLimitInformation", _BASIC), ("IoInfo", _IO),
+                            ("ProcessMemoryLimit", ctypes.c_size_t), ("JobMemoryLimit", ctypes.c_size_t),
+                            ("PeakProcessMemoryUsed", ctypes.c_size_t), ("PeakJobMemoryUsed", ctypes.c_size_t)]
+            JOB_MEM, JOB_ACTIVE, JOB_KILL = 0x00000100, 0x00000008, 0x00002000
+            JobObjectExtendedLimitInformation = 9
+            info = _EXT()
+            info.BasicLimitInformation.LimitFlags = JOB_MEM | JOB_ACTIVE | JOB_KILL
+            info.BasicLimitInformation.ActiveProcessLimit = 1
+            info.ProcessMemoryLimit = WIN_JOB_MEM_BYTES
+            if not k32.SetInformationJobObject(h_job, JobObjectExtendedLimitInformation, ctypes.byref(info),
+                                               ctypes.sizeof(info)):
+                k32.CloseHandle(h_job)
+                return None
+            if not k32.AssignProcessToJobObject(h_job, h_proc):
+                k32.CloseHandle(h_job)
+                return None
+            return h_job
+        finally:
+            k32.CloseHandle(h_proc)
+    except Exception:
+        logs.warn("skills", "SKILL_JOB_UNAVAILABLE", "could not place the Skill child in a Windows job object")
+        return None
 
 
 async def run_sandboxed(code: str, tool: str, args: dict, broker, timeout_s: float = CALL_TIMEOUT_S) -> dict:
@@ -627,6 +735,7 @@ async def run_sandboxed(code: str, tool: str, args: dict, broker, timeout_s: flo
         sys.executable, "-I", "-S", "-X", "utf8", str(_CHILD), cwd=work, env=env,
         stdin=asyncio.subprocess.PIPE, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.DEVNULL,
         limit=MAX_HTTP * 3)
+    job = _win_job_limit(proc.pid)
 
     async def talk() -> dict:
         req = {"code": code, "tool": tool, "args": args, "imports": list(ALLOWED_IMPORTS)}
@@ -657,6 +766,15 @@ async def run_sandboxed(code: str, tool: str, args: dict, broker, timeout_s: flo
         if proc.returncode is None:
             proc.kill()
         await proc.wait()
+        if job is not None:
+            try:
+                import ctypes
+                from ctypes import wintypes
+                _close = ctypes.WinDLL("kernel32").CloseHandle
+                _close.argtypes = [wintypes.HANDLE]
+                _close(job)                                  # kill-on-close reaps anything still in the job
+            except Exception:
+                pass
         shutil.rmtree(work, ignore_errors=True)
 
 
@@ -780,7 +898,9 @@ def make_builder_skill(mgr: GeneratedSkills) -> Skill:
 
 _PI = "https://github.com/igalgerman/JARVIS/issues/21"
 TARGETS = {"windows": {"status": "implemented_unverified",
-                       "evidence": "pytest test_skill_creation (incl. malicious drafts); approval UX not owner-reviewed"},
+                       "evidence": "pytest test_skill_creation (incl. malicious drafts incl. the string.Formatter "
+                                   "getattr escape); child runs in a Job Object (memory + 1-process cap, kill-on-"
+                                   "close); code is NOT OS-sandboxed (shown on the approval page); UX not owner-reviewed"},
            "linux_arm64_pi": {"status": "planned", "roadmap_issue": _PI,
                               "blocker": "sandbox runner not run on Pi OS; OS-level sandbox (bubblewrap/seccomp) open"}}
 features.register("skill_creation", "יצירת כישורים חדשים", "Create new Skills", True, risk="medium",
