@@ -485,18 +485,29 @@ def cmd_wake(a, cfg, home) -> int:
     import time as _time
     from .voice.audio import AudioUnavailable, StreamingAudio
     from .voice.wakeword import WakeWordUnavailable, level_meter, make_detector
+    from .identity import Identity
+    Identity(home, cfg).apply_to_config(cfg)            # the chosen wake model / phrase (dashboard, wake train)
     v = cfg.voice
+    if a.action == "train":
+        return _wake_train(a, cfg, home)
+    model = a.model or v.wake_word
+    phrase = v.wake_phrase if not a.model else Path(a.model).stem.replace("_", " ")
 
     async def go() -> int:
         try:
-            det = make_detector(v.wake_word, 1.01)          # never "triggers": we only read the raw score
+            det = make_detector(model, 1.01)                # never "triggers": we only read the raw score
             await det.load()
         except WakeWordUnavailable as e:
             print(f"{e.code}: {e.message}. {e.action}")
             return 1
+        threshold = v.wake_threshold
+        if model.endswith(".npz") and a.model:
+            threshold = det.head["meta"].get("threshold") or threshold
         from .app import _mic_name
-        print(f"Microphone: {_mic_name(v.input_device)}   current threshold: {v.wake_threshold}")
-        print(f'Say "Hey Jarvis" 3-4 times with a pause between, normally, from where you will sit.  ({a.seconds} s)\n')
+        print(f"Microphone: {_mic_name(v.input_device)}   wake model: {Path(model).name}   threshold: {threshold}")
+        if a.false_wakes:
+            return await false_wakes(det, threshold)
+        print(f'Say "{phrase}" 3-4 times with a pause between, normally, from where you will sit.  ({a.seconds} s)\n')
         mic = StreamingAudio(v.input_device, v.output_device, rate=16000)
         peaks: list[float] = []
         cur_peak, best, loud = 0.0, 0.0, 0.0
@@ -539,13 +550,85 @@ def cmd_wake(a, cfg, home) -> int:
         rec = round(min(0.5, max(0.15, 0.6 * min(peaks))), 2)
         print(f"Heard {len(peaks)} attempt(s), scores {', '.join(f'{x:.2f}' for x in peaks)}.")
         print(f"Recommended wake_threshold = {rec}   (now {v.wake_threshold}).  Lower = easier to trigger, but more false wakes.")
-        if a.apply:
+        if a.apply and a.model:
+            Identity(home, cfg).set_wake(a.model, threshold=rec, by="cli")
+            print(f"Saved: {Path(a.model).name} is now the wake phrase (threshold {rec}). Restart JARVES to use it.")
+        elif a.apply:
             set_toml_value(Path(a.config) if a.config else home / "config.toml", "voice", "wake_threshold", str(rec))
             print("Saved. Restart JARVES to use it.")
         else:
-            print("Apply it with:  jarvis wake test --apply")
+            print("Apply it with:  jarvis wake test --apply" + (f' --model "{a.model}"' if a.model else ""))
         return 0
+
+    async def false_wakes(det, threshold: float) -> int:
+        """Room audio for N minutes (TV, talking, quiet): how often would it wake by mistake?"""
+        print(f"Measuring false wakes for {a.false_wakes} min: do NOT say the wake phrase; keep the room as usual "
+              "(talking, TV, music). Nothing is recorded or sent; only the score is read.\n")
+        mic = StreamingAudio(v.input_device, v.output_device, rate=16000)
+        hits, best, cool = 0, 0.0, 0.0
+        t0 = _time.monotonic()
+        t_end = t0 + a.false_wakes * 60
+        try:
+            async for chunk in mic.mic_chunks(16000, 2560):
+                det.feed(chunk)
+                sc, now = det.last_score, _time.monotonic()
+                best = max(best, sc)
+                if sc >= threshold and now >= cool:
+                    hits, cool = hits + 1, now + 2.0
+                print(f"\r {int(now - t0) // 60:3d} min  false wakes {hits}  highest score {best:4.2f}   ", end="",
+                      flush=True)
+                if now >= t_end:
+                    break
+        except AudioUnavailable as e:
+            print(f"\n{e.code}: {e.message}. {e.action}")
+            return 1
+        finally:
+            mic.close()
+        hours = max(1e-6, (_time.monotonic() - t0) / 3600)
+        print(f"\n\n{hits} false wake(s) in {hours * 60:.0f} min = {hits / hours:.1f} per hour at threshold {threshold}. "
+              f"Highest score {best:.2f}. Aim for under 0.5 per hour; raise the threshold if it is higher.")
+        return 0 if hits / hours <= 0.5 else 1
     return asyncio.run(go())
+
+
+def _wake_train(a, cfg, home) -> int:
+    """`jarvis wake train "<phrase>"`: local synthetic samples -> trained head in <state_dir>/wake (voice/wake_train)."""
+    from .identity import Identity, IdentityError
+    from .voice.wake_train import local_voices, slug, train_phrase
+    if not a.phrase:
+        print('usage: jarvis wake train "hey max" --say "היי מקס" [--samples DIR] [--apply]', file=sys.stderr)
+        return 2
+    phrase = " ".join(a.phrase)
+    voices = local_voices()
+    print(f"Training a wake phrase for \"{phrase}\" on this device (free, local; nothing is played or sent).")
+    print("Voices: " + (", ".join(f"{x.id} ({x.lang})" for x in voices) or "none") +
+          (f"; your recordings: {a.samples}" if a.samples else ""))
+    if not voices and not a.samples:
+        print("No local voice found: install a Windows speech voice (Settings > Time & language > Speech) or "
+              "espeak-ng (Linux/Pi), or record yourself and pass --samples DIR.", file=sys.stderr)
+        return 1
+    out = Path(a.out) if a.out else home / "wake" / f"{slug(phrase)}.npz"
+    try:
+        rep = train_phrase(phrase, out, say=a.say, samples=Path(a.samples) if a.samples else None, voices=voices,
+                           progress=lambda s: print("  " + s, flush=True))
+    except (RuntimeError, ImportError, OSError) as e:
+        print(f"WAKE_TRAIN_FAILED: {e}", file=sys.stderr)
+        return 1
+    ev = rep["eval"]
+    print(f"\nSaved {out} ({rep['seconds']} s).")
+    print(f"Held-out check ({rep['held_out_voice'] or 'random 20 %'}): recall {ev['recall']:.0%}, "
+          f"{ev['false_wakes']} false wakes in {ev['hours'] * 60:.0f} min of synthetic speech/noise "
+          f"(threshold {rep['threshold']}). Synthetic only: test it with your voice next.")
+    for line in rep["next"]:
+        print("  " + line)
+    if a.apply:
+        try:
+            Identity(home, cfg).set_wake(str(out), phrase, rep["threshold"], by="cli")
+        except IdentityError as e:
+            print(f"not applied: {e}", file=sys.stderr)
+            return 1
+        print(f"Applied: JARVES will wake on \"{phrase}\" after the next start (jarvis stop, then jarvis).")
+    return 0
 
 
 def cmd_doctor(a, cfg, home) -> int:
@@ -781,9 +864,21 @@ def cmd_dashboard(a, cfg, home) -> int:
         print("The dashboard is switched off. Turn it on with: jarvis features on dashboard", file=sys.stderr)
         return 1
     from .dashboard import Dashboard
-    dash = Dashboard(home, cfg, a.port)
-    print(f"JARVES dashboard (this computer only; the link holds a one-time key, do not share it):\n  {dash.url}\n"
-          "Ctrl+C to stop.", flush=True)
+    if a.lan and not _cli_features(cfg, home).enabled("dashboard_lan"):
+        print("Home-network access is switched off. Turn it on with: jarvis features on dashboard_lan "
+              "(then phones on your Wi-Fi can pair with a code; never reachable from the internet)", file=sys.stderr)
+        return 1
+    try:
+        dash = Dashboard(home, cfg, a.port, lan=a.lan)
+    except OSError as e:
+        print(f"cannot start the dashboard: {e}", file=sys.stderr)
+        return 1
+    print(f"JARVES dashboard (the link holds a one-time key for THIS computer, do not share it):\n  {dash.url}",
+          flush=True)
+    if dash.lan_url:
+        print(f"Home network: on your phone open {dash.lan_url} and enter the pairing code from the Devices page "
+              "(on this computer). If Windows asks, allow PRIVATE networks only.", flush=True)
+    print("Ctrl+C to stop.", flush=True)
     if not a.no_open:
         import webbrowser
         webbrowser.open(dash.url)
@@ -834,10 +929,18 @@ def main(argv: list[str] | None = None) -> int:
     g.add_argument("--forget", action="store_true", help="logout: also forget this app registration")
     from .google_auth import add_cli as add_google_cli, cmd_google
     add_google_cli(sub)                       # WP-G: jarvis google login / status / logout
-    wk = sub.add_parser("wake",help="calibrate the \"Hey Jarvis\" wake word to your voice and microphone")
-    wk.add_argument("action", choices=["test"])
+    wk = sub.add_parser("wake", help="calibrate the wake word to your voice and mic, or train a new wake phrase")
+    wk.add_argument("action", choices=["test", "train"])
+    wk.add_argument("phrase", nargs="*", help="train: the new phrase in Latin letters, e.g. \"hey max\"")
     wk.add_argument("--seconds", type=int, default=20)
-    wk.add_argument("--apply", action="store_true", help="save the recommended threshold to config.toml")
+    wk.add_argument("--apply", action="store_true", help="test: save the recommended threshold; train: use the "
+                                                         "new phrase from the next start")
+    wk.add_argument("--model", help="test: a trained .npz / .tflite instead of the current wake model")
+    wk.add_argument("--false-wakes", type=int, default=0, metavar="MIN",
+                    help="test: count false wakes over MIN minutes of normal room audio")
+    wk.add_argument("--say", action="append", help="train: another way to say it (e.g. the Hebrew spelling); repeat")
+    wk.add_argument("--samples", help="train: a folder of WAV recordings of YOU saying the phrase (recommended)")
+    wk.add_argument("--out", help="train: output .npz (default <state_dir>/wake/<phrase>.npz)")
     dr = sub.add_parser("doctor", help="check microphone, wake word, keys, music; say what to fix")
     dr.add_argument("--sound", action="store_true", help="also play a beep on the speakers")
     dr.add_argument("--live", action="store_true", help="also open one real GPT-Live session (~1 cent, asks first)")
@@ -856,6 +959,8 @@ def main(argv: list[str] | None = None) -> int:
     db = sub.add_parser("dashboard", help="local web dashboard: conversations, costs, issues, memory, skills")
     db.add_argument("--port", type=int, default=0, help="default: a free port")
     db.add_argument("--no-open", action="store_true", help="do not open the browser")
+    db.add_argument("--lan", action="store_true", help="also allow paired phones on the home network "
+                                                       "(needs: jarvis features on dashboard_lan)")
     fe = sub.add_parser("features", help="feature switches: list / on ID / off ID / reset ID")
     fe.add_argument("action", nargs="?", default="list", choices=["list", "on", "off", "reset"])
     fe.add_argument("id", nargs="?")

@@ -123,7 +123,12 @@ class SkillRegistry:
         if skill.name in self.skills:
             raise ValueError(f"skill {skill.name!r} already registered")
         tools = skill.tools()
+        from ..guardrails import check_tool          # hard bans (no calendar delete), for every Skill incl. generated
         for t in tools:
+            why = check_tool(skill.name, t.name, t.description)
+            if why:
+                logs.error("skills", "TOOL_GUARDRAIL", why, skill=skill.name, tool=t.name)
+                raise ValueError(why)
             if t.name in self._tools:
                 raise ValueError(f"tool {t.name!r} already registered by {self._tools[t.name][0].name}")
         self.skills[skill.name] = skill

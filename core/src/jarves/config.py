@@ -103,7 +103,9 @@ class VoiceConfig(_Strict):
     # "Hey Jarvis" wake word: detected ON THIS DEVICE (pyopen-wakeword, openWakeWord model); no audio leaves the
     # device until it triggers. Software mute stops it and releases the microphone.
     wake_enabled: bool = True
+    # built-in "hey_jarvis", an openWakeWord .tflite, or a phrase trained here (`jarvis wake train`, .npz)
     wake_word: str = "hey_jarvis"
+    wake_phrase: str = "Hey Jarvis"        # what to tell the user to say (matches wake_word)
     # 0.5 is the model's textbook value, but real voices/accents/mics ("hi garvis") often peak at 0.2-0.4:
     # QA 18 Oct saw a real user peak at 0.17. Run `jarvis wake test` to calibrate to YOUR voice and mic.
     wake_threshold: float = Field(0.35, ge=0, le=1)

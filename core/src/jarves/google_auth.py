@@ -46,6 +46,12 @@ CALENDAR_SCOPES = (_G + "calendar.events.readonly", _G + "calendar.calendarlist.
 GMAIL_READ = _G + "gmail.readonly"
 GMAIL_COMPOSE = _G + "gmail.compose"
 ALL_SCOPES = CALENDAR_SCOPES + (GMAIL_READ, GMAIL_COMPOSE)
+# Calendar WRITE (SW-V2 D05, WP-M4): asked for ONLY when the calendar_write switch is on (`jarvis google login
+# --calendar-write`). Google has no "create/update but not delete" scope (checked 2026-10-19 at
+# developers.google.com/workspace/calendar/api/auth: calendar.events = "View and edit events on all your
+# calendars"), so the no-delete rule is enforced in JARVES itself: skills/google.py `calendar_guard` (every request),
+# guardrails.py (no delete-like tool can be registered) and no delete route in the dashboard.
+CALENDAR_WRITE = _G + "calendar.events"
 REFRESH_MARGIN_S = 120
 RECONNECT_HE = "צריך לחבר מחדש את גוגל. אפשר מדף הניהול, או בפקודה jarvis google login."
 NOT_CONNECTED_HE = "גוגל עוד לא מחובר. אפשר לחבר מדף הניהול, או בפקודה jarvis google login."
@@ -117,7 +123,8 @@ class GoogleAuth:
         st = {"connected": connected, "needs_reconnect": bool(t.get("needs_reconnect")) and not connected,
               "client_configured": bool(self.client()), "scopes": [short_scope(s) for s in scopes],
               "calendar": all(s in scopes for s in CALENDAR_SCOPES), "gmail_read": GMAIL_READ in scopes,
-              "gmail_send": GMAIL_COMPOSE in scopes, "last_error": t.get("last_error", ""),
+              "gmail_send": GMAIL_COMPOSE in scopes, "calendar_write": CALENDAR_WRITE in scopes,
+              "last_error": t.get("last_error", ""),
               "last_error_at": t.get("last_error_at", 0), "connected_at": t.get("connected_at", 0)}
         st["message_he"] = ("" if connected else RECONNECT_HE if st["needs_reconnect"] else NOT_CONNECTED_HE)
         return st
@@ -339,6 +346,83 @@ def dashboard_routes(register) -> None:
         return 200, {"revoked": asyncio.run(GoogleAuth(ctx.home).sign_out()), **google_status(ctx.home)}
     register("GET", r"/api/google", get)
     register("POST", r"/api/google/disconnect", disconnect)
+    calendar_routes(register)
+
+
+def calendar_routes(register) -> None:
+    """Dashboard Calendar page (spec 6.6): status, calendars, upcoming events; create/update as preview (the exact
+    read-back) -> commit (the user's click is the approval). There is NO delete route (D05)."""
+    import secrets as _secrets
+
+    def writer(ctx):
+        w = getattr(ctx, "_calendar_writer", None)
+        if w is None:
+            from .skills.google import CalendarWriter, GoogleApi
+            t = getattr(ctx, "google_transport", None)
+            w = CalendarWriter(GoogleApi(GoogleAuth(ctx.home, transport=t), t), **getattr(ctx, "calendar_kw", {}))
+            ctx._calendar_writer, ctx._calendar_plans = w, {}
+        return w
+
+    def switch_on(ctx) -> bool:
+        from .features import Features
+        f = getattr(ctx, "_features", None) or Features(ctx.cfg, ctx.home)
+        return f.enabled("calendar_write")
+
+    def overview(ctx, _m, _b):
+        st = google_status(ctx.home)
+        out = {"google": st, "write_enabled": switch_on(ctx) and st["calendar_write"],
+               "write_switch": switch_on(ctx), "deletion": "not possible: JARVES never deletes calendar events",
+               "calendars": [], "events": []}
+        if not st["calendar"]:
+            return 200, out
+        from .skills.google import FindArgs
+        try:
+            w = writer(ctx)
+            out["calendars"] = asyncio.run(w.calendars())
+            out["events"] = asyncio.run(w.find(FindArgs(day="week")))
+        except GoogleAuthError as e:
+            out["error"] = e.spoken
+        return 200, out
+
+    def preview(ctx, _m, body):
+        from pydantic import ValidationError
+
+        from .skills.google import CreateArgs, UpdateArgs
+        if not switch_on(ctx):
+            return 403, {"error": "calendar writing is off (Features: calendar_write)"}
+        b = dict(body or {})
+        op = b.pop("op", "create")
+        if op not in ("create", "update"):
+            return 400, {"error": "op must be create or update"}       # there is no delete
+        w = writer(ctx)
+        try:
+            args = CreateArgs.model_validate(b) if op == "create" else UpdateArgs.model_validate(b)
+            plan = asyncio.run(w.plan_create(args) if op == "create" else w.plan_update(args))
+        except ValidationError as e:
+            return 400, {"error": "invalid: " + ", ".join(".".join(map(str, x["loc"])) for x in e.errors())}
+        except GoogleAuthError as e:
+            return 400, {"error": e.spoken, "code": e.code}
+        except ValueError:
+            return 400, {"error": "day or time not understood"}
+        token = _secrets.token_urlsafe(12)
+        ctx._calendar_plans = {k: v for k, v in ctx._calendar_plans.items() if time.time() - v["t"] < 300}
+        ctx._calendar_plans[token] = {**plan, "t": time.time()}
+        return 200, {"readback": plan["readback"], "token": token, "expires_s": 300}
+
+    def commit(ctx, _m, body):
+        writer(ctx)
+        plan = ctx._calendar_plans.pop(str((body or {}).get("token", "")), None)
+        if plan is None or time.time() - plan["t"] > 300:
+            return 409, {"error": "preview expired or unknown: preview again"}
+        if not switch_on(ctx):
+            return 403, {"error": "calendar writing is off (Features: calendar_write)"}
+        try:
+            return 200, asyncio.run(ctx._calendar_writer.commit(plan))
+        except GoogleAuthError as e:
+            return 400, {"error": e.spoken, "code": e.code}
+    register("GET", r"/api/calendar", overview)
+    register("POST", r"/api/calendar/preview", preview)
+    register("POST", r"/api/calendar/commit", commit)
 
 
 # ---------------------------------------------------------------------- CLI (`jarvis google ...`)
@@ -347,6 +431,8 @@ def add_cli(sub) -> None:
     g.add_argument("action", choices=["login", "status", "logout"])
     g.add_argument("--client", help="login: the client_secret_*.json downloaded from Google Cloud (Desktop app)")
     g.add_argument("--calendar-only", action="store_true", help="login: ask only for the Calendar permissions")
+    g.add_argument("--calendar-write", action="store_true",
+                   help="login: also allow adding/changing events (needs `jarvis features on calendar_write`)")
 
 
 def cmd_google(a, cfg, home) -> int:
@@ -360,9 +446,17 @@ def cmd_google(a, cfg, home) -> int:
                     auth.import_client(Path(a.client))
                 print("Opening your browser to connect JARVES to Google (Calendar read, Gmail read + drafts).")
                 print("Google will warn that the app is unverified: it is your own app, choose Continue.")
-                st = await auth.sign_in(CALENDAR_SCOPES if a.calendar_only else ALL_SCOPES)
-                print("connected: " + ", ".join(st["scopes"]))
                 need = CALENDAR_SCOPES if a.calendar_only else ALL_SCOPES
+                if getattr(a, "calendar_write", False):
+                    from .features import Features
+                    if not Features(cfg, home).enabled("calendar_write"):
+                        print("Calendar writing is switched off. Turn it on first: jarvis features on calendar_write")
+                        return 1
+                    need = need + (CALENDAR_WRITE,)
+                    print("Also asking to ADD and CHANGE events. JARVES never deletes events (enforced in JARVES; "
+                          "Google's permission itself would allow it).")
+                st = await auth.sign_in(need)
+                print("connected: " + ", ".join(st["scopes"]))
                 if any(short_scope(s) not in st["scopes"] for s in need):
                     print("Some permissions were NOT granted; run login again and tick every box.")
                     return 1

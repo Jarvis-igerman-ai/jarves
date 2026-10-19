@@ -1,7 +1,9 @@
 """Google Calendar + Gmail Skills (SW-V2 WP-G, Issue #17 items 12-13; plan: docs/plans/GOOGLE_CALENDAR_GMAIL_SKILLS.md).
 
 User decisions (19 Oct 2026):
-- Calendar: read ALL the user's calendars (calendarList), no calendar writes.
+- Calendar: read ALL the user's calendars (calendarList). Writes (SW-V2 D05, WP-M4): create + update after a
+  read-back the user approves, behind the calendar_write switch (default OFF) and the calendar.events scope;
+  NEVER delete (calendar_guard on every request + guardrails.py).
 - Gmail: search lists only how many mails and from whom; JARVES must ASK before reading any mail aloud
   (`gmail_read` only accepts ids the user was just offered by `gmail_search`).
 - Sending: a draft first (`gmail_create_draft`, reversible), read back to the user, then `gmail_send_draft`
@@ -33,7 +35,7 @@ import httpx
 from pydantic import BaseModel, Field
 
 from .. import logs
-from ..google_auth import CALENDAR_SCOPES, GMAIL_COMPOSE, GMAIL_READ, GoogleAuth, GoogleAuthError
+from ..google_auth import CALENDAR_SCOPES, CALENDAR_WRITE, GMAIL_COMPOSE, GMAIL_READ, GoogleAuth, GoogleAuthError
 from . import NoArgs, Skill, Tool, ToolResult
 
 CAL_API = "https://www.googleapis.com/calendar/v3"
@@ -168,6 +170,7 @@ class GoogleApi:
         self.auth, self._transport = auth, transport
 
     async def request(self, method: str, url: str, need, *, params=None, json_body=None) -> dict:
+        calendar_guard(method, url, json_body)        # hard no-delete rule, before any token is fetched
         for attempt in (1, 2):
             token = await self.auth.access_token(need, force_refresh=attempt == 2)
             try:
@@ -198,6 +201,20 @@ class GoogleApi:
             raise GoogleAuthError("GOOGLE_API_ERROR", f"Google API error {r.status_code}", "try again later",
                                   "גוגל לא ענה כמו שצריך. נסה שוב עוד מעט.")
         raise GoogleAuthError("GOOGLE_AUTH_EXPIRED", "Google rejected the access", "run `jarvis google login`")
+
+
+def calendar_guard(method: str, url: str, body=None) -> None:
+    """Owner decision D05: nothing in JARVES deletes calendar data. Refuses DELETE on any Calendar URL, the
+    events.move / calendars.clear endpoints (indirect removal) and any write that would cancel an event."""
+    if not url.startswith(CAL_API):
+        return
+    path = url[len(CAL_API):].split("?")[0]
+    bad = (method.upper() == "DELETE" or path.endswith("/move") or path.endswith("/clear")
+           or (isinstance(body, dict) and str(body.get("status", "")).lower() == "cancelled"))
+    if bad:
+        logs.error("google", "CALENDAR_DELETE_FORBIDDEN", "a calendar delete/cancel was refused", method=method)
+        raise GoogleAuthError("CALENDAR_DELETE_FORBIDDEN", "deleting calendar events is not allowed", "",
+                              "אני לא מוחק אירועים מהיומן. אפשר למחוק ישירות ב-Google Calendar.")
 
 
 def _fail(e: GoogleAuthError) -> ToolResult:
@@ -527,6 +544,326 @@ class GmailSkill(Skill):
         ]
 
 
+# ---------------------------------------------------------------------- Calendar WRITE (SW-V2 D05, WP-M4)
+# Create + update with a read-back the user approves (calendar, title, date, time, timezone, recurrence scope);
+# the result is read back from what Google stored. No delete anywhere (calendar_guard, guardrails.py).
+RECURRENCE = {"none": None, "daily": "DAILY", "weekly": "WEEKLY", "monthly": "MONTHLY", "yearly": "YEARLY"}
+RECURRENCE_HE = {"DAILY": "כל יום", "WEEKLY": "כל שבוע", "MONTHLY": "כל חודש", "YEARLY": "כל שנה"}
+HANDLE_TTL_S = 1800
+DEFAULT_TZ_NAME = "Asia/Jerusalem"
+
+
+class CreateArgs(BaseModel):
+    title: str = Field(..., min_length=1, max_length=120)
+    day: str = Field(..., max_length=40, description="today | tomorrow | a weekday | YYYY-MM-DD | D.M (resolved locally)")
+    start: str | None = Field(None, pattern=r"^\d{1,2}:\d{2}$", description="HH:MM, omit for an all-day event")
+    end: str | None = Field(None, pattern=r"^\d{1,2}:\d{2}$", description="HH:MM (default: start + duration)")
+    duration_min: int = Field(60, ge=5, le=24 * 60)
+    calendar: str = Field("primary", max_length=80, description="calendar name, default the main calendar")
+    recurrence: str = Field("none", pattern="^(none|daily|weekly|monthly|yearly)$")
+    count: int | None = Field(None, ge=1, le=100, description="repeat this many times (with recurrence)")
+    reminder_minutes: list[int] = Field(default_factory=list, max_length=5,
+                                        description="popup reminders, minutes before (e.g. [10]); [] = calendar default")
+    location: str = Field("", max_length=120)
+    description: str = Field("", max_length=1000)
+
+
+class FindArgs(BaseModel):
+    day: str = Field("week", max_length=40)
+    query: str = Field("", max_length=80, description="words in the title, e.g. dentist")
+
+
+class UpdateArgs(BaseModel):
+    handle: str = Field(..., pattern=r"^e\d{1,3}$", description="an event handle from calendar_find_events (e1, e2...)")
+    scope: str | None = Field(None, pattern="^(this|series)$",
+                              description="recurring events only: 'this' = only this occurrence, 'series' = all "
+                                          "of them. ASK the user; never guess.")
+    title: str | None = Field(None, min_length=1, max_length=120)
+    day: str | None = Field(None, max_length=40, description="new day (one occurrence / single events only)")
+    start: str | None = Field(None, pattern=r"^\d{1,2}:\d{2}$")
+    end: str | None = Field(None, pattern=r"^\d{1,2}:\d{2}$")
+    location: str | None = Field(None, max_length=120)
+    description: str | None = Field(None, max_length=1000)
+    reminder_minutes: list[int] | None = Field(None, max_length=5)
+
+
+def _hm(s: str) -> tuple[int, int]:
+    h, m = (int(x) for x in s.split(":"))
+    if not (0 <= h < 24 and 0 <= m < 60):
+        raise ValueError(s)
+    return h, m
+
+
+def _he_date(d: datetime | date) -> str:
+    return f"יום {HE_DAYS[d.weekday()]} {d.day}.{d.month}.{d.year}"
+
+
+class CalendarWriter:
+    """The write operations shared by the voice Skill and the dashboard Calendar page. `plan_*` validates and
+    returns (Google request, Hebrew read-back); `commit` sends it and reads back what Google stored."""
+
+    def __init__(self, api: GoogleApi, *, now: Callable[[], datetime] | None = None, tz: tzinfo | None = None,
+                 clock: Callable[[], float] = time.monotonic) -> None:
+        self.api = api
+        self.tz = tz or local_tz()
+        self._now = now or (lambda: datetime.now(self.tz))
+        self._clock = clock
+        self.tz_name = getattr(self.tz, "key", None) or DEFAULT_TZ_NAME
+        self._handles: dict[str, dict] = {}       # e1 -> {calendar_id, event_id, master_id, recurring, view, t}
+
+    async def calendars(self, writable: bool = False) -> list[dict]:
+        cals = (await self.api.request("GET", f"{CAL_API}/users/me/calendarList", CALENDAR_SCOPES,
+                                       params={"maxResults": 250})).get("items", [])
+        out = [{"id": c["id"], "name": clean_text(c.get("summaryOverride") or c.get("summary", ""), 60),
+                "primary": bool(c.get("primary")), "access": c.get("accessRole", "reader")} for c in cals]
+        return [c for c in out if c["access"] in ("owner", "writer")] if writable else out
+
+    async def _calendar(self, name: str) -> dict:
+        cals = await self.calendars(writable=True)
+        want = (name or "primary").strip().lower()
+        for c in cals:
+            if (want in ("primary", "", "ראשי", "היומן שלי") and c["primary"]) or c["name"].lower() == want \
+                    or c["id"].lower() == want:
+                return c
+        raise GoogleAuthError("CALENDAR_UNKNOWN", f"no writable calendar {name!r}", "",
+                              f"לא מצאתי יומן בשם {name} שאפשר לכתוב בו.")
+
+    # --- create
+    def _times(self, day: str, start: str | None, end: str | None, duration_min: int) -> tuple[dict, dict, str]:
+        d0, _, _ = resolve_day(day, self._now())
+        d = d0.date()
+        if start is None:
+            s = {"date": d.isoformat()}
+            e = {"date": (d + timedelta(days=1)).isoformat()}
+            return s, e, f"{_he_date(d)}, כל היום"
+        sh, sm = _hm(start)
+        st = datetime(d.year, d.month, d.day, sh, sm, tzinfo=self.tz)
+        if end:
+            eh, em = _hm(end)
+            en = datetime(d.year, d.month, d.day, eh, em, tzinfo=self.tz)
+            if en <= st:
+                en += timedelta(days=1)
+        else:
+            en = st + timedelta(minutes=duration_min)
+        return ({"dateTime": st.isoformat(), "timeZone": self.tz_name},
+                {"dateTime": en.isoformat(), "timeZone": self.tz_name},
+                f"{_he_date(st)} {st:%H:%M}-{en:%H:%M} ({self.tz_name})")
+
+    @staticmethod
+    def _reminders(minutes: list[int] | None) -> dict | None:
+        if minutes is None:
+            return None
+        if not minutes:
+            return {"useDefault": True}
+        return {"useDefault": False, "overrides": [{"method": "popup", "minutes": max(0, min(40320, int(m)))}
+                                                   for m in minutes]}
+
+    async def plan_create(self, a: CreateArgs) -> dict:
+        cal = await self._calendar(a.calendar)
+        s, e, when = self._times(a.day, a.start, a.end, a.duration_min)
+        body = {"summary": a.title, "start": s, "end": e}
+        rule = RECURRENCE[a.recurrence]
+        rec = "פעם אחת"
+        if rule:
+            body["recurrence"] = [f"RRULE:FREQ={rule}" + (f";COUNT={a.count}" if a.count else "")]
+            rec = RECURRENCE_HE[rule] + (f", {a.count} פעמים" if a.count else ", בלי סוף")
+        if a.location:
+            body["location"] = a.location
+        if a.description:
+            body["description"] = a.description
+        rem = self._reminders(a.reminder_minutes)
+        if rem:
+            body["reminders"] = rem
+        rem_he = ("תזכורת " + ", ".join(f"{m} דקות לפני" for m in a.reminder_minutes)) if a.reminder_minutes \
+            else "תזכורת רגילה של היומן"
+        readback = f"ליצור ביומן \"{cal['name']}\": \"{a.title}\", {when}, {rec}, {rem_he}?"
+        return {"op": "create", "calendar": cal, "body": body, "readback": readback,
+                "url": f"{CAL_API}/calendars/{_q(cal['id'])}/events"}
+
+    # --- find (handles for update) and update
+    async def find(self, a: FindArgs) -> list[dict]:
+        start, end, _ = resolve_day(a.day, self._now())
+        now = self._clock()
+        self._handles = {k: v for k, v in self._handles.items() if now - v["t"] < HANDLE_TTL_S}
+        out = []
+        for cal in await self.calendars(writable=True):
+            items = (await self.api.request(
+                "GET", f"{CAL_API}/calendars/{_q(cal['id'])}/events", CALENDAR_SCOPES,
+                params={"timeMin": start.isoformat(), "timeMax": end.isoformat(), "singleEvents": "true",
+                        "orderBy": "startTime", "maxResults": 50, **({"q": a.query} if a.query else {})})
+            ).get("items", [])
+            for ev in items:
+                if ev.get("status") == "cancelled" or not ev.get("id"):
+                    continue
+                s, all_day = _event_time(ev, "start", self.tz)
+                if s is None:
+                    continue
+                h = f"e{len(self._handles) + 1}"
+                view = {"handle": h, "when": "all day " + f"{s:%a %d.%m}" if all_day else f"{s:%a %d.%m %H:%M}",
+                        "title": clean_text(ev.get("summary", "") or "(ללא כותרת)", 120), "calendar": cal["name"],
+                        "recurring": bool(ev.get("recurringEventId") or ev.get("recurrence"))}
+                self._handles[h] = {"calendar_id": cal["id"], "calendar": cal["name"], "event_id": ev["id"],
+                                    "master_id": ev.get("recurringEventId") or (ev["id"] if ev.get("recurrence")
+                                                                                 else None),
+                                    "recurring": view["recurring"], "event": ev, "t": now}
+                out.append(view)
+                if len(self._handles) >= 30:
+                    return out
+        return out
+
+    async def plan_update(self, a: UpdateArgs) -> dict:
+        h = self._handles.get(a.handle)
+        if h is None or self._clock() - h["t"] > HANDLE_TTL_S:
+            raise GoogleAuthError("CALENDAR_UNKNOWN_EVENT", "unknown event handle", "",
+                                  "קודם אחפש את האירוע ביומן ואקריא לך אותו.")
+        if h["recurring"] and a.scope is None:
+            raise GoogleAuthError("CALENDAR_SCOPE_NEEDED", "recurring event: scope not chosen", "",
+                                  "זה אירוע חוזר. לשנות רק את הפעם הזאת, או את כל הסדרה?")
+        series = h["recurring"] and a.scope == "series"
+        ev = h["event"]
+        body: dict = {}
+        changes = []
+        if a.title is not None:
+            body["summary"] = a.title
+            changes.append(f"כותרת: \"{a.title}\"")
+        if a.location is not None:
+            body["location"] = a.location
+            changes.append(f"מקום: {a.location or 'ללא'}")
+        if a.description is not None:
+            body["description"] = a.description
+            changes.append("תיאור")
+        if a.reminder_minutes is not None:
+            body["reminders"] = self._reminders(a.reminder_minutes)
+            changes.append("תזכורת " + (", ".join(f"{m} דקות לפני" for m in a.reminder_minutes) or "רגילה"))
+        if a.day is not None or a.start is not None or a.end is not None:
+            if series and a.day is not None:
+                raise GoogleAuthError("CALENDAR_SERIES_DATE", "cannot move a whole series to another day", "",
+                                      "את כל הסדרה אני לא מעביר ליום אחר. אפשר לשנות רק את הפעם הזאת, או ב-Google "
+                                      "Calendar.")
+            s0, all_day = _event_time(ev, "start", self.tz)
+            e0, _ = _event_time(ev, "end", self.tz)
+            if all_day and a.start is None:
+                raise GoogleAuthError("CALENDAR_BAD_TIME", "all-day event needs a start time to move", "",
+                                      "זה אירוע של יום שלם. לאיזו שעה להעביר אותו?")
+            length = (e0 - s0) if (e0 and s0 and not all_day) else timedelta(hours=1)
+            if series:                        # keep the series' FIRST date (never drop occurrences), new time only
+                master = await self.api.request(
+                    "GET", f"{CAL_API}/calendars/{_q(h['calendar_id'])}/events/{_q(h['master_id'])}", CALENDAR_SCOPES)
+                base = _event_time(master, "start", self.tz)[0] or s0
+                day = base.date().isoformat()
+            else:
+                day = a.day if a.day is not None else s0.date().isoformat()
+            start = a.start or f"{s0:%H:%M}"
+            end = a.end or (datetime.combine(date.today(), datetime.strptime(start, "%H:%M").time())
+                            + length).strftime("%H:%M")
+            s, e, when = self._times(day, start, end, int(length.total_seconds() // 60))
+            body.update(start=s, end=e)
+            changes.append(f"זמן: {when}")
+        if not body:
+            raise GoogleAuthError("CALENDAR_NOTHING", "nothing to change", "", "מה לשנות באירוע?")
+        target = h["master_id"] if series else h["event_id"]
+        scope_he = ("כל הסדרה (כל הפעמים)" if series else "רק הפעם הזאת") if h["recurring"] else "אירוע יחיד"
+        title = clean_text(ev.get("summary", "") or "(ללא כותרת)", 80)
+        readback = f"לעדכן ביומן \"{h['calendar']}\" את \"{title}\" ({scope_he}): " + "; ".join(changes) + "?"
+        return {"op": "update", "body": body, "readback": readback, "series": series,
+                "url": f"{CAL_API}/calendars/{_q(h['calendar_id'])}/events/{_q(target)}",
+                "calendar": {"id": h["calendar_id"], "name": h["calendar"]}}
+
+    async def commit(self, plan: dict) -> dict:
+        """Send the approved plan; return Google's stored event, read back."""
+        method = "POST" if plan["op"] == "create" else "PATCH"
+        ev = await self.api.request(method, plan["url"], (CALENDAR_WRITE,), json_body=plan["body"])
+        s, all_day = _event_time(ev, "start", self.tz)
+        e, _ = _event_time(ev, "end", self.tz)
+        when = ("כל היום " + _he_date(s)) if all_day else (f"{_he_date(s)} {s:%H:%M}" + (f"-{e:%H:%M}" if e else "")) \
+            if s else "?"
+        rec = ev.get("recurrence") or []
+        rem = ev.get("reminders") or {}
+        stored = {"id": ev.get("id"), "title": ev.get("summary", ""), "when": when,
+                  "timezone": (ev.get("start") or {}).get("timeZone", self.tz_name), "recurrence": rec,
+                  "reminders": [o.get("minutes") for o in rem.get("overrides", [])] if not rem.get("useDefault", True)
+                  else "default", "calendar": plan["calendar"]["name"]}
+        logs.info("google", "CALENDAR_WRITTEN", f"calendar event {plan['op']}d after the user's approval",
+                  op=plan["op"], series=plan.get("series", False))
+        verb = "יצרתי" if plan["op"] == "create" else "עדכנתי"
+        return {"stored": stored, "message": f"{verb} ביומן \"{stored['calendar']}\": \"{stored['title']}\", {when}."
+                + (" (אירוע חוזר)" if rec else "")}
+
+
+class CalendarWriteSkill(Skill):
+    """Registered only when the Google token carries calendar.events; gated by the calendar_write switch."""
+    name = "calendar_write"
+    description = "Add and change events in the user's Google Calendar (always read back and approved; never delete)"
+
+    def __init__(self, writer: CalendarWriter) -> None:
+        self.w = writer
+        self._plans: dict[str, dict] = {}         # args -> the plan whose read-back the user approves
+
+    async def health(self) -> tuple[str, str]:
+        st = self.w.api.auth.status()
+        return ("ok", "connected") if st.get("calendar_write") else ("degraded", "calendar write permission missing")
+
+    def tools(self) -> list[Tool]:
+        async def _plan(kind: str, a) -> dict:
+            # the registry asks impact() (read-back) and then runs the handler with the same args: both must use
+            # the SAME plan, so what runs is exactly what the user approved
+            now = self.w._clock()
+            self._plans = {k: v for k, v in self._plans.items() if now - v["t"] < 120}
+            key = kind + a.model_dump_json()
+            if key not in self._plans:
+                plan = await (self.w.plan_create(a) if kind == "create" else self.w.plan_update(a))
+                self._plans[key] = {**plan, "t": now}
+            return self._plans[key]
+
+        def impact(kind: str):
+            async def fn(a) -> tuple[int | None, str]:
+                try:
+                    return None, (await _plan(kind, a))["readback"]       # None = always ask, any origin
+                except GoogleAuthError as e:
+                    return None, e.spoken                             # the handler then refuses with the reason
+                except ValueError:
+                    return None, "השעה או היום לא ברורים."
+            return fn
+
+        def run(kind: str):
+            async def fn(a) -> ToolResult:
+                try:
+                    plan = await _plan(kind, a)
+                    r = await self.w.commit(plan)
+                except GoogleAuthError as e:
+                    return _fail(e)
+                except ValueError:
+                    return ToolResult(False, "לא הבנתי את היום או השעה.", code="CALENDAR_BAD_TIME")
+                finally:
+                    self._plans.pop(kind + a.model_dump_json(), None)
+                return ToolResult(True, r["message"], {"stored": r["stored"],
+                                                       "rule": "Tell the user exactly what was stored."})
+            return fn
+
+        async def find(a: FindArgs) -> ToolResult:
+            try:
+                evs = await self.w.find(a)
+            except GoogleAuthError as e:
+                return _fail(e)
+            except ValueError:
+                return ToolResult(False, "לא הבנתי איזה יום.", code="CALENDAR_BAD_DAY")
+            return ToolResult(True, f"מצאתי {len(evs)} אירועים." if evs else "לא מצאתי אירוע כזה.",
+                              {"untrusted_events": evs, "note": UNTRUSTED_NOTE + " Use the handle with "
+                               "calendar_update_event after the user confirms which event and, for recurring "
+                               "ones, whether only this occurrence or the whole series."})
+        return [
+            Tool("calendar_find_events", "Find events the user wants to CHANGE (returns handles e1, e2...). "
+                 + UNTRUSTED_NOTE, find, FindArgs, permission="read", timeout_s=15, untrusted_output=True),
+            Tool("calendar_create_event", "Add an event to the user's Google Calendar. The user hears a read-back "
+                 "(calendar, title, day, time, time zone, repeat, reminder) and approves on the screen first.",
+                 run("create"), CreateArgs, permission="destructive", impact=impact("create"), timeout_s=40),
+            Tool("calendar_update_event", "Change an event found by calendar_find_events (title, time, place, "
+                 "reminder). For a recurring event ask 'only this time or the whole series?' and pass scope. "
+                 "There is NO way to delete events.", run("update"), UpdateArgs, permission="destructive",
+                 impact=impact("update"), timeout_s=40),
+        ]
+
+
 # ---------------------------------------------------------------------- wiring (Core + offline intent router)
 def register_google(registry, home: Path, health=None, transport: httpx.AsyncBaseTransport | None = None,
                     **calendar_kw) -> GoogleAuth | None:
@@ -541,6 +878,8 @@ def register_google(registry, home: Path, health=None, transport: httpx.AsyncBas
     api = GoogleApi(auth, transport)
     if all(s in granted for s in CALENDAR_SCOPES):
         registry.register(CalendarSkill(api, **calendar_kw))
+        if CALENDAR_WRITE in granted:          # tools stay hidden until the calendar_write switch is on
+            registry.register(CalendarWriteSkill(CalendarWriter(api, **calendar_kw)))
     if GMAIL_READ in granted:
         registry.register(GmailSkill(api))
         if GMAIL_COMPOSE in granted:

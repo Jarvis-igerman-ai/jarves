@@ -43,7 +43,7 @@ from pathlib import Path
 from typing import Any, Callable, Literal
 from urllib.parse import urlsplit
 
-from . import logs
+from . import capabilities, logs
 
 Risk = Literal["low", "medium", "high"]
 Applies = Literal["live", "next_session", "restart"]
@@ -97,10 +97,15 @@ CATALOG: dict[str, Feature] = {}
 def register(id: str, title_he: str, title_en: str, default_enabled: bool, *, probe: Probe | None = None,
              needs: list[str] | None = None, risk: Risk = "low", skills: list[str] | None = None,
              tools: list[str] | None = None, config: str | None = None, applies: Applies = "live",
-             about: str = "") -> Feature:
-    """Add (or replace) a feature in the catalog every Features instance uses."""
+             about: str = "", targets: dict | None = None, permissions: list[str] | None = None,
+             settings: str = "") -> Feature:
+    """Add (or replace) a feature in the catalog every Features instance uses. `targets` = its Windows / Pi status
+    (capabilities.py: {"windows": {...}, "linux_arm64_pi": {...}}); without it the dashboard shows "not declared"."""
     if risk not in RISKS:
         raise ValueError(f"risk must be one of {RISKS}")
+    if targets is not None:
+        capabilities.declare(id, windows=targets["windows"], linux_arm64_pi=targets["linux_arm64_pi"],
+                             permissions=permissions, settings=settings)
     f = Feature(id, title_he, title_en, bool(default_enabled), probe or _always, list(needs or []), risk,
                 list(skills or []), list(tools or []), config, applies, about)
     CATALOG[id] = f
@@ -268,6 +273,18 @@ register("workspace_agent_edit", "עריכת האופי והקבצים שלי", 
          about="change SOUL / IDENTITY / USER / MEMORY when you ask (always asks you first)")
 register("voice_change", "החלפת קול", "Voice change", True, probe=_probe_live_voice, tools=["set_voice"],
          about="change the speaking voice when you ask (\"תחליף קול\")")
+# SW-V2 WP-M4 (status per platform: capabilities.py)
+register("calendar_write", "הוספה ועדכון ביומן", "Calendar: add and update events", False,
+         probe=_google("calendar write", "calendar_write"), needs=["google_calendar"], risk="high",
+         tools=["calendar_create_event", "calendar_update_event"],
+         about="create and change events after reading them back to you; never deletes (needs a new Google "
+               "sign-in with the events permission)")
+register("dashboard_lan", "לוח בקרה ברשת הביתית", "Dashboard on the home network", False, risk="high",
+         applies="restart", about="open the dashboard from a paired phone on your home Wi-Fi (pairing code + login; "
+                                  "never on the internet). Off = this computer only")
+register("assistant_identity", "שם העוזר", "Assistant name", True, tools=["assistant_rename"],
+         applies="next_session", about="change my written and spoken name (\"קוראים לך...\"); the wake phrase is "
+                                       "separate (Identity & voice page)")
 
 # The voice/CLI legacy keys that a Features instance mirrors back onto the loaded Config (read live by the Core).
 CONFIG_MIRROR = {"voice.wake_enabled": "wake_word", "voice.greeting": "greeting", "voice.chime": "chimes",
@@ -462,11 +479,18 @@ class Features:
         dflt, src = self.default(fid)
         on = dflt if user is None else user
         ok, why = self.available(fid)
+        cap = capabilities.view(fid)
+        health = "off" if not on else "ok" if ok else "unavailable"
         return {"id": fid, "title_he": f.title_he, "title_en": f.title_en, "about": f.about, "risk": f.risk,
                 "enabled": on, "default": f.default_enabled, "source": "user" if user is not None else src,
                 "available": ok, "reason": why, "active": on and ok, "needs": f.needs, "applies": f.applies,
                 "config": f.config, "skills": f.skills, "tools": f.tools,
-                "changed_by": changed.get("by"), "changed_at": changed.get("ts"), "requested": req}
+                "changed_by": changed.get("by"), "changed_at": changed.get("ts"), "requested": req,
+                # capability matrix (spec section 5): health, permissions, settings, Windows/Pi status
+                "health": health, "permissions": cap["permissions"] or [f.risk + " risk"],
+                "settings": cap["settings"] or (f"config {f.config}" if f.config else ""), "targets": cap["targets"],
+                "last_checked": cap["last_checked"], "pi_ready": cap["pi_ready"], "matrix_problems": cap["problems"],
+                "needs_attention": bool(req) or (on and not ok) or bool(cap["problems"])}
 
     def list(self) -> list[dict]:
         return [self.status(fid) for fid in CATALOG]
@@ -698,7 +722,10 @@ def _ctx_features(ctx) -> Features:
 def api_features(ctx, m, body):
     f = _ctx_features(ctx)
     return 200, {"features": f.list(), "note": "Switches apply live where possible; others at the next "
-                                               "conversation or Core start (see 'applies')."}
+                                               "conversation or Core start (see 'applies').",
+                 "statuses": list(capabilities.STATUSES), "targets": list(capabilities.TARGETS),
+                 "filters": ["all", "enabled", "not_ready_on_pi", "needs_attention"],
+                 "pi_roadmap": capabilities.PI_ROADMAP}
 
 
 def api_feature_set(ctx, m, body):
