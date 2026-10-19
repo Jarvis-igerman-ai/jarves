@@ -362,3 +362,19 @@ async def test_b08_end_conversation_stops_only_the_voice_session(monkeypatch):
     assert stopped == ["user"] and core.live is None and not core.stop_event.is_set()   # the Core keeps running
     assert (await reg.call("end_conversation", {})).code == "NO_CONVERSATION"
     assert "closing the window only hides" in brain_mod.INSTRUCTIONS
+
+
+# ------------------------------------------------------------------ B11: a stopped process's session absorbed later records
+def test_b11_session_of_a_stopped_core_is_not_stretched_by_other_processes():
+    from jarves.store import Store
+    st = Store(":memory:", tier="priority", backend_model="gpt-6-luna")
+    t0 = 1_792_350_193.0
+    rec = lambda dt, code, proc, **f: {"ts": t0 + dt, "code": code, "session": proc, "msg": f.pop("msg", code), **f}
+    for d in (rec(0, "LIVE_STARTED", "procA", msg="GPT-Live session started (gpt-live-1 -> gpt-6-luna)"),
+              rec(0.1, "CORE_STOPPED", "procA"),
+              rec(600, "TOOL_RESULT", "cli1", tool="music_play", ok=True, msg="music_play -> ok"),
+              rec(2700, "LIVE_STARTED", "probe", msg="GPT-Live session started (gpt-live-1 -> gpt-6-luna)")):
+        st.ingest(d)
+    a = next(s for s in st.sessions() if s["core_session"] == "procA")
+    assert a["ended"] - a["started"] < 1 and a["end_reason"] == "core_stopped"     # was ~45 min (false $2.27)
+    st.close()

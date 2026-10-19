@@ -163,8 +163,13 @@ class Store:
                 if self._cur:                      # previous process died without VOICE_ENDED
                     self._close(self._cur, None, "core_restarted", None, {})
                 self._cur, self._pending_tools = None, {}
+            elif code == "CORE_STOPPED" and self._cur and self._same_process(d):   # (after VOICE_ENDED normally)
+                # SW-V3 P0.1: a session whose process stopped before VOICE_ENDED (18 Oct 22:03: LIVE_STARTED 0.1 s
+                # before CORE_STOPPED) stayed open and later records stretched it to 45 min (~$2.27 false cost)
+                self._close(self._cur, ts, "core_stopped", None, {})
+                self._cur, self._pending_tools = None, {}
             sid = self._cur
-            if sid:
+            if sid and self._same_process(d):      # other processes (CLI, probes) never extend this session
                 self._db.execute("UPDATE sessions SET last_event = ? WHERE id = ?", (ts, sid))
             if code in ("LIVE_USER_SAID", "LIVE_JARVES_SAID"):
                 text, n = _text(d.get("text"))
@@ -233,6 +238,14 @@ class Store:
                 self._close(sid, ts, d.get("reason"), _num(d.get("voice_seconds")), stats)
                 ended, self._cur, self._pending_tools = sid, None, {}
         return ended
+
+    def _same_process(self, d: dict) -> bool:
+        """The record comes from the Core process of the open session (records without a process id: yes)."""
+        p = d.get("session")
+        if not p or not self._cur:
+            return True
+        r = self._db.execute("SELECT core_session FROM sessions WHERE id = ?", (self._cur,)).fetchone()
+        return r is None or not r[0] or r[0] == p
 
     def _typed_reply(self, d: dict, ts: float) -> None:
         """A typed (or push-to-talk) exchange outside a live conversation: core REPLY carries the user's words
