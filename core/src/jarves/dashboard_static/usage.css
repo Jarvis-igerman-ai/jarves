@@ -1,0 +1,16 @@
+/* SW-V2 M5: usage strip (bottom of every page), usage bars. Uses the tokens of style.css. */
+body { padding-bottom: 56px; }
+.ustrip { position: fixed; inset-inline: 0; bottom: 0; display: flex; gap: 10px; padding: 8px 16px;
+  background: var(--surface); border-top: 1px solid var(--line); z-index: 5; flex-wrap: wrap; }
+.upart { display: flex; align-items: center; gap: 8px; color: var(--text); padding: 4px 10px; border-radius: 8px;
+  border: 1px solid var(--line); background: var(--surface-2); flex: 1 1 320px; min-width: 0; }
+.upart:hover { text-decoration: none; border-color: var(--accent); }
+.upart.reached { border-color: var(--critical); }
+.upart .small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.uval { font-variant-numeric: tabular-nums; font-weight: 600; min-width: 4.5em; }
+.ubar { width: 90px; height: 8px; border-radius: 4px; background: var(--line); overflow: hidden; flex: none; }
+.ubar i { display: block; height: 100%; background: var(--good); }
+.ubar i.warn { background: var(--warning); } .ubar i.high { background: var(--serious); }
+.ubar i.crit { background: var(--critical); }
+.ubar.unknown { background: repeating-linear-gradient(45deg, var(--line) 0 4px, transparent 4px 8px); }
+@media (max-width: 700px) { .ubar { width: 50px; } .upart .small { display: none; } }

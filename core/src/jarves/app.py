@@ -105,6 +105,8 @@ class Core:
         c = self.cfg
         self.log_path = logs.setup(self.home / "logs", c.log.level, c.log.max_bytes, c.log.backups, self.console_logs,
                                   c.log.console_level, c.log.modules, c.log.hide, privacy=c.log.privacy)
+        from . import backup, usage                     # SW-V2 M5: checkpoint BEFORE the stores open/migrate
+        backup.startup_checkpoint(self.home)
         self.history = store.attach(self.home, c)       # conversation history + self-diagnosis (log sink)
         logs.new_cid()
         logs.info("core", "CORE_STARTING", f"JARVES Core {__version__} starting", home=str(self.home))
@@ -126,6 +128,9 @@ class Core:
         self.registry.register(StatusSkill(self.snapshot))
         self.registry.register(feat.make_skill(self.features, self.registry))
         self.registry.allowed_actions |= {"feature_set"}   # policy per risk lives in the tool (features.py)
+        usage.attach(self.home)                          # M5: usage meters ("כמה נשאר לי?") + daily local backup
+        self.registry.register(usage.make_skill(self.home, c))
+        self._backup_auto = backup.start_auto(self.home, self.health)
         if c.music.provider != "none" or self.features.enabled("music") or self._player is not None:
             player = self._player or PearDesktopPlayer(c.music.pear_url, self.home / "pear_client_id", c.music.timeout_s)
             self.music = MusicSkill(player, c.music.max_volume, trim_queue=c.music.trim_queue,
@@ -259,6 +264,8 @@ class Core:
         self.budget.close()          # QA 19 Oct (suite_voice): its own SQLite handle kept memory.db locked after stop
         self.health.mark("stopped")
         logs.info("core", "CORE_STOPPED", "Core stopped cleanly")
+        if getattr(self, "_backup_auto", None) is not None:
+            self._backup_auto.stop.set()                # M5 automatic backup thread
         store.detach(getattr(self, "history", None))
 
     async def run(self) -> None:
