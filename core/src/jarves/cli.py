@@ -601,7 +601,6 @@ def cmd_chatgpt(a, cfg, home) -> int:
     return asyncio.run(go())
 
 
-CONNECTIONS = {"1": "chatgpt", "2": "combined", "3": "api_key"}
 # Issue #13: GPT-Live starts delegated backend requests server-side; JARVES counts them but cannot strictly cap
 # them, so a provider-side limit is the real hard ceiling.
 SPEND_LIMIT_ADVICE = ("IMPORTANT: set a monthly spend limit for your OpenAI project (platform.openai.com > "
@@ -624,10 +623,32 @@ def set_connection(path: Path, connection: str) -> None:
 
 
 def cmd_setup(a, cfg, home) -> int:
-    """First-run wizard: choose who pays for AI, connect ChatGPT if needed."""
+    """First-run wizard (setup_wizard.py): language, connection + key/sign-in, name, wake phrase, voice, every
+    add-on ON/OFF, privacy, budget, Google; also --answers (silent installs), --defaults and --check-addons."""
+    from . import setup_wizard as sw
     from .chatgpt_auth import ChatGPTAuth
     path = a.config or home / "config.toml"
-    if a.if_needed and (home / "setup_done").exists():
+    if getattr(a, "check_addons", False):
+        result = sw.check_addons()
+        print_check = sw.print_check
+        if getattr(a, "json", False):
+            print(json.dumps(result, ensure_ascii=False, indent=1))
+        else:
+            print_check(result)
+        return 0 if result["ok"] else 1
+    answers = None
+    if getattr(a, "answers", None) is not None:
+        if not a.answers.strip():              # the installer's silent run line without /SETUPANSWERS=
+            return 0
+        try:
+            answers = json.loads(Path(a.answers).read_text(encoding="utf-8-sig"))
+        except (OSError, ValueError) as e:
+            print(f"cannot read answers file {a.answers}: {e}", file=sys.stderr)
+            return 2
+        if not isinstance(answers, dict):
+            print("the answers file must be a JSON object", file=sys.stderr)
+            return 2
+    if a.if_needed and not sw.first_run(home) and answers is None:
         conn = cfg.ai.connection
         if conn in ("chatgpt", "combined") and not ChatGPTAuth(home).status()["plan_usage"]:
             print("ChatGPT is not connected, so JARVES starts with offline commands only.\n"
@@ -635,30 +656,25 @@ def cmd_setup(a, cfg, home) -> int:
         if conn in ("combined", "api_key") and not openai_key_present():
             print("No OpenAI API key saved, so live voice is off.  Add it:  jarvis key")
         return 0
-    print("How should JARVES connect?\n"
-          "  1  My ChatGPT plan          (no extra cost, simple voice)\n"
-          "  2  ChatGPT plan + API key   (best voice, voice billed to the key)\n"
-          "  3  API key only             (best everything, billed to the key)")
-    choice = input("Choose 1, 2 or 3 [1]: ").strip() or "1"
-    conn = CONNECTIONS.get(choice)
-    if conn is None:
-        print("Please run again and type 1, 2 or 3.")
-        return 1
-    set_connection(path, conn)
-    if conn in ("combined", "api_key") and not openai_key_present():
-        if _ask_key(home) != 0:
-            print("No key saved. JARVES runs offline until you run:  jarvis key")
-    if conn in ("combined", "api_key"):
-        print(SPEND_LIMIT_ADVICE)
-    if conn in ("chatgpt", "combined") and not ChatGPTAuth(home).status()["plan_usage"]:
-        print("Now sign in to ChatGPT in the browser window and click Allow.")
+
+    def chatgpt_login() -> int:
+        print("Sign in to ChatGPT in the browser window and click Allow.")
         a.action, a.forget = "login", False
-        cfg.ai.connection = conn
-        if cmd_chatgpt(a, cfg, home) != 0:
-            return 1
-    (home / "setup_done").write_text(conn, encoding="utf-8")
-    print(f"Done: connection = {conn}. Change it any time with:  jarvis setup")
-    return 0
+        return cmd_chatgpt(a, cfg, home)
+
+    def google_start() -> int:
+        from argparse import Namespace
+        from .google_auth import cmd_google
+        return cmd_google(Namespace(action="start", client=None, calendar_only=False, send=False, downloads=None,
+                                    restart=False, calendar_write=False, contacts=False, config=a.config), cfg, home)
+    try:
+        wiz = sw.Wizard(cfg, home, config_path=path, answers=answers, defaults=getattr(a, "defaults", False),
+                        lang=getattr(a, "lang", None), restart=getattr(a, "restart", False),
+                        actions={"chatgpt_login": chatgpt_login, "google_start": google_start})
+        return wiz.run()
+    except sw.AnswerError as e:
+        print(f"answers: {e}", file=sys.stderr)
+        return 2
 
 
 def _ask_key(home) -> int:
@@ -1294,8 +1310,16 @@ def main(argv: list[str] | None = None) -> int:
     dr = sub.add_parser("doctor", help="check microphone, wake word, keys, music; say what to fix")
     dr.add_argument("--sound", action="store_true", help="also play a beep on the speakers")
     dr.add_argument("--live", action="store_true", help="also open one real GPT-Live session (~1 cent, asks first)")
-    su = sub.add_parser("setup", help="choose how JARVES connects (ChatGPT plan / API key) and sign in")
+    su = sub.add_parser("setup", help="setup wizard: language, connection + key, name, wake phrase, voice, every "
+                                      "add-on on/off (re-run any time to change)")
     su.add_argument("--if-needed", action="store_true", help="only on the first run")
+    su.add_argument("--answers", metavar="FILE", help="non-interactive: apply a JSON answers file (no secrets in it)")
+    su.add_argument("--defaults", action="store_true", help="non-interactive: take every recommended answer")
+    su.add_argument("--lang", choices=["he", "en"], help="wizard language (default Hebrew)")
+    su.add_argument("--restart", action="store_true", help="forget the progress of an interrupted run")
+    su.add_argument("--check-addons", action="store_true",
+                    help="check that every add-on's code, models and data are in this install (no sensors, no network)")
+    su.add_argument("--json", action="store_true", help="with --check-addons: machine-readable output")
     k = sub.add_parser("key", help="save your OpenAI API key in a private file (secrets.env)")
     k.add_argument("--remove", action="store_true")
     k.add_argument("--show-path", action="store_true")
