@@ -135,6 +135,9 @@ def attach(core, *, mode: str = "foreground", launcher=None, tray_factory=None, 
     core.registry.allowed_actions |= {"show_yourself", "hide_yourself"}
     core.registry.register(make_skill(rt))
     core.features.listeners.append(lambda fid, on: _feature_changed(rt, fid, on))
+    from .privacy_state import PrivacyPublisher         # privacy.state for the face / room / dashboard strip
+    core.privacy_state = PrivacyPublisher(core)
+    core.privacy_state.start()
     rt.start()
     sync_autostart(rt)
     return rt
@@ -182,8 +185,36 @@ def api_runtime(ctx, m, body):
     except Exception as e:
         auto = {"enabled": False, "error": type(e).__name__}
     return 200, {"runtime": view, "live": live, "autostart": auto, "platform_status": PLATFORM_STATUS,
+                 # privacy strip on Home (privacy_state.py); None while the Core is down = shown as "unknown"
+                 "privacy": snap.get("privacy") if snap else None,
                  "snapshot": {k: snap.get(k) for k in ("core", "voice_mode", "wake_listening", "live_session",
                                                        "mic_muted", "version")} if snap else None}
+
+
+def api_camera_preview_poll(ctx, m, body):
+    """Home page "What does he see?": a poll keeps an open preview alive a few seconds and returns the latest frame
+    (never opens one). Frames come from the Core's RAM over the local link; the dashboard keeps nothing."""
+    return _preview_call(ctx, {"open": True})
+
+
+def api_camera_preview_set(ctx, m, body):
+    """POST {"start": true} opens the preview, {"open": false} closes it."""
+    body = body or {}
+    if body.get("open") is False:
+        return _preview_call(ctx, {"open": False})
+    if body.get("start") is True:
+        return _preview_call(ctx, {"open": True, "start": True})
+    return 400, {"error": "body needs {\"start\": true} or {\"open\": false}"}
+
+
+def _preview_call(ctx, msg: dict):
+    who = getattr(ctx, "principal", None)
+    if who is not None and who.get("kind") != "local":      # paired phone over plain-HTTP Wi-Fi: no camera images
+        return 403, {"error": "the camera preview is shown only on this computer", "open": False}
+    r = _ask_core(ctx, {"type": "camera.preview", "payload": msg}, "camera.preview_state")
+    if r is None:
+        return 409, {"error": "JARVES is not running; start it first (jarvis start)", "open": False}
+    return 200, r
 
 
 def api_runtime_set(ctx, m, body):
@@ -225,6 +256,8 @@ def dashboard_routes(register_route) -> None:
     register_route("GET", r"/api/runtime", api_runtime)
     register_route("POST", r"/api/runtime", api_runtime_set)
     register_route("POST", r"/api/runtime/stop", api_core_stop)
+    register_route("GET", r"/api/camera/preview", api_camera_preview_poll)
+    register_route("POST", r"/api/camera/preview", api_camera_preview_set)
 
 
 __all__ = ["Runtime", "attach", "alerts_paused", "current", "read_state", "PLATFORM_STATUS", "dashboard_routes"]

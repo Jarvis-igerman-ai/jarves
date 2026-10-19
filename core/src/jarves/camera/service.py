@@ -10,10 +10,14 @@
 5. Away: nobody seen and no conversation for camera.away_after_s -> camera OFF, unless `camera_when_away` is on.
    It comes back on with the next sign of the user (wake word, conversation, a presence sensor event).
 6. Face recognition only with the `face_recognition` switch AND per-person enrolment; deletion always works.
+7. "What does he see?" preview (switch `camera_preview`, needs `camera`): only while the user keeps it open, at most
+   PREVIEW_MAX_S per opening; small low-fps images to the LOCAL face/dashboard link only (never the cloud, never
+   disk, never the log). The sensor is open during it, so the indicator is on and privacy.state says "preview".
 """
 from __future__ import annotations
 
 import asyncio
+import base64
 import inspect
 import time
 from dataclasses import dataclass
@@ -24,7 +28,7 @@ from .. import logs
 from .backends import Camera, CameraUnavailable, Probe, make_camera, probe as default_probe
 from .detect import Box, Detector, Embedder
 from .faces import FaceStore
-from .frames import Frame, data_url, encode_still, is_dark
+from .frames import Frame, data_url, encode_preview, encode_still, is_dark
 from .presence import PresenceTracker
 from .switches import Switches
 
@@ -33,6 +37,12 @@ PROBE_TTL_S = 600.0         # a camera plugged in later is found within 10 minut
 RETRY_OPEN_S = 30.0
 ENROLL_SAMPLES = 3
 INDICATOR_REPEAT_S = 10.0
+PREVIEW_FPS = 3.0           # "What does he see?": a few small frames per second are enough to aim the camera
+PREVIEW_SIDE = 320          # pixels, long side (JPEG ~10-25 kB)
+PREVIEW_MAX_S = 60.0        # hard cap per opening; the face closes it after 20 s by itself
+PREVIEW_LEASE_S = 5.0       # a dashboard poll keeps it open this long (it polls about once a second)
+PREVIEW_MAX_BYTES = 180_000 # a bigger frame is skipped (the face link stays responsive)
+PHOTO_SHOW_S = 2.0          # privacy.state keeps saying "taking a photo" this long, so a person can notice it
 
 
 @dataclass
@@ -81,8 +91,17 @@ class CameraService:
         self._task: asyncio.Task | None = None
         self._state: tuple = ()
         self._ind_sent = -1e9
+        self.capturing = False                    # a still is being taken right now
+        self._photo_t = -1e9
+        self.preview_until = 0.0                  # clock time the preview ends (0 = closed)
+        self._preview_started = 0.0
+        self._preview_last = -1e9
+        self.preview_seq = 0
+        self.preview_frame: dict | None = None    # the latest preview image (RAM only, dropped at close)
+        self.last_seen: dict | None = None        # {text, mode, ts}: what JARVES last said about a photo
+        self._kick = asyncio.Event()              # wakes the supervisor at once (preview opened)
         switches.register_all({"camera": self.available, "face_recognition": self.face_available,
-                               "camera_when_away": self.available})
+                               "camera_when_away": self.available, "camera_preview": self.available})
 
     # ------------------------------------------------------------------ availability
     def probe(self, fresh: bool = False) -> Probe:
@@ -134,7 +153,11 @@ class CameraService:
 
     def wants_stream(self) -> bool:
         self._load_models()
-        if self.detector is None or not self.switches.active("camera"):
+        if not self.switches.active("camera"):
+            return False
+        if self.preview_active() and self.switches.active("camera_preview"):
+            return True
+        if self.detector is None:
             return False
         return not self.away or self.switches.active("camera_when_away")
 
@@ -165,12 +188,21 @@ class CameraService:
                 async with self._lock:
                     await self._close()
                 await asyncio.sleep(5)
-            await asyncio.sleep(1.0 / self.cfg.presence_fps if self.streaming else 1.0)
+            fps = max(self.cfg.presence_fps, PREVIEW_FPS if self.preview_active() else 0.0)
+            try:
+                await asyncio.wait_for(self._kick.wait(), 1.0 / fps if self.streaming else 1.0)
+            except asyncio.TimeoutError:
+                pass
+            self._kick.clear()
 
     async def tick(self) -> None:
         """One supervisor step (tests call it directly with a fake clock)."""
         await self.refresh_probe()
         now = self._clock()
+        if self.preview_until:
+            why = "timeout" if not self.preview_active() else self.preview_refusal()
+            if why:
+                await self.preview_close(why)
         if self.activity is not None and self.activity():
             self.user_activity()
         if not self.away and now - max(self._last_human, self.tracker.last_seen) > self.cfg.away_after_s:
@@ -196,7 +228,13 @@ class CameraService:
             frame = await asyncio.to_thread(self.cam.read)
         if now - self._ind_sent > INDICATOR_REPEAT_S:      # a face that reconnected learns the camera is on
             await self.resend_indicator()
-        await self._process(frame, now)
+        if self.preview_active() and now - self._preview_last >= 1.0 / PREVIEW_FPS - 1e-6:
+            self._preview_last = now
+            await self._send_preview(frame)
+        if self.detector is not None:
+            await self._process(frame, now)
+        else:
+            frame.drop()
 
     async def _process(self, frame: Frame, now: float) -> None:
         try:
@@ -230,6 +268,73 @@ class CameraService:
         except Exception:
             logs.warn("camera", "FACE_MATCH_FAILED", "face recognition failed; treating as a guest")
             return None
+
+    # ------------------------------------------------------------------ "What does he see?" preview
+    def preview_active(self) -> bool:
+        return self.preview_until > 0.0 and self._clock() < self.preview_until
+
+    def preview_refusal(self) -> str:
+        """"" when a preview may run now, else the reason code (same gates as the camera itself)."""
+        if not self.available()[0]:
+            return "CAMERA_UNAVAILABLE"
+        if not self.switches.active("camera"):
+            return "CAMERA_DISABLED"
+        if not self.switches.active("camera_preview"):
+            return "PREVIEW_DISABLED"
+        return ""
+
+    def preview_open(self, seconds: float, by: str = "face") -> dict:
+        """Open (or keep open) the local preview for `seconds` (capped at PREVIEW_MAX_S from the first opening)."""
+        why = self.preview_refusal()
+        if why:
+            return {"open": False, "reason": why}
+        now = self._clock()
+        if not self.preview_active():
+            self._preview_started, self._preview_last = now, -1e9
+            logs.info("camera", "CAMERA_PREVIEW_OPEN", "local camera preview opened (RAM only, local link only)",
+                      by=by, fps=PREVIEW_FPS, side=PREVIEW_SIDE)
+        self.preview_until = min(self._preview_started + PREVIEW_MAX_S, now + max(0.5, float(seconds)))
+        self.user_activity()                    # the user is looking at the screen: not away
+        self._kick.set()
+        return {"open": True, "seconds_left": round(self.preview_until - now, 1)}
+
+    async def preview_close(self, reason: str = "closed") -> None:
+        was = self.preview_until > 0.0
+        self.preview_until, self.preview_frame = 0.0, None
+        if was:
+            logs.info("camera", "CAMERA_PREVIEW_CLOSED", "local camera preview closed", reason=reason,
+                      frames=self.preview_seq)
+            await _call(self.send, "camera.preview_state", {"open": False, "reason": reason})
+        self._kick.set()                        # the supervisor closes the sensor if nothing else needs it
+
+    async def _send_preview(self, frame: Frame) -> None:
+        try:
+            mime, data, w, h = await asyncio.to_thread(encode_preview, frame, PREVIEW_SIDE)
+        except Exception:
+            logs.warn("camera", "CAMERA_PREVIEW_ENCODE_FAILED", "preview frame could not be encoded")
+            return
+        if len(data) > PREVIEW_MAX_BYTES:
+            logs.debug("camera", "CAMERA_PREVIEW_SKIPPED", "preview frame too large", bytes=len(data))
+            return
+        self.preview_seq += 1
+        self.preview_frame = {"seq": self.preview_seq, "mime": mime, "width": w, "height": h,
+                              "data": base64.b64encode(data).decode("ascii")}
+        del data
+        if self.preview_active():
+            await _call(self.send, "camera.preview_frame", self.preview_frame)
+
+    def privacy_state(self) -> str:
+        """What the camera does right now, from the real sensor state (privacy.state, never optimistic):
+        unavailable | disabled | photo | preview | presence | off."""
+        if not self.available()[0]:
+            return "unavailable"
+        if self.capturing or self._clock() - self._photo_t < PHOTO_SHOW_S:
+            return "photo"                      # also while a switch is being turned off mid-photo
+        if self.cam is not None:
+            return "preview" if self.preview_active() else "presence"
+        if not self.switches.active("camera"):
+            return "disabled"
+        return "off"
 
     def user_activity(self) -> None:
         """A sign of the user that is not the camera (wake word, conversation, button): leave away mode."""
@@ -323,6 +428,7 @@ class CameraService:
                 if self.cam is None:
                     raise Refusal("CAMERA_UNAVAILABLE", "לא הצלחתי להפעיל את המצלמה.")
             try:
+                self.capturing, self._photo_t = True, self._clock()
                 await self._set_indicator(True, flash=flash)
                 frame = await asyncio.to_thread(self.cam.still)
             except CameraUnavailable as e:
@@ -330,6 +436,7 @@ class CameraService:
                 await self._close()
                 raise Refusal(e.code, "המצלמה לא החזירה תמונה.") from e
             finally:
+                self.capturing, self._photo_t = False, self._clock()
                 if opened_here and self.cam is not None:
                     await self._close()
         logs.info("camera", "CAMERA_STILL", "still captured (RAM only)", purpose=purpose, width=frame.width,
@@ -366,6 +473,8 @@ class CameraService:
             text = await self.vision.ask(mode, question, url)
         finally:
             del url
+        # shown on the screen under "What he last described" (RAM only; the words he said anyway)
+        self.last_seen = {"text": str(text)[:400], "mode": mode, "ts": round(time.time(), 1)}
         return text, {"sent_bytes": n, "photos_today": used + 1}
 
     async def identify(self) -> str | None:
@@ -439,7 +548,7 @@ class CameraService:
         return {"available": ok, "detail": detail, "enabled": self.switches.active("camera"),
                 "face_recognition": self.switches.active("face_recognition"),
                 "when_away": self.switches.active("camera_when_away"), "indicator": self.indicator,
-                "streaming": self.streaming, "away": self.away, "present": self.tracker.present,
+                "streaming": self.streaming, "away": self.away, "preview": self.preview_active(), "present": self.tracker.present,
                 "presence_detector": getattr(self.detector, "name", None),
                 "enrolled": self.faces.count() if self._has_faces() else 0,
                 "switches": self.switches.backend}

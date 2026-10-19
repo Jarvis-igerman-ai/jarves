@@ -62,6 +62,28 @@ def messages():
         {"mode": "AVATAR3D"}, {"mode": 3}, {"mode": None}, {"mode": ["face"]}, {"mode": {"a": 1}}, {"mode": "x" * 5000},
         {"mode": True}, {})]
     out.append(m("appearance.set", {"mode": "avatar2d"}))
+    # privacy strip (privacy.state) + "What does he see?" preview frames, also malformed
+    ok = {"v": 1, "locale": "he", "mic": {"state": "listening"}, "camera": {"state": "preview",
+          "preview_available": True, "last_seen": {"text": "ספל קפה", "ts": 1}}, "speaker": {"state": "speaking"},
+          "cloud_audio": {"on": True, "state": "sending"}}
+    out.append(m("privacy.state", ok))
+    out += [m("privacy.state", p) for p in (
+        {**ok, "locale": "en"}, {"mic": "listening"}, {"mic": {"state": 5}}, {"camera": {"state": "nonsense"}},
+        {"mic": None, "camera": [], "speaker": {"state": ["x"]}, "cloud_audio": "on"}, {"locale": 7},
+        {"camera": {"state": "preview", "preview_available": "yes", "last_seen": {"text": 12}}},
+        {"camera": {"state": "off", "last_seen": {"text": "א" * 5000}}}, {"cloud_audio": {"on": "true"}}, {})]
+    out.append(m("privacy.state", ok))
+    import base64
+    import numpy as np
+    from jarves.camera.frames import _png
+    png = base64.b64encode(_png(np.full((24, 32, 3), 120, np.uint8))).decode()   # unrequested: must be ignored
+    out += [m("camera.preview_frame", p) for p in (
+        {"seq": 1, "mime": "image/png", "width": 2, "height": 2, "data": png}, {"seq": 2, "mime": "image/png"},
+        {"seq": "x", "mime": "image/jpeg", "data": "!!!"}, {"mime": "image/png", "data": "QUJDREVGR0g="},
+        {"mime": "image/jpeg", "data": png}, {"mime": "image/gif", "data": png}, {"data": "A" * 300000}, {})]
+    out += [m("camera.preview_state", p) for p in (
+        {"open": False, "reason": "CAMERA_DISABLED"}, {"open": True, "seconds_left": 20}, {"open": "no"}, {})]
+    out += [m("camera.enabled", p) for p in ({"on": True, "active": False, "reason": "no camera"}, {"on": 3}, {})]
     out += [m("mic.level", {"level": v}) for v in (0, 0.5, 1, -3, 99, "x", None)]
     out += [m("speaker.level", {"level": v}) for v in (0, 0.7, 5, -1, "loud")]
     out.append(m("assistant.text", {"text": "שלום! " * 800, "source": "live"}))

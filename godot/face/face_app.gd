@@ -5,7 +5,9 @@ extends Control
 ## the Core: the link no longer drives the face), --shot=<png> (screenshot then quit), --check (self-test),
 ## --low (cheaper face shader), --lively (old busier motion), --seed=<n> (repeatable motion),
 ## --seq=<png> [--seq-frames=8 --seq-span=12 | --seq-blink] (contact sheet of frames on a simulated clock, then quit),
-## --appearance=<face|avatar2d|avatar3d|hidden> (start presentation; the Core's appearance.set overrides it).
+## --appearance=<face|avatar2d|avatar3d|hidden> (start presentation; the Core's appearance.set overrides it),
+## --privacy=<listening|wake|muted|speaking|photo|unavailable|preview|unknown>[_en] [--preview-demo] (privacy strip
+## preview without a Core; the demo picture is a generated test pattern).
 
 const Face := preload("res://face/face.gd")
 const AssistantUI := preload("res://face/assistant_ui.gd")
@@ -67,6 +69,9 @@ func _ready() -> void:
 		_e2e()
 		return
 	for a in args:
+		if a.begins_with("--privacy="):
+			_privacy_demo(a.substr(10), "--preview-demo" in args)
+	for a in args:
 		if a.begins_with("--seq="):
 			await _sequence(a.substr(6), args)
 			return
@@ -119,6 +124,180 @@ func _e2e() -> void:
 	print("E2E RESULT: %s (reply: %s; face states: %s)" % ["PASS" if ok else "FAIL",
 			replies[0].get("text", "") if replies.size() else "-", ",".join(states)])
 	get_tree().quit(0 if ok else 1)
+
+
+## --privacy=<scenario> [--preview-demo]: the privacy strip without a Core (screenshots). The preview picture is a
+## generated test pattern, never a camera image.
+const PRIVACY_DEMOS := {
+	"listening": ["listening", "presence", "quiet", "sending"], "wake": ["wake_only", "disabled", "quiet", "off"],
+	"muted": ["muted", "off", "quiet", "off"], "speaking": ["gated", "disabled", "speaking", "connected"],
+	"photo": ["listening", "photo", "quiet", "sending"], "unavailable": ["unavailable", "unavailable", "unavailable", "off"],
+	"preview": ["wake_only", "preview", "quiet", "off"],
+}
+
+
+static func privacy_payload(v: Array, loc := "he", last := "") -> Dictionary:
+	return {"v": 1, "locale": loc, "mic": {"state": v[0]}, "camera": {"state": v[1], "preview_available":
+		v[1] in ["off", "presence", "preview"], "last_seen": {"text": last, "ts": 0} if last != "" else null},
+		"speaker": {"state": v[2]}, "cloud_audio": {"on": v[3] == "sending", "state": v[3]}}
+
+
+static func test_frame(w := 320, h := 240, seq := 1) -> Dictionary:
+	# synthetic test pattern (colour bars + a moving square) encoded like a Core preview frame
+	var img := Image.create(w, h, false, Image.FORMAT_RGB8)
+	var bars := [Color(0.75, 0.75, 0.75), Color(0.75, 0.75, 0), Color(0, 0.75, 0.75), Color(0, 0.75, 0),
+		Color(0.75, 0, 0.75), Color(0.75, 0, 0), Color(0, 0, 0.75)]
+	for i in bars.size():
+		img.fill_rect(Rect2i(i * w / bars.size(), 0, w / bars.size() + 1, h), bars[i])
+	img.fill_rect(Rect2i((seq * 17) % (w - 40), h / 2 - 20, 40, 40), Color.WHITE)
+	return {"seq": seq, "mime": "image/png", "width": w, "height": h,
+		"data": Marshalls.raw_to_base64(img.save_png_to_buffer())}
+
+
+func _privacy_demo(which: String, with_preview: bool) -> void:
+	ui.link.set_process(false)
+	ui.strip.set_linked(which != "unknown")
+	var loc := "en" if which.ends_with("_en") else "he"
+	var key := which.trim_suffix("_en")
+	if PRIVACY_DEMOS.has(key):
+		var last := "זה ספל קפה לבן עם כיתוב כחול." if loc == "he" else "A white coffee mug with blue writing."
+		ui._on_message("privacy.state", privacy_payload(PRIVACY_DEMOS[key], loc, last))
+	if with_preview:
+		ui._toggle_preview()
+		ui._on_message("camera.preview_frame", test_frame())
+
+
+func _privacy_checks(errs: Array) -> String:
+	# privacy.state -> strip (truthful: unknown until a valid message, per-field validation, stale -> unknown,
+	# link down -> unknown); clicks send the right message; the preview shows frames only while open.
+	var s: Control = ui.strip
+	s.set_linked(false)
+	if s.get_parent() == null or not (s.get_parent() is CanvasLayer) or not s.visible:
+		errs.append("privacy strip is not on its own always-visible layer")
+	for k in s.ITEMS:
+		if s.state_of(k) != "" or s.tone(k) != "unknown":
+			errs.append("strip shows %s before any privacy.state" % k)
+	s.set_linked(true)
+	var seen_labels := {}
+	for k in s.STATES:
+		for st in s.STATES[k]:
+			var v := {"mic": "idle", "camera": "off", "speaker": "quiet", "cloud_audio": "off"}
+			v[k] = st
+			ui._on_message("privacy.state", privacy_payload([v.mic, v.camera, v.speaker, v.cloud_audio]))
+			if s.state_of(k) != st or s.label(k) == "" or s.label(k) == s.UNKNOWN[0]:
+				errs.append("privacy.state %s=%s not shown (%s)" % [k, st, s.label(k)])
+			seen_labels[k + ":" + s.label(k)] = true
+	var n := 0
+	for k in s.STATES:
+		n += s.STATES[k].size()
+	if seen_labels.size() != n:
+		errs.append("two states share one label (%d of %d distinct)" % [seen_labels.size(), n])
+	if s.tone_color("capture") == s.tone_color("off") or s.tone_color("out") == s.tone_color("local"):
+		errs.append("strip tones not distinct")
+	ui._on_message("privacy.state", privacy_payload(["listening", "presence", "quiet", "sending"], "en"))
+	if s.label("mic") != "Listening" or s.label("cloud_audio") != "Audio to cloud" or s.tone("mic") != "capture":
+		errs.append("English labels / tones wrong: %s %s" % [s.label("mic"), s.label("cloud_audio")])
+	ui._on_message("privacy.state", privacy_payload(["listening", "presence", "quiet", "sending"]))
+	if s.label("mic") != "מאזין":
+		errs.append("Hebrew label wrong: %s" % s.label("mic"))
+	# geometry: inside the window, above the eyes, every chip clickable
+	var vr := get_viewport_rect()
+	var big := vr.size.x >= 300.0              # --headless runs a 64 px window: geometry is checked in screenshots
+	var gr := Rect2(s.global_position, s.size)
+	if big and (not vr.encloses(gr) or gr.size.y < 20 or gr.end.y > vr.size.y * 0.2):
+		errs.append("privacy strip outside the window / too low (%s in %s)" % [gr, vr])
+	for k in s.ITEMS + ["preview"]:
+		if s.chip_rect(k).size.x < s.size.y:
+			errs.append("chip %s has no clickable area" % k)
+	# malformed messages: each bad field becomes unknown, nothing crashes, nothing is guessed
+	for bad in [{}, {"mic": "listening"}, {"mic": {"state": 5}}, {"camera": {"state": "nonsense"}},
+			{"mic": null, "camera": [], "speaker": {"state": ["x"]}, "cloud_audio": "on"}, {"locale": 7},
+			{"camera": {"state": "preview", "preview_available": "yes", "last_seen": {"text": 12}}},
+			{"mic": {"state": "LISTENING"}}, {"cloud_audio": {"on": "true", "state": "nope"}}]:
+		ui._on_message("privacy.state", bad)
+		for k in s.ITEMS:
+			var d = bad.get(k)
+			var ok_field: bool = typeof(d) == TYPE_DICTIONARY and typeof(d.get("state")) == TYPE_STRING \
+					and s.STATES[k].has(d.get("state"))
+			if not ok_field and s.state_of(k) != "":
+				errs.append("malformed %s accepted: %s -> %s" % [k, bad, s.state_of(k)])
+	if s.preview_available:
+		errs.append("preview_available accepted a non-bool")
+	ui._on_message("privacy.state", {"cloud_audio": {"on": true, "state": "off"}})
+	if s.state_of("cloud_audio") != "sending":
+		errs.append("cloud_audio on=true not shown as sending")
+	# stale and link down -> unknown
+	ui._on_message("privacy.state", privacy_payload(["muted", "disabled", "quiet", "off"]))
+	s._seen_at -= s.STALE_S + 1.0
+	if s.state_of("mic") != "":
+		errs.append("stale privacy.state still shown")
+	ui._on_message("privacy.state", privacy_payload(["muted", "disabled", "quiet", "off"]))
+	# clicks -> the right Core message (the strip itself waits for the Core's answer)
+	ui._toggle_mic()
+	if ui.last_sent != ["mic.set_mute", {"muted": false}] or s.state_of("mic") != "muted":
+		errs.append("mic chip click sent %s" % [ui.last_sent])
+	ui._toggle_camera()
+	if ui.last_sent != ["camera.set_enabled", {"on": true}]:
+		errs.append("camera chip click (disabled -> on) sent %s" % [ui.last_sent])
+	ui._on_message("privacy.state", privacy_payload(["listening", "presence", "quiet", "sending"]))
+	ui._toggle_mic()
+	ui._toggle_camera()
+	if ui.last_sent != ["camera.set_enabled", {"on": false}]:
+		errs.append("camera chip click (on -> off) sent %s" % [ui.last_sent])
+	ui._on_message("privacy.state", privacy_payload(["unavailable", "unavailable", "unavailable", "off"]))
+	ui.last_sent = []
+	ui._toggle_mic()
+	ui._toggle_camera()
+	if not ui.last_sent.is_empty():
+		errs.append("click on an unavailable device sent %s" % [ui.last_sent])
+	# preview: frames only while open; malformed frames ignored; refusal shown; auto close sends close
+	var pv: PanelContainer = ui.preview
+	ui._on_message("camera.preview_frame", test_frame())
+	if pv.is_open or pv.picture.texture != null or pv.visible:
+		errs.append("preview frame shown while the preview is closed")
+	ui._on_message("privacy.state", privacy_payload(["wake_only", "off", "quiet", "off"], "he", "זה ספל."))
+	if not s.preview_enabled():
+		errs.append("preview button disabled although the camera is available")
+	ui._toggle_preview()
+	if not pv.is_open or ui.last_sent != ["camera.preview", {"open": true, "seconds": ui.PREVIEW_S}] or not s.preview_open:
+		errs.append("preview button did not open / ask the Core: %s" % [ui.last_sent])
+	for bad in [{}, {"data": 5, "mime": "image/png"}, {"data": "!!!notbase64!!!", "mime": "image/png", "seq": 9},
+			{"data": test_frame().data, "mime": "image/gif"}, {"data": "QUJDREVGR0g=", "mime": "image/jpeg"},
+			{"data": "a".repeat(500000), "mime": "image/png"}, {"data": test_frame().data, "mime": "image/jpeg"}]:
+		ui._on_message("camera.preview_frame", bad)
+	if pv.frames != 0 or pv.picture.texture != null:
+		errs.append("malformed preview frame shown")
+	ui._on_message("camera.preview_frame", test_frame(320, 240, 3))
+	ui._on_message("camera.preview_frame", test_frame(320, 240, 2))       # older: dropped
+	if pv.frames != 1 or pv.picture.texture == null or pv.picture.texture.get_width() != 320:
+		errs.append("valid preview frame not shown (frames %d)" % pv.frames)
+	var jimg := Image.create(160, 120, false, Image.FORMAT_RGB8)
+	jimg.fill(Color(0.2, 0.5, 0.8))
+	ui._on_message("camera.preview_frame", {"seq": 4, "mime": "image/jpeg", "width": 160, "height": 120,
+		"data": Marshalls.raw_to_base64(jimg.save_jpg_to_buffer(0.7))})       # what the Core sends (OpenCV JPEG)
+	if pv.frames != 2 or pv.picture.texture.get_width() != 160:
+		errs.append("JPEG preview frame not shown")
+	if pv._last.text != "זה ספל.":
+		errs.append("last description caption missing: %s" % pv._last.text)
+	var pr := Rect2(pv.global_position, pv.get_combined_minimum_size())
+	if big and (not vr.encloses(pr) or pr.intersects(gr)):
+		errs.append("preview window outside the screen / over the strip (%s, strip %s)" % [pr, gr])
+	ui._on_message("camera.preview_state", {"open": false, "reason": "CAMERA_DISABLED"})
+	if pv.picture.texture != null or not pv._status.text.contains("כבויה"):
+		errs.append("preview refusal not shown")
+	ui._process(5.0)
+	if pv.is_open or pv.visible or ui.last_sent != ["camera.preview", {"open": false}] or s.preview_open:
+		errs.append("preview does not close by itself after the refusal (%s)" % [ui.last_sent])
+	ui._toggle_preview()
+	ui._process(ui.PREVIEW_S + 0.5)
+	if pv.is_open or ui.last_sent != ["camera.preview", {"open": false}]:
+		errs.append("preview does not auto-close after %d s" % ui.PREVIEW_S)
+	ui._toggle_preview()
+	ui._on_link(false, "test")
+	if pv.is_open or s.state_of("mic") != "" or s.preview_enabled():
+		errs.append("link down does not close the preview / reset the strip")
+	ui._on_link(true, "test")
+	return "privacy strip: %d states with distinct labels, malformed/stale/offline -> unknown, preview open/close OK" % n
 
 
 func _settle(frames := 40) -> void:
@@ -657,6 +836,7 @@ func _check() -> void:
 	_activity_checks(errs)
 	print(_gaze_checks(errs))
 	print(await _appearance_checks(errs))
+	print(_privacy_checks(errs))
 	# sleeping face never blinks
 	var fz := _new_face(false, 21)
 	fz.set_link("offline")

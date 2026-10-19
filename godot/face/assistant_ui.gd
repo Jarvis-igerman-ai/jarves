@@ -5,6 +5,9 @@ extends PanelContainer
 
 const CoreLink := preload("res://face/core_link.gd")
 const FaceScript := preload("res://face/face.gd")
+const PrivacyStrip := preload("res://face/privacy_strip.gd")
+const CameraPreview := preload("res://face/camera_preview.gd")
+const PREVIEW_S := 20.0           # "What does he see?" closes by itself after this
 
 var link: Node
 var face: Control                 # face.gd instance to drive (set by the owner)
@@ -27,6 +30,9 @@ var _confirm_id := ""
 var last_status := {}
 var _closing := false
 var _close_ack := false
+var strip: Control                # privacy_strip.gd: always visible (own CanvasLayer: kiosk / Options never hide it)
+var preview: PanelContainer       # camera_preview.gd: "What does he see?"
+var last_sent := []               # [type, payload] of the last message sent by the strip / preview (tests)
 
 
 func _ready() -> void:
@@ -100,7 +106,67 @@ func _ready() -> void:
 	confirm.confirmed.connect(func(): _answer(true))
 	confirm.canceled.connect(func(): _answer(false))
 	add_child(confirm)
+	var layer := CanvasLayer.new()
+	layer.name = "PrivacyLayer"
+	layer.layer = 5
+	add_child(layer)
+	strip = PrivacyStrip.new()
+	strip.tooltip_text = "JARVES"
+	strip.mic_pressed.connect(_toggle_mic)
+	strip.camera_pressed.connect(_toggle_camera)
+	strip.preview_pressed.connect(_toggle_preview)
+	layer.add_child(strip)
+	preview = CameraPreview.new()
+	preview.close_requested.connect(func(_why): _close_preview())
+	layer.add_child(preview)
 	_set_controls(false)
+
+
+func _process(delta: float) -> void:
+	if preview and preview.tick(delta):
+		_close_preview()
+	if strip:                               # the strip never covers this panel (hidden in --kiosk: alpha 0)
+		strip.avoid = get_global_rect() if visible and modulate.a > 0.05 else Rect2()
+
+
+func _send(t: String, p: Dictionary = {}) -> void:
+	last_sent = [t, p]
+	link.send(t, p)
+
+
+func _toggle_mic() -> void:
+	# software mute toggle; the strip changes only when the Core's privacy.state says so (never optimistic)
+	var st: String = strip.state_of("mic")
+	if st == "" or st == "unavailable":
+		return
+	_send("mic.set_mute", {"muted": st != "muted"})
+
+
+func _toggle_camera() -> void:
+	# off at once; on = the Core asks on this screen first (confirm.request) and needs a connected camera
+	var st: String = strip.state_of("camera")
+	if st == "" or st == "unavailable":
+		return
+	_send("camera.set_enabled", {"on": st == "disabled"})
+
+
+func _toggle_preview() -> void:
+	if preview.is_open:
+		_close_preview()
+		return
+	preview.set_locale(strip.locale)
+	preview.set_last_seen(strip.last_seen_text)
+	preview.open_preview(PREVIEW_S)
+	strip.set_preview_open(true)
+	_send("camera.preview", {"open": true, "seconds": PREVIEW_S})
+
+
+func _close_preview() -> void:
+	var was: bool = preview.is_open
+	preview.close_preview("closed")
+	strip.set_preview_open(false)
+	if was:
+		_send("camera.preview", {"open": false})
 
 
 func _notification(what: int) -> void:
@@ -135,7 +201,10 @@ func _answer(ok: bool) -> void:
 func _on_link(connected: bool, detail: String) -> void:
 	_linked = connected
 	_set_controls(connected)
+	strip.set_linked(connected)
 	if not connected:
+		preview.close_preview("offline")      # no frames without the Core; nothing kept
+		strip.set_preview_open(false)
 		status_lbl.text = "Core: " + detail
 		activity.text = "JARVES is not running: " + detail
 		if face:
@@ -199,6 +268,19 @@ func _on_message(t: String, p: Dictionary) -> void:
 			# {mode: face|avatar2d|avatar3d|hidden}; anything else is ignored (the current presentation stays)
 			if appearance:
 				appearance.set_mode(p.get("mode"))
+		"privacy.state":
+			# {mic, camera, speaker, cloud_audio}: the always-visible strip (privacy_strip.gd checks every field)
+			strip.apply(p)
+			if preview.is_open:
+				preview.set_last_seen(strip.last_seen_text)
+		"camera.preview_frame":
+			preview.apply_frame(p)                # ignored unless the window is open
+		"camera.preview_state":
+			preview.apply_state(p)
+		"camera.enabled":
+			# {on, active, reason}: answer to the camera chip; the strip itself follows privacy.state
+			if typeof(p.get("on")) == TYPE_BOOL and not p.get("on") and _str(p.get("reason")) != "":
+				caption.text = "Camera: " + _str(p.get("reason")).substr(0, 120)
 		"camera.indicator":
 			# {on, flash}: the camera is streaming / a photo was just taken (software indicator)
 			if face:

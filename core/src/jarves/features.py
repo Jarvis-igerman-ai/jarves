@@ -283,6 +283,9 @@ register("face_recognition", "זיהוי פנים", "Face recognition", False, p
 register("camera_when_away", "מצלמה כשאין אף אחד בבית", "Camera when away", False,
          probe=_all(_probe_camera, _skill_installed("camera")), needs=["camera"], risk="high",
          about="watch the room while nobody is home")
+register("camera_preview", "מה הוא רואה? (תצוגת מצלמה)", "What does he see? (camera preview)", True,
+         probe=_probe_camera, needs=["camera"], risk="low",
+         about="shows the camera picture on this screen while you keep it open; local only, nothing saved or sent")
 register("wake_word", "מילת הפעלה", "Wake word \"Hey Jarvis\"", True, probe=_probe_wake, needs=["microphone"],
          config="voice.wake_enabled", about="listens on this device for \"Hey Jarvis\"; no audio leaves before it")
 register("greeting", "ברכת פתיחה", "Greeting", True, config="voice.greeting", about="says hello when the face starts")
