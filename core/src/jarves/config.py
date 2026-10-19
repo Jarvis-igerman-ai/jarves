@@ -123,6 +123,47 @@ class LogConfig(_Strict):
     debug_minutes: int = Field(30, ge=1, le=240)
 
 
+class ModelPrice(_Strict):
+    input: float = Field(ge=0)              # USD per 1M input tokens
+    cached_input: float = Field(0, ge=0)
+    output: float = Field(ge=0)
+
+
+class PricingConfig(_Strict):
+    """Cost ESTIMATES for `jarvis cost` and the dashboard (USD). Checked 2026-10-19 at
+    https://developers.openai.com/api/docs/pricing (gpt-live-1: $0.05/min billed per second; backend Responses calls
+    at the model's normal token price; web search $10 per 1k calls). Your OpenAI bill is the truth."""
+    voice_per_minute: dict[str, float] = {
+        "gpt-live-1": 0.05,
+        # Realtime is billed by audio tokens ($32/$64 per 1M for 2.1, $10/$20 for mini): rough per-minute estimate
+        "gpt-realtime-2.1": 0.10, "gpt-realtime-2.1-mini": 0.03}
+    models: dict[str, ModelPrice] = {
+        "gpt-6-luna": ModelPrice(input=0.10, cached_input=0.01, output=0.50),
+        "gpt-6-sol": ModelPrice(input=2.00, cached_input=0.20, output=10.00),
+        "gpt-6.1-sol": ModelPrice(input=2.00, cached_input=0.10, output=10.00),
+        "gpt-6-astra": ModelPrice(input=10.00, cached_input=1.00, output=50.00)}
+    tier_multiplier: dict[str, float] = {"priority": 2.0, "flex": 0.5}   # Fast = 2x, Flex = 0.5x standard
+    web_search_per_call: float = Field(0.01, ge=0)
+    # A backend response whose token usage was not logged is estimated with these token counts.
+    est_input_tokens: int = Field(3000, ge=0)
+    est_output_tokens: int = Field(150, ge=0)
+    session_alert_usd: float = Field(0.50, ge=0)   # self-diagnosis flags a conversation above this
+    daily_alert_usd: float = Field(2.00, ge=0)     # ...and a day above this
+
+
+class HistoryConfig(_Strict):
+    """Conversation history (store.db) for the dashboard, cost and self-diagnosis. Follows log.privacy: with
+    privacy on, only lengths and timings are kept, never what was said."""
+    enabled: bool = True
+    keep_days: int = Field(90, ge=1, le=3650)
+    # self-diagnosis thresholds
+    dead_air_s: float = Field(5.0, gt=0, le=120)       # silence before a reply / while a request is pending
+    stall_s: float = Field(20.0, gt=0, le=600)         # a request with no real answer for this long
+    slow_tool_s: float = Field(5.0, gt=0, le=120)
+    slow_backend_s: float = Field(10.0, gt=0, le=600)
+    early_drops: int = Field(5, ge=1)                  # early-response audio drops per session before it is an issue
+
+
 class Config(_Strict):
     assistant_name: str = "JARVES"
     link: LinkConfig = LinkConfig()
@@ -130,6 +171,8 @@ class Config(_Strict):
     voice: VoiceConfig = VoiceConfig()
     music: MusicConfig = MusicConfig()
     log: LogConfig = LogConfig()
+    pricing: PricingConfig = PricingConfig()
+    history: HistoryConfig = HistoryConfig()
 
 
 SECRET_KEYS = ("api_key", "apikey", "token", "secret", "password", "cookie")

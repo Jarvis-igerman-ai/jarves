@@ -682,6 +682,85 @@ def cmd_say(a, cfg, home) -> int:
     return 0
 
 
+def _history(cfg, home):
+    from .store import Store
+    return Store(home / "store.db", tier=cfg.ai.voice_service_tier, backend_model=cfg.ai.text_model)
+
+
+def _log_files(home: Path) -> list[Path]:
+    """jarves.log and its rotations, oldest first."""
+    base = home / "logs" / "jarves.log"
+    rotated = sorted(base.parent.glob("jarves.log.*"), key=lambda p: int(p.suffix[1:]) if p.suffix[1:].isdigit() else 0,
+                     reverse=True)
+    return [p for p in rotated + [base] if p.is_file()]
+
+
+def cmd_cost(a, cfg, home) -> int:
+    from .store import daily_costs, session_cost
+    st = _history(cfg, home)
+    try:
+        days = daily_costs(st, cfg.pricing, a.days)
+        print(f"JARVES cost ESTIMATE, last {a.days} days (prices: [pricing], checked 2026-10-19; your OpenAI bill "
+              f"is the truth)")
+        if not days:
+            print("  no conversations recorded yet (history starts with this version; "
+                  "`jarvis diagnose --import-log` reads older logs)")
+            return 0
+        print(f"  {'day':<11} {'conv':>4} {'voice min':>9} {'voice':>8} {'backend':>8} {'typed':>7} {'total':>8}")
+        for d in days:
+            print(f"  {d['day']:<11} {d['sessions']:>4} {d['voice_minutes']:>9.1f} ${d['voice']:>7.3f} "
+                  f"${d['backend']:>7.4f} ${d['text']:>6.4f} ${d['total']:>7.3f}")
+        print(f"  {'total':<11} {sum(d['sessions'] for d in days):>4} {sum(d['voice_minutes'] for d in days):>9.1f} "
+              f"{'':>27} ${sum(d['total'] for d in days):>7.3f}")
+        print("\n  last conversations:")
+        for s in st.sessions(a.sessions):
+            c = session_cost(st, s, cfg.pricing)
+            when = datetime.fromtimestamp(s["started"]).strftime("%Y-%m-%d %H:%M")
+            print(f"  {when}  {c['voice_minutes']:>5.1f} min  {c['backend_responses']:>3} backend calls  "
+                  f"${c['total']:.3f}{'  (tokens estimated)' if c['estimated_tokens'] else ''}")
+    finally:
+        st.close()
+    return 0
+
+
+def cmd_diagnose(a, cfg, home) -> int:
+    from . import diagnose
+    st = _history(cfg, home)
+    try:
+        if a.import_log is not None:
+            files = [Path(a.import_log)] if a.import_log else _log_files(home)
+            skip = st.newest_ts()
+            n = sum(len(st.ingest_log(f, skip)) for f in files)
+            print(f"imported {n} conversation(s) from {len(files)} log file(s)")
+        found = diagnose.run(st, cfg, days=a.days)
+        issues = st.issues("open")
+        print(f"self-diagnosis: {len(found)} finding(s); {len(issues)} open issue(s)")
+        for i in issues:
+            print(f"  [{i['severity']:<6}] {i['title']}  (x{i['count']})")
+        if issues:
+            print("details: `jarvis dashboard` -> Issues")
+    finally:
+        st.close()
+    return 0
+
+
+def cmd_dashboard(a, cfg, home) -> int:
+    from .dashboard import Dashboard
+    dash = Dashboard(home, cfg, a.port)
+    print(f"JARVES dashboard (this computer only; the link holds a one-time key, do not share it):\n  {dash.url}\n"
+          "Ctrl+C to stop.", flush=True)
+    if not a.no_open:
+        import webbrowser
+        webbrowser.open(dash.url)
+    try:
+        dash.serve_forever()
+    except KeyboardInterrupt:
+        pass
+    finally:
+        dash.stop()
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     for stream in (sys.stdout, sys.stderr):      # Hebrew output on Windows consoles
         try:
@@ -734,6 +813,16 @@ def main(argv: list[str] | None = None) -> int:
     q.add_argument("text", nargs="+")
     s = sub.add_parser("say", help="speak a sentence with the configured voice")
     s.add_argument("text", nargs="+")
+    co = sub.add_parser("cost", help="estimated cost per day and per conversation")
+    co.add_argument("--days", type=int, default=14)
+    co.add_argument("--sessions", type=int, default=10)
+    db = sub.add_parser("dashboard", help="local web dashboard: conversations, costs, issues, memory, skills")
+    db.add_argument("--port", type=int, default=0, help="default: a free port")
+    db.add_argument("--no-open", action="store_true", help="do not open the browser")
+    dg = sub.add_parser("diagnose", help="self-diagnosis: find problems in recent conversations")
+    dg.add_argument("--days", type=int, default=30)
+    dg.add_argument("--import-log", nargs="?", const="", default=None, metavar="PATH",
+                    help="first read conversations from jarves.log (default: the current log and its rotations)")
     a = ap.parse_args(argv)
     home = state_dir()
     load_secrets(home)
@@ -744,7 +833,8 @@ def main(argv: list[str] | None = None) -> int:
         return 2
     return {"run": cmd_run, "stop": cmd_stop, "status": cmd_status, "diag": cmd_diag, "memory": cmd_memory, "music": cmd_music,
             "ask": cmd_ask, "say": cmd_say, "chatgpt": cmd_chatgpt, "setup": cmd_setup, "logs": cmd_logs, "key": cmd_key,
-            "wake": cmd_wake, "doctor": cmd_doctor}[a.cmd](a, cfg, home)
+            "wake": cmd_wake, "doctor": cmd_doctor, "cost": cmd_cost, "dashboard": cmd_dashboard,
+            "diagnose": cmd_diagnose}[a.cmd](a, cfg, home)
 
 
 if __name__ == "__main__":

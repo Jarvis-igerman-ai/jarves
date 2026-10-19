@@ -9,7 +9,7 @@ import json
 from contextlib import aclosing
 from pathlib import Path
 
-from . import __version__, logs
+from . import __version__, logs, store
 from .brain import AgentBrain, Brain, billing_routes
 from .budget import Budget, BudgetExceeded
 from .config import Config, api_billing_allowed, openai_key_present
@@ -101,6 +101,7 @@ class Core:
         c = self.cfg
         self.log_path = logs.setup(self.home / "logs", c.log.level, c.log.max_bytes, c.log.backups, self.console_logs,
                                   c.log.console_level, c.log.modules, c.log.hide, privacy=c.log.privacy)
+        self.history = store.attach(self.home, c)       # conversation history + self-diagnosis (log sink)
         logs.new_cid()
         logs.info("core", "CORE_STARTING", f"JARVES Core {__version__} starting", home=str(self.home))
         self.health = Health(self.home / "health.json")
@@ -208,6 +209,7 @@ class Core:
         self.budget.close()          # QA 19 Oct (suite_voice): its own SQLite handle kept memory.db locked after stop
         self.health.mark("stopped")
         logs.info("core", "CORE_STOPPED", "Core stopped cleanly")
+        store.detach(getattr(self, "history", None))
 
     async def run(self) -> None:
         await self.start()

@@ -213,6 +213,27 @@ _debug_until = 0.0
 _base_level = logging.INFO
 _console: ModuleFilter | None = None
 _console_base = logging.INFO
+# Extra handlers that survive setup() and always receive INFO and above (e.g. the conversation history store).
+_sinks: list[logging.Handler] = []
+
+
+def add_sink(handler: logging.Handler) -> None:
+    """Attach a handler that gets every INFO+ record with its structured fields, whatever the file/console level."""
+    handler.setLevel(min(handler.level or logging.INFO, logging.INFO))
+    if handler not in _sinks:
+        _sinks.append(handler)
+        _logger.addHandler(handler)
+    _logger.setLevel(min(_logger.level or logging.INFO, logging.INFO))
+
+
+def remove_sink(handler: logging.Handler) -> None:
+    if handler in _sinks:
+        _sinks.remove(handler)
+    _logger.removeHandler(handler)
+
+
+def _logger_level(base: int) -> int:
+    return min(base, logging.INFO) if _sinks else base
 
 
 def setup(log_dir: Path, level: str = "INFO", max_bytes: int = 1_000_000, backups: int = 5,
@@ -223,6 +244,8 @@ def setup(log_dir: Path, level: str = "INFO", max_bytes: int = 1_000_000, backup
     log_dir.mkdir(parents=True, exist_ok=True)
     path = log_dir / "jarves.log"
     for h in list(_logger.handlers):
+        if h in _sinks:
+            continue
         _logger.removeHandler(h)
         h.close()
     fh = logging.handlers.RotatingFileHandler(path, maxBytes=max_bytes, backupCount=backups, encoding="utf-8")
@@ -242,7 +265,7 @@ def setup(log_dir: Path, level: str = "INFO", max_bytes: int = 1_000_000, backup
         _console = ModuleFilter(_console_base, only, hide)
         ch.addFilter(_console)
         _logger.addHandler(ch)
-    _logger.setLevel(min(_base_level, _console_base if console else _base_level))
+    _logger.setLevel(_logger_level(min(_base_level, _console_base if console else _base_level)))
     _logger.propagate = False
     return path
 
@@ -264,7 +287,7 @@ def log(component: str, code: str, msg: str, level: int = logging.INFO, exc: boo
         for h in _logger.handlers:
             if isinstance(h, logging.handlers.RotatingFileHandler):
                 h.setLevel(_base_level)
-        _logger.setLevel(min(_base_level, _console_base if _console else _base_level))
+        _logger.setLevel(_logger_level(min(_base_level, _console_base if _console else _base_level)))
     _logger.log(level, msg, exc_info=exc, extra={"component": component, "code": code, "fields": fields})
 
 
