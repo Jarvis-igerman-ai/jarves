@@ -17,7 +17,7 @@ import asyncio
 from .. import features as feat, logs
 from .service import Runtime, alerts_paused, current, read_state
 
-QUIT_DELAY_S = 4.0      # a voice quit stops the Core this long after the tool result (the goodbye is spoken first)
+QUIT_DELAY_S = 4.0      # voice quit / end: first wait QUIT_DELAY_S / 4, then for the spoken goodbye (bounded)
 
 ISSUE_PI = "https://github.com/igalgerman/JARVIS/issues/20"
 EVIDENCE = "docs/reviews/SWV2_WP-M1.md"
@@ -142,9 +142,9 @@ def make_skill(rt: Runtime):
                 # לגמרי" could only hide the window: there was no tool for the user's real request. The same
                 # orderly stop as Quit in the tray, a moment later so the goodbye sentence is still spoken.
                 logs.info("runtime", "QUIT_REQUESTED", "quit requested by voice", by="voice")
-                asyncio.get_running_loop().call_later(QUIT_DELAY_S, rt.core.stop_event.set)
+                asyncio.get_running_loop().create_task(_quit_after_goodbye(rt.core))
                 return ToolResult(True, "אני נסגר עכשיו לגמרי ומפסיק להקשיב. כדי להפעיל אותי שוב, פתח את "
-                                  "ג'ארוויס במחשב.", {"stopping_in_s": QUIT_DELAY_S})
+                                  "ג'ארוויס במחשב.", {"stopping": True})
 
             async def end_(_):
                 # SW-V3 P0.1 (real session 19 Oct 23:21): "תסגור את הסשן" got "I can't close the conversation from
@@ -162,31 +162,50 @@ def make_skill(rt: Runtime):
             return [
                 Tool("end_conversation", "End only this voice conversation (stop listening until the user calls me "
                      "again) when the user asks to end / close the conversation or session (\"תסגור את הסשן\", "
-                     "\"סיימנו\", \"end the conversation\"). JARVES keeps running; not for quitting the app.",
+                     "\"סיימנו\", \"end the conversation\", and a bare \"תסגור\" / \"close\" with nothing else). "
+                     "JARVES keeps running; the smaller, safe choice when closing is unclear. Not for quitting the app.",
                      end_, permission="action", timeout_s=5),
                 Tool("quit_jarves", "Quit the JARVES app completely (the Core stops, the microphone closes, no more "
-                     "listening) when the user explicitly asks to quit, exit, shut down or close JARVES / the app "
+                     "listening) ONLY when the user explicitly asks to quit, exit or shut down JARVES / the whole app "
                      "entirely (\"תסגור את עצמך לגמרי\", \"לסגור את האפליקציה\", \"שט דאון\", \"צא\", \"quit\"). "
-                     "Never the computer itself. If the user only wants the window gone or the conversation to "
-                     "end, or it is unclear which, ask once first. Never open the dashboard instead.", quit_,
+                     "A bare \"close\" or \"close the session/conversation\" is end_conversation, not this. Never "
+                     "the computer itself. If unclear, ask once first. Never open the dashboard instead.", quit_,
                      permission="action", timeout_s=5),
             ]
 
     return DisplaySkill(), AppSkill()
 
 
-async def _end_after_goodbye(core, live, max_wait_s: float = 15.0) -> None:
-    """Let the goodbye sentence (and any tool still running) finish, then end that conversation."""
-    import time
-    await asyncio.sleep(QUIT_DELAY_S / 4)
-    deadline = time.monotonic() + max_wait_s
-    while time.monotonic() < deadline and core.live is live and (
-            getattr(live, "_tools_running", 0) or time.monotonic() < getattr(live, "_speaking_until", 0.0) + 1.0):
-        await asyncio.sleep(0.25)
+async def _quit_after_goodbye(core) -> None:
+    live = getattr(core, "live", None)
+    if live is not None:
+        await _after_goodbye(core, live)
+    else:
+        await asyncio.sleep(QUIT_DELAY_S / 4)
+    core.stop_event.set()
+
+
+async def _end_after_goodbye(core, live) -> None:
+    await _after_goodbye(core, live)
     if core.live is not live:
         return
     core.live = None
     await live.stop("user")
+
+
+async def _after_goodbye(core, live, max_wait_s: float = 15.0) -> None:
+    """Let the goodbye sentence (and any tool still running) finish (bounded)."""
+    import time
+    t_mark = time.monotonic()
+    await asyncio.sleep(QUIT_DELAY_S / 4)
+    deadline = time.monotonic() + max_wait_s
+    # silent live run 20 Oct: ended 1 s after the tool, before the goodbye was even generated. Wait for the
+    # backend answer after this tool AND its speech (bounded).
+    while time.monotonic() < deadline and core.live is live and (
+            getattr(live, "_tools_running", 0) or getattr(live, "_backend_busy", False)
+            or getattr(live, "_last_speech_t", t_mark + 1) <= t_mark
+            or time.monotonic() < getattr(live, "_speaking_until", 0.0) + 1.0):
+        await asyncio.sleep(0.25)
 
 
 def attach(core, *, mode: str = "foreground", launcher=None, tray_factory=None, autostart=None) -> Runtime:
