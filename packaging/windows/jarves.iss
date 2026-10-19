@@ -61,7 +61,7 @@ hebrew.AskPurge=למחוק גם את הנתונים של JARVES (זיכרון, �
 
 [Tasks]
 Name: "path"; Description: "{cm:TaskPath}"
-Name: "autostart"; Description: "{cm:TaskAutostart}"; Flags: unchecked
+Name: "autostart"; Description: "{cm:TaskAutostart}"
 Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; Flags: unchecked
 
 [InstallDelete]
@@ -82,7 +82,7 @@ Name: "{group}\Uninstall JARVES"; Filename: "{uninstallexe}"
 Name: "{userdesktop}\JARVES"; Filename: "{app}\jarvis.cmd"; WorkingDir: "{app}"; IconFilename: "{app}\face\JARVES Face.exe"; Tasks: desktopicon
 
 [Run]
-; Autostart is the runtime's mechanism (WP-M1 `jarvis autostart on|off`); a missing command is harmless here.
+; Autostart (ticked by default, owner decision) is the runtime's own mechanism: WP-M1 `jarvis autostart on|off`.
 Filename: "{cmd}"; Parameters: "/c """"{app}\jarvis.cmd"" autostart on"""; Tasks: autostart; Flags: runhidden waituntilterminated
 Filename: "{cmd}"; Parameters: "/k """"{app}\jarvis.cmd"" setup"""; WorkingDir: "{app}"; Description: "{cm:RunSetup}"; Flags: postinstall nowait skipifsilent
 Filename: "https://github.com/pear-devs/pear-desktop/releases"; Description: "{cm:GetPear}"; Flags: postinstall shellexec nowait skipifsilent unchecked

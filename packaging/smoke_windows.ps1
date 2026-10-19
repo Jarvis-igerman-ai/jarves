@@ -98,8 +98,8 @@ function Face([string]$scene, [string[]]$userArgs, [int]$timeoutS = 60) {
     # The shipped override.cfg starts the loading screen; a self-check scene is set the same way (release templates
     # refuse a scene path argument), then the shipped file is restored.
     $cfg = Join-Path $App "face\override.cfg"
-    $keep = Get-Content $cfg -Raw
-    if ($scene) { "[application]`n`nrun/main_scene=`"$scene`"`n" | Set-Content -Encoding utf8NoBOM $cfg }
+    $keep = [IO.File]::ReadAllText($cfg)
+    if ($scene) { [IO.File]::WriteAllText($cfg, "[application]`n`nrun/main_scene=`"$scene`"`n") }
     $out = Join-Path $Work "face.out"
     try {
         $quit = if ($scene) { @("--quit-after", "3000") } else { @() }     # the loading check quits by itself
@@ -108,7 +108,7 @@ function Face([string]$scene, [string[]]$userArgs, [int]$timeoutS = 60) {
         if (-not $p.WaitForExit($timeoutS * 1000)) { $p.Kill($true) }
         return (Get-Content $out, "$out.err" -Raw -ErrorAction SilentlyContinue) -join "`n"
     }
-    finally { Set-Content -Encoding utf8NoBOM -NoNewline $cfg $keep }
+    finally { [IO.File]::WriteAllText($cfg, $keep) }
 }
 function Tail([string]$o) { $o.Substring([Math]::Max(0, $o.Length - 2000)) }
 if (Test-Path $face) {
