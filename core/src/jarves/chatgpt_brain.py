@@ -156,9 +156,12 @@ class ChatGPTBrain:
         finally:
             res.commit()                  # no-op after release
         final = None
+        items: dict[int, dict] = {}        # output_index -> finished item (message / function_call / reasoning)
         for ev in parse_sse(lines):
             t = ev.get("type", "")
-            if t == "response.completed":
+            if t == "response.output_item.done" and isinstance(ev.get("item"), dict):
+                items[int(ev.get("output_index", len(items)))] = ev["item"]
+            elif t == "response.completed":
                 final = ev["response"]
             elif t in ("response.failed", "error"):
                 err = (ev.get("response") or {}).get("error") or ev.get("error") or ev
@@ -168,6 +171,10 @@ class ChatGPTBrain:
                 raise BrainUnavailable("AI_INCOMPLETE", f"the answer was cut off ({why})", "ask more simply")
         if final is None:
             raise BrainUnavailable("AI_OFFLINE", "the answer stream ended early", "try again; check the network")
+        if not final.get("output") and items:
+            # Verified live 19 Oct 2026: on the ChatGPT-plan route `response.completed` carries output: [] and the
+            # finished items only arrive as response.output_item.done events. Assemble the output from those.
+            final = {**final, "output": [items[k] for k in sorted(items)]}
         return final
 
     def _raise_http(self, r: httpx.Response) -> None:

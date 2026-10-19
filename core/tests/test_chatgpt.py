@@ -408,3 +408,37 @@ async def test_status_reports_who_pays(home, cfg, monkeypatch, connection, typed
         assert (b["typed_text"], b["spoken_voice"], b["voice_backend"]) == (typed, spoken, backend)
     finally:
         await c.stop()
+
+
+def completed_empty():
+    """The REAL plan route (verified live 19 Oct): response.completed has output [] ."""
+    return {"type": "response.completed", "response": {"id": "r", "status": "completed", "output": []}}
+
+
+def item_done(i, item):
+    return {"type": "response.output_item.done", "output_index": i, "item": item}
+
+
+async def test_plan_answer_assembled_from_streamed_items_when_completed_output_is_empty(tmp_path):
+    srv = ResponsesServer([(200, sse(
+        {"type": "response.created"},
+        item_done(0, {"id": "rs1", "type": "reasoning", "content": [], "encrypted_content": "xyz"}),
+        {"type": "response.output_text.delta", "delta": "17 כפול "},
+        item_done(1, {"id": "msg1", "type": "message", "role": "assistant",
+                      "content": [{"type": "output_text", "text": "17 כפול 23 שווה 391."}]}),
+        completed_empty()))])
+    b, _ = brain_with(tmp_path, srv, chatgpt_model="gpt-6-luna", web_search=False)
+    assert await b.reply("כמה זה 17 כפול 23?") == "17 כפול 23 שווה 391."          # not "…"
+
+
+async def test_plan_tool_call_assembled_from_streamed_items(tmp_path):
+    srv = ResponsesServer([
+        (200, sse(item_done(0, {"type": "function_call", "call_id": "c1", "name": "get_time", "namespace": "jarves",
+                                "arguments": "{}"}), completed_empty())),
+        (200, sse(item_done(0, {"type": "message", "role": "assistant",
+                                "content": [{"type": "output_text", "text": "השעה עכשיו שבע."}]}), completed_empty())),
+    ])
+    b, _ = brain_with(tmp_path, srv, chatgpt_model="gpt-6-luna", web_search=False)
+    assert await b.reply("מה השעה?") == "השעה עכשיו שבע."
+    out = [i for i in srv.bodies[1]["input"] if i.get("type") == "function_call_output"]
+    assert out and out[0]["call_id"] == "c1"
