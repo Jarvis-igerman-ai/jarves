@@ -12,6 +12,26 @@ uv sync --extra voice                # locked dependencies; Python 3.12 is insta
 
 On the Pi, also run `sudo apt install libportaudio2 espeak-ng`.
 
+### Google Calendar and Gmail setup
+
+Run `jarvis google start`. Install the [Google Cloud CLI](https://docs.cloud.google.com/sdk/docs/install-sdk)
+and run `gcloud auth login` with the account that owns your project first. When `gcloud` is on PATH, the wizard
+defaults to CLI setup: list accessible projects, choose an existing project by number or `n` to create one,
+then enable Calendar/Gmail APIs. It verifies the selection again on resume; choosing a different project resets
+the old project's checkmarks. Calendar-only setup enables only Calendar. Declining CLI setup, or having no
+CLI installed, uses the manual browser route. No automatic CLI installation or billing setup occurs.
+
+Consent settings, test users, scopes and the Desktop OAuth client still use Google's browser pages; sign-in
+requires your approval. If CLI setup fails, the wizard stops before browser setup: check internet access,
+run `gcloud auth login`, verify `gcloud projects list`, and retry. It does not print raw CLI output or credentials.
+Saved progress is in the private state directory's `google/setup.json`; bounded local logs are under `logs/`
+(`GOOGLE_SETUP_CLI_FAILED` identifies a failed CLI operation). No network means setup cannot finish, but saved
+progress remains available for the next run. Existing connected accounts only run the existing self-check.
+
+CLI choice checked **2026-10-19** against the official [project listing](https://docs.cloud.google.com/sdk/gcloud/reference/projects/list),
+[API enablement](https://docs.cloud.google.com/sdk/gcloud/reference/services/enable) and
+[Desktop OAuth setup](https://developers.google.com/workspace/guides/create-credentials) documentation.
+
 **Best quality (recommended).** Give JARVES your OpenAI key. It is read from the environment only and never stored in files or logs:
 
 ```powershell

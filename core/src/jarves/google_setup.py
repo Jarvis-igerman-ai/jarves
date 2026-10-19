@@ -16,8 +16,10 @@ Console deep links checked 2026-10-19 against Google's Calendar API Python quick
 (developers.google.com/workspace/calendar/api/quickstart/python): flows/enableapi?apiid=..., auth/branding,
 auth/audience, auth/scopes, auth/clients ("Google Auth platform"). gcloud can only do the first two steps
 (`gcloud projects create`, `gcloud services enable`); the consent screen and a Desktop OAuth client have no public
-gcloud/API for personal accounts, so those stay manual. gcloud is used only when it is already installed AND the
-user says yes.
+gcloud/API for personal accounts, so those stay manual. Installed gcloud is the default route (with confirmation),
+including on resume: list accessible projects, select/create one, and enable APIs before opening console pages.
+CLI references checked 2026-10-19: https://docs.cloud.google.com/sdk/gcloud/reference/projects/list and
+https://docs.cloud.google.com/sdk/gcloud/reference/services/enable .
 
 The dashboard Connections page shows the same checklist (dashboard_routes below). Nothing here prints or logs
 tokens, the client secret or the e-mail address.
@@ -419,46 +421,88 @@ class Wizard:
                 self._save()
         return self.state.get("email", "")
 
-    def _gcloud(self) -> None:
-        """Optional: create the project + enable both APIs with an INSTALLED gcloud, only after a yes."""
-        if "project" in self.state["steps"]:
-            return
+    def _gcloud(self) -> bool:
+        """Validate/select the project even on resume; never open stale links after a CLI failure."""
         exe = self.which("gcloud")
         if not exe:
-            return
-        a = self._choice("gcloud is installed: create the project and enable the APIs for you? [y/N] ")
-        if a not in ("y", "yes", "כ", "כן"):
-            return
-        pid = f"jarves-home-{secrets.randbelow(10**6):06d}"
-        apis = ["calendar-json.googleapis.com"] + ([] if self.calendar_only else ["gmail.googleapis.com"])
-        for args, label in (([exe, "projects", "create", pid, f"--name={PROJECT_NAME}"], "project"),
-                            ([exe, "services", "enable", *apis, "--project", pid], "apis")):
+            self.say("Google Cloud CLI is not installed/on PATH. Install it for automatic project/API setup: "
+                     "https://docs.cloud.google.com/sdk/docs/install-sdk . Using browser setup for now.")
+            return True
+        a = self._choice("Use Google Cloud CLI to select/create your project and enable its APIs? [Y/n] ")
+        if a in ("q", "quit", "exit"):
+            return False
+        if a not in ("", "y", "yes"):
+            return True
+
+        def command(args):
             try:
-                r = self.run_cmd(args, capture_output=True, text=True, timeout=180)
-                ok = r.returncode == 0
+                result = self.run_cmd([exe, *args], capture_output=True, text=True, timeout=180)
+                if result.returncode == 0:
+                    return result
             except (OSError, subprocess.SubprocessError):
-                ok = False
-            if not ok:
-                self._h("gcloud לא הצליח (אולי צריך קודם gcloud auth login). ממשיכים ידנית, זה פשוט.",
-                        "gcloud failed (maybe run `gcloud auth login` first). Continuing by hand; it is easy.")
-                return
-            if label == "project":
-                self.state["project_id"] = pid
-                self.state["steps"]["project"] = time.time()
-            else:
-                self.state["steps"]["calendar_api"] = time.time()
-                if not self.calendar_only:
-                    self.state["steps"]["gmail_api"] = time.time()
-            self._save()
-        self._h("gcloud יצר את הפרויקט " + pid + " והפעיל את ה-APIs.",
-                "gcloud created project " + pid + " and enabled the APIs.")
+                pass
+            # Never print raw command output: it can contain account details or credentials.
+            self.say("Google Cloud CLI could not complete this step. Check your network and project permissions. "
+                     "Run `gcloud auth login` with the account that owns your project, then run " + START_COMMAND +
+                     " again. Progress is saved; no browser steps were opened.")
+            logs.info("google", "GOOGLE_SETUP_CLI_FAILED", "Google CLI setup failed", operation=args[0])
+            return None
+
+        result = command(["projects", "list", "--format=json", "--limit=100"])
+        if result is None:
+            return False
+        try:
+            projects = json.loads(result.stdout)
+            if not isinstance(projects, list) or any(
+                    not isinstance(p, dict) or not isinstance(p.get("projectId"), str) for p in projects):
+                raise ValueError("invalid project list")
+            projects = [p for p in projects if p.get("lifecycleState", "ACTIVE") == "ACTIVE"]
+        except (ValueError, TypeError):
+            self.say("Google Cloud CLI returned an invalid project list. Run `gcloud projects list`, then try again.")
+            return False
+        saved = self.state.get("project_id", "")
+        default = next((str(i) for i, p in enumerate(projects, 1) if p["projectId"] == saved), "")
+        self.say("Choose the project you created (project IDs can differ from their display names):")
+        for i, p in enumerate(projects, 1):
+            self.say(f"  {i}. {p.get('name', '')} [{p['projectId']}]")
+        if saved and not default:
+            self.say("The saved project is not accessible to the active CLI account. Select the correct project.")
+        choice = self._choice("Project number" + (f" [Enter = {default}]" if default else "") +
+                              ", n = create a new JARVES project, q = stop: ") or default
+        if choice == "n":
+            pid = f"jarves-home-{secrets.randbelow(10**6):06d}"
+            if command(["projects", "create", pid, f"--name={PROJECT_NAME}", "--quiet"]) is None:
+                return False
+        elif choice.isascii() and choice.isdigit() and 1 <= int(choice) <= len(projects):
+            pid = projects[int(choice) - 1]["projectId"]
+        else:
+            self.say("Stopped without changing the project. Run " + START_COMMAND + " again to select a project.")
+            return False
+        if pid != saved:
+            # Consent/client and API checkmarks belong to the old project, not the newly selected one.
+            self.state["steps"] = {}
+        self.state["project_id"] = pid
+        self.state["steps"]["project"] = time.time()
+        self._save()
+        apis = ["calendar-json.googleapis.com"] + ([] if self.calendar_only else ["gmail.googleapis.com"])
+        if command(["services", "enable", *apis, "--project", pid, "--quiet"]) is None:
+            return False
+        self.state["steps"]["calendar_api"] = time.time()
+        if not self.calendar_only:
+            self.state["steps"]["gmail_api"] = time.time()
+        self._save()
+        self.say("Google Cloud CLI selected project " + pid + " and enabled the APIs. "
+                 "Only consent settings and the Desktop OAuth client remain in the browser.")
+        return True
 
     def _console_steps(self) -> bool:
         steps = self.steps()
         self._h("עוברים על " + str(len(steps)) + " שלבים קצרים בדפדפן. אני פותח כל דף ומעתיק לך מה להדביק.",
-                f"{len(steps)} short steps in the browser. I open each page and copy what to paste.")
+                f"{len(steps)} setup steps. Google Cloud CLI handles project/API setup when installed; "
+                "I open each remaining browser page and copy what to paste.")
         self._email()
-        self._gcloud()
+        if not self._gcloud():
+            return False
         for i, s in enumerate(steps, 1):
             if s["id"] in self.state["steps"]:
                 self._h(f"[{i}/{len(steps)}] ✓ {s['title_he']} (כבר נעשה)",

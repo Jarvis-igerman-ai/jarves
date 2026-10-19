@@ -212,12 +212,13 @@ def test_gcloud_used_only_when_installed_and_the_user_agrees(home, dl):
 
     class R:
         returncode = 0
-    wz, out, _ = make(home, g, b, answers=["", "y"] + [""] * 10)
+        stdout = "[]"
+    wz, out, _ = make(home, g, b, answers=["", "", "n"] + [""] * 10)
     wz.which = lambda n: "C:/gcloud/gcloud.cmd"
     wz.run_cmd = lambda args, **kw: ran.append(args) or R()
     assert wz.run() == 0
-    assert ran[0][1:3] == ["projects", "create"] and ran[1][1:3] == ["services", "enable"]
-    assert "calendar-json.googleapis.com" in ran[1] and "gmail.googleapis.com" in ran[1]
+    assert [r[1:3] for r in ran] == [["projects", "list"], ["projects", "create"], ["services", "enable"]]
+    assert "calendar-json.googleapis.com" in ran[2] and "gmail.googleapis.com" in ran[2]
     assert not any("/projectcreate" in u or "enableapi" in u for u in b.opened)   # those steps were done by gcloud
     pid = google_setup.load_state(home)["project_id"]
     assert pid.startswith("jarves-home-") and any(f"project={pid}" in u for u in b.opened)
@@ -228,6 +229,64 @@ def test_gcloud_used_only_when_installed_and_the_user_agrees(home, dl):
     wz2.run_cmd = lambda args, **kw: ran.append(args) or R()
     wz2.run()
     assert ran == []
+
+
+@pytest.mark.parametrize("calendar_only", [False, True])
+def test_gcloud_resume_selects_accessible_project_and_resets_old_checkmarks(home, dl, calendar_only):
+    google_setup.save_state(home, {"email": "me@example.com", "project_id": "wrong-project",
+                                  "steps": {s: 1 for s in google_setup.STEP_IDS}})
+    wz, out, _ = make(home, Google(), Browser(dl), answers=["", "1", "q"], calendar_only=calendar_only)
+    wz.which = lambda _: "gcloud"
+    ran = []
+
+    def run(args, **kw):
+        ran.append(args)
+        return type("R", (), {"returncode": 0, "stdout": json.dumps([
+            {"projectId": "jarves-home-123456", "name": "JARVES home", "lifecycleState": "ACTIVE"}])})()
+
+    wz.run_cmd = run
+    assert wz.run() == 1  # user stops at the first remaining browser page
+    st = google_setup.load_state(home)
+    assert st["project_id"] == "jarves-home-123456"
+    assert set(st["steps"]) == {"project", "calendar_api"} | (set() if calendar_only else {"gmail_api"})
+    assert len(ran) == 2 and ran[1][1:3] == ["services", "enable"]
+    assert ("gmail.googleapis.com" in ran[1]) is not calendar_only
+    assert wz.open_url.__self__.opened == [google_setup.step_url("branding", st["project_id"])]
+    assert any("not accessible" in line for line in out)
+
+
+@pytest.mark.parametrize("failure", ["list", "invalid_json", "enable", "timeout"])
+def test_gcloud_failure_stops_before_browser_without_exposing_raw_output(home, dl, failure):
+    wz, out, _ = make(home, Google(), Browser(dl), answers=["", "", "1"])
+    wz.which = lambda _: "gcloud"
+
+    def run(args, **kw):
+        if failure == "timeout":
+            raise google_setup.subprocess.TimeoutExpired(args, 180)
+        listing = args[1:3] == ["projects", "list"]
+        failed = failure == ("list" if listing else "enable")
+        return type("R", (), {"returncode": 1 if failed else 0, "stderr": "private-secret",
+                              "stdout": "private-secret" if failure == "invalid_json" or failed else
+                              '[{"projectId":"jarves-home-123456","name":"JARVES home"}]'})()
+
+    wz.run_cmd = run
+    assert wz.run() == 1
+    assert not wz.open_url.__self__.opened
+    assert "private-secret" not in "\n".join(out)
+    assert any("gcloud" in line for line in out)
+    assert not google_setup.load_state(home)["steps"].get("calendar_api")
+
+
+def test_gcloud_resume_same_project_preserves_consent_progress(home, dl):
+    google_setup.save_state(home, {"project_id": "jarves-home-123456", "email": "me@example.com",
+                                  "steps": {"project": 1, "branding": 1}})
+    wz, _, _ = make(home, Google(), Browser(dl), answers=["", "", "q"])
+    wz.which = lambda _: "gcloud"
+    wz.run_cmd = lambda *a, **kw: type("R", (), {"returncode": 0, "stdout":
+        '[{"projectId":"jarves-home-123456","name":"JARVES home"}]'})()
+    assert wz.run() == 1
+    assert google_setup.load_state(home)["steps"]["branding"] == 1
+    assert wz.open_url.__self__.opened == [google_setup.step_url("audience", "jarves-home-123456")]
 
 
 def test_testing_days_left_and_fixes():
