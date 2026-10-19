@@ -74,6 +74,7 @@
 8. Never close hardware or real-world integration items (real mic, live API, account sign-in, playback, Pi, prints) on mock or unit tests alone.
 
 ## Closeout housekeeping
+- User requirement (19 Oct 2026): commit and push every completed change; include the commit link and truthful verification status in the handoff. Do not merge unrelated work or commit credentials.
 - On milestone completion, follow **Issue lifecycle** above.
 - Review changes for tracked caches, duplicate generated files, temporary artifacts and scratch outputs; ignore or clean **only clearly safe** disposable artifacts in scope. Never do sweeping deletion of source, essential renders or historical data without approval. Update README links if authoritative file locations change.
 - Spoken-distance expectations are undecided; earlier 3–5 m is only an exploratory research scenario, not a fixed requirement.

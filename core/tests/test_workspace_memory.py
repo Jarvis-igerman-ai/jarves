@@ -114,6 +114,8 @@ def test_instruction_hooks(tmp_path):
     wsp.attach_live(live, ws, m)
     ins = live.session_config()["instructions"]
     assert ins.startswith("FRONT") and "IDENTITY.md" in ins and "איגל" in ins
+    assert "camera_status before making any connection claim" in ins
+    assert "status cannot be checked, say it is unknown" in ins
     m.close()
 
 

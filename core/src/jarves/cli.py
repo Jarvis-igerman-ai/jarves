@@ -540,6 +540,21 @@ def cmd_ask(a, cfg, home) -> int:
     return 0 if r.ok else 1
 
 
+def cmd_execute(a, cfg, home) -> int:
+    from .text_session import execute
+    text = " ".join(a.text).strip()
+    if not text:
+        print('Provide a request: jarvis execute "add a calendar event tomorrow at 10"', file=sys.stderr)
+        return 2
+    logs.setup(home / "logs", cfg.log.level, console=False, privacy=cfg.log.privacy)
+    logs.new_cid()
+    try:
+        return asyncio.run(execute(cfg, home, text, interactive=a.interactive, read=input))
+    except KeyboardInterrupt:
+        print("Cancelled. Completed actions are not undone; check their status before retrying.")
+        return 1
+
+
 def cmd_chatgpt(a, cfg, home) -> int:
     """Sign in with ChatGPT: the user's own browser consent; tokens stay in <state_dir>/chatgpt (never logged)."""
     from .brain import BrainUnavailable
@@ -1269,6 +1284,9 @@ def main(argv: list[str] | None = None) -> int:
     k.add_argument("--remove", action="store_true")
     k.add_argument("--show-path", action="store_true")
     q = sub.add_parser("ask", help="ask one question (brain + Skills, no Godot)")
+    ex = sub.add_parser("execute", help="run a text request with JARVES stopped; Google/memory/tools, terminal confirmations")
+    ex.add_argument("text", nargs="+", help='request, e.g. "add a calendar event tomorrow at 10"')
+    ex.add_argument("--interactive", "-i", action="store_true", help="keep this text session for follow-up answers; Enter exits")
     q.add_argument("text", nargs="+")
     s = sub.add_parser("say", help="speak a sentence with the configured voice")
     s.add_argument("text", nargs="+")
@@ -1301,6 +1319,7 @@ def main(argv: list[str] | None = None) -> int:
         return 2
     return {"run": cmd_run, "stop": cmd_stop, "status": cmd_status, "diag": cmd_diag, "memory": cmd_memory, "music": cmd_music,
             "contacts": cmd_personal, "calendar": cmd_personal, "mail": cmd_personal,
+            "execute": cmd_execute,
             "ask": cmd_ask, "say": cmd_say, "chatgpt": cmd_chatgpt, "setup": cmd_setup, "logs": cmd_logs, "key": cmd_key,
             "wake": cmd_wake, "doctor": cmd_doctor, "cost": cmd_cost, "dashboard": cmd_dashboard,
             "diagnose": cmd_diagnose, "features": cmd_features, "google": cmd_google,

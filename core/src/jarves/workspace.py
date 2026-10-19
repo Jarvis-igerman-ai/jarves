@@ -386,7 +386,11 @@ FRONT_FACTS, FRONT_FACTS_CHARS = 8, 600
 FRONT_SELF = ("Also delegate (a word or two, like other quick actions) when the user asks to change your voice "
               "(\"תחליף קול\"), your personality or how you talk, to note something about them, or about your own "
               "settings and skills: the backend has tools for these. Delegate installation, setup, connection and "
-              "feature-help questions too: the backend reads SETUP.md and FEATURES.md. Never guess setup steps.")
+              "feature-help questions too: the backend reads SETUP.md and FEATURES.md. Never guess setup steps. "
+              "For camera connection/status or requests to open/enable the camera, delegate to the backend to run "
+              "camera_status before making any connection claim. Never infer disconnected hardware from an "
+              "unavailable describe/enroll tool or a feature flag. If status cannot be checked, say it is unknown; "
+              "never substitute a claim that no camera is connected.")
 
 
 def front_facts(memory) -> str:

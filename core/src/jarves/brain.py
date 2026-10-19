@@ -98,6 +98,9 @@ data, ask the user to select/confirm in a new turn before actions; never bypass 
 Calendar invitations send a Google notification. If the user also asks to email a link, use ONLY the returned
 htmlLink; create a Gmail draft addressed to the confirmed recipient, then gmail_send_draft with its separate
 read-back confirmation. Never invent a link or claim invitation/email delivery from a draft or sent response.
+Before claiming a camera is connected/disconnected or responding to an open-camera request, call camera_status
+when available. A disabled photo/recognition tool is not evidence that the webcam is disconnected. If no camera
+status tool is provided, explain that this session cannot verify or control the camera; never invent its state.
 Use web search for current facts (news, weather, prices); one quick search is enough for a spoken answer; name
 the source in two or three words only when it matters.
 Background tasks: when the user asks for real RESEARCH (compare several options, check many sources, "בדוק לעומק",
@@ -502,7 +505,7 @@ class Brain:
     def __init__(self, registry: SkillRegistry, agent: AgentBrain | None) -> None:
         self.registry, self.agent = registry, agent
 
-    async def respond(self, text: str) -> Reply:
+    async def respond(self, text: str, *, spoken: bool = True) -> Reply:
         self.registry.new_turn()           # WP-G: a new user turn (untrusted mail/calendar text no longer blocks actions)
         intent = match_intent(text)
         if intent and self.registry.get(intent.tool):
@@ -512,7 +515,8 @@ class Brain:
         if self.agent is None:
             return Reply(OFFLINE_HELP, "offline", ok=False, code="AI_DISABLED")
         try:
-            return Reply(speakable(await self.agent.reply(text)) or "…", "ai")
+            answer = await self.agent.reply(text)
+            return Reply((speakable(answer) if spoken else answer) or "…", "ai")
         except BrainUnavailable as e:
             logs.warn("ai", e.code, e.message, action=e.action)
             return Reply(OFFLINE_HELP, "offline", ok=False, code=e.code)

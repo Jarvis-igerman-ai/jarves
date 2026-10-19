@@ -158,6 +158,23 @@ installed apps with missing bundled dependencies need repair/update. Hardware, G
 startup/pairing and per-person face enrollment still require the user. A readiness probe never opens sensors.
 Calendar editing consent: `jarvis google login --calendar-write`, then `jarvis features on calendar_write`.
 
+### Text requests while JARVES is stopped
+
+`jarvis execute "add a calendar event tomorrow at 10 called Dentist"` runs one natural-language text
+request and exits. No running Core, face window, microphone, speaker or camera service is needed or started.
+It uses your configured AI connection and existing request budget, saved memory/relationships, Google
+connection, feature gates and terminal confirmations. It does not acquire missing account permissions.
+Use `jarvis execute --interactive "add a calendar event tomorrow"` for follow-up details in the same
+conversation; enter an empty line to finish. In a single request, include the needed details or rerun with
+the requested clarification. Exit status describes request processing; read the response for actual tool results.
+
+Supported text-mode tools include Calendar, Gmail, Contacts, local memory, clock, music through an existing
+Pear service, workspace/settings and feature inspection. Runtime camera capture, voice, face, scheduler
+and background tasks require their normal running services and are not started by this command. Feature
+activation remains `jarvis features on ID`. The older `jarvis ask` has a smaller tool set; use `execute` for
+natural-language Google actions. Text-mode capability references stay in memory and preserve Core's
+generated tool files. No new model, provider or dependency was selected.
+
 ### Contacts and event invitations
 
 Say “remember my wife's email is …” to save an explicit relationship/address in ordinary local memory.

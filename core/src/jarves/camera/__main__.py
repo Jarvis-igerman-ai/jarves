@@ -1,8 +1,8 @@
 """`python -m jarves.camera status | on <switch> | off <switch> | people | forget <name> | forget-all`
 
-Local switch control until the dashboard switches (WP-I jarves.features) are merged; `status` probes for a camera
-WITHOUT opening it. Run while the Core is stopped or running (settings live in memory.db; the Core reads them on its
-next check). Never opens the sensor, never takes a photo.
+`status` probes for a camera WITHOUT opening it and reads saved feature switches (legacy local settings only
+when the features backend is absent). Run while the Core is stopped or running. Never opens the sensor or takes
+a photo.
 """
 from __future__ import annotations
 
@@ -29,8 +29,13 @@ def main(argv: list[str] | None = None) -> int:
     try:
         if cmd == "status":
             print(f"camera: {'found' if p.available else 'NOT available'} - {p.detail}" + (f" ({p.action})" if p.action else ""))
-            for v in sw.local.view():
-                print(f"  {v['id']:<18} {'ON ' if v['enabled'] else 'off'}  {v['title_en']}")
+            if sw.backend == "features":
+                from ..features import Features
+                enabled = Features(cfg, home).enabled
+            else:
+                enabled = sw.local.enabled
+            for fid, _, title, _ in SWITCHES:
+                print(f"  {fid:<18} {'ON ' if enabled(fid) else 'off'}  {title}")
             print(f"switch backend: {sw.backend}")
             return 0
         if cmd in ("on", "off") and len(args) == 2 and args[1] in ids:
