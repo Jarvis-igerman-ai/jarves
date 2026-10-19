@@ -250,7 +250,7 @@ PAGES.logs = async function (_, refresh) {
     el("div", { class: "card" }, d.lines.length ? [table, more] : el("div", { class: "empty" }, "No log lines match.")));
   if (s.follow) timer = setInterval(() => route(true), 3000);
 };
-const LOG_SKIP = new Set(["ts", "ref", "level", "component", "code", "msg", "cid", "session", "conv"]);
+const LOG_SKIP = new Set(["ts", "ts_utc", "ref", "level", "component", "code", "msg", "cid", "session", "conv"]);
 function logRow(l) {
   const extra = Object.entries(l).filter(([k]) => !LOG_SKIP.has(k));
   const summary = extra.slice(0, 4).map(([k, v]) => `${k}=${typeof v === "object" ? JSON.stringify(v) : v}`).join("  ");
@@ -259,7 +259,7 @@ function logRow(l) {
       l.conv ? el("a", { href: "#/session/" + encodeURIComponent(l.conv) }, "open conversation →") : null),
     el("pre", { class: "args", dir: "ltr" }, JSON.stringify(Object.fromEntries(Object.entries(l).filter(([k]) => k !== "conv")), null, 1))));
   const row = el("tr", { class: "click lvl-" + String(l.level || "").toLowerCase(), onclick: () => { detail.hidden = !detail.hidden; } },
-    el("td", { class: "mono" }, `${clock(l.ts)} · ${utc(l.ts).slice(0, 8)}`, el("div", { class: "muted small" }, day(l.ts))),
+    el("td", { class: "mono nowrap" }, clock(l.ts), el("div", { class: "muted small" }, `${utc(l.ts)} · ${day(l.ts)}`)),
     el("td", {}, pill(l.level === "ERROR" ? "high" : l.level === "WARNING" ? "medium" : "plain", l.level || "")),
     el("td", { class: "small" }, l.component || ""),
     el("td", { class: "mono small" }, l.code || "", l.conv ? el("div", {}, el("a", { href: "#/session/" + encodeURIComponent(l.conv), onclick: (e) => e.stopPropagation() }, "conversation")) : null),

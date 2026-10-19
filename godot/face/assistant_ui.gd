@@ -220,8 +220,8 @@ func _on_message(t: String, p: Dictionary) -> void:
 		"dashboard.opened":
 			# {url, browser}: the Core opened it in the browser; without a browser show where it runs
 			var where := _str(p.get("url")).substr(0, 200)
-			caption.text = "Dashboard opened in your browser" if p.get("browser", false) == true \
-				else "Dashboard running at " + where
+			var opened: bool = typeof(p.get("browser")) == TYPE_BOOL and p.get("browser")
+			caption.text = "Dashboard opened in your browser" if opened else "Dashboard running at " + where
 
 
 const ACTIVITY := {

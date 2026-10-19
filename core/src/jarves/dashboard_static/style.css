@@ -181,3 +181,5 @@ table.log td { padding: 6px 8px; font-size: 13px; }
 table.log tr.lvl-error td:first-child { box-shadow: inset 3px 0 var(--critical); }
 table.log tr.lvl-warning td:first-child { box-shadow: inset 3px 0 var(--serious); }
 tr.detail td { background: var(--surface-2); }
+.nowrap { white-space: nowrap; }
+.card > .row > input:not([type]) { flex: 1; min-width: 240px; }
