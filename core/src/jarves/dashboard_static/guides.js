@@ -7,6 +7,8 @@
 (function () {
   let lang = "he";
   try { lang = localStorage.getItem("jarves-guide-lang") || "he"; } catch (e) { /* storage blocked */ }
+  const forced = new URLSearchParams(location.hash.split("?")[1] || "").get("lang");   // #/guides?lang=en (captures)
+  if (forced === "he" || forced === "en") lang = forced;
   const T = (o, k) => (lang === "he" ? o[k + "_he"] : o[k + "_en"]) || o[k + "_en"] || o[k + "_he"] || "";
   const H = (o) => (lang === "he" ? o.he : o.en) || o.en || o.he || "";      // steps / problems: {he, en}
   const dirOf = () => (lang === "he" ? "rtl" : "ltr");
