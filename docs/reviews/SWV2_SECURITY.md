@@ -70,6 +70,12 @@ It holds device token hashes + per-device CSRF secrets. Added to `EXCLUDE_FILES`
 `verify()` would flag it if present).
 Test: `test_paired_device_tokens_are_never_archived`.
 
+## Test run
+Full suite: 1018 passed, 3 skipped, 6 failed. The 6 failures (test_capabilities matrix, 3 x test_guides,
+test_m3_core reminder, test_workspace_memory setup doc) fail identically on the untouched `swv2-integrate` base
+(checked by restoring base `core/src`): the `google_contacts` feature has no guide/capability-matrix entry. Not in
+this package's files; owner of features.py / guides should fix.
+
 ## Integration hooks
 None required — all changes are within owned files. No live.py/scheduler.py/updates.py edits.
 
