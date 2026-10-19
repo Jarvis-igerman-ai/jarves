@@ -308,17 +308,19 @@ class Wizard:
     """Interactive, resumable. Every outside effect is injectable (tests: fake Downloads, fake browser, fake Google)."""
 
     def __init__(self, home: Path, cfg=None, *, auth: GoogleAuth | None = None, ask: Callable[[str], str] = input,
-                 say: Callable[[str], None] = print, open_url: Callable[[str], bool] = webbrowser.open,
-                 clipboard: Callable[[str], bool] = copy_to_clipboard, downloads: Path | None = None,
-                 sleep: Callable[[float], None] = time.sleep, which: Callable[[str], str | None] = shutil.which,
-                 run: Callable = subprocess.run, calendar_only: bool = False, send: bool = False,
+                 say: Callable[[str], None] = print, open_url: Callable[[str], bool] | None = None,
+                 clipboard: Callable[[str], bool] | None = None, downloads: Path | None = None,
+                 sleep: Callable[[float], None] = time.sleep, which: Callable[[str], str | None] | None = None,
+                 run: Callable | None = None, calendar_only: bool = False, send: bool = False,
                  client: Path | None = None, restart: bool = False, watch_timeout_s: float = WATCH_TIMEOUT_S,
                  transport: httpx.AsyncBaseTransport | None = None) -> None:
         self.home, self.cfg = home, cfg
         self.auth = auth or GoogleAuth(home)
-        self.ask, self.say, self.open_url, self.clipboard = ask, say, open_url, clipboard
+        # resolved now, not at import time, so a test can replace the module-level helpers
+        self.ask, self.say = ask, say
+        self.open_url, self.clipboard = open_url or webbrowser.open, clipboard or copy_to_clipboard
         self.downloads = downloads or downloads_dir()
-        self.sleep, self.which, self.run_cmd = sleep, which, run
+        self.sleep, self.which, self.run_cmd = sleep, which or shutil.which, run or subprocess.run
         self.calendar_only, self.send, self.client_path, self.restart = calendar_only, send, client, restart
         self.watch_timeout_s, self.transport = watch_timeout_s, transport
         self.state = load_state(home)
@@ -335,8 +337,14 @@ class Wizard:
     def _choice(self, prompt: str) -> str:
         try:
             return (self.ask(prompt) or "").strip().lower()
-        except EOFError:
+        except EOFError:                              # no terminal input: stop safely (progress is saved)
             return "q"
+
+    def _text(self, prompt: str) -> str:
+        try:
+            return self.ask(prompt) or ""
+        except EOFError:
+            return ""
 
     @property
     def scopes(self):
@@ -406,7 +414,7 @@ class Wizard:
     # --- console steps
     def _email(self) -> str:
         if not self.state.get("email"):
-            e = (self.ask("מה כתובת הג'ימייל שלך? (נשמרת רק במחשב הזה; Enter לדלג)  Your Gmail address: ") or "").strip()
+            e = (self._text("מה כתובת הג'ימייל שלך? (נשמרת רק במחשב הזה; Enter לדלג)  Your Gmail address: ") or "").strip()
             if "@" in e:
                 self.state["email"] = e
                 self._save()
@@ -481,7 +489,7 @@ class Wizard:
             if a in ("s", "skip"):
                 continue
             if s["id"] == "project" and not self.state.get("project_id"):
-                pid = (self.ask("  אם רואים את ה-Project ID, אפשר להדביק אותו (Enter לדלג)  Project ID (optional): ")
+                pid = (self._text("  אם רואים את ה-Project ID, אפשר להדביק אותו (Enter לדלג)  Project ID (optional): ")
                        or "").strip()
                 if pid and all(c.isalnum() or c == "-" for c in pid):
                     self.state["project_id"] = pid
@@ -582,8 +590,8 @@ def checklist(home: Path) -> dict:
               "copy": s["copy"].replace("{scopes}", scopes_text(cal_only)).replace("{email}", ""),
               "done": s["id"] in ss["steps"] or (s["id"] == "client" and st["client_configured"])}
              for s in STEPS]
-    chk = ss.get("check") or {}
-    err = st["last_error"] or ss.get("last_error", "")
+    chk = (ss.get("check") or {}) if st["connected"] else {}      # an old result says nothing after a disconnect
+    err =st["last_error"] or ss.get("last_error", "")
     days = testing_days_left(st["connected_at"]) if st["connected"] else None
     if st["connected"] and chk.get("calendar") == "ok":
         nxt_he, nxt_en, state = "הכל מחובר. אפשר לשאול: \"מה יש לי מחר ביומן?\"", \

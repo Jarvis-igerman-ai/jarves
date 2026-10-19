@@ -58,12 +58,12 @@ PAGES.home = async function () {
   const lc = d.last_conversation;
   const okConn = d.connections.filter((c) => c.state === "ok").length;
   const tiles = el("div", { class: "tiles" },
-    tile("Connected · מחובר", `${okConn} / ${d.connections.length}`, d.connections.map((c) => `${c.title_en}: ${c.detail_en}`).join(" · ")),
+    tile("Connected · מחובר", `${okConn} / ${d.connections.length}`, d.connections.filter((c) => c.state !== "ok").map((c) => `${c.title_en.split(" (")[0]}: ${c.detail_en}`).join(" · ") || "everything"),
     tile("Features on · פועל", String(d.features.on.length), `${d.features.off.length} off or not available`),
     tile("Today's cost · היום", usd(d.today.cost), `${d.today.conversations} conversations · ${d.today.voice_minutes} voice min`, true),
     tile("Open issues · בעיות", String(d.issues.open), d.issues.high ? `${d.issues.high} important` : "none important"),
-    tile("Last conversation · שיחה אחרונה", lc ? `${day(lc.started)} ${clock(lc.started).slice(0, 5)}` : "—",
-      lc ? `${secs(lc.duration_s)} · ${lc.user_turns} things you said${lc.typed ? " (typed)" : ""}` : "no conversations yet"));
+    tile("Last talk · שיחה אחרונה", lc ? clock(lc.started).slice(0, 5) : "—",
+      lc ? `${day(lc.started)} · ${secs(lc.duration_s)} · ${lc.user_turns} things you said${lc.typed ? " (typed)" : ""}` : "no conversations yet"));
   const next = el("div", { class: "card next" }, el("span", { class: "label" }, "What to do next · מה עכשיו:"),
     el("span", { dir: "rtl" }, d.next.he), el("span", { class: "muted" }, d.next.en), el("span", { class: "spacer" }),
     d.next.link ? el("a", { class: "button-link", href: d.next.link }, "Go · קדימה →") : null);
@@ -116,7 +116,7 @@ PAGES.connections = async function () {
     row("Signed in · מחובר", g.signed_in ? pill("ok", "yes") : g.needs_reconnect ? pill("medium", "expired: reconnect") : pill("plain", "no")),
     row("Calendar check · בדיקת יומן", pill(...CHECK[g.check.calendar] || CHECK.not_run)),
     row("Mail check · בדיקת מייל", pill(...CHECK[g.check.gmail] || CHECK.not_run)),
-    row("Sending mail · שליחת מיילים", g.gmail_send ? el("span", {}, "allowed (switch on Features)") : el("span", { class: "muted" }, "not asked for")),
+    row("Sending mail · שליחת מיילים", g.gmail_send ? el("a", { href: "#/features" }, "Google allows drafts; the on/off switch is on Features (off by default)") : el("span", { class: "muted" }, "not asked for")),
     row("Weekly reconnect · חיבור מחדש", g.testing_days_left !== null ? `in about ${g.testing_days_left} days (Testing mode)` : "—"),
     row("Last problem · בעיה אחרונה", g.last_error ? el("span", { class: "mono" }, g.last_error) : el("span", { class: "muted" }, "none")));
   const fix = g.fix ? el("div", { class: "card fix" }, el("b", {}, "How to fix · איך מתקנים"), el("div", { dir: "rtl" }, g.fix.he), el("div", { class: "muted" }, g.fix.en),
@@ -125,7 +125,7 @@ PAGES.connections = async function () {
     const smsg = el("span", { class: "muted small" });
     return el("li", { class: "step" + (s.done ? " done" : "") }, el("span", { class: "num" }, s.done ? "✓" : String(i + 1)),
       el("div", {}, el("b", { dir: "rtl" }, s.title_he), " ", el("span", { class: "muted" }, "· " + s.title_en),
-        el("ul", {}, s.clicks_en.map((c, k) => el("li", {}, el("span", { dir: "rtl" }, s.clicks_he[k] || ""), el("span", { class: "muted" }, " · " + c)))),
+        s.done ? null : el("ul", {}, s.clicks_en.map((c, k) => el("li", {}, el("span", { dir: "rtl" }, s.clicks_he[k] || ""), el("span", { class: "muted" }, " · " + c)))),
         el("div", { class: "actions" },
           el("a", { class: "button-link", href: s.url, target: "_blank", rel: "noopener noreferrer" }, "Open in Google Cloud →"),
           s.copy ? el("button", { type: "button", onclick: async () => { try { await navigator.clipboard.writeText(s.copy); smsg.textContent = "Copied · הועתק"; } catch (e) { smsg.textContent = "Copy: " + s.copy; } } }, s.id === "scopes" ? "Copy permissions" : "Copy “" + s.copy + "”") : null,
@@ -135,7 +135,7 @@ PAGES.connections = async function () {
   render(header("Connections · חיבורים", "Connect JARVES to your Google Calendar and Gmail. · מחברים את JARVES ליומן ולמייל שלך."),
     el("div", { class: "big-status" }, el("span", { class: "lamp " + ({ connected: "ok", needs_reconnect: "warn" }[g.state] || "off") }),
       el("div", {}, el("div", { class: "title" }, "Google · גוגל: " + ({ connected: "connected · מחובר", needs_reconnect: "needs reconnect · צריך לחבר מחדש", ready_to_sign_in: "ready to sign in · מוכן" }[g.state] || "not connected · לא מחובר")),
-        el("div", { class: "muted small" }, g.scopes.length ? "Allowed: " + g.scopes.join(", ") : "No permissions yet"))),
+        el("div", { class: "muted small" }, g.scopes.length ? "Allowed: " + g.scopes.join(", ") : g.needs_reconnect ? "Nothing to set up again: just sign in once more." : "No permissions yet"))),
     el("div", { class: "card next" }, el("span", { class: "label" }, "What to do next · מה עכשיו:"), el("span", { dir: "rtl" }, g.next_he), el("span", { class: "muted" }, g.next_en)),
     el("div", { class: "grid-home" },
       el("div", { class: "card" }, el("h2", {}, "Status · מצב"), checks, el("div", { class: "actions" }, start, test, disc), msg),
@@ -144,8 +144,9 @@ PAGES.connections = async function () {
           ". It opens each page, copies what to paste, picks up the downloaded file by itself, signs in and checks everything.",
           g.gcloud_installed ? " (gcloud is installed: it can also create the project for you.)" : ""))),
     fix,
-    el("div", { class: "card" }, el("h2", {}, "The steps in Google Cloud (one time, ~10 minutes) · השלבים בגוגל קלאוד"),
-      el("div", { class: "muted small", style: "margin-bottom:10px" }, "JARVES cannot see these pages, so tick each step yourself (the command line ticks them for you). The last step's file is picked up from Downloads when you press Start."),
+    el("details", { class: "card", open: !g.steps.every((s) => s.done || (g.calendar_only && s.gmail)) || null },
+      el("summary", {}, el("b", {}, "The steps in Google Cloud (one time, ~10 minutes) · השלבים בגוגל קלאוד")),
+      el("div", { class: "muted small", style: "margin:10px 0" }, "JARVES cannot see these pages, so tick each step yourself (the command line ticks them for you). The last step's file is picked up from Downloads when you press Start."),
       steps));
   if (g.login.running) timer = setInterval(() => route(true), 2000);
 };
