@@ -89,6 +89,9 @@ class Feature:
     config: str | None = None                          # legacy config.toml key this switch replaces
     applies: Applies = "live"
     about: str = ""
+    # per-platform support (spec SW-V2 section 5): {"windows": {"status", "evidence"|"blocker"}, "linux_arm64_pi": ...}
+    # status: verified_on_device | implemented_unverified | planned | blocked | not_applicable
+    targets: dict = field(default_factory=dict)
 
 
 CATALOG: dict[str, Feature] = {}
@@ -97,12 +100,12 @@ CATALOG: dict[str, Feature] = {}
 def register(id: str, title_he: str, title_en: str, default_enabled: bool, *, probe: Probe | None = None,
              needs: list[str] | None = None, risk: Risk = "low", skills: list[str] | None = None,
              tools: list[str] | None = None, config: str | None = None, applies: Applies = "live",
-             about: str = "") -> Feature:
+             about: str = "", targets: dict | None = None) -> Feature:
     """Add (or replace) a feature in the catalog every Features instance uses."""
     if risk not in RISKS:
         raise ValueError(f"risk must be one of {RISKS}")
     f = Feature(id, title_he, title_en, bool(default_enabled), probe or _always, list(needs or []), risk,
-                list(skills or []), list(tools or []), config, applies, about)
+                list(skills or []), list(tools or []), config, applies, about, dict(targets or {}))
     CATALOG[id] = f
     return f
 
@@ -465,7 +468,7 @@ class Features:
         return {"id": fid, "title_he": f.title_he, "title_en": f.title_en, "about": f.about, "risk": f.risk,
                 "enabled": on, "default": f.default_enabled, "source": "user" if user is not None else src,
                 "available": ok, "reason": why, "active": on and ok, "needs": f.needs, "applies": f.applies,
-                "config": f.config, "skills": f.skills, "tools": f.tools,
+                "config": f.config, "skills": f.skills, "tools": f.tools, "targets": f.targets,
                 "changed_by": changed.get("by"), "changed_at": changed.get("ts"), "requested": req}
 
     def list(self) -> list[dict]:
