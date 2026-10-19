@@ -52,6 +52,7 @@ def cfg():
     c = Config()
     c.link.port = free_port()
     c.voice.greeting = False      # the greeting has its own test
+    c.voice.greeting_delay_s = 0  # the 0.5 s beat before the hello has its own test (test_conversation_quality)
     return c
 
 

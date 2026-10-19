@@ -200,7 +200,8 @@ async def test_greeting_on_first_face_connect(home, cfg):
         g = await f.wait("assistant.text", lambda p: p.get("code") == "GREETING")
         assert g["text"] and "רווח" not in g["text"]
         await f.wait("face.set_state", lambda p: p["state"] == "idle")
-        assert len(tts.spoken) == 1 and "JARVES" in tts.spoken[0]        # said hello ONCE
+        assert len(tts.spoken) == 1 and "ג'ארוויס" in tts.spoken[0]      # said hello ONCE, Hebrew-written name
+        assert "JARVES" not in tts.spoken[0]                          # 19 Oct: the Latin name was mispronounced
         await f.ws.close()
         f2 = await open_face(c)                                       # reconnect: no second greeting
         await f2.send("status.request")
