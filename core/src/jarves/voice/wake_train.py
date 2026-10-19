@@ -53,7 +53,10 @@ NEG_EN = ["what time is it", "turn on the music", "good morning", "how is the we
 NEG_HE = ["מה השעה", "תדליק מוזיקה", "בוקר טוב", "מה מזג האוויר היום", "תודה רבה", "איפה המפתחות שלי",
           "בוא נלך הביתה", "אני הולך לחנות", "תתקשר לאמא", "הפגישה בעשר", "רגע אחד בבקשה", "היי", "שלום לך",
           "מה נשמע", "יאללה", "ג'ארוויס", "היי ג'ארוויס", "תעשה לי טובה", "סגור", "תסגור את החלון", "מעולה",
-          "אני רעב", "מתי הארוחה", "יש לי שאלה"]
+          "אני רעב", "מתי הארוחה", "יש לי שאלה", "מה השעה עכשיו", "תגיד לי משהו", "איך היה היום שלך",
+          "אני לא יודע", "בוא נראה", "כמה זה עולה", "תשמיע לי שיר", "מה יש לי מחר", "תזכיר לי לקנות חלב",
+          "הילדים בבית", "אני יוצא עכשיו", "זה לא נכון", "תחזור על זה", "כן בטח", "לא תודה", "מה אתה אומר",
+          "החדשות של היום", "תפתח את הטלוויזיה", "אני עייף", "לילה טוב", "איפה הטלפון", "היי אמא", "היי חבר"]
 
 
 def _is_he(text: str) -> bool:
@@ -380,7 +383,11 @@ def train_phrase(phrase: str, out: Path, *, say: list[str] | None = None, sample
                         n_tts += 1
                         sets[part] += [(augment(a, rng), True) for _ in range(copies)]
         for text in negs[v.lang]:
-            for r, p in ((1.0, 1.0), (rates[-1], pitches[0]), (rates[0], pitches[-1])):
+            # as many voice variants for "other speech" as for the phrase: otherwise the head learns "this voice
+            # speaking" instead of "this phrase" (seen on the first real run: Asaf saying "מה השעה עכשיו" scored 0.72)
+            mid = rates[min(1, len(rates) - 1)]
+            for r, p in ((1.0, 1.0), (rates[-1], pitches[0]), (rates[0], pitches[-1]), (mid, pitches[-1]),
+                         (rates[-1], pitches[-1]), (rates[0], pitches[0])):
                 a = render(text, v, r, p)
                 if a is not None:
                     # the held-out stream gets 3 augmented copies: more negative minutes for the false-wake rate

@@ -214,7 +214,8 @@ WAKE_PHRASE = {
     # frozen front end. Changing the NAME alone never changes the phrase; the user trains and picks a phrase.
     "custom": {
         "windows": asdict(Target("implemented_unverified", evidence="trained on this PC 2026-10-19 from 4 local "
-                                 "Windows voices (synthetic held-out voice: recall 96 %, 0 false wakes): "
+                                 "Windows voices in 435 s (held-out voice: 24/24 heard, 0 false wakes in 20 min of "
+                                 "synthetic speech/noise at threshold 0.9): "
                                  "docs/reviews/SWV2_WP-M4.md", blocker="never tried with a real voice and mic: run "
                                  "`jarvis wake test --model ...` and `--false-wakes 30`")),
         "linux_arm64_pi": asdict(Target("implemented_unverified", blocker="numpy head + espeak-ng voices; never "
