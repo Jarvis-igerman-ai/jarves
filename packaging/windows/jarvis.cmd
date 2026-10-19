@@ -17,7 +17,7 @@ if "%FIRST%"=="--help" ( %J% %* & exit /b )
 %J% status >nul 2>&1
 if not "%ERRORLEVEL%"=="1" (
   echo JARVES is already running: opening the room and following its log.
-  if exist "%JARVES_FACE_EXE%" start "" "%JARVES_FACE_EXE%" res://loading.tscn
+  if exist "%JARVES_FACE_EXE%" start "" "%JARVES_FACE_EXE%"
   %J% logs -f --until-stopped %*
   exit /b
 )

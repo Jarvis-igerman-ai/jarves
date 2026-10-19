@@ -140,6 +140,10 @@ if (-not $SkipFace) {
     }
     # main.gd loads the room model with ProjectSettings.globalize_path(), which in an exported build points next
     # to the executable, so the raw GLB ships there.
+    # Release templates refuse a scene path on the command line ("compiled without support for path overrides"),
+    # and project.godot starts the review viewer. override.cfg next to the .exe (read by exported builds) makes the
+    # installed face start at the loading screen, like the developer `jarvis` (res://loading.tscn).
+    "[application]`n`nrun/main_scene=`"res://loading.tscn`"`n" | Set-Content -Encoding utf8NoBOM (Join-Path $faceDir "override.cfg")
     New-Item -ItemType Directory -Force (Join-Path $faceDir "assets") | Out-Null
     Copy-Item (Join-Path $godotProj "assets\JARVIS.glb") (Join-Path $faceDir "assets\JARVIS.glb")
 }

@@ -69,9 +69,11 @@ def cmd_run(a, cfg, home) -> int:
 
 async def _launch_viewer(port: int):
     """Own this one child process so closing even the loading window ends this desktop session."""
-    face = os.environ.get("JARVES_FACE_EXE", "").strip('"')      # installed build: the exported face (M6)
+    # Installed build (M6): the exported face. It starts at the loading screen via its override.cfg (release
+    # templates refuse a scene path argument).
+    face = os.environ.get("JARVES_FACE_EXE", "").strip('"')
     if face and Path(face).is_file():
-        return await asyncio.create_subprocess_exec(face, "res://loading.tscn", "--", f"--core-port={port}",
+        return await asyncio.create_subprocess_exec(face, "--", f"--core-port={port}",
                                                    env={k: v for k, v in os.environ.items() if k != "OPENAI_API_KEY"})
     override = os.environ.get("GODOT_EXE", "").strip('"')
     package_root = Path(os.environ.get("LOCALAPPDATA", "")) / "Microsoft/WinGet/Packages"

@@ -6,7 +6,7 @@ the same PC is never touched. No audio is played, no network service is called, 
   1 clean install (/VERYSILENT, per user, no tasks)      -> files, Start-menu entry, uninstaller present
   2 jarvis --version / status / features / doctor         -> build identity, "NOT running", update_check listed
   3 offline Core start + orderly stop through the link    -> CORE_READY / CORE_STOPPED in the log
-  4 exported face: viewer + face self-checks (headless)   -> "CHECK RESULT: PASS"
+  4 exported face: loading screen reaches the Core; room + face self-checks (headless) -> "... RESULT: PASS"
   5 upgrade: same installer again over the install         -> still runs
   6 uninstall (silent)                                     -> program folder gone, user data KEPT
   7 install + uninstall /PURGE=1                           -> user data removed only when asked
@@ -94,22 +94,44 @@ for ($i = 0; $i -lt 120 -and -not ((Test-Path $log) -and (Select-String -Path $l
     Start-Sleep -Milliseconds 500
 }
 Check ((Test-Path $log) -and (Select-String -Path $log -Pattern CORE_READY -Quiet)) "installed Core starts offline (CORE_READY)"
+function Face([string]$scene, [string[]]$userArgs, [int]$timeoutS = 60) {
+    # The shipped override.cfg starts the loading screen; a self-check scene is set the same way (release templates
+    # refuse a scene path argument), then the shipped file is restored.
+    $cfg = Join-Path $App "face\override.cfg"
+    $keep = Get-Content $cfg -Raw
+    if ($scene) { "[application]`n`nrun/main_scene=`"$scene`"`n" | Set-Content -Encoding utf8NoBOM $cfg }
+    $out = Join-Path $Work "face.out"
+    try {
+        $quit = if ($scene) { @("--quit-after", "3000") } else { @() }     # the loading check quits by itself
+        $p = Start-Process $face -ArgumentList (@("--headless") + $quit + @("--") + $userArgs) -NoNewWindow -PassThru `
+            -RedirectStandardOutput $out -RedirectStandardError "$out.err"
+        if (-not $p.WaitForExit($timeoutS * 1000)) { $p.Kill($true) }
+        return (Get-Content $out, "$out.err" -Raw -ErrorAction SilentlyContinue) -join "`n"
+    }
+    finally { Set-Content -Encoding utf8NoBOM -NoNewline $cfg $keep }
+}
+function Tail([string]$o) { $o.Substring([Math]::Max(0, $o.Length - 2000)) }
+if (Test-Path $face) {
+    # 4a the installed launch path: face -> loading screen -> reaches the running Core's readiness
+    $o = Face "" @("--loading-check", "--core-port=18765") 45
+    Check ($o -match "LOADING CHECK RESULT: PASS") "exported face loading screen reaches the installed Core"
+    if ($o -notmatch "LOADING CHECK RESULT: PASS") { Tail $o }
+}
 $r = Jarvis @("stop")
 for ($i = 0; $i -lt 60 -and -not (Select-String -Path $log -Pattern CORE_STOPPED -Quiet); $i++) { Start-Sleep -Milliseconds 500 }
 Check (Select-String -Path $log -Pattern CORE_STOPPED -Quiet) "jarvis stop ends it (CORE_STOPPED)"
 if (-not $core.WaitForExit(20000)) { $core.Kill($true) }
 if ($failures) { Get-Content "$Work\core.out" -Tail 30 -ErrorAction SilentlyContinue }
 
-# 4 exported face (headless self-checks; same markers as the Godot CI job)
+# 4b exported room + face self-checks (same markers as the Godot CI job)
 if (Test-Path $face) {
-    $o = & $face --headless --quit-after 3000 -- --check --no-core 2>&1 | Out-String
+    $o = Face "res://main.tscn" @("--check", "--no-core")
     Check ($o -match "CHECK RESULT: PASS") "exported room viewer self-check"
-    if ($o -notmatch "CHECK RESULT: PASS") { $o.Substring([Math]::Max(0, $o.Length - 2000)) }
-    $o = & $face --headless --quit-after 3000 res://face/face_app.tscn -- --check 2>&1 | Out-String
+    if ($o -notmatch "CHECK RESULT: PASS") { Tail $o }
+    $o = Face "res://face/face_app.tscn" @("--check")
     Check ($o -match "FACE CHECK RESULT: PASS") "exported face self-check"
-    if ($o -notmatch "FACE CHECK RESULT: PASS") { $o.Substring([Math]::Max(0, $o.Length - 2000)) }
+    if ($o -notmatch "FACE CHECK RESULT: PASS") { Tail $o }
 }
-
 # 5 upgrade in place
 Check ((Install) -eq 0) "upgrade over the existing install"
 $r = Jarvis @("--version")
