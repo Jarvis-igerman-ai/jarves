@@ -689,10 +689,8 @@ def _history(cfg, home):
 
 def _log_files(home: Path) -> list[Path]:
     """jarves.log and its rotations, oldest first."""
-    base = home / "logs" / "jarves.log"
-    rotated = sorted(base.parent.glob("jarves.log.*"), key=lambda p: int(p.suffix[1:]) if p.suffix[1:].isdigit() else 0,
-                     reverse=True)
-    return [p for p in rotated + [base] if p.is_file()]
+    from .logview import log_files
+    return log_files(home)
 
 
 def cmd_cost(a, cfg, home) -> int:

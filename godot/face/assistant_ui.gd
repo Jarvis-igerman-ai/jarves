@@ -20,6 +20,7 @@ var connection: Label
 var _state := "idle"
 var _linked := false
 var mute_chk: CheckButton
+var dash_btn: Button
 var confirm: ConfirmationDialog
 var _confirm_id := ""
 var last_status := {}
@@ -88,6 +89,12 @@ func _ready() -> void:
 	mute_chk.text = "Mic mute (software)"
 	mute_chk.toggled.connect(func(on): link.send("mic.set_mute", {"muted": on}))
 	options_box.add_child(mute_chk)
+	# opens the local web dashboard (conversations, logs, costs, memory, settings); the Core opens the browser
+	dash_btn = Button.new()
+	dash_btn.text = "Open dashboard"
+	dash_btn.tooltip_text = "Conversations, logs, costs, memory and settings in your browser"
+	dash_btn.pressed.connect(func(): link.send("ui.open_dashboard"))
+	options_box.add_child(dash_btn)
 	confirm = ConfirmationDialog.new()
 	confirm.confirmed.connect(func(): _answer(true))
 	confirm.canceled.connect(func(): _answer(false))
@@ -115,6 +122,7 @@ func _close_desktop() -> void:
 
 func _set_controls(on: bool) -> void:
 	mute_chk.disabled = not on
+	dash_btn.disabled = not on
 
 
 func _answer(ok: bool) -> void:
@@ -209,6 +217,11 @@ func _on_message(t: String, p: Dictionary) -> void:
 		"status":
 			last_status = p
 			_show_status(p)
+		"dashboard.opened":
+			# {url, browser}: the Core opened it in the browser; without a browser show where it runs
+			var where := _str(p.get("url")).substr(0, 200)
+			caption.text = "Dashboard opened in your browser" if p.get("browser", false) == true \
+				else "Dashboard running at " + where
 
 
 const ACTIVITY := {
