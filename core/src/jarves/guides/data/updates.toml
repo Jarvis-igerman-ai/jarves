@@ -25,8 +25,3 @@ en = "Keep the Update check switch on. When there is an update he asks you."
 action = "feature_on:update_check"
 check = "enabled:update_check"
 
-[platform]
-windows = "implemented_unverified"
-windows_note_en = "installer and update check are built by another package (WP-M6); this guide only links to them"
-pi = "planned"
-pi_note_en = "Pi packaging not decided yet"

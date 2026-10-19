@@ -26,6 +26,12 @@ def make(home, **kw):
     return feat.Features(Config(), home, **kw)
 
 
+def _connect_google(home):
+    """What `jarvis google start` leaves behind (WP-K google_auth token file)."""
+    (home / "google").mkdir(exist_ok=True)
+    (home / "google" / "token.json").write_text('{"refresh_token": "1//x", "scopes": []}', encoding="utf-8")
+
+
 # ---------------------------------------------------------------------- the data
 def test_every_registered_feature_has_exactly_one_guide():
     owners: dict[str, list[str]] = {}
@@ -112,7 +118,7 @@ def test_state_follows_live_switches_and_probes(home):
     g = guides.load()["google_calendar"]
     s = guides.state(g, f)
     assert s["state"] == "setup" and "Google" in s["reason"]
-    (home / "google_token.json").write_text("{}", encoding="utf-8")
+    _connect_google(home)
     f.invalidate()
     assert guides.state(g, f)["state"] == "on"
     f.set("google_calendar", False)
@@ -214,7 +220,8 @@ def test_static_files_wired():
     js = (STATIC / "guides.js").read_text(encoding="utf-8")
     assert "innerHTML" not in js and "PAGES.guides" in js and "PAGES.guide " in js.replace("=", " ")
     app = (STATIC / "app.js").read_text(encoding="utf-8")
-    assert "#/guide-for/" in app and "guidesSetupCard" in app
+    assert "#/guide-for/" in app
+    assert "guidesSetupCard" in (STATIC / "home.js").read_text(encoding="utf-8")       # WP-K Home
 
 
 # ---------------------------------------------------------------------- JARVES: help Skill, step by step
@@ -244,7 +251,7 @@ async def test_help_walks_google_setup_one_step_at_a_time(home):
     assert r.code == "GUIDE_STEP_NOT_DONE" and r.data["step"] == 1 and "Google" in r.data["why"]
     r = await _call(reg, "run_guide_step", {"name": "google"})          # a terminal step: he can only explain
     assert r.code == "GUIDE_STEP_MANUAL" and r.data["command"] == "jarvis google start"
-    (home / "google_token.json").write_text("{}", encoding="utf-8")      # the user ran the wizard
+    _connect_google(home)      # the user ran the wizard
     f.invalidate()
     r = await _call(reg, "setup_next_step", {"name": "google", "done": True})
     assert r.data["step"] == 2 and r.data["action"] == "open:#/connections"

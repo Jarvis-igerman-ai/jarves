@@ -98,7 +98,7 @@ class Connectors(Skill):
             self.effects.append("legacy")
             return ToolResult(True, "ran")
         return [Tool("email_send", "Send an e-mail", send, Mail, permission="action"),
-                Tool("wipe_calendar", "Delete all events", wipe, permission="destructive"),
+                Tool("wipe_notes", "Delete all notes", wipe, permission="destructive"),
                 Tool("no_policy", "registered without a permission", legacy),
                 Tool("weird", "unknown permission", legacy, permission="admin")]
 
@@ -116,7 +116,7 @@ async def test_unapproved_connector_and_unknown_permissions_are_denied():
     assert (await r.call("email_send", mail, origin="admin")).code == "TOOL_FORBIDDEN"   # bogus origin
     assert c.effects == [] and r.confirm.prompts == []
     r.confirm.answer = False
-    assert (await r.call("wipe_calendar")).code == "TOOL_DECLINED" and c.effects == []    # new destructive tool
+    assert (await r.call("wipe_notes")).code == "TOOL_DECLINED" and c.effects == []    # new destructive tool
     r.allowed_actions.add("email_send")                                                  # explicit policy allow
     assert (await r.call("email_send", mail)).ok and c.effects == ["mail:boss@example.com"]
 

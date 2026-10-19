@@ -56,8 +56,10 @@ def test_camera_reported_by_a_skill_makes_it_available(home):
 
 def test_google_needs_token_and_connector(home):
     f = make(home, skills=lambda: set())
-    assert f.available("gmail_read") == (False, "Google account not connected (gmail)")
-    (home / "google_token.json").write_text("{}", encoding="utf-8")
+    ok, why = f.available("gmail_read")
+    assert not ok and why.startswith("Google account not connected (gmail)") and "jarvis google start" in why
+    (home / "google").mkdir()                       # WP-K: the real token file of google_auth (was google_token.json)
+    (home / "google" / "token.json").write_text('{"refresh_token": "1//x", "scopes": []}', encoding="utf-8")
     f.invalidate()
     ok, why = f.available("gmail_read")
     assert not ok and "not installed" in why

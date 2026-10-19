@@ -1,6 +1,6 @@
 order = 60
 category = "system"
-pages = ["home"]
+pages = ["runtime"]
 features = ["background_core", "display_control", "tray_icon", "autostart"]
 aliases = ["רקע", "מגש", "הפעלה אוטומטית", "תופיע", "תיעלם", "tray", "autostart", "start at login", "show yourself", "hide yourself", "background"]
 links = ["appearance", "updates"]
@@ -28,9 +28,9 @@ en = "Look for JARVES's icon by the clock (maybe under the ^ arrow)."
 check = "available:tray_icon"
 
 [[steps]]
-he = "רוצים שיעלה לבד כשנכנסים למחשב? הדליקו \"הפעלה עם הכניסה למחשב\" בעמוד הבית."
-en = "Want him to start when you log in? Turn on Start at login on the Home page."
-action = "open:#/home"
+he = "רוצים שיעלה לבד כשנכנסים למחשב? הדליקו \"הפעלה עם הכניסה למחשב\" בעמוד השליטה (Controls)."
+en = "Want him to start when you log in? Turn on Start at login on the Controls page."
+action = "open:#/runtime"
 
 [[problems]]
 he = "אין סמל במגש"

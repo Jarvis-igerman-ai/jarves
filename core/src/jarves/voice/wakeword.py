@@ -141,7 +141,76 @@ class FakeDetector:
         self.resets += 1
 
 
+class HeadWakeDetector:
+    """A custom phrase trained by `jarvis wake train` (voice/wake_train.py): the same openWakeWord melspectrogram +
+    embedding front end as the built-in models, then a small classifier head stored as .npz (numpy only, so it runs
+    wherever pyopen-wakeword runs: win_amd64, linux aarch64 / Pi). Scores 16 consecutive embeddings (~2 s)."""
+
+    blocking = True
+
+    def __init__(self, path: str, threshold: float = 0.5) -> None:
+        self.path, self.threshold = path, float(threshold)
+        self.name = Path(path).stem
+        self.head: dict | None = None
+        self._features = None
+        self._ring: np.ndarray | None = None
+        self._n = 0
+        self.last_score = 0.0
+
+    def _load_sync(self) -> None:
+        if self.head is not None:
+            return
+        from .wake_train import load_head
+        try:
+            self.head = load_head(self.path)
+        except (OSError, ValueError, KeyError) as e:
+            raise WakeWordUnavailable("WAKE_BAD_MODEL", f"cannot read the custom wake model {Path(self.path).name}",
+                                      "train it again: jarvis wake train \"<phrase>\"") from e
+        try:
+            import pyopen_wakeword as m
+            self._features = m.OpenWakeWordFeatures.from_builtin()
+        except (ImportError, OSError) as e:
+            self.head = None
+            raise WakeWordUnavailable("WAKE_NO_ENGINE", "wake word engine (pyopen-wakeword) is not installed",
+                                      "install the voice extra: uv sync --extra voice") from e
+        self._ring = np.zeros((self.head["windows"], 96), np.float32)
+        self.name = self.head.get("phrase") or self.name
+
+    async def load(self) -> None:
+        await asyncio.to_thread(self._load_sync)
+
+    def check(self) -> tuple[bool, str]:
+        try:
+            self._load_sync()
+            return True, f"custom wake phrase '{self.name}' (trained head, threshold {self.threshold})"
+        except WakeWordUnavailable as e:
+            return False, e.message
+
+    def feed(self, pcm16_mono_16k: bytes) -> float | None:
+        from .wake_train import head_score
+        self._load_sync()
+        best = 0.0
+        for emb in self._features.process_streaming(pcm16_mono_16k):
+            for row in emb.reshape(-1, 96):
+                self._ring = np.roll(self._ring, -1, axis=0)
+                self._ring[-1] = row
+                self._n += 1
+                if self._n >= len(self._ring):
+                    best = max(best, head_score(self.head, self._ring[None])[0])
+        self.last_score = float(best)
+        return self.last_score if self.last_score >= self.threshold else None
+
+    def reset(self) -> None:
+        if self._features is not None:
+            self._features.reset()
+            self._ring[:] = 0
+            self._n = 0
+
+
 def make_detector(wake_word: str = "hey_jarvis", threshold: float = 0.5) -> WakeWordDetector:
+    """Built-in name ("hey_jarvis"), an openWakeWord .tflite, or a `jarvis wake train` head (.npz)."""
+    if wake_word.endswith(".npz"):
+        return HeadWakeDetector(wake_word, threshold)
     return OpenWakeWordDetector(wake_word, threshold)
 
 

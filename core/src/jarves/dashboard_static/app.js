@@ -21,7 +21,8 @@ function el(tag, attrs, ...kids) {
 }
 async function api(path, opts = {}) {
   const r = await fetch(path, { credentials: "same-origin", ...opts,
-    headers: { "Content-Type": "application/json", ...(opts.method && opts.method !== "GET" ? { "X-Jarves": "1" } : {}) } });
+    headers: { "Content-Type": "application/json", ...(opts.method && opts.method !== "GET"
+      ? { "X-Jarves": "1", "X-CSRF-Token": window.JARVES_CSRF || "" } : {}) } });   // CSRF: paired phones (m4.js)
   const data = await r.json().catch(() => ({ error: r.statusText }));
   if (!r.ok) throw new Error(data.error || r.statusText);
   return data;
@@ -433,9 +434,8 @@ async function pageHome() {
       el("tbody", {}, Object.entries(ps).map(([k, v]) => el("tr", {}, el("td", {}, k.replace(/_/g, " ")), prow(k, v.windows), prow(k, v.linux_arm64_pi))))));
   const pending = el("div", { class: "card muted small" }, "Next scheduled jobs and recent alerts appear here once the scheduler is installed. ",
     el("span", { id: "usageStrip" }, "Usage: ChatGPT plan Unknown · OpenAI API Unknown (meters not connected yet)."));
-  const setup = typeof window.guidesSetupCard === "function" ? await window.guidesSetupCard() : null;   // WP-L
   render(header("Home", running ? "JARVES runs in the background; the window is optional." : "JARVES is stopped (last saved state shown)."),
-    tiles, setup, el("div", { class: "grid2 home" }, controls, voice), platform, pending);
+    tiles, el("div", { class: "grid2 home" }, controls, voice), platform, pending);
   if (running) timer = setInterval(() => route(true), 4000);
 }
 async function pageSettings() {
@@ -454,11 +454,12 @@ async function pageSettings() {
 async function route(refresh) {
   clearInterval(timer); timer = null;
   const [page, arg] = location.hash.replace(/^#\/?/, "").split("?")[0].split("/").map(decodeURIComponent);
-  const navPage = { session: "conversations", raw: "conversations", note: "workspace", guide: "guides" }[page] || page || "home";
+  const navPage = { session: "conversations", raw: "conversations", note: "workspace", guide: "guides" }[page] || page || "home";  // WP-K Home = default
   for (const a of document.querySelectorAll("nav a")) a.classList.toggle("active", a.dataset.page === navPage);
   try {
-    if (page === "home" || !page) await pageHome();                    // M1: the default page
-    else if (typeof PAGES !== "undefined" && PAGES[page]) await PAGES[page](arg, refresh);  // pages.js
+    if (page === "runtime") await pageHome();                    // M1 runtime controls (WP-K: "Controls" in the nav)
+    else if (typeof PAGES !== "undefined" && PAGES[page || "home"]) await PAGES[page || "home"](arg, refresh);  // pages.js, home.js
+    else if (!page || page === "home") await pageHome();
     else if (page === "session") await pageSession(arg, refresh === true && (window.innerHeight + window.scrollY >= document.body.scrollHeight - 40));
     else if (page === "costs") await pageCosts();
     else if (page === "issues") await pageIssues(arg);

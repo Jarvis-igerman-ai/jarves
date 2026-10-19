@@ -22,6 +22,6 @@ en = "Open the Alerts page: set quiet hours (default 22:00 to 07:00), how many a
 action = "open:#/alerts"
 
 [[steps]]
-he = "צריך שקט עכשיו? \"השהה התראות\" בעמוד הבית או אמרו \"אל תפריע לי\"."
-en = "Need quiet now? Pause alerts on the Home page or say \"don't disturb me\"."
-action = "open:#/home"
+he = "צריך שקט עכשיו? \"השהה התראות\" בעמוד השליטה (Controls) או אמרו \"אל תפריע לי\"."
+en = "Need quiet now? Pause alerts on the Controls page or say \"don't disturb me\"."
+action = "open:#/runtime"

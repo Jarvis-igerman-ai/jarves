@@ -174,6 +174,10 @@ def _probe_ai(cfg, home) -> tuple[bool, str]:
 
 def _probe_privacy(cfg, home) -> tuple[bool, str]:
     on = bool(getattr(getattr(cfg, "log", None), "privacy", False))
+    try:                                  # WP-K's privacy switch (flag file, applies at once in every process)
+        on = bool(json.loads((home / "logs" / logs.PRIVACY_FILE).read_text(encoding="utf-8"))["privacy"])
+    except (OSError, ValueError, KeyError, TypeError, AttributeError):
+        pass
     return on, "" if on else "privacy mode is off: what you say is kept in the local history (never uploaded)"
 
 

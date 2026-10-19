@@ -43,8 +43,8 @@ action = "test"
 [[problems]]
 he = "הוא לא מגיב"
 en = "He does not react"
-fix_he = "בדקו שהמיקרופון לא מושתק ב-Windows או בעמוד הבית. נסו jarvis wake."
-fix_en = "Check the microphone is not muted in Windows or on the Home page. Try jarvis wake."
+fix_he = "בדקו שהמיקרופון לא מושתק ב-Windows או בעמוד השליטה (Controls). נסו jarvis wake."
+fix_en = "Check the microphone is not muted in Windows or on the Controls page. Try jarvis wake."
 
 [[problems]]
 he = "הוא נדלק לבד"

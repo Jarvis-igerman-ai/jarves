@@ -1,9 +1,10 @@
 """Local web dashboard (`jarvis dashboard`, or the `open_dashboard` tool / face button inside the Core):
 conversations, logs, costs, background tasks, memory, workspace files, settings, skills and issues.
 
-Python stdlib only (http.server). Security: binds 127.0.0.1 only; a random per-run token in the printed URL is
-exchanged for an HttpOnly SameSite=Strict cookie; every request needs it; the Host header must be loopback (DNS
-rebinding); writes need a custom header (no cross-site form posts). No secrets are shown: config holds none by
+Python stdlib only (http.server). Security: binds 127.0.0.1 by default; a random per-run token in the printed URL
+is exchanged for an HttpOnly SameSite=Strict cookie; every request needs it; the Host header must be loopback (DNS
+rebinding); writes need a custom header (no cross-site form posts) and a same-origin Origin. Opt-in home-LAN mode
+with device pairing, CSRF tokens, rate limiting and an audit log: dashboard_auth.py (WP-M4). No secrets are shown: config holds none by
 design, and everything served passes logs.scrub plus e-mail masking. Reads store.db / memory.db while the Core runs
 (SQLite WAL), so the current conversation shows live.
 
@@ -31,6 +32,8 @@ from pathlib import Path
 from urllib.parse import parse_qs, unquote, urlsplit
 
 from . import __version__, config_edit, diagnose, logs, logview
+from .dashboard_auth import (DEVICE_COOKIE, DEVICE_IDLE_S, LAN_PORT, PUBLIC_PATHS, Access, client_allowed,
+                             is_loopback, lan_ip, parse_cookies)
 from .health import read_snapshot
 from .skills import Skill, Tool, ToolResult
 from .store import TYPED_KINDS, Store, daily_costs, session_cost
@@ -40,8 +43,10 @@ COOKIE = "jarves_dash"
 _EMAIL = re.compile(r"[\w.+-]+@[\w-]+\.[\w.-]+")
 _ROUTES: list[tuple[str, re.Pattern, object]] = []
 PLUGIN_MODULES = ("jarves.workspace", "jarves.curator", "jarves.memory", "jarves.features", "jarves.google_auth",
+                  "jarves.google_setup", "jarves.privacy", "jarves.overview",
                   "jarves.usage", "jarves.backup", "jarves.appearance", "jarves.skills.generated",
-                  "jarves.operations", "jarves.runtime", "jarves.guides")     # WP-L: Guides pages
+                  "jarves.operations", "jarves.runtime", "jarves.updates",
+                  "jarves.identity", "jarves.dashboard_auth", "jarves.guides")     # WP-L: Guides pages
 MEMORY_UNDO_KEEP = 30
 
 
@@ -78,6 +83,13 @@ class Ctx:
         self._workspace, self._settings = workspace, settings
         self.logs = logview.LogReader(home)
         self.lock = threading.Lock()                  # memory undo journal
+        self.access = None                 # dashboard_auth.Access (set by Dashboard)
+        self.port = 0
+        self._tl = threading.local()       # per-request principal (the server is threaded)
+
+    @property
+    def principal(self) -> dict | None:
+        return getattr(self._tl, "who", None)
 
     @property
     def memory(self):
@@ -706,39 +718,74 @@ class Handler(BaseHTTPRequestHandler):
         self._send(status, json.dumps(clean(obj), ensure_ascii=False, default=str).encode("utf-8"),
                    "application/json; charset=utf-8")
 
-    def _host_ok(self) -> bool:
-        host = (self.headers.get("Host") or "").rsplit(":", 1)[0].strip("[]").lower()
-        return host in ("127.0.0.1", "localhost", "::1")
+    def _static(self, name: str) -> None:
+        p = (STATIC / name).resolve()
+        if STATIC.resolve() not in p.parents or not p.is_file():
+            return self._send(404, b"not found", "text/plain")
+        return self._send(200, p.read_bytes(), _TYPES.get(p.suffix, "application/octet-stream"))
 
-    def _authed(self) -> bool:
-        cookie = self.headers.get("Cookie") or ""
-        for part in cookie.split(";"):
-            k, _, v = part.strip().partition("=")
-            if k == COOKIE and secrets.compare_digest(v, self.token):
-                return True
-        return False
+    def _pair(self, ip: str) -> None:
+        """POST /api/pair {code, name} from a phone on the LAN -> device cookie (dashboard_auth.Access.pair)."""
+        try:
+            body = json.loads(self.rfile.read(min(int(self.headers.get("Content-Length") or 0), 4096)) or b"{}")
+        except ValueError:
+            return self._json(400, {"error": "invalid JSON"})
+        got = self.access.pair(str(body.get("code", "")), str(body.get("name", "")), ip)
+        if got is None:
+            return self._json(403, {"error": "wrong or expired code: make a new one on the computer"})
+        self.send_response(200)
+        body = json.dumps({"ok": True, "device": got["device"]}).encode()
+        for k, v in (("Content-Type", "application/json"), ("Content-Length", str(len(body))),
+                     ("Cache-Control", "no-store"), ("X-Content-Type-Options", "nosniff")):
+            self.send_header(k, v)
+        self.send_header("Set-Cookie", f"{DEVICE_COOKIE}={got['cookie']}; HttpOnly; SameSite=Strict; Path=/; "
+                                       f"Max-Age={DEVICE_IDLE_S}")
+        self.end_headers()
+        self.wfile.write(body)
 
     def _handle(self) -> None:
-        if not self._host_ok():
-            return self._send(403, b"forbidden host", "text/plain")
+        a, ip = self.access, self.client_address[0]
+        if not client_allowed(ip) or (not a.lan and not is_loopback(ip)):
+            return self._send(403, b"forbidden network", "text/plain")       # never answer the internet
+        if not a.host_ok(self.headers.get("Host") or ""):
+            return self._send(403, b"forbidden host", "text/plain")          # DNS rebinding / spoofed Host
+        if not a.rate_ok(ip):
+            return self._send(429, b"too many requests", "text/plain", {"Retry-After": "60"})
+        if not a.origin_ok(self.headers, self.command):
+            a.audit("refused_cross_origin", ip=ip, path=urlsplit(self.path).path)
+            return self._json(403, {"error": "cross-origin request refused"})
         url = urlsplit(self.path)
         q = parse_qs(url.query)
         if self.command == "GET" and url.path == "/" and "t" in q:
-            if secrets.compare_digest(q["t"][0], self.token):
+            if is_loopback(ip) and secrets.compare_digest(q["t"][0], self.token):
                 return self._send(302, b"", "text/plain", {
                     "Location": "/", "Set-Cookie": f"{COOKIE}={self.token}; HttpOnly; SameSite=Strict; Path=/"})
             return self._send(403, b"wrong token: open the link printed by `jarvis dashboard`", "text/plain")
-        if not self._authed():
-            return self._send(403, "Open the link printed by `jarvis dashboard` (it holds a one-time token)."
-                              .encode(), "text/plain; charset=utf-8")
+        if a.lan and (self.command, url.path) in PUBLIC_PATHS:
+            if url.path == "/pair":
+                return self._static("pair.html")
+            if url.path == "/api/pair":
+                if self.headers.get("X-Jarves") != "1":
+                    return self._json(403, {"error": "missing X-Jarves header"})
+                return self._pair(ip)
+            return self._static(url.path.removeprefix("/static/"))
+        who = a.principal(parse_cookies(self.headers.get("Cookie") or ""), ip)
+        if who is None:
+            msg = ("Open /pair on this device to pair it (code from the computer)." if a.lan and not is_loopback(ip)
+                   else "Open the link printed by `jarvis dashboard` (it holds a one-time token).")
+            return self._send(403, msg.encode(), "text/plain; charset=utf-8")
+        if not a.allowed(who, self.command, url.path):
+            a.audit("refused_privilege", principal=who["id"], method=self.command, path=url.path)
+            return self._json(403, {"error": "only the computer itself can do this"})
+        if who["kind"] == "device" and self.command not in ("GET", "HEAD") and not secrets.compare_digest(
+                self.headers.get("X-CSRF-Token") or "", who["csrf"]):
+            a.audit("refused_csrf", principal=who["id"], method=self.command, path=url.path)
+            return self._json(403, {"error": "missing or wrong CSRF token (reload the page)"})
+        self.ctx._tl.who = who
         if url.path == "/" or url.path.startswith("/static/"):
             if self.command not in ("GET", "HEAD"):
                 return self._send(405, b"", "text/plain")
-            name = "index.html" if url.path == "/" else url.path.removeprefix("/static/")
-            p = (STATIC / name).resolve()
-            if STATIC.resolve() not in p.parents or not p.is_file():
-                return self._send(404, b"not found", "text/plain")
-            return self._send(200, p.read_bytes(), _TYPES.get(p.suffix, "application/octet-stream"))
+            return self._static("index.html" if url.path == "/" else url.path.removeprefix("/static/"))
         if url.path == "/export/logs.jsonl" and self.command == "GET":
             try:
                 data = export_logs(self.ctx, q)
@@ -766,6 +813,8 @@ class Handler(BaseHTTPRequestHandler):
                     status, obj = fn(self.ctx, mt, body, q) if takes_q else fn(self.ctx, mt, body)
                 except Exception as e:
                     status, obj = 500, {"error": f"{type(e).__name__}: {str(e)[:200]}"}
+                if method != "GET":           # audit: config changes, approvals (who, what, result; no bodies)
+                    a.audit("write", principal=who["id"], method=method, path=url.path, status=status)
                 return self._json(status, obj)
         return self._json(404, {"error": "not found"})
 
@@ -774,18 +823,29 @@ class Handler(BaseHTTPRequestHandler):
 
 class Dashboard:
     """Owns the HTTP server; `url` holds the one-time token. start() runs it in a daemon thread.
-    workspace / memory / settings: the Core's own objects when it is opened from inside the Core."""
+    workspace / memory / settings: the Core's own objects when it is opened from inside the Core.
+    lan=True (opt-in, the dashboard_lan switch): also reachable from paired devices on the home network."""
 
     def __init__(self, home: Path, cfg, port: int = 0, *, workspace=None, memory=None, settings=None,
-                 config_path=None) -> None:
+                 config_path=None, lan: bool = False, lan_host: str | None = None) -> None:
         self.ctx = Ctx(home, cfg, workspace=workspace, memory=memory, settings=settings, config_path=config_path)
         self.plugins = load_plugins()
         token = secrets.token_urlsafe(24)
-        handler = type("H", (Handler,), {"ctx": self.ctx, "token": token})
-        self.httpd = ThreadingHTTPServer(("127.0.0.1", port), handler)
+        if lan:
+            lan_host = lan_host or lan_ip()
+            if lan_host is None:
+                raise OSError("no private home-network address found (Wi-Fi/Ethernet connected?)")
+        self.access = Access(home, token, lan=lan, lan_host=lan_host)
+        self.ctx.access = self.access
+        handler = type("H", (Handler,), {"ctx": self.ctx, "token": token, "access": self.access})
+        self.httpd = ThreadingHTTPServer(("0.0.0.0" if lan else "127.0.0.1", port or (LAN_PORT if lan else 0)),
+                                         handler)
         self.httpd.daemon_threads = True
-        self.port = self.httpd.server_address[1]
+        self.port = self.ctx.port = self.httpd.server_address[1]
         self.url = f"http://127.0.0.1:{self.port}/?t={token}"
+        self.lan_url = f"http://{lan_host}:{self.port}/pair" if lan else None
+        if lan:
+            self.access.audit("lan_mode_started", host=lan_host, port=self.port)
         self._thread: threading.Thread | None = None
 
     def start(self) -> "Dashboard":

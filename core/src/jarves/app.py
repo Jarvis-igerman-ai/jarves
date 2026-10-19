@@ -129,6 +129,10 @@ class Core:
         self.features.import_legacy(feat.legacy_settings(self.memory))
         self.features.apply_to_config(c)
         self.features.listeners.append(self._feature_changed)
+        # SW-V2 WP-M4 identity: user-chosen names, wake model and voice over config.toml (identity.json)
+        from .identity import Identity, make_skill as make_identity_skill
+        self.identity = Identity(self.home, c, self.memory)
+        self.identity.apply_to_config(c)
 
         self.registry = SkillRegistry()
         self.registry.confirm = self.ask_confirm
@@ -154,6 +158,7 @@ class Core:
         self.settings = Settings(self.memory, {"voice.voice": c.voice.voice})
         self.settings.features = self.features           # curator.* settings are feature switches now
         self.registry.register(SettingsSkill(self.workspace, self.settings, self.registry, self._on_voice_change))
+        self.registry.register(make_identity_skill(self.identity))     # "your name is X" (confirmed read-back)
         # WP-H: the dashboard on request ("תפתח את לוח הבקרה" / face button), inside this process
         self.registry.allowed_actions.add("open_dashboard")
         self.registry.register(DashboardSkill(self.open_dashboard))
@@ -801,7 +806,7 @@ class Core:
         elif self.voice_mode == "live":
             from .voice.live import LiveVoice
             live = LiveVoice(self.registry, self.agent.instructions, model=v.live_model,
-                             voice=self.settings.get("voice.voice") or v.voice,   # "תחליף קול" override
+                             voice=self.identity.voice()["live_voice"],   # "תחליף קול" override, recovered if unsupported
                              backend_model=self.cfg.ai.text_model, web_search=self.cfg.ai.web_search,
                              name=self.cfg.assistant_name, spoken_name=self.cfg.assistant_name_spoken,
                              half_duplex=v.half_duplex, max_session_s=max_s,
@@ -983,7 +988,7 @@ class Core:
         self._woke = False
         if v.activation == "conversation" and self.voice_mode == "live":
             self._hold_wake_until = time.monotonic() + 45     # the session opens now; "Hey Jarvis" is for AFTER it ends
-        self.health.set("wake_word", "ok", f"say \"Hey Jarvis\" (detected on this device, {v.wake_word})")
+        self.health.set("wake_word", "ok", f"say \"{v.wake_phrase}\" (detected on this device, {Path(v.wake_word).name})")
         self._bg.append(asyncio.create_task(self._wake_loop()))
 
     async def _on_wake(self, score: float) -> None:
