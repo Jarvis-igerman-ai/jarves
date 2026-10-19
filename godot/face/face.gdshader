@@ -36,6 +36,8 @@ uniform vec2 dot_pos = vec2(0.0, 0.84);
 uniform float dot_pulse = 0.0;         // expanding ring (live conversation)
 uniform float dot_breathe = 0.0;       // slow brightness breathing (connecting)
 uniform float dot_slash = 0.0;         // muted: hollow ring + slash
+uniform float cam_on = 0.0;            // camera indicator (software: Camera Module 3 has no LED)
+uniform float cam_flash = 0.0;         // 1 -> 0 over 0.6 s after a photo was taken
 // motion speeds / amounts (face.gd CALM / LIVELY tuning block)
 uniform float wave_amt = 0.1;          // rim halo shimmer depth
 uniform float wave_speed = 0.5;        // rim halo shimmer speed
@@ -265,6 +267,19 @@ void fragment() {
 	}
 	vec3 dc = mix(dot_col * 1.1 + vec3(0.12), vec3(1.0), smoothstep(dr * 0.75, 0.0, dl) * 0.35 * (1.0 - dot_slash));
 	col = mix(col, dc * breathe, smoothstep(aa, -aa, dshape));
+
+	// --- camera indicator (upper-left, mirrors the status dot): a small warm lens ring + pupil while the camera
+	// is ON; a brief bright pulse when a photo is taken. Absent (exactly nothing drawn) when the camera is off.
+	if (cam_on > 0.001 || cam_flash > 0.001) {
+		vec2 cq = p - vec2(-dot_pos.x, dot_pos.y);
+		float cl = length(cq);
+		float cring = abs(cl - 0.024) - 0.0055;
+		float cshape = min(cring, cl - 0.009);
+		vec3 ccol = vec3(1.0, 0.72, 0.32) * (0.85 + 0.6 * cam_flash);
+		col += ccol * max(cam_on, cam_flash) * exp(-max(cshape, 0.0) * 55.0) * 0.35;
+		col = mix(col, ccol, smoothstep(aa, -aa, cshape) * max(cam_on, cam_flash));
+		col += vec3(1.0, 0.9, 0.75) * cam_flash * exp(-cl * 9.0) * 0.5;
+	}
 
 	// --- glass: faint curved reflection and a thin bezel edge
 	if (!low_quality) {

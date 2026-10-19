@@ -4,6 +4,8 @@ Merged so far (436 tests pass): WP-A conversation quality, WP-B store/cost/dashb
 
 **Still open:** WP-E suite runs (Godot, voice, music) and report update; WP-G Google Calendar + Gmail skills (restart; rate-limit); dashboard wiring (workspace/memory edit, costs from WP-C usage fields, tasks.jsonl); settings editable in dashboard (backend deadline etc.); persona line for background tasks; independent code review; CI on final commit; merge to main.
 
+**WP-J camera (branch `worktree-agent-a32a688f84b7feccb`, not merged):** camera package + Skill + Godot gaze/indicator, all switches default OFF, no hardware used. Report `docs/reviews/SWV2_WP-J.md`, setup/privacy `docs/CAMERA_SETUP.md`. Open: greeting-on-presence default, indicator look (user), WP-I switch interface check, Pi C4 gate.
+
 ### User decisions (19 Oct)
 - Google: BOTH Calendar and Gmail skills; all calendars; read calendar allowed; he ASKS before reading email aloud; sending email by voice allowed only after reading the draft back and explicit confirmation; weekly reconnect accepted.
 - Camera: yes; face recognition yes (opt-in per person); physical shutter yes (next CAD round); away mode = camera OFF, configurable, default off.
@@ -16,6 +18,8 @@ Merged so far (436 tests pass): WP-A conversation quality, WP-B store/cost/dashb
 - Self-diagnosis: add the model pass, ON by default (budgeted).
 - Dashboard: opened on request by `jarvis` AND a face button; edit workspace files + delete learned facts, with undo.
 - Merge: PR from `swv2-integrate` -> main after green CI + independent agent review.
+
+- Spec (docs/JARVES_SW_V2_IMPLEMENTATION_SPEC.md) review decisions: Markdown Skills = extend our own SkillRegistry (no other agent's work exists); calendar may also create/update events with confirmation, NEVER delete; dashboard on home LAN with pairing+login; CI should build the Windows installer after a merged green PR and keep the 3 latest (M6); updates: notify + ask approval; Pear closed -> offer to start it; medium-risk features enabled by voice need on-screen approval; camera greeting off (configurable); email search says count + senders then asks before reading; keep httpx for Google; face model download after one confirmation; keep the camera indicator ring.
 
 ### Questions for the user
 - Listen to the warmer persona/greeting wording and the new voices (no GPT-Live voice is documented for Hebrew).

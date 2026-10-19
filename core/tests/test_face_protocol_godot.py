@@ -46,6 +46,12 @@ def messages():
     out += [m("face.emotion", p) for p in (
         {"emotion": "unknown", "ms": 500}, {"emotion": "laugh", "ms": -5}, {"emotion": "cry", "ms": "soon"},
         {"emotion": "laugh", "ms": 10 ** 9}, {"emotion": 7}, {})]
+    # camera (WP-J): gaze target and indicator, also malformed
+    out += [m("face.set_gaze", p) for p in (
+        {"x": 0.4, "y": -0.2, "confidence": 0.9}, {"x": -1, "y": 1, "confidence": 1}, {"x": 99, "y": -99, "confidence": 5},
+        {"x": "left", "y": None, "confidence": "high"}, {"x": 0, "y": 0, "confidence": 0}, {})]
+    out += [m("camera.indicator", p) for p in (
+        {"on": True, "flash": True}, {"on": True}, {"on": "yes", "flash": 1}, {"on": None}, {}, {"on": False})]
     out += [m("mic.level", {"level": v}) for v in (0, 0.5, 1, -3, 99, "x", None)]
     out += [m("speaker.level", {"level": v}) for v in (0, 0.7, 5, -1, "loud")]
     out.append(m("assistant.text", {"text": "שלום! " * 800, "source": "live"}))

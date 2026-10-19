@@ -235,6 +235,67 @@ func _reaction_checks(errs: Array) -> void:
 		errs.append("unknown emotion / reaction end not handled")
 
 
+func _gaze_checks(errs: Array) -> String:
+	# face.set_gaze (camera): calm, capped, no jumps; holds, then returns to the idle look; thinking keeps its look
+	var f := _new_face(false, 17)
+	_simulate(f, 1.0)
+	var feed := func(x: Control) -> void:
+		if fmod(x.t, 0.2) < 1.0 / 60.0:
+			x.set_gaze(1.0, -1.0, 0.9)          # person far to one side and up: the extreme target
+	var step := [0.0, f._look * f.GAZE_TO_RADIUS]
+	var watch := func(x: Control) -> void:
+		feed.call(x)
+		var p: Vector2 = x._look * x.GAZE_TO_RADIUS
+		step[0] = maxf(step[0], (p - step[1]).length())
+		step[1] = p
+	_simulate(f, 3.0, watch)
+	var off: Vector2 = (f._look - f._v.look) * f.GAZE_TO_RADIUS
+	var cap: Vector2 = f.TRACK.max
+	if not f.is_tracking() or off.x < cap.x * 0.6 or off.y > -cap.y * 0.6:
+		errs.append("gaze does not turn toward the person (offset %s)" % off)
+	if absf(off.x) > cap.x + 0.03 or absf(off.y) > cap.y + 0.03:
+		errs.append("gaze offset %s exceeds the cap %s" % [off, cap])
+	if step[0] > 0.012:
+		errs.append("gaze jumps %.3f r per frame while tracking" % step[0])
+	_simulate(f, 5.0)                             # no more updates: hold 2 s, then ease back
+	var idle_r: float = f.gaze_radius()
+	if f.is_tracking() or idle_r >= 0.04:
+		errs.append("gaze does not return to idle after the person left (%.3f r)" % idle_r)
+	f.set_gaze(1.0, 0.0, 0.9)
+	f.set_gaze(0.0, 0.0, 0.0)                     # confidence 0 = stop now
+	if f.is_tracking():
+		errs.append("confidence 0 does not stop tracking")
+	f.set_state("thinking")
+	_simulate(f, 2.5, feed)
+	if f._look.y > -0.5:
+		errs.append("tracking overrides the thinking look")
+	f.set_state("idle")
+	f.set_link("offline")
+	_simulate(f, 1.0, feed)
+	if f.is_tracking():
+		errs.append("tracking while asleep")
+	f.free()
+	# messages from the Core (malformed ones are ignored), camera indicator glyph
+	face.set_link("ready")
+	face.set_state("idle")
+	ui._on_message("face.set_gaze", {"x": "left", "y": null, "confidence": "high"})
+	ui._on_message("face.set_gaze", {"x": 0.5, "y": 0.2, "confidence": 1})
+	if not face.is_tracking():
+		errs.append("face.set_gaze message not applied")
+	ui._on_message("face.set_gaze", {"x": 0, "y": 0, "confidence": 0})
+	ui._on_message("camera.indicator", {"on": true, "flash": true})
+	face._apply()
+	if not face.camera_on or face._mat.get_shader_parameter("cam_on") < 0.5 or face._mat.get_shader_parameter("cam_flash") < 0.5:
+		errs.append("camera indicator not shown")
+	ui._on_message("camera.indicator", {"on": "yes"})
+	ui._on_message("camera.indicator", {})
+	face._apply()
+	if face.camera_on or face._mat.get_shader_parameter("cam_on") > 0.0:
+		errs.append("camera indicator stays on / accepts a non-bool")
+	return "gaze tracking: offset %.1f%% / %.1f%% r (cap %.0f%% / %.0f%%), max step %.2f%% r/frame, idle again %.1f%% r" % [
+		off.x * 100.0, off.y * 100.0, cap.x * 100.0, cap.y * 100.0, step[0] * 100.0, idle_r * 100.0]
+
+
 func _activity_checks(errs: Array) -> void:
 	# assistant.activity {kind, text, detail?} -> pill on the lower arc, fades in/out, Hebrew RTL, never when idle
 	var pill: Control = face.activity
@@ -477,6 +538,7 @@ func _check() -> void:
 		errs.append("face shader canvas / activity pill missing")
 	_reaction_checks(errs)
 	_activity_checks(errs)
+	print(_gaze_checks(errs))
 	# sleeping face never blinks
 	var fz := _new_face(false, 21)
 	fz.set_link("offline")

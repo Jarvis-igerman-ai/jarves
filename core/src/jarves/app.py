@@ -173,6 +173,8 @@ class Core:
 
         self.link = GodotLink(c.link.host, c.link.port, load_token(self.home / "link_token"), self.health,
                               self.on_message, self._face_connected)
+        from .camera import wire as camera_wire              # WP-J camera: switches default OFF (camera/wire.py)
+        self.camera = camera_wire.attach(self)
 
         audio = self._audio
         if audio is None and self.use_real_audio and c.voice.mode != "off":
@@ -250,6 +252,8 @@ class Core:
         if getattr(self, "tasks", None) is not None:
             await self.tasks.shutdown()             # running background tasks end as "cancelled" (stored)
         await self.registry.drain()                 # shielded side effects finish before the store closes
+        if getattr(self, "camera", None) is not None:
+            await self.camera.stop()                # sensor closed, indicator off, faces.db closed
         self.curator.cancel()
         try:                                        # what this run learned is kept (rules only: no network now)
             self.curator.llm = None
@@ -454,6 +458,8 @@ class Core:
                                                     "action": "run `jarvis dashboard`"})
         elif t in INBOUND:
             logs.info("device", "DEVICE_EVENT", f"device event {t}", **logs.safe_fields(p, allow=("id", "muted", "state")))
+            if t == "presence.changed" and getattr(self, "camera", None) is not None:
+                self.camera.external_presence(p.get("present") is True)
         else:
             await self.link.reply(ws, "error", {"code": "LINK_UNKNOWN_TYPE", "message": f"unknown message type {t}"})
 

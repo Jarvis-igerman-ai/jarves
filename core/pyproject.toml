@@ -24,6 +24,12 @@ voice = [
     "winrt-Windows.Foundation.Collections>=3.2; sys_platform == 'win32'",
 ]
 
+camera = [
+    # USB webcam capture + local face detection/recognition models (YuNet/SFace). Pi 5: aarch64 wheels; the Pi
+    # camera itself uses the apt package python3-picamera2 (libcamera), not pip. Checked 2026-10-19 (PyPI).
+    "opencv-python-headless>=4.12",
+]
+
 [project.scripts]
 jarves = "jarves.cli:main"
 
