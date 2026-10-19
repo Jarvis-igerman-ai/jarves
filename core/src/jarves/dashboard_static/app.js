@@ -390,11 +390,12 @@ async function pageSettings() {
 // ---------------------------------------------------------------- router
 async function route(refresh) {
   clearInterval(timer); timer = null;
-  const [page, arg] = location.hash.replace(/^#\/?/, "").split("/").map(decodeURIComponent);
-  for (const a of document.querySelectorAll("nav a"))
-    a.classList.toggle("active", a.dataset.page === (page === "session" ? "conversations" : page || "conversations"));
+  const [page, arg] = location.hash.replace(/^#\/?/, "").split("?")[0].split("/").map(decodeURIComponent);
+  const navPage = { session: "conversations", raw: "conversations", note: "workspace" }[page] || page || "conversations";
+  for (const a of document.querySelectorAll("nav a")) a.classList.toggle("active", a.dataset.page === navPage);
   try {
-    if (page === "session") await pageSession(arg, refresh === true && (window.innerHeight + window.scrollY >= document.body.scrollHeight - 40));
+    if (typeof PAGES !== "undefined" && PAGES[page || "conversations"]) await PAGES[page || "conversations"](arg, refresh);  // pages.js
+    else if (page === "session") await pageSession(arg, refresh === true && (window.innerHeight + window.scrollY >= document.body.scrollHeight - 40));
     else if (page === "costs") await pageCosts();
     else if (page === "issues") await pageIssues(arg);
     else if (page === "memory") await pageMemory();
@@ -402,10 +403,10 @@ async function route(refresh) {
     else if (page === "workspace") await pageWorkspace(arg);
     else if (page === "features") await pageFeatures();
     else if (page === "settings") await pageSettings();
-    else if (window.JARVES_PAGES && window.JARVES_PAGES[page]) await window.JARVES_PAGES[page](arg, refresh);   // plugin pages (usage.js)
     else await pageConversations();
   } catch (e) { if (refresh !== true) fail(e); }
 }
 window.addEventListener("hashchange", () => route());
-refreshOverview().then(() => route());
+// after every deferred script (pages.js) has run
+document.addEventListener("DOMContentLoaded", () => refreshOverview().then(() => route()));
 setInterval(refreshOverview, 15000);

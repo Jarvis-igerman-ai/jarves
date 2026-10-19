@@ -289,7 +289,7 @@ def test_dashboard_usage_and_backup_routes(profile):
         listing = json.loads(call("GET", "/api/backup")[1])
         assert listing["backups"][0]["name"] == name and listing["guidance"]
         s, js = call("GET", "/static/usage.js")
-        assert s == 200 and b"JARVES_PAGES" in js
+        assert s == 200 and b"PAGES.usage" in js
         s, html = call("GET", "/")
         assert b"/static/usage.js" in html
     finally:

@@ -1,6 +1,6 @@
 // SW-V2 M5 dashboard pages: Usage (meters, thresholds) and Backup (list, verify, restore drill, retention), plus the
 // compact usage strip at the bottom of every page. Uses app.js helpers (el, api, header, pill, render, tile...).
-// Registers itself through window.JARVES_PAGES (app.js router) so it adds no edits to the other pages.
+// Registers its pages in PAGES (pages.js; the app.js router checks it first), so it adds no edits to other pages.
 "use strict";
 
 (function () {
@@ -161,5 +161,6 @@
         d.core_running ? el("div", { class: "small" }, "JARVES is running: a real restore needs it stopped first (the test restore above is always safe).") : null));
   }
 
-  window.JARVES_PAGES = Object.assign(window.JARVES_PAGES || {}, { usage: pageUsage, backup: pageBackup });
+  PAGES.usage = pageUsage;                      // pages.js registry, checked first by the app.js router
+  PAGES.backup = pageBackup;
 })();

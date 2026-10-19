@@ -23,7 +23,8 @@ from .skills.music import MusicSkill, PearDesktopPlayer
 from .skills.settings import Settings, SettingsSkill
 from . import workspace as wsp
 from . import features as feat
-from .curator import Curator, openai_extractor
+from .curator import _SENSITIVE as SENSITIVE_TEXT, Curator, openai_extractor
+from .dashboard import DashboardSkill
 from .voice.audio import AudioUnavailable, SoundDeviceAudio, StreamingAudio
 from .voice.speechcache import SpeechCache
 from .voice.stt import STTUnavailable, WhisperSTT
@@ -72,6 +73,10 @@ class Core:
         self.wake = None                           # WakeListener when the wake word is active
         self._live_factory = live_factory          # tests inject a fake live session
         self.console_logs, self.use_real_audio = console_logs, use_real_audio
+        # open_dashboard opens the browser only on a real desktop run (tests / silent runs never open windows)
+        import webbrowser
+        self.open_url = webbrowser.open if use_real_audio else None
+        self._dashboard = None
         self.stop_event = asyncio.Event()
         self.live = None
         self.listening = False
@@ -144,6 +149,9 @@ class Core:
         self.settings = Settings(self.memory, {"voice.voice": c.voice.voice})
         self.settings.features = self.features           # curator.* settings are feature switches now
         self.registry.register(SettingsSkill(self.workspace, self.settings, self.registry, self._on_voice_change))
+        # WP-H: the dashboard on request ("תפתח את לוח הבקרה" / face button), inside this process
+        self.registry.allowed_actions.add("open_dashboard")
+        self.registry.register(DashboardSkill(self.open_dashboard))
         from .skills.google import register_google      # WP-G: only when the user connected Google (no network)
         self.google = register_google(self.registry, self.home, self.health)
         self.workspace.listeners.append(lambda name: self._spawn(wsp.note_live(self.live, self.workspace, name)))
@@ -258,6 +266,8 @@ class Core:
         except Exception:
             logs.warn("memory", "CURATOR_SHUTDOWN_FAILED", "memory curator did not finish at shutdown")
         await self.link.stop()
+        if self._dashboard is not None:              # WP-H: the in-Core dashboard shares memory.db
+            await asyncio.to_thread(self._dashboard.stop)
         if self.music is not None:
             await self.music.close()                # cancels a background queue trim, then closes the client
         self.memory.close()
@@ -444,12 +454,36 @@ class Core:
             if t == "desktop.close":
                 await self.link.reply(ws, "desktop.closed", {})
             self.stop_event.set()
+        elif t == "ui.open_dashboard":               # WP-H: the face's Dashboard button
+            try:
+                url = await self.open_dashboard()
+                await self.link.reply(ws, "dashboard.opened", {"url": url.split("?", 1)[0],
+                                                               "browser": self.open_url is not None})
+            except Exception as e:
+                logs.warn("core", "DASHBOARD_FAILED", f"dashboard could not start: {type(e).__name__}")
+                await self.link.reply(ws, "error", {"code": "DASHBOARD_FAILED", "message": "dashboard did not start",
+                                                    "action": "run `jarvis dashboard`"})
         elif t in INBOUND:
             logs.info("device", "DEVICE_EVENT", f"device event {t}", **logs.safe_fields(p, allow=("id", "muted", "state")))
             if t == "presence.changed" and getattr(self, "camera", None) is not None:
                 self.camera.external_presence(p.get("present") is True)
         else:
             await self.link.reply(ws, "error", {"code": "LINK_UNKNOWN_TYPE", "message": f"unknown message type {t}"})
+
+    async def open_dashboard(self) -> str:
+        """Start the dashboard inside the Core (once; it shares the Core's workspace, memory and settings) and open
+        it in the browser on this computer. Returns the full one-time URL."""
+        if self._dashboard is None or not self._dashboard.running:
+            from .dashboard import Dashboard
+            self._dashboard = await asyncio.to_thread(
+                lambda: Dashboard(self.home, self.cfg, workspace=self.workspace, memory=self.memory,
+                                  settings=self.settings).start())
+        url = self._dashboard.url
+        logs.info("core", "DASHBOARD_OPENED", "dashboard opened", port=self._dashboard.port,
+                  browser=self.open_url is not None)
+        if self.open_url is not None:
+            await asyncio.to_thread(self.open_url, url)
+        return url
 
     def _run_busy(self, coro) -> None:
         if self.stopping:
@@ -558,7 +592,8 @@ class Core:
         t0 = time.monotonic()
         reply = await self.brain.respond(text)
         logs.info("core", "REPLY", f"reply via {reply.source}", tool=reply.tool, ok=reply.ok, result=reply.code,
-                  ms=round((time.monotonic() - t0) * 1000), text=reply.text)
+                  ms=round((time.monotonic() - t0) * 1000), text=reply.text, typed=typed,  # WP-H history: what was asked
+                  utterance=f"<{len(text)} chars>" if SENSITIVE_TEXT.search(text) else text)   # codes never logged
         self.curator.observe("user", text)
         self.curator.observe("assistant", reply.text, idle=self.live is None)   # typed chat: curate when quiet
         await self.link.send_face("assistant.text", {"text": reply.text, "source": reply.source, "ok": reply.ok,
