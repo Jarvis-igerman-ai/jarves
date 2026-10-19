@@ -155,6 +155,10 @@ static func _num(v, d := 0.0) -> float:
 	return d if (is_nan(f) or is_inf(f)) else f
 
 
+static func _bool(v) -> bool:
+	return typeof(v) == TYPE_BOOL and v
+
+
 static func _dict(v) -> Dictionary:
 	return v if typeof(v) == TYPE_DICTIONARY else {}
 
@@ -173,6 +177,14 @@ func _on_message(t: String, p: Dictionary) -> void:
 			# transient reaction {emotion: laugh|cry|surprised|love|sad, ms}; eases back to the current state
 			if face:
 				face.set_emotion(_str(p.get("emotion")), clampi(int(_num(p.get("ms"), -1.0)), -1, 60000))
+		"face.set_gaze":
+			# camera: where the person is {x, y: -1..1, confidence: 0..1}; confidence 0 = stop tracking
+			if face:
+				face.set_gaze(_num(p.get("x")), _num(p.get("y")), clampf(_num(p.get("confidence")), 0.0, 1.0))
+		"camera.indicator":
+			# {on, flash}: the camera is streaming / a photo was just taken (software indicator)
+			if face:
+				face.set_camera(_bool(p.get("on")), _bool(p.get("flash")))
 		"assistant.activity":
 			# {kind?, text, detail?}: with a kind it is also shown on the face (pill on the lower arc);
 			# kind "done" or an empty text clears it. Without a kind it stays a panel-only message.

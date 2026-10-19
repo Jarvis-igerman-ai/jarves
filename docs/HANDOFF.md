@@ -4,6 +4,8 @@ Merged so far (436 tests pass): WP-A conversation quality, WP-B store/cost/dashb
 
 **Still open:** WP-E suite runs (Godot, voice, music) and report update; WP-G Google Calendar + Gmail skills (restart; rate-limit); dashboard wiring (workspace/memory edit, costs from WP-C usage fields, tasks.jsonl); settings editable in dashboard (backend deadline etc.); persona line for background tasks; independent code review; CI on final commit; merge to main.
 
+**WP-J camera (branch `worktree-agent-a32a688f84b7feccb`, not merged):** camera package + Skill + Godot gaze/indicator, all switches default OFF, no hardware used. Report `docs/reviews/SWV2_WP-J.md`, setup/privacy `docs/CAMERA_SETUP.md`. Open: greeting-on-presence default, indicator look (user), WP-I switch interface check, Pi C4 gate.
+
 ### User decisions (19 Oct)
 - Google: BOTH Calendar and Gmail skills; all calendars; read calendar allowed; he ASKS before reading email aloud; sending email by voice allowed only after reading the draft back and explicit confirmation; weekly reconnect accepted.
 - Camera: yes; face recognition yes (opt-in per person); physical shutter yes (next CAD round); away mode = camera OFF, configurable, default off.

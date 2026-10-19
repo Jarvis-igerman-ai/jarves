@@ -181,6 +181,22 @@ class HistoryConfig(_Strict):
     early_drops: int = Field(5, ge=1)                  # early-response audio drops per session before it is an issue
 
 
+class CameraConfig(_Strict):
+    """Camera (SW-V2 WP-J, docs/CAMERA_SETUP.md). Turning the camera ON is never done here: the dashboard switches
+    `camera`, `face_recognition` and `camera_when_away` (all default OFF) decide. These are only the mechanics."""
+    backend: Literal["auto", "picamera2", "opencv", "none"] = "auto"   # auto: picamera2 on the Pi, else OpenCV
+    device: int = Field(0, ge=0, le=9)                  # OpenCV device index (USB webcam on a PC)
+    preview_width: int = Field(320, ge=160, le=1280)    # low-res stream for local presence detection only
+    preview_height: int = Field(240, ge=120, le=960)
+    presence_fps: float = Field(4.0, ge=0.5, le=10)
+    away_after_s: float = Field(900, ge=30, le=86400)   # nobody seen and no conversation this long -> away
+    greet: bool = False                                 # say a short hello when someone sits down (no listening)
+    mirror_gaze: bool = True                            # the camera sees the room mirrored relative to the face
+    still_max_side: int = Field(1280, ge=320, le=4096)  # a cloud photo is downscaled to this (pixels, long side)
+    daily_cloud_photos: int = Field(40, ge=0, le=1000)  # photos sent to the cloud per day ("מה זה?"); 0 = never
+    vision_model: str = ""                              # "" = ai.text_model (gpt-6-luna, text+image input)
+
+
 class Config(_Strict):
     assistant_name: str = "JARVES"
     # how the name is SAID (and written in Hebrew speech/greetings): the voice read the Latin "JARVES" letter by
@@ -193,6 +209,7 @@ class Config(_Strict):
     log: LogConfig = LogConfig()
     pricing: PricingConfig = PricingConfig()
     history: HistoryConfig = HistoryConfig()
+    camera: CameraConfig = CameraConfig()
 
 
 SECRET_KEYS = ("api_key", "apikey", "token", "secret", "password", "cookie")

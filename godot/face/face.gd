@@ -4,6 +4,7 @@ extends Control
 ## behaviour: per-state expression targets, frame-rate independent smoothing, blinks, saccades, breathing.
 ## States (face.set_state from the Core): idle, listening, thinking, speaking, happy, error.
 ## Link (status dot, set_link): ready, live, connecting, degraded, offline, error, muted. "offline" = sleep look.
+## Camera (set_gaze / set_camera): eyes follow the person calmly; a small lens glyph upper-left = camera ON.
 ## No text is ever drawn on the face. `--low` drops the wide glow / glass passes for slow GPUs.
 ## `--lively` restores the earlier, busier motion (LIVELY below) for side-by-side comparison.
 ## All motion runs on the face clock `t` (advanced only by _process), so tests can simulate time exactly.
@@ -84,6 +85,17 @@ const REACT := {
 }
 ## look units -> displacement of the iris centre in face-radius units (eye shift + iris shift inside the eye)
 const GAZE_TO_RADIUS := Vector2(0.065 + 0.3 * 0.165, 0.05 + 0.22 * 0.23)
+## Looking at the person (face.set_gaze {x, y, confidence} from the Core camera, -1..1, ~5 Hz). Calm by design:
+## capped offset, slow exponential follow, holds the last target briefly, then eases back to the idle look.
+const TRACK := {
+	"max": Vector2(0.12, 0.08),             # largest iris offset while tracking, in face-radius units
+	"min_conf": 0.3,                        # below this the target is ignored (0 = stop tracking)
+	"hold": 2.0,                            # no update for this long -> back to the idle look (s)
+	"follow": 3.0,                          # target smoothing rate (1/s)
+	"blend": 2.0,                           # tracking on/off blend rate (1/s)
+	"saccade_keep": 0.3,                    # share of the idle saccades kept while tracking
+	"states": ["idle", "listening", "speaking", "happy"],   # thinking/error keep their own look
+}
 # ------------------------------------------------------------------------------------------------------------
 
 const STATES := ["idle", "listening", "thinking", "speaking", "happy", "error"]
@@ -144,6 +156,12 @@ var _emo_prev := ""                 # reaction being replaced (cross-faded out)
 var _emo_prev_w := 0.0
 var activity: Control               # face_activity.gd pill on the lower arc
 var _fx := Vector3.ZERO             # smoothed reaction extras: x laugh bounce, y tears, z heart glints
+var _track_to := Vector2.ZERO       # camera gaze target (look units, already capped)
+var _track := Vector2.ZERO          # smoothed target
+var _track_w := 0.0                 # 0 idle look .. 1 looking at the person
+var _track_seen := -1000.0
+var camera_on := false              # camera indicator (the sensor is streaming / taking a photo)
+var _cam_flash := -1000.0           # time of the last "photo taken" flash
 
 
 func _init() -> void:
@@ -259,6 +277,26 @@ func set_state(s: String) -> void:
 func set_link(value: String) -> void:
 	if value in LINKS:
 		link_state = value
+
+
+func set_gaze(x: float, y: float, confidence: float) -> void:
+	# where the person is (from the camera), -1..1 each axis; confidence < min_conf = stop tracking now
+	if confidence < TRACK.min_conf:
+		_track_seen = -1000.0
+		return
+	var m: Vector2 = TRACK.max
+	_track_to = Vector2(clampf(x, -1.0, 1.0) * m.x / GAZE_TO_RADIUS.x, clampf(y, -1.0, 1.0) * m.y / GAZE_TO_RADIUS.y)
+	_track_seen = t
+
+
+func is_tracking() -> bool:
+	return t - _track_seen < TRACK.hold and state in TRACK.states and not is_asleep()
+
+
+func set_camera(on: bool, flash := false) -> void:
+	camera_on = on
+	if flash:
+		_cam_flash = t
 
 
 func set_speech_level(level: float) -> void:
@@ -378,6 +416,10 @@ func _process(delta: float) -> void:
 	# final gaze: deliberate state look + eased saccade + slow drift (micro jumps only in --lively)
 	var off: Vector2 = _gaze + _micro + cfg.drift_amp * Vector2(sin(TAU * cfg.drift_hz.x * t + _drift_ph.x),
 			sin(TAU * cfg.drift_hz.y * t + _drift_ph.y))
+	# camera tracking: blend toward the person, keep a little of the natural saccades so it never looks fixed
+	_track_w = lerpf(_track_w, 1.0 if is_tracking() else 0.0, 1.0 - exp(-delta * TRACK.blend))
+	_track = _track.lerp(_track_to, 1.0 - exp(-delta * TRACK.follow))
+	off = off * lerpf(1.0, TRACK.saccade_keep, _track_w) + _track * _track_w
 	var target_look: Vector2 = _v.look + off * (0.0 if is_asleep() else 1.0)
 	_look = target_look if not lively else _look.lerp(target_look, 1.0 - exp(-delta * 16.0))
 	if emotion != "" and _emo_len > 0.0 and t - _emo_t0 > _emo_len + REACT.ease_out:
@@ -515,3 +557,5 @@ func _apply() -> void:
 	m.set_shader_parameter("dot_pulse", 1.0 if link_state == "live" else 0.0)
 	m.set_shader_parameter("dot_breathe", 1.0 if link_state == "connecting" else 0.0)
 	m.set_shader_parameter("dot_slash", 1.0 if link_state == "muted" else 0.0)
+	m.set_shader_parameter("cam_on", 1.0 if camera_on else 0.0)
+	m.set_shader_parameter("cam_flash", clampf(1.0 - (t - _cam_flash) / 0.6, 0.0, 1.0))
