@@ -417,3 +417,12 @@ def test_set_toml_value_keeps_everything_else(tmp_path):
     assert raw["voice"] == {"voice": "vesper", "wake_threshold": 0.3, "idle_disconnect_s": 99}
     assert raw["ai"]["connection"] == "combined" and raw["music"]["provider"] == "pear" and raw["log"]["privacy"] is True
     assert p.read_text(encoding="utf-8").startswith("# mine")
+
+
+def test_speakable_strips_citations_links_and_markdown():
+    from jarves.brain import speakable
+    s = speakable("ראש ממשלת בריטניה הוא **אנדי ברנהאם**, לפי האתר ([gov.uk](https://www.gov.uk/government/ministers/pm)). "
+                  "עוד ב-[BBC](https://bbc.com/x) או https://example.com/a?b=1 סוף")
+    assert "http" not in s and "[" not in s and "**" not in s and "gov.uk" not in s
+    assert "אנדי ברנהאם" in s and "BBC" in s and s.endswith("סוף")
+    assert speakable("") == "" and speakable("שלום") == "שלום"

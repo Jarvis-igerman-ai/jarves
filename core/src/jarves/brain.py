@@ -264,6 +264,21 @@ class AgentBrain:
         return str(res.final_output or "").strip()
 
 
+_CITE = re.compile(r"\s*\(\s*\[[^\]]*\]\(https?://[^)]*\)\s*\)")      # ([gov.uk](https://...))
+_LINK = re.compile(r"\[([^\]]+)\]\(https?://[^)]*\)")                      # [text](https://...)
+_URL = re.compile(r"https?://\S+")
+
+
+def speakable(text: str) -> str:
+    """Spoken/captioned replies must not contain links or markdown. The ChatGPT-plan route (web search) returns
+    citations like ([gov.uk](https://...)): drop them (found 19 Oct), keep the words."""
+    t = _CITE.sub("", text or "")
+    t = _LINK.sub(lambda m: m.group(1), t)
+    t = _URL.sub("", t)
+    t = re.sub(r"[*_`#]{1,3}", "", t)
+    return re.sub(r"[ ]{2,}", " ", t).strip()
+
+
 # ------------------------------------------------------------------ facade
 OFFLINE_HELP = ("אני עובד כרגע בלי בינה מלאכותית, אז אני מבין רק פקודות: נגן, עצור, הבא, עוצמה, מה השעה, "
                 "תזכור ש..., מה אתה זוכר, סטטוס.")
@@ -291,7 +306,7 @@ class Brain:
         if self.agent is None:
             return Reply(OFFLINE_HELP, "offline", ok=False, code="AI_DISABLED")
         try:
-            return Reply(await self.agent.reply(text) or "…", "ai")
+            return Reply(speakable(await self.agent.reply(text)) or "…", "ai")
         except BrainUnavailable as e:
             logs.warn("ai", e.code, e.message, action=e.action)
             return Reply(OFFLINE_HELP, "offline", ok=False, code=e.code)

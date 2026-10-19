@@ -59,9 +59,14 @@ def rss_mb() -> float:
     if sys.platform != "win32":
         import resource
         return resource.getrusage(resource.RUSAGE_SELF).ru_maxrss / 1024
+    from ctypes import wintypes
+    k32, psapi = ctypes.WinDLL("kernel32"), ctypes.WinDLL("psapi")
+    k32.GetCurrentProcess.restype = wintypes.HANDLE
+    psapi.GetProcessMemoryInfo.argtypes = [wintypes.HANDLE, ctypes.POINTER(PMC), wintypes.DWORD]
+    psapi.GetProcessMemoryInfo.restype = wintypes.BOOL
     c = PMC()
     c.cb = ctypes.sizeof(c)
-    ctypes.windll.psapi.GetProcessMemoryInfo(ctypes.windll.kernel32.GetCurrentProcess(), ctypes.byref(c), c.cb)
+    psapi.GetProcessMemoryInfo(k32.GetCurrentProcess(), ctypes.byref(c), c.cb)
     return c.WorkingSetSize / 1e6
 
 
@@ -333,7 +338,7 @@ asyncio.run(main())
     rss0, rss1 = s[0][1], s[-1][1]
     cpu = max(x[2] for x in s)
     logkb = s[-1][3] / 1024
-    ok = rss1 - rss0 < 60 and cpu < 60 and logkb < 800 and d["wake"] == "ok"
+    ok = rss0 > 20 and rss1 - rss0 < 60 and cpu < 60 and logkb < 800 and d["wake"] == "ok"   # rss0 > 20: a real reading
     rec(f"S13 {minutes:g}-minute idle soak with the wake word listening (virtual mic)", ok,
         f"memory {rss0}->{rss1} MB, peak CPU {cpu}%, log {logkb:.0f} KB, wake {d['wake']}")
 
