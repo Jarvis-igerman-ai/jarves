@@ -63,7 +63,7 @@ def local_tz() -> tzinfo:
 def resolve_day(day: str, now: datetime) -> tuple[datetime, datetime, str]:
     """'today'/'היום', 'tomorrow'/'מחר', 'מחרתיים', a weekday ('חמישי', 'ביום חמישי', 'thursday'), 'week'/'השבוע',
     'YYYY-MM-DD' or 'D.M' -> (start, end, Hebrew label). Resolved here, not by the model. ValueError if unknown."""
-    d = re.sub(r"[?!.,]", "", (day or "today").strip().lower())
+    d = re.sub(r"[?!.,\s]+$", "", (day or "today").strip().lower())
     d = re.sub(r"^(?:ב?יום\s+|on\s+)", "", d)
     today = now.replace(hour=0, minute=0, second=0, microsecond=0)
 
