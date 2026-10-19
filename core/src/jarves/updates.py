@@ -58,7 +58,7 @@ SIGN_DOMAIN = b"jarves-update-manifest-v1\n"      # same constant in packaging/r
 # Ed25519 public keys (base64 of the raw 32 bytes) whose signatures this app trusts for latest.json. The private
 # half exists only as the GitHub secret JARVES_UPDATE_SIGNING_KEY (`python packaging/release.py keygen`). Empty
 # until the owner creates the key: a hosted source then reports "unavailable" (no key = no trust).
-UPDATE_PUBLIC_KEYS: tuple[str, ...] = ()
+UPDATE_PUBLIC_KEYS: tuple[str, ...] = ("k95ZucnexPDgELN5ylkcxR0fy38QH5EsQs90yIpY/Go=",)   # key id a2bfe35a27dcd5fd
 DEFAULT_RELEASES_REPO = "igalgerman/jarvis-releases"   # public, release files only (same default in release.py)
 
 
