@@ -12,10 +12,10 @@ import re
 import secrets
 from dataclasses import asdict, dataclass
 from pathlib import Path
-from typing import Protocol
+from typing import Literal, Protocol
 
 import httpx
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 from .. import logs
 from . import Skill, Tool, ToolResult
@@ -54,6 +54,30 @@ class MusicPlayer(Protocol):
     async def next(self) -> None: ...
     async def set_volume(self, percent: int) -> None: ...
     async def now_playing(self) -> NowPlaying | None: ...
+    # optional (MusicSkill checks with getattr): get_volume() -> (slider 0-100, muted), toggle_mute(), trim_history()
+
+
+# ------------------------------------------------------------------ volume scale (Pear Desktop 3.12)
+# POST /volume moves Pear's SLIDER (0-100); GET /volume reports the player's effective level on a lower curve.
+# Measured on the real player (paused, 19 Oct 2026; tools/suite_music.py notes): slider -> reported state.
+# POST 0 also mutes; any other POST unmutes.
+_VOLUME_CURVE = ((0, 0), (5, 1), (10, 2), (20, 5), (30, 8), (40, 13), (50, 20), (60, 29), (70, 40), (80, 55),
+                 (90, 74), (100, 100))
+
+
+def slider_from_state(state: float) -> int:
+    """Pear's reported volume state -> the slider position the user sees (and that POST /volume takes)."""
+    s = max(0.0, min(100.0, _num(state)))
+    for (x0, y0), (x1, y1) in zip(_VOLUME_CURVE, _VOLUME_CURVE[1:]):
+        if s <= y1:
+            return round(x0 + (x1 - x0) * (s - y0) / (y1 - y0))
+    return 100
+
+
+def _volume_tolerance(slider: int) -> int:
+    """How far a read-back slider may be from the one set and still be the same: Pear reports whole state units,
+    which are ~5 slider points apart near the bottom of the curve (slider 2 and 3 both read state 0)."""
+    return 5 if slider <= 10 else 4 if slider <= 30 else 2
 
 
 # ------------------------------------------------------------------ title matching
@@ -166,14 +190,70 @@ def _display_text(resp) -> str:
 
 def search_is_relevant(resp, query: str) -> bool:
     """YouTube Music answers ANY query, even gibberish, with something (QA 19 Oct, real Pear: "asdkjhqwe zzxxcc"
-    -> a random 2.7K-view user video, then generic hits). Accept the results only when at least one word of the
-    query appears somewhere in what YouTube shows (titles, artists, cards, "did you mean"). Hebrew and mood
-    queries pass ("משהו רגוע" -> "משהו קטן וטוב", "שלום חנוך" -> the artist card)."""
-    words = [w for w in re.findall(r"\w+", clean_title(query)) if len(w) >= 2]
+    -> a random 2.7K-view user video, then generic hits). True when at least one word of the query appears
+    somewhere in what YouTube shows. Page level only: play candidates are checked one by one (track_is_relevant)."""
+    words = _query_words(query)
     if not words:
         return True
     shown = _display_text(resp)
     return any(w in shown for w in words)
+
+
+# words that say nothing about WHICH song (a candidate matching only these is not relevant)
+_STOPWORDS = frozenset("של את לי עם גם the by of a an and to for me some music song songs play "
+                       "שיר שירים מוזיקה תנגן נגן".split())
+_HE_PREFIX = "הובלמשכ"
+
+
+def _query_words(query: str) -> list[str]:
+    return [w for w in re.findall(r"\w+", clean_title(query)) if len(w) >= 2 and w not in _STOPWORDS]
+
+
+def _word_in(word: str, tokens: set[str]) -> bool:
+    """A query word among a candidate's words (whole words: "it" must not match "with"). Tolerated: a one-letter
+    Hebrew prefix on either side ("רגוע" ~ "הרגוע", "הביטלס" ~ "ביטלס") and a Latin plural/possessive tail."""
+    if word in tokens:
+        return True
+    if "֐" <= word[0] <= "׿":
+        return any(len(t) >= 3 and ((t[0] in _HE_PREFIX and t[1:] == word) or
+                                    (word[0] in _HE_PREFIX and word[1:] == t)) for t in tokens)
+    return len(word) >= 4 and any(t.startswith(word) and len(t) - len(word) <= 2 for t in tokens)
+
+
+def track_is_relevant(t: Track, query: str) -> bool:
+    """Issue #16 (P2): a PLAYABLE candidate must itself mention the query (its title or artist/subtitle line), not
+    just some other part of the result page (a random top video must not play because the query word appears in
+    another card further down). Queries made only of filler words accept anything."""
+    words = _query_words(query)
+    if not words:
+        return True
+    tokens = set(re.findall(r"\w+", clean_title(f"{t.title} {t.subtitle}")))
+    return any(_word_in(w, tokens) for w in words)
+
+
+_ARTIST_SPLIT = re.compile(r"\s*(?:,|&|•|·|/|\+|\bfeat\.?|\bft\.?|\band\b|\bx\b)\s*")
+_KIND_WORDS = {"song", "video", "single", "ep", "album", "שיר", "סרטון", "סינגל", "אלבום", "topic", "vevo"}
+
+
+def _artist_names(s: str) -> list[str]:
+    return [n.replace(" ", "") for n in _ARTIST_SPLIT.split(clean_title(s))
+            if len(n) >= 2 and not any(c.isdigit() for c in n) and n not in _KIND_WORDS]
+
+
+def _script(s: str) -> str:
+    return "he" if any("֐" <= c <= "׿" for c in s) else "latin"
+
+
+def artists_match(player_artist: str, searched: Track) -> bool | None:
+    """Do the artist the player reports and the searched candidate (its subtitle line / title) agree?
+    None = cannot tell (an empty side, or Hebrew vs Latin spelling of what may be the same artist)."""
+    names = _artist_names(player_artist)
+    other = clean_title(f"{searched.subtitle} {searched.title}")
+    if not names or not searched.subtitle.strip() or _script(" ".join(names)) != _script(searched.subtitle):
+        return None
+    flat = other.replace(" ", "")
+    segs = _artist_names(searched.subtitle)
+    return any(n in flat for n in names) or any(s in n or n in s for s in segs for n in names if len(s) >= 3)
 
 
 class PearDesktopPlayer:
@@ -286,12 +366,12 @@ class PearDesktopPlayer:
         d = _json(r)
         if not isinstance(d, (dict, list)):
             return []
-        tracks = parse_search(d)
-        if tracks and not search_is_relevant(d, query):
-            logs.info("music", "MUSIC_SEARCH_IRRELEVANT", "search results do not mention the query; treated as not found",
-                      results=len(tracks))
-            return []
-        return tracks
+        tracks = parse_search(d, limit=10)
+        relevant = [t for t in tracks if track_is_relevant(t, query)][:5]
+        if tracks and not relevant:
+            logs.info("music", "MUSIC_SEARCH_IRRELEVANT", "no playable result mentions the query; treated as not found",
+                      results=len(tracks), page_mentions_query=search_is_relevant(d, query))
+        return relevant
 
     async def queue(self) -> list[tuple[str, bool]]:
         """Current Pear queue as (videoId, selected) in order; [] when it cannot be read (play_track falls back)."""
@@ -397,6 +477,17 @@ class PearDesktopPlayer:
     async def set_volume(self, percent: int) -> None:
         await self._req("POST", "/volume", {"volume": percent})
 
+    async def get_volume(self) -> tuple[int, bool]:
+        """(slider position 0-100 as the user sees it, muted). GET /volume reports the effective level on a lower
+        curve (state 40 = slider 70), so it is converted back; see _VOLUME_CURVE."""
+        d = _json(await self._req("GET", "/volume"))
+        if not isinstance(d, dict):
+            raise MusicError("MUSIC_PLAYER_ERROR", "Pear Desktop sent an unreadable volume", "update or restart Pear Desktop")
+        return slider_from_state(d.get("state")), bool(d.get("isMuted"))
+
+    async def toggle_mute(self) -> None:
+        await self._req("POST", "/toggle-mute")
+
     async def now_playing(self) -> NowPlaying | None:
         r = await self._req("GET", "/song")
         if r.status_code == 204:
@@ -416,6 +507,7 @@ class FakePlayer:
         self.catalog = catalog or [Track("v1", "Song One", "Artist A"), Track("v2", "Song Two", "Artist B")]
         self.np: NowPlaying | None = None
         self.volume = 50
+        self.muted = False
         self.offline = False
         self.calls: list[str] = []
 
@@ -452,6 +544,15 @@ class FakePlayer:
     async def set_volume(self, percent: int) -> None:
         self._chk("set_volume")
         self.volume = percent
+        self.muted = percent == 0             # like Pear: POST 0 mutes, any other value unmutes
+
+    async def get_volume(self) -> tuple[int, bool]:
+        self._chk("get_volume")
+        return self.volume, self.muted
+
+    async def toggle_mute(self) -> None:
+        self._chk("toggle_mute")
+        self.muted = not self.muted
 
     async def now_playing(self) -> NowPlaying | None:
         self._chk("now_playing")
@@ -468,18 +569,38 @@ class PlayArgs(BaseModel):
 
 
 class VolumeArgs(BaseModel):
-    percent: int = Field(..., ge=0, le=100, description="Music volume 0-100")
+    percent: int | None = Field(None, ge=0, le=100,
+                                description="Absolute music volume 0-100 (only when the user names a number)")
+    change: Literal["up", "down"] | None = Field(
+        None, description="Relative change: 'up' for louder (תגביר/יותר חזק), 'down' for quieter (תנמיך/יותר חלש)")
+    step: int = Field(10, ge=1, le=50, description="Points per relative change (default 10; 'a lot' = 20)")
+
+    @model_validator(mode="after")
+    def _one(self):
+        if (self.percent is None) == (self.change is None):
+            raise ValueError("give exactly one of percent or change")
+        return self
+
+
+PLAY_TIMEOUT_S = 25.0       # the registry's hard limit for music_play
+PLAY_BUDGET_S = 21.0        # ONE end-to-end deadline for search + candidates + confirm, inside the tool limit
+MIN_CANDIDATE_S = 4.0       # do not start another candidate with less time left than this
 
 
 class MusicSkill(Skill):
     name = "music"
     description = "Play music in the user's YouTube Music player (Pear Desktop)"
 
-    def __init__(self, player: MusicPlayer, max_volume: int = 70, verify_tries: int = 16) -> None:
+    def __init__(self, player: MusicPlayer, max_volume: int = 70, verify_tries: int = 16, *,
+                 trim_queue: bool = True, volume_step: int = 10, play_budget_s: float = PLAY_BUDGET_S) -> None:
         self.player = player
         self.verify_tries = verify_tries
         self._plays = 0
-        self._trim_task = None
+        self._trim_task: asyncio.Task | None = None
+        # Issue #16: trimming removes PLAYED items from Pear's queue (its visible history). Config music.trim_queue.
+        self.trim_queue = trim_queue
+        self.volume_step = volume_step
+        self.play_budget_s = min(play_budget_s, PLAY_TIMEOUT_S - 2)
         self.max_volume = max_volume
         self.last_error: MusicError | None = None
 
@@ -499,21 +620,24 @@ class MusicSkill(Skill):
 
     @staticmethod
     def _same_track(np: NowPlaying, t: Track) -> bool:
-        """Same videoId, or the same title: YouTube Music swaps a music video for its "song" counterpart (a
-        different videoId) when it plays it - seen on real Pear 3.12, 18 Oct 2026. Titles are compared without bidi
-        marks and without video/remaster decorations ("X (Official Video)" == "X"); a different song never matches."""
+        """Same videoId; or (narrow exception) the same song under another videoId: YouTube Music swaps a music
+        video for its "song" counterpart when it plays it (real Pear 3.12, 18 Oct 2026). Titles are compared without
+        bidi marks and video/remaster decorations ("X (Official Video)" == "X"), and the ARTIST must agree too
+        when both sides name one in the same script (Issue #16: same title by another artist is another song)."""
         if np.video_id and np.video_id == t.video_id:
             return True
         a, b = clean_title(np.title), clean_title(t.title)
-        if a and a == b:
-            return True
-        a, b = base_title(np.title), base_title(t.title)
-        return bool(a) and a == b
+        same_title = bool(a) and a == b
+        if not same_title:
+            a, b = base_title(np.title), base_title(t.title)
+            same_title = bool(a) and a == b
+        return same_title and artists_match(np.artist, t) is not False
 
     def _spawn_trim(self) -> None:
-        """Keep the player's queue small in the background (never blocks or fails a play)."""
+        """Keep the player's queue small in the background (never blocks or fails a play). Off with
+        music.trim_queue = false (then Pear's played history is never touched)."""
         trim = getattr(self.player, "trim_history", None)
-        if trim is None or (self._trim_task is not None and not self._trim_task.done()):
+        if not self.trim_queue or trim is None or (self._trim_task is not None and not self._trim_task.done()):
             return
 
         async def go() -> None:
@@ -521,20 +645,38 @@ class MusicSkill(Skill):
                 n = await trim()
                 if n:
                     logs.debug("music", "QUEUE_TRIMMED", f"removed {n} played items from the player's queue")
+            except asyncio.CancelledError:
+                logs.debug("music", "QUEUE_TRIM_CANCELLED", "queue trim cancelled (shutdown)")
+                raise
             except Exception:
                 logs.debug("music", "QUEUE_TRIM_FAILED", "could not trim the player's queue")
         self._trim_task = asyncio.get_running_loop().create_task(go())
 
-    async def _verify_playing(self, t: Track, tries: int | None = None) -> NowPlaying | None:
-        """Truthful status: report success only when the player itself says this track is playing. Polls up to
-        verify_tries x 0.5 s (a fresh track can take several seconds to buffer) and returns at once when it is."""
-        # Not usable as a progress signal: Pear's elapsedSeconds stays 0 while really playing and is refreshed only
-        # on events (QA 19 Oct: 0 for ~9 s, then 9 right after a pause). Requiring it gave false "not confirmed".
-        np = None
+    async def close(self) -> None:
+        """Core shutdown: stop a background trim (it gives way between single deletes) before the client closes."""
+        t, self._trim_task = self._trim_task, None
+        if t is not None and not t.done():
+            t.cancel()
+            await asyncio.gather(t, return_exceptions=True)
+        if hasattr(self.player, "close"):
+            await self.player.close()
+
+    async def _verify_playing(self, t: Track, tries: int | None = None,
+                              deadline: float | None = None) -> NowPlaying | None:
+        """Truthful status: success only when the player itself says THIS track (id, or title + artist) is playing.
+        Polls up to tries x 0.5 s (a fresh track can take seconds to buffer), never past `deadline` (loop time).
+        Issue #16 P1: Pear has NO live progress signal. Its elapsedSeconds (REST, and the position in the
+        /api/v1/ws events) is refreshed only on state events: 19 Oct 2026, a song really played 27 s -> 36 s while
+        both read 27 the whole time, so a stalled video and a playing one look the same, and requiring progress gave
+        0/10 false "not confirmed" (QA 19 Oct). What is confirmed is therefore "the player reports this song
+        playing"; results say so (data playback = "player_reports_playing") and never claim it is audible."""
+        loop = asyncio.get_running_loop()
         for _ in range(tries or self.verify_tries):
             np = await self.player.now_playing()
             if np and self._same_track(np, t) and not np.paused:
                 return np
+            if deadline is not None and loop.time() + 0.5 > deadline:
+                break
             await asyncio.sleep(0.5)
         return None
 
@@ -543,29 +685,55 @@ class MusicSkill(Skill):
 
         async def play(a: PlayArgs):
             async def go():
-                found = await p.search(a.query)
+                # Issue #16 P2: ONE end-to-end deadline (search, every candidate's queue work and confirm polling)
+                # that ends before the registry's tool timeout, so the answer is always this function's own truthful
+                # result, never a TOOL_TIMEOUT after the queue was already changed.
+                loop = asyncio.get_running_loop()
+                deadline = loop.time() + self.play_budget_s
+                left = lambda: deadline - loop.time()           # noqa: E731
+                try:
+                    found = await asyncio.wait_for(p.search(a.query), max(0.5, left() - MIN_CANDIDATE_S))
+                except TimeoutError as e:
+                    raise MusicError("MUSIC_TIMEOUT", "Pear Desktop search did not answer in time",
+                                     "check that the app is not frozen") from e
                 if not found:
                     return ToolResult(False, f"לא מצאתי את \"{a.query}\".", code="MUSIC_NOT_FOUND")
                 # Some YouTube results cannot play (region / availability; real Pear, 19 Oct: "Get Lucky" top result,
                 # Pear then skipped to an unrelated song). Try the next candidates instead of giving up (max 3).
-                np, t, tried = None, found[0], []
+                np, t, tried, out_of_time = None, found[0], [], False
                 for cand in found[:3]:
                     if any(clean_title(cand.title) == clean_title(u.title) for u in tried):
                         continue                              # the same song again (another upload): not a new try
+                    if tried and left() < MIN_CANDIDATE_S:
+                        out_of_time = True
+                        break
                     tried.append(cand)
                     t = cand
-                    await p.play_track(cand)
-                    np = await self._verify_playing(cand, tries=None if len(tried) == 1 else max(2, self.verify_tries * 3 // 4))
+                    try:
+                        await asyncio.wait_for(p.play_track(cand), max(0.5, left() - 1.0))
+                    except TimeoutError:
+                        out_of_time = True
+                        break
+                    np = await self._verify_playing(cand, None if len(tried) == 1 else max(2, self.verify_tries * 3 // 4),
+                                                    deadline=deadline)
                     if np is not None:
                         break
                     logs.info("music", "MUSIC_CANDIDATE_FAILED", f"candidate {len(tried)} did not start; trying the next")
                 if np is None:
+                    if out_of_time or left() <= 0.5:
+                        logs.warn("music", "MUSIC_PLAY_DEADLINE", "the player was too slow; stopped trying candidates",
+                                  tried=len(tried), budget_s=self.play_budget_s)
+                        return ToolResult(False, "הנגן איטי מדי כרגע: ביקשתי לנגן, אבל לא קיבלתי ממנו אישור בזמן.",
+                                          {"track": asdict(t), "tried": len(tried), "deadline_s": self.play_budget_s,
+                                           "note": "the player may still start this song late"}, "MUSIC_NOT_CONFIRMED")
                     return ToolResult(False, "ביקשתי מהנגן לנגן, אבל הוא לא מדווח שהשיר מתנגן.",
                                       {"track": asdict(t), "tried": len(tried)}, "MUSIC_NOT_CONFIRMED")
                 self._plays += 1
                 if self._plays % 6 == 1:                    # amortised: the first play, then every 6th
                     self._spawn_trim()
-                return ToolResult(True, f"מנגן: {np.title} – {np.artist}", {"now_playing": asdict(np)})
+                return ToolResult(True, f"מנגן: {np.title} – {np.artist}",
+                                  {"now_playing": asdict(np), "playback": "player_reports_playing",
+                                   "note": "the player reports this song playing; JARVES cannot hear the speakers"})
             return await self._guard(go())
 
         def nothing(ok: bool) -> ToolResult:
@@ -598,7 +766,11 @@ class MusicSkill(Skill):
                                 pressed_again = True
                                 await p.pause()
                             await asyncio.sleep(0.3)
-                        return ToolResult(False, "ביקשתי מהנגן להשהות, אבל הוא עדיין מנגן.", code="MUSIC_NOT_CONFIRMED")
+                        # an ignored pause is also the symptom of a stalled video (QA 19 Oct): say what helps
+                        return ToolResult(False, "ביקשתי מהנגן להשהות, אבל הוא עדיין מדווח שהוא מנגן. אם זה נמשך, "
+                                          "כדאי לסגור ולפתוח מחדש את Pear Desktop.",
+                                          {"action": "restart Pear Desktop if the player stays stuck"},
+                                          "MUSIC_NOT_CONFIRMED")
                     # real Pear 3.12: "next" shows up after 0.9-3.3 s and is occasionally dropped while a track is
                     # loading -> poll ~7 s and press it once more if nothing changed after ~4 s
                     loop = asyncio.get_running_loop()
@@ -622,34 +794,123 @@ class MusicSkill(Skill):
             return run
 
         async def volume(a: VolumeArgs):
+            """Real session 19 Oct: "תגביר" jumped straight to the 70 cap and "what volume is it?" was answered from
+            memory. Relative steps from the REAL current level, read back after the change; the cap is reported."""
             async def go():
-                v = min(a.percent, self.max_volume)
+                cap = self.max_volume
+                cur = await self._read_volume()
+                before = cur[0] if cur else None
+                if a.percent is not None:
+                    want = a.percent
+                elif before is None:
+                    return ToolResult(False, "אני לא יודע מה העוצמה כרגע, אז אי אפשר לשנות אותה ביחס אליה. "
+                                      "אפשר לבקש מספר מ-0 עד 100.", {"max_volume": cap}, "MUSIC_VOLUME_UNKNOWN")
+                else:
+                    step = a.step if "step" in a.model_fields_set else self.volume_step
+                    want = max(0, min(100, before + (step if a.change == "up" else -step)))
+                if before is not None and want > before and before >= cap:     # louder than the cap: never
+                    return ToolResult(True, f"העוצמה כבר {before} מתוך 100, וזו התקרה שהוגדרה ({cap}); לא הגברתי.",
+                                      {"volume": before, "previous": before, "max_volume": cap, "changed": False,
+                                       "at_limit": True, "muted": cur[1]})
+                v = min(want, cap)
                 await p.set_volume(v)
-                note = f" (מוגבל ל-{self.max_volume})" if v < a.percent else ""
-                return ToolResult(True, f"עוצמת המוזיקה {v}{note}", {"volume": v})
+                after = await self._read_volume(expect=v)
+                real = after[0] if after else v
+                if after and abs(after[0] - v) <= _volume_tolerance(v):
+                    real = v                                  # the reported level is coarse: consistent = what we set
+                muted = after[1] if after else (v == 0)
+                capped = want > cap
+                if a.change and before is not None:
+                    verb = "הגברתי" if real > before else "הנמכתי" if real < before else "העוצמה נשארה"
+                    msg = f"{verb} מ-{before} ל-{real} מתוך 100." if real != before else f"{verb} {real} מתוך 100."
+                else:
+                    msg = f"העוצמה עכשיו {real} מתוך 100."
+                if capped:
+                    msg += f" (התקרה שהוגדרה היא {cap})"
+                if cur and cur[1] and not muted:
+                    msg += " ההשתקה בוטלה."
+                return ToolResult(True, msg, {"volume": real, "previous": before, "max_volume": cap, "changed": True,
+                                              "capped": capped, "muted": muted})
             return await self._guard(go())
+
+        def mute_tool(want_muted: bool):
+            """Mute is NOT pause (real session 19 Oct: "תעשה מיוט" paused the song). Pear's toggle-mute keeps the
+            song playing and keeps the slider; verified with GET /volume."""
+            async def run(_):
+                async def go():
+                    if getattr(p, "toggle_mute", None) is None or getattr(p, "get_volume", None) is None:
+                        return ToolResult(False, "הנגן הזה לא תומך בהשתקה.", code="MUSIC_UNSUPPORTED")
+                    vol, muted = await p.get_volume()
+                    if muted == want_muted:
+                        msg = "המוזיקה כבר מושתקת." if muted else f"המוזיקה לא מושתקת; העוצמה {vol} מתוך 100."
+                        return ToolResult(True, msg, {"muted": muted, "volume": vol, "changed": False})
+                    await p.toggle_mute()
+                    after = await self._read_volume(muted=want_muted)
+                    if after is None or after[1] != want_muted:
+                        what = "להשתיק" if want_muted else "לבטל את ההשתקה"
+                        return ToolResult(False, f"ביקשתי מהנגן {what}, אבל הוא לא מדווח שזה קרה.",
+                                          {"muted": after[1] if after else None}, "MUSIC_NOT_CONFIRMED")
+                    if want_muted:
+                        msg = "השתקתי את המוזיקה. השיר ממשיך להתנגן בלי קול."
+                    else:
+                        msg = f"החזרתי את הקול. העוצמה {after[0]} מתוך 100." + (
+                            " היא על 0, אז צריך גם להגביר." if after[0] == 0 else "")
+                    return ToolResult(True, msg, {"muted": want_muted, "volume": after[0], "changed": True,
+                                                  "still_playing": True})
+                return await self._guard(go())
+            return run
 
         async def status(_):
             async def go():
                 np = await p.now_playing()
+                vol = None
+                with contextlib.suppress(MusicError):
+                    vol = await self._read_volume()
+                extra = {"volume": vol[0], "muted": vol[1], "max_volume": self.max_volume} if vol else {}
+                level = (f" עוצמה {vol[0]} מתוך 100" + (", מושתק" if vol[1] else "") + ".") if vol else ""
                 if np is None or not np.title:
-                    return ToolResult(True, "שום דבר לא מתנגן כרגע.", {"now_playing": None})
+                    return ToolResult(True, "שום דבר לא מתנגן כרגע." + level, {"now_playing": None, **extra})
                 state = "מושהה" if np.paused else "מתנגן"
-                return ToolResult(True, f"{state}: {np.title} – {np.artist}", {"now_playing": asdict(np)})
+                return ToolResult(True, f"{state}: {np.title} – {np.artist}.{level}", {"now_playing": asdict(np), **extra})
             return await self._guard(go())
 
         return [
-            Tool("music_play", "Search YouTube Music and start playing the best match (song/artist).", play,
-                 PlayArgs, permission="action", timeout_s=25),
-            Tool("music_pause", "Pause music.", simple("pause", "השהיתי."), permission="action"),
-            Tool("music_resume", "Resume music.", simple("resume", "ממשיך לנגן:"), permission="action"),
+            Tool("music_play", "Search YouTube Music and start playing the best match. query: song and/or artist in "
+                 "its usual spelling (e.g. 'Daft Punk Get Lucky', 'שלום חנוך'); for a mood or genre use concrete genre "
+                 "words ('calm piano', 'lofi'). The result says what the PLAYER reports playing.", play,
+                 PlayArgs, permission="action", timeout_s=PLAY_TIMEOUT_S),
+            Tool("music_pause", "Pause the music: the song stops where it is (music_resume continues it). NOT for "
+                 "'mute'/'השתק'/'מיוט': use music_mute.", simple("pause", "השהיתי."), permission="action"),
+            Tool("music_resume", "Resume paused music.", simple("resume", "ממשיך לנגן:"), permission="action"),
             Tool("music_next", "Skip to the next track.", simple("next", "השיר הבא:"), permission="action",
                  timeout_s=15),
-            Tool("music_stop", "Stop music (pauses the player).", simple("pause", "עצרתי את המוזיקה."),
+            Tool("music_stop", "Stop the music (pauses the player).", simple("pause", "עצרתי את המוזיקה."),
                  permission="action"),
-            Tool("music_volume", "Set the music volume (0-100).", volume, VolumeArgs, permission="action"),
-            Tool("music_status", "What is playing now.", status, permission="read"),
+            Tool("music_mute", "Mute the music WITHOUT pausing it: the song keeps playing silently. Use for 'mute', "
+                 "'השתק', 'תעשה מיוט', 'בלי קול'.", mute_tool(True), permission="action"),
+            Tool("music_unmute", "Unmute the music (bring its sound back). Use for 'unmute', 'בטל השתקה', "
+                 "'תחזיר את הקול'.", mute_tool(False), permission="action"),
+            Tool("music_volume", "Change the music volume (0-100, Pear's slider). Louder/'תגביר': change='up'; "
+                 "quieter/'תנמיך': change='down' (10 points a step; never jump to the maximum). Use percent only "
+                 "when the user names a number. The result reports the real level before and after and the allowed "
+                 "maximum (max_volume).", volume, VolumeArgs, permission="action"),
+            Tool("music_status", "What is playing now, whether it is paused, and the current volume (0-100) and "
+                 "mute state. Use it to answer 'what volume is it?'.", status, permission="read"),
         ]
+
+    async def _read_volume(self, expect: int | None = None, muted: bool | None = None) -> tuple[int, bool] | None:
+        """(slider 0-100, muted) from the player, or None when it cannot report volume. With expect/muted: wait
+        up to ~2 s for Pear to apply a change (it applies volume asynchronously) and return the last reading."""
+        get = getattr(self.player, "get_volume", None)
+        if get is None:
+            return None
+        v = await get()
+        for _ in range(10):
+            if (expect is None or abs(v[0] - expect) <= _volume_tolerance(expect)) and (muted is None or v[1] == muted):
+                break
+            await asyncio.sleep(0.2)
+            v = await get()
+        return v
 
     async def health(self) -> tuple[str, str]:
         try:

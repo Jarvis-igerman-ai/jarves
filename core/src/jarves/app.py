@@ -113,7 +113,8 @@ class Core:
         self.registry.register(StatusSkill(self.snapshot))
         if c.music.provider != "none" or self._player is not None:
             player = self._player or PearDesktopPlayer(c.music.pear_url, self.home / "pear_client_id", c.music.timeout_s)
-            self.music = MusicSkill(player, c.music.max_volume)
+            self.music = MusicSkill(player, c.music.max_volume, trim_queue=c.music.trim_queue,
+                                    volume_step=c.music.volume_step)
             self.registry.register(self.music)
         else:
             self.music = None
@@ -202,8 +203,8 @@ class Core:
         await asyncio.gather(*tasks, return_exceptions=True)
         await self.registry.drain()                 # shielded side effects finish before the store closes
         await self.link.stop()
-        if self.music is not None and hasattr(self.music.player, "close"):
-            await self.music.player.close()
+        if self.music is not None:
+            await self.music.close()                # cancels a background queue trim, then closes the client
         self.memory.close()
         self.budget.close()          # QA 19 Oct (suite_voice): its own SQLite handle kept memory.db locked after stop
         self.health.mark("stopped")
