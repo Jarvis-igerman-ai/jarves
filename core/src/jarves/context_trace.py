@@ -729,7 +729,7 @@ def view(st, sid: str) -> dict | None:
             "memory": _load(tr["memory"], []), "tools": _load(tr["tools"], []), "events": events,
             "start_tokens": start_tokens, "total_tokens": start_tokens + sum(e["tokens"] for e in notes),
             "end_blocks": list(end_blocks.values()), "diff": diff(blocks, list(end_blocks.values()), end),
-            "token_note": "token counts are estimates from the text length (no tokenizer)"}
+            "estimate_note": "token counts are estimates from the text length (no tokenizer)"}
 
 
 def diff(start: list[dict], end: list[dict], end_event: dict | None) -> dict:

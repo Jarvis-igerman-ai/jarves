@@ -118,7 +118,7 @@
   }
 
   function factList(facts) {
-    return facts.length ? el("ul", {}, facts.map((f) => el("li", { dir: "auto" }, `#${f.id} `, f.text === null ? `(${f.chars} characters, privacy mode)` : f.text,
+    return facts.length ? el("ul", {}, facts.map((f) => el("li", {}, `#${f.id} `, el("span", { dir: "auto" }, f.text === null ? `(${f.chars} characters, privacy mode)` : f.text),
       el("span", { class: "muted small" }, ` · ${f.source || "?"}${f.confidence !== undefined && f.confidence !== null ? " · " + f.confidence : ""}`)))) : el("div", { class: "muted small" }, "none");
   }
   function tabDiff(d) {
@@ -172,7 +172,7 @@
         tools.length ? [el("h3", {}, "Tools called (transcript)"), el("ul", {}, tools.map((x) => el("li", {}, `${x.name} ${x.ok === 0 ? "✗ " + (x.code || "failed") : x.ok === 1 ? "✓" : "…"} `,
           el("span", { class: "muted small" }, x.args || ""))))] : null),
       el("div", { class: "card cx-col" }, el("h2", {}, "Possibly from memory"),
-        mem.length ? el("ul", {}, mem.slice(0, 8).map((x) => el("li", { dir: "auto" }, `#${x.m.id} ${x.m.text}`, el("span", { class: "muted small" }, ` · ${x.m.source} · in ${x.m.targets.join(", ")} · ${x.s} shared words`))))
+        mem.length ? el("ul", {}, mem.slice(0, 8).map((x) => el("li", {}, `#${x.m.id} `, el("span", { dir: "auto" }, x.m.text), el("span", { class: "muted small" }, ` · ${x.m.source} · in ${x.m.targets.join(", ")} · ${x.s} shared words`))))
           : el("div", { class: "muted small" }, (d.memory || []).length ? "No remembered fact shares words with this exchange." : "No remembered facts were in his instructions.")),
       el("div", { class: "card cx-col" }, el("h2", {}, "Standing context at that moment"),
         el("ul", {}, blocksAt.map((b) => el("li", {}, link(b), el("span", { class: "muted small" }, ` · ${GROUPS[b.group] ? b.group : ""} · ${tok(b.tokens)}${b.changed_at && b.changed_at <= t.ts ? " · changed " + atTurn(turnNo(turns, b.changed_at)) : ""}`)))),
@@ -232,19 +232,21 @@
     const tabs = el("div", { class: "cx-tabs", role: "tablist" }, TABS.map(([k, label]) => el("button", { type: "button", role: "tab", class: k === ctx.tab ? "on" : "",
       "aria-selected": k === ctx.tab ? "true" : "false", onclick: () => go(sid, { ...query, tab: k }) }, label)));
     const body = { blocks: tabBlocks, timeline: tabTimeline, diff: tabDiff, why: tabWhy, tools: tabTools, memory: tabMemory }[ctx.tab] || tabBlocks;
-    const model = d.kind === "typed" ? `typed chat · ${m.backend_model || "?"}` : `${m.model || "?"} (${m.voice || "?"}) → ${m.backend_model || "?"}`;
+    const model = d.kind === "typed" ? m.backend_model || "?" : m.model || "?";
+    const modelHint = [d.kind === "typed" ? "typed chat" : `voice ${m.voice || "?"} → backend ${m.backend_model || "?"}`,
+      m.reasoning && m.reasoning.effort ? "effort " + m.reasoning.effort : null, m.service_tier ? "tier " + m.service_tier : null].filter(Boolean).join(" · ");
     render(
       header("His context", `${day(d.started)} ${clock(d.started)} · ${d.kind === "typed" ? "typed conversation" : "voice conversation"}`, exp, back),
       d.private ? el("div", { class: "card small" }, pill("medium", "privacy mode"), " Captured with privacy on: names, sizes and hashes only, no text.") : null,
       el("div", { class: "tiles" },
         tile("At the start", tok(d.start_tokens), `${d.blocks.length} blocks · estimate`),
         tile("At the end", tok(d.total_tokens), `${d.events.filter((e) => e.kind !== "end").length} pieces added`),
-        tile("Models", model, [m.reasoning && m.reasoning.effort ? "effort " + m.reasoning.effort : null, m.service_tier ? "tier " + m.service_tier : null].filter(Boolean).join(" · ")),
+        tile("Model", model, modelHint),
         tile("Tools offered", String((d.tools || []).filter((x) => x.offered).length), `${(d.tools || []).filter((x) => !x.offered).length} left out`),
         tile("Facts in prompt", String((d.memory || []).length), "remembered facts")),
       tabs, el("div", { class: "cx-search" }, search, el("button", { type: "button", onclick: () => go(sid, { ...query, q: search.value }) }, "Search"),
         ctx.q ? el("button", { type: "button", class: "ghost", onclick: () => go(sid, { ...query, q: "" }) }, "Clear") : null),
-      body(d, ctx), el("div", { class: "muted small", style: "margin-top:10px" }, d.token_note));
+      body(d, ctx), el("div", { class: "muted small", style: "margin-top:10px" }, d.estimate_note));
     if (ctx.open) {
       const node = document.getElementById(domId(ctx.open));
       if (node) { node.open = true; node.classList.add("flash"); node.scrollIntoView({ block: "center" }); }
