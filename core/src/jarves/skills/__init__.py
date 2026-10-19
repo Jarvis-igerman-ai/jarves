@@ -14,6 +14,8 @@ Permission policy (Issue #9 CR-03), enforced centrally in `SkillRegistry.call`, 
 - missing/unknown permission - denied by default.
 
 A tool's `confirm` prompt, when set, is always asked (any origin).
+Generated Skills (skills/generated.py, owner-approved SKILL.md + optional sandboxed Python) register here like any
+other Skill; `disabled` holds the ones the owner has not switched on, so no route can run them.
 Untrusted content (WP-G): after a tool with `untrusted_output` (mail, calendar text written by others) returned in
 the current user turn, the registry refuses model-origin action/destructive tools (TOOL_UNTRUSTED_TURN) until the
 user speaks again (`new_turn`), so text inside a mail can never trigger a side effect by itself.

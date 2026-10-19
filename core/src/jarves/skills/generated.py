@@ -369,6 +369,8 @@ class GeneratedSkills:
     # --- propose / validate
     def propose(self, md: str, py: str | None = None, *, by: str = "voice") -> dict:
         """Write a draft and validate it. Never installs, never runs, never touches an installed version."""
+        if len(md or "") > MAX_MD * 2 or len(py or "") > MAX_PY * 2:
+            return {"ok": False, "errors": ["draft too large"], "warnings": [], "id": None}
         try:
             meta, _ = parse_skill_md(md)
             sid = self._id(str(meta.get("name", "")))
@@ -580,14 +582,19 @@ class _Broker:
                     (u.port not in (None, 443)):
                 raise PermissionError(f"network access to {host or url[:40]} not granted (https only)")
             client = self.mgr.http
-            if client is None:
-                import httpx
-                async with httpx.AsyncClient(follow_redirects=False, timeout=8.0) as c:
-                    r = await c.get(url)
-            else:
+            if client is not None:                       # tests inject a fake client
                 r = await client.get(url)
-            text = r.text[:MAX_HTTP]
-            return {"status": r.status_code, "text": text}
+                return {"status": r.status_code, "text": r.text[:MAX_HTTP]}
+            await _public_host(host)                     # a granted name must not point into the LAN / loopback
+            import httpx
+            async with httpx.AsyncClient(follow_redirects=False, timeout=8.0) as c:
+                async with c.stream("GET", url) as r:
+                    buf = b""
+                    async for chunk in r.aiter_bytes():
+                        buf += chunk
+                        if len(buf) >= MAX_HTTP:
+                            break
+                    return {"status": r.status_code, "text": buf[:MAX_HTTP].decode(r.encoding or "utf-8", "replace")}
         if op == "now":
             from datetime import datetime
             return datetime.now().astimezone().isoformat(timespec="seconds")
@@ -595,6 +602,16 @@ class _Broker:
             logs.info("skills", "SKILL_LOG", f"{self.sid}: {str(args.get('text', ''))[:200]}", skill=self.sid)
             return True
         raise PermissionError(f"unknown ctx call {op}")
+
+
+async def _public_host(host: str) -> None:
+    import ipaddress
+    import socket
+    infos = await asyncio.get_running_loop().getaddrinfo(host, 443, type=socket.SOCK_STREAM)
+    for info in infos:
+        ip = ipaddress.ip_address(info[4][0])
+        if not ip.is_global:
+            raise PermissionError(f"{host} resolves to a non-public address; refused")
 
 
 _CHILD = Path(__file__).with_name("sandbox_child.py")

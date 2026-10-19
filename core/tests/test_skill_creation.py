@@ -330,6 +330,17 @@ async def test_network_only_to_granted_host(tmp_path):
     assert reg._untrusted_at is not None
 
 
+async def test_granted_name_pointing_into_the_lan_is_refused():
+    with pytest.raises(PermissionError, match="non-public"):
+        await gen._public_host("localhost")                  # resolves locally to 127.0.0.1 / ::1 (no network)
+
+
+def test_oversized_draft_is_not_written(tmp_path):
+    _, mgr = setup(tmp_path)
+    rep = mgr.propose(MD_SHOP + "x" * (gen.MAX_MD * 2), None)
+    assert not rep["ok"] and not (tmp_path / "skills" / "drafts").exists()
+
+
 async def test_model_tool_only_drafts(tmp_path):
     reg, mgr = setup(tmp_path)
     reg.allowed_actions |= {"skill_propose"}
