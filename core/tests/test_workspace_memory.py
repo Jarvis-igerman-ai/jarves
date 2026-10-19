@@ -150,6 +150,64 @@ async def test_settings_skill_edits_with_confirmation(tmp_path):
     m.close()
 
 
+async def test_setup_document_is_loaded_readable_in_pages_and_read_only(tmp_path):
+    r, ws, m = await _registry(tmp_path, [])
+    try:
+        assert "[SETUP.md" in ws.section("backend")
+        parts, offset = [], 0
+        while offset is not None:
+            result = await r.call("workspace_read", {"file": "SETUP", "offset": offset})
+            assert result.ok and not result.data["agent_can_edit"] and len(result.message) <= 4000
+            parts.append(result.message)
+            offset = result.data["next_offset"]
+        assert "".join(parts) == ws.read("SETUP")
+        assert "## Updates, backups" in parts[-1]  # guidance after page one is reachable
+        assert (await r.call("workspace_read", {"file": "SETUP", "offset": -1})).code == "TOOL_BAD_ARGS"
+        assert (await r.call("workspace_edit", {"file": "SETUP", "text": "pretend installed"})).code == "TOOL_BAD_ARGS"
+        with pytest.raises(wsp.WorkspaceError):
+            ws.write("SETUP", "pretend installed", by="user")
+        user = ws.read("USER")
+        (ws.root / "SETUP.md").write_text("outdated guidance", encoding="utf-8")
+        reloaded = wsp.Workspace(ws.root)
+        assert reloaded.read("SETUP").startswith("# JARVES setup") and reloaded.read("USER") == user
+    finally:
+        m.close()
+
+
+async def test_core_generates_complete_feature_docs_and_refreshes_switch_state(core):
+    from jarves import features
+    ws = core.workspace
+    before = ws.read("FEATURES")
+    assert all(f"- {fid} /" in before for fid in features.CATALOG)
+    assert "[FEATURES.md" in ws.section("backend") and "[SETUP.md" in ws.section("backend")
+    core.features.set("greeting", not core.features.enabled("greeting"))
+    assert ws.read("FEATURES") != before
+    assert "## Features (switches)" not in ws.read("TOOLS")
+    offset, text = 0, ""
+    while offset is not None:
+        result = await core.registry.call("workspace_read", {"file": "FEATURES", "offset": offset})
+        assert result.ok and not result.data["agent_can_edit"]
+        text += result.message
+        offset = result.data["next_offset"]
+    assert text == ws.read("FEATURES")
+
+
+async def test_long_generated_catalog_can_be_read_past_twenty_thousand_characters(tmp_path):
+    r, ws, m = await _registry(tmp_path, [])
+    try:
+        catalog = "feature documentation\n" * 1500 + "last feature is reachable"
+        ws.write_generated("FEATURES", catalog)
+        offset, text = 0, ""
+        while offset is not None:
+            result = await r.call("workspace_read", {"file": "FEATURES", "offset": offset})
+            assert result.ok
+            text += result.message
+            offset = result.data["next_offset"]
+        assert text == catalog
+    finally:
+        m.close()
+
+
 async def test_settings_skill_voice_and_allowlist(tmp_path):
     changes = []
     r, ws, m = await _registry(tmp_path, changes)

@@ -9,6 +9,8 @@ text editor or the dashboard):
     USER.md       stable facts/preferences about the user                    agent        front + backend
     MEMORY.md     curated long-term notes                                    agent        backend
     TOOLS.md      GENERATED: skills, tools, settings, voices                 read-only    backend
+    SETUP.md      GENERATED: setup/install help and user approval boundaries read-only    backend
+    FEATURES.md   GENERATED: complete feature catalog and readiness snapshot read-only    backend
     HEARTBEAT.md  periodic checklist (reserved; not run yet)                 user-only    not injected
     memory/YYYY-MM-DD.md  daily notes written by the curator (what was learned, from which conversation)
     .history/<FILE>/<stamp>.md  a backup of the previous version on EVERY write (undo / restore)
@@ -55,6 +57,10 @@ SPECS: dict[str, FileSpec] = {s.name: s for s in (
     FileSpec("IDENTITY.md", "name and identity", True, True, ("front", "backend"), 500),
     FileSpec("USER.md", "about the user", True, False, ("front", "backend"), 1500),
     FileSpec("MEMORY.md", "long-term notes", True, False, ("backend",), 2500),
+    FileSpec("SETUP.md", "installation and connection guide (generated; read full file for a topic)", False, False,
+             ("backend",), 1700, True),
+    FileSpec("FEATURES.md", "all supported features and readiness snapshot (generated)", False, False,
+             ("backend",), 2000, True),
     FileSpec("TOOLS.md", "skills, settings and voices (generated)", False, False, ("backend",), 3000, True),
     FileSpec("HEARTBEAT.md", "periodic checklist (not active yet)", False, False, (), 0),
 )}
@@ -132,6 +138,7 @@ class Workspace:
             (self.root / "TOOLS.md").write_text("# Tools\n(generated when the Core starts)\n", encoding="utf-8")
         self._cache: dict[str, tuple[tuple[int, int], str]] = {}
         self.listeners: list[Callable[[str], None]] = []   # called with the file name after every write
+        self.write_generated("SETUP.md", Path(__file__).with_name("setup_guide.md").read_text(encoding="utf-8"))
 
     # ------------------------------------------------------------------ reading
     def path(self, name: str) -> Path:
@@ -378,7 +385,8 @@ def augment_instructions(agent, ws: Workspace) -> None:
 FRONT_FACTS, FRONT_FACTS_CHARS = 8, 600
 FRONT_SELF = ("Also delegate (a word or two, like other quick actions) when the user asks to change your voice "
               "(\"תחליף קול\"), your personality or how you talk, to note something about them, or about your own "
-              "settings and skills: the backend has tools for these.")
+              "settings and skills: the backend has tools for these. Delegate installation, setup, connection and "
+              "feature-help questions too: the backend reads SETUP.md and FEATURES.md. Never guess setup steps.")
 
 
 def front_facts(memory) -> str:

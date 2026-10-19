@@ -39,7 +39,7 @@ ALLOWED: dict[str, tuple[str, tuple[str, ...] | None, str | None]] = {
                     ON_OFF, "off"),
 }
 EDITABLE = tuple(s.name.removesuffix(".md") for s in SPECS.values() if s.agent_edit)   # SOUL, IDENTITY, USER, MEMORY
-FileName = Literal["AGENTS", "SOUL", "IDENTITY", "USER", "MEMORY", "TOOLS", "HEARTBEAT"]
+FileName = Literal["AGENTS", "SOUL", "IDENTITY", "USER", "MEMORY", "TOOLS", "SETUP", "FEATURES", "HEARTBEAT"]
 EditName = Literal["SOUL", "IDENTITY", "USER", "MEMORY"]
 NoteName = Literal["USER", "MEMORY"]
 
@@ -93,7 +93,12 @@ class Settings:
 
 class FileArgs(BaseModel):
     file: FileName = Field(..., description="Workspace file: SOUL (personality), IDENTITY, USER (about the user), "
-                                            "MEMORY (notes), AGENTS (rules), TOOLS (abilities), HEARTBEAT")
+                                            "MEMORY (notes), AGENTS (rules), TOOLS (tools), SETUP (install help), "
+                                            "FEATURES (complete feature catalog), HEARTBEAT")
+
+
+class ReadFileArgs(FileArgs):
+    offset: int = Field(0, ge=0, description="Character offset; follow next_offset to read long docs")
 
 
 class NoteArgs(BaseModel):
@@ -130,11 +135,14 @@ class SettingsSkill(Skill):
     def tools(self) -> list[Tool]:
         ws, st = self.ws, self.settings
 
-        async def read_file(a: FileArgs):
+        async def read_file(a: ReadFileArgs):
             name = ws.path(a.file).name
             text = ws.read(name)
-            return ToolResult(True, text[:4000] or "(empty)", {"file": name, "chars": len(text),
-                                                                 "agent_can_edit": SPECS[name].agent_edit})
+            end = min(len(text), a.offset + 4000)
+            return ToolResult(True, text[a.offset:end] or "(empty)",
+                              {"file": name, "chars": len(text), "offset": a.offset,
+                               "next_offset": end if end < len(text) else None,
+                               "agent_can_edit": SPECS[name].agent_edit})
 
         async def note(a: NoteArgs):
             try:
@@ -219,7 +227,9 @@ class SettingsSkill(Skill):
 
         return [
             Tool("workspace_read", "Read one of my workspace files (personality, identity, notes about the user, "
-                                   "rules, abilities).", read_file, FileArgs, permission="read"),
+                                   "rules, abilities, SETUP install guide, FEATURES complete catalog). "
+                                   "For long files keep reading with next_offset until it is null.",
+                 read_file, ReadFileArgs, permission="read"),
             Tool("workspace_note", "Add ONE short line to USER.md (stable facts/preferences about the user) or "
                                    "MEMORY.md (other long-term notes). Never passwords or codes.", note, NoteArgs,
                  permission="action"),

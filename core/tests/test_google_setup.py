@@ -360,6 +360,24 @@ def test_private_client_override_takes_precedence_over_app_registration(home, ap
     assert auth.status()["client_source"] == "private" and not google_setup.checklist(home)["app_client"]
 
 
+async def test_app_user_google_help_uses_connect_button_instead_of_developer_cli(home, app_client):
+    reg = SkillRegistry()
+    register_google(reg, home)
+    result = await reg.call("google_connect_help", {})
+    assert not result.ok and result.data["setup"] == "app"
+    assert "Connect Google" in result.message and "command" not in result.data
+
+
+async def test_installed_app_missing_google_registration_reports_maintainer_blocker(home, monkeypatch):
+    from jarves import updates
+    monkeypatch.setattr(updates, "build_info", lambda: {"commit": "release-build"})
+    reg = SkillRegistry()
+    register_google(reg, home)
+    result = await reg.call("google_connect_help", {})
+    assert result.code == "GOOGLE_APP_NOT_CONFIGURED" and not result.ok
+    assert result.data["setup"] == "maintainer_required" and "command" not in result.data
+
+
 # ---------------------------------------------------------------------- voice: not connected -> how to connect
 async def test_not_connected_he_says_how_to_connect_and_picks_up_a_new_connection(home):
     reg = SkillRegistry()

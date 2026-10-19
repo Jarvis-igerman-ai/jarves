@@ -137,6 +137,20 @@ Manual steps:
 
 ## Troubleshooting (works without network)
 
+### Runtime setup and feature references
+
+The runtime workspace includes read-only generated references: `SETUP.md`, built from
+[`src/jarves/setup_guide.md`](src/jarves/setup_guide.md), and `FEATURES.md`, built from the actual
+feature-switch catalog. Setup guidance covers JARVES installation, AI connections, Google, music/Pear,
+voice and wake word, camera, dashboard, Skills, updates, backups and offline diagnostics. These are
+references for guided help; they do not add general installer, shell or browser tools.
+
+The backend receives bounded summaries and can fetch the full documents with the existing
+`workspace_read` tool, following `next_offset` for pagination. The voice frontend delegates setup/help
+questions to that backend. Generated references refresh at startup; `FEATURES.md` also refreshes when
+switches change. Existing personal workspace documents are preserved. Restart a running Core to load
+changed source. Use `jarvis --help` (or `jarvis -h`) for all subcommands and `jarvis features` for switches.
+
 | Need | Command |
 |---|---|
 | What's wrong now | `uv run jarves status` (live health, or the last snapshot marked **stale** if the Core is down) |

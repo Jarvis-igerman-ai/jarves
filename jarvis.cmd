@@ -14,6 +14,9 @@ rem --no-sync: never reinstall while a Core is running (its jarves.exe is locked
 set "J=uv --directory "%C%" run --no-sync jarves"
 if not exist "%C%\.venv" uv --directory "%C%" sync -q --extra voice --extra tray
 set "FIRST=%~1"
+if /i "%FIRST%"=="--help" ( %J% %* & exit /b )
+if /i "%FIRST%"=="-h" ( %J% %* & exit /b )
+if /i "%FIRST%"=="--version" ( %J% %* & exit /b )
 if "%FIRST%"=="" goto launch
 if /i "%FIRST%"=="start" goto start
 if not "%FIRST%"=="" if not "%FIRST:~0,1%"=="-" ( %J% %* & exit /b )

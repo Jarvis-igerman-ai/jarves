@@ -899,10 +899,22 @@ class GoogleConnectSkill(Skill):
                 self.registry.disabled.add(self.name)          # its "not connected" text is no longer true
                 return ToolResult(True, "גוגל מחובר עכשיו. תשאל אותי שוב ואבדוק.", {"connected": True},
                                   code="GOOGLE_NOW_CONNECTED")
+            if auth.status().get("client_source") == "app":
+                return ToolResult(False, "פותחים את לוח הבקרה, נכנסים לחיבורים ולוחצים Connect Google. "
+                                  "בוחרים חשבון ומאשרים את ההרשאות בדפדפן.",
+                                  {"setup": "app", "dashboard_page": "connections", "connected": False},
+                                  code="GOOGLE_NOT_CONNECTED")
+            from ..updates import build_info
+            if not auth.client() and build_info().get("commit"):
+                return ToolResult(False, "בחבילת ההתקנה הזאת חסרה הגדרת החיבור לגוגל. "
+                                  "צריך לפנות למפתח JARVES לעדכון החבילה; לא צריך ליצור פרויקט בגוגל בעצמך.",
+                                  {"setup": "maintainer_required", "connected": False},
+                                  code="GOOGLE_APP_NOT_CONFIGURED")
             return ToolResult(False, NOT_CONNECTED_HE, {"command": START_COMMAND}, code="GOOGLE_NOT_CONNECTED")
         return [Tool("google_connect_help", "Google Calendar and Gmail are NOT connected yet. Call this whenever the "
                      "user asks about their calendar, meetings, schedule or e-mail; say its answer (how to connect: "
-                     f"'תריץ במחשב {START_COMMAND}').", help_, permission="read")]
+                     "use its returned setup instructions; app users use Connect Google, developer builds may "
+                     f"use {START_COMMAND}).", help_, permission="read")]
 
 
 def _register_connected(registry, auth: GoogleAuth, transport, health, calendar_kw: dict) -> None:
