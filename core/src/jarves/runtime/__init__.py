@@ -219,6 +219,7 @@ def attach(core, *, mode: str = "foreground", launcher=None, tray_factory=None, 
     core.privacy_state = PrivacyPublisher(core)
     core.privacy_state.start()
     rt.start()
+    core.features.invalidate("display_control")        # probed earlier without a Runtime: the cached "no Godot" is stale
     sync_autostart(rt)
     return rt
 

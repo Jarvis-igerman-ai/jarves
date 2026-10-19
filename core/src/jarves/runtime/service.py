@@ -106,7 +106,7 @@ class Runtime:
             _current = None
 
     def _start_tray(self) -> None:
-        ok, why = desktop_session()
+        ok, why = (True, "") if self._tray_factory is not None else desktop_session()   # an injected backend needs no desktop
         if ok and self._tray_factory is None:
             ok, why = library_available()
         if not ok:

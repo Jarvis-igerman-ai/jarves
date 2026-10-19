@@ -152,7 +152,8 @@ def test_briefing_capped_hot_and_index(home):
     assert "Needs setup" in b and "google_calendar" in b and "explain_feature" in b
     assert "Music" in b or "music" in b
     f.set("music", False)
-    assert "Music (turned off" in guides.briefing(f)      # recomputed: follows the switch at once
+    # recomputed: follows the switch at once (uncapped: on a machine with more "needs setup" rows the cap cuts the tail)
+    assert "Music (turned off" in guides.briefing(f, limit=100000)
     assert len(guides.briefing(f, limit=400)) <= 430
     assert len(guides.front_briefing(f)) <= guides.BRIEFING_FRONT_CHARS + 1
     idx = guides.index_markdown()
