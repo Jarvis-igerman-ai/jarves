@@ -30,7 +30,7 @@ Branch: `worktree-agent-ae7b56a8c181f3d5f` (based on `swv2-integrate`, re-merged
 | Skill creation | `implemented_unverified` | `planned` + #21 |
 
 ## Tests run (all silent and offline; $0 API spend)
-- `python -m pytest core/tests -q`: 613 passed, 3 skipped before the last small hardening. The final M2 subset passed: 76.
+- `python -m pytest core/tests -q`: 615 passed, 3 skipped (final commit).
 - New: `test_appearance.py` (34) and `test_skill_creation.py` (42, including 29 malicious drafts, runtime containment, a tampered install and a SSRF refusal).
 - Headless Godot `face_app.tscn -- --check`: PASS. Viewer `--check --no-core`: PASS.
 - `GODOT_EXE=... pytest tests/test_face_protocol_godot.py` with appearance fuzz: PASS (3/3 reruns). The very first run after adding new scripts failed once (connection closed during Godot's first import). I could not reproduce it.
