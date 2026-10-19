@@ -1,3 +1,20 @@
+## SW-V2 (19 Oct 2026) — Issue #17: IN PROGRESS on branch `swv2-integrate`
+
+Merged so far (436 tests pass): WP-A conversation quality, WP-B store/cost/dashboard/diagnosis, WP-C backend trace + deadline/retry + background tasks, WP-D workspace files + curator + settings skill, WP-E part (Issue #16 fixes, volume/mute), WP-F Google/camera plans. Reports: `docs/reviews/SWV2_*.md`, `CONVERSATION_LOG_REVIEW_19OCT.md`.
+
+**Still open:** WP-E suite runs (Godot, voice, music) and report update; WP-G Google Calendar + Gmail skills (restart; rate-limit); dashboard wiring (workspace/memory edit, costs from WP-C usage fields, tasks.jsonl); settings editable in dashboard (backend deadline etc.); persona line for background tasks; independent code review; CI on final commit; merge to main.
+
+### User decisions (19 Oct)
+- Google: BOTH Calendar and Gmail skills; all calendars; read calendar allowed; he ASKS before reading email aloud; sending email by voice allowed only after reading the draft back and explicit confirmation; weekly reconnect accepted.
+- Camera: yes; face recognition yes (opt-in per person); physical shutter yes (next CAD round); away mode = camera OFF, configurable, default off.
+- Dashboard DB keeps full text while tuning (log.privacy=false).
+- Memory curator learns automatically, WITH the model pass (budgeted, ~$0.001/conversation).
+- Backend stall deadline: configurable in the dashboard (default 25 s).
+- Typed-chat background tasks in combined mode: use the ChatGPT plan.
+- Tiny "שניה…" lead-in acceptable; task result waits up to 5 min for a quiet moment.
+
+### Questions for the user
+- Listen to the warmer persona/greeting wording and the new voices (no GPT-Live voice is documented for Hebrew).
 ## Overnight batch 18–19 Oct: real conversation fixes, calm face, silent testing
 
 **User asks addressed:** the voice never answered; the hello was slow; "open connected"; no strange pauses; "disconnect only on long idle"; "the face moves too much / not natural"; laugh and cry at what is said; info on the screen; "all tests silent and headless".
