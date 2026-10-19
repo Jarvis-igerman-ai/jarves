@@ -96,7 +96,7 @@ PAGES.conversations = async function () {
 PAGES.session = async function (id, refresh) {
   const keepScroll = refresh === true && (window.innerHeight + window.scrollY >= document.body.scrollHeight - 40);
   const d = await api("/api/session/" + encodeURIComponent(id));
-  const s = d.session, p = null;
+  const s = d.session;
   const items = [];
   for (const t of d.turns) items.push({ ts: t.ts, kind: "turn", t });
   for (const t of d.tools) items.push({ ts: t.ts, kind: "tool", t });

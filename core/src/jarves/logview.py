@@ -138,7 +138,7 @@ def present(d: dict, privacy: bool) -> dict:
     body = {k: v for k, v in d.items() if not k.startswith("_")}
     body = logs.scrub(body, private=True) if privacy else logs.scrub(body, private=False)
     body = json.loads(_EMAIL.sub("<email>", json.dumps(body, ensure_ascii=False, default=str)))
-    return {"ts": d["_ts"], "ref": f"{d['_file']}:{d['_line']}", **body}
+    return {**body, "ts": d["_ts"], "ts_utc": body.get("ts"), "ref": f"{d['_file']}:{d['_line']}"}
 
 
 def facets(reader: LogReader) -> dict:
