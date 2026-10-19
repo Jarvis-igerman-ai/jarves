@@ -175,15 +175,46 @@ def next_runs(kind: str, spec: str, tz: ZoneInfo, after: float, n: int = 3) -> l
     return out
 
 
+def _count_between(cron: Cron, tz: ZoneInfo, a: float, b: float) -> int:
+    """How many occurrences lie in (a, b], without walking them one by one: a whole local day with no UTC-offset
+    change counts hours x minutes; the edge days and DST days count the distinct instants exactly (the same
+    instants next_after yields: a skipped time moves to after the gap, an ambiguous one is taken once)."""
+    if b <= a:
+        return 0
+    per_day = len(cron.hours) * len(cron.minutes)
+    d, last = datetime.fromtimestamp(a, tz).date(), datetime.fromtimestamp(b, tz).date()
+    n = 0
+    while d <= last:
+        if cron.day_ok(d):
+            lo = datetime(d.year, d.month, d.day, tzinfo=tz)
+            hi = datetime(d.year, d.month, d.day, 23, 59, tzinfo=tz)
+            if lo.timestamp() > a and hi.timestamp() <= b and lo.utcoffset() == hi.utcoffset():
+                n += per_day
+            else:
+                n += len({t for h in cron.hours for m in cron.minutes
+                          if a < (t := local_instant(datetime(d.year, d.month, d.day, h, m), tz)) <= b})
+        d += timedelta(days=1)
+    return n
+
+
 def latest_due(kind: str, spec: str, tz: ZoneInfo, first_due: float, now: float) -> tuple[float, int]:
-    """(the latest occurrence <= now, how many earlier ones were missed) starting from a due `first_due`."""
-    occ, missed = first_due, 0
-    for _ in range(MAX_CATCHUP_STEPS):
-        nxt = next_after(kind, spec, tz, occ)
-        if nxt is None or nxt > now:
-            break
-        occ, missed = nxt, missed + 1
-    return occ, missed
+    """(the latest occurrence <= now, how many earlier ones were missed) starting from a due `first_due`.
+    Runs on the tick (event loop), so it never walks every missed occurrence: it looks back from `now` in a
+    doubling window for the latest one and counts the rest per day (a */5 job off for months stays ~ms)."""
+    if kind == "once" or now <= first_due:
+        return first_due, 0
+    cron, span = Cron(spec), 3600.0
+    while True:
+        start = max(first_due, now - span)
+        occ, t = (first_due if start == first_due else None), start
+        for _ in range(MAX_CATCHUP_STEPS):
+            nxt = next_after(kind, spec, tz, t)
+            if nxt is None or nxt > now:
+                break
+            occ = t = nxt
+        if occ is not None:
+            return occ, _count_between(cron, tz, first_due, occ)
+        span *= 2
 
 
 def fmt_local(ts: float | None, tz: ZoneInfo) -> str:
@@ -451,10 +482,12 @@ class JobBudget:
     def __init__(self, inner, limit: int) -> None:
         self.inner, self.limit, self.used = inner, max(0, int(limit)), 0
 
-    def reserve(self, kind: str = "ai_requests", n: int = 1):
+    def reserve(self, kind: str = "ai_requests", n: int = 1, *, shared: bool = True):
+        """shared=False: count against the job cap only (the ChatGPT plan, where ChatGPTBrain._stream reserves
+        the shared daily budget per request itself; reserving it here too charged each request twice)."""
         if self.used + n > self.limit:
             raise BudgetExceeded(f"job:{kind}", self.limit, self.used)
-        res = self.inner.reserve(kind, n) if self.inner is not None else _NoReservation()
+        res = self.inner.reserve(kind, n) if self.inner is not None and shared else _NoReservation()
         self.used += n
         return res
 
@@ -997,11 +1030,10 @@ def make_skills(sched: Scheduler, registry=None) -> list:
                                         "whether to activate it; only after a clear yes call schedule_approve.",
                                   brief(v))
 
-            async def approve(a: JobIdArgs):
-                job = sched.job(a.job_id)
-                if job is None:
-                    return ToolResult(False, "no such job", code="JOB_NOT_FOUND")
-                if job["action"] == "tool":        # side-effect jobs: the user approves on the screen/dashboard
+            async def activate(job: dict) -> ToolResult:
+                """schedule_approve and job_control resume share this: a side-effect (tool) job is activated only
+                after the user approves it on the screen/dashboard, never by voice alone."""
+                if job["action"] == "tool":
                     confirm = getattr(registry, "confirm", None)
                     ok = await confirm(f"להפעיל משימה מתוזמנת: {job['human']} — {job['name']}?") if confirm else False
                     if not ok:
@@ -1013,16 +1045,30 @@ def make_skills(sched: Scheduler, registry=None) -> list:
                     return err(e)
                 return ToolResult(True, f"active: {v['human']}; next run {v['next_run_local']}", brief(v))
 
+            async def approve(a: JobIdArgs):
+                job = sched.job(a.job_id)
+                if job is None:
+                    return ToolResult(False, "no such job", code="JOB_NOT_FOUND")
+                return await activate(job)
+
             async def list_(_):
                 items = [brief(sched.view(j)) for j in sched.jobs(include_drafts=False)][:20]
                 return ToolResult(True, f"{len(items)} job(s)" if items else "no scheduled jobs", {"jobs": items})
 
             async def control(a: JobControlArgs):
+                if a.op == "resume":               # review #6: resume used to skip the on-screen confirm and
+                    job = sched.job(a.job_id)      # silently activated drafts too
+                    if job is None:
+                        return ToolResult(False, "no such job", code="JOB_NOT_FOUND")
+                    if job["status"] == "draft":
+                        return ToolResult(False, "this job is an unapproved preview: read it back and ask; after a "
+                                                 "clear yes call schedule_approve", code="JOB_NOT_APPROVED")
+                    if job["status"] != "paused":
+                        return ToolResult(True, f"resume: {job['name']} ({job['status']})", brief(sched.view(job)))
+                    return await activate(job)
                 try:
                     if a.op == "pause":
                         v = sched.pause(a.job_id, by="voice")
-                    elif a.op == "resume":
-                        v = sched.approve(a.job_id, by="voice")
                     else:
                         v = sched.run_now(a.job_id, by="voice")
                 except ScheduleError as e:
@@ -1240,7 +1286,8 @@ def make_research(tasks_manager) -> ResearchFn | None:
             r.budget, r.area, r.prefix = budget, "scheduler", "JOB_BACKEND"
             return await r(task)
         if isinstance(base, PlanResearchRunner):
-            res = budget.reserve("ai_requests")          # counts against the job cap (plan: no API spending)
+            # the job cap only: the brain reserves the shared daily budget per request (review #4: no double charge)
+            res = budget.reserve("ai_requests", shared=False)
             try:
                 return await r(task)
             finally:

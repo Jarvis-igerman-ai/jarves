@@ -102,6 +102,94 @@ def test_installer_script_policy():
     assert "-I -X utf8 -m jarves" in launcher and "JARVES_FACE_EXE" in launcher
 
 
+def test_uninstall_purge_is_guarded():
+    """Review #11: /PURGE=1 ran DelTree on whatever JARVES_HOME said. Every DelTree now sits behind the guard."""
+    iss = (PKG / "windows" / "jarves.iss").read_text(encoding="utf-8-sig")
+    code = iss.split("[Code]", 1)[1]
+    assert '#include "purge_guard.iss"' in code
+    guard_at = code.index("if not IsDataDirSafeToPurge(Dir) then")
+    assert code.count("DelTree(") == 2 and all(code.index("DelTree(", i) > guard_at
+                                                for i in range(len(code)) if code.startswith("DelTree(", i))
+    guard = (PKG / "windows" / "purge_guard.iss").read_text(encoding="utf-8-sig")
+    for marker in ("config.toml", "store.db", "memory.db"):
+        assert f"'{marker}'" in guard
+    for protected in ("USERPROFILE", "{localappdata}", "{userdocs}", "{win}", "ExtractFileDrive"):
+        assert protected in guard
+
+
+def _iscc() -> Path | None:
+    import os
+    import shutil
+    for c in (os.environ.get("JARVES_ISCC"), Path(os.environ.get("TEMP", "/nonexistent")) / "jarves-build-cache" /
+              "inno-7.1.0" / "ISCC.exe", shutil.which("ISCC")):
+        if c and Path(c).is_file():
+            return Path(c)
+    return None
+
+
+HARNESS = r"""
+[Setup]
+AppName=JARVES purge guard test
+AppVersion=1
+CreateAppDir=no
+Uninstallable=no
+PrivilegesRequired=lowest
+OutputDir=@OUT@
+OutputBaseFilename=purge_guard_test
+
+[Code]
+#include "@GUARD@"
+
+function InitializeSetup(): Boolean;
+var
+  Cases, Res: TArrayOfString;
+  I: Integer;
+begin
+  LoadStringsFromFile(ExpandConstant('{param:CASES|}'), Cases);
+  SetArrayLength(Res, GetArrayLength(Cases));
+  for I := 0 to GetArrayLength(Cases) - 1 do
+    if IsDataDirSafeToPurge(Cases[I]) then Res[I] := '1' else Res[I] := '0';
+  SaveStringsToFile(ExpandConstant('{param:OUT|}'), Res, False);
+  Result := False;      // never installs anything
+end;
+"""
+
+
+@pytest.mark.skipif(_iscc() is None, reason="Inno Setup ISCC not installed (CI builds it; build_windows.ps1 caches it)")
+def test_purge_guard_refuses_roots_profile_and_non_jarves_folders(tmp_path):
+    """Compiles purge_guard.iss into a throw-away setup that only evaluates the guard (InitializeSetup returns False:
+    nothing is installed or deleted), with USERPROFILE pointed at a fake profile that DOES hold a marker file."""
+    import os
+    import subprocess
+    profile = tmp_path / "users" / "me"
+    cases = {}
+    for name, files, want in (("cfg", ["config.toml"], "1"), ("store", ["store.db"], "1"), ("mem", ["memory.db"], "1"),
+                              ("empty", [], "0"), ("other", ["photo.jpg", "notes.txt"], "0")):
+        d = tmp_path / "homes" / name
+        d.mkdir(parents=True)
+        for f in files:
+            (d / f).write_text("x")
+        cases[str(d)] = want
+        cases[str(d) + "\\"] = want
+    profile.mkdir(parents=True)
+    (profile / "config.toml").write_text("x")
+    (tmp_path / "users" / "memory.db").write_text("x")
+    cases[str(profile)] = "0"                          # the profile itself, even with a marker in it
+    cases[str(tmp_path / "users")] = "0"               # a parent of the profile
+    drive = str(tmp_path)[:2]
+    cases.update({drive + "\\": "0", drive: "0", "": "0", "   ": "0"})
+    (tmp_path / "cases.txt").write_text("\n".join(cases), encoding="utf-8")
+    src = tmp_path / "harness.iss"
+    src.write_text(HARNESS.replace("@OUT@", str(tmp_path)).replace("@GUARD@", str(PKG / "windows" / "purge_guard.iss")),
+                   encoding="utf-8")
+    subprocess.run([str(_iscc()), "-q", str(src)], check=True, capture_output=True, timeout=120)
+    env = {**os.environ, "USERPROFILE": str(profile)}
+    subprocess.run([str(tmp_path / "purge_guard_test.exe"), "/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART",
+                    f"/CASES={tmp_path / 'cases.txt'}", f"/OUT={tmp_path / 'out.txt'}"], env=env, timeout=120)
+    got = (tmp_path / "out.txt").read_text(encoding="utf-8").split()
+    assert dict(zip(cases, got)) == cases
+
+
 def test_build_pins_every_download_by_sha256():
     ps = (PKG / "build_windows.ps1").read_text(encoding="utf-8")
     urls = [l for l in ps.splitlines() if "url = " in l]
