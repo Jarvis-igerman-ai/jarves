@@ -68,6 +68,9 @@ def messages():
     out.append(m("user.transcript", {"text": "מה השעה"}))
     out.append(m("error", {"code": "X", "message": "boom", "action": "retry"}))
     out.append(m("confirm.request", {"id": "c1", "prompt": "למחוק הכל?"}))
+    out += [m("dashboard.opened", p) for p in (
+        {"url": "http://127.0.0.1:5000/", "browser": True}, {"url": "http://127.0.0.1:5000/", "browser": False},
+        {"url": None, "browser": "yes"}, {})]
     out.append(m("no.such.type", {"a": 1}))
     out.append("this is not json {{{")
     out.append(json.dumps([1, 2, 3]))

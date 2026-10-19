@@ -31,6 +31,11 @@ The first software release is a **real, persistent, Hebrew-speaking personal ass
 - Email content is untrusted (prompt injection): sanitize, fence, and refuse action tools in the same turn without spoken confirmation. CI uses fakes only; the user creates the Cloud project and consent screen at a user gate.
 - **Camera** ([plan](plans/CAMERA_PLAN.md)): keep Camera Module 3 Wide (CAD E03) + printed privacy shutter; off by default, no recording, local presence/gaze on the Pi CPU, single still to `gpt-6-luna` only on request ("מה זה?"). GPT-Live 1 does not accept images (checked 2026-10-19). Phases C0 (CAD bosses/shutter, #8) to C6; accelerators only if measured CPU contention.
 
+### Stage scope after the 19 Oct review — what is in and what waits
+**Active (software, Windows first):** SW-V2 spec milestones M1–M6 ([spec](JARVES_SW_V2_IMPLEMENTATION_SPEC.md)) under Issue #17: always-on runtime + tray, appearances (Face / 2D / 3D / hidden), scheduler / reports / notes / sandbox, Calendar read + create/update (never delete) and Gmail with confirmations, usage meters + backup, Windows Setup.exe built by CI after merge (latest 3 kept), update notify + ask, custom wake phrase (train/load a custom openWakeWord model), dashboard (home LAN with pairing), feature switches with Windows/Pi status.
+**Not at this stage (hardware / physical, deferred by the owner on 19 Oct):** Raspberry Pi 5 install and boot, real microphone array and acoustics, camera module purchase and mounting (CAD camera bosses, printed shutter, Issue #8), physical mute, thermals and Pi render performance, spec M7 Pi parity. These stay `planned` / `implemented_unverified` in the capability matrix with real issues; no Pi feature is called verified without physical evidence.
+**Later ideas:** shared PC + robot memory (FUTURE_IDEAS F01), remote dashboard outside the home (F04), skill/avatar library (F05).
+
 ## Design feedback workflow
 Work forward **FreeCAD → Blender → Godot**, but process feedback back to the **owning source layer** (geometry and mounts in FreeCAD, finishes in Blender, runtime/UI in Godot, behavior in Core/DevicePort). Re-export only affected downstream assets; focused verification at boundaries; user approval after each review round. Never patch physical geometry only in Godot. Manufacturing path is FreeCAD → slicer → 3D print.
 

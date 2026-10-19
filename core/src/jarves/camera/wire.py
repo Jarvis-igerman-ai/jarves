@@ -82,8 +82,7 @@ def attach(core) -> CameraService:
     core.registry.allowed_actions |= {"camera_enroll"}      # still asks the person for consent on screen
     core.registry.register(CameraSkill(svc, core.registry, on_untrusted=taint))
     try:                                                    # TOOLS.md was generated before this Skill existed
-        from .. import workspace as wsp
-        core.workspace.write_generated("TOOLS.md", wsp.tools_markdown(core.registry, core.settings.view()))
+        core._write_tools_md()                              # skills + the Features section
     except Exception:
         logs.warn("camera", "TOOLS_MD_FAILED", "could not refresh TOOLS.md with the camera tools")
     svc.start()

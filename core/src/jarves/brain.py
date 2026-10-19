@@ -110,6 +110,7 @@ def _d(obj: Any) -> dict:
 def usage_fields(u: dict) -> dict:
     """Token usage as LOG fields: names containing "token" are masked as credentials by logs.scrub."""
     return {"usage_in": u.get("input_tokens", 0), "usage_out": u.get("output_tokens", 0),
+            **({"usage_cached": u["cached_tokens"]} if u.get("cached_tokens") else {}),
             **({"usage_reasoning": u["reasoning_tokens"]} if "reasoning_tokens" in u else {})}
 
 
@@ -134,6 +135,7 @@ class BackendTrace:
         self.t0 = clock()
         self.stage = "starting"
         self.queries: list[str] = []
+        self.search_calls = 0
         self.sources = 0
         self.pages = 0
         self.text = ""
@@ -182,6 +184,7 @@ class BackendTrace:
                     if q and q not in self.queries:
                         self.queries.append(q)
                     self.sources += srcs
+                    self.search_calls += 1      # billed per call ($10/1k), repeats included (WP-H cost hook)
                     self._log(logs.info, "WEB_SEARCH_DONE", "web search finished", query=q, sources=srcs,
                               status=item.get("status") or "")
                 if q:
@@ -230,7 +233,15 @@ class BackendTrace:
         if u:
             self.usage = {"input_tokens": u.get("input_tokens", 0), "output_tokens": u.get("output_tokens", 0),
                           "reasoning_tokens": _d(u.get("output_tokens_details")).get("reasoning_tokens", 0)}
+            cached = _d(u.get("input_tokens_details")).get("cached_tokens") or 0
+            if cached:
+                self.usage["cached_tokens"] = cached
         extra: dict[str, Any] = {}
+        # exact cost inputs for the history store (WP-H): the model and tier the server actually used
+        if resp.get("model"):
+            extra["model"] = str(resp["model"])
+        if resp.get("service_tier"):
+            extra["tier"] = str(resp["service_tier"])
         if status == "failed":
             err = _d(resp.get("error"))
             self.error = str(err.get("code") or "response_failed")
@@ -242,7 +253,8 @@ class BackendTrace:
         if self.quiet:
             return
         level(self.area, f"{self.prefix}_DONE", f"backend response {status}", backend_s=self.elapsed(),
-              **{"searches": len(self.queries), "sources": self.sources, "pages": self.pages,
+              **{"searches": len(self.queries), "web_searches": self.search_calls, "sources": self.sources,
+                 "pages": self.pages,
                  **usage_fields(self.usage), **self.ids, **extra})
 
 
@@ -419,13 +431,17 @@ class AgentBrain:
         except BudgetExceeded as e:     # raised by BudgetedModel instead of sending the next model call
             raise BrainUnavailable("AI_BUDGET", str(e), e.action) from e
         raw = getattr(res, "raw_responses", []) or []      # already counted per call by BudgetedModel
-        tokens = {"input_tokens": 0, "output_tokens": 0}
+        tokens = {"input_tokens": 0, "output_tokens": 0, "cached_tokens": 0}
+        searches = 0
         for r in raw:
             u = getattr(r, "usage", None)
-            for k in tokens:
+            for k in ("input_tokens", "output_tokens"):
                 tokens[k] += int(getattr(u, k, 0) or 0)
+            tokens["cached_tokens"] += int(getattr(getattr(u, "input_tokens_details", None), "cached_tokens", 0) or 0)
+            searches += sum(1 for o in (getattr(r, "output", None) or []) if getattr(o, "type", "") == "web_search_call")
         logs.info("ai", "AI_REPLY", "agent replied", model_calls=len(raw), used_today=self.budget.used("ai_requests"),
-                  duration_s=round(time.monotonic() - t0, 2), **usage_fields(tokens))
+                  duration_s=round(time.monotonic() - t0, 2), model=self.cfg.text_model, web_searches=searches,
+                  **usage_fields(tokens))
         return str(res.final_output or "").strip()
 
 
