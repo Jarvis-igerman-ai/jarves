@@ -216,6 +216,11 @@ MALICIOUS = {
     "typing_sys_escape": (_md(), "import re\n" + _py("return re.enum.sys.modules")),
     "string_dunder_subscript": (_md(), _py("return args['__class__']")),
     "format_attr_walk": (_md(), _py("return '{0.__class__}'.format(args)")),
+    # the independent reviewer's exact sandbox-escape payload: string.Formatter().get_field walks "0._os.system"
+    # with getattr and hands back os.system. Rejected on BOTH `import string` and the .get_field attribute.
+    "string_formatter_getfield": (_md(), "import string, random\n" + _py(
+        'return string.Formatter().get_field("0._os.system", (random,), {})[0]')),
+    "string_import_alone": (_md(), "import string\n" + _py("return string.ascii_letters")),
     "undeclared_network": (_md(), _py("return ctx.http_get('https://example.com')")),
     "undeclared_storage": (_md("[]"), _py("return ctx.storage_get('k')")),
     "destructive_tool": (_md(), _py("return 1", perm="destructive")),
@@ -275,6 +280,8 @@ async def test_runtime_containment_even_if_validation_were_bypassed(monkeypatch)
     assert not r["ok"] and "PermissionError" in r["error"] and "not granted" in r["error"]
     r = await _run("def evil_run(args, ctx):\n    while True:\n        pass\n", timeout_s=1.5)
     assert not r["ok"] and "timed out" in r["error"]
+    r = await _run("def evil_run(args, ctx):\n    import string\n    return string.ascii_letters\n")
+    assert not r["ok"] and "ImportError" in r["error"]       # `string` removed from the allow-list (item 1)
     r = await _run("def evil_run(args, ctx):\n    return 'fine'\n")
     assert r == {"done": True, "ok": True, "message": "fine", "data": {}}
 
@@ -333,6 +340,48 @@ async def test_network_only_to_granted_host(tmp_path):
 async def test_granted_name_pointing_into_the_lan_is_refused():
     with pytest.raises(PermissionError, match="non-public"):
         await gen._public_host("localhost")                  # resolves locally to 127.0.0.1 / ::1 (no network)
+
+
+def _fake_gai(*addrs):
+    import socket as _s
+    async def gai(host, port, **kw):
+        return [(_s.AF_INET, _s.SOCK_STREAM, 6, "", (a, 443)) for a in addrs]
+    return gai
+
+
+async def test_public_host_pins_the_checked_ip(monkeypatch):
+    """DNS-rebinding fix (reviewer item 8): resolve once, return a verified PUBLIC ip for the broker to connect to;
+    refuse if ANY answer is private so a name cannot mix a public and a loopback address."""
+    loop = asyncio.get_running_loop()
+    monkeypatch.setattr(loop, "getaddrinfo", _fake_gai("93.184.216.34"))
+    assert await gen._public_host("example.com") == "93.184.216.34"
+    monkeypatch.setattr(loop, "getaddrinfo", _fake_gai("93.184.216.34", "10.0.0.5"))
+    with pytest.raises(PermissionError, match="non-public"):
+        await gen._public_host("rebind.example")
+
+
+async def test_http_get_connects_to_the_resolved_ip_not_a_re_resolution(tmp_path, monkeypatch):
+    """The broker's real path (no injected client) must go through _public_host and never re-resolve the name."""
+    reg, mgr = setup(tmp_path)                               # mgr.http is None -> the real httpx path
+    async def refuse(host):
+        raise PermissionError(f"{host} resolves to a non-public address; refused")
+    monkeypatch.setattr(gen, "_public_host", refuse)
+    broker = gen._Broker(mgr, "weather", {"network:api.example.com"})
+    with pytest.raises(PermissionError, match="non-public"):
+        await broker("http_get", {"url": "https://api.example.com/x"})
+
+
+async def test_approve_writes_the_reviewed_bytes_never_re_reads_the_draft(tmp_path, monkeypatch):
+    """TOCTOU fix (reviewer item 7): approve installs the exact md/py it validated, not a fresh copy off disk
+    that a concurrent propose() could have swapped after the sha check."""
+    reg, mgr = setup(tmp_path)
+    proposed_py = py_shop()
+    rep = mgr.propose(MD_SHOP, proposed_py)
+    monkeypatch.setattr(gen.shutil, "copy2",
+                        lambda *a, **k: pytest.fail("approve must not re-read draft files from disk"))
+    mgr.approve("shopping", rep["sha256"], by="dashboard")
+    md, py = mgr.files("shopping")
+    assert md == MD_SHOP and py == proposed_py
 
 
 def test_oversized_draft_is_not_written(tmp_path):

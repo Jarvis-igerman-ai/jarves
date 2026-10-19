@@ -26,6 +26,7 @@ import hashlib
 import ipaddress
 import json
 import os
+import re
 import secrets
 import socket
 import threading
@@ -50,6 +51,19 @@ LOOPBACK_HOSTS = ("127.0.0.1", "localhost", "::1")
 PUBLIC_PATHS = {("GET", "/pair"), ("POST", "/api/pair"), ("GET", "/static/pair.js"), ("GET", "/static/style.css"),
                 ("GET", "/static/m4.css")}
 ADMIN_ONLY = ("/api/devices", "/api/audit", "/api/features/dashboard_lan")
+# A paired phone (device role) gets an ALLOWLIST, never a denylist: reads only, plus the explicit low-risk writes
+# below. Everything a denylist used to let through by omission - approving/granting/enabling a generated Skill,
+# installing an update, adding a folder grant or reading a file, switching a risky feature (camera, gmail_send...)
+# on, stopping the Core, deleting/restoring data, editing config.toml, running a backup/restore - is now refused
+# by default because it is not on the list. These stay the computer's own job (loopback session).
+DEVICE_READ_DENY = ADMIN_ONLY + ("/api/files", "/api/backup")       # not even readable from a phone
+_DEVICE_WRITE_OK = re.compile(
+    r"/api/diagnose"                                               # run self-diagnosis
+    r"|/api/issues/\d+"                                            # change an issue's status
+    r"|/api/memory|/api/memory/\d+|/api/memory/undo|/api/memory/forget-session"   # memory facts (all reversible)
+    r"|/api/notes|/api/notes/\d+"                                  # notes
+    r"|/api/alerts/(?:pause|resume|test|dismiss_all|\d+)"          # alert controls
+    r"|/api/session/[^/]+/review")                                 # ask for an AI review of one conversation
 
 
 def _hash(s: str) -> str:
@@ -269,12 +283,16 @@ class Access:
         return None
 
     def allowed(self, who: dict, method: str, path: str) -> bool:
-        """Least privilege for paired devices."""
+        """Least privilege for paired devices: an ALLOWLIST (reads + a few safe writes), default-deny."""
         if who["kind"] == "local":
-            return True
+            return True                               # the owner on this computer (loopback) can do anything
         if path == f"/api/devices/{who['id']}/revoke" and method == "POST":
             return True                               # a phone may un-pair itself
-        return not any(path == p or path.startswith(p + "/") for p in ADMIN_ONLY)
+        if any(path == p or path.startswith(p + "/") for p in DEVICE_READ_DENY):
+            return False                              # device/audit/LAN admin, file browser and backups: never
+        if method in ("GET", "HEAD"):
+            return True                               # any other read
+        return bool(_DEVICE_WRITE_OK.fullmatch(path))  # only the explicitly safe writes; everything else refused
 
 
 def parse_cookies(header: str) -> dict:
