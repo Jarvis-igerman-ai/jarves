@@ -82,3 +82,20 @@ None required — all changes are within owned files. No live.py/scheduler.py/up
 ## Pi (#21) gaps
 - Generated-skill OS sandbox on Linux/Pi (bubblewrap/seccomp) still open; Windows now has a Job Object cap.
 - http_get IP pinning uses `getaddrinfo` + httpx; unverified on Pi OS.
+
+## Addendum (20 Oct): owner decisions on phone rights, undo journal, backup pruning
+(A) Paired LAN phones may additionally (allowlist in `dashboard_auth._DEVICE_WRITE_OK`, body limits in
+`device_body_ok`, called from the dashboard dispatcher for device sessions only):
+- scheduler: `POST /api/jobs` (create; the route only builds research/reminder drafts), `POST /api/jobs/<id>` with op
+  pause, resume, approve or delete, and `POST /api/schedule/parse`. A TOOL job (side effects) can never be approved
+  or resumed from a phone (403); that needs the on-screen approval on the PC. run_now and edit stay PC-only.
+- features: `POST /api/features/<id>` only when `jarves.features` risk is `low`; medium/high (calendar_write, camera,
+  gmail_send, workspace_agent_edit, ...) and `dashboard_lan` stay PC-only (403, also for `reset`).
+- calendar: `POST /api/calendar/preview` (op create/update only) and `/commit`; `calendar_write` must already be on
+  (the handler refuses otherwise) and cannot itself be switched from a phone. Still no delete route or op.
+Everything else remains denied. The loopback owner is unchanged. Tests: `tests/test_dashboard_phone.py`.
+(B) The memory-fact undo journal (`store.db` meta `memory_undo`) is purged 24 h after each entry
+(`dashboard.purge_memory_undo`): on every dashboard start, hourly while it runs, and expired entries are ignored on
+read, so the undo button works for 24 h and not longer. Test with a fake clock: `test_memory_undo_journal_is_purged_after_24h`.
+(C) Verified: delete conversations / mask history prune backups only when that request carries `prune_backups: true`
+(the dashboard confirms each time); nothing is remembered. Test: `test_backup_pruning_is_asked_every_time_never_remembered`.

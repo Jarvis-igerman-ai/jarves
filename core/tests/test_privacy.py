@@ -154,6 +154,26 @@ def test_privacy_purges_the_undo_journal_and_offers_backup_pruning(env, home):
     assert not list((home / "backups").glob("*.zip"))
 
 
+def test_backup_pruning_is_asked_every_time_never_remembered(env, home):
+    """Owner decision (C): pruning backups that hold the data needs an explicit prune_backups in EACH request; an
+    earlier yes is not remembered, and a plain purge never touches a backup."""
+    d, sink = env
+    (home / "backups").mkdir(exist_ok=True)
+    zips = [home / "backups" / f"jarves-backup-2026010{i}-000000-manual.zip" for i in (1, 2, 3)]
+    for z in zips:
+        z.write_bytes(b"PK\x03\x04 old data")
+    st, r = send(d, "POST", "/api/privacy/delete-conversations", {"confirm": True})
+    assert st == 200 and r["backups_removed"] == 0 and r["backups_hint"] and all(z.exists() for z in zips)
+    st, r = send(d, "POST", "/api/privacy/mask-history", {"confirm": True, "prune_backups": False})
+    assert r["backups_removed"] == 0 and all(z.exists() for z in zips)
+    st, r = send(d, "POST", "/api/privacy/mask-history", {"confirm": True, "prune_backups": True})
+    assert r["backups_removed"] == 3 and not any(z.exists() for z in zips)
+    zips[0].write_bytes(b"PK\x03\x04 newer backup")                     # a later backup is not pruned by the old yes
+    st, r = send(d, "POST", "/api/privacy/delete-conversations", {"confirm": True})
+    assert r["backups_removed"] == 0 and zips[0].exists()
+    assert send(d, "POST", "/api/privacy/delete-conversations", {"prune_backups": True})[0] == 400   # no confirm: no-op
+
+
 def test_masking_rewrites_a_log_file_the_core_holds_open(home):
     (home / "logs").mkdir()
     p = home / "logs" / "jarves.log"
