@@ -236,8 +236,7 @@ def test_local_switches_interface_matches_features_contract(tmp_path):
             raise RuntimeError("broken backend")
     s2 = Switches(mem, features=Features())
     s2.register_all({})
-    assert [c[0] for c in calls] == ["camera", "face_recognition", "camera_when_away"]
-    assert all(c[3] is False for c in calls)                       # default_enabled False for all three
+    assert calls == []                                             # jarves.features registers the three itself
     assert s2.active("camera") is False                            # a failing switch backend counts as OFF
     mem.close()
 
@@ -457,15 +456,16 @@ async def test_presence_recognises_enrolled_person_for_greeting(tmp_path):
 # ------------------------------------------------------------------ Core wiring
 async def test_core_attaches_camera_switched_off(core):
     from conftest import open_face
-    assert core.camera is not None and core.registry.get("camera_describe") is not None
+    assert core.camera is not None
     assert core.camera.switches.active("camera") is False
-    assert "camera_describe" in core.workspace.read("TOOLS.md")
+    assert core.registry.get("camera_describe") is None            # switched off: the model is not offered the tool
+    assert "camera" in core.workspace.read("TOOLS.md")             # ...and TOOLS.md says it is off
     face = await open_face(core)
     await asyncio.sleep(0.2)
     r = await core.registry.call("camera_status", {})
     assert r.ok and r.data["enabled"] is False and r.data["indicator"] is False
     r = await core.registry.call("camera_describe", {})
-    assert not r.ok and r.code in ("CAMERA_DISABLED", "CAMERA_UNAVAILABLE")
+    assert not r.ok and r.code in ("CAMERA_DISABLED", "CAMERA_UNAVAILABLE", "FEATURE_OFF")
     await face.send("presence.changed", {"present": True})
     await asyncio.sleep(0.1)
     assert all(m["type"] != "camera.indicator" or m["payload"]["on"] is False for m in face.msgs)
