@@ -27,9 +27,14 @@ def make(home, **kw):
 
 
 def _connect_google(home):
-    """What `jarvis google start` leaves behind (WP-K google_auth token file)."""
+    """What `jarvis google start` leaves behind (WP-K google_auth token file): the default scopes Google granted
+    (features now require the per-scope consent, not only a refresh token)."""
+    import json
+
+    from jarves.google_auth import ALL_SCOPES
     (home / "google").mkdir(exist_ok=True)
-    (home / "google" / "token.json").write_text('{"refresh_token": "1//x", "scopes": []}', encoding="utf-8")
+    (home / "google" / "token.json").write_text(json.dumps({"refresh_token": "1//x", "scopes": list(ALL_SCOPES)}),
+                                                encoding="utf-8")
 
 
 # ---------------------------------------------------------------------- the data
