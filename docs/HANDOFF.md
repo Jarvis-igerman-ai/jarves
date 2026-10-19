@@ -25,6 +25,8 @@ Merged so far (436 tests pass): WP-A conversation quality, WP-B store/cost/dashb
 
 - Wave-2 decisions (19 Oct): tray + show/hide verified by the owner on Windows; first window close shows a one-time "still running in the tray" notice (TODO); installer ticks "start at login" by default; read-only OpenAI admin key + monthly API budget $20 are SETUP steps (guided in the dashboard/by voice); backups exclude face data and API keys; plain "avatar" = 2D avatar; quiet hours 22:00-07:00; missed-job max age 6 h and "ימי חול" = Sunday-Thursday, BOTH configurable (weekday set configurable is TODO); music restart tool with confirmation (TODO).
 
+- Feature suggestions (docs/plans/FEATURE_SUGGESTIONS.md): owner is reading the list; build nothing from it until they choose. Already said: YES to an outbound-only Telegram channel; owner HAS Home Assistant (need URL/version/devices when starting #7); rocket alerts (#21) wait for their reading. Avatars: 2D good but improvable, 3D "creepy" -> WP-N restyle running.
+
 ### Questions for the user
 - Listen to the warmer persona/greeting wording and the new voices (no GPT-Live voice is documented for Hebrew).
 ## Overnight batch 18–19 Oct: real conversation fixes, calm face, silent testing
