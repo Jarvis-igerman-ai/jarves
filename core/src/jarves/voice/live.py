@@ -177,6 +177,17 @@ CONFIRM_NOTE_AFTER_S = 2.5      # an on-screen approval still unanswered after t
 CONFIRM_NOTE = ("A tool is waiting for the user's approval on the screen and will NOT run without it. In a few "
                 "natural Hebrew words ask the user to approve it on the screen (for example 'צריך את האישור שלך "
                 "על המסך'). Do not say it is done and do not guess the outcome.")
+# Stalled backend (real session 19 Oct: an Intel-stock lookup gave no result for 90+ s, JARVES kept saying "עוד
+# רגע"). GPT-Live offers no client cancel for a server-owned delegation, so after backend_deadline_s the Core gives
+# up on it, retries ONCE itself (retry_lookup: tasks.ResearchRunner, own hard deadline) and tells GPT-Live the
+# outcome. Honest failure wording is fixed by the user's request.
+STALL_FAIL_NOTE = ("The backend lookup failed: it got no result in time. Tell the user honestly, in exactly these "
+                   "words: 'לא הצלחתי להביא את זה, ננסה שוב?'. Do not say 'one more moment' and do not guess.")
+STALL_RESULT_NOTE = ("The backend lookup finished. Give the user just this answer now, briefly, in natural Hebrew, "
+                     "without another acknowledgement and without delegating again.\nResult: {answer}")
+NOTE_MAX_CHARS = 1000           # commentary is limited to 500 tokens; Hebrew is ~2-3 characters per token
+RETRY_DEADLINE_S = 25.0         # the Core's own retry of a stalled lookup
+ANNOUNCE_USER_QUIET_S = 1.5     # a background-task announcement waits until the user has been quiet this long
 
 
 def clock_note(now=None) -> str:
@@ -393,8 +404,14 @@ class LiveVoice(SessionLifecycle):
                  on_activity: Callable[[str, str, str], Any] | None = None,
                  on_level: Callable[[float], Any] | None = None, reasoning_effort: str = "",
                  service_tier: str = "", max_output_tokens: int = 0, echo_tail_s: float = 0.4,
-                 clock_context: bool = False, progress_after_s: float = 0.0, no_speech_timeout_s: float = 0.0) -> None:
+                 clock_context: bool = False, progress_after_s: float = 0.0, no_speech_timeout_s: float = 0.0,
+                 backend_deadline_s: float = 0.0, retry_lookup: Callable[[str], Awaitable[str]] | None = None,
+                 reasoning_summary: str = "") -> None:
         self.on_emotion, self.on_activity, self.on_level = on_emotion, on_activity, on_level
+        # Backend reliability (SW-V2 WP-C): a delegated response still unfinished after backend_deadline_s (0 = off)
+        # is abandoned; retry_lookup(question) -> answer text retries it once in the Core; then an honest result.
+        self.backend_deadline_s, self.retry_lookup, self.reasoning_summary = (backend_deadline_s, retry_lookup,
+                                                                              reasoning_summary)
         # A session opened by "Hey Jarvis" in which nobody ever speaks (a FALSE wake: "hey Travis", a TV) ends after
         # this many seconds instead of idling for minutes (each such session costs money). 0 = off.
         self.no_speech_timeout_s = no_speech_timeout_s
@@ -458,6 +475,12 @@ class LiveVoice(SessionLifecycle):
         self._budget_settled = False
         self._tools_running = 0         # Skill calls in flight (run in their own task, never blocking events)
         self._confirm_pending = False   # a destructive tool waits for the user's approval on the screen
+        self._trace = None              # brain.BackendTrace of the backend response in flight
+        self._user_turns: list[str] = []    # last few user utterances (the question a stalled lookup retries)
+        self._abandoned: set = set()    # delegations given up after the deadline (a late answer is only logged)
+        self._retry_task: asyncio.Task | None = None
+        self._ticker: asyncio.Task | None = None
+        self._shown: tuple[str, str] = ("", "")
 
     def session_config(self) -> dict:
         tools: list[dict] = live_tools(self.registry)
@@ -470,6 +493,10 @@ class LiveVoice(SessionLifecycle):
             "tool_choice": "auto", "parallel_tool_calls": False, "text": {"verbosity": "low"}}
         if self.reasoning_effort:
             responses["reasoning"] = {"effort": self.reasoning_effort}
+        if self.reasoning_summary and self.reasoning_effort != "none":
+            # reasoning summaries for the debug log (BackendTrace REASONING); with effort "none" there is nothing
+            # to summarise, so the delegation config stays exactly as measured in LIVE_CONVERSATION_TUNING
+            responses.setdefault("reasoning", {})["summary"] = self.reasoning_summary
         if self.service_tier:
             responses["service_tier"] = self.service_tier
         if self.max_output_tokens:
@@ -633,8 +660,10 @@ class LiveVoice(SessionLifecycle):
             # and never while the user is being asked to approve something on the screen.
             t0 = getattr(self, "_backend_t0", None)
             young = t0 is None or time.monotonic() - t0 < PROGRESS_MIN_RESPONSE_S
-            if (not young and not self._confirm_pending
-                    and time.monotonic() - max(self._speaking_until, self._last_speech_t, last_req) >= need):
+            # never over the user's own speech (the user may keep talking while a lookup runs)
+            if (not young and not self._confirm_pending and not self._in_text.strip()
+                    and time.monotonic() - max(self._speaking_until, self._last_speech_t, last_req,
+                                               self._last_user_voice) >= need):
                 self._stats["progress_notes"] = self._stats.get("progress_notes", 0) + 1
                 logs.info("live", "LIVE_PROGRESS", "slow lookup: short progress note requested", n=sent + 1)
                 try:
@@ -829,6 +858,7 @@ class LiveVoice(SessionLifecycle):
         elif t == "session.output_transcript.delta":
             self.note_activity()
             if self._in_text:
+                self._remember_user(self._in_text)
                 logs.info("live", "LIVE_USER_SAID", "you said (as GPT-Live heard it)", text=self._in_text.strip())
                 await self._emote("user", self._in_text)
                 if self.on_transcript:
@@ -838,6 +868,8 @@ class LiveVoice(SessionLifecycle):
             await self._emote("jarves", self._out_text[-80:])
             self._schedule_flush()
         elif t == "session.delegation.created":
+            logs.info("live", "LIVE_DELEGATION", "GPT-Live delegated work", target=str(_get(g("delegation"), "target")),
+                      delegation=str(_get(g("delegation"), "id") or ""))
             if self.budget is not None and _get(g("delegation"), "target") == "responses":
                 await self._take_credit("delegation")
         elif t == "response.event":
@@ -859,12 +891,14 @@ class LiveVoice(SessionLifecycle):
                 self._request_end(CLOSE_REASONS.get(server_reason, "remote_closed"))
         elif t == "error":
             cid = str(_get(g("error"), "client_event_id") or g("client_event_id") or "")
-            if cid.startswith(("jarves_clock", "jarves_progress")):     # optional extras: switch off, stay healthy
+            if cid.startswith(("jarves_clock", "jarves_progress", "jarves_stall", "jarves_task")):
+                # optional extras: clock/progress are switched off; stall/task notes are only logged; stay healthy
                 code, msg, _ = error_info(g("error"))
                 logs.warn("live", "LIVE_EXTRA_REJECTED", f"{cid.split('_')[1]} context rejected ({code}): {msg}")
+                self._rejected = (getattr(self, "_rejected", set()) | {cid})
                 if cid.startswith("jarves_clock"):
                     self.clock_context = False
-                else:
+                elif cid.startswith("jarves_progress"):
                     self.progress_after_s = 0.0
                 return
             await self._on_error(g("error"))
@@ -930,6 +964,7 @@ class LiveVoice(SessionLifecycle):
     def _flush_transcripts(self) -> list[tuple[str, str]]:
         out = []
         if self._in_text.strip():
+            self._remember_user(self._in_text)
             logs.info("live", "LIVE_USER_SAID", "you said (as GPT-Live heard it)", text=self._in_text.strip())
             out.append(("user", self._in_text.strip()))
             self._in_text = ""
@@ -970,7 +1005,9 @@ class LiveVoice(SessionLifecycle):
         elif res is None:
             kind, text = ({"get_time": ("time", "בודק שעה…"), "remember": ("memory", "זוכר…"),
                            "recall": ("memory", "נזכר…"), "forget": ("memory", "מוחק מהזיכרון…"),
-                           "forget_all": ("memory", "מוחק מהזיכרון…")}.get(name, ("tool", "עובד על זה…")))
+                           "forget_all": ("memory", "מוחק מהזיכרון…"),
+                           "task_start": ("tool", "מתחיל משימה ברקע…"), "task_status": ("tool", "בודק משימות…"),
+                           "task_cancel": ("tool", "עוצר משימה…")}.get(name, ("tool", "עובד על זה…")))
             await self._activity(kind, text)
 
     async def _clear_activity_later(self, delay: float = 3.5) -> None:
@@ -986,37 +1023,162 @@ class LiveVoice(SessionLifecycle):
                            "raise ai.daily_request_limit or wait until tomorrow")
         self._request_end("budget")
 
+    def _remember_user(self, text: str) -> None:
+        self._user_turns = (self._user_turns + [text.strip()])[-3:]
+
+    async def _show(self, kind: str, text: str) -> None:
+        """Backend stage on the screen; the elapsed-time ticker refreshes its detail line."""
+        self._shown = (kind, text)
+        await self._activity(kind, text, self._elapsed_detail())
+
+    def _elapsed_detail(self) -> str:
+        t0 = getattr(self, "_busy_t0", None)
+        s = int(time.monotonic() - t0) if t0 is not None else 0
+        return f"{s} שנ׳" if s >= 3 else ""
+
+    async def _tick_activity(self) -> None:
+        """While the backend works: refresh the pill's detail with the elapsed time every 2 s (no text change, so
+        the face does not blink) and enforce the hard deadline."""
+        while self.running and self._backend_busy:
+            await asyncio.sleep(2.0 if not self.backend_deadline_s else min(2.0, self.backend_deadline_s / 4))
+            if not (self.running and self._backend_busy):
+                return
+            kind, text = self._shown
+            if kind:
+                await self._activity(kind, text, self._elapsed_detail())
+            t0 = getattr(self, "_backend_t0", None)
+            # a Skill running or an approval waiting on the screen is not a backend stall
+            if self._tools_running or self._confirm_pending:
+                self._backend_t0 = time.monotonic()
+            elif self.backend_deadline_s and t0 is not None and time.monotonic() - t0 >= self.backend_deadline_s:
+                self._backend_stalled(getattr(self, "_busy_delegation", None))
+                return
+
+    def _backend_stalled(self, delegation_id) -> None:
+        tr = self._trace
+        self._abandoned.add(delegation_id)
+        self._backend_busy = False                  # progress notes stop; the user is not kept waiting
+        self._backend_t0 = None
+        self._stats["backend_stalls"] = self._stats.get("backend_stalls", 0) + 1
+        logs.warn("live", "LIVE_BACKEND_STALL", "backend lookup got no result before the deadline; giving up on it",
+                  deadline_s=self.backend_deadline_s, stage=getattr(tr, "stage", ""), delegation=delegation_id,
+                  query="; ".join(getattr(tr, "queries", []) or []))
+        self._retry_task = self._spawn(self._retry_stalled(tr), "stall-retry")
+
+    async def _retry_stalled(self, tr) -> None:
+        """One retry of a stalled lookup in the Core (hard deadline), then tell GPT-Live the honest outcome."""
+        turns = self._user_turns + ([self._in_text.strip()] if self._in_text.strip() else [])
+        question = turns[-1] if turns else ""
+        if len(turns) > 1:
+            question = "Earlier: " + " | ".join(turns[:-1]) + "\nAnswer this now: " + turns[-1]
+        if tr is not None and tr.queries:
+            question += f"\n(search hint: {tr.queries[-1]})"
+        answer = ""
+        if self.retry_lookup is not None and question:
+            logs.info("live", "LIVE_BACKEND_RETRY", "retrying the stalled lookup once in the Core",
+                      deadline_s=RETRY_DEADLINE_S)
+            await self._show("searching", "מנסה שוב…")
+            self._tools_running += 1                # keeps the idle watchdog from closing the session meanwhile
+            t0 = time.monotonic()
+            try:
+                answer = str(await asyncio.wait_for(self.retry_lookup(question), RETRY_DEADLINE_S) or "").strip()
+                logs.info("live", "LIVE_BACKEND_RETRY_OK", "retry answered", retry_s=round(time.monotonic() - t0, 1))
+            except asyncio.CancelledError:
+                logs.info("live", "LIVE_BACKEND_RETRY_CANCELLED", "retry cancelled: the original answer arrived")
+                raise
+            except Exception as e:
+                logs.warn("live", "LIVE_BACKEND_RETRY_FAILED", f"retry failed: {type(e).__name__}",
+                          retry_s=round(time.monotonic() - t0, 1), detail=str(e)[:120])
+            finally:
+                self._tools_running = max(0, self._tools_running - 1)
+        content = STALL_RESULT_NOTE.format(answer=answer[:600]) if answer else STALL_FAIL_NOTE
+        self._stats["stall_answers" if answer else "stall_failures"] = self._stats.get(
+            "stall_answers" if answer else "stall_failures", 0) + 1
+        await self._send_note(content, str(self._stats["backend_stalls"]), prefix="jarves_stall")
+        await self._activity("done")
+
+    async def announce(self, content: str, *, max_wait_s: float = 300.0, tag: str = "") -> bool:
+        """Speak a finished background task's result (tasks.TaskManager) at a GOOD moment: never over the user's
+        speech, never over JARVES's own, not while a lookup/tool/approval is in flight. Sent as commentary (the
+        model words it naturally). False when the session ended (or max_wait_s passed) first: the caller keeps it."""
+        deadline = time.monotonic() + max_wait_s
+        while self.running and self.conn is not None and time.monotonic() < deadline:
+            now = time.monotonic()
+            audio = self.audio_io
+            busy = (self._backend_busy or self._tools_running or self._confirm_pending or self._in_text.strip()
+                    or now - self._last_user_voice < ANNOUNCE_USER_QUIET_S or now < self._speaking_until + 0.8
+                    or (audio is not None and audio.queued_s() > 0))
+            if not busy:
+                return await self._send_note(content, tag)
+            await asyncio.sleep(0.25)
+        return False
+
+    async def _send_note(self, content: str, tag: str, prefix: str = "jarves_task") -> bool:
+        """Commentary that must arrive: the server validates it AFTER the send (error with our event id, e.g. "must
+        not exceed 500 tokens"), so wait briefly for a rejection and resend once shortened (notes put their
+        instructions first and the result last, so the cut only shortens the result)."""
+        content = content[:NOTE_MAX_CHARS]
+        for attempt in (1, 2):
+            n = self._stats["announcements"] = self._stats.get("announcements", 0) + 1
+            eid = f"{prefix}_{tag or 'x'}_{n}"
+            try:
+                await self.conn.session.commentary.append(content=content, delegation_id=None, event_id=eid)
+            except Exception as e:
+                logs.warn("live", "LIVE_ANNOUNCE_FAILED", f"announcement not sent: {type(e).__name__}")
+                return False
+            t0 = time.monotonic()
+            while time.monotonic() - t0 < 1.5 and eid not in getattr(self, "_rejected", set()) and self.running:
+                await asyncio.sleep(0.1)
+            if eid not in getattr(self, "_rejected", set()):
+                logs.info("live", "LIVE_ANNOUNCE" if prefix == "jarves_task" else "LIVE_NOTE",
+                          "note handed to GPT-Live", task=tag, chars=len(content))
+                self.note_activity()
+                return True
+            content = content[: len(content) // 2]
+        return False
+
     async def _backend_event(self, inner: dict, delegation_id: str | None) -> None:
         it = inner.get("type") or ""
+        tr = self._trace
+        if delegation_id is not None and delegation_id in self._abandoned:
+            # a delegation given up after the deadline: only log what it does now (its late answer is spoken by
+            # GPT-Live; the Core retry is then cancelled so the user does not hear the answer twice)
+            if it in ("response.completed", "response.failed", "response.incomplete"):
+                self._abandoned.discard(delegation_id)
+                self._stats["backend_responses"] += 1
+                logs.warn("live", "LIVE_BACKEND_LATE", "a stalled backend response finished after the deadline",
+                          delegation=delegation_id, status=it.split(".")[-1])
+                if self._retry_task is not None and not self._retry_task.done() and it == "response.completed":
+                    self._retry_task.cancel()
+                self._settle_one()
+            return
         if it == "response.created":
+            from ..brain import BackendTrace
+            tr = self._trace = BackendTrace("live", "LIVE_BACKEND", delegation=delegation_id)
             self._backend_t0 = time.monotonic()
+            if not getattr(self, "_backend_busy", False) or getattr(self, "_busy_delegation", None) != delegation_id:
+                self._busy_t0 = self._backend_t0    # elapsed on screen counts from the delegation's first response
+            self._busy_delegation = delegation_id
             self._backend_busy = True
+            if self._ticker is None or self._ticker.done():
+                self._ticker = self._spawn(self._tick_activity(), "backend-ticker")
             if self.progress_after_s > 0 and delegation_id != getattr(self, "_progress_for", None):
                 self._progress_for = delegation_id          # at most one progress note per delegation
                 self._spawn(self._progress_later(delegation_id), "progress")
             self.note_activity()
             await self._state("thinking")
-            await self._activity("thinking", "חושב…")
-        elif it.startswith("response.web_search_call") or (
-                it == "response.output_item.added" and (inner.get("item") or {}).get("type") == "web_search_call"):
-            await self._activity("searching", "מחפש ברשת…")
-        elif it in ("response.completed", "response.failed", "response.incomplete"):
+        shown = tr.feed(inner) if tr is not None else None
+        if shown is not None:
+            await self._show(*shown)
+        if it in ("response.completed", "response.failed", "response.incomplete"):
             self._backend_busy = False
             self.note_activity()
             # One delegated backend response finished (billed whether or not it succeeded) -> count it.
             self._stats["backend_responses"] += 1
-            t0 = getattr(self, "_backend_t0", None)
-            if t0 is not None:                      # timing only (no content): backend latency per response
-                logs.info("live", "LIVE_BACKEND_DONE", f"backend response {it.split('.')[-1]}",
-                          backend_s=round(time.monotonic() - t0, 2))
-                self._backend_t0 = None
+            self._backend_t0 = None
+            self._trace = None
             self._spawn(self._clear_activity_later(), "activity-clear")
-            if self.budget is not None and not self._budget_settled:
-                if self._pending:
-                    self._pending.pop(0).commit()
-                else:                               # a backend response we never saw start: count it anyway
-                    self._stats["budget_overrun"] += 1
-                    self.budget.record("ai_requests", 1)
+            self._settle_one()
             if it == "response.failed":
                 await self._on_error(_get(inner.get("response"), "error") or {"code": "response_failed"}, True)
             if self._end_after_answer and not self._pending:
@@ -1047,6 +1209,15 @@ class LiveVoice(SessionLifecycle):
             t.add_done_callback(lambda task: self._tool_finished(task, nxt, state))
         elif it == "error":
             await self._on_error(inner.get("error") or inner, True)
+
+    def _settle_one(self) -> None:
+        """A delegated backend response finished: commit its reservation (FIFO)."""
+        if self.budget is not None and not self._budget_settled:
+            if self._pending:
+                self._pending.pop(0).commit()
+            else:                               # a backend response we never saw start: count it anyway
+                self._stats["budget_overrun"] += 1
+                self.budget.record("ai_requests", 1)
 
     async def _run_tool(self, name: str, call_id: str, arguments: str, state: dict) -> None:
         await self._tool_activity(name, None)
