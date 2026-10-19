@@ -263,6 +263,47 @@ async def test_cli_may_poll_the_preview_but_not_switch_the_camera(core):
     await ws.close()
 
 
+async def test_dashboard_home_strip_and_preview_api(core):
+    """Home page: /api/runtime carries privacy; the preview opens only with start, polls return frames, closes;
+    a paired phone (not this computer) never gets camera images; Core down -> 409 and privacy None (= unknown)."""
+    from jarves import runtime as rt_mod
+    from jarves.camera.backends import FakeCamera, Probe
+    from jarves.dashboard import Ctx
+    svc = core.camera
+    cam = FakeCamera([room()])
+    svc._probe_fn = lambda: Probe(True, "fake", "fake camera")
+    svc._factory = lambda p: cam
+    svc.probe(fresh=True)
+    svc.switches.active = lambda fid: True
+    svc.detector, svc._models = None, None
+    ctx = Ctx(core.home, core.cfg)
+    call = lambda fn, body=None: asyncio.to_thread(fn, ctx, None, body)    # noqa: E731
+    st, body = await call(rt_mod.api_runtime)
+    assert st == 200 and body["privacy"]["mic"]["state"] in MIC and body["privacy"]["camera"]["state"] == "off"
+    st, r = await call(rt_mod.api_camera_preview_poll)
+    assert st == 200 and r["open"] is False                              # a poll never opens it
+    st, r = await call(rt_mod.api_camera_preview_set, {"start": True})
+    assert st == 200 and r["open"] is True
+    frame = None
+    for _ in range(40):
+        st, r = await call(rt_mod.api_camera_preview_poll)
+        if r.get("frame"):
+            frame = r["frame"]
+            break
+        await asyncio.sleep(0.1)
+    assert frame and base64.b64decode(frame["data"]) and r["open"] is True
+    st, body = await call(rt_mod.api_runtime)
+    assert body["privacy"]["camera"]["state"] == "preview"
+    st, r = await call(rt_mod.api_camera_preview_set, {"open": False})
+    assert st == 200 and r["open"] is False and svc.preview_frame is None
+    assert (await call(rt_mod.api_camera_preview_set, {"nope": 1}))[0] == 400
+    ctx._tl.who = {"kind": "device", "id": "phone"}                     # a paired phone on the home Wi-Fi
+    st, r = rt_mod.api_camera_preview_set(ctx, None, {"start": True})   # refused before the Core is asked
+    assert st == 403 and not svc.preview_active()
+    ctx._tl.who = None
+    ctx.close()
+
+
 async def test_core_preview_with_fake_camera_reaches_the_face(core):
     """Wiring end to end: the face asks, frames arrive over the link, closing stops them (fake camera, no sensor)."""
     from conftest import open_face
