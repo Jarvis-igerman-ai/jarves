@@ -271,7 +271,7 @@ async def self_check(auth: GoogleAuth, *, gmail: bool = True,
     if out["error"]:
         out["fix"] = fix_for(out["error"])
     logs.info("google", "GOOGLE_SELF_CHECK", "Google self-check " + ("passed" if out["ok"] else "failed"),
-              calendar=out["calendar"], gmail=out["gmail"], code=out["error"])
+              calendar=out["calendar"], gmail=out["gmail"], error=out["error"])
     return out
 
 
