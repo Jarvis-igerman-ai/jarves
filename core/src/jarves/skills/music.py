@@ -7,6 +7,7 @@ stream extraction. Pairing uses a random client id that the user approves once i
 from __future__ import annotations
 
 import asyncio
+import re
 import secrets
 from dataclasses import asdict, dataclass
 from pathlib import Path
@@ -54,6 +55,43 @@ class MusicPlayer(Protocol):
     async def now_playing(self) -> NowPlaying | None: ...
 
 
+# ------------------------------------------------------------------ title matching
+_BIDI = dict.fromkeys(map(ord, "‎‏‪‫‬‭‮⁦⁧⁨⁩﻿"), None)
+_BRACKETS = re.compile(r"[(\[][^)\]]*[)\]]")
+_DASH_TAIL = re.compile(r"\s+[-–—]\s+.*\b(?:remaster(?:ed)?|version|live|edit|mix|mono|stereo|official|video|audio)\b.*$")
+
+
+def clean_title(s: str | None) -> str:
+    """Casefolded, whitespace-collapsed, without bidi control marks (Hebrew titles often carry U+200F)."""
+    return " ".join((s or "").translate(_BIDI).casefold().split())
+
+
+def base_title(s: str | None) -> str:
+    """The song itself: '(Official Video)', '[Official Music Video]', '(2013 Remaster)', '| Lyrics', ' - Remastered
+    2011' removed. YouTube Music plays a searched music video as its 'song' counterpart, whose title lacks these."""
+    t = clean_title(s).split(" | ")[0]
+    t = _DASH_TAIL.sub("", _BRACKETS.sub(" ", t))
+    return " ".join(t.split()).strip(" -–—")
+
+
+def _num(x) -> float:
+    try:
+        return float(x or 0)
+    except (TypeError, ValueError):
+        return 0.0
+
+
+def _json(r: httpx.Response):
+    """Body as JSON; None when empty; an honest MusicError (not a crash) when Pear sends something unreadable."""
+    if not r.content:
+        return None
+    try:
+        return r.json()
+    except ValueError as e:
+        raise MusicError("MUSIC_PLAYER_ERROR", "Pear Desktop sent an unreadable answer",
+                         "update or restart Pear Desktop") from e
+
+
 # ------------------------------------------------------------------ Pear Desktop
 def _text(runs_holder: dict | None) -> str:
     if not runs_holder:
@@ -65,7 +103,10 @@ def parse_queue(resp: dict) -> list[tuple[str, bool]]:
     """Pear GET /api/v1/queue -> [(videoId, selected)]. Items are playlistPanelVideoRenderer, optionally wrapped
     in playlistPanelVideoWrapperRenderer.primaryRenderer (shape checked on Pear 3.12.0, 18 Oct 2026)."""
     out = []
-    for it in (resp or {}).get("items") or []:
+    items = resp.get("items") if isinstance(resp, dict) else None
+    for it in items if isinstance(items, list) else []:
+        if not isinstance(it, dict):
+            continue
         r = it.get("playlistPanelVideoRenderer") or \
             ((it.get("playlistPanelVideoWrapperRenderer") or {}).get("primaryRenderer") or {}).get("playlistPanelVideoRenderer")
         if r and r.get("videoId"):
@@ -102,6 +143,36 @@ def parse_search(resp: dict, limit: int = 5) -> list[Track]:
                 walk(v)
     walk(resp)
     return out
+
+
+def _display_text(resp) -> str:
+    """All visible strings ('text' runs) of an innertube response - never endpoint params, which echo the query.
+    Iterative and joined once (a recursive join per level took 8 s on a real 250 KB answer, QA 19 Oct)."""
+    out: list[str] = []
+    stack = [resp]
+    while stack:
+        o = stack.pop()
+        if isinstance(o, dict):
+            for k, v in o.items():
+                if k == "text" and isinstance(v, str):
+                    out.append(v)
+                elif isinstance(v, (dict, list)):
+                    stack.append(v)
+        elif isinstance(o, list):
+            stack.extend(o)
+    return clean_title(" ".join(out))
+
+
+def search_is_relevant(resp, query: str) -> bool:
+    """YouTube Music answers ANY query, even gibberish, with something (QA 19 Oct, real Pear: "asdkjhqwe zzxxcc"
+    -> a random 2.7K-view user video, then generic hits). Accept the results only when at least one word of the
+    query appears somewhere in what YouTube shows (titles, artists, cards, "did you mean"). Hebrew and mood
+    queries pass ("משהו רגוע" -> "משהו קטן וטוב", "שלום חנוך" -> the artist card)."""
+    words = [w for w in re.findall(r"\w+", clean_title(query)) if len(w) >= 2]
+    if not words:
+        return True
+    shown = _display_text(resp)
+    return any(w in shown for w in words)
 
 
 class PearDesktopPlayer:
@@ -183,19 +254,37 @@ class PearDesktopPlayer:
 
     async def search(self, query: str) -> list[Track]:
         r = await self._req("POST", "/search", {"query": query})
-        return parse_search(r.json())
+        d = _json(r)
+        if not isinstance(d, (dict, list)):
+            return []
+        tracks = parse_search(d)
+        if tracks and not search_is_relevant(d, query):
+            logs.info("music", "MUSIC_SEARCH_IRRELEVANT", "search results do not mention the query; treated as not found",
+                      results=len(tracks))
+            return []
+        return tracks
 
     async def queue(self) -> list[tuple[str, bool]]:
-        """Current Pear queue as (videoId, selected) in order."""
+        """Current Pear queue as (videoId, selected) in order; [] when it cannot be read (play_track falls back)."""
         r = await self._req("GET", "/queue")
-        if r.status_code != 200 or not r.content:
+        if r.status_code != 200:
             return []
-        return parse_queue(r.json())
+        try:
+            return parse_queue(_json(r))
+        except MusicError:
+            return []
 
     async def play_track(self, track: Track, wait_s: float = 3.0) -> None:
         """Insert after the current song, then jump to THAT queue index. QA 18 Oct on real Pear 3.12: the insert
         lands asynchronously, so pressing "next" right away skipped to the OLD next song; we wait for the
-        inserted item to appear and select it by index instead."""
+        inserted item to appear and select it by index instead.
+        QA 19 Oct: asking for the same song again inserted it again, so the queue filled with back-to-back copies
+        and "next" then landed on the same song. The current song is reused (checked with the cheap /song: the
+        queue answer grows to megabytes on a long queue); copies further on are skipped by next()."""
+        np = await self.now_playing()
+        if np is not None and np.video_id == track.video_id:
+            await self.resume()
+            return
         await self._req("POST", "/queue", {"videoId": track.video_id, "insertPosition": "INSERT_AFTER_CURRENT_VIDEO"})
         deadline = asyncio.get_running_loop().time() + wait_s
         idx = None
@@ -208,7 +297,7 @@ class PearDesktopPlayer:
                 break
             await asyncio.sleep(0.2)
         if idx is not None:
-            await self._req("PATCH", "/queue", {"index": idx})
+            await self._select(idx, track.video_id)
         else:                          # queue not readable: previous behaviour
             np = await self.now_playing()
             if np is None:
@@ -217,6 +306,28 @@ class PearDesktopPlayer:
                 await self._req("POST", "/next")
         await self.resume()
 
+    async def _select(self, idx: int, video_id: str, tries: int = 3) -> None:
+        """Jump to queue index idx and CHECK that the selected item is video_id. QA 19 Oct on a ~100-item real
+        queue: the queue shifted by one between our read and the jump, so Pear kept playing the PREVIOUS request
+        (10/10 plays in a row). On a mismatch, read the queue again and re-select the song."""
+        await self._req("PATCH", "/queue", {"index": idx})
+        for attempt in range(tries):
+            await asyncio.sleep(0.4)
+            q = await self.queue()
+            cur = next((i for i, (_, sel) in enumerate(q) if sel), -1)
+            if not q or (0 <= cur < len(q) and q[cur][0] == video_id):
+                return
+            if 0 <= idx < len(q) and q[idx][0] == video_id:
+                continue        # the song is still at our index: "selected" only lags; jumping again froze playback
+            cands = [i for i, (vid, _) in enumerate(q) if vid == video_id]
+            if not cands:
+                return
+            later = [i for i in cands if i > cur]
+            idx = later[0] if later else cands[-1]
+            logs.info("music", "MUSIC_QUEUE_RESELECT", "queue shifted under the jump; selecting the song again",
+                      attempt=attempt + 1)
+            await self._req("PATCH", "/queue", {"index": idx})
+
     async def pause(self) -> None:
         await self._req("POST", "/pause")
 
@@ -224,6 +335,15 @@ class PearDesktopPlayer:
         await self._req("POST", "/play")
 
     async def next(self) -> None:
+        """Next DIFFERENT song: back-to-back copies of the current one (left by earlier inserts) are skipped by
+        selecting the first other item; otherwise Pear's own next (it also handles autoplay at the queue end)."""
+        q = await self.queue()
+        cur = next((i for i, (_, sel) in enumerate(q) if sel), -1)
+        if cur >= 0:
+            other = next((i for i in range(cur + 1, len(q)) if q[i][0] != q[cur][0]), None)
+            if other is not None and other > cur + 1:
+                await self._req("PATCH", "/queue", {"index": other})
+                return
         await self._req("POST", "/next")
 
     async def set_volume(self, percent: int) -> None:
@@ -231,11 +351,13 @@ class PearDesktopPlayer:
 
     async def now_playing(self) -> NowPlaying | None:
         r = await self._req("GET", "/song")
-        if r.status_code == 204 or not r.content:
+        if r.status_code == 204:
             return None
-        d = r.json()
-        return NowPlaying(d.get("title", ""), d.get("artist", ""), d.get("videoId", ""), bool(d.get("isPaused", True)),
-                          float(d.get("elapsedSeconds") or 0), float(d.get("songDuration") or 0))
+        d = _json(r)
+        if not isinstance(d, dict):
+            return None
+        return NowPlaying(str(d.get("title") or ""), str(d.get("artist") or ""), str(d.get("videoId") or ""),
+                          bool(d.get("isPaused", True)), _num(d.get("elapsedSeconds")), _num(d.get("songDuration")))
 
 
 # ------------------------------------------------------------------ fake player (tests only, never "real")
@@ -328,13 +450,21 @@ class MusicSkill(Skill):
     @staticmethod
     def _same_track(np: NowPlaying, t: Track) -> bool:
         """Same videoId, or the same title: YouTube Music swaps a music video for its "song" counterpart (a
-        different videoId) when it plays it - seen on real Pear 3.12, 18 Oct 2026."""
-        norm = lambda x: " ".join((x or "").casefold().split())     # noqa: E731
-        return np.video_id == t.video_id or (bool(norm(np.title)) and norm(np.title) == norm(t.title))
+        different videoId) when it plays it - seen on real Pear 3.12, 18 Oct 2026. Titles are compared without bidi
+        marks and without video/remaster decorations ("X (Official Video)" == "X"); a different song never matches."""
+        if np.video_id and np.video_id == t.video_id:
+            return True
+        a, b = clean_title(np.title), clean_title(t.title)
+        if a and a == b:
+            return True
+        a, b = base_title(np.title), base_title(t.title)
+        return bool(a) and a == b
 
     async def _verify_playing(self, t: Track) -> NowPlaying | None:
         """Truthful status: report success only when the player itself says this track is playing. Polls up to
         verify_tries x 0.5 s (a fresh track can take several seconds to buffer) and returns at once when it is."""
+        # Not usable as a progress signal: Pear's elapsedSeconds stays 0 while really playing and is refreshed only
+        # on events (QA 19 Oct: 0 for ~9 s, then 9 right after a pause). Requiring it gave false "not confirmed".
         np = None
         for _ in range(self.verify_tries):
             np = await self.player.now_playing()
@@ -360,11 +490,41 @@ class MusicSkill(Skill):
                 return ToolResult(True, f"מנגן: {np.title} – {np.artist}", {"now_playing": asdict(np)})
             return await self._guard(go())
 
+        def nothing(ok: bool) -> ToolResult:
+            return ToolResult(ok, "שום דבר לא מתנגן כרגע." + ("" if ok else " אפשר לבקש ממני שיר."),
+                              {"now_playing": None}, "ok" if ok else "MUSIC_NOTHING_PLAYING")
+
         def simple(op, ok_msg):
+            """pause / stop / resume / next. Nothing loaded in the player -> say so instead of claiming an action
+            (QA 19 Oct: "next" answered "השיר הבא." with nothing playing). next/resume are confirmed with the
+            player itself, and next names the new song."""
             async def run(_):
                 async def go():
+                    before = await p.now_playing()
+                    if before is None or not (before.title or before.video_id):
+                        return nothing(op == "pause")
                     await getattr(p, op)()
-                    return ToolResult(True, ok_msg)
+                    if op == "pause":
+                        return ToolResult(True, ok_msg)
+                    # real Pear 3.12: "next" shows up after 0.9-3.3 s and is occasionally dropped while a track is
+                    # loading -> poll ~7 s and press it once more if nothing changed after ~4 s
+                    loop = asyncio.get_running_loop()
+                    t0, pressed_again = loop.time(), False
+                    limit = 7.0 if self.verify_tries >= 10 else 0.4 * max(2, self.verify_tries)
+                    while True:
+                        np = await p.now_playing()
+                        if np and not np.paused and (op == "resume" or np.video_id != before.video_id):
+                            return ToolResult(True, f"{ok_msg} {np.title} – {np.artist}".strip(" –"),
+                                              {"now_playing": asdict(np)})
+                        if loop.time() - t0 > limit:
+                            break
+                        if op == "next" and not pressed_again and loop.time() - t0 > 4.0:
+                            pressed_again = True
+                            logs.info("music", "MUSIC_NEXT_RETRY", "next not reflected after 4 s; pressing again")
+                            await p.next()
+                        await asyncio.sleep(0.3)
+                    what = "לעבור לשיר הבא" if op == "next" else "להמשיך לנגן"
+                    return ToolResult(False, f"ביקשתי מהנגן {what}, אבל הוא לא מדווח שזה קרה.", code="MUSIC_NOT_CONFIRMED")
                 return await self._guard(go())
             return run
 
@@ -389,8 +549,9 @@ class MusicSkill(Skill):
             Tool("music_play", "Search YouTube Music and start playing the best match (song/artist).", play,
                  PlayArgs, permission="action", timeout_s=25),
             Tool("music_pause", "Pause music.", simple("pause", "השהיתי."), permission="action"),
-            Tool("music_resume", "Resume music.", simple("resume", "ממשיך לנגן."), permission="action"),
-            Tool("music_next", "Skip to the next track.", simple("next", "השיר הבא."), permission="action"),
+            Tool("music_resume", "Resume music.", simple("resume", "ממשיך לנגן:"), permission="action"),
+            Tool("music_next", "Skip to the next track.", simple("next", "השיר הבא:"), permission="action",
+                 timeout_s=15),
             Tool("music_stop", "Stop music (pauses the player).", simple("pause", "עצרתי את המוזיקה."),
                  permission="action"),
             Tool("music_volume", "Set the music volume (0-100).", volume, VolumeArgs, permission="action"),
