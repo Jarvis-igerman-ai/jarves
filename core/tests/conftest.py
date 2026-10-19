@@ -41,6 +41,13 @@ class FakeTTS:
 
 
 @pytest.fixture(autouse=True)
+def _pear_probe_is_hermetic(monkeypatch):
+    """The music feature probe pings Pear's real port; tests must not depend on whether Pear runs on this PC."""
+    from jarves import features as feat
+    monkeypatch.setattr(feat, "_tcp_open", lambda url, timeout=0.3: True)
+
+
+@pytest.fixture(autouse=True)
 def _no_real_autostart(monkeypatch):
     """Never touch the real HKCU Run key / systemd user units from a test (runtime/autostart.py)."""
     from jarves.runtime import autostart as au

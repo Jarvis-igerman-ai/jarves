@@ -1124,8 +1124,7 @@ class Core:
     def _write_tools_md(self) -> None:
         from .guides import index_markdown as guides_index_markdown
         self.workspace.write_generated("TOOLS.md", wsp.tools_markdown(self.registry, self.settings.view())
-                                       + "
-" + guides_index_markdown())
+                                       + "\n" + guides_index_markdown())
         catalog = ["# JARVES features", "Generated from the actual feature catalog; not a promise of readiness.",
                    "Use features_list / get_status for current state; read this full file with workspace_read.",
                    "All feature IDs: " + ", ".join(feat.CATALOG) + ".",

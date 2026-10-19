@@ -41,3 +41,5 @@ print/stl/
 core/src/jarves/_build_info.json
 core/src/jarves/_google_app_client.json
 dist/
+
+.wrangler/
