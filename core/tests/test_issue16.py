@@ -167,6 +167,23 @@ async def test_a_result_the_player_skips_fails_fast_and_the_next_one_is_tried():
     assert res.ok and res.data["now_playing"]["video_id"] == "good" and time.monotonic() - t < 3.0
 
 
+async def test_a_timed_out_play_request_is_checked_not_given_up():
+    from jarves.skills.music import MusicError
+
+    class LateAnswer(FakePlayer):
+        async def play_track(self, t):
+            await super().play_track(t)                  # the command landed...
+            raise MusicError("MUSIC_TIMEOUT", "slow")    # ...but Pear's answer timed out
+    r, _ = _reg(LateAnswer(), verify_tries=2)
+    assert (await r.call("music_play", {"query": "Song One"})).ok
+
+    class Dead(FakePlayer):
+        async def play_track(self, t):
+            raise MusicError("MUSIC_TIMEOUT", "slow")
+    res = await _reg(Dead(), verify_tries=2)[0].call("music_play", {"query": "Song"})
+    assert not res.ok and res.code == "MUSIC_NOT_CONFIRMED" and "deadline_s" in res.data
+
+
 # ---------------------------------------------------------------- P1: honest playback wording
 async def test_play_result_says_the_player_reports_it_not_that_it_is_audible():
     r, _ = _reg(FakePlayer(), verify_tries=2)

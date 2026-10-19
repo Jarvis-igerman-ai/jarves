@@ -735,7 +735,7 @@ class MusicSkill(Skill):
                     return ToolResult(False, f"לא מצאתי את \"{a.query}\".", code="MUSIC_NOT_FOUND")
                 # Some YouTube results cannot play (region / availability; real Pear, 19 Oct: "Get Lucky" top result,
                 # Pear then skipped to an unrelated song). Try the next candidates instead of giving up (max 3).
-                np, t, tried, out_of_time = None, found[0], [], False
+                np, t, tried, out_of_time, slow = None, found[0], [], False, False
                 seen: set[str] = set()                        # songs the player showed that are NOT a skip-on
                 with contextlib.suppress(MusicError):
                     was = await asyncio.wait_for(p.now_playing(), max(0.3, min(3.0, left() - MIN_CANDIDATE_S)))
@@ -756,6 +756,13 @@ class MusicSkill(Skill):
                     except TimeoutError:
                         out_of_time = True
                         break
+                    except MusicError as e:
+                        # one Pear request timing out while it loads a video (S02/S11 re-run, 19 Oct) is not a verdict:
+                        # the command may have landed, so check what plays; offline / unpaired still fail at once
+                        if e.code != "MUSIC_TIMEOUT" or left() < 1.0:
+                            raise
+                        logs.info("music", "MUSIC_PLAY_SLOW", "a player request timed out during the play; checking anyway")
+                        slow = True
                     # every try gets the full window (a slow Pear needed 4-9 s per switch in the 19 Oct campaign), only
                     # the deadline bounds it; a result the player skips fails fast (known songs, see _verify_playing)
                     np = await self._verify_playing(cand, deadline=deadline, known=seen)
@@ -773,7 +780,7 @@ class MusicSkill(Skill):
                         if hit is not None:
                             np, t = last, hit
                 if np is None:
-                    if out_of_time or left() <= 0.5:
+                    if out_of_time or slow or left() <= 0.5:
                         logs.warn("music", "MUSIC_PLAY_DEADLINE", "the player was too slow; stopped trying candidates",
                                   tried=len(tried), budget_s=self.play_budget_s)
                         msg = (f"ניסיתי {len(tried)} גרסאות של השיר, ואף אחת לא התחילה לנגן בזמן." if len(tried) > 1
