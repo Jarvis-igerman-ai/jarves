@@ -175,15 +175,46 @@ def next_runs(kind: str, spec: str, tz: ZoneInfo, after: float, n: int = 3) -> l
     return out
 
 
+def _count_between(cron: Cron, tz: ZoneInfo, a: float, b: float) -> int:
+    """How many occurrences lie in (a, b], without walking them one by one: a whole local day with no UTC-offset
+    change counts hours x minutes; the edge days and DST days count the distinct instants exactly (the same
+    instants next_after yields: a skipped time moves to after the gap, an ambiguous one is taken once)."""
+    if b <= a:
+        return 0
+    per_day = len(cron.hours) * len(cron.minutes)
+    d, last = datetime.fromtimestamp(a, tz).date(), datetime.fromtimestamp(b, tz).date()
+    n = 0
+    while d <= last:
+        if cron.day_ok(d):
+            lo = datetime(d.year, d.month, d.day, tzinfo=tz)
+            hi = datetime(d.year, d.month, d.day, 23, 59, tzinfo=tz)
+            if lo.timestamp() > a and hi.timestamp() <= b and lo.utcoffset() == hi.utcoffset():
+                n += per_day
+            else:
+                n += len({t for h in cron.hours for m in cron.minutes
+                          if a < (t := local_instant(datetime(d.year, d.month, d.day, h, m), tz)) <= b})
+        d += timedelta(days=1)
+    return n
+
+
 def latest_due(kind: str, spec: str, tz: ZoneInfo, first_due: float, now: float) -> tuple[float, int]:
-    """(the latest occurrence <= now, how many earlier ones were missed) starting from a due `first_due`."""
-    occ, missed = first_due, 0
-    for _ in range(MAX_CATCHUP_STEPS):
-        nxt = next_after(kind, spec, tz, occ)
-        if nxt is None or nxt > now:
-            break
-        occ, missed = nxt, missed + 1
-    return occ, missed
+    """(the latest occurrence <= now, how many earlier ones were missed) starting from a due `first_due`.
+    Runs on the tick (event loop), so it never walks every missed occurrence: it looks back from `now` in a
+    doubling window for the latest one and counts the rest per day (a */5 job off for months stays ~ms)."""
+    if kind == "once" or now <= first_due:
+        return first_due, 0
+    cron, span = Cron(spec), 3600.0
+    while True:
+        start = max(first_due, now - span)
+        occ, t = (first_due if start == first_due else None), start
+        for _ in range(MAX_CATCHUP_STEPS):
+            nxt = next_after(kind, spec, tz, t)
+            if nxt is None or nxt > now:
+                break
+            occ = t = nxt
+        if occ is not None:
+            return occ, _count_between(cron, tz, first_due, occ)
+        span *= 2
 
 
 def fmt_local(ts: float | None, tz: ZoneInfo) -> str:
