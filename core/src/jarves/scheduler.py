@@ -1030,11 +1030,10 @@ def make_skills(sched: Scheduler, registry=None) -> list:
                                         "whether to activate it; only after a clear yes call schedule_approve.",
                                   brief(v))
 
-            async def approve(a: JobIdArgs):
-                job = sched.job(a.job_id)
-                if job is None:
-                    return ToolResult(False, "no such job", code="JOB_NOT_FOUND")
-                if job["action"] == "tool":        # side-effect jobs: the user approves on the screen/dashboard
+            async def activate(job: dict) -> ToolResult:
+                """schedule_approve and job_control resume share this: a side-effect (tool) job is activated only
+                after the user approves it on the screen/dashboard, never by voice alone."""
+                if job["action"] == "tool":
                     confirm = getattr(registry, "confirm", None)
                     ok = await confirm(f"להפעיל משימה מתוזמנת: {job['human']} — {job['name']}?") if confirm else False
                     if not ok:
@@ -1046,16 +1045,30 @@ def make_skills(sched: Scheduler, registry=None) -> list:
                     return err(e)
                 return ToolResult(True, f"active: {v['human']}; next run {v['next_run_local']}", brief(v))
 
+            async def approve(a: JobIdArgs):
+                job = sched.job(a.job_id)
+                if job is None:
+                    return ToolResult(False, "no such job", code="JOB_NOT_FOUND")
+                return await activate(job)
+
             async def list_(_):
                 items = [brief(sched.view(j)) for j in sched.jobs(include_drafts=False)][:20]
                 return ToolResult(True, f"{len(items)} job(s)" if items else "no scheduled jobs", {"jobs": items})
 
             async def control(a: JobControlArgs):
+                if a.op == "resume":               # review #6: resume used to skip the on-screen confirm and
+                    job = sched.job(a.job_id)      # silently activated drafts too
+                    if job is None:
+                        return ToolResult(False, "no such job", code="JOB_NOT_FOUND")
+                    if job["status"] == "draft":
+                        return ToolResult(False, "this job is an unapproved preview: read it back and ask; after a "
+                                                 "clear yes call schedule_approve", code="JOB_NOT_APPROVED")
+                    if job["status"] != "paused":
+                        return ToolResult(True, f"resume: {job['name']} ({job['status']})", brief(sched.view(job)))
+                    return await activate(job)
                 try:
                     if a.op == "pause":
                         v = sched.pause(a.job_id, by="voice")
-                    elif a.op == "resume":
-                        v = sched.approve(a.job_id, by="voice")
                     else:
                         v = sched.run_now(a.job_id, by="voice")
                 except ScheduleError as e:

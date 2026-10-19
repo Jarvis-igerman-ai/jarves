@@ -518,6 +518,41 @@ def test_voice_cannot_create_tool_jobs():
         S.PreviewArgs(when="כל בוקר ב-8", task="x" * 3, kind="tool")
 
 
+# ---------------------------------------------------------------------- review #6: resume = approve (confirm)
+async def test_voice_resume_of_a_tool_job_needs_the_onscreen_confirm_and_never_activates_drafts(db):
+    clock = Clock(ts(JLM, 2026, 10, 19, 7, 0))
+    fx = SideEffects()
+    reg = SkillRegistry(allowed_actions=set(S.ALLOWED_ACTIONS) | {"side_act"})
+    reg.register(fx)
+    s = make(db, clock, FakeResearch(), registry=reg)
+    for sk in S.make_skills(s, reg):
+        reg.register(sk)
+    asked, answer = [], [False]
+
+    async def confirm(prompt):
+        asked.append(prompt)
+        return answer[0]
+    reg.confirm = confirm
+    tool_job = s.preview("כל בוקר ב-8", "", action="tool", tool="side_act", tool_args={"text": "a"})
+    s.approve(tool_job["id"], by="dashboard")
+    s.pause(tool_job["id"], by="dashboard")
+    r = await reg.call("job_control", {"job_id": tool_job["id"], "op": "resume"})
+    assert not r.ok and r.code == "JOB_NEEDS_APPROVAL" and len(asked) == 1
+    assert s.job(tool_job["id"])["status"] == "paused"                  # declined on screen: stays paused
+    answer[0] = True
+    r = await reg.call("job_control", {"job_id": tool_job["id"], "op": "resume"})
+    assert r.ok and s.job(tool_job["id"])["status"] == "active" and len(asked) == 2
+    # a draft is never activated by "resume" (that is schedule_approve, after the user's clear yes)
+    draft = s.preview("כל בוקר ב-9", "חדשות")
+    r = await reg.call("job_control", {"job_id": draft["id"], "op": "resume"})
+    assert not r.ok and r.code == "JOB_NOT_APPROVED" and s.job(draft["id"])["status"] == "draft"
+    # a paused research job (no side effect) resumes by voice without a screen prompt
+    s.approve(draft["id"], by="voice")
+    s.pause(draft["id"], by="voice")
+    r = await reg.call("job_control", {"job_id": draft["id"], "op": "resume"})
+    assert r.ok and s.job(draft["id"])["status"] == "active" and len(asked) == 2
+
+
 # ---------------------------------------------------------------------- review #4: plan research charged once
 async def test_plan_research_job_is_charged_once_against_the_daily_limit(db):
     from types import SimpleNamespace
