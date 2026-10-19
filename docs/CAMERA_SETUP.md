@@ -25,17 +25,23 @@ Software for the camera plan (`docs/plans/CAMERA_PLAN.md`, phases C1, C2, C3, C5
 | `face_recognition` | Recognise people who enrolled themselves |
 | `camera_when_away` | Keep the camera on while nobody is home (default off = camera OFF when away) |
 
-They register with the dashboard feature switches (`jarves.features`, WP-I) and show **unavailable** when no camera
-is found. Until WP-I is merged, use the local switch tool (does not open the camera):
+Use the dashboard feature switches or CLI. Activation checks prerequisites before reporting success;
+these commands do not open the camera:
 
 ```powershell
-cd core
-uv run python -m jarves.camera status          # probe (never opens the sensor) + switch states
-uv run python -m jarves.camera on camera        # / off camera, on face_recognition, ...
-uv run python -m jarves.camera people           # who enrolled; forget <name>; forget-all
+jarvis features
+jarvis features on camera
+jarvis features on face_recognition
+jarvis features off camera
 ```
 
 ## 3. Install
+
+`jarvis features on camera` installs missing locked OpenCV dependencies in source checkouts;
+`jarvis features on face_recognition` also downloads and verifies the SFace model below. Installation
+requires Core stopped (`jarvis stop`) and preserves other installed extras. Installed releases bundle
+dependencies; repair/update the release if they are missing. Device availability and individual enrollment
+remain separate user gates. The Windows sensorless probe verifies prerequisites, not successful capture.
 
 - **Windows PC (development, USB webcam):** `uv sync --extra voice --extra camera` (adds `opencv-python-headless`,
   resolved 5.0.0.93 on 2026-10-19). The probe uses the Windows config manager (`cfgmgr32`, ~2 ms) and never opens
@@ -45,7 +51,7 @@ uv run python -m jarves.camera people           # who enrolled; forget <name>; f
   **UNVERIFIED on the Pi**: CPU load, voice latency and Godot fps with detection on are the C4 hardware gate.
 - **Face detection model:** YuNet `face_detection_yunet_2023mar.onnx` (MIT, 232 589 bytes, sha256
   `8f2383e4dd3cfbb4553ea8718107fc0423210dc964f9f4280604804ed2552fa4`) ships in `core/src/jarves/camera/models/`.
-- **Face recognition model (only if you want it):** download SFace once into `<state_dir>/models/`
+- **Face recognition model (only if you want it):** CLI activation downloads SFace once into `<state_dir>/models/`
   (`%LOCALAPPDATA%\jarves\models\` on Windows):
   `https://github.com/opencv/opencv_zoo/raw/main/models/face_recognition_sface/face_recognition_sface_2021dec.onnx`
   (Apache-2.0, 38 696 353 bytes, sha256 `0ba9fbfa01b5270c96627c4ef784da859931e02f04419c829e83484087c34e79`).
@@ -113,8 +119,8 @@ Sources: OpenCV Zoo YuNet <https://github.com/opencv/opencv_zoo/tree/main/models
 | Symptom | Check |
 |---|---|
 | Dashboard says camera unavailable | `uv run python -m jarves.camera status` (probe detail + action) |
-| "OpenCV is not installed" | `uv sync --extra camera` |
+| "OpenCV is not installed" | Stop Core, then `jarvis features on camera`; installed release: repair/update |
 | Camera found but never on | the `camera` switch; away mode (`camera_status` tool / health `camera`) |
 | "התמונה שחורה" | shutter closed or lens covered |
-| Face recognition unavailable | SFace file missing in `<state_dir>/models/` |
+| Face recognition unavailable | Stop Core, then `jarvis features on face_recognition`; also check enrollment |
 | Manual webcam check (opens it once, saves nothing) | `JARVES_MANUAL_CAMERA=1 uv run pytest tests/test_camera.py -k manual -s` |

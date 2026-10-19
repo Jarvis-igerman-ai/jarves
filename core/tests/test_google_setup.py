@@ -378,6 +378,22 @@ async def test_installed_app_missing_google_registration_reports_maintainer_bloc
     assert result.data["setup"] == "maintainer_required" and "command" not in result.data
 
 
+def test_explicit_calendar_write_consent_can_precede_feature_enable(home, monkeypatch):
+    from argparse import Namespace
+    from jarves import google_auth
+    requested = []
+
+    async def sign_in(self, scopes):
+        requested.extend(scopes)
+        return {"scopes": [google_auth.short_scope(s) for s in scopes]}
+
+    monkeypatch.setattr(google_auth.GoogleAuth, "sign_in", sign_in)
+    args = Namespace(action="login", client=None, calendar_only=True, calendar_write=True)
+    assert google_auth.cmd_google(args, Config(), home) == 0
+    assert google_auth.CALENDAR_WRITE in requested
+    assert not Features(Config(), home).enabled("calendar_write")
+
+
 # ---------------------------------------------------------------------- voice: not connected -> how to connect
 async def test_not_connected_he_says_how_to_connect_and_picks_up_a_new_connection(home):
     reg = SkillRegistry()

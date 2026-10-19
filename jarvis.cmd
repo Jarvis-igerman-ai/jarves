@@ -12,7 +12,7 @@ setlocal
 set "C=%~dp0core"
 rem --no-sync: never reinstall while a Core is running (its jarves.exe is locked); install happens on start below
 set "J=uv --directory "%C%" run --no-sync jarves"
-if not exist "%C%\.venv" uv --directory "%C%" sync -q --extra voice --extra tray
+if not exist "%C%\.venv" uv --directory "%C%" sync --inexact -q --extra voice --extra tray
 set "FIRST=%~1"
 if /i "%FIRST%"=="--help" ( %J% %* & exit /b )
 if /i "%FIRST%"=="-h" ( %J% %* & exit /b )
@@ -28,14 +28,14 @@ if not "%ERRORLEVEL%"=="1" (
   %J% logs -f --until-stopped %*
   exit /b
 )
-uv --directory "%C%" sync -q --extra voice --extra tray || ( echo Could not install JARVES packages. & pause & exit /b 1 )
+uv --directory "%C%" sync --inexact -q --extra voice --extra tray || ( echo Could not install JARVES packages. & pause & exit /b 1 )
 %J% setup --if-needed || ( pause & exit /b 1 )
 %J% run --desktop %*
 exit /b
 :start
 %J% status --brief >nul 2>&1
 if "%ERRORLEVEL%"=="1" (
-  uv --directory "%C%" sync -q --extra voice --extra tray || ( echo Could not install JARVES packages. & exit /b 1 )
+  uv --directory "%C%" sync --inexact -q --extra voice --extra tray || ( echo Could not install JARVES packages. & exit /b 1 )
   %J% setup --if-needed || exit /b 1
 )
 %J% %*

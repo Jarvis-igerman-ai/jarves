@@ -26,6 +26,61 @@ class FakeConn:
         self.response = Resp()
 
 
+def test_reply_audio_interval_survives_delayed_transcript_flush(monkeypatch):
+    import struct
+    from jarves.voice import live
+    lv = LiveVoice(SkillRegistry(), lambda: "")
+    clock = {"mono": 100.0, "wall": 1_800_000_000.0}
+    monkeypatch.setattr(live.time, "monotonic", lambda: clock["mono"])
+    monkeypatch.setattr(live.time, "time", lambda: clock["wall"])
+    pcm = struct.pack("<h", 4000) * 2400     # 100 ms of generated speech energy, no physical audio device
+    lv._play(pcm)
+    clock.update(mono=105.0, wall=1_800_000_005.0)
+    lv._play(pcm)
+    clock.update(mono=120.0, wall=1_800_000_020.0)     # transcript flushed well after the actual speech
+    timing = lv._take_reply_wait()
+    assert timing["audio_started"] == 1_800_000_000.0
+    assert abs(timing["audio_ended"] - 1_800_000_005.1) < 0.001
+    assert lv._take_reply_wait() == {}
+
+
+def test_reply_audio_onset_accounts_for_already_queued_speech(monkeypatch):
+    import struct
+    from jarves.voice import live
+    lv = LiveVoice(SkillRegistry(), lambda: "")
+    monkeypatch.setattr(live.time, "monotonic", lambda: 100.0)
+    monkeypatch.setattr(live.time, "time", lambda: 1_800_000_000.0)
+    lv._speaking_until = 103.0
+    lv._play(struct.pack("<h", 4000) * 2400)
+    timing = lv._take_reply_wait()
+    assert timing["audio_started"] == 1_800_000_003.0
+    assert abs(timing["audio_ended"] - 1_800_000_003.1) < 0.001
+
+
+async def test_interrupt_does_not_reuse_abandoned_audio_timing(monkeypatch):
+    import struct
+    from jarves.voice import live
+    lv = LiveVoice(SkillRegistry(), lambda: "")
+    monkeypatch.setattr(live.time, "monotonic", lambda: 100.0)
+    monkeypatch.setattr(live.time, "time", lambda: 1_800_000_000.0)
+    lv._play(struct.pack("<h", 4000) * 2400)
+    lv._reply_wait_s = 2.0
+    await lv.interrupt()
+    assert lv._take_reply_wait() == {}
+    monkeypatch.setattr(live.time, "monotonic", lambda: 110.0)
+    monkeypatch.setattr(live.time, "time", lambda: 1_800_000_010.0)
+    lv._play(struct.pack("<h", 4000) * 2400)
+    assert lv._take_reply_wait()["audio_started"] == 1_800_000_010.0
+
+
+def test_session_reset_clears_unflushed_audio_timing():
+    lv = LiveVoice(SkillRegistry(), lambda: "")
+    lv._reply_audio_started, lv._reply_audio_ended = 1.0, 2.0
+    lv._reply_wait_s, lv._wait_ref = 3.0, 4.0
+    lv._reset_session()
+    assert lv._take_reply_wait() == {} and lv._wait_ref == 0.0
+
+
 async def test_session_config_uses_current_models(tmp_path):
     reg = SkillRegistry()
     reg.register(ClockSkill())

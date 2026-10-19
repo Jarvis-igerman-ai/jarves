@@ -967,8 +967,11 @@ def cmd_diagnose(a, cfg, home) -> int:
 def _cli_features(cfg, home):
     from .features import Features
     from .health import read_snapshot
+    from .runtime.lock import held
 
     def components() -> dict:
+        if not held(home):                 # a fresh snapshot from a stopped Core is not live evidence
+            return {}
         snap = read_snapshot(home / "health.json") or {}
         return (snap.get("components") or {}) if snap.get("age_s", 1e9) < 120 else {}
     return Features(cfg, home, components=components)
@@ -982,6 +985,12 @@ def cmd_features(a, cfg, home) -> int:
         if not a.id or a.id not in CATALOG:
             print(f"unknown feature {a.id!r}. Known: {', '.join(CATALOG)}", file=sys.stderr)
             return 2
+        if a.action == "on":
+            from .feature_setup import prepare
+            ok, detail = prepare(a.id, f, home)
+            if not ok:
+                print(f"{a.id}: {detail}", file=sys.stderr)
+                return 1
         s = f.reset(a.id) if a.action == "reset" else f.set(a.id, a.action == "on", by="cli")
         when = {"live": "now", "next_session": "from the next conversation", "restart": "at the next Core start"}
         print(f"{a.id}: {'on' if s['enabled'] else 'off'} (takes effect {when[s['applies']]})"
@@ -1157,7 +1166,8 @@ def main(argv: list[str] | None = None) -> int:
     db.add_argument("--no-open", action="store_true", help="do not open the browser")
     db.add_argument("--lan", action="store_true", help="also allow paired phones on the home network "
                                                        "(needs: jarvis features on dashboard_lan)")
-    fe = sub.add_parser("features", help="feature switches: list / on ID / off ID / reset ID")
+    fe = sub.add_parser("features", help="feature switches: list / on ID / off ID / reset ID; on installs supported "
+                                        "locked prerequisites before enabling (stop Core for dependency installation)")
     fe.add_argument("action", nargs="?", default="list", choices=["list", "on", "off", "reset"])
     fe.add_argument("id", nargs="?")
     dg = sub.add_parser("diagnose", help="self-diagnosis: find problems in recent conversations")

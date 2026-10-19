@@ -469,6 +469,9 @@ class LiveVoice(SessionLifecycle):
         self._t_started: float | None = None
         self._speaking_until = 0.0
         self._turn_audio_t0 = 0.0
+        self._reply_audio_started = self._reply_audio_ended = None
+        self._reply_wait_s = None
+        self._wait_ref = 0.0
         self._speech_pending = False
         self._out_text = ""
         self._held_text = ""            # assistant text whose audio has not played yet while the user talks
@@ -780,6 +783,11 @@ class LiveVoice(SessionLifecycle):
         dur = len(pcm) / 2 / RATE
         self._audio_in_s += dur
         if _rms16(pcm) > SPEECH_RMS:
+            # Transcript logs are flushed after speech. Keep the actual queued-audio interval so history does
+            # not mistake the duration of a spoken answer for silence before that answer.
+            wall = time.time()
+            if getattr(self, "_reply_audio_started", None) is None:
+                self._reply_audio_started = wall + max(0.0, self._speaking_until - now)
             self.note_activity()
             self._speech_pending = True
             self._speech_in_s += dur
@@ -787,6 +795,7 @@ class LiveVoice(SessionLifecycle):
                 self._turn_audio_t0 = now
                 self._note_reply_wait(now)
             self._speaking_until = max(self._speaking_until, now) + dur
+            self._reply_audio_ended = wall + self._speaking_until - now
             self._last_speech_t = now
             if self.audio_io is not None:
                 self.audio_io.enqueue(pcm)
@@ -807,13 +816,22 @@ class LiveVoice(SessionLifecycle):
 
     def _take_reply_wait(self) -> dict:
         w, self._reply_wait_s = getattr(self, "_reply_wait_s", None), None
-        return {} if w is None else {"wait_s": w}
+        result = {} if w is None else {"wait_s": w}
+        started = getattr(self, "_reply_audio_started", None)
+        if started is not None:
+            result.update(audio_started=started, audio_ended=self._reply_audio_ended)
+            self._reply_audio_started = self._reply_audio_ended = None
+        return result
 
     async def interrupt(self) -> None:
         """Barge-in: drop queued assistant speech immediately."""
         flushed = self.audio_io.flush() if self.audio_io is not None else 0
         self._speaking_until = 0.0
         self._speech_pending = False
+        # Queued speech was discarded. It has no verified full playback interval; never attach its timing
+        # (or its reply wait) to the next answer. Preserve the existing partial-caption handling.
+        self._reply_audio_started = self._reply_audio_ended = None
+        self._reply_wait_s = None
         self._stats["barge_ins"] += 1
         logs.info("live", "LIVE_BARGE_IN", "user interrupted JARVES", flushed_bytes=flushed)
         await self._state("listening")

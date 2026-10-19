@@ -485,13 +485,14 @@ def cmd_google(a, cfg, home) -> int:
                 print("Google will warn that the app is unverified: it is your own app, choose Continue.")
                 need = CALENDAR_SCOPES if a.calendar_only else ALL_SCOPES
                 if getattr(a, "calendar_write", False):
-                    from .features import Features
-                    if not Features(cfg, home).enabled("calendar_write"):
-                        print("Calendar writing is switched off. Turn it on first: jarvis features on calendar_write")
-                        return 1
+                    # Explicit login flag requests Google's consent; execution still requires the separate
+                    # feature switch and per-event confirmation. Requiring the switch here creates a cycle:
+                    # feature-on waits for consent, while consent waits for feature-on.
                     need = need + (CALENDAR_WRITE,)
                     print("Also asking to ADD and CHANGE events. JARVES never deletes events (enforced in JARVES; "
                           "Google's permission itself would allow it).")
+                    print("This permission request does not turn on calendar editing; after approval run "
+                          "jarvis features on calendar_write.")
                 st = await auth.sign_in(need)
                 print("connected: " + ", ".join(st["scopes"]))
                 if any(short_scope(s) not in st["scopes"] for s in need):

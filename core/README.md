@@ -151,6 +151,13 @@ questions to that backend. Generated references refresh at startup; `FEATURES.md
 switches change. Existing personal workspace documents are preserved. Restart a running Core to load
 changed source. Use `jarvis --help` (or `jarvis -h`) for all subcommands and `jarvis features` for switches.
 
+`jarvis features on ID` checks readiness before changing the switch, including when it is already on.
+Source checkouts automatically install missing locked camera/wake dependencies and the verified official
+SFace model when needed. Stop Core first if installation is required. Existing extras are preserved;
+installed apps with missing bundled dependencies need repair/update. Hardware, Google consent, Pear
+startup/pairing and per-person face enrollment still require the user. A readiness probe never opens sensors.
+Calendar editing consent: `jarvis google login --calendar-write`, then `jarvis features on calendar_write`.
+
 | Need | Command |
 |---|---|
 | What's wrong now | `uv run jarves status` (live health, or the last snapshot marked **stale** if the Core is down) |

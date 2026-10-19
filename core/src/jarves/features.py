@@ -202,9 +202,9 @@ def _probe_camera(c: ProbeCtx) -> tuple[bool, str]:
         return True, ""
     if comp.get("status") == "unavailable":
         return False, comp.get("detail") or "no camera connected"
-    if sys.platform.startswith("linux") and any(Path("/dev").glob("video*")):
-        return True, ""
-    return False, "no camera connected"
+    from .camera.backends import probe
+    result = probe(getattr(getattr(c.cfg, "camera", None), "backend", "auto"))
+    return result.available, "" if result.available else "; ".join(x for x in (result.detail, result.action) if x)
 
 
 def _skill_installed(*names: str) -> Probe:
@@ -218,6 +218,9 @@ def _skill_installed(*names: str) -> Probe:
 
 def _google(scope: str, *skill_names: str) -> Probe:
     installed = _skill_installed(*skill_names)
+    scope_field = {"calendar": "calendar", "calendar write": "calendar_write",
+                   "gmail read": "gmail_read", "gmail send": "gmail_send"}[scope]
+    consent_command = "jarvis google login" + (" --calendar-write" if scope_field == "calendar_write" else "")
 
     def probe(c: ProbeCtx) -> tuple[bool, str]:
         # WP-K: the token lives in <home>/google/token.json (google_auth); the reason tells him what to SAY
@@ -229,6 +232,9 @@ def _google(scope: str, *skill_names: str) -> Probe:
         if not st["connected"]:
             return False, (f"Google account not connected ({scope}); tell the user: \"תריץ במחשב {START_COMMAND}, "
                            f"ואני אדריך אותך\"")
+        if not st.get(scope_field, False):
+            return False, (f"Google consent required for {scope}: run `{consent_command}` and approve the requested "
+                           "permission in the browser. No sign-in or permission change was performed.")
         return installed(c)
     return probe
 
@@ -261,9 +267,9 @@ register("diagnosis_llm_pass", "אבחון עצמי בעזרת המודל", "Sel
          about="after each conversation one small model request looks for problems the rules miss")
 register("google_calendar", "יומן גוגל", "Google Calendar", True, probe=_google("calendar", "calendar"),
          needs=["google_account"], risk="medium", skills=["calendar"], about="read and add calendar events")
-register("gmail_read", "קריאת מיילים", "Read Gmail", True, probe=_google("gmail", "gmail"),
+register("gmail_read", "קריאת מיילים", "Read Gmail", True, probe=_google("gmail read", "gmail"),
          needs=["google_account"], risk="medium", tools=["gmail_search", "gmail_read"], about="read your e-mail")
-register("gmail_send", "שליחת מיילים", "Send Gmail", False, probe=_google("gmail", "gmail"),
+register("gmail_send", "שליחת מיילים", "Send Gmail", False, probe=_google("gmail send", "gmail"),
          needs=["google_account", "gmail_read"], risk="high", tools=["gmail_send", "gmail_draft"],
          about="send e-mail in your name")
 register("camera", "מצלמה", "Camera", False, probe=_probe_camera, needs=["camera_device"], risk="high",
@@ -611,7 +617,9 @@ class Features:
 
     def front_note(self, limit: int = 600) -> str:
         """Short line for GPT-Live's own instructions (the voice model answers "do you have a camera?" itself)."""
-        off = [f"{f.title_he} ({why})" for f, why in self.unavailable_summary()]
+        # Keep privacy-sensitive state visible before long setup guidance; full reasons stay in FEATURES.md.
+        unavailable = sorted(self.unavailable_summary(), key=lambda item: item[0].risk != "high")
+        off = [f"{f.title_he} ({why[:80] + '…' if len(why) > 80 else why})" for f, why in unavailable]
         if not off:
             return ""
         text = "Features that are OFF or not available right now: " + "; ".join(off)

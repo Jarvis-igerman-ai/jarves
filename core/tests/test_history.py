@@ -150,6 +150,50 @@ def test_dead_air_from_measured_reply_wait(st):
     assert dead["severity"] == "medium" and "7.5" in dead["title"]
 
 
+@pytest.mark.parametrize("answer_start,expected_stall", [(3.0, False), (25.0, True)])
+def test_answer_audio_onset_not_finished_transcript_measures_stall(st, answer_start, expected_stall):
+    base = 1_800_000_000
+    records = [(0, "LIVE_STARTED", {}), (1, "LIVE_USER_SAID", {"text": "Please check the weather"}),
+               (2, "LIVE_JARVES_SAID", {"text": "checking", "audio_started": base + 1.5,
+                                       "audio_ended": base + 1.8}),
+               (40, "LIVE_JARVES_SAID", {"text": "The forecast is sunny today",
+                                         "audio_started": base + answer_start, "audio_ended": base + 38}),
+               (42, "VOICE_ENDED", {"reason": "idle"})]
+    for at, code, extra in records:
+        sid = st.ingest({"ts": base + at, "code": code, "session": "audio-timing", **extra})
+    diagnose.run(st, Config(), [sid])
+    issues = _issues(st)
+    assert ("backend_stall" in issues) is expected_stall
+    assert ("silent_wait" in issues) is expected_stall
+    if expected_stall:
+        assert json.loads(issues["backend_stall"]["evidence"])["seconds"] == 24.0
+    assert st.timeline(sid)["turns"][-1]["audio_started"] == base + answer_start
+
+
+@pytest.mark.parametrize("speech_s,expected_stall", [(3.5, False), (0.0, True)])
+def test_legacy_speech_buckets_do_not_claim_spoken_answer_was_silence(st, speech_s, expected_stall):
+    base = 1_800_000_000
+    records = [(0, "LIVE_STARTED", {}), (1, "LIVE_USER_SAID", {"text": "Please check the weather"}),
+               (3, "LIVE_JARVES_SAID", {"text": "checking"})]
+    records += [(t, "LIVE_MIC", {"model_speech_s": speech_s}) for t in (5, 10, 15, 20, 25)]
+    records += [(27, "LIVE_JARVES_SAID", {"text": "The forecast is sunny today"}),
+                (30, "VOICE_ENDED", {"reason": "idle"})]
+    for at, code, extra in records:
+        sid = st.ingest({"ts": base + at, "code": code, "session": "legacy-audio", **extra})
+    diagnose.run(st, Config(), [sid])
+    assert ("backend_stall" in _issues(st)) is expected_stall
+    assert ("silent_wait" in _issues(st)) is expected_stall
+
+
+def test_unexpected_face_disconnect_during_active_conversation_stays_visible(st):
+    base = 1_800_000_000
+    st.ingest({"ts": base, "code": "LIVE_STARTED", "session": "face-lost"})
+    st.ingest({"ts": base + 10, "level": "WARNING", "code": "LINK_FACE_DISCONNECTED"})
+    sid = st.ingest({"ts": base + 40, "code": "VOICE_ENDED", "reason": "user"})
+    diagnose.run(st, Config(), [sid])
+    assert "event:LINK_FACE_DISCONNECTED" in _issues(st)
+
+
 def test_log_sink_records_live_and_diagnoses_after_the_session(home):
     cfg = Config()
     logs.setup(home / "logs", console=False, privacy=False)
