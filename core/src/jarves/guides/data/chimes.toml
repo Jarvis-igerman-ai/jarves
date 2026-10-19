@@ -1,0 +1,28 @@
+order = 5
+category = "voice"
+features = ["chimes"]
+aliases = ["צלילים", "צליל", "chime", "beep"]
+links = ["wake_word"]
+title_he = "צלילי התראה"
+title_en = "Chimes"
+what_he = "צליל עדין כשהוא שמע \"היי ג'ארביס\" וכשאפשר להתחיל לדבר."
+what_en = "A soft sound when he heard \"Hey Jarvis\" and when you can start talking."
+say = [["תכבה את הצלילים", "Turn the chimes off"]]
+expect_he = "שני צלילים קצרים בתחילת כל שיחה."
+expect_en = "Two short sounds at the start of each conversation."
+cost_he = "חינם."
+cost_en = "Free."
+privacy_he = "אין."
+privacy_en = "None."
+
+[[steps]]
+he = "ודאו שיש רמקול ושהמתג \"צלילי התראה\" דולק."
+en = "Make sure a speaker is connected and the Chimes switch is on."
+action = "feature_on:chimes"
+check = "active:chimes"
+
+[[problems]]
+he = "לא שומעים צליל"
+en = "No sound"
+fix_he = "בדקו את עוצמת הקול של Windows ואת הרמקול שנבחר."
+fix_en = "Check the Windows volume and the selected speaker."

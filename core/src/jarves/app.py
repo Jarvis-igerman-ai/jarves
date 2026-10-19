@@ -179,6 +179,8 @@ class Core:
             self.registry.register(TaskSkill(self.tasks))
         from .operations import attach as ops_attach    # WP-M3: scheduler, reports, notes, files, alerts, autonomy
         self.ops = ops_attach(self)
+        from . import guides                            # WP-L: help Skill, setup hints, briefing, suggestions
+        self.guides = guides.attach(self)
         self._write_tools_md()                          # after every Skill is registered
         self._retry_lookup = make_retry_lookup(c, self.budget)
         self._check_ai()
@@ -493,9 +495,10 @@ class Core:
         else:
             await self.link.reply(ws, "error", {"code": "LINK_UNKNOWN_TYPE", "message": f"unknown message type {t}"})
 
-    async def open_dashboard(self) -> str:
+    async def open_dashboard(self, page: str = "") -> str:
         """Start the dashboard inside the Core (once; it shares the Core's workspace, memory and settings) and open
-        it in the browser on this computer. Returns the full one-time URL."""
+        it in the browser on this computer, on `page` (e.g. "#/guide/music"; kept across the token redirect).
+        Returns the full one-time URL (without the page)."""
         if self._dashboard is None or not self._dashboard.running:
             from .dashboard import Dashboard
             self._dashboard = await asyncio.to_thread(
@@ -505,7 +508,8 @@ class Core:
         logs.info("core", "DASHBOARD_OPENED", "dashboard opened", port=self._dashboard.port,
                   browser=self.open_url is not None)
         if self.open_url is not None:
-            await asyncio.to_thread(self.open_url, url)
+            page = page if page.startswith("#/") and len(page) < 80 else ""
+            await asyncio.to_thread(self.open_url, url + page)
         return url
 
     def _run_busy(self, coro) -> None:
@@ -818,6 +822,8 @@ class Core:
         live_ref[0] = live
         wsp.attach_live(live, self.workspace, self.memory)   # persona files + known facts in the voice instructions
         feat.attach_live(live, self.features)                 # what is off / unavailable, so he says so truthfully
+        if getattr(self, "guides", None) is not None:         # WP-L: help questions -> backend; one suggestion
+            self.guides.attach_live(live)
         logs.new_cid()
         self._voice_connecting = True
         await self.link.broadcast("status", self.snapshot())
@@ -1108,8 +1114,9 @@ class Core:
         return {k: {"status": v.status, "detail": v.detail} for k, v in h.components.items()} if h else {}
 
     def _write_tools_md(self) -> None:
+        from .guides import index_markdown
         self.workspace.write_generated("TOOLS.md", wsp.tools_markdown(self.registry, self.settings.view())
-                                       + "\n" + self.features.capabilities_markdown())
+                                       + "\n" + self.features.capabilities_markdown() + "\n" + index_markdown())
 
     def _feature_changed(self, fid: str, on: bool) -> None:
         """A switch changed (voice tool, dashboard, CLI): apply what is cheap now; the rest says when it applies."""

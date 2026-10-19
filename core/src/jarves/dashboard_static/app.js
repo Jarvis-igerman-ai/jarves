@@ -366,7 +366,8 @@ async function pageFeatures() {
     const badge = !f.enabled ? pill("plain", "off") : f.available ? pill("ok", "active") : pill("unavailable", "unavailable");
     return el("tr", {}, el("td", {}, sw),
       el("td", {}, el("b", {}, f.title_en), " ", el("span", { class: "muted", dir: "auto" }, f.title_he),
-        el("div", { class: "muted small" }, f.about), f.requested ? el("div", { class: "small" }, "JARVES was asked to turn this on: approve here.") : null),
+        el("div", { class: "muted small" }, f.about, " · ", el("a", { href: "#/guide-for/" + encodeURIComponent(f.id) }, "Guide")),
+        f.requested ? el("div", { class: "small" }, "JARVES was asked to turn this on: approve here.") : null),
       el("td", {}, badge, f.reason ? el("div", { class: "small", dir: "auto" }, f.reason) : null),
       el("td", {}, pill(f.risk, f.risk)),
       el("td", { class: "muted small" }, `applies: ${when[f.applies] || f.applies}` + (f.source !== "user" ? ` · from ${f.source}` : ""), msg));
@@ -432,8 +433,9 @@ async function pageHome() {
       el("tbody", {}, Object.entries(ps).map(([k, v]) => el("tr", {}, el("td", {}, k.replace(/_/g, " ")), prow(k, v.windows), prow(k, v.linux_arm64_pi))))));
   const pending = el("div", { class: "card muted small" }, "Next scheduled jobs and recent alerts appear here once the scheduler is installed. ",
     el("span", { id: "usageStrip" }, "Usage: ChatGPT plan Unknown · OpenAI API Unknown (meters not connected yet)."));
+  const setup = typeof window.guidesSetupCard === "function" ? await window.guidesSetupCard() : null;   // WP-L
   render(header("Home", running ? "JARVES runs in the background; the window is optional." : "JARVES is stopped (last saved state shown)."),
-    tiles, el("div", { class: "grid2 home" }, controls, voice), platform, pending);
+    tiles, setup, el("div", { class: "grid2 home" }, controls, voice), platform, pending);
   if (running) timer = setInterval(() => route(true), 4000);
 }
 async function pageSettings() {
@@ -452,7 +454,7 @@ async function pageSettings() {
 async function route(refresh) {
   clearInterval(timer); timer = null;
   const [page, arg] = location.hash.replace(/^#\/?/, "").split("?")[0].split("/").map(decodeURIComponent);
-  const navPage = { session: "conversations", raw: "conversations", note: "workspace" }[page] || page || "home";
+  const navPage = { session: "conversations", raw: "conversations", note: "workspace", guide: "guides" }[page] || page || "home";
   for (const a of document.querySelectorAll("nav a")) a.classList.toggle("active", a.dataset.page === navPage);
   try {
     if (page === "home" || !page) await pageHome();                    // M1: the default page

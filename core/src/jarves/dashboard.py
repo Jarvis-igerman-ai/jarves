@@ -41,7 +41,7 @@ _EMAIL = re.compile(r"[\w.+-]+@[\w-]+\.[\w.-]+")
 _ROUTES: list[tuple[str, re.Pattern, object]] = []
 PLUGIN_MODULES = ("jarves.workspace", "jarves.curator", "jarves.memory", "jarves.features", "jarves.google_auth",
                   "jarves.usage", "jarves.backup", "jarves.appearance", "jarves.skills.generated",
-                  "jarves.operations", "jarves.runtime")
+                  "jarves.operations", "jarves.runtime", "jarves.guides")     # WP-L: Guides pages
 MEMORY_UNDO_KEEP = 30
 
 

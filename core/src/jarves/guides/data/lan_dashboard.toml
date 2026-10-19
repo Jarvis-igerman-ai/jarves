@@ -1,0 +1,32 @@
+order = 63
+category = "system"
+features = ["dashboard_lan"]
+aliases = ["רשת", "טלפון", "מהטלפון", "lan", "network", "pairing", "phone", "צימוד"]
+links = ["dashboard", "privacy"]
+title_he = "לוח הבקרה מהטלפון (רשת ביתית)"
+title_en = "Dashboard from your phone (home network)"
+what_he = "אפשר לפתוח את לוח הבקרה מהטלפון בבית, אחרי צימוד חד-פעמי וסיסמה. כבוי מראש."
+what_en = "Open the dashboard from your phone at home, after a one-time pairing and a login. Off by default."
+say = [["איך אני פותח את לוח הבקרה מהטלפון?", "How do I open the dashboard from my phone?"]]
+expect_he = "רק ברשת הביתית. כל טלפון צריך צימוד משלו, ואפשר לבטל אותו בכל רגע."
+expect_en = "Home network only. Each phone needs its own pairing, which you can cancel any time."
+cost_he = "חינם."
+cost_en = "Free."
+privacy_he = "בלי צימוד וכניסה אין גישה. בלי צימוד הלוח פתוח רק מהמחשב עצמו."
+privacy_en = "No access without pairing and login. Without it the dashboard opens only on this computer."
+
+[[steps]]
+he = "הדליקו את \"לוח בקרה ברשת הביתית\" בעמוד Features (סיכון גבוה)."
+en = "Turn on Dashboard on the home network on the Features page (high risk)."
+action = "feature_on:dashboard_lan"
+check = "enabled:dashboard_lan"
+
+[[steps]]
+he = "בלוח הבקרה במחשב בחרו \"צמד מכשיר\" וסרקו את הקוד בטלפון."
+en = "On the computer's dashboard choose Pair a device and scan the code with the phone."
+
+[platform]
+windows = "implemented_unverified"
+windows_note_en = "pairing and login are built by another package (WP-M4); this guide links to it"
+pi = "implemented_unverified"
+pi_note_en = "same code; not run on a Pi yet"
