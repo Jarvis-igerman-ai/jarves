@@ -1104,6 +1104,31 @@ async def wake_rates(h: Harness, threshold: float, with_positives: bool) -> dict
             "lost": sum(x["mic"] == "lost" for x in rows)}
 
 
+@scenario(31, "false_wake_closes", "A wake with NOBODY speaking (false wake) ends after ~12 s instead of idling for minutes; then a real wake works",
+          "VOICE_NO_SPEECH logged 10-20 s after the session opened, session closed, the next 'Hey Jarvis' + question works")
+async def s_false_wake(h, r):
+    s = await h.boot("falsewake", over={"voice": {"activation": "wake_word", "wake_enabled": True, "chime": True, "greeting": False,
+                                     "wake_no_speech_s": 12}}, idle_s=180, greet=False)
+    if s.boot_error:
+        r.ok, r.key = False, s.boot_error
+        return
+    await wait_for(lambda: s.core.live is None, 60)
+    await wait_for(lambda: s.core.snapshot()["wake_listening"] and VAudio.open_mics(16000), 15)
+    mark = s.log.mark()
+    await h.say("Hey Jarvis", lang="en", pad_s=0.3)                   # the wake phrase, then NOTHING
+    woke = await wait_for(lambda: bool(s.log.codes("WAKE_WORD", mark)), 5)
+    opened = await wait_for(lambda: s.core.live is not None, 15)
+    t0 = time.time()
+    closed = await wait_for(lambda: s.core.live is None, 40)
+    dt = round(time.time() - t0, 1)
+    ev = s.log.codes("VOICE_NO_SPEECH", mark)
+    x = await wake_cycle(h, s, "כמה זה שתיים ועוד שתיים?", ("4", "ארבע"))     # and a normal wake still works
+    r.ok = bool(woke and opened and closed and ev and 8 <= dt <= 22 and x["connected"] and x["answered"])
+    r.key = (f"woke {woke}, opened {opened}, closed after {dt} s, VOICE_NO_SPEECH {len(ev)}; "
+             f"next real wake connected {x['connected']}, answered {x['answered']}")
+    r.details = {"closed_after_s": dt, "next": {k: v for k, v in x.items() if k != "turn"}}
+
+
 @scenario(22, "wake_false_positives", "20 non-wake sentences (Hebrew/English, near-misses) while idle, threshold 0.15",
           "0 false wakes out of 20 (honest count; real openWakeWord in the Core wake loop, no live cost)")
 async def s_wake_fp(h, r):

@@ -666,7 +666,8 @@ class Core:
                              reasoning_effort=self.cfg.ai.voice_reasoning_effort,
                              service_tier=self.cfg.ai.voice_service_tier,
                              max_output_tokens=self.cfg.ai.voice_max_output_tokens, echo_tail_s=v.echo_tail_s,
-                             clock_context=v.clock_context, progress_after_s=v.progress_after_s, **common, **extra)
+                             clock_context=v.clock_context, progress_after_s=v.progress_after_s,
+                             no_speech_timeout_s=(v.wake_no_speech_s if ack else 0), **common, **extra)
         else:
             from .voice.realtime import RealtimeVoice
             live = RealtimeVoice(v.realtime_model, self.agent.instructions, self.registry.realtime_tools(),

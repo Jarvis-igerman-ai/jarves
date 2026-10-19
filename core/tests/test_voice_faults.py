@@ -709,3 +709,41 @@ async def test_speech_then_silence_gates_only_while_speaking_and_keeps_short_pau
     assert audio.queued_s() == pytest.approx(0.6)                    # dropped, nothing added
     lv._speaking_until = 0.0
     assert not lv._gated() or True
+
+
+# ---------------------------------------------------------------- long utterances and false wakes (QA 19 Oct)
+async def test_model_speaking_while_the_user_is_still_talking_is_dropped_and_mic_stays_open():
+    rec, audio = Rec(), FakeAudio()
+    lv = make_live(rec, FakeClient(), audio)
+    lv._last_user_voice = time.monotonic()                      # the user is mid-story right now
+    await lv.handle_event(delta(loud(4800 * 5)))                # the model starts answering anyway
+    assert audio.queued_s() == 0 and "speaking" not in rec.states        # not played, not shown as speaking
+    assert not lv._gated()                                      # the mic gate did NOT close: the story keeps flowing
+    assert lv.stats()["early_response_drops"] == 1
+    await lv.handle_event(delta(loud(4800 * 5)))                # the tail of that response: still dropped
+    assert audio.queued_s() == 0
+    lv._last_user_voice -= 5
+    lv._drop_until = 0.0                                        # the user stopped long ago
+    await lv.handle_event(delta(loud(4800 * 5)))                # now it is a normal answer
+    assert audio.queued_s() == pytest.approx(0.5) and "speaking" in rec.states and lv._gated()
+
+
+async def test_wake_started_session_with_no_speech_closes_quickly_but_a_normal_one_does_not():
+    rec, client = Rec(), FakeClient()
+    lv = make_live(rec, client, no_speech_timeout_s=0.6, idle_disconnect_s=60)
+    await lv.start()
+    await asyncio.sleep(2.0)
+    assert rec.ends == ["no_speech"]                            # false wake: closed, not 60 s of billing
+    rec2, client2 = Rec(), FakeClient()
+    lv2 = make_live(rec2, client2, no_speech_timeout_s=0.6, idle_disconnect_s=60)
+    await lv2.start()
+    await lv2.handle_event({"type": "session.input_transcript.delta", "delta": "שלום"})   # somebody spoke
+    await asyncio.sleep(2.0)
+    assert rec2.ends == []
+    await lv2.stop()
+    rec3, client3 = Rec(), FakeClient()
+    lv3 = make_live(rec3, client3, idle_disconnect_s=60)          # connected-on-open: no timeout configured
+    await lv3.start()
+    await asyncio.sleep(1.5)
+    assert rec3.ends == []
+    await lv3.stop()

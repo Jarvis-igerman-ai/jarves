@@ -43,6 +43,7 @@ RATE = 24000
 SPEECH_RMS = 0.004
 PAUSE_KEEP_S = 0.6        # silence this soon after speech is a pause INSIDE the utterance: keep it, else drop it
 CHUNK_BYTES = 4800          # 100 ms of PCM16 mono @ 24 kHz
+USER_TALKING_S = 0.5        # the user counts as "still talking" this long after the last loud mic chunk
 ENERGY_EXTEND_S = 30.0      # loud mic input without any transcribed speech keeps a session open at most this long
 BARGE_IN_MIN_S = 0.5       # assistant audio must have been playing this long before a new user utterance flushes it
 
@@ -227,6 +228,13 @@ class SessionLifecycle:
             # Mic energy alone (fan, TV, coughs) extends the session at most ENERGY_EXTEND_S past the last REAL
             # activity (speech transcribed, JARVES speaking, backend/tool work). QA 19 Oct (suite_voice): a session
             # opened by a false wake stayed open 3 min 16 s on room noise instead of ending after 15 s.
+            if (self.no_speech_timeout_s and not self._heard_user and not self._backend_busy
+                    and not getattr(self, "_tools_running", 0)
+                    and time.monotonic() - max(self._t_ready, self._speaking_until) >= self.no_speech_timeout_s):
+                logs.info(self._log_area, "VOICE_NO_SPEECH", "the conversation opened but nobody spoke: closing "
+                          "(false wake?)", after_s=round(time.monotonic() - self._t_ready, 1))
+                self._request_end("no_speech")
+                return
             energy = min(getattr(self, "_last_energy", 0.0), self._last_activity + ENERGY_EXTEND_S)
             if time.monotonic() - max(self._last_activity, energy) >= self.idle_disconnect_s and not (
                     self._backend_busy or getattr(self, "_tools_running", 0)):
@@ -360,8 +368,15 @@ class LiveVoice(SessionLifecycle):
                  on_activity: Callable[[str, str, str], Any] | None = None,
                  on_level: Callable[[float], Any] | None = None, reasoning_effort: str = "",
                  service_tier: str = "", max_output_tokens: int = 0, echo_tail_s: float = 0.4,
-                 clock_context: bool = False, progress_after_s: float = 0.0) -> None:
+                 clock_context: bool = False, progress_after_s: float = 0.0, no_speech_timeout_s: float = 0.0) -> None:
         self.on_emotion, self.on_activity, self.on_level = on_emotion, on_activity, on_level
+        # A session opened by "Hey Jarvis" in which nobody ever speaks (a FALSE wake: "hey Travis", a TV) ends after
+        # this many seconds instead of idling for minutes (each such session costs money). 0 = off.
+        self.no_speech_timeout_s = no_speech_timeout_s
+        self._heard_user = False
+        self._t_ready = 0.0
+        self._last_user_voice = 0.0
+        self._drop_until = 0.0
         self.reasoning_effort, self.service_tier, self.max_output_tokens = reasoning_effort, service_tier, max_output_tokens
         self.echo_tail_s, self.clock_context, self.progress_after_s = echo_tail_s, clock_context, progress_after_s
         self._last_emotion = ("", 0.0)
@@ -531,6 +546,9 @@ class LiveVoice(SessionLifecycle):
         self._spawn(self._idle_watchdog(), "idle")
         if self.clock_context:
             self._spawn(self._clock_loop(), "clock")
+        self._t_ready = time.monotonic()
+        self._heard_user = False
+        self._last_user_voice = self._drop_until = 0.0
         logs.info("live", "LIVE_STARTED", f"GPT-Live session started ({self.model} -> {self.backend_model})")
         await self._state("listening")
 
@@ -630,6 +648,8 @@ class LiveVoice(SessionLifecycle):
                 await _call(self.on_level, 0.0 if gated else level_meter(chunk))
             if not gated and level > 0.015:
                 self._last_energy = time.monotonic()      # bounded by ENERGY_EXTEND_S (see _idle_watchdog)
+            if not gated and level > 0.02:
+                self._last_user_voice = time.monotonic()
             await self.conn.session.input_audio.append(audio=base64.b64encode(silence if gated else chunk).decode())
             sent += 1
             silenced += gated
@@ -655,6 +675,24 @@ class LiveVoice(SessionLifecycle):
     async def _player(self) -> None:
         await self._presented.wait()
         await self.audio_io.run_player(RATE)
+
+    def _drop_early(self, pcm: bytes) -> bool:
+        """The model started (or keeps) speaking while the USER IS STILL TALKING (QA 19 Oct, 40 s story: it answered
+        4 s in and the echo guard then muted the rest of the story, so the question never arrived). Do not play that
+        audio and do not close the mic gate: the server hears the user continue, treats it as an interruption and
+        answers the whole utterance afterwards. Silence chunks are never dropped here."""
+        if _rms16(pcm) <= SPEECH_RMS:
+            return False
+        now = time.monotonic()
+        if now - self._last_user_voice < USER_TALKING_S:
+            self._drop_until = now + 0.6          # keep dropping the tail of that response for a moment
+        elif now >= self._drop_until:
+            return False
+        self._stats["early_response_drops"] = self._stats.get("early_response_drops", 0) + 1
+        if self._stats["early_response_drops"] == 1:
+            logs.info("live", "LIVE_EARLY_RESPONSE", "model started answering while the user is still talking; "
+                      "dropped it and kept the microphone open")
+        return True
 
     def _play(self, pcm: bytes) -> None:
         """Queue server audio. SILENCE (the continuous stream between utterances) must not mute the mic, count as
@@ -730,11 +768,14 @@ class LiveVoice(SessionLifecycle):
             await self._health("ok", f"GPT-Live connected ({self.model} -> {self.backend_model})", "")
         elif t == "session.output_audio.delta":
             pcm = base64.b64decode(g("delta"))
+            if self._drop_early(pcm):
+                return
             if _rms16(pcm) > SPEECH_RMS and time.monotonic() > self._speaking_until:
                 await self._state("speaking")
             self._play(pcm)
         elif t == "session.input_transcript.delta":
             self.note_activity()
+            self._heard_user = True
             now = time.monotonic()
             if (not self._in_text and not self._gated() and now < self._speaking_until
                     and now - self._turn_audio_t0 >= BARGE_IN_MIN_S):
