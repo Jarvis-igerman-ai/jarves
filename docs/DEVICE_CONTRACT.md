@@ -16,6 +16,7 @@ Envelope: `{ "type": "button.down", "ts_ms": 12345, "payload": {"id":"action"} }
 
 ## Outbound commands (Core -> device)
 `speaker.play`, `speaker.stop`, `speaker.set_volume (0..1)`, `face.set_state (idle/listening/thinking/speaking/happy/error)`, `display.set_brightness (0..1)`, `camera.capture`.
+Camera (SW-V2 WP-J, `core/src/jarves/camera/`): `face.set_gaze {x, y: -1..1, confidence: 0..1}` (0 = stop tracking) and `camera.indicator {on, flash}` (software indicator; see `docs/CAMERA_SETUP.md`). The camera adapter lives in `camera/backends.py`; frames stay in the Core process RAM and never cross the face link.
 
 ## Semantics
 - Inputs on all platforms must produce the same named events and state transitions. Button down/up are separate; Core derives long press from times.
