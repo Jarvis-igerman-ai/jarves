@@ -146,7 +146,8 @@ def test_workspace_files_and_plugin_route(dash):
         assert r.status == 200 and seen == [("7", {"text": "new"})]
         assert get(dash, "/api/memory")["editable"] is True
     finally:
-        dashboard._ROUTES[:] = [r for r in dashboard._ROUTES if r[1].pattern != r"^/api/memory/(\d+)$"]
+        dashboard._ROUTES[:] = [r for r in dashboard._ROUTES
+                                if not (r[0] == "POST" and r[1].pattern == r"^/api/memory/(\d+)$")]
 
 
 def test_live_session_is_visible_while_it_runs(home):
