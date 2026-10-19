@@ -70,7 +70,7 @@ jobs:
           "VERSION=$v" >> $env:GITHUB_ENV
       - name: Silent install / run / upgrade / uninstall smoke
         shell: pwsh
-        run: ./packaging/smoke_windows.ps1 -Installer "dist/JARVES-Setup-$env:VERSION.exe" -Version $env:VERSION -RequireFace
+        run: ./packaging/smoke_windows.ps1 -Installer "dist/JARVES-Setup-$env:VERSION.exe" -Version $env:VERSION -RequireFace -CheckAutostart
       - uses: actions/upload-artifact@v7
         with:
           name: jarves-windows-installer-${{ env.CHANNEL }}

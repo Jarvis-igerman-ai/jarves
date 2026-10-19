@@ -18,6 +18,7 @@ param(
     [string]$Version = "",
     [string]$Work = (Join-Path ([IO.Path]::GetTempPath()) "jarves-smoke-$PID"),
     [switch]$RequireFace,
+    [switch]$CheckAutostart,     # CI: the reinstall ticks "start at login" (writes HKCU Run\JARVES); uninstall removes it
     [switch]$SkipDoctor          # local runs: doctor records 1.5 s from the default microphone (CI has none)
 )
 $ErrorActionPreference = "Stop"
@@ -37,9 +38,9 @@ function Jarvis([string[]]$argv, [int]$timeoutS = 120) {
     if (-not $p.WaitForExit($timeoutS * 1000)) { $p.Kill($true); return @{ code = -1; text = "TIMEOUT" } }
     return @{ code = $p.ExitCode; text = (Get-Content $out -Raw -ErrorAction SilentlyContinue) + "" }
 }
-function Install([string[]]$extra = @()) {
+function Install([string]$tasks = "") {
     $p = Start-Process $Installer -Wait -PassThru -ArgumentList (@("/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART",
-        "/SP-", "/TASKS=`"`"", "/DIR=`"$App`"", "/LOG=`"$(Join-Path $Work "install-$(Get-Random).log")`"") + $extra)
+        "/SP-", "/TASKS=`"$tasks`"", "/DIR=`"$App`"", "/LOG=`"$(Join-Path $Work "install-$(Get-Random).log")`""))
     return $p.ExitCode
 }
 function Uninstall([string[]]$extra = @()) {
@@ -146,9 +147,19 @@ Check (-not (Test-Path $menu)) "Start menu entry removed"
 Check ((Test-Path (Join-Path $Home_ "memory.db")) -and (Test-Path (Join-Path $Home_ "secrets.env"))) "user data kept"
 
 # 7 purge only when asked
-Check ((Install) -eq 0) "reinstall"
+$run = "HKCU:\Software\Microsoft\Windows\CurrentVersion\Run"
+if ($CheckAutostart) {
+    Check ((Install "autostart") -eq 0) "reinstall with start-at-login"
+    $entry = (Get-ItemProperty $run -Name JARVES -ErrorAction SilentlyContinue).JARVES
+    Check ($entry -and $entry -like "*$App*pythonw.exe*") "start-at-login entry points to the installed Core: $entry"
+} else {
+    Check ((Install) -eq 0) "reinstall"
+}
 Check ((Uninstall @("/PURGE=1")) -eq 0) "uninstall /PURGE=1"
 Check (-not (Test-Path $Home_)) "user data removed on request"
+if ($CheckAutostart) {
+    Check (-not (Get-ItemProperty $run -Name JARVES -ErrorAction SilentlyContinue)) "uninstall removed start-at-login"
+}
 
 Remove-Item -Recurse -Force $Work -ErrorAction SilentlyContinue
 if ($failures) { Write-Host "SMOKE RESULT: FAIL ($failures)"; exit 1 }

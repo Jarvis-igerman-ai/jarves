@@ -34,7 +34,8 @@ DEVICE_EVENTS = frozenset({"button.down", "button.up", "mic.mute_changed", "pres
 ALLOWED: dict[str, frozenset[str]] = {
     "face": frozenset({"talk.down", "talk.up", "user.text", "mic.set_mute", "status.request", "confirm.reply",
                        "debug.enable", "desktop.close", "ui.open_dashboard"}) | DEVICE_EVENTS,
-    "cli": frozenset({"status.request", "core.shutdown", "debug.enable"}),
+    # runtime.set (M1): show/hide the window, software mute, pause alerts - the CLI, dashboard and tray route
+    "cli": frozenset({"status.request", "core.shutdown", "debug.enable", "runtime.set"}),
 }
 KNOWN_TYPES = frozenset().union(*ALLOWED.values())
 
