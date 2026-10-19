@@ -146,7 +146,24 @@ def make_skill(rt: Runtime):
                 return ToolResult(True, "אני נסגר עכשיו לגמרי ומפסיק להקשיב. כדי להפעיל אותי שוב, פתח את "
                                   "ג'ארוויס במחשב.", {"stopping_in_s": QUIT_DELAY_S})
 
+            async def end_(_):
+                # SW-V3 P0.1 (real session 19 Oct 23:21): "תסגור את הסשן" got "I can't close the conversation from
+                # here, close my window" (false: closing the window only hides JARVES). Ends only this voice
+                # conversation, after the goodbye; the Core, wake word and window stay.
+                core = rt.core
+                live = getattr(core, "live", None)
+                if live is None:
+                    return ToolResult(False, "אין כרגע שיחה קולית פתוחה.", code="NO_CONVERSATION")
+                logs.info("runtime", "CONVERSATION_END_REQUESTED", "end of the voice conversation requested by voice")
+                asyncio.get_running_loop().create_task(_end_after_goodbye(core, live))
+                return ToolResult(True, "סיימנו לעכשיו. כדי לדבר שוב, תגיד \"היי ג'ארוויס\" או לחץ על כפתור "
+                                  "הדיבור.", {"ending": True})
+
             return [
+                Tool("end_conversation", "End only this voice conversation (stop listening until the user calls me "
+                     "again) when the user asks to end / close the conversation or session (\"תסגור את הסשן\", "
+                     "\"סיימנו\", \"end the conversation\"). JARVES keeps running; not for quitting the app.",
+                     end_, permission="action", timeout_s=5),
                 Tool("quit_jarves", "Quit the JARVES app completely (the Core stops, the microphone closes, no more "
                      "listening) when the user explicitly asks to quit, exit, shut down or close JARVES / the app "
                      "entirely (\"תסגור את עצמך לגמרי\", \"לסגור את האפליקציה\", \"שט דאון\", \"צא\", \"quit\"). "
@@ -158,10 +175,24 @@ def make_skill(rt: Runtime):
     return DisplaySkill(), AppSkill()
 
 
+async def _end_after_goodbye(core, live, max_wait_s: float = 15.0) -> None:
+    """Let the goodbye sentence (and any tool still running) finish, then end that conversation."""
+    import time
+    await asyncio.sleep(QUIT_DELAY_S / 4)
+    deadline = time.monotonic() + max_wait_s
+    while time.monotonic() < deadline and core.live is live and (
+            getattr(live, "_tools_running", 0) or time.monotonic() < getattr(live, "_speaking_until", 0.0) + 1.0):
+        await asyncio.sleep(0.25)
+    if core.live is not live:
+        return
+    core.live = None
+    await live.stop("user")
+
+
 def attach(core, *, mode: str = "foreground", launcher=None, tray_factory=None, autostart=None) -> Runtime:
     """Called from Core.start once DevicePort exists (before the wake word is set up)."""
     rt = Runtime(core, mode=mode, launcher=launcher, tray_factory=tray_factory, autostart=autostart)
-    core.registry.allowed_actions |= {"show_yourself", "hide_yourself", "quit_jarves"}
+    core.registry.allowed_actions |= {"show_yourself", "hide_yourself", "quit_jarves", "end_conversation"}
     for skill in make_skill(rt):
         core.registry.register(skill)
     core.features.listeners.append(lambda fid, on: _feature_changed(rt, fid, on))

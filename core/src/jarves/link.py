@@ -15,6 +15,7 @@ import asyncio
 import inspect
 import json
 import secrets
+import time
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Awaitable, Callable
@@ -31,6 +32,7 @@ ROLES = {"godot": "face", "cli": "cli"}
 # Device events (keep in sync with deviceport.INBOUND; a test asserts it).
 DEVICE_EVENTS = frozenset({"button.down", "button.up", "mic.mute_changed", "presence.changed", "light.changed",
                            "network.changed"})
+CLOSE_GRACE_S = 10.0       # a face disconnect this soon after a requested close is the close itself, not a fault
 ALLOWED: dict[str, frozenset[str]] = {
     "face": frozenset({"talk.down", "talk.up", "user.text", "mic.set_mute", "status.request", "confirm.reply",
                        "debug.enable", "desktop.close", "ui.open_dashboard"}) | DEVICE_EVENTS,
@@ -80,6 +82,7 @@ class GodotLink:
         self.face_client: Client | None = None
         self.clients: set[ServerConnection] = set()
         self._server = None
+        self._close_expected_until = 0.0   # a close the Core asked for / the user chose (not a fault)
 
     def face_client_id(self) -> str | None:
         """Id of the currently connected face (bind confirm.request/confirm.reply to it); None if no face."""
@@ -146,6 +149,8 @@ class GodotLink:
                     continue
                 if m.get("cid"):
                     logs.set_cid(str(m["cid"])[:32])
+                if t == "desktop.close" and role == "face":
+                    self.expect_close()                  # the user closed the window: its disconnect follows
                 if t not in KNOWN_TYPES:
                     await self._send(ws, "error", {"code": "LINK_UNKNOWN_TYPE",
                                                    "message": f"unknown message type {t[:64]}"})
@@ -169,9 +174,19 @@ class GodotLink:
             self.clients.discard(ws)
             if ws is self.face:
                 self.face, self.face_client = None, None
-                self.health.set("face_link", "unavailable", "Godot face disconnected",
-                                "restart godot\\run_face.cmd; it reconnects automatically")
-                logs.warn("link", "LINK_FACE_DISCONNECTED", f"Godot face disconnected ({peer})")
+                if time.monotonic() < self._close_expected_until:
+                    # SW-V3 P0.1 (review Q13): hide / window closed / Core stopping logged a WARNING and became a
+                    # dashboard issue every time; a requested close is normal, only an unexpected loss is a fault
+                    self.health.set("face_link", "unavailable", "display window closed", "")
+                    logs.info("link", "LINK_FACE_CLOSED", f"Godot face closed as requested ({peer})")
+                else:
+                    self.health.set("face_link", "unavailable", "Godot face disconnected",
+                                    "restart godot\\run_face.cmd; it reconnects automatically")
+                    logs.warn("link", "LINK_FACE_DISCONNECTED", f"Godot face disconnected ({peer})")
+
+    def expect_close(self, seconds: float = CLOSE_GRACE_S) -> None:
+        """The face is about to close on purpose (hide, window closed by the user, Core stopping)."""
+        self._close_expected_until = time.monotonic() + seconds
 
     @staticmethod
     async def _send(ws: ServerConnection, t: str, payload: dict) -> bool:
@@ -184,6 +199,8 @@ class GodotLink:
             return False
 
     async def send_face(self, t: str, payload: dict) -> bool:
+        if t == "display.close":
+            self.expect_close()
         return await self._send(self.face, t, payload) if self.face else False
 
     async def reply(self, to: ServerConnection | Client, t: str, payload: dict) -> bool:
