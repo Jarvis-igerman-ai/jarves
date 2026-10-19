@@ -44,6 +44,81 @@ def test_ai_reply_reads_usage_fields():
     assert abs(d["text"] - ((4000 * 0.10 + 200 * 0.50) / 1e6 + 0.01)) < 1e-9
 
 
+def test_typed_exchanges_form_a_typed_conversation():
+    cfg = Config()
+    st = Store(":memory:", backend_model="gpt-6-luna")
+    t = 1_760_000_000.0
+    st.ingest({"ts": t, "code": "AI_REPLY", "msg": "agent replied", "usage_in": 10000, "usage_out": 1000, "session": "c"})
+    st.ingest({"ts": t + 0.1, "code": "REPLY", "msg": "reply via ai", "ms": 1500, "text": "שלום!", "utterance": "היי",
+               "typed": True, "session": "c"})
+    st.ingest({"ts": t + 60, "code": "REPLY", "msg": "reply via local", "ms": 10, "text": "14:00",
+               "utterance": "מה השעה", "typed": True, "session": "c"})
+    ss = st.sessions()
+    assert len(ss) == 1 and ss[0]["kind"] == "typed" and ss[0]["ended"] == t + 60
+    turns = st.timeline(ss[0]["id"])["turns"]
+    assert [x["text"] for x in turns] == ["היי", "שלום!", "מה השעה", "14:00"]
+    d = daily_costs(st, cfg.pricing, 3650)[0]
+    assert d["voice"] == 0 and d["text"] > 0 and d["sessions"] == 1
+
+
+class _Resp:
+    model = "gpt-6-luna"
+    output_text = ('{"issues": [{"title": "Answered the wrong city", "severity": "medium", '
+                   '"detail": "asked about Haifa, answered Tel Aviv", "quote": "בתל אביב"}]}')
+
+    class usage:
+        input_tokens, output_tokens = 1500, 80
+
+
+class _Client:
+    def __init__(self):
+        self.calls = []
+
+        class R:
+            @staticmethod
+            def create(**kw):
+                self.calls.append(kw)
+                return _Resp()
+        self.responses = R()
+
+
+def _voice_session(st, t):
+    st.ingest(_rec("LIVE_STARTED", t, msg="GPT-Live session started (gpt-live-1 -> gpt-6-luna)"))
+    st.ingest(_rec("LIVE_USER_SAID", t + 1, text="מה מזג האוויר בחיפה?"))
+    st.ingest(_rec("LIVE_JARVES_SAID", t + 3, text="בתל אביב עשרים מעלות.", wait_s=1.0))
+    st.ingest(_rec("LIVE_USER_SAID", t + 6, text="ביקשתי חיפה, joe@example.com"))
+    st.ingest(_rec("VOICE_ENDED", t + 9, voice_seconds=9.0, reason="user"))
+    return st.sessions()[0]["id"]
+
+
+def test_ai_review_adds_labelled_issue_once_and_counts_cost(home):
+    from jarves import diagnose
+    from jarves.budget import Budget
+    from jarves.memory import MemoryStore
+    cfg = Config()
+    st = Store(home / "store.db", backend_model="gpt-6-luna")
+    sid = _voice_session(st, 1_760_000_000.0)
+    assert diagnose.review_skip_reason(st, cfg, sid) is not None     # no API key in tests: never a real call
+    mem = MemoryStore(home / "memory.db")
+    budget = Budget(mem, cfg.ai)
+    cl = _Client()
+    found = diagnose.llm_review(st, cfg, sid, client=cl, budget=budget)
+    assert len(found) == 1 and len(cl.calls) == 1
+    sent = cl.calls[0]["input"]
+    assert "חיפה" in sent and "example.com" not in sent and cl.calls[0]["model"] == "gpt-6-luna"
+    issue = next(i for i in st.issues() if i["kind"] == "ai_review")
+    assert issue["title"].startswith("AI review: ") and "can be wrong" in issue["evidence"]
+    assert budget.used("ai_requests") == 1
+    assert session_cost(st, st.session(sid), cfg.pricing)["backend_responses"] == 1   # its cost is counted
+    assert diagnose.llm_review(st, cfg, sid, client=cl, budget=budget) == [] and len(cl.calls) == 1   # once
+    cfg.log.privacy = True
+    sid2 = _voice_session(st, 1_760_100_000.0)
+    assert diagnose.llm_review(st, cfg, sid2, client=cl, budget=budget) == [] and len(cl.calls) == 1
+    budget.close()
+    mem.close()
+    st.close()
+
+
 def test_progress_notes_are_neutral_and_front_knows_background_tasks():
     for note in (live_mod.PROGRESS_NOTE, live_mod.PROGRESS_NOTE_AGAIN):
         assert "כמעט שם" not in note and "almost ready (" not in note

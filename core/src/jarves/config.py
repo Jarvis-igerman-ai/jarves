@@ -179,6 +179,12 @@ class HistoryConfig(_Strict):
     slow_tool_s: float = Field(5.0, gt=0, le=120)
     slow_backend_s: float = Field(10.0, gt=0, le=600)
     early_drops: int = Field(5, ge=1)                  # early-response audio drops per session before it is an issue
+    # Optional AI review (diagnose.py): after a finished voice conversation ONE short backend request
+    # (llm_review_model, "" = ai.text_model) looks for problems the rules miss. API key route only, through the
+    # daily Budget, at most llm_review_daily_max a day; skipped with log.privacy on (it needs the transcript).
+    llm_review: bool = True
+    llm_review_daily_max: int = Field(20, ge=0, le=200)
+    llm_review_model: str = ""
 
 
 class Config(_Strict):

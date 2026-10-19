@@ -70,6 +70,8 @@ KEEP_INFO |= set(BACKEND_DONE)
 _MASKED = re.compile(r"^<(\d+) chars>$")
 _MODELS = re.compile(r"\(([^()\s]+)\s*->\s*([^()\s]+)\)")
 OPEN_SESSION_STALE_S = 600          # an "open" session with no event for this long is not shown as live
+TYPED_GAP_S = 600                   # typed exchanges closer than this belong to one typed conversation
+TYPED_KINDS = ("typed", "voice_local")
 
 
 def parse_ts(ts: str | float | None) -> float:
@@ -124,6 +126,7 @@ class Store:
         self._cur: str | None = None              # open live session id
         self._pending_tools: dict[str, list[int]] = {}
         self._last_user_ts: float | None = None
+        self._typed: tuple[str, float, str] | None = None   # open typed conversation (id, last reply ts, kind)
 
     def close(self) -> None:
         with self._lock:
@@ -202,6 +205,8 @@ class Store:
                     (sid, ts, "text", d.get("model") or self.backend_model, "", "completed",
                      int(_num(d.get("model_calls")) or 1), 0 if plan else 1, u["in"], u["cached"], u["out"],
                      u["searches"], _num(d.get("duration_s"))))
+            elif code == "REPLY" and sid is None:
+                self._typed_reply(d, ts)
             elif code == "SKILL_REGISTERED":
                 skills = json.loads(self.meta("skills") or "{}")
                 name = str(d.get("msg", "")).removeprefix("skill ").removesuffix(" registered")
@@ -220,6 +225,31 @@ class Store:
                 self._close(sid, ts, d.get("reason"), _num(d.get("voice_seconds")), stats)
                 ended, self._cur, self._pending_tools = sid, None, {}
         return ended
+
+    def _typed_reply(self, d: dict, ts: float) -> None:
+        """A typed (or push-to-talk) exchange outside a live conversation: core REPLY carries the user's words
+        (utterance) and the answer (text). Exchanges less than TYPED_GAP_S apart form one "typed" conversation;
+        the AI_REPLY / TOOL_RESULT rows logged just before it are attached to it."""
+        t_user = ts - (_num(d.get("ms")) or 0) / 1000
+        kind = "typed" if d.get("typed", True) else "voice_local"
+        sid = None
+        if self._typed and self._typed[2] == kind and t_user - self._typed[1] <= TYPED_GAP_S:
+            sid = self._typed[0]
+        if sid is None:
+            sid = f"{d.get('session') or 'x'}-{datetime.fromtimestamp(t_user).strftime('%Y%m%d-%H%M%S')}-{kind[0]}"
+            self._db.execute("INSERT OR IGNORE INTO sessions (id, core_session, kind, started, model, backend_model, "
+                             "tier, voice_seconds, last_event) VALUES (?,?,?,?,?,?,?,?,?)",
+                             (sid, d.get("session"), kind, t_user, None, self.backend_model, "", 0, ts))
+        for role, key, t in (("user", "utterance", t_user), ("assistant", "text", ts)):
+            text, n = _text(d.get(key))
+            self._db.execute("INSERT INTO turns (session_id, ts, role, text, chars) VALUES (?,?,?,?,?)",
+                             (sid, t, role, text, n))
+        for table in ("delegations", "tool_calls"):
+            self._db.execute(f"UPDATE {table} SET session_id = ? WHERE session_id IS NULL AND ts BETWEEN ? AND ?",
+                             (sid, t_user - 1, ts))
+        self._db.execute("UPDATE sessions SET ended = ?, last_event = ?, end_reason = 'typed' WHERE id = ?",
+                         (ts, ts, sid))
+        self._typed = (sid, ts, kind)
 
     def _session_backend(self, sid: str) -> str | None:
         r = self._db.execute("SELECT backend_model FROM sessions WHERE id = ?", (sid,)).fetchone()
@@ -410,10 +440,13 @@ def daily_costs(store: Store, pricing, days: int = 30) -> list[dict]:
         d = day_row(datetime.fromtimestamp(s["started"]).date().isoformat())
         c = session_cost(store, s, pricing)
         d["sessions"] += 1
+        d["web_searches"] += c["web_searches"]
+        if s.get("kind") in TYPED_KINDS:              # typed chat: its backend cost is the "typed" column
+            d["text"] += c["backend"]
+            continue
         d["voice_minutes"] += c["voice_minutes"]
         d["voice"] += c["voice"]
         d["backend"] += c["backend"]
-        d["web_searches"] += c["web_searches"]
     for r in store.rows("SELECT * FROM delegations WHERE session_id IS NULL AND ts >= ?", (start.timestamp(),)):
         d = day_row(datetime.fromtimestamp(r["ts"]).date().isoformat())
         d["text"] += delegation_cost(r, pricing)        # typed chat and background tasks outside a conversation
@@ -435,6 +468,7 @@ class StoreSink(logging.Handler):
         self.store, self.cfg = store, cfg
         self._fmt = logs.JsonFormatter()
         self._q: queue.SimpleQueue = queue.SimpleQueue()
+        self.reviews: list = []                         # AI review threads started (None = skipped)
         self._thread = threading.Thread(target=self._run, name="jarves-store", daemon=True)
         self._thread.start()
 
@@ -457,6 +491,7 @@ class StoreSink(logging.Handler):
                     self.store.commit()
                     from . import diagnose
                     diagnose.run(self.store, self.cfg, [ended])
+                    self.reviews.append(diagnose.schedule_review(self.store, self.cfg, ended))   # AI pass, own thread
             except Exception as e:                    # never log from here (it would feed back into the sink)
                 print(f"jarves history: {type(e).__name__}: {str(e)[:120]}", flush=True)
         self.store.commit()
@@ -465,6 +500,9 @@ class StoreSink(logging.Handler):
         if self._thread.is_alive():
             self._q.put(None)
             self._thread.join(timeout=5)
+        for th in self.reviews:                       # a running AI review gets a moment to save its findings
+            if th is not None and th.is_alive():
+                th.join(timeout=3)
         super().close()
 
 

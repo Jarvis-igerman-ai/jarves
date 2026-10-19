@@ -529,7 +529,7 @@ class Core:
         t0 = time.monotonic()
         reply = await self.brain.respond(text)
         logs.info("core", "REPLY", f"reply via {reply.source}", tool=reply.tool, ok=reply.ok, result=reply.code,
-                  ms=round((time.monotonic() - t0) * 1000), text=reply.text)
+                  ms=round((time.monotonic() - t0) * 1000), text=reply.text, utterance=text, typed=typed)  # WP-H history
         self.curator.observe("user", text)
         self.curator.observe("assistant", reply.text, idle=self.live is None)   # typed chat: curate when quiet
         await self.link.send_face("assistant.text", {"text": reply.text, "source": reply.source, "ok": reply.ok,
