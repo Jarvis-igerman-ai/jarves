@@ -102,6 +102,8 @@ def mask_history(ctx) -> dict:
                 st.x("UPDATE events SET fields = ? WHERE id = ?", (json.dumps(new, ensure_ascii=False), r["id"]))
                 ev += 1
         st.commit()
+        from . import context_trace                 # the conversation context: sizes and hashes stay
+        context_trace.mask_all(st._db)
     lines = mask_logs(ctx.home)
     logs.info("privacy", "PRIVACY_MASKED_HISTORY", "existing history masked", turns=turns, tool_args=args,
               events=ev, log_lines=lines)
@@ -117,6 +119,8 @@ def delete_conversations(ctx) -> dict:
         st.x("UPDATE delegations SET session_id = NULL")          # costs stay true
         st.x("DELETE FROM sessions")
         st.commit()
+        from . import context_trace                 # and what he was given in them
+        context_trace.delete_all(st._db)
     lines = mask_logs(ctx.home)
     logs.info("privacy", "PRIVACY_DELETED_CONVERSATIONS", "all stored conversations deleted", sessions=n,
               log_lines=lines)
