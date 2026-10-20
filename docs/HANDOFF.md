@@ -1,3 +1,11 @@
+## Approval popup redesign (20 Oct 2026) - #17, branch `v3-popup-ux` (off `v3-final`), [screenshots](reviews/swv3_popup/)
+
+- Owner feedback: "where is the button for approve?", "too much text", "not beautiful". `core/src/jarves/approval_popup.py` is now a compact 420 px card: risk chip + "JARVES asks" + countdown, ONE bold line from the request kind ("Run a command?"), ONE sentence (title, max 90 chars, ellipsised), command / folder / why behind a collapsed "Details" toggle, thin countdown bar, two big buttons packed FIRST at the bottom (Approve = Enter once armed, Deny = Esc / close). Typed-code field only for dangerous requests (Approve disabled until it matches). Window <= 60% of the screen, always inside the work area (taskbar-safe), DPI aware, Segoe UI, light/dark from `AppsUseLightTheme`, Windows 11 rounded corners + matching caption.
+- Language: new `[ui] popup_language` (default `en`; `he` = whole card in Hebrew, right-aligned, never both). No `v3-cli-english` branch exists on origin, so this is a separate setting; merge it with the CLI language setting when that lands. Found: `Segoe UI Variable Text` scrambles Hebrew letters in Tk 8.6 on Windows; plain `Segoe UI` renders correctly.
+- Result-file protocol and `--test-invoke approve|deny|wrong-code|hold` unchanged (+ `show`: visible, never answers, for screenshots).
+- Verified: `core/tools/popup_screens.py` builds 14 real windows (short/long/details open/dangerous/Hebrew/light/dark/150%/200% simulated scaling), asserts both buttons inside the window and the screen, saves PNGs + `layout_report.json`; `tests/test_approval_popup_ux.py` 17 passed; `tests/test_helper_approvals.py` 63 passed.
+- Questions for the user: (1) Enter now approves (as asked) once the 0.9 s arm delay passed; keep that, or should Enter stay Deny for safety? (2) `C:\work\popup_demo.ps1` runs the main checkout (`C:\work\jarvis\core\src`): it shows the new card only after this branch is merged/checked out there. Status: WAITING FOR USER.
+
 ## SW-V3 integration on `v3-final` (20 Oct 2026) - #17, [report](reviews/SWV3_INTEGRATION_REPORT.md)
 
 - Merged (no-ff, both sides kept): v3-fix-show-twice, v3-approvals, v3-ci-yaml-fix, v3-wake, v3-connect, v3-campaign-dash, v3-campaign-features, v3-campaign-voice (2 rounds), on top of the earlier 8 V3 branches.
