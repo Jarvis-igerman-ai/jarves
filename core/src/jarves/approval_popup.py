@@ -556,8 +556,8 @@ def build(req: dict, out: Path, test_invoke: str | None = None, *, theme: str | 
             deny.invoke()
         elif toggle is not None and root.focus_get() is toggle:
             toggle_details()
-        else:
-            approve.invoke()                       # no-op until armed / until the typed code matches
+        elif risk != "high":
+            approve.invoke()                       # no-op until armed. High risk is never approved by a key press: click it
 
     if not test_invoke:
         # Keyboard / close = Deny. Not in tests: the invisible test window could otherwise take a stray key press
