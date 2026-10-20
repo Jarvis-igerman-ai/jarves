@@ -111,7 +111,7 @@
         el("div", { class: "k" }, "Costs API"), el("div", { class: "v" }, costs, el("span", { class: "muted small" },
           d.costs_api.key_present ? " admin key present (read-only use)" : " needs OPENAI_ADMIN_KEY in secrets.env"))),
         el("div", { class: "row", style: "margin-top:10px" }, save, msg), el("h2", {}, "Recent alerts"), alerts),
-      el("ul", { class: "muted small" }, d.notes.map((n, i) => el("li", {}, (JL.lang === "he" && d.notes_he && d.notes_he[i]) || n))));
+      el("ul", { class: "muted small" }, d.notes.map((n, i) => el("li", {}, (d["notes_" + JL.lang] && d["notes_" + JL.lang][i]) || JL.t(n)))));
   }
 
   // ---------------------------------------------------------------- Backup page
@@ -165,7 +165,7 @@
           } catch (e) { msg.textContent = "Not saved: " + e.message; }
         } }, "Save"), msg)),
       el("h2", {}, "If something goes wrong"),
-      el("div", { class: "card" }, el("ol", {}, d.guidance.map((g, i) => el("li", {}, (JL.lang === "he" && d.guidance_he && d.guidance_he[i]) || g))),
+      el("div", { class: "card" }, el("ol", {}, d.guidance.map((g, i) => el("li", {}, (d["guidance_" + JL.lang] && d["guidance_" + JL.lang][i]) || JL.t(g)))),
         d.core_running ? el("div", { class: "small" }, "JARVES is running: a real restore needs it stopped first (the test restore above is always safe).") : null));
   }
 

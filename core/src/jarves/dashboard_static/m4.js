@@ -45,7 +45,7 @@
           el("div", { class: "muted small" }, txh(f, "about")),
           f.requested ? el("div", { class: "small" }, "JARVES was asked to turn this on: approve here.") : null),
         el("td", { "data-label": "Enabled" }, sw, msg),
-        el("td", { "data-label": "Health" }, health, f.reason ? el("div", { class: "small", dir: "auto" }, txh(f, "reason")) : null),
+        el("td", { "data-label": "Health" }, health, f.reason ? el("div", { class: "small", dir: JL.textDir(txh(f, "reason")) }, txh(f, "reason")) : null),
         el("td", { "data-label": "Settings", class: "small" }, f.settings || "—"),
         el("td", { "data-label": "Permissions", class: "small" }, (f.permissions || []).join(", "), " ", pill(f.risk, f.risk)),
         el("td", { "data-label": "Windows" }, statusPill(w), w.evidence ? el("div", { class: "muted small" }, txh(w, "evidence")) : null),

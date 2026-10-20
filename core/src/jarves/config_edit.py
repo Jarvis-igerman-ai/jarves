@@ -16,7 +16,7 @@ from pathlib import Path
 
 from pydantic import ValidationError
 
-from . import hebrew
+from . import locales
 from .config import Config, ConfigError, _find_secrets
 
 BACKUPS = 10
@@ -89,7 +89,7 @@ def view(path: Path, running: Config) -> list[dict]:
     out = []
     for key, (group, label) in EDITABLE.items():
         sec, name = key.split(".", 1)
-        out.append(hebrew.attach({"key": key, "group": group, "label": label, **describe(key),
+        out.append(locales.attach({"key": key, "group": group, "label": label, **describe(key),
                                   "file": (raw.get(sec) or {}).get(name), "running": getattr(getattr(running, sec), name),
                                   "applies": "next start"}, "group", "label"))
     return out

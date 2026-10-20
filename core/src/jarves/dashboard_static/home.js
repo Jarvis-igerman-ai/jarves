@@ -140,7 +140,7 @@ PAGES.connections = async function () {
     g.fix.url ? el("div", { class: "actions" }, el("a", { class: "button-link", href: g.fix.url, target: "_blank", rel: "noopener noreferrer" }, tx("פתיחת העמוד ב-Google Cloud ←", "Open the page in Google Cloud →"))) : null) : null;
   const steps = el("ol", { class: "steps" }, g.steps.filter((s) => !(g.calendar_only && s.gmail)).map((s, i) => {
     const smsg = el("span", { class: "muted small" });
-    const clicks = JL.lang === "he" ? s.clicks_he || s.clicks_en : s.clicks_en;
+    const clicks = (s["clicks_" + JL.lang] || (JL.lang === "he" && s.clicks_he) || (s.clicks_en || []).map((c) => JL.t(c)));
     return el("li", { class: "step" + (s.done ? " done" : "") }, el("span", { class: "num" }, s.done ? "✓" : String(i + 1)),
       el("div", {}, el("b", {}, txo(s, "title")),
         s.done ? null : el("ul", {}, clicks.map((c) => el("li", {}, c))),

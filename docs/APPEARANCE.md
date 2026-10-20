@@ -72,3 +72,37 @@ A Blender `.glb` head can replace the 3D sphere if it keeps:
 Pi performance is unmeasured (#21):
 - 2D is one full-screen fragment pass, like the face.
 - 3D is one sphere with the visor shader plus 6 small meshes, at MSAA 4x. Drop to 2x on the Pi if needed.
+
+## Dashboard languages and direction (SW-V3 P0.2c, #17)
+The web dashboard is multi-language. **English is the default.** The first load shows English unless the owner has
+picked a language with the **language picker** (a dropdown in the top bar, `localStorage jarves-lang`). The browser
+language never picks one. `#/page?lang=he` forces a language for screenshots.
+
+| Locale | Direction | Catalog | Coverage |
+|---|---|---|---|
+| English `en` | LTR | `dashboard_static/locales/en.js` (every source key) | source |
+| Hebrew `he` | RTL | `locales/he.js` | 100 % (test-enforced: a missing key fails) |
+| Arabic `ar` | RTL | `locales/ar.js` | partial (shell, navigation, Home, privacy strip, common words); missing keys show English |
+| Russian `ru` | LTR | `locales/ru.js` | partial, same scope as Arabic |
+
+**Adding a language** takes one catalog file and one registry entry:
+1. Copy `locales/ru.js` to `locales/<code>.js`. Set `code`, `name` (the language's own name), `dir` and `bcp47`.
+2. Translate the `dict` values. The keys are the English texts from `en.js`.
+3. Add `<script src="/static/locales/<code>.js" defer></script>` to `index.html`, before `i18n.js`. The script order is the picker order.
+
+Text that is missing from a catalog shows the English text. Run `core/tests/test_dashboard_locales.py` to see the coverage.
+Server texts (feature descriptions, issue titles, settings labels) get a `<field>_<locale>` sibling from
+`jarves/locales.py`. To translate them into a new language, add a module like `hebrew.py` and one line in
+`locales.TRANSLATORS`. Until then the dashboard shows the English field, translated by the client catalog where it can.
+
+**RTL rules** apply to every RTL locale through `html[dir="rtl"]`. No rule targets one language.
+- Layout uses logical CSS only: `margin-inline`, `padding-inline`, `inset-inline`, `border-inline-start` and `text-align: start`. A test fails on `margin-left` / `right:` and similar.
+- The drawer, the search results, the status chips and the usage strip mirror on their own.
+- Arrows are written mirrored in the RTL catalogs ("Open →" becomes "פתיחה ←"). An English text left untranslated in an RTL page gets its arrows flipped.
+- An English text left in an RTL page is wrapped as one isolated LTR run (U+2068…U+2069). Its punctuation stays at the end ("What should I do first?", not "?What should I do first").
+- Server detail texts get `dir` from their own letters (`JL.textDir`). A Hebrew sentence that starts with "Pear Desktop" still reads right-to-left.
+- Code, paths, URLs, model ids, numbers (`.num`), `.kv` values, the URL/e-mail/number/date inputs and charts stay LTR islands (`unicode-bidi: isolate`). Arabic dates use Latin digits (`ar-u-nu-latn`), so they match the numbers the server sends.
+- Wide tables (the system log) scroll inside their card, never the page.
+- Module names in the log are data. They are never translated.
+
+Evidence: `core/tools/v3_locale_screens.py` (Playwright) captures en/he/ar at 1440 px and 390 px and checks each page automatically: lang/dir, no horizontal scroll, picker value, drawer side, search-results side, LTR islands. Output: `docs/reviews/swv3_p02c/` and the [report](reviews/SWV3_P02C_REPORT.md).

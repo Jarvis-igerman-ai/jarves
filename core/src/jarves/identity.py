@@ -26,7 +26,7 @@ import re
 import time
 from pathlib import Path
 
-from . import capabilities, hebrew, logs
+from . import capabilities, locales, logs
 
 FILE = "identity.json"
 DEFAULT_WAKE = {"model": "hey_jarvis", "phrase": "Hey Jarvis", "threshold": None}
@@ -56,7 +56,7 @@ def _wake_capability() -> dict:
     cap = copy.deepcopy(capabilities.WAKE_PHRASE)
     for group in (cap["targets"], cap["custom"]):
         for t in group.values():
-            hebrew.attach(t, "evidence", "blocker")
+            locales.attach(t, "evidence", "blocker")
     return cap
 
 
@@ -73,7 +73,7 @@ def voice_catalog(cfg) -> list[dict]:
                         "description is its accent", "usd_per_minute": prices.get(model),
                         "cost_kind": "estimate" if mode == "realtime" else "list price",
                         "credential": "OPENAI_API_KEY", "preview": None, "preview_note": PREVIEW_NOTE})
-            hebrew.attach(out[-1], "about", "languages", "preview_note")
+            locales.attach(out[-1], "about", "languages", "preview_note")
     return out
 
 

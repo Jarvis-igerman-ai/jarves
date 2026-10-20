@@ -46,7 +46,7 @@ from datetime import date, datetime, timezone
 from pathlib import Path
 from typing import Callable
 
-from . import hebrew, logs
+from . import locales, logs
 
 CATEGORIES = ("provider_authoritative", "app_local_counter", "estimate", "unavailable")
 UNKNOWN = "Unknown"
@@ -109,7 +109,7 @@ class Meter:
         d["limit_text"] = UNKNOWN if self.limit is None else _fmt(self.limit, self.unit)
         d["percent_text"] = UNKNOWN if pct is None else f"{pct:g}%"
         d["window_text"] = self.window or UNKNOWN
-        hebrew.attach(d, "title", "metric", "source", "window", "limit_source", "note")
+        locales.attach(d, "title", "metric", "source", "window", "limit_source", "note")
         d["reset_text"] = UNKNOWN if self.reset_at is None else datetime.fromtimestamp(self.reset_at).isoformat(
             sep=" ", timespec="minutes")
         return d
@@ -663,7 +663,7 @@ class Monitor:
         return {"meters": [m.to_dict() for m in ms], "footer": self.footer(ms), "settings": get_settings(self.home),
                 "alerts": self.alert_history(20), "costs_api": {"enabled": self.costs_enabled(),
                                                                 "key_present": bool(os.environ.get(ADMIN_ENV))},
-                "notes": list(_NOTES), "notes_he": [hebrew.he(n) for n in _NOTES]}
+                "notes": list(_NOTES), **locales.list_siblings("notes", _NOTES)}
 
 
 def _alert_he(m: Meter, pct: float) -> str:

@@ -250,7 +250,7 @@ def test_dashboard_js_picks_the_hebrew_fields_with_an_english_fallback():
     expect = {"app.js": ['txh(f, "about")', 'txh(i, "title")', 'txh(i, "detail")', 'txh(d, "hint")'],
               "m4.js": ['txh(f, "about")', 'txh(w, "blocker")', 'txh(v, "about")'],
               "pages.js": ['txh(e, "label")', 'txh(list[0], "group")'],
-              "usage.js": ['txh(m, "note")', 'txh(m, "title")', "d.guidance_he"],
+              "usage.js": ['txh(m, "note")', 'txh(m, "title")', 'd["guidance_" + JL.lang]'],
               "setup.js": ['txh(f, "about")', 'txh(s, "reason")'],
               "guides.js": ['txh(t, "blocker")', 'txh(g, "reason")'],
               "m2.js": ['txh(t, "evidence")'], "home.js": ['txh(f, "reason")']}

@@ -7,14 +7,12 @@
 (function () {
   let lang = JL.lang;                                  // one dashboard locale (i18n.js)
   JL.onChange((l) => { lang = l; });
-  const L = (he, en) => (lang === "he" ? he : en);
-  const T = (o, k) => (lang === "he" ? o[k + "_he"] : o[k + "_en"]) || o[k + "_en"] || o[k + "_he"] || "";
-  const dir = () => (lang === "he" ? "rtl" : "ltr");
+  const L = (he, en) => tx(he, en);
+  const T = (o, k) => txo(o, k);                       // <key>_<locale> with the English fallback (i18n.js)
+  const dir = () => JL.dir();
 
   async function pageSetup() {
     const d = await api("/api/setup");
-    const toggle = el("button", { type: "button", class: "ghost", lang: lang === "he" ? "en" : "he",
-      onclick: () => JL.set(lang === "he" ? "en" : "he") }, lang === "he" ? "English" : "עברית");   // the global switch
     const top = el("div", { class: "card", dir: dir() },
       el("div", {}, L("אותה הגדרה כמו ", "The same setup as "), el("code", {}, "jarvis setup"),
         L(". כל שינוי כאן נשמר מיד ואפשר לשנות שוב בכל זמן.", ". Every change here is saved at once and can be changed again any time.")),
@@ -38,12 +36,12 @@
         const avail = f.available ? pill("ok", L("זמין", "available"))
           : pill("unavailable", L("לא זמין", "not available"));
         const h = f.hint || {};
-        const why = !f.available ? el("div", { class: "small", dir: "auto" }, T({ x_he: h.he, x_en: h.en }, "x") || txh(f, "reason"),
+        const why = !f.available ? el("div", { class: "small", dir: JL.textDir(T({ x_he: h.he, x_en: h.en }, "x") || txh(f, "reason")) }, T({ x_he: h.he, x_en: h.en }, "x") || txh(f, "reason"),
           h.link ? el("span", {}, " ", el("a", { href: h.link, target: "_blank", rel: "noopener noreferrer" }, L("הורדה", "download"))) : null) : null;
         const notes = [T(f, "cost"), T(f, "privacy")].filter(Boolean);
         return el("div", { class: "row", style: "align-items:flex-start;gap:12px;padding:8px 0;border-bottom:1px solid var(--line)" },
           el("div", { style: "flex:1", dir: dir() },
-            el("b", {}, lang === "he" ? f.title_he : f.title_en), " ", pill(f.risk, f.risk), " ", avail,
+            el("b", {}, txo(f, "title")), " ", pill(f.risk, f.risk), " ", avail,
             f.enabled !== f.recommended ? el("span", { class: "small muted" }, " · ", L("מומלץ: ", "recommended: "), f.recommended ? L("פועל", "on") : L("כבוי", "off")) : null,
             el("div", { class: "muted small" }, txh(f, "about")),
             notes.length ? el("div", { class: "small" }, notes.join(" · ")) : null, why,
@@ -54,7 +52,7 @@
       el("ul", {}, d.next_steps.map((s) => el("li", {}, el("a", { href: s.dashboard }, T(s, "title")), ": ", T(s, "step"),
         s.reason ? el("span", { class: "muted small" }, " (" + txh(s, "reason") + ")") : null)))) : null;
     render(header(L("הגדרה ותוספים", "Setup & add-ons"),
-      L("כל התוספים, מקובצים: מה פועל, מה זמין, ומה צריך כדי שיעבוד.", "Every add-on, grouped: what is on, what is available, and what it needs."), toggle),
+      L("כל התוספים, מקובצים: מה פועל, מה זמין, ומה צריך כדי שיעבוד.", "Every add-on, grouped: what is on, what is available, and what it needs.")),   // language: the picker in the top bar
       top, next, cards);
   }
 

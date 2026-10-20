@@ -280,11 +280,11 @@ function issueRow(i) {
   } else actions.append(el("button", { type: "button", onclick: () => setIssue(i.id, "open") }, "Reopen"));
   return el("div", { class: "issue card" },
     pill(i.severity, i.severity),
-    el("div", {}, el("div", { class: "title", dir: "auto" }, txh(i, "title")),
+    el("div", {}, el("div", { class: "title", dir: JL.textDir(txh(i, "title")) }, txh(i, "title")),
       el("div", { class: "muted small" }, `${i.kind} · seen in ${i.count} conversation${i.count > 1 ? "s" : ""} · last ${day(i.last_seen)} ${clock(i.last_seen)}`,
         ev.session && !String(ev.session).startsWith("day:") ? [" · ", el("a", { href: "#/session/" + encodeURIComponent(ev.session) }, "open conversation")] : null)),
     actions,
-    i.detail ? el("div", { class: "detail", dir: "auto" }, txh(i, "detail")) : null,
+    i.detail ? el("div", { class: "detail", dir: JL.textDir(txh(i, "detail")) }, txh(i, "detail")) : null,
     evNodes.length ? el("div", { class: "evidence" }, evNodes) : null);
 }
 async function setIssue(id, status) {
@@ -373,7 +373,7 @@ async function pageFeatures() {
       el("td", {}, el("b", {}, f.title_en), " ", el("span", { class: "muted", dir: "auto" }, f.title_he),
         el("div", { class: "muted small" }, txh(f, "about"), " · ", el("a", { href: "#/guide-for/" + encodeURIComponent(f.id) }, "Guide")),
         f.requested ? el("div", { class: "small" }, "JARVES was asked to turn this on: approve here.") : null),
-      el("td", {}, badge, f.reason ? el("div", { class: "small", dir: "auto" }, txh(f, "reason")) : null),
+      el("td", {}, badge, f.reason ? el("div", { class: "small", dir: JL.textDir(txh(f, "reason")) }, txh(f, "reason")) : null),
       el("td", {}, pill(f.risk, f.risk)),
       el("td", { class: "muted small" }, `applies: ${when[f.applies] || f.applies}` + (f.source !== "user" ? ` · from ${f.source}` : ""), msg));
   });

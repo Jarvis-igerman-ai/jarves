@@ -7,9 +7,9 @@
 (function () {
   let lang = JL.lang;                                  // one dashboard locale (i18n.js; #/guides?lang=en for captures)
   JL.onChange((l) => { lang = l; });
-  const T = (o, k) => (lang === "he" ? o[k + "_he"] : o[k + "_en"]) || o[k + "_en"] || o[k + "_he"] || "";
-  const H = (o) => (lang === "he" ? o.he : o.en) || o.en || o.he || "";      // steps / problems: {he, en}
-  const dirOf = () => (lang === "he" ? "rtl" : "ltr");
+  const T = (o, k) => txo(o, k);                       // <key>_<locale> with the English fallback (i18n.js)
+  const H = (o) => JL.pick(o);                         // steps / problems: {he, en}
+  const dirOf = () => JL.dir();
   const STATE = {
     on: ["ok", "פועל", "On"], setup: ["unavailable", "צריך הגדרה", "Setup needed"], off: ["plain", "כבוי", "Off"],
     partly: ["medium", "חלקית", "Partly"], planned: ["plain", "עוד לא קיים", "Not built yet"],
@@ -19,13 +19,9 @@
     costs: ["עלויות", "Costs"], system: ["מערכת", "System"], privacy: ["פרטיות", "Privacy"], other: ["אחר", "Other"] };
   const PLAT = { verified_on_device: ["ok", "verified"], implemented_unverified: ["medium", "not yet verified"],
     planned: ["low", "planned"], blocked: ["fail", "blocked"], not_applicable: ["plain", "n/a"] };
-  const L = (he, en) => (lang === "he" ? he : en);
+  const L = (he, en) => tx(he, en);
   const statePill = (s) => { const x = STATE[s] || STATE.info; return pill(x[0], L(x[1], x[2])); };
 
-  function langToggle() {
-    return el("button", { type: "button", class: "ghost", lang: lang === "he" ? "en" : "he",
-      onclick: () => JL.set(lang === "he" ? "en" : "he") }, lang === "he" ? "English" : "עברית");   // the global switch
-  }
 
   // ------------------------------------------------------------- index
   async function pageGuides() {
@@ -46,7 +42,7 @@
         "JARVES suggests at most one thing per conversation, the same one at most once a week. \"Stop suggesting\" turns it off.")),
       snoozed.length ? el("div", { style: "margin-top:6px" }, L("נדחו: ", "Snoozed: "), snoozed.join(", "), " ",
         el("button", { type: "button", class: "ghost", onclick: async () => { await api("/api/guides-help", { method: "POST", body: JSON.stringify({ op: "reset" }) }); route(true); } }, L("אפס", "Reset"))) : null);
-    render(header(L("מדריכים", "Guides"), L(`מדריך פשוט לכל יכולת. ${d.setup_needed} צריכים הגדרה.`, `A simple guide for every feature. ${d.setup_needed} need setup.`), langToggle()),
+    render(header(L("מדריכים", "Guides"), L(`מדריך פשוט לכל יכולת. ${d.setup_needed} צריכים הגדרה.`, `A simple guide for every feature. ${d.setup_needed} need setup.`)),
       checklistCard(d.checklist), help, cards);
   }
 
@@ -68,7 +64,7 @@
     const runTest = async () => {
       testOut.replaceChildren(el("span", { class: "muted" }, L("בודק…", "Checking…")));
       try { const r = await api(`/api/guides/${g.id}/test`, { method: "POST", body: "{}" });
-        testOut.replaceChildren(pill(r.ok ? "ok" : "fail", r.ok ? L("עובד", "works") : L("עוד לא", "not yet")), " ", el("span", { dir: dirOf() }, lang === "he" ? r.he : r.en));
+        testOut.replaceChildren(pill(r.ok ? "ok" : "fail", r.ok ? L("עובד", "works") : L("עוד לא", "not yet")), " ", el("span", { dir: dirOf() }, JL.pick(r)));
       } catch (e) { testOut.textContent = e.message; }
     };
     const switchFeature = async (fid, on, risk, title) => {
@@ -110,7 +106,7 @@
         t.blocker ? el("div", { class: "small" }, L("חסם: ", "Blocker: ") + txh(t, "blocker")) : null,
         t.roadmap_issue ? el("a", { class: "small", href: t.roadmap_issue, target: "_blank", rel: "noopener" }, "roadmap issue") : null); };
     const section = (title, ...body) => el("div", { class: "card guide-sec" }, el("h2", { dir: dirOf() }, title), ...body);
-    render(header(T(g, "title"), null, el("a", { href: "#/guides" }, L("כל המדריכים ←", "← all guides")), langToggle()),
+    render(header(T(g, "title"), null, el("a", { href: "#/guides" }, L("כל המדריכים ←", "← all guides"))),
       el("div", { class: "card guide-head" }, el("div", { class: "row" }, statePill(g.state),
         g.reason && g.state !== "on" ? el("span", { dir: "auto" }, txh(g, "reason")) : null),
         el("p", { class: "lead", dir: dirOf() }, T(g, "what")), feats, msg),
@@ -125,7 +121,7 @@
         section(L("עלות", "Cost"), el("p", { dir: dirOf() }, T(g, "cost"))),
         section(L("פרטיות", "Privacy"), el("p", { dir: dirOf() }, T(g, "privacy")))),
       g.problems.length ? section(L("בעיות נפוצות", "Common problems"), el("dl", { class: "problems", dir: dirOf() }, g.problems.flatMap((p) =>
-        [el("dt", {}, H(p)), el("dd", {}, lang === "he" ? p.fix_he : p.fix_en)]))) : null,
+        [el("dt", {}, H(p)), el("dd", {}, txo(p, "fix"))]))) : null,
       section(L("Windows ו-Raspberry Pi", "Windows and Raspberry Pi"), el("table", {}, el("thead", {}, el("tr", {}, el("th", {}, "Windows"), el("th", {}, "Raspberry Pi"))),
         el("tbody", {}, el("tr", {}, el("td", {}, plat(g.platforms.windows)), el("td", {}, plat(g.platforms.pi)))))),
       g.links.length ? el("div", { class: "card small guide-sec" }, L("ראו גם: ", "See also: "), g.links.map((l, i) => [i ? " · " : "", el("a", { href: "#/guide/" + l.id }, T(l, "title"))])) : null);

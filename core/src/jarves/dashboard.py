@@ -31,7 +31,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, unquote, urlsplit
 
-from . import __version__, config_edit, diagnose, hebrew, logs, logview
+from . import __version__, config_edit, diagnose, locales, logs, logview
 from .dashboard_auth import (DEVICE_COOKIE, device_body_ok, DEVICE_IDLE_S, LAN_PORT, PUBLIC_PATHS, Access, client_allowed,
                              is_loopback, lan_ip, parse_cookies)
 from .health import read_snapshot
@@ -322,7 +322,7 @@ def api_tasks(ctx: Ctx, m, body, q=None):
 
 def api_issues(ctx: Ctx, m, body, q=None):
     status = _q1(q, "status", "open")
-    return 200, [hebrew.issue(dict(i)) for i in ctx.store.issues(None if status == "all" else status)]
+    return 200, [locales.issue(dict(i)) for i in ctx.store.issues(None if status == "all" else status)]
 
 
 def api_issue_set(ctx: Ctx, m, body):
@@ -629,7 +629,7 @@ def api_settings(ctx: Ctx, m, body):
                  "backups": [p.name for p in config_edit.backups(ctx.config_path)],
                  "features_page": _has_module("jarves.features"),
                  "hint": "config.toml values apply when the Core starts next; the runtime switches apply at once.",
-                 "hint_he": hebrew.he("config.toml values apply when the Core starts next; the runtime switches apply at once.")}
+                 **locales.siblings("hint", "config.toml values apply when the Core starts next; the runtime switches apply at once.")}
 
 
 def api_settings_write(ctx: Ctx, m, body):

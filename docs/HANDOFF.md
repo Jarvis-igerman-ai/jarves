@@ -1,3 +1,27 @@
+## SW-V3 P0.2c Multi-language dashboard, English default (20 Oct 2026) — [report](reviews/SWV3_P02C_REPORT.md) · #17 · branch `v3-p02c-multilang`
+
+- Built on origin/main plus `origin/v3-p02-dashboard` (merged as instructed by the coordinator).
+- **English is the default** (`<html lang="en" dir="ltr">`). An explicit saved choice (`jarves-lang`, written only by the new top-bar **language picker** `<select>`) wins. The browser language is never used.
+- **Locales:** en / he / ar / ru. Each is one catalog in `dashboard_static/locales/<code>.js` plus its script tag (the registry). Coverage: he 100 % (test-enforced), ar 26 %, ru 26 % (English fallback).
+- **Server:** `jarves/locales.py` is the generic `<field>_<locale>` registry, with `hebrew.py` as its first translator.
+- **RTL fixes:**
+  - logical CSS only, enforced by a test
+  - isolated English fallbacks: "?first" fixed
+  - `JL.textDir` for server texts: a Hebrew sentence that starts with a Latin name no longer runs LTR
+  - the log table scrolls inside its card (no page overflow)
+  - module names are not translated
+  - mirrored arrows
+  - Arabic font and digits
+- **Hebrew added** for the P1 channel feature texts, so `test_hebrew_texts` passes on the merged tree.
+- **Evidence:**
+  - `test_dashboard_locales.py`: 17 passed. Focused dashboard / hebrew / guides / usage / setup / identity / backup / phone files: 158 passed.
+  - An earlier full suite: 1196 passed, 1 env failure (`test_launcher_help`: no `.venv` in the worktree).
+  - Playwright: 38 captures, 0 problems, in `docs/reviews/swv3_p02c/` (`core/tools/v3_locale_screens.py --channel msedge`).
+  - These are automatic captures, not an owner hands-on review.
+- **Questions for the user:**
+  1. Which languages should get full catalogs? **USER DECISION REQUIRED**
+  2. Should the dashboard language also drive the voice / CLI language (currently separate)? **USER DECISION REQUIRED**
+
 ## V3 P1 channels: Telegram, morning briefing, WhatsApp handoff, Home Assistant (20 Oct 2026) — [#17](https://github.com/igalgerman/JARVIS/issues/17)
 
 - Branch `v3-p1-channels` (from `swv2-integrate`). Four add-ons, each with a feature switch + capability row + setup-wizard group + bundle check + Hebrew/English guide + tests (`core/tests/test_channels.py`, 27 tests, real HTTP against local fake servers in `core/tests/channels_fakes.py`; full suite 1160 passed, 3 skipped).

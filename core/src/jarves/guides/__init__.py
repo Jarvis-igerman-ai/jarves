@@ -37,7 +37,7 @@ from pathlib import Path
 from typing import Any, Callable
 
 from .. import features as feat
-from .. import hebrew, logs
+from .. import hebrew, locales, logs
 
 DATA = Path(__file__).with_name("data")
 STATE_FILE = "guides_state.json"
@@ -269,9 +269,9 @@ def platforms(g: Guide, rows: list[dict]) -> dict:
         if t:
             return {"windows": t.get("windows"), "pi": t.get("linux_arm64_pi"), "source": r["id"]}
     p = g.platform or {}
-    return {"windows": hebrew.attach({"status": p.get("windows", "implemented_unverified"),
+    return {"windows": locales.attach({"status": p.get("windows", "implemented_unverified"),
                                       "evidence": p.get("windows_note_en", "")}, "evidence"),
-            "pi": hebrew.attach({"status": p.get("pi", "implemented_unverified"), "blocker": p.get("pi_note_en", "")},
+            "pi": locales.attach({"status": p.get("pi", "implemented_unverified"), "blocker": p.get("pi_note_en", "")},
                                 "blocker"),
             "source": "guide"}
 

@@ -1,8 +1,10 @@
 """Hebrew texts for the SERVER-supplied detail strings the dashboard shows (SW-V3 P0.2b, issue #17).
 
-English stays the source of truth: every module keeps its English text and the API adds a `<field>_he` sibling
-next to it (about_he, label_he, note_he, title_he ...). The dashboard picks `_he` in Hebrew mode and falls back to
-the English field when there is none (`txo` in dashboard_static/i18n.js).
+The first additional server locale (registered in locales.py, which adds the `<field>_he` siblings). English stays
+the source of truth and the default: every module keeps its English text and the API adds `<field>_he` next to it
+(about_he, label_he, note_he, title_he ...). The dashboard picks `_he` in Hebrew mode and falls back to the English
+field when there is none (`txh` / `txo` in dashboard_static/i18n.js). Another language = a module like this one
+with `he()` -> its own function, plus one line in locales.TRANSLATORS.
 
 Only OUR OWN fixed texts are translated here (feature descriptions, platform evidence and blockers, probe reasons,
 settings labels, usage meter descriptions, the rule-based issue titles and details, voice descriptions). User
@@ -80,6 +82,27 @@ TEXT: dict[str, str] = {
     "starts JARVES invisibly when you log in (Windows: Startup apps; Pi: systemd user service)":
         "מפעיל את JARVES בשקט כשנכנסים למחשב (Windows: אפליקציות הפעלה; Pi: שירות systemd)",
     "your notes: add, search, edit, export as Markdown": "ההערות שלך: הוספה, חיפוש, עריכה וייצוא ל-Markdown",
+    "send a message to your own Telegram chat, only after you approve the exact text (you create the bot; the token stays on this computer)":
+        "שולח הודעה לצ'אט הטלגרם שלך, רק אחרי שאישרת את הנוסח המדויק (את הבוט יוצרים בעצמכם; האסימון נשאר במחשב הזה)",
+    "UNIT test_channels_telegram.py (local fake Bot API server)": "בדיקות יחידה: test_channels_telegram.py (שרת Bot API מדומה מקומי)",
+    "never sent through a real bot: needs the owner's BotFather token": "מעולם לא נשלח דרך בוט אמיתי: דרוש אסימון BotFather של הבעלים",
+    "plain Python + httpx, no Windows-only code; never run on a Raspberry Pi (no device in the test setup)":
+        "Python ו-httpx בלבד, בלי קוד ייעודי ל-Windows; טרם הורץ על Raspberry Pi (אין מכשיר במערך הבדיקה)",
+    "calendar today, important unread mail, weather and reminders in one go; parts that are not connected are skipped with a note":
+        "היומן של היום, מיילים חשובים שלא נקראו, מזג אוויר ותזכורות בבת אחת; חלקים שלא מחוברים מדולגים עם הערה",
+    "UNIT test_channels_briefing.py (local fake Open-Meteo server, real Skill registry)":
+        "בדיקות יחידה: test_channels_briefing.py (שרת Open-Meteo מדומה מקומי, רישום יכולות אמיתי)",
+    "never run against the real Open-Meteo service or a connected Google account":
+        "מעולם לא הורץ מול שירות Open-Meteo האמיתי או חשבון גוגל מחובר",
+    "control only the devices you allowed in Home Assistant; locks, garage doors and scripts always ask you first (long-lived token stays on this computer)":
+        "שליטה רק במכשירים שאישרת ב-Home Assistant; מנעולים, דלתות חניה וסקריפטים תמיד שואלים קודם (האסימון נשאר במחשב הזה)",
+    "UNIT test_channels_home.py (local fake Home Assistant server)": "בדיקות יחידה: test_channels_home.py (שרת Home Assistant מדומה מקומי)",
+    "never connected to a real Home Assistant": "מעולם לא חובר ל-Home Assistant אמיתי",
+    "drafts a WhatsApp message and opens the chat for you; you press send. He never sends or reads WhatsApp himself":
+        "מנסח הודעת WhatsApp ופותח לך את הצ'אט; את השליחה לוחצים בעצמכם. הוא אף פעם לא שולח או קורא WhatsApp בעצמו",
+    "UNIT test_channels_whatsapp.py (link building, approval, fake opener)":
+        "בדיקות יחידה: test_channels_whatsapp.py (בניית קישור, אישור, פותח מדומה)",
+    "never opened with the real WhatsApp app/Web": "מעולם לא נפתח עם אפליקציית WhatsApp או WhatsApp Web האמיתיות",
     # --- platform blockers
     "never run on a Raspberry Pi 5 (no device yet)": "טרם הורץ על Raspberry Pi 5 (אין עדיין מכשיר)",
     "Pi audio output not tested": "פלט השמע ב-Pi לא נבדק",
@@ -431,22 +454,20 @@ def he(text) -> str | None:
     return None
 
 
+text = he          # the locales.TRANSLATORS interface
+
+
+# kept for older callers: every registered locale (locales.py), Hebrew included
 def attach(obj: dict, *keys: str) -> dict:
-    """Add `<key>_he` next to each translatable string field of `obj` (in place; returns obj)."""
-    for k in keys:
-        t = he(obj.get(k))
-        if t:
-            obj[k + "_he"] = t
-    return obj
+    from . import locales
+    return locales.attach(obj, *keys)
 
 
 def attach_list(obj: dict, key: str) -> dict:
-    """`<key>_he` = a parallel list for a list of fixed strings (None entries fall back to English)."""
-    if isinstance(obj.get(key), list):
-        obj[key + "_he"] = [he(x) for x in obj[key]]
-    return obj
+    from . import locales
+    return locales.attach_list(obj, key)
 
 
 def issue(row: dict) -> dict:
-    """title_he / detail_he for a stored issue; quoted user text inside is kept verbatim."""
-    return attach(row, "title", "detail")
+    from . import locales
+    return locales.issue(row)

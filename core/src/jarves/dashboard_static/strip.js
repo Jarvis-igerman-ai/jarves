@@ -39,24 +39,23 @@
     }
     return s;
   }
-  let st = null, linked = false, he = JL.lang === "he", view = null;
+  let st = null, linked = false, view = null;
   // the same states, compact, for the header on every page (shell.js)
   window.privacyChips = (privacy, live) => ["mic", "camera", "cloud_audio"].map((k) => {
     const v = live && privacy && privacy[k] && privacy[k].state;
-    const e = (STATES[k] && STATES[k][v]) || UNKNOWN, lang = JL.lang === "he" ? 0 : 1;
-    const name = NAMES[k][lang];
-    return el("a", { href: "#/home", class: `ps-chip ps-mini ps-${e[2]}`, title: `${name}: ${e[lang]}`, "aria-label": `${name}: ${e[lang]}`, "data-k": k },
-      icon(k, e[2] === "off" || e[2] === "none"), el("span", { class: "ps-mini-t" }, e[lang]));
+    const e = (STATES[k] && STATES[k][v]) || UNKNOWN, t = tx(e[0], e[1]);
+    const name = tx(NAMES[k][0], NAMES[k][1]);
+    return el("a", { href: "#/home", class: `ps-chip ps-mini ps-${e[2]}`, title: `${name}: ${t}`, "aria-label": `${name}: ${t}`, "data-k": k },
+      icon(k, e[2] === "off" || e[2] === "none"), el("span", { class: "ps-mini-t" }, t));
   });
   const pv = { open: false, left: 0, poll: null, tick: null, msg: "", last: "" };
 
   function entry(k) { const v = linked && st && st[k] && st[k].state; return (STATES[k] && STATES[k][v]) || UNKNOWN; }
-  function label(k) { return entry(k)[he ? 0 : 1]; }
+  function label(k) { const e = entry(k); return tx(e[0], e[1]); }
   async function refresh() {
     try {
       const d = await api("/api/runtime");
       st = d.privacy || null; linked = !!(d.live && st);
-      he = JL.lang === "he";                                   // the dashboard locale (i18n.js), not the Core's
     } catch (e) { st = null; linked = false; }
     draw();
   }
@@ -70,7 +69,7 @@
     const s = linked && st.camera && st.camera.state;
     if (!s || s === "unavailable") return;
     const on = s === "disabled";
-    if (on && !confirm(he ? "להדליק את המצלמה?" : "Turn the camera on?")) return;     // the dashboard click is the approval
+    if (on && !confirm(tx("להדליק את המצלמה?", "Turn the camera on?"))) return;     // the dashboard click is the approval
     try { await api("/api/features/camera", { method: "POST", body: JSON.stringify({ enabled: on }) }); } catch (e) { pv.msg = e.message; }
     setTimeout(refresh, 600);          // the Core picks the switch up within its next health check
   }
@@ -88,7 +87,7 @@
     if (r.frame && typeof r.frame.data === "string" && /^image\/(jpeg|png)$/.test(r.frame.mime)) img.src = `data:${r.frame.mime};base64,${r.frame.data}`;
     const cap = document.getElementById("psLast");
     pv.last = r.last_seen && typeof r.last_seen.text === "string" ? r.last_seen.text : "";
-    if (cap) cap.textContent = pv.last || (he ? "עוד לא תיאר תמונה." : "Nothing described yet.");
+    if (cap) cap.textContent = pv.last || (tx("עוד לא תיאר תמונה.", "Nothing described yet."));
   }
   async function openPreview() {
     if (pv.open) { closePreview(true); return; }
@@ -110,9 +109,9 @@
   function chip(k) {
     const e = entry(k), tone = e[2];
     const click = k === "mic" ? toggleMic : k === "camera" ? toggleCamera : null;
-    const name = NAMES[k][he ? 0 : 1];
+    const name = tx(NAMES[k][0], NAMES[k][1]);
     return el(click ? "button" : "span", { type: click ? "button" : null, class: `ps-chip ps-${tone}`, onclick: click,
-      title: `${name}: ${label(k)}` + (click ? (he ? " · לחיצה לשינוי" : " · click to change") : ""), "data-k": k,
+      title: `${name}: ${label(k)}` + (click ? (tx(" · לחיצה לשינוי", " · click to change")) : ""), "data-k": k,
       "aria-label": `${name}: ${label(k)}` }, icon(k, tone === "off" || tone === "none"), el("span", { dir: "auto" }, label(k)));
   }
   function draw() {
@@ -124,22 +123,22 @@
     const canPreview = pv.open || (linked && st.camera && st.camera.preview_available === true);
     const eye = el("button", { type: "button", class: "ps-chip " + (pv.open ? "ps-capture" : canPreview ? "ps-local" : "ps-none"),
       disabled: canPreview ? null : true, onclick: openPreview, "data-k": "preview",
-      title: canPreview ? (he ? "התמונה נשארת במחשב ולא נשמרת" : "The picture stays on this computer and is never saved")
-        : (he ? "המצלמה כבויה או לא מחוברת" : "The camera is off or not connected") },
-      icon("preview", false), el("span", {}, pv.open ? (he ? "סגור תצוגה" : "Close preview") : (he ? "מה הוא רואה?" : "What does he see?")));
-    const row = el("div", { class: "ps-row", dir: he ? "rtl" : "ltr" }, ["mic", "camera", "speaker", "cloud_audio"].map(chip), eye);
-    const note = el("div", { class: "muted small" }, !linked ? (he ? "אין עדכון מג'ארביס: המצב לא ידוע." : "No update from JARVES: state unknown.")
-      : (he ? "המצב האמיתי של החיישנים, מתעדכן כל 2 שניות." : "The real sensor state, updated every 2 seconds."), pv.msg ? " · " + pv.msg : "");
+      title: canPreview ? (tx("התמונה נשארת במחשב ולא נשמרת", "The picture stays on this computer and is never saved"))
+        : (tx("המצלמה כבויה או לא מחוברת", "The camera is off or not connected")) },
+      icon("preview", false), el("span", {}, pv.open ? (tx("סגור תצוגה", "Close preview")) : (tx("מה הוא רואה?", "What does he see?"))));
+    const row = el("div", { class: "ps-row", dir: JL.dir() }, ["mic", "camera", "speaker", "cloud_audio"].map(chip), eye);
+    const note = el("div", { class: "muted small" }, !linked ? (tx("אין עדכון מג'ארביס: המצב לא ידוע.", "No update from JARVES: state unknown."))
+      : (tx("המצב האמיתי של החיישנים, מתעדכן כל 2 שניות.", "The real sensor state, updated every 2 seconds.")), pv.msg ? " · " + pv.msg : "");
     const box = pv.open ? el("div", { class: "ps-preview" },
-      el("div", { class: "ps-head", dir: he ? "rtl" : "ltr" }, el("span", { class: "ps-rec" }),
-        el("b", {}, he ? "תצוגת מצלמה · נשאר במחשב" : "Camera preview · stays on this computer"), el("span", { class: "spacer" }),
-        el("span", { class: "muted small" }, he ? `נסגר בעוד ${pv.left} שנ׳` : `Closes in ${pv.left} s`)),
-      el("img", { id: "psImg", alt: he ? "תמונת המצלמה" : "Camera picture" }),
-      el("div", { class: "muted small", dir: "auto" }, he ? "מה הוא תיאר לאחרונה:" : "What he last described:"),
-      el("div", { id: "psLast", dir: "auto" }, pv.last || (he ? "עוד לא תיאר תמונה." : "Nothing described yet."))) : null;
+      el("div", { class: "ps-head", dir: JL.dir() }, el("span", { class: "ps-rec" }),
+        el("b", {}, tx("תצוגת מצלמה · נשאר במחשב", "Camera preview · stays on this computer")), el("span", { class: "spacer" }),
+        el("span", { class: "muted small" }, tx(`נסגר בעוד ${pv.left} שנ׳`, `Closes in ${pv.left} s`))),
+      el("img", { id: "psImg", alt: tx("תמונת המצלמה", "Camera picture") }),
+      el("div", { class: "muted small", dir: "auto" }, tx("מה הוא תיאר לאחרונה:", "What he last described:")),
+      el("div", { id: "psLast", dir: "auto" }, pv.last || (tx("עוד לא תיאר תמונה.", "Nothing described yet.")))) : null;
     const keep = document.getElementById("psImg");
     const src = keep && keep.getAttribute("src");
-    card.replaceChildren(...[el("h2", {}, he ? "מה פועל עכשיו" : "What is on now"), row, note, box].filter(Boolean));
+    card.replaceChildren(...[el("h2", {}, tx("מה פועל עכשיו", "What is on now")), row, note, box].filter(Boolean));
     if (box && src) document.getElementById("psImg").src = src;
   }
   window.privacyStripCard = function () {

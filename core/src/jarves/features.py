@@ -43,7 +43,7 @@ from pathlib import Path
 from typing import Any, Callable, Literal
 from urllib.parse import urlsplit
 
-from . import capabilities, hebrew, logs
+from . import capabilities, locales, logs
 
 Risk = Literal["low", "medium", "high"]
 Applies = Literal["live", "next_session", "restart"]
@@ -116,10 +116,10 @@ def register(id: str, title_he: str, title_en: str, default_enabled: bool, *, pr
 
 
 def _with_he(d: dict) -> dict:
-    """Hebrew siblings (about_he, reason_he, targets.*.evidence_he / blocker_he) for the dashboard (hebrew.py)."""
-    hebrew.attach(d, "about", "reason")
+    """Hebrew siblings (about_he, reason_he, targets.*.evidence_he / blocker_he) for the dashboard (locales.py)."""
+    locales.attach(d, "about", "reason")
     for t in (d.get("targets") or {}).values():
-        hebrew.attach(t, "evidence", "blocker")
+        locales.attach(t, "evidence", "blocker")
     return d
 
 
@@ -757,7 +757,7 @@ def _ctx_features(ctx) -> Features:
 def api_features(ctx, m, body):
     f = _ctx_features(ctx)
     note = "Switches apply live where possible; others at the next conversation or Core start (see 'applies')."
-    return 200, {"features": f.list(), "note": note, "note_he": hebrew.he(note),
+    return 200, {"features": f.list(), "note": note, **locales.siblings("note", note),
                  "statuses": list(capabilities.STATUSES), "targets": list(capabilities.TARGETS),
                  "filters": ["all", "enabled", "not_ready_on_pi", "needs_attention"],
                  "pi_roadmap": capabilities.PI_ROADMAP}

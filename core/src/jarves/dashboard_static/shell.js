@@ -1,4 +1,4 @@
-// JARVES dashboard shell (SW-V3 P0.2): grouped navigation (drawer on phones), global search, the language switch
+// JARVES dashboard shell (SW-V3 P0.2): grouped navigation (drawer on phones), global search, the language picker
 // and the status chips shown on every page (Core, this device, Raspberry Pi readiness, microphone / camera / audio
 // to the cloud). Loaded last; uses the app.js helpers (el, api, route) and i18n.js (JL, tx). Text via textContent.
 "use strict";
@@ -9,11 +9,6 @@
 
   // ---------------------------------------------------------------- language
   function labels() {
-    const he = JL.lang === "he";
-    const lb = $("langBtn");
-    lb.textContent = he ? "English" : "עברית";
-    lb.setAttribute("lang", he ? "en" : "he");
-    lb.title = he ? "Switch the dashboard to English" : "להעביר את לוח הבקרה לעברית";
     side.setAttribute("aria-label", tx("ניווט", "Navigation"));
     menuBtn.setAttribute("aria-label", tx("תפריט", "Menu"));
     $("sideClose").setAttribute("aria-label", tx("סגירת התפריט", "Close menu"));
@@ -21,7 +16,7 @@
     input.setAttribute("aria-label", tx("חיפוש בלוח הבקרה", "Search the dashboard"));
     document.title = tx("JARVES · לוח בקרה", "JARVES · Dashboard");
   }
-  $("langBtn").addEventListener("click", () => JL.set(JL.lang === "he" ? "en" : "he"));
+  $("langSlot").replaceChildren(JL.picker("lang-pick"));         // the language picker (every locale in i18n.js)
   JL.onChange(() => {
     labels();
     if (typeof applyTheme === "function") applyTheme(theme);      // app.js
@@ -110,7 +105,7 @@
   function draw() {
     box.replaceChildren(...hits.map((h, i) => el("a", { href: h.href || "#", role: "option", id: "gr" + i, class: "gr" + (i === sel ? " sel" : ""),
       "aria-selected": i === sel ? "true" : "false", "data-noi18n": "",
-      onclick: (ev) => { ev.preventDefault(); go(h); } }, el("span", { class: "gr-t" }, h.title), el("span", { class: "gr-w muted small" }, h.where))));
+      onclick: (ev) => { ev.preventDefault(); go(h); } }, el("span", { class: "gr-t", dir: JL.textDir(h.title) }, h.title), el("span", { class: "gr-w muted small" }, h.where))));
     if (sel >= 0) input.setAttribute("aria-activedescendant", "gr" + sel); else input.removeAttribute("aria-activedescendant");
     show(hits.length > 0);
   }
