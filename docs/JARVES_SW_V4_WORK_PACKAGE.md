@@ -1,3 +1,5 @@
+> **Status correction — 20 Oct 2026 (later owner decision):** V4 was approved; see [PRIORITIES](plans/PRIORITIES.md). **Public `igalgerman/jarves` alone** is the writable source of truth. The former private repo is deprecated/read-only historical migration input and MUST NOT be updated or synced. The older lines below describing the plan as awaiting approval, private sync or updating the private repo are obsolete and superseded. Current source transfer and release gates: [MIGRATION_STATUS](MIGRATION_STATUS.md), public [Issues #1–#5](https://github.com/igalgerman/jarves/issues), public draft PRs #6–#10. These drafts are not merged; V4 has NOT been declared released. No newly authorized paid spending: use the pre-existing $25 total cap with consumed spending deducted. V5/V6 are future roadmap only.
+
 # JARVES — SW-V4 Work Package (authoritative plan)
 
 **Status:** PLAN for owner approval, written 20 Oct 2026 ([#17](https://github.com/igalgerman/JARVIS/issues/17)). It replaces the earlier draft on branch `v3-v4-plan`. Nothing here is authorized until the owner approves it and `docs/NOW.md` points to it.
