@@ -26,7 +26,9 @@ from .tray import Controller, desktop_session, library_available, status_line
 from .viewer import Viewer, find_godot
 
 STATE_FILE = "runtime.json"
-PREFS = ("display_hidden", "alerts_paused", "mic_muted")
+TRAY_NOTICE = ("ג'ארביס עדיין פועל במגש המערכת (ליד השעון). לחצו על הסמל כדי לפתוח אותו, או Quit כדי לעצור. / "
+               "JARVES is still running in the tray. Click the icon to open it, or Quit to stop.")
+PREFS = ("display_hidden", "alerts_paused", "mic_muted", "tray_notice_shown")
 _current: "Runtime | None" = None
 
 
@@ -232,9 +234,19 @@ class Runtime:
         if not self.keep_running:
             return False
         self._set_pref("display_hidden", True)
+        self._tray_notice()
         logs.info("runtime", "DISPLAY_CLOSED_BY_USER", "window closed; JARVES keeps running in the background "
                   "(tray / \"Hey Jarvis\" / jarvis show)")
         return True
+
+    def _tray_notice(self) -> None:
+        """One-time "still running in the tray" notice on the FIRST window close (persisted in runtime.json prefs).
+        Only when a tray icon really exists; without one the sentence would be false, so nothing is shown or recorded."""
+        if self.prefs["tray_notice_shown"] or self.tray is None:
+            return
+        self._set_pref("tray_notice_shown", True)
+        self._notify(TRAY_NOTICE)
+        logs.info("runtime", "TRAY_NOTICE_SHOWN", "one-time tray notice shown on the first window close")
 
     async def _viewer_exited(self, rc, requested: bool) -> None:
         if rc not in (0, None) and not requested:

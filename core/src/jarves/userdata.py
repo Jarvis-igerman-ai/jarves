@@ -40,6 +40,16 @@ CREATE TABLE IF NOT EXISTS reports (
 CREATE TABLE IF NOT EXISTS notes (
     id INTEGER PRIMARY KEY AUTOINCREMENT, title TEXT NOT NULL, text TEXT NOT NULL, tags TEXT NOT NULL DEFAULT '',
     created REAL NOT NULL, updated REAL NOT NULL);
+CREATE TABLE IF NOT EXISTS list_items (
+    id INTEGER PRIMARY KEY AUTOINCREMENT, list_name TEXT NOT NULL, text TEXT NOT NULL,
+    done INTEGER NOT NULL DEFAULT 0, created REAL NOT NULL, done_at REAL);
+CREATE TABLE IF NOT EXISTS timers (
+    id INTEGER PRIMARY KEY AUTOINCREMENT, kind TEXT NOT NULL,       -- timer | alarm
+    label TEXT NOT NULL DEFAULT '', due REAL NOT NULL, created REAL NOT NULL,
+    status TEXT NOT NULL,                       -- pending | fired | missed | cancelled
+    fired_at REAL);
+CREATE INDEX IF NOT EXISTS list_i ON list_items (list_name, done);
+CREATE INDEX IF NOT EXISTS timers_s ON timers (status, due);
 CREATE TABLE IF NOT EXISTS alerts (
     id INTEGER PRIMARY KEY AUTOINCREMENT, ts REAL NOT NULL, source TEXT NOT NULL, kind TEXT NOT NULL DEFAULT 'info',
     priority TEXT NOT NULL, title TEXT NOT NULL, text TEXT NOT NULL DEFAULT '', dedupe_key TEXT, channel TEXT,

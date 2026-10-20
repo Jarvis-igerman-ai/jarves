@@ -1104,6 +1104,22 @@ def _cli_features(cfg, home):
     return Features(cfg, home, components=components)
 
 
+def cmd_help(a, cfg, home) -> int:
+    """jarvis help [topic]: the feature guides as text (Hebrew + English). No topic = the list of topics."""
+    from . import guides
+    topic = " ".join(a.topic).strip()
+    if not topic:
+        print(guides.topics_text())
+        return 0
+    g = guides.find(topic)
+    if g is None:
+        print(f"unknown topic {topic!r}.\n", file=sys.stderr)
+        print(guides.topics_text(), file=sys.stderr)
+        return 1
+    print(guides.help_text(g))
+    return 0
+
+
 def cmd_features(a, cfg, home) -> int:
     """jarvis features [list | on ID | off ID | reset ID]: the user's switches (the running Core follows them)."""
     from .features import CATALOG
@@ -1355,6 +1371,8 @@ def main(argv: list[str] | None = None) -> int:
                                         "locked prerequisites before enabling (stop Core for dependency installation)")
     fe.add_argument("action", nargs="?", default="list", choices=["list", "on", "off", "reset"])
     fe.add_argument("id", nargs="?")
+    hp = sub.add_parser("help", help="explain a topic: jarvis help timers / google / music (no topic = the list)")
+    hp.add_argument("topic", nargs="*", help="a topic id or a word in Hebrew or English")
     dg = sub.add_parser("diagnose", help="self-diagnosis: find problems in recent conversations")
     dg.add_argument("--days", type=int, default=30)
     dg.add_argument("--import-log", nargs="?", const="", default=None, metavar="PATH",
@@ -1375,7 +1393,7 @@ def main(argv: list[str] | None = None) -> int:
             "execute": cmd_execute,
             "ask": cmd_ask, "say": cmd_say, "chatgpt": cmd_chatgpt, "setup": cmd_setup, "logs": cmd_logs, "key": cmd_key,
             "wake": cmd_wake, "doctor": cmd_doctor, "cost": cmd_cost, "dashboard": cmd_dashboard,
-            "diagnose": cmd_diagnose, "features": cmd_features, "google": cmd_google,
+            "diagnose": cmd_diagnose, "features": cmd_features, "help": cmd_help, "google": cmd_google,
             "backup": cmd_backup, "restore": cmd_restore, "usage": cmd_usage, "start": cmd_start,
             "show": cmd_display, "hide": cmd_display, "autostart": cmd_autostart,
             "update": cmd_update, "telegram": cmd_telegram, "instagram": cmd_instagram, "home": cmd_home}[a.cmd](a, cfg, home)
