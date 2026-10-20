@@ -329,7 +329,9 @@ def _words(text: str) -> set[str]:
     for w in re.findall(r"[\w֐-׿]+", (text or "").lower()):
         if len(w) >= 3:
             out.add(w)
-            if len(w) >= 4 and w[0] in "והבלמשכ":       # Hebrew one-letter prefixes (ו/ה/ב/ל/מ/ש/כ)
+            # Hebrew one-letter prefixes (ו/ה/ב/ל/מ/ש/כ); "כרגע" / "ברגע" (= currently) are words of their own, not
+            # the filler "רגע" (live 20 Oct: "כרגע יש שם חלב, לחם ובצים" was judged a filler and said twice)
+            if len(w) >= 4 and w[0] in "והבלמשכ" and w not in ("כרגע", "ברגע"):
                 out.add(w[1:])
     return out
 

@@ -68,6 +68,9 @@ def test_waiting_only_tells_lead_ins_from_answers():
     assert not waiting_only("רשמתי שהצבע האהוב עליך הוא ירוק.")
     assert not waiting_only("רגע. מחקתי את הצבע האהוב עליך.")
     assert not waiting_only("אחלה") and not waiting_only("")
+    from jarves.voice.live import answer_said
+    assert answer_said("חלב, לחם וביצים", "שנייה, אני בודק. כרגע יש שם חלב, לחם ובצים.")   # "כרגע" is no filler
+    assert not answer_said("חלב", "רגע, אני בודק")
 
 
 def test_user_asked_action_and_language():
