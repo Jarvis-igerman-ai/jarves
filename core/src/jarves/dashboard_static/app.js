@@ -434,8 +434,8 @@ async function pageHome() {
     t && (t.blocker || t.equivalent) ? el("div", { class: "muted small" }, t.blocker || ("equivalent: " + t.equivalent)) : null,
     t && t.roadmap_issue ? el("div", { class: "small" }, el("a", { href: t.roadmap_issue, target: "_blank", rel: "noopener" }, "roadmap issue")) : null);
   const platform = el("div", { class: "card" }, el("b", {}, "Always-on runtime: Windows and Raspberry Pi status"),
-    el("table", { style: "margin-top:8px" }, el("thead", {}, el("tr", {}, el("th", {}, "Capability"), el("th", {}, "Windows"), el("th", {}, "Pi (Linux ARM64)"))),
-      el("tbody", {}, Object.entries(ps).map(([k, v]) => el("tr", {}, el("td", {}, k.replace(/_/g, " ")), prow(k, v.windows), prow(k, v.linux_arm64_pi))))));
+    el("div", { class: "tscroll", style: "margin-top:8px" }, el("table", {}, el("thead", {}, el("tr", {}, el("th", {}, "Capability"), el("th", {}, "Windows"), el("th", {}, "Pi (Linux ARM64)"))),
+      el("tbody", {}, Object.entries(ps).map(([k, v]) => el("tr", {}, el("td", {}, k.replace(/_/g, " ")), prow(k, v.windows), prow(k, v.linux_arm64_pi)))))));
   const pending = el("div", { class: "card muted small" }, "Next scheduled jobs and recent alerts appear here once the scheduler is installed. ",
     el("span", { id: "usageStrip" }, "Usage: ChatGPT plan Unknown · OpenAI API Unknown (meters not connected yet)."));
   render(header("Home", running ? "JARVES runs in the background; the window is optional." : "JARVES is stopped (last saved state shown)."),

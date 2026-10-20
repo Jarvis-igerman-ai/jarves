@@ -68,8 +68,8 @@
       tx("ג'ארביס בודק את הרכיבים, היומן, ההגדרות והיכולות ומציע תיקונים. שינוי הגדרה רק אחרי אישור שלכם.",
         "JARVES checks components, logs, settings and features and suggests fixes. Settings change only after you approve."),
       el("label", { class: "small" }, aiBox, " ", tx("כולל בדיקה בעזרת המודל (עולה כסף)", "include AI review (costs money)")), run), msg];
-    if (d.job) parts.push(el("div", { class: "muted small" }, tx("בדיקה קבועה: ", "Scheduled: ") + `${d.job.human} · ` +
-      tx("הבאה: ", "next: ") + (d.job.next_run_local || "—") + " · ", el("a", { href: "#/jobs" }, tx("שינוי שעה", "change time"))));
+    if (d.job) parts.push(el("div", { class: "muted small" }, tx("בדיקה קבועה: ", "Scheduled: ") + `${schedHuman(d.job.kind, d.job.spec, d.job.human)} · ` +
+      tx("הבאה: ", "next: ") + (schedStamp(d.job.next_run_local) || "—") + " · ", el("a", { href: "#/jobs" }, tx("שינוי שעה", "change time"))));
     if (!v) {
       parts.push(el("div", { class: "card empty" }, tx("עוד לא רצה בדיקה עצמית.", "No self-check yet.")));
       render(parts); return;

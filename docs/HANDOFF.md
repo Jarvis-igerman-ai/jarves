@@ -3,6 +3,11 @@
 - One command checks Google, Telegram, the Pear API plugin, the wake word (and optional Instagram / Home Assistant), guides only what is missing, reuses the existing wizards, ends with a summary table. Flags `--only`, `--status`, `--yes`, `--reminders`. Telegram: clipboard token watch (consent, cleared after use), validated before saving, auto-pair through a one-time t.me deep link + confirmation message.
 - Also: once-a-day Hebrew reminder when Google is not connected (quiet hours / autonomy / proactive setting respected), dashboard Connections "Run guided setup" card, first-run wizard offers it, feature `guided_setup` (on by default).
 - Tests: `core/tests/test_connect.py` 32 passed plus the related files run one at a time (list in the report). UNVERIFIED: real BotFather / Google / Pear runs, clipboard write/clear on a real desktop, the dashboard button opening a console window. Questions for the user: none new.
+## SW-V3 campaign Pass D: dashboard + log review (20 Oct 2026) - [report](reviews/SWV3_CAMPAIGN_DASHBOARD.md), [bugs](reviews/SWV3_CAMPAIGN_BUG_TABLE_DASH.md) - [#17](https://github.com/igalgerman/JARVIS/issues/17), branch `v3-campaign-dash`
+
+- 186 page loads (31 pages x en/he/ar x 1440/390 px) plus interaction flows in real headless Edge on the offline TEST profile. 9 bugs fixed (1 P1: Home said "JARVES is off" 2 min after start because health.json was only written on change; P2: 429 from static files, row keyboard access, Undo after save, runtime table overflow, Hebrew schedules in the English UI), 9 open P3 (Hebrew/Arabic string gaps, Self-check card layout, small a11y/phone items). Log review: Core log 0 WARN/ERROR; no unexplained entries.
+- BLOCKED (need Pass E hardware/accounts): live mic/camera states and the "What does he see?" preview, Google/Telegram setup, real captured Context trace.
+- Questions for the user: none new.
 
 ## Browser Skill (20 Oct 2026, SW-V3 P1.2) — [#17](https://github.com/igalgerman/JARVIS/issues/17), branch `v3-p1-browser`
 

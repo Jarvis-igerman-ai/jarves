@@ -3,6 +3,35 @@
 "use strict";
 
 (function () {
+  // The Core words schedules ("בכל יום ראשון ב-10:00") and stamps ("יום א׳ 25.10.2026 10:00") in Hebrew. Every other UI
+  // language gets the same facts in English (Campaign D: Hebrew text and bidi-mangled dates in the English UI).
+  const DAYS_EN = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
+  const LETTER = { "א": 0, "ב": 1, "ג": 2, "ד": 3, "ה": 4, "ו": 5, "ש": 6 };
+  window.schedStamp = (s) => (JL.lang === "he" || !s) ? s
+    : String(s).replace(/יום ([א-ש])['׳]/g, (m, l) => DAYS_EN[LETTER[l]].slice(0, 3));
+  window.schedHuman = (kind, spec, he) => {
+    if (JL.lang === "he") return he;
+    try {
+      if (kind === "once") { const d = new Date(spec); const p = (n) => String(n).padStart(2, "0");
+        return `once, ${DAYS_EN[d.getDay()].slice(0, 3)} ${p(d.getDate())}.${p(d.getMonth() + 1)}.${d.getFullYear()} at ${p(d.getHours())}:${p(d.getMinutes())}`; }
+      const f = String(spec).trim().split(/\s+/); if (f.length !== 5) return he;
+      const num = (x) => /^\d+$/.test(x) ? parseInt(x, 10) : null, p = (n) => String(n).padStart(2, "0");
+      const [mi, hr, dom, mon, dow] = f, m = num(mi), h = num(hr);
+      const at = m !== null && h !== null ? ` at ${p(h)}:${p(m)}` : "";
+      if (m !== null && h !== null && dom === "*" && mon === "*") {
+        if (dow === "*") return "every day" + at;
+        if (dow === "0-4") return "Sunday to Thursday" + at;
+        if (dow === "1-5") return "Monday to Friday" + at;
+        if (/^[\d,]+$/.test(dow)) return "every " + dow.split(",").map((x) => DAYS_EN[+x % 7]).join(" and ") + at;
+      }
+      if (/^\*\/\d+$/.test(mi) && f.slice(1).every((x) => x === "*")) return `every ${mi.slice(2)} minutes`;
+      if (m !== null && f.slice(1).every((x) => x === "*")) return m === 0 ? "every full hour" : `every hour, ${m} minutes past`;
+      if (/^\*\/\d+$/.test(hr) && m !== null && dom === "*" && mon === "*" && dow === "*") return `every ${hr.slice(2)} hours`;
+      return "cron: " + spec;
+    } catch (e) { return he; }
+  };
+  // "Hebrew / English" names written by the Core (e.g. the weekly self-check job): show the part for the UI language
+  const biName = (n) => { const m = /^([^A-Za-z]*[֐-׿][^A-Za-z]*?)\s+\/\s+([A-Za-z].*)$/.exec(String(n || "")); return m ? (JL.lang === "he" ? m[1] : m[2]) : n; };
   const when = (ts) => ts ? `${day(ts)} ${clock(ts)}` : "—";
   const msgSpan = () => el("span", { class: "muted small" });
   async function act(msg, fn) {
@@ -26,7 +55,7 @@
     const kind = el("select", {}, el("option", { value: "research" }, "research report"), el("option", { value: "reminder" }, "reminder"));
     const preview = el("div", { class: "muted small" });
     whenIn.addEventListener("change", async () => {
-      try { const p = await post("/api/schedule/parse", { when: whenIn.value }); preview.textContent = `${p.human} · next: ${p.next.join(" | ")}`; }
+      try { const p = await post("/api/schedule/parse", { when: whenIn.value }); preview.textContent = `${schedHuman(p.kind, p.spec, p.human)} · next: ${p.next.map(schedStamp).join(" | ")}`; }
       catch (e) { preview.textContent = e.message; }
     });
     const form = el("div", { class: "card", style: "margin-bottom:12px" }, el("b", {}, "New job (preview first, then approve)"),
@@ -45,11 +74,11 @@
       const runs = (j.runs || []).slice(0, 5).map((r) => el("div", { class: "small muted" },
         `${when(r.scheduled_for)} · ${r.trigger}${r.late ? " · late" : ""}${r.missed ? ` · ${r.missed} missed` : ""} · `, statusPill(r.state),
         r.error ? ` ${r.error}` : ""));
-      return el("tr", {}, el("td", {}, el("b", { dir: "auto" }, j.name), el("div", { class: "small", dir: "auto" }, j.task),
+      return el("tr", {}, el("td", {}, el("b", { dir: "auto" }, biName(j.name)), el("div", { class: "small", dir: "auto" }, j.task),
           el("div", { class: "small muted" }, `${j.action} · skills: ${j.skills.join(", ") || "none"} · max ${j.max_requests} AI request(s)/run · retries ${j.retries} · max age ${Math.round(j.max_age_s / 3600)} h`)),
-        el("td", {}, el("div", { dir: "auto" }, j.human), el("div", { class: "small muted", dir: "ltr" }, j.spec + " · " + j.tz)),
-        el("td", {}, statusPill(j.status), el("div", { class: "small" }, j.next_run_local ? "next: " + j.next_run_local : (j.upcoming_local || []).join(" | "))),
-        el("td", {}, j.last_outcome ? statusPill(j.last_outcome) : "—", el("div", { class: "small muted" }, j.last_run_local || ""), runs),
+        el("td", {}, el("div", { dir: "auto" }, schedHuman(j.kind, j.spec, j.human)), el("div", { class: "small muted", dir: "ltr" }, j.spec + " · " + j.tz)),
+        el("td", {}, statusPill(j.status), el("div", { class: "small" }, j.next_run_local ? "next: " + schedStamp(j.next_run_local) : (j.upcoming_local || []).map(schedStamp).join(" | "))),
+        el("td", {}, j.last_outcome ? statusPill(j.last_outcome) : "—", el("div", { class: "small muted" }, schedStamp(j.last_run_local) || ""), runs),
         el("td", {}, buttons, m));
     });
     const tzIn = el("input", { type: "text", value: d.timezone, style: "width:150px", "aria-label": "Default time zone" });
@@ -63,7 +92,7 @@
     const settings = el("div", { class: "card small", style: "margin-bottom:12px" }, el("b", {}, "Settings "),
       "A missed job (computer off) runs once if not older than ", ageIn, " hours · ", wwIn, " ", setSave,
       " ", el("a", { href: "#/guide/scheduler" }, "Guide"));
-    render(header("Jobs", `Scheduled reminders and reports. Now ${d.now_local}. ${d.note}`, tzIn, tzSave, tzMsg), settings, form,
+    render(header("Jobs", JL.lang === "he" ? `תזכורות ודוחות מתוזמנים. עכשיו ${d.now_local}. הליבה מריצה משימות שהגיע זמנן (בדיקה לפחות כל 30 שניות); משימה שהוחמצה רצה פעם אחת אחרי ההפעלה אם היא לא ישנה מדי, ומסומנת כמאוחרת.` : `Scheduled reminders and reports. Now ${schedStamp(d.now_local)}. ${d.note}`, tzIn, tzSave, tzMsg), settings, form,
       el("div", { class: "card" }, rows.length ? el("table", {}, el("thead", {}, el("tr", {}, el("th", {}, "Job"), el("th", {}, "When"),
         el("th", {}, "Status"), el("th", {}, "Last run"), el("th", {}, ""))), el("tbody", {}, rows)) : el("div", { class: "empty" }, "No jobs yet.")));
   }
@@ -81,7 +110,7 @@
     body.replaceChildren(el("div", { class: "row" }, el("b", { dir: "auto" }, r.title), el("span", { class: "spacer" }), m,
         el("button", { type: "button", class: "primary", onclick: () => act(m, async () => { const x = await post(`/api/reports/${r.id}`, { op: "speak" }); m.textContent = x.note; }) }, "Read aloud"),
         el("button", { type: "button", class: "ghost", onclick: () => { if (confirm("Delete this report?")) act(m, () => post(`/api/reports/${r.id}`, { op: "delete" })); } }, "Delete")),
-      el("div", { class: "small muted" }, `${r.created_local} · ${r.status}${r.late ? " · ran late (catch-up)" : ""}${r.read_at ? " · read " + when(r.read_at) : ""}`),
+      el("div", { class: "small muted" }, `${schedStamp(r.created_local)} · ${r.status}${r.late ? " · ran late (catch-up)" : ""}${r.read_at ? " · read " + when(r.read_at) : ""}`),
       el("pre", { class: "file", dir: "auto" }, r.text),
       r.sources.length ? el("div", { class: "small" }, "Sources: ", r.sources.map((s) => s.query ? `search "${s.query}"` : s.name).join(" · ")) : null);
   }

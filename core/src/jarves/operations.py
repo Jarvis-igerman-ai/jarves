@@ -234,7 +234,11 @@ class Operations:
             return
         self._nudge_checked = now
         try:
-            connect_mod.maybe_nudge(self.db, self.alerts, home=self.core.home, features=self.core.features)
+            # voice only inside an open conversation; idle (often hidden, in the background) = a quiet popup, so
+            # JARVES never starts talking out of nowhere about setup
+            open_ = getattr(self.core, "live", None) is not None
+            connect_mod.maybe_nudge(self.db, self.alerts, home=self.core.home, features=self.core.features,
+                                    channel="speech" if open_ else "popup")
         except Exception:
             logs.error("connect", "CONNECT_NUDGE_FAILED", "setup reminder failed", exc=True)
 

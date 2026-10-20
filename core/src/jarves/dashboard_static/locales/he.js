@@ -570,6 +570,34 @@
   "At the start": "בהתחלה",
   "At the end": "בסוף",
   "Start vs end": "התחלה מול סוף",
+  "A missed job (computer off) runs once if not older than": "משימה שהוחמצה (המחשב כבוי) תרוץ פעם אחת אם היא לא ישנה מ-",
+  "Blocks": "בלוקים",
+  "Timeline": "ציר זמן",
+  "← transcript": "→ תמליל",
+  "roadmap": "מפת דרכים",
+  "custom phrase: Windows": "ביטוי מותאם: Windows",
+  "custom phrase: Pi": "ביטוי מותאם: Pi",
+  "Hey Jarvis (built-in model)": "Hey Jarvis (מודל מובנה)",
+  "Full control (open, read, click, type) only on the sites listed here.": "שליטה מלאה (פתיחה, קריאה, לחיצה, הקלדה) רק באתרים שברשימה.",
+  "Any other site: read-only, and only after you approve it on the screen.": "כל אתר אחר: קריאה בלבד, ורק אחרי שתאשר על המסך.",
+  "Purchases, payments and passwords / card numbers always ask on the screen first.": "רכישות, תשלומים, סיסמאות ומספרי כרטיס תמיד שואלים קודם על המסך.",
+  "Fresh private browser every time: no personal profile, cookies or saved passwords; downloads are refused.": "דפדפן פרטי חדש בכל פעם: בלי פרופיל אישי, עוגיות או סיסמאות שמורות; הורדות נחסמות.",
+  "biometric; off by default": "ביומטרי; כבוי כברירת מחדל",
+  "once per meter and window": "פעם אחת לכל מונה וחלון",
+  "API budget per month ($)": "תקציב API חודשי ($)",
+  "your own number: OpenAI does not expose the project budget": "המספר שלך: OpenAI לא חושפת את תקציב הפרויקט",
+  "needs OPENAI_ADMIN_KEY in secrets.env": "דורש OPENAI_ADMIN_KEY בקובץ secrets.env",
+  "not possible: JARVES never deletes calendar events": "לא אפשרי: JARVES לעולם לא מוחק אירועי יומן",
+  "Off: this computer only. To use your phone:": "כבוי: רק במחשב הזה. כדי להשתמש בטלפון:",
+  "longest silence s:": "השתיקה הארוכה ביותר (שנ׳):",
+  "early response drops:": "הפסקות תשובה מוקדמות:",
+  "never answered: the conversation ended while waiting": "לא נענה: השיחה הסתיימה בזמן ההמתנה",
+  "operating rules · you only": "כללי עבודה · רק אתה",
+  "personality and tone · JARVES may edit": "אישיות וטון · JARVES רשאי לערוך",
+  "name and identity · JARVES may edit": "שם וזהות · JARVES רשאי לערוך",
+  "about the user · JARVES may edit": "על המשתמש · JARVES רשאי לערוך",
+  "long-term notes · JARVES may edit": "הערות לטווח ארוך · JARVES רשאי לערוך",
+  "periodic checklist (not active yet) · you only": "רשימת בדיקות תקופתית (עוד לא פעילה) · רק אתה",
   "No block matches the search.": "אין מקטע שתואם לחיפוש.",
   "Tools offered": "כלים שהוצעו",
   "Possibly from memory": "אולי מהזיכרון",
@@ -931,6 +959,34 @@
   "after an error burst": "אחרי רצף שגיאות"
  },
  "rules": [
+  [
+  "^Scheduled reminders and reports\\. Now (.+)\\. The Core runs due jobs .*$",
+  "תזכורות ודוחות מתוזמנים. עכשיו $1. הליבה מריצה משימות שהגיע זמנן (בדיקה לפחות כל 30 שניות); משימה שהוחמצה רצה פעם אחת אחרי ההפעלה אם היא לא ישנה מדי, ומסומנת כמאוחרת."
+  ],
+  [
+  "^default (.+) · (.+)–(.+)$",
+  "ברירת מחדל $1 · $2–$3"
+  ],
+  [
+  "^default (.+)$",
+  "ברירת מחדל $1"
+  ],
+  [
+  "^~([\\d.]+k?) tokens$",
+  "~$1 אסימונים"
+  ],
+  [
+  "^(\\d+) blocks · estimate$",
+  "$1 בלוקים · הערכה"
+  ],
+  [
+  "^(\\d+) pieces added$",
+  "נוספו $1 פריטים"
+  ],
+  [
+  "^(\\d+) left out$",
+  "$1 הושמטו"
+  ],
   [
   "^(\\d+) conversations?$",
   "$1 שיחות"

@@ -784,7 +784,8 @@ class Handler(BaseHTTPRequestHandler):
             return self._send(403, b"forbidden network", "text/plain")       # never answer the internet
         if not a.host_ok(self.headers.get("Host") or ""):
             return self._send(403, b"forbidden host", "text/plain")          # DNS rebinding / spoofed Host
-        if not a.rate_ok(ip):
+        if not (self.command == "GET" and urlsplit(self.path).path.startswith("/static/")) and not a.rate_ok(ip):
+            # (a page load fetches ~30 static files; they are public app code and must not eat the 240/min budget)
             return self._send(429, b"too many requests", "text/plain", {"Retry-After": "60"})
         if not a.origin_ok(self.headers, self.command):
             a.audit("refused_cross_origin", ip=ip, path=urlsplit(self.path).path)

@@ -463,6 +463,7 @@ class Core:
                     self.dev.check_audio()
                 self.features.poll()            # a switch flipped on the dashboard / CLI reaches the Core here
                 self._check_ai()
+                self.health.save()              # heartbeat: the dashboard calls a snapshot older than 120 s "JARVES is off"
                 await self.link.broadcast("status", self.snapshot())
             except Exception:
                 logs.error("core", "HEALTH_LOOP_ERROR", "health check failed", exc=True)

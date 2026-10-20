@@ -553,7 +553,8 @@ def _run_wake_test() -> int:
 
 
 # ---------------------------------------------------------------------- the once-a-day reminder
-def maybe_nudge(db, alerts, *, home: Path, features=None, clock: Callable[[], float] = time.time) -> dict | None:
+def maybe_nudge(db, alerts, *, home: Path, features=None, clock: Callable[[], float] = time.time,
+                channel: str = "speech") -> dict | None:
     """Remind the owner (voice when a conversation is open, else a quiet popup) that Google is not connected.
     At most once per 24 h; never in quiet hours or while alerts are paused; not when proactive alerts are off, when
     the autonomy level is observe-only, when the guided_setup feature is off, or after `jarvis connect --reminders off`."""
@@ -577,7 +578,7 @@ def maybe_nudge(db, alerts, *, home: Path, features=None, clock: Callable[[], fl
         return None
     db.set_setting("connect.last_nudge", now, actor="connect")
     text = NUDGE_TEXT_RECONNECT_HE if g["needs_reconnect"] else NUDGE_TEXT_HE
-    return alerts.raise_("connect", "חיבור גוגל", text, priority="normal", kind="suggestion", channel="speech",
+    return alerts.raise_("connect", "חיבור גוגל", text, priority="normal", kind="suggestion", channel=channel,
                          dedupe_key="connect.google")
 
 
