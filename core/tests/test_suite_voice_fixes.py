@@ -354,6 +354,6 @@ async def test_confirmation_tells_the_voice_session(core):
     req = await face.wait("confirm.request")
     await face.send("confirm.reply", {"id": req["id"], "approved": False})
     assert await task is False
-    assert calls == [("pending", "Delete?"), ("done",)]
+    assert calls == [("pending", "Delete something?"), ("done",)]     # kind only, one language, never details
     core.live = None
     await face.ws.close()

@@ -1,3 +1,10 @@
+## V4 research: real WhatsApp send/read (20 Oct 2026) - #17, branch `v4-whatsapp-research` (off `v3-final`)
+
+- Docs only, no code/tests: [plans/WHATSAPP_REAL_ACCESS.md](plans/WHATSAPP_REAL_ACCESS.md). Compared Cloud API + coexistence, whatsmeow / neonize / Baileys / whatsapp-web.js / WAHA, mautrix / Beeper, Playwright/Desktop UI automation, Android notification listener / accessibility / Tasker, ToS, ban risk, privacy; sources with URLs, checked 20 Oct 2026.
+- Findings: official Cloud API cannot run a personal account (business number or Business-app coexistence, templates + 24 h window, groups not synced, paid since 1 Oct 2026, +972 coexistence unconfirmed). Full send/read needs an unofficial linked-device client (ToS violation, real but unquantified ban risk, warnings reported even at low volume). Lowest-risk read = Android notification listener on the phone that runs WhatsApp.
+- Recommended: isolated `whatsapp_bridge` process on whatsmeow (Go; neonize = plan B), loopback + token, encrypted store, modes off/read/send set only on the PC, read-only first on a SECONDARY number, sends only to allow-listed contacts via the approvals popup (recipient + full text), rate limits, kill switch, incoming text untrusted; staged S1 fake -> S1 read-only -> S2 confirmed send -> S3 voice -> S4 phone; fake-bridge test plan + owner checklist.
+- Questions for the user: see section 7 of the plan (main-number ban risk vs secondary SIM, read/send scope, approval surface, retention, cloud model sees message text, Go binary OK, linked device vs Android route). Status: WAITING FOR USER.
+
 ## V4 P0.3: CLI / dashboard parity (20 Oct 2026) - #17, branch `v4-p03-parity` (off `v3-final`)
 
 - Owner D1/D2: (1) Timers and Lists dashboard pages (Everyday group; list, add, cancel/complete, clear asks first) plus CLI `jarvis timers list|add|cancel`, `jarvis lists show|add|check|remove|clear [--everything] [--yes]` (clear asks on the terminal), read-only `jarvis notes|jobs|reports`; code in `cli_parity.py`, `timers.py`/`lists.py` (routes), `dashboard_static/m3.js`; en/he catalogs and nav/search keywords added once; guides timers/lists mention the CLI.

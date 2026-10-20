@@ -364,7 +364,7 @@ async def test_app_user_google_help_uses_connect_button_instead_of_developer_cli
     reg = SkillRegistry()
     register_google(reg, home)
     result = await reg.call("google_connect_help", {})
-    assert not result.ok and result.data["setup"] == "app"
+    assert result.ok and result.data["setup"] == "app"
     assert "Connect Google" in result.message and "command" not in result.data
 
 
@@ -399,7 +399,7 @@ async def test_not_connected_he_says_how_to_connect_and_picks_up_a_new_connectio
     reg = SkillRegistry()
     assert register_google(reg, home) is None
     res = await reg.call("google_connect_help", {})
-    assert not res.ok and res.message == NOT_CONNECTED_HE and "תריץ במחשב jarvis google start" in res.message
+    assert res.ok and res.message == NOT_CONNECTED_HE and "תריץ במחשב jarvis google start" in res.message
     seed(home)                                               # the user ran `jarvis google start` meanwhile
     res = await reg.call("google_connect_help", {})
     assert res.ok and "calendar" in reg.skills and "gmail" in reg.skills

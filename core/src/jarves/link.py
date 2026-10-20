@@ -185,7 +185,7 @@ class GodotLink:
                 else:
                     self.health.set("face_link", "unavailable", "Godot face disconnected",
                                     "restart godot\\run_face.cmd; it reconnects automatically")
-                    logs.warn("link", "LINK_FACE_DISCONNECTED", f"Godot face disconnected ({peer})")
+                    logs.info("link", "LINK_FACE_DISCONNECTED", f"Godot face disconnected ({peer})")
 
     def expect_close(self, seconds: float = CLOSE_GRACE_S) -> None:
         """The face is about to close on purpose (hide, window closed by the user, Core stopping)."""

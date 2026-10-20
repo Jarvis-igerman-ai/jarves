@@ -37,6 +37,9 @@
   async function act(msg, fn) {
     try { await fn(); route(true); } catch (e) { msg.textContent = "Failed: " + e.message; }
   }
+  // destructive: the SERVER asks on the approval popup and this request waits for the owner's answer
+  const WAITING = () => tx("ממתין לאישור על המסך שלך", "waiting for approval on your screen");
+  const actApproved = (msg, fn) => { msg.textContent = WAITING(); return act(msg, fn); };
   const post = (path, body) => api(path, { method: "POST", body: JSON.stringify(body || {}) });
   function download(name, text) {
     const a = el("a", { href: URL.createObjectURL(new Blob([text], { type: "text/markdown" })), download: name });
@@ -70,7 +73,7 @@
         j.status === "active" ? el("button", { type: "button", onclick: op("pause") }, "Pause") : null,
         j.status === "paused" ? el("button", { type: "button", onclick: op("resume") }, "Resume") : null,
         j.status !== "draft" ? el("button", { type: "button", onclick: op("run_now") }, "Run now") : null,
-        el("button", { type: "button", class: "ghost", onclick: () => { if (confirm(`Delete job "${j.name}"?`)) op("delete")(); } }, "Delete")];
+        el("button", { type: "button", class: "ghost", onclick: () => { msg.textContent = WAITING(); op("delete")(); } }, "Delete")];
       const runs = (j.runs || []).slice(0, 5).map((r) => el("div", { class: "small muted" },
         `${when(r.scheduled_for)} · ${r.trigger}${r.late ? " · late" : ""}${r.missed ? ` · ${r.missed} missed` : ""} · `, statusPill(r.state),
         r.error ? ` ${r.error}` : ""));
@@ -109,7 +112,7 @@
     const m = msgSpan();
     body.replaceChildren(el("div", { class: "row" }, el("b", { dir: "auto" }, r.title), el("span", { class: "spacer" }), m,
         el("button", { type: "button", class: "primary", onclick: () => act(m, async () => { const x = await post(`/api/reports/${r.id}`, { op: "speak" }); m.textContent = x.note; }) }, "Read aloud"),
-        el("button", { type: "button", class: "ghost", onclick: () => { if (confirm("Delete this report?")) act(m, () => post(`/api/reports/${r.id}`, { op: "delete" })); } }, "Delete")),
+        el("button", { type: "button", class: "ghost", onclick: () => actApproved(m, () => post(`/api/reports/${r.id}`, { op: "delete" })) }, "Delete")),
       el("div", { class: "small muted" }, `${schedStamp(r.created_local)} · ${r.status}${r.late ? " · ran late (catch-up)" : ""}${r.read_at ? " · read " + when(r.read_at) : ""}`),
       el("pre", { class: "file", dir: "auto" }, r.text),
       r.sources.length ? el("div", { class: "small" }, "Sources: ", r.sources.map((s) => s.query ? `search "${s.query}"` : s.name).join(" · ")) : null);
@@ -135,7 +138,7 @@
           el("span", { class: "small muted" }, `created ${when(n.created)} · updated ${when(n.updated)}`)), ta,
         el("div", { class: "row" }, el("button", { type: "button", onclick: () => act(m, () => post("/api/notes/" + n.id, { op: "edit", text: ta.value })) }, "Save"),
           el("button", { type: "button", onclick: async () => { const x = await post("/api/notes/" + n.id, { op: "export" }); download(x.filename, x.markdown); } }, "Export .md"),
-          el("button", { type: "button", class: "ghost", onclick: () => { if (confirm(`Delete note "${n.title}"?`)) act(m, () => post("/api/notes/" + n.id, { op: "delete" })); } }, "Delete"), m));
+          el("button", { type: "button", class: "ghost", onclick: () => actApproved(m, () => post("/api/notes/" + n.id, { op: "delete" })) }, "Delete"), m));
     });
     render(header("Notes", "Your notes: searchable, editable, exportable as Markdown.", q,
       el("button", { type: "button", onclick: async () => { const x = await api("/api/notes/export"); download(x.filename, x.markdown); } }, "Export all")),
@@ -292,8 +295,8 @@
     const doneN = (d.items || []).filter((r) => r.done).length, allN = (d.items || []).length;
     const clear = (onlyDone) => () => {
       const n = onlyDone ? doneN : allN;
-      if (n && confirm(onlyDone ? tx("לנקות את הפריטים המסומנים?", "Clear the ticked-off items?") : tx("לנקות את כל הפריטים ברשימה?", "Clear every item in this list?")))
-        act(msg, () => post("/api/lists/op", { op: "clear", list_name: d.list, only_done: onlyDone, approved: true }));
+      if (n)       // the server asks for the approval on the full popup and this request waits for the answer
+        actApproved(msg, () => post("/api/lists/op", { op: "clear", list_name: d.list, only_done: onlyDone }));
     };
     render(header(tx("רשימות", "Lists"), tx("קניות ומשימות: מוסיפים, מסמנים, מסירים. ניקוי מבקש אישור.", "Shopping and to-do: add, tick off, remove. Clearing asks first.")),
       el("div", { class: "grid2" }, el("div", {}, names, el("div", { style: "margin-top:8px" }, other)),

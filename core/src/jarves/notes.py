@@ -261,7 +261,13 @@ def api_note_op(ctx, m, body):
     try:
         if op == "edit":
             return 200, n.edit(nid, title=b.get("title"), text=b.get("text"), tags=b.get("tags"), by="dashboard")
-        if op == "delete":                       # the dashboard button asks first; the user is the approver
+        if op == "delete":                       # the owner approves on the approval popup; the request waits
+            from . import approvals
+            ok, _w = approvals.ask_owner(ctx.home, f"Delete note #{nid}?", title="dashboard_delete_note",
+                                         risk="medium", why="You pressed Delete on the dashboard Notes page.",
+                                         details={"note": nid})
+            if not ok:
+                return 403, dict(approvals.APPROVAL_REFUSED)
             return (200, {"deleted": True}) if n.delete(nid, by="dashboard") else (404, {"error": "no such note"})
         if op == "export":
             note = n.get(nid)

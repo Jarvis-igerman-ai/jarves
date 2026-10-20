@@ -223,9 +223,18 @@ def api_list_op(ctx, m, body):
         hit = (ls.check if op == "check" else ls.remove)(name, str(b.get("item", "")), by="dashboard")
         return (200, {"items": hit}) if hit else (404, {"error": "no such item on the list"})
     if op == "clear":
-        if b.get("approved") is not True:
-            return 400, {"error": "clearing needs your approval", "needs_approval": True}
-        return 200, {"cleared": ls.clear(name, only_done=bool(b.get("only_done", True)), by="dashboard")}
+        only_done = bool(b.get("only_done", True))
+        # the owner approves on the full approval popup (same service as the voice tools); this request waits for
+        # the answer. A flag sent by the page is NOT an approval.
+        from . import approvals
+        n_items = len(ls.items(name, include_done=True))
+        ok, _why = approvals.ask_owner(
+            ctx.home, ("Clear the ticked-off items of the list" if only_done else "Clear every item of the list")
+            + f" '{title(name)}' ({n_items} items)?", title="dashboard_clear_list", risk="medium", kind="tool",
+            why="You pressed Clear on the dashboard Lists page.", details={"list": list_key(name)})
+        if not ok:
+            return 403, dict(approvals.APPROVAL_REFUSED)
+        return 200, {"cleared": ls.clear(name, only_done=only_done, by="dashboard")}
     return 400, {"error": "op must be check, remove or clear"}
 
 

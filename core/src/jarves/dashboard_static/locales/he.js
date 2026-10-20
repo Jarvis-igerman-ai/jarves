@@ -981,7 +981,8 @@
   "Lists": "רשימות",
   "Shopping and to-do: add, tick off, remove. Clearing asks first.": "קניות ומשימות: מוסיפים, מסמנים, מסירים. ניקוי מבקש אישור.",
   "Clear the ticked-off items?": "לנקות את הפריטים המסומנים?",
-  "Clear every item in this list?": "לנקות את כל הפריטים ברשימה?"
+  "Clear every item in this list?": "לנקות את כל הפריטים ברשימה?",
+  "waiting for approval on your screen": "ממתין לאישור על המסך שלך"
  },
  "rules": [
   [

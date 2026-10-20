@@ -112,8 +112,10 @@ class Timers:
 
     def view(self, t: dict) -> dict:
         left = max(0.0, t["due"] - self.clock())
+        due_now = t["due"] <= self.clock()
         out = {"id": t["id"], "kind": t["kind"], "label": t["label"], "seconds_left": round(left),
-               "left_he": duration_he(left)}
+               "left_he": "מצלצל עכשיו, ממתין להשמעה" if due_now else duration_he(left),
+               "state": "ringing" if due_now else "running"}
         if t["kind"] == "alarm":
             out["at"] = datetime.fromtimestamp(t["due"], self.zone()).strftime("%Y-%m-%d %H:%M")
         return out
@@ -216,7 +218,11 @@ def make_skill(timers: Timers):
 
             async def listing(_):
                 items = [timers.view(t) for t in timers.pending()]
-                return ToolResult(True, f"{len(items)} running" if items else "no timers or alarms", {"timers": items})
+                ringing = sum(1 for i in items if i["state"] == "ringing")
+                txt = f"{len(items)} running" if items else "no timers or alarms"
+                if ringing:
+                    txt += f" ({ringing} ringing / pending delivery)"
+                return ToolResult(True, txt, {"timers": items})
 
             async def cancel(a: CancelArgs):
                 hit = timers.cancel(a.timer_id, a.label, by="voice")
