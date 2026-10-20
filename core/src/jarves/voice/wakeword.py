@@ -214,6 +214,21 @@ def make_detector(wake_word: str = "hey_jarvis", threshold: float = 0.5) -> Wake
     return OpenWakeWordDetector(wake_word, threshold)
 
 
+def make_wake_detector(v) -> WakeWordDetector:
+    """The Core's wake pipeline from VoiceConfig (docs/reviews/SWV3_WAKE_REPORT.md):
+    AGC (voice.wake_agc) -> wake model -> optional local ASR confirmation of the name (voice.wake_confirm).
+    The confirm stage needs faster-whisper (voice extra); when it cannot load, `check()` fails and the caller falls
+    back to the single-stage detector at voice.wake_threshold (and says so)."""
+    from .wake_confirm import AutoGain, ConfirmingDetector, GainDetector, WhisperConfirm
+    agc = AutoGain(initial_gain_db=getattr(v, "wake_gain_db", 0.0) or 0.0) if getattr(v, "wake_agc", False) else None
+    if getattr(v, "wake_confirm", False):
+        base = make_detector(v.wake_word, 1.01)          # the gate: only its raw score is read
+        return ConfirmingDetector(base, WhisperConfirm(v.wake_confirm_model), accept=max(v.wake_threshold,
+                                  v.wake_accept), gate=v.wake_gate, agc=agc)
+    det = make_detector(v.wake_word, v.wake_threshold)
+    return GainDetector(det, agc) if agc is not None else det
+
+
 # --------------------------------------------------------------------------------------------- levels
 
 

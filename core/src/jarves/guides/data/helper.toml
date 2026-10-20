@@ -1,0 +1,49 @@
+order = 26
+category = "system"
+features = ["helper", "helper_readonly_auto"]
+aliases = ["עוזר מחשב", "תריץ פקודה", "תתקין", "התקנה", "פקודה", "helper", "run a command", "install"]
+error_codes = ["HELPER_NOT_APPROVED", "HELPER_REFUSED", "HELPER_JARVES_DATA", "HELPER_ELEVATED", "HELPER_NOT_FOUND", "HELPER_TIMEOUT", "HELPER_NO_MANAGER"]
+title_he = "עוזר מחשב: פקודות והתקנות"
+title_en = "Computer helper: commands and installs"
+what_he = "ג'ארביס יכול להציע פקודה אחת או התקנת תוכנה (winget, pip, npm) ולהריץ אותה רק אחרי שאישרתם בחלון האישור את הפקודה המדויקת, התיקייה והסיכון. פקודות מסוכנות דורשות להקליד קוד. הוא לא רץ אף פעם כמנהל מערכת."
+what_en = "JARVES can propose one command or a software install (winget, pip, npm) and runs it only after you approve the exact command, folder and risk in the approval window. Dangerous commands need a typed code. It never runs as administrator."
+say = [["תבדוק איזו גרסת פייתון מותקנת", "Check which Python version is installed"], ["תתקין לי את Git", "Install Git for me"]]
+expect_he = "קופץ חלון אישור קטן מעל הכול עם הפקודה, התיקייה, הסיבה והסיכון. רק אחרי \"אשר\" (או \"כן\" בקול, לפקודות לא מסוכנות) היא רצה, והוא מסכם את התוצאה."
+expect_en = "A small always-on-top approval window shows the command, folder, reason and risk. Only after Approve (or a spoken yes, for non-dangerous commands) does it run, and he summarizes the result."
+test = "feature"
+test_he = "הבדיקה רק בודקת ש-JARVES לא רץ כמנהל מערכת. היא לא מריצה כלום."
+test_en = "The check only verifies that JARVES is not running as administrator. It runs nothing."
+cost_he = "חינם. התקנות מורידות תוכנה מהמקור שמוצג בחלון האישור."
+cost_en = "Free. Installs download software from the source shown in the approval window."
+privacy_he = "הפקודה רצה במחשב הזה כמשתמש שלכם, בלי מפתחות וסיסמאות בסביבה שלה. הפלט נשמר ביומן מקומי ונחשב לא מהימן: ג'ארביס לא מבצע הוראות שמופיעות בו."
+privacy_en = "The command runs on this computer as your user, without keys or passwords in its environment. Output is kept in a local log and treated as untrusted: JARVES never follows instructions in it."
+pages = ["approvals"]
+
+[[steps]]
+he = "הדליקו את המתג \"עוזר מחשב\" (כבוי כברירת מחדל)."
+en = "Switch on \"Computer helper\" (off by default)."
+action = "feature_on:helper"
+check = "active:helper"
+
+[[steps]]
+he = "בקשו בקול או בכתב פקודה פשוטה, למשל לבדוק את גרסת פייתון, ואשרו בחלון שקופץ או בעמוד האישורים."
+en = "Ask for a simple command, for example checking the Python version, and approve it in the popup or on the Approvals page."
+action = "open:#/approvals"
+
+[[problems]]
+he = "לא קופץ חלון אישור"
+en = "No approval window appears"
+fix_he = "פתחו את לוח הבקרה, עמוד אישורים, או הריצו jarvis approvals list. בלי מסך פתוח הבקשה נדחית."
+fix_en = "Open the dashboard Approvals page, or run jarvis approvals list. With no screen open the request is denied."
+
+[[problems]]
+he = "הוא אומר שהוא לא מריץ את הפקודה"
+en = "He refuses to run the command"
+fix_he = "פקודות שמבקשות הרשאות מנהל, נוגעות בתיקיית הנתונים של JARVES, או מתקינות חבילות מחוץ לכלי ההתקנה נחסמות תמיד. הריצו אותן בעצמכם."
+fix_en = "Commands that ask for administrator rights, touch JARVES's own data folder, or install packages outside the install tool are always refused. Run them yourself."
+
+[[problems]]
+he = "כפתור האישור לא נלחץ"
+en = "The Approve button stays disabled"
+fix_he = "בפקודה מסוכנת צריך להקליד את הקוד בן ארבע הספרות שמוצג בחלון."
+fix_en = "For a dangerous command, type the four-digit code shown in the window."
