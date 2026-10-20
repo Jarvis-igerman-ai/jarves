@@ -24,6 +24,10 @@ check = "active:timers"
 he = "כדי לבדוק את הצליל, הגדירו טיימר של דקה והשאירו את החלון סגור."
 en = "To test the sound, set a one minute timer and leave the window closed."
 
+[[steps]]
+he = "בלי קול: בלוח הבקרה, בעמוד \"טיימרים ושעונים מעוררים\", או בשורת הפקודה: jarvis timers add 10m פסטה, jarvis timers list, jarvis timers cancel 3."
+en = "Without voice: on the dashboard page \"Timers & alarms\", or on the command line: jarvis timers add 10m pasta, jarvis timers list, jarvis timers cancel 3."
+
 [[problems]]
 he = "הטיימר לא צלצל"
 en = "The timer did not ring"

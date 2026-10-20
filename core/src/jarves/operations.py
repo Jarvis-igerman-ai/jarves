@@ -281,6 +281,6 @@ def api_platforms(ctx, m, body):
 
 
 def dashboard_routes(register) -> None:
-    for mod in (sched_mod, alerts_mod, notes_mod, sandbox_mod, autonomy_mod):
+    for mod in (sched_mod, alerts_mod, notes_mod, sandbox_mod, autonomy_mod, timers_mod, lists_mod):
         mod.dashboard_routes(register)
     register("GET", r"/api/m3/platforms", api_platforms)

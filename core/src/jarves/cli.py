@@ -1280,16 +1280,14 @@ def cmd_features(a, cfg, home) -> int:
         if not a.id or a.id not in CATALOG:
             print(f"unknown feature {a.id!r}. Known: {', '.join(CATALOG)}", file=sys.stderr)
             return 2
+        from .features import APPLIES_EN, state_text, switch
         if a.action == "on":
             from .feature_setup import prepare
             ok, detail = prepare(a.id, f, home)
-            if not ok:
+            if not ok:                      # best effort: the switch is still saved (same rule as the dashboard)
                 print(f"{a.id}: {detail}", file=sys.stderr)
-                return 1
-        s = f.reset(a.id) if a.action == "reset" else f.set(a.id, a.action == "on", by="cli")
-        when = {"live": "now", "next_session": "from the next conversation", "restart": "at the next Core start"}
-        print(f"{a.id}: {'on' if s['enabled'] else 'off'} (takes effect {when[s['applies']]})"
-              + ("" if s["available"] or not s["enabled"] else f"; not available: {clilang.reason(s['reason'])}"))
+        s = f.reset(a.id) if a.action == "reset" else switch(f, a.id, a.action == "on", by="cli")
+        print(f"{a.id}: {state_text(s, reason=clilang.reason)} (saved; takes effect {APPLIES_EN[s['applies']]})")
         return 0
     for s in f.list():
         state = "ACTIVE" if s["active"] else ("off" if not s["enabled"] else "unavailable")
@@ -1550,6 +1548,8 @@ def main(argv: list[str] | None = None) -> int:
     up.add_argument("--yes", action="store_true", help="install: you already approved (no question)")
     from . import profiles
     profiles.add_cli(sub)                     # Issue #17: jarvis profile list / create / use / delete / export
+    from . import cli_parity
+    cli_parity.add_cli(sub)                   # V4 P0.3: jarvis timers / lists / notes / jobs / reports
     a = ap.parse_args(argv)
     try:
         if a.profile:
@@ -1576,7 +1576,7 @@ def main(argv: list[str] | None = None) -> int:
             "backup": cmd_backup, "restore": cmd_restore, "usage": cmd_usage, "start": cmd_start,
             "show": cmd_display, "hide": cmd_display, "autostart": cmd_autostart,
             "update": cmd_update, "browser": cmd_browser, "connect": cmd_connect, "telegram": cmd_telegram, "instagram": cmd_instagram, "home": cmd_home,
-            "profile": profiles.cmd_profile, "approvals": cmd_approvals}[a.cmd](a, cfg, home)
+            "profile": profiles.cmd_profile, "approvals": cmd_approvals, **cli_parity.COMMANDS}[a.cmd](a, cfg, home)
 
 
 if __name__ == "__main__":

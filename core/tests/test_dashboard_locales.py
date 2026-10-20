@@ -164,3 +164,27 @@ def test_server_locale_registry_is_generic(monkeypatch):
 def test_features_api_carries_locale_siblings(dash):
     d = get(dash, "/api/features")
     assert "note" in d and "note_he" in d
+
+
+def test_timers_and_lists_pages_are_translated_once():
+    """V4 P0.3: the two new pages' every English text is a catalog key with a Hebrew value (P1.3 does not redo them)."""
+    en, he = catalog("en")["dict"], catalog("he")["dict"]
+    src = (STATIC / "m3.js").read_text(encoding="utf-8")
+    page = src[src.index("// ------------------------------------------------------------- Timers & alarms"):
+               src.index("Object.assign(PAGES")]
+    pairs = re.findall(r'tx\(\s*"((?:[^"\\]|\\.)*)"\s*,\s*"((?:[^"\\]|\\.)*)"', page)
+    assert len(pairs) >= 30
+    for hebrew, english in pairs:
+        assert english in en and english in he, english
+        assert re.search(r"[֐-׿]", he[english]), english
+        assert re.search(r"[֐-׿]", hebrew), english                          # and the inline Hebrew is Hebrew
+    html = (STATIC / "index.html").read_text(encoding="utf-8")
+    for label in re.findall(r'data-page="(?:timers|lists)"><span data-he="[^"]+" data-en="([^"]+)"', html):
+        assert label.replace("&amp;", "&") in en and label.replace("&amp;", "&") in he
+
+
+def test_new_pages_search_keywords_in_both_languages():
+    js = (STATIC / "shell.js").read_text(encoding="utf-8")
+    for page in ("timers", "lists"):
+        m = re.search(rf'\b{page}: "([^"]+)"', js)
+        assert m and re.search(r"[A-Za-z]", m.group(1)) and re.search(r"[֐-׿]", m.group(1)), page

@@ -44,13 +44,14 @@ def test_existing_dependencies_no_install(camera, tmp_path):
 
 @pytest.mark.parametrize("failure", [RuntimeError("installer failed"), KeyboardInterrupt(),
                                      subprocess.TimeoutExpired("uv", 300)])
-def test_failure_or_cancellation_retains_switch(camera, monkeypatch, tmp_path, failure):
+def test_failure_or_cancellation_still_saves_switch_as_unavailable(camera, monkeypatch, tmp_path, failure, capsys):
     _, f = camera
     def fail(extra):
         raise failure
     monkeypatch.setattr(setup, "_install_extra", fail)
-    assert cli.cmd_features(Namespace(action="on", id="camera"), Config(), tmp_path) == 1
-    assert not f.enabled("camera")
+    assert cli.cmd_features(Namespace(action="on", id="camera"), Config(), tmp_path) == 0
+    assert f.enabled("camera") and not f.active("camera")      # O-02: saved ON, shown unavailable
+    assert "unavailable (" in capsys.readouterr().out
     lock = InstanceLock(tmp_path)
     lock.acquire()  # failure/cancel always releases the installation guard
     lock.release()
@@ -63,18 +64,19 @@ def test_already_enabled_repairs_missing_software(camera, tmp_path):
     assert state["installs"] == ["camera"] and f.active("camera")
 
 
-def test_hardware_blocker_retains_previous_state(camera, tmp_path):
+def test_hardware_blocker_saves_enabled_but_unavailable(camera, tmp_path, capsys):
     state, f = camera
     state.update(installed=True, hardware=False)
-    assert cli.cmd_features(Namespace(action="on", id="camera"), Config(), tmp_path) == 1
-    assert not f.enabled("camera") and state["installs"] == []
+    assert cli.cmd_features(Namespace(action="on", id="camera"), Config(), tmp_path) == 0
+    assert f.enabled("camera") and not f.active("camera") and state["installs"] == []
+    assert "camera: unavailable (camera hardware missing)" in capsys.readouterr().out
 
 
 def test_already_enabled_failure_stays_enabled(camera, tmp_path):
     state, f = camera
     f.set("camera", True)
     state.update(installed=True, hardware=False)
-    assert cli.cmd_features(Namespace(action="on", id="camera"), Config(), tmp_path) == 1
+    assert cli.cmd_features(Namespace(action="on", id="camera"), Config(), tmp_path) == 0
     assert f.enabled("camera") and not f.active("camera")
 
 

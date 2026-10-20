@@ -748,8 +748,8 @@ def make_skill(features: Features, registry=None):
                 f = CATALOG[fid]
                 if features.enabled(fid) == a.on:
                     st = features.status(fid)
-                    note = "" if (not a.on or st["available"]) else f" אבל היא לא זמינה: {st['reason']}"
-                    return ToolResult(True, f"{f.title_he} כבר {'פועלת' if a.on else 'כבויה'}.{note}", st)
+                    return ToolResult(True, f"{f.title_he} כבר {'מופעלת' if a.on else 'כבויה'}. "
+                                            f"מצב: {state_text(st, 'he')}", st)
                 if a.on and f.risk in ("medium", "high"):
                     prompt = f"להפעיל את {f.title_he}? / Turn on {f.title_en}?"
                     meta = dict(title=f"Turn on {f.title_en} / להפעיל את {f.title_he}", risk=f.risk, kind="feature",
@@ -763,11 +763,9 @@ def make_skill(features: Features, registry=None):
                         features.request(fid, by="voice")
                         return ToolResult(False, f"{f.title_he} דורשת אישור על המסך או בלוח הבקרה. לא הפעלתי.",
                                           {"id": fid, "risk": f.risk}, "FEATURE_NEEDS_APPROVAL")
-                st = features.set(fid, a.on, by="voice")
-                when = {"live": "מעכשיו", "next_session": "מהשיחה הבאה", "restart": "מההפעלה הבאה"}[f.applies]
-                msg = f"{'הפעלתי' if a.on else 'כיביתי'} את {f.title_he} ({when})."
-                if a.on and not st["available"]:
-                    msg += f" אבל היא עדיין לא זמינה: {st['reason']}"
+                st = switch(features, fid, a.on, by="voice")
+                msg = (f"{'הפעלתי' if a.on else 'כיביתי'} את {f.title_he} ({APPLIES_HE[f.applies]}). "
+                       f"מצב: {state_text(st, 'he')}")
                 return ToolResult(True, msg, st)
 
             return [
@@ -779,6 +777,39 @@ def make_skill(features: Features, registry=None):
             ]
 
     return FeatureSkill()
+
+
+# ---------------------------------------------------------------------- one rule for every surface
+APPLIES_EN = {"live": "now", "next_session": "from the next conversation", "restart": "at the next Core start"}
+APPLIES_HE = {"live": "מעכשיו", "next_session": "מהשיחה הבאה", "restart": "מההפעלה הבאה"}
+
+
+def state_word(st: dict) -> str:
+    """The one state word every surface shows: on / off / unavailable (enabled but its prerequisites are missing)."""
+    if not st["enabled"]:
+        return "off"
+    return "on" if st["available"] else "unavailable"
+
+
+def state_text(st: dict, lang: str = "en", reason=None) -> str:
+    """'on', 'off' or 'unavailable (reason)'; Hebrew for the model tool. Same words in CLI, dashboard and tool."""
+    word = state_word(st)
+    why = (reason or (lambda r: r))(st.get("reason") or "")
+    if lang == "he":
+        base = {"on": "פועלת", "off": "כבויה", "unavailable": "לא זמינה"}[word]
+        return f"{base} ({why})" if word == "unavailable" and why else base
+    return f"unavailable ({why})" if word == "unavailable" and why else word
+
+
+def switch(features: "Features", fid: str, on: bool, *, by: str) -> dict:
+    """Turn a feature on/off for ANY surface (CLI, dashboard, model tool). Turning on an unavailable feature SAVES it
+    as enabled and reports 'unavailable (reason)': the switch is the user's wish, availability is a separate fact
+    that the Core re-checks and follows once the prerequisites exist (owner decision O-02)."""
+    st = features.set(fid, on, by=by)
+    st["state"] = state_word(st)
+    st["state_text"] = state_text(st)
+    st["state_text_he"] = state_text(st, "he")
+    return st
 
 
 # ---------------------------------------------------------------------- dashboard
@@ -814,7 +845,7 @@ def api_feature_set(ctx, m, body):
         return 200, f.reset(fid)
     if not isinstance(body.get("enabled"), bool):
         return 400, {"error": "body needs {\"enabled\": true|false}"}
-    return 200, f.set(fid, body["enabled"], by="dashboard")     # the dashboard IS the user's approval
+    return 200, switch(f, fid, body["enabled"], by="dashboard")     # the dashboard IS the user's approval
 
 
 def dashboard_routes(register_route) -> None:
