@@ -635,3 +635,4 @@ See [docs/reviews/S1_T03R1_ENGINEERING_REVIEW.md](reviews/S1_T03R1_ENGINEERING_R
 - Virtual computer (P2): write a justification first, then decide. Calling (P2): assisted dialing only.
 - Multi-device + Tailscale remote: after V3 P0–P1, together with the phone satellite.
 - Installer signing: research free options (SignPath OSS etc.); stay unsigned meanwhile.
+- Defaults: ask before any outward action; keep conversations/logs 90 days then summarize into memory; proactive suggestions rare/important only (quiet hours respected); installer pre-selects only core + music.
