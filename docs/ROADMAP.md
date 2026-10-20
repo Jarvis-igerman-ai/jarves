@@ -10,12 +10,12 @@
 | --- | --- | --- | --- |
 | **1. Desktop assistant** | Reliable Windows Core, voice, face, skills, diagnostics and installer | Existing SW-V1/V2/V3/V4 work | V3 integration reported; V4 in development, real acceptance and release gates must be checked |
 | **2. PC-hosted personal server + phone access** | One PC-hosted JARVES, authenticated phone client, shared conversation and abilities | **V5 — JARVES Goes Mobile** | Owner selected for the roadmap, **not implemented or authorized to start coding yet** |
-| **3. Android Auto / car** | Safe hands-free access through an officially supported car/phone path | Later milestone (version TBD) | Future, subject to Android Auto restrictions |
+| **3. Android Auto / car** | Safe hands-free car interaction plus cross-device Skills Platform 2.0 | **V6 — JARVES Drive & Act** | Owner-approved roadmap direction, implementation gated after V5; subject to official platform restrictions |
 | **4. Everyday Android assistant** | Native daily phone companion with notifications and relevant local abilities | Later milestone (version TBD) | Future, not the V5 phone-access client |
 | **5. Phone as robot stand-in** | Docked spare OnePlus 11 used to validate face/mic/speaker/camera/wake behavior | Later milestone (version TBD) | Future; no 1:1 hardware claim |
 | **6. Physical robot** | Serviceable 3D-printed JARVES with approved Pi-class hardware | Final physical milestone (version TBD) | Deferred: CAD, sourcing, print, safety, acoustic and owner approval gates |
 
-**Important:** the six *product stages* are not necessarily numbered software releases. V5 targets **stage 2** only; V6/V7/etc. are not committed dates or approved scopes. Physical design work continues to be tracked separately under issues #3, #4 and #8.
+**Important:** the six *product stages* are not necessarily numbered software releases. V5 targets **stage 2**, and owner-approved **V6** targets **stage 3**; later version mappings, implementation authorizations and dates remain uncommitted. Physical design work continues to be tracked separately under issues #3, #4 and #8.
 
 ## V5 — JARVES Goes Mobile + personal intelligence (owner-selected roadmap scope)
 
@@ -55,6 +55,40 @@
 4. Perform real-device, real-agent and release acceptance. Do not start stage 3, hardware purchases, new subscriptions, paid tests or network exposure without separate owner approval.
 
 **Docs-only update:** this roadmap entry does not update `NOW.md`, install software, create a V5 implementation branch or start V5 before its separate execution approval. Earlier SW-V1/V2 review notes below are retained as historical evidence, not current completion claims.
+
+## V6 — JARVES Drive & Act (owner-approved future product direction, 20 October 2026)
+
+**Primary product outcome:** complete **stage 3 of [PRODUCT_VISION](PRODUCT_VISION.md)** — safely access the same JARVES while driving through whatever Android Auto/Android/phone-Bluetooth paths are legitimately supported. This is the successor to stage-2 phone access in V5. **Secondary outcome:** introduce new heavyweight assistant capabilities that benefit desktop, phone and later Android, not just a thin in-car UI. The owner approved the following six pillars as the V6 roadmap direction, **not an authorization to start implementation before the prior release gates**.
+
+### Approved six V6 pillars
+
+1. **Driving Companion:** hands-free, conversational assistant tuned for the driver's attention. Natural dialog, concise spoken confirmations, interruption/barge-in, fail-safe cancellation and low-distraction UX. No vehicle motion/control.
+2. **Journey Intelligence:** combine user-permitted calendar context, route and traffic information, weather, parking/stop suggestions and timing estimates to help plan a journey. Label freshness, uncertainty and providers accurately; do not invent real-time traffic, parking or routes. Reuse V5 secure phone access and existing connected Skills.
+3. **Drive Actions:** approved voice-initiated calls, messages, reminders, music/navigation handoff and calendar/task actions, within the actual OS-app category and permission limits. Sending, booking or consequential changes require appropriate confirmation; when driving, use minimal safe prompts and defer unsafe interactions until stopped.
+4. **Voice Engine 2.0:** robust mic/Bluetooth/car-audio routing, noise and echo handling, wake/PTT feasibility, speaker interruption, route and network transitions, headset changes, recovery and measured response latency. Verify with real phones and compatible vehicles rather than simulator-only success.
+5. **Contextual Briefings:** opt-in pre-drive and journey-aware concise updates (schedule conflicts, departure/arrival reminders, relevant stops and time-sensitive tasks); avoid notification spam, irrelevant interruptions and spoken sensitive content to passengers by default. Respect quiet hours, privacy, deduplication, budgets and driver attention.
+6. **Skills Platform 2.0:** significant cross-device foundation for vetted, permission-scoped, reviewable and maintainable Skills with manifests, dependency/version constraints, capability discovery, setup, diagnostic hooks, updates and rollback. Define a safe import/signing/trust model as appropriate; no arbitrary third-party code execution, auto-install of untrusted Skills or new subscription without approval. Reuse existing Skills contracts instead of a platform rewrite.
+
+### Android Auto platform reality — mandatory research and feasibility gate
+
+- Before design, recheck **current official Android Auto and Android developer policies/APIs** for supported app categories and templates, audio capture/voice use, background/lifecycle, steering-wheel assistant-button behavior, messaging/phone/media/navigation integration and Play/distribution requirements; record documentation versions/date.
+- **No promise** that JARVES can replace Gemini/Google Assistant via steering-wheel button, display an unrestricted AI chat UI on the vehicle screen, control native calls/messages/navigation directly, or play every music source from Android Auto. Build only platform-compliant features.
+- Maintain an **equivalent practical phone + Bluetooth hands-free fallback** where Android Auto denies required APIs. Each claimed capability must distinguish official in-car UI vs phone-mediated use vs unsupported behavior.
+- No interaction with steering, acceleration, braking, or other vehicle-control systems. No unsafe visual interactions, extended text entry or driver distraction.
+
+### Proposed V6 acceptance and dependency gates
+
+- **V5 must first deliver stage 2**: phone pairing, shared Core/memory/permissions, reliable voice, transport and truthful offline state on a real Android device. No separate car 'brain'.
+- User can start and end a hands-free conversation through the **validated** Android Auto or Bluetooth phone path in an actual compatible parked vehicle, then continue it on the desktop/phone without losing context or duplicating commands.
+- Demonstrate accurate planning of at least one calendar-related trip using real permitted inputs, report estimated vs observed times/freshness and a useful fallback for missing location/traffic/weather provider data.
+- Demonstrate authorized driving-mode actions with confirmations, app/OS handoff as needed, and denied-action/unsupported flows that never pretend success.
+- Test noise/echo, Bluetooth disconnect/reconnect, phone lock/app background limits, incoming calls, lost data link, session interruption, driver distraction risks and safe failure behavior; real-device evidence is mandatory.
+- Demonstrate opt-in briefings with quiet-hours, passenger-privacy and deduplication tests; demonstrate two maintained Skills with permission separation, update and rollback, and no regression to existing V4/V5 Skills.
+- Complete security/privacy review, CI/real-device regression matrix and an honest Android Auto compatibility matrix (supported, phone-mediated, blocked/unavailable), with no purchases or paid external service calls without owner approval.
+
+**Out of scope:** turning V6 into the everyday native standalone Android assistant (vision stage 4), docked-phone robot (stage 5), physical robot (stage 6), Family Intelligence (future F11), hidden vehicle controls or broad unapproved automation. Future V7+ version numbers remain tentative until approved.
+
+**Planning authority:** this V6 scope is **approved to be retained in the roadmap**. `docs/NOW.md` and a later bounded V6 implementation package/Issues must explicitly authorize coding. Do not interrupt V4 migration, active delivery or V5 stage-2 sequence.
 
 ---
 ## Active software bundle — approved 18 October 2026
