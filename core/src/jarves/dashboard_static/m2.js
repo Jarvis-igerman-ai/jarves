@@ -22,9 +22,10 @@ PAGES.appearance = async function () {
         try { await api("/api/appearance", { method: "POST", body: JSON.stringify({ mode: m.id }) }); msg.textContent = "Switched; the screen follows within a second."; route(true); }
         catch (e) { msg.textContent = "Not changed: " + e.message; }
       } }, m.id === d.mode ? "In use" : "Use")),
-    el("td", {}, el("b", {}, m.title_en), " ", el("span", { class: "muted", dir: "auto" }, m.title_he)),
+    el("td", {}, el("b", {}, txo(m, "title"))),
     el("td", {}, platformCell(m.targets.windows)), el("td", {}, platformCell(m.targets.linux_arm64_pi))));
-  render(header("Appearance", "How JARVES looks on the screen. " + d.note + " You can also say \"תחליף לאווטאר תלת מימד\"."),
+  render(header(tx("מראה", "Appearance"), tx("איך JARVES נראה על המסך. ", "How JARVES looks on the screen. ") + d.note
+      + tx(" אפשר גם לומר \"תחליף לאווטאר תלת מימד\".", " You can also say \"תחליף לאווטאר תלת מימד\".")),
     el("div", { class: "card" }, el("table", {}, el("thead", {}, el("tr", {}, el("th", {}, ""), el("th", {}, "Presentation"),
       el("th", {}, "Windows"), el("th", {}, "Raspberry Pi"))), el("tbody", {}, rows)), el("div", { style: "height:8px" }), msg));
 };
