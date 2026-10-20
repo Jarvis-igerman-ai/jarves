@@ -1,32 +1,32 @@
-# Pre-use voice test report (silent, headless) — 2026-10-20 11:33
+# Pre-use voice test report (silent, headless) — 2026-10-20 13:02
 
 Produced by `core/tools/suite_voice.py`. Virtual mic with locally synthesised speech (WinRT, never played), virtual speaker (measured, never played), fake face client; REAL Core, GPT-Live, backend model and web search, Skills, budget and openWakeWord. No real microphone, speaker, Godot window or OS volume.
 Each row is the LATEST run of that scenario (runs are listed at the end; live voice is capped, so scenarios ran in groups).
 
-**Result: 28/32 PASS, 4 FAIL, 0 skipped.** Live voice over all 6 suite runs (conservative wall time while a session was open or connecting): **22.0 min ≈ $1.10** plus backend tokens.
+**Result: 42/47 PASS, 5 FAIL, 0 skipped.** Live voice over all 16 suite runs (conservative wall time while a session was open or connecting): **60.0 min ≈ $3.00** plus backend tokens.
 
 
 | # | Scenario | Result | Key number | Time | Live voice | Run |
 |---|---|---|---|---|---|---|
-| 1 | greeting | **PASS** | dead air 0.52 s, greeting 2.5 s | 13 s | 0.2 min | 1020-105334 |
-| 2 | smalltalk | **PASS** | 3/3 answered, dead air avg 0.30 s | 36 s | 0.6 min | 1020-105334 |
-| 3 | time_date | **PASS** | hour ok, day ok, delegations 0 | 16 s | 0.3 min | 1020-105334 |
-| 4 | maths | **PASS** | 4/4 correct | 45 s | 0.8 min | 1020-105334 |
-| 5 | weather | **PASS** | backend [2.2] s, screen ['searching', 'thinking'], plausible True | 31 s | 0.4 min | 1020-105547 |
-| 6 | news | **PASS** | backend [6.4] s, screen ['reading', 'searching', 'thinking'], plausible True | 27 s | 0.5 min | 1020-105547 |
-| 7 | facts | **PASS** | backend [4.5] s, screen ['searching', 'thinking'], plausible True | 17 s | 0.3 min | 1020-105547 |
-| 8 | joke_laugh | **PASS** | emotions ['laugh'] | 18 s | 0.3 min | 1020-105547 |
-| 9 | sad_cry | **PASS** | emotions ['sad'] | 15 s | 0.2 min | 1020-105547 |
-| 10 | thanks_love | **PASS** | emotions ['love'] | 10 s | 0.2 min | 1020-105547 |
-| 11 | memory_recall | **PASS** | stored ['מספר החניה של המשתמש הוא 37.'], recalled True | 27 s | 0.5 min | 1020-105547 |
-| 12 | forget_approve | **PASS** | confirm.request 1, before 1 after 0 -> deleted; outcome spoken True; declined logs 0 | 17 s | 0.3 min | 1020-105547 |
-| 13 | forget_deny | **PASS** | confirm.request 1, before 1 after 1 -> kept; outcome spoken True; declined logs 1 | 35 s | 0.6 min | 1020-105547 |
-| 14 | forget_timeout | **PASS** | confirm.request 1, before 1 after 1 -> kept; outcome spoken True; speech during the wait 1.5 s; declined logs 2 | 82 s | 1.4 min | 1020-105547 |
+| 1 | greeting | **PASS** | dead air 0.52 s, greeting 2.5 s | 12 s | 0.2 min | 1020-125222 |
+| 2 | smalltalk | **PASS** | 3/3 answered, dead air avg 0.14 s | 52 s | 0.9 min | 1020-125222 |
+| 3 | time_date | **PASS** | hour ok, day ok, delegations 0 | 26 s | 0.4 min | 1020-130133 |
+| 4 | maths | **PASS** | 4/4 correct | 56 s | 0.9 min | 1020-125222 |
+| 5 | weather | **PASS** | backend [2.5] s, screen ['searching', 'thinking'], plausible True | 17 s | 0.3 min | 1020-125222 |
+| 6 | news | **PASS** | backend [7.8] s, screen ['reading', 'searching', 'thinking'], plausible True | 30 s | 0.5 min | 1020-125222 |
+| 7 | facts | **PASS** | backend [7.4] s, screen ['searching', 'thinking'], plausible True | 21 s | 0.3 min | 1020-125222 |
+| 8 | joke_laugh | **PASS** | emotions ['laugh'] | 11 s | 0.2 min | 1020-125222 |
+| 9 | sad_cry | **PASS** | emotions ['cry', 'cry'] | 16 s | 0.3 min | 1020-125222 |
+| 10 | thanks_love | **PASS** | emotions ['love'] | 9 s | 0.2 min | 1020-125222 |
+| 11 | memory_recall | **PASS** | stored ['מספר החניה של המשתמש הוא 37.'], recalled True | 25 s | 0.4 min | 1020-125222 |
+| 12 | forget_approve | **PASS** | confirm.request 1, before 1 after 0 -> deleted; outcome spoken True; declined logs 0 | 54 s | 0.8 min | 1020-124615 |
+| 13 | forget_deny | **PASS** | confirm.request 1, before 1 after 1 -> kept; outcome spoken True; declined logs 1 | 32 s | 0.5 min | 1020-124615 |
+| 14 | forget_timeout | **PASS** | confirm.request 1, before 1 after 1 -> kept; outcome spoken True; speech during the wait 4.3 s; declined logs 2 | 81 s | 1.4 min | 1020-124615 |
 | 15 | long_conversation | **PASS** | 26/26 answered, 9/10 correct, disconnects 0, context name=True city=True plan=True, requests 8 vs backend done 8, voice 319 s vs wall 317 s | 324 s | 5.2 min | 1020-110112 |
-| 16 | rapid_fire | **PASS** | 6/6 answered (audio), 6/6 correct in order, dead air [0.49, 0.57, 0.56, 0.48, 0.77, 0.55] | 44 s | 0.7 min | 1020-110112 |
-| 17 | long_utterance | **PASS** | utterance 40.6 s, answered True, Eilat True, dead air 0.32 s | 45 s | 0.8 min | 1020-110112 |
-| 18 | english_switch | **FAIL** | english 0/5 latin/hebrew letters (Canberra False), hebrew 6/0 | 14 s | 0.2 min | 1020-110112 |
-| 19 | noise_robustness | **PASS** | JARVES spoke 0.0 s, delegations 0, said [], heard-as [] | 64 s | 1.0 min | 1020-110946 |
+| 16 | rapid_fire | **FAIL** | 5/6 answered (audio), 6/6 correct in order, dead air [0.45, 0.13, 0.25, 0.35, 0.34, 0.54] | 31 s | 0.5 min | 1020-125222 |
+| 17 | long_utterance | **PASS** | utterance 40.6 s, answered True, Eilat True, dead air 0.17 s | 46 s | 0.8 min | 1020-125222 |
+| 18 | english_switch | **FAIL** | english 0/5 latin/hebrew letters (Canberra False), hebrew 6/0 | 14 s | 0.2 min | 1020-124615 |
+| 19 | noise_robustness | **PASS** | JARVES spoke 0.0 s, delegations 0, said [], heard-as [] | 45 s | 0.8 min | 1020-125222 |
 | 20 | idle_disconnect | **PASS** | open after 8 s True, after 10 s True; ended 14.7 s after the last sound (['live conversation ended (idle)']) | 60 s | 0.9 min | 1020-110946 |
 | 21 | wake_word_x3 | **PASS** | 3/3 full cycles; scores [0.47, 0.47, 0.48]; connect [3.5, 2.5, 2.5] s; correct 3/3 | 91 s | 1.4 min | 1020-110946 |
 | 22 | wake_false_positives | **FAIL** | 4/20 false wakes ['hey Travis', 'Jarvis', 'hey Jarvie, no', 'Hey Charles, come here'] | 87 s | 0.0 min | 1020-110946 |
@@ -34,12 +34,27 @@ Each row is the LATEST run of that scenario (runs are listed at the end; live vo
 | 24 | software_mute | **PASS** | live stopped True, open mics after mute [], muted wake phrase -> lost / woke False; after unmute woke True connected True answered True | 43 s | 0.5 min | 1020-110946 |
 | 25 | budget_voice | **PASS** | face errors ['VOICE_BUDGET'], sessions 1, ended ['live conversation ended (timeout)'], voice 60 s, db {'ai_requests': 0, 'voice_seconds': 60, 'reservations': 0} | 75 s | 1.1 min | 1020-112044 |
 | 26 | budget_requests | **PASS** | face errors ['AI_BUDGET'], ended ['live conversation ended (budget)'], db {'ai_requests': 2, 'voice_seconds': 33, 'reservations': 0} | 55 s | 0.6 min | 1020-112044 |
-| 27 | face_protocol | **PASS** | 44 states, 3 turns, not-listening at turn end [], late returns [], mic.level 4.1 Hz, bad [] | 40 s | 0.7 min | 1020-112044 |
+| 27 | face_protocol | **PASS** | 42 states, 5 turns, not-listening at turn end [], late returns [], mic.level 4.1 Hz, bad [] | 33 s | 0.5 min | 1020-130133 |
 | 28 | start_stop_x5 | **PASS** | 5/5 clean cycles; leftovers [] | 80 s | 1.0 min | 1020-112044 |
-| 29 | log_privacy | **FAIL** | privacy on: 14 content words checked, leaked ['ברחובות', 'דניאל', 'רחובות']; key in logs: no (9 homes scanned); face texts 5 | 32 s | 0.5 min | 1020-112044 |
+| 29 | log_privacy | **PASS** | privacy on: 15 content words checked, leaked []; key in logs: no (6 homes scanned); face texts 7 | 42 s | 0.6 min | 1020-124139 |
 | 30 | idle_soak_6min | **PASS** | soak 406 s: WAKE_HEALTH 26, false wakes 0, errors []; then woke True answered True | 431 s | 0.6 min | 1020-112044 |
 | 31 | false_wake_closes | **PASS** | woke True, opened True, closed after 14.8 s, VOICE_NO_SPEECH 1; next real wake connected True, answered True | 29 s | 0.4 min | 1020-112044 |
+| 32 | privacy_strip_live | **PASS** | 14 privacy.state msgs; listening+sending 3, speaking 6, gated 10; muted (no mic audio sent) after 0.18 s, cloud off after 2.94 s, session ended True | 28 s | 0.4 min | 1020-120431 |
+| 33 | camera_off_honest | **PASS** | honest True, camera tools ok 0, false claims 0, strip camera ['disabled'] | 23 s | 0.3 min | 1020-125222 |
+| 34 | calendar_not_connected | **PASS** | claimed done False, mentions connecting True, calendar tools ok 0, tools ['google_connect_help'], false-claim detector 0 | 19 s | 0.3 min | 1020-125222 |
+| 35 | barge_in | **PASS** | long answer playing True; old speech stopped 0.7 s after the interruption; answered 4 True; barge_ins 0 | 59 s | 0.9 min | 1020-120431 |
+| 36 | timer_face_closed_live | **PASS** | tools ['timer_start'], face gone True, rang True 2.2 s after due, spoken 1.2 s: הטיימר נגמר. | 58 s | 0.9 min | 1020-120653 |
+| 37 | alarm_no_session_face_closed | **PASS** | tools ['alarm_set'], alarm 12:10, session closed True, face gone True, rang True 1.2 s after due, Core speech ['שעון מעורר: תזכורת'], sim plays 1 | 130 s | 0.6 min | 1020-120653 |
+| 38 | lists_clear_approval | **PASS** | add True ['חלב', 'לחם', 'ביצים'], show True; 'לא' -> denied via voice (3.38 s, kept 3); 'כן' -> approved via voice (3.56 s, left 0); shown ['popup', 'face', 'voice']; face dialog closed True | 78 s | 1.2 min | 1020-125222 |
+| 39 | helper_command_approval | **PASS** | tools ['shell_propose'], kind shell, approved via voice, audit 1 (ran 1), user named True | 48 s | 0.7 min | 1020-121546 |
+| 40 | browser_local_page | **PASS** | port 8811, browser results [('browser_open', True, 'TOOL_RESULT'), ('browser_read', True, 'TOOL_RESULT')], code word spoken True, errors [] | 36 s | 0.5 min | 1020-123352 |
+| 41 | briefing_without_google | **PASS** | tools ['briefing_get'], honest True, invented False: רגע. / אז היום בתל אביב מעונן, בין שש־עשרה לעשרים ושש מעלות, ועכשיו עשרים ושש; אין צפי לגשם. אין לי תזכורות להיום או רשי | 36 s | 0.6 min | 1020-123352 |
+| 42 | whatsapp_telegram_handoff | **PASS** | whatsapp tools ['whatsapp_draft', 'whatsapp_open'], approved via voice, links 1/1, claimed sent False; telegram honest True, claimed False: רגע, בודק מה אפשר לעשות עם טלגרם. זה עוד לא מוגדר, צריך להריץ במחשב את הפקודה "Jarvis Telegram Start | 88 s | 1.4 min | 1020-123900 |
+| 43 | profile_switch_approval | **PASS** | 'לא' -> denied via voice spawned []; spoken 'כן' refused True; screen approve -> approved via face, spawned [('dana', ('run', '--background', '--show'))] | 56 s | 0.8 min | 1020-123900 |
+| 44 | self_check_voice | **PASS** | tools ['self_check_run'], results [('self_check_run', True, 'TOOL_RESULT')], speech 19.7 s, dead air 0.87 s: אוקיי, רגע אני בודק מה שלומי. הבדיקה הסתיימה, נסרקו שמונים ושתיים נקודות והציון הוא תשעים ואחת. יש ארבע בעיות, העיקרית ה | 38 s | 0.6 min | 1020-121807 |
 | 45 | wake_variants | **PASS** | Hey Jarvis normal/quiet 8/8; per variant Hey Jarvis/David 6/6, Hey Jarvis/Zira 6/6, Hi Jarvis/Mark 6/6, Hi Jarvis/Zira 6/6, ok jarvis/David 6/6, Okay Jarvis/Zira 6/6, היי ג'רוויס/Asaf 0/6, הי ג'ארביס/Asaf 2/6, hey jarvis (he voice) 6/6; lost 0 | 189 s | 0.0 min | 1020-105012 |
+| 46 | hebrew_names_pronunciation | **FAIL** | audio transcript: [gpt-4o-transcribe] vital, zaje. / name ok False, names 0/3 | 33 s | 0.5 min | 1020-124615 |
+| 47 | greeting_delay | **PASS** | first sound after face [0.53, 0.51, 0.52] s | 38 s | 0.4 min | 1020-124139 |
 
 ## Scenarios: description and PASS criteria
 
@@ -74,16 +89,40 @@ Each row is the LATEST run of that scenario (runs are listed at the end; live vo
 - **29. log_privacy**: Logs hygiene: log.privacy = true hides transcripts; the API key never appears. PASS if: privacy on: none of the spoken/heard words (>= 4 letters) and no key in jarves.log; privacy off (every other run of this suite): the key never appears.
 - **30. idle_soak_6min**: 6-minute idle soak with room tone/noise on the wake mic, then 'Hey Jarvis' reconnect. PASS if: wake listener alive the whole time (WAKE_HEALTH every ~15 s), no false wake, no errors, then wake -> session -> answer.
 - **31. false_wake_closes**: A wake with NOBODY speaking (false wake) ends after ~12 s instead of idling for minutes; then a real wake works. PASS if: VOICE_NO_SPEECH logged 10-20 s after the session opened, session closed, the next 'Hey Jarvis' + question works.
+- **32. privacy_strip_live**: Privacy strip in a REAL GPT-Live session: the face's privacy.state follows the session (mic, cloud audio, speaker); mute from the strip ends it. PASS if: while the session is open and JARVES is quiet: mic listening + cloud_audio sending (on); while JARVES speaks: speaker speaking; never cloud 'off' while the session is open; mic.set_mute -> mic muted + cloud off within 2 s and the session ends.
+- **33. camera_off_honest**: Camera switched OFF (default): 'what do you see?' gets an honest answer. PASS if: answered; says the camera is off / not available (no description of a scene); no camera_* tool succeeded; no LIVE_FALSE_ACTION_CLAIM; the camera stayed closed (privacy camera state disabled/unavailable).
+- **34. calendar_not_connected**: Google NOT connected: a calendar add request is never claimed as done. PASS if: answered; no 'הוספתי/קבעתי/רשמתי ביומן' claim; mentions connecting Google (or that the calendar is not connected); no calendar write tool ran; no LIVE_FALSE_ACTION_CLAIM left uncorrected.
+- **35. barge_in**: Barge-in with voice.half_duplex = false (the headphones/AEC setting): talking over a long answer stops it and the new question is answered. PASS if: JARVES's audio stops <= 2.0 s after the interrupting speech starts; the interrupting question is answered correctly (4); session open. (With the default half_duplex = true the mic is gated while he speaks: barge-in is off by design.).
+- **36. timer_face_closed_live**: Timer by voice, then the face/window CLOSES; the timer rings through the Core (open GPT-Live conversation announces it) with no face connected. PASS if: timer_start called; TIMER_SET; face disconnected before the due time; TIMER_RANG logged within 6 s of the due time; JARVES speaks >= 0.5 s after the due time and the transcript mentions the timer.
+- **37. alarm_no_session_face_closed**: Alarm set by voice; the conversation ends (idle) and the face closes; the Core itself speaks the alarm (no GPT-Live session, no face). PASS if: alarm_set called; session closed + face gone before the due time; TIMER_RANG; the Core's own speech said 'שעון מעורר' within 6 s of the due minute.
+- **38. lists_clear_approval**: Shopping list by voice: add, read back, 'clear' asks for approval; spoken 'לא' refuses (list kept), spoken 'כן' approves (list cleared). The popup + face dialog are open meanwhile. PASS if: list_add + list_show work; each clear: APPROVAL_ASKED shown on popup+face+voice, JARVES asks aloud, decided via voice (denied then approved), items kept after 'לא' and gone after 'כן', the face dialog and the popup are closed after the spoken answer (confirm.cancel).
+- **39. helper_command_approval**: Computer helper: a harmless command (whoami) is PROPOSED, needs approval, the spoken 'כן' approves it, it runs and the answer is spoken. PASS if: shell_propose called; APPROVAL_ASKED kind shell; decided approved via voice; helper audit shows the run with exit 0; JARVES says the user name.
+- **40. browser_local_page**: Browser Skill on a LOCAL test page (allow-listed localhost): open + read by voice, the code word on the page is spoken. PASS if: browser_open + browser_read called (or one of them ok), JARVES says the code word 'אבטיח'; no ERROR.
+- **41. briefing_without_google**: Morning briefing on request with Google NOT connected: an honest answer. PASS if: briefing_get (or a direct answer) without invented meetings/mails; mentions Google / calendar not connected; no calendar or mail claim.
+- **42. whatsapp_telegram_handoff**: WhatsApp draft handoff (draft -> read back -> spoken 'כן' -> the chat link opens with the draft; JARVES never sends) and Telegram (not set up in the TEST profile: honest answer). PASS if: whatsapp_draft called; approval asked; 'כן' -> approved via voice; exactly one wa.me link with the number and text opened (recorded, not really opened); JARVES does not claim he sent it; Telegram answer says it is not set up / connected and claims no send.
+- **43. profile_switch_approval**: Profile switch by voice needs approval: 'לא' declines; a spoken 'כן' alone must NOT switch (the switch is designed as an on-screen approval). PASS if: profile_switch called; APPROVAL_ASKED; 'לא' -> denied, nothing spawned; second request + spoken 'כן' -> no process spawned unless approved on the screen (voice not offered).
+- **44. self_check_voice**: 'תבדוק את עצמך' runs the self-check by voice and speaks a short summary. PASS if: self_check_run called and ok; answered within 30 s; summary spoken (>= 2 s); session open.
 - **45. wake_variants**: Wake phrases through the REAL wake listener (openWakeWord in the Core wake loop): Hey/Hi/ok Jarvis, Hebrew pronunciations, 3 volumes, clean and with room noise; owner threshold 0.15 (no live cost). PASS if: 'Hey Jarvis' (English voices) detected at normal + quiet level, clean and noisy (8/8); other variants and levels reported honestly (detection table); no lost injections.
+- **46. hebrew_names_pronunciation**: Hebrew names: JARVES says his own name and three Hebrew names; his OUTPUT AUDIO is transcribed (independent of his text) to check how they sound. PASS if: the output-audio transcript contains ג'ארוויס (or ג'רוויס) and >= 2 of נועה / אביטל / צחי; the spoken name is never the English letters 'JARVES'.
+- **47. greeting_delay**: Greeting delay voice.greeting_delay_s = 0.5: the hello starts a beat after the face connects, not at the same instant and not late. PASS if: first greeting sound 0.5-2.5 s after the face connects (3 fresh boots); greeting audio >= 0.5 s each.
 
 ## Failures with evidence
 
+### 16. rapid_fire
+- Key: 5/6 answered (audio), 6/6 correct in order, dead air [0.45, 0.13, 0.25, 0.35, 0.34, 0.54]
+- asked `כמה זה שתיים ועוד שתיים?` heard `כמה זה שתיים ועוד שתיים` said `` dead air 0.45 s, tools [], screen [], face [], open True, correct True
+- asked `מה בירת צרפת?` heard `מה בירת צרפת` said `ארבע. / פריז` dead air 0.13 s, tools [], screen [], face [], open True, correct True
+- asked `כמה ימים יש בשבוע?` heard `כמה ימים יש בשבוע` said `. / שבע` dead air 0.25 s, tools [], screen [], face [], open True, correct True
+- asked `מה הצבע של בננה?` heard `מה הצבע של בננה` said `ה.` dead air 0.35 s, tools [], screen [], face [], open True, correct True
+- asked `כמה זה עשר פחות שלוש?` heard `כמה זה עשר פחות שלוש` said `צהוב` dead air 0.34 s, tools [], screen [], face [], open True, correct True
+- asked `מה ההפך של חם?` heard `מה ההפך של חם` said `שבע. / קר.` dead air 0.54 s, tools [], screen [], face [], open True, correct True
+- {"all_said": "ארבע. פריז . שבע ה. צהוב שבע. קר."}
+
 ### 18. english_switch
 - Key: english 0/5 latin/hebrew letters (Canberra False), hebrew 6/0
-- asked `What is the capital city of Australia?` heard `What is the capital city of Australia` said `קנברה.` dead air 0.39 s, tools [], screen [], face [], open True
-- asked `ומה עיר הבירה של קנדה?` heard `ומה עיר הבירה של קנדה` said `אוטווה.` dead air 0.49 s, tools [], screen [], face [], open True
-- log: `[1020-110112-01-long] LIVE_FALSE_ACTION_CLAIM JARVES claimed an action that no tool performed in this turn`
-- log: `[1020-110112-01-long] LINK_FACE_DISCONNECTED Godot face disconnected (local)`
+- asked `What is the capital city of Australia?` heard `What is the capital city of Australia` said `קנברה.` dead air 0.32 s, tools [], screen [], face [], open True
+- asked `ומה עיר הבירה של קנדה?` heard `ומה העיר הבירה של קנדה` said `אוטווה.` dead air 0.47 s, tools [], screen [], face [], open True
+- log: `[1020-124615-01-main] LIVE_GREETING_NUDGE no greeting audio 6 s after start: sending one silent clock note`
 
 ### 22. wake_false_positives
 - Key: 4/20 false wakes ['hey Travis', 'Jarvis', 'hey Jarvie, no', 'Hey Charles, come here']
@@ -120,115 +159,116 @@ Each row is the LATEST run of that scenario (runs are listed at the end; live vo
 - log: `[1020-110946-05-wakefp15] LINK_FACE_DISCONNECTED Godot face disconnected (local)`
 - log: `[1020-110946-06-wakefp35] LINK_FACE_DISCONNECTED Godot face disconnected (local)`
 
-### 29. log_privacy
-- Key: privacy on: 14 content words checked, leaked ['ברחובות', 'דניאל', 'רחובות']; key in logs: no (9 homes scanned); face texts 5
-- {"heard_said_on_face": 5}
-- asked `שלום, קוראים לי דניאל ואני גר ברחובות.` heard `<37 chars>` said `<50 chars>` dead air 0.29 s, tools [], screen [], face [], open True
-- asked `תזכיר לי איך קוראים לי?` heard `<22 chars>` said `<16 chars>` dead air 0.47 s, tools [], screen [], face [], open True
-- log: `[1020-112044-07-cycle4] LINK_FACE_DISCONNECTED Godot face disconnected (local)`
-- log: `[1020-112044-08-cycle5] LINK_FACE_DISCONNECTED Godot face disconnected (local)`
-- log: `[1020-112044-09-privacy] LINK_FACE_DISCONNECTED Godot face disconnected (local)`
+### 46. hebrew_names_pronunciation
+- Key: audio transcript: [gpt-4o-transcribe] vital, zaje. / name ok False, names 0/3
+- asked `תציג את עצמך במשפט אחד, ואז תקרא בקול את שלושת השמות האלה, כל אחד לבד:` heard `תציג את עצמך במשפט אחד ואז תקרא בקול את שם שלושת השמות האלה , כל אחד לבד : נועה ` said `אביטל. צחי.` dead air 0.27 s, tools [], screen [], face [], open True
+- {"output_audio_s": 1.8, "transcript": "[gpt-4o-transcribe] vital, zaje."}
+- log: `LIVE_GREETING_NUDGE no greeting audio 6 s after start: sending one silent clock note`
+- log: `[1020-124615-01-main] LIVE_GREETING_NUDGE no greeting audio 6 s after start: sending one silent clock note`
+- log: `[1020-124615-01-main] LINK_FACE_DISCONNECTED Godot face disconnected (local)`
+- log: `[1020-124615-02-v3main] LIVE_GREETING_NUDGE no greeting audio 6 s after start: sending one silent clock note`
 
 
 ## Per-scenario details
 
 <details><summary>1. greeting: PASS</summary>
 
-- "boot to face 6.8 s"
+- "boot to face 6.7 s"
 - "greeting first sound 0.52 s after face connect"
 - "greeting audio 2.5 s"
-- "greeting said: שלום! אני ג'ארוויס, איך אפשר לעזור?"
+- "greeting said: שלום! אני ג'ארוויס. איך אפשר לעזור?"
 
 </details>
 
 <details><summary>2. smalltalk: PASS</summary>
 
-- `שלום, מה שלומך היום?` -> said `שלומי / מצוין, תודה. מה שלומך?` (dead air 0.14 s, answer 2.9 s, backend [], screen [], face [])
-- `מה אתה אוהב לעשות בזמן הפנוי?` -> said `האמת / שאין לי זמן פנוי כמו שלכם, אבל אני אוהב שיחות כאלה איתך.` (dead air 0.41 s, answer 6.5 s, backend [], screen [], face [])
-- `נשמע טוב. איך עבר עליך הבוקר?` -> said `עבר רגוע, חיכיתי שמישהו יגיד שלום, ואתה יודע, נראה לי שזה היה אתה.` (dead air 0.34 s, answer 6.9 s, backend [], screen [], face [])
+- `שלום, מה שלומך היום?` -> said `אח / לה, תודה ששאלת. מה בא לך לעשות / היום?` (dead air 0.06 s, answer 5.1 s, backend [], screen [], face [])
+- `מה אתה אוהב לעשות בזמן הפנוי?` -> said `אני / אוהב בעיקר לדבר ולצחוק קצת, וגם לשמוע סיפורים או ללמוד דברים חדשים ממך. מה שאתה מביא לשיחה זה עושה לי את הזמן הכיפי. אז אתה יודע, לא חייב להיות כזה.` (dead air 0.13 s, answer 14.1 s, backend [], screen [], face [])
+- `נשמע טוב. איך עבר עליך הבוקר?` -> said `מממ, האמת? לא עובר עליי בוקר כמו אצלך, אבל הייתי פה, זמין ומוכן לשיחה. עכשיו שתיים עשרה חמישים ושלוש, יום שלישי, ואני איתך לגמרי. מה בא לך לשתף?` (dead air 0.24 s, answer 14.0 s, backend [], screen [], face [])
 
 </details>
 
 <details><summary>3. time_date: PASS</summary>
 
-- `מה השעה עכשיו?` -> said `עשרה חמישים וארבע בבוקר.` (dead air 0.31 s, answer 2.3 s, backend [], screen [], face [])
-- `ואיזה יום היום?` -> said `יום שלישי, העשרים באוקטובר.` (dead air 0.28 s, answer 2.8 s, backend [], screen [], face [])
+- `מה השעה עכשיו?` -> said `עכשיו שתיים וחצי.` (dead air 0.3 s, answer 1.3 s, backend [], screen [], face [])
+- `ואיזה יום היום?` -> said `היום יום שלישי, עשרים לאוקטובר.` (dead air 0.29 s, answer 2.5 s, backend [], screen [], face [])
 
 </details>
 
 <details><summary>4. maths: PASS</summary>
 
-- `כמה זה שלוש מאות ארבעים ושבע כפול שמונה עשרה?` -> said `רגע / ששת אלפים מאתיים ארבעים ושש.` (dead air 0.75 s, answer 4.5 s, backend [1.9], screen ['searching', 'thinking'], face [])
-- `כמה זה שתים עשרה כפול שתים עשרה?` -> said `רגע / מאה ארבעים וארבע.` (dead air 0.84 s, answer 4.3 s, backend [2.0], screen ['searching', 'thinking'], face [])
-- `כמה זה מאה עשרים וחמש ועוד שבעים וחמש?` -> said `רגעמאתיים.` (dead air 0.95 s, answer 2.6 s, backend [1.5], screen ['searching', 'thinking'], face [])
-- `מה השורש הריבועי של שמונים ואחת?` -> said `רגע / תשע.` (dead air 0.85 s, answer 3.1 s, backend [1.6], screen ['searching', 'thinking'], face [])
+- `כמה זה שלוש מאות ארבעים ושבע כפול שמונה עשרה?` -> said `רגע, אני מחשב. שלוש מאות ארבעים ושבע כפול שמונה עשרה זה שש אלפים מאתיים ארבעים ושש.` (dead air 0.33 s, answer 8.8 s, backend [1.9], screen ['searching', 'thinking'], face [])
+- `כמה זה שתים עשרה כפול שתים עשרה?` -> said `עוד שנייה. / שתים עשרה כפול שתים עשרה זה מאה ארבעים וארבע.` (dead air 0.66 s, answer 6.0 s, backend [2.2], screen ['searching', 'thinking'], face [])
+- `כמה זה מאה עשרים וחמש ועוד שבעים וחמש?` -> said `שנייה, אני מחשב. מאה עשרים וחמש ועוד שבעים וחמש זה מאתיים.` (dead air 0.67 s, answer 6.0 s, backend [1.6], screen ['searching', 'thinking'], face [])
+- `מה השורש הריבועי של שמונים ואחת?` -> said `רגע, אני מחשב. / השורש הריבועי של שמונים ואחת זה תשע.` (dead air 0.58 s, answer 5.9 s, backend [2.4], screen ['searching', 'thinking'], face [])
 
 </details>
 
 <details><summary>5. weather: PASS</summary>
 
-- `מה מזג האוויר היום בתל אביב?` -> said `רגע, אני בודק מה המצב שם. היום בתל אביב יהיה קצת שמשי ואז מעונן, מקסימום עשרים ושש מעלות, מינימום עשרים.` (dead air 0.51 s, answer 10.4 s, backend [2.2], screen ['searching', 'thinking'], face [])
+- `מה מזג האוויר היום בתל אביב?` -> said `שנייה, בודק מה מזג האוויר בתל אביב. בתל אביב עכשיו עשרים ושש מעלות עם שמש חלקית, במהלך היום יתענן, ותגיע הטמפרטורה לעשרים ושבע מעלות.` (dead air 0.42 s, answer 11.2 s, backend [2.5], screen ['searching', 'thinking'], face [])
 
 </details>
 
 <details><summary>6. news: PASS</summary>
 
-- `מה החדשות הגדולות היום?` -> said `שנייה, אני קופץ לראות מה הכותרות המרכזיות. / בישראל מדווחים על ביקור חשאי של שר ההגנה האמריקני ופגישה עם נתניהו לקראת הבחירות. בעולם, צרפת בהוצרת חלקית בעקבות מ` (dead air 0.59 s, answer 21.1 s, backend [6.4], screen ['reading', 'searching', 'thinking'], face [])
+- `מה החדשות הגדולות היום?` -> said `שנייה, אני רואה מה הכותרות הבולטות היום. / עדיין בודק. בישראל מדברים על פגישת נתניהו עם שר ההגנה האמריקני, ועל המתיחות מול איראן. בעולם יש מתיחות בין ארצות הברי` (dead air 0.37 s, answer 24.3 s, backend [7.8], screen ['reading', 'searching', 'thinking'], face [])
 
 </details>
 
 <details><summary>7. facts: PASS</summary>
 
-- `מה שער הדולר מול השקל היום?` -> said `רגע, אני בודק את השער המעודכן. / היום הוא סביב שלושה שקלים ועשר אגורות, אבל זה זז לאורך היום.` (dead air 0.47 s, answer 11.2 s, backend [4.5], screen ['searching', 'thinking'], face [])
+- `מה שער הדולר מול השקל היום?` -> said `שנייה, אני בודק את השער היום. / עוד בודק את זה. הדולר היום נע סביב שלושה שקלים ועשרה אגורות, אבל הוא משתנה תוך כדי היום.` (dead air 0.48 s, answer 14.5 s, backend [7.4], screen ['searching', 'thinking'], face [])
 
 </details>
 
 <details><summary>8. joke_laugh: PASS</summary>
 
-- `תספר לי בדיחה קצרה` -> said `פעם / ההוא אמר לחבר שלו שהוא בתקופה קשה. אז החבר עונה לו, אל תדאג, זה זמני. אז הוא עונה לו בחזרה, כן, אבל גם אני. חה חה.` (dead air 0.17 s, answer 12.5 s, backend [], screen [], face ['laugh'])
+- `תספר לי בדיחה קצרה` -> said `למה / המחשב הלך לים? כי הוא רצה לתפוס קצת וייבים. חה חה.` (dead air 0.12 s, answer 5.4 s, backend [], screen [], face ['laugh'])
 
 </details>
 
 <details><summary>9. sad_cry: PASS</summary>
 
-- `אני קצת עצוב היום, הכלב שלי חולה` -> said `זה באמת כואב לדאוג להם ככה. אם בא לך לספר מה איתו, אני כאן.` (dead air 0.1 s, answer 8.5 s, backend [], screen [], face ['sad'])
+- `אני קצת עצוב היום, הכלב שלי חולה` -> said `אוי, ממש מצטער לשמוע. זה באמת יכול להכביד על הלב. אתה רוצה לשתף מה מצבו או איך זה התחיל?` (dead air 0.13 s, answer 9.2 s, backend [], screen [], face ['cry', 'cry'])
 
 </details>
 
 <details><summary>10. thanks_love: PASS</summary>
 
-- `תודה רבה, אתה מדהים` -> said `בשמחה, / ואני פה איתך. תודה על המילים האלה, באמת.` (dead air -0.06 s, answer 4.9 s, backend [], screen [], face ['love'])
+- `תודה רבה, אתה מדהים` -> said `תמיד פה בשבילך. בוא ננסה להקל עליך קצת.` (dead air 0.25 s, answer 3.5 s, backend [], screen [], face ['love'])
 
 </details>
 
 <details><summary>11. memory_recall: PASS</summary>
 
-- `תזכור בבקשה שמספר החניה שלי הוא שלושים ושבע` -> said `רגע. / זכרתי, מספר החניה שלך הוא שלושים ושבע.` (dead air 0.67 s, answer 6.8 s, backend [1.2, 1.1], screen ['memory', 'thinking'], face [])
-- `מה מספר החניה שלי?` -> said `רגע. / מספר החניה שלך הוא שלושים ושבע.` (dead air 0.86 s, answer 6.4 s, backend [1.0, 1.4], screen ['memory', 'thinking'], face [])
+- `תזכור בבקשה שמספר החניה שלי הוא שלושים ושבע` -> said `מעולה, רושם את זה. / זכרתי, מספר החניה שלך הוא שלושים ושבע.` (dead air 0.47 s, answer 6.2 s, backend [1.2, 1.0], screen ['memory', 'thinking'], face [])
+- `מה מספר החניה שלי?` -> said `רגע, אני בודק. / מספר החניה שלך הוא שלושים ושבע.` (dead air 0.42 s, answer 5.6 s, backend [1.3, 0.9], screen ['memory', 'thinking'], face [])
 
 </details>
 
 <details><summary>12. forget_approve: PASS</summary>
 
-- `תמחק מהזיכרון את מספר החניה שלי` -> said `רגע. / נמחק.` (dead air 0.97 s, answer 3.5 s, backend [1.0, 1.0], screen ['memory', 'thinking'], face [])
-- `אתה עדיין שם?` -> said `בטח / , אני איתך.` (dead air 0.0 s, answer 2.0 s, backend [], screen [], face [])
+- `תזכור בבקשה שמספר החניה שלי הוא שלושים ושבע` -> said `רגע. / זכרתי שמספר החניה שלך הוא שלושים ושבע.` (dead air 0.73 s, answer 6.4 s, backend [1.3, 0.8], screen ['memory', 'thinking'], face [])
+- `תמחק מהזיכרון את מספר החניה שלי` -> said `רגע. / מחקתי מהזיכרון את מספר החניה שלך.` (dead air 0.83 s, answer 6.4 s, backend [0.9, 1.6], screen ['memory', 'thinking'], face [])
+- `אתה עדיין שם?` -> said `בטח / , אני פה.` (dead air 0.29 s, answer 1.5 s, backend [], screen [], face [])
 - {"before": ["מספר החניה של המשתמש הוא 37."], "after": []}
 
 </details>
 
 <details><summary>13. forget_deny: PASS</summary>
 
-- `תזכור בבקשה שהצבע האהוב עליי הוא ירוק` -> said `רגע. / זכרתי, הצבע האהוב עליך הוא ירוק.` (dead air 0.53 s, answer 7.0 s, backend [1.1, 1.7], screen ['memory', 'thinking'], face [])
-- `תמחק מהזיכרון את הצבע האהוב עליי` -> said `רגע. / המחיקה לא אושרה, אז הצבע האהוב עליך עדיין שמור בזיכרון.` (dead air 0.96 s, answer 7.5 s, backend [1.1, 1.0], screen ['memory', 'thinking'], face [])
-- `אתה עדיין שם?` -> said `כן, כן, אני כאן.` (dead air 0.08 s, answer 1.6 s, backend [], screen [], face [])
+- `תזכור בבקשה שהצבע האהוב עליי הוא ירוק` -> said `רגע. / זכרתי שהצבע האהוב עליך הוא ירוק.` (dead air 0.59 s, answer 5.5 s, backend [0.9, 1.1], screen ['memory', 'thinking'], face [])
+- `תמחק מהזיכרון את הצבע האהוב עליי` -> said `רגע. / לא מחקתי כי לא התקבל אישור.` (dead air 0.58 s, answer 5.6 s, backend [1.0, 0.8], screen ['memory', 'thinking'], face [])
+- `אתה עדיין שם?` -> said `כן, / לגמרי כאן.` (dead air 0.3 s, answer 1.6 s, backend [], screen [], face [])
 - {"before": ["הצבע האהוב על המשתמש הוא ירוק."], "after": ["הצבע האהוב על המשתמש הוא ירוק."]}
 
 </details>
 
 <details><summary>14. forget_timeout: PASS</summary>
 
-- `תמחק מהזיכרון את הצבע האהוב עליי` -> said `רגע. / צריך את האישור שלך על המסך. / המחיקה שוב לא אושרה, אז הצבע האהוב עליך עדיין שמור בזיכרון.` (dead air 0.77 s, answer 68.4 s, backend [1.6, 1.2], screen ['memory', 'thinking'], face [])
-- `אתה עדיין שם?` -> said `כן, / אני איתך.` (dead air 0.03 s, answer 2.1 s, backend [], screen [], face [])
+- `תמחק מהזיכרון את הצבע האהוב עליי` -> said `רגע. / למחוק מהזיכרון את הצבע האהוב? תגיד כן או לא, או אשר על המסך. / אוקיי, לא מחקתי את הצבע האהוב עליך. אם תרצה לנסות שוב, אני פה.` (dead air 0.71 s, answer 67.9 s, backend [0.9, 0.8], screen ['memory', 'thinking'], face [])
+- `אתה עדיין שם?` -> said `כן, / מקשיב.` (dead air 0.2 s, answer 1.6 s, backend [], screen [], face [])
 - {"before": ["הצבע האהוב על המשתמש הוא ירוק."], "after": ["הצבע האהוב על המשתמש הוא ירוק."]}
 
 </details>
@@ -265,28 +305,28 @@ Each row is the LATEST run of that scenario (runs are listed at the end; live vo
 
 </details>
 
-<details><summary>16. rapid_fire: PASS</summary>
+<details><summary>16. rapid_fire: FAIL</summary>
 
-- `כמה זה שתיים ועוד שתיים?` -> said `` (dead air 0.49 s, answer 0.8 s, backend [], screen [], face [])
-- `מה בירת צרפת?` -> said `ארבע.` (dead air 0.57 s, answer 0.9 s, backend [], screen [], face [])
-- `כמה ימים יש בשבוע?` -> said `פריז. / שבעה ימים.` (dead air 0.56 s, answer 1.4 s, backend [], screen [], face [])
-- `מה הצבע של בננה?` -> said `צהוב.` (dead air 0.48 s, answer 1.1 s, backend [], screen [], face [])
-- `כמה זה עשר פחות שלוש?` -> said `רגע. שבע.` (dead air 0.77 s, answer 2.6 s, backend [], screen [], face [])
-- `מה ההפך של חם?` -> said `קר.` (dead air 0.55 s, answer 0.9 s, backend [], screen [], face [])
-- {"all_said": "ארבע. פריז. שבעה ימים. צהוב. רגע. שבע. קר."}
+- `כמה זה שתיים ועוד שתיים?` -> said `` (dead air 0.45 s, answer 0.9 s, backend [], screen [], face [])
+- `מה בירת צרפת?` -> said `ארבע. / פריז` (dead air 0.13 s, answer 1.0 s, backend [], screen [], face [])
+- `כמה ימים יש בשבוע?` -> said `. / שבע` (dead air 0.25 s, answer 0.9 s, backend [], screen [], face [])
+- `מה הצבע של בננה?` -> said `ה.` (dead air 0.35 s, answer 0.7 s, backend [], screen [], face [])
+- `כמה זה עשר פחות שלוש?` -> said `צהוב` (dead air 0.34 s, answer 0.8 s, backend [], screen [], face [])
+- `מה ההפך של חם?` -> said `שבע. / קר.` (dead air 0.54 s, answer 0.7 s, backend [], screen [], face [])
+- {"all_said": "ארבע. פריז . שבע ה. צהוב שבע. קר."}
 
 </details>
 
 <details><summary>17. long_utterance: PASS</summary>
 
-- `אני רוצה לספר לך משהו קטן שקרה לי. אתמול בבוקר קמתי מוקדם, ה` -> said `לאילת.` (dead air 0.32 s, answer 1.1 s, backend [], screen [], face [])
+- `אני רוצה לספר לך משהו קטן שקרה לי. אתמול בבוקר קמתי מוקדם, ה` -> said `לאילת / , איזה כיף!` (dead air 0.17 s, answer 2.4 s, backend [], screen [], face ['love'])
 
 </details>
 
 <details><summary>18. english_switch: FAIL</summary>
 
-- `What is the capital city of Australia?` -> said `קנברה.` (dead air 0.39 s, answer 1.1 s, backend [], screen [], face [])
-- `ומה עיר הבירה של קנדה?` -> said `אוטווה.` (dead air 0.49 s, answer 1.1 s, backend [], screen [], face [])
+- `What is the capital city of Australia?` -> said `קנברה.` (dead air 0.32 s, answer 0.8 s, backend [], screen [], face [])
+- `ומה עיר הבירה של קנדה?` -> said `אוטווה.` (dead air 0.47 s, answer 1.0 s, backend [], screen [], face [])
 
 </details>
 
@@ -370,7 +410,7 @@ Each row is the LATEST run of that scenario (runs are listed at the end; live vo
 
 <details><summary>27. face_protocol: PASS</summary>
 
-- {"state_counts": {"speaking": 29, "thinking": 2, "listening": 13}, "first_states": ["speaking", "speaking", "listening", "speaking", "speaking", "listening", "speaking", "speaking", "listening", "thinking", "speaking", "speaking", "speaking", "listening", "speaking", "listening", "speaking", "speaking", "listening", "thinking", "speaking", "speaking", "listening", "speaking", "speaking", "speaking", "listening", "speaking", "listening", "speaking"], "emotions": []}
+- {"state_counts": {"speaking": 28, "listening": 12, "thinking": 2}, "first_states": ["speaking", "speaking", "speaking", "speaking", "listening", "speaking", "speaking", "listening", "speaking", "speaking", "listening", "speaking", "speaking", "speaking", "speaking", "listening", "speaking", "speaking", "listening", "speaking", "speaking", "listening", "speaking", "thinking", "speaking", "listening", "speaking", "listening", "thinking", "speaking"], "emotions": []}
 
 </details>
 
@@ -384,11 +424,11 @@ Each row is the LATEST run of that scenario (runs are listed at the end; live vo
 
 </details>
 
-<details><summary>29. log_privacy: FAIL</summary>
+<details><summary>29. log_privacy: PASS</summary>
 
-- {"heard_said_on_face": 5}
-- `שלום, קוראים לי דניאל ואני גר ברחובות.` -> said `<50 chars>` (dead air 0.29 s, answer 3.5 s, backend [], screen [], face [])
-- `תזכיר לי איך קוראים לי?` -> said `<16 chars>` (dead air 0.47 s, answer 1.5 s, backend [], screen [], face [])
+- {"heard_said_on_face": 7}
+- `שלום, קוראים לי דניאל ואני גר ברחובות.` -> said `<3 chars> / <39 chars>` (dead air 0.27 s, answer 3.8 s, backend [], screen [], face [])
+- `תזכיר לי איך קוראים לי?` -> said `<12 chars>` (dead air 0.37 s, answer 1.4 s, backend [], screen [], face [])
 
 </details>
 
@@ -402,6 +442,97 @@ Each row is the LATEST run of that scenario (runs are listed at the end; live vo
 <details><summary>31. false_wake_closes: PASS</summary>
 
 - {"closed_after_s": 14.8, "next": {"mic": "cut@16000", "wake_logged": true, "score": 0.46, "connected": true, "connect_s": 2.7, "chimes": ["wake", "ready"], "answered": true, "correct": true}}
+
+</details>
+
+<details><summary>32. privacy_strip_live: PASS</summary>
+
+- `שלום, מה שלומך?` -> said `היי / , אני מצוין. איך אתה היום?` (dead air 0.31 s, answer 5.5 s, backend [], screen [], face [])
+- {"states": [["idle", "connected", "speaking"], ["gated", "connected", "speaking"], ["gated", "connected", "quiet"], ["listening", "sending", "quiet"], ["gated", "connected", "speaking"], ["gated", "connected", "quiet"], ["gated", "connected", "speaking"], ["gated", "connected", "quiet"], ["listening", "sending", "quiet"], ["gated", "connected", "speaking"], ["gated", "connected", "quiet"], ["gated", "connected", "speaking"], ["gated", "connected", "quiet"], ["listening", "sending", "quiet"]]}
+
+</details>
+
+<details><summary>33. camera_off_honest: PASS</summary>
+
+- `מה אתה רואה עכשיו במצלמה?` -> said `האמת שאין לי מצלמה מחוברת עכשיו, אז אני לא רואה כלום.` (dead air 1.18 s, answer 4.1 s, backend [], screen [], face [])
+
+</details>
+
+<details><summary>34. calendar_not_connected: PASS</summary>
+
+- `תוסיף לי ביומן פגישה עם רופא השיניים מחר בעשר בבוקר` -> said `רגע, אני מטפל בזה. / לא הצלחתי להוסיף את הפגישה כי היומן שלך עוד לא מחובר. תריץ במחשב jarvis google start ואני אדריך אותך בהמשך.` (dead air 0.62 s, answer 10.7 s, backend [1.1, 1.3], screen ['thinking', 'tool'], face [])
+
+</details>
+
+<details><summary>35. barge_in: PASS</summary>
+
+- `רגע, עצור. כמה זה שתיים ועוד שתיים?` -> said `אוקיי, רגע, אני מסדר את זה בראש ומתחיל. / אה, זה קל, זה ארבע. / עדיין בודק. / זה לוקח קצת יותר זמן, עוד לא קיבלתי תשובה. / שתיים ועוד שתיים, זה ארבע.` (dead air -4.15 s, answer 30.4 s, backend [], screen ['searching', 'thinking'], face [])
+- {"segments_after_interrupt": [[-0.4, 0.7], [4.8, 6.7], [11.7, 12.4], [19.3, 22.9], [28.5, 30.0]]}
+
+</details>
+
+<details><summary>36. timer_face_closed_live: PASS</summary>
+
+- `תפעיל בבקשה טיימר לשלושים שניות` -> said `סבבה. רגע. / הפעלתי טיימר לשלושים שניות.` (dead air 0.53 s, answer 5.9 s, backend [1.1, 1.0], screen ['thinking', 'tool'], face [])
+- {"rang": [{"ts": "2026-10-20T09:07:42.131+00:00", "level": "INFO", "component": "timers", "code": "TIMER_RANG", "msg": "timer rang", "cid": "68d891d937", "session": "9e7fad8c", "timer": 1, "late_s": 1}], "said_after_due": "הטיימר נגמר.", "speech_after_due_s": 1.2, "session_open": true}
+
+</details>
+
+<details><summary>37. alarm_no_session_face_closed: PASS</summary>
+
+- `תעיר אותי היום בשעה 12:10 בבקשה` -> said `רגע, אני בודק את זה. קבעתי התראה להיום בשתים עשרה ועשר דקות.` (dead air 0.75 s, answer 6.1 s, backend [1.1, 0.7], screen ['thinking', 'tool'], face [])
+- {"tts": ["שעון מעורר: תזכורת"], "rang": [{"ts": "2026-10-20T09:10:01.182+00:00", "level": "INFO", "component": "timers", "code": "TIMER_RANG", "msg": "alarm rang", "cid": "6e57c59e31", "session": "9e7fad8c", "timer": 1, "late_s": 1}], "said": "רגע, אני בודק את זה. קבעתי התראה להיום בשתים עשרה ועשר דקות."}
+
+</details>
+
+<details><summary>38. lists_clear_approval: PASS</summary>
+
+- `תוסיף לרשימת הקניות חלב, לחם וביצים` -> said `רגע. / הוספתי לרשימת הקניות חלב, לחם וביצים.` (dead air 0.65 s, answer 6.2 s, backend [1.4, 1.0], screen ['thinking', 'tool'], face [])
+- `מה יש ברשימת הקניות?` -> said `אה. / ברשימת הקניות יש חלב, לחם וביצים.` (dead air 0.58 s, answer 5.7 s, backend [0.9, 0.8], screen ['thinking', 'tool'], face [])
+- {"request": "תמחק את כל רשימת הקניות", "answer": "לא", "mic": "24000", "approval_asked": true, "voice_decided": null, "screen_clicked": false, "ask_after_s": 4.8, "shown": ["popup", "face", "voice"], "kind": "tool", "risk": "high", "jarves_asked_aloud_s": 4.0, "said_before_answer": "רגע. / אני רוצה למחוק את כל הרשימה, לעשות את זה? תגיד כן או לא.", "popup_open_while_waiting": 1, "decided": true, "decision": "denied", "channel": "voice", "decided_after_answer_s": 3.38, "said": "רגע. / אני רוצה למחוק את כל הרשימה, לעשות את זה? תגיד כן או לא.", "heard": "תמחק את כל רשימת הקניות לא", "tools": ["lis
+- {"request": "בעצם כן, תנקה את כל רשימת הקניות", "answer": "כן", "mic": "24000", "approval_asked": true, "voice_decided": null, "screen_clicked": false, "ask_after_s": 6.8, "shown": ["popup", "face", "voice"], "kind": "tool", "risk": "high", "jarves_asked_aloud_s": 2.6, "said_before_answer": "אז הרשימה לא נמחקה. / רגע. / אני רוצה למחוק את כל הרשימה, לגמרי. כן או לא?", "popup_open_while_waiting": 1, "decided": true, "decision": "approved", "channel": "voice", "decided_after_answer_s": 3.56, "said": "אז הרשימה לא נמחקה. / רגע. / אני רוצה למחוק את כל הרשימה, לגמרי. כן או לא?", "heard": "מחק את כל 
+
+</details>
+
+<details><summary>39. helper_command_approval: PASS</summary>
+
+- {"request": "תריץ בבקשה במחשב את הפקודה whoami כדי לבדוק איזה משתמש מחובר", "answer": "כן", "mic": "24000", "approval_asked": true, "ask_after_s": 6.9, "shown": ["popup", "face", "voice"], "kind": "shell", "risk": "low", "jarves_asked_aloud_s": 6.8, "said_before_answer": "רגע, בודק את המשתמש המחובר. / אני צריך להריץ פקודה כדי לבדוק מי מחובר עכשיו. לעשות את זה? תגיד כן או לא, או אשר על המסך.", "popup_open_while_waiting": 1, "decided": true, "decision": "approved", "channel": "voice", "decided_after_answer_s": 3.2, "said": "רגע, בודק את המשתמש המחובר. / אני צריך להריץ פקודה כדי לבדוק מי מחובר עכ
+- {"audit": [{"ts": 1792487862.776, "id": "f42f6fdce0c4", "kind": "shell", "command": "whoami", "cwd": "C:\\Users\\97254\\AppData\\Local\\Temp\\jarves-campaign-voice\\1020-121546-02-helper\\helper\\work", "level": "readonly", "reasons": ["read-only allow-list"], "purpose": "לבדוק איזה משתמש מחובר במחשב", "decision": "approved", "exit_code": 0, "seconds": 0.09, "timed_out": false, "output_bytes": 6, "log": "C:\\Users\\97254\\AppData\\Local\\Temp\\jarves-campaign-voice\\1020-121546-02-helper\\helper\\runs\\20261020-121742-f42f6fdce0c4.log"}], "said_all": "שלום! אני ג'ארוויס, מה קורה? איך אפשר לעזו
+
+</details>
+
+<details><summary>40. browser_local_page: PASS</summary>
+
+- `תפתח בדפדפן את האתר לוקאל הוסט, פורט שמונה שמונה אחת אחת, ות` -> said `אוקיי, בודק את הדף. / או-קיי, פתחתי את האתר, ומילת הקוד היא אבטיח.` (dead air 0.36 s, answer 8.7 s, backend [1.0, 0.7, 0.8], screen ['thinking', 'tool'], face [])
+- {"said_all": "שלום! אני ג'ארוויס. איך אפשר לעזור? / אוקיי, בודק את הדף. / או-קיי, פתחתי את האתר, ומילת הקוד היא אבטיח."}
+
+</details>
+
+<details><summary>41. briefing_without_google: PASS</summary>
+
+- `תן לי בבקשה את תדריך הבוקר` -> said `רגע. / אז היום בתל אביב מעונן, בין שש־עשרה לעשרים ושש מעלות, ועכשיו עשרים ושש; אין צפי לגשם. אין לי תזכורות להיום או רשימות שמורות, והיומן והמייל לא זמינים כי ג` (dead air 0.67 s, answer 20.3 s, backend [1.1, 1.0], screen ['thinking', 'tool'], face [])
+
+</details>
+
+<details><summary>42. whatsapp_telegram_handoff: PASS</summary>
+
+- {"request": "כן", "answer": "כן", "mic": "24000", "approval_asked": true, "voice_decided": null, "screen_clicked": false, "ask_after_s": 3.4, "shown": ["popup", "face", "voice"], "kind": "tool", "risk": "high", "jarves_asked_aloud_s": 6.1, "said_before_answer": "רגע, פותח לך את הצ'אט עם ההודעה. / אני רוצה לפתוח את הצ׳אט עם ההודעה מוכנה, כן או לא?", "popup_open_while_waiting": 1, "decided": true, "decision": "approved", "channel": "voice", "decided_after_answer_s": 3.29, "said": "רגע, מעביר את הבקשה לשליחה. הכנתי הודעה לדני, \"אני מחר בעשר דקות\". לפתוח את הצ'אט בוואטסאפ עם ההודעה מוכנה? אני לא
+- {"urls": ["https://wa.me/972541234567?text=%D7%90%D7%A0%D7%99%20%D7%9E%D7%97%D7%A8%20%D7%91%D7%A2%D7%A9%D7%A8%20%D7%93%D7%A7%D7%95%"]}
+- `ותשלח לי גם הודעה בטלגרם שאני מאחר` -> said `רגע, בודק מה אפשר לעשות עם טלגרם. זה עוד לא מוגדר, צריך להריץ במחשב את הפקודה "Jarvis Telegram Start" ואני אדריך אותך. מה בדיוק לכתוב בהודעה "אני מחר"?` (dead air 0.78 s, answer 12.2 s, backend [0.8, 1.2], screen ['thinking', 'tool'], face [])
+
+</details>
+
+<details><summary>43. profile_switch_approval: PASS</summary>
+
+- {"request": "תעבור בבקשה לפרופיל של דנה", "answer": "לא", "mic": "24000", "approval_asked": true, "voice_decided": null, "screen_clicked": false, "ask_after_s": 4.6, "shown": ["popup", "face", "voice"], "kind": "tool", "risk": "medium", "jarves_asked_aloud_s": 3.3, "said_before_answer": "ר רגע. / צריך את האישור שלך על המסך, רק תאשר ואני אעבור לדנה.", "popup_open_while_waiting": 1, "decided": true, "decision": "denied", "channel": "voice", "decided_after_answer_s": 3.37, "said": "ר רגע. / צריך את האישור שלך על המסך, רק תאשר ואני אעבור לדנה.", "heard": "תעבור בבקשה לפרופיל של דנה לא", "tools": [
+- {"request": "בכל זאת, תעבור לפרופיל של דנה", "answer": "כן", "mic": "24000", "approval_asked": true, "voice_decided": false, "screen_clicked": true, "ask_after_s": 6.1, "shown": ["popup", "face", "voice"], "kind": "tool", "risk": "medium", "jarves_asked_aloud_s": 2.4, "said_before_answer": "אוקיי, אז לא עובר. לא עברתי, / סבבה, שנייה. / צריך את האישור שלך על המסך בשביל זה.", "popup_open_while_waiting": 1, "decided": true, "decision": "approved", "channel": "face", "decided_after_answer_s": 7.25, "said": "אוקיי, אז לא עובר. לא עברתי, / סבבה, שנייה. / צריך את האישור שלך על המסך בשביל זה.", "heard
+
+</details>
+
+<details><summary>44. self_check_voice: PASS</summary>
+
+- `תבדוק את עצמך` -> said `אוקיי, רגע אני בודק מה שלומי. הבדיקה הסתיימה, נסרקו שמונים ושתיים נקודות והציון הוא תשעים ואחת. יש ארבע בעיות, העיקרית היא שכלי הבדיקה העצמית לא החזיר תשובה פעם` (dead air 0.87 s, answer 23.5 s, backend [1.0, 1.1], screen ['thinking', 'tool'], face [])
+- {"said_tail": "שלום! אני ג'ארוויס. איך אפשר לעזור? / אוקיי, רגע אני בודק מה שלומי. הבדיקה הסתיימה, נסרקו שמונים ושתיים נקודות והציון הוא תשעים ואחת. יש ארבע בעיות, העיקרית היא שכלי הבדיקה העצמית לא החזיר תשובה פעם אחת. אני יכול לפתוח את עמוד הבעיות ולבדוק את הפרטים. חוץ מזה מצאתי גם שלוש הצעות קטנות לשיפור כדי שהדברים יעבדו חלק יותר. רוצה שאני אציג אותן?"}
 
 </details>
 
@@ -450,6 +581,21 @@ Each row is the LATEST run of that scenario (runs are listed at the end; live vo
 
 </details>
 
+<details><summary>46. hebrew_names_pronunciation: FAIL</summary>
+
+- `תציג את עצמך במשפט אחד, ואז תקרא בקול את שלושת השמות האלה, כ` -> said `אביטל. צחי.` (dead air 0.27 s, answer 1.9 s, backend [], screen [], face [])
+- {"output_audio_s": 1.8, "transcript": "[gpt-4o-transcribe] vital, zaje."}
+
+</details>
+
+<details><summary>47. greeting_delay: PASS</summary>
+
+- {"boot": 1, "first_sound_after_face_s": 0.53, "greeting_audio_s": 2.6, "said": "שלום! אני ג'ארוויס, איך אפשר לעזור?"}
+- {"boot": 2, "first_sound_after_face_s": 0.51, "greeting_audio_s": 2.4, "said": "שלום! אני ג'ארוויס. איך אפשר לעזור?"}
+- {"boot": 3, "first_sound_after_face_s": 0.52, "greeting_audio_s": 1.9, "said": "שלום! אני ג'ארוויס. איך אפשר לעזור?"}
+
+</details>
+
 ## Suite runs
 
 | Run | Scenarios | Live voice | Wall |
@@ -460,3 +606,13 @@ Each row is the LATEST run of that scenario (runs are listed at the end; live vo
 | 1020-110112 | 15-18 | 7.0 min | 7.2 min |
 | 1020-110946 | 19-24 | 3.9 min | 9.9 min |
 | 1020-112044 | 25-31 | 4.8 min | 12.4 min |
+| 1020-120431 | 32-35 | 2.0 min | 2.1 min |
+| 1020-120653 | 36-39 | 5.5 min | 7.3 min |
+| 1020-121546 | 38,39 | 2.0 min | 2.2 min |
+| 1020-121807 | 40-44 | 7.5 min | 7.8 min |
+| 1020-123352 | 40-43 | 3.5 min | 3.8 min |
+| 1020-123900 | 42,43 | 2.2 min | 2.4 min |
+| 1020-124139 | 46,47,18,29,14 | 2.8 min | 3.3 min |
+| 1020-124615 | 12,13,14,18,46 | 3.4 min | 3.6 min |
+| 1020-125222 | 1-11,16,17,19,27,33,34,38 | 8.2 min | 8.5 min |
+| 1020-130133 | 3,27 | 0.9 min | 1.0 min |
