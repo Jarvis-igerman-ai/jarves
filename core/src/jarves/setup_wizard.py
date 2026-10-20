@@ -925,7 +925,7 @@ BUNDLE: dict[str, list[Callable[[], tuple[bool, str]]]] = {
     "home_assistant": [_mod("jarves.homeassistant"), _mod("httpx"), _data("jarves.guides", "data/home_assistant.toml")],
     "profiles": [_mod("jarves.profiles"), _data("jarves", "dashboard_static/profiles.js"),
                  _data("jarves.guides", "data/profiles.toml")],
-    "helper": [_mod("jarves.skills.helper"), _mod("jarves.approvals"), _mod("jarves.approval_popup"), _mod("tkinter"),
+    "helper": [_mod("jarves.skills.helper"), _mod("jarves.approvals"), _mod("jarves.approval_popup"), _win(_mod("tkinter")),
                _data("jarves.guides", "data/helper.toml")],
     "helper_readonly_auto": [_mod("jarves.skills.helper")],
 }
@@ -934,7 +934,7 @@ EXTRA_BUNDLE: dict[str, list[Callable[[], tuple[bool, str]]]] = {
     "live_voice": [_mod("agents.realtime"), _mod("websockets")],
     "chatgpt_sign_in": [_mod("jarves.chatgpt_auth"), _mod("jwt")],
     "privacy": [_mod("jarves.privacy")],
-    "approvals": [_mod("jarves.approvals"), _mod("jarves.approval_popup"), _mod("tkinter"),
+    "approvals": [_mod("jarves.approvals"), _mod("jarves.approval_popup"), _win(_mod("tkinter")),
                   _data("jarves", "dashboard_static/approvals.js")],
     "windows_tts": [_win(_mod("winrt.windows.media.speechsynthesis"))],
     "offline_stt": [_mod("faster_whisper")],          # its Whisper model downloads on first use (not shipped)
