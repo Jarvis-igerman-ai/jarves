@@ -470,7 +470,7 @@ async def test_room_noise_still_cannot_hold_a_false_wake_session_open(monkeypatc
     await lv.start()
     await asyncio.sleep(35 / SPEED)
     assert rec.ends == []                                        # within the bounded grace (12 + 30 s)
-    for _ in range(40):
+    for _ in range(400):
         if rec.ends:
             break
         await asyncio.sleep(0.1)

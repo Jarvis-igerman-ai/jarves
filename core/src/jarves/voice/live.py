@@ -28,6 +28,7 @@ import base64
 import inspect
 import json
 import time
+from datetime import datetime
 from typing import TYPE_CHECKING, Any, Awaitable, Callable
 
 from .. import logs
@@ -40,6 +41,7 @@ if TYPE_CHECKING:
     from ..budget import Budget
 
 RATE = 24000
+GREETING_NUDGE_S = 6.0      # no greeting audio this long after start: one silent clock note (P0.4 Q05)
 # GPT-Live streams audio CONTINUOUSLY in real time, silence included (QA 18 Oct 2026: 5.0 s of audio per 5 s, all
 # session long). Only chunks LOUDER than this (rms, 0..1; speech is ~0.03-0.3) count as JARVES speaking.
 SPEECH_RMS = 0.004
@@ -233,7 +235,6 @@ ANNOUNCE_USER_QUIET_S = 1.5     # a background-task announcement waits until the
 
 def clock_note(now=None) -> str:
     """Silent context for GPT-Live (session.thinking.append): the local time, so time questions need no backend."""
-    from datetime import datetime
     now = now or datetime.now()
     return (f"[clock] Local time now {now:%H:%M}, יום {_HE_DAYS[now.weekday()]}, {now:%d.%m.%Y}. "
             "Silent context: mention it only when the user asks for the time or date.")
@@ -562,6 +563,7 @@ class LiveVoice(SessionLifecycle):
         self._usage_final = False       # True once session.closed carried the server's final usage
         self._t_started: float | None = None
         self._speaking_until = 0.0
+        self._now = datetime.now            # injectable wall clock (tests pin the minute)
         self._turn_audio_t0 = 0.0
         self._reply_audio_started = self._reply_audio_ended = None
         self._reply_wait_s = None
@@ -643,7 +645,14 @@ class LiveVoice(SessionLifecycle):
         audio = asyncio.create_task(self._first_audio.wait())
         ended = asyncio.create_task(self._ended.wait())
         try:
-            await asyncio.wait({audio, ended}, timeout=timeout, return_when=asyncio.FIRST_COMPLETED)
+            first = min(GREETING_NUDGE_S, timeout)
+            await asyncio.wait({audio, ended}, timeout=first, return_when=asyncio.FIRST_COMPLETED)
+            if not self._first_audio.is_set() and self.running and timeout > first:
+                # SW-V3 P0.4 Q05: in 2 of 14 silent-QA starts (20 Oct) the server sent NOTHING after session.started
+                # and the startup failed at 15 s ("room remains closed"). A silent clock note is what un-stuck a
+                # pending greeting on 19 Oct (see session_config), so send one once, then keep waiting.
+                await self._nudge_greeting()
+                await asyncio.wait({audio, ended}, timeout=timeout - first, return_when=asyncio.FIRST_COMPLETED)
             if not self._first_audio.is_set() or not self.running:
                 raise RuntimeError("live greeting audio was not received; check voice/network logs")
         finally:
@@ -674,6 +683,15 @@ class LiveVoice(SessionLifecycle):
         return max(self.usage_s, elapsed)
 
     # ------------------------------------------------------------------ lifecycle
+    async def _nudge_greeting(self) -> None:
+        logs.warn("live", "LIVE_GREETING_NUDGE", f"no greeting audio {GREETING_NUDGE_S:g} s after start: sending one "
+                                                  "silent clock note")
+        try:
+            await self.conn.session.thinking.append(content=clock_note(), delegation_id=None,
+                                                    event_id="jarves_greeting_nudge")
+        except Exception as e:                       # never let the nudge itself fail the start
+            logs.warn("live", "LIVE_GREETING_NUDGE_FAILED", f"nudge not sent: {type(e).__name__}")
+
     async def start(self) -> None:
         if self._active:
             if self._end_task is None:
@@ -740,18 +758,17 @@ class LiveVoice(SessionLifecycle):
 
     async def _clock_loop(self) -> None:
         """Once a minute: the local time as SILENT context (no speech, no backend call). Never ends the session."""
-        from datetime import datetime
         last = ""
         if self.greeting:
             # the greeting message already carries this minute's clock; send nothing until the greeting was spoken
             # (an extra event before it suppresses the greeting, see session_config)
-            last = datetime.now().strftime("%Y%m%d%H%M")
+            last = self._now().strftime("%Y%m%d%H%M")
             deadline = time.monotonic() + 45
             while self.running and time.monotonic() < deadline and (
                     not self._first_audio.is_set() or time.monotonic() < self._speaking_until + 1.0):
                 await asyncio.sleep(0.25)
         while self.running:
-            now = datetime.now()
+            now = self._now()
             if now.strftime("%Y%m%d%H%M") != last and self.clock_context:
                 last = now.strftime("%Y%m%d%H%M")
                 try:

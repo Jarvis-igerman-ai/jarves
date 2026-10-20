@@ -4,6 +4,7 @@ import asyncio
 import re
 import time
 from pathlib import Path
+from unittest.mock import patch
 
 from jarves.app import Core
 from jarves.config import Config, VoiceConfig
@@ -70,9 +71,16 @@ async def test_greeting_is_presented_after_the_configured_beat(home):
             presented.append(time.monotonic())
 
     core.live = live = Live()
-    t0 = time.monotonic()
-    await core._present_after_delay(live)
-    assert presented and presented[0] - t0 >= 0.19
+    slept = []
+    real_sleep = asyncio.sleep
+
+    async def spy_sleep(d, *a, **k):                         # the beat is the delay handed to the timer, not wall time
+        slept.append(d)
+        await real_sleep(0)
+
+    with patch("jarves.app.asyncio.sleep", spy_sleep):
+        await core._present_after_delay(live)
+    assert slept == [0.2] and presented                      # exactly the configured beat, then presented
     core.live = None                                         # a session replaced meanwhile is not presented
     await core._present_after_delay(live)
     assert len(presented) == 1

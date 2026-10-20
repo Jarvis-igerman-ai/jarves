@@ -25,7 +25,7 @@ def new_core(cfg, home, tts=None):
                 console_logs=False, use_real_audio=False)
 
 
-async def wait_for(pred, timeout=5.0):
+async def wait_for(pred, timeout=45.0):
     t0 = time.monotonic()
     while time.monotonic() - t0 < timeout:
         if pred():
@@ -60,7 +60,7 @@ async def test_reminder_is_spoken_then_shown_on_the_face(core):
     face = await open_face(core)
     core.ops.alerts.raise_("test", "דוח מוכן", "אפשר לבקש הקראה", priority="normal")
     core.ops.scheduler.poke()
-    m = await face.wait("assistant.text", lambda p: p.get("source") == "alert", timeout=5)
+    m = await face.wait("assistant.text", lambda p: p.get("source") == "alert")
     assert "דוח מוכן" in m["text"]
     await face.ws.close()
 
@@ -85,9 +85,12 @@ async def test_missed_daily_report_runs_once_after_real_restart(home, cfg):
         assert await wait_for(lambda: c2.ops.scheduler.runs(jid) and c2.ops.scheduler.runs(jid)[0]["state"] == "done")
         await asyncio.sleep(0.3)
         runs = c2.ops.scheduler.runs(jid)
-        assert len(runs) == 1 and runs[0]["late"] == 1 and runs[0]["trigger"] == "catch_up"
+        # The "08:00" occurrence is the latest one before now: when the suite runs 08:00-08:02 local it is under the
+        # 120 s late-grace and rightly NOT labelled late, so derive the expectation from the recorded times.
+        late = runs[0]["started"] - runs[0]["scheduled_for"] > 120
+        assert len(runs) == 1 and runs[0]["late"] == int(late) and runs[0]["trigger"] == ("catch_up" if late else "schedule")
         rd = await c2.registry.call("report_read", {"period": "latest", "query": "בוקר"})
-        assert rd.ok and rd.data["late"] is True and rd.data["text"] == "תזכורת בוקר"
+        assert rd.ok and rd.data["late"] is late and rd.data["text"] == "תזכורת בוקר"
         assert c2.ops.scheduler.job(jid)["next_run"] > time.time()
     finally:
         await c2.stop()

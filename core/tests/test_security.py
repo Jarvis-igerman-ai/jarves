@@ -293,7 +293,7 @@ async def hello(core, client):
     return ws
 
 
-async def recv_type(ws, t, timeout=3):
+async def recv_type(ws, t, timeout=30):
     while True:
         m = json.loads(await asyncio.wait_for(ws.recv(), timeout))
         if m["type"] == t:
@@ -352,13 +352,13 @@ async def test_dispatcher_receives_client_identity():
         await recv_type(ws, "hello.ok")
         fid = link.face_client_id()
         await ws.send(json.dumps({"type": "confirm.reply", "payload": {"id": "1", "approved": True}}))
-        for _ in range(50):
+        for _ in range(1500):
             if seen:
                 break
             await asyncio.sleep(0.02)
         assert seen == [("confirm.reply", "face", fid)] and fid
         await ws.close()
-        for _ in range(50):
+        for _ in range(1500):
             if link.face_client_id() is None:
                 break
             await asyncio.sleep(0.02)

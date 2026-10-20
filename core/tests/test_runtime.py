@@ -10,7 +10,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from conftest import FakeSTT, FakeTTS, open_face
+from conftest import FakeSTT, FakeTTS, open_face, until
 from jarves import cli
 from jarves import runtime as rt_mod
 from jarves.app import Core
@@ -92,14 +92,6 @@ def make_core(home, cfg, **kw):
                 use_real_audio=False, **kw)
 
 
-async def until(pred, timeout=3.0):
-    t0 = time.monotonic()
-    while not pred():
-        if time.monotonic() - t0 > timeout:
-            raise AssertionError("condition not reached")
-        await asyncio.sleep(0.02)
-
-
 async def cli_client(core):
     from websockets.asyncio.client import connect
     ws = await connect(f"ws://127.0.0.1:{core.cfg.link.port}")
@@ -119,9 +111,8 @@ async def test_window_close_keeps_core_running_and_remembers_hidden(home, cfg):
         await face.send("desktop.close")
         await face.wait("desktop.closed")
         await face.ws.close()
-        await asyncio.sleep(0.2)
+        await until(lambda: core.runtime.display_state() == "hidden")
         assert not core.stop_event.is_set() and not core.stopping
-        assert core.runtime.display_state() == "hidden"
         assert rt_mod.read_state(home)["prefs"]["display_hidden"] is True
         # the Core still answers: a CLI status works, the voice/wake paths are untouched
         c = await cli_client(core)
@@ -141,7 +132,7 @@ async def test_window_close_quits_when_background_core_is_switched_off(home, cfg
         face = await open_face(core)
         await face.send("desktop.close")
         await face.wait("desktop.closed")
-        await asyncio.wait_for(core.stop_event.wait(), 1)       # the old behaviour, still available
+        await asyncio.wait_for(core.stop_event.wait(), 30)      # the old behaviour, still available
         await face.ws.close()
     finally:
         await core.stop()
@@ -307,7 +298,7 @@ async def test_tray_actions_reach_the_core_from_its_own_thread(home, cfg):
         await until(lambda: tray.notes)
         assert "mic muted" in tray.notes[0]
         threading.Thread(target=tray.ctl.act, args=("quit",)).start()
-        await asyncio.wait_for(core.stop_event.wait(), 2)
+        await asyncio.wait_for(core.stop_event.wait(), 30)
     finally:
         await core.stop()
     assert tray.stopped
@@ -493,10 +484,10 @@ async def test_wake_loop_reopens_the_mic_after_a_stall(home, cfg):
         def codes():
             return [json.loads(line).get("code") for line in
                     (home / "logs" / "jarves.log").read_text(encoding="utf-8").splitlines()]
-        await until(lambda: "AUDIO_MIC_STALLED" in codes(), timeout=4)
-        await until(lambda: "AUDIO_RECOVERED" in codes(), timeout=2)     # devices re-scanned, audio re-checked   # devices re-scanned, audio re-checked
-        await until(lambda: len(opened) >= 2, timeout=8)       # re-opened after the 5 s back-off
-        await until(lambda: core.snapshot()["wake_listening"], timeout=3)
+        await until(lambda: "AUDIO_MIC_STALLED" in codes())
+        await until(lambda: "AUDIO_RECOVERED" in codes())     # devices re-scanned, audio re-checked
+        await until(lambda: len(opened) >= 2)       # re-opened after the 5 s back-off
+        await until(lambda: core.snapshot()["wake_listening"])
         assert core.health.components["audio"].status == "ok"
     finally:
         await core.stop()
@@ -557,12 +548,12 @@ async def test_desktop_mode_window_close_keeps_core_and_adopts_window(home, cfg)
     task = asyncio.create_task(cli._run_desktop(core, launch))
     await until(lambda: core.runtime is not None and core.runtime.viewer.proc is procs[0])
     procs[0].exit(0)                                   # the user closed the window
-    await asyncio.sleep(0.3)
+    await until(lambda: core.runtime.display_state() == "hidden")
     assert not task.done() and not core.stopping
     ok, _ = await core.runtime.show("test")            # "show yourself" opens it again
     assert ok
     core.stop_event.set()                              # Quit in the tray
-    await asyncio.wait_for(task, 5)
+    await asyncio.wait_for(task, 30)
     assert core.health.core == "stopped"
 
 

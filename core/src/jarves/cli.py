@@ -1093,6 +1093,8 @@ def _cli_features(cfg, home):
     from .features import Features
     from .health import read_snapshot
     from .runtime.lock import held
+    from .setup_wizard import load_addons
+    load_addons()      # add-ons register their switches on import (scheduler, notes, backup...): same list as the Core
 
     def components() -> dict:
         if not held(home):                 # a fresh snapshot from a stopped Core is not live evidence
@@ -1303,6 +1305,8 @@ def main(argv: list[str] | None = None) -> int:
     add_browser_cli(sub)                      # SW-V3 P1.2: jarvis browser status / sites / allow / remove
     from .telegram_channel import add_cli as add_telegram_cli, cmd_telegram
     from .homeassistant import add_cli as add_home_cli, cmd_home
+    from .instagram_channel import add_cli as add_instagram_cli, cmd_instagram
+    add_instagram_cli(sub)                    # V3 P1: jarvis instagram start / status / test / logout (+ serve, refresh)
     add_telegram_cli(sub)                     # V3 P1: jarvis telegram start / status / test / logout
     add_home_cli(sub)                         # V3 P1: jarvis home start / status / test / logout
     wk = sub.add_parser("wake", help="calibrate the wake word to your voice and mic, or train a new wake phrase")
@@ -1376,7 +1380,11 @@ def main(argv: list[str] | None = None) -> int:
             "diagnose": cmd_diagnose, "features": cmd_features, "google": cmd_google,
             "backup": cmd_backup, "restore": cmd_restore, "usage": cmd_usage, "start": cmd_start,
             "show": cmd_display, "hide": cmd_display, "autostart": cmd_autostart,
+<<<<<<< HEAD
             "update": cmd_update, "browser": cmd_browser, "telegram": cmd_telegram, "home": cmd_home}[a.cmd](a, cfg, home)
+=======
+            "update": cmd_update, "telegram": cmd_telegram, "instagram": cmd_instagram, "home": cmd_home}[a.cmd](a, cfg, home)
+>>>>>>> origin/main
 
 
 if __name__ == "__main__":

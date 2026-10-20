@@ -172,6 +172,8 @@ class Core:
         from .telegram_channel import register_telegram
         from .whatsapp import register_whatsapp
         register_telegram(self.registry, self.home, self.health)
+        from .instagram_channel import register_instagram
+        register_instagram(self.registry, self.home, self.health)
         register_whatsapp(self.registry, self.home)
         register_home(self.registry, self.home, self.health)
         self.workspace.listeners.append(lambda name: self._spawn(wsp.note_live(self.live, self.workspace, name)))
@@ -269,6 +271,8 @@ class Core:
         self.dev.speaker_stop()
         self.health.mark("stopping")
         logs.info("core", "CORE_STOPPING", "Core stopping")
+        if getattr(self, "history", None) is not None:
+            self.history.ai_reviews = False         # P0.4 Q06: no AI review starts during shutdown (rules still run)
         for fut, _ in list(self._confirm.values()):
             if not fut.done():
                 fut.set_result(False)              # pending confirmation = denied, never approved by shutdown
@@ -532,6 +536,9 @@ class Core:
             self._dashboard = await asyncio.to_thread(
                 lambda: Dashboard(self.home, self.cfg, workspace=self.workspace, memory=self.memory,
                                   settings=self.settings).start())
+            ops = getattr(self, "ops", None)
+            if ops is not None:      # P0.4 Q04: "Run now"/approve wake the Core's own loop (was: next 30 s poll)
+                self._dashboard.ctx._scheduler = ops.scheduler
         url = self._dashboard.url
         logs.info("core", "DASHBOARD_OPENED", "dashboard opened", port=self._dashboard.port,
                   browser=self.open_url is not None)

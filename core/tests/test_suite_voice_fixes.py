@@ -5,7 +5,7 @@ import time
 from types import SimpleNamespace
 
 import pytest
-from conftest import FakeSTT, FakeTTS, drain_tools, open_face
+from conftest import FakeSTT, FakeTTS, drain_tools, open_face, until
 
 from jarves.app import Core
 from jarves.skills import SkillRegistry, Tool, ToolResult
@@ -62,24 +62,56 @@ def test_greeting_message_carries_the_clock():
     assert "Greet now" in text and "[clock]" in text
 
 
-async def test_clock_loop_sends_nothing_before_the_greeting_was_spoken():
+class FakeMinutes:
+    """Pinned wall clock + fake sleeps for LiveVoice._clock_loop: no real time, no dependence on the minute the
+    suite happens to run in. Short sleeps (the greeting poll) only yield; long ones (the 60 s tick) park on a gate."""
+
+    def __init__(self, monkeypatch, lv, at):
+        self.at, self.gate, self.short, self.long = at, asyncio.Event(), 0, 0
+        real_sleep = asyncio.sleep
+        outer = self
+
+        async def fake_sleep(d, *a):
+            if d >= 10:
+                outer.long += 1
+                await outer.gate.wait()
+                outer.gate.clear()
+            else:
+                outer.short += 1
+                await real_sleep(0)
+        monkeypatch.setattr(live_mod, "asyncio", SimpleNamespace(**{**vars(asyncio), "sleep": fake_sleep}))
+        lv._now = lambda: outer.at
+
+    def tick(self, at):
+        self.at = at
+        self.gate.set()
+
+
+async def test_clock_loop_sends_nothing_before_the_greeting_was_spoken(monkeypatch):
     """A thinking.append right after session.started suppressed the greeting (startup failed after 15 s)."""
+    from datetime import datetime
     lv = make(greeting="שלום!", clock_context=True)
+    clk = FakeMinutes(monkeypatch, lv, datetime(2026, 10, 19, 14, 30, 10))
     task = asyncio.create_task(lv._clock_loop())
-    await asyncio.sleep(0.4)
+    await until(lambda: clk.short >= 20)                     # the loop is polling for the greeting audio
     assert not lv.conn.sent                                  # no event before the greeting audio
     lv._first_audio.set()
     lv._speaking_until = time.monotonic() - 2
-    await asyncio.sleep(0.5)
+    await until(lambda: clk.long >= 1)                       # greeting done: the loop is now in its 60 s wait
     assert not lv.conn.sent                                  # this minute's clock already went with the greeting
+    clk.tick(datetime(2026, 10, 19, 14, 31, 0))              # the next minute does get its clock
+    await until(lambda: lv.conn.sent)
+    assert [s[0] for s in lv.conn.sent] == ["thinking"] and "14:31" in lv.conn.sent[0][1]
     task.cancel()
     await asyncio.gather(task, return_exceptions=True)
 
 
-async def test_clock_loop_without_greeting_sends_at_once():
+async def test_clock_loop_without_greeting_sends_at_once(monkeypatch):
+    from datetime import datetime
     lv = make(clock_context=True)
+    clk = FakeMinutes(monkeypatch, lv, datetime(2026, 10, 19, 14, 30, 10))
     task = asyncio.create_task(lv._clock_loop())
-    await asyncio.sleep(0.1)
+    await until(lambda: clk.long >= 1)
     assert [s[0] for s in lv.conn.sent] == ["thinking"]
     task.cancel()
     await asyncio.gather(task, return_exceptions=True)

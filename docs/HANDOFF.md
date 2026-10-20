@@ -5,6 +5,30 @@
 - Evidence: `core/tests/test_browser.py` **18 passed** (policy, dashboard API, CLI, plus two tests driving the **real headless Edge 155** against a local 127.0.0.1 test page: read-only ask/decline, refused click/type, hidden text not read, taint guard, blocked/bad URLs, allow-listed search/click without prompts, refused off-host link, password/purchase/card confirmations, redirect catch). Related suites (setup_wizard, guides, capabilities, features, camera, feature_setup, launcher_help, dashboard, core, security, startup, readiness, swv3_p01, dashboard_wph, m3_core, packaging, privacy_state) **230 passed, 1 skipped**. `jarvis setup --check-addons` browser row OK; headless dashboard smoke of #/browser (add a site) without page errors. CI installs no extras: the two real-browser tests skip there. Playwright 1.64.0 was installed into the shared `core/.venv` (`uv pip install`) to run them.
 - Not done / UNVERIFIED: no real spoken conversation with the browser yet; installer build with the browser extra not run (payload size + payload_check UNVERIFIED); Pi untested (#18). Downloads into the approved sandbox (work package) not implemented: downloads are refused for now.
 - Questions for the user: (1) Keep logins between sessions for allow-listed sites (persistent private profile) or always start fresh (current, safest)? (2) Should "registrations / account changes / sending messages" on allow-listed sites also always ask (today only purchases/payments/credentials do, per your answer)? (3) Want downloads saved into the Files sandbox (asks first), or keep them blocked?
+## SW-V3 P0.4 installed-system QA, virtual mic/speaker (20 Oct 2026) — #17, branch `v3-p04-qa`
+
+- Matrix + bug table: [reviews/SWV3_P04_BUG_TABLE.md](reviews/SWV3_P04_BUG_TABLE.md); system report regenerated:
+  [reviews/PRE_USE_TEST_REPORT_SYSTEM.md](reviews/PRE_USE_TEST_REPORT_SYSTEM.md) (now incl. V01-V08).
+- Suites extended, not replaced: `suite_system.py` V01-V08 (privacy strip, feature switches CLI/dashboard/Core,
+  camera preview with the Core's FakeCamera = virtual camera, calendar guardrails with Google NOT connected,
+  scheduler incl. catch-up across a real restart); `suite_voice.py` 32-35 (live privacy strip, camera-off and
+  Google-not-connected honesty, barge-in with half_duplex=false); `suite_music.py` runs mock groups with Pear closed.
+- Fixed in Core: Q01 `jarvis features` missed add-on switches (scheduler, notes, backup...); Q04 dashboard "Run now"
+  waited for the 30 s poll; Q05 greeting nudge when GPT-Live sends nothing after start (live effect UNVERIFIED: not
+  re-occurred in 13 later starts); Q06 AI review started during shutdown kept memory.db locked / a reservation held.
+- Evidence: real Core/GPT-Live/plan/CLI/HTTP + virtual mic/speaker/camera; ~15.6 live voice min (~$0.8). NOT tested:
+  physical mic/speaker/camera, installed package/clean setup (JARVES not installed here; installing changes
+  PATH/autostart = owner gate), Pi, Google account, real Pear (closed).
+- Open: Q07 wake false positives 4/20 at 0.15 (model limit), Q08 one spoken alert per tick (observation).
+
+### Questions for the user (P0.4)
+- May the agent install the CI installer build on this PC (or do you test it on the second PC per docs/INSTALL_TEST.md)?
+  Recommendation: second PC, so this PC's dev state stays clean. Status: **USER DECISION REQUIRED**.
+- Real-Pear music rows (S01-S13, V01-V10, K01) need Pear Desktop open (volume is forced to 0 by the suite). Run them
+  when you leave Pear open? Status: **USER DECISION REQUIRED**.
+- Q06 trade-off: a conversation that ends because JARVES is stopping no longer gets the automatic AI review (rules
+  still run; the dashboard Review button can run it). Recommendation: keep. Status: **ANSWERED by agent, reversible**.
+
 ## V3 P1 channels: Telegram, morning briefing, WhatsApp handoff, Home Assistant (20 Oct 2026) — [#17](https://github.com/igalgerman/JARVIS/issues/17)
 
 - Branch `v3-p1-channels` (from `swv2-integrate`). Four add-ons, each with a feature switch + capability row + setup-wizard group + bundle check + Hebrew/English guide + tests (`core/tests/test_channels.py`, 27 tests, real HTTP against local fake servers in `core/tests/channels_fakes.py`; full suite 1160 passed, 3 skipped).
@@ -661,6 +685,10 @@ See [docs/reviews/S1_T03R1_ENGINEERING_REVIEW.md](reviews/S1_T03R1_ENGINEERING_R
 - Installer signing: research free options (SignPath OSS etc.); stay unsigned meanwhile.
 - Defaults: ask before any outward action; keep conversations/logs 90 days then summarize into memory; proactive suggestions rare/important only (quiet hours respected); installer pre-selects only core + music.
 
+## Instagram channel (#17, branch v3-p1-instagram)
+Built per docs/plans/INSTAGRAM_CHANNEL.md: `core/src/jarves/instagram_channel.py`, `jarvis instagram start|status|test|logout` (+ `serve` webhook receiver on 127.0.0.1, `refresh` long-lived token), feature `instagram` (off by default, SAFE_OFF, group Channels, bundle check, guide `instagram.toml`, capabilities row via features.register). Token/app secret/verify token only in secrets.env. Inbox (SQLite, dedup), DMs read aloud as untrusted data, LLM only drafts, `instagram_send` is destructive with impact None (exact text confirmed from every origin, one draft per send), 24h window checked at draft and send, audit log `instagram/audit.jsonl`. Tests: `tests/test_instagram.py` against a local fake Graph API (real HTTP) and a real webhook server.
+Unverified: never run against real Instagram/Meta (needs owner's Meta app + Business/Creator account); endpoint paths/fields (graph.instagram.com/v21.0 /me, /me/conversations, /me/messages, /refresh_access_token) follow Meta docs from memory and must be checked at first live run; no tunnel set up; declines at the prompt are not audited (the registry never calls the tool).
+Questions for the user: (1) Is the Instagram account Business/Creator? (2) Confirmation surface: voice+screen as built, or add Telegram buttons? (3) OK to run `jarvis instagram serve` behind a Cloudflare Tunnel, or poll only?
 ## Questions for the user (from research, branch v3-research, docs/plans/)
 - Signing: SignPath OSS needs a public repo + OSI license; Azure Artifact Signing ~$9.99/mo, region-limited (verify price). Stay unsigned? Open-source the installer?
 - Instagram: is the account Business/Creator and linked to a Facebook Page? Confirm sends by voice, dashboard or Telegram?
