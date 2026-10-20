@@ -1,3 +1,6 @@
+> [!IMPORTANT]
+> **SINGLE ACTIVE REPOSITORY — 20 October 2026.** This public repository is the sole source of truth for JARVES code, documentation, issues, CI and releases. The former private repository `igalgerman/JARVIS` is **deprecated**, preserved read-only for historical V4 branch/issue migration, and should be GitHub-archived only once migration is verified. **Do not push or synchronize changes back to the private repository.** Sensitive data must not be copied into this public repo.
+
 # JARVES — Personal Companion Robot
 
 A cute, friendly, premium-looking stationary home companion. **Simulation first, practical DIY build later.**
