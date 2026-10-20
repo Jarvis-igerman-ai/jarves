@@ -140,6 +140,35 @@ def _norm(s: str) -> str:
     return re.sub(r"[\s_\-\"'״׳.?!,]+", " ", s.lower()).strip()
 
 
+def help_text(g: Guide) -> str:
+    """Plain-text topic help for `jarvis help <topic>`: what it is, steps, example phrases, cost, privacy, problems.
+    Static guide text only (no live state: that is the dashboard Guides page and JARVES's own explain_feature)."""
+    out = [f"{g.title_he} / {g.title_en}", "", g.what_he, g.what_en, ""]
+    if g.steps:
+        out.append("Steps / שלבים:")
+        for i, st in enumerate(g.steps, 1):
+            out += [f"  {i}. {st.he}", f"     {st.en}"]
+        out.append("")
+    if g.say:
+        out.append("Say / אמרו:")
+        out += [f"  - {he}  /  {en}" for he, en in g.say]
+        out.append("")
+    out += [g.expect_he, g.expect_en, "", f"Cost / עלות: {g.cost_he} {g.cost_en}",
+            f"Privacy / פרטיות: {g.privacy_he} {g.privacy_en}"]
+    for p in g.problems:
+        out += ["", f"Problem / בעיה: {p['he']} / {p['en']}", f"  {p['fix_he']}", f"  {p['fix_en']}"]
+    if g.links:
+        out += ["", "See also / ראו גם: " + ", ".join(g.links)]
+    return "\n".join(out).strip()
+
+
+def topics_text() -> str:
+    gs = sorted(load().values(), key=lambda g: (g.order, g.id))
+    lines = ["JARVES help topics / נושאי עזרה (jarvis help <topic>):", ""]
+    lines += [f"  {g.id:<22} {g.title_he} / {g.title_en}" for g in gs]
+    return "\n".join(lines)
+
+
 def find(name: str) -> Guide | None:
     """A guide by id, feature id, title or alias (Hebrew or English, partial words allowed)."""
     gs = load()
