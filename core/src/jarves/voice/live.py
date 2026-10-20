@@ -262,7 +262,8 @@ REDELEGATE_RESULT_NOTE = ("The backend finished the user's last request. Tell th
 REDELEGATE_FAIL_NOTE = ("The user's last request was NOT done: it never reached the backend. Tell the user honestly in "
                         "one short sentence that it did not go through and ask them to say it again. Do not say it "
                         "was done.")
-OWN_DELIVERY_WAIT_S = 1.5       # a Core-started answer GPT-Live does not start saying within this long is handed over
+OWN_DELIVERY_WAIT_S = 3.0       # a Core-started answer GPT-Live does not start saying within this long is handed over
+# (live probe 20 Oct: GPT-Live itself said the result 0.8 s after the backend finished)
 # A claimed memory the user never asked for (CV-06, long conversation: "לאחותי קוראים נועה" -> "רשמתי שנועה גרה בחיפה"):
 # nothing must be saved (memory is only on request), so the claim is taken back instead of made true.
 UNASKED_CLAIM_NOTE = ("Correction needed: you just told the user that you saved or noted something ('{verb}'), but the "
@@ -1180,8 +1181,14 @@ class LiveVoice(SessionLifecycle):
         elif t == "session.delegation.created":
             logs.info("live", "LIVE_DELEGATION", "GPT-Live delegated work", target=str(_get(g("delegation"), "target")),
                       delegation=str(_get(g("delegation"), "id") or ""))
-            self._delegations += 1
-            self._deleg_turn[str(_get(g("delegation"), "id") or "")] = (self._user_turn_n, time.monotonic())
+            did = str(_get(g("delegation"), "id") or "")
+            if self._own_pending is not None and _get(g("delegation"), "target") == "responses":
+                # live probe 20 Oct: a Core response.create arrives as an ordinary delegation (GPT-Live then speaks
+                # its result itself); it is ours, not the model's own delegation for the user turn
+                self._own_pending, self._own_delegation = None, did
+            else:
+                self._delegations += 1
+            self._deleg_turn[did] = (self._user_turn_n, time.monotonic())
             if self.budget is not None and _get(g("delegation"), "target") == "responses":
                 await self._take_credit("delegation")
         elif t == "response.event":
@@ -1638,16 +1645,12 @@ class LiveVoice(SessionLifecycle):
         """Start a backend response from the Core with the user's words (the session's own backend config, Skill
         tools and approvals). Its result is said through _deliver_own; if it cannot start, the user hears so."""
         self._redelegated_turn = turn
-        res = None
-        if self.budget is not None:
-            try:
-                res = self.budget.reserve("ai_requests")
-            except BudgetExceeded:
-                logs.warn("live", "AI_BUDGET", "no budget to hand an undelegated request to the backend")
-                await self.announce(REDELEGATE_FAIL_NOTE, max_wait_s=10.0, tag="redelegate")
-                return False
-            self._pending.append(res)
-        self._own_pending, self._own_res = self._delegations, res
+        if self._input_closed:                      # budget F1: no new backend work once the credit ran out
+            await self.announce(REDELEGATE_FAIL_NOTE, max_wait_s=10.0, tag="redelegate")
+            return False
+        # Billing: the server announces this response as an ordinary session.delegation.created, which takes the
+        # held credit like any delegation (_take_credit); nothing is reserved here twice.
+        self._own_pending, self._own_res = self._delegations, None
         try:
             await self.conn.response.item.create(item={"type": "message", "role": "user", "content": [
                 {"type": "input_text", "text": REDELEGATE_INPUT.format(text=text.strip()[:600])}]},
@@ -1795,6 +1798,7 @@ class LiveVoice(SessionLifecycle):
         self._confirm_pending = True
         self._confirm_gen = getattr(self, "_confirm_gen", 0) + 1
         self._confirm_voice = bool(voice)
+        self._confirm_prompt = prompt
         if self.running and self.conn is not None:
             self._spawn(self._confirm_note_later(self._confirm_gen), "confirm-note")
 
@@ -1804,6 +1808,11 @@ class LiveVoice(SessionLifecycle):
             return
         try:
             note = CONFIRM_NOTE_VOICE if getattr(self, "_confirm_voice", False) else CONFIRM_NOTE
+            prompt = str(getattr(self, "_confirm_prompt", "") or "").strip()
+            if prompt:
+                # live probe 20 Oct: for a Core-started request GPT-Live did not know what was being approved and
+                # asked "to check the time, yes or no?"; the approval's own read-back names it (CV-14 too)
+                note += f"\nThe action waiting for approval: {prompt[:300]}"
             await self.conn.session.commentary.append(content=note, delegation_id=None,
                                                       event_id="jarves_progress_confirm")
             logs.info("live", "LIVE_CONFIRM_NOTE", "asked the user to approve on the screen")

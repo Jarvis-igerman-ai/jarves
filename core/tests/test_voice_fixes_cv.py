@@ -107,6 +107,30 @@ async def test_cv15_undelegated_wait_is_handed_to_the_backend_and_its_result_sai
         await _cleanup(lv)
 
 
+async def test_cv15_handover_arrives_as_a_delegation_and_gpt_live_says_it(monkeypatch):
+    """Live probe 20 Oct: the Core's response.create comes back as session.delegation.created and GPT-Live speaks
+    the result itself: no 'did not go through' note, no second hand-over of the result."""
+    monkeypatch.setattr(live_mod, "REDELEGATE_AFTER_S", 0.05)
+    monkeypatch.setattr(live_mod, "OWN_DELIVERY_WAIT_S", 0.05)
+    lv, sent = make_live()
+    try:
+        await _user(lv, "תמחק מהזיכרון את הצבע האהוב עליי")
+        await _jarves(lv, "רגע...")
+        await asyncio.sleep(0.3)
+        n0 = lv._delegations
+        await lv.handle_event({"type": "session.delegation.created", "delegation": {"id": "d9", "target": "responses"}})
+        assert lv._own_delegation == "d9" and lv._own_pending is None and lv._delegations == n0
+        for ev in ({"type": "response.created", "response": {"id": "r9"}},
+                   {"type": "response.output_text.done", "text": "מחקתי את הצבע האהוב עליך."},
+                   {"type": "response.completed", "response": {"id": "r9"}}):
+            await lv.handle_event({"type": "response.event", "delegation_id": "d9", "event": ev})
+        await _jarves(lv, "מחקתי את הצבע האהוב עליך.")
+        await asyncio.sleep(1.0)
+        assert not [x for x in sent.items if x[0] == "commentary"]
+    finally:
+        await _cleanup(lv)
+
+
 async def test_cv15_no_handover_when_the_model_delegates_after_its_lead_in(monkeypatch):
     monkeypatch.setattr(live_mod, "REDELEGATE_AFTER_S", 0.3)
     lv, sent = make_live()
