@@ -151,7 +151,7 @@ def seed_legacy(home: Path) -> None:
 
 
 SKIP_DIRS = {"logs", "backups", "updates"}
-SKIP_FILES = {"backup_state.json", "schema.json", "health.json"}
+SKIP_FILES = {"backup_state.json", "schema.json", "health.json", "updates.json"}
 
 
 def snapshot(home: Path, *, include_marker: bool = False) -> dict:
