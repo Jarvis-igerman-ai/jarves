@@ -58,11 +58,7 @@ ADDON_MODULES = ("jarves.telegram_channel", "jarves.instagram_channel", "jarves.
                  "jarves.operations", "jarves.guides", "jarves.skills.generated", "jarves.browser")
 # Privacy-sensitive or outward-acting: OFF on the first run whatever else says; ON only after an explicit yes.
 SAFE_OFF = frozenset({"camera", "face_recognition", "camera_when_away", "gmail_send", "calendar_write",
-<<<<<<< HEAD
-                      "dashboard_lan", "browser", "telegram", "home_assistant"})
-=======
-                      "dashboard_lan", "telegram", "home_assistant", "instagram"})
->>>>>>> origin/main
+                      "dashboard_lan", "browser", "telegram", "home_assistant", "instagram"})
 GOOGLE_FEATURES = ("google_calendar", "calendar_write", "gmail_read", "gmail_send", "google_contacts")
 # (id, Hebrew, English, feature ids). A feature missing here lands in "other" (never hidden); a test demands
 # that every registered feature is listed.

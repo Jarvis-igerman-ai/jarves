@@ -1380,11 +1380,7 @@ def main(argv: list[str] | None = None) -> int:
             "diagnose": cmd_diagnose, "features": cmd_features, "google": cmd_google,
             "backup": cmd_backup, "restore": cmd_restore, "usage": cmd_usage, "start": cmd_start,
             "show": cmd_display, "hide": cmd_display, "autostart": cmd_autostart,
-<<<<<<< HEAD
-            "update": cmd_update, "browser": cmd_browser, "telegram": cmd_telegram, "home": cmd_home}[a.cmd](a, cfg, home)
-=======
-            "update": cmd_update, "telegram": cmd_telegram, "instagram": cmd_instagram, "home": cmd_home}[a.cmd](a, cfg, home)
->>>>>>> origin/main
+            "update": cmd_update, "browser": cmd_browser, "telegram": cmd_telegram, "instagram": cmd_instagram, "home": cmd_home}[a.cmd](a, cfg, home)
 
 
 if __name__ == "__main__":
