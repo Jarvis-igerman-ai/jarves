@@ -208,7 +208,11 @@ async def approval_flow(h, s, request: str, answer: str | None, *, wait_ask: flo
     asked = await wait_for(lambda: bool(ev_codes(s, "APPROVAL_ASKED", mark)), wait_ask)
     t_ask = time.time()
     ask_ev = (ev_codes(s, "APPROVAL_ASKED", mark) or [{}])[0]
-    # JARVES says what he wants to do; wait until he is quiet (and at least VOICE_MIN_AGE_S after the request)
+    # JARVES says what he wants to do (the confirm note comes ~2.5 s after the request): wait for the note and for
+    # the speech after it, then for quiet - a person answers the question, not the "רגע" before it
+    await wait_for(lambda: bool(ev_codes(s, "LIVE_CONFIRM_NOTE", mark)), 8)
+    t_note = time.time()
+    await wait_for(lambda: VAudio.last_play > t_note - 0.5, 6)
     await wait_for(lambda: time.time() - VAudio.last_play >= 1.6 and time.time() - t_ask >= 2.0, 25)
     spoken_q = round(speech_s(t_ask - 0.5, time.time()), 1)
     said_q = " / ".join(e.get("text", "") for e in s.log.since(mark) if e["code"] == "LIVE_JARVES_SAID")
@@ -229,7 +233,7 @@ async def approval_flow(h, s, request: str, answer: str | None, *, wait_ask: flo
     await asyncio.sleep(1.5)
     ev = s.log.since(mark)
     s.face.confirm_policy = "approve"
-    return {"request": request, "answer": answer, "mic": where, "asked": asked,
+    return {"request": request, "answer": answer, "mic": where, "approval_asked": asked,
             "ask_after_s": round(t_ask - t0, 1), "shown": ask_ev.get("shown"), "kind": ask_ev.get("kind"),
             "risk": ask_ev.get("risk"), "jarves_asked_aloud_s": spoken_q, "said_before_answer": said_q[:300],
             "popup_open_while_waiting": popup_procs, "decided": decided, "decision": dec.get("decision"),
@@ -337,8 +341,8 @@ async def s_lists(h, r):
     items_yes = [x["text"] for x in lists.items("shopping", True)]
     ok_add = "list_add" in a["tools"] and len(items_a) >= 3
     ok_show = has(b["said"], "חלב") and has(b["said"], "לחם")
-    ok_no = no["asked"] and no["decision"] == "denied" and no["channel"] == "voice" and len(items_no) == len(items_a)
-    ok_yes = yes["asked"] and yes["decision"] == "approved" and yes["channel"] == "voice" and not items_yes
+    ok_no = no["approval_asked"] and no["decision"] == "denied" and no["channel"] == "voice" and len(items_no) == len(items_a)
+    ok_yes = yes["approval_asked"] and yes["decision"] == "approved" and yes["channel"] == "voice" and not items_yes
     shown_ok = all(set(x.get("shown") or []) >= {"popup", "face", "voice"} for x in (no, yes))
     cancels = all(x["face_confirm_cancels"] >= 1 for x in (no, yes))
     r.ok = ok_add and ok_show and ok_no and ok_yes and shown_ok and cancels
@@ -399,7 +403,7 @@ class _Page(http.server.SimpleHTTPRequestHandler):
           "voice, the code word on the page is spoken",
           "browser_open + browser_read called (or one of them ok), JARVES says the code word 'אבטיח'; no ERROR")
 async def s_browser(h, r):
-    srv = socketserver.TCPServer(("127.0.0.1", 0), _Page)
+    srv = socketserver.TCPServer(("127.0.0.1", 8811), _Page)
     port = srv.server_address[1]
     th = threading.Thread(target=srv.serve_forever, daemon=True)
     th.start()
@@ -408,7 +412,7 @@ async def s_browser(h, r):
         if s.boot_error:
             r.ok, r.key = False, s.boot_error
             return
-        x = await h.turn(s, f"תפתח בדפדפן את הכתובת localhost נקודתיים {port} ותגיד לי מה מילת הקוד שכתובה בדף",
+        x = await h.turn(s, "תפתח בדפדפן את האתר לוקאל הוסט, פורט שמונה שמונה אחת אחת, ותגיד לי מה מילת הקוד שכתובה בדף",
                          label="browser", first_timeout=45)
         await h.quiet(s, 3.0, 40)
         said = " / ".join(e.get("text", "") for e in s.log.codes("LIVE_JARVES_SAID"))
@@ -444,8 +448,12 @@ async def s_briefing(h, r):
 async def s_handoff(h, r):
     s = await h.get(V3)
     n0 = len(OPENED_URLS)
-    x = await approval_flow(h, s, "תכין הודעת וואטסאפ לדני, המספר שלו אפס חמש ארבע, אחת שתיים שלוש, ארבע חמש שש "
-                                  "שבע, שאני מאחר בעשר דקות", "כן", wait_ask=60)
+    d = await h.turn(s, "תכין הודעת וואטסאפ לדני, המספר שלו אפס חמש ארבע, אחת שתיים שלוש, ארבע חמש שש שבע, "
+                        "שאני מאחר בעשר דקות", label="whatsapp-draft", first_timeout=40)
+    # two steps, as a person does it: "כן" to the read-back, then "כן" to the approval it opens
+    x = await approval_flow(h, s, "כן", "כן", wait_ask=30)
+    x["tools"] = d["tools"] + x["tools"]
+    x["said"] = d["said"] + " / " + x["said"]
     urls = OPENED_URLS[n0:]
     wa = [u for u in urls if "wa.me/972541234567" in u]
     claim_sent = has(x["said"], "שלחתי את ההודעה", "ההודעה נשלחה", "I sent")
@@ -473,11 +481,20 @@ async def s_profile(h, r):
     no = await approval_flow(h, s, "תעבור בבקשה לפרופיל של דנה", "לא")
     sp_no = SPAWNED[n0:]
     yes = await approval_flow(h, s, "בכל זאת, תעבור לפרופיל של דנה", "כן")
-    sp_yes = SPAWNED[n0 + len(sp_no):]
-    r.ok = (no["asked"] and no["decision"] == "denied" and not sp_no and yes["asked"]
-            and "voice" not in (yes.get("shown") or []) and not sp_yes)
-    r.key = (f"'לא' -> {no['decision']} via {no['channel']} spawned {sp_no}; 'כן' -> {yes['decision']} via "
-             f"{yes['channel']}, shown {yes.get('shown')}, spawned {sp_yes}")
+    sp_voice = SPAWNED[n0 + len(sp_no):]
+    voice_refused = yes["approval_asked"] and not yes["decided"] and not sp_voice
+    screen = None
+    pend = s.core.approvals.pending() if s.core.approvals else []
+    if pend:                                      # the owner now approves ON THE SCREEN (the face dialog)
+        req = [p for t, ty, p in s.face.msgs if ty == "confirm.request"]
+        if req:
+            await s.face.send("confirm.reply", {"id": req[-1]["id"], "approved": True})
+            await wait_for(lambda: len(SPAWNED) > n0 + len(sp_no), 10)
+            screen = SPAWNED[n0 + len(sp_no):]
+    r.ok = (no["approval_asked"] and no["decision"] == "denied" and not sp_no and voice_refused
+            and screen == [("dana", ("run", "--background", "--show"))])
+    r.key = (f"'לא' -> {no['decision']} via {no['channel']} spawned {sp_no}; spoken 'כן' refused {voice_refused} "
+             f"(decided {yes['decision']}); then screen approve -> spawned {screen}")
     r.details = [no, yes]
     await h.shutdown(s)
 
