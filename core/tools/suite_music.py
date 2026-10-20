@@ -278,6 +278,10 @@ class Safety:
         if self._task:
             self._task.cancel()
         out = {}
+        if not getattr(self, "real", True):
+            await self.admin.close()
+            self.final = {"real_pear": "not touched (mock-only groups)"}
+            return self.final
         try:
             await self.set_volume(0)
             for attempt in range(4):
@@ -586,6 +590,8 @@ async def e02(c: Ctx) -> R:
     ev.append(f"health: {h}; requests: {[(m, pth, st) for _, m, pth, st in lt.log]}")
     ok &= not auth and h[0] == "degraded" and not idf.with_name(idf.name + ".paired").exists()
     await p.close()
+    if not ok and h[0] == "unavailable":       # Pear closed: this scenario needs the real port
+        return R(False, "BLOCKED: Pear Desktop not running (real port needed)", "", ev)
     return R(ok, f"/auth calls {len(auth)}, {len(lt.log)} requests", "", ev)
 
 
@@ -1287,7 +1293,12 @@ async def main() -> None:
     WORK.mkdir(parents=True, exist_ok=True)
     store = {} if args.fresh else load_store()
     safety = Safety(args.restore_volume)
-    await safety.start()
+    # errors/robust use mock transports only: they must run (and are useful) while Pear is closed (P0.4 B-QA02)
+    safety.real = bool(groups & {"skill", "voice", "soak"})
+    if safety.real:
+        await safety.start()
+    else:
+        print("[safety] mock-only groups: real Pear is not touched")
     rows: list[tuple[str, str, R, float]] = []
 
     def keep(sid, group, name, r, secs):
@@ -1346,11 +1357,13 @@ async def main() -> None:
         await ctx.player.close()
     finally:
         final = await safety.finish()
-        store["_safety"] = final
+        if safety.real or "_safety" not in store:      # a mock-only run keeps the last real-Pear safety record
+            store["_safety"] = final
         STORE.write_text(json.dumps(store, ensure_ascii=False, indent=1, default=str), encoding="utf-8")
-        write_report(store, final)
         table(rows)
-        print(f"report: {REPORT}")
+        if safety.real:                        # a mock-only run never rewrites the real-Pear report
+            write_report(store, final)
+            print(f"report: {REPORT}")
 
 
 if __name__ == "__main__":

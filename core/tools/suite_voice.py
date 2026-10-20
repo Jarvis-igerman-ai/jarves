@@ -1378,6 +1378,122 @@ async def s_soak(h, r):
     r.details = [{k: v for k, v in x.items() if k != "turn"}, x["turn"]]
 
 
+# ============================================================================================ SW-V2 features (P0.4)
+V2 = "v2live"
+
+
+def strip(s: Session, since: float = 0.0) -> list[tuple[float, dict]]:
+    return [(t, p) for t, ty, p in s.face.msgs if ty == "privacy.state" and t >= since]
+
+
+@scenario(32, "privacy_strip_live", "Privacy strip in a REAL GPT-Live session: the face's privacy.state follows the "
+          "session (mic, cloud audio, speaker); mute from the strip ends it",
+          "while the session is open and JARVES is quiet: mic listening + cloud_audio sending (on); while JARVES "
+          "speaks: speaker speaking; never cloud 'off' while the session is open; mic.set_mute -> mic muted + cloud "
+          "off within 2 s and the session ends")
+async def s_privacy_live(h, r):
+    s = await h.get(V2)
+    if s.boot_error:
+        r.ok, r.key = False, s.boot_error
+        return
+    x = await h.turn(s, "שלום, מה שלומך?", label="privacy-live")
+    await h.quiet(s, 2.0, 30)
+    t_open = time.time()
+    await asyncio.sleep(1.0)
+    msgs = strip(s)
+    quiet_open = [p for t, p in strip(s, t_open - 0.5)] or [p for _, p in msgs[-1:]]
+    sending = [p for _, p in msgs if p["cloud_audio"]["on"] and p["mic"]["state"] == "listening"]
+    speaking = [p for _, p in msgs if p["speaker"]["state"] == "speaking"]
+    gated = [p for _, p in msgs if p["mic"]["state"] == "gated"]
+    off_while_open = [p["cloud_audio"]["state"] for p in quiet_open if p["cloud_audio"]["state"] == "off"]
+    tm = time.time()
+    await s.face.send("mic.set_mute", {"muted": True})
+    # muted at once = no microphone audio leaves (cloud_audio.on false); the session itself then closes ("off")
+    muted = await wait_for(lambda: any(p["mic"]["state"] == "muted" and not p["cloud_audio"]["on"]
+                                       for _, p in strip(s, tm)), 2.0)
+    dt = next((round(t - tm, 2) for t, p in strip(s, tm) if p["mic"]["state"] == "muted"), None)
+    ended = await wait_for(lambda: s.core.live is None and any(p["cloud_audio"]["state"] == "off"
+                                                                for _, p in strip(s, tm)), 8)
+    dt_off = next((round(t - tm, 2) for t, p in strip(s, tm) if p["cloud_audio"]["state"] == "off"), None)
+    await s.face.send("mic.set_mute", {"muted": False})
+    await h.shutdown(s)
+    r.ok = bool(sending) and bool(speaking) and not off_while_open and muted and ended and answered(x)
+    r.key = (f"{len(msgs)} privacy.state msgs; listening+sending {len(sending)}, speaking {len(speaking)}, gated "
+             f"{len(gated)}; muted (no mic audio sent) after {dt} s, cloud off after {dt_off} s, session ended {ended}")
+    r.details = [x, {"states": [(p["mic"]["state"], p["cloud_audio"]["state"], p["speaker"]["state"])
+                                for _, p in msgs][:40]}]
+
+
+@scenario(33, "camera_off_honest", "Camera switched OFF (default): 'what do you see?' gets an honest answer",
+          "answered; says the camera is off / not available (no description of a scene); no camera_* tool succeeded; "
+          "no LIVE_FALSE_ACTION_CLAIM; the camera stayed closed (privacy camera state disabled/unavailable)")
+async def s_camera_off(h, r):
+    s = await h.get(V2)
+    if s.boot_error:
+        r.ok, r.key = False, s.boot_error
+        return
+    mark = s.log.mark()
+    x = await h.turn(s, "מה אתה רואה עכשיו במצלמה?", label="camera-off", first_timeout=40)
+    ev = s.log.since(mark)
+    cam_ok = [e for e in ev if e["code"] == "TOOL_RESULT" and str(e.get("tool", "")).startswith("camera_")
+              and e.get("ok")]
+    false_claim = [e for e in ev if e["code"] == "LIVE_FALSE_ACTION_CLAIM"]
+    honest = has(x["said"], "כבויה", "כבוי", "לא מחובר", "אין לי מצלמה", "לא זמינה", "לא פעילה", "להדליק", "לא יכול לראות",
+                 "אינני רואה", "לא רואה", "off")
+    cams = {p["camera"]["state"] for _, p in strip(s)}
+    r.ok = answered(x) and honest and not cam_ok and not false_claim and cams <= {"disabled", "unavailable"}
+    r.key = f"honest {honest}, camera tools ok {len(cam_ok)}, false claims {len(false_claim)}, strip camera {sorted(cams)}"
+    r.details = [x]
+
+
+@scenario(34, "calendar_not_connected", "Google NOT connected: a calendar add request is never claimed as done",
+          "answered; no 'הוספתי/קבעתי/רשמתי ביומן' claim; mentions connecting Google (or that the calendar is not "
+          "connected); no calendar write tool ran; no LIVE_FALSE_ACTION_CLAIM left uncorrected")
+async def s_calendar_off(h, r):
+    s = await h.get(V2)
+    if s.boot_error:
+        r.ok, r.key = False, s.boot_error
+        return
+    mark = s.log.mark()
+    x = await h.turn(s, "תוסיף לי ביומן פגישה עם רופא השיניים מחר בעשר בבוקר", label="calendar-off", first_timeout=40)
+    ev = s.log.since(mark)
+    writes = [e for e in ev if e["code"] == "TOOL_RESULT" and str(e.get("tool", "")).startswith("calendar_")
+              and e.get("ok")]
+    claim = has(x["said"], "הוספתי", "קבעתי", "רשמתי ביומן", "הכנסתי ליומן", "נוסף ליומן", "האירוע נוצר")
+    connect = has(x["said"], "גוגל", "Google", "לחבר", "מחובר", "חיבור")
+    false_claim = [e for e in ev if e["code"] == "LIVE_FALSE_ACTION_CLAIM"]
+    r.ok = answered(x) and not claim and connect and not writes
+    r.key = (f"claimed done {claim}, mentions connecting {connect}, calendar tools ok {len(writes)}, tools "
+             f"{x['tools']}, false-claim detector {len(false_claim)}")
+    r.details = [x]
+
+
+@scenario(35, "barge_in", "Barge-in with voice.half_duplex = false (the headphones/AEC setting): talking over a long "
+          "answer stops it and the new question is answered",
+          "JARVES's audio stops <= 2.0 s after the interrupting speech starts; the interrupting question is answered "
+          "correctly (4); session open. (With the default half_duplex = true the mic is gated while he speaks: "
+          "barge-in is off by design.)")
+async def s_barge(h, r):
+    s = await h.boot("barge", over={"voice": {"half_duplex": False}})
+    if s.boot_error:
+        r.ok, r.key = False, s.boot_error
+        return
+    await h.say("ספר לי בבקשה סיפור ארוך ומפורט על ההיסטוריה של העיר ירושלים, לפחות דקה.")
+    t_q = time.time()
+    talking = await wait_for(lambda: speech_s(t_q, time.time()) >= 3.0, 40)
+    t_int = time.time()
+    x = await h.turn(s, "רגע, עצור. כמה זה שתיים ועוד שתיים?", label="barge-in")
+    segs = segments(t_int - 0.5, t_int + 30)
+    stop_s = round(segs[0][1] - t_int, 2) if segs and segs[0][0] <= t_int + 0.3 else None
+    correct = has(x["said"], "4", "ארבע")
+    barges = (getattr(s.core.live, "_stats", {}) or {}).get("barge_ins") if s.core.live else None
+    await h.shutdown(s)
+    r.ok = talking and stop_s is not None and stop_s <= 2.0 and correct and x["open"]
+    r.key = f"long answer playing {talking}; old speech stopped {stop_s} s after the interruption; answered 4 {correct}; " \
+            f"barge_ins {barges}"
+    r.details = [x, {"segments_after_interrupt": [[round(a - t_int, 1), round(b - t_int, 1)] for a, b in segs][:8]}]
+
+
 # ============================================================================================ runner + report
 def parse_only(spec: str | None) -> list[int]:
     if not spec:
@@ -1392,7 +1508,7 @@ def parse_only(spec: str | None) -> list[int]:
     return out
 
 
-LIVE_COST = {19: 1.0, 20: 1.5, 21: 3.0, 22: 0, 23: 0, 24: 1.5, 25: 1.5, 26: 1.5, 28: 2.5, 29: 1.0, 30: 1.5, 15: 6.0}
+LIVE_COST = {32: 1.0, 33: 1.0, 34: 1.0, 35: 1.5, 19: 1.0, 20: 1.5, 21: 3.0, 22: 0, 23: 0, 24: 1.5, 25: 1.5, 26: 1.5, 28: 2.5, 29: 1.0, 30: 1.5, 15: 6.0}
 
 
 def table(results: list[Result]) -> str:
