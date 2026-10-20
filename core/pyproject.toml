@@ -1,6 +1,6 @@
 [project]
 name = "jarves"
-version = "0.1.0"
+version = "3.0.0"
 description = "JARVES assistant Core: state, Godot face link, DevicePort, memory, Skills, voice and music"
 requires-python = ">=3.12"
 dependencies = [
