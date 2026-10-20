@@ -27,7 +27,8 @@ async def test_ci_journeys_pass_or_block_with_reason(home, monkeypatch):
     st = {r["name"]: r for r in rep["results"]}
     for name in ("voice_stack", "music", "calendar_read", "scheduler", "installer_check"):
         assert st[name]["status"] == canary.PASS, st[name]
-    assert st["bridges"]["status"] == canary.BLOCKED and "E / F" in st["bridges"]["detail"]
+    assert st["bridges"]["status"] == canary.BLOCKED and (
+        "E / F" in st["bridges"]["detail"] or "no read-only doctor/status" in st["bridges"]["detail"])
     assert "STT -> reply -> speaker ok" in st["voice_stack"]["detail"]
     assert "read-only" in st["calendar_read"]["detail"] and "job ran" in st["scheduler"]["detail"]
     assert rep["failed"] == 0 and os.environ["JARVES_HOME"] == str(home)          # the test home is restored

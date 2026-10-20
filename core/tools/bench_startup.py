@@ -158,7 +158,9 @@ def diff_files(prev: dict, cur: dict, counts: dict[str, int]) -> dict:
 # ------------------------------------------------------------------ one run
 def _env(home: Path, scenario: str) -> dict:
     env = {k: v for k, v in os.environ.items() if k not in ("OPENAI_API_KEY", "OPENAI_ADMIN_KEY")}
-    env.update(JARVES_HOME=str(home), PYTHONPATH=str(SRC), PYTHONIOENCODING="utf-8")
+    # PYTHONDONTWRITEBYTECODE: on a fresh checkout the first import of each module compiles and WRITES its .pyc; that is
+    # one-time warm-up work, not steady-state churn, and it would be counted as idle disk writes (CI Linux: 1340 KB/min).
+    env.update(JARVES_HOME=str(home), PYTHONPATH=str(SRC), PYTHONIOENCODING="utf-8", PYTHONDONTWRITEBYTECODE="1")
     if scenario in ("cloud", "combined"):
         env["OPENAI_API_KEY"] = "sk-test-bench-dummy-never-sent"   # "test": the S09 secret scan skips fakes
     return env
