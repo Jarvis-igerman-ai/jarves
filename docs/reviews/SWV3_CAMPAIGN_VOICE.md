@@ -102,3 +102,26 @@ test_suite_voice_fixes 15, test_channels 27 — all green.
 ## Not verified
 Real microphone/speaker/room echo, the visible popup on the desktop, the owner's real voice for the wake word, the
 real WhatsApp app opening, a real Telegram bot, Google-connected briefing (Pass E).
+
+## Follow-up: open voice items fixed (branch `v3-voice-fixes`, 20 Oct 2026)
+
+Same harness (real GPT-Live, virtual mic/speaker, TEST-profile homes, one Core at a time), new scenarios 48-50 in
+`suite_v3_voice.py`, unit tests in `core/tests/test_voice_fixes_cv.py` (19). **Cost of this follow-up: about $1.2
+upper bound** (live voice 18.5 min ≈ $0.93; backend 57 calls, 1.01 M input tokens of which 84 % cached, ≤ $0.20; 4
+web searches $0.04; 4 output-audio transcriptions ≈ $0.01).
+
+| ID | Fix | Live evidence | Status |
+|---|---|---|---|
+| CV-15 | Persona: "saying רגע is NOT doing it". Core watchdog: an utterance that only announces waiting ("רגע...") with no delegation for that user turn 3 s later -> the Core hands the user's words to the session's own backend (`response.item.create` + `response.create`: all Skill tools, normal approvals); if it cannot start (error / no response in 8 s) the user hears honestly that it did not go through. | #48 probe on the real backend (what the watchdog does): first run FAILED and showed that the hand-over comes back as an ordinary `session.delegation.created` and GPT-Live speaks the result itself (the Core had reported a false "did not go through") and that the approval note did not say WHAT was approved ("לבדוק מה השעה, כן או לא?"); both fixed, retest **PASS**: remember saved and said, forget asked, spoken "כן" -> deleted, "מחקתי..." said. #12/#13/#14 PASS (the original stall did not recur in these runs; it is intermittent). | FIXED (watchdog verified live; the natural trigger is intermittent) |
+| CV-06 | Persona: a fact the user only TELLS is never "רשמתי". Core: a memory claim the user did not ask for is taken back by a correction note (nothing saved: memory is on request only); a claimed action the user DID ask for but no tool did is handed to the backend (as CV-15). | #49 (3 told facts: sister/city, working from home, dog): 3/3 answered, no claim, memory 0 -> 0, no `remember` call: **PASS**. The correction path itself is unit-tested (the claim did not occur live). | FIXED |
+| CV-05 | Persona: answer in the language of the user's latest sentence. Core: the user's words are known while he speaks (input transcript), so a `[language]` note is sent when the language changes: to English as a developer instruction, back to Hebrew as SILENT context. | Variant 1 (Hebrew also as an instruction): the Hebrew question got NO answer 3/3. Variant 2 (no note back): stayed in English 2/2. Final: #18 **PASS 2/2** ("Canberra." / "אוטווה."); English answered in English 6/6. | FIXED |
+| CV-09 | A delegation is "superseded" when the user started a new utterance > 1.5 s after it and JARVES already spoke to that turn: no "still checking" note, and at the stall deadline it is dropped quietly (no retry that re-answers the new turn). Barge-in over speech the server already stopped is now counted. | #35 **PASS**: old speech stopped 0.5 s after the interruption, answered "ארבע", no stale progress notes, `barge_ins` 1 (was 0). | FIXED |
+| CV-14 | `whatsapp_draft` no longer asks; it calls `whatsapp_open` at once and the approval (now naming the action) reads the draft back: ONE spoken yes. Answer delivery: a spoken approval word re-delegated by GPT-Live (empty answer) no longer cancels the delivery check, and dead silence 4 s after an answer ends the 7 s window early. | #42 run 1: one yes, but "opened the chat" was never said (found the delivery bug); fixed; run 2 **PASS**: one yes, "הצ׳אט של דני נפתח עם הטיוטה, רק נשאר ללחוץ על שלח" about 2 s after the decision, 1 wa.me link. | FIXED |
+| CV-16 | Persona pronunciation rule: a one-letter prefix never swallows a name's first sound (ל+אביטל = "לְאביטל", ל+צחי = "לְצחי"). | New #50 (output audio transcribed): "לאביטל" right 2/2 (was "לביטל"); צחי written right ("ולצחי") but its audio transcribed as "וליצחק" / "ולכפיר", and the virtual mic's own Hebrew voice says "וליצחי": inconclusive. #46 (names alone) PASS 3/3. | PARTLY FIXED (אביטל yes; צחי needs a human ear) |
+| CV-08 | New exact local `calculate` tool (safe AST: + - * / ** % ( ) sqrt) and the backend rule "ALWAYS call calculate, never web search for arithmetic". The screen shows "מחשב…". | Before: 4/4 maths questions web-searched (screen "searching", 12 search events). After: #4 **PASS 4/4**, tool `calculate`, screen "thinking" only, 0 searches. | FIXED |
+| CV-18 | The answer-delivery check counted "כרגע" / "ברגע" (= currently) as the filler "רגע", so real answers were judged unsaid and spoken twice (#38 list read-back, #42 Telegram answer). | Unit test; the later #38/#42 runs had no double answer. | FIXED |
+
+Regression after the fixes: #2 smalltalk, #3 time/date, #11 memory recall, #16 rapid fire (6/6), #38 lists +
+spoken approvals: all PASS. Logs of every follow-up home: no ERROR; no spurious `LIVE_UNDELEGATED` hand-over in any
+normal turn.
+Not changed: CV-04/CV-07 (wake model; needs the owner's recordings), CV-17 (token size per delegation).
