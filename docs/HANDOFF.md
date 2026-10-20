@@ -907,3 +907,10 @@ reachable from the phone (dashboard_lan) for approvals, or PC-only?
 - Signing: SignPath OSS needs a public repo + OSI license; Azure Artifact Signing ~$9.99/mo, region-limited (verify price). Stay unsigned? Open-source the installer?
 - Instagram: is the account Business/Creator and linked to a Facebook Page? Confirm sends by voice, dashboard or Telegram?
 - Virtual computer: which 2-3 tasks would justify it; local (WSL2/Docker) or cloud budget?
+
+## Idle writes to owner budget + hook Hebrew fix (21 Oct 2026) - #17, branch `perf/idle-writes-owner-budget`
+
+- Idle writes: 29-53 KB/min -> 4.8-8.7 KB/min (owner budget 10 unchanged). Cause: the diag monitor flushed `diag_metrics/diag_codes/diag_events` to store.db every 60 s (3 commits, ~30-45 KB of WAL pages). Now `Monitor.flush_due()` batches the in-memory buffer into ONE transaction every 5 min (and at shutdown via `flush(all_=True)`; crash loses at most 5 min of samples). `Store`: WAL + `synchronous=NORMAL`, `wal_autocheckpoint=4000`. `health.json` heartbeat window 50 -> 70 s (still < 120 s "off").
+- Hook fix: `orchestrator/hook.py` printed the Stop reason with `ensure_ascii=False`; a Hebrew message hit the Windows console codec (UnicodeEncodeError, swallowed -> no output after the messages were already claimed). Now ASCII-escaped JSON.
+- Tests: `test_swv4_idle_writes.py` (diag batching over 10 simulated minutes, WAL/NORMAL pragma, real idle Core < 12 KB/min).
+- Open: perf gate `spawn_to_ready_s` 5.11 > 5 on this busy PC (unrelated, noise).

@@ -87,15 +87,19 @@ class MetricStore:
             for k in ck:
                 del self._c[k]
             ev, self._ev = self._ev, []
-        db.many(self.store, "INSERT INTO diag_metrics (res, ts, name, value, vmin, vmax, n, app_version, git_commit) "
-                            "VALUES (?,?,?,?,?,?,?,?,?) ON CONFLICT(res, name, ts) DO UPDATE SET "
-                            "value=(value*n + excluded.value*excluded.n)/(n+excluded.n), "
-                            "vmin=MIN(vmin, excluded.vmin), vmax=MAX(vmax, excluded.vmax), n=n+excluded.n", mrows)
-        db.many(self.store, "INSERT INTO diag_codes (res, ts, code, level, component, n, app_version, git_commit) "
-                            "VALUES (?,?,?,?,?,?,?,?) ON CONFLICT(res, ts, code, level) DO UPDATE SET n=n+excluded.n",
-                crows)
-        db.many(self.store, "INSERT INTO diag_events (ts, kind, name, value, detail, ref, app_version, git_commit) "
-                            "VALUES (?,?,?,?,?,?,?,?)", ev)
+        if mrows or crows or ev:
+            with self.store._lock:                       # ONE transaction: one WAL commit instead of three
+                con = self.store._db
+                con.executemany("INSERT INTO diag_metrics (res, ts, name, value, vmin, vmax, n, app_version, git_commit) "
+                                "VALUES (?,?,?,?,?,?,?,?,?) ON CONFLICT(res, name, ts) DO UPDATE SET "
+                                "value=(value*n + excluded.value*excluded.n)/(n+excluded.n), "
+                                "vmin=MIN(vmin, excluded.vmin), vmax=MAX(vmax, excluded.vmax), n=n+excluded.n", mrows)
+                con.executemany("INSERT INTO diag_codes (res, ts, code, level, component, n, app_version, git_commit) "
+                                "VALUES (?,?,?,?,?,?,?,?) ON CONFLICT(res, ts, code, level) DO UPDATE SET "
+                                "n=n+excluded.n", crows)
+                con.executemany("INSERT INTO diag_events (ts, kind, name, value, detail, ref, app_version, git_commit) "
+                                "VALUES (?,?,?,?,?,?,?,?)", ev)
+                con.commit()
         self.rollup(now)
         return len(mrows) + len(crows) + len(ev)
 

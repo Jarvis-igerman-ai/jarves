@@ -119,6 +119,8 @@ class Store:
         self._db.row_factory = sqlite3.Row
         if self.path != ":memory:":
             self._db.execute("PRAGMA journal_mode=WAL")
+            self._db.execute("PRAGMA synchronous=NORMAL")        # WAL + NORMAL: durable across app crashes, one fsync less
+            self._db.execute("PRAGMA wal_autocheckpoint=4000")   # ~16 MB: no checkpoint churn while idle
         self._db.executescript(SCHEMA)
         have = {r[1] for r in self._db.execute("PRAGMA table_info(delegations)")}
         if "response_id" not in have:              # SW-V2 WP-H: open backend requests (store.db migrated in place)
