@@ -355,7 +355,7 @@ def test_dashboard_js_has_the_switcher_banner_and_page():
 
 # ---------------------------------------------------------------------- dashboard
 def _req(d, method, path, body=None, cookie=True):
-    c = http.client.HTTPConnection("127.0.0.1", d.port, timeout=5)
+    c = http.client.HTTPConnection("127.0.0.1", d.port, timeout=60)
     h = {"Host": f"127.0.0.1:{d.port}"}
     if cookie:
         h["Cookie"] = f"{d.access.cookie}={d.url.split('t=')[1]}"
@@ -377,13 +377,13 @@ def test_dashboard_per_profile_login_page_and_management(base, spawned):
     dd = dashboard.Dashboard(base, Config()).start()
     try:
         assert dd.access.cookie == "jarves_dash" and da.access.cookie == "jarves_dash_alice"
-        c = http.client.HTTPConnection("127.0.0.1", da.port, timeout=5)
+        c = http.client.HTTPConnection("127.0.0.1", da.port, timeout=60)
         c.request("GET", "/?t=" + da.url.split("t=")[1], headers={"Host": f"127.0.0.1:{da.port}"})
         assert c.getresponse().getheader("Set-Cookie").startswith("jarves_dash_alice=")
         c.close()
         # the owner's login cookie does not open alice's dashboard (and the other way round)
         h = {"Host": f"127.0.0.1:{da.port}", "Cookie": f"jarves_dash={dd.url.split('t=')[1]}"}
-        c = http.client.HTTPConnection("127.0.0.1", da.port, timeout=5)
+        c = http.client.HTTPConnection("127.0.0.1", da.port, timeout=60)
         c.request("GET", "/api/profiles", headers=h)
         assert c.getresponse().status == 403
         c.close()

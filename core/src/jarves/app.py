@@ -102,9 +102,9 @@ class _VoiceApproval:
         try:
             import inspect
             if "voice" in inspect.signature(live.confirm_pending).parameters:
-                await live.confirm_pending(a.prompt, voice=bool(getattr(a, "voice_ok", False)))
+                await live.confirm_pending(a.spoken, voice=bool(getattr(a, "voice_ok", False)))   # kind only: no details aloud
             else:                                  # a session without the voice hint (tests' fakes)
-                await live.confirm_pending(a.prompt)
+                await live.confirm_pending(a.spoken)
         except Exception:
             logs.warn("voice", "LIVE_CONFIRM_NOTE_FAILED", "could not tell the voice session about the confirmation")
 

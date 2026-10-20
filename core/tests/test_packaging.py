@@ -198,3 +198,11 @@ def test_build_pins_every_download_by_sha256():
     shas = [l for l in ps.splitlines() if "sha256 = " in l]
     assert len(urls) == len(shas) == 4
     assert all(len(l.split('"')[1]) == 64 for l in shas)
+
+
+def test_retention_across_the_repo_move_sorts_by_version_not_name():
+    rs = [rel("0.1.0.82"), rel("3.0.0.5"), rel("0.1.0.9"), rel("3.0.0.6"), rel("0.1.0.100"), rel("3.0.0.10")]
+    gone = [r["tag_name"] for r in release.releases_to_prune(rs, keep=3)]
+    assert sorted(gone) == ["win-v0.1.0.100", "win-v0.1.0.82", "win-v0.1.0.9"]     # kept: 3.0.0.10, 3.0.0.6, 3.0.0.5
+    assert release.version_key("win-v3.0.0.5") > release.version_key("win-v0.1.0.82")
+    assert release.version_key("win-v3.0.0.10") > release.version_key("win-v3.0.0.9")

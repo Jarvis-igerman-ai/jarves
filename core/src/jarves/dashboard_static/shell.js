@@ -54,6 +54,7 @@
     selfcheck: "self check health suggestions improvements בדיקה עצמית הצעות שיפור",
     tasks: "research background מחקר רקע", logs: "log errors events debug יומן שגיאות אירועים",
     calendar: "events meeting אירועים פגישה", jobs: "schedule reminder cron מתוזמן תזכורת", reports: "briefing morning תדריך בוקר",
+    timers: "timer alarm countdown wake clock טיימר שעון מעורר התראה זמן", lists: "shopping todo groceries tasks קניות משימות רשימה סופר",
     alerts: "notifications התראות", notes: "markdown memo רשימות", files: "folders documents תיקיות מסמכים",
     identity: "name wake word voice שם מילת הפעלה קול", appearance: "face avatar theme פנים אווטאר",
     memory: "facts remember forget עובדות לזכור לשכוח", workspace: "persona soul user identity אישיות",

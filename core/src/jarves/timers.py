@@ -239,3 +239,50 @@ def make_skill(timers: Timers):
 
 
 ALLOWED_ACTIONS = {"timer_start", "alarm_set", "timer_cancel"}
+
+
+# ---------------------------------------------------------------------- dashboard (V4 P0.3: the Timers page)
+def _ctx_timers(ctx) -> Timers:
+    from .userdata import ctx_db
+    t = getattr(ctx, "_timers", None)
+    if t is None:
+        t = Timers(ctx_db(ctx))              # writes rows only; the Core's loop (every second) rings them
+        ctx._timers = t
+    return t
+
+
+def api_timers(ctx, m, body):
+    t = _ctx_timers(ctx)
+    recent = t.db.rows("SELECT * FROM timers WHERE status!='pending' ORDER BY id DESC LIMIT 8")
+    return 200, {"timers": [t.view(r) for r in t.pending()],
+                 "recent": [{"id": r["id"], "kind": r["kind"], "label": r["label"], "status": r["status"],
+                             "due": r["due"]} for r in recent],
+                 "max_pending": MAX_PENDING,
+                 "note": "The Core checks timers every second, so a change here applies within a second."}
+
+
+def api_timer_add(ctx, m, body):
+    t, b = _ctx_timers(ctx), body or {}
+    try:
+        if str(b.get("kind", "timer")) == "alarm":
+            r = t.set_alarm(str(b.get("at", "")), str(b.get("label", "")), str(b.get("date", "")), by="dashboard")
+        else:
+            r = t.start_timer(float(b.get("minutes") or 0) * 60 + float(b.get("seconds") or 0),
+                              str(b.get("label", "")), by="dashboard")
+    except (ValueError, TypeError) as e:
+        return 400, {"error": str(e)}
+    return 200, t.view(r)
+
+
+def api_timer_op(ctx, m, body):
+    t = _ctx_timers(ctx)
+    if (body or {}).get("op") != "cancel":
+        return 400, {"error": "op must be cancel"}
+    hit = t.cancel(int(m.group(1)), by="dashboard")
+    return (200, {"cancelled": len(hit)}) if hit else (404, {"error": "no such running timer"})
+
+
+def dashboard_routes(register) -> None:
+    register("GET", r"/api/timers", api_timers)
+    register("POST", r"/api/timers", api_timer_add)
+    register("POST", r"/api/timers/(\d+)", api_timer_op)

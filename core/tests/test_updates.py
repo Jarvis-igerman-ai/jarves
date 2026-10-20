@@ -176,3 +176,22 @@ def test_cli_version_flag(capsys):
         cli.main(["--version"])
     assert e.value.code == 0
     assert capsys.readouterr().out.startswith("JARVES ")
+
+
+def test_repo_move_versions_only_ever_increase():
+    """The old private repo built 0.1.0.<run>; the public repo restarted its counter but builds 3.0.0.<run>."""
+    assert version_tuple("win-v3.0.0.5") == (3, 0, 0, 5)
+    assert is_newer("3.0.0.5", "0.1.0.82") and not is_newer("0.1.0.82", "3.0.0.5")
+    assert is_newer("3.0.0.6", "3.0.0.5") and not is_newer("3.0.0.5", "3.0.0.5")
+
+
+def test_installed_old_build_sees_new_series_and_a_new_build_never_sees_a_downgrade():
+    rels = [release("0.1.0.82"), release("3.0.0.5"), release("0.1.0.9")]
+    assert pick_release(rels, "0.1.0.82")["version"] == "3.0.0.5"
+    assert pick_release(rels, "3.0.0.5") is None                       # 0.1.0.82 is never offered as an update
+    assert pick_release([release("0.1.0.82")], "3.0.0.5") is None
+
+
+def test_package_version_is_in_the_new_series():
+    from jarves import __version__
+    assert version_tuple(__version__) >= (3, 0, 0, 0) and is_newer(f"{__version__}.5", "0.1.0.82")

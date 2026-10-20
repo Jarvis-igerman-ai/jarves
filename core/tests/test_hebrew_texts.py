@@ -260,3 +260,32 @@ def test_dashboard_js_picks_the_hebrew_fields_with_an_english_fallback():
             assert n in src, (js, n)
         assert ".innerHTML" not in src
     assert ".innerHTML" not in i18n
+
+
+def test_p03_spoken_approval_questions_and_feature_states_have_hebrew():
+    """V4 P0.3: every kind-of-action question that may be SPOKEN has Hebrew, and the shared state words too."""
+    from jarves import approvals
+    for rx, en, he, named in approvals._SPOKEN_KINDS:
+        assert is_he(he) and not is_he(en) and en.endswith("?") and he.endswith("?"), (rx, en, he)
+        assert ("{to}" in en) == ("{to}" in he) == named
+    assert is_he(approvals.spoken_kind("x", "tool")[1]) and is_he(approvals.spoken_kind("x", "message")[1])
+    st = {"enabled": True, "available": False, "reason": "no camera"}
+    assert features.state_text(st, "he") == "לא זמינה (no camera)" and features.state_text(st) == "unavailable (no camera)"
+    assert features.state_text({**st, "enabled": False}, "he") == "כבויה"
+    assert features.state_text({**st, "available": True}, "he") == "פועלת"
+    assert all(is_he(v) for v in features.APPLIES_HE.values()) and set(features.APPLIES_HE) == set(features.APPLIES_EN)
+
+
+def test_p03_timers_and_lists_cli_notices_have_hebrew(home, monkeypatch, capsys):
+    """`jarvis timers|lists` print Hebrew when the CLI language is Hebrew (JARVES_CLI_LANG=he)."""
+    from jarves import cli
+    monkeypatch.setenv("JARVES_CLI_LANG", "he")
+    assert cli.main(["timers", "list"]) == 0
+    assert is_he(capsys.readouterr().out)
+    assert cli.main(["lists", "show"]) == 0
+    assert is_he(capsys.readouterr().out)
+    assert cli.main(["lists", "add", "todo", "x"]) == 0
+    assert is_he(capsys.readouterr().out)
+    assert cli.main(["lists", "clear", "todo"]) == 1
+    assert is_he(capsys.readouterr().err)
+    assert cli.main(["jobs", "list"]) == 0 and is_he(capsys.readouterr().out)

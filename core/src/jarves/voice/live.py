@@ -1841,7 +1841,8 @@ class LiveVoice(SessionLifecycle):
             if prompt:
                 # live probe 20 Oct: for a Core-started request GPT-Live did not know what was being approved and
                 # asked "to check the time, yes or no?"; the approval's own read-back names it (CV-14 too)
-                note += f"\nThe action waiting for approval: {prompt[:300]}"
+                note += (f"\nThe action waiting for approval (name only this kind of action, in the user's language; "
+                         f"never read out message text, commands, addresses or any other detail): {prompt[:300]}")
             await self.conn.session.commentary.append(content=note, delegation_id=None,
                                                       event_id="jarves_progress_confirm")
             logs.info("live", "LIVE_CONFIRM_NOTE", "asked the user to approve on the screen")

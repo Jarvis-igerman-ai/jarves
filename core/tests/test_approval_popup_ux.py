@@ -8,6 +8,7 @@ machine without a desktop (headless Linux CI) the window part asserts that the p
 """
 from __future__ import annotations
 
+import gc
 import json
 
 import pytest
@@ -114,7 +115,10 @@ def test_buttons_always_inside_window_and_screen(tmp_path, name, req, kw, open_d
             root.jarves.toggle_details()
         root.update()
         rep = ap.layout_report(root)
-        assert all(rep["ok"].values()), (name, rep)
+        ok_ = dict(rep["ok"])
+        if not root.winfo_viewable():            # CI runners have no interactive desktop: never mapped
+            ok_.pop("buttons_viewable")
+        assert all(ok_.values()), (name, rep)
         a, d = rep["approve"], rep["deny"]
         assert a[1] == d[1] and a[3] == d[3]                      # one row, same size
         assert a[1] + a[3] <= rep["window"][1] + rep["window"][3]  # anchored at the bottom, never clipped
@@ -141,13 +145,13 @@ def test_typed_code_gates_approve_and_details_toggle(tmp_path):
         assert not out.exists() and not j.approve.enabled
         j.typed.set("4821")
         assert j.approve.enabled
-        assert not j.details.winfo_ismapped()                     # Details collapsed by default
+        assert not j.details.winfo_manager()                      # Details collapsed by default (not managed)
         j.toggle_details()
-        root.update()
-        assert j.details.winfo_ismapped()
+        root.update_idletasks()
+        assert j.details.winfo_manager() == "pack" and j.details.pack_info()   # shown; no visible desktop needed
         j.toggle_details()
-        root.update()
-        assert not j.details.winfo_ismapped()
+        root.update_idletasks()
+        assert not j.details.winfo_manager()
         j.approve.invoke()                                        # writes the result, closes the window
     except Exception:
         root.destroy()
@@ -175,3 +179,42 @@ def test_no_code_field_for_normal_requests_and_approve_waits_for_the_delay(tmp_p
         root.destroy()
         raise
     assert json.loads(out.read_text(encoding="utf-8"))["decision"] == "deny"
+
+
+# ---------------------------------------------------------------------- calm palette: WCAG AA contrast
+def _lum(h):
+    h = h.lstrip("#")
+    c = [int(h[i:i + 2], 16) / 255 for i in (0, 2, 4)]
+    c = [x / 12.92 if x <= 0.03928 else ((x + 0.055) / 1.055) ** 2.4 for x in c]
+    return 0.2126 * c[0] + 0.7152 * c[1] + 0.0722 * c[2]
+
+
+def _ratio(a, b):
+    hi, lo = sorted((_lum(a), _lum(b)), reverse=True)
+    return (hi + 0.05) / (lo + 0.05)
+
+
+@pytest.mark.parametrize("theme", ["light", "dark"])
+@pytest.mark.parametrize("risk", ["low", "medium", "high"])
+def test_palette_contrast_is_wcag_aa(theme, risk):
+    P = ap.PALETTES[theme]
+    cb, cf = P["chip"][risk]
+    assert _ratio(cf, cb) >= 4.5, "risk chip"
+    for fg in ("text", "muted", "link"):
+        assert _ratio(P[fg], P["bg"]) >= 4.5, fg
+    assert _ratio(P["text"], P["surface"]) >= 4.5 and _ratio(P["muted"], P["surface"]) >= 4.5
+    prim = "danger" if risk == "high" else "primary"
+    for state in (prim, prim + "_hover"):
+        assert _ratio(P["on_primary"], P[state]) >= 4.5, state
+    for state in ("secondary", "secondary_hover"):
+        assert _ratio(P["on_secondary"], P[state]) >= 4.5, state
+    assert _ratio(P["focus"], P["bg"]) >= 3.0
+    if risk == "high":
+        assert _ratio(P["chip"]["high"][1], P["bg"]) >= 4.5  # the typed-code hint text
+
+
+@pytest.fixture(autouse=True)
+def _tk_objects_die_on_the_main_thread():
+    """Tk variables garbage-collected on another thread print 'main thread is not in main loop'; collect here."""
+    yield
+    gc.collect()

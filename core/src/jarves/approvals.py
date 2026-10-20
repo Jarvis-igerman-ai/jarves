@@ -83,6 +83,40 @@ HE = {   # Hebrew texts of this module (fixed strings; user content is never tra
 }
 
 
+# Spoken approval questions name ONLY the kind of action (owner decision 20 Oct): never message text, commands,
+# addresses or other details. The full text stays on the popup / dashboard (Approval.prompt, unchanged).
+# (regex on the tool name/title, English question, Hebrew question, may name the recipient)
+_SPOKEN_KINDS = (
+    (r"whatsapp", "Send a WhatsApp message{to}?", "לשלוח הודעת וואטסאפ{to}?", True),
+    (r"telegram", "Send a Telegram message{to}?", "לשלוח הודעת טלגרם{to}?", True),
+    (r"instagram", "Send an Instagram message{to}?", "לשלוח הודעה באינסטגרם{to}?", True),
+    (r"gmail|mail", "Send an e-mail{to}?", "לשלוח מייל{to}?", True),
+    (r"calendar_(create|update|share)|calendar", "Change your calendar?", "לשנות את היומן?", False),
+    (r"shell|command", "Run a command on this computer?", "להריץ פקודה במחשב?", False),
+    (r"install", "Install software on this computer?", "להתקין תוכנה במחשב?", False),
+    (r"camera", "Turn the camera on?", "להפעיל את המצלמה?", False),
+    (r"feature|profile", "Change a setting?", "לשנות הגדרה?", False),
+    (r"home_control|lock|door", "Control a smart-home device?", "לשלוט במכשיר בבית החכם?", False),
+    (r"delete|forget|clear|remove|erase", "Delete something?", "למחוק משהו?", False),
+    (r"schedule|job", "Run a scheduled job?", "להפעיל משימה מתוזמנת?", False),
+)
+
+
+def spoken_kind(title: str, kind: str, details: dict | None = None) -> tuple[str, str]:
+    """(English, Hebrew) question that may be SPOKEN aloud. Names the kind of action (and at most a short recipient
+    name when the caller supplied details['recipient']); never the message text, command or other details."""
+    # the approval's own kind wins for the system kinds (a feature titled "Turn on Send e-mail" is a setting change)
+    hay = kind.lower() if kind in ("feature", "shell", "install", "camera", "schedule") else f"{title} {kind}".lower()
+    who = str((details or {}).get("recipient") or "").strip().splitlines()[0][:30] if (details or {}).get("recipient") else ""
+    for rx, en, he, named in _SPOKEN_KINDS:
+        if re.search(rx, hay):
+            return (en.format(to=f" to {who}" if (named and who) else ""),
+                    he.format(to=f" אל {who}" if (named and who) else ""))
+    if kind == "message":
+        return ("Send a message?", "לשלוח הודעה?")
+    return ("Do something that needs your approval?", "לבצע פעולה שדורשת את האישור שלך?")
+
+
 class ApprovalRefused(Exception):
     pass
 
@@ -106,6 +140,12 @@ class Approval:
     channel: str = ""
     decided_at: float = 0.0
     shown: list = field(default_factory=list)
+
+    @property
+    def spoken(self) -> str:
+        """What may be said aloud: the kind of action only, English / Hebrew. Not the prompt (that has the details)."""
+        en, he = spoken_kind(self.title, self.kind, self.details)
+        return f"{he} / {en}"
 
     def public(self) -> dict:
         d = asdict(self)

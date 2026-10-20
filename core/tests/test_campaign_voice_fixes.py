@@ -39,7 +39,8 @@ def _note_for(voice: bool, monkeypatch) -> str:
 def test_voice_answerable_approval_tells_the_user_to_say_yes_or_no(monkeypatch):
     note = _note_for(True, monkeypatch)
     assert note.startswith(live_mod.CONFIRM_NOTE_VOICE) and "כן או לא" in note
-    assert note.endswith("The action waiting for approval: לנקות 3 פריטים?")      # names what is approved
+    assert "The action waiting for approval" in note and note.endswith("לנקות 3 פריטים?")   # names what is approved
+    assert "never read out message text, commands" in note                                 # P0.3: kind only aloud
 
 
 def test_screen_only_approval_keeps_the_screen_hint(monkeypatch):

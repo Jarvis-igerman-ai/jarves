@@ -181,3 +181,55 @@ def make_skill(lists: Lists):
 
 
 ALLOWED_ACTIONS = {"list_add", "list_check", "list_remove"}
+
+
+# ---------------------------------------------------------------------- dashboard (V4 P0.3: the Lists page)
+def _ctx_lists(ctx) -> Lists:
+    from .userdata import ctx_db
+    ls = getattr(ctx, "_lists", None)
+    if ls is None:
+        ls = Lists(ctx_db(ctx))              # the same store the voice tools use
+        ctx._lists = ls
+    return ls
+
+
+def api_lists(ctx, m, body, q=None):
+    ls = _ctx_lists(ctx)
+    name = str(((q or {}).get("name") or [""])[0]).strip()
+    out = {"lists": [{**n, "title": title(n["name"])} for n in ls.names()]}
+    if name:
+        out["list"] = list_key(name)
+        out["items"] = [{"id": r["id"], "text": r["text"], "done": bool(r["done"])}
+                        for r in ls.items(name, include_done=True)]
+    return 200, out
+
+
+def api_list_add(ctx, m, body):
+    b = body or {}
+    items = b.get("items")
+    if isinstance(items, str):
+        items = items.replace("\n", ",").split(",")
+    try:
+        return 200, _ctx_lists(ctx).add(str(b.get("list_name", "shopping")), items or [], by="dashboard")
+    except ValueError as e:
+        return 400, {"error": str(e)}
+
+
+def api_list_op(ctx, m, body):
+    """check / remove one item; clear asks for approval: the page confirms first and sends approved=true."""
+    ls, b = _ctx_lists(ctx), body or {}
+    name, op = str(b.get("list_name", "")), b.get("op")
+    if op in ("check", "remove"):
+        hit = (ls.check if op == "check" else ls.remove)(name, str(b.get("item", "")), by="dashboard")
+        return (200, {"items": hit}) if hit else (404, {"error": "no such item on the list"})
+    if op == "clear":
+        if b.get("approved") is not True:
+            return 400, {"error": "clearing needs your approval", "needs_approval": True}
+        return 200, {"cleared": ls.clear(name, only_done=bool(b.get("only_done", True)), by="dashboard")}
+    return 400, {"error": "op must be check, remove or clear"}
+
+
+def dashboard_routes(register) -> None:
+    register("GET", r"/api/lists", api_lists)
+    register("POST", r"/api/lists", api_list_add)
+    register("POST", r"/api/lists/op", api_list_op)

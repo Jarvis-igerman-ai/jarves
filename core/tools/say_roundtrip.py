@@ -65,13 +65,52 @@ def build(engine: str, cfg):
             "winrt": lambda: WinRTTTS(v.tts_voice_hint)}[engine]()
 
 
+async def translit(wav: bytes, key: str) -> str:
+    """Latin syllable transcription of what is heard (a plain Hebrew transcript hides mispronunciation: the model
+    'corrects' to the expected word). Still a proxy: only the owner's ear confirms the accent."""
+    import httpx
+    async with httpx.AsyncClient(timeout=90) as c:
+        r = await c.post("https://api.openai.com/v1/audio/transcriptions", headers={"Authorization": f"Bearer {key}"},
+                         data={"model": "gpt-4o-transcribe", "response_format": "text",
+                               "prompt": "Transliterate the Hebrew speech into Latin letters exactly as it sounds, "
+                                         "syllable by syllable, with hyphens. Do not use Hebrew letters."},
+                         files={"file": ("a.wav", wav, "audio/wav")})
+    r.raise_for_status()
+    return r.text.strip()
+
+
+async def compare(load_secrets, state_dir, load_config, a) -> int:
+    from jarves import pronounce
+    load_secrets(state_dir())
+    key = os.environ.get("OPENAI_API_KEY", "").strip()
+    cfg, _ = load_config(None)
+    eng = build("openai-tts", cfg)
+    real = pronounce.apply
+    for label, fn in (("before", lambda t: t), ("after", real)):
+        pronounce.apply = fn
+        shown = fn(SENTENCE)
+        for i in range(3):
+            samples, rate = await eng.synth(SENTENCE)
+            wav = wav_bytes(samples, rate)
+            if i == 0:
+                Path(rf"C:\work\say_{label}.wav").write_bytes(wav)
+            print(f"{label} [{shown}] #{i}: {await translit(wav, key)}  | he score "
+                  f"{similarity(SENTENCE, await transcribe(wav, key)):.2f}")
+    pronounce.apply = real
+    return 0
+
+
 async def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--engine", default="auto")
     ap.add_argument("--wav", default=r"C:\work\say_test.wav")
     ap.add_argument("--no-names", action="store_true", help="only the full sentence")
+    ap.add_argument("--compare", action="store_true", help="pronunciation dictionary off vs on: saves "
+                    r"C:\work\say_before.wav / say_after.wav and prints a Latin-transliteration of what is heard")
     a = ap.parse_args()
     from jarves.config import load_config, load_secrets, state_dir
+    if a.compare:
+        return await compare(load_secrets, state_dir, load_config, a)
     home = state_dir()
     load_secrets(home)
     cfg, _ = load_config(None)

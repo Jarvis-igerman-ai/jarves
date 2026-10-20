@@ -211,6 +211,8 @@ class RealtimeSpeaker:
 
     async def stream(self, text: str):
         from .tts import TTSUnavailable
+        from .. import pronounce
+        text = pronounce.apply(text)             # user pronunciation dictionary (PRONUNCIATIONS.md)
         instr = ("You are a text-to-speech voice. Read the user's message aloud EXACTLY as written, in natural, warm "
                  "Israeli Hebrew (or the message's language). Do not add, answer or comment on anything.")
         received = False
