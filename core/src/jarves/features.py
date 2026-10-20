@@ -287,7 +287,7 @@ register("gmail_send", "שליחת מיילים", "Send Gmail", False, probe=_go
          about="send e-mail in your name")
 register("camera", "מצלמה", "Camera", False, probe=_probe_camera, needs=["camera_device"], risk="high",
          skills=["camera"], about="look through the camera when asked")
-register("face_recognition", "זיהוי פנים", "Face recognition", False, probe=_all(_probe_camera, _skill_installed("faces")),
+register("face_recognition", "זיהוי פנים", "Face recognition", False, probe=_all(_probe_camera, _skill_installed("camera")),
          needs=["camera"], risk="high", skills=["faces"], about="recognise who is in the room")
 register("camera_when_away", "מצלמה כשאין אף אחד בבית", "Camera when away", False,
          probe=_all(_probe_camera, _skill_installed("camera")), needs=["camera"], risk="high",

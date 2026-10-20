@@ -403,7 +403,12 @@ def cmd_memory(a, cfg, home) -> int:
             print(f"{r['id']:4d}  {r['created'][:10]}  {r['text']}")
         print(f"({m.count()} memories)")
     elif a.action == "delete":
-        print("deleted" if m.delete(int(a.id)) else "not found")
+        try:
+            mid = int(a.id)
+        except (TypeError, ValueError):
+            print("memory delete needs the number from `jarvis memory list`, e.g. jarvis memory delete 12", file=sys.stderr)
+            return 2
+        print("deleted" if m.delete(mid) else "not found")
     elif a.action == "clear":
         if a.yes or input("Delete ALL memories? type yes: ").strip() == "yes":
             print(f"deleted {m.clear()} memories")

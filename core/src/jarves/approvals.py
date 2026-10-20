@@ -390,6 +390,12 @@ class ApprovalService:
     async def _poll_answers(self) -> None:
         """Answers from another process (dashboard, CLI): runs only while something waits."""
         adir = self.dir / "answers"
+        # The poller task is created by the first ask(); when that ask came from INSIDE a tool (shell_propose,
+        # install_propose) the task inherited IN_TOOL and refused every file answer (CLI, other-process dashboard)
+        # with APPROVAL_FROM_TOOL (campaign 20 Oct, B-05). Answers read here come from files written by the owner's
+        # other processes, never from this tool: run with a clean marker.
+        from .skills import IN_TOOL
+        IN_TOOL.set("")
         while self.has_pending():
             try:
                 files = list(adir.glob("*.json")) if adir.is_dir() else []
