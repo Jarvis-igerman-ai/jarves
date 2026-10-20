@@ -72,7 +72,13 @@ def status_line(view: dict) -> str:
 
 
 def tooltip(view: dict) -> str:
-    return ("JARVES - " + status_line(view))[:120]       # Windows limits the tip to 127 characters
+    from ..profiles import DEFAULT, ProfileError, current_name
+    try:
+        p = current_name()
+    except ProfileError:
+        p = DEFAULT
+    name = "JARVES" if p == DEFAULT else f"JARVES [{p}]"      # two profiles = two tray icons: say which is which
+    return (name + " - " + status_line(view))[:120]       # Windows limits the tip to 127 characters
 
 
 def desktop_session() -> tuple[bool, str]:

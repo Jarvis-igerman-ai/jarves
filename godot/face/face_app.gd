@@ -811,6 +811,18 @@ func _check() -> void:
 			errs.append("status %s -> dot %s, want %s" % [c[0], face.link_state, c[1]])
 		elif ui.connection.text.contains("Hey Jarvis") or ui.connection.modulate != face.dot_color():
 			errs.append("panel caption for %s wrong" % c[1])
+	# profiles (Issue #17): the red TEST PROFILE banner follows status.profile.test; a name goes into the title
+	if ui.profile_banner.visible:
+		errs.append("test banner shown without a profile")
+	ui._on_message("status", {"profile": {"name": "test", "test": true}})
+	if not ui.profile_banner.visible or not ui.title_lbl.text.contains("test"):
+		errs.append("test profile banner / title missing")
+	ui._on_message("status", {"profile": {"name": "dana", "test": false}})
+	if ui.profile_banner.visible or not ui.title_lbl.text.contains("dana"):
+		errs.append("normal profile shows the test banner")
+	ui._on_message("status", {"profile": "garbage"})
+	if ui.profile_banner.visible or ui.title_lbl.text != "JARVES assistant":
+		errs.append("malformed profile not ignored")
 	var colours := {}
 	for ls in face.LINKS:
 		face.set_link(ls)

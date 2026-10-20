@@ -151,6 +151,8 @@ def plan(home: Path, settings: dict | None = None) -> tuple[list[tuple[Path, str
         dirs = rel.split("/")[:-1]
         if any(part in EXCLUDE_DIRS or part.startswith(".restore-staging") for part in dirs):
             continue
+        if (dirs[:1] == ["profiles"] or rel == "profiles.json") and not (home / "profile.json").is_file():
+            continue            # the default profile's folder holds the OTHER profiles: never in its backup (#17)
         if p.is_symlink():
             skipped.append({"name": rel, "reason": "symlink"})
             continue
