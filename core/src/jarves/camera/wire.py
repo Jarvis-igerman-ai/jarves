@@ -18,20 +18,25 @@ TAINT_WINDOW_S = 60.0
 GREET_COOLDOWN_S = 1800.0
 
 
-def install_taint_guard(registry, window_s: float = TAINT_WINDOW_S, clock=time.monotonic) -> Callable[[], None]:
+def install_taint_guard(registry, window_s: float = TAINT_WINDOW_S, clock=time.monotonic, *,
+                        exempt_prefix: str = "camera_", module: str = "camera",
+                        label: tuple[str, str] = ("תוכן מתמונה", "image content")) -> Callable[[], None]:
     """After image-derived text entered the conversation, any action/destructive tool the MODEL calls in the next
     `window_s` must be approved by the user first (text in a photo is untrusted, like e-mail). Returns the
-    function that marks the conversation as tainted. Wraps registry.call on this registry instance only."""
+    function that marks the conversation as tainted. Wraps registry.call on this registry instance only.
+    The Browser Skill reuses it for web page text (exempt_prefix "browser_": its own tools enforce the allow-list
+    and the always-confirm rules themselves; every OTHER side effect after page text asks the user)."""
     state = {"until": -1e9}
     inner = registry.call
+    he, en = label
 
     async def call(name, raw_args=None, *, origin="model"):
         tool = registry.get(name)
         if (origin == "model" and tool is not None and tool.permission in ("action", "destructive")
-                and not name.startswith("camera_") and clock() < state["until"]):
-            logs.info("camera", "UNTRUSTED_GUARD", f"{name} after image content: asking the user first", tool=name)
-            if not await registry.confirm(f"לבצע {name}? (אחרי תוכן מתמונה) / Run {name}? (after image content)"):
-                return ToolResult(False, "cancelled: not confirmed after image content", code="TOOL_DECLINED")
+                and not name.startswith(exempt_prefix) and clock() < state["until"]):
+            logs.info(module, "UNTRUSTED_GUARD", f"{name} after {en}: asking the user first", tool=name)
+            if not await registry.confirm(f"לבצע {name}? (אחרי {he}) / Run {name}? (after {en})"):
+                return ToolResult(False, f"cancelled: not confirmed after {en}", code="TOOL_DECLINED")
         return await inner(name, raw_args, origin=origin)
 
     registry.call = call

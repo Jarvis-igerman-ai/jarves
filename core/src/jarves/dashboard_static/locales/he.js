@@ -825,7 +825,20 @@
   "Usage & limits": "שימוש ומגבלות",
   "System & help": "מערכת ועזרה",
   "Language": "שפה",
-  "Search…": "חיפוש…"
+  "Search…": "חיפוש…",
+  "Browser": "דפדפן",
+  "Web pages JARVES opens for you. Full control only on the sites below; every other site is read-only and opens only after you approve it on the screen.": "דפי אינטרנט ש-JARVES פותח בשבילך. שליטה מלאה רק באתרים שבהמשך; כל אתר אחר לקריאה בלבד ונפתח רק אחרי שאישרת אותו במסך.",
+  "Switch:": "מתג:",
+  "Now:": "עכשיו:",
+  "not running (no live Core status)": "לא פועל (אין מצב חי מהליבה)",
+  "Site to allow": "אתר לאישור",
+  "Allow full control": "אפשר שליטה מלאה",
+  "Remove": "הסרה",
+  "+ subdomains": "+ תתי-דומיינים",
+  "Empty: every site is read-only + ask. Add only sites you trust JARVES to click and type on.": "ריק: כל אתר לקריאה בלבד ועם אישור. הוסיפו רק אתרים שאתם סומכים ש-JARVES ילחץ ויקליד בהם.",
+  "Also from the command line: jarvis browser allow <site> / jarvis browser remove <site>. Purchases, payments and passwords still ask on the screen every time.": "אפשר גם משורת הפקודה: jarvis browser allow <site> / jarvis browser remove <site>. קניות, תשלומים וסיסמאות עדיין מבקשים אישור במסך בכל פעם.",
+  "Never browsed (AI account / quota pages): ": "אף פעם לא גולש (חשבונות AI ועמודי מכסה): ",
+  "Full-control sites": "אתרים עם שליטה מלאה"
  },
  "rules": [
   [

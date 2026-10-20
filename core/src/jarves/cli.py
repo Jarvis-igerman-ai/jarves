@@ -1317,6 +1317,8 @@ def main(argv: list[str] | None = None) -> int:
     from .usage import add_cli as add_usage_cli, cmd_usage
     add_backup_cli(sub)                       # SW-V2 M5: jarvis backup / restore
     add_usage_cli(sub)                        # SW-V2 M5: jarvis usage
+    from .browser import add_cli as add_browser_cli, cmd_browser
+    add_browser_cli(sub)                      # SW-V3 P1.2: jarvis browser status / sites / allow / remove
     from .telegram_channel import add_cli as add_telegram_cli, cmd_telegram
     from .homeassistant import add_cli as add_home_cli, cmd_home
     from .instagram_channel import add_cli as add_instagram_cli, cmd_instagram
@@ -1396,7 +1398,7 @@ def main(argv: list[str] | None = None) -> int:
             "diagnose": cmd_diagnose, "features": cmd_features, "help": cmd_help, "google": cmd_google,
             "backup": cmd_backup, "restore": cmd_restore, "usage": cmd_usage, "start": cmd_start,
             "show": cmd_display, "hide": cmd_display, "autostart": cmd_autostart,
-            "update": cmd_update, "telegram": cmd_telegram, "instagram": cmd_instagram, "home": cmd_home}[a.cmd](a, cfg, home)
+            "update": cmd_update, "browser": cmd_browser, "telegram": cmd_telegram, "instagram": cmd_instagram, "home": cmd_home}[a.cmd](a, cfg, home)
 
 
 if __name__ == "__main__":

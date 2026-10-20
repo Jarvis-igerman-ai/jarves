@@ -825,6 +825,19 @@
   "Usage & limits": "Usage & limits",
   "System & help": "System & help",
   "Language": "Language",
-  "Search…": "Search…"
+  "Search…": "Search…",
+  "Browser": "Browser",
+  "Web pages JARVES opens for you. Full control only on the sites below; every other site is read-only and opens only after you approve it on the screen.": "Web pages JARVES opens for you. Full control only on the sites below; every other site is read-only and opens only after you approve it on the screen.",
+  "Switch:": "Switch:",
+  "Now:": "Now:",
+  "not running (no live Core status)": "not running (no live Core status)",
+  "Site to allow": "Site to allow",
+  "Allow full control": "Allow full control",
+  "Remove": "Remove",
+  "+ subdomains": "+ subdomains",
+  "Empty: every site is read-only + ask. Add only sites you trust JARVES to click and type on.": "Empty: every site is read-only + ask. Add only sites you trust JARVES to click and type on.",
+  "Also from the command line: jarvis browser allow <site> / jarvis browser remove <site>. Purchases, payments and passwords still ask on the screen every time.": "Also from the command line: jarvis browser allow <site> / jarvis browser remove <site>. Purchases, payments and passwords still ask on the screen every time.",
+  "Never browsed (AI account / quota pages): ": "Never browsed (AI account / quota pages): ",
+  "Full-control sites": "Full-control sites"
  }
 };

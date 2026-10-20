@@ -55,10 +55,10 @@ STEPS = ("language", "connection", "names", "wake", "voice", "addons", "privacy"
 # Modules that register add-ons in jarves.features at import (the dashboard imports the same ones).
 ADDON_MODULES = ("jarves.telegram_channel", "jarves.instagram_channel", "jarves.whatsapp", "jarves.briefing", "jarves.homeassistant",
                  "jarves.appearance", "jarves.backup", "jarves.usage", "jarves.updates", "jarves.runtime",
-                 "jarves.operations", "jarves.guides", "jarves.skills.generated")
+                 "jarves.operations", "jarves.guides", "jarves.skills.generated", "jarves.browser")
 # Privacy-sensitive or outward-acting: OFF on the first run whatever else says; ON only after an explicit yes.
 SAFE_OFF = frozenset({"camera", "face_recognition", "camera_when_away", "gmail_send", "calendar_write",
-                      "dashboard_lan", "telegram", "home_assistant", "instagram"})
+                      "dashboard_lan", "browser", "telegram", "home_assistant", "instagram"})
 GOOGLE_FEATURES = ("google_calendar", "calendar_write", "gmail_read", "gmail_send", "google_contacts")
 # (id, Hebrew, English, feature ids). A feature missing here lands in "other" (never hidden); a test demands
 # that every registered feature is listed.
@@ -71,6 +71,7 @@ GROUPS: tuple[tuple[str, str, str, tuple[str, ...]], ...] = (
     ("music", "מוזיקה", "Music", ("music",)),
     ("google", "גוגל", "Google", GOOGLE_FEATURES),
     ("camera", "מצלמה ופרטיות", "Camera & privacy", ("camera", "camera_preview", "face_recognition", "camera_when_away")),
+    ("browser", "דפדפן", "Browser", ("browser",)),
     ("automation", "אוטומציה", "Automation", ("scheduler", "reports", "timers", "lists", "notes", "files", "proactive_alerts",
                                               "autonomy", "morning_briefing")),
     ("channels", "ערוצים ובית חכם", "Channels & smart home", ("telegram", "instagram", "whatsapp_handoff", "home_assistant")),
@@ -230,6 +231,8 @@ def hint(fid: str, ok: bool, why: str) -> dict:
                 "en": "Google must be connected:  jarvis google start"}
     if fid in ("camera", "camera_preview", "face_recognition", "camera_when_away"):
         return {"he": "מצלמה: " + why, "en": "Camera: " + why}
+    if fid == "browser":
+        return {"command": "jarvis features on browser", "he": "דפדפן: " + why, "en": "Browser: " + why}
     if fid == "telegram":
         return {"command": "jarvis telegram start", "he": "צריך להגדיר בוט טלגרם:  jarvis telegram start",
                 "en": "Set up your Telegram bot:  jarvis telegram start"}
@@ -754,10 +757,10 @@ def _ask_key(home: Path) -> int:
 
 
 def _prepare(fid: str, f: feat.Features, home: Path) -> tuple[bool, str]:
-    """Allowlisted prerequisites (feature_setup.prepare) only where one exists: camera trio (OpenCV, SFace model)
-    and the wake word (voice extra). Everything else needs no installation."""
+    """Allowlisted prerequisites (feature_setup.prepare) only where one exists: camera trio (OpenCV, SFace model),
+    the wake word (voice extra) and the browser (browser extra: Playwright). Everything else needs no installation."""
     from .feature_setup import CAMERA_FEATURES, prepare
-    if fid not in CAMERA_FEATURES and fid != "wake_word":
+    if fid not in CAMERA_FEATURES and fid not in ("wake_word", "browser"):
         return True, ""
     return prepare(fid, f, home)
 
@@ -888,6 +891,8 @@ BUNDLE: dict[str, list[Callable[[], tuple[bool, str]]]] = {
     "display_control": [_mod("jarves.runtime.viewer")],
     "tray_icon": [_win(_mod("pystray")), _win(_mod("PIL"))],
     "autostart": [_mod("jarves.runtime.autostart")],
+    # the browser itself is the installed Edge/Chrome (Windows) or Chromium (Pi), probed by the feature
+    "browser": [_mod("playwright.async_api"), _mod("jarves.browser"), _mod("jarves.skills.browser")],
     "telegram": [_mod("jarves.telegram_channel"), _mod("httpx"), _data("jarves.guides", "data/telegram.toml")],
     "instagram": [_mod("jarves.instagram_channel"), _mod("httpx"), _data("jarves.guides", "data/instagram.toml")],
     "whatsapp_handoff": [_mod("jarves.whatsapp"), _data("jarves.guides", "data/whatsapp.toml")],
