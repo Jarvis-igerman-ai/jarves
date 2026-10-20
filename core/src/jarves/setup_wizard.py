@@ -53,11 +53,12 @@ STATE_FILE = "setup_state.json"
 PEAR_URL = "https://github.com/pear-devs/pear-desktop/releases"
 STEPS = ("language", "connection", "names", "wake", "voice", "addons", "privacy", "budget", "google")
 # Modules that register add-ons in jarves.features at import (the dashboard imports the same ones).
-ADDON_MODULES = ("jarves.appearance", "jarves.backup", "jarves.usage", "jarves.updates", "jarves.runtime",
+ADDON_MODULES = ("jarves.telegram_channel", "jarves.instagram_channel", "jarves.whatsapp", "jarves.briefing", "jarves.homeassistant",
+                 "jarves.appearance", "jarves.backup", "jarves.usage", "jarves.updates", "jarves.runtime",
                  "jarves.operations", "jarves.guides", "jarves.skills.generated")
 # Privacy-sensitive or outward-acting: OFF on the first run whatever else says; ON only after an explicit yes.
 SAFE_OFF = frozenset({"camera", "face_recognition", "camera_when_away", "gmail_send", "calendar_write",
-                      "dashboard_lan"})
+                      "dashboard_lan", "telegram", "home_assistant", "instagram"})
 GOOGLE_FEATURES = ("google_calendar", "calendar_write", "gmail_read", "gmail_send", "google_contacts")
 # (id, Hebrew, English, feature ids). A feature missing here lands in "other" (never hidden); a test demands
 # that every registered feature is listed.
@@ -71,7 +72,8 @@ GROUPS: tuple[tuple[str, str, str, tuple[str, ...]], ...] = (
     ("google", "גוגל", "Google", GOOGLE_FEATURES),
     ("camera", "מצלמה ופרטיות", "Camera & privacy", ("camera", "camera_preview", "face_recognition", "camera_when_away")),
     ("automation", "אוטומציה", "Automation", ("scheduler", "reports", "notes", "files", "proactive_alerts",
-                                              "autonomy")),
+                                              "autonomy", "morning_briefing")),
+    ("channels", "ערוצים ובית חכם", "Channels & smart home", ("telegram", "instagram", "whatsapp_handoff", "home_assistant")),
     ("dashboard", "לוח בקרה וטלפון", "Dashboard & phone", ("dashboard", "dashboard_lan", "context_trace")),
     ("updates", "עדכונים וגיבוי", "Updates & backup", ("update_check", "backup")),
 )
@@ -228,6 +230,15 @@ def hint(fid: str, ok: bool, why: str) -> dict:
                 "en": "Google must be connected:  jarvis google start"}
     if fid in ("camera", "camera_preview", "face_recognition", "camera_when_away"):
         return {"he": "מצלמה: " + why, "en": "Camera: " + why}
+    if fid == "telegram":
+        return {"command": "jarvis telegram start", "he": "צריך להגדיר בוט טלגרם:  jarvis telegram start",
+                "en": "Set up your Telegram bot:  jarvis telegram start"}
+    if fid == "instagram":
+        return {"command": "jarvis instagram start", "he": "צריך לחבר חשבון אינסטגרם עסקי:  jarvis instagram start",
+                "en": "Connect your Instagram Business account:  jarvis instagram start"}
+    if fid == "home_assistant":
+        return {"command": "jarvis home start", "he": "צריך לחבר את Home Assistant:  jarvis home start",
+                "en": "Connect Home Assistant:  jarvis home start"}
     return {}
 
 
@@ -849,7 +860,8 @@ BUNDLE: dict[str, list[Callable[[], tuple[bool, str]]]] = {
     "chimes": [_mod("sounddevice")],
     "voice_change": [_mod("jarves.skills.settings"), _mod("agents.realtime")],
     "dashboard": [_mod("jarves.dashboard"), _data("jarves", "dashboard_static/index.html"),
-                  _data("jarves", "dashboard_static/setup.js")],
+                  _data("jarves", "dashboard_static/setup.js"), _data("jarves", "dashboard_static/i18n.js"),
+                  _data("jarves", "dashboard_static/shell.js")],
     "dashboard_lan": [_mod("jarves.dashboard_auth"), _data("jarves", "dashboard_static/pair.html")],
     "context_trace": [_mod("jarves.context_trace"), _data("jarves", "dashboard_static/context.js")],
     "workspace_agent_edit": [_mod("jarves.workspace"), _data("jarves", "setup_guide.md")],
@@ -870,6 +882,11 @@ BUNDLE: dict[str, list[Callable[[], tuple[bool, str]]]] = {
     "display_control": [_mod("jarves.runtime.viewer")],
     "tray_icon": [_win(_mod("pystray")), _win(_mod("PIL"))],
     "autostart": [_mod("jarves.runtime.autostart")],
+    "telegram": [_mod("jarves.telegram_channel"), _mod("httpx"), _data("jarves.guides", "data/telegram.toml")],
+    "instagram": [_mod("jarves.instagram_channel"), _mod("httpx"), _data("jarves.guides", "data/instagram.toml")],
+    "whatsapp_handoff": [_mod("jarves.whatsapp"), _data("jarves.guides", "data/whatsapp.toml")],
+    "morning_briefing": [_mod("jarves.briefing"), _mod("httpx"), _data("jarves.guides", "data/morning_briefing.toml")],
+    "home_assistant": [_mod("jarves.homeassistant"), _mod("httpx"), _data("jarves.guides", "data/home_assistant.toml")],
 }
 # Not switches, but shipped parts the add-ons rely on.
 EXTRA_BUNDLE: dict[str, list[Callable[[], tuple[bool, str]]]] = {
