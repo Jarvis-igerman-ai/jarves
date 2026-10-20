@@ -39,13 +39,15 @@
       const w = f.targets.windows, p = f.targets.linux_arm64_pi;
       const blockers = [w.blocker ? "Windows: " + txh(w, "blocker") : null, p.blocker ? "Pi: " + txh(p, "blocker") : null,
         ...(f.matrix_problems || []).map((x) => "matrix: " + x)].filter(Boolean);
-      const health = f.health === "ok" ? pill("ok", "active") : f.health === "off" ? pill("plain", "off") : pill("unavailable", "unavailable");
+      const health = f.health === "ok" ? pill("ok", "active") : f.health === "off" ? pill("plain", "off")
+        : f.health === "checking" ? pill("plain", "checking") : pill("unavailable", "unavailable");
+      const age = f.check === "stale" && f.checked_s_ago != null ? el("div", { class: "muted small" }, `checked ${Math.round(f.checked_s_ago)} s ago, re-checking`) : null;
       return el("tr", { class: f.needs_attention ? "m4-attn" : null },
         el("td", { "data-label": "Feature" }, el("b", {}, txo(f, "title")),
           el("div", { class: "muted small" }, txh(f, "about")),
           f.requested ? el("div", { class: "small" }, "JARVES was asked to turn this on: approve here.") : null),
         el("td", { "data-label": "Enabled" }, sw, msg),
-        el("td", { "data-label": "Health" }, health, f.reason ? el("div", { class: "small", dir: JL.textDir(txh(f, "reason")) }, txh(f, "reason")) : null),
+        el("td", { "data-label": "Health" }, health, f.reason ? el("div", { class: "small", dir: JL.textDir(txh(f, "reason")) }, txh(f, "reason")) : null, age),
         el("td", { "data-label": "Settings", class: "small" }, f.settings || "—"),
         el("td", { "data-label": "Permissions", class: "small" }, (f.permissions || []).join(", "), " ", pill(f.risk, f.risk)),
         el("td", { "data-label": "Windows" }, statusPill(w), w.evidence ? el("div", { class: "muted small" }, txh(w, "evidence")) : null),
@@ -70,6 +72,11 @@
       el("div", { class: "muted small", style: "margin-top:8px" }, "Last checked: ",
         [...new Set(d.features.map((f) => f.last_checked))].join(", "), " · Pi roadmap: ",
         el("a", { href: d.pi_roadmap, target: "_blank", rel: "noopener noreferrer" }, d.pi_roadmap)));
+    // a never-checked probe runs in the Core's background worker: show its real result once it landed (once)
+    if (d.features.some((f) => f.check === "checking") && !pageFeatures.rechecked) {
+      pageFeatures.rechecked = true;
+      setTimeout(() => { if (location.hash.startsWith("#/features")) route(true); }, 1500);
+    }
   }
 
   // ------------------------------------------------------------------ Identity & voice

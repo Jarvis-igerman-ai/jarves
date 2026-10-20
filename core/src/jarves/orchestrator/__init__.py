@@ -27,7 +27,7 @@ EVIDENCE = ("core/tests/test_agents_*.py (real processes: fake Claude Code host 
 PI_BLOCKER = "the Unix-socket bridge runs in Linux CI; Claude Code / Codex on a Pi not tried yet"
 NO_AGENT = "neither Claude Code (claude) nor Codex (codex) was found on this computer"
 features.register(FEATURE, "מנהל סוכני קוד (Claude Code / Codex)", "Coding-agent orchestrator", False,
-                  probe=lambda c: _probe(c), risk="medium", skills=[SKILL], applies="live", about=ABOUT,
+                  probe=lambda c: _probe(c), slow=True, risk="medium", skills=[SKILL], applies="live", about=ABOUT,
                   targets={"windows": {"status": "implemented_unverified", "evidence": EVIDENCE},
                            "linux_arm64_pi": {"status": "implemented_unverified", "roadmap_issue": PI_ROADMAP,
                                               "blocker": PI_BLOCKER}})

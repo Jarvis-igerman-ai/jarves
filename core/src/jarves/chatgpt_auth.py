@@ -26,10 +26,11 @@ import uuid
 import webbrowser
 from dataclasses import dataclass
 from pathlib import Path
-from typing import AsyncIterator, Callable
+from typing import TYPE_CHECKING, AsyncIterator, Callable
 from urllib.parse import parse_qs, urlencode, urlparse
 
-import httpx
+if TYPE_CHECKING:          # imported where used: the feature probes read token files only (V4 perf fix)
+    import httpx
 
 from . import logs
 
@@ -212,6 +213,7 @@ class ChatGPTAuth:
                 "access_expires_in_s": int(a.get("expires_at", 0) - time.time())}
 
     def _client(self) -> httpx.AsyncClient:
+        import httpx
         return httpx.AsyncClient(timeout=20, transport=self._transport)
 
     # ------------------------------------------------------------------ sign-in
@@ -330,6 +332,7 @@ class ChatGPTAuth:
                 "expires_at": time.time() + float(tok.get("expires_in", 3600))}
 
     async def _token(self, form: dict) -> dict:
+        import httpx
         try:
             async with self._client() as c:
                 r = await c.post(TOKEN_URL, data=form)
@@ -415,6 +418,7 @@ class ChatGPTAuth:
     async def sign_out(self, forget: bool = False) -> bool:
         """Clear locally first (under the account lock, so no in-flight refresh can resurrect tokens), then revoke
         the refresh token remotely. Returns True if revocation was confirmed."""
+        import httpx
         taken: dict = {}
 
         def clear(a: dict) -> dict | None:

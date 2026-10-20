@@ -867,7 +867,7 @@ def _probe_send(c: feat.ProbeCtx) -> tuple[bool, str]:
     return True, ""
 
 
-feat.register(FEATURE, "וואטסאפ אמיתי (קריאה)", "WhatsApp real access (read)", False, probe=_probe,
+feat.register(FEATURE, "וואטסאפ אמיתי (קריאה)", "WhatsApp real access (read)", False, probe=_probe, slow=True,
               risk="high", tools=list(READ_TOOLS),
               about="reads your WhatsApp through a separate linked-device bridge on this computer (unofficial; "
                     "breaks WhatsApp's terms; ban risk you accepted). Read-only first; message text is treated as "
@@ -877,7 +877,7 @@ feat.register(FEATURE, "וואטסאפ אמיתי (קריאה)", "WhatsApp real 
                               "BLOCKED: the real bridge was never linked to the owner's phone (owner step)"),
               permissions=["read", "action (show on screen)"], settings=START_COMMAND)
 feat.register(SEND_FEATURE, "שליחה בוואטסאפ דרך הגשר", "WhatsApp send through the bridge", False, probe=_probe_send,
-              needs=[FEATURE], risk="high", tools=list(SEND_TOOLS),
+              slow=True, needs=[FEATURE], risk="high", tools=list(SEND_TOOLS),
               about="sends a WhatsApp message you dictated to an allow-listed person, only after you approve the "
                     "recipient, number and full text on the screen; only in send mode (after 14 quiet days)",
               targets=targets("UNIT test_whatsapp_send.py (fake bridge: popup, signed single-use approval, limits)",

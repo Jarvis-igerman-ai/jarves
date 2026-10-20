@@ -902,7 +902,7 @@ class SelfCheck:
     def _feature_gaps(self, out: list[Finding], recs: list[dict], since: float) -> None:
         from . import setup_wizard as sw
         f = self.features
-        for s in f.list():
+        for s in f.list(wait=True):
             fid = s["id"]
             if not s["enabled"] or s["available"] or fid in AVAIL_FEATURES:
                 continue

@@ -276,6 +276,7 @@ TEXT: dict[str, str] = {
     "AI is offline (ai.provider = offline)": "ה-AI כבוי (ai.provider = offline)",
     "needs the OpenAI API key (connection = ChatGPT plan only)": "דורש מפתח API של OpenAI (החיבור הוא תוכנית ChatGPT בלבד)",
     "no OpenAI API key (run `jarvis key`)": "אין מפתח API של OpenAI (הרץ `jarvis key`)",
+    "not checked yet: checking now (look again in a moment)": "עוד לא נבדק: בודק עכשיו (הסתכלו שוב בעוד רגע)",
     "Pear Desktop is not running (start it with the API Server plugin)": "Pear Desktop לא רץ (הפעל אותו עם תוסף ה-API Server)",
     "voice is off (voice.mode = off)": "הקול כבוי (voice.mode = off)",
     "wake word detector unavailable": "מזהה מילת ההפעלה לא זמין",
