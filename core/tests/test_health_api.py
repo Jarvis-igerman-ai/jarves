@@ -225,3 +225,35 @@ def test_feature_registered_on_every_surface():
     assert 'data-page="health"' in html and "/static/health.js" in html
     assert "Object.assign(PAGES, { health: pageHealth })" in (STATIC / "health.js").read_text(encoding="utf-8")
     assert capabilities is not None
+
+
+def test_cli_canary_profile_option_is_not_the_jarvis_profile(home, monkeypatch, capsys):
+    """V4-HE-1: `jarvis health canary [--profile ci|owner]` shares its flag name with the global `--profile NAME`;
+    the canary default ("owner") used to be taken as a JARVES profile and the command died with PROFILE ERROR."""
+    seen = []
+
+    async def fake_run_all(profile, **kw):
+        seen.append((profile, kw.get("real_home")))
+        return {"ts": 1.0, "profile": profile, "passed": 1, "failed": 0, "blocked": 0, "ms": 1.0,
+                "results": [{"status": "pass", "name": "x", "ms": 1.0, "detail": "ok"}]}
+
+    from jarves.diag import canary
+    monkeypatch.setattr(canary, "run_all", fake_run_all)
+    monkeypatch.setattr(canary, "save", lambda st, rep: 1)
+    assert cli.main(["health", "canary"]) == 0
+    assert cli.main(["health", "canary", "--profile", "ci"]) == 0
+    assert [p for p, _ in seen] == ["owner", "ci"] and seen[0][1] is not None and seen[1][1] is None
+    assert "PROFILE ERROR" not in capsys.readouterr().err
+
+
+def test_cli_prompts_without_a_terminal_are_a_no_not_a_traceback(home, monkeypatch, capsys):
+    """V4-HE-2: `jarvis health ai-review --now` / `remediate` with stdin closed raised EOFError (traceback)."""
+    import io
+    import sys
+    monkeypatch.setattr(sys, "stdin", io.StringIO(""))
+    rc = cli.main(["health", "remediate", "clear_guide_cache"])
+    out = capsys.readouterr()
+    assert rc != 0 and "denied" in (out.out + out.err).lower()
+    rc = cli.main(["health", "ai-review", "--now"])
+    out = capsys.readouterr()
+    assert "Traceback" not in out.err and "EOFError" not in out.err + out.out

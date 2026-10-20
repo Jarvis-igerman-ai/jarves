@@ -97,3 +97,13 @@ def test_due_timer_without_audio_route_shows_ringing(tmp_path):
     v = tm.view(tm.get(t["id"]))
     assert v["state"] == "ringing" and v["seconds_left"] == 0 and "מצלצל" in v["left_he"]
     db.close()
+
+
+def test_cli_calendar_create_exits_1_when_google_is_not_connected(tmp_path, monkeypatch, capsys):
+    """V4-CLI-1: `jarvis calendar create` printed {"ok": true, "code": "GOOGLE_NOT_CONNECTED"} and exited 0 although
+    nothing was created."""
+    from jarves import cli
+    monkeypatch.setenv("JARVES_HOME", str(tmp_path))
+    rc = cli.main(["calendar", "create", "--title", "QA", "--day", "tomorrow", "--start", "10:00"])
+    out = capsys.readouterr().out
+    assert rc == 1 and "GOOGLE_NOT_CONNECTED" in out
