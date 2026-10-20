@@ -21,7 +21,7 @@ COMPLETE = {"he"}                   # locales that must cover every key (others 
 
 
 def catalog(code: str) -> dict:
-    src = (LOCALES / f"{code}.js").read_text(encoding="utf-8")
+    src = (LOCALES / f"{code}.js").read_text(encoding="utf-8").replace("\r\n", "\n")   # CRLF checkouts
     head, body = src.split("=\n", 1)
     assert f"(window.JARVES_CATALOGS = window.JARVES_CATALOGS || {{}}).{code}" in head
     return json.loads(body.strip().rstrip(";"))
