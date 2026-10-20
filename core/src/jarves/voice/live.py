@@ -220,6 +220,12 @@ CONFIRM_NOTE_AFTER_S = 2.5      # an on-screen approval still unanswered after t
 CONFIRM_NOTE = ("A tool is waiting for the user's approval on the screen and will NOT run without it. In a few "
                 "natural Hebrew words ask the user to approve it on the screen (for example 'צריך את האישור שלך "
                 "על המסך'). Do not say it is done and do not guess the outcome.")
+# Campaign 20 Oct (suite_v3_voice #14): the owner CAN answer by voice ("כן" / "לא", approvals.py), but the note above
+# told him to approve on the screen only. Used when the request accepts a spoken answer.
+CONFIRM_NOTE_VOICE = ("A tool is waiting for the user's approval and will NOT run without it. In one short natural "
+                      "Hebrew sentence say what you want to do and ask for a yes or no (for example 'לעשות את זה? "
+                      "תגיד כן או לא, או אשר על המסך'). Do not say it is done and do not guess the outcome. "
+                      "Do not call any tool for the answer: the user's own 'כן' or 'לא' is the answer.")
 # Stalled backend (real session 19 Oct: an Intel-stock lookup gave no result for 90+ s, JARVES kept saying "עוד
 # רגע"). GPT-Live offers no client cancel for a server-owned delegation, so after backend_deadline_s the Core gives
 # up on it, retries ONCE itself (retry_lookup: tasks.ResearchRunner, own hard deadline) and tells GPT-Live the
@@ -1515,12 +1521,13 @@ class LiveVoice(SessionLifecycle):
             self._pending.remove(nxt)
             nxt.commit() if state["sent"] else nxt.release()   # outcome unknown -> counted; never sent -> freed
 
-    async def confirm_pending(self, prompt: str) -> None:
+    async def confirm_pending(self, prompt: str, voice: bool = False) -> None:
         """The Core is asking the user to approve a destructive tool on the screen. If it is still unanswered after
         CONFIRM_NOTE_AFTER_S, JARVES says so (once). No progress notes meanwhile. QA 19 Oct: a note sent at once was
         spoken INSTEAD of the result when the user approved quickly, so a fast answer gets no note at all."""
         self._confirm_pending = True
         self._confirm_gen = getattr(self, "_confirm_gen", 0) + 1
+        self._confirm_voice = bool(voice)
         if self.running and self.conn is not None:
             self._spawn(self._confirm_note_later(self._confirm_gen), "confirm-note")
 
@@ -1529,7 +1536,8 @@ class LiveVoice(SessionLifecycle):
         if not (self.running and self._confirm_pending and gen == getattr(self, "_confirm_gen", 0)):
             return
         try:
-            await self.conn.session.commentary.append(content=CONFIRM_NOTE, delegation_id=None,
+            note = CONFIRM_NOTE_VOICE if getattr(self, "_confirm_voice", False) else CONFIRM_NOTE
+            await self.conn.session.commentary.append(content=note, delegation_id=None,
                                                       event_id="jarves_progress_confirm")
             logs.info("live", "LIVE_CONFIRM_NOTE", "asked the user to approve on the screen")
         except Exception as e:

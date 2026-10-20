@@ -270,8 +270,10 @@ class Curator:
             except Exception:
                 logs.error("memory", "CURATOR_FAILED", "memory curator failed", exc=True)
             self.last = saved
+            # campaign 20 Oct (suite #29): the learned facts are private content; log.privacy = true hides them
+            facts = {} if logs.privacy() else {"facts": [s["text"] for s in saved]}
             logs.info("memory", "CURATOR_DONE", f"curator saved {len(saved)} new fact(s)", reason=reason,
-                      session=session, turns=len(turns), saved=len(saved), facts=[s["text"] for s in saved])
+                      session=session, turns=len(turns), saved=len(saved), **facts)
             return saved
 
     async def _llm_pass(self, turns: list[tuple[str, str]]) -> list[Candidate]:

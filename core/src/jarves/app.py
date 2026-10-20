@@ -100,7 +100,11 @@ class _VoiceApproval:
     async def open(self, a) -> None:
         live = self._live[a.id] = self.core.live
         try:
-            await live.confirm_pending(a.prompt)
+            import inspect
+            if "voice" in inspect.signature(live.confirm_pending).parameters:
+                await live.confirm_pending(a.prompt, voice=bool(getattr(a, "voice_ok", False)))
+            else:                                  # a session without the voice hint (tests' fakes)
+                await live.confirm_pending(a.prompt)
         except Exception:
             logs.warn("voice", "LIVE_CONFIRM_NOTE_FAILED", "could not tell the voice session about the confirmation")
 

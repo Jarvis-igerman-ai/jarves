@@ -430,6 +430,12 @@ class Harness:
         os.environ["JARVES_HOME"] = str(home)
         app_mod.StreamingAudio = VAudio
         VAudio.reset()
+        from jarves import approvals as appr          # campaign 20 Oct: a silent run never shows a (beeping) popup;
+        if not getattr(appr.PopupChannel, "_silent", False):   # the real window still opens, invisible, never answers
+            _init = appr.PopupChannel.__init__
+            appr.PopupChannel.__init__ = lambda self, svc, **k: _init(self, svc, **{**k, "test_invoke":
+                                                                                     k.get("test_invoke") or "hold"})
+            appr.PopupChannel._silent = True
         cfg, _ = load_config(home / "config.toml")
         if idle_s is not None:                       # test-only: below the config minimum (30 s)
             object.__setattr__(cfg.voice, "idle_disconnect_s", int(idle_s))

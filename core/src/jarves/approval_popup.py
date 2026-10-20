@@ -1,6 +1,6 @@
 """The approval popup: a small always-on-top native window (own process, started by approvals.PopupChannel).
 
-    python -m jarves.approval_popup --in request.json --out result.json [--test-invoke approve|deny|wrong-code]
+    python -m jarves.approval_popup --in request.json --out result.json [--test-invoke approve|deny|wrong-code|hold]
 
 Shows exactly what is requested, why (JARVES's words, marked as such), the risk, the details (command, folder,
 package...) and a countdown. Deny has the keyboard focus; Enter / Escape / closing the window = Deny; Approve is
@@ -141,6 +141,8 @@ def build(req: dict, out: Path, test_invoke: str | None = None):
     tick()
     if not test_invoke:
         root.bell()
+    elif test_invoke == "hold":
+        pass                                      # silent voice tests: an invisible real window that never answers
     else:
         def press():
             if test_invoke == "approve":
@@ -163,7 +165,7 @@ def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(prog="jarves.approval_popup")
     ap.add_argument("--in", dest="inp", required=True)
     ap.add_argument("--out", required=True)
-    ap.add_argument("--test-invoke", choices=["approve", "deny", "wrong-code"])
+    ap.add_argument("--test-invoke", choices=["approve", "deny", "wrong-code", "hold"])
     a = ap.parse_args(argv)
     try:
         req = json.loads(Path(a.inp).read_text(encoding="utf-8"))
