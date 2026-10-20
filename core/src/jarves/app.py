@@ -171,6 +171,8 @@ class Core:
         from .telegram_channel import register_telegram
         from .whatsapp import register_whatsapp
         register_telegram(self.registry, self.home, self.health)
+        from .instagram_channel import register_instagram
+        register_instagram(self.registry, self.home, self.health)
         register_whatsapp(self.registry, self.home)
         register_home(self.registry, self.home, self.health)
         self.workspace.listeners.append(lambda name: self._spawn(wsp.note_live(self.live, self.workspace, name)))
