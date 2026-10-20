@@ -23,6 +23,7 @@ LOG_CLASS = {
 
 # FAIL rows that were wrong EXPECTATIONS of the harness (verified by hand), not product defects. Kept visible in the evidence.
 OVERRIDES = {
+    ("F:whatsapp_send", "wizard group"): ("PASS", "WIZARD_HIDDEN by design (send mode is never a wizard offer); grouped under channels (first run, before the harness check was corrected)"),
     ("inventory", "every feature has a wizard group"): ("PASS", "helper_readonly_auto is listed in setup_wizard.WIZARD_HIDDEN by design (sub-switch of the helper group)"),
     ("F:helper_readonly_auto", "wizard group"): ("PASS", "WIZARD_HIDDEN by design; its parent `helper` has the group"),
     ("F:face_recognition", "dashboard reason matches"): ("PASS", "real defect B-06 (probe asked for a Skill 'faces' that never exists); fixed in this branch, regression test test_b06"),
@@ -51,7 +52,7 @@ SCOPE = """## Scope, build and method
   `v4_agents`, `v4_privacy`, `v4_isolation`, `v4_signed_approvals`, `v4_update`). Several runs on separate homes (ports) were merged by
   `core/tools/campaign_report_v4.py` (a later run replaces an earlier row with the same area and name); the log groups come from
   `core/tools/campaign_logsum.py`. Re-run: `python tools/campaign_features.py STAGE...`.
-- Features: the Core catalog has 59 switches (62 incl. the V4 ones counted by the package; `assisted_dialing` / package H is NOT in this tree) plus the
+- Features: the Core catalog has 59 switches (`assisted_dialing` / package H is NOT in this tree) plus the
   `helper_isolation` status row (not a switch). Every switch was exercised through CLI, dashboard API and the Core tool path (matrix below).
 - BLOCKED / not covered, with reason: `assisted_dialing` (package H is not in the integrated tree); the V3 `browser` stage (would launch Edge);
   wake calibrate/train/eval (needs the owner's voice and microphone); Google-backed features (no account; the unavailable state, honest reason and the hard
@@ -220,6 +221,10 @@ def classify_group(g: dict) -> tuple[str, str]:
     }
     if code in rules:
         return rules[code]
+    if code == "LIB_LOG" and "InvalidMessage" in det:
+        return "noise", "V4-LG-1 (P3): a plain TCP probe of the link port (the single-instance check of the real-Core run) is logged at ERROR by websockets"
+    if code == "SELFCHECK_FAILED":
+        return "bug", "V4-SC-1 (P2, open): the automatic crash self-check outlived Core stop and hit the closed database"
     if g["level"] in ("ERROR", "CRITICAL"):
         return "bug", "an ERROR the campaign did not provoke"
     return "REVIEW", "not classified yet"
