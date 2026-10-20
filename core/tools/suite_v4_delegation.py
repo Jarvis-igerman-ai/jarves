@@ -331,7 +331,7 @@ async def s60(h, r):
     mark = s.log.mark()
     row = await h.turn(s, "תזכור בבקשה שמספר החניה שלי הוא שבע", label="remember")
     await settle(h, s)
-    tools = [e.get("tool") or e["msg"].replace("backend called ", "") for e in s.log.since(mark) if e["code"] == "LIVE_TOOL_CALL"]
+    tools = [e.get("tool") or (e["msg"].replace("backend called ", "")) for e in s.log.since(mark) if e["code"] == "LIVE_TOOL_CALL"]
     saved = [m["text"] for m in s.core.memory.list(50) if has(m["text"], "חניה", "שבע", "7")]
     done = deleg(s, "DELEG_DONE", mark)
     r.ok = "remember" in tools and bool(saved) and any((d.get("requests") or 0) >= 2 for d in done) and sv.answered(row)
@@ -412,13 +412,13 @@ async def measure_latency(n: int, max_minutes: float) -> dict:
             ev = s.log.since(mark)
             done_code = "DELEG_DONE" if mode == "client" else "LIVE_BACKEND_DONE"
             done = [e for e in ev if e["code"] == done_code]
-            last_in = [e for e in ev if e["code"] == "LIVE_EVENT" and e.get("msg") == "session.input_transcript.delta"]
+            last_in = [e for e in ev if e["code"] == "LIVE_EVENT" and (e.get("event") or e.get("msg")) == "session.input_transcript.delta"]
             if not done or not last_in:
                 lats.append({"q": q, "skipped": "no delegation"})
                 continue
             t_done = stamp(done[-1])
             q_end = max(stamp(e) for e in last_in if stamp(e) <= t_done)
-            ans = [stamp(e) for e in ev if e["code"] == "LIVE_EVENT" and e.get("msg") == "session.output_transcript.delta"
+            ans = [stamp(e) for e in ev if e["code"] == "LIVE_EVENT" and (e.get("event") or e.get("msg")) == "session.output_transcript.delta"
                    and stamp(e) >= t_done]
             lats.append({"q": q, "answer_after_s": round((ans[0] if ans else t_done) - q_end, 2),
                          "backend_s": round(t_done - q_end, 2), "dead_air_s": row["dead_air_s"]})

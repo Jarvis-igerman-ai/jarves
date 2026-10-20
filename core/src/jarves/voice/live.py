@@ -343,13 +343,15 @@ def answer_said(answer: str, said: str) -> bool:
     names the topic, not the result) counts only when it carries a number of the answer."""
     import re
     nums = set(re.findall(r"\d+", answer or ""))
+    # V4-VC-2 (campaign C, 20 Oct): a one-word answer ("10" spoken as "עשר.") is a whole answer, not a filler
+    short = len((answer or "").split()) <= 3
     for sentence in re.split(r"[.!?\n]+", said or ""):
         w = _words(sentence)
-        if not w:
+        if not w and not re.search(r"[\w֐-׿]", sentence):       # "זה שש." has only 2-letter words: still a sentence
             continue
         if nums and nums & set(re.findall(r"\d+", sentence)):
             return True
-        if not any(s in w for s in _FILLER_STEMS) and len(sentence.split()) >= 2:
+        if not any(s in w for s in _FILLER_STEMS) and (len(sentence.split()) >= 2 or short):
             return True
     return False
 

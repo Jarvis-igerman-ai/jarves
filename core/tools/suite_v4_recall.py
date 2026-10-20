@@ -70,7 +70,7 @@ def seed(home: Path) -> dict[str, str]:
 
 
 def _code(e: dict) -> str:
-    return str(e.get("msg", "")).rpartition("-> ")[2]
+    return str(e.get("result_code") or str(e.get("msg", "")).rpartition("-> ")[2])
 
 
 async def boot(h, fresh: str = ""):

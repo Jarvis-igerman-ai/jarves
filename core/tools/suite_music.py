@@ -1073,7 +1073,7 @@ async def run_voice(c: Ctx, picked: set[str] | None) -> dict[str, R]:
             ev = events(home)[mark:]
             said = " / ".join(e.get("text", "") for e in ev if e["code"] == "LIVE_JARVES_SAID")
             heard = next((e.get("text") for e in ev if e["code"] == "LIVE_USER_SAID"), None)
-            tools = [e["msg"].replace("backend called ", "") for e in ev if e["code"] == "LIVE_TOOL_CALL"]
+            tools = [(e.get("tool") or e["msg"].replace("backend called ", "")) for e in ev if e["code"] == "LIVE_TOOL_CALL"]
             results = [(e.get("tool"), e.get("ok"), e["msg"]) for e in ev if e["code"] == "TOOL_RESULT"]
             acts = [m[2] for m in face.msgs[fmark:] if m[1] == "assistant.activity"]
             win = [(t, s) for t, s in pear_log if t >= t_q_end]

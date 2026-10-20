@@ -193,7 +193,7 @@ async def speak_and_wait_answer(h, s, text: str, *, first_timeout: float = 30, q
             "speech_s": round(speech_s(t0 + 0.3, time.time()), 1),
             "heard": " ".join(e.get("text", "") for e in ev if e["code"] == "LIVE_USER_SAID"),
             "said": " / ".join(e.get("text", "") for e in ev if e["code"] == "LIVE_JARVES_SAID"),
-            "tools": [e["msg"].replace("backend called ", "") for e in ev if e["code"] == "LIVE_TOOL_CALL"],
+            "tools": [(e.get("tool") or e["msg"].replace("backend called ", "")) for e in ev if e["code"] == "LIVE_TOOL_CALL"],
             "open": s.core.live is not None, "label": "", "answer_s": None, "backend_s": [], "activity": [],
             "emotions": [], "errors": [f"{e['code']}: {e['msg'][:90]}" for e in ev if e.get("level") == "ERROR"]}
 
@@ -249,8 +249,8 @@ async def approval_flow(h, s, request: str, answer: str | None, *, wait_ask: flo
             "channel": dec.get("channel"), "decided_after_answer_s": round(t_dec - t_ans, 2) if t_dec else None,
             "said": " / ".join(e.get("text", "") for e in ev if e["code"] == "LIVE_JARVES_SAID")[:600],
             "heard": " ".join(e.get("text", "") for e in ev if e["code"] == "LIVE_USER_SAID")[:300],
-            "tools": [e["msg"].replace("backend called ", "") for e in ev if e["code"] == "LIVE_TOOL_CALL"],
-            "tool_results": [(e.get("tool"), e.get("ok"), e.get("code")) for e in ev if e["code"] == "TOOL_RESULT"],
+            "tools": [(e.get("tool") or e["msg"].replace("backend called ", "")) for e in ev if e["code"] == "LIVE_TOOL_CALL"],
+            "tool_results": [(e.get("tool"), e.get("ok"), e.get("result_code") or e.get("code")) for e in ev if e["code"] == "TOOL_RESULT"],
             "face_confirm_requests": len([1 for t, ty, p in s.face.msgs if ty == "confirm.request" and t >= t0]),
             "face_confirm_cancels": len([1 for t, ty, p in s.face.msgs if ty == "confirm.cancel" and t >= t0]),
             "open": s.core.live is not None,
@@ -425,7 +425,7 @@ async def s_browser(h, r):
                          label="browser", first_timeout=45)
         await h.quiet(s, 3.0, 40)
         said = " / ".join(e.get("text", "") for e in s.log.codes("LIVE_JARVES_SAID"))
-        res = [(e.get("tool"), e.get("ok"), e.get("code")) for e in s.log.codes("TOOL_RESULT")
+        res = [(e.get("tool"), e.get("ok"), e.get("result_code") or e.get("code")) for e in s.log.codes("TOOL_RESULT")
                if str(e.get("tool", "")).startswith("browser_")]
         errs = [e["code"] for e in s.log.refresh() if e.get("level") == "ERROR"]
         r.ok = any(t in ("browser_open", "browser_read") and ok for t, ok, _ in res) and has(said, "אבטיח") and not errs
@@ -514,7 +514,7 @@ async def s_selfcheck(h, r):
     s = await h.get(V3)
     x = await h.turn(s, "תבדוק את עצמך", label="self-check", first_timeout=40)
     await h.quiet(s, 3, 60)
-    res = [(e.get("tool"), e.get("ok"), e.get("code")) for e in s.log.codes("TOOL_RESULT")
+    res = [(e.get("tool"), e.get("ok"), e.get("result_code") or e.get("code")) for e in s.log.codes("TOOL_RESULT")
            if e.get("tool") == "self_check_run"]
     said = " / ".join(e.get("text", "") for e in s.log.codes("LIVE_JARVES_SAID"))[-600:]
     r.ok = "self_check_run" in x["tools"] and any(ok for _, ok, _ in res) and (x["speech_s"] or 0) >= 2 and x["open"]
@@ -684,7 +684,7 @@ async def s_redelegate(h, r):
     dec = (ev_codes(s, "APPROVAL_DECIDED", mark2) or [{}])[0]
     left = [m for m in (x["text"] for x in s.core.memory.list(50)) if has(m, "לוקר")]
     ev = s.log.since(mark)
-    tools = [e["msg"].replace("backend called ", "") for e in ev if e["code"] == "LIVE_TOOL_CALL"]
+    tools = [(e.get("tool") or e["msg"].replace("backend called ", "")) for e in ev if e["code"] == "LIVE_TOOL_CALL"]
     said_b = " / ".join(e.get("text", "") for e in s.log.since(mark2) if e["code"] == "LIVE_JARVES_SAID")
     redel = len([e for e in ev if e["code"] == "LIVE_REDELEGATED"])
     bad = [e["code"] for e in ev if e["code"] in ("LIVE_REDELEGATE_REJECTED", "LIVE_REDELEGATE_NO_RESPONSE",
@@ -714,7 +714,7 @@ async def s_told(h, r):
     ev = s.log.since(mark)
     claims = [e for e in ev if e["code"] == "LIVE_FALSE_ACTION_CLAIM"]
     fixed = [e for e in ev if e["code"] == "LIVE_CLAIM_UNASKED"]
-    tools = [e["msg"].replace("backend called ", "") for e in ev if e["code"] == "LIVE_TOOL_CALL"]
+    tools = [(e.get("tool") or e["msg"].replace("backend called ", "")) for e in ev if e["code"] == "LIVE_TOOL_CALL"]
     after = len(s.core.memory.list(200))
     r.ok = all(answered(x) for x in rows) and after == before and len(fixed) >= len(claims) and "remember" not in tools
     r.key = (f"answered {sum(answered(x) for x in rows)}/3, memories {before}->{after}, claims {len(claims)}, "
