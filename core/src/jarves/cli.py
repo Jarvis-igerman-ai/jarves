@@ -129,6 +129,7 @@ async def _run_desktop(core, launcher=None) -> None:
     print("Loading JARVES... the room opens after voice is ready.", flush=True)
     viewer = await (launcher or _launch_viewer)(core.cfg.link.port)
     viewer_done = asyncio.create_task(viewer.wait())
+    core.preopened_viewer = viewer             # the Runtime owns this window from the start: no second one on `show`
     stop = asyncio.create_task(core.stop_event.wait())
 
     async def boot():
