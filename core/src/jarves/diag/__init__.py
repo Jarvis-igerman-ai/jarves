@@ -14,7 +14,7 @@ Modules (each one small and testable on its own; real SQLite in tests, fixed clo
               last commit), plus 10 redacted surrounding log lines
 - preflight   the start-up self-check (budget 1.5 s) before CORE_READY; a failed item degrades its component only
 - remediation the closed list of auto-repairs, each ONLY through approvals (pre-check, action, post-check)
-- tickets     ticket drafts; filed on the private repo only after an approval; duplicates become comments
+- tickets     ticket drafts (local files; filed only when health.ticket_repo is set AND the owner approves, on a private repo); duplicates become comments
 - ai_review   the scheduled, SELECTIVE AI review (rule layer picks first; skipped at $0 when nothing is new;
               OpenAI backend = a different model family than the Claude models that wrote the code; caps)
 - canary      nightly synthetic user-journey canaries on a throw-away TEST profile

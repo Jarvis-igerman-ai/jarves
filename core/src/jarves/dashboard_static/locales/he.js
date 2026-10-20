@@ -1083,7 +1083,7 @@
   "No nightly canary yet.": "עוד לא רצו בדיקות לילה.",
   "Repairs (always with approval)": "תיקונים (תמיד באישור)",
   "Ticket drafts": "טיוטות כרטיסים",
-  "File on the private repo (asks first)": "שלח למאגר הפרטי (ישאל קודם)",
+  "File on GitHub (asks first, only if a repo is set)": "שלח ל-GitHub (ישאל קודם, רק אם הוגדר מאגר)",
   "No drafts.": "אין טיוטות.",
   "ok": "תקין",
   "degraded": "פועל חלקית",

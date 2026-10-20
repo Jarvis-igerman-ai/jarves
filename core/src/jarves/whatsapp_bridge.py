@@ -618,6 +618,12 @@ class WhatsAppBridgeSkill(Skill):
             return {"details": det, "typed": bool(d["night"]), "voice": not d["first"] and not d["night"],
                     "why": "you asked JARVES to send this WhatsApp message"}
 
+        def send_precheck(a: SendArgs) -> ToolResult | None:
+            d = self._drafts.get(a.draft_id)
+            if d is None or self.clock() - d["t"] >= DRAFT_TTL_S:
+                return ToolResult(False, "אני שולח רק טיוטה שכתבתי עכשיו והצגתי לך.", code="WA_UNKNOWN_DRAFT")
+            return None
+
         async def send(a: SendArgs) -> ToolResult:
             d = self._drafts.pop(a.draft_id, None)            # single use, also when the send fails
             if d is None or self.clock() - d["t"] >= DRAFT_TTL_S:
@@ -658,7 +664,7 @@ class WhatsAppBridgeSkill(Skill):
                  compose, ComposeArgs, permission="action"),
             Tool("whatsapp_send", "Send a draft made by whatsapp_compose. The system shows the recipient, number "
                  "and full text on the screen and asks the owner; do not ask yourself.", send, SendArgs,
-                 permission="destructive", timeout_s=30, impact=send_impact,
+                 permission="destructive", timeout_s=30, impact=send_impact, precheck=send_precheck,
                  recipient=lambda a: (self._drafts.get(a.draft_id) or {}).get("name"), approval_meta=send_meta),
         ]
 

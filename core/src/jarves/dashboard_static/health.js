@@ -188,7 +188,7 @@
         msg.textContent = tx("ממתין לאישור על המסך…", "Waiting for your approval on screen…");
         try { const r = await post("/api/health/ticket/file", { id: t.id }); msg.textContent = `${r.status} ${r.issue_url || r.reason || ""}`; route(true); }
         catch (e) { msg.textContent = tx("נכשל: ", "Failed: ") + e.message; }
-      } }, tx("שלח למאגר הפרטי (ישאל קודם)", "File on the private repo (asks first)")) : null))
+      } }, tx("שלח ל-GitHub (ישאל קודם, רק אם הוגדר מאגר)", "File on GitHub (asks first, only if a repo is set)")) : null))
       : el("div", { class: "muted small" }, tx("אין טיוטות.", "No drafts."))));
     render(parts);
   }

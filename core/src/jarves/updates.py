@@ -11,9 +11,10 @@
                  (jarves.backup.checkpoint, WP-M5) -> stop the Core -> start the normal installer window (the user sees it).
                  The installer keeps user data (it lives in <state_dir>, not in the program folder).
 
-Private repository: anonymous requests cannot see the releases (GitHub answers 404). A user may put a read-only
-fine-grained token in secrets.env as JARVES_UPDATE_TOKEN (never shipped in the installer); otherwise the check
-reports "unavailable" truthfully instead of "up to date".
+Repositories: REPO (igalgerman/jarves, public) is the source repo; signed installers and latest.json live in
+DEFAULT_RELEASES_REPO (igalgerman/jarvis-releases). If a repo answers 404/403 the check reports "unavailable"
+truthfully instead of "up to date" (an optional read-only JARVES_UPDATE_TOKEN in secrets.env is only used for the
+GitHub REST fallback, never for hosted sources).
 
 Public releases (WP-O, docs/RELEASE_HOSTING.md): package.yml also publishes every green `main` build to a separate
 PUBLIC repo that holds only release files (DEFAULT_RELEASES_REPO). Once this build trusts a signing key, the check
@@ -47,7 +48,7 @@ from typing import Callable
 
 from . import __version__, logs
 
-REPO = "igalgerman/JARVIS"
+REPO = "igalgerman/jarves"   # the PUBLIC source repo (V4-RP-1); signed installers live in DEFAULT_RELEASES_REPO
 TAG_PREFIX = "win-v"
 ASSET_RE = re.compile(r"^JARVES-Setup-(\d+(?:\.\d+){1,3})\.exe$")
 CHECK_INTERVAL_S = 24 * 3600
@@ -67,12 +68,12 @@ def public_releases_url(repo: str = DEFAULT_RELEASES_REPO) -> str:
 
 # Windows / Pi status of the M6 features (spec section 5). jarves.features has no targets field yet, so this is
 # the record the capability matrix (WP-M4) reads; the issue is real (created with `gh issue create`).
-PI_ISSUE = "https://github.com/igalgerman/JARVIS/issues/19"
+PI_ISSUE = "https://github.com/igalgerman/jarves/issues/19"
 PLATFORMS = {
     "windows_installer": {
         "windows": {"status": "implemented_unverified",
                     "evidence": "CI silent install/run/uninstall on windows-2025: "
-                                "https://github.com/igalgerman/JARVIS/actions/runs/39290421823; "
+                                "CI run 39290421823 of the legacy private repo; "
                                 "a clean second PC is the owner's test (docs/INSTALL_TEST.md)"},
         "linux_arm64_pi": {"status": "planned", "blocker": "no Linux ARM64 package/systemd service yet (M7)",
                            "roadmap_issue": PI_ISSUE}},
@@ -310,8 +311,9 @@ class UpdateChecker:
         if code == 200 and isinstance(body, list):
             return None, pick_release(body, self.current)
         if code in (401, 403, 404):
-            return ("releases not reachable (private repository or rate limit). Ask the owner for access or set "
-                    "JARVES_UPDATE_TOKEN (read-only) in secrets.env, or [update] base_url"), None
+            return (f"releases not reachable on GitHub ({self.repo}: none published there, or rate limit). Signed "
+                    f"installers are published at https://github.com/{DEFAULT_RELEASES_REPO}/releases; "
+                    "or set [update] base_url"), None
         return f"GitHub answered HTTP {code}", None
 
     def _fetch_manifest(self) -> dict:

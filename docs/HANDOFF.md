@@ -10,6 +10,17 @@
 
 ---
 
+## Repoint to the public repo + clean shutdown (21 Oct 2026) - branch `fix/repoint-and-shutdown` (off `v4/integrated-b-c-d-g-m-r01`, draft PR into it)
+
+- **V4-RP-1:** `updates.REPO = igalgerman/jarves` (source repo); signed installers + `latest.json` stay in `igalgerman/jarvis-releases` (`DEFAULT_RELEASES_REPO`). The "releases not reachable" text now names both repos and the download page. New `tests/test_repoint.py`: fake release host with a signed `latest.json` finds a newer 3.x/4.x build, never offers a downgrade, rejects a wrong signature.
+- **V4-RP-2:** `health.ticket_repo` default is empty: drafts stay local (Health page, `jarvis health ticket`); `tickets.file` returns "stays local" without asking or calling gh until the owner sets a repo (Health settings) AND approves (the private-repo check of OD-35 still applies). Button text (he/en + locale catalogs) now "File on GitHub (asks first, only if a repo is set)".
+- **V4-RP-3:** all `github.com/igalgerman/JARVIS` links in `core/src`, `packaging` (installer publisher URL) and tests now point at `igalgerman/jarves` (issue numbers kept: re-map them if the migrated public issue numbers differ). `test_no_product_file_links_to_the_deprecated_private_repo` guards core/src, packaging, .github, scripts (empty allow-list). README/AGENTS/docs/reviews/MIGRATION_* untouched on purpose.
+- **V4-SC-1:** `SelfCheck.cancel` event checked between steps (`CheckCancelled`); the worker thread closes its own handles; `SelfCheckService.stop` sets the event and waits for the thread before `ops.stop` lets the databases close. Test with a stopping Core (fails on the old code with `ProgrammingError: closed database`).
+- **P3:** V4-WA-2 new `Tool.precheck` hook runs before the owner is asked (unknown/used draft -> `WA_UNKNOWN_DRAFT`, no popup); V4-AG-1 taint refusal wording is source-neutral; V4-LG-1 websockets handshake-probe errors are logged at INFO with a fixed message.
+- **Open question for the user:** the legacy issue numbers in capability/roadmap links (#14..#28) were repointed to `igalgerman/jarves/issues/N` mechanically; the public issues are numbered #1-#5 so these links need a mapping decision.
+
+---
+
 ## V4 perf fix: slow feature probes block features_list (20 Oct 2026) - #1, branch `perf/fix-slow-probes` (off `v4/integrated-b-c-d-g-m-r01`, draft PR into it)
 
 - **Problem:** with every V4 package registered (59 features) the gate's `features_list_ms` was 171-359 ms (median 260 ms over 7 fresh processes; budget ci 150 / owner 50; V3 baseline 10.5). Cause, per probe (first list, busy PC): camera 132 ms (camera.backends imported numpy, then the probe imported OpenCV), tray 39 ms (PIL + pystray), agent_orchestrator 33 ms on EVERY expired list (4-7 PATH scans for claude/codex), Google probes (httpx import), browser/wake/camera* 2-4 ms each, WhatsApp bridge = localhost HTTP status with a 2 s timeout. No probe spawned a subprocess; `claude agents --json` runs only in the orchestrator service, not in a probe.

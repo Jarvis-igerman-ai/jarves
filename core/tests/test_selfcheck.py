@@ -507,3 +507,55 @@ async def test_core_error_burst_starts_one_check(home, cfg):
         assert any(f["fingerprint"] == "log:ERROR:TEST_ERROR" for f in svc.last["findings"])
     finally:
         await c.stop()
+
+
+async def test_stopping_core_cancels_the_running_check_and_logs_no_error_afterwards(home, cfg, monkeypatch):
+    """V4-SC-1: the automatic crash check ends between two steps when the Core stops, its thread has finished (and
+    closed its handles) before Core stopped cleanly, and nothing is logged at ERROR afterwards."""
+    import logging
+    import threading
+    import time as _time
+    from conftest import FakeTTS, FakeSTT
+    from jarves.app import Core
+    from jarves.skills.music import FakePlayer
+    from jarves.voice.audio import SimAudio
+    t = _time.time()
+    write_log(home, [rec(t - 7200, "CORE_STARTING", session="old1"), rec(t - 7100, "SOMETHING", session="old1")])
+    entered, finished, later_steps = threading.Event(), threading.Event(), []
+    real_health, real_close = selfcheck.SelfCheck._health, selfcheck.SelfCheck.close
+
+    def slow_health(self, found):
+        entered.set()
+        _time.sleep(0.6)                                   # the Core is asked to stop while this step runs
+        return real_health(self, found)
+
+    def spy_logs(self, recs, found, metrics):
+        later_steps.append("logs")                         # must never run: cancelled before this step
+
+    def close_spy(self):
+        real_close(self)
+        finished.set()
+    monkeypatch.setattr(selfcheck.SelfCheck, "_health", slow_health)
+    monkeypatch.setattr(selfcheck.SelfCheck, "_logs", spy_logs)
+    monkeypatch.setattr(selfcheck.SelfCheck, "close", close_spy)
+    seen: list[logging.LogRecord] = []
+
+    class Grab(logging.Handler):
+        def emit(self, r):
+            seen.append(r)
+    sink = Grab(logging.DEBUG)
+    logs.add_sink(sink)
+    c = Core(cfg, home, audio=SimAudio(), player=FakePlayer(), stt=FakeSTT(), tts=FakeTTS(), console_logs=False,
+             use_real_audio=False)
+    try:
+        await c.start()
+        assert await asyncio.to_thread(entered.wait, 15)
+        await c.stop()
+        assert finished.is_set()                           # the check thread had ended before the databases closed
+        await asyncio.sleep(1.0)
+        assert not later_steps
+        assert [r for r in seen if r.levelno >= logging.ERROR] == []
+        stopped = [i for i, r in enumerate(seen) if getattr(r, "code", "") == "CORE_STOPPED"]
+        assert stopped and not [r for r in seen[stopped[-1] + 1:] if getattr(r, "component", "") == "selfcheck"]
+    finally:
+        logs.remove_sink(sink)

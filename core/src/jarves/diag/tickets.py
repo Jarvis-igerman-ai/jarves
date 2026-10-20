@@ -1,4 +1,4 @@
-"""Ticket drafts from findings, filed ONLY after the owner's approval, ONLY on the private repo (OD-35).
+"""Ticket drafts from findings, filed ONLY after the owner's approval, ONLY on the private repo the owner set in health.ticket_repo (empty by default = drafts stay local, V4-RP-2).
 
 A draft holds: title, severity, version, commit, code links (log-index hints), counts, redacted evidence and the
 reproduction steps when known. Filing is an approvals-flow action: the full text is in the approval prompt (and on
@@ -110,6 +110,8 @@ async def file(store, tid: int, *, ask, repo: str, by: str, run: Runner = gh_run
         raise KeyError(tid)
     if t["status"] != "draft":
         return {"id": tid, "status": t["status"], "issue_url": t["issue_url"]}
+    if not (repo or "").strip():                      # V4-RP-2: no repo configured = the draft stays a local file
+        return {"id": tid, "status": "draft", "reason": "no ticket repo is set (health.ticket_repo); the draft stays local, nothing filed"}
     ok, vis = _private(repo, run)
     if not ok:
         db.write(store, "UPDATE diag_tickets SET status='draft', by=? WHERE id=?", (by, tid))

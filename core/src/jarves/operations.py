@@ -33,7 +33,7 @@ from . import timers as timers_mod
 from .userdata import open_db
 
 AUTONOMY_SYNC_S = 600.0
-ROADMAP_ISSUE = "https://github.com/igalgerman/JARVIS/issues/23"     # M3 Raspberry Pi verification (real issue)
+ROADMAP_ISSUE = "https://github.com/igalgerman/jarves/issues/23"     # M3 Raspberry Pi verification (real issue)
 _UNVERIFIED_PI = ("pure Python + SQLite + tzdata, no Windows-only code; not run on a Raspberry Pi yet "
                   "(no device in the test setup)")
 _WIN_EVIDENCE = "core/tests/test_m3_*.py (unit + fault injection on Windows); no real-restart run yet"
