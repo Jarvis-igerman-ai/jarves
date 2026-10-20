@@ -4,6 +4,21 @@ Owner requests (20 Oct): (A) a visible approval popup even when the face is hidd
 background, one shared approvals service for every confirmation path; (B) a Helper Skill that runs commands and
 installs software only with explicit per-action approval.
 
+## Owner decisions applied (20 Oct, later the same day)
+1. **The Helper asks for every command.** `helper_readonly_auto` stays in code (off) but is not offered: the wizard
+   hides it (`setup_wizard.WIZARD_HIDDEN`, scripted answers skip it too) and the guide no longer has a step for it.
+   Only `jarvis features on helper_readonly_auto` could switch it on.
+2. **Popup = small always-on-top window (primary)**; tray balloon + dashboard Approvals page as fallback; no toast.
+3. **Instagram sends use the same approvals service** (popup/dashboard + voice "כן"), no Telegram buttons. Test
+   `test_instagram_send_goes_through_the_approvals_service_and_voice`: real fake Graph API over HTTP, real registry,
+   real `ApprovalService`; the request is kind `message`, risk high, shows the exact text and recipient, nothing
+   is sent while waiting, the spoken yes approves, exactly one send follows, the audit records channel `voice`.
+
+Recovery note: the first run was cut by a PC restart before any push; its uncommitted work was recovered from the
+old worktree, merged onto origin/main (one conflict in `Core.stop`, both sides kept) and pushed.
+Flake found and fixed: the invisible test popup could take a stray key press from the desktop (Escape/Enter =
+Deny); in test mode the window now has no keyboard/close bindings and does not take focus.
+
 ## A. One approvals service: `core/src/jarves/approvals.py`
 - `Core.ask_confirm` (which is `registry.confirm`) now calls `ApprovalService.ask`. Every existing path goes through
   it: destructive tools and `confirm` prompts (memory delete, Telegram/Instagram send, Gmail send, calendar,
@@ -64,7 +79,8 @@ installs software only with explicit per-action approval.
   further model action runs in the same turn. Audit: `<home>/helper/audit.jsonl`.
 
 ## Tests (run one file at a time: the machine was short of RAM)
-`core/.venv/Scripts/python.exe -m pytest -o pythonpath=src tests/test_helper_approvals.py` gave **41 passed** with
+`core/.venv/Scripts/python.exe -m pytest -o pythonpath=src tests/test_helper_approvals.py` gave **42 passed**
+(4 consecutive green runs after the popup fix; 24 extra popup round-trips in a loop all correct) with
 real child processes in temp folders, the real approvals service, the real dashboard route functions, the answers
 file, the real Tk popup (invisible, the window presses its own button), the face link and typed "כן". The approval
 decision path is never mocked.

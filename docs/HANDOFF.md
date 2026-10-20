@@ -682,6 +682,24 @@ See [docs/reviews/S1_T03R1_ENGINEERING_REVIEW.md](reviews/S1_T03R1_ENGINEERING_R
 Built per docs/plans/INSTAGRAM_CHANNEL.md: `core/src/jarves/instagram_channel.py`, `jarvis instagram start|status|test|logout` (+ `serve` webhook receiver on 127.0.0.1, `refresh` long-lived token), feature `instagram` (off by default, SAFE_OFF, group Channels, bundle check, guide `instagram.toml`, capabilities row via features.register). Token/app secret/verify token only in secrets.env. Inbox (SQLite, dedup), DMs read aloud as untrusted data, LLM only drafts, `instagram_send` is destructive with impact None (exact text confirmed from every origin, one draft per send), 24h window checked at draft and send, audit log `instagram/audit.jsonl`. Tests: `tests/test_instagram.py` against a local fake Graph API (real HTTP) and a real webhook server.
 Unverified: never run against real Instagram/Meta (needs owner's Meta app + Business/Creator account); endpoint paths/fields (graph.instagram.com/v21.0 /me, /me/conversations, /me/messages, /refresh_access_token) follow Meta docs from memory and must be checked at first live run; no tunnel set up; declines at the prompt are not audited (the registry never calls the tool).
 Questions for the user: (1) Is the Instagram account Business/Creator? (2) Confirmation surface: voice+screen as built, or add Telegram buttons? (3) OK to run `jarvis instagram serve` behind a Cloudflare Tunnel, or poll only?
+## Approvals service + Helper skill (#17, branch v3-approvals, 20 Oct 2026)
+Report: [docs/reviews/SWV3_APPROVALS_REPORT.md](reviews/SWV3_APPROVALS_REPORT.md). One `ApprovalService`
+(`core/src/jarves/approvals.py`) behind `Core.ask_confirm` / `registry.confirm`: feature_set requests, tool
+confirmations, camera, Telegram/Instagram sends, Helper. Shown at once on an always-on-top Tk popup
+(`approval_popup.py`, own process), tray balloon, face dialog, dashboard `#/approvals`, voice/typed yes-no, CLI
+`jarvis approvals`. Default deny on timeout/shutdown/no channel; no answers from inside a tool; dedupe, 30 s
+cooldown after a deny, 6/min rate limit; audit `approvals/audit.jsonl`. Helper skill (`skills/helper.py`,
+feature `helper` off, SAFE_OFF): `shell_propose`, `install_propose` (winget/pip/npm, exact package/source/version),
+blocklist with typed 4-digit code, elevation and JARVES-data refused, timeout + process-tree kill, untrusted
+redacted output summary, audit. Owner decisions applied: Helper always asks (read-only allow-list not offered),
+popup window primary (no toast), Instagram send via approvals + voice.
+Unverified: the real popup on the owner's desktop (Hebrew/RTL, position, topmost over full-screen, pythonw from the
+background runtime), tray balloon, Godot `confirm.cancel` (no Godot binary here), voice "כן" in a live session
+(echo), real winget/pip/npm installs and UAC, Raspberry Pi. Full suite not run locally (low RAM): focused files only.
+Questions for the user: (1) Please trigger one approval (e.g. ask JARVES to turn on Contacts) and confirm the popup
+looks right and stays on top. (2) Timeout 60 s (Helper 120 s): OK? (3) Should the dashboard Approvals page also be
+reachable from the phone (dashboard_lan) for approvals, or PC-only?
+
 ## Questions for the user (from research, branch v3-research, docs/plans/)
 - Signing: SignPath OSS needs a public repo + OSI license; Azure Artifact Signing ~$9.99/mo, region-limited (verify price). Stay unsigned? Open-source the installer?
 - Instagram: is the account Business/Creator and linked to a Facebook Page? Confirm sends by voice, dashboard or Telegram?
