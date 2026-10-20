@@ -191,3 +191,21 @@ def test_live_session_is_visible_while_it_runs(home):
     finally:
         d.stop()
         st.close()
+
+
+def test_static_files_do_not_use_the_rate_budget(dash, monkeypatch):
+    """Campaign D: a page load fetches ~30 static files; they must not push the API calls into 429."""
+    from jarves import dashboard_auth
+    monkeypatch.setattr(dashboard_auth, "RATE_PER_MIN", 5)
+    assert [req(dash, "GET", "/static/app.js")[0].status for _ in range(12)] == [200] * 12
+    api = [req(dash, "GET", "/api/sessions")[0].status for _ in range(8)]
+    assert api[:5] == [200] * 5 and api[-1] == 429
+
+
+def test_shell_has_icon_and_keyboard_rows():
+    """Campaign D: no favicon 404 in the console; clickable table rows are reachable with Tab and Enter."""
+    from pathlib import Path
+    st = Path(__file__).resolve().parents[1] / "src" / "jarves" / "dashboard_static"
+    assert 'rel="icon"' in (st / "index.html").read_text(encoding="utf-8")
+    shell = (st / "shell.js").read_text(encoding="utf-8")
+    assert "tr.click" in shell and "tabIndex = 0" in shell
