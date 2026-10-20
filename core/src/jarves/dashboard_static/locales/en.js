@@ -1465,6 +1465,26 @@
   "A number I type myself": "A number I type myself",
   "Phone number": "Phone number",
   "Name (optional)": "Name (optional)",
-  "Numbers from an e-mail, a web page or a message are never dialled for you: type them yourself.": "Numbers from an e-mail, a web page or a message are never dialled for you: type them yourself."
+  "Numbers from an e-mail, a web page or a message are never dialled for you: type them yourself.": "Numbers from an e-mail, a web page or a message are never dialled for you: type them yourself.",
+  "Updates": "Updates",
+  "Install, update and go back to the previous version. JARVES asks before it installs anything and keeps your data.": "Install, update and go back to the previous version. JARVES asks before it installs anything and keeps your data.",
+  "Install update": "Install update",
+  "Current version": "Current version",
+  "Latest available": "Latest available",
+  "Up to date": "Up to date",
+  "Last checked": "Last checked",
+  "Go back": "Go back",
+  "Nothing to roll back to: no previous version is kept yet.": "Nothing to roll back to: no previous version is kept yet.",
+  "Roll back to the previous version": "Roll back to the previous version",
+  "Rolling back stops JARVES, restores your data from before the update and installs the previous version. Anything you changed after the update is kept in a safety backup. Also from the command line: jarvis update --rollback.": "Rolling back stops JARVES, restores your data from before the update and installs the previous version. Anything you changed after the update is kept in a safety backup. Also from the command line: jarvis update --rollback.",
+  "The installer is not code-signed yet. Windows SmartScreen may say Windows protected your PC: choose More info, then Run anyway.": "The installer is not code-signed yet. Windows SmartScreen may say Windows protected your PC: choose More info, then Run anyway.",
+  "Starting JARVES when you sign in stays off unless you turn it on (jarvis autostart on).": "Starting JARVES when you sign in stays off unless you turn it on (jarvis autostart on).",
+  "Check failed: ": "Check failed: ",
+  "Downloading and checking the signature, SHA256 and size…": "Downloading and checking the signature, SHA256 and size…",
+  "Not installed (the current version keeps working): ": "Not installed (the current version keeps working): ",
+  "Not rolled back: ": "Not rolled back: ",
+  "Check unavailable": "Check unavailable",
+  "Previous version: ": "Previous version: ",
+  " (downloaded from the signed release folder)": " (downloaded from the signed release folder)"
  }
 };

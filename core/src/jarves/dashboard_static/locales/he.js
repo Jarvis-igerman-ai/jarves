@@ -1465,7 +1465,27 @@
   "A number I type myself": "מספר שאני מקליד בעצמי",
   "Phone number": "מספר טלפון",
   "Name (optional)": "שם (לא חובה)",
-  "Numbers from an e-mail, a web page or a message are never dialled for you: type them yourself.": "מספרים ממייל, מאתר או מהודעה לא מחויגים אוטומטית: הקלידו אותם בעצמכם."
+  "Numbers from an e-mail, a web page or a message are never dialled for you: type them yourself.": "מספרים ממייל, מאתר או מהודעה לא מחויגים אוטומטית: הקלידו אותם בעצמכם.",
+  "Updates": "עדכונים",
+  "Install, update and go back to the previous version. JARVES asks before it installs anything and keeps your data.": "התקנה, עדכון וחזרה לגרסה הקודמת. ג'ארביס שואל לפני שהוא מתקין משהו, ושומר על הנתונים שלך.",
+  "Install update": "התקן את העדכון",
+  "Current version": "גרסה נוכחית",
+  "Latest available": "הגרסה העדכנית",
+  "Up to date": "מעודכן",
+  "Last checked": "נבדק לאחרונה",
+  "Go back": "חזרה לאחור",
+  "Nothing to roll back to: no previous version is kept yet.": "אין לאן לחזור: עדיין לא נשמרה גרסה קודמת.",
+  "Roll back to the previous version": "חזרה לגרסה הקודמת",
+  "Rolling back stops JARVES, restores your data from before the update and installs the previous version. Anything you changed after the update is kept in a safety backup. Also from the command line: jarvis update --rollback.": "החזרה עוצרת את ג'ארביס, משחזרת את הנתונים מלפני העדכון ומתקינה את הגרסה הקודמת. כל מה ששינית אחרי העדכון נשמר בגיבוי ביטחון. אפשר גם מהמסוף: jarvis update --rollback.",
+  "The installer is not code-signed yet. Windows SmartScreen may say Windows protected your PC: choose More info, then Run anyway.": "המתקין עדיין לא חתום דיגיטלית. ייתכן ש-Windows SmartScreen יציג \"Windows protected your PC\": בחר More info ואז Run anyway.",
+  "Starting JARVES when you sign in stays off unless you turn it on (jarvis autostart on).": "הפעלת ג'ארביס בכניסה ל-Windows נשארת כבויה אלא אם תדליק אותה (jarvis autostart on).",
+  "Check failed: ": "הבדיקה נכשלה: ",
+  "Downloading and checking the signature, SHA256 and size…": "מוריד ובודק את החתימה, ה-SHA256 והגודל…",
+  "Not installed (the current version keeps working): ": "לא הותקן (הגרסה הנוכחית ממשיכה לעבוד): ",
+  "Not rolled back: ": "לא בוצעה חזרה: ",
+  "Check unavailable": "בדיקה לא זמינה",
+  "Previous version: ": "הגרסה הקודמת: ",
+  " (downloaded from the signed release folder)": " (תורד מתיקיית ההפצה החתומה)"
  },
  "rules": [
   [

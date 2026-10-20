@@ -963,7 +963,8 @@ BUNDLE: dict[str, list[Callable[[], tuple[bool, str]]]] = {
     "proactive_alerts": [_mod("jarves.alerts")],
     "autonomy": [_mod("jarves.autonomy")],
     "backup": [_mod("jarves.backup")],
-    "update_check": [_mod("jarves.updates")],
+    "update_check": [_mod("jarves.updates"), _mod("jarves.migrations"), _data("jarves", "dashboard_static/updates.js"),
+                     _mod("cryptography.hazmat.primitives.asymmetric.ed25519")],   # the signed-manifest check needs it
     "background_core": [_mod("jarves.runtime.service")],
     "display_control": [_mod("jarves.runtime.viewer")],
     "tray_icon": [_win(_mod("pystray")), _win(_mod("PIL"))],
