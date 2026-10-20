@@ -193,7 +193,8 @@ class Core:
         from . import approvals as appr
         self.approvals = appr.attach(appr.ApprovalService(self.home))
         # the native popup only on a real run (tests and silent runs never open windows)
-        self.approvals.channels += [appr.PopupChannel(self.approvals, enabled=self.use_real_audio),
+        self.approvals.channels += [appr.PopupChannel(self.approvals, enabled=self.use_real_audio,
+                                                       lang=c.ui.popup_language),
                                     _FaceApproval(self), _VoiceApproval(self)]
         self.registry = SkillRegistry()
         self.registry.confirm = self.ask_confirm

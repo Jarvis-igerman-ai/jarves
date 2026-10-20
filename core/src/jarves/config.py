@@ -245,6 +245,12 @@ class UpdateConfig(_Strict):
         return v
 
 
+class UIConfig(_Strict):
+    """Language of the desktop UI chrome (the approval popup). English by default; "he" = Hebrew, right-aligned.
+    Never both at once (owner feedback 20 Oct: too much text)."""
+    popup_language: Literal["en", "he"] = "en"
+
+
 class Config(_Strict):
     assistant_name: str = "JARVES"
     # how the name is SAID (and written in Hebrew speech/greetings): the voice read the Latin "JARVES" letter by
@@ -260,6 +266,7 @@ class Config(_Strict):
     camera: CameraConfig = CameraConfig()
     runtime: RuntimeConfig = RuntimeConfig()
     update: UpdateConfig = UpdateConfig()
+    ui: UIConfig = UIConfig()
 
 
 SECRET_KEYS = ("api_key", "apikey", "token", "secret", "password", "cookie")
