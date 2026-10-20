@@ -209,13 +209,43 @@ def one_run(scenario: str, idle_s: float, port: int) -> dict:
             "threads": b["threads"], "child_processes": kids, "stop_s": round(stop_s, 2), "exit": p.returncode}
 
 
+STAGES = {"CORE_READY": "ready", "LIVE_STARTED": "live_started", "LIVE_FIRST_AUDIO": "first_audio",
+          "LINK_FACE_CONNECTED": "face", "PREWARM_DONE": "prewarm_done"}
+
+
+def log_stages(path: Path, last: int) -> None:
+    """Per-start stage timings (seconds after CORE_STARTING) from a real jarves.log; codes only, no transcript."""
+    runs, cur = [], None
+    for line in path.read_text(encoding="utf-8", errors="replace").splitlines():
+        try:
+            d = json.loads(line)
+            t = time.mktime(time.strptime(d["ts"][:19], "%Y-%m-%dT%H:%M:%S")) + float("0." + d["ts"][20:23])
+        except (ValueError, KeyError):
+            continue
+        if d.get("code") == "CORE_STARTING":
+            cur = {"start_utc": d["ts"][:19], "t0": t}
+            runs.append(cur)
+        elif cur is not None and d.get("code") in STAGES and STAGES[d["code"]] not in cur:
+            cur[STAGES[d["code"]]] = round(t - cur["t0"], 1)
+            if d["code"] == "PREWARM_DONE":
+                cur["prewarm_ms"] = d.get("ms")
+    for r in runs[-last:]:
+        r.pop("t0")
+        print(json.dumps(r))
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     ap.add_argument("--runs", type=int, default=3)
     ap.add_argument("--idle-s", type=float, default=60)
     ap.add_argument("--scenario", choices=sorted(CONFIGS), default="core")
     ap.add_argument("--port", type=int, default=18765)
+    ap.add_argument("--log", type=Path, help="instead: print stage timings of the last starts in this jarves.log")
+    ap.add_argument("--last", type=int, default=10)
     a = ap.parse_args()
+    if a.log:
+        log_stages(a.log, a.last)
+        return 0
     rows = []
     for i in range(a.runs):
         r = one_run(a.scenario, a.idle_s, a.port)

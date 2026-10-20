@@ -1,3 +1,32 @@
+## SW-V3 P0.3 startup / always-on performance (20 Oct 2026): branch `v3-p03-perf`, [#17](https://github.com/igalgerman/JARVIS/issues/17), [report](reviews/SWV3_P03_REPORT.md)
+
+- **Fixed, all measured before and after on the owner's PC.** Behaviour is unchanged.
+  - The prewarm now imports only what the selected route uses. GPT-Live and ChatGPT-plan routes no longer load the
+    Agents SDK, and the live-client lazy imports are now prewarmed.
+  - The Core now runs with `OPENBLAS_NUM_THREADS=1` (a value the user set still wins).
+  - `runtime.json` is no longer rewritten every second: it is saved on a change, with a 60 s heartbeat.
+  - The Pear probe is warmed in a worker thread. When its cached result has expired, the old result is returned at
+    once and re-checked in the background.
+- **Background Core results (combined route).**
+  - Private commit: 358 → 93 MB.
+  - Working set: 159 → 117 MB.
+  - Threads: 18 → 11.
+  - Idle CPU: 0.57 → 0.28 %.
+  - Idle disk writes: 58.6 → 3.5 KB/min.
+  - First live session's event-loop work before the network: 387–553 → 9 ms.
+  - `features_list` / `list_skills` / `live_tools` with Pear closed: about 320 ms → 2–22 ms.
+- **Reproduce:**
+  - `core/.venv/Scripts/python.exe core/tools/bench_startup.py --scenario combined`, silent and offline, no mic.
+  - Add `--log <jarves.log>` to get stage timings of real starts.
+- **Tests:** the full offline suite passed, 1141 passed and 3 skipped. New tests are in `core/tests/test_swv3_p03_perf.py`.
+- **UNVERIFIED:**
+  - End-to-end wake / desktop start with Godot and a billed live session.
+  - Dashboard load and face show/hide.
+  - Sleep/resume timings.
+  - Pi 5.
+  - Idle disk *reads* (250–390 KB/min) are unexplained.
+  - Next gate: compare `bench_startup.py --log` on the owner's next real starts against the report table.
+
 ## Complete retained-log quality review (19 Oct 2026) — [report](reviews/ALL_RETAINED_LOGS_19OCT2026.md)
 
 - User explicitly requested improvement analysis of all logs beyond ERROR events. Reviewed all **988 JSON records**, all **100 voice text entries** (40 user/60 assistant), **74 history turns** and history backups. Found **26 raw-only turns** absent DB; backup snapshots add no unique transcript text. **19 typed AI completion records have no answer text**, so typed quality is unassessable. Input log SHA256 unchanged before/after and private DB counts unchanged (4 sessions/74 turns/13 tools/29 delegations/156 events/4 issues); no raw conversation/account content committed.
