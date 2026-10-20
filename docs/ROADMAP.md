@@ -2,6 +2,61 @@
 
 > Planning and future backlog only. **Only [docs/NOW.md](NOW.md) authorizes work.** Future Issues are NOT permission to start them.
 
+## Product stages and release direction — owner decision, 20 October 2026
+
+**North star:** [PRODUCT_VISION](PRODUCT_VISION.md) defines six distinct product stages. The roadmap below maps software milestones to that vision; it does not replace existing CAD/physical gates or authorize future implementation. `docs/NOW.md` and the active approved work package remain the execution authority.
+
+| Vision stage | Outcome | Intended release direction | Status |
+| --- | --- | --- | --- |
+| **1. Desktop assistant** | Reliable Windows Core, voice, face, skills, diagnostics and installer | Existing SW-V1/V2/V3/V4 work | V3 integration reported; V4 in development, real acceptance and release gates must be checked |
+| **2. PC-hosted personal server + phone access** | One PC-hosted JARVES, authenticated phone client, shared conversation and abilities | **V5 — JARVES Goes Mobile** | Owner selected for the roadmap, **not implemented or authorized to start coding yet** |
+| **3. Android Auto / car** | Safe hands-free access through an officially supported car/phone path | Later milestone (version TBD) | Future, subject to Android Auto restrictions |
+| **4. Everyday Android assistant** | Native daily phone companion with notifications and relevant local abilities | Later milestone (version TBD) | Future, not the V5 phone-access client |
+| **5. Phone as robot stand-in** | Docked spare OnePlus 11 used to validate face/mic/speaker/camera/wake behavior | Later milestone (version TBD) | Future; no 1:1 hardware claim |
+| **6. Physical robot** | Serviceable 3D-printed JARVES with approved Pi-class hardware | Final physical milestone (version TBD) | Deferred: CAD, sourcing, print, safety, acoustic and owner approval gates |
+
+**Important:** the six *product stages* are not necessarily numbered software releases. V5 targets **stage 2** only; V6/V7/etc. are not committed dates or approved scopes. Physical design work continues to be tracked separately under issues #3, #4 and #8.
+
+## V5 — JARVES Goes Mobile + personal intelligence (owner-selected roadmap scope)
+
+**Decision recorded 20 Oct 2026:** preserve all the proposed V5 concepts except Family Intelligence. Family Intelligence is intentionally **deferred**, not rejected; see [F11 in FUTURE_IDEAS](FUTURE_IDEAS.md#f11--family-intelligence-deferred-not-v5). V5 should deliver stage 2 of PRODUCT_VISION while making the already-working desktop assistant more useful. This is a **scope/direction decision**, not permission to start the implementation. Finish and verify V4 first.
+
+### V5 feature pillars
+
+1. **JARVES Everywhere (stage-2 subset: Desktop ↔ Phone).** The Windows PC remains the authoritative Core; a secure, mobile-friendly phone client connects to the same assistant over a deliberately approved transport (LAN first unless the owner separately approves a remote-access architecture). Reuse the existing Core, Skills, identity, memory and DevicePort/API contracts. Support paired-device management, revoke, connection status, live voice, face/status where practical, and seamless follow-up between desktop and phone. Do not create a second brain or silently fork the memory. Always-on phone wake, full native Android integration, Android Auto and dedicated robot hardware remain later stages.
+2. **JARVES Executes Goals.** Owner-requested outcomes become bounded, inspectable, resumable multi-step plans using existing Skills and V4 approvals. Persist task status/checkpoints, show what is pending, allow pause/cancel/retry, respect costs/timeouts, and deliver a concise evidence-linked result. Confirm consequential actions; no unrestricted autonomy, opaque external effects or self-modifying code.
+3. **Adaptive Memory.** Build on V4 conversation recall: source-linked, correctable user preferences and lessons from explicit corrections, with confidence/staleness/conflict handling. The assistant may suggest a memory update, but personal facts and behavior rules are reviewable, editable and deletable; prevent silent speculative profiling. Changes remain consistent across the paired desktop/phone interface.
+4. **Proactive Intelligence.** Opt-in, context-aware suggestions about useful pending work, scheduling conflicts and follow-ups; use event-driven/scheduled signals rather than perpetual paid LLM polling. Respect quiet hours, snooze/stop, frequency limits, permission boundaries and spending caps; deduplicate across desktop and phone. No automatic consequential external side effects.
+5. **JARVES Development Manager.** Extend—not rebuild—the V4 Agent Orchestrator (#49). Report what existing Claude Code/Codex agents are doing, correlate tasks with GitHub Issues/commits/PRs/CI, detect blocked or finished work, and recommend review/repair/next action. Use supported session interfaces; distinguish status-only observation from live push/steer. Reviewer independence, repository access, security approvals and user consent remain hard gates; no autonomous merge/deploy by default.
+
+### Required foundations / currently easy to overlook
+
+- **Phone security:** documented threat model, authenticated pairing and revocation, least-privilege per-device grants, protected transport and secrets, explicit mic/camera/cloud indicators. Internet access is separately reviewed; never expose a home PC port merely to satisfy phone access.
+- **Continuity and resilience:** one source of truth for conversation/task/memory state, idempotent commands, correct device routing and deduplication, reconnection after sleep/Wi-Fi change, honest offline/PC-unreachable behavior and graceful recovery without duplicate reminders or actions.
+- **Voice/product UX:** measure real Android phone mic/speaker latency, echo, push-to-talk vs supported hands-free options, interrupt/barge-in and battery/background behavior; do not confuse a browser demo with a reliable day-to-day mobile client.
+- **Control and observability:** truthful feature/status/capability matrix, CLI/dashboard parity where relevant, task audit trails, privacy-preserving diagnostics, budget/usage visibility, rollback, targeted regression coverage and accessibility in Hebrew/English.
+- **No stage creep:** no Android Auto controls, everyday standalone Android assistant, docked-phone robot, dedicated Pi hardware or Family Intelligence within V5 merely because shared interfaces could be reused.
+
+### V5 definition of done (proposed acceptance gates for the future work package)
+
+- On an **actual Android phone**, pair/revoke safely, speak with the existing PC Core over the approved transport, resume the same conversation from Windows, read relevant status, and run a permitted Skill with the right approval; no second memory or duplicate actions.
+- Verify live voice and reconnection on the physical phone (including host unavailable, interrupted network, app suspend/resume, permission denial and explicit cloud-audio indicators); keep an honest real-vs-fake evidence table.
+- Demonstrate an approved multi-step goal with persistent progress, cancellation, bounded budget and a verified final report; test a failure-and-retry path.
+- Demonstrate a user-confirmed adaptive memory correction and its source, revision/deletion and effect from both clients.
+- Demonstrate useful opt-in proactive suggestions while proving quiet hours, deduplication, stop/snooze and no unapproved action.
+- Demonstrate Development Manager status/review reports against real Claude/Codex/GitHub data, stating clearly when a particular live push/attach/control route is unsupported; no implicit PR merge or permission escalation.
+- Complete security/privacy review and automated + owner-present Windows/Android end-to-end checks. Record performance, actual costs, unresolved blockers and a V5 release artifact/rollback path.
+
+### Sequencing and authorization
+
+1. Close V4 release and outstanding live acceptance gates, especially the V4 Orchestrator, memory, security and installer; reuse those modules rather than duplicating them.
+2. Research current Android/browser/voice/background restrictions and choose the smallest maintainable stage-2 client plus secure transport. Write a scoped V5 package and Issues with dependencies, acceptance criteria and actual device test plan.
+3. Implement stage-2 phone access and shared-session/approval reliability first; layer Goals, Adaptive Memory, Proactivity and Development Manager onto that proven backbone, with bounded parallel work only when independent.
+4. Perform real-device, real-agent and release acceptance. Do not start stage 3, hardware purchases, new subscriptions, paid tests or network exposure without separate owner approval.
+
+**Docs-only update:** this roadmap entry does not update `NOW.md`, install software, create a V5 implementation branch or start V5 before its separate execution approval. Earlier SW-V1/V2 review notes below are retained as historical evidence, not current completion claims.
+
+---
 ## Active software bundle — approved 18 October 2026
 
 The user explicitly authorized one sustained implementation package: **[SW_V1_WORK_PACKAGE.md](SW_V1_WORK_PACKAGE.md)**. It covers **#2 CI → #5 library choice → #6 real Core/Godot → #7 Hebrew voice/face → the first YouTube Music Skill → integration testing and handoff**. The agent proceeds automatically between related phases; no new approval at each checkpoint. R5b remains a software baseline, not an approved physical print. No new subscriptions or account connections without consent.
