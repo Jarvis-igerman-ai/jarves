@@ -554,6 +554,7 @@
   "At the start": "At the start",
   "At the end": "At the end",
   "Start vs end": "Start vs end",
+  "A missed job (computer off) runs once if not older than": "A missed job (computer off) runs once if not older than",
   "Blocks": "Blocks",
   "Timeline": "Timeline",
   "← transcript": "← transcript",

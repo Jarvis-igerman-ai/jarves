@@ -554,6 +554,7 @@
   "At the start": "בהתחלה",
   "At the end": "בסוף",
   "Start vs end": "התחלה מול סוף",
+  "A missed job (computer off) runs once if not older than": "משימה שהוחמצה (המחשב כבוי) תרוץ פעם אחת אם היא לא ישנה מ-",
   "Blocks": "בלוקים",
   "Timeline": "ציר זמן",
   "← transcript": "→ תמליל",
@@ -934,6 +935,10 @@
   "after an error burst": "אחרי רצף שגיאות"
  },
  "rules": [
+  [
+  "^Scheduled reminders and reports\\. Now (.+)\\. The Core runs due jobs .*$",
+  "תזכורות ודוחות מתוזמנים. עכשיו $1. הליבה מריצה משימות שהגיע זמנן (בדיקה לפחות כל 30 שניות); משימה שהוחמצה רצה פעם אחת אחרי ההפעלה אם היא לא ישנה מדי, ומסומנת כמאוחרת."
+  ],
   [
   "^default (.+) · (.+)–(.+)$",
   "ברירת מחדל $1 · $2–$3"
