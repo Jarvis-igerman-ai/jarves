@@ -62,7 +62,8 @@ STRINGS = {
         "keys": {"command": "Command", "cwd": "Folder", "folder": "Folder", "purpose": "Purpose (JARVES's words)",
                  "manager": "Package manager", "package": "Package", "version": "Version", "source": "Source",
                  "timeout_s": "Time limit (s)", "classification": "Classification", "reasons": "Why it needs approval",
-                 "runs_as": "Runs as", "log": "Output log", "to": "To", "text": "Text", "app": "App"},
+                 "runs_as": "Runs as", "log": "Output log", "to": "To", "text": "Text", "app": "App",
+                 "recipient": "Recipient", "number": "Number", "warning": "Warning", "grant": "Approval id"},
     },
     "he": {
         "window": "JARVES - אישור",
@@ -79,7 +80,8 @@ STRINGS = {
         "keys": {"command": "פקודה", "cwd": "תיקייה", "folder": "תיקייה", "purpose": "מה זה עושה (לדברי JARVES)",
                  "manager": "מנהל חבילות", "package": "חבילה", "version": "גרסה", "source": "מקור",
                  "timeout_s": "זמן מקסימלי (שניות)", "classification": "סיווג", "reasons": "למה צריך אישור",
-                 "runs_as": "רץ בתור", "log": "יומן פלט", "to": "אל", "text": "טקסט", "app": "אפליקציה"},
+                 "runs_as": "רץ בתור", "log": "יומן פלט", "to": "אל", "text": "טקסט", "app": "אפליקציה",
+                 "recipient": "נמען", "number": "מספר", "warning": "אזהרה", "grant": "מזהה אישור"},
     },
 }
 
@@ -149,6 +151,8 @@ def detail_rows(req: dict, lang: str) -> list[tuple[str, str, str]]:
     if prompt and prompt != title:
         rows.append((s["request"] if not rows else "", prompt[:2000], "text"))
     for k, v in (req.get("details") or {}).items():
+        if k == "grant":                       # an internal binding hash (WhatsApp approval), nothing to read
+            continue
         if isinstance(v, (list, tuple)):
             v = ", ".join(str(x) for x in v)
         elif isinstance(v, dict):
@@ -373,7 +377,10 @@ def build(req: dict, out: Path, test_invoke: str | None = None, *, theme: str | 
         if state["done"]:
             return
         state["done"] = True
-        write_result(out, {"id": req.get("id"), "decision": decision, "typed": typed.get() if code else ""})
+        res = {"id": req.get("id"), "decision": decision, "typed": typed.get() if code else ""}
+        if req.get("nonce"):                 # R-01: proves the result came from this window (nonce via stdin)
+            res["nonce"] = str(req["nonce"])
+        write_result(out, res)
         root.destroy()
 
     card = tk.Frame(root, bg=P["bg"], padx=pad, pady=pad, width=W)
@@ -577,6 +584,9 @@ def build(req: dict, out: Path, test_invoke: str | None = None, *, theme: str | 
                         toggle_details=toggle_details, layout=layout, frame=None, work=None, cap=None, arm=arm,
                         state=state)
     root.jarves = j
+    # SW-V4 F: a message send with a number shows recipient, number and the FULL text at once (no click needed)
+    if rows and req.get("kind") == "message" and "number" in (req.get("details") or {}):
+        toggle_details()
     layout()
     root.update()                                  # mapped: measure the real title bar / borders, place again
     layout()
@@ -649,9 +659,14 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--in", dest="inp", required=True)
     ap.add_argument("--out", required=True)
     ap.add_argument("--test-invoke", choices=list(TEST_INVOKES))
+    ap.add_argument("--stdin", action="store_true", help="read the typed code and the result nonce from stdin")
     a = ap.parse_args(argv)
     try:
         req = json.loads(Path(a.inp).read_text(encoding="utf-8"))
+        if a.stdin:          # R-01: the code and the nonce never touch a file
+            extra = json.loads(sys.stdin.readline() or "{}")
+            req["typed_code"] = str(extra.get("typed_code") or "")
+            req["nonce"] = str(extra.get("nonce") or "")
     except (OSError, ValueError):
         return 2
     try:

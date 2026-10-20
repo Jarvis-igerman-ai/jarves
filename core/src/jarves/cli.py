@@ -419,6 +419,9 @@ def _private_line(line: str) -> str:
 def cmd_diag(a, cfg, home) -> int:
     """User-initiated, redacted support bundle (no secrets, no transcripts, no audio)."""
     from . import diagbundle                    # SW-V2 M5: sanitized, size-bounded bundle
+    if getattr(a, "ci", False):                 # SW-V4 O: the CI-uploaded bundle (redacted + scanned)
+        from .diag.service import ci_bundle
+        return ci_bundle(home, cfg, Path(a.out or "diag"))
     out = Path(a.out or home / f"jarves-diag-{datetime.now():%Y%m%d-%H%M%S}.zip")
     snap = _ws_call(home, cfg.link.port, {"type": "status.request", "payload": {}}, "status") or read_snapshot(home / "health.json")
     man = diagbundle.build(home, cfg, out, lines=a.lines, max_bytes=int(a.max_mb * 1024 * 1024), status=snap,
@@ -1099,6 +1102,19 @@ def cmd_doctor(a, cfg, home) -> int:
     live = _ws_call(home, cfg.link.port, {"type": "status.request", "payload": {}}, "status")
     add("info", "Core is " + ("running" if live else "not running (start it with: jarvis)"))
 
+    # --- R-01: OS limits around approved helper commands and generated-Skill children
+    try:
+        from . import isolation
+        from .health import read_snapshot
+        snap = read_snapshot(home / "health.json") or {} if live else {}
+        iso = isolation.row(cfg, (snap.get("components") or {}) if snap.get("age_s", 1e9) < 120 else {})
+        add({"active": "ok", "degraded": "warn"}.get(iso["state"], "warn"),
+            f"helper isolation: {iso['state']} ({iso['mechanism']}, {iso['source']})",
+            iso["reason"] + ("" if iso["state"] != "unavailable" else
+                             "  -> helper commands ask for the typed code until it is active"))
+    except Exception as e:
+        add("warn", f"helper isolation: could not check ({type(e).__name__})")
+
     # --- microphone: level while you stay quiet (digital silence = hardware/privacy problem)
     try:
         import numpy as np
@@ -1335,6 +1351,13 @@ def cmd_features(a, cfg, home) -> int:
         print(f"{s['id']:<22} {state:<12} {s['risk']:<7} {s['title_en']}"
               + (f"  - {clilang.reason(s['reason'])}" if s["reason"] and not s["active"] else "")
               + (f"  [from {s['source']}]" if s["source"] != "default" else ""))
+    try:                                   # R-01: not a switch; the OS limits the helper runs under
+        from . import isolation
+        iso = isolation.row(cfg, f.ctx.components())
+        print(f"{'helper_isolation':<22} {iso['state'].upper():<12} {'status':<7} {iso['mechanism']}: {iso['reason']}"
+              f"  [{iso['source']}]")
+    except Exception as e:
+        print(f"{'helper_isolation':<22} {'unknown':<12} {'status':<7} could not check ({type(e).__name__})")
     print("change: jarvis features on|off|reset ID   (or the dashboard Features page)")
     return 0
 
@@ -1460,6 +1483,8 @@ def main(argv: list[str] | None = None) -> int:
     d.add_argument("--out")
     d.add_argument("--lines", type=int, default=500)
     d.add_argument("--max-mb", type=float, default=5.0, help="size limit of the bundle (default 5 MB)")
+    d.add_argument("--ci", action="store_true", help="CI: bundle of the TEST home + health summary into --out (a "
+                                                     "folder), scanned for secrets; a hit = exit 2, nothing kept")
     m = sub.add_parser("memory", help="list / delete / clear what JARVES remembers")
     m.add_argument("action", choices=["list", "delete", "clear"])
     m.add_argument("id", nargs="?")
@@ -1595,8 +1620,16 @@ def main(argv: list[str] | None = None) -> int:
     profiles.add_cli(sub)                     # Issue #17: jarvis profile list / create / use / delete / export
     from . import cli_parity
     cli_parity.add_cli(sub)                   # V4 P0.3: jarvis timers / lists / notes / jobs / reports
+    from . import budget_cli
+    budget_cli.add_cli(sub)                   # SW-V4 D (#14): jarvis budget status / test-cap / set / reset-ladder
     from . import recall
     recall.add_cli(sub)                       # SW-V4 G: jarvis recall "query" [--since] [--json]
+    from .diag import service as health_cli
+    health_cli.add_cli(sub)                   # SW-V4 O: jarvis health [report|remediate|ticket|ai-review|canary|...]
+    from . import whatsapp_admin
+    whatsapp_admin.add_cli(sub)               # SW-V4 F: jarvis whatsapp status / link / mode / allow / kill ...
+    from .orchestrator import surfaces as agents_cli
+    agents_cli.add_cli(sub)                   # SW-V4 E: jarvis agents list | status | ask | tell | start | ...
     a = ap.parse_args(argv)
     try:
         if a.profile:
@@ -1624,7 +1657,10 @@ def main(argv: list[str] | None = None) -> int:
             "show": cmd_display, "hide": cmd_display, "autostart": cmd_autostart,
             "update": cmd_update, "browser": cmd_browser, "connect": cmd_connect, "telegram": cmd_telegram, "instagram": cmd_instagram, "home": cmd_home,
             "profile": profiles.cmd_profile, "approvals": cmd_approvals, "recall": recall.cmd_recall,
-            **cli_parity.COMMANDS}[a.cmd](a, cfg, home)
+            "health": health_cli.cmd_health,
+            "whatsapp": whatsapp_admin.cmd_whatsapp,
+            "agents": agents_cli.cmd_agents,
+            **cli_parity.COMMANDS, **budget_cli.COMMANDS}[a.cmd](a, cfg, home)
 
 
 if __name__ == "__main__":

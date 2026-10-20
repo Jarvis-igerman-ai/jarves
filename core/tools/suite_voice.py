@@ -1515,6 +1515,7 @@ def parse_only(spec: str | None) -> list[int]:
     return out
 
 
+GROUPS: dict[str, str] = {}      # --group NAME -> scenario numbers (e.g. "delegation" -> "51-62", SW-V4 D)
 LIVE_COST = {32: 1.0, 33: 1.0, 34: 1.0, 35: 1.5, 19: 1.0, 20: 1.5, 21: 3.0, 22: 0, 23: 0, 24: 1.5, 25: 1.5, 26: 1.5, 28: 2.5, 29: 1.0, 30: 1.5, 15: 6.0}
 
 
@@ -1612,6 +1613,7 @@ def write_report(store: dict, notes: list[str]) -> None:
 async def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--only", help="scenario numbers, e.g. 1-4,8")
+    ap.add_argument("--group", help="a named scenario group, e.g. delegation (51-62)")
     ap.add_argument("--list", action="store_true")
     ap.add_argument("--max-minutes", type=float, default=34, help="live-voice cap for this run")
     ap.add_argument("--no-report", action="store_true", help="do not (over)write the markdown report")
@@ -1620,6 +1622,10 @@ async def main() -> None:
     ap.add_argument("--notes", help="markdown lines to put at the top of the report (findings, fixes)")
     ap.add_argument("--report-only", action="store_true", help="rewrite the report from stored results; no test")
     args = ap.parse_args()
+    if args.group:
+        if args.group not in GROUPS:
+            sys.exit(f"unknown group {args.group!r}; known: {sorted(GROUPS)}")
+        args.only = args.only or GROUPS[args.group]
     if args.report_only:
         notes = Path(args.notes).read_text(encoding="utf-8").splitlines() if args.notes else []
         write_report(load_store(), notes)

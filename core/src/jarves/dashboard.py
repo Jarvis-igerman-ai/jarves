@@ -51,8 +51,11 @@ PLUGIN_MODULES = ("jarves.workspace", "jarves.curator", "jarves.memory", "jarves
                   "jarves.profiles",                                             # Issue #17: Profiles page
                   "jarves.context_trace",                                          # his context per conversation
                   "jarves.recall",                                                 # SW-V4 G: Recall search page
+                  "jarves.whatsapp_admin",                                         # SW-V4 F: WhatsApp page (PC only)
+                  "jarves.orchestrator.surfaces",                                  # SW-V4 E: Coding agents page
                   "jarves.browser",                                                # Browser allow-list page
-                  "jarves.approvals", "jarves.skills.helper")                      # V3: Approvals list, Helper switch
+                  "jarves.approvals", "jarves.skills.helper",                      # V3: Approvals list, Helper switch
+                  "jarves.diag.service")                                           # SW-V4 O: Health page
 MEMORY_UNDO_KEEP = 30
 MEMORY_UNDO_TTL_S = 24 * 3600                        # the undo button works for 24 h, then the entry is purged
 UNDO_PURGE_EVERY_S = 3600
@@ -310,6 +313,12 @@ def api_costs(ctx: Ctx, m, body, q=None):
                            "included in their conversation."]}
 
 
+def api_delegation(ctx: Ctx, m, body, q=None):
+    """SW-V4 D (#14): the strict delegation budget, live reservations of all processes, mode and fallback step."""
+    from .budget_cli import status_view
+    return 200, status_view(ctx.cfg, ctx.home)
+
+
 def _ts(v) -> float:
     if isinstance(v, (int, float)):
         return float(v)
@@ -367,7 +376,15 @@ def api_skills(ctx: Ctx, m, body):
     stats = ctx.store.tool_stats(30)
     skills = ctx.store.skills()
     snap = read_snapshot(ctx.home / "health.json") or {}
-    comp = snap.get("components") or {}
+    comp = dict(snap.get("components") or {})
+    if "helper_isolation" not in comp:          # R-01: no Core row (not running / older snapshot): check here
+        try:
+            from . import isolation
+            iso = isolation.row(ctx.cfg)
+            st, detail, action = isolation.health_status(iso)
+            comp["helper_isolation"] = {"status": st, "detail": f"{detail} ({iso['source']})", "action": action}
+        except Exception:
+            pass
     out = []
     for name, info in sorted(skills.items()):
         tools = [{"name": t, **{k: v for k, v in (stats.get(t) or {}).items() if k != "name"}}
@@ -690,7 +707,7 @@ for _m, _p, _h in [
         ("GET", r"/api/overview", api_overview), ("GET", r"/api/sessions", api_sessions),
         ("GET", r"/api/session/([^/]+)", api_session), ("GET", r"/api/session/([^/]+)/raw", api_session_raw),
         ("POST", r"/api/session/([^/]+)/review", api_review), ("GET", r"/api/live", api_live),
-        ("GET", r"/api/costs", api_costs), ("GET", r"/api/tasks", api_tasks),
+        ("GET", r"/api/costs", api_costs), ("GET", r"/api/delegation", api_delegation),("GET", r"/api/tasks", api_tasks),
         ("GET", r"/api/logs", api_logs), ("GET", r"/api/logs/facets", api_log_facets),
         ("GET", r"/api/memory", api_memory), ("POST", r"/api/memory", api_memory_add),
         ("PUT", r"/api/memory/(\d+)", api_memory_edit), ("DELETE", r"/api/memory/(\d+)", api_memory_delete),

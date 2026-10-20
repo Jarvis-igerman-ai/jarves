@@ -110,6 +110,9 @@ class Tool:
     impact: ImpactFn | None = None     # destructive tools: how many records this call would affect
     untrusted_output: bool = False     # returns third-party text (mail, calendar): see SkillRegistry.new_turn
     recipient: Callable[[Any], str | None] | None = None   # send tools: who it goes to (first name is spoken aloud)
+    # extra approval metadata (SW-V4 F): (validated args) -> {"details": {...}, "typed": bool, "voice": bool} merged
+    # into the approvals request (a WhatsApp send shows name + number + full text; typed at night)
+    approval_meta: Callable[[Any], dict] | None = None
 
     @property
     def side_effect(self) -> bool:     # read-only view of the old flag
@@ -279,6 +282,15 @@ class SkillRegistry:
                 who = None
             if who:
                 meta["details"] = {"recipient": str(who)}       # spoken_kind() speaks its first name only
+        if tool.approval_meta is not None and prompt:
+            try:
+                extra = tool.approval_meta(args) or {}
+            except Exception:
+                extra = {}
+            meta["details"] = {**meta.get("details", {}), **(extra.get("details") or {})}
+            for k in ("typed", "voice", "why"):
+                if k in extra:
+                    meta[k] = extra[k]
         if prompt and not await self._ask(prompt, **meta):
             logs.info("skills", "TOOL_DECLINED", "tool not confirmed by the user", tool=tool.name, origin=origin)
             return ToolResult(False, "cancelled: the user did not confirm", code="TOOL_DECLINED")
@@ -331,6 +343,7 @@ class SkillRegistry:
         refused = await self._authorize(tool, args, origin)
         if refused is not None:
             return refused
+        t_run = time.monotonic()
         try:
             res = await self._run(tool, args)
         except TimeoutError:
@@ -343,7 +356,8 @@ class SkillRegistry:
             # whatever it likes into output_tail): that taints the turn exactly like a successful one
             self._untrusted_at = self.clock()
         log = logs.info if res.ok else logs.warn
-        log("skills", "TOOL_RESULT", "tool finished", tool=name, ok=res.ok, result_code=res.code, origin=origin)
+        log("skills", "TOOL_RESULT", "tool finished", tool=name, ok=res.ok, result_code=res.code, origin=origin,
+            ms=round((time.monotonic() - t_run) * 1000))      # SW-V4 O: tool p50/p95 in the health monitor
         return self._hinted(skill, tool, res) if not res.ok else res
 
     def _hinted(self, skill: Skill, tool: Tool, res: ToolResult) -> ToolResult:

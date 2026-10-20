@@ -748,5 +748,7 @@ async def s_names_prefix(h, r):
 sv.LIVE_COST.update({50: 1.0,36: 2.0, 37: 1.5, 38: 3.0, 39: 2.0, 40: 2.0, 41: 1.0, 42: 2.5, 43: 2.5, 44: 1.5, 45: 0,
                      46: 1.0, 47: 1.5, 48: 1.5, 49: 1.5})
 
+import suite_v4_delegation  # noqa: E402,F401  (SW-V4 D: scenarios 51-62, --group delegation)
+
 if __name__ == "__main__":
     asyncio.run(sv.main())

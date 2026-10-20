@@ -349,17 +349,22 @@ async def drive(home: Path, private: bool) -> dict[str, bytes]:
                                                                 "protocol": 1}}))
 
         async def wait(t, timeout=45.0):
+            kinds = (t,) if isinstance(t, str) else tuple(t)
+
             async def go():
                 while True:
                     m = json.loads(await ws.recv())
-                    if m["type"] == t:
+                    if m["type"] in kinds:
                         return m["payload"]
             return await asyncio.wait_for(go(), timeout)
         await wait("hello.ok")
         for text in (MIXED, f"תזכור ש{PII['hebrew_name']} גרה ב{PII['address']}", "מה השעה?",
                      f"what is {CONTENT['calendar_title']} with {PII['email']}", CONTENT["niqqud"]):
             await ws.send(json.dumps({"type": "user.text", "payload": {"text": text}}))
-            await wait("assistant.text")
+            # A typed turn ends with a reply (assistant.text) or, when the provider raises an unexpected exception
+            # (the fake agent's every second call), with the Core's "error" message to the face: the CORE_TASK_CRASH
+            # path kills the request task and tells the owner, no reply text exists. Both are a finished turn.
+            await wait(("assistant.text", "error"))
         for tool in ("planted_fail", "planted_crash"):
             await core.registry.call(tool, {"text": MIXED}, origin="model")
         lv = LiveVoice(SkillRegistry(), lambda: "")              # GPT-Live provider errors + info + transcripts

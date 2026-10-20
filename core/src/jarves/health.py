@@ -10,6 +10,7 @@ from typing import Literal
 
 from . import logs
 
+HEARTBEAT_MIN_S = 50.0    # health.json is rewritten on a change, and otherwise at most this often (loop runs every 20 s)
 Status = Literal["ok", "degraded", "unavailable", "disabled", "unknown"]
 
 
@@ -29,6 +30,7 @@ class Health:
         self.started = time.time()
         self._path = snapshot_path
         self._listeners: list = []
+        self._saved_at = float("-inf")
 
     def on_change(self, fn) -> None:
         self._listeners.append(fn)
@@ -70,8 +72,16 @@ class Health:
                 "storage_free_gb": disk, "last_error": _clean(self.last_error),
                 "components": {k: _clean(asdict(v)) for k, v in sorted(self.components.items())}}
 
+    def heartbeat(self, min_age_s: float = HEARTBEAT_MIN_S) -> bool:
+        """Re-save only when the file is older than min_age_s (readers call a snapshot older than 120 s "off")."""
+        if time.monotonic() - self._saved_at < min_age_s:
+            return False
+        self.save()
+        return True
+
     def save(self) -> None:
         if self._path:
+            self._saved_at = time.monotonic()
             try:
                 self._path.write_text(json.dumps(self.snapshot(self._path.parent), indent=1), encoding="utf-8")
             except OSError:

@@ -188,7 +188,8 @@ class AlertEngine:
                     except Exception as e:     # a broken output must not lose the alert or stop the others
                         logs.warn("alerts", "ALERT_OUTPUT_FAILED", "alert output failed", channel=ch, error_type=type(e).__name__)
                 if via is None:
-                    self.db.x("UPDATE alerts SET attempts=attempts+1 WHERE id=?", (a["id"],))
+                    if not a["attempts"]:         # SW-V4 idle writes: record the FIRST failed try only; a stuck alert
+                        self.db.x("UPDATE alerts SET attempts=1 WHERE id=?", (a["id"],))   # was a WAL write every tick
                     continue
                 self.db.x("UPDATE alerts SET status='delivered', delivered_via=?, delivered_at=?, attempts=attempts+1 "
                           "WHERE id=?", (via, self.clock(), a["id"]))

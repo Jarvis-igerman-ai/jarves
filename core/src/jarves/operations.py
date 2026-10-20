@@ -226,6 +226,13 @@ class Operations:
             name="timers")
         # owner request 20 Oct: self-check (voice tools, weekly job, after an unclean stop / an error burst)
         self.selfcheck = selfcheck_mod.attach(self.core, self)
+        # SW-V4 O: Self-Diagnostics 2.0 (monitor, anomalies, canary + AI-review jobs, health voice tools)
+        from .diag import service as health_mod
+        try:
+            self.health_diag = health_mod.attach(self.core, self)
+        except Exception:
+            self.health_diag = None
+            logs.error("health", "HEALTH_ATTACH_FAILED", "self-diagnostics 2.0 not started", exc=True)
 
     async def _connect_nudge(self) -> None:
         """Owner request 20 Oct: once a day at most, remind that Google is not connected (connect.maybe_nudge)."""
@@ -256,6 +263,8 @@ class Operations:
                 logs.error("autonomy", "AUTONOMY_SYNC_FAILED", "diagnostic proposals not updated", exc=True)
 
     async def stop(self) -> None:
+        if getattr(self, "health_diag", None) is not None:
+            await self.health_diag.stop()
         if getattr(self, "selfcheck", None) is not None:
             await self.selfcheck.stop()
         await self.scheduler.stop()

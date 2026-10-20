@@ -110,7 +110,11 @@ def test_synthetic_canary_runner():
     assert empty["registered"] == 0 and "package O" in empty["note"]
     rep = sc.run({"ok": lambda: None, "bad": lambda: (_ for _ in ()).throw(ValueError("x"))})
     assert (rep["passed"], rep["failed"]) == (1, 1) and rep["results"][1]["error"] == "ValueError"
-    assert sc.main([]) == 0
+    # package O registers its journeys; a journey that cannot run here is BLOCKED (reported, not failed)
+    rep = sc.run({"blocked": lambda: (_ for _ in ()).throw(sc.CanaryBlocked("no browser"))})
+    assert (rep["passed"], rep["failed"], rep["blocked"]) == (0, 0, 1) and rep["results"][0]["reason"] == "no browser"
+    sc.register_package_o()
+    assert {"voice_stack", "music", "calendar_read", "dashboard_load", "installer_check", "scheduler"} <= set(sc.CANARIES)
 
 
 def test_ci_minutes_summary():

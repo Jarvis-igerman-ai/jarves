@@ -28,6 +28,7 @@ jobs:
       cad: ${{ steps.c.outputs.cad }}
       blender: ${{ steps.c.outputs.blender }}
       godot: ${{ steps.c.outputs.godot }}
+      whatsapp: ${{ steps.c.outputs.whatsapp }}
     steps:
       - uses: actions/checkout@v7
         with:
@@ -38,7 +39,7 @@ jobs:
           set -euo pipefail
           out() { echo "$1=$2" >> "$GITHUB_OUTPUT"; }
           if [ "$GITHUB_EVENT_NAME" != "pull_request" ]; then
-            for k in code perf installer cad blender godot; do out $k true; done
+            for k in code perf installer cad blender godot whatsapp; do out $k true; done
             echo "full matrix ($GITHUB_EVENT_NAME $GITHUB_REF)"; exit 0
           fi
           files=$(git diff --name-only HEAD^1 HEAD)   # the PR merge commit against its base
@@ -50,6 +51,7 @@ jobs:
           out cad       "$(any '^(cad/|\.github/)')"
           out blender   "$(any '^(blender/|cad/|godot/|\.github/)')"
           out godot     "$(any '^(godot/|blender/|core/src/|\.github/)')"
+          out whatsapp  "$(any '^(bridge/|scripts/build_whatsapp_bridge\.ps1|packaging/|\.github/)')"
   core:
     name: Python Core tests (${{ matrix.os }})
     needs: changes
@@ -99,7 +101,9 @@ jobs:
       - name: Redacted diagnostics on failure (pytest output, junit, Core logs; no secrets, no user content)
         if: failure()
         shell: bash
-        run: uv run python tools/ci_diagnostics.py diag pytest.out pytest-junit.xml || true
+        run: |
+          uv run python tools/ci_diagnostics.py diag pytest.out pytest-junit.xml || true
+          uv run python -m jarves diag --ci --out diag/health || true   # package O: redaction-scanned bundle
       - name: Upload redacted diagnostics
         if: failure()
         uses: actions/upload-artifact@v7
@@ -162,6 +166,32 @@ jobs:
             dist/build-info.json
           retention-days: ${{ env.CHANNEL == 'main' && 14 || 3 }}
           compression-level: 0
+          if-no-files-found: error
+  whatsapp-bridge:
+    # SW-V4 F: the Go WhatsApp bridge (bridge/whatsapp). Offline only: go mod verify, vet, unit + API tests against the
+    # fake engine (no WhatsApp account is ever contacted), then a reproducible Windows build checked by rebuilding.
+    name: WhatsApp bridge (Go vet/test + reproducible build)
+    needs: changes
+    if: needs.changes.outputs.whatsapp == 'true'
+    runs-on: windows-2025
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version: "1.27.0"
+          cache-dependency-path: bridge/whatsapp/go.sum
+      - name: Build (pinned go1.27.0 check, go mod verify, go vet, go test, reproducible build)
+        shell: pwsh
+        run: ./scripts/build_whatsapp_bridge.ps1 -Version "0.1.0.${{ github.run_number }}"
+      - name: Rebuild and compare SHA-256 (reproducibility)
+        shell: pwsh
+        run: ./scripts/build_whatsapp_bridge.ps1 -Version "0.1.0.${{ github.run_number }}" -Verify bridge/whatsapp/dist/whatsapp_bridge.exe.sha256
+      - uses: actions/upload-artifact@v7
+        with:
+          name: whatsapp-bridge-windows
+          path: bridge/whatsapp/dist/
+          retention-days: 7
           if-no-files-found: error
   perf:
     # SW-V4 M: performance gate (core/perf_budgets.toml, class ci = loose). Fails when a budget is exceeded.
@@ -334,6 +364,7 @@ jobs:
         run: |
           (cd core && uv run python tools/ci_diagnostics.py "$GITHUB_WORKSPACE/diag" "$RUNNER_TEMP/core.out" "$RUNNER_TEMP/core2.out" "$JARVES_HOME/logs" "$RUNNER_TEMP/bad" || true)
           tail -50 "$GITHUB_WORKSPACE"/diag/*jarves.log || true
+          (cd core && uv run python -m jarves diag --ci --out "$GITHUB_WORKSPACE/diag/health" || true)   # package O
       - name: Upload redacted diagnostics
         if: failure()
         uses: actions/upload-artifact@v7

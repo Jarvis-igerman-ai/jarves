@@ -37,6 +37,7 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
+import hmac
 import json
 import os
 import re
@@ -50,6 +51,7 @@ from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any, Awaitable, Callable
 
+from . import approval_keys as akeys
 from . import logs
 
 DEFAULT_TIMEOUT_S = 60.0
@@ -154,6 +156,8 @@ class Approval:
     channel: str = ""
     decided_at: float = 0.0
     shown: list = field(default_factory=list)
+    typed_salt: str = ""              # R-01: pending.json keeps salt + keyed hash + sealed code, never the code
+    typed_hash: str = ""
 
     @property
     def spoken(self) -> str:
@@ -166,11 +170,31 @@ class Approval:
         return he if str(lang or "").lower().startswith("he") else en
 
     def public(self) -> dict:
+        """In-process view (the Core's own dashboard routes, popup): includes the code to SHOW to the owner."""
         d = asdict(self)
-        d.pop("key", None)
+        for k in ("key", "typed_salt", "typed_hash"):
+            d.pop(k, None)
         d["typed"] = bool(self.typed_code)
         d["seconds_left"] = max(0, round(self.expires - time.time()))
         return d
+
+    def file_row(self, key: bytes | None) -> dict:
+        """What pending.json holds (read by other processes): no plain code. A typed request carries the salt, the
+        keyed hash (to check a typed code) and the code sealed with the profile key (so the owner's dashboard / CLI,
+        which can read the key file, can still show it)."""
+        d = self.public()
+        d.pop("typed_code", None)
+        if self.typed_code:
+            d["typed_salt"], d["typed_hash"] = self.typed_salt, self.typed_hash
+            d["typed_sealed"] = akeys.seal(key, self.typed_salt, self.typed_code) if key else ""
+        return d
+
+    def code_ok(self, key: bytes | None, typed: str) -> bool:
+        if not self.typed_code:
+            return True
+        if key and self.typed_hash:
+            return akeys.code_matches(key, self.typed_salt, self.typed_hash, typed)
+        return hmac.compare_digest(str(typed or "").strip().encode(), self.typed_code.encode())
 
 
 def _norm_words(text: str) -> list[str]:
@@ -216,6 +240,52 @@ class ApprovalService:
         self.on_ask: list[Callable[[Approval], None]] = []       # when a request starts waiting (tests, runtime)
         self.closed = False
         self.loop: asyncio.AbstractEventLoop | None = None       # the Core's loop (set by Core.start): see ask_owner
+        # SW-V4 F: details["grant"] of requests the OWNER approved -> decision time. A caller (the WhatsApp send) may
+        # spend a grant once to get a signed, single-use approval id the bridge checks (take_grant).
+        self._grants: dict[str, float] = {}
+        # R-01: the profile key, held in memory. Answer files must be signed with it; typed codes are stored hashed
+        # and sealed with it. A service that is not the Core (dashboard fallback, tests) uses the existing key.
+        self._key: bytes | None = akeys.load_or_create(self.home)
+        self._quiet: set[str] = set()                             # file-answer problems already logged once
+        self._nonces: dict[str, float] = {}
+        if self._key is None:
+            logs.warn("approvals", "APPROVAL_KEY_UNAVAILABLE", "no private approval key: answers from other processes "
+                      "(dashboard / CLI files) are refused")
+
+    def rotate_key(self) -> bool:
+        """Core start: a fresh key (the old one, and every answer file signed with it, stops counting). Old answer
+        files (unsigned ones from before this version included) are removed and pending.json is rewritten without
+        any plain code."""
+        try:
+            self._key = akeys.rotate(self.home)
+        except OSError as e:
+            self._key = None
+            logs.warn("approvals", "APPROVAL_KEY_UNAVAILABLE", "could not create a private approval key: answers "
+                      "from other processes are refused", error_type=type(e).__name__)
+            return False
+        adir = self.dir / "answers"
+        try:
+            stale = list(adir.glob("*.json")) if adir.is_dir() else []
+        except OSError:
+            stale = []
+        for p in stale:
+            try:
+                p.unlink()
+            except OSError:
+                pass
+        self._write_pending()
+        logs.info("approvals", "APPROVAL_KEY_ROTATED", "new approval key for this run", count=len(stale))
+        return True
+
+    def _quiet_reject(self, reason: str, path: Path) -> None:
+        """Ignored answer file: logged once per reason and run, quietly (never the content)."""
+        if reason in self._quiet:
+            logs.debug("approvals", "APPROVAL_FILE_IGNORED", "ignored an answer file", reason=reason,
+                       file=path.name[:40])
+            return
+        self._quiet.add(reason)
+        logs.info("approvals", "APPROVAL_FILE_IGNORED", "ignored an answer file (logged once per reason)",
+                  reason=reason, file=path.name[:40])
 
     # ------------------------------------------------------------------ asking
     async def ask(self, prompt: str, *, title: str = "", why: str = "", risk: str = "medium", kind: str = "tool",
@@ -261,6 +331,9 @@ class ApprovalService:
         a = Approval(uuid.uuid4().hex[:16], title, prompt, str(why or "")[:600], risk, kind, source, details,
                      f"{secrets.randbelow(9000) + 1000}" if typed else "",
                      (not typed) if voice is None else (bool(voice) and not typed), now, now + t, key)
+        if a.typed_code:
+            a.typed_salt = secrets.token_hex(8)
+            a.typed_hash = akeys.code_hash(self._key, a.typed_salt, a.typed_code) if self._key else ""
         fut = loop.create_future()
         with self._lock:
             self._pending[a.id] = (a, fut, loop)
@@ -327,7 +400,7 @@ class ApprovalService:
             return False, "no such waiting approval (already answered or expired)"
         a, fut, loop = entry
         if approved is True:
-            if a.typed_code and str(typed or "").strip() != a.typed_code:
+            if a.typed_code and not a.code_ok(self._key, typed):
                 return False, HE["typed"] + " / Type the code shown to approve."
             if channel == "voice" and not a.voice_ok:
                 return False, HE["voice_typed"]
@@ -381,6 +454,8 @@ class ApprovalService:
         a.channel, a.decided_at = channel, self.clock()
         if not approved and channel in CHANNELS:
             self._denied[a.key] = a.decided_at
+        if approved and channel in CHANNELS and isinstance(a.details.get("grant"), str):
+            self._grants[a.details["grant"]] = a.decided_at
         fut.set_result(bool(approved))
         self._audit(a)
         logs.info("approvals", "APPROVAL_DECIDED", "approval decided", id=a.id, kind=a.kind,
@@ -390,6 +465,14 @@ class ApprovalService:
                 fn(a)
             except Exception:
                 logs.error("approvals", "APPROVAL_LISTENER_FAILED", "approval listener failed", exc=True)
+
+    def take_grant(self, grant: str, max_age_s: float = 120.0) -> bool:
+        """True ONCE for a grant the owner approved on a real channel less than max_age_s ago (SW-V4 F: the
+        WhatsApp approval id is minted only after this). Never from inside a tool's own approval answer path."""
+        with self._lock:
+            now = self.clock()
+            self._grants = {g: t for g, t in self._grants.items() if now - t < max_age_s}
+            return self._grants.pop(str(grant), None) is not None
 
     # ------------------------------------------------------------------ views
     def note_user_turn(self) -> None:
@@ -438,7 +521,9 @@ class ApprovalService:
         try:
             self.dir.mkdir(parents=True, exist_ok=True)
             tmp = self.dir / f"pending.{os.getpid()}.tmp"
-            tmp.write_text(json.dumps({"pid": os.getpid(), "at": time.time(), "pending": self.pending()},
+            with self._lock:
+                rows = [a.file_row(self._key) for a, f, _ in self._pending.values() if not f.done()]
+            tmp.write_text(json.dumps({"pid": os.getpid(), "at": time.time(), "pending": rows, "signed": True},
                                       ensure_ascii=False), encoding="utf-8")
             for i in range(8):                       # Windows: a reader holding the file for a moment refuses the swap
                 try:
@@ -479,12 +564,40 @@ class ApprovalService:
                 except OSError:
                     pass
                 if not isinstance(d, dict) or d.get("channel") not in FILE_CHANNELS:
+                    self._quiet_reject("not an answer", p)
+                    continue
+                why = self._file_problem(d, p)
+                if why:
+                    self._quiet_reject(why, p)
                     continue
                 ok, why = self.answer(str(d.get("id")), d.get("approved") is True, channel=d["channel"],
                                       typed=str(d.get("typed") or ""))
                 if not ok:
                     logs.info("approvals", "APPROVAL_FILE_ANSWER_REJECTED", "file answer rejected", why=why[:120], channel=d["channel"])
             await asyncio.sleep(POLL_S)
+
+    def _file_problem(self, d: dict, p: Path) -> str:
+        """Why an answer file does not count ('' = it does): it must be signed with this run's key, name the file's
+        own id, be fresh and not be a replay."""
+        if "sig" not in d:
+            return "unsigned"
+        if not akeys.verify(self._key, d):
+            return "bad signature"
+        if f"{d.get('id')}.json" != p.name:
+            return "id does not match the file"
+        try:
+            ts = float(d.get("ts"))
+        except (TypeError, ValueError):
+            return "no time"
+        now = time.time()
+        if not (now - MAX_TIMEOUT_S - 60 <= ts <= now + 60):
+            return "stale"
+        nonce = str(d.get("nonce") or "")
+        self._nonces = {n: t for n, t in self._nonces.items() if now - t < MAX_TIMEOUT_S + 120}
+        if not nonce or nonce in self._nonces:
+            return "replayed"
+        self._nonces[nonce] = now
+        return ""
 
     # ------------------------------------------------------------------ audit
     def _audit(self, a: Approval) -> None:
@@ -494,6 +607,10 @@ class ApprovalService:
     def _audit_simple(self, title, prompt, kind, risk, source, details, decision, channel, aid="", waited=0.0,
                       shown=None) -> None:
         private = logs.privacy()
+        if isinstance((details or {}).get("grant"), str):
+            # SW-V4 F: a WhatsApp send is audited with hashes only in BOTH modes (no recipient, number or text)
+            private = True
+            details = {"grant": details["grant"], "chars": len(str(details.get("text") or ""))}
         rec = {"ts": round(time.time(), 3), "id": aid, "kind": kind, "risk": risk, "source": source,
                "title": logs.redact(str(title))[:200], "decision": decision, "channel": channel,
                "waited_s": round(max(0.0, waited), 1), "shown": list(shown or []),
@@ -550,19 +667,30 @@ def _write_json(path: Path, d: dict) -> None:
     os.replace(tmp, path)
 
 
-def read_pending_file(home: Path) -> list[dict]:
-    """The waiting requests of the running Core (for a dashboard / CLI in another process)."""
+def read_pending_file(home: Path, *, reveal: bool = True) -> list[dict]:
+    """The waiting requests of the running Core (for a dashboard / CLI in another process). pending.json holds no
+    plain code; with reveal (the owner's own dashboard / CLI) the code is unsealed with the profile key to SHOW it.
+    A row whose sealed code does not check out against its hash shows no code (it cannot be approved by typing)."""
     try:
         d = json.loads((Path(home) / "approvals" / "pending.json").read_text(encoding="utf-8"))
     except (OSError, ValueError):
         return []
     rows = d.get("pending") if isinstance(d, dict) else None
     now = time.time()
-    return [r for r in rows or [] if isinstance(r, dict) and float(r.get("expires") or 0) > now]
+    out = [dict(r) for r in rows or [] if isinstance(r, dict) and float(r.get("expires") or 0) > now]
+    key = akeys.load(home) if reveal and any(r.get("typed") for r in out) else None
+    for r in out:
+        r.pop("typed_code", None)                    # a plain code from an older file is never trusted or shown
+        if r.get("typed") and reveal:
+            code = akeys.unseal(key, str(r.get("typed_salt") or ""), str(r.get("typed_sealed") or ""))
+            ok = code and akeys.code_matches(key, str(r.get("typed_salt") or ""), str(r.get("typed_hash") or ""), code)
+            r["typed_code"] = code if ok else ""
+    return out
 
 
 def submit_answer(home: Path, aid: str, approved: bool, *, channel: str, typed: str = "") -> tuple[bool, str]:
-    """Answer from another process: in-process service when it serves this home, else the answers file."""
+    """Answer from another process: in-process service when it serves this home, else the answers file, signed
+    with the profile key (the Core ignores unsigned or wrongly signed files)."""
     if _in_tool():
         return False, "approvals cannot be answered from a tool"
     svc = _current
@@ -570,16 +698,21 @@ def submit_answer(home: Path, aid: str, approved: bool, *, channel: str, typed: 
         return svc.answer(aid, approved, channel=channel, typed=typed)
     if channel not in FILE_CHANNELS:
         return False, f"channel {channel} cannot answer through a file"
-    rows = {r["id"]: r for r in read_pending_file(home)}
+    if not re.fullmatch(r"[0-9a-f]{16}", str(aid)):
+        return False, "bad id"
+    rows = {r["id"]: r for r in read_pending_file(home, reveal=False)}
     r = rows.get(str(aid))
     if r is None:
         return False, "no such waiting approval (already answered or expired)"
-    if approved and r.get("typed") and str(typed).strip() != str(r.get("typed_code")):
+    key = akeys.load(home)
+    if key is None:
+        return False, "the approval key of the running JARVES is missing (restart JARVES)"
+    if approved and r.get("typed") and not akeys.code_matches(key, str(r.get("typed_salt") or ""),
+                                                              str(r.get("typed_hash") or ""), typed):
         return False, HE["typed"] + " / Type the code shown to approve."
-    if not re.fullmatch(r"[0-9a-f]{16}", str(aid)):
-        return False, "bad id"
-    _write_json(Path(home) / "approvals" / "answers" / f"{aid}.json",
-                {"id": aid, "approved": bool(approved), "typed": str(typed or ""), "channel": channel})
+    body = akeys.sign(key, {"id": aid, "approved": bool(approved), "typed": str(typed or "").strip(),
+                            "channel": channel, "ts": round(time.time(), 3), "nonce": secrets.token_hex(12)})
+    _write_json(Path(home) / "approvals" / "answers" / f"{aid}.json", body)
     return True, ""
 
 
@@ -696,25 +829,30 @@ class PopupChannel:
         d.mkdir(parents=True, exist_ok=True)
         inp, out = d / f"{a.id}.in.json", d / f"{a.id}.out.json"
         out.unlink(missing_ok=True)
+        # R-01: the typed code and a one-time nonce go to the window through its stdin pipe, never into a file;
+        # its result file counts only when it echoes the nonce (a result file written by anything else is ignored)
+        nonce = secrets.token_hex(16)
         _write_json(inp, {"id": a.id, "title": a.title, "prompt": a.prompt, "why": a.why, "risk": a.risk,
-                          "kind": a.kind, "details": a.details, "typed_code": a.typed_code,
+                          "kind": a.kind, "details": a.details, "typed": bool(a.typed_code),
                           "timeout_s": max(1, round(a.expires - time.time())), "lang": self.lang})
-        argv = [_popup_python(), "-m", "jarves.approval_popup", "--in", str(inp), "--out", str(out)]
+        argv = [_popup_python(), "-m", "jarves.approval_popup", "--in", str(inp), "--out", str(out), "--stdin"]
         if self.test_invoke:
             argv += ["--test-invoke", self.test_invoke]
         env = dict(os.environ)
         src = str(Path(__file__).resolve().parents[1])
         env["PYTHONPATH"] = src + (os.pathsep + env["PYTHONPATH"] if env.get("PYTHONPATH") else "")
         flags = getattr(subprocess, "CREATE_NO_WINDOW", 0) if sys.platform == "win32" else 0
-        p = subprocess.Popen(argv, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE,
+        p = subprocess.Popen(argv, stdin=subprocess.PIPE, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE,
                              env=env, creationflags=flags)
         self.procs[a.id] = p
-        threading.Thread(target=self._watch, args=(a.id, p, inp, out), name=f"approval-popup-{a.id[:6]}",
-                         daemon=True).start()
+        secret = (json.dumps({"typed_code": a.typed_code, "nonce": nonce}) + "\n").encode("utf-8")
+        threading.Thread(target=self._watch, args=(a.id, p, inp, out, nonce, secret),
+                         name=f"approval-popup-{a.id[:6]}", daemon=True).start()
 
-    def _watch(self, aid: str, p: subprocess.Popen, inp: Path, out: Path) -> None:
+    def _watch(self, aid: str, p: subprocess.Popen, inp: Path, out: Path, nonce: str = "",
+               secret: bytes | None = None) -> None:
         try:
-            _, err = p.communicate(timeout=MAX_TIMEOUT_S + 30)
+            _, err = p.communicate(input=secret, timeout=MAX_TIMEOUT_S + 30)
         except subprocess.TimeoutExpired:
             p.kill()
             err = b""
@@ -728,6 +866,10 @@ class PopupChannel:
             except OSError:
                 pass
         self.procs.pop(aid, None)
+        if isinstance(d, dict) and d.get("id") == aid and nonce and \
+                not hmac.compare_digest(str(d.get("nonce") or "").encode(), nonce.encode()):
+            logs.info("approvals", "APPROVAL_FILE_IGNORED", "ignored a popup result without the window's nonce", id=aid)
+            d = None
         if isinstance(d, dict) and d.get("id") == aid and d.get("decision") in ("approve", "deny"):
             ok, why = self.svc.answer(aid, d["decision"] == "approve", channel="popup", typed=str(d.get("typed") or ""))
             if not ok and "no such" not in why:
@@ -809,7 +951,8 @@ def cmd_approvals(a, cfg, home) -> int:
             return 0
         for r in rows:
             print(f"{r['id']}  [{r['risk']}] {r['kind']}: {r['title']}  ({r['seconds_left']} s left)"
-                  + (f"  -- type: jarvis approvals approve {r['id']} --code {r['typed_code']}" if r.get("typed") else ""))
+                  + ((f"  -- type: jarvis approvals approve {r['id']} --code {r['typed_code']}" if r.get("typed_code")
+                      else "  -- needs the code shown on the popup / dashboard") if r.get("typed") else ""))
             for k, v in (r.get("details") or {}).items():
                 print(f"    {k}: {v}")
         return 0

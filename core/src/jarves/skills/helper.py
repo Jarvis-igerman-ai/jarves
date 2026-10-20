@@ -47,6 +47,7 @@ from typing import Literal
 from pydantic import BaseModel, Field
 
 from .. import features as feat
+from .. import isolation
 from .. import logs
 from ..approvals import append_audit
 from ..channels_common import targets
@@ -430,6 +431,8 @@ class RunResult:
     tail: str
     log: Path
     bytes: int
+    isolation: str = ""               # active | degraded | unavailable (isolation.py)
+    isolation_reason: str = ""
 
 
 def child_env() -> dict:
@@ -468,20 +471,29 @@ def _kill_tree(p: subprocess.Popen) -> None:
         pass
 
 
-def run_blocking(prop: Proposal, timeout_s: float, log_path: Path) -> RunResult:
+def run_blocking(prop: Proposal, timeout_s: float, log_path: Path, limits: "isolation.Limits | None" = None
+                 ) -> RunResult:
+    """Run the approved command under the OS limits (isolation.py: a Windows Job Object / POSIX rlimits + own
+    session). If the limits cannot be applied it runs as before and the result says so (RunResult.isolation)."""
     log_path.parent.mkdir(parents=True, exist_ok=True)
     kw: dict = dict(cwd=str(prop.cwd), stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
                     env=child_env())
     if sys.platform == "win32":
         kw["creationflags"] = subprocess.CREATE_NEW_PROCESS_GROUP | getattr(subprocess, "CREATE_NO_WINDOW", 0)
-    else:
-        kw["start_new_session"] = True
     t0 = time.monotonic()
     if prop.argv is None:
-        p = subprocess.Popen(prop.command if sys.platform == "win32" else ["/bin/sh", "-c", prop.command],
-                             shell=sys.platform == "win32", **kw)
+        p, guard = isolation.popen(prop.command if sys.platform == "win32" else ["/bin/sh", "-c", prop.command],
+                                   limits=limits, shell=sys.platform == "win32", **kw)
     else:
-        p = subprocess.Popen(prop.argv, **kw)
+        p, guard = isolation.popen(prop.argv, limits=limits, **kw)
+    try:
+        return _wait_and_collect(prop, p, guard, timeout_s, log_path, t0)
+    finally:
+        guard.close()                    # Windows: kill-on-close ends anything the command left running
+
+
+def _wait_and_collect(prop: Proposal, p: subprocess.Popen, guard, timeout_s: float, log_path: Path,
+                      t0: float) -> RunResult:
     keep: collections.deque[bytes] = collections.deque()
     state = {"kept": 0, "total": 0}
 
@@ -506,17 +518,23 @@ def run_blocking(prop: Proposal, timeout_s: float, log_path: Path) -> RunResult:
         p.wait(timeout=timeout_s)
     except subprocess.TimeoutExpired:
         timed_out = True
-        _kill_tree(p)
+        guard.kill_tree()                # the whole job / process group, not only the first process
         try:
             p.wait(timeout=10)
         except subprocess.TimeoutExpired:
-            pass
+            _kill_tree(p)
+            try:
+                p.wait(timeout=10)
+            except subprocess.TimeoutExpired:
+                pass
+    if not timed_out:
+        guard.close()                    # a finished command's leftovers end now (they would hold the pipe open)
     reader.join(timeout=5)
     text = _decode(b"".join(keep))
     lines = [ln.rstrip() for ln in text.splitlines() if ln.strip()]
     tail = logs.redact("\n".join(lines[-SUMMARY_LINES:]))[-SUMMARY_CHARS:]
     return RunResult(None if timed_out else p.returncode, round(time.monotonic() - t0, 2), timed_out, tail,
-                     log_path, state["total"])
+                     log_path, state["total"], guard.state, guard.reason)
 
 
 # ---------------------------------------------------------------------- installs
@@ -589,8 +607,9 @@ class HelperSkill(Skill):
     name = "helper"
     description = "Run one command or install software on this computer, only after the owner approves each one"
 
-    def __init__(self, registry, home: Path) -> None:
+    def __init__(self, registry, home: Path, limits: "isolation.Limits | None" = None) -> None:
         self.registry, self.home = registry, Path(home)
+        self.limits = limits or isolation.helper_limits()
         self.audit_path = helper_dir(self.home) / "audit.jsonl"
 
     def _audit(self, **rec) -> None:
@@ -600,15 +619,19 @@ class HelperSkill(Skill):
         auto = prop.level == "readonly" and feat.current().active("helper_readonly_auto")
         if auto:
             return True, "auto (owner allow-list)"
+        iso = await asyncio.to_thread(isolation.status, self.limits)
+        no_iso = iso["state"] == "unavailable"       # no OS limits: ask for the stronger typed confirmation
         details = {"command": prop.command, "cwd": str(prop.cwd), **(extra or {}),
                    "classification": prop.level + (": " + "; ".join(prop.reasons) if prop.reasons else ""),
-                   "runs_as": "you (normal user, never administrator)"}
+                   "runs_as": "you (normal user, never administrator)",
+                   "isolation": f"{iso['state']}: {iso['reason']}"[:200]}
         title = ("Install / להתקין: " + extra["package"]) if kind == "install" and extra else \
             ("Run a command / להריץ פקודה: " + prop.command[:80])
+        typed = prop.level == "dangerous" or no_iso
         ok = await self.registry.ask(
             f"להריץ במחשב? / Run on this computer?\n{prop.command}\n(בתיקייה / in: {prop.cwd})",
-            title=title, why=purpose, risk="high" if kind == "install" else prop.risk, kind=kind, details=details,
-            typed=prop.level == "dangerous", timeout=APPROVAL_TIMEOUT_S, voice=prop.level != "dangerous")
+            title=title, why=purpose, risk="high" if (kind == "install" or no_iso) else prop.risk, kind=kind,
+            details=details, typed=typed, timeout=APPROVAL_TIMEOUT_S, voice=not typed)
         return ok, "approved" if ok else "denied"
 
     async def _execute(self, prop: Proposal, purpose: str, kind: str, timeout_s: int, extra: dict | None = None
@@ -626,12 +649,12 @@ class HelperSkill(Skill):
         logs.info("helper", "HELPER_RUN", "helper command started", kind=kind, decision=decision, id=prop.id,
                   classification=prop.level)
         try:
-            r = await asyncio.to_thread(run_blocking, prop, timeout_s, log_path)
+            r = await asyncio.to_thread(run_blocking, prop, timeout_s, log_path, self.limits)
         except OSError as e:
             self._audit(**base, decision=decision, error=type(e).__name__)
             return ToolResult(False, f"ההרצה נכשלה: {type(e).__name__}", {"id": prop.id}, "HELPER_START_FAILED")
         self._audit(**base, decision=decision, exit_code=r.exit_code, seconds=r.seconds, timed_out=r.timed_out,
-                    output_bytes=r.bytes, log=str(r.log))
+                    output_bytes=r.bytes, log=str(r.log), isolation=r.isolation)
         logs.info("helper", "HELPER_DONE", "helper command finished", kind=kind, id=prop.id, exit_code=r.exit_code, seconds=r.seconds,
                   timed_out=r.timed_out)
         if r.timed_out:
@@ -722,11 +745,18 @@ class HelperSkill(Skill):
 ALLOWED_ACTIONS = frozenset({"shell_propose", "install_propose"})
 
 
-def register_helper(registry, home: Path, health=None) -> HelperSkill:
-    skill = HelperSkill(registry, home)
+def register_helper(registry, home: Path, health=None, limits: "isolation.Limits | None" = None) -> HelperSkill:
+    if limits is not None:
+        isolation.configure(limits)
+    skill = HelperSkill(registry, home, limits)
     registry.register(skill)
     registry.allowed_actions |= ALLOWED_ACTIONS
     if health is not None:
+        # R-01 (#17): the OS limits around helper commands and generated-Skill children, as they really are
+        def show_isolation(st: dict | None = None) -> None:
+            health.set("helper_isolation", *isolation.health_status(st or isolation.status(skill.limits)))
+        show_isolation()
+        isolation.listeners["helper"] = show_isolation
         # integration open point 1 (SWV3): the row said "ok" on a fresh profile although the switch is OFF. It
         # follows the switch now (and every later flip of it, from this process or another one).
         def show(_fid: str | None = None, _on: bool | None = None) -> None:

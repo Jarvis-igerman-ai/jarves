@@ -229,7 +229,7 @@ def system_info(home: Path) -> dict:
 COMPONENT_HE = {"ai": "חיבור ה-AI", "audio": "השמע", "speech_out": "הדיבור", "speech_in": "זיהוי הדיבור",
                 "wake_word": "מילת ההפעלה", "mic": "המיקרופון", "link": "החיבור לפנים", "music": "המוזיקה",
                 "scheduler": "המשימות המתוזמנות", "camera": "המצלמה", "google": "גוגל", "backup": "הגיבוי",
-                "dashboard": "לוח הבקרה", "voice": "הקול"}
+                "dashboard": "לוח הבקרה", "voice": "הקול", "helper_isolation": "הבידוד של פקודות העוזר"}
 STATUS_HE = {"unavailable": "לא זמין", "degraded": "פועל חלקית"}
 CORE_COMPONENTS = {"ai", "audio", "speech_out", "link", "wake_word", "mic", "voice"}
 # log code -> (cause, cause_he, fix, fix_he, effort)
@@ -441,7 +441,15 @@ class SelfCheck:
 
     # ---- health components
     def _health(self, out: list[Finding]) -> None:
-        for name, c in sorted(self.components().items()):
+        comps = dict(self.components())
+        if "helper_isolation" not in comps:        # R-01: no live Core row: check the OS limits here
+            try:
+                from . import isolation
+                st, detail, action = isolation.health_status(isolation.row(self.cfg))
+                comps["helper_isolation"] = {"status": st, "detail": detail, "action": action}
+            except Exception:
+                pass
+        for name, c in sorted(comps.items()):
             status = (c or {}).get("status")
             if status not in ("unavailable", "degraded"):
                 continue

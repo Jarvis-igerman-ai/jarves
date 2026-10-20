@@ -44,3 +44,5 @@ dist/
 
 .wrangler/
 .playwright-mcp/
+# SW-V4 O: built at packaging time by core/tools/build_log_index.py (git blame), never committed
+core/src/jarves/diag/log_codes.json

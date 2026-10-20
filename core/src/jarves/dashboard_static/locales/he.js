@@ -8,6 +8,28 @@
  "dir": "rtl",
  "bcp47": "he-IL",
  "dict": {
+  "Helper isolation": "בידוד פקודות העוזר",
+  "Without isolation every helper command needs the typed code.": "בלי בידוד, כל פקודה דורשת הקלדת קוד.",
+  "Spoken lookups: strict budget": "חיפושים בשיחה: תקציב קשיח",
+  "Every lookup is reserved before it is sent; a request that does not fit is never sent.": "כל חיפוש נשמר בתקציב לפני שהוא נשלח; בקשה שלא נכנסת לא נשלחת אף פעם.",
+  "Used today": "נוצל היום",
+  "Held now": "שמור עכשיו",
+  "Daily cap": "תקרה יומית",
+  "Per question: ": "לשאלה: ",
+  "Left": "נשאר",
+  "Requests today: ": "בקשות היום: ",
+  "Mode": "מצב",
+  "Fallback": "גיבוי",
+  "Answered / refused before sending": "נענו / נחסמו לפני שליחה",
+  "Cancelled / timeouts": "בוטלו / חרגו מזמן",
+  "Open reservations": "הזמנות פתוחות",
+  "Amount": "סכום",
+  "Process": "תהליך",
+  "Age": "גיל",
+  "No open reservations.": "אין הזמנות פתוחות.",
+  "client (strict cap)": "בצד הלקוח (תקרה קשיחה)",
+  "server (counted, not strictly capped)": "בצד השרת (ספירה בלבד)",
+  "text only, no lookups": "טקסט בלבד, בלי חיפושים",
   "Loading…": "טוען…",
   "Theme: auto": "ערכת צבע: אוטומטית",
   "Theme: light": "ערכת צבע: בהירה",
@@ -1021,112 +1043,250 @@
   "Rebuild": "בנייה מחדש",
   "Delete this conversation? This cannot be undone.": "למחוק את השיחה הזאת? אי אפשר לבטל.",
   "Waiting for your approval on the screen…": "ממתין לאישור על המסך…",
-  "Delete conversation": "מחיקת השיחה"
+  "Delete conversation": "מחיקת השיחה",
+  "Repair (asks first)": "תיקון (ישאל לאישור)",
+  "Ticket draft #": "נוצרה טיוטת כרטיס #",
+  "Code location": "מיקום בקוד",
+  "Waiting for your approval on screen…": "ממתין לאישור על המסך…",
+  "No trend yet (recorded every hour).": "אין עדיין מגמה (נאסף כל שעה).",
+  "30-day score trend": "מגמת ציון 30 יום",
+  "Every how many days": "כל כמה ימים",
+  "What would be sent: ": "מה יישלח: ",
+  "estimate up to ": "עלות משוערת עד ",
+  "cap": "תקרה",
+  "would skip: nothing new ($0)": "ידלג: אין שום דבר חדש ($0)",
+  "Run now (up to the estimate)": "הרץ עכשיו (עד העלות המשוערת)",
+  "What would be sent and its cost": "מה יישלח ובכמה",
+  "Selective AI review": "בדיקת AI סלקטיבית",
+  "AI review ready": "דוח מוכן",
+  "Every N days: ": "כל כמה ימים: ",
+  "per-run cap ": "תקרה לבדיקה ",
+  "per month ": "לחודש ",
+  "this month ": "החודש ",
+  "What the reviewer never sees": "מה הבודק לעולם לא רואה",
+  "estimate: ": "לפני: ",
+  "actual: ": "בפועל: ",
+  "The reviewer has not run yet.": "הבודק עוד לא רץ.",
+  "Evidence: ": "הוכחה: ",
+  "Hypothesis: ": "השערה: ",
+  "Accept (nothing is applied by itself)": "קבל (שום דבר לא מוחל לבד)",
+  "JARVES watches himself for free, finds anomalies and shows where in the code. Repairs only after you approve.": "ג'ארביס עוקב אחרי עצמו בחינם, מוצא חריגות ומראה איפה בקוד. תיקון רק אחרי אישור שלכם.",
+  "Full self-check": "בדיקה עצמית מלאה",
+  "Components": "רכיבים",
+  "JARVES is not running now.": "ג'ארביס לא פועל כרגע.",
+  "Version report": "דוח גרסה",
+  "No regression against the previous version.": "אין נסיגה מול הגרסה הקודמת.",
+  "No recent update to compare.": "אין עדכון חדש להשוואה.",
+  "Start-up check": "בדיקת הפעלה",
+  "No start-up check yet.": "עוד לא רצה בדיקת הפעלה.",
+  "Nightly canaries": "בדיקות לילה",
+  "No nightly canary yet.": "עוד לא רצו בדיקות לילה.",
+  "Repairs (always with approval)": "תיקונים (תמיד באישור)",
+  "Ticket drafts": "טיוטות כרטיסים",
+  "File on the private repo (asks first)": "שלח למאגר הפרטי (ישאל קודם)",
+  "No drafts.": "אין טיוטות.",
+  "ok": "תקין",
+  "degraded": "פועל חלקית",
+  "disabled": "כבוי",
+  "stale": "ממתין יותר משבוע",
+  "seen": "נבדק",
+  "Done.": "בוצע.",
+  "partial": "חלקי",
+  "Linked. The phone shows JARVES bridge.": "מקושר. בטלפון יופיע JARVES bridge.",
+  "Linking did not finish. Try again.": "הקישור לא הושלם. נסו שוב.",
+  "Switch send mode on? Every message is still approved on the screen.": "להפעיל מצב שליחה? כל הודעה עדיין תאושר על המסך.",
+  "name or +number": "שם או +מספר",
+  "Empty: nobody (the default).": "ריק: אף אחד (ברירת מחדל).",
+  "Empty: every 1:1 chat is read, no groups.": "ריק: כל צ'אט אחד-על-אחד נקרא, בלי קבוצות.",
+  "Text written by others: untrusted. JARVES never acts on it and never opens links.": "טקסט שכתבו אחרים: לא אמין. ג'ארביס לא פועל לפיו ולא פותח קישורים.",
+  "Hidden characters removed: ": "הוסרו תווים נסתרים: ",
+  "Contains a link (never opened).": "יש קישור (לא נפתח).",
+  "may send": "שליחה מותרת",
+  "WhatsApp": "וואטסאפ",
+  "Real access through a separate bridge on this computer. Read-only first; every send is approved on the screen.": "גישה אמיתית דרך גשר נפרד במחשב. קודם קריאה בלבד; כל שליחה מאושרת על המסך.",
+  "Bridge: ": "מצב הגשר: ",
+  "KILLED": "עצור",
+  "Changes are made only on the computer itself.": "את זה משנים רק במחשב עצמו.",
+  "Release the kill switch": "שחרור מתג החירום",
+  "Kill switch: stop everything": "מתג חירום: לעצור הכול",
+  "Start the bridge": "הפעלת הגשר",
+  "Link": "קישור",
+  "On the phone: WhatsApp > Settings > Linked devices > Link a device. Unlinking on the phone always works.": "בטלפון: וואטסאפ > הגדרות > מכשירים מקושרים > קישור מכשיר. ניתוק בטלפון עובד תמיד.",
+  "Scan the code": "סרקו את הקוד",
+  "Link (QR code)": "קישור (קוד QR)",
+  "or a number for a pairing code": "או מספר לקוד צימוד",
+  "Unlink and wipe the bridge store on this computer?": "לנתק ולמחוק את המידע של הגשר במחשב?",
+  "Unlink": "ניתוק",
+  "Read only": "קריאה בלבד",
+  "Send": "שליחה",
+  "Days left before send mode can be offered: ": "ימים שנותרו עד שאפשר להציע מצב שליחה: ",
+  "Until send mode is on, sending opens the chat and you press send.": "עד שמצב שליחה פועל, שולחים דרך פתיחת הצ'אט ואתם לוחצים שלח.",
+  "Read list (extra chats)": "רשימת קריאה (צ'אטים נוספים)",
+  "Send list": "רשימת שליחה",
+  "Limits and retention": "מגבלות ושמירה",
+  "Sent in the last hour: ": "נשלחו בשעה האחרונה: ",
+  "Sent today: ": "נשלחו היום: ",
+  "No sends 23:00-07:00 without a typed code.": "אין שליחה בין 23:00 ל-07:00 בלי קוד מוקלד.",
+  "Days kept: ": "ימי שמירה: ",
+  "Keep messages again": "לשמור הודעות שוב",
+  "Keep nothing": "לא לשמור כלום",
+  "Delete every stored message?": "למחוק את כל ההודעות השמורות?",
+  "Delete messages": "מחיקת הודעות",
+  "Inbox": "תיבת הודעות",
+  "No chats to show.": "אין צ'אטים להצגה.",
+  "Send audit": "יומן שליחות",
+  "Nothing sent yet.": "עוד לא נשלח כלום.",
+  "started by JARVES": "הופעל ע\"י ג'רוויס",
+  "live channel": "ערוץ חי",
+  "plugin: at the next stop": "תוסף: בעצירה הבאה",
+  "observe only": "צפייה בלבד",
+  "observe only (cannot attach)": "צפייה בלבד (אין חיבור)",
+  "Matching: ": "מתאימים: ",
+  "Sending…": "שולח…",
+  "Coding agents": "סוכני קוד",
+  "Claude Code and Codex": "Claude Code ו-Codex",
+  "The coding-agent orchestrator is off: ": "מנהל סוכני הקוד כבוי: ",
+  "Switch it on on the Features page, then: jarvis agents projects add <folder> and jarvis agents install-plugin claude": "הדליקו אותו בעמוד התכונות, ואז: jarvis agents projects add <תיקייה> ו-jarvis agents install-plugin claude",
+  "(last known)": "(ידוע אחרון)",
+  "No sessions in the allowed projects right now. Start Claude Code or Codex in one of them, or start a new session here.": "אין כרגע סשנים בפרויקטים המותרים. הפעילו Claude Code או Codex באחד מהם, או התחילו סשן חדש כאן.",
+  "No allowed projects yet. On the PC: jarvis agents projects add C:\\work\\jarvis --name jarvis, then jarvis agents install-plugin claude.": "עוד אין פרויקטים מותרים. במחשב: jarvis agents projects add C:\\work\\jarvis --name jarvis, ואז jarvis agents install-plugin claude.",
+  "code": "קוד",
+  "The task": "המשימה",
+  "In the project folder itself": "בתיקיית הפרויקט עצמה",
+  "Agent": "סוכן",
+  "Project": "פרויקט",
+  "No new worktree": "בלי worktree חדש",
+  "Start a session (approve on screen)": "התחלת סשן (אישור על המסך)",
+  "Claude Code and Codex sessions in your allowed projects, also ones you started yourself. The same operations as by voice and jarvis agents.": "הסשנים של Claude Code ו-Codex בפרויקטים המותרים, גם כאלה שהפעלת בעצמך. אותן פעולות כמו בקול וב-jarvis agents.",
+  "Digest: ": "תקציר: ",
+  "more session(s) outside the allow-list": "סשנים נוספים מחוץ לרשימת המותרים",
+  "New session": "סשן חדש",
+  "Session": "סשן",
+  "← all sessions": "כל הסשנים ←",
+  "What is blocking you?": "מה חוסם אותך?",
+  "Question": "שאלה",
+  "Run the targeted tests": "תריץ את הבדיקות הממוקדות",
+  "Instruction": "הוראה",
+  "Continue": "המשך",
+  "Pause": "השהיה",
+  "Interrupt": "עצירת התור",
+  "Stop (approve)": "סיום (אישור)",
+  "Resume under JARVES (approve)": "המשך דרך ג'רוויס (אישור)",
+  "last known": "ידוע אחרון",
+  "Connection": "חיבור",
+  "Cost (estimate)": "עלות (הערכה)",
+  "subscription": "מנוי",
+  "Tokens": "טוקנים",
+  "Its last report: ": "הדיווח האחרון שלו: ",
+  "Next step: ": "הצעד הבא: ",
+  "Files: ": "קבצים: ",
+  "Ask": "שאלה",
+  "Tell": "להגיד"
  },
  "rules": [
   [
-  "^Scheduled reminders and reports\\. Now (.+)\\. The Core runs due jobs .*$",
-  "תזכורות ודוחות מתוזמנים. עכשיו $1. הליבה מריצה משימות שהגיע זמנן (בדיקה לפחות כל 30 שניות); משימה שהוחמצה רצה פעם אחת אחרי ההפעלה אם היא לא ישנה מדי, ומסומנת כמאוחרת."
+   "^Scheduled reminders and reports\\. Now (.+)\\. The Core runs due jobs .*$",
+   "תזכורות ודוחות מתוזמנים. עכשיו $1. הליבה מריצה משימות שהגיע זמנן (בדיקה לפחות כל 30 שניות); משימה שהוחמצה רצה פעם אחת אחרי ההפעלה אם היא לא ישנה מדי, ומסומנת כמאוחרת."
   ],
   [
-  "^default (.+) · (.+)–(.+)$",
-  "ברירת מחדל $1 · $2–$3"
+   "^default (.+) · (.+)–(.+)$",
+   "ברירת מחדל $1 · $2–$3"
   ],
   [
-  "^default (.+)$",
-  "ברירת מחדל $1"
+   "^default (.+)$",
+   "ברירת מחדל $1"
   ],
   [
-  "^~([\\d.]+k?) tokens$",
-  "~$1 אסימונים"
+   "^~([\\d.]+k?) tokens$",
+   "~$1 אסימונים"
   ],
   [
-  "^(\\d+) blocks · estimate$",
-  "$1 בלוקים · הערכה"
+   "^(\\d+) blocks · estimate$",
+   "$1 בלוקים · הערכה"
   ],
   [
-  "^(\\d+) pieces added$",
-  "נוספו $1 פריטים"
+   "^(\\d+) pieces added$",
+   "נוספו $1 פריטים"
   ],
   [
-  "^(\\d+) left out$",
-  "$1 הושמטו"
+   "^(\\d+) left out$",
+   "$1 הושמטו"
   ],
   [
-  "^(\\d+) conversations?$",
-  "$1 שיחות"
+   "^(\\d+) conversations?$",
+   "$1 שיחות"
   ],
   [
-  "^(\\d+) conversations? · ([\\d.]+) voice min$",
-  "$1 שיחות · $2 דק׳ קול"
+   "^(\\d+) conversations? · ([\\d.]+) voice min$",
+   "$1 שיחות · $2 דק׳ קול"
   ],
   [
-  "^(\\d+) high$",
-  "$1 חמורות"
+   "^(\\d+) high$",
+   "$1 חמורות"
   ],
   [
-  "^(\\d+) important$",
-  "$1 חשובות"
+   "^(\\d+) important$",
+   "$1 חשובות"
   ],
   [
-  "^(\\d+) failed$",
-  "$1 נכשלו"
+   "^(\\d+) failed$",
+   "$1 נכשלו"
   ],
   [
-  "^(\\d+) off or not available$",
-  "$1 כבויות או לא זמינות"
+   "^(\\d+) off or not available$",
+   "$1 כבויות או לא זמינות"
   ],
   [
-  "^Done: (\\d+) findings$",
-  "בוצע: $1 ממצאים"
+   "^Done: (\\d+) findings$",
+   "בוצע: $1 ממצאים"
   ],
   [
-  "^([\\d.]+) min$",
-  "$1 דק׳"
+   "^([\\d.]+) min$",
+   "$1 דק׳"
   ],
   [
-  "^([\\d.]+) s$",
-  "$1 שנ׳"
+   "^([\\d.]+) s$",
+   "$1 שנ׳"
   ],
   [
-  "^(\\d+) min (\\d+) s$",
-  "$1 דק׳ $2 שנ׳"
+   "^(\\d+) min (\\d+) s$",
+   "$1 דק׳ $2 שנ׳"
   ],
   [
-  "^reply after ([\\d.]+) s$",
-  "תשובה אחרי $1 שנ׳"
+   "^reply after ([\\d.]+) s$",
+   "תשובה אחרי $1 שנ׳"
   ],
   [
-  "^applies: (.+)$",
-  "חל: $1"
+   "^applies: (.+)$",
+   "חל: $1"
   ],
   [
-  "^page (\\d+) of (\\d+) · (\\d+) conversations?$",
-  "עמוד $1 מתוך $2 · $3 שיחות"
+   "^page (\\d+) of (\\d+) · (\\d+) conversations?$",
+   "עמוד $1 מתוך $2 · $3 שיחות"
   ],
   [
-  "^(\\d+) matching lines$",
-  "$1 שורות מתאימות"
+   "^(\\d+) matching lines$",
+   "$1 שורות מתאימות"
   ],
   [
-  "^Pending \\((\\d+)\\)$",
-  "ממתינות ($1)"
+   "^Pending \\((\\d+)\\)$",
+   "ממתינות ($1)"
   ],
   [
-  "^Installed \\((\\d+)\\)$",
-  "מותקנים ($1)"
+   "^Installed \\((\\d+)\\)$",
+   "מותקנים ($1)"
   ],
   [
-  "^Waiting for your review \\((\\d+)\\)$",
-  "ממתינים לסקירה שלך ($1)"
+   "^Waiting for your review \\((\\d+)\\)$",
+   "ממתינים לסקירה שלך ($1)"
   ],
   [
-  "^(\\d+) fact\\(s\\) learned$",
-  "$1 עובדות נלמדו"
+   "^(\\d+) fact\\(s\\) learned$",
+   "$1 עובדות נלמדו"
   ],
   [
-  "^learned (\\d+)%$",
-  "נלמד $1%"
+   "^learned (\\d+)%$",
+   "נלמד $1%"
   ]
  ]
 };

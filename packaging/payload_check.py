@@ -9,15 +9,18 @@ Third-party wheels are scanned by name only (their test fixtures may legitimatel
 """
 from __future__ import annotations
 
+import hashlib
 import re
 import sys
 from pathlib import Path
 
 FORBIDDEN_NAMES = {"secrets.env", "link_token", "google_token.json", "google_oauth.json", "health.json",
                    "pear_client_id", "pear_client_id.paired", "features.json", "setup_done", "config.toml",
-                   "updates.json", ".env", ".git", "id_rsa", "id_ed25519"}
+                   "updates.json", ".env", ".git", "id_rsa", "id_ed25519",
+                   "store.enc", "admin.token", "audit.jsonl"}   # SW-V4 F: WhatsApp bridge state
 FORBIDDEN_SUFFIXES = (".db", ".sqlite", ".sqlite3", ".db-wal", ".db-shm", ".log", ".pem", ".key", ".p12", ".pfx")
-FORBIDDEN_DIRS = {"chatgpt", "logs", "backups", "workspace", "updates", ".git"}
+FORBIDDEN_DIRS = {"chatgpt", "logs", "backups", "workspace", "updates", ".git", "whatsapp_bridge"}
+BRIDGE_EXE = "bridge/whatsapp_bridge.exe"   # SW-V4 F: must match the .sha256 written by scripts/build_whatsapp_bridge.ps1
 # Third-party packages that ship sample data with such extensions (checked 2026-10-19 on the real payload).
 ALLOWED = (re.compile(r"(^|/)python/Lib/site-packages/[^/]+/.*(tests?|testing|data)/"),
            re.compile(r"/certifi/cacert\.pem$"))             # the public CA bundle (certifi, pip's vendored copy)
@@ -46,7 +49,21 @@ def findings(stage: Path) -> list[str]:
             for rx in SECRET_PATTERNS:
                 if rx.search(text):
                     out.append(f"secret-like content ({rx.pattern[:20]}...): {rel}")
+    out.extend(bridge_findings(stage))
     return out
+
+
+def bridge_findings(stage: Path) -> list[str]:
+    """If the WhatsApp bridge is staged, its SHA-256 must equal the .sha256 file next to it."""
+    exe = stage / BRIDGE_EXE
+    if not exe.is_file():
+        return []
+    side = exe.with_name(exe.name + ".sha256")
+    if not side.is_file():
+        return [f"bridge binary without .sha256: {BRIDGE_EXE}"]
+    want = (side.read_text(encoding="ascii", errors="replace").split() or [""])[0].lower()
+    got = hashlib.sha256(exe.read_bytes()).hexdigest()
+    return [] if want == got else [f"bridge binary sha256 mismatch: {BRIDGE_EXE}"]
 
 
 def main(argv: list[str]) -> int:

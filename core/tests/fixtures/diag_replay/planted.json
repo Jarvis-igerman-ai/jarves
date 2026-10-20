@@ -1,0 +1,17 @@
+{
+ "note": "SW-V4 O replay harness: the 12 planted anomalies (tests/diag_replay.py plants them into 14+ days of synthetic baseline). 'finding' = the Detector fingerprint; 'slice' = every AI-review slice item it may produce (precision and recall are measured against these).",
+ "anomalies": {
+  "new_error_code": {"finding": "anomaly:newcode:PLANTED_NEW_ERROR", "slice": ["anomaly:newcode:PLANTED_NEW_ERROR"]},
+  "rate_step_3x": {"finding": "anomaly:step:LIVE_RECONNECT", "slice": ["anomaly:step:LIVE_RECONNECT"]},
+  "ram_creep": {"finding": "trend:ram_mb", "slice": ["trend:ram_mb"]},
+  "disk_growth": {"finding": "trend:disk_state_mb", "slice": ["trend:disk_state_mb"]},
+  "slow_turns": {"finding": "anomaly:slow:reply_wait", "slice": ["anomaly:slow:reply_wait"]},
+  "tool_fails_3_conversations": {"finding": "anomaly:tool:calendar_list", "slice": ["anomaly:tool:calendar_list"]},
+  "false_action_claim": {"finding": "anomaly:claim:LIVE_FALSE_ACTION_CLAIM", "slice": ["anomaly:claim:LIVE_FALSE_ACTION_CLAIM"]},
+  "wake_false_positive_burst": {"finding": "anomaly:wake_false", "slice": ["anomaly:wake_false"]},
+  "version_regression": {"finding": "version:4.0.1", "slice": ["version:4.0.1", "files:version"]},
+  "config_drift": {"finding": "config:drift", "slice": ["config:drift"]},
+  "canary_fails_twice": {"finding": "canary:dashboard_load", "slice": ["canary:dashboard_load"]},
+  "google_token_near_expiry": {"finding": "preflight:google_token", "slice": ["preflight:google_token"]}
+ }
+}

@@ -316,6 +316,26 @@ register("calendar_write", "הוספה ועדכון ביומן", "Calendar: add 
 register("dashboard_lan", "לוח בקרה ברשת הביתית", "Dashboard on the home network", False, risk="high",
          applies="restart", about="open the dashboard from a paired phone on your home Wi-Fi (pairing code + login; "
                                   "never on the internet). Off = this computer only")
+def _probe_client_delegation(c: ProbeCtx) -> tuple[bool, str]:
+    v = getattr(c.cfg, "voice", None)
+    if v is None or v.mode != "live":
+        return False, "client delegation needs live cloud voice (voice.mode = live)"
+    return _api_billing(c)
+
+
+# SW-V4 D (#14): default OFF until the owner decides OD-15 (ai.delegation_mode is the config default and mirror)
+register("client_delegation", "תקציב קשיח לחיפושים בשיחה", "Strict budget for spoken lookups (client delegation)",
+         False, probe=_probe_client_delegation, needs=["openai_api"], risk="medium", config="ai.delegation_mode",
+         applies="next_session",
+         about="JARVES itself runs every lookup GPT-Live hands over, and reserves its cost before sending it, so the "
+               "daily and per-question limits are never exceeded; with ChatGPT + API key the reasoning runs on your "
+               "plan. Adds a little latency",
+         targets={"windows": {"status": "implemented_unverified",
+                              "evidence": "core/tests/test_delegation_client.py (strict cap property test, fake Live "
+                                          "and Responses servers); live scenarios 51-62 in docs/reviews/SWV4_D_DELEGATION.md"},
+                  "linux_arm64_pi": {"status": "planned", "blocker": "Pi voice is out of V4 scope", "roadmap_issue": "https://github.com/igalgerman/JARVIS/issues/14"}},
+         permissions=["sends the question to OpenAI (API key or your ChatGPT plan)"],
+         settings="ai.delegation_daily_usd, ai.delegation_turn_usd, ai.delegation_fallback, ai.delegation_timeout_s")
 register("assistant_identity", "שם העוזר", "Assistant name", True, tools=["assistant_rename"],
          applies="next_session", about="change my written and spoken name (\"קוראים לך...\"); the wake phrase is "
                                        "separate (Identity & voice page)")
@@ -369,8 +389,9 @@ class Features:
         self._probe_cache: dict[str, tuple[float, bool, str]] = {}
         self._revalidating: set[str] = set()
         self._defaults: dict[str, tuple[bool, str]] = {}
-        for fid in CONFIG_MIRROR.values():
-            self.default(fid)                   # legacy config values, before anything mirrors onto cfg
+        for fid in (*CONFIG_MIRROR.values(), "client_delegation"):
+            if fid in CATALOG:
+                self.default(fid)               # legacy config values, before anything mirrors onto cfg
         self.listeners: list[Callable[[str, bool], None]] = []   # (id, enabled) after a change by this process
         self._load()
 
@@ -459,6 +480,8 @@ class Features:
             src = "config" if key in getattr(getattr(self.cfg, section, None), "model_fields_set", set()) else "default"
             if f.config == "music.provider" and isinstance(val, str):
                 return val != "none", src
+            if f.config == "ai.delegation_mode" and isinstance(val, str):
+                return val == "client", src
             if isinstance(val, bool):
                 return val, src
         return f.default_enabled, "default"
@@ -644,6 +667,9 @@ class Features:
             sec = getattr(cfg, section, None)
             if sec is not None and hasattr(sec, name):
                 setattr(sec, name, self.enabled(fid))
+        ai = getattr(cfg, "ai", None)
+        if ai is not None and hasattr(ai, "delegation_mode") and "client_delegation" in CATALOG:
+            ai.delegation_mode = "client" if self.enabled("client_delegation") else "server"   # SW-V4 D
 
     def unavailable_summary(self) -> list[tuple[Feature, str]]:
         out = []
@@ -829,7 +855,12 @@ def _ctx_features(ctx) -> Features:
 def api_features(ctx, m, body):
     f = _ctx_features(ctx)
     note = "Switches apply live where possible; others at the next conversation or Core start (see 'applies')."
-    return 200, {"features": f.list(), "note": note, **locales.siblings("note", note),
+    try:                                   # R-01: the OS limits around helper commands (a status, not a switch)
+        from . import isolation
+        iso = isolation.row(ctx.cfg, f.ctx.components())
+    except Exception as e:
+        iso = {"state": "unavailable", "reason": f"could not check ({type(e).__name__})", "status": "unavailable"}
+    return 200, {"features": f.list(), "note": note, **locales.siblings("note", note), "helper_isolation": iso,
                  "statuses": list(capabilities.STATUSES), "targets": list(capabilities.TARGETS),
                  "filters": ["all", "enabled", "not_ready_on_pi", "needs_attention"],
                  "pi_roadmap": capabilities.PI_ROADMAP}

@@ -458,7 +458,7 @@ async function pageSettings() {
 async function route(refresh) {
   clearInterval(timer); timer = null;
   const [page, arg] = location.hash.replace(/^#\/?/, "").split("?")[0].split("/").map(decodeURIComponent);
-  const navPage = { session: "conversations", raw: "conversations", context: "conversations", note: "workspace", guide: "guides",
+  const navPage = { session: "conversations", raw: "conversations", context: "conversations", note: "workspace", guide: "guides", agent: "agents",
     "guide-for": "guides" }[page] || page || "home";  // WP-K Home = default
   for (const a of document.querySelectorAll("nav a")) a.classList.toggle("active", a.dataset.page === navPage);
   try {

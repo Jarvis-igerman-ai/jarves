@@ -67,6 +67,8 @@ _PATTERNS = [
     (re.compile(r"\b(?:gh[pousr]_[A-Za-z0-9]{20,}|github_pat_[A-Za-z0-9_]{20,})"), "<github-token>"),
     (re.compile(r"\bxox[abprs]-[A-Za-z0-9\-]{10,}"), "<slack-token>"),
     (re.compile(r"AQAAANCMnd8BFdERjHoAwE/Cl\+sBAAAA[A-Za-z0-9+/=]*"), "<dpapi-blob>"),   # Windows DPAPI blob (base64)
+    (re.compile(r"\bwa[ab]_[A-Za-z0-9_\-]{20,}"), "<whatsapp-bridge-token>"),           # SW-V4 F bridge user/admin token
+    (re.compile(r"\bwa1\.[A-Za-z0-9_\-]{16,}\.[A-Za-z0-9_\-]{16,}"), "<whatsapp-approval>"),   # signed approval id
     (re.compile(r"(?i)([?&#;](?:t|k|key|token|access_token|refresh_token|id_token|code|secret|client_secret|sig|"
                 r"signature|auth|password|pwd|session|sid|apikey|api_key|state)=)[^&#\s\"'<>]+"), r"\1***"),
     (re.compile(r"(?i)\b(api[_-]?key|token|secret|password|passwd|cookie|authorization)(\"?\s*[:=]\s*\"?)"
@@ -77,7 +79,7 @@ _USER_PATH = re.compile(r"(?i)((?:[a-z]:)?(?:\\\\|\\|/)(?:users|documents and se
                         r"(?!<user>|public(?:\\|/|$)|default(?:\\|/|$))[^\\/\s\"'<>:*?|]+")
 
 
-_TOKEN_SHAPES = [p for p, _ in _PATTERNS[:1] + _PATTERNS[3:12]]   # token shapes only (no bearer/key=value/URL rules)
+_TOKEN_SHAPES = [p for p, _ in _PATTERNS[:1] + _PATTERNS[3:14]]   # token shapes only (no bearer/key=value/URL rules)
 
 
 def has_secret(s: str) -> bool:
@@ -129,6 +131,8 @@ def _reg(cls: str, names: str) -> dict[str, str]:
 # anything a user said, a provider returned or an exception printed is content; a person's identifier is pii.
 FIELD_CLASS: dict[str, str] = {
     **_reg(SAFE, """
+        amber automatic blocked cap_usd error_type est_usd failed item item_count part passed red remedy skipped_because
+        ticket usd visibility within_budget
         action actions activation active after_s age_s ai_reviews alerts_paused answer_chars api_code applier
         asr_ms attempt attempts audio_ended audio_s audio_started autonomy available away backend backend_model
         backend_s backup bad_fields browser budget_s builtin bytes calendar camera camera_when_away caps changed
@@ -154,11 +158,15 @@ FIELD_CLASS: dict[str, str] = {
         task_name tier where crash_kind note_id code args_chars ok_count
         index_rows docs cap took_ms term_count ranged build_s fts_ok orphan_fts docs_without_fts masked_or_gone
         deleted_sessions added
+        chat_hash chats logout override unread killed text_sha256 retry_after_s days_left
+        turn route history_items reserved_usd spent_usd actual_usd requests deleg_s scope err_code daily_usd turn_usd
+        transport plugin provider
         """),
     **_reg(SECRET, """
         token access_token refresh_token id_token id_token_hint api_key apikey secret secrets client_secret
         password passcode cookie cookies authorization auth code_verifier verifier nonce credentials
         device_store bridge_store session_store dpapi
+        approval_id approval_key admin_token bridge_token store_key
         """),
     **_reg(CONTENT, """
         text transcript transcription query q search match phrase utterance prompt instructions input output

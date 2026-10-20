@@ -46,6 +46,9 @@ FEATURES: dict[str, object] = {
     "browser": "browser", "helper": "approvals", "helper_readonly_auto": (D, "a pure switch; `jarvis features`"),
     "whatsapp_handoff": (D, "WhatsApp opens a draft in the app; no CLI needed, switch via `jarvis features`"),
     "morning_briefing": "jobs", "home_assistant": "home", "conversation_recall": "recall",
+    "self_diagnostics_2": "health", "client_delegation": "budget",
+    "whatsapp_bridge": "whatsapp", "whatsapp_send": "whatsapp",          # SW-V4 F: jarvis whatsapp ...
+    "agent_orchestrator": "agents",
 }
 
 # Skill (tool group) name -> "jarvis <command>" or ("dashboard", reason) or ("voice", reason) for groups that only
@@ -64,6 +67,9 @@ TOOL_GROUPS: dict[str, object] = {
     "settings": (D, "settings are edited on the Settings page"), "skill_builder": (D, "the New Skills page"),
     "status": "status", "tasks": (D, "the Background tasks page"), "telegram": "telegram", "timers": "timers",
     "usage": "usage", "whatsapp": (D, "WhatsApp opens a draft in the app"), "conversation_recall": "recall",
+    "health": "health",
+    "whatsapp_bridge": "whatsapp",                                       # SW-V4 F: inbox / send / status
+    "agents": "agents",
 }
 
 

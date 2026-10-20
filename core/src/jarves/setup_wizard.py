@@ -57,34 +57,37 @@ ADDON_MODULES = ("jarves.telegram_channel", "jarves.instagram_channel", "jarves.
                  "jarves.appearance", "jarves.backup", "jarves.usage", "jarves.updates", "jarves.runtime",
                  "jarves.operations", "jarves.guides", "jarves.skills.generated", "jarves.browser", "jarves.profiles",
                  "jarves.selfcheck", "jarves.connect", "jarves.skills.helper", "jarves.context_trace",
-                 "jarves.recall")
+                 "jarves.recall", "jarves.diag.service", "jarves.whatsapp_bridge", "jarves.orchestrator")
 # Privacy-sensitive or outward-acting: OFF on the first run whatever else says; ON only after an explicit yes.
 SAFE_OFF = frozenset({"camera", "face_recognition", "camera_when_away", "gmail_send", "calendar_write",
                       "dashboard_lan", "browser", "telegram", "home_assistant", "instagram", "helper",
-                      "helper_readonly_auto"})
+                      "helper_readonly_auto", "whatsapp_bridge", "whatsapp_send", "agent_orchestrator"})
 # Registered and grouped (so coverage checks see them) but never offered by the wizard: the owner decided (20 Oct)
 # that the Helper asks for EVERY command; the read-only allow-list exists only as `jarvis features on ...`.
-WIZARD_HIDDEN = frozenset({"helper_readonly_auto"})
+WIZARD_HIDDEN = frozenset({"helper_readonly_auto",
+                           "whatsapp_send"})   # SW-V4 F: send mode only after 14 read-only days: never a wizard offer
 GOOGLE_FEATURES = ("google_calendar", "calendar_write", "gmail_read", "gmail_send", "google_contacts")
 # (id, Hebrew, English, feature ids). A feature missing here lands in "other" (never hidden); a test demands
 # that every registered feature is listed.
 GROUPS: tuple[tuple[str, str, str, tuple[str, ...]], ...] = (
     ("core", "בסיס", "Core", ("web_search", "background_tasks", "memory_curator", "memory_llm_pass",
-                             "diagnosis_llm_pass", "conversation_recall", "self_check", "guided_setup", "workspace_agent_edit", "assistant_identity", "skill_creation",
+                             "diagnosis_llm_pass", "conversation_recall", "self_check", "self_diagnostics_2", "guided_setup", "workspace_agent_edit", "assistant_identity", "skill_creation",
                              "proactive_help", "usage_monitor", "appearance", "background_core", "display_control",
                              "tray_icon", "autostart")),
-    ("voice", "קול", "Voice", ("wake_word", "greeting", "chimes", "voice_change")),
+    ("voice", "קול", "Voice", ("wake_word", "greeting", "chimes", "voice_change", "client_delegation")),
     ("music", "מוזיקה", "Music", ("music",)),
     ("google", "גוגל", "Google", GOOGLE_FEATURES),
     ("camera", "מצלמה ופרטיות", "Camera & privacy", ("camera", "camera_preview", "face_recognition", "camera_when_away")),
     ("browser", "דפדפן", "Browser", ("browser",)),
     ("automation", "אוטומציה", "Automation", ("scheduler", "reports", "timers", "lists", "notes", "files", "proactive_alerts",
                                               "autonomy", "morning_briefing")),
-    ("channels", "ערוצים ובית חכם", "Channels & smart home", ("telegram", "instagram", "whatsapp_handoff", "home_assistant")),
+    ("channels", "ערוצים ובית חכם", "Channels & smart home", ("telegram", "instagram", "whatsapp_handoff",
+                                                                  "whatsapp_bridge", "whatsapp_send", "home_assistant")),
     ("dashboard", "לוח בקרה וטלפון", "Dashboard & phone", ("dashboard", "dashboard_lan", "context_trace")),
     ("updates", "עדכונים וגיבוי", "Updates & backup", ("update_check", "backup")),
     ("profiles", "פרופילים", "Profiles", ("profiles",)),
     ("helper", "עזרה במחשב (פקודות והתקנות)", "Computer helper (commands & installs)", ("helper", "helper_readonly_auto")),
+    ("agents", "סוכני קוד", "Coding agents", ("agent_orchestrator",)),
 )
 ANSWER_KEYS = {"language", "connection", "api_key_from_env", "display_name", "spoken_name", "address_me",
                "wake_model", "voice", "approve_voice_cost", "features", "privacy_mode", "monthly_budget_usd",
@@ -254,6 +257,13 @@ def hint(fid: str, ok: bool, why: str) -> dict:
     if fid == "home_assistant":
         return {"command": "jarvis home start", "he": "צריך לחבר את Home Assistant:  jarvis home start",
                 "en": "Connect Home Assistant:  jarvis home start"}
+    if fid == "whatsapp_bridge":
+        return {"command": "jarvis whatsapp link", "he": "צריך לקשר את וואטסאפ (מכשיר מקושר, קריאה בלבד קודם):  "
+                "jarvis whatsapp link", "en": "Link WhatsApp (a linked device, read-only first):  jarvis whatsapp link"}
+    if fid == "whatsapp_send":
+        return {"command": "jarvis whatsapp mode send", "he": "שליחה רק אחרי 14 ימי קריאה שקטים ואישור שלך:  "
+                "jarvis whatsapp mode send", "en": "Send only after 14 quiet read-only days and your go:  "
+                "jarvis whatsapp mode send"}
     return {}
 
 
@@ -898,6 +908,10 @@ BUNDLE: dict[str, list[Callable[[], tuple[bool, str]]]] = {
     "diagnosis_llm_pass": [_mod("jarves.diagnose")],
     "self_check": [_mod("jarves.selfcheck"), _data("jarves", "dashboard_static/selfcheck.js"),
                    _data("jarves.guides", "data/self_check.toml")],
+    # SW-V4 O; diag/log_codes.json is built at packaging time (root-cause hints) and optional in a dev checkout
+    "self_diagnostics_2": [_mod("jarves.diag.service"), _mod("jarves.diag.monitor"), _mod("jarves.diag.ai_review"),
+                           _mod("jarves.diag.canary"), _data("jarves", "dashboard_static/health.js"),
+                           _data("jarves.guides", "data/health.toml")],
     "guided_setup": [_mod("jarves.connect"), _mod("jarves.google_setup"), _mod("jarves.telegram_channel"),
                      _data("jarves.guides", "data/guided_setup.toml")],
     "google_calendar": _GOOGLE, "calendar_write": _GOOGLE, "gmail_read": _GOOGLE, "gmail_send": _GOOGLE,
@@ -912,6 +926,9 @@ BUNDLE: dict[str, list[Callable[[], tuple[bool, str]]]] = {
     "greeting": [_mod("jarves.voice.tts")],
     "chimes": [_mod("sounddevice")],
     "voice_change": [_mod("jarves.skills.settings"), _mod("agents.realtime")],
+    "client_delegation": [_mod("jarves.voice.delegation_client"), _mod("jarves.budget_cli"), _mod("openai"),
+                          _data("jarves", "dashboard_static/delegation.js"),
+                          _data("jarves.guides", "data/client_delegation.toml")],
     "dashboard": [_mod("jarves.dashboard"), _data("jarves", "dashboard_static/index.html"),
                   _data("jarves", "dashboard_static/setup.js"), _data("jarves", "dashboard_static/i18n.js"),
                   _data("jarves", "dashboard_static/shell.js"), _data("jarves", "dashboard_static/locales/en.js"),
@@ -919,6 +936,10 @@ BUNDLE: dict[str, list[Callable[[], tuple[bool, str]]]] = {
                   _data("jarves", "dashboard_static/locales/ru.js")],
     "dashboard_lan": [_mod("jarves.dashboard_auth"), _data("jarves", "dashboard_static/pair.html")],
     "context_trace": [_mod("jarves.context_trace"), _data("jarves", "dashboard_static/context.js")],
+    "agent_orchestrator": [_mod("jarves.orchestrator"), _mod("jarves.orchestrator.service"),
+                           _mod("jarves.orchestrator.hook"), _mod("jarves.orchestrator.channel"),
+                           _data("jarves", "dashboard_static/agents.js"),
+                           _data("jarves.guides", "data/agent_orchestrator.toml")],
     "conversation_recall": [_mod("jarves.recall"), _mod("jarves.recall_text"), _fts5(),
                             _data("jarves", "dashboard_static/recall.js"), _data("jarves.guides", "data/recall.toml")],
     "workspace_agent_edit": [_mod("jarves.workspace"), _data("jarves", "setup_guide.md")],
@@ -946,6 +967,13 @@ BUNDLE: dict[str, list[Callable[[], tuple[bool, str]]]] = {
     "telegram": [_mod("jarves.telegram_channel"), _mod("httpx"), _data("jarves.guides", "data/telegram.toml")],
     "instagram": [_mod("jarves.instagram_channel"), _mod("httpx"), _data("jarves.guides", "data/instagram.toml")],
     "whatsapp_handoff": [_mod("jarves.whatsapp"), _data("jarves.guides", "data/whatsapp.toml")],
+    # SW-V4 F: the Core side; the bridge binary itself (installer payload bridge/, SHA256-checked by payload_check)
+    # is an external process probed by the feature and started by `jarvis whatsapp start`
+    "whatsapp_bridge": [_mod("jarves.whatsapp_bridge"), _mod("jarves.whatsapp_admin"), _mod("jarves.whatsapp_policy"),
+                        _mod("jarves.whatsapp_store"), _mod("cryptography.hazmat.primitives.ciphers.aead"),
+                        _mod("websockets.asyncio.client"), _data("jarves", "dashboard_static/whatsapp.js"),
+                        _data("jarves.guides", "data/whatsapp_bridge.toml")],
+    "whatsapp_send": [_mod("jarves.whatsapp_bridge"), _mod("jarves.approvals"), _mod("jarves.approval_popup")],
     "morning_briefing": [_mod("jarves.briefing"), _mod("httpx"), _data("jarves.guides", "data/morning_briefing.toml")],
     "home_assistant": [_mod("jarves.homeassistant"), _mod("httpx"), _data("jarves.guides", "data/home_assistant.toml")],
     "profiles": [_mod("jarves.profiles"), _data("jarves", "dashboard_static/profiles.js"),

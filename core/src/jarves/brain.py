@@ -319,9 +319,11 @@ def billing_routes(ai: AIConfig, voice: Any = None) -> dict[str, str]:
         # the plan has no voice: local push-to-talk STT, transcript answered by the plan text brain, local speech
         r = {"typed_text": "chatgpt_plan", "spoken_voice": "local", "voice_backend": "chatgpt_plan",
              "reply_speech": "local"}
-    else:  # combined: GPT-Live delegates its reasoning/web search to the API-key backend, NOT to the plan
-        r = {"typed_text": "chatgpt_plan", "spoken_voice": "api_key", "voice_backend": "api_key",
-             "reply_speech": "api_key"}
+    else:  # combined: server delegation sends the reasoning/web search to the API-key backend, NOT to the plan;
+        # client delegation (SW-V4 D) runs it in JARVES on the plan, so only the voice itself is billed to the key
+        plan = getattr(ai, "delegation_mode", "server") == "client"
+        r = {"typed_text": "chatgpt_plan", "spoken_voice": "api_key",
+             "voice_backend": "chatgpt_plan" if plan else "api_key", "reply_speech": "api_key"}
     if voice is not None:
         mode = getattr(voice, "mode", "live")
         if mode == "off":
@@ -343,7 +345,8 @@ ROUTE_LABEL = {"api_key": "API key, billed", "chatgpt_plan": "ChatGPT plan", "lo
 def billing_summary(ai: AIConfig, voice: Any = None) -> str:
     """One human line from billing_routes(), e.g. for health/status text."""
     r = billing_routes(ai, voice)
-    if ai.provider == "openai" and ai.connection == "combined" and r["spoken_voice"] == "api_key":
+    if (ai.provider == "openai" and ai.connection == "combined" and r["spoken_voice"] == "api_key"
+            and r["voice_backend"] == "api_key"):
         return ("typed answers: ChatGPT plan; spoken conversation (GPT-Live voice + its backend reasoning/web "
                 f"search): API key, billed; speech for typed replies: {ROUTE_LABEL[r['reply_speech']]}")
     return (f"typed answers: {ROUTE_LABEL[r['typed_text']]}; spoken conversation: {ROUTE_LABEL[r['spoken_voice']]}"

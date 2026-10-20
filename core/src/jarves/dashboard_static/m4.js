@@ -61,6 +61,12 @@
       el("div", { class: "card m4-scroll" }, rows.length ? el("table", { class: "m4-matrix" },
         el("thead", {}, el("tr", {}, ["Feature", "Enabled", "Health", "Settings", "Permissions", "Windows", "Pi", "Blocker", "Roadmap"]
           .map((h) => el("th", {}, h)))), el("tbody", {}, rows)) : el("div", { class: "empty" }, "Nothing in this filter.")),
+      d.helper_isolation ? el("div", { class: "card small", style: "margin-top:8px", id: "helper-isolation" },
+        el("b", {}, tx("בידוד פקודות העוזר", "Helper isolation")), " ",
+        pill(d.helper_isolation.status === "ok" ? "ok" : d.helper_isolation.status, d.helper_isolation.state), " ",
+        el("span", { dir: "auto" }, d.helper_isolation.reason || ""),
+        d.helper_isolation.state === "unavailable" ? el("div", { class: "muted" },
+          tx("בלי בידוד, כל פקודה דורשת הקלדת קוד.", "Without isolation every helper command needs the typed code.")) : null) : null,
       el("div", { class: "muted small", style: "margin-top:8px" }, "Last checked: ",
         [...new Set(d.features.map((f) => f.last_checked))].join(", "), " · Pi roadmap: ",
         el("a", { href: d.pi_roadmap, target: "_blank", rel: "noopener noreferrer" }, d.pi_roadmap)));

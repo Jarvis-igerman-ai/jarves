@@ -103,6 +103,30 @@ TEXT: dict[str, str] = {
     "UNIT test_channels_whatsapp.py (link building, approval, fake opener)":
         "בדיקות יחידה: test_channels_whatsapp.py (בניית קישור, אישור, פותח מדומה)",
     "never opened with the real WhatsApp app/Web": "מעולם לא נפתח עם אפליקציית WhatsApp או WhatsApp Web האמיתיות",
+    # SW-V4 F: real WhatsApp access through the bridge
+    "reads your WhatsApp through a separate linked-device bridge on this computer (unofficial; breaks WhatsApp's terms; ban risk you accepted). Read-only first; message text is treated as untrusted and goes to the AI only for messages you ask about":
+        "קורא את הוואטסאפ שלך דרך גשר נפרד במחשב הזה שמתחבר כמכשיר מקושר (לא רשמי; מפר את תנאי השימוש של וואטסאפ; "
+        "סיכון חסימה שקיבלת). קודם קריאה בלבד; טקסט ההודעות נחשב לא אמין ונשלח ל-AI רק להודעות שביקשת",
+    "UNIT/INTEGRATION test_whatsapp_*.py against the local fake bridge (same protocol and policy table as the Go bridge)":
+        "בדיקות יחידה ושילוב: test_whatsapp_*.py מול גשר מדומה מקומי (אותו פרוטוקול ואותה טבלת מדיניות כמו גשר ה-Go)",
+    "BLOCKED: the real bridge was never linked to the owner's phone (owner step)":
+        "חסום: הגשר האמיתי עוד לא קושר לטלפון של הבעלים (שלב של הבעלים)",
+    "sends a WhatsApp message you dictated to an allow-listed person, only after you approve the recipient, number and full text on the screen; only in send mode (after 14 quiet days)":
+        "שולח הודעת וואטסאפ שהכתבת לאדם שברשימת השליחה, רק אחרי שאישרת על המסך את הנמען, המספר והטקסט המלא; "
+        "רק במצב שליחה (אחרי 14 ימים שקטים)",
+    "UNIT test_whatsapp_send.py (fake bridge: popup, signed single-use approval, limits)":
+        "בדיקות יחידה: test_whatsapp_send.py (גשר מדומה: חלון אישור, אישור חתום חד-פעמי, מגבלות)",
+    "BLOCKED: send mode needs the 14-day read-only watch and the owner's go":
+        "חסום: מצב שליחה דורש 14 ימי קריאה בלבד ואישור של הבעלים",
+    "the bridge is not in send mode (read-only: the wa.me handoff sends)":
+        "הגשר לא במצב שליחה (קריאה בלבד: שולחים דרך פתיחת הצ'אט ב-wa.me)",
+    "the WhatsApp bridge is not running (jarvis whatsapp start)": "גשר הוואטסאפ לא פועל (jarvis whatsapp start)",
+    "bridge not running": "הגשר לא פועל",
+    "not linked to a phone yet": "עוד לא מקושר לטלפון",
+    "mode off": "מצב כבוי",
+    "logged out (unlinked on the phone?)": "התנתק (נותק בטלפון?)",
+    "send rate limit reached": "הגיע למגבלת השליחה",
+    "the bridge store does not decrypt for this Windows user or PC": "המידע של הגשר לא נפתח במשתמש או במחשב הזה",
     "read your Instagram Business/Creator direct messages aloud and reply, only after you approve the exact text (official API; the token stays on this computer)":
         "מקריא בקול הודעות פרטיות באינסטגרם העסקי/יוצר שלך ועונה, רק אחרי שאישרת את הנוסח המדויק (API רשמי; האסימון נשאר במחשב הזה)",
     "UNIT test_instagram.py (local fake Graph API server)": "בדיקות יחידה: test_instagram.py (שרת Graph API מדומה מקומי)",
@@ -113,6 +137,14 @@ TEXT: dict[str, str] = {
     "UNIT test_selfcheck.py (real store/log/scheduler/autonomy in tmp dirs, synthetic log files)":
         "בדיקות יחידה: test_selfcheck.py (אחסון, יומן, מתזמן ועצמאות אמיתיים בתיקיות זמניות, קובצי יומן סינתטיים)",
     "not yet run on the owner's real logs and Core": "טרם הורץ על היומנים וה-Core האמיתיים של הבעלים",
+    # SW-V4 O: Self-Diagnostics 2.0
+    "watches his own health all the time (free), finds anomalies and regressions with the exact code and log lines, runs nightly checks and a selective AI review every 2 days within a strict cap; repairs only after you approve":
+        "עוקב אחרי התקינות שלו כל הזמן (בחינם), מוצא חריגות ונסיגות עם הקוד ושורות היומן המדויקים, מריץ בדיקות לילה ובדיקת AI סלקטיבית כל יומיים בתקציב קשיח; מתקן רק אחרי שאישרת",
+    "UNIT test_diag_*.py, test_preflight.py, test_remediation.py, test_ai_review_selection.py, test_canary.py, test_health_api.py (real SQLite, replay harness, fake review client)":
+        "בדיקות יחידה: test_diag_*.py, test_preflight.py, test_remediation.py, test_ai_review_selection.py, test_canary.py, test_health_api.py (SQLite אמיתי, הרצה חוזרת של נתונים, בודק מדומה)",
+    "not yet soaked 24 h nor run 5 nights on the owner's PC": "טרם רץ 24 שעות ברצף או 5 לילות במחשב של הבעלים",
+    "pure Python + SQLite (/proc for process stats); never run on a Raspberry Pi (no device in the test setup)":
+        "Python ו-SQLite בלבד (/proc לנתוני התהליך); טרם הורץ על Raspberry Pi (אין מכשיר במערך הבדיקה)",
     "one command, jarvis connect, checks every account (Google, Telegram, Pear, wake word) and walks you through only what is missing; reminds you once a day while Google is not connected":
         "פקודה אחת, jarvis connect, בודקת כל חשבון (גוגל, טלגרם, Pear, מילת ההפעלה) ומדריכה אותך רק במה שחסר; מזכירה פעם ביום כל עוד גוגל לא מחובר",
     "UNIT test_connect.py (real HTTP fake Telegram with getUpdates pairing, fake Pear, fake Google, fake clipboard, tmp Downloads)":
@@ -420,6 +452,25 @@ TEXT: dict[str, str] = {
         "מדבר בכל שפה שהמודל מדבר (כולל עברית); התיאור הוא המבטא שלו",
     "No preview: OpenAI publishes no sample clips through the API, and JARVES does not fake one. Hearing a voice needs a short real session (about $0.05 per minute on GPT-Live).":
         "אין תצוגה מקדימה: OpenAI לא מפרסמת דוגמאות דרך ה-API, ו-JARVES לא מזייף. כדי לשמוע קול צריך שיחה אמיתית קצרה (כ-0.05 דולר לדקה ב-GPT-Live).",
+    # --- SW-V4 D (#14): client-mode delegation (feature, capability row, settings, probe reason)
+    "JARVES itself runs every lookup GPT-Live hands over, and reserves its cost before sending it, so the daily and "
+    "per-question limits are never exceeded; with ChatGPT + API key the reasoning runs on your plan. Adds a little "
+    "latency":
+        "ג'ארביס מריץ בעצמו כל חיפוש ש-GPT-Live מעביר, ושומר את העלות שלו לפני השליחה, כך שהתקרה היומית והתקרה לשאלה "
+        "אף פעם לא נחצות; עם ChatGPT + מפתח API החשיבה רצה על המנוי שלך. מוסיף מעט השהיה",
+    "core/tests/test_delegation_client.py (strict cap property test, fake Live and Responses servers); live scenarios "
+    "51-62 in docs/reviews/SWV4_D_DELEGATION.md":
+        "core/tests/test_delegation_client.py (בדיקת מאפיין של תקרה קשיחה, שרתי Live ו-Responses מדומים); תרחישים חיים "
+        "51-62 ב-docs/reviews/SWV4_D_DELEGATION.md",
+    "Pi voice is out of V4 scope": "קול על ה-Pi מחוץ לתחום של V4",
+    "client delegation needs live cloud voice (voice.mode = live)": "תקציב קשיח לחיפושים צריך קול חי בענן (voice.mode = live)",
+    "Daily budget for spoken lookups (USD, strict)": "תקציב יומי לחיפושים בשיחה (דולר, קשיח)",
+    "Budget for one spoken question (USD, strict)": "תקציב לשאלה אחת בשיחה (דולר, קשיח)",
+    "Model requests for one spoken question": "בקשות למודל לשאלה אחת בשיחה",
+    "Web searches per request": "חיפושים ברשת לבקשה",
+    "Stop a spoken lookup after (s)": "לעצור חיפוש בשיחה אחרי (שניות)",
+    "If client delegation fails: local = honest \"can't look it up\"; server = allow server delegation":
+        "אם התקציב הקשיח נכשל: local = תשובה כנה \"לא יכול לבדוק\"; server = לאפשר מעבר להעברה בצד השרת",
 }
 
 _OUTCOME = {"answered late": "נענה באיחור", "the user gave up and asked something else": "המשתמש ויתר ושאל משהו אחר",

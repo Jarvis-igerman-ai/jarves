@@ -1,0 +1,48 @@
+order = 38
+category = "system"
+pages = ["health"]
+features = ["self_diagnostics_2"]
+aliases = ["תקינות", "מה מצבך", "אבחון עצמי", "health", "health page", "self diagnostics", "מה מצא הבודק", "AI review"]
+links = ["self_check", "diagnosis", "autonomy", "scheduler"]
+error_codes = ["HEALTH_REMEDY_DENIED", "HEALTH_REMEDY_PRECHECK_FAILED", "HEALTH_REMEDY_POST_CHECK_FAILED", "PREFLIGHT_ITEM", "HEALTH_AI_REVIEW_SKIPPED"]
+title_he = "תקינות (אבחון עצמי 2.0)"
+title_en = "Health (Self-diagnostics 2.0)"
+what_he = "ג'ארביס בודק את עצמו כל הזמן ובחינם: שגיאות, זמני תגובה, זיכרון, דיסק ועוד, מול בסיס של 14 יום. הוא מראה מה השתנה, איפה בקוד זה קורה, מה בדיקת ההפעלה מצאה ומה הבדיקות הליליות מצאו. כל יומיים בודק AI בודק רק את מה שחדש, בתקציב קטן."
+what_en = "JARVES watches himself all the time, for free: errors, reply times, memory, disk and more, against a 14-day baseline. He shows what changed, where in the code it happens, what the start-up check and the nightly canaries found. Every 2 days an AI reviewer looks only at what is new, within a small budget."
+say = [["מה מצבך?", "How are you doing?"], ["מה מצא הבודק?", "What did the reviewer find?"]]
+expect_he = "הוא אומר בשניים-שלושה משפטים מה הציון, מה הבעיה העיקרית ומה לעשות. הרשימה המלאה בעמוד התקינות. תיקון קורה רק אחרי שאישרתם."
+expect_en = "He says in 2-3 sentences the score, the main issue and what to do. The full list is on the Health page. A repair happens only after you approve it."
+test = "feature"
+test_he = "הבדיקה רק מוודאת שהרכיב מותקן. את הדוח עצמו רואים בעמוד התקינות."
+test_en = "The check only sees that the component is installed. The report itself is on the Health page."
+cost_he = "המעקב, הבדיקות הליליות ובדיקת ההפעלה חינם ומקומיים. בדיקת ה-AI רצה כל יומיים רק כשיש משהו חדש, עד 10 סנט לבדיקה ודולר לחודש, והעלות מוצגת לפני ואחרי."
+cost_en = "Monitoring, nightly canaries and the start-up check are free and local. The AI review runs every 2 days only when something is new, at most 10 cents per run and $1 per month, and the cost is shown before and after."
+privacy_he = "הכל נשאר במחשב. לבודק ה-AI נשלחים רק קודי יומן, ספירות, זמנים ומיקומים בקוד, אחרי סינון. הוא לעולם לא רואה סודות, תוכן הודעות, אנשי קשר, טקסט מהיומן או טקסט שיחה."
+privacy_en = "Everything stays on this computer. The AI reviewer gets only log codes, counts, timings and code locations, after redaction. It never sees secrets, message bodies, contacts, calendar text or conversation text."
+
+[[steps]]
+he = "פתחו את עמוד התקינות: ציון, מגמה של 30 יום, רכיבים, ממצאים, דוח גרסה, בדיקת הפעלה ובדיקות לילה."
+en = "Open the Health page: score, 30-day trend, components, findings, version report, start-up check and nightly canaries."
+action = "open:#/health"
+
+[[steps]]
+he = "לכל ממצא: קבל, דחה או הזכר לי אחר כך. תיקון או שינוי הגדרה תמיד מחכים לאישור שלכם."
+en = "For each finding: accept, dismiss or snooze. A repair or a settings change always waits for your approval."
+action = "command:jarvis health report"
+
+[[steps]]
+he = "בדיקת ה-AI: בחרו כל כמה ימים (או כבוי) והסתכלו על הדוח שלה כשהוא מוכן."
+en = "The AI review: pick every how many days (or off) and read its report when it is ready."
+action = "command:jarvis health ai-review --preview"
+
+[[problems]]
+he = "בדיקת ה-AI תמיד מדלגת"
+en = "The AI review is always skipped"
+fix_he = "זה תקין כשאין שום דבר חדש: היא לא עולה כלום. אפשר לראות מה הייתה שולחת עם jarvis health ai-review --preview."
+fix_en = "That is right when nothing is new: it costs nothing. See what it would send with jarvis health ai-review --preview."
+
+[[problems]]
+he = "תיקון לא בוצע"
+en = "A repair did not happen"
+fix_he = "כל תיקון מחכה לאישור על המסך. אם לא אישרתם, שום דבר לא נעשה. חלק מהתיקונים צריכים את ג'ארביס פועל."
+fix_en = "Every repair waits for approval on the screen. If you did not approve, nothing was done. Some repairs need JARVES running."

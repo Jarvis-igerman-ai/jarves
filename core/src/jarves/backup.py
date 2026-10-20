@@ -48,9 +48,11 @@ from . import __version__, locales, logs
 BACKUP_DIR = "backups"
 KINDS = ("auto", "manual", "pre-migration", "pre-restore")
 EXCLUDE_DIRS = {BACKUP_DIR, "logs", "chatgpt", "google", "cache", "caches", "models", "tmp", "temp", "__pycache__",
-                "voice_cache", ".restore-staging"}
+                "voice_cache", ".restore-staging",
+                "whatsapp_bridge"}     # SW-V4 F: the WhatsApp session (= the whole account) + messages: never archived
 EXCLUDE_FILES = {"secrets.env", "link_token", "pear_client_id", "pear_client_id.paired", "health.json",
                  "startup_timing.json", "setup_done",
+                 "answer.key",                  # R-01 approval key: private, rotated on every Core start
                  "dashboard_devices.json"}      # paired-phone token HASHES + per-device CSRF secrets: never archived
 _SECRET_NAME = re.compile(r"(?i)(token|secret|api[_-]?key|auth|cookie|credential|password|\.env$|\.pem$|\.key$)")
 _SECRET_TEXT = re.compile(r"sk-[A-Za-z0-9_\-]{16,}|eyJ[A-Za-z0-9_\-]{10,}\.[A-Za-z0-9_\-]{10,}\.|\"refresh_token\"\s*:")

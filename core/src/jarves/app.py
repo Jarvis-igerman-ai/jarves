@@ -43,7 +43,19 @@ def make_agent(cfg: Config, registry: SkillRegistry, memory: MemoryStore, home: 
     return AgentBrain(cfg.ai, registry, memory, cfg.assistant_name, budget=budget)
 
 
-NEAR_MISS_MIN = 0.12          # a wake score at/above this but below the threshold is logged (WAKE_NEAR_MISS)
+def _delegation_kwargs(core) -> dict:
+    """SW-V4 D: client delegation / text-only fallback for the next live conversation ({} = server delegation)."""
+    from .voice.delegation_client import for_core
+    try:
+        return for_core(core, {})
+    except Exception as e:                  # never let the delegation wiring stop a conversation from starting
+        logs.error("delegation", "DELEG_WIRING_FAILED", "client delegation could not be set up",
+                   error_type=type(e).__name__)
+        core.delegation_state.fail("wiring", type(e).__name__)     # the owner's fallback rule, logged and shown
+        return {"delegation_mode": "text_only"} if core.delegation_state.session_step() == "text_only" else {}
+
+
+NEAR_MISS_MIN = 0.12         # a wake score at/above this but below the threshold is logged (WAKE_NEAR_MISS)
 
 
 def _mic_name(device) -> str:
@@ -178,6 +190,8 @@ class Core:
         self.history = store.attach(self.home, c)       # conversation history + self-diagnosis (log sink)
         logs.new_cid()
         logs.info("core", "CORE_STARTING", "JARVES Core starting", version=__version__, home=str(self.home))
+        from .diag import preflight as _preflight       # SW-V4 O: read the last run's state before it is overwritten
+        self._preflight_prev = _preflight.previous_state(self.home)
         self.health = Health(self.home / "health.json")
         self.memory = MemoryStore(self.home / "memory.db")
         # SW-V2 WP-I feature switches: ONE source of truth (features.json over the legacy config.toml keys); the
@@ -196,6 +210,7 @@ class Core:
         # V3 approvals: ONE service behind every confirmation (popup / tray / face / dashboard / voice, audit log)
         from . import approvals as appr
         self.approvals = appr.attach(appr.ApprovalService(self.home))
+        self.approvals.rotate_key()        # R-01: a fresh private key per Core start (signed answer files, hidden codes)
         self.approvals.loop = asyncio.get_running_loop()      # dashboard threads ask through it (ask_owner)
         # the native popup only on a real run (tests and silent runs never open windows)
         self.approvals.channels += [appr.PopupChannel(self.approvals, enabled=self.use_real_audio,
@@ -269,17 +284,30 @@ class Core:
         self.ops = ops_attach(self)
         from . import recall                            # SW-V4 G: conversation_recall / _search / _show
         recall.attach(self)
+        from . import orchestrator                      # SW-V4 E: coding agents (bridge starts with the switch)
+        orchestrator.attach(self)
         from . import guides                            # WP-L: help Skill, setup hints, briefing, suggestions
         self.guides = guides.attach(self)
         self._write_tools_md()                          # after every Skill is registered
         self._retry_lookup = make_retry_lookup(c, self.budget)
+        from .voice.delegation_client import DelegationState    # SW-V4 D (#14): mode, fallback ladder, in-flight
+        self.delegation_state = DelegationState(self.home, c.ai,
+                                                health=lambda s, d, a: self.health.set("delegation", s, d, a))
+        self.health.set("delegation", "ok", self.delegation_state.describe())
         self._check_ai()
+        try:                                            # SW-V4 O preflight (<= 1.5 s) while the ports are still free
+            self.preflight = _preflight.run_core(self)
+        except Exception:
+            self.preflight = None
+            logs.error("health", "PREFLIGHT_FAILED", "preflight did not run", exc=True)
 
         self.link = GodotLink(c.link.host, c.link.port, load_token(self.home / "link_token"), self.health,
                               self.on_message, self._face_connected)
         from .camera import wire as camera_wire              # WP-J camera: switches default OFF (camera/wire.py)
         self.camera = camera_wire.attach(self)
         self.browser = browser_mod.attach(self)              # Browser Skill: allow-list control, read-only + ask
+        from . import whatsapp_bridge as wab                 # SW-V4 F: real WhatsApp (bridge), untrusted, 60 s guard
+        self.whatsapp = wab.attach(self)
         from . import appearance                             # WP-M2: face / 2D / 3D avatar / hidden (appearance.py)
         self.appearance = appearance.attach(self)
         from .skills import generated                        # WP-M2: approved generated Skills (skills/generated.py)
@@ -297,7 +325,8 @@ class Core:
         profiles.attach(self)
         self.approvals.channels.append(appr.TrayChannel(self.runtime))   # balloon -> popup / dashboard
         from .skills.helper import register_helper       # V3: shell / install helper, every action approved first
-        register_helper(self.registry, self.home, self.health)
+        from . import isolation                          # R-01: OS limits around every approved command
+        register_helper(self.registry, self.home, self.health, isolation.Limits.from_config(c.helper))
         self._write_tools_md()                          # again: camera + display + profile + helper Skills registered after the first
 
         self.stt = self._stt or WhisperSTT(c.voice.stt_model, c.voice.stt_fallback_model, c.voice.stt_compute,
@@ -326,10 +355,12 @@ class Core:
         # Accept the room/face connection only after audio and speech are initialized.
         await self.link.start()
         self._bg.append(asyncio.create_task(self._health_loop()))
+        self._bg.append(asyncio.create_task(wab.run(self)))   # SW-V4 F: bridge + events (switch on only)
         if self.use_real_audio and openai_key_present() and self.cfg.ai.provider == "openai":
             self._bg.append(asyncio.create_task(asyncio.to_thread(self._prewarm)))
         self._setup_wake()
         self._log_summary()
+        _preflight.finish_core(self)                    # red/amber preflight items degrade only their component
         self.health.mark("ready")
         logs.info("core", "CORE_READY", "Core ready", voice_mode=self.voice_mode, log=str(self.log_path),
                   ms=round((time.monotonic() - started_at) * 1000))
@@ -365,6 +396,9 @@ class Core:
                 busy.cancel()
                 logs.warn("core", "CORE_TASK_CANCELLED", "in-flight request cancelled by shutdown")
             await asyncio.gather(busy, return_exceptions=True)
+        if getattr(self, "whatsapp", None) is not None:
+            from . import whatsapp_bridge as wab
+            await wab.stop(self)                    # watcher ends; a bridge this run started seals its store
         tasks = [t for t in self._bg + list(self._tasks) if not t.done()]
         for t in tasks:
             t.cancel()
@@ -373,6 +407,8 @@ class Core:
             await self.tasks.shutdown()             # running background tasks end as "cancelled" (stored)
         if getattr(self, "ops", None) is not None:
             await self.ops.stop()                   # running jobs stop; the next start resumes or marks them
+        if getattr(self, "agents_stop", None) is not None:
+            await asyncio.to_thread(self.agents_stop)   # SW-V4 E: managed sessions closed, bridge down, last known kept
         await self.registry.drain()                 # shielded side effects finish before the store closes
         if getattr(self, "camera", None) is not None:
             await self.camera.stop()                # sensor closed, indicator off, faces.db closed
@@ -428,6 +464,8 @@ class Core:
                  wake_status=getattr(self, "_wake_status", None),
                  ai_connection=self.cfg.ai.connection, billing=billing_routes(self.cfg.ai, self.cfg.voice),
                  ai_requests_today=self.memory.usage_today("ai_requests"),
+                 delegation=(self.delegation_state.snapshot(self.budget)
+                             if getattr(self, "delegation_state", None) is not None else None),
                  voice_minutes_today=round(self.memory.usage_today("voice_seconds") / 60, 1))
         return s
 
@@ -476,7 +514,7 @@ class Core:
                     self.dev.check_audio()
                 self.features.poll()            # a switch flipped on the dashboard / CLI reaches the Core here
                 self._check_ai()
-                self.health.save()              # heartbeat: the dashboard calls a snapshot older than 120 s "JARVES is off"
+                self.health.heartbeat()         # the dashboard calls a snapshot older than 120 s "JARVES is off"
                 await self.link.broadcast("status", self.snapshot())
             except Exception:
                 logs.error("core", "HEALTH_LOOP_ERROR", "health check failed", exc=True)
@@ -936,7 +974,8 @@ class Core:
                              clock_context=v.clock_context, progress_after_s=v.progress_after_s,
                              no_speech_timeout_s=(v.wake_no_speech_s if ack else 0),
                              backend_deadline_s=v.backend_deadline_s, retry_lookup=self._retry_lookup,
-                             reasoning_summary=self.cfg.ai.reasoning_summary, **common, **extra)
+                             reasoning_summary=self.cfg.ai.reasoning_summary, **common, **extra,
+                             **_delegation_kwargs(self))
         else:
             from .voice.realtime import RealtimeVoice
             live = RealtimeVoice(v.realtime_model, self.agent.instructions, self.registry.realtime_tools(),
@@ -947,6 +986,8 @@ class Core:
         feat.attach_live(live, self.features)                 # what is off / unavailable, so he says so truthfully
         from . import recall                                  # SW-V4 G: "what did I say..." -> conversation_recall
         recall.attach_live(live, self.features)
+        from . import whatsapp_bridge as wab                  # SW-V4 F: WhatsApp questions -> backend, names + counts
+        wab.attach_live(live, self.features)
         if getattr(self, "guides", None) is not None:         # WP-L: help questions -> backend; one suggestion
             self.guides.attach_live(live)
         from . import context_trace                           # LAST: records the final instructions + notes sent
