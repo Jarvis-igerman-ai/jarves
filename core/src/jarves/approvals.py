@@ -302,7 +302,8 @@ class ApprovalService:
             logs.info("approvals", "APPROVAL_VOICE_TOO_EARLY", "speech older than the request ignored", id=a.id)
             return False
         if verdict and not a.voice_ok:
-            logs.info("approvals", "APPROVAL_VOICE_REFUSED", "this approval needs the typed code on the screen", id=a.id)
+            logs.info("approvals", "APPROVAL_VOICE_REFUSED", "this approval is answered on the screen only"
+                      + (" (typed code)" if a.typed_code else ""), id=a.id)
             return False
         ok, _ = self.answer(a.id, verdict, channel=channel)
         return ok

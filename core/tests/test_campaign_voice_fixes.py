@@ -62,3 +62,13 @@ def test_curator_facts_are_not_logged_in_privacy_mode(tmp_path):
     assert "דניאל" not in raw and "רחובות" not in raw
     done = [json.loads(l) for l in raw.splitlines() if '"CURATOR_DONE"' in l]
     assert all("facts" not in e for e in done)
+
+
+def test_profile_spoken_in_hebrew_matches_the_latin_profile():
+    from jarves.profiles import spoken_match
+    names = ["default", "dana", "test"]
+    assert spoken_match("דנה", names) == "dana"
+    assert spoken_match("dana", names) == "dana"
+    assert spoken_match("טסט", names) == "test"
+    assert spoken_match("משה", names) is None
+    assert spoken_match("דן", ["dana", "dan"]) is None        # ambiguous: never guess
