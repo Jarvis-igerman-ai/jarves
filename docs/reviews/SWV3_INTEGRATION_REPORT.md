@@ -21,7 +21,7 @@ Merged in this run:
 | v3-connect | clean |
 | v3-campaign-dash | `index.html` favicon: took the campaign's SVG icon |
 | v3-campaign-features | clean |
-| v3-campaign-voice (two rounds) | clean |
+| v3-campaign-voice (three rounds, final head `58ff3e9`) | clean |
 
 ## 2. Bugs found and fixed during integration
 
@@ -52,7 +52,8 @@ are `linux_only` (deselected, not skipped, on Windows).
 | exploratory 1 | after the first 4 merges | 1 failed (bug 2), 1399 passed |
 | exploratory 2 | after the fix | 1400 passed, 0 skipped |
 | A1-A3 | `6ce2984` (all merges incl. campaign-voice round 1) | 1453 passed x3, 0 skipped, 0 failed (564 s, 573 s, 577 s) |
-| **final 1-3** | `29b751c` (+ campaign-voice round 2) | FINAL_RESULTS |
+| B1 | `29b751c` (+ campaign-voice round 2) | 1454 passed, 0 skipped (stopped after run 1: the final voice commit arrived) |
+| **final 1-3** | `4e80261` (+ campaign-voice final `58ff3e9`) | **1454 passed x3, 0 skipped, 0 failed** (608 s, 570 s, 602 s) |
 
 ## 4. Real-system checks (no accounts, no sound, no paid calls)
 
@@ -67,5 +68,5 @@ are `linux_only` (deselected, not skipped, on Windows).
 ## 5. Open points for the owner (also in HANDOFF)
 
 1. On a fresh TEST profile, Core health lists `helper: ok` while browser/telegram/... show `disabled`; helper is in SAFE_OFF, so the health row probably reflects "module loaded" rather than the switch. Not investigated further (P3, display only).
-2. v3-campaign-voice was marked "in progress" by its author; two rounds are merged. Later commits need another merge.
+2. suite_system and the Edge page sweep ran at `2d6d359`/`e0704d4`; the later merges (campaign-voice) changed voice/approvals/profiles code that the offline suite covers, but suite_system was not re-run on the final head.
 3. Live checks that need accounts (silent_live, Google, Telegram, Instagram, Home Assistant) remain for the owner.
