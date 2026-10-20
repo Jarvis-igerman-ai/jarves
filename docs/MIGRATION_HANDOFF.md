@@ -1,13 +1,12 @@
 # JARVES — Public Repository Migration Handoff
 
-**As of:** 20 October 2026. **Status:** PARTIALLY MIGRATED, NOT RELEASE-READY.
+**As of:** 20 October 2026. **Status:** PARTIALLY MIGRATED; not yet reconciled or archived. **This document is strictly about repository migration, not general project implementation.**
 
 ## Source of truth and owner decision
 
 - **ONLY active writable repository:** [`igalgerman/jarves`](https://github.com/igalgerman/jarves), public, branch `main`.
 - Legacy [`igalgerman/JARVIS`](https://github.com/igalgerman/JARVIS) is **DEPRECATED / READ-ONLY** as a development source; it is **not yet GitHub-archived**. Do not push/commit/create issues there. Never synchronize public changes *back* to private.
-- This migration is approved; it is **not** approval to merge incomplete V4 features or to start V5/V6 coding. Preserve credential material, real session traces, personal logs, machine-specific research and user/account details outside the public repository. Public branch review does not equal release acceptance.
-- The owner approved V5 and V6 as future roadmap directions. [ROADMAP](ROADMAP.md) records V5 Goes Mobile (vision stage 2) and V6 Drive & Act (vision stage 3). Family Intelligence is retained as [F11](FUTURE_IDEAS.md#f11--family-intelligence-deferred-not-v5), *not* V5.
+- This migration is approved **for transferring repository-owned code, tests, documentation and issue tracking only**. It is not approval to develop unrelated features or merge incomplete V4 functionality. Keep credentials, personal logs, live agent-session traces and account/user data out of the public repository. A draft PR is a preservation step, not feature acceptance.
 
 ## Work safely moved to public feature branches
 
@@ -58,7 +57,6 @@ These are **open DRAFT PRs**, based on public main. Counts were compared against
 | Item | Status | Next proof |
 | --- | --- | --- |
 | Public-only GitHub workflow | **DECIDED; README + AGENTS marked** | Check local remotes and agents obey it |
-| V5 Goes Mobile and V6 Drive & Act | **ROADMAP approved; no code authorization** | Complete V4 release before later scoped plan |
 | Public preservation of 5 V4 code slices | **DONE as Draft PRs** | Verify per-file source fidelity and security/CI |
 | Modified integration files and end-to-end V4 | **NOT DONE** | Diff against public main; integrated PR and tests |
 | Owner account / actual WhatsApp / physical mic, phone, Pi | **UNVERIFIED / user consent gate** | Owner-present test or explicitly accepted blocker |
