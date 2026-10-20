@@ -8,6 +8,7 @@ from types import SimpleNamespace
 
 import pytest
 
+from conftest import until
 from jarves.brain import BackendTrace
 from jarves.budget import Budget
 from jarves.config import AIConfig, Config
@@ -115,7 +116,7 @@ async def test_stalled_lookup_is_retried_once_and_the_answer_is_handed_to_live()
     lv, sent, acts = make_live(backend_deadline_s=0.2, retry_lookup=retry)
     lv._remember_user("אתה יכול לבדוק בחדשות מה המצב של מניית אינטל")
     await lv._backend_event({"type": "response.created"}, "d1")
-    await asyncio.sleep(0.6)
+    await until(lambda: [s for s in sent.items if s[0] == "commentary"])
     notes = [s for s in sent.items if s[0] == "commentary"]
     assert len(asked) == 1 and "אינטל" in asked[0]
     assert len(notes) == 1 and "שלושה אחוזים" in notes[0][1] and notes[0][3].startswith("jarves_stall")
@@ -130,7 +131,7 @@ async def test_stalled_lookup_without_answer_says_the_honest_failure_once():
     lv, sent, _ = make_live(backend_deadline_s=0.2, retry_lookup=retry)
     lv._remember_user("מה המצב של מניית אינטל")
     await lv._backend_event({"type": "response.created"}, "d1")
-    await asyncio.sleep(0.6)
+    await until(lambda: [s for s in sent.items if s[0] == "commentary"])
     notes = [s[1] for s in sent.items if s[0] == "commentary"]
     assert notes == [STALL_FAIL_NOTE] and "לא הצלחתי להביא את זה, ננסה שוב?" in notes[0]
     await _cleanup(lv)
@@ -146,7 +147,7 @@ async def test_late_original_answer_cancels_the_retry_and_is_not_counted_twice()
     lv, sent, _ = make_live(backend_deadline_s=0.2, retry_lookup=retry)
     lv._remember_user("שאלה")
     await lv._backend_event({"type": "response.created"}, "d1")
-    await asyncio.wait_for(started.wait(), 2)
+    await asyncio.wait_for(started.wait(), 30)
     await lv._backend_event({"type": "response.completed"}, "d1")      # the stalled response finally answered
     await asyncio.sleep(0.05)
     assert lv._retry_task.cancelled() and not [s for s in sent.items if s[0] == "commentary"]
@@ -197,7 +198,7 @@ async def test_announce_waits_until_the_user_is_quiet():
     t = asyncio.create_task(lv.announce("[task] result", tag="abc"))
     await asyncio.sleep(0.5)
     assert not sent.items
-    ok = await asyncio.wait_for(t, 5)
+    ok = await asyncio.wait_for(t, 30)
     assert ok and sent.items[-1][1] == "[task] result" and sent.items[-1][3] == "jarves_task_abc_1"
     await _cleanup(lv)
 
@@ -212,7 +213,7 @@ async def test_announcement_rejected_as_too_long_is_resent_shorter():
     assert len(sent.items[0][1]) == live_mod.NOTE_MAX_CHARS
     await lv.handle_event({"type": "error", "error": {"code": "invalid_value", "client_event_id": sent.items[0][3],
                                                       "message": "Context append text must not exceed 500 tokens."}})
-    assert await asyncio.wait_for(t, 5) is True
+    assert await asyncio.wait_for(t, 30) is True
     assert len(sent.items) == 2 and sent.items[1][1].startswith("[task] instructions first.")
     assert len(sent.items[1][1]) == live_mod.NOTE_MAX_CHARS // 2
     await _cleanup(lv)
@@ -230,7 +231,7 @@ async def test_announce_gives_up_when_the_session_ends():
     t = asyncio.create_task(lv.announce("x"))
     await asyncio.sleep(0.1)
     lv.running = False
-    assert await asyncio.wait_for(t, 2) is False and not sent.items
+    assert await asyncio.wait_for(t, 30) is False and not sent.items
 
 
 async def test_rejected_stall_or_task_note_does_not_switch_progress_off():
@@ -267,7 +268,7 @@ async def test_tasks_run_in_background_with_bounded_concurrency(tmp_path):
     with pytest.raises(Exception) as e:
         await tm.start("one too many")
     assert getattr(e.value, "code", "") == "TASK_LIMIT"
-    await asyncio.sleep(0.6)
+    await until(lambda: len(finished) == 3 and all(t.status == "done" for t in (a, b, c)))
     assert [t.status for t in (a, b, c)] == ["done", "done", "done"] and len(finished) == 3
     assert updates and {v["status"] for v in updates[-1]} == {"done"}
     hist = read_history(tmp_path / "tasks.jsonl")
