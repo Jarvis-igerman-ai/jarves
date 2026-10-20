@@ -11,6 +11,26 @@ from jarves.skills.music import FakePlayer
 from jarves.voice.audio import SimAudio
 
 
+# CI runners (windows-2025) stall for seconds at a time: every wait for an event is event-driven and generous, and
+# fails fast only on a real failure (the awaited thing raising), never on a short clock.
+WAIT_S = 45.0
+
+
+async def until(pred, timeout=WAIT_S, interval=0.02):
+    """Poll `pred` (sync or async) until it is truthy; AssertionError("condition not reached") after `timeout`."""
+    loop = asyncio.get_running_loop()
+    t0 = loop.time()
+    while True:
+        v = pred()
+        if asyncio.iscoroutine(v):
+            v = await v
+        if v:
+            return v
+        if loop.time() - t0 > timeout:
+            raise AssertionError("condition not reached")
+        await asyncio.sleep(interval)
+
+
 def free_port() -> int:
     s = socket.socket()
     s.bind(("127.0.0.1", 0))
@@ -95,7 +115,7 @@ class Face:
     async def send(self, t, payload=None):
         await self.ws.send(json.dumps({"type": t, "payload": payload or {}}))
 
-    async def wait(self, t, pred=lambda p: True, timeout=5):
+    async def wait(self, t, pred=lambda p: True, timeout=WAIT_S):
         async def go():
             while True:
                 m = json.loads(await self.ws.recv())

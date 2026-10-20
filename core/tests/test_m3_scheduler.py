@@ -473,7 +473,7 @@ async def test_run_loop_real_time_and_run_now(db):
     loop = asyncio.create_task(s.run())
     await asyncio.sleep(0.05)
     s.run_now(jid, by="dashboard")
-    for _ in range(100):
+    for _ in range(1500):
         await asyncio.sleep(0.02)
         if s.runs(jid) and s.runs(jid)[0]["state"] == "done":
             break
