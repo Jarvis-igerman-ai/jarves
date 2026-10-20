@@ -5,6 +5,15 @@
 
 A cute, friendly, premium-looking stationary home companion. **Simulation first, practical DIY build later.**
 
+## Current project state and agent handoff — 20 October 2026
+
+**The old private `igalgerman/JARVIS` repository is OBSOLETE for all development.** This PUBLIC `igalgerman/jarves` repository is the **sole active source of truth**. Legacy V4 code/Issues have been **partially migrated**, not merged or fully tested; do **not** send pushes or syncs back to private. GitHub Archive of the old repository is pending final verification.
+
+- **[Current handoff](docs/HANDOFF.md)** — start at the top for public-only status and pending gates.
+- **[V4 migration handoff](docs/MIGRATION_HANDOFF.md)** — public PRs #6–#10, migrated Issues and remaining integration.
+- **[Agent resume prompt/template](docs/AGENT_HANDOFF_TEMPLATE.md)** — copy/paste for Claude Code / Codex.
+- **[ROADMAP](docs/ROADMAP.md)** — V5 stage 2 and approved V6 Drive & Act stage 3 future directions (not implementation authorization).
+
 ## Start here — persistent project context
 
 | What you need | Source |
