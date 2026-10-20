@@ -56,7 +56,16 @@ def _quiet_streams() -> None:
             setattr(sys, name, open(os.devnull, "w", encoding="utf-8"))
 
 
+def _lean_numeric_threads() -> None:
+    """SW-V3 P0.3: numpy's OpenBLAS starts one worker per CPU at import and commits ~32 MB for each (measured on
+    the owner's 8-thread laptop: +231 MB private memory, 7 idle threads). The always-on Core only does tiny
+    vector maths (audio frames, face embeddings); STT / wake / camera use their own runtimes (CTranslate2,
+    ONNX Runtime, OpenCV). Must run before numpy is first imported; an explicit user setting wins."""
+    os.environ.setdefault("OPENBLAS_NUM_THREADS", "1")
+
+
 def cmd_run(a, cfg, home) -> int:
+    _lean_numeric_threads()
     from .app import Core
     from .runtime.lock import AlreadyRunning, InstanceLock
     background = getattr(a, "background", False)

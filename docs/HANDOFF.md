@@ -5,6 +5,34 @@
 - Evidence: `core/tests/test_browser.py` **18 passed** (policy, dashboard API, CLI, plus two tests driving the **real headless Edge 155** against a local 127.0.0.1 test page: read-only ask/decline, refused click/type, hidden text not read, taint guard, blocked/bad URLs, allow-listed search/click without prompts, refused off-host link, password/purchase/card confirmations, redirect catch). Related suites (setup_wizard, guides, capabilities, features, camera, feature_setup, launcher_help, dashboard, core, security, startup, readiness, swv3_p01, dashboard_wph, m3_core, packaging, privacy_state) **230 passed, 1 skipped**. `jarvis setup --check-addons` browser row OK; headless dashboard smoke of #/browser (add a site) without page errors. CI installs no extras: the two real-browser tests skip there. Playwright 1.64.0 was installed into the shared `core/.venv` (`uv pip install`) to run them.
 - Not done / UNVERIFIED: no real spoken conversation with the browser yet; installer build with the browser extra not run (payload size + payload_check UNVERIFIED); Pi untested (#18). Downloads into the approved sandbox (work package) not implemented: downloads are refused for now.
 - Questions for the user: (1) Keep logins between sessions for allow-listed sites (persistent private profile) or always start fresh (current, safest)? (2) Should "registrations / account changes / sending messages" on allow-listed sites also always ask (today only purchases/payments/credentials do, per your answer)? (3) Want downloads saved into the Files sandbox (asks first), or keep them blocked?
+## SW-V3 P0.3 startup / always-on performance (20 Oct 2026): branch `v3-p03-perf`, [#17](https://github.com/igalgerman/JARVIS/issues/17), [report](reviews/SWV3_P03_REPORT.md)
+
+- **Fixed, all measured before and after on the owner's PC.** Behaviour is unchanged.
+  - The prewarm now imports only what the selected route uses. GPT-Live and ChatGPT-plan routes no longer load the
+    Agents SDK, and the live-client lazy imports are now prewarmed.
+  - The Core now runs with `OPENBLAS_NUM_THREADS=1` (a value the user set still wins).
+  - `runtime.json` is no longer rewritten every second: it is saved on a change, with a 60 s heartbeat.
+  - The Pear probe is warmed in a worker thread. When its cached result has expired, the old result is returned at
+    once and re-checked in the background.
+- **Background Core results (combined route).**
+  - Private commit: 358 → 93 MB.
+  - Working set: 159 → 117 MB.
+  - Threads: 18 → 11.
+  - Idle CPU: 0.57 → 0.28 %.
+  - Idle disk writes: 58.6 → 3.5 KB/min.
+  - First live session's event-loop work before the network: 387–553 → 9 ms.
+  - `features_list` / `list_skills` / `live_tools` with Pear closed: about 320 ms → 2–22 ms.
+- **Reproduce:**
+  - `core/.venv/Scripts/python.exe core/tools/bench_startup.py --scenario combined`, silent and offline, no mic.
+  - Add `--log <jarves.log>` to get stage timings of real starts.
+- **Tests:** the full offline suite passed, 1141 passed and 3 skipped. New tests are in `core/tests/test_swv3_p03_perf.py`.
+- **UNVERIFIED:**
+  - End-to-end wake / desktop start with Godot and a billed live session.
+  - Dashboard load and face show/hide.
+  - Sleep/resume timings.
+  - Pi 5.
+  - Idle disk *reads* (250–390 KB/min) are unexplained.
+  - Next gate: compare `bench_startup.py --log` on the owner's next real starts against the report table.
 ## SW-V3 P0.4 installed-system QA, virtual mic/speaker (20 Oct 2026) — #17, branch `v3-p04-qa`
 
 - Matrix + bug table: [reviews/SWV3_P04_BUG_TABLE.md](reviews/SWV3_P04_BUG_TABLE.md); system report regenerated:
