@@ -5,13 +5,14 @@
 
 (function () {
   const he = () => !window.JL || JL.lang === "he";
-  const T = (h, e) => (he() ? h : e);
+  // i18n.js tx(he, en): Hebrew inline, English = the catalog key for every other locale (ar, ru, ...)
+  const tx = (h, e) => (window.tx ? window.tx(h, e) : (he() ? h : e));
   const RISK = { low: ["נמוך", "low"], medium: ["בינוני", "medium"], high: ["גבוה", "high"] };
   let last = "", busy = false, msg = "";
 
   function card(a, compact) {
     const typed = el("input", { type: "text", inputmode: "numeric", maxlength: "6", class: "ap-code",
-      "aria-label": T("קוד אישור", "Approval code"), placeholder: a.typed_code || "" });
+      "aria-label": tx("קוד אישור", "Approval code"), placeholder: a.typed_code || "" });
     const send = async (approved) => {
       busy = true; msg = "";
       try { await api("/api/approvals/" + encodeURIComponent(a.id), { method: "POST",
@@ -22,19 +23,19 @@
     const r = RISK[a.risk] || RISK.high;
     const details = Object.entries(a.details || {}).map(([k, v]) =>
       el("div", { class: "ap-row" }, el("span", { class: "muted small" }, k + ": "), el("code", { dir: "ltr" }, String(v))));
-    return el("div", { class: `ap-card ap-${a.risk}`, role: "alertdialog", "aria-label": T("בקשת אישור", "Approval request") },
-      el("div", { class: "ap-head" }, el("b", {}, T("JARVES מבקש אישור", "JARVES asks for approval")),
-        el("span", { class: "pill ap-risk" }, T("סיכון ", "risk ") + r[he() ? 0 : 1]),
-        el("span", { class: "muted small" }, T(`נדחה אוטומטית בעוד ${a.seconds_left} שנ׳`, `auto-deny in ${a.seconds_left} s`))),
+    return el("div", { class: `ap-card ap-${a.risk}`, role: "alertdialog", "aria-label": tx("בקשת אישור", "Approval request") },
+      el("div", { class: "ap-head" }, el("b", {}, tx("JARVES מבקש אישור", "JARVES asks for approval")),
+        el("span", { class: "pill ap-risk" }, tx("סיכון", "Risk") + ": " + tx(r[0], r[1])),
+        el("span", { class: "muted small" }, tx(`נדחה אוטומטית בעוד ${a.seconds_left} שנ׳`, `auto-deny in ${a.seconds_left} s`))),
       el("div", { class: "ap-title", dir: "auto" }, a.title),
       a.prompt && a.prompt !== a.title ? el("div", { dir: "auto", class: "ap-prompt" }, a.prompt) : null,
-      a.why ? el("div", { class: "small", dir: "auto" }, el("span", { class: "muted" }, T("למה (במילים של JARVES): ", "Why (JARVES's words): ")), a.why) : null,
+      a.why ? el("div", { class: "small", dir: "auto" }, el("span", { class: "muted" }, tx("למה (במילים של JARVES): ", "Why (JARVES's words): ")), a.why) : null,
       compact ? null : details,
-      a.typed ? el("div", { class: "ap-typed" }, T(`פעולה מסוכנת: הקלד ${a.typed_code} כדי לאשר `, `Dangerous: type ${a.typed_code} to approve `), typed) : null,
+      a.typed ? el("div", { class: "ap-typed" }, tx(`פעולה מסוכנת: הקלד ${a.typed_code} כדי לאשר `, `Dangerous: type ${a.typed_code} to approve `), typed) : null,
       el("div", { class: "row" },
-        el("button", { type: "button", class: "primary", disabled: busy ? true : null, onclick: () => send(true) }, T("אשר", "Approve")),
-        el("button", { type: "button", disabled: busy ? true : null, onclick: () => send(false) }, T("דחה", "Deny")),
-        compact ? el("a", { href: "#/approvals", class: "small" }, T("פרטים", "Details")) : null));
+        el("button", { type: "button", class: "primary", disabled: busy ? true : null, onclick: () => send(true) }, tx("אשר", "Approve")),
+        el("button", { type: "button", disabled: busy ? true : null, onclick: () => send(false) }, tx("דחה", "Deny")),
+        compact ? el("a", { href: "#/approvals", class: "small" }, tx("פרטים", "Details")) : null));
   }
 
   function banner(pending) {
@@ -60,19 +61,19 @@
   function draw(page, d) {
     const rows = (d.history || []).map((h) => el("tr", {},
       el("td", { class: "small" }, new Date(h.ts * 1000).toLocaleString()), el("td", {}, h.decision), el("td", {}, h.channel),
-      el("td", {}, h.kind), el("td", {}, (RISK[h.risk] || ["", h.risk])[he() ? 0 : 1]), el("td", { dir: "auto" }, h.title)));
+      el("td", {}, h.kind), el("td", {}, tx(...(RISK[h.risk] || [h.risk, h.risk]))), el("td", { dir: "auto" }, h.title)));
     page.replaceChildren(
-      el("div", { class: "card" }, el("h2", {}, T("ממתין לאישור שלך", "Waiting for your approval")),
-        d.pending.length ? d.pending.map((a) => card(a, false)) : el("div", { class: "muted" }, T("אין בקשות ממתינות.", "Nothing is waiting.")),
+      el("div", { class: "card" }, el("h2", {}, tx("ממתין לאישור שלך", "Waiting for your approval")),
+        d.pending.length ? d.pending.map((a) => card(a, false)) : el("div", { class: "muted" }, tx("אין בקשות ממתינות.", "Nothing is waiting.")),
         msg ? el("div", { class: "small" }, msg) : null),
-      el("div", { class: "card" }, el("h2", {}, T("החלטות אחרונות", "Recent decisions")),
-        rows.length ? el("table", { class: "table" }, el("thead", {}, el("tr", {}, ...[T("זמן", "Time"), T("החלטה", "Decision"),
-          T("איפה", "Where"), T("סוג", "Kind"), T("סיכון", "Risk"), T("מה", "What")].map((x) => el("th", {}, x)))), el("tbody", {}, rows))
-          : el("div", { class: "muted" }, T("עוד אין החלטות.", "No decisions yet."))));
+      el("div", { class: "card" }, el("h2", {}, tx("החלטות אחרונות", "Recent decisions")),
+        rows.length ? el("table", { class: "table" }, el("thead", {}, el("tr", {}, ...[tx("זמן", "Time"), tx("החלטה", "Decision"),
+          tx("איפה", "Where"), tx("סוג", "Kind"), tx("סיכון", "Risk"), tx("מה", "What")].map((x) => el("th", {}, x)))), el("tbody", {}, rows))
+          : el("div", { class: "muted" }, tx("עוד אין החלטות.", "No decisions yet."))));
   }
 
   async function pageApprovals() {
-    render(header(T("אישורים", "Approvals"), T("כל מה ש-JARVES ביקש לאשר: אשר או דחה כאן. בלי תשובה = נדחה.",
+    render(header(tx("אישורים", "Approvals"), tx("כל מה ש-JARVES ביקש לאשר: אשר או דחה כאן. בלי תשובה = נדחה.",
       "Everything JARVES asked you to approve: approve or deny here. No answer = denied.")), el("div", { id: "apPage" }));
     last = "";
     await refresh();

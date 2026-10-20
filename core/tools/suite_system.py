@@ -665,6 +665,8 @@ async def _child_v2a(home: Path) -> None:
     rows = []
     manual = await _until(lambda: _db_rows(home, "SELECT state FROM job_runs WHERE job_id=? AND state='done'",
                                            (j2.get("id"),)), 40)
+    if a1.get("status") != "active":
+        rows.append(f"approve qa-due answered {json.dumps(a1, ensure_ascii=False)[:200]} (job {json.dumps(j1, ensure_ascii=False)[:160]})")
     rows.append(f"parse 'כל יום ב-8' -> {sc} {parsed.get('spec')}; draft runs before approval {len(draft_runs)}; "
                 f"approved {a1.get('status')}/{a2.get('status')}/{a3.get('status')}; run_now done {bool(manual)} "
                 f"started {round(_db_rows(home, 'SELECT MIN(started) s FROM job_runs WHERE job_id=?', (j2.get('id'),))[0]['s'] - t_rn, 1) if manual else '-'} s after the click")
@@ -675,6 +677,7 @@ async def _child_v2a(home: Path) -> None:
     await asyncio.sleep(35)                                      # > POLL_S: a held run would have started
     n_off = len(_db_rows(home, "SELECT id FROM job_runs WHERE job_id=?", (j2.get("id"),)))
     await cli("features", "on", "scheduler")
+    t_sched_on = time.time()                 # qa-due may come due while the scheduler is switched off (35 s)
     core.features.poll()
     core.ops.scheduler.poke() if getattr(core, "ops", None) else None
     resumed = await _until(lambda: len(_db_rows(home, "SELECT id FROM job_runs WHERE job_id=?", (j2.get("id"),)))
@@ -684,7 +687,8 @@ async def _child_v2a(home: Path) -> None:
     on_time = await _until(lambda: _db_rows(home, "SELECT * FROM job_runs WHERE job_id=? AND state='done'",
                                             (j1.get("id"),)), max(5.0, (due_at or time.time()) - time.time() + 40), 0.5)
     run1 = (_db_rows(home, "SELECT * FROM job_runs WHERE job_id=?", (j1.get("id"),)) or [{}])[0]
-    lateness = round(run1.get("started", 0) - (due_at or 0), 1) if run1 else None
+    # late = after it was due AND the scheduler was on again (a held run must start right after switching on)
+    lateness = round(run1.get("started", 0) - max(due_at or 0, t_sched_on), 1) if run1 else None
     alerts = _db_rows(home, "SELECT title, status, reason, delivered_via FROM alerts WHERE source='scheduler'")
     popups = [p.get("text", "")[:40] for p in face.of("assistant.text") if p.get("code") == "ALERT"]
     reports = _db_rows(home, "SELECT job_id, status FROM reports")

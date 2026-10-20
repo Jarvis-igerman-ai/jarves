@@ -128,6 +128,7 @@ class Core:
         self._runtime_fakes = dict(launcher=viewer_launcher, tray_factory=tray_factory, autostart=autostart)
         self.runtime = None
         self.wake = None                           # WakeListener when the wake word is active
+        self._wake_status: dict | None = None      # last wake finding (heard speech / too quiet / near miss / woke)
         self._live_factory = live_factory          # tests inject a fake live session
         self.console_logs, self.use_real_audio = console_logs, use_real_audio
         # open_dashboard opens the browser only on a real desktop run (tests / silent runs never open windows)
@@ -415,6 +416,7 @@ class Core:
                  privacy=self.privacy_state.state() if getattr(self, "privacy_state", None) else None,
                  voice_connecting=self._voice_connecting,
                  wake_listening=getattr(self, "_wake_mic_active", False),
+                 wake_status=getattr(self, "_wake_status", None),
                  ai_connection=self.cfg.ai.connection, billing=billing_routes(self.cfg.ai, self.cfg.voice),
                  ai_requests_today=self.memory.usage_today("ai_requests"),
                  voice_minutes_today=round(self.memory.usage_today("voice_seconds") / 60, 1))
@@ -465,6 +467,7 @@ class Core:
                     self.dev.check_audio()
                 self.features.poll()            # a switch flipped on the dashboard / CLI reaches the Core here
                 self._check_ai()
+                self.health.save()              # heartbeat: the dashboard calls a snapshot older than 120 s "JARVES is off"
                 await self.link.broadcast("status", self.snapshot())
             except Exception:
                 logs.error("core", "HEALTH_LOOP_ERROR", "health check failed", exc=True)
@@ -1119,10 +1122,18 @@ class Core:
         if not v.wake_enabled or self.voice_mode == "off" or not (self._wake_audio or self.use_real_audio):
             self.health.set("wake_word", "disabled", "wake word off (voice.wake_enabled / voice.mode)")
             return
-        from .voice.wakeword import WakeListener, WakeWordUnavailable, make_detector
+        from .voice.wakeword import WakeListener, WakeWordUnavailable, make_wake_detector
         try:
-            det = self._wake_detector or make_detector(v.wake_word, v.wake_threshold)
+            det = self._wake_detector or make_wake_detector(self._wake_cfg())
             ok, msg = det.check() if hasattr(det, "check") else (True, "")
+            if not ok and self._wake_detector is None and v.wake_confirm:
+                # the local speech check could not load (no faster-whisper / model): one stage, said truthfully
+                logs.warn("wake", "WAKE_CONFIRM_UNAVAILABLE", msg, action="uv sync --extra voice; connect once "
+                          "so the speech model can download", fallback=f"wake model only at {v.wake_threshold}")
+                cfg1 = self._wake_cfg()
+                cfg1.wake_confirm = False
+                det = make_wake_detector(cfg1)
+                ok, msg = det.check() if hasattr(det, "check") else (True, "")
         except WakeWordUnavailable as e:
             ok, msg = False, e.message
         if not ok:
@@ -1136,9 +1147,27 @@ class Core:
         self.health.set("wake_word", "ok", f"say \"{v.wake_phrase}\" (detected on this device, {Path(v.wake_word).name})")
         self._bg.append(asyncio.create_task(self._wake_loop()))
 
+    def _wake_cfg(self):
+        """voice config for the wake pipeline, with this mic's saved starting gain (voice/wake_calib.py)."""
+        from .voice.wake_calib import load_calibration
+        v = self.cfg.voice.model_copy()
+        if v.wake_agc and not v.wake_gain_db:
+            cal = load_calibration(self.home, _mic_name(v.input_device))
+            if cal:
+                v.wake_gain_db = float(cal.get("gain_db", 0.0))
+        return v
+
+    def _wake_note(self, kind: str, hint: str, **kw) -> None:
+        """Last wake-listener finding for the dashboard/face privacy strip (`privacy.wake`) and the status."""
+        self._wake_status = {"kind": kind, "hint": hint, "ts": round(time.time(), 1), **kw}
+
     async def _on_wake(self, score: float) -> None:
         self._woke = True
-        logs.info("wake", "WAKE_WORD", "wake word heard", score=round(score, 2))
+        conf = getattr(self.wake.detector, "last_confirm", None) if self.wake is not None else None
+        via = "asr_confirm" if conf and conf.get("ok") and score <= getattr(self.wake.detector, "accept", 1) else "model"
+        logs.info("wake", "WAKE_WORD", "wake word heard", score=round(score, 2), via=via,
+                  **({"asr_ms": conf["ms"]} if via == "asr_confirm" else {}))
+        self._wake_note("woke", "", score=round(score, 2), via=via)
 
     async def _levels(self, chunks):
         """Pass mic chunks through, sending the face a ~5 Hz mic level for the level bar."""
@@ -1170,10 +1199,16 @@ class Core:
                 logs.error("wake", "WAKE_LOAD_FAILED", "wake listener failed to initialize", exc=True)
                 self.health.set("wake_word", "unavailable", "wake listener failed to initialize", "see logs; use Talk")
                 return
+        from .voice.wake_calib import load_calibration, save_calibration
+        from .voice.wake_confirm import SpeechMonitor
         last_report = time.monotonic()
         peak_score = 0.0
         peak_level = 0.0
         near_t, near_n = 0.0, 0
+        monitor = SpeechMonitor(min_score=NEAR_MISS_MIN)
+        heard_t, heard_n, confirm_seen = -1e9, 0, None
+        mic_name = _mic_name(v.input_device)
+        calibrated = load_calibration(self.home, mic_name) is not None
         while not self.stopping:
             if not self._wake_should_listen():
                 await asyncio.sleep(0.2)
@@ -1208,11 +1243,45 @@ class Core:
                         logs.info("wake", "WAKE_NEAR_MISS", "heard something like the wake word but not sure enough",
                                   score=round(sc, 2), needs=self.wake.detector.threshold,
                                   hint="say \"Hey Jarvis\" clearly, or run `jarvis wake test` to calibrate")
+                        self._wake_note("near_miss", "close: say \"Hey Jarvis\" a bit clearer",
+                                        score=round(sc, 2), needs=self.wake.detector.threshold)
+                    conf = getattr(self.wake.detector, "last_confirm", None)
+                    if conf is not None and conf is not confirm_seen:
+                        confirm_seen = conf
+                        if not conf["ok"]:      # the transcript stays in RAM: room speech is not written to logs
+                            logs.info("wake", "WAKE_CONFIRM_REJECTED", "wake model was unsure and the local speech "
+                                      "check did not hear the name", score=conf["score"], asr_ms=conf["ms"])
+                    ev = None if self._woke else monitor.feed(chunk, sc)
+                    if ev is not None and time.monotonic() - heard_t > 30:
+                        heard_t, heard_n = time.monotonic(), heard_n + 1
+                        if ev.kind == "too_quiet":
+                            hint = ("mic too quiet: move closer, raise the input volume, or run `jarvis wake test`")
+                            logs.warn("wake", "WAKE_MIC_QUIET", "heard speech, but too quiet for the wake word",
+                                      level_db=ev.level_db, floor_db=ev.floor_db, peak_score=ev.peak_score,
+                                      mic=mic_name, hint=hint)
+                        else:
+                            hint = "heard speech, no wake match: say 'Hey Jarvis'"
+                            logs.info("wake", "WAKE_SPEECH_NO_MATCH", hint, speech_ms=ev.speech_ms,
+                                      level_db=ev.level_db, peak_score=ev.peak_score, mic=mic_name,
+                                      hint="say \"Hey Jarvis\" (or \"Hi Jarvis\"); `jarvis wake test` shows the score")
+                        self._wake_note(ev.kind, hint, level_db=ev.level_db, peak_score=ev.peak_score)
+                    if not calibrated and monitor.last_burst_db is not None and monitor.frames > 40:
+                        calibrated = True     # first run with this mic: room floor + first speech level
+                        cal = save_calibration(self.home, mic_name, floor_db=monitor.floor_db,
+                                               speech_db=monitor.last_burst_db, verdict="auto", by="core")
+                        logs.info("wake", "WAKE_CALIBRATION", "first-run level calibration for this microphone",
+                                  mic=mic_name, **{k: cal[k] for k in ("floor_db", "speech_db", "gain_db")})
+                        agc = getattr(self.wake.detector, "agc", None)
+                        if agc is not None and cal["gain_db"] > agc.gain_db:
+                            agc.gain_db = cal["gain_db"]
                     if time.monotonic() - last_report >= 15:
                         logs.info("wake", "WAKE_HEALTH", "wake listener running", frames=self.wake.stats.frames,
                                   peak_score=round(peak_score, 3), peak_level=round(peak_level, 3),
                                   threshold=self.wake.detector.threshold, near_misses=near_n,
-                                  mic=_mic_name(v.input_device))
+                                  speech_no_match=heard_n, floor_db=round(monitor.floor_db, 1),
+                                  **({"gain_db": round(self.wake.detector.agc.gain_db, 1)}
+                                     if getattr(self.wake.detector, "agc", None) is not None else {}),
+                                  mic=mic_name)
                         last_report, peak_score, peak_level = time.monotonic(), 0.0, 0.0
                     if self.wake.stats.frames % 25 == 0:
                         logs.verbose("wake", "WAKE_SCORE", "wake word score", score=round(self.wake.stats.last_score, 3))

@@ -47,6 +47,16 @@ def get(d, path):
     return json.loads(data)
 
 
+def test_a_burst_of_parallel_requests_is_never_refused(dash):
+    """A page load fetches 40+ files while the strip and the approvals banner poll: the listen backlog must hold a
+    burst (socketserver's default of 5 refused random requests in headless Edge: ERR_CONNECTION_REFUSED)."""
+    from concurrent.futures import ThreadPoolExecutor
+    assert dash.httpd.request_queue_size >= 64
+    with ThreadPoolExecutor(max_workers=40) as ex:
+        codes = list(ex.map(lambda _: req(dash, "GET", "/static/shell.js")[0].status, range(40)))
+    assert codes == [200] * 40
+
+
 def test_binds_loopback_and_needs_the_token(dash):
     assert dash.httpd.server_address[0] == "127.0.0.1"
     assert dash.url.startswith(f"http://127.0.0.1:{dash.port}/?t=") and len(dash.url.split("t=")[1]) >= 30
@@ -191,3 +201,21 @@ def test_live_session_is_visible_while_it_runs(home):
     finally:
         d.stop()
         st.close()
+
+
+def test_static_files_do_not_use_the_rate_budget(dash, monkeypatch):
+    """Campaign D: a page load fetches ~30 static files; they must not push the API calls into 429."""
+    from jarves import dashboard_auth
+    monkeypatch.setattr(dashboard_auth, "RATE_PER_MIN", 5)
+    assert [req(dash, "GET", "/static/app.js")[0].status for _ in range(12)] == [200] * 12
+    api = [req(dash, "GET", "/api/sessions")[0].status for _ in range(8)]
+    assert api[:5] == [200] * 5 and api[-1] == 429
+
+
+def test_shell_has_icon_and_keyboard_rows():
+    """Campaign D: no favicon 404 in the console; clickable table rows are reachable with Tab and Enter."""
+    from pathlib import Path
+    st = Path(__file__).resolve().parents[1] / "src" / "jarves" / "dashboard_static"
+    assert 'rel="icon"' in (st / "index.html").read_text(encoding="utf-8")
+    shell = (st / "shell.js").read_text(encoding="utf-8")
+    assert "tr.click" in shell and "tabIndex = 0" in shell
