@@ -1,3 +1,17 @@
+# NOW — V4 delivery + public-only repository consolidation (owner decision, 20 October 2026)
+
+**Current execution contract (supersedes older dated status entries below):** `igalgerman/jarves` is the only active writable repository. `igalgerman/JARVIS` is deprecated and is only a **read-only historical migration source**. No new commits, sync pushes, PRs or Issues to the old private repo. Existing Claude/Codex worktrees must be repointed only after their ongoing writes are safely stopped; do not lose agent work.
+
+**Current approved software work: V4** (see [work package](JARVES_SW_V4_WORK_PACKAGE.md) and [owner decisions](plans/PRIORITIES.md)). V4's total authorized live-call budget remains **$25 overall**, *not an additional grant*; determine prior usage before spending. No new account linking, external messages, private data publication, microphone/camera activation, physical work or V5/V6 implementation without the corresponding user gate.
+
+**Recovery and integration:** [MIGRATION_STATUS](MIGRATION_STATUS.md) is the authoritative transfer ledger. Public [issues #1–#5](https://github.com/igalgerman/jarves/issues) replace the active tracking ledger of 17 private legacy issues. Five **DRAFT, NOT MERGED** public PRs [#6](https://github.com/igalgerman/jarves/pull/6)–[#10](https://github.com/igalgerman/jarves/pull/10) preserve previously private V4 components. Their newly added files are not operational integration. Owner/agent must reconcile shared modified code, dependencies, CI and approval/security gates before review and merge. No independent claim that V4 is released or that GitHub Archive has happened.
+
+**Future product direction:** [ROADMAP](ROADMAP.md) now retains owner-selected V5 (stage 2: mobile access + personal intelligence) and owner-approved V6 (stage 3: Drive & Act + Skills Platform 2.0). They are *roadmap decisions*, **NOT permission to code yet**. Family Intelligence remains future F11. No work on Raspberry Pi physical hardware until explicit future approval.
+
+**Older notes below are historical checkpoints, not newer execution authorization.** Follow [AGENTS](../AGENTS.md), public issue scope, V4 work package, latest verified code and CI; never treat historical private links as the active issue tracker.
+
+---
+
 # NOW — SW-V1: Real assistant software + CI (approved 18 October 2026)
 
 **Active review request (19 Oct):** analyze all available retained runtime logs and stored sessions for conversation quality and improvement opportunities, not just ERROR events. Authorized read-only private log/history inspection, session/timing/tool correlation and a redacted evidence-based report with prioritized follow-ups. No paid replay, device activation, history mutation or runtime behavior change in this review. Commit/push report and handoff; distinguish current confirmed defects, historical corrected defects, benign behavior and unverified concerns.
