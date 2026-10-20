@@ -318,6 +318,11 @@ func _on_message(t: String, p: Dictionary) -> void:
 			_confirm_id = _str(p.get("id"))
 			confirm.dialog_text = _str(p.get("prompt"), "Confirm?")
 			confirm.popup_centered()
+		"confirm.cancel":
+			# answered elsewhere (approval popup, dashboard, voice) or expired: close the dialog without replying
+			if _str(p.get("id")) == _confirm_id:
+				_confirm_id = ""
+				confirm.hide()
 		"status":
 			last_status = p
 			_show_status(p)

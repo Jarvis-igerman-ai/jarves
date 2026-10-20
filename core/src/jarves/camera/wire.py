@@ -99,7 +99,8 @@ async def on_link(core, t: str, p: dict, client) -> None:
 
 
 async def _enable_after_confirm(core, client) -> None:
-    if await core.ask_confirm(ENABLE_PROMPT):
+    if await core.ask_confirm(ENABLE_PROMPT, title="Camera on / הדלקת המצלמה", risk="high", kind="camera",
+                              source="user", why="the camera button on the face was pressed"):
         core.features.set("camera", True, by="face")
     else:
         core.features.request("camera", by="face")       # the dashboard shows it for approval

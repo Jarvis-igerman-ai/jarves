@@ -708,8 +708,14 @@ def make_skill(features: Features, registry=None):
                     note = "" if (not a.on or st["available"]) else f" אבל היא לא זמינה: {st['reason']}"
                     return ToolResult(True, f"{f.title_he} כבר {'פועלת' if a.on else 'כבויה'}.{note}", st)
                 if a.on and f.risk in ("medium", "high"):
-                    confirm = getattr(registry, "confirm", None)
-                    ok = await confirm(f"להפעיל את {f.title_he}? / Turn on {f.title_en}?") if confirm else False
+                    prompt = f"להפעיל את {f.title_he}? / Turn on {f.title_en}?"
+                    meta = dict(title=f"Turn on {f.title_en} / להפעיל את {f.title_he}", risk=f.risk, kind="feature",
+                                why=f.about, details={"feature": fid, "applies": f.applies})
+                    if hasattr(registry, "ask"):            # the approvals service (popup, dashboard, voice, audit)
+                        ok = await registry.ask(prompt, **meta)
+                    else:
+                        confirm = getattr(registry, "confirm", None)
+                        ok = await confirm(prompt) if confirm else False
                     if not ok:
                         features.request(fid, by="voice")
                         return ToolResult(False, f"{f.title_he} דורשת אישור על המסך או בלוח הבקרה. לא הפעלתי.",

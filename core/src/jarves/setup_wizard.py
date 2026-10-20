@@ -55,10 +55,11 @@ STEPS = ("language", "connection", "names", "wake", "voice", "addons", "privacy"
 # Modules that register add-ons in jarves.features at import (the dashboard imports the same ones).
 ADDON_MODULES = ("jarves.telegram_channel", "jarves.instagram_channel", "jarves.whatsapp", "jarves.briefing", "jarves.homeassistant",
                  "jarves.appearance", "jarves.backup", "jarves.usage", "jarves.updates", "jarves.runtime",
-                 "jarves.operations", "jarves.guides", "jarves.skills.generated")
+                 "jarves.operations", "jarves.guides", "jarves.skills.generated", "jarves.skills.helper")
 # Privacy-sensitive or outward-acting: OFF on the first run whatever else says; ON only after an explicit yes.
 SAFE_OFF = frozenset({"camera", "face_recognition", "camera_when_away", "gmail_send", "calendar_write",
-                      "dashboard_lan", "telegram", "home_assistant", "instagram"})
+                      "dashboard_lan", "telegram", "home_assistant", "instagram", "helper",
+                      "helper_readonly_auto"})
 GOOGLE_FEATURES = ("google_calendar", "calendar_write", "gmail_read", "gmail_send", "google_contacts")
 # (id, Hebrew, English, feature ids). A feature missing here lands in "other" (never hidden); a test demands
 # that every registered feature is listed.
@@ -76,6 +77,7 @@ GROUPS: tuple[tuple[str, str, str, tuple[str, ...]], ...] = (
     ("channels", "ערוצים ובית חכם", "Channels & smart home", ("telegram", "instagram", "whatsapp_handoff", "home_assistant")),
     ("dashboard", "לוח בקרה וטלפון", "Dashboard & phone", ("dashboard", "dashboard_lan", "context_trace")),
     ("updates", "עדכונים וגיבוי", "Updates & backup", ("update_check", "backup")),
+    ("helper", "עזרה במחשב (פקודות והתקנות)", "Computer helper (commands & installs)", ("helper", "helper_readonly_auto")),
 )
 ANSWER_KEYS = {"language", "connection", "api_key_from_env", "display_name", "spoken_name", "address_me",
                "wake_model", "voice", "approve_voice_cost", "features", "privacy_mode", "monthly_budget_usd",
@@ -887,12 +889,17 @@ BUNDLE: dict[str, list[Callable[[], tuple[bool, str]]]] = {
     "whatsapp_handoff": [_mod("jarves.whatsapp"), _data("jarves.guides", "data/whatsapp.toml")],
     "morning_briefing": [_mod("jarves.briefing"), _mod("httpx"), _data("jarves.guides", "data/morning_briefing.toml")],
     "home_assistant": [_mod("jarves.homeassistant"), _mod("httpx"), _data("jarves.guides", "data/home_assistant.toml")],
+    "helper": [_mod("jarves.skills.helper"), _mod("jarves.approvals"), _mod("jarves.approval_popup"), _mod("tkinter"),
+               _data("jarves.guides", "data/helper.toml")],
+    "helper_readonly_auto": [_mod("jarves.skills.helper")],
 }
 # Not switches, but shipped parts the add-ons rely on.
 EXTRA_BUNDLE: dict[str, list[Callable[[], tuple[bool, str]]]] = {
     "live_voice": [_mod("agents.realtime"), _mod("websockets")],
     "chatgpt_sign_in": [_mod("jarves.chatgpt_auth"), _mod("jwt")],
     "privacy": [_mod("jarves.privacy")],
+    "approvals": [_mod("jarves.approvals"), _mod("jarves.approval_popup"), _mod("tkinter"),
+                  _data("jarves", "dashboard_static/approvals.js")],
     "windows_tts": [_win(_mod("winrt.windows.media.speechsynthesis"))],
     "offline_stt": [_mod("faster_whisper")],          # its Whisper model downloads on first use (not shipped)
     "guides": [_data("jarves.guides", "data/music.toml")],

@@ -405,7 +405,8 @@ def cmd_personal(a, cfg, home) -> int:
 
     async def confirm(prompt):
         return input(prompt + "\nType yes to confirm: ").strip().lower() == "yes"
-    reg.confirm = confirm
+    from .approvals import audited
+    reg.confirm = audited(home, confirm)          # same approvals audit log as the Core
 
     async def run():
         if a.cmd == "contacts" and a.action != "search":
@@ -1307,6 +1308,8 @@ def main(argv: list[str] | None = None) -> int:
     add_instagram_cli(sub)                    # V3 P1: jarvis instagram start / status / test / logout (+ serve, refresh)
     add_telegram_cli(sub)                     # V3 P1: jarvis telegram start / status / test / logout
     add_home_cli(sub)                         # V3 P1: jarvis home start / status / test / logout
+    from .approvals import add_cli as add_approvals_cli, cmd_approvals
+    add_approvals_cli(sub)                    # V3: jarvis approvals list / approve / deny / history
     wk = sub.add_parser("wake", help="calibrate the wake word to your voice and mic, or train a new wake phrase")
     wk.add_argument("action", choices=["test", "train"])
     wk.add_argument("phrase", nargs="*", help="train: the new phrase in Latin letters, e.g. \"hey max\"")
@@ -1378,7 +1381,8 @@ def main(argv: list[str] | None = None) -> int:
             "diagnose": cmd_diagnose, "features": cmd_features, "google": cmd_google,
             "backup": cmd_backup, "restore": cmd_restore, "usage": cmd_usage, "start": cmd_start,
             "show": cmd_display, "hide": cmd_display, "autostart": cmd_autostart,
-            "update": cmd_update, "telegram": cmd_telegram, "instagram": cmd_instagram, "home": cmd_home}[a.cmd](a, cfg, home)
+            "update": cmd_update, "telegram": cmd_telegram, "instagram": cmd_instagram, "home": cmd_home,
+            "approvals": cmd_approvals}[a.cmd](a, cfg, home)
 
 
 if __name__ == "__main__":
