@@ -97,6 +97,8 @@ def cmd_run(a, cfg, home) -> int:
               + (f", hiding {','.join(cfg.log.hide)}" if cfg.log.hide else "")
               + ". Stop: Ctrl+C or `jarvis stop`.", file=sys.stderr)
     core = Core(cfg, home, console_logs=not background, runtime_mode=mode)
+    (home / "logs").mkdir(parents=True, exist_ok=True)
+    _fault = logs.enable_faulthandler(home / "logs")    # SW-V4 B: native crashes -> logs/crash.txt (frames only)
     try:
         if mode == "desktop":
             asyncio.run(_run_desktop(core))
@@ -201,7 +203,9 @@ def cmd_logs(a, cfg, home) -> int:
         r = _logging.LogRecord("jarves", logs.level_no(lv) if lv in logs.LEVELS else 20, "", 0, d.get("msg", ""), None, None)
         r.created = datetime.fromisoformat(d["ts"]).timestamp() if d.get("ts") else _time.time()
         r.component, r.code = d.get("component", "-"), d.get("code", "-")
-        r.fields = {k: v for k, v in d.items() if k not in ("ts", "level", "component", "code", "msg", "session", "cid")}
+        r.template = True       # the file's own line (masked when written); the formatter applies today's rules too
+        r.fields = {k: v for k, v in d.items()
+                    if k not in ("ts", "level", "component", "code", "msg", "session", "cid", "v")}
         if flt.filter(r):
             print(fmt.format(r), flush=True)
     if not path.exists():
@@ -250,6 +254,20 @@ def runtime_summary(rt: dict | None) -> str:
             f" | {voice} | tray {(rt.get('tray') or {}).get('state', '?')}")
 
 
+def _privacy_note(cfg, home) -> str:
+    """"Privacy: off — conversation text is kept in logs" when log.privacy is off (config, or the runtime switch)."""
+    on = bool(cfg.log.privacy)
+    try:
+        flag = json.loads((home / "logs" / logs.PRIVACY_FILE).read_text(encoding="utf-8")).get("privacy")
+        on = flag if isinstance(flag, bool) else on
+    except (OSError, ValueError, AttributeError):
+        pass
+    if on:
+        return ""
+    from .clilang import fmt
+    return fmt(logs.PRIVACY_OFF_NOTE_HE, logs.PRIVACY_OFF_NOTE)
+
+
 def cmd_status(a, cfg, home) -> int:
     live = _ws_call(home, cfg.link.port, {"type": "status.request", "payload": {}}, "status")
     if live is None:
@@ -267,9 +285,25 @@ def cmd_status(a, cfg, home) -> int:
     prof = live.get("profile") or {}
     print(runtime_summary(live.get("runtime"))
           + (f" | profile {prof.get('name')}{' (TEST)' if prof.get('test') else ''}" if prof else ""))
+    note = _privacy_note(cfg, home)
+    if note:                                 # SW-V4 B: development mode is said plainly
+        print(note)
     if not getattr(a, "brief", False):
         print(json.dumps(live, indent=1, ensure_ascii=False))
-    return 0 if live["core"] == "ready" else 3
+    return status_exit_code(live)
+
+
+# `jarvis status` exit codes (O-05, documented in `jarvis status --help`): 0 ready, 1 Core not running,
+# 3 degraded (a real component problem), 4 ready except that the Godot face is not connected (a headless run).
+EXIT_READY, EXIT_NOT_RUNNING, EXIT_DEGRADED, EXIT_HEADLESS = 0, 1, 3, 4
+
+
+def status_exit_code(live: dict) -> int:
+    if live.get("core") == "ready":
+        return EXIT_READY
+    bad = {k for k, c in (live.get("components") or {}).items()
+           if isinstance(c, dict) and c.get("status") in ("unavailable", "degraded")}
+    return EXIT_HEADLESS if live.get("core") == "degraded" and bad == {"face_link"} else EXIT_DEGRADED
 
 
 def _background_spawn(home: Path, show: bool) -> None:
@@ -379,7 +413,7 @@ def _git_rev() -> str:
 def _private_line(line: str) -> str:
     """Support bundles are for sharing (old name; the rule lives in diagbundle.private_line, issue #15)."""
     from .diagbundle import private_line
-    return private_line(line)
+    return private_line(line) or ""         # a malformed line is dropped, never copied
 
 
 def cmd_diag(a, cfg, home) -> int:
@@ -997,6 +1031,13 @@ def _wake_train(a, cfg, home) -> int:
     """`jarvis wake train "<phrase>"`: local synthetic samples -> trained head in <state_dir>/wake (voice/wake_train)."""
     from .identity import Identity, IdentityError
     from .voice.wake_train import local_voices, slug, train_phrase
+    if getattr(a, "revert", False):
+        # back to the built-in "Hey Jarvis" (threshold from config.toml); the trained .npz file is kept on disk
+        old = Identity(home, cfg).wake()
+        Identity(home, cfg).set_wake("hey_jarvis", "Hey Jarvis", None, by="cli")
+        print(f"Reverted: JARVES wakes on the standard \"Hey Jarvis\" model again after the next start (was "
+              f"{Path(old['model']).name}). The trained file is kept; delete it by hand if you no longer want it.")
+        return 0
     if not a.phrase:
         print('usage: jarvis wake train "hey max" --say "היי מקס" [--samples DIR] [--apply]', file=sys.stderr)
         return 2
@@ -1411,7 +1452,9 @@ def main(argv: list[str] | None = None) -> int:
     lg.add_argument("-n", "--lines", type=int, default=50)
     lg.add_argument("--until-stopped", action="store_true", help="finish following when the Core stops")
     sub.add_parser("stop", help="orderly shutdown of the running Core")
-    stp = sub.add_parser("status", help="live health from the running Core, or the last stale snapshot")
+    stp = sub.add_parser("status", help="live health from the running Core, or the last stale snapshot",
+                         description="Exit codes: 0 ready; 1 the Core is not running; 3 degraded (a component has a "
+                                     "problem); 4 ready except that the Godot face is not connected (headless run).")
     stp.add_argument("--brief", action="store_true", help="only the one-line runtime summary")
     d = sub.add_parser("diag", help="write a redacted support bundle (zip)")
     d.add_argument("--out")
@@ -1492,6 +1535,8 @@ def main(argv: list[str] | None = None) -> int:
     wk.add_argument("--seconds", type=int, default=20)
     wk.add_argument("--apply", action="store_true", help="test: save the recommended threshold; train: use the "
                                                          "new phrase from the next start")
+    wk.add_argument("--revert", action="store_true", help="train: go back to the standard \"Hey Jarvis\" model "
+                                                          "(the trained file is kept)")
     wk.add_argument("--model", help="test: a trained .npz / .tflite instead of the current wake model")
     wk.add_argument("--false-wakes", type=int, default=0, metavar="MIN",
                     help="test: count false wakes over MIN minutes of normal room audio")
@@ -1550,6 +1595,8 @@ def main(argv: list[str] | None = None) -> int:
     profiles.add_cli(sub)                     # Issue #17: jarvis profile list / create / use / delete / export
     from . import cli_parity
     cli_parity.add_cli(sub)                   # V4 P0.3: jarvis timers / lists / notes / jobs / reports
+    from . import recall
+    recall.add_cli(sub)                       # SW-V4 G: jarvis recall "query" [--since] [--json]
     a = ap.parse_args(argv)
     try:
         if a.profile:
@@ -1576,7 +1623,8 @@ def main(argv: list[str] | None = None) -> int:
             "backup": cmd_backup, "restore": cmd_restore, "usage": cmd_usage, "start": cmd_start,
             "show": cmd_display, "hide": cmd_display, "autostart": cmd_autostart,
             "update": cmd_update, "browser": cmd_browser, "connect": cmd_connect, "telegram": cmd_telegram, "instagram": cmd_instagram, "home": cmd_home,
-            "profile": profiles.cmd_profile, "approvals": cmd_approvals, **cli_parity.COMMANDS}[a.cmd](a, cfg, home)
+            "profile": profiles.cmd_profile, "approvals": cmd_approvals, "recall": recall.cmd_recall,
+            **cli_parity.COMMANDS}[a.cmd](a, cfg, home)
 
 
 if __name__ == "__main__":

@@ -163,7 +163,7 @@ class PrivacyPublisher:
         if not force and face == self._face and key == self._last and now - self._sent_t < HEARTBEAT_S:
             return False
         if key != self._last:
-            logs.verbose("runtime", "PRIVACY_STATE", "privacy state changed", mic=st["mic"]["state"],
+            logs.verbose("runtime", "PRIVACY_STATE", "privacy state changed", mic_state=st["mic"]["state"],
                          camera=st["camera"]["state"], cloud_audio=st["cloud_audio"]["state"])
         self._face, self._last, self._sent_t = face, key, now
         self.sent += 1

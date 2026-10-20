@@ -117,7 +117,7 @@ class CameraService:
                 return self._probe or p
             self._probe_applied = seq
             if self._probe is None or (p.available, p.detail) != (self._probe.available, self._probe.detail):
-                logs.info("camera", "CAMERA_PROBE", p.detail, available=p.available, backend=p.backend)
+                logs.info("camera", "CAMERA_PROBE", "camera probed", detail=p.detail, available=p.available, backend=p.backend)
             self._probe, self._probe_t = p, self._clock()
         return self._probe or Probe(False, "none", "checking for a camera")
 
@@ -363,7 +363,7 @@ class CameraService:
         except CameraUnavailable as e:
             self._open_failed_t = self._clock()
             self._probe_t = -1e9                    # re-probe (in a worker thread) on the next tick
-            logs.warn("camera", e.code, e.message, action=e.action)
+            logs.warn("camera", e.code, "camera unavailable", detail=e.message, action=e.action)
             self._set_health("unavailable", e.message, e.action)
             self.cam = None
             return
@@ -436,7 +436,7 @@ class CameraService:
                 await self._set_indicator(True, flash=flash)
                 frame = await asyncio.to_thread(self.cam.still)
             except CameraUnavailable as e:
-                logs.warn("camera", e.code, e.message)
+                logs.warn("camera", e.code, "camera request refused", detail=e.message)
                 await self._close()
                 raise Refusal(e.code, "המצלמה לא החזירה תמונה.") from e
             finally:

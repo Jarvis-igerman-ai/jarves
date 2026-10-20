@@ -351,7 +351,7 @@ class UpdateChecker:
         if err is None:
             d["release"] = rel
         self._save(d)
-        logs.info("updates", "UPDATE_CHECKED", "update check" + (f": {err}" if err else ""),
+        logs.info("updates", "UPDATE_CHECKED", "update check finished", detail=err,
                   current=self.current, latest=(rel or {}).get("version"), ok=err is None)
         return self.status()
 
@@ -410,7 +410,8 @@ class UpdateChecker:
         out = self.home / "updates" / rel["asset"]["name"]
         out.parent.mkdir(parents=True, exist_ok=True)
         out.write_bytes(data)
-        logs.info("updates", "UPDATE_DOWNLOADED", f"installer {rel['version']} verified", sha256=got, size=len(data))
+        logs.info("updates", "UPDATE_DOWNLOADED", "installer verified", version=rel["version"], sha256=got,
+                  size=len(data))
         return out
 
     def prepare_install(self, approved: bool) -> dict:

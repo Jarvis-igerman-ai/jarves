@@ -128,6 +128,19 @@ def exists(name: str, base: Path | None = None) -> bool:
     return n == DEFAULT or (home_for(n, base) / PROFILE_FILE).is_file()
 
 
+def data_roots(home: Path) -> list[Path]:
+    """The JARVES data folders a profile's tools must never reach into: its own home and, for a named profile
+    (<base>/profiles/<name>), the base folder, which IS the default profile's home and holds every other profile."""
+    home = Path(home)
+    roots = [home]
+    try:
+        if home.parent.name == DIR and (home / PROFILE_FILE).is_file() and info(home).get("name") != DEFAULT:
+            roots.append(home.parent.parent)
+    except OSError:
+        pass
+    return roots
+
+
 def _read_json(path: Path) -> dict:
     try:
         d = json.loads(path.read_text(encoding="utf-8"))
@@ -387,7 +400,7 @@ def create(name: str, *, from_: str | None = None, copy_memory: bool = False, co
     except Exception:
         shutil.rmtree(home, ignore_errors=True)
         raise
-    logs.info("profiles", "PROFILE_CREATED", f"profile {n} created", profile=n, kind=meta["kind"], port=port, by=by,
+    logs.info("profiles", "PROFILE_CREATED", "profile created", profile=n, kind=meta["kind"], port=port, by=by,
               copied_from=meta["from"], memory=bool(copy_memory), secrets=bool(copy_secrets))
     return {**info(home), "home": str(home), "copied": copied, "never_copied": list(NEVER_COPIED)}
 
@@ -398,7 +411,7 @@ def use(name: str, base: Path | None = None) -> str:
     if not exists(n, b):
         raise ProfileError(f"there is no profile {n!r} (jarvis profile list)")
     _write_json(b / REGISTRY, {"active": n, "changed": time.time()})
-    logs.info("profiles", "PROFILE_ACTIVE", f"active profile {n}", profile=n)
+    logs.info("profiles", "PROFILE_ACTIVE", "active profile set", profile=n)
     return n
 
 
@@ -422,7 +435,7 @@ def delete(name: str, confirm: str, base: Path | None = None, by: str = "cli") -
     shutil.rmtree(real)
     if _read_json(b / REGISTRY).get("active") == n:
         _write_json(b / REGISTRY, {"active": DEFAULT, "changed": time.time()})
-    logs.info("profiles", "PROFILE_DELETED", f"profile {n} deleted", profile=n, by=by)
+    logs.info("profiles", "PROFILE_DELETED", "profile deleted", profile=n, by=by)
     return {"deleted": n}
 
 
@@ -574,7 +587,7 @@ def make_skill(core):
                                       "PROFILE_SWITCH_NOT_APPROVED")
                 use(n, base)
                 SPAWN(n, ["run", "--background", "--show"])
-                logs.info("profiles", "PROFILE_SWITCH", f"switching profile {cur} -> {n}", frm=cur, to=n)
+                logs.info("profiles", "PROFILE_SWITCH", "switching profile", frm=cur, to=n)
                 import asyncio
 
                 from .runtime import _quit_after_goodbye

@@ -138,7 +138,7 @@ class Identity:
             notes.append(f"stored realtime voice {rt!r} is not supported; using cedar")
             rt = "cedar"
         for n in notes:
-            logs.warn("identity", "VOICE_RECOVERED", n)
+            logs.warn("identity", "VOICE_RECOVERED", "voice setting recovered", detail=n)
         return {"mode": mode, "live_voice": live, "realtime_voice": rt, "notes": notes,
                 "current": f"{mode}:{live if mode == 'live' else rt}" if mode in ("live", "realtime") else None}
 
@@ -216,7 +216,7 @@ class Identity:
             self.memory.set_setting("override:voice.voice", want["voice"])
         else:
             self._change(by, realtime_voice=want["voice"])
-        logs.info("identity", "VOICE_CHOSEN", f"voice {voice_id}", by=by)
+        logs.info("identity", "VOICE_CHOSEN", "voice chosen", voice=voice_id, by=by)
         return {"ok": True, "needs_approval": False, "voice": self.voice(), "applies": "next conversation"}
 
     def apply_to_config(self, cfg=None) -> None:

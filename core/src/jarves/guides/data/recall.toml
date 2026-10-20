@@ -1,0 +1,54 @@
+order = 38
+category = "memory"
+pages = ["recall", "conversations"]
+features = ["conversation_recall"]
+aliases = ["מה אמרתי", "מה דיברנו", "חיפוש בשיחות", "שיחות קודמות", "recall", "what did i say", "search conversations", "conversation search", "remember what we said"]
+links = ["memory", "privacy", "notes_files", "diagnosis"]
+title_he = "מה אמרתי? חיפוש בשיחות קודמות"
+title_en = "What did I say? Searching past conversations"
+what_he = "שואלים \"מה אמרתי על הרופא?\" או \"מה דיברנו אתמול על הרכב?\" וג'רוויס מחפש בשיחות הקודמות, בפתקים ובדוחות, ועונה בקצרה עם התאריך וציטוט קצר. משהו ארוך או פרטי הוא מציע להציג על המסך."
+what_en = "Ask \"what did I say about the dentist?\" or \"what did we talk about yesterday about the car?\" and JARVES searches past conversations, notes and reports and answers briefly with the date and a short quote. Anything long or private he offers to show on the screen."
+say = [
+  ["מה אמרתי על הרופא?", "What did I say about the doctor?"],
+  ["מה דיברנו אתמול על הרכב?", "What did we talk about yesterday about the car?"],
+  ["מה אמרת לי ביום שלישי על הטיסה?", "What did you tell me on Tuesday about the flight?"],
+  ["על מה דיברנו בשבוע שעבר?", "What did we talk about last week?"],
+]
+expect_he = "תשובה של משפט או שניים: מתי, מי אמר, וציטוט קצר. אם אין כלום, הוא אומר שלא מצא ולא ממציא."
+expect_en = "A one or two sentence answer: when, who said it, and a short quote. If there is nothing, he says so and never makes it up."
+cost_he = "חינם: האינדקס מקומי במחשב. רק התשובה הקצרה לשאלה ששאלת עוברת למודל הקול באותה שיחה."
+cost_en = "Free: the index is local on this computer. Only the short answer to the question you asked goes to the voice model in that conversation."
+privacy_he = "לכל פרופיל אינדקס משלו. כשמצב פרטיות פועל שום דבר לא נכנס לאינדקס. מחיקת שיחה מוחקת גם אותה מהאינדקס, ו\"אל תזכור את זה\" משאיר את המשפט מחוץ לאינדקס. אחרי 90 יום נשאר רק סיכום קצר של כל שיחה. טקסט שעולה מהחיפוש לא מפעיל שום פעולה."
+privacy_en = "Each profile has its own index. With privacy mode on nothing is indexed. Deleting a conversation removes it from the index, and \"off the record\" keeps that sentence out. After 90 days only a short summary of each conversation stays. Recalled text never triggers an action."
+
+[[steps]]
+he = "ודאו שהמתג \"חיפוש בשיחות קודמות\" דולק."
+en = "Keep the Conversation recall switch on."
+action = "feature_on:conversation_recall"
+check = "enabled:conversation_recall"
+
+[[steps]]
+he = "שאלו בקול או בכתב: \"מה אמרתי על...?\" עם מילה או שתיים מהנושא, ואם רוצים גם זמן: \"אתמול\", \"ביום שלישי\", \"בשבוע שעבר\"."
+en = "Ask by voice or typing: \"what did I say about...?\" with a word or two of the topic, and a time if you like: \"yesterday\", \"on Tuesday\", \"last week\"."
+
+[[steps]]
+he = "בלוח הבקרה, בעמוד \"חיפוש בשיחות\", אפשר לחפש עם סינון לפי תאריך, מי אמר וסוג שיחה, ולראות את המילים שנמצאו מודגשות."
+en = "On the dashboard Recall page you can search with filters for dates, speaker and kind of conversation, with the matched words highlighted."
+action = "open:#/recall"
+
+[[steps]]
+he = "משורת הפקודה: jarvis recall \"הרופא\" --since \"last week\". בדיקה ובנייה מחדש: jarvis recall --stats / --repair / --rebuild."
+en = "From the command line: jarvis recall \"the dentist\" --since \"last week\". Check or rebuild: jarvis recall --stats / --repair / --rebuild."
+action = "command:jarvis recall --stats"
+
+[[problems]]
+he = "הוא לא מוצא שיחה שאני זוכר"
+en = "He does not find a conversation I remember"
+fix_he = "אם מצב פרטיות היה פועל בזמן השיחה, המילים לא נשמרו ולכן אין מה לחפש. אחרת הריצו jarvis recall --repair ונסו מילה אחרת מהנושא."
+fix_en = "If privacy mode was on during that conversation, the words were not kept, so there is nothing to search. Otherwise run jarvis recall --repair and try another word of the topic."
+
+[[problems]]
+he = "אני לא רוצה שמשפט מסוים יישמר לחיפוש"
+en = "I do not want a sentence to be searchable"
+fix_he = "אמרו \"אל תזכור את זה\" באותו משפט, או מחקו את השיחה בעמוד השיחה בלוח הבקרה."
+fix_en = "Say \"off the record\" in that sentence, or delete the conversation on its page in the dashboard."

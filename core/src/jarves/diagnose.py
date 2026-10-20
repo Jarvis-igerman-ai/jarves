@@ -431,8 +431,8 @@ def llm_review(store: Store, cfg, sid: str, *, client=None, budget=None) -> list
     why = review_skip_reason(store, cfg, sid, have_client=client is not None)
     text = None if why else review_input(store, sid)
     if why or text is None:
-        logs.debug("diagnose", "DIAGNOSE_LLM_SKIPPED", f"AI review skipped: {why or 'nothing to review'}",
-                   conversation=sid)
+        logs.debug("diagnose", "DIAGNOSE_LLM_SKIPPED", "AI review skipped", why=why or "nothing to review",
+                   conversation_id=sid)
         return []
     model = cfg.history.llm_review_model or cfg.ai.text_model
     own_budget = None
@@ -456,7 +456,8 @@ def llm_review(store: Store, cfg, sid: str, *, client=None, budget=None) -> list
             r = client.responses.create(model=model, instructions=REVIEW_INSTRUCTIONS, input=text, store=False,
                                         max_output_tokens=900, reasoning={"effort": "low"})
     except Exception as e:                         # budget reached, network, API: the rules' findings stand
-        logs.warn("diagnose", "DIAGNOSE_LLM_FAILED", f"AI review failed: {type(e).__name__}", conversation=sid)
+        logs.warn("diagnose", "DIAGNOSE_LLM_FAILED", "AI review failed", error_type=type(e).__name__,
+                  conversation_id=sid)
         with store._lock:
             store._set_meta(f"llm_review_pending:{sid}", "")
             store._set_meta(f"llm_review_failed:{sid}", type(e).__name__)
@@ -490,7 +491,7 @@ def llm_review(store: Store, cfg, sid: str, *, client=None, budget=None) -> list
     store._set_meta(f"llm_reviewed:{sid}", str(time.time()))      # only now: the outcome is saved
     store._set_meta(f"llm_review_pending:{sid}", "")
     store.commit()
-    logs.info("diagnose", "DIAGNOSE_LLM_DONE", f"AI review found {len(f.found)} issue(s)", conversation=sid,
+    logs.info("diagnose", "DIAGNOSE_LLM_DONE", "AI review finished", conversation_id=sid,
               model=model, usage_in=usage["in"], usage_out=usage["out"], found=len(f.found))
     return f.found
 

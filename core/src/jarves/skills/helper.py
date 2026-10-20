@@ -88,7 +88,13 @@ _DANGEROUS: list[tuple[re.Pattern, str]] = [
      "shuts down or restarts the computer"),
     (re.compile(r"\b(takeown|icacls|cacls|chown|chmod|attrib)\b", re.I), "changes file ownership / permissions"),
     (re.compile(r"\b(taskkill|stop-process|pkill|killall)\b|\bkill\s+-9\b", re.I), "stops running programs"),
-    (re.compile(r"\b(powershell|pwsh)(\.exe)?\b.*\s-(e|ec|en|enc|encodedcommand)\b", re.I), "encoded PowerShell"),
+    # PowerShell takes ANY unambiguous prefix of -EncodedCommand (-enco, -encodedc...), "/" or an en/em dash as the
+    # switch character (review C, SWV4: "-enco" and "–enc" slipped past the old exact list)
+    (re.compile(r"\b(powershell|pwsh)(\.exe)?\b.*\s[-/–—―](e|ec|en[a-z]*)\b", re.I), "encoded PowerShell"),
+    (re.compile(r"\bfind\b.*\s-(delete|exec|execdir|ok|okdir)\b|\bxargs\b|\brsync\b.*\s--del|"
+                r"\b(shutil\.rmtree|rmtree|os\.(remove|unlink|rmdir|removedirs|system|popen|exec\w*|spawn\w*)|"
+                r"subprocess|child_process|fs\.(rm|rmdir|unlink)\w*)\b", re.I),
+     "inline code or a tool that deletes files or starts other programs"),
     (re.compile(r"\b(iex|invoke-expression|invoke-command|downloadstring|downloadfile|start-bitstransfer)\b"
                 r"|\b(certutil)\b.*-urlcache|\b(bitsadmin|mshta|rundll32|regsvr32|wscript|cscript)\b", re.I),
      "downloads or runs hidden code"),
@@ -105,8 +111,12 @@ _DANGEROUS: list[tuple[re.Pattern, str]] = [
     (re.compile(r"\bgit\s+(push\s+.*(--force|-f\b)|reset\s+--hard|clean\s+-\w*f)", re.I),
      "discards or overwrites git history / files"),
 ]
-_RECURSIVE_DELETE = re.compile(r"^\s*(rm\s+(-\w*r\w*|--recursive)|rmdir\s+/s|rd\s+/s|del\s+.*/s|erase\s+.*/s|"
-                               r"remove-item\b.*-recurse|rimraf)\b", re.I)
+# The recursive flag may come after other options ("rm -f -r", "rmdir /q /s"); PowerShell accepts "-r"/"-rec" for
+# -Recurse and its aliases (ri, rm, del, rd, rmdir, erase) and an en/em dash for "-" (review C, SWV4).
+_RECURSIVE_DELETE = re.compile(r"^\s*(rm\b.*\s(-[a-z]*r[a-z]*|--recursive)|(rmdir|rd|del|erase)\b.*\s/s|"
+                               r"(remove-item|ri|rm|del|erase|rd|rmdir)\b.*\s[-–—―]r(e(c(u(r(s(e)?)?)?)?)?)?"
+                               r"|rimraf)\b", re.I)
+_NESTED_SHELLS = frozenset({"cmd", "powershell", "pwsh", "bash", "sh", "zsh", "dash", "ksh", "fish", "wsl", "busybox"})
 _DELETE_ANY = re.compile(r"^\s*(rm|rmdir|rd|del|erase|remove-item|ri|unlink)\b", re.I)
 _READONLY = [re.compile(p, re.I) for p in (
     r"dir(\s+/[a-z]+)*(\s+[\w.\\/:\-]+)?(\s+/[a-z]+)*", r"ls(\s+-[alh1R]+)*(\s+[\w./\-]+)?", r"pwd", r"cd", r"whoami",
@@ -217,6 +227,126 @@ def _path_tokens(tokens: list[str], cwd: Path) -> list[Path]:
     return out
 
 
+def _segments(cmd: str) -> list[str]:
+    """Every place a NESTED command could start: after a quote, separator or bracket, and at every later word
+    ("cmd /c rd /s /q X", "powershell -c \"Remove-Item -Recurse X\"", "env rm -rf X", "python -c \"...\"").
+    The top-level command itself (word 0 of part 0) is not included: the normal rules judge it."""
+    out = []
+    for pi, part in enumerate(re.split(r"[\"'`;&|(){}\n\r]", cmd)):
+        words = part.split()
+        for i in range(len(words)):
+            if pi == 0 and i == 0:
+                continue
+            out.append(" ".join(words[i:]))
+    return out
+
+
+def _nested_shell(tokens: list[str]) -> bool:
+    """The command starts another shell / interpreter with a command line of its own: what that inner line does
+    cannot be judged reliably here (quoting, aliases, abbreviations), so it needs the typed code."""
+    if not tokens:
+        return False
+    name = re.sub(r"\.exe$", "", Path(tokens[0].strip("\"'")).name.lower())
+    rest = [t.lower() for t in tokens[1:]]
+    if name not in _NESTED_SHELLS or not rest:
+        return False
+    if rest in (["--version"], ["-v"], ["-version"], ["/?"], ["--help"], ["-?"]):
+        return False
+    if name == "cmd":
+        return any(t in ("/c", "/k", "/r") or t.startswith(("/c", "/k")) for t in rest)
+    # powershell / pwsh (positional text, -c, -command, -e..., -file), wsl, busybox, sh / bash -c or a script:
+    # everything after the program name is another command line
+    return True
+
+
+def _short_path(p: Path) -> str:
+    """Windows 8.3 short form of an existing path ('C:\\Users\\me\\JARVES~1'), '' elsewhere."""
+    if sys.platform != "win32":
+        return ""
+    try:
+        import ctypes
+        buf = ctypes.create_unicode_buffer(1024)
+        n = ctypes.windll.kernel32.GetShortPathNameW(str(p), buf, 1024)
+        return buf.value.lower() if 0 < n < 1024 else ""
+    except Exception:
+        return ""
+
+
+_UNC_DRIVE = re.compile(r"\\\\(?:\?\\unc\\|\.\\unc\\)?[^\\\s\"']+\\([a-z])\$(?=\\|$)", re.I)    # \\host\C$ -> c:
+_DEV_PREFIX = re.compile(r"\\\\[?.]\\(?=[a-z]:)", re.I)                                    # \\?\C: / \\.\C: -> C:
+
+
+def _norm_mention(s: str, user_home: str) -> str:
+    """The command text the way Windows / a shell would resolve paths in it, for the JARVES-data check."""
+    s = re.sub(r"(^|[\s\"'=:;(])~(?=[\\/]|$|[\s\"'])", lambda m: m.group(1) + user_home, s)
+    s = os.path.expandvars(s).lower()
+    if sys.platform == "win32":
+        s = s.replace("/", "\\")
+        s = _DEV_PREFIX.sub("", _UNC_DRIVE.sub(lambda m: m.group(1) + ":", s))
+        s = re.sub(r"\\{2,}", r"\\", s)                 # C:\\Users\\me == C:\Users\me
+    return s
+
+
+def _words(cmd: str) -> list[str]:
+    return [w for w in re.split(r"[\s\"'`;&|(){}=,<>]+", cmd) if w]
+
+
+def _glob_hits(word: str, root: Path, wd: Path) -> bool:
+    """A wildcard word ('C:\\Users\\me\\.jarv*\\secrets.env') that can expand to `root` or something inside it."""
+    import fnmatch
+    if "*" not in word and "?" not in word:
+        return False
+    p = Path(os.path.expandvars(os.path.expanduser(word)))
+    if not p.is_absolute():
+        p = wd / p
+    want = [x.lower() for x in Path(os.path.abspath(root)).parts]
+    got = [x.lower() for x in Path(os.path.abspath(p)).parts] if "*" not in p.anchor else []
+    if len(got) < len(want):
+        return False
+    return all(fnmatch.fnmatchcase(w_, g) for g, w_ in zip(got, want))      # (name, pattern)
+
+
+def _mentions_home(cmd: str, wd: Path, home: Path, sandbox: Path) -> bool:
+    """Does the command name JARVES's data folder in any spelling: plain, ~ / %VAR% / $VAR, forward slashes, no
+    drive letter (\\Users\\...), a \\\\?\\ or \\\\host\\C$ prefix, the 8.3 short name, a wildcard, or a path inside a
+    nested command line ("sh -c 'cat .jarves/secrets.env'")."""
+    user_home = os.path.expanduser("~")
+    text = _norm_mention(cmd, user_home)
+    sb_needles = {str(sandbox.resolve()).lower(), str(Path(os.path.abspath(sandbox))).lower()}
+    sb_short = _short_path(sandbox)
+    if sb_short:
+        sb_needles.add(sb_short)
+    for n in sorted(sb_needles, key=len, reverse=True):
+        text = text.replace(n, "<sandbox>")
+    needles = {str(home.resolve()).lower(), str(Path(os.path.abspath(home))).lower()}
+    short = _short_path(home)
+    if short:
+        needles.add(short)
+    if sys.platform == "win32":
+        needles |= {n[2:] for n in list(needles) if len(n) > 3 and n[1] == ":"}       # \users\me\.jarves
+    if any(n and n in text for n in needles):
+        return True
+    for w in _words(text):
+        if _glob_hits(w, home, wd) and not _glob_hits(w, sandbox, wd):
+            return True
+        if w.startswith("-") or (sys.platform == "win32" and w.startswith("/") and len(w) <= 3):
+            continue
+        p = Path(w)
+        p = p if p.is_absolute() else wd / p
+        if _inside(p, home) and not _inside(p, sandbox):
+            return True
+    return False
+
+
+def protected_roots(home: Path) -> list[Path]:
+    """JARVES data folders the helper never touches: this profile's home and, for a named profile
+    (<base>/profiles/<name>), the base folder too: it IS the default profile's home (its secrets.env, tokens,
+    approvals) and holds every other profile (review C, SWV4: a command proposed in profile "dana" could read the
+    default profile's secrets)."""
+    from ..profiles import data_roots
+    return data_roots(home)
+
+
 def classify(command: str, cwd: str | Path | None, *, home: Path) -> Proposal:
     """The policy. Raises HelperRefused for what never runs; returns the level for everything else."""
     home = Path(home)
@@ -239,21 +369,32 @@ def classify(command: str, cwd: str | Path | None, *, home: Path) -> Proposal:
         wd = sandbox / wd
     if not wd.is_dir():
         raise HelperRefused("HELPER_BAD_CWD", f"folder does not exist: {wd}", f"התיקייה לא קיימת: {wd}")
-    home_s, sandbox_s = str(home.resolve()).lower(), str(sandbox.resolve()).lower()
-    mentioned = os.path.expandvars(cmd).lower().replace("/", os.sep).replace(sandbox_s, "<sandbox>")
-    in_home = home_s in mentioned or (_inside(wd, home) and not _inside(wd, sandbox))
     try:
         tokens = split_command(cmd)
     except ValueError:
         raise HelperRefused("HELPER_BAD_QUOTES", "unbalanced quotes", "המירכאות בפקודה לא סגורות.") from None
     paths = _path_tokens(tokens, wd)
-    if in_home or any(_inside(p, home) and not _inside(p, sandbox) for p in paths):
-        raise HelperRefused("HELPER_JARVES_DATA", "touches JARVES's own data folder (approvals, secrets, tokens)",
-                            "את זה אני לא מריץ: זה נוגע בתיקיית הנתונים של JARVES עצמו.")
+    sandbox_s = str(sandbox.resolve()).lower()
+    mentioned = os.path.expandvars(cmd).lower().replace("/", os.sep).replace(sandbox_s, "<sandbox>")
+    for root in protected_roots(home):
+        root_s = str(root.resolve()).lower()
+        in_root = root_s in mentioned or (_inside(wd, root) and not _inside(wd, sandbox))
+        if in_root or any(_inside(p, root) and not _inside(p, sandbox) for p in paths) \
+                or _mentions_home(cmd, wd, root, sandbox):
+            raise HelperRefused("HELPER_JARVES_DATA", "touches JARVES's own data folder (approvals, secrets, tokens)",
+                                "את זה אני לא מריץ: זה נוגע בתיקיית הנתונים של JARVES עצמו.")
     reasons = [why for rx, why in _DANGEROUS if rx.search(cmd)]
     meta = _meta_outside_quotes(cmd)
     if meta:
         reasons.append("pipes / redirects / chains commands")
+    if _nested_shell(tokens):
+        reasons.append("starts another shell with a command line of its own")
+    nested = _segments(cmd)
+    if any(_RECURSIVE_DELETE.search(s) for s in nested):
+        # a delete inside another command line: its paths cannot be checked against the sandbox
+        reasons.append("deletes folders recursively inside another command line")
+    if _DANGEROUS[0][1] not in reasons and any(_DANGEROUS[0][0].search(s) for s in nested):
+        reasons.append(_DANGEROUS[0][1])
     if _RECURSIVE_DELETE.search(cmd):
         raw_foreign = any(foreign_abs(t) for t in cmd.split()[1:])      # posix parsing eats the backslashes
         if raw_foreign or not (paths and all(_inside(p, sandbox) for p in paths)):
@@ -269,7 +410,9 @@ def classify(command: str, cwd: str | Path | None, *, home: Path) -> Proposal:
         if exe is None:
             raise HelperRefused("HELPER_NOT_FOUND", f"program not found: {tokens[0]}",
                                 f"לא מצאתי את התוכנה {tokens[0]} במחשב.")
-        argv = [exe, *tokens[1:]]
+        # Windows runs a .bat / .cmd (npm -> npm.cmd) through cmd.exe, which re-parses the arguments ("BatBadBut",
+        # CVE-2024-24576 class): run the line the owner saw through cmd itself instead of a re-quoted argv
+        argv = None if sys.platform == "win32" and exe.lower().endswith((".bat", ".cmd")) else [exe, *tokens[1:]]
     if reasons:
         return Proposal(cmd, wd, argv, "dangerous", reasons)
     norm = " ".join(cmd.split())
@@ -475,11 +618,13 @@ class HelperSkill(Skill):
                 "reasons": prop.reasons, "purpose": logs.redact(purpose)[:300], **(extra or {})}
         if not ok:
             self._audit(**base, decision="denied")
-            logs.info("helper", "HELPER_DENIED", f"{kind} not approved", id=prop.id, classification=prop.level)
+            logs.info("helper", "HELPER_DENIED", "helper command not approved", kind=kind, id=prop.id,
+                  classification=prop.level)
             return ToolResult(False, "לא אושר: לא הרצתי כלום. / Not approved: nothing was run.",
                               {"id": prop.id, "level": prop.level}, "HELPER_NOT_APPROVED")
         log_path = helper_dir(self.home) / "runs" / f"{time.strftime('%Y%m%d-%H%M%S')}-{prop.id}.log"
-        logs.info("helper", "HELPER_RUN", f"{kind} started ({decision})", id=prop.id, classification=prop.level)
+        logs.info("helper", "HELPER_RUN", "helper command started", kind=kind, decision=decision, id=prop.id,
+                  classification=prop.level)
         try:
             r = await asyncio.to_thread(run_blocking, prop, timeout_s, log_path)
         except OSError as e:
@@ -487,7 +632,7 @@ class HelperSkill(Skill):
             return ToolResult(False, f"ההרצה נכשלה: {type(e).__name__}", {"id": prop.id}, "HELPER_START_FAILED")
         self._audit(**base, decision=decision, exit_code=r.exit_code, seconds=r.seconds, timed_out=r.timed_out,
                     output_bytes=r.bytes, log=str(r.log))
-        logs.info("helper", "HELPER_DONE", f"{kind} finished", id=prop.id, exit_code=r.exit_code, seconds=r.seconds,
+        logs.info("helper", "HELPER_DONE", "helper command finished", kind=kind, id=prop.id, exit_code=r.exit_code, seconds=r.seconds,
                   timed_out=r.timed_out)
         if r.timed_out:
             msg = f"עצרתי אחרי {timeout_s} שניות (חרג מהזמן). / Stopped after {timeout_s} s (time limit)."
@@ -508,7 +653,7 @@ class HelperSkill(Skill):
             except HelperRefused as e:
                 self._audit(kind="shell", command=a.command[:MAX_CMD_CHARS], cwd=a.cwd, decision="refused",
                             code=e.code, reason=e.message)
-                logs.info("helper", "HELPER_REFUSED", e.message, reason=e.code)
+                logs.info("helper", "HELPER_REFUSED", "helper command refused", detail=e.message, reason=e.code)
                 return ToolResult(False, e.he + " / " + e.message, {"code": e.code}, e.code)
             return await self._execute(prop, a.purpose, "shell", a.timeout_s)
 
@@ -528,7 +673,8 @@ class HelperSkill(Skill):
                 if a.manager == "npm" and not a.cwd:
                     raise HelperRefused("HELPER_BAD_CWD", "npm installs into a project: give its folder (cwd)",
                                         "npm מתקין לתוך פרויקט: צריך את התיקייה שלו.")
-                if not wd.is_dir() or (_inside(wd, self.home) and not _inside(wd, sandbox)):
+                if not wd.is_dir() or any(_inside(wd, r) and not _inside(wd, sandbox)
+                                          for r in protected_roots(self.home)):
                     raise HelperRefused("HELPER_BAD_CWD", f"bad folder: {wd}", f"תיקייה לא תקינה: {wd}")
             except HelperRefused as e:
                 self._audit(kind="install", manager=a.manager, package=pkg, version=ver, decision="refused", code=e.code)
@@ -581,8 +727,18 @@ def register_helper(registry, home: Path, health=None) -> HelperSkill:
     registry.register(skill)
     registry.allowed_actions |= ALLOWED_ACTIONS
     if health is not None:
-        ok, why = _probe(None)
-        health.set("helper", "ok" if ok else "unavailable", why or "commands run only after your approval")
+        # integration open point 1 (SWV3): the row said "ok" on a fresh profile although the switch is OFF. It
+        # follows the switch now (and every later flip of it, from this process or another one).
+        def show(_fid: str | None = None, _on: bool | None = None) -> None:
+            if _fid not in (None, "helper"):
+                return
+            if not feat.current().enabled("helper"):
+                health.set("helper", "disabled", "off (jarvis features on helper)", "jarvis features on helper")
+                return
+            ok, why = _probe(None)
+            health.set("helper", "ok" if ok else "unavailable", why or "commands run only after your approval")
+        show()
+        feat.current().listeners.append(show)
     return skill
 
 

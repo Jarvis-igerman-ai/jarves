@@ -128,6 +128,9 @@ class Store:
             if column not in turn_columns:
                 self._db.execute(f"ALTER TABLE turns ADD COLUMN {column} REAL")
         self._db.commit()
+        from . import recall                       # SW-V4 G: the conversation-recall index lives in this file too
+        recall.ensure(self._db)
+        self.indexer: "recall.Indexer | None" = None   # set by attach(): index new turns on every commit
         self.tier, self.backend_model = tier, backend_model
         self._cur: str | None = None              # open live session id
         self._pending_tools: dict[str, list[int]] = {}
@@ -147,7 +150,14 @@ class Store:
             return [dict(r) for r in self._db.execute(sql, args)]
 
     def commit(self) -> None:
+        """Commit; with an indexer attached (the Core's history writer) the new turns are indexed for recall in the
+        same transaction first (SW-V4 G: incremental on commit, no background poll)."""
         with self._lock:
+            if self.indexer is not None:
+                try:
+                    self.indexer.sync(self._db)
+                except sqlite3.Error as e:            # the index must never lose a history row
+                    print(f"jarves recall: {type(e).__name__}: {str(e)[:120]}", flush=True)
             self._db.commit()
 
     # ------------------------------------------------------------------ ingestion
@@ -189,7 +199,8 @@ class Store:
                 self._pending_tools.setdefault(name, []).append(cur.lastrowid)
             elif code == "TOOL_RESULT":
                 name = str(d.get("tool") or "")
-                rc = str(d.get("msg", "")).rpartition("-> ")[2] or None
+                rc = (d.get("result_code") if "result_code" in d     # v2 log lines (package B); older: in msg
+                      else str(d.get("msg", "")).rpartition("-> ")[2] or None)
                 pend = self._pending_tools.get(name) or []
                 if pend:
                     rid = pend.pop(0)
@@ -222,7 +233,7 @@ class Store:
                 self._typed_reply(d, ts)
             elif code == "SKILL_REGISTERED":
                 skills = json.loads(self.meta("skills") or "{}")
-                name = str(d.get("msg", "")).removeprefix("skill ").removesuffix(" registered")
+                name = str(d.get("skill") or str(d.get("msg", "")).removeprefix("skill ").removesuffix(" registered"))
                 skills[name] = {"tools": d.get("tools") or [], "ts": ts}
                 self._set_meta("skills", json.dumps(skills, ensure_ascii=False))
             if level in ("WARNING", "ERROR") or code in KEEP_INFO:
@@ -281,7 +292,7 @@ class Store:
 
     def _backend_done(self, d: dict, sid: str | None, ts: float, kind: str) -> None:
         """Finish the open row of this response (matched by response_id), or add one (old logs had no START)."""
-        status = str(d.get("msg", "")).rsplit(" ", 1)[-1]
+        status = str(d.get("status") or str(d.get("msg", "")).rsplit(" ", 1)[-1])
         u = usage(d)
         tier = d.get("tier") or (self.tier if kind in ("voice", "retry") else "")
         rid = d.get("response_id")
@@ -300,12 +311,14 @@ class Store:
     def _open(self, d: dict, ts: float, kind: str) -> str:
         if self._cur:
             self._close(self._cur, None, "replaced", None, {})
-        m = _MODELS.search(str(d.get("msg", "")))
-        model = m.group(1) if m else (re.search(r"\(([^()]+)\)", str(d.get("msg", ""))) or [None, None])[1]
+        m = _MODELS.search(str(d.get("msg", "")))           # older log lines: "started (model -> backend)"
+        model = d.get("model") or (m.group(1) if m else (re.search(r"\(([^()]+)\)", str(d.get("msg", "")))
+                                                         or [None, None])[1])
         sid = f"{d.get('session') or 'x'}-{datetime.fromtimestamp(ts).strftime('%Y%m%d-%H%M%S')}"
         self._db.execute("INSERT OR IGNORE INTO sessions (id, core_session, kind, started, model, backend_model, tier, "
                          "last_event) VALUES (?,?,?,?,?,?,?,?)",
-                         (sid, d.get("session"), kind, ts, model, (m.group(2) if m else None) or self.backend_model,
+                         (sid, d.get("session"), kind, ts, model,
+                          d.get("backend_model") or (m.group(2) if m else None) or self.backend_model,
                           self.tier, ts))
         self._cur, self._pending_tools = sid, {}
         return sid
@@ -354,8 +367,8 @@ class Store:
                 if sid:
                     ended.append(sid)
         if missing:
-            logs.info("store", "HISTORY_BACKFILLED", f"added {len(missing)} older conversation(s) missing from "
-                      "history", processes=sorted(missing))
+            logs.info("store", "HISTORY_BACKFILLED", "older conversations missing from history added",
+                      n=len(missing), processes=sorted(missing))
         self.commit()
         return ended
 
@@ -368,15 +381,48 @@ class Store:
         self._db.execute("INSERT INTO meta (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = "
                          "excluded.value", (key, value))
 
-    def prune(self, keep_days: int) -> int:
+    def prune(self, keep_days: int, *, summaries: bool = True) -> int:
+        """Drop history older than keep_days. Recall (SW-V4 G, OD-17): each conversation that goes is first
+        summarised locally into the recall index, so only its summary stays searchable."""
         cut = time.time() - keep_days * 86400
         with self._lock:
+            from . import recall
+            if self.indexer is not None:
+                self.indexer.sync(self._db)           # nothing said before the cut is missed by its summary
+            try:
+                on = self.indexer is None or bool(self.indexer.enabled())
+            except Exception:
+                on = True
+            recall.before_prune(self._db, cut, summaries=summaries and on)
             old = [r[0] for r in self._db.execute("SELECT id FROM sessions WHERE started < ?", (cut,))]
             for t in ("turns", "tool_calls", "delegations", "events"):
                 self._db.execute(f"DELETE FROM {t} WHERE ts < ?", (cut,))
             self._db.execute("DELETE FROM sessions WHERE started < ?", (cut,))
             self._db.commit()
         return len(old)
+
+    def delete_session(self, sid: str) -> dict:
+        """Delete ONE conversation: its turns, tool calls, events, issue links, context trace and recall index rows,
+        all in one transaction (cost rows stay, detached, so the cost totals remain true). Freed pages are
+        overwritten (secure_delete); the log files are not rewritten (the privacy page's mask does that)."""
+        from . import context_trace, recall
+        with self._lock:
+            db = self._db
+            db.execute("PRAGMA secure_delete=ON")
+            n = {t: db.execute(f"DELETE FROM {t} WHERE session_id = ?", (sid,)).rowcount
+                 for t in ("turns", "tool_calls", "events", "issue_hits")}
+            db.execute("UPDATE delegations SET session_id = NULL WHERE session_id = ?", (sid,))
+            context_trace.ensure_schema(db)
+            traces = [r[0] for r in db.execute("SELECT id FROM context_traces WHERE session_id = ?", (sid,))]
+            for tid in traces:
+                db.execute("DELETE FROM context_events WHERE trace_id = ?", (tid,))
+            db.execute("DELETE FROM context_traces WHERE session_id = ?", (sid,))
+            idx = recall.delete_session(db, sid)
+            gone = db.execute("DELETE FROM sessions WHERE id = ?", (sid,)).rowcount
+            db.commit()
+        logs.info("store", "CONVERSATION_DELETED", "one conversation deleted", turns=n["turns"], index_rows=idx)
+        return {"ok": bool(gone or idx), "session": sid, "turns": n["turns"], "tool_calls": n["tool_calls"],
+                "events": n["events"], "context_traces": len(traces), "index_rows": idx}
 
     # ------------------------------------------------------------------ queries
     def sessions(self, limit: int = 100, day: str | None = None) -> list[dict]:
@@ -539,7 +585,7 @@ class StoreSink(logging.Handler):
                     if self.ai_reviews:
                         self.reviews.append(diagnose.schedule_review(self.store, self.cfg, ended))  # AI pass, own thread
             except Exception as e:                    # never log from here (it would feed back into the sink)
-                print(f"jarves history: {type(e).__name__}: {str(e)[:120]}", flush=True)
+                print(f"jarves history: {type(e).__name__}", flush=True)     # (exception text may hold content)
         self.store.commit()
 
     def close(self) -> None:
@@ -559,6 +605,8 @@ def attach(home: Path, cfg) -> StoreSink | None:
     if not cfg.history.enabled:
         return None
     store = Store(home / "store.db", tier=cfg.ai.voice_service_tier, backend_model=cfg.ai.text_model)
+    from . import recall                          # SW-V4 G: new turns are indexed on every history commit
+    store.indexer = recall.make_indexer(cfg, lambda: recall.feature_enabled(home, cfg))
     store.prune(cfg.history.keep_days)
     sink = StoreSink(store, cfg)
     logs.add_sink(sink)

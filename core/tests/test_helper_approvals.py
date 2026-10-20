@@ -181,6 +181,7 @@ async def test_instagram_send_goes_through_the_approvals_service_and_voice(home)
         confirm.accepts_meta = True
         reg.confirm = confirm
         await reg.call("instagram_inbox", {})
+        reg._untrusted.clear()                     # the owner speaks again (DM text taints its own turn, review C)
         d = await reg.call("instagram_draft", {"message_id": "m1", "text": "Yes, until 6pm"})
         call = asyncio.create_task(reg.call("instagram_send", {"draft_id": d.data["draft_id"]}))
         a = await next_request(svc)

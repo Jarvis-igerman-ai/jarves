@@ -36,7 +36,9 @@ def state(ctx) -> dict:
                            "conversation history on this computer. Turn privacy on for daily use."),
             "explain_he": ("מעכשיו נשמרים רק אורך ותזמון, לא המילים. מה שנשמר קודם נשאר עד שמסתירים אותו."
                            if on else "כל מה שנאמר ונכתב נשמר במלואו ביומנים ובהיסטוריה במחשב הזה."),
-            "applies": "now"}
+            "applies": "now",
+            # SW-V4 B: the plain state line shown by the dashboard banner and `jarvis status` (empty when on)
+            "banner_en": "" if on else logs.PRIVACY_OFF_NOTE, "banner_he": "" if on else logs.PRIVACY_OFF_NOTE_HE}
 
 
 def set_privacy(ctx, on: bool) -> dict:
@@ -48,7 +50,7 @@ def set_privacy(ctx, on: bool) -> dict:
         config_edit.apply(ctx.config_path, {"log.privacy": bool(on)})
     except Exception as e:                          # unreadable config.toml: the switch still works until restart
         saved, err = False, str(e)[:200]
-    logs.info("privacy", "PRIVACY_SET", f"privacy {'on' if on else 'off'} (dashboard)", on=bool(on), saved=saved)
+    logs.info("privacy", "PRIVACY_SET", "privacy switched from the dashboard", on=bool(on), saved=saved)
     return {**state(ctx), "saved_in_config": saved, "config_error": err}
 
 
@@ -63,7 +65,11 @@ def _rewrite_jsonl(path: Path, fix) -> int:
                 try:
                     d = json.loads(line)
                 except ValueError:
-                    out.append(line)
+                    d = None
+                if not isinstance(d, dict):         # a malformed line may hold anything: only its length stays
+                    masked = json.dumps({"unparsed": f"<{len(line)} chars>"}) if line.strip() else line
+                    n += masked != line
+                    out.append(masked)
                     continue
                 new = fix(d)
                 n += new != d
@@ -80,11 +86,26 @@ def mask_logs(home: Path) -> int:
     n = 0
     for p in sorted((home / "logs").glob("jarves.log*")):
         if p.suffix != ".tmp":
-            n += _rewrite_jsonl(p, lambda d: logs.scrub(d, private=True))
+            n += _rewrite_jsonl(p, logs.private_record)
     tasks = home / "tasks.jsonl"
     if tasks.is_file():
         n += _rewrite_jsonl(tasks, lambda d: {**d, **{k: logs._mask(d[k]) for k in _TEXT_KEYS if d.get(k)}})
+    for audit in sorted((home / "approvals").glob("audit*.jsonl")):     # SW-V4 B: titles / details of old answers
+        n += _rewrite_jsonl(audit, _mask_audit)
     return n
+
+
+def _mask_audit(d: dict) -> dict:
+    """An approvals audit record as privacy mode writes it (approvals._private_audit), applied to an old one."""
+    if d.get("kind") in ("shell", "install"):
+        return d
+    out = dict(d)
+    for k in ("title", "prompt"):
+        if out.get(k) and not str(out[k]).startswith("<"):
+            out[k] = logs._mask(out[k])
+    if isinstance(out.get("details"), dict):
+        out["details"] = {k: logs.render_field(k, v, private=True) for k, v in out["details"].items()}
+    return out
 
 
 def _secure_purge(st) -> None:
@@ -101,7 +122,7 @@ def _secure_purge(st) -> None:
             st.commit()
         except sqlite3.Error as e:
             logs.warn("privacy", "PRIVACY_PURGE_PARTIAL", "could not fully compact store.db (Core may hold it)",
-                      error=type(e).__name__)
+                      error_type=type(e).__name__)
 
 
 def _backup_residue(home: Path, prune: bool) -> dict:
@@ -132,24 +153,31 @@ def mask_history(ctx, *, prune_backups: bool = False) -> dict:
         turns = st.x("UPDATE turns SET text = NULL WHERE text IS NOT NULL").rowcount
         args = st.x("UPDATE tool_calls SET args = NULL WHERE args IS NOT NULL").rowcount
         ev = 0
-        for r in st.rows("SELECT id, fields FROM events WHERE fields IS NOT NULL"):
+        for r in st.rows("SELECT id, msg, fields FROM events"):
             try:
-                f = json.loads(r["fields"])
+                f = json.loads(r["fields"]) if r["fields"] else {}
             except ValueError:
-                continue
-            new = logs.scrub(f, private=True)
-            if new != f:
-                st.x("UPDATE events SET fields = ? WHERE id = ?", (json.dumps(new, ensure_ascii=False), r["id"]))
+                f = {"unparsed": r["fields"]}
+            f = f if isinstance(f, dict) else {"unparsed": f}
+            new = logs.private_record(f)
+            # SW-V4 B: a pre-v2 event message is free text (it may quote what was said): masked too
+            msg = r["msg"] if f.get("v") == logs.FORMAT_VERSION or r["msg"] is None else logs._mask(r["msg"])
+            if new != f or msg != r["msg"]:
+                st.x("UPDATE events SET fields = ?, msg = ? WHERE id = ?",
+                     (json.dumps(new, ensure_ascii=False), msg, r["id"]))
                 ev += 1
-        st.commit()
+        from . import recall                        # SW-V4 G: the search index held the words too
+        purged = recall.purge_conversations(st._db)
+        st._db.commit()
         from . import context_trace                 # the conversation context: sizes and hashes stay
         context_trace.mask_all(st._db)
     _secure_purge(st)
     lines = mask_logs(ctx.home)
     backups = _backup_residue(ctx.home, prune_backups)
     logs.info("privacy", "PRIVACY_MASKED_HISTORY", "existing history masked", turns=turns, tool_args=args,
-              events=ev, log_lines=lines)
-    return {"ok": True, "turns": turns, "tool_args": args, "events": ev, "log_lines": lines, **backups}
+              events=ev, log_lines=lines, index_rows=purged)
+    return {"ok": True, "turns": turns, "tool_args": args, "events": ev, "log_lines": lines, "index_rows": purged,
+            **backups}
 
 
 def delete_conversations(ctx, *, prune_backups: bool = False) -> dict:
@@ -161,15 +189,17 @@ def delete_conversations(ctx, *, prune_backups: bool = False) -> dict:
             st.x(f"DELETE FROM {table}")
         st.x("UPDATE delegations SET session_id = NULL")          # costs stay true
         st.x("DELETE FROM sessions")
-        st.commit()
+        from . import recall                        # SW-V4 G: and their rows in the search index
+        purged = recall.purge_conversations(st._db)
+        st._db.commit()
         from . import context_trace                 # and what he was given in them
         context_trace.delete_all(st._db)
     _secure_purge(st)
     lines = mask_logs(ctx.home)
     backups = _backup_residue(ctx.home, prune_backups)
     logs.info("privacy", "PRIVACY_DELETED_CONVERSATIONS", "all stored conversations deleted", sessions=n,
-              log_lines=lines)
-    return {"ok": True, "deleted": n, "log_lines": lines, **backups}
+              log_lines=lines, index_rows=purged)
+    return {"ok": True, "deleted": n, "log_lines": lines, "index_rows": purged, **backups}
 
 
 # ---------------------------------------------------------------------- dashboard routes

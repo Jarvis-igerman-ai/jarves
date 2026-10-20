@@ -408,6 +408,10 @@ class Trace:
     def event(self, kind: str, label: str, text: str | None = None, *, block: str | None = None,
               data: dict | None = None, ts: float | None = None) -> None:
         text = "" if text is None else str(text)
+        if data:            # SW-V4 B: never a secret; in privacy mode the field registry masks the values too
+            data = logs.redact_deep(data)
+            if self.private:
+                data = {k: logs.render_field(k, v, private=True) for k, v in data.items()}
         self.rec.put("INSERT INTO context_events (trace_id, ts, kind, label, block, text, chars, tokens, hash, data) "
                      "VALUES (?,?,?,?,?,?,?,?,?,?)",
                      (self.id, ts or time.time(), kind, label, block,
@@ -566,7 +570,8 @@ def attach_live(live, *, home: Path, cfg=None, memory=None, workspace=None, regi
             else:
                 live._ctx_trace = None
         except Exception as e:
-            logs.warn("context", "CONTEXT_CAPTURE_FAILED", f"conversation context not captured: {type(e).__name__}")
+            logs.warn("context", "CONTEXT_CAPTURE_FAILED", "conversation context not captured", stage="start",
+                      error_type=type(e).__name__)
         return config
     live.session_config = session_config
 
@@ -596,7 +601,8 @@ def attach_live(live, *, home: Path, cfg=None, memory=None, workspace=None, regi
                 tr.end(reason, data)
                 live._ctx_trace = None
         except Exception as e:
-            logs.warn("context", "CONTEXT_CAPTURE_FAILED", f"end of context not captured: {type(e).__name__}")
+            logs.warn("context", "CONTEXT_CAPTURE_FAILED", "end of context not captured", stage="end",
+                      error_type=type(e).__name__)
 
     if on_end is None or inspect.iscoroutinefunction(on_end):
         async def ended(reason):
@@ -625,7 +631,8 @@ def attach_brain(agent, *, home: Path, cfg=None, memory=None, registry=None, fea
             if rec is not None:
                 _typed_capture(agent, rec, state, memory, registry)
         except Exception as e:
-            logs.warn("context", "CONTEXT_CAPTURE_FAILED", f"typed context not captured: {type(e).__name__}")
+            logs.warn("context", "CONTEXT_CAPTURE_FAILED", "typed context not captured", stage="typed",
+                      error_type=type(e).__name__)
         return await orig(text)
     agent.reply = reply
     return True

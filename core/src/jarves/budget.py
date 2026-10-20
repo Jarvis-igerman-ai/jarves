@@ -209,7 +209,7 @@ class Budget:
         try:
             self._tx(go)
         except BudgetExceeded as e:
-            logs.warn("budget", e.code, str(e), action=e.action)
+            logs.warn("budget", e.code, "budget limit reached", detail=str(e), action=e.action)
             raise
         return r
 

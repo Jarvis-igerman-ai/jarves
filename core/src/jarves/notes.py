@@ -61,7 +61,7 @@ class Notes:
         now = self.clock()
         cur = self.db.x("INSERT INTO notes (title, text, tags, created, updated) VALUES (?,?,?,?,?)",
                         (title, text, _tags_col(norm_tags(tags)), now, now))
-        logs.info("notes", "NOTE_ADDED", "note added", note=cur.lastrowid, by=by)
+        logs.info("notes", "NOTE_ADDED", "note added", note_id=cur.lastrowid, by=by)
         return self.get(cur.lastrowid)
 
     def get(self, nid: int) -> dict | None:
@@ -95,7 +95,7 @@ class Notes:
         new_tags = n["tags"] if tags is None else norm_tags(tags)
         self.db.x("UPDATE notes SET title=?, text=?, tags=?, updated=? WHERE id=?",
                   (new_title, new_text, _tags_col(new_tags), self.clock(), n["id"]))
-        logs.info("notes", "NOTE_EDITED", "note edited", note=n["id"], by=by)
+        logs.info("notes", "NOTE_EDITED", "note edited", note_id=n["id"], by=by)
         return self.get(n["id"])
 
     def delete(self, nid: int, *, by: str) -> bool:
@@ -104,7 +104,7 @@ class Notes:
             return False
         self.db.x("DELETE FROM notes WHERE id=?", (n["id"],))
         self.db.audit(by, "note_delete", n["id"], {"title": n["title"]})
-        logs.info("notes", "NOTE_DELETED", "note deleted", note=n["id"], by=by)
+        logs.info("notes", "NOTE_DELETED", "note deleted", note_id=n["id"], by=by)
         return True
 
     def markdown(self, notes: list[dict]) -> str:

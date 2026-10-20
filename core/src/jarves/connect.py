@@ -649,7 +649,7 @@ class Connector:
         else:
             self.results[fid] = "failed"
             self.notes[fid] = fix
-            logs.warn("connect", "CONNECT_STEP_FAILED", f"{fid} setup did not finish", step=fid, rc=rc)
+            logs.warn("connect", "CONNECT_STEP_FAILED", "setup step did not finish", step=fid, rc=rc)
 
 
 def _run_wake_test() -> int:

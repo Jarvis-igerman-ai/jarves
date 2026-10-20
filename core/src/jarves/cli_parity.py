@@ -45,7 +45,7 @@ FEATURES: dict[str, object] = {
     "profiles": "profile", "context_trace": (D, "the context trace is a dashboard view of one conversation"),
     "browser": "browser", "helper": "approvals", "helper_readonly_auto": (D, "a pure switch; `jarvis features`"),
     "whatsapp_handoff": (D, "WhatsApp opens a draft in the app; no CLI needed, switch via `jarvis features`"),
-    "morning_briefing": "jobs", "home_assistant": "home",
+    "morning_briefing": "jobs", "home_assistant": "home", "conversation_recall": "recall",
 }
 
 # Skill (tool group) name -> "jarvis <command>" or ("dashboard", reason) or ("voice", reason) for groups that only
@@ -63,7 +63,7 @@ TOOL_GROUPS: dict[str, object] = {
     "notes": "notes", "profiles": "profile", "reports": "reports", "scheduler": "jobs", "self_check": "diagnose",
     "settings": (D, "settings are edited on the Settings page"), "skill_builder": (D, "the New Skills page"),
     "status": "status", "tasks": (D, "the Background tasks page"), "telegram": "telegram", "timers": "timers",
-    "usage": "usage", "whatsapp": (D, "WhatsApp opens a draft in the app"),
+    "usage": "usage", "whatsapp": (D, "WhatsApp opens a draft in the app"), "conversation_recall": "recall",
 }
 
 

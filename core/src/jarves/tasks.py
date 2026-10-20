@@ -45,7 +45,8 @@ current facts, then reply in one or two short natural spoken Hebrew sentences, n
 check". If you cannot find it, say so in one sentence."""
 
 ANNOUNCE_RESULT_CHARS = 600       # Hebrew is ~2-3 characters per token; the whole note must stay under 500 tokens
-STORE_MAX_BYTES = 1_000_000      # tasks.jsonl is trimmed to its newest STORE_KEEP lines beyond this
+TEXT_KEYS = ("description", "result", "queries", "steps")   # what the user asked / what came back (content)
+STORE_MAX_BYTES = 1_000_000     # tasks.jsonl is trimmed to its newest STORE_KEEP lines beyond this
 STORE_KEEP = 500
 ACTIVE = ("queued", "running")
 FINISHED = ("done", "failed", "timeout", "cancelled")
@@ -127,7 +128,7 @@ class ResearchRunner:
             finally:
                 if res is not None:
                     res.commit()        # sent or unknown -> counted (conservative)
-            logs.warn(self.area, "LOOKUP_ATTEMPT_FAILED", f"backend attempt {n} failed ({last.code})",
+            logs.warn(self.area, "LOOKUP_ATTEMPT_FAILED", "backend attempt failed", error_code=last.code,
                       attempt=n, retry=n <= self.retries)
             if n <= self.retries and on_progress is not None:
                 on_progress("searching", "מנסה שוב…")
@@ -194,7 +195,7 @@ class PlanResearchRunner:
                 raise LookupFailed("AI_BUDGET", str(e)) from e
             except Exception as e:
                 last = LookupFailed(getattr(e, "code", None) or type(e).__name__, str(e)[:160])
-            logs.warn("tasks", "LOOKUP_ATTEMPT_FAILED", f"plan attempt {n} failed ({last.code})", attempt=n)
+            logs.warn("tasks", "LOOKUP_ATTEMPT_FAILED", "plan attempt failed", error_code=last.code, attempt=n)
         raise last
 
 
@@ -287,7 +288,7 @@ class TaskManager:
 
     def mark_announced(self, task: Task) -> None:
         task.announced = True
-        logs.info("tasks", "TASK_ANNOUNCED", "background task result announced", task=task.id)
+        logs.info("tasks", "TASK_ANNOUNCED", "background task result announced", task_id=task.id)
         self._persist(task)
 
     # ------------------------------------------------------------------ control
@@ -309,7 +310,7 @@ class TaskManager:
         task = Task(uuid.uuid4().hex[:6], description, created=self._clock())
         self.tasks[task.id] = task
         self._jobs[task.id] = asyncio.get_running_loop().create_task(self._run(task, res), name=f"task.{task.id}")
-        logs.info("tasks", "TASK_STARTED", "background task queued", task=task.id, text=short(description, 120),
+        logs.info("tasks", "TASK_STARTED", "background task queued", task_id=task.id, text=short(description, 120),
                   active=len(self.active()))
         self._emit()
         return task
@@ -343,13 +344,13 @@ class TaskManager:
             if text and text != task.step:
                 task.step = text
                 task.steps = (task.steps + [text])[-20:]
-                logs.debug("tasks", "TASK_PROGRESS", "background task progress", task=task.id, text=text,
+                logs.debug("tasks", "TASK_PROGRESS", "background task progress", task_id=task.id, text=text,
                            elapsed_s=task.elapsed())
                 self._emit()
         try:
             async with self._sem:
                 task.status, task.started = "running", self._clock()
-                logs.info("tasks", "TASK_RUNNING", "background task running", task=task.id)
+                logs.info("tasks", "TASK_RUNNING", "background task running", task_id=task.id)
                 self._emit()
                 handed = True               # the runner owns (and settles) the reservation from here on
                 out = await asyncio.wait_for(self.runner(task.description, progress, reservation=res), self.timeout_s)
@@ -363,7 +364,7 @@ class TaskManager:
             task.status, task.error = "failed", e.code
         except Exception as e:
             task.status, task.error = "failed", type(e).__name__
-            logs.error("tasks", "TASK_CRASHED", f"background task crashed: {type(e).__name__}: {str(e)[:120]}")
+            logs.error("tasks", "TASK_CRASHED", "background task crashed", **logs.error_fields(e))
         finally:
             if res is not None and not handed:
                 res.release()               # never sent (cancelled while queued)
@@ -371,8 +372,8 @@ class TaskManager:
             task.step = ""
             self._jobs.pop(task.id, None)
         level = logs.info if task.status == "done" else logs.warn
-        level("tasks", f"TASK_{task.status.upper()}", f"background task {task.status}", task=task.id,
-              duration_s=task.elapsed(), attempts=task.attempts, error=task.error, **usage_fields(task.usage))
+        level("tasks", f"TASK_{task.status.upper()}", "background task finished", status=task.status, task_id=task.id,
+              duration_s=task.elapsed(), attempts=task.attempts, error_code=task.error, **usage_fields(task.usage))
         self._persist(task)
         self._emit()
         if task.status != "cancelled" and self.on_finished is not None and not self._closed:
@@ -389,7 +390,7 @@ class TaskManager:
     def _callback_done(self, c: asyncio.Task) -> None:
         self._callbacks.discard(c)
         if not c.cancelled() and c.exception() is not None:
-            logs.warn("tasks", "TASK_CALLBACK_FAILED", f"task callback failed: {type(c.exception()).__name__}")
+            logs.warn("tasks", "TASK_CALLBACK_FAILED", "task callback failed", error_type=type(c.exception()).__name__)
 
     def _emit(self) -> None:
         if self.on_update is not None:
@@ -402,13 +403,16 @@ class TaskManager:
             return
         try:
             self.store.parent.mkdir(parents=True, exist_ok=True)
+            rec = logs.redact_deep(task.record())          # never a secret, whatever the mode
+            if logs.privacy():      # SW-V4 B: content reaches disk only with privacy off (lengths kept)
+                rec = {**rec, **{k: logs._mask(rec[k]) for k in TEXT_KEYS if rec.get(k)}}
             with self.store.open("a", encoding="utf-8") as f:
-                f.write(json.dumps(task.record(), ensure_ascii=False) + "\n")
+                f.write(json.dumps(rec, ensure_ascii=False) + "\n")
             if self.store.stat().st_size > STORE_MAX_BYTES:
                 lines = self.store.read_text(encoding="utf-8").splitlines()[-STORE_KEEP:]
                 self.store.write_text("\n".join(lines) + "\n", encoding="utf-8")
         except OSError as e:
-            logs.warn("tasks", "TASK_STORE_FAILED", f"could not save the task: {type(e).__name__}")
+            logs.warn("tasks", "TASK_STORE_FAILED", "could not save the task", error_type=type(e).__name__)
 
 
 def read_history(store: Path, limit: int = 50) -> list[dict]:

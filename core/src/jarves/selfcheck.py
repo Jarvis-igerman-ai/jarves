@@ -112,9 +112,12 @@ def _when(ts: float | None) -> str:
 
 
 def _line(r: dict) -> str:
-    """One evidence line: time, level, component, code and the redacted log message (never fields)."""
-    msg = " ".join(logs.redact(str(r.get("msg") or "")).split())[:140]
-    msg = re.sub(r"[\w.+-]+@[\w-]+\.[\w.-]+", "<email>", msg)
+    """One evidence line: time, level, component, code and the redacted log message (never fields). Evidence goes
+    into ticket drafts meant for sharing: only a v2 message (a developer-written template, package B) is quoted;
+    an older line's free-text message is reduced to its length (it may hold what the user or a provider said)."""
+    raw = str(r.get("msg") or "")
+    msg = " ".join(logs.redact_pii(logs.redact(raw)).split())[:140] if r.get("v") == logs.FORMAT_VERSION \
+        else f"<{len(raw)} chars>"
     return f"{_when(r['_t'])} {r.get('level', '?')} {r.get('component', '-')} {r.get('code', '-')}: {msg}"
 
 
@@ -388,18 +391,18 @@ class SelfCheck:
                 try:
                     step()
                 except Exception as e:               # one broken check never hides the others
-                    logs.error("selfcheck", "SELFCHECK_STEP_FAILED", f"a self-check step failed: {type(e).__name__}",
+                    logs.error("selfcheck", "SELFCHECK_STEP_FAILED", "a self-check step failed",
                                exc=True)
                     status = "partial"
             ai_info = self._ai_pass(ai, since, t0)
             try:
                 self._conversations(found, since, days)
             except Exception as e:
-                logs.error("selfcheck", "SELFCHECK_STEP_FAILED", f"conversation diagnosis failed: {type(e).__name__}",
+                logs.error("selfcheck", "SELFCHECK_STEP_FAILED", "conversation diagnosis failed", step="diagnose",
                            exc=True)
                 status = "partial"
         except Exception as e:
-            logs.error("selfcheck", "SELFCHECK_FAILED", f"self-check failed: {type(e).__name__}", exc=True)
+            logs.error("selfcheck", "SELFCHECK_FAILED", "self-check failed", exc=True)
             status = "failed"
         ranked = rank(found)
         score = health_score(ranked)
@@ -431,7 +434,7 @@ class SelfCheck:
             self.db.set_setting("self_check.last_run", t0, actor="selfcheck")
         except Exception:
             pass
-        logs.info("selfcheck", "SELFCHECK_DONE", f"self-check: {len(ranked)} finding(s)", run=run_id,
+        logs.info("selfcheck", "SELFCHECK_DONE", "self-check finished", n=len(ranked), run=run_id,
                   trigger=trigger, high=counts["high"], medium=counts["medium"], low=counts["low"], score=score,
                   ai_reviews=ai_info.get("reviewed", 0))
         return run_view(st, run_id, now=self.clock())
@@ -663,7 +666,8 @@ class SelfCheck:
             if r.get("code") != "TOOL_RESULT":
                 continue
             name = str(r.get("tool") or str(r.get("msg") or "").split(" -> ")[0] or "?")
-            code = str(r.get("msg") or "").rsplit(" -> ", 1)[-1] if " -> " in str(r.get("msg") or "") else "?"
+            code = (str(r.get("result_code") or "?") if "result_code" in r
+                    else str(r.get("msg") or "").rsplit(" -> ", 1)[-1] if " -> " in str(r.get("msg") or "") else "?")
             s = stats.setdefault(name, {"calls": 0, "fails": 0, "codes": {}, "lines": []})
             s["calls"] += 1
             if r.get("ok") is False:
@@ -1231,7 +1235,7 @@ def propose(finding: dict, *, home: Path, cfg, db, features=None, clock=time.tim
                 APPLIERS[applier].risk, "proposed", clock()))
     pid = cur.lastrowid
     db.audit("selfcheck", "proposal_new", pid, {"finding": finding["fingerprint"], "applier": applier})
-    logs.info("selfcheck", "SELFCHECK_PROPOSAL", "self-check suggestion proposed for approval", proposal=pid,
+    logs.info("selfcheck", "SELFCHECK_PROPOSAL", "self-check suggestion proposed for approval", proposal_id=pid,
               applier=applier)
     return pid
 
@@ -1268,7 +1272,8 @@ def decide(store, fingerprint: str, op: str, *, by: str, home: Path, cfg, db=Non
                           "decided_at=excluded.decided_at, decided_by=excluded.decided_by",
                           (fingerprint, status, until, pid, now, by))
         store._db.commit()
-    logs.info("selfcheck", "SELFCHECK_DECIDED", f"suggestion {op}", fingerprint=fingerprint, by=by, proposal=pid)
+    logs.info("selfcheck", "SELFCHECK_DECIDED", "suggestion decided", op=op, fingerprint=fingerprint, by=by,
+              proposal_id=pid)
     return {"fingerprint": fingerprint, "state": status, "until": until, "proposal_id": pid,
             "needs_approval": bool(pid), "changes_setting": f["changes_setting"]}
 
@@ -1301,8 +1306,8 @@ def ticket_draft(view: dict) -> dict:
               f"{m.get('warnings')}", "", "Draft made locally by `jarvis diagnose --now --ticket`; review before "
               "posting. (#17)"]
     body = "\n".join(lines)
-    body = re.sub(r"[\w.+-]+@[\w-]+\.[\w.-]+", "<email>", body)
-    return {"title": title, "body": body}
+    body = logs.redact_pii(logs.redact(body))         # SW-V4 B: no secret, e-mail or phone number in a draft
+    return {"title": logs.redact_pii(logs.redact(title)), "body": body}
 
 
 # ---------------------------------------------------------------------- Core service: triggers + scheduled job
@@ -1406,7 +1411,7 @@ class SelfCheckService:
         if not self.active() or not self._due() or self.core.stopping:
             return None
         self.db.set_setting("self_check.last_auto", self.clock(), actor="selfcheck")
-        logs.info("selfcheck", "SELFCHECK_AUTO", f"automatic self-check ({trigger})", trigger=trigger,
+        logs.info("selfcheck", "SELFCHECK_AUTO", "automatic self-check", trigger=trigger,
                   previous=(prev or {}).get("session"))
         try:
             v = await self.run(trigger)

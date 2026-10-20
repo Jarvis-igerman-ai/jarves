@@ -389,8 +389,8 @@ class Features:
             if not isinstance(raw, dict) or not isinstance(raw.get("enabled", {}), dict):
                 raise ValueError("not a features object")
         except (OSError, ValueError) as e:
-            logs.warn("features", "FEATURES_FILE_BAD", f"{self.path.name} unreadable; using defaults",
-                      error=type(e).__name__)
+            logs.warn("features", "FEATURES_FILE_BAD", "features file unreadable; using defaults",
+                      file=self.path.name, error_type=type(e).__name__)
             try:
                 os.replace(self.path, self.path.with_suffix(".bad.json"))
             except OSError:
@@ -436,7 +436,7 @@ class Features:
             try:
                 fn(fid, on)
             except Exception:
-                logs.error("features", "FEATURE_LISTENER_FAILED", f"listener failed for {fid}", exc=True)
+                logs.error("features", "FEATURE_LISTENER_FAILED", "feature listener failed", feature=fid, exc=True)
 
     # --- reads
     def feature(self, fid: str) -> Feature:
@@ -575,7 +575,7 @@ class Features:
             if on:
                 self._state["requests"].pop(fid, None)
             self._save()
-        logs.info("features", "FEATURE_SET", f"{fid} {'on' if on else 'off'}", feature=fid, on=bool(on), by=by)
+        logs.info("features", "FEATURE_SET", "feature switched", feature=fid, on=bool(on), by=by)
         if before != bool(on):
             self._notify(fid)
         return self.status(fid)

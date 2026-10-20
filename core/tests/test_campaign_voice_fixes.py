@@ -63,7 +63,8 @@ def test_curator_facts_are_not_logged_in_privacy_mode(tmp_path):
     raw = path.read_text(encoding="utf-8")
     assert "דניאל" not in raw and "רחובות" not in raw
     done = [json.loads(l) for l in raw.splitlines() if '"CURATOR_DONE"' in l]
-    assert all("facts" not in e for e in done)
+    # SW-V4 B: facts is a content field: in privacy mode only its length is written
+    assert done and all(str(e.get("facts", "<")).startswith("<") for e in done)
 
 
 def test_profile_spoken_in_hebrew_matches_the_latin_profile():

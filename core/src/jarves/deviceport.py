@@ -47,7 +47,7 @@ class DevicePort:
             self.audio.stop_capture()
         self.health.set("mic", "disabled" if muted else "ok",
                         "software mute ON (not a hardware privacy switch)" if muted else "software mute off")
-        logs.info("device", "MIC_MUTE_CHANGED", f"software mic mute {'on' if muted else 'off'}", muted=muted)
+        logs.info("device", "MIC_MUTE_CHANGED", "software mic mute changed", muted=muted)
 
     def mic_start(self) -> None:
         if self.mic_muted:

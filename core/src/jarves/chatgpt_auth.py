@@ -386,7 +386,7 @@ class ChatGPTAuth:
                 err = e.code.removeprefix("oauth:")
                 if err in TERMINAL_REFRESH_ERRORS:
                     self._save(self._without_tokens(self.load()))
-                    logs.warn("chatgpt", "CHATGPT_SESSION_ENDED", f"refresh rejected ({err})")
+                    logs.warn("chatgpt", "CHATGPT_SESSION_ENDED", "ChatGPT sign-in refresh rejected", error_code=err)
                     raise ChatGPTAuthError("CHATGPT_SIGNED_OUT", "the ChatGPT connection ended",
                                            "run `jarves chatgpt login` to reconnect") from e
                 if e.code == "CHATGPT_OFFLINE":

@@ -1120,3 +1120,26 @@ Not started in V4. Each one needs its own owner approval and plan:
 - **Languages other than English and Hebrew** (Arabic, Russian and any other).
 - **Virtual-computer prototype** (V3 P2.1; justification gate D7 not passed: the owner has not named 2+ tasks the browser skill cannot do).
 - **JARVES-managed phone calls** (V3 P2.2 stage B), ChatGPT history import (F10), shared PC + robot memory (F01), skill/avatar library (F05), speaker recognition, HTTPS for the LAN dashboard before the robot is in the house, ACP/A2A adapters and other coding agents (OpenCode) for the orchestrator unless a concrete use case appears.
+
+---
+
+## Package P — Performance improvement (added by the owner, 20 Oct 2026)
+
+**Goal.** Make JARVES measurably faster, lighter and more responsive, and keep it that way. Package M enforces budgets (regression gates); package P *improves* the numbers below the V3 baselines. Complete, not an MVP.
+
+**Scope (all of it)**
+1. **Voice latency.** Wake-to-first-audio, end-of-speech to first reply audio (V3 median 1.78 s, p90 2.52 s), live-session start after Core start (V3: 8.6–15 s), barge-in stop time (0.5–0.7 s), dead air. Targets: wake-to-first-audio p50 under 2.0 s, session start under 6 s, p90 reply audio under 2.0 s. Includes keeping a warm session/prewarm policy, connection reuse, avoiding work on the event loop, and measuring on the real GPT-Live path (virtual mic/speaker, within the shared $25 cap).
+2. **Backend cost and latency (CV-17).** About 20k input tokens per backend call: trim the persona/tool schema, share cached prefixes, send only the tools the turn can use (feature-gated tool lists), compact conversation context, verify prompt caching hit rate (V3: 84% cached). Target: at least 40% fewer input tokens per call with no drop in the voice scenarios.
+3. **Startup and idle.** Core ready (V3 1.7 s), time to a usable dashboard, idle CPU (V3 0.28%), idle memory (V3 93 MB private), threads (11), and the **unexplained idle disk reads of about 250–390 KB/min**: find and remove the cause. Face show/hide time (5x), sleep/resume recovery, network-loss recovery.
+4. **Dashboard.** First load, per-page API time, static asset size/caching (ETag, gzip), no polling storms, lazy-loading of heavy pages, search index speed; measured in the real browser at 1440 and 390 px.
+5. **Test-suite and CI speed.** Suite wall time (1600+ tests, about 10 min locally, 15–17 min Windows CI): profile the slowest tests, share expensive fixtures safely, remove real sleeps, keep zero skips and zero flakes; reassess parallelism only if provably flake-free (package M decided serial).
+6. **Memory.** Per-feature memory cost table (each add-on on/off), lazy import of rarely used features, release of camera/browser/wake resources when switched off.
+7. **Installer and update.** Installer size (198 MB), install time, first-start time, update download size (delta or skip unchanged payload if feasible), startup after install.
+
+**Method.** Baseline first (`core/tools/bench_startup.py`, `perf_gate.py`, voice suites, new browser timing tool), one change at a time with before/after numbers in `docs/reviews/SWV4_P_PERF.md`, behaviour unchanged (full suite green), budgets in `core/perf_budgets.toml` tightened to the new numbers with a `[[history]]` entry. Measurements only on an idle machine (no other agents running); noisy runs are discarded and repeated (median of 5).
+
+**Acceptance.** (a) Each target above met or the report explains why not, with evidence; (b) the performance gate in CI passes with the tightened budgets; (c) the 47+ voice scenarios still pass, no new flakes; (d) the idle-read cause is identified (or proven to be OS/AV noise); (e) no feature regression (full suite zero skipped).
+
+**Testing.** Automatic: perf gate (owner and CI classes), voice latency suite with percentile assertions, dashboard timing sweep, token-count regression test for the backend prompt (fails if input tokens grow more than 10%), memory-per-feature table test. Manual: owner stop-watch script (wake-to-first-audio x10, face show/hide x5, startup to usable x3) with expected ranges.
+
+**Model.** Opus 5.5 (measurement design, voice/prompt work); Sonnet 5.5 for the dashboard/CI mechanical parts. **Effort.** About 7 agent-days. **Depends on:** M (gates), B/C finished (to avoid conflicts in `live.py`/`app.py`). **Risks.** Latency gains depend on OpenAI-side behaviour; prompt trimming can change answers (guarded by the voice scenarios); idle-read cause may be outside JARVES.

@@ -106,8 +106,8 @@ class Appearance:
                 raise ValueError("unknown mode")
             self._state = {"mode": mode, "changed": dict(raw.get("changed") or {})}
         except (OSError, ValueError, AttributeError) as e:
-            logs.warn("appearance", "APPEARANCE_FILE_BAD", f"{self.path.name} unreadable; keeping {self._state['mode']}",
-                      error=type(e).__name__)
+            logs.warn("appearance", "APPEARANCE_FILE_BAD", "appearance file unreadable; keeping the current mode",
+                      file=self.path.name, mode=self._state["mode"], error_type=type(e).__name__)
         self._mtime = st.st_mtime
 
     @property
@@ -126,7 +126,7 @@ class Appearance:
             tmp.write_text(json.dumps(self._state, ensure_ascii=False), encoding="utf-8")
             os.replace(tmp, self.path)
             self._mtime = self.path.stat().st_mtime
-        logs.info("appearance", "APPEARANCE_SET", f"appearance -> {m}", mode=m, by=by)
+        logs.info("appearance", "APPEARANCE_SET", "appearance changed", mode=m, by=by)
         return self.status()
 
     def status(self) -> dict:

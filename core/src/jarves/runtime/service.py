@@ -97,7 +97,7 @@ class Runtime:
         if self.mode in ("background", "desktop") and core.features.enabled("tray_icon"):
             self._start_tray()
         self.save()
-        logs.info("runtime", "RUNTIME_STARTED", f"runtime mode {self.mode}", mode=self.mode,
+        logs.info("runtime", "RUNTIME_STARTED", "runtime started", mode=self.mode,
                   keep_running=self.keep_running, tray=self.tray_state, alerts_paused=self.prefs["alerts_paused"])
 
     async def stop(self) -> None:
@@ -120,7 +120,7 @@ class Runtime:
             ok, why = library_available()
         if not ok:
             self.tray_state, self.tray_reason = "unavailable", why
-            logs.info("runtime", "TRAY_UNAVAILABLE", why)
+            logs.info("runtime", "TRAY_UNAVAILABLE", "tray icon unavailable", why=why)
             return
         try:
             factory = self._tray_factory
@@ -131,7 +131,7 @@ class Runtime:
             self.tray_state, self.tray_reason = "shown", ""
         except Exception as e:
             self.tray, self.tray_state, self.tray_reason = None, "unavailable", f"{type(e).__name__}: {str(e)[:100]}"
-            logs.warn("runtime", "TRAY_UNAVAILABLE", f"tray icon could not start: {self.tray_reason}")
+            logs.warn("runtime", "TRAY_UNAVAILABLE", "tray icon could not start", why=self.tray_reason)
 
     async def _refresh_loop(self) -> None:
         """Persist the live view / refresh the tray when something changed. SW-V3 P0.3: the view carries "ts", so
@@ -230,7 +230,7 @@ class Runtime:
             try:
                 await self.viewer.open()
             except Exception as e:
-                logs.warn("runtime", "VIEWER_START_FAILED", f"display window could not start: {e}", by=by)
+                logs.warn("runtime", "VIEWER_START_FAILED", "display window could not start", by=by, **logs.error_fields(e))
                 return False, str(e)[:160]
             logs.info("runtime", "DISPLAY_SHOWN", "display window opened", by=by)
             return True, "opening"
@@ -278,7 +278,7 @@ class Runtime:
     async def set_alerts_paused(self, paused: bool, by: str = "user") -> None:
         self._set_pref("alerts_paused", bool(paused))
         logs.info("runtime", "ALERTS_PAUSED" if paused else "ALERTS_RESUMED",
-                  f"proactive alerts {'paused' if paused else 'resumed'}", by=by)
+                  "proactive alerts switched", paused=paused, by=by)
 
     async def apply(self, change: dict, by: str) -> dict:
         """One entry point for tray / dashboard / CLI changes: {display: show|hide, mic_muted, alerts_paused}."""
@@ -323,7 +323,7 @@ class Runtime:
             if self.tray is not None:
                 await asyncio.to_thread(self.tray.refresh)
         except Exception:
-            logs.error("runtime", "TRAY_ACTION_FAILED", f"tray action {action} failed", exc=True)
+            logs.error("runtime", "TRAY_ACTION_FAILED", "tray action failed", action=action, exc=True)
 
     def _notify(self, text: str) -> None:
         if self.tray is not None:
@@ -369,7 +369,7 @@ class Runtime:
                 await asyncio.to_thread(reset_audio_backend)
             ok = self.core.dev.check_audio()
             logs.info("runtime", "AUDIO_RECOVERED" if ok else "AUDIO_STILL_UNAVAILABLE",
-                      "audio re-opened" if ok else "audio still unavailable; retrying automatically", why=why)
+                      "audio recovery attempted", ok=ok, why=why)
             return ok
         finally:
             self.recovering = False

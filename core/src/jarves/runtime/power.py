@@ -75,5 +75,5 @@ def reset_audio_backend() -> bool:
         logs.info("runtime", "AUDIO_BACKEND_RESET", "audio devices re-scanned")
         return True
     except Exception as e:
-        logs.debug("runtime", "AUDIO_BACKEND_RESET_FAILED", f"{type(e).__name__}")
+        logs.debug("runtime", "AUDIO_BACKEND_RESET_FAILED", "audio backend reset failed", error_type=type(e).__name__)
         return False

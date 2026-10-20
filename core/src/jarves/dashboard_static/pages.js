@@ -74,7 +74,13 @@ PAGES.conversations = async function () {
     el("td", { class: "num" }, `${x.user_turns} / ${x.assistant_turns}`),
     el("td", { class: "num" }, x.tools ? `${x.tools}${x.tool_failures ? ` (${x.tool_failures} failed)` : ""}` : "—"),
     el("td", { class: "num" }, usd(x.cost.total)),
-    el("td", {}, x.errors ? pill("high", `${x.errors} err`) : null, x.issues ? pill("medium", `${x.issues}`) : (x.errors ? null : el("span", { class: "muted" }, "—")))));
+    el("td", {}, x.errors ? pill("high", `${x.errors} err`) : null, x.issues ? pill("medium", `${x.issues}`) : (x.errors ? null : el("span", { class: "muted" }, "—")))))
+    .flatMap((tr, i) => {        // SW-V4 G: the text filter goes through the recall index; show where it matched
+      const r = d.items[i].recall;
+      return r ? [tr, el("tr", { class: "click", onclick: () => { location.hash = "#/session/" + encodeURIComponent(d.items[i].id); } },
+        el("td", { colspan: "8", class: "small", dir: "auto", "data-noi18n": "" }, el("span", { class: "muted" }, `${clock(r.ts)} · `),
+          typeof recallMarked === "function" ? recallMarked(r.snippet, r.marks) : r.snippet))] : [tr];
+    });
   const pager = el("div", { class: "row pager" },
     el("button", { type: "button", disabled: d.page <= 1, onclick: () => { s.page -= 1; go(); } }, "← Newer"),
     el("span", { class: "muted small" }, `page ${d.page} of ${d.pages} · ${d.total} conversations`),
@@ -171,10 +177,17 @@ PAGES.session = async function (id, refresh) {
       try { const r = await api(`/api/session/${encodeURIComponent(s.id)}/review`, { method: "POST", body: "{}" }); reviewMsg.textContent = `${r.found} finding(s)`; setTimeout(route, 700); }
       catch (e) { reviewMsg.textContent = e.message; }
     } }, "AI review now");
+  const delMsg = note();          // SW-V4 G: one conversation (and its recall index rows), after the owner's approval
+  const del = s.live ? null : el("button", { type: "button", class: "ghost", onclick: async (ev) => {
+    if (!window.confirm(tx("למחוק את השיחה הזאת? אי אפשר לבטל.", "Delete this conversation? This cannot be undone."))) return;
+    ev.target.disabled = true; delMsg.textContent = tx("ממתין לאישור על המסך…", "Waiting for your approval on the screen…");
+    try { await api(`/api/session/${encodeURIComponent(s.id)}/delete`, { method: "POST", body: JSON.stringify({ confirm: true }) }); location.hash = "#/conversations"; }
+    catch (e) { delMsg.textContent = e.message; ev.target.disabled = false; }
+  } }, tx("מחיקת השיחה", "Delete conversation"));
   render(
     header(s.live ? "Live conversation" : (s.typed ? "Typed conversation" : "Conversation"), `${day(s.started)} ${clock(s.started)} (${utc(s.started)}) · ${secs(s.duration_s)}`,
       el("a", { href: "#/logs?conv=" + encodeURIComponent(s.id) }, "Log lines"),
-      el("a", { href: "#/raw/" + encodeURIComponent(s.id) }, "Raw JSON"),
+      el("a", { href: "#/raw/" + encodeURIComponent(s.id) }, "Raw JSON"), del, delMsg,
       el("a", { href: "#/conversations" }, "← all conversations")),
     el("div", { class: "tiles" },
       tile("Cost", usd(c.total), `voice ${usd(c.voice)} + backend ${usd(c.backend, 4)}`, true),

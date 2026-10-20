@@ -236,7 +236,7 @@ def sync_autostart(rt: Runtime) -> None:
             rt.autostart.disable()
     except Exception as e:
         from .. import logs
-        logs.warn("runtime", "AUTOSTART_SYNC_FAILED", f"could not apply autostart: {type(e).__name__}")
+        logs.warn("runtime", "AUTOSTART_SYNC_FAILED", "could not apply autostart", error_type=type(e).__name__)
 
 
 def _feature_changed(rt: Runtime, fid: str, on: bool) -> None:

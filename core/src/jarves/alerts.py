@@ -133,8 +133,8 @@ class AlertEngine:
                          int(bool(user_requested)), status, reason, None if expires_s is None else now + expires_s))
         level = logs.info if status == "pending" else logs.debug
         level("alerts", "ALERT_RAISED" if status == "pending" else "ALERT_SUPPRESSED",
-              f"alert {status}" + (f" ({reason})" if reason else ""), alert=cur.lastrowid, source=source, kind=kind,
-              priority=priority, channel=ch)
+              "alert recorded", status=status, reason=reason, alert_id=cur.lastrowid, source=source,
+              alert_kind=kind, priority=priority, channel=ch)
         return self.db.row("SELECT * FROM alerts WHERE id=?", (cur.lastrowid,))
 
     async def notify(self, *args, **kw) -> dict:
@@ -186,14 +186,14 @@ class AlertEngine:
                             via = ch
                             break
                     except Exception as e:     # a broken output must not lose the alert or stop the others
-                        logs.warn("alerts", "ALERT_OUTPUT_FAILED", f"{ch} output failed: {type(e).__name__}")
+                        logs.warn("alerts", "ALERT_OUTPUT_FAILED", "alert output failed", channel=ch, error_type=type(e).__name__)
                 if via is None:
                     self.db.x("UPDATE alerts SET attempts=attempts+1 WHERE id=?", (a["id"],))
                     continue
                 self.db.x("UPDATE alerts SET status='delivered', delivered_via=?, delivered_at=?, attempts=attempts+1 "
                           "WHERE id=?", (via, self.clock(), a["id"]))
                 delivered += 1
-                logs.info("alerts", "ALERT_DELIVERED", f"alert delivered via {via}", alert=a["id"], via=via)
+                logs.info("alerts", "ALERT_DELIVERED", "alert delivered", alert_id=a["id"], via=via)
         finally:
             self._flushing = False
         return delivered

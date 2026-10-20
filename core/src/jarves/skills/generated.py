@@ -396,7 +396,7 @@ class GeneratedSkills:
         rep["upgrade_of"] = int(self.state(sid).get("version", 0)) if upgrading else None
         _write_json(d / "report.json", rep)
         _write_json(d / "meta.json", {"proposed_by": by, "ts": time.time()})
-        logs.info("skills", "SKILL_PROPOSED", f"draft {sid} proposed ({'ok' if rep['ok'] else 'invalid'})", skill=sid,
+        logs.info("skills", "SKILL_PROPOSED", "generated Skill draft proposed", skill=sid,
                   by=by, ok=rep["ok"], errors=len(rep["errors"]))
         return rep
 
@@ -444,7 +444,7 @@ class GeneratedSkills:
         self._set_state(sid, {"version": version, "enabled": False, "grants": {"capabilities": [], "actions": False},
                               "history": hist, "last_error": None})
         shutil.rmtree(d)
-        logs.info("skills", "SKILL_INSTALLED", f"{sid} v{version} installed DISABLED", skill=sid, version=version, by=by)
+        logs.info("skills", "SKILL_INSTALLED", "generated Skill installed DISABLED", skill=sid, version=version, by=by)
         return self.view(sid)
 
     def reject(self, sid: str, *, by: str) -> None:
@@ -452,7 +452,7 @@ class GeneratedSkills:
         d = self.drafts / self._id(sid)
         if d.is_dir():
             shutil.rmtree(d)
-            logs.info("skills", "SKILL_REJECTED", f"draft {sid} rejected", skill=sid, by=by)
+            logs.info("skills", "SKILL_REJECTED", "generated Skill draft rejected", skill=sid, by=by)
 
     def _installed(self, sid: str) -> dict:
         sid = self._id(sid)
@@ -473,7 +473,7 @@ class GeneratedSkills:
         st["grants"] = {"capabilities": sorted(set(caps)), "actions": bool(actions) and has_actions}
         st.setdefault("history", []).append({"grant": st["grants"], "by": by, "ts": time.time()})
         self._set_state(sid, st)
-        logs.info("skills", "SKILL_GRANTED", f"{sid} grants updated", skill=sid, caps=st["grants"]["capabilities"],
+        logs.info("skills", "SKILL_GRANTED", "generated Skill grants updated", skill=sid, caps=st["grants"]["capabilities"],
                   actions=st["grants"]["actions"], by=by)
         return self.view(sid)
 
@@ -484,7 +484,7 @@ class GeneratedSkills:
         st["enabled"] = bool(on)
         st.setdefault("history", []).append({"enabled": bool(on), "by": by, "ts": time.time()})
         self._set_state(sid, st)
-        logs.info("skills", "SKILL_ENABLED" if on else "SKILL_DISABLED", f"{sid} {'enabled' if on else 'disabled'}",
+        logs.info("skills", "SKILL_ENABLED" if on else "SKILL_DISABLED", "generated Skill switched", on=on,
                   skill=sid, by=by)
         return self.view(sid)
 
@@ -499,7 +499,8 @@ class GeneratedSkills:
         st.update(version=older[-1], enabled=False, grants={"capabilities": [], "actions": False})
         st.setdefault("history", []).append({"rollback_from": cur, "to": older[-1], "by": by, "ts": time.time()})
         self._set_state(sid, st)
-        logs.info("skills", "SKILL_ROLLBACK", f"{sid} rolled back v{cur} -> v{older[-1]} (disabled)", skill=sid, by=by)
+        logs.info("skills", "SKILL_ROLLBACK", "generated Skill rolled back (disabled)", skill=sid, version=older[-1],
+                  previous=cur, by=by)
         return self.view(sid)
 
     def uninstall(self, sid: str, *, by: str) -> None:
@@ -507,7 +508,7 @@ class GeneratedSkills:
         self._installed(sid)
         self.removed.mkdir(parents=True, exist_ok=True)
         os.replace(self.installed / sid, self.removed / f"{sid}-{int(time.time())}")
-        logs.info("skills", "SKILL_UNINSTALLED", f"{sid} uninstalled (kept in removed/)", skill=sid, by=by)
+        logs.info("skills", "SKILL_UNINSTALLED", "generated Skill uninstalled (kept in removed/)", skill=sid, by=by)
 
     # --- views
     def view(self, sid: str) -> dict:
@@ -620,7 +621,7 @@ class _Broker:
             from datetime import datetime
             return datetime.now().astimezone().isoformat(timespec="seconds")
         if op == "log":
-            logs.info("skills", "SKILL_LOG", f"{self.sid}: {str(args.get('text', ''))[:200]}", skill=self.sid)
+            logs.info("skills", "SKILL_LOG", "generated Skill log line", skill=self.sid, text=str(args.get("text", ""))[:200])
             return True
         raise PermissionError(f"unknown ctx call {op}")
 
@@ -833,7 +834,7 @@ def sync(mgr: GeneratedSkills, registry) -> list[str]:
                 registry.register(skill)
                 changed.append(f"+{sid}")
             except Exception:
-                logs.error("skills", "SKILL_LOAD_FAILED", f"generated Skill {sid} could not be registered", exc=True)
+                logs.error("skills", "SKILL_LOAD_FAILED", "generated Skill could not be registered", skill=sid, exc=True)
                 continue
         if not isinstance(skill, InstalledSkill):
             continue                              # a built-in with the same name always wins

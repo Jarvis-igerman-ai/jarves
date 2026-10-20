@@ -218,7 +218,7 @@ DELIVERY_NOTE = ("The backend answer below finished several seconds ago but has 
 # "רשמתי לי שהצבע האהוב עליך הוא כחול" with NO delegation and NO tool call; memory stayed empty.
 CLAIM_VERBS_HE = ("רשמתי", "זכרתי", "שמרתי", "הגברתי", "הנמכתי", "החלשתי", r"שמתי(?!\s+לב)", "הפעלתי", "פתחתי",
                   "סגרתי", "הדלקתי", "כיביתי",
-                  "עצרתי", "השהיתי", "השתקתי", "שיניתי", "עדכנתי", "קבעתי", "יצרתי", "שלחתי", "מחקתי", "הוספתי",
+                  "עצרתי", "הפסקתי", "דילגתי", "השהיתי", "השתקתי", "שיניתי", "עדכנתי", "קבעתי", "יצרתי", "שלחתי", "מחקתי", "הוספתי",
                   "ביטלתי", "הסרתי", "ניגנתי", "תזמנתי", "הגדרתי")
 CLAIM_SETTLE_MAX_S = 10.0       # wait this long for a running tool / backend before judging a claim
 CLAIM_TURN_SLACK_S = 5.0        # an action result this soon before the user turn's first word still belongs to it
@@ -312,7 +312,7 @@ def action_claim(text: str) -> str:
         he = "|".join(CLAIM_VERBS_HE)
         _CLAIM_RE = (re.compile(rf"(?<![֐-׿])({he})(?![֐-׿])"),
                      re.compile(r"\bI(?:'ve| have)?\s+(saved|remembered|noted|set|turned|changed|added|sent|deleted|"
-                                r"played|paused|stopped|created|scheduled|muted|wrote)\b", re.I))
+                                r"played|paused|stopped|resumed|skipped|created|scheduled|muted|wrote)\b", re.I))
     for sentence in re.split(r"[.!?\n]+", text or ""):
         if re.search(r"(?<![֐-׿])(?:לא|כבר|אם|אולי)(?![֐-׿])|\b(?:not|already|if)\b", sentence, re.I):
             continue
@@ -494,7 +494,8 @@ class SessionLifecycle:
         if e is None:
             return
         code = getattr(e, "code", None) or type(e).__name__
-        logs.error(self._log_area, "VOICE_TASK_CRASHED", f"{t.get_name()} crashed: {type(e).__name__}: {str(e)[:150]}")
+        logs.error(self._log_area, "VOICE_TASK_CRASHED", "a voice task crashed", task_name=t.get_name(),
+                   **logs.error_fields(e))
         self._health_soon("degraded", f"live voice stopped: {t.get_name()} failed ({type(e).__name__})",
                           getattr(e, "action", "") or GENERIC_ACTION)
         self._request_end(f"error:{code}")
@@ -507,7 +508,8 @@ class SessionLifecycle:
         try:
             await _call(self.on_health, status, detail, action)
         except Exception as e:
-            logs.error(self._log_area, "VOICE_CALLBACK_FAILED", f"on_health failed: {type(e).__name__}")
+            logs.error(self._log_area, "VOICE_CALLBACK_FAILED", "voice callback failed", callback="on_health",
+                       error_type=type(e).__name__)
 
     def _request_end(self, reason: str) -> asyncio.Task | None:
         """Start finalization (once) in its own task, so a task that triggers it is never cancelling itself."""
@@ -540,18 +542,18 @@ class SessionLifecycle:
         try:
             await self._close_transport(reason)
         except Exception as e:
-            logs.debug(self._log_area, "VOICE_CLOSE_FAILED", f"close failed: {type(e).__name__}")
+            logs.debug(self._log_area, "VOICE_CLOSE_FAILED", "close failed", error_type=type(e).__name__)
         tasks, self._tasks = [t for t in self._tasks if t is not asyncio.current_task()], []
         for t in tasks:
             t.cancel()
         if tasks:
             _, pending = await asyncio.wait(tasks, timeout=3)
             if pending:
-                logs.warn(self._log_area, "VOICE_TASK_STUCK", f"{len(pending)} voice task(s) did not stop")
+                logs.warn(self._log_area, "VOICE_TASK_STUCK", "voice tasks did not stop", n=len(pending))
         try:
             await self._release()
         except Exception as e:
-            logs.debug(self._log_area, "VOICE_RELEASE_FAILED", f"release failed: {type(e).__name__}")
+            logs.debug(self._log_area, "VOICE_RELEASE_FAILED", "release failed", error_type=type(e).__name__)
         audio = getattr(self, "audio_io", None)
         if audio is not None:
             try:
@@ -567,19 +569,22 @@ class SessionLifecycle:
         try:
             await _call(getattr(self, "on_usage", None), seconds)
         except Exception as e:
-            logs.error(self._log_area, "VOICE_CALLBACK_FAILED", f"on_usage failed: {type(e).__name__}")
+            logs.error(self._log_area, "VOICE_CALLBACK_FAILED", "voice callback failed", callback="on_usage",
+                       error_type=type(e).__name__)
         stats = self.stats()
-        logs.info(self._log_area, "VOICE_ENDED", f"voice session ended ({reason})", reason=reason,
-                  voice_seconds=round(seconds, 1), **{k: v for k, v in stats.items() if k.endswith(("drops", "_s"))})
+        logs.info(self._log_area, "VOICE_ENDED", "voice session ended", reason=reason,
+                  voice_seconds=round(seconds, 1), **logs.numeric_fields(stats, ("drops", "_s")))
         try:
             await self._state("idle")
         except Exception as e:
-            logs.error(self._log_area, "VOICE_CALLBACK_FAILED", f"on_state failed: {type(e).__name__}")
+            logs.error(self._log_area, "VOICE_CALLBACK_FAILED", "voice callback failed", callback="on_state",
+                       error_type=type(e).__name__)
         self._active = False
         try:
             await _call(self.on_end, reason)
         except Exception as e:
-            logs.error(self._log_area, "VOICE_CALLBACK_FAILED", f"on_end failed: {type(e).__name__}")
+            logs.error(self._log_area, "VOICE_CALLBACK_FAILED", "voice callback failed", callback="on_end",
+                       error_type=type(e).__name__)
 
     async def _release(self) -> None: ...
 
@@ -790,13 +795,13 @@ class LiveVoice(SessionLifecycle):
 
     # ------------------------------------------------------------------ lifecycle
     async def _nudge_greeting(self) -> None:
-        logs.warn("live", "LIVE_GREETING_NUDGE", f"no greeting audio {GREETING_NUDGE_S:g} s after start: sending one "
-                                                  "silent clock note")
+        logs.warn("live", "LIVE_GREETING_NUDGE", "no greeting audio after start: sending one silent clock note",
+                          after_s=GREETING_NUDGE_S)
         try:
             await self.conn.session.thinking.append(content=clock_note(), delegation_id=None,
                                                     event_id="jarves_greeting_nudge")
         except Exception as e:                       # never let the nudge itself fail the start
-            logs.warn("live", "LIVE_GREETING_NUDGE_FAILED", f"nudge not sent: {type(e).__name__}")
+            logs.warn("live", "LIVE_GREETING_NUDGE_FAILED", "nudge not sent", error_type=type(e).__name__)
 
     async def start(self) -> None:
         if self._active:
@@ -844,7 +849,7 @@ class LiveVoice(SessionLifecycle):
         self._t_ready = time.monotonic()
         self._heard_user = False
         self._last_user_voice = self._drop_until = 0.0
-        logs.info("live", "LIVE_STARTED", f"GPT-Live session started ({self.model} -> {self.backend_model})")
+        logs.info("live", "LIVE_STARTED", "GPT-Live session started", model=self.model, backend_model=self.backend_model)
         await self._state("listening")
 
     async def _close_transport(self, reason: str) -> None:
@@ -881,7 +886,7 @@ class LiveVoice(SessionLifecycle):
                     await self.conn.session.thinking.append(content=clock_note(now), delegation_id=None,
                                                             event_id=f"jarves_clock_{last}")
                 except Exception as e:
-                    logs.warn("live", "LIVE_CLOCK_FAILED", f"clock context not sent: {type(e).__name__}")
+                    logs.warn("live", "LIVE_CLOCK_FAILED", "clock context not sent", error_type=type(e).__name__)
                     return
             await asyncio.sleep(60.5 - now.second - now.microsecond / 1e6)
 
@@ -920,7 +925,7 @@ class LiveVoice(SessionLifecycle):
                     await self.conn.session.commentary.append(content=notes[sent], delegation_id=None,
                                                               event_id=f"jarves_progress_{sent + 1}")
                 except Exception as e:
-                    logs.warn("live", "LIVE_PROGRESS_FAILED", f"progress note not sent: {type(e).__name__}")
+                    logs.warn("live", "LIVE_PROGRESS_FAILED", "progress note not sent", error_type=type(e).__name__)
                     return
                 sent += 1
                 need, last_req = PROGRESS_AGAIN_S, time.monotonic()     # silence counts from the request
@@ -1086,11 +1091,11 @@ class LiveVoice(SessionLifecycle):
             if self.running:
                 code = getattr(e, "code", None) or type(e).__name__
                 if in_handler:                  # our bug, not the network: still end cleanly
-                    logs.error("live", "LIVE_EVENT_HANDLER_CRASHED",
-                               f"event handler crashed: {type(e).__name__}: {str(e)[:150]}")
+                    logs.error("live", "LIVE_EVENT_HANDLER_CRASHED", "event handler crashed",
+                               **logs.error_fields(e))
                     detail, action = f"live voice stopped: internal error ({type(e).__name__})", GENERIC_ACTION
                 else:
-                    logs.error("live", "LIVE_CONNECTION_LOST", f"Live connection lost: {type(e).__name__}")
+                    logs.error("live", "LIVE_CONNECTION_LOST", "Live connection lost", error_type=type(e).__name__)
                     detail = f"live connection lost ({type(e).__name__})"
                     action = "check the internet; tap to start a new conversation"
                 await self._health("degraded", detail, action)
@@ -1105,7 +1110,7 @@ class LiveVoice(SessionLifecycle):
     async def handle_event(self, ev) -> None:
         t = _get(ev, "type")
         if t != "session.output_audio.delta":
-            logs.verbose("live", "LIVE_EVENT", str(t))
+            logs.verbose("live", "LIVE_EVENT", "live event", event=str(t)[:64])
         g = lambda k, d=None: _get(ev, k, d)    # noqa: E731
         if t == "session.started":
             self._started.set()
@@ -1210,7 +1215,7 @@ class LiveVoice(SessionLifecycle):
             server_reason = str(g("reason") or "")
             self._closed.set()
             if self._end_task is None:          # not requested by us
-                logs.info("live", "LIVE_REMOTE_CLOSED", f"server closed the session ({server_reason or 'unknown'})")
+                logs.info("live", "LIVE_REMOTE_CLOSED", "server closed the session", reason=server_reason or "unknown")
                 if server_reason in ("connection_lost", "content"):
                     await self._health("degraded", f"live session ended by the server ({server_reason})",
                                        "check the internet; tap to start a new conversation")
@@ -1219,18 +1224,21 @@ class LiveVoice(SessionLifecycle):
             cid = str(_get(g("error"), "client_event_id") or g("client_event_id") or "")
             if cid.startswith("jarves_redelegate"):
                 code, msg, _ = error_info(g("error"))
-                logs.warn("live", "LIVE_REDELEGATE_REJECTED", f"Core hand-over to the backend rejected ({code}): {msg}")
+                logs.warn("live", "LIVE_REDELEGATE_REJECTED", "Core hand-over to the backend rejected", error_code=code,
+                          provider_error=msg)
                 self._own_rejected()
                 return
             if cid.startswith("jarves_lang"):
                 code, msg, _ = error_info(g("error"))
-                logs.warn("live", "LIVE_EXTRA_REJECTED", f"language context rejected ({code}): {msg}")
+                logs.warn("live", "LIVE_EXTRA_REJECTED", "optional context rejected", extra="lang", error_code=code,
+                          provider_error=msg)
                 self._lang_off = True
                 return
             if cid.startswith(("jarves_clock", "jarves_progress", "jarves_stall", "jarves_task")):
                 # optional extras: clock/progress are switched off; stall/task notes are only logged; stay healthy
                 code, msg, _ = error_info(g("error"))
-                logs.warn("live", "LIVE_EXTRA_REJECTED", f"{cid.split('_')[1]} context rejected ({code}): {msg}")
+                logs.warn("live", "LIVE_EXTRA_REJECTED", "optional context rejected", extra=cid.split("_")[1],
+                          error_code=code, provider_error=msg)
                 self._rejected = (getattr(self, "_rejected", set()) | {cid})
                 if cid.startswith("jarves_clock"):
                     self.clock_context = False
@@ -1239,14 +1247,14 @@ class LiveVoice(SessionLifecycle):
                 return
             await self._on_error(g("error"))
         elif t == "info":
-            logs.debug("live", "LIVE_INFO", str(g("message"))[:200])
+            logs.debug("live", "LIVE_INFO", "server info message", provider_error=str(g("message"))[:200])
 
     async def _on_error(self, err, backend: bool = False) -> None:
         code, msg, etype = error_info(err)
         self._stats["errors"] += 1
         fatal = is_fatal(code, etype)
-        logs.error("live", "LIVE_BACKEND_ERROR" if backend else "LIVE_ERROR",
-                   f"{'backend' if backend else 'Live'} error {code}: {msg}", fatal=fatal)
+        logs.error("live", "LIVE_BACKEND_ERROR" if backend else "LIVE_ERROR", "the voice provider reported an error",
+                   error_code=code, error_type=etype, provider_error=msg, backend=backend, fatal=fatal)
         if code == "responses_validation_failed":
             detail = f"backend delegation settings rejected: {msg}"
         else:
@@ -1273,8 +1281,8 @@ class LiveVoice(SessionLifecycle):
         except BudgetExceeded:
             self._input_closed = True               # no new user turns -> no new delegations
             self._end_after_answer = True
-            logs.warn("live", "AI_BUDGET", f"no budget for another request ({where}); mic input closed, "
-                      "ending after this answer", action="raise ai.daily_request_limit")
+            logs.warn("live", "AI_BUDGET", "no budget for another request; mic input closed, ending after this answer",
+                      where=where, action="raise ai.daily_request_limit")
 
     def _schedule_flush(self, delay: float = 2.0) -> None:
         """Log what was said once the speaker has been quiet for `delay` s (instead of at the next turn)."""
@@ -1295,7 +1303,7 @@ class LiveVoice(SessionLifecycle):
                 try:
                     await self.on_transcript(role, text)
                 except Exception as e:
-                    logs.debug("live", "LIVE_TRANSCRIPT_SEND_FAILED", f"transcript not sent: {type(e).__name__}")
+                    logs.debug("live", "LIVE_TRANSCRIPT_SEND_FAILED", "transcript not sent", error_type=type(e).__name__)
 
     def _flush_transcripts(self) -> list[tuple[str, str]]:
         out = []
@@ -1325,7 +1333,7 @@ class LiveVoice(SessionLifecycle):
         now = time.monotonic()
         if emo and not (self._last_emotion[0] == emo and now - self._last_emotion[1] < 5.0):
             self._last_emotion = (emo, now)
-            logs.info("live", "LIVE_EMOTION", f"reacting: {emo}", role=role)
+            logs.info("live", "LIVE_EMOTION", "reacting with an emotion", emotion=emo, role=role)
             await _call(self.on_emotion, emo)
 
     async def _activity(self, kind: str, text: str = "", detail: str = "") -> None:
@@ -1360,7 +1368,7 @@ class LiveVoice(SessionLifecycle):
             await self._activity("done")
 
     async def _budget_exhausted(self, where: str) -> None:
-        logs.warn("live", "AI_BUDGET", f"daily AI request limit reached ({where}); ending live session",
+        logs.warn("live", "AI_BUDGET", "daily AI request limit reached; ending live session", where=where,
                   action="raise ai.daily_request_limit")
         await self._health("degraded", "daily AI request limit reached; live voice ended",
                            "raise ai.daily_request_limit or wait until tomorrow")
@@ -1442,8 +1450,8 @@ class LiveVoice(SessionLifecycle):
                 logs.info("live", "LIVE_BACKEND_RETRY_CANCELLED", "retry cancelled: the original answer arrived")
                 raise
             except Exception as e:
-                logs.warn("live", "LIVE_BACKEND_RETRY_FAILED", f"retry failed: {type(e).__name__}",
-                          retry_s=round(time.monotonic() - t0, 1), detail=str(e)[:120])
+                logs.warn("live", "LIVE_BACKEND_RETRY_FAILED", "retry failed",
+                          retry_s=round(time.monotonic() - t0, 1), **logs.error_fields(e))
             finally:
                 self._tools_running = max(0, self._tools_running - 1)
         content = STALL_RESULT_NOTE.format(answer=answer[:600]) if answer else STALL_FAIL_NOTE
@@ -1479,14 +1487,14 @@ class LiveVoice(SessionLifecycle):
             try:
                 await self.conn.session.commentary.append(content=content, delegation_id=None, event_id=eid)
             except Exception as e:
-                logs.warn("live", "LIVE_ANNOUNCE_FAILED", f"announcement not sent: {type(e).__name__}")
+                logs.warn("live", "LIVE_ANNOUNCE_FAILED", "announcement not sent", error_type=type(e).__name__)
                 return False
             t0 = time.monotonic()
             while time.monotonic() - t0 < 1.5 and eid not in getattr(self, "_rejected", set()) and self.running:
                 await asyncio.sleep(0.1)
             if eid not in getattr(self, "_rejected", set()):
                 logs.info("live", "LIVE_ANNOUNCE" if prefix == "jarves_task" else "LIVE_NOTE",
-                          "note handed to GPT-Live", task=tag, chars=len(content))
+                          "note handed to GPT-Live", extra=tag, chars=len(content))
                 self.note_activity()
                 return True
             content = content[: len(content) // 2]
@@ -1560,7 +1568,7 @@ class LiveVoice(SessionLifecycle):
             if item.get("type") != "function_call":
                 return
             name, call_id = item.get("name", ""), item.get("call_id", "")
-            logs.info("live", "LIVE_TOOL_CALL", f"backend called {name}", delegation=delegation_id)
+            logs.info("live", "LIVE_TOOL_CALL", "backend called a tool", tool=name, delegation=delegation_id)
             nxt = None
             if self.budget is not None:
                 try:
@@ -1668,7 +1676,7 @@ class LiveVoice(SessionLifecycle):
                 event_id=f"jarves_redelegate_item_{turn}")
             await self.conn.response.create(event_id=f"jarves_redelegate_{turn}")
         except Exception as e:
-            logs.warn("live", "LIVE_REDELEGATE_FAILED", f"hand-over not sent: {type(e).__name__}")
+            logs.warn("live", "LIVE_REDELEGATE_FAILED", "hand-over not sent", error_type=type(e).__name__)
             self._own_rejected(announce=announce_fail)
             return False
         self._stats["redelegations"] = self._stats.get("redelegations", 0) + 1
@@ -1739,9 +1747,9 @@ class LiveVoice(SessionLifecycle):
                 await self.conn.session.instructions.append(content=LANG_NOTE.format(lang=name), delegation_id=None,
                                                             event_id=f"jarves_lang_{self._user_turn_n}")
             self._stats["language_notes"] = self._stats.get("language_notes", 0) + 1
-            logs.info("live", "LIVE_LANGUAGE", f"the user speaks {name}: language note sent", lang=lang)
+            logs.info("live", "LIVE_LANGUAGE", "language note sent", language=name, lang=lang)
         except Exception as e:
-            logs.warn("live", "LIVE_LANGUAGE_FAILED", f"language note not sent: {type(e).__name__}")
+            logs.warn("live", "LIVE_LANGUAGE_FAILED", "language note not sent", error_type=type(e).__name__)
 
     async def _make_claim_true(self) -> bool:
         """The user's own words were a plain "תזכור ש..." (the deterministic parser matches them): the Core saves it
@@ -1847,7 +1855,7 @@ class LiveVoice(SessionLifecycle):
                                                       event_id="jarves_progress_confirm")
             logs.info("live", "LIVE_CONFIRM_NOTE", "asked the user to approve on the screen")
         except Exception as e:
-            logs.warn("live", "LIVE_PROGRESS_FAILED", f"confirmation note not sent: {type(e).__name__}")
+            logs.warn("live", "LIVE_PROGRESS_FAILED", "confirmation note not sent", error_type=type(e).__name__)
 
     def confirm_done(self) -> None:
         self._confirm_pending = False

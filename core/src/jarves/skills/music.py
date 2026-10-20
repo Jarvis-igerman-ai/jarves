@@ -607,7 +607,7 @@ class MusicSkill(Skill):
     description = "Play music in the user's YouTube Music player (Pear Desktop)"
 
     def __init__(self, player: MusicPlayer, max_volume: int = 70, verify_tries: int = 16, *,
-                 trim_queue: bool = True, volume_step: int = 10, play_budget_s: float = PLAY_BUDGET_S) -> None:
+                 trim_queue: bool = False, volume_step: int = 10, play_budget_s: float = PLAY_BUDGET_S) -> None:
         self.player = player
         self.verify_tries = verify_tries
         self._plays = 0
@@ -628,7 +628,7 @@ class MusicSkill(Skill):
             return res
         except MusicError as e:
             self.last_error = e
-            logs.warn("music", e.code, e.message, action=e.action)
+            logs.warn("music", e.code, "music player problem", detail=e.message, action=e.action)
             msg = {"MUSIC_PLAYER_OFFLINE": "נגן המוזיקה לא פועל. צריך להפעיל את Pear Desktop.",
                    "MUSIC_PAIR_DENIED": "החיבור לנגן נדחה. צריך לאשר אותו ב-Pear Desktop.",
                    "MUSIC_NOT_PAIRED": "עוד לא חיברו אותי לנגן המוזיקה. צריך להריץ jarves music pair ולאשר.",
@@ -661,7 +661,7 @@ class MusicSkill(Skill):
             try:
                 n = await trim()
                 if n:
-                    logs.debug("music", "QUEUE_TRIMMED", f"removed {n} played items from the player's queue")
+                    logs.debug("music", "QUEUE_TRIMMED", "played items removed from the player's queue", n=n)
             except asyncio.CancelledError:
                 logs.debug("music", "QUEUE_TRIM_CANCELLED", "queue trim cancelled (shutdown)")
                 raise
@@ -774,7 +774,7 @@ class MusicSkill(Skill):
                         break
                     if self._moved_on:
                         seen.add(self._moved_on)
-                    logs.info("music", "MUSIC_CANDIDATE_FAILED", f"candidate {len(tried)} did not start; trying the next")
+                    logs.info("music", "MUSIC_CANDIDATE_FAILED", "candidate did not start; trying the next", n=len(tried))
                 if np is None and tried:
                     # a slow player may have started an EARLIER try after we moved on (S11, real Pear 19 Oct: "נועה
                     # קירל" ended on the 2nd candidate, reported "not confirmed"): one last look before saying no

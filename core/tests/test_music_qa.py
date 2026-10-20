@@ -329,7 +329,7 @@ async def test_music_skill_trims_in_the_background_after_a_successful_play():
         trimmed.append(1)
         return 5
     p.trim_history = trim_history
-    s = MusicSkill(p, verify_tries=2)
+    s = MusicSkill(p, verify_tries=2, trim_queue=True)          # OD-14: trimming is opt-in (off by default)
     play = next(x for x in s.tools() if x.name == "music_play")
     res = await play.handler(type("A", (), {"query": "שיר"})())
     assert res.ok

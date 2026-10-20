@@ -205,7 +205,8 @@ class ChatGPTBrain:
         self._raise_code("", "", str(body.get("detail", "")) if isinstance(body, dict) else "", r.status_code)
 
     def _raise_code(self, code: str, param: str, message: str, status: int) -> None:
-        logs.warn("chatgpt", code or f"HTTP_{status}", "ChatGPT plan request failed", param=param, status=status)
+        logs.warn("chatgpt", code or f"HTTP_{status}", "ChatGPT plan request failed", param=param, status=status,
+                  provider_error=message[:200])
         if code == "subscription_sharing_usage_limit_exceeded":
             self.paused_code = "CHATGPT_LIMIT"
             raise BrainUnavailable("CHATGPT_LIMIT", "ChatGPT plan usage limit reached",

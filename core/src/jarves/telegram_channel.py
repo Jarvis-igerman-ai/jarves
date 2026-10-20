@@ -98,7 +98,7 @@ class TelegramApi:
                                 "הצ'אט חסם את הבוט או שלא לחצו Start. פותחים את הבוט בטלגרם ושולחים לו הודעה.")
         if r.status_code == 429:
             raise TelegramError("TELEGRAM_RATE_LIMIT", "Telegram asks to slow down", "טלגרם מבקש להאט. ננסה עוד רגע.")
-        logs.warn("telegram", "TELEGRAM_API_ERROR", f"Telegram answered {r.status_code}", method=method,
+        logs.warn("telegram", "TELEGRAM_API_ERROR", "Telegram API error", method=method,
                   status=r.status_code)
         raise TelegramError("TELEGRAM_API_ERROR", f"Telegram answered {r.status_code}: {desc[:120]}",
                             "טלגרם החזיר שגיאה. נסו שוב מאוחר יותר.")

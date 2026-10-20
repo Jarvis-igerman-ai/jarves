@@ -35,7 +35,7 @@ provider = "pear"              # Pear Desktop (YouTube Music) local API Server p
 pear_url = "http://127.0.0.1:26538"
 max_volume = 70               # cap for the slider JARVES sets (0-100)
 volume_step = 10              # "louder" / "quieter" step
-trim_queue = true             # remove old PLAYED items from Pear's queue (its history) so it stays fast; false = never
+trim_queue = false            # true = remove old PLAYED items from Pear's queue (its history) so it stays fast (OD-14: off)
 
 [log]
 level = "INFO"

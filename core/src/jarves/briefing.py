@@ -166,7 +166,7 @@ class BriefingSkill(Skill):
                 try:
                     return await asyncio.wait_for(getattr(self, sid)(), SECTION_TIMEOUT_S)
                 except Exception:
-                    logs.error("briefing", "BRIEFING_SECTION_FAILED", f"briefing section {sid} failed", exc=True)
+                    logs.error("briefing", "BRIEFING_SECTION_FAILED", "briefing section failed", section=sid, exc=True)
                     return _sec(sid, False, "החלק הזה לא זמין כרגע.", code="SECTION_FAILED")
             secs = await asyncio.gather(*(one(s) for s in wanted))
             day = self.clock().strftime("%Y-%m-%d")

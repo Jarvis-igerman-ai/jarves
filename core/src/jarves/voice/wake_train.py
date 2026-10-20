@@ -50,6 +50,13 @@ NEG_EN = ["what time is it", "turn on the music", "good morning", "how is the we
           "I am going to the store", "call my mother", "the meeting is at ten", "just a moment please",
           "hey google", "hey siri", "alexa", "okay google", "hey mycroft", "hey jarvis", "jarvis", "service",
           "nervous", "hey honey", "harvest", "hey, are you there", "this is amazing", "open the window"]
+# "hey <name>" hard negatives (SWV4_WAKE_TRAIN.md): the openWakeWord-based heads mostly false-wake on a greeting + a
+# similar name. Deliberately DISJOINT from the eval near-misses (wake_eval.NEAR_MISS and the voice-campaign list:
+# Travis, Jarvie, Charles, Garvey, Jarrod, Harvey, ...) so the measured false-wake rate stays an honest hold-out.
+NEAR_EN = ["hey Marcus", "hey Carlos", "hey Jarrett", "hey Travers", "hey Chavez", "hey Darwin", "hey Garvin",
+           "hey Jason", "hey Marvel", "hey Arthur", "hey Parvez", "hey Charlie", "hey Davies", "hey Jagger",
+           "hey Gervais", "hey Barnes", "hi Marcus", "hi Carlos", "okay Darwin", "hey Jarrah", "hey Larkin",
+           "hey Carver", "hey starfish", "hey Artie", "ok Jason", "hey Charvez", "hey Tavish", "hey Jarmusch"]
 NEG_HE = ["מה השעה", "תדליק מוזיקה", "בוקר טוב", "מה מזג האוויר היום", "תודה רבה", "איפה המפתחות שלי",
           "בוא נלך הביתה", "אני הולך לחנות", "תתקשר לאמא", "הפגישה בעשר", "רגע אחד בבקשה", "היי", "שלום לך",
           "מה נשמע", "יאללה", "ג'ארוויס", "היי ג'ארוויס", "תעשה לי טובה", "סגור", "תסגור את החלון", "מעולה",
@@ -358,7 +365,7 @@ def train_phrase(phrase: str, out: Path, *, say: list[str] | None = None, sample
     held = next((v.id for v in voices if v.lang == "en" and sum(x.lang == "en" for x in voices) > 1), None)
     words = [w for t in texts for w in re.split(r"\s+", t) if len(w) > 1]
     near = lambda s: max(difflib.SequenceMatcher(None, s.lower(), t.lower()).ratio() for t in texts) > 0.75
-    negs = {"en": [s for s in NEG_EN + words if not _is_he(s) and not near(s)],
+    negs = {"en": [s for s in NEG_EN + NEAR_EN + words if not _is_he(s) and not near(s)],
             "he": [s for s in NEG_HE + words if _is_he(s) and not near(s)]}
 
     def render(text: str, v: Voice, rate: float, pitch: float) -> np.ndarray | None:

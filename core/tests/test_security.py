@@ -371,7 +371,7 @@ async def test_dispatcher_receives_client_identity():
 def test_nested_private_strings_never_reach_the_log(tmp_path):
     path = logs.setup(tmp_path / "logs", console=False)
     logs.info("device", "DEVICE_EVENT", "device event x",
-              payload={"phrase": "secret words", "x": [{"text": "hidden diary"}, {"deep": {"Email": "me@ex.com"}}],
+              stats={"phrase": "secret words", "x": [{"text": "hidden diary"}, {"deep": {"Email": "me@ex.com"}}],
                        "nested": {"access_token": "tok123456", "list": [["transcript-ish", {"query": "my query"}]]},
                        "note": "bearer abcdefghij"},
               items=[{"content": "private body"}], id="action", n=3)
@@ -384,15 +384,19 @@ def test_nested_private_strings_never_reach_the_log(tmp_path):
         assert secret not in raw, secret
     line = json.loads(raw.splitlines()[0])
     assert line["id"] == "action" and line["n"] == 3 and line["level"] == "INFO"     # safe values kept
-    assert line["payload"]["phrase"] == "<12 chars>" and line["payload"]["x"][1]["deep"]["Email"] == "<9 chars>"
+    # nested keys follow the registry under a safe parent (SW-V4 B); an unregistered field is content as a whole
+    assert line["stats"]["phrase"] == "<12 chars>" and line["stats"]["x"][1]["deep"]["Email"] == "<9 chars>"
+    assert line["items"] == "<1 chars>" and json.loads(raw.splitlines()[1])["payload"].startswith("<")
 
 
 def test_safe_fields_allow_list():
     p = {"id": "action", "muted": True, "phrase": "secret words", "blob": {"text": "x"}, "level": 0.5,
          "label": "y" * 200}
     out = logs.safe_fields(p, allow=("id", "muted", "level", "phrase", "label"))
-    assert out["id"] == "action" and out["muted"] is True and out["level"] == 0.5
-    assert "phrase" not in out and "blob" not in out and out["label"] == "<200 chars>"
-    assert set(out["omitted_keys"]) == {"phrase", "blob"}
+    # "level" is a parameter of logs.log(): never a field (a ** expansion with it would raise), so it is dropped
+    assert out["id"] == "action" and out["muted"] is True and "level" not in out
+    # only keys registered as safe survive (SW-V4 B): "label" is content, so it is dropped like "phrase"
+    assert "phrase" not in out and "blob" not in out and "label" not in out
+    assert set(out["omitted_keys"]) == {"phrase", "blob", "label", "level"}
     assert logs.safe_fields("not a dict") == {}
     assert "secret" not in json.dumps(out)

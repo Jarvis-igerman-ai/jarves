@@ -8,6 +8,8 @@ from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Literal
 
+from . import logs
+
 Status = Literal["ok", "degraded", "unavailable", "disabled", "unknown"]
 
 
@@ -54,6 +56,10 @@ class Health:
         self._recompute()
         self.save()
 
+    def components_view(self) -> dict:
+        """{name: {status, detail}} for features / self-check: the same cleaning as the snapshot."""
+        return {k: _clean({"status": v.status, "detail": v.detail}) for k, v in self.components.items()}
+
     def snapshot(self, root: Path | None = None) -> dict:
         disk = None
         try:
@@ -61,8 +67,8 @@ class Health:
         except OSError:
             pass
         return {"ts": time.time(), "core": self.core, "uptime_s": round(time.time() - self.started),
-                "storage_free_gb": disk, "last_error": self.last_error,
-                "components": {k: asdict(v) for k, v in sorted(self.components.items())}}
+                "storage_free_gb": disk, "last_error": _clean(self.last_error),
+                "components": {k: _clean(asdict(v)) for k, v in sorted(self.components.items())}}
 
     def save(self) -> None:
         if self._path:
@@ -70,6 +76,16 @@ class Health:
                 self._path.write_text(json.dumps(self.snapshot(self._path.parent), indent=1), encoding="utf-8")
             except OSError:
                 pass
+
+
+def _clean(d: dict | None) -> dict | None:
+    """SW-V4 B: health text (health.json, `jarvis status`, dashboard) never carries a secret, and in privacy mode no
+    e-mail address or phone number (e.g. the signed-in ChatGPT account in the ai detail)."""
+    if not d:
+        return d
+    priv = logs.privacy()
+    fix = (lambda s: logs.redact_pii(logs.redact(s))) if priv else logs.redact
+    return {k: fix(v) if isinstance(v, str) and k in ("detail", "action") else v for k, v in d.items()}
 
 
 def read_snapshot(path: Path) -> dict | None:

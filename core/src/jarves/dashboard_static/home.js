@@ -34,7 +34,10 @@ async function renderTopbar() {
   const bar = document.getElementById("topbar");
   try { privacyState = await api("/api/privacy"); } catch (e) { bar.replaceChildren(); return; }
   const msg = el("span", { class: "muted small" });
-  bar.replaceChildren(el("span", { class: "priv" }, privacyButton(msg, true)), msg);
+  // SW-V4 B: development mode is said plainly on every page (the server sends the text, empty when privacy is on)
+  const banner = privacyState.privacy ? null : el("span", { class: "priv-banner small", role: "status", id: "privacyBanner" },
+    tx(privacyState.banner_he, privacyState.banner_en));
+  bar.replaceChildren(el("span", { class: "priv" }, privacyButton(msg, true)), ...(banner ? [banner] : []), msg);
 }
 function privacyCard(p) {
   const msg = el("div", { class: "muted small" });

@@ -131,6 +131,14 @@ class Skill:
 ConfirmFn = Callable[[str], Awaitable[bool]]
 
 
+_UNTRUSTED_KEYS = ("output_tail",)
+
+
+def _carries_untrusted(data: dict | None) -> bool:
+    """Does a result carry text written by someone else (untrusted_* keys, a program's output)?"""
+    return any(str(k).startswith("untrusted") or k in _UNTRUSTED_KEYS for k, v in (data or {}).items() if v)
+
+
 async def _deny(_: str) -> bool:
     return False
 
@@ -207,14 +215,14 @@ class SkillRegistry:
         for t in tools:
             why = check_tool(skill.name, t.name, t.description)
             if why:
-                logs.error("skills", "TOOL_GUARDRAIL", why, skill=skill.name, tool=t.name)
+                logs.error("skills", "TOOL_GUARDRAIL", "tool rejected by a guardrail", why=why, skill=skill.name, tool=t.name)
                 raise ValueError(why)
             if t.name in self._tools:
                 raise ValueError(f"tool {t.name!r} already registered by {self._tools[t.name][0].name}")
         self.skills[skill.name] = skill
         for t in tools:
             self._tools[t.name] = (skill, t)
-        logs.info("skills", "SKILL_REGISTERED", f"skill {skill.name} registered", tools=[t.name for t in tools])
+        logs.info("skills", "SKILL_REGISTERED", "skill registered", skill=skill.name, tools=[t.name for t in tools])
 
     def unregister(self, name: str) -> bool:
         """Remove a Skill and its tools (generated Skills: uninstall / rollback / new version). True if it existed."""
@@ -223,7 +231,7 @@ class SkillRegistry:
             return False
         for tname in [t for t, (s, _) in self._tools.items() if s is skill]:
             del self._tools[tname]
-        logs.info("skills", "SKILL_UNREGISTERED", f"skill {name} unregistered")
+        logs.info("skills", "SKILL_UNREGISTERED", "skill unregistered", skill=name)
         return True
 
     def _gated(self, skill: Skill, tool: Tool) -> str | None:
@@ -232,7 +240,7 @@ class SkillRegistry:
         try:
             return self.gate(skill.name, tool.name)
         except Exception:          # a broken switch check must not hide every tool or crash a turn
-            logs.error("skills", "FEATURE_GATE_FAILED", f"feature check failed for {tool.name}", exc=True)
+            logs.error("skills", "FEATURE_GATE_FAILED", "feature check failed", tool=tool.name, exc=True)
             return None
 
     def tools(self) -> list[Tool]:
@@ -249,11 +257,11 @@ class SkillRegistry:
         perm = tool.permission
         if origin not in ("model", "user") or perm not in PERMISSIONS or (
                 perm == "action" and tool.name not in self.allowed_actions):
-            logs.warn("skills", "TOOL_FORBIDDEN", f"{tool.name} is not authorized by policy; denied",
+            logs.warn("skills", "TOOL_FORBIDDEN", "tool not authorized by policy; denied",
                       tool=tool.name, permission=str(perm), origin=str(origin))
             return ToolResult(False, f"{tool.name} is not allowed", code="TOOL_FORBIDDEN")
         if perm != "read" and origin == "model" and self._untrusted_at is not None:
-            logs.warn("skills", "TOOL_UNTRUSTED_TURN", f"{tool.name} refused: mail/calendar text was read this turn",
+            logs.warn("skills", "TOOL_UNTRUSTED_TURN", "tool refused: mail/calendar text was read this turn",
                       tool=tool.name)
             return ToolResult(False, "I just read mail or calendar text written by others, so I take no action in "
                               "this turn. Ask the user to say the request again.", code="TOOL_UNTRUSTED_TURN")
@@ -272,7 +280,7 @@ class SkillRegistry:
             if who:
                 meta["details"] = {"recipient": str(who)}       # spoken_kind() speaks its first name only
         if prompt and not await self._ask(prompt, **meta):
-            logs.info("skills", "TOOL_DECLINED", f"{tool.name} not confirmed by user", tool=tool.name, origin=origin)
+            logs.info("skills", "TOOL_DECLINED", "tool not confirmed by the user", tool=tool.name, origin=origin)
             return ToolResult(False, "cancelled: the user did not confirm", code="TOOL_DECLINED")
         return None
 
@@ -307,7 +315,7 @@ class SkillRegistry:
             return ToolResult(False, f"skill {skill.name} is disabled", code="SKILL_DISABLED")
         off = self._gated(skill, tool)
         if off is not None:        # the model may still hold an older tool list: refuse truthfully
-            logs.info("skills", "FEATURE_OFF", f"{name} refused: {off}", tool=name)
+            logs.info("skills", "FEATURE_OFF", "tool refused: feature off", tool=name, reason=off)
             return self._hinted(skill, tool, ToolResult(False, f"not available: {off}", code="FEATURE_OFF"))
         try:
             if isinstance(raw_args, str):
@@ -315,10 +323,10 @@ class SkillRegistry:
             args = tool.args.model_validate(raw_args or {})
         except ValidationError as e:        # never log the input values (may be private)
             bad = [".".join(map(str, err.get("loc", ()))) for err in e.errors(include_input=False)]
-            logs.warn("skills", "TOOL_BAD_ARGS", f"invalid arguments for {name}", bad_fields=bad)
+            logs.warn("skills", "TOOL_BAD_ARGS", "invalid tool arguments", tool=name, bad_fields=bad)
             return ToolResult(False, f"invalid arguments for {name}", code="TOOL_BAD_ARGS")
         except ValueError:
-            logs.warn("skills", "TOOL_BAD_ARGS", f"invalid arguments for {name}")
+            logs.warn("skills", "TOOL_BAD_ARGS", "invalid tool arguments", tool=name)
             return ToolResult(False, f"invalid arguments for {name}", code="TOOL_BAD_ARGS")
         refused = await self._authorize(tool, args, origin)
         if refused is not None:
@@ -328,12 +336,14 @@ class SkillRegistry:
         except TimeoutError:
             res = ToolResult(False, f"{name} timed out", code="TOOL_TIMEOUT")
         except Exception as e:  # a broken Skill must never take down the Core
-            logs.error("skills", "TOOL_CRASH", f"{name} raised", exc=True)
+            logs.error("skills", "TOOL_CRASH", "tool raised an exception", tool=name, exc=True)
             res = ToolResult(False, f"{name} failed: {type(e).__name__}", code="TOOL_CRASH")
-        if tool.untrusted_output and res.ok:
+        if tool.untrusted_output and (res.ok or _carries_untrusted(res.data)):
+            # review C (SWV4): a FAILED run still returns third-party text (a helper command exiting 1 prints
+            # whatever it likes into output_tail): that taints the turn exactly like a successful one
             self._untrusted_at = self.clock()
         log = logs.info if res.ok else logs.warn
-        log("skills", "TOOL_RESULT", f"{name} -> {res.code}", tool=name, ok=res.ok, origin=origin)
+        log("skills", "TOOL_RESULT", "tool finished", tool=name, ok=res.ok, result_code=res.code, origin=origin)
         return self._hinted(skill, tool, res) if not res.ok else res
 
     def _hinted(self, skill: Skill, tool: Tool, res: ToolResult) -> ToolResult:
@@ -342,7 +352,7 @@ class SkillRegistry:
         try:
             hint = self.setup_hint(skill.name, tool.name, res)
         except Exception:          # a broken hint must never change the result
-            logs.error("skills", "SETUP_HINT_FAILED", f"setup hint failed for {tool.name}", exc=True)
+            logs.error("skills", "SETUP_HINT_FAILED", "setup hint failed", tool=tool.name, exc=True)
             return res
         if hint:
             res.data = {**res.data, "setup_hint": hint}

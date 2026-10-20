@@ -283,7 +283,7 @@ async def test_close_cancels_a_running_trim_then_closes_the_player():
     async def close():
         state["closed"] = True
     fp.trim_history, fp.close = trim_history, close
-    r, sk = _reg(fp, verify_tries=2)
+    r, sk = _reg(fp, verify_tries=2, trim_queue=True)
     assert (await r.call("music_play", {"query": "Song One"})).ok
     await asyncio.sleep(0.05)
     assert sk._trim_task is not None and not sk._trim_task.done()
@@ -294,8 +294,10 @@ async def test_close_cancels_a_running_trim_then_closes_the_player():
 def test_config_has_trim_and_step_switches():
     from jarves.config import MusicConfig
     c = MusicConfig()
-    assert c.trim_queue is True and c.volume_step == 10
-    assert MusicConfig(trim_queue=False).trim_queue is False
+    assert c.trim_queue is False and c.volume_step == 10           # OD-14: off by default
+    assert MusicConfig(trim_queue=True).trim_queue is True
+    from jarves.config_edit import EDITABLE
+    assert "music.trim_queue" in EDITABLE                          # ... with a switch in Settings
 
 
 # ---------------------------------------------------------------- volume UX (real session 19 Oct 2026)

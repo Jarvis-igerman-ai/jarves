@@ -271,9 +271,8 @@ class Curator:
                 logs.error("memory", "CURATOR_FAILED", "memory curator failed", exc=True)
             self.last = saved
             # campaign 20 Oct (suite #29): the learned facts are private content; log.privacy = true hides them
-            facts = {} if logs.privacy() else {"facts": [s["text"] for s in saved]}
-            logs.info("memory", "CURATOR_DONE", f"curator saved {len(saved)} new fact(s)", reason=reason,
-                      session=session, turns=len(turns), saved=len(saved), **facts)
+            logs.info("memory", "CURATOR_DONE", "curator finished", reason=reason, session=session, turns=len(turns),
+                      saved=len(saved), facts=[s["text"] for s in saved])
             return saved
 
     async def _llm_pass(self, turns: list[tuple[str, str]]) -> list[Candidate]:
@@ -285,7 +284,7 @@ class Curator:
         try:
             facts = await self.llm(transcript)
         except Exception as e:
-            logs.warn("memory", "CURATOR_LLM_FAILED", f"LLM memory pass failed: {type(e).__name__}")
+            logs.warn("memory", "CURATOR_LLM_FAILED", "LLM memory pass failed", error_type=type(e).__name__)
             return []
         out = []
         for f in facts[:10]:

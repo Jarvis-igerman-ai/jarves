@@ -42,6 +42,11 @@ def home(tmp_path):
     return tmp_path
 
 
+def owner_speaks(reg) -> None:
+    """A new owner turn after the inbox was read aloud (the registry keeps a young taint for 3 s)."""
+    reg._untrusted.clear()
+
+
 def reg_with(skill, approve=True, log=None):
     reg = SkillRegistry()
     reg.register(skill)
@@ -121,6 +126,7 @@ async def test_send_only_after_confirmation_with_exact_text(home):
         prompts = []
         reg = reg_with(ig.InstagramSkill(home), approve=False, log=prompts)
         await reg.call("instagram_inbox", {})
+        owner_speaks(reg)                                    # DM text taints the turn (review C): the owner answers
         d = await reg.call("instagram_draft", {"message_id": "m1", "text": "Yes, until 6pm"})
         assert d.ok and d.code == "INSTAGRAM_DRAFT_READY" and "/me/messages" not in srv.paths()
         for origin in ("model", "user"):
@@ -149,6 +155,7 @@ async def test_edit_needs_a_new_draft_and_unknown_message_is_refused(home):
         connect(home, srv)
         reg = reg_with(ig.InstagramSkill(home))
         await reg.call("instagram_inbox", {})
+        owner_speaks(reg)                                    # DM text taints the turn (review C): the owner answers
         assert (await reg.call("instagram_draft", {"message_id": "nope", "text": "x"})).code == "INSTAGRAM_UNKNOWN_MESSAGE"
         assert (await reg.call("instagram_send", {"draft_id": "forged"})).code == "INSTAGRAM_UNKNOWN_DRAFT"
         a = await reg.call("instagram_draft", {"message_id": "m1", "text": "one"})
@@ -168,6 +175,7 @@ async def test_window_guard_refuses_at_draft_and_at_send(home):
         now = [time.time()]
         reg = reg_with(ig.InstagramSkill(home, clock=lambda: now[0]))
         await reg.call("instagram_inbox", {})
+        owner_speaks(reg)                                    # DM text taints the turn (review C): the owner answers
         r = await reg.call("instagram_draft", {"message_id": "old", "text": "late reply"})
         assert not r.ok and r.code == "INSTAGRAM_WINDOW_CLOSED"
         d = await reg.call("instagram_draft", {"message_id": "new", "text": "ok"})
@@ -186,6 +194,7 @@ async def test_api_side_errors_are_reported_without_secrets(home):
         connect(home, srv)
         reg = reg_with(ig.InstagramSkill(home))
         await reg.call("instagram_inbox", {})
+        owner_speaks(reg)                                    # DM text taints the turn (review C): the owner answers
         srv.state["window_closed"] = True
         d = await reg.call("instagram_draft", {"message_id": "m1", "text": "x"})
         r = await reg.call("instagram_send", {"draft_id": d.data["draft_id"]})

@@ -124,7 +124,7 @@ def load(data_dir: Path | None = None) -> dict[str, Guide]:
             try:
                 g = _parse(p)
             except (OSError, ValueError, TypeError) as e:
-                logs.warn("guides", "GUIDE_BAD", f"guide {p.name} unreadable", error=type(e).__name__)
+                logs.warn("guides", "GUIDE_BAD", "guide unreadable", file=p.name, error_type=type(e).__name__)
                 continue
             out[g.id] = g
         out = dict(sorted(out.items(), key=lambda kv: (kv[1].order, kv[0])))
@@ -390,7 +390,7 @@ def run_test(g: Guide, f: feat.Features) -> dict:
         ok, he, en = fn(g, f)
     except Exception as e:
         ok, he, en = False, f"הבדיקה נכשלה ({type(e).__name__}).", f"The check failed ({type(e).__name__})."
-    logs.info("guides", "GUIDE_TEST", f"guide test {g.id}: {'ok' if ok else 'not ok'}", guide=g.id, ok=ok)
+    logs.info("guides", "GUIDE_TEST", "guide test finished", guide=g.id, ok=ok)
     return {"ok": bool(ok), "he": he, "en": en, "ts": time.time()}
 
 
@@ -634,7 +634,7 @@ class Suggester:
     def mark(self, s: Suggestion) -> None:
         now = self.clock()
         self.st.update(lambda d: d["suggested"].__setitem__(s.guide.id, now))
-        logs.info("guides", "GUIDE_SUGGESTED", f"suggested setup of {s.guide.id}", guide=s.guide.id, why=s.why)
+        logs.info("guides", "GUIDE_SUGGESTED", "setup suggested", guide=s.guide.id, why=s.why)
 
     def take(self) -> Suggestion | None:
         s = self.pick()

@@ -100,7 +100,8 @@ class Timers:
         label = " ".join(str(label or "").split())[:80]
         cur = self.db.x("INSERT INTO timers (kind, label, due, created, status) VALUES (?,?,?,?, 'pending')",
                         (kind, label, due, self.clock()))
-        logs.info("timers", "TIMER_SET", f"{kind} set", timer=cur.lastrowid, in_s=round(due - self.clock()), by=by)
+        logs.info("timers", "TIMER_SET", "timer set", kind=kind, timer_id=cur.lastrowid, in_s=round(due - self.clock()),
+                  by=by)
         return self.get(cur.lastrowid)
 
     # ------------------------------------------------------------------ reading / cancelling
@@ -144,7 +145,8 @@ class Timers:
             late = now - t["due"]
             if late > LATE_MAX_S:
                 self.db.x("UPDATE timers SET status='missed', fired_at=? WHERE id=?", (now, t["id"]))
-                logs.warn("timers", "TIMER_MISSED", f"{t['kind']} was due {int(late)} s ago (Core was off)", timer=t["id"])
+                logs.warn("timers", "TIMER_MISSED", "timer was due while the Core was off", kind=t["kind"], late_s=int(late),
+                          timer_id=t["id"])
                 continue
             text = ring_text(t)
             try:
@@ -154,8 +156,8 @@ class Timers:
                 ok = False
             if ok or late > RETRY_S:
                 self.db.x("UPDATE timers SET status='fired', fired_at=? WHERE id=?", (now, t["id"]))
-                logs.info("timers", "TIMER_RANG" if ok else "TIMER_UNHEARD", f"{t['kind']} {'rang' if ok else 'could not be spoken'}",
-                          timer=t["id"], late_s=round(late))
+                logs.info("timers", "TIMER_RANG" if ok else "TIMER_UNHEARD", "timer due", kind=t["kind"], ok=ok,
+                          timer_id=t["id"], late_s=round(late))
                 rang += 1
         return rang
 

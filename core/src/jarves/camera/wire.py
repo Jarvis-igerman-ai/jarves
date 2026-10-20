@@ -34,7 +34,8 @@ def install_taint_guard(registry, window_s: float = TAINT_WINDOW_S, clock=time.m
         tool = registry.get(name)
         if (origin == "model" and tool is not None and tool.permission in ("action", "destructive")
                 and not name.startswith(exempt_prefix) and clock() < state["until"]):
-            logs.info(module, "UNTRUSTED_GUARD", f"{name} after {en}: asking the user first", tool=name)
+            logs.info(module, "UNTRUSTED_GUARD", "tool after untrusted content: asking the user first", tool=name,
+              after=en)
             if not await registry.confirm(f"לבצע {name}? (אחרי {he}) / Run {name}? (after {en})"):
                 return ToolResult(False, f"cancelled: not confirmed after {en}", code="TOOL_DECLINED")
         return await inner(name, raw_args, origin=origin)

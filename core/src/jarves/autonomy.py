@@ -145,7 +145,7 @@ class Autonomy:
         if LEVELS.index(level) > LEVELS.index(self.level()) and by not in ("dashboard", "cli", "user"):
             raise PermissionError("more autonomy can only be granted on the dashboard")
         self.db.set_setting("autonomy.level", level, actor=by)
-        logs.info("autonomy", "AUTONOMY_LEVEL", f"autonomy level {level}", by=by)
+        logs.info("autonomy", "AUTONOMY_LEVEL", "autonomy level set", autonomy=level, by=by)
         return level
 
     def grants(self) -> list[str]:
@@ -210,7 +210,7 @@ class Autonomy:
                              json.dumps(params), risk, status, self.clock()))
             pid = cur.lastrowid
             self.db.audit("autonomy", "proposal_new", pid, {"issue": issue["fingerprint"], "level": level})
-            logs.info("autonomy", "PROPOSAL_NEW", "diagnostic proposal", proposal=pid, applier=applier,
+            logs.info("autonomy", "PROPOSAL_NEW", "diagnostic proposal", proposal_id=pid, applier=applier,
                       autonomy=level)
             if level == "approved_low_risk" and applier and risk == "low" and applier in self.grants():
                 self.decide(pid, True, by="autonomy")
@@ -261,8 +261,8 @@ class Autonomy:
         self.db.x("UPDATE proposals SET status=?, decided_at=?, decided_by=?, result=?, revert=? WHERE id=?",
                   (status, now, by, result, json.dumps(revert) if revert else None, p["id"]))
         self.db.audit(by, "proposal_apply", p["id"], {"applier": p["applier"], "result": result})
-        logs.info("autonomy", "PROPOSAL_APPLIED" if status == "applied" else "PROPOSAL_FAILED", result,
-                  proposal=p["id"], by=by)
+        logs.info("autonomy", "PROPOSAL_APPLIED" if status == "applied" else "PROPOSAL_FAILED", "proposal decided",
+                  status=status, detail=result, proposal_id=p["id"], by=by)
         return self.get(p["id"])
 
     def revert(self, pid: int, *, by: str) -> dict:

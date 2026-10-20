@@ -716,8 +716,7 @@ class Scheduler:
             except asyncio.CancelledError:
                 raise
             except Exception as e:
-                logs.error("scheduler", "SCHEDULER_TICK_FAILED", f"scheduler tick failed: {type(e).__name__}",
-                           exc=True)
+                logs.error("scheduler", "SCHEDULER_TICK_FAILED", "scheduler tick failed", exc=True)
             try:
                 await asyncio.wait_for(self._wake.wait(), max(1.0, delay))
             except asyncio.TimeoutError:
@@ -782,7 +781,7 @@ class Scheduler:
         except sqlite3.IntegrityError:
             return
         self.db.x("UPDATE jobs SET last_outcome='skipped', last_error=? WHERE id=?", (why, job["id"]))
-        logs.warn("scheduler", "JOB_SKIPPED", f"job occurrence skipped ({code})", job=job["id"], reason=why)
+        logs.warn("scheduler", "JOB_SKIPPED", "job occurrence skipped", error_code=code, job=job["id"], why=why)
 
     def _start(self, job: dict, occ: float, trigger: str, late: bool, missed: int, *, idem: str | None = None,
                run: dict | None = None) -> asyncio.Task | None:
@@ -803,7 +802,7 @@ class Scheduler:
             return None
         self._running.setdefault(job["id"], set()).add(loop_task)
         loop_task.add_done_callback(lambda t, jid=job["id"]: self._running.get(jid, set()).discard(t))
-        logs.info("scheduler", "JOB_STARTED", f"job run started ({trigger})", job=job["id"], run=run["id"],
+        logs.info("scheduler", "JOB_STARTED", "job run started", trigger=trigger, job=job["id"], run=run["id"],
                   late=late, missed=missed)
         return loop_task
 
@@ -851,7 +850,7 @@ class Scheduler:
                 except asyncio.CancelledError:
                     raise
                 except Exception as e:                     # a broken action never takes the scheduler down
-                    logs.error("scheduler", "JOB_CRASHED", f"job action crashed: {type(e).__name__}", exc=True)
+                    logs.error("scheduler", "JOB_CRASHED", "job action crashed", exc=True)
                     err = JobFailed(type(e).__name__, str(e)[:160])
                 finally:
                     self.db.x("UPDATE job_runs SET requests=? WHERE id=?", ((run["requests"] or 0) + budget.used,
@@ -859,7 +858,7 @@ class Scheduler:
                 if err.permanent or attempts >= 1 + job["retries"]:
                     break
                 wait = min(job["backoff_s"] * 2 ** (attempts - 1), BACKOFF_CAP_S)
-                logs.warn("scheduler", "JOB_RETRY", f"job attempt {attempts} failed ({err.code}); retry in {wait:g} s",
+                logs.warn("scheduler", "JOB_RETRY", "job attempt failed; retrying", error_code=err.code, retry_s=wait,
                           job=job["id"], attempt=attempts)
                 await self._sleep(wait)
         except asyncio.CancelledError:
@@ -913,8 +912,8 @@ class Scheduler:
         self.db.x("DELETE FROM reports WHERE job_id=? AND id NOT IN (SELECT id FROM reports WHERE job_id=? ORDER BY "
                   "created DESC, id DESC LIMIT ?)", (job["id"], job["id"], keep))
         level = logs.info if err is None else logs.warn
-        level("scheduler", f"JOB_{state.upper()}", f"job run {state}", job=job["id"], run=run["id"], report=rid,
-              late=late, attempts=run["attempts"], error=None if err is None else err.code)
+        level("scheduler", f"JOB_{state.upper()}", "job run finished", state=state, job=job["id"], run=run["id"],
+              report=rid, late=late, attempts=run["attempts"], error_code=None if err is None else err.code)
         delivery = _j(job["delivery"], ["report"])
         self.poke()                                  # the loop delivers the alert now, not at the next poll
         if err is not None:

@@ -191,6 +191,7 @@ class BackendTrace:
     def _log(self, level, code: str, msg: str, **f) -> None:
         if self.quiet:
             return
+        # log-lint: wrapper fields=elapsed_s,model,attempt,delegation,response_id
         level(self.area, f"{self.prefix}_{code}", msg, **{"elapsed_s": self.elapsed(), **self.ids, **f})
 
     def _set(self, stage: str, kind: str, text: str) -> tuple[str, str]:
@@ -208,7 +209,7 @@ class BackendTrace:
             return self._set("thinking", "thinking", "חושב…")
         if t.startswith("response.web_search_call."):
             status = t.rsplit(".", 1)[-1]
-            self._log(logs.info, "WEB_SEARCH", f"web search {status}", status=status)
+            self._log(logs.info, "WEB_SEARCH", "web search progress", status=status)
             if status in ("in_progress", "searching") and self.stage != "searching":
                 return self._set("searching", "searching", "מחפש ברשת…")
             return None
@@ -260,7 +261,8 @@ class BackendTrace:
         if t == "error":
             err = _d(ev.get("error")) or ev
             self.error = str(err.get("code") or "error")
-            self._log(logs.warn, "ERROR", f"backend stream error {self.error}", message=str(err.get("message"))[:200])
+            self._log(logs.warn, "ERROR", "backend stream error", error_code=self.error,
+                      provider_error=str(err.get("message"))[:200])
         return None
 
     def finish(self, status: str, resp: dict | None = None) -> None:
@@ -285,17 +287,17 @@ class BackendTrace:
         if status == "failed":
             err = _d(resp.get("error"))
             self.error = str(err.get("code") or "response_failed")
-            extra["error"], extra["reason"] = self.error, str(err.get("message") or "")[:200]
+            extra["error_code"], extra["provider_error"] = self.error, str(err.get("message") or "")[:200]
         elif status == "incomplete":
             self.error = str(_d(resp.get("incomplete_details")).get("reason") or "incomplete")
             extra["reason"] = self.error
         level = logs.info if status == "completed" else logs.warn
         if self.quiet:
             return
-        level(self.area, f"{self.prefix}_DONE", f"backend response {status}", backend_s=self.elapsed(),
-              **{"searches": len(self.queries), "web_searches": self.search_calls, "sources": self.sources,
-                 "pages": self.pages,
-                 **usage_fields(self.usage), **self.ids, **extra})
+        # log-lint: fields=model,attempt,delegation,response_id,tier,error_code,provider_error,reason
+        level(self.area, f"{self.prefix}_DONE", "backend response finished", status=status,
+              backend_s=self.elapsed(), searches=len(self.queries), web_searches=self.search_calls,
+              sources=self.sources, pages=self.pages, **usage_fields(self.usage), **self.ids, **extra)
 
 
 # ------------------------------------------------------------------ billing truth (CR-04)
@@ -541,7 +543,7 @@ class Brain:
             answer = await self.agent.reply(text)
             return Reply((speakable(answer) if spoken else answer) or "…", "ai")
         except BrainUnavailable as e:
-            logs.warn("ai", e.code, e.message, action=e.action)
+            logs.warn("ai", e.code, "AI request not made", detail=e.message, action=e.action)
             # SW-V3 P0.1: a timeout or network error is not "working without AI": say what really happened
             msg = TRANSIENT_REPLY.get(e.code, OFFLINE_HELP)
             return Reply(msg, "offline", ok=False, code=e.code)

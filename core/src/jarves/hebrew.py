@@ -299,6 +299,8 @@ TEXT: dict[str, str] = {
     "Background task time limit (s)": "מגבלת זמן למשימת רקע (שנ׳)",
     "Maximum music volume (%)": "עוצמת המוזיקה המרבית (%)",
     "Louder / quieter step (%)": "גודל הצעד של חזק יותר או שקט יותר (%)",
+    "Remove played songs from Pear's queue (its history) to keep it fast":
+        "למחוק שירים שכבר נוגנו מהתור של Pear (ההיסטוריה שלו) כדי שיישאר מהיר",
     "Privacy mode: never keep what was said (logs, history)": "מצב פרטיות: לא לשמור מה שנאמר (יומנים, היסטוריה)",
     "Log file level": "רמת פירוט של קובץ היומן",
     "Keep conversation history for (days)": "לשמור היסטוריית שיחות (ימים)",

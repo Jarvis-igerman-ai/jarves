@@ -1,3 +1,40 @@
+## SW-V4 B: privacy hardening + full redaction audit (20 Oct 2026) - #15 / #17, branch `v4-b-privacy` (off `origin/main`), [report](reviews/SWV4_B_PRIVACY.md), [sinks](reviews/SWV4_B_SINKS.md)
+
+- `logs.*` messages are fixed literals (466 call sites migrated); variable parts are fields classified once in `logs.FIELD_CLASS` (safe/secret/content/pii, unknown = content); provider/exception text -> `provider_error` / `exc_text`; AST lint `tools/log_lint.py` (0 violations). Secret patterns extended (OpenAI/Anthropic, JWT, Google, Telegram, Meta, GitHub, DPAPI, URL tokens, bearer, user-profile paths). Third-party loggers and crashes (main/thread/asyncio/faulthandler) routed and classified.
+- `jarvis diag` always strips content, hashes pii (per-bundle salt), drops + counts malformed lines; fixed sinks: ticket drafts, health, approvals audit, tasks.jsonl, context traces, dashboard log view, backups, Godot E2E print. "Privacy: off - conversation text is kept in logs" banner (dashboard + `jarvis status`, en/he).
+- Verified locally: full suite 1657 passed, 0 skipped; `tools/redaction_audit.py --both-modes` (real Core, planted data, 36 sinks, raw/JSON/URL/base64/UTF-16/NFC/NFD) 0 violations in both modes.
+- Open: independent Opus review (not the author), CI run URL to close #15, owner rows OR-01..OR-04, public export script key patterns (R4, branch v3-public-sync).
+- Questions for the user: OD-12 - should NEW installs start with `log.privacy` ON (recommended; your profile stays as is)? Status: WAITING FOR USER (OD-12) + review.
+## SW-V4 package C: independent re-review (20 Oct 2026) - #16, #17, branch `v4-c-review` (off `main` 5a98f13), [report](reviews/SWV4_C_REVIEW.md)
+
+- **Fixed, each with an exploit test** that fails on 5a98f13 (`core/tests/test_review_c.py`, 28 tests, 0 skips):
+  - C-01 (P1): helper dangerous commands could be approved by voice. Nested shells, late `-r` / `/s` flags, `-encodedc` / en-dash PowerShell, `python -c` rmtree and `find -delete` now need the typed code.
+  - C-02 (P1 chain): the JARVES data-folder refusal was bypassed by a wildcard, a nested quoted path, traversal, a drive-less path, `\\localhost\C$` or `~`.
+  - C-03 (P2): a failed untrusted tool did not taint the turn.
+  - C-04 (P3): `.cmd` re-parse.
+  - C-06 (P1): Instagram DMs were not marked untrusted.
+  - C-07 (P3): the webhook hung on `Content-Length: -1`.
+  - C-08 (P2): a named profile could reach the default profile's secrets (helper + folder grants).
+  - C-09 (P3): `secrets.env` line injection.
+- **#16:** every item triaged (see the paste-ready block in the report). OD-14 applied: Pear history trimming is OFF by default, with a switch in Settings.
+- **Backlog:**
+  - Fixed: O-04 (navigation refusals logged at INFO), O-05 (new `jarvis status` exit 4 = headless, face absent; documented in `--help`; campaign tools accept it), B5 (stop/skip claim verbs), and the helper health row now follows its switch.
+  - Already done on main and verified: O-03, O-06, B3, B4, CV-16.
+  - Not changed: Q08 (design) and CV-17 (needs paid live measurement).
+- **Not run:** the full suite and CI, the real-Pear validation, the `suite_v3_voice` regression and the OD-13 Codex second opinion.
+- **Questions for the user:**
+  1. R-01: an approved helper command still runs with your full rights and could reach JARVES's data through a path it builds at run time. OK to plan OS-level isolation (a restricted token, or a deny ACL on the data folder) in package L/O?
+  2. Release note: should `jarvis status` exit 4 (headless) go into v3.x, or wait for V4?
+  3. Run the real-Pear S10 / stalled-player check and `suite_v3_voice` (≤ $1.5) now, so #16 can close?
+
+  Status: WAITING FOR USER.
+
+## SW-V4 G: conversation recall (20 Oct 2026) - #17, branch `v4-g-recall` (off `origin/main`)
+
+- Report: [reviews/SWV4_G_RECALL.md](reviews/SWV4_G_RECALL.md). New `recall.py` + `recall_text.py`: SQLite FTS5 index per profile in store.db, indexed on every history commit (same transaction), Hebrew niqqud / final letters / clitic prefixes / suffixes, transliteration keys, bilingual concepts, date phrases he+en; tools `conversation_recall` / `conversation_search` (untrusted output) / `conversation_show`; `jarvis recall "q" [--since] [--json]` + `--stats/--rebuild/--repair/--forget`; dashboard Recall page, Conversations filter through the index with snippets, Delete conversation (approval popup); privacy mask/delete purge the index; 90-day retention keeps a local summary; size cap; feature/guide/wizard/bundle/capability/parity/catalogs.
+- Score: 40-question set Recall@3 40/40, right day 40/40 (`python tools/recall_quality.py`); trigram baseline 31/40 (34 with prefix strip). 10 000 turns: build ~1 s, index 3.4 MB, search p95 19 ms. 95 new tests pass; related suites pass.
+- Live voice 79-84 (`tools/suite_v4_recall.py`, ~$1.0 of $2): 79, 81, 82, 83, 84 PASS; 80 4/5 (fix for the STT name variant made after, not re-run: port busy). Two real bugs found live and fixed (the question quoted back from the open conversation; a private code read aloud from the tool data).
+- Questions for the user: in the report (notes/reports indexed while privacy is on? summary retention 10 years? speak JARVES's own past words?). Status: WAITING FOR REVIEW + USER.
 ## SW-V4 full plan (20 Oct 2026) - #17, branch `v4-plan-full` (off `v3-final`)
 
 - Docs only, no code/tests: [JARVES_SW_V4_WORK_PACKAGE.md](JARVES_SW_V4_WORK_PACKAGE.md) is now the authoritative V4 file (replaces the `v3-v4-plan` draft). Owner rules applied: software only (phone/Pi/hardware/Tailscale/multi-device/other languages under "Later"), every item a complete feature (no MVPs).
@@ -5,6 +42,14 @@
 - Testing: automatic pyramid (14 layers with commands, pass criteria, where they run), flake policy, CI matrix; owner manual script 7.1-7.21; agent script; campaign protocol A-F; release checklist.
 - No `SWV4_WAKE_TRAIN.md` / `v4-wake-train` branch exists on origin; J builds on the merged `wake_train.py` pipeline.
 - Questions for the user: the open decisions table in section 11.1 (OD-01 budget, OD-08 signing confirm, OD-12 privacy default, OD-15 delegation default, OD-20..24 orchestrator, OD-25..31 WhatsApp, OD-33..37 self-diagnostics AI review, and others). Already-answered decisions are listed in 11.2 so nobody re-asks. Status: WAITING FOR USER (approval of the plan + decisions).
+## V4: custom "Hey Jarvis" head from the owner's recordings (20 Oct 2026) - #17, branch `v4-wake-train` (off `v3-final`), [report](reviews/SWV4_WAKE_TRAIN.md)
+
+- Trained an openWakeWord-front-end head (`jarvis wake train`) on the 24 owner clips + synthetic TTS. Measured with 3-fold cross-validation (16 train / 8 test, each clip tested once) against `hey_jarvis` @0.15.
+- At threshold 0.95: owner hold-out 21/24 vs 19/24 (65/72 vs 56/72 incl. noise/quiet); false wakes on the 24-min `wake eval` corpus 23-32 vs 42 (real WakeListener); campaign phrases 2-3/20 vs 3/20 (x4 voices: 7-9/56 vs 14/56); latency median +40 ms (310 vs 270 ms), max ~1.1 s; CPU equal (~6 ms/frame).
+- **Applied** (better on both axes): `%LOCALAPPDATA%\jarves\wake\hey_jarvis.npz`, threshold 0.95, from the next Core start (the running Core was not restarted). Revert: new `jarvis wake train --revert` (test added), or delete the .npz.
+- Code: `wake_train.NEAR_EN` hard negatives ("hey <name>", disjoint from the eval near-miss lists); `--revert`. No WAVs/models in git.
+- Not measured: the two-stage Whisper confirm with the custom head (RAM). Still wakes on bare "Jarvis"; new false wake "A jar of peanut butter"; a second wake within ~4 s of a previous one can be missed (head ring reset).
+- Questions for the user: (1) Try it in the room (`jarvis stop`, `jarvis`; then `jarvis wake test --false-wakes 30`), keep or revert? (2) If false wakes are noticeable, OK to raise to 0.99 (about half the false wakes, 1 fewer noisy detection)? (3) Record ~20 more clips (other rooms, "ok jarvis", far away) for a better head? Status: WAITING FOR USER.
 
 ## V4 research: real WhatsApp send/read (20 Oct 2026) - #17, branch `v4-whatsapp-research` (off `v3-final`)
 

@@ -238,7 +238,7 @@ class ApprovalService:
         with self._lock:
             for a, fut, _ in self._pending.values():
                 if a.key == key and not fut.done():      # identical request already waiting: one prompt, one answer
-                    logs.info("approvals", "APPROVAL_DEDUPED", f"same request already waiting ({a.id[:8]})", kind=kind)
+                    logs.info("approvals", "APPROVAL_DEDUPED", "same request already waiting", id=a.id, kind=kind)
                     shared = fut
                     break
             else:
@@ -253,8 +253,8 @@ class ApprovalService:
         self._recent = [t for t in self._recent if now - t < window]
         if len(self._recent) >= limit:
             self._audit_simple(title, prompt, kind, risk, source, details, "denied", "rate_limited")
-            logs.warn("approvals", "APPROVAL_RATE_LIMITED", f"more than {limit} approval requests in {window:.0f} s; denied",
-                      kind=kind)
+            logs.warn("approvals", "APPROVAL_RATE_LIMITED", "too many approval requests; denied", limit=limit,
+                      window_s=window, kind=kind)
             return False
         self._recent.append(now)
         t = min(MAX_TIMEOUT_S, max(1.0, float(timeout if timeout is not None else self.timeout_s)))
@@ -276,11 +276,11 @@ class ApprovalService:
                 opened.append(ch)
                 a.shown.append(ch.name)
             except Exception:
-                logs.error("approvals", "APPROVAL_CHANNEL_FAILED", f"approval channel {getattr(ch, 'name', ch)} failed",
+                logs.error("approvals", "APPROVAL_CHANNEL_FAILED", "approval channel failed", channel=str(getattr(ch, "name", ch)),
                            exc=True)
         if self.dashboard_watching():
             a.shown.append("dashboard")
-        logs.info("approvals", "APPROVAL_ASKED", f"approval requested ({kind}, {risk})", id=a.id, kind=kind, risk=risk,
+        logs.info("approvals", "APPROVAL_ASKED", "approval requested", id=a.id, kind=kind, risk=risk,
                   shown=a.shown, typed=bool(a.typed_code), timeout_s=t)
         if not a.shown:
             self._resolve(a.id, False, "no_channel")
@@ -309,14 +309,15 @@ class ApprovalService:
                     if asyncio.iscoroutine(r):
                         await r
                 except Exception:
-                    logs.warn("approvals", "APPROVAL_CLOSE_FAILED", f"could not close {getattr(ch, 'name', ch)}")
+                    logs.warn("approvals", "APPROVAL_CLOSE_FAILED", "could not close an approval channel",
+                          channel=str(getattr(ch, "name", ch)))
 
     # ------------------------------------------------------------------ answering
     def answer(self, aid: str, approved: bool, *, channel: str, typed: str = "") -> tuple[bool, str]:
         """An owner's answer from a real channel. Thread-safe (dashboard threads, popup watcher threads)."""
         tool = _in_tool()
         if tool:
-            logs.warn("approvals", "APPROVAL_FROM_TOOL", f"refused: an answer came from inside tool {tool}", tool=tool)
+            logs.warn("approvals", "APPROVAL_FROM_TOOL", "refused: an answer came from inside a tool", tool=tool)
             return False, "approvals cannot be answered from a tool"
         if channel not in CHANNELS:
             return False, f"unknown channel {channel!r}"
@@ -361,8 +362,8 @@ class ApprovalService:
             logs.info("approvals", "APPROVAL_VOICE_TOO_EARLY", "speech older than the request ignored", id=a.id)
             return False
         if verdict and not a.voice_ok:
-            logs.info("approvals", "APPROVAL_VOICE_REFUSED", "this approval is answered on the screen only"
-                      + (" (typed code)" if a.typed_code else ""), id=a.id)
+            logs.info("approvals", "APPROVAL_VOICE_REFUSED", "this approval is answered on the screen only",
+                      typed=bool(a.typed_code), id=a.id)
             return False
         ok, _ = self.answer(a.id, verdict, channel=channel)
         return ok
@@ -382,7 +383,7 @@ class ApprovalService:
             self._denied[a.key] = a.decided_at
         fut.set_result(bool(approved))
         self._audit(a)
-        logs.info("approvals", "APPROVAL_DECIDED", f"{a.kind} {a.state} via {channel}", id=a.id, kind=a.kind,
+        logs.info("approvals", "APPROVAL_DECIDED", "approval decided", id=a.id, kind=a.kind,
                   risk=a.risk, decision=a.state, channel=channel)
         for fn in list(self.listeners):
             try:
@@ -482,7 +483,7 @@ class ApprovalService:
                 ok, why = self.answer(str(d.get("id")), d.get("approved") is True, channel=d["channel"],
                                       typed=str(d.get("typed") or ""))
                 if not ok:
-                    logs.info("approvals", "APPROVAL_FILE_ANSWER_REJECTED", why[:120], channel=d["channel"])
+                    logs.info("approvals", "APPROVAL_FILE_ANSWER_REJECTED", "file answer rejected", why=why[:120], channel=d["channel"])
             await asyncio.sleep(POLL_S)
 
     # ------------------------------------------------------------------ audit
@@ -504,7 +505,19 @@ class ApprovalService:
 
 
 # ---------------------------------------------------------------------- module helpers
+def _private_audit(rec: dict) -> dict:
+    """SW-V4 B: in privacy mode the audit keeps who/what kind/when/decision, not the words: the title (it can name
+    the recipient) and the detail values are masked by the field registry (an unregistered key is content).
+    Shell / install commands stay readable (redacted): they are the security record of what ran."""
+    if not logs.privacy() or rec.get("kind") in ("shell", "install"):
+        return rec
+    title = rec.get("title")
+    return {**rec, "title": title if not title else logs._mask(title),
+            "details": {k: logs.render_field(k, v, private=True) for k, v in (rec.get("details") or {}).items()}}
+
+
 def append_audit(path: Path, rec: dict) -> None:
+    rec = logs.redact_deep(_private_audit(rec))     # no secret in any field, whatever the mode
     try:
         path.parent.mkdir(parents=True, exist_ok=True)
         if path.exists() and path.stat().st_size > AUDIT_MAX_BYTES:
@@ -512,7 +525,7 @@ def append_audit(path: Path, rec: dict) -> None:
         with open(path, "a", encoding="utf-8") as f:
             f.write(json.dumps(rec, ensure_ascii=False) + "\n")
     except OSError:
-        logs.warn("approvals", "AUDIT_WRITE_FAILED", f"could not append to {path.name}")
+        logs.warn("approvals", "AUDIT_WRITE_FAILED", "could not append to the audit file", file=path.name)
 
 
 def read_history(home: Path, limit: int = 50) -> list[dict]:
@@ -630,7 +643,7 @@ def ask_owner(home: Path, prompt: str, *, title: str, why: str = "", kind: str =
                 ok = ex.submit(lambda: asyncio.run(ApprovalService(home).ask(prompt, **kw))).result(
                     MAX_TIMEOUT_S + 15)
     except Exception as e:
-        logs.warn("approvals", "DASHBOARD_APPROVAL_FAILED", f"dashboard approval failed: {type(e).__name__}")
+        logs.warn("approvals", "DASHBOARD_APPROVAL_FAILED", "dashboard approval failed", error_type=type(e).__name__)
         return False, "no approval"
     return (True, "") if ok else (False, "not approved")
 
@@ -718,10 +731,10 @@ class PopupChannel:
         if isinstance(d, dict) and d.get("id") == aid and d.get("decision") in ("approve", "deny"):
             ok, why = self.svc.answer(aid, d["decision"] == "approve", channel="popup", typed=str(d.get("typed") or ""))
             if not ok and "no such" not in why:
-                logs.warn("approvals", "APPROVAL_POPUP_REJECTED", why[:120], id=aid)
+                logs.warn("approvals", "APPROVAL_POPUP_REJECTED", "popup answer rejected", why=why[:120], id=aid)
         elif p.returncode not in (0, None, -15, 1):
             self.last_error = (err or b"").decode("utf-8", "replace")[-300:]
-            logs.warn("approvals", "APPROVAL_POPUP_FAILED", f"approval window exited with {p.returncode}",
+            logs.warn("approvals", "APPROVAL_POPUP_FAILED", "approval window failed", returncode=p.returncode,
                       detail=self.last_error[-160:])
 
     def close(self, a: Approval) -> None:

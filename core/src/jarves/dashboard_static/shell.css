@@ -75,6 +75,8 @@ nav a:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
 .topbar-slot { display: flex; align-items: center; gap: 6px; }
 .topbar-slot .priv { display: flex; gap: 6px; align-items: center; }
 .priv-btn { font-size: 12px; padding: 3px 12px; border-radius: 999px; min-height: 0; }
+.priv-banner { font-size: 12px; padding: 3px 10px; border-radius: 999px; white-space: nowrap; color: var(--text);
+  border: 1px solid color-mix(in srgb, var(--warning) 75%, var(--line)); background: var(--surface-2); }
 
 /* ---------------------------------------------------------------- content */
 main { padding: 24px 28px 88px; max-width: 1240px; margin-inline: auto; }

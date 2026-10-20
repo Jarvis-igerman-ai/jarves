@@ -93,7 +93,8 @@ def _inside(child: Path, root: Path) -> bool:
 
 def _forbidden_grant_roots(home: Path) -> list[Path]:
     """Folders a grant may never cover (system, programs, JARVES's own state with credentials)."""
-    out = [home]
+    from .profiles import data_roots
+    out = list(data_roots(home))           # a named profile: the base folder (default profile + all profiles) too
     env = os.environ
     for k in ("SystemRoot", "ProgramFiles", "ProgramFiles(x86)", "ProgramData", "LOCALAPPDATA", "APPDATA"):
         if env.get(k):
@@ -166,7 +167,7 @@ class Sandbox:
             self._check_grant_path(g["path"])          # re-checked at approval (the folder may have changed)
         self.db.x("UPDATE grants SET status=?, decided_at=?, decided_by=? WHERE id=?", (new, time.time(), by, g["id"]))
         self.db.audit(by, f"grant_{op}", g["id"], {"path": g["path"], "mode": g["mode"]})
-        logs.info("files", "GRANT_" + op.upper(), f"folder grant {op}", grant=g["id"], by=by)
+        logs.info("files", "GRANT_" + op.upper(), "folder grant decided", op=op, grant=g["id"], by=by)
         return self.db.row("SELECT * FROM grants WHERE id=?", (g["id"],))
 
     # ------------------------------------------------------------------ paths
@@ -246,7 +247,7 @@ class Sandbox:
         tmp = p.with_name(f".{p.name}.{os.getpid()}.tmp")
         tmp.write_bytes(data)
         os.replace(tmp, p)
-        logs.info("files", "FILE_WRITTEN", "file written", path=self.display(p, root, grant), bytes=len(data), by=by)
+        logs.info("files", "FILE_WRITTEN", "file written", user_path=self.display(p, root, grant), bytes=len(data), by=by)
         return {"path": self.display(p, root, grant), "bytes": len(data), "replaced": existed}
 
     def read_text(self, raw: str) -> dict:

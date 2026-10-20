@@ -196,3 +196,22 @@ def _helper_not_elevated(monkeypatch):
     except Exception:
         return
     monkeypatch.setattr(_hp, "running_elevated", lambda: False, raising=False)
+
+
+@pytest.fixture(autouse=True)
+def _no_real_browser(monkeypatch):
+    """Tests must NEVER open a real browser/window on the developer's desktop (a connect-wizard test once opened
+    t.me/BotFather every time it ran). Every launch is recorded in `opened_urls` and refused."""
+    import os
+    import webbrowser
+    opened: list[str] = []
+
+    def _fake(url, *a, **k):
+        opened.append(str(url))
+        return True
+
+    for name in ("open", "open_new", "open_new_tab"):
+        monkeypatch.setattr(webbrowser, name, _fake, raising=False)
+    if hasattr(os, "startfile"):
+        monkeypatch.setattr(os, "startfile", lambda path, *a, **k: opened.append(str(path)), raising=False)
+    yield opened

@@ -41,7 +41,7 @@ def main() -> int:
                         (("connect", "--help"), "connect --help"), (("wake", "--help"), "wake --help"), (("profile", "list"), "profile list"),
                         (("cost",), "cost"), (("usage",), "usage"), (("doctor",), "doctor"), (("diagnose",), "diagnose")):
         rr = cli(*args, timeout=150)
-        check(A, f"`jarvis {label}` runs without a traceback", "Traceback" not in rr.stderr and rr.returncode in (0, 1, 2, 3),
+        check(A, f"`jarvis {label}` runs without a traceback", "Traceback" not in rr.stderr and rr.returncode in (0, 1, 2, 3, 4),
               f"rc={rr.returncode} {(rr.stdout + rr.stderr).strip()[-200:]}")
     import json as _json
     r = cli("connect", "--status")

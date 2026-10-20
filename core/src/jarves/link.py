@@ -100,7 +100,7 @@ class GodotLink:
                             "another Core may be running; stop it or change link.port")
             raise
         self.health.set("face_link", "unavailable", "waiting for the Godot face to connect", "start godot\\run_face.cmd")
-        logs.info("link", "LINK_LISTENING", f"listening on ws://{self.host}:{self.port}")
+        logs.info("link", "LINK_LISTENING", "link listening", bind_host=self.host, port=self.port)
 
     async def stop(self) -> None:
         if self._server:
@@ -159,7 +159,7 @@ class GodotLink:
                                                    "message": f"unknown message type {t[:64]}"})
                     continue
                 if t not in ALLOWED[role]:
-                    logs.warn("link", "LINK_FORBIDDEN", f"{role} client may not send {t}", role=role)
+                    logs.warn("link", "LINK_FORBIDDEN", "client may not send this message type", msg_type=t, role=role)
                     await self._send(ws, "error", {"code": "LINK_FORBIDDEN",
                                                    "message": f"{t} is not allowed for this client"})
                     continue
@@ -169,7 +169,7 @@ class GodotLink:
                     else:
                         await self.on_message({"type": t, "payload": payload, "cid": m.get("cid")}, client)
                 except Exception:
-                    logs.error("link", "LINK_HANDLER_ERROR", f"handler for {t} failed", exc=True)
+                    logs.error("link", "LINK_HANDLER_ERROR", "link handler failed", msg_type=t, exc=True)
                     await self._send(ws, "error", {"code": "CORE_INTERNAL", "message": f"{t} failed; see logs"})
         except websockets.ConnectionClosed:
             pass
@@ -181,11 +181,11 @@ class GodotLink:
                     # SW-V3 P0.1 (review Q13): hide / window closed / Core stopping logged a WARNING and became a
                     # dashboard issue every time; a requested close is normal, only an unexpected loss is a fault
                     self.health.set("face_link", "unavailable", "display window closed", "")
-                    logs.info("link", "LINK_FACE_CLOSED", f"Godot face closed as requested ({peer})")
+                    logs.info("link", "LINK_FACE_CLOSED", "Godot face closed as requested", peer=peer)
                 else:
                     self.health.set("face_link", "unavailable", "Godot face disconnected",
                                     "restart godot\\run_face.cmd; it reconnects automatically")
-                    logs.info("link", "LINK_FACE_DISCONNECTED", f"Godot face disconnected ({peer})")
+                    logs.info("link", "LINK_FACE_DISCONNECTED", "Godot face disconnected", peer=peer)
 
     def expect_close(self, seconds: float = CLOSE_GRACE_S) -> None:
         """The face is about to close on purpose (hide, window closed by the user, Core stopping)."""
@@ -194,7 +194,7 @@ class GodotLink:
     @staticmethod
     async def _send(ws: ServerConnection, t: str, payload: dict) -> bool:
         if t != "mic.level":
-            logs.verbose("link", "MSG_OUT", t, keys=sorted(payload)[:8])
+            logs.verbose("link", "MSG_OUT", "link message out", msg_type=t, keys=sorted(payload)[:8])
         try:
             await ws.send(json.dumps({"type": t, "payload": payload, "cid": logs.get_cid()}, ensure_ascii=False))
             return True

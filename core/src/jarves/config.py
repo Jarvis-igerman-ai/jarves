@@ -137,7 +137,8 @@ class MusicConfig(_Strict):
     volume_step: int = Field(10, ge=1, le=50)      # "louder"/"quieter" move the slider this many points
     # Every 6th play removes up to 12 already-PLAYED items from Pear's queue (its visible play history) so the
     # queue stays small and fast; current and upcoming songs are never touched. false = never edit the queue.
-    trim_queue: bool = True
+    # OD-14 (owner, SW-V4): OFF by default (it changes the owner's Pear history); switch in dashboard Settings.
+    trim_queue: bool = False
 
 
 LogLevel = Literal["ERROR", "WARNING", "INFO", "DEBUG", "VERBOSE"]
@@ -201,6 +202,10 @@ class HistoryConfig(_Strict):
     llm_review: bool = True
     llm_review_daily_max: int = Field(20, ge=0, le=200)
     llm_review_model: str = ""
+    # Conversation recall (SW-V4 G, recall.py): size cap of the search index (rows; the oldest turns go first) and
+    # regular expressions whose matching text is never indexed (e.g. ["(?i)salary", "בדיקת דם"]).
+    recall_max_docs: int = Field(200_000, ge=1000, le=5_000_000)
+    recall_exclude: list[str] = []
 
 
 class CameraConfig(_Strict):
@@ -355,6 +360,9 @@ def load_secrets(home: Path | None = None) -> list[str]:
 def save_secret(name: str, value: str, home: Path | None = None) -> Path:
     if name not in SECRET_ENV:
         raise ValueError(f"unsupported secret {name}")
+    if any(c in value.strip() for c in "\r\n\x00"):
+        # review C (SWV4): one line per secret; a value with a line break would add or override OTHER entries
+        raise ValueError(f"{name}: a secret must be a single line")
     path = secrets_file(home)
     keep = []
     if path.exists():

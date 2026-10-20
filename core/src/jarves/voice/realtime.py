@@ -92,7 +92,7 @@ class RealtimeVoice(SessionLifecycle):
         if self.audio_io is not None:
             self._spawn(self._mic(), "mic")
             self._spawn(self.audio_io.run_player(RATE), "player")
-        logs.info("realtime", "RT_STARTED", f"realtime session started ({self.model})")
+        logs.info("realtime", "RT_STARTED", "realtime session started", model=self.model)
         await self._health("ok", f"realtime voice connected ({self.model})", "")
         await self._state("listening")
 
@@ -131,7 +131,7 @@ class RealtimeVoice(SessionLifecycle):
             if self.running:
                 code = getattr(e, "code", None) or type(e).__name__
                 what = "internal error" if in_handler else "connection lost"
-                logs.error("realtime", "RT_CONNECTION_LOST", f"realtime {what}: {type(e).__name__}: {str(e)[:150]}")
+                logs.error("realtime", "RT_CONNECTION_LOST", "realtime connection lost", stage=what, **logs.error_fields(e))
                 await self._health("degraded", f"realtime voice stopped: {what} ({type(e).__name__})",
                                    "check the internet; tap to start a new conversation")
                 self._request_end(f"error:{code}")
@@ -143,7 +143,7 @@ class RealtimeVoice(SessionLifecycle):
     async def handle_event(self, ev) -> None:
         t = ev.type
         if t != "audio":
-            logs.verbose("realtime", "RT_EVENT", str(t))
+            logs.verbose("realtime", "RT_EVENT", "realtime event", event=str(t)[:64])
         if t == "audio":
             self.note_activity()
             if time.monotonic() > self._speaking_until:
@@ -179,7 +179,7 @@ class RealtimeVoice(SessionLifecycle):
             code, msg, etype = error_info(ev.error)
             self._stats["errors"] += 1
             fatal = is_fatal(code, etype)
-            logs.error("realtime", "RT_ERROR", f"realtime error {code}: {msg}", fatal=fatal)
+            logs.error("realtime", "RT_ERROR", "realtime provider error", error_code=code, provider_error=msg, fatal=fatal)
             await self._health("degraded", f"realtime voice error {code}: {msg}",
                                ERROR_ACTIONS.get(code, GENERIC_ACTION))
             if fatal:

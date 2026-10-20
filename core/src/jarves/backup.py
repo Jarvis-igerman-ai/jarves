@@ -134,7 +134,8 @@ def _secret_reason(p: Path, rel: str) -> str | None:
         return "credential-like file name"
     if p.suffix.lower() in (".json", ".toml", ".md", ".txt", ".env", ".ini", ".yaml", ".yml") and p.stat().st_size < 2_000_000:
         try:
-            if _SECRET_TEXT.search(p.read_text(encoding="utf-8", errors="ignore")):
+            text = p.read_text(encoding="utf-8", errors="ignore")
+            if _SECRET_TEXT.search(text) or logs.has_secret(text):        # SW-V4 B: every token shape
                 return "contains a credential"
         except OSError:
             return "unreadable"
@@ -250,12 +251,12 @@ def create(home: Path, kind: str = "manual", *, note: str = "", now: float | Non
             raise
         except (OSError, sqlite3.Error, zipfile.BadZipFile) as e:
             _unlink(tmp)
-            logs.error("backup", "BACKUP_FAILED", "backup could not be written", error=type(e).__name__)
+            logs.error("backup", "BACKUP_FAILED", "backup could not be written", error_type=type(e).__name__)
             raise BackupError("BACKUP_FAILED", f"backup could not be written ({type(e).__name__}: {str(e)[:120]})",
                               "free some disk space or check folder permissions") from e
     _save_state(home, {"last": {"path": final.name, "ts": now, "kind": kind, "ok": True, "files": len(files)}},
                 kind=kind)
-    logs.info("backup", "BACKUP_DONE", f"backup {final.name}", kind=kind, files=len(files), excluded=len(skipped),
+    logs.info("backup", "BACKUP_DONE", "backup written", backup=final.name, kind=kind, files=len(files), excluded=len(skipped),
               bytes=final.stat().st_size)
     prune(home)
     return final
@@ -387,7 +388,7 @@ def prune(home: Path) -> list[str]:
         if time.time() - p.stat().st_mtime > 3600:
             _unlink(p)
     if gone:
-        logs.info("backup", "BACKUP_PRUNED", f"{len(gone)} old backup(s) removed", removed=len(gone))
+        logs.info("backup", "BACKUP_PRUNED", "old backups removed", removed=len(gone))
     return gone
 
 
@@ -461,12 +462,12 @@ def restore(path: Path, target: Path, *, force: bool = False, checkpoint_first: 
         done = _extract(path, target, man)
     except Exception as e:
         logs.error("backup", "RESTORE_FAILED", "restore failed; putting the previous data back",
-                   error=type(e).__name__)
+                   error_type=type(e).__name__)
         if pre is not None:
             _extract(pre, target, read_manifest(pre))
         raise BackupError("RESTORE_FAILED", f"restore failed ({type(e).__name__}); previous data kept",
                           f"your data before the restore is in {pre.name if pre else '(no checkpoint)'}") from e
-    logs.info("backup", "RESTORE_DONE", f"restored {path.name}", files=len(done), checkpoint=pre.name if pre else None)
+    logs.info("backup", "RESTORE_DONE", "backup restored", backup=path.name, files=len(done), checkpoint=pre.name if pre else None)
     return {"ok": True, "restored": done, "checkpoint": pre.name if pre else None, "from": path.name,
             "sign_in_again": _sign_in_hints(target)}
 
@@ -524,7 +525,7 @@ def restore_test(path: Path) -> dict:
     if path.parent.name == BACKUP_DIR:
         _save_state(path.parent.parent, {"last_restore_test": {"name": path.name, "ok": report["ok"],
                                                                "ts": time.time()}})
-    logs.info("backup", "RESTORE_TEST", f"restore test {'passed' if report['ok'] else 'FAILED'}", name=path.name)
+    logs.info("backup", "RESTORE_TEST", "restore test finished", ok=report["ok"], backup=path.name)
     return report
 
 
@@ -547,7 +548,7 @@ def startup_checkpoint(home: Path, health=None) -> Path | None:
     try:
         p = checkpoint(home, f"version {st.get('version') or 'unknown'} -> {__version__}")
     except BackupError as e:
-        logs.error("backup", e.code, f"pre-migration checkpoint failed: {e.message}", action=e.action)
+        logs.error("backup", e.code, "pre-migration checkpoint failed", detail=e.message, action=e.action)
         if health is not None:
             health.set("backup", "degraded", "pre-migration checkpoint failed", e.action)
         return None
@@ -578,7 +579,7 @@ def maybe_auto(home: Path, health=None) -> Path | None:
             health.set("backup", "ok", f"last backup {datetime.now():%Y-%m-%d %H:%M}")
         return p
     except BackupError as e:
-        logs.error("backup", e.code, e.message, action=e.action)
+        logs.error("backup", e.code, "backup operation failed", detail=e.message, action=e.action)
         if health is not None:
             health.set("backup", "degraded", e.message, e.action)
         return None

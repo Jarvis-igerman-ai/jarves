@@ -43,12 +43,12 @@ class WhisperSTT:
             try:
                 t = time.time()
                 m = WhisperModel(name, device="cpu", compute_type=self.compute, cpu_threads=self.cpu_threads)
-                logs.info("stt", "STT_LOADED", f"model {name} loaded", seconds=round(time.time() - t, 1))
+                logs.info("stt", "STT_LOADED", "speech model loaded", model=name, seconds=round(time.time() - t, 1))
                 self.loaded_name = name
                 return m
             except Exception as e:     # download/network/disk errors
                 last = e
-                logs.warn("stt", "STT_LOAD_FAILED", f"model {name} failed to load: {type(e).__name__}: {str(e)[:150]}")
+                logs.warn("stt", "STT_LOAD_FAILED", "speech model failed to load", model=name, **logs.error_fields(e))
         raise STTUnavailable("STT_MODEL_UNAVAILABLE", f"no speech model could be loaded ({last})",
                              "connect to the internet once so the model can download, or set voice.stt_model")
 
@@ -56,7 +56,7 @@ class WhisperSTT:
         if self._model is not None:
             return
         if self._loading is None:
-            logs.info("stt", "STT_LOADING", f"loading speech model {self.model_name} (first run may download it)")
+            logs.info("stt", "STT_LOADING", "loading the speech model (first run may download it)", model=self.model_name)
             self._loading = asyncio.create_task(asyncio.to_thread(self._load_sync))
         try:
             self._model = await self._loading

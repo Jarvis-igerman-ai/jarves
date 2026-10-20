@@ -243,13 +243,13 @@ class FallbackTTS:
             try:
                 out = await e.synth(text)
                 if self.last_used != e.name:
-                    logs.info("tts", "TTS_ENGINE", f"speaking with {e.name} ({e.quality})")
+                    logs.info("tts", "TTS_ENGINE", "speech engine selected", engine=e.name, quality=e.quality)
                 self.last_used = e.name
                 return out
             except TTSUnavailable as x:
                 err = x
                 over_budget = over_budget or x.code == "TTS_BUDGET"
-                logs.warn("tts", x.code, f"{e.name}: {x.message}", action=x.action)
+                logs.warn("tts", x.code, "speech engine unavailable", engine=e.name, detail=x.message, action=x.action)
         raise err or TTSUnavailable("TTS_NONE", "no speech engine available", "set OPENAI_API_KEY")
 
     async def stream(self, text: str):
@@ -265,14 +265,14 @@ class FallbackTTS:
                         async for chunk in source:
                             emitted = True
                             if self.last_used != e.name:
-                                logs.info("tts", "TTS_ENGINE", f"speaking with {e.name} ({e.quality})")
+                                logs.info("tts", "TTS_ENGINE", "speech engine selected", engine=e.name, quality=e.quality)
                             self.last_used = e.name
                             yield chunk
                 else:
                     chunk = await e.synth(text)
                     emitted = True
                     if self.last_used != e.name:
-                        logs.info("tts", "TTS_ENGINE", f"speaking with {e.name} ({e.quality})")
+                        logs.info("tts", "TTS_ENGINE", "speech engine selected", engine=e.name, quality=e.quality)
                     self.last_used = e.name
                     yield chunk
                 return
@@ -281,5 +281,6 @@ class FallbackTTS:
                     raise
                 err = e_error
                 over_budget = over_budget or err.code == "TTS_BUDGET"
-                logs.warn("tts", err.code, f"{e.name}: {err.message}", action=err.action)
+                logs.warn("tts", err.code, "speech engine failed", engine=e.name, detail=err.message,
+                      action=err.action)
         raise err or TTSUnavailable("TTS_NONE", "no speech engine available", "set OPENAI_API_KEY")

@@ -46,7 +46,7 @@ def main() -> int:
     out = open(BASE / f"realcore_{PROFILE}.out", "w", encoding="utf-8")
     p = subprocess.Popen([str(EXE), "--profile", PROFILE, "run"], stdout=out, stderr=subprocess.STDOUT, env=env, cwd=str(CORE))
     try:
-        up = wait(lambda: cli("status", "--brief").returncode in (0, 3), 90)
+        up = wait(lambda: cli("status", "--brief").returncode in (0, 3, 4), 90)
         check(A, "real Core starts and `status` answers", up, "")
         r = cli("status", "--brief")
         rec(A, "status --brief while running", "PASS" if "Core running" in r.stdout else "FAIL", f"rc={r.returncode} {r.stdout.strip()[:200]}")
@@ -64,7 +64,7 @@ def main() -> int:
         ready = wait(healthy_enough, 60)
         check(A, "Core reaches ready (headless: only the absent Godot face may be 'unavailable')", ready, f"rc={cli('status', '--brief').returncode}")
         r = cli("status")
-        check(A, "`status` full JSON-ish readable", r.returncode in (0, 3) and "Traceback" not in r.stderr, r.stdout[-200:])
+        check(A, "`status` full JSON-ish readable", r.returncode in (0, 3, 4) and "Traceback" not in r.stderr, r.stdout[-200:])
         # second instance is refused
         r2 = cli("run", timeout=60)
         check(A, "a second `run` for the same profile is refused cleanly", r2.returncode != 0 and "Traceback" not in r2.stderr, f"rc={r2.returncode} {(r2.stdout + r2.stderr)[-250:]}")
@@ -72,7 +72,7 @@ def main() -> int:
         r = cli("features", "off", "notes")
         time.sleep(3)
         r = cli("status")
-        rec(A, "CLI features off notes while Core runs", "PASS" if r.returncode in (0, 3) else "FAIL", "")
+        rec(A, "CLI features off notes while Core runs", "PASS" if r.returncode in (0, 3, 4) else "FAIL", "")
         # prerequisites: CLI `features on` of something needing an install is refused while the Core runs (lock)
         r = cli("features", "on", "wake_word")
         rec(A, "CLI `features on wake_word` while Core runs", "PASS", f"rc={r.returncode} {(r.stdout + r.stderr).strip()[-220:]}")
@@ -98,7 +98,7 @@ def main() -> int:
         check(A, "`stop` when nothing runs: friendly", "Traceback" not in r.stderr, f"rc={r.returncode} {(r.stdout + r.stderr)[-150:]}")
         # crash then restart
         p = subprocess.Popen([str(EXE), "--profile", PROFILE, "run"], stdout=out, stderr=subprocess.STDOUT, env=env, cwd=str(CORE))
-        wait(lambda: cli("status", "--brief").returncode in (0, 3), 90)
+        wait(lambda: cli("status", "--brief").returncode in (0, 3, 4), 90)
         subprocess.run(["taskkill", "/F", "/T", "/PID", str(p.pid)], capture_output=True)
         wait(lambda: p.poll() is not None, 20)
         r = cli("status", "--brief")

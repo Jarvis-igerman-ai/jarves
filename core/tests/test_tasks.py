@@ -9,6 +9,7 @@ from types import SimpleNamespace
 import pytest
 
 from conftest import until
+from jarves import logs
 from jarves.brain import BackendTrace
 from jarves.budget import Budget
 from jarves.config import AIConfig, Config
@@ -259,7 +260,8 @@ def fake_runner(delay=0.05, text="תוצאה", fail=None):
     return run
 
 
-async def test_tasks_run_in_background_with_bounded_concurrency(tmp_path):
+async def test_tasks_run_in_background_with_bounded_concurrency(tmp_path, monkeypatch):
+    monkeypatch.setattr(logs, "_privacy", False)          # development mode: tasks.jsonl keeps the text
     updates, finished = [], []
     tm = TaskManager(fake_runner(0.2), store=tmp_path / "tasks.jsonl", max_running=2, max_queued=1,
                      on_update=lambda v: updates.append(v), on_finished=lambda t: finished.append(t))
@@ -274,6 +276,20 @@ async def test_tasks_run_in_background_with_bounded_concurrency(tmp_path):
     assert updates and {v["status"] for v in updates[-1]} == {"done"}
     hist = read_history(tmp_path / "tasks.jsonl")
     assert len(hist) == 3 and hist[0]["result"] == "תוצאה" and "duration_s" in hist[0]
+    await tm.shutdown()
+
+
+async def test_task_history_keeps_no_text_in_privacy_mode(tmp_path, monkeypatch):
+    """SW-V4 B: with log.privacy on, tasks.jsonl keeps lengths and timings, never what was asked or found."""
+    monkeypatch.setattr(logs, "_privacy", True)
+    finished = []
+    tm = TaskManager(fake_runner(0.0, text="דנה גרה ברחוב הרצל 12"), store=tmp_path / "tasks.jsonl",
+                     on_finished=lambda t: finished.append(t))
+    t = await tm.start("מה הכתובת של דנה כהן?")
+    await until(lambda: finished)
+    assert t.result == "דנה גרה ברחוב הרצל 12"                 # still announced in full, live
+    raw = (tmp_path / "tasks.jsonl").read_text(encoding="utf-8")
+    assert "דנה" not in raw and "הרצל" not in raw and read_history(tmp_path / "tasks.jsonl")[0]["result"] == "<21 chars>"
     await tm.shutdown()
 
 

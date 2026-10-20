@@ -197,7 +197,7 @@ class GoogleApi:
                                       "run `jarvis google start`", "חסרה לי הרשאה מגוגל. צריך לחבר מחדש את גוגל.")
             if r.status_code == 404:
                 raise GoogleAuthError("GOOGLE_NOT_FOUND", "not found in Google", "", "לא מצאתי את זה.")
-            logs.warn("google", "GOOGLE_API_ERROR", f"Google API returned {r.status_code}", status=r.status_code,
+            logs.warn("google", "GOOGLE_API_ERROR", "Google API error", status=r.status_code,
                       reason=reason[:60])
             await self.auth._record_error(f"GOOGLE_API_{r.status_code}")
             raise GoogleAuthError("GOOGLE_API_ERROR", f"Google API error {r.status_code}", "try again later",
@@ -881,7 +881,7 @@ class CalendarWriter:
         stored["guests"] = [x["email"] for x in ev.get("attendees", []) if isinstance(x, dict)
                             and isinstance(x.get("email"), str) and _EMAIL.fullmatch(x["email"])]
         stored["htmlLink"] = _event_link(ev.get("htmlLink"))
-        logs.info("google", "CALENDAR_WRITTEN", f"calendar event {plan['op']}d after the user's approval",
+        logs.info("google", "CALENDAR_WRITTEN", "calendar event written after the user's approval",
                   op=plan["op"], series=plan.get("series", False))
         verb = "יצרתי" if plan["op"] == "create" else "עדכנתי"
         return {"stored": stored, "message": f"{verb} ביומן \"{stored['calendar']}\": \"{stored['title']}\", {when}."

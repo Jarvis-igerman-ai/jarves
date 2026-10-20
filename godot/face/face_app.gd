@@ -121,8 +121,9 @@ func _e2e() -> void:
 	while (replies.is_empty() or states.is_empty() or states[-1] != "idle") and Time.get_ticks_msec() - t0 < 20000:
 		await get_tree().process_frame
 	var ok: bool = not replies.is_empty() and "thinking" in states and face.state == "idle"
-	print("E2E RESULT: %s (reply: %s; face states: %s)" % ["PASS" if ok else "FAIL",
-			replies[0].get("text", "") if replies.size() else "-", ",".join(states)])
+	# SW-V4 B: godot.log (file logging) never gets conversation text: the reply length only
+	print("E2E RESULT: %s (reply: %d chars; face states: %s)" % ["PASS" if ok else "FAIL",
+			str(replies[0].get("text", "")).length() if replies.size() else 0, ",".join(states)])
 	get_tree().quit(0 if ok else 1)
 
 

@@ -196,7 +196,7 @@ class Sites:
         tmp.write_text(json.dumps({"version": 1, "sites": sites, "changed_by": by, "changed_at": time.time()},
                                   ensure_ascii=False, indent=1), encoding="utf-8")
         os.replace(tmp, self.path)
-        logs.info("browser", "BROWSER_SITES_CHANGED", f"allow-list now has {len(sites)} site(s)", by=by)
+        logs.info("browser", "BROWSER_SITES_CHANGED", "browser allow-list changed", n=len(sites), by=by)
 
     def add(self, entry: str, by: str = "user") -> list[str]:
         site = normalize_site(entry)
@@ -383,7 +383,7 @@ class BrowserService:
         del self.activity[:-20]
         # blocked / declined are normal policy decisions (INFO); only a real failure is a warning
         log = logs.warn if result == "failed" else logs.info
-        log("browser", "BROWSER_" + action.upper(), f"{action} {host or '-'} -> {result}", host=host, result=result)
+        log("browser", "BROWSER_" + action.upper(), "browser action", action=action, host=host, outcome=result)
         if self.health is not None:
             if self._page is None:
                 self.health.set("browser", "ok", "idle (no page open)")
@@ -430,7 +430,7 @@ class BrowserService:
             self._context.set_default_navigation_timeout(NAV_TIMEOUT_MS)
             await self._context.route("**/*", self._route)
             self._context.on("page", self._on_page)
-            logs.info("browser", "BROWSER_STARTED", f"{self.engine} started (headless, isolated profile)",
+            logs.info("browser", "BROWSER_STARTED", "browser started (headless, isolated profile)",
                       engine=self.engine)
         self._page = await self._context.new_page()
 
@@ -447,7 +447,8 @@ class BrowserService:
             host = url_host(req.url)
             if self.mode(host) not in ("control", "read_only"):
                 self._blocked.append(host or "non-web address")
-                logs.warn("browser", "BROWSER_NAV_BLOCKED", f"navigation to {host or 'non-web address'} refused",
+                # a policy decision, not a fault (O-04): INFO keeps the WARNING view for real problems
+                logs.info("browser", "BROWSER_NAV_BLOCKED", "navigation refused",
                           host=host)
                 await route.abort("blockedbyclient")
                 return

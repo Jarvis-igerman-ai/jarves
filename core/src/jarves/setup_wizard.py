@@ -56,7 +56,8 @@ STEPS = ("language", "connection", "names", "wake", "voice", "addons", "privacy"
 ADDON_MODULES = ("jarves.telegram_channel", "jarves.instagram_channel", "jarves.whatsapp", "jarves.briefing", "jarves.homeassistant",
                  "jarves.appearance", "jarves.backup", "jarves.usage", "jarves.updates", "jarves.runtime",
                  "jarves.operations", "jarves.guides", "jarves.skills.generated", "jarves.browser", "jarves.profiles",
-                 "jarves.selfcheck", "jarves.connect", "jarves.skills.helper", "jarves.context_trace")
+                 "jarves.selfcheck", "jarves.connect", "jarves.skills.helper", "jarves.context_trace",
+                 "jarves.recall")
 # Privacy-sensitive or outward-acting: OFF on the first run whatever else says; ON only after an explicit yes.
 SAFE_OFF = frozenset({"camera", "face_recognition", "camera_when_away", "gmail_send", "calendar_write",
                       "dashboard_lan", "browser", "telegram", "home_assistant", "instagram", "helper",
@@ -69,7 +70,7 @@ GOOGLE_FEATURES = ("google_calendar", "calendar_write", "gmail_read", "gmail_sen
 # that every registered feature is listed.
 GROUPS: tuple[tuple[str, str, str, tuple[str, ...]], ...] = (
     ("core", "בסיס", "Core", ("web_search", "background_tasks", "memory_curator", "memory_llm_pass",
-                             "diagnosis_llm_pass", "self_check", "guided_setup", "workspace_agent_edit", "assistant_identity", "skill_creation",
+                             "diagnosis_llm_pass", "conversation_recall", "self_check", "guided_setup", "workspace_agent_edit", "assistant_identity", "skill_creation",
                              "proactive_help", "usage_monitor", "appearance", "background_core", "display_control",
                              "tray_icon", "autostart")),
     ("voice", "קול", "Voice", ("wake_word", "greeting", "chimes", "voice_change")),
@@ -869,6 +870,22 @@ def _win(check: Callable[[], tuple[bool, str]]) -> Callable[[], tuple[bool, str]
     return check if sys.platform == "win32" else (lambda: (True, "n/a off Windows"))
 
 
+def _fts5() -> Callable[[], tuple[bool, str]]:
+    """SW-V4 G: the Python build's SQLite must have FTS5 with the porter/unicode61 tokenizers (recall index)."""
+    def check() -> tuple[bool, str]:
+        import sqlite3
+        try:
+            db = sqlite3.connect(":memory:")
+            try:
+                db.execute("CREATE VIRTUAL TABLE t USING fts5(a, tokenize = 'porter unicode61 remove_diacritics 2')")
+            finally:
+                db.close()
+            return True, f"sqlite {sqlite3.sqlite_version} fts5"
+        except sqlite3.Error as e:
+            return False, f"SQLite FTS5 missing ({str(e)[:80]})"
+    return check
+
+
 _GOOGLE = [_mod("jarves.google_auth"), _mod("jarves.google_setup"), _mod("jarves.skills.google")]
 # feature id -> what must be IN the install for it to work (code, wheels, models, data). External prerequisites
 # (Pear Desktop, keys, Google console, a webcam) are probed by the feature itself, not here.
@@ -902,6 +919,8 @@ BUNDLE: dict[str, list[Callable[[], tuple[bool, str]]]] = {
                   _data("jarves", "dashboard_static/locales/ru.js")],
     "dashboard_lan": [_mod("jarves.dashboard_auth"), _data("jarves", "dashboard_static/pair.html")],
     "context_trace": [_mod("jarves.context_trace"), _data("jarves", "dashboard_static/context.js")],
+    "conversation_recall": [_mod("jarves.recall"), _mod("jarves.recall_text"), _fts5(),
+                            _data("jarves", "dashboard_static/recall.js"), _data("jarves.guides", "data/recall.toml")],
     "workspace_agent_edit": [_mod("jarves.workspace"), _data("jarves", "setup_guide.md")],
     "assistant_identity": [_mod("jarves.identity")],
     "appearance": [_mod("jarves.appearance")],

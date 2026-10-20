@@ -272,7 +272,7 @@ async def self_check(auth: GoogleAuth, *, gmail: bool = True,
     out["ok"] = out["calendar"] == "ok" and out["gmail"] in ("ok", "skipped")
     if out["error"]:
         out["fix"] = fix_for(out["error"])
-    logs.info("google", "GOOGLE_SELF_CHECK", "Google self-check " + ("passed" if out["ok"] else "failed"),
+    logs.info("google", "GOOGLE_SELF_CHECK", "Google self-check finished", ok=out["ok"],
               calendar=out["calendar"], gmail=out["gmail"], error=out["error"])
     return out
 

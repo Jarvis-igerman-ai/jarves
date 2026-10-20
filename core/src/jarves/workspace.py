@@ -230,7 +230,7 @@ class Workspace:
         tmp.write_text(text, encoding="utf-8")
         os.replace(tmp, p)
         self._cache.pop(spec.name, None)
-        logs.info("workspace", "WORKSPACE_WRITE", f"{spec.name} changed by {by}", file=spec.name, by=by,
+        logs.info("workspace", "WORKSPACE_WRITE", "workspace file changed", file=spec.name, by=by,
                   chars=len(text), version=version, note=note[:80])
         for cb in list(self.listeners):
             try:
@@ -438,5 +438,5 @@ async def note_live(live, ws: Workspace, name: str) -> bool:
                                                 event_id=f"jarves_ws_{int(time.time())}")
         return True
     except Exception as e:
-        logs.warn("workspace", "WORKSPACE_LIVE_NOTE_FAILED", f"live session not updated: {type(e).__name__}")
+        logs.warn("workspace", "WORKSPACE_LIVE_NOTE_FAILED", "live session not updated", error_type=type(e).__name__)
         return False

@@ -171,11 +171,13 @@ class Core:
         c = self.cfg
         self.log_path = logs.setup(self.home / "logs", c.log.level, c.log.max_bytes, c.log.backups, self.console_logs,
                                   c.log.console_level, c.log.modules, c.log.hide, privacy=c.log.privacy)
+        # SW-V4 B crash output: an exception nobody awaited is logged as CRASH (frames; its text is content)
+        asyncio.get_running_loop().set_exception_handler(logs.asyncio_handler)
         from . import backup, usage                     # SW-V2 M5: checkpoint BEFORE the stores open/migrate
         backup.startup_checkpoint(self.home)
         self.history = store.attach(self.home, c)       # conversation history + self-diagnosis (log sink)
         logs.new_cid()
-        logs.info("core", "CORE_STARTING", f"JARVES Core {__version__} starting", home=str(self.home))
+        logs.info("core", "CORE_STARTING", "JARVES Core starting", version=__version__, home=str(self.home))
         self.health = Health(self.home / "health.json")
         self.memory = MemoryStore(self.home / "memory.db")
         # SW-V2 WP-I feature switches: ONE source of truth (features.json over the legacy config.toml keys); the
@@ -265,6 +267,8 @@ class Core:
             self.registry.register(TaskSkill(self.tasks))
         from .operations import attach as ops_attach    # WP-M3: scheduler, reports, notes, files, alerts, autonomy
         self.ops = ops_attach(self)
+        from . import recall                            # SW-V4 G: conversation_recall / _search / _show
+        recall.attach(self)
         from . import guides                            # WP-L: help Skill, setup hints, briefing, suggestions
         self.guides = guides.attach(self)
         self._write_tools_md()                          # after every Skill is registered
@@ -327,7 +331,7 @@ class Core:
         self._setup_wake()
         self._log_summary()
         self.health.mark("ready")
-        logs.info("core", "CORE_READY", f"Core ready (voice: {self.voice_mode})", log=str(self.log_path),
+        logs.info("core", "CORE_READY", "Core ready", voice_mode=self.voice_mode, log=str(self.log_path),
                   ms=round((time.monotonic() - started_at) * 1000))
         self._startup_stage("ready" if self.voice_mode == "off" else "core_ready",
                             "Core ready (voice off)" if self.voice_mode == "off" else "Core loaded. Preparing voice...")
@@ -546,7 +550,7 @@ class Core:
     async def on_message(self, msg: dict, client) -> None:
         """Dispatch an authenticated, role-checked message (link.py enforces the per-role allow-list)."""
         t, p, ws = msg["type"], msg.get("payload") or {}, client
-        logs.verbose("link", "MSG_IN", t, role=client.role)
+        logs.verbose("link", "MSG_IN", "link message in", msg_type=t, role=client.role)
         if self.stopping and t != "status.request":
             await self.link.reply(ws, "error", {"code": "CORE_STOPPING", "message": "JARVES is shutting down"})
             return
@@ -593,11 +597,11 @@ class Core:
                 await self.link.reply(ws, "dashboard.opened", {"url": url.split("?", 1)[0],
                                                                "browser": self.open_url is not None})
             except Exception as e:
-                logs.warn("core", "DASHBOARD_FAILED", f"dashboard could not start: {type(e).__name__}")
+                logs.warn("core", "DASHBOARD_FAILED", "dashboard could not start", error_type=type(e).__name__)
                 await self.link.reply(ws, "error", {"code": "DASHBOARD_FAILED", "message": "dashboard did not start",
                                                     "action": "run `jarvis dashboard`"})
         elif t in INBOUND:
-            logs.info("device", "DEVICE_EVENT", f"device event {t}", **logs.safe_fields(p, allow=("id", "muted", "state")))
+            logs.info("device", "DEVICE_EVENT", "device event", msg_type=t, **logs.safe_fields(p, allow=("id", "muted", "state")))
             if t == "presence.changed" and getattr(self, "camera", None) is not None:
                 self.camera.external_presence(p.get("present") is True)
         else:
@@ -644,7 +648,7 @@ class Core:
         if task.cancelled() or task.exception() is None:
             return
         e = task.exception()
-        logs.log("core", "CORE_TASK_CRASH", f"request failed: {type(e).__name__}: {str(e)[:200]}", 40)
+        logs.log("core", "CORE_TASK_CRASH", "request failed", 40, **logs.error_fields(e))
         self.health.set("core_tasks", "degraded", f"last request crashed ({type(e).__name__})", "see logs; try again")
         self._spawn(self.notify_error("CORE_INTERNAL", "internal error", "try again"))
 
@@ -736,7 +740,7 @@ class Core:
         await self.set_face("thinking")
         t0 = time.monotonic()
         reply = await self.brain.respond(text)
-        logs.info("core", "REPLY", f"reply via {reply.source}", tool=reply.tool, ok=reply.ok, result=reply.code,
+        logs.info("core", "REPLY", "reply sent", source=reply.source, tool=reply.tool, ok=reply.ok, result_code=reply.code,
                   ms=round((time.monotonic() - t0) * 1000), text=reply.text, typed=typed,  # WP-H history: what was asked
                   utterance=f"<{len(text)} chars>" if SENSITIVE_TEXT.search(text) else text)   # codes never logged
         self.curator.observe("user", text)
@@ -878,7 +882,7 @@ class Core:
             self._hold_wake_until = 0.0
             if self.live is live_ref[0]:
                 self.live = None                   # any end (user, remote close, error, budget) frees the slot
-            logs.info("voice", "LIVE_ENDED", f"live conversation ended ({reason})")
+            logs.info("voice", "LIVE_ENDED", "live conversation ended", reason=reason)
             if not self.stopping:
                 self._spawn(self.curator.run(f"live_{reason}"))   # learn durable facts from this conversation
             # Smooth conversation: the server closing a session (or a time limit) while the user is in the middle
@@ -941,6 +945,8 @@ class Core:
         live_ref[0] = live
         wsp.attach_live(live, self.workspace, self.memory)   # persona files + known facts in the voice instructions
         feat.attach_live(live, self.features)                 # what is off / unavailable, so he says so truthfully
+        from . import recall                                  # SW-V4 G: "what did I say..." -> conversation_recall
+        recall.attach_live(live, self.features)
         if getattr(self, "guides", None) is not None:         # WP-L: help questions -> backend; one suggestion
             self.guides.attach_live(live)
         from . import context_trace                           # LAST: records the final instructions + notes sent
@@ -955,7 +961,7 @@ class Core:
             await self.notify_error(e.code, "הגעתי למגבלת השימוש היומית", e.action)
             return
         except Exception as e:
-            logs.error("voice", "LIVE_START_FAILED", f"live voice failed to start: {type(e).__name__}: {str(e)[:150]}")
+            logs.error("voice", "LIVE_START_FAILED", "live voice failed to start", **logs.error_fields(e))
             self.health.set("voice", "degraded", f"live voice failed: {type(e).__name__}",
                             "check OPENAI_API_KEY/internet; push-to-talk still works")
             if ended[0]:
@@ -1006,7 +1012,7 @@ class Core:
                     "ready": 90, "running": 100}.get(phase, self.startup.get("progress", 0))
         self.startup = {"phase": phase, "ready": phase in ("ready", "running"), "detail": detail,
                         "progress": progress}
-        logs.info("core", "STARTUP_STAGE", detail, phase=phase)
+        logs.info("core", "STARTUP_STAGE", "startup stage", phase=phase, detail=detail)
 
     async def prepare_desktop(self) -> None:
         """Essential readiness gate, reusable by a future display; it does not launch Godot itself."""
@@ -1104,7 +1110,7 @@ class Core:
             logs.info("core", "PREWARM_DONE", "cloud voice libraries loaded", ms=round((time.monotonic() - t0) * 1000),
                       modules=mods)
         except Exception as e:
-            logs.warn("core", "PREWARM_FAILED", f"{type(e).__name__}: {str(e)[:120]}")
+            logs.warn("core", "PREWARM_FAILED", "prewarm failed", **logs.error_fields(e))
 
     def _log_summary(self) -> None:
         """One INFO line that answers "what is this JARVES going to do?" (visible in the terminal at startup)."""
@@ -1133,7 +1139,7 @@ class Core:
             ok, msg = det.check() if hasattr(det, "check") else (True, "")
             if not ok and self._wake_detector is None and v.wake_confirm:
                 # the local speech check could not load (no faster-whisper / model): one stage, said truthfully
-                logs.warn("wake", "WAKE_CONFIRM_UNAVAILABLE", msg, action="uv sync --extra voice; connect once "
+                logs.warn("wake", "WAKE_CONFIRM_UNAVAILABLE", "the wake speech check is unavailable", detail=msg, action="uv sync --extra voice; connect once "
                           "so the speech model can download", fallback=f"wake model only at {v.wake_threshold}")
                 cfg1 = self._wake_cfg()
                 cfg1.wake_confirm = False
@@ -1143,7 +1149,7 @@ class Core:
             ok, msg = False, e.message
         if not ok:
             self.health.set("wake_word", "unavailable", msg, "check wake/audio setup: jarvis status; uv sync --extra voice")
-            logs.warn("wake", "WAKE_UNAVAILABLE", msg)
+            logs.warn("wake", "WAKE_UNAVAILABLE", "wake word unavailable", detail=msg)
             return
         self.wake = WakeListener(det, self._on_wake, v.wake_cooldown_s)
         self._woke = False
@@ -1266,7 +1272,7 @@ class Core:
                                       mic=mic_name, hint=hint)
                         else:
                             hint = "heard speech, no wake match: say 'Hey Jarvis'"
-                            logs.info("wake", "WAKE_SPEECH_NO_MATCH", hint, speech_ms=ev.speech_ms,
+                            logs.info("wake", "WAKE_SPEECH_NO_MATCH", "heard speech, no wake match: say 'Hey Jarvis'", speech_ms=ev.speech_ms,
                                       level_db=ev.level_db, peak_score=ev.peak_score, mic=mic_name,
                                       hint="say \"Hey Jarvis\" (or \"Hi Jarvis\"); `jarvis wake test` shows the score")
                         self._wake_note(ev.kind, hint, level_db=ev.level_db, peak_score=ev.peak_score)
@@ -1275,7 +1281,7 @@ class Core:
                         cal = save_calibration(self.home, mic_name, floor_db=monitor.floor_db,
                                                speech_db=monitor.last_burst_db, verdict="auto", by="core")
                         logs.info("wake", "WAKE_CALIBRATION", "first-run level calibration for this microphone",
-                                  mic=mic_name, **{k: cal[k] for k in ("floor_db", "speech_db", "gain_db")})
+                                  mic=mic_name, floor_db=cal["floor_db"], speech_db=cal["speech_db"], gain_db=cal["gain_db"])
                         agc = getattr(self.wake.detector, "agc", None)
                         if agc is not None and cal["gain_db"] > agc.gain_db:
                             agc.gain_db = cal["gain_db"]
@@ -1305,7 +1311,7 @@ class Core:
                         self.wake.note_false_trigger()
                     self._run_busy(self._transcribe_and_answer(cap.audio))
             except AudioUnavailable as e:
-                logs.warn("wake", e.code, e.message, action=e.action)
+                logs.warn("wake", e.code, "audio unavailable", detail=e.message, action=e.action)
                 self.health.set("audio", "unavailable", e.message, e.action)
                 self._wake_mic_active = False
                 await self.link.broadcast("status", self.snapshot())
@@ -1335,7 +1341,7 @@ class Core:
     # ------------------------------------------------------------------ feature switches (features.py)
     def _health_components(self) -> dict:
         h = getattr(self, "health", None)
-        return {k: {"status": v.status, "detail": v.detail} for k, v in h.components.items()} if h else {}
+        return h.components_view() if h else {}       # (SW-V4 B: secrets / privacy-mode pii removed)
 
     def _write_tools_md(self) -> None:
         from .guides import index_markdown as guides_index_markdown
@@ -1364,13 +1370,12 @@ class Core:
             self.health.set("wake_word", "disabled", "wake word switched off")   # the wake loop releases the mic
         restart = ((fid == "music" and on and getattr(self, "music", None) is None)
                    or (fid == "background_tasks" and on and getattr(self, "tasks", None) is None))
-        logs.info("features", "FEATURE_APPLIED", f"{fid} {'on' if on else 'off'}"
-                  + (" (takes effect at the next Core start)" if restart else ""), feature=fid, on=on)
+        logs.info("features", "FEATURE_APPLIED", "feature switched", feature=fid, on=on, restart=bool(restart))
 
     # ------------------------------------------------------------------ voice change ("תחליף קול")
     def _on_voice_change(self, voice: str, restart_now: bool) -> None:
         """GPT-Live fixes the voice per session: the override applies to the next session, or now via a restart."""
-        logs.info("voice", "VOICE_CHANGED", f"voice set to {voice}", voice=voice, restart=restart_now)
+        logs.info("voice", "VOICE_CHANGED", "voice changed", voice=voice, restart=restart_now)
         if restart_now and self.live is not None and self.voice_mode == "live":
             self._spawn(self._restart_live_for_voice(self.live))
 
@@ -1407,7 +1412,7 @@ class Core:
         if ap is None:
             return False
         if ap.has_pending() and ap.answer_words(text, channel=channel):
-            logs.info("core", "APPROVAL_ANSWERED_BY_WORDS", f"approval answered ({channel})")
+            logs.info("core", "APPROVAL_ANSWERED_BY_WORDS", "approval answered", channel=channel)
             return True
         ap.note_user_turn()
         return False

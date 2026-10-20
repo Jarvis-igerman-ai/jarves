@@ -39,6 +39,8 @@ EDITABLE: dict[str, tuple[str, str]] = {
     "ai.task_timeout_s": ("AI", "Background task time limit (s)"),
     "music.max_volume": ("Music", "Maximum music volume (%)"),
     "music.volume_step": ("Music", "Louder / quieter step (%)"),
+    # OD-14 (owner, V4): off by default, a switch in Settings. On = old PLAYED items leave Pear's queue/history.
+    "music.trim_queue": ("Music", "Remove played songs from Pear's queue (its history) to keep it fast"),
     "log.privacy": ("Privacy & logs", "Privacy mode: never keep what was said (logs, history)"),
     "log.level": ("Privacy & logs", "Log file level"),
     "history.keep_days": ("Privacy & logs", "Keep conversation history for (days)"),

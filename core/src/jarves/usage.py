@@ -154,7 +154,7 @@ def _put_obs(home: Path | None, key: str, data: dict, ts: float | None = None) -
             finally:
                 db.close()
     except sqlite3.Error as e:            # usage must never break a provider call
-        logs.warn("usage", "USAGE_OBS_FAILED", "could not store a usage observation", error=type(e).__name__)
+        logs.warn("usage", "USAGE_OBS_FAILED", "could not store a usage observation", error_type=type(e).__name__)
 
 
 def _get_obs(db: sqlite3.Connection, key: str) -> tuple[dict, float] | None:
@@ -322,7 +322,7 @@ def _default_sink(alert: dict) -> None:
     if callable(emit):
         emit(alert)
         return
-    logs.warn("usage", "USAGE_THRESHOLD", alert["title"], meter=alert["meter"], threshold=alert["threshold"],
+    logs.warn("usage", "USAGE_THRESHOLD", "usage threshold reached", detail=alert["title"], meter=alert["meter"], threshold=alert["threshold"],
               percent=alert["percent"], window=alert["window"])
 
 

@@ -50,6 +50,7 @@ PLUGIN_MODULES = ("jarves.workspace", "jarves.curator", "jarves.memory", "jarves
                   "jarves.setup_wizard",                                         # SW-V3: Setup & add-ons page
                   "jarves.profiles",                                             # Issue #17: Profiles page
                   "jarves.context_trace",                                          # his context per conversation
+                  "jarves.recall",                                                 # SW-V4 G: Recall search page
                   "jarves.browser",                                                # Browser allow-list page
                   "jarves.approvals", "jarves.skills.helper")                      # V3: Approvals list, Helper switch
 MEMORY_UNDO_KEEP = 30
@@ -190,8 +191,14 @@ def api_sessions(ctx: Ctx, m, body, q=None):
     elif kind == "voice":
         where.append(f"kind NOT IN ({','.join('?' * len(TYPED_KINDS))})"); args += list(TYPED_KINDS)
     text = _q1(q, "q")
+    hits = None
     if text:
-        where.append("id IN (SELECT session_id FROM turns WHERE text LIKE ?)"); args.append(f"%{text}%")
+        from .recall import session_hits             # SW-V4 G: the recall index (Hebrew prefixes, both scripts)
+        hits = session_hits(ctx, text)
+        if hits is None:                              # recall switched off: the plain substring filter
+            where.append("id IN (SELECT session_id FROM turns WHERE text LIKE ?)"); args.append(f"%{text}%")
+        else:
+            where.append(f"id IN ({','.join('?' * len(hits)) or 'NULL'})"); args += list(hits)
     if _q1(q, "tool"):
         where.append("id IN (SELECT session_id FROM tool_calls WHERE name = ?)"); args.append(_q1(q, "tool"))
     if _q1(q, "issues") in ("1", "true"):
@@ -202,6 +209,10 @@ def api_sessions(ctx: Ctx, m, body, q=None):
     sql = "SELECT * FROM sessions" + (" WHERE " + " AND ".join(where) if where else "") + " ORDER BY started DESC"
     rows = st.rows(sql + " LIMIT ?", (*args, 5000 if paged else limit))
     out = [_session_summary(ctx, s) for s in rows]
+    for s in out if hits else []:
+        h = hits.get(s["id"])
+        if h:
+            s["recall"] = {"snippet": h["snippet"], "marks": h["marks"], "ts": h["ts"], "role": h["role"]}
     if not paged:
         return 200, out
     try:
@@ -671,7 +682,7 @@ def api_runtime_set(ctx: Ctx, m, body):
             v = ctx.settings.set(key, str(value))
     except (KeyError, WorkspaceError) as e:
         return 400, {"error": str(e).strip("'")}
-    logs.info("dashboard", "SETTING_CHANGED", f"{key} set from the dashboard", key=key, value=v)
+    logs.info("dashboard", "SETTING_CHANGED", "setting changed from the dashboard", key=key, value=v)
     return 200, {"ok": True, "key": key, "value": v}
 
 
@@ -904,7 +915,7 @@ class Dashboard:
             purge_memory_undo(self.ctx)
         except Exception as e:
             logs.warn("dashboard", "UNDO_PURGE_FAILED", "could not purge the memory undo journal",
-                      error=type(e).__name__)
+                      error_type=type(e).__name__)
 
     def _housekeeping_loop(self) -> None:
         while not self._stop_evt.wait(UNDO_PURGE_EVERY_S):

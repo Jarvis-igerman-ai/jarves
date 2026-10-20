@@ -24,45 +24,57 @@ from pathlib import Path
 from . import __version__, logs
 
 MAX_BYTES = 5 * 1024 * 1024
-_EMAIL = re.compile(r"(?<![\w.+-])[\w.+-]+@[\w-]+\.[\w.-]+")   # lookbehind: linear on long words
+_EMAIL = logs._EMAIL
 _LEAK = re.compile(r"sk-[A-Za-z0-9_\-]{12,}|eyJ[A-Za-z0-9_\-]{8,}\.[A-Za-z0-9_\-]{8,}\.|(?i:bearer\s+(?!\*\*\*)[A-Za-z0-9._\-]{8,})")
 
 
 def sanitize(text: str) -> str:
-    return _EMAIL.sub("<email>", logs.redact(text))
+    return logs.redact_pii(logs.redact(text))
 
 
-_TOKEN_LIKE = re.compile(r"^[A-Za-z0-9_.:+\-]{0,64}$")      # codes, states, model ids, numbers, ISO times
+_SALT = os.urandom(16)          # module default; build() uses a fresh salt per bundle
 
 
-def _strict(v, depth: int = 0):
-    """Issue #15: free-form text (the "msg" sentence, provider error messages, nested payloads) is never shared.
-    Only identifier-like strings survive; everything else becomes its length. Numbers and booleans stay."""
-    if depth > 8:
-        return "<nested>"
-    if isinstance(v, dict):
-        return {str(k): _strict(x, depth + 1) for k, x in v.items()}
-    if isinstance(v, list):
-        return [_strict(x, depth + 1) for x in v]
-    if isinstance(v, str):
-        return v if _TOKEN_LIKE.match(v) else f"<{len(v)} chars>"
-    return v
-
-
-def private_line(line: str) -> str:
-    """One log line for sharing: structured fields only (code, level, component, timings, ids); every sentence,
-    whatever its field, is reduced to its length, even if the log was written with privacy off. A line that is not
-    JSON is dropped to its length too (no guessing which words are private)."""
+def private_line(line: str, salt: bytes | None = None) -> str | None:
+    """One log line for sharing (SW-V4 B bundle rule), whatever log.privacy was when it was written: content
+    fields stripped to their length, pii hashed (per-bundle salt), secrets dropped, stack-trace text dropped
+    (frames kept), nested JSON walked with the same registry. The msg of a v2 line is a developer template and is
+    kept; an older line's free-text msg becomes its length. A line that is not a JSON object returns None: the
+    caller drops and counts it (never copied, not even in part)."""
     try:
         d = json.loads(line)
     except ValueError:
-        return json.dumps({"unparsed": f"<{len(line)} chars>"})
-    return sanitize(json.dumps(_strict(logs.scrub(d, private=True)), ensure_ascii=False))
+        return None
+    if not isinstance(d, dict):
+        return None
+    return sanitize(json.dumps(logs.bundle_record(d, salt or _SALT), ensure_ascii=False, default=str))
 
 
-def _dump(obj) -> str:
-    return sanitize(json.dumps(logs.scrub(obj, private=True), indent=1, ensure_ascii=False, default=str))
+def _member(v, salt: bytes, depth: int = 0):
+    """Non-log members (config, health, features, usage, store export): registry classes apply (secret dropped,
+    content stripped, pii hashed; unknown keys stay safe here); a safe string is kept when it is plain ASCII
+    developer text without personal identifiers, else reduced to its length."""
+    if depth > 10:
+        return "<nested>"
+    if isinstance(v, dict):
+        out = {}
+        for k, x in v.items():
+            c = logs.field_class(k, default=logs.SAFE)
+            out[str(k)] = _member(x, salt, depth + 1) if c == logs.SAFE else logs._bundle_value(x, c, salt, depth)
+        return out
+    if isinstance(v, (list, tuple, set, frozenset)):
+        return [_member(x, salt, depth + 1) for x in v]
+    if isinstance(v, str):
+        s = sanitize(v)
+        return s if s.isascii() and len(s) <= 200 else f"<{len(s)} chars>"
+    if v is None or isinstance(v, (bool, int, float)):
+        return v
+    return _member(str(v), salt, depth)
 
+
+def _dump(obj, salt: bytes | None = None) -> str:
+    return sanitize(json.dumps(_member(json.loads(json.dumps(obj, default=str)), salt or _SALT), indent=1,
+                               ensure_ascii=False))
 
 def _log_lines(home: Path, max_lines: int) -> list[str]:
     """Newest last; the current log first, then jarves.log.1, .2 ... until max_lines."""
@@ -95,7 +107,8 @@ def _store_summary(home: Path) -> dict:
     st = Store(p)
     try:
         n = {t: st.rows(f"SELECT COUNT(*) n FROM {t}")[0]["n"] for t in ("sessions", "turns", "tool_calls", "events")}
-        issues = [{k: i[k] for k in ("kind", "severity", "title", "count", "status")} for i in st.issues("open")[:30]]
+        issues = [{k: i[k] for k in ("kind", "severity", "title", "count", "status", "fingerprint")}
+                  for i in st.issues("open")[:30]]
         codes = st.rows("SELECT code, COUNT(*) n FROM events WHERE level IN ('WARNING','ERROR') GROUP BY code "
                         "ORDER BY n DESC LIMIT 30")
         return {"present": True, "counts": n, "open_issues": issues, "warning_codes": codes}
@@ -103,12 +116,22 @@ def _store_summary(home: Path) -> dict:
         st.close()
 
 
-def _inventory(home: Path) -> list[dict]:
+# File names JARVES itself creates are shown; any other name (a user's file, a contact or project name in a path)
+# is a per-bundle pseudonym with its extension (SW-V4 B: a file name can be personal).
+_KNOWN_FILE = re.compile(r"^(config\.toml|(store|memory|faces|userdata|budget|usage)\.db(-wal|-shm|-journal)?|"
+                         r"[a-z_]+\.json|[a-z_]+\.jsonl|link_token|pear_client_id(\.paired)?|secrets\.env|"
+                         r"(approvals|wake|google|chatgpt|camera|guides|runtime|skills|cache)/[A-Za-z0-9_.-]+|"
+                         r"workspace/[A-Z_]+\.md)$")
+
+
+def _inventory(home: Path, salt: bytes | None = None) -> list[dict]:
     out = []
     for p in sorted(home.rglob("*")):
         rel = p.relative_to(home).as_posix()
         if p.is_file() and not rel.startswith(("backups/", "logs/", "profiles/")) and rel.count("/") < 3:
-            out.append({"name": rel, "size": p.stat().st_size})
+            shown = rel if _KNOWN_FILE.match(rel) else (
+                f"{rel.split('/')[0] + '/' if '/' in rel else ''}{logs.pii_hash(rel, salt or _SALT)}{p.suffix[:8]}")
+            out.append({"file": shown, "size": p.stat().st_size})
         if len(out) >= 300:
             break
     return out
@@ -141,25 +164,38 @@ def build(home: Path, cfg, out: Path, *, lines: int = 500, max_bytes: int = MAX_
         return {"backups": items[:20], "state": read_state(home),
                 "newest_verified": None if newest is None else {"name": newest["name"], "ok": newest["ok"],
                                                                 "errors": newest["errors"][:5]}}
-    members = {"info.json": _dump(info), "health.json": _dump(status or {}),
-               "features.json": _dump(_safe(features_list)), "usage.json": _dump(_safe(usage_view)),
-               "backups.json": _dump(_safe(backups_view)), "store_summary.json": _dump(_safe(lambda: _store_summary(home))),
-               "files.json": _dump(_safe(lambda: _inventory(home)))}
+    salt = os.urandom(16)                               # pii pseudonyms correlate inside THIS bundle only
+    members = {"info.json": _dump(info, salt), "health.json": _dump(status or {}, salt),
+               "features.json": _dump(_safe(features_list), salt), "usage.json": _dump(_safe(usage_view), salt),
+               "backups.json": _dump(_safe(backups_view), salt),
+               "store_summary.json": _dump(_safe(lambda: _store_summary(home)), salt),
+               "files.json": _dump(_safe(lambda: _inventory(home, salt)), salt)}
     for k, v in list(members.items()):                  # each small member capped too
         if len(v.encode("utf-8")) > max_bytes // 10:
             members[k] = v.encode("utf-8")[:max_bytes // 10].decode("utf-8", "ignore") + "\n<cut: size limit>"
     budget = max_bytes - sum(len(v.encode("utf-8")) for v in members.values()) - 4096
-    log = [private_line(line) for line in _log_lines(home, lines)]
+    log, malformed = [], 0
+    for line in _log_lines(home, lines):
+        x = private_line(line, salt) if line.strip() else ""
+        if x is None:
+            malformed += 1                                # dropped and counted, never copied
+        elif x:
+            log.append(x)
     cut = 0
     while log and sum(len(x.encode("utf-8")) + 1 for x in log) > budget:
         drop = max(1, len(log) // 10)
         log, cut = log[drop:], cut + drop                 # the oldest lines go first
     members["recent.log"] = "\n".join(log)
-    leaks = [k for k, v in members.items() if _LEAK.search(v)]
-    for k in leaks:                                       # belt and braces: never ship a key-shaped string
-        members[k] = _LEAK.sub("<redacted>", members[k])
+    leaks = []
+    for k, v in members.items():                          # belt and braces: never ship a key-shaped string
+        w = _LEAK.sub("<redacted>", logs.redact(v))
+        if w != v:
+            members[k] = w
+            leaks.append(k)
     manifest = {"created": info["created"], "version": __version__, "members": sorted(members), "log_lines": len(log),
-                "log_lines_cut_for_size": cut, "max_bytes": max_bytes, "leak_patterns_redacted_in": leaks,
+                "log_lines_cut_for_size": cut, "log_lines_dropped_malformed": malformed, "max_bytes": max_bytes,
+                "leak_patterns_redacted_in": leaks,
+                "rule": "content stripped, pii hashed (per-bundle salt), secrets dropped, whatever log.privacy says",
                 "never_included": ["secrets.env", "chatgpt/ and google/ sign-in tokens", "databases", "transcripts",
                                    "audio", "workspace and memory text", "backups"]}
     tmp = out.with_name(out.name + ".partial")

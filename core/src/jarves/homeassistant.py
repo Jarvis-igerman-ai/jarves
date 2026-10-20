@@ -219,7 +219,7 @@ class HomeSkill(Skill):
                 await self._client().call_service(domain, service, data)
             except HAError as e:
                 return ToolResult(False, e.he, code=e.code)
-            logs.info("home", "HOME_CONTROL", f"home device {domain}.{service} done", risky=risky)
+            logs.info("home", "HOME_CONTROL", "home device action done", domain=domain, service=service, risky=risky)
             return ToolResult(True, f"בוצע: {meta.get('name') or eid} - {a.action}.", {"entity": eid},
                               code="HOME_DONE")
 

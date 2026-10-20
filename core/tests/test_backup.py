@@ -282,16 +282,19 @@ def test_diag_never_shares_free_form_text_issue_15():
     from jarves import cli
     lines = [json.dumps({"ts": "2026-10-19T10:00:00", "level": "ERROR", "component": "voice", "code": "LIVE_ERROR",
                          "msg": "server said: user lives at 12 Herzl street", "status": 400, "ok": False,
-                         "nested": {"detail": "my secret medical phrase", "model": "gpt-live-1"},
+                         "stats": {"detail": "my secret medical phrase", "model": "gpt-live-1"},
                          "items": ["another private sentence", "OK"]}),
              "not json: my private words"]
-    out = [diagbundle.private_line(x) for x in lines] + [cli._private_line(lines[0])]
-    blob = "\n".join(out)
+    out = [diagbundle.private_line(x) for x in lines] + [cli._private_line(lines[0]), cli._private_line(lines[1])]
+    assert out[1] is None and out[3] == ""          # SW-V4 B: a malformed line is dropped, never copied
+    blob = "\n".join(x for x in out if x)
     for private in ("Herzl", "medical", "private sentence", "private words"):
         assert private not in blob
     d = json.loads(out[0])
-    assert d["code"] == "LIVE_ERROR" and d["status"] == 400 and d["nested"]["model"] == "gpt-live-1"
-    assert d["msg"].startswith("<") and d["items"][1] == "OK"
+    # a pre-v2 line: its msg is free text (length only); registered safe fields keep their values; nested keys
+    # follow the registry (detail = content); an unregistered field is content (stripped)
+    assert d["code"] == "LIVE_ERROR" and d["status"] == 400 and d["stats"]["model"] == "gpt-live-1"
+    assert d["msg"].startswith("<") and d["items"].startswith("<") and d["stats"]["detail"].startswith("<")
 
 
 def test_dashboard_usage_and_backup_routes(profile):
