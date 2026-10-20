@@ -1,0 +1,47 @@
+# SW-V4 package H: assisted dialing through Phone Link (20 Oct 2026)
+
+Branch `v4/h-dialing`, built on the integrated V4 branch `v4/integrated-b-c-d-g-m-r01` (privacy lint, approvals popup, helper isolation included). Issue: #17 (V4 release). Implementer: Sonnet 5.5. **The independent Opus 5.5 security review (wrong-number and injection paths) is still to be done by a different agent.**
+
+## What it does
+"תתקשר לדנה" / "call Dana" / `jarvis dial Dana` / the Calls page: JARVES resolves the contact, reads the number back digit by digit, shows name, number and where the number came from in the approvals popup, and only after the owner approved opens a `tel:` link. Windows hands it to Phone Link (when Phone Link owns `tel:`) or to the default dialer. **The owner presses Call.** JARVES never dials, answers, joins or records, and never drives the Phone Link window.
+
+## Surfaces (code in `core/src/jarves/dialing.py`)
+| Surface | Entry |
+|---|---|
+| Voice / typed (model tools) | `dial_prepare` (action), then `dial_open` (action; the approval is asked inside it, one yes/no) |
+| CLI | `jarvis dial <name or number> [--which mobile\|home] [--yes-on-screen] [--name N --remember] [--json]` |
+| Dashboard | page "Phone calls" (`#/calls`, `dialing.js`): contacts with a Call button (numbers masked) and a box for a number the owner types; `GET /api/dialing`, `POST /api/dialing/call` |
+| Feature | `assisted_dialing`, SAFE_OFF, medium risk, off by default; guide `assisted_dialing.toml`; capability row (Windows `implemented_unverified`, Pi `planned`); wizard group "Phone calls"; bundle check; CLI/dashboard parity rows (`FEATURES`, `TOOL_GROUPS`) |
+| Texts | Hebrew and English in `dialing.T`; `hebrew.TEXT` entries for the feature; dashboard catalogs `en.js` / `he.js` (15 new keys); popup labels (`recipient`, `number`, `number_source`, kind `call`) in both languages |
+
+## Rules and where they are enforced
+1. **Contact resolution.** Memory contacts (`kind=contact`, only rows with source `user`; `contact_remember` has a new optional `phone`), the `whatsapp/contacts.json` numbers the owner said, then read-only Google Contacts (People API `searchContacts`, readMask `names,phoneNumbers`, same consent as feature `google_contacts`, used only when that feature is active and only when the local book has no match). Hebrew and English names, the `ל` / `ל־` prefix, and a cross-script consonant match (`דנה` ~ `Dana`) reported as `guessed_name`. Same-script near matches are never fuzzy (`לאה` is not `אלה`). Several matches or several numbers are asked about ("Dana Levi / Dana Cohen?", "mobile or home?"). An unknown name never guesses.
+2. **Number hygiene.** `normalize()` to E.164 (+972 default; Israeli numbers need 8 or 9 digits after 972; a bare number without a leading 0 or country code is refused). `readback()` reads digit by digit in Hebrew or English. A number the owner says is read back too.
+3. **Taint rule, three layers.** (a) `number_source` other than `owner_said` (email, web, message, recalled, other) is refused: `DIAL_UNTRUSTED_NUMBER`. (b) The registry already refuses every action tool in a turn that read mail, calendar or web text: `TOOL_UNTRUSTED_TURN` (test s05b). (c) A spoken number must really appear in something the owner said: `Core.owner_said` keeps the last 6 owner utterances in memory only (fed by `_owner_answer`; digits and Hebrew/English digit words understood; one utterance, not a patchwork), otherwise `DIAL_NUMBER_NOT_HEARD`. CLI and dashboard input is typed by the owner, so it is trusted.
+4. **Emergency numbers** (100, 101, 102, 112, 911, 999 and police, ambulance, fire, משטרה, אמבולנס, כבאים, חירום): no contact lookup, no approval, no rate limit. The dialer is opened with the number and the answer says "press Call yourself; if it is urgent dial from your phone now". With no dialer app: "dial it from your phone now". Audited.
+5. **Handler detection** (`detect_handler`, read-only registry reads: `HKCU\Software\Microsoft\Windows\Shell\Associations\UrlAssociations\tel\UserChoice` ProgId, `HKCR\<ProgId>\shell\open\command`, `HKCR\tel\shell\open\command`): Phone Link, Teams, Skype, other or none. The approval and the answer name the app. No handler: `DIAL_NO_HANDLER` plus the guide. Phone Link not set up (`phone_link_state()`: package folder missing or no data files): `DIAL_PHONE_LINK_NOT_PAIRED`. Whether a phone is paired and reachable right now cannot be read reliably; the check is best effort and UNVERIFIED.
+6. **Approval.** Kind `call`, risk medium. The popup shows who, number, where the number came from and which app. A number never called before is approved on the screen only (`voice=False`); a known one may be approved by voice after the digit read-back. The spoken approval question names only the kind ("Open the phone dialer to Dana?" / "לפתוח את החייגן לדנה?"), never the number (owner decision of 20 Oct), so the model reads the digits itself: the `dial_prepare` result tells it to say the readback in the same reply and call `dial_open` at once (one yes, CV-14). Deny, timeout, shutdown and "nobody could be asked" open nothing.
+7. **Rate limit.** 5 dialer openings per 10 minutes (`DIAL_RATE_LIMITED`), emergency numbers exempt; the approvals service has its own limit on top.
+8. **Opener.** `default_open` only opens `tel:` plus digits (a regex refuses anything else), `os.startfile` on Windows.
+9. **Audit and logs (privacy package B).** `<home>/dialing/audit.jsonl` holds event, code, source, handler, `name_hash` and `number_hash` (HMAC-SHA256 with a random per-install salt in `dialing/salt.json`, mode 0600; an unsalted hash of a phone number is brute-forceable). `dialing/seen.json` holds number hashes only (it drives the voice-approval rule). The approvals audit hashes the `number` detail with the profile key and never stores the prompt of a `call` approval. `logs.*` messages are fixed literals; the one new registered field is `handler` (safe). `tools/log_lint.py`: 513 call sites, 0 violations.
+
+## Tests (`core/tests/test_dialing.py`, 91 tests, 0 skips, event-driven; nothing opens on the desktop)
+Fakes only: a dict registry for `tel:`, a recording opener (plus the conftest guard `_no_real_browser`), in-memory contacts, a fake Google lookup, fake approval callbacks. The timeout test uses a real `ApprovalService` with a 1 s timeout and a silent channel; the Core test uses the real Core fixture. Covered: the 12 scenarios (known name, ambiguous, unknown, spoken number, number from an email, deny, timeout, two numbers, English name with Google, Hebrew prefix, no handler, Phone Link not paired), emergency numbers, rate limit, the voice flag, draft expiry, opener failure, owner-only memory rows, remember, hashes-only dialing audit and approvals audit, the spoken question, popup labels in both languages, handler detection cases, the opener guard, catalog wiring (SAFE_OFF, group, bundle, guide, capability row), Core tools hidden while off, `jarvis dial` (off, typed number, saved name, deny, no tty), the dashboard route and static wiring.
+
+Also green after the change (about 700 tests): log lint, hebrew texts, guides, cli parity, capabilities, setup wizard, dashboard locales, contacts (local and Google), approval popup, features, privacy, security, channels, packaging, helper approvals, recall surfaces, review C, dashboard, core, live, units, selfcheck. **Pre-existing, not caused by this change:** `tests/test_redaction_audit.py::test_planted_data_audit_of_a_real_core[privacy_on and privacy_off]` time out on this PC at the base commit `e0ea554` as well (checked in a clean worktree).
+
+## NOT verified (needs the owner's Phone Link and phone)
+- OH-01: a real `tel:` handoff opens Phone Link with the right number. The real registry strings on the owner's PC may differ from what the classifier looks for (`yourphone`, `phoneexperiencehost`, `phonelink`).
+- Whether `phone_link_state()` "data_found" really means a phone is paired; phone reachability.
+- Virtual-mic voice scenarios 85-90 on a real Core (GPT-Live): the tool flow is tested, the spoken flow is not (digits read aloud before the approval; the live transcript arriving before the tool call so that `owner_said` has the utterance). If the transcript arrives late the safe result is a refusal ("I did not hear you say that number"), never a wrong call.
+- Google Contacts `phoneNumbers` with a real account (request follows the official reference; never called).
+- The independent security review.
+
+## Residual risks (for the reviewer)
+- `contact_remember` is a model tool: an injected instruction in a later clean turn could save a phone under a name. Mitigation: the first call to a new number needs the on-screen approval, which shows the number and its source ("your saved contacts"). Not mitigated: an owner who approves without reading.
+- The model chooses `number_source`; the `owner_said` ring is the real check. A number the owner did say and that also appears in a mail is accepted (the owner did say it).
+- Approval prompts contain the number (popup, dashboard, `pending.json`) by design; no audit or log does.
+
+## Owner questions
+- OD-16 (Phone Link vs the default dialer) is "Phone Link / default dialer" in the work package. Please confirm that Phone Link is the default `tel:` app on your PC (Settings > Apps > Default apps > tel) before OH-01.
+- Should the voice read the number before the approval every time (current, short) or only for numbers never called before?

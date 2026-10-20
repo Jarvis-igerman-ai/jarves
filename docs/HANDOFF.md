@@ -10,6 +10,15 @@
 
 ---
 
+## SW-V4 H: assisted dialing through Phone Link (20 Oct 2026) - #17, branch `v4/h-dialing` (on `v4/integrated-b-c-d-g-m-r01`), [report](reviews/SWV4_H_DIALING.md)
+
+- "Call Dana" by voice (`dial_prepare` / `dial_open`), `jarvis dial <name|number> [--yes-on-screen]`, and the dashboard Phone calls page: contact resolution (memory contacts, whatsapp book, read-only Google Contacts), E.164 + digit-by-digit read-back, popup with who / number / source / app, then a `tel:` link; the owner presses Call. Numbers from email, web, messages or recalled text are never dialled; a spoken number must be in the owner's own words (memory-only ring). Emergency numbers just open the dialer. Rate limit, hashes-only audit, feature `assisted_dialing` (SAFE_OFF), guide, capability row, wizard group, bundle check, en/he texts and catalogs.
+- Verified: `core/tests/test_dialing.py` 91 passed, 0 skips (fakes only, nothing opened); log lint 0 violations; about 700 related tests green. Pre-existing: `test_redaction_audit` real-Core timeouts on this PC at the base commit too.
+- NOT verified: a real `tel:` handoff into Phone Link (OH-01), Phone Link paired state, the spoken GPT-Live flow (scenarios 85-90), Google phone numbers with a real account, independent Opus security review.
+- Questions for the user: (1) Is Phone Link the default `tel:` app on your PC? (OD-16, needed for OH-01). (2) Read the number aloud before every approval (current) or only for new numbers? Status: USER DECISION REQUIRED (1), DEFERRED (2).
+
+---
+
 ## SW-V4 B: privacy hardening + full redaction audit (20 Oct 2026) - #15 / #17, branch `v4-b-privacy` (off `origin/main`), [report](reviews/SWV4_B_PRIVACY.md), [sinks](reviews/SWV4_B_SINKS.md)
 
 - `logs.*` messages are fixed literals (466 call sites migrated); variable parts are fields classified once in `logs.FIELD_CLASS` (safe/secret/content/pii, unknown = content); provider/exception text -> `provider_error` / `exc_text`; AST lint `tools/log_lint.py` (0 violations). Secret patterns extended (OpenAI/Anthropic, JWT, Google, Telegram, Meta, GitHub, DPAPI, URL tokens, bearer, user-profile paths). Third-party loggers and crashes (main/thread/asyncio/faulthandler) routed and classified.
