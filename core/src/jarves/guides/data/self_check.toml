@@ -1,0 +1,43 @@
+order = 37
+category = "system"
+pages = ["selfcheck"]
+features = ["self_check"]
+aliases = ["בדיקה עצמית", "תבדוק את עצמך", "self check", "self-check", "שיפורים", "הצעות לשיפור"]
+links = ["diagnosis", "autonomy", "scheduler"]
+error_codes = ["SELFCHECK_NONE", "SELFCHECK_NEEDS_APPROVAL", "SELFCHECK_APPLY_FAILED"]
+title_he = "בדיקה עצמית והצעות לשיפור"
+title_en = "Self-check & suggestions"
+what_he = "ג'ארביס בודק את עצמו: הרכיבים, היומן של השבוע האחרון (שגיאות, קריסות, תשובות איטיות, התעוררויות לשווא, כלים שנכשלו), ההגדרות והיכולות, ומציע תיקונים מדורגים. רץ כשמבקשים, פעם בשבוע, ואחרי עצירה לא מסודרת."
+what_en = "JARVES checks himself: components, the last week of logs (errors, crashes, slow replies, false wakes, failing tools), settings and features, and suggests ranked fixes. Runs on request, weekly, and after an unclean stop."
+say = [["תבדוק את עצמך", "Run a self check"], ["מה ההצעה הראשונה?", "What is the first suggestion?"]]
+expect_he = "הוא אומר כמה בעיות מצא ומה העיקרית. שינוי הגדרה קורה רק אחרי שאישרתם (בקול, במסוף או בלוח הבקרה)."
+expect_en = "He says how many issues he found and the main one. A settings change happens only after you approve it (voice, terminal or dashboard)."
+test = "feature"
+test_he = "הבדיקה רק מוודאת שהרכיב מותקן. את הבדיקה העצמית עצמה מריצים מעמוד 'בדיקה עצמית'."
+test_en = "The check only sees that the component is installed. Run the self-check itself from the Self-check page."
+cost_he = "הבדיקה לפי כללים חינם ומקומית. אם הבדיקה בעזרת המודל דולקת: עד שתי בקשות קטנות לבדיקה, בתוך התקציב היומי, והעלות מוצגת."
+cost_en = "The rule-based check is free and local. If the AI review is on: at most two small requests per check, within the daily budget, and the cost is shown."
+privacy_he = "הכל נשאר במחשב. רק הבדיקה בעזרת המודל (אם דולקת) שולחת תמליל שיחה ל-OpenAI, כמו באבחון העצמי. במצב פרטיות היא לא רצה."
+privacy_en = "Everything stays on this computer. Only the AI review (if on) sends a conversation transcript to OpenAI, as in self-diagnosis. In privacy mode it does not run."
+
+[[steps]]
+he = "פתחו את עמוד 'בדיקה עצמית' ולחצו 'בדוק עכשיו' (או אמרו: תבדוק את עצמך)."
+en = "Open the Self-check page and press Check now (or say: run a self check)."
+action = "open:#/selfcheck"
+
+[[steps]]
+he = "לכל הצעה: קבל, דחה או הזכר לי אחר כך. שינוי הגדרה מחכה לאישור שלכם."
+en = "For each suggestion: accept, dismiss or snooze. A settings change waits for your approval."
+action = "command:jarvis diagnose --now"
+
+[[problems]]
+he = "הוא לא מוצא את הבדיקה האחרונה"
+en = "He finds no earlier self-check"
+fix_he = "עוד לא רצה בדיקה. הריצו jarvis diagnose --now או לחצו 'בדוק עכשיו'."
+fix_en = "None ran yet. Run jarvis diagnose --now or press Check now."
+
+[[problems]]
+he = "הבדיקה השבועית רצה בשעה לא נוחה"
+en = "The weekly check runs at a bad time"
+fix_he = "שנו את השעה בעמוד המשימות הקבועות, או: jarvis diagnose --schedule \"every sunday at 10\"."
+fix_en = "Change the time on the Jobs page, or: jarvis diagnose --schedule \"every sunday at 10\"."

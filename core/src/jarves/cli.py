@@ -1090,7 +1090,10 @@ def cmd_cost(a, cfg, home) -> int:
 
 
 def cmd_diagnose(a, cfg, home) -> int:
-    from . import diagnose
+    from . import diagnose, selfcheck
+    if selfcheck.wants_selfcheck(a):                 # --now / --history / --schedule / --suggestion
+        return selfcheck.cli_main(a, cfg, home)
+    a.days = a.days or 30
     st = _history(cfg, home)
     try:
         if a.import_log is not None:
@@ -1399,9 +1402,11 @@ def main(argv: list[str] | None = None) -> int:
     hp = sub.add_parser("help", help="explain a topic: jarvis help timers / google / music (no topic = the list)")
     hp.add_argument("topic", nargs="*", help="a topic id or a word in Hebrew or English")
     dg = sub.add_parser("diagnose", help="self-diagnosis: find problems in recent conversations")
-    dg.add_argument("--days", type=int, default=30)
+    dg.add_argument("--days", type=int, default=None, help="look back N days (conversations: 30, self-check: 7)")
     dg.add_argument("--import-log", nargs="?", const="", default=None, metavar="PATH",
                     help="first read conversations from jarves.log (default: the current log and its rotations)")
+    from .selfcheck import add_cli_args as add_selfcheck_args
+    add_selfcheck_args(dg)                    # owner request 20 Oct: jarvis diagnose --now (self-check)
     up = sub.add_parser("update", help="check GitHub for a newer JARVES; install only after you approve")
     up.add_argument("action", nargs="?", default="check", choices=["check", "install", "status"])
     up.add_argument("--yes", action="store_true", help="install: you already approved (no question)")

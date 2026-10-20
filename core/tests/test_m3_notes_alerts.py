@@ -279,7 +279,9 @@ def test_more_autonomy_only_from_dashboard(db, tmp_path):
 
 
 def test_autonomy_has_no_destructive_or_calendar_path():
-    assert set(AU.APPLIERS) == {"wake_threshold", "feature_off"}
+    # closed list; config_setting / feature_on (self-check suggestions) are medium risk: never granted automatically
+    assert set(AU.APPLIERS) == {"wake_threshold", "feature_off", "config_setting", "feature_on"}
+    assert all(AU.APPLIERS[k].risk == "medium" for k in ("config_setting", "feature_on", "feature_off"))
     assert not any("delete" in k or "calendar" in k for k in AU.APPLIERS)
     import inspect
     src = inspect.getsource(AU)
