@@ -629,3 +629,6 @@ See [docs/reviews/S1_T03R1_ENGINEERING_REVIEW.md](reviews/S1_T03R1_ENGINEERING_R
 - Instagram: read DMs aloud + send replies (always with confirmation); official API only.
 - Morning briefing includes: calendar today, important unread Gmail (summary), weather, reminders/lists.
 - Rocket alerts: last priority. Phone (OnePlus 11) satellite: after V3 P0–P1.
+- Browser skill: full control on an owner-managed allow-list (other sites read-only/ask first); purchases/payments/credentials always need confirmation.
+- WhatsApp v1: assisted handoff (draft + open chat, owner presses send).
+- Dashboard: Hebrew default with English toggle. Timers/alarms: Core speaks them even with the face closed.
