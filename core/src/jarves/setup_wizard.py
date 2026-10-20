@@ -56,10 +56,14 @@ STEPS = ("language", "connection", "names", "wake", "voice", "addons", "privacy"
 ADDON_MODULES = ("jarves.telegram_channel", "jarves.instagram_channel", "jarves.whatsapp", "jarves.briefing", "jarves.homeassistant",
                  "jarves.appearance", "jarves.backup", "jarves.usage", "jarves.updates", "jarves.runtime",
                  "jarves.operations", "jarves.guides", "jarves.skills.generated", "jarves.browser", "jarves.profiles",
-                 "jarves.selfcheck")
+                 "jarves.selfcheck", "jarves.skills.helper")
 # Privacy-sensitive or outward-acting: OFF on the first run whatever else says; ON only after an explicit yes.
 SAFE_OFF = frozenset({"camera", "face_recognition", "camera_when_away", "gmail_send", "calendar_write",
-                      "dashboard_lan", "browser", "telegram", "home_assistant", "instagram"})
+                      "dashboard_lan", "browser", "telegram", "home_assistant", "instagram", "helper",
+                      "helper_readonly_auto"})
+# Registered and grouped (so coverage checks see them) but never offered by the wizard: the owner decided (20 Oct)
+# that the Helper asks for EVERY command; the read-only allow-list exists only as `jarvis features on ...`.
+WIZARD_HIDDEN = frozenset({"helper_readonly_auto"})
 GOOGLE_FEATURES = ("google_calendar", "calendar_write", "gmail_read", "gmail_send", "google_contacts")
 # (id, Hebrew, English, feature ids). A feature missing here lands in "other" (never hidden); a test demands
 # that every registered feature is listed.
@@ -79,6 +83,7 @@ GROUPS: tuple[tuple[str, str, str, tuple[str, ...]], ...] = (
     ("dashboard", "לוח בקרה וטלפון", "Dashboard & phone", ("dashboard", "dashboard_lan", "context_trace")),
     ("updates", "עדכונים וגיבוי", "Updates & backup", ("update_check", "backup")),
     ("profiles", "פרופילים", "Profiles", ("profiles",)),
+    ("helper", "עזרה במחשב (פקודות והתקנות)", "Computer helper (commands & installs)", ("helper", "helper_readonly_auto")),
 )
 ANSWER_KEYS = {"language", "connection", "api_key_from_env", "display_name", "spoken_name", "address_me",
                "wake_model", "voice", "approve_voice_cost", "features", "privacy_mode", "monthly_budget_usd",
@@ -173,7 +178,7 @@ def groups() -> list[tuple[str, str, str, list[str]]]:
     load_addons()
     seen, out = set(), []
     for gid, he, en, ids in GROUPS:
-        have = [i for i in ids if i in feat.CATALOG]
+        have = [i for i in ids if i in feat.CATALOG and i not in WIZARD_HIDDEN]
         seen.update(ids)
         if have:
             out.append((gid, he, en, have))
@@ -613,8 +618,8 @@ class Wizard:
             if not isinstance(given, dict):
                 raise AnswerError("features must be an object {id: true|false}")
             for fid, on in given.items():
-                if fid not in feat.CATALOG:
-                    self.say(f"(unknown feature {fid!r} skipped)")
+                if fid not in feat.CATALOG or fid in WIZARD_HIDDEN:
+                    self.say(f"(feature {fid!r} not offered here; skipped)")
                     continue
                 if not isinstance(on, bool):
                     raise AnswerError(f"features.{fid} must be true or false")
@@ -904,12 +909,17 @@ BUNDLE: dict[str, list[Callable[[], tuple[bool, str]]]] = {
     "home_assistant": [_mod("jarves.homeassistant"), _mod("httpx"), _data("jarves.guides", "data/home_assistant.toml")],
     "profiles": [_mod("jarves.profiles"), _data("jarves", "dashboard_static/profiles.js"),
                  _data("jarves.guides", "data/profiles.toml")],
+    "helper": [_mod("jarves.skills.helper"), _mod("jarves.approvals"), _mod("jarves.approval_popup"), _mod("tkinter"),
+               _data("jarves.guides", "data/helper.toml")],
+    "helper_readonly_auto": [_mod("jarves.skills.helper")],
 }
 # Not switches, but shipped parts the add-ons rely on.
 EXTRA_BUNDLE: dict[str, list[Callable[[], tuple[bool, str]]]] = {
     "live_voice": [_mod("agents.realtime"), _mod("websockets")],
     "chatgpt_sign_in": [_mod("jarves.chatgpt_auth"), _mod("jwt")],
     "privacy": [_mod("jarves.privacy")],
+    "approvals": [_mod("jarves.approvals"), _mod("jarves.approval_popup"), _mod("tkinter"),
+                  _data("jarves", "dashboard_static/approvals.js")],
     "windows_tts": [_win(_mod("winrt.windows.media.speechsynthesis"))],
     "offline_stt": [_mod("faster_whisper")],          # its Whisper model downloads on first use (not shipped)
     "guides": [_data("jarves.guides", "data/music.toml")],

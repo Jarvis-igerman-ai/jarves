@@ -50,7 +50,8 @@ PLUGIN_MODULES = ("jarves.workspace", "jarves.curator", "jarves.memory", "jarves
                   "jarves.setup_wizard",                                         # SW-V3: Setup & add-ons page
                   "jarves.profiles",                                             # Issue #17: Profiles page
                   "jarves.context_trace",                                          # his context per conversation
-                  "jarves.browser")                                                # Browser allow-list page
+                  "jarves.browser",                                                # Browser allow-list page
+                  "jarves.approvals", "jarves.skills.helper")                      # V3: Approvals list, Helper switch
 MEMORY_UNDO_KEEP = 30
 MEMORY_UNDO_TTL_S = 24 * 3600                        # the undo button works for 24 h, then the entry is purged
 UNDO_PURGE_EVERY_S = 3600

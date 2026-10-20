@@ -3,7 +3,6 @@ from __future__ import annotations
 
 import asyncio
 import time
-import uuid
 import hashlib
 import json
 from contextlib import aclosing
@@ -63,6 +62,54 @@ def _speaker_name(device) -> str:
         return "unknown"
 
 
+class _FaceApproval:
+    """approvals channel: the Godot confirm dialog, bound to the face client that was asked (typed-code requests
+    are not offered there: the face has no code field)."""
+    name = "face"
+
+    def __init__(self, core) -> None:
+        self.core = core
+
+    def available(self, a) -> bool:
+        return not a.typed_code and getattr(self.core, "link", None) is not None \
+            and self.core.link.face_client_id() is not None
+
+    async def open(self, a) -> None:
+        self.core._confirm[a.id] = self.core.link.face_client_id()
+        await self.core.link.send_face("confirm.request", {"id": a.id, "prompt": a.prompt, "risk": a.risk,
+                                                           "kind": a.kind})
+
+    async def close(self, a) -> None:
+        if self.core._confirm.pop(a.id, None) is not None and a.channel != "face":
+            await self.core.link.send_face("confirm.cancel", {"id": a.id})   # answered elsewhere: close the dialog
+
+
+class _VoiceApproval:
+    """approvals channel: the live conversation is told an approval waits (JARVES asks for it once); the owner's
+    yes/no comes back through Core._owner_answer. Not counted for typed-code requests."""
+    name = "voice"
+
+    def __init__(self, core) -> None:
+        self.core = core
+        self._live: dict[str, object] = {}
+
+    def available(self, a) -> bool:
+        live = self.core.live
+        return not a.typed_code and live is not None and hasattr(live, "confirm_pending")
+
+    async def open(self, a) -> None:
+        live = self._live[a.id] = self.core.live
+        try:
+            await live.confirm_pending(a.prompt)
+        except Exception:
+            logs.warn("voice", "LIVE_CONFIRM_NOTE_FAILED", "could not tell the voice session about the confirmation")
+
+    def close(self, a) -> None:
+        live = self._live.pop(a.id, None)
+        if live is not None and hasattr(live, "confirm_done"):
+            live.confirm_done()
+
+
 class Core:
     def __init__(self, cfg: Config, home: Path, *, audio=None, player=None, stt=None, tts=None,
                  live_factory=None, console_logs: bool = True, use_real_audio: bool = True, ai_transport=None,
@@ -87,7 +134,8 @@ class Core:
         self.live = None
         self.listening = False
         self._busy: asyncio.Task | None = None
-        self._confirm: dict[str, tuple[asyncio.Future, str]] = {}   # request id -> (answer, face client id)
+        self._confirm: dict[str, str] = {}         # approval id -> the face client id that was asked
+        self.approvals = None
         self._bg: list[asyncio.Task] = []
         self._speech_cache = SpeechCache(home)
         self._tasks: set[asyncio.Task] = set()     # short fire-and-forget tasks (error notices); awaited on stop
@@ -136,6 +184,12 @@ class Core:
         self.identity = Identity(self.home, c, self.memory)
         self.identity.apply_to_config(c)
 
+        # V3 approvals: ONE service behind every confirmation (popup / tray / face / dashboard / voice, audit log)
+        from . import approvals as appr
+        self.approvals = appr.attach(appr.ApprovalService(self.home))
+        # the native popup only on a real run (tests and silent runs never open windows)
+        self.approvals.channels += [appr.PopupChannel(self.approvals, enabled=self.use_real_audio),
+                                    _FaceApproval(self), _VoiceApproval(self)]
         self.registry = SkillRegistry()
         self.registry.confirm = self.ask_confirm
         self.registry.gate = self.features.gate          # inactive features: tools not offered, calls refused
@@ -227,7 +281,10 @@ class Core:
         self.runtime = runtime_mod.attach(self, mode=self.runtime_mode, **self._runtime_fakes)
         from . import profiles                          # Issue #17: profile_list / profile_switch (screen approval)
         profiles.attach(self)
-        self._write_tools_md()                         # again: camera + display Skills registered after the first
+        self.approvals.channels.append(appr.TrayChannel(self.runtime))   # balloon -> popup / dashboard
+        from .skills.helper import register_helper       # V3: shell / install helper, every action approved first
+        register_helper(self.registry, self.home, self.health)
+        self._write_tools_md()                          # again: camera + display + profile + helper Skills registered after the first
 
         self.stt = self._stt or WhisperSTT(c.voice.stt_model, c.voice.stt_fallback_model, c.voice.stt_compute,
                                            c.voice.language)
@@ -276,9 +333,10 @@ class Core:
         logs.info("core", "CORE_STOPPING", "Core stopping")
         if getattr(self, "history", None) is not None:
             self.history.ai_reviews = False         # P0.4 Q06: no AI review starts during shutdown (rules still run)
-        for fut, _ in list(self._confirm.values()):
-            if not fut.done():
-                fut.set_result(False)              # pending confirmation = denied, never approved by shutdown
+        if getattr(self, "approvals", None) is not None:
+            self.approvals.close()                 # pending approvals = denied, never approved by shutdown
+            from . import approvals as appr
+            appr.detach(self.approvals)
         self._confirm.clear()
         if self.live is not None:
             live, self.live = self.live, None
@@ -486,6 +544,8 @@ class Core:
             await self.talk_up()
         elif t == "user.text":
             text = str(p.get("text", "")).strip()[:1000]
+            if text and self._owner_answer(text, "typed"):
+                return                              # "כן" / "לא" typed while an approval waits: that was the answer
             if text:
                 self._run_busy(self.handle_utterance(text, typed=True))
         elif t in ("mic.set_mute", "mic.mute_changed"):
@@ -493,14 +553,13 @@ class Core:
         elif t == "status.request":
             await self.link.reply(ws, "status", self.snapshot())
         elif t == "confirm.reply":
-            req = self._confirm.get(str(p.get("id")))
-            if req is None or req[1] != client.id:      # only the face that was asked may answer
+            aid = str(p.get("id"))
+            if self._confirm.get(aid) != client.id:      # only the face that was asked may answer
                 logs.warn("core", "CONFIRM_SPOOFED", "confirmation reply from a client that was not asked",
                           role=client.role)
                 return
-            self._confirm.pop(str(p.get("id")), None)
-            if not req[0].done():
-                req[0].set_result(p.get("approved") is True)
+            self._confirm.pop(aid, None)
+            self.approvals.answer(aid, p.get("approved") is True, channel="face")
         elif t == "debug.enable":
             logs.enable_debug(min(int(p.get("minutes", self.cfg.log.debug_minutes)), self.cfg.log.debug_minutes))
             logs.info("core", "DEBUG_ENABLED", "temporary DEBUG logging enabled")
@@ -612,7 +671,8 @@ class Core:
         if self.voice_mode != "push_to_talk":
             return
         self.dev.speaker_stop()                # barge-in: talking interrupts JARVES
-        if self._busy and not self._busy.done():
+        waiting = self.approvals is not None and self.approvals.has_pending()
+        if self._busy and not self._busy.done() and not waiting:   # an approval's turn stays: he answers it
             self._busy.cancel()
         try:
             self.dev.mic_start()
@@ -628,6 +688,9 @@ class Core:
             return
         self.listening = False
         audio = self.dev.mic_stop()
+        if self.approvals is not None and self.approvals.has_pending():
+            self._spawn(self._transcribe_for_approval(audio))
+            return
         self._run_busy(self._transcribe_and_answer(audio))
 
     async def _transcribe_and_answer(self, audio) -> None:
@@ -652,6 +715,7 @@ class Core:
             await self.set_face("idle")
             return
         await self.link.send_face("user.transcript", {"text": text})
+        self._owner_answer(text, "voice")           # nothing waits here (talk_up routes those): a new turn
         await self.handle_utterance(text, typed=False)
 
     async def handle_utterance(self, text: str, typed: bool) -> None:
@@ -791,6 +855,8 @@ class Core:
             self.budget.record("voice_seconds", int(round(seconds)))
 
         async def on_transcript(role: str, text: str) -> None:
+            if role == "user":                      # the OWNER's speech (input transcription), never JARVES's
+                self._owner_answer(text, "voice")
             self.curator.observe(role, text, live=True)
             await self.link.send_face("user.transcript" if role == "user" else "assistant.text",
                                       {"text": text, "source": self.voice_mode})
@@ -1245,26 +1311,38 @@ class Core:
         await self._start_live(greeting="זה הקול החדש שלי. מה דעתך?")
 
     # ------------------------------------------------------------------ confirmation for side effects
-    async def ask_confirm(self, prompt: str, timeout: float = 20) -> bool:
-        face_id = self.link.face_client_id()
-        if face_id is None or self.stopping:
+    async def ask_confirm(self, prompt: str, timeout: float | None = None, **meta) -> bool:
+        """registry.confirm / camera switch / any approval: the shared approvals service (approvals.py) shows it
+        on the popup, tray, face, dashboard and voice at once; no answer in time = NO."""
+        if self.stopping or self.approvals is None:
             return False
-        cid = uuid.uuid4().hex
-        fut = asyncio.get_running_loop().create_future()
-        self._confirm[cid] = (fut, face_id)
-        await self.link.send_face("confirm.request", {"id": cid, "prompt": prompt})
-        live = self.live
-        if live is not None and hasattr(live, "confirm_pending"):
-            try:                                    # voice-only user: JARVES says "approve it on the screen"
-                await live.confirm_pending(prompt)
-            except Exception:
-                logs.warn("voice", "LIVE_CONFIRM_NOTE_FAILED", "could not tell the voice session about the confirmation")
+        ok = await self.approvals.ask(prompt, timeout=timeout, **meta)
+        if not ok:
+            logs.info("core", "CONFIRM_DENIED", "approval not given: treated as NO")
+        return ok
+    ask_confirm.accepts_meta = True
+
+    def _owner_answer(self, text: str, channel: str) -> bool:
+        """The owner's own words (typed on the face / heard from the mic): a pure yes/no answers the ONE waiting
+        approval. Otherwise it is a new turn (a denied request may be asked again)."""
+        ap = self.approvals
+        if ap is None:
+            return False
+        if ap.has_pending() and ap.answer_words(text, channel=channel):
+            logs.info("core", "APPROVAL_ANSWERED_BY_WORDS", f"approval answered ({channel})")
+            return True
+        ap.note_user_turn()
+        return False
+
+    async def _transcribe_for_approval(self, audio) -> None:
+        """Push-to-talk while an approval waits: the turn that asked must not be cancelled; hear yes/no only."""
         try:
-            return await asyncio.wait_for(fut, timeout)
-        except asyncio.TimeoutError:
-            logs.info("core", "CONFIRM_TIMEOUT", "no answer to the confirmation: treated as NO", timeout_s=timeout)
-            return False
-        finally:
-            self._confirm.pop(cid, None)
-            if live is not None and hasattr(live, "confirm_done"):
-                live.confirm_done()
+            text = await self.stt.transcribe(audio)
+        except STTUnavailable as e:
+            await self.notify_error(e.code, e.message, e.action)
+            return
+        if text:
+            await self.link.send_face("user.transcript", {"text": text})
+            if not self._owner_answer(text, "voice"):
+                await self.link.send_face("assistant.text", {"text": "מחכה לאישור שלך: כן או לא (או על המסך).",
+                                                             "source": "core"})
