@@ -4,6 +4,7 @@ import time
 from datetime import datetime
 from types import SimpleNamespace
 
+from conftest import until
 from jarves.config import AIConfig, VoiceConfig
 from jarves.skills import SkillRegistry
 from jarves.skills.builtin import ClockSkill
@@ -71,10 +72,12 @@ def test_clock_note_has_time_day_and_date():
 
 async def test_clock_loop_sends_silent_context_once_per_minute():
     lv, sent, _ = make(clock_context=True)
+    lv._now = lambda: datetime(2026, 10, 19, 14, 30, 10)     # pinned minute: never straddles a real minute change
     task = asyncio.create_task(lv._clock_loop())
-    await asyncio.sleep(0.05)
+    await until(lambda: sent.items)
     lv.running = False
     task.cancel()
+    await asyncio.gather(task, return_exceptions=True)
     assert len(sent.items) == 1
     kind, content, delegation_id, event_id = sent.items[0]
     assert kind == "thinking" and delegation_id is None and event_id.startswith("jarves_clock_")
