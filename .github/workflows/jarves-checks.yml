@@ -30,7 +30,7 @@ jobs:
       # Owner rule: NO skipped tests. Every extra is installed (camera/OpenCV, voice, tray, browser/Playwright once it
       # exists) and the real tools are fetched/located by tests/_tools.py (Godot 4.7.2 everywhere, Inno Setup on
       # Windows, openssl from PATH/Git). Platform-only tests are deselected per OS (markers), never skipped.
-      - name: System libraries (Linux: PortAudio for sounddevice)
+      - name: "System libraries (Linux, PortAudio for sounddevice)"
         if: runner.os == 'Linux'
         run: sudo apt-get update -qq && sudo apt-get install -y -qq libportaudio2
       - name: Install (locked, all extras)
