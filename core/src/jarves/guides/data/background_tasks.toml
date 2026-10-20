@@ -1,0 +1,33 @@
+order = 12
+category = "everyday"
+pages = ["tasks"]
+features = ["background_tasks"]
+aliases = ["משימות ברקע", "מחקר", "research", "tasks", "background"]
+links = ["voice_ai", "web_search", "scheduler"]
+title_he = "משימות ברקע"
+title_en = "Background tasks"
+what_he = "שאלות ארוכות (מחקר, השוואות) ג'ארביס בודק ברקע, ואפשר להמשיך לדבר בינתיים."
+what_en = "Long questions (research, comparisons) run in the background while you keep talking."
+say = [["תבדוק לי ברקע מה המחשב הנייד הכי טוב עד 4000 שקל", "Research in the background the best laptop under 4000 shekels"], ["מה עם המשימה?", "How is the task going?"]]
+expect_he = "הוא אומר שהתחיל, ומספר את התשובה כשהיא מוכנה."
+expect_en = "He says he started, and tells you the answer when it is ready."
+cost_he = "בערך 5-30 סנט למשימה, לפי האורך. יש תקרה יומית."
+cost_en = "About 5-30 cents a task, depending on length. There is a daily cap."
+privacy_he = "השאלה נשלחת ל-OpenAI."
+privacy_en = "The question is sent to OpenAI."
+
+[[steps]]
+he = "צריך מפתח OpenAI API (מנוי ChatGPT לבד לא מספיק). ראו \"חיבור לבינה המלאכותית\"."
+en = "Needs an OpenAI API key (a ChatGPT plan alone is not enough). See \"Connect the AI\"."
+check = "available:background_tasks"
+
+[[steps]]
+he = "ודאו שהמתג \"משימות ברקע\" דולק."
+en = "Make sure the Background tasks switch is on."
+action = "feature_on:background_tasks"
+check = "enabled:background_tasks"
+
+[[steps]]
+he = "את המשימות רואים בעמוד \"Background tasks\" בלוח הבקרה."
+en = "See the tasks on the dashboard's Background tasks page."
+action = "open:#/tasks"

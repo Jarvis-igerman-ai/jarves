@@ -1,0 +1,53 @@
+order = 2
+category = "voice"
+features = ["wake_word"]
+checklist = 2
+suggest = true
+aliases = ["hey jarvis", "היי ג'ארביס", "מילת הפעלה", "wake", "מיקרופון", "microphone"]
+links = ["custom_wake_phrase", "chimes", "voice_ai"]
+title_he = "מילת הפעלה \"היי ג'ארביס\""
+title_en = "Wake word \"Hey Jarvis\""
+what_he = "ג'ארביס מקשיב במחשב עצמו למילים \"היי ג'ארביס\" ורק אז פותח שיחה."
+what_en = "JARVES listens on this computer for \"Hey Jarvis\" and only then opens a conversation."
+say = [["היי ג'ארביס", "Hey Jarvis"]]
+expect_he = "נשמע צליל קצר, הפנים מסתכלות אליכם, ואחרי צליל שני אפשר לדבר."
+expect_en = "A short chime, the face looks at you, and after the second chime you can talk."
+test_he = "הבדיקה בודקת שיש מיקרופון ושהגלאי מותקן. אחר כך פשוט אמרו \"היי ג'ארביס\"."
+test_en = "The check looks for a microphone and the detector. Then just say \"Hey Jarvis\"."
+cost_he = "חינם: הזיהוי רץ במחשב."
+cost_en = "Free: detection runs on this computer."
+privacy_he = "שום קול לא יוצא מהמחשב לפני שהמילים זוהו."
+privacy_en = "No audio leaves the computer before the words are detected."
+
+[[steps]]
+he = "חברו מיקרופון (או השתמשו במיקרופון של המחשב)."
+en = "Connect a microphone (or use the computer's own)."
+check = "available:wake_word"
+
+[[steps]]
+he = "ודאו שהמתג \"מילת הפעלה\" דולק."
+en = "Make sure the Wake word switch is on."
+action = "feature_on:wake_word"
+check = "enabled:wake_word"
+
+[[steps]]
+he = "אם הוא לא שומע טוב, הריצו jarvis wake כדי לכייל לקול שלכם."
+en = "If he does not hear you well, run jarvis wake to tune it to your voice."
+action = "command:jarvis wake"
+
+[[steps]]
+he = "לחצו \"בדוק עכשיו\" ואז אמרו \"היי ג'ארביס\"."
+en = "Press Test now, then say \"Hey Jarvis\"."
+action = "test"
+
+[[problems]]
+he = "הוא לא מגיב"
+en = "He does not react"
+fix_he = "בדקו שהמיקרופון לא מושתק ב-Windows או בעמוד השליטה (Controls). נסו jarvis wake."
+fix_en = "Check the microphone is not muted in Windows or on the Controls page. Try jarvis wake."
+
+[[problems]]
+he = "הוא נדלק לבד"
+en = "He wakes up by himself"
+fix_he = "הריצו jarvis wake והשתמשו בסף שהוא ממליץ."
+fix_en = "Run jarvis wake and use the threshold it recommends."

@@ -1,0 +1,59 @@
+order = 10
+category = "everyday"
+features = ["music"]
+checklist = 3
+suggest = true
+aliases = ["מוזיקה", "שירים", "שיר", "pear", "youtube music", "תנגן", "music", "songs"]
+error_codes = ["MUSIC_PLAYER_OFFLINE", "MUSIC_NOT_PAIRED", "MUSIC_PAIR_DENIED"]
+title_he = "מוזיקה"
+title_en = "Music"
+what_he = "ג'ארביס מנגן, עוצר ומחליף שירים ב-Pear Desktop (יוטיוב מיוזיק) כשמבקשים."
+what_en = "JARVES plays, pauses and skips songs in Pear Desktop (YouTube Music) when you ask."
+say = [["תנגן משהו רגוע", "Play something calm"], ["תעצור את המוזיקה", "Pause the music"], ["שיר הבא", "Next song"], ["תנמיך קצת", "A bit quieter"]]
+expect_he = "השיר מתחיל תוך כמה שניות. הוא אומר \"עצרתי\" רק אחרי שבדק שהמוזיקה באמת נעצרה."
+expect_en = "The song starts within a few seconds. He says \"paused\" only after checking it really stopped."
+test = "music"
+test_he = "הבדיקה רק בודקת ש-Pear עונה. היא לא מנגנת כלום."
+test_en = "The check only sees that Pear answers. It does not play anything."
+cost_he = "חינם (חשבון יוטיוב מיוזיק משלכם)."
+cost_en = "Free (your own YouTube Music account)."
+privacy_he = "רק שם השיר שביקשתם נשלח ל-Pear במחשב."
+privacy_en = "Only the song you asked for is sent to Pear on this computer."
+
+[[steps]]
+he = "התקינו ופתחו את Pear Desktop."
+en = "Install and open Pear Desktop."
+
+[[steps]]
+he = "ב-Pear: Plugins, הפעילו את API Server."
+en = "In Pear: Plugins, turn on API Server."
+check = "available:music"
+
+[[steps]]
+he = "בטרמינל הקלידו jarvis music pair ולחצו Allow בחלון של Pear (פעם אחת)."
+en = "In a terminal type jarvis music pair and press Allow in Pear's window (once)."
+action = "command:jarvis music pair"
+
+[[steps]]
+he = "ודאו שהמתג \"מוזיקה\" דולק ולחצו \"בדוק עכשיו\"."
+en = "Make sure the Music switch is on and press Test now."
+action = "feature_on:music"
+check = "active:music"
+
+[[problems]]
+he = "הוא אומר ש-Pear לא פועל"
+en = "He says Pear is not running"
+fix_he = "פתחו את Pear Desktop וודאו שהתוסף API Server דולק."
+fix_en = "Open Pear Desktop and make sure the API Server plugin is on."
+
+[[problems]]
+he = "הוא אומר שאין הרשאה"
+en = "He says he has no permission"
+fix_he = "הריצו jarvis music pair ולחצו Allow."
+fix_en = "Run jarvis music pair and press Allow."
+
+[[problems]]
+he = "הוא מנגן שיר אחר"
+en = "He plays a different song"
+fix_he = "אמרו את שם השיר ואת הזמר, למשל \"תנגן את ירושלים של זהב של נעמי שמר\"."
+fix_en = "Say the song and the singer, e.g. \"play Yesterday by the Beatles\"."

@@ -40,6 +40,13 @@
 ## Future runtime operability gate (mandatory when software scope is approved)
 - Before implementing any Python Core, DevicePort, admin UI, networking or runtime service, read `docs/JARVES_CONTROLS_DIAGNOSTICS_REQUIREMENTS.md`. From the **first running Core↔Godot integration**, include bounded structured local logs, truthful health/error states, targeted disconnect/recovery tests, privacy-safe diagnostic export and a documented no-network troubleshooting path appropriate to the approved slice. Do not postpone all observability to the final hardware build or add heavyweight monitoring infrastructure. This rule **does not authorize** software work during the current mechanical milestone.
 
+## Feature setup and CLI access (user requirement, 19 Oct 2026)
+- Every user-facing feature and option must have a discoverable CLI path as well as any dashboard/voice path. Root `jarvis --help` / `jarvis -h` must list command groups; feature switches alone do not establish CLI parity for settings, workspace edits or runtime actions. Document gaps truthfully rather than claiming all options are covered.
+- Enabling a feature must check its prerequisites and automatically install supported missing software prerequisites through the maintained setup path before reporting successful activation. Include already-enabled but unusable features in repair checks. Do not merely set an ON flag and leave an unexplained missing dependency such as OpenCV.
+- Use allowlisted packages, existing locks and official pinned model/download sources; preserve installed extras and user data. Never execute model-supplied install commands, replace an in-use runtime unsafely, silently spend money, log credentials or treat a toggle as proof of readiness. If a prerequisite cannot be installed safely, fail/pause with an exact next action; do not claim usable success.
+- Hardware, sign-in, provider consent, administrator/OS permissions, paid access and public app verification remain explicit user/maintainer gates. Distinguish configured/enabled, installed, available and live-verified states. Recheck after installation; add focused success/failure/cancellation coverage using mocks, not real downloads in tests.
+- Keep JARVES's loaded setup/feature docs in sync with implemented CLI behavior, approvals and known blockers. Generated references must describe actual capabilities, not invented installers or tools.
+
 ## Design constraints
 - For design, sourcing, printability, assembly, acoustics, component selection or service tasks, read `docs/PROJECT_PRINCIPLES.md` after the two default entry files. Explain physical choices to the user in plain language and flag what must be physically tested.
 - The user buys hardware in Israel: require credible local stock, VAT-inclusive ILS price, warranty, delivery and available substitutes. Import-only options are fallback, never assume local availability. No final SKU or purchasing approval yet.
@@ -67,6 +74,7 @@
 8. Never close hardware or real-world integration items (real mic, live API, account sign-in, playback, Pi, prints) on mock or unit tests alone.
 
 ## Closeout housekeeping
+- User requirement (19 Oct 2026): commit and push every completed change; include the commit link and truthful verification status in the handoff. Do not merge unrelated work or commit credentials.
 - On milestone completion, follow **Issue lifecycle** above.
 - Review changes for tracked caches, duplicate generated files, temporary artifacts and scratch outputs; ignore or clean **only clearly safe** disposable artifacts in scope. Never do sweeping deletion of source, essential renders or historical data without approval. Update README links if authoritative file locations change.
 - Spoken-distance expectations are undecided; earlier 3–5 m is only an exploratory research scenario, not a fixed requirement.

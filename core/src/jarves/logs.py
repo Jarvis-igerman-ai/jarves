@@ -76,7 +76,77 @@ def set_privacy(on: bool) -> None:
 
 
 def privacy() -> bool:
+    _poll_privacy()
     return _privacy
+
+
+# Runtime privacy switch (dashboard button, WP-K): <log_dir>/privacy.json {"privacy": bool, "at": ts}. Whoever writes
+# it (the dashboard in another process, the CLI) changes privacy for NEW log lines / history rows of every process
+# that logs into the same folder, within a second, without a restart. A flag older than this process's setup() is
+# ignored (config.toml, also updated by the switch, is the truth at start).
+PRIVACY_FILE = "privacy.json"
+_flag: Path | None = None
+_flag_mtime: float | None = None
+_flag_checked = 0.0
+_runtime: bool | None = None          # set by a runtime switch since setup() (None = the config value holds)
+
+
+def runtime_privacy() -> bool | None:
+    """The value of a runtime switch made since setup() (dashboard button), else None."""
+    _poll_privacy()
+    return _runtime
+
+
+def _poll_privacy(force: bool = False) -> None:
+    global _flag_mtime, _flag_checked, _runtime
+    if _flag is None:
+        return
+    now = time.monotonic()
+    if not force and now - _flag_checked < 1.0:
+        return
+    _flag_checked = now
+    try:
+        m = _flag.stat().st_mtime
+    except OSError:
+        return
+    if m == _flag_mtime:
+        return
+    _flag_mtime = m
+    try:
+        v = json.loads(_flag.read_text(encoding="utf-8")).get("privacy")
+    except (OSError, ValueError, AttributeError):
+        return
+    if isinstance(v, bool):
+        set_privacy(v)
+        _runtime = v
+
+
+def watch_privacy(log_dir: Path) -> None:
+    """Follow the runtime switch in <log_dir>/privacy.json from now on (called by setup())."""
+    global _flag, _flag_mtime, _runtime
+    _flag, _runtime = Path(log_dir) / PRIVACY_FILE, None
+    try:
+        _flag_mtime = _flag.stat().st_mtime         # baseline: only LATER switches apply
+    except OSError:
+        _flag_mtime = None
+
+
+def write_privacy(log_dir: Path, on: bool) -> None:
+    """Flip privacy now for this process and (via the flag file) for every process logging into log_dir."""
+    global _flag_mtime, _runtime
+    import os
+    log_dir = Path(log_dir)
+    log_dir.mkdir(parents=True, exist_ok=True)
+    tmp = log_dir / (PRIVACY_FILE + ".tmp")
+    tmp.write_text(json.dumps({"privacy": bool(on), "at": time.time()}), encoding="utf-8")
+    os.replace(tmp, log_dir / PRIVACY_FILE)
+    set_privacy(on)
+    _runtime = bool(on)
+    if _flag is not None and _flag == log_dir / PRIVACY_FILE:
+        try:
+            _flag_mtime = _flag.stat().st_mtime       # our own write: already applied
+        except OSError:
+            pass
 
 
 def is_credential(key: object) -> bool:
@@ -88,7 +158,7 @@ def is_sensitive(key: object, private: bool | None = None) -> bool:
     """Should this field's value be masked? Credentials always; content only in privacy mode."""
     if is_credential(key):
         return True
-    return (_privacy if private is None else private) and str(key).lower() in _CONTENT_FIELDS
+    return (privacy() if private is None else private) and str(key).lower() in _CONTENT_FIELDS
 
 
 def _mask(v: object) -> str:
@@ -213,6 +283,27 @@ _debug_until = 0.0
 _base_level = logging.INFO
 _console: ModuleFilter | None = None
 _console_base = logging.INFO
+# Extra handlers that survive setup() and always receive INFO and above (e.g. the conversation history store).
+_sinks: list[logging.Handler] = []
+
+
+def add_sink(handler: logging.Handler) -> None:
+    """Attach a handler that gets every INFO+ record with its structured fields, whatever the file/console level."""
+    handler.setLevel(min(handler.level or logging.INFO, logging.INFO))
+    if handler not in _sinks:
+        _sinks.append(handler)
+        _logger.addHandler(handler)
+    _logger.setLevel(min(_logger.level or logging.INFO, logging.INFO))
+
+
+def remove_sink(handler: logging.Handler) -> None:
+    if handler in _sinks:
+        _sinks.remove(handler)
+    _logger.removeHandler(handler)
+
+
+def _logger_level(base: int) -> int:
+    return min(base, logging.INFO) if _sinks else base
 
 
 def setup(log_dir: Path, level: str = "INFO", max_bytes: int = 1_000_000, backups: int = 5,
@@ -221,8 +312,11 @@ def setup(log_dir: Path, level: str = "INFO", max_bytes: int = 1_000_000, backup
     global _base_level, _console, _console_base
     set_privacy(privacy)
     log_dir.mkdir(parents=True, exist_ok=True)
+    watch_privacy(log_dir)
     path = log_dir / "jarves.log"
     for h in list(_logger.handlers):
+        if h in _sinks:
+            continue
         _logger.removeHandler(h)
         h.close()
     fh = logging.handlers.RotatingFileHandler(path, maxBytes=max_bytes, backupCount=backups, encoding="utf-8")
@@ -242,7 +336,7 @@ def setup(log_dir: Path, level: str = "INFO", max_bytes: int = 1_000_000, backup
         _console = ModuleFilter(_console_base, only, hide)
         ch.addFilter(_console)
         _logger.addHandler(ch)
-    _logger.setLevel(min(_base_level, _console_base if console else _base_level))
+    _logger.setLevel(_logger_level(min(_base_level, _console_base if console else _base_level)))
     _logger.propagate = False
     return path
 
@@ -264,7 +358,7 @@ def log(component: str, code: str, msg: str, level: int = logging.INFO, exc: boo
         for h in _logger.handlers:
             if isinstance(h, logging.handlers.RotatingFileHandler):
                 h.setLevel(_base_level)
-        _logger.setLevel(min(_base_level, _console_base if _console else _base_level))
+        _logger.setLevel(_logger_level(min(_base_level, _console_base if _console else _base_level)))
     _logger.log(level, msg, exc_info=exc, extra={"component": component, "code": code, "fields": fields})
 
 

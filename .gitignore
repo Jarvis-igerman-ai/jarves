@@ -36,3 +36,11 @@ build/
 # Generated print STLs (regenerate: freecadcmd print/build_print_package.py)
 print/stl/
 .claude/
+
+# Build identity written by packaging/build_windows.ps1 into installed copies only
+core/src/jarves/_build_info.json
+core/src/jarves/_google_app_client.json
+dist/
+
+.wrangler/
+.playwright-mcp/

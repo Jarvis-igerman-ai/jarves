@@ -40,6 +40,35 @@ class FakeTTS:
         return np.zeros(1600, np.float32), 16000
 
 
+@pytest.fixture(autouse=True)
+def _update_keys_are_hermetic(monkeypatch):
+    """The shipped public key must not change what update tests expect; tests pass their own keys explicitly."""
+    from jarves import updates
+    monkeypatch.setattr(updates, "UPDATE_PUBLIC_KEYS", ())
+
+
+@pytest.fixture(autouse=True)
+def _pear_probe_is_hermetic(monkeypatch):
+    """The music feature probe pings Pear's real port; tests must not depend on whether Pear runs on this PC."""
+    from jarves import features as feat
+    monkeypatch.setattr(feat, "_tcp_open", lambda url, timeout=0.3: True)
+
+
+@pytest.fixture(autouse=True)
+def _no_real_autostart(monkeypatch):
+    """Never touch the real HKCU Run key / systemd user units from a test (runtime/autostart.py)."""
+    from jarves.runtime import autostart as au
+
+    class Reg(dict):
+        def set(self, name, value):
+            self[name] = value
+
+        def delete(self, name):
+            return self.pop(name, None) is not None
+    monkeypatch.setattr(au, "adapter", lambda: au.WindowsAutostart(Reg(), ["pythonw.exe", "-m", "jarves", "run",
+                                                                           "--background"]))
+
+
 @pytest.fixture
 def home(tmp_path, monkeypatch):
     monkeypatch.setenv("JARVES_HOME", str(tmp_path))
@@ -52,6 +81,7 @@ def cfg():
     c = Config()
     c.link.port = free_port()
     c.voice.greeting = False      # the greeting has its own test
+    c.voice.greeting_delay_s = 0  # the 0.5 s beat before the hello has its own test (test_conversation_quality)
     return c
 
 

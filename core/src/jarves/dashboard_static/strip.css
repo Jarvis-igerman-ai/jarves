@@ -1,0 +1,25 @@
+/* Privacy strip on Home (strip.js). Okabe-Ito colours; every state also differs in fill/outline/slash and words. */
+:root { --ps-capture: #e69f00; --ps-out: #d55e00; --ps-local: #2b8cc4; --ps-standby: #b8a400; --ps-off: #7a7974; }
+:root[data-theme="dark"] { --ps-local: #56b4e9; --ps-standby: #f0e442; --ps-off: #9a9992; }
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) { --ps-local: #56b4e9; --ps-standby: #f0e442; --ps-off: #9a9992; } }
+.ps-row { display: flex; flex-wrap: wrap; gap: 8px; margin: 6px 0 8px; }
+.ps-chip { display: inline-flex; align-items: center; gap: 6px; padding: 6px 12px 6px 10px; border-radius: 999px;
+  border: 2px solid var(--ps-off); background: var(--surface); color: var(--text); font: inherit; font-weight: 600; }
+button.ps-chip { cursor: pointer; }
+button.ps-chip:disabled { cursor: not-allowed; opacity: .55; }
+.ps-icon { width: 20px; height: 20px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round;
+  stroke-linejoin: round; flex: none; }
+.ps-capture { background: var(--ps-capture); border-color: var(--ps-capture); color: #111; }
+.ps-out { background: var(--ps-out); border-color: var(--text); color: #fff; box-shadow: 0 0 0 2px var(--ps-out); }
+.ps-local { border-color: var(--ps-local); color: var(--ps-local); }
+.ps-standby { border-color: var(--ps-standby); border-style: dashed; }
+.ps-off, .ps-none { border-width: 1px; color: var(--ps-off); }
+.ps-none { opacity: .7; }
+.ps-unknown { border-style: dotted; color: var(--text-2); }
+.ps-preview { margin-top: 10px; border: 5px solid var(--ps-capture); border-radius: 12px; padding: 10px; max-width: 680px; }
+.ps-head { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; }
+.ps-rec { width: 12px; height: 12px; border-radius: 50%; background: var(--ps-out); animation: ps-blink 1.2s infinite; }
+@keyframes ps-blink { 50% { opacity: .35; } }
+@media (prefers-reduced-motion: reduce) { .ps-rec { animation: none; } }
+#psImg { display: block; width: 100%; aspect-ratio: 4 / 3; object-fit: contain; background: #000; border-radius: 6px;
+  margin-bottom: 8px; }

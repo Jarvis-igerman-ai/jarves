@@ -1,0 +1,33 @@
+order = 11
+category = "everyday"
+features = ["web_search"]
+aliases = ["חיפוש", "אינטרנט", "חדשות", "מזג אוויר", "search", "web", "news"]
+links = ["voice_ai", "background_tasks"]
+title_he = "חיפוש באינטרנט"
+title_en = "Web search"
+what_he = "ג'ארביס בודק באינטרנט כשצריך מידע עדכני, כמו חדשות או מזג אוויר."
+what_en = "JARVES checks the web when he needs fresh facts, like news or weather."
+say = [["מה מזג האוויר מחר בתל אביב?", "What's the weather tomorrow in Tel Aviv?"], ["מה החדשות היום?", "What's in the news today?"]]
+expect_he = "הוא אומר \"רגע, אני בודק\" ועונה תוך כמה שניות."
+expect_en = "He says \"one moment, checking\" and answers within a few seconds."
+cost_he = "כמה סנטים לחיפוש (OpenAI)."
+cost_en = "A few cents per search (OpenAI)."
+privacy_he = "השאלה נשלחת ל-OpenAI לחיפוש."
+privacy_en = "The question is sent to OpenAI for the search."
+
+[[steps]]
+he = "חברו את הבינה המלאכותית (מדריך \"חיבור לבינה המלאכותית\")."
+en = "Connect the AI (guide \"Connect the AI\")."
+check = "available:web_search"
+
+[[steps]]
+he = "ודאו שהמתג \"חיפוש באינטרנט\" דולק. זה מתחיל מהשיחה הבאה."
+en = "Make sure the Web search switch is on. It starts with the next conversation."
+action = "feature_on:web_search"
+check = "enabled:web_search"
+
+[[problems]]
+he = "הוא שותק הרבה זמן"
+en = "He is silent for a long time"
+fix_he = "חיפוש יכול לקחת עד כחצי דקה. אם זה קורה הרבה, ראו את עמוד הבעיות."
+fix_en = "A search may take up to about half a minute. If it happens often, see the Issues page."

@@ -29,7 +29,9 @@ _SURPRISED = {
 _LOVE = {
     "both": ["❤", "😍", "🥰"],
     "user": ["אוהב אותך", "אני אוהבת אותך", "love you", "אתה מתוק", "אתה חמוד", "you're sweet", "תודה רבה"],
-    "jarves": ["אוהב אותך", "נעים לי", "איזה כיף", "you're so sweet", "aww"],
+    # 19 Oct persona: the warmer tone words the Live prompt now asks for ("שמח בשבילך", "מזל טוב")
+    "jarves": ["אוהב אותך", "נעים לי", "איזה כיף", "שמח בשבילך", "מזל טוב", "כל הכבוד לך", "you're so sweet",
+               "aww", "so happy for you", "congratulations"],
 }
 # Mild sadness ("I'm a bit sad", "that's not simple, I'm here with you") -> the face's gentle "sad" look; loss, illness,
 # death or crying -> full "cry". Regexes allow words between ("אני קצת עצוב").
@@ -38,7 +40,8 @@ _MILD_SAD = {
     "user": [r"אני\s+(?:\S+\s+){0,2}(?:עצוב|עצובה|מדוכא|מדוכאת|בודד|בודדה|שבור|שבורה|מתוסכל|מתוסכלת)",
              r"(?:עצוב|עצובה)\s+לי", r"בדידות|דיכאון|(?:feel|feeling)\s+lonely",
              r"(?:i'?m|i am|i feel)\s+(?:\w+\s+){0,2}(?:sad|lonely|depressed|down|upset)"],
-    "jarves": [r"אני\s+כאן\s+איתך", r"זה\s+(?:באמת\s+)?לא\s+פשוט", r"i'?m\s+here\s+(?:with|for)\s+you"],
+    "jarves": [r"אני\s+כאן\s+איתך", r"אני\s+כאן\s+בשבילך", r"זה\s+(?:באמת\s+)?לא\s+פשוט", r"^אוי[,.!\s]+לא\b",
+               r"i'?m\s+here\s+(?:with|for)\s+you"],
 }
 _CRY_RE = {
     "both": [],

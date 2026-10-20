@@ -9,7 +9,7 @@ import json
 from contextlib import aclosing
 from pathlib import Path
 
-from . import __version__, logs
+from . import __version__, logs, store
 from .brain import AgentBrain, Brain, billing_routes
 from .budget import Budget, BudgetExceeded
 from .config import Config, api_billing_allowed, openai_key_present
@@ -20,6 +20,11 @@ from .memory import MemoryStore
 from .skills import SkillRegistry
 from .skills.builtin import ClockSkill, MemorySkill, StatusSkill
 from .skills.music import MusicSkill, PearDesktopPlayer
+from .skills.settings import Settings, SettingsSkill
+from . import workspace as wsp
+from . import features as feat
+from .curator import _SENSITIVE as SENSITIVE_TEXT, Curator, openai_extractor
+from .dashboard import DashboardSkill
 from .voice.audio import AudioUnavailable, SoundDeviceAudio, StreamingAudio
 from .voice.speechcache import SpeechCache
 from .voice.stt import STTUnavailable, WhisperSTT
@@ -60,14 +65,23 @@ def _speaker_name(device) -> str:
 class Core:
     def __init__(self, cfg: Config, home: Path, *, audio=None, player=None, stt=None, tts=None,
                  live_factory=None, console_logs: bool = True, use_real_audio: bool = True, ai_transport=None,
-                 wake_detector=None, wake_audio=None) -> None:
+                 wake_detector=None, wake_audio=None, runtime_mode: str = "foreground", viewer_launcher=None,
+                 tray_factory=None, autostart=None) -> None:
         self.cfg, self.home = cfg, home
         self._audio, self._player, self._stt, self._tts = audio, player, stt, tts
         self._ai_transport = ai_transport          # tests inject a mock HTTP transport for the ChatGPT route
         self._wake_detector, self._wake_audio = wake_detector, wake_audio   # tests inject fakes
+        # always-on runtime (runtime/): "foreground" (terminal), "desktop" (`jarvis`), "background" (no window)
+        self.runtime_mode = runtime_mode
+        self._runtime_fakes = dict(launcher=viewer_launcher, tray_factory=tray_factory, autostart=autostart)
+        self.runtime = None
         self.wake = None                           # WakeListener when the wake word is active
         self._live_factory = live_factory          # tests inject a fake live session
         self.console_logs, self.use_real_audio = console_logs, use_real_audio
+        # open_dashboard opens the browser only on a real desktop run (tests / silent runs never open windows)
+        import webbrowser
+        self.open_url = webbrowser.open if use_real_audio else None
+        self._dashboard = None
         self.stop_event = asyncio.Event()
         self.live = None
         self.listening = False
@@ -101,31 +115,96 @@ class Core:
         c = self.cfg
         self.log_path = logs.setup(self.home / "logs", c.log.level, c.log.max_bytes, c.log.backups, self.console_logs,
                                   c.log.console_level, c.log.modules, c.log.hide, privacy=c.log.privacy)
+        from . import backup, usage                     # SW-V2 M5: checkpoint BEFORE the stores open/migrate
+        backup.startup_checkpoint(self.home)
+        self.history = store.attach(self.home, c)       # conversation history + self-diagnosis (log sink)
         logs.new_cid()
         logs.info("core", "CORE_STARTING", f"JARVES Core {__version__} starting", home=str(self.home))
         self.health = Health(self.home / "health.json")
         self.memory = MemoryStore(self.home / "memory.db")
+        # SW-V2 WP-I feature switches: ONE source of truth (features.json over the legacy config.toml keys); the
+        # loaded cfg mirrors them so code reading cfg.voice.greeting / cfg.ai.web_search follows the switches.
+        self.features = feat.attach(feat.Features(c, self.home, components=self._health_components,
+                                                  skills=lambda: set(self.registry.skills)))
+        self.features.import_legacy(feat.legacy_settings(self.memory))
+        self.features.apply_to_config(c)
+        self.features.listeners.append(self._feature_changed)
+        # SW-V2 WP-M4 identity: user-chosen names, wake model and voice over config.toml (identity.json)
+        from .identity import Identity, make_skill as make_identity_skill
+        self.identity = Identity(self.home, c, self.memory)
+        self.identity.apply_to_config(c)
 
         self.registry = SkillRegistry()
         self.registry.confirm = self.ask_confirm
+        self.registry.gate = self.features.gate          # inactive features: tools not offered, calls refused
         self.registry.register(ClockSkill())
         self.registry.register(MemorySkill(self.memory))
+        from .skills.local_contacts import LocalContactsSkill
+        self.registry.register(LocalContactsSkill(self.memory))
+        self.registry.allowed_actions.add("contact_remember")
         self.registry.register(StatusSkill(self.snapshot))
-        if c.music.provider != "none" or self._player is not None:
+        self.registry.register(feat.make_skill(self.features, self.registry))
+        self.registry.allowed_actions |= {"feature_set"}   # policy per risk lives in the tool (features.py)
+        usage.attach(self.home)                          # M5: usage meters ("כמה נשאר לי?") + daily local backup
+        self.registry.register(usage.make_skill(self.home, c))
+        self._backup_auto = backup.start_auto(self.home, self.health)
+        if c.music.provider != "none" or self.features.enabled("music") or self._player is not None:
             player = self._player or PearDesktopPlayer(c.music.pear_url, self.home / "pear_client_id", c.music.timeout_s)
-            self.music = MusicSkill(player, c.music.max_volume)
+            self.music = MusicSkill(player, c.music.max_volume, trim_queue=c.music.trim_queue,
+                                    volume_step=c.music.volume_step)
             self.registry.register(self.music)
         else:
             self.music = None
-            self.health.set("music", "disabled", "music.provider = none")
+            self.health.set("music", "disabled", "music switched off (jarvis features on music)")
+        # WP-D workspace/memory: persona files, self-settings Skill, background memory curator
+        self.workspace = wsp.Workspace(self.home / "workspace")
+        self.settings = Settings(self.memory, {"voice.voice": c.voice.voice})
+        self.settings.features = self.features           # curator.* settings are feature switches now
+        self.registry.register(SettingsSkill(self.workspace, self.settings, self.registry, self._on_voice_change))
+        self.registry.register(make_identity_skill(self.identity))     # "your name is X" (confirmed read-back)
+        # WP-H: the dashboard on request ("תפתח את לוח הבקרה" / face button), inside this process
+        self.registry.allowed_actions.add("open_dashboard")
+        self.registry.register(DashboardSkill(self.open_dashboard))
+        from .skills.google import register_google      # WP-G: only when the user connected Google (no network)
+        self.google = register_google(self.registry, self.home, self.health)
+        self.workspace.listeners.append(lambda name: self._spawn(wsp.note_live(self.live, self.workspace, name)))
 
         self.budget = Budget(self.memory, c.ai)      # ONE shared budget: in-flight counts span brain, TTS and voice
+        self.curator = Curator(self.memory, self.workspace, enabled=lambda k: self.features.active(feat.SETTING_FEATURES[k])
+                               if k in feat.SETTING_FEATURES else self.settings.get(k) == "on",
+                               llm=openai_extractor(c.ai.text_model, self.budget) if api_billing_allowed(c.ai) else None)
         self.agent = make_agent(c, self.registry, self.memory, self.home, self._ai_transport, self.budget)
+        if self.agent is not None:
+            wsp.augment_instructions(self.agent, self.workspace)
         self.brain = Brain(self.registry, self.agent)
+        if self.agent is not None:                      # dashboard: what he was given in each typed conversation
+            from . import context_trace
+            context_trace.attach_brain(self.agent, home=self.home, cfg=c, memory=self.memory, registry=self.registry,
+                                       feats=self.features)
+        # Background tasks (SW-V2 WP-C, tasks.py): research runs while the conversation goes on
+        from .tasks import TaskSkill, make_retry_lookup, make_task_manager
+        self.tasks = make_task_manager(c, self.agent, self.budget, self.home, on_update=self._tasks_changed,
+                                       on_finished=self._task_finished)
+        self._announcing: set[str] = set()
+        if self.tasks is not None:
+            self.registry.allowed_actions |= {"task_start", "task_cancel"}
+            self.registry.register(TaskSkill(self.tasks))
+        from .operations import attach as ops_attach    # WP-M3: scheduler, reports, notes, files, alerts, autonomy
+        self.ops = ops_attach(self)
+        from . import guides                            # WP-L: help Skill, setup hints, briefing, suggestions
+        self.guides = guides.attach(self)
+        self._write_tools_md()                          # after every Skill is registered
+        self._retry_lookup = make_retry_lookup(c, self.budget)
         self._check_ai()
 
         self.link = GodotLink(c.link.host, c.link.port, load_token(self.home / "link_token"), self.health,
                               self.on_message, self._face_connected)
+        from .camera import wire as camera_wire              # WP-J camera: switches default OFF (camera/wire.py)
+        self.camera = camera_wire.attach(self)
+        from . import appearance                             # WP-M2: face / 2D / 3D avatar / hidden (appearance.py)
+        self.appearance = appearance.attach(self)
+        from .skills import generated                        # WP-M2: approved generated Skills (skills/generated.py)
+        self.generated_skills = generated.attach(self)
 
         audio = self._audio
         if audio is None and self.use_real_audio and c.voice.mode != "off":
@@ -133,6 +212,9 @@ class Core:
         self.dev = DevicePort(audio, self.link, self.health)
         self.dev.check_audio()
         self.health.set("mic", "ok", "software mute off")
+        from . import runtime as runtime_mod            # M1: display/tray/autostart/resume; restores a saved mute
+        self.runtime = runtime_mod.attach(self, mode=self.runtime_mode, **self._runtime_fakes)
+        self._write_tools_md()                          # again: camera + display Skills registered after the first
 
         self.stt = self._stt or WhisperSTT(c.voice.stt_model, c.voice.stt_fallback_model, c.voice.stt_compute,
                                            c.voice.language)
@@ -200,14 +282,35 @@ class Core:
         for t in tasks:
             t.cancel()
         await asyncio.gather(*tasks, return_exceptions=True)
+        if getattr(self, "tasks", None) is not None:
+            await self.tasks.shutdown()             # running background tasks end as "cancelled" (stored)
+        if getattr(self, "ops", None) is not None:
+            await self.ops.stop()                   # running jobs stop; the next start resumes or marks them
         await self.registry.drain()                 # shielded side effects finish before the store closes
+        if getattr(self, "camera", None) is not None:
+            await self.camera.stop()                # sensor closed, indicator off, faces.db closed
+        self.curator.cancel()
+        try:                                        # what this run learned is kept (rules only: no network now)
+            self.curator.llm = None
+            await asyncio.wait_for(self.curator.run("shutdown"), 3)
+        except Exception:
+            logs.warn("memory", "CURATOR_SHUTDOWN_FAILED", "memory curator did not finish at shutdown")
+        if self.runtime is not None:
+            await self.runtime.stop()               # closes the window it opened; tray/dashboard off; state saved
         await self.link.stop()
-        if self.music is not None and hasattr(self.music.player, "close"):
-            await self.music.player.close()
+        if self._dashboard is not None:              # WP-H: the in-Core dashboard shares memory.db
+            await asyncio.to_thread(self._dashboard.stop)
+        if self.music is not None:
+            await self.music.close()                # cancels a background queue trim, then closes the client
         self.memory.close()
         self.budget.close()          # QA 19 Oct (suite_voice): its own SQLite handle kept memory.db locked after stop
         self.health.mark("stopped")
         logs.info("core", "CORE_STOPPED", "Core stopped cleanly")
+        if getattr(self, "_backup_auto", None) is not None:
+            self._backup_auto.stop.set()                # M5 automatic backup thread
+        store.detach(getattr(self, "history", None))
+        from . import context_trace
+        context_trace.close_home(self.home)             # its own store.db handle (conversation context)
 
     async def run(self) -> None:
         await self.start()
@@ -227,6 +330,8 @@ class Core:
                  startup=startup,
                  face_state=self.dev.face_state,
                  mic_muted=self.dev.mic_muted, live_session=self.live is not None,
+                 runtime=self.runtime.view() if self.runtime is not None else None,
+                 privacy=self.privacy_state.state() if getattr(self, "privacy_state", None) else None,
                  voice_connecting=self._voice_connecting,
                  wake_listening=getattr(self, "_wake_mic_active", False),
                  ai_connection=self.cfg.ai.connection, billing=billing_routes(self.cfg.ai, self.cfg.voice),
@@ -277,6 +382,7 @@ class Core:
                     self.health.set("music", st, d, "" if st == "ok" else "start Pear Desktop with the API Server plugin")
                 if not self.listening and self.live is None:
                     self.dev.check_audio()
+                self.features.poll()            # a switch flipped on the dashboard / CLI reaches the Core here
                 self._check_ai()
                 await self.link.broadcast("status", self.snapshot())
             except Exception:
@@ -285,7 +391,7 @@ class Core:
     # ------------------------------------------------------------------ face / UI messages
     async def _face_connected(self) -> None:
         if self.startup["ready"] and self.live is not None and hasattr(self.live, "present"):
-            self.live.present()
+            self._spawn(self._present_after_delay(self.live))
         if self.startup["phase"] == "ready":
             self._startup_stage("running", "Ready")
             seconds = round(time.monotonic() - self._startup_t0, 2)
@@ -315,11 +421,22 @@ class Core:
             return "הקול המקומי זמין דרך מילת ההפעלה כשהמיקרופון מוכן."
         return "הקול אינו זמין. בדוק את המצב באפשרויות."
 
+    def hello_text(self, question: bool = False) -> str:
+        """The spoken hello: always the Hebrew-written name (19 Oct: "אני JARVES" was mispronounced)."""
+        return f"שלום! אני {self.cfg.assistant_name_spoken}." + (" איך אפשר לעזור?" if question else "")
+
+    async def _present_after_delay(self, live) -> None:
+        """Release the held live greeting a beat after the room is ready instead of the same instant."""
+        await asyncio.sleep(self.cfg.voice.greeting_delay_s)
+        if self.live is live:
+            live.present()
+
     async def greet(self) -> None:
-        hello = f"שלום! אני {self.cfg.assistant_name}."
+        hello = self.hello_text()
         text = f"{hello} {self.how_to_talk()}"
         await self.link.send_face("assistant.text", {"text": text, "source": "core", "ok": True, "code": "GREETING"})
         if self.cfg.voice.greeting:
+            await asyncio.sleep(self.cfg.voice.greeting_delay_s)     # a beat after the room is ready (cache stays instant)
             await self.speak(f'{hello} תגיד היי ג׳ארוויס כדי לדבר איתי.' if self.wake is not None else hello,
                              cache=True)
         if self.cfg.voice.activation == "conversation":
@@ -369,14 +486,49 @@ class Core:
             logs.enable_debug(min(int(p.get("minutes", self.cfg.log.debug_minutes)), self.cfg.log.debug_minutes))
             logs.info("core", "DEBUG_ENABLED", "temporary DEBUG logging enabled")
         elif t in ("core.shutdown", "desktop.close"):
-            logs.info("core", "SHUTDOWN_REQUESTED", "shutdown requested by an authenticated client")
             if t == "desktop.close":
                 await self.link.reply(ws, "desktop.closed", {})
+                if self.runtime is not None and self.runtime.window_closed():
+                    return                         # M1: the window is only a display; the Core keeps running
+            logs.info("core", "SHUTDOWN_REQUESTED", "shutdown requested by an authenticated client")
             self.stop_event.set()
+        elif t == "runtime.set":
+            await self.link.reply(ws, "runtime.state", await self.runtime.apply(p, by=client.role))
+        elif t in ("camera.preview", "camera.set_enabled"):   # privacy strip buttons (camera/wire.py)
+            from .camera import wire as camera_wire
+            await camera_wire.on_link(self, t, p, client)
+        elif t == "ui.open_dashboard":               # WP-H: the face's Dashboard button
+            try:
+                url = await self.open_dashboard()
+                await self.link.reply(ws, "dashboard.opened", {"url": url.split("?", 1)[0],
+                                                               "browser": self.open_url is not None})
+            except Exception as e:
+                logs.warn("core", "DASHBOARD_FAILED", f"dashboard could not start: {type(e).__name__}")
+                await self.link.reply(ws, "error", {"code": "DASHBOARD_FAILED", "message": "dashboard did not start",
+                                                    "action": "run `jarvis dashboard`"})
         elif t in INBOUND:
             logs.info("device", "DEVICE_EVENT", f"device event {t}", **logs.safe_fields(p, allow=("id", "muted", "state")))
+            if t == "presence.changed" and getattr(self, "camera", None) is not None:
+                self.camera.external_presence(p.get("present") is True)
         else:
             await self.link.reply(ws, "error", {"code": "LINK_UNKNOWN_TYPE", "message": f"unknown message type {t}"})
+
+    async def open_dashboard(self, page: str = "") -> str:
+        """Start the dashboard inside the Core (once; it shares the Core's workspace, memory and settings) and open
+        it in the browser on this computer, on `page` (e.g. "#/guide/music"; kept across the token redirect).
+        Returns the full one-time URL (without the page)."""
+        if self._dashboard is None or not self._dashboard.running:
+            from .dashboard import Dashboard
+            self._dashboard = await asyncio.to_thread(
+                lambda: Dashboard(self.home, self.cfg, workspace=self.workspace, memory=self.memory,
+                                  settings=self.settings).start())
+        url = self._dashboard.url
+        logs.info("core", "DASHBOARD_OPENED", "dashboard opened", port=self._dashboard.port,
+                  browser=self.open_url is not None)
+        if self.open_url is not None:
+            page = page if page.startswith("#/") and len(page) < 80 else ""
+            await asyncio.to_thread(self.open_url, url + page)
+        return url
 
     def _run_busy(self, coro) -> None:
         if self.stopping:
@@ -405,6 +557,8 @@ class Core:
 
     async def set_muted(self, muted: bool) -> None:
         self.dev.set_mic_muted(muted)
+        if self.runtime is not None:
+            self.runtime.note_muted(muted)        # persists: still muted after a restart
         if self.wake is not None:
             self.wake.mute() if muted else self.wake.unmute()
         if muted and self.live is not None:
@@ -485,7 +639,10 @@ class Core:
         t0 = time.monotonic()
         reply = await self.brain.respond(text)
         logs.info("core", "REPLY", f"reply via {reply.source}", tool=reply.tool, ok=reply.ok, result=reply.code,
-                  ms=round((time.monotonic() - t0) * 1000), text=reply.text)
+                  ms=round((time.monotonic() - t0) * 1000), text=reply.text, typed=typed,  # WP-H history: what was asked
+                  utterance=f"<{len(text)} chars>" if SENSITIVE_TEXT.search(text) else text)   # codes never logged
+        self.curator.observe("user", text)
+        self.curator.observe("assistant", reply.text, idle=self.live is None)   # typed chat: curate when quiet
         await self.link.send_face("assistant.text", {"text": reply.text, "source": reply.source, "ok": reply.ok,
                                                      "code": reply.code})
         if self.live is None:
@@ -611,6 +768,7 @@ class Core:
             self.budget.record("voice_seconds", int(round(seconds)))
 
         async def on_transcript(role: str, text: str) -> None:
+            self.curator.observe(role, text, live=True)
             await self.link.send_face("user.transcript" if role == "user" else "assistant.text",
                                       {"text": text, "source": self.voice_mode})
 
@@ -620,6 +778,8 @@ class Core:
             if self.live is live_ref[0]:
                 self.live = None                   # any end (user, remote close, error, budget) frees the slot
             logs.info("voice", "LIVE_ENDED", f"live conversation ended ({reason})")
+            if not self.stopping:
+                self._spawn(self.curator.run(f"live_{reason}"))   # learn durable facts from this conversation
             # Smooth conversation: the server closing a session (or a time limit) while the user is in the middle
             # of talking must not drop them out - reconnect at once. Idle / user / error / budget end for real.
             last = getattr(live_ref[0], "_last_activity", 0.0)
@@ -658,22 +818,33 @@ class Core:
             live = self._live_factory(self, **common, **extra)
         elif self.voice_mode == "live":
             from .voice.live import LiveVoice
-            live = LiveVoice(self.registry, self.agent.instructions, model=v.live_model, voice=v.voice,
+            live = LiveVoice(self.registry, self.agent.instructions, model=v.live_model,
+                             voice=self.identity.voice()["live_voice"],   # "תחליף קול" override, recovered if unsupported
                              backend_model=self.cfg.ai.text_model, web_search=self.cfg.ai.web_search,
-                             name=self.cfg.assistant_name, half_duplex=v.half_duplex, max_session_s=max_s,
+                             name=self.cfg.assistant_name, spoken_name=self.cfg.assistant_name_spoken,
+                             half_duplex=v.half_duplex, max_session_s=max_s,
                              audio_io=audio_io, idle_disconnect_s=v.idle_disconnect_s, on_emotion=on_emotion,
                              on_activity=on_activity, on_level=on_level,
                              reasoning_effort=self.cfg.ai.voice_reasoning_effort,
                              service_tier=self.cfg.ai.voice_service_tier,
                              max_output_tokens=self.cfg.ai.voice_max_output_tokens, echo_tail_s=v.echo_tail_s,
                              clock_context=v.clock_context, progress_after_s=v.progress_after_s,
-                             no_speech_timeout_s=(v.wake_no_speech_s if ack else 0), **common, **extra)
+                             no_speech_timeout_s=(v.wake_no_speech_s if ack else 0),
+                             backend_deadline_s=v.backend_deadline_s, retry_lookup=self._retry_lookup,
+                             reasoning_summary=self.cfg.ai.reasoning_summary, **common, **extra)
         else:
             from .voice.realtime import RealtimeVoice
             live = RealtimeVoice(v.realtime_model, self.agent.instructions, self.registry.realtime_tools(),
                                  v.language, v.realtime_voice, v.half_duplex, audio_io, max_session_s=max_s,
                                  idle_disconnect_s=v.idle_disconnect_s, **common, **extra)
         live_ref[0] = live
+        wsp.attach_live(live, self.workspace, self.memory)   # persona files + known facts in the voice instructions
+        feat.attach_live(live, self.features)                 # what is off / unavailable, so he says so truthfully
+        if getattr(self, "guides", None) is not None:         # WP-L: help questions -> backend; one suggestion
+            self.guides.attach_live(live)
+        from . import context_trace                           # LAST: records the final instructions + notes sent
+        context_trace.attach_live(live, home=self.home, cfg=self.cfg, memory=self.memory, workspace=self.workspace,
+                                  registry=self.registry, feats=self.features)
         logs.new_cid()
         self._voice_connecting = True
         await self.link.broadcast("status", self.snapshot())
@@ -702,12 +873,32 @@ class Core:
             return
         self.live = live
         await self.link.broadcast("status", self.snapshot())
+        for task in (self.tasks.unannounced() if self.tasks is not None else []):
+            self._spawn(self._task_finished(task))     # finished while no conversation was open
         if ack:
             await self.link.send_face("assistant.activity", {"kind": "done", "text": "", "detail": ""})
             self._spawn(self._chime("ready"))
             await self.set_face("listening")
         if not hold_output and self.cfg.voice.activation == "conversation":
             self._startup_stage("running", "Voice ready")
+
+    async def _tasks_changed(self, views: list[dict]) -> None:
+        """Background task list for the screen (tasks.py docstring: message shape)."""
+        await self.link.send_face("tasks.update", {"tasks": views})
+
+    async def _task_finished(self, task) -> None:
+        """A background task finished: GPT-Live says it at a good moment; without a conversation it waits for
+        the next one (and stays on the screen / in tasks.jsonl)."""
+        from .tasks import announcement
+        live = self.live
+        if task.announced or task.id in self._announcing or live is None or not hasattr(live, "announce"):
+            return
+        self._announcing.add(task.id)
+        try:
+            if await live.announce(announcement(task), tag=task.id):
+                self.tasks.mark_announced(task)
+        finally:
+            self._announcing.discard(task.id)
 
     def _startup_stage(self, phase: str, detail: str) -> None:
         progress = {"starting": 5, "core_ready": 25, "loading": 45, "waiting_audio": 70,
@@ -727,7 +918,7 @@ class Core:
             if self.cfg.voice.activation == "conversation":
                 if self.voice_mode != "live":
                     raise RuntimeError("automatic desktop startup currently requires live voice; check voice/API settings")
-                hello = f"שלום! אני {self.cfg.assistant_name}. איך אפשר לעזור?" if self.cfg.voice.greeting else None
+                hello = self.hello_text(question=True) if self.cfg.voice.greeting else None
                 await self._start_live(greeting=hello, hold_output=True)
                 if self.live is None or not hasattr(self.live, "wait_ready"):
                     raise RuntimeError("live voice did not become ready; check logs and API limits")
@@ -790,6 +981,7 @@ class Core:
                   api_key="set" if openai_key_present() else "missing",
                   chatgpt="signed-in" if plan.get("plan_usage") else "not connected",
                   greeting=v.greeting, music=self.cfg.music.provider,
+                  features_off=[f.id for f, _ in self.features.unavailable_summary()],
                   say="Hey Jarvis" if self.wake is not None else "(see jarvis doctor)")
 
     # ------------------------------------------------------------------ "Hey Jarvis" wake word
@@ -812,7 +1004,7 @@ class Core:
         self._woke = False
         if v.activation == "conversation" and self.voice_mode == "live":
             self._hold_wake_until = time.monotonic() + 45     # the session opens now; "Hey Jarvis" is for AFTER it ends
-        self.health.set("wake_word", "ok", f"say \"Hey Jarvis\" (detected on this device, {v.wake_word})")
+        self.health.set("wake_word", "ok", f"say \"{v.wake_phrase}\" (detected on this device, {Path(v.wake_word).name})")
         self._bg.append(asyncio.create_task(self._wake_loop()))
 
     async def _on_wake(self, score: float) -> None:
@@ -831,8 +1023,9 @@ class Core:
             yield c
 
     def _wake_should_listen(self) -> bool:
-        return not (self.dev.mic_muted or self.live is not None or self.listening or self.stopping
+        return not (not self.cfg.voice.wake_enabled or self.dev.mic_muted or self.live is not None or self.listening or self.stopping
                     or self._voice_connecting or time.monotonic() < self._hold_wake_until
+                    or (self.runtime is not None and self.runtime.recovering)
                     or (self._busy is not None and not self._busy.done()))
 
     async def _wake_loop(self) -> None:
@@ -857,7 +1050,8 @@ class Core:
                 await asyncio.sleep(0.2)
                 continue
             mic = self._wake_audio() if self._wake_audio else StreamingAudio(v.input_device, v.output_device, rate=16000)
-            chunks = self._levels(mic.mic_chunks(16000, 2560))      # 80 ms chunks
+            from .runtime.power import stall_guard          # unplugged headset / after sleep: no frames -> re-open
+            chunks = self._levels(stall_guard(mic.mic_chunks(16000, 2560), self.cfg.runtime.mic_stall_s))  # 80 ms
             woke = False
             try:
                 self.wake.resume()
@@ -912,6 +1106,8 @@ class Core:
                 self.health.set("audio", "unavailable", e.message, e.action)
                 self._wake_mic_active = False
                 await self.link.broadcast("status", self.snapshot())
+                if e.code == "AUDIO_MIC_STALLED" and self.runtime is not None:
+                    await self.runtime.recover_audio("mic_stalled")     # re-scan devices (new default mic)
                 await asyncio.sleep(5)
             except asyncio.CancelledError:
                 raise
@@ -932,6 +1128,62 @@ class Core:
                 await self.set_face("listening")
                 await self.link.send_face("assistant.activity", {"kind": "connecting", "text": "מתחבר…", "detail": ""})
                 await self._start_live(ack=True)
+
+    # ------------------------------------------------------------------ feature switches (features.py)
+    def _health_components(self) -> dict:
+        h = getattr(self, "health", None)
+        return {k: {"status": v.status, "detail": v.detail} for k, v in h.components.items()} if h else {}
+
+    def _write_tools_md(self) -> None:
+        from .guides import index_markdown as guides_index_markdown
+        self.workspace.write_generated("TOOLS.md", wsp.tools_markdown(self.registry, self.settings.view())
+                                       + "\n" + guides_index_markdown())
+        catalog = ["# JARVES features", "Generated from the actual feature catalog; not a promise of readiness.",
+                   "Use features_list / get_status for current state; read this full file with workspace_read.",
+                   "All feature IDs: " + ", ".join(feat.CATALOG) + ".",
+                   self.features.capabilities_markdown(), "## What each feature does"]
+        for f in feat.CATALOG.values():
+            catalog.append(f"- {f.id} / {f.title_en}: {f.about or f.title_en}. "
+                           f"Needs: {', '.join(f.needs) or 'none'}. Risk: {f.risk}. Applies: {f.applies}.")
+        self.workspace.write_generated("FEATURES.md", "\n".join(catalog) + "\n")
+
+    def _feature_changed(self, fid: str, on: bool) -> None:
+        """A switch changed (voice tool, dashboard, CLI): apply what is cheap now; the rest says when it applies."""
+        self.features.apply_to_config(self.cfg)
+        self.features.invalidate()
+        if getattr(self.agent, "_agent", None) is not None:
+            self.agent._agent = None                # AgentBrain rebuilds its tool list on the next request
+        if getattr(self, "workspace", None) is not None:
+            self._write_tools_md()
+        if fid == "wake_word" and on and self.wake is None and getattr(self, "dev", None) is not None and not self.stopping:
+            self._setup_wake()
+        elif fid == "wake_word" and not on and getattr(self, "health", None) is not None:
+            self.health.set("wake_word", "disabled", "wake word switched off")   # the wake loop releases the mic
+        restart = ((fid == "music" and on and getattr(self, "music", None) is None)
+                   or (fid == "background_tasks" and on and getattr(self, "tasks", None) is None))
+        logs.info("features", "FEATURE_APPLIED", f"{fid} {'on' if on else 'off'}"
+                  + (" (takes effect at the next Core start)" if restart else ""), feature=fid, on=on)
+
+    # ------------------------------------------------------------------ voice change ("תחליף קול")
+    def _on_voice_change(self, voice: str, restart_now: bool) -> None:
+        """GPT-Live fixes the voice per session: the override applies to the next session, or now via a restart."""
+        logs.info("voice", "VOICE_CHANGED", f"voice set to {voice}", voice=voice, restart=restart_now)
+        if restart_now and self.live is not None and self.voice_mode == "live":
+            self._spawn(self._restart_live_for_voice(self.live))
+
+    async def _restart_live_for_voice(self, live) -> None:
+        await asyncio.sleep(1.0)                      # let the tool result reach the conversation first
+        deadline = time.monotonic() + 20
+        while time.monotonic() < deadline and self.live is live and (
+                getattr(live, "_tools_running", 0) or getattr(live, "_pending", None)
+                or time.monotonic() < getattr(live, "_speaking_until", 0.0) + 1.0):
+            await asyncio.sleep(0.25)                 # the confirmation sentence is still being spoken
+        if self.live is not live or self.stopping:
+            return
+        await live.stop("voice_change")
+        await live.wait_ended() if hasattr(live, "wait_ended") else None
+        self.live = None
+        await self._start_live(greeting="זה הקול החדש שלי. מה דעתך?")
 
     # ------------------------------------------------------------------ confirmation for side effects
     async def ask_confirm(self, prompt: str, timeout: float = 20) -> bool:

@@ -1,0 +1,22 @@
+order = 43
+category = "everyday"
+pages = ["appearance"]
+features = ["appearance"]
+aliases = ["מראה", "פנים", "אווטאר", "תלת מימד", "appearance", "avatar", "face", "hidden", "להסתיר"]
+links = ["runtime"]
+title_he = "המראה שלו"
+title_en = "How he looks"
+what_he = "אפשר לבחור איך ג'ארביס נראה: פנים, אווטאר דו-ממדי, אווטאר תלת-ממדי, או מוסתר (רק קול)."
+what_en = "Choose how JARVES looks: face, 2D avatar, 3D avatar, or hidden (voice only)."
+say = [["תחליף לאווטאר תלת מימד", "Switch to the 3D avatar"], ["תחזור לפנים", "Go back to the face"], ["תסתתר", "Hide"]]
+expect_he = "המסך מתחלף תוך שנייה. במצב מוסתר הוא עדיין שומע \"היי ג'ארביס\"."
+expect_en = "The screen changes within a second. Hidden, he still hears \"Hey Jarvis\"."
+cost_he = "חינם."
+cost_en = "Free."
+privacy_he = "אין."
+privacy_en = "None."
+
+[[steps]]
+he = "פתחו את עמוד Appearance ובחרו מראה, או בקשו ממנו בקול."
+en = "Open the Appearance page and pick a look, or ask him by voice."
+action = "open:#/appearance"

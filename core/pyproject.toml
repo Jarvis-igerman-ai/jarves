@@ -10,6 +10,7 @@ dependencies = [
     "httpx>=0.27",
     "pyjwt[crypto]>=2.10",           # Sign in with ChatGPT: verify the OpenAI ID token (RS256, JWKS)
     "numpy>=2",
+    "tzdata>=2025.2",                # IANA time zones for zoneinfo (Windows has none built in): scheduler DST
 ]
 
 [project.optional-dependencies]
@@ -22,6 +23,16 @@ voice = [
     "winrt-Windows.Storage.Streams>=3.2; sys_platform == 'win32'",
     "winrt-Windows.Foundation>=3.2; sys_platform == 'win32'",
     "winrt-Windows.Foundation.Collections>=3.2; sys_platform == 'win32'",
+]
+
+camera = [
+    # USB webcam capture + local face detection/recognition models (YuNet/SFace). Pi 5: aarch64 wheels; the Pi
+    # camera itself uses the apt package python3-picamera2 (libcamera), not pip. Checked 2026-10-19 (PyPI).
+    "opencv-python-headless>=4.12",
+]
+tray = [
+    "pillow>=11",
+    "pystray>=0.19.5,<0.20",
 ]
 
 [project.scripts]

@@ -1,0 +1,22 @@
+order = 62
+category = "system"
+features = ["dashboard"]
+aliases = ["לוח בקרה", "דשבורד", "dashboard", "control panel", "תפתח את לוח הבקרה"]
+links = ["lan_dashboard", "privacy"]
+title_he = "לוח הבקרה"
+title_en = "Dashboard"
+what_he = "אתר קטן במחשב שלכם: שיחות, עלויות, יכולות, הגדרות והמדריכים האלה."
+what_en = "A small site on your computer: conversations, costs, features, settings and these guides."
+say = [["תפתח את לוח הבקרה", "Open the dashboard"], ["תראה לי את המדריך של המוזיקה", "Show me the music guide"]]
+expect_he = "הדפדפן נפתח על הכתובת המקומית. רק מהמחשב הזה, עם קוד חד-פעמי."
+expect_en = "The browser opens the local address. Only from this computer, with a one-time code."
+cost_he = "חינם."
+cost_en = "Free."
+privacy_he = "לא מוצגים מפתחות. כתובות מייל מוסתרות."
+privacy_en = "No keys are shown. E-mail addresses are masked."
+
+[[steps]]
+he = "אמרו \"תפתח את לוח הבקרה\", או הקלידו jarvis dashboard."
+en = "Say \"open the dashboard\", or type jarvis dashboard."
+action = "command:jarvis dashboard"
+check = "enabled:dashboard"

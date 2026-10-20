@@ -1,0 +1,43 @@
+order = 21
+category = "google"
+features = ["gmail_read", "gmail_send"]
+suggest = true
+aliases = ["מייל", "מיילים", "דואר", "gmail", "email", "mail", "לשלוח מייל"]
+error_codes = ["GMAIL_NOT_OFFERED"]
+links = ["google_calendar"]
+title_he = "ג'ימייל: קריאה ושליחה"
+title_en = "Gmail: read and send"
+what_he = "ג'ארביס קורא לכם מיילים. שליחה בשמכם היא מתג נפרד, כבוי מראש, ותמיד עם אישור."
+what_en = "JARVES reads your e-mail to you. Sending in your name is a separate switch, off by default, always confirmed."
+say = [["יש לי מיילים חדשים?", "Do I have new e-mails?"], ["תקרא לי את המייל האחרון מהבנק", "Read me the last e-mail from the bank"]]
+expect_he = "הוא מסכם את המיילים. הוא לא עושה פעולות בגלל מה שכתוב בתוך מייל."
+expect_en = "He summarises the e-mails. He never acts on what an e-mail says."
+test_he = "הבדיקה בודקת שהחשבון מחובר."
+test_en = "The check sees that the account is connected."
+cost_he = "חינם."
+cost_en = "Free."
+privacy_he = "המיילים נקראים רק כשמבקשים. שליחה רק אחרי \"כן\" שלכם."
+privacy_en = "E-mails are read only when you ask. Sending only after your \"yes\"."
+
+[[steps]]
+he = "חברו את גוגל: jarvis google start (או עמוד Connections)."
+en = "Connect Google: jarvis google start (or the Connections page)."
+action = "command:jarvis google start"
+check = "available:gmail_read"
+
+[[steps]]
+he = "ודאו שהמתג \"קריאת מיילים\" דולק."
+en = "Make sure the Read Gmail switch is on."
+action = "feature_on:gmail_read"
+check = "active:gmail_read"
+
+[[steps]]
+he = "רוצים שהוא ישלח בשמכם? הדליקו את \"שליחת מיילים\" בעמוד Features (סיכון גבוה)."
+en = "Want him to send in your name? Turn on Send Gmail on the Features page (high risk)."
+action = "open:#/features"
+
+[[problems]]
+he = "הוא אומר שהוא לא יכול לשלוח"
+en = "He says he cannot send"
+fix_he = "שליחה כבויה מראש. הדליקו אותה בעמוד Features."
+fix_en = "Sending is off by default. Turn it on on the Features page."

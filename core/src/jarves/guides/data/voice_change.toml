@@ -1,0 +1,27 @@
+order = 6
+category = "voice"
+features = ["voice_change"]
+aliases = ["קול", "תחליף קול", "voice", "change voice"]
+links = ["voice_ai"]
+title_he = "החלפת קול"
+title_en = "Change his voice"
+what_he = "אפשר לבקש מג'ארביס לדבר בקול אחר."
+what_en = "You can ask JARVES to speak with a different voice."
+say = [["תחליף קול", "Change your voice"], ["תחזור לקול הקודם", "Go back to the previous voice"]]
+expect_he = "הקול החדש מתחיל מהשיחה הבאה."
+expect_en = "The new voice starts with the next conversation."
+cost_he = "חינם."
+cost_en = "Free."
+privacy_he = "אין."
+privacy_en = "None."
+
+[[steps]]
+he = "צריך קול חי בענן (OpenAI). אמרו \"תחליף קול\"."
+en = "Needs the live cloud voice (OpenAI). Say \"change your voice\"."
+check = "available:voice_change"
+
+[[problems]]
+he = "הוא אומר שאי אפשר"
+en = "He says he cannot"
+fix_he = "החלפת קול עובדת רק עם קול חי בענן. ראו המדריך \"חיבור לבינה המלאכותית\"."
+fix_en = "It works only with the live cloud voice. See the guide \"Connect the AI\"."

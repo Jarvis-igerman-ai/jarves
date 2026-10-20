@@ -1,0 +1,31 @@
+order = 0
+category = "start"
+features = ["proactive_help"]
+aliases = ["עזרה", "מדריך", "מדריכים", "הצעות", "תפסיק להציע", "help", "guides", "what can you do", "מה אתה יכול לעשות"]
+links = ["voice_ai", "wake_word", "music", "google_calendar"]
+title_he = "עזרה והצעות הגדרה"
+title_en = "Help and setup suggestions"
+what_he = "ג'ארביס יודע להסביר כל יכולת שלו ולהוביל אתכם בהגדרה צעד אחר צעד. מדי פעם הוא מציע במשפט אחד מה עוד אפשר להגדיר."
+what_en = "JARVES can explain each of his features and walk you through setup step by step. Now and then he suggests, in one sentence, what else to set up."
+say = [["מה אתה יכול לעשות?", "What can you do?"], ["איך אני מחבר את גוגל?", "How do I connect Google?"], ["מה עוד לא מוגדר?", "What is not set up yet?"], ["תפסיק להציע", "Stop suggesting"]]
+expect_he = "הוא נותן שלב אחד, מחכה ל\"סיימתי\" או \"הבא\", בודק שזה עבד וממשיך. הצעה לאותו דבר לכל היותר פעם בשבוע."
+expect_en = "He gives one step, waits for \"done\" or \"next\", checks it worked and goes on. The same suggestion at most once a week."
+cost_he = "חינם (חלק מהשיחה הרגילה)."
+cost_en = "Free (part of the normal conversation)."
+privacy_he = "אין. ההצעות לא מגיעות בשעות השקט."
+privacy_en = "None. No suggestions in quiet hours."
+
+[[steps]]
+he = "אמרו \"מה עוד לא מוגדר?\" או התחילו מהרשימה \"מה לעשות קודם\" בעמוד הבית."
+en = "Say \"what is not set up yet?\" or start from the \"What should I do first?\" list on the Home page."
+action = "open:#/guides"
+
+[[steps]]
+he = "לבחור מחדש שם, קול ואת כל התוספים (מה פועל ומה כבוי): הריצו jarvis setup או פתחו את \"הגדרה ותוספים\"."
+en = "To choose the name, voice and every add-on (on or off) again: run jarvis setup or open Setup & add-ons."
+action = "open:#/setup"
+
+[[steps]]
+he = "לא רוצים הצעות? אמרו \"תפסיק להציע\" או כבו את \"הצעות עזרה בהגדרה\"."
+en = "No suggestions? Say \"stop suggesting\" or switch off Setup suggestions."
+check = "enabled:proactive_help"

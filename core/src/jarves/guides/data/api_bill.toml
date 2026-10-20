@@ -1,0 +1,57 @@
+order = 51
+category = "costs"
+probe = "admin_key"
+optional = true
+aliases = ["חשבון אמיתי", "חיוב", "admin key", "מפתח אדמין", "real bill", "billing", "costs api"]
+links = ["api_budget", "usage"]
+title_he = "החשבון האמיתי של ה-API"
+title_en = "Real API bill"
+what_he = "עם מפתח \"אדמין\" לקריאה בלבד, ג'ארביס מראה את החיוב האמיתי של OpenAI החודש ולא רק הערכה."
+what_en = "With a read-only admin key, JARVES shows OpenAI's real bill for this month, not just an estimate."
+say = [["כמה באמת שילמתי החודש ל-OpenAI?", "How much did I really pay OpenAI this month?"]]
+expect_he = "בעמוד Usage המונה \"הוצאות ה-API החודש\" מסומן \"לפי OpenAI\" במקום \"הערכה\". מתעדכן פעם בשעה."
+expect_en = "On the Usage page the API spend meter says \"from OpenAI\" instead of \"estimate\". Updated hourly."
+test = "admin_key"
+test_he = "הבדיקה שואלת את OpenAI פעם אחת את החיוב החודש (קריאה בלבד, חינם, בלי מודל)."
+test_en = "The check asks OpenAI once for this month's cost (read-only, free, no model)."
+cost_he = "חינם."
+cost_en = "Free."
+privacy_he = "המפתח נשמר רק בקובץ הפרטי secrets.env. הוא משמש רק לקריאת העלויות."
+privacy_en = "The key is kept only in the private secrets.env file and used only to read costs."
+
+[[steps]]
+he = "היכנסו ל-platform.openai.com כבעלי הארגון: Settings, Organization, Admin keys (הכתובת platform.openai.com/settings/organization/admin-keys)."
+en = "Sign in to platform.openai.com as the organization owner: Settings, Organization, Admin keys (platform.openai.com/settings/organization/admin-keys)."
+
+[[steps]]
+he = "לחצו \"Create new admin key\", תנו שם כמו JARVES-costs, ובחרו הרשאת Read only. העתיקו את המפתח (מתחיל ב-sk-admin-)."
+en = "Press \"Create new admin key\", name it e.g. JARVES-costs, choose Read only permission. Copy the key (starts with sk-admin-)."
+
+[[steps]]
+he = "בטרמינל הקלידו jarvis key --admin והדביקו (מוסתר בזמן ההדבקה)."
+en = "In a terminal type jarvis key --admin and paste (hidden while you paste)."
+action = "command:jarvis key --admin"
+check = "probe:admin_key"
+
+[[steps]]
+he = "לחצו \"בדוק עכשיו\". אחר כך הפעילו מחדש את ג'ארביס."
+en = "Press Test now. Then restart JARVES."
+action = "test"
+
+[[problems]]
+he = "הבדיקה אומרת HTTP 401 או 403"
+en = "The check says HTTP 401 or 403"
+fix_he = "המפתח לא מפתח אדמין, או שאינכם בעלי הארגון. צרו מפתח אדמין חדש והריצו שוב jarvis key --admin."
+fix_en = "It is not an admin key, or you are not the organization owner. Create a new admin key and run jarvis key --admin again."
+
+[[problems]]
+he = "רוצים להסיר את המפתח"
+en = "Want to remove the key"
+fix_he = "הריצו jarvis key --admin --remove, ומחקו את המפתח גם באתר של OpenAI."
+fix_en = "Run jarvis key --admin --remove, and delete it on OpenAI's site too."
+
+[platform]
+windows = "implemented_unverified"
+windows_note_en = "core/tests/test_usage.py with a fake Costs API; no real admin key tested yet"
+pi = "implemented_unverified"
+pi_note_en = "pure Python HTTPS GET; not run on a Pi yet"

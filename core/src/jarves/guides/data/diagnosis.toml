@@ -1,0 +1,28 @@
+order = 36
+category = "system"
+pages = ["issues"]
+features = ["diagnosis_llm_pass"]
+aliases = ["אבחון", "בעיות", "diagnosis", "issues", "תקלות", "self check"]
+links = ["autonomy", "usage"]
+title_he = "אבחון עצמי"
+title_en = "Self-diagnosis"
+what_he = "אחרי כל שיחה ג'ארביס בודק מה לא עבד טוב (שתיקות, כלים שנכשלו) ורושם את זה בעמוד Issues."
+what_en = "After each conversation JARVES checks what went wrong (silences, failed tools) and lists it on the Issues page."
+say = [["היו בעיות בשיחה האחרונה?", "Were there problems in the last conversation?"]]
+expect_he = "בעמוד Issues רואים כל בעיה עם ההוכחה. \"בדיקה בעזרת המודל\" מוצאת גם דברים שהכללים מפספסים."
+expect_en = "The Issues page shows each problem with evidence. The AI review also finds what the rules miss."
+cost_he = "הכללים חינם. בדיקה בעזרת המודל: בקשה קטנה אחת לשיחה, עם תקרה יומית."
+cost_en = "The rules are free. The AI review: one small request per conversation, with a daily cap."
+privacy_he = "הבדיקה בעזרת המודל שולחת את תמליל השיחה ל-OpenAI. במצב פרטיות היא לא רצה."
+privacy_en = "The AI review sends the transcript to OpenAI. In privacy mode it does not run."
+
+[[steps]]
+he = "פתחו את עמוד Issues כדי לראות מה נמצא."
+en = "Open the Issues page to see what was found."
+action = "open:#/issues"
+
+[[steps]]
+he = "ודאו שהמתג \"אבחון עצמי בעזרת המודל\" דולק (צריך מפתח API)."
+en = "Keep the Self-diagnosis LLM pass switch on (needs an API key)."
+action = "feature_on:diagnosis_llm_pass"
+check = "active:diagnosis_llm_pass"

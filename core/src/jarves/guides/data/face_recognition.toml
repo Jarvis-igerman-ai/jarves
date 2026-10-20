@@ -1,0 +1,33 @@
+order = 41
+category = "camera"
+features = ["face_recognition"]
+aliases = ["זיהוי פנים", "מי זה", "faces", "face recognition", "who is"]
+links = ["camera", "privacy"]
+title_he = "זיהוי פנים"
+title_en = "Face recognition"
+what_he = "ג'ארביס מזהה מי מבני הבית נמצא בחדר, אחרי שלימדתם אותו. כבוי מראש."
+what_en = "JARVES recognises which family member is in the room, after you taught him. Off by default."
+say = [["מי נמצא בחדר?", "Who is in the room?"], ["תלמד את הפנים שלי, קוראים לי דני", "Learn my face, my name is Danny"]]
+expect_he = "הוא אומר שם רק כשהוא בטוח. אחרת הוא אומר שהוא לא מכיר."
+expect_en = "He says a name only when he is sure; otherwise he says he does not know."
+test_he = "הבדיקה בודקת שהמצלמה פועלת ושהזיהוי מותקן."
+test_en = "The check sees the camera works and recognition is installed."
+cost_he = "חינם: הזיהוי רץ במחשב."
+cost_en = "Free: recognition runs on this computer."
+privacy_he = "תווי הפנים נשמרים רק במחשב, ואפשר למחוק אותם בכל רגע."
+privacy_en = "Face data stays on this computer and can be deleted any time."
+
+[[steps]]
+he = "קודם הפעילו את המצלמה (מדריך \"מצלמה\")."
+en = "First turn the camera on (guide \"Camera\")."
+check = "active:camera"
+
+[[steps]]
+he = "הדליקו את \"זיהוי פנים\" (סיכון גבוה: צריך אישור)."
+en = "Turn on Face recognition (high risk: needs approval)."
+action = "feature_on:face_recognition"
+check = "enabled:face_recognition"
+
+[[steps]]
+he = "אמרו \"תלמד את הפנים שלי\" והסתכלו למצלמה."
+en = "Say \"learn my face\" and look at the camera."

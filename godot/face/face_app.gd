@@ -4,12 +4,17 @@ extends Control
 ## --state=<s> / --link=<ready|live|connecting|degraded|offline|error|muted> / --level=<0..1> (preview without
 ## the Core: the link no longer drives the face), --shot=<png> (screenshot then quit), --check (self-test),
 ## --low (cheaper face shader), --lively (old busier motion), --seed=<n> (repeatable motion),
-## --seq=<png> [--seq-frames=8 --seq-span=12 | --seq-blink] (contact sheet of frames on a simulated clock, then quit).
+## --seq=<png> [--seq-frames=8 --seq-span=12 | --seq-blink] (contact sheet of frames on a simulated clock, then quit),
+## --appearance=<face|avatar2d|avatar3d|hidden> (start presentation; the Core's appearance.set overrides it),
+## --privacy=<listening|wake|muted|speaking|photo|unavailable|preview|unknown>[_en] [--preview-demo] (privacy strip
+## preview without a Core; the demo picture is a generated test pattern).
 
 const Face := preload("res://face/face.gd")
 const AssistantUI := preload("res://face/assistant_ui.gd")
+const Appearance := preload("res://face/appearance.gd")
 
 var face: Control
+var appearance: Control          # face / avatar2d / avatar3d / hidden (appearance.gd); face.gd drives them all
 var ui: PanelContainer
 var _preview_level := -1.0
 
@@ -20,7 +25,12 @@ func _ready() -> void:
 	bg.set_anchors_preset(Control.PRESET_FULL_RECT)
 	add_child(bg)
 	face = Face.new()
-	add_child(face)
+	appearance = Appearance.new()
+	appearance.name = "Appearance"
+	appearance.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	add_child(appearance)
+	appearance.add_child(face)
+	appearance.setup(face)
 	ui = AssistantUI.new()
 	ui.position = Vector2(12, 12)
 	var args := OS.get_cmdline_user_args()
@@ -40,8 +50,11 @@ func _ready() -> void:
 			_preview_level = float(a.substr(8))
 		elif a.begins_with("--seed="):
 			face.reseed(int(a.substr(7)))
+		elif a.begins_with("--appearance="):
+			appearance.set_mode(a.substr(13))
 	if not preview:
 		ui.face = face
+		ui.appearance = appearance
 	if preview and not link_given:
 		face.set_link("ready")
 	add_child(ui)
@@ -55,6 +68,9 @@ func _ready() -> void:
 		ui.face = face
 		_e2e()
 		return
+	for a in args:
+		if a.begins_with("--privacy="):
+			_privacy_demo(a.substr(10), "--preview-demo" in args)
 	for a in args:
 		if a.begins_with("--seq="):
 			await _sequence(a.substr(6), args)
@@ -77,8 +93,7 @@ func _process(_delta: float) -> void:
 func _layout() -> void:
 	var s := get_viewport_rect().size
 	var d: float = min(s.x, s.y)
-	face.size = Vector2(d, d)
-	face.position = (s - face.size) / 2.0
+	appearance.layout(Rect2((s - Vector2(d, d)) / 2.0, Vector2(d, d)))
 
 
 func _e2e() -> void:
@@ -109,6 +124,180 @@ func _e2e() -> void:
 	print("E2E RESULT: %s (reply: %s; face states: %s)" % ["PASS" if ok else "FAIL",
 			replies[0].get("text", "") if replies.size() else "-", ",".join(states)])
 	get_tree().quit(0 if ok else 1)
+
+
+## --privacy=<scenario> [--preview-demo]: the privacy strip without a Core (screenshots). The preview picture is a
+## generated test pattern, never a camera image.
+const PRIVACY_DEMOS := {
+	"listening": ["listening", "presence", "quiet", "sending"], "wake": ["wake_only", "disabled", "quiet", "off"],
+	"muted": ["muted", "off", "quiet", "off"], "speaking": ["gated", "disabled", "speaking", "connected"],
+	"photo": ["listening", "photo", "quiet", "sending"], "unavailable": ["unavailable", "unavailable", "unavailable", "off"],
+	"preview": ["wake_only", "preview", "quiet", "off"],
+}
+
+
+static func privacy_payload(v: Array, loc := "he", last := "") -> Dictionary:
+	return {"v": 1, "locale": loc, "mic": {"state": v[0]}, "camera": {"state": v[1], "preview_available":
+		v[1] in ["off", "presence", "preview"], "last_seen": {"text": last, "ts": 0} if last != "" else null},
+		"speaker": {"state": v[2]}, "cloud_audio": {"on": v[3] == "sending", "state": v[3]}}
+
+
+static func test_frame(w := 320, h := 240, seq := 1) -> Dictionary:
+	# synthetic test pattern (colour bars + a moving square) encoded like a Core preview frame
+	var img := Image.create(w, h, false, Image.FORMAT_RGB8)
+	var bars := [Color(0.75, 0.75, 0.75), Color(0.75, 0.75, 0), Color(0, 0.75, 0.75), Color(0, 0.75, 0),
+		Color(0.75, 0, 0.75), Color(0.75, 0, 0), Color(0, 0, 0.75)]
+	for i in bars.size():
+		img.fill_rect(Rect2i(i * w / bars.size(), 0, w / bars.size() + 1, h), bars[i])
+	img.fill_rect(Rect2i((seq * 17) % (w - 40), h / 2 - 20, 40, 40), Color.WHITE)
+	return {"seq": seq, "mime": "image/png", "width": w, "height": h,
+		"data": Marshalls.raw_to_base64(img.save_png_to_buffer())}
+
+
+func _privacy_demo(which: String, with_preview: bool) -> void:
+	ui.link.set_process(false)
+	ui.strip.set_linked(which != "unknown")
+	var loc := "en" if which.ends_with("_en") else "he"
+	var key := which.trim_suffix("_en")
+	if PRIVACY_DEMOS.has(key):
+		var last := "זה ספל קפה לבן עם כיתוב כחול." if loc == "he" else "A white coffee mug with blue writing."
+		ui._on_message("privacy.state", privacy_payload(PRIVACY_DEMOS[key], loc, last))
+	if with_preview:
+		ui._toggle_preview()
+		ui._on_message("camera.preview_frame", test_frame())
+
+
+func _privacy_checks(errs: Array) -> String:
+	# privacy.state -> strip (truthful: unknown until a valid message, per-field validation, stale -> unknown,
+	# link down -> unknown); clicks send the right message; the preview shows frames only while open.
+	var s: Control = ui.strip
+	s.set_linked(false)
+	if s.get_parent() == null or not (s.get_parent() is CanvasLayer) or not s.visible:
+		errs.append("privacy strip is not on its own always-visible layer")
+	for k in s.ITEMS:
+		if s.state_of(k) != "" or s.tone(k) != "unknown":
+			errs.append("strip shows %s before any privacy.state" % k)
+	s.set_linked(true)
+	var seen_labels := {}
+	for k in s.STATES:
+		for st in s.STATES[k]:
+			var v := {"mic": "idle", "camera": "off", "speaker": "quiet", "cloud_audio": "off"}
+			v[k] = st
+			ui._on_message("privacy.state", privacy_payload([v.mic, v.camera, v.speaker, v.cloud_audio]))
+			if s.state_of(k) != st or s.label(k) == "" or s.label(k) == s.UNKNOWN[0]:
+				errs.append("privacy.state %s=%s not shown (%s)" % [k, st, s.label(k)])
+			seen_labels[k + ":" + s.label(k)] = true
+	var n := 0
+	for k in s.STATES:
+		n += s.STATES[k].size()
+	if seen_labels.size() != n:
+		errs.append("two states share one label (%d of %d distinct)" % [seen_labels.size(), n])
+	if s.tone_color("capture") == s.tone_color("off") or s.tone_color("out") == s.tone_color("local"):
+		errs.append("strip tones not distinct")
+	ui._on_message("privacy.state", privacy_payload(["listening", "presence", "quiet", "sending"], "en"))
+	if s.label("mic") != "Listening" or s.label("cloud_audio") != "Audio to cloud" or s.tone("mic") != "capture":
+		errs.append("English labels / tones wrong: %s %s" % [s.label("mic"), s.label("cloud_audio")])
+	ui._on_message("privacy.state", privacy_payload(["listening", "presence", "quiet", "sending"]))
+	if s.label("mic") != "מאזין":
+		errs.append("Hebrew label wrong: %s" % s.label("mic"))
+	# geometry: inside the window, above the eyes, every chip clickable
+	var vr := get_viewport_rect()
+	var big := vr.size.x >= 300.0              # --headless runs a 64 px window: geometry is checked in screenshots
+	var gr := Rect2(s.global_position, s.size)
+	if big and (not vr.encloses(gr) or gr.size.y < 20 or gr.end.y > vr.size.y * 0.2):
+		errs.append("privacy strip outside the window / too low (%s in %s)" % [gr, vr])
+	for k in s.ITEMS + ["preview"]:
+		if s.chip_rect(k).size.x < s.size.y:
+			errs.append("chip %s has no clickable area" % k)
+	# malformed messages: each bad field becomes unknown, nothing crashes, nothing is guessed
+	for bad in [{}, {"mic": "listening"}, {"mic": {"state": 5}}, {"camera": {"state": "nonsense"}},
+			{"mic": null, "camera": [], "speaker": {"state": ["x"]}, "cloud_audio": "on"}, {"locale": 7},
+			{"camera": {"state": "preview", "preview_available": "yes", "last_seen": {"text": 12}}},
+			{"mic": {"state": "LISTENING"}}, {"cloud_audio": {"on": "true", "state": "nope"}}]:
+		ui._on_message("privacy.state", bad)
+		for k in s.ITEMS:
+			var d = bad.get(k)
+			var ok_field: bool = typeof(d) == TYPE_DICTIONARY and typeof(d.get("state")) == TYPE_STRING \
+					and s.STATES[k].has(d.get("state"))
+			if not ok_field and s.state_of(k) != "":
+				errs.append("malformed %s accepted: %s -> %s" % [k, bad, s.state_of(k)])
+	if s.preview_available:
+		errs.append("preview_available accepted a non-bool")
+	ui._on_message("privacy.state", {"cloud_audio": {"on": true, "state": "off"}})
+	if s.state_of("cloud_audio") != "sending":
+		errs.append("cloud_audio on=true not shown as sending")
+	# stale and link down -> unknown
+	ui._on_message("privacy.state", privacy_payload(["muted", "disabled", "quiet", "off"]))
+	s._seen_at -= s.STALE_S + 1.0
+	if s.state_of("mic") != "":
+		errs.append("stale privacy.state still shown")
+	ui._on_message("privacy.state", privacy_payload(["muted", "disabled", "quiet", "off"]))
+	# clicks -> the right Core message (the strip itself waits for the Core's answer)
+	ui._toggle_mic()
+	if ui.last_sent != ["mic.set_mute", {"muted": false}] or s.state_of("mic") != "muted":
+		errs.append("mic chip click sent %s" % [ui.last_sent])
+	ui._toggle_camera()
+	if ui.last_sent != ["camera.set_enabled", {"on": true}]:
+		errs.append("camera chip click (disabled -> on) sent %s" % [ui.last_sent])
+	ui._on_message("privacy.state", privacy_payload(["listening", "presence", "quiet", "sending"]))
+	ui._toggle_mic()
+	ui._toggle_camera()
+	if ui.last_sent != ["camera.set_enabled", {"on": false}]:
+		errs.append("camera chip click (on -> off) sent %s" % [ui.last_sent])
+	ui._on_message("privacy.state", privacy_payload(["unavailable", "unavailable", "unavailable", "off"]))
+	ui.last_sent = []
+	ui._toggle_mic()
+	ui._toggle_camera()
+	if not ui.last_sent.is_empty():
+		errs.append("click on an unavailable device sent %s" % [ui.last_sent])
+	# preview: frames only while open; malformed frames ignored; refusal shown; auto close sends close
+	var pv: PanelContainer = ui.preview
+	ui._on_message("camera.preview_frame", test_frame())
+	if pv.is_open or pv.picture.texture != null or pv.visible:
+		errs.append("preview frame shown while the preview is closed")
+	ui._on_message("privacy.state", privacy_payload(["wake_only", "off", "quiet", "off"], "he", "זה ספל."))
+	if not s.preview_enabled():
+		errs.append("preview button disabled although the camera is available")
+	ui._toggle_preview()
+	if not pv.is_open or ui.last_sent != ["camera.preview", {"open": true, "seconds": ui.PREVIEW_S}] or not s.preview_open:
+		errs.append("preview button did not open / ask the Core: %s" % [ui.last_sent])
+	for bad in [{}, {"data": 5, "mime": "image/png"}, {"data": "!!!notbase64!!!", "mime": "image/png", "seq": 9},
+			{"data": test_frame().data, "mime": "image/gif"}, {"data": "QUJDREVGR0g=", "mime": "image/jpeg"},
+			{"data": "a".repeat(500000), "mime": "image/png"}, {"data": test_frame().data, "mime": "image/jpeg"}]:
+		ui._on_message("camera.preview_frame", bad)
+	if pv.frames != 0 or pv.picture.texture != null:
+		errs.append("malformed preview frame shown")
+	ui._on_message("camera.preview_frame", test_frame(320, 240, 3))
+	ui._on_message("camera.preview_frame", test_frame(320, 240, 2))       # older: dropped
+	if pv.frames != 1 or pv.picture.texture == null or pv.picture.texture.get_width() != 320:
+		errs.append("valid preview frame not shown (frames %d)" % pv.frames)
+	var jimg := Image.create(160, 120, false, Image.FORMAT_RGB8)
+	jimg.fill(Color(0.2, 0.5, 0.8))
+	ui._on_message("camera.preview_frame", {"seq": 4, "mime": "image/jpeg", "width": 160, "height": 120,
+		"data": Marshalls.raw_to_base64(jimg.save_jpg_to_buffer(0.7))})       # what the Core sends (OpenCV JPEG)
+	if pv.frames != 2 or pv.picture.texture.get_width() != 160:
+		errs.append("JPEG preview frame not shown")
+	if pv._last.text != "זה ספל.":
+		errs.append("last description caption missing: %s" % pv._last.text)
+	var pr := Rect2(pv.global_position, pv.get_combined_minimum_size())
+	if big and (not vr.encloses(pr) or pr.intersects(gr)):
+		errs.append("preview window outside the screen / over the strip (%s, strip %s)" % [pr, gr])
+	ui._on_message("camera.preview_state", {"open": false, "reason": "CAMERA_DISABLED"})
+	if pv.picture.texture != null or not pv._status.text.contains("כבויה"):
+		errs.append("preview refusal not shown")
+	ui._process(5.0)
+	if pv.is_open or pv.visible or ui.last_sent != ["camera.preview", {"open": false}] or s.preview_open:
+		errs.append("preview does not close by itself after the refusal (%s)" % [ui.last_sent])
+	ui._toggle_preview()
+	ui._process(ui.PREVIEW_S + 0.5)
+	if pv.is_open or ui.last_sent != ["camera.preview", {"open": false}]:
+		errs.append("preview does not auto-close after %d s" % ui.PREVIEW_S)
+	ui._toggle_preview()
+	ui._on_link(false, "test")
+	if pv.is_open or s.state_of("mic") != "" or s.preview_enabled():
+		errs.append("link down does not close the preview / reset the strip")
+	ui._on_link(true, "test")
+	return "privacy strip: %d states with distinct labels, malformed/stale/offline -> unknown, preview open/close OK" % n
 
 
 func _settle(frames := 40) -> void:
@@ -235,6 +424,67 @@ func _reaction_checks(errs: Array) -> void:
 		errs.append("unknown emotion / reaction end not handled")
 
 
+func _gaze_checks(errs: Array) -> String:
+	# face.set_gaze (camera): calm, capped, no jumps; holds, then returns to the idle look; thinking keeps its look
+	var f := _new_face(false, 17)
+	_simulate(f, 1.0)
+	var feed := func(x: Control) -> void:
+		if fmod(x.t, 0.2) < 1.0 / 60.0:
+			x.set_gaze(1.0, -1.0, 0.9)          # person far to one side and up: the extreme target
+	var step := [0.0, f._look * f.GAZE_TO_RADIUS]
+	var watch := func(x: Control) -> void:
+		feed.call(x)
+		var p: Vector2 = x._look * x.GAZE_TO_RADIUS
+		step[0] = maxf(step[0], (p - step[1]).length())
+		step[1] = p
+	_simulate(f, 3.0, watch)
+	var off: Vector2 = (f._look - f._v.look) * f.GAZE_TO_RADIUS
+	var cap: Vector2 = f.TRACK.max
+	if not f.is_tracking() or off.x < cap.x * 0.6 or off.y > -cap.y * 0.6:
+		errs.append("gaze does not turn toward the person (offset %s)" % off)
+	if absf(off.x) > cap.x + 0.03 or absf(off.y) > cap.y + 0.03:
+		errs.append("gaze offset %s exceeds the cap %s" % [off, cap])
+	if step[0] > 0.012:
+		errs.append("gaze jumps %.3f r per frame while tracking" % step[0])
+	_simulate(f, 5.0)                             # no more updates: hold 2 s, then ease back
+	var idle_r: float = f.gaze_radius()
+	if f.is_tracking() or idle_r >= 0.04:
+		errs.append("gaze does not return to idle after the person left (%.3f r)" % idle_r)
+	f.set_gaze(1.0, 0.0, 0.9)
+	f.set_gaze(0.0, 0.0, 0.0)                     # confidence 0 = stop now
+	if f.is_tracking():
+		errs.append("confidence 0 does not stop tracking")
+	f.set_state("thinking")
+	_simulate(f, 2.5, feed)
+	if f._look.y > -0.5:
+		errs.append("tracking overrides the thinking look")
+	f.set_state("idle")
+	f.set_link("offline")
+	_simulate(f, 1.0, feed)
+	if f.is_tracking():
+		errs.append("tracking while asleep")
+	f.free()
+	# messages from the Core (malformed ones are ignored), camera indicator glyph
+	face.set_link("ready")
+	face.set_state("idle")
+	ui._on_message("face.set_gaze", {"x": "left", "y": null, "confidence": "high"})
+	ui._on_message("face.set_gaze", {"x": 0.5, "y": 0.2, "confidence": 1})
+	if not face.is_tracking():
+		errs.append("face.set_gaze message not applied")
+	ui._on_message("face.set_gaze", {"x": 0, "y": 0, "confidence": 0})
+	ui._on_message("camera.indicator", {"on": true, "flash": true})
+	face._apply()
+	if not face.camera_on or face._mat.get_shader_parameter("cam_on") < 0.5 or face._mat.get_shader_parameter("cam_flash") < 0.5:
+		errs.append("camera indicator not shown")
+	ui._on_message("camera.indicator", {"on": "yes"})
+	ui._on_message("camera.indicator", {})
+	face._apply()
+	if face.camera_on or face._mat.get_shader_parameter("cam_on") > 0.0:
+		errs.append("camera indicator stays on / accepts a non-bool")
+	return "gaze tracking: offset %.1f%% / %.1f%% r (cap %.0f%% / %.0f%%), max step %.2f%% r/frame, idle again %.1f%% r" % [
+		off.x * 100.0, off.y * 100.0, cap.x * 100.0, cap.y * 100.0, step[0] * 100.0, idle_r * 100.0]
+
+
 func _activity_checks(errs: Array) -> void:
 	# assistant.activity {kind, text, detail?} -> pill on the lower arc, fades in/out, Hebrew RTL, never when idle
 	var pill: Control = face.activity
@@ -283,6 +533,113 @@ func _activity_checks(errs: Array) -> void:
 		errs.append("activity pill too high (top %.2f, mouth at 0.36..0.5)" % top_unit)
 	face.set_activity("done", "")
 	_settle(120)
+
+
+func _appearance_checks(errs: Array) -> String:
+	# appearance.set: every presentation draws the SAME face.pose(); a switch never touches the face state;
+	# malformed modes are ignored; hidden draws nothing; avatars blink/move exactly as calmly as the face.
+	face.set_link("ready")
+	face.set_state("happy")
+	_settle(60)
+	var canvas: Control = face.get_child(0)
+	for m in appearance.MODES:
+		ui._on_message("appearance.set", {"mode": m})
+		await get_tree().process_frame
+		if appearance.mode != m:
+			errs.append("appearance.set %s not applied" % m)
+		if face.state != "happy" or face.link_state != "ready":
+			errs.append("switching to %s changed the face state/link" % m)
+		var av: Control = appearance.avatar
+		var ok := false
+		match m:
+			"face":
+				ok = canvas.visible and face.visible and av == null
+			"avatar2d":
+				ok = av != null and av.get_script() == appearance.Avatar2D and not canvas.visible and face.visible
+			"avatar3d":
+				ok = av != null and av.get_script() == appearance.Avatar3D and not canvas.visible and face.visible
+			"hidden":
+				ok = av == null and not face.visible
+		if not ok:
+			errs.append("presentation %s not shown correctly" % m)
+	ui._on_message("appearance.set", {"mode": "avatar2d"})
+	face.set_activity("searching", "מחפש ברשת")
+	_settle(30)
+	if not face.activity.visible or face.activity.alpha < 0.9:
+		errs.append("activity pill hidden in avatar mode")
+	face.set_activity("done", "")
+	var n0: int = appearance.switches
+	for bad in [{"mode": 7}, {"mode": null}, {"mode": "AVATAR3D"}, {"mode": ["face"]}, {}, {"mode": "a".repeat(5000)},
+			{"mode": {"x": 1}}, {"mode": 3.5}, {"mode": true}]:
+		ui._on_message("appearance.set", bad)
+	ui._on_message("appearance.set", {"mode": "avatar2d"})        # same mode again: no rebuild
+	if appearance.mode != "avatar2d" or appearance.switches != n0:
+		errs.append("malformed / repeated appearance.set changed the presentation")
+	# the contract reaches both avatars: expressions, speech level, sleep, colour
+	var f := _new_face(false, 7)
+	var a2: Control = appearance.Avatar2D.new()
+	var a3: Control = appearance.Avatar3D.new()
+	var feed_both := func(x: Control) -> void:
+		a2.apply_pose(x.pose())
+		a3.apply_pose(x.pose())
+	_simulate(f, 1.0)
+	feed_both.call(f)
+	var idle_eye: float = a3.eye_h
+	f.set_state("happy")
+	_simulate(f, 1.5)
+	feed_both.call(f)
+	if a2.mouth_curve < 0.8 or a3.eye_h > idle_eye * 0.9:
+		errs.append("avatars do not show the happy expression (smile %.2f, eye %.2f vs %.2f)" % [a2.mouth_curve, a3.eye_h, idle_eye])
+	f.set_state("speaking")
+	_simulate(f, 1.0, func(x: Control) -> void: x.set_speech_level(0.8))
+	feed_both.call(f)
+	var talk := [a2.mouth_gap, a3.mouth_gap]
+	_simulate(f, 0.6)
+	feed_both.call(f)
+	if talk[0] < 0.03 or talk[1] < 0.03 or a2.mouth_gap > 0.01 or a3.mouth_gap > 0.01:
+		errs.append("avatar mouths do not follow the speech level (open %s, closed %.3f / %.3f)" % [talk, a2.mouth_gap, a3.mouth_gap])
+	f.set_state("error")
+	_simulate(f, 1.0)
+	feed_both.call(f)
+	if a3.eye_col.r < 0.9:
+		errs.append("3D avatar ignores the expression colour")
+	f.set_state("idle")
+	f.set_link("offline")
+	_simulate(f, 2.0)
+	feed_both.call(f)
+	if a2.eye_open > 0.1 or a3.eye_open > 0.1:
+		errs.append("avatars do not sleep when offline")
+	f.free()
+	# motion budget: identical blink count to the driver, head motion tiny (the eyes do the looking)
+	var g := _new_face(false, 11)
+	var meas := {"b2": 0, "b3": 0, "open2": true, "open3": true, "head2": 0.0, "head3": 0.0}
+	var watch := func(x: Control) -> void:
+		feed_both.call(x)
+		var o2: bool = a2.eye_open > 0.3
+		var o3: bool = a3.eye_open > 0.3
+		if meas.open2 and not o2:
+			meas.b2 += 1
+		if meas.open3 and not o3:
+			meas.b3 += 1
+		meas.open2 = o2
+		meas.open3 = o3
+		meas.head2 = maxf(meas.head2, a2.head_off.length())
+		meas.head3 = maxf(meas.head3, a3.head_rot.length())
+	var mo := _simulate(g, 120.0, watch)
+	var driver: float = mo.blinks_per_min * 2.0
+	if absf(meas.b2 - driver) > 1.0 or absf(meas.b3 - driver) > 1.0:
+		errs.append("avatar blinks (%d / %d) differ from the face driver (%.0f)" % [meas.b2, meas.b3, driver])
+	if mo.blinks_per_min < 8.0 or mo.blinks_per_min > 16.0:
+		errs.append("avatar blink rate %.1f/min outside 8..16" % mo.blinks_per_min)
+	if meas.head2 > 0.02 or meas.head3 > 0.06:
+		errs.append("avatar head moves too much (2D %.1f%% r, 3D %.1f deg)" % [meas.head2 * 100.0, rad_to_deg(meas.head3)])
+	g.free()
+	a2.free()
+	a3.free()
+	ui._on_message("appearance.set", {"mode": "face"})
+	face.set_state("idle")
+	return "appearance: modes %s, avatar blinks %d/%d per 2 min (face %.0f), head motion 2D %.2f%% r / 3D %.2f deg" % [
+		",".join(appearance.MODES), meas.b2, meas.b3, driver, meas.head2 * 100.0, rad_to_deg(meas.head3)]
 
 
 func _new_face(lively: bool, seed_value: int, st := "idle") -> Control:
@@ -477,6 +834,9 @@ func _check() -> void:
 		errs.append("face shader canvas / activity pill missing")
 	_reaction_checks(errs)
 	_activity_checks(errs)
+	print(_gaze_checks(errs))
+	print(await _appearance_checks(errs))
+	print(_privacy_checks(errs))
 	# sleeping face never blinks
 	var fz := _new_face(false, 21)
 	fz.set_link("offline")

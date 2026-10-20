@@ -1,0 +1,44 @@
+order = 22
+category = "google"
+pages = ["connections"]
+features = ["google_contacts"]
+suggest = false
+aliases = ["אנשי קשר", "אנשי קשר בגוגל", "contacts", "google contacts", "people api", "לחפש איש קשר"]
+links = ["google_calendar", "gmail", "memory"]
+title_he = "אנשי קשר בגוגל"
+title_en = "Google Contacts"
+what_he = "ג'ארביס מחפש שם או כתובת מייל באנשי הקשר שלכם בגוגל, רק לקריאה. הוא לא מייבא, לא עורך ולא שומר אותם."
+what_en = "JARVES looks up a name or e-mail address in your Google Contacts, read-only. He never imports, edits or saves them."
+say = [["מה המייל של דנה?", "What is Dana's e-mail address?"], ["תחפש באנשי הקשר את יוסי", "Look up Yossi in my contacts"]]
+expect_he = "הוא מראה את המועמדים שמצא ושואל למי התכוונתם. הוא מחכה לתשובה שלכם לפני כל פעולה."
+expect_en = "He shows the matches he found and asks which one you meant. He waits for your answer before any action."
+test_he = "הבדיקה בודקת שגוגל מחובר ושאישרתם את הרשאת אנשי הקשר."
+test_en = "The check sees that Google is connected and that you approved the Contacts permission."
+cost_he = "חינם."
+cost_en = "Free."
+privacy_he = "אנשי הקשר נקראים רק כשמבקשים ולא נשמרים במחשב. ההרשאה נפרדת, ואפשר לנתק בכל רגע בעמוד Connections."
+privacy_en = "Contacts are read only when you ask and are not stored on this computer. The permission is separate; disconnect any time on the Connections page."
+
+[[steps]]
+he = "בטרמינל הקלידו jarvis google login --contacts ואשרו בדפדפן את הרשאת אנשי הקשר."
+en = "In a terminal type jarvis google login --contacts and approve the Contacts permission in the browser."
+action = "command:jarvis google login --contacts"
+check = "available:google_contacts"
+
+[[steps]]
+he = "הדליקו את המתג \"אנשי קשר בגוגל\" (או jarvis features on google_contacts) והפעילו מחדש את ג'ארביס."
+en = "Turn on the Google Contacts switch (or jarvis features on google_contacts) and restart JARVES."
+action = "feature_on:google_contacts"
+check = "active:google_contacts"
+
+[[problems]]
+he = "הוא אומר שצריך אישור לאנשי קשר"
+en = "He says Contacts consent is required"
+fix_he = "הריצו jarvis google login --contacts ואשרו את ההרשאה. ההרשאות הקודמות נשמרות רק אם גוגל מחזיר אותן."
+fix_en = "Run jarvis google login --contacts and approve the permission. Earlier grants stay only if Google returns them."
+
+[[problems]]
+he = "החיפוש נכשל גם אחרי האישור"
+en = "Search fails even after approval"
+fix_he = "צריך להפעיל את People API בפרויקט של האפליקציה ב-Google Cloud (פעולה של מי שמתחזק את האפליקציה)."
+fix_en = "People API must be enabled in the app's Google Cloud project (a maintainer step)."
