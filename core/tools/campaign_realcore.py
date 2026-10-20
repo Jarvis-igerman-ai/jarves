@@ -35,16 +35,16 @@ def main() -> int:
     A = "R:realcore"
     home = BASE / "profiles" / PROFILE
     if not home.exists():
-        r = subprocess.run([str(EXE), "profile", "create", PROFILE, "--test"], capture_output=True, text=True,
-                           env={**{k: v for k, v in os.environ.items() if k != "JARVES_PROFILE"}, "JARVES_HOME": str(BASE)})
+        r = subprocess.run([sys.executable, "-m", "jarves", "profile", "create", PROFILE, "--test"], capture_output=True, text=True,
+                           env={**{k: v for k, v in os.environ.items() if k != "JARVES_PROFILE"}, "JARVES_HOME": str(BASE), "PYTHONPATH": str(CORE / "src")})
         print(r.stdout[:200])
         import re
         cfgp = home / "config.toml"
         cfgp.write_text(re.sub(r"port = \d+", "port = 18793", cfgp.read_text(encoding="utf-8"), count=1), encoding="utf-8")
-    env = {**os.environ, "JARVES_HOME": str(BASE), "PYTHONIOENCODING": "utf-8"}
+    env = {**os.environ, "JARVES_HOME": str(BASE), "PYTHONIOENCODING": "utf-8", "PYTHONPATH": str(CORE / "src")}
     env.pop("OPENAI_API_KEY", None)
     out = open(BASE / f"realcore_{PROFILE}.out", "w", encoding="utf-8")
-    p = subprocess.Popen([str(EXE), "--profile", PROFILE, "run"], stdout=out, stderr=subprocess.STDOUT, env=env, cwd=str(CORE))
+    p = subprocess.Popen([sys.executable, "-m", "jarves", "--profile", PROFILE, "run"], stdout=out, stderr=subprocess.STDOUT, env=env, cwd=str(CORE))
     try:
         up = wait(lambda: cli("status", "--brief").returncode in (0, 3, 4), 90)
         check(A, "real Core starts and `status` answers", up, "")
@@ -97,13 +97,13 @@ def main() -> int:
         r = cli("stop")
         check(A, "`stop` when nothing runs: friendly", "Traceback" not in r.stderr, f"rc={r.returncode} {(r.stdout + r.stderr)[-150:]}")
         # crash then restart
-        p = subprocess.Popen([str(EXE), "--profile", PROFILE, "run"], stdout=out, stderr=subprocess.STDOUT, env=env, cwd=str(CORE))
+        p = subprocess.Popen([sys.executable, "-m", "jarves", "--profile", PROFILE, "run"], stdout=out, stderr=subprocess.STDOUT, env=env, cwd=str(CORE))
         wait(lambda: cli("status", "--brief").returncode in (0, 3, 4), 90)
         subprocess.run(["taskkill", "/F", "/T", "/PID", str(p.pid)], capture_output=True)
         wait(lambda: p.poll() is not None, 20)
         r = cli("status", "--brief")
         rec(A, "status after a hard kill (stale snapshot, no crash)", "PASS" if "Traceback" not in r.stderr else "FAIL", f"rc={r.returncode} {r.stdout.strip()[:200]}")
-        p = subprocess.Popen([str(EXE), "--profile", PROFILE, "run"], stdout=out, stderr=subprocess.STDOUT, env=env, cwd=str(CORE))
+        p = subprocess.Popen([sys.executable, "-m", "jarves", "--profile", PROFILE, "run"], stdout=out, stderr=subprocess.STDOUT, env=env, cwd=str(CORE))
         ok = wait(healthy_enough, 90)
         check(A, "restart after a hard kill: Core becomes ready again", ok, "")
         r = cli("stop", timeout=60)

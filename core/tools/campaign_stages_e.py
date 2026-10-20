@@ -192,7 +192,7 @@ async def usage_diag(h):
 async def profiles_stage(h):
     A = "C:profiles"
     r = await h.acli("profile", "list")
-    check(A, "CLI profile list", r.returncode == 0 and "test" in r.stdout, r.stdout[-300:])
+    check(A, "CLI profile list", r.returncode == 0 and ("test" in r.stdout or "TEST" in r.stdout), r.stdout[-300:])
     r = await h.acli("profile", "show")
     check(A, "CLI profile show", r.returncode == 0 and "TEST" in r.stdout, r.stdout[-200:])
     r = await h.acli("profile", "create", "Bad Name!")

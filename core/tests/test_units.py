@@ -351,6 +351,20 @@ def test_diag_bundle_masks_content_even_when_logged_in_full(tmp_path, monkeypatc
     assert "רחוב הרצל" not in recent and _json.loads(recent.splitlines()[-1])["text"].startswith("<")
 
 
+def test_diag_out_may_be_a_folder(tmp_path, monkeypatch, capsys):
+    """V4-DG-1: `jarvis diag --out <existing folder>` ended in a PermissionError traceback; the bundle goes inside it."""
+    import zipfile
+    from jarves import cli
+    monkeypatch.setenv("JARVES_HOME", str(tmp_path / "home"))
+    folder = tmp_path / "bundles"
+    folder.mkdir()
+    assert cli.main(["diag", "--out", str(folder)]) == 0
+    zips = list(folder.glob("jarves-diag-*.zip"))
+    assert len(zips) == 1 and "manifest.json" in zipfile.ZipFile(zips[0]).namelist()
+    assert cli.main(["diag", "--out", str(tmp_path / "new" / "sub" / "x.zip")]) == 0          # missing parent folders are made
+    assert (tmp_path / "new" / "sub" / "x.zip").exists()
+
+
 async def test_pear_play_selects_inserted_index_despite_async_insert(tmp_path):
     """Real Pear 3.12 race (QA 18 Oct): the inserted song shows up in the queue a moment later; pressing "next"
     immediately played the OLD next song. JARVES must wait for it and PATCH its exact index."""

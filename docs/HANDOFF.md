@@ -916,3 +916,10 @@ reachable from the phone (dashboard_lan) for approvals, or PC-only?
 - Signing: SignPath OSS needs a public repo + OSI license; Azure Artifact Signing ~$9.99/mo, region-limited (verify price). Stay unsigned? Open-source the installer?
 - Instagram: is the account Business/Creator and linked to a Facebook Page? Confirm sends by voice, dashboard or Telegram?
 - Virtual computer: which 2-3 tasks would justify it; local (WSL2/Docker) or cloud budget?
+
+## SW-V4 test campaign, pass B (feature by feature) - 20 Oct 2026, branch `test/v4-campaign-a`, draft PR #21 (#17)
+
+- Offline TEST profiles, fakes only (WhatsApp fake bridge, fake Claude/Codex, channel fakes), no browser, no account, no paid call. Reports: [features](reviews/SWV4_CAMPAIGN_FEATURES.md) (1707 PASS, 0 FAIL, 2 BLOCKED, 28 N/A; 59 switches x CLI/dashboard/Core tool + recall, budget, health, WhatsApp, agents, privacy bundle with planted secrets (none leaked), helper isolation, approvals, update refusal paths, real `jarves run`), [bug table](reviews/SWV4_CAMPAIGN_BUG_TABLE.md).
+- Fixed with regression tests: V4-HE-1 (P1, `jarvis health canary` unusable), V4-WA-1 (P2, WhatsApp switch not live), V4-HE-2, V4-DG-1, V4-CLI-1 (P3). Open: V4-SC-1 (P2 self-check outlives Core stop), V4-RP-1/2 (P2, owner decision), 7 x P3.
+- BLOCKED: `assisted_dialing` (package H not in this tree); the V3 `browser` stage (launches Edge); update check against a signed local https release server (none exists).
+- Questions for the user: (1) Where should update releases come from? `updates.REPO` is the deprecated private `igalgerman/JARVIS` and `jarvis-releases` is the old name (V4-RP-1). (2) Where should private diagnostic ticket drafts be filed now that the old private repo is deprecated (V4-RP-2)? Nothing was filed.

@@ -815,6 +815,29 @@ def attach(core) -> WhatsAppBridgeSkill:
     if not core.features.active(FEATURE):
         core.health.set("whatsapp_bridge", "disabled", core.features.reason(FEATURE) or "switched off",
                         f"jarvis features on {FEATURE}")
+    try:
+        loop = asyncio.get_running_loop()
+    except RuntimeError:
+        loop = None
+
+    def on_switch(fid: str, on: bool) -> None:
+        """The switch is 'live' (V4-WA-1): flipping it while the Core runs starts / ends the bridge watcher too.
+        Before, the watcher and the health component only followed the switch at Core start, so whatsapp_send could
+        not become available and no red alert (account warning, logged out, kill) reached the screen until a restart."""
+        if fid != FEATURE or loop is None or getattr(core, "stopping", False):
+            return
+        if on:
+            if not getattr(core, "_whatsapp_running", False):
+                def start() -> None:
+                    t = asyncio.ensure_future(run(core))
+                    getattr(core, "_bg", []).append(t)
+                loop.call_soon_threadsafe(start)
+        else:
+            ev = getattr(core, "_whatsapp_stop", None)
+            if ev is not None:
+                loop.call_soon_threadsafe(ev.set)
+            core.health.set("whatsapp_bridge", "disabled", "switched off", f"jarvis features on {FEATURE}")
+    core.features.listeners.append(on_switch)
     return skill
 
 
@@ -822,14 +845,20 @@ async def run(core) -> None:
     """A Core background task (feature switched on): make sure the bridge runs, then follow its events until the
     Core stops. A bridge THIS run started is shut down in an orderly way (store sealed) by `stop`."""
     w: Watcher | None = getattr(core, "whatsapp_watcher", None)
-    if w is None or not core.features.enabled(FEATURE):
+    if w is None or not core.features.enabled(FEATURE) or getattr(core, "_whatsapp_running", False):
         return
-    ok, why = await asyncio.to_thread(start_bridge, core.home)
-    core._whatsapp_started = ok and why == "started"
-    if not ok:
-        core.health.set("whatsapp_bridge", "unavailable", why, "jarvis whatsapp start")
-    core._whatsapp_stop = asyncio.Event()
-    await w.run(core._whatsapp_stop)
+    core._whatsapp_running = True
+    try:
+        ok, why = await asyncio.to_thread(start_bridge, core.home)
+        core._whatsapp_started = getattr(core, "_whatsapp_started", False) or (ok and why == "started")
+        if not ok:
+            core.health.set("whatsapp_bridge", "unavailable", why, "jarvis whatsapp start")
+        core._whatsapp_stop = asyncio.Event()
+        if getattr(core, "stopping", False):
+            core._whatsapp_stop.set()
+        await w.run(core._whatsapp_stop)
+    finally:
+        core._whatsapp_running = False
 
 
 async def stop(core) -> None:
