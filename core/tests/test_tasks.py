@@ -19,6 +19,7 @@ from jarves.tasks import (LookupFailed, LookupResult, ResearchRunner, TaskManage
                           make_task_manager, read_history)
 from jarves.voice import live as live_mod
 from jarves.voice.live import STALL_FAIL_NOTE, LiveVoice
+from openai_fakes import FakeResponses, FakeStream
 
 WEB_STREAM = [
     {"type": "response.created", "response": {"id": "resp_1", "model": "gpt-6-luna"}},
@@ -352,32 +353,6 @@ def test_task_start_is_denied_unless_preauthorized():
 
 
 # ------------------------------------------------------------------ ResearchRunner (fake OpenAI client)
-class FakeStream:
-    def __init__(self, events, hang=False):
-        self.events, self.hang, self.closed = events, hang, False
-
-    def __aiter__(self):
-        return self._gen()
-
-    async def _gen(self):
-        for e in self.events:
-            yield e
-        if self.hang:
-            await asyncio.sleep(30)
-
-    async def close(self):
-        self.closed = True
-
-
-class FakeResponses:
-    def __init__(self, streams):
-        self.streams, self.bodies = list(streams), []
-
-    async def create(self, **body):
-        self.bodies.append(body)
-        return self.streams.pop(0)
-
-
 async def test_research_runner_deadline_then_one_retry_with_progress_and_budget(tmp_path):
     mem = MemoryStore(tmp_path / "m.db")
     budget = Budget(mem, AIConfig(daily_request_limit=10))

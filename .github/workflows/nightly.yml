@@ -1,0 +1,153 @@
+name: jarves-nightly
+# SW-V4 M: the account-free layers of the test pyramid every night (02:00 UTC) and on demand. No secrets, no paid API
+# calls, nothing is billed. Public repo: Actions minutes are free. Every job has a timeout; a failure uploads REDACTED
+# diagnostics (tools/ci_diagnostics.py), never raw logs. Hooks for package O (Self-Diagnostics 2.0): the synthetic
+# canaries step (tools/synthetic_canaries.py) and the diagnostics bundle upload.
+on:
+  schedule:
+    - cron: "0 2 * * *"
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  suite:
+    name: Full Core suite (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, windows-2025]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 120
+    defaults:
+      run:
+        working-directory: core
+    steps:
+      - uses: actions/checkout@v7
+      - uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884  # v10.3.0
+        with:
+          enable-cache: true
+      - name: "System libraries (Linux, PortAudio for sounddevice)"
+        if: runner.os == 'Linux'
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq libportaudio2
+      - run: uv sync --frozen --all-extras
+      - name: Browser for the real-browser tests
+        shell: bash
+        run: |
+          if uv run python -c "import playwright" 2>/dev/null; then
+            if [ "$RUNNER_OS" = "Linux" ]; then uv run playwright install --with-deps chromium; else echo "using the preinstalled Edge"; fi
+          fi
+      - name: Cache tool downloads (Godot, Inno Setup)
+        uses: actions/cache@v6
+        with:
+          path: ${{ runner.temp }}/jarves-test-tools
+          key: jarves-test-tools-${{ runner.os }}-${{ hashFiles('core/tests/_tools.py') }}
+      - name: pytest (any skip fails the run)
+        shell: bash
+        env:
+          JARVES_BUILD_CACHE: ${{ runner.temp }}/jarves-test-tools
+        run: |
+          uv run pytest -q -rs -p no:cacheprovider --durations=40 --junitxml=pytest-junit.xml | tee pytest.out
+          if grep -E "(^SKIPPED|[0-9]+ skipped|xfailed)" pytest.out; then echo "::error::tests were skipped"; exit 1; fi
+      - name: Redacted diagnostics on failure
+        if: failure()
+        shell: bash
+        run: uv run python tools/ci_diagnostics.py diag pytest.out pytest-junit.xml || true
+      - uses: actions/upload-artifact@v7
+        if: failure()
+        with:
+          name: diagnostics-suite-${{ matrix.os }}
+          path: core/diag
+          retention-days: 14
+          if-no-files-found: ignore
+  flake:
+    # Flake detector: the whole suite 3 times in a row on Linux (the fast runner). No reruns, no quarantine: any run
+    # that fails is a flake or a regression and gets a bug-table row (V4 plan 6.4).
+    name: Flake detector (3x suite, Linux)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 150
+    defaults:
+      run:
+        working-directory: core
+    steps:
+      - uses: actions/checkout@v7
+      - uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884  # v10.3.0
+        with:
+          enable-cache: true
+      - run: sudo apt-get update -qq && sudo apt-get install -y -qq libportaudio2
+      - run: uv sync --frozen --all-extras
+      - name: Cache tool downloads (Godot)
+        uses: actions/cache@v6
+        with:
+          path: ${{ runner.temp }}/jarves-test-tools
+          key: jarves-test-tools-${{ runner.os }}-${{ hashFiles('core/tests/_tools.py') }}
+      - name: pytest x3
+        shell: bash
+        env:
+          JARVES_BUILD_CACHE: ${{ runner.temp }}/jarves-test-tools
+        run: |
+          rc=0
+          for i in 1 2 3; do
+            uv run pytest -q -p no:cacheprovider 2>&1 | tee "pytest-run$i.out" || rc=1    # pipefail: pytest's status
+          done
+          exit $rc
+      - name: Redacted diagnostics on failure
+        if: failure()
+        run: uv run python tools/ci_diagnostics.py diag pytest-run1.out pytest-run2.out pytest-run3.out || true
+      - uses: actions/upload-artifact@v7
+        if: failure()
+        with:
+          name: diagnostics-flake
+          path: core/diag
+          retention-days: 14
+          if-no-files-found: ignore
+  perf:
+    name: Performance gate (3 runs, Windows)
+    runs-on: windows-2025
+    timeout-minutes: 20
+    defaults:
+      run:
+        working-directory: core
+    steps:
+      - uses: actions/checkout@v7
+      - uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884  # v10.3.0
+        with:
+          enable-cache: true
+      - run: uv sync --frozen
+      - name: perf_gate
+        shell: bash
+        run: uv run python tools/perf_gate.py --class ci --runs 3 --results perf-results.json
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: nightly-perf-results
+          path: core/perf-results.json
+          retention-days: 30
+          if-no-files-found: ignore
+  audits:
+    name: Redaction audit and synthetic canaries
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    defaults:
+      run:
+        working-directory: core
+    steps:
+      - uses: actions/checkout@v7
+      - uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884  # v10.3.0
+        with:
+          enable-cache: true
+      - run: sudo apt-get update -qq && sudo apt-get install -y -qq libportaudio2
+      - run: uv sync --frozen --all-extras
+      - name: Redaction audit (privacy, secrets and diagnostics redaction tests)
+        run: uv run pytest -q -p no:cacheprovider tests/test_privacy.py tests/test_privacy_state.py tests/test_security.py tests/test_ci_diagnostics.py
+      - name: Synthetic journey canaries (package O hook; runs every registered canary on a CI test profile)
+        run: uv run python tools/synthetic_canaries.py --out canaries.json
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: nightly-canaries
+          path: core/canaries.json
+          retention-days: 14
+          if-no-files-found: ignore

@@ -1,0 +1,158 @@
+# JARVES performance budgets (SW-V4 package M). Read by tools/perf_gate.py; explained in docs/reviews/SWV4_PERF_BUDGETS.md.
+#
+# Each metric: the measured baseline plus two ceilings. `owner_max` is strict (the owner's PC, checked by hand and by
+# the O monitor); `ci_max` is loose (a shared CI runner is 2-5x noisier). The gate compares the MEDIAN of the runs
+# with `<= max`. Raising a ceiling needs a reason in [[history]] (see "Updating budgets" in the budgets doc).
+#
+# `source`: bench = tools/bench_startup.py (real background Core), inproc = measured in the gate process,
+#           log = per-start stage timings from a real jarves.log (owner PC only, `perf_gate.py --log`).
+[meta]
+baseline_commit = "v3-p03-perf (swv2-integrate e95eb6f) + V4 M gate"
+baseline_machine = "owner PC: AMD Ryzen 3 5300U, 7.5 GB RAM, Windows 11, Python 3.12.12"
+scenario = "combined"
+default_runs = 3
+default_idle_s = 60
+ci_runs = 2
+ci_idle_s = 60
+
+[metrics.private_mb]
+baseline = 92.7
+unit = "MB"
+source = "bench"
+owner_max = 150
+ci_max = 260
+note = "background Core private commit, combined scenario (cloud scenario baseline 131.4)"
+
+[metrics.steady_rss_mb]
+baseline = 117.0
+unit = "MB"
+source = "bench"
+owner_max = 175
+ci_max = 300
+note = "steady working set"
+
+[metrics.threads]
+baseline = 11
+unit = "count"
+source = "bench"
+owner_max = 14
+ci_max = 22
+note = "idle threads"
+
+[metrics.child_processes]
+baseline = 0
+unit = "count"
+source = "bench"
+owner_max = 0
+ci_max = 0
+note = "no child process in background mode"
+
+[metrics.idle_cpu_pct]
+baseline = 0.28
+unit = "%"
+source = "bench"
+owner_max = 0.5
+ci_max = 2.0
+note = "idle CPU of the background Core"
+
+[metrics.idle_disk_write_kb_per_min]
+baseline = 3.5
+unit = "KB/min"
+source = "bench"
+owner_max = 10
+ci_max = 60
+note = "idle disk writes (was 58 KB/min before V3 P0.3: runtime.json churn)"
+
+[metrics.idle_disk_read_kb_per_min]
+baseline = 320
+unit = "KB/min"
+source = "bench"
+owner_max = 600
+ci_max = 2500
+note = "UNEXPLAINED (V3 range 250-390; Windows counters include non-file I/O). Ceiling only stops growth; explain first (V4 M AM-P2)"
+
+[metrics.rss_growth_mb]
+baseline = 0.8
+unit = "MB/idle window"
+source = "bench"
+owner_max = 2
+ci_max = 6
+note = "working-set growth over the idle window (leak tripwire)"
+
+[metrics.core_start_ms]
+baseline = 1687
+unit = "ms"
+source = "bench"
+owner_max = 3000
+ci_max = 8000
+note = "CORE_READY time reported by the Core (V3: 1.6-2.0 s)"
+
+[metrics.spawn_to_ready_s]
+baseline = 2.6
+unit = "s"
+source = "bench"
+owner_max = 5
+ci_max = 15
+note = "process spawn to CORE_READY seen in the log (V3: 2.0-2.6 s on a quiet PC, up to 6.9 s when busy)"
+
+[metrics.stop_s]
+baseline = 1.65
+unit = "s"
+source = "bench"
+owner_max = 3
+ci_max = 8
+note = "`jarves stop` until the process exits"
+
+[metrics.features_list_ms]
+baseline = 10.5
+unit = "ms"
+source = "inproc"
+owner_max = 50
+ci_max = 150
+note = "features_list body with an EXPIRED, slow (0.3 s) music probe: must answer from the stale result (V3 F4: was 324 ms)"
+
+[metrics.live_tools_probe_ms]
+baseline = 18
+unit = "ms"
+source = "inproc"
+owner_max = 50
+ci_max = 150
+note = "live_tools()/session-start probe path with an expired slow probe (V3 F4: was 323-349 ms)"
+
+[metrics.dashboard_first_load_ms]
+baseline = 78
+unit = "ms"
+source = "inproc"
+owner_max = 500
+ci_max = 1500
+note = "first GET / of the in-process dashboard (page shell)"
+
+[metrics.dashboard_api_max_ms]
+baseline = 74
+unit = "ms"
+source = "inproc"
+owner_max = 500
+ci_max = 1500
+note = "slowest first request among the page APIs (overview, sessions, costs, issues, skills, memory, settings)"
+
+[metrics.live_started_s]
+baseline = 8.6
+unit = "s after CORE_STARTING"
+source = "log"
+owner_max = 20
+ci_max = 40
+note = "LIVE_STARTED in a real desktop start (V3 log: 8.6-15.1 s, before the P0.3 fixes). Tighten after A"
+
+[metrics.first_audio_s]
+baseline = 10.3
+unit = "s after CORE_STARTING"
+source = "log"
+owner_max = 24
+ci_max = 45
+note = "LIVE_FIRST_AUDIO in a real desktop start (V3 log: 10.3-17.2 s). Wake-to-first-audio proper is measured 5x in A/AM-P1"
+
+# Budgets that need a real microphone, Godot window or billed session are listed in the budgets doc as PENDING (A).
+
+[[history]]
+date = "2026-10-20"
+change = "created from SWV3_P03_REPORT.md numbers; owner ceilings = the V3 P0.3 acceptance budgets"

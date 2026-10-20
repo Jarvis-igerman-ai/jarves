@@ -1,8 +1,14 @@
 name: jarves-checks
 # CI for Issue #2. No secrets used; no paid API calls (all AI/voice tests are offline fakes).
+#
+# SW-V4 M: a `changes` job classifies the diff so a docs-only PR skips every heavy job (skipped jobs count as green for
+# the merge queue). `main` pushes, release tags and manual runs ALWAYS run the full matrix. Every job has a timeout;
+# superseded runs of the same ref are cancelled; tool downloads (uv, Godot, Inno Setup, Blender, FreeCAD) are cached.
+# The core suite stays serial on purpose (no pytest-xdist): see docs/reviews/SWV4_M_PERF_CI.md. Nightly: nightly.yml.
 on:
   push:
     branches: [main]
+    tags: ["v*", "win-v*"]
   pull_request:
   workflow_dispatch:
 permissions:
@@ -11,8 +17,43 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 jobs:
+  changes:
+    name: Classify the change (docs-only skips heavy jobs)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    outputs:
+      code: ${{ steps.c.outputs.code }}
+      perf: ${{ steps.c.outputs.perf }}
+      installer: ${{ steps.c.outputs.installer }}
+      cad: ${{ steps.c.outputs.cad }}
+      blender: ${{ steps.c.outputs.blender }}
+      godot: ${{ steps.c.outputs.godot }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 2
+      - id: c
+        shell: bash
+        run: |
+          set -euo pipefail
+          out() { echo "$1=$2" >> "$GITHUB_OUTPUT"; }
+          if [ "$GITHUB_EVENT_NAME" != "pull_request" ]; then
+            for k in code perf installer cad blender godot; do out $k true; done
+            echo "full matrix ($GITHUB_EVENT_NAME $GITHUB_REF)"; exit 0
+          fi
+          files=$(git diff --name-only HEAD^1 HEAD)   # the PR merge commit against its base
+          echo "$files"
+          any() { grep -Eq "$1" <<< "$files" && echo true || echo false; }
+          out code      "$(grep -Evq '^(docs/|[^/]+\.md$|LICENSE|\.gitignore)' <<< "$files" && echo true || echo false)"
+          out perf      "$(any '^(core/(src/|tools/(bench_startup|perf_gate)|perf_budgets|pyproject|uv\.lock)|\.github/)')"
+          out installer "$(any '^(packaging/|core/(src/|pyproject|uv\.lock)|godot/|\.github/|jarvis\.cmd)')"
+          out cad       "$(any '^(cad/|\.github/)')"
+          out blender   "$(any '^(blender/|cad/|godot/|\.github/)')"
+          out godot     "$(any '^(godot/|blender/|core/src/|\.github/)')"
   core:
     name: Python Core tests (${{ matrix.os }})
+    needs: changes
+    if: needs.changes.outputs.code == 'true'
     strategy:
       fail-fast: false
       matrix:
@@ -53,8 +94,20 @@ jobs:
         env:
           JARVES_BUILD_CACHE: ${{ runner.temp }}/jarves-test-tools
         run: |
-          uv run pytest -q -rs -p no:cacheprovider | tee pytest.out
+          uv run pytest -q -rs -p no:cacheprovider --durations=25 --junitxml=pytest-junit.xml | tee pytest.out
           if grep -E "(^SKIPPED|[0-9]+ skipped|xfailed)" pytest.out; then echo "::error::tests were skipped"; exit 1; fi
+      - name: Redacted diagnostics on failure (pytest output, junit, Core logs; no secrets, no user content)
+        if: failure()
+        shell: bash
+        run: uv run python tools/ci_diagnostics.py diag pytest.out pytest-junit.xml || true
+      - name: Upload redacted diagnostics
+        if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: diagnostics-core-${{ matrix.os }}
+          path: core/diag
+          retention-days: 7
+          if-no-files-found: ignore
       - name: jarvis.cmd launcher smoke (Windows)
         if: runner.os == 'Windows'
         shell: cmd
@@ -69,7 +122,8 @@ jobs:
     # data, /PURGE=1). On `main` the tested artifact is what .github/workflows/package.yml publishes; PR artifacts are
     # CI-only (3 days) and never become releases.
     name: Windows installer (build + silent install smoke)
-    needs: core
+    needs: [core, changes]
+    if: needs.changes.outputs.installer == 'true'
     runs-on: windows-2025
     timeout-minutes: 45
     env:
@@ -109,14 +163,48 @@ jobs:
           retention-days: ${{ env.CHANNEL == 'main' && 14 || 3 }}
           compression-level: 0
           if-no-files-found: error
+  perf:
+    # SW-V4 M: performance gate (core/perf_budgets.toml, class ci = loose). Fails when a budget is exceeded.
+    name: Performance gate (Windows)
+    needs: changes
+    if: needs.changes.outputs.perf == 'true'
+    runs-on: windows-2025
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: core
+    steps:
+      - uses: actions/checkout@v7
+      - uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884  # v10.3.0
+        with:
+          enable-cache: true
+      - run: uv sync --frozen
+      - name: perf_gate (real background Core, 2 runs, idle 60 s, plus in-process and dashboard timings)
+        shell: bash
+        run: uv run python tools/perf_gate.py --class ci --results perf-results.json
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: perf-results
+          path: core/perf-results.json
+          retention-days: 14
+          if-no-files-found: ignore
   cad:
+    needs: changes
+    if: needs.changes.outputs.cad == 'true'
     runs-on: ubuntu-24.04
     timeout-minutes: 25
     steps:
       - uses: actions/checkout@v7
+      - name: Cache FreeCAD AppImage
+        id: fc
+        uses: actions/cache@v6
+        with:
+          path: FreeCAD_1.1.4-Linux-x86_64-py311.AppImage
+          key: freecad-1.1.4-appimage
       - name: Install FreeCAD 1.1.4 (same version as local; apt only ships 0.21)
         run: |
-          curl -sSLO https://github.com/FreeCAD/FreeCAD/releases/download/1.1.4/FreeCAD_1.1.4-Linux-x86_64-py311.AppImage
+          [ -f FreeCAD_1.1.4-Linux-x86_64-py311.AppImage ] || curl -sSLO https://github.com/FreeCAD/FreeCAD/releases/download/1.1.4/FreeCAD_1.1.4-Linux-x86_64-py311.AppImage
           curl -sSL https://github.com/FreeCAD/FreeCAD/releases/download/1.1.4/FreeCAD_1.1.4-Linux-x86_64-py311.AppImage-SHA256.txt | sha256sum -c -
           chmod +x FreeCAD_*.AppImage && ./FreeCAD_*.AppImage --appimage-extract > /dev/null
           echo "FC=$PWD/squashfs-root/usr/bin/freecadcmd" >> "$GITHUB_ENV"
@@ -129,24 +217,38 @@ jobs:
           QT_QPA_PLATFORM=offscreen "$FC" cad/mech_estimates.py | tee mech.txt
           grep -q "MECH DONE" mech.txt
   blender:
+    needs: changes
+    if: needs.changes.outputs.blender == 'true'
     runs-on: ubuntu-24.04
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@v7
+      - name: Cache Blender 5.2.2
+        uses: actions/cache@v6
+        with:
+          path: blender-5.2.2-linux-x64
+          key: blender-5.2.2-linux-x64
       - name: Install Blender 5.2.2
         run: |
-          curl -sSL https://download.blender.org/release/Blender5.2/blender-5.2.2-linux-x64.tar.xz | tar xJ
+          [ -x blender-5.2.2-linux-x64/blender ] || curl -sSL https://download.blender.org/release/Blender5.2/blender-5.2.2-linux-x64.tar.xz | tar xJ
           sudo apt-get update && sudo apt-get install -y --no-install-recommends libxi6 libxkbcommon0 libxrender1 libsm6 libgl1 libegl1
       - name: Blender smoke (committed .glb vs CAD manifest, materials, Godot asset sync, renders present)
         run: ./blender-5.2.2-linux-x64/blender -b --python blender/smoke_blender.py
   godot:
+    needs: changes
+    if: needs.changes.outputs.godot == 'true'
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@v7
+      - name: Cache the Godot 4.7.2 download
+        uses: actions/cache@v6
+        with:
+          path: Godot_v4.7.2-stable_linux.x86_64.zip
+          key: godot-4.7.2-linux-zip
       - name: Install Godot 4.7.2
         run: |
-          curl -sSLO https://github.com/godotengine/godot/releases/download/4.7.2-stable/Godot_v4.7.2-stable_linux.x86_64.zip
+          [ -f Godot_v4.7.2-stable_linux.x86_64.zip ] || curl -sSLO https://github.com/godotengine/godot/releases/download/4.7.2-stable/Godot_v4.7.2-stable_linux.x86_64.zip
           unzip -q Godot_*.zip && echo "GODOT=$PWD/Godot_v4.7.2-stable_linux.x86_64" >> "$GITHUB_ENV"
       - name: Import assets
         run: '"$GODOT" --headless --path godot --import'
@@ -160,6 +262,8 @@ jobs:
           grep -q "FACE CHECK RESULT: PASS" face.txt
   e2e:
     name: Core-Godot E2E (real processes)
+    needs: changes
+    if: needs.changes.outputs.code == 'true'
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     steps:
@@ -167,10 +271,15 @@ jobs:
       - uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884  # v10.3.0
         with:
           enable-cache: true
+      - name: Cache the Godot 4.7.2 download
+        uses: actions/cache@v6
+        with:
+          path: Godot_v4.7.2-stable_linux.x86_64.zip
+          key: godot-4.7.2-linux-zip
       - name: Install Core + Godot 4.7.2
         run: |
           (cd core && uv sync --frozen)
-          curl -sSLO https://github.com/godotengine/godot/releases/download/4.7.2-stable/Godot_v4.7.2-stable_linux.x86_64.zip
+          [ -f Godot_v4.7.2-stable_linux.x86_64.zip ] || curl -sSLO https://github.com/godotengine/godot/releases/download/4.7.2-stable/Godot_v4.7.2-stable_linux.x86_64.zip
           unzip -q Godot_*.zip && echo "GODOT=$PWD/Godot_v4.7.2-stable_linux.x86_64" >> "$GITHUB_ENV"
           echo "JARVES_HOME=$RUNNER_TEMP/jarves" >> "$GITHUB_ENV"
       - name: Import assets
@@ -220,6 +329,16 @@ jobs:
           for i in $(seq 30); do grep -q CORE_STOPPED "$JARVES_HOME/logs/jarves.log" && break; sleep 0.5; done
           grep -q CORE_STOPPED "$JARVES_HOME/logs/jarves.log"
           ! (cd core && uv run jarves status)                                 # now reports NOT running
-      - name: Core log on failure
+      - name: Redacted diagnostics on failure (Core output and log, nothing unredacted is printed or kept)
         if: failure()
-        run: cat "$RUNNER_TEMP/core.out"; tail -50 "$JARVES_HOME/logs/jarves.log" || true
+        run: |
+          (cd core && uv run python tools/ci_diagnostics.py "$GITHUB_WORKSPACE/diag" "$RUNNER_TEMP/core.out" "$RUNNER_TEMP/core2.out" "$JARVES_HOME/logs" "$RUNNER_TEMP/bad" || true)
+          tail -50 "$GITHUB_WORKSPACE"/diag/*jarves.log || true
+      - name: Upload redacted diagnostics
+        if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: diagnostics-e2e
+          path: diag
+          retention-days: 7
+          if-no-files-found: ignore

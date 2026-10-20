@@ -27,6 +27,8 @@ from jarves.config import AIConfig, CameraConfig
 from jarves.memory import MemoryStore
 from jarves.skills import SkillRegistry, Tool, ToolResult, Skill
 from jarves.skills.camera import CameraSkill
+from openai_fakes import FakeStream
+from openai_fakes import TextResponses as FakeResponses
 
 
 # ------------------------------------------------------------------ synthetic fixtures
@@ -77,33 +79,6 @@ class ColourEmbedder:
         x, y = int((box.x + box.w / 2) * w), int((box.y + box.h / 2) * h)
         c = frame.pixels[y, x].astype(np.float32) - 225.0
         return np.concatenate([c, [1.0]]).astype(np.float32)
-
-
-class FakeStream:
-    def __init__(self, events):
-        self.events = events
-
-    def __aiter__(self):
-        return self._gen()
-
-    async def _gen(self):
-        for e in self.events:
-            yield e
-
-    async def close(self):
-        pass
-
-
-class FakeResponses:
-    def __init__(self, text="זה ספל קפה לבן."):
-        self.text, self.bodies = text, []
-
-    async def create(self, **body):
-        self.bodies.append(body)
-        return FakeStream([{"type": "response.created", "response": {"id": "r1", "model": body["model"]}},
-                           {"type": "response.output_text.delta", "delta": self.text},
-                           {"type": "response.completed", "response": {"usage": {"input_tokens": 900,
-                                                                                 "output_tokens": 20}}}])
 
 
 class Sent(list):
