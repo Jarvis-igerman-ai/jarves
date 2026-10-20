@@ -620,3 +620,9 @@ See [docs/reviews/S1_T03R1_ENGINEERING_REVIEW.md](reviews/S1_T03R1_ENGINEERING_R
   - The XVF3800 needs a raised crown pod.
   - The Pi 5 USB power budget may be exceeded.
 - **Open hardware questions** (all DEFERRED in the queue above): imported mic, display variant, bench purchases, printer, room/listening range.
+
+## Owner answers (20 Oct 2026)
+- Workweek default for "ימי חול": Sun–Thu (configurable).
+- Home Assistant: LAST priority; build the generic, config-driven version and add a `jarvis home start` wizard (like `jarvis google start`).
+- Telegram outbound: build it; owner creates the bot. Also add a `jarvis instagram start` setup wizard (Instagram channel; research API limits first, assisted/handoff if no official send API).
+- Tray: show a one-time "still running in the tray" notice on first window close.
