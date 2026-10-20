@@ -72,6 +72,20 @@ After local automatic backups are proven, consider an explicitly authorized encr
 - **Later technical decision:** once the owner *explicitly reactivates* this item, Opus may refine the recommended design and make technical implementation decisions without asking about ordinary architecture details. Opus must not analyze every historical chat; use economical local indexing and scoped retrieval.
 - **Reactivation:** separate owner-approved milestone/issue with Pi roadmap and tests. Not active now.
 
----
+## F11 — Family Intelligence (DEFERRED; NOT V5)
 
+**Owner decision, 20 October 2026:** retain this idea explicitly in the future backlog. It was suggested for V5 but the owner chose to exclude it from V5, **not to discard it**. It has no implementation authorization, target date or automatic trigger.
+
+**Vision:** evolve the single personal JARVES into a permission-aware household assistant when the mobile/platform foundations and real-world use are mature. Potential features: separate household member and guest profiles, age-appropriate interactions, shared routines/reminders/calendar and planning, household coordination, and responses adapted to the active consenting person.
+
+**Design and safety gates:**
+- Consent-based recognition/selection of the active speaker or profile, with an honest fallback when uncertain; do not assume reliable voice identity or enable biometric recognition by default.
+- Person-specific access controls and separate private memories, with deliberate explicit sharing of household information only where authorized. Never leak private messages, calendars or preferences between members.
+- Age-appropriate interactions, guardian-configurable permissions where relevant, simple manual profile switching, and no passive collection or profiling of children by default.
+- Quiet hours, notification routing, duplicate prevention, transparency about microphone/camera/cloud use and human approvals for consequential actions.
+- Real family/guest usability and privacy acceptance tests before enabling household mode. Reuse the common Core/identity/memory architecture; do not create separate assistant brains.
+
+**Candidate timing:** reconsider after the stage-2 mobile foundations and more mature day-to-day Android experiences (PRODUCT_VISION stages 2–4), if the owner explicitly chooses a household-focused milestone. It is *not* part of V5 Goes Mobile, V4, Android Auto, or physical hardware readiness.
+
+---
 **Backlog rule:** Every idea promoted to active work gets its own agreed scope, GitHub issue, acceptance criteria, and Windows/Pi support plan. Leaving it here does not mean it has been forgotten.
