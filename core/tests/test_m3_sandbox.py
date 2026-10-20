@@ -100,8 +100,7 @@ def test_quota_and_file_size(env):
 
 def test_junction_or_symlink_is_never_followed(env):
     link = env.sb.root / "door"
-    if not make_junction(link, env.outside):
-        pytest.skip("cannot create a junction/symlink here")
+    assert make_junction(link, env.outside), "could not create a real junction/symlink in the tmp dir"
     for path in ("door/secret.txt", "door/new.md", "door"):
         with pytest.raises(SB.SandboxError):
             env.sb.write_text(path, "pwned", overwrite=True)
@@ -117,10 +116,7 @@ def test_junction_or_symlink_is_never_followed(env):
 def test_hard_link_is_not_overwritten(env):
     target = env.outside / "hard.txt"
     target.write_text("outside data", encoding="utf-8")
-    try:
-        os.link(target, env.sb.root / "hard.txt")
-    except OSError:
-        pytest.skip("hard links unsupported")
+    os.link(target, env.sb.root / "hard.txt")                # a real hard link (NTFS and ext4/tmpfs both support it)
     with pytest.raises(SB.SandboxError):
         env.sb.write_text("hard.txt", "pwned", overwrite=True)
     assert target.read_text(encoding="utf-8") == "outside data"

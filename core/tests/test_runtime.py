@@ -314,7 +314,7 @@ async def test_tray_actions_reach_the_core_from_its_own_thread(home, cfg):
 
 
 def test_pystray_backend_builds_without_running():
-    pytest.importorskip("pystray")
+    import pystray  # noqa: F401  (the `tray` extra is installed everywhere: uv sync --all-extras)
     from jarves.runtime.tray import Controller, PystrayTray, icon_image
     view = {"core": {"state": "running"}, "display": {"state": "shown"}, "mic": {"muted": True},
             "alerts": {"paused": True}}

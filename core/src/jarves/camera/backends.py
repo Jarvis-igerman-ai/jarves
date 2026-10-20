@@ -106,7 +106,7 @@ class OpenCVCamera(Camera):
     """USB webcam (development PC). The preview is requested at the configured low resolution."""
     name = "opencv"
 
-    def __init__(self, device: int = 0, width: int = 320, height: int = 240) -> None:
+    def __init__(self, device: int | str = 0, width: int = 320, height: int = 240) -> None:
         super().__init__()
         self.device, self.width, self.height = device, width, height
         self._cap = None
@@ -117,7 +117,8 @@ class OpenCVCamera(Camera):
         except ImportError as e:
             raise CameraUnavailable("CAMERA_NO_LIBRARY", "OpenCV is not installed",
                                     "uv sync --extra camera") from e
-        api = cv2.CAP_DSHOW if sys.platform == "win32" else cv2.CAP_ANY
+        # an int is a webcam index; a str is a video file/stream (tests replay a recorded clip through the real path)
+        api = cv2.CAP_DSHOW if sys.platform == "win32" and isinstance(self.device, int) else cv2.CAP_ANY
         cap = cv2.VideoCapture(self.device, api)
         if not cap.isOpened():
             cap.release()
