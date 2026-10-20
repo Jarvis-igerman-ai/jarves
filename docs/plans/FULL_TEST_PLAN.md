@@ -30,3 +30,4 @@ No open P0/P1; every feature has a PASS or an explicit BLOCKED reason; log revie
 - Wake word: owner will record ~20 short samples when the agent asks.
 - Telegram: only the owner's chat for now.
 - PC restart killed the merge and approvals agents; both relaunched (merge agent is top priority).
+- Helper skill: always ask per command (no read-only auto-allow). Approval popup: small always-on-top window. Instagram sends: voice + on-screen popup. Installer signing: stay unsigned for now.
