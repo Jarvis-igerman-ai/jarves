@@ -152,7 +152,7 @@ def build(home: Path, cfg, out: Path, *, lines: int = 500, max_bytes: int = MAX_
 
     def features_list():
         from .features import Features
-        return [{k: s[k] for k in ("id", "enabled", "available", "active", "reason")} for s in Features(cfg, home).list()]
+        return [{k: s[k] for k in ("id", "enabled", "available", "active", "reason")} for s in Features(cfg, home).list(wait=True)]
 
     def usage_view():
         from .usage import Monitor

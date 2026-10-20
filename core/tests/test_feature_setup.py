@@ -161,8 +161,9 @@ def test_model_hash_atomicity_and_cleanup(monkeypatch, tmp_path, valid):
 
 def test_windows_camera_probe_is_sensorless(monkeypatch, tmp_path):
     from jarves.camera import backends
+    from jarves.camera import probe as camera_probe
     monkeypatch.setattr(features.sys, "platform", "win32")
-    monkeypatch.setattr(backends, "probe", lambda backend: backends.Probe(True, "opencv", "webcam interface found"))
+    monkeypatch.setattr(camera_probe, "probe", lambda backend: backends.Probe(True, "opencv", "webcam interface found"))
     monkeypatch.setattr(backends.OpenCVCamera, "open", lambda self: pytest.fail("opened sensor"))
     ctx = features.ProbeCtx(Config(), tmp_path, lambda: {}, lambda: None)
     assert features._probe_camera(ctx) == (True, "")

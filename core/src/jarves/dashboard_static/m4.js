@@ -39,15 +39,17 @@
       const w = f.targets.windows, p = f.targets.linux_arm64_pi;
       const blockers = [w.blocker ? "Windows: " + txh(w, "blocker") : null, p.blocker ? "Pi: " + txh(p, "blocker") : null,
         ...(f.matrix_problems || []).map((x) => tx("טבלה: ", "matrix: ") + x)].filter(Boolean);
-      const health = f.health === "ok" ? pill("ok", tx("פעיל", "active")) : f.health === "off" ? pill("plain", tx("כבוי", "off")) : pill("unavailable", tx("לא זמין", "unavailable"));
+      const health = f.health === "ok" ? pill("ok", tx("פעיל", "active")) : f.health === "off" ? pill("plain", tx("כבוי", "off"))
+        : f.health === "checking" ? pill("plain", tx("בודק", "checking")) : pill("unavailable", tx("לא זמין", "unavailable"));
       const PERM = { read: ["קריאה", "read"], action: ["פעולה", "action"], destructive: ["הרסני", "destructive"] };
       const perm = (x) => { const m = /^(read|action|destructive)(?=$|[ ,(])(.*)$/.exec(x); const k = m && PERM[m[1]]; return k ? tx(k[0], k[1]) + (m[2].trim() ? " " + JL.t(m[2].trim()) : "") : JL.t(x); };
+      const age = f.check === "stale" && f.checked_s_ago != null ? el("div", { class: "muted small" }, tx(`נבדק לפני ${Math.round(f.checked_s_ago)} שנ׳, בודק שוב`, `checked ${Math.round(f.checked_s_ago)} s ago, re-checking`)) : null;
       return el("tr", { class: f.needs_attention ? "m4-attn" : null },
         el("td", { "data-label": "Feature" }, el("b", {}, txo(f, "title")),
           el("div", { class: "muted small" }, txh(f, "about")),
           f.requested ? el("div", { class: "small" }, tx("ביקשו מ-JARVES להפעיל את זה: מאשרים כאן.", "JARVES was asked to turn this on: approve here.")) : null),
         el("td", { "data-label": "Enabled" }, sw, msg),
-        el("td", { "data-label": "Health" }, health, f.reason ? el("div", { class: "small", dir: JL.textDir(txh(f, "reason")) }, txh(f, "reason")) : null),
+        el("td", { "data-label": "Health" }, health, f.reason ? el("div", { class: "small", dir: JL.textDir(txh(f, "reason")) }, txh(f, "reason")) : null, age),
         el("td", { "data-label": "Settings", class: "small" }, f.settings || "—"),
         el("td", { "data-label": "Permissions", class: "small" }, (f.permissions || []).map((x, i) => el("span", {}, (i ? ", " : "") + perm(x))), " ",
           pill(f.risk, ({ low: tx("סיכון נמוך", "low risk"), medium: tx("סיכון בינוני", "medium risk"), high: tx("סיכון גבוה", "high risk") })[f.risk] || f.risk)),
@@ -73,6 +75,11 @@
       el("div", { class: "muted small", style: "margin-top:8px" }, tx("נבדק לאחרונה: ", "Last checked: "),
         [...new Set(d.features.map((f) => f.last_checked))].join(", "), tx(" · תוכנית ל-Pi: ", " · Pi roadmap: "),
         el("a", { href: d.pi_roadmap, target: "_blank", rel: "noopener noreferrer" }, d.pi_roadmap)));
+    // a never-checked probe runs in the Core's background worker: show its real result once it landed (once)
+    if (d.features.some((f) => f.check === "checking") && !pageFeatures.rechecked) {
+      pageFeatures.rechecked = true;
+      setTimeout(() => { if (location.hash.startsWith("#/features")) route(true); }, 1500);
+    }
   }
 
   // ------------------------------------------------------------------ Identity & voice

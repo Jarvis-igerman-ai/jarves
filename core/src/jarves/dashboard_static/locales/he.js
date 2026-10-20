@@ -1443,7 +1443,8 @@
   "Phone number for a pairing code": "מספר טלפון לקוד צימוד",
   "Retention days": "ימי שמירה",
   "WhatsApp is not linked; run: jarvis whatsapp link": "וואטסאפ לא מקושר; הריצו: jarvis whatsapp link",
-  "dashboard Health page, jarvis health, health.* settings": "דף הבריאות בלוח הבקרה, jarvis health, הגדרות health.*"
+  "dashboard Health page, jarvis health, health.* settings": "דף הבריאות בלוח הבקרה, jarvis health, הגדרות health.*",
+  "checking": "בודק"
  },
  "rules": [
   [

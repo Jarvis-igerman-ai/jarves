@@ -1443,6 +1443,7 @@
   "Phone number for a pairing code": "Phone number for a pairing code",
   "Retention days": "Retention days",
   "WhatsApp is not linked; run: jarvis whatsapp link": "WhatsApp is not linked; run: jarvis whatsapp link",
-  "dashboard Health page, jarvis health, health.* settings": "dashboard Health page, jarvis health, health.* settings"
+  "dashboard Health page, jarvis health, health.* settings": "dashboard Health page, jarvis health, health.* settings",
+  "checking": "checking"
  }
 };

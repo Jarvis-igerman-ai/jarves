@@ -1346,7 +1346,7 @@ def cmd_features(a, cfg, home) -> int:
         s = f.reset(a.id) if a.action == "reset" else switch(f, a.id, a.action == "on", by="cli")
         print(f"{a.id}: {state_text(s, reason=clilang.reason)} (saved; takes effect {APPLIES_EN[s['applies']]})")
         return 0
-    for s in f.list():
+    for s in f.list(wait=True):
         state = "ACTIVE" if s["active"] else ("off" if not s["enabled"] else "unavailable")
         print(f"{s['id']:<22} {state:<12} {s['risk']:<7} {s['title_en']}"
               + (f"  - {clilang.reason(s['reason'])}" if s["reason"] and not s["active"] else "")
