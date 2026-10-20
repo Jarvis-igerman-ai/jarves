@@ -108,10 +108,14 @@ class CameraService:
         """The cached probe; `fresh` runs it now (blocking: the Windows PnP query takes ~1 s, so the loop calls
         it in a worker thread). Before the first probe the camera counts as unavailable (privacy default)."""
         if fresh:
+            self._probe_seq = seq = getattr(self, "_probe_seq", 0) + 1     # a slow older probe must not overwrite a newer one
             try:
                 p = self._probe_fn()
             except Exception as e:          # a broken probe = no camera, never a crash
                 p = Probe(False, "none", f"camera probe failed: {type(e).__name__}")
+            if seq < getattr(self, "_probe_applied", 0):
+                return self._probe or p
+            self._probe_applied = seq
             if self._probe is None or (p.available, p.detail) != (self._probe.available, self._probe.detail):
                 logs.info("camera", "CAMERA_PROBE", p.detail, available=p.available, backend=p.backend)
             self._probe, self._probe_t = p, self._clock()

@@ -45,7 +45,7 @@ def lines(home):
 
 
 def flush(sink):
-    for _ in range(100):
+    for _ in range(1500):
         if sink._q.empty():
             break
         time.sleep(0.02)
