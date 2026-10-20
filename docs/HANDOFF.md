@@ -1,3 +1,15 @@
+## CURRENT HANDOFF — PUBLIC REPO ONLY; PRIVATE REPO OBSOLETE (20 October 2026)
+
+> **AUTHORITATIVE OWNER DECISION:** `igalgerman/JARVIS` (private) is **DEPRECATED / NO LONGER RELEVANT FOR DEVELOPMENT**; **never push, synchronize, commit, create/update issues or PRs there**. Keep it **READ-ONLY** solely for needed historical migration; GitHub Archive is still pending. **All new work must happen in `igalgerman/jarves` (public) exclusively.** This rule overrides historic references to private origin/issues in older handoff entries below.
+>
+> **MIGRATION STATUS: PARTIAL, NOT COMPLETE.** Public issues [#1–#5](https://github.com/igalgerman/jarves/issues) preserve 17 original private open-issue scopes in consolidated form. Public **DRAFT** PRs [#6 WhatsApp](https://github.com/igalgerman/jarves/pull/6) (23 added files), [#7 Orchestrator](https://github.com/igalgerman/jarves/pull/7) (26), [#8 Diagnostics](https://github.com/igalgerman/jarves/pull/8) (28), [#9 Delegation / OS isolation](https://github.com/igalgerman/jarves/pull/9) (12), [#10 Dashboard](https://github.com/igalgerman/jarves/pull/10) (3) preserve **92 newly added files**. **None is merged; modified integration files still need careful reconciliation, real tests/CI and release gates.** Never claim feature completeness from a migrated source file.
+>
+> **V6 is approved as a FUTURE ROADMAP DIRECTION only:** [V6 Drive & Act](ROADMAP.md#v6--jarves-drive--act) targets vision stage 3 (vehicle/Android Auto) with six selected pillars. V5 Goes Mobile targets vision stage 2; Family Intelligence is deferred as F11. Do not start V5/V6 coding from a planning note.
+>
+> **NEXT CODING AGENT:** Start with [MIGRATION_HANDOFF.md](MIGRATION_HANDOFF.md) for exact migration blockers and [AGENT_HANDOFF_TEMPLATE.md](AGENT_HANDOFF_TEMPLATE.md) for a copy-paste resume prompt. First inspect local remotes, worktrees and active agents; choose one scoped integration task in the public repo, avoid overwriting public main or exposing private account material. Never auto-merge. CI on the eventual **exact release SHA, real provider/device/owner checks and GitHub Archive are NOT YET VERIFIED**.
+
+---
+
 ## SW-V4 B: privacy hardening + full redaction audit (20 Oct 2026) - #15 / #17, branch `v4-b-privacy` (off `origin/main`), [report](reviews/SWV4_B_PRIVACY.md), [sinks](reviews/SWV4_B_SINKS.md)
 
 - `logs.*` messages are fixed literals (466 call sites migrated); variable parts are fields classified once in `logs.FIELD_CLASS` (safe/secret/content/pii, unknown = content); provider/exception text -> `provider_error` / `exc_text`; AST lint `tools/log_lint.py` (0 violations). Secret patterns extended (OpenAI/Anthropic, JWT, Google, Telegram, Meta, GitHub, DPAPI, URL tokens, bearer, user-profile paths). Third-party loggers and crashes (main/thread/asyncio/faulthandler) routed and classified.
