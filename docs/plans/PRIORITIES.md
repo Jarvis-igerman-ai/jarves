@@ -1,0 +1,1 @@
+- WhatsApp (owner, 20 Oct late): keep the safe handoff for sending now. Real read/send via a linked-device bridge goes to V4 after the v3.0.0 release: owner chose his MAIN number, read-only first; message text goes to OpenAI only for messages he asks about. (Risk: unofficial linked device can get the number restricted; see docs/plans/WHATSAPP_REAL_ACCESS.md.)
