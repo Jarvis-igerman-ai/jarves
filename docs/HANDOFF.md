@@ -632,3 +632,6 @@ See [docs/reviews/S1_T03R1_ENGINEERING_REVIEW.md](reviews/S1_T03R1_ENGINEERING_R
 - Browser skill: full control on an owner-managed allow-list (other sites read-only/ask first); purchases/payments/credentials always need confirmation.
 - WhatsApp v1: assisted handoff (draft + open chat, owner presses send).
 - Dashboard: Hebrew default with English toggle. Timers/alarms: Core speaks them even with the face closed.
+- Virtual computer (P2): write a justification first, then decide. Calling (P2): assisted dialing only.
+- Multi-device + Tailscale remote: after V3 P0–P1, together with the phone satellite.
+- Installer signing: research free options (SignPath OSS etc.); stay unsigned meanwhile.
