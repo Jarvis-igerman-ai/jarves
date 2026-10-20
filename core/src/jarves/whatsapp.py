@@ -141,7 +141,8 @@ class WhatsAppSkill(Skill):
             Tool("whatsapp_open", "Open the WhatsApp chat with the drafted text pre-filled. The system first reads the "
                  "draft back and asks the user's approval (do not ask yourself). The user presses send; you cannot "
                  "send WhatsApp messages.", open_, OpenArgs,
-                 permission="destructive", impact=open_impact),
+                 permission="destructive", impact=open_impact,
+                 recipient=lambda a: (self._drafts.get(a.draft_id) or {}).get("name")),
         ]
 
 

@@ -1212,6 +1212,12 @@ def api_job_op(ctx, m, body):
         if op == "run_now":
             return 200, s.run_now(m.group(1), by="dashboard")
         if op == "delete":
+            from . import approvals
+            ok, _w = approvals.ask_owner(ctx.home, f"Delete scheduled job {m.group(1)}?", title="dashboard_delete_job",
+                                         risk="medium", why="You pressed Delete on the dashboard Jobs page.",
+                                         details={"job": m.group(1)})
+            if not ok:
+                return 403, dict(approvals.APPROVAL_REFUSED)
             return 200, {"deleted": s.delete(m.group(1), by="dashboard")}
         if op == "edit":
             return 200, s.edit(m.group(1), by="dashboard", **{k: b.get(k) for k in (
@@ -1249,6 +1255,12 @@ def api_report_op(ctx, m, body):
         return 200, {"queued": True, "alert": a,
                      "note": "JARVES reads it aloud as soon as he can speak (the Core picks it up within 30 s)."}
     if op == "delete":
+        from . import approvals
+        ok, _w = approvals.ask_owner(ctx.home, f"Delete report #{r['id']}?", title="dashboard_delete_report",
+                                     risk="medium", why="You pressed Delete on the dashboard Reports page.",
+                                     details={"report": r["id"]})
+        if not ok:
+            return 403, dict(approvals.APPROVAL_REFUSED)
         s.db.x("DELETE FROM reports WHERE id=?", (r["id"],))
         s.db.audit("dashboard", "report_delete", r["id"])
         return 200, {"deleted": True}

@@ -981,6 +981,7 @@
   "Lists": "Lists",
   "Shopping and to-do: add, tick off, remove. Clearing asks first.": "Shopping and to-do: add, tick off, remove. Clearing asks first.",
   "Clear the ticked-off items?": "Clear the ticked-off items?",
-  "Clear every item in this list?": "Clear every item in this list?"
+  "Clear every item in this list?": "Clear every item in this list?",
+  "waiting for approval on your screen": "waiting for approval on your screen"
  }
 };

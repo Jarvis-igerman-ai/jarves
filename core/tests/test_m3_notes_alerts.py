@@ -67,8 +67,11 @@ def test_notes_dashboard_routes(db, tmp_path):
     st, x = N.api_note_op(ctx, m, {"op": "export"})
     assert st == 200 and x["markdown"].startswith("# t") and x["filename"].endswith(".md")
     assert N.api_notes(ctx, None, None, {"q": ["new"]})[1]["notes"][0]["id"] == n["id"]
-    assert N.api_note_op(ctx, m, {"op": "delete"})[0] == 200
-    assert N.api_note_op(ctx, m, {"op": "delete"})[0] == 404
+    assert N.api_note_op(ctx, m, {"op": "delete"})[0] == 403          # nobody approved on the popup: not deleted
+    from owner_harness import OwnerAnswers
+    with OwnerAnswers(tmp_path, True):
+        assert N.api_note_op(ctx, m, {"op": "delete"})[0] == 200
+        assert N.api_note_op(ctx, m, {"op": "delete"})[0] == 404
 
 
 # ---------------------------------------------------------------------- alerts

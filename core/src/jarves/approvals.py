@@ -102,16 +102,30 @@ _SPOKEN_KINDS = (
 )
 
 
+def first_name(recipient: Any) -> str:
+    """FIRST NAME only of a recipient label ('Dana Levi <d@x.com>' -> 'Dana'); an address/number alone gives ''."""
+    s = re.sub(r"<[^>]*>|\([^)]*\)", " ", str(recipient or "")).strip()
+    for tok in s.replace(",", " ").split():
+        tok = tok.strip("\"'.;:")
+        if re.match(r"[A-Za-z֐-׿]", tok) and "@" not in tok:
+            return tok[:30]
+        break
+    return ""
+
+
 def spoken_kind(title: str, kind: str, details: dict | None = None) -> tuple[str, str]:
     """(English, Hebrew) question that may be SPOKEN aloud. Names the kind of action (and at most a short recipient
     name when the caller supplied details['recipient']); never the message text, command or other details."""
     # the approval's own kind wins for the system kinds (a feature titled "Turn on Send e-mail" is a setting change)
     hay = kind.lower() if kind in ("feature", "shell", "install", "camera", "schedule") else f"{title} {kind}".lower()
-    who = str((details or {}).get("recipient") or "").strip().splitlines()[0][:30] if (details or {}).get("recipient") else ""
+    who = first_name((details or {}).get("recipient"))
+    he_to = ""
+    if who:
+        he_to = f" ל{who}" if re.match(r"[א-ת]", who) else f" אל {who}"     # ל prefix on a Hebrew name
     for rx, en, he, named in _SPOKEN_KINDS:
         if re.search(rx, hay):
             return (en.format(to=f" to {who}" if (named and who) else ""),
-                    he.format(to=f" אל {who}" if (named and who) else ""))
+                    he.format(to=he_to if (named and who) else ""))
     if kind == "message":
         return ("Send a message?", "לשלוח הודעה?")
     return ("Do something that needs your approval?", "לבצע פעולה שדורשת את האישור שלך?")
@@ -143,9 +157,13 @@ class Approval:
 
     @property
     def spoken(self) -> str:
-        """What may be said aloud: the kind of action only, English / Hebrew. Not the prompt (that has the details)."""
+        """What may be said aloud: the kind of action only, ONE language (English). Not the prompt (that has details)."""
+        return self.spoken_in("en")
+
+    def spoken_in(self, lang: str = "en") -> str:
+        """The spoken question in ONE language: Hebrew only when lang is 'he', English otherwise."""
         en, he = spoken_kind(self.title, self.kind, self.details)
-        return f"{he} / {en}"
+        return he if str(lang or "").lower().startswith("he") else en
 
     def public(self) -> dict:
         d = asdict(self)
@@ -197,6 +215,7 @@ class ApprovalService:
         self.listeners: list[Callable[[Approval], None]] = []    # after every decision (tests, runtime)
         self.on_ask: list[Callable[[Approval], None]] = []       # when a request starts waiting (tests, runtime)
         self.closed = False
+        self.loop: asyncio.AbstractEventLoop | None = None       # the Core's loop (set by Core.start): see ask_owner
 
     # ------------------------------------------------------------------ asking
     async def ask(self, prompt: str, *, title: str = "", why: str = "", risk: str = "medium", kind: str = "tool",
@@ -420,7 +439,14 @@ class ApprovalService:
             tmp = self.dir / f"pending.{os.getpid()}.tmp"
             tmp.write_text(json.dumps({"pid": os.getpid(), "at": time.time(), "pending": self.pending()},
                                       ensure_ascii=False), encoding="utf-8")
-            os.replace(tmp, self.dir / "pending.json")
+            for i in range(8):                       # Windows: a reader holding the file for a moment refuses the swap
+                try:
+                    os.replace(tmp, self.dir / "pending.json")
+                    break
+                except PermissionError:
+                    if i == 7:
+                        raise
+                    time.sleep(0.02)
         except OSError:
             logs.warn("approvals", "APPROVAL_FILE_FAILED", "could not write approvals/pending.json")
 
@@ -582,6 +608,35 @@ def detach(svc: ApprovalService | None = None) -> None:
     global _current
     if svc is None or _current is svc:
         _current = None
+
+
+def ask_owner(home: Path, prompt: str, *, title: str, why: str = "", kind: str = "tool", risk: str = "high",
+              details: dict | None = None, timeout: float | None = None) -> tuple[bool, str]:
+    """For a destructive DASHBOARD action (called from the HTTP handler thread, which blocks until the owner
+    answers): the same ApprovalService the model tools use shows the popup / tray / face / dashboard banner; the
+    request waits up to the popup timeout. (ok, reason): ok only on an explicit approval; a denial, timeout or
+    nobody to ask is a refusal and the caller must not act. Without a running Core the request is asked by a
+    service of its own (answerable from the dashboard banner or `jarvis approvals approve`)."""
+    home = Path(home)
+    kw = dict(title=title, why=why, kind=kind, risk=risk, details=details, source="dashboard", timeout=timeout)
+    svc = _current
+    try:
+        if svc is not None and svc.loop is not None and svc.loop.is_running() and svc.home.resolve() == home.resolve():
+            t = min(MAX_TIMEOUT_S, max(1.0, float(timeout if timeout is not None else svc.timeout_s)))
+            ok = asyncio.run_coroutine_threadsafe(svc.ask(prompt, **kw), svc.loop).result(t + 15)
+        else:
+            import concurrent.futures as cf                    # own loop in a worker thread (also when called from a loop)
+            with cf.ThreadPoolExecutor(1) as ex:
+                ok = ex.submit(lambda: asyncio.run(ApprovalService(home).ask(prompt, **kw))).result(
+                    MAX_TIMEOUT_S + 15)
+    except Exception as e:
+        logs.warn("approvals", "DASHBOARD_APPROVAL_FAILED", f"dashboard approval failed: {type(e).__name__}")
+        return False, "no approval"
+    return (True, "") if ok else (False, "not approved")
+
+
+APPROVAL_REFUSED = {"error": "not done: it needs your approval on the screen and was not approved",
+                    "error_he": "לא בוצע: נדרש אישור שלך על המסך ולא התקבל", "needs_approval": True}
 
 
 # ---------------------------------------------------------------------- the native popup channel

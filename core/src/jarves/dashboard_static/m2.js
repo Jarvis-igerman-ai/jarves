@@ -87,7 +87,7 @@ PAGES.newskills = async function (arg) {
       s.last_error ? el("div", { class: "small" }, `Last error (${s.last_error.tool}): ${s.last_error.error}`) : null,
       el("div", { class: "row", style: "margin-top:8px" },
         el("button", { type: "button", disabled: s.versions.length < 2, onclick: () => act(s.id, "rollback", {}, "Rolled back (disabled).") }, "Roll back to previous version"),
-        el("button", { type: "button", class: "ghost", onclick: () => { if (confirm(`Uninstall ${s.title}? (kept in skills/removed)`)) act(s.id, "uninstall", {}, "Uninstalled."); } }, "Uninstall")));
+        el("button", { type: "button", class: "ghost", onclick: () => { msg.textContent = "Waiting for approval on your screen…"; act(s.id, "uninstall", {}, "Uninstalled."); } }, "Uninstall")));
   });
   render(header("New Skills", "Skills JARVES drafted for you. Nothing runs before you approve it; it installs OFF, then you grant only what it needs and switch it on. Off means off for voice, schedules, dashboard and the AI."),
     el("div", { class: "row", style: "margin-bottom:10px" }, el("span", { class: "small" }, "Windows: "), platformCell(d.targets.windows),
