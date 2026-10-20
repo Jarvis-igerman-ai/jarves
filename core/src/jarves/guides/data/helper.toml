@@ -30,11 +30,6 @@ he = "בקשו בקול או בכתב פקודה פשוטה, למשל לבדוק
 en = "Ask for a simple command, for example checking the Python version, and approve it in the popup or on the Approvals page."
 action = "open:#/approvals"
 
-[[steps]]
-he = "רשות: אפשר לתת לפקודות קריאה בלבד (dir, git status) לרוץ בלי חלון אישור עם המתג \"פקודות קריאה בלי אישור\"."
-en = "Optional: let read-only commands (dir, git status) run without the popup with the \"Read-only commands without asking\" switch."
-action = "feature_on:helper_readonly_auto"
-
 [[problems]]
 he = "לא קופץ חלון אישור"
 en = "No approval window appears"

@@ -125,14 +125,18 @@ def build(req: dict, out: Path, test_invoke: str | None = None):
     def arm():
         ready["delay"] = True
         update_approve()
-    root.protocol("WM_DELETE_WINDOW", lambda: finish("deny"))
-    root.bind("<Escape>", lambda _e: finish("deny"))
-    deny.bind("<Return>", lambda _e: finish("deny"))
-    approve.bind("<Return>", lambda _e: approve.invoke())
+    if not test_invoke:
+        # Keyboard / close = Deny. Not in tests: the invisible test window could otherwise take a stray key press
+        # from whoever is typing on this desktop and answer instead of the scripted button.
+        root.protocol("WM_DELETE_WINDOW", lambda: finish("deny"))
+        root.bind("<Escape>", lambda _e: finish("deny"))
+        deny.bind("<Return>", lambda _e: finish("deny"))
+        approve.bind("<Return>", lambda _e: approve.invoke())
     root.update_idletasks()
     w, h = root.winfo_reqwidth(), root.winfo_reqheight()
     root.geometry(f"+{max(0, root.winfo_screenwidth() - w - 24)}+{max(0, root.winfo_screenheight() - h - 72)}")
-    deny.focus_set()
+    if not test_invoke:
+        deny.focus_set()
     root.after(APPROVE_DELAY_MS, arm)
     tick()
     if not test_invoke:

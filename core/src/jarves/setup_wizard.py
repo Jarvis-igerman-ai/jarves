@@ -60,6 +60,9 @@ ADDON_MODULES = ("jarves.telegram_channel", "jarves.instagram_channel", "jarves.
 SAFE_OFF = frozenset({"camera", "face_recognition", "camera_when_away", "gmail_send", "calendar_write",
                       "dashboard_lan", "telegram", "home_assistant", "instagram", "helper",
                       "helper_readonly_auto"})
+# Registered and grouped (so coverage checks see them) but never offered by the wizard: the owner decided (20 Oct)
+# that the Helper asks for EVERY command; the read-only allow-list exists only as `jarvis features on ...`.
+WIZARD_HIDDEN = frozenset({"helper_readonly_auto"})
 GOOGLE_FEATURES = ("google_calendar", "calendar_write", "gmail_read", "gmail_send", "google_contacts")
 # (id, Hebrew, English, feature ids). A feature missing here lands in "other" (never hidden); a test demands
 # that every registered feature is listed.
@@ -172,7 +175,7 @@ def groups() -> list[tuple[str, str, str, list[str]]]:
     load_addons()
     seen, out = set(), []
     for gid, he, en, ids in GROUPS:
-        have = [i for i in ids if i in feat.CATALOG]
+        have = [i for i in ids if i in feat.CATALOG and i not in WIZARD_HIDDEN]
         seen.update(ids)
         if have:
             out.append((gid, he, en, have))
@@ -607,8 +610,8 @@ class Wizard:
             if not isinstance(given, dict):
                 raise AnswerError("features must be an object {id: true|false}")
             for fid, on in given.items():
-                if fid not in feat.CATALOG:
-                    self.say(f"(unknown feature {fid!r} skipped)")
+                if fid not in feat.CATALOG or fid in WIZARD_HIDDEN:
+                    self.say(f"(feature {fid!r} not offered here; skipped)")
                     continue
                 if not isinstance(on, bool):
                     raise AnswerError(f"features.{fid} must be true or false")

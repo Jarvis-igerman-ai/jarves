@@ -157,6 +157,51 @@ async def test_no_approval_from_inside_a_tool(home):
     assert await task is False
 
 
+async def test_instagram_send_goes_through_the_approvals_service_and_voice(home):
+    """Owner decision (20 Oct): Instagram sends use the same approvals (popup/dashboard + voice), no Telegram buttons.
+    Real fake Graph API over HTTP, real registry policy, real ApprovalService; answered by the owner's spoken yes."""
+    from channels_fakes import IG_TOKEN, instagram_server
+    from jarves import instagram_channel as ig
+    import time as _t
+    old = {k: os.environ.get(k) for k in (ig.TOKEN_ENV, ig.API_BASE_ENV)}
+    srv = instagram_server([{"id": "m1", "from": {"id": "555", "username": "anna"}, "message": "Open today?",
+                             "created_time": _t.strftime("%Y-%m-%dT%H:%M:%S+0000", _t.gmtime(_t.time() - 60))}])
+    try:
+        os.environ[ig.TOKEN_ENV] = IG_TOKEN
+        os.environ[ig.API_BASE_ENV] = srv.url
+        ig.write_private_json(ig.account_file(home), {"user_id": "9001", "username": "igal_biz"})
+        svc = appr.ApprovalService(home)
+        dashboard_open(home)
+        reg = SkillRegistry()
+        reg.register(ig.InstagramSkill(home))
+        reg.allowed_actions |= ig.ALLOWED_ACTIONS
+
+        async def confirm(prompt, timeout=None, **meta):
+            return await svc.ask(prompt, timeout=timeout, **meta)
+        confirm.accepts_meta = True
+        reg.confirm = confirm
+        await reg.call("instagram_inbox", {})
+        d = await reg.call("instagram_draft", {"message_id": "m1", "text": "Yes, until 6pm"})
+        call = asyncio.create_task(reg.call("instagram_send", {"draft_id": d.data["draft_id"]}))
+        a = await next_request(svc)
+        assert a.kind == "message" and a.risk == "high" and "Yes, until 6pm" in a.prompt and "anna" in a.prompt
+        assert "/me/messages" not in srv.paths()                         # nothing sent while waiting
+        a.created -= appr.VOICE_MIN_AGE_S
+        assert svc.answer_words("כן", channel="voice") is True
+        r = await asyncio.wait_for(call, 20)
+        assert r.ok and r.code == "INSTAGRAM_SENT"
+        assert len([q for q in srv.requests if q["path"] == "/me/messages"]) == 1
+        h = history(home)[0]
+        assert h["kind"] == "message" and h["decision"] == "approved" and h["channel"] == "voice"
+    finally:
+        srv.close()
+        for k, v in old.items():
+            if v is None:
+                os.environ.pop(k, None)
+            else:
+                os.environ[k] = v
+
+
 async def test_answer_from_another_process_through_the_file(home):
     """`jarvis dashboard` / `jarvis approvals approve` in another process: pending.json + answers/<id>.json."""
     svc = appr.ApprovalService(home)
@@ -184,7 +229,7 @@ async def test_real_popup_window_answers(home):
         if not ok:                                  # headless Linux CI: the popup is not offered, nothing approved
             assert result is False and history(home)[0]["decision"] == "no_channel", why
             continue
-        assert result is expect, (invoke, typed, ch.last_error)
+        assert result is expect, (invoke, typed, ch.last_error, history(home, 1))
         h = history(home)[0]
         assert h["shown"] == ["popup"] and h["channel"] == ("popup" if invoke != "wrong-code" else "popup")
     assert not list((home / "approvals" / "popup").glob("*.json"))      # request / result files cleaned up
@@ -416,5 +461,9 @@ def test_helper_is_registered_grouped_bundled_declared_guided_and_hebrew():
             for k in ("evidence", "blocker"):
                 assert not t[k] or any("\u0590" <= ch <= "\u05ff" for ch in hp.HE_TEXTS[t[k]]), t[k]
     assert feat.CATALOG["helper"].risk == "high" and feat.CATALOG["helper_readonly_auto"].needs == ["helper"]
+    # owner decision (20 Oct): the Helper always asks; the read-only allow-list is never offered by the wizard/guide
+    offered = {i for _, _, _, ids in sw.groups() for i in ids}
+    assert "helper" in offered and "helper_readonly_auto" not in offered
+    assert all("helper_readonly_auto" not in (s.action or "") for s in guides.load()["helper"].steps)
     rows = {r["id"]: r for r in sw.check_addons()["rows"]}
     assert rows["helper"]["ok"] and rows["approvals"]["ok"], (rows["helper"], rows["approvals"])
