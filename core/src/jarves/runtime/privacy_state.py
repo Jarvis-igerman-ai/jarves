@@ -27,6 +27,7 @@ from .. import logs
 
 POLL_S = 0.25
 HEARTBEAT_S = 5.0
+WAKE_NOTE_S = 120.0
 VERSION = 1
 MIC = ("listening", "gated", "wake_only", "muted", "idle", "unavailable")
 CAMERA = ("photo", "preview", "presence", "off", "disabled", "unavailable")
@@ -110,6 +111,13 @@ def derive(core) -> dict:
         except Exception:
             logs.debug("runtime", "PRIVACY_CAMERA_FAILED", "camera state unreadable: shown as unavailable")
             cam_state = "unavailable"
+    # --- wake word: is the local detector listening, and the last thing it noticed (shown for 2 minutes):
+    # "heard speech, no wake match", "mic too quiet", a near miss, or a wake.
+    ws = getattr(core, "_wake_status", None)
+    recent = isinstance(ws, dict) and time.time() - float(ws.get("ts", 0)) < WAKE_NOTE_S
+    wake = {"state": "listening" if mic == "wake_only" else "off",
+            "note": ws.get("kind") if recent else None, "hint": (ws.get("hint") or None) if recent else None,
+            "at": ws.get("ts") if recent else None}
     lang = str(getattr(getattr(getattr(core, "cfg", None), "voice", None), "language", "he") or "he")
     return {
         "v": VERSION, "locale": "he" if lang.startswith("he") else "en",
@@ -118,6 +126,7 @@ def derive(core) -> dict:
                    "preview_available": can_preview, "last_seen": last},
         "speaker": {"state": speaker},
         "cloud_audio": {"on": cloud == "sending", "state": cloud},
+        "wake": wake,
         "ts": round(time.time(), 2),
     }
 

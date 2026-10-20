@@ -130,6 +130,13 @@
     const row = el("div", { class: "ps-row", dir: he ? "rtl" : "ltr" }, ["mic", "camera", "speaker", "cloud_audio"].map(chip), eye);
     const note = el("div", { class: "muted small" }, !linked ? (he ? "אין עדכון מג'ארביס: המצב לא ידוע." : "No update from JARVES: state unknown.")
       : (he ? "המצב האמיתי של החיישנים, מתעדכן כל 2 שניות." : "The real sensor state, updated every 2 seconds."), pv.msg ? " · " + pv.msg : "");
+    // wake word: the last thing the local detector noticed (privacy_state.py "wake", shown for 2 minutes)
+    const WAKE = { no_match: ["שמעתי דיבור, אבל לא את מילת ההפעלה: אמור \"Hey Jarvis\"", "Heard speech, no wake match: say \"Hey Jarvis\""],
+      too_quiet: ["המיקרופון שקט מדי למילת ההפעלה: התקרב, הגבר את עוצמת הקלט או הרץ jarvis wake test", "Mic too quiet for the wake word: move closer, raise the input volume, or run jarvis wake test"],
+      near_miss: ["כמעט: אמור \"Hey Jarvis\" קצת יותר ברור", "Close: say \"Hey Jarvis\" a bit clearer"],
+      woke: ["מילת ההפעלה נשמעה", "Wake word heard"] };
+    const wk = linked && st.wake && st.wake.note && WAKE[st.wake.note];
+    const wakeLine = wk ? el("div", { class: "small ps-wake", id: "psWake", dir: "auto", "data-note": st.wake.note }, wk[he ? 0 : 1]) : null;
     const box = pv.open ? el("div", { class: "ps-preview" },
       el("div", { class: "ps-head", dir: he ? "rtl" : "ltr" }, el("span", { class: "ps-rec" }),
         el("b", {}, he ? "תצוגת מצלמה · נשאר במחשב" : "Camera preview · stays on this computer"), el("span", { class: "spacer" }),
@@ -139,7 +146,7 @@
       el("div", { id: "psLast", dir: "auto" }, pv.last || (he ? "עוד לא תיאר תמונה." : "Nothing described yet."))) : null;
     const keep = document.getElementById("psImg");
     const src = keep && keep.getAttribute("src");
-    card.replaceChildren(...[el("h2", {}, he ? "מה פועל עכשיו" : "What is on now"), row, note, box].filter(Boolean));
+    card.replaceChildren(...[el("h2", {}, he ? "מה פועל עכשיו" : "What is on now"), row, wakeLine, note, box].filter(Boolean));
     if (box && src) document.getElementById("psImg").src = src;
   }
   window.privacyStripCard = function () {

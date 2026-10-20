@@ -110,6 +110,18 @@ class VoiceConfig(_Strict):
     # QA 18 Oct saw a real user peak at 0.17. Run `jarvis wake test` to calibrate to YOUR voice and mic.
     wake_threshold: float = Field(0.35, ge=0, le=1)
     wake_cooldown_s: float = Field(2.0, ge=0, le=30)
+    # Two-stage wake (docs/reviews/SWV3_WAKE_REPORT.md): the wake model is a cheap gate; a score >= wake_accept
+    # (or wake_threshold, whichever is higher) wakes at once, a score in [wake_gate, that) wakes only if a short
+    # LOCAL speech-to-text check (faster-whisper, nothing leaves the device) hears "hey/hi/ok Jarvis". This accepts
+    # "hi jarvis", "hey jarves", Hebrew "היי ג'רוויס" and rejects "hey Travis". Falls back to one stage if the
+    # speech model cannot load.
+    wake_confirm: bool = True
+    wake_gate: float = Field(0.02, ge=0, le=1)
+    wake_accept: float = Field(0.5, ge=0, le=1)
+    wake_confirm_model: str = "small"
+    # Digital AGC on the wake mic (quiet webcam/laptop mics); wake_gain_db = starting gain, set by calibration.
+    wake_agc: bool = True
+    wake_gain_db: float = Field(0.0, ge=0, le=30)
     record_max_s: float = Field(15, gt=0, le=60)
     input_device: int | str | None = None
     output_device: int | str | None = None
