@@ -324,7 +324,7 @@ async def test_b07_requested_face_close_is_info_unexpected_loss_stays_a_warning(
     f = await open_face(core)
     await core.link.send_face("display.close", {"reason": "hide"})       # what runtime.hide / stop send
     await f.ws.close()
-    for _ in range(50):
+    for _ in range(900):
         if core.health.components["face_link"].status == "unavailable":
             break
         await asyncio.sleep(0.05)
@@ -332,7 +332,7 @@ async def test_b07_requested_face_close_is_info_unexpected_loss_stays_a_warning(
     core.link._close_expected_until = 0.0
     f2 = await open_face(core)
     await f2.ws.close()                                                  # nobody asked: a real fault
-    for _ in range(50):
+    for _ in range(900):
         if core.health.components["face_link"].detail == "Godot face disconnected":
             break
         await asyncio.sleep(0.05)

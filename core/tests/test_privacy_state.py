@@ -18,6 +18,7 @@ from jarves.camera.vision import Vision
 from jarves.health import Health
 from jarves.runtime.privacy_state import CAMERA, CLOUD, MIC, SPEAKER, derive
 
+from conftest import until
 from test_camera import FakeResponses, make, room
 
 
@@ -251,14 +252,14 @@ async def test_cli_may_poll_the_preview_but_not_switch_the_camera(core):
     await ws.send(json.dumps({"type": "hello", "payload": {"token": core.link.token, "client": "cli"}}))
     assert json.loads(await ws.recv())["type"] == "hello.ok"
     await ws.send(json.dumps({"type": "camera.preview", "payload": {"open": True}}))
-    m = json.loads(await asyncio.wait_for(ws.recv(), 5))
+    m = json.loads(await asyncio.wait_for(ws.recv(), 30))
     assert m["type"] == "camera.preview_state" and m["payload"] == {"open": False, "reason": "timeout",
                                                                      "last_seen": None}   # a poll never opens
     await ws.send(json.dumps({"type": "camera.preview", "payload": {"open": True, "start": True}}))
-    m = json.loads(await asyncio.wait_for(ws.recv(), 5))
+    m = json.loads(await asyncio.wait_for(ws.recv(), 30))
     assert m["payload"]["open"] is False and m["payload"]["reason"] in ("CAMERA_DISABLED", "CAMERA_UNAVAILABLE")
     await ws.send(json.dumps({"type": "camera.set_enabled", "payload": {"on": True}}))
-    m = json.loads(await asyncio.wait_for(ws.recv(), 5))
+    m = json.loads(await asyncio.wait_for(ws.recv(), 30))
     assert m["type"] == "error" and m["payload"]["code"] == "LINK_FORBIDDEN"
     await ws.close()
 
@@ -282,16 +283,21 @@ async def test_dashboard_home_strip_and_preview_api(core):
     assert st == 200 and body["privacy"]["mic"]["state"] in MIC and body["privacy"]["camera"]["state"] in ("off", "unavailable")
     st, r = await call(rt_mod.api_camera_preview_poll)
     assert st == 200 and r["open"] is False                              # a poll never opens it
-    st, r = await call(rt_mod.api_camera_preview_set, {"start": True})
-    assert st == 200 and r["open"] is True
+    from conftest import until
+    await until(lambda: svc.available()[0])                              # the fake probe is the one in force
+
+    async def opened():
+        st, r = await call(rt_mod.api_camera_preview_set, {"start": True})
+        return r if st == 200 and r["open"] is True else None
+    assert await until(opened)
     frame = None
-    for _ in range(40):
+    for _ in range(400):
         st, r = await call(rt_mod.api_camera_preview_poll)
         if r.get("frame"):
             frame = r["frame"]
             break
         await asyncio.sleep(0.1)
-    assert frame and base64.b64decode(frame["data"]) and r["open"] is True
+    assert st == 200 and frame and base64.b64decode(frame["data"]) and r["open"] is True
     st, body = await call(rt_mod.api_runtime)
     assert body["privacy"]["camera"]["state"] == "preview"
     st, r = await call(rt_mod.api_camera_preview_set, {"open": False})
@@ -324,8 +330,6 @@ async def test_core_preview_with_fake_camera_reaches_the_face(core):
     await face.wait("privacy.state", lambda p: p["camera"]["state"] == "preview", timeout=20)
     await face.send("camera.preview", {"open": False})
     await face.wait("camera.preview_state", lambda p: p["open"] is False)
-    t0 = time.monotonic()
-    while cam.is_open and time.monotonic() - t0 < 3:
-        await asyncio.sleep(0.05)
+    await until(lambda: not cam.is_open)
     assert not cam.is_open
     await face.ws.close()

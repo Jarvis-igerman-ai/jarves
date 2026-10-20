@@ -520,6 +520,7 @@ class Scheduler:
         self._recovered = False
         self._stopped = False
         self._wake: asyncio.Event | None = None
+        self._loop: asyncio.AbstractEventLoop | None = None
 
     # ------------------------------------------------------------------ jobs
     def tz(self, name: str | None = None) -> ZoneInfo:
@@ -678,8 +679,21 @@ class Scheduler:
 
     # ------------------------------------------------------------------ loop
     def poke(self) -> None:
-        if self._wake is not None:
+        """Wake the loop now. Thread-safe: the dashboard (HTTP thread) shares this Scheduler with the Core."""
+        if self._wake is None:
+            return
+        loop = getattr(self, "_loop", None)
+        try:
+            same = asyncio.get_running_loop() is loop
+        except RuntimeError:
+            same = False
+        if loop is None or same:
             self._wake.set()
+            return
+        try:
+            loop.call_soon_threadsafe(self._wake.set)
+        except RuntimeError:                       # the Core's loop is closed (shutting down)
+            pass
 
     def enabled(self) -> bool:
         if self.features is None:
@@ -691,6 +705,7 @@ class Scheduler:
 
     async def run(self, on_tick: Callable[[], Awaitable[None]] | None = None) -> None:
         self._wake = asyncio.Event()
+        self._loop = asyncio.get_running_loop()
         logs.info("scheduler", "SCHEDULER_STARTED", "scheduler running", poll_s=POLL_S)
         while not self._stopped:
             delay = POLL_S

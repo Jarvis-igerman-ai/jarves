@@ -1093,6 +1093,8 @@ def _cli_features(cfg, home):
     from .features import Features
     from .health import read_snapshot
     from .runtime.lock import held
+    from .setup_wizard import load_addons
+    load_addons()      # add-ons register their switches on import (scheduler, notes, backup...): same list as the Core
 
     def components() -> dict:
         if not held(home):                 # a fresh snapshot from a stopped Core is not live evidence

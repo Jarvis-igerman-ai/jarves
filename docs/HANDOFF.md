@@ -1,3 +1,27 @@
+## SW-V3 P0.4 installed-system QA, virtual mic/speaker (20 Oct 2026) — #17, branch `v3-p04-qa`
+
+- Matrix + bug table: [reviews/SWV3_P04_BUG_TABLE.md](reviews/SWV3_P04_BUG_TABLE.md); system report regenerated:
+  [reviews/PRE_USE_TEST_REPORT_SYSTEM.md](reviews/PRE_USE_TEST_REPORT_SYSTEM.md) (now incl. V01-V08).
+- Suites extended, not replaced: `suite_system.py` V01-V08 (privacy strip, feature switches CLI/dashboard/Core,
+  camera preview with the Core's FakeCamera = virtual camera, calendar guardrails with Google NOT connected,
+  scheduler incl. catch-up across a real restart); `suite_voice.py` 32-35 (live privacy strip, camera-off and
+  Google-not-connected honesty, barge-in with half_duplex=false); `suite_music.py` runs mock groups with Pear closed.
+- Fixed in Core: Q01 `jarvis features` missed add-on switches (scheduler, notes, backup...); Q04 dashboard "Run now"
+  waited for the 30 s poll; Q05 greeting nudge when GPT-Live sends nothing after start (live effect UNVERIFIED: not
+  re-occurred in 13 later starts); Q06 AI review started during shutdown kept memory.db locked / a reservation held.
+- Evidence: real Core/GPT-Live/plan/CLI/HTTP + virtual mic/speaker/camera; ~15.6 live voice min (~$0.8). NOT tested:
+  physical mic/speaker/camera, installed package/clean setup (JARVES not installed here; installing changes
+  PATH/autostart = owner gate), Pi, Google account, real Pear (closed).
+- Open: Q07 wake false positives 4/20 at 0.15 (model limit), Q08 one spoken alert per tick (observation).
+
+### Questions for the user (P0.4)
+- May the agent install the CI installer build on this PC (or do you test it on the second PC per docs/INSTALL_TEST.md)?
+  Recommendation: second PC, so this PC's dev state stays clean. Status: **USER DECISION REQUIRED**.
+- Real-Pear music rows (S01-S13, V01-V10, K01) need Pear Desktop open (volume is forced to 0 by the suite). Run them
+  when you leave Pear open? Status: **USER DECISION REQUIRED**.
+- Q06 trade-off: a conversation that ends because JARVES is stopping no longer gets the automatic AI review (rules
+  still run; the dashboard Review button can run it). Recommendation: keep. Status: **ANSWERED by agent, reversible**.
+
 ## V3 P1 channels: Telegram, morning briefing, WhatsApp handoff, Home Assistant (20 Oct 2026) — [#17](https://github.com/igalgerman/JARVIS/issues/17)
 
 - Branch `v3-p1-channels` (from `swv2-integrate`). Four add-ons, each with a feature switch + capability row + setup-wizard group + bundle check + Hebrew/English guide + tests (`core/tests/test_channels.py`, 27 tests, real HTTP against local fake servers in `core/tests/channels_fakes.py`; full suite 1160 passed, 3 skipped).

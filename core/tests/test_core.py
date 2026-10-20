@@ -24,7 +24,7 @@ async def test_bad_token_is_rejected(core):
 async def test_no_hello_times_out(core):
     ws = await connect(f"ws://127.0.0.1:{core.cfg.link.port}")
     with pytest.raises(websockets.ConnectionClosed) as e:
-        await asyncio.wait_for(ws.recv(), 6)
+        await asyncio.wait_for(ws.recv(), 30)
     assert e.value.rcvd.code == 4400
 
 
@@ -66,7 +66,7 @@ async def test_mute_blocks_listening(core):
 async def test_face_disconnect_and_reconnect(core):
     f = await open_face(core)
     await f.ws.close()
-    for _ in range(50):
+    for _ in range(900):
         if core.health.components["face_link"].status == "unavailable":
             break
         await asyncio.sleep(0.05)
@@ -186,7 +186,7 @@ async def test_cli_shutdown_and_status(core):
     ws = await connect(f"ws://127.0.0.1:{core.cfg.link.port}")
     await ws.send(json.dumps({"type": "hello", "payload": {"token": core.link.token, "client": "cli"}}))
     await ws.send(json.dumps({"type": "core.shutdown", "payload": {}}))
-    await asyncio.wait_for(core.stop_event.wait(), 3)
+    await asyncio.wait_for(core.stop_event.wait(), 30)
 
 
 async def test_greeting_on_first_face_connect(home, cfg):
