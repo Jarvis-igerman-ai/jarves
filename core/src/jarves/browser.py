@@ -381,7 +381,8 @@ class BrowserService:
     def _note(self, action: str, host: str, result: str) -> None:
         self.activity.append({"ts": time.time(), "action": action, "host": host, "result": result})
         del self.activity[:-20]
-        log = logs.info if result in ("ok", "approved") else logs.warn
+        # blocked / declined are normal policy decisions (INFO); only a real failure is a warning
+        log = logs.warn if result == "failed" else logs.info
         log("browser", "BROWSER_" + action.upper(), f"{action} {host or '-'} -> {result}", host=host, result=result)
         if self.health is not None:
             if self._page is None:

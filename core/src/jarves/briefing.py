@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import asyncio
 import os
+import re
 from datetime import datetime, timedelta
 
 import httpx
@@ -31,6 +32,25 @@ from .skills import Skill, Tool, ToolResult
 WEATHER_BASE_ENV = "JARVES_WEATHER_API_BASE"
 DEFAULT_WEATHER = "https://api.open-meteo.com"
 SECTION_TIMEOUT_S = 14.0
+HE_CITIES = {"tel aviv": "תל אביב", "tel aviv-yafo": "תל אביב", "tel-aviv": "תל אביב", "jerusalem": "ירושלים",
+             "haifa": "חיפה", "beer sheva": "באר שבע", "be'er sheva": "באר שבע", "beersheba": "באר שבע",
+             "eilat": "אילת", "netanya": "נתניה", "ashdod": "אשדוד", "rishon lezion": "ראשון לציון"}
+
+
+def weather_place(city: str, lang: str = "he") -> str:
+    """"in <place>" without a Hebrew prefix glued to Latin letters ("בTel Aviv", SWV4 P01 B4): English -> "in Tel Aviv";
+    Hebrew -> "בתל אביב" for a known city, otherwise "ב-Tel Aviv" with a hyphen separator."""
+    city = " ".join(str(city or "").split())
+    if not city:
+        return ""
+    if lang != "he":
+        return f"in {city}"
+    he = HE_CITIES.get(city.lower())
+    if he:
+        return "ב" + he
+    return ("ב" + city) if re.match(r"[֐-׿]", city) else f"ב-{city}"
+
+
 SECTIONS = ("calendar", "email", "weather", "reminders")
 WMO_HE = {0: "בהיר", 1: "בהיר ברובו", 2: "מעונן חלקית", 3: "מעונן", 45: "ערפל", 48: "ערפל", 51: "טפטוף קל", 53: "טפטוף",
           55: "טפטוף חזק", 61: "גשם קל", 63: "גשם", 65: "גשם חזק", 71: "שלג קל", 73: "שלג", 75: "שלג חזק",
@@ -88,6 +108,9 @@ class BriefingSkill(Skill):
         return _sec(sid, False, f"{what} לא זמין: {why}. מחברים עם: jarvis google start", code="GOOGLE_NOT_CONNECTED",
                     fix="jarvis google start")
 
+    def language(self) -> str:
+        return "he"                      # the briefing text is Hebrew; weather_place() supports English too
+
     async def weather(self) -> dict:
         city = self.db.setting("briefing.city")
         base = (os.environ.get(WEATHER_BASE_ENV) or DEFAULT_WEATHER).rstrip("/")
@@ -107,7 +130,8 @@ class BriefingSkill(Skill):
         except (httpx.HTTPError, KeyError, IndexError, TypeError, ValueError):
             logs.warn("briefing", "BRIEFING_WEATHER_FAILED", "weather could not be fetched")
             return _sec("weather", False, "מזג האוויר לא זמין כרגע (אין חיבור לשירות).", code="WEATHER_UNAVAILABLE")
-        text = (f"ב{city}: {sky}, " if sky else f"ב{city}: ") + f"בין {lo} ל-{hi} מעלות"
+        place = weather_place(city, self.language())
+        text = (f"{place}: {sky}, " if sky else f"{place}: ") + f"בין {lo} ל-{hi} מעלות"
         text += f", עכשיו {round(now)}" if now is not None else ""
         text += f", סיכוי לגשם {rain}%." if rain is not None else "."
         return _sec("weather", True, text, city=city, high=hi, low=lo, rain_percent=rain)

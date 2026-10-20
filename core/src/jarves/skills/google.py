@@ -214,7 +214,8 @@ def calendar_guard(method: str, url: str, body=None) -> None:
     bad = (method.upper() == "DELETE" or path.endswith("/move") or path.endswith("/clear")
            or (isinstance(body, dict) and str(body.get("status", "")).lower() == "cancelled"))
     if bad:
-        logs.error("google", "CALENDAR_DELETE_FORBIDDEN", "a calendar delete/cancel was refused", method=method)
+        # a correct refusal is an expected guard decision, not a fault (SWV4 P01 B3): INFO, never ERROR
+        logs.info("google", "CALENDAR_DELETE_FORBIDDEN", "a calendar delete/cancel was refused", method=method)
         raise GoogleAuthError("CALENDAR_DELETE_FORBIDDEN", "deleting calendar events is not allowed", "",
                               "אני לא מוחק אירועים מהיומן. אפשר למחוק ישירות ב-Google Calendar.")
     if method.upper() not in ("GET", "HEAD"):
@@ -1004,7 +1005,7 @@ class GoogleConnectSkill(Skill):
                 return ToolResult(True, "גוגל מחובר עכשיו. תשאל אותי שוב ואבדוק.", {"connected": True},
                                   code="GOOGLE_NOW_CONNECTED")
             if auth.status().get("client_source") == "app":
-                return ToolResult(False, "פותחים את לוח הבקרה, נכנסים לחיבורים ולוחצים Connect Google. "
+                return ToolResult(True, "פותחים את לוח הבקרה, נכנסים לחיבורים ולוחצים Connect Google. "
                                   "בוחרים חשבון ומאשרים את ההרשאות בדפדפן.",
                                   {"setup": "app", "dashboard_page": "connections", "connected": False},
                                   code="GOOGLE_NOT_CONNECTED")
@@ -1014,7 +1015,8 @@ class GoogleConnectSkill(Skill):
                                   "צריך לפנות למפתח JARVES לעדכון החבילה; לא צריך ליצור פרויקט בגוגל בעצמך.",
                                   {"setup": "maintainer_required", "connected": False},
                                   code="GOOGLE_APP_NOT_CONFIGURED")
-            return ToolResult(False, NOT_CONNECTED_HE, {"command": START_COMMAND}, code="GOOGLE_NOT_CONNECTED")
+            return ToolResult(True, NOT_CONNECTED_HE, {"command": START_COMMAND, "connected": False},
+                              code="GOOGLE_NOT_CONNECTED")
         return [Tool("google_connect_help", "Google Calendar and Gmail are NOT connected yet. Call this whenever the "
                      "user asks about their calendar, meetings, schedule or e-mail; say its answer (how to connect: "
                      "use its returned setup instructions; app users use Connect Google, developer builds may "

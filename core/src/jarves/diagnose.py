@@ -301,6 +301,8 @@ class Finder:
                        "Raise voice.wake_threshold (`jarvis wake test --apply`) if this repeats.",
                        {"at": [_clock(e["ts"]) for e in nospeech]})
         for e in events:
+            if e["code"] == "CALENDAR_DELETE_FORBIDDEN":
+                continue                          # a correct guard refusal (older logs wrote it at ERROR)
             if e["level"] == "WARNING" and end - e["ts"] < 5 and s.get("end_reason") == "user":
                 continue                          # shutdown noise (face window closed with the conversation)
             if e["level"] == "ERROR" or (e["level"] == "WARNING" and e["code"] not in ("AI_BUDGET",)):

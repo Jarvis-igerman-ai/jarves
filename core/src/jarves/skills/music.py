@@ -599,6 +599,9 @@ PLAY_BUDGET_S = 21.0        # ONE end-to-end deadline for search + candidates + 
 MIN_CANDIDATE_S = 4.0       # do not start another candidate with less time left than this
 
 
+TRACK_SETTLE_S = 12.0       # a pause within this long after a track change gets the longer confirmation window
+
+
 class MusicSkill(Skill):
     name = "music"
     description = "Play music in the user's YouTube Music player (Pear Desktop)"
@@ -609,6 +612,7 @@ class MusicSkill(Skill):
         self.verify_tries = verify_tries
         self._plays = 0
         self._trim_task: asyncio.Task | None = None
+        self._changed_at = -1e9      # loop time of the last track change (next / play): a pause right after it settles slowly
         self._moved_on = ""          # set by _verify_playing: the song the player skipped to instead
         # Issue #16: trimming removes PLAYED items from Pear's queue (its visible history). Config music.trim_queue.
         self.trim_queue = trim_queue
@@ -811,19 +815,29 @@ class MusicSkill(Skill):
                     before = await p.now_playing()
                     if before is None or not (before.title or before.video_id):
                         return nothing(op == "pause")
+                    loop = asyncio.get_running_loop()
+                    changed_recently = loop.time() - self._changed_at < TRACK_SETTLE_S
+                    if op == "next":
+                        self._changed_at = loop.time()
                     await getattr(p, op)()
                     if op == "pause":
                         # a pause pressed while a track is still loading can be ignored by the player (real Pear, 19 Oct:
                         # "השהיתי" was said while it kept playing). Verify with the player, press once more, else say so.
                         loop = asyncio.get_running_loop()
                         t0, pressed_again = loop.time(), False
-                        limit = 4.0 if self.verify_tries >= 10 else 0.4 * max(2, self.verify_tries)
+                        # SWV4 P01 S10: right after a track change the real Pear needs a moment before it takes a pause,
+                        # so wait (polling, event-driven, no fixed sleep) up to ~8 s and press again once more
+                        limit = (8.0 if changed_recently else 4.0) if self.verify_tries >= 10                             else 0.4 * max(2, self.verify_tries)
+                        pressed_late = False
                         while True:
                             now = await p.now_playing()
                             if now is None or now.paused:
                                 return ToolResult(True, ok_msg)
                             if loop.time() - t0 > limit:
                                 break
+                            if changed_recently and not pressed_late and loop.time() - t0 > 4.5:
+                                pressed_late = True
+                                await p.pause()
                             if not pressed_again and loop.time() - t0 > 1.5:
                                 pressed_again = True
                                 await p.pause()

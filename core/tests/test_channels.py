@@ -322,7 +322,7 @@ async def test_briefing_full_with_google_weather_reminders_and_lists(home):
         secs = {s["id"]: s for s in r.data["sections"]}
         assert secs["calendar"]["count"] == 2 and secs["email"]["count"] == 3
         assert "דנה" in secs["email"]["text"] and "כותרת" not in secs["email"]["text"]
-        assert "בין 21 ל-29 מעלות" in secs["weather"]["text"] and "Tel Aviv" in secs["weather"]["text"]
+        assert "בין 21 ל-29 מעלות" in secs["weather"]["text"] and "בתל אביב" in secs["weather"]["text"] and "בTel" not in secs["weather"]["text"]
         assert secs["reminders"]["reminders"] == ["לקחת כדורים"] and secs["reminders"]["lists"] == ["קניות"]
         q = [x["path"] for x in srv.requests][0]
         assert "latitude=32.0853" in q and "longitude=34.7818" in q            # only coordinates leave the PC
