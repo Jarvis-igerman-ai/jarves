@@ -100,8 +100,8 @@ class FakeGh:
         if argv[:2] == ["issue", "list"]:
             return 0, json.dumps(self.existing)
         if argv[:2] == ["issue", "create"]:
-            self.existing = [{"number": 7, "url": "https://github.com/igalgerman/JARVIS/issues/7"}]
-            return 0, "https://github.com/igalgerman/JARVIS/issues/7\n"
+            self.existing = [{"number": 7, "url": "https://github.com/igalgerman/jarves/issues/7"}]
+            return 0, "https://github.com/igalgerman/jarves/issues/7\n"
         if argv[:2] == ["issue", "comment"]:
             return 0, "commented"
         return 1, "unexpected"
@@ -115,6 +115,9 @@ def test_ticket_draft_then_file_only_after_approval_on_the_private_repo(planted,
     monkeypatch.setattr(service.tickets, "file", _file_with(gh))
     monkeypatch.setattr("jarves.approvals.ask_owner", lambda *a, **k: (False, "not approved"))
     s, r = post(dash, "/api/health/ticket/file", {"id": t["id"]})
+    assert r["status"] == "draft" and "no ticket repo" in r["reason"] and not gh.calls     # V4-RP-2: default = local
+    assert post(dash, "/api/health/settings", {"health.ticket_repo": "igalgerman/jarves-tickets"})[0] == 200
+    s, r = post(dash, "/api/health/ticket/file", {"id": t["id"]})
     assert r["status"] == "draft" and not [c for c in gh.calls if c[0][:2] == ["issue", "create"]]   # denied: nothing
     prompts = []
     monkeypatch.setattr("jarves.approvals.ask_owner", lambda home, prompt, **k: (prompts.append(prompt) or True, ""))
@@ -122,7 +125,7 @@ def test_ticket_draft_then_file_only_after_approval_on_the_private_repo(planted,
     assert r["status"] == "filed" and r["issue_url"].endswith("/issues/7")
     assert t["title"] in prompts[0] and "jarves-fingerprint" in prompts[0]             # the full text was shown
     create = [c for c in gh.calls if c[0][:2] == ["issue", "create"]]
-    assert len(create) == 1 and "igalgerman/JARVIS" in create[0][0]
+    assert len(create) == 1 and "igalgerman/jarves-tickets" in create[0][0]
     # the same finding again: a duplicate fingerprint comments on the open issue instead
     s, t2 = post(dash, "/api/health/ticket", {"fingerprint": "version:4.0.1"})
     s, r2 = post(dash, "/api/health/ticket/file", {"id": t2["id"]})

@@ -555,7 +555,7 @@ def api_ticket_draft(ctx, m, body):
 
 def api_ticket_file(ctx, m, body):
     tid = int((body or {}).get("id") or 0)
-    repo = str(_ctx_db(ctx).setting("health.ticket_repo") or "igalgerman/JARVIS")
+    repo = str(_ctx_db(ctx).setting("health.ticket_repo") or "")
     from ..approvals import ask_owner
 
     async def ask(prompt, **kw):
@@ -593,7 +593,7 @@ def add_cli(sub) -> None:
     r.add_argument("remedy", choices=sorted(remediation.REMEDIES))
     r.add_argument("--finding", default="")
     r.add_argument("--feature", default="", help="rerun_feature_setup: the feature id")
-    t = hs.add_parser("ticket", help="make a ticket draft of a finding; --file files it on the private repo (asks)")
+    t = hs.add_parser("ticket", help="make a ticket draft of a finding; --file files it on the repo set in health.ticket_repo (asks; no repo = stays local)")
     t.add_argument("finding", help="the finding fingerprint (see: jarvis health report)")
     t.add_argument("--file", action="store_true")
     a = hs.add_parser("ai-review", help="the selective AI review: --every 2d | off, --now, --preview")
@@ -666,7 +666,7 @@ def cmd_health(a, cfg, home: Path, *, out=print, ask=input) -> int:
             out(f"--- ticket draft #{tid} (not filed) ---\n# {d['title']}\n\n{d['body']}")
             if a.file:
                 res = asyncio.run(tickets.file(st, tid, ask=_tty_ask(home, ask),
-                                               repo=str(dbs.setting("health.ticket_repo")), by="cli"))
+                                               repo=str(dbs.setting("health.ticket_repo") or ""), by="cli"))
                 out(f"ticket: {res['status']} {res.get('issue_url') or res.get('reason') or ''}")
             return 0
         if act == "ai-review":

@@ -1083,7 +1083,7 @@
   "No nightly canary yet.": "No nightly canary yet.",
   "Repairs (always with approval)": "Repairs (always with approval)",
   "Ticket drafts": "Ticket drafts",
-  "File on the private repo (asks first)": "File on the private repo (asks first)",
+  "File on GitHub (asks first, only if a repo is set)": "File on GitHub (asks first, only if a repo is set)",
   "No drafts.": "No drafts.",
   "ok": "ok",
   "degraded": "degraded",

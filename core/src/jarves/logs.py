@@ -566,7 +566,15 @@ class _ThirdParty(logging.Handler):
             pass
 
 
+_PROBE_TEXTS = ("did not receive a valid HTTP request", "opening handshake failed", "connection closed while reading HTTP request")
+
+
 def _lib_record(r: logging.LogRecord) -> logging.LogRecord:
+    if r.name.startswith("websockets") and any(t in r.getMessage() or t in repr(r.exc_info and r.exc_info[1])
+                                               for t in _PROBE_TEXTS):
+        # V4-LG-1: a plain TCP probe of the link port (single-instance check) is not an error: fixed text, INFO
+        r = logging.LogRecord(r.name, logging.INFO, r.pathname, r.lineno,
+                              "a client connected to the link port without a WebSocket handshake", None, None)
     n = logging.LogRecord("jarves", r.levelno, r.pathname, r.lineno, r.getMessage(), None, r.exc_info)
     n.created, n.component, n.code, n.template = r.created, f"lib:{r.name.split('.')[0]}"[:24], "LIB_LOG", False
     n.fields, n.name = {"lib": r.name}, r.name
