@@ -477,6 +477,20 @@ class Features:
                     return False, f"needs {CATALOG[dep].title_en} ({dep}) on"
         return bool(ok), str(why or "")
 
+    def warm(self, fid: str) -> None:
+        """Refresh one probe's cached result now, typically from a worker thread, so the next available() on the
+        event loop is a cache hit. SW-V3 P0.3: with Pear closed the music probe's localhost connect blocks for its
+        0.3 s timeout on Windows, and live_tools() hit it at every live-session start after 15 s idle."""
+        hit = self._probe_cache.get(fid)
+        if hit and time.monotonic() - hit[0] < PROBE_TTL_S / 2:
+            return
+        f = self.feature(fid)
+        try:
+            ok, why = f.probe(self.ctx)
+        except Exception as e:
+            ok, why = False, f"check failed ({type(e).__name__})"
+        self._probe_cache[fid] = (time.monotonic(), bool(ok), str(why or ""))
+
     def active(self, fid: str) -> bool:
         return fid in CATALOG and self.enabled(fid) and self.available(fid)[0]
 

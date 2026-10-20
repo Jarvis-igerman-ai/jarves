@@ -27,6 +27,7 @@ from .viewer import Viewer, find_godot
 
 STATE_FILE = "runtime.json"
 PREFS = ("display_hidden", "alerts_paused", "mic_muted")
+HEARTBEAT_S = 60.0          # runtime.json is rewritten on every change, and at least this often while idle
 _current: "Runtime | None" = None
 
 
@@ -125,16 +126,20 @@ class Runtime:
             logs.warn("runtime", "TRAY_UNAVAILABLE", f"tray icon could not start: {self.tray_reason}")
 
     async def _refresh_loop(self) -> None:
-        last = None
+        """Persist the live view / refresh the tray when something changed. SW-V3 P0.3: the view carries "ts", so
+        comparing it whole rewrote runtime.json and hopped to a tray thread EVERY second while idle (~58 KB/min
+        of disk writes, measured); the file is still re-saved at least every HEARTBEAT_S so its ts stays recent."""
+        last, saved_at = None, time.monotonic()
         while True:
             await asyncio.sleep(1.0)
             try:
                 v = self.view()
-                key = json.dumps(v, sort_keys=True, default=str)
-                if key != last:
-                    last = key
+                key = json.dumps({k: x for k, x in v.items() if k != "ts"}, sort_keys=True, default=str)
+                changed = key != last
+                if changed or time.monotonic() - saved_at >= HEARTBEAT_S:
+                    last, saved_at = key, time.monotonic()
                     self.save(v)
-                    if self.tray is not None:
+                    if changed and self.tray is not None:
                         await asyncio.to_thread(self.tray.refresh)
             except Exception:
                 logs.debug("runtime", "RUNTIME_REFRESH_FAILED", "runtime refresh failed")

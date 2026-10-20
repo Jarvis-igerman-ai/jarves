@@ -129,6 +129,7 @@ class Core:
         self.features.import_legacy(feat.legacy_settings(self.memory))
         self.features.apply_to_config(c)
         self.features.listeners.append(self._feature_changed)
+        self._warm_probes()                              # P0.3: Pear's localhost probe overlaps the rest of start()
         # SW-V2 WP-M4 identity: user-chosen names, wake model and voice over config.toml (identity.json)
         from .identity import Identity, make_skill as make_identity_skill
         self.identity = Identity(self.home, c, self.memory)
@@ -752,6 +753,7 @@ class Core:
             # the first was still open (two billed sessions, one never heard). One conversation at a time.
             logs.info("voice", "LIVE_ALREADY_RUNNING", "a live conversation is already open; not starting another")
             return
+        self._warm_probes()               # P0.3: ready before session_config() builds the tool list (after connect)
         await self.link.send_face("assistant.activity", {"text": "Loading voice connection..."})
         if self._voice_budget_left_s() <= 0:
             await self.notify_error("VOICE_BUDGET", "daily live-voice limit reached",
@@ -957,15 +959,51 @@ class Core:
         except Exception:
             logs.warn("tts", "SPEECH_CACHE_FAILED", "could not cache the greeting", exc=True)
 
+    def _warm_probes(self) -> None:
+        """Run the one slow feature probe (music: a localhost TCP connect, 0.3 s timeout when Pear is closed) in a
+        worker thread instead of on the event loop, where TOOLS.md at start-up and live_tools() at each live-session
+        start would otherwise wait for it. Fire-and-forget: a not-yet-finished warm-up just means available()
+        probes itself exactly as before."""
+        feats = getattr(self, "features", None)
+        if feats is None or "music" not in feat.CATALOG:
+            return
+        try:
+            asyncio.get_running_loop().run_in_executor(None, feats.warm, "music")
+        except RuntimeError:
+            pass
+
+    def _prewarm_modules(self) -> list[str]:
+        """What the selected route will import on first use, most urgent first (SW-V3 P0.3, measured on the owner's
+        PC: openai 1.3-2.7 s, the Agents SDK another 2.2-2.8 s and +41 MB RAM). The Agents SDK is only used by the
+        API-key text brain (brain.AgentBrain) and by voice.mode = "realtime"; GPT-Live and the ChatGPT-plan brain
+        never import it, so a combined/ChatGPT install no longer loads it in the background while the first live
+        session starts (19 Oct logs: prewarm 6-21 s, competing with LIVE_STARTED for the CPU)."""
+        mods = ["openai"]
+        if self.voice_mode == "live":
+            # lazily imported by AsyncOpenAI().live.connect() ON THE EVENT LOOP: ~0.45 s per first live session
+            mods += ["openai.resources.live.forks", "httpcore2", "jarves.voice.live"]
+        elif self.voice_mode == "realtime":
+            mods += ["agents.realtime", "jarves.voice.realtime"]
+        if isinstance(self.agent, AgentBrain):
+            mods += ["agents"]
+        return mods
+
     def _prewarm(self) -> None:
         """Import the heavy cloud-voice libraries in a worker thread right at start-up. QA 18 Oct: importing
         agents.realtime on first use took 6 s (13 s on a busy PC) and delayed the first spoken word."""
+        import importlib
         t0 = time.monotonic()
+        mods = self._prewarm_modules()
         try:
-            import agents.realtime  # noqa: F401
-            import openai  # noqa: F401
-            from .voice import live, realtime  # noqa: F401
-            logs.info("core", "PREWARM_DONE", "cloud voice libraries loaded", ms=round((time.monotonic() - t0) * 1000))
+            for name in mods:
+                try:
+                    importlib.import_module(name)
+                except ImportError:
+                    if name in ("openai", "agents", "agents.realtime"):
+                        raise
+                    # an optional submodule moved in another SDK version: first use imports what it needs
+            logs.info("core", "PREWARM_DONE", "cloud voice libraries loaded", ms=round((time.monotonic() - t0) * 1000),
+                      modules=mods)
         except Exception as e:
             logs.warn("core", "PREWARM_FAILED", f"{type(e).__name__}: {str(e)[:120]}")
 
