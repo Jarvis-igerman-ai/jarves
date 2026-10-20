@@ -117,3 +117,21 @@ def test_cli_train_and_apply(home, monkeypatch, capsys):
     w = Identity(home).wake()
     assert w["phrase"] == "hey max" and w["model"].endswith("hey_max.npz")
     assert cli.main(["wake", "train"]) == 2
+
+
+def test_cli_train_revert(home, monkeypatch, capsys):
+    monkeypatch.setattr(wt, "local_voices", lambda: VOICES)
+    real = wt.train_phrase
+
+    def fast(*a, **kw):
+        kw.update(synth=fake_synth, embedder=fake_embedder, rates=(1.0,), pitches=(0.9, 1.1))
+        return real(*a, **kw)
+    monkeypatch.setattr(wt, "train_phrase", fast)
+    assert cli.main(["wake", "train", "hey", "max", "--apply"]) == 0
+    model = Identity(home).wake()["model"]
+    assert model.endswith("hey_max.npz")
+    assert cli.main(["wake", "train", "--revert"]) == 0
+    assert "Reverted" in capsys.readouterr().out
+    w = Identity(home).wake()
+    assert w["model"] == "hey_jarvis" and w["phrase"] == "Hey Jarvis" and w["threshold"] is None
+    assert (home / "wake" / "hey_max.npz").is_file()          # the trained file is kept

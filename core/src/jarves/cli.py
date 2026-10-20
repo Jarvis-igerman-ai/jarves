@@ -997,6 +997,13 @@ def _wake_train(a, cfg, home) -> int:
     """`jarvis wake train "<phrase>"`: local synthetic samples -> trained head in <state_dir>/wake (voice/wake_train)."""
     from .identity import Identity, IdentityError
     from .voice.wake_train import local_voices, slug, train_phrase
+    if getattr(a, "revert", False):
+        # back to the built-in "Hey Jarvis" (threshold from config.toml); the trained .npz file is kept on disk
+        old = Identity(home, cfg).wake()
+        Identity(home, cfg).set_wake("hey_jarvis", "Hey Jarvis", None, by="cli")
+        print(f"Reverted: JARVES wakes on the standard \"Hey Jarvis\" model again after the next start (was "
+              f"{Path(old['model']).name}). The trained file is kept; delete it by hand if you no longer want it.")
+        return 0
     if not a.phrase:
         print('usage: jarvis wake train "hey max" --say "היי מקס" [--samples DIR] [--apply]', file=sys.stderr)
         return 2
@@ -1492,6 +1499,8 @@ def main(argv: list[str] | None = None) -> int:
     wk.add_argument("--seconds", type=int, default=20)
     wk.add_argument("--apply", action="store_true", help="test: save the recommended threshold; train: use the "
                                                          "new phrase from the next start")
+    wk.add_argument("--revert", action="store_true", help="train: go back to the standard \"Hey Jarvis\" model "
+                                                          "(the trained file is kept)")
     wk.add_argument("--model", help="test: a trained .npz / .tflite instead of the current wake model")
     wk.add_argument("--false-wakes", type=int, default=0, metavar="MIN",
                     help="test: count false wakes over MIN minutes of normal room audio")
