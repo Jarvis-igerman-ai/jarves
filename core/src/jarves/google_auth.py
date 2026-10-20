@@ -58,6 +58,22 @@ START_COMMAND = "jarvis google start"           # WP-K: the one command for firs
 APP_CLIENT_FILE = Path(__file__).with_name("_google_app_client.json")  # injected into release payload, never source
 RECONNECT_HE = f"צריך לחבר מחדש את גוגל: תריץ במחשב {START_COMMAND}, או לחץ Reconnect בדף הניהול."
 NOT_CONNECTED_HE = f"גוגל עוד לא מחובר. כדי לחבר, תריץ במחשב {START_COMMAND}, ואני אדריך אותך צעד אחר צעד."
+RECONNECT_EN = f"Google needs to be reconnected: run {START_COMMAND} on the computer, or press Reconnect in the dashboard."
+NOT_CONNECTED_EN = f"Google is not connected yet. To connect, run {START_COMMAND} on the computer; it guides you step by step."
+
+
+def cli_status_view(st: dict) -> dict:
+    """The status dict as the CLI prints it: the Hebrew message only when the CLI language asks for it."""
+    from . import clilang
+    out = dict(st)
+    he = out.pop("message_he", "")
+    en = "" if st.get("connected") else RECONNECT_EN if st.get("needs_reconnect") else NOT_CONNECTED_EN
+    mode = clilang.current()
+    if mode in ("en", "both"):
+        out["message"] = en
+    if mode in ("he", "both"):
+        out["message_he"] = he
+    return out
 
 
 class GoogleAuthError(Exception):
@@ -477,12 +493,14 @@ def cmd_google(a, cfg, home) -> int:
             return google_setup.cmd_start(a, cfg, home)
         logs.setup(home / "logs", cfg.log.level, console=False, privacy=cfg.log.privacy)
         if not GoogleAuth(home).status()["connected"]:
-            print(NOT_CONNECTED_HE)
+            from . import clilang
+            clilang.say(NOT_CONNECTED_HE, NOT_CONNECTED_EN)
             return 1
         chk = google_setup.run_check(home, cfg)
         print(json.dumps({k: chk[k] for k in ("calendar", "gmail", "error")}, ensure_ascii=False))
         if not chk["ok"]:
-            print(chk["fix"]["he"] + "\n" + chk["fix"]["en"])
+            from . import clilang
+            clilang.say(chk["fix"]["he"], chk["fix"]["en"])
         return 0 if chk["ok"] else 1
     logs.setup(home / "logs", cfg.log.level, console=False, privacy=cfg.log.privacy)
     auth = GoogleAuth(home)
@@ -520,7 +538,7 @@ def cmd_google(a, cfg, home) -> int:
                                         " myaccount.google.com > Security > Your connections to third-party apps)"))
             else:
                 st = auth.status()
-                print(json.dumps(st, ensure_ascii=False, indent=1))
+                print(json.dumps(cli_status_view(st), ensure_ascii=False, indent=1))
                 return 0 if st["connected"] else 1
             return 0
         except GoogleAuthError as e:

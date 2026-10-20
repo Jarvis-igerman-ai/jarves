@@ -39,13 +39,26 @@ def write_private_json(path: Path, data: dict) -> None:
     os.replace(tmp, path)
 
 
+class StepSkipped(BaseException):
+    """The owner typed 's' / 'skip' inside a `jarvis connect` step: abandon that step, continue with the next
+    (BaseException so a wizard's own `except Exception` cannot swallow it)."""
+
+
+def is_skip_word(text: str | None, words: tuple[str, ...] = ("s", "skip")) -> bool:
+    return (text or "").strip().lower() in words
+
+
 def read_secret(io, prompt: str) -> str | None:
-    """A token typed by the user: hidden on a real terminal, plain from a scripted ConsoleIO (tests)."""
+    """A token typed by the user: hidden on a real terminal, plain from a scripted ConsoleIO (tests).
+    Inside `jarvis connect` (io.skippable) typing s / skip abandons the step before anything is saved."""
     if getattr(io, "lines", None) is None:
         try:
-            return getpass.getpass(prompt)
+            v = getpass.getpass(prompt)
         except (EOFError, KeyboardInterrupt):
             return None
+        if getattr(io, "skippable", False) and is_skip_word(v):
+            raise StepSkipped
+        return v
     return io.read(prompt)
 
 

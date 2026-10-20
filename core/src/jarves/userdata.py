@@ -107,6 +107,7 @@ DEFAULTS: dict[str, Any] = {
     # guided account setup (connect.py): the once-a-day "Google is not connected" reminder
     "connect.nudge": True,
     "connect.last_nudge": 0.0,
+    "connect.skipped": [],                      # items the owner chose "never ask again" for (jarvis connect)
     "files.quota_mb": 200,
     "files.max_file_mb": 10,
 }

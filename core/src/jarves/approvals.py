@@ -570,7 +570,7 @@ class PopupChannel:
     on an invisible window, so the real Tk code and the real decision path run without a person."""
     name = "popup"
 
-    def __init__(self, svc: ApprovalService, *, enabled: bool = True, lang: str = "he",
+    def __init__(self, svc: ApprovalService, *, enabled: bool = True, lang: str = "en",
                  test_invoke: str | None = None) -> None:
         self.svc, self.enabled, self.lang, self.test_invoke = svc, enabled, lang, test_invoke
         self.procs: dict[str, subprocess.Popen] = {}

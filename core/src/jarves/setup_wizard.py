@@ -345,7 +345,11 @@ class Wizard:
         self.f = features or _cli_features(cfg, self.home)
         self.first = first_run(self.home)
         self.state = {} if restart else read_state(self.home)
-        self.lang = lang or self.answers.get("language") or self.state.get("language") or "he"
+        picked = lang or self.answers.get("language") or self.state.get("language")
+        from . import clilang
+        mode = clilang.current()
+        self.both = not picked and mode == "both"            # JARVES_CLI_LANG / ui.cli_language = both: print both
+        self.lang = picked or ("he" if mode in ("he", "both") else "en")
         self.actions = {"ask_key": _ask_key, "chatgpt_login": None, "google_start": None, "prepare": _prepare,
                         "autostart": _autostart, **(actions or {})}
         self.notes: list[str] = []          # "do later" lines collected for the summary
@@ -355,9 +359,11 @@ class Wizard:
     # --- text + questions
     def t(self, key: str) -> str:
         he, en = T[key]
-        return he if self.lang == "he" else en
+        return self.L(he, en)
 
     def L(self, he: str, en: str) -> str:
+        if self.both:
+            return f"{he}\n{en}"
         return he if self.lang == "he" else en
 
     def say(self, text: str = "") -> None:
@@ -440,7 +446,7 @@ class Wizard:
     def run(self) -> int:
         done = list(self.state.get("completed") or [])
         resumable = bool(done) and not self.state.get("finished_at") and not self.scripted
-        self.say(f"== {T['title'][0]} / {T['title'][1]} ==")
+        self.say(f"== {T['title'][0]} / {T['title'][1]} ==" if self.both else f"== {self.t('title')} ==")
         if resumable and not self.yesno("resume", self.t("resume"), True):
             done = []
         elif not resumable:

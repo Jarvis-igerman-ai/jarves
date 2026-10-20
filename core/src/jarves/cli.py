@@ -12,7 +12,7 @@ import zipfile
 from datetime import datetime, timezone
 from pathlib import Path
 
-from . import __version__, logs
+from . import __version__, clilang, logs
 from .config import (ConfigError, load_config, load_secrets, openai_key_present, save_secret, secrets_file,
                      state_dir)
 from .health import read_snapshot
@@ -1156,14 +1156,25 @@ def cmd_say(a, cfg, home) -> int:
     logs.setup(home / "logs", cfg.log.level, console=False, privacy=cfg.log.privacy)
     t = make_tts(cfg, Budget(MemoryStore(home / "memory.db"), cfg.ai))   # same mode + shared budget as the Core
     ok, q, d = t.check()
-    print(f"speech: {q} ({d})")
+    if getattr(a, "verbose", False):
+        print(f"speech engines: {d}")                      # the full table (every engine, incl. the ones that failed)
     if not ok:
+        print(f"ERROR: no speech engine can speak. {d} -> run `jarvis key` (cloud voice) or add a Hebrew voice in "
+              f"Settings > Time & language > Speech", file=sys.stderr)
         return 1
+    text = " ".join(a.text)
 
     async def go():
-        s, r = await t.synth(" ".join(a.text))
+        s, r = await t.synth(text)
+        eng = next((e for e in t.usable if e.name == t.last_used), t.usable[0])
+        print(f"Speaking with {eng.name} ({eng.check()[1]})")
         await SoundDeviceAudio(output_device=cfg.voice.output_device).play(s, r)
-    asyncio.run(go())
+    try:
+        asyncio.run(go())
+    except Exception as e:
+        print(f"ERROR: speech failed: {getattr(e, 'message', e)}. {getattr(e, 'action', '') or 'run `jarvis say --verbose`'}",
+              file=sys.stderr)
+        return 1
     return 0
 
 
@@ -1278,12 +1289,12 @@ def cmd_features(a, cfg, home) -> int:
         s = f.reset(a.id) if a.action == "reset" else f.set(a.id, a.action == "on", by="cli")
         when = {"live": "now", "next_session": "from the next conversation", "restart": "at the next Core start"}
         print(f"{a.id}: {'on' if s['enabled'] else 'off'} (takes effect {when[s['applies']]})"
-              + ("" if s["available"] or not s["enabled"] else f"; not available: {s['reason']}"))
+              + ("" if s["available"] or not s["enabled"] else f"; not available: {clilang.reason(s['reason'])}"))
         return 0
     for s in f.list():
         state = "ACTIVE" if s["active"] else ("off" if not s["enabled"] else "unavailable")
         print(f"{s['id']:<22} {state:<12} {s['risk']:<7} {s['title_en']}"
-              + (f"  - {s['reason']}" if s["reason"] and not s["active"] else "")
+              + (f"  - {clilang.reason(s['reason'])}" if s["reason"] and not s["active"] else "")
               + (f"  [from {s['source']}]" if s["source"] != "default" else ""))
     print("change: jarvis features on|off|reset ID   (or the dashboard Features page)")
     return 0
@@ -1513,7 +1524,8 @@ def main(argv: list[str] | None = None) -> int:
     q.add_argument("text", nargs="+")
     s = sub.add_parser("say", help="speak a sentence with the configured voice")
     s.add_argument("text", nargs="+")
-    co = sub.add_parser("cost", help="estimated cost per day and per conversation")
+    s.add_argument("--verbose", "-v", action="store_true", help="show every speech engine and its state")
+    co =sub.add_parser("cost", help="estimated cost per day and per conversation")
     co.add_argument("--days", type=int, default=14)
     co.add_argument("--sessions", type=int, default=10)
     db = sub.add_parser("dashboard", help="local web dashboard: conversations, costs, issues, memory, skills")
@@ -1548,6 +1560,8 @@ def main(argv: list[str] | None = None) -> int:
         print(f"PROFILE ERROR: {e}", file=sys.stderr)
         return 2
     load_secrets(home)
+    from . import clilang
+    clilang.set_home(home)
     try:
         cfg, _ = load_config(a.config)
     except ConfigError as e:

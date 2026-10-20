@@ -95,6 +95,8 @@ class VoiceConfig(_Strict):
     stt_fallback_model: str = "tiny"
     stt_compute: str = "int8"
     tts_voice_hint: str = "he-IL"
+    speech_http_model: str = "gpt-4o-mini-tts"   # /v1/audio/speech model for typed replies and `jarvis say`
+    speech_voice: str = "marin"
     wake_no_speech_s: float = Field(12, ge=0, le=120)   # a wake-started conversation where nobody speaks ends after this (false wake); 0 = off
     chime: bool = True                     # soft sound when "Hey Jarvis" is heard and when the conversation is ready
     greeting: bool = True                  # say hello + how to talk when the face first connects
@@ -243,6 +245,12 @@ class UpdateConfig(_Strict):
         return v
 
 
+class UIConfig(_Strict):
+    """Language of the desktop UI chrome (the approval popup). English by default; "he" = Hebrew, right-aligned.
+    Never both at once (owner feedback 20 Oct: too much text)."""
+    popup_language: Literal["en", "he"] = "en"
+
+
 class Config(_Strict):
     assistant_name: str = "JARVES"
     # how the name is SAID (and written in Hebrew speech/greetings): the voice read the Latin "JARVES" letter by
@@ -258,6 +266,7 @@ class Config(_Strict):
     camera: CameraConfig = CameraConfig()
     runtime: RuntimeConfig = RuntimeConfig()
     update: UpdateConfig = UpdateConfig()
+    ui: UIConfig = UIConfig()
 
 
 SECRET_KEYS = ("api_key", "apikey", "token", "secret", "password", "cookie")

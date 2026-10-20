@@ -32,6 +32,7 @@ import httpx
 from pydantic import BaseModel, Field
 
 from . import features as feat
+from . import clilang
 from . import logs
 from .channels_common import read_json, read_secret, targets, write_private_json, yes
 from .config import save_secret
@@ -453,8 +454,8 @@ class Wizard:
         self.home, self.io, self.transport = Path(home), io, transport
 
     async def run(self) -> int:
-        out = self.io.out
-        out("JARVES + Instagram\n" + STEPS_HE + "\n" + STEPS_EN + "\n")
+        out = lambda t="": self.io.out(clilang.bi(t))      # noqa: E731
+        out("JARVES + Instagram\n" + clilang.fmt(STEPS_HE, STEPS_EN) + "\n")
         api, me = None, None
         if token_present():
             try:
@@ -462,7 +463,7 @@ class Wizard:
                 me = await api.me()
                 out(f"הטוקן השמור תקין: @{me.get('username', '?')}. / The saved token works: @{me.get('username', '?')}.")
             except InstagramError as e:
-                out(e.he + "\n" + e.message)
+                out(clilang.fmt(e.he, e.message))
                 api = None
         if api is None:
             tok = (read_secret(self.io, "Access token (hidden, Enter = cancel): ") or "").strip()
@@ -473,7 +474,7 @@ class Wizard:
             try:
                 me = await api.me()
             except InstagramError as e:
-                out(e.he + "\n" + e.message)
+                out(clilang.fmt(e.he, e.message))
                 return 1
             if str(me.get("account_type", "")).upper() not in ("", "BUSINESS", "MEDIA_CREATOR", "CREATOR"):
                 out("זה חשבון אישי: ה-API הרשמי לא מאפשר הודעות בו. / A personal account cannot use the messaging API.")
@@ -496,7 +497,8 @@ class Wizard:
         out("הערה: אפשר לענות רק למי שכתב לכם ב-24 השעות האחרונות. / You can reply only within 24h of their message.")
         out("אחרי שמפעילים את המתג:  jarvis features on instagram  (כבוי כברירת מחדל). / Then switch it on: "
             "jarvis features on instagram (off by default).")
-        out("הוא תמיד יקריא את הטיוטה המדויקת ויבקש אישור לפני כל שליחה.")
+        out("הוא תמיד יקריא את הטיוטה המדויקת ויבקש אישור לפני כל שליחה. / It always reads the exact draft back and "
+            "asks before every send.")
         return 0
 
 
