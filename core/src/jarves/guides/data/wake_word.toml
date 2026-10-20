@@ -9,7 +9,7 @@ title_he = "מילת הפעלה \"היי ג'ארביס\""
 title_en = "Wake word \"Hey Jarvis\""
 what_he = "ג'ארביס מקשיב במחשב עצמו למילים \"היי ג'ארביס\" ורק אז פותח שיחה."
 what_en = "JARVES listens on this computer for \"Hey Jarvis\" and only then opens a conversation."
-say = [["היי ג'ארביס", "Hey Jarvis"]]
+say = [["היי ג'ארביס", "Hey Jarvis"], ["הי ג'ארביס", "Hi Jarvis"], ["אוקיי ג'ארביס", "OK Jarvis"]]
 expect_he = "נשמע צליל קצר, הפנים מסתכלות אליכם, ואחרי צליל שני אפשר לדבר."
 expect_en = "A short chime, the face looks at you, and after the second chime you can talk."
 test_he = "הבדיקה בודקת שיש מיקרופון ושהגלאי מותקן. אחר כך פשוט אמרו \"היי ג'ארביס\"."
@@ -31,9 +31,9 @@ action = "feature_on:wake_word"
 check = "enabled:wake_word"
 
 [[steps]]
-he = "אם הוא לא שומע טוב, הריצו jarvis wake כדי לכייל לקול שלכם."
-en = "If he does not hear you well, run jarvis wake to tune it to your voice."
-action = "command:jarvis wake"
+he = "אם הוא לא שומע טוב, הריצו jarvis wake test: הוא מראה עוצמה, ציון וכמעט-זיהויים ואומר בדיוק מה לתקן (שקט מדי, מיקרופון לא נכון, מילים לא מזוהות)."
+en = "If he does not hear you well, run jarvis wake test: it shows level, score and near misses and says exactly what to fix (too quiet, wrong mic, phrase not matched)."
+action = "command:jarvis wake test"
 
 [[steps]]
 he = "לחצו \"בדוק עכשיו\" ואז אמרו \"היי ג'ארביס\"."
@@ -43,11 +43,11 @@ action = "test"
 [[problems]]
 he = "הוא לא מגיב"
 en = "He does not react"
-fix_he = "בדקו שהמיקרופון לא מושתק ב-Windows או בעמוד השליטה (Controls). נסו jarvis wake."
-fix_en = "Check the microphone is not muted in Windows or on the Controls page. Try jarvis wake."
+fix_he = "בדף הבית, תחת \"מה פועל עכשיו\", מופיע מה הגלאי שמע (למשל \"שמעתי דיבור, אבל לא את מילת ההפעלה\" או \"המיקרופון שקט מדי\"). בדקו שהמיקרופון לא מושתק והריצו jarvis wake test (jarvis wake test --list-mics מציג את המיקרופונים)."
+fix_en = "On Home, under What is on now, the detector shows what it heard (e.g. \"Heard speech, no wake match\" or \"Mic too quiet\"). Check the mic is not muted and run jarvis wake test (jarvis wake test --list-mics lists the microphones)."
 
 [[problems]]
 he = "הוא נדלק לבד"
 en = "He wakes up by himself"
-fix_he = "הריצו jarvis wake והשתמשו בסף שהוא ממליץ."
-fix_en = "Run jarvis wake and use the threshold it recommends."
+fix_he = "בדיקת הדיבור המקומית (voice.wake_confirm) דוחה דמיונות כמו \"היי טרוויס\". אם זה עדיין קורה, הריצו jarvis wake test --false-wakes 30 והעלו את voice.wake_accept."
+fix_en = "The local speech check (voice.wake_confirm) rejects look-alikes such as \"hey Travis\". If it still happens, run jarvis wake test --false-wakes 30 and raise voice.wake_accept."

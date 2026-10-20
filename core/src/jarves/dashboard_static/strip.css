@@ -23,3 +23,6 @@ button.ps-chip:disabled { cursor: not-allowed; opacity: .55; }
 @media (prefers-reduced-motion: reduce) { .ps-rec { animation: none; } }
 #psImg { display: block; width: 100%; aspect-ratio: 4 / 3; object-fit: contain; background: #000; border-radius: 6px;
   margin-bottom: 8px; }
+.ps-wake { margin: -2px 0 8px; padding: 6px 10px; border-inline-start: 4px solid var(--ps-local); background: var(--surface); }
+.ps-wake[data-note="too_quiet"] { border-inline-start-color: var(--warning); }
+.ps-wake[data-note="woke"] { border-inline-start-color: var(--good); }
