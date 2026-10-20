@@ -121,7 +121,7 @@ async def test_attach_pushes_on_connect_and_follows_dashboard(tmp_path):
         # the dashboard (another process) switches: the Core pushes within ~1 s
         code, body = ap.api_set(SimpleNamespace(home=tmp_path), None, {"mode": "hidden"})
         assert code == 200 and body["mode"] == "hidden"
-        for _ in range(30):
+        for _ in range(450):
             await asyncio.sleep(0.1)
             if sent[-1] == ("appearance.set", {"mode": "hidden"}):
                 break

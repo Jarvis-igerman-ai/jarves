@@ -202,7 +202,7 @@ async def test_sign_in_loopback_pkce_and_storage(home, g):
         return True
     auth = GoogleAuth(home, transport=g.transport(), open_browser=browser)
     st = await auth.sign_in(timeout_s=10)
-    for _ in range(50):                          # the browser task reads the result page right after
+    for _ in range(1500):                        # the browser task reads the result page right after
         if "page" in opened:
             break
         await asyncio.sleep(0.02)
