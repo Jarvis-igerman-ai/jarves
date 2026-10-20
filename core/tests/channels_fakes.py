@@ -127,3 +127,32 @@ def weather_handler(srv: FakeServer, req: dict):
 
 def weather_server() -> FakeServer:
     return FakeServer(weather_handler)
+
+
+# ---------------------------------------------------------------------- Instagram Graph API
+IG_TOKEN = "IGAAfake_instagram_token_for_tests_0123456789"
+IG_SECRET = "app-secret-for-tests"
+IG_ME = {"user_id": "9001", "username": "igal_biz", "account_type": "BUSINESS"}
+
+
+def ig_handler(srv: FakeServer, req: dict):
+    if req["auth"] != f"Bearer {IG_TOKEN}":
+        return 401, {"error": {"message": "Invalid OAuth access token", "code": 190}}
+    p = req["path"].split("?")[0]
+    if p == "/me":
+        return 200, srv.state.get("me", IG_ME)
+    if p == "/me/conversations":
+        return 200, {"data": [{"id": "c1", "messages": {"data": srv.state.get("messages", [])}}]}
+    if p == "/me/messages":
+        if srv.state.get("window_closed"):
+            return 400, {"error": {"message": "outside of allowed window", "code": 10, "error_subcode": 2534022}}
+        return 200, {"recipient_id": req["body"]["recipient"]["id"], "message_id": "m_sent"}
+    if p == "/refresh_access_token":
+        return 200, {"access_token": IG_TOKEN, "token_type": "bearer", "expires_in": 5184000}
+    return 404, {"error": {"code": 100}}
+
+
+def instagram_server(messages=None) -> FakeServer:
+    s = FakeServer(ig_handler)
+    s.state["messages"] = messages if messages is not None else []
+    return s
