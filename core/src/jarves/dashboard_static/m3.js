@@ -228,6 +228,83 @@
         el("td", { class: "small muted" }, when(a.ts)), el("td", {}, a.actor), el("td", {}, a.action), el("td", { class: "small" }, `${a.target || ""} ${a.detail || ""}`)))))));
   }
 
+  // ------------------------------------------------------------- Timers & alarms (V4 P0.3)
+  const leftText = (s) => { s = Math.max(0, Math.round(s)); const h = Math.floor(s / 3600), m = Math.floor((s % 3600) / 60), r = s % 60;
+    return (h ? h + ":" + String(m).padStart(2, "0") : m) + ":" + String(r).padStart(2, "0"); };
+  async function pageTimers() {
+    const d = await api("/api/timers");
+    const msg = msgSpan();
+    const kind = el("select", {}, el("option", { value: "timer" }, tx("טיימר", "Timer")), el("option", { value: "alarm" }, tx("שעון מעורר", "Alarm")));
+    const mins = el("input", { type: "number", min: "0", max: "1440", step: "any", placeholder: tx("דקות", "Minutes"), style: "width:110px", "aria-label": tx("דקות", "Minutes") });
+    const at = el("input", { type: "time", "aria-label": tx("שעה", "Time") });
+    const label = el("input", { type: "text", dir: "auto", maxlength: "80", placeholder: tx("תווית (לא חובה)", "Label (optional)"), style: "min-width:200px", "aria-label": tx("תווית", "Label") });
+    const sync = () => { mins.hidden = kind.value === "alarm"; at.hidden = kind.value !== "alarm"; };
+    kind.addEventListener("change", sync); sync();
+    const send = () => act(msg, () => post("/api/timers", kind.value === "alarm"
+      ? { kind: "alarm", at: at.value, label: label.value } : { kind: "timer", minutes: parseFloat(mins.value || "0"), label: label.value }));
+    const add = el("div", { class: "card", style: "margin-bottom:12px" }, el("b", {}, tx("טיימר או שעון מעורר חדש", "New timer or alarm")),
+      el("div", { class: "row", style: "gap:8px;margin:8px 0;flex-wrap:wrap" }, kind, mins, at, label,
+        el("button", { type: "button", class: "primary", onclick: send }, tx("התחל", "Start")), msg));
+    const cells = [];
+    const rows = d.timers.map((t) => {
+      const left = el("td", { class: "small", "data-left": String(t.seconds_left) }, leftText(t.seconds_left));
+      cells.push(left);
+      return el("tr", {}, el("td", {}, pill("plain", t.kind === "alarm" ? tx("שעון מעורר", "Alarm") : tx("טיימר", "Timer"))),
+        el("td", { dir: "auto" }, t.label || "—"), el("td", { class: "small muted" }, t.kind === "alarm" ? t.at : ""), left,
+        el("td", {}, el("button", { type: "button", class: "ghost", onclick: () => act(msg, () => post("/api/timers/" + t.id, { op: "cancel" })) }, tx("ביטול", "Cancel"))));
+    });
+    const stText = { fired: tx("צלצל", "rang"), cancelled: tx("בוטל", "cancelled"), missed: tx("הוחמץ", "missed") };
+    const recent = d.recent.map((r) => el("tr", {}, el("td", {}, r.kind === "alarm" ? tx("שעון מעורר", "Alarm") : tx("טיימר", "Timer")),
+      el("td", { dir: "auto" }, r.label || "—"), el("td", { class: "small muted" }, stText[r.status] || r.status), el("td", { class: "small muted" }, when(r.due))));
+    render(header(tx("טיימרים ושעונים מעוררים", "Timers & alarms"), tx("הליבה מצלצלת בקול, גם כשהחלון סגור.", "The Core rings them aloud, even when the window is closed.")),
+      add, el("div", { class: "card" }, rows.length ? el("table", {}, el("tbody", {}, rows)) : el("div", { class: "empty" }, tx("אין טיימרים פעילים.", "No timers running."))),
+      d.recent.length ? [el("h2", {}, tx("אחרונים", "Recent")), el("div", { class: "card" }, el("table", {}, el("tbody", {}, recent)))] : null,
+      el("div", { class: "muted small", style: "margin-top:8px" }, tx("שינוי כאן נכנס לתוקף תוך שנייה.", "A change here applies within a second.")));
+    const t0 = Date.now();
+    timer = setInterval(() => {
+      const gone = (Date.now() - t0) / 1000;
+      let done = false;
+      for (const c of cells) { const s = Number(c.dataset.left) - gone; c.textContent = leftText(s); if (s <= -2) done = true; }
+      if (done) route(true);
+    }, 1000);
+  }
+
+  // ------------------------------------------------------------- Lists (V4 P0.3)
+  async function pageLists(arg) {
+    const all = await api("/api/lists");
+    const name = arg || (all.lists[0] && all.lists[0].name) || "shopping";
+    const d = await api("/api/lists?name=" + encodeURIComponent(name));
+    const msg = msgSpan();
+    const names = el("div", { class: "card list" }, d.lists.map((l) => el("a", { href: "#/lists/" + encodeURIComponent(l.name), class: l.name === d.list ? "active" : "" },
+      el("span", { dir: "auto" }, l.name), " ", el("span", { class: "muted small" }, `${l.open}`))),
+      ["shopping", "todo"].filter((n) => !d.lists.some((l) => l.name === n)).map((n) => el("a", { href: "#/lists/" + n, class: n === d.list ? "active" : "" },
+        n === "shopping" ? tx("קניות", "shopping") : tx("משימות", "todo"))));
+    const item = el("input", { type: "text", dir: "auto", maxlength: "120", placeholder: tx("פריטים, מופרדים בפסיק", "Items, comma separated"), style: "min-width:260px", "aria-label": tx("פריטים", "Items") });
+    const addIt = () => act(msg, () => post("/api/lists", { list_name: d.list, items: item.value }));
+    item.addEventListener("keydown", (e) => { if (e.key === "Enter") addIt(); });
+    const other = el("input", { type: "text", dir: "auto", maxlength: "40", placeholder: tx("שם רשימה חדשה", "New list name"), "aria-label": tx("שם רשימה", "List name") });
+    other.addEventListener("keydown", (e) => { if (e.key === "Enter" && other.value.trim()) location.hash = "#/lists/" + encodeURIComponent(other.value.trim()); });
+    const items = (d.items || []).map((r) => el("div", { class: "row", style: "gap:8px;align-items:center;padding:4px 0" },
+      el("input", { type: "checkbox", checked: r.done, disabled: r.done, "aria-label": r.text,
+        onchange: () => act(msg, () => post("/api/lists/op", { op: "check", list_name: d.list, item: r.text })) }),
+      el("span", { dir: "auto", style: r.done ? "text-decoration:line-through;opacity:.6" : "" }, r.text), el("span", { class: "spacer" }),
+      el("button", { type: "button", class: "ghost", onclick: () => act(msg, () => post("/api/lists/op", { op: "remove", list_name: d.list, item: r.text })) }, tx("הסרה", "Remove"))));
+    const doneN = (d.items || []).filter((r) => r.done).length, allN = (d.items || []).length;
+    const clear = (onlyDone) => () => {
+      const n = onlyDone ? doneN : allN;
+      if (n && confirm(onlyDone ? tx("לנקות את הפריטים המסומנים?", "Clear the ticked-off items?") : tx("לנקות את כל הפריטים ברשימה?", "Clear every item in this list?")))
+        act(msg, () => post("/api/lists/op", { op: "clear", list_name: d.list, only_done: onlyDone, approved: true }));
+    };
+    render(header(tx("רשימות", "Lists"), tx("קניות ומשימות: מוסיפים, מסמנים, מסירים. ניקוי מבקש אישור.", "Shopping and to-do: add, tick off, remove. Clearing asks first.")),
+      el("div", { class: "grid2" }, el("div", {}, names, el("div", { style: "margin-top:8px" }, other)),
+        el("div", { class: "card" }, el("div", { class: "row", style: "gap:8px;flex-wrap:wrap" }, el("b", { dir: "auto" }, d.list), el("span", { class: "spacer" }), msg,
+          el("button", { type: "button", disabled: !doneN, onclick: clear(true) }, tx("ניקוי מסומנים", "Clear ticked-off")),
+          el("button", { type: "button", class: "ghost", disabled: !allN, onclick: clear(false) }, tx("ניקוי הכול", "Clear all"))),
+          el("div", { class: "row", style: "gap:8px;margin:10px 0" }, item, el("button", { type: "button", class: "primary", onclick: addIt }, tx("הוספה", "Add"))),
+          items.length ? items : el("div", { class: "empty" }, tx("הרשימה ריקה.", "This list is empty.")))));
+  }
+
   Object.assign(PAGES, {          // pages.js registry; the app.js router checks it first
+    timers: pageTimers, lists: pageLists,
     jobs: pageJobs, reports: pageReports, notes: pageNotes, files: pageFiles, alerts: pageAlerts, autonomy: pageAutonomy });
 })();

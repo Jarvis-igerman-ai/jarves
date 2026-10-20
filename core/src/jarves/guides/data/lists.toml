@@ -24,6 +24,10 @@ check = "active:lists"
 he = "אחר כך שאלו \"מה ברשימת הקניות?\" וסמנו \"קניתי חלב\"."
 en = "Then ask \"what is on the shopping list?\" and say \"I bought the milk\"."
 
+[[steps]]
+he = "בלי קול: בלוח הבקרה, בעמוד \"רשימות\", או בשורת הפקודה: jarvis lists add shopping חלב לחם, jarvis lists show shopping, jarvis lists check shopping חלב, jarvis lists clear shopping (מבקש אישור)."
+en = "Without voice: on the dashboard page \"Lists\", or on the command line: jarvis lists add shopping milk bread, jarvis lists show shopping, jarvis lists check shopping milk, jarvis lists clear shopping (asks first)."
+
 [[problems]]
 he = "פריט לא נמצא כשביקשתי לסמן אותו"
 en = "An item was not found when I ticked it off"
