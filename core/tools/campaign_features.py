@@ -147,7 +147,15 @@ class H:
         self.cfg = cfg
         self.core = Core(cfg, self.home, console_logs=False, use_real_audio=False, autostart=FakeAutostart())
         self.core.open_url = None
+        try:                                    # many scripted approvals in a minute: the dedicated stage restores the real limits
+            from jarves import approvals as appr
+            appr.RATE_LIMIT = (10_000, 60.0)
+            appr.DENY_COOLDOWN_S = 0.0
+        except ImportError:
+            pass
         await self.core.start()
+        if getattr(self.core, "approvals", None) is not None:
+            self.core.approvals.rate_limit = (10_000, 60.0)        # instance value (set from the module default at creation)
         self.reg = self.core.registry
         self.feat = self.core.features
         # approvals take the REAL path: Core.ask_confirm -> link -> a stand-in for the Godot face that answers by policy
@@ -196,6 +204,34 @@ async def until(pred, timeout: float = 4.0, step: float = 0.1) -> bool:
     return False
 
 
+async def log_review(h, stage_name: str, logp: Path, off: int) -> None:
+    """After EACH stage: `jarvis logs -n 300 --log-level WARNING` must work, and every WARNING/ERROR the stage wrote is
+    grouped (component, code, message shape) and stored as LOG:<stage> rows for manual classification."""
+    import collections
+    import re
+    r = await h.acli("logs", "-n", "300", "--log-level", "WARNING")
+    ok = r.returncode == 0 and "Traceback" not in r.stderr
+    rec("LOG:" + stage_name, "`jarvis logs -n 300 --log-level WARNING` works", "PASS" if ok else "FAIL",
+        f"rc={r.returncode} lines={len(r.stdout.splitlines())}")
+    try:
+        with logp.open("rb") as f:
+            f.seek(off)
+            lines = f.read().decode("utf-8", errors="replace").splitlines()
+    except OSError:
+        return
+    groups: dict[tuple, list] = collections.OrderedDict()
+    for line in lines:
+        try:
+            d = json.loads(line)
+        except ValueError:
+            continue
+        if d.get("level") in ("WARNING", "ERROR", "CRITICAL"):
+            shape = re.sub(r"\d+", "N", d.get("msg", ""))[:90]
+            groups.setdefault((d["level"], d["component"], d["code"], shape), []).append(d)
+    for (lvl, comp, code, shape), items in groups.items():
+        rec("LOG:" + stage_name, f"{lvl} {comp}/{code}: {shape}", "INFO", f"x{len(items)} first={items[0].get('ts', '')[11:19]}")
+
+
 STAGES: dict[str, callable] = {}
 
 
@@ -206,7 +242,7 @@ def stage(fn):
 
 async def main(names: list[str]) -> int:
     import importlib
-    for mod in ("campaign_stages_a", "campaign_stages_b", "campaign_stages_c", "campaign_stages_d", "campaign_stages_e"):
+    for mod in ("campaign_stages_a", "campaign_stages_b", "campaign_stages_c", "campaign_stages_d", "campaign_stages_e", "campaign_stages_f", "campaign_stages_g"):
         try:
             importlib.import_module(f"tools.{mod}")
         except ModuleNotFoundError as e:
@@ -223,6 +259,8 @@ async def main(names: list[str]) -> int:
                 rc = 2
                 continue
             print(f"=== stage {n}", flush=True)
+            logp = h.home / "logs" / "jarves.log"
+            off = logp.stat().st_size if logp.exists() else 0
             try:
                 await STAGES[n](h)
             except Exception as e:
@@ -230,6 +268,7 @@ async def main(names: list[str]) -> int:
                 traceback.print_exc()
                 rec(n, "stage crashed", "FAIL", f"{type(e).__name__}: {e}")
                 rc = 1
+            await log_review(h, n, logp, off)
     finally:
         await h.stop()
     return rc

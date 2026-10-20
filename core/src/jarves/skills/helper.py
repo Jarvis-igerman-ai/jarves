@@ -487,7 +487,7 @@ class HelperSkill(Skill):
             except HelperRefused as e:
                 self._audit(kind="shell", command=a.command[:MAX_CMD_CHARS], cwd=a.cwd, decision="refused",
                             code=e.code, reason=e.message)
-                logs.info("helper", "HELPER_REFUSED", e.message, code=e.code)
+                logs.info("helper", "HELPER_REFUSED", e.message, reason=e.code)
                 return ToolResult(False, e.he + " / " + e.message, {"code": e.code}, e.code)
             return await self._execute(prop, a.purpose, "shell", a.timeout_s)
 

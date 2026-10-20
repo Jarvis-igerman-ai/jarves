@@ -17,6 +17,64 @@ def test_b01_every_core_feature_is_registered_by_the_cli_addon_loader():
     assert "context_trace" in feat.CATALOG
 
 
+async def test_b04_refused_helper_command_returns_the_refusal_not_a_crash(tmp_path):
+    """logs.info(..., code=...) collided with logs.info's own `code` parameter: every REFUSED command (sudo, runas,
+    multi-line, JARVES data folder...) crashed the tool with a TypeError (TOOL_CRASH) instead of its refusal text."""
+    from jarves.skills import SkillRegistry
+    from jarves.skills import helper as hp
+    f = feat.attach(feat.Features(Config(), tmp_path))
+    try:
+        f.set("helper", True)
+        reg = SkillRegistry()
+        reg.gate = f.gate
+        hp.register_helper(reg, tmp_path)
+        for cmd in ("sudo ls", "runas /user:Administrator cmd", "echo a\necho b", ""):
+            r = await reg.call("shell_propose", {"command": cmd, "purpose": "campaign"})
+            assert not r.ok and r.code.startswith("HELPER_"), (cmd, r.code, r.message)
+    finally:
+        feat.detach()
+
+
+async def test_b05_cli_answer_file_approves_a_request_asked_from_inside_a_tool(tmp_path):
+    """The answers poller inherited the asking tool's IN_TOOL marker and rejected every file answer
+    (`jarvis approvals approve`, a dashboard in another process) as APPROVAL_FROM_TOOL: helper commands asked from
+    shell_propose could only be approved in-process."""
+    import asyncio
+
+    from jarves import approvals as appr
+    from jarves.skills import IN_TOOL
+
+    class Ch:
+        name = "face"
+
+        def available(self, a):
+            return True
+
+        def open(self, a):
+            return None
+
+        def close(self, a):
+            return None
+
+    svc = appr.ApprovalService(tmp_path)
+    svc.channels.append(Ch())
+    mark = IN_TOOL.set("shell_propose")
+    try:
+        task = asyncio.create_task(svc.ask("run it?", kind="shell", risk="medium"))   # copies the context: "in a tool"
+    finally:
+        IN_TOOL.reset(mark)
+    for _ in range(50):
+        if svc.has_pending():
+            break
+        await asyncio.sleep(0.05)
+    aid = svc.pending()[0]["id"]
+    ok, why = appr.submit_answer(tmp_path, aid, True, channel="cli")      # not the in-process service: via the file
+    if svc.home.resolve() == tmp_path.resolve():
+        pass
+    assert ok, why
+    assert await asyncio.wait_for(task, 5) is True
+
+
 def test_b03_memory_delete_needs_a_number_and_does_not_traceback(tmp_path, capsys):
     a = argparse.Namespace(action="delete", id=None, yes=False)
     assert cmd_memory(a, Config(), tmp_path) == 2
