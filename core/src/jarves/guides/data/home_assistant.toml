@@ -1,0 +1,47 @@
+order = 27
+category = "system"
+features = ["home_assistant"]
+aliases = ["בית חכם", "home assistant", "הום אסיסטנט", "אורות", "תדליק את האור", "smart home"]
+error_codes = ["HOME_NOT_ALLOWED", "HOME_NEEDS_CONFIRM", "HOME_BAD_TOKEN", "HOME_UNREACHABLE", "HOME_BAD_ACTION"]
+title_he = "בית חכם (Home Assistant)"
+title_en = "Smart home (Home Assistant)"
+what_he = "ג'ארביס שולט רק במכשירים שבחרתם ב-Home Assistant. מנעולים, חניה ותסריטים תמיד מבקשים אישור."
+what_en = "JARVES controls only the devices you picked in Home Assistant. Locks, garage doors and scripts always ask first."
+say = [["תדליק את האור בסלון", "Turn on the living room light"], ["תנעל את הדלת", "Lock the door"]]
+expect_he = "מכשיר רגיל מגיב מיד. מכשיר רגיש קודם מבקש את אישורכם על המסך."
+expect_en = "A normal device reacts at once. A sensitive one first asks your approval on the screen."
+test = "feature"
+test_he = "הבדיקה רק בודקת שההגדרה והטוקן קיימים. היא לא משנה שום מכשיר."
+test_en = "The check only sees that the setup and token exist. It changes no device."
+cost_he = "חינם."
+cost_en = "Free."
+privacy_he = "הכול מדבר ישירות עם ה-Home Assistant שלכם. הטוקן נשמר רק במחשב הזה."
+privacy_en = "Everything talks directly to your Home Assistant. The token stays on this computer."
+
+[[steps]]
+he = "ב-Home Assistant: הפרופיל שלכם, Security, Long-lived access tokens, Create token. העתיקו אותו."
+en = "In Home Assistant: your profile, Security, Long-lived access tokens, Create token. Copy it."
+
+[[steps]]
+he = "בטרמינל הקלידו jarvis home start, הדביקו כתובת וטוקן ובחרו אילו מכשירים מותרים."
+en = "In a terminal type jarvis home start, paste the address and token and pick which devices are allowed."
+action = "command:jarvis home start"
+check = "available:home_assistant"
+
+[[steps]]
+he = "הדליקו את המתג \"בית חכם\" (כבוי כברירת מחדל)."
+en = "Switch on \"Smart home\" (off by default)."
+action = "feature_on:home_assistant"
+check = "active:home_assistant"
+
+[[problems]]
+he = "הוא אומר שהמכשיר לא ברשימה"
+en = "He says the device is not in the list"
+fix_he = "הריצו jarvis home start שוב והוסיפו אותו."
+fix_en = "Run jarvis home start again and add it."
+
+[[problems]]
+he = "הוא לא מצליח להגיע ל-Home Assistant"
+en = "He cannot reach Home Assistant"
+fix_he = "ודאו שהוא דולק ושהמחשב באותה רשת, ושהכתובת נכונה (jarvis home status)."
+fix_en = "Make sure it is on, this PC is on the same network and the address is right (jarvis home status)."

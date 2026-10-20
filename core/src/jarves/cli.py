@@ -1299,6 +1299,10 @@ def main(argv: list[str] | None = None) -> int:
     from .usage import add_cli as add_usage_cli, cmd_usage
     add_backup_cli(sub)                       # SW-V2 M5: jarvis backup / restore
     add_usage_cli(sub)                        # SW-V2 M5: jarvis usage
+    from .telegram_channel import add_cli as add_telegram_cli, cmd_telegram
+    from .homeassistant import add_cli as add_home_cli, cmd_home
+    add_telegram_cli(sub)                     # V3 P1: jarvis telegram start / status / test / logout
+    add_home_cli(sub)                         # V3 P1: jarvis home start / status / test / logout
     wk = sub.add_parser("wake", help="calibrate the wake word to your voice and mic, or train a new wake phrase")
     wk.add_argument("action", choices=["test", "train"])
     wk.add_argument("phrase", nargs="*", help="train: the new phrase in Latin letters, e.g. \"hey max\"")
@@ -1370,7 +1374,7 @@ def main(argv: list[str] | None = None) -> int:
             "diagnose": cmd_diagnose, "features": cmd_features, "google": cmd_google,
             "backup": cmd_backup, "restore": cmd_restore, "usage": cmd_usage, "start": cmd_start,
             "show": cmd_display, "hide": cmd_display, "autostart": cmd_autostart,
-            "update": cmd_update}[a.cmd](a, cfg, home)
+            "update": cmd_update, "telegram": cmd_telegram, "home": cmd_home}[a.cmd](a, cfg, home)
 
 
 if __name__ == "__main__":
