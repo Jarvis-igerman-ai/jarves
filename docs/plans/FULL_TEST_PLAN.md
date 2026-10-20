@@ -21,3 +21,12 @@ No open P0/P1; every feature has a PASS or an explicit BLOCKED reason; log revie
 - Live GPT-Live budget: up to about $10 total for the campaign.
 - Owner can assist with: Google sign-in + Calendar/Gmail, Telegram bot, real speaker/mic/camera listening, Pear Desktop open for music. (Instagram/Browser: not confirmed yet.)
 - Data: agents use a copy / separate test profile (`JARVES_HOME` pointed at a temp dir); the real memory is never modified.
+
+## More owner answers (20 Oct 2026, evening)
+- Campaign runs on the offline `test` profile by default (real profile untouched).
+- Profiles: one voice profile at a time; other profiles run without a microphone.
+- Self-check: weekly Sunday 10:00 + after a crash; AI pass OFF by default (button to run it).
+- Dashboard languages: English (default) + Hebrew complete; Arabic/Russian stay partial for now. Dashboard language stays separate from the voice/CLI language.
+- Wake word: owner will record ~20 short samples when the agent asks.
+- Telegram: only the owner's chat for now.
+- PC restart killed the merge and approvals agents; both relaunched (merge agent is top priority).
