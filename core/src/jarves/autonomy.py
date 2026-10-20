@@ -81,11 +81,52 @@ def _feature_revert(a: "Autonomy", r: dict) -> str:
     return f"feature {r['feature']} back {'on' if r['was'] else 'off'}"
 
 
+def _config_apply(a: "Autonomy", p: dict) -> tuple[str, dict]:
+    """Self-check suggestions: one allowlisted config.toml value (config_edit.EDITABLE, validated, backed up)."""
+    from . import config_edit
+    key = p["key"]
+    if key not in config_edit.EDITABLE:
+        raise ValueError(f"{key} is not an editable setting")
+    sec, name = key.split(".", 1)
+    old = getattr(getattr(a.cfg, sec), name)
+    config_edit.apply(a.home / "config.toml", {key: p["value"]})
+    return f"{key} {old} -> {p['value']} (applies at the next Core start)", {"key": key, "old": old}
+
+
+def _config_revert(a: "Autonomy", r: dict) -> str:
+    from . import config_edit
+    config_edit.apply(a.home / "config.toml", {r["key"]: r["old"]})
+    return f"{r['key']} back to {r['old']}"
+
+
+def _feature_on_apply(a: "Autonomy", p: dict) -> tuple[str, dict]:
+    """Self-check suggestions: switch on a useful feature (never a privacy-sensitive SAFE_OFF one); prerequisites are
+    checked/installed first through the maintained setup path, like `jarvis features on`."""
+    from .setup_wizard import SAFE_OFF
+    fid = p["feature"]
+    if a.features is None:
+        raise ValueError("feature switches unavailable")
+    if fid in SAFE_OFF:
+        raise ValueError(f"{fid} is privacy-sensitive: switch it on yourself on the Features page")
+    from .feature_setup import prepare
+    ok, detail = prepare(fid, a.features, a.home)
+    if not ok:
+        raise ValueError(detail)
+    before = a.features.enabled(fid)
+    a.features.set(fid, True, by="autonomy")
+    return f"feature {fid} switched on", {"feature": fid, "was": before}
+
+
 APPLIERS: dict[str, Applier] = {
     "wake_threshold": Applier("wake_threshold", "low", "raise the wake-word threshold after repeated false wakes",
                               _wake_apply, _wake_revert),
     "feature_off": Applier("feature_off", "medium", "switch off a feature whose tool keeps failing",
                            _feature_apply, _feature_revert),
+    # self-check suggestions (selfcheck.py): medium risk, so never granted for automatic use
+    "config_setting": Applier("config_setting", "medium", "change one dashboard-editable setting suggested by the "
+                              "self-check", _config_apply, _config_revert),
+    "feature_on": Applier("feature_on", "medium", "switch on a useful feature suggested by the self-check",
+                          _feature_on_apply, _feature_revert),
 }
 
 

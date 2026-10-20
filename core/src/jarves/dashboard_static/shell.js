@@ -56,6 +56,7 @@
     home: "status overview dashboard מצב סקירה ראשי", runtime: "mic mute window show hide autostart quit stop wake tray מיקרופון השתקה חלון הפעלה עצירה מגש",
     connections: "google gmail calendar sign in oauth גוגל ג׳ימייל התחברות", devices: "phone lan pair wifi audit טלפון הצמדה רשת ביקורת",
     conversations: "transcript chat history talk תמליל היסטוריה צ׳אט", issues: "problems errors diagnosis תקלות שגיאות אבחון",
+    selfcheck: "self check health suggestions improvements בדיקה עצמית הצעות שיפור",
     tasks: "research background מחקר רקע", logs: "log errors events debug יומן שגיאות אירועים",
     calendar: "events meeting אירועים פגישה", jobs: "schedule reminder cron מתוזמן תזכורת", reports: "briefing morning תדריך בוקר",
     alerts: "notifications התראות", notes: "markdown memo רשימות", files: "folders documents תיקיות מסמכים",

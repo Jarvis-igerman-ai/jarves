@@ -84,6 +84,16 @@ DEFAULTS: dict[str, Any] = {
     "briefing.city": "Tel Aviv",                # morning briefing weather place (Open-Meteo, no key)
     "briefing.lat": 32.0853,
     "briefing.lon": 34.7818,
+    # self-check (selfcheck.py, owner request 20 Oct 2026)
+    "self_check.on_start": "crash",             # crash = after an unclean stop | always = every start | never
+    "self_check.error_burst": 10,               # this many ERROR records in one run of the Core start a check (0 = off)
+    "self_check.min_interval_s": 3600,          # automatic checks at most this often
+    "self_check.days": 7,                       # log window of one check
+    "self_check.ai_pass": True,                 # also run the existing AI review (diagnosis_llm_pass rules apply)
+    "self_check.ai_sessions": 2,                # at most this many conversations reviewed per check
+    "self_check.job_id": "",                    # the weekly scheduler job (created once)
+    "self_check.last_auto": 0.0,
+    "self_check.last_run": 0.0,
     "files.quota_mb": 200,
     "files.max_file_mb": 10,
 }

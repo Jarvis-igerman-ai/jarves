@@ -26,6 +26,7 @@ from . import logs
 from . import notes as notes_mod
 from . import sandbox as sandbox_mod
 from . import scheduler as sched_mod
+from . import selfcheck as selfcheck_mod
 from .userdata import open_db
 
 AUTONOMY_SYNC_S = 600.0
@@ -171,6 +172,8 @@ class Operations:
 
     def start(self) -> None:
         self._task = asyncio.get_running_loop().create_task(self.scheduler.run(self._after_tick), name="operations")
+        # owner request 20 Oct: self-check (voice tools, weekly job, after an unclean stop / an error burst)
+        self.selfcheck = selfcheck_mod.attach(self.core, self)
 
     async def _after_tick(self) -> None:
         await self.alerts.flush()
@@ -185,6 +188,8 @@ class Operations:
                 logs.error("autonomy", "AUTONOMY_SYNC_FAILED", "diagnostic proposals not updated", exc=True)
 
     async def stop(self) -> None:
+        if getattr(self, "selfcheck", None) is not None:
+            await self.selfcheck.stop()
         await self.scheduler.stop()
         if self._task is not None and not self._task.done():
             self._task.cancel()
