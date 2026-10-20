@@ -5,16 +5,16 @@
 ## Copy/paste to Claude Code or Codex
 
 ```text
-Continue JARVES V4 migration and stabilization. IMPORTANT: the old PRIVATE igalgerman/JARVIS repo is DEPRECATED and NOT relevant for further development. igalgerman/jarves (PUBLIC) is now the ONLY writable repository/source of truth. The required PUBLIC migration has STARTED, but is NOT fully integrated. NEVER push/sync/code/change issues on the old private repo. Read old branches read-only only to recover missing source after privacy/secret review.
+Continue ONLY the JARVES repository migration. Do not begin unrelated feature development or a general product/V4 stabilization campaign. IMPORTANT: the old PRIVATE igalgerman/JARVIS repo is DEPRECATED and NOT relevant for further development. igalgerman/jarves (PUBLIC) is now the ONLY writable repository/source of truth. The required PUBLIC migration has STARTED, but is NOT fully integrated. NEVER push/sync/code/change issues on the old private repo. Read old branches read-only only to recover missing source after privacy/secret review.
 
 First read AGENTS.md and docs/NOW.md, then ONLY docs/MIGRATION_HANDOFF.md, the top of docs/HANDOFF.md and the one public Issue/PR directly relevant to your next scoped task. Inspect local git remote -v, git status, active worktrees and any running Claude/Codex writer; don't clobber dirty state or work on the same files concurrently.
 
 Public migration issues: #1 V4 release/acceptance, #2 Orchestrator, #3 Pi parity, #4 future hardware, #5 consolidation.
 Public DRAFT PRs: #6 WhatsApp Go (23 files), #7 Orchestrator (26), #8 Self-Diagnostics 2.0 (28), #9 Delegation/OS isolation (12), #10 Dashboard QA (3). Together 92 ADDED preserved files, not yet complete or merged functionality. Their original modified integration files (app/CLI/voice/dashboard/i18n/CI/config) must be reconciled safely with current PUBLIC main, not overwritten wholesale. Preserve private source research/logs outside public history.
 
-Choose the next small, approved V4 integration step in public only; respect independent tests, security, approval, no account linking and no paid calls without consent. Do not start V5/V6 implementation: their roadmap directions only have been approved, and V6 Drive & Act is in docs/ROADMAP.md.
+Choose ONE scoped migration item in public only: review and port missing integration diffs, verify private-vs-public file fidelity, reconcile issue tracker/links/remotes, or prepare archival readiness. Do not undertake unrelated V4/V5/V6 product work. Run focused checks only to prove the migrated code is preserved and safe; no account linking or paid calls.
 
-For any completed scoped step: commit/push ONLY to public branch; update docs/HANDOFF.md + docs/MIGRATION_HANDOFF.md, corresponding PUBLIC issue/PR, exact final-sha CI status, real/fake/virtual checks, blockers and next single task. Do not merge unverified Draft PRs. Do not archive old repo until migration and active writers are checked.
+For each completed migration step: commit/push ONLY to a public migration branch; update the migration section at the top of docs/HANDOFF.md, docs/MIGRATION_HANDOFF.md and the associated PUBLIC Issue/PR. Record file source/target, privacy scan, targeted test/CI result, blockers and the next migration step. Do not merge unverified Draft PRs; do not archive the private repo until all necessary material and active writers are accounted for.
 
 Return at most 6 concise lines: outcome; files; tests + context; CI final-SHA link or NOT RUN; blockers; public commit/PR and next step.
 ```
@@ -33,4 +33,4 @@ BLOCKED / USER DECISIONS: [precise]
 NEXT ONE TASK:
 ```
 
-More detail: [MIGRATION_HANDOFF.md](MIGRATION_HANDOFF.md), [ROADMAP.md](ROADMAP.md). No personal logs or secrets belong in this public repository.
+More detail (migration only): [MIGRATION_HANDOFF.md](MIGRATION_HANDOFF.md). No personal logs or secrets belong in this public repository.
