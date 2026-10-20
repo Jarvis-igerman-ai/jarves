@@ -977,6 +977,12 @@ def api_action(ctx, m, body):
         if act == "rollback":
             return 200, mgr.rollback(sid, by="dashboard")
         if act == "uninstall":
+            from .. import approvals
+            ok, _w = approvals.ask_owner(ctx.home, f"Remove the skill '{sid}'? (kept in skills/removed)",
+                                         title="dashboard_remove_skill", risk="medium",
+                                         why="You pressed Uninstall on the dashboard Skills page.", details={"skill": sid})
+            if not ok:
+                return 403, dict(approvals.APPROVAL_REFUSED)
             mgr.uninstall(sid, by="dashboard")
             return 200, {"ok": True}
         if act == "test":

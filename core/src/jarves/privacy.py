@@ -183,14 +183,20 @@ def dashboard_routes(register) -> None:
             return 400, {"error": "send {\"privacy\": true|false}"}
         return 200, set_privacy(ctx, on)
 
-    def confirmed(fn):
+    def confirmed(fn, label, title):
         def h(ctx, _m, body):
             body = body or {}
             if body.get("confirm") is not True:
                 return 400, {"error": "this cannot be undone: send {\"confirm\": true}"}
+            from . import approvals
+            ok, _w = approvals.ask_owner(ctx.home, "This cannot be undone: " + label + "?",
+                                         title=title, risk="high",
+                                         why="You pressed this on the dashboard Privacy page.")
+            if not ok:
+                return 403, dict(approvals.APPROVAL_REFUSED)
             return 200, fn(ctx, prune_backups=bool(body.get("prune_backups")))
         return h
     register("GET", r"/api/privacy", get)
     register("POST", r"/api/privacy", post)
-    register("POST", r"/api/privacy/mask-history", confirmed(mask_history))
-    register("POST", r"/api/privacy/delete-conversations", confirmed(delete_conversations))
+    register("POST", r"/api/privacy/mask-history", confirmed(mask_history, "mask the conversation history", "dashboard_mask_history"))
+    register("POST", r"/api/privacy/delete-conversations", confirmed(delete_conversations, "delete all conversations", "dashboard_delete_conversations"))

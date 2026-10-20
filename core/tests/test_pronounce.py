@@ -45,6 +45,9 @@ def test_workspace_default_and_edit_changes_output(tmp_path):
     assert "PRONUNCIATIONS.md" in wsp.SPECS
     pronounce.set_path(w.root / "PRONUNCIATIONS.md")
     try:
+        assert pronounce.load().entries == {}                       # shipped template has no entries
+        assert pronounce.apply("שלום לצחי") == "שלום לצחי"
+        w.write("PRONUNCIATIONS.md", "- צחי = " + TZACHI + "\n", by="user")
         assert pronounce.apply("שלום לצחי") == "שלום לְ" + TZACHI
         w.write("PRONUNCIATIONS.md", "- צחי = טסחי\n", by="user")
         assert pronounce.apply("שלום לצחי") == "שלום לטסחי"
@@ -55,7 +58,10 @@ def test_workspace_default_and_edit_changes_output(tmp_path):
 def test_persona_note_in_live_front_section(tmp_path):
     w = wsp.Workspace(tmp_path / "workspace")
     front = w.section("front")
-    assert "PRONUNCIATIONS.md" in front and "צחי" in front and TZACHI in front
+    assert TZACHI not in front                                       # the shipped template adds no entries
+    w.write("PRONUNCIATIONS.md", "- צחי = " + TZACHI + "\n", by="user")
+    assert TZACHI in w.section("front")
+    assert pronounce.Dictionary({}).note() == ""
     assert "צחי" in d().note()
 
 

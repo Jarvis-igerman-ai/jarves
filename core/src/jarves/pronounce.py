@@ -20,19 +20,14 @@ _WORD = re.compile(r"[֐-׿][֐-׿'’]*|[A-Za-z][A-Za-z'’]*")
 PREFIXES = "לובכמהש"
 FILE = "PRONUNCIATIONS.md"
 
-DEFAULT_ENTRIES = {          # name -> spoken form (the owner confirms by ear; edit in the dashboard)
-    "צחי": "צַ֫חִי",
-    "אביטל": "אֲבִיטַל",
-    "נועה": "נוֹעָה",
-    "איגל": "אִיגָל",
-    "JARVES": "ג'ארוויס",
-    "Jarvis": "ג'ארוויס",
-}
+DEFAULT_ENTRIES: dict[str, str] = {}   # owner decision 20 Oct: no shipped entries (the plain voice sounded better)
 DEFAULT_TEXT = ("# הגייה / Pronunciations\n"
-                "<!-- One per line: word = how to say it (Hebrew with niqqud, or a phonetic respelling). Prefixes "
-                "ל ו ב כ מ ה ש are handled automatically (לצחי, ולצחי). Applies to every spoken reply and to the "
-                "live voice. -->\n"
-                + "\n".join(f"- {k} = {v}" for k, v in DEFAULT_ENTRIES.items()) + "\n")
+                "<!-- Empty on purpose: the voice sounds best without entries unless a name is mispronounced.\n"
+                "One entry per line: word = how to say it (Hebrew with niqqud, or a phonetic respelling). "
+                "Prefixes ל ו ב כ מ ה ש are handled automatically. Applies to every spoken reply and the live voice.\n"
+                "Example (remove the leading # to enable):\n"
+                "# - Dana = דָּנָה\n"
+                "-->\n")
 
 
 def strip_niqqud(s: str) -> str:

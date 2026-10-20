@@ -109,6 +109,7 @@ class Tool:
     timeout_s: float = 10.0
     impact: ImpactFn | None = None     # destructive tools: how many records this call would affect
     untrusted_output: bool = False     # returns third-party text (mail, calendar): see SkillRegistry.new_turn
+    recipient: Callable[[Any], str | None] | None = None   # send tools: who it goes to (first name is spoken aloud)
 
     @property
     def side_effect(self) -> bool:     # read-only view of the old flag
@@ -263,6 +264,13 @@ class SkillRegistry:
                 prompt = prompt or impact_prompt or f"{tool.description} - approve?"
         meta = {"title": tool.name, "risk": "high" if perm == "destructive" else "medium", "source": origin,
                 "kind": "message" if "send" in tool.name or "reply" in tool.name else "tool"}
+        if tool.recipient is not None:
+            try:
+                who = tool.recipient(args)
+            except Exception:
+                who = None
+            if who:
+                meta["details"] = {"recipient": str(who)}       # spoken_kind() speaks its first name only
         if prompt and not await self._ask(prompt, **meta):
             logs.info("skills", "TOOL_DECLINED", f"{tool.name} not confirmed by user", tool=tool.name, origin=origin)
             return ToolResult(False, "cancelled: the user did not confirm", code="TOOL_DECLINED")

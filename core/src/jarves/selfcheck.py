@@ -251,7 +251,7 @@ KNOWN_CODES = {
 }
 # codes that have their own rule (not counted again as a generic cluster)
 OWN_RULE = {"AI_BUDGET", "AI_BUDGET_OVERRUN", "LIVE_FALSE_ACTION_CLAIM", "WAKE_NEAR_MISS", "VOICE_NO_SPEECH",
-            "TOOL_RESULT", "UPDATE_CHECKED"}
+            "TOOL_RESULT", "UPDATE_CHECKED", "CALENDAR_DELETE_FORBIDDEN"}
 AVAIL = {
     "pear": {"codes": {"MUSIC_PLAYER_OFFLINE", "MUSIC_NOT_PAIRED", "MUSIC_PAIR_FAILED", "MUSIC_TIMEOUT",
                        "MUSIC_PLAYER_ERROR"},

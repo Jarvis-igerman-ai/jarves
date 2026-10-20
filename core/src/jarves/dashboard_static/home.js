@@ -39,7 +39,7 @@ async function renderTopbar() {
 function privacyCard(p) {
   const msg = el("div", { class: "muted small" });
   const oneWay = (label, path, question) => el("button", { type: "button", class: "danger", onclick: async () => {
-    if (!confirm(question + "\n\n" + tx("אי אפשר לבטל.", "This cannot be undone."))) return;
+    msg.textContent = tx("ממתין לאישור על המסך שלך", "waiting for approval on your screen");     // the server asks on the popup
     try {
       const r = await post(path, { confirm: true });
       msg.textContent = tx("בוצע", "Done") + (r.deleted !== undefined ? ` (${r.deleted} ${tx("שיחות", "conversations")})` : ` (${r.turns} ${tx("שורות", "lines")})`);
@@ -135,7 +135,7 @@ PAGES.connections = async function () {
     route(true);
   }) }, tx("בדיקה", "Test"));
   const disc = el("button", { type: "button", class: "danger", disabled: !(g.signed_in || g.needs_reconnect) || null, onclick: () => act(async () => {
-    if (!confirm(tx("לנתק את Google? JARVES שוכח את המפתחות ו-Google מבטל אותם.", "Disconnect Google? JARVES forgets the keys and Google revokes them."))) return;
+    msg.textContent = tx("ממתין לאישור על המסך שלך", "waiting for approval on your screen");     // the server asks on the popup
     await post("/api/google/disconnect"); msg.textContent = tx("נותק", "Disconnected"); route(true);
   }) }, tx("ניתוק", "Disconnect"));
   const row = (label, value) => [el("div", {}, label), el("div", {}, value)];
