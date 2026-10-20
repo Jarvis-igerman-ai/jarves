@@ -1,0 +1,50 @@
+order = 53
+category = "costs"
+pages = ["costs"]
+features = ["client_delegation"]
+aliases = ["תקציב קשיח", "תקרה קשיחה", "client delegation", "strict budget", "strict cap", "delegation", "העברה"]
+links = ["api_budget", "voice_ai", "web_search"]
+title_he = "תקציב קשיח לחיפושים בשיחה"
+title_en = "Strict budget for spoken lookups"
+what_he = "כשהמתג דולק, ג'ארביס עצמו מריץ כל חיפוש שהקול החי מעביר, ושומר את העלות שלו לפני השליחה. כך תקרת היום ותקרת השאלה אף פעם לא נחצות, אפילו לא בבקשה אחת. עם ChatGPT + מפתח API החשיבה רצה על המנוי שלך (0 דולר API לחשיבה)."
+what_en = "With the switch on, JARVES itself runs every lookup the live voice hands over and reserves its cost before sending it, so the daily and per-question limits are never exceeded, not even by one request. With ChatGPT + API key the reasoning runs on your plan ($0 API for the reasoning)."
+say = [["מה מזג האוויר עכשיו בתל אביב?", "What is the weather in Tel Aviv right now?"], ["עזוב, לא משנה", "Never mind"]]
+expect_he = "הוא עונה כרגיל, אולי שבריר שנייה לאט יותר. כשהתקציב היומי נגמר הוא אומר זאת בכנות ומציע לענות ממה שהוא כבר יודע. \"עזוב\" באמצע חיפוש עוצר אותו."
+expect_en = "He answers as usual, maybe a fraction of a second slower. When the daily budget is used up he says so honestly and offers to answer from what he already knows. \"Never mind\" during a lookup stops it."
+cost_he = "כמו חיפוש רגיל (בערך 0.1-2 סנט לחיפוש), ולא יותר מהתקרה שקבעתם (ברירת מחדל: דולר ליום, 5 סנט לשאלה). עם מנוי ChatGPT: החשיבה במנוי, רק הקול במפתח."
+cost_en = "Like a normal lookup (about 0.1-2 cents each) and never more than the caps you set (default: $1 a day, 5 cents a question). With a ChatGPT plan: reasoning on the plan, only the voice on the key."
+privacy_he = "השאלה והשיחה הקצרה שלפניה נשלחות ל-OpenAI (מפתח API או מנוי ChatGPT), כמו בחיפוש רגיל."
+privacy_en = "The question and the short conversation before it are sent to OpenAI (API key or ChatGPT plan), as with a normal lookup."
+
+[[steps]]
+he = "צריך קול חי (GPT-Live) ומפתח OpenAI API. ראו \"חיבור לבינה המלאכותית\"."
+en = "Needs live voice (GPT-Live) and an OpenAI API key. See \"Connect the AI\"."
+check = "available:client_delegation"
+
+[[steps]]
+he = "הדליקו את המתג \"תקציב קשיח לחיפושים בשיחה\". הוא חל מהשיחה הבאה."
+en = "Turn on the \"Strict budget for spoken lookups\" switch. It applies from the next conversation."
+action = "feature_on:client_delegation"
+check = "enabled:client_delegation"
+
+[[steps]]
+he = "קבעו תקרה: בהגדרות (מגבלות עלות) או jarvis budget set --daily-usd 1 --turn-usd 0.05."
+en = "Set the caps: Settings (Cost limits) or jarvis budget set --daily-usd 1 --turn-usd 0.05."
+action = "command:jarvis budget set --daily-usd 1 --turn-usd 0.05"
+
+[[steps]]
+he = "בדקו שהתקרה עובדת, בלי עלות: jarvis budget test-cap. ההזמנות החיות מופיעות בעמוד העלויות ו-jarvis budget status."
+en = "Check the cap works, free: jarvis budget test-cap. Live reservations show on the Costs page and in jarvis budget status."
+action = "command:jarvis budget test-cap"
+
+[[problems]]
+he = "הסטטוס אומר \"text only\" או \"server delegation\" אחרי תקלה"
+en = "The status says \"text only\" or \"server delegation\" after a failure"
+fix_he = "השרת דחה את מצב הלקוח, וג'ארביס עבר לדרגה הבאה (כתוב ביומן). הפעלה מחדש של ג'ארביס, או jarvis budget reset-ladder, מנסה שוב."
+fix_en = "The server rejected client mode and JARVES stepped down the ladder (logged). Restarting JARVES, or jarvis budget reset-ladder, tries again."
+
+[[problems]]
+he = "הוא אומר שהגיע לתקציב היומי"
+en = "He says he reached the daily budget"
+fix_he = "זו התקרה הקשיחה שעובדת. אפשר להעלות אותה בהגדרות או לחכות למחר."
+fix_en = "That is the strict cap working. Raise it in Settings or wait until tomorrow."
