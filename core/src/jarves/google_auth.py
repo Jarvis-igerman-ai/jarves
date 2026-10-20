@@ -384,6 +384,12 @@ def dashboard_routes(register) -> None:
         return 200, {**google_status(ctx.home), "connect_command": "jarvis google start"}
 
     def disconnect(ctx, _m, _body):
+        from . import approvals
+        ok, _w = approvals.ask_owner(ctx.home, "Disconnect Google? JARVES forgets the keys and Google revokes them.",
+                                     title="dashboard_disconnect_google", risk="high",
+                                     why="You pressed Disconnect on the dashboard.")
+        if not ok:
+            return 403, dict(approvals.APPROVAL_REFUSED)
         return 200, {"revoked": asyncio.run(GoogleAuth(ctx.home).sign_out()), **google_status(ctx.home)}
     register("GET", r"/api/google", get)
     register("POST", r"/api/google/disconnect", disconnect)

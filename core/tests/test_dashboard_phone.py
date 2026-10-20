@@ -10,6 +10,7 @@ from jarves.scheduler import _ctx_sched
 from jarves.dashboard_auth import device_body_ok
 
 from test_dashboard_lan import LAN, jget, new_code, pair, req
+from owner_harness import owner_approves  # noqa: F401  (fixture)
 
 PC = {"admin": True}
 
@@ -40,7 +41,7 @@ def pc(lan, method, path, body=None):
     return r.status, (json.loads(data) if data[:1] == b"{" else data)
 
 
-def test_phone_manages_reminder_jobs(lan, phone):
+def test_phone_manages_reminder_jobs(lan, phone, home, owner_approves):
     st, job = phone("POST", "/api/jobs", {"when": "בעוד 20 דקות", "task": "להוציא כביסה", "action": "reminder"})
     assert st == 200 and job["status"] == "draft"
     jid = job["id"]
@@ -53,7 +54,7 @@ def test_phone_manages_reminder_jobs(lan, phone):
     assert phone("POST", "/api/schedule/parse", {"when": "בעוד 20 דקות"})[0] == 200
 
 
-def test_phone_cannot_approve_a_tool_job(lan, phone):
+def test_phone_cannot_approve_a_tool_job(lan, phone, home, owner_approves):
     s = _ctx_sched(lan.ctx)
     tid = s.preview("בעוד 20 דקות", "", action="tool", tool="file_write", by="voice")["id"]
     assert phone("POST", f"/api/jobs/{tid}", {"op": "approve"})[0] == 403

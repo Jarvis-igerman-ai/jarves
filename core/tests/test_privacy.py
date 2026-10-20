@@ -12,6 +12,7 @@ from jarves import dashboard, diagnose, logs, store
 from jarves.config import Config
 
 from test_dashboard import req
+from owner_harness import owner_approves  # noqa: F401  (fixture)
 
 W = {"X-Jarves": "1"}
 
@@ -100,7 +101,7 @@ def test_ai_review_is_skipped_once_privacy_is_switched_on(env, home):
     assert "privacy" in (diagnose.review_skip_reason(st, cfg, "s1") or "")
 
 
-def test_one_way_actions_need_confirmation_mask_and_delete(env, home):
+def test_one_way_actions_need_confirmation_mask_and_delete(env, home, owner_approves):
     d, sink = env
     typed("הסוד שלי הוא 1234", "שמרתי")
     logs.info("live", "LIVE_STARTED", "live started", model="gpt-live-1")
@@ -131,7 +132,7 @@ def test_one_way_actions_need_confirmation_mask_and_delete(env, home):
     assert h["last_conversation"] is None and h["today"]["cost"] > 0
 
 
-def test_privacy_purges_the_undo_journal_and_offers_backup_pruning(env, home):
+def test_privacy_purges_the_undo_journal_and_offers_backup_pruning(env, home, owner_approves):
     """Reviewer item 10: deleted / masked text must not survive in the store.db `memory_undo` journal, and the
     user is told that older backups still hold it and can prune them (confirmed)."""
     d, sink = env
@@ -154,7 +155,7 @@ def test_privacy_purges_the_undo_journal_and_offers_backup_pruning(env, home):
     assert not list((home / "backups").glob("*.zip"))
 
 
-def test_backup_pruning_is_asked_every_time_never_remembered(env, home):
+def test_backup_pruning_is_asked_every_time_never_remembered(env, home, owner_approves):
     """Owner decision (C): pruning backups that hold the data needs an explicit prune_backups in EACH request; an
     earlier yes is not remembered, and a plain purge never touches a backup."""
     d, sink = env
@@ -193,4 +194,4 @@ def test_topbar_and_home_show_the_switch(env):
     r, page = req(d, "GET", "/")
     assert b'id="topbar"' in page and b"home.js" in page
     r, js = req(d, "GET", "/static/home.js")
-    assert b"/api/privacy/mask-history" in js and b"/api/privacy/delete-conversations" in js and b"confirm(" in js
+    assert b"/api/privacy/mask-history" in js and b"/api/privacy/delete-conversations" in js and b"waiting for approval on your screen" in js

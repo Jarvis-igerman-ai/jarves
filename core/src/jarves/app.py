@@ -101,10 +101,12 @@ class _VoiceApproval:
         live = self._live[a.id] = self.core.live
         try:
             import inspect
+            lang = getattr(getattr(getattr(self.core, "cfg", None), "ui", None), "popup_language", "en")   # same source as the popup
+            said = a.spoken_in(lang)
             if "voice" in inspect.signature(live.confirm_pending).parameters:
-                await live.confirm_pending(a.spoken, voice=bool(getattr(a, "voice_ok", False)))   # kind only: no details aloud
+                await live.confirm_pending(said, voice=bool(getattr(a, "voice_ok", False)))   # kind only: no details aloud
             else:                                  # a session without the voice hint (tests' fakes)
-                await live.confirm_pending(a.spoken)
+                await live.confirm_pending(said)
         except Exception:
             logs.warn("voice", "LIVE_CONFIRM_NOTE_FAILED", "could not tell the voice session about the confirmation")
 
@@ -192,6 +194,7 @@ class Core:
         # V3 approvals: ONE service behind every confirmation (popup / tray / face / dashboard / voice, audit log)
         from . import approvals as appr
         self.approvals = appr.attach(appr.ApprovalService(self.home))
+        self.approvals.loop = asyncio.get_running_loop()      # dashboard threads ask through it (ask_owner)
         # the native popup only on a real run (tests and silent runs never open windows)
         self.approvals.channels += [appr.PopupChannel(self.approvals, enabled=self.use_real_audio,
                                                        lang=c.ui.popup_language),

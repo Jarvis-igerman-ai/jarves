@@ -15,6 +15,7 @@ from jarves.config import Config
 from jarves.features import CATALOG, Features
 from jarves.skills import SkillRegistry
 from jarves.userdata import open_db
+from owner_harness import OwnerAnswers
 
 REASON = "Pear is not running"
 
@@ -119,7 +120,7 @@ async def test_voice_channel_hears_the_kind_while_popup_keeps_the_full_text(home
     task = asyncio.create_task(svc.ask(full, title="whatsapp_send", kind="message", risk="medium",
                                        details={"recipient": "Dana"}))
     await asyncio.wait_for(ev.wait(), 30)
-    assert heard == ["לשלוח הודעת וואטסאפ אל Dana? / Send a WhatsApp message to Dana?"]
+    assert heard == ["Send a WhatsApp message to Dana?"]                 # ONE language (English default)
     for leak in ("4,000", "hunter2", "12-345", "הסיסמה"):
         assert leak not in heard[0]
     assert shown and shown[0]["prompt"] == full                           # popup / dashboard text is unchanged
@@ -211,7 +212,10 @@ async def test_list_added_by_voice_ticked_on_dashboard_read_by_cli(home, capsys)
         assert lists_mod.api_list_op(ctx, None, {"op": "check", "list_name": "shopping", "item": "xyz"})[0] == 404
         # clearing asks for approval: the dashboard refuses without it
         st, body = lists_mod.api_list_op(ctx, None, {"op": "clear", "list_name": "shopping"})
-        assert st == 400 and body["needs_approval"]
+        assert st == 403 and body["needs_approval"]               # nobody could be asked: refused, nothing cleared
+        with OwnerAnswers(home, False):                           # the owner presses Deny on the popup
+            assert lists_mod.api_list_op(ctx, None, {"op": "clear", "list_name": "shopping"})[0] == 403
+        assert len(lists_mod.api_lists(ctx, None, None, {"name": ["shopping"]})[1]["items"]) == 5
     finally:
         ctx.close()
 
@@ -238,9 +242,11 @@ def test_cli_list_edit_and_clear_needs_approval(home, capsys):
     try:
         assert lists_mod.api_lists(ctx, None, None, {"name": ["todo"]})[1]["items"] == []
         lists_mod.api_list_add(ctx, None, {"list_name": "todo", "items": ["x"]})
-        st, body = lists_mod.api_list_op(ctx, None, {"op": "clear", "list_name": "todo", "only_done": False,
-                                                       "approved": True})
-        assert st == 200 and body["cleared"] == 1
+        with OwnerAnswers(home, True) as owner:
+            st, body = lists_mod.api_list_op(ctx, None, {"op": "clear", "list_name": "todo", "only_done": False,
+                                                           "approved": True})     # the flag is ignored: the popup decides
+        assert st == 200 and body["cleared"] == 1 and len(owner.asked) == 1
+        assert owner.asked[0]["details"] == {"list": "todo"} and owner.asked[0]["source"] == "dashboard"
     finally:
         ctx.close()
 

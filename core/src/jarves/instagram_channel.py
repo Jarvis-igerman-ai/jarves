@@ -402,7 +402,8 @@ class InstagramSkill(Skill):
                  "back and ask before sending.", draft, DraftArgs, permission="action"),
             Tool("instagram_send", "Send a draft made by instagram_draft, only after reading it back and the user "
                  "said yes. The user also approves on the screen. One draft per call.", send, SendArgs,
-                 permission="destructive", timeout_s=25, impact=send_impact),
+                 permission="destructive", timeout_s=25, impact=send_impact,
+                 recipient=lambda a: (self._drafts.get(a.draft_id) or {}).get("name")),
         ]
 
 

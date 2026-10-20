@@ -548,7 +548,8 @@ class GmailSkill(Skill):
                  timeout_s=20),
             Tool("gmail_send_draft", "Send a draft made by gmail_create_draft, only after reading it back and the user "
                  "said yes. The user also approves on the screen.", send, SendArgs, permission="destructive",
-                 timeout_s=20, impact=send_impact),
+                 timeout_s=20, impact=send_impact,
+                 recipient=lambda a: (self._drafts.get(a.draft_id) or {}).get("name")),
         ]
 
 
