@@ -5,10 +5,8 @@
 "use strict";
 
 (function () {
-  let lang = "he";
-  try { lang = localStorage.getItem("jarves-guide-lang") || "he"; } catch (e) { /* storage blocked */ }
-  const forced = new URLSearchParams(location.hash.split("?")[1] || "").get("lang");   // #/guides?lang=en (captures)
-  if (forced === "he" || forced === "en") lang = forced;
+  let lang = JL.lang;                                  // one dashboard locale (i18n.js; #/guides?lang=en for captures)
+  JL.onChange((l) => { lang = l; });
   const T = (o, k) => (lang === "he" ? o[k + "_he"] : o[k + "_en"]) || o[k + "_en"] || o[k + "_he"] || "";
   const H = (o) => (lang === "he" ? o.he : o.en) || o.en || o.he || "";      // steps / problems: {he, en}
   const dirOf = () => (lang === "he" ? "rtl" : "ltr");
@@ -25,11 +23,8 @@
   const statePill = (s) => { const x = STATE[s] || STATE.info; return pill(x[0], L(x[1], x[2])); };
 
   function langToggle() {
-    return el("button", { type: "button", class: "ghost", onclick: () => {
-      lang = lang === "he" ? "en" : "he";
-      try { localStorage.setItem("jarves-guide-lang", lang); } catch (e) { /* ignore */ }
-      route(true);
-    } }, lang === "he" ? "English" : "עברית");
+    return el("button", { type: "button", class: "ghost", lang: lang === "he" ? "en" : "he",
+      onclick: () => JL.set(lang === "he" ? "en" : "he") }, lang === "he" ? "English" : "עברית");   // the global switch
   }
 
   // ------------------------------------------------------------- index
@@ -166,7 +161,9 @@
   // nav entry (index.html is shared with other packages; add it here once)
   const nav = document.getElementById("nav");
   const badge = el("span", { class: "count", id: "guideCount", title: "features that need setup" });
-  if (nav && !nav.querySelector('[data-page="guides"]')) {
+  const existing = nav && nav.querySelector('[data-page="guides"]');
+  if (existing) existing.append(" ", badge);                // grouped nav in index.html (SW-V3 P0.2)
+  else if (nav) {
     const a = el("a", { href: "#/guides", "data-page": "guides" }, el("span", {}, "Guides ", el("small", { class: "he" }, "מדריכים")), " ", badge);
     const after = nav.querySelector('[data-page="features"]');
     after ? after.after(a) : nav.append(a);

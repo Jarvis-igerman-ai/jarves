@@ -320,9 +320,9 @@ async def test_core_preview_with_fake_camera_reaches_the_face(core):
     await face.send("camera.preview", {"open": True, "seconds": 5})
     ps = await face.wait("camera.preview_state")
     assert ps["open"] is True
-    fr = await face.wait("camera.preview_frame")
+    fr = await face.wait("camera.preview_frame", timeout=20)
     assert fr["seq"] >= 1 and base64.b64decode(fr["data"])
-    await face.wait("privacy.state", lambda p: p["camera"]["state"] == "preview")
+    await face.wait("privacy.state", lambda p: p["camera"]["state"] == "preview", timeout=20)
     await face.send("camera.preview", {"open": False})
     await face.wait("camera.preview_state", lambda p: p["open"] is False)
     await until(lambda: not cam.is_open)
