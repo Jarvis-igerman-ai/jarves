@@ -257,3 +257,20 @@ async def test_allow_listed_site_full_control_with_confirmations(tmp_path, site)
         assert svc.status()["recent"] and all("hunter2" not in str(a) for a in svc.activity)
     finally:
         await svc.close()
+
+
+# ---------------------------------------------------------------------- campaign B-02 (offline)
+@pytest.mark.parametrize("bad", ["javascript:alert(1)", "data:text/html,<b>x</b>", "mailto:a@b.co", "vbscript:x",
+                                 "about:blank"])
+def test_with_scheme_refuses_non_web_schemes_before_any_question(bad):
+    with pytest.raises(br.BrowserError) as e:
+        br.with_scheme(bad)
+    assert e.value.code == "BROWSER_BAD_URL"
+
+
+@pytest.mark.parametrize("url,out", [("shop.example.com/x", "https://shop.example.com/x"),
+                                     ("localhost:8080/a", "https://localhost:8080/a"),
+                                     ("example.com:443", "https://example.com:443"),
+                                     ("http://127.0.0.1:1/", "http://127.0.0.1:1/"), ("", "")])
+def test_with_scheme_completes_plain_hosts(url, out):
+    assert br.with_scheme(url) == out

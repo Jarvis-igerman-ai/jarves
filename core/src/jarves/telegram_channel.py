@@ -16,6 +16,7 @@ from __future__ import annotations
 import asyncio
 import os
 import re
+import secrets
 import time
 import uuid
 from pathlib import Path
@@ -109,8 +110,12 @@ class TelegramApi:
         r = await self.call("sendMessage", chat_id=chat_id, text=text, disable_web_page_preview=True)
         return r if isinstance(r, dict) else {}
 
-    async def updates(self) -> list[dict]:
-        r = await self.call("getUpdates", timeout=0, allowed_updates=["message"])
+    async def updates(self, timeout: int = 0, offset: int | None = None) -> list[dict]:
+        """timeout > 0 = Telegram long polling (the call returns as soon as a message arrives)."""
+        params: dict = {"timeout": int(timeout), "allowed_updates": ["message"]}
+        if offset is not None:
+            params["offset"] = int(offset)
+        r = await self.call("getUpdates", **params)
         return [u for u in r if isinstance(u, dict)] if isinstance(r, list) else []
 
 
@@ -262,11 +267,28 @@ STEPS_EN = ("1. In Telegram: find @BotFather, send /newbot, pick a name and a us
             "2. BotFather replies with a token (digits:letters). Copy it.")
 
 
+def chats_with_code(updates: list[dict], code: str) -> list[dict]:
+    """Private chats whose message carries the one-time pairing code (the t.me deep link sends `/start <code>`)."""
+    hits = []
+    for u in updates:
+        m = u.get("message") or {}
+        if code and code in str(m.get("text") or "") and (m.get("chat") or {}).get("type") == "private":
+            hits += private_chats([u])
+    return hits
+
+
 class Wizard:
+    """`jarvis telegram start`. `jarvis connect` drives the same wizard with optional hooks: `token_provider` (finds
+    the token itself, e.g. from the clipboard, instead of a typed prompt), `auto_pair` (the owner taps a t.me link
+    carrying a one-time code; no Enter, no y/N: only the chat that sent the code is paired) and `on_link`."""
+
     def __init__(self, home: Path, io, *, transport=None, polls: int = 6, poll_sleep: float = 2.0, sleep=asyncio.sleep,
-                 add_chat: bool = False) -> None:
+                 add_chat: bool = False, token_provider=None, auto_pair: bool = False, poll_timeout: int = 0,
+                 on_link=None, pair_code: str = "") -> None:
         self.home, self.io, self.transport = Path(home), io, transport
         self.polls, self.poll_sleep, self.sleep, self.add_chat = polls, poll_sleep, sleep, add_chat
+        self.token_provider, self.auto_pair, self.poll_timeout = token_provider, auto_pair, poll_timeout
+        self.on_link, self.pair_code = on_link, pair_code
 
     async def run(self) -> int:
         out = self.io.out
@@ -281,7 +303,10 @@ class Wizard:
                 out(e.he + "\n" + e.message)
                 api = None
         if api is None:
-            tok = (read_secret(self.io, "Bot token (hidden, Enter = cancel): ") or "").strip()
+            if self.token_provider is not None:
+                tok = ((await self.token_provider()) or "").strip()
+            else:
+                tok = (read_secret(self.io, "Bot token (hidden, Enter = cancel): ") or "").strip()
             if not tok:
                 out("בוטל. / Cancelled. Nothing was saved.")
                 return 1
@@ -302,34 +327,51 @@ class Wizard:
             out(f"כבר מחובר לצ'אט של {have['chats'][0].get('name')}. / Already paired. "
                 f"(add another chat: {START_COMMAND} --add-chat)")
             return 0
-        out(f"עכשיו פותחים בטלגרם את @{bot.get('username', '')} ושולחים לו הודעה כלשהי (למשל hi). "
-            f"/ Now open @{bot.get('username', '')} in Telegram and send it any message (e.g. hi).")
-        self.io.read("Enter when sent: ")
+        code = ""
+        if self.auto_pair:
+            code = self.pair_code or "jv" + secrets.token_hex(6)
+            link = f"https://t.me/{bot.get('username', '')}?start={code}"
+            out(f"פותח את הבוט בטלגרם: לוחצים Start והחיבור מסתיים לבד. / Opening the bot in Telegram: press Start "
+                f"and pairing finishes by itself.  {link}")
+            if self.on_link is not None:
+                self.on_link(link)
+        else:
+            out(f"עכשיו פותחים בטלגרם את @{bot.get('username', '')} ושולחים לו הודעה כלשהי (למשל hi). "
+                f"/ Now open @{bot.get('username', '')} in Telegram and send it any message (e.g. hi).")
+            self.io.read("Enter when sent: ")
         chosen = None
         for i in range(self.polls):
             try:
-                found = private_chats(await api.updates())
+                ups = await api.updates(timeout=self.poll_timeout)
+                found = chats_with_code(ups, code) if self.auto_pair else private_chats(ups)
             except TelegramError as e:
                 out(e.he + "\n" + e.message)
                 return 1
             known = {c["chat_id"] for c in have["chats"]}
             found = [c for c in found if c["chat_id"] not in known]
+            if self.auto_pair:        # acknowledge everything seen (a stranger's message must not be served again in a loop)
+                ids = [u.get("update_id") for u in ups if isinstance(u.get("update_id"), int)]
+                if ids:
+                    try:
+                        await api.updates(offset=max(ids) + 1)
+                    except TelegramError:
+                        pass
             if found:
                 chosen = found[0]
                 break
-            if i + 1 < self.polls:
+            if i + 1 < self.polls and not self.poll_timeout:
                 await self.sleep(self.poll_sleep)
         if chosen is None:
             out("לא קיבלתי הודעה. שולחים הודעה לבוט ומריצים שוב. / No message arrived: send one to the bot and run again.")
             return 1
-        ok = yes(self.io.read(f"Is this you: {chosen['name']}? [y/N] "))
+        ok = True if self.auto_pair else yes(self.io.read(f"Is this you: {chosen['name']}? [y/N] "))
         if not ok:
             out("לא חיברתי את הצ'אט. / Chat not paired.")
             return 1
         data = {"bot_username": bot.get("username", ""), "chats": have["chats"] + [chosen], "paired_at": time.time()}
         write_private_json(pair_file(self.home), data)
         logs.info("telegram", "TELEGRAM_PAIRED", "Telegram chat paired")
-        if yes(self.io.read("Send a test message now? [y/N] ")):
+        if self.auto_pair or yes(self.io.read("Send a test message now? [y/N] ")):
             try:
                 await api.send_message(chosen["chat_id"], "JARVES: Telegram is connected. / טלגרם מחובר.")
                 out("נשלחה הודעת בדיקה. / Test message sent.")

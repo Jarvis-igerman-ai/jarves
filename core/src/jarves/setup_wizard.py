@@ -51,21 +51,25 @@ from . import hebrew, logs
 
 STATE_FILE = "setup_state.json"
 PEAR_URL = "https://github.com/pear-devs/pear-desktop/releases"
-STEPS = ("language", "connection", "names", "wake", "voice", "addons", "privacy", "budget", "google")
+STEPS = ("language", "connection", "names", "wake", "voice", "addons", "privacy", "budget", "google", "connect")
 # Modules that register add-ons in jarves.features at import (the dashboard imports the same ones).
 ADDON_MODULES = ("jarves.telegram_channel", "jarves.instagram_channel", "jarves.whatsapp", "jarves.briefing", "jarves.homeassistant",
                  "jarves.appearance", "jarves.backup", "jarves.usage", "jarves.updates", "jarves.runtime",
                  "jarves.operations", "jarves.guides", "jarves.skills.generated", "jarves.browser", "jarves.profiles",
-                 "jarves.selfcheck")
+                 "jarves.selfcheck", "jarves.connect", "jarves.skills.helper", "jarves.context_trace")
 # Privacy-sensitive or outward-acting: OFF on the first run whatever else says; ON only after an explicit yes.
 SAFE_OFF = frozenset({"camera", "face_recognition", "camera_when_away", "gmail_send", "calendar_write",
-                      "dashboard_lan", "browser", "telegram", "home_assistant", "instagram"})
+                      "dashboard_lan", "browser", "telegram", "home_assistant", "instagram", "helper",
+                      "helper_readonly_auto"})
+# Registered and grouped (so coverage checks see them) but never offered by the wizard: the owner decided (20 Oct)
+# that the Helper asks for EVERY command; the read-only allow-list exists only as `jarvis features on ...`.
+WIZARD_HIDDEN = frozenset({"helper_readonly_auto"})
 GOOGLE_FEATURES = ("google_calendar", "calendar_write", "gmail_read", "gmail_send", "google_contacts")
 # (id, Hebrew, English, feature ids). A feature missing here lands in "other" (never hidden); a test demands
 # that every registered feature is listed.
 GROUPS: tuple[tuple[str, str, str, tuple[str, ...]], ...] = (
     ("core", "בסיס", "Core", ("web_search", "background_tasks", "memory_curator", "memory_llm_pass",
-                             "diagnosis_llm_pass", "self_check", "workspace_agent_edit", "assistant_identity", "skill_creation",
+                             "diagnosis_llm_pass", "self_check", "guided_setup", "workspace_agent_edit", "assistant_identity", "skill_creation",
                              "proactive_help", "usage_monitor", "appearance", "background_core", "display_control",
                              "tray_icon", "autostart")),
     ("voice", "קול", "Voice", ("wake_word", "greeting", "chimes", "voice_change")),
@@ -79,10 +83,11 @@ GROUPS: tuple[tuple[str, str, str, tuple[str, ...]], ...] = (
     ("dashboard", "לוח בקרה וטלפון", "Dashboard & phone", ("dashboard", "dashboard_lan", "context_trace")),
     ("updates", "עדכונים וגיבוי", "Updates & backup", ("update_check", "backup")),
     ("profiles", "פרופילים", "Profiles", ("profiles",)),
+    ("helper", "עזרה במחשב (פקודות והתקנות)", "Computer helper (commands & installs)", ("helper", "helper_readonly_auto")),
 )
 ANSWER_KEYS = {"language", "connection", "api_key_from_env", "display_name", "spoken_name", "address_me",
                "wake_model", "voice", "approve_voice_cost", "features", "privacy_mode", "monthly_budget_usd",
-               "connect_google_now"}
+               "connect_google_now", "connect_now"}
 ADDRESS_MARK = "איך לפנות אליי / How to address me:"
 CONNECTIONS = (("chatgpt", "תוכנית ChatGPT שלי (בלי עלות נוספת, קול פשוט)", "My ChatGPT plan (no extra cost, simple voice)"),
                ("combined", "ChatGPT + מפתח API (הקול הכי טוב, הקול מחויב במפתח)",
@@ -135,6 +140,10 @@ T: dict[str, tuple[str, str]] = {
     "google_now": ("גוגל עוד לא מחובר. לפתוח עכשיו את  jarvis google start  (כ-10 דקות, צעד אחר צעד)?",
                    "Google is not connected yet. Open  jarvis google start  now (about 10 minutes, step by step)?"),
     "google_later": ("לחיבור גוגל אחר כך:  jarvis google start", "Connect Google later:  jarvis google start"),
+    "connect_now": ("להריץ עכשיו  jarvis connect ? הוא בודק מה מחובר (גוגל, טלגרם, Pear, מילת ההפעלה) ומדריך רק במה שחסר.",
+                    "Run  jarvis connect  now? It checks what is connected (Google, Telegram, Pear, wake word) and "
+                    "guides you through only what is missing."),
+    "connect_later": ("לחיבור כל החשבונות בהדרכה:  jarvis connect", "Connect every account with guidance:  jarvis connect"),
     "summary": ("סיכום", "Summary"),
     "next": ("מה לעשות עכשיו", "What to do next"),
     "change": ("לשנות הכול בכל זמן:  jarvis setup  או בלוח הבקרה: הגדרה ותוספים (#/setup)",
@@ -173,7 +182,7 @@ def groups() -> list[tuple[str, str, str, list[str]]]:
     load_addons()
     seen, out = set(), []
     for gid, he, en, ids in GROUPS:
-        have = [i for i in ids if i in feat.CATALOG]
+        have = [i for i in ids if i in feat.CATALOG and i not in WIZARD_HIDDEN]
         seen.update(ids)
         if have:
             out.append((gid, he, en, have))
@@ -613,8 +622,8 @@ class Wizard:
             if not isinstance(given, dict):
                 raise AnswerError("features must be an object {id: true|false}")
             for fid, on in given.items():
-                if fid not in feat.CATALOG:
-                    self.say(f"(unknown feature {fid!r} skipped)")
+                if fid not in feat.CATALOG or fid in WIZARD_HIDDEN:
+                    self.say(f"(feature {fid!r} not offered here; skipped)")
                     continue
                 if not isinstance(on, bool):
                     raise AnswerError(f"features.{fid} must be true or false")
@@ -709,6 +718,15 @@ class Wizard:
             self.f.invalidate()
         else:
             self.notes.append(self.t("google_later"))
+
+    def step_connect(self) -> None:
+        """The wizard ends by offering `jarvis connect` (owner request 20 Oct); never in a silent/scripted run."""
+        start = self.actions.get("connect_start")
+        if not self.scripted and start is not None and self.yesno("connect_now", "\n" + self.t("connect_now"), True):
+            start()
+            self.f.invalidate()
+        else:
+            self.notes.append(self.t("connect_later"))
 
     def summary(self) -> None:
         self.f.invalidate()
@@ -857,6 +875,8 @@ BUNDLE: dict[str, list[Callable[[], tuple[bool, str]]]] = {
     "diagnosis_llm_pass": [_mod("jarves.diagnose")],
     "self_check": [_mod("jarves.selfcheck"), _data("jarves", "dashboard_static/selfcheck.js"),
                    _data("jarves.guides", "data/self_check.toml")],
+    "guided_setup": [_mod("jarves.connect"), _mod("jarves.google_setup"), _mod("jarves.telegram_channel"),
+                     _data("jarves.guides", "data/guided_setup.toml")],
     "google_calendar": _GOOGLE, "calendar_write": _GOOGLE, "gmail_read": _GOOGLE, "gmail_send": _GOOGLE,
     "google_contacts": [*_GOOGLE, _mod("jarves.skills.contacts")],
     "camera": [_mod("cv2"), _mod("jarves.camera.service"), _data("jarves.camera", "models/face_detection_yunet_2023mar.onnx")],
@@ -872,7 +892,8 @@ BUNDLE: dict[str, list[Callable[[], tuple[bool, str]]]] = {
     "dashboard": [_mod("jarves.dashboard"), _data("jarves", "dashboard_static/index.html"),
                   _data("jarves", "dashboard_static/setup.js"), _data("jarves", "dashboard_static/i18n.js"),
                   _data("jarves", "dashboard_static/shell.js"), _data("jarves", "dashboard_static/locales/en.js"),
-                  _data("jarves", "dashboard_static/locales/he.js")],
+                  _data("jarves", "dashboard_static/locales/he.js"), _data("jarves", "dashboard_static/locales/ar.js"),
+                  _data("jarves", "dashboard_static/locales/ru.js")],
     "dashboard_lan": [_mod("jarves.dashboard_auth"), _data("jarves", "dashboard_static/pair.html")],
     "context_trace": [_mod("jarves.context_trace"), _data("jarves", "dashboard_static/context.js")],
     "workspace_agent_edit": [_mod("jarves.workspace"), _data("jarves", "setup_guide.md")],
@@ -904,12 +925,17 @@ BUNDLE: dict[str, list[Callable[[], tuple[bool, str]]]] = {
     "home_assistant": [_mod("jarves.homeassistant"), _mod("httpx"), _data("jarves.guides", "data/home_assistant.toml")],
     "profiles": [_mod("jarves.profiles"), _data("jarves", "dashboard_static/profiles.js"),
                  _data("jarves.guides", "data/profiles.toml")],
+    "helper": [_mod("jarves.skills.helper"), _mod("jarves.approvals"), _mod("jarves.approval_popup"), _mod("tkinter"),
+               _data("jarves.guides", "data/helper.toml")],
+    "helper_readonly_auto": [_mod("jarves.skills.helper")],
 }
 # Not switches, but shipped parts the add-ons rely on.
 EXTRA_BUNDLE: dict[str, list[Callable[[], tuple[bool, str]]]] = {
     "live_voice": [_mod("agents.realtime"), _mod("websockets")],
     "chatgpt_sign_in": [_mod("jarves.chatgpt_auth"), _mod("jwt")],
     "privacy": [_mod("jarves.privacy")],
+    "approvals": [_mod("jarves.approvals"), _mod("jarves.approval_popup"), _mod("tkinter"),
+                  _data("jarves", "dashboard_static/approvals.js")],
     "windows_tts": [_win(_mod("winrt.windows.media.speechsynthesis"))],
     "offline_stt": [_mod("faster_whisper")],          # its Whisper model downloads on first use (not shipped)
     "guides": [_data("jarves.guides", "data/music.toml")],

@@ -137,7 +137,7 @@ def _env(home: Path, scenario: str) -> dict:
     env = {k: v for k, v in os.environ.items() if k not in ("OPENAI_API_KEY", "OPENAI_ADMIN_KEY")}
     env.update(JARVES_HOME=str(home), PYTHONPATH=str(SRC), PYTHONIOENCODING="utf-8")
     if scenario in ("cloud", "combined"):
-        env["OPENAI_API_KEY"] = "sk-bench-dummy-never-sent"
+        env["OPENAI_API_KEY"] = "sk-test-bench-dummy-never-sent"   # "test": the S09 secret scan skips fakes
     return env
 
 

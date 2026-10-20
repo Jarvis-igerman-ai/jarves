@@ -104,6 +104,9 @@ DEFAULTS: dict[str, Any] = {
     "self_check.job_id": "",                    # the weekly scheduler job (created once)
     "self_check.last_auto": 0.0,
     "self_check.last_run": 0.0,
+    # guided account setup (connect.py): the once-a-day "Google is not connected" reminder
+    "connect.nudge": True,
+    "connect.last_nudge": 0.0,
     "files.quota_mb": 200,
     "files.max_file_mb": 10,
 }

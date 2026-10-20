@@ -1,3 +1,35 @@
+## SW-V3 integration on `v3-final` (20 Oct 2026) - #17, [report](reviews/SWV3_INTEGRATION_REPORT.md)
+
+- Merged (no-ff, both sides kept): v3-fix-show-twice, v3-approvals, v3-ci-yaml-fix, v3-wake, v3-connect, v3-campaign-dash, v3-campaign-features, v3-campaign-voice (2 rounds), on top of the earlier 8 V3 branches.
+- Fixed while integrating: workflow YAML test (`test_ci_workflows.py`), Google reminder spoke out loud while hidden/idle (now popup unless a conversation is open), dashboard listen backlog 5 -> 128 (random ERR_CONNECTION_REFUSED in Edge), approvals page + wake strip line in the en/he/ar/ru catalogs, 23 missing Hebrew feature texts, profile-switch test vs the approvals deny cooldown, suite_system S09/V06 harness.
+- Verified locally (CI has no minutes): full offline suite 3x green, 0 skipped; suite_system 20/20 (Godot headless, start/stop x5, soak, V01-V08); `jarvis setup --check-addons` PASS; real Core 5x on a TEST profile; 32 dashboard pages x en/he/ar in headless Edge, 0 errors (`core/tools/v3_all_pages_check.py`).
+- Final head `4e80261` (+ this doc commit): full offline suite 1454 passed x3, 0 skipped.
+- Questions for the user: (1) `silent_live` (paid, needs your key) was not run: run it before you use the build? (2) Export `v3-final` to main / the public repo now? Status: WAITING FOR USER.
+## SW-V3 campaign PASS C, voice (20 Oct 2026) - #17, branch `v3-campaign-voice`
+
+- Report: [reviews/SWV3_CAMPAIGN_VOICE.md](reviews/SWV3_CAMPAIGN_VOICE.md); bugs: [reviews/SWV3_CAMPAIGN_BUG_TABLE_VOICE.md](reviews/SWV3_CAMPAIGN_BUG_TABLE_VOICE.md). Real GPT-Live, virtual mic/speaker, TEST-profile homes: suite_voice 1-35 + V3 36-47 (timers/alarms with the face closed, lists + spoken approvals, helper, browser on a local page, briefing without Google, WhatsApp/Telegram, profile switch, self-check, wake variants, names, greeting delay). Result: **44 PASS, 3 FAIL (P3), 0 BLOCKED**; cost ≈ $3.80 (60 min live voice). Barge-in stop 0.7 s, greeting 0.51-0.53 s after the face, dead air typically 0.1-0.9 s.
+- Fixed (P2): CV-01 curator facts in privacy-mode logs, CV-02 "approve on the screen" hint when a spoken yes works, CV-03 silent suites opened the real popup, CV-10 model asked for approval without calling the tool, CV-11 briefing skipped missing Google parts silently, CV-12 Hebrew-spoken profile name not found, CV-13 profile switch accepted a spoken yes. Open: CV-15 (P2, intermittent "רגע" without delegating), P3 CV-04..09, 14, 16, 17.
+- Re-run: `cd core; $env:PYTHONPATH="src"; python tools/suite_v3_voice.py --only 36-47` (COSTS MONEY; `--list`).
+- Questions for the user: (1) WhatsApp asks twice (read-back yes + approval yes): keep both, or let the approval be the only question? (2) English questions are answered in Hebrew (CV-05): should JARVES switch to English for one English sentence? (3) Record the ~20 wake samples now (CV-04/07)? Status: USER DECISION REQUIRED (P3).
+
+## SW-V3 campaign PASS B, feature by feature (20 Oct 2026) - #17, branch `v3-campaign-features`
+
+- Report: [reviews/SWV3_CAMPAIGN_FEATURES.md](reviews/SWV3_CAMPAIGN_FEATURES.md); bugs: [reviews/SWV3_CAMPAIGN_BUG_TABLE.md](reviews/SWV3_CAMPAIGN_BUG_TABLE.md). 53 features x CLI/dashboard/Core tool, plus tools of timers, lists, notes, files, scheduler/reports, memory/curator, skills, Telegram/WhatsApp/Instagram/Home Assistant (local fakes), browser (local page), helper + approvals (answered through dashboard API and CLI), profiles, self-check, backup/restore, usage/cost, diag, camera (virtual). Result: 1429 PASS, 1 FAIL (open P3), 2 BLOCKED, 27 N/A.
+- Fixed (P0-P2, each with a regression test): B-05 CLI/other-process approval answers rejected for tool-asked requests (P1), B-01 context_trace missing from CLI, B-04 helper refusals crashed the tool, B-06 face_recognition never available; P3 B-02, B-03. Open P3: O-01..O-06 (CLI parity for timers/lists, CLI-vs-dashboard "on" semantics, google_connect_help ok=False, WARNING noise, status exit 3, timer ringing state).
+- Re-run: `core/.venv/Scripts/python.exe core/tools/campaign_features.py STAGE...` (see the report header).
+- Questions for the user: (1) CLI `features on` refuses unavailable features but the dashboard allows them: which rule? (2) Build CLI/dashboard pages for timers and lists? Status: USER DECISION REQUIRED (P3).
+
+## `jarvis connect` guided account setup (20 Oct 2026): branch `v3-connect`, [#17](https://github.com/igalgerman/JARVIS/issues/17), [report](reviews/SWV3_CONNECT_REPORT.md)
+
+- One command checks Google, Telegram, the Pear API plugin, the wake word (and optional Instagram / Home Assistant), guides only what is missing, reuses the existing wizards, ends with a summary table. Flags `--only`, `--status`, `--yes`, `--reminders`. Telegram: clipboard token watch (consent, cleared after use), validated before saving, auto-pair through a one-time t.me deep link + confirmation message.
+- Also: once-a-day Hebrew reminder when Google is not connected (quiet hours / autonomy / proactive setting respected), dashboard Connections "Run guided setup" card, first-run wizard offers it, feature `guided_setup` (on by default).
+- Tests: `core/tests/test_connect.py` 32 passed plus the related files run one at a time (list in the report). UNVERIFIED: real BotFather / Google / Pear runs, clipboard write/clear on a real desktop, the dashboard button opening a console window. Questions for the user: none new.
+## SW-V3 campaign Pass D: dashboard + log review (20 Oct 2026) - [report](reviews/SWV3_CAMPAIGN_DASHBOARD.md), [bugs](reviews/SWV3_CAMPAIGN_BUG_TABLE_DASH.md) - [#17](https://github.com/igalgerman/JARVIS/issues/17), branch `v3-campaign-dash`
+
+- 186 page loads (31 pages x en/he/ar x 1440/390 px) plus interaction flows in real headless Edge on the offline TEST profile. 9 bugs fixed (1 P1: Home said "JARVES is off" 2 min after start because health.json was only written on change; P2: 429 from static files, row keyboard access, Undo after save, runtime table overflow, Hebrew schedules in the English UI), 9 open P3 (Hebrew/Arabic string gaps, Self-check card layout, small a11y/phone items). Log review: Core log 0 WARN/ERROR; no unexplained entries.
+- BLOCKED (need Pass E hardware/accounts): live mic/camera states and the "What does he see?" preview, Google/Telegram setup, real captured Context trace.
+- Questions for the user: none new.
+
 ## Browser Skill (20 Oct 2026, SW-V3 P1.2) — [#17](https://github.com/igalgerman/JARVIS/issues/17), branch `v3-p1-browser`
 
 - Owner rule implemented in Python Core (`browser.py` service/policy/dashboard/CLI, `skills/browser.py` tools): **full control** (open/read/click/type) only on the owner's allow-list (`<state_dir>/browser_sites.json`, **default empty**, edited on the new dashboard **Browser** page or `jarvis browser allow|remove <site>`; no model tool can change it). Other sites: **read-only after an on-screen approval** (once per host per browser session). **Purchases/payments/credential entry always confirmed** (password / one-time-code / card fields, buy/pay/checkout buttons, payment forms, Luhn card numbers), decided from the real DOM element, value never shown in the prompt. Page text returned only under `untrusted_*` with a note; the camera taint guard (`camera/wire.install_taint_guard`, now parameterized) makes every non-browser side effect within 60 s ask first. Fresh in-memory context (no personal profile/cookies), downloads refused, service workers blocked, http/https only, ChatGPT/Claude account pages blocked, every top-level navigation (links/scripts/popups) route-checked, redirects re-checked after landing. Visible status: health component `browser` + dashboard page; logs carry host only.
@@ -758,6 +790,24 @@ Not verified on real hardware: audible timer ring on the real speaker, the Windo
 Built per docs/plans/INSTAGRAM_CHANNEL.md: `core/src/jarves/instagram_channel.py`, `jarvis instagram start|status|test|logout` (+ `serve` webhook receiver on 127.0.0.1, `refresh` long-lived token), feature `instagram` (off by default, SAFE_OFF, group Channels, bundle check, guide `instagram.toml`, capabilities row via features.register). Token/app secret/verify token only in secrets.env. Inbox (SQLite, dedup), DMs read aloud as untrusted data, LLM only drafts, `instagram_send` is destructive with impact None (exact text confirmed from every origin, one draft per send), 24h window checked at draft and send, audit log `instagram/audit.jsonl`. Tests: `tests/test_instagram.py` against a local fake Graph API (real HTTP) and a real webhook server.
 Unverified: never run against real Instagram/Meta (needs owner's Meta app + Business/Creator account); endpoint paths/fields (graph.instagram.com/v21.0 /me, /me/conversations, /me/messages, /refresh_access_token) follow Meta docs from memory and must be checked at first live run; no tunnel set up; declines at the prompt are not audited (the registry never calls the tool).
 Questions for the user: (1) Is the Instagram account Business/Creator? (2) Confirmation surface: voice+screen as built, or add Telegram buttons? (3) OK to run `jarvis instagram serve` behind a Cloudflare Tunnel, or poll only?
+## Approvals service + Helper skill (#17, branch v3-approvals, 20 Oct 2026)
+Report: [docs/reviews/SWV3_APPROVALS_REPORT.md](reviews/SWV3_APPROVALS_REPORT.md). One `ApprovalService`
+(`core/src/jarves/approvals.py`) behind `Core.ask_confirm` / `registry.confirm`: feature_set requests, tool
+confirmations, camera, Telegram/Instagram sends, Helper. Shown at once on an always-on-top Tk popup
+(`approval_popup.py`, own process), tray balloon, face dialog, dashboard `#/approvals`, voice/typed yes-no, CLI
+`jarvis approvals`. Default deny on timeout/shutdown/no channel; no answers from inside a tool; dedupe, 30 s
+cooldown after a deny, 6/min rate limit; audit `approvals/audit.jsonl`. Helper skill (`skills/helper.py`,
+feature `helper` off, SAFE_OFF): `shell_propose`, `install_propose` (winget/pip/npm, exact package/source/version),
+blocklist with typed 4-digit code, elevation and JARVES-data refused, timeout + process-tree kill, untrusted
+redacted output summary, audit. Owner decisions applied: Helper always asks (read-only allow-list not offered),
+popup window primary (no toast), Instagram send via approvals + voice.
+Unverified: the real popup on the owner's desktop (Hebrew/RTL, position, topmost over full-screen, pythonw from the
+background runtime), tray balloon, Godot `confirm.cancel` (no Godot binary here), voice "כן" in a live session
+(echo), real winget/pip/npm installs and UAC, Raspberry Pi. Full suite not run locally (low RAM): focused files only.
+Questions for the user: (1) Please trigger one approval (e.g. ask JARVES to turn on Contacts) and confirm the popup
+looks right and stays on top. (2) Timeout 60 s (Helper 120 s): OK? (3) Should the dashboard Approvals page also be
+reachable from the phone (dashboard_lan) for approvals, or PC-only?
+
 ## Questions for the user (from research, branch v3-research, docs/plans/)
 - Signing: SignPath OSS needs a public repo + OSI license; Azure Artifact Signing ~$9.99/mo, region-limited (verify price). Stay unsigned? Open-source the installer?
 - Instagram: is the account Business/Creator and linked to a Facebook Page? Confirm sends by voice, dashboard or Telegram?

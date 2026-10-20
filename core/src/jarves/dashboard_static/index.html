@@ -4,6 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>JARVES</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns=%27http://www.w3.org/2000/svg%27 viewBox=%270 0 32 32%27%3E%3Ccircle cx=%2716%27 cy=%2716%27 r=%2713%27 fill=%27%231e6bff%27/%3E%3Ccircle cx=%2716%27 cy=%2716%27 r=%275%27 fill=%27%23fff%27/%3E%3C/svg%3E">
 <link rel="stylesheet" href="/static/style.css">
 <link rel="stylesheet" href="/static/m4.css">
 <link rel="stylesheet" href="/static/shell.css">
@@ -29,6 +30,8 @@
 <script src="/static/browser.js" defer></script>
 <script src="/static/profiles.js" defer></script>
 <script src="/static/selfcheck.js" defer></script>
+<link rel="stylesheet" href="/static/approvals.css">
+<script src="/static/approvals.js" defer></script>
 <script src="/static/shell.js" defer></script>
 </head>
 <body>
@@ -47,6 +50,7 @@
       </div>
       <div class="nav-group" data-group="activity">
         <div class="nav-h" data-he="פעילות" data-en="Activity">Activity</div>
+        <a href="#/approvals" data-page="approvals"><span data-he="אישורים" data-en="Approvals">Approvals</span></a>
         <a href="#/conversations" data-page="conversations"><span data-he="שיחות" data-en="Conversations">Conversations</span></a>
         <a href="#/issues" data-page="issues"><span data-he="בעיות" data-en="Issues">Issues</span> <span class="count" id="issueCount"></span></a>
         <a href="#/selfcheck" data-page="selfcheck"><span data-he="בדיקה עצמית" data-en="Self-check">Self-check</span></a>

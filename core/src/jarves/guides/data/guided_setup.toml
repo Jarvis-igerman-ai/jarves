@@ -1,0 +1,53 @@
+order = 5
+category = "start"
+pages = ["connections"]
+features = ["guided_setup"]
+aliases = ["חיבור חשבונות", "חיבור מודרך", "jarvis connect", "connect", "הגדרה מודרכת", "guided setup", "לחבר גוגל", "לחבר טלגרם"]
+links = ["google_calendar", "telegram", "music", "wake_word"]
+title_he = "חיבור חשבונות מודרך"
+title_en = "Guided account setup"
+what_he = "פקודה אחת, jarvis connect, בודקת מה מחובר (גוגל, טלגרם, תוסף Pear, מילת ההפעלה) ומדריכה אותך רק במה שחסר: פותחת את הדפים הנכונים, מעתיקה ללוח מה להדביק, מזהה לבד שהטוקן או הקובץ הגיעו ומחברת את הצ'אט בטלגרם. פעם ביום היא גם מזכירה, בקול או בחלון, אם גוגל עדיין לא מחובר."
+what_en = "One command, jarvis connect, checks what is connected (Google, Telegram, the Pear plugin, the wake word) and guides you through only what is missing: it opens the right pages, copies what to paste, notices by itself that the token or file arrived, and pairs your Telegram chat. Once a day it also reminds you, by voice or a popup, while Google is not connected."
+say = [["תחבר לי את החשבונות", "Connect my accounts"], ["מה עוד לא מחובר?", "What is not connected yet?"]]
+expect_he = "בסוף מוצגת טבלה: מחובר, דולג או דורש טיפול, ולכל שורה הצעד הבא. הפקודה נכשלת (קוד יציאה שונה מאפס) רק אם שלב באמת נכשל."
+expect_en = "A table at the end: connected, skipped or needs attention, with the next step for each row. The command exits non-zero only when a step really failed."
+test = "feature"
+test_he = "הבדיקה רק מוודאת שהרכיב מותקן. את המצב האמיתי רואים ב-jarvis connect --status (לא משנה כלום) או בעמוד החיבורים."
+test_en = "The check only sees that the component is installed. See the real state with jarvis connect --status (changes nothing) or on the Connections page."
+cost_he = "חינם. אין שום בקשה בתשלום."
+cost_en = "Free. No paid request is made."
+privacy_he = "הלוח נקרא רק אם הסכמת, רק עד שמופיע טוקן של בוט טלגרם, והוא מנוקה אחרי השימוש. הטוקן והמפתחות נשמרים רק במחשב הזה. שום דבר לא נשלח לשום מקום חוץ מהשירותים שאתה מחבר."
+privacy_en = "The clipboard is read only if you agree, only until a Telegram bot token appears, and it is cleared after use. Tokens and keys stay on this computer. Nothing is sent anywhere except to the services you connect."
+
+[[steps]]
+he = "בטרמינל הקלידו jarvis connect --status כדי לראות מה מחובר (לא משנה כלום)."
+en = "In a terminal type jarvis connect --status to see what is connected (it changes nothing)."
+action = "command:jarvis connect --status"
+
+[[steps]]
+he = "הקלידו jarvis connect ועקבו אחרי ההוראות. אפשר להריץ שוב בכל זמן: הוא עושה רק את מה שחסר."
+en = "Type jarvis connect and follow the instructions. You can run it again any time: it does only what is missing."
+action = "command:jarvis connect"
+
+[[steps]]
+he = "או בעמוד החיבורים בלוח הבקרה: לחצו 'הפעלת הגדרה מודרכת'."
+en = "Or on the dashboard Connections page: press Run guided setup."
+action = "open:#/connections"
+
+[[problems]]
+he = "לא רוצים את התזכורת היומית על גוגל"
+en = "I do not want the daily Google reminder"
+fix_he = "הקלידו jarvis connect --reminders off (ו-on כדי להחזיר)."
+fix_en = "Type jarvis connect --reminders off (and on to bring it back)."
+
+[[problems]]
+he = "הטוקן של טלגרם לא זוהה מהלוח"
+en = "The Telegram token was not detected on the clipboard"
+fix_he = "הטוקן צריך להיות מועתק במלואו מ-BotFather (מספר, נקודתיים ואותיות). אם סירבת למעקב אחרי הלוח אפשר להקליד אותו (הקלדה מוסתרת)."
+fix_en = "Copy the whole token from BotFather (digits, a colon, letters). If you declined clipboard watching you can type it (hidden input)."
+
+[[problems]]
+he = "Pear לא עונה"
+en = "Pear does not answer"
+fix_he = "פותחים את Pear Desktop, ובתפריט Plugins מסמנים את API Server (כתובת 127.0.0.1, פורט 26538). אחר כך jarvis connect --only pear."
+fix_en = "Open Pear Desktop and tick API Server in the Plugins menu (host 127.0.0.1, port 26538). Then jarvis connect --only pear."

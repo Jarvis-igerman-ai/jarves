@@ -41,7 +41,7 @@ Source: [developers.openai.com/api/docs/pricing](https://developers.openai.com/a
 |---|---|---|
 | Request stalled 98 s (never answered: the conversation ended while waiting) | high | "...מה המצב של מניית אינטל" at 17:14:57. It got 4 fillers ("שנייה, אני בודק." ...), the user asked "למה לוקח כל כך הרבה זמן", and the only backend response completed in 4.9 s with nothing after it. |
 | Dead air while waiting: 54 s of silence | high | From 17:15:41 until the end, nothing was said or done. |
-| Confusing filler "סגור" said 4× – the user asked what it means | high | "בטח. סוגר.", "סגור." ×2, "סגור.השתקתי…", then the user said "לא הבנתי מה אתה אומר כל פעם גור גור?" |
+| Confusing filler "סגור" said 4× – the user asked what it means | high | "בטח. סוגר.", "סגור." ×2, "סגור.השתקתי…", then the owner asked what the filler word meant |
 | The user did not understand JARVES | medium | Same moment, with the two preceding replies. |
 | The user had to repeat himself | medium | "בסדר משה עכשיו", then "בסדר, מה השעה עכשיו". GPT-Live misheard "מה השעה". |
 | Model kept answering while the user was talking | medium | `early_response_drops` = 12. |

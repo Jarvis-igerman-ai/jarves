@@ -64,7 +64,8 @@ async def execute(cfg, home: Path, text: str, *, interactive=False, read=input, 
             return ok
         except EOFError:
             return False
-    registry.confirm = confirm
+    from .approvals import audited
+    registry.confirm = audited(home, confirm)    # same approvals audit log as the Core
     registry.register(ClockSkill())
     registry.register(MemorySkill(memory))
     registry.register(LocalContactsSkill(memory))

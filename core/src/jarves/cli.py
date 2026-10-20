@@ -148,6 +148,7 @@ async def _run_desktop(core, launcher=None) -> None:
     print("Loading JARVES... the room opens after voice is ready.", flush=True)
     viewer = await (launcher or _launch_viewer)(core.cfg.link.port)
     viewer_done = asyncio.create_task(viewer.wait())
+    core.preopened_viewer = viewer             # the Runtime owns this window from the start: no second one on `show`
     stop = asyncio.create_task(core.stop_event.wait())
 
     async def boot():
@@ -402,7 +403,12 @@ def cmd_memory(a, cfg, home) -> int:
             print(f"{r['id']:4d}  {r['created'][:10]}  {r['text']}")
         print(f"({m.count()} memories)")
     elif a.action == "delete":
-        print("deleted" if m.delete(int(a.id)) else "not found")
+        try:
+            mid = int(a.id)
+        except (TypeError, ValueError):
+            print("memory delete needs the number from `jarvis memory list`, e.g. jarvis memory delete 12", file=sys.stderr)
+            return 2
+        print("deleted" if m.delete(mid) else "not found")
     elif a.action == "clear":
         if a.yes or input("Delete ALL memories? type yes: ").strip() == "yes":
             print(f"deleted {m.clear()} memories")
@@ -426,7 +432,8 @@ def cmd_personal(a, cfg, home) -> int:
 
     async def confirm(prompt):
         return input(prompt + "\nType yes to confirm: ").strip().lower() == "yes"
-    reg.confirm = confirm
+    from .approvals import audited
+    reg.confirm = audited(home, confirm)          # same approvals audit log as the Core
 
     async def run():
         if a.cmd == "contacts" and a.action != "search":
@@ -688,10 +695,13 @@ def cmd_setup(a, cfg, home) -> int:
         from .google_auth import cmd_google
         return cmd_google(Namespace(action="start", client=None, calendar_only=False, send=False, downloads=None,
                                     restart=False, calendar_write=False, contacts=False, config=a.config), cfg, home)
+    def connect_start() -> int:
+        from .connect import Connector
+        return Connector(home, cfg).run()
     try:
         wiz = sw.Wizard(cfg, home, config_path=path, answers=answers, defaults=getattr(a, "defaults", False),
                         lang=getattr(a, "lang", None), restart=getattr(a, "restart", False),
-                        actions={"chatgpt_login": chatgpt_login, "google_start": google_start})
+                        actions={"chatgpt_login": chatgpt_login, "google_start": google_start, "connect_start": connect_start})
         return wiz.run()
     except sw.AnswerError as e:
         print(f"answers: {e}", file=sys.stderr)
@@ -765,16 +775,113 @@ def set_toml_value(path: Path, section: str, key: str, literal: str) -> None:
     path.write_text(text, encoding="utf-8")
 
 
+def _confirm_or_none(v):
+    """The same local speech check the Core uses (voice.wake_confirm), or None when off / not loadable."""
+    if not v.wake_confirm:
+        return None
+    from .voice.wake_confirm import WhisperConfirm
+    c = WhisperConfirm(v.wake_confirm_model)
+    ok, msg = c.check()
+    if not ok:
+        print(f"(two-stage check off for this test: {msg})")
+    return c if ok else None
+
+
+async def _wake_listen_test(det, *, mic_factory, seconds: float, phrase: str, threshold: float, v,
+                            confirm=None, out=print) -> dict:
+    """`jarvis wake test`: listen `seconds`, report per attempt the level, wake score and (two-stage) what the local
+    speech check heard, then ONE verdict with the exact fix (voice/wake_calib.diagnose). Audio stays in RAM."""
+    import time as _t
+    import numpy as np
+    from .voice.audio import AudioUnavailable
+    from .voice.wake_calib import diagnose
+    from .voice.wake_confirm import AutoGain, SpeechMonitor, name_match
+    from .voice.wakeword import level_meter
+    agc = AutoGain(initial_gain_db=v.wake_gain_db) if v.wake_agc else None
+    mon = SpeechMonitor(min_score=0.0)
+    ring = np.zeros(int(16000 * 2.5), np.int16)
+    gate = v.wake_gate if confirm is not None else threshold
+    attempts: list[dict] = []
+    cur = {"score": 0.0}
+    best, n, nonzero = 0.0, 0, False
+    out(f'Say "{phrase}" 3-4 times with a pause between, normally, from where you will sit.  ({seconds} s)\n')
+    mic = mic_factory()
+    t_end = None
+    try:
+        async for chunk in mic.mic_chunks(16000, 2560):
+            t_end = t_end or _t.monotonic() + seconds
+            n += 1
+            raw = np.frombuffer(chunk, "<i2")
+            nonzero = nonzero or bool(np.abs(raw).max() > 2) if raw.size else nonzero
+            fed = agc.process(chunk) if agc is not None else chunk
+            a = np.frombuffer(fed, "<i2")
+            ring = np.roll(ring, -len(a))
+            ring[-len(a):] = a
+            det.feed(fed)
+            sc = float(det.last_score)
+            best = max(best, sc)
+            before = mon.bursts
+            mon.feed(chunk, sc)
+            if mon._speech_ms:
+                cur["score"] = max(cur["score"], sc)
+            if mon.bursts > before:                         # one utterance ended: report it
+                at = {"level_db": mon.last_burst_db, "score": round(cur["score"], 3), "heard": None, "match": None}
+                if confirm is not None and cur["score"] >= gate:
+                    text = confirm.transcribe(ring.astype(np.float32) / 32768.0)
+                    at["heard"], at["match"] = text, name_match(text)
+                attempts.append(at)
+                cur["score"] = 0.0
+                ok = at["score"] >= threshold or at["match"]
+                out(f"\r attempt {len(attempts)}: level {at['level_db']:.0f} dBFS, wake score {at['score']:.2f}"
+                    + (f", heard \"{at['heard']}\"" if at["heard"] is not None else "")
+                    + ("  -> would WAKE" if ok else "  -> no wake") + " " * 20)
+            lv = level_meter(chunk)
+            bar = "#" * int(sc * 30)
+            out(f"\r mic {'|' * int(lv * 12):<12} wake {sc:4.2f} {bar:<30} best {best:4.2f}   ", end="", flush=True)
+            if _t.monotonic() >= t_end:
+                break
+    except AudioUnavailable as e:
+        return {"error": f"{e.code}: {e.message}. {e.action}"}
+    finally:
+        mic.close()
+    out("\n")
+    speech = [x["level_db"] for x in attempts if x["level_db"] is not None]
+    speech_db = max(speech) if speech else None
+    peaks = [x["score"] for x in attempts if x["score"] >= 0.1 or x["match"]]
+    near = sum(1 for x in attempts if gate <= x["score"] < threshold and not x["match"])
+    verdict, advice = diagnose(floor_db=mon.floor_db, speech_db=speech_db, best_score=best, attempts=len(attempts),
+                               gate=gate, threshold=threshold, confirmed=sum(bool(x["match"]) for x in attempts),
+                               digital_silence=n > 5 and not nonzero)
+    out(f"Room noise {mon.floor_db:.0f} dBFS, loudest speech "
+        + (f"{speech_db:.0f} dBFS" if speech_db is not None else "none")
+        + f", {len(attempts)} attempt(s), best wake score {best:.2f} (instant wake at {threshold}"
+        + (f", local speech check from {gate}" if confirm is not None else "") + f"), near misses {near}.")
+    out(f"{verdict}: {advice}")
+    return {"verdict": verdict, "advice": advice, "floor_db": mon.floor_db, "speech_db": speech_db, "best": best,
+            "attempts": attempts, "peaks": peaks, "near_misses": near}
+
+
 def cmd_wake(a, cfg, home) -> int:
     """Calibrate "Hey Jarvis" to YOUR voice and mic: live score bar, then a recommended threshold."""
     import time as _time
     from .voice.audio import AudioUnavailable, StreamingAudio
-    from .voice.wakeword import WakeWordUnavailable, level_meter, make_detector
+    from .voice.wakeword import WakeWordUnavailable, make_detector
     from .identity import Identity
     Identity(home, cfg).apply_to_config(cfg)            # the chosen wake model / phrase (dashboard, wake train)
     v = cfg.voice
     if a.action == "train":
         return _wake_train(a, cfg, home)
+    if a.action == "eval":
+        return _wake_eval(a, cfg, home)
+    if getattr(a, "list_mics", False):
+        import sounddevice as sd
+        from .app import _mic_name
+        print(f"In use now: {_mic_name(v.input_device)}  (voice.input_device = {v.input_device!r})")
+        for i, d in enumerate(sd.query_devices()):
+            if d.get("max_input_channels", 0) > 0:
+                print(f"  {i:3d}  {d['name']}")
+        print("Pick one with:  voice.input_device = <number or name>  in config.toml, then jarvis wake test again.")
+        return 0
     model = a.model or v.wake_word
     phrase = v.wake_phrase if not a.model else Path(a.model).stem.replace("_", " ")
 
@@ -792,45 +899,22 @@ def cmd_wake(a, cfg, home) -> int:
         print(f"Microphone: {_mic_name(v.input_device)}   wake model: {Path(model).name}   threshold: {threshold}")
         if a.false_wakes:
             return await false_wakes(det, threshold)
-        print(f'Say "{phrase}" 3-4 times with a pause between, normally, from where you will sit.  ({a.seconds} s)\n')
-        mic = StreamingAudio(v.input_device, v.output_device, rate=16000)
-        peaks: list[float] = []
-        cur_peak, best, loud = 0.0, 0.0, 0.0
-        t_end = _time.monotonic() + a.seconds
-        gap = 0
-        try:
-            async for chunk in mic.mic_chunks(16000, 2560):
-                det.feed(chunk)
-                sc, lv = det.last_score, level_meter(chunk)
-                loud = max(loud, lv)
-                if sc > 0.1:
-                    cur_peak, gap = max(cur_peak, sc), 0
-                else:
-                    gap += 1
-                    if gap > 8 and cur_peak > 0:                     # ~0.6 s of quiet closes one utterance
-                        peaks.append(cur_peak)
-                        cur_peak = 0.0
-                best = max(best, sc)
-                bar = "#" * int(sc * 30)
-                mark = "  <-- heard it" if sc >= v.wake_threshold else ""
-                print(f"\r mic {'|' * int(lv * 12):<12} wake {sc:4.2f} {bar:<30} best {best:4.2f}{mark}   ", end="", flush=True)
-                if _time.monotonic() >= t_end:
-                    break
-        except AudioUnavailable as e:
-            print(f"\n{e.code}: {e.message}. {e.action}")
+        confirm = None if a.model else _confirm_or_none(v)
+        res = await _wake_listen_test(det, mic_factory=lambda: StreamingAudio(v.input_device, v.output_device,
+                                                                               rate=16000),
+                                      seconds=a.seconds, phrase=phrase, v=v, confirm=confirm,
+                                      threshold=max(threshold, v.wake_accept) if confirm is not None else threshold)
+        if res.get("error"):
+            print(res["error"])
             return 1
-        finally:
-            mic.close()
-        if cur_peak > 0:
-            peaks.append(cur_peak)
-        print("\n")
-        if loud < 0.05:
-            print("The microphone is (almost) silent: check Windows Settings > Privacy & security > Microphone, the "
-                  "selected input device, and that it is not muted.  Run `jarvis doctor`.")
-            return 1
-        if not peaks or best < 0.15:
-            print(f"Never heard it (best score {best:.2f}). Try: say it clearer as \"HEY JAR-VIS\", closer to the mic, or "
-                  "pick another microphone (voice.input_device in config.toml).")
+        from .voice.wake_calib import save_calibration
+        mic_name = _mic_name(v.input_device)
+        cal = save_calibration(home, mic_name, floor_db=res["floor_db"], speech_db=res["speech_db"],
+                               verdict=res["verdict"], by="wake test")
+        print(f"Saved the level calibration for {mic_name}: starting gain +{cal['gain_db']} dB "
+              f"(applies at the next start).")
+        peaks = res["peaks"]
+        if res["verdict"] not in ("OK", "NEAR_MISS") or not peaks:
             return 1
         rec = round(min(0.5, max(0.15, 0.6 * min(peaks))), 2)
         print(f"Heard {len(peaks)} attempt(s), scores {', '.join(f'{x:.2f}' for x in peaks)}.")
@@ -874,6 +958,39 @@ def cmd_wake(a, cfg, home) -> int:
               f"Highest score {best:.2f}. Aim for under 0.5 per hour; raise the threshold if it is higher.")
         return 0 if hits / hours <= 0.5 else 1
     return asyncio.run(go())
+
+
+def _wake_eval(a, cfg, home) -> int:
+    """`jarvis wake eval`: synthetic positives/negatives through the real WakeListener (voice/wake_eval.py):
+    the plain wake model at voice.wake_threshold vs the configured pipeline (AGC / two-stage). Free and local
+    unless --openai (OpenAI TTS voices, metered once, then cached)."""
+    import asyncio as _aio
+    import json as _json
+    from .voice import wake_confirm  # noqa: F401  (faster-whisper before WinRT)
+    from .voice.wake_eval import build_corpus, evaluate_pipeline, save_report
+    from .voice.wakeword import make_detector, make_wake_detector
+    from .config import load_secrets
+    v = cfg.voice
+    if a.openai:
+        load_secrets(home)
+        print("Using OpenAI TTS voices for extra speakers (metered, about US$0.30 the first time, then cached).")
+    cost: dict = {}
+    corpus = build_corpus(home / "wake" / "eval_cache", use_openai=a.openai, minutes=a.minutes,
+                          progress=lambda s: print("  " + s, flush=True), cost=cost)
+    pipes = {f"single-stage {v.wake_word}@{v.wake_threshold}": lambda: make_detector(v.wake_word, v.wake_threshold),
+             "configured (" + ("AGC + " if v.wake_agc else "") + (f"two-stage gate {v.wake_gate} / instant "
+              f"{max(v.wake_threshold, v.wake_accept)} / {v.wake_confirm_model}" if v.wake_confirm
+              else f"single-stage @{v.wake_threshold}") + ")": lambda: make_wake_detector(v)}
+    rows = []
+    for name, make in pipes.items():
+        print(f"running {name} ...", flush=True)
+        rows.append(_aio.run(evaluate_pipeline(name, make, corpus, progress=lambda s: print("  " + s, flush=True))))
+    out = Path(a.out) if a.out else home / "wake" / "eval_report.json"
+    save_report(out, rows, {**corpus.info, "openai_cost": cost})
+    print(f"\nSaved {out}. Synthetic voices only: confirm with your own voice using  jarvis wake test.")
+    print(_json.dumps([{"pipeline": r["pipeline"], "detection": r["detection"]["rate"],
+                        "false_per_hour": r["negatives"]["per_hour"]} for r in rows], indent=1))
+    return 0
 
 
 def _wake_train(a, cfg, home) -> int:
@@ -1351,8 +1468,17 @@ def main(argv: list[str] | None = None) -> int:
     add_instagram_cli(sub)                    # V3 P1: jarvis instagram start / status / test / logout (+ serve, refresh)
     add_telegram_cli(sub)                     # V3 P1: jarvis telegram start / status / test / logout
     add_home_cli(sub)                         # V3 P1: jarvis home start / status / test / logout
+    from .connect import add_cli as add_connect_cli, cmd_connect
+    add_connect_cli(sub)                      # owner request 20 Oct: jarvis connect (guided setup of every account)
+    from .approvals import add_cli as add_approvals_cli, cmd_approvals
+    add_approvals_cli(sub)                    # V3: jarvis approvals list / approve / deny / history
     wk = sub.add_parser("wake", help="calibrate the wake word to your voice and mic, or train a new wake phrase")
-    wk.add_argument("action", choices=["test", "train"])
+    wk.add_argument("action", choices=["test", "train", "eval"],
+                    help="test = live check of your voice + mic with an exact fix; train = new phrase; "
+                         "eval = measured detection rate / false wakes per hour on a synthetic corpus")
+    wk.add_argument("--list-mics", action="store_true", help="test: list the input devices and exit")
+    wk.add_argument("--openai", action="store_true", help="eval: add OpenAI TTS voices (metered once, cached)")
+    wk.add_argument("--minutes", type=float, default=24.0, help="eval: minutes of non-wake audio (default 24)")
     wk.add_argument("phrase", nargs="*", help="train: the new phrase in Latin letters, e.g. \"hey max\"")
     wk.add_argument("--seconds", type=int, default=20)
     wk.add_argument("--apply", action="store_true", help="test: save the recommended threshold; train: use the "
@@ -1435,8 +1561,8 @@ def main(argv: list[str] | None = None) -> int:
             "diagnose": cmd_diagnose, "features": cmd_features, "help": cmd_help, "google": cmd_google,
             "backup": cmd_backup, "restore": cmd_restore, "usage": cmd_usage, "start": cmd_start,
             "show": cmd_display, "hide": cmd_display, "autostart": cmd_autostart,
-            "update": cmd_update, "browser": cmd_browser, "telegram": cmd_telegram, "instagram": cmd_instagram, "home": cmd_home,
-            "profile": profiles.cmd_profile}[a.cmd](a, cfg, home)
+            "update": cmd_update, "browser": cmd_browser, "connect": cmd_connect, "telegram": cmd_telegram, "instagram": cmd_instagram, "home": cmd_home,
+            "profile": profiles.cmd_profile, "approvals": cmd_approvals}[a.cmd](a, cfg, home)
 
 
 if __name__ == "__main__":

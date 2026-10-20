@@ -114,15 +114,15 @@ button.ghost { background: transparent; text-align: start; color: var(--text-2);
 .evidence div { unicode-bidi: plaintext; }
 .evidence .k { color: var(--muted); }
 /* chart */
-.chart { position: relative; height: 180px; display: flex; align-items: flex-end; gap: 6px; padding: 8px 4px 0;
+.chart { position: relative; height: 180px; display: flex; align-items: flex-end; gap: 6px; max-width: 100%; padding: 8px 4px 0;
   border-bottom: 1px solid var(--line); }
-.bar { flex: 1; display: flex; flex-direction: column-reverse; gap: 2px; min-width: 6px; height: 100%;
+.bar { flex: 1; display: flex; flex-direction: column-reverse; gap: 2px; min-width: 3px; height: 100%;
   justify-content: flex-start; cursor: default; }
 .bar .seg { border-radius: 2px; min-height: 0; }
 .bar .seg:last-child { border-start-start-radius: 4px; border-start-end-radius: 4px; }
 .bar:hover .seg { filter: brightness(1.1); }
 .xlabels { display: flex; gap: 6px; padding: 4px 4px 0; font-size: 11px; color: var(--muted); }
-.xlabels span { flex: 1; text-align: center; min-width: 6px; overflow: hidden; }
+.xlabels span { flex: 1; text-align: center; min-width: 3px; overflow: hidden; }
 .legend { display: flex; gap: 16px; font-size: 12px; color: var(--text-2); margin: 8px 0 0; }
 .legend i { display: inline-block; width: 10px; height: 10px; border-radius: 3px; margin-inline-end: 6px;
   vertical-align: -1px; }

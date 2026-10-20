@@ -497,6 +497,32 @@ feat.register("profiles", "פרופילים (משתמשים ופרופיל בד�
 
 
 # ---------------------------------------------------------------------- the voice Skill
+_HE_LATIN = {"ב": "b", "ג": "g", "ד": "d", "ה": "h", "ו": "v", "ז": "z", "ח": "h", "ט": "t", "י": "y", "כ": "k",
+             "ך": "k", "ל": "l", "מ": "m", "ם": "m", "נ": "n", "ן": "n", "ס": "s", "פ": "p", "ף": "p", "צ": "tz",
+             "ץ": "tz", "ק": "k", "ר": "r", "ש": "sh", "ת": "t", "א": "", "ע": ""}
+
+
+def _skeleton(s: str) -> str:
+    """Consonants only, Hebrew transliterated: 'dana' / 'דנה' -> 'dn', 'test' / 'טסט' -> 'tst'."""
+    s = "".join(_HE_LATIN.get(ch, ch) for ch in s.strip().lower())
+    s = s.replace("ch", "h").replace("w", "v").replace("c", "k").replace("ph", "p")
+    return re.sub(r"[^a-z0-9]|[aeiouyhv]", "", s)
+
+
+def spoken_match(said: str, names: list[str]) -> str | None:
+    """The profile the user named: an exact (valid) name, else the ONE profile whose consonants match what was said
+    (a Hebrew-spoken "דנה" -> "dana"). None when nothing or more than one matches."""
+    try:
+        n = valid_name(said)
+        if n in names:
+            return n
+    except ProfileError:
+        pass
+    sk = _skeleton(said)
+    hits = [x for x in names if sk and _skeleton(x) == sk]
+    return hits[0] if len(hits) == 1 else None
+
+
 def make_skill(core):
     """profile_list (read) and profile_switch (action): switching asks on the SCREEN first (registry.confirm, never a
     spoken yes alone), then starts the other profile's Core with its window and quits this one after the goodbye.
@@ -525,20 +551,22 @@ def make_skill(core):
 
             async def switch(a: SwitchArgs):
                 cur = info(core.home)["name"]
-                try:
-                    n = valid_name(a.name)
-                except ProfileError:
-                    return ToolResult(False, f"אין פרופיל בשם {a.name}.", code="PROFILE_UNKNOWN")
-                if not exists(n, base):
-                    names = [r["name"] for r in list_profiles(base, cur)]
-                    return ToolResult(False, f"אין פרופיל בשם {n}. יש: {', '.join(names)}.", {"profiles": names},
-                                      "PROFILE_UNKNOWN")
+                names = [r["name"] for r in list_profiles(base, cur)]
+                n = spoken_match(a.name, names)       # campaign 20 Oct: "דנה" said aloud is the profile "dana"
+                if n is None:
+                    return ToolResult(False, f"אין פרופיל בשם {a.name}. יש: {', '.join(names)}.", {
+                        "profiles": names, "rule": "If the user meant one of these, call profile_switch again with "
+                                                   "that exact name. Never offer to create a profile that is listed."},
+                        "PROFILE_UNKNOWN")
                 if n == cur:
                     return ToolResult(True, f"אנחנו כבר בפרופיל {n}.", {"current": cur}, "PROFILE_ALREADY")
                 confirm = getattr(core.registry, "confirm", None)
                 label = f"{n} ({HE['TEST PROFILE']})" if info(home_for(n, base)).get("test") else n
-                ok = await confirm(f"לעבור לפרופיל {label}? ג'ארוויס ייסגר וייפתח בפרופיל הזה. / Switch to profile "
-                                   f"{n}? JARVES closes and opens in that profile.") if confirm else False
+                prompt = (f"לעבור לפרופיל {label}? ג'ארוויס ייסגר וייפתח בפרופיל הזה. / Switch to profile "
+                          f"{n}? JARVES closes and opens in that profile.")
+                # on the SCREEN only (design above; campaign 20 Oct: the plain confirm also took a spoken "כן")
+                meta = {"voice": False, "risk": "medium"} if getattr(confirm, "accepts_meta", False) else {}
+                ok = await confirm(prompt, **meta) if confirm else False
                 if not ok:
                     logs.info("profiles", "PROFILE_SWITCH_DECLINED", "profile switch not approved on the screen",
                               profile=n)
