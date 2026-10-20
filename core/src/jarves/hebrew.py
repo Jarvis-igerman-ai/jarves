@@ -113,6 +113,12 @@ TEXT: dict[str, str] = {
     "UNIT test_selfcheck.py (real store/log/scheduler/autonomy in tmp dirs, synthetic log files)":
         "בדיקות יחידה: test_selfcheck.py (אחסון, יומן, מתזמן ועצמאות אמיתיים בתיקיות זמניות, קובצי יומן סינתטיים)",
     "not yet run on the owner's real logs and Core": "טרם הורץ על היומנים וה-Core האמיתיים של הבעלים",
+    "one command, jarvis connect, checks every account (Google, Telegram, Pear, wake word) and walks you through only what is missing; reminds you once a day while Google is not connected":
+        "פקודה אחת, jarvis connect, בודקת כל חשבון (גוגל, טלגרם, Pear, מילת ההפעלה) ומדריכה אותך רק במה שחסר; מזכירה פעם ביום כל עוד גוגל לא מחובר",
+    "UNIT test_connect.py (real HTTP fake Telegram with getUpdates pairing, fake Pear, fake Google, fake clipboard, tmp Downloads)":
+        "בדיקות יחידה: test_connect.py (טלגרם מדומה ב-HTTP אמיתי עם התאמה דרך getUpdates, Pear מדומה, גוגל מדומה, לוח מדומה, תיקיית הורדות זמנית)",
+    "never run against the owner's real Telegram, Google or Pear accounts":
+        "מעולם לא הורץ מול חשבונות הטלגרם, הגוגל וה-Pear האמיתיים של הבעלים",
     "pure Python + SQLite (/proc/meminfo for memory); never run on a Raspberry Pi (no device in the test setup)":
         "Python ו-SQLite בלבד (/proc/meminfo לזיכרון); טרם הורץ על Raspberry Pi (אין מכשיר במערך הבדיקה)",
     "countdown timers and alarms; the Core rings them aloud even when the window is closed":

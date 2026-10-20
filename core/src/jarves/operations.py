@@ -21,6 +21,7 @@ import time
 
 from . import alerts as alerts_mod
 from . import autonomy as autonomy_mod
+from . import connect as connect_mod
 from . import features as feat
 from . import lists as lists_mod
 from . import logs
@@ -208,6 +209,7 @@ class Operations:
         self._task: asyncio.Task | None = None
         self._timer_task: asyncio.Task | None = None
         self._synced = 0.0
+        self._nudge_checked = 0.0
         try:                                         # truthful health: no zone data = no correct schedule times
             tz = self.scheduler.tz()
             n = len(self.db.rows("SELECT id FROM jobs WHERE status='active'"))
@@ -225,7 +227,19 @@ class Operations:
         # owner request 20 Oct: self-check (voice tools, weekly job, after an unclean stop / an error burst)
         self.selfcheck = selfcheck_mod.attach(self.core, self)
 
+    async def _connect_nudge(self) -> None:
+        """Owner request 20 Oct: once a day at most, remind that Google is not connected (connect.maybe_nudge)."""
+        now = time.time()
+        if now - self._nudge_checked < connect_mod.NUDGE_CHECK_EVERY_S:
+            return
+        self._nudge_checked = now
+        try:
+            connect_mod.maybe_nudge(self.db, self.alerts, home=self.core.home, features=self.core.features)
+        except Exception:
+            logs.error("connect", "CONNECT_NUDGE_FAILED", "setup reminder failed", exc=True)
+
     async def _after_tick(self) -> None:
+        await self._connect_nudge()
         await self.alerts.flush()
         now = time.time()
         if now - self._synced >= AUTONOMY_SYNC_S:
