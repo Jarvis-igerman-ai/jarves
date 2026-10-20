@@ -1,0 +1,53 @@
+order = 24
+category = "system"
+features = ["telegram"]
+aliases = ["טלגרם", "telegram", "בוט טלגרם", "תשלח לי בטלגרם", "botfather"]
+error_codes = ["TELEGRAM_NOT_PAIRED", "TELEGRAM_BAD_TOKEN", "TELEGRAM_BLOCKED", "TELEGRAM_UNREACHABLE", "TELEGRAM_UNKNOWN_DRAFT"]
+title_he = "הודעות בטלגרם"
+title_en = "Telegram messages"
+what_he = "ג'ארביס שולח הודעה לצ'אט הטלגרם שלכם, רק אחרי שהקריא לכם את הטקסט המדויק ואישרתם. אתם יוצרים את הבוט, והטוקן נשאר במחשב."
+what_en = "JARVES sends a message to your own Telegram chat, only after reading the exact text back and you approving. You create the bot; the token stays on this computer."
+say = [["תשלח לי בטלגרם שהכביסה מוכנה", "Send me on Telegram that the laundry is ready"]]
+expect_he = "הוא מקריא את ההודעה ושואל. רק אחרי \"כן\" שלכם (ואישור על המסך) היא יוצאת."
+expect_en = "He reads the message back and asks. Only after your yes (and the on-screen approval) does it go out."
+test = "feature"
+test_he = "הבדיקה רק בודקת שיש טוקן וצ'אט מחובר. היא לא שולחת כלום."
+test_en = "The check only sees that a token and a paired chat exist. It sends nothing."
+cost_he = "חינם (Telegram Bot API)."
+cost_en = "Free (Telegram Bot API)."
+privacy_he = "רק הטקסט שאישרתם נשלח לשרתי טלגרם, ורק לצ'אט שחיברתם. הטוקן נשמר רק במחשב הזה."
+privacy_en = "Only the text you approved goes to Telegram's servers, only to the chat you paired. The token stays on this computer."
+
+[[steps]]
+he = "בטלגרם: פתחו את @BotFather, שלחו /newbot ובחרו שם וכתובת שמסתיימת ב-bot. העתיקו את הטוקן."
+en = "In Telegram: open @BotFather, send /newbot, pick a name and a username ending in bot. Copy the token."
+
+[[steps]]
+he = "בטרמינל הקלידו jarvis telegram start, הדביקו את הטוקן ושלחו לבוט הודעה כשהאשף מבקש."
+en = "In a terminal type jarvis telegram start, paste the token and send the bot a message when the wizard asks."
+action = "command:jarvis telegram start"
+check = "available:telegram"
+
+[[steps]]
+he = "הדליקו את המתג \"הודעות בטלגרם\" (כבוי כברירת מחדל) ולחצו \"בדוק עכשיו\"."
+en = "Switch on \"Telegram messages\" (off by default) and press Test now."
+action = "feature_on:telegram"
+check = "active:telegram"
+
+[[problems]]
+he = "הוא אומר שטלגרם לא מחובר"
+en = "He says Telegram is not set up"
+fix_he = "הריצו jarvis telegram start."
+fix_en = "Run jarvis telegram start."
+
+[[problems]]
+he = "הטוקן לא תקף"
+en = "The token is rejected"
+fix_he = "ב-BotFather שלחו /token, העתיקו מחדש והריצו jarvis telegram start."
+fix_en = "In BotFather send /token, copy it again and run jarvis telegram start."
+
+[[problems]]
+he = "ההודעה לא מגיעה"
+en = "The message does not arrive"
+fix_he = "פתחו את הבוט בטלגרם ולחצו Start (אם חסמתם אותו, בטלו את החסימה)."
+fix_en = "Open the bot in Telegram and press Start (unblock it if you blocked it)."

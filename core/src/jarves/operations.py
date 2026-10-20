@@ -199,6 +199,8 @@ class Operations:
                       sandbox_mod.make_skill(self.sandbox), alerts_mod.make_skill(self.alerts),
                       autonomy_mod.make_skill(self.autonomy, reg)]:
             reg.register(skill)
+        from .briefing import register_briefing
+        register_briefing(reg, self.db)                # V3 P1: morning briefing (calls the Calendar/Gmail tools)
         reg.allowed_actions |= (sched_mod.ALLOWED_ACTIONS | notes_mod.ALLOWED_ACTIONS | sandbox_mod.ALLOWED_ACTIONS
                                 | alerts_mod.ALLOWED_ACTIONS | autonomy_mod.ALLOWED_ACTIONS
                                 | lists_mod.ALLOWED_ACTIONS | timers_mod.ALLOWED_ACTIONS)

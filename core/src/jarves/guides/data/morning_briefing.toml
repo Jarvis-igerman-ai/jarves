@@ -1,0 +1,45 @@
+order = 26
+category = "everyday"
+features = ["morning_briefing"]
+suggest = true
+aliases = ["תדריך בוקר", "בוקר טוב", "תדריך", "morning briefing", "briefing", "מה יש היום"]
+error_codes = ["BRIEFING_PARTIAL", "BRIEFING_EMPTY", "WEATHER_UNAVAILABLE", "GOOGLE_NOT_CONNECTED"]
+links = ["google_calendar", "scheduler"]
+title_he = "תדריך בוקר"
+title_en = "Morning briefing"
+what_he = "יומן להיום, מיילים חשובים שלא נקראו, מזג אוויר ותזכורות ורשימות, הכול בבת אחת. אם גוגל לא מחובר, שאר החלקים עדיין עובדים."
+what_en = "Today's calendar, important unread mail, weather, reminders and lists in one go. If Google is not connected the other parts still work."
+say = [["בוקר טוב, מה יש היום?", "Good morning, what's on today?"], ["תן לי את התדריך", "Give me the briefing"]]
+expect_he = "הוא מסכם בקצרה. במיילים הוא אומר רק כמה ומי שלח, ושואל אם להקריא."
+expect_en = "He summarises briefly. For mail he only says how many and from whom, and asks before reading."
+test_he = "אין בדיקה נפרדת: אמרו \"תן לי את התדריך\"."
+test_en = "No separate test: say \"give me the briefing\"."
+cost_he = "חינם (Open-Meteo ללא מפתח)."
+cost_en = "Free (Open-Meteo, no key)."
+privacy_he = "מזג האוויר שולח רק את קו הרוחב והאורך של העיר. היומן והמייל נקראים דרך החיבור לגוגל שלכם."
+privacy_en = "Weather sends only the city's latitude and longitude. Calendar and mail come through your own Google connection."
+
+[[steps]]
+he = "אמרו \"תן לי את התדריך\". בלי חיבור לגוגל תקבלו מזג אוויר ותזכורות, והוא יגיד איך לחבר את השאר."
+en = "Say \"give me the briefing\". Without Google you get weather and reminders, and he says how to connect the rest."
+
+[[steps]]
+he = "לחיבור היומן והמייל: jarvis google start."
+en = "To add calendar and mail: jarvis google start."
+action = "command:jarvis google start"
+
+[[steps]]
+he = "כל בוקר בשעה קבועה: בקשו \"כל יום חול ב-7:30 תפעיל את התדריך\" (עמוד המשימות המתוזמנות)."
+en = "Every morning at a set time: ask \"every workday at 7:30 run the briefing\" (Jobs page)."
+
+[[problems]]
+he = "מזג האוויר מהעיר הלא נכונה"
+en = "Weather is for the wrong city"
+fix_he = "משנים את briefing.city, briefing.lat ו-briefing.lon בהגדרות הסוכן."
+fix_en = "Change briefing.city, briefing.lat and briefing.lon in the agent settings."
+
+[[problems]]
+he = "הוא אומר שהיומן לא זמין"
+en = "He says the calendar is not available"
+fix_he = "הריצו jarvis google start וודאו שמתג \"יומן גוגל\" דולק."
+fix_en = "Run jarvis google start and make sure the Google Calendar switch is on."

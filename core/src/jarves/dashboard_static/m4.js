@@ -41,7 +41,7 @@
         ...(f.matrix_problems || []).map((x) => "matrix: " + x)].filter(Boolean);
       const health = f.health === "ok" ? pill("ok", "active") : f.health === "off" ? pill("plain", "off") : pill("unavailable", "unavailable");
       return el("tr", { class: f.needs_attention ? "m4-attn" : null },
-        el("td", { "data-label": "Feature" }, el("b", {}, f.title_en), " ", el("span", { class: "muted", dir: "auto" }, f.title_he),
+        el("td", { "data-label": "Feature" }, el("b", {}, txo(f, "title")),
           el("div", { class: "muted small" }, f.about),
           f.requested ? el("div", { class: "small" }, "JARVES was asked to turn this on: approve here.") : null),
         el("td", { "data-label": "Enabled" }, sw, msg),
@@ -54,8 +54,9 @@
         el("td", { "data-label": "Roadmap" }, p.roadmap_issue ? el("a", { href: p.roadmap_issue, target: "_blank", rel: "noopener noreferrer" },
           "#" + p.roadmap_issue.split("/").pop()) : "—"));
     });
-    render(header("Features", "What JARVES may do, whether it works now, and its real status on Windows and on the Raspberry Pi. "
-        + "'Built, not verified' means it was never run on that device. " + d.note),
+    render(header(tx("יכולות ומתגים", "Features"), tx("מה JARVES רשאי לעשות, האם זה עובד עכשיו, והמצב האמיתי ב-Windows וב-Raspberry Pi. "
+        + "'נבנה, לא אומת' אומר שזה מעולם לא הורץ במכשיר הזה. ", "What JARVES may do, whether it works now, and its real status on Windows and on the Raspberry Pi. "
+        + "'Built, not verified' means it was never run on that device. ") + d.note),
       tabs, el("div", { style: "height:12px" }),
       el("div", { class: "card m4-scroll" }, rows.length ? el("table", { class: "m4-matrix" },
         el("thead", {}, el("tr", {}, ["Feature", "Enabled", "Health", "Settings", "Permissions", "Windows", "Pi", "Blocker", "Roadmap"]

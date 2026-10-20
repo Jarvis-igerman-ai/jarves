@@ -5,19 +5,16 @@
 "use strict";
 
 (function () {
-  let lang = "he";
-  try { lang = localStorage.getItem("jarves-guide-lang") || "he"; } catch (e) { /* storage blocked */ }
+  let lang = JL.lang;                                  // one dashboard locale (i18n.js)
+  JL.onChange((l) => { lang = l; });
   const L = (he, en) => (lang === "he" ? he : en);
   const T = (o, k) => (lang === "he" ? o[k + "_he"] : o[k + "_en"]) || o[k + "_en"] || o[k + "_he"] || "";
   const dir = () => (lang === "he" ? "rtl" : "ltr");
 
   async function pageSetup() {
     const d = await api("/api/setup");
-    const toggle = el("button", { type: "button", class: "ghost", onclick: () => {
-      lang = lang === "he" ? "en" : "he";
-      try { localStorage.setItem("jarves-guide-lang", lang); } catch (e) { /* ignore */ }
-      route(true);
-    } }, lang === "he" ? "English" : "עברית");
+    const toggle = el("button", { type: "button", class: "ghost", lang: lang === "he" ? "en" : "he",
+      onclick: () => JL.set(lang === "he" ? "en" : "he") }, lang === "he" ? "English" : "עברית");   // the global switch
     const top = el("div", { class: "card", dir: dir() },
       el("div", {}, L("אותה הגדרה כמו ", "The same setup as "), el("code", {}, "jarvis setup"),
         L(". כל שינוי כאן נשמר מיד ואפשר לשנות שוב בכל זמן.", ". Every change here is saved at once and can be changed again any time.")),

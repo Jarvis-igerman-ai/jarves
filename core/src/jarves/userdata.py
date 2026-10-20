@@ -91,6 +91,9 @@ DEFAULTS: dict[str, Any] = {
     "alerts.delivery": {"low": "popup", "normal": "popup", "high": "speech", "urgent": "speech"},
     "autonomy.level": "suggest_and_ask",
     "autonomy.grants": [],                      # appliers the user allowed for approved_low_risk
+    "briefing.city": "Tel Aviv",                # morning briefing weather place (Open-Meteo, no key)
+    "briefing.lat": 32.0853,
+    "briefing.lon": 34.7818,
     "files.quota_mb": 200,
     "files.max_file_mb": 10,
 }
