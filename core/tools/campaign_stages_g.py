@@ -168,7 +168,8 @@ async def helper(h):
     r = await h.call("list_add", {"items": ["after-helper"]})
     check(A, "helper output taints the turn: a following action is refused/asked", r.code in ("TOOL_UNTRUSTED_TURN", "TOOL_DECLINED") or not r.ok, brief(r))
     # --- denied via dashboard: nothing runs
-    marker = h.home.parent / "helper_marker.txt"
+    marker = Path(os.environ["TEMP"]) / "jv4_helper_marker.txt"       # outside the JARVES data folder (V4 R-01 refuses commands that touch it)
+    marker.unlink(missing_ok=True)
     res, row, resp = await ask_and_answer(h, "shell_propose", {"command": f'"{py}" -c "open(r\'{marker}\',\'w\').write(\'x\')"', "purpose": "campaign: must NOT run"}, approve=False)
     check(A, "denied via dashboard -> HELPER_NOT_APPROVED and the command did NOT run", res is not None and res.code == "HELPER_NOT_APPROVED" and not marker.exists(), f"{brief(res) if res else None} marker={marker.exists()}")
     # --- approved via CLI
