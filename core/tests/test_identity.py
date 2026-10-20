@@ -125,7 +125,8 @@ def test_dashboard_routes(home, mem):
     ctx = Ctx()
     ctx.home, ctx.cfg, ctx.memory = home, Config(), mem
     st, v = routes[("GET", r"/api/identity")](ctx, None, None)
-    assert st == 200 and v["wake"]["builtin"] and v["wake"]["capability"] is capabilities.WAKE_PHRASE
+    assert st == 200 and v["wake"]["builtin"] and v["wake"]["capability"]["spoken"] == capabilities.WAKE_PHRASE["spoken"]
+    assert v["wake"]["capability"]["targets"]["windows"]["status"] == capabilities.WAKE_PHRASE["targets"]["windows"]["status"]
     assert v["wake"]["capability"]["custom"]["linux_arm64_pi"]["roadmap_issue"] == capabilities.PI_ROADMAP
     assert routes[("POST", r"/api/identity/names")](ctx, None, {"display_name": ""})[0] == 400
     st, r = routes[("POST", r"/api/identity/voice")](ctx, None, {"voice": "realtime:cedar"})

@@ -341,6 +341,9 @@
     },
   };
   window.tx = (he, en) => (lang === "he" ? (he || en) : (en || he));
+  // Server text with a Hebrew sibling: <key>_he in Hebrew mode, the English <key> (or <key>_en) otherwise and as the
+  // fallback. Only for our own fixed texts; user content, logs and code are never given a _he field.
+  window.txh = (o, k) => (o ? (lang === "he" ? o[k + "_he"] || o[k] || o[k + "_en"] : o[k] || o[k + "_en"] || o[k + "_he"]) || "" : "");
   window.txo = (o, k) => (o ? (lang === "he" ? o[k + "_he"] || o[k + "_en"] : o[k + "_en"] || o[k + "_he"]) || "" : "");
 
   applyDoc();

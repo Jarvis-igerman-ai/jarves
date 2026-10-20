@@ -37,18 +37,18 @@
           catch (e) { msg.textContent = "Not changed: " + e.message; }
         } }, f.enabled ? "On" : "Off");
       const w = f.targets.windows, p = f.targets.linux_arm64_pi;
-      const blockers = [w.blocker ? "Windows: " + w.blocker : null, p.blocker ? "Pi: " + p.blocker : null,
+      const blockers = [w.blocker ? "Windows: " + txh(w, "blocker") : null, p.blocker ? "Pi: " + txh(p, "blocker") : null,
         ...(f.matrix_problems || []).map((x) => "matrix: " + x)].filter(Boolean);
       const health = f.health === "ok" ? pill("ok", "active") : f.health === "off" ? pill("plain", "off") : pill("unavailable", "unavailable");
       return el("tr", { class: f.needs_attention ? "m4-attn" : null },
         el("td", { "data-label": "Feature" }, el("b", {}, txo(f, "title")),
-          el("div", { class: "muted small" }, f.about),
+          el("div", { class: "muted small" }, txh(f, "about")),
           f.requested ? el("div", { class: "small" }, "JARVES was asked to turn this on: approve here.") : null),
         el("td", { "data-label": "Enabled" }, sw, msg),
-        el("td", { "data-label": "Health" }, health, f.reason ? el("div", { class: "small", dir: "auto" }, f.reason) : null),
+        el("td", { "data-label": "Health" }, health, f.reason ? el("div", { class: "small", dir: "auto" }, txh(f, "reason")) : null),
         el("td", { "data-label": "Settings", class: "small" }, f.settings || "—"),
         el("td", { "data-label": "Permissions", class: "small" }, (f.permissions || []).join(", "), " ", pill(f.risk, f.risk)),
-        el("td", { "data-label": "Windows" }, statusPill(w), w.evidence ? el("div", { class: "muted small" }, w.evidence) : null),
+        el("td", { "data-label": "Windows" }, statusPill(w), w.evidence ? el("div", { class: "muted small" }, txh(w, "evidence")) : null),
         el("td", { "data-label": "Pi" }, statusPill(p)),
         el("td", { "data-label": "Blocker", class: "small" }, blockers.length ? blockers.map((b) => el("div", {}, b)) : "—"),
         el("td", { "data-label": "Roadmap" }, p.roadmap_issue ? el("a", { href: p.roadmap_issue, target: "_blank", rel: "noopener noreferrer" },
@@ -56,7 +56,7 @@
     });
     render(header(tx("יכולות ומתגים", "Features"), tx("מה JARVES רשאי לעשות, האם זה עובד עכשיו, והמצב האמיתי ב-Windows וב-Raspberry Pi. "
         + "'נבנה, לא אומת' אומר שזה מעולם לא הורץ במכשיר הזה. ", "What JARVES may do, whether it works now, and its real status on Windows and on the Raspberry Pi. "
-        + "'Built, not verified' means it was never run on that device. ") + d.note),
+        + "'Built, not verified' means it was never run on that device. ") + txh(d, "note")),
       tabs, el("div", { style: "height:12px" }),
       el("div", { class: "card m4-scroll" }, rows.length ? el("table", { class: "m4-matrix" },
         el("thead", {}, el("tr", {}, ["Feature", "Enabled", "Health", "Settings", "Permissions", "Windows", "Pi", "Blocker", "Roadmap"]
@@ -94,10 +94,10 @@
     const wake = el("div", { class: "card" }, el("h2", {}, "Wake phrase"),
       el("div", { class: "kv" },
         el("div", { class: "k" }, "current phrase"), el("div", { class: "v" }, `${w.phrase} (${w.builtin ? "built-in model" : "trained on this device"})`),
-        el("div", { class: "k" }, "Hey Jarvis: Windows"), el("div", { class: "v" }, statusPill(cap.targets.windows), " ", cap.targets.windows.evidence || ""),
-        el("div", { class: "k" }, "Hey Jarvis: Pi"), el("div", { class: "v" }, statusPill(cap.targets.linux_arm64_pi), " ", cap.targets.linux_arm64_pi.blocker || ""),
-        el("div", { class: "k" }, "custom phrase: Windows"), el("div", { class: "v" }, statusPill(cap.custom.windows), " ", cap.custom.windows.blocker || ""),
-        el("div", { class: "k" }, "custom phrase: Pi"), el("div", { class: "v" }, statusPill(cap.custom.linux_arm64_pi), " ", cap.custom.linux_arm64_pi.blocker || "",
+        el("div", { class: "k" }, "Hey Jarvis: Windows"), el("div", { class: "v" }, statusPill(cap.targets.windows), " ", txh(cap.targets.windows, "evidence")),
+        el("div", { class: "k" }, "Hey Jarvis: Pi"), el("div", { class: "v" }, statusPill(cap.targets.linux_arm64_pi), " ", txh(cap.targets.linux_arm64_pi, "blocker")),
+        el("div", { class: "k" }, "custom phrase: Windows"), el("div", { class: "v" }, statusPill(cap.custom.windows), " ", txh(cap.custom.windows, "blocker")),
+        el("div", { class: "k" }, "custom phrase: Pi"), el("div", { class: "v" }, statusPill(cap.custom.linux_arm64_pi), " ", txh(cap.custom.linux_arm64_pi, "blocker"),
           cap.custom.linux_arm64_pi.roadmap_issue ? [" ", el("a", { href: cap.custom.linux_arm64_pi.roadmap_issue, target: "_blank", rel: "noopener noreferrer" }, "roadmap")] : null)),
       w.missing ? el("div", { class: "small" }, `The chosen model ${w.missing} is missing: using Hey Jarvis.`) : null,
       el("p", { class: "small" }, "A new phrase: run ", el("code", {}, w.train_command),
@@ -122,13 +122,13 @@
     };
     const voiceRows = d.voices.map((v) => el("tr", {},
       el("td", {}, el("b", {}, v.voice), " ", d.voice.current === v.id ? pill("ok", "in use") : null),
-      el("td", { class: "small" }, `${v.provider} ${v.model}`), el("td", { class: "small" }, v.about),
+      el("td", { class: "small" }, `${v.provider} ${v.model}`), el("td", { class: "small" }, txh(v, "about")),
       el("td", { class: "num small" }, v.usd_per_minute != null ? `$${v.usd_per_minute}/min ${v.cost_kind === "estimate" ? "(est.)" : ""}` : "unknown"),
       el("td", { class: "small muted" }, "not available"),
       el("td", {}, d.voice.current === v.id ? null : el("button", { type: "button", onclick: () => choose(v) },
         v.mode === d.voice.mode ? "Use" : "Use (needs approval)"))));
     const voices = el("div", { class: "card" }, el("h2", {}, "Voice"),
-      el("div", { class: "muted small" }, d.voices[0] ? d.voices[0].preview_note : "", " Rules: same model = ", d.rules.same_model,
+      el("div", { class: "muted small" }, d.voices[0] ? txh(d.voices[0], "preview_note") : "", " Rules: same model = ", d.rules.same_model,
         "; another model = ", d.rules.other_model, ". You can also say \"תחליף קול\"."),
       d.voice.notes.length ? el("div", { class: "small" }, d.voice.notes.join(" ")) : null,
       el("div", { class: "m4-scroll" }, el("table", {}, el("thead", {}, el("tr", {}, ["Voice", "Provider / model", "Accent / style", "Cost", "Preview", ""].map((h) => el("th", {}, h)))),

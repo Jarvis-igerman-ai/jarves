@@ -37,7 +37,7 @@
       el("div", { class: "guide-grid" }, gs.map((g) => el("a", { class: "guide-tile" + (g.setup_needed ? " need" : ""), href: "#/guide/" + g.id },
         el("div", { class: "row" }, el("b", { dir: dirOf() }, T(g, "title")), el("span", { class: "spacer" }), statePill(g.state)),
         el("div", { class: "small muted", dir: dirOf() }, T(g, "what")),
-        g.reason && g.state !== "on" ? el("div", { class: "small", dir: "auto" }, g.reason) : null)))));
+        g.reason && g.state !== "on" ? el("div", { class: "small", dir: "auto" }, txh(g, "reason")) : null)))));
     const h = d.help || {};
     const snoozed = Object.keys(h.snoozed || {}).concat(h.dismissed || []);
     const help = el("div", { class: "card small guide-sec" }, el("b", {}, L("הצעות עזרה", "Setup suggestions")), " ",
@@ -104,15 +104,15 @@
         onclick: () => switchFeature(r.id, !r.enabled, r.risk, T(r, "title")) }, r.enabled ? "On" : "Off")),
       el("td", {}, el("b", { dir: dirOf() }, T(r, "title")), " ", pill(r.risk, r.risk)),
       el("td", {}, r.active ? pill("ok", L("פועל", "active")) : !r.enabled ? pill("plain", L("כבוי", "off")) : pill("unavailable", L("לא זמין", "unavailable")),
-        r.reason && !r.active ? el("div", { class: "small", dir: "auto" }, r.reason) : null))))) : null;
+        r.reason && !r.active ? el("div", { class: "small", dir: "auto" }, txh(r, "reason")) : null))))) : null;
     const plat = (t) => { if (!t) return "—"; const p = PLAT[t.status] || ["plain", t.status];
-      return el("div", {}, pill(p[0], p[1]), t.evidence ? el("div", { class: "muted small" }, t.evidence) : null,
-        t.blocker ? el("div", { class: "small" }, "Blocker: " + t.blocker) : null,
+      return el("div", {}, pill(p[0], p[1]), t.evidence ? el("div", { class: "muted small" }, txh(t, "evidence")) : null,
+        t.blocker ? el("div", { class: "small" }, L("חסם: ", "Blocker: ") + txh(t, "blocker")) : null,
         t.roadmap_issue ? el("a", { class: "small", href: t.roadmap_issue, target: "_blank", rel: "noopener" }, "roadmap issue") : null); };
     const section = (title, ...body) => el("div", { class: "card guide-sec" }, el("h2", { dir: dirOf() }, title), ...body);
     render(header(T(g, "title"), null, el("a", { href: "#/guides" }, L("כל המדריכים ←", "← all guides")), langToggle()),
       el("div", { class: "card guide-head" }, el("div", { class: "row" }, statePill(g.state),
-        g.reason && g.state !== "on" ? el("span", { dir: "auto" }, g.reason) : null),
+        g.reason && g.state !== "on" ? el("span", { dir: "auto" }, txh(g, "reason")) : null),
         el("p", { class: "lead", dir: dirOf() }, T(g, "what")), feats, msg),
       section(L("איך מפעילים", "How to turn it on"), steps),
       g.say.length ? section(L("מה להגיד לו", "What to say"), el("ul", { class: "say" }, g.say.map((s) =>
