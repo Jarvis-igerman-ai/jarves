@@ -1,3 +1,10 @@
+## SW-V3 campaign PASS B, feature by feature (20 Oct 2026) - #17, branch `v3-campaign-features`
+
+- Report: [reviews/SWV3_CAMPAIGN_FEATURES.md](reviews/SWV3_CAMPAIGN_FEATURES.md); bugs: [reviews/SWV3_CAMPAIGN_BUG_TABLE.md](reviews/SWV3_CAMPAIGN_BUG_TABLE.md). 53 features x CLI/dashboard/Core tool, plus tools of timers, lists, notes, files, scheduler/reports, memory/curator, skills, Telegram/WhatsApp/Instagram/Home Assistant (local fakes), browser (local page), helper + approvals (answered through dashboard API and CLI), profiles, self-check, backup/restore, usage/cost, diag, camera (virtual). Result: 1429 PASS, 1 FAIL (open P3), 2 BLOCKED, 27 N/A.
+- Fixed (P0-P2, each with a regression test): B-05 CLI/other-process approval answers rejected for tool-asked requests (P1), B-01 context_trace missing from CLI, B-04 helper refusals crashed the tool, B-06 face_recognition never available; P3 B-02, B-03. Open P3: O-01..O-06 (CLI parity for timers/lists, CLI-vs-dashboard "on" semantics, google_connect_help ok=False, WARNING noise, status exit 3, timer ringing state).
+- Re-run: `core/.venv/Scripts/python.exe core/tools/campaign_features.py STAGE...` (see the report header).
+- Questions for the user: (1) CLI `features on` refuses unavailable features but the dashboard allows them: which rule? (2) Build CLI/dashboard pages for timers and lists? Status: USER DECISION REQUIRED (P3).
+
 ## `jarvis connect` guided account setup (20 Oct 2026): branch `v3-connect`, [#17](https://github.com/igalgerman/JARVIS/issues/17), [report](reviews/SWV3_CONNECT_REPORT.md)
 
 - One command checks Google, Telegram, the Pear API plugin, the wake word (and optional Instagram / Home Assistant), guides only what is missing, reuses the existing wizards, ends with a summary table. Flags `--only`, `--status`, `--yes`, `--reminders`. Telegram: clipboard token watch (consent, cleared after use), validated before saving, auto-pair through a one-time t.me deep link + confirmation message.
