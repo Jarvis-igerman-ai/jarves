@@ -115,7 +115,7 @@ Already public, as the brief asked to check: `docs/reviews/SWV4_WAKE_TRAIN.md` +
 | Actions artifacts | 24 (22 PR installer builds, 2 main installer builds, 1 Android demo APK) | n/a | all expire by 3 Nov 2026; all rebuildable from source; nothing unique |
 | Wiki / Pages | disabled / none | n/a | none |
 | Projects | repo flag on; listing needs the `read:project` token scope (not granted) | n/a | owner: check github.com/igalgerman?tab=projects once |
-| Labels | GitHub defaults + `accessibility`, `automerge` | defaults + `accessibility` | `automerge` label is missing on public. The public automerge workflow (`automerge.yml`) selects PRs by this label, so it needs it (owner/agent: `gh label create automerge -R igalgerman/jarves`) |
+| Labels | GitHub defaults + `accessibility`, `automerge` | defaults + `accessibility` + `automerge` | the `automerge` label was missing on public; `automerge.yml` selects PRs by it. **Created by this audit** with the legacy colour and description |
 | Milestones | none | none | none |
 | Issue/PR comments of value | in legacy #3, #4 (design delivery evidence), #15, #17 (live reports), #49 (full spec) | now copied as checklists into public #1-#4 | done |
 
@@ -169,7 +169,7 @@ The other legacy issues (#1, #2, #5-#7, #9, #10, #13, #26, #27) were already clo
 2. Answer the open decisions in public #1: OD-15 (default delegation mode), OD-05 (read-only OpenAI admin key), OD-12 (`log.privacy` default). Approve a bounded paid voice regression inside the $25 V4 cap. Run the owner-present checks for Pear, Google reconnect, guides, webcam and privacy strip.
 3. Decide on the Android demo branch: port it during V5 or drop it.
 4. Review and merge draft PR #12 (docs only).
-5. Optional: create the `automerge` label on public; delete the stale draft release in `jarvis-releases`; check user Projects.
+5. Optional: delete the stale draft release in `jarvis-releases`; check user Projects.
 6. **Archive the legacy repo yourself** (GitHub -> `igalgerman/JARVIS` -> Settings -> General -> Danger Zone -> Archive this repository), **only after** steps 1-2 of the integration are done and no agent pushes there any more. Do not delete it. Then revoke legacy-only tokens and repoint any local clones (`git remote set-url origin https://github.com/igalgerman/jarves.git`) once their work is saved.
 
 *Audit tooling (blob-hash comparison, scanner) ran from a temp folder outside the repository; no legacy content other than the three sanitized files in PR #12 was written to public.*
