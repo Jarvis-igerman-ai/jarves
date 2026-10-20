@@ -22,7 +22,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 sys.path.insert(0, str(ROOT / "tools"))
 
-DESKTOP, PHONE = (1440, 1000), (390, 1500)
+DESKTOP, PHONE = (1440, 1000), (500, 1500)   # headless Edge will not go narrower than ~500 px; 390 px: Playwright pw_*.png
 SHOTS = [  # name, fragment, lang, theme, size
     ("home", "#/home", "he", "light", DESKTOP), ("home", "#/home", "en", "light", DESKTOP),
     ("home", "#/home", "he", "dark", DESKTOP), ("home_phone", "#/home", "he", "light", PHONE),
@@ -56,8 +56,10 @@ def main() -> int:
         os.environ["JARVES_HOME"] = str(home)
         os.environ.pop("OPENAI_API_KEY", None)           # never a paid call from here
         sid = fill(home)
+        from jarves import dashboard_auth
         from jarves.config import Config
         from jarves.dashboard import Dashboard
+        dashboard_auth.RATE_PER_MIN = 100_000      # 16 fresh browser loads in two minutes are not an attack
         d = Dashboard(home, Config()).start()
         try:
             if a.serve:

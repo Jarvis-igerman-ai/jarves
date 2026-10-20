@@ -261,6 +261,7 @@
     "Threshold": "סף", "in use": "בשימוש", "not available": "לא זמין", "Add": "הוספה", "switch on the Features page": "המתג בעמוד היכולות",
     "Proposals": "הצעות", "Meter": "מונה", "Keep": "לשמור", "Switches": "מתגים", "run one below": "הריצו אחד למטה", "Wake word": "מילת הפעלה",
     "Windows:": "Windows:", "Raspberry Pi:": "Raspberry Pi:", "Get started": "תחילת עבודה", "Next": "הבא", "Create": "יצירה",
+    "Context": "הקשר", "why?": "למה?", "Log lines ": "שורות יומן ",
     "Paired": "הוצמד", "Last used ": "שימוש אחרון ", "Address": "כתובת", "Event": "אירוע", "Time": "שעה", "Date": "תאריך",
   };
   // "Prefix: " keys above also act as prefixes for "Prefix: dynamic text"

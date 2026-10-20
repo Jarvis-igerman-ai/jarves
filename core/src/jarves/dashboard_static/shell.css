@@ -115,9 +115,9 @@ html[dir="rtl"] tr.m4-attn td:first-child { box-shadow: inset -3px 0 0 var(--ser
   .topbar-slot { order: 11; }
   main { padding: 16px 16px 80px; }
   /* usage strip: one swipeable row instead of three stacked rows */
-  .ustrip { flex-wrap: nowrap; overflow-x: auto; scrollbar-width: none; padding: 6px 10px; gap: 6px; }
-  .ustrip::-webkit-scrollbar { display: none; }
-  .ustrip .upart { flex: none; padding: 3px 8px; }}
+  body .ustrip { flex-wrap: nowrap; overflow-x: auto; scrollbar-width: none; padding: 6px 10px; gap: 6px; }
+  body .ustrip::-webkit-scrollbar { display: none; }
+  body .ustrip .upart { flex: none; padding: 3px 8px; }}
 @media (max-width: 480px) {
   .search-key { display: none; }
   h1 { font-size: 20px; }
