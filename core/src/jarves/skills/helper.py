@@ -181,10 +181,27 @@ def _meta_outside_quotes(cmd: str) -> bool:
     return False
 
 
+_FOREIGN_ABS = re.compile(r"^([a-zA-Z]:|[\\/]{2}|\\)")      # C:\x, C:x, \\server\x, \x : a Windows-style path
+
+
+def foreign_abs(token: str) -> bool:
+    """A Windows-style absolute path (drive letter / backslash / UNC), whatever OS we run on."""
+    return bool(_FOREIGN_ABS.match(token.strip("\"'")))
+
+
+def _split_win(cmd: str) -> list[str]:
+    return [t[1:-1] if len(t) >= 2 and t[0] == t[-1] == '"' else t for t in shlex.split(cmd, posix=False)]
+
+
 def split_command(cmd: str) -> list[str]:
     if sys.platform == "win32":
-        return [t[1:-1] if len(t) >= 2 and t[0] == t[-1] == '"' else t for t in shlex.split(cmd, posix=False)]
-    return shlex.split(cmd)
+        return _split_win(cmd)
+    try:
+        return shlex.split(cmd)
+    except ValueError:
+        if "\\" in cmd:                                 # a Windows path such as C:\ ends in a backslash
+            return _split_win(cmd)
+        raise
 
 
 def _path_tokens(tokens: list[str], cwd: Path) -> list[Path]:
@@ -192,6 +209,9 @@ def _path_tokens(tokens: list[str], cwd: Path) -> list[Path]:
     for t in tokens[1:]:
         if not t or t.startswith("-") or (sys.platform == "win32" and t.startswith("/")):
             continue                                   # an option, or a Windows switch (/s, /q)
+        if sys.platform != "win32" and foreign_abs(t):
+            out.append(Path(cwd.anchor or "/"))        # C:\Users on Linux: absolute, never inside the sandbox
+            continue
         p = Path(os.path.expandvars(os.path.expanduser(t)))
         out.append(p if p.is_absolute() else cwd / p)
     return out
@@ -235,7 +255,8 @@ def classify(command: str, cwd: str | Path | None, *, home: Path) -> Proposal:
     if meta:
         reasons.append("pipes / redirects / chains commands")
     if _RECURSIVE_DELETE.search(cmd):
-        if not (paths and all(_inside(p, sandbox) for p in paths)):
+        raw_foreign = any(foreign_abs(t) for t in cmd.split()[1:])      # posix parsing eats the backslashes
+        if raw_foreign or not (paths and all(_inside(p, sandbox) for p in paths)):
             reasons.append("deletes folders recursively outside the helper sandbox")
     elif (_DELETE_ANY.search(cmd) and any("*" in str(p) or "?" in str(p) for p in paths)
           and not all(_inside(p.parent, sandbox) for p in paths)):
