@@ -28,6 +28,7 @@ import base64
 import inspect
 import json
 import time
+from datetime import datetime
 from typing import TYPE_CHECKING, Any, Awaitable, Callable
 
 from .. import logs
@@ -233,7 +234,6 @@ ANNOUNCE_USER_QUIET_S = 1.5     # a background-task announcement waits until the
 
 def clock_note(now=None) -> str:
     """Silent context for GPT-Live (session.thinking.append): the local time, so time questions need no backend."""
-    from datetime import datetime
     now = now or datetime.now()
     return (f"[clock] Local time now {now:%H:%M}, יום {_HE_DAYS[now.weekday()]}, {now:%d.%m.%Y}. "
             "Silent context: mention it only when the user asks for the time or date.")
@@ -562,6 +562,7 @@ class LiveVoice(SessionLifecycle):
         self._usage_final = False       # True once session.closed carried the server's final usage
         self._t_started: float | None = None
         self._speaking_until = 0.0
+        self._now = datetime.now            # injectable wall clock (tests pin the minute)
         self._turn_audio_t0 = 0.0
         self._reply_audio_started = self._reply_audio_ended = None
         self._reply_wait_s = None
@@ -740,18 +741,17 @@ class LiveVoice(SessionLifecycle):
 
     async def _clock_loop(self) -> None:
         """Once a minute: the local time as SILENT context (no speech, no backend call). Never ends the session."""
-        from datetime import datetime
         last = ""
         if self.greeting:
             # the greeting message already carries this minute's clock; send nothing until the greeting was spoken
             # (an extra event before it suppresses the greeting, see session_config)
-            last = datetime.now().strftime("%Y%m%d%H%M")
+            last = self._now().strftime("%Y%m%d%H%M")
             deadline = time.monotonic() + 45
             while self.running and time.monotonic() < deadline and (
                     not self._first_audio.is_set() or time.monotonic() < self._speaking_until + 1.0):
                 await asyncio.sleep(0.25)
         while self.running:
-            now = datetime.now()
+            now = self._now()
             if now.strftime("%Y%m%d%H%M") != last and self.clock_context:
                 last = now.strftime("%Y%m%d%H%M")
                 try:
