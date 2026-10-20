@@ -43,7 +43,7 @@ COOKIE = "jarves_dash"
 _EMAIL = re.compile(r"[\w.+-]+@[\w-]+\.[\w.-]+")
 _ROUTES: list[tuple[str, re.Pattern, object]] = []
 PLUGIN_MODULES = ("jarves.workspace", "jarves.curator", "jarves.memory", "jarves.features", "jarves.google_auth",
-                  "jarves.google_setup", "jarves.privacy", "jarves.overview",
+                  "jarves.google_setup", "jarves.telegram_channel", "jarves.privacy", "jarves.overview",
                   "jarves.usage", "jarves.backup", "jarves.appearance", "jarves.skills.generated",
                   "jarves.operations", "jarves.runtime", "jarves.updates",
                   "jarves.identity", "jarves.dashboard_auth", "jarves.guides",     # WP-L: Guides pages

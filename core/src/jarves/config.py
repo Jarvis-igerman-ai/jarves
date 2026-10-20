@@ -292,7 +292,8 @@ def load_config(path: Path | None = None) -> tuple[Config, Path]:
         raise ConfigError(f"{path}: invalid settings: {msgs}") from e
 
 
-SECRET_ENV = ("OPENAI_API_KEY", "OPENAI_ADMIN_KEY")   # admin key: optional, read-only Costs API (usage.py)
+SECRET_ENV = ("OPENAI_API_KEY", "OPENAI_ADMIN_KEY",   # admin key: optional, read-only Costs API (usage.py)
+              "TELEGRAM_BOT_TOKEN", "HOME_ASSISTANT_TOKEN")   # V3 P1 channels: private secrets.env, never the config
 
 
 def secrets_file(home: Path | None = None) -> Path:
