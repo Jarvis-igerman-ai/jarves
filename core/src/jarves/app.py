@@ -17,7 +17,7 @@ from .health import Health
 from .link import GodotLink, load_token
 from .memory import MemoryStore
 from .skills import SkillRegistry
-from .skills.builtin import ClockSkill, MemorySkill, StatusSkill
+from .skills.builtin import CalcSkill, ClockSkill, MemorySkill, StatusSkill
 from .skills.music import MusicSkill, PearDesktopPlayer
 from .skills.settings import Settings, SettingsSkill
 from . import workspace as wsp
@@ -199,6 +199,7 @@ class Core:
         self.registry.confirm = self.ask_confirm
         self.registry.gate = self.features.gate          # inactive features: tools not offered, calls refused
         self.registry.register(ClockSkill())
+        self.registry.register(CalcSkill())
         self.registry.register(MemorySkill(self.memory))
         from .skills.local_contacts import LocalContactsSkill
         self.registry.register(LocalContactsSkill(self.memory))

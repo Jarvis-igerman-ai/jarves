@@ -25,6 +25,61 @@ class ClockSkill(Skill):
         return [Tool("get_time", "Current local date and time.", now, permission="read")]
 
 
+class CalcArgs(BaseModel):
+    expression: str = Field(..., min_length=1, max_length=200,
+                            description="arithmetic in digits and + - * / ** % ( ), sqrt(x), e.g. '347*18' or 'sqrt(81)'")
+
+
+def calculate(expression: str) -> float | int:
+    """Exact arithmetic on a safe AST subset (no names except sqrt/abs/round, no attribute access, small powers)."""
+    import ast
+    import math
+    import operator as op
+    ops = {ast.Add: op.add, ast.Sub: op.sub, ast.Mult: op.mul, ast.Div: op.truediv, ast.FloorDiv: op.floordiv,
+           ast.Mod: op.mod, ast.Pow: op.pow}
+    funcs = {"sqrt": math.sqrt, "abs": abs, "round": round}
+
+    def ev(n):
+        if isinstance(n, ast.Expression):
+            return ev(n.body)
+        if isinstance(n, ast.Constant) and isinstance(n.value, (int, float)) and not isinstance(n.value, bool):
+            return n.value
+        if isinstance(n, ast.UnaryOp) and isinstance(n.op, (ast.UAdd, ast.USub)):
+            v = ev(n.operand)
+            return v if isinstance(n.op, ast.UAdd) else -v
+        if isinstance(n, ast.BinOp) and type(n.op) in ops:
+            a, b = ev(n.left), ev(n.right)
+            if isinstance(n.op, ast.Pow) and (abs(b) > 64 or abs(a) > 1e6):
+                raise ValueError("power too large")
+            return ops[type(n.op)](a, b)
+        if (isinstance(n, ast.Call) and isinstance(n.func, ast.Name) and n.func.id in funcs and not n.keywords
+                and 1 <= len(n.args) <= 2):
+            return funcs[n.func.id](*[ev(a) for a in n.args])
+        raise ValueError("unsupported expression")
+    expr = expression.replace("×", "*").replace("÷", "/").replace("^", "**").replace(",", "")
+    v = ev(ast.parse(expr, mode="eval"))
+    if isinstance(v, float) and v.is_integer() and abs(v) < 1e15:
+        return int(v)
+    return round(v, 10) if isinstance(v, float) else v
+
+
+class CalcSkill(Skill):
+    """CV-08 (voice campaign 20 Oct): GPT-Live delegates every sum above ten, and the backend answered 4/4 maths
+    questions with a WEB SEARCH (screen 'searching', ~$0.01 each). An exact local calculator is faster and free."""
+    name = "calc"
+    description = "Exact arithmetic"
+
+    def tools(self) -> list[Tool]:
+        async def calc(a: CalcArgs):
+            try:
+                v = calculate(a.expression)
+            except (ValueError, SyntaxError, ZeroDivisionError, OverflowError, TypeError) as e:
+                return ToolResult(False, f"לא הצלחתי לחשב את זה ({type(e).__name__}).", code="CALC_FAILED")
+            return ToolResult(True, f"{a.expression} = {v}", {"result": v})
+        return [Tool("calculate", "Exact arithmetic (use it for ANY calculation instead of web search or mental "
+                     "maths): + - * / ** % ( ) and sqrt().", calc, CalcArgs, permission="read")]
+
+
 class RememberArgs(BaseModel):
     text: str = Field(..., min_length=1, max_length=500, description="The fact the user explicitly asked to remember")
 

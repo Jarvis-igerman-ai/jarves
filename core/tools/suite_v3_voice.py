@@ -457,12 +457,14 @@ async def s_briefing(h, r):
 async def s_handoff(h, r):
     s = await h.get(V3)
     n0 = len(OPENED_URLS)
-    d = await h.turn(s, "תכין הודעת וואטסאפ לדני, המספר שלו אפס חמש ארבע, אחת שתיים שלוש, ארבע חמש שש שבע, "
-                        "שאני מאחר בעשר דקות", label="whatsapp-draft", first_timeout=40)
-    # two steps, as a person does it: "כן" to the read-back, then "כן" to the approval it opens
-    x = await approval_flow(h, s, "כן", "כן", wait_ask=30)
-    x["tools"] = d["tools"] + x["tools"]
-    x["said"] = d["said"] + " / " + x["said"]
+    # CV-14 (v3-voice-fixes): ONE confirmation - the draft goes straight to the approval, which reads it back
+    x = await approval_flow(h, s, "תכין הודעת וואטסאפ לדני, המספר שלו אפס חמש ארבע, אחת שתיים שלוש, ארבע חמש שש "
+                                  "שבע, שאני מאחר בעשר דקות", "כן", wait_ask=40)
+    dec = ev_codes(s, "APPROVAL_DECIDED")
+    t_dec = stamp(dec[-1]) if dec else None
+    after_yes = next((t for t, d_, rms in VAudio.play_log if t_dec and t >= t_dec and rms >= sv.SPEECH_RMS), None)
+    x["yes_to_first_sound_s"] = round(after_yes - t_dec, 2) if after_yes and t_dec else None
+    x["spoken_yeses"] = 1
     urls = OPENED_URLS[n0:]
     wa = [u for u in urls if "wa.me/972541234567" in u]
     claim_sent = has(x["said"], "שלחתי את ההודעה", "ההודעה נשלחה", "I sent")
@@ -474,7 +476,8 @@ async def s_handoff(h, r):
     tg_claim = has(y["said"], "שלחתי לך בטלגרם", "שלחתי בטלגרם", "נשלחה בטלגרם")
     r.ok = ("whatsapp_draft" in x["tools"] and x["decision"] == "approved" and x["channel"] == "voice"
             and len(wa) == 1 and not claim_sent and answered(y) and tg_honest and not tg_claim)
-    r.key = (f"whatsapp tools {x['tools']}, {x['decision']} via {x['channel']}, links {len(wa)}/{len(urls)}, "
+    r.key = (f"whatsapp tools {x['tools']}, ONE spoken yes -> {x['decision']} via {x['channel']}, first sound "
+             f"{x['yes_to_first_sound_s']} s after the decision, links {len(wa)}/{len(urls)}, "
              f"claimed sent {claim_sent}; telegram honest {tg_honest}, claimed {tg_claim}: {y['said'][:100]}")
     r.details = [x, {"urls": [u[:120] for u in urls]}, y]
 
@@ -647,8 +650,103 @@ async def s_greet_delay(h, r):
     r.details = rows
 
 
-sv.LIVE_COST.update({36: 2.0, 37: 1.5, 38: 3.0, 39: 2.0, 40: 2.0, 41: 1.0, 42: 2.5, 43: 2.5, 44: 1.5, 45: 0,
-                     46: 1.0, 47: 1.5})
+@scenario(48, "redelegate_probe", "CV-15 watchdog mechanism on the REAL backend: the Core itself hands a request to "
+          "the session's backend (what the watchdog does after an undelegated 'רגע'): a remember, then a forget whose "
+          "approval is answered by a spoken 'כן'",
+          "both hand-overs LIVE_REDELEGATED, no REJECTED/NO_RESPONSE; remember + forget tools called; memory saved then "
+          "gone; approval asked and approved via voice; each result spoken (within 15 s)")
+async def s_redelegate(h, r):
+    s = await h.get(V3)
+    await h.turn(s, "היי, מה נשמע?", label="smalltalk")
+    lv = s.core.live
+    mark = s.log.mark()
+    await lv._redelegate("תזכור בבקשה שמספר הלוקר שלי הוא שמונה", lv._user_turn_n, "probe")
+    await wait_for(lambda: bool(ev_codes(s, "LIVE_BACKEND_DONE", mark)), 20)
+    await asyncio.sleep(2.0)
+    await h.quiet(s, 2.5, 30)
+    mems = [m["text"] for m in s.core.memory.list(50)]
+    saved = [m for m in mems if has(m, "שמונה", "8", "לוקר")]
+    said_a = " / ".join(e.get("text", "") for e in s.log.since(mark) if e["code"] == "LIVE_JARVES_SAID")
+    mark2 = s.log.mark()
+    s.face.confirm_policy = "none"
+    await lv._redelegate("תמחק מהזיכרון את מספר הלוקר שלי", lv._user_turn_n + 100, "probe")
+    asked = await wait_for(lambda: bool(ev_codes(s, "APPROVAL_ASKED", mark2)), 25)
+    t_ask = time.time()
+    await wait_for(lambda: bool(ev_codes(s, "LIVE_CONFIRM_NOTE", mark2)), 8)
+    t_note = time.time()
+    await wait_for(lambda: VAudio.last_play > t_note - 0.5, 6)
+    await wait_for(lambda: time.time() - VAudio.last_play >= 1.6 and time.time() - t_ask >= 2.0, 25)
+    await h.say("כן")
+    decided = await wait_for(lambda: bool(ev_codes(s, "APPROVAL_DECIDED", mark2)), 20)
+    await asyncio.sleep(2.0)
+    await h.quiet(s, 2.5, 30)
+    s.face.confirm_policy = "approve"
+    dec = (ev_codes(s, "APPROVAL_DECIDED", mark2) or [{}])[0]
+    left = [m for m in (x["text"] for x in s.core.memory.list(50)) if has(m, "לוקר")]
+    ev = s.log.since(mark)
+    tools = [e["msg"].replace("backend called ", "") for e in ev if e["code"] == "LIVE_TOOL_CALL"]
+    said_b = " / ".join(e.get("text", "") for e in s.log.since(mark2) if e["code"] == "LIVE_JARVES_SAID")
+    redel = len([e for e in ev if e["code"] == "LIVE_REDELEGATED"])
+    bad = [e["code"] for e in ev if e["code"] in ("LIVE_REDELEGATE_REJECTED", "LIVE_REDELEGATE_NO_RESPONSE",
+                                                   "LIVE_REDELEGATE_FAILED")]
+    own = [e["code"] for e in ev if e["code"] == "LIVE_OWN_RESULT"]
+    r.ok = (redel == 2 and not bad and "remember" in tools and "forget" in tools and bool(saved) and not left
+            and asked and decided and dec.get("decision") == "approved" and dec.get("channel") == "voice"
+            and has(said_a, "שמונה", "8", "לוקר", "רשמתי", "זוכר") and has(said_b, "מחקתי", "נמחק", "מחוק"))
+    r.key = (f"hand-overs {redel}, bad {bad}, tools {tools}, saved {saved[:1]}, left {left}, approval "
+             f"{dec.get('decision')} via {dec.get('channel')}, Core handed result {len(own)}x; said: {said_a[:80]} | "
+             f"{said_b[:100]}")
+    r.details = [{"said_remember": said_a, "said_forget": said_b, "tools": tools, "events": bad + own}]
+
+
+@scenario(49, "told_not_asked", "CV-06: the user only TELLS facts (no request to remember): JARVES reacts, never claims "
+          "'רשמתי' uncorrected, and nothing is saved",
+          "3 told facts answered; memory store unchanged; every LIVE_FALSE_ACTION_CLAIM followed by a correction note "
+          "(LIVE_CLAIM_UNASKED); no remember tool call")
+async def s_told(h, r):
+    s = await h.get(V3)
+    before = len(s.core.memory.list(200))
+    mark = s.log.mark()
+    rows = [await h.turn(s, q, label="told") for q in ("דרך אגב, לאחותי קוראים נועה, והיא גרה בחיפה.",
+                                                        "אני עובד היום מהבית.",
+                                                        "יש לי כלב בשם רקס, הוא בן שלוש.")]
+    await asyncio.sleep(3)
+    ev = s.log.since(mark)
+    claims = [e for e in ev if e["code"] == "LIVE_FALSE_ACTION_CLAIM"]
+    fixed = [e for e in ev if e["code"] == "LIVE_CLAIM_UNASKED"]
+    tools = [e["msg"].replace("backend called ", "") for e in ev if e["code"] == "LIVE_TOOL_CALL"]
+    after = len(s.core.memory.list(200))
+    r.ok = all(answered(x) for x in rows) and after == before and len(fixed) >= len(claims) and "remember" not in tools
+    r.key = (f"answered {sum(answered(x) for x in rows)}/3, memories {before}->{after}, claims {len(claims)}, "
+             f"corrected {len(fixed)}, tools {tools}: {' | '.join(x['said'][:50] for x in rows)}")
+    r.details = rows
+
+
+@scenario(50, "names_after_prefix", "CV-16: Hebrew names after the ל / ו prefix (לאביטל, ולצחי); JARVES's OUTPUT AUDIO "
+          "is transcribed to hear whether the name keeps its first sound",
+          "the output-audio transcript keeps the names after the prefix: contains אביטל (not only 'לביטל') and צחי "
+          "(not 'ליצחי' / 'ליצי'); the written text has no 'לביטל'")
+async def s_names_prefix(h, r):
+    s = await h.get(V3)
+    rows = []
+    for i in range(2):
+        CAPTURE["on"] = True
+        t0 = time.time()
+        x = await h.turn(s, "תגיד בבקשה בקול את המשפט הזה, בדיוק ככה: שלום לנועה, לאביטל ולצחי.", label="prefix")
+        CAPTURE["on"] = False
+        pcm = b"".join(p for t, p in OUT_PCM if t >= t0)
+        OUT_PCM.clear()
+        heard = await _transcribe(pcm) if pcm else "[no audio]"
+        bad = has(heard, "לביטל", "ליצחי", "ליצי") and not has(heard, "לאביטל", "לא ביטל", "ולצחי", "לצחי")
+        rows.append({"said": x["said"], "audio_transcript": heard, "avital": has(heard, "אביטל"),
+                     "tsachi": has(heard, "צחי"), "swallowed": bad, "text_bad": has(x["said"], "לביטל", "ליצחי")})
+    r.ok = all(x["avital"] and x["tsachi"] and not x["swallowed"] and not x["text_bad"] for x in rows)
+    r.key = " | ".join(f"audio: {x['audio_transcript'][:90]}" for x in rows)
+    r.details = rows
+
+
+sv.LIVE_COST.update({50: 1.0,36: 2.0, 37: 1.5, 38: 3.0, 39: 2.0, 40: 2.0, 41: 1.0, 42: 2.5, 43: 2.5, 44: 1.5, 45: 0,
+                     46: 1.0, 47: 1.5, 48: 1.5, 49: 1.5})
 
 if __name__ == "__main__":
     asyncio.run(sv.main())

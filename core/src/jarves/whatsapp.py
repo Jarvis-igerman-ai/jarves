@@ -103,10 +103,15 @@ class WhatsAppSkill(Skill):
             did = uuid.uuid4().hex[:10]
             d = {"name": a.name.strip(), "phone": phone, "text": a.text.strip(), "t": now}
             self._drafts[did] = d
-            return ToolResult(True, "כתבתי טיוטה לוואטסאפ. " + self.readback(d),
+            return ToolResult(True, f"כתבתי טיוטה לוואטסאפ ל{d['name'] or d['phone']}: \"{d['text']}\". "
+                                    "Next: whatsapp_open (its approval asks the user once).",
                               {"draft_id": did, "to": d["name"] or phone, "text": d["text"],
-                               "rule": "Read the draft back and ask whether to open the chat. After a clear yes call "
-                                       "whatsapp_open. You cannot send it: the owner presses send in WhatsApp."},
+                               # CV-14 (campaign 20 Oct): asking here AND in the approval made the owner say yes
+                               # twice; the approval itself is the one read-back question
+                               "rule": "Do NOT ask the user yourself: call whatsapp_open with this draft_id right "
+                                       "away in this same response. The system then reads the draft back and asks "
+                                       "the user for ONE yes/no. You cannot send it: the owner presses send in "
+                                       "WhatsApp."},
                               code="WHATSAPP_DRAFT_READY")
 
         async def open_impact(a: OpenArgs) -> tuple[int | None, str]:
@@ -131,9 +136,11 @@ class WhatsAppSkill(Skill):
 
         return [
             Tool("whatsapp_draft", "Prepare a WhatsApp message for someone (text + name or phone). Nothing is opened "
-                 "or sent. Then read it back and ask whether to open the chat.", draft, DraftArgs, permission="action"),
-            Tool("whatsapp_open", "Open the WhatsApp chat with the drafted text pre-filled, after the user approved the "
-                 "read-back. The user presses send; you cannot send WhatsApp messages.", open_, OpenArgs,
+                 "or sent. Then call whatsapp_open at once: its approval reads the draft back to the user (one yes).",
+                 draft, DraftArgs, permission="action"),
+            Tool("whatsapp_open", "Open the WhatsApp chat with the drafted text pre-filled. The system first reads the "
+                 "draft back and asks the user's approval (do not ask yourself). The user presses send; you cannot "
+                 "send WhatsApp messages.", open_, OpenArgs,
                  permission="destructive", impact=open_impact),
         ]
 
