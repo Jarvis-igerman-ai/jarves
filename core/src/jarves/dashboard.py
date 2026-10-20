@@ -865,6 +865,13 @@ class Handler(BaseHTTPRequestHandler):
     do_GET = do_POST = do_PUT = do_DELETE = do_HEAD = _handle
 
 
+class _Server(ThreadingHTTPServer):
+    # socketserver's default listen backlog is 5: a page load (40+ scripts) plus the 2 s polls of the strip and the
+    # approvals banner overflowed it on Windows, and the browser got ERR_CONNECTION_REFUSED for random requests.
+    request_queue_size = 128
+    daemon_threads = True
+
+
 class Dashboard:
     """Owns the HTTP server; `url` holds the one-time token. start() runs it in a daemon thread.
     workspace / memory / settings: the Core's own objects when it is opened from inside the Core.
@@ -882,8 +889,7 @@ class Dashboard:
         self.access = Access(home, token, lan=lan, lan_host=lan_host)
         self.ctx.access = self.access
         handler = type("H", (Handler,), {"ctx": self.ctx, "token": token, "access": self.access})
-        self.httpd = ThreadingHTTPServer(("0.0.0.0" if lan else "127.0.0.1", port or (LAN_PORT if lan else 0)),
-                                         handler)
+        self.httpd = _Server(("0.0.0.0" if lan else "127.0.0.1", port or (LAN_PORT if lan else 0)), handler)
         self.httpd.daemon_threads = True
         self.port = self.ctx.port = self.httpd.server_address[1]
         self.url = f"http://127.0.0.1:{self.port}/?t={token}"

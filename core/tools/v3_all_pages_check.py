@@ -66,10 +66,12 @@ def main() -> int:
                     p = ctx.new_page()
                     errs: list[str] = []
                     p.on("pageerror", lambda e, errs=errs: errs.append(f"pageerror: {e}"))
-                    p.on("console", lambda m, errs=errs: errs.append(f"console.{m.type}: {m.text}")
+                    p.on("console", lambda m, errs=errs: errs.append(f"console.{m.type}: {m.text} @ {m.location.get('url', '')}")
                          if m.type == "error" else None)
-                    p.on("response", lambda r, errs=errs: errs.append(f"HTTP {r.status} {r.url}")
-                         if "/api/" in r.url and r.status >= 500 else None)
+                    p.on("response", lambda r, errs=errs: errs.append(f"HTTP {r.status} {r.request.method} {r.url}")
+                         if r.status >= 400 else None)
+                    p.on("requestfailed", lambda r, errs=errs: errs.append(f"request failed {r.url}: {r.failure}")
+                         if "net::ERR_ABORTED" not in str(r.failure) else None)
                     for name in pages:
                         errs.clear()
                         p.goto(d.url + "#/" + name)
