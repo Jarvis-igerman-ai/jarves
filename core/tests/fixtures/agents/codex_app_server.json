@@ -1,0 +1,528 @@
+{
+ "client_requests_used": [
+  "initialize",
+  "thread/start",
+  "thread/resume",
+  "thread/list",
+  "thread/read",
+  "thread/loaded/list",
+  "turn/start",
+  "turn/steer",
+  "turn/interrupt",
+  "account/read"
+ ],
+ "enums": {
+  "AccountType": [
+   "amazonBedrock",
+   "apiKey",
+   "chatgpt"
+  ],
+  "CommandExecutionApprovalDecision": [
+   "accept",
+   "acceptForSession",
+   "cancel",
+   "decline"
+  ],
+  "FileChangeApprovalDecision": [
+   "accept",
+   "acceptForSession",
+   "cancel",
+   "decline"
+  ],
+  "ThreadActiveFlag": [
+   "waitingOnApproval",
+   "waitingOnUserInput"
+  ],
+  "ThreadItemType": [
+   "agentMessage",
+   "collabAgentToolCall",
+   "commandExecution",
+   "contextCompaction",
+   "dynamicToolCall",
+   "enteredReviewMode",
+   "exitedReviewMode",
+   "fileChange",
+   "functionCallOutput",
+   "hookPrompt",
+   "imageGeneration",
+   "imageView",
+   "mcpToolCall",
+   "plan",
+   "reasoning",
+   "sleep",
+   "subAgentActivity",
+   "userMessage",
+   "webSearch"
+  ],
+  "ThreadStatus": [
+   "active",
+   "idle",
+   "notLoaded",
+   "systemError"
+  ],
+  "TurnStatus": [
+   "completed",
+   "failed",
+   "inProgress",
+   "interrupted"
+  ]
+ },
+ "live": {
+  "account_keys": [
+   "email",
+   "planType",
+   "type"
+  ],
+  "account_result_keys": [
+   "account",
+   "requiresOpenaiAuth",
+   "workspaceRouting"
+  ],
+  "account_type": "chatgpt",
+  "initialize_result_keys": [
+   "codexHome",
+   "platformFamily",
+   "platformOs",
+   "userAgent"
+  ],
+  "notifications_after_initialize": [],
+  "thread_keys": [
+   "agentNickname",
+   "agentRole",
+   "canAcceptDirectInput",
+   "cliVersion",
+   "createdAt",
+   "cwd",
+   "daybreakEnabled",
+   "environments",
+   "ephemeral",
+   "extra",
+   "forkedFromId",
+   "gitInfo",
+   "historyMode",
+   "id",
+   "model",
+   "modelProvider",
+   "name",
+   "originator",
+   "parentThreadId",
+   "path",
+   "preview",
+   "projectId",
+   "reasoningEffort",
+   "recencyAt",
+   "section",
+   "sectionEnteredAt",
+   "sessionId",
+   "source",
+   "status",
+   "threadSource",
+   "turns",
+   "updatedAt"
+  ],
+  "thread_list_result_keys": [
+   "backwardsCursor",
+   "data",
+   "nextCursor",
+   "readStates"
+  ],
+  "thread_status_seen": [
+   "notLoaded"
+  ],
+  "unknown_thread_error_code": -32600
+ },
+ "missing_client_requests": [],
+ "notifications_used": [
+  "thread/started",
+  "thread/status/changed",
+  "thread/tokenUsage/updated",
+  "turn/started",
+  "turn/completed",
+  "item/started",
+  "item/completed",
+  "item/agentMessage/delta",
+  "error"
+ ],
+ "recorded": "2026-10-20",
+ "server_requests_used": [
+  "item/commandExecution/requestApproval",
+  "item/fileChange/requestApproval"
+ ],
+ "thread_required": [
+  "cliVersion",
+  "createdAt",
+  "cwd",
+  "ephemeral",
+  "id",
+  "modelProvider",
+  "preview",
+  "projectId",
+  "sessionId",
+  "source",
+  "status",
+  "turns",
+  "updatedAt"
+ ],
+ "types": {
+  "AgentMessageDeltaNotification": {
+   "properties": [
+    "delta",
+    "itemId",
+    "threadId",
+    "turnId"
+   ],
+   "required": [
+    "delta",
+    "itemId",
+    "threadId",
+    "turnId"
+   ]
+  },
+  "CommandExecutionRequestApprovalParams": {
+   "properties": [
+    "approvalId",
+    "command",
+    "commandActions",
+    "cwd",
+    "environmentId",
+    "itemId",
+    "kind",
+    "networkApprovalContext",
+    "proposedExecpolicyAmendment",
+    "proposedNetworkPolicyAmendments",
+    "reason",
+    "startedAtMs",
+    "threadId",
+    "turnId"
+   ],
+   "required": [
+    "itemId",
+    "startedAtMs",
+    "threadId",
+    "turnId"
+   ]
+  },
+  "CommandExecutionRequestApprovalResponse": {
+   "properties": [
+    "decision"
+   ],
+   "required": [
+    "decision"
+   ]
+  },
+  "ErrorNotification": {
+   "properties": [
+    "error",
+    "threadId",
+    "turnId",
+    "willRetry"
+   ],
+   "required": [
+    "error",
+    "threadId",
+    "turnId",
+    "willRetry"
+   ]
+  },
+  "FileChangeRequestApprovalParams": {
+   "properties": [
+    "grantRoot",
+    "itemId",
+    "reason",
+    "startedAtMs",
+    "threadId",
+    "turnId"
+   ],
+   "required": [
+    "itemId",
+    "startedAtMs",
+    "threadId",
+    "turnId"
+   ]
+  },
+  "FileChangeRequestApprovalResponse": {
+   "properties": [
+    "decision"
+   ],
+   "required": [
+    "decision"
+   ]
+  },
+  "GetAccountParams": {
+   "properties": [
+    "refreshToken"
+   ],
+   "required": []
+  },
+  "GetAccountResponse": {
+   "properties": [
+    "account",
+    "requiresOpenaiAuth"
+   ],
+   "required": [
+    "requiresOpenaiAuth"
+   ]
+  },
+  "InitializeParams": {
+   "properties": [
+    "capabilities",
+    "clientInfo"
+   ],
+   "required": [
+    "clientInfo"
+   ]
+  },
+  "InitializeResponse": {
+   "properties": [
+    "codexHome",
+    "platformFamily",
+    "platformOs",
+    "userAgent"
+   ],
+   "required": [
+    "codexHome",
+    "platformFamily",
+    "platformOs",
+    "userAgent"
+   ]
+  },
+  "ItemCompletedNotification": {
+   "properties": [
+    "completedAtMs",
+    "item",
+    "threadId",
+    "turnId"
+   ],
+   "required": [
+    "completedAtMs",
+    "item",
+    "threadId",
+    "turnId"
+   ]
+  },
+  "ItemStartedNotification": {
+   "properties": [
+    "item",
+    "startedAtMs",
+    "threadId",
+    "turnId"
+   ],
+   "required": [
+    "item",
+    "startedAtMs",
+    "threadId",
+    "turnId"
+   ]
+  },
+  "ThreadListParams": {
+   "properties": [
+    "archived",
+    "cursor",
+    "cwd",
+    "excludedThreadIds",
+    "limit",
+    "modelProviders",
+    "originators",
+    "searchTerm",
+    "sectionId",
+    "sortDirection",
+    "sortKey",
+    "sourceKinds",
+    "useStateDbOnly"
+   ],
+   "required": []
+  },
+  "ThreadListResponse": {
+   "properties": [
+    "backwardsCursor",
+    "data",
+    "nextCursor"
+   ],
+   "required": [
+    "data"
+   ]
+  },
+  "ThreadReadParams": {
+   "properties": [
+    "includeTurns",
+    "threadId"
+   ],
+   "required": [
+    "threadId"
+   ]
+  },
+  "ThreadResumeParams": {
+   "properties": [
+    "approvalPolicy",
+    "approvalsReviewer",
+    "baseInstructions",
+    "config",
+    "cwd",
+    "developerInstructions",
+    "excludeTurns",
+    "model",
+    "modelProvider",
+    "personality",
+    "sandbox",
+    "serviceTier",
+    "threadId"
+   ],
+   "required": [
+    "threadId"
+   ]
+  },
+  "ThreadStartParams": {
+   "properties": [
+    "approvalPolicy",
+    "approvalsReviewer",
+    "baseInstructions",
+    "config",
+    "cwd",
+    "developerInstructions",
+    "ephemeral",
+    "model",
+    "modelProvider",
+    "personality",
+    "sandbox",
+    "serviceName",
+    "serviceTier",
+    "sessionStartSource",
+    "threadSource"
+   ],
+   "required": []
+  },
+  "ThreadStartResponse": {
+   "properties": [
+    "approvalPolicy",
+    "approvalsReviewer",
+    "cwd",
+    "disabledPluginIds",
+    "instructionSources",
+    "model",
+    "modelProvider",
+    "reasoningEffort",
+    "sandbox",
+    "serviceTier",
+    "thread"
+   ],
+   "required": [
+    "approvalPolicy",
+    "approvalsReviewer",
+    "cwd",
+    "model",
+    "modelProvider",
+    "sandbox",
+    "thread"
+   ]
+  },
+  "ThreadStartedNotification": {
+   "properties": [
+    "thread"
+   ],
+   "required": [
+    "thread"
+   ]
+  },
+  "ThreadStatusChangedNotification": {
+   "properties": [
+    "status",
+    "threadId"
+   ],
+   "required": [
+    "status",
+    "threadId"
+   ]
+  },
+  "ThreadTokenUsageUpdatedNotification": {
+   "properties": [
+    "threadId",
+    "tokenUsage",
+    "turnId"
+   ],
+   "required": [
+    "threadId",
+    "tokenUsage",
+    "turnId"
+   ]
+  },
+  "TurnCompletedNotification": {
+   "properties": [
+    "threadId",
+    "turn"
+   ],
+   "required": [
+    "threadId",
+    "turn"
+   ]
+  },
+  "TurnInterruptParams": {
+   "properties": [
+    "threadId",
+    "turnId"
+   ],
+   "required": [
+    "threadId",
+    "turnId"
+   ]
+  },
+  "TurnStartParams": {
+   "properties": [
+    "approvalPolicy",
+    "approvalsReviewer",
+    "clientUserMessageId",
+    "cwd",
+    "disabledPluginIds",
+    "effort",
+    "input",
+    "model",
+    "outputSchema",
+    "parentTurnId",
+    "personality",
+    "rootTurnId",
+    "sandboxPolicy",
+    "serviceTier",
+    "serviceTierForTurn",
+    "summary",
+    "threadId",
+    "toolOutput",
+    "turnTrigger"
+   ],
+   "required": [
+    "input",
+    "threadId"
+   ]
+  },
+  "TurnStartResponse": {
+   "properties": [
+    "turn"
+   ],
+   "required": [
+    "turn"
+   ]
+  },
+  "TurnStartedNotification": {
+   "properties": [
+    "threadId",
+    "turn"
+   ],
+   "required": [
+    "threadId",
+    "turn"
+   ]
+  },
+  "TurnSteerParams": {
+   "properties": [
+    "clientUserMessageId",
+    "expectedTurnId",
+    "input",
+    "threadId"
+   ],
+   "required": [
+    "expectedTurnId",
+    "input",
+    "threadId"
+   ]
+  }
+ },
+ "version": "codex-cli 0.163.0"
+}
