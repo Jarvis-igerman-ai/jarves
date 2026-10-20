@@ -511,6 +511,9 @@ class StoreSink(logging.Handler):
         self._fmt = logs.JsonFormatter()
         self._q: queue.SimpleQueue = queue.SimpleQueue()
         self.reviews: list = []                         # AI review threads started (None = skipped)
+        # False while the Core stops: a conversation ended BY the shutdown gets the rules only (like the curator), so
+        # no paid request / memory.db handle outlives "Core stopped cleanly" (SW-V3 P0.4 Q06)
+        self.ai_reviews = True
         self._thread = threading.Thread(target=self._run, name="jarves-store", daemon=True)
         self._thread.start()
 
@@ -533,7 +536,8 @@ class StoreSink(logging.Handler):
                     self.store.commit()
                     from . import diagnose
                     diagnose.run(self.store, self.cfg, [ended])
-                    self.reviews.append(diagnose.schedule_review(self.store, self.cfg, ended))   # AI pass, own thread
+                    if self.ai_reviews:
+                        self.reviews.append(diagnose.schedule_review(self.store, self.cfg, ended))  # AI pass, own thread
             except Exception as e:                    # never log from here (it would feed back into the sink)
                 print(f"jarves history: {type(e).__name__}: {str(e)[:120]}", flush=True)
         self.store.commit()
