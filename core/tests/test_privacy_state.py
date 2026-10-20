@@ -283,8 +283,13 @@ async def test_dashboard_home_strip_and_preview_api(core):
     assert st == 200 and body["privacy"]["mic"]["state"] in MIC and body["privacy"]["camera"]["state"] in ("off", "unavailable")
     st, r = await call(rt_mod.api_camera_preview_poll)
     assert st == 200 and r["open"] is False                              # a poll never opens it
-    st, r = await call(rt_mod.api_camera_preview_set, {"start": True})
-    assert st == 200 and r["open"] is True
+    from conftest import until
+    await until(lambda: svc.available()[0])                              # the fake probe is the one in force
+
+    async def opened():
+        st, r = await call(rt_mod.api_camera_preview_set, {"start": True})
+        return r if st == 200 and r["open"] is True else None
+    assert await until(opened)
     frame = None
     for _ in range(400):
         st, r = await call(rt_mod.api_camera_preview_poll)
@@ -292,7 +297,7 @@ async def test_dashboard_home_strip_and_preview_api(core):
             frame = r["frame"]
             break
         await asyncio.sleep(0.1)
-    assert frame and base64.b64decode(frame["data"]) and r["open"] is True
+    assert st == 200 and frame and base64.b64decode(frame["data"]) and r["open"] is True
     st, body = await call(rt_mod.api_runtime)
     assert body["privacy"]["camera"]["state"] == "preview"
     st, r = await call(rt_mod.api_camera_preview_set, {"open": False})
