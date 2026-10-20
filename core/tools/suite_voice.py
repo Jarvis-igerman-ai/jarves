@@ -648,6 +648,7 @@ async def s_time(h, r):
     now = datetime.now()
     h12 = now.hour % 12 or 12
     cands = {HOURS[h12], HOURS[h12 % 12 + 1], f"{now.hour}:", f"{now.hour:02d}:", str(now.hour)}
+    cands |= {c.replace("שתים", "שתיים") for c in cands}      # both spellings of 12 (campaign 20 Oct)
     ok_t = has(a["said"], *cands)
     b = await h.turn(s, "ואיזה יום היום?", label="date")
     ok_d = has(b["said"], DAYS[now.weekday()], now.strftime("%A"))
@@ -1252,7 +1253,7 @@ async def s_budget_req(h, r):
 
 
 FACE_STATES_OK = {"idle", "listening", "thinking", "speaking", "happy", "error", "sleeping", "muted"}
-ACT_KINDS = {None, "thinking", "searching", "music", "time", "memory", "connecting", "tool", "done"}
+ACT_KINDS = {None, "thinking", "searching", "reading", "music", "time", "memory", "connecting", "tool", "done"}
 EMOS = {"laugh", "cry", "sad", "surprised", "love"}
 
 
