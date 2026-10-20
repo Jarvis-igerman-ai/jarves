@@ -636,3 +636,8 @@ See [docs/reviews/S1_T03R1_ENGINEERING_REVIEW.md](reviews/S1_T03R1_ENGINEERING_R
 - Multi-device + Tailscale remote: after V3 P0–P1, together with the phone satellite.
 - Installer signing: research free options (SignPath OSS etc.); stay unsigned meanwhile.
 - Defaults: ask before any outward action; keep conversations/logs 90 days then summarize into memory; proactive suggestions rare/important only (quiet hours respected); installer pre-selects only core + music.
+
+## Questions for the user (from research, branch v3-research, docs/plans/)
+- Signing: SignPath OSS needs a public repo + OSI license; Azure Artifact Signing ~$9.99/mo, region-limited (verify price). Stay unsigned? Open-source the installer?
+- Instagram: is the account Business/Creator and linked to a Facebook Page? Confirm sends by voice, dashboard or Telegram?
+- Virtual computer: which 2-3 tasks would justify it; local (WSL2/Docker) or cloud budget?
