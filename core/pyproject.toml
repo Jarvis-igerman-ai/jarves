@@ -44,7 +44,7 @@ tray = [
 jarves = "jarves.cli:main"
 
 [dependency-groups]
-dev = ["pytest>=8", "pytest-asyncio>=1.0"]
+dev = ["pytest>=8", "pytest-asyncio>=1.0", "pyyaml>=6.0.2"]   # pyyaml: test_ci_workflows parses .github/workflows
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
