@@ -1,3 +1,20 @@
+## V3 P1 channels: Telegram, morning briefing, WhatsApp handoff, Home Assistant (20 Oct 2026) — [#17](https://github.com/igalgerman/JARVIS/issues/17)
+
+- Branch `v3-p1-channels` (from `swv2-integrate`). Four add-ons, each with a feature switch + capability row + setup-wizard group + bundle check + Hebrew/English guide + tests (`core/tests/test_channels.py`, 27 tests, real HTTP against local fake servers in `core/tests/channels_fakes.py`; full suite 1160 passed, 3 skipped).
+- **Telegram** (`telegram_channel.py`, `jarvis telegram start|status|test|logout`, dashboard `POST /api/telegram/token`): owner creates the bot; token only in `secrets.env` (`TELEGRAM_BOT_TOKEN`), never logged/printed. Wizard pairs only private chats the owner confirms. Send = `telegram_draft` then `telegram_send` (destructive, impact None = confirmation from every origin, exact text read back). Off by default, in SAFE_OFF.
+- **Morning briefing** (`briefing.py`, tool `briefing_get`, on by default): calendar today + important unread Gmail (count/senders only) via the existing Calendar/Gmail tools, weather from Open-Meteo (settings `briefing.city/lat/lon`, default Tel Aviv), reminders due today + notes tagged list/רשימה. Each part degrades alone (Google missing -> says `jarvis google start`; no network -> weather says so). Mail/calendar text is untrusted (no side effects in that turn).
+- **WhatsApp handoff** (`whatsapp.py`, on by default, risk medium): `whatsapp_draft` -> read-back approval -> `whatsapp_open` opens `https://wa.me/<number>?text=...`; the owner presses send. No network/automation code (test asserts it). Numbers the owner says are kept in `whatsapp/contacts.json`.
+- **Home Assistant** (`homeassistant.py`, `jarvis home start|status|test|logout`, last priority): URL + long-lived token (`HOME_ASSISTANT_TOKEN` in `secrets.env`), entity allow-list chosen in the wizard, fixed table of simple services per domain; risky entities (lock, cover, alarm, script, valve, siren, water_heater or owner-flagged) only via `home_control_risky` which always asks. Off by default, in SAFE_OFF.
+- **UNVERIFIED (never against the real services):** a real BotFather bot, real Telegram delivery, real Open-Meteo, a real Home Assistant, the real WhatsApp app opening the link, a connected Google account for the briefing. Windows/Pi status for all four is `implemented_unverified`.
+- **Instagram** (owner asked for `jarvis instagram start`): NOT built in this task (not in the brief); needs the API-limits research first.
+- **Questions for the user:** (1) Telegram: should extra allowed chats (family) be supported beyond `--add-chat`? (2) Briefing: schedule it automatically every workday (Sun-Thu) at a time you choose? (3) Home Assistant: is the default risky list (lock, cover, alarm, script, valve, siren, water heater) right?
+
+## SW-V3 P0.2 Dashboard redesign (20 Oct 2026) — [report](reviews/SWV3_P02_REPORT.md) · #17 · branch `v3-p02-dashboard`
+
+- Hebrew-first RTL dashboard (default) with one global English switch; 7 grouped nav sections keep every page (test-enforced); phone drawer; global search (pages, features, guides, conversations/log search); app-bar chips for Core, host device, Pi readiness, mic/camera/audio-to-cloud and privacy; usage strip kept on every page plus today's estimated cost. New `i18n.js`, `shell.js`, `shell.css`; `/api/runtime` gains `host`.
+- Evidence: 123 focused dashboard/guides/setup/usage tests passed (incl. new `test_dashboard_p02.py`); Playwright interactive review (1440 px + 390 px, he/en) and 16 headless Edge captures in `docs/reviews/swv3_p02/` (`tools/v3_dashboard_screens.py`). Not merged into `swv2-integrate`; final-commit CI not claimed.
+- Gaps: server-provided detail texts (feature about/evidence, issue titles, settings labels, usage meter notes) remain English in Hebrew mode; owning layer = Python modules (`_he` fields). No owner hands-on review yet.
+- Questions for the user: group names/order — **USER DECISION REQUIRED** (provisional in report); translate server texts as P0.2 follow-up before P0.5 — **USER DECISION REQUIRED** (recommended yes).
 ## Complete retained-log quality review (19 Oct 2026) — [report](reviews/ALL_RETAINED_LOGS_19OCT2026.md)
 
 - User explicitly requested improvement analysis of all logs beyond ERROR events. Reviewed all **988 JSON records**, all **100 voice text entries** (40 user/60 assistant), **74 history turns** and history backups. Found **26 raw-only turns** absent DB; backup snapshots add no unique transcript text. **19 typed AI completion records have no answer text**, so typed quality is unassessable. Input log SHA256 unchanged before/after and private DB counts unchanged (4 sessions/74 turns/13 tools/29 delegations/156 events/4 issues); no raw conversation/account content committed.
@@ -639,3 +656,7 @@ See [docs/reviews/S1_T03R1_ENGINEERING_REVIEW.md](reviews/S1_T03R1_ENGINEERING_R
 
 ## Status 20 Oct 2026
 - SW-V2 merged to main via PR #29 (9e2149d). V3 is delivered as one PR per piece (P0.2 dashboard #31, P1 basics #32, research #33); more follow as agents finish (perf, QA, browser, channels, Hebrew server texts).
+## Questions for the user (from research, branch v3-research, docs/plans/)
+- Signing: SignPath OSS needs a public repo + OSI license; Azure Artifact Signing ~$9.99/mo, region-limited (verify price). Stay unsigned? Open-source the installer?
+- Instagram: is the account Business/Creator and linked to a Facebook Page? Confirm sends by voice, dashboard or Telegram?
+- Virtual computer: which 2-3 tasks would justify it; local (WSL2/Docker) or cloud budget?
