@@ -1,3 +1,10 @@
+## SW-V3 integration on `v3-final` (20 Oct 2026) - #17, [report](reviews/SWV3_INTEGRATION_REPORT.md)
+
+- Merged (no-ff, both sides kept): v3-fix-show-twice, v3-approvals, v3-ci-yaml-fix, v3-wake, v3-connect, v3-campaign-dash, v3-campaign-features, v3-campaign-voice (2 rounds), on top of the earlier 8 V3 branches.
+- Fixed while integrating: workflow YAML test (`test_ci_workflows.py`), Google reminder spoke out loud while hidden/idle (now popup unless a conversation is open), dashboard listen backlog 5 -> 128 (random ERR_CONNECTION_REFUSED in Edge), approvals page + wake strip line in the en/he/ar/ru catalogs, 23 missing Hebrew feature texts, profile-switch test vs the approvals deny cooldown, suite_system S09/V06 harness.
+- Verified locally (CI has no minutes): full offline suite 3x green, 0 skipped; suite_system 20/20 (Godot headless, start/stop x5, soak, V01-V08); `jarvis setup --check-addons` PASS; real Core 5x on a TEST profile; 32 dashboard pages x en/he/ar in headless Edge, 0 errors (`core/tools/v3_all_pages_check.py`).
+- Questions for the user: (1) v3-campaign-voice is still "in progress": merge its later commits too? (2) `silent_live` (paid, needs your key) was not run: run it before you use the build? Status: WAITING FOR USER.
+
 ## SW-V3 campaign PASS B, feature by feature (20 Oct 2026) - #17, branch `v3-campaign-features`
 
 - Report: [reviews/SWV3_CAMPAIGN_FEATURES.md](reviews/SWV3_CAMPAIGN_FEATURES.md); bugs: [reviews/SWV3_CAMPAIGN_BUG_TABLE.md](reviews/SWV3_CAMPAIGN_BUG_TABLE.md). 53 features x CLI/dashboard/Core tool, plus tools of timers, lists, notes, files, scheduler/reports, memory/curator, skills, Telegram/WhatsApp/Instagram/Home Assistant (local fakes), browser (local page), helper + approvals (answered through dashboard API and CLI), profiles, self-check, backup/restore, usage/cost, diag, camera (virtual). Result: 1429 PASS, 1 FAIL (open P3), 2 BLOCKED, 27 N/A.
