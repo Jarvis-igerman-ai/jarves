@@ -310,14 +310,17 @@ def build(req: dict, out: Path, test_invoke: str | None = None, *, theme: str | 
     from tkinter import font as tkfont
 
     _dpi_aware()
-    for attempt in range(3):
+    for attempt in range(5):
         try:
             root = tk.Tk()
             break
-        except tk.TclError as e:      # Windows: Tcl's init script read now and then fails ("couldn't read file
-            if attempt == 2 or "couldn't read file" not in str(e) and "tk.tcl" not in str(e):   # ...auto.tcl")
+        except tk.TclError as e:      # Windows: Tcl's init scripts are read now and then with a failure ("couldn't read
+            msg = str(e)              # file ...auto.tcl", 'invalid command name "tcl_findLibrary"'): retry a few times
+            transient = any(k in msg for k in ("couldn't read file", "tk.tcl", "init.tcl", "auto.tcl",
+                                               "tcl_findLibrary", "tk_getFileLibrary", "can't find a usable"))
+            if attempt == 4 or not transient:
                 raise
-            time.sleep(0.2)
+            time.sleep(0.25 * (attempt + 1))
     lang = pick_lang(req)
     S = STRINGS[lang]
     rtl = lang == "he"
