@@ -68,7 +68,7 @@ def public_releases_url(repo: str = DEFAULT_RELEASES_REPO) -> str:
 
 # Windows / Pi status of the M6 features (spec section 5). jarves.features has no targets field yet, so this is
 # the record the capability matrix (WP-M4) reads; the issue is real (created with `gh issue create`).
-PI_ISSUE = "https://github.com/igalgerman/jarves/issues/19"
+PI_ISSUE = "https://github.com/igalgerman/jarves/issues/3"
 PLATFORMS = {
     "windows_installer": {
         "windows": {"status": "implemented_unverified",

@@ -19,7 +19,7 @@ from .service import Runtime, alerts_paused, current, read_state
 
 QUIT_DELAY_S = 4.0      # voice quit / end: first wait QUIT_DELAY_S / 4, then for the spoken goodbye (bounded)
 
-ISSUE_PI = "https://github.com/igalgerman/jarves/issues/20"
+ISSUE_PI = "https://github.com/igalgerman/jarves/issues/3"
 EVIDENCE = "docs/reviews/SWV2_WP-M1.md"
 
 # Truthful status per target (spec 5). "verified_on_device" only with a real run on that device.
