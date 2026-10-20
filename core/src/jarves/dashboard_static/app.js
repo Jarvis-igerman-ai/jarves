@@ -280,11 +280,11 @@ function issueRow(i) {
   } else actions.append(el("button", { type: "button", onclick: () => setIssue(i.id, "open") }, "Reopen"));
   return el("div", { class: "issue card" },
     pill(i.severity, i.severity),
-    el("div", {}, el("div", { class: "title", dir: "ltr" }, i.title),
+    el("div", {}, el("div", { class: "title", dir: "auto" }, txh(i, "title")),
       el("div", { class: "muted small" }, `${i.kind} · seen in ${i.count} conversation${i.count > 1 ? "s" : ""} · last ${day(i.last_seen)} ${clock(i.last_seen)}`,
         ev.session && !String(ev.session).startsWith("day:") ? [" · ", el("a", { href: "#/session/" + encodeURIComponent(ev.session) }, "open conversation")] : null)),
     actions,
-    i.detail ? el("div", { class: "detail", dir: "ltr" }, i.detail) : null,
+    i.detail ? el("div", { class: "detail", dir: "auto" }, txh(i, "detail")) : null,
     evNodes.length ? el("div", { class: "evidence" }, evNodes) : null);
 }
 async function setIssue(id, status) {
@@ -371,13 +371,13 @@ async function pageFeatures() {
     const badge = !f.enabled ? pill("plain", "off") : f.available ? pill("ok", "active") : pill("unavailable", "unavailable");
     return el("tr", {}, el("td", {}, sw),
       el("td", {}, el("b", {}, f.title_en), " ", el("span", { class: "muted", dir: "auto" }, f.title_he),
-        el("div", { class: "muted small" }, f.about, " · ", el("a", { href: "#/guide-for/" + encodeURIComponent(f.id) }, "Guide")),
+        el("div", { class: "muted small" }, txh(f, "about"), " · ", el("a", { href: "#/guide-for/" + encodeURIComponent(f.id) }, "Guide")),
         f.requested ? el("div", { class: "small" }, "JARVES was asked to turn this on: approve here.") : null),
-      el("td", {}, badge, f.reason ? el("div", { class: "small", dir: "auto" }, f.reason) : null),
+      el("td", {}, badge, f.reason ? el("div", { class: "small", dir: "auto" }, txh(f, "reason")) : null),
       el("td", {}, pill(f.risk, f.risk)),
       el("td", { class: "muted small" }, `applies: ${when[f.applies] || f.applies}` + (f.source !== "user" ? ` · from ${f.source}` : ""), msg));
   });
-  render(header("Features", "Switch what JARVES may do. 'Unavailable' means the device, account or service is missing; he tells you why. " + d.note),
+  render(header("Features", "Switch what JARVES may do. 'Unavailable' means the device, account or service is missing; he tells you why. " + txh(d, "note")),
     el("div", { class: "card" }, el("table", {}, el("thead", {}, el("tr", {}, el("th", {}, "Switch"), el("th", {}, "Feature"),
       el("th", {}, "Status"), el("th", {}, "Risk"), el("th", {}, "Takes effect"))), el("tbody", {}, rows))));
 }
@@ -451,7 +451,7 @@ async function pageSettings() {
     return el("div", { class: "card", style: "margin-bottom:12px" }, el("b", {}, typeof v === "object" ? `[${sec}]` : "general"),
       el("div", { class: "kv", style: "margin-top:8px" }, rows));
   });
-  render(header("Settings", `Read-only view of the settings in effect. ${d.hint}`), el("div", { class: "muted small", style: "margin-bottom:12px" }, `Data folder: ${d.home}`), sections);
+  render(header("Settings", `Read-only view of the settings in effect. ${txh(d, "hint")}`), el("div", { class: "muted small", style: "margin-bottom:12px" }, `Data folder: ${d.home}`), sections);
 }
 
 // ---------------------------------------------------------------- router

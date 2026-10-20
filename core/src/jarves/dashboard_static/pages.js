@@ -452,8 +452,8 @@ PAGES.settings = async function () {
     try { const r = await api("/api/settings/undo", { method: "POST", body: "{}" }); msg.textContent = "Restored " + r.restored; setTimeout(route, 900); }
     catch (e) { msg.textContent = e.message; }
   } }, "Undo last save");
-  const cards = Object.entries(groups).map(([g, list]) => el("div", { class: "card", style: "margin-bottom:12px" }, el("b", {}, g),
-    el("table", { style: "margin-top:6px" }, el("tbody", {}, list.map((e) => el("tr", {}, el("td", {}, e.label, el("div", { class: "muted small mono" }, e.key)),
+  const cards = Object.entries(groups).map(([g, list]) => el("div", { class: "card", style: "margin-bottom:12px" }, el("b", {}, txh(list[0], "group")),
+    el("table", { style: "margin-top:6px" }, el("tbody", {}, list.map((e) => el("tr", {}, el("td", {}, txh(e, "label"), el("div", { class: "muted small mono" }, e.key)),
       el("td", {}, control(e)), el("td", { class: "muted small" }, `default ${e.default === "" ? '""' : e.default}` + (e.min !== undefined ? ` · ${e.min}–${e.max ?? "∞"}` : "") +
         (e.file !== null && e.file !== undefined && e.file !== e.running ? ` · running now: ${e.running} (until restart)` : ""))))))));
   const rt = d.runtime || {};
