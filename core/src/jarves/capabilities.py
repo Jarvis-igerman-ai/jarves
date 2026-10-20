@@ -34,7 +34,7 @@ TRACKING = "https://github.com/igalgerman/JARVIS/issues/17"
 PI_ROADMAP = "https://github.com/igalgerman/JARVIS/issues/18"
 # Every roadmap issue a feature may link: checked to exist with `gh issue list` on LAST_CHECKED (#19-#23 were
 # created by the other SW-V2 packages for their own Pi gaps). Add a number only after the issue exists.
-KNOWN_ISSUES = {TRACKING, PI_ROADMAP, *(f"https://github.com/igalgerman/JARVIS/issues/{n}" for n in (19, 20, 21, 22, 23, 25, 28))}   # 25: WP-L, 28: privacy strip
+KNOWN_ISSUES = {TRACKING, PI_ROADMAP, *(f"https://github.com/igalgerman/JARVIS/issues/{n}" for n in (14, 19, 20, 21, 22, 23, 25, 28))}   # 14: SW-V4 D, 25: WP-L, 28: privacy strip
 _ISSUE_URL = re.compile(r"^https://github\.com/igalgerman/JARVIS/issues/\d+$")
 LAST_CHECKED = "2026-10-19"
 

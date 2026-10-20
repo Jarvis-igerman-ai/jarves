@@ -34,6 +34,14 @@ EDITABLE: dict[str, tuple[str, str]] = {
     "voice.wake_no_speech_s": ("Wake word", "Close a wake with no speech after (s)"),
     "ai.daily_request_limit": ("Cost limits", "AI requests per day (hard ceiling)"),
     "ai.daily_realtime_minutes": ("Cost limits", "Voice minutes per day (hard ceiling)"),
+    # SW-V4 D (#14): client delegation caps (the mode itself is the `client_delegation` feature switch)
+    "ai.delegation_daily_usd": ("Cost limits", "Daily budget for spoken lookups (USD, strict)"),
+    "ai.delegation_turn_usd": ("Cost limits", "Budget for one spoken question (USD, strict)"),
+    "ai.delegation_turn_requests": ("Cost limits", "Model requests for one spoken question"),
+    "ai.delegation_max_searches": ("Cost limits", "Web searches per request"),
+    "ai.delegation_timeout_s": ("Conversation", "Stop a spoken lookup after (s)"),
+    "ai.delegation_fallback": ("Cost limits", "If client delegation fails: local = honest \"can't look it up\"; "
+                                              "server = allow server delegation"),
     "ai.voice_service_tier": ("AI", "Backend speed tier for spoken lookups (priority = Fast, 2x price)"),
     "ai.voice_reasoning_effort": ("AI", "Backend reasoning effort for spoken lookups"),
     "ai.task_timeout_s": ("AI", "Background task time limit (s)"),

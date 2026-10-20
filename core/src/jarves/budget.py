@@ -32,7 +32,10 @@ from . import logs
 from .config import AIConfig
 from .memory import MemoryStore
 
-KINDS = ("ai_requests", "voice_seconds")
+KINDS = ("ai_requests", "voice_seconds", "delegation_usd_micros")
+# SW-V4 D (#14): client-mode GPT-Live delegation reserves its worst-case API cost in micro-USD (1e-6 $) per local day.
+USD_KIND = "delegation_usd_micros"
+MICRO = 1_000_000
 HARD_TTL_S = 6 * 3600            # backstop only: a reservation of a LIVE owner is never expired before this
 RESERVATION_TTL_S = HARD_TTL_S   # (old name)
 
@@ -72,9 +75,10 @@ class BudgetExceeded(Exception):
     def __init__(self, kind: str, limit: int, used: int) -> None:
         super().__init__(f"daily {kind} limit {limit} reached ({used} used)")
         self.kind, self.limit, self.used = kind, limit, used
-        self.code = "AI_BUDGET" if kind == "ai_requests" else "VOICE_BUDGET"
-        self.action = ("raise ai.daily_request_limit" if kind == "ai_requests"
-                       else "raise ai.daily_realtime_minutes")
+        self.code = {"ai_requests": "AI_BUDGET", USD_KIND: "DELEGATION_BUDGET"}.get(kind, "VOICE_BUDGET")
+        self.action = {"ai_requests": "raise ai.daily_request_limit",
+                       USD_KIND: "raise ai.delegation_daily_usd (jarvis budget set --daily-usd)"}.get(
+                           kind, "raise ai.daily_realtime_minutes")
 
 
 @dataclass
@@ -175,7 +179,39 @@ class Budget:
 
     # ------------------------------------------------------------------ public API
     def limit(self, kind: str) -> int:
+        if kind == USD_KIND:
+            return int(round(float(getattr(self.ai, "delegation_daily_usd", 0.0)) * MICRO))
         return self.ai.daily_request_limit if kind == "ai_requests" else self.ai.daily_realtime_minutes * 60
+
+    def reserve_many(self, items: list[tuple[str, int]]) -> list[Reservation]:
+        """Several kinds in ONE transaction (all or nothing): e.g. 1 ai_requests unit + the request's worst-case
+        micro-USD. Raises BudgetExceeded for the first kind that does not fit; nothing is then held."""
+        rs = [Reservation(self, kind, n) for kind, n in items]
+
+        def go(cur):
+            now = self._clock()
+            self._expire(cur, now)
+            for r in rs:
+                used = self._used(cur, r.kind, r.day)
+                limit = self.limit(r.kind)
+                if used + self._held(cur, r.kind, r.day) + r.n > limit:
+                    raise BudgetExceeded(r.kind, limit, used)
+                cur.execute("INSERT INTO reservations (id, day, kind, n, pid, created) VALUES (?, ?, ?, ?, ?, ?)",
+                            (r.id, r.day, r.kind, r.n, os.getpid(), now))
+        try:
+            self._tx(go)                      # an exception rolls the whole transaction back: nothing held
+        except BudgetExceeded as e:
+            logs.warn("budget", e.code, "budget limit reached", detail=str(e), action=e.action)
+            raise
+        return rs
+
+    def reservations(self, kind: str | None = None) -> list[dict]:
+        """Live reservations of ALL processes (dashboard Costs page, `jarvis budget status`)."""
+        q = "SELECT id, day, kind, n, pid, created FROM reservations"
+        rows = self._db.execute(q + (" WHERE kind = ?" if kind else "") + " ORDER BY created",
+                                (kind,) if kind else ()).fetchall()
+        return [{"id": r[0][:8], "day": r[1], "kind": r[2], "n": r[3], "pid": r[4], "age_s": round(self._clock() - r[5], 1)}
+                for r in rows]
 
     def used(self, kind: str) -> int:
         return self.memory.usage_today(kind)

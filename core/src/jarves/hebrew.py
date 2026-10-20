@@ -420,6 +420,25 @@ TEXT: dict[str, str] = {
         "מדבר בכל שפה שהמודל מדבר (כולל עברית); התיאור הוא המבטא שלו",
     "No preview: OpenAI publishes no sample clips through the API, and JARVES does not fake one. Hearing a voice needs a short real session (about $0.05 per minute on GPT-Live).":
         "אין תצוגה מקדימה: OpenAI לא מפרסמת דוגמאות דרך ה-API, ו-JARVES לא מזייף. כדי לשמוע קול צריך שיחה אמיתית קצרה (כ-0.05 דולר לדקה ב-GPT-Live).",
+    # --- SW-V4 D (#14): client-mode delegation (feature, capability row, settings, probe reason)
+    "JARVES itself runs every lookup GPT-Live hands over, and reserves its cost before sending it, so the daily and "
+    "per-question limits are never exceeded; with ChatGPT + API key the reasoning runs on your plan. Adds a little "
+    "latency":
+        "ג'ארביס מריץ בעצמו כל חיפוש ש-GPT-Live מעביר, ושומר את העלות שלו לפני השליחה, כך שהתקרה היומית והתקרה לשאלה "
+        "אף פעם לא נחצות; עם ChatGPT + מפתח API החשיבה רצה על המנוי שלך. מוסיף מעט השהיה",
+    "core/tests/test_delegation_client.py (strict cap property test, fake Live and Responses servers); live scenarios "
+    "51-62 in docs/reviews/SWV4_D_DELEGATION.md":
+        "core/tests/test_delegation_client.py (בדיקת מאפיין של תקרה קשיחה, שרתי Live ו-Responses מדומים); תרחישים חיים "
+        "51-62 ב-docs/reviews/SWV4_D_DELEGATION.md",
+    "Pi voice is out of V4 scope": "קול על ה-Pi מחוץ לתחום של V4",
+    "client delegation needs live cloud voice (voice.mode = live)": "תקציב קשיח לחיפושים צריך קול חי בענן (voice.mode = live)",
+    "Daily budget for spoken lookups (USD, strict)": "תקציב יומי לחיפושים בשיחה (דולר, קשיח)",
+    "Budget for one spoken question (USD, strict)": "תקציב לשאלה אחת בשיחה (דולר, קשיח)",
+    "Model requests for one spoken question": "בקשות למודל לשאלה אחת בשיחה",
+    "Web searches per request": "חיפושים ברשת לבקשה",
+    "Stop a spoken lookup after (s)": "לעצור חיפוש בשיחה אחרי (שניות)",
+    "If client delegation fails: local = honest \"can't look it up\"; server = allow server delegation":
+        "אם התקציב הקשיח נכשל: local = תשובה כנה \"לא יכול לבדוק\"; server = לאפשר מעבר להעברה בצד השרת",
 }
 
 _OUTCOME = {"answered late": "נענה באיחור", "the user gave up and asked something else": "המשתמש ויתר ושאל משהו אחר",

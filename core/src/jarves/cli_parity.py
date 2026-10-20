@@ -46,6 +46,7 @@ FEATURES: dict[str, object] = {
     "browser": "browser", "helper": "approvals", "helper_readonly_auto": (D, "a pure switch; `jarvis features`"),
     "whatsapp_handoff": (D, "WhatsApp opens a draft in the app; no CLI needed, switch via `jarvis features`"),
     "morning_briefing": "jobs", "home_assistant": "home", "conversation_recall": "recall",
+    "client_delegation": "budget",
 }
 
 # Skill (tool group) name -> "jarvis <command>" or ("dashboard", reason) or ("voice", reason) for groups that only

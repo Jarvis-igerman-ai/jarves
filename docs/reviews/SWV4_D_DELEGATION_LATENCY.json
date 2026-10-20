@@ -1,0 +1,136 @@
+{
+ "server": {
+  "runs": [
+   {
+    "q": "מה מזג האוויר עכשיו בתל אביב?",
+    "answer_after_s": 2.69,
+    "backend_s": 2.4,
+    "dead_air_s": 0.79
+   },
+   {
+    "q": "מה שער הדולר היום?",
+    "answer_after_s": 5.91,
+    "backend_s": 5.32,
+    "dead_air_s": 0.83
+   },
+   {
+    "q": "מי זכה אתמול במשחק של מכבי תל אביב?",
+    "answer_after_s": 7.66,
+    "backend_s": 7.59,
+    "dead_air_s": 0.39
+   },
+   {
+    "q": "מה מזג האוויר בירושלים מחר?",
+    "answer_after_s": 5.96,
+    "backend_s": 5.27,
+    "dead_air_s": 0.9
+   },
+   {
+    "q": "מה המחיר של מניית אינטל עכשיו?",
+    "answer_after_s": 4.6,
+    "backend_s": 3.95,
+    "dead_air_s": 1.2
+   },
+   {
+    "q": "מה מזג האוויר עכשיו בלונדון?",
+    "answer_after_s": 5.97,
+    "backend_s": 5.41,
+    "dead_air_s": 1.21
+   },
+   {
+    "q": "מתי השקיעה היום בתל אביב?",
+    "answer_after_s": 10.88,
+    "backend_s": 10.27,
+    "dead_air_s": 1.01
+   },
+   {
+    "q": "מה החדשות הגדולות היום?",
+    "answer_after_s": 11.29,
+    "backend_s": 10.59,
+    "dead_air_s": 1.68
+   },
+   {
+    "q": "מה מזג האוויר עכשיו בחיפה?",
+    "answer_after_s": 4.56,
+    "backend_s": 4.0,
+    "dead_air_s": 1.28
+   },
+   {
+    "q": "כמה עולה ביטקוין עכשיו?",
+    "answer_after_s": 4.51,
+    "backend_s": 3.87,
+    "dead_air_s": 0.84
+   }
+  ],
+  "n": 10,
+  "p50": 5.96,
+  "p95": 11.29
+ },
+ "client": {
+  "runs": [
+   {
+    "q": "מה מזג האוויר עכשיו בתל אביב?",
+    "answer_after_s": 3.99,
+    "backend_s": 3.22,
+    "dead_air_s": 0.51
+   },
+   {
+    "q": "מה שער הדולר היום?",
+    "answer_after_s": 5.54,
+    "backend_s": 4.9,
+    "dead_air_s": 0.86
+   },
+   {
+    "q": "מי זכה אתמול במשחק של מכבי תל אביב?",
+    "answer_after_s": 6.91,
+    "backend_s": 6.13,
+    "dead_air_s": 0.57
+   },
+   {
+    "q": "מה מזג האוויר בירושלים מחר?",
+    "answer_after_s": 3.36,
+    "backend_s": 2.76,
+    "dead_air_s": 0.69
+   },
+   {
+    "q": "מה המחיר של מניית אינטל עכשיו?",
+    "answer_after_s": 3.53,
+    "backend_s": 2.74,
+    "dead_air_s": 0.61
+   },
+   {
+    "q": "מה מזג האוויר עכשיו בלונדון?",
+    "answer_after_s": 2.57,
+    "backend_s": 1.94,
+    "dead_air_s": 0.71
+   },
+   {
+    "q": "מתי השקיעה היום בתל אביב?",
+    "skipped": "no delegation"
+   },
+   {
+    "q": "מה החדשות הגדולות היום?",
+    "answer_after_s": 7.73,
+    "backend_s": 7.53,
+    "dead_air_s": 0.7
+   },
+   {
+    "q": "מה מזג האוויר עכשיו בחיפה?",
+    "answer_after_s": 5.72,
+    "backend_s": 5.05,
+    "dead_air_s": 1.19
+   },
+   {
+    "q": "כמה עולה ביטקוין עכשיו?",
+    "skipped": "no delegation"
+   }
+  ],
+  "n": 8,
+  "p50": 5.54,
+  "p95": 7.73
+ },
+ "added_p50_s": -0.42,
+ "added_p95_s": -3.56,
+ "voice_minutes": 6.1,
+ "measured": "2026-10-20 17:57"
+}

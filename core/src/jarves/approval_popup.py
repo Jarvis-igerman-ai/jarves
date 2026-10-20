@@ -373,7 +373,10 @@ def build(req: dict, out: Path, test_invoke: str | None = None, *, theme: str | 
         if state["done"]:
             return
         state["done"] = True
-        write_result(out, {"id": req.get("id"), "decision": decision, "typed": typed.get() if code else ""})
+        res = {"id": req.get("id"), "decision": decision, "typed": typed.get() if code else ""}
+        if req.get("nonce"):                 # R-01: proves the result came from this window (nonce via stdin)
+            res["nonce"] = str(req["nonce"])
+        write_result(out, res)
         root.destroy()
 
     card = tk.Frame(root, bg=P["bg"], padx=pad, pady=pad, width=W)
@@ -649,9 +652,14 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--in", dest="inp", required=True)
     ap.add_argument("--out", required=True)
     ap.add_argument("--test-invoke", choices=list(TEST_INVOKES))
+    ap.add_argument("--stdin", action="store_true", help="read the typed code and the result nonce from stdin")
     a = ap.parse_args(argv)
     try:
         req = json.loads(Path(a.inp).read_text(encoding="utf-8"))
+        if a.stdin:          # R-01: the code and the nonce never touch a file
+            extra = json.loads(sys.stdin.readline() or "{}")
+            req["typed_code"] = str(extra.get("typed_code") or "")
+            req["nonce"] = str(extra.get("nonce") or "")
     except (OSError, ValueError):
         return 2
     try:

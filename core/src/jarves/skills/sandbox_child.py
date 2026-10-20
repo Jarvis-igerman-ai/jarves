@@ -5,7 +5,8 @@ directory and a hard timeout in the parent. Stdlib only, never imports jarves.
 Layers here (on top of the parent's static AST validation and the approval gate):
 - restricted builtins: no open/eval/exec/compile/getattr/type/vars/globals/__import__ except a guarded import that
   only admits the allow-listed modules sent by the parent;
-- POSIX rlimits: memory, CPU seconds, no file writes, few file descriptors (Windows: the parent's timeout only);
+- POSIX rlimits: memory, CPU seconds, no file writes, few file descriptors (Windows: the parent starts this process
+  suspended inside a Job Object: one process, 512 MB, 10 s CPU, kill on close, no breakaway, UI restricted);
 - the Skill reaches the outside only through `ctx` calls that the PARENT executes and checks against the user's
   grants (storage, network:<host>), one JSON line per request on stdout, the answer on stdin.
 Protocol: stdin line 1 = {"code", "tool", "args", "imports"}; stdout = {"rpc", "id", "args"}* then {"done": true, ...}.

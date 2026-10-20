@@ -43,7 +43,19 @@ def make_agent(cfg: Config, registry: SkillRegistry, memory: MemoryStore, home: 
     return AgentBrain(cfg.ai, registry, memory, cfg.assistant_name, budget=budget)
 
 
-NEAR_MISS_MIN = 0.12          # a wake score at/above this but below the threshold is logged (WAKE_NEAR_MISS)
+def _delegation_kwargs(core) -> dict:
+    """SW-V4 D: client delegation / text-only fallback for the next live conversation ({} = server delegation)."""
+    from .voice.delegation_client import for_core
+    try:
+        return for_core(core, {})
+    except Exception as e:                  # never let the delegation wiring stop a conversation from starting
+        logs.error("delegation", "DELEG_WIRING_FAILED", "client delegation could not be set up",
+                   error_type=type(e).__name__)
+        core.delegation_state.fail("wiring", type(e).__name__)     # the owner's fallback rule, logged and shown
+        return {"delegation_mode": "text_only"} if core.delegation_state.session_step() == "text_only" else {}
+
+
+NEAR_MISS_MIN = 0.12         # a wake score at/above this but below the threshold is logged (WAKE_NEAR_MISS)
 
 
 def _mic_name(device) -> str:
@@ -196,6 +208,7 @@ class Core:
         # V3 approvals: ONE service behind every confirmation (popup / tray / face / dashboard / voice, audit log)
         from . import approvals as appr
         self.approvals = appr.attach(appr.ApprovalService(self.home))
+        self.approvals.rotate_key()        # R-01: a fresh private key per Core start (signed answer files, hidden codes)
         self.approvals.loop = asyncio.get_running_loop()      # dashboard threads ask through it (ask_owner)
         # the native popup only on a real run (tests and silent runs never open windows)
         self.approvals.channels += [appr.PopupChannel(self.approvals, enabled=self.use_real_audio,
@@ -273,6 +286,10 @@ class Core:
         self.guides = guides.attach(self)
         self._write_tools_md()                          # after every Skill is registered
         self._retry_lookup = make_retry_lookup(c, self.budget)
+        from .voice.delegation_client import DelegationState    # SW-V4 D (#14): mode, fallback ladder, in-flight
+        self.delegation_state = DelegationState(self.home, c.ai,
+                                                health=lambda s, d, a: self.health.set("delegation", s, d, a))
+        self.health.set("delegation", "ok", self.delegation_state.describe())
         self._check_ai()
 
         self.link = GodotLink(c.link.host, c.link.port, load_token(self.home / "link_token"), self.health,
@@ -297,7 +314,8 @@ class Core:
         profiles.attach(self)
         self.approvals.channels.append(appr.TrayChannel(self.runtime))   # balloon -> popup / dashboard
         from .skills.helper import register_helper       # V3: shell / install helper, every action approved first
-        register_helper(self.registry, self.home, self.health)
+        from . import isolation                          # R-01: OS limits around every approved command
+        register_helper(self.registry, self.home, self.health, isolation.Limits.from_config(c.helper))
         self._write_tools_md()                          # again: camera + display + profile + helper Skills registered after the first
 
         self.stt = self._stt or WhisperSTT(c.voice.stt_model, c.voice.stt_fallback_model, c.voice.stt_compute,
@@ -428,6 +446,8 @@ class Core:
                  wake_status=getattr(self, "_wake_status", None),
                  ai_connection=self.cfg.ai.connection, billing=billing_routes(self.cfg.ai, self.cfg.voice),
                  ai_requests_today=self.memory.usage_today("ai_requests"),
+                 delegation=(self.delegation_state.snapshot(self.budget)
+                             if getattr(self, "delegation_state", None) is not None else None),
                  voice_minutes_today=round(self.memory.usage_today("voice_seconds") / 60, 1))
         return s
 
@@ -476,7 +496,7 @@ class Core:
                     self.dev.check_audio()
                 self.features.poll()            # a switch flipped on the dashboard / CLI reaches the Core here
                 self._check_ai()
-                self.health.save()              # heartbeat: the dashboard calls a snapshot older than 120 s "JARVES is off"
+                self.health.heartbeat()         # the dashboard calls a snapshot older than 120 s "JARVES is off"
                 await self.link.broadcast("status", self.snapshot())
             except Exception:
                 logs.error("core", "HEALTH_LOOP_ERROR", "health check failed", exc=True)
@@ -936,7 +956,8 @@ class Core:
                              clock_context=v.clock_context, progress_after_s=v.progress_after_s,
                              no_speech_timeout_s=(v.wake_no_speech_s if ack else 0),
                              backend_deadline_s=v.backend_deadline_s, retry_lookup=self._retry_lookup,
-                             reasoning_summary=self.cfg.ai.reasoning_summary, **common, **extra)
+                             reasoning_summary=self.cfg.ai.reasoning_summary, **common, **extra,
+                             **_delegation_kwargs(self))
         else:
             from .voice.realtime import RealtimeVoice
             live = RealtimeVoice(v.realtime_model, self.agent.instructions, self.registry.realtime_tools(),
