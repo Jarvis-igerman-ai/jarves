@@ -1043,6 +1043,21 @@
   "Rebuild": "Rebuild",
   "Delete this conversation? This cannot be undone.": "Delete this conversation? This cannot be undone.",
   "Waiting for your approval on the screen…": "Waiting for your approval on the screen…",
-  "Delete conversation": "Delete conversation"
+  "Delete conversation": "Delete conversation",
+  "Phone calls": "Phone calls",
+  "Assisted dialing through Phone Link: you press Call.": "Assisted dialing through Phone Link: you press Call.",
+  "Assisted dialing is off: ": "Assisted dialing is off: ",
+  "No app handles dialing (tel:)": "No app handles dialing (tel:)",
+  "Dialer app: ": "Dialer app: ",
+  "Phone Link not set up": "Phone Link not set up",
+  "Call ": "Call ",
+  "Call": "Call",
+  "Number": "Number",
+  "No contacts with a number yet. Tell JARVES a number once, or type one here.": "No contacts with a number yet. Tell JARVES a number once, or type one here.",
+  "JARVES never places the call: it opens the dialer and you press Call.": "JARVES never places the call: it opens the dialer and you press Call.",
+  "A number I type myself": "A number I type myself",
+  "Phone number": "Phone number",
+  "Name (optional)": "Name (optional)",
+  "Numbers from an e-mail, a web page or a message are never dialled for you: type them yourself.": "Numbers from an e-mail, a web page or a message are never dialled for you: type them yourself."
  }
 };

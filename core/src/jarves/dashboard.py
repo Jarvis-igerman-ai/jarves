@@ -51,6 +51,7 @@ PLUGIN_MODULES = ("jarves.workspace", "jarves.curator", "jarves.memory", "jarves
                   "jarves.profiles",                                             # Issue #17: Profiles page
                   "jarves.context_trace",                                          # his context per conversation
                   "jarves.recall",                                                 # SW-V4 G: Recall search page
+                  "jarves.dialing",                                                # SW-V4 H: Phone calls page
                   "jarves.browser",                                                # Browser allow-list page
                   "jarves.approvals", "jarves.skills.helper")                      # V3: Approvals list, Helper switch
 MEMORY_UNDO_KEEP = 30

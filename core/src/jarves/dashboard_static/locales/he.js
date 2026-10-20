@@ -1043,7 +1043,22 @@
   "Rebuild": "בנייה מחדש",
   "Delete this conversation? This cannot be undone.": "למחוק את השיחה הזאת? אי אפשר לבטל.",
   "Waiting for your approval on the screen…": "ממתין לאישור על המסך…",
-  "Delete conversation": "מחיקת השיחה"
+  "Delete conversation": "מחיקת השיחה",
+  "Phone calls": "שיחות טלפון",
+  "Assisted dialing through Phone Link: you press Call.": "חיוג מסייע דרך Phone Link: אתם לוחצים חיוג.",
+  "Assisted dialing is off: ": "חיוג מסייע כבוי: ",
+  "No app handles dialing (tel:)": "אין אפליקציה שמטפלת בחיוג (tel:)",
+  "Dialer app: ": "אפליקציית החיוג: ",
+  "Phone Link not set up": "Phone Link לא מחובר",
+  "Call ": "התקשר ל",
+  "Call": "התקשר",
+  "Number": "מספר",
+  "No contacts with a number yet. Tell JARVES a number once, or type one here.": "אין אנשי קשר עם מספר. אמרו לג'ארביס מספר פעם אחת, או הקלידו כאן.",
+  "JARVES never places the call: it opens the dialer and you press Call.": "ג'ארביס לא מחייג בעצמו: הוא פותח את החייגן ואתם לוחצים חיוג.",
+  "A number I type myself": "מספר שאני מקליד בעצמי",
+  "Phone number": "מספר טלפון",
+  "Name (optional)": "שם (לא חובה)",
+  "Numbers from an e-mail, a web page or a message are never dialled for you: type them yourself.": "מספרים ממייל, מאתר או מהודעה לא מחויגים אוטומטית: הקלידו אותם בעצמכם."
  },
  "rules": [
   [

@@ -155,6 +155,7 @@ FIELD_CLASS: dict[str, str] = {
         index_rows docs cap took_ms term_count ranged build_s fts_ok orphan_fts docs_without_fts masked_or_gone
         deleted_sessions added
         turn route history_items reserved_usd spent_usd actual_usd requests deleg_s scope err_code daily_usd turn_usd
+        handler
         """),
     **_reg(SECRET, """
         token access_token refresh_token id_token id_token_hint api_key apikey secret secrets client_secret

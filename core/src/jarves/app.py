@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import asyncio
 import time
+from collections import deque
 import hashlib
 import json
 from contextlib import aclosing
@@ -162,6 +163,9 @@ class Core:
         self._greeted = False
         self.voice_mode = "off"
         self._voice_connecting = False
+        # the last things the OWNER said (typed or heard), in memory only: assisted dialing checks that a number the
+        # model passes was really said by the owner (dialing.py); never written to disk or logs
+        self.owner_said: deque[str] = deque(maxlen=6)
         self._hold_wake_until = 0.0     # connected-on-open mode: wake word waits until the first live session ended
         self._rollovers: list[float] = []   # times of automatic session resumes (loop guard)
         self.startup = {"phase": "starting", "ready": False, "detail": "Loading JARVES..."}
@@ -282,7 +286,9 @@ class Core:
         self.ops = ops_attach(self)
         from . import recall                            # SW-V4 G: conversation_recall / _search / _show
         recall.attach(self)
-        from . import guides                            # WP-L: help Skill, setup hints, briefing, suggestions
+        from . import dialing                           # SW-V4 H: dial_prepare / dial_open (assisted dialing)
+        dialing.attach(self)
+        from . import guides                           # WP-L: help Skill, setup hints, briefing, suggestions
         self.guides = guides.attach(self)
         self._write_tools_md()                          # after every Skill is registered
         self._retry_lookup = make_retry_lookup(c, self.budget)
@@ -1429,6 +1435,8 @@ class Core:
     def _owner_answer(self, text: str, channel: str) -> bool:
         """The owner's own words (typed on the face / heard from the mic): a pure yes/no answers the ONE waiting
         approval. Otherwise it is a new turn (a denied request may be asked again)."""
+        if text:
+            self.owner_said.append(str(text)[:500])
         ap = self.approvals
         if ap is None:
             return False

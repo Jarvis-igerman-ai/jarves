@@ -1619,6 +1619,8 @@ def main(argv: list[str] | None = None) -> int:
     budget_cli.add_cli(sub)                   # SW-V4 D (#14): jarvis budget status / test-cap / set / reset-ladder
     from . import recall
     recall.add_cli(sub)                       # SW-V4 G: jarvis recall "query" [--since] [--json]
+    from . import dialing
+    dialing.add_cli(sub)                      # SW-V4 H: jarvis dial <name|number> [--yes-on-screen]
     a = ap.parse_args(argv)
     try:
         if a.profile:
@@ -1646,7 +1648,7 @@ def main(argv: list[str] | None = None) -> int:
             "show": cmd_display, "hide": cmd_display, "autostart": cmd_autostart,
             "update": cmd_update, "browser": cmd_browser, "connect": cmd_connect, "telegram": cmd_telegram, "instagram": cmd_instagram, "home": cmd_home,
             "profile": profiles.cmd_profile, "approvals": cmd_approvals, "recall": recall.cmd_recall,
-            **cli_parity.COMMANDS, **budget_cli.COMMANDS}[a.cmd](a, cfg, home)
+            "dial": dialing.cmd_dial, **cli_parity.COMMANDS, **budget_cli.COMMANDS}[a.cmd](a, cfg, home)
 
 
 if __name__ == "__main__":
