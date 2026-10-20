@@ -265,7 +265,9 @@ def api_runtime(ctx, m, body):
         auto = au.adapter().describe()
     except Exception as e:
         auto = {"enabled": False, "error": type(e).__name__}
-    return 200, {"runtime": view, "live": live, "autostart": auto, "platform_status": PLATFORM_STATUS,
+    import platform as _pf
+    host = {"os": _pf.system(), "machine": _pf.machine()}          # the dashboard header's device chip (P0.2)
+    return 200, {"runtime": view, "live": live, "autostart": auto, "platform_status": PLATFORM_STATUS, "host": host,
                  # privacy strip on Home (privacy_state.py); None while the Core is down = shown as "unknown"
                  "privacy": snap.get("privacy") if snap else None,
                  "snapshot": {k: snap.get(k) for k in ("core", "voice_mode", "wake_listening", "live_session",
