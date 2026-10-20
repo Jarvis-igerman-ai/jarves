@@ -185,3 +185,14 @@ async def core(home, cfg):
     yield c
     if c.health.core != "stopped":
         await c.stop()
+
+
+@pytest.fixture(autouse=True)
+def _helper_not_elevated(monkeypatch):
+    """CI runners (Windows) run as administrator, where the helper correctly refuses everything. Tests assume a normal
+    user; the elevation tests set their own monkeypatch to True after this fixture."""
+    try:
+        from jarves.skills import helper as _hp
+    except Exception:
+        return
+    monkeypatch.setattr(_hp, "running_elevated", lambda: False, raising=False)
