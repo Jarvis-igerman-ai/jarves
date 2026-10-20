@@ -1,0 +1,39 @@
+order = 60
+category = "system"
+pages = ["runtime"]
+features = ["background_core", "display_control", "tray_icon", "autostart"]
+aliases = ["רקע", "מגש", "הפעלה אוטומטית", "תופיע", "תיעלם", "tray", "autostart", "start at login", "show yourself", "hide yourself", "background"]
+links = ["appearance", "updates"]
+title_he = "פועל ברקע, סמל במגש והפעלה עם המחשב"
+title_en = "Runs in the background, tray icon, start with Windows"
+what_he = "ג'ארביס ממשיך לשמוע \"היי ג'ארביס\" גם כשהחלון סגור, יש לו סמל ליד השעון, ואפשר שיעלה לבד עם המחשב."
+what_en = "JARVES keeps hearing \"Hey Jarvis\" with the window closed, has an icon by the clock, and can start with the computer."
+say = [["תופיע", "Show yourself"], ["תיעלם", "Hide yourself"]]
+expect_he = "סגירת החלון רק מסתירה אותו. בפעם הראשונה תופיע הודעה חד-פעמית \"ג'ארביס עדיין פועל במגש\". \"Quit\" בתפריט של הסמל עוצר אותו באמת."
+expect_en = "Closing the window only hides him. The first time, a one-time notice says JARVES is still running in the tray. Quit in the tray icon's menu really stops him."
+cost_he = "חינם. מחכה ל\"היי ג'ארביס\" בלי חיבור לענן."
+cost_en = "Free. Waiting for \"Hey Jarvis\" uses no cloud connection."
+privacy_he = "אין."
+privacy_en = "None."
+
+[[steps]]
+he = "ודאו שהמתג \"ממשיך לפעול ברקע\" דולק."
+en = "Make sure Keep running in the background is on."
+action = "feature_on:background_core"
+check = "enabled:background_core"
+
+[[steps]]
+he = "חפשו את הסמל של ג'ארביס ליד השעון (אולי מתחת לחץ ^)."
+en = "Look for JARVES's icon by the clock (maybe under the ^ arrow)."
+check = "available:tray_icon"
+
+[[steps]]
+he = "רוצים שיעלה לבד כשנכנסים למחשב? הדליקו \"הפעלה עם הכניסה למחשב\" בעמוד השליטה (Controls)."
+en = "Want him to start when you log in? Turn on Start at login on the Controls page."
+action = "open:#/runtime"
+
+[[problems]]
+he = "אין סמל במגש"
+en = "No tray icon"
+fix_he = "הסמל צריך את החבילה tray (uv sync --extra tray). אחרי התקנה הפעילו מחדש."
+fix_en = "The icon needs the tray extra (uv sync --extra tray). Restart after installing."

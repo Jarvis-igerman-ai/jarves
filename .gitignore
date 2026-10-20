@@ -1,0 +1,46 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.pytest_cache/
+# Godot
+.godot/
+.import/
+*.import
+*.translation
+export_presets.cfg
+# FreeCAD backups
+*.FCBak
+*.FCStd1
+*~
+# Caches / temp
+.cache/
+*.tmp
+*.log
+.DS_Store
+Thumbs.db
+# Secrets
+.env
+.env.*
+*.pem
+*.key
+secrets*
+# Review packages
+*.zip
+
+# Generated build output (meshes)
+build/
+*.blend1
+
+# Generated print STLs (regenerate: freecadcmd print/build_print_package.py)
+print/stl/
+.claude/
+
+# Build identity written by packaging/build_windows.ps1 into installed copies only
+core/src/jarves/_build_info.json
+core/src/jarves/_google_app_client.json
+dist/
+
+.wrangler/
+.playwright-mcp/

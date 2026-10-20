@@ -1,0 +1,11 @@
+# JARVIS CAD assumptions (S1.T01a/b) — PROVISIONAL unless marked VERIFIED; not a fit drawing
+- Envelope H280 x W200 x D160 mm: PROVISIONAL. Head disc Ø200 (bottom z=80); body H79 (was 110 in T01a so the head clears the body). Wall 3 mm.
+- VERIFIED (raspberrypi.com docs): Camera Module 3 Wide ≈ 25 x 24 x 12.4 mm. Mounting holes/lens position not modelled.
+- Pi 5 85 x 56 mm is public spec (datasheet PDF fetch failed, so treat as UNVERIFIED); height 20 mm incl. cooler is PROVISIONAL.
+- XVF3800 USB mic array 108 x 108 x 18 mm is a retailer figure (PROVISIONAL); acoustic ports/placement need physical testing.
+- 5" round display: Ø148 x 12 mm module, opening Ø140 are PROVISIONAL (SKU not chosen). Display sits 8 mm below head centre to fit the camera above.
+- Speaker drivers Ø46 x 25 mm and grille plates Ø50 are PROVISIONAL. Reserve_USB_Hub (50x45x20) is a spare-volume placeholder.
+- Layout: display/camera/mic in head (front/back shells split at y=40); Pi 5 on a tray in the body, ports facing the removable rear door, 25 mm plug room.
+- NOT modelled: head-body joint/neck and cable path, fasteners/bosses, vents, PCB holes, standoffs, door latch, power inlet, light ring.
+- Check: `cad/check_layout.py` = containment + collisions + door access only; no acoustic, thermal or assembly-sequence proof.
+- REQUEST before fit claims: display SKU drawing, Pi 5 datasheet, mic array drawing, speaker model, power inlet, printer volume.

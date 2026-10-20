@@ -1,0 +1,29 @@
+order = 42
+category = "camera"
+features = ["camera_when_away"]
+aliases = ["שמירה על הבית", "כשאין אף אחד", "away", "home watch", "security"]
+links = ["camera", "alerts", "privacy"]
+title_he = "מצלמה כשאין אף אחד בבית"
+title_en = "Camera when nobody is home"
+what_he = "כשאתם לא בבית ג'ארביס יכול לשים לב לתנועה בחדר ולהתריע. כבוי מראש."
+what_en = "When you are out, JARVES can notice movement in the room and alert you. Off by default."
+say = [["אני יוצא, תשמור על הבית", "I'm going out, watch the house"], ["חזרתי", "I'm back"]]
+expect_he = "רק כשאמרתם שאתם יוצאים. ההתראה מגיעה דרך מסלול ההתראות הרגיל."
+expect_en = "Only after you said you are going out. The alert comes through the normal alerts."
+test_he = "הבדיקה בודקת שהמצלמה פועלת."
+test_en = "The check sees the camera works."
+cost_he = "חינם: הזיהוי רץ במחשב."
+cost_en = "Free: detection runs on this computer."
+privacy_he = "תמונות לא נשלחות ולא נשמרות בלי שתבקשו."
+privacy_en = "No pictures are sent or kept unless you ask."
+
+[[steps]]
+he = "קודם הפעילו את המצלמה (מדריך \"מצלמה\")."
+en = "First turn the camera on (guide \"Camera\")."
+check = "active:camera"
+
+[[steps]]
+he = "הדליקו את \"מצלמה כשאין אף אחד בבית\" (סיכון גבוה: צריך אישור)."
+en = "Turn on Camera when away (high risk: needs approval)."
+action = "feature_on:camera_when_away"
+check = "enabled:camera_when_away"

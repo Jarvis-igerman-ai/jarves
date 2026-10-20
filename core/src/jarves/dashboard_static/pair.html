@@ -1,0 +1,26 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Pair with JARVES</title>
+<link rel="stylesheet" href="/static/style.css">
+<link rel="stylesheet" href="/static/m4.css">
+<script src="/static/pair.js" defer></script>
+</head>
+<body>
+<main class="m4-pair">
+  <h1>Pair this phone</h1>
+  <p class="sub">On the computer open the dashboard, go to <b>Devices</b> and press <b>Pair a phone</b>. Enter the 8-digit code here.</p>
+  <form id="pairForm" class="card">
+    <label class="m4-field"><span class="muted small">Pairing code</span>
+      <input type="text" id="code" inputmode="numeric" autocomplete="one-time-code" maxlength="9" required></label>
+    <label class="m4-field"><span class="muted small">Name for this device</span>
+      <input type="text" id="name" maxlength="40" value="phone"></label>
+    <button type="submit" class="primary">Pair</button>
+    <p id="msg" class="small" aria-live="polite"></p>
+  </form>
+  <p class="muted small">Works only on your home network. Nothing here is reachable from the internet.</p>
+</main>
+</body>
+</html>

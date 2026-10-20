@@ -1,0 +1,31 @@
+order = 35
+category = "everyday"
+features = ["lists"]
+aliases = ["רשימת קניות", "קניות", "רשימה", "רשימות", "משימות", "מטלות", "shopping", "shopping list", "todo", "to-do", "lists"]
+links = ["notes_files", "scheduler"]
+title_he = "רשימת קניות ומשימות"
+title_en = "Shopping and to-do lists"
+what_he = "רשימת קניות ורשימת משימות בקול: מוסיפים, שומעים, מסמנים כבוצע ומנקים."
+what_en = "A shopping list and a to-do list by voice: add, hear them read back, tick off and clear."
+say = [["תוסיף חלב ולחם לרשימת הקניות", "Add milk and bread to the shopping list"], ["מה ברשימת הקניות?", "What is on the shopping list?"], ["קניתי חלב", "I bought the milk"], ["תוסיף למשימות להתקשר לאינסטלטור", "Add to my to-do: call the plumber"]]
+expect_he = "הפריטים נשמרים ברשימה עד שמנקים אותה. ניקוי רשימה שלמה מבקש אישור על המסך."
+expect_en = "Items stay on the list until cleared. Clearing a whole list asks for approval on the screen."
+cost_he = "חינם. הכול מקומי."
+cost_en = "Free. All local."
+privacy_he = "הרשימות נשמרות רק במחשב ונכללות בגיבוי."
+privacy_en = "Lists stay on this computer and are included in the backup."
+
+[[steps]]
+he = "אמרו \"תוסיף חלב ולחם לרשימת הקניות\"."
+en = "Say \"add milk and bread to the shopping list\"."
+check = "active:lists"
+
+[[steps]]
+he = "אחר כך שאלו \"מה ברשימת הקניות?\" וסמנו \"קניתי חלב\"."
+en = "Then ask \"what is on the shopping list?\" and say \"I bought the milk\"."
+
+[[problems]]
+he = "פריט לא נמצא כשביקשתי לסמן אותו"
+en = "An item was not found when I ticked it off"
+fix_he = "אמרו את המילה כפי שהיא ברשימה (למשל \"חלב\"). שאלו \"מה ברשימה?\" כדי לשמוע מה קיים."
+fix_en = "Say the word as it is on the list (e.g. \"milk\"). Ask \"what is on the list?\" to hear what is there."

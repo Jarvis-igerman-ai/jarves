@@ -1,0 +1,27 @@
+/* SW-V2 WP-L Guides (uses the tokens of style.css) */
+.guide-cat { margin-bottom: 12px; }
+.guide-cat h2 { margin: 0 0 10px; }
+.guide-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 10px; }
+.guide-tile { display: block; padding: 10px 12px; border: 1px solid var(--line); border-radius: var(--radius);
+  background: var(--surface); color: var(--text); text-decoration: none; }
+.guide-tile:hover, .guide-tile:focus-visible { border-color: var(--accent); }
+.guide-tile.need { border-color: var(--critical); }
+.guide-tile .small { margin-top: 4px; }
+.checklist { margin-bottom: 12px; }
+.checklist ol { margin: 8px 0 0; padding-inline-start: 22px; }
+.checklist li { margin: 6px 0; }
+.checklist li.done a, .steps li.done > div:first-child { color: var(--muted); }
+.guide-head .lead { font-size: 1.08em; margin: 10px 0; }
+.steps { margin: 0; padding-inline-start: 22px; }
+.steps li { margin: 10px 0; }
+.step-actions { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin-top: 4px; }
+.step-actions code { background: var(--surface-2); padding: 2px 6px; border-radius: 6px; }
+.say { margin: 0; padding-inline-start: 18px; }
+.say li { margin: 4px 0; }
+.problems dt { font-weight: 600; margin-top: 8px; }
+.problems dd { margin: 2px 0 0; color: var(--text-2); }
+.test-out { margin-top: 8px; }
+.guide-link { margin-inline-start: 8px; }
+.guide-sec, .guide-head, .guide-pair { margin-bottom: 12px; }
+.guide-pair .card { margin-bottom: 0; }
+@media (max-width: 640px) { .guide-grid { grid-template-columns: 1fr; } }

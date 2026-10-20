@@ -1,0 +1,64 @@
+# JARVES Core settings. Copy to %LOCALAPPDATA%\jarves\config.toml (Windows) or ~/.local/state/jarves/config.toml.
+# Every key is optional; unknown keys are rejected. NEVER put API keys here: set OPENAI_API_KEY in the environment.
+# On/off switches (music, web search, wake word, greeting, chimes, background tasks, camera, Gmail...) live in
+# `jarvis features` / the dashboard Features page (<data dir>/features.json). The old keys below (ai.web_search,
+# ai.tasks_enabled, voice.wake_enabled, voice.greeting, voice.chime, music.provider = "none") still work: they set
+# the switch's default until you flip it there.
+
+assistant_name = "JARVES"
+
+[ai]
+provider = "openai"            # "offline" = built-in commands only, no cloud calls
+connection = "api_key"         # who pays (your choice, never switched automatically):
+                               #   api_key  = OPENAI_API_KEY for everything (GPT-6 text + GPT-Live voice)
+                               #   chatgpt  = your ChatGPT plan for text (`jarves chatgpt login`); local voice; no API spending
+                               #   combined = ChatGPT plan for text + GPT-Live voice billed to OPENAI_API_KEY
+chatgpt_model = ""             # "" = first model your plan lists (`jarves chatgpt models`)
+text_model = "gpt-6-luna"      # GPT-6 backend (checked 2026-10-18); "gpt-6.1-sol" for harder reasoning
+web_search = true
+daily_request_limit = 200      # hard ceiling on AI requests per day (cost guard)
+daily_realtime_minutes = 30    # hard ceiling on live-voice minutes per day (cost guard)
+
+[voice]
+activation = "wake_word"       # mode 1: Hey Jarvis; mode 2: "conversation" greets and opens cloud voice
+mode = "live"                  # live (GPT-Live) | realtime (gpt-realtime-2.1) | push_to_talk (offline) | off
+voice = "vesper"              # GPT-Live masculine British voice
+realtime_voice = "cedar"       # separate supported Realtime/read-aloud voice
+idle_disconnect_s = 180        # quiet time after speech/tools, then local wake
+half_duplex = true             # set false with headphones or an echo-cancelling mic (enables barge-in)
+session_max_s = 600
+tts_engine = "auto"            # auto (cloud, then local fallback) | openai | local | none
+stt_model = "small"            # offline fallback only (~4 s/phrase on a Ryzen 3); accurate but slow: "ivrit-ai/whisper-large-v3-turbo-ct2" (~19 s)
+
+[music]
+provider = "pear"              # Pear Desktop (YouTube Music) local API Server plugin
+pear_url = "http://127.0.0.1:26538"
+max_volume = 70               # cap for the slider JARVES sets (0-100)
+volume_step = 10              # "louder" / "quieter" step
+trim_queue = true             # remove old PLAYED items from Pear's queue (its history) so it stays fast; false = never
+
+[log]
+level = "INFO"
+
+[history]                      # conversation history for `jarvis dashboard`, `jarvis cost`, self-diagnosis
+enabled = true                 # follows log.privacy: privacy on = only lengths and timings, never what was said
+keep_days = 90
+dead_air_s = 5                 # self-diagnosis: silence before a reply / while a request is pending
+stall_s = 20                   # a request with no real answer for this long is an issue
+
+[pricing]                      # cost ESTIMATES (USD), checked 2026-10-19 at developers.openai.com/api/docs/pricing
+session_alert_usd = 0.50       # self-diagnosis flags a conversation above this
+daily_alert_usd = 2.00         # ...and a day above this
+# voice_per_minute = { "gpt-live-1" = 0.05 }
+# models."gpt-6-luna" = { input = 0.10, cached_input = 0.01, output = 0.50 }   # per 1M tokens
+
+[runtime]                       # always-on desktop runtime (jarvis start / tray / autostart)
+keep_running = true             # closing the window only hides JARVES (switch: background_core); Quit stops him
+tray = true                     # notification-area icon in background/desktop mode (switch: tray_icon)
+viewer_exe = ""                 # Godot for the window; "" = GODOT_EXE / WinGet install / godot on PATH
+resume_gap_s = 30               # a wall-clock jump this large = the computer slept: re-open audio, drop a dead call
+mic_stall_s = 6                 # the wake mic sends nothing this long (unplugged headset) = re-open it; 0 = off
+
+[update]                        # where `jarvis update` looks (docs/RELEASE_HOSTING.md); install always asks first
+base_url = ""                   # "" = the public releases repo (github.com/igalgerman/jarvis-releases); or any HTTPS folder with latest.json
+public_key = ""                 # extra trusted Ed25519 public key (base64); the keys built into the app always count

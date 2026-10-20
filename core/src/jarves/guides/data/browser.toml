@@ -1,0 +1,54 @@
+order = 58
+category = "everyday"
+features = ["browser"]
+aliases = ["דפדפן", "אתר", "אינטרנט", "browser", "web page", "website", "playwright"]
+links = ["privacy", "web_search"]
+pages = ["browser"]
+title_he = "דפדפן"
+title_en = "Browser"
+what_he = "ג'ארביס פותח דפי אינטרנט בשבילך. שליטה מלאה (קריאה, לחיצה, מילוי טפסים) רק באתרים שאישרת ברשימה; כל אתר אחר נפתח לקריאה בלבד ורק אחרי שאישרת על המסך. קנייה, תשלום וסיסמאות תמיד דורשים אישור שלך."
+what_en = "JARVES opens web pages for you. Full control (read, click, fill forms) only on the sites in your allow-list; any other site opens read-only and only after you approve it on the screen. Purchases, payments and passwords always need your approval."
+say = [["תפתח את האתר של העירייה ותקרא לי מה כתוב", "Open the city's website and read it to me"],
+       ["תחפש באתר את שעות הפתיחה", "Search the site for the opening hours"]]
+expect_he = "הוא אומר באיזה אתר הוא נמצא ואם יש לו שם שליטה מלאה או קריאה בלבד. בלוח הבקרה (דפדפן) רואים מה פתוח עכשיו."
+expect_en = "He says which site is open and whether he has full control or read-only there. The dashboard Browser page shows what is open."
+test = "feature"
+test_he = "הבדיקה רק מחפשת את Playwright ודפדפן מותקן (Edge / Chrome / Chromium). שום דף לא נפתח."
+test_en = "The check only looks for Playwright and an installed browser (Edge / Chrome / Chromium). No page is opened."
+cost_he = "חינם (הדפדפן רץ במחשב). קריאת דף ארוך מוסיפה טקסט לשיחה, כלומר קצת יותר טוקנים."
+cost_en = "Free (the browser runs on this computer). Reading a long page adds text to the conversation, i.e. a few more tokens."
+privacy_he = "דפדפן פרטי חדש בכל פעם: בלי הפרופיל שלך, בלי עוגיות ובלי סיסמאות שמורות. הורדות חסומות. טקסט מהאתר לא נחשב כהוראה, ואחרי קריאת דף כל פעולה אחרת מבקשת אישור."
+privacy_en = "A fresh private browser every time: no personal profile, cookies or saved passwords. Downloads are refused. Website text is never treated as an instruction, and after a page is read every other action asks you first."
+
+[[steps]]
+he = "הדליקו את המתג \"דפדפן\" (סיכון גבוה: צריך את האישור שלכם). הפקודה  jarvis features on browser  מתקינה גם את Playwright."
+en = "Turn the Browser switch on (high risk: needs your approval). The command  jarvis features on browser  also installs Playwright."
+action = "feature_on:browser"
+check = "enabled:browser"
+
+[[steps]]
+he = "בדקו שיש דפדפן מותקן: ב-Windows משתמשים ב-Edge שכבר מותקן; ב-Raspberry Pi צריך Chromium."
+en = "Check that a browser is installed: Windows uses the Edge that is already there; the Raspberry Pi needs Chromium."
+check = "available:browser"
+
+[[steps]]
+he = "הוסיפו בלוח הבקרה (דפדפן) את האתרים שמותר לו לשלוט בהם, למשל example.com. בלי רשימה הכול לקריאה בלבד."
+en = "On the dashboard Browser page add the sites he may control, e.g. example.com. With an empty list everything is read-only."
+action = "open:#/browser"
+
+[[steps]]
+he = "אמרו \"תפתח את example.com ותקרא לי מה כתוב\"."
+en = "Say \"open example.com and read it to me\"."
+action = "test"
+
+[[problems]]
+he = "הוא אומר שהאתר לקריאה בלבד"
+en = "He says the site is read-only"
+fix_he = "האתר לא ברשימה המאושרת. הוסיפו אותו בלוח הבקרה (דפדפן) או עם  jarvis browser allow <אתר>."
+fix_en = "The site is not on the allow-list. Add it on the dashboard Browser page or with  jarvis browser allow <site>."
+
+[[problems]]
+he = "הוא אומר שאין דפדפן"
+en = "He says there is no browser"
+fix_he = "הריצו  jarvis features on browser  (מתקין את Playwright). ב-Pi התקינו Chromium (sudo apt install chromium)."
+fix_en = "Run  jarvis features on browser  (installs Playwright). On the Pi install Chromium (sudo apt install chromium)."

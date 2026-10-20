@@ -1,0 +1,26 @@
+order = 3
+category = "voice"
+status = "planned"
+aliases = ["custom wake", "מילת הפעלה אחרת", "wake phrase", "מילה משלי"]
+links = ["wake_word"]
+title_he = "מילת הפעלה משלכם"
+title_en = "Your own wake phrase"
+what_he = "בעתיד תוכלו לבחור מילה אחרת במקום \"היי ג'ארביס\". זה עוד לא קיים."
+what_en = "Later you will be able to pick a different phrase instead of \"Hey Jarvis\". This does not exist yet."
+expect_he = "כרגע רק \"היי ג'ארביס\" עובד."
+expect_en = "For now only \"Hey Jarvis\" works."
+cost_he = "חינם."
+cost_en = "Free."
+privacy_he = "גם מילה משלכם תזוהה רק במחשב."
+privacy_en = "A custom phrase will also be detected only on this computer."
+
+[[steps]]
+he = "בינתיים השתמשו ב\"היי ג'ארביס\" (ראו המדריך שלו)."
+en = "For now use \"Hey Jarvis\" (see its guide)."
+action = "open:#/guide/wake_word"
+
+[platform]
+windows = "planned"
+windows_note_en = "needs a trained custom wake-word model (docs/FUTURE_IDEAS.md)"
+pi = "planned"
+pi_note_en = "same plan as Windows"

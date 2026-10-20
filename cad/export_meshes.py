@@ -1,0 +1,100 @@
+# JARVES CAD -> mesh export for Blender (CAD stays the source of geometry; STL in mm, Z up, front = -Y).
+# Exports the Pebble A model (R5b): every categorised part from cad/JARVIS_pebble.FCStd, plus
+# build/parts/manifest.json (part -> category + exact bbox in mm) used by the Blender and Godot checks.
+# Run: freecadcmd.exe cad\export_meshes.py   -> build/parts/<PartName>.stl (generated, git-ignored)
+import json
+import os
+import FreeCAD as App
+import MeshPart
+
+root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+out = os.path.join(root, "build", "parts")
+os.makedirs(out, exist_ok=True)
+for f in os.listdir(out):  # stale meshes from an older model would leak into Blender
+    if f.endswith(".stl"):
+        os.remove(os.path.join(out, f))
+doc = App.openDocument(os.path.join(root, "cad", "JARVIS_pebble.FCStd"))
+sh = doc.getObject("Params")
+cats, meta, i = {}, {}, 2
+while True:  # build_pebble.py stores name/category/kind/step/explode/note in columns E..J; empty cell raises
+    try:
+        n = sh.get(f"E{i}")
+    except Exception:
+        break
+    cats[n] = sh.get(f"F{i}")
+    meta[n] = {"kind": sh.get(f"G{i}"), "step": int(float(sh.get(f"H{i}"))),
+               "explode_mm": [float(v) for v in str(sh.get(f"I{i}")).split(",")], "note": str(sh.get(f"J{i}")),
+               "pid": sh.get(f"K{i}"), "print_rot": str(sh.get(f"L{i}")), "print_group": sh.get(f"M{i}")}
+    i += 1
+parts, ext = {}, None
+for n, c in sorted(cats.items()):
+    s = doc.getObject(n).Shape
+    mesh = MeshPart.meshFromShape(s, LinearDeflection=0.15, AngularDeflection=0.15)
+    mesh.write(os.path.join(out, n + ".stl"))
+    b = mesh.BoundBox        # exactly what Blender/Godot receive (optimalBoundingBox after meshing can be inflated)
+    parts[n] = {"category": c, "bbox_mm": [round(v, 2) for v in (b.XMin, b.YMin, b.ZMin, b.XMax, b.YMax, b.ZMax)],
+                **meta[n]}
+    if c in ("exterior", "structure"):         # installed physical parts (floor is structure)
+        ext = b if ext is None else ext.united(b)
+STEPS = {  # R5b beginner sequence (matches the CAD step numbers)
+    1: "Tray: screw the Pi 5 on (4 screws), set the speaker in its cradle (1 strap screw); plug HDMI, camera ribbon and 2 USB cables into the Pi",
+    2: "Base top: push 3 nuts into the cover-top bosses, bolt the neck column on from inside (3 screws)",
+    3: "Close the base: feed the cable ends up through the neck, set the cover on the tray, 4 nuts + 4 screws from underneath",
+    4: "Snap the two blank ring halves into the shoulder groove (LED halves are an optional later swap)",
+    5: "Head: display + retainer (4 screws), camera (2), mic board (2); press 3 nuts into the neck flare; set the head on and fix it with 3 screws from inside; plug the cables into display, camera, mic board and the speaker lead",
+    6: "Hook the service lid in at the bottom, 2 screws at the top",
+    7: "Rear door: hooks + 1 screw; official power cable through the notch; microSD and Pi ports stay reachable here"}
+manifest = {"model": "cad/JARVIS_pebble.FCStd", "units": "mm", "frame": "Z up, front -Y", "steps": STEPS,
+            "installed_bbox_mm": [round(v, 2) for v in (ext.XMin, ext.YMin, ext.ZMin, ext.XMax, ext.YMax, ext.ZMax)],
+            "parts": parts}
+with open(os.path.join(out, "manifest.json"), "w") as fh:
+    json.dump(manifest, fh, indent=1)
+print(f"exported {len(parts)} parts to {out}")
+
+# ---------------- human-readable inventory (auto-generated from the CAD metadata) ----------------
+FASTENERS = [  # R5b, reconciled with the modelled CAD holes/bosses (joint, screws, nuts, size, status)
+    ("Pi 5 -> tray bosses", 4, 0, "M2.5x6 self-tapping", "modelled bosses"),
+    ("Speaker strap -> cradle", 1, 0, "M3x10 self-tapping", "cradle modelled, strap not modelled"),
+    ("Neck column flange -> cover-top bosses", 3, 3, "M3x12 + captive nut (side-entry slot)", "modelled"),
+    ("Base cover -> tray", 4, 4, "M3x12 from underneath + captive nut", "modelled"),
+    ("Display retainer -> face-wall bosses", 4, 0, "M3x10 self-tapping", "modelled"),
+    ("Camera Module 3 -> face wall", 2, 0, "M2x6 self-tapping", "bosses NOT modelled (vendor hole pattern)"),
+    ("Mic board -> crown bosses", 2, 0, "M2.5x6 self-tapping", "bosses modelled, positions PROVISIONAL"),
+    ("Head body -> neck column top", 3, 3, "M3x12 from inside the head + nut slid in from the bore", "modelled"),
+    ("Service lid -> head body", 2, 2, "M3x16 from outside (counterbored) + captive nut; 2 bottom hooks", "modelled"),
+    ("Rear door", 1, 1, "M3x10 + captive nut; 2 bottom hooks", "hooks NOT modelled"),
+    ("LED blank / diffuser halves", 0, 0, "snap-in", "fit clearance 0.2 mm; retention UNVERIFIED"),
+    ("Rubber feet", 0, 0, "4 stick-on feet", "not modelled"),
+]
+doc_path = os.path.join(root, "docs", "reviews", "PEBBLE_PARTS_INVENTORY.md")
+L = ["# JARVES Pebble A — parts inventory and assembly sequence",
+     "", "_Auto-generated by `cad/export_meshes.py` from `cad/JARVIS_pebble.FCStd` — do not edit by hand. "
+     "All sizes PROVISIONAL; strength, tolerances and fit of purchased parts UNVERIFIED (needs physical tests)._", ""]
+for kind, title in (("printed", "Printed parts (FDM; printer/material not chosen, PETG suggested)"),
+                    ("purchased", "Purchased stock parts (no SKU locked)"),
+                    ("placeholder", "Electronics placeholders (envelopes only, no SKU)"),
+                    ("reserved", "Reserved empty volumes (NOT installed)"),
+                    ("alternate", "Alternate swap-in parts")):
+    rows = sorted((v["step"], k) for k, v in parts.items() if v["kind"] == kind)
+    if not rows:
+        continue
+    L += [f"## {title}", "", "| ID | Part | Step | Size W x D x H (mm) | Notes / print orientation |",
+          "|---|---|---|---|---|"]
+    for step, k in rows:
+        bb = parts[k]["bbox_mm"]
+        L.append(f"| **{parts[k]['pid']}** | `{k}` | {step} | {bb[3] - bb[0]:.0f} x {bb[4] - bb[1]:.0f} x "
+                 f"{bb[5] - bb[2]:.0f} | {parts[k]['note']} |")
+    L.append("")
+L += ["## Fasteners", "", "| Joint | Screws | Captive nuts | Type | Status |", "|---|---|---|---|---|"]
+L += [f"| {a} | {s} | {n} | {ty} | {st} |" for a, s, n, ty, st in FASTENERS]
+L += [f"| **Total** | **{sum(f[1] for f in FASTENERS)}** | **{sum(f[2] for f in FASTENERS)}** | "
+      "M3x10/12/16, M2.5x6, M2x6 | one Phillips #1 + #2 |"]
+L += ["", "## Assembly sequence (disassembly = reverse)", ""]
+for s, txt in STEPS.items():
+    L.append(f"{s}. **{txt}** — " + ", ".join(f"{v['pid']} `{k}`" for k, v in sorted(parts.items()) if v["step"] == s))
+L += ["", "**Service access:** rear door (1 screw) -> Pi microSD, Pi ports, power, all cable plugs; service lid "
+      "(2 screws) -> display, camera, mic board and the 3 head screws; LED ring halves pop out from outside; full base "
+      "access = remove the head (3 screws) then the 4 cover screws underneath."]
+with open(doc_path, "w", encoding="utf-8") as fh:
+    fh.write("\n".join(L) + "\n")
+print("inventory", doc_path)

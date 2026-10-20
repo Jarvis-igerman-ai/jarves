@@ -1,0 +1,27 @@
+order = 34
+category = "everyday"
+pages = ["alerts"]
+features = ["proactive_alerts"]
+aliases = ["התראות", "שעות שקט", "שקט", "alerts", "quiet hours", "notifications", "תפסיק להפריע"]
+links = ["scheduler", "autonomy"]
+title_he = "התראות ושעות שקט"
+title_en = "Alerts and quiet hours"
+what_he = "ג'ארביס אומר לכם דברים בזמן הנכון, ובשעות השקט (22:00 עד 07:00) רק מראה שורה על המסך בלי קול."
+what_en = "JARVES tells you things at the right time; in quiet hours (22:00 to 07:00) he only shows a silent line."
+say = [["אל תפריע לי עד הערב", "Don't disturb me until the evening"], ["אילו התראות יש?", "Which alerts are waiting?"]]
+expect_he = "לא יותר מכמה התראות בשעה, ולא אותה התראה פעמיים."
+expect_en = "At most a few alerts an hour, and never the same one twice."
+cost_he = "חינם."
+cost_en = "Free."
+privacy_he = "אין."
+privacy_en = "None."
+
+[[steps]]
+he = "פתחו את עמוד Alerts: קבעו שעות שקט (ברירת מחדל 22:00 עד 07:00), כמה התראות בשעה, ואם דחוף מותר בשעות שקט."
+en = "Open the Alerts page: set quiet hours (default 22:00 to 07:00), how many alerts an hour, and whether urgent ones may speak."
+action = "open:#/alerts"
+
+[[steps]]
+he = "צריך שקט עכשיו? \"השהה התראות\" בעמוד השליטה (Controls) או אמרו \"אל תפריע לי\"."
+en = "Need quiet now? Pause alerts on the Controls page or say \"don't disturb me\"."
+action = "open:#/runtime"

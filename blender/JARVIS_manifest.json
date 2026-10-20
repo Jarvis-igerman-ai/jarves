@@ -1,0 +1,635 @@
+{
+ "model": "cad/JARVIS_pebble.FCStd",
+ "units": "mm",
+ "frame": "Z up, front -Y",
+ "steps": {
+  "1": "Tray: screw the Pi 5 on (4 screws), set the speaker in its cradle (1 strap screw); plug HDMI, camera ribbon and 2 USB cables into the Pi",
+  "2": "Base top: push 3 nuts into the cover-top bosses, bolt the neck column on from inside (3 screws)",
+  "3": "Close the base: feed the cable ends up through the neck, set the cover on the tray, 4 nuts + 4 screws from underneath",
+  "4": "Snap the two blank ring halves into the shoulder groove (LED halves are an optional later swap)",
+  "5": "Head: display + retainer (4 screws), camera (2), mic board (2); press 3 nuts into the neck flare; set the head on and fix it with 3 screws from inside; plug the cables into display, camera, mic board and the speaker lead",
+  "6": "Hook the service lid in at the bottom, 2 screws at the top",
+  "7": "Rear door: hooks + 1 screw; official power cable through the notch; microSD and Pi ports stay reachable here"
+ },
+ "installed_bbox_mm": [
+  -107.5,
+  -105.0,
+  0.0,
+  107.5,
+  111.95,
+  292.0
+ ],
+ "parts": {
+  "Base_Door": {
+   "category": "exterior",
+   "bbox_mm": [
+    -55.0,
+    81.64,
+    6.0,
+    55.0,
+    105.0,
+    72.0
+   ],
+   "kind": "printed",
+   "step": 7,
+   "explode_mm": [
+    0.0,
+    70.0,
+    70.0
+   ],
+   "note": "rear door: 2 hooks + 1x M3; vents; PSU cable notch",
+   "pid": "P09",
+   "print_rot": "X,-90",
+   "print_group": "Base_Door"
+  },
+  "Base_Floor": {
+   "category": "structure",
+   "bbox_mm": [
+    -103.93,
+    -103.93,
+    0.0,
+    103.93,
+    103.93,
+    11.0
+   ],
+   "kind": "printed",
+   "step": 1,
+   "explode_mm": [
+    0.0,
+    0.0,
+    -70.0
+   ],
+   "note": "TRAY: print flat; Pi bosses (M2.5 self-tap), intake slots, 4 cover screws",
+   "pid": "P01",
+   "print_rot": "Z,0",
+   "print_group": "Base_Floor"
+  },
+  "Base_Shell": {
+   "category": "exterior",
+   "bbox_mm": [
+    -104.99,
+    -105.0,
+    4.0,
+    105.0,
+    104.67,
+    85.0
+   ],
+   "kind": "printed",
+   "step": 3,
+   "explode_mm": [
+    0.0,
+    0.0,
+    70.0
+   ],
+   "note": "COVER: print top-down; ribbed 6 mm top, 3 nut bosses; 4x M3x12 from underside",
+   "pid": "P03",
+   "print_rot": "X,180",
+   "print_group": "Base_Shell"
+  },
+  "Base_Shell_Band": {
+   "category": "exterior",
+   "bbox_mm": [
+    -104.99,
+    -105.0,
+    18.0,
+    105.0,
+    89.44,
+    62.0
+   ],
+   "kind": "printed",
+   "step": 3,
+   "explode_mm": [
+    0.0,
+    0.0,
+    70.0
+   ],
+   "note": "navy colour-change zone of the cover print (same part)",
+   "pid": "P03",
+   "print_rot": "X,180",
+   "print_group": "Base_Shell"
+  },
+  "Camera_Module": {
+   "category": "component",
+   "bbox_mm": [
+    -12.5,
+    -16.57,
+    263.5,
+    12.5,
+    -4.17,
+    287.5
+   ],
+   "kind": "placeholder",
+   "step": 5,
+   "explode_mm": [
+    0.0,
+    -60.0,
+    210.0
+   ],
+   "note": "Camera Module 3 (Wide); 2x M2 self-tap; 500 mm Pi 5 ribbon",
+   "pid": "E03",
+   "print_rot": "Z,0",
+   "print_group": "Camera_Module"
+  },
+  "Display_Driver": {
+   "category": "component",
+   "bbox_mm": [
+    -44.5,
+    -5.07,
+    157.5,
+    41.0,
+    1.48,
+    215.5
+   ],
+   "kind": "placeholder",
+   "step": 5,
+   "explode_mm": [
+    0.0,
+    -60.0,
+    190.0
+   ],
+   "note": "display driver board envelope",
+   "pid": "E04",
+   "print_rot": "Z,0",
+   "print_group": "Display_Driver"
+  },
+  "Display_Panel": {
+   "category": "component",
+   "bbox_mm": [
+    -75.0,
+    -16.57,
+    112.5,
+    75.0,
+    -5.07,
+    262.5
+   ],
+   "kind": "placeholder",
+   "step": 5,
+   "explode_mm": [
+    0.0,
+    -70.0,
+    190.0
+   ],
+   "note": "5in round HDMI display (measured STEP envelope); glass is the face",
+   "pid": "E05",
+   "print_rot": "Z,0",
+   "print_group": "Display_Panel"
+  },
+  "Display_Retainer": {
+   "category": "structure",
+   "bbox_mm": [
+    -82.52,
+    -5.07,
+    113.05,
+    82.52,
+    -1.07,
+    261.95
+   ],
+   "kind": "printed",
+   "step": 5,
+   "explode_mm": [
+    0.0,
+    -35.0,
+    190.0
+   ],
+   "note": "print flat; 4x M3x10 self-tap into face-wall bosses",
+   "pid": "P06",
+   "print_rot": "X,90",
+   "print_group": "Display_Retainer"
+  },
+  "Head_Back": {
+   "category": "exterior",
+   "bbox_mm": [
+    -96.19,
+    43.0,
+    114.26,
+    96.19,
+    111.95,
+    288.73
+   ],
+   "kind": "printed",
+   "step": 6,
+   "explode_mm": [
+    0.0,
+    70.0,
+    190.0
+   ],
+   "note": "SERVICE LID: print open side down; 2 hooks + 2x M3x16 into body nuts",
+   "pid": "P08",
+   "print_rot": "X,90",
+   "print_group": "Head_Back"
+  },
+  "Head_Face_Zone": {
+   "category": "exterior",
+   "bbox_mm": [
+    -106.32,
+    -19.57,
+    108.0,
+    106.32,
+    -16.56,
+    292.0
+   ],
+   "kind": "printed",
+   "step": 5,
+   "explode_mm": [
+    0.0,
+    0.0,
+    190.0
+   ],
+   "note": "dark colour zone of the head body print (same part)",
+   "pid": "P07",
+   "print_rot": "X,90",
+   "print_group": "Head_Front"
+  },
+  "Head_Front": {
+   "category": "exterior",
+   "bbox_mm": [
+    -107.5,
+    -16.56,
+    108.0,
+    107.5,
+    50.0,
+    292.0
+   ],
+   "kind": "printed",
+   "step": 5,
+   "explode_mm": [
+    0.0,
+    0.0,
+    190.0
+   ],
+   "note": "HEAD BODY: print face-down; seat ring, 3 seat holes, retainer + mic bosses, lid nuts",
+   "pid": "P07",
+   "print_rot": "X,90",
+   "print_group": "Head_Front"
+  },
+  "Keepout_Display_Cable": {
+   "category": "reserved",
+   "bbox_mm": [
+    -44.5,
+    1.48,
+    157.5,
+    41.0,
+    26.48,
+    215.5
+   ],
+   "kind": "reserved",
+   "step": 5,
+   "explode_mm": [
+    0.0,
+    -50.0,
+    190.0
+   ],
+   "note": "RESERVED: HDMI/USB plug + bend room",
+   "pid": "R04",
+   "print_rot": "Z,0",
+   "print_group": "Keepout_Display_Cable"
+  },
+  "Keepout_Neck_Cables": {
+   "category": "reserved",
+   "bbox_mm": [
+    -21.5,
+    -21.5,
+    60.0,
+    21.5,
+    21.5,
+    111.0
+   ],
+   "kind": "reserved",
+   "step": 3,
+   "explode_mm": [
+    0.0,
+    0.0,
+    35.0
+   ],
+   "note": "RESERVED: 5 cables through the \u00d844 bore",
+   "pid": "R03",
+   "print_rot": "Z,0",
+   "print_group": "Keepout_Neck_Cables"
+  },
+  "LED_Blank_Back": {
+   "category": "exterior",
+   "bbox_mm": [
+    -100.4,
+    0.2,
+    74.2,
+    100.4,
+    100.4,
+    79.8
+   ],
+   "kind": "printed",
+   "step": 4,
+   "explode_mm": [
+    0.0,
+    55.0,
+    95.0
+   ],
+   "note": "blank ring half, snap-in (default)",
+   "pid": "P04",
+   "print_rot": "Z,0",
+   "print_group": "LED_Blank_Back"
+  },
+  "LED_Blank_Front": {
+   "category": "exterior",
+   "bbox_mm": [
+    -100.4,
+    -100.4,
+    74.2,
+    100.4,
+    -0.2,
+    79.8
+   ],
+   "kind": "printed",
+   "step": 4,
+   "explode_mm": [
+    0.0,
+    -55.0,
+    95.0
+   ],
+   "note": "blank ring half, snap-in (default)",
+   "pid": "P05",
+   "print_rot": "Z,0",
+   "print_group": "LED_Blank_Front"
+  },
+  "LED_Connector": {
+   "category": "alternate",
+   "bbox_mm": [
+    26.0,
+    82.0,
+    60.0,
+    41.0,
+    90.0,
+    68.0
+   ],
+   "kind": "alternate",
+   "step": 1,
+   "explode_mm": [
+    0.0,
+    40.0,
+    -20.0
+   ],
+   "note": "optional LED plug, behind rear door",
+   "pid": "A01",
+   "print_rot": "Z,0",
+   "print_group": "LED_Connector"
+  },
+  "LED_Diffuser_Back": {
+   "category": "alternate",
+   "bbox_mm": [
+    -100.4,
+    0.2,
+    74.2,
+    100.4,
+    100.4,
+    79.8
+   ],
+   "kind": "alternate",
+   "step": 4,
+   "explode_mm": [
+    0.0,
+    55.0,
+    95.0
+   ],
+   "note": "optional translucent half when LEDs are fitted",
+   "pid": "A02",
+   "print_rot": "Z,0",
+   "print_group": "LED_Diffuser_Back"
+  },
+  "LED_Diffuser_Front": {
+   "category": "alternate",
+   "bbox_mm": [
+    -100.4,
+    -100.4,
+    74.2,
+    100.4,
+    -0.2,
+    79.8
+   ],
+   "kind": "alternate",
+   "step": 4,
+   "explode_mm": [
+    0.0,
+    -55.0,
+    95.0
+   ],
+   "note": "optional translucent half when LEDs are fitted",
+   "pid": "A03",
+   "print_rot": "Z,0",
+   "print_group": "LED_Diffuser_Front"
+  },
+  "LED_Strip": {
+   "category": "alternate",
+   "bbox_mm": [
+    -91.2,
+    -91.2,
+    75.0,
+    91.2,
+    91.2,
+    78.5
+   ],
+   "kind": "alternate",
+   "step": 4,
+   "explode_mm": [
+    0.0,
+    0.0,
+    85.0
+   ],
+   "note": "optional addressable strip; needs a no-solder kit (not selected)",
+   "pid": "A04",
+   "print_rot": "Z,0",
+   "print_group": "LED_Strip"
+  },
+  "Mic_Board": {
+   "category": "component",
+   "bbox_mm": [
+    -43.0,
+    -3.5,
+    272.5,
+    43.0,
+    31.5,
+    282.5
+   ],
+   "kind": "placeholder",
+   "step": 5,
+   "explode_mm": [
+    0.0,
+    0.0,
+    230.0
+   ],
+   "note": "ReSpeaker Lite (XU316, 2 mics) 35x86; 2x M2.5 self-tap under crown",
+   "pid": "E06",
+   "print_rot": "Z,0",
+   "print_group": "Mic_Board"
+  },
+  "Neck_Column": {
+   "category": "structure",
+   "bbox_mm": [
+    -45.0,
+    -45.0,
+    63.0,
+    45.0,
+    45.0,
+    112.74
+   ],
+   "kind": "printed",
+   "step": 2,
+   "explode_mm": [
+    0.0,
+    0.0,
+    35.0
+   ],
+   "note": "print flange-down; 45 deg saddle flare under the head (3 hidden nut pockets); 3x M3x12 up into cover bosses",
+   "pid": "P02",
+   "print_rot": "Z,0",
+   "print_group": "Neck_Column"
+  },
+  "Pi_5": {
+   "category": "component",
+   "bbox_mm": [
+    -28.0,
+    -14.0,
+    10.0,
+    28.0,
+    71.0,
+    31.0
+   ],
+   "kind": "placeholder",
+   "step": 1,
+   "explode_mm": [
+    0.0,
+    0.0,
+    -40.0
+   ],
+   "note": "Raspberry Pi 5 + Active Cooler; 4x M2.5x6; microSD edge faces the rear door",
+   "pid": "E01",
+   "print_rot": "Z,0",
+   "print_group": "Pi_5"
+  },
+  "Reserve_Amp": {
+   "category": "reserved",
+   "bbox_mm": [
+    -80.0,
+    0.0,
+    4.0,
+    -40.0,
+    30.0,
+    24.0
+   ],
+   "kind": "reserved",
+   "step": 1,
+   "explode_mm": [
+    -30.0,
+    0.0,
+    -40.0
+   ],
+   "note": "RESERVED: only if a 3.5 mm-input amplifier is needed (fallback)",
+   "pid": "R01",
+   "print_rot": "Z,0",
+   "print_group": "Reserve_Amp"
+  },
+  "Reserve_M2_HAT": {
+   "category": "reserved",
+   "bbox_mm": [
+    -28.0,
+    -14.0,
+    31.0,
+    28.0,
+    71.0,
+    52.0
+   ],
+   "kind": "reserved",
+   "step": 1,
+   "explode_mm": [
+    0.0,
+    0.0,
+    -20.0
+   ],
+   "note": "RESERVED: official M.2 HAT+ (SSD) stack height",
+   "pid": "R02",
+   "print_rot": "Z,0",
+   "print_group": "Reserve_M2_HAT"
+  },
+  "Speaker_Module": {
+   "category": "component",
+   "bbox_mm": [
+    -25.0,
+    -96.0,
+    11.0,
+    25.0,
+    -74.0,
+    56.0
+   ],
+   "kind": "placeholder",
+   "step": 1,
+   "explode_mm": [
+    0.0,
+    -45.0,
+    -40.0
+   ],
+   "note": "Seeed mono enclosed speaker 4R 5W 50x45x22 (for ReSpeaker Lite); cradle + 1 strap screw",
+   "pid": "E02",
+   "print_rot": "Z,0",
+   "print_group": "Speaker_Module"
+  },
+  "Face_Eye_L": {
+   "category": "exterior",
+   "bbox_mm": [
+    -47.0,
+    -17.57,
+    181.5,
+    -19.0,
+    -16.37,
+    221.5
+   ],
+   "visual_only": true,
+   "kind": "placeholder",
+   "step": 5,
+   "explode_mm": [
+    0.0,
+    -70.0,
+    190.0
+   ],
+   "note": "visual face placeholder (real face = Godot face scene, later)"
+  },
+  "Face_Eye_R": {
+   "category": "exterior",
+   "bbox_mm": [
+    19.0,
+    -17.57,
+    181.5,
+    47.0,
+    -16.37,
+    221.5
+   ],
+   "visual_only": true,
+   "kind": "placeholder",
+   "step": 5,
+   "explode_mm": [
+    0.0,
+    -70.0,
+    190.0
+   ],
+   "note": "visual face placeholder (real face = Godot face scene, later)"
+  },
+  "Face_Smile": {
+   "category": "exterior",
+   "bbox_mm": [
+    -18.4,
+    -20.17,
+    149.1,
+    18.4,
+    -15.37,
+    169.3
+   ],
+   "visual_only": true,
+   "kind": "placeholder",
+   "step": 5,
+   "explode_mm": [
+    0.0,
+    -70.0,
+    190.0
+   ],
+   "note": "visual face placeholder (real face = Godot face scene, later)"
+  }
+ },
+ "blender": "5.2.2 LTS"
+}

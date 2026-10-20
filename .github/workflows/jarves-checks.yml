@@ -1,0 +1,224 @@
+name: jarves-checks
+# CI for Issue #2. No secrets used; no paid API calls (all AI/voice tests are offline fakes).
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  core:
+    name: Python Core tests (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, windows-2025]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: core
+    steps:
+      - uses: actions/checkout@v7
+      - uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884  # v10.3.0 (no major tags since v8)
+        with:
+          enable-cache: true
+      # Owner rule: NO skipped tests. Every extra is installed (camera/OpenCV, voice, tray, browser/Playwright once it
+      # exists) and the real tools are fetched/located by tests/_tools.py (Godot 4.7.2 everywhere, Inno Setup on
+      # Windows, openssl from PATH/Git). Platform-only tests are deselected per OS (markers), never skipped.
+      - name: System libraries (Linux: PortAudio for sounddevice)
+        if: runner.os == 'Linux'
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq libportaudio2
+      - name: Install (locked, all extras)
+        run: uv sync --frozen --all-extras
+      - name: Browser for the real-browser tests (Chromium on Linux, preinstalled Edge on Windows)
+        shell: bash
+        run: |
+          if uv run python -c "import playwright" 2>/dev/null; then
+            if [ "$RUNNER_OS" = "Linux" ]; then uv run playwright install --with-deps chromium; else echo "using the preinstalled Edge"; fi
+          else
+            echo "no browser extra yet"
+          fi
+      - name: Cache tool downloads (Godot, Inno Setup; SHA-pinned in tests/_tools.py)
+        uses: actions/cache@v6
+        with:
+          path: ${{ runner.temp }}/jarves-test-tools
+          key: jarves-test-tools-${{ runner.os }}-${{ hashFiles('core/tests/_tools.py') }}
+      - name: pytest (offline; fakes for OpenAI, audio and the music player; ANY skip fails the run)
+        shell: bash
+        env:
+          JARVES_BUILD_CACHE: ${{ runner.temp }}/jarves-test-tools
+        run: |
+          uv run pytest -q -rs -p no:cacheprovider | tee pytest.out
+          if grep -E "(^SKIPPED|[0-9]+ skipped|xfailed)" pytest.out; then echo "::error::tests were skipped"; exit 1; fi
+      - name: jarvis.cmd launcher smoke (Windows)
+        if: runner.os == 'Windows'
+        shell: cmd
+        run: |
+          call ..\jarvis.cmd setup --help || exit /b 1
+          call ..\jarvis.cmd status > status.txt
+          type status.txt
+          findstr /C:"Core is NOT running" status.txt || exit /b 1
+  installer:
+    # SW-V2 M6: build the real Windows installer and smoke-test it (silent per-user install into a temp dir,
+    # --version/status/features/doctor, offline Core start/stop, exported face self-checks, upgrade, uninstall keeps
+    # data, /PURGE=1). On `main` the tested artifact is what .github/workflows/package.yml publishes; PR artifacts are
+    # CI-only (3 days) and never become releases.
+    name: Windows installer (build + silent install smoke)
+    needs: core
+    runs-on: windows-2025
+    timeout-minutes: 45
+    env:
+      CHANNEL: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' && 'main' || 'pr' }}
+      # WP-O: optional custom update folder baked in as the default (docs/RELEASE_HOSTING.md); unset = the public
+      # releases repo (once a signing key is built in), else the private repo's releases
+      JARVES_UPDATE_BASE_URL: ${{ vars.JARVES_UPDATE_BASE_URL }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884  # v10.3.0
+        with:
+          enable-cache: true
+      - name: Cache pinned build tools (Python, Godot editor + Windows template, Inno Setup; SHA256-pinned)
+        uses: actions/cache@v6
+        with:
+          path: ${{ runner.temp }}/jarves-build-cache
+          key: jarves-build-tools-${{ hashFiles('packaging/build_windows.ps1') }}
+      - name: Build installer
+        shell: pwsh
+        run: |
+          $base = (Select-String -Path core/pyproject.toml -Pattern '^version\s*=\s*"([^"]+)"').Matches[0].Groups[1].Value
+          $v = "$base.${{ github.run_number }}"
+          ./packaging/build_windows.ps1 -Version $v -Channel $env:CHANNEL -Commit $env:GITHUB_SHA `
+            -Cache "$env:RUNNER_TEMP/jarves-build-cache" -Out dist
+          "VERSION=$v" >> $env:GITHUB_ENV
+      - name: Silent install / run / upgrade / uninstall smoke
+        shell: pwsh
+        run: ./packaging/smoke_windows.ps1 -Installer "dist/JARVES-Setup-$env:VERSION.exe" -Version $env:VERSION -RequireFace -CheckAutostart
+      - uses: actions/upload-artifact@v7
+        with:
+          name: jarves-windows-installer-${{ env.CHANNEL }}
+          path: |
+            dist/JARVES-Setup-*.exe
+            dist/JARVES-Setup-*.exe.sha256
+            dist/build-info.json
+          retention-days: ${{ env.CHANNEL == 'main' && 14 || 3 }}
+          compression-level: 0
+          if-no-files-found: error
+  cad:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v7
+      - name: Install FreeCAD 1.1.4 (same version as local; apt only ships 0.21)
+        run: |
+          curl -sSLO https://github.com/FreeCAD/FreeCAD/releases/download/1.1.4/FreeCAD_1.1.4-Linux-x86_64-py311.AppImage
+          curl -sSL https://github.com/FreeCAD/FreeCAD/releases/download/1.1.4/FreeCAD_1.1.4-Linux-x86_64-py311.AppImage-SHA256.txt | sha256sum -c -
+          chmod +x FreeCAD_*.AppImage && ./FreeCAD_*.AppImage --appimage-extract > /dev/null
+          echo "FC=$PWD/squashfs-root/usr/bin/freecadcmd" >> "$GITHUB_ENV"
+      - name: CAD smoke test (blockout + Pebble build, check_pebble, HeadRX regression)
+        run: QT_QPA_PLATFORM=offscreen "$FC" cad/smoke_test.py
+      - name: Mesh export + mechanical estimates
+        run: |
+          QT_QPA_PLATFORM=offscreen "$FC" cad/build_pebble.py
+          QT_QPA_PLATFORM=offscreen "$FC" cad/export_meshes.py
+          QT_QPA_PLATFORM=offscreen "$FC" cad/mech_estimates.py | tee mech.txt
+          grep -q "MECH DONE" mech.txt
+  blender:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v7
+      - name: Install Blender 5.2.2
+        run: |
+          curl -sSL https://download.blender.org/release/Blender5.2/blender-5.2.2-linux-x64.tar.xz | tar xJ
+          sudo apt-get update && sudo apt-get install -y --no-install-recommends libxi6 libxkbcommon0 libxrender1 libsm6 libgl1 libegl1
+      - name: Blender smoke (committed .glb vs CAD manifest, materials, Godot asset sync, renders present)
+        run: ./blender-5.2.2-linux-x64/blender -b --python blender/smoke_blender.py
+  godot:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+      - name: Install Godot 4.7.2
+        run: |
+          curl -sSLO https://github.com/godotengine/godot/releases/download/4.7.2-stable/Godot_v4.7.2-stable_linux.x86_64.zip
+          unzip -q Godot_*.zip && echo "GODOT=$PWD/Godot_v4.7.2-stable_linux.x86_64" >> "$GITHUB_ENV"
+      - name: Import assets
+        run: '"$GODOT" --headless --path godot --import'
+      - name: Viewer check (parts, picking, exploded view, LED/blank swap, live face)
+        run: |
+          "$GODOT" --headless --path godot --quit-after 3000 -- --check --no-core | tee viewer.txt
+          grep -q "CHECK RESULT: PASS" viewer.txt
+      - name: Face display self-test
+        run: |
+          "$GODOT" --headless --path godot --quit-after 3000 res://face/face_app.tscn -- --check | tee face.txt
+          grep -q "FACE CHECK RESULT: PASS" face.txt
+  e2e:
+    name: Core-Godot E2E (real processes)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+      - uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884  # v10.3.0
+        with:
+          enable-cache: true
+      - name: Install Core + Godot 4.7.2
+        run: |
+          (cd core && uv sync --frozen)
+          curl -sSLO https://github.com/godotengine/godot/releases/download/4.7.2-stable/Godot_v4.7.2-stable_linux.x86_64.zip
+          unzip -q Godot_*.zip && echo "GODOT=$PWD/Godot_v4.7.2-stable_linux.x86_64" >> "$GITHUB_ENV"
+          echo "JARVES_HOME=$RUNNER_TEMP/jarves" >> "$GITHUB_ENV"
+      - name: Import assets
+        run: '"$GODOT" --headless --path godot --import'
+      - name: Face protocol test (real face, headless; every message incl. malformed must not break it)
+        run: (cd core && GODOT_EXE="$GODOT" uv run pytest -q tests/test_face_protocol_godot.py)
+      - name: Start the Core (offline, no keys, no audio, no music)
+        run: |
+          mkdir -p "$JARVES_HOME"
+          printf '[voice]\nmode = "off"\n\n[music]\nprovider = "none"\n' > "$JARVES_HOME/config.toml"
+          (cd core && nohup uv run jarves run > "$RUNNER_TEMP/core.out" 2>&1 &)
+          for i in $(seq 60); do grep -q CORE_READY "$JARVES_HOME/logs/jarves.log" 2>/dev/null && break; sleep 0.5; done
+          grep -q CORE_READY "$JARVES_HOME/logs/jarves.log" || { cat "$RUNNER_TEMP/core.out"; exit 1; }
+      - name: Loading screen waits for read-only startup readiness
+        run: |
+          timeout 30 "$GODOT" --headless --path godot res://loading.tscn -- --loading-check | tee loading.txt
+          grep -q "LOADING CHECK RESULT: PASS" loading.txt
+      - name: E2E pass - face asks "what time is it", gets a reply and face states
+        run: |
+          timeout 90 "$GODOT" --headless --path godot res://face/face_app.tscn -- --e2e | tee e2e.txt
+          grep -q "E2E RESULT: PASS" e2e.txt
+      - name: E2E negative - wrong token is rejected (4401), face never connects
+        run: |
+          mkdir -p "$RUNNER_TEMP/bad" && echo wrong-token > "$RUNNER_TEMP/bad/link_token"
+          JARVES_HOME="$RUNNER_TEMP/bad" timeout 90 "$GODOT" --headless --path godot res://face/face_app.tscn -- --e2e | tee bad.txt || true
+          grep -q "E2E RESULT: FAIL" bad.txt && grep -q "rejected the token" bad.txt
+          (cd core && uv run jarves status || true) | grep -Eq '"core": "(ready|degraded)"'   # Core survived the bad client (offline = degraded)
+      - name: Window close keeps the Core running by default (background_core ON); `jarves stop` ends it
+        run: |
+          timeout 30 "$GODOT" --headless --path godot res://face/face_app.tscn -- --e2e-close
+          sleep 3
+          ! grep -q CORE_STOPPED "$JARVES_HOME/logs/jarves.log"               # the face closed, the Core did not stop
+          (cd core && uv run jarves status) | grep -Eq '"core": "(ready|degraded)"'
+          (cd core && uv run jarves stop)
+          for i in $(seq 30); do grep -q CORE_STOPPED "$JARVES_HOME/logs/jarves.log" && break; sleep 0.5; done
+          grep -q CORE_STOPPED "$JARVES_HOME/logs/jarves.log"
+          ! (cd core && uv run jarves status)
+      - name: Window close stops the Core through the authenticated link (background_core OFF)
+        run: |
+          rm -f "$JARVES_HOME/logs/jarves.log"
+          (cd core && nohup uv run jarves run > "$RUNNER_TEMP/core2.out" 2>&1 &)
+          for i in $(seq 60); do grep -q CORE_READY "$JARVES_HOME/logs/jarves.log" 2>/dev/null && break; sleep 0.5; done
+          grep -q CORE_READY "$JARVES_HOME/logs/jarves.log" || { cat "$RUNNER_TEMP/core2.out"; exit 1; }
+          (cd core && uv run jarves features off background_core)
+          sleep 2                                                             # the running Core re-reads the switch file
+          timeout 30 "$GODOT" --headless --path godot res://face/face_app.tscn -- --e2e-close
+          for i in $(seq 30); do grep -q CORE_STOPPED "$JARVES_HOME/logs/jarves.log" && break; sleep 0.5; done
+          grep -q CORE_STOPPED "$JARVES_HOME/logs/jarves.log"
+          ! (cd core && uv run jarves status)                                 # now reports NOT running
+      - name: Core log on failure
+        if: failure()
+        run: cat "$RUNNER_TEMP/core.out"; tail -50 "$JARVES_HOME/logs/jarves.log" || true

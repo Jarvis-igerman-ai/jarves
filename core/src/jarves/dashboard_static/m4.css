@@ -1,0 +1,37 @@
+/* WP-M4: capability matrix, identity, calendar, devices, pairing page; phone layout. Uses style.css tokens. */
+.m4-scroll { overflow-x: auto; }
+.m4-tabs .pill { padding: 3px 12px; }
+.m4-matrix td { font-size: 13px; }
+.m4-matrix td:first-child { min-width: 200px; }
+main:has(.m4-matrix) { max-width: none; }          /* nine columns: use the whole width */
+.m4-matrix td[data-label="Blocker"] { min-width: 220px; max-width: 320px; }
+.m4-matrix td[data-label="Windows"] { max-width: 260px; }
+.m4-matrix td[data-label="Health"] { max-width: 170px; }
+tr.m4-attn td:first-child { box-shadow: inset 3px 0 0 var(--serious); }
+.m4-form { display: flex; flex-wrap: wrap; gap: 10px; align-items: flex-end; margin: 6px 0; }
+.m4-field { display: flex; flex-direction: column; gap: 2px; }
+input[type="text"], select { font: inherit; padding: 6px 9px; border-radius: 8px; border: 1px solid var(--line);
+  background: var(--surface-2); color: var(--text); min-width: 0; }
+input[type="text"]:focus-visible, select:focus-visible, button:focus-visible, a:focus-visible {
+  outline: 2px solid var(--accent); outline-offset: 2px; }
+.m4-code { margin-top: 12px; }
+.m4-big { font-size: 34px; font-weight: 700; letter-spacing: .12em; font-variant-numeric: tabular-nums; }
+button[disabled] { opacity: .5; cursor: not-allowed; }
+/* pairing page (phone) */
+.m4-pair { max-width: 420px; margin: 8vh auto; padding: 0 16px; }
+.m4-pair input[type="text"] { width: 100%; font-size: 22px; letter-spacing: .1em; padding: 10px 12px; }
+.m4-pair button { width: 100%; padding: 12px; font-size: 16px; margin-top: 12px; }
+/* phones: the matrix becomes one card per feature, buttons get finger-sized */
+@media (max-width: 760px) {
+  .shell { grid-template-columns: minmax(0, 1fr); }      /* a long word must not widen the page */
+  main { min-width: 0; overflow-wrap: anywhere; }
+  button, .switch, nav a { min-height: 40px; }
+  .m4-matrix thead { display: none; }
+  .m4-matrix, .m4-matrix tbody, .m4-matrix tr, .m4-matrix td { display: block; width: 100%; }
+  .m4-matrix tr { border-bottom: 1px solid var(--line); padding: 8px 0; }
+  .m4-matrix td { border: 0; padding: 4px 2px; }
+  .m4-matrix td[data-label]::before { content: attr(data-label); display: block; font-size: 11px; color: var(--muted);
+    text-transform: uppercase; letter-spacing: .04em; }
+  .m4-form { flex-direction: column; align-items: stretch; }
+  .m4-form input[type="text"], .m4-form select { width: 100%; }
+}

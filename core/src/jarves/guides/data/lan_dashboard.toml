@@ -1,0 +1,37 @@
+order = 63
+category = "system"
+features = ["dashboard_lan"]
+aliases = ["רשת", "טלפון", "מהטלפון", "lan", "network", "pairing", "phone", "צימוד"]
+links = ["dashboard", "privacy"]
+title_he = "לוח הבקרה מהטלפון (רשת ביתית)"
+title_en = "Dashboard from your phone (home network)"
+what_he = "אפשר לפתוח את לוח הבקרה מהטלפון בבית, אחרי צימוד חד-פעמי וסיסמה. כבוי מראש."
+what_en = "Open the dashboard from your phone at home, after a one-time pairing and a login. Off by default."
+say = [["איך אני פותח את לוח הבקרה מהטלפון?", "How do I open the dashboard from my phone?"]]
+expect_he = "רק ברשת הביתית. כל טלפון צריך צימוד משלו, ואפשר לבטל אותו בכל רגע. מהטלפון אפשר לנהל תזכורות ומשימות מתוזמנות, להדליק מתגים בסיכון נמוך ולאשר הוספה או עדכון ביומן; הפעלת משימה עם פעולות, מתגים בסיכון בינוני או גבוה ומחיקות נשארים במחשב."
+expect_en = "Home network only. Each phone needs its own pairing, which you can cancel any time. From the phone you can manage reminders and scheduled jobs, flip low-risk switches and confirm adding or updating calendar events; approving a job that acts on things, medium/high-risk switches and deletions stay on the computer."
+cost_he = "חינם."
+cost_en = "Free."
+privacy_he = "בלי צימוד אין גישה. החיבור בבית בלי הצפנה (HTTP), אז מישהו שכבר מחובר ל-Wi-Fi שלכם יכול תיאורטית לראות אותו."
+privacy_en = "No access without pairing. The home connection is unencrypted (HTTP), so someone already on your Wi-Fi could in theory see it."
+
+[[steps]]
+he = "הדליקו את \"לוח בקרה ברשת הביתית\" בעמוד Features (סיכון גבוה)."
+en = "Turn on Dashboard on the home network on the Features page (high risk)."
+action = "feature_on:dashboard_lan"
+check = "enabled:dashboard_lan"
+
+[[steps]]
+he = "במחשב הקלידו jarvis dashboard --lan. הוא מדפיס כתובת לטלפון."
+en = "On the computer type jarvis dashboard --lan. It prints an address for the phone."
+action = "command:jarvis dashboard --lan"
+
+[[steps]]
+he = "בלוח הבקרה במחשב לחצו \"Pair a phone\": מופיע קוד של 8 ספרות ל-5 דקות. בטלפון פתחו את הכתובת והקלידו את הקוד."
+en = "On the computer's dashboard press Pair a phone: an 8-digit code valid 5 minutes. On the phone open the address and enter it."
+
+[[problems]]
+he = "הטלפון לא מגיע לכתובת"
+en = "The phone cannot reach the address"
+fix_he = "הטלפון חייב להיות באותה רשת Wi-Fi. מבחוץ (מהאינטרנט) זה חסום בכוונה."
+fix_en = "The phone must be on the same Wi-Fi. From the internet it is blocked on purpose."

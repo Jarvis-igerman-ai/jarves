@@ -1,0 +1,28 @@
+order = 31
+category = "memory"
+pages = ["workspace"]
+features = ["workspace_agent_edit", "assistant_identity"]
+aliases = ["אופי", "אישיות", "שם", "persona", "personality", "soul", "workspace", "קבצים שלו", "name"]
+links = ["memory"]
+title_he = "האופי והשם שלו"
+title_en = "His personality and name"
+what_he = "קבצים פשוטים (SOUL, IDENTITY, USER) קובעים איך ג'ארביס מדבר ומה הוא יודע עליכם, ואפשר לשנות אותם."
+what_en = "Simple files (SOUL, IDENTITY, USER) set how JARVES talks and what he knows about you, and you can change them."
+say = [["תדבר יותר קצר", "Talk shorter"], ["תהיה יותר מצחיק", "Be funnier"], ["תבטל את השינוי האחרון", "Undo the last change"]]
+expect_he = "הוא מראה מה ישתנה ומבקש אישור. כל שינוי נשמר ואפשר לבטל."
+expect_en = "He shows what will change and asks first. Every change is saved and can be undone."
+cost_he = "חינם."
+cost_en = "Free."
+privacy_he = "הקבצים נשמרים רק במחשב."
+privacy_en = "The files stay on this computer."
+
+[[steps]]
+he = "פתחו את עמוד Workspace וערכו את הקבצים, או פשוט בקשו ממנו בקול."
+en = "Open the Workspace page and edit the files, or just ask him by voice."
+action = "open:#/workspace"
+
+[[steps]]
+he = "ודאו שהמתג \"עריכת האופי והקבצים שלי\" דולק אם אתם רוצים שהוא ישנה בעצמו."
+en = "Keep the Edit my own persona files switch on if you want him to make the change himself."
+action = "feature_on:workspace_agent_edit"
+check = "enabled:workspace_agent_edit"

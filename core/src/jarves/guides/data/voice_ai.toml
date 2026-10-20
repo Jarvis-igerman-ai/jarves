@@ -1,0 +1,60 @@
+# Guide data (WP-L). Top-level keys first; [[steps]] / [[problems]] / [platform] tables last (TOML rule).
+order = 1
+category = "start"
+probe = "ai"
+checklist = 1
+suggest = true
+aliases = ["key", "api key", "openai", "connect ai", "מפתח", "חיבור", "התחברות", "בינה מלאכותית", "chatgpt"]
+links = ["api_budget", "usage", "wake_word"]
+title_he = "חיבור לבינה המלאכותית"
+title_en = "Connect the AI (voice and answers)"
+what_he = "ג'ארביס מדבר ועונה בעזרת OpenAI, אז צריך לחבר אותו פעם אחת עם מפתח או עם מנוי ChatGPT."
+what_en = "JARVES talks and answers with OpenAI, so he needs to be connected once, with an API key or a ChatGPT plan."
+say = [["היי ג'ארביס, מה השעה?", "Hey Jarvis, what time is it?"], ["מה אתה יכול לעשות?", "What can you do?"]]
+expect_he = "אחרי החיבור, \"היי ג'ארביס\" פותח שיחה קולית והוא עונה תוך שנייה-שתיים."
+expect_en = "After connecting, \"Hey Jarvis\" opens a voice conversation and he answers within a second or two."
+test = "ai"
+test_he = "הבדיקה רק בודקת שהמפתח שמור (בלי לשלוח בקשה בתשלום)."
+test_en = "The check only looks that the key is saved (no paid request is sent)."
+cost_he = "שיחה קולית עולה בערך 5 סנט לדקה. אפשר לקבוע תקציב חודשי (מדריך \"תקציב API חודשי\")."
+cost_en = "Voice costs about 5 cents a minute. You can set a monthly budget (guide \"Monthly API budget\")."
+privacy_he = "המפתח נשמר רק במחשב שלכם, בקובץ פרטי (secrets.env), אף פעם לא בפרויקט ולא ביומן."
+privacy_en = "The key is kept only on your computer in a private file (secrets.env), never in the project or the logs."
+
+[[steps]]
+he = "פתחו את platform.openai.com/api-keys, לחצו \"Create new secret key\" והעתיקו אותו."
+en = "Open platform.openai.com/api-keys, press \"Create new secret key\" and copy it."
+
+[[steps]]
+he = "בטרמינל הקלידו jarvis key והדביקו את המפתח (הוא מוסתר בזמן ההדבקה)."
+en = "In a terminal type jarvis key and paste the key (it stays hidden while you paste)."
+action = "command:jarvis key"
+check = "probe:ai"
+
+[[steps]]
+he = "הפעילו מחדש את ג'ארביס: jarvis stop ואז jarvis."
+en = "Restart JARVES: jarvis stop, then jarvis."
+action = "command:jarvis stop"
+
+[[steps]]
+he = "לחצו \"בדוק עכשיו\"."
+en = "Press Test now."
+action = "test"
+
+[[problems]]
+he = "הוא אומר שאין מפתח"
+en = "He says there is no key"
+fix_he = "הריצו שוב jarvis key. המפתח חייב להתחיל ב-sk-."
+fix_en = "Run jarvis key again. The key must start with sk-."
+
+[[problems]]
+he = "יש לי מנוי ChatGPT ולא מפתח"
+en = "I have a ChatGPT plan, not a key"
+fix_he = "הריצו jarvis setup ובחרו ChatGPT. משימות ברקע עדיין צריכות מפתח API."
+fix_en = "Run jarvis setup and choose ChatGPT. Background tasks still need an API key."
+
+[platform]
+windows = "verified_on_device"
+windows_note_en = "used daily on the user's Windows PC"
+pi = "implemented_unverified"
+pi_note_en = "same code; not run on a Raspberry Pi yet"

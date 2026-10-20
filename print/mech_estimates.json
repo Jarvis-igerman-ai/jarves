@@ -1,0 +1,68 @@
+{
+ "total_mass_g": 1436,
+ "head_mass_g": 795,
+ "com_mm": [
+  -5.1,
+  4.9,
+  127.6
+ ],
+ "tip_deg_no_ballast": 33.7,
+ "tip_deg_with_400g_ballast": 41.7,
+ "allowable_N": 150.0,
+ "joints": [
+  {
+   "case": "20 N push at the head top, any direction",
+   "joint": "head -> neck column (3x M3 + nut, r33 @7/90/173, saddle r45)",
+   "worst_bolt_N": 50.4,
+   "safety_factor": 3.0
+  },
+  {
+   "case": "20 N push at the head top, any direction",
+   "joint": "neck column -> cover top (3x M3 + nut, r38, flange r45)",
+   "worst_bolt_N": 45.5,
+   "safety_factor": 3.3
+  },
+  {
+   "case": "20 N push at the head top, any direction",
+   "joint": "cover -> tray (4x M3 + nut, r96.5)",
+   "worst_bolt_N": 21.9,
+   "safety_factor": 6.8
+  },
+  {
+   "case": "tipped 45 deg and caught: 2x head weight sideways at head COM",
+   "joint": "head -> neck column (3x M3 + nut, r33 @7/90/173, saddle r45)",
+   "worst_bolt_N": 13.3,
+   "safety_factor": 11.3
+  },
+  {
+   "case": "tipped 45 deg and caught: 2x head weight sideways at head COM",
+   "joint": "neck column -> cover top (3x M3 + nut, r38, flange r45)",
+   "worst_bolt_N": 14.4,
+   "safety_factor": 10.4
+  },
+  {
+   "case": "tipped 45 deg and caught: 2x head weight sideways at head COM",
+   "joint": "cover -> tray (4x M3 + nut, r96.5)",
+   "worst_bolt_N": 8.1,
+   "safety_factor": 18.6
+  },
+  {
+   "case": "5 N finger press on the touchscreen centre",
+   "joint": "head -> neck column (3x M3 + nut, r33 @7/90/173, saddle r45)",
+   "worst_bolt_N": 5.4,
+   "safety_factor": 27.6
+  },
+  {
+   "case": "5 N finger press on the touchscreen centre",
+   "joint": "neck column -> cover top (3x M3 + nut, r38, flange r45)",
+   "worst_bolt_N": 6.1,
+   "safety_factor": 24.5
+  },
+  {
+   "case": "5 N finger press on the touchscreen centre",
+   "joint": "cover -> tray (4x M3 + nut, r96.5)",
+   "worst_bolt_N": 3.5,
+   "safety_factor": 42.9
+  }
+ ]
+}

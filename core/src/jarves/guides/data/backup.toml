@@ -1,0 +1,43 @@
+order = 53
+category = "system"
+pages = ["backup"]
+features = ["backup"]
+checklist = 5
+aliases = ["גיבוי", "שחזור", "backup", "restore"]
+links = ["privacy", "updates"]
+title_he = "גיבוי ושחזור"
+title_en = "Backup and restore"
+what_he = "ג'ארביס מגבה כל יום את ההגדרות, הזיכרון, הפתקים וההיסטוריה (בלי מפתחות), ואפשר לשחזר."
+what_en = "JARVES backs up settings, memory, notes and history every day (no keys), and you can restore."
+say = [["מתי היה הגיבוי האחרון?", "When was the last backup?"]]
+expect_he = "בעמוד Backup רואים את הגיבויים. \"בדיקת שחזור\" משחזרת לתיקייה זמנית בלי לגעת בנתונים שלכם."
+expect_en = "The Backup page lists backups. Test restore restores into a throw-away folder without touching your data."
+test = "backup"
+test_he = "הבדיקה בודקת שהגיבוי האחרון שלם (בלי לשחזר)."
+test_en = "The check verifies the newest backup is intact (no restore)."
+cost_he = "חינם. נשמר בתיקיית הנתונים."
+cost_en = "Free. Kept in the data folder."
+privacy_he = "בגיבוי אין מפתחות ואין התחברויות. אחרי שחזור במחשב אחר מתחברים מחדש."
+privacy_en = "Backups contain no keys or sign-ins. After restoring on another computer, sign in again."
+
+[[steps]]
+he = "פתחו את עמוד Backup ולחצו \"גבה עכשיו\"."
+en = "Open the Backup page and press Back up now."
+action = "open:#/backup"
+check = "probe:backup"
+
+[[steps]]
+he = "לחצו \"בדוק עכשיו\" כדי לוודא שהגיבוי שלם."
+en = "Press Test now to make sure the backup is intact."
+action = "test"
+
+[[steps]]
+he = "לשחזור: jarvis stop ואז jarvis restore ושם הגיבוי. הנתונים הנוכחיים נשמרים קודם."
+en = "To restore: jarvis stop, then jarvis restore NAME. Your current data is saved first."
+action = "command:jarvis restore"
+
+[[problems]]
+he = "אחרי שחזור הוא לא מחובר לגוגל"
+en = "After a restore Google is not connected"
+fix_he = "זה בכוונה: מפתחות לא נשמרים בגיבוי. הריצו jarvis key ו-jarvis google start."
+fix_en = "On purpose: keys are not backed up. Run jarvis key and jarvis google start."

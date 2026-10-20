@@ -1,0 +1,28 @@
+order = 50
+category = "costs"
+pages = ["usage"]
+features = ["usage_monitor"]
+aliases = ["כמה נשאר", "שימוש", "עלות", "usage", "meters", "costs", "limits"]
+links = ["api_bill", "api_budget", "voice_ai"]
+title_he = "כמה השתמשתי"
+title_en = "Usage meters"
+what_he = "ג'ארביס מראה כמה השתמשתם במנוי ChatGPT וב-API של OpenAI, ומתריע ב-75%, 90% ו-100%."
+what_en = "JARVES shows how much of the ChatGPT plan and the OpenAI API you used, and alerts at 75%, 90% and 100%."
+say = [["כמה נשאר לי?", "How much do I have left?"], ["כמה עלה לי החודש?", "How much did this month cost?"]]
+expect_he = "\"לא ידוע\" אומר שהספק לא מדווח. הוא אף פעם לא מנחש אחוז."
+expect_en = "\"Unknown\" means the provider does not report it. He never guesses a percent."
+cost_he = "חינם."
+cost_en = "Free."
+privacy_he = "המונים נשמרים רק במחשב."
+privacy_en = "The meters stay on this computer."
+
+[[steps]]
+he = "פתחו את עמוד Usage."
+en = "Open the Usage page."
+action = "open:#/usage"
+check = "active:usage_monitor"
+
+[[steps]]
+he = "לחשבון אמיתי מ-OpenAI: מדריך \"החשבון האמיתי של ה-API\". לתקציב: מדריך \"תקציב API חודשי\"."
+en = "For the real bill from OpenAI: guide \"Real API bill\". For a budget: guide \"Monthly API budget\"."
+action = "open:#/guide/api_bill"
