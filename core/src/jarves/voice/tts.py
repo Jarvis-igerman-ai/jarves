@@ -63,6 +63,8 @@ class OpenAISpeechTTS:
     async def synth(self, text: str) -> tuple[np.ndarray, int]:
         import os
         import httpx
+        from .. import pronounce
+        text = pronounce.apply(text)             # user pronunciation dictionary (PRONUNCIATIONS.md)
         body = {"model": self.model, "voice": self.voice, "input": text, "response_format": "pcm"}
         if text_lang(text) == "he":
             body["instructions"] = HEBREW_STYLE
