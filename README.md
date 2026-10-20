@@ -11,9 +11,9 @@ A cute, friendly, premium-looking stationary home companion. **Simulation first,
 |---|---|
 | **Permanent decisions and non-negotiable buildability principles** | [PROJECT_PRINCIPLES](docs/PROJECT_PRINCIPLES.md) |
 | Current authorized work | [NOW](docs/NOW.md) |
-| Latest implementation, tests, risks and handoff | [HANDOFF](docs/HANDOFF.md) |
-| Current design and component discussion | [Issue #3](https://github.com/igalgerman/JARVIS/issues/3) and [design review](docs/reviews/S1_DESIGN_REVIEW.md) |
-| Milestones | [ROADMAP](docs/ROADMAP.md) |
+| Latest code/CI and issues | [Public issues](https://github.com/igalgerman/jarves/issues), [migration status](docs/MIGRATION_STATUS.md) and [HANDOFF](docs/HANDOFF.md) (older entries may be historical) |
+| Current physical design backlog | [Public hardware/design issue #4](https://github.com/igalgerman/jarves/issues/4) and [design review](docs/reviews/S1_DESIGN_REVIEW.md) |
+| Milestones, V5 and V6 vision stages | [ROADMAP](docs/ROADMAP.md) |
 | **Engineering challenges, simulations and staged safety/quality reviews** | [ENGINEERING_REVIEW_GATES](docs/ENGINEERING_REVIEW_GATES.md) |
 | **Active software / CI implementation package** | [SW-V1 approved plan](docs/SW_V1_WORK_PACKAGE.md) |
 | **Future personal assistant, Skills, YouTube Music, controls and diagnostics** | [JARVES software requirements](docs/JARVES_CONTROLS_DIAGNOSTICS_REQUIREMENTS.md) |
@@ -22,13 +22,13 @@ A cute, friendly, premium-looking stationary home companion. **Simulation first,
 | Interactive viewer instructions | [godot/README](godot/README.md) |
 | **Run the assistant (Core + face), setup, troubleshooting** | [core/README](core/README.md) · [SW-V1 review](docs/reviews/SW_V1_REVIEW.md) |
 
-## Current snapshot — 18 October 2026
+## Historic snapshot — 18 October 2026 (superseded by [NOW](docs/NOW.md))
 
 **Software SW-V1 (in review):**
 - A working Python Core (`core/`) runs the face (Godot) end to end.
 - Everything is ready for OpenAI GPT-Live voice + GPT-6 agent + web search, but those need your `OPENAI_API_KEY`.
 - Or connect your **ChatGPT plan** (`jarves chatgpt login`): text on the plan, with voice local or on the API key ("combined").
-- CI is active: [jarves-checks](https://github.com/igalgerman/JARVIS/actions/workflows/jarves-checks.yml), with Core tests, CAD, Blender and Godot on every push.
+- CI is active: [jarves-checks](https://github.com/igalgerman/jarves/actions/workflows/jarves-checks.yml), with Core tests, CAD, Blender and Godot on every push.
 - Offline it handles Hebrew commands, memory, diagnostics and the YouTube Music skill via Pear Desktop (needs a one-time "Allow").
 - **Quick start: type `jarvis`.** The first time, it asks how to connect: (1) ChatGPT plan, (2) plan + API-key voice, or (3) API key. Then it starts the Core and the face. Other commands: `jarvis setup`, `jarvis stop`, `jarvis status`. Details: [core/README](core/README.md).
 
