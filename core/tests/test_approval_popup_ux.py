@@ -8,6 +8,7 @@ machine without a desktop (headless Linux CI) the window part asserts that the p
 """
 from __future__ import annotations
 
+import gc
 import json
 
 import pytest
@@ -114,7 +115,10 @@ def test_buttons_always_inside_window_and_screen(tmp_path, name, req, kw, open_d
             root.jarves.toggle_details()
         root.update()
         rep = ap.layout_report(root)
-        assert all(rep["ok"].values()), (name, rep)
+        ok_ = dict(rep["ok"])
+        if not root.winfo_viewable():            # CI runners have no interactive desktop: never mapped
+            ok_.pop("buttons_viewable")
+        assert all(ok_.values()), (name, rep)
         a, d = rep["approve"], rep["deny"]
         assert a[1] == d[1] and a[3] == d[3]                      # one row, same size
         assert a[1] + a[3] <= rep["window"][1] + rep["window"][3]  # anchored at the bottom, never clipped
@@ -141,13 +145,13 @@ def test_typed_code_gates_approve_and_details_toggle(tmp_path):
         assert not out.exists() and not j.approve.enabled
         j.typed.set("4821")
         assert j.approve.enabled
-        assert not j.details.winfo_ismapped()                     # Details collapsed by default
+        assert not j.details.winfo_manager()                      # Details collapsed by default (not managed)
         j.toggle_details()
-        root.update()
-        assert j.details.winfo_ismapped()
+        root.update_idletasks()
+        assert j.details.winfo_manager() == "pack" and j.details.pack_info()   # shown; no visible desktop needed
         j.toggle_details()
-        root.update()
-        assert not j.details.winfo_ismapped()
+        root.update_idletasks()
+        assert not j.details.winfo_manager()
         j.approve.invoke()                                        # writes the result, closes the window
     except Exception:
         root.destroy()
@@ -207,3 +211,10 @@ def test_palette_contrast_is_wcag_aa(theme, risk):
     assert _ratio(P["focus"], P["bg"]) >= 3.0
     if risk == "high":
         assert _ratio(P["chip"]["high"][1], P["bg"]) >= 4.5  # the typed-code hint text
+
+
+@pytest.fixture(autouse=True)
+def _tk_objects_die_on_the_main_thread():
+    """Tk variables garbage-collected on another thread print 'main thread is not in main loop'; collect here."""
+    yield
+    gc.collect()
