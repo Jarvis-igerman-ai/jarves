@@ -1,3 +1,11 @@
+## SW-V4 full plan (20 Oct 2026) - #17, branch `v4-plan-full` (off `v3-final`)
+
+- Docs only, no code/tests: [JARVES_SW_V4_WORK_PACKAGE.md](JARVES_SW_V4_WORK_PACKAGE.md) is now the authoritative V4 file (replaces the `v3-v4-plan` draft). Owner rules applied: software only (phone/Pi/hardware/Tailscale/multi-device/other languages under "Later"), every item a complete feature (no MVPs).
+- 15 packages, about 78 agent-days, about 10 h owner time: A owner verification + closure of #17/#24/#25/#28 (+ #7/#26/#27 leftovers), B privacy (#15, planted-secret audit of every sink), C independent re-review (#16 + open P3 backlog), D client-mode delegation (#14), E Agent Orchestrator (#49, Claude Code + Codex, 12 d), F WhatsApp bridge (main number read-only first), G recall, H dialing, I Telegram/Instagram/HA live + rocket alerts last, J wake word production, K dashboard en+he (ar/ru removed), L installer upgrade/rollback/signing, M perf budgets + CI matrix + nightly, N docs, O Self-Diagnostics 2.0 (monitor, baselines, version regressions, root-cause hints, approved tickets/remediation, preflight, nightly canaries, scheduled selective AI review every 2 days with a cost cap).
+- Testing: automatic pyramid (14 layers with commands, pass criteria, where they run), flake policy, CI matrix; owner manual script 7.1-7.21; agent script; campaign protocol A-F; release checklist.
+- No `SWV4_WAKE_TRAIN.md` / `v4-wake-train` branch exists on origin; J builds on the merged `wake_train.py` pipeline.
+- Questions for the user: the open decisions table in section 11.1 (OD-01 budget, OD-08 signing confirm, OD-12 privacy default, OD-15 delegation default, OD-20..24 orchestrator, OD-25..31 WhatsApp, OD-33..37 self-diagnostics AI review, and others). Already-answered decisions are listed in 11.2 so nobody re-asks. Status: WAITING FOR USER (approval of the plan + decisions).
+
 ## V4 research: real WhatsApp send/read (20 Oct 2026) - #17, branch `v4-whatsapp-research` (off `v3-final`)
 
 - Docs only, no code/tests: [plans/WHATSAPP_REAL_ACCESS.md](plans/WHATSAPP_REAL_ACCESS.md). Compared Cloud API + coexistence, whatsmeow / neonize / Baileys / whatsapp-web.js / WAHA, mautrix / Beeper, Playwright/Desktop UI automation, Android notification listener / accessibility / Tasker, ToS, ban risk, privacy; sources with URLs, checked 20 Oct 2026.
