@@ -73,16 +73,26 @@ def cmd_run(a, cfg, home) -> int:
         _quiet_streams()
     _apply_log_args(a, cfg)
     mode = "background" if background else ("desktop" if getattr(a, "desktop", False) else "foreground")
+    from . import profiles
+    prof = profiles.info(home)["name"]
+    clash = profiles.port_conflicts(prof, cfg.link.port)
+    if clash:                           # two profiles' Cores would fight over one link port
+        print(f"Profile {prof} uses link port {cfg.link.port}, which profile {', '.join(clash)} also uses. Set another "
+              f"[link] port in {home / 'config.toml'} (jarvis profile create picks free ones).", file=sys.stderr)
+        return 2
     lock = InstanceLock(home)
     try:
         lock.acquire(mode)              # one Core per user: autostart, `jarvis start` and `jarvis` never double up
     except AlreadyRunning as e:
-        print(f"{e}. Use `jarvis status`, `jarvis show` or `jarvis stop`.", file=sys.stderr)
+        where = "" if prof == profiles.DEFAULT else f"--profile {prof} "
+        print(f"{e} (profile {prof}). Use `jarvis {where}status`, `jarvis {where}show` or `jarvis {where}stop`.",
+              file=sys.stderr)
         if getattr(a, "show", False):
             _ws_call(home, cfg.link.port, {"type": "runtime.set", "payload": {"display": "show"}}, "runtime.state")
         return EXIT_ALREADY_RUNNING
     if not background:
-        print(f"JARVES Core starting. Terminal log: {cfg.log.console_level}"
+        print(f"JARVES Core starting{'' if prof == profiles.DEFAULT else f' (profile {prof})'}. "
+              f"Terminal log: {cfg.log.console_level}"
               + (f", modules {','.join(cfg.log.modules)}" if cfg.log.modules else "")
               + (f", hiding {','.join(cfg.log.hide)}" if cfg.log.hide else "")
               + ". Stop: Ctrl+C or `jarvis stop`.", file=sys.stderr)
@@ -253,7 +263,9 @@ def cmd_status(a, cfg, home) -> int:
             print(f"Last snapshot is {snap['age_s']} s old (stale, not current truth):")
             print(json.dumps(snap, indent=1, ensure_ascii=False))
         return 1
-    print(runtime_summary(live.get("runtime")))
+    prof = live.get("profile") or {}
+    print(runtime_summary(live.get("runtime"))
+          + (f" | profile {prof.get('name')}{' (TEST)' if prof.get('test') else ''}" if prof else ""))
     if not getattr(a, "brief", False):
         print(json.dumps(live, indent=1, ensure_ascii=False))
     return 0 if live["core"] == "ready" else 3
@@ -1243,6 +1255,8 @@ def main(argv: list[str] | None = None) -> int:
             pass
     ap = argparse.ArgumentParser(prog="jarves", description="JARVES assistant Core")
     ap.add_argument("--config", type=Path, help="config.toml (default: <JARVES_HOME>/config.toml)")
+    ap.add_argument("--profile", metavar="NAME", help="use this profile (its own memory, conversations, costs, "
+                                                      "settings, keys); also JARVES_PROFILE. See: jarvis profile list")
     from .updates import version_line
     ap.add_argument("--version", action="version", version=version_line())
     sub = ap.add_subparsers(dest="cmd", required=True)
@@ -1391,8 +1405,17 @@ def main(argv: list[str] | None = None) -> int:
     up = sub.add_parser("update", help="check GitHub for a newer JARVES; install only after you approve")
     up.add_argument("action", nargs="?", default="check", choices=["check", "install", "status"])
     up.add_argument("--yes", action="store_true", help="install: you already approved (no question)")
+    from . import profiles
+    profiles.add_cli(sub)                     # Issue #17: jarvis profile list / create / use / delete / export
     a = ap.parse_args(argv)
-    home = state_dir()
+    try:
+        if a.profile:
+            profiles.select(a.profile)        # this process and every child it starts use that profile
+        home = state_dir()
+        profiles.prepare_env(profiles.current_name())     # a non-default profile never inherits the parent's keys
+    except profiles.ProfileError as e:
+        print(f"PROFILE ERROR: {e}", file=sys.stderr)
+        return 2
     load_secrets(home)
     try:
         cfg, _ = load_config(a.config)
@@ -1407,7 +1430,8 @@ def main(argv: list[str] | None = None) -> int:
             "diagnose": cmd_diagnose, "features": cmd_features, "help": cmd_help, "google": cmd_google,
             "backup": cmd_backup, "restore": cmd_restore, "usage": cmd_usage, "start": cmd_start,
             "show": cmd_display, "hide": cmd_display, "autostart": cmd_autostart,
-            "update": cmd_update, "browser": cmd_browser, "telegram": cmd_telegram, "instagram": cmd_instagram, "home": cmd_home}[a.cmd](a, cfg, home)
+            "update": cmd_update, "browser": cmd_browser, "telegram": cmd_telegram, "instagram": cmd_instagram, "home": cmd_home,
+            "profile": profiles.cmd_profile}[a.cmd](a, cfg, home)
 
 
 if __name__ == "__main__":

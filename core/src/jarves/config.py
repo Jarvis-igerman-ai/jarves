@@ -252,7 +252,20 @@ SECRET_KEYS = ("api_key", "apikey", "token", "secret", "password", "cookie")
 
 
 def state_dir() -> Path:
-    """Per-user data dir (logs, memory db, link token). Override with JARVES_HOME."""
+    """Per-user data dir of the current PROFILE (logs, memory db, link token). The default profile is base_dir()
+    (JARVES_HOME or the per-user folder, unchanged); others are <base>/profiles/<name> (jarves.profiles)."""
+    from . import profiles
+    name = profiles.current_name()
+    if name == profiles.DEFAULT:
+        return base_dir()
+    if not profiles.exists(name):
+        raise profiles.ProfileError(f"there is no profile {name!r} (JARVES_PROFILE / jarvis profile use). "
+                                    f"Create it: jarvis profile create {name}")
+    return profiles.home_for(name)
+
+
+def base_dir() -> Path:
+    """The per-user JARVES folder = the default profile. Override with JARVES_HOME."""
     if os.environ.get("JARVES_HOME"):
         p = Path(os.environ["JARVES_HOME"])
     elif sys.platform == "win32":

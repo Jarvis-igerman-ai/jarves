@@ -55,7 +55,7 @@ STEPS = ("language", "connection", "names", "wake", "voice", "addons", "privacy"
 # Modules that register add-ons in jarves.features at import (the dashboard imports the same ones).
 ADDON_MODULES = ("jarves.telegram_channel", "jarves.instagram_channel", "jarves.whatsapp", "jarves.briefing", "jarves.homeassistant",
                  "jarves.appearance", "jarves.backup", "jarves.usage", "jarves.updates", "jarves.runtime",
-                 "jarves.operations", "jarves.guides", "jarves.skills.generated", "jarves.browser")
+                 "jarves.operations", "jarves.guides", "jarves.skills.generated", "jarves.browser", "jarves.profiles")
 # Privacy-sensitive or outward-acting: OFF on the first run whatever else says; ON only after an explicit yes.
 SAFE_OFF = frozenset({"camera", "face_recognition", "camera_when_away", "gmail_send", "calendar_write",
                       "dashboard_lan", "browser", "telegram", "home_assistant", "instagram"})
@@ -77,6 +77,7 @@ GROUPS: tuple[tuple[str, str, str, tuple[str, ...]], ...] = (
     ("channels", "ערוצים ובית חכם", "Channels & smart home", ("telegram", "instagram", "whatsapp_handoff", "home_assistant")),
     ("dashboard", "לוח בקרה וטלפון", "Dashboard & phone", ("dashboard", "dashboard_lan", "context_trace")),
     ("updates", "עדכונים וגיבוי", "Updates & backup", ("update_check", "backup")),
+    ("profiles", "פרופילים", "Profiles", ("profiles",)),
 )
 ANSWER_KEYS = {"language", "connection", "api_key_from_env", "display_name", "spoken_name", "address_me",
                "wake_model", "voice", "approve_voice_cost", "features", "privacy_mode", "monthly_budget_usd",
@@ -898,6 +899,8 @@ BUNDLE: dict[str, list[Callable[[], tuple[bool, str]]]] = {
     "whatsapp_handoff": [_mod("jarves.whatsapp"), _data("jarves.guides", "data/whatsapp.toml")],
     "morning_briefing": [_mod("jarves.briefing"), _mod("httpx"), _data("jarves.guides", "data/morning_briefing.toml")],
     "home_assistant": [_mod("jarves.homeassistant"), _mod("httpx"), _data("jarves.guides", "data/home_assistant.toml")],
+    "profiles": [_mod("jarves.profiles"), _data("jarves", "dashboard_static/profiles.js"),
+                 _data("jarves.guides", "data/profiles.toml")],
 }
 # Not switches, but shipped parts the add-ons rely on.
 EXTRA_BUNDLE: dict[str, list[Callable[[], tuple[bool, str]]]] = {

@@ -225,7 +225,9 @@ class Core:
         self.health.set("mic", "ok", "software mute off")
         from . import runtime as runtime_mod            # M1: display/tray/autostart/resume; restores a saved mute
         self.runtime = runtime_mod.attach(self, mode=self.runtime_mode, **self._runtime_fakes)
-        self._write_tools_md()                          # again: camera + display Skills registered after the first
+        from . import profiles                          # Issue #17: profile_list / profile_switch (screen approval)
+        profiles.attach(self)
+        self._write_tools_md()                         # again: camera + display Skills registered after the first
 
         self.stt = self._stt or WhisperSTT(c.voice.stt_model, c.voice.stt_fallback_model, c.voice.stt_compute,
                                            c.voice.language)
@@ -341,7 +343,9 @@ class Core:
         startup["elapsed_s"] = round(time.monotonic() - self._startup_t0, 1)
         startup["eta_s"] = (max(0, round(self._startup_estimate - startup["elapsed_s"]))
                             if self._startup_estimate is not None else None)
+        from . import profiles
         s.update(version=__version__, voice_mode=self.voice_mode, voice_activation=self.cfg.voice.activation,
+                 profile=profiles.info(self.home),                     # face / dashboard: name + TEST banner
                  startup=startup,
                  face_state=self.dev.face_state,
                  mic_muted=self.dev.mic_muted, live_session=self.live is not None,

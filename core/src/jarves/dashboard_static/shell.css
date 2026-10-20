@@ -141,3 +141,9 @@ table.log td:last-child { overflow-wrap: anywhere; min-width: 220px; }
   .tile .value { font-size: 21px; }
 }
 @media (prefers-reduced-motion: reduce) { .side { transition: none; } .dot.live { animation: none; } }
+
+/* Profiles (Issue #17, profiles.js): top-bar switcher and the TEST PROFILE banner */
+.profile-chip { display: flex; align-items: center; gap: 6px; flex: none; }
+.profile-chip select { max-width: 160px; padding: 2px 6px; }
+.profile-chip.test select { border-color: var(--critical); color: var(--critical); font-weight: 600; }
+.profile-banner { background: var(--critical); color: #fff; padding: 6px 16px; font-size: 14px; text-align: center; }

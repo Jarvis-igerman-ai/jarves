@@ -1,0 +1,54 @@
+order = 27
+category = "system"
+features = ["profiles"]
+aliases = ["פרופיל", "פרופילים", "משתמשים", "פרופיל בדיקה", "profile", "profiles", "users", "test profile", "תעבור לפרופיל"]
+error_codes = ["PROFILE_UNKNOWN", "PROFILE_SWITCH_NOT_APPROVED"]
+pages = ["profiles"]
+title_he = "פרופילים: משתמשים ופרופיל בדיקה"
+title_en = "Profiles: users and a test profile"
+what_he = "לכל אדם בבית פרופיל משלו: זיכרון, שיחות, עלויות ותקציב, הגדרות, שם וקול, מפתחות והתחברויות נפרדים. פרופיל הבדיקה (test) עובד במצב לא מקוון ולא נוגע בנתונים האמיתיים."
+what_en = "Each person at home gets their own profile: separate memory, conversations, costs and budget, settings, name and voice, keys and sign-ins. The test profile runs offline and never touches the real data."
+say = [["תעבור לפרופיל של דנה", "Switch to Dana's profile"], ["איזה פרופילים יש?", "Which profiles are there?"]]
+expect_he = "לפני מעבר הוא מבקש אישור על המסך. אחרי אישור הוא נסגר ונפתח בפרופיל שבחרתם. הוא לא מזהה מי מדבר: אומרים לו את שם הפרופיל."
+expect_en = "Before switching he asks for approval on the screen. After you approve he closes and opens in the chosen profile. He does not recognise who is speaking: you say the profile name."
+test = "feature"
+test_he = "הבדיקה רק בודקת שהיכולת זמינה. היא לא יוצרת ולא מוחקת פרופיל."
+test_en = "The check only sees that the feature is available. It creates or deletes nothing."
+cost_he = "חינם. לכל פרופיל תקציב ועלויות משלו."
+cost_en = "Free. Every profile has its own budget and costs."
+privacy_he = "כל פרופיל נשמר בתיקייה משלו. מפתחות והתחברויות לא מועתקים בין פרופילים, אלא אם ביקשתם במפורש. זו הפרדה של התוכנה, לא של Windows: אנשים שצריכים הפרדה מלאה צריכים משתמש Windows נפרד."
+privacy_en = "Each profile is kept in its own folder. Keys and sign-ins are never copied between profiles unless you explicitly ask. This is separation by the app, not by Windows: people who need full separation need separate Windows accounts."
+
+[[steps]]
+he = "צרו פרופיל בעמוד הפרופילים, או בטרמינל: jarvis profile create dana (אפשר להעתיק הגדרות: --from default)."
+en = "Create a profile on the Profiles page, or in a terminal: jarvis profile create dana (copy settings with --from default)."
+action = "open:#/profiles"
+
+[[steps]]
+he = "הפעילו אותו: jarvis --profile dana. בפעם הראשונה ההגדרה הראשונית נפתחת לפרופיל הזה."
+en = "Start it: jarvis --profile dana. The first time, the setup wizard opens for that profile."
+action = "command:jarvis --profile dana"
+
+[[steps]]
+he = "לבדיקות בלי נתונים אמיתיים: jarvis profile create test ואז jarvis --profile test. רואים פס אדום \"פרופיל בדיקה\"."
+en = "For tests without real data: jarvis profile create test, then jarvis --profile test. A red TEST PROFILE banner shows."
+action = "command:jarvis profile create test"
+check = "enabled:profiles"
+
+[[problems]]
+he = "הוא אומר שאין פרופיל בשם הזה"
+en = "He says there is no profile with that name"
+fix_he = "בדקו את הרשימה: jarvis profile list, או צרו אותו בעמוד הפרופילים."
+fix_en = "Check the list: jarvis profile list, or create it on the Profiles page."
+
+[[problems]]
+he = "המעבר לא קרה"
+en = "The switch did not happen"
+fix_he = "מעבר פרופיל דורש אישור על המסך. פתחו את החלון של ג'ארוויס ואשרו, או הריצו jarvis --profile <שם>."
+fix_en = "A profile switch needs approval on the screen. Open JARVES's window and approve, or run jarvis --profile <name>."
+
+[[problems]]
+he = "אי אפשר למחוק פרופיל"
+en = "A profile cannot be deleted"
+fix_he = "עצרו קודם את ג'ארוויס בפרופיל הזה (jarvis --profile <שם> stop) והקלידו את שם הפרופיל לאישור. את הפרופיל הראשי אי אפשר למחוק."
+fix_en = "First stop JARVES in that profile (jarvis --profile <name> stop) and type the profile name to confirm. The default profile cannot be deleted."

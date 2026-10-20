@@ -60,6 +60,7 @@
     skills: "tools health כלים תקינות", newskills: "generated skills proposals כלים חדשים הצעות", autonomy: "permissions approve הרשאות אישור",
     usage: "quota limits chatgpt openai api budget מכסה מגבלות תקציב", costs: "price spend money dollars מחיר הוצאה כסף",
     browser: "web site chrome playwright allow-list אתר אינטרנט דפדפן רשימת היתר", guides: "help how to עזרה איך", settings: "config toml configuration תצורה", backup: "restore export שחזור ייצוא",
+    profiles: "profile users user test switch פרופיל משתמשים משתמש בדיקה החלפה",
   };
   const norm = (s) => String(s || "").toLowerCase().replace(/[֑-ׇ]/g, "").replace(/[׳']/g, "'");
   let extra = null, hits = [], sel = -1;

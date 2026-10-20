@@ -48,6 +48,7 @@ PLUGIN_MODULES = ("jarves.workspace", "jarves.curator", "jarves.memory", "jarves
                   "jarves.operations", "jarves.runtime", "jarves.updates",
                   "jarves.identity", "jarves.dashboard_auth", "jarves.guides",     # WP-L: Guides pages
                   "jarves.setup_wizard",                                         # SW-V3: Setup & add-ons page
+                  "jarves.profiles",                                             # Issue #17: Profiles page
                   "jarves.context_trace",                                          # his context per conversation
                   "jarves.browser")                                                # Browser allow-list page
 MEMORY_UNDO_KEEP = 30
@@ -792,7 +793,7 @@ class Handler(BaseHTTPRequestHandler):
         if self.command == "GET" and url.path == "/" and "t" in q:
             if is_loopback(ip) and secrets.compare_digest(q["t"][0], self.token):
                 return self._send(302, b"", "text/plain", {
-                    "Location": "/", "Set-Cookie": f"{COOKIE}={self.token}; HttpOnly; SameSite=Strict; Path=/"})
+                    "Location": "/", "Set-Cookie": f"{a.cookie}={self.token}; HttpOnly; SameSite=Strict; Path=/"})
             return self._send(403, b"wrong token: open the link printed by `jarvis dashboard`", "text/plain")
         if a.lan and (self.command, url.path) in PUBLIC_PATHS:
             if url.path == "/pair":
