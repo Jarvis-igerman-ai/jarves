@@ -1438,7 +1438,12 @@
   " Rules: same model = ": " כללים: אותו מודל = ",
   "; another model = ": "; מודל אחר = ",
   ". You can also say “change your voice”.": ". אפשר גם לומר \"תחליף קול\".",
-  "At": "שעה"
+  "At": "שעה",
+  "bridge not running": "הגשר אינו פועל",
+  "Phone number for a pairing code": "מספר טלפון לקוד צימוד",
+  "Retention days": "ימי שמירה",
+  "WhatsApp is not linked; run: jarvis whatsapp link": "וואטסאפ לא מקושר; הריצו: jarvis whatsapp link",
+  "dashboard Health page, jarvis health, health.* settings": "דף הבריאות בלוח הבקרה, jarvis health, הגדרות health.*"
  },
  "rules": [
   [

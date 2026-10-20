@@ -1438,6 +1438,11 @@
   " Rules: same model = ": " Rules: same model = ",
   "; another model = ": "; another model = ",
   ". You can also say “change your voice”.": ". You can also say “change your voice”.",
-  "At": "At"
+  "At": "At",
+  "bridge not running": "bridge not running",
+  "Phone number for a pairing code": "Phone number for a pairing code",
+  "Retention days": "Retention days",
+  "WhatsApp is not linked; run: jarvis whatsapp link": "WhatsApp is not linked; run: jarvis whatsapp link",
+  "dashboard Health page, jarvis health, health.* settings": "dashboard Health page, jarvis health, health.* settings"
  }
 };
