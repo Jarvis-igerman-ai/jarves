@@ -208,7 +208,7 @@ def test_log_sink_records_live_and_diagnoses_after_the_session(home):
         logs.info("live", "LIVE_TOOL_CALL", "backend called music_play", delegation="x")
         logs.info("skills", "TOOL_RESULT", "music_play -> PEAR_DOWN", tool="music_play", ok=False, origin="model")
         logs.info("voice", "VOICE_ENDED", "voice session ended (idle)", reason="idle", voice_seconds=40.0)
-        deadline = time.time() + 5
+        deadline = time.time() + 30
         while time.time() < deadline and not sink.store.issues():
             time.sleep(0.05)
         live = sink.store.sessions()

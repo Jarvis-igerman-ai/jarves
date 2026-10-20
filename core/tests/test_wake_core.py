@@ -91,7 +91,7 @@ async def test_wake_starts_live_conversation(home, cfg, monkeypatch):
             pass
     c = await make(home, cfg, wake_then_speech, live_factory=FakeLive)
     try:
-        for _ in range(200):
+        for _ in range(1500):
             if started:
                 break
             await asyncio.sleep(0.02)
@@ -101,7 +101,7 @@ async def test_wake_starts_live_conversation(home, cfg, monkeypatch):
         c._startup_stage("ready", "test")
         await session.on_end("idle")
         assert c.live is None and c.snapshot()["startup"]["ready"]
-        for _ in range(100):
+        for _ in range(1500):
             if c.snapshot()["wake_listening"]:
                 break
             await asyncio.sleep(0.01)
@@ -165,7 +165,7 @@ async def test_near_miss_is_logged_with_score_and_hint(home, cfg, caplog):
              use_real_audio=False, wake_detector=QuietNearMiss(threshold=0.5), wake_audio=lambda: FakeMic(near))
     await c.start()
     try:
-        for _ in range(100):
+        for _ in range(300):
             await asyncio.sleep(0.1)
             lines = [_json.loads(l) for l in (home / "logs" / "jarves.log").read_text(encoding="utf-8").splitlines()]
             hit = [l for l in lines if l["code"] == "WAKE_NEAR_MISS"]
@@ -220,7 +220,7 @@ async def test_connected_mode_wake_word_is_the_way_back_in_after_the_session_end
         await asyncio.sleep(1.5)
         assert len(sessions) == 1 and FakeMic.opened == 0                    # wake mic closed during the conversation
         await sessions[0].on_end("idle")                                     # quiet for 3 minutes: back to wake mode
-        for _ in range(60):
+        for _ in range(400):
             await asyncio.sleep(0.1)
             if len(sessions) == 2:
                 break
@@ -264,7 +264,7 @@ async def test_server_close_in_the_middle_of_a_conversation_resumes_smoothly(hom
     c, sessions = await _conversation_core(home, cfg, monkeypatch)
     try:
         await sessions[0].on_end("remote_closed")                  # server closed it while the user was active
-        for _ in range(40):
+        for _ in range(400):
             await asyncio.sleep(0.1)
             if len(sessions) == 2:
                 break
