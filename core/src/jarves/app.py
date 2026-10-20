@@ -261,6 +261,8 @@ class Core:
         self.dev.speaker_stop()
         self.health.mark("stopping")
         logs.info("core", "CORE_STOPPING", "Core stopping")
+        if getattr(self, "history", None) is not None:
+            self.history.ai_reviews = False         # P0.4 Q06: no AI review starts during shutdown (rules still run)
         for fut, _ in list(self._confirm.values()):
             if not fut.done():
                 fut.set_result(False)              # pending confirmation = denied, never approved by shutdown

@@ -69,6 +69,41 @@ async def test_q05_silent_server_after_start_gets_one_greeting_nudge(monkeypatch
         await voice.stop()
 
 
+def test_q06_no_ai_review_starts_while_the_core_stops(tmp_path, monkeypatch):
+    """Q06: a conversation ended BY the shutdown started the paid AI review in a daemon thread that outlived "Core
+    stopped cleanly" (budget reservation held, memory.db locked: suite_voice 25 and 28 cycle 4). The Core now turns
+    AI reviews off at CORE_STOPPING; the rule-based diagnosis still runs."""
+    import json
+    import time
+
+    from jarves import diagnose
+    from jarves import store as store_mod
+    from jarves.config import Config
+    rules, ai = [], []
+    monkeypatch.setattr(diagnose, "run", lambda st, cfg, sids: rules.extend(sids) or [])
+    monkeypatch.setattr(diagnose, "schedule_review", lambda st, cfg, sid: ai.append(sid))
+    st = store_mod.Store(tmp_path / "store.db")
+    monkeypatch.setattr(st, "ingest", lambda rec: rec.get("sid"))
+    sink = store_mod.StoreSink(st, Config())
+    try:
+        sink._q.put(json.dumps({"sid": "before-stop"}))
+        t0 = time.monotonic()
+        while ai != ["before-stop"] and time.monotonic() - t0 < 3:
+            time.sleep(0.02)
+        sink.ai_reviews = False                         # what Core.stop() does at CORE_STOPPING
+        sink._q.put(json.dumps({"sid": "ended-by-stop"}))
+    finally:
+        sink.close()
+        st.close()
+    assert ai == ["before-stop"] and rules == ["before-stop", "ended-by-stop"]
+
+
+async def test_q06_core_stop_switches_ai_reviews_off(core):
+    assert core.history is None or core.history.ai_reviews is True
+    await core.stop()
+    assert core.history is None or core.history.ai_reviews is False
+
+
 def test_q01_cli_features_knows_addon_switches(tmp_path):
     """Q01: a fresh `jarvis features` process (no Core imported) listed only the core catalog: `features off
     scheduler` / `notes` / `backup` failed with "unknown feature" (rc 2) although the dashboard showed them."""
