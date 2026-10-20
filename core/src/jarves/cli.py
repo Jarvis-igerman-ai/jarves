@@ -690,10 +690,13 @@ def cmd_setup(a, cfg, home) -> int:
         from .google_auth import cmd_google
         return cmd_google(Namespace(action="start", client=None, calendar_only=False, send=False, downloads=None,
                                     restart=False, calendar_write=False, contacts=False, config=a.config), cfg, home)
+    def connect_start() -> int:
+        from .connect import Connector
+        return Connector(home, cfg).run()
     try:
         wiz = sw.Wizard(cfg, home, config_path=path, answers=answers, defaults=getattr(a, "defaults", False),
                         lang=getattr(a, "lang", None), restart=getattr(a, "restart", False),
-                        actions={"chatgpt_login": chatgpt_login, "google_start": google_start})
+                        actions={"chatgpt_login": chatgpt_login, "google_start": google_start, "connect_start": connect_start})
         return wiz.run()
     except sw.AnswerError as e:
         print(f"answers: {e}", file=sys.stderr)
@@ -1460,6 +1463,8 @@ def main(argv: list[str] | None = None) -> int:
     add_instagram_cli(sub)                    # V3 P1: jarvis instagram start / status / test / logout (+ serve, refresh)
     add_telegram_cli(sub)                     # V3 P1: jarvis telegram start / status / test / logout
     add_home_cli(sub)                         # V3 P1: jarvis home start / status / test / logout
+    from .connect import add_cli as add_connect_cli, cmd_connect
+    add_connect_cli(sub)                      # owner request 20 Oct: jarvis connect (guided setup of every account)
     from .approvals import add_cli as add_approvals_cli, cmd_approvals
     add_approvals_cli(sub)                    # V3: jarvis approvals list / approve / deny / history
     wk = sub.add_parser("wake", help="calibrate the wake word to your voice and mic, or train a new wake phrase")
@@ -1551,7 +1556,7 @@ def main(argv: list[str] | None = None) -> int:
             "diagnose": cmd_diagnose, "features": cmd_features, "help": cmd_help, "google": cmd_google,
             "backup": cmd_backup, "restore": cmd_restore, "usage": cmd_usage, "start": cmd_start,
             "show": cmd_display, "hide": cmd_display, "autostart": cmd_autostart,
-            "update": cmd_update, "browser": cmd_browser, "telegram": cmd_telegram, "instagram": cmd_instagram, "home": cmd_home,
+            "update": cmd_update, "browser": cmd_browser, "connect": cmd_connect, "telegram": cmd_telegram, "instagram": cmd_instagram, "home": cmd_home,
             "profile": profiles.cmd_profile, "approvals": cmd_approvals}[a.cmd](a, cfg, home)
 
 

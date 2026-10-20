@@ -107,6 +107,19 @@ const CHECK = { ok: ["ok", "עובד", "works"], fail: ["fail", "נכשל", "fai
 const checkPill = (k) => { const c = CHECK[k] || CHECK.not_run; return pill(c[0], tx(c[1], c[2])); };
 PAGES.connections = async function () {
   const g = await api("/api/google/setup");
+  const cn = await api("/api/connect");                      // the same checklist as `jarvis connect --status`
+  const cmsg = el("div", { class: "small", dir: "auto" });
+  const guided = el("div", { class: "card", id: "guided-setup" }, el("h2", {}, tx("הגדרה מודרכת של כל החשבונות", "Guided setup of every account")),
+    el("div", { class: "muted small" }, tx("אותה בדיקה כמו בפקודה ", "The same check as the command "), el("span", { class: "mono" }, cn.command + " --status")),
+    el("div", { class: "checks" }, cn.items.map((i) => [
+      el("div", {}, tx(i.title_he, i.title_en)),
+      el("div", {}, i.state === "connected" ? pill("ok", tx("מחובר", "connected")) : i.state === "attention" ? pill("medium", tx("דורש טיפול", "needs attention"))
+        : pill("plain", tx("חסר", "missing")), " ", el("span", { class: "muted small" }, tx(i.detail_he, i.detail_en)),
+        i.state !== "connected" && i.fix_en ? el("div", { class: "small" }, tx(i.fix_he, i.fix_en)) : null)])),
+    el("div", { class: "actions" }, el("button", { type: "button", class: "primary", onclick: async () => {
+      try { const r = await post("/api/connect/run"); cmsg.textContent = tx(r.message_he, r.message_en); }
+      catch (e) { cmsg.textContent = e.message; }
+    } }, tx("הפעלת הגדרה מודרכת", "Run guided setup")), cmsg));
   const msg = el("div", { class: "small", dir: "auto" });
   const act = async (fn) => { try { await fn(); } catch (e) { msg.textContent = e.message; } };
   const start = el("button", { type: "button", class: "primary big", disabled: g.login.running || null, onclick: () => act(async () => {
@@ -166,6 +179,7 @@ PAGES.connections = async function () {
           tx(". הפקודה פותחת כל עמוד, מעתיקה מה להדביק, מוצאת לבד את הקובץ שהורד, מתחברת ובודקת הכל.",
             ". It opens each page, copies what to paste, picks up the downloaded file by itself, signs in and checks everything."),
           g.gcloud_installed ? tx(" (gcloud מותקן: הוא יכול גם ליצור את הפרויקט.)", " (gcloud is installed: it can also create the project for you.)") : ""))),
+    guided,
     fix,
     g.app_client ? null : el("details", { class: "card", open: !g.steps.every((s) => s.done || (g.calendar_only && s.gmail)) || null },
       el("summary", {}, el("b", {}, tx("השלבים ב-Google Cloud (פעם אחת, כ-10 דקות)", "The steps in Google Cloud (one time, ~10 minutes)"))),
