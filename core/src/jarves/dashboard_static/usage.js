@@ -53,10 +53,18 @@
         `window: ${m.window_text} · reset: ${m.reset_text}`, m.note || ""]);
       return node;
     };
-    strip.replaceChildren(part("ChatGPT plan", d.footer.chatgpt_plan), part("OpenAI API", d.footer.openai_api));
+    // SW-V3 P0.2: today's estimated JARVES spend next to the provider meters (from /api/overview, app.js)
+    const t = typeof overview !== "undefined" && overview && overview.today;
+    const cost = el("a", { href: "#/costs", class: "upart ucost" }, el("b", {}, tx("היום", "Today")),
+      el("span", { class: "uval" }, t ? usd(t.total) : tx("לא ידוע", "Unknown")), est());
+    hoverTip(cost, [tx("הוצאה משוערת היום (לפי [pricing])", "Estimated spend today (from [pricing])"),
+      t ? tx(`${t.sessions} שיחות · ${t.voice_minutes} דק׳ קול`, `${t.sessions} conversations · ${t.voice_minutes} voice min`) : ""]);
+    strip.replaceChildren(part(tx("מנוי ChatGPT", "ChatGPT plan"), d.footer.chatgpt_plan), part("OpenAI API", d.footer.openai_api), cost);
   }
   refreshStrip();
+  setTimeout(refreshStrip, 1500);                 // once /api/overview has answered (today's cost)
   setInterval(refreshStrip, 60000);
+  JL.onChange(refreshStrip);
 
   // ---------------------------------------------------------------- Usage page
   async function pageUsage() {

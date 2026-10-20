@@ -1,0 +1,127 @@
+/* SW-V3 P0.2 dashboard shell: grouped side navigation (a drawer below 900px), app bar with search, status chips,
+   language + theme, RTL-correct details for Hebrew (default) and LTR English. Uses the style.css tokens. */
+:root { --side-w: 248px; --appbar-h: 56px; }
+html[dir="rtl"] body { font-family: "Segoe UI", system-ui, -apple-system, "Noto Sans Hebrew", "Arial Hebrew", Arial, sans-serif; }
+.skip { position: absolute; inset-inline-start: 8px; top: -60px; z-index: 100; background: var(--accent); color: #fff;
+  padding: 8px 14px; border-radius: 8px; }
+.skip:focus { top: 8px; }
+.shell { grid-template-columns: var(--side-w) minmax(0, 1fr); }
+
+/* ---------------------------------------------------------------- side navigation */
+.side { padding: 14px 10px 12px; gap: 10px; overflow-y: auto; overscroll-behavior: contain; z-index: 40; }
+.brand { padding: 4px 10px 2px; font-size: 17px; }
+.brand .side-close { display: none; margin-inline-start: auto; }
+nav { gap: 14px; }
+.nav-group { display: flex; flex-direction: column; gap: 1px; }
+.nav-h { font-size: 11.5px; font-weight: 650; color: var(--muted); padding: 0 12px 4px; letter-spacing: .04em; }
+html[dir="ltr"] .nav-h { text-transform: uppercase; letter-spacing: .07em; font-size: 11px; }
+nav a { padding: 6px 10px; font-size: 13.5px; align-items: center; gap: 8px; color: var(--text-2);
+  border-inline-start: 3px solid transparent; border-radius: 8px; }
+nav a.active { border-inline-start-color: var(--accent); }
+nav a:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+.side-foot { padding-inline: 10px; }
+.he { display: none; }                                  /* old bilingual nav captions (one language now) */
+
+/* ---------------------------------------------------------------- app bar */
+.appbar { position: sticky; top: 0; z-index: 20; display: flex; align-items: center; gap: 8px 10px; flex-wrap: wrap;
+  min-height: var(--appbar-h); padding: 8px 24px; background: color-mix(in srgb, var(--surface) 92%, transparent);
+  backdrop-filter: saturate(1.4) blur(8px); border-bottom: 1px solid var(--line); }
+.appbar .spacer { flex: 1 1 0; min-width: 0; }
+.icon-btn { min-width: 36px; height: 36px; padding: 0 8px; display: inline-flex; align-items: center; justify-content: center;
+  font-size: 16px; line-height: 1; text-align: center; }
+.menu-btn { display: none; }
+.lang-btn { font-weight: 600; }
+.search { position: relative; flex: 0 1 340px; min-width: 160px; }
+.search input { width: 100%; padding: 7px 12px; padding-inline-end: 34px; border-radius: 10px; background: var(--surface-2); }
+.search-key { position: absolute; inset-inline-end: 8px; top: 50%; transform: translateY(-50%); font: 11px ui-monospace, Consolas, monospace;
+  border: 1px solid var(--line); border-radius: 5px; padding: 0 5px; color: var(--muted); background: var(--surface); }
+.search input:focus + .search-key { display: none; }
+.gresults { position: absolute; top: calc(100% + 6px); inset-inline-start: 0; width: min(480px, calc(100vw - 32px)); max-height: 60vh;
+  overflow: auto; padding: 6px; z-index: 30; display: flex; flex-direction: column; gap: 2px;
+  box-shadow: 0 8px 30px rgba(0,0,0,.18); }
+.gresults[hidden], .scrim[hidden] { display: none; }
+.gr { display: flex; gap: 12px; justify-content: space-between; align-items: baseline; padding: 8px 10px; border-radius: 8px;
+  color: var(--text); }
+.gr:hover, .gr.sel { background: var(--accent-soft); text-decoration: none; }
+.gr-t { overflow-wrap: anywhere; } .gr-w { white-space: nowrap; }
+
+/* status chips: Core, device, Pi readiness, mic / camera / audio to the cloud */
+.status-chips { display: flex; flex-wrap: nowrap; gap: 6px; align-items: center; flex: 1 1 auto; min-width: 0;
+  overflow-x: auto; scrollbar-width: none; }
+.status-chips::-webkit-scrollbar { display: none; }
+.status-chips > * { flex: none; }
+.priv-btn, .lang-btn { white-space: nowrap; }
+.appbar .spacer { display: none; }
+@media (min-width: 901px) { .appbar { flex-wrap: nowrap; } .search { flex: 0 1 270px; } }
+@media (min-width: 901px) and (max-width: 1500px) { .schip-k { display: none; } }
+.schip { display: inline-flex; align-items: center; gap: 6px; padding: 3px 10px; border-radius: 999px; font-size: 12px;
+  border: 1px solid var(--line); background: var(--surface-2); color: var(--text); white-space: nowrap; line-height: 20px; }
+.schip:hover { text-decoration: none; border-color: var(--accent); }
+.schip-k { color: var(--muted); font-weight: 600; }
+.schip.ok { border-color: color-mix(in srgb, var(--good) 55%, var(--line)); }
+.schip.warn { border-color: color-mix(in srgb, var(--warning) 75%, var(--line)); }
+.schip.bad { border-color: color-mix(in srgb, var(--critical) 60%, var(--line)); }
+.schip .dot { width: 8px; height: 8px; }
+.ps-chip.ps-mini { padding: 2px 9px 2px 8px; border-width: 1.5px; font-size: 12px; font-weight: 600; gap: 5px; line-height: 20px; }
+.ps-chip.ps-mini:hover { text-decoration: none; filter: brightness(1.05); }
+.ps-mini .ps-icon { width: 15px; height: 15px; }
+.topbar-slot { display: flex; align-items: center; gap: 6px; }
+.topbar-slot .priv { display: flex; gap: 6px; align-items: center; }
+.priv-btn { font-size: 12px; padding: 3px 12px; border-radius: 999px; min-height: 0; }
+
+/* ---------------------------------------------------------------- content */
+main { padding: 24px 28px 88px; max-width: 1240px; margin-inline: auto; }
+main:focus { outline: none; }
+h1 { font-size: 23px; letter-spacing: -.01em; }
+.card { border-radius: 14px; }
+.big-status.hero .title { margin: 0; font-size: 23px; }
+.tile .value { unicode-bidi: plaintext; }
+html[dir="rtl"] .tile .label, html[dir="rtl"] th { text-transform: none; letter-spacing: 0; }
+/* mixed-direction content: code, paths, URLs, model ids and charts stay left-to-right inside Hebrew text */
+code, kbd, .mono, .kv .k, .kv .v, .chip, input[type="url"] { unicode-bidi: isolate; direction: ltr; }
+.kv .v, .kv .k { text-align: start; }
+html[dir="rtl"] .kv .v, html[dir="rtl"] .kv .k { text-align: right; }
+.chart, .xlabels { direction: ltr; }
+/* server-provided English details inside Hebrew pages: each paragraph takes the direction of its own text */
+html[dir="rtl"] main :is(.small, .sub, .detail, .hint, li, .evidence div, .issue .title) { unicode-bidi: plaintext; }
+html[dir="rtl"] table.log tr.lvl-error td:first-child { box-shadow: inset -3px 0 var(--critical); }
+html[dir="rtl"] table.log tr.lvl-warning td:first-child { box-shadow: inset -3px 0 var(--serious); }
+html[dir="rtl"] tr.m4-attn td:first-child { box-shadow: inset -3px 0 0 var(--serious); }
+.empty { padding: 28px 16px; }
+@media (max-width: 760px) {
+  .m4-matrix td[data-label-t]::before { content: attr(data-label-t); }
+  html[dir="rtl"] .m4-matrix td[data-label]::before { text-transform: none; letter-spacing: 0; }
+}
+
+/* ---------------------------------------------------------------- narrow windows, tablets and phones */
+@media (max-width: 900px) {
+  :root { --side-w: 0px; }
+  .shell { grid-template-columns: minmax(0, 1fr); }
+  .side { position: fixed; inset-block: 0; inset-inline-start: 0; width: min(300px, 86vw); height: 100vh; height: 100dvh;
+    flex-direction: column; flex-wrap: nowrap; padding: 14px 10px; transform: translateX(-105%); transition: transform .2s ease;
+    box-shadow: 0 0 40px rgba(0,0,0,.25); visibility: hidden; }
+  html[dir="rtl"] .side { transform: translateX(105%); }
+  body.nav-open .side { transform: none; visibility: visible; }
+  nav { flex-direction: column; flex-wrap: nowrap; }
+  .side-foot { display: flex; }
+  .brand .side-close { display: inline-flex; }
+  .scrim { position: fixed; inset: 0; background: rgba(0,0,0,.38); z-index: 35; }
+  .menu-btn { display: inline-flex; }
+  .appbar { padding: 8px 12px; }
+  .search { flex: 1 1 160px; }
+  .appbar .spacer { display: none; }
+  .status-chips { order: 10; flex: 1 0 100%; flex-wrap: nowrap; overflow-x: auto; scrollbar-width: none; padding-bottom: 2px; }
+  .status-chips::-webkit-scrollbar { display: none; }
+  .topbar-slot { order: 11; }
+  main { padding: 16px 16px 80px; }
+  /* usage strip: one swipeable row instead of three stacked rows */
+  .ustrip { flex-wrap: nowrap; overflow-x: auto; scrollbar-width: none; padding: 6px 10px; gap: 6px; }
+  .ustrip::-webkit-scrollbar { display: none; }
+  .ustrip .upart { flex: none; padding: 3px 8px; }}
+@media (max-width: 480px) {
+  .search-key { display: none; }
+  h1 { font-size: 20px; }
+  .tiles { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .tile .value { font-size: 21px; }
+}
+@media (prefers-reduced-motion: reduce) { .side { transition: none; } .dot.live { animation: none; } }

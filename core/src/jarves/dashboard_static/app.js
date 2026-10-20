@@ -31,8 +31,8 @@ const usd = (v, d = 3) => v === null || v === undefined ? "—" : "$" + Number(v
 const secs = (s) => s === null || s === undefined ? "—" : s < 60 ? `${s.toFixed(s < 10 ? 1 : 0)} s`
   : `${Math.floor(s / 60)} min ${Math.round(s % 60)} s`;
 const dt = (ts) => new Date(ts * 1000);
-const clock = (ts) => dt(ts).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: false });
-const day = (ts) => dt(ts).toLocaleDateString([], { weekday: "short", day: "numeric", month: "short" });
+const clock = (ts) => dt(ts).toLocaleTimeString(window.JL ? JL.locale() : [], { hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: false });
+const day = (ts) => dt(ts).toLocaleDateString(window.JL ? JL.locale() : [], { weekday: "short", day: "numeric", month: "short" });
 const est = () => el("span", { class: "est", title: "Estimate from [pricing]; your OpenAI bill is the truth" }, "estimate");
 const pill = (cls, text) => el("span", { class: "pill " + cls }, text);
 const textOf = (t) => t.text !== null && t.text !== undefined ? t.text : null;
@@ -57,7 +57,10 @@ const THEMES = ["auto", "light", "dark"];
 function applyTheme(t) {
   if (t === "auto") document.documentElement.removeAttribute("data-theme");
   else document.documentElement.setAttribute("data-theme", t);
-  document.getElementById("themeBtn").textContent = "Theme: " + t;
+  const b = document.getElementById("themeBtn");
+  const label = tx({ auto: "ערכת צבע: אוטומטית", light: "ערכת צבע: בהירה", dark: "ערכת צבע: כהה" }[t], "Theme: " + t);
+  b.textContent = { auto: "◐", light: "☀", dark: "☾" }[t] || "◐";
+  b.title = label; b.setAttribute("aria-label", label);
 }
 let theme = "auto";
 try { theme = localStorage.getItem("jarves-theme") || "auto"; } catch (e) { /* storage blocked */ }
@@ -75,10 +78,11 @@ async function refreshOverview() {
     const dot = document.getElementById("coreDot");
     dot.className = "dot " + (overview.live ? "live" : overview.core.state === "ready" ? "ok"
       : overview.core.state === "degraded" ? "bad" : "");
-    dot.title = overview.live ? "conversation in progress" : "Core: " + (overview.core.state || "unknown");
+    dot.title = overview.live ? tx("שיחה מתנהלת", "conversation in progress") : tx("ליבה: ", "Core: ") + (overview.core.state || "unknown");
     document.getElementById("issueCount").textContent = overview.issues.open || "";
-    document.getElementById("footInfo").textContent =
-      `v${overview.version} · ${overview.sessions} conversations` + (overview.privacy ? " · privacy on" : "");
+    document.getElementById("footInfo").textContent = `v${overview.version} · ` +
+      tx(`${overview.sessions} שיחות`, `${overview.sessions} conversations`) + (overview.privacy ? tx(" · פרטיות פועלת", " · privacy on") : "");
+    if (typeof window.shellOverview === "function") window.shellOverview(overview);     // shell.js: status chips + cost
   } catch (e) { /* page shows its own error */ }
 }
 
@@ -454,7 +458,8 @@ async function pageSettings() {
 async function route(refresh) {
   clearInterval(timer); timer = null;
   const [page, arg] = location.hash.replace(/^#\/?/, "").split("?")[0].split("/").map(decodeURIComponent);
-  const navPage = { session: "conversations", raw: "conversations", note: "workspace", guide: "guides" }[page] || page || "home";  // WP-K Home = default
+  const navPage = { session: "conversations", raw: "conversations", context: "conversations", note: "workspace", guide: "guides",
+    "guide-for": "guides" }[page] || page || "home";  // WP-K Home = default
   for (const a of document.querySelectorAll("nav a")) a.classList.toggle("active", a.dataset.page === navPage);
   try {
     if (page === "runtime") await pageHome();                    // M1 runtime controls (WP-K: "Controls" in the nav)
