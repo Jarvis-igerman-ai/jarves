@@ -10,7 +10,7 @@ PAGES.browser = async function () {
     try {
       await api("/api/browser/sites", { method: "POST", body: JSON.stringify({ action, site }) });
       route(true);
-    } catch (e) { msg.textContent = "Not changed: " + e.message; }
+    } catch (e) { msg.textContent = tx("לא שונה: ", "Not changed: ") + e.message; }
   };
   const input = el("input", { type: "text", placeholder: "example.com", dir: "ltr", style: "min-width:240px",
     "aria-label": "Site to allow" });
@@ -31,10 +31,10 @@ PAGES.browser = async function () {
         el("a", { href: "#/features", class: "small" }, "Features page"), el("a", { href: "#/guide/browser", class: "small" }, "Guide")),
       el("div", { class: "small", style: "margin-top:6px" }, "Now: ", act.detail || "not running (no live Core status)"),
       el("ul", { class: "small" }, d.rules.map((r) => el("li", {}, r))),
-      el("div", { class: "muted small" }, "Never browsed (AI account / quota pages): " + d.blocked_hosts.join(", ")),
+      el("div", { class: "muted small" }, tx("אף פעם לא גולש (חשבונות AI ועמודי מכסה): ", "Never browsed (AI account / quota pages): ") + d.blocked_hosts.join(", ")),
       el("div", { class: "row", style: "margin-top:8px" }, el("span", { class: "small" }, "Windows: "), platformCell(f.targets.windows),
         el("span", { class: "small" }, "Raspberry Pi: "), platformCell(f.targets.linux_arm64_pi))),
-    el("h2", {}, `Full-control sites (${d.sites.length})`),
+    el("h2", {}, tx("אתרים עם שליטה מלאה", "Full-control sites") + ` (${d.sites.length})`),
     el("div", { class: "card" },
       rows.length ? el("table", {}, el("tbody", {}, rows))
         : el("div", { class: "empty" }, "Empty: every site is read-only + ask. Add only sites you trust JARVES to click and type on."),
