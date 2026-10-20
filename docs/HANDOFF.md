@@ -10,6 +10,12 @@
 
 ---
 
+## SW-V4 package L: installer, updates, rollback (20 Oct 2026) - #17, branch `v4/l-installer` (public repo, draft PR to main), [report](reviews/SWV4_L_INSTALLER.md)
+
+- Done (fake/loopback tests, 0 skips): versioned data migrations with backup first and restore-from-backup down path; update flow against a local signed release server (SHA256+size, ask first, failures leave the old version, downgrade refused); `updates.rollback` + `jarvis update --rollback` + Updates page button (approval) + failed-first-start offer; silent installer args; signed-manifest `previous` block; clean-install residue audit; upgrade/rollback CI scenario; pinned-bridge payload check; installer size/time budgets feeding the M gate; restricted-token probe (study, not wired in).
+- Not verified: no real installer was built or run here (CI-only scripts); old-installer fixtures are not pinned (`packaging/upgrade_fixtures.json` empty, CI says NOT RUN); no second-PC run; Go bridge not on main.
+- Questions for the user: (1) **Autostart default**: the installer now leaves "start at sign-in" OFF (you asked for OFF by default), reversing the earlier owner decision "ticked by default" in `jarves.iss`/INSTALL_TEST. Confirm OFF? (2) OD-08 stays unsigned (recorded). (3) Pin real 0.1.0.x and 3.0.0.x installers (URL + SHA256) in `packaging/upgrade_fixtures.json` so the matrix runs. (4) Helper isolation via write-restricted token + protected `<home>` DACL is feasible (report section 8); want it as its own package? Status: WAITING FOR USER + CI run.
+
 ## SW-V4 B: privacy hardening + full redaction audit (20 Oct 2026) - #15 / #17, branch `v4-b-privacy` (off `origin/main`), [report](reviews/SWV4_B_PRIVACY.md), [sinks](reviews/SWV4_B_SINKS.md)
 
 - `logs.*` messages are fixed literals (466 call sites migrated); variable parts are fields classified once in `logs.FIELD_CLASS` (safe/secret/content/pii, unknown = content); provider/exception text -> `provider_error` / `exc_text`; AST lint `tools/log_lint.py` (0 violations). Secret patterns extended (OpenAI/Anthropic, JWT, Google, Telegram, Meta, GitHub, DPAPI, URL tokens, bearer, user-profile paths). Third-party loggers and crashes (main/thread/asyncio/faulthandler) routed and classified.

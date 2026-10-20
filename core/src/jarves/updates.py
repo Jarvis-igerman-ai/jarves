@@ -73,12 +73,17 @@ PLATFORMS = {
         "windows": {"status": "implemented_unverified",
                     "evidence": "CI silent install/run/uninstall on windows-2025: "
                                 "https://github.com/igalgerman/JARVIS/actions/runs/39290421823; "
-                                "a clean second PC is the owner's test (docs/INSTALL_TEST.md)"},
+                                "SW-V4 L adds the clean-install audit, the upgrade/rollback scenario "
+                                "(packaging/smoke_windows.ps1 -UpgradeFrom -Rollback; core/tests/test_installer_clean.py) "
+                                "and the unsigned decision (docs/reviews/SWV4_L_INSTALLER.md); a clean second PC is "
+                                "the owner's test (docs/INSTALL_TEST.md)"},
         "linux_arm64_pi": {"status": "planned", "blocker": "no Linux ARM64 package/systemd service yet (M7)",
                            "roadmap_issue": PI_ISSUE}},
     "update_check": {
         "windows": {"status": "implemented_unverified",
-                    "evidence": "core/tests/test_updates.py (fake GitHub); needs a published release to verify live"},
+                    "evidence": "core/tests/test_updates.py (fake GitHub), core/tests/test_update_flow.py (local signed "
+                                "release server: ask first, SHA256 + size, failure keeps the old version, downgrade "
+                                "refused, rollback); needs a published release to verify live"},
         "linux_arm64_pi": {"status": "planned", "blocker": "the check works, but there is no Pi package to install",
                            "roadmap_issue": PI_ISSUE}},
 }
@@ -756,7 +761,8 @@ def _register_feature() -> None:
     kw = {"targets": PLATFORMS["update_check"]} if "targets" in inspect.signature(features.register).parameters else {}
     features.register("update_check", "בדיקת עדכונים", "Update check", True, risk="low",
                       about="looks for a newer JARVES once a day (GitHub, or the signed release folder in "
-                            "update.base_url; read-only); installs only after you approve", **kw)
+                            "update.base_url; read-only); installs only after you approve, and one command or "
+                            "button goes back to the previous version", **kw)
 
 
 _register_feature()

@@ -68,8 +68,8 @@ TEXT: dict[str, str] = {
         "פנים / דמות דו-ממדית / דמות תלת-ממדית / מוסתר, בקול או כאן; רק התמונה משתנה",
     "keeps what JARVES was given in each conversation (instructions, memory, tools, notes) for the dashboard; only sizes and names while privacy is on":
         "שומר מה ש-JARVES קיבל בכל שיחה (הוראות, זיכרון, כלים, הערות) לתצוגה בלוח הבקרה; במצב פרטיות רק גדלים ושמות",
-    "looks for a newer JARVES once a day (GitHub, or the signed release folder in update.base_url; read-only); installs only after you approve":
-        "בודק פעם ביום אם יש גרסה חדשה (GitHub או תיקיית ההפצה החתומה ב-update.base_url; לקריאה בלבד); מתקין רק באישורך",
+    "looks for a newer JARVES once a day (GitHub, or the signed release folder in update.base_url; read-only); installs only after you approve, and one command or button goes back to the previous version":
+        "בודק פעם ביום אם יש גרסה חדשה (GitHub או תיקיית ההפצה החתומה ב-update.base_url; לקריאה בלבד); מתקין רק באישורך, ופקודה אחת או כפתור אחד חוזרים לגרסה הקודמת",
     "notification-area icon: dashboard, show/hide, mute, pause alerts, status, quit":
         "סמל באזור ההתראות: לוח בקרה, הצגה והסתרה, השתקה, השהיית התראות, מצב ויציאה",
     "now and then suggests one setup step in a short sentence (\"תפסיק להציע\" turns it off)":
@@ -222,8 +222,8 @@ TEXT: dict[str, str] = {
     "core/tests/test_m3_*.py (unit + fault injection on Windows); no real-restart run yet":
         "core/tests/test_m3_*.py (יחידה והזרקת תקלות ב-Windows); עוד לא בוצעה הפעלה מחדש אמיתית",
     "core/tests/test_runtime.py": "בדיקות: core/tests/test_runtime.py",
-    "core/tests/test_updates.py (fake GitHub); needs a published release to verify live":
-        "core/tests/test_updates.py (GitHub מדומה); כדי לאמת בפועל צריך גרסה שפורסמה",
+    "core/tests/test_updates.py (fake GitHub), core/tests/test_update_flow.py (local signed release server: ask first, SHA256 + size, failure keeps the old version, downgrade refused, rollback); needs a published release to verify live":
+        "core/tests/test_updates.py (GitHub מדומה), core/tests/test_update_flow.py (שרת הפצה חתום מקומי: שואל קודם, SHA256 וגודל, כשל משאיר את הגרסה הקודמת, ירידת גרסה נדחית, חזרה לאחור); כדי לאמת בפועל צריך גרסה שפורסמה",
     "core/tests/test_usage.py (unit + dashboard HTTP); no live plan-limit event observed yet":
         "core/tests/test_usage.py (יחידה ו-HTTP של לוח הבקרה); עוד לא נצפה אירוע מגבלת תוכנית אמיתי",
     "docs/reviews/SWV2_WP-M1.md (real hidden-mode run, pythonw, no window)":
