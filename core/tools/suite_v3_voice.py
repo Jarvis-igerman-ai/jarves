@@ -722,7 +722,30 @@ async def s_told(h, r):
     r.details = rows
 
 
-sv.LIVE_COST.update({36: 2.0, 37: 1.5, 38: 3.0, 39: 2.0, 40: 2.0, 41: 1.0, 42: 2.5, 43: 2.5, 44: 1.5, 45: 0,
+@scenario(50, "names_after_prefix", "CV-16: Hebrew names after the ל / ו prefix (לאביטל, ולצחי); JARVES's OUTPUT AUDIO "
+          "is transcribed to hear whether the name keeps its first sound",
+          "the output-audio transcript keeps the names after the prefix: contains אביטל (not only 'לביטל') and צחי "
+          "(not 'ליצחי' / 'ליצי'); the written text has no 'לביטל'")
+async def s_names_prefix(h, r):
+    s = await h.get(V3)
+    rows = []
+    for i in range(2):
+        CAPTURE["on"] = True
+        t0 = time.time()
+        x = await h.turn(s, "תגיד בבקשה בקול את המשפט הזה, בדיוק ככה: שלום לנועה, לאביטל ולצחי.", label="prefix")
+        CAPTURE["on"] = False
+        pcm = b"".join(p for t, p in OUT_PCM if t >= t0)
+        OUT_PCM.clear()
+        heard = await _transcribe(pcm) if pcm else "[no audio]"
+        bad = has(heard, "לביטל", "ליצחי", "ליצי") and not has(heard, "לאביטל", "לא ביטל", "ולצחי", "לצחי")
+        rows.append({"said": x["said"], "audio_transcript": heard, "avital": has(heard, "אביטל"),
+                     "tsachi": has(heard, "צחי"), "swallowed": bad, "text_bad": has(x["said"], "לביטל", "ליצחי")})
+    r.ok = all(x["avital"] and x["tsachi"] and not x["swallowed"] and not x["text_bad"] for x in rows)
+    r.key = " | ".join(f"audio: {x['audio_transcript'][:90]}" for x in rows)
+    r.details = rows
+
+
+sv.LIVE_COST.update({50: 1.0,36: 2.0, 37: 1.5, 38: 3.0, 39: 2.0, 40: 2.0, 41: 1.0, 42: 2.5, 43: 2.5, 44: 1.5, 45: 0,
                      46: 1.0, 47: 1.5, 48: 1.5, 49: 1.5})
 
 if __name__ == "__main__":

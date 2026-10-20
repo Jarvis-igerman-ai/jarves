@@ -272,6 +272,28 @@ async def test_cv14_whatsapp_draft_goes_straight_to_the_single_approval(tmp_path
     assert "do not ask yourself" in tools["whatsapp_open"].description
 
 
+async def test_cv14_result_after_spoken_yes_is_delivered_despite_an_empty_extra_delegation(monkeypatch):
+    """Live 20 Oct: after the spoken 'כן' the WhatsApp result 'פתחתי את הצ'אט' completed, GPT-Live delegated the
+    'כן' again (empty answer), said only 'רגע.' and the result was never said."""
+    monkeypatch.setattr(live_mod, "DELIVERY_QUIET_S", 0.3)
+    monkeypatch.setattr(live_mod, "ANNOUNCE_USER_QUIET_S", 0.0)
+    lv, sent = make_live()
+    try:
+        await _user(lv, "כן")
+        for did, text in (("d1", "פתחתי את הצ'אט עם הטיוטה. לוחצים שלח בוואטסאפ."), ("d2", "כן.")):
+            await lv.handle_event({"type": "session.delegation.created", "delegation": {"id": did, "target": "x"}})
+            for ev in ({"type": "response.created", "response": {"id": did}},
+                       {"type": "response.output_text.done", "text": text},
+                       {"type": "response.completed", "response": {"id": did}}):
+                await lv.handle_event({"type": "response.event", "delegation_id": did, "event": ev})
+        await _jarves(lv, "רגע.")
+        await asyncio.sleep(3.0)
+        notes = [c for k, c, _ in sent.items if k == "commentary"]
+        assert len(notes) == 1 and "פתחתי את הצ'אט" in notes[0]
+    finally:
+        await _cleanup(lv)
+
+
 def test_cv08_backend_never_searches_for_arithmetic():
     assert "ALWAYS call `calculate`" in brain_mod.INSTRUCTIONS and "never web search for arithmetic" in \
         brain_mod.INSTRUCTIONS

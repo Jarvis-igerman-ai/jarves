@@ -208,6 +208,9 @@ PROGRESS_LEADIN_WINDOW_S = 2.0  # speech this soon before the backend response s
 # it hands the answer to GPT-Live once (commentary) instead of leaving the user waiting forever.
 DELIVERY_WINDOW_S = 7.0         # time after the backend answer for GPT-Live to start saying it
 DELIVERY_MAX_WAIT_S = 20.0      # JARVES still talking at the window end: wait at most this long for quiet
+DELIVERY_QUIET_S = 4.0          # ... but complete silence this long after the answer ends the window early
+# backend "answers" that carry nothing to deliver (GPT-Live re-delegated a spoken approval word, live 20 Oct)
+_BARE_REPLIES = {"כן", "לא", "בסדר", "אוקיי", "אוקי", "ok", "okay", "yes", "no", "done"}
 DELIVERY_NOTE = ("The backend answer below finished several seconds ago but has not been said yet. Give the user "
                  "just this answer now, briefly, in natural Hebrew, without another acknowledgement, without "
                  "excuses and without delegating again.\nResult: {answer}")
@@ -687,6 +690,7 @@ class LiveVoice(SessionLifecycle):
         self._shown: tuple[str, str] = ("", "")
         self._said_all = ""             # every assistant word shown/spoken this session (answer-delivery check)
         self._delegations = 0           # delegations created (a new one = the user moved on)
+        self._answers = 0               # substantive backend answers completed (answer-delivery check)
         self._user_turn_n = 0           # user utterances started
         self._turn_t0 = self._out_turn_t0 = 0.0   # start of the current user turn / of the turn being answered
         self._action_times: list[float] = []      # successful action/destructive tool results (monotonic)
@@ -1528,6 +1532,8 @@ class LiveVoice(SessionLifecycle):
             self._stats["backend_responses"] += 1
             self._backend_t0 = None
             answer = (getattr(tr, "text", "") or "").strip() if tr is not None else ""
+            if it == "response.completed" and len(answer.split()) >= 2 and getattr(tr, "stage", "") != "tool":
+                self._answers += 1              # a substantive backend answer (the user's request moved on)
             own = self._own_delegation != "unset" and delegation_id == self._own_delegation
             if own and getattr(tr, "stage", "") != "tool":
                 self._own_delegation = "unset"
@@ -1536,8 +1542,9 @@ class LiveVoice(SessionLifecycle):
                 else:
                     self._spawn(self.announce(REDELEGATE_FAIL_NOTE, max_wait_s=10.0, tag="redelegate"),
                                 "redelegate-fail")
-            elif it == "response.completed" and answer and getattr(tr, "stage", "") != "tool":
-                self._spawn(self._watch_delivery(answer, (len(self._said_all), self._delegations, self._user_turn_n)),
+            elif (it == "response.completed" and answer and getattr(tr, "stage", "") != "tool"
+                  and answer.strip(" .!?,").lower() not in _BARE_REPLIES):
+                self._spawn(self._watch_delivery(answer, (len(self._said_all), self._answers, self._user_turn_n)),
                             "delivery-watch")
             self._trace = None
             self._spawn(self._clear_activity_later(), "activity-clear")
@@ -1755,12 +1762,23 @@ class LiveVoice(SessionLifecycle):
         """After a completed backend answer: if GPT-Live said only fillers (or nothing) within DELIVERY_WINDOW_S, and
         the user did not move on (no new utterance or delegation), hand it the answer once."""
         start, deleg, turns = mark            # taken when the answer completed (this task starts later)
-        await asyncio.sleep(DELIVERY_WINDOW_S)
+        t0 = time.monotonic()
+        while self.running and time.monotonic() - t0 < DELIVERY_WINDOW_S:
+            # CV-14: a dead quiet DELIVERY_QUIET_S after the answer (nothing said, nothing playing) needs no full
+            # 7 s window: the WhatsApp "opened the chat" result after a spoken yes was otherwise 9 s of silence
+            if (time.monotonic() - t0 >= DELIVERY_QUIET_S and time.monotonic() >= self._speaking_until + 1.5
+                    and not self._backend_busy and not self._tools_running
+                    and not answer_said(answer, self._said_all[start:])):
+                break
+            await asyncio.sleep(0.2)
         t_end = time.monotonic() + DELIVERY_MAX_WAIT_S
         while self.running and time.monotonic() < t_end and (
                 time.monotonic() < self._speaking_until + 0.5 or self._tools_running or self._backend_busy):
             await asyncio.sleep(0.25)
-        if not self.running or self._delegations != deleg or self._user_turn_n != turns:
+        # CV-14 (live 20 Oct): after a spoken approval "כן", GPT-Live delegated that "כן" once more (an empty 4-token
+        # backend answer) and never said "opened the chat"; only a NEW substantive answer or user turn means the
+        # user moved on, not any delegation
+        if not self.running or self._answers != deleg or self._user_turn_n != turns:
             return
         said = self._said_all[start:]
         if answer_said(answer, said):
