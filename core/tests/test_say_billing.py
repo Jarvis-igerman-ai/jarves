@@ -22,8 +22,9 @@ def speech(monkeypatch, tmp_path):
         calls["local"] += 1
         return np.zeros(100, np.float32), 16000
 
-    monkeypatch.setattr(realtime.RealtimeSpeaker, "check", lambda self: (True, "fake cloud"))
-    monkeypatch.setattr(realtime.RealtimeSpeaker, "synth", cloud_synth)
+    for eng in (realtime.RealtimeSpeaker, tts.OpenAISpeechTTS):
+        monkeypatch.setattr(eng, "check", lambda self: (True, "fake cloud"))
+        monkeypatch.setattr(eng, "synth", cloud_synth)
     for eng in (tts.WinRTTTS, tts.EspeakTTS):
         monkeypatch.setattr(eng, "check", lambda self: (True, "fake local"))
         monkeypatch.setattr(eng, "synth", local_synth)

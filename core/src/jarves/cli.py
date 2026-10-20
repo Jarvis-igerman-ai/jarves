@@ -1156,14 +1156,25 @@ def cmd_say(a, cfg, home) -> int:
     logs.setup(home / "logs", cfg.log.level, console=False, privacy=cfg.log.privacy)
     t = make_tts(cfg, Budget(MemoryStore(home / "memory.db"), cfg.ai))   # same mode + shared budget as the Core
     ok, q, d = t.check()
-    print(f"speech: {q} ({d})")
+    if getattr(a, "verbose", False):
+        print(f"speech engines: {d}")                      # the full table (every engine, incl. the ones that failed)
     if not ok:
+        print(f"ERROR: no speech engine can speak. {d} -> run `jarvis key` (cloud voice) or add a Hebrew voice in "
+              f"Settings > Time & language > Speech", file=sys.stderr)
         return 1
+    text = " ".join(a.text)
 
     async def go():
-        s, r = await t.synth(" ".join(a.text))
+        s, r = await t.synth(text)
+        eng = next((e for e in t.usable if e.name == t.last_used), t.usable[0])
+        print(f"Speaking with {eng.name} ({eng.check()[1]})")
         await SoundDeviceAudio(output_device=cfg.voice.output_device).play(s, r)
-    asyncio.run(go())
+    try:
+        asyncio.run(go())
+    except Exception as e:
+        print(f"ERROR: speech failed: {getattr(e, 'message', e)}. {getattr(e, 'action', '') or 'run `jarvis say --verbose`'}",
+              file=sys.stderr)
+        return 1
     return 0
 
 
@@ -1513,7 +1524,8 @@ def main(argv: list[str] | None = None) -> int:
     q.add_argument("text", nargs="+")
     s = sub.add_parser("say", help="speak a sentence with the configured voice")
     s.add_argument("text", nargs="+")
-    co = sub.add_parser("cost", help="estimated cost per day and per conversation")
+    s.add_argument("--verbose", "-v", action="store_true", help="show every speech engine and its state")
+    co =sub.add_parser("cost", help="estimated cost per day and per conversation")
     co.add_argument("--days", type=int, default=14)
     co.add_argument("--sessions", type=int, default=10)
     db = sub.add_parser("dashboard", help="local web dashboard: conversations, costs, issues, memory, skills")

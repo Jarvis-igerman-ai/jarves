@@ -36,16 +36,61 @@ def wav_to_np(data: bytes) -> tuple[np.ndarray, int]:
     return a, rate
 
 
+def text_lang(text: str) -> str:
+    """"he" when the text contains Hebrew letters, else "en". Engine choice follows the TEXT, not the config."""
+    return "he" if any("֐" <= c <= "׿" for c in text) else "en"
+
+
+HEBREW_STYLE = ("Speak natural, clear Israeli Hebrew, warmly and at a calm pace, like a friendly voice assistant. "
+                "Pronounce names exactly as written. Read only the given text.")
+
+
+class OpenAISpeechTTS:
+    """OpenAI /v1/audio/speech: a dedicated TTS model (not a conversation model)."""
+    name = "openai-tts"
+    quality = "cloud"
+    langs = ("he", "en")
+
+    def __init__(self, model: str = "gpt-4o-mini-tts", voice: str = "marin", timeout_s: float = 60) -> None:
+        self.model, self.voice, self.timeout = model, voice, timeout_s
+
+    def check(self) -> tuple[bool, str]:
+        import os
+        if not os.environ.get("OPENAI_API_KEY", "").strip():
+            return False, "OPENAI_API_KEY not set (run: jarvis key)"
+        return True, f"{self.model} voice {self.voice}"
+
+    async def synth(self, text: str) -> tuple[np.ndarray, int]:
+        import os
+        import httpx
+        body = {"model": self.model, "voice": self.voice, "input": text, "response_format": "pcm"}
+        if text_lang(text) == "he":
+            body["instructions"] = HEBREW_STYLE
+        try:
+            async with httpx.AsyncClient(timeout=self.timeout) as c:
+                r = await c.post("https://api.openai.com/v1/audio/speech", json=body,
+                                 headers={"Authorization": f"Bearer {os.environ.get('OPENAI_API_KEY', '').strip()}"})
+        except httpx.HTTPError as e:
+            raise TTSUnavailable("TTS_OFFLINE", f"cloud speech unavailable ({type(e).__name__})",
+                                 "check the internet") from e
+        if r.status_code != 200:
+            raise TTSUnavailable("TTS_FAILED", f"OpenAI speech HTTP {r.status_code}",
+                                 "check OPENAI_API_KEY, billing and voice.speech_http_model")
+        return np.frombuffer(r.content, "<i2").astype(np.float32) / 32768.0, 24000
+
+
 class WinRTTTS:
     name = "winrt"
     quality = "local-fallback"
+    langs = ("he", "en")
 
     def __init__(self, lang_hint: str = "he-IL") -> None:
         self.lang = lang_hint.lower()
 
-    def _voices(self):
+    def _voices(self, lang: str | None = None):
         from winrt.windows.media.speechsynthesis import SpeechSynthesizer
-        return [v for v in SpeechSynthesizer.all_voices if v.language.lower().startswith(self.lang[:2])]
+        lang = (lang or self.lang)[:2]
+        return [v for v in SpeechSynthesizer.all_voices if v.language.lower().startswith(lang)]
 
     def check(self) -> tuple[bool, str]:
         try:
@@ -59,9 +104,11 @@ class WinRTTTS:
     async def synth(self, text: str) -> tuple[np.ndarray, int]:
         from winrt.windows.media.speechsynthesis import SpeechSynthesizer
         from winrt.windows.storage.streams import Buffer, InputStreamOptions
-        voices = self._voices()
+        lang = text_lang(text)                       # Hebrew text always gets the Hebrew voice, English the English one
+        voices = self._voices(lang)
         if not voices:
-            raise TTSUnavailable("TTS_NO_VOICE", f"no {self.lang} voice installed")
+            raise TTSUnavailable("TTS_NO_VOICE", f"no {lang} voice installed",
+                                 "Settings > Time & language > Speech > add voices")
         s = SpeechSynthesizer()
         s.voice = voices[0]
         stream = await s.synthesize_text_to_stream_async(text)
@@ -73,6 +120,7 @@ class WinRTTTS:
 class EspeakTTS:
     name = "espeak"
     quality = "local-fallback"
+    langs = ("he", "en")
 
     def __init__(self, lang: str = "he") -> None:
         self.lang = lang[:2]
@@ -84,7 +132,7 @@ class EspeakTTS:
     async def synth(self, text: str) -> tuple[np.ndarray, int]:
         if not self.exe:
             raise TTSUnavailable("TTS_NO_ENGINE", "espeak-ng not installed", "apt install espeak-ng")
-        r = await asyncio.to_thread(subprocess.run, [self.exe, "-v", self.lang, "--stdout", text],
+        r = await asyncio.to_thread(subprocess.run, [self.exe, "-v", text_lang(text), "--stdout", text],
                                     capture_output=True, timeout=30)
         if r.returncode != 0:
             raise TTSUnavailable("TTS_FAILED", "espeak-ng failed")
@@ -136,12 +184,21 @@ def _metered(engines: list, budget) -> list:
     return [MeteredTTS(e, budget) if e.quality == "cloud" and not isinstance(e, MeteredTTS) else e for e in engines]
 
 
-def tts_chain(vc, allow_cloud: bool = True, budget=None) -> list:
+def select_engines(engines: list, text: str) -> list:
+    """Only engines that can speak the text's language (Hebrew text never goes to an engine without Hebrew)."""
+    lang = text_lang(text)
+    return [e for e in engines if lang in getattr(getattr(e, "engine", e), "langs", ("he", "en"))]
+
+
+def tts_chain(vc, allow_cloud: bool = True, budget=None, platform: str | None = None) -> list:
     """Engines in quality order for VoiceConfig.tts_engine. allow_cloud=False (ChatGPT-plan-only connection)
     keeps speech local so nothing is billed to an API key. budget: the shared Budget meters cloud speech."""
     from .realtime import RealtimeSpeaker
-    cloud = [RealtimeSpeaker(vc.speech_model, vc.realtime_voice, vc.language)] if allow_cloud else []
-    local = ([WinRTTTS(vc.tts_voice_hint)] if sys.platform == "win32" else []) + [EspeakTTS(vc.language)]
+    # dedicated TTS model first (reads the text exactly, Hebrew style instructions); the realtime model is its backup
+    cloud = [OpenAISpeechTTS(vc.speech_http_model, vc.speech_voice),
+             RealtimeSpeaker(vc.speech_model, vc.realtime_voice, vc.language)] if allow_cloud else []
+    win = (platform or sys.platform) == "win32"
+    local = [WinRTTTS(vc.tts_voice_hint)] if win else [EspeakTTS(vc.language)]     # espeak is a Linux/Pi engine
     return _metered({"auto": cloud + local, "openai": cloud, "local": local, "none": []}[vc.tts_engine], budget)
 
 
@@ -178,7 +235,7 @@ class FallbackTTS:
     async def synth(self, text: str) -> tuple[np.ndarray, int]:
         err = None
         over_budget = False
-        for e in self.usable or self.engines:
+        for e in select_engines(self.usable or self.engines, text):
             if over_budget and e.quality == "cloud":
                 continue
             try:
@@ -196,7 +253,7 @@ class FallbackTTS:
     async def stream(self, text: str):
         """Fallback only before the first audio; never replay a partially spoken reply."""
         err, over_budget = None, False
-        for e in self.usable or self.engines:
+        for e in select_engines(self.usable or self.engines, text):
             if over_budget and e.quality == "cloud":
                 continue
             emitted = False
