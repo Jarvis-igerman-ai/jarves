@@ -923,3 +923,9 @@ reachable from the phone (dashboard_lan) for approvals, or PC-only?
 - Fixed with regression tests: V4-HE-1 (P1, `jarvis health canary` unusable), V4-WA-1 (P2, WhatsApp switch not live), V4-HE-2, V4-DG-1, V4-CLI-1 (P3). Open: V4-SC-1 (P2 self-check outlives Core stop), V4-RP-1/2 (P2, owner decision), 7 x P3.
 - BLOCKED: `assisted_dialing` (package H not in this tree); the V3 `browser` stage (launches Edge); update check against a signed local https release server (none exists).
 - Questions for the user: (1) Where should update releases come from? `updates.REPO` is the deprecated private `igalgerman/JARVIS` and `jarvis-releases` is the old name (V4-RP-1). (2) Where should private diagnostic ticket drafts be filed now that the old private repo is deprecated (V4-RP-2)? Nothing was filed.
+## Idle writes to owner budget + hook Hebrew fix (21 Oct 2026) - #17, branch `perf/idle-writes-owner-budget`
+
+- Idle writes: 29-53 KB/min -> 4.8-8.7 KB/min (owner budget 10 unchanged). Cause: the diag monitor flushed `diag_metrics/diag_codes/diag_events` to store.db every 60 s (3 commits, ~30-45 KB of WAL pages). Now `Monitor.flush_due()` batches the in-memory buffer into ONE transaction every 5 min (and at shutdown via `flush(all_=True)`; crash loses at most 5 min of samples). `Store`: WAL + `synchronous=NORMAL`, `wal_autocheckpoint=4000`. `health.json` heartbeat window 50 -> 70 s (still < 120 s "off").
+- Hook fix: `orchestrator/hook.py` printed the Stop reason with `ensure_ascii=False`; a Hebrew message hit the Windows console codec (UnicodeEncodeError, swallowed -> no output after the messages were already claimed). Now ASCII-escaped JSON.
+- Tests: `test_swv4_idle_writes.py` (diag batching over 10 simulated minutes, WAL/NORMAL pragma, real idle Core < 12 KB/min).
+- Open: perf gate `spawn_to_ready_s` 5.11 > 5 on this busy PC (unrelated, noise).

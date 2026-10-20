@@ -34,6 +34,7 @@ from .metrics import MetricStore
 FALSE_CLAIM = "LIVE_FALSE_ACTION_CLAIM"
 WAKE_FALSE = "VOICE_NO_SPEECH"
 BUDGET_CODES = ("AI_BUDGET", "AI_BUDGET_OVERRUN")
+FLUSH_EVERY_S = 300.0                       # diag rows reach store.db in one batch per 5 min
 LIVE_OPEN = ("LIVE_STARTED", "REALTIME_STARTED")
 LIVE_CLOSE = ("LIVE_STOPPED", "LIVE_CLOSED", "LIVE_ENDED", "REALTIME_STOPPED")
 
@@ -146,6 +147,7 @@ class Monitor:
         self._sink: MonitorSink | None = None
         self._task: asyncio.Task | None = None
         self.last_sample: dict = {}
+        self._flushed_at: float | None = None
 
     # ---- events
     def conversation(self) -> str:
@@ -247,6 +249,15 @@ class Monitor:
             return None
         return max(0.0, float(r[1]) - float(r[0]))
 
+    def flush_due(self) -> int:
+        """Write the buffered diag rows at most every FLUSH_EVERY_S (idle disk-write budget): the sampler keeps
+        sampling every minute into memory; store.db gets one transaction per 5 min. Shutdown flushes everything."""
+        now = self.clock()
+        if self._flushed_at is not None and now - self._flushed_at < FLUSH_EVERY_S:
+            return 0
+        self._flushed_at = now
+        return self.metrics.flush()
+
     # ---- lifecycle inside the Core
     def attach(self, health=None) -> None:
         self._sink = MonitorSink(self)
@@ -261,7 +272,7 @@ class Monitor:
         while True:
             try:
                 await asyncio.to_thread(self.sample, lag)
-                await asyncio.to_thread(self.metrics.flush)
+                await asyncio.to_thread(self.flush_due)
             except Exception:
                 logs.warn("health", "HEALTH_SAMPLE_FAILED", "health monitor sample failed")
             t = loop.time()
