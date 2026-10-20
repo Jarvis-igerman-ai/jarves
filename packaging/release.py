@@ -231,8 +231,21 @@ def key_id(public_raw: bytes) -> str:
     return hashlib.sha256(public_raw).hexdigest()[:16]
 
 
+def openssl_exe() -> str | None:
+    """The openssl CLI: $JARVES_OPENSSL, PATH, else the copy bundled with Git for Windows (always on the runners)."""
+    import shutil
+    found = os.environ.get("JARVES_OPENSSL") or shutil.which("openssl")
+    if found:
+        return found
+    for root in (os.environ.get("ProgramFiles", r"C:\Program Files"), os.environ.get("ProgramW6432", "")):
+        for sub in (r"Git\usr\bin\openssl.exe", r"Git\mingw64\bin\openssl.exe"):
+            if root and Path(root, sub).is_file():
+                return str(Path(root, sub))
+    return None
+
+
 def _openssl(*args: str) -> bytes:
-    return subprocess.run(["openssl", *args], check=True, capture_output=True).stdout
+    return subprocess.run([openssl_exe() or "openssl", *args], check=True, capture_output=True).stdout
 
 
 def ed25519_sign(message: bytes, private_pem: str) -> tuple[bytes, bytes]:

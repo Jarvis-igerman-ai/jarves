@@ -475,7 +475,7 @@ async def test_core_attaches_camera_switched_off(core):
 
 # ------------------------------------------------------------------ real OpenCV (only where the camera extra is installed)
 def test_bundled_yunet_runs_on_a_synthetic_frame(tmp_path):
-    cv2 = pytest.importorskip("cv2")
+    import cv2
     from jarves.camera.detect import BUNDLED, make_detector, yunet_model
     assert yunet_model(tmp_path) == BUNDLED / "face_detection_yunet_2023mar.onnx"
     det = make_detector(tmp_path)
@@ -486,25 +486,27 @@ def test_bundled_yunet_runs_on_a_synthetic_frame(tmp_path):
     assert mime == "image/jpeg" and cv2.imdecode(np.frombuffer(data, np.uint8), cv2.IMREAD_COLOR).shape[1] == 640
 
 
-# ------------------------------------------------------------------ MANUAL: the PC webcam (never in CI, never records)
-@pytest.mark.skipif(os.environ.get("JARVES_MANUAL_CAMERA") != "1",
-                    reason="manual only: set JARVES_MANUAL_CAMERA=1 to open the real webcam once")
-def test_manual_real_webcam_one_frame(tmp_path):
-    """Opens the PC webcam, reads ONE preview frame and one still, runs local detection, drops both. Nothing is
-    saved or sent anywhere. By hand: JARVES_MANUAL_CAMERA=1 uv run pytest tests/test_camera.py -k manual -s"""
-    pytest.importorskip("cv2")
-    from jarves.camera.backends import make_camera
+# ------------------------------------------------------------------ a recorded clip through the REAL OpenCV capture path
+def test_recorded_video_source_through_the_real_opencv_camera(tmp_path):
+    """Replaces the old manual-webcam test: a clip is recorded to disk and replayed through OpenCVCamera
+    (VideoCapture, preview read, still, local detection, drop). Needs no hardware, so it runs everywhere."""
+    import cv2
+    from jarves.camera.backends import OpenCVCamera
     from jarves.camera.detect import make_detector
-    p = probe("opencv")
-    if not p.available:
-        pytest.skip(p.detail)
-    cam = make_camera(p, CameraConfig())
+    clip = tmp_path / "room.avi"
+    w = cv2.VideoWriter(str(clip), cv2.VideoWriter_fourcc(*"MJPG"), 10, (320, 240))
+    assert w.isOpened()
+    for _ in range(12):
+        w.write(cv2.cvtColor(room(size=(240, 320)), cv2.COLOR_RGB2BGR))
+    w.release()
+    cam = OpenCVCamera(str(clip))
     cam.open()
     try:
+        assert cam.is_open
         f, s = cam.read(), cam.still()
-        faces = make_detector(tmp_path).detect(f)
-        print(f"webcam ok: preview {f.width}x{f.height}, still {s.width}x{s.height}, dark={is_dark(f)}, "
-              f"faces={len(faces)}")
+        assert (f.width, f.height) == (320, 240) and (s.width, s.height) == (320, 240)
+        assert make_detector(tmp_path).detect(f) == []
+        assert not is_dark(f)
         f.drop()
         s.drop()
     finally:

@@ -1,6 +1,10 @@
 import asyncio
 import json
+import os
 import socket
+
+if os.name != "nt":
+    os.environ.setdefault("PYSTRAY_BACKEND", "dummy")  # headless Linux CI: no X server / appindicator needed
 
 import numpy as np
 import pytest
@@ -9,6 +13,36 @@ from websockets.asyncio.client import connect
 from jarves.config import Config
 from jarves.skills.music import FakePlayer
 from jarves.voice.audio import SimAudio
+
+
+# ---------------------------------------------------------------- no skipped tests, ever (owner rule, issue #17)
+def pytest_configure(config):
+    config.addinivalue_line("markers", "windows_only: runs only on Windows (deselected, not skipped, elsewhere)")
+    config.addinivalue_line("markers", "linux_only: runs only on Linux (deselected, not skipped, elsewhere)")
+
+
+def pytest_collection_modifyitems(config, items):
+    import sys
+    keep, drop = [], []
+    for item in items:
+        wrong = (item.get_closest_marker("windows_only") and sys.platform != "win32") or \
+                (item.get_closest_marker("linux_only") and not sys.platform.startswith("linux"))
+        (drop if wrong else keep).append(item)
+    if drop:
+        config.hook.pytest_deselected(items=drop)
+        items[:] = keep
+
+
+def pytest_sessionfinish(session, exitstatus):
+    """A skipped (or xfailed) test fails the run: every test must really run and pass."""
+    tr = session.config.pluginmanager.get_plugin("terminalreporter")
+    if tr is None:
+        return
+    bad = [r for key in ("skipped", "xfailed") for r in tr.stats.get(key, [])]
+    if bad:
+        tr.write_line(f"NO-SKIPS RULE: {len(bad)} test(s) skipped/xfailed: " + ", ".join(r.nodeid for r in bad[:10]),
+                      red=True)
+        session.exitstatus = 1
 
 
 # CI runners (windows-2025) stall for seconds at a time: every wait for an event is event-driven and generous, and

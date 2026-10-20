@@ -89,7 +89,7 @@ def test_make_detector_dispatch(tmp_path):
 
 
 def test_head_detector_on_the_real_front_end(tmp_path):
-    pytest.importorskip("pyopen_wakeword")
+    import pyopen_wakeword  # noqa: F401  (the `voice` extra is installed everywhere: uv sync --all-extras)
     rng = np.random.default_rng(0)
     x = rng.standard_normal((40, wt.WINDOWS, wt.EMB)).astype(np.float32)
     wt.save_head(tmp_path / "m.npz", wt.train_head(x, np.array([0, 1] * 20), epochs=2), {"phrase": "hey max"})

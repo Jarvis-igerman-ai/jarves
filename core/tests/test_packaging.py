@@ -117,14 +117,9 @@ def test_uninstall_purge_is_guarded():
         assert protected in guard
 
 
-def _iscc() -> Path | None:
-    import os
-    import shutil
-    for c in (os.environ.get("JARVES_ISCC"), Path(os.environ.get("TEMP", "/nonexistent")) / "jarves-build-cache" /
-              "inno-7.1.0" / "ISCC.exe", shutil.which("ISCC")):
-        if c and Path(c).is_file():
-            return Path(c)
-    return None
+def _iscc() -> Path:
+    import _tools
+    return _tools.iscc_exe()                  # finds it, or installs the pinned portable Inno Setup (Windows)
 
 
 HARNESS = r"""
@@ -155,7 +150,14 @@ end;
 """
 
 
-@pytest.mark.skipif(_iscc() is None, reason="Inno Setup ISCC not installed (CI builds it; build_windows.ps1 caches it)")
+def test_purge_guard_script_is_self_contained_pascal():
+    """Every OS: the guard has the three entry points the harness and the installer use (the compiled run is the
+    Windows-only test below, defined only on Windows because Inno Setup does not run elsewhere)."""
+    guard = (PKG / "windows" / "purge_guard.iss").read_text(encoding="utf-8-sig")
+    assert "function IsDataDirSafeToPurge(" in guard
+
+
+@pytest.mark.windows_only
 def test_purge_guard_refuses_roots_profile_and_non_jarves_folders(tmp_path):
     """Compiles purge_guard.iss into a throw-away setup that only evaluates the guard (InitializeSetup returns False:
     nothing is installed or deleted), with USERPROFILE pointed at a fake profile that DOES hold a marker file."""

@@ -293,8 +293,8 @@ def test_manifest_signing_round_trip_and_tamper_detection():
         assert e.value.code == code
 
 
-@pytest.mark.skipif(not shutil.which("openssl"), reason="openssl CLI not on PATH (CI Ubuntu has it)")
 def test_openssl_fallback_signature_verifies_in_the_app():
+    assert release.openssl_exe(), "openssl CLI not found (PATH, $JARVES_OPENSSL or Git for Windows)"
     pem, pub = _keypair()
     sig, raw = release.openssl_sign(updates.canonical(_manifest()), pem)
     assert base64.b64encode(raw).decode() == pub
