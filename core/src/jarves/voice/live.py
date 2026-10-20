@@ -275,8 +275,9 @@ _ASK_RE = None                  # explicit action request in the user's words (s
 # Language matching (CV-05: an English question was answered in Hebrew 3/3 runs; a stronger prompt rule alone did
 # not change it). The user's words are known WHILE he speaks (input transcript deltas), before GPT-Live answers, so a
 # silent developer instruction names the language of this turn whenever it changes.
-LANG_NOTE = ("[language] The user is speaking {lang} now. Answer this turn and the next ones in {lang}, until the "
-             "user switches language or asks for another one.")
+LANG_NOTE = ("[language] The user is speaking {lang} now: answer in {lang} while the user speaks {lang}. As soon as "
+             "the user speaks Hebrew again, answer in Hebrew again.")
+LANG_BACK_NOTE = "[language] The user speaks Hebrew again now: answer this question in Hebrew."
 LANG_MIN_LETTERS = 8            # letters of a turn needed before its language is judged
 
 
@@ -1338,7 +1339,8 @@ class LiveVoice(SessionLifecycle):
                                                "music_pause": "משהה…", "music_resume": "ממשיך…",
                                                "music_volume": "מכוונן עוצמה…"}.get(name, "מוזיקה…"))
         elif res is None:
-            kind, text = ({"get_time": ("time", "בודק שעה…"), "remember": ("memory", "זוכר…"),
+            kind, text = ({"get_time": ("time", "בודק שעה…"), "calculate": ("thinking", "מחשב…"),
+                           "remember": ("memory", "זוכר…"),
                            "recall": ("memory", "נזכר…"), "forget": ("memory", "מוחק מהזיכרון…"),
                            "forget_all": ("memory", "מוחק מהזיכרון…"),
                            "task_start": ("tool", "מתחיל משימה ברקע…"), "task_status": ("tool", "בודק משימות…"),
@@ -1718,8 +1720,15 @@ class LiveVoice(SessionLifecycle):
         self._reply_lang = lang
         name = "English" if lang == "en" else "Hebrew"
         try:
-            await self.conn.session.instructions.append(content=LANG_NOTE.format(lang=name), delegation_id=None,
+            if lang == "he":
+                # live runs 20 Oct (3/3): a developer INSTRUCTION naming Hebrew, appended while the user asked in
+                # Hebrew, left that question unanswered (no audio at all); without any note the answer stayed in
+                # English (2/2). Back to the default language goes as silent context instead.
+                await self.conn.session.thinking.append(content=LANG_BACK_NOTE, delegation_id=None,
                                                         event_id=f"jarves_lang_{self._user_turn_n}")
+            else:
+                await self.conn.session.instructions.append(content=LANG_NOTE.format(lang=name), delegation_id=None,
+                                                            event_id=f"jarves_lang_{self._user_turn_n}")
             self._stats["language_notes"] = self._stats.get("language_notes", 0) + 1
             logs.info("live", "LIVE_LANGUAGE", f"the user speaks {name}: language note sent", lang=lang)
         except Exception as e:

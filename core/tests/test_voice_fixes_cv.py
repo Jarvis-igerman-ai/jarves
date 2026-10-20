@@ -207,9 +207,12 @@ async def test_cv05_language_note_on_change_only():
         await _user(lv, "ומה עיר הבירה של קנדה?")
         await _jarves(lv, "אוטווה.")
         await _user(lv, "ומה הבירה של יפן?")
-        notes = [(c, e) for k, c, e in sent.items if k == "instructions"]
-        assert len(notes) == 2
-        assert "English" in notes[0][0] and "Hebrew" in notes[1][0] and notes[0][1].startswith("jarves_lang")
+        notes = [(k, c, e) for k, c, e in sent.items if k in ("instructions", "thinking")]
+        # to English: a developer instruction; back to Hebrew: SILENT context only (live 20 Oct: a Hebrew
+        # instruction left the Hebrew question unanswered 3/3)
+        assert [k for k, _, _ in notes] == ["instructions", "thinking"]
+        assert "English" in notes[0][1] and notes[1][1] == live_mod.LANG_BACK_NOTE
+        assert notes[0][2].startswith("jarves_lang")
     finally:
         await _cleanup(lv)
 
@@ -270,7 +273,24 @@ async def test_cv14_whatsapp_draft_goes_straight_to_the_single_approval(tmp_path
 
 
 def test_cv08_backend_never_searches_for_arithmetic():
-    assert "Never web search for arithmetic" in brain_mod.INSTRUCTIONS
+    assert "ALWAYS call `calculate`" in brain_mod.INSTRUCTIONS and "never web search for arithmetic" in \
+        brain_mod.INSTRUCTIONS
+
+
+async def test_cv08_exact_local_calculator():
+    import pytest
+    from jarves.skills.builtin import CalcSkill, calculate
+    assert calculate("347*18") == 6246 and calculate("12 × 12") == 144 and calculate("sqrt(81)") == 9
+    assert calculate("100/4") == 25 and calculate("(125+75)") == 200 and calculate("2^10") == 1024
+    assert calculate("10/4") == 2.5
+    for bad in ("__import__('os')", "2**99999", "a+1", "open('x')", "(1).real"):
+        with pytest.raises((ValueError, SyntaxError)):
+            calculate(bad)
+    tool = CalcSkill().tools()[0]
+    res = await tool.handler(tool.args(expression="1/0"))
+    assert not res.ok and res.code == "CALC_FAILED"
+    res = await tool.handler(tool.args(expression="23+19"))
+    assert res.ok and res.data["result"] == 42 and tool.permission == "read"
 
 
 def test_cv16_name_prefix_rule():

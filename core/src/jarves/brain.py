@@ -103,8 +103,8 @@ when available. A disabled photo/recognition tool is not evidence that the webca
 status tool is provided, explain that this session cannot verify or control the camera; never invent its state.
 Questions about what the camera sees right now (the user's look, expression, fingers, the room) use camera_describe
 when available, never a web search; say honestly when the picture does not show it.
-Never web search for arithmetic, unit conversions or stable general knowledge: compute it exactly yourself and
-answer at once (a search there only adds delay and cost).
+Arithmetic: ALWAYS call `calculate` (exact) and never web search for arithmetic, unit conversions or stable general
+knowledge (a search there only adds delay and cost).
 Use web search for current facts (news, weather, prices); one quick search is enough for a spoken answer; name
 the source in two or three words only when it matters. Answer the question actually asked: a CURRENT score/state
 ("מה התוצאה", "מה המצב") means the latest reported value with its time ("נכון לדקה 60: אחת-אפס"), not only a
