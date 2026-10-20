@@ -1,6 +1,6 @@
 /* SW-V2 M5: usage strip (bottom of every page), usage bars. Uses the tokens of style.css. */
 body { padding-bottom: 56px; }
-.ustrip { position: fixed; inset-inline: 220px 0; bottom: 0; display: flex; gap: 10px; padding: 8px 16px;
+.ustrip { position: fixed; inset-inline: var(--side-w, 220px) 0; bottom: 0; display: flex; gap: 10px; padding: 8px 16px;
   background: var(--surface); border-top: 1px solid var(--line); z-index: 5; flex-wrap: wrap; }
 .upart { display: flex; align-items: center; gap: 8px; color: var(--text); padding: 4px 10px; border-radius: 8px;
   border: 1px solid var(--line); background: var(--surface-2); flex: 1 1 320px; min-width: 0; }
@@ -14,5 +14,6 @@ body { padding-bottom: 56px; }
 .ubar i.crit { background: var(--critical); }
 .ubar.unknown { background: repeating-linear-gradient(45deg, var(--line) 0 4px, transparent 4px 8px); }
 .upart b { white-space: nowrap; }
+.upart.ucost { flex: 0 1 auto; }
 @media (max-width: 760px) { .ustrip { inset-inline-start: 0; } }
 @media (max-width: 700px) { .ubar { width: 50px; } .upart .small { display: none; } }

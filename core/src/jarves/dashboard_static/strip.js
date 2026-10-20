@@ -39,7 +39,15 @@
     }
     return s;
   }
-  let st = null, linked = false, he = true, view = null;
+  let st = null, linked = false, he = JL.lang === "he", view = null;
+  // the same states, compact, for the header on every page (shell.js)
+  window.privacyChips = (privacy, live) => ["mic", "camera", "cloud_audio"].map((k) => {
+    const v = live && privacy && privacy[k] && privacy[k].state;
+    const e = (STATES[k] && STATES[k][v]) || UNKNOWN, lang = JL.lang === "he" ? 0 : 1;
+    const name = NAMES[k][lang];
+    return el("a", { href: "#/home", class: `ps-chip ps-mini ps-${e[2]}`, title: `${name}: ${e[lang]}`, "aria-label": `${name}: ${e[lang]}`, "data-k": k },
+      icon(k, e[2] === "off" || e[2] === "none"), el("span", { class: "ps-mini-t" }, e[lang]));
+  });
   const pv = { open: false, left: 0, poll: null, tick: null, msg: "", last: "" };
 
   function entry(k) { const v = linked && st && st[k] && st[k].state; return (STATES[k] && STATES[k][v]) || UNKNOWN; }
@@ -48,7 +56,7 @@
     try {
       const d = await api("/api/runtime");
       st = d.privacy || null; linked = !!(d.live && st);
-      he = !st || st.locale !== "en";
+      he = JL.lang === "he";                                   // the dashboard locale (i18n.js), not the Core's
     } catch (e) { st = null; linked = false; }
     draw();
   }
@@ -62,7 +70,7 @@
     const s = linked && st.camera && st.camera.state;
     if (!s || s === "unavailable") return;
     const on = s === "disabled";
-    if (on && !confirm("להדליק את המצלמה? / Turn the camera on?")) return;      // the dashboard click is the approval
+    if (on && !confirm(he ? "להדליק את המצלמה?" : "Turn the camera on?")) return;     // the dashboard click is the approval
     try { await api("/api/features/camera", { method: "POST", body: JSON.stringify({ enabled: on }) }); } catch (e) { pv.msg = e.message; }
     setTimeout(refresh, 600);          // the Core picks the switch up within its next health check
   }
@@ -131,7 +139,7 @@
       el("div", { id: "psLast", dir: "auto" }, pv.last || (he ? "עוד לא תיאר תמונה." : "Nothing described yet."))) : null;
     const keep = document.getElementById("psImg");
     const src = keep && keep.getAttribute("src");
-    card.replaceChildren(...[el("h2", {}, "What is on now · מה פועל עכשיו"), row, note, box].filter(Boolean));
+    card.replaceChildren(...[el("h2", {}, he ? "מה פועל עכשיו" : "What is on now"), row, note, box].filter(Boolean));
     if (box && src) document.getElementById("psImg").src = src;
   }
   window.privacyStripCard = function () {
