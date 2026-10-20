@@ -15,3 +15,9 @@ Goal: find real bugs before more features. Every test = steps, expected result, 
 No open P0/P1; every feature has a PASS or an explicit BLOCKED reason; log review shows no unexplained ERROR; installer clean-install pass.
 
 ## Open questions → see HANDOFF "Questions for the user" (owner answers recorded there).
+
+## Owner answers (20 Oct 2026)
+- Target: this PC, from `main` (real Core + virtual mic/speaker); clean-installer test is in the roadmap for later.
+- Live GPT-Live budget: up to about $10 total for the campaign.
+- Owner can assist with: Google sign-in + Calendar/Gmail, Telegram bot, real speaker/mic/camera listening, Pear Desktop open for music. (Instagram/Browser: not confirmed yet.)
+- Data: agents use a copy / separate test profile (`JARVES_HOME` pointed at a temp dir); the real memory is never modified.
