@@ -242,7 +242,7 @@ def stage(fn):
 
 async def main(names: list[str]) -> int:
     import importlib
-    for mod in ("campaign_stages_a", "campaign_stages_b", "campaign_stages_c", "campaign_stages_d", "campaign_stages_e", "campaign_stages_f", "campaign_stages_g"):
+    for mod in ("campaign_stages_a", "campaign_stages_b", "campaign_stages_c", "campaign_stages_d", "campaign_stages_e", "campaign_stages_f", "campaign_stages_g", "campaign_stages_h"):
         try:
             importlib.import_module(f"tools.{mod}")
         except ModuleNotFoundError as e:

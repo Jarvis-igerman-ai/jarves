@@ -75,6 +75,18 @@ async def test_b05_cli_answer_file_approves_a_request_asked_from_inside_a_tool(t
     assert await asyncio.wait_for(task, 5) is True
 
 
+def test_b06_face_recognition_can_become_active_when_the_camera_skill_is_there(tmp_path):
+    """The probe asked for a Skill named 'faces' that nothing registers (the camera Skill owns enroll / who), so in the
+    running Core the switch was permanently 'not installed yet (no connector in this version)'."""
+    f = feat.Features(Config(), tmp_path, components=lambda: {"camera": {"status": "ok"}}, skills=lambda: {"camera"})
+    f.set("camera", True)
+    f.set("face_recognition", True)
+    ok, why = f.available("face_recognition")
+    assert ok, why
+    f2 = feat.Features(Config(), tmp_path, components=lambda: {"camera": {"status": "ok"}}, skills=lambda: {"clock"})
+    assert not f2.available("face_recognition")[0]          # without the camera Skill it is honestly unavailable
+
+
 def test_b03_memory_delete_needs_a_number_and_does_not_traceback(tmp_path, capsys):
     a = argparse.Namespace(action="delete", id=None, yes=False)
     assert cmd_memory(a, Config(), tmp_path) == 2
