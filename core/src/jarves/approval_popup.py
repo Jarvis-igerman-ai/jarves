@@ -85,18 +85,18 @@ STRINGS = {
 
 # flat palettes; chips are a tinted background with a strong text colour (calm, readable in both themes)
 PALETTES = {
-    "light": {"bg": "#ffffff", "surface": "#f3f4f6", "text": "#1b1f24", "muted": "#5f6b7a", "border": "#d8dce2",
-              "primary": "#2563eb", "primary_hover": "#1d4ed8", "primary_off": "#b8c8ee", "on_primary": "#ffffff",
-              "danger": "#c62828", "danger_hover": "#a91f1f", "danger_off": "#efc0c0",
-              "secondary": "#eceef2", "secondary_hover": "#dfe2e8", "on_secondary": "#1b1f24",
-              "focus": "#1b1f24", "track": "#e6e9ee", "link": "#2563eb",
-              "chip": {"low": ("#e3f4e8", "#1d6b35"), "medium": ("#fdf0dc", "#8a5300"), "high": ("#fde4e4", "#b42318")}},
-    "dark": {"bg": "#1f2126", "surface": "#2a2d33", "text": "#eceff3", "muted": "#9aa3ae", "border": "#3a3e46",
-             "primary": "#3b82f6", "primary_hover": "#5b96f8", "primary_off": "#2b3d5f", "on_primary": "#ffffff",
-             "danger": "#e5484d", "danger_hover": "#ec6a6e", "danger_off": "#5a2a2c",
-             "secondary": "#33363d", "secondary_hover": "#3e424a", "on_secondary": "#eceff3",
-             "focus": "#eceff3", "track": "#33363d", "link": "#7aa7ff",
-             "chip": {"low": ("#1d3a27", "#7fd49a"), "medium": ("#3f3018", "#f2b867"), "high": ("#45201f", "#ff8f87")}},
+    "light": {"bg": "#e9ebee", "surface": "#dcdfe4", "text": "#1f2329", "muted": "#4c5663", "border": "#bfc4cc",
+              "primary": "#3c5a99", "primary_hover": "#324d87", "primary_off": "#a9b6d0", "on_primary": "#ffffff",
+              "danger": "#8f3535", "danger_hover": "#7a2c2c", "danger_off": "#d3b3b3",
+              "secondary": "#dadde2", "secondary_hover": "#cdd1d7", "on_secondary": "#1f2329",
+              "focus": "#1f2329", "track": "#d3d7dd", "link": "#2f4f8f",
+              "chip": {"low": ("#d5e3d9", "#2a5c3a"), "medium": ("#eadfc9", "#6e4a12"), "high": ("#ebd8d8", "#8c3030")}},
+    "dark": {"bg": "#1b1d21", "surface": "#25282d", "text": "#e4e7eb", "muted": "#9aa2ad", "border": "#34383f",
+             "primary": "#4a6fb0", "primary_hover": "#41639f", "primary_off": "#2a3850", "on_primary": "#ffffff",
+             "danger": "#b04a4e", "danger_hover": "#9e4044", "danger_off": "#4a2a2c",
+             "secondary": "#2f3238", "secondary_hover": "#3a3e45", "on_secondary": "#e4e7eb",
+             "focus": "#e4e7eb", "track": "#2f3238", "link": "#8db0e8",
+             "chip": {"low": ("#22362a", "#8fc7a0"), "medium": ("#3a2f1c", "#e0b574"), "high": ("#3e2423", "#efa19b")}},
 }
 _RTL = re.compile(r"[֐-ࣿיִ-﷿ﹰ-﻿]")
 
@@ -405,7 +405,7 @@ def build(req: dict, out: Path, test_invoke: str | None = None, *, theme: str | 
     if code:
         cbox = tk.Frame(card, bg=P["bg"])
         cbox.pack(side="bottom", fill="x", pady=(px(16), 0))
-        tk.Label(cbox, text=S["code"].format(code=code), font=f_small, bg=P["bg"], fg=P["danger"], anchor=anchor,
+        tk.Label(cbox, text=S["code"].format(code=code), font=f_small, bg=P["bg"], fg=P["chip"]["high"][1], anchor=anchor,
                  justify=justify, wraplength=inner).pack(fill="x")
         entry = tk.Entry(cbox, textvariable=typed, width=8, justify="center", font=f_code, relief="flat",
                          bg=P["surface"], fg=P["text"], insertbackground=P["text"], highlightthickness=px(2),
