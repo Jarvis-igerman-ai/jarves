@@ -1,0 +1,53 @@
+order = 25
+category = "system"
+features = ["instagram"]
+aliases = ["אינסטגרם", "instagram", "הודעות באינסטגרם", "דיירקט", "DM"]
+error_codes = ["INSTAGRAM_BAD_TOKEN", "INSTAGRAM_WINDOW_CLOSED", "INSTAGRAM_UNREACHABLE", "INSTAGRAM_UNKNOWN_DRAFT", "INSTAGRAM_RATE_LIMIT"]
+title_he = "הודעות אינסטגרם"
+title_en = "Instagram messages"
+what_he = "ג'ארביס מקריא את ההודעות הפרטיות שקיבלתם באינסטגרם ומנסח תשובה, אבל שולח רק אחרי שהקריא את הטקסט המדויק ואישרתם. עובד רק עם חשבון עסקי או יוצר תוכן, ורק בתוך 24 שעות מההודעה שלהם."
+what_en = "JARVES reads your Instagram direct messages aloud and drafts a reply, but sends only after reading the exact text back and you approving. Works only with a Business or Creator account, and only within 24 hours of their message."
+say = [["יש לי הודעות באינסטגרם?", "Do I have Instagram messages?"], ["תענה לה שאני מגיע בשש", "Tell her I am coming at six"]]
+expect_he = "הוא מקריא את ההודעות. כשמבקשים לענות הוא מקריא טיוטה ושואל. רק אחרי \"כן\" שלכם (ואישור על המסך) היא יוצאת."
+expect_en = "He reads the messages. When you ask to reply he reads a draft back and asks. Only after your yes (and the on-screen approval) does it go out."
+test = "feature"
+test_he = "הבדיקה רק בודקת שיש טוקן וחשבון מאומת. היא לא שולחת כלום."
+test_en = "The check only sees that a token and a verified account exist. It sends nothing."
+cost_he = "חינם (Instagram Messaging API הרשמי)."
+cost_en = "Free (official Instagram Messaging API)."
+privacy_he = "הודעות שקיבלתם נשמרות במחשב הזה. רק התשובה שאישרתם נשלחת לאינסטגרם. הטוקן נשמר רק במחשב הזה. תוכן ההודעות נחשב לא מהימן ולא מופעל כפקודה."
+privacy_en = "Messages you received are stored on this computer. Only the reply you approved goes to Instagram. The token stays on this computer. Message text is treated as untrusted and never as a command."
+
+[[steps]]
+he = "ודאו שהחשבון עסקי או יוצר תוכן, וצרו אפליקציה ב-developers.facebook.com (Instagram, ניהול הודעות) עם החשבון שלכם כבודק."
+en = "Make sure the account is Business or Creator, and create an app at developers.facebook.com (Instagram, manage messaging) with your account as a tester."
+
+[[steps]]
+he = "בטרמינל הקלידו jarvis instagram start והדביקו את ה-Access Token (ואת ה-App Secret אם רוצים webhook)."
+en = "In a terminal type jarvis instagram start and paste the Access Token (and the App Secret if you want the webhook)."
+action = "command:jarvis instagram start"
+check = "available:instagram"
+
+[[steps]]
+he = "הדליקו את המתג \"הודעות אינסטגרם\" (כבוי כברירת מחדל) ולחצו \"בדוק עכשיו\"."
+en = "Switch on \"Instagram messages\" (off by default) and press Test now."
+action = "feature_on:instagram"
+check = "active:instagram"
+
+[[problems]]
+he = "הוא אומר שאינסטגרם לא מחובר"
+en = "He says Instagram is not set up"
+fix_he = "הריצו jarvis instagram start."
+fix_en = "Run jarvis instagram start."
+
+[[problems]]
+he = "הטוקן נדחה או פג תוקף"
+en = "The token is rejected or expired"
+fix_he = "הטוקן תקף כ-60 יום. הריצו jarvis instagram refresh, ואם לא עוזר, צרו טוקן חדש והריצו jarvis instagram start."
+fix_en = "The token lasts about 60 days. Run jarvis instagram refresh; if that fails, generate a new token and run jarvis instagram start."
+
+[[problems]]
+he = "הוא לא מוכן לשלוח תשובה"
+en = "He refuses to send a reply"
+fix_he = "עברו יותר מ-24 שעות מההודעה שלהם. אינסטגרם לא מאפשר תשובה אוטומטית אחרי זה, אפשר לענות ידנית באפליקציה."
+fix_en = "More than 24 hours passed since their message. Instagram does not allow an automatic reply after that; answer by hand in the app."

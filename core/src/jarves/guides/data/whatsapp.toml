@@ -1,0 +1,41 @@
+order = 25
+category = "everyday"
+features = ["whatsapp_handoff"]
+suggest = true
+aliases = ["וואטסאפ", "ווטסאפ", "whatsapp", "וואצאפ", "תשלח וואטסאפ"]
+error_codes = ["WHATSAPP_PHONE_UNKNOWN", "WHATSAPP_BAD_PHONE", "WHATSAPP_OPEN_FAILED", "WHATSAPP_UNKNOWN_DRAFT"]
+title_he = "וואטסאפ: טיוטה ופתיחת צ'אט"
+title_en = "WhatsApp: draft and open the chat"
+what_he = "ג'ארביס כותב טיוטה, פותח את הצ'אט עם ההודעה מוכנה, ואתם לוחצים שלח. הוא לא שולח ולא קורא וואטסאפ בעצמו."
+what_en = "JARVES writes the draft, opens the chat with the message ready, and you press send. He never sends or reads WhatsApp himself."
+say = [["תכתוב לדנה בוואטסאפ שאני מאחר בעשר דקות", "Write Dana on WhatsApp that I'm ten minutes late"]]
+expect_he = "הוא מקריא את הטיוטה ושואל. אחרי \"כן\" נפתח הצ'אט ואתם לוחצים שלח."
+expect_en = "He reads the draft back and asks. After yes the chat opens and you press send."
+test_he = "אין בדיקה: שום דבר לא נפתח עד שמבקשים הודעה."
+test_en = "There is no test: nothing opens until you ask for a message."
+cost_he = "חינם."
+cost_en = "Free."
+privacy_he = "הטקסט והמספר נפתחים בקישור wa.me בדפדפן או באפליקציה שלכם. ג'ארביס לא מתחבר לחשבון וואטסאפ."
+privacy_en = "The text and number open in a wa.me link in your browser or app. JARVES never signs in to your WhatsApp."
+
+[[steps]]
+he = "ודאו שהמתג \"וואטסאפ\" דולק (הוא דולק כברירת מחדל)."
+en = "Make sure the WhatsApp switch is on (it is on by default)."
+action = "feature_on:whatsapp_handoff"
+check = "active:whatsapp_handoff"
+
+[[steps]]
+he = "בקשו הודעה ואמרו את המספר פעם אחת (עם קידומת). הוא יזכור אותו במחשב."
+en = "Ask for a message and say the number once (with country code). He remembers it on this computer."
+
+[[problems]]
+he = "הוא שואל לאיזה מספר"
+en = "He asks for the number"
+fix_he = "אמרו את המספר המלא פעם אחת, למשל 054-123-4567."
+fix_en = "Say the full number once, e.g. 054-123-4567."
+
+[[problems]]
+he = "וואטסאפ לא נפתח"
+en = "WhatsApp does not open"
+fix_he = "ודאו שיש דפדפן ברירת מחדל או וואטסאפ דסקטופ מותקן."
+fix_en = "Make sure a default browser or WhatsApp Desktop is installed."

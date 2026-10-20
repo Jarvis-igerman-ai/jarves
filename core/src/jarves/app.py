@@ -167,6 +167,14 @@ class Core:
         self.registry.register(DashboardSkill(self.open_dashboard))
         from .skills.google import register_google      # WP-G: only when the user connected Google (no network)
         self.google = register_google(self.registry, self.home, self.health)
+        from .homeassistant import register_home        # V3 P1 channels: tools stay hidden until their switch is on
+        from .telegram_channel import register_telegram
+        from .whatsapp import register_whatsapp
+        register_telegram(self.registry, self.home, self.health)
+        from .instagram_channel import register_instagram
+        register_instagram(self.registry, self.home, self.health)
+        register_whatsapp(self.registry, self.home)
+        register_home(self.registry, self.home, self.health)
         self.workspace.listeners.append(lambda name: self._spawn(wsp.note_live(self.live, self.workspace, name)))
 
         self.budget = Budget(self.memory, c.ai)      # ONE shared budget: in-flight counts span brain, TTS and voice
