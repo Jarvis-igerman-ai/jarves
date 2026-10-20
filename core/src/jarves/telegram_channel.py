@@ -26,6 +26,7 @@ from pydantic import BaseModel, Field
 
 from . import features as feat
 from . import logs
+from . import clilang
 from .channels_common import read_json, read_secret, targets, write_private_json, yes
 from .config import save_secret
 from .skills import Skill, Tool, ToolResult
@@ -292,15 +293,15 @@ class Wizard:
 
     async def run(self) -> int:
         out = self.io.out
-        out("JARVES + Telegram\n" + STEPS_HE + "\n" + STEPS_EN + "\n")
+        out(clilang.fmt("JARVES + Telegram\n" + STEPS_HE, "JARVES + Telegram\n" + STEPS_EN) + "\n")
         api = TelegramApi(transport=self.transport) if token_present() else None
         bot = None
         if api is not None:
             try:
                 bot = await api.get_me()
-                out(f"הטוקן השמור תקין: @{bot.get('username', '?')}. / The saved token works: @{bot.get('username', '?')}.")
+                out(clilang.fmt(f"הטוקן השמור תקין: @{bot.get('username', '?')}.", f"The saved token works: @{bot.get('username', '?')}."))
             except TelegramError as e:
-                out(e.he + "\n" + e.message)
+                out(clilang.fmt(e.he, e.message))
                 api = None
         if api is None:
             if self.token_provider is not None:
@@ -308,36 +309,36 @@ class Wizard:
             else:
                 tok = (read_secret(self.io, "Bot token (hidden, Enter = cancel): ") or "").strip()
             if not tok:
-                out("בוטל. / Cancelled. Nothing was saved.")
+                out(clilang.fmt("בוטל. לא נשמר דבר.", "Cancelled. Nothing was saved."))
                 return 1
             if not _TOKEN.match(tok):
-                out("זה לא נראה כמו טוקן של טלגרם (מספר:אותיות). / That does not look like a Telegram bot token.")
+                out(clilang.fmt("זה לא נראה כמו טוקן של טלגרם (מספר:אותיות).", "That does not look like a Telegram bot token."))
                 return 1
             api = TelegramApi(tok, transport=self.transport)
             try:
                 bot = await api.get_me()
             except TelegramError as e:
-                out(e.he + "\n" + e.message)
+                out(clilang.fmt(e.he, e.message))
                 return 1
             save_secret(TOKEN_ENV, tok, self.home)
             logs.info("telegram", "TELEGRAM_TOKEN_SAVED", "Telegram bot token saved")
-            out(f"נשמר (רק במחשב הזה): @{bot.get('username', '?')}. / Saved on this computer only.")
+            out(clilang.fmt(f"נשמר (רק במחשב הזה): @{bot.get('username', '?')}.", "Saved on this computer only."))
         have = pairing(self.home)
         if have["chats"] and not self.add_chat:
-            out(f"כבר מחובר לצ'אט של {have['chats'][0].get('name')}. / Already paired. "
-                f"(add another chat: {START_COMMAND} --add-chat)")
+            out(clilang.fmt(f"כבר מחובר לצ'אט של {have['chats'][0].get('name')}. (צ'אט נוסף: {START_COMMAND} --add-chat)",
+                            f"Already paired. (add another chat: {START_COMMAND} --add-chat)"))
             return 0
         code = ""
         if self.auto_pair:
             code = self.pair_code or "jv" + secrets.token_hex(6)
             link = f"https://t.me/{bot.get('username', '')}?start={code}"
-            out(f"פותח את הבוט בטלגרם: לוחצים Start והחיבור מסתיים לבד. / Opening the bot in Telegram: press Start "
-                f"and pairing finishes by itself.  {link}")
+            out(clilang.fmt(f"פותח את הבוט בטלגרם: לוחצים Start והחיבור מסתיים לבד.  {link}",
+                            f"Opening the bot in Telegram: press Start and pairing finishes by itself.  {link}"))
             if self.on_link is not None:
                 self.on_link(link)
         else:
-            out(f"עכשיו פותחים בטלגרם את @{bot.get('username', '')} ושולחים לו הודעה כלשהי (למשל hi). "
-                f"/ Now open @{bot.get('username', '')} in Telegram and send it any message (e.g. hi).")
+            out(clilang.fmt(f"עכשיו פותחים בטלגרם את @{bot.get('username', '')} ושולחים לו הודעה כלשהי (למשל hi).",
+                            f"Now open @{bot.get('username', '')} in Telegram and send it any message (e.g. hi)."))
             self.io.read("Enter when sent: ")
         chosen = None
         for i in range(self.polls):
@@ -345,7 +346,7 @@ class Wizard:
                 ups = await api.updates(timeout=self.poll_timeout)
                 found = chats_with_code(ups, code) if self.auto_pair else private_chats(ups)
             except TelegramError as e:
-                out(e.he + "\n" + e.message)
+                out(clilang.fmt(e.he, e.message))
                 return 1
             known = {c["chat_id"] for c in have["chats"]}
             found = [c for c in found if c["chat_id"] not in known]
@@ -362,11 +363,11 @@ class Wizard:
             if i + 1 < self.polls and not self.poll_timeout:
                 await self.sleep(self.poll_sleep)
         if chosen is None:
-            out("לא קיבלתי הודעה. שולחים הודעה לבוט ומריצים שוב. / No message arrived: send one to the bot and run again.")
+            out(clilang.fmt("לא קיבלתי הודעה. שולחים הודעה לבוט ומריצים שוב.", "No message arrived: send one to the bot and run again."))
             return 1
         ok = True if self.auto_pair else yes(self.io.read(f"Is this you: {chosen['name']}? [y/N] "))
         if not ok:
-            out("לא חיברתי את הצ'אט. / Chat not paired.")
+            out(clilang.fmt("לא חיברתי את הצ'אט.", "Chat not paired."))
             return 1
         data = {"bot_username": bot.get("username", ""), "chats": have["chats"] + [chosen], "paired_at": time.time()}
         write_private_json(pair_file(self.home), data)
@@ -374,13 +375,14 @@ class Wizard:
         if self.auto_pair or yes(self.io.read("Send a test message now? [y/N] ")):
             try:
                 await api.send_message(chosen["chat_id"], "JARVES: Telegram is connected. / טלגרם מחובר.")
-                out("נשלחה הודעת בדיקה. / Test message sent.")
+                out(clilang.fmt("נשלחה הודעת בדיקה.", "Test message sent."))
             except TelegramError as e:
-                out(e.he + "\n" + e.message)
+                out(clilang.fmt(e.he, e.message))
                 return 1
-        out("אחרי שמפעילים את המתג:  jarvis features on telegram  (כבוי כברירת מחדל). / Then switch it on: "
-            "jarvis features on telegram (off by default).")
-        out("אפשר לומר: \"תשלח לי בטלגרם ...\". הוא תמיד יקריא ויבקש אישור לפני שליחה.")
+        out(clilang.fmt("אחרי שמפעילים את המתג:  jarvis features on telegram  (כבוי כברירת מחדל).",
+                        "Then switch it on: jarvis features on telegram (off by default)."))
+        out(clilang.fmt("אפשר לומר: \"תשלח לי בטלגרם ...\". הוא תמיד יקריא ויבקש אישור לפני שליחה.",
+                        "You can say: \"Send me a message on Telegram ...\". It always reads it back and asks before sending."))
         return 0
 
 

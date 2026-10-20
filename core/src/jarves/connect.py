@@ -41,7 +41,8 @@ from urllib.parse import urlsplit
 
 from . import features as feat
 from . import logs
-from .channels_common import read_json, read_secret, targets, write_private_json
+from . import clilang
+from .channels_common import StepSkipped, is_skip_word, read_json, read_secret, targets, write_private_json
 
 FEATURE = "guided_setup"
 COMMAND = "jarvis connect"
@@ -80,6 +81,13 @@ TITLES = {
     "wake": ("מילת ההפעלה (כיול לקול שלך)", "Wake word (calibrated to your voice)", True),
     "instagram": ("אינסטגרם (לא חובה)", "Instagram (optional)", True),
     "home": ("Home Assistant (לא חובה)", "Home Assistant (optional)", True),
+}
+# what the first prompt of a step asks about (the Continue / Skip / Never line follows it)
+QUESTIONS = {
+    "wake": ("לכייל עכשיו את מילת ההפעלה לקול שלך (כ-20 שניות, אומרים Hey Jarvis כמה פעמים)?",
+             "Calibrate the wake word to your voice now (about 20 seconds, say Hey Jarvis a few times)?"),
+    "instagram": ("לחבר עכשיו אינסטגרם?", "Connect Instagram now?"),
+    "home": ("לחבר עכשיו Home Assistant?", "Connect Home Assistant now?"),
 }
 
 
@@ -284,6 +292,49 @@ def _ask_eof(_prompt: str) -> str:
     raise EOFError
 
 
+class _StepIO:
+    """The io the steps and sub-wizards see: typing `s` / `skip` at any prompt abandons the step (StepSkipped)."""
+    skippable = True
+
+    def __init__(self, inner) -> None:
+        self.inner = inner
+
+    @property
+    def lines(self):
+        return getattr(self.inner, "lines", None)
+
+    def out(self, text: str = "") -> None:
+        self.inner.out(text)
+
+    def read(self, prompt: str) -> str | None:
+        a = self.inner.read(prompt)
+        if is_skip_word(a):
+            raise StepSkipped
+        return a
+
+
+def never_list(home: Path) -> list[str]:
+    """Items the owner chose 'never ask again' for (setting connect.skipped)."""
+    from .userdata import open_db
+    if not (Path(home) / "memory.db").exists():                # nothing chosen yet; a status call creates no file
+        return []
+    db = open_db(home)
+    try:
+        v = db.setting("connect.skipped")
+    finally:
+        db.close()
+    return [x for x in (v if isinstance(v, list) else []) if x in ONLY]
+
+
+def set_never(home: Path, ids: list[str], actor: str = "cli") -> None:
+    from .userdata import open_db
+    db = open_db(home)
+    try:
+        db.set_setting("connect.skipped", sorted(set(ids)), actor=actor)
+    finally:
+        db.close()
+
+
 class Connector:
     def __init__(self, home: Path, cfg, *, io=None, clipboard: Clipboard | None = None,
                  open_url: Callable[[str], bool] | None = None, downloads: Path | None = None, yes: bool = False,
@@ -292,10 +343,14 @@ class Connector:
                  clip_timeout_s: float = 240.0, pear_wait_s: float = 120.0, pear_probe: Callable[[str], bool] = pear_up,
                  google_factory: Callable | None = None, wake_runner: Callable[[], int] | None = None,
                  pair_polls: int = 36, pair_poll_timeout: int = 5, pear_pair_wait_s: float = 90.0,
-                 pear_transport=None, optional_runners: dict[str, Callable[[], int]] | None = None) -> None:
+                 pear_transport=None, optional_runners: dict[str, Callable[[], int]] | None = None,
+                 skip: list[str] | None = None, reset_skips: bool = False) -> None:
+        self.reset_skips = reset_skips
         from .setup_wizard import ConsoleIO
         self.home, self.cfg = Path(home), cfg
-        self.io = io or ConsoleIO()
+        self.raw_io = io or ConsoleIO()
+        self.io = _StepIO(self.raw_io)
+        self.skip_now = [x for x in (skip or []) if x in ONLY]
         self.clipboard = clipboard or SystemClipboard()
         self.open_url = open_url or webbrowser.open
         self.downloads, self.yes, self.only, self.status_only = downloads, yes, only, status_only
@@ -311,12 +366,12 @@ class Connector:
 
     # --- output / input
     def h(self, he: str, en: str) -> None:
-        self.io.out(he + "\n" + en)
+        self.io.out(clilang.fmt(he, en))
 
     def _yn(self, he: str, en: str, default: bool, eof: bool | None = None) -> bool:
         if self.yes:
             return default
-        a = self.io.read(f"{he} / {en} [{'Y/n' if default else 'y/N'}]: ")
+        a = self.io.read(f"{clilang.pick(he, en)} [{'Y/n' if default else 'y/N'}]: ")
         if a is None:
             return default if eof is None else eof
         a = a.strip().lower()
@@ -329,17 +384,40 @@ class Connector:
         ids = [self.only] if self.only else list(ONLY)
         self.h("JARVES: חיבור חשבונות מודרך", "JARVES: guided account setup")
         before = {i.id: i for i in status_items(self.home, self.cfg, pear_probe=self.pear_probe)}
+        never = never_list(self.home)
+        if self.reset_skips and never:
+            set_never(self.home, [])
+            never = []
+            self.h("הדילוגים הקבועים נוקו.", "The 'never ask again' list was cleared.")
+        if self.only in never and not self.status_only:       # asking for an item by name brings it back
+            never = [x for x in never if x != self.only]
+            set_never(self.home, never)
         if self.status_only:
+            for fid in ids:
+                if fid in never and before[fid].state != "connected":
+                    self.results[fid] = "skipped"
+                    self.notes[fid] = (f"jarvis connect --only {fid}", f"run {COMMAND} --only {fid}")
             self._summary(ids, before, show_actions=False)
             return 0
+        hidden = [f for f in ids if f in never]               # "never ask again": not even mentioned
+        ids = [f for f in ids if f not in hidden]
         try:
             for fid in ids:
                 it = before[fid]
                 if it.state == "connected" and fid not in ("google", "telegram"):
                     self.results[fid] = "connected"
                     continue
+                if fid in self.skip_now:
+                    self._skipped(fid, "skipped (--skip)")
+                    continue
                 self.h(f"\n== {it.title_he} ==", f"== {it.title_en} ==")
-                getattr(self, "step_" + fid)(it)
+                if it.state != "connected" and not self._gate(fid):
+                    continue
+                try:
+                    getattr(self, "step_" + fid)(it)
+                except StepSkipped:
+                    self._finish_clip()
+                    self._skipped(fid, "skipped")
         except KeyboardInterrupt:
             self.h("\nעצרנו. מה שכבר חובר נשמר; מריצים שוב " + COMMAND + " וממשיכים.",
                    "Stopped. What is connected is kept; run " + COMMAND + " again to continue.")
@@ -351,6 +429,30 @@ class Connector:
         self._save(ids)
         self._summary(ids, {i.id: i for i in status_items(self.home, self.cfg, pear_probe=self.pear_probe)})
         return 1 if "failed" in self.results.values() else 0
+
+    def _skipped(self, fid: str, why: str) -> None:
+        self.results[fid] = "skipped"
+        self.notes[fid] = (f"jarvis connect --only {fid}", f"run {COMMAND} --only {fid}")
+        self.h(f"דילגנו על {TITLES[fid][0]}.", f"Skipped {TITLES[fid][1]}.")
+
+    def _gate(self, fid: str) -> bool:
+        """The first prompt of every step: Continue / Skip now / Never ask again. True = go on with the step."""
+        if self.yes:
+            return True
+        q = QUESTIONS.get(fid)
+        if q:
+            self.h(*q)
+        a = (self.raw_io.read("[C]ontinue / [S]kip now / [N]ever ask again (Enter = continue): ") or "").strip().lower()
+        if is_skip_word(a, ("s", "skip")):
+            self._skipped(fid, "skipped")
+            return False
+        if is_skip_word(a, ("n", "never", "no")):
+            set_never(self.home, never_list(self.home) + [fid])
+            self._skipped(fid, "skipped")
+            self.h(f"לא אשאל שוב. לחיבור מאוחר יותר: {COMMAND} --only {fid}",
+                   f"I will not ask again. To connect later: {COMMAND} --only {fid}  (or {COMMAND} --reset-skips)")
+            return False
+        return True
 
     def _save(self, ids: list[str]) -> None:
         old = last_run(self.home)
@@ -370,16 +472,22 @@ class Connector:
             state = self.results.get(fid) or it.state
             word = WORDS[state]
             next_he, next_en = self.notes.get(fid) or ((it.fix_he, it.fix_en) if state in ("missing", "attention", "failed") else ("", ""))
-            rows.append((it.title_en, f"{word[1]} / {word[0]}", next_en, next_he))
+            if state == "skipped":
+                next_he, next_en = f"דולג (מריצים {COMMAND} --only {fid})", f"(run {COMMAND} --only {fid})"
+                word = ("דולג", "skipped")
+            title = it.title_en if clilang.current() == "en" else it.title_he if clilang.current() == "he" \
+                else f"{it.title_he} / {it.title_en}"
+            rows.append((title, clilang.pick(word[0], word[1]), clilang.fmt(next_he, next_en).split("\n")))
         w1 = max(len(r[0]) for r in rows)
         w2 = max(len(r[1]) for r in rows)
-        self.io.out("\n== סיכום / Summary ==")
-        for t, s, ne, nh in rows:
-            self.io.out(f"  {t:<{w1}}  {s:<{w2}}  {ne}")
-            if nh:
-                self.io.out(f"  {'':<{w1}}  {'':<{w2}}  {nh}")
+        self.io.out(clilang.fmt("\n== סיכום ==", "\n== Summary =="))
+        for t, s, nxt in rows:
+            self.io.out(f"  {t:<{w1}}  {s:<{w2}}  {nxt[0]}")
+            for extra in nxt[1:]:
+                self.io.out(f"  {'':<{w1}}  {'':<{w2}}  {extra}")
         if not show_actions:
-            self.io.out(f"\nהמצב בלבד, שום דבר לא שונה. / Status only, nothing was changed.  Run: {COMMAND}")
+            self.io.out(clilang.fmt(f"המצב בלבד, שום דבר לא שונה. הרצה: {COMMAND}",
+                                    f"Status only, nothing was changed.  Run: {COMMAND}"))
 
     # --- the clipboard (Telegram token)
     def _finish_clip(self) -> None:
@@ -413,7 +521,7 @@ class Connector:
                     return self._clip_token
                 await self.asleep(self.clip_poll_s)
             self.h("לא הופיע טוקן בלוח.", "No token appeared on the clipboard.")
-        tok = (read_secret(self.io, "Bot token (hidden, Enter = skip): ") or "").strip()
+        tok = (read_secret(self.io, "Bot token (hidden, Enter = no token now, s = skip this step): ") or "").strip()
         self._token_skipped = not tok
         return tok or None
 
@@ -427,11 +535,13 @@ class Connector:
         self._wizard_result("google", rc, fix=(f"מריצים שוב {COMMAND}", f"Run {COMMAND} again"))
 
     def _google_ask(self, prompt: str) -> str:
-        a = self.io.read(prompt)
+        a = self.raw_io.read(prompt)          # not _StepIO: here a bare `s` already means "skip this sub-step"
         if a is None:
             if getattr(self.io, "lines", None) is not None:
                 return ""                    # scripted input: the end of the script means Enter (ConsoleIO's contract)
             raise EOFError                   # a real terminal closed: the wizard stops safely, progress is saved
+        if is_skip_word(a, ("skip",)):
+            raise StepSkipped                # the whole word abandons the Google step
         return a
 
     def step_telegram(self, it: Item) -> None:
@@ -504,12 +614,6 @@ class Connector:
             self.results["wake"] = "skipped"
             self.notes["wake"] = (it.fix_he, it.fix_en)
             return
-        if not self._yn("לכייל עכשיו את מילת ההפעלה לקול שלך (כ-20 שניות, אומרים Hey Jarvis כמה פעמים)?",
-                        "Calibrate the wake word to your voice now (about 20 seconds, say Hey Jarvis a few times)?", True,
-                        eof=False):
-            self.results["wake"] = "skipped"
-            self.notes["wake"] = (it.fix_he, it.fix_en)
-            return
         rc = (self.wake_runner or _run_wake_test)()
         if rc == 0:
             self.results["wake"] = "connected"
@@ -518,7 +622,7 @@ class Connector:
             self.notes["wake"] = ("בדקו את המיקרופון ואז: jarvis wake test --apply", "Check the microphone, then: jarvis wake test --apply")
 
     def _optional(self, fid: str, label: tuple[str, str], runner_name: str) -> None:
-        if self.yes or not self._yn(f"לחבר עכשיו {label[0]}?", f"Connect {label[1]} now?", False):
+        if self.yes:
             self.results[fid] = "skipped"
             self.notes[fid] = (f"כשתרצו: jarvis {runner_name} start", f"When you want: jarvis {runner_name} start")
             return
@@ -563,6 +667,8 @@ def maybe_nudge(db, alerts, *, home: Path, features=None, clock: Callable[[], fl
         return None
     if not db.setting("connect.nudge") or db.setting("autonomy.level") == "observe_only":
         return None
+    if "google" in (db.setting("connect.skipped") or []):          # "never ask again" (jarvis connect --reset-skips)
+        return None
     try:
         if not alerts.enabled():
             return None
@@ -592,6 +698,9 @@ def add_cli(sub) -> None:
     c.add_argument("--yes", action="store_true", help="accept the default answers and skip the optional accounts")
     c.add_argument("--json", action="store_true", help="with --status: machine-readable output")
     c.add_argument("--reminders", choices=["on", "off"], help="the once-a-day 'Google is not connected' reminder")
+    c.add_argument("--skip", help="comma-separated items to skip in this run, e.g. --skip telegram,instagram "
+                                  "(items: " + ", ".join(ONLY) + ")")
+    c.add_argument("--reset-skips", action="store_true", help="forget every 'never ask again' choice")
 
 
 def cmd_connect(a, cfg, home) -> int:
@@ -605,13 +714,19 @@ def cmd_connect(a, cfg, home) -> int:
             db.set_setting("connect.nudge", a.reminders == "on", actor="cli")
         finally:
             db.close()
-        print(f"Reminders {a.reminders}. / התזכורת היומית: {'דולקת' if a.reminders == 'on' else 'כבויה'}.")
+        clilang.say(f"התזכורת היומית: {'דולקת' if a.reminders == 'on' else 'כבויה'}.", f"Reminders {a.reminders}.")
         return 0
+    skip = [x.strip().lower() for x in (getattr(a, "skip", None) or "").split(",") if x.strip()]
+    bad = [x for x in skip if x not in ONLY]
+    if bad:
+        print(f"Unknown item(s) for --skip: {', '.join(bad)}. Items: {', '.join(ONLY)}", file=sys.stderr)
+        return 2
     if getattr(a, "json", False) and getattr(a, "status", False):
         print(json.dumps(items_json(home, cfg), ensure_ascii=False, indent=1))
         return 0
     return Connector(home, cfg, yes=bool(getattr(a, "yes", False)), only=getattr(a, "only", None),
-                     status_only=bool(getattr(a, "status", False))).run()
+                     status_only=bool(getattr(a, "status", False)), skip=skip,
+                     reset_skips=bool(getattr(a, "reset_skips", False))).run()
 
 
 # ---------------------------------------------------------------------- feature + dashboard

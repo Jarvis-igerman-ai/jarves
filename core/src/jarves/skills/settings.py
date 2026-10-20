@@ -35,6 +35,8 @@ ON_OFF = ("on", "off")
 ALLOWED: dict[str, tuple[str, tuple[str, ...] | None, str | None]] = {
     "voice.voice": ("GPT-Live voice", tuple(LIVE_VOICES), None),
     "curator.auto": ("learn durable facts from conversations (local rules, no network)", ON_OFF, "on"),
+    "ui.cli_language": ("language of what the command-line wizards print: en | he | both (env JARVES_CLI_LANG wins)",
+                        ("en", "he", "both"), "en"),
     "curator.llm": ("also ask the backend model to extract facts after a conversation (costs one request)",
                     ON_OFF, "off"),
 }

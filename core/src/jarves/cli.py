@@ -12,7 +12,7 @@ import zipfile
 from datetime import datetime, timezone
 from pathlib import Path
 
-from . import __version__, logs
+from . import __version__, clilang, logs
 from .config import (ConfigError, load_config, load_secrets, openai_key_present, save_secret, secrets_file,
                      state_dir)
 from .health import read_snapshot
@@ -1278,12 +1278,12 @@ def cmd_features(a, cfg, home) -> int:
         s = f.reset(a.id) if a.action == "reset" else f.set(a.id, a.action == "on", by="cli")
         when = {"live": "now", "next_session": "from the next conversation", "restart": "at the next Core start"}
         print(f"{a.id}: {'on' if s['enabled'] else 'off'} (takes effect {when[s['applies']]})"
-              + ("" if s["available"] or not s["enabled"] else f"; not available: {s['reason']}"))
+              + ("" if s["available"] or not s["enabled"] else f"; not available: {clilang.reason(s['reason'])}"))
         return 0
     for s in f.list():
         state = "ACTIVE" if s["active"] else ("off" if not s["enabled"] else "unavailable")
         print(f"{s['id']:<22} {state:<12} {s['risk']:<7} {s['title_en']}"
-              + (f"  - {s['reason']}" if s["reason"] and not s["active"] else "")
+              + (f"  - {clilang.reason(s['reason'])}" if s["reason"] and not s["active"] else "")
               + (f"  [from {s['source']}]" if s["source"] != "default" else ""))
     print("change: jarvis features on|off|reset ID   (or the dashboard Features page)")
     return 0
@@ -1548,6 +1548,8 @@ def main(argv: list[str] | None = None) -> int:
         print(f"PROFILE ERROR: {e}", file=sys.stderr)
         return 2
     load_secrets(home)
+    from . import clilang
+    clilang.set_home(home)
     try:
         cfg, _ = load_config(a.config)
     except ConfigError as e:

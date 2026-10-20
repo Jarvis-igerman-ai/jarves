@@ -17,7 +17,7 @@ import time
 import pytest
 
 from channels_fakes import (GOOD_TOKEN, IG_TOKEN, FakeClipboard, instagram_server, pear_server, telegram_server)
-from jarves import alerts, connect, dashboard, google_setup
+from jarves import alerts, clilang, connect, dashboard, google_setup
 from jarves import features as feat
 from jarves import instagram_channel as ig
 from jarves import telegram_channel as tg
@@ -156,7 +156,7 @@ async def test_telegram_token_from_clipboard_and_chat_paired_by_deep_link(home):
     srv, link = tg_server(), Link()
     try:
         clip = FakeClipboard(["", "something else", f"BotFather: Use this token to access the HTTP API:\n{GOOD_TOKEN}\nKeep it safe"])
-        conn, out = make(home, ["y"], only="telegram", clipboard=clip, open_url=link, pair_poll_timeout=5)
+        conn, out = make(home, ["", "y"], only="telegram", clipboard=clip, open_url=link, pair_poll_timeout=5)
         t = owner_taps_start(srv, link)
         rc = await asyncio.to_thread(conn.run)
         t.join(5)
@@ -177,7 +177,7 @@ async def test_telegram_token_from_clipboard_and_chat_paired_by_deep_link(home):
         # the long poll really was used, and the stranger's message was acknowledged (no endless re-serving)
         assert any((r["body"] or {}).get("timeout") == 5 for r in srv.requests if r["path"].endswith("getUpdates"))
         assert srv.state["updates"] == []
-        assert "מחובר" in "\n".join(out) and "connected" in "\n".join(out)
+        assert "connected" in "\n".join(out) and not clilang.has_hebrew("\n".join(out))
     finally:
         srv.close()
 
@@ -186,7 +186,7 @@ async def test_telegram_declined_clipboard_falls_back_to_hidden_prompt_and_never
     srv, link = tg_server(), Link()
     try:
         clip = FakeClipboard([GOOD_TOKEN])                      # a token IS on the clipboard, but the owner said no
-        conn, out = make(home, ["n", GOOD_TOKEN], only="telegram", clipboard=clip, open_url=link)
+        conn, out = make(home, ["", "n", GOOD_TOKEN], only="telegram", clipboard=clip, open_url=link)
         t = owner_taps_start(srv, link, stranger=False)
         assert await asyncio.to_thread(conn.run) == 0
         t.join(5)
@@ -213,7 +213,7 @@ async def test_telegram_rejected_token_is_a_real_failure_nothing_saved_clipboard
     try:
         bad = "987654321:AAH-this_is_not_the_right_token_0123456789"
         clip = FakeClipboard([bad])
-        conn, out = make(home, ["y"], only="telegram", clipboard=clip)
+        conn, out = make(home, ["", "y"], only="telegram", clipboard=clip)
         assert await asyncio.to_thread(conn.run) == 1
         assert conn.results == {"telegram": "failed"}
         assert not (home / "secrets.env").exists() and not tg.pairing(home)["chats"]
@@ -227,7 +227,7 @@ async def test_telegram_token_saved_but_owner_never_pressed_start_needs_attentio
     srv = telegram_server(updates=[])                    # getUpdates answers at once with nothing
     os.environ[tg.API_BASE_ENV] = srv.url
     try:
-        conn, out = make(home, ["y"], only="telegram", clipboard=FakeClipboard([GOOD_TOKEN]), pair_polls=2,
+        conn, out = make(home, ["", "y"], only="telegram", clipboard=FakeClipboard([GOOD_TOKEN]), pair_polls=2,
                          pair_poll_timeout=0)
         assert await asyncio.to_thread(conn.run) == 0
         assert conn.results == {"telegram": "attention"} and tg.token_present() and not tg.pairing(home)["chats"]
@@ -239,7 +239,7 @@ async def test_telegram_token_saved_but_owner_never_pressed_start_needs_attentio
 async def test_telegram_rerun_when_connected_does_nothing_new(home):
     srv, link = tg_server(), Link()
     try:
-        conn, _ = make(home, ["y"], only="telegram", clipboard=FakeClipboard([GOOD_TOKEN]), open_url=link)
+        conn, _ = make(home, ["", "y"], only="telegram", clipboard=FakeClipboard([GOOD_TOKEN]), open_url=link)
         t = owner_taps_start(srv, link, stranger=False)
         assert await asyncio.to_thread(conn.run) == 0
         t.join(5)
@@ -273,7 +273,7 @@ def google_factory(home, g, b, tmp=None):
 def test_google_runs_the_existing_wizard_picks_up_the_download_and_validates_live(home, dl):
     g, b = Google(), Browser(dl)
     clip = FakeClipboard()
-    conn, out = make(home, ["me@example.com"], only="google", clipboard=clip, open_url=b.open_console,
+    conn, out = make(home, ["", "me@example.com"], only="google", clipboard=clip, open_url=b.open_console,
                      downloads=dl, google_factory=google_factory(home, g, b))
     assert conn.run() == 0 and conn.results == {"google": "connected"}
     assert "/auth/clients" in " ".join(b.opened) and google_setup.scopes_text() in clip.writes
@@ -282,14 +282,14 @@ def test_google_runs_the_existing_wizard_picks_up_the_download_and_validates_liv
     paths = [c.url.path for c in g.api_calls()]
     assert "/calendar/v3/users/me/calendarList" in paths       # validated live before it counted as connected
     text = "\n".join(out)
-    assert "== Summary ==" in text.replace("סיכום / ", "") and "connected / מחובר" in text
+    assert "== Summary ==" in text and "connected" in text and not clilang.has_hebrew(text)
     assert "ya29" not in text and "GOCSPX" not in text
 
 
 def test_google_rerun_is_safe_and_just_rechecks(home, dl):
     g, b = Google(), Browser(dl)
     f = google_factory(home, g, b)
-    assert make(home, ["me@example.com"], only="google", open_url=b.open_console, downloads=dl, google_factory=f)[0].run() == 0
+    assert make(home, ["", "me@example.com"], only="google", open_url=b.open_console, downloads=dl, google_factory=f)[0].run() == 0
     b2 = Browser(dl, client=None)
     conn, _ = make(home, [], only="google", open_url=b2.open_console, downloads=dl, google_factory=google_factory(home, g, b2))
     assert conn.run() == 0 and conn.results == {"google": "connected"} and b2.opened == []
@@ -317,7 +317,7 @@ def test_pear_not_running_says_exactly_how_to_enable_the_plugin_and_is_not_a_fai
     assert conn.run() == 0 and conn.results == {"pear": "attention"}
     text = "\n".join(out)
     assert "Plugins > API Server" in text and "127.0.0.1" in text and "26538" in text and "jarvis music open" in text
-    assert "הפעלת" in text or "פותחים את Pear" in text                   # and in Hebrew
+    assert not clilang.has_hebrew(text)                                    # English only by default
 
 
 def test_pear_waits_for_the_app_then_pairs_when_the_owner_clicks_allow(home):
@@ -361,7 +361,7 @@ def test_wake_calibration_offered_run_and_skipped_with_yes(home):
     assert conn.run() == 0 and calls == [1] and conn.results == {"wake": "connected"}
     conn2, out2 = make(home, [], only="wake", yes=True, wake_runner=lambda: calls.append(2) or 0)
     assert conn2.run() == 0 and calls == [1] and conn2.results == {"wake": "skipped"}   # needs the owner's voice
-    conn3, _ = make(home, ["n"], only="wake", wake_runner=lambda: calls.append(3) or 0)
+    conn3, _ = make(home, ["s"], only="wake", wake_runner=lambda: calls.append(3) or 0)
     assert conn3.run() == 0 and conn3.results == {"wake": "skipped"}
     conn4, _ = make(home, ["y"], only="wake", wake_runner=lambda: 1)
     assert conn4.run() == 0 and conn4.results == {"wake": "attention"}                  # mic problem: not a crash
@@ -390,7 +390,7 @@ async def test_instagram_is_optional_skipped_by_yes_and_runs_the_real_wizard_whe
 def test_home_assistant_optional_runner_and_failure_exit_code(home):
     conn, _ = make(home, ["y"], only="home", optional_runners={"home": lambda: 1})
     assert conn.run() == 1 and conn.results == {"home": "failed"}
-    conn2, _ = make(home, ["n"], only="home", optional_runners={"home": lambda: 1})
+    conn2, _ = make(home, ["s"], only="home", optional_runners={"home": lambda: 1})
     assert conn2.run() == 0 and conn2.results == {"home": "skipped"}
 
 
