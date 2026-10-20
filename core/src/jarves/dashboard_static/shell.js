@@ -81,7 +81,7 @@
     extra = [];
     const [f, g] = await Promise.all([api("/api/features").catch(() => null), api("/api/guides").catch(() => null)]);
     for (const x of (f && f.features) || []) extra.push({ title: txo(x, "title"), where: tx("יכולת", "Feature"),
-      href: "#/guide-for/" + encodeURIComponent(x.id), hay: norm([x.title_he, x.title_en, x.id, x.about].join(" ")) });
+      href: "#/guide-for/" + encodeURIComponent(x.id), hay: norm([x.title_he, x.title_en, x.id, x.about, x.about_he].join(" ")) });
     for (const x of (g && g.guides) || []) extra.push({ title: txo(x, "title"), where: tx("מדריך", "Guide"),
       href: "#/guide/" + encodeURIComponent(x.id), hay: norm([x.title_he, x.title_en, x.id].join(" ")) });
     return extra;

@@ -8,8 +8,8 @@ function platformCell(t) {
   if (!t) return el("span", { class: "muted small" }, "—");
   const cls = t.status === "verified_on_device" ? "ok" : t.status === "blocked" ? "fail" : t.status === "planned" ? "plain" : "medium";
   return el("div", {}, pill(cls, PLATFORM[t.status] || t.status),
-    t.evidence ? el("div", { class: "muted small" }, t.evidence) : null,
-    t.blocker ? el("div", { class: "small" }, "Blocker: " + t.blocker) : null,
+    t.evidence ? el("div", { class: "muted small" }, txh(t, "evidence")) : null,
+    t.blocker ? el("div", { class: "small" }, tx("חסם: ", "Blocker: ") + txh(t, "blocker")) : null,
     t.roadmap_issue ? el("a", { class: "small", href: t.roadmap_issue, target: "_blank", rel: "noopener" }, "roadmap issue") : null);
 }
 

@@ -47,7 +47,7 @@ from types import SimpleNamespace
 from typing import Any, Callable
 
 from . import features as feat
-from . import logs
+from . import hebrew, logs
 
 STATE_FILE = "setup_state.json"
 PEAR_URL = "https://github.com/pear-devs/pear-desktop/releases"
@@ -241,8 +241,9 @@ def view(cfg, home: Path, f: feat.Features | None = None) -> dict:
         rows = []
         for fid in ids:
             s = f.status(fid)
-            rows.append({**{k: s[k] for k in ("id", "title_he", "title_en", "about", "risk", "enabled", "available",
-                                              "reason", "active", "needs", "applies", "source")},
+            rows.append({**{k: s[k] for k in ("id", "title_he", "title_en", "about", "about_he", "risk", "enabled",
+                                              "available", "reason", "reason_he", "active", "needs", "applies", "source")
+                                if k in s},
                          "recommended": recommended(fid, f, first), "safe_off": fid in SAFE_OFF,
                          "hint": hint(fid, s["available"], s["reason"]), **_guide_notes(fid)})
         out.append({"id": gid, "title_he": he, "title_en": en, "features": rows})
@@ -266,12 +267,14 @@ def next_steps(f: feat.Features) -> list[dict]:
         seen.add(g.id)
         h = guides.setup_hint(fid, f) or {}
         out.append({"guide": g.id, "title_he": g.title_he, "title_en": g.title_en, "reason": f.reason(fid),
+                    "reason_he": hebrew.he(f.reason(fid)) or "",
                     "step_he": h.get("next_step_he", ""), "step_en": h.get("next_step_en", ""),
                     "dashboard": f"#/guide/{g.id}"})
     for c in guides.checklist(f):
         if not c["done"] and c["id"] not in seen and c["state"] != "off":
             seen.add(c["id"])
             out.append({"guide": c["id"], "title_he": c["title_he"], "title_en": c["title_en"], "reason": c["reason"],
+                        "reason_he": c.get("reason_he", ""),
                         "step_he": c["first_step_he"], "step_en": c["first_step_en"], "dashboard": f"#/guide/{c['id']}"})
     return out
 

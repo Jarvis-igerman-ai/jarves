@@ -86,7 +86,7 @@ PAGES.home = async function () {
   const feats = el("div", { class: "card" }, el("h2", {}, tx("מה פועל", "What is on")),
     el("div", { class: "chips" }, d.features.on.map((f) => el("span", { class: "chip-on" }, two(f, "title")))),
     el("div", { class: "small muted", style: "margin-top:10px" }, tx("כבוי או לא זמין", "Off or not available")),
-    el("div", { class: "chips" }, d.features.off.map((f) => el("span", { class: "chip-off", title: f.reason, dir: "auto" }, two(f, "title")))),
+    el("div", { class: "chips" }, d.features.off.map((f) => el("span", { class: "chip-off", title: txh(f, "reason"), dir: "auto" }, two(f, "title")))),
     el("div", { class: "actions" }, el("a", { class: "button-link", href: "#/features" }, tx("שינוי", "Change"))));
   const last = lc ? el("div", { class: "card" }, el("h2", {}, tx("שיחה אחרונה", "Last conversation")),
     el("div", { dir: "auto" }, lc.first_user || tx("(לא נאמר כלום)", "(nothing said)")),
