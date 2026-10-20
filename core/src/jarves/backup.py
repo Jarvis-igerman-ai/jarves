@@ -43,7 +43,7 @@ import zipfile
 from datetime import datetime
 from pathlib import Path
 
-from . import __version__, logs
+from . import __version__, locales, logs
 
 BACKUP_DIR = "backups"
 KINDS = ("auto", "manual", "pre-migration", "pre-restore")
@@ -637,7 +637,8 @@ def _name(home: Path, body) -> Path | None:
 
 def api_backups(ctx, m, body):
     return 200, {"backups": list_backups(ctx.home), "settings": get_settings(ctx.home), "state": read_state(ctx.home),
-                 "guidance": GUIDANCE, "core_running": core_running(ctx.home), "folder": str(backup_dir(ctx.home))}
+                 "guidance": GUIDANCE,
+                 **locales.list_siblings("guidance", GUIDANCE), "core_running": core_running(ctx.home), "folder": str(backup_dir(ctx.home))}
 
 
 def api_backup_now(ctx, m, body):

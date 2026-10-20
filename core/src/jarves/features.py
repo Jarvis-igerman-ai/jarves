@@ -43,7 +43,7 @@ from pathlib import Path
 from typing import Any, Callable, Literal
 from urllib.parse import urlsplit
 
-from . import capabilities, logs
+from . import capabilities, locales, logs
 
 Risk = Literal["low", "medium", "high"]
 Applies = Literal["live", "next_session", "restart"]
@@ -113,6 +113,14 @@ def register(id: str, title_he: str, title_en: str, default_enabled: bool, *, pr
                 list(skills or []), list(tools or []), config, applies, about, dict(targets or {}))
     CATALOG[id] = f
     return f
+
+
+def _with_he(d: dict) -> dict:
+    """Hebrew siblings (about_he, reason_he, targets.*.evidence_he / blocker_he) for the dashboard (locales.py)."""
+    locales.attach(d, "about", "reason")
+    for t in (d.get("targets") or {}).values():
+        locales.attach(t, "evidence", "blocker")
+    return d
 
 
 # ---------------------------------------------------------------------- probes
@@ -506,7 +514,7 @@ class Features:
         ok, why = self.available(fid)
         cap = capabilities.view(fid)
         health = "off" if not on else "ok" if ok else "unavailable"
-        return {"id": fid, "title_he": f.title_he, "title_en": f.title_en, "about": f.about, "risk": f.risk,
+        return _with_he({"id": fid, "title_he": f.title_he, "title_en": f.title_en, "about": f.about, "risk": f.risk,
                 "enabled": on, "default": f.default_enabled, "source": "user" if user is not None else src,
                 "available": ok, "reason": why, "active": on and ok, "needs": f.needs, "applies": f.applies,
                 "config": f.config, "skills": f.skills, "tools": f.tools,
@@ -515,7 +523,7 @@ class Features:
                 "health": health, "permissions": cap["permissions"] or [f.risk + " risk"],
                 "settings": cap["settings"] or (f"config {f.config}" if f.config else ""), "targets": cap["targets"],
                 "last_checked": cap["last_checked"], "pi_ready": cap["pi_ready"], "matrix_problems": cap["problems"],
-                "needs_attention": bool(req) or (on and not ok) or bool(cap["problems"])}
+                "needs_attention": bool(req) or (on and not ok) or bool(cap["problems"])})
 
     def list(self) -> list[dict]:
         return [self.status(fid) for fid in CATALOG]
@@ -748,8 +756,8 @@ def _ctx_features(ctx) -> Features:
 
 def api_features(ctx, m, body):
     f = _ctx_features(ctx)
-    return 200, {"features": f.list(), "note": "Switches apply live where possible; others at the next "
-                                               "conversation or Core start (see 'applies').",
+    note = "Switches apply live where possible; others at the next conversation or Core start (see 'applies')."
+    return 200, {"features": f.list(), "note": note, **locales.siblings("note", note),
                  "statuses": list(capabilities.STATUSES), "targets": list(capabilities.TARGETS),
                  "filters": ["all", "enabled", "not_ready_on_pi", "needs_attention"],
                  "pi_roadmap": capabilities.PI_ROADMAP}

@@ -19,13 +19,14 @@ Voice choice rules (D12):
 """
 from __future__ import annotations
 
+import copy
 import json
 import os
 import re
 import time
 from pathlib import Path
 
-from . import capabilities, logs
+from . import capabilities, locales, logs
 
 FILE = "identity.json"
 DEFAULT_WAKE = {"model": "hey_jarvis", "phrase": "Hey Jarvis", "threshold": None}
@@ -50,6 +51,15 @@ def _clean_name(v: str, what: str) -> str:
     return v
 
 
+def _wake_capability() -> dict:
+    """capabilities.WAKE_PHRASE as a copy with Hebrew evidence / blocker next to the English ones."""
+    cap = copy.deepcopy(capabilities.WAKE_PHRASE)
+    for group in (cap["targets"], cap["custom"]):
+        for t in group.values():
+            locales.attach(t, "evidence", "blocker")
+    return cap
+
+
 def voice_catalog(cfg) -> list[dict]:
     """Every voice JARVES can use, with provider, model, languages, price and honest preview status."""
     from .skills.settings import LIVE_VOICES
@@ -63,6 +73,7 @@ def voice_catalog(cfg) -> list[dict]:
                         "description is its accent", "usd_per_minute": prices.get(model),
                         "cost_kind": "estimate" if mode == "realtime" else "list price",
                         "credential": "OPENAI_API_KEY", "preview": None, "preview_note": PREVIEW_NOTE})
+            locales.attach(out[-1], "about", "languages", "preview_note")
     return out
 
 
@@ -135,7 +146,7 @@ class Identity:
         from .voice.wake_train import list_models
         w = self.wake()
         return {**self.names(), "wake": {**w, "builtin": w["model"] == "hey_jarvis",
-                                         "capability": capabilities.WAKE_PHRASE, "models": list_models(self.home),
+                                         "capability": _wake_capability(), "models": list_models(self.home),
                                          "train_command": 'jarvis wake train "<phrase>" --say "<Hebrew spelling>"'},
                 "voice": self.voice(), "voices": voice_catalog(self.cfg),
                 "rules": {"same_model": "allowed (no cost change)",

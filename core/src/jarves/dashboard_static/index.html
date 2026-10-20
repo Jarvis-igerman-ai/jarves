@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="he" dir="rtl">
+<html lang="en" dir="ltr">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -7,6 +7,10 @@
 <link rel="stylesheet" href="/static/style.css">
 <link rel="stylesheet" href="/static/m4.css">
 <link rel="stylesheet" href="/static/shell.css">
+<script src="/static/locales/en.js" defer></script>
+<script src="/static/locales/he.js" defer></script>
+<script src="/static/locales/ar.js" defer></script>
+<script src="/static/locales/ru.js" defer></script>
 <script src="/static/i18n.js" defer></script>
 <script src="/static/app.js" defer></script>
 <script src="/static/pages.js" defer></script>
@@ -25,60 +29,60 @@
 <script src="/static/shell.js" defer></script>
 </head>
 <body>
-<a class="skip" href="#main" data-he="דילוג לתוכן" data-en="Skip to content">דילוג לתוכן</a>
+<a class="skip" href="#main" data-he="דילוג לתוכן" data-en="Skip to content">Skip to content</a>
 <div class="shell">
-  <aside class="side" id="side" aria-label="ניווט">
+  <aside class="side" id="side" aria-label="Navigation">
     <div class="brand"><span class="dot" id="coreDot" title="Core state"></span><span>JARVES</span>
-      <button type="button" class="ghost icon-btn side-close" id="sideClose" aria-label="סגירת התפריט">✕</button></div>
+      <button type="button" class="ghost icon-btn side-close" id="sideClose" aria-label="Close menu">✕</button></div>
     <nav id="nav">
       <div class="nav-group" data-group="overview">
-        <div class="nav-h" data-he="סקירה" data-en="Overview">סקירה</div>
-        <a href="#/home" data-page="home"><span data-he="בית" data-en="Home">בית</span></a>
-        <a href="#/runtime" data-page="runtime"><span data-he="שליטה ומצב ריצה" data-en="Controls &amp; runtime">שליטה ומצב ריצה</span></a>
-        <a href="#/connections" data-page="connections"><span data-he="חיבורים" data-en="Connections">חיבורים</span></a>
-        <a href="#/devices" data-page="devices"><span data-he="מכשירים וגישה" data-en="Devices &amp; access">מכשירים וגישה</span></a>
+        <div class="nav-h" data-he="סקירה" data-en="Overview">Overview</div>
+        <a href="#/home" data-page="home"><span data-he="בית" data-en="Home">Home</span></a>
+        <a href="#/runtime" data-page="runtime"><span data-he="שליטה ומצב ריצה" data-en="Controls &amp; runtime">Controls &amp; runtime</span></a>
+        <a href="#/connections" data-page="connections"><span data-he="חיבורים" data-en="Connections">Connections</span></a>
+        <a href="#/devices" data-page="devices"><span data-he="מכשירים וגישה" data-en="Devices &amp; access">Devices &amp; access</span></a>
       </div>
       <div class="nav-group" data-group="activity">
-        <div class="nav-h" data-he="פעילות" data-en="Activity">פעילות</div>
-        <a href="#/conversations" data-page="conversations"><span data-he="שיחות" data-en="Conversations">שיחות</span></a>
-        <a href="#/issues" data-page="issues"><span data-he="בעיות" data-en="Issues">בעיות</span> <span class="count" id="issueCount"></span></a>
-        <a href="#/tasks" data-page="tasks"><span data-he="משימות רקע" data-en="Background tasks">משימות רקע</span></a>
-        <a href="#/logs" data-page="logs"><span data-he="יומן מערכת" data-en="System log">יומן מערכת</span></a>
+        <div class="nav-h" data-he="פעילות" data-en="Activity">Activity</div>
+        <a href="#/conversations" data-page="conversations"><span data-he="שיחות" data-en="Conversations">Conversations</span></a>
+        <a href="#/issues" data-page="issues"><span data-he="בעיות" data-en="Issues">Issues</span> <span class="count" id="issueCount"></span></a>
+        <a href="#/tasks" data-page="tasks"><span data-he="משימות רקע" data-en="Background tasks">Background tasks</span></a>
+        <a href="#/logs" data-page="logs"><span data-he="יומן מערכת" data-en="System log">System log</span></a>
       </div>
       <div class="nav-group" data-group="everyday">
-        <div class="nav-h" data-he="יום-יום" data-en="Everyday">יום-יום</div>
-        <a href="#/calendar" data-page="calendar"><span data-he="יומן" data-en="Calendar">יומן</span></a>
-        <a href="#/jobs" data-page="jobs"><span data-he="משימות קבועות" data-en="Scheduled jobs">משימות קבועות</span></a>
-        <a href="#/reports" data-page="reports"><span data-he="דוחות" data-en="Reports">דוחות</span></a>
-        <a href="#/alerts" data-page="alerts"><span data-he="התראות" data-en="Alerts">התראות</span></a>
-        <a href="#/notes" data-page="notes"><span data-he="פתקים" data-en="Notes">פתקים</span></a>
-        <a href="#/files" data-page="files"><span data-he="קבצים שלי" data-en="My files">קבצים שלי</span></a>
+        <div class="nav-h" data-he="יום-יום" data-en="Everyday">Everyday</div>
+        <a href="#/calendar" data-page="calendar"><span data-he="יומן" data-en="Calendar">Calendar</span></a>
+        <a href="#/jobs" data-page="jobs"><span data-he="משימות קבועות" data-en="Scheduled jobs">Scheduled jobs</span></a>
+        <a href="#/reports" data-page="reports"><span data-he="דוחות" data-en="Reports">Reports</span></a>
+        <a href="#/alerts" data-page="alerts"><span data-he="התראות" data-en="Alerts">Alerts</span></a>
+        <a href="#/notes" data-page="notes"><span data-he="פתקים" data-en="Notes">Notes</span></a>
+        <a href="#/files" data-page="files"><span data-he="קבצים שלי" data-en="My files">My files</span></a>
       </div>
       <div class="nav-group" data-group="assistant">
-        <div class="nav-h" data-he="העוזר" data-en="Assistant">העוזר</div>
-        <a href="#/identity" data-page="identity"><span data-he="שם וקול" data-en="Identity &amp; voice">שם וקול</span></a>
-        <a href="#/appearance" data-page="appearance"><span data-he="מראה" data-en="Appearance">מראה</span></a>
-        <a href="#/memory" data-page="memory"><span data-he="זיכרון" data-en="Memory">זיכרון</span></a>
-        <a href="#/workspace" data-page="workspace"><span data-he="קבצי אישיות" data-en="Persona files">קבצי אישיות</span></a>
+        <div class="nav-h" data-he="העוזר" data-en="Assistant">Assistant</div>
+        <a href="#/identity" data-page="identity"><span data-he="שם וקול" data-en="Identity &amp; voice">Identity &amp; voice</span></a>
+        <a href="#/appearance" data-page="appearance"><span data-he="מראה" data-en="Appearance">Appearance</span></a>
+        <a href="#/memory" data-page="memory"><span data-he="זיכרון" data-en="Memory">Memory</span></a>
+        <a href="#/workspace" data-page="workspace"><span data-he="קבצי אישיות" data-en="Persona files">Persona files</span></a>
       </div>
       <div class="nav-group" data-group="capabilities">
-        <div class="nav-h" data-he="יכולות" data-en="Capabilities">יכולות</div>
-        <a href="#/setup" data-page="setup"><span data-he="הגדרה ותוספים" data-en="Setup &amp; add-ons">הגדרה ותוספים</span></a>
-        <a href="#/features" data-page="features"><span data-he="יכולות ומתגים" data-en="Features &amp; switches">יכולות ומתגים</span></a>
-        <a href="#/skills" data-page="skills"><span data-he="כלים ותקינות" data-en="Skills &amp; health">כלים ותקינות</span></a>
-        <a href="#/newskills" data-page="newskills"><span data-he="כלים חדשים" data-en="New Skills">כלים חדשים</span></a>
-        <a href="#/autonomy" data-page="autonomy"><span data-he="עצמאות" data-en="Autonomy">עצמאות</span></a>
+        <div class="nav-h" data-he="יכולות" data-en="Capabilities">Capabilities</div>
+        <a href="#/setup" data-page="setup"><span data-he="הגדרה ותוספים" data-en="Setup &amp; add-ons">Setup &amp; add-ons</span></a>
+        <a href="#/features" data-page="features"><span data-he="יכולות ומתגים" data-en="Features &amp; switches">Features &amp; switches</span></a>
+        <a href="#/skills" data-page="skills"><span data-he="כלים ותקינות" data-en="Skills &amp; health">Skills &amp; health</span></a>
+        <a href="#/newskills" data-page="newskills"><span data-he="כלים חדשים" data-en="New Skills">New Skills</span></a>
+        <a href="#/autonomy" data-page="autonomy"><span data-he="עצמאות" data-en="Autonomy">Autonomy</span></a>
       </div>
       <div class="nav-group" data-group="usage">
-        <div class="nav-h" data-he="שימוש ועלויות" data-en="Usage &amp; cost">שימוש ועלויות</div>
-        <a href="#/usage" data-page="usage"><span data-he="שימוש ומגבלות" data-en="Usage &amp; limits">שימוש ומגבלות</span></a>
-        <a href="#/costs" data-page="costs"><span data-he="עלויות" data-en="Costs">עלויות</span></a>
+        <div class="nav-h" data-he="שימוש ועלויות" data-en="Usage &amp; cost">Usage &amp; cost</div>
+        <a href="#/usage" data-page="usage"><span data-he="שימוש ומגבלות" data-en="Usage &amp; limits">Usage &amp; limits</span></a>
+        <a href="#/costs" data-page="costs"><span data-he="עלויות" data-en="Costs">Costs</span></a>
       </div>
       <div class="nav-group" data-group="system">
-        <div class="nav-h" data-he="מערכת ועזרה" data-en="System &amp; help">מערכת ועזרה</div>
-        <a href="#/guides" data-page="guides"><span data-he="מדריכים" data-en="Guides">מדריכים</span></a>
-        <a href="#/settings" data-page="settings"><span data-he="הגדרות" data-en="Settings">הגדרות</span></a>
-        <a href="#/backup" data-page="backup"><span data-he="גיבוי" data-en="Backup">גיבוי</span></a>
+        <div class="nav-h" data-he="מערכת ועזרה" data-en="System &amp; help">System &amp; help</div>
+        <a href="#/guides" data-page="guides"><span data-he="מדריכים" data-en="Guides">Guides</span></a>
+        <a href="#/settings" data-page="settings"><span data-he="הגדרות" data-en="Settings">Settings</span></a>
+        <a href="#/backup" data-page="backup"><span data-he="גיבוי" data-en="Backup">Backup</span></a>
       </div>
     </nav>
     <div class="side-foot">
@@ -88,20 +92,20 @@
   <div class="scrim" id="scrim" hidden></div>
   <div class="content">
     <header class="appbar" id="appbar">
-      <button type="button" class="ghost icon-btn menu-btn" id="menuBtn" aria-controls="side" aria-expanded="false" aria-label="תפריט">☰</button>
+      <button type="button" class="ghost icon-btn menu-btn" id="menuBtn" aria-controls="side" aria-expanded="false" aria-label="Menu">☰</button>
       <div class="search" role="search">
         <input type="search" id="gsearch" autocomplete="off" spellcheck="false" aria-controls="gresults" aria-expanded="false"
-          aria-autocomplete="list" placeholder="חיפוש…" aria-label="חיפוש">
+          aria-autocomplete="list" placeholder="Search…" aria-label="Search">
         <kbd class="search-key" aria-hidden="true">/</kbd>
         <div class="gresults card" id="gresults" role="listbox" hidden></div>
       </div>
       <div class="status-chips" id="statusChips" aria-live="polite"></div>
       <div id="topbar" class="topbar-slot" aria-live="polite"></div>
       <span class="spacer"></span>
-      <button type="button" class="ghost lang-btn" id="langBtn" lang="en">English</button>
+      <span class="lang-slot" id="langSlot"></span>
       <button id="themeBtn" class="ghost icon-btn" type="button" aria-label="Theme">◐</button>
     </header>
-    <main id="main" aria-live="polite" tabindex="-1"><div class="muted">טוען…</div></main>
+    <main id="main" aria-live="polite" tabindex="-1"><div class="muted">Loading…</div></main>
   </div>
 </div>
 <div id="tip" class="tip" role="tooltip" hidden></div>

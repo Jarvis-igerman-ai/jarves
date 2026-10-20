@@ -8,8 +8,8 @@ function platformCell(t) {
   if (!t) return el("span", { class: "muted small" }, "—");
   const cls = t.status === "verified_on_device" ? "ok" : t.status === "blocked" ? "fail" : t.status === "planned" ? "plain" : "medium";
   return el("div", {}, pill(cls, PLATFORM[t.status] || t.status),
-    t.evidence ? el("div", { class: "muted small" }, t.evidence) : null,
-    t.blocker ? el("div", { class: "small" }, "Blocker: " + t.blocker) : null,
+    t.evidence ? el("div", { class: "muted small" }, txh(t, "evidence")) : null,
+    t.blocker ? el("div", { class: "small" }, tx("חסם: ", "Blocker: ") + txh(t, "blocker")) : null,
     t.roadmap_issue ? el("a", { class: "small", href: t.roadmap_issue, target: "_blank", rel: "noopener" }, "roadmap issue") : null);
 }
 
@@ -68,7 +68,7 @@ PAGES.newskills = async function (arg) {
     const caps = s.requested.map((c) => {
       const cb = el("input", { type: "checkbox", value: c });
       cb.checked = (s.grants.capabilities || []).includes(c);
-      return el("label", { class: "small", style: "margin-right:12px" }, cb, " " + capLabel(c));
+      return el("label", { class: "small", style: "margin-inline-end:12px" }, cb, " " + capLabel(c));
     });
     const hasActions = s.tools.some((t) => t.permission === "action");
     const actCb = el("input", { type: "checkbox" }); actCb.checked = !!s.grants.actions;
@@ -81,7 +81,7 @@ PAGES.newskills = async function (arg) {
       el("div", { dir: "auto", class: "small", style: "margin-top:6px" }, s.summary_he),
       s.has_code ? el("div", { class: "small", style: "margin-top:6px;color:#b45309" },
         "⚠ Runs Python code; on Windows it is NOT OS-sandboxed.") : null,
-      el("div", { class: "small", style: "margin-top:6px" }, "Tools: ", s.tools.map((t) => el("code", { style: "margin-right:8px" }, `${t.name} (${t.permission})`))),
+      el("div", { class: "small", style: "margin-top:6px" }, "Tools: ", s.tools.map((t) => el("code", { style: "margin-inline-end:8px" }, `${t.name} (${t.permission})`))),
       el("div", { style: "margin-top:8px" }, el("b", { class: "small" }, "Grants: "), caps.length ? caps : el("span", { class: "muted small" }, "requests nothing "),
         hasActions ? el("label", { class: "small" }, actCb, " allow its action tools") : null, " ", save),
       s.last_error ? el("div", { class: "small" }, `Last error (${s.last_error.tool}): ${s.last_error.error}`) : null,

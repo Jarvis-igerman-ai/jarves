@@ -1,4 +1,4 @@
-"""SW-V3 P0.2 dashboard redesign: Hebrew-first shell, grouped navigation that keeps every page, the locale /
+"""SW-V3 P0.2 dashboard redesign: English-first multi-language shell (P0.2c), grouped navigation that keeps every page, the locale /
 search / status scripts are served and safe, and /api/runtime names the host device for the header chip."""
 from __future__ import annotations
 
@@ -21,15 +21,15 @@ def registered_pages() -> set[str]:
     return pages
 
 
-def test_shell_is_hebrew_first_and_serves_the_new_scripts(dash):
+def test_shell_is_english_first_and_serves_the_new_scripts(dash):
     r, html = req(dash, "GET", "/")
-    assert r.status == 200 and b'<html lang="he" dir="rtl">' in html
+    assert r.status == 200 and b'<html lang="en" dir="ltr">' in html
     for f in ("i18n.js", "shell.js", "shell.css"):
         assert f"/static/{f}".encode() in html
         r, body = req(dash, "GET", "/static/" + f)
         assert r.status == 200 and b".innerHTML" not in body and b"eval(" not in body
     assert html.index(b"/static/i18n.js") < html.index(b"/static/app.js")      # the locale loads first
-    assert b'id="gsearch"' in html and b'id="langBtn"' in html and b'id="statusChips"' in html
+    assert b'id="gsearch"' in html and b'id="langSlot"' in html and b'id="statusChips"' in html
 
 
 def test_grouped_navigation_keeps_every_page():
