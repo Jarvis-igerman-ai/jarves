@@ -636,3 +636,8 @@ See [docs/reviews/S1_T03R1_ENGINEERING_REVIEW.md](reviews/S1_T03R1_ENGINEERING_R
 - Multi-device + Tailscale remote: after V3 P0–P1, together with the phone satellite.
 - Installer signing: research free options (SignPath OSS etc.); stay unsigned meanwhile.
 - Defaults: ask before any outward action; keep conversations/logs 90 days then summarize into memory; proactive suggestions rare/important only (quiet hours respected); installer pre-selects only core + music.
+
+## V3 P1 basics (branch v3-p1-basics, Issue #17)
+Done (offline tests in `core/tests/test_v3_p1.py`): (1) one-time tray notice on the first window close (pref `tray_notice_shown` in runtime.json; only when a tray icon exists); (2) workweek: `scheduler.workweek` (default `0-4` Sun-Thu, `1-5` allowed) already drove "ימי חול", now covered by tests; (3) `timers` feature: `timer_start` / `alarm_set` / `timers_list` / `timer_cancel`, stored in memory.db, rung by the Core itself (GPT-Live announce, else Core TTS) with no face needed; a ring missed by more than 10 min is recorded as missed, never rung late; (4) `lists` feature: shopping/todo lists (`list_add/show/check/remove/clear`, clear needs approval); (5) `jarvis help [topic]` prints the feature guides as Hebrew+English text.
+Each new feature has a guide (`timers.toml`, `lists.toml`), capability matrix rows (operations.py M3_FEATURES), setup-wizard group and bundle check.
+Not verified on real hardware: audible timer ring on the real speaker, the Windows toast for the tray notice. No dashboard pages for timers/lists yet (voice only).
