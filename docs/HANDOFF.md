@@ -626,3 +626,6 @@ See [docs/reviews/S1_T03R1_ENGINEERING_REVIEW.md](reviews/S1_T03R1_ENGINEERING_R
 - Home Assistant: LAST priority; build the generic, config-driven version and add a `jarvis home start` wizard (like `jarvis google start`).
 - Telegram outbound: build it; owner creates the bot. Also add a `jarvis instagram start` setup wizard (Instagram channel; research API limits first, assisted/handoff if no official send API).
 - Tray: show a one-time "still running in the tray" notice on first window close.
+- Instagram: read DMs aloud + send replies (always with confirmation); official API only.
+- Morning briefing includes: calendar today, important unread Gmail (summary), weather, reminders/lists.
+- Rocket alerts: last priority. Phone (OnePlus 11) satellite: after V3 P0–P1.
