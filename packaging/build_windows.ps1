@@ -85,8 +85,8 @@ $Py = Join-Path $Stage "python\python.exe"
 $req = Join-Path $Out "requirements.txt"
 Push-Location (Join-Path $Repo "core")
 try {
-    Step "locked wheels (uv.lock, extras voice + camera + tray, no dev)"
-    Run "uv" @("export", "--frozen", "--no-dev", "--extra", "voice", "--extra", "camera", "--extra", "tray", "--no-emit-project",
+    Step "locked wheels (uv.lock, extras voice + camera + tray + browser, no dev)"
+    Run "uv" @("export", "--frozen", "--no-dev", "--extra", "voice", "--extra", "camera", "--extra", "tray", "--extra", "browser", "--no-emit-project",
                "--format", "requirements-txt", "-o", $req)
     Run "uv" @("pip", "install", "--python", $Py, "--break-system-packages", "--require-hashes", "--compile-bytecode",
                "-r", $req)

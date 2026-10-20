@@ -23,6 +23,7 @@ from .skills.music import MusicSkill, PearDesktopPlayer
 from .skills.settings import Settings, SettingsSkill
 from . import workspace as wsp
 from . import features as feat
+from . import browser as browser_mod            # SW-V3 P1.2: registers the `browser` switch (default OFF)
 from .curator import _SENSITIVE as SENSITIVE_TEXT, Curator, openai_extractor
 from .dashboard import DashboardSkill
 from .voice.audio import AudioUnavailable, SoundDeviceAudio, StreamingAudio
@@ -201,6 +202,7 @@ class Core:
                               self.on_message, self._face_connected)
         from .camera import wire as camera_wire              # WP-J camera: switches default OFF (camera/wire.py)
         self.camera = camera_wire.attach(self)
+        self.browser = browser_mod.attach(self)              # Browser Skill: allow-list control, read-only + ask
         from . import appearance                             # WP-M2: face / 2D / 3D avatar / hidden (appearance.py)
         self.appearance = appearance.attach(self)
         from .skills import generated                        # WP-M2: approved generated Skills (skills/generated.py)
@@ -289,6 +291,8 @@ class Core:
         await self.registry.drain()                 # shielded side effects finish before the store closes
         if getattr(self, "camera", None) is not None:
             await self.camera.stop()                # sensor closed, indicator off, faces.db closed
+        if getattr(self, "browser", None) is not None:
+            await self.browser.close("core stopping")   # headless browser + its private session gone
         self.curator.cancel()
         try:                                        # what this run learned is kept (rules only: no network now)
             self.curator.llm = None

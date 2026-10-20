@@ -1299,6 +1299,8 @@ def main(argv: list[str] | None = None) -> int:
     from .usage import add_cli as add_usage_cli, cmd_usage
     add_backup_cli(sub)                       # SW-V2 M5: jarvis backup / restore
     add_usage_cli(sub)                        # SW-V2 M5: jarvis usage
+    from .browser import add_cli as add_browser_cli, cmd_browser
+    add_browser_cli(sub)                      # SW-V3 P1.2: jarvis browser status / sites / allow / remove
     wk = sub.add_parser("wake", help="calibrate the wake word to your voice and mic, or train a new wake phrase")
     wk.add_argument("action", choices=["test", "train"])
     wk.add_argument("phrase", nargs="*", help="train: the new phrase in Latin letters, e.g. \"hey max\"")
@@ -1370,7 +1372,7 @@ def main(argv: list[str] | None = None) -> int:
             "diagnose": cmd_diagnose, "features": cmd_features, "google": cmd_google,
             "backup": cmd_backup, "restore": cmd_restore, "usage": cmd_usage, "start": cmd_start,
             "show": cmd_display, "hide": cmd_display, "autostart": cmd_autostart,
-            "update": cmd_update}[a.cmd](a, cfg, home)
+            "update": cmd_update, "browser": cmd_browser}[a.cmd](a, cfg, home)
 
 
 if __name__ == "__main__":
