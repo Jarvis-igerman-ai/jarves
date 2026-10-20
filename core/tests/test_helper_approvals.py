@@ -363,6 +363,13 @@ async def test_approved_command_runs_and_is_logged(helper_env, monkeypatch):
     # its output is untrusted: the next model action in this turn is refused
     nxt = await e.reg.call("shell_propose", {"command": cmd, "purpose": "again"})
     assert nxt.code == "TOOL_UNTRUSTED_TURN"
+    # V4-VC-3: the IDENTICAL call repeated in this turn (GPT-Live re-delegated the spoken "yes") is not run again
+    # and not refused: the earlier result comes back, marked already done; no new approval, no new run
+    n_audit = len((e.home / "helper" / "audit.jsonl").read_text(encoding="utf-8").splitlines())
+    again = await e.reg.call("shell_propose", {"command": cmd, "purpose": "say hello"})
+    assert again.ok and again.code == "ok" and "hello from helper" in again.data["output_tail"]
+    assert "already_done" in again.data
+    assert len((e.home / "helper" / "audit.jsonl").read_text(encoding="utf-8").splitlines()) == n_audit
 
 
 async def test_denied_command_never_runs(helper_env):
@@ -412,6 +419,7 @@ async def test_readonly_auto_only_when_the_owner_enabled_it(helper_env):
     assert (await call).ok
     e.f.set("helper_readonly_auto", True)
     e.reg._untrusted.clear()
+    e.reg._recent_ok.clear()                                             # a new owner turn (V4-VC-3 replay window)
     r = await e.reg.call("shell_propose", {"command": cmd, "purpose": "where am I"})
     assert r.ok and r.data["approval"].startswith("auto") and e.svc.pending() == []
     e.reg._untrusted.clear()
@@ -494,3 +502,42 @@ def test_helper_is_registered_grouped_bundled_declared_guided_and_hebrew():
     assert all("helper_readonly_auto" not in (s.action or "") for s in guides.load()["helper"].steps)
     rows = {r["id"]: r for r in sw.check_addons()["rows"]}
     assert rows["helper"]["ok"] and rows["approvals"]["ok"], (rows["helper"], rows["approvals"])
+
+
+# ====================================================================== V4-VC-3 (campaign C)
+async def test_identical_approved_action_repeated_is_replayed_not_asked_again():
+    """GPT-Live re-delegates the spoken approval "yes": the second backend run repeats the SAME approved action. It
+    is neither run nor asked again (the earlier result comes back, marked already done); different arguments and a
+    non-approved action still go the normal way."""
+    runs, asks = [], []
+
+    class Lists(Skill):
+        name = "lists_vc3"
+        description = "x"
+
+        def tools(self):
+            async def clear(_a):
+                runs.append(1)
+                return ToolResult(True, "cleared", {"n": 3})
+
+            async def add(_a):
+                runs.append(2)
+                return ToolResult(True, "added")
+            return [Tool("vc3_clear", "clear", clear, NoArgs, permission="destructive", confirm="Clear the list?"),
+                    Tool("vc3_add", "add", add, NoArgs, permission="action")]
+
+    reg = SkillRegistry(allowed_actions={"vc3_add"})
+
+    async def confirm(prompt):
+        asks.append(prompt)
+        return True
+    reg.confirm = confirm
+    reg.register(Lists())
+    first = await reg.call("vc3_clear", {})
+    again = await reg.call("vc3_clear", {})
+    assert first.ok and again.ok and again.data["n"] == 3 and "already_done" in again.data
+    assert len(runs) == 1 and len(asks) == 1
+    # an action that needed no approval may be repeated on purpose ("add milk" twice): it runs again
+    await reg.call("vc3_add", {})
+    await reg.call("vc3_add", {})
+    assert runs.count(2) == 2

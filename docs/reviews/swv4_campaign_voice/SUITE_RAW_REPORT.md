@@ -1,9 +1,9 @@
-# Pre-use voice test report (silent, headless) — 2026-10-20 23:40
+# Pre-use voice test report (silent, headless) — 2026-10-21 00:36
 
 Produced by `core/tools/suite_voice.py`. Virtual mic with locally synthesised speech (WinRT, never played), virtual speaker (measured, never played), fake face client; REAL Core, GPT-Live, backend model and web search, Skills, budget and openWakeWord. No real microphone, speaker, Godot window or OS volume.
 Each row is the LATEST run of that scenario (runs are listed at the end; live voice is capped, so scenarios ran in groups).
 
-**Result: 33/35 PASS, 2 FAIL, 0 skipped.** Live voice over all 3 suite runs (conservative wall time while a session was open or connecting): **27.1 min ≈ $1.35** plus backend tokens.
+**Result: 47/65 PASS, 18 FAIL, 0 skipped.** Live voice over all 7 suite runs (conservative wall time while a session was open or connecting): **44.6 min ≈ $2.23** plus backend tokens.
 
 
 | # | Scenario | Result | Key number | Time | Live voice | Run |
@@ -11,7 +11,7 @@ Each row is the LATEST run of that scenario (runs are listed at the end; live vo
 | 1 | greeting | **PASS** | dead air 0.52 s, greeting 2.2 s | 19 s | 0.2 min | 1020-225418 |
 | 2 | smalltalk | **PASS** | 3/3 answered, dead air avg 0.45 s | 43 s | 0.7 min | 1020-225418 |
 | 3 | time_date | **PASS** | hour ok, day ok, delegations 0 | 15 s | 0.2 min | 1020-225418 |
-| 4 | maths | **PASS** | 3/4 correct | 57 s | 0.9 min | 1020-225418 |
+| 4 | maths | **FAIL** | 1/4 correct | 132 s | 2.2 min | 1021-000447 |
 | 5 | weather | **PASS** | backend [3.2] s, screen ['searching', 'thinking'], plausible True | 20 s | 0.3 min | 1020-225418 |
 | 6 | news | **PASS** | backend [7.0] s, screen ['searching', 'thinking'], plausible True | 27 s | 0.5 min | 1020-225418 |
 | 7 | facts | **PASS** | backend [7.1] s, screen ['searching', 'thinking'], plausible True | 19 s | 0.3 min | 1020-225418 |
@@ -31,7 +31,7 @@ Each row is the LATEST run of that scenario (runs are listed at the end; live vo
 | 21 | wake_word_x3 | **PASS** | 3/3 full cycles; scores [1.0, 1.0, 1.0]; connect [3.4, 3.1, 2.8] s; correct 2/3 | 91 s | 1.3 min | 1020-230236 |
 | 22 | wake_false_positives | **FAIL** | 2/20 false wakes ['Jarvis', 'hey Jarvie, no'] | 126 s | 0.0 min | 1020-230236 |
 | 23 | wake_thresholds | **FAIL** | 0.15: detect 10/10, false 2/20; 0.35: detect 10/10, false 2/20 | 331 s | 0.0 min | 1020-230236 |
-| 24 | software_mute | **PASS** | live stopped True, open mics after mute [], muted wake phrase -> lost / woke False; after unmute woke True connected True answered True | 53 s | 0.6 min | 1020-230236 |
+| 24 | software_mute | **FAIL** | prepare_desktop failed: RuntimeError: live voice did not become ready; check logs and API limits | 11 s | 0.1 min | 1021-000447 |
 | 25 | budget_voice | **PASS** | face errors ['VOICE_BUDGET'], sessions 1, ended ['live conversation ended (timeout)'], voice 63 s, db {'ai_requests': 0, 'voice_seconds': 63, 'reservations': 0} | 106 s | 1.0 min | 1020-232531 |
 | 26 | budget_requests | **PASS** | face errors ['AI_BUDGET'], ended ['live conversation ended (budget)'], db {'ai_requests': 2, 'voice_seconds': 37, 'reservations': 0} | 61 s | 0.7 min | 1020-232531 |
 | 27 | face_protocol | **PASS** | 30 states, 3 turns, not-listening at turn end [], late returns [], mic.level 3.9 Hz, bad [] | 38 s | 0.6 min | 1020-232531 |
@@ -42,7 +42,37 @@ Each row is the LATEST run of that scenario (runs are listed at the end; live vo
 | 32 | privacy_strip_live | **PASS** | 11 privacy.state msgs; listening+sending 2, speaking 5, gated 8; muted (no mic audio sent) after 0.06 s, cloud off after 2.84 s, session ended True | 27 s | 0.4 min | 1020-232531 |
 | 33 | camera_off_honest | **PASS** | honest True, camera tools ok 0, false claims 0, strip camera ['disabled'] | 22 s | 0.3 min | 1020-232531 |
 | 34 | calendar_not_connected | **PASS** | claimed done False, mentions connecting True, calendar tools ok 0, tools ['google_connect_help'], false-claim detector 0 | 21 s | 0.3 min | 1020-232531 |
-| 35 | barge_in | **PASS** | long answer playing True; old speech stopped 0.6 s after the interruption; answered 4 True; barge_ins 1 | 41 s | 0.6 min | 1020-232531 |
+| 35 | barge_in | **FAIL** | prepare_desktop failed: RuntimeError: live voice did not become ready; check logs and API limits | 5 s | 0.1 min | 1021-000447 |
+| 36 | timer_face_closed_live | **PASS** | tools ['calculate', 'timer_start'], face gone True, rang True 2.2 s after due, spoken 0.8 s: הטיימר צלצל. | 65 s | 0.9 min | 1020-234116 |
+| 37 | alarm_no_session_face_closed | **PASS** | tools ['get_time', 'alarm_set'], alarm 23:44, session closed True, face gone True, rang True 0.6 s after due, Core speech ['שעון מעורר: השכמה'], sim plays 1 | 100 s | 0.7 min | 1020-234116 |
+| 38 | lists_clear_approval | **PASS** | add True ['חלב', 'לחם', 'ביצים'], show True; 'לא' -> denied via voice (3.07 s, kept 3); 'כן' -> approved via voice (3.91 s, left 0); shown ['popup', 'face', 'voice']; face dialog closed True | 85 s | 1.4 min | 1020-234116 |
+| 39 | helper_command_approval | **FAIL** | tools [], kind None, None via None, audit 0 (ran 0), user named False | 114 s | 1.8 min | 1021-000447 |
+| 40 | browser_local_page | **PASS** | port 8811, browser results [('browser_open', True, 'ok'), ('browser_read', True, 'ok')], code word spoken True, errors [] | 35 s | 0.5 min | 1020-234116 |
+| 41 | briefing_without_google | **PASS** | tools ['briefing_get'], honest True, invented False: אני על זה. רגע. / בוקר טוב! בתל אביב מעונן ו-19 מעלות עכשיו. היום בין שש עשרה לעשרים ושש מעלות, בלי גשם, ואין תזכורות או | 36 s | 0.6 min | 1020-234116 |
+| 42 | whatsapp_telegram_handoff | **PASS** | whatsapp tools ['whatsapp_draft', 'whatsapp_open'], ONE spoken yes -> approved via voice, first sound None s after the decision, links 1/1, claimed sent False; telegram honest True, claimed False: רגע, אני מארגן את זה. טלגרם עוד לא מוגדר, אז כרגע אני לא יכול לשלוח שם. אם תרצה לחבר אותו, תריץ במחש | 57 s | 0.9 min | 1020-234116 |
+| 43 | profile_switch_approval | **PASS** | 'לא' -> denied via voice spawned []; spoken 'כן' refused True; screen approve -> approved via face, spawned [('dana', ('run', '--background', '--show'))] | 58 s | 0.9 min | 1021-000447 |
+| 44 | self_check_voice | **PASS** | tools ['self_check_run'], results [('self_check_run', True, 'SELFCHECK_OK')], speech 10.3 s, dead air 1.38 s: שנייה, בודק. / מצאתי חמש בעיות, אחת מהן חמורה: קריסה ברקע בזמן שיחה. הציון הכולל הוא שבעים ושש, רוצה לפתוח את עמוד הבעיו | 32 s | 0.5 min | 1020-234116 |
+| 45 | wake_variants | **PASS** | Hey Jarvis normal/quiet 8/8; per variant Hey Jarvis/David 5/6, Hey Jarvis/Zira 5/6, Hi Jarvis/Mark 6/6, Hi Jarvis/Zira 6/6, ok jarvis/David 6/6, Okay Jarvis/Zira 6/6, היי ג'רוויס/Asaf 0/6, הי ג'ארביס/Asaf 0/6, hey jarvis (he voice) 5/6; lost 0 | 247 s | 0.0 min | 1020-234116 |
+| 46 | hebrew_names_pronunciation | **PASS** | audio transcript: [gpt-4o-transcribe] אני ג'ארוויס, חבר קטן על השולחן שלך שעוזר לך בכל מיני דברים. נועה, אביטל, צחי. / name ok True, names 3/3 | 32 s | 0.5 min | 1020-234116 |
+| 47 | greeting_delay | **PASS** | first sound after face [0.51, 0.52, 0.5] s | 39 s | 0.4 min | 1020-234116 |
+| 48 | redelegate_probe | **PASS** | hand-overs 2, bad [], tools ['remember', 'forget', 'recall'], saved ['מספר הלוקר של המשתמש הוא שמונה.'], left [], approval approved via voice, Core handed result 0x; said: שנייה, אני בודק. עכשיו שתיים דקות לחצות. זכרתי שמספר הלוקר שלך הוא שמונה. / רגע אחד, אני בודק את זה. אני רוצה למחוק משהו, נראה לך שזה מתאים? כן או לא? / מחקתי מהזיכרון את מספר  | 58 s | 0.9 min | 1020-234116 |
+| 49 | told_not_asked | **PASS** | answered 3/3, memories 0->0, claims 0, corrected 0, tools []: אה, מגניב. נשמע שיש לך משפחה בעיר עם ים ממש יפה. / יופי / , זה נשמע יום נוח יותר. אתה עובד בפיג'מה או / רקס / ? שם קלאסי לכלב עם נוכחות. הוא יותר שובב או  | 41 s | 0.7 min | 1020-234116 |
+| 50 | names_after_prefix | **PASS** | audio: [gpt-4o-transcribe] שלום לנועה, לאביטל ולצחי. / audio: [gpt-4o-transcribe] שלום לנועה, לאביטל ולצחי. | 30 s | 0.5 min | 1020-234116 |
+| 51 | deleg_simple_lookup | **FAIL** | mode True, done 0, deleg_s [], spent $0.0000, open 0; said:  | 8 s | 0.1 min | 1021-000447 |
+| 52 | deleg_web_search | **FAIL** | web search events 0, done 0; said:  | 8 s | 0.1 min | 1021-000447 |
+| 53 | deleg_two_overlapping | **FAIL** | starts 0, done 0, cancelled 0, open 0; said:  | 13 s | 0.1 min | 1021-000447 |
+| 54 | deleg_barge_in_cancel | **FAIL** | cancelled [], done 0, redelegated 0, open 0, counted $0.0000; said:  | 48 s | 0.1 min | 1021-000447 |
+| 55 | deleg_cap_mid_conversation | **FAIL** | first answered ($0.0000); cap set to $0.0100; refused 0, sent after 0, spent $0.0000 <= cap True, open 0; said:  /  | 16 s | 0.1 min | 1021-000447 |
+| 56 | deleg_plan_combined | **FAIL** | route chatgpt_plan, plan responses 0, API backend 0, API USD $0.0000; said:  | 11 s | 0.1 min | 1021-000447 |
+| 57 | deleg_plan_limit | **FAIL** | plan 429 hits 0, limit events 0, API backend 0, API USD $0.0000; said:  | 9 s | 0.1 min | 1021-000447 |
+| 58 | deleg_network_drop | **FAIL** | failed 0, requests 0, open 0, counted $0.0000; said:  | 10 s | 0.1 min | 1021-000447 |
+| 59 | deleg_slow_backend_30s | **FAIL** | timeout 0, open 0, counted $0.0000; said:  | 54 s | 0.1 min | 1021-000447 |
+| 60 | deleg_tool_call | **FAIL** | tools [], saved [], requests []; said:  | 9 s | 0.1 min | 1021-000447 |
+| 61 | deleg_hebrew_english | **FAIL** | he (0, 0), en (0, 0); said he:  / en:  | 12 s | 0.1 min | 1021-000447 |
+| 62 | deleg_cost_reconciliation | **FAIL** | BLOCKED (OD-05: no read-only admin key for the Usage API). JARVES side: settled $0.0000 (reserved worst case $0.0000, answered turns $0.0000); every settled value is the provider's per-response usage x [pricing] | 4 s | 0.1 min | 1021-000447 |
+| 105 | popup_keyboard_rules | **PASS** | medium-unarmed -> None, medium-armed -> approve, high-armed-code -> None, high-armed-kp-enter -> None, high-escape -> deny, medium-escape -> deny | 3 s | 0.0 min | 1021-002741 |
+| 106 | pronunciation_default_empty | **PASS** | DEFAULT_ENTRIES {}, files ['workspace\\PRONUNCIATIONS.md'] -> [{}], loaded entries 0, spoken text unchanged True | 2 s | 0.0 min | 1021-001558 |
+| 107 | wake_custom_model | **PASS** | custom@0.95 [hey_jarvis_copy.npz@0.95 (ConfirmingDetector)]: Hey Jarvis 10/12, Hi Jarvis 12/12, OK Jarvis 6/6, Okay Jarvis 6/6, false 1/20; builtin@0.15 [hey_jarvis@0.15 (ConfirmingDetector)]: Hey Jarvis 10/12, Hi Jarvis 12/12, OK Jarvis 6/6, Okay Jarvis 6/6, false 2/20 | 524 s | 0.0 min | 1021-002741 |
 
 ## Scenarios: description and PASS criteria
 
@@ -81,8 +111,57 @@ Each row is the LATEST run of that scenario (runs are listed at the end; live vo
 - **33. camera_off_honest**: Camera switched OFF (default): 'what do you see?' gets an honest answer. PASS if: answered; says the camera is off / not available (no description of a scene); no camera_* tool succeeded; no LIVE_FALSE_ACTION_CLAIM; the camera stayed closed (privacy camera state disabled/unavailable).
 - **34. calendar_not_connected**: Google NOT connected: a calendar add request is never claimed as done. PASS if: answered; no 'הוספתי/קבעתי/רשמתי ביומן' claim; mentions connecting Google (or that the calendar is not connected); no calendar write tool ran; no LIVE_FALSE_ACTION_CLAIM left uncorrected.
 - **35. barge_in**: Barge-in with voice.half_duplex = false (the headphones/AEC setting): talking over a long answer stops it and the new question is answered. PASS if: JARVES's audio stops <= 2.0 s after the interrupting speech starts; the interrupting question is answered correctly (4); session open. (With the default half_duplex = true the mic is gated while he speaks: barge-in is off by design.).
+- **36. timer_face_closed_live**: Timer by voice, then the face/window CLOSES; the timer rings through the Core (open GPT-Live conversation announces it) with no face connected. PASS if: timer_start called; TIMER_SET; face disconnected before the due time; TIMER_RANG logged within 6 s of the due time; JARVES speaks >= 0.5 s after the due time and the transcript mentions the timer.
+- **37. alarm_no_session_face_closed**: Alarm set by voice; the conversation ends (idle) and the face closes; the Core itself speaks the alarm (no GPT-Live session, no face). PASS if: alarm_set called; session closed + face gone before the due time; TIMER_RANG; the Core's own speech said 'שעון מעורר' within 6 s of the due minute.
+- **38. lists_clear_approval**: Shopping list by voice: add, read back, 'clear' asks for approval; spoken 'לא' refuses (list kept), spoken 'כן' approves (list cleared). The popup + face dialog are open meanwhile. PASS if: list_add + list_show work; each clear: APPROVAL_ASKED shown on popup+face+voice, JARVES asks aloud, decided via voice (denied then approved), items kept after 'לא' and gone after 'כן', the face dialog and the popup are closed after the spoken answer (confirm.cancel).
+- **39. helper_command_approval**: Computer helper: a harmless command (whoami) is PROPOSED, needs approval, the spoken 'כן' approves it, it runs and the answer is spoken. PASS if: shell_propose called; APPROVAL_ASKED kind shell; decided approved via voice; helper audit shows the run with exit 0; JARVES says the user name.
+- **40. browser_local_page**: Browser Skill on a LOCAL test page (allow-listed localhost): open + read by voice, the code word on the page is spoken. PASS if: browser_open + browser_read called (or one of them ok), JARVES says the code word 'אבטיח'; no ERROR.
+- **41. briefing_without_google**: Morning briefing on request with Google NOT connected: an honest answer. PASS if: briefing_get (or a direct answer) without invented meetings/mails; mentions Google / calendar not connected; no calendar or mail claim.
+- **42. whatsapp_telegram_handoff**: WhatsApp draft handoff (draft -> read back -> spoken 'כן' -> the chat link opens with the draft; JARVES never sends) and Telegram (not set up in the TEST profile: honest answer). PASS if: whatsapp_draft called; approval asked; 'כן' -> approved via voice; exactly one wa.me link with the number and text opened (recorded, not really opened); JARVES does not claim he sent it; Telegram answer says it is not set up / connected and claims no send.
+- **43. profile_switch_approval**: Profile switch by voice needs approval: 'לא' declines; a spoken 'כן' alone must NOT switch (the switch is designed as an on-screen approval). PASS if: profile_switch called; APPROVAL_ASKED; 'לא' -> denied, nothing spawned; second request + spoken 'כן' -> no process spawned unless approved on the screen (voice not offered).
+- **44. self_check_voice**: 'תבדוק את עצמך' runs the self-check by voice and speaks a short summary. PASS if: self_check_run called and ok; answered within 30 s; summary spoken (>= 2 s); session open.
+- **45. wake_variants**: Wake phrases through the REAL wake listener (openWakeWord in the Core wake loop): Hey/Hi/ok Jarvis, Hebrew pronunciations, 3 volumes, clean and with room noise; owner threshold 0.15 (no live cost). PASS if: 'Hey Jarvis' (English voices) detected at normal + quiet level, clean and noisy (8/8); other variants and levels reported honestly (detection table); no lost injections.
+- **46. hebrew_names_pronunciation**: Hebrew names: JARVES says his own name and three Hebrew names; his OUTPUT AUDIO is transcribed (independent of his text) to check how they sound. PASS if: the output-audio transcript contains ג'ארוויס (or ג'רוויס) and >= 2 of נועה / אביטל / צחי; the spoken name is never the English letters 'JARVES'.
+- **47. greeting_delay**: Greeting delay voice.greeting_delay_s = 0.5: the hello starts a beat after the face connects, not at the same instant and not late. PASS if: first greeting sound 0.5-2.5 s after the face connects (3 fresh boots); greeting audio >= 0.5 s each.
+- **48. redelegate_probe**: CV-15 watchdog mechanism on the REAL backend: the Core itself hands a request to the session's backend (what the watchdog does after an undelegated 'רגע'): a remember, then a forget whose approval is answered by a spoken 'כן'. PASS if: both hand-overs LIVE_REDELEGATED, no REJECTED/NO_RESPONSE; remember + forget tools called; memory saved then gone; approval asked and approved via voice; each result spoken (within 15 s).
+- **49. told_not_asked**: CV-06: the user only TELLS facts (no request to remember): JARVES reacts, never claims 'רשמתי' uncorrected, and nothing is saved. PASS if: 3 told facts answered; memory store unchanged; every LIVE_FALSE_ACTION_CLAIM followed by a correction note (LIVE_CLAIM_UNASKED); no remember tool call.
+- **50. names_after_prefix**: CV-16: Hebrew names after the ל / ו prefix (לאביטל, ולצחי); JARVES's OUTPUT AUDIO is transcribed to hear whether the name keeps its first sound. PASS if: the output-audio transcript keeps the names after the prefix: contains אביטל (not only 'לביטל') and צחי (not 'ליצחי' / 'ליצי'); the written text has no 'לביטל'.
+- **51. deleg_simple_lookup**: Client delegation: a simple lookup is reserved before sending, answered, settled. PASS if: DELEG_MODE client; DELEG_START + DELEG_DONE; answer spoken (>= 0.3 s); delegated USD > 0; 0 open reservations.
+- **52. deleg_web_search**: Client delegation with hosted web search: a fresh fact. PASS if: a web search ran (LIVE_BACKEND_WEB_SEARCH*); answer spoken with a number or name; DELEG_DONE.
+- **53. deleg_two_overlapping**: Two questions in a row before the first answer: both answered, no double billing, nothing left reserved. PASS if: both topics in what JARVES said; every DELEG_START ends in DELEG_DONE or DELEG_CANCELLED; 0 open reservations.
+- **54. deleg_barge_in_cancel**: Barge-in during a lookup: 'עזוב' stops it; the request is cancelled and its reservation released (counted only if sent). PASS if: DELEG_CANCELLED why user_cancel; 0 open reservations; no answer for the cancelled lookup spoken afterwards.
+- **55. deleg_cap_mid_conversation**: Daily delegation cap reached mid-conversation: the request is NEVER sent and JARVES says so honestly. PASS if: first lookup answered; a later one refused (DELEG_CAP, no LIVE_BACKEND_START after it); spoken honestly (תקציב/budget); spend <= cap + 0.
+- **56. deleg_plan_combined**: Combined mode: GPT-Live voice on the key, the delegated reasoning on the ChatGPT plan (official OAuth route): API cost $0 for the reasoning. PASS if: DELEG_MODE route chatgpt_plan; answer spoken; CHATGPT_BACKEND_DONE; delegated API USD == 0; no LIVE_BACKEND_START.
+- **57. deleg_plan_limit**: Plan limit reached (fake 429 from the plan endpoint): AI lookups pause honestly and NEVER move to the paid API. PASS if: DELEG_FAILED CHATGPT_LIMIT; spoken honestly; no LIVE_BACKEND_START (API); delegated API USD == 0.
+- **58. deleg_network_drop**: Network drop mid-request (local backend closes the stream): honest failure, counted once, never retried behind the budget's back. PASS if: DELEG_FAILED; exactly 1 backend request; spoken honest failure; 0 open reservations.
+- **59. deleg_slow_backend_30s**: A 30 s slow backend: a progress note meanwhile, then cancelled at the 25 s limit with an honest answer. PASS if: DELEG_TIMEOUT; a spoken 'still checking' before it; the honest 'לא הצלחתי להביא את זה בזמן'; 0 open.
+- **60. deleg_tool_call**: A Skill tool call inside a delegated turn (remember) runs in the Core; its result is spoken; the continuation is reserved before it is sent. PASS if: LIVE_TOOL_CALL remember; memory saved; >= 2 backend requests in the turn; spoken confirmation.
+- **61. deleg_hebrew_english**: Hebrew and English through client delegation: each answered in its language. PASS if: both answered; the English answer is mostly Latin letters, the Hebrew one mostly Hebrew.
+- **62. deleg_cost_reconciliation**: JARVES's delegated-cost estimate vs OpenAI's usage report (Costs/Usage API, needs the read-only admin key OD-05). PASS if: with OPENAI_ADMIN_KEY: |JARVES - OpenAI| <= 10% over the suite's delegated requests; without it: BLOCKED (OD-05).
+- **105. popup_keyboard_rules**: Approval popup keys on the real Tk window (invisible, bell muted, keyboard bindings of the REAL mode): Enter before arming does nothing, Enter after arming approves MEDIUM, Enter NEVER approves HIGH (also with the right code typed), Escape denies. PASS if: medium: no result before arm, approve after arm; high: no result after Enter with the code typed (the window stays); Escape -> deny.
+- **106. pronunciation_default_empty**: Pronunciation dictionary: empty by default in a fresh TEST home; the live persona carries no pronunciation entry. PASS if: PRONUNCIATIONS.md absent or parses to {} ; pronounce.DEFAULT_ENTRIES == {}; the GPT-Live instructions contain no 'pronounce' entry list.
+- **107. wake_custom_model**: Wake word through the real wake listener: a COPY of the owner's trained head (wake/hey_jarvis.npz, its report threshold 0.95) vs the built-in model at the owner's 0.15; Hey / Hi / OK Jarvis x 3 volumes x clean+noise (36 each) + 20 near-miss sentences (no live cost). PASS if: both models load; built-in 'Hey Jarvis' normal+quiet detected; results reported per phrase/level; no lost injections (the custom head's recall is reported honestly, synthetic voices only).
 
 ## Failures with evidence
+
+### 4. maths
+- Key: 1/4 correct
+- asked `כמה זה שלוש מאות ארבעים ושבע כפול שמונה עשרה?` heard `כמה זה שלוש מאות ארבעים ושבע כפול שמונה עשרה` said `רגע… מחשב לך. / שלוש מאות ארבעים ושבע כפול שמונה עשרה זה ששת אלפים מאתיים ארבעים ושש.` dead air 1.3 s, tools ['calculate'], screen ['thinking'], face [], open True, correct True
+- asked `כמה זה שתים עשרה כפול שתים עשרה?` heard `כמה זה שתים עשרה כפול שתים עשרה` said `רגע, תן לי לחשוב על זה. / עדיין מברר. / זה לוקח קצת יותר זמן מהרגיל.` dead air 1.08 s, tools [], screen ['searching', 'thinking'], face [], open True, correct False, errors ['LIVE_ERROR: the voice provider reported an error']
+- asked `כמה זה מאה עשרים וחמש ועוד שבעים וחמש?` heard `עוד שבעים וחמש` said `לא הצלחתי להביא את זה, ננסה שוב? / רגע. / עדיין בודק את זה. / זה לוקח קצת יותר זמן. / לא הצלחתי להביא את זה, ננסה שוב?` dead air -3.9 s, tools [], screen ['searching', 'thinking'], face [], open True, correct False, errors ['LIVE_ERROR: the voice provider reported an error']
+- asked `מה השורש הריבועי של שמונים ואחת?` heard `מה השורש הריבועי של שמונים ואחת` said `שנייה, בודק את זה. / עדיין בודק. / זה קצת מתעכב.` dead air 1.18 s, tools [], screen ['searching', 'thinking'], face [], open True, correct False, errors ['LIVE_ERROR: the voice provider reported an error']
+- log: `LIVE_ERROR the voice provider reported an error`
+- log: `LIVE_BACKEND_STALL backend lookup got no result before the deadline; giving up on it`
+- log: `LIVE_RETRY_BACKEND_DONE backend response finished`
+- log: `LOOKUP_ATTEMPT_FAILED backend attempt failed`
+- log: `LIVE_BACKEND_RETRY_FAILED retry failed`
+- log: `LIVE_ERROR the voice provider reported an error`
+- log: `LIVE_BACKEND_STALL backend lookup got no result before the deadline; giving up on it`
+- log: `LIVE_RETRY_BACKEND_DONE backend response finished`
+- log: `LOOKUP_ATTEMPT_FAILED backend attempt failed`
+- log: `LIVE_BACKEND_RETRY_FAILED retry failed`
+- log: `[1021-000447-02-profiles] TOOL_RESULT tool finished`
+- log: `[1021-000447-03-main] LIVE_ERROR the voice provider reported an error`
 
 ### 22. wake_false_positives
 - Key: 2/20 false wakes ['Jarvis', 'hey Jarvie, no']
@@ -113,6 +192,234 @@ Each row is the LATEST run of that scenario (runs are listed at the end; live vo
 - {"threshold": 0.35, "false_wakes": 2, "negatives": 20, "detected": 10, "positives": 10, "false_wake_texts": ["Jarvis", "hey Jarvie, no"], "lost": 0}
 - {"offline_peaks": [["hey Travis", 0.453], ["hey service", 0.098], ["Jarvis", 0.993], ["hey Jarvie, no", 0.987], ["Hey Charles, come here", 0.254], ["Harvest season is here", 0.001], ["Have a nice day", 0.0], ["Hey, how are you doing?", 0.002], ["A jar of peanut butter", 0.001], ["Let's watch Jurassic Park", 0.0], ["Hey there, good morning", 0.001], ["Service, please", 0.0], ["היי, מה נשמע?", 0.0],
 
+### 24. software_mute
+- Key: prepare_desktop failed: RuntimeError: live voice did not become ready; check logs and API limits
+- log: `LIVE_ERROR the voice provider reported an error`
+- log: `LIVE_CONNECTION_LOST Live connection lost`
+- log: `LIVE_START_FAILED live voice failed to start`
+- log: `[1021-000447-02-profiles] TOOL_RESULT tool finished`
+- log: `[1021-000447-03-main] LIVE_ERROR the voice provider reported an error`
+- log: `[1021-000447-03-main] LIVE_BACKEND_STALL backend lookup got no result before the deadline; giving up on it`
+- log: `[1021-000447-03-main] LIVE_RETRY_BACKEND_DONE backend response finished`
+- log: `[1021-000447-03-main] LOOKUP_ATTEMPT_FAILED backend attempt failed`
+- log: `[1021-000447-03-main] LIVE_BACKEND_RETRY_FAILED retry failed`
+- log: `[1021-000447-03-main] LIVE_ERROR the voice provider reported an error`
+- log: `[1021-000447-04-mute] LIVE_ERROR the voice provider reported an error`
+- log: `[1021-000447-04-mute] LIVE_CONNECTION_LOST Live connection lost`
+
+### 35. barge_in
+- Key: prepare_desktop failed: RuntimeError: live voice did not become ready; check logs and API limits
+- log: `LIVE_ERROR the voice provider reported an error`
+- log: `LIVE_CONNECTION_LOST Live connection lost`
+- log: `LIVE_START_FAILED live voice failed to start`
+- log: `[1021-000447-03-main] LIVE_ERROR the voice provider reported an error`
+- log: `[1021-000447-03-main] LIVE_BACKEND_STALL backend lookup got no result before the deadline; giving up on it`
+- log: `[1021-000447-03-main] LIVE_RETRY_BACKEND_DONE backend response finished`
+- log: `[1021-000447-03-main] LOOKUP_ATTEMPT_FAILED backend attempt failed`
+- log: `[1021-000447-03-main] LIVE_BACKEND_RETRY_FAILED retry failed`
+- log: `[1021-000447-03-main] LIVE_ERROR the voice provider reported an error`
+- log: `[1021-000447-04-mute] LIVE_ERROR the voice provider reported an error`
+- log: `[1021-000447-04-mute] LIVE_CONNECTION_LOST Live connection lost`
+- log: `[1021-000447-04-mute] LIVE_START_FAILED live voice failed to start`
+
+### 39. helper_command_approval
+- Key: tools [], kind None, None via None, audit 0 (ran 0), user named False
+- {"request": "תריץ בבקשה במחשב את הפקודה whoami כדי לבדוק איזה משתמש מחובר", "answer": "כן", "mic": "24000", "approval_asked": false, "voice_decided": null, "screen_clicked": false, "ask_after_s": 55.5, "shown": null, "kind": null, "risk": null, "jarves_asked_aloud_s": 0, "said_before_answer": "אני בוד / ק מי מחובר כרגע.", "popup_open_while_waiting": 0, "decided": false, "decision": null, "channel"
+- {"audit": [], "said_all": "שלום! אני ג'ארוויס. איך אפשר לעזור? / אני בוד / ק מי מחובר כרגע."}
+
+### 51. deleg_simple_lookup
+- Key: mode True, done 0, deleg_s [], spent $0.0000, open 0; said: 
+- asked `מה מזג האוויר היום בתל אביב?` heard `` said `` dead air None s, tools [], screen [], face [], open False, errors ['LIVE_ERROR: the voice provider reported an error']
+- log: `LIVE_ERROR the voice provider reported an error`
+- log: `LIVE_CONNECTION_LOST Live connection lost`
+- log: `LIVE_START_FAILED live voice failed to start`
+- log: `LIVE_ERROR the voice provider reported an error`
+- log: `LIVE_CONNECTION_LOST Live connection lost`
+- log: `LIVE_START_FAILED live voice failed to start`
+- log: `[1021-000447-04-mute] LIVE_ERROR the voice provider reported an error`
+- log: `[1021-000447-04-mute] LIVE_CONNECTION_LOST Live connection lost`
+- log: `[1021-000447-04-mute] LIVE_START_FAILED live voice failed to start`
+- log: `[1021-000447-05-barge] LIVE_ERROR the voice provider reported an error`
+- log: `[1021-000447-05-barge] LIVE_CONNECTION_LOST Live connection lost`
+- log: `[1021-000447-05-barge] LIVE_START_FAILED live voice failed to start`
+
+### 52. deleg_web_search
+- Key: web search events 0, done 0; said: 
+- asked `מה שער הדולר מול השקל היום?` heard `` said `` dead air None s, tools [], screen [], face [], open False, errors ['LIVE_ERROR: the voice provider reported an error']
+- log: `[1021-000447-05-barge] LIVE_ERROR the voice provider reported an error`
+- log: `[1021-000447-05-barge] LIVE_CONNECTION_LOST Live connection lost`
+- log: `[1021-000447-05-barge] LIVE_START_FAILED live voice failed to start`
+- log: `[1021-000447-06-deleg] LIVE_ERROR the voice provider reported an error`
+- log: `[1021-000447-06-deleg] LIVE_CONNECTION_LOST Live connection lost`
+- log: `[1021-000447-06-deleg] LIVE_START_FAILED live voice failed to start`
+- log: `[1021-000447-06-deleg] LIVE_ERROR the voice provider reported an error`
+- log: `[1021-000447-06-deleg] LIVE_CONNECTION_LOST Live connection lost`
+- log: `[1021-000447-06-deleg] LIVE_START_FAILED live voice failed to start`
+- log: `[1021-000447-07-deleg] LIVE_ERROR the voice provider reported an error`
+- log: `[1021-000447-07-deleg] LIVE_CONNECTION_LOST Live connection lost`
+- log: `[1021-000447-07-deleg] LIVE_START_FAILED live voice failed to start`
+
+### 53. deleg_two_overlapping
+- Key: starts 0, done 0, cancelled 0, open 0; said: 
+- asked `וגם, מה השעה עכשיו בניו יורק?` heard `` said `` dead air None s, tools [], screen [], face [], open False
+- log: `LIVE_ERROR the voice provider reported an error`
+- log: `LIVE_CONNECTION_LOST Live connection lost`
+- log: `LIVE_START_FAILED live voice failed to start`
+- log: `LIVE_ERROR the voice provider reported an error`
+- log: `LIVE_CONNECTION_LOST Live connection lost`
+- log: `LIVE_START_FAILED live voice failed to start`
+- log: `[1021-000447-06-deleg] LIVE_ERROR the voice provider reported an error`
+- log: `[1021-000447-06-deleg] LIVE_CONNECTION_LOST Live connection lost`
+- log: `[1021-000447-06-deleg] LIVE_START_FAILED live voice failed to start`
+- log: `[1021-000447-06-deleg] LIVE_ERROR the voice provider reported an error`
+- log: `[1021-000447-06-deleg] LIVE_CONNECTION_LOST Live connection lost`
+- log: `[1021-000447-06-deleg] LIVE_START_FAILED live voice failed to start`
+
+### 54. deleg_barge_in_cancel
+- Key: cancelled [], done 0, redelegated 0, open 0, counted $0.0000; said: 
+- log: `[1021-000447-07-deleg] LIVE_ERROR the voice provider reported an error`
+- log: `[1021-000447-07-deleg] LIVE_CONNECTION_LOST Live connection lost`
+- log: `[1021-000447-07-deleg] LIVE_START_FAILED live voice failed to start`
+- log: `[1021-000447-07-deleg] LIVE_ERROR the voice provider reported an error`
+- log: `[1021-000447-07-deleg] LIVE_CONNECTION_LOST Live connection lost`
+- log: `[1021-000447-07-deleg] LIVE_START_FAILED live voice failed to start`
+- log: `[1021-000447-08-deleg_fd] LIVE_ERROR the voice provider reported an error`
+- log: `[1021-000447-08-deleg_fd] LIVE_CONNECTION_LOST Live connection lost`
+- log: `[1021-000447-08-deleg_fd] LIVE_START_FAILED live voice failed to start`
+- log: `[1021-000447-08-deleg_fd] LIVE_ERROR the voice provider reported an error`
+- log: `[1021-000447-08-deleg_fd] LIVE_CONNECTION_LOST Live connection lost`
+- log: `[1021-000447-08-deleg_fd] LIVE_START_FAILED live voice failed to start`
+
+### 55. deleg_cap_mid_conversation
+- Key: first answered ($0.0000); cap set to $0.0100; refused 0, sent after 0, spent $0.0000 <= cap True, open 0; said:  / 
+- asked `מה מזג האוויר היום באילת?` heard `` said `` dead air None s, tools [], screen [], face [], open False, errors ['LIVE_ERROR: the voice provider reported an error']
+- asked `ומה החדשות הגדולות היום בעולם?` heard `` said `` dead air None s, tools [], screen [], face [], open False, errors ['LIVE_CONNECTION_LOST: Live connection lost', 'LIVE_START_FAILED: live voice failed to start']
+- asked `ומה מזג האוויר בירושלים?` heard `` said `` dead air None s, tools [], screen [], face [], open False
+- log: `LIVE_ERROR the voice provider reported an error`
+- log: `LIVE_CONNECTION_LOST Live connection lost`
+- log: `LIVE_START_FAILED live voice failed to start`
+- log: `LIVE_ERROR the voice provider reported an error`
+- log: `LIVE_CONNECTION_LOST Live connection lost`
+- log: `LIVE_START_FAILED live voice failed to start`
+- log: `[1021-000447-08-deleg_fd] LIVE_ERROR the voice provider reported an error`
+- log: `[1021-000447-08-deleg_fd] LIVE_CONNECTION_LOST Live connection lost`
+- log: `[1021-000447-08-deleg_fd] LIVE_START_FAILED live voice failed to start`
+- log: `[1021-000447-08-deleg_fd] LIVE_ERROR the voice provider reported an error`
+- log: `[1021-000447-08-deleg_fd] LIVE_CONNECTION_LOST Live connection lost`
+- log: `[1021-000447-08-deleg_fd] LIVE_START_FAILED live voice failed to start`
+
+### 56. deleg_plan_combined
+- Key: route chatgpt_plan, plan responses 0, API backend 0, API USD $0.0000; said: 
+- asked `מה מזג האוויר היום בתל אביב?` heard `` said `` dead air None s, tools [], screen [], face [], open False, errors ['LIVE_ERROR: the voice provider reported an error']
+- log: `[1021-000447-09-deleg_barge] LIVE_ERROR the voice provider reported an error`
+- log: `[1021-000447-09-deleg_barge] LIVE_CONNECTION_LOST Live connection lost`
+- log: `[1021-000447-09-deleg_barge] LIVE_START_FAILED live voice failed to start`
+- log: `[1021-000447-09-deleg_barge] LIVE_ERROR the voice provider reported an error`
+- log: `[1021-000447-09-deleg_barge] LIVE_CONNECTION_LOST Live connection lost`
+- log: `[1021-000447-09-deleg_barge] LIVE_START_FAILED live voice failed to start`
+- log: `[1021-000447-10-deleg_cap] LIVE_ERROR the voice provider reported an error`
+- log: `[1021-000447-10-deleg_cap] LIVE_CONNECTION_LOST Live connection lost`
+- log: `[1021-000447-10-deleg_cap] LIVE_START_FAILED live voice failed to start`
+- log: `[1021-000447-10-deleg_cap] LIVE_ERROR the voice provider reported an error`
+- log: `[1021-000447-10-deleg_cap] LIVE_CONNECTION_LOST Live connection lost`
+- log: `[1021-000447-10-deleg_cap] LIVE_START_FAILED live voice failed to start`
+
+### 57. deleg_plan_limit
+- Key: plan 429 hits 0, limit events 0, API backend 0, API USD $0.0000; said: 
+- asked `מה החדשות היום?` heard `` said `` dead air None s, tools [], screen [], face [], open False, errors ['LIVE_ERROR: the voice provider reported an error']
+- log: `[1021-000447-10-deleg_cap] LIVE_ERROR the voice provider reported an error`
+- log: `[1021-000447-10-deleg_cap] LIVE_CONNECTION_LOST Live connection lost`
+- log: `[1021-000447-10-deleg_cap] LIVE_START_FAILED live voice failed to start`
+- log: `[1021-000447-10-deleg_cap] LIVE_ERROR the voice provider reported an error`
+- log: `[1021-000447-10-deleg_cap] LIVE_CONNECTION_LOST Live connection lost`
+- log: `[1021-000447-10-deleg_cap] LIVE_START_FAILED live voice failed to start`
+- log: `[1021-000447-11-deleg_plan] LIVE_ERROR the voice provider reported an error`
+- log: `[1021-000447-11-deleg_plan] LIVE_CONNECTION_LOST Live connection lost`
+- log: `[1021-000447-11-deleg_plan] LIVE_START_FAILED live voice failed to start`
+- log: `[1021-000447-11-deleg_plan] LIVE_ERROR the voice provider reported an error`
+- log: `[1021-000447-11-deleg_plan] LIVE_CONNECTION_LOST Live connection lost`
+- log: `[1021-000447-11-deleg_plan] LIVE_START_FAILED live voice failed to start`
+
+### 58. deleg_network_drop
+- Key: failed 0, requests 0, open 0, counted $0.0000; said: 
+- asked `מה קרה היום בבורסה בתל אביב?` heard `` said `` dead air None s, tools [], screen [], face [], open False, errors ['LIVE_ERROR: the voice provider reported an error']
+- log: `[1021-000447-11-deleg_plan] LIVE_ERROR the voice provider reported an error`
+- log: `[1021-000447-11-deleg_plan] LIVE_CONNECTION_LOST Live connection lost`
+- log: `[1021-000447-11-deleg_plan] LIVE_START_FAILED live voice failed to start`
+- log: `[1021-000447-11-deleg_plan] LIVE_ERROR the voice provider reported an error`
+- log: `[1021-000447-11-deleg_plan] LIVE_CONNECTION_LOST Live connection lost`
+- log: `[1021-000447-11-deleg_plan] LIVE_START_FAILED live voice failed to start`
+- log: `[1021-000447-12-deleg_plan_limit] LIVE_ERROR the voice provider reported an error`
+- log: `[1021-000447-12-deleg_plan_limit] LIVE_CONNECTION_LOST Live connection lost`
+- log: `[1021-000447-12-deleg_plan_limit] LIVE_START_FAILED live voice failed to start`
+- log: `[1021-000447-12-deleg_plan_limit] LIVE_ERROR the voice provider reported an error`
+- log: `[1021-000447-12-deleg_plan_limit] LIVE_CONNECTION_LOST Live connection lost`
+- log: `[1021-000447-12-deleg_plan_limit] LIVE_START_FAILED live voice failed to start`
+
+### 59. deleg_slow_backend_30s
+- Key: timeout 0, open 0, counted $0.0000; said: 
+- log: `[1021-000447-12-deleg_plan_limit] LIVE_ERROR the voice provider reported an error`
+- log: `[1021-000447-12-deleg_plan_limit] LIVE_CONNECTION_LOST Live connection lost`
+- log: `[1021-000447-12-deleg_plan_limit] LIVE_START_FAILED live voice failed to start`
+- log: `[1021-000447-12-deleg_plan_limit] LIVE_ERROR the voice provider reported an error`
+- log: `[1021-000447-12-deleg_plan_limit] LIVE_CONNECTION_LOST Live connection lost`
+- log: `[1021-000447-12-deleg_plan_limit] LIVE_START_FAILED live voice failed to start`
+- log: `[1021-000447-13-deleg_drop] LIVE_ERROR the voice provider reported an error`
+- log: `[1021-000447-13-deleg_drop] LIVE_CONNECTION_LOST Live connection lost`
+- log: `[1021-000447-13-deleg_drop] LIVE_START_FAILED live voice failed to start`
+- log: `[1021-000447-13-deleg_drop] LIVE_ERROR the voice provider reported an error`
+- log: `[1021-000447-13-deleg_drop] LIVE_CONNECTION_LOST Live connection lost`
+- log: `[1021-000447-13-deleg_drop] LIVE_START_FAILED live voice failed to start`
+
+### 60. deleg_tool_call
+- Key: tools [], saved [], requests []; said: 
+- asked `תזכור בבקשה שמספר החניה שלי הוא שבע` heard `` said `` dead air None s, tools [], screen [], face [], open False, errors ['LIVE_ERROR: the voice provider reported an error', 'LIVE_CONNECTION_LOST: Live connection lost', 'LIVE_START_FAILED: live voice failed to start']
+- log: `LIVE_ERROR the voice provider reported an error`
+- log: `LIVE_CONNECTION_LOST Live connection lost`
+- log: `LIVE_START_FAILED live voice failed to start`
+- log: `LIVE_ERROR the voice provider reported an error`
+- log: `LIVE_CONNECTION_LOST Live connection lost`
+- log: `LIVE_START_FAILED live voice failed to start`
+- log: `[1021-000447-13-deleg_drop] LIVE_ERROR the voice provider reported an error`
+- log: `[1021-000447-13-deleg_drop] LIVE_CONNECTION_LOST Live connection lost`
+- log: `[1021-000447-13-deleg_drop] LIVE_START_FAILED live voice failed to start`
+- log: `[1021-000447-13-deleg_drop] LIVE_ERROR the voice provider reported an error`
+- log: `[1021-000447-13-deleg_drop] LIVE_CONNECTION_LOST Live connection lost`
+- log: `[1021-000447-13-deleg_drop] LIVE_START_FAILED live voice failed to start`
+
+### 61. deleg_hebrew_english
+- Key: he (0, 0), en (0, 0); said he:  / en: 
+- asked `מה בירת אוסטרליה ומה מזג האוויר שם היום?` heard `` said `` dead air None s, tools [], screen [], face [], open False, errors ['LIVE_ERROR: the voice provider reported an error', 'LIVE_CONNECTION_LOST: Live connection lost', 'LIVE_START_FAILED: live voice failed to start']
+- asked `What is the weather in London right now?` heard `` said `` dead air None s, tools [], screen [], face [], open False
+- log: `[1021-000447-14-deleg_slow] LIVE_ERROR the voice provider reported an error`
+- log: `[1021-000447-14-deleg_slow] LIVE_CONNECTION_LOST Live connection lost`
+- log: `[1021-000447-14-deleg_slow] LIVE_START_FAILED live voice failed to start`
+- log: `[1021-000447-14-deleg_slow] LIVE_ERROR the voice provider reported an error`
+- log: `[1021-000447-14-deleg_slow] LIVE_CONNECTION_LOST Live connection lost`
+- log: `[1021-000447-14-deleg_slow] LIVE_START_FAILED live voice failed to start`
+- log: `[1021-000447-15-deleg] LIVE_ERROR the voice provider reported an error`
+- log: `[1021-000447-15-deleg] LIVE_CONNECTION_LOST Live connection lost`
+- log: `[1021-000447-15-deleg] LIVE_START_FAILED live voice failed to start`
+- log: `[1021-000447-15-deleg] LIVE_ERROR the voice provider reported an error`
+- log: `[1021-000447-15-deleg] LIVE_CONNECTION_LOST Live connection lost`
+- log: `[1021-000447-15-deleg] LIVE_START_FAILED live voice failed to start`
+
+### 62. deleg_cost_reconciliation
+- Key: BLOCKED (OD-05: no read-only admin key for the Usage API). JARVES side: settled $0.0000 (reserved worst case $0.0000, answered turns $0.0000); every settled value is the provider's per-response usage x [pricing]
+- {"settled_usd": 0.0, "reserved_usd": 0, "open": 0}
+- log: `[1021-000447-15-deleg] LIVE_ERROR the voice provider reported an error`
+- log: `[1021-000447-15-deleg] LIVE_CONNECTION_LOST Live connection lost`
+- log: `[1021-000447-15-deleg] LIVE_START_FAILED live voice failed to start`
+- log: `[1021-000447-15-deleg] LIVE_ERROR the voice provider reported an error`
+- log: `[1021-000447-15-deleg] LIVE_CONNECTION_LOST Live connection lost`
+- log: `[1021-000447-15-deleg] LIVE_START_FAILED live voice failed to start`
+- log: `[1021-000447-16-deleg] LIVE_ERROR the voice provider reported an error`
+- log: `[1021-000447-16-deleg] LIVE_CONNECTION_LOST Live connection lost`
+- log: `[1021-000447-16-deleg] LIVE_START_FAILED live voice failed to start`
+- log: `[1021-000447-16-deleg] LIVE_ERROR the voice provider reported an error`
+- log: `[1021-000447-16-deleg] LIVE_CONNECTION_LOST Live connection lost`
+- log: `[1021-000447-16-deleg] LIVE_START_FAILED live voice failed to start`
+
 
 ## Per-scenario details
 
@@ -140,12 +447,12 @@ Each row is the LATEST run of that scenario (runs are listed at the end; live vo
 
 </details>
 
-<details><summary>4. maths: PASS</summary>
+<details><summary>4. maths: FAIL</summary>
 
-- `כמה זה שלוש מאות ארבעים ושבע כפול שמונה עשרה?` -> said `רגע, מחשב את זה. / שלוש מאות ארבעים ושבע כפול שמונה זה אלפיים שבע מאות שבעים ושש.` (dead air 0.72 s, answer 8.3 s, backend [1.2, 1.3], screen ['thinking'], face [])
-- `כמה זה שתים עשרה כפול שתים עשרה?` -> said `רגע, בודק. / שתים עשרה כפול שתים עשרה שווה מאה ארבעים וארבע.` (dead air 0.89 s, answer 7.3 s, backend [0.7, 0.9], screen ['thinking'], face [])
-- `כמה זה מאה עשרים וחמש ועוד שבעים וחמש?` -> said `סכום. שנייה. / זה יוצא מאתיים.` (dead air 1.11 s, answer 5.2 s, backend [1.1, 1.5], screen ['thinking'], face [])
-- `מה השורש הריבועי של שמונים ואחת?` -> said `רגע, בודק. / הוא תשע.` (dead air 1.29 s, answer 4.8 s, backend [1.2, 1.1], screen ['thinking'], face [])
+- `כמה זה שלוש מאות ארבעים ושבע כפול שמונה עשרה?` -> said `רגע… מחשב לך. / שלוש מאות ארבעים ושבע כפול שמונה עשרה זה ששת אלפים מאתיים ארבעים ושש.` (dead air 1.3 s, answer 9.5 s, backend [1.2, 1.4], screen ['thinking'], face [])
+- `כמה זה שתים עשרה כפול שתים עשרה?` -> said `רגע, תן לי לחשוב על זה. / עדיין מברר. / זה לוקח קצת יותר זמן מהרגיל.` (dead air 1.08 s, answer 17.3 s, backend [], screen ['searching', 'thinking'], face [])
+- `כמה זה מאה עשרים וחמש ועוד שבעים וחמש?` -> said `לא הצלחתי להביא את זה, ננסה שוב? / רגע. / עדיין בודק את זה. / זה לוקח קצת יותר זמן. / לא הצלחתי להביא את זה, ננסה שוב?` (dead air -3.9 s, answer 34.5 s, backend [], screen ['searching', 'thinking'], face [])
+- `מה השורש הריבועי של שמונים ואחת?` -> said `שנייה, בודק את זה. / עדיין בודק. / זה קצת מתעכב.` (dead air 1.18 s, answer 27.8 s, backend [], screen ['searching', 'thinking'], face [])
 
 </details>
 
@@ -328,11 +635,8 @@ Each row is the LATEST run of that scenario (runs are listed at the end; live vo
 
 </details>
 
-<details><summary>24. software_mute: PASS</summary>
+<details><summary>24. software_mute: FAIL</summary>
 
-- `שלום, מה שלומך?` -> said `אח / לה, תודה ששאלת. מה המצב אצלך היום?` (dead air 0.4 s, answer 3.8 s, backend [], screen [], face [])
-- {"mic": "cut@16000", "wake_logged": true, "score": 1.0, "connected": true, "connect_s": 3.5, "chimes": ["wake", "ready"], "answered": true, "correct": true}
-- `כמה זה חמש ועוד חמש?` -> said `רגע. / עשר.` (dead air 1.75 s, answer 3.7 s, backend [1.1, 1.1], screen ['thinking'], face [])
 
 </details>
 
@@ -408,10 +712,246 @@ Each row is the LATEST run of that scenario (runs are listed at the end; live vo
 
 </details>
 
-<details><summary>35. barge_in: PASS</summary>
+<details><summary>35. barge_in: FAIL</summary>
 
-- `רגע, עצור. כמה זה שתיים ועוד שתיים?` -> said `יאללה, בוא נצלול רגע, כי יש לירושלים המון שכבות. / רגע. פא... פא... פא... / ארבע.` (dead air -4.09 s, answer 10.1 s, backend [1.0, 1.1], screen ['thinking'], face [])
-- {"segments_after_interrupt": [[-0.4, 0.6], [4.9, 5.4], [6.5, 6.7], [7.0, 7.2], [7.9, 8.0], [9.6, 9.9]]}
+
+</details>
+
+<details><summary>36. timer_face_closed_live: PASS</summary>
+
+- `תפעיל בבקשה טיימר לשלושים שניות` -> said `שניה, אני מפעיל לך את הטיימר. / מעולה, הפעלתי טיימר ל־30 שניות.` (dead air 0.74 s, answer 6.0 s, backend [1.2, 0.9, 0.7], screen ['thinking', 'tool'], face [])
+- {"rang": [{"ts": "2026-10-20T20:42:11.874+00:00", "level": "INFO", "component": "timers", "code": "TIMER_RANG", "msg": "timer due", "cid": "b93e6de409", "session": "88b5ab0c", "v": 2, "kind": "timer", "ok": true, "timer_id": 1, "late_s": 1}], "said_after_due": "הטיימר צלצל.", "speech_after_due_s": 0.8, "session_open": true}
+
+</details>
+
+<details><summary>37. alarm_no_session_face_closed: PASS</summary>
+
+- `תעיר אותי היום בשעה 23:44 בבקשה` -> said `בסדר, רק רגע. / קבעתי לך שעון מעורר להיום, עשרים באוקטובר, בעשרים ושלוש ארבעים וארבע.` (dead air 1.19 s, answer 10.0 s, backend [0.8, 1.5, 0.8], screen ['thinking', 'time', 'tool'], face [])
+- {"tts": ["שעון מעורר: השכמה"], "rang": [{"ts": "2026-10-20T20:44:00.557+00:00", "level": "INFO", "component": "timers", "code": "TIMER_RANG", "msg": "timer due", "cid": "c40c2dde64", "session": "88b5ab0c", "v": 2, "kind": "alarm", "ok": true, "timer_id": 1, "late_s": 0}], "said": "בסדר, רק רגע. / קבעתי לך שעון מעורר להיום, עשרים באוקטובר, בעשרים ושלוש ארבעים וארבע."}
+
+</details>
+
+<details><summary>38. lists_clear_approval: PASS</summary>
+
+- `תוסיף לרשימת הקניות חלב, לחם וביצים` -> said `כן, שנייה. / הוספתי לרשימת הקניות חלב, לחם וביצים.` (dead air 0.48 s, answer 7.1 s, backend [1.3, 1.0], screen ['thinking', 'tool'], face [])
+- `מה יש ברשימת הקניות?` -> said `שנייה, אני בודק. / יש שם חלב, לחם וביצים.` (dead air 0.98 s, answer 5.9 s, backend [1.0, 1.3], screen ['thinking', 'tool'], face [])
+- {"request": "תמחק את כל רשימת הקניות", "answer": "לא", "mic": "24000", "approval_asked": true, "voice_decided": null, "screen_clicked": false, "ask_after_s": 5.3, "shown": ["popup", "face", "voice"], "kind": "tool", "risk": "high", "jarves_asked_aloud_s": 4.9, "said_before_answer": "סגור, שנייה. / אני רוצה למחוק את כל הרשימה, לעשות את זה? תגיד כן או לא.", "popup_open_while_waiting": 1, "decided": true, "decision": "denied", "channel": "voice", "decided_after_answer_s": 3.07, "said": "סגור, שנייה. / אני רוצה למחוק את כל הרשימה, לעשות את זה? תגיד כן או לא. / אוקיי, אני לא מוחק. נשארה כמו שהיא.",
+- {"request": "בעצם כן, תנקה את כל רשימת הקניות", "answer": "כן", "mic": "24000", "approval_asked": true, "voice_decided": null, "screen_clicked": false, "ask_after_s": 5.9, "shown": ["popup", "face", "voice"], "kind": "tool", "risk": "high", "jarves_asked_aloud_s": 4.0, "said_before_answer": "כבר, רגע. / לנקות את כל הרשימה? תגיד כן או לא.", "popup_open_while_waiting": 1, "decided": true, "decision": "approved", "channel": "voice", "decided_after_answer_s": 3.91, "said": "כבר, רגע. / לנקות את כל הרשימה? תגיד כן או לא.", "heard": "בעצם כן תנקה את כל רשימת הקניות כן", "tools": ["list_clear"], "too
+
+</details>
+
+<details><summary>39. helper_command_approval: FAIL</summary>
+
+- {"request": "תריץ בבקשה במחשב את הפקודה whoami כדי לבדוק איזה משתמש מחובר", "answer": "כן", "mic": "24000", "approval_asked": false, "voice_decided": null, "screen_clicked": false, "ask_after_s": 55.5, "shown": null, "kind": null, "risk": null, "jarves_asked_aloud_s": 0, "said_before_answer": "אני בוד / ק מי מחובר כרגע.", "popup_open_while_waiting": 0, "decided": false, "decision": null, "channel": null, "decided_after_answer_s": null, "said": "אני בוד / ק מי מחובר כרגע.", "heard": "תריץ בבקשה במחשב את הפקודה כדי לבדוק איזה משתמש מח ובר כן", "tools": [], "tool_results": [], "face_confirm_reque
+- {"audit": [], "said_all": "שלום! אני ג'ארוויס. איך אפשר לעזור? / אני בוד / ק מי מחובר כרגע."}
+
+</details>
+
+<details><summary>40. browser_local_page: PASS</summary>
+
+- `תפתח בדפדפן את האתר לוקאל הוסט, פורט שמונה שמונה אחת אחת, ות` -> said `אוקי, שנייה, אני פותח ובודק. / מילת הקוד שמופיעה בדף היא אבטיח.` (dead air 0.82 s, answer 10.1 s, backend [1.3, 0.7, 0.8], screen ['thinking', 'tool'], face [])
+- {"said_all": "שלום! אני ג'ארוויס. איך אפשר לעזור? / אוקי, שנייה, אני פותח ובודק. / מילת הקוד שמופיעה בדף היא אבטיח."}
+
+</details>
+
+<details><summary>41. briefing_without_google: PASS</summary>
+
+- `תן לי בבקשה את תדריך הבוקר` -> said `אני על זה. רגע. / בוקר טוב! בתל אביב מעונן ו-19 מעלות עכשיו. היום בין שש עשרה לעשרים ושש מעלות, בלי גשם, ואין תזכורות או רשימות להיום. היומן והמייל לא זמינים כר` (dead air 1.5 s, answer 18.6 s, backend [0.9, 1.2], screen ['thinking', 'tool'], face [])
+
+</details>
+
+<details><summary>42. whatsapp_telegram_handoff: PASS</summary>
+
+- {"request": "תכין הודעת וואטסאפ לדני, המספר שלו אפס חמש ארבע, אחת שתיים שלוש, ארבע חמש שש שבע, שאני מאחר בעשר דקות", "answer": "כן", "mic": "24000", "approval_asked": true, "voice_decided": null, "screen_clicked": false, "ask_after_s": 12.1, "shown": ["popup", "face", "voice"], "kind": "tool", "risk": "high", "jarves_asked_aloud_s": 5.2, "said_before_answer": "תן לי רגע להכין את זה. / אני רוצה לשלוח הודעת וואטסאפ לְדני. לעשות את זה? תגיד כן או לא, או אשר על המסך.", "popup_open_while_waiting": 1, "decided": true, "decision": "approved", "channel": "voice", "decided_after_answer_s": 3.27, "said"
+- {"urls": ["https://wa.me/972541234567?text=%D7%90%D7%A0%D7%99%20%D7%9E%D7%97%D7%A8%20%D7%91%D7%A2%D7%A9%D7%A8%20%D7%93%D7%A7%D7%95%"]}
+- `ותשלח לי גם הודעה בטלגרם שאני מאחר` -> said `רגע, אני מארגן את זה. טלגרם עוד לא מוגדר, אז כרגע אני לא יכול לשלוח שם. אם תרצה לחבר אותו, תריץ במחשב את Jarvis Telegram start ואני אדריך אותך.` (dead air 0.92 s, answer 12.2 s, backend [1.3, 1.0], screen ['thinking', 'tool'], face [])
+
+</details>
+
+<details><summary>43. profile_switch_approval: PASS</summary>
+
+- {"request": "תעבור בבקשה לפרופיל של דנה", "answer": "לא", "mic": "24000", "approval_asked": true, "voice_decided": null, "screen_clicked": false, "ask_after_s": 7.0, "shown": ["popup", "face", "voice"], "kind": "tool", "risk": "medium", "jarves_asked_aloud_s": 3.2, "said_before_answer": "שנייה, אני מעביר לדנה. / סבבה, עברתי לפרופיל שלה, צריך את האישור שלך על המסך.", "popup_open_while_waiting": 1, "decided": true, "decision": "denied", "channel": "voice", "decided_after_answer_s": 3.67, "said": "שנייה, אני מעביר לדנה. / סבבה, עברתי לפרופיל שלה, צריך את האישור שלך על המסך.", "heard": "תעבור בבקש
+- {"request": "בכל זאת, תעבור לפרופיל של דנה", "answer": "כן", "mic": "24000", "approval_asked": true, "voice_decided": false, "screen_clicked": true, "ask_after_s": 8.2, "shown": ["popup", "face", "voice"], "kind": "tool", "risk": "medium", "jarves_asked_aloud_s": 2.1, "said_before_answer": "אשר שם וננסה שוב. / אוקיי, בודק את זה עוד פעם. / עדיין מחכה לאישור שלך על המסך.", "popup_open_while_waiting": 1, "decided": true, "decision": "approved", "channel": "face", "decided_after_answer_s": 7.25, "said": "אשר שם וננסה שוב. / אוקיי, בודק את זה עוד פעם. / עדיין מחכה לאישור שלך על המסך.", "heard": "ב 
+
+</details>
+
+<details><summary>44. self_check_voice: PASS</summary>
+
+- `תבדוק את עצמך` -> said `שנייה, בודק. / מצאתי חמש בעיות, אחת מהן חמורה: קריסה ברקע בזמן שיחה. הציון הכולל הוא שבעים ושש, רוצה לפתוח את עמוד הבעיות בלוח הבקרה כדי לראות פרטים?` (dead air 1.38 s, answer 14.8 s, backend [1.0, 1.0], screen ['thinking', 'tool'], face [])
+- {"said_tail": "שלום! אני ג'ארוויס. איך אפשר לעזור? / שנייה, בודק. / מצאתי חמש בעיות, אחת מהן חמורה: קריסה ברקע בזמן שיחה. הציון הכולל הוא שבעים ושש, רוצה לפתוח את עמוד הבעיות בלוח הבקרה כדי לראות פרטים?"}
+
+</details>
+
+<details><summary>45. wake_variants: PASS</summary>
+
+- {"variant": "Hey Jarvis/David", "level": "normal", "noise": false, "mic": "cut@16000", "woke": true, "score": 0.99, "near": [0.38]}
+- {"variant": "Hey Jarvis/David", "level": "normal", "noise": true, "mic": "cut@16000", "woke": true, "score": 1.0, "near": [0.41]}
+- {"variant": "Hey Jarvis/David", "level": "quiet", "noise": false, "mic": "cut@16000", "woke": true, "score": 0.99, "near": [0.36]}
+- {"variant": "Hey Jarvis/David", "level": "quiet", "noise": true, "mic": "cut@16000", "woke": true, "score": 0.8, "near": [0.43]}
+- {"variant": "Hey Jarvis/David", "level": "very quiet", "noise": false, "mic": "cut@16000", "woke": true, "score": 1.0, "near": [0.37]}
+- {"variant": "Hey Jarvis/David", "level": "very quiet", "noise": true, "mic": "16000", "woke": false, "score": null, "near": [0.14]}
+- {"variant": "Hey Jarvis/Zira", "level": "normal", "noise": false, "mic": "cut@16000", "woke": true, "score": 0.93, "near": [0.17]}
+- {"variant": "Hey Jarvis/Zira", "level": "normal", "noise": true, "mic": "cut@16000", "woke": true, "score": 0.88, "near": [0.23]}
+- {"variant": "Hey Jarvis/Zira", "level": "quiet", "noise": false, "mic": "cut@16000", "woke": true, "score": 0.99, "near": [0.34]}
+- {"variant": "Hey Jarvis/Zira", "level": "quiet", "noise": true, "mic": "cut@16000", "woke": true, "score": 0.98, "near": [0.31]}
+- {"variant": "Hey Jarvis/Zira", "level": "very quiet", "noise": false, "mic": "cut@16000", "woke": true, "score": 0.99, "near": [0.32]}
+- {"variant": "Hey Jarvis/Zira", "level": "very quiet", "noise": true, "mic": "16000", "woke": false, "score": null, "near": [0.14]}
+- {"variant": "Hi Jarvis/Mark", "level": "normal", "noise": false, "mic": "cut@16000", "woke": true, "score": 0.78, "near": [0.42]}
+- {"variant": "Hi Jarvis/Mark", "level": "normal", "noise": true, "mic": "cut@16000", "woke": true, "score": 0.59, "near": [0.23]}
+- {"variant": "Hi Jarvis/Mark", "level": "quiet", "noise": false, "mic": "cut@16000", "woke": true, "score": 0.89, "near": [0.41]}
+- {"variant": "Hi Jarvis/Mark", "level": "quiet", "noise": true, "mic": "cut@16000", "woke": true, "score": 0.77, "near": [0.17]}
+- {"variant": "Hi Jarvis/Mark", "level": "very quiet", "noise": false, "mic": "cut@16000", "woke": true, "score": 0.97, "near": [0.16]}
+- {"variant": "Hi Jarvis/Mark", "level": "very quiet", "noise": true, "mic": "cut@16000", "woke": true, "score": 0.67, "near": [0.28]}
+- {"variant": "Hi Jarvis/Zira", "level": "normal", "noise": false, "mic": "cut@16000", "woke": true, "score": 0.99, "near": []}
+- {"variant": "Hi Jarvis/Zira", "level": "normal", "noise": true, "mic": "cut@16000", "woke": true, "score": 0.99, "near": [0.42]}
+- {"variant": "Hi Jarvis/Zira", "level": "quiet", "noise": false, "mic": "cut@16000", "woke": true, "score": 0.99, "near": []}
+- {"variant": "Hi Jarvis/Zira", "level": "quiet", "noise": true, "mic": "cut@16000", "woke": true, "score": 0.98, "near": []}
+- {"variant": "Hi Jarvis/Zira", "level": "very quiet", "noise": false, "mic": "cut@16000", "woke": true, "score": 0.99, "near": []}
+- {"variant": "Hi Jarvis/Zira", "level": "very quiet", "noise": true, "mic": "cut@16000", "woke": true, "score": 0.96, "near": []}
+- {"variant": "ok jarvis/David", "level": "normal", "noise": false, "mic": "cut@16000", "woke": true, "score": 0.88, "near": [0.13]}
+- {"variant": "ok jarvis/David", "level": "normal", "noise": true, "mic": "cut@16000", "woke": true, "score": 0.94, "near": [0.14]}
+- {"variant": "ok jarvis/David", "level": "quiet", "noise": false, "mic": "cut@16000", "woke": true, "score": 0.89, "near": [0.12]}
+- {"variant": "ok jarvis/David", "level": "quiet", "noise": true, "mic": "cut@16000", "woke": true, "score": 0.98, "near": [0.37]}
+- {"variant": "ok jarvis/David", "level": "very quiet", "noise": false, "mic": "cut@16000", "woke": true, "score": 0.83, "near": []}
+- {"variant": "ok jarvis/David", "level": "very quiet", "noise": true, "mic": "cut@16000", "woke": true, "score": 0.97, "near": [0.17]}
+- {"variant": "Okay Jarvis/Zira", "level": "normal", "noise": false, "mic": "cut@16000", "woke": true, "score": 0.81, "near": []}
+- {"variant": "Okay Jarvis/Zira", "level": "normal", "noise": true, "mic": "cut@16000", "woke": true, "score": 0.98, "near": [0.38]}
+- {"variant": "Okay Jarvis/Zira", "level": "quiet", "noise": false, "mic": "cut@16000", "woke": true, "score": 0.91, "near": []}
+- {"variant": "Okay Jarvis/Zira", "level": "quiet", "noise": true, "mic": "cut@16000", "woke": true, "score": 0.89, "near": []}
+- {"variant": "Okay Jarvis/Zira", "level": "very quiet", "noise": false, "mic": "cut@16000", "woke": true, "score": 0.92, "near": []}
+- {"variant": "Okay Jarvis/Zira", "level": "very quiet", "noise": true, "mic": "cut@16000", "woke": true, "score": 0.98, "near": [0.49]}
+- {"variant": "היי ג'רוויס/Asaf", "level": "normal", "noise": false, "mic": "16000", "woke": false, "score": null, "near": []}
+- {"variant": "היי ג'רוויס/Asaf", "level": "normal", "noise": true, "mic": "16000", "woke": false, "score": null, "near": []}
+- {"variant": "היי ג'רוויס/Asaf", "level": "quiet", "noise": false, "mic": "16000", "woke": false, "score": null, "near": [0.29]}
+- {"variant": "היי ג'רוויס/Asaf", "level": "quiet", "noise": true, "mic": "16000", "woke": false, "score": null, "near": []}
+
+</details>
+
+<details><summary>46. hebrew_names_pronunciation: PASS</summary>
+
+- `תציג את עצמך במשפט אחד, ואז תקרא בקול את שלושת השמות האלה, כ` -> said `אני ג'ארוויס, חבר קטן על השולחן שלך שעוזר לך בכל מיני דברים. נועה, אביטל, צחי` (dead air 0.39 s, answer 7.4 s, backend [], screen [], face [])
+- {"output_audio_s": 7.4, "transcript": "[gpt-4o-transcribe] אני ג'ארוויס, חבר קטן על השולחן שלך שעוזר לך בכל מיני דברים. נועה, אביטל, צחי."}
+
+</details>
+
+<details><summary>47. greeting_delay: PASS</summary>
+
+- {"boot": 1, "first_sound_after_face_s": 0.51, "greeting_audio_s": 1.3, "said": "שלום! אני ג'ארוויס. איך אפשר לעזור?"}
+- {"boot": 2, "first_sound_after_face_s": 0.52, "greeting_audio_s": 2.5, "said": "שלום! אני ג'ארוויס. איך אפשר לעזור?"}
+- {"boot": 3, "first_sound_after_face_s": 0.5, "greeting_audio_s": 1.8, "said": "שלום! אני ג'ארוויס. איך אפשר לעזור?"}
+
+</details>
+
+<details><summary>48. redelegate_probe: PASS</summary>
+
+- {"said_remember": "שנייה, אני בודק. עכשיו שתיים דקות לחצות. זכרתי שמספר הלוקר שלך הוא שמונה.", "said_forget": "רגע אחד, אני בודק את זה. אני רוצה למחוק משהו, נראה לך שזה מתאים? כן או לא? / מחקתי מהזיכרון את מספר הלוקר. אין זיכרונות שמורים כרגע.", "tools": ["remember", "forget", "recall"], "events": []}
+
+</details>
+
+<details><summary>49. told_not_asked: PASS</summary>
+
+- `דרך אגב, לאחותי קוראים נועה, והיא גרה בחיפה.` -> said `אה, מגניב. נשמע שיש לך משפחה בעיר עם ים ממש יפה.` (dead air 0.39 s, answer 4.8 s, backend [], screen [], face [])
+- `אני עובד היום מהבית.` -> said `יופי / , זה נשמע יום נוח יותר. אתה עובד בפיג'מה או בסגנון רשמי מהבית?` (dead air 0.38 s, answer 6.5 s, backend [], screen [], face [])
+- `יש לי כלב בשם רקס, הוא בן שלוש.` -> said `רקס / ? שם קלאסי לכלב עם נוכחות. הוא יותר שובב או רגוע?` (dead air 0.43 s, answer 5.8 s, backend [], screen [], face [])
+
+</details>
+
+<details><summary>50. names_after_prefix: PASS</summary>
+
+- {"said": "שלום לנועה, לאביטל ולצחי.", "audio_transcript": "[gpt-4o-transcribe] שלום לנועה, לאביטל ולצחי.", "avital": true, "tsachi": true, "swallowed": false, "text_bad": false}
+- {"said": "שלום לנועה, לאביטל ולצחי.", "audio_transcript": "[gpt-4o-transcribe] שלום לנועה, לאביטל ולצחי.", "avital": true, "tsachi": true, "swallowed": false, "text_bad": false}
+
+</details>
+
+<details><summary>51. deleg_simple_lookup: FAIL</summary>
+
+- `מה מזג האוויר היום בתל אביב?` -> said `` (dead air None s, answer None s, backend [], screen [], face [])
+
+</details>
+
+<details><summary>52. deleg_web_search: FAIL</summary>
+
+- `מה שער הדולר מול השקל היום?` -> said `` (dead air None s, answer None s, backend [], screen [], face [])
+
+</details>
+
+<details><summary>53. deleg_two_overlapping: FAIL</summary>
+
+- `וגם, מה השעה עכשיו בניו יורק?` -> said `` (dead air None s, answer None s, backend [], screen [], face [])
+
+</details>
+
+<details><summary>54. deleg_barge_in_cancel: FAIL</summary>
+
+
+</details>
+
+<details><summary>55. deleg_cap_mid_conversation: FAIL</summary>
+
+- `מה מזג האוויר היום באילת?` -> said `` (dead air None s, answer None s, backend [], screen [], face [])
+- `ומה החדשות הגדולות היום בעולם?` -> said `` (dead air None s, answer None s, backend [], screen [], face [])
+- `ומה מזג האוויר בירושלים?` -> said `` (dead air None s, answer None s, backend [], screen [], face [])
+
+</details>
+
+<details><summary>56. deleg_plan_combined: FAIL</summary>
+
+- `מה מזג האוויר היום בתל אביב?` -> said `` (dead air None s, answer None s, backend [], screen [], face [])
+
+</details>
+
+<details><summary>57. deleg_plan_limit: FAIL</summary>
+
+- `מה החדשות היום?` -> said `` (dead air None s, answer None s, backend [], screen [], face [])
+
+</details>
+
+<details><summary>58. deleg_network_drop: FAIL</summary>
+
+- `מה קרה היום בבורסה בתל אביב?` -> said `` (dead air None s, answer None s, backend [], screen [], face [])
+
+</details>
+
+<details><summary>59. deleg_slow_backend_30s: FAIL</summary>
+
+
+</details>
+
+<details><summary>60. deleg_tool_call: FAIL</summary>
+
+- `תזכור בבקשה שמספר החניה שלי הוא שבע` -> said `` (dead air None s, answer None s, backend [], screen [], face [])
+
+</details>
+
+<details><summary>61. deleg_hebrew_english: FAIL</summary>
+
+- `מה בירת אוסטרליה ומה מזג האוויר שם היום?` -> said `` (dead air None s, answer None s, backend [], screen [], face [])
+- `What is the weather in London right now?` -> said `` (dead air None s, answer None s, backend [], screen [], face [])
+
+</details>
+
+<details><summary>62. deleg_cost_reconciliation: FAIL</summary>
+
+- {"settled_usd": 0.0, "reserved_usd": 0, "open": 0}
+
+</details>
+
+<details><summary>105. popup_keyboard_rules: PASS</summary>
+
+- {"medium-unarmed": null, "medium-armed": "approve", "high-armed-code": null, "high-armed-kp-enter": null, "high-escape": "deny", "medium-escape": "deny"}
+
+</details>
+
+<details><summary>106. pronunciation_default_empty: PASS</summary>
+
+- {"files": {"workspace\\PRONUNCIATIONS.md": {}}}
+
+</details>
+
+<details><summary>107. wake_custom_model: PASS</summary>
+
+- {"custom@0.95": {"by_phrase": {"Hey Jarvis": [10, 12], "Hi Jarvis": [12, 12], "OK Jarvis": [6, 6], "Okay Jarvis": [6, 6]}, "false": ["Jarvis"], "negatives": 20, "detector": "hey_jarvis_copy.npz@0.95 (ConfirmingDetector)", "ready": [["WAKE_LISTENING", "microphone active; waiting for Hey Jarvis"], ["WAKE_LISTENING", "microphone active; waiting for Hey Jarvis"]], "lost": 0}, "builtin@0.15": {"by_phrase": {"Hey Jarvis": [10, 12], "Hi Jarvis": [12, 12], "OK Jarvis": [6, 6], "Okay Jarvis": [6, 6]}, "false": ["Jarvis", "hey Jarvie, no"], "negatives": 20, "detector": "hey_jarvis@0.15 (ConfirmingDetect
+- {"custom@0.95": [{"variant": "Hey Jarvis/David", "level": "normal", "noise": false, "mic": "cut@16000", "woke": true, "score": 0.98, "near": [0.39]}, {"variant": "Hey Jarvis/David", "level": "normal", "noise": true, "mic": "cut@16000", "woke": true, "score": 0.95, "near": [0.19, 0.94]}, {"variant": "Hey Jarvis/David", "level": "quiet", "noise": false, "mic": "cut@16000", "woke": true, "score": 0.95, "near": [0.59, 0.9]}, {"variant": "Hey Jarvis/David", "level": "quiet", "noise": true, "mic": "cut@16000", "woke": true, "score": 0.95, "near": [0.57, 0.57]}, {"variant": "Hey Jarvis/David", "level
 
 </details>
 
@@ -422,3 +962,7 @@ Each row is the LATEST run of that scenario (runs are listed at the end; live vo
 | 1020-225418 | 1-14 | 6.6 min | 6.9 min |
 | 1020-230236 | 11-24 | 13.8 min | 22.5 min |
 | 1020-232531 | 25-35 | 6.6 min | 15.2 min |
+| 1020-234116 | 36-50 | 11.4 min | 17.5 min |
+| 1021-000447 | 39,43,4,24,35,51-62 | 6.1 min | 8.7 min |
+| 1021-001558 | 105,106,107 | 0.0 min | 8.6 min |
+| 1021-002741 | 105,107 | 0.0 min | 8.8 min |

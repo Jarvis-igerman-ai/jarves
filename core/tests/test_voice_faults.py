@@ -349,6 +349,40 @@ async def test_fatal_error_ends_session():
     assert rec.health[-1][0] == "degraded" and "billing" in rec.health[-1][2]
 
 
+async def test_hung_transport_exit_and_closed_budget_never_hang_or_crash_the_finalize():
+    """V4-VC-5 (campaign C): the transport exit hung for minutes after an unconfirmed close and the late settle hit a
+    closed budget DB (CRASH in a later Core). The exit is bounded and a failing settle is a warning."""
+    rec, client = Rec(), FakeClient()
+    lv = make_live(rec, client)
+    await lv.start()
+    cm = lv._cm
+
+    async def hang(*a):
+        await asyncio.sleep(3600)
+    cm.__aexit__ = hang                                      # instance attribute: the CM's exit never returns
+
+    class Closed:
+        def release(self):
+            import sqlite3
+            raise sqlite3.ProgrammingError("Cannot operate on a closed database.")
+    lv._credit = Closed()
+    await asyncio.wait_for(lv.stop(), 4.0)                   # close_timeout_s 0.5: bounded, no exception
+    assert rec.ends == ["user"]
+
+
+async def test_credit_balance_exhausted_ends_session_with_billing_action():
+    """V4-VC-4 (campaign C, live 21 Oct): GPT-Live's 'credit_balance_exhausted' arrives as invalid_request_error;
+    the session cannot do anything useful, so it ends and the action names the credits."""
+    rec, client = Rec(), FakeClient()
+    lv = make_live(rec, client)
+    await lv.start()
+    client.conn.push({"type": "error", "error": {"code": "credit_balance_exhausted", "message": "You have no credits",
+                                                 "type": "invalid_request_error"}})
+    await settle(lv)
+    assert rec.ends == ["error:credit_balance_exhausted"]
+    assert rec.health[-1][0] == "degraded" and "credits" in rec.health[-1][2]
+
+
 async def test_validation_failure_degraded_with_action():
     rec, client = Rec(), FakeClient()
     lv = make_live(rec, client)

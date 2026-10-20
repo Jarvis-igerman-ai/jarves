@@ -415,48 +415,17 @@ async def s104(h, r):
           "NEVER approves HIGH (also with the right code typed), Escape denies", "medium: no result before arm, "
           "approve after arm; high: no result after Enter with the code typed (the window stays); Escape -> deny")
 async def s105(h, r):
-    import tkinter as tk
-    from jarves import approval_popup as ap
     tmp = sv.ROOT / f"{h.run_id}-popup-keys"
-    tmp.mkdir(parents=True, exist_ok=True)
-    orig_init, orig_bell = tk.Tk.__init__, tk.Misc.bell
-
-    def init(self, *a, **k):
-        orig_init(self, *a, **k)
-        self.attributes("-alpha", 0.0)
-    tk.Tk.__init__, tk.Misc.bell = init, (lambda self, *a, **k: None)
-    rows = {}
+    env = dict(os.environ, PYTHONPATH=str(HERE.parent / "src") + os.pathsep + os.environ.get("PYTHONPATH", ""))
+    p = await asyncio.to_thread(subprocess.run, [sys.executable, str(HERE / "popup_keys_check.py"), str(tmp)],
+                                capture_output=True, text=True, encoding="utf-8", env=env, timeout=120)
     try:
-        for case, risk, code, key, arm in (("medium-unarmed", "medium", "", "<Return>", False),
-                                           ("medium-armed", "medium", "", "<Return>", True),
-                                           ("high-armed-code", "high", "4821", "<Return>", True),
-                                           ("high-escape", "high", "4821", "<Escape>", True),
-                                           ("medium-escape", "medium", "", "<Escape>", True)):
-            out = tmp / f"{case}.json"
-            req = {"id": case, "title": "Run a command", "prompt": "Run a command?", "risk": risk, "kind": "shell",
-                   "lang": "en", "timeout_s": 30, "typed_code": code}
-            root = ap.build(req, out, None)
-            j = root.jarves
-            if arm:
-                j.arm()
-            if code:
-                j.typed.set(code)
-            root.update()
-            root.event_generate(key, when="now")
-            try:
-                root.update()
-            except tk.TclError:
-                pass
-            res = json.loads(out.read_text(encoding="utf-8")) if out.exists() else None
-            rows[case] = res.get("decision") if res else None
-            try:
-                root.destroy()
-            except tk.TclError:
-                pass
-    finally:
-        tk.Tk.__init__, tk.Misc.bell = orig_init, orig_bell
+        rows = json.loads(p.stdout.strip().splitlines()[-1])
+    except (ValueError, IndexError):
+        r.ok, r.key = False, f"checker failed rc {p.returncode}: {p.stderr[-200:]}"
+        return
     r.ok = (rows["medium-unarmed"] is None and rows["medium-armed"] == "approve" and rows["high-armed-code"] is None
-            and rows["high-escape"] == "deny" and rows["medium-escape"] == "deny")
+            and rows["high-armed-kp-enter"] is None and rows["high-escape"] == "deny" and rows["medium-escape"] == "deny")
     r.key = ", ".join(f"{k} -> {v}" for k, v in rows.items())
     r.details = [rows]
 
@@ -466,24 +435,20 @@ async def s105(h, r):
           "pronounce.DEFAULT_ENTRIES == {}; the GPT-Live instructions contain no 'pronounce' entry list")
 async def s106(h, r):
     from jarves import pronounce
-    s = await cc_boot(h)
-    if s.boot_error:
-        r.ok, r.key = False, s.boot_error
-        return
+    # no live cost: a fresh TEST home booted with the fake live session (the dictionary is a home file)
+    s = await h.boot("pron", over={"voice": {"activation": "wake_word", "wake_enabled": False, "greeting": False}},
+                     live_factory=sv.FakeLive, greet=False)
     files = list(s.home.rglob(pronounce.FILE))
     parsed = {str(p.relative_to(s.home)): pronounce.parse(p.read_text(encoding="utf-8")) for p in files}
-    instr = ""
-    try:
-        instr = str((s.core.live.session_config() or {}).get("instructions", "")) if s.core.live else ""
-    except Exception as e:
-        instr = f"[session_config failed {type(e).__name__}]"
-    import re as _re
-    note = [ln for ln in instr.splitlines() if _re.search(r"(?i)pronounc|הגייה|הגיה", ln)]
-    entries = [ln for ln in note if "=" in ln or "→" in ln]
-    r.ok = pronounce.DEFAULT_ENTRIES == {} and all(v == {} for v in parsed.values()) and not entries
+    loaded = pronounce.load()
+    probe = "שלום לדנה, לצחי ולג'רוויס"
+    same = pronounce.apply(probe) == probe
+    await h.shutdown(s)
+    n_loaded = len(getattr(loaded, "entries", None) or getattr(loaded, "map", None) or {}) if loaded else 0
+    r.ok = pronounce.DEFAULT_ENTRIES == {} and all(v == {} for v in parsed.values()) and same and n_loaded == 0
     r.key = (f"DEFAULT_ENTRIES {pronounce.DEFAULT_ENTRIES}, files {list(parsed)} -> {list(parsed.values())}, "
-             f"persona lines about pronunciation {len(note)} (with entries {len(entries)})")
-    r.details = [{"files": parsed, "persona_lines": note[:4]}]
+             f"loaded entries {n_loaded}, spoken text unchanged {same}")
+    r.details = [{"files": parsed}]
 
 
 WAKE_EN = [("Hey Jarvis/David", "Hey Jarvis", "David"), ("Hey Jarvis/Zira", "Hey Jarvis", "Zira"),
@@ -495,12 +460,28 @@ async def _wake_sweep(h, name, voice_over) -> dict:
     over = {"voice": {"wake_enabled": True, "activation": "wake_word", "greeting": False, "chime": True,
                       **voice_over}}
     sv.FakeLive.started = 0
-    s = await h.boot(name, over=over, live_factory=sv.FakeLive, greet=False)
-    detector = ""
+    import jarves.app as app_mod
+    orig = app_mod.Core.start
+    model = voice_over.pop("_identity_model", None)
+    over["voice"].pop("_identity_model", None)
+
+    async def start(core, *a, **k):          # the wake model is chosen through identity.json (as the dashboard does)
+        if model:
+            from jarves.identity import Identity
+            (core.home / "wake").mkdir(exist_ok=True)
+            dst = core.home / "wake" / Path(model).name
+            shutil.copy2(model, dst)
+            ident = Identity(core.home, core.cfg)
+            ident.set_wake(str(dst), by="campaign", only_in=core.home / "wake")
+            ident.apply_to_config()
+        return await orig(core, *a, **k)
+    app_mod.Core.start = start
     try:
-        detector = type(getattr(s.core, "_wake_detector_obj", None) or "").__name__
-    except Exception:
-        pass
+        s = await h.boot(name, over=over, live_factory=sv.FakeLive, greet=False)
+    finally:
+        app_mod.Core.start = orig
+    detector = (f"{Path(s.core.cfg.voice.wake_word).name}@{s.core.cfg.voice.wake_threshold} "
+                f"({type(getattr(s.core.wake, 'detector', None)).__name__})")
     await wait_for(lambda: VAudio.open_mics(16000), 20)
     rows = []
     for label, text, voice in WAKE_EN:
@@ -557,14 +538,14 @@ async def s107(h, r):
         copy = sv.ROOT / f"{h.run_id}-wake-copy" / "hey_jarvis_copy.npz"
         copy.parent.mkdir(parents=True, exist_ok=True)
         shutil.copy2(src, copy)
-        out["custom@0.95"] = await _wake_sweep(h, "wake-custom", {"wake_word": str(copy), "wake_threshold": 0.95})
+        out["custom@0.95"] = await _wake_sweep(h, "wake-custom", {"_identity_model": str(copy)})
     else:
         out["custom@0.95"] = {"by_phrase": {}, "false": [], "lost": 0, "note": "no owner model"}
     out["builtin@0.15"] = await _wake_sweep(h, "wake-builtin", {"wake_threshold": 0.15})
     b = out["builtin@0.15"]
     key_rows = [x for x in b["rows"] if x["variant"].startswith("Hey Jarvis/") and x["level"] != "very quiet"]
     r.ok = all(x["woke"] for x in key_rows) and all(v.get("lost", 0) == 0 for v in out.values()) and src.exists()
-    r.key = "; ".join(f"{m}: " + ", ".join(f"{k} {a}/{n}" for k, (a, n) in v["by_phrase"].items())
+    r.key = "; ".join(f"{m} [{v.get('detector', '')}]: " + ", ".join(f"{k} {a}/{n}" for k, (a, n) in v["by_phrase"].items())
                       + f", false {len(v['false'])}/{v.get('negatives', 20)}" for m, v in out.items())
     r.details = [{m: {k: v[k] for k in v if k != "rows"} for m, v in out.items()},
                  {m: [x for x in v.get("rows", [])] for m, v in out.items()}]

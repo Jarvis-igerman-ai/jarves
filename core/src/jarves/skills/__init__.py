@@ -45,6 +45,7 @@ DEFAULT_ALLOWED_ACTIONS = frozenset({"remember", "music_play", "music_pause", "m
                                      # settings Skill: one appended line (backed up, undoable) / allowlisted keys
                                      "workspace_note", "set_voice", "set_setting"})
 UNTRUSTED_GRACE_S = 3.0    # see SkillRegistry.new_turn
+REPEAT_REPLAY_S = 30.0     # V4-VC-3: an identical successful action repeated in a tainted turn gets its result back
 # Which conversation a tool call belongs to ("voice", "text", default "default": scheduler / other callers). The
 # untrusted-content taint is kept per route. A contextvar: tasks spawned by a route inherit it.
 ROUTE: contextvars.ContextVar[str] = contextvars.ContextVar("jarves_skill_route", default="default")
@@ -166,6 +167,8 @@ class SkillRegistry:
         # human approval time (registry.confirm) is not AI time: Brain timeouts add it back (bounded_ai)
         self.confirm_wait_s = 0.0
         self._confirming_since: float | None = None
+        self.asks = 0                              # approvals asked through this registry (V4-VC-3)
+        self._recent_ok: dict[tuple, tuple] = {}   # V4-VC-3: (route, tool, args) -> (t, result, owner approved it)
 
     @property
     def _untrusted_at(self) -> float | None:
@@ -186,6 +189,9 @@ class SkillRegistry:
         at = self._untrusted.get(key)
         if at is not None and self.clock() - at >= UNTRUSTED_GRACE_S:
             self._untrusted.pop(key, None)
+        # V4-VC-3: only a repeat inside the turn of the approval answer is replayed; a later turn runs it anew
+        now = self.clock()
+        self._recent_ok = {k: v for k, v in self._recent_ok.items() if k[0] != key or now - v[0] < UNTRUSTED_GRACE_S}
 
     async def _ask(self, prompt: str, **meta) -> bool:
         """registry.confirm, with the human's thinking time recorded (it must never count as an AI timeout).
@@ -193,6 +199,7 @@ class SkillRegistry:
         (the Core's approvals service); a plain confirm(prompt) gets the prompt only."""
         t0 = time.monotonic()
         self._confirming_since = t0
+        self.asks += 1
         try:
             if meta and getattr(self.confirm, "accepts_meta", False):
                 return bool(await self.confirm(prompt, **meta))
@@ -340,6 +347,21 @@ class SkillRegistry:
         except ValueError:
             logs.warn("skills", "TOOL_BAD_ARGS", "invalid tool arguments", tool=name)
             return ToolResult(False, f"invalid arguments for {name}", code="TOOL_BAD_ARGS")
+        key = (ROUTE.get(), name, json.dumps(args.model_dump(mode="json"), sort_keys=True, ensure_ascii=False,
+                                            default=str))
+        last = self._recent_ok.get(key)
+        if (last is not None and tool.permission != "read" and origin == "model"
+                and (self._untrusted_at is not None or last[2]) and self.clock() - last[0] < REPEAT_REPLAY_S):
+            # V4-VC-3 (campaign C): GPT-Live re-delegates the spoken approval "כן"; that second backend run repeats
+            # the SAME action it just ran (approved): the untrusted-turn guard refused it (helper: the backend then
+            # said "it did not work" instead of the real result) or it asked the owner a second time (list_clear).
+            # The identical approved action is never run or asked again: its result is handed back as done.
+            logs.info("skills", "TOOL_REPLAYED", "identical action already done this turn; result returned again",
+                      tool=name)
+            prev = last[1]
+            return ToolResult(prev.ok, prev.message, {**prev.data, "already_done": "this exact action already ran a "
+                              "moment ago (approved); do NOT run it again: report this result"}, code=prev.code)
+        asked0 = self.asks
         refused = await self._authorize(tool, args, origin)
         if refused is not None:
             return refused
@@ -355,6 +377,10 @@ class SkillRegistry:
             # review C (SWV4): a FAILED run still returns third-party text (a helper command exiting 1 prints
             # whatever it likes into output_tail): that taints the turn exactly like a successful one
             self._untrusted_at = self.clock()
+        if res.ok and tool.permission != "read":
+            now = self.clock()
+            self._recent_ok = {k: v for k, v in self._recent_ok.items() if now - v[0] < REPEAT_REPLAY_S}
+            self._recent_ok[key] = (now, res, self.asks > asked0)    # approved by the owner this call
         log = logs.info if res.ok else logs.warn
         log("skills", "TOOL_RESULT", "tool finished", tool=name, ok=res.ok, result_code=res.code, origin=origin,
             ms=round((time.monotonic() - t_run) * 1000))      # SW-V4 O: tool p50/p95 in the health monitor

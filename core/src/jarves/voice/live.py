@@ -132,13 +132,16 @@ def front_instructions(name: str = "JARVES", spoken: str = "ג'ארוויס") ->
 # Errors after which the session cannot do useful work -> end it (others: log + degraded + continue).
 FATAL_ERROR_TYPES = {"authentication_error", "permission_error"}
 FATAL_ERROR_CODES = {"invalid_api_key", "insufficient_quota", "billing_hard_limit_reached", "account_deactivated",
-                     "session_expired", "session_not_found"}
+                     "session_expired", "session_not_found",
+                     # V4-VC-4 (campaign C, live 21 Oct): the prepaid balance is empty; every later turn fails too
+                     "credit_balance_exhausted"}
 ERROR_ACTIONS = {
     "responses_validation_failed": "check ai.text_model, web search and Skill tool settings; spoken chat still "
                                    "works but backend answers/actions will fail until fixed",
     "invalid_api_key": "check OPENAI_API_KEY (jarvis key)",
     "insufficient_quota": "check OpenAI billing / project spend limit",
     "billing_hard_limit_reached": "check OpenAI billing / project spend limit",
+    "credit_balance_exhausted": "OpenAI credits are used up: add credits at platform.openai.com billing",
     "tool_outputs_required": "a tool result was not returned; report this bug (see core logs)",
     "function_call_outputs_required": "a tool result was not returned; report this bug (see core logs)",
 }
@@ -566,7 +569,11 @@ class SessionLifecycle:
             self._flush_task.cancel()
         if hasattr(self, "_flush_transcripts"):
             self._flush_transcripts()
-        self._settle_budget()
+        try:
+            self._settle_budget()
+        except Exception as e:                  # V4-VC-5: never a background CRASH at shutdown (store already closed)
+            logs.warn(self._log_area, "VOICE_BUDGET_SETTLE_FAILED", "budget not settled at the session end",
+                      error_type=type(e).__name__)
         seconds = self._usage_seconds()
         try:
             await _call(getattr(self, "on_usage", None), seconds)
@@ -883,7 +890,9 @@ class LiveVoice(SessionLifecycle):
     async def _release(self) -> None:
         cm, self._cm, self.conn = self._cm, None, None
         if cm is not None:
-            await cm.__aexit__(None, None, None)
+            # V4-VC-5 (campaign C): after an unconfirmed close the transport exit hung for minutes; the session's
+            # finalisation then ran into a later Core (budget DB already closed -> CRASH). Bounded: drop it.
+            await asyncio.wait_for(cm.__aexit__(None, None, None), max(1.0, self.close_timeout_s))
 
     async def _clock_loop(self) -> None:
         """Once a minute: the local time as SILENT context (no speech, no backend call). Never ends the session."""
