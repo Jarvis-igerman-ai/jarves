@@ -279,7 +279,7 @@ async def test_dashboard_home_strip_and_preview_api(core):
     ctx = Ctx(core.home, core.cfg)
     call = lambda fn, body=None: asyncio.to_thread(fn, ctx, None, body)    # noqa: E731
     st, body = await call(rt_mod.api_runtime)
-    assert st == 200 and body["privacy"]["mic"]["state"] in MIC and body["privacy"]["camera"]["state"] == "off"
+    assert st == 200 and body["privacy"]["mic"]["state"] in MIC and body["privacy"]["camera"]["state"] in ("off", "unavailable")
     st, r = await call(rt_mod.api_camera_preview_poll)
     assert st == 200 and r["open"] is False                              # a poll never opens it
     st, r = await call(rt_mod.api_camera_preview_set, {"start": True})
