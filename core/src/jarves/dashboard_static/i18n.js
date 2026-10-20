@@ -31,7 +31,7 @@
 
   const HE = /[֐-׿]/, LAT = /[A-Za-z]/, RTL_CHARS = /[֐-ࣿיִ-﷿ﹰ-﻿]/;
   const FSI = "⁨", PDI = "⁩";
-  const SCRIPT = { he: HE, ar: /[؀-ۿ]/, ru: /[Ѐ-ӿ]/ };   // text already in the target script is left alone
+  const SCRIPT = { he: HE };   // text already in the target script is left alone (one entry per non-Latin locale)
   const compiled = {};
   function cat(code) {
     if (compiled[code]) return compiled[code];
@@ -64,6 +64,8 @@
   function tr(t, noFlip) {
     if (typeof t !== "string" || !t) return t;
     const r = pick(t);
+    const exact = lang !== "en" && own(cat(lang).dict, r) ? cat(lang).dict[r] : null;
+    if (exact !== null) return exact;                        // also a mixed text ("... ל/ו/ב ...") has its catalog entry
     const sc = SCRIPT[lang];
     if (sc && sc.test(r)) return r;
     if (lang !== "en" && HE.test(r)) return r;               // Hebrew-only text with no English source
@@ -102,6 +104,10 @@
       return;
     }
     if (n.nodeType !== 1) return;
+    // phone card labels: CSS selectors key on data-label (English), the visible label is data-label-t (also on a
+    // dir=auto cell that holds user content: the label is ours)
+    const dl0 = n.getAttribute("data-label");
+    if (dl0) n.setAttribute("data-label-t", tr(dl0, true));
     if (n.closest(SKIP)) {
       // a dir="auto" input holds the user's words, but its placeholder is ours ("Search what was said…")
       const ph = /^(INPUT|TEXTAREA)$/.test(n.tagName) && !n.parentElement?.closest(SKIP) && n.getAttribute("placeholder");
@@ -112,9 +118,6 @@
       const v = n.getAttribute(a);
       if (v && LAT.test(v)) { const r = tr(v.trim(), true); if (r !== v.trim()) n.setAttribute(a, r); }
     }
-    // phone card labels: CSS selectors key on data-label (English), the visible label is data-label-t
-    const dl = n.getAttribute("data-label");
-    if (dl) n.setAttribute("data-label-t", tr(dl, true));
     for (const c of Array.from(n.childNodes)) trNode(c);
   }
 
@@ -179,10 +182,11 @@
     if (!o) return "";
     const mine = o[k + "_" + lang];
     if (mine) return mine;
-    if (lang === "he") return o[k + "_he"] || en || "";
+    if (lang === "he") return o[k + "_he"] || (en ? tr(en, true) : "");      // no server sibling: the client catalog
     return (en ? (lang === "en" ? en : tr(en)) : "") || o[k + "_he"] || "";
   }
-  window.txh = (o, k) => srv(o, k, o && (o[k] || o[k + "_en"]));
+  // <key>_en is the English DISPLAY form when the source holds a model-facing Hebrew hint (D-11), so it wins
+  window.txh = (o, k) => srv(o, k, o && (o[k + "_en"] || o[k]));
   window.txo = (o, k) => srv(o, k, o && o[k + "_en"]);
 
   applyDoc();

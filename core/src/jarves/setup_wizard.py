@@ -234,6 +234,12 @@ def _guide_notes(fid: str) -> dict:
             "privacy_en": g.privacy_en}
 
 
+def _he(why: str) -> str:
+    """The Hebrew form of a probe reason when there is one (SW-V4 K: no English inside the Hebrew hint)."""
+    from . import hebrew
+    return hebrew.he(why) or why
+
+
 def hint(fid: str, ok: bool, why: str) -> dict:
     """Extra, specific help for the availability line (Pear link, Google start, camera)."""
     if ok:
@@ -245,9 +251,9 @@ def hint(fid: str, ok: bool, why: str) -> dict:
         return {"command": "jarvis google start", "he": "צריך לחבר את גוגל:  jarvis google start",
                 "en": "Google must be connected:  jarvis google start"}
     if fid in ("camera", "camera_preview", "face_recognition", "camera_when_away"):
-        return {"he": "מצלמה: " + why, "en": "Camera: " + why}
+        return {"he": "מצלמה: " + _he(why), "en": "Camera: " + why}
     if fid == "browser":
-        return {"command": "jarvis features on browser", "he": "דפדפן: " + why, "en": "Browser: " + why}
+        return {"command": "jarvis features on browser", "he": "דפדפן: " + _he(why), "en": "Browser: " + why}
     if fid == "telegram":
         return {"command": "jarvis telegram start", "he": "צריך להגדיר בוט טלגרם:  jarvis telegram start",
                 "en": "Set up your Telegram bot:  jarvis telegram start"}
@@ -932,8 +938,7 @@ BUNDLE: dict[str, list[Callable[[], tuple[bool, str]]]] = {
     "dashboard": [_mod("jarves.dashboard"), _data("jarves", "dashboard_static/index.html"),
                   _data("jarves", "dashboard_static/setup.js"), _data("jarves", "dashboard_static/i18n.js"),
                   _data("jarves", "dashboard_static/shell.js"), _data("jarves", "dashboard_static/locales/en.js"),
-                  _data("jarves", "dashboard_static/locales/he.js"), _data("jarves", "dashboard_static/locales/ar.js"),
-                  _data("jarves", "dashboard_static/locales/ru.js")],
+                  _data("jarves", "dashboard_static/locales/he.js")],
     "dashboard_lan": [_mod("jarves.dashboard_auth"), _data("jarves", "dashboard_static/pair.html")],
     "context_trace": [_mod("jarves.context_trace"), _data("jarves", "dashboard_static/context.js")],
     "agent_orchestrator": [_mod("jarves.orchestrator"), _mod("jarves.orchestrator.service"),

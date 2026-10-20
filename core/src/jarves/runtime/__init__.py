@@ -267,7 +267,10 @@ def api_runtime(ctx, m, body):
         auto = {"enabled": False, "error": type(e).__name__}
     import platform as _pf
     host = {"os": _pf.system(), "machine": _pf.machine()}          # the dashboard header's device chip (P0.2)
-    return 200, {"runtime": view, "live": live, "autostart": auto, "platform_status": PLATFORM_STATUS, "host": host,
+    from .. import locales                                     # SW-V4 K: blocker / evidence texts in Hebrew too
+    platform = {k: {t: locales.attach(dict(x), "blocker", "evidence", "equivalent") for t, x in v.items()}
+                for k, v in PLATFORM_STATUS.items()}
+    return 200, {"runtime": view, "live": live, "autostart": auto, "platform_status": platform, "host": host,
                  # privacy strip on Home (privacy_state.py); None while the Core is down = shown as "unknown"
                  "privacy": snap.get("privacy") if snap else None,
                  "snapshot": {k: snap.get(k) for k in ("core", "voice_mode", "wake_listening", "live_session",

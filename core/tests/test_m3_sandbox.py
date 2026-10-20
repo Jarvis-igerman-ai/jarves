@@ -218,6 +218,9 @@ def test_dashboard_route(env):
         assert st in (403, 404), path
     st, obj = SB.api_grant_add(ctx, None, {"path": str(env.home), "mode": "readwrite"})
     assert st == 403
+    for typo in (str(env.outside / "no-such-folder"), "relative/folder"):       # SW-V4 K D-15: a typo is 400
+        st, obj = SB.api_grant_add(ctx, None, {"path": typo, "mode": "read"})
+        assert st == 400 and obj["code"] == "SANDBOX_BAD_PATH" and obj["error"], typo
     st, obj = SB.api_grant_add(ctx, None, {"path": str(env.outside), "mode": "read"})
     assert st == 200 and obj["status"] == "active"
     st, obj = SB.api_file_read(ctx, None, None, {"path": [f"grant:{obj['id']}/secret.txt"]})

@@ -13,7 +13,7 @@ PAGES.browser = async function () {
     } catch (e) { msg.textContent = tx("לא שונה: ", "Not changed: ") + e.message; }
   };
   const input = el("input", { type: "text", placeholder: "example.com", dir: "ltr", style: "min-width:240px",
-    "aria-label": "Site to allow" });
+    "aria-label": JL.t("Site to allow") });
   const add = el("button", { type: "button", class: "primary", onclick: () => {
     const v = input.value.trim();
     if (v) change("add", v);

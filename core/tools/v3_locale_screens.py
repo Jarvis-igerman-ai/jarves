@@ -1,5 +1,5 @@
 """SW-V3 P0.2c: real-browser (Playwright, headless Chromium/Edge) screenshots of the multi-language dashboard in
-English (default), Hebrew and Arabic at desktop (1440 px) and phone (390 px) widths, plus automatic layout checks.
+English (default) and Hebrew at desktop (1440 px) and phone (390 px) widths, plus automatic layout checks.
 
 A throw-away data dir is filled with the same demo data as v3_dashboard_screens.py; no network, no sound, bound to
 127.0.0.1. For every capture the page is checked for: html lang/dir of the locale, no horizontal page scroll, the
@@ -24,7 +24,7 @@ sys.path.insert(0, str(ROOT / "src"))
 sys.path.insert(0, str(ROOT / "tools"))
 
 DESKTOP, PHONE = (1440, 1000), (390, 844)
-LANGS = {"en": "ltr", "he": "rtl", "ar": "rtl"}
+LANGS = {"en": "ltr", "he": "rtl"}
 PAGES = [("home", "#/home"), ("conversations", "#/conversations"), ("features", "#/features"), ("usage", "#/usage"),
          ("logs", "#/logs"), ("guides", "#/guides"), ("settings", "#/settings")]
 PHONE_PAGES = [("home", "#/home"), ("features", "#/features"), ("conversations", "#/conversations")]

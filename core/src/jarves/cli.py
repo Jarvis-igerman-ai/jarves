@@ -1376,7 +1376,7 @@ def cmd_dashboard(a, cfg, home) -> int:
     except OSError as e:
         print(f"cannot start the dashboard: {e}", file=sys.stderr)
         return 1
-    print(f"JARVES dashboard (the link holds a one-time key for THIS computer, do not share it):\n  {dash.url}",
+    print(f"JARVES dashboard (the link holds a private key for THIS computer, valid until the dashboard stops; do not share it):\n  {dash.url}",
           flush=True)
     if dash.lan_url:
         print(f"Home network: on your phone open {dash.lan_url} and enter the pairing code from the Devices page "

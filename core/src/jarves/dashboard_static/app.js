@@ -15,7 +15,7 @@ function el(tag, attrs, ...kids) {
     else if (k.startsWith("on")) e.addEventListener(k.slice(2), v);
     else e.setAttribute(k, v === true ? "" : v);
   }
-  for (const k of kids.flat()) if (k !== null && k !== undefined && k !== false)
+  for (const k of kids.flat(Infinity)) if (k !== null && k !== undefined && k !== false)   // nested lists of nodes (K)
     e.append(k instanceof Node ? k : document.createTextNode(String(k)));
   return e;
 }
@@ -35,6 +35,8 @@ const clock = (ts) => dt(ts).toLocaleTimeString(window.JL ? JL.locale() : [], { 
 const day = (ts) => dt(ts).toLocaleDateString(window.JL ? JL.locale() : [], { weekday: "short", day: "numeric", month: "short" });
 const est = () => el("span", { class: "est", title: "Estimate from [pricing]; your OpenAI bill is the truth" }, "estimate");
 const pill = (cls, text) => el("span", { class: "pill " + cls }, text);
+// an on/off switch is read as "<feature>: on" in the page language (SW-V4 K; was English in Hebrew)
+const switchLabel = (title, on) => `${title}: ${on ? tx("פועל", "on") : tx("כבוי", "off")}`;
 const textOf = (t) => t.text !== null && t.text !== undefined ? t.text : null;
 const header = (title, sub, ...right) => el("div", { class: "row" },
   el("div", {}, el("h1", {}, title), sub ? el("div", { class: "sub" }, sub) : null), el("div", { class: "spacer" }), ...right);
@@ -215,7 +217,7 @@ async function pageCosts() {
   }
   const total = (n) => d.days.slice(0, n).reduce((a, x) => a + x.total, 0);
   const max = Math.max(0.0001, ...days.map((x) => x.total));
-  const chart = el("div", { class: "chart", role: "img", "aria-label": "Daily estimated cost, last 30 days (table below)" });
+  const chart = el("div", { class: "chart", role: "img", "aria-label": JL.t("Daily estimated cost, last 30 days (table below)") });
   const labels = el("div", { class: "xlabels" });
   for (const x of days) {
     const bar = el("div", { class: "bar" });
@@ -271,7 +273,7 @@ function issueRow(i) {
     if (k === "session" || v === null || (Array.isArray(v) && !v.length)) continue;
     const val = Array.isArray(v) ? v.map((x) => el("div", { dir: "auto" }, String(x)))
       : typeof v === "object" ? el("div", {}, JSON.stringify(v)) : el("span", { dir: "auto" }, String(v));
-    evNodes.push(el("div", {}, el("span", { class: "k" }, k.replace(/_/g, " ") + ": "), val));
+    evNodes.push(el("div", {}, el("span", { class: "k" }, JL.t(k.replace(/_/g, " ") + ":") + " "), val));
   }
   const actions = el("div", { class: "row" });
   if (i.status === "open") {
@@ -363,7 +365,7 @@ async function pageFeatures() {
   const rows = d.features.map((f) => {
     const msg = el("span", { class: "muted small" });
     const sw = el("button", { type: "button", class: "switch", "aria-pressed": f.enabled ? "true" : "false",
-      "aria-label": `${f.title_en}: ${f.enabled ? "on" : "off"}`, onclick: async () => {
+      "aria-label": switchLabel(txo(f, "title"), f.enabled), onclick: async () => {
         if (!f.enabled && f.risk === "high" && !confirm(`Turn on ${f.title_en}? This is a high-risk feature.`)) return;
         try { await api("/api/features/" + encodeURIComponent(f.id), { method: "POST", body: JSON.stringify({ enabled: !f.enabled }) }); route(true); }
         catch (e) { msg.textContent = "Not changed: " + e.message; }
@@ -389,57 +391,65 @@ async function pageHome() {
   const r = d.runtime || {}, c = r.core || {}, disp = r.display || {}, mic = r.mic || {}, al = r.alerts || {},
     vo = r.voice || {}, tray = r.tray || {};
   const running = d.live && c.state === "running";
-  const msg = el("span", { class: "muted small" });
+  const msg = el("span", { class: "muted small", role: "status" });
   const send = async (body) => {
-    try { await api("/api/runtime", { method: "POST", body: JSON.stringify(body) }); msg.textContent = "Done"; route(true); }
-    catch (e) { msg.textContent = "Not changed: " + e.message; }
+    try { await api("/api/runtime", { method: "POST", body: JSON.stringify(body) }); msg.textContent = tx("בוצע", "Done"); route(true); }
+    catch (e) { msg.textContent = tx("לא שונה: ", "Not changed: ") + e.message; }
   };
+  const onOff = (on) => on ? tx("פועל", "On") : tx("כבוי", "Off");
   const toggle = (on, label, body) => el("button", { type: "button", class: "switch", "aria-pressed": on ? "true" : "false",
-    "aria-label": `${label}: ${on ? "on" : "off"}`, disabled: running ? null : true, onclick: () => send(body) }, on ? "On" : "Off");
-  const voiceText = !running ? "—" : vo.live_session ? "In a conversation (cloud voice open)"
-    : vo.connecting ? "Connecting…" : vo.wake_listening ? "Listening for “Hey Jarvis” on this device (no cloud connection)"
-    : mic.muted ? "Microphone muted" : `Voice ${vo.mode || "?"}${vo.detail ? " · " + vo.detail : ""}`;
+    "aria-label": switchLabel(label, on), disabled: running ? null : true, onclick: () => send(body) }, onOff(on));
+  const voiceText = !running ? "—" : vo.live_session ? tx("בשיחה (הקול בענן פתוח)", "In a conversation (cloud voice open)")
+    : vo.connecting ? tx("מתחבר…", "Connecting…") : vo.wake_listening ? tx("מאזין ל-“Hey Jarvis” במכשיר הזה (בלי חיבור לענן)", "Listening for “Hey Jarvis” on this device (no cloud connection)")
+    : mic.muted ? tx("המיקרופון מושתק", "Microphone muted") : `${tx("קול", "Voice")} ${vo.mode || "?"}${vo.detail ? " · " + vo.detail : ""}`;
+  const WIN = { shown: ["מוצג", "Shown"], hidden: ["מוסתר", "Hidden"], starting: ["נפתח…", "Opening…"], crashed: ["קרס", "Crashed"] };
   const tiles = el("div", { class: "tiles" },
-    tile("Core", running ? "Running" : "Stopped", running ? `${c.mode} · pid ${c.pid} · v${c.version}`
-      : (c.since ? "last seen " + day(c.since) + " " + clock(r.ts || c.since) : "not started yet")),
-    tile("Window", running ? ({ shown: "Shown", hidden: "Hidden", starting: "Opening…", crashed: "Crashed" }[disp.state] || disp.state) : "—",
-      disp.available === false ? disp.reason : `closing it ${disp.close_policy === "quit" ? "quits JARVES" : "only hides JARVES"}`),
-    tile("Microphone", mic.muted ? "Muted" : "On", "software mute" + (mic.physical_mute === null || mic.physical_mute === undefined ? "" : " · physical: " + mic.physical_mute)),
-    tile("Proactive alerts", al.paused ? "Paused" : "On", "answers you ask for are never held"));
+    tile(tx("ליבה", "Core"), running ? tx("פועל", "Running") : tx("עצור", "Stopped"), running ? `${c.mode} · pid ${c.pid} · v${c.version}`
+      : (c.since ? tx("נראה לאחרונה ", "last seen ") + day(c.since) + " " + clock(r.ts || c.since) : tx("עוד לא הופעל", "not started yet"))),
+    tile(tx("חלון", "Window"), running ? (WIN[disp.state] ? tx(...WIN[disp.state]) : disp.state) : "—",
+      disp.available === false ? disp.reason : (disp.close_policy === "quit" ? tx("סגירה יוצאת מ-JARVES", "closing it quits JARVES") : tx("סגירה רק מסתירה את JARVES", "closing it only hides JARVES"))),
+    tile(tx("מיקרופון", "Microphone"), mic.muted ? tx("מושתק", "Muted") : tx("פועל", "On"), tx("השתקה בתוכנה", "software mute") + (mic.physical_mute === null || mic.physical_mute === undefined ? "" : tx(" · פיזית: ", " · physical: ") + mic.physical_mute)),
+    tile(tx("התראות יזומות", "Proactive alerts"), al.paused ? tx("מושהות", "Paused") : tx("פועלות", "On"), tx("תשובות שביקשת לא מתעכבות אף פעם", "answers you ask for are never held")));
+  const auto = d.autostart || {};
   const controls = el("div", { class: "card" },
-    el("div", { class: "row" }, el("b", {}, "Controls"), el("span", { class: "spacer" }), msg),
+    el("div", { class: "row" }, el("h2", { style: "margin:0" }, tx("שליטה", "Controls")), el("span", { class: "spacer" }), msg),
     el("table", { style: "margin-top:8px" }, el("tbody", {},
-      el("tr", {}, el("td", {}, "Window"), el("td", {},
-        el("button", { type: "button", class: "primary", disabled: running && disp.state !== "shown" ? null : true, onclick: () => send({ display: "show" }) }, "Show"), " ",
-        el("button", { type: "button", disabled: running && disp.state !== "hidden" ? null : true, onclick: () => send({ display: "hide" }) }, "Hide"))),
-      el("tr", {}, el("td", {}, "Mute microphone (software)"), el("td", {}, toggle(mic.muted, "Mute", { mic_muted: !mic.muted }))),
-      el("tr", {}, el("td", {}, "Pause proactive alerts"), el("td", {}, toggle(al.paused, "Pause alerts", { alerts_paused: !al.paused }))),
-      el("tr", {}, el("td", {}, "Start at login (invisible)"), el("td", {},
-        el("button", { type: "button", class: "switch", "aria-pressed": d.autostart && d.autostart.enabled ? "true" : "false",
-          onclick: () => send({ autostart: !(d.autostart && d.autostart.enabled) }) }, d.autostart && d.autostart.enabled ? "On" : "Off"),
-        el("span", { class: "muted small" }, " " + ((d.autostart && d.autostart.mechanism) || "not supported here")))),
-      el("tr", {}, el("td", {}, "Stop JARVES"), el("td", {},
-        el("button", { type: "button", disabled: running ? null : true, onclick: async () => {
-          if (!confirm("Stop JARVES? “Hey Jarvis” will not work until you start it again (jarvis start).")) return;
-          try { await api("/api/runtime/stop", { method: "POST", body: "{}" }); msg.textContent = "Stopping…"; setTimeout(() => route(true), 2500); }
-          catch (e) { msg.textContent = "Not stopped: " + e.message; }
-        } }, "Quit"))))),
-    !running ? el("div", { class: "small", style: "margin-top:8px" }, "JARVES is not running. Start it with ", el("code", {}, "jarvis start"),
-      ". The saved choices above apply when it starts.") : null);
-  const voice = el("div", { class: "card" }, el("b", {}, "Voice and wake word"), el("div", { style: "margin-top:6px" }, voiceText),
-    el("div", { class: "muted small", style: "margin-top:4px" }, `Tray icon: ${tray.state || "?"}${tray.reason ? " (" + tray.reason + ")" : ""}` +
-      (r.resumes ? ` · recovered after sleep ${r.resumes}×` : "")));
+      el("tr", {}, el("td", {}, tx("חלון", "Window")), el("td", {}, el("div", { class: "row" },
+        el("button", { type: "button", class: "primary", disabled: running && disp.state !== "shown" ? null : true, onclick: () => send({ display: "show" }) }, tx("הצגה", "Show")),
+        el("button", { type: "button", disabled: running && disp.state !== "hidden" ? null : true, onclick: () => send({ display: "hide" }) }, tx("הסתרה", "Hide"))))),
+      el("tr", {}, el("td", {}, tx("השתקת המיקרופון (בתוכנה)", "Mute microphone (software)")), el("td", {}, toggle(mic.muted, tx("השתקה", "Mute"), { mic_muted: !mic.muted }))),
+      el("tr", {}, el("td", {}, tx("השהיית התראות יזומות", "Pause proactive alerts")), el("td", {}, toggle(al.paused, tx("השהיית התראות", "Pause alerts"), { alerts_paused: !al.paused }))),
+      el("tr", {}, el("td", {}, tx("הפעלה בכניסה למחשב (בלי חלון)", "Start at login (invisible)")), el("td", {},
+        el("button", { type: "button", class: "switch", "aria-pressed": auto.enabled ? "true" : "false", "aria-label": switchLabel(tx("הפעלה בכניסה", "Start at login"), auto.enabled),
+          onclick: () => send({ autostart: !auto.enabled }) }, onOff(auto.enabled)),
+        el("span", { class: "muted small mono" }, " " + (auto.mechanism || "")), auto.mechanism ? null : el("span", { class: "muted small" }, tx("לא נתמך כאן", "not supported here")))),
+      el("tr", {}, el("td", {}, tx("עצירת JARVES", "Stop JARVES")), el("td", {},
+        el("button", { type: "button", class: "danger", disabled: running ? null : true, onclick: async () => {
+          if (!confirm(tx("לעצור את JARVES? “Hey Jarvis” לא יעבוד עד שתפעילו אותו שוב (jarvis start).", "Stop JARVES? “Hey Jarvis” will not work until you start it again (jarvis start)."))) return;
+          try { await api("/api/runtime/stop", { method: "POST", body: "{}" }); msg.textContent = tx("עוצר…", "Stopping…"); setTimeout(() => route(true), 2500); }
+          catch (e) { msg.textContent = tx("לא נעצר: ", "Not stopped: ") + e.message; }
+        } }, tx("יציאה", "Quit")))))),
+    !running ? el("div", { class: "small", style: "margin-top:8px" }, tx("JARVES לא רץ. מפעילים עם ", "JARVES is not running. Start it with "), el("code", {}, "jarvis start"),
+      tx(". הבחירות השמורות למעלה חלות כשהוא עולה.", ". The saved choices above apply when it starts.")) : null);
+  const voice = el("div", { class: "card" }, el("h2", { style: "margin:0" }, tx("קול ומילת הפעלה", "Voice and wake word")), el("div", { style: "margin-top:6px" }, voiceText),
+    el("div", { class: "muted small", style: "margin-top:4px" }, `${tx("סמל במגש", "Tray icon")}: ${tray.state || "?"}${tray.reason ? " (" + tray.reason + ")" : ""}` +
+      (r.resumes ? tx(` · התאושש אחרי שינה ${r.resumes} פעמים`, ` · recovered after sleep ${r.resumes}×`) : "")));
   const ps = d.platform_status || {};
-  const prow = (k, t) => el("td", {}, t ? pill(PSTATUS[t.status] || "plain", t.status.replace(/_/g, " ")) : "—",
-    t && (t.blocker || t.equivalent) ? el("div", { class: "muted small" }, t.blocker || ("equivalent: " + t.equivalent)) : null,
-    t && t.roadmap_issue ? el("div", { class: "small" }, el("a", { href: t.roadmap_issue, target: "_blank", rel: "noopener" }, "roadmap issue")) : null);
-  const platform = el("div", { class: "card" }, el("b", {}, "Always-on runtime: Windows and Raspberry Pi status"),
-    el("div", { class: "tscroll", style: "margin-top:8px" }, el("table", {}, el("thead", {}, el("tr", {}, el("th", {}, "Capability"), el("th", {}, "Windows"), el("th", {}, "Pi (Linux ARM64)"))),
-      el("tbody", {}, Object.entries(ps).map(([k, v]) => el("tr", {}, el("td", {}, k.replace(/_/g, " ")), prow(k, v.windows), prow(k, v.linux_arm64_pi)))))));
-  const pending = el("div", { class: "card muted small" }, "Next scheduled jobs and recent alerts appear here once the scheduler is installed. ",
-    el("span", { id: "usageStrip" }, "Usage: ChatGPT plan Unknown · OpenAI API Unknown (meters not connected yet)."));
-  render(header("Home", running ? "JARVES runs in the background; the window is optional." : "JARVES is stopped (last saved state shown)."),
-    tiles, el("div", { class: "grid2 home" }, controls, voice), platform, pending);
+  const PS = { verified_on_device: ["אומת במכשיר", "verified on device"], implemented_unverified: ["נבנה, לא אומת", "built, not verified"],
+    planned: ["מתוכנן", "planned"], blocked: ["חסום", "blocked"], not_applicable: ["לא רלוונטי", "not applicable"] };
+  const CAP = { background_core: ["ליבה ברקע", "background core"], single_instance: ["מופע יחיד", "single instance"],
+    display_control: ["שליטה בחלון", "display control"], tray_icon: ["סמל במגש", "tray icon"], autostart: ["הפעלה אוטומטית", "start at login"],
+    resume_recovery: ["התאוששות אחרי שינה", "resume recovery"], idle_no_cloud: ["בלי ענן במנוחה", "idle, no cloud"] };
+  const prow = (k, t) => el("td", { "data-label": k }, t ? pill(PSTATUS[t.status] || "plain", PS[t.status] ? tx(...PS[t.status]) : t.status.replace(/_/g, " ")) : "—",
+    t && (t.blocker || t.equivalent) ? el("div", { class: "muted small", dir: JL.textDir(txh(t, "blocker") || txh(t, "equivalent")) },
+      t.blocker ? txh(t, "blocker") : tx("מקבילה: ", "equivalent: ") + txh(t, "equivalent")) : null,
+    t && t.roadmap_issue ? el("div", { class: "small" }, el("a", { href: t.roadmap_issue, target: "_blank", rel: "noopener" }, tx("משימה בתוכנית העבודה", "Roadmap issue"))) : null);
+  const platform = el("div", { class: "card" }, el("h2", { style: "margin:0" }, tx("ריצה תמידית: מצב ב-Windows וב-Raspberry Pi", "Always-on runtime: Windows and Raspberry Pi status")),
+    el("div", { class: "tscroll", style: "margin-top:8px" }, el("table", { class: "stack" }, el("thead", {}, el("tr", {}, el("th", {}, tx("יכולת", "Capability")), el("th", {}, "Windows"), el("th", {}, "Pi (Linux ARM64)"))),
+      el("tbody", {}, Object.entries(ps).map(([k, v]) => el("tr", {}, el("td", {}, el("b", {}, CAP[k] ? tx(...CAP[k]) : k.replace(/_/g, " "))), prow("Windows", v.windows), prow("Pi", v.linux_arm64_pi)))))));
+  render(header(tx("שליטה ומצב ריצה", "Controls & runtime"), running ? tx("JARVES רץ ברקע; החלון לא חובה.", "JARVES runs in the background; the window is optional.")
+    : tx("JARVES עצור (מוצג המצב השמור האחרון).", "JARVES is stopped (last saved state shown).")),
+    tiles, el("div", { class: "grid2 home" }, controls, voice), platform);
   if (running) timer = setInterval(() => route(true), 4000);
 }
 async function pageSettings() {

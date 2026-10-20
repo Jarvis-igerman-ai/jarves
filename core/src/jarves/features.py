@@ -584,7 +584,8 @@ class Features:
                 "needs_attention": bool(req) or (on and not ok) or bool(cap["problems"])})
 
     def list(self) -> list[dict]:
-        return [self.status(fid) for fid in CATALOG]
+        # a snapshot: a plugin module imported by another request may register a feature meanwhile (K: 500 race)
+        return [self.status(fid) for fid in list(CATALOG)]
 
     # --- writes
     def set(self, fid: str, on: bool, *, by: str = "user") -> dict:
@@ -640,10 +641,10 @@ class Features:
     # --- integration
     def owner(self, skill: str, tool: str) -> str | None:
         """The feature that owns a tool (tool-level ownership wins over skill-level)."""
-        for f in CATALOG.values():
+        for f in list(CATALOG.values()):
             if tool in f.tools:
                 return f.id
-        for f in CATALOG.values():
+        for f in list(CATALOG.values()):
             if skill in f.skills:
                 return f.id
         return None
@@ -673,7 +674,7 @@ class Features:
 
     def unavailable_summary(self) -> list[tuple[Feature, str]]:
         out = []
-        for f in CATALOG.values():
+        for f in list(CATALOG.values()):
             if not self.active(f.id):
                 out.append((f, self.reason(f.id)))
         return out
@@ -681,7 +682,7 @@ class Features:
     def capabilities_markdown(self) -> str:
         """The Features section for TOOLS.md and the voice instructions: what is off/unavailable and why."""
         off = self.unavailable_summary()
-        on = [f for f in CATALOG.values() if self.active(f.id)]
+        on = [f for f in list(CATALOG.values()) if self.active(f.id)]
         lines = ["## Features (switches)",
                  "On: " + (", ".join(f"{f.title_en} ({f.id})" for f in on) or "none") + ".",
                  "Off or not available (say so honestly, e.g. \"אין לי מצלמה מחוברת\"; never pretend):"]

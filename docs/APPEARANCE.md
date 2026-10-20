@@ -82,11 +82,11 @@ language never picks one. `#/page?lang=he` forces a language for screenshots.
 |---|---|---|---|
 | English `en` | LTR | `dashboard_static/locales/en.js` (every source key) | source |
 | Hebrew `he` | RTL | `locales/he.js` | 100 % (test-enforced: a missing key fails) |
-| Arabic `ar` | RTL | `locales/ar.js` | partial (shell, navigation, Home, privacy strip, common words); missing keys show English |
-| Russian `ru` | LTR | `locales/ru.js` | partial, same scope as Arabic |
+
+The owner chose **English and Hebrew only** (SW-V4 K, 20 Oct 2026): the Arabic and Russian catalogs were removed (the repository history keeps them). A saved `ar` or `ru` choice falls back to English.
 
 **Adding a language** takes one catalog file and one registry entry:
-1. Copy `locales/ru.js` to `locales/<code>.js`. Set `code`, `name` (the language's own name), `dir` and `bcp47`.
+1. Copy `locales/he.js` to `locales/<code>.js`. Set `code`, `name` (the language's own name), `dir` and `bcp47`.
 2. Translate the `dict` values. The keys are the English texts from `en.js`.
 3. Add `<script src="/static/locales/<code>.js" defer></script>` to `index.html`, before `i18n.js`. The script order is the picker order.
 
@@ -101,8 +101,8 @@ Server texts (feature descriptions, issue titles, settings labels) get a `<field
 - Arrows are written mirrored in the RTL catalogs ("Open →" becomes "פתיחה ←"). An English text left untranslated in an RTL page gets its arrows flipped.
 - An English text left in an RTL page is wrapped as one isolated LTR run (U+2068…U+2069). Its punctuation stays at the end ("What should I do first?", not "?What should I do first").
 - Server detail texts get `dir` from their own letters (`JL.textDir`). A Hebrew sentence that starts with "Pear Desktop" still reads right-to-left.
-- Code, paths, URLs, model ids, numbers (`.num`), `.kv` values, the URL/e-mail/number/date inputs and charts stay LTR islands (`unicode-bidi: isolate`). Arabic dates use Latin digits (`ar-u-nu-latn`), so they match the numbers the server sends.
+- Code, paths, URLs, model ids, numbers (`.num`), `.kv` values, the URL/e-mail/number/date inputs and charts stay LTR islands (`unicode-bidi: isolate`).
 - Wide tables (the system log) scroll inside their card, never the page.
 - Module names in the log are data. They are never translated.
 
-Evidence: `core/tools/v3_locale_screens.py` (Playwright) captures en/he/ar at 1440 px and 390 px and checks each page automatically: lang/dir, no horizontal scroll, picker value, drawer side, search-results side, LTR islands. Output: `docs/reviews/swv3_p02c/` and the [report](reviews/SWV3_P02C_REPORT.md).
+Evidence: `core/tools/v3_locale_screens.py` (Playwright) captures en/he at 1440 px and 390 px and checks each page automatically: lang/dir, no horizontal scroll, picker value, drawer side, search-results side, LTR islands. Output: `docs/reviews/swv3_p02c/` and the [report](reviews/SWV3_P02C_REPORT.md).

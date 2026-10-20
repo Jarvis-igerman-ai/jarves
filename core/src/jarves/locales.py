@@ -12,6 +12,7 @@ and code never get a sibling.
 """
 from __future__ import annotations
 
+import re
 from typing import Callable
 
 from . import hebrew
@@ -23,6 +24,26 @@ TRANSLATORS: dict[str, Callable[[object], str | None]] = {
 }
 
 
+# a model-facing hint inside an English reason: '...; tell the user: "<Hebrew sentence to say>"' (the voice says it)
+_TELL = re.compile(r';?\s*tell the user: "([^"]*)"')
+_HEB = re.compile(r"[\u0590-\u05FF]")
+
+
+def display_en(s) -> str | None:
+    """The English DISPLAY form of a fixed text when it differs from the source (SW-V4 K, D-11): the spoken Hebrew hint
+    becomes the bare command ('...; run: jarvis google start'). None when the source is already plain English."""
+    if not isinstance(s, str) or not _HEB.search(s):
+        return None
+
+    def sub(m: re.Match) -> str:
+        if not _HEB.search(m.group(1)):
+            return m.group(0)
+        cmd = re.search(r"jarvis [a-z_]+(?: [a-z_-]+)*", m.group(1))
+        return f"; run: {cmd.group(0)}" if cmd else ""
+    out = _TELL.sub(sub, s)
+    return out if out != s else None
+
+
 def text(locale: str, s) -> str | None:
     """`s` in `locale`, or None (English, an unknown locale or no translation: the caller keeps the English)."""
     fn = TRANSLATORS.get(locale)
@@ -32,6 +53,9 @@ def text(locale: str, s) -> str | None:
 def siblings(key: str, s) -> dict:
     """{"<key>_he": ..., ...} for one fixed English text (only the locales that translate it)."""
     out = {}
+    en = display_en(s)
+    if en:
+        out[f"{key}_en"] = en
     for loc, fn in TRANSLATORS.items():
         t = fn(s)
         if t:

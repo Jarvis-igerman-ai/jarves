@@ -17,7 +17,7 @@ privacy_he = "מפתחות, סיסמאות ומיילים לא נשמרים לע
 privacy_en = "Keys, passwords and e-mail addresses are never stored. With privacy mode on only names, sizes and hashes are kept, no text."
 
 [[steps]]
-he = "פתחו שיחה בעמוד Conversations ולחצו על \"Context\"."
+he = "פתחו שיחה בעמוד \"שיחות\" ולחצו על \"Context\"."
 en = "Open a conversation on the Conversations page and press Context."
 action = "open:#/conversations"
 

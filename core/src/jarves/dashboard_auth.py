@@ -1,6 +1,6 @@
 """Dashboard access control (SW-V2 D02, spec 6 + 12): loopback by default, opt-in home-LAN mode with device pairing.
 
-Loopback (default, unchanged): the server binds 127.0.0.1; the one-time token printed by `jarvis dashboard` becomes an
+Loopback (default, unchanged): the server binds 127.0.0.1; the private token printed by `jarvis dashboard` (valid for this run) becomes an
 HttpOnly SameSite=Strict cookie; Host must be a loopback name (DNS rebinding); writes need the X-Jarves header.
 
 LAN mode (`jarvis dashboard --lan`, needs the `dashboard_lan` switch, default OFF):

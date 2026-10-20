@@ -241,7 +241,7 @@ def api_session(ctx: Ctx, m, body):
         return 404, {"error": "no such conversation"}
     tl = ctx.store.timeline(sid)
     hits = {r["fingerprint"] for r in ctx.store.rows("SELECT fingerprint FROM issue_hits WHERE session_id = ?", (sid,))}
-    issues = [i for i in ctx.store.issues(None) if i["fingerprint"] in hits]
+    issues = [locales.issue(dict(i)) for i in ctx.store.issues(None) if i["fingerprint"] in hits]   # K: Hebrew titles
     tasks = [t for t in _tasks(ctx, 200) if s["started"] - 1 <= _ts(t.get("created")) <=
              (s.get("ended") or s.get("last_event") or time.time()) + 1]
     return 200, {"session": _session_summary(ctx, s), **tl, "issues": issues, "tasks": tasks,
@@ -836,7 +836,7 @@ class Handler(BaseHTTPRequestHandler):
         who = a.principal(parse_cookies(self.headers.get("Cookie") or ""), ip)
         if who is None:
             msg = ("Open /pair on this device to pair it (code from the computer)." if a.lan and not is_loopback(ip)
-                   else "Open the link printed by `jarvis dashboard` (it holds a one-time token).")
+                   else "Open the link printed by `jarvis dashboard` (it holds this computer's private access key).")
             return self._send(403, msg.encode(), "text/plain; charset=utf-8")
         if not a.allowed(who, self.command, url.path):
             a.audit("refused_privilege", principal=who["id"], method=self.command, path=url.path)
@@ -902,7 +902,7 @@ class _Server(ThreadingHTTPServer):
 
 
 class Dashboard:
-    """Owns the HTTP server; `url` holds the one-time token. start() runs it in a daemon thread.
+    """Owns the HTTP server; `url` holds the private access token (reusable until the dashboard stops; D-18). start() runs it in a daemon thread.
     workspace / memory / settings: the Core's own objects when it is opened from inside the Core.
     lan=True (opt-in, the dashboard_lan switch): also reachable from paired devices on the home network."""
 
@@ -963,7 +963,7 @@ class Dashboard:
 # ---------------------------------------------------------------------- inside the Core: tool + face button
 class DashboardSkill(Skill):
     """`open_dashboard`: start (once) the dashboard inside the Core, open it in the browser, return the local URL
-    (without the one-time key: tool results reach the model and the log)."""
+    (without the private access key: tool results reach the model and the log)."""
     name = "dashboard"
     description = "the local web dashboard (conversations, logs, costs, memory, settings)"
 

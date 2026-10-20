@@ -648,7 +648,7 @@ class Core:
     async def open_dashboard(self, page: str = "") -> str:
         """Start the dashboard inside the Core (once; it shares the Core's workspace, memory and settings) and open
         it in the browser on this computer, on `page` (e.g. "#/guide/music"; kept across the token redirect).
-        Returns the full one-time URL (without the page)."""
+        Returns the full URL with the private access key (without the page)."""
         if self._dashboard is None or not self._dashboard.running:
             from .dashboard import Dashboard
             self._dashboard = await asyncio.to_thread(
@@ -1392,7 +1392,7 @@ class Core:
                    "Use features_list / get_status for current state; read this full file with workspace_read.",
                    "All feature IDs: " + ", ".join(feat.CATALOG) + ".",
                    self.features.capabilities_markdown(), "## What each feature does"]
-        for f in feat.CATALOG.values():
+        for f in list(feat.CATALOG.values()):
             catalog.append(f"- {f.id} / {f.title_en}: {f.about or f.title_en}. "
                            f"Needs: {', '.join(f.needs) or 'none'}. Risk: {f.risk}. Applies: {f.applies}.")
         self.workspace.write_generated("FEATURES.md", "\n".join(catalog) + "\n")

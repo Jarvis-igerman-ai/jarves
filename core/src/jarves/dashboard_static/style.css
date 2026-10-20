@@ -3,8 +3,12 @@
 :root {
   color-scheme: light;
   --bg: #f4f4f2; --surface: #fcfcfb; --surface-2: #efefec; --line: #e0dfda;
-  --text: #0b0b0b; --text-2: #52514e; --muted: #7a7974;
-  --accent: #2a78d6; --accent-soft: #e3eefb;
+  --text: #0b0b0b; --text-2: #52514e; --muted: #686762;
+  /* SW-V4 K: every text token passes WCAG AA (4.5:1) on --bg, --surface and --surface-2; --accent-fill carries
+     white text (buttons, the active tab); --good-text is the readable green for words, --good stays for dots */
+  --accent: #1d68c4; --accent-soft: #e3eefb; --accent-fill: #1d68c4; --on-accent: #fff; --good-text: #0a7d0a;
+  --space-1: 4px; --space-2: 8px; --space-3: 12px; --space-4: 16px; --space-5: 24px; --radius-s: 8px;
+  --fs-xs: 12px; --fs-s: 13px; --fs-m: 14px; --fs-l: 16px; --focus: 2px solid var(--accent);
   --user: #e3eefb; --user-line: #c4dbf6; --jarves: #f0efec; --jarves-line: #e0dfda;
   --series-1: #2a78d6; --series-2: #eb6834; --series-3: #1baf7a;
   --good: #0ca30c; --warning: #fab219; --serious: #ec835a; --critical: #d03b3b;
@@ -14,8 +18,8 @@
   :root:where(:not([data-theme="light"])) {
     color-scheme: dark;
     --bg: #121211; --surface: #1a1a19; --surface-2: #232321; --line: #2f2f2c;
-    --text: #f0efec; --text-2: #c3c2b7; --muted: #8f8e86;
-    --accent: #3987e5; --accent-soft: #1d2a3b;
+    --text: #f0efec; --text-2: #c3c2b7; --muted: #9a9992;
+    --accent: #4a93ea; --accent-soft: #1d2a3b; --accent-fill: #2f6fc4; --good-text: #3fbf5f; --critical: #e5534b; --count-bg: #b3302b;
     --user: #1d2a3b; --user-line: #2b4363; --jarves: #232321; --jarves-line: #34342f;
     --series-1: #3987e5; --series-2: #d95926; --series-3: #199e70;
     --shadow: none;
@@ -24,8 +28,8 @@
 :root[data-theme="dark"] {
   color-scheme: dark;
   --bg: #121211; --surface: #1a1a19; --surface-2: #232321; --line: #2f2f2c;
-  --text: #f0efec; --text-2: #c3c2b7; --muted: #8f8e86;
-  --accent: #3987e5; --accent-soft: #1d2a3b;
+  --text: #f0efec; --text-2: #c3c2b7; --muted: #9a9992;
+  --accent: #4a93ea; --accent-soft: #1d2a3b; --accent-fill: #2f6fc4; --good-text: #3fbf5f; --critical: #e5534b; --count-bg: #b3302b;
   --user: #1d2a3b; --user-line: #2b4363; --jarves: #232321; --jarves-line: #34342f;
   --series-1: #3987e5; --series-2: #d95926; --series-3: #199e70;
   --shadow: none;
@@ -48,7 +52,7 @@ nav { display: flex; flex-direction: column; gap: 2px; }
 nav a { color: var(--text-2); padding: 8px 10px; border-radius: 8px; display: flex; justify-content: space-between; }
 nav a:hover { background: var(--surface-2); text-decoration: none; }
 nav a.active { background: var(--accent-soft); color: var(--text); font-weight: 600; }
-.count { background: var(--critical); color: #fff; border-radius: 10px; padding: 0 7px; font-size: 12px; }
+.count { background: var(--count-bg, var(--critical)); color: #fff; border-radius: 10px; padding: 0 7px; font-size: 12px; }
 .count:empty { display: none; }
 .side-foot { margin-top: auto; display: flex; flex-direction: column; gap: 8px; padding-inline: 6px; }
 main { padding: 28px 32px; max-width: 1180px; width: 100%; }
@@ -81,7 +85,8 @@ td.num, th.num { text-align: end; }
 button { font: inherit; border-radius: 8px; border: 1px solid var(--line); background: var(--surface); color: var(--text);
   padding: 6px 12px; cursor: pointer; }
 button:hover { background: var(--surface-2); }
-button.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+button.primary { background: var(--accent-fill); border-color: var(--accent-fill); color: var(--on-accent); }
+button.primary:hover { background: color-mix(in srgb, var(--accent-fill) 88%, #000); }
 button.ghost { background: transparent; text-align: start; color: var(--text-2); }
 .row { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
 .spacer { flex: 1; }
@@ -149,7 +154,7 @@ textarea.file { width: 100%; min-height: 50vh; font: 13px/1.55 ui-monospace, Con
 }
 /* Features page (WP-I): on/off switch */
 .switch { min-width: 52px; border-radius: 999px; }
-.switch[aria-pressed="true"] { background: var(--good); border-color: var(--good); color: #fff; }
+.switch[aria-pressed="true"] { background: var(--good-fill); border-color: var(--good-fill); color: #fff; }
 /* WP-H: filters, editors, diffs, logs */
 input, select { font: inherit; color: var(--text); background: var(--surface); border: 1px solid var(--line); border-radius: 8px;
   padding: 5px 8px; }
@@ -220,6 +225,47 @@ button.big { font-size: 15px; padding: 9px 18px; }
 .fix { border-color: var(--serious); }
 @media (max-width: 760px) { .topbar { padding: 10px 16px; } }
 
+/* ---------------------------------------------------------------- SW-V4 K design system: shared components
+   One card (.card), one chip family (.pill for states, .chip for code/ids, .schip in the app bar), one table (table, plus
+   .stack: a table that becomes one card per row on phones; cells carry data-label), one empty state (.empty), one
+   key/value list (.kvlist). Spacing and type come from the --space-* / --fs-* tokens above. */
+.finding { display: flex; flex-direction: column; gap: var(--space-2); }
+.finding + .finding { margin-top: var(--space-3); }
+.finding .detail { color: var(--text-2); }
+.finding-kv, .kvlist { display: grid; grid-template-columns: minmax(110px, max-content) minmax(0, 1fr); gap: var(--space-1) var(--space-3); margin: 0; }
+.finding-kv dt, .kvlist dt { color: var(--text-2); font-weight: 600; }
+.finding-kv dd, .kvlist dd { margin: 0; min-width: 0; overflow-wrap: anywhere; }
+.finding .row:last-child { justify-content: flex-start; }
+@media (max-width: 760px) {
+  .finding-kv, .kvlist { grid-template-columns: minmax(0, 1fr); }
+  .finding-kv dd, .kvlist dd { margin-bottom: var(--space-2); }
+  table.stack thead { display: none; }
+  table.stack, table.stack tbody, table.stack tr, table.stack td { display: block; width: 100%; }
+  table.stack tr { border-bottom: 1px solid var(--line); padding: var(--space-2) 0; }
+  table.stack td { border: 0; padding: 3px 2px; }
+  /* label in the first column, everything the cell holds stacked in the second */
+  table.stack td[data-label-t] { display: grid; grid-template-columns: minmax(0, 32%) minmax(0, 1fr); column-gap: var(--space-2);
+    align-items: start; justify-items: start; }
+  table.stack td[data-label-t]::before { content: attr(data-label-t); grid-column: 1; grid-row: 1 / span 20; font-size: 12px; color: var(--muted); }
+  table.stack td[data-label-t] > * { grid-column: 2; min-width: 0; max-width: 100%; }
+  table.stack td.num[data-label-t] { direction: inherit; unicode-bidi: normal; text-align: start; }   /* the grid follows the page */
+  table.stack td[data-label-t]:empty { display: none; }
+  table.stack td.num { text-align: start; }
+}
+.empty-state { padding: 28px 16px; text-align: center; color: var(--text-2); }
+.empty-state .empty-hint { color: var(--muted); font-size: var(--fs-s); margin-top: var(--space-1); }
+@media (prefers-reduced-motion: reduce) { *, *::before, *::after { animation-duration: .001ms !important; animation-iteration-count: 1 !important; transition-duration: .001ms !important; scroll-behavior: auto !important; } }
+
 /* Home (M1 runtime): controls + voice side by side */
 .grid2.home { grid-template-columns: 1fr 1fr; margin-bottom: 14px; }
 @media (max-width: 760px) { .grid2.home { grid-template-columns: 1fr; } }
+/* SW-V4 K: Timers (ringing row), Lists (items), Jobs form, switches (white on green passes AA) */
+:root { --good-fill: #0a7d0a; }
+tr.ringing td { background: color-mix(in srgb, var(--warning) 16%, transparent); font-weight: 600; }
+.timer-edit > summary { cursor: pointer; font-size: var(--fs-s); color: var(--accent); margin-top: var(--space-1); }
+.list-item { gap: var(--space-2); padding: var(--space-1) 0; border-bottom: 1px solid var(--line); }
+.list-item:last-child { border-bottom: 0; }
+.list-item.done span[dir] { text-decoration: line-through; color: var(--muted); }
+.jobs-form { margin-top: var(--space-2); gap: var(--space-2); }
+.jobs-form input[type="text"] { flex: 1 1 240px; min-width: 0; }
+.field > input, .field > select { min-width: 0; }

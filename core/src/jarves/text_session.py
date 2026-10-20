@@ -84,7 +84,7 @@ async def execute(cfg, home: Path, text: str, *, interactive=False, read=input, 
     # Generate the actual text-mode tool list. Personal workspace files are preserved.
     workspace.references = {"TOOLS.md": wsp.tools_markdown(registry, settings.view()),
                             "FEATURES.md": "# Features\n" + features.capabilities_markdown() + "\n" +
-                            "\n".join(f"- {f.id}: {f.about or f.title_en}" for f in feat.CATALOG.values())}
+                            "\n".join(f"- {f.id}: {f.about or f.title_en}" for f in list(feat.CATALOG.values()))}
     try:
         agent = (agent_factory or make_agent)(cfg, registry, memory, home, budget=budget)
         if agent is not None:

@@ -16,7 +16,7 @@ test_he = "הבדיקה בודקת שגוגל מחובר ושאישרתם את �
 test_en = "The check sees that Google is connected and that you approved the Contacts permission."
 cost_he = "חינם."
 cost_en = "Free."
-privacy_he = "אנשי הקשר נקראים רק כשמבקשים ולא נשמרים במחשב. ההרשאה נפרדת, ואפשר לנתק בכל רגע בעמוד Connections."
+privacy_he = "אנשי הקשר נקראים רק כשמבקשים ולא נשמרים במחשב. ההרשאה נפרדת, ואפשר לנתק בכל רגע בעמוד \"חיבורים\"."
 privacy_en = "Contacts are read only when you ask and are not stored on this computer. The permission is separate; disconnect any time on the Connections page."
 
 [[steps]]

@@ -213,6 +213,16 @@ TEXT: dict[str, str] = {
         "הביצועים של Godot ב-Pi לא נמדדו (תאימות המציג, מפרט 4.2)",
     "HKCU Run key written through a fake registry in tests; a real Windows login was not exercised":
         "מפתח ההפעלה ב-HKCU נבדק רק מול רישום מדומה; לא נבדקה כניסה אמיתית ל-Windows",
+    # SW-V4 K: the rest of the always-on runtime platform table (Controls & runtime page)
+    "fcntl lock tested on CI-style unit tests only, not on a Pi": "נעילת fcntl נבדקה רק בבדיקות יחידה, לא על Pi",
+    "dashboard Home page (show/hide, mute, pause alerts, status, quit)":
+        "עמוד הבית בלוח הבקרה (הצגה/הסתרה, השתקה, השהיית התראות, מצב, יציאה)",
+    "sleep and headset unplug simulated (clock jump, stalled mic); a real sleep/unplug cycle is pending":
+        "שינה וניתוק אוזניות נבדקו בסימולציה (קפיצת שעון, מיקרופון תקוע); מחזור שינה/ניתוק אמיתי עוד ממתין",
+    "Pi USB mic re-plug untested": "חיבור מחדש של מיקרופון USB ב-Pi לא נבדק",
+    "contract test: no voice session or speech while idle in hidden mode; the real wake mic is the user's QA":
+        "בדיקת חוזה: אין שיחה קולית ואין דיבור במצב מוסתר ושקט; את מיקרופון ההפעלה האמיתי בודק המשתמש",
+    "Pi mic/acoustics untested": "המיקרופון והאקוסטיקה ב-Pi לא נבדקו",
     "no Pi device yet; same code path, systemd user service untested":
         "אין עדיין מכשיר Pi; אותו קוד, שירות systemd לא נבדק",
     "not run on a Raspberry Pi 5 yet: Godot ARM64 fps/RAM on the round display unmeasured":
@@ -480,6 +490,12 @@ _SCOPE = {"calendar": "יומן", "calendar write": "כתיבה ליומן", "co
 _LEVEL = {"ERROR": "שגיאה", "WARNING": "אזהרה"}
 
 
+def _feature_he(fid: str, fallback: str) -> str:
+    from .features import CATALOG                    # late: features imports this module through locales
+    f = CATALOG.get(fid)
+    return f.title_he if f else fallback
+
+
 def _s(fmt: str):
     """Rule helper: a Hebrew template with {1}, {2} for regex groups (kept verbatim)."""
     return lambda m: re.sub(r"\{(\d)\}", lambda g: m.group(int(g.group(1))), fmt)
@@ -495,6 +511,10 @@ RULES: list[tuple[re.Pattern, object]] = [(re.compile(p, re.S), f) for p, f in [
      lambda m: f"נדרשת הסכמה בגוגל ל{_SCOPE.get(m.group(1), m.group(1))}: הרץ `{m.group(2)}` ואשר את ההרשאה בדפדפן. "
                "לא בוצעה התחברות ולא שונתה הרשאה."),
     (r"^UNIT (\S+\.py)$", _s("בדיקות יחידה: {1}")),
+    (r"^no Telegram bot token; tell the user: .*$", lambda m: "אין טוקן לבוט טלגרם; מריצים במחשב jarvis telegram start"),
+    (r"^no Instagram token; tell the user: .*$", lambda m: "אין טוקן לאינסטגרם; מריצים במחשב jarvis instagram start"),
+    (r"^Home Assistant not set up; tell the user: .*$", lambda m: "Home Assistant עוד לא הוגדר; מריצים במחשב jarvis home start"),
+    (r"^needs (.+) \((\w+)\) on$", lambda m: f"צריך להפעיל קודם את \"{_feature_he(m.group(2), m.group(1))}\""),
     # usage
     (r"^(\d+(?:\.\d+)?) min$", _s("{1} דק׳")),
     (r"^API rate limit \((.+?)(, realtime)?\)$", lambda m: f"מגבלת קצב ה-API ({m.group(1)}{', realtime' if m.group(2) else ''})"),

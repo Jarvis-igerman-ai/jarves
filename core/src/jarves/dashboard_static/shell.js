@@ -157,7 +157,21 @@
       : piNotReady ? tx(`${piTotal - piNotReady}/${piTotal} מוכנות`, `${piTotal - piNotReady}/${piTotal} ready`) : tx("הכל מוכן", "all ready"))));
     const priv = typeof window.privacyChips === "function" ? window.privacyChips(rt && rt.privacy, live) : [];
     bar.replaceChildren(core, dev, pi, ...priv);
+    fadeCue(bar);
   }
+  // a sideways scroller shows a fade at the edge where more chips are hidden (D-17); RTL scrollLeft is negative
+  function fadeCue(s) {
+    if (!s) return;
+    s.dataset.fade = "1";
+    const upd = () => {
+      const max = s.scrollWidth - s.clientWidth, pos = Math.abs(s.scrollLeft);
+      s.classList.toggle("fade-end", max > 2 && pos < max - 2);
+      s.classList.toggle("fade-start", max > 2 && pos > 2);
+    };
+    if (!s._fade) { s._fade = true; s.addEventListener("scroll", upd, { passive: true }); window.addEventListener("resize", upd); }
+    upd();
+  }
+  window.fadeCue = fadeCue;
   async function poll() {
     if (document.hidden) return;
     try { rt = await api("/api/runtime"); } catch (e) { rt = null; }
