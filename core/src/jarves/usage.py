@@ -46,7 +46,7 @@ from datetime import date, datetime, timezone
 from pathlib import Path
 from typing import Callable
 
-from . import logs
+from . import locales, logs
 
 CATEGORIES = ("provider_authoritative", "app_local_counter", "estimate", "unavailable")
 UNKNOWN = "Unknown"
@@ -56,6 +56,10 @@ ADMIN_ENV = "OPENAI_ADMIN_KEY"
 COSTS_REFRESH_S = 3600          # Costs API at most hourly (it reports daily buckets anyway)
 RATE_FRESH_S = 900              # a rate-limit observation older than this is shown as stale
 PLAN_LIMIT_CODE = "subscription_sharing_usage_limit_exceeded"
+
+_NOTES = ("Unknown means the provider does not report it; JARVES never guesses a percent.",
+          "Tokens, requests, voice minutes, dollars and plan quota are tracked separately.",
+          "When the ChatGPT plan limit is reached JARVES pauses; it never switches to the paid API by itself.")
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS usage_obs (key TEXT PRIMARY KEY, data TEXT NOT NULL, ts REAL NOT NULL);
@@ -105,6 +109,7 @@ class Meter:
         d["limit_text"] = UNKNOWN if self.limit is None else _fmt(self.limit, self.unit)
         d["percent_text"] = UNKNOWN if pct is None else f"{pct:g}%"
         d["window_text"] = self.window or UNKNOWN
+        locales.attach(d, "title", "metric", "source", "window", "limit_source", "note")
         d["reset_text"] = UNKNOWN if self.reset_at is None else datetime.fromtimestamp(self.reset_at).isoformat(
             sep=" ", timespec="minutes")
         return d
@@ -658,10 +663,7 @@ class Monitor:
         return {"meters": [m.to_dict() for m in ms], "footer": self.footer(ms), "settings": get_settings(self.home),
                 "alerts": self.alert_history(20), "costs_api": {"enabled": self.costs_enabled(),
                                                                 "key_present": bool(os.environ.get(ADMIN_ENV))},
-                "notes": ["Unknown means the provider does not report it; JARVES never guesses a percent.",
-                          "Tokens, requests, voice minutes, dollars and plan quota are tracked separately.",
-                          "When the ChatGPT plan limit is reached JARVES pauses; it never switches to the paid API "
-                          "by itself."]}
+                "notes": list(_NOTES), **locales.list_siblings("notes", _NOTES)}
 
 
 def _alert_he(m: Meter, pct: float) -> str:

@@ -1,6 +1,6 @@
 """The REAL Godot face (headless, no window, no sound) must survive every message the Core can send - including
 malformed ones: unknown kinds, wrong types, huge text, bad JSON, binary frames. A fake Core serves the face.
-Runs only when GODOT_EXE points at a Godot 4.7 binary (CI e2e job sets it; locally: the console exe)."""
+Always runs: tests/_tools.py uses $GODOT_EXE, else finds/downloads the pinned Godot 4.7.2 into the build cache."""
 import asyncio
 import json
 import os
@@ -10,9 +10,16 @@ from pathlib import Path
 import pytest
 from websockets.asyncio.server import serve
 
-GODOT = os.environ.get("GODOT_EXE", "")
+import _tools
+
 GODOT_DIR = Path(__file__).resolve().parents[2] / "godot"
-pytestmark = pytest.mark.skipif(not GODOT or not Path(GODOT).exists(), reason="set GODOT_EXE to run the real-face test")
+
+
+@pytest.fixture(scope="module")
+def godot():
+    exe = _tools.godot_exe()
+    _tools.godot_project_imported(exe)
+    return exe
 
 STATES = ["idle", "listening", "thinking", "speaking", "happy", "error"]
 KINDS = ["thinking", "searching", "reading", "music", "time", "memory", "tool", "connecting", "done"]
@@ -90,6 +97,7 @@ def messages():
     out.append(m("user.transcript", {"text": "מה השעה"}))
     out.append(m("error", {"code": "X", "message": "boom", "action": "retry"}))
     out.append(m("confirm.request", {"id": "c1", "prompt": "למחוק הכל?"}))
+    out += [m("confirm.cancel", p) for p in ({"id": "other"}, {"id": "c1"}, {"id": None}, {})]
     out += [m("dashboard.opened", p) for p in (
         {"url": "http://127.0.0.1:5000/", "browser": True}, {"url": "http://127.0.0.1:5000/", "browser": False},
         {"url": None, "browser": "yes"}, {})]
@@ -101,7 +109,7 @@ def messages():
     return out
 
 
-async def test_face_survives_every_protocol_message(tmp_path):
+async def test_face_survives_every_protocol_message(tmp_path, godot):
     port = free_port()
     (tmp_path / "link_token").write_text("t" * 24, encoding="utf-8")
     sent, hello = [], asyncio.Event()
@@ -126,7 +134,7 @@ async def test_face_survives_every_protocol_message(tmp_path):
     env = {**os.environ, "JARVES_HOME": str(tmp_path)}
     async with serve(core, "127.0.0.1", port):
         proc = await asyncio.create_subprocess_exec(
-            GODOT, "--headless", "--path", str(GODOT_DIR), "res://face/face_app.tscn", "--", f"--core-port={port}",
+            godot, "--headless", "--path", str(GODOT_DIR), "res://face/face_app.tscn", "--", f"--core-port={port}",
             stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.STDOUT, env=env)
         try:
             await asyncio.wait_for(hello.wait(), 60)
@@ -142,7 +150,7 @@ async def test_face_survives_every_protocol_message(tmp_path):
     assert not bad, "the face logged script errors:\n" + "\n".join(bad[:12])
 
 
-async def test_face_closes_itself_on_display_close(tmp_path):
+async def test_face_closes_itself_on_display_close(tmp_path, godot):
     """SW-V2 M1 "hide yourself": the Core sends display.close; the real face says desktop.close and exits by itself
     (exit code 0, not killed), so the Core never has to terminate it."""
     port = free_port()
@@ -166,7 +174,7 @@ async def test_face_closes_itself_on_display_close(tmp_path):
     env = {**os.environ, "JARVES_HOME": str(tmp_path)}
     async with serve(core, "127.0.0.1", port):
         proc = await asyncio.create_subprocess_exec(
-            GODOT, "--headless", "--path", str(GODOT_DIR), "res://face/face_app.tscn", "--", f"--core-port={port}",
+            godot, "--headless", "--path", str(GODOT_DIR), "res://face/face_app.tscn", "--", f"--core-port={port}",
             stdout=asyncio.subprocess.DEVNULL, stderr=asyncio.subprocess.DEVNULL, env=env)
         try:
             rc = await asyncio.wait_for(proc.wait(), 60)

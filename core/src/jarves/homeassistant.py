@@ -25,6 +25,7 @@ import httpx
 from pydantic import BaseModel, Field
 
 from . import features as feat
+from . import clilang
 from . import logs
 from .channels_common import read_json, read_secret, targets, write_private_json
 from .config import save_secret
@@ -302,12 +303,13 @@ class Wizard:
         self.home, self.io, self.transport = Path(home), io, transport
 
     async def run(self) -> int:
-        out = self.io.out
+        out = lambda t="": self.io.out(clilang.bi(t))      # noqa: E731
         cur = load_config(self.home)
-        out("JARVES + Home Assistant\n"
+        out("JARVES + Home Assistant\n" + clilang.fmt(
             "1. ב-Home Assistant: לוחצים על השם שלכם (למטה משמאל) > Security > Long-lived access tokens > Create token.\n"
-            "   In Home Assistant: your profile (bottom left) > Security > Long-lived access tokens > Create token.\n"
-            "2. מעתיקים את הטוקן (מוצג פעם אחת). / Copy the token (shown once).\n")
+            "2. מעתיקים את הטוקן (מוצג פעם אחת).",
+            "1. In Home Assistant: your profile (bottom left) > Security > Long-lived access tokens > Create token.\n"
+            "2. Copy the token (shown once).") + "\n")
         url = (self.io.read(f"Home Assistant address [{cur['url'] or DEFAULT_URL}]: ") or "").strip() \
             or cur["url"] or DEFAULT_URL
         sp = urlsplit(url)
@@ -327,7 +329,7 @@ class Wizard:
                 return 1
             states = await client.states()
         except HAError as e:
-            out(e.he + "\n" + e.message)
+            out(clilang.fmt(e.he, e.message))
             return 1
         cands = sorted((s for s in states if s["entity_id"].split(".", 1)[0] in PICKABLE),
                        key=lambda s: s["entity_id"])

@@ -165,7 +165,16 @@ def test_api_key_only_from_environment_when_asked(env, monkeypatch):
 
 
 # ---------------------------------------------------------------------- interactive
-def test_interactive_all_enter_is_hebrew_and_safe(env):
+def test_interactive_all_enter_is_english_by_default(env, monkeypatch):
+    monkeypatch.delenv("JARVES_CLI_LANG", raising=False)
+    w, out = wizard(env, lines=[])
+    assert w.run() == 0
+    text = "\n".join(out)
+    assert "JARVES setup" in text and "הגדרת" not in text
+
+
+def test_interactive_all_enter_is_hebrew_and_safe(env, monkeypatch):
+    monkeypatch.setenv("JARVES_CLI_LANG", "he")             # the CLI language setting (default is English)
     w, out = wizard(env, lines=[])                          # every question answered with Enter (end of input)
     assert w.run() == 0
     text = "\n".join(out)

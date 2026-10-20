@@ -95,6 +95,8 @@ class VoiceConfig(_Strict):
     stt_fallback_model: str = "tiny"
     stt_compute: str = "int8"
     tts_voice_hint: str = "he-IL"
+    speech_http_model: str = "gpt-4o-mini-tts"   # /v1/audio/speech model for typed replies and `jarvis say`
+    speech_voice: str = "marin"
     wake_no_speech_s: float = Field(12, ge=0, le=120)   # a wake-started conversation where nobody speaks ends after this (false wake); 0 = off
     chime: bool = True                     # soft sound when "Hey Jarvis" is heard and when the conversation is ready
     greeting: bool = True                  # say hello + how to talk when the face first connects
@@ -110,6 +112,18 @@ class VoiceConfig(_Strict):
     # QA 18 Oct saw a real user peak at 0.17. Run `jarvis wake test` to calibrate to YOUR voice and mic.
     wake_threshold: float = Field(0.35, ge=0, le=1)
     wake_cooldown_s: float = Field(2.0, ge=0, le=30)
+    # Two-stage wake (docs/reviews/SWV3_WAKE_REPORT.md): the wake model is a cheap gate; a score >= wake_accept
+    # (or wake_threshold, whichever is higher) wakes at once, a score in [wake_gate, that) wakes only if a short
+    # LOCAL speech-to-text check (faster-whisper, nothing leaves the device) hears "hey/hi/ok Jarvis". This accepts
+    # "hi jarvis", "hey jarves", Hebrew "היי ג'רוויס" and rejects "hey Travis". Falls back to one stage if the
+    # speech model cannot load.
+    wake_confirm: bool = True
+    wake_gate: float = Field(0.02, ge=0, le=1)
+    wake_accept: float = Field(0.5, ge=0, le=1)
+    wake_confirm_model: str = "small"
+    # Digital AGC on the wake mic (quiet webcam/laptop mics); wake_gain_db = starting gain, set by calibration.
+    wake_agc: bool = True
+    wake_gain_db: float = Field(0.0, ge=0, le=30)
     record_max_s: float = Field(15, gt=0, le=60)
     input_device: int | str | None = None
     output_device: int | str | None = None
@@ -231,6 +245,12 @@ class UpdateConfig(_Strict):
         return v
 
 
+class UIConfig(_Strict):
+    """Language of the desktop UI chrome (the approval popup). English by default; "he" = Hebrew, right-aligned.
+    Never both at once (owner feedback 20 Oct: too much text)."""
+    popup_language: Literal["en", "he"] = "en"
+
+
 class Config(_Strict):
     assistant_name: str = "JARVES"
     # how the name is SAID (and written in Hebrew speech/greetings): the voice read the Latin "JARVES" letter by
@@ -246,13 +266,27 @@ class Config(_Strict):
     camera: CameraConfig = CameraConfig()
     runtime: RuntimeConfig = RuntimeConfig()
     update: UpdateConfig = UpdateConfig()
+    ui: UIConfig = UIConfig()
 
 
 SECRET_KEYS = ("api_key", "apikey", "token", "secret", "password", "cookie")
 
 
 def state_dir() -> Path:
-    """Per-user data dir (logs, memory db, link token). Override with JARVES_HOME."""
+    """Per-user data dir of the current PROFILE (logs, memory db, link token). The default profile is base_dir()
+    (JARVES_HOME or the per-user folder, unchanged); others are <base>/profiles/<name> (jarves.profiles)."""
+    from . import profiles
+    name = profiles.current_name()
+    if name == profiles.DEFAULT:
+        return base_dir()
+    if not profiles.exists(name):
+        raise profiles.ProfileError(f"there is no profile {name!r} (JARVES_PROFILE / jarvis profile use). "
+                                    f"Create it: jarvis profile create {name}")
+    return profiles.home_for(name)
+
+
+def base_dir() -> Path:
+    """The per-user JARVES folder = the default profile. Override with JARVES_HOME."""
     if os.environ.get("JARVES_HOME"):
         p = Path(os.environ["JARVES_HOME"])
     elif sys.platform == "win32":

@@ -34,8 +34,30 @@ def background_python() -> Path:
     return exe
 
 
+def _profile() -> str:
+    from ..profiles import DEFAULT, current_name, ProfileError
+    try:
+        return current_name()
+    except ProfileError:
+        return DEFAULT
+
+
 def core_command(extra: list[str] | None = None) -> list[str]:
-    return [str(background_python()), "-m", "jarves", "run", "--background", *(extra or [])]
+    """The background Core of the CURRENT profile (Issue #17: the default profile's command is unchanged)."""
+    from ..profiles import DEFAULT
+    p = _profile()
+    prof = [] if p == DEFAULT else ["--profile", p]
+    return [str(background_python()), "-m", "jarves", *prof, "run", "--background", *(extra or [])]
+
+
+def entry_name(base: str) -> str:
+    """Run-key value / systemd unit name: one per profile ("JARVES", "JARVES-dana"; jarves.service, jarves-dana...)."""
+    from ..profiles import DEFAULT
+    p = _profile()
+    if p == DEFAULT:
+        return base
+    stem, dot, ext = base.partition(".")
+    return f"{stem}-{p}{dot}{ext}"
 
 
 class _WinReg:
@@ -75,18 +97,18 @@ class WindowsAutostart:
         return subprocess.list2cmdline(self.command)
 
     def enabled(self) -> bool:
-        return bool(self.reg.get(VALUE))
+        return bool(self.reg.get(entry_name(VALUE)))
 
     def enable(self) -> str:
         line = self.command_line()
-        self.reg.set(VALUE, line)
-        return f"HKCU\\{RUN_KEY}\\{VALUE} = {line}"
+        self.reg.set(entry_name(VALUE), line)
+        return f"HKCU\\{RUN_KEY}\\{entry_name(VALUE)} = {line}"
 
     def disable(self) -> bool:
-        return self.reg.delete(VALUE)
+        return self.reg.delete(entry_name(VALUE))
 
     def describe(self) -> dict:
-        cur = self.reg.get(VALUE)
+        cur = self.reg.get(entry_name(VALUE))
         return {"platform": self.platform, "mechanism": "HKCU Run key", "enabled": bool(cur), "entry": cur,
                 "current_install": cur == self.command_line() if cur else None}
 
@@ -113,7 +135,7 @@ class SystemdUserAutostart:
 
     @property
     def path(self) -> Path:
-        return self.unit_dir / UNIT
+        return self.unit_dir / entry_name(UNIT)
 
     def unit_text(self) -> str:
         exec_start = " ".join(shlex.quote(c) for c in self.command)
@@ -132,17 +154,17 @@ class SystemdUserAutostart:
                 "WantedBy=default.target\n")
 
     def enabled(self) -> bool:
-        return self.path.is_file() and (self.unit_dir / "default.target.wants" / UNIT).exists()
+        return self.path.is_file() and (self.unit_dir / "default.target.wants" / entry_name(UNIT)).exists()
 
     def enable(self) -> str:
         self.unit_dir.mkdir(parents=True, exist_ok=True)
         self.path.write_text(self.unit_text(), encoding="utf-8")
         self.run(["daemon-reload"])
-        rc = self.run(["enable", UNIT])
+        rc = self.run(["enable", entry_name(UNIT)])
         if rc != 0:     # no systemd user manager (container, WSL): link it ourselves, as `enable` would
             wants = self.unit_dir / "default.target.wants"
             wants.mkdir(exist_ok=True)
-            link = wants / UNIT
+            link = wants / entry_name(UNIT)
             if not link.exists():
                 try:
                     link.symlink_to(self.path)
@@ -152,8 +174,8 @@ class SystemdUserAutostart:
 
     def disable(self) -> bool:
         had = self.path.exists()
-        self.run(["disable", UNIT])
-        for p in (self.unit_dir / "default.target.wants" / UNIT, self.path):
+        self.run(["disable", entry_name(UNIT)])
+        for p in (self.unit_dir / "default.target.wants" / entry_name(UNIT), self.path):
             try:
                 p.unlink()
             except OSError:

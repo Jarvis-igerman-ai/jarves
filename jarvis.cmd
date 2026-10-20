@@ -6,6 +6,7 @@ rem jarvis start [--show]                JARVES in the background: no window, tr
 rem jarvis stop ^| status ^| show ^| hide    stop it / its four states / open or close the window (Core keeps running)
 rem jarvis autostart on ^| off ^| status     start invisibly when you log in to Windows (default off)
 rem jarvis setup ^| key ^| logs -f ^| ^<any Core command^>
+rem jarvis --profile NAME [command]    the same for another profile (jarvis profile list ^| create ^| use ^| delete)
 rem jarvis dashboard                      open the local dashboard (home, conversations, logs, costs, memory, settings)
 rem Closing the window only hides JARVES; Quit in the tray (or jarvis stop) stops him.
 setlocal
@@ -14,6 +15,8 @@ rem --no-sync: never reinstall while a Core is running (its jarves.exe is locked
 set "J=uv --directory "%C%" run --no-sync jarves"
 if not exist "%C%\.venv" uv --directory "%C%" sync --inexact -q --extra voice --extra tray
 set "FIRST=%~1"
+set "SELF=%~f0"
+if /i "%FIRST%"=="--profile" goto profile
 if /i "%FIRST%"=="--help" ( %J% %* & exit /b )
 if /i "%FIRST%"=="-h" ( %J% %* & exit /b )
 if /i "%FIRST%"=="--version" ( %J% %* & exit /b )
@@ -39,3 +42,20 @@ if "%ERRORLEVEL%"=="1" (
   %J% setup --if-needed || exit /b 1
 )
 %J% %*
+exit /b
+:profile
+rem jarvis --profile NAME [command]: the same launcher for another profile (own memory, settings, keys, port)
+if "%~2"=="" ( echo usage: jarvis --profile NAME [command]   ^(list: jarvis profile list^) & exit /b 2 )
+set "JARVES_PROFILE=%~2"
+%J% profile show >nul 2>&1 || ( %J% profile show & exit /b 2 )
+shift
+shift
+set "REST="
+:collect
+if "%~1"=="" goto recall
+set REST=%REST% %1
+shift
+goto collect
+:recall
+call "%SELF%" %REST%
+exit /b

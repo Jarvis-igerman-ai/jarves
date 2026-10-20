@@ -107,7 +107,7 @@ def _inventory(home: Path) -> list[dict]:
     out = []
     for p in sorted(home.rglob("*")):
         rel = p.relative_to(home).as_posix()
-        if p.is_file() and not rel.startswith(("backups/", "logs/")) and rel.count("/") < 3:
+        if p.is_file() and not rel.startswith(("backups/", "logs/", "profiles/")) and rel.count("/") < 3:
             out.append({"name": rel, "size": p.stat().st_size})
         if len(out) >= 300:
             break

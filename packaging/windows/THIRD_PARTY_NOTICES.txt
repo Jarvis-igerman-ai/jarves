@@ -2,9 +2,10 @@ JARVES for Windows bundles these third-party components (their own license files
 
 - CPython 3.12 (python-build-standalone build by Astral) - Python Software Foundation License; python\LICENSE.txt
 - Python packages pinned in core/uv.lock (OpenAI Agents SDK, websockets, pydantic, httpx, numpy, sounddevice /
-  PortAudio, faster-whisper / CTranslate2, pyopen-wakeword, opencv-python-headless, winrt ...) - each package's
-  license is in python\Lib\site-packages\<package>.dist-info
+  PortAudio, faster-whisper / CTranslate2, pyopen-wakeword, opencv-python-headless, winrt, Playwright with its
+  Node.js driver ...) - each package's license is in python\Lib\site-packages\<package>.dist-info
 - Godot Engine 4.7.2 export template (face\JARVES Face.exe) - MIT License, https://godotengine.org/license
 
 Not bundled: Pear Desktop (music player, separate download: https://github.com/pear-devs/pear-desktop/releases).
+Not bundled: a web browser - the Browser Skill drives the Microsoft Edge (or Chrome) already installed in Windows.
 No API keys, account tokens, personal databases or logs are included in this package.

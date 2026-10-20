@@ -48,9 +48,9 @@
       const m = f.meter, x = f.extra;
       const node = el("a", { href: "#/usage", class: "upart" + (m.state === "limit_reached" ? " reached" : "") },
         el("b", {}, label), bar(m), el("span", { class: "uval" }, headline(m)), catPill(m.category),
-        x ? el("span", { class: "muted small" }, `${x.title}: ${x.used_text}${x.limit !== null ? " / " + x.limit_text : ""}`) : null);
-      hoverTip(node, [m.title, `${m.used_text} of ${m.limit_text} (${m.percent_text})`, `source: ${m.source}`,
-        `window: ${m.window_text} · reset: ${m.reset_text}`, m.note || ""]);
+        x ? el("span", { class: "muted small" }, `${txh(x, "title")}: ${x.used_text}${x.limit !== null ? " / " + x.limit_text : ""}`) : null);
+      hoverTip(node, [txh(m, "title"), `${m.used_text} of ${m.limit_text} (${m.percent_text})`, `source: ${txh(m, "source")}`,
+        `window: ${txh(m, "window") || m.window_text} · reset: ${m.reset_text}`, txh(m, "note")]);
       return node;
     };
     // SW-V3 P0.2: today's estimated JARVES spend next to the provider meters (from /api/overview, app.js)
@@ -74,15 +74,15 @@
       el("table", {}, el("thead", {}, el("tr", {}, el("th", {}, "Meter"), el("th", {}, "Used / limit"), el("th", {}, ""),
         el("th", {}, "Window / reset"), el("th", {}, "Source"))),
         el("tbody", {}, d.meters.filter((m) => m.provider === g).map((m) => el("tr", {},
-          el("td", {}, el("b", {}, m.title), el("div", { class: "muted small" }, `${m.metric} (${m.unit})`),
+          el("td", {}, el("b", {}, txh(m, "title")), el("div", { class: "muted small" }, `${txh(m, "metric")} (${m.unit})`),
             m.state === "limit_reached" ? pill("fail", "limit reached") : null, m.state === "stale" ? pill("medium", "stale") : null),
           el("td", { class: "num" }, `${m.used_text} / ${m.limit_text}`, m.limit !== null ? el("div", { class: "small" }, m.percent_text) : null,
-            m.limit_source ? el("div", { class: "muted small" }, "limit: " + m.limit_source) : null),
+            m.limit_source ? el("div", { class: "muted small" }, "limit: " + txh(m, "limit_source")) : null),
           el("td", {}, bar(m)),
-          el("td", { class: "small" }, m.window_text, el("div", { class: "muted" }, "reset: " + m.reset_text)),
-          el("td", { class: "small" }, catPill(m.category), el("div", { class: "muted" }, m.source),
+          el("td", { class: "small" }, txh(m, "window") || m.window_text, el("div", { class: "muted" }, "reset: " + m.reset_text)),
+          el("td", { class: "small" }, catPill(m.category), el("div", { class: "muted" }, txh(m, "source")),
             el("div", { class: "muted" }, `confidence ${m.confidence} · ${m.scope.replace("_", " ")} · checked ${when(m.last_verified)}`),
-            m.note ? el("div", { class: "muted" }, m.note) : null)))))));
+            m.note ? el("div", { class: "muted" }, txh(m, "note")) : null)))))));
     const s = d.settings;
     const th = el("input", { type: "text", value: s.thresholds.join(", "), "aria-label": "Alert thresholds in percent", size: 14 });
     const bud = el("input", { type: "number", min: "0", step: "1", value: s.api_monthly_budget_usd ?? "", placeholder: "none",
@@ -111,7 +111,7 @@
         el("div", { class: "k" }, "Costs API"), el("div", { class: "v" }, costs, el("span", { class: "muted small" },
           d.costs_api.key_present ? " admin key present (read-only use)" : " needs OPENAI_ADMIN_KEY in secrets.env"))),
         el("div", { class: "row", style: "margin-top:10px" }, save, msg), el("h2", {}, "Recent alerts"), alerts),
-      el("ul", { class: "muted small" }, d.notes.map((n) => el("li", {}, n))));
+      el("ul", { class: "muted small" }, d.notes.map((n, i) => el("li", {}, (d["notes_" + JL.lang] && d["notes_" + JL.lang][i]) || JL.t(n)))));
   }
 
   // ---------------------------------------------------------------- Backup page
@@ -165,7 +165,7 @@
           } catch (e) { msg.textContent = "Not saved: " + e.message; }
         } }, "Save"), msg)),
       el("h2", {}, "If something goes wrong"),
-      el("div", { class: "card" }, el("ol", {}, d.guidance.map((g) => el("li", {}, g))),
+      el("div", { class: "card" }, el("ol", {}, d.guidance.map((g, i) => el("li", {}, (d["guidance_" + JL.lang] && d["guidance_" + JL.lang][i]) || JL.t(g)))),
         d.core_running ? el("div", { class: "small" }, "JARVES is running: a real restore needs it stopped first (the test restore above is always safe).") : null));
   }
 

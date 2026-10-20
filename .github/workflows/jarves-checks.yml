@@ -27,10 +27,34 @@ jobs:
       - uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884  # v10.3.0 (no major tags since v8)
         with:
           enable-cache: true
-      - name: Install (locked, no voice extras)
-        run: uv sync --frozen
-      - name: pytest (offline; fakes for OpenAI, audio and the music player)
-        run: uv run pytest -q
+      # Owner rule: NO skipped tests. Every extra is installed (camera/OpenCV, voice, tray, browser/Playwright once it
+      # exists) and the real tools are fetched/located by tests/_tools.py (Godot 4.7.2 everywhere, Inno Setup on
+      # Windows, openssl from PATH/Git). Platform-only tests are deselected per OS (markers), never skipped.
+      - name: "System libraries (Linux, PortAudio for sounddevice)"
+        if: runner.os == 'Linux'
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq libportaudio2
+      - name: Install (locked, all extras)
+        run: uv sync --frozen --all-extras
+      - name: Browser for the real-browser tests (Chromium on Linux, preinstalled Edge on Windows)
+        shell: bash
+        run: |
+          if uv run python -c "import playwright" 2>/dev/null; then
+            if [ "$RUNNER_OS" = "Linux" ]; then uv run playwright install --with-deps chromium; else echo "using the preinstalled Edge"; fi
+          else
+            echo "no browser extra yet"
+          fi
+      - name: Cache tool downloads (Godot, Inno Setup; SHA-pinned in tests/_tools.py)
+        uses: actions/cache@v6
+        with:
+          path: ${{ runner.temp }}/jarves-test-tools
+          key: jarves-test-tools-${{ runner.os }}-${{ hashFiles('core/tests/_tools.py') }}
+      - name: pytest (offline; fakes for OpenAI, audio and the music player; ANY skip fails the run)
+        shell: bash
+        env:
+          JARVES_BUILD_CACHE: ${{ runner.temp }}/jarves-test-tools
+        run: |
+          uv run pytest -q -rs -p no:cacheprovider | tee pytest.out
+          if grep -E "(^SKIPPED|[0-9]+ skipped|xfailed)" pytest.out; then echo "::error::tests were skipped"; exit 1; fi
       - name: jarvis.cmd launcher smoke (Windows)
         if: runner.os == 'Windows'
         shell: cmd
@@ -66,6 +90,7 @@ jobs:
       - name: Build installer
         shell: pwsh
         run: |
+          # 3.0.0.<run_number>: the public repo restarted its run counter, so the 3.x base keeps versions above the old 0.1.0.<run> series.
           $base = (Select-String -Path core/pyproject.toml -Pattern '^version\s*=\s*"([^"]+)"').Matches[0].Groups[1].Value
           $v = "$base.${{ github.run_number }}"
           ./packaging/build_windows.ps1 -Version $v -Channel $env:CHANNEL -Commit $env:GITHUB_SHA `

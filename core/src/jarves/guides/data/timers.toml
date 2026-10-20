@@ -1,0 +1,35 @@
+order = 34
+category = "everyday"
+features = ["timers"]
+aliases = ["טיימר", "טיימרים", "שעון מעורר", "מעורר", "התראה בזמן", "timer", "timers", "alarm", "alarms", "countdown"]
+links = ["scheduler", "alerts"]
+title_he = "טיימרים ושעונים מעוררים"
+title_en = "Timers and alarms"
+what_he = "טיימר לספירה לאחור או שעון מעורר לשעה מסוימת. ג'ארביס מכריז עליהם בקול, גם כשהחלון סגור."
+what_en = "A countdown timer or an alarm for a clock time. JARVES announces it aloud, even when the window is closed."
+say = [["טיימר לעשר דקות לפסטה", "A ten minute timer for the pasta"], ["תעיר אותי מחר בשבע וחצי", "Wake me tomorrow at seven thirty"], ["כמה זמן נשאר בטיימר?", "How long is left on the timer?"], ["תבטל את הטיימר", "Cancel the timer"]]
+expect_he = "כשהזמן נגמר ג'ארביס אומר את זה בקול, בשיחה פתוחה ברגע נוח ובלי שיחה בעצמו. אם המחשב היה כבוי והטיימר חלף ביותר מ-10 דקות, הוא לא יצלצל באיחור."
+expect_en = "When time is up JARVES says it aloud: in an open conversation at a good moment, otherwise by himself. If the computer was off and the timer passed more than 10 minutes ago it does not ring late."
+cost_he = "חינם. הכול מקומי."
+cost_en = "Free. All local."
+privacy_he = "הטיימרים נשמרים רק במחשב."
+privacy_en = "Timers are kept on this computer only."
+
+[[steps]]
+he = "אמרו \"טיימר לעשר דקות\" או \"תעיר אותי בשבע וחצי\"."
+en = "Say \"a ten minute timer\" or \"wake me at seven thirty\"."
+check = "active:timers"
+
+[[steps]]
+he = "כדי לבדוק את הצליל, הגדירו טיימר של דקה והשאירו את החלון סגור."
+en = "To test the sound, set a one minute timer and leave the window closed."
+
+[[steps]]
+he = "בלי קול: בלוח הבקרה, בעמוד \"טיימרים ושעונים מעוררים\", או בשורת הפקודה: jarvis timers add 10m פסטה, jarvis timers list, jarvis timers cancel 3."
+en = "Without voice: on the dashboard page \"Timers & alarms\", or on the command line: jarvis timers add 10m pasta, jarvis timers list, jarvis timers cancel 3."
+
+[[problems]]
+he = "הטיימר לא צלצל"
+en = "The timer did not ring"
+fix_he = "בדקו שהרמקול והמיקרופון פועלים (jarvis doctor) ושהקול לא כבוי. טיימר שהוחמץ יותר מ-10 דקות נרשם כ\"הוחמץ\"."
+fix_en = "Check that the speaker works (jarvis doctor) and voice is not off. A timer missed by over 10 minutes is recorded as missed."

@@ -43,7 +43,7 @@ import zipfile
 from datetime import datetime
 from pathlib import Path
 
-from . import __version__, logs
+from . import __version__, locales, logs
 
 BACKUP_DIR = "backups"
 KINDS = ("auto", "manual", "pre-migration", "pre-restore")
@@ -151,6 +151,8 @@ def plan(home: Path, settings: dict | None = None) -> tuple[list[tuple[Path, str
         dirs = rel.split("/")[:-1]
         if any(part in EXCLUDE_DIRS or part.startswith(".restore-staging") for part in dirs):
             continue
+        if (dirs[:1] == ["profiles"] or rel == "profiles.json") and not (home / "profile.json").is_file():
+            continue            # the default profile's folder holds the OTHER profiles: never in its backup (#17)
         if p.is_symlink():
             skipped.append({"name": rel, "reason": "symlink"})
             continue
@@ -637,7 +639,8 @@ def _name(home: Path, body) -> Path | None:
 
 def api_backups(ctx, m, body):
     return 200, {"backups": list_backups(ctx.home), "settings": get_settings(ctx.home), "state": read_state(ctx.home),
-                 "guidance": GUIDANCE, "core_running": core_running(ctx.home), "folder": str(backup_dir(ctx.home))}
+                 "guidance": GUIDANCE,
+                 **locales.list_siblings("guidance", GUIDANCE), "core_running": core_running(ctx.home), "folder": str(backup_dir(ctx.home))}
 
 
 def api_backup_now(ctx, m, body):

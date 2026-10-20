@@ -36,6 +36,8 @@ def _missing_extra(fid: str) -> str | None:
     if fid == "wake_word" and (not _present("sounddevice") or
                                not any(_present(m) for m in ("pyopen_wakeword", "openwakeword"))):
         return "voice"
+    if fid == "browser" and not _present("playwright"):
+        return "browser"
     return None
 
 

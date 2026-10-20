@@ -12,6 +12,8 @@ class FakeServer:
     def __init__(self, handler) -> None:
         self.requests: list[dict] = []
         self.state: dict = {}
+        self.polled = threading.Event()                  # set by the Telegram fake on every getUpdates
+        self.wake = threading.Event()                    # releases a blocked long poll
         outer = self
 
         class H(BaseHTTPRequestHandler):
@@ -50,6 +52,11 @@ class FakeServer:
         self.httpd.shutdown()
         self.httpd.server_close()
 
+    def deliver(self, update: dict) -> None:
+        """A message arrives at the (Telegram) fake while a long poll may be waiting."""
+        self.state.setdefault("updates", []).append(update)
+        self.wake.set()
+
     def paths(self, method: str | None = None) -> list[str]:
         return [r["path"] for r in self.requests if method is None or r["method"] == method]
 
@@ -66,7 +73,14 @@ def telegram_handler(srv: FakeServer, req: dict):
     if method == "getMe":
         return 200, {"ok": True, "result": {"id": 1, "is_bot": True, "username": "jarves_test_bot"}}
     if method == "getUpdates":
-        return 200, {"ok": True, "result": srv.state.get("updates", [])}
+        body = req["body"] or {}
+        srv.polled.set()                                  # a test waits for this instead of sleeping
+        if body.get("offset") is not None:               # Telegram semantics: confirmed updates are dropped
+            srv.state["updates"] = [u for u in srv.state.get("updates", []) if u["update_id"] >= body["offset"]]
+        if not srv.state.get("updates") and body.get("timeout") and srv.state.get("block"):
+            srv.wake.wait(10)                             # long poll: returns the moment a test calls srv.deliver()
+            srv.wake.clear()
+        return 200, {"ok": True, "result": list(srv.state.get("updates", []))}
     if method == "sendMessage":
         if srv.state.get("blocked"):
             return 403, {"ok": False, "description": "Forbidden: bot was blocked by the user"}
@@ -156,3 +170,47 @@ def instagram_server(messages=None) -> FakeServer:
     s = FakeServer(ig_handler)
     s.state["messages"] = messages if messages is not None else []
     return s
+
+
+# ---------------------------------------------------------------------- Pear Desktop API Server plugin
+def pear_handler(srv: FakeServer, req: dict):
+    p = req["path"]
+    if p.startswith("/auth/"):
+        return (403, {}) if srv.state.get("deny") else (200, {"accessToken": "pear-token"})
+    if req["auth"] != "Bearer pear-token":
+        return 401, {}                                   # the server is up, the client is not authorised yet
+    return 200, {"title": "Song", "artist": "Artist"}
+
+
+def pear_server() -> FakeServer:
+    return FakeServer(pear_handler)
+
+
+# ---------------------------------------------------------------------- clipboard (the interface jarves.connect uses)
+class FakeClipboard:
+    """Implements connect.Clipboard. `script` = what successive reads return (the last value stays); every write and
+    clear is recorded so a test can assert the token was cleared after use and nothing else was touched."""
+
+    def __init__(self, script: list[str] | None = None) -> None:
+        self.script = list(script or [])
+        self.value = ""
+        self.reads = 0
+        self.writes: list[str] = []
+        self.cleared = 0
+
+    def read(self) -> str | None:
+        self.reads += 1
+        if self.script:
+            self.value = self.script.pop(0) if len(self.script) > 1 else self.script[0]
+        return self.value
+
+    def write(self, text: str) -> bool:
+        self.writes.append(text)
+        self.value = text
+        return True
+
+    def clear(self) -> bool:
+        self.cleared += 1
+        self.value = ""
+        self.script = []
+        return True

@@ -293,8 +293,8 @@ def test_manifest_signing_round_trip_and_tamper_detection():
         assert e.value.code == code
 
 
-@pytest.mark.skipif(not shutil.which("openssl"), reason="openssl CLI not on PATH (CI Ubuntu has it)")
 def test_openssl_fallback_signature_verifies_in_the_app():
+    assert release.openssl_exe(), "openssl CLI not found (PATH, $JARVES_OPENSSL or Git for Windows)"
     pem, pub = _keypair()
     sig, raw = release.openssl_sign(updates.canonical(_manifest()), pem)
     assert base64.b64encode(raw).decode() == pub
@@ -523,3 +523,16 @@ def test_installed_build_launches_only_the_verified_signed_installer(tmp_path, i
         updates.launch_installer(tmp_path / "other.exe", verified=r)  # a different path than the verified one
     updates.launch_installer(r["installer"], verified=r)
     assert installed == [([r["installer"]],)]
+
+
+def test_new_series_publishes_over_old_series_and_old_never_replaces_new(tmp_path, gh):
+    pem, pub = _keypair()
+    _publish(gh, _dist(tmp_path, "0.1.0.82"), pem)
+    _publish(gh, _dist(tmp_path, "3.0.0.5"), pem)
+    assert gh.latest()["tag_name"] == "win-v3.0.0.5"
+    m = updates.verify_manifest(json.loads(gh.asset("win-v3.0.0.5", "latest.json")), [pub])
+    assert m["version"] == "3.0.0.5" and m["installer"] == "JARVES-Setup-3.0.0.5.exe" and m["url"].endswith(
+        "/win-v3.0.0.5/JARVES-Setup-3.0.0.5.exe")
+    _publish(gh, _dist(tmp_path, "0.1.0.83"), pem)                      # a late old-series build is refused
+    assert gh.latest()["tag_name"] == "win-v3.0.0.5"
+    assert updates.is_newer(m["version"], "0.1.0.82") and not updates.is_newer("0.1.0.83", m["version"])

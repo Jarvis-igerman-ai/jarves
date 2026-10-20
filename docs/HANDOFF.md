@@ -1,3 +1,93 @@
+## V4 P0.3: CLI / dashboard parity (20 Oct 2026) - #17, branch `v4-p03-parity` (off `v3-final`)
+
+- Owner D1/D2: (1) Timers and Lists dashboard pages (Everyday group; list, add, cancel/complete, clear asks first) plus CLI `jarvis timers list|add|cancel`, `jarvis lists show|add|check|remove|clear [--everything] [--yes]` (clear asks on the terminal), read-only `jarvis notes|jobs|reports`; code in `cli_parity.py`, `timers.py`/`lists.py` (routes), `dashboard_static/m3.js`; en/he catalogs and nav/search keywords added once; guides timers/lists mention the CLI.
+- (2) ONE rule for an unavailable feature: `features.switch()` saves it as ON and every surface (CLI, dashboard `state_text`, model tool) says `unavailable (reason)`. `jarvis features on X` no longer refuses (prerequisite install is best effort, exit 0).
+- (3) Spoken approvals name only the kind of action: `approvals.spoken_kind()` / `Approval.spoken` feed `_VoiceApproval` and the live confirm note (which now forbids reading details); popup/dashboard text unchanged. Optional `details["recipient"]` is named (e.g. "Send a WhatsApp message to Dana?"); no caller sets it yet.
+- Parity test `tests/test_cli_parity.py` (25 tests): every feature and every Skill group has a CLI command or a documented dashboard-only/voice-only marker in `cli_parity.FEATURES` / `TOOL_GROUPS`; new features/skills fail the test until listed. Not done: `jarvis files` CLI; headless Edge captures of the new pages at 1440/390 px (needs a display pass); Opus UX review.
+- Questions for the user: (1) WhatsApp/Telegram/mail senders should pass the recipient first name in `details["recipient"]` so the spoken question can say "to Dana": OK to expose names aloud? (2) Dashboard clear uses a browser confirm; want the full approvals popup instead? Status: WAITING FOR USER.
+
+## Approval popup redesign (20 Oct 2026) - #17, branch `v3-popup-ux` (off `v3-final`), [screenshots](reviews/swv3_popup/)
+
+- Owner feedback: "where is the button for approve?", "too much text", "not beautiful". `core/src/jarves/approval_popup.py` is now a compact 420 px card: risk chip + "JARVES asks" + countdown, ONE bold line from the request kind ("Run a command?"), ONE sentence (title, max 90 chars, ellipsised), command / folder / why behind a collapsed "Details" toggle, thin countdown bar, two big buttons packed FIRST at the bottom (Approve = Enter once armed, Deny = Esc / close). Typed-code field only for dangerous requests (Approve disabled until it matches). Window <= 60% of the screen, always inside the work area (taskbar-safe), DPI aware, Segoe UI, light/dark from `AppsUseLightTheme`, Windows 11 rounded corners + matching caption.
+- Language: new `[ui] popup_language` (default `en`; `he` = whole card in Hebrew, right-aligned, never both). No `v3-cli-english` branch exists on origin, so this is a separate setting; merge it with the CLI language setting when that lands. Found: `Segoe UI Variable Text` scrambles Hebrew letters in Tk 8.6 on Windows; plain `Segoe UI` renders correctly.
+- Result-file protocol and `--test-invoke approve|deny|wrong-code|hold` unchanged (+ `show`: visible, never answers, for screenshots).
+- Verified: `core/tools/popup_screens.py` builds 14 real windows (short/long/details open/dangerous/Hebrew/light/dark/150%/200% simulated scaling), asserts both buttons inside the window and the screen, saves PNGs + `layout_report.json`; `tests/test_approval_popup_ux.py` 17 passed; `tests/test_helper_approvals.py` 63 passed.
+- Questions for the user: (1) Enter now approves (as asked) once the 0.9 s arm delay passed; keep that, or should Enter stay Deny for safety? (2) `C:\work\popup_demo.ps1` runs the main checkout (`C:\work\jarvis\core\src`): it shows the new card only after this branch is merged/checked out there. Status: WAITING FOR USER.
+
+## SW-V3 integration on `v3-final` (20 Oct 2026) - #17, [report](reviews/SWV3_INTEGRATION_REPORT.md)
+
+- Merged (no-ff, both sides kept): v3-fix-show-twice, v3-approvals, v3-ci-yaml-fix, v3-wake, v3-connect, v3-campaign-dash, v3-campaign-features, v3-campaign-voice (2 rounds), on top of the earlier 8 V3 branches.
+- Fixed while integrating: workflow YAML test (`test_ci_workflows.py`), Google reminder spoke out loud while hidden/idle (now popup unless a conversation is open), dashboard listen backlog 5 -> 128 (random ERR_CONNECTION_REFUSED in Edge), approvals page + wake strip line in the en/he/ar/ru catalogs, 23 missing Hebrew feature texts, profile-switch test vs the approvals deny cooldown, suite_system S09/V06 harness.
+- Verified locally (CI has no minutes): full offline suite 3x green, 0 skipped; suite_system 20/20 (Godot headless, start/stop x5, soak, V01-V08); `jarvis setup --check-addons` PASS; real Core 5x on a TEST profile; 32 dashboard pages x en/he/ar in headless Edge, 0 errors (`core/tools/v3_all_pages_check.py`).
+- Final head `4e80261` (+ this doc commit): full offline suite 1454 passed x3, 0 skipped.
+- Questions for the user: (1) `silent_live` (paid, needs your key) was not run: run it before you use the build? (2) Export `v3-final` to main / the public repo now? Status: WAITING FOR USER.
+## Voice campaign follow-up: open voice items (20 Oct 2026) - #17, branch `v3-voice-fixes` (off `v3-campaign-voice`)
+
+- Report section "Follow-up" in [reviews/SWV3_CAMPAIGN_VOICE.md](reviews/SWV3_CAMPAIGN_VOICE.md); statuses in the [bug table](reviews/SWV3_CAMPAIGN_BUG_TABLE_VOICE.md). Each fix verified on real GPT-Live with the virtual mic/speaker (`suite_v3_voice.py`, new scenarios 48 redelegate probe, 49 told-not-asked, 50 names after a prefix) plus `core/tests/test_voice_fixes_cv.py` (19 tests). Cost ≈ $1.2 (18.5 min live voice).
+- FIXED: CV-15 (Core watchdog hands an acknowledged-but-undelegated turn to the session backend; honest "did not go through" if it cannot), CV-06 (unasked "רשמתי" taken back, asked-but-undone handed over), CV-05 (per-turn language note; English 6/6, back to Hebrew 2/2), CV-09 (no stale "still checking"/retry after the user moved on; barge-in counted), CV-14 (one spoken yes, result said ~2 s after the decision), CV-08 (exact local `calculate` tool, no web search), new CV-18 ("כרגע" taken for the filler: answers spoken twice). PARTLY: CV-16 ("לאביטל" now right; צחי audio inconclusive).
+- Design notes: a client `response.create` returns as an ordinary `session.delegation.created` and GPT-Live speaks its result; an appended developer instruction naming Hebrew made GPT-Live skip the Hebrew answer (3/3), so the switch back is silent context.
+- Questions for the user: (1) CV-16: listen once to "שלום לנועה, לאביטל ולצחי" - is צחי said right? (2) The approval note now reads the action aloud (e.g. the WhatsApp draft text): OK for private messages, or should it only name the kind of action? Status: USER CHECK (P3).
+
+## SW-V3 campaign PASS C, voice (20 Oct 2026) - #17, branch `v3-campaign-voice`
+
+- Report: [reviews/SWV3_CAMPAIGN_VOICE.md](reviews/SWV3_CAMPAIGN_VOICE.md); bugs: [reviews/SWV3_CAMPAIGN_BUG_TABLE_VOICE.md](reviews/SWV3_CAMPAIGN_BUG_TABLE_VOICE.md). Real GPT-Live, virtual mic/speaker, TEST-profile homes: suite_voice 1-35 + V3 36-47 (timers/alarms with the face closed, lists + spoken approvals, helper, browser on a local page, briefing without Google, WhatsApp/Telegram, profile switch, self-check, wake variants, names, greeting delay). Result: **44 PASS, 3 FAIL (P3), 0 BLOCKED**; cost ≈ $3.80 (60 min live voice). Barge-in stop 0.7 s, greeting 0.51-0.53 s after the face, dead air typically 0.1-0.9 s.
+- Fixed (P2): CV-01 curator facts in privacy-mode logs, CV-02 "approve on the screen" hint when a spoken yes works, CV-03 silent suites opened the real popup, CV-10 model asked for approval without calling the tool, CV-11 briefing skipped missing Google parts silently, CV-12 Hebrew-spoken profile name not found, CV-13 profile switch accepted a spoken yes. Open: CV-15 (P2, intermittent "רגע" without delegating), P3 CV-04..09, 14, 16, 17.
+- Re-run: `cd core; $env:PYTHONPATH="src"; python tools/suite_v3_voice.py --only 36-47` (COSTS MONEY; `--list`).
+- Questions for the user: (1) WhatsApp asks twice (read-back yes + approval yes): keep both, or let the approval be the only question? (2) English questions are answered in Hebrew (CV-05): should JARVES switch to English for one English sentence? (3) Record the ~20 wake samples now (CV-04/07)? Status: USER DECISION REQUIRED (P3).
+
+## SW-V3 campaign PASS B, feature by feature (20 Oct 2026) - #17, branch `v3-campaign-features`
+
+- Report: [reviews/SWV3_CAMPAIGN_FEATURES.md](reviews/SWV3_CAMPAIGN_FEATURES.md); bugs: [reviews/SWV3_CAMPAIGN_BUG_TABLE.md](reviews/SWV3_CAMPAIGN_BUG_TABLE.md). 53 features x CLI/dashboard/Core tool, plus tools of timers, lists, notes, files, scheduler/reports, memory/curator, skills, Telegram/WhatsApp/Instagram/Home Assistant (local fakes), browser (local page), helper + approvals (answered through dashboard API and CLI), profiles, self-check, backup/restore, usage/cost, diag, camera (virtual). Result: 1429 PASS, 1 FAIL (open P3), 2 BLOCKED, 27 N/A.
+- Fixed (P0-P2, each with a regression test): B-05 CLI/other-process approval answers rejected for tool-asked requests (P1), B-01 context_trace missing from CLI, B-04 helper refusals crashed the tool, B-06 face_recognition never available; P3 B-02, B-03. Open P3: O-01..O-06 (CLI parity for timers/lists, CLI-vs-dashboard "on" semantics, google_connect_help ok=False, WARNING noise, status exit 3, timer ringing state).
+- Re-run: `core/.venv/Scripts/python.exe core/tools/campaign_features.py STAGE...` (see the report header).
+- Questions for the user: (1) CLI `features on` refuses unavailable features but the dashboard allows them: which rule? (2) Build CLI/dashboard pages for timers and lists? Status: USER DECISION REQUIRED (P3).
+
+## `jarvis connect` guided account setup (20 Oct 2026): branch `v3-connect`, [#17](https://github.com/igalgerman/JARVIS/issues/17), [report](reviews/SWV3_CONNECT_REPORT.md)
+
+- One command checks Google, Telegram, the Pear API plugin, the wake word (and optional Instagram / Home Assistant), guides only what is missing, reuses the existing wizards, ends with a summary table. Flags `--only`, `--status`, `--yes`, `--reminders`. Telegram: clipboard token watch (consent, cleared after use), validated before saving, auto-pair through a one-time t.me deep link + confirmation message.
+- Also: once-a-day Hebrew reminder when Google is not connected (quiet hours / autonomy / proactive setting respected), dashboard Connections "Run guided setup" card, first-run wizard offers it, feature `guided_setup` (on by default).
+- Tests: `core/tests/test_connect.py` 32 passed plus the related files run one at a time (list in the report). UNVERIFIED: real BotFather / Google / Pear runs, clipboard write/clear on a real desktop, the dashboard button opening a console window. Questions for the user: none new.
+## SW-V3 campaign Pass D: dashboard + log review (20 Oct 2026) - [report](reviews/SWV3_CAMPAIGN_DASHBOARD.md), [bugs](reviews/SWV3_CAMPAIGN_BUG_TABLE_DASH.md) - [#17](https://github.com/igalgerman/JARVIS/issues/17), branch `v3-campaign-dash`
+
+- 186 page loads (31 pages x en/he/ar x 1440/390 px) plus interaction flows in real headless Edge on the offline TEST profile. 9 bugs fixed (1 P1: Home said "JARVES is off" 2 min after start because health.json was only written on change; P2: 429 from static files, row keyboard access, Undo after save, runtime table overflow, Hebrew schedules in the English UI), 9 open P3 (Hebrew/Arabic string gaps, Self-check card layout, small a11y/phone items). Log review: Core log 0 WARN/ERROR; no unexplained entries.
+- BLOCKED (need Pass E hardware/accounts): live mic/camera states and the "What does he see?" preview, Google/Telegram setup, real captured Context trace.
+- Questions for the user: none new.
+
+## Browser Skill (20 Oct 2026, SW-V3 P1.2) — [#17](https://github.com/igalgerman/JARVIS/issues/17), branch `v3-p1-browser`
+
+- Owner rule implemented in Python Core (`browser.py` service/policy/dashboard/CLI, `skills/browser.py` tools): **full control** (open/read/click/type) only on the owner's allow-list (`<state_dir>/browser_sites.json`, **default empty**, edited on the new dashboard **Browser** page or `jarvis browser allow|remove <site>`; no model tool can change it). Other sites: **read-only after an on-screen approval** (once per host per browser session). **Purchases/payments/credential entry always confirmed** (password / one-time-code / card fields, buy/pay/checkout buttons, payment forms, Luhn card numbers), decided from the real DOM element, value never shown in the prompt. Page text returned only under `untrusted_*` with a note; the camera taint guard (`camera/wire.install_taint_guard`, now parameterized) makes every non-browser side effect within 60 s ask first. Fresh in-memory context (no personal profile/cookies), downloads refused, service workers blocked, http/https only, ChatGPT/Claude account pages blocked, every top-level navigation (links/scripts/popups) route-checked, redirects re-checked after landing. Visible status: health component `browser` + dashboard page; logs carry host only.
+- Engine choice (checked 2026-10-20): **Playwright 1.64.0** (PyPI, released 2026-10-13; win_amd64 + manylinux aarch64 wheels) driving the **installed Edge** on Windows (no browser download), Playwright/apt Chromium on the Pi. browser-use 0.13.11 is an LLM agent loop on top of Playwright/CDP (own model calls, less policy control) and raw CDP lacks Playwright's routing/locators: not chosen. New `browser` extra in `pyproject.toml`/`uv.lock`; Windows build exports it; `jarvis features on browser` installs it (feature_setup). Feature `browser`: high risk, default OFF, in SAFE_OFF, wizard group "Browser", BUNDLE check, capability row (Windows/Pi implemented_unverified), guide `guides/data/browser.toml`, setup_guide section.
+- Evidence: `core/tests/test_browser.py` **18 passed** (policy, dashboard API, CLI, plus two tests driving the **real headless Edge 155** against a local 127.0.0.1 test page: read-only ask/decline, refused click/type, hidden text not read, taint guard, blocked/bad URLs, allow-listed search/click without prompts, refused off-host link, password/purchase/card confirmations, redirect catch). Related suites (setup_wizard, guides, capabilities, features, camera, feature_setup, launcher_help, dashboard, core, security, startup, readiness, swv3_p01, dashboard_wph, m3_core, packaging, privacy_state) **230 passed, 1 skipped**. `jarvis setup --check-addons` browser row OK; headless dashboard smoke of #/browser (add a site) without page errors. CI installs no extras: the two real-browser tests skip there. Playwright 1.64.0 was installed into the shared `core/.venv` (`uv pip install`) to run them.
+- Not done / UNVERIFIED: no real spoken conversation with the browser yet; installer build with the browser extra not run (payload size + payload_check UNVERIFIED); Pi untested (#18). Downloads into the approved sandbox (work package) not implemented: downloads are refused for now.
+- Questions for the user: (1) Keep logins between sessions for allow-listed sites (persistent private profile) or always start fresh (current, safest)? (2) Should "registrations / account changes / sending messages" on allow-listed sites also always ask (today only purchases/payments/credentials do, per your answer)? (3) Want downloads saved into the Files sandbox (asks first), or keep them blocked?
+## SW-V3 P0.3 startup / always-on performance (20 Oct 2026): branch `v3-p03-perf`, [#17](https://github.com/igalgerman/JARVIS/issues/17), [report](reviews/SWV3_P03_REPORT.md)
+
+- **Fixed, all measured before and after on the owner's PC.** Behaviour is unchanged.
+  - The prewarm now imports only what the selected route uses. GPT-Live and ChatGPT-plan routes no longer load the
+    Agents SDK, and the live-client lazy imports are now prewarmed.
+  - The Core now runs with `OPENBLAS_NUM_THREADS=1` (a value the user set still wins).
+  - `runtime.json` is no longer rewritten every second: it is saved on a change, with a 60 s heartbeat.
+  - The Pear probe is warmed in a worker thread. When its cached result has expired, the old result is returned at
+    once and re-checked in the background.
+- **Background Core results (combined route).**
+  - Private commit: 358 → 93 MB.
+  - Working set: 159 → 117 MB.
+  - Threads: 18 → 11.
+  - Idle CPU: 0.57 → 0.28 %.
+  - Idle disk writes: 58.6 → 3.5 KB/min.
+  - First live session's event-loop work before the network: 387–553 → 9 ms.
+  - `features_list` / `list_skills` / `live_tools` with Pear closed: about 320 ms → 2–22 ms.
+- **Reproduce:**
+  - `core/.venv/Scripts/python.exe core/tools/bench_startup.py --scenario combined`, silent and offline, no mic.
+  - Add `--log <jarves.log>` to get stage timings of real starts.
+- **Tests:** the full offline suite passed, 1141 passed and 3 skipped. New tests are in `core/tests/test_swv3_p03_perf.py`.
+- **UNVERIFIED:**
+  - End-to-end wake / desktop start with Godot and a billed live session.
+  - Dashboard load and face show/hide.
+  - Sleep/resume timings.
+  - Pi 5.
+  - Idle disk *reads* (250–390 KB/min) are unexplained.
+  - Next gate: compare `bench_startup.py --log` on the owner's next real starts against the report table.
 ## SW-V3 P0.4 installed-system QA, virtual mic/speaker (20 Oct 2026) — #17, branch `v3-p04-qa`
 
 - Matrix + bug table: [reviews/SWV3_P04_BUG_TABLE.md](reviews/SWV3_P04_BUG_TABLE.md); system report regenerated:
@@ -21,7 +111,42 @@
   when you leave Pear open? Status: **USER DECISION REQUIRED**.
 - Q06 trade-off: a conversation that ends because JARVES is stopping no longer gets the automatic AI review (rules
   still run; the dashboard Review button can run it). Recommendation: keep. Status: **ANSWERED by agent, reversible**.
+## SW-V3 P0.2c Multi-language dashboard, English default (20 Oct 2026) — [report](reviews/SWV3_P02C_REPORT.md) · #17 · branch `v3-p02c-multilang`
 
+- Built on origin/main plus `origin/v3-p02-dashboard` (merged as instructed by the coordinator).
+- **English is the default** (`<html lang="en" dir="ltr">`). An explicit saved choice (`jarves-lang`, written only by the new top-bar **language picker** `<select>`) wins. The browser language is never used.
+- **Locales:** en / he / ar / ru. Each is one catalog in `dashboard_static/locales/<code>.js` plus its script tag (the registry). Coverage: he 100 % (test-enforced), ar 26 %, ru 26 % (English fallback).
+- **Server:** `jarves/locales.py` is the generic `<field>_<locale>` registry, with `hebrew.py` as its first translator.
+- **RTL fixes:**
+  - logical CSS only, enforced by a test
+  - isolated English fallbacks: "?first" fixed
+  - `JL.textDir` for server texts: a Hebrew sentence that starts with a Latin name no longer runs LTR
+  - the log table scrolls inside its card (no page overflow)
+  - module names are not translated
+  - mirrored arrows
+  - Arabic font and digits
+- **Hebrew added** for the P1 channel feature texts, so `test_hebrew_texts` passes on the merged tree.
+- **Evidence:**
+  - `test_dashboard_locales.py`: 17 passed. Focused dashboard / hebrew / guides / usage / setup / identity / backup / phone files: 158 passed.
+  - An earlier full suite: 1196 passed, 1 env failure (`test_launcher_help`: no `.venv` in the worktree).
+  - Playwright: 38 captures, 0 problems, in `docs/reviews/swv3_p02c/` (`core/tools/v3_locale_screens.py --channel msedge`).
+  - These are automatic captures, not an owner hands-on review.
+- **Questions for the user:**
+  1. Which languages should get full catalogs? **USER DECISION REQUIRED**
+  2. Should the dashboard language also drive the voice / CLI language (currently separate)? **USER DECISION REQUIRED**
+## SW-V3 Profiles: several users + test profile (20 Oct 2026) — [report](reviews/SWV3_PROFILES_REPORT.md) · [#17](https://github.com/igalgerman/JARVIS/issues/17) · branch `v3-profiles`
+
+- Profile = isolated state dir (memory, conversations/costs, persona files, settings, switches, name/wake/voice, secrets.env, Google/ChatGPT tokens, privacy, channels). `default` = today's `JARVES_HOME` / `%LOCALAPPDATA%\jarves`; others `<base>/profiles/<name>`. `jarvis --profile <name> …` / `JARVES_PROFILE` / `jarvis profile list|show|create|use|delete|export`; own lock, link port (allocated free, checked at run), per-profile dashboard cookie, autostart entry and tray label.
+- `test` profile: AI offline, voice off, music none, sensitive switches off, $10 budget, red TEST PROFILE banner (dashboard + Godot face). Non-default profiles drop inherited secret env vars; `--from` never copies keys (only `--copy-secrets`) or sign-ins; delete needs the typed name. Voice `profile_switch` only after on-screen approval; no speaker recognition (v1).
+- Registered feature `profiles` (guide, capability row, wizard group, bundle check, Hebrew texts in `profiles.HE`, auto-merged into `hebrew.TEXT` when P0.2b lands). Evidence: `tests/test_profiles.py` 33 passed (incl. two real Core processes side by side) + 15 related files passed one by one + Godot face check PASS. Full suite NOT run (RAM request), final-commit CI not claimed; separation is app-level, not an OS boundary.
+- **Questions for the user:** (1) which profiles/names; test profile as agents' default for the FULL_TEST_PLAN campaign? (recommended yes) (2) allow two voice profiles running at once? (recommended no) (3) dashboard "switch" that restarts the Core, or is "open its dashboard" enough? (4) app-level separation OK, or separate Windows accounts for family? (5) speaker recognition later? — all **USER DECISION REQUIRED**.
+
+## SW-V3 Self-check: self-diagnostics + improvement suggestions (20 Oct 2026) — [report](reviews/SWV3_SELFCHECK_REPORT.md) · #17 · branch `v3-selfdiag`
+
+- New `core/src/jarves/selfcheck.py` + dashboard **Self-check** page (`selfcheck.js`). On demand (voice `self_check_run` "תבדוק את עצמך", `jarvis diagnose --now`, dashboard Check now), weekly scheduler job (Sun 10:00, editable: Jobs page / `jarvis diagnose --schedule`), after an unclean stop and after an error burst (min interval, alerts respect quiet hours). Health + 7-day log scan (crashes, ERROR/WARN clusters, repeated failures, latency p50/p90/p95, budget burn, wake false/near-misses, tool errors, false action claims, Pear/Google/camera, update, disk/memory) + config sanity + feature gaps/setup/bundle/unused + existing diagnose issues. Ranked findings stored in store.db with history, trend and accept/dismiss/snooze; ticket draft (never posted); spoken Hebrew/English summary.
+- Setting changes -> autonomy proposals (new medium-risk appliers `config_setting`, `feature_on`; never auto-applied); AI pass = existing `diagnose.llm_review` only, capped, budget-aware, cost shown; no transcript text in reports.
+- Evidence: `tests/test_selfcheck.py` 19 passed + 11 related focused files passed (one at a time, low RAM); full suite and final-commit CI NOT run/claimed. Live use on the owner's logs UNVERIFIED.
+- Questions for the user: (1) weekly default Sunday 10:00 — OK? **USER DECISION REQUIRED** (recommend yes, outside quiet hours). (2) `self_check.on_start`: crash only (default) or every start? **USER DECISION REQUIRED** (recommend crash: every start adds noise). (3) AI pass in self-check on by default (max 2 reviews/run)? **USER DECISION REQUIRED** (recommend yes; same path/caps as per-conversation review). (4) Merge note: Hebrew catalog (P0.2b `hebrew.py`) is not on main; add `self_check` strings when it lands — **DEFERRED** to that merge.
 ## V3 P1 channels: Telegram, morning briefing, WhatsApp handoff, Home Assistant (20 Oct 2026) — [#17](https://github.com/igalgerman/JARVIS/issues/17)
 
 - Branch `v3-p1-channels` (from `swv2-integrate`). Four add-ons, each with a feature switch + capability row + setup-wizard group + bundle check + Hebrew/English guide + tests (`core/tests/test_channels.py`, 27 tests, real HTTP against local fake servers in `core/tests/channels_fakes.py`; full suite 1160 passed, 3 skipped).
@@ -678,10 +803,34 @@ See [docs/reviews/S1_T03R1_ENGINEERING_REVIEW.md](reviews/S1_T03R1_ENGINEERING_R
 - Installer signing: research free options (SignPath OSS etc.); stay unsigned meanwhile.
 - Defaults: ask before any outward action; keep conversations/logs 90 days then summarize into memory; proactive suggestions rare/important only (quiet hours respected); installer pre-selects only core + music.
 
+## V3 P1 basics (branch v3-p1-basics, Issue #17)
+Done (offline tests in `core/tests/test_v3_p1.py`): (1) one-time tray notice on the first window close (pref `tray_notice_shown` in runtime.json; only when a tray icon exists); (2) workweek: `scheduler.workweek` (default `0-4` Sun-Thu, `1-5` allowed) already drove "ימי חול", now covered by tests; (3) `timers` feature: `timer_start` / `alarm_set` / `timers_list` / `timer_cancel`, stored in memory.db, rung by the Core itself (GPT-Live announce, else Core TTS) with no face needed; a ring missed by more than 10 min is recorded as missed, never rung late; (4) `lists` feature: shopping/todo lists (`list_add/show/check/remove/clear`, clear needs approval); (5) `jarvis help [topic]` prints the feature guides as Hebrew+English text.
+Each new feature has a guide (`timers.toml`, `lists.toml`), capability matrix rows (operations.py M3_FEATURES), setup-wizard group and bundle check.
+Not verified on real hardware: audible timer ring on the real speaker, the Windows toast for the tray notice. No dashboard pages for timers/lists yet (voice only).
+## Status 20 Oct 2026
+- SW-V2 merged to main via PR #29 (9e2149d). V3 is delivered as one PR per piece (P0.2 dashboard #31, P1 basics #32, research #33); more follow as agents finish (perf, QA, browser, channels, Hebrew server texts).
 ## Instagram channel (#17, branch v3-p1-instagram)
 Built per docs/plans/INSTAGRAM_CHANNEL.md: `core/src/jarves/instagram_channel.py`, `jarvis instagram start|status|test|logout` (+ `serve` webhook receiver on 127.0.0.1, `refresh` long-lived token), feature `instagram` (off by default, SAFE_OFF, group Channels, bundle check, guide `instagram.toml`, capabilities row via features.register). Token/app secret/verify token only in secrets.env. Inbox (SQLite, dedup), DMs read aloud as untrusted data, LLM only drafts, `instagram_send` is destructive with impact None (exact text confirmed from every origin, one draft per send), 24h window checked at draft and send, audit log `instagram/audit.jsonl`. Tests: `tests/test_instagram.py` against a local fake Graph API (real HTTP) and a real webhook server.
 Unverified: never run against real Instagram/Meta (needs owner's Meta app + Business/Creator account); endpoint paths/fields (graph.instagram.com/v21.0 /me, /me/conversations, /me/messages, /refresh_access_token) follow Meta docs from memory and must be checked at first live run; no tunnel set up; declines at the prompt are not audited (the registry never calls the tool).
 Questions for the user: (1) Is the Instagram account Business/Creator? (2) Confirmation surface: voice+screen as built, or add Telegram buttons? (3) OK to run `jarvis instagram serve` behind a Cloudflare Tunnel, or poll only?
+## Approvals service + Helper skill (#17, branch v3-approvals, 20 Oct 2026)
+Report: [docs/reviews/SWV3_APPROVALS_REPORT.md](reviews/SWV3_APPROVALS_REPORT.md). One `ApprovalService`
+(`core/src/jarves/approvals.py`) behind `Core.ask_confirm` / `registry.confirm`: feature_set requests, tool
+confirmations, camera, Telegram/Instagram sends, Helper. Shown at once on an always-on-top Tk popup
+(`approval_popup.py`, own process), tray balloon, face dialog, dashboard `#/approvals`, voice/typed yes-no, CLI
+`jarvis approvals`. Default deny on timeout/shutdown/no channel; no answers from inside a tool; dedupe, 30 s
+cooldown after a deny, 6/min rate limit; audit `approvals/audit.jsonl`. Helper skill (`skills/helper.py`,
+feature `helper` off, SAFE_OFF): `shell_propose`, `install_propose` (winget/pip/npm, exact package/source/version),
+blocklist with typed 4-digit code, elevation and JARVES-data refused, timeout + process-tree kill, untrusted
+redacted output summary, audit. Owner decisions applied: Helper always asks (read-only allow-list not offered),
+popup window primary (no toast), Instagram send via approvals + voice.
+Unverified: the real popup on the owner's desktop (Hebrew/RTL, position, topmost over full-screen, pythonw from the
+background runtime), tray balloon, Godot `confirm.cancel` (no Godot binary here), voice "כן" in a live session
+(echo), real winget/pip/npm installs and UAC, Raspberry Pi. Full suite not run locally (low RAM): focused files only.
+Questions for the user: (1) Please trigger one approval (e.g. ask JARVES to turn on Contacts) and confirm the popup
+looks right and stays on top. (2) Timeout 60 s (Helper 120 s): OK? (3) Should the dashboard Approvals page also be
+reachable from the phone (dashboard_lan) for approvals, or PC-only?
+
 ## Questions for the user (from research, branch v3-research, docs/plans/)
 - Signing: SignPath OSS needs a public repo + OSI license; Azure Artifact Signing ~$9.99/mo, region-limited (verify price). Stay unsigned? Open-source the installer?
 - Instagram: is the account Business/Creator and linked to a Facebook Page? Confirm sends by voice, dashboard or Telegram?

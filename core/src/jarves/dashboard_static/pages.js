@@ -247,7 +247,7 @@ PAGES.logs = async function (_, refresh) {
       el("a", { href: "#/session/" + encodeURIComponent(s.conv) }, "Open its transcript"), el("span", { class: "spacer" }),
       el("a", { href: "#/logs", onclick: () => { s.conv = ""; } }, "Show all")) : null,
     filters, el("div", { class: "muted small", style: "margin:8px 0" }, `${d.matched} matching line${d.matched === 1 ? "" : "s"}${d.more ? `, showing the newest ${d.lines.length}` : ""}`),
-    el("div", { class: "card" }, d.lines.length ? [table, more] : el("div", { class: "empty" }, "No log lines match.")));
+    el("div", { class: "card" }, d.lines.length ? [el("div", { class: "tscroll" }, table), more] : el("div", { class: "empty" }, "No log lines match.")));
   if (s.follow) timer = setInterval(() => route(true), 3000);
 };
 const LOG_SKIP = new Set(["ts", "ts_utc", "ref", "level", "component", "code", "msg", "cid", "session", "conv"]);
@@ -261,7 +261,7 @@ function logRow(l) {
   const row = el("tr", { class: "click lvl-" + String(l.level || "").toLowerCase(), onclick: () => { detail.hidden = !detail.hidden; } },
     el("td", { class: "mono nowrap" }, clock(l.ts), el("div", { class: "muted small" }, `${utc(l.ts)} · ${day(l.ts)}`)),
     el("td", {}, pill(l.level === "ERROR" ? "high" : l.level === "WARNING" ? "medium" : "plain", l.level || "")),
-    el("td", { class: "small" }, l.component || ""),
+    el("td", { class: "small", "data-noi18n": "" }, l.component || ""),   // a module name, never translated
     el("td", { class: "mono small" }, l.code || "", l.conv ? el("div", {}, el("a", { href: "#/session/" + encodeURIComponent(l.conv), onclick: (e) => e.stopPropagation() }, "conversation")) : null),
     el("td", { dir: "auto" }, l.msg || "", summary ? el("div", { class: "muted small mono", dir: "ltr" }, summary.length > 220 ? summary.slice(0, 220) + "…" : summary) : null));
   return [row, detail];
@@ -445,15 +445,15 @@ PAGES.settings = async function () {
   };
   const save = el("button", { type: "button", class: "primary", disabled: true, onclick: async () => {
     try { const r = await api("/api/settings", { method: "PUT", body: JSON.stringify({ values: changed }) });
-      msg.textContent = `Saved ${Object.keys(r.changed).length} value(s) to config.toml${r.backup ? " (backup " + r.backup + ")" : ""}. They apply when JARVES starts next.`; save.disabled = true; }
+      msg.textContent = `Saved ${Object.keys(r.changed).length} value(s) to config.toml${r.backup ? " (backup " + r.backup + ")" : ""}. They apply when JARVES starts next.`; save.disabled = true; undo.disabled = false; }
     catch (e) { msg.textContent = "Not saved: " + e.message; }
   } }, "Save changes");
   const undo = el("button", { type: "button", disabled: !d.backups.length, onclick: async () => {
     try { const r = await api("/api/settings/undo", { method: "POST", body: "{}" }); msg.textContent = "Restored " + r.restored; setTimeout(route, 900); }
     catch (e) { msg.textContent = e.message; }
   } }, "Undo last save");
-  const cards = Object.entries(groups).map(([g, list]) => el("div", { class: "card", style: "margin-bottom:12px" }, el("b", {}, g),
-    el("table", { style: "margin-top:6px" }, el("tbody", {}, list.map((e) => el("tr", {}, el("td", {}, e.label, el("div", { class: "muted small mono" }, e.key)),
+  const cards = Object.entries(groups).map(([g, list]) => el("div", { class: "card", style: "margin-bottom:12px" }, el("b", {}, txh(list[0], "group")),
+    el("table", { style: "margin-top:6px" }, el("tbody", {}, list.map((e) => el("tr", {}, el("td", {}, txh(e, "label"), el("div", { class: "muted small mono" }, e.key)),
       el("td", {}, control(e)), el("td", { class: "muted small" }, `default ${e.default === "" ? '""' : e.default}` + (e.min !== undefined ? ` · ${e.min}–${e.max ?? "∞"}` : "") +
         (e.file !== null && e.file !== undefined && e.file !== e.running ? ` · running now: ${e.running} (until restart)` : ""))))))));
   const rt = d.runtime || {};

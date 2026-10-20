@@ -3,7 +3,6 @@ from __future__ import annotations
 
 import asyncio
 import time
-import uuid
 import hashlib
 import json
 from contextlib import aclosing
@@ -18,11 +17,12 @@ from .health import Health
 from .link import GodotLink, load_token
 from .memory import MemoryStore
 from .skills import SkillRegistry
-from .skills.builtin import ClockSkill, MemorySkill, StatusSkill
+from .skills.builtin import CalcSkill, ClockSkill, MemorySkill, StatusSkill
 from .skills.music import MusicSkill, PearDesktopPlayer
 from .skills.settings import Settings, SettingsSkill
 from . import workspace as wsp
 from . import features as feat
+from . import browser as browser_mod            # SW-V3 P1.2: registers the `browser` switch (default OFF)
 from .curator import _SENSITIVE as SENSITIVE_TEXT, Curator, openai_extractor
 from .dashboard import DashboardSkill
 from .voice.audio import AudioUnavailable, SoundDeviceAudio, StreamingAudio
@@ -62,6 +62,58 @@ def _speaker_name(device) -> str:
         return "unknown"
 
 
+class _FaceApproval:
+    """approvals channel: the Godot confirm dialog, bound to the face client that was asked (typed-code requests
+    are not offered there: the face has no code field)."""
+    name = "face"
+
+    def __init__(self, core) -> None:
+        self.core = core
+
+    def available(self, a) -> bool:
+        return not a.typed_code and getattr(self.core, "link", None) is not None \
+            and self.core.link.face_client_id() is not None
+
+    async def open(self, a) -> None:
+        self.core._confirm[a.id] = self.core.link.face_client_id()
+        await self.core.link.send_face("confirm.request", {"id": a.id, "prompt": a.prompt, "risk": a.risk,
+                                                           "kind": a.kind})
+
+    async def close(self, a) -> None:
+        if self.core._confirm.pop(a.id, None) is not None and a.channel != "face":
+            await self.core.link.send_face("confirm.cancel", {"id": a.id})   # answered elsewhere: close the dialog
+
+
+class _VoiceApproval:
+    """approvals channel: the live conversation is told an approval waits (JARVES asks for it once); the owner's
+    yes/no comes back through Core._owner_answer. Not counted for typed-code requests."""
+    name = "voice"
+
+    def __init__(self, core) -> None:
+        self.core = core
+        self._live: dict[str, object] = {}
+
+    def available(self, a) -> bool:
+        live = self.core.live
+        return not a.typed_code and live is not None and hasattr(live, "confirm_pending")
+
+    async def open(self, a) -> None:
+        live = self._live[a.id] = self.core.live
+        try:
+            import inspect
+            if "voice" in inspect.signature(live.confirm_pending).parameters:
+                await live.confirm_pending(a.spoken, voice=bool(getattr(a, "voice_ok", False)))   # kind only: no details aloud
+            else:                                  # a session without the voice hint (tests' fakes)
+                await live.confirm_pending(a.spoken)
+        except Exception:
+            logs.warn("voice", "LIVE_CONFIRM_NOTE_FAILED", "could not tell the voice session about the confirmation")
+
+    def close(self, a) -> None:
+        live = self._live.pop(a.id, None)
+        if live is not None and hasattr(live, "confirm_done"):
+            live.confirm_done()
+
+
 class Core:
     def __init__(self, cfg: Config, home: Path, *, audio=None, player=None, stt=None, tts=None,
                  live_factory=None, console_logs: bool = True, use_real_audio: bool = True, ai_transport=None,
@@ -76,6 +128,7 @@ class Core:
         self._runtime_fakes = dict(launcher=viewer_launcher, tray_factory=tray_factory, autostart=autostart)
         self.runtime = None
         self.wake = None                           # WakeListener when the wake word is active
+        self._wake_status: dict | None = None      # last wake finding (heard speech / too quiet / near miss / woke)
         self._live_factory = live_factory          # tests inject a fake live session
         self.console_logs, self.use_real_audio = console_logs, use_real_audio
         # open_dashboard opens the browser only on a real desktop run (tests / silent runs never open windows)
@@ -86,7 +139,8 @@ class Core:
         self.live = None
         self.listening = False
         self._busy: asyncio.Task | None = None
-        self._confirm: dict[str, tuple[asyncio.Future, str]] = {}   # request id -> (answer, face client id)
+        self._confirm: dict[str, str] = {}         # approval id -> the face client id that was asked
+        self.approvals = None
         self._bg: list[asyncio.Task] = []
         self._speech_cache = SpeechCache(home)
         self._tasks: set[asyncio.Task] = set()     # short fire-and-forget tasks (error notices); awaited on stop
@@ -129,15 +183,24 @@ class Core:
         self.features.import_legacy(feat.legacy_settings(self.memory))
         self.features.apply_to_config(c)
         self.features.listeners.append(self._feature_changed)
+        self._warm_probes()                              # P0.3: Pear's localhost probe overlaps the rest of start()
         # SW-V2 WP-M4 identity: user-chosen names, wake model and voice over config.toml (identity.json)
         from .identity import Identity, make_skill as make_identity_skill
         self.identity = Identity(self.home, c, self.memory)
         self.identity.apply_to_config(c)
 
+        # V3 approvals: ONE service behind every confirmation (popup / tray / face / dashboard / voice, audit log)
+        from . import approvals as appr
+        self.approvals = appr.attach(appr.ApprovalService(self.home))
+        # the native popup only on a real run (tests and silent runs never open windows)
+        self.approvals.channels += [appr.PopupChannel(self.approvals, enabled=self.use_real_audio,
+                                                       lang=c.ui.popup_language),
+                                    _FaceApproval(self), _VoiceApproval(self)]
         self.registry = SkillRegistry()
         self.registry.confirm = self.ask_confirm
         self.registry.gate = self.features.gate          # inactive features: tools not offered, calls refused
         self.registry.register(ClockSkill())
+        self.registry.register(CalcSkill())
         self.registry.register(MemorySkill(self.memory))
         from .skills.local_contacts import LocalContactsSkill
         self.registry.register(LocalContactsSkill(self.memory))
@@ -209,6 +272,7 @@ class Core:
                               self.on_message, self._face_connected)
         from .camera import wire as camera_wire              # WP-J camera: switches default OFF (camera/wire.py)
         self.camera = camera_wire.attach(self)
+        self.browser = browser_mod.attach(self)              # Browser Skill: allow-list control, read-only + ask
         from . import appearance                             # WP-M2: face / 2D / 3D avatar / hidden (appearance.py)
         self.appearance = appearance.attach(self)
         from .skills import generated                        # WP-M2: approved generated Skills (skills/generated.py)
@@ -222,7 +286,12 @@ class Core:
         self.health.set("mic", "ok", "software mute off")
         from . import runtime as runtime_mod            # M1: display/tray/autostart/resume; restores a saved mute
         self.runtime = runtime_mod.attach(self, mode=self.runtime_mode, **self._runtime_fakes)
-        self._write_tools_md()                          # again: camera + display Skills registered after the first
+        from . import profiles                          # Issue #17: profile_list / profile_switch (screen approval)
+        profiles.attach(self)
+        self.approvals.channels.append(appr.TrayChannel(self.runtime))   # balloon -> popup / dashboard
+        from .skills.helper import register_helper       # V3: shell / install helper, every action approved first
+        register_helper(self.registry, self.home, self.health)
+        self._write_tools_md()                          # again: camera + display + profile + helper Skills registered after the first
 
         self.stt = self._stt or WhisperSTT(c.voice.stt_model, c.voice.stt_fallback_model, c.voice.stt_compute,
                                            c.voice.language)
@@ -271,9 +340,10 @@ class Core:
         logs.info("core", "CORE_STOPPING", "Core stopping")
         if getattr(self, "history", None) is not None:
             self.history.ai_reviews = False         # P0.4 Q06: no AI review starts during shutdown (rules still run)
-        for fut, _ in list(self._confirm.values()):
-            if not fut.done():
-                fut.set_result(False)              # pending confirmation = denied, never approved by shutdown
+        if getattr(self, "approvals", None) is not None:
+            self.approvals.close()                 # pending approvals = denied, never approved by shutdown
+            from . import approvals as appr
+            appr.detach(self.approvals)
         self._confirm.clear()
         if self.live is not None:
             live, self.live = self.live, None
@@ -299,6 +369,8 @@ class Core:
         await self.registry.drain()                 # shielded side effects finish before the store closes
         if getattr(self, "camera", None) is not None:
             await self.camera.stop()                # sensor closed, indicator off, faces.db closed
+        if getattr(self, "browser", None) is not None:
+            await self.browser.close("core stopping")   # headless browser + its private session gone
         self.curator.cancel()
         try:                                        # what this run learned is kept (rules only: no network now)
             self.curator.llm = None
@@ -336,7 +408,9 @@ class Core:
         startup["elapsed_s"] = round(time.monotonic() - self._startup_t0, 1)
         startup["eta_s"] = (max(0, round(self._startup_estimate - startup["elapsed_s"]))
                             if self._startup_estimate is not None else None)
+        from . import profiles
         s.update(version=__version__, voice_mode=self.voice_mode, voice_activation=self.cfg.voice.activation,
+                 profile=profiles.info(self.home),                     # face / dashboard: name + TEST banner
                  startup=startup,
                  face_state=self.dev.face_state,
                  mic_muted=self.dev.mic_muted, live_session=self.live is not None,
@@ -344,6 +418,7 @@ class Core:
                  privacy=self.privacy_state.state() if getattr(self, "privacy_state", None) else None,
                  voice_connecting=self._voice_connecting,
                  wake_listening=getattr(self, "_wake_mic_active", False),
+                 wake_status=getattr(self, "_wake_status", None),
                  ai_connection=self.cfg.ai.connection, billing=billing_routes(self.cfg.ai, self.cfg.voice),
                  ai_requests_today=self.memory.usage_today("ai_requests"),
                  voice_minutes_today=round(self.memory.usage_today("voice_seconds") / 60, 1))
@@ -394,6 +469,7 @@ class Core:
                     self.dev.check_audio()
                 self.features.poll()            # a switch flipped on the dashboard / CLI reaches the Core here
                 self._check_ai()
+                self.health.save()              # heartbeat: the dashboard calls a snapshot older than 120 s "JARVES is off"
                 await self.link.broadcast("status", self.snapshot())
             except Exception:
                 logs.error("core", "HEALTH_LOOP_ERROR", "health check failed", exc=True)
@@ -477,6 +553,8 @@ class Core:
             await self.talk_up()
         elif t == "user.text":
             text = str(p.get("text", "")).strip()[:1000]
+            if text and self._owner_answer(text, "typed"):
+                return                              # "כן" / "לא" typed while an approval waits: that was the answer
             if text:
                 self._run_busy(self.handle_utterance(text, typed=True))
         elif t in ("mic.set_mute", "mic.mute_changed"):
@@ -484,14 +562,13 @@ class Core:
         elif t == "status.request":
             await self.link.reply(ws, "status", self.snapshot())
         elif t == "confirm.reply":
-            req = self._confirm.get(str(p.get("id")))
-            if req is None or req[1] != client.id:      # only the face that was asked may answer
+            aid = str(p.get("id"))
+            if self._confirm.get(aid) != client.id:      # only the face that was asked may answer
                 logs.warn("core", "CONFIRM_SPOOFED", "confirmation reply from a client that was not asked",
                           role=client.role)
                 return
-            self._confirm.pop(str(p.get("id")), None)
-            if not req[0].done():
-                req[0].set_result(p.get("approved") is True)
+            self._confirm.pop(aid, None)
+            self.approvals.answer(aid, p.get("approved") is True, channel="face")
         elif t == "debug.enable":
             logs.enable_debug(min(int(p.get("minutes", self.cfg.log.debug_minutes)), self.cfg.log.debug_minutes))
             logs.info("core", "DEBUG_ENABLED", "temporary DEBUG logging enabled")
@@ -603,7 +680,8 @@ class Core:
         if self.voice_mode != "push_to_talk":
             return
         self.dev.speaker_stop()                # barge-in: talking interrupts JARVES
-        if self._busy and not self._busy.done():
+        waiting = self.approvals is not None and self.approvals.has_pending()
+        if self._busy and not self._busy.done() and not waiting:   # an approval's turn stays: he answers it
             self._busy.cancel()
         try:
             self.dev.mic_start()
@@ -619,6 +697,9 @@ class Core:
             return
         self.listening = False
         audio = self.dev.mic_stop()
+        if self.approvals is not None and self.approvals.has_pending():
+            self._spawn(self._transcribe_for_approval(audio))
+            return
         self._run_busy(self._transcribe_and_answer(audio))
 
     async def _transcribe_and_answer(self, audio) -> None:
@@ -643,6 +724,7 @@ class Core:
             await self.set_face("idle")
             return
         await self.link.send_face("user.transcript", {"text": text})
+        self._owner_answer(text, "voice")           # nothing waits here (talk_up routes those): a new turn
         await self.handle_utterance(text, typed=False)
 
     async def handle_utterance(self, text: str, typed: bool) -> None:
@@ -765,6 +847,7 @@ class Core:
             # the first was still open (two billed sessions, one never heard). One conversation at a time.
             logs.info("voice", "LIVE_ALREADY_RUNNING", "a live conversation is already open; not starting another")
             return
+        self._warm_probes()               # P0.3: ready before session_config() builds the tool list (after connect)
         await self.link.send_face("assistant.activity", {"text": "Loading voice connection..."})
         if self._voice_budget_left_s() <= 0:
             await self.notify_error("VOICE_BUDGET", "daily live-voice limit reached",
@@ -781,6 +864,8 @@ class Core:
             self.budget.record("voice_seconds", int(round(seconds)))
 
         async def on_transcript(role: str, text: str) -> None:
+            if role == "user":                      # the OWNER's speech (input transcription), never JARVES's
+                self._owner_answer(text, "voice")
             self.curator.observe(role, text, live=True)
             await self.link.send_face("user.transcript" if role == "user" else "assistant.text",
                                       {"text": text, "source": self.voice_mode})
@@ -970,15 +1055,51 @@ class Core:
         except Exception:
             logs.warn("tts", "SPEECH_CACHE_FAILED", "could not cache the greeting", exc=True)
 
+    def _warm_probes(self) -> None:
+        """Run the one slow feature probe (music: a localhost TCP connect, 0.3 s timeout when Pear is closed) in a
+        worker thread instead of on the event loop, where TOOLS.md at start-up and live_tools() at each live-session
+        start would otherwise wait for it. Fire-and-forget: a not-yet-finished warm-up just means available()
+        probes itself exactly as before."""
+        feats = getattr(self, "features", None)
+        if feats is None or "music" not in feat.CATALOG:
+            return
+        try:
+            asyncio.get_running_loop().run_in_executor(None, feats.warm, "music")
+        except RuntimeError:
+            pass
+
+    def _prewarm_modules(self) -> list[str]:
+        """What the selected route will import on first use, most urgent first (SW-V3 P0.3, measured on the owner's
+        PC: openai 1.3-2.7 s, the Agents SDK another 2.2-2.8 s and +41 MB RAM). The Agents SDK is only used by the
+        API-key text brain (brain.AgentBrain) and by voice.mode = "realtime"; GPT-Live and the ChatGPT-plan brain
+        never import it, so a combined/ChatGPT install no longer loads it in the background while the first live
+        session starts (19 Oct logs: prewarm 6-21 s, competing with LIVE_STARTED for the CPU)."""
+        mods = ["openai"]
+        if self.voice_mode == "live":
+            # lazily imported by AsyncOpenAI().live.connect() ON THE EVENT LOOP: ~0.45 s per first live session
+            mods += ["openai.resources.live.forks", "httpcore2", "jarves.voice.live"]
+        elif self.voice_mode == "realtime":
+            mods += ["agents.realtime", "jarves.voice.realtime"]
+        if isinstance(self.agent, AgentBrain):
+            mods += ["agents"]
+        return mods
+
     def _prewarm(self) -> None:
         """Import the heavy cloud-voice libraries in a worker thread right at start-up. QA 18 Oct: importing
         agents.realtime on first use took 6 s (13 s on a busy PC) and delayed the first spoken word."""
+        import importlib
         t0 = time.monotonic()
+        mods = self._prewarm_modules()
         try:
-            import agents.realtime  # noqa: F401
-            import openai  # noqa: F401
-            from .voice import live, realtime  # noqa: F401
-            logs.info("core", "PREWARM_DONE", "cloud voice libraries loaded", ms=round((time.monotonic() - t0) * 1000))
+            for name in mods:
+                try:
+                    importlib.import_module(name)
+                except ImportError:
+                    if name in ("openai", "agents", "agents.realtime"):
+                        raise
+                    # an optional submodule moved in another SDK version: first use imports what it needs
+            logs.info("core", "PREWARM_DONE", "cloud voice libraries loaded", ms=round((time.monotonic() - t0) * 1000),
+                      modules=mods)
         except Exception as e:
             logs.warn("core", "PREWARM_FAILED", f"{type(e).__name__}: {str(e)[:120]}")
 
@@ -1003,10 +1124,18 @@ class Core:
         if not v.wake_enabled or self.voice_mode == "off" or not (self._wake_audio or self.use_real_audio):
             self.health.set("wake_word", "disabled", "wake word off (voice.wake_enabled / voice.mode)")
             return
-        from .voice.wakeword import WakeListener, WakeWordUnavailable, make_detector
+        from .voice.wakeword import WakeListener, WakeWordUnavailable, make_wake_detector
         try:
-            det = self._wake_detector or make_detector(v.wake_word, v.wake_threshold)
+            det = self._wake_detector or make_wake_detector(self._wake_cfg())
             ok, msg = det.check() if hasattr(det, "check") else (True, "")
+            if not ok and self._wake_detector is None and v.wake_confirm:
+                # the local speech check could not load (no faster-whisper / model): one stage, said truthfully
+                logs.warn("wake", "WAKE_CONFIRM_UNAVAILABLE", msg, action="uv sync --extra voice; connect once "
+                          "so the speech model can download", fallback=f"wake model only at {v.wake_threshold}")
+                cfg1 = self._wake_cfg()
+                cfg1.wake_confirm = False
+                det = make_wake_detector(cfg1)
+                ok, msg = det.check() if hasattr(det, "check") else (True, "")
         except WakeWordUnavailable as e:
             ok, msg = False, e.message
         if not ok:
@@ -1020,9 +1149,27 @@ class Core:
         self.health.set("wake_word", "ok", f"say \"{v.wake_phrase}\" (detected on this device, {Path(v.wake_word).name})")
         self._bg.append(asyncio.create_task(self._wake_loop()))
 
+    def _wake_cfg(self):
+        """voice config for the wake pipeline, with this mic's saved starting gain (voice/wake_calib.py)."""
+        from .voice.wake_calib import load_calibration
+        v = self.cfg.voice.model_copy()
+        if v.wake_agc and not v.wake_gain_db:
+            cal = load_calibration(self.home, _mic_name(v.input_device))
+            if cal:
+                v.wake_gain_db = float(cal.get("gain_db", 0.0))
+        return v
+
+    def _wake_note(self, kind: str, hint: str, **kw) -> None:
+        """Last wake-listener finding for the dashboard/face privacy strip (`privacy.wake`) and the status."""
+        self._wake_status = {"kind": kind, "hint": hint, "ts": round(time.time(), 1), **kw}
+
     async def _on_wake(self, score: float) -> None:
         self._woke = True
-        logs.info("wake", "WAKE_WORD", "wake word heard", score=round(score, 2))
+        conf = getattr(self.wake.detector, "last_confirm", None) if self.wake is not None else None
+        via = "asr_confirm" if conf and conf.get("ok") and score <= getattr(self.wake.detector, "accept", 1) else "model"
+        logs.info("wake", "WAKE_WORD", "wake word heard", score=round(score, 2), via=via,
+                  **({"asr_ms": conf["ms"]} if via == "asr_confirm" else {}))
+        self._wake_note("woke", "", score=round(score, 2), via=via)
 
     async def _levels(self, chunks):
         """Pass mic chunks through, sending the face a ~5 Hz mic level for the level bar."""
@@ -1054,10 +1201,16 @@ class Core:
                 logs.error("wake", "WAKE_LOAD_FAILED", "wake listener failed to initialize", exc=True)
                 self.health.set("wake_word", "unavailable", "wake listener failed to initialize", "see logs; use Talk")
                 return
+        from .voice.wake_calib import load_calibration, save_calibration
+        from .voice.wake_confirm import SpeechMonitor
         last_report = time.monotonic()
         peak_score = 0.0
         peak_level = 0.0
         near_t, near_n = 0.0, 0
+        monitor = SpeechMonitor(min_score=NEAR_MISS_MIN)
+        heard_t, heard_n, confirm_seen = -1e9, 0, None
+        mic_name = _mic_name(v.input_device)
+        calibrated = load_calibration(self.home, mic_name) is not None
         while not self.stopping:
             if not self._wake_should_listen():
                 await asyncio.sleep(0.2)
@@ -1092,11 +1245,45 @@ class Core:
                         logs.info("wake", "WAKE_NEAR_MISS", "heard something like the wake word but not sure enough",
                                   score=round(sc, 2), needs=self.wake.detector.threshold,
                                   hint="say \"Hey Jarvis\" clearly, or run `jarvis wake test` to calibrate")
+                        self._wake_note("near_miss", "close: say \"Hey Jarvis\" a bit clearer",
+                                        score=round(sc, 2), needs=self.wake.detector.threshold)
+                    conf = getattr(self.wake.detector, "last_confirm", None)
+                    if conf is not None and conf is not confirm_seen:
+                        confirm_seen = conf
+                        if not conf["ok"]:      # the transcript stays in RAM: room speech is not written to logs
+                            logs.info("wake", "WAKE_CONFIRM_REJECTED", "wake model was unsure and the local speech "
+                                      "check did not hear the name", score=conf["score"], asr_ms=conf["ms"])
+                    ev = None if self._woke else monitor.feed(chunk, sc)
+                    if ev is not None and time.monotonic() - heard_t > 30:
+                        heard_t, heard_n = time.monotonic(), heard_n + 1
+                        if ev.kind == "too_quiet":
+                            hint = ("mic too quiet: move closer, raise the input volume, or run `jarvis wake test`")
+                            logs.warn("wake", "WAKE_MIC_QUIET", "heard speech, but too quiet for the wake word",
+                                      level_db=ev.level_db, floor_db=ev.floor_db, peak_score=ev.peak_score,
+                                      mic=mic_name, hint=hint)
+                        else:
+                            hint = "heard speech, no wake match: say 'Hey Jarvis'"
+                            logs.info("wake", "WAKE_SPEECH_NO_MATCH", hint, speech_ms=ev.speech_ms,
+                                      level_db=ev.level_db, peak_score=ev.peak_score, mic=mic_name,
+                                      hint="say \"Hey Jarvis\" (or \"Hi Jarvis\"); `jarvis wake test` shows the score")
+                        self._wake_note(ev.kind, hint, level_db=ev.level_db, peak_score=ev.peak_score)
+                    if not calibrated and monitor.last_burst_db is not None and monitor.frames > 40:
+                        calibrated = True     # first run with this mic: room floor + first speech level
+                        cal = save_calibration(self.home, mic_name, floor_db=monitor.floor_db,
+                                               speech_db=monitor.last_burst_db, verdict="auto", by="core")
+                        logs.info("wake", "WAKE_CALIBRATION", "first-run level calibration for this microphone",
+                                  mic=mic_name, **{k: cal[k] for k in ("floor_db", "speech_db", "gain_db")})
+                        agc = getattr(self.wake.detector, "agc", None)
+                        if agc is not None and cal["gain_db"] > agc.gain_db:
+                            agc.gain_db = cal["gain_db"]
                     if time.monotonic() - last_report >= 15:
                         logs.info("wake", "WAKE_HEALTH", "wake listener running", frames=self.wake.stats.frames,
                                   peak_score=round(peak_score, 3), peak_level=round(peak_level, 3),
                                   threshold=self.wake.detector.threshold, near_misses=near_n,
-                                  mic=_mic_name(v.input_device))
+                                  speech_no_match=heard_n, floor_db=round(monitor.floor_db, 1),
+                                  **({"gain_db": round(self.wake.detector.agc.gain_db, 1)}
+                                     if getattr(self.wake.detector, "agc", None) is not None else {}),
+                                  mic=mic_name)
                         last_report, peak_score, peak_level = time.monotonic(), 0.0, 0.0
                     if self.wake.stats.frames % 25 == 0:
                         logs.verbose("wake", "WAKE_SCORE", "wake word score", score=round(self.wake.stats.last_score, 3))
@@ -1199,26 +1386,38 @@ class Core:
         await self._start_live(greeting="זה הקול החדש שלי. מה דעתך?")
 
     # ------------------------------------------------------------------ confirmation for side effects
-    async def ask_confirm(self, prompt: str, timeout: float = 20) -> bool:
-        face_id = self.link.face_client_id()
-        if face_id is None or self.stopping:
+    async def ask_confirm(self, prompt: str, timeout: float | None = None, **meta) -> bool:
+        """registry.confirm / camera switch / any approval: the shared approvals service (approvals.py) shows it
+        on the popup, tray, face, dashboard and voice at once; no answer in time = NO."""
+        if self.stopping or self.approvals is None:
             return False
-        cid = uuid.uuid4().hex
-        fut = asyncio.get_running_loop().create_future()
-        self._confirm[cid] = (fut, face_id)
-        await self.link.send_face("confirm.request", {"id": cid, "prompt": prompt})
-        live = self.live
-        if live is not None and hasattr(live, "confirm_pending"):
-            try:                                    # voice-only user: JARVES says "approve it on the screen"
-                await live.confirm_pending(prompt)
-            except Exception:
-                logs.warn("voice", "LIVE_CONFIRM_NOTE_FAILED", "could not tell the voice session about the confirmation")
+        ok = await self.approvals.ask(prompt, timeout=timeout, **meta)
+        if not ok:
+            logs.info("core", "CONFIRM_DENIED", "approval not given: treated as NO")
+        return ok
+    ask_confirm.accepts_meta = True
+
+    def _owner_answer(self, text: str, channel: str) -> bool:
+        """The owner's own words (typed on the face / heard from the mic): a pure yes/no answers the ONE waiting
+        approval. Otherwise it is a new turn (a denied request may be asked again)."""
+        ap = self.approvals
+        if ap is None:
+            return False
+        if ap.has_pending() and ap.answer_words(text, channel=channel):
+            logs.info("core", "APPROVAL_ANSWERED_BY_WORDS", f"approval answered ({channel})")
+            return True
+        ap.note_user_turn()
+        return False
+
+    async def _transcribe_for_approval(self, audio) -> None:
+        """Push-to-talk while an approval waits: the turn that asked must not be cancelled; hear yes/no only."""
         try:
-            return await asyncio.wait_for(fut, timeout)
-        except asyncio.TimeoutError:
-            logs.info("core", "CONFIRM_TIMEOUT", "no answer to the confirmation: treated as NO", timeout_s=timeout)
-            return False
-        finally:
-            self._confirm.pop(cid, None)
-            if live is not None and hasattr(live, "confirm_done"):
-                live.confirm_done()
+            text = await self.stt.transcribe(audio)
+        except STTUnavailable as e:
+            await self.notify_error(e.code, e.message, e.action)
+            return
+        if text:
+            await self.link.send_face("user.transcript", {"text": text})
+            if not self._owner_answer(text, "voice"):
+                await self.link.send_face("assistant.text", {"text": "מחכה לאישור שלך: כן או לא (או על המסך).",
+                                                             "source": "core"})

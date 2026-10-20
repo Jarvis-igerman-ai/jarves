@@ -113,6 +113,14 @@ def is_loopback(ip: str) -> bool:
         return False
 
 
+def session_cookie(home: Path) -> str:
+    """The owner's login cookie name: "jarves_dash" for the default profile (unchanged), "jarves_dash_<name>" for
+    others. Cookies are shared by every port on 127.0.0.1, so one name for all profiles would log the others out."""
+    from .profiles import DEFAULT, info
+    name = info(home)["name"]
+    return "jarves_dash" if name == DEFAULT else f"jarves_dash_{name}"
+
+
 class Access:
     def __init__(self, home: Path, admin_token: str, *, lan: bool = False, lan_host: str | None = None,
                  clock=time.time) -> None:
@@ -122,6 +130,7 @@ class Access:
         self.path = home / DEVICES_FILE
         self.audit_path = home / AUDIT_FILE
         self.local_csrf = secrets.token_urlsafe(18)
+        self.cookie = session_cookie(home)        # per profile: two dashboards on 127.0.0.1 keep their own login
         self._code: dict | None = None
         self._hits: dict[str, deque] = {}
 
@@ -280,7 +289,7 @@ class Access:
 
     def principal(self, cookies: dict, ip: str) -> dict | None:
         """{"kind": "local"} for the owner's loopback session, {"kind": "device", ...} for a paired device."""
-        tok = cookies.get("jarves_dash")
+        tok = cookies.get(self.cookie)
         if tok and is_loopback(ip) and secrets.compare_digest(tok, self.admin_token):
             return {"kind": "local", "id": "local", "csrf": self.local_csrf}
         dv = cookies.get(DEVICE_COOKIE)

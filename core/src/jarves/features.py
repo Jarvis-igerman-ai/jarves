@@ -43,12 +43,13 @@ from pathlib import Path
 from typing import Any, Callable, Literal
 from urllib.parse import urlsplit
 
-from . import capabilities, logs
+from . import capabilities, locales, logs
 
 Risk = Literal["low", "medium", "high"]
 Applies = Literal["live", "next_session", "restart"]
 RISKS = ("low", "medium", "high")
 PROBE_TTL_S = 15.0
+SLOW_PROBES = {"music"}     # probes that may block (localhost connect): an expired result is re-checked off-thread
 STATE_FILE = "features.json"
 
 
@@ -113,6 +114,14 @@ def register(id: str, title_he: str, title_en: str, default_enabled: bool, *, pr
                 list(skills or []), list(tools or []), config, applies, about, dict(targets or {}))
     CATALOG[id] = f
     return f
+
+
+def _with_he(d: dict) -> dict:
+    """Hebrew siblings (about_he, reason_he, targets.*.evidence_he / blocker_he) for the dashboard (locales.py)."""
+    locales.attach(d, "about", "reason")
+    for t in (d.get("targets") or {}).values():
+        locales.attach(t, "evidence", "blocker")
+    return d
 
 
 # ---------------------------------------------------------------------- probes
@@ -278,7 +287,7 @@ register("gmail_send", "שליחת מיילים", "Send Gmail", False, probe=_go
          about="send e-mail in your name")
 register("camera", "מצלמה", "Camera", False, probe=_probe_camera, needs=["camera_device"], risk="high",
          skills=["camera"], about="look through the camera when asked")
-register("face_recognition", "זיהוי פנים", "Face recognition", False, probe=_all(_probe_camera, _skill_installed("faces")),
+register("face_recognition", "זיהוי פנים", "Face recognition", False, probe=_all(_probe_camera, _skill_installed("camera")),
          needs=["camera"], risk="high", skills=["faces"], about="recognise who is in the room")
 register("camera_when_away", "מצלמה כשאין אף אחד בבית", "Camera when away", False,
          probe=_all(_probe_camera, _skill_installed("camera")), needs=["camera"], risk="high",
@@ -358,6 +367,7 @@ class Features:
         self._mtime: float | None = None
         self._checked = 0.0
         self._probe_cache: dict[str, tuple[float, bool, str]] = {}
+        self._revalidating: set[str] = set()
         self._defaults: dict[str, tuple[bool, str]] = {}
         for fid in CONFIG_MIRROR.values():
             self.default(fid)                   # legacy config values, before anything mirrors onto cfg
@@ -465,6 +475,11 @@ class Features:
         hit = self._probe_cache.get(fid)
         if hit and now - hit[0] < PROBE_TTL_S:
             ok, why = hit[1], hit[2]
+        elif hit and fid in SLOW_PROBES:
+            # stale-while-revalidate (P0.3): answer with the last result now, re-check in a worker thread. The owner's
+            # 19 Oct logs: features_list / list_skills took 320 ms each, all of it the Pear probe on the event loop.
+            ok, why = hit[1], hit[2]
+            self._revalidate(fid)
         else:
             try:
                 ok, why = f.probe(self.ctx)
@@ -476,6 +491,34 @@ class Features:
                 if dep in CATALOG and dep != fid and not self.active(dep):
                     return False, f"needs {CATALOG[dep].title_en} ({dep}) on"
         return bool(ok), str(why or "")
+
+    def warm(self, fid: str, force: bool = False) -> None:
+        """Refresh one probe's cached result now, typically from a worker thread, so the next available() on the
+        event loop is a cache hit. SW-V3 P0.3: with Pear closed the music probe's localhost connect blocks for its
+        0.3 s timeout on Windows, and live_tools() hit it at every live-session start after 15 s idle."""
+        hit = self._probe_cache.get(fid)
+        if not force and hit and time.monotonic() - hit[0] < PROBE_TTL_S / 2:
+            return
+        f = self.feature(fid)
+        try:
+            ok, why = f.probe(self.ctx)
+        except Exception as e:
+            ok, why = False, f"check failed ({type(e).__name__})"
+        self._probe_cache[fid] = (time.monotonic(), bool(ok), str(why or ""))
+
+    def _revalidate(self, fid: str) -> None:
+        """One background re-check per slow probe at a time (daemon thread: never delays shutdown)."""
+        with self._lock:
+            if fid in self._revalidating:
+                return
+            self._revalidating.add(fid)
+
+        def run() -> None:
+            try:
+                self.warm(fid, force=True)
+            finally:
+                self._revalidating.discard(fid)
+        threading.Thread(target=run, name=f"jarves-probe-{fid}", daemon=True).start()
 
     def active(self, fid: str) -> bool:
         return fid in CATALOG and self.enabled(fid) and self.available(fid)[0]
@@ -506,7 +549,7 @@ class Features:
         ok, why = self.available(fid)
         cap = capabilities.view(fid)
         health = "off" if not on else "ok" if ok else "unavailable"
-        return {"id": fid, "title_he": f.title_he, "title_en": f.title_en, "about": f.about, "risk": f.risk,
+        return _with_he({"id": fid, "title_he": f.title_he, "title_en": f.title_en, "about": f.about, "risk": f.risk,
                 "enabled": on, "default": f.default_enabled, "source": "user" if user is not None else src,
                 "available": ok, "reason": why, "active": on and ok, "needs": f.needs, "applies": f.applies,
                 "config": f.config, "skills": f.skills, "tools": f.tools,
@@ -515,7 +558,7 @@ class Features:
                 "health": health, "permissions": cap["permissions"] or [f.risk + " risk"],
                 "settings": cap["settings"] or (f"config {f.config}" if f.config else ""), "targets": cap["targets"],
                 "last_checked": cap["last_checked"], "pi_ready": cap["pi_ready"], "matrix_problems": cap["problems"],
-                "needs_attention": bool(req) or (on and not ok) or bool(cap["problems"])}
+                "needs_attention": bool(req) or (on and not ok) or bool(cap["problems"])})
 
     def list(self) -> list[dict]:
         return [self.status(fid) for fid in CATALOG]
@@ -705,20 +748,24 @@ def make_skill(features: Features, registry=None):
                 f = CATALOG[fid]
                 if features.enabled(fid) == a.on:
                     st = features.status(fid)
-                    note = "" if (not a.on or st["available"]) else f" אבל היא לא זמינה: {st['reason']}"
-                    return ToolResult(True, f"{f.title_he} כבר {'פועלת' if a.on else 'כבויה'}.{note}", st)
+                    return ToolResult(True, f"{f.title_he} כבר {'מופעלת' if a.on else 'כבויה'}. "
+                                            f"מצב: {state_text(st, 'he')}", st)
                 if a.on and f.risk in ("medium", "high"):
-                    confirm = getattr(registry, "confirm", None)
-                    ok = await confirm(f"להפעיל את {f.title_he}? / Turn on {f.title_en}?") if confirm else False
+                    prompt = f"להפעיל את {f.title_he}? / Turn on {f.title_en}?"
+                    meta = dict(title=f"Turn on {f.title_en} / להפעיל את {f.title_he}", risk=f.risk, kind="feature",
+                                why=f.about, details={"feature": fid, "applies": f.applies})
+                    if hasattr(registry, "ask"):            # the approvals service (popup, dashboard, voice, audit)
+                        ok = await registry.ask(prompt, **meta)
+                    else:
+                        confirm = getattr(registry, "confirm", None)
+                        ok = await confirm(prompt) if confirm else False
                     if not ok:
                         features.request(fid, by="voice")
                         return ToolResult(False, f"{f.title_he} דורשת אישור על המסך או בלוח הבקרה. לא הפעלתי.",
                                           {"id": fid, "risk": f.risk}, "FEATURE_NEEDS_APPROVAL")
-                st = features.set(fid, a.on, by="voice")
-                when = {"live": "מעכשיו", "next_session": "מהשיחה הבאה", "restart": "מההפעלה הבאה"}[f.applies]
-                msg = f"{'הפעלתי' if a.on else 'כיביתי'} את {f.title_he} ({when})."
-                if a.on and not st["available"]:
-                    msg += f" אבל היא עדיין לא זמינה: {st['reason']}"
+                st = switch(features, fid, a.on, by="voice")
+                msg = (f"{'הפעלתי' if a.on else 'כיביתי'} את {f.title_he} ({APPLIES_HE[f.applies]}). "
+                       f"מצב: {state_text(st, 'he')}")
                 return ToolResult(True, msg, st)
 
             return [
@@ -730,6 +777,39 @@ def make_skill(features: Features, registry=None):
             ]
 
     return FeatureSkill()
+
+
+# ---------------------------------------------------------------------- one rule for every surface
+APPLIES_EN = {"live": "now", "next_session": "from the next conversation", "restart": "at the next Core start"}
+APPLIES_HE = {"live": "מעכשיו", "next_session": "מהשיחה הבאה", "restart": "מההפעלה הבאה"}
+
+
+def state_word(st: dict) -> str:
+    """The one state word every surface shows: on / off / unavailable (enabled but its prerequisites are missing)."""
+    if not st["enabled"]:
+        return "off"
+    return "on" if st["available"] else "unavailable"
+
+
+def state_text(st: dict, lang: str = "en", reason=None) -> str:
+    """'on', 'off' or 'unavailable (reason)'; Hebrew for the model tool. Same words in CLI, dashboard and tool."""
+    word = state_word(st)
+    why = (reason or (lambda r: r))(st.get("reason") or "")
+    if lang == "he":
+        base = {"on": "פועלת", "off": "כבויה", "unavailable": "לא זמינה"}[word]
+        return f"{base} ({why})" if word == "unavailable" and why else base
+    return f"unavailable ({why})" if word == "unavailable" and why else word
+
+
+def switch(features: "Features", fid: str, on: bool, *, by: str) -> dict:
+    """Turn a feature on/off for ANY surface (CLI, dashboard, model tool). Turning on an unavailable feature SAVES it
+    as enabled and reports 'unavailable (reason)': the switch is the user's wish, availability is a separate fact
+    that the Core re-checks and follows once the prerequisites exist (owner decision O-02)."""
+    st = features.set(fid, on, by=by)
+    st["state"] = state_word(st)
+    st["state_text"] = state_text(st)
+    st["state_text_he"] = state_text(st, "he")
+    return st
 
 
 # ---------------------------------------------------------------------- dashboard
@@ -748,8 +828,8 @@ def _ctx_features(ctx) -> Features:
 
 def api_features(ctx, m, body):
     f = _ctx_features(ctx)
-    return 200, {"features": f.list(), "note": "Switches apply live where possible; others at the next "
-                                               "conversation or Core start (see 'applies').",
+    note = "Switches apply live where possible; others at the next conversation or Core start (see 'applies')."
+    return 200, {"features": f.list(), "note": note, **locales.siblings("note", note),
                  "statuses": list(capabilities.STATUSES), "targets": list(capabilities.TARGETS),
                  "filters": ["all", "enabled", "not_ready_on_pi", "needs_attention"],
                  "pi_roadmap": capabilities.PI_ROADMAP}
@@ -765,7 +845,7 @@ def api_feature_set(ctx, m, body):
         return 200, f.reset(fid)
     if not isinstance(body.get("enabled"), bool):
         return 400, {"error": "body needs {\"enabled\": true|false}"}
-    return 200, f.set(fid, body["enabled"], by="dashboard")     # the dashboard IS the user's approval
+    return 200, switch(f, fid, body["enabled"], by="dashboard")     # the dashboard IS the user's approval
 
 
 def dashboard_routes(register_route) -> None:

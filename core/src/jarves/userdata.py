@@ -40,6 +40,16 @@ CREATE TABLE IF NOT EXISTS reports (
 CREATE TABLE IF NOT EXISTS notes (
     id INTEGER PRIMARY KEY AUTOINCREMENT, title TEXT NOT NULL, text TEXT NOT NULL, tags TEXT NOT NULL DEFAULT '',
     created REAL NOT NULL, updated REAL NOT NULL);
+CREATE TABLE IF NOT EXISTS list_items (
+    id INTEGER PRIMARY KEY AUTOINCREMENT, list_name TEXT NOT NULL, text TEXT NOT NULL,
+    done INTEGER NOT NULL DEFAULT 0, created REAL NOT NULL, done_at REAL);
+CREATE TABLE IF NOT EXISTS timers (
+    id INTEGER PRIMARY KEY AUTOINCREMENT, kind TEXT NOT NULL,       -- timer | alarm
+    label TEXT NOT NULL DEFAULT '', due REAL NOT NULL, created REAL NOT NULL,
+    status TEXT NOT NULL,                       -- pending | fired | missed | cancelled
+    fired_at REAL);
+CREATE INDEX IF NOT EXISTS list_i ON list_items (list_name, done);
+CREATE INDEX IF NOT EXISTS timers_s ON timers (status, due);
 CREATE TABLE IF NOT EXISTS alerts (
     id INTEGER PRIMARY KEY AUTOINCREMENT, ts REAL NOT NULL, source TEXT NOT NULL, kind TEXT NOT NULL DEFAULT 'info',
     priority TEXT NOT NULL, title TEXT NOT NULL, text TEXT NOT NULL DEFAULT '', dedupe_key TEXT, channel TEXT,
@@ -84,6 +94,20 @@ DEFAULTS: dict[str, Any] = {
     "briefing.city": "Tel Aviv",                # morning briefing weather place (Open-Meteo, no key)
     "briefing.lat": 32.0853,
     "briefing.lon": 34.7818,
+    # self-check (selfcheck.py, owner request 20 Oct 2026)
+    "self_check.on_start": "crash",             # crash = after an unclean stop | always = every start | never
+    "self_check.error_burst": 10,               # this many ERROR records in one run of the Core start a check (0 = off)
+    "self_check.min_interval_s": 3600,          # automatic checks at most this often
+    "self_check.days": 7,                       # log window of one check
+    "self_check.ai_pass": True,                 # also run the existing AI review (diagnosis_llm_pass rules apply)
+    "self_check.ai_sessions": 2,                # at most this many conversations reviewed per check
+    "self_check.job_id": "",                    # the weekly scheduler job (created once)
+    "self_check.last_auto": 0.0,
+    "self_check.last_run": 0.0,
+    # guided account setup (connect.py): the once-a-day "Google is not connected" reminder
+    "connect.nudge": True,
+    "connect.last_nudge": 0.0,
+    "connect.skipped": [],                      # items the owner chose "never ask again" for (jarvis connect)
     "files.quota_mb": 200,
     "files.max_file_mb": 10,
 }

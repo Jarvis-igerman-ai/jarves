@@ -37,7 +37,7 @@ from pathlib import Path
 from typing import Any, Callable
 
 from .. import features as feat
-from .. import logs
+from .. import hebrew, locales, logs
 
 DATA = Path(__file__).with_name("data")
 STATE_FILE = "guides_state.json"
@@ -140,6 +140,35 @@ def _norm(s: str) -> str:
     return re.sub(r"[\s_\-\"'״׳.?!,]+", " ", s.lower()).strip()
 
 
+def help_text(g: Guide) -> str:
+    """Plain-text topic help for `jarvis help <topic>`: what it is, steps, example phrases, cost, privacy, problems.
+    Static guide text only (no live state: that is the dashboard Guides page and JARVES's own explain_feature)."""
+    out = [f"{g.title_he} / {g.title_en}", "", g.what_he, g.what_en, ""]
+    if g.steps:
+        out.append("Steps / שלבים:")
+        for i, st in enumerate(g.steps, 1):
+            out += [f"  {i}. {st.he}", f"     {st.en}"]
+        out.append("")
+    if g.say:
+        out.append("Say / אמרו:")
+        out += [f"  - {he}  /  {en}" for he, en in g.say]
+        out.append("")
+    out += [g.expect_he, g.expect_en, "", f"Cost / עלות: {g.cost_he} {g.cost_en}",
+            f"Privacy / פרטיות: {g.privacy_he} {g.privacy_en}"]
+    for p in g.problems:
+        out += ["", f"Problem / בעיה: {p['he']} / {p['en']}", f"  {p['fix_he']}", f"  {p['fix_en']}"]
+    if g.links:
+        out += ["", "See also / ראו גם: " + ", ".join(g.links)]
+    return "\n".join(out).strip()
+
+
+def topics_text() -> str:
+    gs = sorted(load().values(), key=lambda g: (g.order, g.id))
+    lines = ["JARVES help topics / נושאי עזרה (jarvis help <topic>):", ""]
+    lines += [f"  {g.id:<22} {g.title_he} / {g.title_en}" for g in gs]
+    return "\n".join(lines)
+
+
 def find(name: str) -> Guide | None:
     """A guide by id, feature id, title or alias (Hebrew or English, partial words allowed)."""
     gs = load()
@@ -228,11 +257,12 @@ def state(g: Guide, f: feat.Features) -> dict:
     """Live state of one guide: on / setup (needs setup) / off / partly / planned / info, with reasons."""
     rows = [f.status(fid) for fid in g.features if fid in feat.CATALOG]
     missing = [fid for fid in g.features if fid not in feat.CATALOG]
-    reason = ""
+    reason = reason_he = ""
     if g.status == "planned" and not rows:
         st = "planned"
     elif g.features and not rows:
         st, reason = "missing", "not in this version yet"
+        reason_he = hebrew.he(reason) or ""
     elif rows:
         main = rows[0]
         broken = [r for r in rows[1:] if r["enabled"] and not r["available"]]   # extras switched off = a choice
@@ -240,20 +270,24 @@ def state(g: Guide, f: feat.Features) -> dict:
             st = "on"
         elif main["enabled"] and not main["available"]:
             st, reason = "setup", main["reason"]
+            reason_he = main.get("reason_he", "")
         elif not main["enabled"]:
             st, reason = "off", "turned off" if main["available"] else f"turned off; also {main['reason']}"
+            reason_he = "כבוי" if main["available"] else (f"כבוי; וגם {main['reason_he']}" if main.get("reason_he") else "")
         else:
             st = "partly"
             reason = f"{broken[0]['title_en']}: {broken[0]['reason']}"
+            reason_he = f"{broken[0]['title_he']}: {broken[0]['reason_he']}" if broken[0].get("reason_he") else ""
     elif g.probe in EXTRA_PROBES:
         try:
             ok, why = EXTRA_PROBES[g.probe](f.cfg, f.home)
         except Exception as e:
             ok, why = False, f"check failed ({type(e).__name__})"
         st, reason = ("on", why) if ok else ("off" if g.optional else "setup", why)
+        reason_he = hebrew.he(why) or ""
     else:
         st = "info"
-    return {"state": st, "reason": reason, "features": rows, "missing_features": missing,
+    return {"state": st, "reason": reason, "reason_he": reason_he, "features": rows, "missing_features": missing,
             "setup_needed": st == "setup"}
 
 
@@ -264,8 +298,10 @@ def platforms(g: Guide, rows: list[dict]) -> dict:
         if t:
             return {"windows": t.get("windows"), "pi": t.get("linux_arm64_pi"), "source": r["id"]}
     p = g.platform or {}
-    return {"windows": {"status": p.get("windows", "implemented_unverified"), "evidence": p.get("windows_note_en", "")},
-            "pi": {"status": p.get("pi", "implemented_unverified"), "blocker": p.get("pi_note_en", "")},
+    return {"windows": locales.attach({"status": p.get("windows", "implemented_unverified"),
+                                      "evidence": p.get("windows_note_en", "")}, "evidence"),
+            "pi": locales.attach({"status": p.get("pi", "implemented_unverified"), "blocker": p.get("pi_note_en", "")},
+                                "blocker"),
             "source": "guide"}
 
 
@@ -364,8 +400,8 @@ def summary(g: Guide, f: feat.Features) -> dict:
     return {"id": g.id, "title_he": g.title_he, "title_en": g.title_en, "what_he": g.what_he, "what_en": g.what_en,
             "category": g.category, "order": g.order, "checklist": g.checklist, "features": g.features,
             "pages": g.pages,
-            "state": s["state"], "reason": s["reason"], "setup_needed": s["setup_needed"],
-            "has_test": bool(g.test or g.features)}
+            "state": s["state"], "reason": s["reason"], "reason_he": s["reason_he"],
+            "setup_needed": s["setup_needed"], "has_test": bool(g.test or g.features)}
 
 
 def full(g: Guide, f: feat.Features, progress: int = 0) -> dict:
@@ -384,7 +420,7 @@ def full(g: Guide, f: feat.Features, progress: int = 0) -> dict:
             "test_he": g.test_he, "test_en": g.test_en, "cost_he": g.cost_he, "cost_en": g.cost_en,
             "privacy_he": g.privacy_he, "privacy_en": g.privacy_en, "problems": g.problems,
             "feature_rows": [{k: r[k] for k in ("id", "title_he", "title_en", "enabled", "available", "active",
-                                                "reason", "risk", "applies")} for r in s["features"]],
+                                                "reason", "reason_he", "risk", "applies") if k in r} for r in s["features"]],
             "missing_features": s["missing_features"], "platforms": platforms(g, s["features"]),
             "links": [{"id": x, "title_en": load()[x].title_en, "title_he": load()[x].title_he}
                       for x in g.links if x in load()], "progress": progress}
@@ -396,7 +432,7 @@ def checklist(f: feat.Features) -> list[dict]:
     for g in sorted((g for g in load().values() if g.checklist), key=lambda g: g.checklist):
         s = state(g, f)
         out.append({"id": g.id, "title_he": g.title_he, "title_en": g.title_en, "done": s["state"] == "on",
-                    "state": s["state"], "reason": s["reason"],
+                    "state": s["state"], "reason": s["reason"], "reason_he": s["reason_he"],
                     "first_step_he": g.steps[0].he if g.steps else "", "first_step_en": g.steps[0].en if g.steps else ""})
     return out
 

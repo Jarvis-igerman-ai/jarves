@@ -35,6 +35,7 @@ from pathlib import Path
 from typing import Callable, Iterable, Literal
 
 from . import logs
+from . import pronounce as _pron
 
 Target = Literal["front", "backend"]
 Writer = Literal["user", "agent"]
@@ -56,6 +57,8 @@ SPECS: dict[str, FileSpec] = {s.name: s for s in (
     FileSpec("SOUL.md", "personality and tone", True, True, ("front", "backend"), 1500),
     FileSpec("IDENTITY.md", "name and identity", True, True, ("front", "backend"), 500),
     FileSpec("USER.md", "about the user", True, False, ("front", "backend"), 1500),
+    FileSpec("PRONUNCIATIONS.md", "how to SAY names: 'word = spoken form'; say exactly that, also with prefixes ל/ו/ב/כ/מ/ה/ש",
+             True, False, ("front",), 700),
     FileSpec("MEMORY.md", "long-term notes", True, False, ("backend",), 2500),
     FileSpec("SETUP.md", "installation and connection guide (generated; read full file for a topic)", False, False,
              ("backend",), 1700, True),
@@ -104,6 +107,7 @@ ask; you can edit or delete anything. Example:
 <!-- Free-form notes JARVES keeps for later (decisions, ongoing plans). Single facts live in the memory list
 (`jarvis memory` / dashboard); conversation summaries in memory/YYYY-MM-DD.md. -->
 """,
+    "PRONUNCIATIONS.md": _pron.DEFAULT_TEXT,
     "HEARTBEAT.md": """# בדיקות תקופתיות / Heartbeat
 <!-- Reserved: a short checklist JARVES will run periodically in a later version. Not active yet. -->
 """,

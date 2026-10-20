@@ -33,6 +33,9 @@ var _close_ack := false
 var strip: Control                # privacy_strip.gd: always visible (own CanvasLayer: kiosk / Options never hide it)
 var preview: PanelContainer       # camera_preview.gd: "What does he see?"
 var last_sent := []               # [type, payload] of the last message sent by the strip / preview (tests)
+var title_lbl: Label              # "JARVES assistant" (+ " · profile <name>" for a non-default profile)
+var profile_banner: Label         # red "TEST PROFILE" banner (Core status.profile.test), own CanvasLayer: always visible
+var profile_name := "default"
 
 
 func _ready() -> void:
@@ -46,6 +49,7 @@ func _ready() -> void:
 	add_child(box)
 	var title := Label.new()
 	title.text = "JARVES assistant"
+	title_lbl = title
 	box.add_child(title)
 	connection = Label.new()
 	connection.text = "Connecting to Core..."
@@ -119,6 +123,21 @@ func _ready() -> void:
 	preview = CameraPreview.new()
 	preview.close_requested.connect(func(_why): _close_preview())
 	layer.add_child(preview)
+	profile_banner = Label.new()
+	profile_banner.name = "ProfileBanner"
+	profile_banner.text = TEST_BANNER
+	profile_banner.visible = false
+	profile_banner.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	profile_banner.add_theme_color_override("font_color", Color.WHITE)
+	profile_banner.add_theme_font_size_override("font_size", 20)
+	var banner_bg := StyleBoxFlat.new()
+	banner_bg.bg_color = Color(0.72, 0.08, 0.08, 0.92)
+	banner_bg.content_margin_top = 4
+	banner_bg.content_margin_bottom = 4
+	profile_banner.add_theme_stylebox_override("normal", banner_bg)
+	profile_banner.set_anchors_preset(Control.PRESET_TOP_WIDE)
+	profile_banner.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	layer.add_child(profile_banner)
 	_set_controls(false)
 
 
@@ -318,14 +337,32 @@ func _on_message(t: String, p: Dictionary) -> void:
 			_confirm_id = _str(p.get("id"))
 			confirm.dialog_text = _str(p.get("prompt"), "Confirm?")
 			confirm.popup_centered()
+		"confirm.cancel":
+			# answered elsewhere (approval popup, dashboard, voice) or expired: close the dialog without replying
+			if _str(p.get("id")) == _confirm_id:
+				_confirm_id = ""
+				confirm.hide()
 		"status":
 			last_status = p
+			show_profile(_dict(p.get("profile")))
 			_show_status(p)
 		"dashboard.opened":
 			# {url, browser}: the Core opened it in the browser; without a browser show where it runs
 			var where := _str(p.get("url")).substr(0, 200)
 			var opened: bool = typeof(p.get("browser")) == TYPE_BOOL and p.get("browser")
 			caption.text = "Dashboard opened in your browser" if opened else "Dashboard running at " + where
+
+
+const TEST_BANNER := "TEST PROFILE · not your real data"
+
+
+## Profile from the Core `status` snapshot (profiles.info): a non-default name goes into the panel title, a test
+## profile shows the red banner. Missing / malformed = the default look (older Cores send no profile).
+func show_profile(pr: Dictionary) -> void:
+	var pname := _str(pr.get("name"), "default").substr(0, 24)
+	profile_name = pname if pname != "" else "default"
+	title_lbl.text = "JARVES assistant" if profile_name == "default" else "JARVES assistant · profile " + profile_name
+	profile_banner.visible = _bool(pr.get("test"))
 
 
 const ACTIVITY := {

@@ -1,6 +1,6 @@
 [project]
 name = "jarves"
-version = "0.1.0"
+version = "3.0.0"
 description = "JARVES assistant Core: state, Godot face link, DevicePort, memory, Skills, voice and music"
 requires-python = ">=3.12"
 dependencies = [
@@ -30,6 +30,11 @@ camera = [
     # camera itself uses the apt package python3-picamera2 (libcamera), not pip. Checked 2026-10-19 (PyPI).
     "opencv-python-headless>=4.12",
 ]
+browser = [
+    # Browser Skill: Playwright drives the installed Edge/Chrome on Windows (no download) or Chromium on the Pi
+    # (manylinux aarch64 wheel; `playwright install chromium` or apt chromium). 1.64.0 checked 2026-10-20 (PyPI).
+    "playwright>=1.63,<2",
+]
 tray = [
     "pillow>=11",
     "pystray>=0.19.5,<0.20",
@@ -39,7 +44,7 @@ tray = [
 jarves = "jarves.cli:main"
 
 [dependency-groups]
-dev = ["pytest>=8", "pytest-asyncio>=1.0"]
+dev = ["pytest>=8", "pytest-asyncio>=1.0", "pyyaml>=6.0.2"]   # pyyaml: test_ci_workflows parses .github/workflows
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"

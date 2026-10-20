@@ -21,11 +21,15 @@ import time
 
 from . import alerts as alerts_mod
 from . import autonomy as autonomy_mod
+from . import connect as connect_mod
 from . import features as feat
+from . import lists as lists_mod
 from . import logs
 from . import notes as notes_mod
 from . import sandbox as sandbox_mod
 from . import scheduler as sched_mod
+from . import selfcheck as selfcheck_mod
+from . import timers as timers_mod
 from .userdata import open_db
 
 AUTONOMY_SYNC_S = 600.0
@@ -42,6 +46,12 @@ M3_FEATURES = {
     "reports": ("דוחות שמורים", "Saved reports", ["reports"], "results of scheduled jobs, read back on request",
                 "implemented_unverified", "implemented_unverified", _UNVERIFIED_PI),
     "notes": ("פתקים", "Notes", ["notes"], "your notes: add, search, edit, export as Markdown",
+              "implemented_unverified", "implemented_unverified", _UNVERIFIED_PI),
+    "timers": ("טיימרים ושעונים מעוררים", "Timers and alarms", ["timers"],
+               "countdown timers and alarms; the Core rings them aloud even when the window is closed",
+               "implemented_unverified", "implemented_unverified", _UNVERIFIED_PI + "; ringing needs the Pi speaker"),
+    "lists": ("רשימות קניות ומשימות", "Shopping and to-do lists", ["lists"],
+              "shopping and to-do lists by voice: add, read back, tick off, clear",
               "implemented_unverified", "implemented_unverified", _UNVERIFIED_PI),
     "files": ("קבצים בסביבה פרטית", "File workspace", ["files"],
               "documents JARVES writes, only in its private folder; your folders only after you approve",
@@ -134,6 +144,40 @@ class OSOutput:
         return bool(r)
 
 
+async def _false() -> bool:
+    return False
+
+
+class TimerRinger:
+    """Rings a due timer / alarm. The open GPT-Live conversation gets it at a good moment; otherwise the Core speaks
+    it itself - never depends on the face or the window. A face popup is an extra when a window is open."""
+    ANNOUNCE_WAIT_S = 8.0
+
+    def __init__(self, core) -> None:
+        self.core = core
+
+    async def __call__(self, t: dict, text: str) -> bool:
+        c = self.core
+        if c.stopping:
+            return False
+        link = getattr(c, "link", None)
+        if link is not None and link.face_client_id() is not None:
+            try:
+                await link.send_face("assistant.text", {"text": text, "source": "timer", "ok": True, "code": "TIMER"})
+            except Exception:
+                logs.debug("timers", "TIMER_POPUP_FAILED", "popup not shown")
+        live = c.live
+        if live is not None and hasattr(live, "announce"):
+            note = ("[timer] A timer or alarm the user set just went off. Tell them now, briefly, in Hebrew. Do not "
+                    f"call tools for it.\n{text}")
+            return bool(await live.announce(note, max_wait_s=self.ANNOUNCE_WAIT_S, tag=f"timer{t['id']}"))
+        if c.dev.audio is None or c.voice_mode == "off":
+            return False
+        await c.speak(text)
+        comp = getattr(getattr(c, "health", None), "components", {})
+        return all(getattr(comp.get(n), "status", "") != "unavailable" for n in ("speech_out", "audio"))
+
+
 # ---------------------------------------------------------------------- Core wiring
 class Operations:
     def __init__(self, core) -> None:
@@ -150,17 +194,22 @@ class Operations:
                                              features=core.features)
         self.autonomy = autonomy_mod.Autonomy(self.db, cfg=core.cfg, home=home, features=core.features,
                                               alerts=self.alerts)
+        self.lists = lists_mod.Lists(self.db)
+        self.timers = timers_mod.Timers(self.db, tz=self.scheduler.tz)
         reg = core.registry
-        for skill in [*sched_mod.make_skills(self.scheduler, reg), notes_mod.make_skill(self.notes, self.sandbox),
+        for skill in [lists_mod.make_skill(self.lists), timers_mod.make_skill(self.timers), *sched_mod.make_skills(self.scheduler, reg), notes_mod.make_skill(self.notes, self.sandbox),
                       sandbox_mod.make_skill(self.sandbox), alerts_mod.make_skill(self.alerts),
                       autonomy_mod.make_skill(self.autonomy, reg)]:
             reg.register(skill)
         from .briefing import register_briefing
         register_briefing(reg, self.db)                # V3 P1: morning briefing (calls the Calendar/Gmail tools)
         reg.allowed_actions |= (sched_mod.ALLOWED_ACTIONS | notes_mod.ALLOWED_ACTIONS | sandbox_mod.ALLOWED_ACTIONS
-                                | alerts_mod.ALLOWED_ACTIONS | autonomy_mod.ALLOWED_ACTIONS)
+                                | alerts_mod.ALLOWED_ACTIONS | autonomy_mod.ALLOWED_ACTIONS
+                                | lists_mod.ALLOWED_ACTIONS | timers_mod.ALLOWED_ACTIONS)
         self._task: asyncio.Task | None = None
+        self._timer_task: asyncio.Task | None = None
         self._synced = 0.0
+        self._nudge_checked = 0.0
         try:                                         # truthful health: no zone data = no correct schedule times
             tz = self.scheduler.tz()
             n = len(self.db.rows("SELECT id FROM jobs WHERE status='active'"))
@@ -171,8 +220,30 @@ class Operations:
 
     def start(self) -> None:
         self._task = asyncio.get_running_loop().create_task(self.scheduler.run(self._after_tick), name="operations")
+        ring = TimerRinger(self.core)
+        self._timer_task = asyncio.get_running_loop().create_task(
+            self.timers.run(lambda t, text: ring(t, text) if self.core.features.active("timers") else _false()),
+            name="timers")
+        # owner request 20 Oct: self-check (voice tools, weekly job, after an unclean stop / an error burst)
+        self.selfcheck = selfcheck_mod.attach(self.core, self)
+
+    async def _connect_nudge(self) -> None:
+        """Owner request 20 Oct: once a day at most, remind that Google is not connected (connect.maybe_nudge)."""
+        now = time.time()
+        if now - self._nudge_checked < connect_mod.NUDGE_CHECK_EVERY_S:
+            return
+        self._nudge_checked = now
+        try:
+            # voice only inside an open conversation; idle (often hidden, in the background) = a quiet popup, so
+            # JARVES never starts talking out of nowhere about setup
+            open_ = getattr(self.core, "live", None) is not None
+            connect_mod.maybe_nudge(self.db, self.alerts, home=self.core.home, features=self.core.features,
+                                    channel="speech" if open_ else "popup")
+        except Exception:
+            logs.error("connect", "CONNECT_NUDGE_FAILED", "setup reminder failed", exc=True)
 
     async def _after_tick(self) -> None:
+        await self._connect_nudge()
         await self.alerts.flush()
         now = time.time()
         if now - self._synced >= AUTONOMY_SYNC_S:
@@ -185,7 +256,12 @@ class Operations:
                 logs.error("autonomy", "AUTONOMY_SYNC_FAILED", "diagnostic proposals not updated", exc=True)
 
     async def stop(self) -> None:
+        if getattr(self, "selfcheck", None) is not None:
+            await self.selfcheck.stop()
         await self.scheduler.stop()
+        self.timers.stop()
+        if self._timer_task is not None:
+            await asyncio.gather(self._timer_task, return_exceptions=True)
         if self._task is not None and not self._task.done():
             self._task.cancel()
             await asyncio.gather(self._task, return_exceptions=True)
@@ -205,6 +281,6 @@ def api_platforms(ctx, m, body):
 
 
 def dashboard_routes(register) -> None:
-    for mod in (sched_mod, alerts_mod, notes_mod, sandbox_mod, autonomy_mod):
+    for mod in (sched_mod, alerts_mod, notes_mod, sandbox_mod, autonomy_mod, timers_mod, lists_mod):
         mod.dashboard_routes(register)
     register("GET", r"/api/m3/platforms", api_platforms)
