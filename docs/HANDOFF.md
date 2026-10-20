@@ -636,3 +636,6 @@ See [docs/reviews/S1_T03R1_ENGINEERING_REVIEW.md](reviews/S1_T03R1_ENGINEERING_R
 - Multi-device + Tailscale remote: after V3 P0–P1, together with the phone satellite.
 - Installer signing: research free options (SignPath OSS etc.); stay unsigned meanwhile.
 - Defaults: ask before any outward action; keep conversations/logs 90 days then summarize into memory; proactive suggestions rare/important only (quiet hours respected); installer pre-selects only core + music.
+
+## Status 20 Oct 2026
+- SW-V2 merged to main via PR #29 (9e2149d). V3 is delivered as one PR per piece (P0.2 dashboard #31, P1 basics #32, research #33); more follow as agents finish (perf, QA, browser, channels, Hebrew server texts).
