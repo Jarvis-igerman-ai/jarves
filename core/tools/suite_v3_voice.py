@@ -198,7 +198,8 @@ async def speak_and_wait_answer(h, s, text: str, *, first_timeout: float = 30, q
             "emotions": [], "errors": [f"{e['code']}: {e['msg'][:90]}" for e in ev if e.get("level") == "ERROR"]}
 
 
-async def approval_flow(h, s, request: str, answer: str | None, *, wait_ask: float = 45) -> dict:
+async def approval_flow(h, s, request: str, answer: str | None, *, wait_ask: float = 45,
+                        screen_after: float | None = None) -> dict:
     """Say the request; wait for APPROVAL_ASKED and for JARVES to finish asking; then say `answer` (or nothing)
     and wait for APPROVAL_DECIDED. The face does NOT answer (policy none): only the spoken word can."""
     s.face.confirm_policy = "none"
@@ -225,6 +226,13 @@ async def approval_flow(h, s, request: str, answer: str | None, *, wait_ask: flo
     t_ans = time.time()
     if answer:
         await h.say(answer)
+    screen_clicked, voice_decided = False, None
+    if screen_after is not None:              # the spoken answer must NOT decide; then the owner clicks Approve
+        voice_decided = await wait_for(lambda: bool(ev_codes(s, "APPROVAL_DECIDED", mark)), screen_after)
+        req = [p for t_, ty, p in s.face.msgs if ty == "confirm.request" and t_ >= t0]
+        if not voice_decided and req:
+            await s.face.send("confirm.reply", {"id": req[-1]["id"], "approved": True})
+            screen_clicked = True
     decided = await wait_for(lambda: bool(ev_codes(s, "APPROVAL_DECIDED", mark)), 70 if not answer else 20)
     dec = (ev_codes(s, "APPROVAL_DECIDED", mark) or [{}])[0]
     t_dec = stamp(dec) if dec else None
@@ -234,6 +242,7 @@ async def approval_flow(h, s, request: str, answer: str | None, *, wait_ask: flo
     ev = s.log.since(mark)
     s.face.confirm_policy = "approve"
     return {"request": request, "answer": answer, "mic": where, "approval_asked": asked,
+            "voice_decided": voice_decided, "screen_clicked": screen_clicked,
             "ask_after_s": round(t_ask - t0, 1), "shown": ask_ev.get("shown"), "kind": ask_ev.get("kind"),
             "risk": ask_ev.get("risk"), "jarves_asked_aloud_s": spoken_q, "said_before_answer": said_q[:300],
             "popup_open_while_waiting": popup_procs, "decided": decided, "decision": dec.get("decision"),
@@ -457,6 +466,8 @@ async def s_handoff(h, r):
     urls = OPENED_URLS[n0:]
     wa = [u for u in urls if "wa.me/972541234567" in u]
     claim_sent = has(x["said"], "שלחתי את ההודעה", "ההודעה נשלחה", "I sent")
+    await h.quiet(s, 3.0, 30)                     # the "opened the chat" result can come ~9 s after the yes
+    await asyncio.sleep(1.0)
     y = await h.turn(s, "ותשלח לי גם הודעה בטלגרם שאני מאחר", label="telegram", first_timeout=40)
     tg_honest = has(y["said"], "טלגרם לא", "לא מחובר", "לא מוגדר", "לא הוגדר", "אין לי חיבור", "לחבר", "להגדיר",
                     "לא זמין", "אין לי אפשרות", "לא פעיל", "כבוי")
@@ -480,21 +491,16 @@ async def s_profile(h, r):
     n0 = len(SPAWNED)
     no = await approval_flow(h, s, "תעבור בבקשה לפרופיל של דנה", "לא")
     sp_no = SPAWNED[n0:]
-    yes = await approval_flow(h, s, "בכל זאת, תעבור לפרופיל של דנה", "כן")
-    sp_voice = SPAWNED[n0 + len(sp_no):]
-    voice_refused = yes["approval_asked"] and not yes["decided"] and not sp_voice
-    screen = None
-    pend = s.core.approvals.pending() if s.core.approvals else []
-    if pend:                                      # the owner now approves ON THE SCREEN (the face dialog)
-        req = [p for t, ty, p in s.face.msgs if ty == "confirm.request"]
-        if req:
-            await s.face.send("confirm.reply", {"id": req[-1]["id"], "approved": True})
-            await wait_for(lambda: len(SPAWNED) > n0 + len(sp_no), 10)
-            screen = SPAWNED[n0 + len(sp_no):]
+    yes = await approval_flow(h, s, "בכל זאת, תעבור לפרופיל של דנה", "כן", screen_after=6)
+    await wait_for(lambda: len(SPAWNED) > n0 + len(sp_no), 10)
+    screen = SPAWNED[n0 + len(sp_no):]
+    voice_refused = bool(yes["approval_asked"]) and not yes["voice_decided"] and bool(
+        ev_codes(s, "APPROVAL_VOICE_REFUSED"))
     r.ok = (no["approval_asked"] and no["decision"] == "denied" and not sp_no and voice_refused
+            and yes["screen_clicked"] and yes["decision"] == "approved" and yes["channel"] == "face"
             and screen == [("dana", ("run", "--background", "--show"))])
-    r.key = (f"'לא' -> {no['decision']} via {no['channel']} spawned {sp_no}; spoken 'כן' refused {voice_refused} "
-             f"(decided {yes['decision']}); then screen approve -> spawned {screen}")
+    r.key = (f"'לא' -> {no['decision']} via {no['channel']} spawned {sp_no}; spoken 'כן' refused {voice_refused}; "
+             f"screen approve -> {yes['decision']} via {yes['channel']}, spawned {screen}")
     r.details = [no, yes]
     await h.shutdown(s)
 
@@ -612,7 +618,7 @@ async def s_names(h, r):
     s = await h.get(V3)
     CAPTURE["on"] = True
     t0 = time.time()
-    x = await h.turn(s, "תציג את עצמך במשפט אחד, ואז תגיד שלום לנועה, לאביטל ולצחי", label="names")
+    x = await h.turn(s, "תציג את עצמך במשפט אחד, ואז תקרא בקול את שלושת השמות האלה, כל אחד לבד: נועה. אביטל. צחי.", label="names")
     CAPTURE["on"] = False
     pcm = b"".join(p for t, p in OUT_PCM if t >= t0)
     OUT_PCM.clear()
