@@ -86,6 +86,31 @@ def test_music_probe_warm_up_is_a_cache_hit_later(home, cfg, monkeypatch):
     assert len(calls) == 1
 
 
+def test_expired_music_probe_answers_at_once_and_rechecks_in_background(home, cfg, monkeypatch):
+    import threading
+    import time
+    state = {"open": False, "threads": []}
+
+    def tcp(url, timeout=0.3):
+        state["threads"].append(threading.current_thread().name)
+        return state["open"]
+    monkeypatch.setattr(feat, "_tcp_open", tcp)
+    f = feat.Features(cfg, home, components=lambda: {}, skills=lambda: set())
+    assert f.available("music")[0] is False                     # first ever check: synchronous, as before
+    state["open"] = True                                        # Pear started meanwhile
+    t, ok, why = f._probe_cache["music"]
+    f._probe_cache["music"] = (t - feat.PROBE_TTL_S - 1, ok, why)   # expired
+    assert f.available("music")[0] is False                     # last result at once: no blocking connect here
+    deadline = time.monotonic() + 3
+    while f._probe_cache["music"][1] is False and time.monotonic() < deadline:
+        time.sleep(0.01)
+    assert f.available("music")[0] is True                      # the background re-check landed
+    assert state["threads"][0] == threading.current_thread().name and state["threads"][1].startswith("jarves-probe")
+    f.invalidate()                                              # an explicit invalidate still re-probes in line
+    state["open"] = False
+    assert f.available("music")[0] is False and len(state["threads"]) == 3
+
+
 async def test_core_start_runs_the_music_probe_off_the_loop(home, cfg, monkeypatch):
     threads = []
     import threading

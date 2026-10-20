@@ -49,6 +49,7 @@ Risk = Literal["low", "medium", "high"]
 Applies = Literal["live", "next_session", "restart"]
 RISKS = ("low", "medium", "high")
 PROBE_TTL_S = 15.0
+SLOW_PROBES = {"music"}     # probes that may block (localhost connect): an expired result is re-checked off-thread
 STATE_FILE = "features.json"
 
 
@@ -358,6 +359,7 @@ class Features:
         self._mtime: float | None = None
         self._checked = 0.0
         self._probe_cache: dict[str, tuple[float, bool, str]] = {}
+        self._revalidating: set[str] = set()
         self._defaults: dict[str, tuple[bool, str]] = {}
         for fid in CONFIG_MIRROR.values():
             self.default(fid)                   # legacy config values, before anything mirrors onto cfg
@@ -465,6 +467,11 @@ class Features:
         hit = self._probe_cache.get(fid)
         if hit and now - hit[0] < PROBE_TTL_S:
             ok, why = hit[1], hit[2]
+        elif hit and fid in SLOW_PROBES:
+            # stale-while-revalidate (P0.3): answer with the last result now, re-check in a worker thread. The owner's
+            # 19 Oct logs: features_list / list_skills took 320 ms each, all of it the Pear probe on the event loop.
+            ok, why = hit[1], hit[2]
+            self._revalidate(fid)
         else:
             try:
                 ok, why = f.probe(self.ctx)
@@ -477,12 +484,12 @@ class Features:
                     return False, f"needs {CATALOG[dep].title_en} ({dep}) on"
         return bool(ok), str(why or "")
 
-    def warm(self, fid: str) -> None:
+    def warm(self, fid: str, force: bool = False) -> None:
         """Refresh one probe's cached result now, typically from a worker thread, so the next available() on the
         event loop is a cache hit. SW-V3 P0.3: with Pear closed the music probe's localhost connect blocks for its
         0.3 s timeout on Windows, and live_tools() hit it at every live-session start after 15 s idle."""
         hit = self._probe_cache.get(fid)
-        if hit and time.monotonic() - hit[0] < PROBE_TTL_S / 2:
+        if not force and hit and time.monotonic() - hit[0] < PROBE_TTL_S / 2:
             return
         f = self.feature(fid)
         try:
@@ -490,6 +497,20 @@ class Features:
         except Exception as e:
             ok, why = False, f"check failed ({type(e).__name__})"
         self._probe_cache[fid] = (time.monotonic(), bool(ok), str(why or ""))
+
+    def _revalidate(self, fid: str) -> None:
+        """One background re-check per slow probe at a time (daemon thread: never delays shutdown)."""
+        with self._lock:
+            if fid in self._revalidating:
+                return
+            self._revalidating.add(fid)
+
+        def run() -> None:
+            try:
+                self.warm(fid, force=True)
+            finally:
+                self._revalidating.discard(fid)
+        threading.Thread(target=run, name=f"jarves-probe-{fid}", daemon=True).start()
 
     def active(self, fid: str) -> bool:
         return fid in CATALOG and self.enabled(fid) and self.available(fid)[0]
