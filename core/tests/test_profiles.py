@@ -484,8 +484,10 @@ async def test_voice_switch_needs_on_screen_approval(base, spawned):
         r = await call
         assert not r.ok and r.code == "PROFILE_SWITCH_NOT_APPROVED" and not spawned
         assert profiles.active() == "default" and not core.stop_event.is_set()
-        # the screen says yes: the test profile's Core starts, this one quits after the goodbye
-        call = asyncio.create_task(core.registry.call("profile_switch", {"name": "test"}, origin="model"))
+        # the owner asks again (a NEW turn: approvals.py denies a just-denied identical request without asking
+        # until the owner speaks), and the screen says yes: the test profile's Core starts, this one quits
+        core.approvals.note_user_turn()
+        call =asyncio.create_task(core.registry.call("profile_switch", {"name": "test"}, origin="model"))
         req = await face.wait("confirm.request")
         await face.send("confirm.reply", {"id": req["id"], "approved": True})
         r = await call
