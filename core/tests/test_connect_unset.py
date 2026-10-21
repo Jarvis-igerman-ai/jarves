@@ -135,7 +135,7 @@ def test_unknown_name_is_refused_and_cli_flags_exist(capsys):
     with pytest.raises(SystemExit):
         cli.main(["connect", "--help"])
     out = capsys.readouterr().out
-    for flag in ("--all", "--check", "--reset-skipped", "--only", "name"):
+    for flag in ("--all", "--check", "--reset-skipped", "--only", "item"):
         assert flag in out
 
 

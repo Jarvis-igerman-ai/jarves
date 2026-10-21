@@ -942,7 +942,7 @@ def add_cli(sub) -> None:
     c = sub.add_parser("connect", help="guided setup of the accounts NOT yet set up (skipped ones are not shown again); "
                                        "first it tests the connected ones; --all shows everything, "
                                        "`connect <name>` runs one, --check only tests")
-    c.add_argument("name", nargs="?", metavar="item", help="run just this integration (also un-skips it); one of: " + ", ".join(ONLY))
+    c.add_argument("item", nargs="?", help="run just this integration (also un-skips it); one of: " + ", ".join(ONLY))
     c.add_argument("--only", help="same as the name")
     c.add_argument("--all", action="store_true", help="list every integration with its state (connected / skipped / not set)")
     c.add_argument("--check", action="store_true", help="read-only test of every connected integration "
@@ -971,7 +971,7 @@ def cmd_connect(a, cfg, home) -> int:
         clilang.say(f"התזכורת היומית: {'דולקת' if a.reminders == 'on' else 'כבויה'}.", f"Reminders {a.reminders}.")
         return 0
     skip = [x.strip().lower() for x in (getattr(a, "skip", None) or "").split(",") if x.strip()]
-    only = (getattr(a, "name", None) or getattr(a, "only", None) or "").strip().lower() or None
+    only = (getattr(a, "item", None) or getattr(a, "name", None) or getattr(a, "only", None) or "").strip().lower() or None
     bad = [x for x in skip + ([only] if only else []) if x not in ONLY]
     if bad:
         print(f"Unknown item(s): {', '.join(bad)}. Items: {', '.join(ONLY)}", file=sys.stderr)
