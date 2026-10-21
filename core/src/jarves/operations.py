@@ -23,9 +23,11 @@ from . import alerts as alerts_mod
 from . import autonomy as autonomy_mod
 from . import connect as connect_mod
 from . import features as feat
+from . import goals as goals_mod
 from . import lists as lists_mod
 from . import logs
 from . import notes as notes_mod
+from . import preferences as prefs_mod
 from . import sandbox as sandbox_mod
 from . import scheduler as sched_mod
 from . import selfcheck as selfcheck_mod
@@ -53,6 +55,12 @@ M3_FEATURES = {
     "lists": ("רשימות קניות ומשימות", "Shopping and to-do lists", ["lists"],
               "shopping and to-do lists by voice: add, read back, tick off, clear",
               "implemented_unverified", "implemented_unverified", _UNVERIFIED_PI),
+    "goals": ("יעדים", "Goals", ["goals"],
+              "your goals with steps and progress; a check-in only when you ask; nothing is done or sent for you",
+              "implemented_unverified", "implemented_unverified", _UNVERIFIED_PI),
+    "adaptive_memory": ("העדפות נלמדות", "Learned preferences", ["preferences"],
+                        "preferences you state are remembered only after you confirm; all visible, editable, removable",
+                        "implemented_unverified", "implemented_unverified", _UNVERIFIED_PI),
     "files": ("קבצים בסביבה פרטית", "File workspace", ["files"],
               "documents JARVES writes, only in its private folder; your folders only after you approve",
               "implemented_unverified", "implemented_unverified",
@@ -195,9 +203,12 @@ class Operations:
         self.autonomy = autonomy_mod.Autonomy(self.db, cfg=core.cfg, home=home, features=core.features,
                                               alerts=self.alerts)
         self.lists = lists_mod.Lists(self.db)
+        self.goals = goals_mod.Goals(self.db)
+        self.prefs = prefs_mod.Preferences(self.db)
         self.timers = timers_mod.Timers(self.db, tz=self.scheduler.tz)
         reg = core.registry
-        for skill in [lists_mod.make_skill(self.lists), timers_mod.make_skill(self.timers), *sched_mod.make_skills(self.scheduler, reg), notes_mod.make_skill(self.notes, self.sandbox),
+        for skill in [lists_mod.make_skill(self.lists), goals_mod.make_skill(self.goals, reg),
+                      prefs_mod.make_skill(self.prefs), timers_mod.make_skill(self.timers), *sched_mod.make_skills(self.scheduler, reg), notes_mod.make_skill(self.notes, self.sandbox),
                       sandbox_mod.make_skill(self.sandbox), alerts_mod.make_skill(self.alerts),
                       autonomy_mod.make_skill(self.autonomy, reg)]:
             reg.register(skill)
@@ -205,7 +216,8 @@ class Operations:
         register_briefing(reg, self.db)                # V3 P1: morning briefing (calls the Calendar/Gmail tools)
         reg.allowed_actions |= (sched_mod.ALLOWED_ACTIONS | notes_mod.ALLOWED_ACTIONS | sandbox_mod.ALLOWED_ACTIONS
                                 | alerts_mod.ALLOWED_ACTIONS | autonomy_mod.ALLOWED_ACTIONS
-                                | lists_mod.ALLOWED_ACTIONS | timers_mod.ALLOWED_ACTIONS)
+                                | lists_mod.ALLOWED_ACTIONS | timers_mod.ALLOWED_ACTIONS
+                                | goals_mod.ALLOWED_ACTIONS | prefs_mod.ALLOWED_ACTIONS)
         self._task: asyncio.Task | None = None
         self._timer_task: asyncio.Task | None = None
         self._synced = 0.0

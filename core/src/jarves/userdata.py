@@ -48,6 +48,21 @@ CREATE TABLE IF NOT EXISTS timers (
     label TEXT NOT NULL DEFAULT '', due REAL NOT NULL, created REAL NOT NULL,
     status TEXT NOT NULL,                       -- pending | fired | missed | cancelled
     fired_at REAL);
+CREATE TABLE IF NOT EXISTS goals (
+    id INTEGER PRIMARY KEY AUTOINCREMENT, title TEXT NOT NULL, details TEXT NOT NULL DEFAULT '',
+    status TEXT NOT NULL DEFAULT 'active',      -- active | paused | done | dropped
+    target_date TEXT NOT NULL DEFAULT '', percent INTEGER NOT NULL DEFAULT 0,
+    created REAL NOT NULL, updated REAL NOT NULL, done_at REAL, last_checkin REAL);
+CREATE TABLE IF NOT EXISTS goal_steps (
+    id INTEGER PRIMARY KEY AUTOINCREMENT, goal_id INTEGER NOT NULL, text TEXT NOT NULL,
+    done INTEGER NOT NULL DEFAULT 0, outward INTEGER NOT NULL DEFAULT 0, created REAL NOT NULL, done_at REAL);
+CREATE INDEX IF NOT EXISTS goal_steps_g ON goal_steps (goal_id);
+CREATE TABLE IF NOT EXISTS learned_prefs (
+    id INTEGER PRIMARY KEY AUTOINCREMENT, text TEXT NOT NULL, norm TEXT NOT NULL, topic TEXT NOT NULL DEFAULT 'other',
+    state TEXT NOT NULL,                        -- proposed | confirmed | declined
+    evidence TEXT NOT NULL DEFAULT '', source TEXT NOT NULL DEFAULT 'voice',
+    created REAL NOT NULL, updated REAL NOT NULL, confirmed_at REAL);
+CREATE INDEX IF NOT EXISTS learned_prefs_s ON learned_prefs (state);
 CREATE INDEX IF NOT EXISTS list_i ON list_items (list_name, done);
 CREATE INDEX IF NOT EXISTS timers_s ON timers (status, due);
 CREATE TABLE IF NOT EXISTS alerts (

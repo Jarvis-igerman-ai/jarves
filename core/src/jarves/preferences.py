@@ -1,0 +1,312 @@
+"""Adaptive Memory (V5 pillar 3, software slice): preferences the owner STATES, learned only after an explicit yes.
+
+Flow: the owner says a preference ("I prefer short answers in the morning") -> the model calls `pref_suggest` ->
+the item is stored as `proposed` (visible on the Learned preferences page, NEVER used anywhere yet) -> the owner
+confirms (spoken/typed yes on the approval, or the Confirm button) -> `confirmed`. Declining keeps only the
+normalised text so the same suggestion is not asked again (removable). Nothing is inferred silently: a suggestion
+must carry the owner's own words as evidence, sensitive text (passwords, card/ID/long numbers, health and money
+details) is refused and NOT stored, proposals are capped and expire, and conflicts are shown, never auto-merged.
+Every item is listable, editable, removable (dashboard, CLI, voice). Local only, in memory.db `learned_prefs`.
+"""
+from __future__ import annotations
+
+import difflib
+import re
+import time
+
+from pydantic import BaseModel, Field
+
+from . import logs
+from .userdata import UserDB
+
+MAX_TEXT = 200
+MAX_EVIDENCE = 200
+MAX_PROPOSED = 20                 # pending suggestions at once; more are refused until some are answered
+PROPOSAL_TTL_S = 14 * 86400       # an unanswered suggestion disappears (never silently turns into a fact)
+STALE_S = 180 * 86400             # a confirmed item not re-confirmed this long is not used until reaffirmed
+CONFLICT_RATIO = 0.55
+TOPICS = ("voice", "schedule", "food", "music", "communication", "other")
+_PUNCT = re.compile(r"[^\w\s]+")
+_NIQQUD = re.compile(r"[֑-ׇ]")
+# Text that must never be learned: credentials, card/ID/phone-like numbers, and health or money details.
+_SENSITIVE = re.compile(
+    r"סיסמ|קוד\s|קוד$|הקוד|פין|אשראי|תעודת\s+זהות|ת\"ז|חשבון\s+(?:ה)?בנק|משכורת|שכר|חוב|אבחנ|תרופ|מחלה|"
+    r"password|passcode|\bpin\b|credit\s*card|\bssn\b|\biban\b|salary|diagnos|medicat|prescription|"
+    r"\d{6,}|\d[\d -]{10,}\d", re.I)
+
+
+def looks_sensitive(text: str) -> bool:
+    return bool(_SENSITIVE.search(text or ""))
+
+
+def normalize(text: str) -> str:
+    return " ".join(_PUNCT.sub(" ", _NIQQUD.sub("", str(text).casefold())).split())
+
+
+def _clean(text: str, n: int) -> str:
+    return " ".join(str(text or "").split())[:n]
+
+
+class Preferences:
+    def __init__(self, db: UserDB, *, clock=time.time) -> None:
+        self.db, self.clock = db, clock
+
+    # ------------------------------------------------------------------ housekeeping
+    def _expire(self) -> None:
+        self.db.x("DELETE FROM learned_prefs WHERE state='proposed' AND created < ?", (self.clock() - PROPOSAL_TTL_S,))
+
+    def _view(self, r: dict) -> dict:
+        r = dict(r)
+        r.pop("norm", None)
+        r["stale"] = r["state"] == "confirmed" and (self.clock() - (r["confirmed_at"] or r["updated"])) > STALE_S
+        return r
+
+    # ------------------------------------------------------------------ learning
+    def suggest(self, text: str, evidence: str, topic: str = "other", *, by: str = "voice") -> dict:
+        """Store a PROPOSAL. Raises ValueError (nothing stored) for empty/sensitive/unsupported suggestions."""
+        t, ev = _clean(text, MAX_TEXT), _clean(evidence, MAX_EVIDENCE)
+        if not t:
+            raise ValueError("nothing to remember")
+        if not ev:
+            raise ValueError("a suggestion needs the owner's own words as evidence")
+        if looks_sensitive(t) or looks_sensitive(ev):
+            logs.info("prefs", "PREF_REFUSED_SENSITIVE", "sensitive preference not stored", by=by)
+            raise ValueError("this looks sensitive (secret, number, health or money detail): not stored")
+        self._expire()
+        norm = normalize(t)
+        topic = topic if topic in TOPICS else "other"
+        same = self.db.row("SELECT * FROM learned_prefs WHERE norm=?", (norm,))
+        if same:
+            return {"item": self._view(same), "status": "known_" + same["state"]}
+        if len(self.db.rows("SELECT id FROM learned_prefs WHERE state='proposed'")) >= MAX_PROPOSED:
+            raise ValueError("too many unanswered suggestions: answer or remove some first")
+        now = self.clock()
+        cur = self.db.x("INSERT INTO learned_prefs (text, norm, topic, state, evidence, source, created, updated) "
+                        "VALUES (?,?,?,?,?,?,?,?)", (t, norm, topic, "proposed", ev, by, now, now))
+        logs.info("prefs", "PREF_PROPOSED", "preference proposed", id=cur.lastrowid, by=by)
+        return {"item": self._view(self.get(cur.lastrowid)), "status": "proposed"}
+
+    def add_confirmed(self, text: str, topic: str = "other", *, by: str = "dashboard") -> dict:
+        """The owner typed it themselves (dashboard/CLI): explicit by definition, stored as confirmed."""
+        r = self.suggest(text, "typed by the owner", topic, by=by)
+        if r["status"] in ("proposed", "known_proposed", "known_declined"):
+            r["item"] = self.confirm(r["item"]["id"], by=by)["item"]
+            r["status"] = "confirmed"
+        return r
+
+    def confirm(self, pid: int, *, by: str = "user") -> dict:
+        r = self.get(pid)
+        if not r:
+            raise KeyError(pid)
+        now = self.clock()
+        self.db.x("UPDATE learned_prefs SET state='confirmed', confirmed_at=?, updated=? WHERE id=?", (now, now, pid))
+        logs.info("prefs", "PREF_CONFIRMED", "preference confirmed", id=pid, by=by)
+        return {"item": self._view(self.get(pid)), "conflicts": [self._view(c) for c in self.conflicts(pid)]}
+
+    def decline(self, pid: int, *, by: str = "user") -> bool:
+        n = self.db.x("UPDATE learned_prefs SET state='declined', updated=? WHERE id=?", (self.clock(), pid)).rowcount
+        logs.info("prefs", "PREF_DECLINED", "preference declined", id=pid, by=by)
+        return bool(n)
+
+    def reaffirm(self, pid: int, *, by: str = "user") -> bool:
+        now = self.clock()
+        n = self.db.x("UPDATE learned_prefs SET confirmed_at=?, updated=? WHERE id=? AND state='confirmed'",
+                      (now, now, pid)).rowcount
+        logs.info("prefs", "PREF_REAFFIRMED", "preference reaffirmed", id=pid, by=by)
+        return bool(n)
+
+    def edit(self, pid: int, text: str, *, by: str = "user") -> dict:
+        t = _clean(text, MAX_TEXT)
+        if not t or looks_sensitive(t):
+            raise ValueError("empty or sensitive text: not stored")
+        norm = normalize(t)
+        other = self.db.row("SELECT id FROM learned_prefs WHERE norm=? AND id<>?", (norm, pid))
+        if other:
+            raise ValueError("the same preference already exists")
+        if not self.get(pid):
+            raise KeyError(pid)
+        self.db.x("UPDATE learned_prefs SET text=?, norm=?, updated=? WHERE id=?", (t, norm, self.clock(), pid))
+        logs.info("prefs", "PREF_EDITED", "preference edited", id=pid, by=by)
+        return self._view(self.get(pid))
+
+    def remove(self, pid: int, *, by: str = "user") -> bool:
+        n = self.db.x("DELETE FROM learned_prefs WHERE id=?", (pid,)).rowcount
+        logs.info("prefs", "PREF_REMOVED", "preference removed", id=pid, by=by)
+        return bool(n)
+
+    def clear(self, *, by: str = "user") -> int:
+        n = self.db.x("DELETE FROM learned_prefs").rowcount
+        logs.info("prefs", "PREF_CLEARED", "all preferences removed", n=n, by=by)
+        return n
+
+    # ------------------------------------------------------------------ reading
+    def get(self, pid: int) -> dict | None:
+        return self.db.row("SELECT * FROM learned_prefs WHERE id=?", (pid,))
+
+    def items(self, state: str = "") -> list[dict]:
+        self._expire()
+        rows = self.db.rows("SELECT * FROM learned_prefs" + (" WHERE state=?" if state else "") + " ORDER BY id",
+                            (state,) if state else ())
+        return [self._view(r) for r in rows]
+
+    def conflicts(self, pid: int) -> list[dict]:
+        """Confirmed items on the same topic that look similar but are not the same text: shown to the owner."""
+        me = self.get(pid)
+        if not me:
+            return []
+        return [r for r in self.db.rows("SELECT * FROM learned_prefs WHERE state='confirmed' AND topic=? AND id<>?",
+                                        (me["topic"], pid))
+                if difflib.SequenceMatcher(None, me["norm"], r["norm"]).ratio() >= CONFLICT_RATIO]
+
+    def for_prompt(self, limit: int = 20) -> list[str]:
+        """What may influence behaviour: confirmed, not stale. Proposals and declined items never appear."""
+        return [r["text"] for r in self.items("confirmed") if not r["stale"]][:limit]
+
+
+# ---------------------------------------------------------------------- voice / agent tools
+class SuggestArgs(BaseModel):
+    text: str = Field(..., min_length=3, max_length=MAX_TEXT, description="the preference, in the owner's terms")
+    evidence: str = Field(..., min_length=3, max_length=MAX_EVIDENCE, description="the owner's own words that state it")
+    topic: str = Field("other", max_length=20, description="voice, schedule, food, music, communication or other")
+
+
+class IdArgs(BaseModel):
+    id: int = Field(..., ge=1)
+
+
+class EditArgs(BaseModel):
+    id: int = Field(..., ge=1)
+    text: str = Field(..., min_length=3, max_length=MAX_TEXT)
+
+
+class NoArgs(BaseModel):
+    pass
+
+
+def make_skill(prefs: Preferences):
+    from .skills import Skill, Tool, ToolResult
+
+    class PrefSkill(Skill):
+        name = "preferences"
+        description = "learned preferences: suggest what the owner stated, confirm, list, edit, forget"
+
+        def tools(self) -> list:
+            async def suggest(a: SuggestArgs):
+                try:
+                    r = prefs.suggest(a.text, a.evidence, a.topic, by="voice")
+                except ValueError as e:
+                    return ToolResult(False, str(e), code="PREF_REFUSED")
+                if r["status"] == "proposed":
+                    return ToolResult(True, "proposed, not saved yet: ask the owner whether to remember it", r)
+                return ToolResult(True, "already " + r["status"].split("_")[1], r)
+
+            async def confirm(a: IdArgs):
+                if not prefs.get(a.id):
+                    return ToolResult(False, "no such preference", code="PREF_NOT_FOUND")
+                r = prefs.confirm(a.id, by="voice")
+                msg = "remembered"
+                if r["conflicts"]:
+                    msg += "; it may conflict with: " + "; ".join(c["text"] for c in r["conflicts"])
+                return ToolResult(True, msg, r)
+
+            async def decline(a: IdArgs):
+                return (ToolResult(True, "will not remember it") if prefs.decline(a.id, by="voice")
+                        else ToolResult(False, "no such preference", code="PREF_NOT_FOUND"))
+
+            async def show(_a: NoArgs):
+                rows = prefs.items()
+                shown = [r for r in rows if r["state"] != "declined"]
+                data = {"items": [{k: r[k] for k in ("id", "text", "topic", "state", "stale")} for r in shown]}
+                if not shown:
+                    return ToolResult(True, "no learned preferences", data)
+                return ToolResult(True, "; ".join(f"{r['text']} ({r['state']})" for r in shown), data)
+
+            async def edit(a: EditArgs):
+                try:
+                    return ToolResult(True, "updated", {"item": prefs.edit(a.id, a.text, by="voice")})
+                except KeyError:
+                    return ToolResult(False, "no such preference", code="PREF_NOT_FOUND")
+                except ValueError as e:
+                    return ToolResult(False, str(e), code="PREF_REFUSED")
+
+            async def forget(a: IdArgs):
+                return (ToolResult(True, "forgotten") if prefs.remove(a.id, by="voice")
+                        else ToolResult(False, "no such preference", code="PREF_NOT_FOUND"))
+
+            async def forget_impact(_a: IdArgs):
+                return 1, "לשכוח את ההעדפה? / Forget this preference?"
+
+            return [
+                Tool("pref_suggest", "When the owner STATES a lasting preference, propose it (never guess one). It is "
+                     "only a proposal: then ask whether to remember it. Never for secrets, numbers, health or money.",
+                     suggest, SuggestArgs, permission="action"),
+                Tool("pref_confirm", "Remember a proposed preference after the owner said yes.", confirm, IdArgs,
+                     permission="action", confirm="לזכור את ההעדפה הזאת? / Remember this preference?"),
+                Tool("pref_decline", "The owner said no to a proposed preference.", decline, IdArgs, permission="action"),
+                Tool("pref_show", "Read back the learned preferences and pending proposals.", show, NoArgs,
+                     permission="read"),
+                Tool("pref_edit", "Change the wording of a learned preference.", edit, EditArgs, permission="action"),
+                Tool("pref_forget", "Forget a learned preference (asks the owner first).", forget, IdArgs,
+                     permission="destructive", impact=forget_impact),
+            ]
+
+    return PrefSkill()
+
+
+ALLOWED_ACTIONS = {"pref_suggest", "pref_confirm", "pref_decline", "pref_edit"}
+
+
+# ---------------------------------------------------------------------- dashboard: the Learned preferences page
+def _ctx(ctx) -> Preferences:
+    from .userdata import ctx_db
+    p = getattr(ctx, "_prefs", None)
+    if p is None:
+        p = Preferences(ctx_db(ctx))
+        ctx._prefs = p
+    return p
+
+
+def api_prefs(ctx, m, body, q=None):
+    rows = _ctx(ctx).items()
+    return 200, {"items": [r for r in rows if r["state"] == "confirmed"],
+                 "proposed": [r for r in rows if r["state"] == "proposed"],
+                 "declined": [r for r in rows if r["state"] == "declined"], "topics": list(TOPICS)}
+
+
+def api_pref_add(ctx, m, body):
+    b = body or {}
+    try:
+        return 200, _ctx(ctx).add_confirmed(str(b.get("text", "")), str(b.get("topic", "other")), by="dashboard")
+    except ValueError as e:
+        return 400, {"error": str(e)}
+
+
+def api_pref_op(ctx, m, body):
+    p, b = _ctx(ctx), body or {}
+    op = b.get("op")
+    try:
+        pid = int(b.get("id", 0))
+    except (TypeError, ValueError):
+        return 400, {"error": "id must be a number"}
+    if not p.get(pid):
+        return 404, {"error": "no such preference"}
+    try:
+        if op == "confirm":
+            return 200, p.confirm(pid, by="dashboard")
+        if op == "decline":
+            return 200, {"ok": p.decline(pid, by="dashboard")}
+        if op == "reaffirm":
+            return 200, {"ok": p.reaffirm(pid, by="dashboard")}
+        if op == "edit":
+            return 200, {"item": p.edit(pid, str(b.get("text", "")), by="dashboard")}
+        if op == "remove":
+            return 200, {"ok": p.remove(pid, by="dashboard")}
+    except ValueError as e:
+        return 400, {"error": str(e)}
+    return 400, {"error": "op must be confirm, decline, reaffirm, edit or remove"}
+
+
+def dashboard_routes(register) -> None:
+    register("GET", r"/api/prefs", api_prefs)
+    register("POST", r"/api/prefs", api_pref_add)
+    register("POST", r"/api/prefs/op", api_pref_op)

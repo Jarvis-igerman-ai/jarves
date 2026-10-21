@@ -1,3 +1,12 @@
+## V5 pillars 2+3 software slice: Goals and Adaptive Memory (21 Oct 2026) - branch `v5/pillars-goals-memory`, draft PR into `v5/mobile-access`
+
+- Design: [plans/V5_PILLARS.md](plans/V5_PILLARS.md). New `goals.py`, `preferences.py`, `dashboard_static/pillars.js` (Goals + Learned preferences pages), `jarvis goals` / `jarvis prefs`, features `goals` and `adaptive_memory`, two guides, EN+HE catalog.
+- Goals only track (never act); outward steps and deletes ask the owner; the check-in exists only on request. Preferences are proposals until an explicit yes; sensitive text is refused; all items visible/editable/removable.
+- Verified locally: `test_v5_pillars.py` 18 passed; guides, cli_parity, dashboard_locales, log_message_lint (0 violations), capabilities, features, hebrew_texts, dashboard, backup, privacy, perf_probes pass. Full suite and CI not run.
+- Questions for the user: see "Open for the owner" in the design (inject confirmed preferences into the model instructions now? spoken "well done" on a finished goal?).
+
+---
+
 ## MIGRATION HANDOFF — ONLY ACTIVE PUBLIC REPOSITORY (20 October 2026)
 
 **Scope of this handoff: repository migration only; not a general V4 status report or future roadmap.**

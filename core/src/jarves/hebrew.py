@@ -157,6 +157,10 @@ TEXT: dict[str, str] = {
         "טיימרים לספירה לאחור ושעונים מעוררים; ה-Core מצלצל בקול גם כשהחלון סגור",
     "pure Python + SQLite + tzdata, no Windows-only code; not run on a Raspberry Pi yet (no device in the test setup); ringing needs the Pi speaker":
         "Python, SQLite ו-tzdata בלבד, בלי קוד ייעודי ל-Windows; טרם הורץ על Raspberry Pi (אין מכשיר במערך הבדיקה); הצלצול צריך את הרמקול של ה-Pi",
+    "your goals with steps and progress; a check-in only when you ask; nothing is done or sent for you":
+        "היעדים שלך עם צעדים והתקדמות; סיכום התקדמות רק כשאתה מבקש; שום דבר לא נעשה או נשלח בשבילך",
+    "preferences you state are remembered only after you confirm; all visible, editable, removable":
+        "העדפות שאתה מציין נשמרות רק אחרי שאישרת; הכול גלוי, ניתן לעריכה ולהסרה",
     "shopping and to-do lists by voice: add, read back, tick off, clear":
         "רשימות קניות ומשימות בקול: הוספה, הקראה, סימון וניקוי",
     "opens web pages for you: full control only on your allow-list (empty at first), other sites read-only after you approve; purchases, payments and passwords always ask on the screen":
