@@ -13,10 +13,31 @@ _EMAIL = re.compile(r"^[^@\s<>\"',;]+@[^@\s<>\"',;]+\.[A-Za-z]{2,}$")
 KIND = "contact"
 
 
+def _dump(a: "ContactArgs") -> dict:
+    """The stored fields; an empty phone is left out so older rows and answers keep their exact shape."""
+    d = a.model_dump()
+    if not d.get("phone"):
+        d.pop("phone", None)
+    return d
+
+
 class ContactArgs(BaseModel):
     label: str = Field(..., min_length=1, max_length=80, description="User's relationship or alias, e.g. my wife")
     email: str = Field(..., min_length=3, max_length=254)
     name: str = Field("", max_length=80)
+    phone: str = Field("", max_length=30, description="Optional phone number the user said, for assisted dialing")
+
+    @field_validator("phone")
+    @classmethod
+    def phone_number(cls, value):
+        value = value.strip()
+        if value:
+            from ..dialing import normalize
+            e164 = normalize(value)
+            if e164 is None:
+                raise ValueError("Use a full phone number")
+            return e164
+        return value
 
     @field_validator("label", "name")
     @classmethod
@@ -68,7 +89,7 @@ class LocalContactsSkill(Skill):
             except (ValueError, TypeError):
                 continue
             if query.casefold() in " ".join((a.label, a.name, a.email)).casefold():
-                out.append({"memory_id": row["id"], **a.model_dump()})
+                out.append({"memory_id": row["id"], **_dump(a)})
         return out
 
     def tools(self):
@@ -81,11 +102,11 @@ class LocalContactsSkill(Skill):
                 return ToolResult(False, "That relationship already has saved contact details. Ask the user which "
                                   "to keep; use the existing forget tool before replacing them.",
                                   {"candidates": same}, "CONTACT_CONFLICT")
-            text = json.dumps(a.model_dump(), ensure_ascii=False, separators=(",", ":"))
+            text = json.dumps(_dump(a), ensure_ascii=False, separators=(",", ":"))
             if len(text) > 500:
                 return ToolResult(False, "Use a shorter contact label or name.", code="TOOL_BAD_ARGS")
             mid = self.memory.add(text, source="user", confidence=1.0, kind=KIND)
-            return ToolResult(True, "Contact remembered locally.", {"contact": {"memory_id": mid, **a.model_dump()}})
+            return ToolResult(True, "Contact remembered locally.", {"contact": {"memory_id": mid, **_dump(a)}})
 
         async def lookup(a: LookupArgs):
             rows = self.records(a.query.strip())

@@ -74,12 +74,17 @@ PLATFORMS = {
         "windows": {"status": "implemented_unverified",
                     "evidence": "CI silent install/run/uninstall on windows-2025: "
                                 "CI run 39290421823 of the legacy private repo; "
-                                "a clean second PC is the owner's test (docs/INSTALL_TEST.md)"},
+                                "SW-V4 L adds the clean-install audit, the upgrade/rollback scenario "
+                                "(packaging/smoke_windows.ps1 -UpgradeFrom -Rollback; core/tests/test_installer_clean.py) "
+                                "and the unsigned decision (docs/reviews/SWV4_L_INSTALLER.md); a clean second PC is "
+                                "the owner's test (docs/INSTALL_TEST.md)"},
         "linux_arm64_pi": {"status": "planned", "blocker": "no Linux ARM64 package/systemd service yet (M7)",
                            "roadmap_issue": PI_ISSUE}},
     "update_check": {
         "windows": {"status": "implemented_unverified",
-                    "evidence": "core/tests/test_updates.py (fake GitHub); needs a published release to verify live"},
+                    "evidence": "core/tests/test_updates.py (fake GitHub), core/tests/test_update_flow.py (local signed "
+                                "release server: ask first, SHA256 + size, failure keeps the old version, downgrade "
+                                "refused, rollback); needs a published release to verify live"},
         "linux_arm64_pi": {"status": "planned", "blocker": "the check works, but there is no Pi package to install",
                            "roadmap_issue": PI_ISSUE}},
 }
@@ -233,7 +238,20 @@ def release_from_manifest(m: dict, base_url: str, current: str) -> dict | None:
     return {"version": v, "tag": f"{TAG_PREFIX}{v}", "page": None, "published": m.get("published"),
             "commit": m.get("commit"), "built": m.get("built"), "notes": "", "source": "hosted",
             "asset": {"name": name, "api_url": None, "download_url": url, "size": size, "digest": f"sha256:{sha}"},
-            "sha256_asset": None}
+            "sha256_asset": None, "previous": _previous_entry(m.get("previous"), base_url)}
+
+
+def _previous_entry(p: object, base_url: str) -> dict | None:
+    """The optional `previous` block of a signed manifest: the installer of the release before this one, so that a
+    rollback has something to reinstall even when that version was not installed by the updater. A malformed block is
+    ignored (rollback then needs a kept installer), never an error for the update itself."""
+    if not isinstance(p, dict):
+        return None
+    v, name, sha, size = str(p.get("version") or ""), str(p.get("installer") or ""), str(p.get("sha256") or "").lower(), p.get("size")
+    url = str(p.get("url") or "") or f"{base_url}/{name}"
+    if version_tuple(v) is None or not ASSET_RE.match(name) or ASSET_RE.match(name).group(1) != v             or not re.fullmatch(r"[0-9a-f]{64}", sha) or not isinstance(size, int) or size <= 0             or not url.startswith("https://"):
+        return None
+    return {"version": v, "name": name, "url": url, "sha256": sha, "size": size}
 
 
 class UpdateChecker:
@@ -411,7 +429,13 @@ class UpdateChecker:
             raise UpdateError("UPDATE_CHECKSUM_MISMATCH", "the downloaded installer has the wrong size")
         out = self.home / "updates" / rel["asset"]["name"]
         out.parent.mkdir(parents=True, exist_ok=True)
-        out.write_bytes(data)
+        tmp = out.with_name(out.name + ".partial")          # a failed write never leaves a half installer behind
+        try:
+            tmp.write_bytes(data)
+            os.replace(tmp, out)
+        except OSError as e:
+            tmp.unlink(missing_ok=True)
+            raise UpdateError("UPDATE_DOWNLOAD_FAILED", f"the installer could not be saved ({type(e).__name__})") from e
         logs.info("updates", "UPDATE_DOWNLOADED", "installer verified", version=rel["version"], sha256=got,
                   size=len(data))
         return out
@@ -439,14 +463,42 @@ class UpdateChecker:
             rel = release_from_manifest(self._fetch_manifest(), self.base_url, self.current)
             if rel is None:
                 raise UpdateError("UPDATE_NONE", "the update server no longer offers a newer version")
+        refuse_downgrade(rel["version"], self.current)
         exe = self.download(rel)
         bak = backup_before_update(self.home, f"pre-update-{self.current}-to-{rel['version']}")
+        keep_previous(self.home, self.current, rel["version"], bak, rel.get("previous"), signed, keep=exe.name)
         return {"installer": str(exe), "backup": str(bak), "version": rel["version"], "signed": signed,
                 "sha256": hashlib.sha256(exe.read_bytes()).hexdigest()}   # = the verified value (download checked)
 
 
-def launch_installer(path: str | Path, verified: dict | None = None) -> None:
-    """Start the normal (visible) setup window, detached, so the user sees and confirms every step. `verified` is
+SILENT_ARGS = ("/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART", "/CLOSEAPPLICATIONS")
+
+
+def refuse_downgrade(candidate: str, current: str) -> None:
+    """An installer that is not newer than this copy is never started by the update path; only an explicit rollback
+    (rollback() below, which passes /ROLLBACK=1 to setup) may install an older version."""
+    if not is_newer(candidate, current):
+        raise UpdateError("UPDATE_DOWNGRADE", "this installer is not newer than the installed version; going back "
+                                              "is only possible with `jarvis update --rollback`")
+
+
+def installer_args(path: str | Path, *, silent: bool = False, rollback: bool = False, restart: bool = False) -> list[str]:
+    """The setup command line. `silent` is the in-app updater path (no wizard, no message boxes; setup closes the
+    running app itself); `restart` asks setup to start the Core again at the end."""
+    args = [str(path)]
+    if silent:
+        args += list(SILENT_ARGS)
+    if rollback:
+        args.append("/ROLLBACK=1")
+    if restart:
+        args.append("/RESTARTJARVES=1")
+    return args
+
+
+def launch_installer(path: str | Path, verified: dict | None = None, *, silent: bool = False, rollback: bool = False,
+                     restart: bool = False, popen: Callable | None = None) -> None:
+    """Start setup, detached. By default the normal (visible) window, so the user sees and confirms every step;
+    `silent` runs /VERYSILENT /SUPPRESSMSGBOXES (the in-app updater after the user said yes). `verified` is
     prepare_install()'s result; an installed build refuses to start anything without a signed, verified result
     whose SHA256 still matches the file on disk (checked again right before launch)."""
     if is_installed_build():
@@ -456,9 +508,240 @@ def launch_installer(path: str | Path, verified: dict | None = None) -> None:
         if hashlib.sha256(Path(path).read_bytes()).hexdigest() != verified.get("sha256"):
             raise UpdateError("UPDATE_CHECKSUM_MISMATCH", "the installer changed after it was verified; not "
                                                           "starting it")
+    if not rollback and verified and verified.get("version"):
+        refuse_downgrade(str(verified["version"]), build_info()["version"])
     flags = getattr(subprocess, "DETACHED_PROCESS", 0) | getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0)
-    subprocess.Popen([str(path)], creationflags=flags, close_fds=True)
-    logs.info("updates", "UPDATE_INSTALLER_STARTED", "installer started after user approval", installer=Path(path).name)
+    (popen or subprocess.Popen)(installer_args(path, silent=silent, rollback=rollback, restart=restart),
+                                creationflags=flags, close_fds=True)
+    logs.info("updates", "UPDATE_INSTALLER_STARTED", "installer started after user approval", installer=Path(path).name,
+              mode="silent" if silent else "window")
+
+
+# ---------------------------------------------------------------------- previous version, pending check, rollback
+PREVIOUS_DIR = "previous"
+PREVIOUS_FILE = "previous.json"
+PENDING_FILE = "pending.json"
+
+
+def _updates_dir(home: Path) -> Path:
+    return Path(home) / "updates"
+
+
+def _write_json(path: Path, d: dict) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_name(path.name + ".tmp")
+    tmp.write_text(json.dumps(d, ensure_ascii=False, indent=1), encoding="utf-8")
+    os.replace(tmp, path)
+
+
+def _read_json(path: Path) -> dict:
+    try:
+        d = json.loads(path.read_text(encoding="utf-8"))
+        return d if isinstance(d, dict) else {}
+    except (OSError, ValueError):
+        return {}
+
+
+def _sha256_file(path: Path) -> str:
+    h = hashlib.sha256()
+    with open(path, "rb") as f:
+        for chunk in iter(lambda: f.read(1 << 20), b""):
+            h.update(chunk)
+    return h.hexdigest()
+
+
+def read_previous(home: Path) -> dict:
+    """What a rollback would go back to ({} = nothing kept): {version, to, backup, installer, sha256, size, source,
+    signed, schema}. The installer file lives in <updates>/previous/."""
+    return _read_json(_updates_dir(home) / PREVIOUS_DIR / PREVIOUS_FILE)
+
+
+def keep_previous(home: Path, current: str, to: str, backup_path: Path | str, entry: dict | None, signed: bool,
+                  keep: str | None = None) -> dict:
+    """Called by prepare_install after the new installer is verified and the backup exists: remember how to get
+    back to `current`. The old installer is kept when this copy was itself installed by the updater (it is still in
+    <updates>/); otherwise the signed manifest's `previous` block is recorded and downloaded on demand."""
+    import shutil
+    from . import migrations
+    home = Path(home)
+    udir, pdir = _updates_dir(home), _updates_dir(home) / PREVIOUS_DIR
+    pdir.mkdir(parents=True, exist_ok=True)
+    for old in pdir.iterdir():                              # one previous version only
+        if old.is_file():
+            old.unlink(missing_ok=True)
+    rec: dict = {"version": current, "to": to, "backup": str(backup_path), "installer": None, "sha256": None,
+                 "size": None, "source": None, "signed": bool(signed), "created_ts": time.time()}
+    try:
+        rec["schema"] = migrations.current(home)
+    except migrations.MigrationError:
+        rec["schema"] = None
+    local = udir / f"JARVES-Setup-{current}.exe"
+    if local.is_file():
+        shutil.copy2(local, pdir / local.name)
+        rec.update(installer=local.name, sha256=_sha256_file(local), size=local.stat().st_size)
+    elif entry and entry.get("version") == current:
+        rec["source"] = {k: entry[k] for k in ("name", "url", "sha256", "size")}
+    _write_json(pdir / PREVIOUS_FILE, rec)
+    for f in udir.glob("JARVES-Setup-*.exe"):               # only the new installer and the previous one stay
+        if f.name != keep:
+            f.unlink(missing_ok=True)
+    _write_json(udir / PENDING_FILE, {"from": current, "to": to, "state": "installing", "attempts": 0,
+                                      "ts": time.time()})
+    logs.info("updates", "UPDATE_PREVIOUS_KEPT", "previous version recorded for rollback", version=current,
+              ok=bool(rec["installer"] or rec["source"]))
+    return rec
+
+
+def rollback_info(home: Path) -> dict:
+    """For the CLI and the dashboard: is a rollback possible, and to what."""
+    rec = read_previous(home)
+    have = bool(rec.get("installer") and (_updates_dir(home) / PREVIOUS_DIR / rec["installer"]).is_file())
+    possible = bool(rec) and (have or bool(rec.get("source")))
+    return {"possible": possible, "version": rec.get("version"), "from_version": rec.get("to"),
+            "installer_kept": have, "downloads": bool(rec.get("source")) and not have,
+            "backup": Path(rec["backup"]).name if rec.get("backup") else None,
+            "pending": _read_json(_updates_dir(home) / PENDING_FILE).get("state")}
+
+
+def _previous_installer(home: Path, rec: dict, http: Http | None) -> Path:
+    """The previous installer, verified (SHA256 + size) against what was recorded when it was still trusted."""
+    pdir = _updates_dir(home) / PREVIOUS_DIR
+    if rec.get("installer"):
+        f = pdir / rec["installer"]
+        if f.is_file():
+            if _sha256_file(f) != rec.get("sha256") or f.stat().st_size != rec.get("size"):
+                raise UpdateError("ROLLBACK_BAD_INSTALLER", "the kept previous installer does not match its SHA256; "
+                                                            "not using it")
+            return f
+    src = rec.get("source")
+    if not src:
+        raise UpdateError("ROLLBACK_NO_INSTALLER", "there is no previous installer to go back to; download that "
+                                                   "version's installer and run it, your data backup is in "
+                                                   "`jarvis backup list`")
+    url = str(src.get("url") or "")
+    if not url.startswith("https://"):
+        raise UpdateError("ROLLBACK_BAD_INSTALLER", "the previous installer link is not HTTPS")
+    try:
+        code, body = (http or _httpx_get)(url, {"Accept": "*/*", "User-Agent": "jarves-rollback"})
+    except Exception as e:
+        raise UpdateError("UPDATE_OFFLINE", f"no connection to download the previous version ({type(e).__name__})") from None
+    if code != 200 or not isinstance(body, (bytes, bytearray)):
+        raise UpdateError("UPDATE_DOWNLOAD_FAILED", f"download of the previous version failed (HTTP {code})")
+    data = bytes(body)
+    if hashlib.sha256(data).hexdigest() != src.get("sha256") or len(data) != src.get("size"):
+        raise UpdateError("UPDATE_CHECKSUM_MISMATCH", "the previous installer does not match its SHA256 or size")
+    out = pdir / str(src["name"])
+    tmp = out.with_name(out.name + ".partial")
+    tmp.write_bytes(data)
+    os.replace(tmp, out)
+    return out
+
+
+def rollback(home: Path, *, approved: bool, current: str | None = None, http: Http | None = None,
+             restore_data: bool = True, launch: bool = True, silent: bool = True, port: int | None = None,
+             popen: Callable | None = None) -> dict:
+    """`jarvis update --rollback` / the dashboard button: reinstall the previous version and put the data back the way
+    it was before the update (the pre-update backup). Needs approval; the Core must be stopped (the CLI does that).
+
+    Order: everything that can fail without changing anything comes first (approval, record, installer download and
+    SHA256/size check); then the data restore (it takes its own safety checkpoint first); then setup is started."""
+    from . import backup, migrations
+    if approved is not True:
+        raise UpdateError("UPDATE_NEEDS_APPROVAL", "a rollback is done only after the user approves it")
+    if sys.platform != "win32":
+        raise UpdateError("UPDATE_NOT_APPLICABLE", "there is no installer for this platform yet (Pi: planned)")
+    home = Path(home)
+    cur = current or build_info()["version"]
+    rec = read_previous(home)
+    if not rec or version_tuple(rec.get("version")) is None:
+        raise UpdateError("ROLLBACK_NONE", "there is no previous version kept; nothing to roll back to")
+    if not is_newer(cur, rec["version"]):
+        raise UpdateError("ROLLBACK_NONE", "the installed version is not newer than the kept previous one")
+    exe = _previous_installer(home, rec, http)
+    restored = None
+    bak = Path(rec["backup"]) if rec.get("backup") else None
+    if restore_data and bak is not None:
+        if not bak.is_file():
+            raise UpdateError("ROLLBACK_NO_BACKUP", "the backup from before the update is missing; use "
+                                                    "`--keep-data` to roll back the program only")
+        try:
+            res = backup.restore(bak, home, port=port)
+        except backup.BackupError as e:
+            raise UpdateError(e.code, e.message) from e
+        restored = res["from"]
+        if rec.get("schema") == migrations.LEGACY:           # a legacy backup predates schema.json: drop ours
+            (home / migrations.MARKER).unlink(missing_ok=True)
+    verified = {"installer": str(exe), "signed": bool(rec.get("signed")), "version": rec["version"],
+                "sha256": _sha256_file(exe)}
+    _write_json(_updates_dir(home) / PENDING_FILE, {"from": cur, "to": rec["version"], "state": "rolled_back",
+                                                    "attempts": 0, "ts": time.time()})
+    if launch:
+        launch_installer(exe, verified, silent=silent, rollback=True, restart=True, popen=popen)
+    logs.info("updates", "UPDATE_ROLLBACK", "rollback prepared", version=rec["version"], backup=restored or "none",
+              mode="silent" if silent else "window")
+    return {**verified, "restored": restored, "kept_data": not restore_data}
+
+
+def note_start(home: Path, version: str | None = None) -> dict:
+    """Core start, right after the pre-migration checkpoint. Counts starts of a freshly updated version that never
+    reached "ready"; the second one asks for a rollback (offer_rollback). Also marks a pending record when setup
+    failed and the old version is the one starting ({"state": "not_applied"}: the old version keeps working)."""
+    home, v = Path(home), version or build_info()["version"]
+    path = _updates_dir(home) / PENDING_FILE
+    d = _read_json(path)
+    if d.get("state") != "installing":
+        return {"offer": False, "state": d.get("state")}
+    if v == d.get("from"):
+        d["state"] = "not_applied"
+        _write_json(path, d)
+        logs.warn("updates", "UPDATE_NOT_APPLIED", "update did not install; the previous version is running", version=v)
+        return {"offer": False, "state": "not_applied"}
+    if v != d.get("to"):
+        return {"offer": False, "state": "installing"}
+    d["attempts"] = int(d.get("attempts") or 0) + 1
+    _write_json(path, d)
+    offer = d["attempts"] >= 2 and rollback_info(home)["possible"]
+    if offer:
+        logs.warn("updates", "UPDATE_FIRST_START_FAILED", "the updated version did not become ready last time",
+                  version=v, attempts=d["attempts"])
+    return {"offer": offer, "state": "installing", "attempts": d["attempts"]}
+
+
+def mark_healthy(home: Path, version: str | None = None) -> None:
+    """Core reached CORE_READY: the update is confirmed; the rollback record stays (rollback remains possible)."""
+    home, v = Path(home), version or build_info()["version"]
+    path = _updates_dir(home) / PENDING_FILE
+    d = _read_json(path)
+    if d.get("state") == "installing" and v == d.get("to"):
+        d.update(state="ok", attempts=0)
+        _write_json(path, d)
+
+
+def start_rollback_process(home: Path, popen: Callable | None = None) -> None:
+    """Run `jarvis update --rollback --yes` as a separate process (it stops the Core, restores the data and starts
+    setup), after the owner's approval was recorded. The Core cannot roll itself back while it is running."""
+    flags = getattr(subprocess, "DETACHED_PROCESS", 0) | getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0)
+    (popen or subprocess.Popen)([sys.executable, "-m", "jarves", "update", "--rollback", "--yes"],
+                                creationflags=flags, close_fds=True, env={**os.environ, "JARVES_HOME": str(home)})
+    logs.info("updates", "UPDATE_ROLLBACK_STARTED", "rollback process started after approval")
+
+
+def offer_rollback(home: Path, *, ask: Callable | None = None, popen: Callable | None = None) -> bool:
+    """After a failed first start: ask through approvals (medium risk; never automatic) and, only on a yes, start the
+    rollback. True when it was started."""
+    info = rollback_info(home)
+    if not info["possible"]:
+        return False
+    if ask is None:
+        from . import approvals
+        ask = approvals.ask_owner
+    ok, _ = ask(f"JARVES {info['from_version']} did not start properly after the update. Go back to {info['version']}?",
+                title="Roll back the update?", kind="update", risk="medium",
+                why="the new version failed to start; your data from before the update will be restored",
+                details={"version": info["version"]})
+    if ok:
+        start_rollback_process(home, popen)
+    return bool(ok)
 
 
 # ---------------------------------------------------------------------- backup before update / migration
@@ -480,7 +763,8 @@ def _register_feature() -> None:
     kw = {"targets": PLATFORMS["update_check"]} if "targets" in inspect.signature(features.register).parameters else {}
     features.register("update_check", "בדיקת עדכונים", "Update check", True, risk="low",
                       about="looks for a newer JARVES once a day (GitHub, or the signed release folder in "
-                            "update.base_url; read-only); installs only after you approve", **kw)
+                            "update.base_url; read-only); installs only after you approve, and one command or "
+                            "button goes back to the previous version", **kw)
 
 
 _register_feature()
@@ -501,7 +785,8 @@ def _enabled(ctx) -> bool:
 def api_updates(ctx, m, body):
     u = _checker(ctx)
     s = u.check() if _enabled(ctx) else u.status()       # cached for a day; opening the page is not a poll loop
-    return 200, {**s, "enabled": _enabled(ctx), "platforms": PLATFORMS, "notice": u.notice("he")}
+    return 200, {**s, "enabled": _enabled(ctx), "platforms": PLATFORMS, "notice": u.notice("he"),
+                 "rollback": rollback_info(ctx.home)}
 
 
 def api_updates_check(ctx, m, body):
@@ -511,16 +796,41 @@ def api_updates_check(ctx, m, body):
 
 
 def api_updates_install(ctx, m, body):
-    """POST {"approve": true}: the dashboard click is the approval. Downloads, verifies, backs up, starts setup."""
+    """POST {"approve": true, "silent": bool}: the dashboard click is the approval. Downloads, verifies, backs up,
+    starts setup (silent = the in-app updater path: no wizard, setup restarts JARVES at the end)."""
+    silent = (body or {}).get("silent") is True
     try:
         r = _checker(ctx).prepare_install((body or {}).get("approve") is True)
-        launch_installer(r["installer"], verified=r)
+        launch_installer(r["installer"], verified=r, silent=silent, restart=silent)
     except UpdateError as e:
         return 409, {"error": e.message, "code": e.code}
-    return 200, {**r, "note": "the setup window is open; it closes JARVES, keeps your data and can start it again"}
+    return 200, {**r, "note": "setup is running; it closes JARVES, keeps your data and starts it again" if silent else
+                 "the setup window is open; it closes JARVES, keeps your data and can start it again"}
+
+
+def api_updates_rollback(ctx, m, body):
+    """POST {"approve": true}: go back to the previous version. The click asks the same approval as every medium-risk
+    action (popup / tray / banner); only after a yes does a separate process stop the Core, restore the data from
+    before the update and start setup."""
+    if (body or {}).get("approve") is not True:
+        return 409, {"error": "a rollback needs your approval", "code": "UPDATE_NEEDS_APPROVAL"}
+    info = rollback_info(ctx.home)
+    if not info["possible"]:
+        return 409, {"error": "there is no previous version kept; nothing to roll back to", "code": "ROLLBACK_NONE"}
+    from . import approvals
+    ok, why = approvals.ask_owner(ctx.home, f"Go back from JARVES {info['from_version']} to {info['version']}?",
+                                  title="Roll back the update?", kind="update", risk="medium",
+                                  why="your data from before the update is restored; newer data is kept in a backup",
+                                  details={"version": info["version"]})
+    if not ok:
+        return 409, {"error": f"not rolled back: {why}", "code": "ROLLBACK_NOT_APPROVED"}
+    start_rollback_process(ctx.home)
+    return 200, {"started": True, "version": info["version"],
+                 "note": "JARVES stops, the previous version is installed and started again"}
 
 
 def dashboard_routes(register_route) -> None:
     register_route("GET", r"/api/updates", api_updates)
     register_route("POST", r"/api/updates/check", api_updates_check)
     register_route("POST", r"/api/updates/install", api_updates_install)
+    register_route("POST", r"/api/updates/rollback", api_updates_rollback)
