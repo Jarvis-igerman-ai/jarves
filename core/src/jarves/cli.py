@@ -774,10 +774,13 @@ def _ask_admin_key(home) -> int:
     key = getpass.getpass("Admin key: ").strip()
     if not key:
         return 1
-    if not key.startswith("sk-admin-"):
-        print("That does not look like an OpenAI admin key (it should start with sk-admin-). Nothing saved.")
+    from .usage import save_admin_key
+    try:
+        save_admin_key(home, key)
+    except ValueError as e:
+        print(e)
         return 1
-    print(f"saved to {save_secret('OPENAI_ADMIN_KEY', key, home)} (private to your Windows user, not in the project)")
+    print(f"saved to {secrets_file(home)} (private to your Windows user, not in the project)")
     return 0
 
 
@@ -786,7 +789,10 @@ def cmd_key(a, cfg, home) -> int:
     path = secrets_file(home)
     name = "OPENAI_ADMIN_KEY" if getattr(a, "admin", False) else "OPENAI_API_KEY"
     if a.remove:
-        if path.exists():
+        if name == "OPENAI_ADMIN_KEY":
+            from .usage import remove_admin_key
+            remove_admin_key(home)
+        elif path.exists():
             lines = [l for l in path.read_text(encoding="utf-8-sig").splitlines()
                      if l.partition("=")[0].strip() != name]
             path.write_text("\n".join(lines) + "\n", encoding="utf-8")
