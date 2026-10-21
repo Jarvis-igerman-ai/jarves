@@ -21,8 +21,47 @@ def pytest_configure(config):
     config.addinivalue_line("markers", "linux_only: runs only on Linux (deselected, not skipped, elsewhere)")
 
 
+# ---------------------------------------------------------------- CI sharding (no plugin, no reruns of the whole suite)
+# The real-browser files run as their own CI job (own retry); the rest is split into N shards by file, balanced by
+# test count, the same on every shard because each shard collects the same tests. Deselected, never skipped.
+BROWSER_FILES = ("test_browser.py", "test_canary.py", "test_dashboard_a11y.py")
+
+
+def pytest_addoption(parser):
+    parser.addoption("--shard", default="1/1", help="I/N: run only the I-th of N balanced shards of the files")
+    parser.addoption("--browser", default="include", choices=["include", "exclude", "only"],
+                     help="real-browser test files (CI runs them as their own job): include, exclude or only")
+
+
+def shard_files(counts: dict, n: int) -> list:
+    """Greedy longest-first split of {file: test count} into n shards (deterministic)."""
+    shards = [[] for _ in range(n)]
+    load = [0] * n
+    for name, c in sorted(counts.items(), key=lambda kv: (-kv[1], kv[0])):
+        i = load.index(min(load))
+        shards[i].append(name)
+        load[i] += c
+    return shards
+
+
 def pytest_collection_modifyitems(config, items):
     import sys
+    mode = config.getoption("--browser")
+    if mode != "include":
+        gone = [i for i in items if (os.path.basename(str(i.fspath)) in BROWSER_FILES) == (mode == "exclude")]
+        if gone:
+            config.hook.pytest_deselected(items=gone)
+            items[:] = [i for i in items if i not in gone]
+    idx, n = (int(x) for x in config.getoption("--shard").split("/"))
+    if n > 1:
+        counts = {}
+        for i in items:
+            counts[str(i.fspath)] = counts.get(str(i.fspath), 0) + 1
+        mine = set(shard_files(counts, n)[idx - 1])
+        out = [i for i in items if str(i.fspath) not in mine]
+        if out:
+            config.hook.pytest_deselected(items=out)
+            items[:] = [i for i in items if str(i.fspath) in mine]
     keep, drop = [], []
     for item in items:
         wrong = (item.get_closest_marker("windows_only") and sys.platform != "win32") or \

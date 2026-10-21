@@ -53,13 +53,19 @@ jobs:
           out godot     "$(any '^(godot/|blender/|core/src/|\.github/)')"
           out whatsapp  "$(any '^(bridge/|scripts/build_whatsapp_bridge\.ps1|packaging/|\.github/)')"
   core:
-    name: Python Core tests (${{ matrix.os }})
+    # Windows is split into 3 shards (files balanced by test count, tests/conftest.py --shard); Linux runs the whole
+    # non-browser suite in one job. The real-browser files are their own job (`browser`, one retry).
+    name: Python Core tests (${{ matrix.os }} shard ${{ matrix.shard }})
     needs: changes
     if: needs.changes.outputs.code == 'true'
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-24.04, windows-2025]
+        include:
+          - {os: ubuntu-24.04, shard: "1/1"}
+          - {os: windows-2025, shard: "1/3"}
+          - {os: windows-2025, shard: "2/3"}
+          - {os: windows-2025, shard: "3/3"}
     runs-on: ${{ matrix.os }}
     timeout-minutes: 40
     defaults:
@@ -70,6 +76,7 @@ jobs:
       - uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884  # v10.3.0 (no major tags since v8)
         with:
           enable-cache: true
+          cache-dependency-glob: core/uv.lock
       # Owner rule: NO skipped tests. Every extra is installed (camera/OpenCV, voice, tray, browser/Playwright once it
       # exists) and the real tools are fetched/located by tests/_tools.py (Godot 4.7.2 everywhere, Inno Setup on
       # Windows, openssl from PATH/Git). Platform-only tests are deselected per OS (markers), never skipped.
@@ -78,25 +85,17 @@ jobs:
         run: sudo apt-get update -qq && sudo apt-get install -y -qq libportaudio2
       - name: Install (locked, all extras)
         run: uv sync --frozen --all-extras
-      - name: Browser for the real-browser tests (Chromium on Linux, preinstalled Edge on Windows)
-        shell: bash
-        run: |
-          if uv run python -c "import playwright" 2>/dev/null; then
-            if [ "$RUNNER_OS" = "Linux" ]; then uv run playwright install --with-deps chromium; else echo "using the preinstalled Edge"; fi
-          else
-            echo "no browser extra yet"
-          fi
       - name: Cache tool downloads (Godot, Inno Setup; SHA-pinned in tests/_tools.py)
         uses: actions/cache@v6
         with:
           path: ${{ runner.temp }}/jarves-test-tools
           key: jarves-test-tools-${{ runner.os }}-${{ hashFiles('core/tests/_tools.py') }}
-      - name: pytest (offline; fakes for OpenAI, audio and the music player; ANY skip fails the run)
+      - name: pytest (offline; fakes; no real-browser files here; ANY skip fails the run)
         shell: bash
         env:
           JARVES_BUILD_CACHE: ${{ runner.temp }}/jarves-test-tools
         run: |
-          uv run pytest -q -rs -p no:cacheprovider --durations=25 --junitxml=pytest-junit.xml | tee pytest.out
+          uv run pytest -q -rs -p no:cacheprovider --browser exclude --shard ${{ matrix.shard }} --durations=25 --junitxml=pytest-junit.xml | tee pytest.out
           if grep -E "(^SKIPPED|[0-9]+ skipped|xfailed)" pytest.out; then echo "::error::tests were skipped"; exit 1; fi
       - name: Redacted diagnostics on failure (pytest output, junit, Core logs; no secrets, no user content)
         if: failure()
@@ -108,22 +107,78 @@ jobs:
         if: failure()
         uses: actions/upload-artifact@v7
         with:
-          name: diagnostics-core-${{ matrix.os }}
+          name: diagnostics-core-${{ matrix.os }}-${{ strategy.job-index }}
           path: core/diag
           retention-days: 7
           if-no-files-found: ignore
-      - name: jarvis.cmd launcher smoke (Windows)
-        if: runner.os == 'Windows'
+      - name: jarvis.cmd launcher smoke (Windows, shard 1 only)
+        if: runner.os == 'Windows' && matrix.shard == '1/3'
         shell: cmd
         run: |
           call ..\jarvis.cmd setup --help || exit /b 1
           call ..\jarvis.cmd status > status.txt
           type status.txt
           findstr /C:"Core is NOT running" status.txt || exit /b 1
+  browser:
+    # Real-browser tests (Playwright: Chromium on Linux, the preinstalled Edge on Windows) as their own job so the
+    # shards stay fast. One retry of the browser files only; a second failure fails the job. Never skipped.
+    name: Real-browser tests (${{ matrix.os }})
+    needs: changes
+    if: needs.changes.outputs.code == 'true'
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, windows-2025]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    defaults:
+      run:
+        working-directory: core
+    steps:
+      - uses: actions/checkout@v7
+      - uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884  # v10.3.0
+        with:
+          enable-cache: true
+          cache-dependency-glob: core/uv.lock
+      - name: "System libraries (Linux, PortAudio for sounddevice)"
+        if: runner.os == 'Linux'
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq libportaudio2
+      - name: Install (locked, all extras)
+        run: uv sync --frozen --all-extras
+      - name: Cache Playwright browsers (Linux)
+        if: runner.os == 'Linux'
+        uses: actions/cache@v6
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ runner.os }}-${{ hashFiles('core/uv.lock') }}
+      - name: Browser (Chromium on Linux, preinstalled Edge on Windows)
+        shell: bash
+        run: |
+          if [ "$RUNNER_OS" = "Linux" ]; then uv run playwright install --with-deps chromium; else echo "using the preinstalled Edge"; fi
+      - name: pytest real-browser files (one retry; ANY skip fails the run)
+        shell: bash
+        run: |
+          run() { uv run pytest -q -rs -p no:cacheprovider --browser only --junitxml=pytest-junit.xml 2>&1 | tee pytest.out; return "${PIPESTATUS[0]}"; }
+          run || { echo "::warning::real-browser tests failed once; retrying the browser files one time"; run; }
+          rc=$?
+          if grep -E "(^SKIPPED|[0-9]+ skipped|xfailed)" pytest.out; then echo "::error::tests were skipped"; exit 1; fi
+          exit $rc
+      - name: Redacted diagnostics on failure
+        if: failure()
+        shell: bash
+        run: uv run python tools/ci_diagnostics.py diag pytest.out pytest-junit.xml || true
+      - name: Upload redacted diagnostics
+        if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: diagnostics-browser-${{ matrix.os }}
+          path: core/diag
+          retention-days: 7
+          if-no-files-found: ignore
   installer:
     # SW-V2 M6: build the real Windows installer and smoke-test it (silent per-user install into a temp dir,
     # --version/status/features/doctor, offline Core start/stop, exported face self-checks, upgrade, uninstall keeps
-    # data, /PURGE=1). On `main` the tested artifact is what .github/workflows/package.yml publishes; PR artifacts are
+    # data, /PURGE=1). On `main` the tested artifact is what .github/workflows/package.yml turns into a signed candidate (and, if enabled, a beta); PR artifacts are
     # CI-only (3 days) and never become releases.
     name: Windows installer (build + silent install smoke)
     needs: [core, changes]
@@ -170,7 +225,7 @@ jobs:
             dist/JARVES-Setup-*.exe
             dist/JARVES-Setup-*.exe.sha256
             dist/build-info.json
-          retention-days: ${{ env.CHANNEL == 'main' && 14 || 3 }}
+          retention-days: ${{ env.CHANNEL == 'main' && 30 || 3 }}
           compression-level: 0
           if-no-files-found: error
   whatsapp-bridge:

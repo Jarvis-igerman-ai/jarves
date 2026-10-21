@@ -1,9 +1,12 @@
 name: jarves-package
-# SW-V2 M6 (D09): publish the Windows installer as a GitHub Release after a PR is merged to main and ALL
-# jarves-checks jobs passed (including the `installer` build + silent install smoke). The published files are the
-# exact artifact that run tested - nothing is rebuilt here. PR builds never get here (event must be a push to main).
-# Retention: newest 3 `win-v*` releases + newest 3 `jarves-windows-installer-main` artifacts; "[pinned]" releases,
-# drafts and anything else are never touched (packaging/release.py). Unsigned: no code-signing certificate exists.
+# Continuous release (docs/RELEASING.md). After EVERY green `main` (all jarves-checks jobs passed, including the
+# installer build + silent install smoke) this workflow takes the exact installer that run tested - nothing is rebuilt -
+# and
+#   1. builds a signed CANDIDATE (installer + signed manifest) and keeps it as a workflow artifact for 30 days.
+#      Nothing is published.
+#   2. BETA channel: publishes JARVES X.Y.Z-beta.N to the releases repo with latest-beta.json, ONLY when the repository
+#      variable ENABLE_BETA_PUBLISH is "true" (default: unset = disabled).
+# STABLE is never published here: it is tag-driven (.github/workflows/release.yml) and gated by tools/release_gate.py.
 on:
   workflow_run:
     workflows: [jarves-checks]
@@ -14,7 +17,7 @@ concurrency:
   group: jarves-package
   cancel-in-progress: false
 jobs:
-  publish:
+  candidate:
     if: >-
       github.event.workflow_run.conclusion == 'success' &&
       github.event.workflow_run.event == 'push' &&
@@ -22,11 +25,9 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     permissions:
-      contents: write      # create the release + tag, delete old ones
-      actions: write       # read the tested artifact, delete old ones
+      contents: read       # check out the tested commit
+      actions: read        # read the tested artifact
     env:
-      GH_TOKEN: ${{ github.token }}
-      GITHUB_TOKEN: ${{ github.token }}
       SHA: ${{ github.event.workflow_run.head_sha }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
@@ -40,30 +41,49 @@ jobs:
           github-token: ${{ github.token }}
           path: dist
       - name: Verify provenance (tested commit, channel main, SHA256)
-        id: verify
         run: python3 packaging/release.py verify --dir dist --commit "$SHA"
-      - name: Create release win-v<version>
+      - name: Signed candidate (installer + manifest; published nowhere)
         env:
-          VERSION: ${{ steps.verify.outputs.version }}
-          RUN_URL: ${{ github.event.workflow_run.html_url }}
-        run: |
-          if gh release view "win-v$VERSION" > /dev/null 2>&1; then
-            echo "release win-v$VERSION already exists (re-run): nothing to publish"; exit 0
-          fi
-          python3 packaging/release.py notes --dir dist --run-url "$RUN_URL" > notes.md
-          gh release create "win-v$VERSION" --target "$SHA" --title "JARVES $VERSION (Windows)" \
-            --notes-file notes.md --latest dist/JARVES-Setup-*.exe dist/JARVES-Setup-*.exe.sha256 dist/build-info.json
-      - name: Retention - keep the newest 3 (pinned exempt)
-        run: python3 packaging/release.py prune --keep 3
-      # WP-O (docs/RELEASE_HOSTING.md): the same verified installer + a signed latest.json as a release of the
-      # separate PUBLIC repo (release files only, no source), so PCs without access to this private repo can
-      # download and check for updates. Free. Runs even if the private-repo steps failed (it only needs the
-      # verified artifact). Without the secrets it logs "SKIPPED" and succeeds; the private release stays the
-      # fallback. Retention there: newest 3 releases; "[pinned]" in a release's title/notes keeps it.
-      - name: Publish to the public releases repo (signed latest.json, keep newest 3)
-        if: ${{ always() && steps.verify.outcome == 'success' }}
+          JARVES_UPDATE_SIGNING_KEY: ${{ secrets.JARVES_UPDATE_SIGNING_KEY }}
+          RELEASES_REPO: ${{ vars.RELEASES_REPO }}
+        run: python3 packaging/release.py candidate --dir dist --commit "$SHA" --out candidate
+      - uses: actions/upload-artifact@v7
+        with:
+          name: jarves-release-candidate-${{ github.event.workflow_run.head_sha }}
+          path: candidate
+          retention-days: 30
+          compression-level: 0
+          if-no-files-found: error
+      - name: What the beta step would do (dry run; no network, no secrets)
+        run: python3 packaging/release.py beta-publish --dir dist --dry-run
+      - name: Keep the verified installer for the beta job
+        uses: actions/upload-artifact@v7
+        with:
+          name: beta-input
+          path: dist
+          retention-days: 1
+          compression-level: 0
+  beta:
+    # DISABLED by default: runs only when the repository variable ENABLE_BETA_PUBLISH is "true".
+    needs: candidate
+    if: ${{ vars.ENABLE_BETA_PUBLISH == 'true' }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    env:
+      ENABLE_BETA_PUBLISH: ${{ vars.ENABLE_BETA_PUBLISH }}
+      RELEASES_REPO: ${{ vars.RELEASES_REPO }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          ref: ${{ github.event.workflow_run.head_sha }}
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333  # v8.0.2
+        with:
+          name: beta-input
+          path: dist
+      - name: Publish the beta (pre-release beta-v<build> + signed latest-beta.json; stable is never touched)
         env:
           RELEASES_TOKEN: ${{ secrets.RELEASES_TOKEN }}
-          RELEASES_REPO: ${{ vars.RELEASES_REPO }}
           JARVES_UPDATE_SIGNING_KEY: ${{ secrets.JARVES_UPDATE_SIGNING_KEY }}
-        run: python3 packaging/release.py public-publish --dir dist --keep 3
+        run: python3 packaging/release.py beta-publish --dir dist
