@@ -1636,6 +1636,8 @@ def main(argv: list[str] | None = None) -> int:
     whatsapp_admin.add_cli(sub)               # SW-V4 F: jarvis whatsapp status / link / mode / allow / kill ...
     from .orchestrator import surfaces as agents_cli
     agents_cli.add_cli(sub)                   # SW-V4 E: jarvis agents list | status | ask | tell | start | ...
+    from . import dialing
+    dialing.add_cli(sub)                      # SW-V4 H: jarvis dial <name|number> [--yes-on-screen]
     a = ap.parse_args(argv)
     try:
         if a.profile:
@@ -1666,6 +1668,7 @@ def main(argv: list[str] | None = None) -> int:
             "health": health_cli.cmd_health,
             "whatsapp": whatsapp_admin.cmd_whatsapp,
             "agents": agents_cli.cmd_agents,
+            "dial": dialing.cmd_dial,
             **cli_parity.COMMANDS, **budget_cli.COMMANDS}[a.cmd](a, cfg, home)
 
 

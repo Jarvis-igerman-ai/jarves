@@ -1450,7 +1450,22 @@
   "Godot viewer not found (set GODOT_EXE)": "לא נמצא צופה Godot (הגדירו GODOT_EXE)",
   "(Godot viewer not found (set GODOT_EXE))": "(לא נמצא צופה Godot (הגדירו GODOT_EXE))",
   "no desktop session (headless): use the dashboard instead": "אין סשן שולחן עבודה (ללא מסך): השתמשו בלוח הבקרה",
-  "מצלמה: no camera connected; connect a camera (Pi: Camera Module 3 Wide)": "מצלמה: אין מצלמה מחוברת; חברו מצלמה (בפאי: Camera Module 3 Wide)"
+  "מצלמה: no camera connected; connect a camera (Pi: Camera Module 3 Wide)": "מצלמה: אין מצלמה מחוברת; חברו מצלמה (בפאי: Camera Module 3 Wide)",
+  "Phone calls": "שיחות טלפון",
+  "Assisted dialing through Phone Link: you press Call.": "חיוג מסייע דרך Phone Link: אתם לוחצים חיוג.",
+  "Assisted dialing is off: ": "חיוג מסייע כבוי: ",
+  "No app handles dialing (tel:)": "אין אפליקציה שמטפלת בחיוג (tel:)",
+  "Dialer app: ": "אפליקציית החיוג: ",
+  "Phone Link not set up": "Phone Link לא מחובר",
+  "Call ": "התקשר ל",
+  "Call": "התקשר",
+  "Number": "מספר",
+  "No contacts with a number yet. Tell JARVES a number once, or type one here.": "אין אנשי קשר עם מספר. אמרו לג'ארביס מספר פעם אחת, או הקלידו כאן.",
+  "JARVES never places the call: it opens the dialer and you press Call.": "ג'ארביס לא מחייג בעצמו: הוא פותח את החייגן ואתם לוחצים חיוג.",
+  "A number I type myself": "מספר שאני מקליד בעצמי",
+  "Phone number": "מספר טלפון",
+  "Name (optional)": "שם (לא חובה)",
+  "Numbers from an e-mail, a web page or a message are never dialled for you: type them yourself.": "מספרים ממייל, מאתר או מהודעה לא מחויגים אוטומטית: הקלידו אותם בעצמכם."
  },
  "rules": [
   [
