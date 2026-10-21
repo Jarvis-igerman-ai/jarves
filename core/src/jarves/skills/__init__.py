@@ -369,7 +369,9 @@ class SkillRegistry:
             raise
 
     async def call(self, name: str, raw_args: dict | str | None = None, *, origin: Origin = "model") -> ToolResult:
-        return await self._call(name, raw_args, origin=origin)   # _call tells TOOL_SINK (terminal + web chat)
+        res = await self._call(name, raw_args, origin=origin)
+        _tool_seen(name, res.ok, res.code, res.message)   # terminal + web chat: one line per call (TOOL_SINK)
+        return res
 
     async def _call(self, name: str, raw_args: dict | str | None = None, *, origin: Origin = "model") -> ToolResult:
         """Run a tool under the permission policy. origin="user" only when the deterministic command parser matched
@@ -412,7 +414,6 @@ class SkillRegistry:
         asked0 = self.asks
         refused = await self._authorize(tool, args, origin)
         if refused is not None:
-            _tool_seen(name, False, refused.code, refused.message)
             return refused
         t_run = time.monotonic()
         try:
@@ -433,7 +434,6 @@ class SkillRegistry:
         log = logs.info if res.ok else logs.warn
         log("skills", "TOOL_RESULT", "tool finished", tool=name, ok=res.ok, result_code=res.code, origin=origin,
             ms=round((time.monotonic() - t_run) * 1000))      # SW-V4 O: tool p50/p95 in the health monitor
-        _tool_seen(name, res.ok, res.code, res.message)
         return self._hinted(skill, tool, res) if not res.ok else res
 
     def _hinted(self, skill: Skill, tool: Tool, res: ToolResult) -> ToolResult:

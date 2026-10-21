@@ -290,10 +290,10 @@ class WebChat:
             fut.cancel()
 
     def _asked(self, a) -> None:
-        self.events.add("approval", id=a.id)
+        self.events.add("approval", approval=a.id)
 
     def _decided(self, a) -> None:
-        self.events.add("approval_closed", id=a.id, decision=a.state, channel=a.channel)
+        self.events.add("approval_closed", approval=a.id, decision=a.state, channel=a.channel)
 
     # ------------------------------------------------------------------ silence
     def setting_silent(self) -> bool:
@@ -439,13 +439,13 @@ class WebChat:
         spoke = False
         if speak and not silent and self.can_speak() and reply.ok and reply.text:
             spoke = True
-        self._finish(tid, reply.text, bool(reply.ok), str(reply.code or ""), silent, spoke,
-                     ms=round((time.monotonic() - t0) * 1000), source=getattr(reply, "source", ""))
-        if spoke:
+        if spoke:                                  # spoken first: the reply event (and the busy flag) mean "all done"
             try:
                 await self.core.speak(reply.text)
             except Exception:
                 logs.warn("core", "CHAT_SPEAK_FAILED", "the reply could not be spoken")
+        self._finish(tid, reply.text, bool(reply.ok), str(reply.code or ""), silent, spoke,
+                     ms=round((time.monotonic() - t0) * 1000), source=getattr(reply, "source", ""))
 
     def _finish(self, tid: str, text: str, ok: bool, code: str, silent: bool, spoke: bool, **extra) -> None:
         if text:
@@ -572,7 +572,7 @@ class WebChat:
                                 "אין מה לבטל: לאף קובץ אישיות או סביבת עבודה אין גרסה קודמת.")
         name = best[1]
         appr.CHAT_TURN.set({"client": "web", "silent": self.silent_state()["on"]})
-        res = await self.core.registry.call("workspace_undo", {"file": name}, origin="user")
+        res = await self.core.registry.call("workspace_undo", {"file": Path(name).stem.upper()}, origin="user")
         if res.ok:
             self._notice(tid, "undo", f"Undid the last change to {name}.", f"בוטל השינוי האחרון ב-{name}.", file=name, code=res.code)
         else:

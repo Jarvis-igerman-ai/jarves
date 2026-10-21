@@ -273,6 +273,10 @@ class Store:
             sid = self._typed[0]
         if sid is None:
             sid = f"{d.get('session') or 'x'}-{datetime.fromtimestamp(t_user).strftime('%Y%m%d-%H%M%S')}-{kind[0]}"
+            base, n = sid, 1
+            while self._db.execute("SELECT 1 FROM sessions WHERE id = ?", (sid,)).fetchone():   # two /new in one second
+                n += 1
+                sid = f"{base}{n}"
             self._db.execute("INSERT OR IGNORE INTO sessions (id, core_session, kind, started, model, backend_model, "
                              "tier, voice_seconds, last_event) VALUES (?,?,?,?,?,?,?,?,?)",
                              (sid, d.get("session"), kind, t_user, None, self.backend_model, "", 0, ts))

@@ -7,6 +7,7 @@ import asyncio
 import http.client
 import json
 import threading
+import time
 
 import pytest
 from pydantic import BaseModel
@@ -98,6 +99,15 @@ class Rig:
             a = FakeAgent(registry)
             self.agents.append(a)
             return a
+        from jarves.userdata import open_db
+        _db = open_db(home)
+        try:
+            _db.set_setting("alerts.quiet_enabled", False)   # the suite must not depend on the time of day
+        finally:
+            _db.close()
+        if mobile_on:
+            from jarves.features import Features
+            Features(self.cfg, home).set("mobile_access", True)   # the owner's switch; default OFF
         self.h = web_cli.start_standalone(self.cfg, home, mobile_on=mobile_on, lan_host=HOST if mobile_on else None,
                                           agent_factory=factory, popup=False, port=free_port())
         self.core, self.chat, self.dash = self.h.core, self.h.chat, self.h.dashboard
@@ -114,6 +124,9 @@ class Rig:
 
 @pytest.fixture
 def rig(home):
+    from jarves import logs as _logs
+    was = _logs.privacy()
+    _logs.set_privacy(False)                 # the history keeps the words (the owner's choice; default is masked)
     made = []
 
     def make(**kw):
@@ -123,6 +136,7 @@ def rig(home):
     yield make
     for r in made:
         r.stop()
+    _logs.set_privacy(was)
 
 
 class FakePopup:
@@ -323,7 +337,7 @@ def test_resume_across_surfaces(rig):
     assert "and now from the web" in {s["first"] for s in chat_engine.recent_sessions(r.home)}
     assert r.chat.submit("/resume 99")[0] == 200
     ev, _, _ = collect(owner_poll(r), "notice", "t4")
-    assert "No such conversation" in next(e for e in ev if e["turn"] == "t4")["en"]
+    assert "No such conversation" in next(e for e in ev if e.get("turn") == "t4" and e["type"] == "notice")["en"]
 
 
 def test_status_help_unknown_and_undo(rig):
@@ -368,6 +382,10 @@ def test_silent_turns_never_speak_ring_or_light_the_face(rig):
     # a silent turn that asks for approval reaches channels with CHAT_TURN.silent set (face / voice channels refuse it)
     r.chat.submit("send the report", client="owner")
     asked = _wait_pending(r)
+    for _ in range(100):                                          # the channels are asked just after the request exists
+        if pop.turn_seen:
+            break
+        time.sleep(0.05)
     assert pop.turn_seen[-1] == {"client": "web", "silent": True}
     ok, _ = r.core.approvals.answer(asked[0]["id"], True, channel="popup")
     assert ok
@@ -385,6 +403,7 @@ def test_quiet_hours_make_the_chat_silent(rig, home):
     r = rig()
     db = open_db(home)
     try:
+        db.set_setting("alerts.quiet_enabled", True)
         db.set_setting("alerts.quiet_start", "00:00")
         db.set_setting("alerts.quiet_end", "23:59")
     finally:
@@ -401,6 +420,16 @@ def test_popup_window_is_told_to_stay_silent(home, monkeypatch):
     class FakePopen:
         def __init__(self, argv, **kw):
             captured["req"] = json.loads(open(argv[argv.index("--in") + 1], encoding="utf-8").read())
+            self.returncode, self.pid = 0, 0
+
+        def poll(self):
+            return 0
+
+        def wait(self, timeout=None):
+            return 0
+
+        def kill(self):
+            pass
 
         def communicate(self, input=None, timeout=None):
             return b"", b""
@@ -547,6 +576,7 @@ def test_dashboard_chat_api_and_feature_switch(rig):
     assert st == 200 and s["silent"]["setting"] is True
     assert owner_req(d, "POST", "/api/chat/silent", {"on": "yes"})[0] == 400
     from jarves.features import Features
+    time.sleep(1.1)                        # other processes are picked up within a second (features._refresh)
     Features(r.cfg, r.home).set("web_chat", False)
     st, body = owner_req(d, "GET", "/api/chat/state")
     assert st == 403 and body["code"] == "CHAT_FEATURE_OFF"
@@ -661,14 +691,14 @@ def test_cli_lists_and_sets_device_pages(rig, capsys):
     tok, dev = pair(r.dash)
     assert cli.main(["web", "--set-pages", dev, "chat,home"]) == 0
     out = capsys.readouterr().out
-    assert dev in out and "chat, home" in out and "computer-only" in out
+    assert dev in out and "home, chat" in out and "computer-only" in out
     assert cli.main(["web", "--set-pages", dev, "chat,settings"]) == 1
     assert "stay on the computer" in capsys.readouterr().err
     assert cli.main(["web", "--set-pages", dev, "chat,nothing"]) == 1
     assert cli.main(["web", "--set-pages", "ffffffffffff", "chat"]) == 1
     capsys.readouterr()
     assert cli.main(["web", "--device-pages"]) == 0
-    assert "chat, home" in capsys.readouterr().out
+    assert "home, chat" in capsys.readouterr().out
 
 
 def test_the_phone_page_files_are_served_and_safe(rig):
