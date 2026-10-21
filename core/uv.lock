@@ -661,6 +661,7 @@ name = "jarves"
 version = "3.0.0"
 source = { editable = "." }
 dependencies = [
+    { name = "cryptography" },
     { name = "httpx" },
     { name = "numpy" },
     { name = "openai-agents" },
@@ -701,6 +702,7 @@ dev = [
 
 [package.metadata]
 requires-dist = [
+    { name = "cryptography", specifier = ">=46" },
     { name = "faster-whisper", marker = "extra == 'voice'", specifier = ">=1.2" },
     { name = "httpx", specifier = ">=0.27" },
     { name = "numpy", specifier = ">=2" },

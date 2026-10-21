@@ -280,7 +280,8 @@ class UpdateChecker:
             or str(build_info().get("update_base_url") or "")
             or (public_releases_url(dev_env("JARVES_RELEASES_REPO") or DEFAULT_RELEASES_REPO)
                 if self.public_keys else ""))
-        if base and not base.strip().startswith("https://"):
+        self.bad_base = bool(base and not base.strip().startswith("https://"))
+        if self.bad_base:
             base = ""                                      # never fetch an update manifest over plain HTTP
         self.base_url = base.strip().rstrip("/")
         # A different source invalidates the cached answer (e.g. base_url was just set).
@@ -363,7 +364,10 @@ class UpdateChecker:
         if not force and d.get("checked_at") and d.get("source", self.source) == self.source \
                 and self.now() - float(d.get("checked_ts") or 0) < CHECK_INTERVAL_S:
             return self.status()
-        err, rel = self._check_hosted() if self.base_url else self._check_github()
+        if self.bad_base:                                  # V4-UP-1: say why, never fall back to GitHub silently
+            err, rel = "update.base_url must be an https:// address (plain http is never used)", None
+        else:
+            err, rel = self._check_hosted() if self.base_url else self._check_github()
         if d.get("source", self.source) != self.source:
             d.pop("release", None)                         # an answer from the old source is not this source's
         d.update({"checked_at": datetime.now(timezone.utc).isoformat(timespec="seconds"), "checked_ts": self.now(),
