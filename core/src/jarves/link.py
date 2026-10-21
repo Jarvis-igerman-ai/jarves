@@ -41,7 +41,9 @@ ALLOWED: dict[str, frozenset[str]] = {
     # runtime.set (M1): show/hide the window, software mute, pause alerts - the CLI, dashboard and tray route;
     # camera.preview: the dashboard Home preview (each poll keeps it open a few seconds and returns the last frame)
     "cli": frozenset({"status.request", "core.shutdown", "debug.enable", "runtime.set", "camera.preview",
-                      "ui.open_dashboard"}),               # `jarvis web`: open the Chat page of the running Core
+                      "ui.open_dashboard",                 # `jarvis web`: open the Chat page of the running Core
+                      # terminal text chat (chat_service.py): `jarvis chat`
+                      "chat.hello", "chat.turn", "chat.cancel", "chat.command", "chat.approval_answer"}),
 }
 KNOWN_TYPES = frozenset().union(*ALLOWED.values())
 
@@ -87,6 +89,7 @@ class GodotLink:
         self.clients: set[ServerConnection] = set()
         self._server = None
         self._close_expected_until = 0.0   # a close the Core asked for / the user chose (not a fault)
+        self.on_client_closed: Callable[[Client], None] | None = None   # a text-chat terminal went away
 
     def face_client_id(self) -> str | None:
         """Id of the currently connected face (bind confirm.request/confirm.reply to it); None if no face."""
@@ -176,6 +179,11 @@ class GodotLink:
             pass
         finally:
             self.clients.discard(ws)
+            if role == "cli" and self.on_client_closed is not None:
+                try:
+                    self.on_client_closed(client)
+                except Exception:
+                    logs.error("link", "LINK_CLOSE_HOOK_FAILED", "cli close hook failed", exc=True)
             if ws is self.face:
                 self.face, self.face_client = None, None
                 if time.monotonic() < self._close_expected_until:

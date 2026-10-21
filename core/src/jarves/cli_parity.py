@@ -50,7 +50,7 @@ FEATURES: dict[str, object] = {
     "whatsapp_bridge": "whatsapp", "whatsapp_send": "whatsapp",          # SW-V4 F: jarvis whatsapp ...
     "agent_orchestrator": "agents",
     "assisted_dialing": "dial",
-    "self_tests": "selftest",
+    "self_tests": "selftest", "text_chat": "chat",
     "web_chat": "web",
 }
 

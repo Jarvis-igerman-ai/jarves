@@ -369,6 +369,9 @@ class SkillRegistry:
             raise
 
     async def call(self, name: str, raw_args: dict | str | None = None, *, origin: Origin = "model") -> ToolResult:
+        return await self._call(name, raw_args, origin=origin)   # _call tells TOOL_SINK (terminal + web chat)
+
+    async def _call(self, name: str, raw_args: dict | str | None = None, *, origin: Origin = "model") -> ToolResult:
         """Run a tool under the permission policy. origin="user" only when the deterministic command parser matched
         the user's own words; everything from a model (text agent, voice agent, ChatGPT plan) is "model"."""
         st = self._tools.get(name)
