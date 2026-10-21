@@ -1,7 +1,7 @@
 order = 37
 category = "everyday"
 pages = ["preferences"]
-features = ["adaptive_memory"]
+features = ["adaptive_memory", "prefs_in_prompt"]
 aliases = ["העדפות", "העדפות נלמדות", "לזכור העדפה", "preferences", "learned preferences", "adaptive memory", "my preferences"]
 links = ["memory", "privacy"]
 title_he = "העדפות נלמדות"
@@ -24,6 +24,10 @@ check = "active:adaptive_memory"
 [[steps]]
 he = "ענו \"כן\" כדי לשמור או \"לא\" כדי לא לשמור. בכל רגע אפשר לפתוח את העמוד \"העדפות נלמדות\" לערוך או להסיר."
 en = "Answer yes to keep it or no to drop it. Any time, open the Learned preferences page to edit or remove."
+
+[[steps]]
+he = "העדפות שאישרתם מצורפות להוראות של כל שיחה, בגודל קטן וקבוע, ואפשר לראות בדיוק מה נשלח בעמוד \"העדפות נלמדות\". המתג בעמוד, או: jarvis prefs prompt on|off|show. תקף מהשיחה הבאה."
+en = "Preferences you confirmed are added to the instructions of every conversation, within a small fixed size, and the page \"Learned preferences\" shows exactly what is sent. The switch is on the page, or: jarvis prefs prompt on|off|show. It applies from the next conversation."
 
 [[steps]]
 he = "בלי קול: jarvis prefs list, jarvis prefs add \"...\", jarvis prefs confirm ID, jarvis prefs remove ID."

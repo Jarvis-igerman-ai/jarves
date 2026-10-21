@@ -1,7 +1,7 @@
 order = 36
 category = "everyday"
 pages = ["goals"]
-features = ["goals"]
+features = ["goals", "goal_done_line"]
 aliases = ["יעדים", "יעד", "מטרה", "מטרות", "goals", "goal", "my goals", "check-in", "check in"]
 links = ["lists", "scheduler"]
 title_he = "יעדים"
@@ -24,6 +24,10 @@ check = "active:goals"
 [[steps]]
 he = "הוסיפו צעדים וסמנו אותם כשהם בוצעו. כדי לשמוע איך הולך, בקשו \"תן לי סיכום של היעדים שלי\" (לא יגיע מעצמו)."
 en = "Add steps and tick them off as you do them. To hear how it is going, ask \"give me a check-in on my goals\" (it never arrives on its own)."
+
+[[steps]]
+he = "כשמסמנים יעד כהושלם, JARVES אומר משפט קצר ורגוע אחד (\"סיימת, כל הכבוד\" בעברית, \"Done, nice work\" באנגלית), רק כשאתם ליד המחשב ולא בין 22:00 ל-07:00. לשקט מוחלט: jarvis features off goal_done_line."
+en = "When you mark a goal completed, JARVES says one short calm line (\"Done, nice work\" in English, the Hebrew equivalent if you use Hebrew), only while you are at the computer and never between 22:00 and 07:00. For total silence: jarvis features off goal_done_line."
 
 [[steps]]
 he = "בלי קול: בלוח הבקרה, בעמוד \"יעדים\", או בשורת הפקודה: jarvis goals add \"לרוץ 10 ק\\\"מ\" --by 2026-12-31, jarvis goals list, jarvis goals checkin, jarvis goals delete ID (מבקש אישור)."
