@@ -372,12 +372,27 @@ def make_skill(svc: HealthService):
 
 
 ALLOWED_ACTIONS = {"health_remediate"}
+INSTRUCTION = ("Your own health: for 'מה מצבך?', 'מה שלומך הטכני', 'how is your health / what is your status' call "
+               "health_summary and say its 2-3 sentences in the user's language; for 'מה מצא הבודק?' / 'what did the "
+               "reviewer find' call health_ai_review_summary (say honestly if it has not run). Never invent a score "
+               "or a finding.")
 
 
 def attach(core, ops) -> HealthService:
     svc = HealthService(core, ops)
     core.registry.register(make_skill(svc))
     core.registry.allowed_actions |= ALLOWED_ACTIONS
+    agent = getattr(core, "agent", None)
+    if agent is not None and hasattr(agent, "instructions"):
+        base = agent.instructions
+
+        def instructions() -> str:                      # V4-VC-8: live 21 Oct, 'מה מצבך?' was answered as small talk
+            try:
+                on = core.features.active(FEATURE)
+            except Exception:
+                on = False
+            return f"{base()}\n\n{INSTRUCTION}" if on else base()
+        agent.instructions = instructions
     svc.start()
     return svc
 
