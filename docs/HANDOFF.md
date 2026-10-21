@@ -950,3 +950,10 @@ reachable from the phone (dashboard_lan) for approvals, or PC-only?
 - Hook fix: `orchestrator/hook.py` printed the Stop reason with `ensure_ascii=False`; a Hebrew message hit the Windows console codec (UnicodeEncodeError, swallowed -> no output after the messages were already claimed). Now ASCII-escaped JSON.
 - Tests: `test_swv4_idle_writes.py` (diag batching over 10 simulated minutes, WAL/NORMAL pragma, real idle Core < 12 KB/min).
 - Open: perf gate `spawn_to_ready_s` 5.11 > 5 on this busy PC (unrelated, noise).
+
+## V4 voice campaign C2 (21 Oct 2026) - #17, branch `test/v4-campaign-c2`
+
+- Credits topped up; re-ran every blocked live scenario: 89 PASS, 2 FAIL (22/23 wake near-misses, P3 unchanged), 1 BLOCKED (62, needs OD-05 admin key). Spend about $2.8. Report: `docs/reviews/SWV4_CAMPAIGN_VOICE.md`, bugs: `SWV4_CAMPAIGN_BUG_TABLE_VOICE.md`.
+- Product fixes: V4-VC-12 `BackendTrace.finish` duplicate `model` kwarg broke the ChatGPT-plan delegation route; V4-VC-13 own-health questions now delegated; V4-VC-14 WhatsApp inbox English phrasing.
+- Harness: the WhatsApp suites restart the live session after switching the feature on; scenario 56 copies (never refreshes) the owner's ChatGPT token.
+- Open: 79/80/84/101 occasionally miss on synthetic-ASR clips (pass on re-run). No questions for the user.
