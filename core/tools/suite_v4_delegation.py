@@ -177,9 +177,10 @@ async def _prepare_plan_copy(home: Path) -> str:
     real = ChatGPTAuth(sv.REAL)
     if not real.status()["signed_in"]:
         return "BLOCKED: the owner is not signed in to ChatGPT"
-    await real.access_token()                        # refresh (if due) in the REAL home, under its lock
+    acct = real.load()                               # read-only: NEVER refresh the owner's real token (rotating refresh token)
+    if acct.get("expires_at", 0) - time.time() < 600:
+        return "BLOCKED: the owner's ChatGPT access token is (nearly) expired; not refreshing the real account"
     (home / "chatgpt").mkdir(exist_ok=True)
-    acct = real.load()
     acct = {**acct, "refresh_token": "copy-cannot-refresh", "expires_at": acct.get("expires_at", 0)}
     from jarves.chatgpt_auth import _write_private
     _write_private(home / "chatgpt" / "account.json", acct)
