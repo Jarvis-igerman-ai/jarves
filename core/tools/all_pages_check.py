@@ -236,9 +236,18 @@ def run(*, langs, widths, themes=("light",), pages=None, channel="", focus=False
                                             if "net::ERR_ABORTED" not in str(r.failure) else None)
                                         for frag in gpages:
                                             t0 = time.time()
-                                            row = check_page(p, d.url, frag.format(sid=sid), lang, width,
-                                                             reduced=reduced, focus=focus and width >= 1024,
-                                                             shots=shots if sweep == 0 else None, theme=theme, errs=errs)
+                                            for attempt in (0, 1):
+                                                row = check_page(p, d.url, frag.format(sid=sid), lang, width,
+                                                                 reduced=reduced, focus=focus and width >= 1024,
+                                                                 shots=shots if sweep == 0 else None, theme=theme,
+                                                                 errs=errs)
+                                                # Windows runners exhaust socket buffers under many page loads
+                                                # (net::ERR_NO_BUFFER_SPACE): an OS limit, not a page defect.
+                                                # Re-check once; a real defect still fails the second time.
+                                                if attempt or not any("ERR_NO_BUFFER_SPACE" in x["msg"]
+                                                                      for x in row["problems"]):
+                                                    break
+                                                time.sleep(1.0)
                                             row.update(group=group, sweep=sweep, ms=round((time.time() - t0) * 1000))
                                             rows.append(row)
                                             if not quiet:
