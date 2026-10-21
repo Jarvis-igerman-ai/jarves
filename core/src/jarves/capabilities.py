@@ -200,6 +200,10 @@ for _fid, _w, _p, _perm, _set in [
                            "rate limit)", "never paired with a real phone"),
      _pi("implemented_unverified", "never paired with a real phone on the Pi"), ["action"],
      "dashboard Devices page / `jarvis dashboard --lan`"),
+    ("mobile_access", _win("implemented_unverified", "UNIT test_mobile_*.py (pairing, tokens, scopes, rate limits, "
+                           "audit, PWA files, TLS); QR decoded once with OpenCV", "never paired with a real phone"),
+     _pi("planned", "V5 is PC-hosted; the Pi is out of scope"), ["read", "action"],
+     "dashboard Phone page / `jarvis dashboard --mobile`"),
     ("workspace_agent_edit", _win("implemented_unverified", "UNIT test_workspace_memory.py",
                                   "not checked in a real conversation"),
      _pi("implemented_unverified"), ["action", "destructive"], "dashboard Workspace page"),

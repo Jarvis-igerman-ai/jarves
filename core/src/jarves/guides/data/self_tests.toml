@@ -1,0 +1,48 @@
+order = 39
+category = "system"
+pages = ["speed"]
+features = ["self_tests"]
+aliases = ["בדיקת מהירות", "בדיקה עצמית טכנית", "מהירות", "self test", "selftest", "speed test", "speedtest", "health and speed", "is anything broken", "how fast are you"]
+links = ["health", "self_check", "scheduler"]
+error_codes = ["SELFTEST_FAIL", "SELFTEST_WARN", "SPEEDTEST_FAIL", "SPEEDTEST_WARN", "SPEEDTEST_FAILED", "SELFSPEED_SKIPPED"]
+title_he = "בדיקה עצמית ובדיקת מהירות"
+title_en = "Self-test & speed test"
+what_he = "ג'ארביס בודק את ההתקנה שלו (הגדרות, מסדי נתונים, הרשאות, חיבורים, מדריכים, שפות, פרטיות היומן, דיסק, עדכונים) ומודד כמה הוא מהיר וקל (הפעלה, מעבד, זיכרון, דיסק, לוח הבקרה, כלים, זמן עד קול ראשון). הוא אומר מה איטי או שבור ואם זה החמיר לעומת הפעמים הקודמות."
+what_en = "JARVES checks his own installation (config, databases, permissions, connections, guides, languages, log privacy, disk, updates) and measures how fast and light he is (start-up, CPU, memory, disk, dashboard, tools, time to first sound). He says what is slow or broken and whether it got worse than before."
+say = [["תבדוק את עצמך מבחינה טכנית", "Run a self-test"], ["תריץ בדיקת מהירות", "Run a speed test"]]
+expect_he = "משפט אחד עם התוצאה, והפרטים בעמוד 'תקינות ומהירות'. הבדיקה העצמית רצה כל יום ב-08:15, בדיקת המהירות פעם בשבוע (ראשון 13:00), אף פעם לא בשעות השקט ולא באמצע שיחה."
+expect_en = "One sentence with the result, the details on the Health & speed page. The self-test runs daily at 08:15, the speed test weekly (Sunday 13:00), never in quiet hours and never during a conversation."
+test = "feature"
+test_he = "הבדיקה רק מוודאת שהרכיב מותקן. הבדיקות עצמן רצות מהעמוד 'תקינות ומהירות' או מ-jarvis selftest."
+test_en = "The check only sees that the component is installed. The tests themselves run from the Health & speed page or jarvis selftest."
+cost_he = "חינם. הבדיקות מקומיות ורק קוראות. מול OpenAI נשלחת בקשת HEAD אחת בלי מפתח: אין עלות ואין אסימונים."
+cost_en = "Free. The tests are local and read-only. Against OpenAI only one HEAD request without a key is sent: no cost, no tokens."
+privacy_he = "הכל נשאר במחשב. התוצאות נשמרות בקובץ קטן מקומי (selfspeed.json). בדיקת הפרטיות של היומן לא מציגה את התוכן שמצאה. בדיקה מעמיקה לא מקליטה ולא מדברת אלא אם ביקשתם --audio."
+privacy_en = "Everything stays on this computer. Results are kept in one small local file (selfspeed.json). The log privacy check never shows what it found. The deep test neither records nor speaks unless you ask for --audio."
+
+[[steps]]
+he = "פתחו את העמוד 'תקינות ומהירות' ולחצו 'הרץ עכשיו' ליד הבדיקה העצמית או בדיקת המהירות."
+en = "Open the Health & speed page and press Run now next to the self-test or the speed test."
+action = "open:#/speed"
+
+[[steps]]
+he = "מהטרמינל: בדיקה מהירה, או מעמיקה (הפעלת ליבה זמנית, מודל מילת ההפעלה, התקני שמע)."
+en = "From the terminal: the quick test, or the deep one (a temporary Core start, the wake model, audio devices)."
+action = "command:jarvis selftest --deep"
+
+[[steps]]
+he = "בדיקת מהירות מול התקציב ומול חמש ההרצות האחרונות. החמרה של יותר מ-20 אחוז מסומנת באזהרה."
+en = "The speed test against the budget and the last five runs. Getting more than 20 percent worse is a warning."
+action = "command:jarvis speedtest"
+
+[[problems]]
+he = "הבדיקה המתוזמנת לא רצה"
+en = "The scheduled test did not run"
+fix_he = "בשעות השקט (22:00-07:00) ובזמן שיחה קולית היא מדולגת, נרשמת ביומן ולא נדחית להמשך. אפשר להריץ ידנית בכל שעה."
+fix_en = "In quiet hours (22:00-07:00) and during a voice conversation it is skipped, logged and not queued. You can run it by hand at any time."
+
+[[problems]]
+he = "ערכים חסרים בבדיקת המהירות"
+en = "Some speed values are missing"
+fix_he = "ערכים כמו זמן עד קול ראשון או זמני כלים מופיעים רק אחרי מספיק שיחות אמיתיות. מעבד וזיכרון נמדדים רק כשג'ארביס פועל."
+fix_en = "Values such as time to first sound or tool times appear only after enough real conversations. CPU and memory are measured only while JARVES is running."

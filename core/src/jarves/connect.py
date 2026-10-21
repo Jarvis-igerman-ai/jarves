@@ -77,7 +77,6 @@ class Item:
 TITLES: dict[str, tuple[str, str, bool]] = {
     "openai": ("מפתח OpenAI (API)", "OpenAI API key", False),
     "chatgpt": ("תוכנית ChatGPT", "ChatGPT plan", True),
-    "openai-admin": ("מפתח אדמין של OpenAI (חשבון אמיתי, לא חובה)", "OpenAI admin key (real bill, optional)", True),
     "google": ("גוגל (יומן + ג'ימייל)", "Google (Calendar + Gmail)", False),
     "telegram": ("טלגרם", "Telegram", False),
     "pear": ("Pear Desktop (תוסף API Server)", "Pear Desktop (API Server plugin)", False),
