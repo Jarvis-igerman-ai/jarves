@@ -114,15 +114,36 @@ PAGES.connections = async function () {
   const cmsg = el("div", { class: "small", dir: "auto" });
   const guided = el("div", { class: "card", id: "guided-setup" }, el("h2", {}, tx("הגדרה מודרכת של כל החשבונות", "Guided setup of every account")),
     el("div", { class: "muted small" }, tx("אותה בדיקה כמו בפקודה ", "The same check as the command "), el("span", { class: "mono" }, cn.command + " --status")),
-    el("div", { class: "checks" }, cn.items.map((i) => [
-      el("div", {}, tx(i.title_he, i.title_en)),
-      el("div", {}, i.state === "connected" ? pill("ok", tx("מחובר", "connected")) : i.state === "attention" ? pill("medium", tx("דורש טיפול", "needs attention"))
-        : pill("plain", tx("חסר", "missing")), " ", el("span", { class: "muted small" }, tx(i.detail_he, i.detail_en)),
-        i.state !== "connected" && i.fix_en ? el("div", { class: "small" }, tx(i.fix_he, i.fix_en)) : null)])),
+    el("div", { class: "checks" }, cn.items.map((i) => {
+      const chk = i.check;                                       // the read-only connectivity test (cached for a minute)
+      const CK = { working: ["ok", "עובד", "working"], broken: ["fail", "שבור", "broken"], unreachable: ["medium", "לא זמין", "unreachable"],
+        not_tested: ["plain", "לא נבדק", "not tested"] }[chk ? chk.state : "not_tested"];
+      const act2 = (path, body) => async () => { try { await post(path, body); } catch (e) { cmsg.textContent = e.message; } route(true); };
+      return [
+        el("div", {}, tx(i.title_he, i.title_en)),
+        el("div", {}, i.status === "connected" ? pill("ok", tx("מחובר", "connected")) : i.status === "skipped" ? pill("plain", tx("דולג", "skipped"))
+          : pill("medium", tx("לא הוגדר", "not set")), " ",
+          i.status === "connected" ? pill(CK[0], tx(CK[1], CK[2])) : null, " ",
+          el("span", { class: "muted small" }, tx(i.detail_he, i.detail_en), chk && chk.detail ? " · " + chk.detail : ""),
+          i.status !== "connected" && i.fix_en ? el("div", { class: "small" }, tx(i.fix_he, i.fix_en)) : null,
+          chk && chk.fix && chk.state !== "working" ? el("div", { class: "small mono" }, chk.fix) : null,
+          el("div", { class: "actions" },
+            i.status !== "connected" ? el("button", { type: "button", class: "primary", onclick: async () => {
+              try { const r = await post("/api/connect/run", { id: i.id }); cmsg.textContent = tx(r.message_he, r.message_en); }
+              catch (e) { cmsg.textContent = e.message; } } }, tx("חיבור", "Connect")) : null,
+            i.status === "not_set" ? el("button", { type: "button", onclick: act2("/api/connect/skip", { id: i.id, skip: true }) }, tx("דילוג", "Skip")) : null,
+            i.status === "skipped" ? el("button", { type: "button", onclick: act2("/api/connect/skip", { id: i.id, skip: false }) }, tx("ביטול דילוג", "Un-skip")) : null,
+            i.status === "connected" ? el("button", { type: "button", onclick: async () => { cmsg.textContent = tx("בודק…", "Testing…");
+              await act2("/api/connect/check", { id: i.id })(); } }, tx("בדיקה חוזרת", "Test again")) : null))];
+    })),
     el("div", { class: "actions" }, el("button", { type: "button", class: "primary", onclick: async () => {
       try { const r = await post("/api/connect/run"); cmsg.textContent = tx(r.message_he, r.message_en); }
       catch (e) { cmsg.textContent = e.message; }
     } }, tx("הפעלת הגדרה מודרכת", "Run guided setup")), cmsg));
+  if (!window.__connTested && cn.items.some((i) => i.status === "connected" && !i.check)) {   // test the connected ones once, in the background
+    window.__connTested = true;
+    post("/api/connect/check").then(() => route(true), () => {});
+  }
   const msg = el("div", { class: "small", dir: "auto" });
   const act = async (fn) => { try { await fn(); } catch (e) { msg.textContent = e.message; } };
   const start = el("button", { type: "button", class: "primary big", disabled: g.login.running || null, onclick: () => act(async () => {

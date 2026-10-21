@@ -108,6 +108,7 @@ DEFAULTS: dict[str, Any] = {
     "connect.nudge": True,
     "connect.last_nudge": 0.0,
     "connect.skipped": [],                      # items the owner chose "never ask again" for (jarvis connect)
+    "connect.state": {},                        # per-integration state: id -> connected | skipped (jarvis connect)
     "files.quota_mb": 200,
     "files.max_file_mb": 10,
 }

@@ -136,7 +136,7 @@ def test_status_json_reflects_connected_accounts(home, capsys):
     finally:
         srv.close()
     st = {i["id"]: i["state"] for i in data["items"]}
-    assert st == {"google": "missing", "telegram": "connected", "pear": "connected", "wake": "connected",
+    assert st == {"openai": "missing", "chatgpt": "missing", "openai_admin": "missing", "google": "missing", "telegram": "connected", "pear": "connected", "wake": "connected",
                   "instagram": "missing", "home": "missing"}
     assert data["all_connected"] is False and data["command"] == "jarvis connect"
     assert GOOD_TOKEN not in json.dumps(data)

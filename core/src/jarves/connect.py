@@ -47,7 +47,7 @@ from .channels_common import StepSkipped, is_skip_word, read_json, read_secret, 
 FEATURE = "guided_setup"
 COMMAND = "jarvis connect"
 STATE_FILE = "connect.json"
-ONLY = ("google", "telegram", "pear", "wake", "instagram", "home")
+ONLY: list[str] = []                 # the registry order; other modules add to it with register()
 BOTFATHER_URL = "https://t.me/BotFather"
 TOKEN_RE = re.compile(r"(?<![\w-])\d{5,15}:[A-Za-z0-9_-]{30,80}(?![\w-])")     # a Telegram bot token
 NUDGE_EVERY_S = 24 * 3600
@@ -74,7 +74,10 @@ class Item:
     fix_en: str = ""
 
 
-TITLES = {
+TITLES: dict[str, tuple[str, str, bool]] = {
+    "openai": ("מפתח OpenAI (API)", "OpenAI API key", False),
+    "chatgpt": ("תוכנית ChatGPT", "ChatGPT plan", True),
+    "openai_admin": ("מפתח אדמין של OpenAI (חשבון אמיתי, לא חובה)", "OpenAI admin key (real bill, optional)", True),
     "google": ("גוגל (יומן + ג'ימייל)", "Google (Calendar + Gmail)", False),
     "telegram": ("טלגרם", "Telegram", False),
     "pear": ("Pear Desktop (תוסף API Server)", "Pear Desktop (API Server plugin)", False),
@@ -89,6 +92,45 @@ QUESTIONS = {
     "instagram": ("לחבר עכשיו אינסטגרם?", "Connect Instagram now?"),
     "home": ("לחבר עכשיו Home Assistant?", "Connect Home Assistant now?"),
 }
+
+# the three states the owner sees (a per-integration state that is persisted: connected / skipped / not set)
+SHOWN = {"connected": ("מחובר", "connected"), "skipped": ("דולג", "skipped"), "not_set": ("לא הוגדר", "not set")}
+EXTRA_STATUS: dict[str, Callable] = {}      # id -> fn(item, home, cfg): fills the Item of a registered integration
+EXTRA_STEPS: dict[str, Callable] = {}       # id -> fn(connector, item): walks the owner through it
+
+
+@dataclass
+class Integration:
+    """One account/integration `jarvis connect` knows. Other modules add theirs with register(); the optional
+    `status` fills the Item (state/detail/fix), `step` walks the owner through it, `check` is a read-only probe
+    (connect_checks.register_check) that proves it still works."""
+    id: str
+    title_he: str
+    title_en: str
+    optional: bool = True
+    status: Callable | None = None
+    step: Callable | None = None
+    check: Callable | None = None
+    question: tuple[str, str] | None = None
+
+
+def register(i: Integration) -> None:
+    """Add (or replace) an integration; it then appears in `jarvis connect`, --all, --check and the dashboard."""
+    TITLES[i.id] = (i.title_he, i.title_en, i.optional)
+    if i.question:
+        QUESTIONS[i.id] = i.question
+    if i.status:
+        EXTRA_STATUS[i.id] = i.status
+    if i.step:
+        EXTRA_STEPS[i.id] = i.step
+    if i.check:
+        from .connect_checks import register_check
+        register_check(i.id, i.check)
+    if i.id not in ONLY:
+        ONLY.append(i.id)
+
+
+ONLY.extend(["openai", "chatgpt", "google", "telegram", "pear", "wake", "instagram", "home", "openai_admin"])
 
 
 # ---------------------------------------------------------------------- the clipboard
@@ -272,7 +314,46 @@ def status_items(home: Path, cfg=None, *, pear_probe: Callable[[str], bool] = pe
     else:
         it.detail_he, it.detail_en = "לא מחובר", "not connected"
         it.fix_he, it.fix_en = "jarvis home start", "jarvis home start"
+
+    for fid, fn in list(EXTRA_STATUS.items()):                 # registered by other modules (and the OpenAI trio below)
+        if fid in items:
+            try:
+                fn(items[fid], home, cfg)
+            except Exception as e:                             # one broken status must not hide the others
+                logs.warn("connect", "CONNECT_STATUS_ERROR", "an integration status could not be read", step=fid,
+                          error=type(e).__name__)
     return [items[i] for i in ONLY]
+
+
+def _status_openai(it: Item, home: Path, cfg) -> None:
+    from .config import openai_key_present
+    if openai_key_present():
+        it.state, it.detail_he, it.detail_en = "connected", "מפתח שמור", "key saved"
+    else:
+        it.detail_he, it.detail_en = "אין מפתח", "no key"
+        it.fix_he, it.fix_en = "jarvis key", "jarvis key"
+
+
+def _status_chatgpt(it: Item, home: Path, cfg) -> None:
+    from .chatgpt_auth import ChatGPTAuth
+    st = ChatGPTAuth(home).status()
+    if st.get("signed_in") and st.get("plan_usage"):
+        it.state, it.detail_he, it.detail_en = "connected", "מחובר", f"signed in ({st.get('email') or 'ChatGPT account'})"
+    else:
+        it.detail_he, it.detail_en = "לא מחובר", "not signed in"
+        it.fix_he, it.fix_en = "jarvis chatgpt login", "jarvis chatgpt login"
+
+
+def _status_admin(it: Item, home: Path, cfg) -> None:
+    import os
+    if os.environ.get("OPENAI_ADMIN_KEY", "").strip():
+        it.state, it.detail_he, it.detail_en = "connected", "מפתח שמור", "key saved"
+    else:
+        it.detail_he, it.detail_en = "אין מפתח", "no key"
+        it.fix_he, it.fix_en = "jarvis key --admin", "jarvis key --admin"
+
+
+EXTRA_STATUS.update({"openai": _status_openai, "chatgpt": _status_chatgpt, "openai_admin": _status_admin})
 
 
 PEAR_STEPS_HE = ("1. פותחים את Pear Desktop (אפשר: jarvis music open). 2. בתפריט של Pear: Plugins > API Server וסימון V "
@@ -281,9 +362,23 @@ PEAR_STEPS_EN = ("1. Open Pear Desktop (you can run: jarvis music open). 2. In P
                  "(Hostname 127.0.0.1, Port 26538). 3. Run " + COMMAND + " again.")
 
 
+def shown_state(it: Item, never: list[str]) -> str:
+    """connected / skipped / not_set: what the owner sees (a skipped integration that is in fact connected is connected)."""
+    return "connected" if it.state == "connected" else "skipped" if it.id in never else "not_set"
+
+
 def items_json(home: Path, cfg=None, **kw) -> dict:
+    from .connect_checks import cached
     items = status_items(home, cfg, **kw)
-    return {"items": [asdict(i) for i in items], "command": COMMAND, "last_run": last_run(home).get("last_run", 0),
+    never = never_list(home)
+    rows = []
+    for i in items:
+        d = asdict(i)
+        d["status"] = shown_state(i, never)
+        c = cached(home, i.id) if i.state == "connected" else None
+        d["check"] = c.to_dict() if c else None
+        rows.append(d)
+    return {"items": rows, "command": COMMAND, "last_run": last_run(home).get("last_run", 0),
             "all_connected": all(i.state == "connected" for i in items if not i.optional)}
 
 
@@ -331,6 +426,38 @@ def set_never(home: Path, ids: list[str], actor: str = "cli") -> None:
     db = open_db(home)
     try:
         db.set_setting("connect.skipped", sorted(set(ids)), actor=actor)
+        v = db.setting("connect.state")
+        v = {k: s for k, s in (v if isinstance(v, dict) else {}).items() if s != "skipped" or k in ids}
+        v.update({k: "skipped" for k in ids})
+        db.set_setting("connect.state", v, actor=actor)
+    finally:
+        db.close()
+
+
+def state_map(home: Path) -> dict[str, str]:
+    """The persisted per-integration state: id -> connected | skipped (anything absent is not set)."""
+    from .userdata import open_db
+    if not (Path(home) / "memory.db").exists():
+        return {}
+    db = open_db(home)
+    try:
+        v = db.setting("connect.state")
+    finally:
+        db.close()
+    out = {k: s for k, s in (v if isinstance(v, dict) else {}).items() if k in ONLY and s in ("connected", "skipped")}
+    for k in never_list(home):
+        out[k] = "skipped"
+    return out
+
+
+def record_connected(home: Path, fid: str) -> None:
+    from .userdata import open_db
+    db = open_db(home)
+    try:
+        v = db.setting("connect.state")
+        v = dict(v) if isinstance(v, dict) else {}
+        v[fid] = "connected"
+        db.set_setting("connect.state", v, actor="cli")
     finally:
         db.close()
 
@@ -344,8 +471,13 @@ class Connector:
                  google_factory: Callable | None = None, wake_runner: Callable[[], int] | None = None,
                  pair_polls: int = 36, pair_poll_timeout: int = 5, pear_pair_wait_s: float = 90.0,
                  pear_transport=None, optional_runners: dict[str, Callable[[], int]] | None = None,
-                 skip: list[str] | None = None, reset_skips: bool = False) -> None:
-        self.reset_skips = reset_skips
+                 skip: list[str] | None = None, reset_skips: bool = False, show_all: bool = False,
+                 check_only: bool = False, check_first: bool = True, fresh_checks: bool = False,
+                 check_transports: dict | None = None, wake_loader: Callable | None = None) -> None:
+        self.reset_skips, self.show_all, self.check_only = reset_skips, show_all, check_only
+        self.check_first, self.fresh_checks, self.check_transports = check_first, fresh_checks, check_transports or {}
+        self.wake_loader = wake_loader
+        self.check_results: dict = {}
         from .setup_wizard import ConsoleIO
         self.home, self.cfg = Path(home), cfg
         self.raw_io = io or ConsoleIO()
@@ -381,40 +513,63 @@ class Connector:
 
     # --- run
     def run(self) -> int:
+        from .connect_checks import BROKEN
         ids = [self.only] if self.only else list(ONLY)
         self.h("JARVES: חיבור חשבונות מודרך", "JARVES: guided account setup")
         before = {i.id: i for i in status_items(self.home, self.cfg, pear_probe=self.pear_probe)}
         never = never_list(self.home)
-        if self.reset_skips and never:
-            set_never(self.home, [])
-            never = []
-            self.h("הדילוגים הקבועים נוקו.", "The 'never ask again' list was cleared.")
-        if self.only in never and not self.status_only:       # asking for an item by name brings it back
+        if self.reset_skips:
+            if never:
+                set_never(self.home, [])
+                never = []
+            self.h("הדילוגים נוקו: כל מה שלא מחובר יוצג שוב.", "The skipped list was cleared: everything not connected is offered again.")
+        if self.only and self.only in never:                  # asking for an integration by name brings it back
             never = [x for x in never if x != self.only]
             set_never(self.home, never)
-        if self.status_only:
+        if self.status_only or self.show_all:
             for fid in ids:
-                if fid in never and before[fid].state != "connected":
+                if self.show_all and before[fid].state != "connected" and fid in never:
                     self.results[fid] = "skipped"
-                    self.notes[fid] = (f"jarvis connect --only {fid}", f"run {COMMAND} --only {fid}")
-            self._summary(ids, before, show_actions=False)
+                    self.notes[fid] = (f"jarvis connect {fid}", f"run {COMMAND} {fid}")
+                elif self.status_only and fid in never and before[fid].state != "connected":
+                    self.results[fid] = "skipped"
+                    self.notes[fid] = (f"jarvis connect {fid}", f"run {COMMAND} {fid}")
+            self._summary(ids, before, show_actions=False, three=self.show_all)
             return 0
-        hidden = [f for f in ids if f in never]               # "never ask again": not even mentioned
-        ids = [f for f in ids if f not in hidden]
+        connected = [f for f in ids if before[f].state == "connected"]
+        if self.check_only:
+            checks = self._run_checks(connected)
+            if not connected:
+                self.h("אין עדיין שום דבר מחובר לבדיקה.", "Nothing is connected yet, so there is nothing to test.")
+            return 1 if any(c.state == BROKEN for c in checks.values()) else 0
+        failing: list[str] = []
+        if self.only:
+            todo = ids
+        else:
+            checks = self._run_checks(connected) if self.check_first else {}
+            failing = [f for f in connected if checks.get(f) is not None and checks[f].state == BROKEN]
+            if failing and not self.yes:
+                failing = [f for f in failing if self._yn(f"{TITLES[f][0]} לא עובד. לחבר מחדש עכשיו?",
+                                                          f"{TITLES[f][1]} is not working. Reconnect it now?", True)]
+            else:
+                failing = []
+            todo = failing + [f for f in ids if before[f].state != "connected" and f not in never]
+        if not todo:
+            self.h("הכול מחובר או שדילגת עליו, אין מה להגדיר. (jarvis connect --all מציג הכול)",
+                   "Nothing left to set up: everything is connected or skipped. (jarvis connect --all shows everything)")
+            return 0
+        ids = todo
         try:
             for fid in ids:
                 it = before[fid]
-                if it.state == "connected" and fid not in ("google", "telegram"):
-                    self.results[fid] = "connected"
-                    continue
                 if fid in self.skip_now:
-                    self._skipped(fid, "skipped (--skip)")
+                    self._skipped(fid, "skipped (--skip)", persist=False)
                     continue
                 self.h(f"\n== {it.title_he} ==", f"== {it.title_en} ==")
                 if it.state != "connected" and not self._gate(fid):
                     continue
                 try:
-                    getattr(self, "step_" + fid)(it)
+                    (EXTRA_STEPS.get(fid) and (lambda i: EXTRA_STEPS[fid](self, i)) or getattr(self, "step_" + fid))(it)
                 except StepSkipped:
                     self._finish_clip()
                     self._skipped(fid, "skipped")
@@ -430,27 +585,41 @@ class Connector:
         self._summary(ids, {i.id: i for i in status_items(self.home, self.cfg, pear_probe=self.pear_probe)})
         return 1 if "failed" in self.results.values() else 0
 
-    def _skipped(self, fid: str, why: str) -> None:
+    def _run_checks(self, ids: list[str]) -> dict:
+        """Run the read-only probes of the connected integrations (concurrent, cached a minute) and print the result."""
+        from .connect_checks import WORDS as CW, CheckCtx, run_checks
+        if not ids:
+            return {}
+        self.h("בודק שהחיבורים באמת עובדים (קריאה בלבד)...", "Testing that the connected accounts really work (read-only)...")
+        res = run_checks(CheckCtx(self.home, self.cfg, transports=self.check_transports, pear_probe=self.pear_probe,
+                                  wake_loader=self.wake_loader), ids, fresh=self.fresh_checks)
+        for fid, r in res.items():
+            word = clilang.pick(*CW[r.state])
+            title = TITLES[fid][1] if clilang.current() == "en" else TITLES[fid][0]
+            tail = (f"  {r.detail}" if r.detail else "") + (f"  -> {r.fix}" if r.fix and r.state != "working" else "")
+            self.io.out(f"  {title}: {word}{tail}")
+        self.check_results = res
+        return res
+
+    def _skipped(self, fid: str, why: str, persist: bool = True) -> None:
         self.results[fid] = "skipped"
-        self.notes[fid] = (f"jarvis connect --only {fid}", f"run {COMMAND} --only {fid}")
+        self.notes[fid] = (f"jarvis connect {fid}", f"run {COMMAND} {fid}")
         self.h(f"דילגנו על {TITLES[fid][0]}.", f"Skipped {TITLES[fid][1]}.")
+        if persist:                                              # remembered: never offered again unless asked by name
+            set_never(self.home, never_list(self.home) + [fid])
+            self.h(f"לא אציע את זה שוב. לחיבור מאוחר יותר: {COMMAND} {fid}",
+                   f"I will not offer it again. To connect it later: {COMMAND} {fid}  (or {COMMAND} --reset-skipped)")
 
     def _gate(self, fid: str) -> bool:
-        """The first prompt of every step: Continue / Skip now / Never ask again. True = go on with the step."""
+        """The first prompt of every step: Continue / Skip (remembered). True = go on with the step."""
         if self.yes:
             return True
         q = QUESTIONS.get(fid)
         if q:
             self.h(*q)
-        a = (self.raw_io.read("[C]ontinue / [S]kip now / [N]ever ask again (Enter = continue): ") or "").strip().lower()
-        if is_skip_word(a, ("s", "skip")):
+        a = (self.raw_io.read("[C]ontinue / [S]kip (not offered again) (Enter = continue): ") or "").strip().lower()
+        if is_skip_word(a, ("s", "skip", "n", "never", "no")):
             self._skipped(fid, "skipped")
-            return False
-        if is_skip_word(a, ("n", "never", "no")):
-            set_never(self.home, never_list(self.home) + [fid])
-            self._skipped(fid, "skipped")
-            self.h(f"לא אשאל שוב. לחיבור מאוחר יותר: {COMMAND} --only {fid}",
-                   f"I will not ask again. To connect later: {COMMAND} --only {fid}  (or {COMMAND} --reset-skips)")
             return False
         return True
 
@@ -460,20 +629,24 @@ class Connector:
         for fid in ids:
             if fid in self.results:
                 items[fid] = {"state": self.results[fid], "at": time.time()}
+                if self.results[fid] == "connected":
+                    record_connected(self.home, fid)
         try:
             write_private_json(state_file(self.home), {"last_run": time.time(), "items": items})
         except OSError:
             logs.warn("connect", "CONNECT_STATE_NOT_SAVED", "could not save connect.json")
 
-    def _summary(self, ids: list[str], items: dict[str, Item], show_actions: bool = True) -> None:
+    def _summary(self, ids: list[str], items: dict[str, Item], show_actions: bool = True, three: bool = False) -> None:
         rows = []
         for fid in ids:
             it = items[fid]
             state = self.results.get(fid) or it.state
             word = WORDS[state]
+            if three:
+                word = SHOWN["connected" if it.state == "connected" else "skipped" if state == "skipped" else "not_set"]
             next_he, next_en = self.notes.get(fid) or ((it.fix_he, it.fix_en) if state in ("missing", "attention", "failed") else ("", ""))
             if state == "skipped":
-                next_he, next_en = f"דולג (מריצים {COMMAND} --only {fid})", f"(run {COMMAND} --only {fid})"
+                next_he, next_en = f"(מריצים {COMMAND} {fid})", f"(run {COMMAND} {fid})"
                 word = ("דולג", "skipped")
             title = it.title_en if clilang.current() == "en" else it.title_he if clilang.current() == "he" \
                 else f"{it.title_he} / {it.title_en}"
@@ -485,7 +658,10 @@ class Connector:
             self.io.out(f"  {t:<{w1}}  {s:<{w2}}  {nxt[0]}")
             for extra in nxt[1:]:
                 self.io.out(f"  {'':<{w1}}  {'':<{w2}}  {extra}")
-        if not show_actions:
+        if not show_actions and three:
+            self.io.out(clilang.fmt(f"הכול מוצג, שום דבר לא שונה. {COMMAND} --reset-skipped מחזיר את מה שדילגת.",
+                                    f"Everything shown, nothing was changed.  {COMMAND} --reset-skipped brings skipped ones back."))
+        elif not show_actions:
             self.io.out(clilang.fmt(f"המצב בלבד, שום דבר לא שונה. הרצה: {COMMAND}",
                                     f"Status only, nothing was changed.  Run: {COMMAND}"))
 
@@ -588,6 +764,10 @@ class Connector:
                 self.results["pear"] = "attention"
                 self.notes["pear"] = (PEAR_STEPS_HE, PEAR_STEPS_EN)
                 return
+        if (self.home / "pear_client_id.paired").exists():
+            self.results["pear"] = "connected"
+            self.h("Pear כבר מחובר.", "Pear is already paired.")
+            return
         from .skills.music import MusicError, PearDesktopPlayer
         self.h("Pear עונה. בחלון של Pear יופיע Allow: לוחצים עליו (פעם אחת).",
                "Pear answers. A dialog with Allow appears in Pear's window: click it (once).")
@@ -620,6 +800,24 @@ class Connector:
         else:
             self.results["wake"] = "attention"
             self.notes["wake"] = ("בדקו את המיקרופון ואז: jarvis wake test --apply", "Check the microphone, then: jarvis wake test --apply")
+
+    def _cli_step(self, fid: str, args: list[str], note: tuple[str, str]) -> None:
+        """Run one of the existing interactive commands (jarvis key / chatgpt login) in this terminal."""
+        if self.yes:
+            self.results[fid] = "skipped"
+            self.notes[fid] = note
+            return
+        run = self.optional_runners.get(fid) or (lambda: subprocess.run([sys.executable, "-m", "jarves", *args]).returncode)
+        self._wizard_result(fid, run(), fix=note)
+
+    def step_openai(self, it: Item) -> None:
+        self._cli_step("openai", ["key"], ("jarvis key", "jarvis key"))
+
+    def step_chatgpt(self, it: Item) -> None:
+        self._cli_step("chatgpt", ["chatgpt", "login"], ("jarvis chatgpt login", "jarvis chatgpt login"))
+
+    def step_openai_admin(self, it: Item) -> None:
+        self._cli_step("openai_admin", ["key", "--admin"], ("jarvis key --admin", "jarvis key --admin"))
 
     def _optional(self, fid: str, label: tuple[str, str], runner_name: str) -> None:
         if self.yes:
@@ -690,17 +888,22 @@ def maybe_nudge(db, alerts, *, home: Path, features=None, clock: Callable[[], fl
 
 # ---------------------------------------------------------------------- CLI
 def add_cli(sub) -> None:
-    c = sub.add_parser("connect", help="ONE guided command: checks Google, Telegram, the Pear plugin and the wake "
-                                       "word and walks you through only what is missing (opens the pages, watches "
-                                       "the clipboard and Downloads, pairs by itself)")
-    c.add_argument("--only", choices=list(ONLY), help="just this one")
+    c = sub.add_parser("connect", help="guided setup of the accounts NOT yet set up (skipped ones are not shown again); "
+                                       "first it tests the connected ones; --all shows everything, "
+                                       "`connect <name>` runs one, --check only tests")
+    c.add_argument("name", nargs="?", help="run just this integration (also un-skips it); one of: " + ", ".join(ONLY))
+    c.add_argument("--only", help="same as the name")
+    c.add_argument("--all", action="store_true", help="list every integration with its state (connected / skipped / not set)")
+    c.add_argument("--check", action="store_true", help="read-only test of every connected integration "
+                                                        "(working / broken / unreachable); sends and changes nothing")
     c.add_argument("--status", action="store_true", help="show what is connected; change nothing")
     c.add_argument("--yes", action="store_true", help="accept the default answers and skip the optional accounts")
-    c.add_argument("--json", action="store_true", help="with --status: machine-readable output")
+    c.add_argument("--json", action="store_true", help="with --status / --all / --check: machine-readable output")
     c.add_argument("--reminders", choices=["on", "off"], help="the once-a-day 'Google is not connected' reminder")
-    c.add_argument("--skip", help="comma-separated items to skip in this run, e.g. --skip telegram,instagram "
-                                  "(items: " + ", ".join(ONLY) + ")")
-    c.add_argument("--reset-skips", action="store_true", help="forget every 'never ask again' choice")
+    c.add_argument("--skip", help="comma-separated items to skip in this run only, e.g. --skip telegram,instagram")
+    c.add_argument("--reset-skipped", "--reset-skips", dest="reset_skips", action="store_true",
+                   help="forget every skipped integration so it is offered again")
+    c.add_argument("--no-check", action="store_true", help="do not test the connected accounts first")
 
 
 def cmd_connect(a, cfg, home) -> int:
@@ -717,28 +920,39 @@ def cmd_connect(a, cfg, home) -> int:
         clilang.say(f"התזכורת היומית: {'דולקת' if a.reminders == 'on' else 'כבויה'}.", f"Reminders {a.reminders}.")
         return 0
     skip = [x.strip().lower() for x in (getattr(a, "skip", None) or "").split(",") if x.strip()]
-    bad = [x for x in skip if x not in ONLY]
+    only = (getattr(a, "name", None) or getattr(a, "only", None) or "").strip().lower() or None
+    bad = [x for x in skip + ([only] if only else []) if x not in ONLY]
     if bad:
-        print(f"Unknown item(s) for --skip: {', '.join(bad)}. Items: {', '.join(ONLY)}", file=sys.stderr)
+        print(f"Unknown item(s): {', '.join(bad)}. Items: {', '.join(ONLY)}", file=sys.stderr)
         return 2
-    if getattr(a, "json", False) and getattr(a, "status", False):
+    want_json = bool(getattr(a, "json", False))
+    if want_json and (getattr(a, "status", False) or getattr(a, "all", False)):
         print(json.dumps(items_json(home, cfg), ensure_ascii=False, indent=1))
         return 0
-    return Connector(home, cfg, yes=bool(getattr(a, "yes", False)), only=getattr(a, "only", None),
-                     status_only=bool(getattr(a, "status", False)), skip=skip,
-                     reset_skips=bool(getattr(a, "reset_skips", False))).run()
+    c = Connector(home, cfg, yes=bool(getattr(a, "yes", False)), only=only,
+                  status_only=bool(getattr(a, "status", False)), skip=skip,
+                  reset_skips=bool(getattr(a, "reset_skips", False)), show_all=bool(getattr(a, "all", False)),
+                  check_only=bool(getattr(a, "check", False)), check_first=not getattr(a, "no_check", False))
+    if want_json and getattr(a, "check", False):
+        from .connect_checks import CheckCtx, run_checks
+        ids = [i.id for i in status_items(home, cfg) if i.state == "connected" and (not only or i.id == only)]
+        res = run_checks(CheckCtx(home, cfg), ids, fresh=True)
+        print(json.dumps({k: v.to_dict() for k, v in res.items()}, ensure_ascii=False, indent=1))
+        return 1 if any(v.state == "broken" for v in res.values()) else 0
+    return c.run()
 
 
 # ---------------------------------------------------------------------- feature + dashboard
-def _launch_console() -> bool:
+def _launch_console(fid: str | None = None) -> bool:
     """Open `jarvis connect` in its own console window (it needs the keyboard). Windows only; elsewhere False."""
     if sys.platform != "win32":
         return False
-    subprocess.Popen([sys.executable, "-m", "jarves", "connect"], creationflags=subprocess.CREATE_NEW_CONSOLE)
+    subprocess.Popen([sys.executable, "-m", "jarves", "connect"] + ([fid] if fid else []), creationflags=subprocess.CREATE_NEW_CONSOLE)
     return True
 
 
-LAUNCH: Callable[[], bool] = _launch_console
+LAUNCH: Callable[..., bool] = _launch_console
+CHECK_TRANSPORTS: dict = {}          # tests inject fake endpoints here; empty = the real network
 
 feat.register(FEATURE, "חיבור חשבונות מודרך", "Guided account setup", True,
               about="one command, jarvis connect, checks every account (Google, Telegram, Pear, wake word) and walks "
@@ -754,10 +968,35 @@ def dashboard_routes(register) -> None:
     def get(ctx, _m, _b):
         return 200, items_json(ctx.home, ctx.cfg)
 
-    def run(ctx, _m, _b):
-        ok = bool(LAUNCH())
-        return 200, {"started": ok, "command": COMMAND,
-                     "message_he": "נפתח חלון עם " + COMMAND + "." if ok else f"פותחים טרמינל ומריצים: {COMMAND}",
-                     "message_en": f"A window with {COMMAND} opened." if ok else f"Open a terminal and run: {COMMAND}"}
+    def run(ctx, _m, body):
+        fid = str((body or {}).get("id") or "")
+        if fid and fid not in ONLY:
+            return 404, {"error": "no such integration"}
+        if fid:
+            set_never(ctx.home, [x for x in never_list(ctx.home) if x != fid])
+        ok = bool(LAUNCH(fid) if fid else LAUNCH())
+        cmd = COMMAND + (" " + fid if fid else "")
+        return 200, {"started": ok, "command": cmd,
+                     "message_he": "נפתח חלון עם " + cmd + "." if ok else f"פותחים טרמינל ומריצים: {cmd}",
+                     "message_en": f"A window with {cmd} opened." if ok else f"Open a terminal and run: {cmd}"}
+
+    def skip(ctx, m, body):
+        fid, skipped = str((body or {}).get("id") or ""), bool((body or {}).get("skip", True))
+        if fid not in ONLY:
+            return 404, {"error": "no such integration"}
+        cur = [x for x in never_list(ctx.home) if x != fid]
+        set_never(ctx.home, cur + [fid] if skipped else cur)
+        return 200, items_json(ctx.home, ctx.cfg)
+
+    def check(ctx, _m, body):
+        from .connect_checks import CheckCtx, run_checks
+        fid = str((body or {}).get("id") or "")
+        if fid and fid not in ONLY:
+            return 404, {"error": "no such integration"}
+        ids = [i.id for i in status_items(ctx.home, ctx.cfg) if i.state == "connected" and (not fid or i.id == fid)]
+        run_checks(CheckCtx(ctx.home, ctx.cfg, transports=CHECK_TRANSPORTS), ids, fresh=True)
+        return 200, items_json(ctx.home, ctx.cfg)
     register("GET", r"/api/connect", get)
     register("POST", r"/api/connect/run", run)
+    register("POST", r"/api/connect/skip", skip)
+    register("POST", r"/api/connect/check", check)
