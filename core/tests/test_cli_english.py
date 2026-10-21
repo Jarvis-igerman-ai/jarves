@@ -233,7 +233,7 @@ def test_skip_inside_a_step_continues_with_the_next_item(home):
             self.ask("Something: ")
             return 0
     conn, out = make(home, ["", "skip", "s"], yes=False, google_factory=lambda h, c, **kw: Skipper(ask=kw["ask"]),
-                     skip=["openai", "chatgpt", "openai_admin", "telegram", "pear", "instagram", "home"],
+                     skip=["openai", "chatgpt", "openai-admin", "telegram", "pear", "instagram", "home"],
                      wake_runner=lambda: 0)
     assert conn.run() == 0
     assert conn.results["google"] == "skipped"

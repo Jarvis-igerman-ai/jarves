@@ -54,7 +54,7 @@ class CheckCtx:
 
 
 HE = {"key accepted": "המפתח התקבל", "no API key": "אין מפתח", "OpenAI could not be reached": "אי אפשר להגיע ל-OpenAI",
-      "OpenAI rejected the key": "OpenAI דחה את המפתח", "no admin key": "אין מפתח אדמין",
+      "OpenAI rejected the key": "OpenAI דחה את המפתח", "no admin key": "אין מפתח אדמין", "linked and connected": "מחובר",
       "admin key accepted (read-only costs)": "מפתח האדמין התקבל (קריאה בלבד)", "OpenAI rejected the admin key": "OpenAI דחה את מפתח האדמין",
       "signed out": "לא מחובר", "plan usage was not granted": "לא ניתנה הרשאה לשימוש בתוכנית", "token valid": "האסימון תקף",
       "token refreshed": "האסימון חודש", "token expired and could not be refreshed": "האסימון פג ולא הצלחתי לחדש אותו",
@@ -132,17 +132,25 @@ def check_openai(c: CheckCtx) -> CheckResult:
 def check_openai_admin(c: CheckCtx) -> CheckResult:
     key = os.environ.get("OPENAI_ADMIN_KEY", "").strip()
     if not key:
-        return _broken("no admin key", "jarvis key --admin")
+        from .usage import ADMIN_ENV, admin_key_saved
+        if admin_key_saved(c.home):                       # saved in secrets.env but not loaded into this process
+            from .config import secrets_file
+            for line in secrets_file(c.home).read_text(encoding="utf-8-sig").splitlines():
+                name, _, val = line.partition("=")
+                if name.strip() == ADMIN_ENV:
+                    key = val.strip().strip("\"'")
+    if not key:
+        return _broken("no admin key", "jarvis connect openai-admin")
     try:
         r = _http_get(os.environ.get("JARVES_OPENAI_API_BASE", OPENAI_API).rstrip("/") + "/organization/costs",
-                      {"Authorization": f"Bearer {key}"}, c.transport("openai_admin"),
+                      {"Authorization": f"Bearer {key}"}, c.transport("openai-admin"),
                       {"start_time": int(time.time()) - 86400, "limit": 1})
     except httpx.HTTPError:
         return _down("OpenAI could not be reached")
     if r.status_code == 200:
         return _ok("admin key accepted (read-only costs)")
     if r.status_code in (401, 403):
-        return _broken("OpenAI rejected the admin key", "jarvis key --admin")
+        return _broken("OpenAI rejected the admin key", "jarvis connect openai-admin")
     return _down(f"OpenAI answered {r.status_code}")
 
 
@@ -243,7 +251,7 @@ def check_home(c: CheckCtx) -> CheckResult:
     return _ok("Home Assistant answers")
 
 
-for _id, _fn in (("openai", check_openai), ("openai_admin", check_openai_admin), ("chatgpt", check_chatgpt),
+for _id, _fn in (("openai", check_openai), ("openai-admin", check_openai_admin), ("chatgpt", check_chatgpt),
                  ("google", check_google), ("pear", check_pear), ("wake", check_wake), ("telegram", check_telegram),
                  ("instagram", check_instagram), ("home", check_home)):
     register_check(_id, _fn)

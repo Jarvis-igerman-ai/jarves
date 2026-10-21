@@ -307,3 +307,24 @@ def test_dashboard_run_one_integration_launches_its_console(dash, monkeypatch):
     monkeypatch.setattr(connect, "LAUNCH", lambda *a: seen.append(a) or True)
     r, body = req(dash, "POST", "/api/connect/run", headers={"X-Jarves": "1"}, body={"id": "pear"})
     assert r.status == 200 and seen == [("pear",)] and "jarvis connect pear" in json.loads(body)["message_en"]
+
+
+# ====================================================================== WhatsApp bridge + openai-admin
+def test_whatsapp_check_is_read_only_status_and_never_links(home, monkeypatch):
+    from jarves import whatsapp_bridge as wb
+    assert "whatsapp" in connect.ONLY and "openai-admin" in connect.ONLY
+    seen = []
+
+    def handler(r: httpx.Request) -> httpx.Response:
+        seen.append((r.method, r.url.path))
+        return httpx.Response(200, json={"linked": True, "connection": "connected", "mode": "read", "counts": {"unread": 2}})
+    monkeypatch.setattr(wb.BridgeClient, "_base", lambda self: "http://127.0.0.1:9")
+    monkeypatch.setattr(wb.BridgeClient, "_token", lambda self: "t")
+    c = cc.CheckCtx(home, cfg_for(), transports={"whatsapp": httpx.MockTransport(handler)})
+    assert cc.run_checks(c, ["whatsapp"], fresh=True)["whatsapp"].state == cc.WORKING and seen == [("GET", "/status")]
+    down = cc.CheckCtx(home, cfg_for())
+    r = cc.run_checks(down, ["whatsapp"], fresh=True)["whatsapp"]          # no bridge endpoint file: not running
+    assert r.state == cc.UNREACHABLE and r.fix == "jarvis whatsapp start"
+    conn, out = make(home, [""], only="whatsapp", check_first=False)
+    assert conn.run() == 0 and conn.results == {"whatsapp": "attention"}
+    assert any("jarvis whatsapp link" in line for line in out)

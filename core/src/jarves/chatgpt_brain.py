@@ -15,12 +15,12 @@ import random
 import httpx
 
 from . import logs, usage
-from .brain import INSTRUCTIONS, BackendTrace, BrainUnavailable, billing_summary
+from .brain import INSTRUCTIONS, render_instructions, BackendTrace, BrainUnavailable, billing_summary
 from .budget import Budget, BudgetExceeded
 from .chatgpt_auth import RESOURCE, ChatGPTAuth, ChatGPTAuthError
 from .config import AIConfig
 from .memory import MemoryStore
-from .skills import SkillRegistry, bounded_ai
+from .skills import SkillRegistry, bounded_ai, tool_schema
 
 NAMESPACE = "jarves"
 MAX_HISTORY_ITEMS = 40
@@ -87,7 +87,7 @@ class ChatGPTBrain:
 
     def instructions(self) -> str:
         mems = self.memory.list(20)
-        return INSTRUCTIONS.format(name=self.name, memories="\n".join(f"- {m['text']}" for m in mems) or "- (none)")
+        return render_instructions(self.registry, self.name, "\n".join(f"- {m['text']}" for m in mems) or "- (none)")
 
     def reset_conversation(self) -> None:
         self.history = []
@@ -121,7 +121,7 @@ class ChatGPTBrain:
 
     def _tools(self) -> list[dict]:
         fns = [{"type": "function", "name": t.name, "description": t.description,
-                "parameters": t.args.model_json_schema()} for t in self.registry.tools()]
+                "parameters": tool_schema(t)} for t in self.registry.tools()]
         tools: list[dict] = [{"type": "namespace", "name": NAMESPACE,
                               "description": "JARVES device skills: music, memory, time, status.", "tools": fns}]
         if self.web_search:

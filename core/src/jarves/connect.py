@@ -77,13 +77,14 @@ class Item:
 TITLES: dict[str, tuple[str, str, bool]] = {
     "openai": ("מפתח OpenAI (API)", "OpenAI API key", False),
     "chatgpt": ("תוכנית ChatGPT", "ChatGPT plan", True),
-    "openai_admin": ("מפתח אדמין של OpenAI (חשבון אמיתי, לא חובה)", "OpenAI admin key (real bill, optional)", True),
+    "openai-admin": ("מפתח אדמין של OpenAI (חשבון אמיתי, לא חובה)", "OpenAI admin key (real bill, optional)", True),
     "google": ("גוגל (יומן + ג'ימייל)", "Google (Calendar + Gmail)", False),
     "telegram": ("טלגרם", "Telegram", False),
     "pear": ("Pear Desktop (תוסף API Server)", "Pear Desktop (API Server plugin)", False),
     "wake": ("מילת ההפעלה (כיול לקול שלך)", "Wake word (calibrated to your voice)", True),
     "instagram": ("אינסטגרם (לא חובה)", "Instagram (optional)", True),
     "home": ("Home Assistant (לא חובה)", "Home Assistant (optional)", True),
+    "openai-admin": ("מפתח אדמין של OpenAI לבדיקות שימוש (לא חובה)", "OpenAI admin key for usage checks (optional)", True),
 }
 # what the first prompt of a step asks about (the Continue / Skip / Never line follows it)
 QUESTIONS = {
@@ -91,6 +92,8 @@ QUESTIONS = {
              "Calibrate the wake word to your voice now (about 20 seconds, say Hey Jarvis a few times)?"),
     "instagram": ("לחבר עכשיו אינסטגרם?", "Connect Instagram now?"),
     "home": ("לחבר עכשיו Home Assistant?", "Connect Home Assistant now?"),
+    "openai-admin": ("לשמור עכשיו מפתח אדמין של OpenAI לקריאה בלבד (העלות האמיתית החודש)?",
+                     "Save a read-only OpenAI admin key now (the real cost this month)?"),
 }
 
 # the three states the owner sees (a per-integration state that is persisted: connected / skipped / not set)
@@ -130,7 +133,7 @@ def register(i: Integration) -> None:
         ONLY.append(i.id)
 
 
-ONLY.extend(["openai", "chatgpt", "google", "telegram", "pear", "wake", "instagram", "home", "openai_admin"])
+ONLY.extend(["openai", "chatgpt", "google", "telegram", "pear", "wake", "instagram", "home", "openai-admin"])
 
 
 # ---------------------------------------------------------------------- the clipboard
@@ -345,15 +348,45 @@ def _status_chatgpt(it: Item, home: Path, cfg) -> None:
 
 
 def _status_admin(it: Item, home: Path, cfg) -> None:
-    import os
-    if os.environ.get("OPENAI_ADMIN_KEY", "").strip():
-        it.state, it.detail_he, it.detail_en = "connected", "מפתח שמור", "key saved"
+    from .usage import admin_key_saved
+    if admin_key_saved(home):
+        it.state, it.detail_he, it.detail_en = "connected", "נשמר (לקריאה בלבד)", "saved (read-only use)"
     else:
-        it.detail_he, it.detail_en = "אין מפתח", "no key"
-        it.fix_he, it.fix_en = "jarvis key --admin", "jarvis key --admin"
+        it.detail_he, it.detail_en = "לא נשמר (לא חובה)", "not saved (optional)"
+        it.fix_he, it.fix_en = f"{COMMAND} openai-admin, או בלוח הבקרה בעמוד Usage", f"{COMMAND} openai-admin, or in the dashboard on the Usage page"
 
 
-EXTRA_STATUS.update({"openai": _status_openai, "chatgpt": _status_chatgpt, "openai_admin": _status_admin})
+def _wa_status_dict(home: Path):
+    from .whatsapp_bridge import status_or_none
+    return status_or_none(home)
+
+
+def _status_whatsapp(it: Item, home: Path, cfg) -> None:
+    st = _wa_status_dict(home)                                # one local read-only call; nothing is sent
+    if st and st.get("linked") and st.get("connection") not in ("logged_out", "not_linked", "linking"):
+        it.state, it.detail_he, it.detail_en = "connected", "מחובר לטלפון", "linked to the phone"
+    else:
+        it.detail_he, it.detail_en = "לא מחובר", "not linked"
+        it.fix_he, it.fix_en = "jarvis whatsapp link", "jarvis whatsapp link"
+
+
+def _step_whatsapp(conn, it: Item) -> None:
+    """Linking needs the phone's QR scan, so connect never links by itself: it points to the command."""
+    conn.h("קישור וואטסאפ דורש סריקה בטלפון. מריצים: jarvis whatsapp link",
+           "Linking WhatsApp needs a scan on your phone. Run: jarvis whatsapp link")
+    conn.results["whatsapp"] = "attention"
+    conn.notes["whatsapp"] = ("jarvis whatsapp link", "jarvis whatsapp link")
+
+
+EXTRA_STATUS.update({"openai": _status_openai, "chatgpt": _status_chatgpt, "openai-admin": _status_admin})
+
+
+ADMIN_STEPS_HE = ("1. נכנסים ל-platform.openai.com כבעלי הארגון: Settings, Organization, Admin keys. "
+                  "2. Create new admin key, שם JARVES-costs, הרשאה Read only. 3. מעתיקים (sk-admin-...) ומדביקים כאן; "
+                  "ההדבקה מוסתרת. כדי לדלג: s.")
+ADMIN_STEPS_EN = ("1. Sign in to platform.openai.com as the organization owner: Settings, Organization, Admin keys. "
+                  "2. Create new admin key, name JARVES-costs, permission Read only. 3. Copy it (sk-admin-...) and "
+                  "paste it here; the paste is hidden. To skip: s.")
 
 
 PEAR_STEPS_HE = ("1. פותחים את Pear Desktop (אפשר: jarvis music open). 2. בתפריט של Pear: Plugins > API Server וסימון V "
@@ -569,7 +602,7 @@ class Connector:
                 if it.state != "connected" and not self._gate(fid):
                     continue
                 try:
-                    (EXTRA_STEPS.get(fid) and (lambda i: EXTRA_STEPS[fid](self, i)) or getattr(self, "step_" + fid))(it)
+                    (EXTRA_STEPS.get(fid) and (lambda i: EXTRA_STEPS[fid](self, i)) or getattr(self, "step_" + fid.replace("-", "_")))(it)
                 except StepSkipped:
                     self._finish_clip()
                     self._skipped(fid, "skipped")
@@ -816,9 +849,6 @@ class Connector:
     def step_chatgpt(self, it: Item) -> None:
         self._cli_step("chatgpt", ["chatgpt", "login"], ("jarvis chatgpt login", "jarvis chatgpt login"))
 
-    def step_openai_admin(self, it: Item) -> None:
-        self._cli_step("openai_admin", ["key", "--admin"], ("jarvis key --admin", "jarvis key --admin"))
-
     def _optional(self, fid: str, label: tuple[str, str], runner_name: str) -> None:
         if self.yes:
             self.results[fid] = "skipped"
@@ -838,6 +868,27 @@ class Connector:
 
     def step_home(self, it: Item) -> None:
         self._optional("home", ("Home Assistant", "Home Assistant"), "home")
+
+    def step_openai_admin(self, it: Item) -> None:
+        """Optional read-only admin key for usage/cost checks. Hidden input, saved only to secrets.env; skippable."""
+        from .usage import save_admin_key
+        if self.yes:
+            self.results["openai-admin"] = "skipped"
+            self.notes["openai-admin"] = (f"כשתרצו: {COMMAND} openai-admin", f"When you want: {COMMAND} openai-admin")
+            return
+        self.h(ADMIN_STEPS_HE, ADMIN_STEPS_EN)
+        key = read_secret(self.io, "OpenAI admin key (hidden, s = skip): ")
+        if key is None or not key.strip():
+            raise StepSkipped
+        try:
+            save_admin_key(self.home, key)
+        except ValueError as e:
+            self.results["openai-admin"] = "failed"
+            self.notes["openai-admin"] = (f"{COMMAND} openai-admin", f"{COMMAND} openai-admin")
+            self.h("המפתח לא נראה כמו מפתח אדמין (מתחיל ב-sk-admin-). לא נשמר.", str(e))
+            return
+        self.results["openai-admin"] = "connected"
+        self.h("נשמר. הפעילו מחדש את ג'ארביס; הבדיקה בעמוד Usage.", "Saved. Restart JARVES; test it on the Usage page.")
 
     def _wizard_result(self, fid: str, rc: int, fix: tuple[str, str]) -> None:
         if rc == 0:
@@ -891,7 +942,7 @@ def add_cli(sub) -> None:
     c = sub.add_parser("connect", help="guided setup of the accounts NOT yet set up (skipped ones are not shown again); "
                                        "first it tests the connected ones; --all shows everything, "
                                        "`connect <name>` runs one, --check only tests")
-    c.add_argument("name", nargs="?", help="run just this integration (also un-skips it); one of: " + ", ".join(ONLY))
+    c.add_argument("name", nargs="?", metavar="item", help="run just this integration (also un-skips it); one of: " + ", ".join(ONLY))
     c.add_argument("--only", help="same as the name")
     c.add_argument("--all", action="store_true", help="list every integration with its state (connected / skipped / not set)")
     c.add_argument("--check", action="store_true", help="read-only test of every connected integration "
@@ -1000,3 +1051,20 @@ def dashboard_routes(register) -> None:
     register("POST", r"/api/connect/run", run)
     register("POST", r"/api/connect/skip", skip)
     register("POST", r"/api/connect/check", check)
+
+
+def _check_whatsapp(c):
+    from . import connect_checks as cc
+    from .whatsapp_bridge import BridgeClient, BridgeError, health_view
+    try:
+        st = BridgeClient(c.home, timeout=cc.TIMEOUT_S - 1, transport=c.transport("whatsapp")).status()   # GET /status only
+    except BridgeError:
+        return cc.CheckResult(cc.UNREACHABLE, "the WhatsApp bridge is not running", "jarvis whatsapp start")
+    status, detail, action = health_view(st)
+    if status == "ok":
+        return cc.CheckResult(cc.WORKING, detail)
+    return cc.CheckResult(cc.BROKEN, detail, action or "jarvis whatsapp status")
+
+
+register(Integration("whatsapp", "וואטסאפ (גשר)", "WhatsApp (bridge)", True, status=_status_whatsapp,
+                     step=_step_whatsapp, check=_check_whatsapp))

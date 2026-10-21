@@ -137,7 +137,7 @@ Each package below states: goal, full scope, acceptance criteria, tests (automat
 |---|---|---|
 | #17 (SW-V2 umbrella) | the 18 checklist items: each gets a ticked box with an evidence link to the V2/V3/V4 report that proves it, or is moved to a named V4 package; live Calendar natural-language acceptance (voice: "מה יש לי מחר?", confirmed create, no delete); P0 items from the 19 Oct log review (full-exit intent, pending-answer recovery), verified by a live conversation | OA-01..OA-12 |
 | #24 (WP-K Google/Connections/privacy) | real first-time `jarvis google start` (console links, clipboard, Downloads pickup) on a clean Google test project or a re-run; weekly reconnect after a real 7-day Testing expiry, via the CLI and the dashboard Reconnect button; live privacy switch during a real conversation (the Core follows `privacy.json` within 1 s). Pi rows move to Later. | OG-01..OG-07 |
-| #25 (WP-L guides/help/suggestions) | hands-on dashboard Guides check (index, per-feature pages, Test now buttons, Home checklist); owner voice "איך אני מחבר את גוגל?", "מה אתה יכול לעשות?", step-by-step "סיימתי"/"הבא"; a proactive suggestion said once at a natural pause, honouring snooze and "תפסיק להציע" over 3 days; the real API bill guide with a read-only admin key (`jarvis key --admin`, if the owner has one; otherwise BLOCKED with OD-05). Pi rows move to Later. | OL-01..OL-08 |
+| #25 (WP-L guides/help/suggestions) | hands-on dashboard Guides check (index, per-feature pages, Test now buttons, Home checklist); owner voice "איך אני מחבר את גוגל?", "מה אתה יכול לעשות?", step-by-step "סיימתי"/"הבא"; a proactive suggestion said once at a natural pause, honouring snooze and "תפסיק להציע" over 3 days; the real API bill guide with a read-only admin key (`jarvis connect openai-admin` or the Usage page, see `OPENAI_ADMIN_KEY.md`, if the owner has one; otherwise BLOCKED with OD-05). Pi rows move to Later. | OL-01..OL-08 |
 | #28 (privacy strip + camera preview) | preview with the real webcam (frame rate and latency measured); strip states during a real GPT-Live conversation (listening / paused while speaking / audio to cloud) matching what is heard; owner review of colours and words (colour-blind safety by eye). Pi camera and the round display move to Later. | OC-01..OC-06 |
 | #7 (closed) leftovers | the owner's own Hebrew voice test on the real mic; owner approval of the face | OV-01..OV-10 |
 | #26 (closed) leftovers | live Contacts consent and one read-only lookup; one confirmed invitation to the owner's own second address | OG-08, OG-09 |
@@ -767,7 +767,7 @@ Run by the owner with an agent guiding (`core/tools/owner_pass.py --section <n>`
 | OL-04 | | "מה אתה יכול לעשות?" | accurate capability summary | owner yes |
 | OL-05 | | step-by-step setup with "סיימתי" / "הבא" | advances correctly | rows |
 | OL-06 | 3 days | proactive suggestion once at a pause; "תפסיק להציע" | said once; then not again | alert rows |
-| OL-07 | OD-05 yes | `jarvis key --admin`, Costs Test now | real costs shown | row |
+| OL-07 | OD-05 yes | `jarvis connect openai-admin`, Costs Test now | real costs shown | row |
 | OL-08 | | snooze a suggestion | not repeated before snooze ends | row |
 
 ### 7.9 Browser (A)
