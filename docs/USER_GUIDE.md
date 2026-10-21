@@ -28,7 +28,7 @@ Always-on: `jarvis start` runs JARVES in the background with a tray icon. `jarvi
 
 `jarvis dashboard` opens a page on this computer (English by default, Hebrew in Settings; Arabic and Russian were removed in V4). The link carries a private key that is valid until the dashboard stops.
 
-Main pages: Home (privacy switch, health, approvals), Conversations and Recall, Memory, Skills and tools, Features, Settings, Costs, Timers and Lists, Approvals, Coding agents, WhatsApp, Health, Updates, Logs. The Features page shows every switch with its state and the reason when something is unavailable. Every page is keyboard-usable and has text contrast checked against WCAG AA. On a phone, home-network access is opt-in (`dashboard_lan`) and needs pairing.
+Main pages: Home (privacy switch, health, approvals), Conversations and Recall, Memory, Skills and tools, Features, Guides, Settings, Costs, Timers and Lists, Approvals, Coding agents, WhatsApp, Phone calls, Health, Updates, Logs. The Features page shows every switch with its state, the reason when something is unavailable, and per device (Windows, Raspberry Pi) whether the feature is verified on a real device, implemented but not verified, or planned. Most features are still "implemented, not verified"; only the wake word, chimes, greeting and music are marked verified. Every page is keyboard-usable and has text contrast checked against WCAG AA. On a phone, home-network access is opt-in (`dashboard_lan`) and needs pairing.
 
 Every feature also has a guide: dashboard Guides, or `jarvis help <topic>`. Ask JARVES "how do I set up X?" and he walks you through it one step at a time.
 
@@ -89,7 +89,7 @@ A separate local program (a Go bridge) reads WhatsApp as a linked device. Read m
 
 "Call Dana" resolves the contact, reads the number back digit by digit, shows name, number and its source in the approvals popup, and only after your yes opens a `tel:` link. **You press Call** in Phone Link or the default dialer; JARVES never dials, answers or records. Emergency numbers are never routed through contacts. A number that came from mail or the web is refused.
 
-This package is built in its own review branch (`v4/h-dialing`) and is not in every build yet. It has not been verified with a real Phone Link and phone. If your build has the "Phone calls" page and `jarvis dial`, the feature is `assisted_dialing`, off by default.
+This is part of the main code (the "Phone calls" page and `jarvis dial`); the feature is `assisted_dialing`, off by default. It has not been verified with a real Phone Link and phone.
 
 ## 11. Other channels and devices
 
@@ -116,7 +116,7 @@ The idle Core targets about 93 MB private memory, 11 threads and 0.3% CPU, with 
 
 - `jarvis update check`, then `jarvis update install`. Nothing is downloaded before your yes. The manifest is Ed25519-signed, the installer's hash and size are pinned, a downgrade is refused, and your data is backed up first.
 - `jarvis update --rollback` (and a button on the Updates page) restores the previous version and the data backup taken before the update. Data written after that backup stays in a safety backup.
-- Upgrade and rollback are covered by tests with fakes. The real installer round trip runs in CI and on a second PC (owner test list in INSTALL_TEST); this is not yet verified by the owner. Package L is in its own review branch (`v4/l-installer`) and may not be in your build.
+- Upgrade and rollback are covered by tests with fakes. The real installer round trip runs in CI and on a second PC (owner test list in INSTALL_TEST); this is not yet verified by the owner. The installer, update and rollback code is part of the main code.
 - Uninstall keeps your data unless you choose to delete it. Backups: `jarvis backup`, `jarvis restore`.
 
 ## 15. Profiles

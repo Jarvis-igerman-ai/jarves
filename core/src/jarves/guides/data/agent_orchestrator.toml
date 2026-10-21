@@ -6,7 +6,7 @@ aliases = ["סוכני קוד", "קלוד", "קודקס", "מה המצב בפר�
 links = ["privacy", "diagnosis"]
 title_he = "סוכני קוד: Claude Code ו-Codex"
 title_en = "Coding agents: Claude Code and Codex"
-what_he = "ג'רוויס יודע אילו סשנים של Claude Code ו-Codex פועלים במחשב, גם כאלה שהפעלת בעצמך: מה כל אחד עושה, מתי עדכן לאחרונה ומה חוסם אותו. אפשר לשאול אותו, להגיד לו להמשיך או לעצור, להפעיל סשן חדש, ובקשות אישור של הסוכן מגיעות לחלון האישור שלך."
+what_he = "ג'ארביס יודע אילו סשנים של Claude Code ו-Codex פועלים במחשב, גם כאלה שהפעלתם בעצמכם: מה כל אחד עושה, מתי עדכן לאחרונה ומה חוסם אותו. אפשר לשאול אותו, להגיד לו להמשיך או לעצור, להפעיל סשן חדש, ובקשות אישור של הסוכן מגיעות לחלון האישור שלכם."
 what_en = "JARVES knows which Claude Code and Codex sessions run on this computer, also ones you started yourself: what each is doing, when it last reported and what blocks it. You can ask it, tell it to continue or pause, start a new session, and the agent's approval requests come to your approval window."
 say = [
   ["תשאל את קלוד מה המצב בפרויקט ג'רבס", "Ask Claude what's going on in the jarvis project"],
@@ -16,9 +16,9 @@ say = [
 ]
 expect_he = "תשובה קצרה עם המצב, הגיל של העדכון ומה חוסם, ואם זה מהדיווח האחרון או תשובה חיה. לפני פעולה כשיש יותר מסשן אחד מתאים הוא שואל לאיזה."
 expect_en = "A short answer with the state, how old the update is and what blocks it, and whether it is the last report or a live reply. When more than one session matches he asks which one before any change."
-cost_he = "הסוכנים עובדים על המנויים שלך (Claude ו-ChatGPT), אף פעם לא בחיוב API. ג'רוויס מתחיל עד 20 תורות ביום בעצמו, ושאלת מצב נענית מהדיווח האחרון בלי לבזבז תור."
+cost_he = "הסוכנים עובדים על המנויים שלכם (Claude ו-ChatGPT), אף פעם לא בחיוב API. ג'ארביס מתחיל עד 20 תורות ביום בעצמו, ושאלת מצב נענית מהדיווח האחרון בלי לבזבז תור."
 cost_en = "The agents run on your subscriptions (Claude and ChatGPT), never on API billing. JARVES starts at most 20 turns a day itself, and a status question is answered from the last report without spending a turn."
-privacy_he = "רק פרויקטים ברשימת המותרים נראים. קוד, תמלילים והוראות לא נשלחים למודל של ג'רוויס, רק סיכום קצר ונקי. טקסט שהסוכן כותב לא מפעיל שום פעולה, וג'רוויס אף פעם לא מאשר בעצמו פעולה מסוכנת."
+privacy_he = "רק פרויקטים ברשימת המותרים נראים. קוד, תמלילים והוראות לא נשלחים למודל של ג'ארביס, רק סיכום קצר ונקי. טקסט שהסוכן כותב לא מפעיל שום פעולה, וג'ארביס אף פעם לא מאשר בעצמו פעולה מסוכנת."
 privacy_en = "Only allow-listed projects are visible. Code, transcripts and prompts never go to JARVES's own model, only a short cleaned summary. Agent text never triggers an action, and JARVES never approves a risky action by itself."
 
 [[steps]]
@@ -33,12 +33,12 @@ en = "Add a project to the allow-list: jarvis agents projects add C:\\work\\jarv
 action = "command:jarvis agents projects list"
 
 [[steps]]
-he = "התקינו את התוסף ל-Claude Code (פעם אחת, באישור שלך): jarvis agents install-plugin claude. ל-Codex לא צריך תוסף."
+he = "התקינו את התוסף ל-Claude Code (פעם אחת, באישורכם): jarvis agents install-plugin claude. ל-Codex לא צריך תוסף."
 en = "Install the Claude Code plugin (once, with your approval): jarvis agents install-plugin claude. Codex needs no plugin."
 action = "command:jarvis agents doctor"
 
 [[steps]]
-he = "לשאלות חיות לסשן שהפעלת בעצמך הפעילו את Claude Code כך: claude --dangerously-load-development-channels plugin:jarves@jarves-local. בלי זה ג'רוויס עונה מהדיווח האחרון ומעביר שאלות בעצירה הבטוחה הבאה."
+he = "לשאלות חיות לסשן שהפעלתם בעצמכם הפעילו את Claude Code כך: claude --dangerously-load-development-channels plugin:jarves@jarves-local. בלי זה ג'ארביס עונה מהדיווח האחרון ומעביר שאלות בעצירה הבטוחה הבאה."
 en = "For live questions to a session you start yourself, start Claude Code like this: claude --dangerously-load-development-channels plugin:jarves@jarves-local. Without it JARVES answers from the last report and passes questions at the next safe stop."
 
 [[steps]]

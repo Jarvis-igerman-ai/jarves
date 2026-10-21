@@ -37,5 +37,5 @@ action = "test"
 [[problems]]
 he = "הוא אומר שאין מצלמה"
 en = "He says there is no camera"
-fix_he = "חברו מחדש את המצלמה וסגרו תוכנות אחרות שמשתמשות בה (זום, טימס)."
+fix_he = "חברו מחדש את המצלמה וסגרו תוכנות אחרות שמשתמשות בה (זום, Teams)."
 fix_en = "Reconnect the camera and close other apps using it (Zoom, Teams)."

@@ -6,7 +6,7 @@ aliases = ["מה אמרתי", "מה דיברנו", "חיפוש בשיחות", "�
 links = ["memory", "privacy", "notes_files", "diagnosis"]
 title_he = "מה אמרתי? חיפוש בשיחות קודמות"
 title_en = "What did I say? Searching past conversations"
-what_he = "שואלים \"מה אמרתי על הרופא?\" או \"מה דיברנו אתמול על הרכב?\" וג'רוויס מחפש בשיחות הקודמות, בפתקים ובדוחות, ועונה בקצרה עם התאריך וציטוט קצר. משהו ארוך או פרטי הוא מציע להציג על המסך."
+what_he = "שואלים \"מה אמרתי על הרופא?\" או \"מה דיברנו אתמול על הרכב?\" וג'ארביס מחפש בשיחות הקודמות, בפתקים ובדוחות, ועונה בקצרה עם התאריך וציטוט קצר. משהו ארוך או פרטי הוא מציע להציג על המסך."
 what_en = "Ask \"what did I say about the dentist?\" or \"what did we talk about yesterday about the car?\" and JARVES searches past conversations, notes and reports and answers briefly with the date and a short quote. Anything long or private he offers to show on the screen."
 say = [
   ["מה אמרתי על הרופא?", "What did I say about the doctor?"],
@@ -16,7 +16,7 @@ say = [
 ]
 expect_he = "תשובה של משפט או שניים: מתי, מי אמר, וציטוט קצר. אם אין כלום, הוא אומר שלא מצא ולא ממציא."
 expect_en = "A one or two sentence answer: when, who said it, and a short quote. If there is nothing, he says so and never makes it up."
-cost_he = "חינם: האינדקס מקומי במחשב. רק התשובה הקצרה לשאלה ששאלת עוברת למודל הקול באותה שיחה."
+cost_he = "חינם: האינדקס מקומי במחשב. רק התשובה הקצרה לשאלה ששאלתם עוברת למודל הקול באותה שיחה."
 cost_en = "Free: the index is local on this computer. Only the short answer to the question you asked goes to the voice model in that conversation."
 privacy_he = "לכל פרופיל אינדקס משלו. כשמצב פרטיות פועל שום דבר לא נכנס לאינדקס. מחיקת שיחה מוחקת גם אותה מהאינדקס, ו\"אל תזכור את זה\" משאיר את המשפט מחוץ לאינדקס. אחרי 90 יום נשאר רק סיכום קצר של כל שיחה. טקסט שעולה מהחיפוש לא מפעיל שום פעולה."
 privacy_en = "Each profile has its own index. With privacy mode on nothing is indexed. Deleting a conversation removes it from the index, and \"off the record\" keeps that sentence out. After 90 days only a short summary of each conversation stays. Recalled text never triggers an action."

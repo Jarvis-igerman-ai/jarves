@@ -43,7 +43,7 @@ check = "active:music"
 [[problems]]
 he = "הוא אומר ש-Pear לא פועל"
 en = "He says Pear is not running"
-fix_he = "פתחו את Pear Desktop וודאו שהתוסף API Server דולק."
+fix_he = "פתחו את Pear Desktop ודאו שהתוסף API Server דולק."
 fix_en = "Open Pear Desktop and make sure the API Server plugin is on."
 
 [[problems]]

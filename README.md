@@ -5,7 +5,7 @@
 
 ## Using JARVES today (software V4)
 
-JARVES is a voice assistant for your Windows PC with a face on the screen. V4 adds: privacy hardening and redaction audit, a compact approvals popup, client-mode live-voice delegation with a strict budget, an Agent Orchestrator for Claude Code and Codex, a WhatsApp bridge, conversation recall, Health and Self-Diagnostics 2.0, performance gates, an English and Hebrew dashboard and an owner-trained wake word. Assisted dialing and the installer with update and rollback are in review branches.
+JARVES is a voice assistant for your Windows PC with a face on the screen. V4 adds: privacy hardening and redaction audit, a compact approvals popup, client-mode live-voice delegation with a strict budget, an Agent Orchestrator for Claude Code and Codex, a WhatsApp bridge, conversation recall, Health and Self-Diagnostics 2.0, performance gates, an English and Hebrew dashboard and an owner-trained wake word. Assisted dialing and the installer with update and rollback are part of the main code, not yet verified on real hardware.
 
 - **[User guide](docs/USER_GUIDE.md)** ([עברית](docs/USER_GUIDE.he.md)): install, voice, dashboard, each feature, privacy, update and rollback, troubleshooting.
 - [Release notes 4.0](docs/RELEASE_NOTES_4.0.md) and [CHANGELOG](CHANGELOG.md): what changed, including behaviour and exit-code changes.

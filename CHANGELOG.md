@@ -5,7 +5,7 @@ All notable changes to JARVES. Newest first. Details per release: [docs/RELEASE_
 ## 4.0 (unreleased, in integration)
 
 - Added: privacy hardening and redaction audit; independent security re-review fixes; compact approvals popup with signed answers; client-mode GPT-Live delegation with a strict budget; Agent Orchestrator for Claude Code and Codex; WhatsApp bridge (read first, approved sends); conversation recall; Health page and Self-Diagnostics 2.0; performance budgets and nightly CI; owner-trained wake head; dashboard in English and Hebrew with accessibility fixes.
-- Branches pending merge into the integration: assisted dialing (`v4/h-dialing`), installer, update and rollback (`v4/l-installer`).
+- Also merged: assisted dialing (`jarvis dial`) and installer, update and rollback; both are not yet verified on real hardware.
 - Changed: `jarvis status` exit 4 means headless; `jarvis features on` no longer refuses an unavailable feature; Arabic and Russian dashboards removed; update source repository is `igalgerman/jarves`; ticket drafts stay local by default; Pear history trimming off by default.
 - Docs: new [user guide](docs/USER_GUIDE.md) (English and Hebrew), docs index, release notes.
 

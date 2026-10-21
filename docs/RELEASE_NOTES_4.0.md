@@ -1,6 +1,6 @@
 # JARVES 4.0 release notes
 
-Status: V4 is integrated on branch `v4/integrated-b-c-d-g-m-r01` and its follow-ups. Owner acceptance and a public release have not happened yet. "Verified" below means checked in a real run; everything else was tested with fakes. Owner-facing guide: [USER_GUIDE](USER_GUIDE.md) ([עברית](USER_GUIDE.he.md)).
+Status: V4 is integrated on `main`. Owner acceptance and the public release have not happened yet. "Verified" below means checked in a real run; everything else was tested with fakes. Owner-facing guide: [USER_GUIDE](USER_GUIDE.md) ([עברית](USER_GUIDE.he.md)).
 
 ## New
 
@@ -18,8 +18,8 @@ Status: V4 is integrated on branch `v4/integrated-b-c-d-g-m-r01` and its follow-
 | Self-Diagnostics 2.0 | Monitor, baselines, version regression, root-cause hints, preflight, canaries, remediation through approvals, scheduled AI review | [report](reviews/SWV4_O_SELFDIAG2.md) |
 | Wake model | Head trained on the owner's recordings, `jarvis wake train [--revert]` | Measured by cross-validation ([report](reviews/SWV4_WAKE_TRAIN.md)) |
 | Idle writes | Idle disk writes reduced from 36.5 to 4.8 KB/min | [report](reviews/SWV4_IDLE_WRITES.md) |
-| Assisted dialing | Voice, CLI and page open a `tel:` link after approval; the owner presses Call | Branch `v4/h-dialing`, not in every build; Phone Link not verified |
-| Installer, update, rollback | Silent upgrade, signed manifest, `jarvis update --rollback`, migrations with backup | Branch `v4/l-installer`, not in every build; real installer round trip not run |
+| Assisted dialing | Voice, CLI and page open a `tel:` link after approval; the owner presses Call | In the main code, off by default; Phone Link not verified |
+| Installer, update, rollback | Silent upgrade, signed manifest, `jarvis update --rollback`, migrations with backup | In the main code; real installer round trip not run by the owner |
 
 Not in V4: Telegram, Instagram and Home Assistant live verification, rocket alerts, a signed installer (the owner chose to stay unsigned for now), phone and robot hardware.
 
