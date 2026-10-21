@@ -1518,7 +1518,8 @@
   "Self-test daily at 08:15, speed test weekly (Sunday 13:00). Never in quiet hours or in the middle of a conversation: a skipped run is logged, not queued.": "בדיקה עצמית כל יום ב-08:15, בדיקת מהירות פעם בשבוע (ראשון 13:00). לא בשעות השקט ולא באמצע שיחה: ריצה שדולגה נרשמת ביומן ולא נדחית.",
   "Warning": "אזהרה",
   "Skipped": "דולג",
-  "No data": "אין נתון"
+  "No data": "אין נתון",
+  "dashboard Health & speed page, jarvis selftest, jarvis speedtest, Jobs page (times)": "עמוד תקינות ומהירות בלוח הבקרה, jarvis selftest, jarvis speedtest, עמוד המשימות הקבועות (שעות)"
  },
  "rules": [
   [

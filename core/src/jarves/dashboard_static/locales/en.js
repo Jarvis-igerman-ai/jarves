@@ -1518,6 +1518,7 @@
   "Self-test daily at 08:15, speed test weekly (Sunday 13:00). Never in quiet hours or in the middle of a conversation: a skipped run is logged, not queued.": "Self-test daily at 08:15, speed test weekly (Sunday 13:00). Never in quiet hours or in the middle of a conversation: a skipped run is logged, not queued.",
   "Warning": "Warning",
   "Skipped": "Skipped",
-  "No data": "No data"
+  "No data": "No data",
+  "dashboard Health & speed page, jarvis selftest, jarvis speedtest, Jobs page (times)": "dashboard Health & speed page, jarvis selftest, jarvis speedtest, Jobs page (times)"
  }
 };
