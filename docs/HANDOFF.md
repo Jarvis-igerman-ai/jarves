@@ -1,3 +1,11 @@
+## CI speed-up and continuous release (21 Oct 2026) - branch `ci/speedup-and-continuous-release`, public repo igalgerman/jarves
+
+- Done: 3 Windows shards + Linux single job (`tests/conftest.py --shard/--browser`), real-browser job with one retry, uv/Go/Playwright caches, package.yml = signed candidate on every green main + beta job gated by `vars.ENABLE_BETA_PUBLISH == 'true'`, release.yml (tag `vX.Y.Z`, `core/tools/release_gate.py`), beta channel setting (CLI/dashboard/guide/feature row), `jarvis release signoff` + dashboard page, `manual_test_sheet.py`, `release_rollback.py` (dry run default), docs/RELEASING.md, SECURITY.md, dependabot, CodeQL, secret_scanning.yml. Tests: test_release_channels.py, test_release_signoff.py, test_ci_pipeline.py.
+- Not verified: the workflows themselves (only CI shows it), a live beta publish (owner must set ENABLE_BETA_PUBLISH and secrets).
+- Questions for the user: (1) branch protection required-check names change (see docs/RELEASING.md), please update after merge. (2) Enable `ENABLE_BETA_PUBLISH` when ready. (3) Enable CodeQL default setup off if the repo uses it, to avoid a duplicate.
+
+---
+
 ## Self-test and speed test (21 Oct 2026) - branch `v5/self-and-speed-tests`, public repo igalgerman/jarves
 
 - `jarvis selftest [--deep] [--audio] [--json]` (core/src/jarves/selftest.py, `selftest.run(deep=False)` returns `SelfTestResult` dataclasses): quick read-only checks (config, DB integrity, file permissions, feature probes, tool/guide/CLI-parity consistency, EN+HE locale completeness, log privacy, disk, version/updates). `--deep` adds a real Core start/stop in a temp home, wake model load, speech engine and audio device checks; nothing is spoken or recorded unless `--audio` (one quiet tone, 0.5 s mic level, dropped).

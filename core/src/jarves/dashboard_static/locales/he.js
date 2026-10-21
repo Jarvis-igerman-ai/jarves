@@ -1552,7 +1552,15 @@
   "Commit": "קומיט",
   "Note": "הערה",
   "Area": "תחום",
-  "ID": "מזהה"
+  "ID": "מזהה",
+  "Beta: every green main build reaches you, signed. To go back a version use the Roll back button below.": "בטא: כל בנייה ירוקה של main מגיעה אליך, חתומה. כדי לחזור לגרסה קודמת השתמש בכפתור השחזור למטה.",
+  "Channel not changed: ": "הערוץ לא הוחלף: ",
+  "No sheet": "אין גיליון",
+  "Not signed": "לא נחתם",
+  "Not signed: ": "לא נחתם: ",
+  "Note for ": "הערה ל-",
+  "Result for ": "תוצאה ל-",
+  "Stable: only releases that were tested by hand and signed off.": "יציב: רק גרסאות שנבדקו ידנית ואושרו."
  },
  "rules": [
   [

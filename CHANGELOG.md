@@ -2,6 +2,13 @@
 
 All notable changes to JARVES. Newest first. Details per release: [docs/RELEASE_NOTES_4.0.md](docs/RELEASE_NOTES_4.0.md). Dates are 2026.
 
+## 4.0.1 (unreleased)
+
+- Added: update channels. `jarvis update --channel beta` (dashboard Updates page, English and Hebrew) follows every green `main` build as a signed beta; beta builds show BETA in status and the dashboard header. Beta publishing is off until the owner sets `ENABLE_BETA_PUBLISH`.
+- Added: stable releases are tag-driven and gated by a manual test sign-off (`jarvis release signoff`, dashboard page Release sign-off), see docs/RELEASING.md; `core/tools/release_rollback.py` with a dry run.
+- Changed: CI runs the Windows Python tests in 3 shards and the real-browser tests as their own job with one retry; every green `main` builds a signed candidate (not published).
+- Added: SECURITY.md, Dependabot, CodeQL (Python), secret scanning exclusions for the planted test tokens.
+
 ## 4.0 (unreleased, in integration)
 
 - Added: privacy hardening and redaction audit; independent security re-review fixes; compact approvals popup with signed answers; client-mode GPT-Live delegation with a strict budget; Agent Orchestrator for Claude Code and Codex; WhatsApp bridge (read first, approved sends); conversation recall; Health page and Self-Diagnostics 2.0; performance budgets and nightly CI; owner-trained wake head; dashboard in English and Hebrew with accessibility fixes.

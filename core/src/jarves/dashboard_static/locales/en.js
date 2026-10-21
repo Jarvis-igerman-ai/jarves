@@ -1552,6 +1552,14 @@
   "Commit": "Commit",
   "Note": "Note",
   "Area": "Area",
-  "ID": "ID"
+  "ID": "ID",
+  "Beta: every green main build reaches you, signed. To go back a version use the Roll back button below.": "Beta: every green main build reaches you, signed. To go back a version use the Roll back button below.",
+  "Channel not changed: ": "Channel not changed: ",
+  "No sheet": "No sheet",
+  "Not signed": "Not signed",
+  "Not signed: ": "Not signed: ",
+  "Note for ": "Note for ",
+  "Result for ": "Result for ",
+  "Stable: only releases that were tested by hand and signed off.": "Stable: only releases that were tested by hand and signed off."
  }
 };

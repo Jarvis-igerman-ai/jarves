@@ -70,7 +70,7 @@ def cmd_release(a, cfg, home) -> int:
             print(clilang.fmt(f"נחתם: בטא {sheet.beta}, קומיט {sheet.commit[:12]}, {sheet.date}. עכשיו אפשר לתייג v{version}.",
                               f"Signed off: beta {sheet.beta}, commit {sheet.commit[:12]}, {sheet.date}. "
                               f"You can now tag v{version}."))
-            logs.info("release", "RELEASE_SIGNED", "manual test sign-off recorded", version=version, beta=sheet.beta)
+            logs.info("release", "RELEASE_SIGNED", "manual test sign-off recorded", version=version)
             return 0
     except so.SheetError as e:
         print(f"RELEASE_SIGNOFF: {e}")
