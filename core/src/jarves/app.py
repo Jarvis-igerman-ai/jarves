@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import asyncio
 import time
+from collections import deque
 import hashlib
 import json
 from contextlib import aclosing
@@ -162,6 +163,9 @@ class Core:
         self._greeted = False
         self.voice_mode = "off"
         self._voice_connecting = False
+        # the last things the OWNER said (typed or heard), in memory only: assisted dialing checks that a number the
+        # model passes was really said by the owner (dialing.py); never written to disk or logs
+        self.owner_said: deque[str] = deque(maxlen=6)
         self._hold_wake_until = 0.0     # connected-on-open mode: wake word waits until the first live session ended
         self._rollovers: list[float] = []   # times of automatic session resumes (loop guard)
         self.startup = {"phase": "starting", "ready": False, "detail": "Loading JARVES..."}
@@ -187,6 +191,7 @@ class Core:
         asyncio.get_running_loop().set_exception_handler(logs.asyncio_handler)
         from . import backup, usage                     # SW-V2 M5: checkpoint BEFORE the stores open/migrate
         backup.startup_checkpoint(self.home)
+        self._update_guard()                            # SW-V4 L: data migrations (backup first) + failed-update watch
         self.history = store.attach(self.home, c)       # conversation history + self-diagnosis (log sink)
         logs.new_cid()
         logs.info("core", "CORE_STARTING", "JARVES Core starting", version=__version__, home=str(self.home))
@@ -286,6 +291,8 @@ class Core:
         recall.attach(self)
         from . import orchestrator                      # SW-V4 E: coding agents (bridge starts with the switch)
         orchestrator.attach(self)
+        from . import dialing                           # SW-V4 H: dial_prepare / dial_open (assisted dialing)
+        dialing.attach(self)
         from . import guides                            # WP-L: help Skill, setup hints, briefing, suggestions
         self.guides = guides.attach(self)
         self._write_tools_md()                          # after every Skill is registered
@@ -364,8 +371,33 @@ class Core:
         self.health.mark("ready")
         logs.info("core", "CORE_READY", "Core ready", voice_mode=self.voice_mode, log=str(self.log_path),
                   ms=round((time.monotonic() - started_at) * 1000))
+        self._update_confirmed()
         self._startup_stage("ready" if self.voice_mode == "off" else "core_ready",
                             "Core ready (voice off)" if self.voice_mode == "off" else "Core loaded. Preparing voice...")
+
+    def _update_guard(self) -> None:
+        """Package L: bring the data to the current schema (a verified backup first) and notice an update whose new
+        version did not become ready last time (the second such start offers a rollback through approvals)."""
+        from . import migrations, updates
+        try:
+            migrations.run(self.home)
+        except migrations.MigrationError as e:
+            logs.error("core", "MIGRATION_REFUSED", "data migration refused; data left unchanged", code_name=e.code)
+            raise
+        try:
+            if updates.note_start(self.home)["offer"]:
+                import threading
+                threading.Thread(target=updates.offer_rollback, args=(self.home,), name="update-rollback-offer",
+                                 daemon=True).start()
+        except Exception as e:                           # the watch must never stop the Core from starting
+            logs.warn("core", "UPDATE_WATCH_FAILED", "update watch failed", error_type=type(e).__name__)
+
+    def _update_confirmed(self) -> None:
+        from . import updates
+        try:
+            updates.mark_healthy(self.home)
+        except Exception as e:
+            logs.warn("core", "UPDATE_WATCH_FAILED", "update watch failed", error_type=type(e).__name__)
 
     async def stop(self, grace_s: float = 3.0) -> None:
         """Orderly shutdown (CR-11): refuse new work, end voice, deny pending confirmations, let an in-flight
@@ -1447,6 +1479,8 @@ class Core:
     def _owner_answer(self, text: str, channel: str) -> bool:
         """The owner's own words (typed on the face / heard from the mic): a pure yes/no answers the ONE waiting
         approval. Otherwise it is a new turn (a denied request may be asked again)."""
+        if text:
+            self.owner_said.append(str(text)[:500])
         ap = self.approvals
         if ap is None:
             return False

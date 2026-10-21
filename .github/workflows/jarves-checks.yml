@@ -156,7 +156,13 @@ jobs:
           "VERSION=$v" >> $env:GITHUB_ENV
       - name: Silent install / run / upgrade / uninstall smoke
         shell: pwsh
-        run: ./packaging/smoke_windows.ps1 -Installer "dist/JARVES-Setup-$env:VERSION.exe" -Version $env:VERSION -RequireFace -CheckAutostart
+        run: ./packaging/smoke_windows.ps1 -Installer "dist/JARVES-Setup-$env:VERSION.exe" -Version $env:VERSION -RequireFace -CheckAutostart -DefaultTasks -MetricsOut dist/installer-metrics.json
+      - name: Installer size / time budget (SW-V4 L; same numbers feed core/tools/perf_gate.py --installer-json)
+        shell: pwsh
+        run: python packaging/installer_metrics.py check --metrics dist/installer-metrics.json --class ci
+      - name: Upgrade + rollback matrix (old installers pinned in packaging/upgrade_fixtures.json)
+        shell: pwsh
+        run: ./packaging/upgrade_matrix.ps1 -Candidate "dist/JARVES-Setup-$env:VERSION.exe" -Version $env:VERSION
       - uses: actions/upload-artifact@v7
         with:
           name: jarves-windows-installer-${{ env.CHANNEL }}
