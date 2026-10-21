@@ -315,6 +315,10 @@ TEXT: dict[str, str] = {
     "privacy mode is off: what you say is kept in the local history (never uploaded)":
         "מצב הפרטיות כבוי: מה שנאמר נשמר בהיסטוריה המקומית (אף פעם לא מועלה)",
     "no OpenAI admin key saved": "לא נשמר מפתח Admin של OpenAI",
+    "optional read-only OpenAI admin key: real monthly cost for the spend display and usage checks; used only for OpenAI's costs endpoint":
+        "מפתח Admin אופציונלי של OpenAI לקריאה בלבד: העלות החודשית האמיתית לתצוגת ההוצאות ולבדיקות שימוש; משמש רק לנקודת העלויות של OpenAI",
+    "core/tests/test_usage_admin_key.py with a fake costs endpoint; no real admin key tested yet (owner decision OD-05)":
+        "core/tests/test_usage_admin_key.py עם נקודת עלויות מדומה; עוד לא נבדק מפתח Admin אמיתי (החלטת בעלים OD-05)",
     "no data folder": "אין תיקיית נתונים",
     "no monthly API budget set": "לא נקבע תקציב חודשי ל-API",
     "no backup made yet": "עוד לא נעשה גיבוי",

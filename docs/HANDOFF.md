@@ -972,6 +972,12 @@ reachable from the phone (dashboard_lan) for approvals, or PC-only?
 - Harness: the WhatsApp suites restart the live session after switching the feature on; scenario 56 copies (never refreshes) the owner's ChatGPT token.
 - Open: 79/80/84/101 occasionally miss on synthetic-ASR clips (pass on re-run). No questions for the user.
 
+## Optional read-only OpenAI admin key (21 Oct 2026) - branch `v4/admin-key-option` (OD-05)
+
+- The Core already read `OPENAI_ADMIN_KEY` (usage.py Costs API, `jarvis key --admin`). Added: `jarvis connect openai-admin` (hidden input, skippable with `s`, `--yes` never asks), a Usage-page box (password field, Save / Remove / Test now, never echoes the key), one shared `usage.save_admin_key / remove_admin_key / admin_key_saved`, EN+HE guide steps in `api_bill.toml`, feature row "Usage checks (admin key)" (`implemented_unverified`: fake costs endpoint only, no real key tested). Docs: `docs/OPENAI_ADMIN_KEY.md` (create, save, hidden-input pattern for a local helper script; the owner's own script is untouched).
+- Tests: `core/tests/test_usage_admin_key.py` (local fake costs endpoint, no network); log_lint 0 violations; Hebrew via `tools/catalog_add.py`.
+- Open: voice scenario 62 stays BLOCKED until the owner saves a real admin key. Question for the user: create the key (docs/OPENAI_ADMIN_KEY.md) when convenient; OK to leave the switch default-on (shows "off by choice" until a key exists)?
+
 ## V5 mobile access (branch v5/mobile-access, draft PR) - core done, review and real phone open
 
 Plan and security model: `docs/JARVES_SW_V5_WORK_PACKAGE.md`. Built: pairing (QR + one-time code), hashed per-device tokens, revoke, scopes, rate limits, audit without content, phone API (chat, voice PTT over TLS, approvals list/answer, status), PWA EN+HE, dashboard Phone page, `jarvis dashboard --mobile [--tls-selfsigned]`, feature `mobile_access` (default OFF). Tests: `test_mobile_access.py`, `test_mobile_pwa.py`; log lint 0 violations.

@@ -10,10 +10,15 @@
 | Face renderer same on desktop/device | `FACE_RUNTIME.md` |
 | Camera software: switches, privacy rules, models, setup | `CAMERA_SETUP.md` (plan: `plans/CAMERA_PLAN.md`) |
 | Real WhatsApp send/read: options, ban risk, isolated bridge design | `plans/WHATSAPP_REAL_ACCESS.md` |
+| Optional read-only OpenAI admin key (usage/cost checks), how to create and save it | `OPENAI_ADMIN_KEY.md` |
 | Face / 2D avatar / 3D avatar / hidden presentations, `appearance.set` | `APPEARANCE.md` |
 | JARVES-generated Skills: draft, validation, approval, grants, sandbox | `SKILL_CREATION.md` |
 | Assistant software: stack, models, costs (checked dates) | `reviews/SW_V1_TECH_DECISION.md` |
 | Run/debug the Core, Skills, music pairing | `../core/README.md` |
+| Using JARVES end to end (en/he), V4 features, troubleshooting | `USER_GUIDE.md`, `USER_GUIDE.he.md` |
+| Which document is where | `README.md` (docs index) |
+| What V4 changed (behaviour, exit codes) | `RELEASE_NOTES_4.0.md`, `../CHANGELOG.md` |
+| V4 package evidence (privacy, orchestrator, WhatsApp, recall, diagnostics, perf) | `reviews/SWV4_*.md` (one per package) |
 | Historical decisions and alternatives | `archive/DECISIONS.md` |
 | Component slots/fit/assembly | `archive/MECHANICAL.md` |
 | Connections, power, Pi vs PC, USB bridge | `archive/HARDWARE.md` |

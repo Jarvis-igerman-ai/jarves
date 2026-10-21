@@ -72,7 +72,7 @@ GOOGLE_FEATURES = ("google_calendar", "calendar_write", "gmail_read", "gmail_sen
 GROUPS: tuple[tuple[str, str, str, tuple[str, ...]], ...] = (
     ("core", "בסיס", "Core", ("web_search", "background_tasks", "memory_curator", "memory_llm_pass",
                              "diagnosis_llm_pass", "conversation_recall", "self_check", "self_diagnostics_2", "guided_setup", "workspace_agent_edit", "assistant_identity", "skill_creation",
-                             "proactive_help", "usage_monitor", "appearance", "background_core", "display_control",
+                             "proactive_help", "usage_monitor", "usage_admin_key", "appearance", "background_core", "display_control",
                              "tray_icon", "autostart")),
     ("voice", "קול", "Voice", ("wake_word", "greeting", "chimes", "voice_change", "client_delegation")),
     ("music", "מוזיקה", "Music", ("music",)),
@@ -955,6 +955,7 @@ BUNDLE: dict[str, list[Callable[[], tuple[bool, str]]]] = {
     "skill_creation": [_mod("jarves.skills.generated")],
     "proactive_help": [_mod("jarves.guides"), _data("jarves.guides", "data/help.toml")],
     "usage_monitor": [_mod("jarves.usage")],
+    "usage_admin_key": [_mod("jarves.usage")],
     "scheduler": [_mod("jarves.scheduler"), _tz("Asia/Jerusalem")],
     "reports": [_mod("jarves.scheduler")],
     "timers": [_mod("jarves.timers"), _tz("Asia/Jerusalem")],

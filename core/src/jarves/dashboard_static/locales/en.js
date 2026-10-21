@@ -1465,7 +1465,7 @@
   "(Godot viewer not found (set GODOT_EXE))": "(Godot viewer not found (set GODOT_EXE))",
   "no desktop session (headless): use the dashboard instead": "no desktop session (headless): use the dashboard instead",
   "מצלמה: no camera connected; connect a camera (Pi: Camera Module 3 Wide)": "מצלמה: no camera connected; connect a camera (Pi: Camera Module 3 Wide)",
-  "Starts with JARVES. Switching it off stops phone access at once.": "Starts with JARVES. Switching it off stops phone access at once.",
+  "Starts with JARVES. Switching it off stops phone access at once.": "Starts with JARVES. Switching it off stops phone access at once.",
   "Phone calls": "Phone calls",
   "Assisted dialing through Phone Link: you press Call.": "Assisted dialing through Phone Link: you press Call.",
   "Assisted dialing is off: ": "Assisted dialing is off: ",
@@ -1502,6 +1502,18 @@
   "Previous version: ": "Previous version: ",
   " (downloaded from the signed release folder)": " (downloaded from the signed release folder)",
   "jarvis dial <name|number>, dashboard Calls page (#/calls)": "jarvis dial <name|number>, dashboard Calls page (#/calls)",
-  ", approval on every call (on screen for a new number)": ", approval on every call (on screen for a new number)"
+  ", approval on every call (on screen for a new number)": ", approval on every call (on screen for a new number)",
+  "OpenAI admin key (optional, read-only)": "OpenAI admin key (optional, read-only)",
+  "Key saved. Press Test now.": "Key saved. Press Test now.",
+  "Save key": "Save key",
+  "Remove key": "Remove key",
+  "Key removed.": "Key removed.",
+  "Checking...": "Checking...",
+  "Works: this month so far $": "Works: this month so far $",
+  "Not working: ": "Not working: ",
+  "no answer": "no answer",
+  "Used only to read this month's real cost from OpenAI's usage endpoint. Never shown again, never sent anywhere else.": "Used only to read this month's real cost from OpenAI's usage endpoint. Never shown again, never sent anywhere else.",
+  "How to create a read-only key (step by step)": "How to create a read-only key (step by step)",
+  "or in a terminal: jarvis connect openai-admin": "or in a terminal: jarvis connect openai-admin"
  }
 };

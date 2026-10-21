@@ -3,7 +3,7 @@
 ## What the user can choose
 | Mode | What shows | Windows | Raspberry Pi 5 |
 |---|---|---|---|
-| `face` | the original shader face (`godot/face/face.gd` + `face.gdshader`) | verified_on_device | planned ([#21](https://github.com/igalgerman/JARVIS/issues/21)) |
+| `face` | the original shader face (`godot/face/face.gd` + `face.gdshader`) | verified_on_device | planned (roadmap issue) |
 | `avatar2d` | soft-shaded robot buddy, one SDF canvas shader (`avatar_2d.gd` + `avatar_2d.gdshader`) | implemented_unverified | planned (#21) |
 | `avatar3d` | cute rounded robot head with glowing eye panels on a glass visor, own SubViewport (`avatar_3d.gd` + `avatar_3d_head.gdshader`) | implemented_unverified | planned (#21: 3D on the Pi GPU unmeasured) |
 | `hidden` | no renderer drawn (black); Core and voice keep running | implemented_unverified | planned (#21: backlight off not wired) |

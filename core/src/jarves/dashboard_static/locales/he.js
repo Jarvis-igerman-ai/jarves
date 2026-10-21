@@ -153,7 +153,7 @@
   "Restored ": "שוחזר ",
   "Roll back to previous version": "חזרה לגרסה הקודמת",
   "Run now": "הרצה עכשיו",
-  "Test now": "בדיקה עכשיו",
+  "Test now": "בדוק עכשיו",
   "Turn on": "הפעלה",
   "Read aloud": "הקראה",
   "Export .md": "ייצוא ‎.md",
@@ -1465,7 +1465,7 @@
   "(Godot viewer not found (set GODOT_EXE))": "(לא נמצא צופה Godot (הגדירו GODOT_EXE))",
   "no desktop session (headless): use the dashboard instead": "אין סשן שולחן עבודה (ללא מסך): השתמשו בלוח הבקרה",
   "מצלמה: no camera connected; connect a camera (Pi: Camera Module 3 Wide)": "מצלמה: אין מצלמה מחוברת; חברו מצלמה (בפאי: Camera Module 3 Wide)",
-  "Starts with JARVES. Switching it off stops phone access at once.": "מתחיל יחד עם JARVES. כיבוי המתג עוצר את הגישה מהטלפון מיד.",
+  "Starts with JARVES. Switching it off stops phone access at once.": "מתחיל יחד עם JARVES. כיבוי המתג עוצר את הגישה מהטלפון מיד.",
   "Phone calls": "שיחות טלפון",
   "Assisted dialing through Phone Link: you press Call.": "חיוג מסייע דרך Phone Link: אתם לוחצים חיוג.",
   "Assisted dialing is off: ": "חיוג מסייע כבוי: ",
@@ -1502,7 +1502,19 @@
   "Previous version: ": "הגרסה הקודמת: ",
   " (downloaded from the signed release folder)": " (תורד מתיקיית ההפצה החתומה)",
   "jarvis dial <name|number>, dashboard Calls page (#/calls)": "jarvis dial <שם|מספר>, עמוד השיחות בלוח הבקרה (#/calls)",
-  ", approval on every call (on screen for a new number)": ", אישור על כל שיחה (על המסך למספר חדש)"
+  ", approval on every call (on screen for a new number)": ", אישור על כל שיחה (על המסך למספר חדש)",
+  "OpenAI admin key (optional, read-only)": "מפתח אדמין של OpenAI (לא חובה, לקריאה בלבד)",
+  "Key saved. Press Test now.": "המפתח נשמר. לחצו על \"בדוק עכשיו\".",
+  "Save key": "שמירת מפתח",
+  "Remove key": "הסרת מפתח",
+  "Key removed.": "המפתח הוסר.",
+  "Checking...": "בודק...",
+  "Works: this month so far $": "עובד: העלות החודש עד עכשיו $",
+  "Not working: ": "לא עובד: ",
+  "no answer": "אין תשובה",
+  "Used only to read this month's real cost from OpenAI's usage endpoint. Never shown again, never sent anywhere else.": "משמש רק לקריאת העלות האמיתית החודש ממשק השימוש של OpenAI. לא מוצג שוב ולא נשלח לשום מקום אחר.",
+  "How to create a read-only key (step by step)": "איך יוצרים מפתח לקריאה בלבד (שלב אחר שלב)",
+  "or in a terminal: jarvis connect openai-admin": "או בטרמינל: jarvis connect openai-admin"
  },
  "rules": [
   [
