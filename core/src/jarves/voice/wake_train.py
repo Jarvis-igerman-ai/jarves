@@ -56,9 +56,7 @@ NEG_EN = ["what time is it", "turn on the music", "good morning", "how is the we
 NEAR_EN = ["hey Marcus", "hey Carlos", "hey Jarrett", "hey Travers", "hey Chavez", "hey Darwin", "hey Garvin",
            "hey Jason", "hey Marvel", "hey Arthur", "hey Parvez", "hey Charlie", "hey Davies", "hey Jagger",
            "hey Gervais", "hey Barnes", "hi Marcus", "hi Carlos", "okay Darwin", "hey Jarrah", "hey Larkin",
-           "hey Carver", "hey starfish", "hey Artie", "ok Jason", "hey Charvez", "hey Tavish", "hey Jarmusch",
-           "hey Charlene", "hey Carl", "hey Chalmers", "hey Sharkey", "hey Marshall", "hey Charmaine", "hey Chandler",
-           "hey Carlton", "hey Sherman", "hey Harlan", "hey Chuck", "hey Marlow"]
+           "hey Carver", "hey starfish", "hey Artie", "ok Jason", "hey Charvez", "hey Tavish", "hey Jarmusch"]
 NEG_HE = ["מה השעה", "תדליק מוזיקה", "בוקר טוב", "מה מזג האוויר היום", "תודה רבה", "איפה המפתחות שלי",
           "בוא נלך הביתה", "אני הולך לחנות", "תתקשר לאמא", "הפגישה בעשר", "רגע אחד בבקשה", "היי", "שלום לך",
           "מה נשמע", "יאללה", "ג'ארוויס", "היי ג'ארוויס", "תעשה לי טובה", "סגור", "תסגור את החלון", "מעולה",
@@ -66,6 +64,20 @@ NEG_HE = ["מה השעה", "תדליק מוזיקה", "בוקר טוב", "מה �
           "אני לא יודע", "בוא נראה", "כמה זה עולה", "תשמיע לי שיר", "מה יש לי מחר", "תזכיר לי לקנות חלב",
           "הילדים בבית", "אני יוצא עכשיו", "זה לא נכון", "תחזור על זה", "כן בטח", "לא תודה", "מה אתה אומר",
           "החדשות של היום", "תפתח את הטלוויזיה", "אני עייף", "לילה טוב", "איפה הטלפון", "היי אמא", "היי חבר"]
+
+# Longer everyday sentences: the negatives must cover every utterance length the near-miss list and real speech have
+# (a gap in the 20-28 character range left the head hair-trigger on exactly those lengths: the production check
+# measured scores of 0.98 for "Hey Charles, come here" on one platform and 0.4 on another).
+NEG_EN_LONG = ["we are almost there", "see you tomorrow morning", "I would like some coffee", "it is a lovely evening",
+               "please turn the volume down", "what are we having for dinner", "the train leaves at noon",
+               "remind me about the dentist", "how long will it take", "open the front door please",
+               "are you coming with us tonight", "we should leave a bit earlier", "the children are asleep upstairs",
+               "can you check the oven for me", "put the groceries on the table", "it is time for lunch now",
+               "I will be back in a minute", "that was a really good movie", "what a beautiful sunny day"]
+NEG_HE_LONG = ["מה אתה עושה עכשיו", "בוא נאכל משהו טעים", "תדליק את האור במטבח", "האוטובוס מגיע בעוד חמש דקות",
+               "יש הרבה אנשים היום בחוץ", "תזכיר לי להתקשר לרופא", "תפתח את החלון בבקשה", "מזג האוויר יפה מאוד היום",
+               "אני צריך לצאת בעוד רגע", "הילדים כבר הלכו לישון", "כמה זמן זה ייקח בערך", "בוא נסע לים בשבת",
+               "מתי אנחנו אוכלים ארוחת ערב"]
 
 
 def _is_he(text: str) -> bool:
@@ -369,8 +381,8 @@ def train_phrase(phrase: str, out: Path, *, say: list[str] | None = None, sample
     held = next((v.id for v in voices if v.lang == "en" and sum(x.lang == "en" for x in voices) > 1), None)
     words = [w for t in texts for w in re.split(r"\s+", t) if len(w) > 1]
     near = lambda s: max(difflib.SequenceMatcher(None, s.lower(), t.lower()).ratio() for t in texts) > 0.75
-    negs = {"en": [s for s in NEG_EN + NEAR_EN + words if not _is_he(s) and not near(s)],
-            "he": [s for s in NEG_HE + words if _is_he(s) and not near(s)]}
+    negs = {"en": [s for s in NEG_EN + NEG_EN_LONG + NEAR_EN + words if not _is_he(s) and not near(s)],
+            "he": [s for s in NEG_HE + NEG_HE_LONG + words if _is_he(s) and not near(s)]}
 
     def render(text: str, v: Voice, rate: float, pitch: float) -> np.ndarray | None:
         try:
