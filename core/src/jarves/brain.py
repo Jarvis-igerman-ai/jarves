@@ -297,7 +297,7 @@ class BackendTrace:
         # log-lint: fields=model,attempt,delegation,response_id,tier,error_code,provider_error,reason
         level(self.area, f"{self.prefix}_DONE", "backend response finished", status=status,
               backend_s=self.elapsed(), searches=len(self.queries), web_searches=self.search_calls,
-              sources=self.sources, pages=self.pages, **usage_fields(self.usage), **self.ids, **extra)
+              sources=self.sources, pages=self.pages, **usage_fields(self.usage), **{**self.ids, **extra})
 
 
 # ------------------------------------------------------------------ billing truth (CR-04)
