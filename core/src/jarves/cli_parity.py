@@ -50,6 +50,7 @@ FEATURES: dict[str, object] = {
     "whatsapp_bridge": "whatsapp", "whatsapp_send": "whatsapp",          # SW-V4 F: jarvis whatsapp ...
     "agent_orchestrator": "agents",
     "assisted_dialing": "dial",
+    "self_tests": "selftest",
 }
 
 # Skill (tool group) name -> "jarvis <command>" or ("dashboard", reason) or ("voice", reason) for groups that only
@@ -72,6 +73,7 @@ TOOL_GROUPS: dict[str, object] = {
     "whatsapp_bridge": "whatsapp",                                       # SW-V4 F: inbox / send / status
     "agents": "agents",
     "dialing": "dial",
+    "selfspeed": "selftest",
 }
 
 
