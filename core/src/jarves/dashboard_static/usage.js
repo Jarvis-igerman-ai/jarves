@@ -111,8 +111,41 @@
           el("span", { class: "muted small" }, " your own number: OpenAI does not expose the project budget")),
         el("div", { class: "k" }, "Costs API"), el("div", { class: "v" }, costs, el("span", { class: "muted small" },
           d.costs_api.key_present ? " admin key present (read-only use)" : " needs OPENAI_ADMIN_KEY in secrets.env"))),
-        el("div", { class: "row", style: "margin-top:10px" }, save, msg), el("h2", {}, "Recent alerts"), alerts),
+        el("div", { class: "row", style: "margin-top:10px" }, save, msg), adminKeyCard(d), el("h2", {}, "Recent alerts"), alerts),
       el("ul", { class: "muted small" }, d.notes.map((n, i) => el("li", {}, (d["notes_" + JL.lang] && d["notes_" + JL.lang][i]) || JL.t(n)))));
+  }
+
+  // The optional read-only OpenAI admin key (usage/cost checks only). Hidden input; the page never shows the key back.
+  function adminKeyCard(d) {
+    const present = d.costs_api.key_present;
+    const input = el("input", { type: "password", autocomplete: "off", spellcheck: "false", size: 40,
+      placeholder: "sk-admin-...", "aria-label": JL.t("OpenAI admin key (optional, read-only)") });
+    const out = el("span", { class: "muted small", "aria-live": "polite" });
+    const post = async (path, body) => {
+      try { const r = await api(path, { method: "POST", body: JSON.stringify(body) }); input.value = ""; return r; }
+      catch (e) { out.textContent = JL.t("Not saved: ") + e.message; return null; }
+    };
+    const saveKey = el("button", { type: "button", class: "primary", onclick: async () => {
+      if (await post("/api/usage/admin-key", { key: input.value })) { out.textContent = JL.t("Key saved. Press Test now."); route(true); }
+    } }, JL.t("Save key"));
+    const removeKey = el("button", { type: "button", class: "ghost", disabled: !present, onclick: async () => {
+      if (await post("/api/usage/admin-key", { remove: true })) { out.textContent = JL.t("Key removed."); route(true); }
+    } }, JL.t("Remove key"));
+    const test = el("button", { type: "button", class: "ghost", disabled: !present, onclick: async () => {
+      out.textContent = JL.t("Checking...");
+      try {
+        const r = await api("/api/usage/refresh", { method: "POST", body: "{}" });
+        const c = r.costs;
+        out.textContent = c && c.usd !== undefined ? JL.t("Works: this month so far $") + c.usd.toFixed(2)
+          : JL.t("Not working: ") + ((c && c.error) || JL.t("no answer"));
+      } catch (e) { out.textContent = JL.t("Not working: ") + e.message; }
+    } }, JL.t("Test now"));
+    return el("div", { class: "card", style: "margin-top:10px" },
+      el("h2", {}, JL.t("OpenAI admin key (optional, read-only)")),
+      el("p", { class: "muted small" }, JL.t("Used only to read this month's real cost from OpenAI's usage endpoint. Never shown again, never sent anywhere else.")),
+      el("div", { class: "row" }, input, saveKey, removeKey, test, out),
+      el("p", { class: "small" }, el("a", { href: "#/guide/api_bill" }, JL.t("How to create a read-only key (step by step)")),
+        el("span", { class: "muted" }, " · " + JL.t("or in a terminal: jarvis connect openai-admin"))));
   }
 
   // ---------------------------------------------------------------- Backup page

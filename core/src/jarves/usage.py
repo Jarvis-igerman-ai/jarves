@@ -68,6 +68,50 @@ CREATE TABLE IF NOT EXISTS usage_alerts (meter TEXT NOT NULL, window TEXT NOT NU
 """
 
 
+# ---------------------------------------------------------------------- the optional admin key
+# One place for the admin key (CLI `jarvis key --admin`, `jarvis connect openai-admin`, the dashboard Usage page).
+# It goes through config.save_secret (private secrets.env, never in the project), is never printed, echoed or logged,
+# and is sent only to the OpenAI usage/costs endpoint (COSTS_URL) by Monitor.refresh_costs.
+ADMIN_PREFIX = "sk-admin-"
+
+
+def valid_admin_key(key: str) -> bool:
+    k = (key or "").strip()
+    return k.startswith(ADMIN_PREFIX) and len(k) > len(ADMIN_PREFIX) and k.isprintable() and " " not in k
+
+
+def admin_key_saved(home) -> bool:
+    """True when secrets.env holds a non-empty admin key (reads the file, not only the process environment)."""
+    from .config import secrets_file
+    try:
+        for line in secrets_file(home).read_text(encoding="utf-8-sig").splitlines():
+            name, _, val = line.partition("=")
+            if name.strip() == ADMIN_ENV and val.strip():
+                return True
+    except OSError:
+        pass
+    return False
+
+
+def save_admin_key(home, key: str) -> None:
+    """Validate and store the key. Raises ValueError (never containing the key) when it is not an admin key."""
+    from .config import save_secret
+    if not valid_admin_key(key):
+        raise ValueError("That does not look like an OpenAI admin key (it starts with sk-admin-). Nothing saved.")
+    save_secret(ADMIN_ENV, key.strip(), home)
+    logs.info("usage", "USAGE_ADMIN_KEY_SAVED", "optional OpenAI admin key saved")
+
+
+def remove_admin_key(home) -> None:
+    from .config import secrets_file
+    path = secrets_file(home)
+    if path.exists():
+        lines = [l for l in path.read_text(encoding="utf-8-sig").splitlines() if l.partition("=")[0].strip() != ADMIN_ENV]
+        path.write_text(chr(10).join(lines) + chr(10), encoding="utf-8")
+    os.environ.pop(ADMIN_ENV, None)
+    logs.info("usage", "USAGE_ADMIN_KEY_REMOVED", "optional OpenAI admin key removed")
+
+
 # ---------------------------------------------------------------------- meter
 @dataclass
 class Meter:
@@ -694,6 +738,24 @@ def register_feature() -> None:
                                     "blocker": "pure Python + SQLite, no platform code; not yet run on a Pi"}}
 
 
+def _probe_admin_key(c) -> tuple[bool, str]:
+    return (True, "") if os.environ.get(ADMIN_ENV, "").strip() else (False, "no OpenAI admin key saved")
+
+
+def register_admin_key_feature() -> None:
+    from . import features
+    f = features.register("usage_admin_key", "בדיקות שימוש (מפתח אדמין)", "Usage checks (admin key)", True,
+                          probe=_probe_admin_key,
+                          about="optional read-only OpenAI admin key: real monthly cost for the spend display and "
+                                "usage checks; used only for OpenAI's costs endpoint")
+    f.targets = {"windows": {"status": "implemented_unverified",
+                             "evidence": "core/tests/test_usage_admin_key.py with a fake costs endpoint; no real "
+                                         "admin key tested yet (owner decision OD-05)"},
+                 "linux_arm64_pi": {"status": "implemented_unverified",
+                                    "roadmap_issue": "https://github.com/igalgerman/jarves/issues/3",
+                                    "blocker": "pure Python HTTPS GET; not run on a Pi yet"}}
+
+
 def make_skill(home: Path, cfg=None):
     from .skills import Skill, Tool, ToolResult
 
@@ -720,6 +782,7 @@ def make_skill(home: Path, cfg=None):
 
 
 register_feature()
+register_admin_key_feature()
 
 
 # ---------------------------------------------------------------------- dashboard
@@ -741,6 +804,19 @@ def api_usage_settings(ctx, m, body):
         return 400, {"error": str(e)}
 
 
+def api_usage_admin_key(ctx, m, body):
+    """Save / remove the optional read-only OpenAI admin key. The key is never echoed back and never logged."""
+    body = body or {}
+    try:
+        if body.get("remove"):
+            remove_admin_key(ctx.home)
+        else:
+            save_admin_key(ctx.home, str(body.get("key") or ""))
+    except ValueError as e:
+        return 400, {"error": str(e)}
+    return 200, {"key_present": admin_key_saved(ctx.home)}
+
+
 def api_usage_refresh(ctx, m, body):
     mon = _monitor(ctx)
     data = mon.refresh_costs(force=True)
@@ -750,6 +826,7 @@ def api_usage_refresh(ctx, m, body):
 def dashboard_routes(register_route) -> None:
     register_route("GET", r"/api/usage", api_usage)
     register_route("POST", r"/api/usage/settings", api_usage_settings)
+    register_route("POST", r"/api/usage/admin-key", api_usage_admin_key)
     register_route("POST", r"/api/usage/refresh", api_usage_refresh)
 
 

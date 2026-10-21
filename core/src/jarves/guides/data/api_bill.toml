@@ -1,6 +1,7 @@
 order = 51
 category = "costs"
 probe = "admin_key"
+features = ["usage_admin_key"]
 optional = true
 aliases = ["חשבון אמיתי", "חיוב", "admin key", "מפתח אדמין", "real bill", "billing", "costs api"]
 links = ["api_budget", "usage"]
@@ -28,9 +29,9 @@ he = "לחצו \"Create new admin key\", תנו שם כמו JARVES-costs, ובח
 en = "Press \"Create new admin key\", name it e.g. JARVES-costs, choose Read only permission. Copy the key (starts with sk-admin-)."
 
 [[steps]]
-he = "בטרמינל הקלידו jarvis key --admin והדביקו (מוסתר בזמן ההדבקה)."
-en = "In a terminal type jarvis key --admin and paste (hidden while you paste)."
-action = "command:jarvis key --admin"
+he = "שומרים את המפתח, באחת משתי דרכים: בטרמינל jarvis connect openai-admin (אפשר לדלג עם s), או בלוח הבקרה, עמוד Usage, תיבת \"מפתח אדמין\". ההדבקה מוסתרת, המפתח נשמר רק בקובץ הפרטי secrets.env ואף פעם לא מוצג שוב."
+en = "Save the key one of two ways: in a terminal run jarvis connect openai-admin (type s to skip), or in the dashboard on the Usage page, the admin key box. The paste is hidden, the key is kept only in the private secrets.env file and is never shown again."
+action = "command:jarvis connect openai-admin"
 check = "probe:admin_key"
 
 [[steps]]
@@ -41,14 +42,14 @@ action = "test"
 [[problems]]
 he = "הבדיקה אומרת HTTP 401 או 403"
 en = "The check says HTTP 401 or 403"
-fix_he = "המפתח לא מפתח אדמין, או שאינכם בעלי הארגון. צרו מפתח אדמין חדש והריצו שוב jarvis key --admin."
-fix_en = "It is not an admin key, or you are not the organization owner. Create a new admin key and run jarvis key --admin again."
+fix_he = "המפתח לא מפתח אדמין, או שאינכם בעלי הארגון. צרו מפתח אדמין חדש והריצו שוב jarvis connect openai-admin."
+fix_en = "It is not an admin key, or you are not the organization owner. Create a new admin key and run jarvis connect openai-admin again."
 
 [[problems]]
 he = "רוצים להסיר את המפתח"
 en = "Want to remove the key"
-fix_he = "הריצו jarvis key --admin --remove, ומחקו את המפתח גם באתר של OpenAI."
-fix_en = "Run jarvis key --admin --remove, and delete it on OpenAI's site too."
+fix_he = "הריצו jarvis key --admin --remove (או \"הסרת מפתח\" בעמוד Usage), ומחקו את המפתח גם באתר של OpenAI."
+fix_en = "Run jarvis key --admin --remove (or Remove key on the Usage page), and delete it on OpenAI's site too."
 
 [platform]
 windows = "implemented_unverified"
