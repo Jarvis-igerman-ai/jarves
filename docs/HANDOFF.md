@@ -1,3 +1,11 @@
+## V5 owner decisions 2026-10-21 - branch `v5/owner-decisions` (off `v5/mobile-access`, draft PR)
+
+- Done and tested (`core/tests/test_tailnet.py`, 26 tests, plus mobile/privacy/setup/guides/lint suites): OD-15 client delegation and OD-12 privacy on for NEW installs only (`config.NEW_INSTALL_DEFAULTS`); **Full text on request** (24 h, auto-revert in every process, dashboard + `jarvis privacy`); Tailscale detection, tailnet-only bind (never 0.0.0.0, refuses without an address), `tailscale cert` with self-signed fallback, tailnet URL + QR, `jarvis phone status|approvals|revoke-all|bind`; phone approvals for every risk level except typed codes, audited, warning toggle and revoke-all. Docs: `PHONE_ACCESS_TAILSCALE.md` (+ `_HE`), PRIORITIES, V5 work package section 8. log_lint 0 violations.
+- Not verified: a real Tailscale install, a real phone. Not built yet (decided in PRIORITIES, belong on the #29 branch): Adaptive Memory in instructions, goal-finished line, proactive items, Development Manager drafts list.
+- Questions for the user: none new. Status: REVIEW.
+
+---
+
 ## MIGRATION HANDOFF — ONLY ACTIVE PUBLIC REPOSITORY (20 October 2026)
 
 **Scope of this handoff: repository migration only; not a general V4 status report or future roadmap.**

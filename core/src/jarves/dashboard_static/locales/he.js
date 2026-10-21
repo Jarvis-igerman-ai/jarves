@@ -1465,7 +1465,33 @@
   "(Godot viewer not found (set GODOT_EXE))": "(לא נמצא צופה Godot (הגדירו GODOT_EXE))",
   "no desktop session (headless): use the dashboard instead": "אין סשן שולחן עבודה (ללא מסך): השתמשו בלוח הבקרה",
   "מצלמה: no camera connected; connect a camera (Pi: Camera Module 3 Wide)": "מצלמה: אין מצלמה מחוברת; חברו מצלמה (בפאי: Camera Module 3 Wide)",
-  "Starts with JARVES. Switching it off stops phone access at once.": "מתחיל יחד עם JARVES. כיבוי המתג עוצר את הגישה מהטלפון מיד."
+  "Starts with JARVES. Switching it off stops phone access at once.": "מתחיל יחד עם JARVES. כיבוי המתג עוצר את הגישה מהטלפון מיד.",
+  "body needs {\"phone_approvals\": true|false} and/or {\"bind_tailnet_only\": true|false}": "נדרש גוף בצורה {\"phone_approvals\": true|false} ו/או {\"bind_tailnet_only\": true|false}",
+  "send {\"full_text\": true|false}": "שלחו {\"full_text\": true|false}",
+  "tailnet-only mode needs a Tailscale address on this computer (is Tailscale running?)": "מצב Tailscale בלבד דורש כתובת Tailscale במחשב הזה (האם Tailscale פועל?)",
+  "Full text on request": "טקסט מלא לפי בקשה",
+  "Keep full text for 24 hours only? Privacy then turns on again by itself.": "לשמור טקסט מלא ל-24 שעות בלבד? אחר כך הפרטיות חוזרת לבד.",
+  "End full text now": "סיום טקסט מלא עכשיו",
+  "Full text on request (24 hours)": "טקסט מלא לפי בקשה (24 שעות)",
+  "ready": "מוכן",
+  "not installed": "לא מותקן",
+  "installed but not connected": "מותקן אך לא מחובר",
+  "not in use": "לא בשימוש",
+  "Tailscale (away from home)": "Tailscale (גישה מחוץ לבית)",
+  "Status: ": "מצב: ",
+  "Address on the phone: ": "כתובת בטלפון: ",
+  "Secure connection with a Tailscale certificate: voice is available.": "חיבור מאובטח עם תעודה של Tailscale: קול זמין.",
+  "No Tailscale certificate: self-signed or no TLS (voice needs TLS).": "ללא תעודת Tailscale: משתמשים בתעודה עצמית או בלי TLS (קול דורש TLS).",
+  "Pairing code over Tailscale (5 minutes, one use):": "קוד צימוד דרך Tailscale (5 דקות, שימוש אחד):",
+  "Pair over Tailscale": "צימוד דרך Tailscale",
+  "Listen on the Tailscale address only (not the home network): ": "האזנה לכתובת Tailscale בלבד (לא לרשת הבית): ",
+  "Applies the next time JARVES starts.": "נכנס לתוקף בהפעלה הבאה של JARVES.",
+  "Tailscale is installed but not connected. Open it and sign in yourself; JARVES never signs in for you.": "Tailscale מותקן אך לא מחובר. פתחו אותו והתחברו בעצמכם; JARVES לא מתחבר בשבילכם.",
+  "Optional: install Tailscale on this computer and the phone and sign in to the same account. JARVES only detects it and never installs anything. Guide: docs/PHONE_ACCESS_TAILSCALE.md": "אופציונלי: התקינו Tailscale במחשב ובטלפון והתחברו לאותו חשבון. JARVES רק מזהה אותו ולא מתקין דבר. מדריך: docs/PHONE_ACCESS_TAILSCALE.md",
+  "Warning: a lost or stolen phone that is still paired could approve actions of ANY risk level, except requests that need a typed code (those stay on the computer only). You can revoke every phone with one click. Turn it on?": "אזהרה: טלפון אבוד או גנוב עם גישה מצומדת יוכל לאשר פעולות בכל רמת סיכון, חוץ מבקשות שדורשות קוד מוקלד (אלה נשארות במחשב בלבד). אפשר לנתק את כל הטלפונים בלחיצה אחת. להפעיל?",
+  "When on, a paired phone can approve any risk level except typed-code requests. A lost phone is a danger: revoke it at once.": "כשהמתג פועל, טלפון מצומד יכול לאשר כל רמת סיכון, חוץ מבקשות עם קוד מוקלד. טלפון אבוד = סכנה: נתקו אותו מיד.",
+  "Revoke ALL paired phones now?": "לנתק את כל הטלפונים המצומדים עכשיו?",
+  "Revoke all phones": "ניתוק כל הטלפונים"
  },
  "rules": [
   [
@@ -1651,6 +1677,10 @@
   [
    "^config (\\S.*)$",
    "הגדרה: $1"
+  ],
+  [
+   "^Full text on request: ends at (.+), then privacy turns on by itself$",
+   "טקסט מלא לפי בקשה: מסתיים ב-$1, ואז הפרטיות חוזרת לבד"
   ]
  ]
 };

@@ -205,6 +205,9 @@ def apply(path: Path, updates: dict) -> dict:
         raise ValueError(f"not editable here: {', '.join(unknown)}")
     values = {k: coerce(k, v) for k, v in updates.items()}
     text, _ = _read(path)
+    if not path.exists():                           # the first save keeps what a new install already runs with
+        from .config import NEW_INSTALL_TOML
+        text = NEW_INSTALL_TOML
     new_text = edit_text(text, values)
     cfg = validate_text(path, new_text)
     for k, v in values.items():                     # the edit landed where pydantic reads it

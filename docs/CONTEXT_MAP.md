@@ -18,6 +18,7 @@
 | Component slots/fit/assembly | `archive/MECHANICAL.md` |
 | Connections, power, Pi vs PC, USB bridge | `archive/HARDWARE.md` |
 | Stage order / physical transition | `archive/ROADMAP.md` |
+| Phone access over Tailscale (setup EN/HE) | `PHONE_ACCESS_TAILSCALE.md`, `PHONE_ACCESS_TAILSCALE_HE.md` |
 | Future features/personal assistant | `archive/PRODUCT.md` |
 | Open risks/questions | `archive/OPEN_ITEMS.md` |
 | Prior artifacts/PDF/old simulator | `../archive/legacy/` ONLY if asked |

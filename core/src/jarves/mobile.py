@@ -62,10 +62,15 @@ def is_mobile_path(path: str) -> bool:
     return path == "/m" or path.startswith("/m/") or path.startswith("/api/m/")
 
 
-def network_ok(ip: str, *, lan: bool, mobile_on: bool, path: str) -> bool:
+def network_ok(ip: str, *, lan: bool, mobile_on: bool, path: str, tailnet: bool = False) -> bool:
     """Who may talk to the server at all. Public addresses never. A home-network address only in LAN mode (whole
-    dashboard, paired devices) or, in phone mode, only on the phone paths. Loopback always (the owner's own PC)."""
+    dashboard, paired devices) or, in phone mode, only on the phone paths. Loopback always (the owner's own PC).
+    A tailnet address (100.64.0.0/10) only when the owner uses Tailscale (`tailnet`), phone mode is on and only on
+    the phone paths: the rest of the dashboard stays PC-only."""
     from .dashboard_auth import client_allowed, is_loopback
+    from .tailnet import is_tailnet_ip
+    if tailnet and mobile_on and is_tailnet_ip(ip) and is_mobile_path(path):
+        return True
     if not client_allowed(ip):
         return False
     return is_loopback(ip) or lan or (mobile_on and is_mobile_path(path))
@@ -118,6 +123,9 @@ class MobileAccess:
         self.scheme = "http"
         self.host: str | None = None
         self.port = 0
+        self.tailnet: dict = {}                  # tailnet.detect() result of THIS run (empty = Tailscale not used)
+        self.tls_source = "none"                 # tailscale | selfsigned | none
+        self.bind: str | None = None             # the address the server listens on
 
     @property
     def enabled(self) -> bool:
@@ -138,13 +146,36 @@ class MobileAccess:
             d = json.loads(self.settings_path.read_text(encoding="utf-8"))
         except (OSError, ValueError):
             d = {}
-        return {"phone_approvals": bool(d.get("phone_approvals")) if isinstance(d, dict) else False}
+        d = d if isinstance(d, dict) else {}
+        return {"phone_approvals": bool(d.get("phone_approvals")), "bind_tailnet_only": bool(d.get("bind_tailnet_only"))}
 
     def set_phone_approvals(self, on: bool, by: str = "local") -> None:
         with self._lock:
-            self._write(self.settings_path, {"phone_approvals": bool(on)})
+            self._write(self.settings_path, {**self.settings(), "phone_approvals": bool(on)})
         self.audit("phone_approvals_changed", by=by, on=bool(on))
         logs.info("mobile", "MOBILE_PHONE_APPROVALS", "phone approvals setting changed", enabled=bool(on))
+
+    def set_bind_tailnet_only(self, on: bool, by: str = "local") -> None:
+        """Listen on the tailnet address only (takes effect when the phone server starts the next time)."""
+        with self._lock:
+            self._write(self.settings_path, {**self.settings(), "bind_tailnet_only": bool(on)})
+        self.audit("bind_changed", by=by, on=bool(on))
+        logs.info("mobile", "MOBILE_BIND_CHANGED", "phone server bind setting changed", bind_tailnet_only=bool(on))
+
+    def revoke_all(self, by: str) -> int:
+        """One click: every paired phone is revoked at once (a lost phone)."""
+        with self._lock:
+            devs = self._devices()
+            n = 0
+            for d in devs:
+                if not d.get("revoked"):
+                    d["revoked"], d["token_hash"] = self.clock(), ""
+                    n += 1
+            if n:
+                self._write(self.path, {"version": 1, "devices": devs})
+        self.audit("all_devices_revoked", by=by, count=n)
+        logs.warn("mobile", "MOBILE_ALL_REVOKED", "every paired phone was revoked", count=n)
+        return n
 
     # ------------------------------------------------------------------ storage
     def _write(self, path: Path, obj) -> None:
@@ -217,13 +248,28 @@ class MobileAccess:
         host = self.host or "127.0.0.1"
         return f"{self.scheme}://{host}:{self.port}/m/#c={code}"
 
+    def tailnet_host(self) -> str | None:
+        """The name the phone uses over Tailscale: the tailnet DNS name with a Tailscale certificate, else the 100.x address."""
+        t = self.tailnet or {}
+        if not t.get("present"):
+            return None
+        return t.get("name") if (self.tls_source == "tailscale" and t.get("name")) else t.get("ip")
+
+    def tailnet_url(self, code: str) -> str | None:
+        h = self.tailnet_host()
+        return f"{self.scheme}://{h}:{self.port}/m/#c={code}" if h else None
+
     def new_code(self, by: str = "local") -> dict:
         code = f"{secrets.randbelow(10 ** 8):08d}"
         with self._lock:
             self._code = {"hash": _hash(code), "expires": self.clock() + CODE_TTL_S, "tries": {}, "total": 0}
         self.audit("pairing_code_created", by=by)
         url = self.pair_url(code)
-        return {"code": code, "expires_s": CODE_TTL_S, "url": url, "qr": qrmini.rows(url)}
+        out = {"code": code, "expires_s": CODE_TTL_S, "url": url, "qr": qrmini.rows(url)}
+        turl = self.tailnet_url(code)
+        if turl:
+            out.update(tailnet_url=turl, tailnet_qr=qrmini.rows(turl))
+        return out
 
     def pair(self, code: str, name: str, ip: str) -> dict | None:
         """A bearer token for a correct code (single use), else None."""
@@ -600,6 +646,8 @@ def answer_approval(mob: MobileAccess, aid: str, approved: bool, device: str) ->
         return 403, {"error": "this request needs the code shown on the computer", "code": "TYPED_PC_ONLY"}
     ok, why = submit_answer(mob.home, aid, approved, channel="phone")
     if ok:
+        mob.audit("phone_approval", device=device, decision="approve" if approved else "deny",
+                  risk=(row or {}).get("risk"), kind=(row or {}).get("kind"))    # no title, no details
         logs.info("mobile", "MOBILE_APPROVAL_ANSWERED", "an approval was answered from a phone", device=device,
                   decision="approve" if approved else "deny")
         return 200, {"ok": True}
@@ -648,7 +696,12 @@ def dashboard_routes(register) -> None:
 
     def info(ctx, _m, _b):
         a = mob(ctx)
+        t = a.tailnet or {}
         return 200, {"enabled": a.enabled, "host": a.host, "port": a.port, "tls": a.scheme == "https",
+                     "tailnet": {"state": t.get("state", "unused"), "present": bool(t.get("present")), "ip": t.get("ip"),
+                                 "name": t.get("name"), "host": a.tailnet_host(), "bind": a.bind,
+                                 "url": f"{a.scheme}://{a.tailnet_host()}:{a.port}/m/" if a.tailnet_host() else None,
+                                 "tls_source": a.tls_source},
                      "reachable_from_phone": bool(a.enabled and a.host), **a.settings(), "devices": a.devices(),
                      "how": "jarvis features on mobile_access, then jarvis dashboard --mobile"}
 
@@ -665,10 +718,17 @@ def dashboard_routes(register) -> None:
 
     def setting(ctx, _m, body):
         body = body or {}
-        if not isinstance(body.get("phone_approvals"), bool):
-            return 400, {"error": "body needs {\"phone_approvals\": true|false}"}
-        mob(ctx).set_phone_approvals(body["phone_approvals"], by="local")
+        keys = [k for k in ("phone_approvals", "bind_tailnet_only") if k in body]
+        if not keys or any(not isinstance(body[k], bool) for k in keys):
+            return 400, {"error": "body needs {\"phone_approvals\": true|false} and/or {\"bind_tailnet_only\": true|false}"}
+        if "phone_approvals" in body:
+            mob(ctx).set_phone_approvals(body["phone_approvals"], by="local")
+        if "bind_tailnet_only" in body:
+            mob(ctx).set_bind_tailnet_only(body["bind_tailnet_only"], by="local")
         return 200, {"ok": True, **mob(ctx).settings()}
+
+    def revoke_all(ctx, _m, _b):
+        return 200, {"ok": True, "revoked": mob(ctx).revoke_all(by="local")}
 
     def scopes(ctx, m, body):
         sc = (body or {}).get("scopes")
@@ -682,6 +742,7 @@ def dashboard_routes(register) -> None:
     register("GET", r"/api/mobile", info)
     register("POST", r"/api/mobile/code", code)
     register("POST", r"/api/mobile/settings", setting)
+    register("POST", r"/api/mobile/revoke-all", revoke_all)
     register("POST", r"/api/mobile/devices/([0-9a-f]{12})/revoke", revoke)
     register("POST", r"/api/mobile/devices/([0-9a-f]{12})/scopes", scopes)
     register("GET", r"/api/mobile/audit", audit)
