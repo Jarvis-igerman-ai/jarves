@@ -161,3 +161,21 @@ def test_core_attach_installs_the_guard_and_hides_tools_while_off(home):
     assert "whatsapp_inbox" not in {t.name for t in reg.tools()}               # switch off (SAFE_OFF): hidden
     assert core.health.components["whatsapp_bridge"].status == "disabled"
     assert reg.call.__name__ == "call" and reg.call.__qualname__.startswith("install_taint_guard")
+
+
+async def test_send_of_an_unknown_draft_is_refused_before_the_owner_is_asked(rig, bridge):
+    """V4-WA-2: no approval question for a draft id that does not exist (or was already used)."""
+    reg, eff, asked, clk = rig
+    set_send_mode(bridge, DANA)
+    asked.clear()
+    s = await reg.call("whatsapp_send", {"draft_id": "nosuchdraft"})
+    assert not s.ok and s.code == "WA_UNKNOWN_DRAFT" and asked == [] and bridge.outbox == []
+
+
+async def test_taint_refusal_names_no_wrong_source(rig, bridge):
+    """V4-AG-1: the refusal after WhatsApp text does not claim that mail or calendar text was read."""
+    reg, eff, asked, clk = rig
+    set_send_mode(bridge, DANA)
+    await reg.call("whatsapp_chat", {"who": "+15550001111"})
+    r = await reg.call("whatsapp_compose", {"who": "+15550001111", "text": "x"})
+    assert r.code == "TOOL_UNTRUSTED_TURN" and "message" in r.message and "mail or calendar" not in r.message

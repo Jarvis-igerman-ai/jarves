@@ -17,7 +17,7 @@ privacy_he = "אין."
 privacy_en = "None."
 
 [[steps]]
-he = "פתחו את עמוד Alerts: קבעו שעות שקט (ברירת מחדל 22:00 עד 07:00), כמה התראות בשעה, ואם דחוף מותר בשעות שקט."
+he = "פתחו את עמוד \"התראות\": קבעו שעות שקט (ברירת מחדל 22:00 עד 07:00), כמה התראות בשעה, ואם דחוף מותר בשעות שקט."
 en = "Open the Alerts page: set quiet hours (default 22:00 to 07:00), how many alerts an hour, and whether urgent ones may speak."
 action = "open:#/alerts"
 

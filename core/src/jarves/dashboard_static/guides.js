@@ -18,8 +18,9 @@
     google: ["גוגל", "Google"], memory: ["זיכרון ואופי", "Memory and personality"], camera: ["מצלמה", "Camera"],
     costs: ["עלויות", "Costs"], system: ["מערכת", "System"], privacy: ["פרטיות", "Privacy"], other: ["אחר", "Other"] };
   const PLAT = { verified_on_device: ["ok", "verified"], implemented_unverified: ["medium", "not yet verified"],
-    planned: ["low", "planned"], blocked: ["fail", "blocked"], not_applicable: ["plain", "n/a"] };
+    planned: ["low", "planned"], blocked: ["fail", "blocked"], not_applicable: ["plain", "not applicable"] };
   const L = (he, en) => tx(he, en);
+  const riskText = (r) => ({ low: L("סיכון נמוך", "low risk"), medium: L("סיכון בינוני", "medium risk"), high: L("סיכון גבוה", "high risk") }[r] || r);
   const statePill = (s) => { const x = STATE[s] || STATE.info; return pill(x[0], L(x[1], x[2])); };
 
 
@@ -50,7 +51,7 @@
     const done = items.filter((c) => c.done).length;
     return el("div", { class: "card checklist" }, el("div", { class: "row" },
       el("b", { dir: dirOf() }, L("מה לעשות קודם?", "What should I do first?")), el("span", { class: "spacer" }),
-      el("span", { class: "muted small" }, `${done} / ${items.length}`)),
+      el("span", { class: "muted small" }, L(`${done} מתוך ${items.length} בוצעו`, `${done} of ${items.length} done`))),
       el("ol", { dir: dirOf() }, items.map((c) => el("li", { class: c.done ? "done" : "" },
         el("a", { href: "#/guide/" + c.id }, T(c, "title")), " ", c.done ? pill("ok", L("בוצע", "done")) : statePill(c.state),
         !c.done ? el("div", { class: "small muted", dir: dirOf() }, T(c, "first_step")) : null))));
@@ -96,15 +97,15 @@
       el("div", { dir: dirOf() }, H(s)),
       el("div", { class: "step-actions" }, actionBtn(s), s.done === true ? pill("ok", L("בוצע", "done")) : s.done === false ? pill("plain", L("עוד לא", "not yet")) : null))));
     const feats = g.feature_rows.length ? el("table", {}, el("tbody", {}, g.feature_rows.map((r) => el("tr", {},
-      el("td", {}, el("button", { type: "button", class: "switch", "aria-pressed": r.enabled ? "true" : "false", "aria-label": `${r.title_en}: ${r.enabled ? "on" : "off"}`,
+      el("td", {}, el("button", { type: "button", class: "switch", "aria-pressed": r.enabled ? "true" : "false", "aria-label": switchLabel(txo(r, "title"), r.enabled),
         onclick: () => switchFeature(r.id, !r.enabled, r.risk, T(r, "title")) }, r.enabled ? "On" : "Off")),
-      el("td", {}, el("b", { dir: dirOf() }, T(r, "title")), " ", pill(r.risk, r.risk)),
+      el("td", {}, el("b", { dir: dirOf() }, T(r, "title")), " ", pill(r.risk, riskText(r.risk))),
       el("td", {}, r.active ? pill("ok", L("פועל", "active")) : !r.enabled ? pill("plain", L("כבוי", "off")) : pill("unavailable", L("לא זמין", "unavailable")),
         r.reason && !r.active ? el("div", { class: "small", dir: "auto" }, txh(r, "reason")) : null))))) : null;
     const plat = (t) => { if (!t) return "—"; const p = PLAT[t.status] || ["plain", t.status];
       return el("div", {}, pill(p[0], p[1]), t.evidence ? el("div", { class: "muted small" }, txh(t, "evidence")) : null,
         t.blocker ? el("div", { class: "small" }, L("חסם: ", "Blocker: ") + txh(t, "blocker")) : null,
-        t.roadmap_issue ? el("a", { class: "small", href: t.roadmap_issue, target: "_blank", rel: "noopener" }, "roadmap issue") : null); };
+        t.roadmap_issue ? el("a", { class: "small", href: t.roadmap_issue, target: "_blank", rel: "noopener" }, L("משימה בתוכנית העבודה", "Roadmap issue")) : null); };
     const section = (title, ...body) => el("div", { class: "card guide-sec" }, el("h2", { dir: dirOf() }, title), ...body);
     render(header(T(g, "title"), null, el("a", { href: "#/guides" }, L("כל המדריכים ←", "← all guides"))),
       el("div", { class: "card guide-head" }, el("div", { class: "row" }, statePill(g.state),
@@ -112,7 +113,8 @@
         el("p", { class: "lead", dir: dirOf() }, T(g, "what")), feats, msg),
       section(L("איך מפעילים", "How to turn it on"), steps),
       g.say.length ? section(L("מה להגיד לו", "What to say"), el("ul", { class: "say" }, g.say.map((s) =>
-        el("li", {}, el("span", { dir: "rtl", lang: "he" }, `“${s.he}”`), el("span", { class: "muted", dir: "ltr" }, ` · “${s.en}”`))))) : null,
+        // one language per page: the Hebrew phrase on Hebrew pages, the English one on English pages (K)
+        el("li", {}, lang === "he" || !s.en ? el("span", { dir: "rtl", lang: "he" }, `“${s.he}”`) : el("span", { dir: "ltr", lang: "en" }, `“${s.en}”`))))) : null,
       el("div", { class: "grid2 guide-pair" },
         section(L("מה לצפות", "What to expect"), el("p", { dir: dirOf() }, T(g, "expect"))),
         section(L("לבדוק שזה עובד", "Check it works"), el("p", { class: "small", dir: dirOf() }, T(g, "test")),
@@ -150,7 +152,7 @@
     const g = pageMap[page];
     const head = document.querySelector("#main > .row");
     if (!g || !head || head.querySelector(".guide-link")) return;
-    head.append(el("a", { class: "button-link guide-link", href: "#/guide/" + g.id, title: g.title_en }, L("מדריך", "Guide")));
+    head.append(el("a", { class: "button-link guide-link", href: "#/guide/" + g.id, title: T(g, "title") }, L("מדריך", "Guide")));
   }
   new MutationObserver(() => { addGuideLink(); }).observe(document.getElementById("main"), { childList: true });
 

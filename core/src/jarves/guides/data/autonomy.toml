@@ -9,7 +9,7 @@ title_en = "Self-improvement with your approval"
 what_he = "כשג'ארביס מזהה בעיה קבועה (למשל עונה לאט) הוא מציע תיקון קטן, ומחיל אותו רק באישור שלכם."
 what_en = "When JARVES sees a repeating problem (e.g. slow answers) he proposes a small fix and applies it only with your approval."
 say = [["יש לך הצעות לשיפור?", "Do you have improvement proposals?"]]
-expect_he = "ההצעות מופיעות בעמוד Autonomy עם \"אשר\" או \"דחה\". כל שינוי אפשר לבטל."
+expect_he = "ההצעות מופיעות בעמוד \"עצמאות\" עם \"אשר\" או \"דחה\". כל שינוי אפשר לבטל."
 expect_en = "Proposals show on the Autonomy page with Approve or Reject. Every change can be undone."
 cost_he = "חינם."
 cost_en = "Free."
@@ -17,6 +17,6 @@ privacy_he = "אין."
 privacy_en = "None."
 
 [[steps]]
-he = "פתחו את עמוד Autonomy ובחרו רמה: רק להציע ולשאול (מומלץ), או להחיל לבד שינויים קטנים שאישרתם מראש."
+he = "פתחו את עמוד \"עצמאות\" ובחרו רמה: רק להציע ולשאול (מומלץ), או להחיל לבד שינויים קטנים שאישרתם מראש."
 en = "Open the Autonomy page and choose a level: suggest and ask (recommended), or apply small pre-approved changes."
 action = "open:#/autonomy"

@@ -916,6 +916,8 @@ def api_approvals(ctx, m, body):
         pass
     svc = _current
     pending = svc.pending() if svc is not None and svc.home.resolve() == home.resolve() else read_pending_file(home)
+    for a in pending:                    # SW-V4 K: the page previews the question he may SAY aloud (kind only)
+        a["spoken_en"], a["spoken_he"] = spoken_kind(str(a.get("title") or ""), str(a.get("kind") or ""), a.get("details"))
     return 200, {"pending": pending, "history": read_history(home, 30),
                  "note": "Approve or deny what JARVES asked for. Typed requests need the code shown."}
 

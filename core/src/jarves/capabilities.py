@@ -30,13 +30,13 @@ TARGETS = ("windows", "linux_arm64_pi")
 STATUSES = ("verified_on_device", "implemented_unverified", "planned", "blocked", "not_applicable")
 READY = ("verified_on_device", "not_applicable")
 # Real issues (created 2026-10-19 by WP-M4). Add new ones here only after `gh issue create` returned the URL.
-TRACKING = "https://github.com/igalgerman/JARVIS/issues/17"
-PI_ROADMAP = "https://github.com/igalgerman/JARVIS/issues/18"
+TRACKING = "https://github.com/igalgerman/jarves/issues/1"
+PI_ROADMAP = "https://github.com/igalgerman/jarves/issues/3"
 # Every roadmap issue a feature may link: checked to exist with `gh issue list` on LAST_CHECKED (#19-#23 were
 # created by the other SW-V2 packages for their own Pi gaps). Add a number only after the issue exists.
-KNOWN_ISSUES = {TRACKING, PI_ROADMAP, *(f"https://github.com/igalgerman/JARVIS/issues/{n}" for n in (14, 19, 20, 21, 22, 23, 25, 28))}   # 14: SW-V4 D, 25: WP-L, 28: privacy strip
-_ISSUE_URL = re.compile(r"^https://github\.com/igalgerman/JARVIS/issues/\d+$")
-LAST_CHECKED = "2026-10-19"
+KNOWN_ISSUES = {TRACKING, PI_ROADMAP, *(f"https://github.com/igalgerman/jarves/issues/{n}" for n in (1, 2, 3, 4, 5))}   # public issues: #1 V4 release/acceptance, #2 orchestrator, #3 Pi parity, #4 physical design, #5 consolidation
+_ISSUE_URL = re.compile(r"^https://github\.com/igalgerman/jarves/issues/\d+$")
+LAST_CHECKED = "2026-10-21"
 
 
 @dataclass
@@ -50,7 +50,7 @@ class Target:
         if self.status not in STATUSES:
             raise ValueError(f"status must be one of {STATUSES}, not {self.status!r}")
         if self.roadmap_issue and not _ISSUE_URL.match(self.roadmap_issue):
-            raise ValueError(f"roadmap_issue must be a github.com/igalgerman/JARVIS issue URL: {self.roadmap_issue}")
+            raise ValueError(f"roadmap_issue must be a github.com/igalgerman/jarves issue URL: {self.roadmap_issue}")
 
 
 @dataclass
@@ -183,7 +183,7 @@ for _fid, _w, _p, _perm, _set in [
     ("camera_preview", _win("implemented_unverified", "UNIT test_privacy_state.py (fake camera) + headless face "
                             "screenshots docs/reviews/swv2_privacy/", "never shown with a real webcam yet"),
      {"status": "implemented_unverified", "blocker": "picamera2 preview frames and the round-screen strip layout "
-      "never run on Pi hardware", "roadmap_issue": "https://github.com/igalgerman/JARVIS/issues/28"}, ["read"],
+      "never run on Pi hardware", "roadmap_issue": "https://github.com/igalgerman/jarves/issues/1"}, ["read"],
      "Home page / the face's camera buttons"),
     ("wake_word", _win("verified_on_device", "HANDOFF 'Wake word through the air': speakers -> webcam mic, 4/4, "
                        "CPU 14-25 ms/frame (owner's own voice peaked ~0.17: threshold calibrated)"),

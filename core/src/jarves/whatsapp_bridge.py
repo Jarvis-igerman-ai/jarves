@@ -618,6 +618,12 @@ class WhatsAppBridgeSkill(Skill):
             return {"details": det, "typed": bool(d["night"]), "voice": not d["first"] and not d["night"],
                     "why": "you asked JARVES to send this WhatsApp message"}
 
+        def send_precheck(a: SendArgs) -> ToolResult | None:
+            d = self._drafts.get(a.draft_id)
+            if d is None or self.clock() - d["t"] >= DRAFT_TTL_S:
+                return ToolResult(False, "אני שולח רק טיוטה שכתבתי עכשיו והצגתי לך.", code="WA_UNKNOWN_DRAFT")
+            return None
+
         async def send(a: SendArgs) -> ToolResult:
             d = self._drafts.pop(a.draft_id, None)            # single use, also when the send fails
             if d is None or self.clock() - d["t"] >= DRAFT_TTL_S:
@@ -658,7 +664,7 @@ class WhatsAppBridgeSkill(Skill):
                  compose, ComposeArgs, permission="action"),
             Tool("whatsapp_send", "Send a draft made by whatsapp_compose. The system shows the recipient, number "
                  "and full text on the screen and asks the owner; do not ask yourself.", send, SendArgs,
-                 permission="destructive", timeout_s=30, impact=send_impact,
+                 permission="destructive", timeout_s=30, impact=send_impact, precheck=send_precheck,
                  recipient=lambda a: (self._drafts.get(a.draft_id) or {}).get("name"), approval_meta=send_meta),
         ]
 
@@ -815,6 +821,29 @@ def attach(core) -> WhatsAppBridgeSkill:
     if not core.features.active(FEATURE):
         core.health.set("whatsapp_bridge", "disabled", core.features.reason(FEATURE) or "switched off",
                         f"jarvis features on {FEATURE}")
+    try:
+        loop = asyncio.get_running_loop()
+    except RuntimeError:
+        loop = None
+
+    def on_switch(fid: str, on: bool) -> None:
+        """The switch is 'live' (V4-WA-1): flipping it while the Core runs starts / ends the bridge watcher too.
+        Before, the watcher and the health component only followed the switch at Core start, so whatsapp_send could
+        not become available and no red alert (account warning, logged out, kill) reached the screen until a restart."""
+        if fid != FEATURE or loop is None or getattr(core, "stopping", False):
+            return
+        if on:
+            if not getattr(core, "_whatsapp_running", False):
+                def start() -> None:
+                    t = asyncio.ensure_future(run(core))
+                    getattr(core, "_bg", []).append(t)
+                loop.call_soon_threadsafe(start)
+        else:
+            ev = getattr(core, "_whatsapp_stop", None)
+            if ev is not None:
+                loop.call_soon_threadsafe(ev.set)
+            core.health.set("whatsapp_bridge", "disabled", "switched off", f"jarvis features on {FEATURE}")
+    core.features.listeners.append(on_switch)
     return skill
 
 
@@ -822,14 +851,20 @@ async def run(core) -> None:
     """A Core background task (feature switched on): make sure the bridge runs, then follow its events until the
     Core stops. A bridge THIS run started is shut down in an orderly way (store sealed) by `stop`."""
     w: Watcher | None = getattr(core, "whatsapp_watcher", None)
-    if w is None or not core.features.enabled(FEATURE):
+    if w is None or not core.features.enabled(FEATURE) or getattr(core, "_whatsapp_running", False):
         return
-    ok, why = await asyncio.to_thread(start_bridge, core.home)
-    core._whatsapp_started = ok and why == "started"
-    if not ok:
-        core.health.set("whatsapp_bridge", "unavailable", why, "jarvis whatsapp start")
-    core._whatsapp_stop = asyncio.Event()
-    await w.run(core._whatsapp_stop)
+    core._whatsapp_running = True
+    try:
+        ok, why = await asyncio.to_thread(start_bridge, core.home)
+        core._whatsapp_started = getattr(core, "_whatsapp_started", False) or (ok and why == "started")
+        if not ok:
+            core.health.set("whatsapp_bridge", "unavailable", why, "jarvis whatsapp start")
+        core._whatsapp_stop = asyncio.Event()
+        if getattr(core, "stopping", False):
+            core._whatsapp_stop.set()
+        await w.run(core._whatsapp_stop)
+    finally:
+        core._whatsapp_running = False
 
 
 async def stop(core) -> None:
@@ -867,7 +902,7 @@ def _probe_send(c: feat.ProbeCtx) -> tuple[bool, str]:
     return True, ""
 
 
-feat.register(FEATURE, "וואטסאפ אמיתי (קריאה)", "WhatsApp real access (read)", False, probe=_probe,
+feat.register(FEATURE, "וואטסאפ אמיתי (קריאה)", "WhatsApp real access (read)", False, probe=_probe, slow=True,
               risk="high", tools=list(READ_TOOLS),
               about="reads your WhatsApp through a separate linked-device bridge on this computer (unofficial; "
                     "breaks WhatsApp's terms; ban risk you accepted). Read-only first; message text is treated as "
@@ -877,7 +912,7 @@ feat.register(FEATURE, "וואטסאפ אמיתי (קריאה)", "WhatsApp real 
                               "BLOCKED: the real bridge was never linked to the owner's phone (owner step)"),
               permissions=["read", "action (show on screen)"], settings=START_COMMAND)
 feat.register(SEND_FEATURE, "שליחה בוואטסאפ דרך הגשר", "WhatsApp send through the bridge", False, probe=_probe_send,
-              needs=[FEATURE], risk="high", tools=list(SEND_TOOLS),
+              slow=True, needs=[FEATURE], risk="high", tools=list(SEND_TOOLS),
               about="sends a WhatsApp message you dictated to an allow-listed person, only after you approve the "
                     "recipient, number and full text on the screen; only in send mode (after 14 quiet days)",
               targets=targets("UNIT test_whatsapp_send.py (fake bridge: popup, signed single-use approval, limits)",

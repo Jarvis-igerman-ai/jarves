@@ -25,7 +25,7 @@ MAX_STDIN = 1_000_000
 
 
 def _out(obj: dict) -> None:
-    sys.stdout.write(json.dumps(obj, ensure_ascii=False))
+    sys.stdout.write(json.dumps(obj))        # ASCII-escaped: a Hebrew reason must not hit a cp1252/cp1255 console codec
     sys.stdout.flush()
 
 

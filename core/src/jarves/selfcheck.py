@@ -306,6 +306,10 @@ ISSUE_KIND_HE = {"stall": "בקשה שנתקעה", "dead_air": "שתיקה אר�
 
 
 # ---------------------------------------------------------------------- the check
+class CheckCancelled(Exception):
+    """The Core is stopping: the run ends between two steps (V4-SC-1), nothing more is written."""
+
+
 class SelfCheck:
     """One run. Everything it reads is local: log files, store.db, memory.db, health.json, config, features."""
 
@@ -320,6 +324,11 @@ class SelfCheck:
         self.system = system or system_info
         self.ai_client, self.budget = ai_client, budget
         self.current_session = current_session
+        self.cancel = threading.Event()           # set by the Core at shutdown; checked between steps
+
+    def _check_cancel(self) -> None:
+        if self.cancel.is_set():
+            raise CheckCancelled()
 
     # ---- resources
     @property
@@ -388,19 +397,32 @@ class SelfCheck:
             for step in (lambda: self._health(found), lambda: self._logs(recs, found, metrics),
                          lambda: self._system(found, metrics), lambda: self._config(found),
                          lambda: self._feature_gaps(found, recs, since)):
+                self._check_cancel()
                 try:
                     step()
+                except CheckCancelled:
+                    raise
                 except Exception as e:               # one broken check never hides the others
                     logs.error("selfcheck", "SELFCHECK_STEP_FAILED", "a self-check step failed",
                                exc=True)
                     status = "partial"
+            self._check_cancel()
             ai_info = self._ai_pass(ai, since, t0)
+            self._check_cancel()
             try:
                 self._conversations(found, since, days)
+            except CheckCancelled:
+                raise
             except Exception as e:
                 logs.error("selfcheck", "SELFCHECK_STEP_FAILED", "conversation diagnosis failed", step="diagnose",
                            exc=True)
                 status = "partial"
+        except CheckCancelled:
+            with st._lock:
+                st._db.execute("UPDATE selfcheck_runs SET status='cancelled' WHERE id=?", (run_id,))
+                st._db.commit()
+            logs.info("selfcheck", "SELFCHECK_CANCELLED", "self-check cancelled: the Core is stopping", run=run_id)
+            raise
         except Exception as e:
             logs.error("selfcheck", "SELFCHECK_FAILED", "self-check failed", exc=True)
             status = "failed"
@@ -902,7 +924,7 @@ class SelfCheck:
     def _feature_gaps(self, out: list[Finding], recs: list[dict], since: float) -> None:
         from . import setup_wizard as sw
         f = self.features
-        for s in f.list():
+        for s in f.list(wait=True):
             fid = s["id"]
             if not s["enabled"] or s["available"] or fid in AVAIL_FEATURES:
                 continue
@@ -1349,6 +1371,8 @@ class SelfCheckService:
         self._tasks: set[asyncio.Task] = set()
         self.last: dict | None = None
         self.clock = time.time
+        self._stopping = False
+        self._checks: set[tuple[SelfCheck, threading.Event]] = set()   # running checks and their "thread ended" flags
 
     def active(self) -> bool:
         try:
@@ -1363,11 +1387,26 @@ class SelfCheckService:
 
     async def run(self, trigger: str, *, days: int | None = None, ai: bool | None = None) -> dict:
         async with self._lock:
+            if self._stopping:
+                raise CheckCancelled()
             chk = self.make_check()
+            ended = threading.Event()
+            entry = (chk, ended)
+            self._checks.add(entry)
+
+            def work() -> dict:                       # the thread closes its own handles: nothing else touches them
+                try:
+                    return chk.run(trigger, days=days, ai=ai)
+                finally:
+                    try:
+                        chk.close()
+                    finally:
+                        ended.set()
             try:
-                self.last = await asyncio.to_thread(chk.run, trigger, days=days, ai=ai)
+                self.last = await asyncio.to_thread(work)
             finally:
-                chk.close()
+                if ended.is_set():
+                    self._checks.discard(entry)
             self._errors = 0
             return self.last
 
@@ -1423,6 +1462,8 @@ class SelfCheckService:
                   previous=(prev or {}).get("session"))
         try:
             v = await self.run(trigger)
+        except CheckCancelled:
+            return None
         except Exception:
             logs.error("selfcheck", "SELFCHECK_FAILED", "automatic self-check failed", exc=True)
             return None
@@ -1441,9 +1482,15 @@ class SelfCheckService:
         if self._sink is not None:
             logs.remove_sink(self._sink)
             self._sink = None
+        self._stopping = True
+        for chk, _ in list(self._checks):
+            chk.cancel.set()                         # the running check ends between two steps
         for t in list(self._tasks):
             t.cancel()
         await asyncio.gather(*self._tasks, return_exceptions=True)
+        for _, ended in list(self._checks):          # the worker thread has closed its handles before the Core closes its own
+            await asyncio.to_thread(ended.wait, 30)
+        self._checks.clear()
 
 
 DEFAULT_SCHEDULE = "0 10 * * 0"                    # Sunday 10:00 local (owner's work week starts on Sunday)

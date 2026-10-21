@@ -45,8 +45,11 @@ async def inventory(h):
     grouped = {i for _, _, _, g in groups() for i in g}
     other = [i for _, _, _, g in groups() if _ == _ for i in g] if False else None
     gid_of = {i: gid for gid, _, _, g in groups() for i in g}
-    nogroup = [i for i in ids if gid_of.get(i) in (None, "other")]
-    check("inventory", "every feature has a wizard group (not 'other')", not nogroup, f"in other/none: {nogroup}")
+    from jarves.setup_wizard import GROUPS, WIZARD_HIDDEN
+    listed = {i for _g, _h, _e, g in GROUPS for i in g}
+    nogroup = [i for i in ids if gid_of.get(i) in (None, "other") and not (i in WIZARD_HIDDEN and i in listed)]
+    check("inventory", "every feature has a wizard group (not 'other'); WIZARD_HIDDEN ones are grouped but never offered", not nogroup,
+          f"in other/none: {nogroup}; hidden by design: {sorted(WIZARD_HIDDEN)}")
     _, st = await h.aget("/api/setup")
     api_groups = {i for g in st.get("groups", []) for i in [x.get("id") for x in g.get("features", g.get("items", []))]}
     rec("inventory", "dashboard /api/setup returns groups", "PASS" if st.get("groups") else "FAIL",
@@ -85,7 +88,11 @@ async def matrix(h):
         check(A, "capabilities row declared + no matrix problems", cv["declared"] and not cv["problems"],
               f"declared={cv['declared']} problems={cv['problems']}")
         check(A, "capabilities has windows + pi target", set(cv["targets"]) >= {"windows", "linux_arm64_pi"}, str(list(cv["targets"])))
-        check(A, "wizard group", gid_of.get(fid) not in (None, "other"), f"group={gid_of.get(fid)}")
+        from jarves.setup_wizard import GROUPS, WIZARD_HIDDEN
+        listed = {x: gid for gid, _h, _e, g in GROUPS for x in g}
+        hidden_ok = fid in WIZARD_HIDDEN and fid in listed          # grouped but never offered by design (documented in setup_wizard.py)
+        check(A, "wizard group (WIZARD_HIDDEN ones are grouped but never offered)", gid_of.get(fid) not in (None, "other") or hidden_ok,
+              f"group={gid_of.get(fid) or listed.get(fid)}{' (hidden by design)' if hidden_ok else ''}")
 
 
 async def _toggle(h, fid: str):

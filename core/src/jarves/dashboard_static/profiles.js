@@ -106,7 +106,7 @@
       el("div", { class: "row", style: "gap:8px;flex-wrap:wrap;align-items:center" }, name, from,
         el("label", { for: "profCopyMem", class: "small" }, mem, " ", tx("להעתיק גם זיכרון (USER.md, MEMORY.md, עובדות)", "also copy memory (USER.md, MEMORY.md, facts)")),
         el("label", { for: "profTest", class: "small" }, test, " ", tx("פרופיל בדיקה (לא מקוון)", "test profile (offline)")), create),
-      el("div", { class: "muted small", style: "margin-top:6px" }, tx("אף פעם לא מועתק: ", "Never copied: "), d.never_copied.join(", ")),
+      el("div", { class: "muted small", style: "margin-top:6px" }, tx("אף פעם לא מועתק: ", "Never copied: "), d.never_copied.map((x) => JL.t(x)).join(", ")),
       el("div", { class: "muted small" }, tx("מפתחות API מועתקים רק בטרמינל, כשמבקשים במפורש: ", "API keys are copied only in a terminal, when explicitly asked: "),
         el("code", {}, "jarvis profile create <name> --from <name> --copy-secrets")), msg);
     const cli = el("div", { class: "card small" }, el("h2", {}, tx("בטרמינל", "In a terminal")),

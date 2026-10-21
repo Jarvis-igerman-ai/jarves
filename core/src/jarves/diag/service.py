@@ -555,7 +555,7 @@ def api_ticket_draft(ctx, m, body):
 
 def api_ticket_file(ctx, m, body):
     tid = int((body or {}).get("id") or 0)
-    repo = str(_ctx_db(ctx).setting("health.ticket_repo") or "igalgerman/JARVIS")
+    repo = str(_ctx_db(ctx).setting("health.ticket_repo") or "")
     from ..approvals import ask_owner
 
     async def ask(prompt, **kw):
@@ -593,7 +593,7 @@ def add_cli(sub) -> None:
     r.add_argument("remedy", choices=sorted(remediation.REMEDIES))
     r.add_argument("--finding", default="")
     r.add_argument("--feature", default="", help="rerun_feature_setup: the feature id")
-    t = hs.add_parser("ticket", help="make a ticket draft of a finding; --file files it on the private repo (asks)")
+    t = hs.add_parser("ticket", help="make a ticket draft of a finding; --file files it on the repo set in health.ticket_repo (asks; no repo = stays local)")
     t.add_argument("finding", help="the finding fingerprint (see: jarvis health report)")
     t.add_argument("--file", action="store_true")
     a = hs.add_parser("ai-review", help="the selective AI review: --every 2d | off, --now, --preview")
@@ -602,7 +602,10 @@ def add_cli(sub) -> None:
     a.add_argument("--preview", action="store_true", help="what would be sent and its cost; sends nothing")
     a.add_argument("--yes", action="store_true", help="--now: you already saw and approved the estimate")
     c = hs.add_parser("canary", help="run the synthetic user-journey canaries now (throw-away test profile)")
-    c.add_argument("--profile", choices=["ci", "owner"], default="owner")
+    # dest differs from the global `--profile NAME` (the JARVES profile): sharing "profile" made the canary default
+    # ("owner") select a JARVES profile of that name and fail with PROFILE ERROR before anything ran (V4-HE-1)
+    c.add_argument("--profile", dest="canary_profile", choices=["ci", "owner"], default="owner",
+                   help="ci = every external service is a fake; owner = this PC's real local parts (default)")
     c.add_argument("--report", type=Path, help="also write the JSON report here")
     hs.add_parser("preflight", help="run the start-up self-check now (read-only)")
     d = hs.add_parser("decide", help="accept / dismiss / snooze a finding or an AI review item")
@@ -620,9 +623,20 @@ def _tty_ask(home: Path, ask=input):
     return audited(home, confirm, channel="terminal")
 
 
+def _eof_is_no(ask):
+    """A prompt with no terminal behind it (stdin closed / piped / a scheduled run) is a NO, never a traceback."""
+    def safe(prompt: str = "") -> str:
+        try:
+            return ask(prompt)
+        except EOFError:
+            return ""
+    return safe
+
+
 def cmd_health(a, cfg, home: Path, *, out=print, ask=input) -> int:
     from ..store import Store
     from ..userdata import open_db
+    ask = _eof_is_no(ask)
     st = Store(home / "store.db")
     dbs = open_db(home)
     try:
@@ -652,7 +666,7 @@ def cmd_health(a, cfg, home: Path, *, out=print, ask=input) -> int:
             out(f"--- ticket draft #{tid} (not filed) ---\n# {d['title']}\n\n{d['body']}")
             if a.file:
                 res = asyncio.run(tickets.file(st, tid, ask=_tty_ask(home, ask),
-                                               repo=str(dbs.setting("health.ticket_repo")), by="cli"))
+                                               repo=str(dbs.setting("health.ticket_repo") or ""), by="cli"))
                 out(f"ticket: {res['status']} {res.get('issue_url') or res.get('reason') or ''}")
             return 0
         if act == "ai-review":
@@ -684,7 +698,7 @@ def cmd_health(a, cfg, home: Path, *, out=print, ask=input) -> int:
                 out(f"  {it['rank']}. [{it['severity']}] {it['title']} - {it['fix']}")
             return 0 if v.get("status") in ("done", "skipped") else 1
         if act == "canary":
-            rep = asyncio.run(canary.run_all(a.profile, real_home=home if a.profile == "owner" else None))
+            rep = asyncio.run(canary.run_all(a.canary_profile, real_home=home if a.canary_profile == "owner" else None))
             canary.save(st, rep)
             for r in rep["results"]:
                 out(f"{r['status']:<8} {r['name']:<16} {r['ms']:>8.0f} ms  {r['detail']}")

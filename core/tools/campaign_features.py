@@ -40,9 +40,9 @@ def check(area: str, name: str, ok: bool, evidence: str = "") -> bool:
     return ok
 
 
-def cli(*args: str, timeout: int = 120, stdin: str | None = None) -> subprocess.CompletedProcess:
-    env = {**os.environ, "PYTHONIOENCODING": "utf-8", "JARVES_HOME": str(BASE)}
-    return subprocess.run([str(EXE), "--profile", PROFILE, *args], capture_output=True, text=True, encoding="utf-8",
+def cli(*args: str, timeout: int = 120, stdin: str | None = None, env_extra: dict | None = None) -> subprocess.CompletedProcess:
+    env = {**os.environ, "PYTHONIOENCODING": "utf-8", "JARVES_HOME": str(BASE), "PYTHONPATH": str(CORE / "src"), **(env_extra or {})}
+    return subprocess.run([sys.executable, "-m", "jarves", "--profile", PROFILE, *args], capture_output=True, text=True, encoding="utf-8",
                           errors="replace", timeout=timeout, env=env, input=stdin, cwd=str(CORE))
 
 
@@ -226,7 +226,10 @@ async def log_review(h, stage_name: str, logp: Path, off: int) -> None:
         except ValueError:
             continue
         if d.get("level") in ("WARNING", "ERROR", "CRITICAL"):
-            shape = re.sub(r"\d+", "N", d.get("msg", ""))[:90]
+            shape = re.sub(r"\d+", "N", d.get("msg", ""))[:70]
+            extra = [str(d[k]) for k in ("tool", "result_code", "reason", "err_code", "feature", "job", "kind") if d.get(k) not in (None, "")]
+            if extra:
+                shape += " [" + " ".join(extra)[:70] + "]"
             groups.setdefault((d["level"], d["component"], d["code"], shape), []).append(d)
     for (lvl, comp, code, shape), items in groups.items():
         rec("LOG:" + stage_name, f"{lvl} {comp}/{code}: {shape}", "INFO", f"x{len(items)} first={items[0].get('ts', '')[11:19]}")
@@ -242,7 +245,7 @@ def stage(fn):
 
 async def main(names: list[str]) -> int:
     import importlib
-    for mod in ("campaign_stages_a", "campaign_stages_b", "campaign_stages_c", "campaign_stages_d", "campaign_stages_e", "campaign_stages_f", "campaign_stages_g", "campaign_stages_h"):
+    for mod in ("campaign_stages_a", "campaign_stages_b", "campaign_stages_c", "campaign_stages_d", "campaign_stages_e", "campaign_stages_f", "campaign_stages_g", "campaign_stages_h", "campaign_stages_v4"):
         try:
             importlib.import_module(f"tools.{mod}")
         except ModuleNotFoundError as e:

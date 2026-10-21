@@ -20,7 +20,7 @@ privacy_he = "המיילים נקראים רק כשמבקשים. שליחה רק
 privacy_en = "E-mails are read only when you ask. Sending only after your \"yes\"."
 
 [[steps]]
-he = "חברו את גוגל: jarvis google start (או עמוד Connections)."
+he = "חברו את גוגל: jarvis google start (או עמוד \"חיבורים\")."
 en = "Connect Google: jarvis google start (or the Connections page)."
 action = "command:jarvis google start"
 check = "available:gmail_read"
@@ -32,12 +32,12 @@ action = "feature_on:gmail_read"
 check = "active:gmail_read"
 
 [[steps]]
-he = "רוצים שהוא ישלח בשמכם? הדליקו את \"שליחת מיילים\" בעמוד Features (סיכון גבוה)."
+he = "רוצים שהוא ישלח בשמכם? הדליקו את \"שליחת מיילים\" בעמוד \"יכולות ומתגים\" (סיכון גבוה)."
 en = "Want him to send in your name? Turn on Send Gmail on the Features page (high risk)."
 action = "open:#/features"
 
 [[problems]]
 he = "הוא אומר שהוא לא יכול לשלוח"
 en = "He says he cannot send"
-fix_he = "שליחה כבויה מראש. הדליקו אותה בעמוד Features."
+fix_he = "שליחה כבויה מראש. הדליקו אותה בעמוד \"יכולות ומתגים\"."
 fix_en = "Sending is off by default. Turn it on on the Features page."

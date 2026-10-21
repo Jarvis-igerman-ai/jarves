@@ -19,7 +19,7 @@ from .service import Runtime, alerts_paused, current, read_state
 
 QUIT_DELAY_S = 4.0      # voice quit / end: first wait QUIT_DELAY_S / 4, then for the spoken goodbye (bounded)
 
-ISSUE_PI = "https://github.com/igalgerman/JARVIS/issues/20"
+ISSUE_PI = "https://github.com/igalgerman/jarves/issues/3"
 EVIDENCE = "docs/reviews/SWV2_WP-M1.md"
 
 # Truthful status per target (spec 5). "verified_on_device" only with a real run on that device.
@@ -93,9 +93,9 @@ def _register(fid: str, *args, **kw) -> None:
 _register("background_core", "ממשיך לפעול ברקע", "Keep running in the background", True,
           config="runtime.keep_running",
           about="closing the window only hides JARVES; \"Hey Jarvis\" keeps working (Quit in the tray stops him)")
-_register("display_control", "להופיע / להיעלם בפקודה", "Show / hide on command", True, probe=_probe_display,
+_register("display_control", "להופיע / להיעלם בפקודה", "Show / hide on command", True, probe=_probe_display, slow=True,
           tools=["show_yourself", "hide_yourself"], about="\"show yourself\" / \"hide yourself\" open or close the window")
-_register("tray_icon", "סמל במגש המערכת", "Tray icon", True, probe=_probe_tray, config="runtime.tray",
+_register("tray_icon", "סמל במגש המערכת", "Tray icon", True, probe=_probe_tray, slow=True, config="runtime.tray",
           applies="restart", about="notification-area icon: dashboard, show/hide, mute, pause alerts, status, quit")
 _register("autostart", "הפעלה עם הכניסה למחשב", "Start at login", False, probe=_probe_autostart,
           about="starts JARVES invisibly when you log in (Windows: Startup apps; Pi: systemd user service)")
@@ -267,7 +267,10 @@ def api_runtime(ctx, m, body):
         auto = {"enabled": False, "error": type(e).__name__}
     import platform as _pf
     host = {"os": _pf.system(), "machine": _pf.machine()}          # the dashboard header's device chip (P0.2)
-    return 200, {"runtime": view, "live": live, "autostart": auto, "platform_status": PLATFORM_STATUS, "host": host,
+    from .. import locales                                     # SW-V4 K: blocker / evidence texts in Hebrew too
+    platform = {k: {t: locales.attach(dict(x), "blocker", "evidence", "equivalent") for t, x in v.items()}
+                for k, v in PLATFORM_STATUS.items()}
+    return 200, {"runtime": view, "live": live, "autostart": auto, "platform_status": platform, "host": host,
                  # privacy strip on Home (privacy_state.py); None while the Core is down = shown as "unknown"
                  "privacy": snap.get("privacy") if snap else None,
                  "snapshot": {k: snap.get(k) for k in ("core", "voice_mode", "wake_listening", "live_session",

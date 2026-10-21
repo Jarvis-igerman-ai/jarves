@@ -48,3 +48,35 @@ async def test_core_runs_the_watcher_and_offers_read_tools_only(wa_core, bridge)
     assert any(h.get("decision") in ("denied", "no_channel") for h in c.approvals.history())
     await c.stop()
     assert c.health.core == "stopped" and bridge.httpd is not None   # a bridge the Core did not start keeps running
+
+
+@pytest.fixture
+async def wa_core_off(home, cfg, bridge):
+    """A Core that STARTS with the switch off (the default) while a linked fake bridge already runs."""
+    bridge.phone_last_seen = None
+    c = Core(cfg, home, audio=SimAudio(), player=FakePlayer(), stt=FakeSTT(), tts=FakeTTS(), console_logs=False,
+             use_real_audio=False)
+    await c.start()
+    yield c
+    if c.health.core != "stopped":
+        await c.stop()
+
+
+async def test_switch_is_live_watcher_and_health_start_without_a_restart(wa_core_off, bridge, home):
+    """V4-WA-1: the switch says applies=live, but the watcher (health component, red alerts, send-mode detection)
+    only started at Core start. Flip it on while the Core runs: health follows the bridge, send becomes available
+    in send mode, and off ends it again."""
+    c = wa_core_off
+    assert c.health.components["whatsapp_bridge"].status == "disabled"
+    c.features.set("whatsapp_bridge", True, by="test")
+    await until(lambda: c.health.components["whatsapp_bridge"].status == "ok" and "mode read" in c.health.components["whatsapp_bridge"].detail)
+    assert not c.features.active("whatsapp_send")
+    bridge.policy.update(mode="send", send_allow=[])
+    bridge._save_policy()
+    bridge.emit("mode.changed", mode="send")
+    await until(lambda: "mode send" in c.health.components["whatsapp_bridge"].detail)
+    c.features.set("whatsapp_send", True, by="test")
+    c.features.invalidate()
+    assert c.features.active("whatsapp_send")
+    c.features.set("whatsapp_bridge", False, by="test")
+    await until(lambda: c.health.components["whatsapp_bridge"].status == "disabled")

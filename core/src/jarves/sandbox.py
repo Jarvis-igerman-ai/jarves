@@ -122,9 +122,9 @@ class Sandbox:
     def _check_grant_path(self, path: str) -> Path:
         p = Path(str(path)).expanduser()
         if not p.is_absolute():
-            raise _deny("a folder grant needs a full folder path")
-        if not p.is_dir():
-            raise _deny("that folder does not exist")
+            raise SandboxError("SANDBOX_BAD_PATH", "a folder grant needs a full folder path")
+        if not p.is_dir():                           # a typo, not a refusal: 400 with the message (SW-V4 K, D-15)
+            raise SandboxError("SANDBOX_BAD_PATH", "that folder does not exist")
         if _is_link(p):
             raise _deny("the folder is a link/junction")
         r = p.resolve()

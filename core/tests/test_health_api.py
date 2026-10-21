@@ -100,8 +100,8 @@ class FakeGh:
         if argv[:2] == ["issue", "list"]:
             return 0, json.dumps(self.existing)
         if argv[:2] == ["issue", "create"]:
-            self.existing = [{"number": 7, "url": "https://github.com/igalgerman/JARVIS/issues/7"}]
-            return 0, "https://github.com/igalgerman/JARVIS/issues/7\n"
+            self.existing = [{"number": 7, "url": "https://github.com/igalgerman/jarves/issues/7"}]
+            return 0, "https://github.com/igalgerman/jarves/issues/7\n"
         if argv[:2] == ["issue", "comment"]:
             return 0, "commented"
         return 1, "unexpected"
@@ -115,6 +115,9 @@ def test_ticket_draft_then_file_only_after_approval_on_the_private_repo(planted,
     monkeypatch.setattr(service.tickets, "file", _file_with(gh))
     monkeypatch.setattr("jarves.approvals.ask_owner", lambda *a, **k: (False, "not approved"))
     s, r = post(dash, "/api/health/ticket/file", {"id": t["id"]})
+    assert r["status"] == "draft" and "no ticket repo" in r["reason"] and not gh.calls     # V4-RP-2: default = local
+    assert post(dash, "/api/health/settings", {"health.ticket_repo": "igalgerman/jarves-tickets"})[0] == 200
+    s, r = post(dash, "/api/health/ticket/file", {"id": t["id"]})
     assert r["status"] == "draft" and not [c for c in gh.calls if c[0][:2] == ["issue", "create"]]   # denied: nothing
     prompts = []
     monkeypatch.setattr("jarves.approvals.ask_owner", lambda home, prompt, **k: (prompts.append(prompt) or True, ""))
@@ -122,7 +125,7 @@ def test_ticket_draft_then_file_only_after_approval_on_the_private_repo(planted,
     assert r["status"] == "filed" and r["issue_url"].endswith("/issues/7")
     assert t["title"] in prompts[0] and "jarves-fingerprint" in prompts[0]             # the full text was shown
     create = [c for c in gh.calls if c[0][:2] == ["issue", "create"]]
-    assert len(create) == 1 and "igalgerman/JARVIS" in create[0][0]
+    assert len(create) == 1 and "igalgerman/jarves-tickets" in create[0][0]
     # the same finding again: a duplicate fingerprint comments on the open issue instead
     s, t2 = post(dash, "/api/health/ticket", {"fingerprint": "version:4.0.1"})
     s, r2 = post(dash, "/api/health/ticket/file", {"id": t2["id"]})
@@ -225,3 +228,35 @@ def test_feature_registered_on_every_surface():
     assert 'data-page="health"' in html and "/static/health.js" in html
     assert "Object.assign(PAGES, { health: pageHealth })" in (STATIC / "health.js").read_text(encoding="utf-8")
     assert capabilities is not None
+
+
+def test_cli_canary_profile_option_is_not_the_jarvis_profile(home, monkeypatch, capsys):
+    """V4-HE-1: `jarvis health canary [--profile ci|owner]` shares its flag name with the global `--profile NAME`;
+    the canary default ("owner") used to be taken as a JARVES profile and the command died with PROFILE ERROR."""
+    seen = []
+
+    async def fake_run_all(profile, **kw):
+        seen.append((profile, kw.get("real_home")))
+        return {"ts": 1.0, "profile": profile, "passed": 1, "failed": 0, "blocked": 0, "ms": 1.0,
+                "results": [{"status": "pass", "name": "x", "ms": 1.0, "detail": "ok"}]}
+
+    from jarves.diag import canary
+    monkeypatch.setattr(canary, "run_all", fake_run_all)
+    monkeypatch.setattr(canary, "save", lambda st, rep: 1)
+    assert cli.main(["health", "canary"]) == 0
+    assert cli.main(["health", "canary", "--profile", "ci"]) == 0
+    assert [p for p, _ in seen] == ["owner", "ci"] and seen[0][1] is not None and seen[1][1] is None
+    assert "PROFILE ERROR" not in capsys.readouterr().err
+
+
+def test_cli_prompts_without_a_terminal_are_a_no_not_a_traceback(home, monkeypatch, capsys):
+    """V4-HE-2: `jarvis health ai-review --now` / `remediate` with stdin closed raised EOFError (traceback)."""
+    import io
+    import sys
+    monkeypatch.setattr(sys, "stdin", io.StringIO(""))
+    rc = cli.main(["health", "remediate", "clear_guide_cache"])
+    out = capsys.readouterr()
+    assert rc != 0 and "denied" in (out.out + out.err).lower()
+    rc = cli.main(["health", "ai-review", "--now"])
+    out = capsys.readouterr()
+    assert "Traceback" not in out.err and "EOFError" not in out.err + out.out

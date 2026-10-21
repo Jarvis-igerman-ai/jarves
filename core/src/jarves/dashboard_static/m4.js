@@ -31,23 +31,28 @@
     const rows = list.map((f) => {
       const msg = el("span", { class: "muted small" });
       const sw = el("button", { type: "button", class: "switch", "aria-pressed": f.enabled ? "true" : "false",
-        "aria-label": `${f.title_en}: ${f.enabled ? "on" : "off"}`, onclick: async () => {
-          if (!f.enabled && f.risk === "high" && !confirm(`Turn on ${f.title_en}? This is a high-risk feature.`)) return;
+        "aria-label": switchLabel(txo(f, "title"), f.enabled), onclick: async () => {
+          if (!f.enabled && f.risk === "high" && !confirm(tx(`להפעיל את ${txo(f, "title")}? זו יכולת בסיכון גבוה.`, `Turn on ${f.title_en}? This is a high-risk feature.`))) return;
           try { await api("/api/features/" + encodeURIComponent(f.id), { method: "POST", body: JSON.stringify({ enabled: !f.enabled }) }); route(true); }
-          catch (e) { msg.textContent = "Not changed: " + e.message; }
-        } }, f.enabled ? "On" : "Off");
+          catch (e) { msg.textContent = tx("לא שונה: ", "Not changed: ") + e.message; }
+        } }, f.enabled ? tx("פועל", "On") : tx("כבוי", "Off"));
       const w = f.targets.windows, p = f.targets.linux_arm64_pi;
       const blockers = [w.blocker ? "Windows: " + txh(w, "blocker") : null, p.blocker ? "Pi: " + txh(p, "blocker") : null,
-        ...(f.matrix_problems || []).map((x) => "matrix: " + x)].filter(Boolean);
-      const health = f.health === "ok" ? pill("ok", "active") : f.health === "off" ? pill("plain", "off") : pill("unavailable", "unavailable");
+        ...(f.matrix_problems || []).map((x) => tx("טבלה: ", "matrix: ") + x)].filter(Boolean);
+      const health = f.health === "ok" ? pill("ok", tx("פעיל", "active")) : f.health === "off" ? pill("plain", tx("כבוי", "off"))
+        : f.health === "checking" ? pill("plain", tx("בודק", "checking")) : pill("unavailable", tx("לא זמין", "unavailable"));
+      const PERM = { read: ["קריאה", "read"], action: ["פעולה", "action"], destructive: ["הרסני", "destructive"] };
+      const perm = (x) => { const m = /^(read|action|destructive)(?=$|[ ,(])(.*)$/.exec(x); const k = m && PERM[m[1]]; return k ? tx(k[0], k[1]) + (m[2].trim() ? " " + JL.t(m[2].trim()) : "") : JL.t(x); };
+      const age = f.check === "stale" && f.checked_s_ago != null ? el("div", { class: "muted small" }, tx(`נבדק לפני ${Math.round(f.checked_s_ago)} שנ׳, בודק שוב`, `checked ${Math.round(f.checked_s_ago)} s ago, re-checking`)) : null;
       return el("tr", { class: f.needs_attention ? "m4-attn" : null },
         el("td", { "data-label": "Feature" }, el("b", {}, txo(f, "title")),
           el("div", { class: "muted small" }, txh(f, "about")),
-          f.requested ? el("div", { class: "small" }, "JARVES was asked to turn this on: approve here.") : null),
+          f.requested ? el("div", { class: "small" }, tx("ביקשו מ-JARVES להפעיל את זה: מאשרים כאן.", "JARVES was asked to turn this on: approve here.")) : null),
         el("td", { "data-label": "Enabled" }, sw, msg),
-        el("td", { "data-label": "Health" }, health, f.reason ? el("div", { class: "small", dir: JL.textDir(txh(f, "reason")) }, txh(f, "reason")) : null),
+        el("td", { "data-label": "Health" }, health, f.reason ? el("div", { class: "small", dir: JL.textDir(txh(f, "reason")) }, txh(f, "reason")) : null, age),
         el("td", { "data-label": "Settings", class: "small" }, f.settings || "—"),
-        el("td", { "data-label": "Permissions", class: "small" }, (f.permissions || []).join(", "), " ", pill(f.risk, f.risk)),
+        el("td", { "data-label": "Permissions", class: "small" }, (f.permissions || []).map((x, i) => el("span", {}, (i ? ", " : "") + perm(x))), " ",
+          pill(f.risk, ({ low: tx("סיכון נמוך", "low risk"), medium: tx("סיכון בינוני", "medium risk"), high: tx("סיכון גבוה", "high risk") })[f.risk] || f.risk)),
         el("td", { "data-label": "Windows" }, statusPill(w), w.evidence ? el("div", { class: "muted small" }, txh(w, "evidence")) : null),
         el("td", { "data-label": "Pi" }, statusPill(p)),
         el("td", { "data-label": "Blocker", class: "small" }, blockers.length ? blockers.map((b) => el("div", {}, b)) : "—"),
@@ -59,25 +64,30 @@
         + "'Built, not verified' means it was never run on that device. ") + txh(d, "note")),
       tabs, el("div", { style: "height:12px" }),
       el("div", { class: "card m4-scroll" }, rows.length ? el("table", { class: "m4-matrix" },
-        el("thead", {}, el("tr", {}, ["Feature", "Enabled", "Health", "Settings", "Permissions", "Windows", "Pi", "Blocker", "Roadmap"]
-          .map((h) => el("th", {}, h)))), el("tbody", {}, rows)) : el("div", { class: "empty" }, "Nothing in this filter.")),
+        el("thead", {}, el("tr", {}, [tx("יכולת", "Feature"), tx("מופעל", "Enabled"), tx("תקינות", "Health"), tx("הגדרות", "Settings"), tx("הרשאות", "Permissions"), "Windows", "Pi", tx("חסם", "Blocker"), tx("תוכנית", "Roadmap")]
+          .map((h) => el("th", {}, h)))), el("tbody", {}, rows)) : el("div", { class: "empty" }, tx("אין יכולות בסינון הזה.", "Nothing in this filter."))),
       d.helper_isolation ? el("div", { class: "card small", style: "margin-top:8px", id: "helper-isolation" },
         el("b", {}, tx("בידוד פקודות העוזר", "Helper isolation")), " ",
         pill(d.helper_isolation.status === "ok" ? "ok" : d.helper_isolation.status, d.helper_isolation.state), " ",
         el("span", { dir: "auto" }, d.helper_isolation.reason || ""),
         d.helper_isolation.state === "unavailable" ? el("div", { class: "muted" },
           tx("בלי בידוד, כל פקודה דורשת הקלדת קוד.", "Without isolation every helper command needs the typed code.")) : null) : null,
-      el("div", { class: "muted small", style: "margin-top:8px" }, "Last checked: ",
-        [...new Set(d.features.map((f) => f.last_checked))].join(", "), " · Pi roadmap: ",
+      el("div", { class: "muted small", style: "margin-top:8px" }, tx("נבדק לאחרונה: ", "Last checked: "),
+        [...new Set(d.features.map((f) => f.last_checked))].join(", "), tx(" · תוכנית ל-Pi: ", " · Pi roadmap: "),
         el("a", { href: d.pi_roadmap, target: "_blank", rel: "noopener noreferrer" }, d.pi_roadmap)));
+    // a never-checked probe runs in the Core's background worker: show its real result once it landed (once)
+    if (d.features.some((f) => f.check === "checking") && !pageFeatures.rechecked) {
+      pageFeatures.rechecked = true;
+      setTimeout(() => { if (location.hash.startsWith("#/features")) route(true); }, 1500);
+    }
   }
 
   // ------------------------------------------------------------------ Identity & voice
   async function pageIdentity() {
     const d = await api("/api/identity");
     const nameMsg = el("span", { class: "muted small" });
-    const disp = input({ value: d.display_name, maxlength: "40", "aria-label": "Display name" });
-    const spoken = input({ value: d.spoken_name, maxlength: "40", dir: "auto", "aria-label": "Spoken name" });
+    const disp = input({ value: d.display_name, maxlength: "40", "aria-label": JL.t("Display name") });
+    const spoken = input({ value: d.spoken_name, maxlength: "40", dir: "auto", "aria-label": tx("השם המדובר", "Spoken name") });
     const names = el("div", { class: "card" }, el("h2", {}, "Name"),
       el("div", { class: "m4-form" }, field("Display name (written)", disp), field("Spoken name (how he says it)", spoken),
         el("button", { type: "button", class: "primary", onclick: async () => {
@@ -106,9 +116,9 @@
         el("div", { class: "k" }, "custom phrase: Pi"), el("div", { class: "v" }, statusPill(cap.custom.linux_arm64_pi), " ", txh(cap.custom.linux_arm64_pi, "blocker"),
           cap.custom.linux_arm64_pi.roadmap_issue ? [" ", el("a", { href: cap.custom.linux_arm64_pi.roadmap_issue, target: "_blank", rel: "noopener noreferrer" }, "roadmap")] : null)),
       w.missing ? el("div", { class: "small" }, `The chosen model ${w.missing} is missing: using Hey Jarvis.`) : null,
-      el("p", { class: "small" }, "A new phrase: run ", el("code", {}, w.train_command),
-        " on this computer (free, local, about 3-5 minutes), then test it with your voice: ", el("code", {}, "jarvis wake test --model <file>"),
-        " and count false wakes over 30 minutes of normal room sound: ", el("code", {}, "jarvis wake test --model <file> --false-wakes 30"), "."),
+      el("p", { class: "small" }, tx("מילת הפעלה חדשה: מריצים ", "A new phrase: run "), el("code", {}, w.train_command),
+        tx(" במחשב הזה (חינם, מקומי, כ-3-5 דקות), ואז בודקים אותה בקול שלכם: ", " on this computer (free, local, about 3-5 minutes), then test it with your voice: "), el("code", {}, "jarvis wake test --model <file>"),
+        tx(" ולספור התעוררויות שווא במשך 30 דקות של רעש חדר רגיל: ", " and count false wakes over 30 minutes of normal room sound: "), el("code", {}, "jarvis wake test --model <file> --false-wakes 30"), "."),
       models.length ? el("table", {}, el("thead", {}, el("tr", {}, ["Trained phrase", "Check", "Threshold", ""].map((h) => el("th", {}, h)))),
         el("tbody", {}, models)) : el("div", { class: "muted small" }, "No phrase trained yet."),
       w.builtin ? null : el("button", { type: "button", onclick: async () => {
@@ -134,8 +144,8 @@
       el("td", {}, d.voice.current === v.id ? null : el("button", { type: "button", onclick: () => choose(v) },
         v.mode === d.voice.mode ? "Use" : "Use (needs approval)"))));
     const voices = el("div", { class: "card" }, el("h2", {}, "Voice"),
-      el("div", { class: "muted small" }, d.voices[0] ? txh(d.voices[0], "preview_note") : "", " Rules: same model = ", d.rules.same_model,
-        "; another model = ", d.rules.other_model, ". You can also say \"תחליף קול\"."),
+      el("div", { class: "muted small" }, d.voices[0] ? txh(d.voices[0], "preview_note") : "", tx(" כללים: אותו מודל = ", " Rules: same model = "), JL.t(d.rules.same_model),
+        tx("; מודל אחר = ", "; another model = "), JL.t(d.rules.other_model), tx(". אפשר גם לומר \"תחליף קול\".", ". You can also say “change your voice”.")),
       d.voice.notes.length ? el("div", { class: "small" }, d.voice.notes.join(" ")) : null,
       el("div", { class: "m4-scroll" }, el("table", {}, el("thead", {}, el("tr", {}, ["Voice", "Provider / model", "Accent / style", "Cost", "Preview", ""].map((h) => el("th", {}, h)))),
         el("tbody", {}, voiceRows))), vMsg);
@@ -173,11 +183,11 @@
       catch (e) { msg.textContent = e.message; }
     };
     const cals = d.calendars.filter((c) => c.access === "owner" || c.access === "writer");
-    const f = { title: input({ "aria-label": "Title", dir: "auto" }), day: input({ value: "tomorrow", "aria-label": "Day" }),
-      start: input({ placeholder: "HH:MM", "aria-label": "Start" }), end: input({ placeholder: "HH:MM", "aria-label": "End" }),
-      cal: el("select", { "aria-label": "Calendar" }, cals.map((c) => el("option", { value: c.primary ? "primary" : c.name }, c.name + (c.primary ? " (main)" : "")))),
-      rec: el("select", { "aria-label": "Repeat" }, ["none", "daily", "weekly", "monthly", "yearly"].map((r) => el("option", { value: r }, r))),
-      count: input({ placeholder: "times", "aria-label": "Repeat count" }), rem: input({ placeholder: "minutes before", "aria-label": "Reminder" }) };
+    const f = { title: input({ "aria-label": JL.t("Title"), dir: "auto" }), day: input({ value: "tomorrow", "aria-label": JL.t("Day") }),
+      start: input({ placeholder: "HH:MM", "aria-label": JL.t("Start") }), end: input({ placeholder: "HH:MM", "aria-label": JL.t("End") }),
+      cal: el("select", { "aria-label": JL.t("Calendar") }, cals.map((c) => el("option", { value: c.primary ? "primary" : c.name }, c.name + (c.primary ? " (main)" : "")))),
+      rec: el("select", { "aria-label": JL.t("Repeat") }, ["none", "daily", "weekly", "monthly", "yearly"].map((r) => el("option", { value: r }, r))),
+      count: input({ placeholder: "times", "aria-label": JL.t("Repeat count") }), rem: input({ placeholder: "minutes before", "aria-label": JL.t("Reminder") }) };
     const cMsg = el("div", { class: "muted small" });
     const create = el("div", { class: "card" }, el("h2", {}, "Add an event"),
       el("div", { class: "m4-form" }, field("Title", f.title), field("Day (today / tomorrow / 2026-11-03)", f.day), field("Start", f.start),
@@ -187,9 +197,9 @@
           count: f.count.value ? Number(f.count.value) : null, reminder_minutes: f.rem.value ? [Number(f.rem.value)] : [] }, cMsg) }, "Preview")), cMsg);
     const evRows = d.events.map((e) => {
       const m = el("div", { class: "muted small" });
-      const scope = el("select", { "aria-label": "Which occurrences" }, el("option", { value: "" }, "choose…"),
+      const scope = el("select", { "aria-label": JL.t("Which occurrences") }, el("option", { value: "" }, "choose…"),
         el("option", { value: "this" }, "only this time"), el("option", { value: "series" }, "the whole series"));
-      const t = input({ placeholder: "new title", dir: "auto", "aria-label": "New title" }), s = input({ placeholder: "new start HH:MM", "aria-label": "New start" });
+      const t = input({ placeholder: "new title", dir: "auto", "aria-label": JL.t("New title") }), s = input({ placeholder: "new start HH:MM", "aria-label": JL.t("New start") });
       const edit = el("div", { class: "m4-form", hidden: true }, t, s, e.recurring ? scope : null,
         el("button", { type: "button", onclick: () => preview({ op: "update", handle: e.handle, title: t.value || null, start: s.value || null,
           scope: e.recurring ? (scope.value || null) : null }, m) }, "Preview change"), m);

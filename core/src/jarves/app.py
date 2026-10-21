@@ -648,7 +648,7 @@ class Core:
     async def open_dashboard(self, page: str = "") -> str:
         """Start the dashboard inside the Core (once; it shares the Core's workspace, memory and settings) and open
         it in the browser on this computer, on `page` (e.g. "#/guide/music"; kept across the token redirect).
-        Returns the full one-time URL (without the page)."""
+        Returns the full URL with the private access key (without the page)."""
         if self._dashboard is None or not self._dashboard.running:
             from .dashboard import Dashboard
             self._dashboard = await asyncio.to_thread(
@@ -1106,17 +1106,15 @@ class Core:
             logs.warn("tts", "SPEECH_CACHE_FAILED", "could not cache the greeting", exc=True)
 
     def _warm_probes(self) -> None:
-        """Run the one slow feature probe (music: a localhost TCP connect, 0.3 s timeout when Pear is closed) in a
-        worker thread instead of on the event loop, where TOOLS.md at start-up and live_tools() at each live-session
-        start would otherwise wait for it. Fire-and-forget: a not-yet-finished warm-up just means available()
-        probes itself exactly as before."""
+        """Run the feature probes (music: a localhost TCP connect, 0.3 s timeout when Pear is closed; V4: PATH scans
+        for claude/codex, the WhatsApp bridge's localhost status, Godot/browser lookups...) in the background worker
+        instead of on the event loop, where TOOLS.md at start-up and live_tools() at each live-session start would
+        otherwise wait for them. Fire-and-forget: a not-yet-finished warm-up just means available() probes itself
+        exactly as before."""
         feats = getattr(self, "features", None)
-        if feats is None or "music" not in feat.CATALOG:
+        if feats is None or not hasattr(feats, "prewarm"):
             return
-        try:
-            asyncio.get_running_loop().run_in_executor(None, feats.warm, "music")
-        except RuntimeError:
-            pass
+        feats.prewarm()
 
     def _prewarm_modules(self) -> list[str]:
         """What the selected route will import on first use, most urgent first (SW-V3 P0.3, measured on the owner's
@@ -1392,7 +1390,7 @@ class Core:
                    "Use features_list / get_status for current state; read this full file with workspace_read.",
                    "All feature IDs: " + ", ".join(feat.CATALOG) + ".",
                    self.features.capabilities_markdown(), "## What each feature does"]
-        for f in feat.CATALOG.values():
+        for f in list(feat.CATALOG.values()):
             catalog.append(f"- {f.id} / {f.title_en}: {f.about or f.title_en}. "
                            f"Needs: {', '.join(f.needs) or 'none'}. Risk: {f.risk}. Applies: {f.applies}.")
         self.workspace.write_generated("FEATURES.md", "\n".join(catalog) + "\n")

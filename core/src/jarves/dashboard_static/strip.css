@@ -1,5 +1,5 @@
 /* Privacy strip on Home (strip.js). Okabe-Ito colours; every state also differs in fill/outline/slash and words. */
-:root { --ps-capture: #e69f00; --ps-out: #d55e00; --ps-local: #2b8cc4; --ps-standby: #b8a400; --ps-off: #7a7974; }
+:root { --ps-capture: #e69f00; --ps-out: #d55e00; --ps-local: #1f6fa3; --ps-standby: #b8a400; --ps-off: #686762; }
 :root[data-theme="dark"] { --ps-local: #56b4e9; --ps-standby: #f0e442; --ps-off: #9a9992; }
 @media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) { --ps-local: #56b4e9; --ps-standby: #f0e442; --ps-off: #9a9992; } }
 .ps-row { display: flex; flex-wrap: wrap; gap: 8px; margin: 6px 0 8px; }

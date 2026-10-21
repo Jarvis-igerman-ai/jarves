@@ -110,7 +110,7 @@
         el("span", { class: "cx-k" }, el("b", {}, `turn ${x.n}`)),
         el("div", { class: "cx-what", dir: "auto" }, `${x.t.role === "user" ? "You" : "JARVES"}: `,
           textOf(x.t) === null ? `(${x.t.chars} characters, privacy mode)` : marked(x.t.text, ctx.q),
-          x.t.role === "assistant" ? el("a", { class: "cx-why-link", href: "#/context/" + encodeURIComponent(ctx.sid) + "?tab=why&turn=" + x.n }, "why?") : null))
+          x.t.role === "assistant" ? el("a", { class: "cx-why-link", href: "#/context/" + encodeURIComponent(ctx.sid) + "?tab=why&turn=" + x.n, "aria-label": tx(`למה הוא ענה כך? (תשובה ${x.n})`, `Why did he answer this? (reply ${x.n})`) }, tx("למה?", "why?")) : null))
       : evRow(x.e, ctx));
     return [summary, el("div", { style: "height:10px" }), el("div", { class: "card" },
       el("div", { class: "muted small" }, `Started ${clock(d.started)} with ${tok(d.start_tokens)} of instructions; ${d.events.filter((e) => e.kind !== "end").length} pieces of context were added during the conversation (${tok(d.total_tokens - d.start_tokens)}).`),
@@ -265,7 +265,7 @@
     $main.querySelectorAll(".chat .msg").forEach((m, i) => {
       if (m.classList.contains("assistant") && !m.querySelector(".cx-why-link")) {
         const meta = m.querySelector(".meta");
-        if (meta) meta.append(el("a", { class: "cx-why-link", href: "#/context/" + encodeURIComponent(id) + "?tab=why&turn=" + (i + 1) }, "why?"));
+        if (meta) meta.append(el("a", { class: "cx-why-link", href: "#/context/" + encodeURIComponent(id) + "?tab=why&turn=" + (i + 1), "aria-label": tx(`למה הוא ענה כך? (תשובה ${i + 1})`, `Why did he answer this? (reply ${i + 1})`) }, tx("למה?", "why?")));
       }
     });
   };

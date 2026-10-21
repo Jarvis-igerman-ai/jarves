@@ -13,21 +13,21 @@ what_en = "JARVES reads your calendar and, after you confirm, can add or update 
 say = [["מה יש לי ביומן מחר?", "What's on my calendar tomorrow?"], ["תקבע לי פגישה עם דני ביום שלישי בעשר", "Book a meeting with Danny on Tuesday at ten"]]
 expect_he = "הוא מקריא את הפגישות. לפני הוספה הוא אומר מה בדיוק יוסיף ומחכה ל\"כן\"."
 expect_en = "He reads your events. Before adding one he says exactly what he will add and waits for \"yes\"."
-test_he = "הבדיקה בודקת שהחשבון מחובר. בדיקה מלאה מול גוגל יש בעמוד Connections."
+test_he = "הבדיקה בודקת שהחשבון מחובר. בדיקה מלאה מול גוגל יש בעמוד \"חיבורים\"."
 test_en = "The check sees that the account is connected. The full live check is on the Connections page."
 cost_he = "חינם."
 cost_en = "Free."
-privacy_he = "הגישה נשמרת רק במחשב. אפשר לנתק בכל רגע בעמוד Connections."
+privacy_he = "הגישה נשמרת רק במחשב. אפשר לנתק בכל רגע בעמוד \"חיבורים\"."
 privacy_en = "The sign-in is kept only on this computer. Disconnect any time on the Connections page."
 
 [[steps]]
-he = "בטרמינל הקלידו jarvis google start. הוא מוביל אתכם צעד אחר צעד (או פתחו את עמוד Connections)."
+he = "בטרמינל הקלידו jarvis google start. הוא מוביל אתכם צעד אחר צעד (או פתחו את עמוד \"חיבורים\")."
 en = "In a terminal type jarvis google start. It walks you through it step by step (or open the Connections page)."
 action = "command:jarvis google start"
 check = "available:google_calendar"
 
 [[steps]]
-he = "פתחו את עמוד Connections בלוח הבקרה ובדקו שגוגל מסומן OK."
+he = "פתחו את עמוד \"חיבורים\" בלוח הבקרה ובדקו שגוגל מסומן OK."
 en = "Open the Connections page in the dashboard and check Google shows OK."
 action = "open:#/connections"
 

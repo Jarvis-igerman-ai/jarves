@@ -16,7 +16,7 @@ privacy_he = "בלי צימוד אין גישה. החיבור בבית בלי ה
 privacy_en = "No access without pairing. The home connection is unencrypted (HTTP), so someone already on your Wi-Fi could in theory see it."
 
 [[steps]]
-he = "הדליקו את \"לוח בקרה ברשת הביתית\" בעמוד Features (סיכון גבוה)."
+he = "הדליקו את \"לוח בקרה ברשת הביתית\" בעמוד \"יכולות ומתגים\" (סיכון גבוה)."
 en = "Turn on Dashboard on the home network on the Features page (high risk)."
 action = "feature_on:dashboard_lan"
 check = "enabled:dashboard_lan"

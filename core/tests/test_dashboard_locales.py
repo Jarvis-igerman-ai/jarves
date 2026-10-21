@@ -16,7 +16,7 @@ from test_dashboard import dash, get, req  # noqa: F401  (fixture + helpers)
 
 STATIC = Path(__file__).resolve().parents[1] / "src" / "jarves" / "dashboard_static"
 LOCALES = STATIC / "locales"
-RTL = {"he", "ar"}
+RTL = {"he"}
 COMPLETE = {"he"}                   # locales that must cover every key (others report coverage)
 
 
@@ -29,6 +29,18 @@ def catalog(code: str) -> dict:
 
 def codes() -> list[str]:
     return sorted(p.stem for p in LOCALES.glob("*.js"))
+
+
+def test_owner_languages_are_english_and_hebrew_only():
+    """SW-V4 K (owner decision): English (default) and Hebrew only; the multi-locale mechanism stays generic.
+    A saved choice that is no longer registered (ar / ru from V3) falls back to English."""
+    assert codes() == ["en", "he"]
+    js = (STATIC / "i18n.js").read_text(encoding="utf-8")
+    assert "if (s && LOC[s]) lang = s;" in js and "lang = LOC[l] ? l : DEFAULT;" in js
+    assert "forced && LOC[forced]" in js
+    for f in list(STATIC.glob("*.js")) + list(STATIC.glob("*.css")) + [STATIC / "index.html"]:
+        src = f.read_text(encoding="utf-8")
+        assert not re.search(r'lang="(?:ar|ru)"|locales/(?:ar|ru)\.js|Noto Sans Arabic', src), f.name
 
 
 def test_every_catalog_is_registered_in_order_before_i18n():
@@ -159,6 +171,19 @@ def test_server_locale_registry_is_generic(monkeypatch):
     assert "other_he" not in obj and "other_xx" not in obj      # unknown / user text gets no sibling
     assert locales.siblings("note", text) == {"note_he": "אין מיקרופון", "note_xx": "[xx] no microphone"}
     assert locales.list_siblings("notes", [text, "zzz"])["notes_he"] == ["אין מיקרופון", None]
+
+
+def test_english_display_form_drops_the_spoken_hebrew_hint():
+    """D-11: a reason that carries the model's Hebrew line ('tell the user: "<Hebrew>"') gets an English display
+    sibling (<key>_en) with the bare command; the dashboard's txh prefers it on English pages."""
+    from jarves import locales
+    src = 'Google account not connected (calendar); tell the user: "תריץ במחשב jarvis google start, ואני אדריך אותך"'
+    sib = locales.siblings("reason", src)
+    assert sib["reason_en"] == "Google account not connected (calendar); run: jarvis google start"
+    assert re.search(r"[֐-׿]", sib["reason_he"])
+    assert "reason_en" not in locales.siblings("reason", "no microphone")       # plain English: no sibling
+    js = (STATIC / "i18n.js").read_text(encoding="utf-8")
+    assert 'window.txh = (o, k) => srv(o, k, o && (o[k + "_en"] || o[k]));' in js
 
 
 def test_features_api_carries_locale_siblings(dash):

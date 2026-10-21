@@ -9,7 +9,7 @@ title_en = "Reminders and scheduled jobs"
 what_he = "ג'ארביס מזכיר לכם דברים ומכין דוחות קבועים, למשל \"כל בוקר בשמונה תגיד לי את החדשות\"."
 what_en = "JARVES reminds you of things and runs regular reports, e.g. \"every morning at eight tell me the news\"."
 say = [["תזכיר לי מחר בשמונה להתקשר לאמא", "Remind me tomorrow at eight to call mom"], ["כל ימי חול בשבע תגיד לי את מזג האוויר", "Every workday at seven tell me the weather"], ["אילו תזכורות יש לי?", "Which reminders do I have?"]]
-expect_he = "לפני שהוא מפעיל משימה קבועה הוא חוזר עליה ומבקש אישור. התוצאות נשמרות בעמוד Reports."
+expect_he = "לפני שהוא מפעיל משימה קבועה הוא חוזר עליה ומבקש אישור. התוצאות נשמרות בעמוד \"דוחות\"."
 expect_en = "Before turning a recurring job on he repeats it and asks first. Results are saved on the Reports page."
 cost_he = "תזכורת חינם. דוח עם חיפוש עולה כמה סנטים בכל פעם."
 cost_en = "A reminder is free. A report with a web search costs a few cents each time."
@@ -22,12 +22,12 @@ en = "Say what and when, e.g. \"remind me tomorrow at eight\"."
 check = "active:scheduler"
 
 [[steps]]
-he = "פתחו את עמוד Jobs כדי לראות, לעצור או למחוק משימות."
+he = "פתחו את עמוד \"משימות קבועות\" כדי לראות, לעצור או למחוק משימות."
 en = "Open the Jobs page to see, pause or delete jobs."
 action = "open:#/jobs"
 
 [[steps]]
-he = "הגדרות בעמוד Jobs: אזור זמן; משימה שהוחמצה (המחשב היה כבוי) רצה פעם אחת אם עברו פחות מ-6 שעות (אפשר לשנות); \"ימי חול\" = ראשון עד חמישי (אפשר לשנות לשני-שישי)."
+he = "הגדרות בעמוד \"משימות קבועות\": אזור זמן; משימה שהוחמצה (המחשב היה כבוי) רצה פעם אחת אם עברו פחות מ-6 שעות (אפשר לשנות); \"ימי חול\" = ראשון עד חמישי (אפשר לשנות לשני-שישי)."
 en = "Settings on the Jobs page: time zone; a missed job (computer was off) runs once if under 6 hours late (changeable); \"workdays\" = Sunday to Thursday (changeable to Monday-Friday)."
 action = "open:#/jobs"
 

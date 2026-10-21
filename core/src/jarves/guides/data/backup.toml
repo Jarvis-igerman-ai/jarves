@@ -10,7 +10,7 @@ title_en = "Backup and restore"
 what_he = "ג'ארביס מגבה כל יום את ההגדרות, הזיכרון, הפתקים וההיסטוריה (בלי מפתחות), ואפשר לשחזר."
 what_en = "JARVES backs up settings, memory, notes and history every day (no keys), and you can restore."
 say = [["מתי היה הגיבוי האחרון?", "When was the last backup?"]]
-expect_he = "בעמוד Backup רואים את הגיבויים. \"בדיקת שחזור\" משחזרת לתיקייה זמנית בלי לגעת בנתונים שלכם."
+expect_he = "בעמוד \"גיבוי\" רואים את הגיבויים. \"בדיקת שחזור\" משחזרת לתיקייה זמנית בלי לגעת בנתונים שלכם."
 expect_en = "The Backup page lists backups. Test restore restores into a throw-away folder without touching your data."
 test = "backup"
 test_he = "הבדיקה בודקת שהגיבוי האחרון שלם (בלי לשחזר)."
@@ -21,7 +21,7 @@ privacy_he = "בגיבוי אין מפתחות ואין התחברויות. אח
 privacy_en = "Backups contain no keys or sign-ins. After restoring on another computer, sign in again."
 
 [[steps]]
-he = "פתחו את עמוד Backup ולחצו \"גבה עכשיו\"."
+he = "פתחו את עמוד \"גיבוי\" ולחצו \"גבה עכשיו\"."
 en = "Open the Backup page and press Back up now."
 action = "open:#/backup"
 check = "probe:backup"

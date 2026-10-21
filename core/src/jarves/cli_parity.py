@@ -148,6 +148,10 @@ def cmd_timers(a, cfg, home) -> int:
             hit = t.cancel(int(a.id or 0), a.label or "", by="cli")
             print(clilang.fmt(f"בוטלו {len(hit)}", f"cancelled {len(hit)}"))
             return 0 if hit else 1
+        if a.action == "snooze":                         # SW-V4 K: same op as the dashboard Snooze button
+            r = t.snooze(int(a.id), float(a.minutes), by="cli")
+            print(clilang.fmt(f"נדחה: {_left(t.view(r)['seconds_left'])}", f"snoozed: {_left(t.view(r)['seconds_left'])} left"))
+            return 0
     except ValueError as e:
         print(f"timers: {e}", file=sys.stderr)
         return 2
@@ -281,6 +285,9 @@ def add_cli(sub) -> None:
     tc.add_argument("id", nargs="?", default="")
     tc.add_argument("--label", default="")
     tc.add_argument("--all", action="store_true")
+    tz = ts.add_parser("snooze", help="push a running timer later (or restart one that rang): snooze ID [MINUTES]")
+    tz.add_argument("id")
+    tz.add_argument("minutes", nargs="?", default="5")
 
     li = sub.add_parser("lists", help="shopping / to-do lists: show / add / check / remove / clear")
     lsub = li.add_subparsers(dest="action", required=True)

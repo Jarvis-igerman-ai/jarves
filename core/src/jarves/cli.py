@@ -422,7 +422,11 @@ def cmd_diag(a, cfg, home) -> int:
     if getattr(a, "ci", False):                 # SW-V4 O: the CI-uploaded bundle (redacted + scanned)
         from .diag.service import ci_bundle
         return ci_bundle(home, cfg, Path(a.out or "diag"))
-    out = Path(a.out or home / f"jarves-diag-{datetime.now():%Y%m%d-%H%M%S}.zip")
+    name = f"jarves-diag-{datetime.now():%Y%m%d-%H%M%S}.zip"
+    out = Path(a.out or home / name)
+    if out.is_dir():                            # `--out <folder>`: the bundle goes inside (was a PermissionError traceback)
+        out = out / name
+    out.parent.mkdir(parents=True, exist_ok=True)
     snap = _ws_call(home, cfg.link.port, {"type": "status.request", "payload": {}}, "status") or read_snapshot(home / "health.json")
     man = diagbundle.build(home, cfg, out, lines=a.lines, max_bytes=int(a.max_mb * 1024 * 1024), status=snap,
                            commit=_git_rev())
@@ -520,7 +524,9 @@ def cmd_personal(a, cfg, home) -> int:
     try:
         result = asyncio.run(run())
         print(result.to_model())
-        return 0 if result.ok else 1
+        # google_connect_help answers ok=True for the model (it is guidance, not a fault), but the command the user
+        # typed did NOT happen: exit 1 so scripts and the shell see it (V4-CLI-1).
+        return 0 if result.ok and result.code != "GOOGLE_NOT_CONNECTED" else 1
     except (EOFError, KeyboardInterrupt):
         print("Cancelled.")
         return 1
@@ -1346,7 +1352,7 @@ def cmd_features(a, cfg, home) -> int:
         s = f.reset(a.id) if a.action == "reset" else switch(f, a.id, a.action == "on", by="cli")
         print(f"{a.id}: {state_text(s, reason=clilang.reason)} (saved; takes effect {APPLIES_EN[s['applies']]})")
         return 0
-    for s in f.list():
+    for s in f.list(wait=True):
         state = "ACTIVE" if s["active"] else ("off" if not s["enabled"] else "unavailable")
         print(f"{s['id']:<22} {state:<12} {s['risk']:<7} {s['title_en']}"
               + (f"  - {clilang.reason(s['reason'])}" if s["reason"] and not s["active"] else "")
@@ -1376,7 +1382,7 @@ def cmd_dashboard(a, cfg, home) -> int:
     except OSError as e:
         print(f"cannot start the dashboard: {e}", file=sys.stderr)
         return 1
-    print(f"JARVES dashboard (the link holds a one-time key for THIS computer, do not share it):\n  {dash.url}",
+    print(f"JARVES dashboard (the link holds a private key for THIS computer, valid until the dashboard stops; do not share it):\n  {dash.url}",
           flush=True)
     if dash.lan_url:
         print(f"Home network: on your phone open {dash.lan_url} and enter the pairing code from the Devices page "

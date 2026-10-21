@@ -84,7 +84,7 @@ SETTINGS: dict[str, object] = {
     "health.canary_job_id": "",
     "health.auto_face_link_restart": False,        # OD-37: the ONLY remediation the owner may grant for automatic use
     "health.spoken_alert_last": 0.0,               # at most one spoken health alert per day
-    "health.ticket_repo": "igalgerman/JARVIS",     # OD-35: private repo only
+    "health.ticket_repo": "",     # empty: drafts stay local files; the owner sets a repo to allow filing (V4-RP-2)
 }
 for _k, _v in SETTINGS.items():
     DEFAULTS.setdefault(_k, _v)

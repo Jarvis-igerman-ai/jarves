@@ -85,7 +85,7 @@ PAGES.home = async function () {
       el("div", {}, el("b", {}, two(c, "title")),
         el("div", { class: "small" }, two(c, "detail"),
           c.days_left !== null && c.days_left !== undefined ? el("span", { class: "muted" }, tx(` · חיבור מחדש בעוד כ-${c.days_left} ימים`, ` · reconnect in ~${c.days_left} days`)) : null)),
-      el("span", { class: "spacer" }), el("a", { href: c.link }, tx("פתיחה ←", "Open →")))));
+      el("span", { class: "spacer" }), el("a", { href: c.link, "aria-label": `${tx("פתיחה", "Open")}: ${two(c, "title")}` }, tx("פתיחה ←", "Open →")))));
   const feats = el("div", { class: "card" }, el("h2", {}, tx("מה פועל", "What is on")),
     el("div", { class: "chips" }, d.features.on.map((f) => el("span", { class: "chip-on" }, two(f, "title")))),
     el("div", { class: "small muted", style: "margin-top:10px" }, tx("כבוי או לא זמין", "Off or not available")),
@@ -161,7 +161,7 @@ PAGES.connections = async function () {
       el("div", {}, el("b", {}, txo(s, "title")),
         s.done ? null : el("ul", {}, clicks.map((c) => el("li", {}, c))),
         el("div", { class: "actions" },
-          el("a", { class: "button-link", href: s.url, target: "_blank", rel: "noopener noreferrer" }, tx("פתיחה ב-Google Cloud ←", "Open in Google Cloud →")),
+          el("a", { class: "button-link", href: s.url, target: "_blank", rel: "noopener noreferrer", "aria-label": `${tx("פתיחה ב-Google Cloud", "Open in Google Cloud")}: ${txo(s, "title")}` }, tx("פתיחה ב-Google Cloud ←", "Open in Google Cloud →")),
           s.copy ? el("button", { type: "button", onclick: async () => { try { await navigator.clipboard.writeText(s.copy); smsg.textContent = tx("הועתק", "Copied"); } catch (e) { smsg.textContent = tx("העתקה: ", "Copy: ") + s.copy; } } },
             s.id === "scopes" ? tx("העתקת הרשאות", "Copy permissions") : tx("העתקת “", "Copy “") + s.copy + "”") : null,
           s.id === "audience" ? el("span", { class: "muted small" }, tx("הדביקו את כתובת ה-Gmail שלכם", "paste your own Gmail address")) : null,
