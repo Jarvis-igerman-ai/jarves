@@ -1039,49 +1039,115 @@ def _wake_eval(a, cfg, home) -> int:
 
 
 def _wake_train(a, cfg, home) -> int:
-    """`jarvis wake train "<phrase>"`: local synthetic samples -> trained head in <state_dir>/wake (voice/wake_train)."""
-    from .identity import Identity, IdentityError
+    """`jarvis wake train "<phrase>"`: local synthetic samples + the owner's recordings -> a CANDIDATE head in
+    <state_dir>/wake/candidates (voice/wake_train). Nothing active changes without --apply; --revert undoes the last
+    --apply (voice/wake_prod)."""
+    from .identity import IdentityError
+    from .voice import wake_prod
     from .voice.wake_train import local_voices, slug, train_phrase
     if getattr(a, "revert", False):
-        # back to the built-in "Hey Jarvis" (threshold from config.toml); the trained .npz file is kept on disk
-        old = Identity(home, cfg).wake()
-        Identity(home, cfg).set_wake("hey_jarvis", "Hey Jarvis", None, by="cli")
-        print(f"Reverted: JARVES wakes on the standard \"Hey Jarvis\" model again after the next start (was "
-              f"{Path(old['model']).name}). The trained file is kept; delete it by hand if you no longer want it.")
+        try:
+            r = wake_prod.revert(home, cfg)
+        except (IdentityError, OSError) as e:
+            print(f"not reverted: {e}", file=sys.stderr)
+            return 1
+        if r is None:
+            print("Nothing to revert: no wake model was applied with `jarvis wake train --apply`.", file=sys.stderr)
+            return 1
+        now = "the stock Hey Jarvis" if r["model"] == "hey_jarvis" else Path(r["model"]).name
+        print(f"Reverted: the wake model is now {now}. Restart JARVES to use it (jarvis stop, then jarvis).")
         return 0
+    samples = Path(a.samples) if a.samples else None
+    if samples is None and wake_prod.default_samples_dir(home).is_dir()             and any(wake_prod.default_samples_dir(home).glob("*.wav")):
+        samples = wake_prod.default_samples_dir(home)           # the owner's recordings, no flag needed
+    files = None
+    if samples is not None:
+        checks = wake_prod.check_samples(samples)
+        sm = wake_prod.sample_summary(checks)
+        print(f"Your recordings in {samples}: {sm['usable']} usable of {sm['files']}.")
+        for c in checks:
+            for msg in c.problems:
+                print(f"  REJECTED {c.path.name}: {msg}")
+            for msg in c.warnings:
+                print(f"  warning  {c.path.name}: {msg}")
+        if not sm["enough"]:
+            print(f"  Fewer than {wake_prod.RECOMMENDED_SAMPLES} usable recordings: the model will lean on synthetic "
+                  "voices. Record more phrases in a quiet room, 20-50 cm from the microphone.")
+        files = [c.path for c in checks if c.ok]
+        if a.check_samples:
+            return 0 if sm["minimum"] else 1
+        if a.samples and not files:
+            print("No usable recording in --samples: nothing trained.", file=sys.stderr)
+            return 1
+    elif a.check_samples:
+        print(f"No recordings found. Put WAV files of you saying the phrase in {wake_prod.default_samples_dir(home)}.",
+              file=sys.stderr)
+        return 1
     if not a.phrase:
-        print('usage: jarvis wake train "hey max" --say "היי מקס" [--samples DIR] [--apply]', file=sys.stderr)
+        print('usage: jarvis wake train "hey max" --say "היי מקס" [--samples DIR] [--apply] | --revert | '
+              '--check-samples', file=sys.stderr)
         return 2
     phrase = " ".join(a.phrase)
     voices = local_voices()
     print(f"Training a wake phrase for \"{phrase}\" on this device (free, local; nothing is played or sent).")
     print("Voices: " + (", ".join(f"{x.id} ({x.lang})" for x in voices) or "none") +
-          (f"; your recordings: {a.samples}" if a.samples else ""))
-    if not voices and not a.samples:
+          (f"; your recordings: {len(files)} usable" if files is not None else ""))
+    if not voices and not files:
         print("No local voice found: install a Windows speech voice (Settings > Time & language > Speech) or "
               "espeak-ng (Linux/Pi), or record yourself and pass --samples DIR.", file=sys.stderr)
         return 1
-    out = Path(a.out) if a.out else home / "wake" / f"{slug(phrase)}.npz"
+    active = home / "wake" / f"{slug(phrase)}.npz"
+    if a.out:
+        out = Path(a.out)
+        if out.exists() and not a.apply:
+            print(f"{out} exists and is not replaced without --apply (the old one is kept in history then).",
+                  file=sys.stderr)
+            return 1
+    else:
+        out = wake_prod.candidate_path(home, slug(phrase))      # never the active model: that needs --apply
     try:
-        rep = train_phrase(phrase, out, say=a.say, samples=Path(a.samples) if a.samples else None, voices=voices,
-                           progress=lambda s: print("  " + s, flush=True))
+        rep = train_phrase(phrase, out, say=a.say, samples=samples, voices=voices, seed=a.seed,
+                           sample_files=files, progress=lambda s: print("  " + s, flush=True))
     except (RuntimeError, ImportError, OSError) as e:
         print(f"WAKE_TRAIN_FAILED: {e}", file=sys.stderr)
         return 1
     ev = rep["eval"]
-    print(f"\nSaved {out} ({rep['seconds']} s).")
+    print(f"\nSaved the candidate {out} ({rep['seconds']} s, seed {rep['seed']}).")
     print(f"Held-out check ({rep['held_out_voice'] or 'random 20 %'}): recall {ev['recall']:.0%}, "
           f"{ev['false_wakes']} false wakes in {ev['hours'] * 60:.0f} min of synthetic speech/noise "
           f"(threshold {rep['threshold']}). Synthetic only: test it with your voice next.")
+    print("Calibration (threshold vs misses and false wakes):")
+    for line in wake_prod.format_curve(rep["curve"], rep["threshold"]):
+        print(line)
+    ow = rep["owner"]
+    if ow["recordings"]:
+        print(f"Your recordings wake it {ow['recall_at_threshold']:.0%} of the time at {rep['threshold']}"
+              + (f" (held out, not trained on: {ow['held_out_recall_at_threshold']:.0%})"
+                 if ow["held_out_recall_at_threshold"] is not None else "") + ".")
+    nm = rep["near_miss"]
+    print(f"Near-miss sentences: {len(nm['false_wakes'])} false wakes in {nm['rendered']} renderings "
+          f"(worst score {nm['worst_score']}).")
+    for w in nm["false_wakes"]:
+        print(f"  WOULD WAKE on \"{w['text']}\" ({w['voice']}, score {w['score']})")
     for line in rep["next"]:
         print("  " + line)
-    if a.apply:
-        try:
-            Identity(home, cfg).set_wake(str(out), phrase, rep["threshold"], by="cli")
-        except IdentityError as e:
-            print(f"not applied: {e}", file=sys.stderr)
-            return 1
-        print(f"Applied: JARVES will wake on \"{phrase}\" after the next start (jarvis stop, then jarvis).")
+    if not a.apply:
+        print(f"\nNot applied. The active wake model is unchanged. Use it with: "
+              f"jarvis wake train {' '.join(a.phrase)} --apply   (undo later with: jarvis wake train --revert)")
+        return 0
+    why = wake_prod.gate(rep)
+    if why and not a.accept_risk:
+        for w in why:
+            print(f"not applied: {w}", file=sys.stderr)
+        print("Record better samples or retrain; --accept-risk applies it anyway.", file=sys.stderr)
+        return 1
+    try:
+        wake_prod.promote(home, cfg, out, phrase, rep["threshold"], active)
+    except (IdentityError, OSError) as e:
+        print(f"not applied: {e}", file=sys.stderr)
+        return 1
+    print(f"Applied: JARVES will wake on \"{phrase}\" after the next start (jarvis stop, then jarvis). "
+          "Undo with: jarvis wake train --revert")
     return 0
 
 
@@ -1591,7 +1657,7 @@ def main(argv: list[str] | None = None) -> int:
     add_approvals_cli(sub)                    # V3: jarvis approvals list / approve / deny / history
     wk = sub.add_parser("wake", help="calibrate the wake word to your voice and mic, or train a new wake phrase")
     wk.add_argument("action", choices=["test", "train", "eval"],
-                    help="test = live check of your voice + mic with an exact fix; train = new phrase; "
+                    help="test = live check of your voice + mic with an exact fix; train = new phrase (candidate; --apply to use, --revert to undo); "
                          "eval = measured detection rate / false wakes per hour on a synthetic corpus")
     wk.add_argument("--list-mics", action="store_true", help="test: list the input devices and exit")
     wk.add_argument("--openai", action="store_true", help="eval: add OpenAI TTS voices (metered once, cached)")
@@ -1600,14 +1666,19 @@ def main(argv: list[str] | None = None) -> int:
     wk.add_argument("--seconds", type=int, default=20)
     wk.add_argument("--apply", action="store_true", help="test: save the recommended threshold; train: use the "
                                                          "new phrase from the next start")
-    wk.add_argument("--revert", action="store_true", help="train: go back to the standard \"Hey Jarvis\" model "
+    wk.add_argument("--revert", action="store_true", help="train: undo the last --apply (the previous model and setting; else the standard \"Hey Jarvis\") "
                                                           "(the trained file is kept)")
     wk.add_argument("--model", help="test: a trained .npz / .tflite instead of the current wake model")
     wk.add_argument("--false-wakes", type=int, default=0, metavar="MIN",
                     help="test: count false wakes over MIN minutes of normal room audio")
     wk.add_argument("--say", action="append", help="train: another way to say it (e.g. the Hebrew spelling); repeat")
     wk.add_argument("--samples", help="train: a folder of WAV recordings of YOU saying the phrase (recommended)")
-    wk.add_argument("--out", help="train: output .npz (default <state_dir>/wake/<phrase>.npz)")
+    wk.add_argument("--out", help="train: output .npz (default <state_dir>/wake/candidates/<phrase>.npz)")
+    wk.add_argument("--check-samples", action="store_true",
+                    help="train: only check the quality of your recordings (default folder <state_dir>/wake/samples)")
+    wk.add_argument("--seed", type=int, default=7, help="train: random seed (same seed + same samples = same model)")
+    wk.add_argument("--accept-risk", action="store_true",
+                    help="train: apply even if a near-miss sentence or your held-out recordings fail the check")
     dr = sub.add_parser("doctor", help="check microphone, wake word, keys, music; say what to fix")
     dr.add_argument("--sound", action="store_true", help="also play a beep on the speakers")
     dr.add_argument("--live", action="store_true", help="also open one real GPT-Live session (~1 cent, asks first)")

@@ -38,7 +38,7 @@ from typing import Any
 
 from pydantic import BaseModel, Field, create_model
 
-from .. import features, isolation, logs
+from .. import features, isolation, logs, winsandbox
 from . import Skill, Tool, ToolResult
 
 ROOT = "skills"
@@ -658,10 +658,15 @@ async def run_sandboxed(code: str, tool: str, args: dict, broker, timeout_s: flo
     work = tempfile.mkdtemp(prefix="jarves-skill-")
     # R-01 (#17): created inside its own OS limits (Windows: suspended -> Job Object -> resumed; one process,
     # 512 MB, 10 s CPU, kill on close, no breakaway, UI restricted. POSIX: own session; the child sets its rlimits)
-    proc, guard = await isolation.exec_async(
-        _child_python(), "-I", "-S", "-X", "utf8", str(_CHILD), limits=isolation.SKILL_LIMITS, cwd=work, env=env,
-        stdin=asyncio.subprocess.PIPE, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.DEVNULL,
-        limit=MAX_HTTP * 3)
+    try:
+        proc, guard = await isolation.exec_async(
+            _child_python(), "-I", "-S", "-X", "utf8", str(_CHILD), limits=isolation.SKILL_LIMITS, cwd=work, env=env,
+            stdin=asyncio.subprocess.PIPE, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.DEVNULL,
+            limit=MAX_HTTP * 3)
+    except winsandbox.RestrictedLaunchError as e:       # [helper] restricted_token is on: never run it unrestricted
+        shutil.rmtree(work, ignore_errors=True)
+        logs.warn("skills", "SKILL_RESTRICTED_LAUNCH_FAILED", "restricted launch failed; Skill not run", error=str(e))
+        return {"ok": False, "error": "restricted launch failed; the Skill was not run"}
     if guard.state != "active":
         logs.warn("skills", "SKILL_JOB_UNAVAILABLE", "the Skill child runs without its full OS limits",
                   state=guard.state, reason=guard.reason[:200])

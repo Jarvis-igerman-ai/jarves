@@ -49,6 +49,7 @@ from pydantic import BaseModel, Field
 from .. import features as feat
 from .. import isolation
 from .. import logs
+from .. import winsandbox
 from ..approvals import append_audit
 from ..channels_common import targets
 from . import Skill, Tool, ToolResult
@@ -481,11 +482,15 @@ def run_blocking(prop: Proposal, timeout_s: float, log_path: Path, limits: "isol
     if sys.platform == "win32":
         kw["creationflags"] = subprocess.CREATE_NEW_PROCESS_GROUP | getattr(subprocess, "CREATE_NO_WINDOW", 0)
     t0 = time.monotonic()
-    if prop.argv is None:
-        p, guard = isolation.popen(prop.command if sys.platform == "win32" else ["/bin/sh", "-c", prop.command],
-                                   limits=limits, shell=sys.platform == "win32", **kw)
-    else:
-        p, guard = isolation.popen(prop.argv, limits=limits, **kw)
+    try:
+        if prop.argv is None:
+            p, guard = isolation.popen(prop.command if sys.platform == "win32" else ["/bin/sh", "-c", prop.command],
+                                       limits=limits, shell=sys.platform == "win32", **kw)
+        else:
+            p, guard = isolation.popen(prop.argv, limits=limits, **kw)
+    except winsandbox.RestrictedLaunchError as e:       # restricted_token is on: never run it unrestricted
+        logs.warn("helper", "HELPER_RESTRICTED_LAUNCH_FAILED", "restricted launch failed; command not run", error=str(e))
+        return RunResult(None, 0.0, False, f"restricted launch failed ({e}); the command was not run", log_path, 0)
     try:
         return _wait_and_collect(prop, p, guard, timeout_s, log_path, t0)
     finally:

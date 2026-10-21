@@ -290,6 +290,9 @@ class HelperConfig(_Strict):
     memory_mb: int = Field(2048, ge=64, le=65536)      # all processes of one command together (Windows job memory)
     max_processes: int = Field(64, ge=1, le=1024)     # processes alive at once in one command's tree
     cpu_seconds: float = Field(0, ge=0, le=86400)     # user CPU time of the whole tree; 0 = no cap (time limit only)
+    # Windows only, OFF by default: the command (and generated Skills) also run with a restricted token at the Low
+    # integrity level (winsandbox.py). Such a child cannot write to your normal folders, so installs fail.
+    restricted_token: bool = False
 
 
 class Config(_Strict):

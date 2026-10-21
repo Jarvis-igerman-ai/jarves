@@ -202,10 +202,11 @@ def local_synth(voices: list[Voice]) -> Synth:
     return synth
 
 
-def read_samples(folder: Path) -> list[np.ndarray]:
-    """The user's own recordings of the phrase (any WAV, int16)."""
+def read_samples(folder: Path, files: list[Path] | None = None) -> list[np.ndarray]:
+    """The user's own recordings of the phrase (any WAV, int16). `files` = only these (the ones that passed the
+    quality check in wake_prod.check_samples)."""
     out = []
-    for p in sorted(Path(folder).glob("*.wav")):
+    for p in (sorted(files) if files is not None else sorted(Path(folder).glob("*.wav"))):
         a, sr = _wav_bytes_to_np(p.read_bytes())
         out.append(resample(a, sr))
     return out
@@ -352,7 +353,8 @@ def pick_threshold(head, embs, last, events, n, target_fph: float = 0.5) -> tupl
 def train_phrase(phrase: str, out: Path, *, say: list[str] | None = None, samples: Path | None = None,
                  voices: list[Voice] | None = None, synth: Synth | None = None,
                  embedder: Callable | None = None, seed: int = 7, rates=(0.8, 0.95, 1.1, 1.3),
-                 pitches=(0.8, 1.0, 1.2), copies: int = 2, progress: Callable[[str], None] = print) -> dict:
+                 pitches=(0.8, 1.0, 1.2), copies: int = 2, progress: Callable[[str], None] = print,
+                 sample_files: list[Path] | None = None) -> dict:
     """Generate, train, evaluate and save `out` (.npz) + `out`.json (report). Returns the report."""
     t0 = time.monotonic()
     rng = np.random.default_rng(seed)
@@ -399,7 +401,7 @@ def train_phrase(phrase: str, out: Path, *, say: list[str] | None = None, sample
                 if a is not None:
                     # the held-out stream gets 3 augmented copies: more negative minutes for the false-wake rate
                     sets[part] += [(augment(a, rng), False) for _ in range(3 if part == "test" else 1)]
-    own = read_samples(samples) if samples else []
+    own = read_samples(samples, sample_files) if samples else []
     for i, a in enumerate(own):                      # every 4th own recording is kept for the test
         a = trim(a)
         part = "test" if i % 4 == 3 else "train"
@@ -427,9 +429,22 @@ def train_phrase(phrase: str, out: Path, *, say: list[str] | None = None, sample
     x, y, _ = windows(data["train"][2], data["train"][3], data["train"][1])
     head = train_head(x, y, seed=seed)
     audio, events, embs, last = data["test"]
-    threshold, ev = pick_threshold(head, embs, last, events, len(audio))
+    from . import wake_prod                          # production loop: owner-calibrated curve + near-miss check
+    own_trim = [trim(a) for a in own]
+    own_peaks = [wake_prod.stream_peak(head, embed, a, np.random.default_rng(seed + 100 + i))
+                 for i, a in enumerate(own_trim)]
+    held_idx = [i for i in range(len(own_trim)) if i % 4 == 3]
+    threshold, ev, curve = wake_prod.calibrate(head, embs, last, events, len(audio), own_peaks, held_idx)
+    near = wake_prod.near_miss_check(head, threshold, voices, synth, embed, seed=seed)
     report = {"phrase": phrase, "texts": texts, "model": str(out), "threshold": threshold, "held_out_voice": held,
               "voices": [f"{v.engine}:{v.id}" for v in voices], "own_recordings": len(own),
+              "seed": seed, "curve": curve, "target_false_per_hour": 0.5,
+              "owner": {"recordings": len(own), "peak_scores": [round(float(x), 3) for x in own_peaks],
+                        "held_out_indices": held_idx,
+                        "recall_at_threshold": wake_prod.recall_at(own_peaks, threshold),
+                        "held_out_recall_at_threshold": wake_prod.recall_at([own_peaks[i] for i in held_idx],
+                                                                            threshold)},
+              "near_miss": near, "samples_sha256": wake_prod.samples_fingerprint(samples, sample_files),
               "train_windows": int(len(y)), "train_positive_windows": int(y.sum()), "eval": ev,
               "train_eval": evaluate(head, data["train"][2], data["train"][3], data["train"][1],
                                      len(data["train"][0]), threshold),
