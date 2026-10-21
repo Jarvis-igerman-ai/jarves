@@ -375,7 +375,9 @@ def cmd_autostart(a, cfg, home) -> int:
     except NotImplementedError as e:
         print(str(e), file=sys.stderr)
         return 2
-    Features(cfg, home).set("autostart", a.action == "on", by="cli")     # the dashboard shows the same choice
+    feats, want = Features(cfg, home), a.action == "on"
+    if feats.enabled("autostart") != want:       # an unchanged switch is not rewritten (the uninstaller runs `off`: user data stays byte-for-byte)
+        feats.set("autostart", want, by="cli")   # the dashboard shows the same choice
     return 0
 
 
