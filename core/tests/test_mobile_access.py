@@ -419,3 +419,125 @@ def test_selfsigned_certificate_is_private(home):
     assert cert.read_text().startswith("-----BEGIN CERTIFICATE")
     ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
     ctx.load_cert_chain(str(cert), str(key))
+
+
+# ---------------------------------------------------------------- security review fixes (docs/reviews/SWV5_SECURITY_REVIEW.md)
+def test_sr1_switching_the_feature_off_stops_serving_at_once(home, fake):
+    on = [True]
+    d = dashboard.Dashboard(home, Config(), free_port(), mobile_on=True, lan_host=HOST, mobile_bridge=fake.bridge()).start()
+    d.mobile.gate = lambda: on[0]
+    try:
+        tok, _, _ = pair(d)
+        assert req(d, "GET", "/api/m/status", token=tok)[0] == 200
+        on[0] = False
+        assert req(d, "GET", "/api/m/status", token=tok)[0] == 404
+        assert req(d, "GET", "/m/")[0] == 404
+        assert admin(d, "POST", "/api/mobile/code", {})[0] == 409
+        assert mobile.network_ok("192.168.1.9", lan=False, mobile_on=d.mobile.enabled, path="/m/") is False
+        on[0] = True
+        assert req(d, "GET", "/api/m/status", token=tok)[0] == 200          # tokens survive a switch cycle
+        d.mobile.gate = lambda: 1 / 0                                          # an unreadable switch fails closed
+        assert req(d, "GET", "/api/m/status", token=tok)[0] == 404
+    finally:
+        d.stop()
+
+
+def test_sr2_unauthenticated_floods_cannot_rotate_the_audit_log(home, fake):
+    now = [100.0]
+    d = dashboard.Dashboard(home, Config(), free_port(), mobile_on=True, lan_host=HOST, mobile_bridge=fake.bridge()).start()
+    d.mobile.clock = lambda: now[0]
+    try:
+        tok, dev, _ = pair(d)
+        for _ in range(60):
+            req(d, "POST", "/api/m/pair", body={"code": "00000000"})
+        for _ in range(20):
+            req(d, "GET", "/api/m/me", token="bad.token")
+            now[0] += 0.001
+        entries = d.mobile.audit_tail(1000)
+        assert len([e for e in entries if e["event"] == "pairing_refused"]) <= 5
+        assert len([e for e in entries if e["event"] == "auth_refused"]) <= 5
+        assert any(e["event"] == "device_paired" for e in entries)            # the real history is intact
+        now[0] += 61
+        req(d, "GET", "/api/m/me", token="bad.token2")
+        assert any(e.get("suppressed") for e in d.mobile.audit_tail(1000) if e["event"] == "auth_refused")
+    finally:
+        d.stop()
+
+
+def test_sr3_secret_files_are_created_owner_only(home):
+    import os
+    import stat
+    m = MobileAccess(home)
+    m.pair(m.new_code()["code"], "p", "10.0.0.2")
+    assert m.path.is_file()
+    if os.name != "nt":
+        assert stat.S_IMODE(m.path.stat().st_mode) == 0o600
+    created = []
+    real = os.open
+    os.open = lambda path, flags, mode=0o777, **k: (created.append((str(path), mode)), real(path, flags, mode, **k))[1]
+    try:
+        mobile.make_selfsigned(home, "192.168.1.5")
+    finally:
+        os.open = real
+    assert any(p.endswith("key.pem") and mode == 0o600 for p, mode in created)   # never created world-readable
+
+
+def test_sr4_one_turn_per_phone_at_a_time(home):
+    import threading
+    gate, entered = threading.Event(), threading.Event()
+    calls = []
+
+    def slow(text, dev):
+        calls.append(text)
+        entered.set()
+        gate.wait(20)
+        return {"reply": "done", "ok": True}
+    br = Bridge(chat=slow, voice=lambda w, d: {}, status=lambda: {"core": "x", "components": {}})
+    d = dashboard.Dashboard(home, Config(), free_port(), mobile_on=True, lan_host=HOST, mobile_bridge=br).start()
+    try:
+        tok, _, _ = pair(d)
+        first = []
+        t = threading.Thread(target=lambda: first.append(req(d, "POST", "/api/m/chat", token=tok, body={"text": "one"})))
+        t.start()
+        assert entered.wait(20)
+        st, body, _ = req(d, "POST", "/api/m/chat", token=tok, body={"text": "one"})      # the double tap
+        assert st == 409 and body["code"] == "BUSY"
+        gate.set()
+        t.join(20)
+        assert first[0][0] == 200 and calls == ["one"]                    # the message ran exactly once
+        assert req(d, "POST", "/api/m/chat", token=tok, body={"text": "two"})[0] == 200   # free again
+    finally:
+        gate.set()
+        d.stop()
+
+
+async def test_sr5_typed_approval_cannot_be_approved_from_the_phone_without_the_code(srv, home):
+    """The in-process service enforces the typed code itself; the phone path never sends one."""
+    pair(srv)
+    admin(srv, "POST", "/api/mobile/settings", {"phone_approvals": True})
+    svc = appr.ApprovalService(home)
+    dashboard_open(home)
+    task = asyncio.create_task(svc.ask("Install Git?", typed=True, title="Install"))
+    a = await next_request(svc)
+    ok, why = await asyncio.to_thread(appr.submit_answer, home, a.id, True, channel="phone")   # no pending row involved
+    assert ok is False and not task.done()
+    ok, why = await asyncio.to_thread(appr.submit_answer, home, a.id, False, channel="phone")
+    assert ok and await asyncio.wait_for(task, 30) is False
+
+
+def test_sr6_audit_never_holds_content_or_credentials(srv, fake, home):
+    tok, dev, code = pair(srv)
+    secret_msg = "my bank PIN is 4921 sk-ABCDEF1234567890"
+    assert req(srv, "POST", "/api/m/chat", token=tok, body={"text": secret_msg})[0] == 200
+    req(srv, "POST", "/api/m/pair", body={"code": "12345678", "name": "x"})
+    raw = (home / mobile.AUDIT_FILE).read_text(encoding="utf-8")
+    assert secret_msg not in raw and "4921" not in raw and tok not in raw and tok.split(".")[1] not in raw
+    assert code["code"] not in raw and "12345678" not in raw
+
+
+def test_sr7_revocation_is_immediate(srv):
+    tok, dev, _ = pair(srv)
+    assert req(srv, "GET", "/api/m/me", token=tok)[0] == 200
+    assert admin(srv, "POST", f"/api/mobile/devices/{dev}/revoke", {})[0] == 200
+    assert req(srv, "GET", "/api/m/me", token=tok)[0] == 401
+    assert req(srv, "POST", "/api/m/chat", token=tok, body={"text": "x"})[0] == 401

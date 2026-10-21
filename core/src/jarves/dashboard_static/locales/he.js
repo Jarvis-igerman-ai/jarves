@@ -1464,7 +1464,8 @@
   "Godot viewer not found (set GODOT_EXE)": "לא נמצא צופה Godot (הגדירו GODOT_EXE)",
   "(Godot viewer not found (set GODOT_EXE))": "(לא נמצא צופה Godot (הגדירו GODOT_EXE))",
   "no desktop session (headless): use the dashboard instead": "אין סשן שולחן עבודה (ללא מסך): השתמשו בלוח הבקרה",
-  "מצלמה: no camera connected; connect a camera (Pi: Camera Module 3 Wide)": "מצלמה: אין מצלמה מחוברת; חברו מצלמה (בפאי: Camera Module 3 Wide)"
+  "מצלמה: no camera connected; connect a camera (Pi: Camera Module 3 Wide)": "מצלמה: אין מצלמה מחוברת; חברו מצלמה (בפאי: Camera Module 3 Wide)",
+  "Starts with JARVES. Switching it off stops phone access at once.": "מתחיל יחד עם JARVES. כיבוי המתג עוצר את הגישה מהטלפון מיד."
  },
  "rules": [
   [

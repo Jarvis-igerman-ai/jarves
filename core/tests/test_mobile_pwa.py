@@ -156,8 +156,13 @@ def test_core_bridge_uses_the_brain_and_stt_but_not_the_speaker():
             seen["stt"].append((audio.dtype, len(audio)))
             return " hello " if len(audio) else ""
 
+    async def respond_remote(text):
+        reply = await Brain().respond(text, spoken=False)
+        seen["observed"] += ["user", "assistant"]
+        return reply
+
     core = SimpleNamespace(
-        brain=Brain(), stt=STT(), curator=SimpleNamespace(observe=lambda *a, **k: seen["observed"].append(a[0])),
+        stt=STT(), respond_remote=respond_remote,
         health=SimpleNamespace(core="running", components_view=lambda: {"audio": {"status": "ok", "detail": "/home/x/secret"}}))
     loop = asyncio.new_event_loop()
     t = threading.Thread(target=loop.run_forever, daemon=True)
@@ -175,3 +180,60 @@ def test_core_bridge_uses_the_brain_and_stt_but_not_the_speaker():
         loop.call_soon_threadsafe(loop.stop)
         t.join(10)
         loop.close()
+
+
+def test_phone_turn_is_logged_as_a_typed_exchange_in_the_desktop_history(monkeypatch):
+    """V5-G: Core.respond_remote logs the same REPLY record a Windows typed turn does, so the History store puts the
+    phone exchange into the shared (typed) conversation; the spoken-approval path is never used."""
+    from jarves import app as core_app
+    from jarves.store import Store
+    records, observed = [], []
+
+    class Brain:
+        async def respond(self, text, *, spoken=True):
+            assert spoken is False
+            return SimpleNamespace(text="reply to " + text, ok=True, source="ai", tool=None, code=None)
+
+    fake_self = SimpleNamespace(brain=Brain(), live=None,
+                                curator=SimpleNamespace(observe=lambda *a, **k: observed.append(a[0])),
+                                answer_words=lambda *a, **k: pytest.fail("phone text must not answer approvals"))
+    monkeypatch.setattr(core_app.logs, "new_cid", lambda *a, **k: None)
+    monkeypatch.setattr(core_app.logs, "info", lambda comp, code, msg, **f: records.append({"code": code, "ts": 1000.0, **f}))
+    reply = asyncio.run(core_app.Core.respond_remote(fake_self, "from the phone"))
+    assert reply.text == "reply to from the phone" and observed == ["user", "assistant"]
+    st = Store(":memory:")
+    for r in records:
+        st.ingest(r)
+    sid = st.sessions()[0]["id"]
+    turns = [(t["role"], t["text"]) for t in st.rows("SELECT role, text FROM turns WHERE session_id = ? ORDER BY id", (sid,))]
+    assert ("user", "from the phone") in turns and ("assistant", "reply to from the phone") in turns
+
+
+def test_busy_message_exists_in_both_phone_languages():
+    js = (MOBILE_DIR / "app.js").read_text(encoding="utf-8")
+    assert js.count("busy:") == 2
+
+
+async def _noop():
+    return None
+
+
+def test_core_starts_the_phone_server_at_boot_only_when_the_switch_is_on(tmp_path, monkeypatch):
+    """V5-I: Core.start_mobile -> ensure_dashboard only when `mobile_access` is ON (default OFF = nothing starts)."""
+    from jarves import app as core_app
+    calls = []
+
+    async def ensure():
+        calls.append(1)
+        fake_self._dashboard = SimpleNamespace(port=1234)
+    for on, expect in ((False, 0), (True, 1)):
+        calls.clear()
+        fake_self = SimpleNamespace(features=SimpleNamespace(enabled=lambda name, _on=on: _on and name == "mobile_access"),
+                                    ensure_dashboard=ensure, _dashboard=None)
+        asyncio.run(core_app.Core.start_mobile(fake_self))
+        assert len(calls) == expect
+    # a failing start never blocks the Core
+    async def boom():
+        raise OSError("no network")
+    fake_self = SimpleNamespace(features=SimpleNamespace(enabled=lambda name: True), ensure_dashboard=boom, _dashboard=None)
+    asyncio.run(core_app.Core.start_mobile(fake_self))

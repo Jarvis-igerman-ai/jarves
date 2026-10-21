@@ -1464,6 +1464,7 @@
   "Godot viewer not found (set GODOT_EXE)": "Godot viewer not found (set GODOT_EXE)",
   "(Godot viewer not found (set GODOT_EXE))": "(Godot viewer not found (set GODOT_EXE))",
   "no desktop session (headless): use the dashboard instead": "no desktop session (headless): use the dashboard instead",
-  "מצלמה: no camera connected; connect a camera (Pi: Camera Module 3 Wide)": "מצלמה: no camera connected; connect a camera (Pi: Camera Module 3 Wide)"
+  "מצלמה: no camera connected; connect a camera (Pi: Camera Module 3 Wide)": "מצלמה: no camera connected; connect a camera (Pi: Camera Module 3 Wide)",
+  "Starts with JARVES. Switching it off stops phone access at once.": "Starts with JARVES. Switching it off stops phone access at once."
  }
 };

@@ -359,6 +359,7 @@ class Core:
         if self.use_real_audio and openai_key_present() and self.cfg.ai.provider == "openai":
             self._bg.append(asyncio.create_task(asyncio.to_thread(self._prewarm)))
         self._setup_wake()
+        self._bg.append(asyncio.create_task(self.start_mobile()))   # V5-I: phone server with the Core (switch OFF = no-op)
         self._log_summary()
         _preflight.finish_core(self)                    # red/amber preflight items degrade only their component
         self.health.mark("ready")
@@ -645,32 +646,53 @@ class Core:
         else:
             await self.link.reply(ws, "error", {"code": "LINK_UNKNOWN_TYPE", "message": f"unknown message type {t}"})
 
+    async def ensure_dashboard(self) -> None:
+        """Start the in-Core dashboard server once (no browser). With the `mobile_access` switch ON (default OFF) it
+        also serves the phone app on the home network; the switch is re-read on every request, so turning it off stops
+        phone access at once. Called at boot (start_mobile) and by open_dashboard."""
+        if self._dashboard is not None and self._dashboard.running:
+            return
+        from .dashboard import Dashboard
+        from . import mobile
+        loop = asyncio.get_running_loop()
+        mob_on = self.features.enabled("mobile_access")        # V5: default OFF; the dashboard stays on 127.0.0.1
+        cert, key = mobile.tls_paths(self.home)
+        tls = (cert, key) if cert.is_file() and key.is_file() else None
+
+        def make(on: bool):
+            d = Dashboard(self.home, self.cfg, workspace=self.workspace, memory=self.memory,
+                          settings=self.settings, mobile_on=on, tls=tls if on else None,
+                          mobile_bridge=mobile.core_bridge(self, loop) if on else None)
+            d.mobile.gate = lambda: self.features.enabled("mobile_access")
+            return d.start()
+        try:
+            self._dashboard = await asyncio.to_thread(make, mob_on)
+        except OSError as e:                                    # no home-network address: stay local-only
+            if not mob_on:
+                raise
+            logs.warn("core", "MOBILE_START_FAILED", "phone access could not start", error_type=type(e).__name__)
+            self._dashboard = await asyncio.to_thread(make, False)
+        ops = getattr(self, "ops", None)
+        if ops is not None:      # P0.4 Q04: "Run now"/approve wake the Core's own loop (was: next 30 s poll)
+            self._dashboard.ctx._scheduler = ops.scheduler
+
+    async def start_mobile(self) -> None:
+        """V5-I: with `mobile_access` ON the phone server starts WITH the Core (not only after 'open dashboard').
+        OFF (the default) = nothing is started and nothing listens."""
+        if not self.features.enabled("mobile_access"):
+            return
+        try:
+            await self.ensure_dashboard()
+            logs.info("core", "MOBILE_BOOT_STARTED", "phone access started with the Core",
+                      port=self._dashboard.port)
+        except Exception as e:                                  # never blocks the Core
+            logs.warn("core", "MOBILE_START_FAILED", "phone access could not start", error_type=type(e).__name__)
+
     async def open_dashboard(self, page: str = "") -> str:
         """Start the dashboard inside the Core (once; it shares the Core's workspace, memory and settings) and open
         it in the browser on this computer, on `page` (e.g. "#/guide/music"; kept across the token redirect).
         Returns the full URL with the private access key (without the page)."""
-        if self._dashboard is None or not self._dashboard.running:
-            from .dashboard import Dashboard
-            from . import mobile
-            loop = asyncio.get_running_loop()
-            mob_on = self.features.enabled("mobile_access")        # V5: default OFF; the dashboard stays on 127.0.0.1
-            cert, key = mobile.tls_paths(self.home)
-            tls = (cert, key) if cert.is_file() and key.is_file() else None
-
-            def make(on: bool):
-                return Dashboard(self.home, self.cfg, workspace=self.workspace, memory=self.memory,
-                                 settings=self.settings, mobile_on=on, tls=tls if on else None,
-                                 mobile_bridge=mobile.core_bridge(self, loop) if on else None).start()
-            try:
-                self._dashboard = await asyncio.to_thread(make, mob_on)
-            except OSError as e:                                    # no home-network address: stay local-only
-                if not mob_on:
-                    raise
-                logs.warn("core", "MOBILE_START_FAILED", "phone access could not start", error_type=type(e).__name__)
-                self._dashboard = await asyncio.to_thread(make, False)
-            ops = getattr(self, "ops", None)
-            if ops is not None:      # P0.4 Q04: "Run now"/approve wake the Core's own loop (was: next 30 s poll)
-                self._dashboard.ctx._scheduler = ops.scheduler
+        await self.ensure_dashboard()
         url = self._dashboard.url
         logs.info("core", "DASHBOARD_OPENED", "dashboard opened", port=self._dashboard.port,
                   browser=self.open_url is not None)
@@ -785,6 +807,21 @@ class Core:
         await self.link.send_face("user.transcript", {"text": text})
         self._owner_answer(text, "voice")           # nothing waits here (talk_up routes those): a new turn
         await self.handle_utterance(text, typed=False)
+
+    async def respond_remote(self, text: str):
+        """A typed turn from a paired phone (V5-G): the SAME Brain, memory and conversation context as a Windows
+        turn, logged as a typed exchange so it appears in the desktop history and joins the open typed conversation
+        (TYPED_GAP_S). The answer goes back to the phone only: no face update, no speaker, and never the spoken-approval
+        path."""
+        logs.new_cid()
+        t0 = time.monotonic()
+        reply = await self.brain.respond(text, spoken=False)
+        logs.info("core", "REPLY", "reply sent", source=reply.source, tool=reply.tool, ok=reply.ok, result_code=reply.code,
+                  ms=round((time.monotonic() - t0) * 1000), text=reply.text, typed=True,
+                  utterance=f"<{len(text)} chars>" if SENSITIVE_TEXT.search(text) else text)
+        self.curator.observe("user", text)
+        self.curator.observe("assistant", reply.text, idle=self.live is None)
+        return reply
 
     async def handle_utterance(self, text: str, typed: bool) -> None:
         if typed:

@@ -36,10 +36,10 @@
 | V5-C | PWA shell, English + Hebrew (RTL), manifest, service worker (shell only), push-to-talk recorder, honest "PC unreachable" (`dashboard_static/mobile/`) | **Done**; not opened in a real phone browser |
 | V5-D | Core wiring: `Dashboard(mobile_on=...)`, `core_bridge(core, loop)`, feature `mobile_access`, `jarvis dashboard --mobile [--tls-selfsigned]`, dashboard **Phone** page, capability row, setup-wizard group | **Done**; Core launches it from `open_dashboard` when the switch is on |
 | V5-E | TLS: self-signed generator and `mobile_tls/` certificates | **Done** (unit + HTTPS test); trusted-certificate story (local CA, installing the cert on the phone) **open** |
-| V5-F | Independent security/privacy review (Opus, fresh context) + planted-secret test through `tools/redaction_audit.py` | **Open** |
-| V5-G | One shared conversation: phone turns appear in the desktop history; resume a phone conversation from Windows; idempotent send (client message ids), dedupe on reconnect | **Open** (phone turns already go through the Core Brain and curator) |
+| V5-F | Independent security/privacy review (Opus, fresh context) + planted-secret test through `tools/redaction_audit.py` | **Done** (second-pass review, `docs/reviews/SWV5_SECURITY_REVIEW.md`: 4 findings fixed with tests; planted-secret audit test added; `redaction_audit.py` run still open) |
+| V5-G | One shared conversation: phone turns appear in the desktop history; resume a phone conversation from Windows; idempotent send (client message ids), dedupe on reconnect | **Partly done**: phone turns use `Core.respond_remote` (same Brain, same context, logged as a typed exchange so they show in the desktop history and join the open typed conversation); one turn per phone at a time (409 BUSY). **Open**: client message ids / dedupe on reconnect, resuming a specific phone conversation from Windows |
 | V5-H | Real-device acceptance on the owner's Android phone (pair, revoke, chat, PTT, approvals, host unavailable, Wi-Fi change, app suspend/resume, permission denial) | **Open, owner present** |
-| V5-I | Always-on phone start: start the dashboard server with the Core (not only on "open dashboard"), firewall prompt guidance, stable LAN name | **Open** |
+| V5-I | Always-on phone start: start the dashboard server with the Core (not only on "open dashboard"), firewall prompt guidance, stable LAN name | **Done**: `Core.start_mobile` at boot when `mobile_access` is ON (default OFF = nothing starts); the switch is re-read on every request. **Open**: firewall prompt guidance, stable LAN name |
 | V5-J..M | Goals, Adaptive Memory, Proactive Intelligence, Development Manager (roadmap pillars 2-5) | **Not started** (need the backbone proven on a real phone first) |
 
 ## 4. API summary

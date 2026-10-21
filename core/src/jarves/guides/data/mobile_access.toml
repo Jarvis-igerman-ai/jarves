@@ -1,0 +1,42 @@
+order = 64
+category = "system"
+features = ["mobile_access"]
+aliases = ["אפליקציה", "אפליקציית טלפון", "pwa", "qr", "קוד qr", "mobile", "phone app", "גישה מהטלפון"]
+links = ["lan_dashboard", "privacy"]
+title_he = "דיבור עם JARVES מהטלפון"
+title_en = "Talk to JARVES from your phone"
+what_he = "אפליקציית אינטרנט בטלפון שמדברת ישירות עם המחשב שלכם בבית: שיחה, דיבור בלחיצה ורשימת אישורים. אין שרת בענן. כבוי מראש."
+what_en = "A web app on your phone that talks directly to your computer at home: chat, push-to-talk and an approvals list. No cloud server. Off by default."
+say = [["איך אני מדבר עם JARVES מהטלפון?", "How do I talk to JARVES from my phone?"]]
+expect_he = "מצמידים את הטלפון פעם אחת בסריקת קוד QR שמוצג במחשב. אחר כך אפשר לכתוב ל-JARVES, ואם הוגדר חיבור מאובטח גם לדבר אליו. אישורים נענים בחלון במחשב, אלא אם הפעלתם אישורים מהטלפון; בקשות שדורשות קוד מאושרות במחשב בלבד. אפשר לנתק כל טלפון בכל רגע."
+expect_en = "Pair the phone once by scanning the QR code shown on the computer. Then you can type to JARVES, and talk to it if a secure connection is set up. Approvals are answered in the popup on the computer unless you switch on phone approvals; requests that need a code are approved on the computer only. You can disconnect any phone at any time."
+cost_he = "חינם."
+cost_en = "Free."
+privacy_he = "רק ברשת הביתית, בלי שרת בענן. בלי חיבור מאובטח אפשר לכתוב אבל לא לדבר, ומישהו שכבר מחובר ל-Wi-Fi שלכם יכול תיאורטית לראות את התנועה. יומן הביקורת לא שומר תוכן הודעות. כיבוי המתג עוצר את הגישה מיד."
+privacy_en = "Home network only, no cloud server. Without a secure connection you can type but not talk, and someone already on your Wi-Fi could in theory see the traffic. The audit log never keeps message text. Switching it off stops access at once."
+
+[[steps]]
+he = "הדליקו את \"גישה מהטלפון\" בעמוד \"יכולות ומתגים\" (סיכון גבוה) והפעילו מחדש את JARVES."
+en = "Turn on Phone access on the Features page (high risk) and restart JARVES."
+action = "feature_on:mobile_access"
+check = "enabled:mobile_access"
+
+[[steps]]
+he = "בלוח הבקרה במחשב פתחו את העמוד \"טלפון\" ולחצו \"צימוד טלפון\"."
+en = "In the dashboard on the computer open the Phone page and press Pair a phone."
+
+[[steps]]
+he = "בטלפון סרקו את קוד ה-QR במצלמה. אם הוא לא נסרק, הקלידו את הקוד בן 8 הספרות. הקוד תקף 5 דקות ופעם אחת."
+en = "On the phone scan the QR code with the camera. If it does not scan, type the 8-digit code. It works for 5 minutes and once."
+
+[[problems]]
+he = "הטלפון לא מגיע למחשב"
+en = "The phone cannot reach the computer"
+fix_he = "הטלפון חייב להיות באותה רשת Wi-Fi והמחשב דולק עם JARVES פעיל. אם Windows שואל על חומת האש, אשרו רשתות פרטיות בלבד."
+fix_en = "The phone must be on the same Wi-Fi and the computer on with JARVES running. If Windows asks about the firewall, allow private networks only."
+
+[[problems]]
+he = "כפתור הדיבור לא פעיל"
+en = "The talk button is disabled"
+fix_he = "דיבור דורש חיבור מאובטח. במחשב הריצו jarvis dashboard --mobile --tls-selfsigned ואשרו את אזהרת התעודה בטלפון פעם אחת."
+fix_en = "Talking needs a secure connection. On the computer run jarvis dashboard --mobile --tls-selfsigned and accept the certificate warning on the phone once."

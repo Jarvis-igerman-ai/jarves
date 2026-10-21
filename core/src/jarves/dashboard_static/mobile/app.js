@@ -13,7 +13,7 @@
       voice_ready: "Press and hold the button, speak, then release.", voice_nomic: "Microphone permission was denied or is unavailable.",
       heard: "You said", nothing: "Nothing is waiting for approval.", pc_only: "Answer on the computer.", approve: "Approve", deny: "Deny",
       typed_pc: "Needs the code shown on the computer.", sec: "s", core: "Core", tls: "Secure connection", yes: "yes", no: "no (text only)",
-      phone_ap_on: "Phone approvals are on.", phone_ap_off: "Phone approvals are off: approvals are answered on the computer.", sending: "Sending…" },
+      busy: "The previous message is still being answered. Wait a moment.", phone_ap_on: "Phone approvals are on.", phone_ap_off: "Phone approvals are off: approvals are answered on the computer.", sending: "Sending…" },
     he: { pair_title: "צימוד הטלפון", pair_help: "במחשב פתחו את לוח הבקרה של JARVES, עברו אל טלפון ולחצו על צימוד טלפון. סרקו את קוד ה-QR או הקלידו כאן את הקוד בן 8 הספרות.",
       code: "קוד צימוד", name: "שם לטלפון", pair: "לצמד", pair_net: "עובד ברשת הביתית בלבד. שום דבר כאן לא נגיש מהאינטרנט.",
       tab_chat: "שיחה", tab_voice: "קול", tab_approvals: "אישורים", tab_status: "מצב", send: "שליחה", type_here: "כתבו הודעה",
@@ -23,7 +23,7 @@
       voice_ready: "לחצו והחזיקו את הכפתור, דברו ושחררו.", voice_nomic: "הרשאת המיקרופון נדחתה או לא זמינה.",
       heard: "אמרתם", nothing: "שום דבר לא ממתין לאישור.", pc_only: "עונים במחשב.", approve: "אישור", deny: "דחייה",
       typed_pc: "דורש את הקוד שמוצג במחשב.", sec: "ש׳", core: "ליבה", tls: "חיבור מאובטח", yes: "כן", no: "לא (טקסט בלבד)",
-      phone_ap_on: "אישורים מהטלפון פעילים.", phone_ap_off: "אישורים מהטלפון כבויים: עונים על אישורים במחשב.", sending: "שולח…" },
+      busy: "ההודעה הקודמת עדיין בטיפול. המתינו רגע.", phone_ap_on: "אישורים מהטלפון פעילים.", phone_ap_off: "אישורים מהטלפון כבויים: עונים על אישורים במחשב.", sending: "שולח…" },
   };
   const $ = (id) => document.getElementById(id);
   let lang = "en";
@@ -92,7 +92,7 @@
     const box = $("chatText"), text = box.value.trim(); if (!text) return;
     box.value = ""; bubble(text, "me"); const wait = bubble(t("thinking"));
     try { const d = await post("/api/m/chat", { text }); wait.textContent = d.reply; if (!d.ok) wait.classList.add("err"); }
-    catch (e) { wait.textContent = e.status === 429 || e.status === 503 || e.status === 502 ? e.message : (e.message || t("err_chat")); wait.classList.add("err"); }
+    catch (e) { if (e.code === "BUSY") e.message = t("busy"); wait.textContent = e.status === 429 || e.status === 503 || e.status === 502 ? e.message : (e.message || t("err_chat")); wait.classList.add("err"); }
   });
 
   // ---- voice (push to talk): record, encode 16 kHz mono WAV, send

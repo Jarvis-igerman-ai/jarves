@@ -23,6 +23,7 @@
           d.reachable_from_phone ? el("code", {}, `${d.tls ? "https" : "http"}://${d.host}:${d.port}/m/`) : tx("(נגיש מהמחשב הזה בלבד)", "(this computer only)")),
         el("div", { class: "muted small" }, d.tls ? tx("חיבור מאובטח: קול זמין.", "Secure connection: voice is available.")
           : tx("ללא TLS: שיחה בכתב, אישורים ומצב בלבד. לקול: jarvis dashboard --mobile --tls-selfsigned", "No TLS: chat, approvals and status only. For voice: jarvis dashboard --mobile --tls-selfsigned")),
+        el("div", { class: "muted small" }, tx("מתחיל יחד עם JARVES. כיבוי המתג עוצר את הגישה מהטלפון מיד.", "Starts with JARVES. Switching it off stops phone access at once.")),
         el("div", { class: "row", style: "margin-top:10px" }, el("button", { type: "button", class: "primary", onclick: async () => {
           try {
             const c = await api("/api/mobile/code", { method: "POST", body: "{}" });

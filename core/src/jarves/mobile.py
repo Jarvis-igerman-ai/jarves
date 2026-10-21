@@ -71,6 +71,20 @@ def network_ok(ip: str, *, lan: bool, mobile_on: bool, path: str) -> bool:
     return is_loopback(ip) or lan or (mobile_on and is_mobile_path(path))
 
 
+def write_private(path: Path, data: bytes) -> None:
+    """Create the file already owner-only (0600): there is no moment when a token store or a TLS key is readable by
+    other users (write-then-chmod left one)."""
+    fd = os.open(str(path), os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    try:
+        os.write(fd, data)
+    finally:
+        os.close(fd)
+    try:
+        os.chmod(path, 0o600)
+    except OSError:
+        pass
+
+
 def _hash(s: str) -> str:
     return hashlib.sha256(s.encode()).hexdigest()
 
@@ -96,11 +110,27 @@ class MobileAccess:
         self._code: dict | None = None
         self._hits: dict[str, deque] = {}
         # serving state, set by the Dashboard when the owner enabled mobile access
-        self.enabled = False
+        self._enabled = False
+        self.gate: Callable[[], bool] | None = None   # live feature switch: turning mobile_access OFF stops serving at once
+        self._noisy: dict[str, list] = {}
+        self._busy: set[str] = set()
         self.bridge: Bridge | None = None
         self.scheme = "http"
         self.host: str | None = None
         self.port = 0
+
+    @property
+    def enabled(self) -> bool:
+        if not self._enabled:
+            return False
+        try:
+            return self.gate() if self.gate else True
+        except Exception:                         # an unreadable switch fails closed
+            return False
+
+    @enabled.setter
+    def enabled(self, on: bool) -> None:
+        self._enabled = bool(on)
 
     # ------------------------------------------------------------------ settings
     def settings(self) -> dict:
@@ -120,11 +150,7 @@ class MobileAccess:
     def _write(self, path: Path, obj) -> None:
         self.home.mkdir(parents=True, exist_ok=True)
         tmp = path.with_name(path.name + f".{secrets.token_hex(3)}.tmp")
-        tmp.write_text(json.dumps(obj, ensure_ascii=False, indent=1), encoding="utf-8")
-        try:
-            os.chmod(tmp, 0o600)
-        except OSError:
-            pass
+        write_private(tmp, json.dumps(obj, ensure_ascii=False, indent=1).encode("utf-8"))
         os.replace(tmp, path)
 
     def _devices(self) -> list[dict]:
@@ -218,7 +244,7 @@ class MobileAccess:
             else:
                 reason = ""
             if reason:
-                self.audit("pairing_refused", ip=ip, reason=reason)
+                self.audit_noisy("pairing_refused", ip, reason=reason)
                 logs.warn("mobile", "MOBILE_PAIR_REFUSED", "a phone pairing attempt was refused", reason=reason)
                 return None
             self._code = None                         # single use
@@ -245,6 +271,26 @@ class MobileAccess:
                     f.write(json.dumps(rec, ensure_ascii=False) + "\n")
             except OSError:
                 logs.warn("mobile", "MOBILE_AUDIT_WRITE_FAILED", "could not write the mobile audit log")
+
+    def audit_noisy(self, event: str, ip: str, **fields) -> None:
+        """Audit for events anyone on the network can cause without a token (refused pairing/auth, rate limits):
+        at most 5 per address and event per minute, then a count of what was left out. A flood cannot rotate the real
+        history (paired, revoked, approvals) out of the size-bounded log."""
+        now, key = self.clock(), f"{event}:{ip}"
+        with self._lock:
+            w = self._noisy.get(key)
+            if w is None or now - w[0] > 60:
+                skipped = w[2] if w else 0
+                if len(self._noisy) > 500:
+                    self._noisy = {k: v for k, v in self._noisy.items() if now - v[0] <= 60}
+                self._noisy[key] = w = [now, 0, 0]
+                if skipped:
+                    fields["suppressed"] = skipped
+            w[1] += 1
+            if w[1] > 5:
+                w[2] += 1
+                return
+        self.audit(event, ip=ip, **fields)
 
     def audit_tail(self, n: int = 200) -> list[dict]:
         try:
@@ -273,6 +319,19 @@ class MobileAccess:
                     self._hits.pop(k, None)
         return True
 
+    def begin(self, device: str) -> bool:
+        """One chat/voice turn per phone at a time: a double tap or a retry after a Wi-Fi blip cannot run the same
+        message twice in parallel or pile up Brain calls (the phone shows the busy answer and waits)."""
+        with self._lock:
+            if device in self._busy:
+                return False
+            self._busy.add(device)
+            return True
+
+    def end(self, device: str) -> None:
+        with self._lock:
+            self._busy.discard(device)
+
     def auth_failures_ok(self, ip: str) -> bool:
         """False once an address produced AUTH_FAILS_PER_MIN bad tokens in the last minute."""
         now = self.clock()
@@ -300,12 +359,8 @@ def core_bridge(core, loop) -> Bridge:
         return asyncio.run_coroutine_threadsafe(coro, loop).result(timeout)
 
     async def _respond(text: str) -> dict:
-        reply = await core.brain.respond(text, spoken=False)
-        try:
-            core.curator.observe("user", text)
-            core.curator.observe("assistant", reply.text, idle=True)
-        except Exception as e:                        # curation never blocks an answer
-            logs.warn("mobile", "MOBILE_CURATE_FAILED", "memory curation skipped", error_type=type(e).__name__)
+        # Core.respond_remote: same Brain + typed-history logging + curation as a Windows turn (one conversation)
+        reply = await core.respond_remote(text)
         return {"reply": reply.text, "ok": bool(reply.ok)}
 
     def chat(text: str, device: str) -> dict:
@@ -395,11 +450,11 @@ def serve(h, mob: MobileAccess, ip: str) -> None:
         return h._send(200, f.read_bytes(), ctype, {"Service-Worker-Allowed": "/m/"} if name == "sw.js" else None)
     # ---- the API
     if not mob.rate_ok("ip:" + ip, IP_RATE_PER_MIN):
-        mob.audit("rate_limited", ip=ip, path=path, scope="address")
+        mob.audit_noisy("rate_limited", ip, path=path, scope="address")
         logs.warn("mobile", "MOBILE_RATE_LIMITED", "phone API rate limit hit", path=path)
         return h._json_extra(429, {"error": "too many requests"}, {"Retry-After": "60"})
     if method != "GET" and (h.headers.get("X-Jarves") != "1" or not _origin_ok(h)):
-        mob.audit("refused_cross_origin", ip=ip, path=path)
+        mob.audit_noisy("refused_cross_origin", ip, path=path)
         return h._json(403, {"error": "cross-origin or missing X-Jarves header"})
     if path == "/api/m/pair" and method == "POST":
         d = _json_body(h)
@@ -412,13 +467,13 @@ def serve(h, mob: MobileAccess, ip: str) -> None:
         return h._send(200, json.dumps({"ok": True, **got}).encode("utf-8"), "application/json; charset=utf-8")
     # ---- everything below needs a device token
     if not mob.auth_failures_ok(ip):
-        mob.audit("rate_limited", ip=ip, path=path, scope="bad tokens")
+        mob.audit_noisy("rate_limited", ip, path=path, scope="bad tokens")
         return h._json_extra(429, {"error": "too many bad tokens"}, {"Retry-After": "60"})
     auth = h.headers.get("Authorization") or ""
     dev = mob.authenticate(auth[7:].strip()) if auth[:7].lower() == "bearer " else None
     if dev is None:
         mob.note_auth_failure(ip)
-        mob.audit("auth_refused", ip=ip, path=path)
+        mob.audit_noisy("auth_refused", ip, path=path)
         logs.warn("mobile", "MOBILE_AUTH_FAILED", "phone API request without a valid token", path=path)
         return h._json(401, {"error": "not paired or revoked: pair again on the computer"})
     if not mob.rate_ok("dev:" + dev["id"], DEVICE_RATE_PER_MIN):
@@ -466,11 +521,15 @@ def serve(h, mob: MobileAccess, ip: str) -> None:
             return h._json(400, {"error": "text is empty"})
         if mob.bridge is None:
             return done(503, {"error": "the Core is not connected"}, chars=len(text))
+        if not mob.begin(dev["id"]):
+            return h._json(409, {"error": "the previous message is still being answered", "code": "BUSY"})
         try:
             r = mob.bridge.chat(text, dev["id"])
         except Exception as e:
             logs.warn("mobile", "MOBILE_CHAT_FAILED", "a phone message could not be answered", error_type=type(e).__name__)
             return done(502, {"error": "JARVES could not answer right now"}, chars=len(text))
+        finally:
+            mob.end(dev["id"])
         return done(200, {"reply": str(r.get("reply", "")), "ok": bool(r.get("ok", True))}, chars=len(text))
     if path == "/api/m/voice" and method == "POST":
         if not need("voice"):
@@ -484,11 +543,15 @@ def serve(h, mob: MobileAccess, ip: str) -> None:
             return
         if raw[:4] != b"RIFF":
             return h._json(415, {"error": "send a 16-bit PCM WAV"})
+        if not mob.begin(dev["id"]):
+            return h._json(409, {"error": "the previous request is still being answered", "code": "BUSY"})
         try:
             r = mob.bridge.voice(raw, dev["id"])
         except Exception as e:
             logs.warn("mobile", "MOBILE_VOICE_FAILED", "a phone voice request failed", error_type=type(e).__name__)
             return done(502, {"error": "JARVES could not understand the audio"}, bytes=len(raw))
+        finally:
+            mob.end(dev["id"])
         return done(200, {"transcript": str(r.get("transcript", "")), "reply": str(r.get("reply", "")),
                           "ok": bool(r.get("ok", False))}, bytes=len(raw))
     if path == "/api/m/approvals" and method == "GET":
@@ -572,13 +635,9 @@ def make_selfsigned(home: Path, host: str | None) -> tuple[Path, Path]:
             .not_valid_after(now + datetime.timedelta(days=825))
             .add_extension(x509.SubjectAlternativeName(sans), critical=False)
             .sign(key, hashes.SHA256()))
+    write_private(key_p, key.private_bytes(serialization.Encoding.PEM, serialization.PrivateFormat.PKCS8,
+                                           serialization.NoEncryption()))
     cert_p.write_bytes(cert.public_bytes(serialization.Encoding.PEM))
-    key_p.write_bytes(key.private_bytes(serialization.Encoding.PEM, serialization.PrivateFormat.PKCS8,
-                                        serialization.NoEncryption()))
-    try:
-        os.chmod(key_p, 0o600)
-    except OSError:
-        pass
     return cert_p, key_p
 
 
