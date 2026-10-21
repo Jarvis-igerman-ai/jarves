@@ -60,6 +60,19 @@ class AIConfig(_Strict):
     task_max_running: int = Field(3, ge=1, le=10)
     task_timeout_s: float = Field(180, ge=10, le=900)
     research_reasoning_effort: Literal["none", "minimal", "low", "medium", "high", "xhigh", ""] = "low"
+    # GPT-Live delegation (SW-V4 D, #14). server = GPT-Live's Responses delegation: OpenAI starts the backend
+    # requests itself, JARVES can only COUNT them. client = JARVES runs every backend request itself, so each one is
+    # reserved against the budget BEFORE it is sent (a strict cap); in `combined` the reasoning runs on the ChatGPT
+    # plan. The dashboard/CLI switch is the `client_delegation` feature (this value is its default and its mirror).
+    delegation_mode: Literal["server", "client"] = "server"     # default pending owner decision OD-15
+    # client mode, protocol failure: "local" = honest "I can't look that up now" (text-only); "server" = the owner
+    # allows falling back to server delegation (counting cap) for the next conversation. Always logged and shown.
+    delegation_fallback: Literal["local", "server"] = "local"
+    delegation_daily_usd: float = Field(1.00, ge=0, le=100)    # strict daily API cap for delegated requests (0 = none allowed)
+    delegation_turn_usd: float = Field(0.05, ge=0, le=10)      # strict cap for ONE delegated turn (all its requests)
+    delegation_turn_requests: int = Field(4, ge=1, le=20)      # model requests in one delegated turn (tool steps)
+    delegation_max_searches: int = Field(2, ge=0, le=10)       # web searches per request (Responses max_tool_calls)
+    delegation_timeout_s: float = Field(25, ge=3, le=120)      # one delegated turn; then cancelled + honest answer
 
 
 class VoiceConfig(_Strict):
@@ -256,6 +269,29 @@ class UIConfig(_Strict):
     popup_language: Literal["en", "he"] = "en"
 
 
+class AgentsConfig(_Strict):
+    """Coding-agent orchestrator (SW-V4 E, jarves/orchestrator/): Claude Code + Codex sessions. Owner decisions:
+    OD-21 subscription only (never API billing), OD-23 starts need an on-screen approval, OD-24 20 turns a day."""
+    max_turns_per_day: int = Field(20, ge=0, le=500)       # turns JARVES itself starts (tell / continue / ask / start)
+    max_ask_probes_per_day: int = Field(10, ge=0, le=200)  # live "ask" questions that cost the agent a turn
+    max_cost_usd_per_day: float = Field(5.0, ge=0, le=100)  # provider-reported cost estimate of JARVES-started turns
+    permission_wait_s: float = Field(60, ge=5, le=180)     # a worker's approval waits this long on the popup
+    refresh_s: float = Field(60, ge=30, le=3600)           # background `claude agents --json` (never faster than 30 s)
+    claude_command: list[str] = []                         # [] = `claude` on PATH
+    codex_command: list[str] = []                          # [] = `codex` on PATH / the Codex app's CLI
+    codex_observe: bool = True                             # list the owner's Codex threads (starts `codex app-server`)
+    channel_permission_relay: bool = False                 # also take approvals through the live channel
+    allow_api_billing: bool = False                        # never: an API-key session is refused (AUTH_REQUIRED)
+
+
+class HelperConfig(_Strict):
+    """OS limits for approved helper commands (R-01 defence, jarves/isolation.py): a Windows Job Object, POSIX
+    rlimits + own session. The whole command tree shares them."""
+    memory_mb: int = Field(2048, ge=64, le=65536)      # all processes of one command together (Windows job memory)
+    max_processes: int = Field(64, ge=1, le=1024)     # processes alive at once in one command's tree
+    cpu_seconds: float = Field(0, ge=0, le=86400)     # user CPU time of the whole tree; 0 = no cap (time limit only)
+
+
 class Config(_Strict):
     assistant_name: str = "JARVES"
     # how the name is SAID (and written in Hebrew speech/greetings): the voice read the Latin "JARVES" letter by
@@ -272,6 +308,8 @@ class Config(_Strict):
     runtime: RuntimeConfig = RuntimeConfig()
     update: UpdateConfig = UpdateConfig()
     ui: UIConfig = UIConfig()
+    agents: AgentsConfig = AgentsConfig()
+    helper: HelperConfig = HelperConfig()
 
 
 SECRET_KEYS = ("api_key", "apikey", "token", "secret", "password", "cookie")

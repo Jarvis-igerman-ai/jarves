@@ -10,6 +10,36 @@
 
 ---
 
+## SW-V4 campaign PASS C — voice (21 Oct 2026) - #17, branch `test/v4-campaign-c`, draft [PR #20](https://github.com/igalgerman/jarves/pull/20), [report](reviews/SWV4_CAMPAIGN_VOICE.md), [bugs](reviews/SWV4_CAMPAIGN_BUG_TABLE_VOICE.md)
+
+- 50 PASS, 3 FAIL (22/23 wake false positives P3; 39 fixed, live retest pending), 39 BLOCKED of 92. Live spend at most $2.45 of the $8 slice.
+- Fixed with focused tests: V4-VC-1 harness reads V4 log fields; V4-VC-2 short answers said twice; V4-VC-3 a re-delegated approved repeat was refused and reported as failed; V4-VC-4 credits error was not fatal (also retested live); V4-VC-5 a hung live shutdown caused a background CRASH. 9 P3 open.
+- Dead air p95 1.44 s over 83 turns, greeting 0.50-0.52 s, barge-in 0.6 s, wake connect 2.8-3.4 s.
+- **Blocker:** the OpenAI account is out of credits (`credit_balance_exhausted` since 21:08 UTC 20 Oct; still empty 00:14 UTC 21 Oct). Not run: 51-62, 63-70, 71-84 (including the 80 re-run), 100-104 and the live retests of 39/4/24/35. The host stopped the full offline suite for low memory; the focused files passed (170) after merging integration head fd937bc.
+- Questions for the user: (1) please add OpenAI credits; the blocked groups need about $4-5 (commands are in the report). (2) OD-05: a read-only admin key for scenario 62. Status: WAITING FOR USER (credits).
+
+---
+
+## Repoint to the public repo + clean shutdown (21 Oct 2026) - branch `fix/repoint-and-shutdown` (off `v4/integrated-b-c-d-g-m-r01`, draft PR into it)
+
+- **V4-RP-1:** `updates.REPO = igalgerman/jarves` (source repo); signed installers + `latest.json` stay in `igalgerman/jarvis-releases` (`DEFAULT_RELEASES_REPO`). The "releases not reachable" text now names both repos and the download page. New `tests/test_repoint.py`: fake release host with a signed `latest.json` finds a newer 3.x/4.x build, never offers a downgrade, rejects a wrong signature.
+- **V4-RP-2:** `health.ticket_repo` default is empty: drafts stay local (Health page, `jarvis health ticket`); `tickets.file` returns "stays local" without asking or calling gh until the owner sets a repo (Health settings) AND approves (the private-repo check of OD-35 still applies). Button text (he/en + locale catalogs) now "File on GitHub (asks first, only if a repo is set)".
+- **V4-RP-3:** all `github.com/igalgerman/JARVIS` links in `core/src`, `packaging` (installer publisher URL) and tests now point at `igalgerman/jarves` (issue numbers kept: re-map them if the migrated public issue numbers differ). `test_no_product_file_links_to_the_deprecated_private_repo` guards core/src, packaging, .github, scripts (empty allow-list). README/AGENTS/docs/reviews/MIGRATION_* untouched on purpose.
+- **V4-SC-1:** `SelfCheck.cancel` event checked between steps (`CheckCancelled`); the worker thread closes its own handles; `SelfCheckService.stop` sets the event and waits for the thread before `ops.stop` lets the databases close. Test with a stopping Core (fails on the old code with `ProgrammingError: closed database`).
+- **P3:** V4-WA-2 new `Tool.precheck` hook runs before the owner is asked (unknown/used draft -> `WA_UNKNOWN_DRAFT`, no popup); V4-AG-1 taint refusal wording is source-neutral; V4-LG-1 websockets handshake-probe errors are logged at INFO with a fixed message.
+- **Open question for the user:** the legacy issue numbers in capability/roadmap links (#14..#28) were repointed to `igalgerman/jarves/issues/N` mechanically; the public issues are numbered #1-#5 so these links need a mapping decision.
+
+---
+
+## V4 perf fix: slow feature probes block features_list (20 Oct 2026) - #1, branch `perf/fix-slow-probes` (off `v4/integrated-b-c-d-g-m-r01`, draft PR into it)
+
+- **Problem:** with every V4 package registered (59 features) the gate's `features_list_ms` was 171-359 ms (median 260 ms over 7 fresh processes; budget ci 150 / owner 50; V3 baseline 10.5). Cause, per probe (first list, busy PC): camera 132 ms (camera.backends imported numpy, then the probe imported OpenCV), tray 39 ms (PIL + pystray), agent_orchestrator 33 ms on EVERY expired list (4-7 PATH scans for claude/codex), Google probes (httpx import), browser/wake/camera* 2-4 ms each, WhatsApp bridge = localhost HTTP status with a 2 s timeout. No probe spawned a subprocess; `claude agents --json` runs only in the orchestrator service, not in a probe.
+- **Fix (features.py):** slow probes (`register(slow=True)`: music, camera x4, wake_word, Google x5, agent_orchestrator, whatsapp x2, tray_icon, display_control, browser; or any probe measured > 10 ms) answer from the last result and re-check in ONE background worker (`jarves-probe-refresh`, started with `_thread` so the caller never waits for thread start: `threading.Thread.start()` measured 10-80 ms on this busy PC). `list()` never runs a slow probe on the caller's thread; cheap ones run in line within a 30 ms budget. New status fields: `check` = fresh / stale / checking and `checked_s_ago`; never-checked = health `checking` with a fixed reason (en/he). `list(wait=True)` for one-shot CLI / diag bundle / self-check. `prewarm()` at Core start, live-session start and dashboard. Light `camera/probe.py` (no numpy, cv2 via find_spec); `google_auth` / `chatgpt_auth` import httpx where used; dashboard Features page shows "checking" / "checked N s ago, re-checking" and re-renders once.
+- **Measured (alternating before/after, 7 fresh processes each, all modules registered, PC at ~100 % CPU from other agents):** features_list_ms before 171-359 (median 260) -> after 12-23 (median 15.7); live_tools_probe_ms 0.4-2.7 -> 0.0. All features expired (15 s idle worst case): 51-83 ms -> 5-13 ms. Full `perf_gate.py --class ci`: PERF GATE OK (features_list 1.8 ms). `--class owner`: everything ok except idle_disk_write_kb_per_min 36.5 > 10, which also fails on the base branch (32.7, health.json / store.db-wal / runtime.json) - pre-existing, not touched here.
+- **Tests (one pytest at a time, 0 skips):** new `tests/test_perf_probes.py` (5: fake 2 s `claude` on PATH, stale labelling, background update, undeclared-slow learning, gate in the full-module condition: fails on the base with 1227 ms). Passed: test_perf_gate 44, test_features 19, test_swv3_p03_perf 8, capabilities, feature_setup, camera, camera_cli, log_message_lint, hebrew_texts, google, chatgpt, browser, selfcheck, cli_english, cli_parity, dashboard_lan/phone/wph, execute, m3_core, profiles, workspace_memory, guides, setup_wizard, google_setup, agents_contract, whatsapp_core/surfaces, diag_bundle_strip, runtime.
+- **Pre-existing failures, also on the base branch (not caused here):** `test_dashboard_locales` ar/ru coverage 19.8 % < 20 %; `test_agents_system::test_voice_tools_cli_and_dashboard_see_the_same_sessions` (TypeError at line 141).
+- **Questions for the user:** (1) OK that a never-checked slow feature shows "checking" for about a second on the very first Features view after a start (instead of blocking)? (2) The owner-class idle write budget (10 KB/min) fails on the integrated V4 tree (~33-37 KB/min): fix in a separate task, or raise the budget?
+
 ## SW-V4 B: privacy hardening + full redaction audit (20 Oct 2026) - #15 / #17, branch `v4-b-privacy` (off `origin/main`), [report](reviews/SWV4_B_PRIVACY.md), [sinks](reviews/SWV4_B_SINKS.md)
 
 - `logs.*` messages are fixed literals (466 call sites migrated); variable parts are fields classified once in `logs.FIELD_CLASS` (safe/secret/content/pii, unknown = content); provider/exception text -> `provider_error` / `exc_text`; AST lint `tools/log_lint.py` (0 violations). Secret patterns extended (OpenAI/Anthropic, JWT, Google, Telegram, Meta, GitHub, DPAPI, URL tokens, bearer, user-profile paths). Third-party loggers and crashes (main/thread/asyncio/faulthandler) routed and classified.
@@ -907,3 +937,16 @@ reachable from the phone (dashboard_lan) for approvals, or PC-only?
 - Signing: SignPath OSS needs a public repo + OSI license; Azure Artifact Signing ~$9.99/mo, region-limited (verify price). Stay unsigned? Open-source the installer?
 - Instagram: is the account Business/Creator and linked to a Facebook Page? Confirm sends by voice, dashboard or Telegram?
 - Virtual computer: which 2-3 tasks would justify it; local (WSL2/Docker) or cloud budget?
+
+## SW-V4 test campaign, pass B (feature by feature) - 20 Oct 2026, branch `test/v4-campaign-a`, draft PR #21 (#17)
+
+- Offline TEST profiles, fakes only (WhatsApp fake bridge, fake Claude/Codex, channel fakes), no browser, no account, no paid call. Reports: [features](reviews/SWV4_CAMPAIGN_FEATURES.md) (1707 PASS, 0 FAIL, 2 BLOCKED, 28 N/A; 59 switches x CLI/dashboard/Core tool + recall, budget, health, WhatsApp, agents, privacy bundle with planted secrets (none leaked), helper isolation, approvals, update refusal paths, real `jarves run`), [bug table](reviews/SWV4_CAMPAIGN_BUG_TABLE.md).
+- Fixed with regression tests: V4-HE-1 (P1, `jarvis health canary` unusable), V4-WA-1 (P2, WhatsApp switch not live), V4-HE-2, V4-DG-1, V4-CLI-1 (P3). Open: V4-SC-1 (P2 self-check outlives Core stop), V4-RP-1/2 (P2, owner decision), 7 x P3.
+- BLOCKED: `assisted_dialing` (package H not in this tree); the V3 `browser` stage (launches Edge); update check against a signed local https release server (none exists).
+- Questions for the user: (1) Where should update releases come from? `updates.REPO` is the deprecated private `igalgerman/JARVIS` and `jarvis-releases` is the old name (V4-RP-1). (2) Where should private diagnostic ticket drafts be filed now that the old private repo is deprecated (V4-RP-2)? Nothing was filed.
+## Idle writes to owner budget + hook Hebrew fix (21 Oct 2026) - #17, branch `perf/idle-writes-owner-budget`
+
+- Idle writes: 29-53 KB/min -> 4.8-8.7 KB/min (owner budget 10 unchanged). Cause: the diag monitor flushed `diag_metrics/diag_codes/diag_events` to store.db every 60 s (3 commits, ~30-45 KB of WAL pages). Now `Monitor.flush_due()` batches the in-memory buffer into ONE transaction every 5 min (and at shutdown via `flush(all_=True)`; crash loses at most 5 min of samples). `Store`: WAL + `synchronous=NORMAL`, `wal_autocheckpoint=4000`. `health.json` heartbeat window 50 -> 70 s (still < 120 s "off").
+- Hook fix: `orchestrator/hook.py` printed the Stop reason with `ensure_ascii=False`; a Hebrew message hit the Windows console codec (UnicodeEncodeError, swallowed -> no output after the messages were already claimed). Now ASCII-escaped JSON.
+- Tests: `test_swv4_idle_writes.py` (diag batching over 10 simulated minutes, WAL/NORMAL pragma, real idle Core < 12 KB/min).
+- Open: perf gate `spawn_to_ready_s` 5.11 > 5 on this busy PC (unrelated, noise).

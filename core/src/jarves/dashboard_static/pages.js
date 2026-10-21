@@ -197,8 +197,8 @@ PAGES.session = async function (id, refresh) {
       tile("Turns", `${s.user_turns} / ${s.assistant_turns}`, "you / JARVES"),
       tile("Tools", String(s.tools), s.tool_failures ? `${s.tool_failures} failed` : "no failures")),
     el("div", { class: "card" }, el("div", { class: "row" }, el("h2", { style: "margin:0" }, "Issues found"), el("span", { class: "spacer" }), review, reviewMsg),
-      d.issues.length ? el("div", { class: "issue-list", style: "margin-top:8px" }, d.issues.map((i) => el("div", { class: "row" }, pill(i.severity, i.severity),
-        el("span", { dir: "ltr" }, i.title), el("span", { class: "muted small" }, i.kind)))) : el("div", { class: "muted small" }, "None."),
+      d.issues.length ? el("div", { class: "issue-list", style: "margin-top:8px" }, d.issues.map((i) => el("div", { class: "row" }, pill(i.severity, JL.t(i.severity)),
+        el("span", { dir: JL.textDir(txh(i, "title")) }, txh(i, "title")), el("span", { class: "muted small" }, i.kind)))) : el("div", { class: "muted small" }, "None."),
       d.issues.length ? el("div", { class: "small", style: "margin-top:8px" }, el("a", { href: "#/issues" }, "Evidence and actions on the Issues page →")) : null),
     el("h2", {}, "Transcript"), el("div", { class: "card" }, chat));
   if (s.live) timer = setInterval(() => route(true), 2000);
@@ -269,13 +269,15 @@ function logRow(l) {
   const summary = extra.slice(0, 4).map(([k, v]) => `${k}=${typeof v === "object" ? JSON.stringify(v) : v}`).join("  ");
   const detail = el("tr", { class: "detail", hidden: true }, el("td", { colspan: "5" },
     el("div", { class: "row small" }, el("span", { class: "muted" }, `${l.ref} · cid ${l.cid || "-"} · session ${l.session || "-"}`),
-      l.conv ? el("a", { href: "#/session/" + encodeURIComponent(l.conv) }, "open conversation →") : null),
+      l.conv ? el("a", { href: "#/session/" + encodeURIComponent(l.conv), "aria-label": `${tx("פתיחת השיחה", "Open conversation")} ${l.conv} · ${clock(l.ts)}` }, "open conversation →") : null),
     el("pre", { class: "args", dir: "ltr" }, JSON.stringify(Object.fromEntries(Object.entries(l).filter(([k]) => k !== "conv")), null, 1))));
   const row = el("tr", { class: "click lvl-" + String(l.level || "").toLowerCase(), onclick: () => { detail.hidden = !detail.hidden; } },
     el("td", { class: "mono nowrap" }, clock(l.ts), el("div", { class: "muted small" }, `${utc(l.ts)} · ${day(l.ts)}`)),
     el("td", {}, pill(l.level === "ERROR" ? "high" : l.level === "WARNING" ? "medium" : "plain", l.level || "")),
     el("td", { class: "small", "data-noi18n": "" }, l.component || ""),   // a module name, never translated
-    el("td", { class: "mono small" }, l.code || "", l.conv ? el("div", {}, el("a", { href: "#/session/" + encodeURIComponent(l.conv), onclick: (e) => e.stopPropagation() }, "conversation")) : null),
+    // D-14: every conversation link names its conversation and time for screen readers (inside .mono: no catalog pass)
+    el("td", { class: "mono small" }, l.code || "", l.conv ? el("div", {}, el("a", { href: "#/session/" + encodeURIComponent(l.conv), onclick: (e) => e.stopPropagation(),
+      "aria-label": `${tx("פתיחת השיחה", "Open conversation")} ${l.conv} · ${clock(l.ts)}` }, tx("שיחה", "conversation"))) : null),
     el("td", { dir: "auto" }, l.msg || "", summary ? el("div", { class: "muted small mono", dir: "ltr" }, summary.length > 220 ? summary.slice(0, 220) + "…" : summary) : null));
   return [row, detail];
 }
@@ -312,7 +314,7 @@ PAGES.costs = async function () {
   }
   const total = (n) => d.days.filter((x) => (Date.now() - Date.parse(x.day)) / 86400000 < n).reduce((a, x) => a + x.total, 0);
   const max = Math.max(0.0001, ...days.map((x) => x.total));
-  const chart = el("div", { class: "chart", role: "img", "aria-label": "Daily cost, last 30 days (table below)" });
+  const chart = el("div", { class: "chart", role: "img", "aria-label": JL.t("Daily cost, last 30 days (table below)") });
   const labels = el("div", { class: "xlabels" });
   days.forEach((x, i) => {
     const bar = el("div", { class: "bar" });
@@ -392,7 +394,8 @@ PAGES.memory = async function () {
   render(header("Memory", "What JARVES remembers about you: what you asked him to keep, and what he learned from conversations.",
     d.undo ? el("button", { type: "button", onclick: () => act(() => call("/api/memory/undo", "POST"), "Undone") }, "Undo " + d.undo) : null, msg),
     el("div", { class: "card" }, add, el("div", { class: "muted small", style: "margin-top:6px" },
-      `Learning from conversations: ${cur["curator.auto"] ? cur["curator.auto"].value : "?"} · with the AI model: ${cur["curator.llm"] ? cur["curator.llm"].value : "?"} · `,
+      tx(`למידה משיחות: ${cur["curator.auto"] ? JL.t(String(cur["curator.auto"].value)) : "?"} · בעזרת המודל: ${cur["curator.llm"] ? JL.t(String(cur["curator.llm"].value)) : "?"} · `,
+        `Learning from conversations: ${cur["curator.auto"] ? cur["curator.auto"].value : "?"} · with the AI model: ${cur["curator.llm"] ? cur["curator.llm"].value : "?"} · `),
       el("a", { href: "#/features" }, "switch on the Features page"))),
     el("div", { style: "height:12px" }),
     el("div", { class: "card" }, d.items.length ? el("table", {},
@@ -406,7 +409,7 @@ PAGES.workspace = async function (name) {
   const d = await api("/api/workspace");
   name = name || (d.files[0] && d.files[0].name);
   const list = el("div", { class: "card list" }, d.files.map((f) => el("a", { href: "#/workspace/" + encodeURIComponent(f.name), class: f.name === name ? "active" : "" },
-    f.name, el("div", { class: "muted small" }, f.title + (f.generated ? " · generated" : f.agent_edit ? " · JARVES may edit" : " · you only")))),
+    f.name, el("div", { class: "muted small" }, JL.t(f.title) + " · " + (f.generated ? tx("נוצר אוטומטית", "generated") : f.agent_edit ? tx("JARVES רשאי לערוך", "JARVES may edit") : tx("רק אתם", "you only"))))),
     d.notes.length ? [el("div", { class: "muted small", style: "margin:10px 10px 4px" }, "Daily notes"),
       ...d.notes.map((n) => el("a", { href: "#/note/" + n.day }, n.day))] : null);
   const body = el("div", { class: "card" }, el("div", { class: "muted" }, "Loading…"));
@@ -415,7 +418,7 @@ PAGES.workspace = async function (name) {
   const f = await api("/api/workspace/" + encodeURIComponent(name));
   const msg = note();
   const out = el("div");
-  const ta = el("textarea", { class: "file", dir: "auto", readonly: !f.writable }); ta.value = f.text;
+  const ta = el("textarea", { class: "file", dir: "auto", readonly: !f.writable, "aria-label": tx("תוכן הקובץ ", "File text ") + name }); ta.value = f.text;
   const send = (path, body) => api(path, { method: "POST", body: JSON.stringify(body || {}) });
   const base = "/api/workspace/" + encodeURIComponent(name);
   const buttons = f.writable ? [
@@ -425,12 +428,13 @@ PAGES.workspace = async function (name) {
       catch (e) { msg.textContent = "Not saved: " + e.message; }
     } }, "Save"),
     el("button", { type: "button", disabled: !f.history.length, onclick: async () => { try { await send(base + "/undo"); await PAGES.workspace(name); } catch (e) { msg.textContent = e.message; } } }, "Undo last change")] : [];
-  const hist = f.history.length ? el("table", {}, el("tbody", {}, f.history.slice(0, 20).map((h) => el("tr", {},
-    el("td", { class: "mono small" }, h.version), el("td", { class: "muted small" }, h.saved.replace("T", " ")), el("td", { class: "num small" }, `${h.chars} B`),
+  // D-16: one card per version on phones (table.stack), so the date no longer wraps over three lines
+  const hist = f.history.length ? el("table", { class: "stack" }, el("tbody", {}, f.history.slice(0, 20).map((h) => el("tr", {},
+    el("td", { class: "mono small", "data-label": "Version" }, h.version), el("td", { class: "muted small nowrap", "data-label": "Saved" }, h.saved.replace("T", " ")), el("td", { class: "num small", "data-label": "Size" }, `${h.chars} B`),
     el("td", {}, el("div", { class: "row" }, el("button", { type: "button", class: "ghost", onclick: async () => {
       const v = await api(base + "/version/" + encodeURIComponent(h.version)); out.replaceChildren(el("h2", {}, `Going back to ${h.version} would change:`), diffView(v.diff));
     } }, "Compare"), f.writable ? el("button", { type: "button", class: "ghost", onclick: async () => { try { await send(base + "/restore", { version: h.version }); await PAGES.workspace(name); } catch (e) { msg.textContent = e.message; } } }, "Restore") : null)))))) : el("div", { class: "muted small" }, "No earlier versions yet.");
-  body.replaceChildren(el("div", { class: "row" }, el("b", {}, name), el("span", { class: "muted small" }, f.title + " · used in: " + (f.inject.join(", ") || "nothing")),
+  body.replaceChildren(el("div", { class: "row" }, el("b", {}, name), el("span", { class: "muted small" }, JL.t(f.title) + tx(" · בשימוש ב: ", " · used in: ") + (f.inject.join(", ") || tx("שום מקום", "nothing"))),
     el("span", { class: "spacer" }), msg, ...buttons), el("div", { style: "height:10px" }), ta, out,
     el("h2", {}, "Earlier versions"), hist);
 };
@@ -449,10 +453,11 @@ PAGES.settings = async function () {
   for (const e of d.editable) (groups[e.group] = groups[e.group] || []).push(e);
   const control = (e) => {
     const cur = e.file !== null && e.file !== undefined ? e.file : e.running;
+    const lab = { "aria-label": txh(e, "label") || e.key };       // K: a screen reader names the control by its row
     const mark = (v) => { changed[e.key] = v; save.disabled = false; };
-    if (e.type === "bool") return input({ type: "checkbox", checked: !!cur, onchange: (ev) => mark(ev.target.checked) });
-    if (e.type === "choice") return select(e.choices.map((c) => [c, c === "" ? "(account default)" : c]), cur, { onchange: (ev) => mark(ev.target.value) });
-    const a = { type: e.type === "str" ? "text" : "number", class: "narrow", oninput: (ev) => mark(ev.target.value) };
+    if (e.type === "bool") return input({ type: "checkbox", checked: !!cur, ...lab, onchange: (ev) => mark(ev.target.checked) });
+    if (e.type === "choice") return select(e.choices.map((c) => [c, c === "" ? tx("(ברירת המחדל של החשבון)", "(account default)") : c]), cur, { ...lab, onchange: (ev) => mark(ev.target.value) });
+    const a = { type: e.type === "str" ? "text" : "number", class: "narrow", ...lab, oninput: (ev) => mark(ev.target.value) };
     if (e.type !== "str") { a.step = e.type === "int" ? "1" : "any"; if (e.min !== undefined) a.min = e.min; if (e.max !== undefined) a.max = e.max; }
     return input(a, cur);
   };
@@ -467,12 +472,12 @@ PAGES.settings = async function () {
   } }, "Undo last save");
   const cards = Object.entries(groups).map(([g, list]) => el("div", { class: "card", style: "margin-bottom:12px" }, el("b", {}, txh(list[0], "group")),
     el("table", { style: "margin-top:6px" }, el("tbody", {}, list.map((e) => el("tr", {}, el("td", {}, txh(e, "label"), el("div", { class: "muted small mono" }, e.key)),
-      el("td", {}, control(e)), el("td", { class: "muted small" }, `default ${e.default === "" ? '""' : e.default}` + (e.min !== undefined ? ` · ${e.min}–${e.max ?? "∞"}` : "") +
-        (e.file !== null && e.file !== undefined && e.file !== e.running ? ` · running now: ${e.running} (until restart)` : ""))))))));
+      el("td", {}, control(e)), el("td", { class: "muted small" }, `${tx("ברירת מחדל", "default")} ${e.default === "" ? '""' : e.default}` + (e.min !== undefined ? ` · ${e.min}–${e.max ?? "∞"}` : "") +
+        (e.file !== null && e.file !== undefined && e.file !== e.running ? tx(` · פועל עכשיו: ${e.running} (עד הפעלה מחדש)`, ` · running now: ${e.running} (until restart)`) : ""))))))));
   const rt = d.runtime || {};
   const voice = rt["voice.voice"];
   const rtMsg = note();
-  const voiceSel = voice ? select(voice.choices.map((c) => [c, c]), voice.value, { onchange: async (ev) => {
+  const voiceSel = voice ? select(voice.choices.map((c) => [c, c]), voice.value, { "aria-label": tx("קול", "Voice"), onchange: async (ev) => {
     try { await api("/api/settings/runtime", { method: "POST", body: JSON.stringify({ key: "voice.voice", value: ev.target.value }) }); rtMsg.textContent = "Saved: the next conversation uses this voice."; }
     catch (e) { rtMsg.textContent = e.message; }
   } }) : null;
@@ -487,5 +492,5 @@ PAGES.settings = async function () {
       el("a", { href: "#/features" }, "Features page"), ". They apply at once or at the next conversation.")),
     voiceSel ? el("div", { class: "card", style: "margin-bottom:12px" }, el("div", { class: "row" }, el("b", {}, "Voice"), voiceSel, rtMsg),
       el("div", { class: "muted small" }, "GPT-Live voice; a new voice starts with the next conversation.")) : null,
-    cards, full, el("div", { class: "muted small", style: "margin-top:12px" }, `File: ${d.config_file} · data folder: ${d.home} · API keys live in secrets.env and are never shown or edited here.`));
+    cards, full, el("div", { class: "muted small", style: "margin-top:12px" }, tx(`קובץ: ${d.config_file} · תיקיית הנתונים: ${d.home} · מפתחות API נשמרים ב-secrets.env ואף פעם לא מוצגים או נערכים כאן.`, `File: ${d.config_file} · data folder: ${d.home} · API keys live in secrets.env and are never shown or edited here.`)));
 };

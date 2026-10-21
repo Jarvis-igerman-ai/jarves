@@ -132,13 +132,16 @@ def front_instructions(name: str = "JARVES", spoken: str = "ג'ארוויס") ->
 # Errors after which the session cannot do useful work -> end it (others: log + degraded + continue).
 FATAL_ERROR_TYPES = {"authentication_error", "permission_error"}
 FATAL_ERROR_CODES = {"invalid_api_key", "insufficient_quota", "billing_hard_limit_reached", "account_deactivated",
-                     "session_expired", "session_not_found"}
+                     "session_expired", "session_not_found",
+                     # V4-VC-4 (campaign C, live 21 Oct): the prepaid balance is empty; every later turn fails too
+                     "credit_balance_exhausted"}
 ERROR_ACTIONS = {
     "responses_validation_failed": "check ai.text_model, web search and Skill tool settings; spoken chat still "
                                    "works but backend answers/actions will fail until fixed",
     "invalid_api_key": "check OPENAI_API_KEY (jarvis key)",
     "insufficient_quota": "check OpenAI billing / project spend limit",
     "billing_hard_limit_reached": "check OpenAI billing / project spend limit",
+    "credit_balance_exhausted": "OpenAI credits are used up: add credits at platform.openai.com billing",
     "tool_outputs_required": "a tool result was not returned; report this bug (see core logs)",
     "function_call_outputs_required": "a tool result was not returned; report this bug (see core logs)",
 }
@@ -343,13 +346,15 @@ def answer_said(answer: str, said: str) -> bool:
     names the topic, not the result) counts only when it carries a number of the answer."""
     import re
     nums = set(re.findall(r"\d+", answer or ""))
+    # V4-VC-2 (campaign C, 20 Oct): a one-word answer ("10" spoken as "עשר.") is a whole answer, not a filler
+    short = len((answer or "").split()) <= 3
     for sentence in re.split(r"[.!?\n]+", said or ""):
         w = _words(sentence)
-        if not w:
+        if not w and not re.search(r"[\w֐-׿]", sentence):       # "זה שש." has only 2-letter words: still a sentence
             continue
         if nums and nums & set(re.findall(r"\d+", sentence)):
             return True
-        if not any(s in w for s in _FILLER_STEMS) and len(sentence.split()) >= 2:
+        if not any(s in w for s in _FILLER_STEMS) and (len(sentence.split()) >= 2 or short):
             return True
     return False
 
@@ -564,7 +569,11 @@ class SessionLifecycle:
             self._flush_task.cancel()
         if hasattr(self, "_flush_transcripts"):
             self._flush_transcripts()
-        self._settle_budget()
+        try:
+            self._settle_budget()
+        except Exception as e:                  # V4-VC-5: never a background CRASH at shutdown (store already closed)
+            logs.warn(self._log_area, "VOICE_BUDGET_SETTLE_FAILED", "budget not settled at the session end",
+                      error_type=type(e).__name__)
         seconds = self._usage_seconds()
         try:
             await _call(getattr(self, "on_usage", None), seconds)
@@ -592,6 +601,8 @@ class SessionLifecycle:
         audio = getattr(self, "audio_io", None)
         s = dict(audio.stats()) if audio is not None and hasattr(audio, "stats") else {}
         s.update(getattr(self, "_stats", {}))
+        if getattr(self, "delegation", None) is not None:
+            s.update(self.delegation.stats())
         return s
 
 
@@ -615,8 +626,14 @@ class LiveVoice(SessionLifecycle):
                  service_tier: str = "", max_output_tokens: int = 0, echo_tail_s: float = 0.4,
                  clock_context: bool = False, progress_after_s: float = 0.0, no_speech_timeout_s: float = 0.0,
                  backend_deadline_s: float = 0.0, retry_lookup: Callable[[str], Awaitable[str]] | None = None,
-                 reasoning_summary: str = "") -> None:
+                 reasoning_summary: str = "", delegation_mode: str = "server", delegation=None) -> None:
         self.on_emotion, self.on_activity, self.on_level = on_emotion, on_activity, on_level
+        # SW-V4 D (#14): "server" = Responses delegation (OpenAI runs the backend); "client" = JARVES runs every
+        # backend request itself (voice/delegation_client.py, strict cap); "text_only" = no lookups (ladder fallback)
+        self.delegation_mode = delegation_mode if delegation_mode in ("server", "client", "text_only") else "server"
+        self.delegation = None
+        if delegation is not None and self.delegation_mode == "client":
+            delegation.attach(self)
         # Backend reliability (SW-V2 WP-C): a delegated response still unfinished after backend_deadline_s (0 = off)
         # is abandoned; retry_lookup(question) -> answer text retries it once in the Core; then an honest result.
         self.backend_deadline_s, self.retry_lookup, self.reasoning_summary = (backend_deadline_s, retry_lookup,
@@ -711,6 +728,7 @@ class LiveVoice(SessionLifecycle):
         self._lang_turn = -1            # the user turn whose language was judged
         self._voice_onset = 0.0         # first loud mic chunk of the current user utterance
         self._onset_over_speech = False # ... and whether JARVES was audibly speaking at that moment
+        self._convo: list[dict] = []    # finished utterances (client delegation builds the backend input from them)
 
     def session_config(self) -> dict:
         tools: list[dict] = live_tools(self.registry)
@@ -737,6 +755,12 @@ class LiveVoice(SessionLifecycle):
             "audio": {"format": {"type": "audio/pcm", "rate": RATE}, "output": {"voice": self.voice}},
             "delegation": {"type": "responses", "responses": responses},
         }
+        if self.delegation_mode == "client":
+            config["delegation"] = {"type": "client"}       # JARVES runs the backend (voice/delegation_client.py)
+        elif self.delegation_mode == "text_only":
+            from .delegation_client import TEXT_ONLY_INSTRUCTIONS
+            del config["delegation"]                         # no backend at all: honest "can't look that up now"
+            config["instructions"] += TEXT_ONLY_INSTRUCTIONS
         if self.greeting:
             # The first [clock] note travels INSIDE the greeting message: QA 19 Oct (suite_voice) found that a
             # session.thinking.append sent right after session.started suppressed the pending greeting (no audio
@@ -809,7 +833,8 @@ class LiveVoice(SessionLifecycle):
                 raise RuntimeError("live session already running")
             await self.wait_ended()                 # a previous session is still finalizing
         self._reset_session()
-        if self.budget is not None:
+        if self.budget is not None and self.delegation_mode == "server":
+            # (client mode reserves each request itself before sending; text-only sends none)
             self._credit = self.budget.reserve("ai_requests")   # raises BudgetExceeded: session not started
         self._reset_lifecycle()
         try:
@@ -865,7 +890,9 @@ class LiveVoice(SessionLifecycle):
     async def _release(self) -> None:
         cm, self._cm, self.conn = self._cm, None, None
         if cm is not None:
-            await cm.__aexit__(None, None, None)
+            # V4-VC-5 (campaign C): after an unconfirmed close the transport exit hung for minutes; the session's
+            # finalisation then ran into a later Core (budget DB already closed -> CRASH). Bounded: drop it.
+            await asyncio.wait_for(cm.__aexit__(None, None, None), max(1.0, self.close_timeout_s))
 
     async def _clock_loop(self) -> None:
         """Once a minute: the local time as SILENT context (no speech, no backend call). Never ends the session."""
@@ -1164,6 +1191,7 @@ class LiveVoice(SessionLifecycle):
             self._schedule_flush()
             if self._out_text:
                 logs.info("live", "LIVE_JARVES_SAID", "JARVES said", text=self._out_text.strip(), **self._take_reply_wait())
+                self._convo_add("assistant", self._out_text)
                 self._check_claim(self._out_text)
                 if self.on_transcript:
                     await self.on_transcript("assistant", self._out_text.strip())
@@ -1203,6 +1231,8 @@ class LiveVoice(SessionLifecycle):
             self._deleg_turn[did] = (self._user_turn_n, time.monotonic())
             if self.budget is not None and _get(g("delegation"), "target") == "responses":
                 await self._take_credit("delegation")
+            elif _get(g("delegation"), "target") == "client" and self.delegation is not None:
+                await self.delegation.on_created(did, self._user_turn_n, self._convo_snapshot(), self._reply_lang)
         elif t == "response.event":
             await self._backend_event(g("event") or {}, g("delegation_id"))
         elif t == "session.usage.updated":
@@ -1227,6 +1257,12 @@ class LiveVoice(SessionLifecycle):
                 logs.warn("live", "LIVE_REDELEGATE_REJECTED", "Core hand-over to the backend rejected", error_code=code,
                           provider_error=msg)
                 self._own_rejected()
+                return
+            if cid.startswith("jarves_deleg") and self.delegation is not None:
+                code, msg, _ = error_info(g("error"))     # client delegation PROTOCOL failure -> fallback ladder
+                logs.warn("live", "LIVE_DELEGATION_REJECTED", "a client-delegation append was rejected", err_code=code,
+                          detail=msg)
+                await self.delegation.on_rejected(cid, code, msg)
                 return
             if cid.startswith("jarves_lang"):
                 code, msg, _ = error_info(g("error"))
@@ -1255,6 +1291,8 @@ class LiveVoice(SessionLifecycle):
         fatal = is_fatal(code, etype)
         logs.error("live", "LIVE_BACKEND_ERROR" if backend else "LIVE_ERROR", "the voice provider reported an error",
                    error_code=code, error_type=etype, provider_error=msg, backend=backend, fatal=fatal)
+        if self.delegation is not None and "deleg" in f"{code} {msg}".lower():
+            self.delegation.state.fail("live_error", f"{code}: {msg}")   # client delegation not accepted -> ladder
         if code == "responses_validation_failed":
             detail = f"backend delegation settings rejected: {msg}"
         else:
@@ -1319,6 +1357,7 @@ class LiveVoice(SessionLifecycle):
             self._in_text = ""
         if self._out_text.strip():
             logs.info("live", "LIVE_JARVES_SAID", "JARVES said", text=self._out_text.strip(), **self._take_reply_wait())
+            self._convo_add("assistant", self._out_text)
             self._check_claim(self._out_text)
             out.append(("assistant", self._out_text.strip()))
             self._out_text = ""
@@ -1376,7 +1415,23 @@ class LiveVoice(SessionLifecycle):
 
     def _remember_user(self, text: str) -> None:
         self._user_turns = (self._user_turns + [text.strip()])[-3:]
+        self._convo_add("user", text)
+        if self.delegation is not None:
+            self.delegation.on_user_text(text.strip())
         self._new_turn()
+
+    def _convo_add(self, role: str, text: str) -> None:
+        text = (text or "").strip()
+        if text:
+            self._convo = (self._convo + [{"role": role, "text": text}])[-40:]
+
+    def _convo_snapshot(self) -> list[dict]:
+        """The conversation so far for a client delegation, including the user's words still being transcribed
+        (the delegation arrives ~0.4 s after the last input delta, before that turn is flushed: live probe 20 Oct)."""
+        out = list(self._convo)
+        if self._in_text.strip():
+            out.append({"role": "user", "text": self._in_text.strip()})
+        return out
 
     def _new_turn(self) -> None:
         if hasattr(self.registry, "new_turn"):
@@ -1664,6 +1719,16 @@ class LiveVoice(SessionLifecycle):
         """Start a backend response from the Core with the user's words (the session's own backend config, Skill
         tools and approvals). Its result is said through _deliver_own; if it cannot start, the user hears so."""
         self._redelegated_turn = turn
+        if self.delegation_mode == "text_only":     # no backend this conversation: nothing to hand over
+            return False
+        if self.delegation is not None and not self.delegation.may_hand_over(text):
+            return False                            # "עזוב" right after a cancel is not a request (live 20 Oct)
+        if self.delegation is not None:             # client mode: the Core runs the turn itself (reserved first)
+            self._stats["redelegations"] = self._stats.get("redelegations", 0) + 1
+            logs.info("live", "LIVE_REDELEGATED", "the Core handed the user's request to the backend", why=why)
+            await self.delegation.on_created(f"jarves_own_{turn}", turn, self._convo_snapshot(), self._reply_lang,
+                                             own=True)
+            return True
         if self._input_closed:                      # budget F1: no new backend work once the credit ran out
             await self.announce(REDELEGATE_FAIL_NOTE, max_wait_s=10.0, tag="redelegate")
             return False

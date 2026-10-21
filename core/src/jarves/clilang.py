@@ -99,21 +99,13 @@ def bi(text: str) -> str:
     return "\n".join(lines)
 
 
-_TELL = re.compile(r';?\s*tell the user: "([^"]*)"')
-
-
 def reason(text: str) -> str:
     """A feature `reason` for the CLI: the model-facing 'tell the user: "<Hebrew>"' hint becomes the bare command
     ('run: jarvis google start') unless the CLI language shows Hebrew."""
     if current() != "en":
         return text
-
-    def sub(m: re.Match) -> str:
-        if not _HEB.search(m.group(1)):
-            return m.group(0)
-        cmd = re.search(r"jarvis [a-z_]+(?: [a-z_-]+)*", m.group(1))
-        return f"; run: {cmd.group(0)}" if cmd else ""
-    return _TELL.sub(sub, text)
+    from .locales import display_en                  # the same English display form as the dashboard (D-11)
+    return display_en(text) or text
 
 
 def say(he: str, en: str = "", out: Callable[[str], None] | None = None) -> None:

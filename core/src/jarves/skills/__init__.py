@@ -45,6 +45,7 @@ DEFAULT_ALLOWED_ACTIONS = frozenset({"remember", "music_play", "music_pause", "m
                                      # settings Skill: one appended line (backed up, undoable) / allowlisted keys
                                      "workspace_note", "set_voice", "set_setting"})
 UNTRUSTED_GRACE_S = 3.0    # see SkillRegistry.new_turn
+REPEAT_REPLAY_S = 30.0     # V4-VC-3: an identical successful action repeated in a tainted turn gets its result back
 # Which conversation a tool call belongs to ("voice", "text", default "default": scheduler / other callers). The
 # untrusted-content taint is kept per route. A contextvar: tasks spawned by a route inherit it.
 ROUTE: contextvars.ContextVar[str] = contextvars.ContextVar("jarves_skill_route", default="default")
@@ -110,6 +111,12 @@ class Tool:
     impact: ImpactFn | None = None     # destructive tools: how many records this call would affect
     untrusted_output: bool = False     # returns third-party text (mail, calendar): see SkillRegistry.new_turn
     recipient: Callable[[Any], str | None] | None = None   # send tools: who it goes to (first name is spoken aloud)
+    # extra approval metadata (SW-V4 F): (validated args) -> {"details": {...}, "typed": bool, "voice": bool} merged
+    # into the approvals request (a WhatsApp send shows name + number + full text; typed at night)
+    approval_meta: Callable[[Any], dict] | None = None
+    # (validated args) -> a refusal, or None: runs BEFORE the owner is asked, so an impossible call is never put to
+    # the owner as a question (V4-WA-2: unknown/used WhatsApp draft id)
+    precheck: Callable[[Any], "ToolResult | None"] | None = None
 
     @property
     def side_effect(self) -> bool:     # read-only view of the old flag
@@ -163,6 +170,8 @@ class SkillRegistry:
         # human approval time (registry.confirm) is not AI time: Brain timeouts add it back (bounded_ai)
         self.confirm_wait_s = 0.0
         self._confirming_since: float | None = None
+        self.asks = 0                              # approvals asked through this registry (V4-VC-3)
+        self._recent_ok: dict[tuple, tuple] = {}   # V4-VC-3: (route, tool, args) -> (t, result, owner approved it)
 
     @property
     def _untrusted_at(self) -> float | None:
@@ -183,6 +192,9 @@ class SkillRegistry:
         at = self._untrusted.get(key)
         if at is not None and self.clock() - at >= UNTRUSTED_GRACE_S:
             self._untrusted.pop(key, None)
+        # V4-VC-3: only a repeat inside the turn of the approval answer is replayed; a later turn runs it anew
+        now = self.clock()
+        self._recent_ok = {k: v for k, v in self._recent_ok.items() if k[0] != key or now - v[0] < UNTRUSTED_GRACE_S}
 
     async def _ask(self, prompt: str, **meta) -> bool:
         """registry.confirm, with the human's thinking time recorded (it must never count as an AI timeout).
@@ -190,6 +202,7 @@ class SkillRegistry:
         (the Core's approvals service); a plain confirm(prompt) gets the prompt only."""
         t0 = time.monotonic()
         self._confirming_since = t0
+        self.asks += 1
         try:
             if meta and getattr(self.confirm, "accepts_meta", False):
                 return bool(await self.confirm(prompt, **meta))
@@ -261,10 +274,17 @@ class SkillRegistry:
                       tool=tool.name, permission=str(perm), origin=str(origin))
             return ToolResult(False, f"{tool.name} is not allowed", code="TOOL_FORBIDDEN")
         if perm != "read" and origin == "model" and self._untrusted_at is not None:
-            logs.warn("skills", "TOOL_UNTRUSTED_TURN", "tool refused: mail/calendar text was read this turn",
+            logs.warn("skills", "TOOL_UNTRUSTED_TURN", "tool refused: untrusted text was read this turn",
                       tool=tool.name)
-            return ToolResult(False, "I just read mail or calendar text written by others, so I take no action in "
-                              "this turn. Ask the user to say the request again.", code="TOOL_UNTRUSTED_TURN")
+            return ToolResult(False, "I just read text written by others (mail, calendar, a message or an agent's output), so I take no "
+                              "action in this turn. Ask the user to say the request again.", code="TOOL_UNTRUSTED_TURN")
+        if tool.precheck is not None:
+            try:
+                refusal = tool.precheck(args)
+            except Exception:
+                refusal = None
+            if refusal is not None:
+                return refusal
         prompt = tool.confirm
         if perm == "destructive":
             count, impact_prompt = (await tool.impact(args)) if tool.impact else (None, "")
@@ -279,6 +299,15 @@ class SkillRegistry:
                 who = None
             if who:
                 meta["details"] = {"recipient": str(who)}       # spoken_kind() speaks its first name only
+        if tool.approval_meta is not None and prompt:
+            try:
+                extra = tool.approval_meta(args) or {}
+            except Exception:
+                extra = {}
+            meta["details"] = {**meta.get("details", {}), **(extra.get("details") or {})}
+            for k in ("typed", "voice", "why"):
+                if k in extra:
+                    meta[k] = extra[k]
         if prompt and not await self._ask(prompt, **meta):
             logs.info("skills", "TOOL_DECLINED", "tool not confirmed by the user", tool=tool.name, origin=origin)
             return ToolResult(False, "cancelled: the user did not confirm", code="TOOL_DECLINED")
@@ -328,9 +357,25 @@ class SkillRegistry:
         except ValueError:
             logs.warn("skills", "TOOL_BAD_ARGS", "invalid tool arguments", tool=name)
             return ToolResult(False, f"invalid arguments for {name}", code="TOOL_BAD_ARGS")
+        key = (ROUTE.get(), name, json.dumps(args.model_dump(mode="json"), sort_keys=True, ensure_ascii=False,
+                                            default=str))
+        last = self._recent_ok.get(key)
+        if (last is not None and tool.permission != "read" and origin == "model"
+                and (self._untrusted_at is not None or last[2]) and self.clock() - last[0] < REPEAT_REPLAY_S):
+            # V4-VC-3 (campaign C): GPT-Live re-delegates the spoken approval "כן"; that second backend run repeats
+            # the SAME action it just ran (approved): the untrusted-turn guard refused it (helper: the backend then
+            # said "it did not work" instead of the real result) or it asked the owner a second time (list_clear).
+            # The identical approved action is never run or asked again: its result is handed back as done.
+            logs.info("skills", "TOOL_REPLAYED", "identical action already done this turn; result returned again",
+                      tool=name)
+            prev = last[1]
+            return ToolResult(prev.ok, prev.message, {**prev.data, "already_done": "this exact action already ran a "
+                              "moment ago (approved); do NOT run it again: report this result"}, code=prev.code)
+        asked0 = self.asks
         refused = await self._authorize(tool, args, origin)
         if refused is not None:
             return refused
+        t_run = time.monotonic()
         try:
             res = await self._run(tool, args)
         except TimeoutError:
@@ -342,8 +387,13 @@ class SkillRegistry:
             # review C (SWV4): a FAILED run still returns third-party text (a helper command exiting 1 prints
             # whatever it likes into output_tail): that taints the turn exactly like a successful one
             self._untrusted_at = self.clock()
+        if res.ok and tool.permission != "read":
+            now = self.clock()
+            self._recent_ok = {k: v for k, v in self._recent_ok.items() if now - v[0] < REPEAT_REPLAY_S}
+            self._recent_ok[key] = (now, res, self.asks > asked0)    # approved by the owner this call
         log = logs.info if res.ok else logs.warn
-        log("skills", "TOOL_RESULT", "tool finished", tool=name, ok=res.ok, result_code=res.code, origin=origin)
+        log("skills", "TOOL_RESULT", "tool finished", tool=name, ok=res.ok, result_code=res.code, origin=origin,
+            ms=round((time.monotonic() - t_run) * 1000))      # SW-V4 O: tool p50/p95 in the health monitor
         return self._hinted(skill, tool, res) if not res.ok else res
 
     def _hinted(self, skill: Skill, tool: Tool, res: ToolResult) -> ToolResult:

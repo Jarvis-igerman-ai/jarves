@@ -55,12 +55,20 @@ jobs:
         if: failure()
         shell: bash
         run: uv run python tools/ci_diagnostics.py diag pytest.out pytest-junit.xml || true
+      - name: Health diagnostics bundle of the test home on failure (package O; redaction-scanned, a hit uploads nothing)
+        if: failure()
+        shell: bash
+        env:
+          JARVES_HOME: ${{ runner.temp }}/jarves-ci-home
+        run: uv run python -m jarves diag --ci --out diag-ci || true
       - uses: actions/upload-artifact@v7
         if: failure()
         with:
           name: diagnostics-suite-${{ matrix.os }}
-          path: core/diag
-          retention-days: 14
+          path: |
+            core/diag
+            core/diag-ci
+          retention-days: 7
           if-no-files-found: ignore
   flake:
     # Flake detector: the whole suite 3 times in a row on Linux (the fast runner). No reruns, no quarantine: any run
@@ -142,8 +150,24 @@ jobs:
       - run: uv sync --frozen --all-extras
       - name: Redaction audit (privacy, secrets and diagnostics redaction tests)
         run: uv run pytest -q -p no:cacheprovider tests/test_privacy.py tests/test_privacy_state.py tests/test_security.py tests/test_ci_diagnostics.py
-      - name: Synthetic journey canaries (package O hook; runs every registered canary on a CI test profile)
+      - name: Browser for the dashboard canary
+        run: uv run playwright install --with-deps chromium
+      - name: Synthetic journey canaries (package O; voice stack, music fake, calendar fake, dashboard, installer, scheduler)
+        env:
+          JARVES_HOME: ${{ runner.temp }}/jarves-ci-home
         run: uv run python tools/synthetic_canaries.py --out canaries.json
+      - name: Health diagnostics bundle of the test home on failure (package O; redaction-scanned, a hit uploads nothing)
+        if: failure()
+        env:
+          JARVES_HOME: ${{ runner.temp }}/jarves-ci-home
+        run: uv run python -m jarves diag --ci --out diag-ci || true
+      - uses: actions/upload-artifact@v7
+        if: failure()
+        with:
+          name: diagnostics-audits
+          path: core/diag-ci
+          retention-days: 7
+          if-no-files-found: ignore
       - uses: actions/upload-artifact@v7
         if: always()
         with:

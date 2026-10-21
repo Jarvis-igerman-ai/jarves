@@ -432,6 +432,12 @@ def delete(name: str, confirm: str, base: Path | None = None, by: str = "cli") -
     real = home.resolve()
     if home.is_symlink() or real.parent != root:
         raise ProfileError("not deleted: the profile folder is not inside the profiles folder")
+    from . import whatsapp_bridge as wab              # SW-V4 F: a bridge of this profile stops first (it holds files)
+    if wab.status_or_none(home) is not None:
+        try:
+            wab.BridgeClient(home, admin=True, timeout=3.0).call("POST", "/shutdown")
+        except wab.BridgeError:
+            pass
     shutil.rmtree(real)
     if _read_json(b / REGISTRY).get("active") == n:
         _write_json(b / REGISTRY, {"active": DEFAULT, "changed": time.time()})

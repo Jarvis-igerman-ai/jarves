@@ -1,0 +1,4 @@
+# Same bytes on every checkout (reproducible builds across Windows/Linux runners).
+*.go    text eol=lf
+go.mod  text eol=lf
+go.sum  text eol=lf

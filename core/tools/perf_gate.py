@@ -62,6 +62,8 @@ def propose(budgets: dict) -> str:
 def measure_bench(scenario: str, runs: int, idle_s: float, port: int) -> dict:
     import bench_startup as bs
     rows = [bs.one_run(scenario, idle_s, port) for _ in range(runs)]
+    for i, r in enumerate(rows):          # diagnosis in the CI log: which files changed during the idle window
+        print(f"run {i + 1}: idle write {r['idle_disk_write_kb_per_min']} KB/min; files changed: {r['idle_files'] or '-'}")
     return {k: statistics.median(r[k] for r in rows) for k, v in rows[0].items()
             if isinstance(v, (int, float)) and all(r[k] is not None for r in rows)}
 

@@ -136,6 +136,51 @@ class Timers:
             logs.info("timers", "TIMER_CANCELLED", "timers cancelled", n=len(hit), by=by)
         return hit
 
+    def snooze(self, tid: int, minutes: float = 5, *, by: str = "user") -> dict:
+        """SW-V4 K: 'snooze': a running or ringing one moves to now + minutes (from now when it is due, else from its
+        due time); a timer that already rang or was missed comes back as a new timer with the same label."""
+        secs = float(minutes) * 60
+        if not 60 <= secs <= MAX_TIMER_S:
+            raise ValueError("snooze between 1 minute and 24 hours")
+        t = self.get(tid)
+        if t is None:
+            raise ValueError("no such timer")
+        if t["status"] == "pending":
+            due = max(self.clock(), t["due"]) + secs
+            self.db.x("UPDATE timers SET due=? WHERE id=?", (due, t["id"]))
+            logs.info("timers", "TIMER_SNOOZED", "timer snoozed", timer_id=t["id"], in_s=round(due - self.clock()), by=by)
+            return self.get(t["id"])
+        if t["status"] in ("fired", "missed"):
+            return self._add("timer", self.clock() + secs, t["label"], by)
+        raise ValueError(f"a {t['status']} timer cannot be snoozed")
+
+    def edit(self, tid: int, *, label: str | None = None, minutes: float | None = None, at: str = "",
+             by: str = "user") -> dict:
+        """SW-V4 K: change a running one: its label, a timer's remaining minutes, or an alarm's HH:MM."""
+        t = self.get(tid)
+        if t is None or t["status"] != "pending":
+            raise ValueError("no such running timer")
+        due = t["due"]
+        if minutes is not None and t["kind"] == "timer":
+            secs = float(minutes) * 60
+            if not 1 <= secs <= MAX_TIMER_S:
+                raise ValueError("a timer is between 1 second and 24 hours")
+            due = self.clock() + secs
+        if at and t["kind"] == "alarm":
+            m = re.fullmatch(r"\s*(\d{1,2})[:.](\d{2})\s*", str(at))
+            if not m or int(m.group(1)) > 23 or int(m.group(2)) > 59:
+                raise ValueError("the alarm time must be HH:MM (24-hour)")
+            tz = self.zone()
+            now = datetime.fromtimestamp(self.clock(), tz)
+            when = now.replace(hour=int(m.group(1)), minute=int(m.group(2)), second=0, microsecond=0)
+            if when <= now:
+                when = when + timedelta(days=1)
+            due = when.timestamp()
+        lab = t["label"] if label is None else " ".join(str(label).split())[:80]
+        self.db.x("UPDATE timers SET due=?, label=? WHERE id=?", (due, lab, t["id"]))
+        logs.info("timers", "TIMER_EDITED", "timer changed", timer_id=t["id"], in_s=round(due - self.clock()), by=by)
+        return self.get(t["id"])
+
     # ------------------------------------------------------------------ ringing
     async def poll(self, deliver: Deliver) -> int:
         """Ring everything that is due. Returns how many rang."""
@@ -283,9 +328,20 @@ def api_timer_add(ctx, m, body):
 
 
 def api_timer_op(ctx, m, body):
-    t = _ctx_timers(ctx)
-    if (body or {}).get("op") != "cancel":
-        return 400, {"error": "op must be cancel"}
+    t, b = _ctx_timers(ctx), body or {}
+    op = b.get("op")
+    try:
+        if op == "snooze":
+            return 200, t.view(t.snooze(int(m.group(1)), float(b.get("minutes") or 5), by="dashboard"))
+        if op == "edit":
+            r = t.edit(int(m.group(1)), label=b.get("label") if "label" in b else None,
+                       minutes=float(b["minutes"]) if b.get("minutes") not in (None, "") else None,
+                       at=str(b.get("at") or ""), by="dashboard")
+            return 200, t.view(r)
+    except (ValueError, TypeError) as e:
+        return 400, {"error": str(e)}
+    if op != "cancel":
+        return 400, {"error": "op must be cancel, snooze or edit"}
     hit = t.cancel(int(m.group(1)), by="dashboard")
     return (200, {"cancelled": len(hit)}) if hit else (404, {"error": "no such running timer"})
 

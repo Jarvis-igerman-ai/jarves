@@ -17,6 +17,25 @@ def make(home, cfg=None, **kw):
     return Features(cfg or Config(), home, **kw)
 
 
+def test_list_survives_a_feature_registered_meanwhile(home, monkeypatch):
+    """SW-V4 K: a dashboard request imported a plugin module (it registers a feature) while another request listed
+    the catalog: 'dictionary changed size during iteration' -> HTTP 500 on /api/features. list() takes a snapshot."""
+    f = make(home)
+    real = Features.status
+    added = []
+
+    def status(self, fid):
+        if not added:
+            added.append(feat.register("k_race_probe", "בדיקה", "Race probe", False))
+        return real(self, fid)
+    monkeypatch.setattr(Features, "status", status)
+    try:
+        rows = f.list()
+        assert rows and "k_race_probe" not in [r["id"] for r in rows]
+    finally:
+        CATALOG.pop("k_race_probe", None)
+
+
 def test_defaults_privacy_features_off(home):
     f = make(home)
     for fid in ("camera", "face_recognition", "camera_when_away", "gmail_send"):

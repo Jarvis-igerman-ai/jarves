@@ -17,7 +17,7 @@ privacy_he = "המונים נשמרים רק במחשב."
 privacy_en = "The meters stay on this computer."
 
 [[steps]]
-he = "פתחו את עמוד Usage."
+he = "פתחו את עמוד \"שימוש ומגבלות\"."
 en = "Open the Usage page."
 action = "open:#/usage"
 check = "active:usage_monitor"

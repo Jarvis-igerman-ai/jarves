@@ -39,7 +39,7 @@
   }
 
   // ---------------------------------------------------------------- footer strip (every page)
-  const strip = el("footer", { class: "ustrip", "aria-label": "Usage" });
+  const strip = el("footer", { class: "ustrip", "aria-label": tx("שימוש", "Usage") });
   document.body.append(strip);
   async function refreshStrip() {
     let d;
@@ -48,7 +48,7 @@
       const m = f.meter, x = f.extra;
       const node = el("a", { href: "#/usage", class: "upart" + (m.state === "limit_reached" ? " reached" : "") },
         el("b", {}, label), bar(m), el("span", { class: "uval" }, headline(m)), catPill(m.category),
-        x ? el("span", { class: "muted small" }, `${txh(x, "title")}: ${x.used_text}${x.limit !== null ? " / " + x.limit_text : ""}`) : null);
+        x ? el("span", { class: "muted small" }, `${txh(x, "title")}: ${JL.t(x.used_text)}${x.limit !== null ? " / " + JL.t(x.limit_text) : ""}`) : null);
       hoverTip(node, [txh(m, "title"), `${m.used_text} of ${m.limit_text} (${m.percent_text})`, `source: ${txh(m, "source")}`,
         `window: ${txh(m, "window") || m.window_text} · reset: ${m.reset_text}`, txh(m, "note")]);
       return node;
@@ -60,6 +60,7 @@
     hoverTip(cost, [tx("הוצאה משוערת היום (לפי [pricing])", "Estimated spend today (from [pricing])"),
       t ? tx(`${t.sessions} שיחות · ${t.voice_minutes} דק׳ קול`, `${t.sessions} conversations · ${t.voice_minutes} voice min`) : ""]);
     strip.replaceChildren(part(tx("מנוי ChatGPT", "ChatGPT plan"), d.footer.chatgpt_plan), part("OpenAI API", d.footer.openai_api), cost);
+    if (window.fadeCue) window.fadeCue(strip);          // a swipe row on phones: the fade shows that more follows
   }
   refreshStrip();
   setTimeout(refreshStrip, 1500);                 // once /api/overview has answered (today's cost)
@@ -84,10 +85,10 @@
             el("div", { class: "muted" }, `confidence ${m.confidence} · ${m.scope.replace("_", " ")} · checked ${when(m.last_verified)}`),
             m.note ? el("div", { class: "muted" }, txh(m, "note")) : null)))))));
     const s = d.settings;
-    const th = el("input", { type: "text", value: s.thresholds.join(", "), "aria-label": "Alert thresholds in percent", size: 14 });
+    const th = el("input", { type: "text", value: s.thresholds.join(", "), "aria-label": JL.t("Alert thresholds in percent"), size: 14 });
     const bud = el("input", { type: "number", min: "0", step: "1", value: s.api_monthly_budget_usd ?? "", placeholder: "none",
-      "aria-label": "Monthly API budget in dollars" });
-    const costs = el("select", { "aria-label": "Costs API" }, ["auto", "on", "off"].map((v) => {
+      "aria-label": JL.t("Monthly API budget in dollars") });
+    const costs = el("select", { "aria-label": JL.t("Costs API") }, ["auto", "on", "off"].map((v) => {
       const o = el("option", { value: v }, v); if (v === s.costs_api) o.selected = true; return o; }));
     const msg = el("span", { class: "muted small" });
     const save = el("button", { type: "button", class: "primary", onclick: async () => {
@@ -134,10 +135,10 @@
       el("td", { class: "num" }, (b.size / 1024).toFixed(0) + " KB"), el("td", {}, when(b.ts)),
       el("td", {}, act("Verify", "/api/backup/verify", b.name), " ", act("Test restore", "/api/backup/test", b.name))));
     const s = d.settings;
-    const daily = el("input", { type: "number", min: "1", max: "365", value: s.daily, "aria-label": "Daily backups kept" });
-    const weekly = el("input", { type: "number", min: "0", max: "365", value: s.weekly, "aria-label": "Weekly backups kept" });
-    const auto = el("input", { type: "checkbox", "aria-label": "Automatic daily backup" }); auto.checked = s.auto;
-    const faces = el("input", { type: "checkbox", "aria-label": "Include face recognition data" }); faces.checked = s.include_faces;
+    const daily = el("input", { type: "number", min: "1", max: "365", value: s.daily, "aria-label": JL.t("Daily backups kept") });
+    const weekly = el("input", { type: "number", min: "0", max: "365", value: s.weekly, "aria-label": JL.t("Weekly backups kept") });
+    const auto = el("input", { type: "checkbox", "aria-label": JL.t("Automatic daily backup") }); auto.checked = s.auto;
+    const faces = el("input", { type: "checkbox", "aria-label": JL.t("Include face recognition data") }); faces.checked = s.include_faces;
     const msg = el("span", { class: "muted small" });
     const st = d.state || {};
     render(header("Backup", "Automatic local backups of settings, memory, notes and history. Never your keys or sign-in tokens.",

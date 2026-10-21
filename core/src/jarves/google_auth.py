@@ -31,9 +31,11 @@ import secrets
 import time
 import webbrowser
 from pathlib import Path
+from typing import TYPE_CHECKING
 from urllib.parse import parse_qs, urlencode, urlparse
 
-import httpx
+if TYPE_CHECKING:          # imported where used: the feature probes read token files only (V4 perf fix)
+    import httpx
 
 from . import logs
 from .chatgpt_auth import _read_json, _write_private, pkce_pair
@@ -183,6 +185,7 @@ class GoogleAuth:
             self._save(t)
 
     def _http(self) -> httpx.AsyncClient:
+        import httpx
         return httpx.AsyncClient(timeout=20, transport=self._transport)
 
     # ------------------------------------------------------------------ sign-in
@@ -283,6 +286,7 @@ class GoogleAuth:
         return st
 
     async def _token(self, form: dict) -> dict:
+        import httpx
         try:
             async with self._http() as c:
                 r = await c.post(TOKEN_URL, data=form)
@@ -355,6 +359,7 @@ class GoogleAuth:
 
     async def sign_out(self) -> bool:
         """Delete locally first, then revoke remotely. True when Google confirmed the revocation."""
+        import httpx
         async with self._lock:
             t = self.load()
             self.file.unlink(missing_ok=True)

@@ -31,6 +31,7 @@ Interface for other packages (stable):
 """
 from __future__ import annotations
 
+import _thread
 import importlib.util
 import json
 import os
@@ -49,7 +50,15 @@ Risk = Literal["low", "medium", "high"]
 Applies = Literal["live", "next_session", "restart"]
 RISKS = ("low", "medium", "high")
 PROBE_TTL_S = 15.0
-SLOW_PROBES = {"music"}     # probes that may block (localhost connect): an expired result is re-checked off-thread
+# Probes that may block (localhost connect, PATH scans, a local bridge's HTTP status, device enumeration, package
+# lookups, imports): an expired result is answered at once and re-checked off-thread. register(slow=True) adds to
+# it; a probe measured slower than SLOW_PROBE_S joins its Features instance's own slow set the same way.
+SLOW_PROBES = {"music"}
+SLOW_PROBE_S = 0.01
+# list() (features_list tool, dashboard): slow probes never run on the caller's thread; cheap ones run in line until
+# the list has spent this long, then the rest go to the background worker too (last result, or "checking").
+LIST_PROBE_BUDGET_S = 0.03
+CHECKING_REASON = "not checked yet: checking now (look again in a moment)"
 STATE_FILE = "features.json"
 
 
@@ -102,9 +111,10 @@ def register(id: str, title_he: str, title_en: str, default_enabled: bool, *, pr
              needs: list[str] | None = None, risk: Risk = "low", skills: list[str] | None = None,
              tools: list[str] | None = None, config: str | None = None, applies: Applies = "live",
              about: str = "", targets: dict | None = None, permissions: list[str] | None = None,
-             settings: str = "") -> Feature:
+             settings: str = "", slow: bool = False) -> Feature:
     """Add (or replace) a feature in the catalog every Features instance uses. `targets` = its Windows / Pi status
-    (capabilities.py: {"windows": {...}, "linux_arm64_pi": {...}}); without it the dashboard shows "not declared"."""
+    (capabilities.py: {"windows": {...}, "linux_arm64_pi": {...}}); without it the dashboard shows "not declared".
+    `slow` = the probe may block (subprocess, PATH scan, localhost HTTP): an expired result is re-checked off-thread."""
     if risk not in RISKS:
         raise ValueError(f"risk must be one of {RISKS}")
     if targets is not None:
@@ -113,6 +123,8 @@ def register(id: str, title_he: str, title_en: str, default_enabled: bool, *, pr
     f = Feature(id, title_he, title_en, bool(default_enabled), probe or _always, list(needs or []), risk,
                 list(skills or []), list(tools or []), config, applies, about, dict(targets or {}))
     CATALOG[id] = f
+    if slow:
+        SLOW_PROBES.add(id)
     return f
 
 
@@ -211,8 +223,8 @@ def _probe_camera(c: ProbeCtx) -> tuple[bool, str]:
         return True, ""
     if comp.get("status") == "unavailable":
         return False, comp.get("detail") or "no camera connected"
-    from .camera.backends import probe
-    result = probe(getattr(getattr(c.cfg, "camera", None), "backend", "auto"))
+    from .camera import probe as camera_probe      # light module: no numpy / OpenCV import (V4 perf fix)
+    result = camera_probe.probe(getattr(getattr(c.cfg, "camera", None), "backend", "auto"))
     return result.available, "" if result.available else "; ".join(x for x in (result.detail, result.action) if x)
 
 
@@ -274,28 +286,28 @@ register("memory_llm_pass", "למידה בעזרת המודל", "Memory LLM pass
 register("diagnosis_llm_pass", "אבחון עצמי בעזרת המודל", "Self-diagnosis LLM pass", True, probe=_api_billing,
          needs=["openai_api"], risk="medium", config="history.llm_review",
          about="after each conversation one small model request looks for problems the rules miss")
-register("google_calendar", "יומן גוגל", "Google Calendar", True, probe=_google("calendar", "calendar"),
+register("google_calendar", "יומן גוגל", "Google Calendar", True, probe=_google("calendar", "calendar"), slow=True,
          needs=["google_account"], risk="medium", skills=["calendar"], about="read and add calendar events")
 register("google_contacts", "אנשי קשר בגוגל", "Google Contacts", False,
-         probe=_google("contacts", "google_contacts"), needs=["google_account"], risk="medium",
+         probe=_google("contacts", "google_contacts"), slow=True, needs=["google_account"], risk="medium",
          skills=["google_contacts"], tools=["google_contacts_search"],
          about="search contact names and email addresses, read-only; separate Contacts consent and People API required")
-register("gmail_read", "קריאת מיילים", "Read Gmail", True, probe=_google("gmail read", "gmail"),
+register("gmail_read", "קריאת מיילים", "Read Gmail", True, probe=_google("gmail read", "gmail"), slow=True,
          needs=["google_account"], risk="medium", tools=["gmail_search", "gmail_read"], about="read your e-mail")
-register("gmail_send", "שליחת מיילים", "Send Gmail", False, probe=_google("gmail send", "gmail"),
+register("gmail_send", "שליחת מיילים", "Send Gmail", False, probe=_google("gmail send", "gmail"), slow=True,
          needs=["google_account", "gmail_read"], risk="high", tools=["gmail_send_draft", "gmail_create_draft"],
          about="send e-mail in your name")
-register("camera", "מצלמה", "Camera", False, probe=_probe_camera, needs=["camera_device"], risk="high",
+register("camera", "מצלמה", "Camera", False, probe=_probe_camera, slow=True, needs=["camera_device"], risk="high",
          skills=["camera"], about="look through the camera when asked")
 register("face_recognition", "זיהוי פנים", "Face recognition", False, probe=_all(_probe_camera, _skill_installed("camera")),
-         needs=["camera"], risk="high", skills=["faces"], about="recognise who is in the room")
+         slow=True, needs=["camera"], risk="high", skills=["faces"], about="recognise who is in the room")
 register("camera_when_away", "מצלמה כשאין אף אחד בבית", "Camera when away", False,
-         probe=_all(_probe_camera, _skill_installed("camera")), needs=["camera"], risk="high",
+         probe=_all(_probe_camera, _skill_installed("camera")), slow=True, needs=["camera"], risk="high",
          about="watch the room while nobody is home")
 register("camera_preview", "מה הוא רואה? (תצוגת מצלמה)", "What does he see? (camera preview)", True,
-         probe=_probe_camera, needs=["camera"], risk="low",
+         probe=_probe_camera, slow=True, needs=["camera"], risk="low",
          about="shows the camera picture on this screen while you keep it open; local only, nothing saved or sent")
-register("wake_word", "מילת הפעלה", "Wake word \"Hey Jarvis\"", True, probe=_probe_wake, needs=["microphone"],
+register("wake_word", "מילת הפעלה", "Wake word \"Hey Jarvis\"", True, probe=_probe_wake, slow=True, needs=["microphone"],
          config="voice.wake_enabled", about="listens on this device for \"Hey Jarvis\"; no audio leaves before it")
 register("greeting", "ברכת פתיחה", "Greeting", True, config="voice.greeting", about="says hello when the face starts")
 register("chimes", "צלילי התראה", "Chimes", True, probe=_probe_speaker, needs=["speaker"], config="voice.chime",
@@ -309,13 +321,33 @@ register("voice_change", "החלפת קול", "Voice change", True, probe=_probe
          about="change the speaking voice when you ask (\"תחליף קול\")")
 # SW-V2 WP-M4 (status per platform: capabilities.py)
 register("calendar_write", "הוספה ועדכון ביומן", "Calendar: add and update events", False,
-         probe=_google("calendar write", "calendar_write"), needs=["google_calendar"], risk="high",
+         probe=_google("calendar write", "calendar_write"), slow=True, needs=["google_calendar"], risk="high",
          tools=["calendar_create_event", "calendar_update_event", "calendar_share_event"],
          about="create and change events after reading them back to you; never deletes (needs a new Google "
                "sign-in with the events permission)")
 register("dashboard_lan", "לוח בקרה ברשת הביתית", "Dashboard on the home network", False, risk="high",
          applies="restart", about="open the dashboard from a paired phone on your home Wi-Fi (pairing code + login; "
                                   "never on the internet). Off = this computer only")
+def _probe_client_delegation(c: ProbeCtx) -> tuple[bool, str]:
+    v = getattr(c.cfg, "voice", None)
+    if v is None or v.mode != "live":
+        return False, "client delegation needs live cloud voice (voice.mode = live)"
+    return _api_billing(c)
+
+
+# SW-V4 D (#14): default OFF until the owner decides OD-15 (ai.delegation_mode is the config default and mirror)
+register("client_delegation", "תקציב קשיח לחיפושים בשיחה", "Strict budget for spoken lookups (client delegation)",
+         False, probe=_probe_client_delegation, needs=["openai_api"], risk="medium", config="ai.delegation_mode",
+         applies="next_session",
+         about="JARVES itself runs every lookup GPT-Live hands over, and reserves its cost before sending it, so the "
+               "daily and per-question limits are never exceeded; with ChatGPT + API key the reasoning runs on your "
+               "plan. Adds a little latency",
+         targets={"windows": {"status": "implemented_unverified",
+                              "evidence": "core/tests/test_delegation_client.py (strict cap property test, fake Live "
+                                          "and Responses servers); live scenarios 51-62 in docs/reviews/SWV4_D_DELEGATION.md"},
+                  "linux_arm64_pi": {"status": "planned", "blocker": "Pi voice is out of V4 scope", "roadmap_issue": "https://github.com/igalgerman/jarves/issues/1"}},
+         permissions=["sends the question to OpenAI (API key or your ChatGPT plan)"],
+         settings="ai.delegation_daily_usd, ai.delegation_turn_usd, ai.delegation_fallback, ai.delegation_timeout_s")
 register("assistant_identity", "שם העוזר", "Assistant name", True, tools=["assistant_rename"],
          applies="next_session", about="change my written and spoken name (\"קוראים לך...\"); the wake phrase is "
                                        "separate (Identity & voice page)")
@@ -367,10 +399,14 @@ class Features:
         self._mtime: float | None = None
         self._checked = 0.0
         self._probe_cache: dict[str, tuple[float, bool, str]] = {}
-        self._revalidating: set[str] = set()
+        self._slow: set[str] = set()                  # probes measured slower than SLOW_PROBE_S
+        self._pending: dict[str, bool] = {}           # background re-checks queued: fid -> force
+        self._worker = False                          # the one "jarves-probe-refresh" daemon thread runs
+        self._tl = threading.local()                  # .deadline while list() runs on this thread
         self._defaults: dict[str, tuple[bool, str]] = {}
-        for fid in CONFIG_MIRROR.values():
-            self.default(fid)                   # legacy config values, before anything mirrors onto cfg
+        for fid in (*CONFIG_MIRROR.values(), "client_delegation"):
+            if fid in CATALOG:
+                self.default(fid)               # legacy config values, before anything mirrors onto cfg
         self.listeners: list[Callable[[str, bool], None]] = []   # (id, enabled) after a change by this process
         self._load()
 
@@ -459,6 +495,8 @@ class Features:
             src = "config" if key in getattr(getattr(self.cfg, section, None), "model_fields_set", set()) else "default"
             if f.config == "music.provider" and isinstance(val, str):
                 return val != "none", src
+            if f.config == "ai.delegation_mode" and isinstance(val, str):
+                return val == "client", src
             if isinstance(val, bool):
                 return val, src
         return f.default_enabled, "default"
@@ -469,23 +507,31 @@ class Features:
             v = self._state["enabled"].get(fid)
         return self.default(fid)[0] if v is None else v
 
+    def is_slow(self, fid: str) -> bool:
+        return fid in SLOW_PROBES or fid in self._slow
+
     def available(self, fid: str) -> tuple[bool, str]:
         f = self.feature(fid)
         now = time.monotonic()
         hit = self._probe_cache.get(fid)
+        deadline = getattr(self._tl, "deadline", None)
         if hit and now - hit[0] < PROBE_TTL_S:
             ok, why = hit[1], hit[2]
-        elif hit and fid in SLOW_PROBES:
+        elif hit and self.is_slow(fid):
             # stale-while-revalidate (P0.3): answer with the last result now, re-check in a worker thread. The owner's
             # 19 Oct logs: features_list / list_skills took 320 ms each, all of it the Pear probe on the event loop.
             ok, why = hit[1], hit[2]
-            self._revalidate(fid)
+            self._schedule(fid, force=True)
+        elif deadline is not None and (self.is_slow(fid) or time.perf_counter() >= deadline):
+            # inside list() (V4 perf fix: 59 probes incl. PATH scans, device lists, imports and a localhost HTTP
+            # status made features_list 357 ms): a slow probe, or any probe once the list's budget is spent, is checked
+            # in the background; until then the last result, or "checking" when there is none (status: check)
+            self._schedule(fid, force=hit is not None)
+            if hit is None:
+                return False, CHECKING_REASON
+            ok, why = hit[1], hit[2]
         else:
-            try:
-                ok, why = f.probe(self.ctx)
-            except Exception as e:      # a broken probe means "not available", never a crash
-                ok, why = False, f"check failed ({type(e).__name__})"
-            self._probe_cache[fid] = (now, bool(ok), str(why or ""))
+            ok, why = self._run_probe(fid)
         if ok:
             for dep in f.needs:
                 if dep in CATALOG and dep != fid and not self.active(dep):
@@ -499,26 +545,67 @@ class Features:
         hit = self._probe_cache.get(fid)
         if not force and hit and time.monotonic() - hit[0] < PROBE_TTL_S / 2:
             return
+        self._run_probe(fid)
+
+    def _run_probe(self, fid: str) -> tuple[bool, str]:
+        """Run one probe on this thread and cache it; a probe slower than SLOW_PROBE_S is re-checked off-thread
+        from then on."""
         f = self.feature(fid)
+        t0 = time.perf_counter()
         try:
             ok, why = f.probe(self.ctx)
-        except Exception as e:
+        except Exception as e:      # a broken probe means "not available", never a crash
             ok, why = False, f"check failed ({type(e).__name__})"
-        self._probe_cache[fid] = (time.monotonic(), bool(ok), str(why or ""))
+        if time.perf_counter() - t0 > SLOW_PROBE_S:
+            self._slow.add(fid)
+        ok, why = bool(ok), str(why or "")
+        self._probe_cache[fid] = (time.monotonic(), ok, why)
+        return ok, why
 
-    def _revalidate(self, fid: str) -> None:
-        """One background re-check per slow probe at a time (daemon thread: never delays shutdown)."""
+    def prewarm(self) -> None:
+        """Check every probe that has no recent result in the background worker (Core start, live-session start,
+        dashboard): later calls on the event loop are cache hits. Fire-and-forget."""
+        now = time.monotonic()
+        for fid in list(CATALOG):
+            hit = self._probe_cache.get(fid)
+            if not hit or now - hit[0] >= PROBE_TTL_S / 2:
+                self._schedule(fid, force=False)
+
+    def _schedule(self, fid: str, force: bool = True) -> None:
+        """Queue a check for the ONE background worker (daemon thread "jarves-probe-refresh": never delays
+        shutdown, runs only while there is work). Already queued = nothing new (one check per probe at a time)."""
         with self._lock:
-            if fid in self._revalidating:
+            if fid in self._pending:
                 return
-            self._revalidating.add(fid)
+            self._pending[fid] = force
+            if self._worker:
+                return
+            self._worker = True
+        try:
+            # _thread, not threading.Thread().start(): that waits until the new thread runs, which took 10-80 ms on
+            # the owner's busy PC (measured) and would land on the event loop; this returns at once
+            _thread.start_new_thread(self._drain, ())
+        except RuntimeError:                          # interpreter shutting down: the next caller probes in line
+            with self._lock:
+                self._worker = False
+                self._pending.clear()
 
-        def run() -> None:
+    def _drain(self) -> None:
+        threading.current_thread().name = "jarves-probe-refresh"     # for logs / thread dumps (daemon-like)
+        while True:
+            with self._lock:
+                if not self._pending:
+                    self._worker = False
+                    return
+                fid, force = next(iter(self._pending.items()))
             try:
-                self.warm(fid, force=True)
+                if fid in CATALOG:
+                    self.warm(fid, force=force)
+            except Exception:
+                logs.error("features", "FEATURE_PROBE_FAILED", "background feature check failed", feature=fid, exc=True)
             finally:
-                self._revalidating.discard(fid)
-        threading.Thread(target=run, name=f"jarves-probe-{fid}", daemon=True).start()
+                with self._lock:
+                    self._pending.pop(fid, None)
 
     def active(self, fid: str) -> bool:
         return fid in CATALOG and self.enabled(fid) and self.available(fid)[0]
@@ -547,8 +634,12 @@ class Features:
         dflt, src = self.default(fid)
         on = dflt if user is None else user
         ok, why = self.available(fid)
+        hit = self._probe_cache.get(fid)
+        age = None if hit is None else round(time.monotonic() - hit[0], 1)
+        # honest freshness: "checking" = never checked yet (worker running), "stale" = the last result, re-checking
+        check = "checking" if hit is None else "stale" if age >= PROBE_TTL_S else "fresh"
         cap = capabilities.view(fid)
-        health = "off" if not on else "ok" if ok else "unavailable"
+        health = "off" if not on else "ok" if ok else "checking" if check == "checking" else "unavailable"
         return _with_he({"id": fid, "title_he": f.title_he, "title_en": f.title_en, "about": f.about, "risk": f.risk,
                 "enabled": on, "default": f.default_enabled, "source": "user" if user is not None else src,
                 "available": ok, "reason": why, "active": on and ok, "needs": f.needs, "applies": f.applies,
@@ -558,10 +649,22 @@ class Features:
                 "health": health, "permissions": cap["permissions"] or [f.risk + " risk"],
                 "settings": cap["settings"] or (f"config {f.config}" if f.config else ""), "targets": cap["targets"],
                 "last_checked": cap["last_checked"], "pi_ready": cap["pi_ready"], "matrix_problems": cap["problems"],
-                "needs_attention": bool(req) or (on and not ok) or bool(cap["problems"])})
+                "check": check, "checked_s_ago": age,
+                "needs_attention": bool(req) or (on and not ok and check != "checking") or bool(cap["problems"])})
 
-    def list(self) -> list[dict]:
-        return [self.status(fid) for fid in CATALOG]
+    # a snapshot of the catalog: a plugin module imported by another request may register a feature meanwhile (K: 500 race)
+    def list(self, *, wait: bool = False) -> list[dict]:
+        """Every feature's status, fast enough for the event loop and a dashboard request: a slow probe never runs
+        on the caller's thread (its last result, labelled check = "stale" / checked_s_ago, or "checking"), cheap ones
+        run in line within LIST_PROBE_BUDGET_S. wait=True = check everything in line (one-shot CLI / diagnostics
+        bundle that print once and exit)."""
+        if wait:
+            return [self.status(fid) for fid in list(CATALOG)]
+        self._tl.deadline = time.perf_counter() + LIST_PROBE_BUDGET_S
+        try:
+            return [self.status(fid) for fid in list(CATALOG)]
+        finally:
+            self._tl.deadline = None
 
     # --- writes
     def set(self, fid: str, on: bool, *, by: str = "user") -> dict:
@@ -617,10 +720,10 @@ class Features:
     # --- integration
     def owner(self, skill: str, tool: str) -> str | None:
         """The feature that owns a tool (tool-level ownership wins over skill-level)."""
-        for f in CATALOG.values():
+        for f in list(CATALOG.values()):
             if tool in f.tools:
                 return f.id
-        for f in CATALOG.values():
+        for f in list(CATALOG.values()):
             if skill in f.skills:
                 return f.id
         return None
@@ -644,10 +747,13 @@ class Features:
             sec = getattr(cfg, section, None)
             if sec is not None and hasattr(sec, name):
                 setattr(sec, name, self.enabled(fid))
+        ai = getattr(cfg, "ai", None)
+        if ai is not None and hasattr(ai, "delegation_mode") and "client_delegation" in CATALOG:
+            ai.delegation_mode = "client" if self.enabled("client_delegation") else "server"   # SW-V4 D
 
     def unavailable_summary(self) -> list[tuple[Feature, str]]:
         out = []
-        for f in CATALOG.values():
+        for f in list(CATALOG.values()):
             if not self.active(f.id):
                 out.append((f, self.reason(f.id)))
         return out
@@ -655,7 +761,7 @@ class Features:
     def capabilities_markdown(self) -> str:
         """The Features section for TOOLS.md and the voice instructions: what is off/unavailable and why."""
         off = self.unavailable_summary()
-        on = [f for f in CATALOG.values() if self.active(f.id)]
+        on = [f for f in list(CATALOG.values()) if self.active(f.id)]
         lines = ["## Features (switches)",
                  "On: " + (", ".join(f"{f.title_en} ({f.id})" for f in on) or "none") + ".",
                  "Off or not available (say so honestly, e.g. \"אין לי מצלמה מחוברת\"; never pretend):"]
@@ -823,13 +929,19 @@ def _ctx_features(ctx) -> Features:
             return snap.get("components") or {} if snap.get("age_s", 1e9) < 120 else {}
         f = Features(ctx.cfg, ctx.home, components=components)
         ctx._features = f
+        f.prewarm()                     # the first Features page / overview reads cached results, not 59 probes
     return f
 
 
 def api_features(ctx, m, body):
     f = _ctx_features(ctx)
     note = "Switches apply live where possible; others at the next conversation or Core start (see 'applies')."
-    return 200, {"features": f.list(), "note": note, **locales.siblings("note", note),
+    try:                                   # R-01: the OS limits around helper commands (a status, not a switch)
+        from . import isolation
+        iso = isolation.row(ctx.cfg, f.ctx.components())
+    except Exception as e:
+        iso = {"state": "unavailable", "reason": f"could not check ({type(e).__name__})", "status": "unavailable"}
+    return 200, {"features": f.list(), "note": note, **locales.siblings("note", note), "helper_isolation": iso,
                  "statuses": list(capabilities.STATUSES), "targets": list(capabilities.TARGETS),
                  "filters": ["all", "enabled", "not_ready_on_pi", "needs_attention"],
                  "pi_roadmap": capabilities.PI_ROADMAP}

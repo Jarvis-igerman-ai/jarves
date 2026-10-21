@@ -1,12 +1,10 @@
 /* SW-V3 P0.2 dashboard shell: grouped side navigation (a drawer below 900px), app bar with search, status chips,
-   language picker + theme. English is the default; every right-to-left locale (he, ar) gets the html[dir="rtl"]
+   language picker + theme. English is the default; every right-to-left locale (today Hebrew) gets the html[dir="rtl"]
    rules, so direction is never keyed on one language. Logical properties only (margin-inline, inset-inline,
    text-align: start); numbers, code, paths, URLs and charts are LTR islands. Uses the style.css tokens. */
 :root { --side-w: 248px; --appbar-h: 56px; }
 html[dir="rtl"] body { font-family: "Segoe UI", system-ui, -apple-system, "Noto Sans Hebrew", "Arial Hebrew", Arial, sans-serif; }
-html[lang="ar"] body { font-family: "Segoe UI", system-ui, -apple-system, "Noto Sans Arabic", "Geeza Pro", Tahoma, Arial, sans-serif; }
-html[lang="ar"] { line-height: 1.6; }
-.skip { position: absolute; inset-inline-start: 8px; top: -60px; z-index: 100; background: var(--accent); color: #fff;
+.skip { position: absolute; inset-inline-start: 8px; top: -60px; z-index: 100; background: var(--accent-fill); color: var(--on-accent);
   padding: 8px 14px; border-radius: 8px; }
 .skip:focus { top: 8px; }
 .shell { grid-template-columns: var(--side-w) minmax(0, 1fr); }
@@ -57,9 +55,17 @@ nav a:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
   overflow-x: auto; scrollbar-width: none; }
 .status-chips::-webkit-scrollbar { display: none; }
 .status-chips > * { flex: none; }
+/* D-17: a fade at the edge that hides more chips (shell.js fadeCue); the chips are links, so Tab scrolls them in */
+.fade-end { -webkit-mask-image: linear-gradient(to right, #000 calc(100% - 32px), transparent); mask-image: linear-gradient(to right, #000 calc(100% - 32px), transparent); }
+.fade-start { -webkit-mask-image: linear-gradient(to left, #000 calc(100% - 32px), transparent); mask-image: linear-gradient(to left, #000 calc(100% - 32px), transparent); }
+.fade-start.fade-end { -webkit-mask-image: linear-gradient(to right, transparent, #000 32px, #000 calc(100% - 32px), transparent); mask-image: linear-gradient(to right, transparent, #000 32px, #000 calc(100% - 32px), transparent); }
+html[dir="rtl"] .fade-end:not(.fade-start) { -webkit-mask-image: linear-gradient(to left, #000 calc(100% - 32px), transparent); mask-image: linear-gradient(to left, #000 calc(100% - 32px), transparent); }
+html[dir="rtl"] .fade-start:not(.fade-end) { -webkit-mask-image: linear-gradient(to right, #000 calc(100% - 32px), transparent); mask-image: linear-gradient(to right, #000 calc(100% - 32px), transparent); }
 .priv-btn { white-space: nowrap; }
 .appbar .spacer { display: none; }
-@media (min-width: 901px) { .appbar { flex-wrap: nowrap; } .search { flex: 0 1 270px; } }
+@media (min-width: 1280px) { .appbar { flex-wrap: nowrap; } .search { flex: 0 1 270px; } }
+/* 901-1279 px (laptops, tablets): the status chips get their own row, so the language and theme buttons stay on screen */
+@media (min-width: 901px) and (max-width: 1279px) { .status-chips { order: 10; flex: 1 0 100%; } .topbar-slot { order: 11; } .search { flex: 1 1 220px; } }
 @media (min-width: 901px) and (max-width: 1500px) { .schip-k { display: none; } }
 .schip { display: inline-flex; align-items: center; gap: 6px; padding: 3px 10px; border-radius: 999px; font-size: 12px;
   border: 1px solid var(--line); background: var(--surface-2); color: var(--text); white-space: nowrap; line-height: 20px; }
@@ -97,7 +103,7 @@ html[dir="rtl"] .kv .v, html[dir="rtl"] .kv .k { text-align: right; }
 /* English left inside a right-to-left page is isolated by i18n.js (FSI...PDI around the text, so "first?" keeps its
    question mark at the end) and server details get dir=JL.textDir(text). No `unicode-bidi: plaintext` here: it
    made a Hebrew sentence that starts with a product name ("Pear Desktop לא רץ") run left-to-right. */
-html[dir="rtl"] .nav-h { letter-spacing: 0; }          /* never letter-space Hebrew / Arabic */
+html[dir="rtl"] .nav-h { letter-spacing: 0; }          /* never letter-space Hebrew */
 html[dir="rtl"] table.log tr.lvl-error td:first-child { box-shadow: inset -3px 0 var(--critical); }
 html[dir="rtl"] table.log tr.lvl-warning td:first-child { box-shadow: inset -3px 0 var(--serious); }
 html[dir="rtl"] tr.m4-attn td:first-child { box-shadow: inset -3px 0 0 var(--serious); }

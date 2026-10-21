@@ -90,6 +90,8 @@ try {
                "--format", "requirements-txt", "-o", $req)
     Run "uv" @("pip", "install", "--python", $Py, "--break-system-packages", "--require-hashes", "--compile-bytecode",
                "-r", $req)
+    Step "log-code index for root-cause hints (SW-V4 O: git blame at build time, never at runtime)"
+    Run "uv" @("run", "--frozen", "--no-dev", "python", "tools/build_log_index.py")
     Step "jarves wheel"
     Run "uv" @("build", "--wheel", "--out-dir", (Join-Path $Out "wheel"))
     $whl = Get-ChildItem (Join-Path $Out "wheel") -Filter "jarves-*.whl" | Select-Object -First 1
@@ -169,6 +171,16 @@ if (-not $SkipFace) {
 # ---------------------------------------------------------------- launcher, notices, payload check
 Copy-Item (Join-Path $PSScriptRoot "windows\jarvis.cmd") $Stage
 Copy-Item (Join-Path $PSScriptRoot "windows\THIRD_PARTY_NOTICES.txt") $Stage
+# SW-V4 F: the WhatsApp bridge binary (built by scripts/build_whatsapp_bridge.ps1) ships next to the Core when it was
+# built; payload_check.py verifies its .sha256. Its state (tokens, store) lives in the user's data dir, never here.
+$bridgeExe = Join-Path $Repo "bridge\whatsapp\dist\whatsapp_bridge.exe"
+if ((Test-Path $bridgeExe) -and (Test-Path "$bridgeExe.sha256")) {
+    Step "WhatsApp bridge binary -> bridge\"
+    New-Item -ItemType Directory -Force (Join-Path $Stage "bridge") | Out-Null
+    Copy-Item $bridgeExe, "$bridgeExe.sha256" (Join-Path $Stage "bridge")
+} else {
+    Step "WhatsApp bridge not built (run scripts/build_whatsapp_bridge.ps1 first to include it); skipping"
+}
 Step "payload check (no secrets, tokens, personal databases or logs)"
 Run $Py @("-I", (Join-Path $PSScriptRoot "payload_check.py"), $Stage)
 

@@ -46,6 +46,9 @@ FEATURES: dict[str, object] = {
     "browser": "browser", "helper": "approvals", "helper_readonly_auto": (D, "a pure switch; `jarvis features`"),
     "whatsapp_handoff": (D, "WhatsApp opens a draft in the app; no CLI needed, switch via `jarvis features`"),
     "morning_briefing": "jobs", "home_assistant": "home", "conversation_recall": "recall",
+    "self_diagnostics_2": "health", "client_delegation": "budget",
+    "whatsapp_bridge": "whatsapp", "whatsapp_send": "whatsapp",          # SW-V4 F: jarvis whatsapp ...
+    "agent_orchestrator": "agents",
 }
 
 # Skill (tool group) name -> "jarvis <command>" or ("dashboard", reason) or ("voice", reason) for groups that only
@@ -64,6 +67,9 @@ TOOL_GROUPS: dict[str, object] = {
     "settings": (D, "settings are edited on the Settings page"), "skill_builder": (D, "the New Skills page"),
     "status": "status", "tasks": (D, "the Background tasks page"), "telegram": "telegram", "timers": "timers",
     "usage": "usage", "whatsapp": (D, "WhatsApp opens a draft in the app"), "conversation_recall": "recall",
+    "health": "health",
+    "whatsapp_bridge": "whatsapp",                                       # SW-V4 F: inbox / send / status
+    "agents": "agents",
 }
 
 
@@ -142,6 +148,10 @@ def cmd_timers(a, cfg, home) -> int:
             hit = t.cancel(int(a.id or 0), a.label or "", by="cli")
             print(clilang.fmt(f"בוטלו {len(hit)}", f"cancelled {len(hit)}"))
             return 0 if hit else 1
+        if a.action == "snooze":                         # SW-V4 K: same op as the dashboard Snooze button
+            r = t.snooze(int(a.id), float(a.minutes), by="cli")
+            print(clilang.fmt(f"נדחה: {_left(t.view(r)['seconds_left'])}", f"snoozed: {_left(t.view(r)['seconds_left'])} left"))
+            return 0
     except ValueError as e:
         print(f"timers: {e}", file=sys.stderr)
         return 2
@@ -275,6 +285,9 @@ def add_cli(sub) -> None:
     tc.add_argument("id", nargs="?", default="")
     tc.add_argument("--label", default="")
     tc.add_argument("--all", action="store_true")
+    tz = ts.add_parser("snooze", help="push a running timer later (or restart one that rang): snooze ID [MINUTES]")
+    tz.add_argument("id")
+    tz.add_argument("minutes", nargs="?", default="5")
 
     li = sub.add_parser("lists", help="shopping / to-do lists: show / add / check / remove / clear")
     lsub = li.add_subparsers(dest="action", required=True)

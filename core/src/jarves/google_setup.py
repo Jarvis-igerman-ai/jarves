@@ -58,41 +58,41 @@ EXAMPLES_HE = ["מה יש לי מחר ביומן?", "מתי הפגישה הבא�
 STEPS: list[dict] = [
     {"id": "project", "url": "/projectcreate", "copy": PROJECT_NAME,
      "title_he": "יוצרים פרויקט בגוגל קלאוד (חינם)", "title_en": "Create a Google Cloud project (free)",
-     "clicks_he": ["נכנסים עם חשבון הג'ימייל שלך", "Project name: מדביקים (Ctrl+V)", "לוחצים Create",
+     "clicks_he": ["נכנסים עם חשבון הג'ימייל שלך", "\"Project name\": מדביקים (Ctrl+V)", "לוחצים \"Create\"",
                    "מחכים כמה שניות עד שהפרויקט נבחר למעלה"],
      "clicks_en": ["Sign in with your Gmail account", "Project name: paste (Ctrl+V)", "Click Create",
                    "Wait until the new project is selected at the top"]},
     {"id": "calendar_api", "url": "/flows/enableapi?apiid=calendar-json.googleapis.com", "copy": "",
      "title_he": "מפעילים את Google Calendar API", "title_en": "Enable the Google Calendar API",
-     "clicks_he": ["בודקים שהפרויקט JARVES home בחור למעלה", "Next ואז Enable"],
+     "clicks_he": ["בודקים שהפרויקט JARVES home בחור למעלה", "\"Next\" ואז \"Enable\""],
      "clicks_en": ["Check that JARVES home is the selected project", "Next, then Enable"]},
     {"id": "gmail_api", "url": "/flows/enableapi?apiid=gmail.googleapis.com", "copy": "", "gmail": True,
      "title_he": "מפעילים את Gmail API", "title_en": "Enable the Gmail API",
-     "clicks_he": ["אותו פרויקט", "Next ואז Enable"], "clicks_en": ["Same project", "Next, then Enable"]},
+     "clicks_he": ["אותו פרויקט", "\"Next\" ואז \"Enable\""], "clicks_en": ["Same project", "Next, then Enable"]},
     {"id": "branding", "url": "/auth/branding", "copy": APP_NAME,
      "title_he": "מסך ההסכמה: שם האפליקציה", "title_en": "Consent screen: app name",
-     "clicks_he": ["Get started", "App name: מדביקים JARVES", "User support email: בוחרים את המייל שלך", "Next",
-                   "Audience: בוחרים External, Next", "Contact information: המייל שלך, Next",
-                   "מסמנים הסכמה, Continue, Create"],
+     "clicks_he": ["לוחצים \"Get started\"", "\"App name\": מדביקים JARVES", "\"User support email\": בוחרים את המייל שלך",
+                   "\"Next\"", "\"Audience\": בוחרים \"External\", ואז \"Next\"", "\"Contact information\": המייל שלך, ואז \"Next\"",
+                   "מסמנים הסכמה, \"Continue\", \"Create\""],
      "clicks_en": ["Get started", "App name: paste JARVES", "User support email: pick your address", "Next",
                    "Audience: External, Next", "Contact information: your address, Next",
                    "Tick the agreement, Continue, Create"]},
     {"id": "audience", "url": "/auth/audience", "copy": "{email}",
      "title_he": "מוסיפים את עצמך כמשתמש בדיקה", "title_en": "Add yourself as a test user",
-     "clicks_he": ["למטה: Test users, ואז Add users", "מדביקים את המייל שלך", "Save",
-                   "לא לוחצים Publish app (נשארים במצב Testing)"],
+     "clicks_he": ["למטה: \"Test users\", ואז \"Add users\"", "מדביקים את המייל שלך", "\"Save\"",
+                   "לא לוחצים \"Publish app\" (נשארים במצב \"Testing\")"],
      "clicks_en": ["Bottom: Test users, then Add users", "Paste your address", "Save",
                    "Do not click Publish app (stay in Testing)"]},
     {"id": "scopes", "url": "/auth/scopes", "copy": "{scopes}",
      "title_he": "ההרשאות ש-JARVES מבקש", "title_en": "The permissions JARVES asks for",
-     "clicks_he": ["Add or remove scopes", "למטה בתיבה Manually add scopes: מדביקים", "Add to table, Update",
-                   "Save"],
+     "clicks_he": ["לוחצים \"Add or remove scopes\"", "למטה, בתיבה \"Manually add scopes\": מדביקים", "\"Add to table\", ואז \"Update\"",
+                   "\"Save\""],
      "clicks_en": ["Add or remove scopes", "Bottom box 'Manually add scopes': paste", "Add to table, Update",
                    "Save"]},
     {"id": "client", "url": "/auth/clients", "copy": APP_NAME,
      "title_he": "יוצרים מפתח למחשב (Desktop app) ומורידים אותו", "title_en": "Create a Desktop client and download it",
-     "clicks_he": ["Create client", "Application type: Desktop app", "Name: מדביקים JARVES", "Create",
-                   "בחלון שנפתח: Download JSON (אני אמצא את הקובץ בהורדות לבד)"],
+     "clicks_he": ["לוחצים \"Create client\"", "\"Application type\": בוחרים \"Desktop app\"", "\"Name\": מדביקים JARVES", "\"Create\"",
+                   "בחלון שנפתח: \"Download JSON\" (אני אמצא את הקובץ בהורדות לבד)"],
      "clicks_en": ["Create client", "Application type: Desktop app", "Name: paste JARVES", "Create",
                    "In the dialog: Download JSON (I pick the file up from Downloads myself)"]},
 ]
@@ -301,7 +301,7 @@ def summary_he(scopes: list[str], gmail_send: bool) -> str:
     return ("מעולה, גוגל מחובר. מעכשיו אני יכול " + " ו".join(can) + ". " +
             "נסה להגיד: " + ", ".join(f"\"{e}\"" for e in ex) + ". " +
             ("שליחת מיילים פועלת: אני תמיד מקריא את הטיוטה ומחכה לאישור שלך. " if gmail_send else
-             "שליחת מיילים כבויה; אפשר להדליק אותה בדף הניהול, בעמוד Features. ") +
+             "שליחת מיילים כבויה; אפשר להדליק אותה בדף הניהול, בעמוד \"יכולות ומתגים\". ") +
             "פעם בשבוע גוגל מנתק אפליקציות במצב בדיקה; אז פשוט מריצים שוב " + START_COMMAND + ".")
 
 

@@ -17,7 +17,7 @@ privacy_he = "הקבצים נשמרים רק במחשב."
 privacy_en = "The files stay on this computer."
 
 [[steps]]
-he = "פתחו את עמוד Workspace וערכו את הקבצים, או פשוט בקשו ממנו בקול."
+he = "פתחו את עמוד \"קבצי אישיות\" וערכו את הקבצים, או פשוט בקשו ממנו בקול."
 en = "Open the Workspace page and edit the files, or just ask him by voice."
 action = "open:#/workspace"
 

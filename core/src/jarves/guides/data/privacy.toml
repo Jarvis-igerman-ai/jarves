@@ -23,7 +23,7 @@ action = "open:#/home"
 check = "probe:privacy"
 
 [[steps]]
-he = "עברו על עמוד Features: מה דולק ומה כבוי."
+he = "עברו על עמוד \"יכולות ומתגים\": מה דולק ומה כבוי."
 en = "Go over the Features page: what is on and what is off."
 action = "open:#/features"
 

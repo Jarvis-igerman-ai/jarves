@@ -266,7 +266,7 @@ def _probe(_ctx) -> tuple[bool, str]:
     return True, ""
 
 
-feat.register(FEATURE, "דפדפן", "Browser", False, probe=_probe, needs=["playwright", "edge_or_chromium"],
+feat.register(FEATURE, "דפדפן", "Browser", False, probe=_probe, slow=True, needs=["playwright", "edge_or_chromium"],
               risk="high", skills=["browser"],
               about="opens web pages for you: full control only on your allow-list (empty at first), other sites "
                     "read-only after you approve; purchases, payments and passwords always ask on the screen",

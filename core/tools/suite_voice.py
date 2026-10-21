@@ -558,8 +558,8 @@ class Harness:
             "speech_s": round(speech_s(t_inj + 0.3, t_done + 0.5), 1),
             "heard": " ".join(e.get("text", "") for e in ev if e["code"] == "LIVE_USER_SAID"),
             "said": " / ".join(e.get("text", "") for e in ev if e["code"] == "LIVE_JARVES_SAID"),
-            "tools": [e["msg"].replace("backend called ", "") for e in ev if e["code"] == "LIVE_TOOL_CALL"],
-            "delegations": sum(1 for e in ev if e["code"] == "LIVE_EVENT" and e["msg"] == "session.delegation.created"),
+            "tools": [(e.get("tool") or e["msg"].replace("backend called ", "")) for e in ev if e["code"] == "LIVE_TOOL_CALL"],
+            "delegations": sum(1 for e in ev if e["code"] == "LIVE_EVENT" and (e.get("event") or e["msg"]) == "session.delegation.created"),
             "backend_s": [e.get("backend_s") for e in ev if e["code"] == "LIVE_BACKEND_DONE"],
             "activity": sorted({p.get("kind") for p in acts}),
             "emotions": [p.get("emotion") for p in s.face.of("face.emotion", fmark_t)],
@@ -948,7 +948,7 @@ async def s_noise(h, r):
     out = speech_s(t0, time.time())
     said = [e.get("text", "") for e in ev if e["code"] == "LIVE_JARVES_SAID"]
     heard = [e.get("text", "") for e in ev if e["code"] == "LIVE_USER_SAID"]
-    dele = sum(1 for e in ev if e["code"] == "LIVE_EVENT" and e["msg"] == "session.delegation.created")
+    dele = sum(1 for e in ev if e["code"] == "LIVE_EVENT" and (e.get("event") or e["msg"]) == "session.delegation.created")
     r.ok = out < 0.5 and not said and dele == 0 and s.core.live is not None
     r.key = f"JARVES spoke {out:.1f} s, delegations {dele}, said {said[:2]}, heard-as {heard[:2]}"
     r.details = [{"said": said, "heard": heard}]
@@ -972,7 +972,7 @@ async def s_idle(h, r):
         await asyncio.sleep(0.2)
     idle = s.log.codes("VOICE_IDLE")
     after = round(stamp(idle[-1]) - t_quiet, 1) if idle else None
-    ended = [e["msg"] for e in s.log.codes("LIVE_ENDED")]
+    ended = [(f"{e['msg']} ({e['reason']})" if e.get("reason") else e["msg"]) for e in s.log.codes("LIVE_ENDED")]
     await h.shutdown(s)
     r.ok = open1 and open2 and after is not None and 13 <= after <= 22 and any("(idle)" in m for m in ended)
     r.key = f"open after 8 s {open1}, after 10 s {open2}; ended {after} s after the last sound ({ended})"
@@ -1181,7 +1181,7 @@ async def s_mute(h, r):
     stopped = await wait_for(lambda: s.core.live is None, 10)
     await asyncio.sleep(1.0)
     mics_open = [m.mic_rate for m in VAudio.instances if m._open and m.mic_rate]
-    ended = [e["msg"] for e in s.log.codes("LIVE_ENDED", mark)]
+    ended = [(f"{e['msg']} ({e['reason']})" if e.get("reason") else e["msg"]) for e in s.log.codes("LIVE_ENDED", mark)]
     where_muted, _ = await h.say("Hey Jarvis", lang="en", pad_s=0.3)
     await asyncio.sleep(3)
     woke_muted = bool(s.log.codes("WAKE_WORD", mark))
@@ -1218,7 +1218,7 @@ async def s_budget_voice(h, r):
     starts = len(s.log.codes("LIVE_STARTED"))
     crash = [e["code"] for e in s.log.refresh() if e["code"] in ("VOICE_TASK_CRASHED", "CORE_TASK_CRASH",
                                                                   "LIVE_EVENT_HANDLER_CRASHED", "LINK_HANDLER_ERROR")]
-    ended = [e["msg"] for e in s.log.codes("LIVE_ENDED")]
+    ended = [(f"{e['msg']} ({e['reason']})" if e.get("reason") else e["msg"]) for e in s.log.codes("LIVE_ENDED")]
     u = await h.shutdown(s)
     r.ok = (any(c in ("VOICE_BUDGET", "AI_BUDGET") for c in errs) and starts <= 2 and not crash
             and u.get("voice_seconds", 999) <= 75 and u.get("reservations") == 0)
@@ -1244,7 +1244,7 @@ async def s_budget_req(h, r):
     errs = [p.get("code") for p in s.face.of("error")]
     crash = [e["code"] for e in s.log.refresh() if e["code"] in ("VOICE_TASK_CRASHED", "CORE_TASK_CRASH",
                                                                   "LIVE_EVENT_HANDLER_CRASHED", "LINK_HANDLER_ERROR")]
-    ended = [e["msg"] for e in s.log.codes("LIVE_ENDED")]
+    ended = [(f"{e['msg']} ({e['reason']})" if e.get("reason") else e["msg"]) for e in s.log.codes("LIVE_ENDED")]
     budget_logs = [e["msg"][:80] for e in s.log.refresh() if e["code"] in ("AI_BUDGET", "AI_BUDGET_OVERRUN")]
     u = await h.shutdown(s)
     r.ok = "AI_BUDGET" in errs and not crash and u.get("ai_requests", 99) <= 3 and u.get("reservations") == 0
@@ -1515,6 +1515,7 @@ def parse_only(spec: str | None) -> list[int]:
     return out
 
 
+GROUPS: dict[str, str] = {}      # --group NAME -> scenario numbers (e.g. "delegation" -> "51-62", SW-V4 D)
 LIVE_COST = {32: 1.0, 33: 1.0, 34: 1.0, 35: 1.5, 19: 1.0, 20: 1.5, 21: 3.0, 22: 0, 23: 0, 24: 1.5, 25: 1.5, 26: 1.5, 28: 2.5, 29: 1.0, 30: 1.5, 15: 6.0}
 
 
@@ -1612,6 +1613,7 @@ def write_report(store: dict, notes: list[str]) -> None:
 async def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--only", help="scenario numbers, e.g. 1-4,8")
+    ap.add_argument("--group", help="a named scenario group, e.g. delegation (51-62)")
     ap.add_argument("--list", action="store_true")
     ap.add_argument("--max-minutes", type=float, default=34, help="live-voice cap for this run")
     ap.add_argument("--no-report", action="store_true", help="do not (over)write the markdown report")
@@ -1620,6 +1622,10 @@ async def main() -> None:
     ap.add_argument("--notes", help="markdown lines to put at the top of the report (findings, fixes)")
     ap.add_argument("--report-only", action="store_true", help="rewrite the report from stored results; no test")
     args = ap.parse_args()
+    if args.group:
+        if args.group not in GROUPS:
+            sys.exit(f"unknown group {args.group!r}; known: {sorted(GROUPS)}")
+        args.only = args.only or GROUPS[args.group]
     if args.report_only:
         notes = Path(args.notes).read_text(encoding="utf-8").splitlines() if args.notes else []
         write_report(load_store(), notes)

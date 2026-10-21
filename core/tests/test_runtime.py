@@ -588,4 +588,4 @@ def test_every_m1_feature_has_truthful_platform_status():
         pi = targets["linux_arm64_pi"]
         assert pi["status"] != "verified_on_device"                 # no Pi exists yet
         if pi["status"] in ("implemented_unverified", "planned", "blocked"):
-            assert pi["blocker"] and pi["roadmap_issue"].startswith("https://github.com/igalgerman/JARVIS/issues/")
+            assert pi["blocker"] and pi["roadmap_issue"].startswith("https://github.com/igalgerman/jarves/issues/")

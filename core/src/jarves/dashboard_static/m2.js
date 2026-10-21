@@ -24,8 +24,8 @@ PAGES.appearance = async function () {
       } }, m.id === d.mode ? "In use" : "Use")),
     el("td", {}, el("b", {}, txo(m, "title"))),
     el("td", {}, platformCell(m.targets.windows)), el("td", {}, platformCell(m.targets.linux_arm64_pi))));
-  render(header(tx("מראה", "Appearance"), tx("איך JARVES נראה על המסך. ", "How JARVES looks on the screen. ") + d.note
-      + tx(" אפשר גם לומר \"תחליף לאווטאר תלת מימד\".", " You can also say \"תחליף לאווטאר תלת מימד\".")),
+  render(header(tx("מראה", "Appearance"), tx("איך JARVES נראה על המסך. ", "How JARVES looks on the screen. ") + JL.t(d.note)
+      + tx(" אפשר גם לומר \"תחליף לאווטאר תלת מימד\".", " You can also say “switch to the 3D avatar”.")),
     el("div", { class: "card" }, el("table", {}, el("thead", {}, el("tr", {}, el("th", {}, ""), el("th", {}, "Presentation"),
       el("th", {}, "Windows"), el("th", {}, "Raspberry Pi"))), el("tbody", {}, rows)), el("div", { style: "height:8px" }), msg));
 };
@@ -76,7 +76,7 @@ PAGES.newskills = async function (arg) {
       capabilities: caps.map((l) => l.querySelector("input")).filter((i) => i.checked).map((i) => i.value), actions: actCb.checked }, "Grants saved.") }, "Save grants");
     return el("div", { class: "card", style: "margin-bottom:12px" },
       el("div", { class: "row" }, el("button", { type: "button", class: "switch", "aria-pressed": s.enabled ? "true" : "false",
-        "aria-label": `${s.title}: ${s.enabled ? "on" : "off"}`, onclick: () => act(s.id, s.enabled ? "disable" : "enable", {}, s.enabled ? "Disabled." : "Enabled.") },
+        "aria-label": switchLabel(s.title, s.enabled), onclick: () => act(s.id, s.enabled ? "disable" : "enable", {}, s.enabled ? "Disabled." : "Enabled.") },
         s.enabled ? "On" : "Off"), el("b", {}, s.title), pill("plain", "v" + s.version), el("span", { class: "muted small" }, s.description)),
       el("div", { dir: "auto", class: "small", style: "margin-top:6px" }, s.summary_he),
       s.has_code ? el("div", { class: "small", style: "margin-top:6px;color:#b45309" },

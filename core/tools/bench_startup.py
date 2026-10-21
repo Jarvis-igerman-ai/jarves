@@ -132,10 +132,35 @@ else:
             return 0
 
 
+# ------------------------------------------------------------------ which files change while idle (diagnosis)
+WARMUP_S = 20.0     # after CORE_READY: prewarm / first scheduler pass / first health heartbeat are start-up work
+
+
+def snapshot_files(home: Path) -> dict[str, tuple[int, int]]:
+    out = {}
+    for p in home.rglob("*"):
+        try:
+            if p.is_file():
+                st = p.stat()
+                out[p.relative_to(home).as_posix()] = (st.st_size, st.st_mtime_ns)
+        except OSError:
+            pass
+    return out
+
+
+def diff_files(prev: dict, cur: dict, counts: dict[str, int]) -> dict:
+    for f, v in cur.items():
+        if prev.get(f) != v:
+            counts[f] = counts.get(f, 0) + 1
+    return cur
+
+
 # ------------------------------------------------------------------ one run
 def _env(home: Path, scenario: str) -> dict:
     env = {k: v for k, v in os.environ.items() if k not in ("OPENAI_API_KEY", "OPENAI_ADMIN_KEY")}
-    env.update(JARVES_HOME=str(home), PYTHONPATH=str(SRC), PYTHONIOENCODING="utf-8")
+    # PYTHONDONTWRITEBYTECODE: on a fresh checkout the first import of each module compiles and WRITES its .pyc; that is
+    # one-time warm-up work, not steady-state churn, and it would be counted as idle disk writes (CI Linux: 1340 KB/min).
+    env.update(JARVES_HOME=str(home), PYTHONPATH=str(SRC), PYTHONIOENCODING="utf-8", PYTHONDONTWRITEBYTECODE="1")
     if scenario in ("cloud", "combined"):
         env["OPENAI_API_KEY"] = "sk-test-bench-dummy-never-sent"   # "test": the S09 secret scan skips fakes
     return env
@@ -175,15 +200,16 @@ def one_run(scenario: str, idle_s: float, port: int) -> dict:
         raise SystemExit(f"Core did not become ready: {err}")
     at_ready = sample(pid)
     # settle: background prewarm / first scheduler pass finish; then measure the steady idle window
-    settle = 15.0
-    time.sleep(settle)
+    time.sleep(WARMUP_S)
     a = sample(pid)
     rss_series, t_idle = [], time.perf_counter()
+    files_prev, file_changes = snapshot_files(home), {}
     while time.perf_counter() - t_idle < idle_s:
         time.sleep(1.0)
         s = sample(pid)
         if s:
             rss_series.append(s["rss_mb"])
+        files_prev = diff_files(files_prev, snapshot_files(home), file_changes)
     b = sample(pid)
     kids = children(pid)
     wall = time.perf_counter() - t_idle
@@ -204,6 +230,7 @@ def one_run(scenario: str, idle_s: float, port: int) -> dict:
             "rss_growth_mb": round(rss_series[-1] - rss_series[0], 1), "private_mb": round(b["private_mb"], 1),
             "idle_cpu_pct": round(100 * (b["cpu_s"] - a["cpu_s"]) / wall, 2),
             "startup_cpu_s": round(a["cpu_s"], 2),
+            "idle_files": ", ".join(f"{f} x{n}" for f, n in sorted(file_changes.items(), key=lambda kv: -kv[1])),
             "idle_disk_write_kb_per_min": round((b["write_mb"] - a["write_mb"]) * 1024 * 60 / wall, 1),
             "idle_disk_read_kb_per_min": round((b["read_mb"] - a["read_mb"]) * 1024 * 60 / wall, 1),
             "threads": b["threads"], "child_processes": kids, "stop_s": round(stop_s, 2), "exit": p.returncode}

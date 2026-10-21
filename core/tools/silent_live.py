@@ -297,8 +297,8 @@ async def main() -> None:
             "pauses_inside_answer_s": pauses,
             "heard_as": next((e.get("text") for e in ev if e["code"] == "LIVE_USER_SAID"), None),
             "jarves_said": " / ".join(e.get("text", "") for e in ev if e["code"] == "LIVE_JARVES_SAID")[:160],
-            "tools": [e["msg"].replace("backend called ", "") for e in ev if e["code"] == "LIVE_TOOL_CALL"],
-            "delegations": sum(1 for e in ev if e["code"] == "LIVE_EVENT" and e["msg"] == "session.delegation.created"),
+            "tools": [(e.get("tool") or e["msg"].replace("backend called ", "")) for e in ev if e["code"] == "LIVE_TOOL_CALL"],
+            "delegations": sum(1 for e in ev if e["code"] == "LIVE_EVENT" and (e.get("event") or e["msg"]) == "session.delegation.created"),
             "backend_s": [e.get("backend_s") for e in ev if e["code"] == "LIVE_BACKEND_DONE"],
             "speech_segments_s": [[round(a - t_q_end, 1), round(b - t_q_end, 1)] for a, b in segs],
             "activity": sorted({m[2].get("kind") for m in acts}),
@@ -331,7 +331,7 @@ async def main() -> None:
         "dead_air_avg_s": round(float(np.mean([r["dead_air_s"] for r in results if r["dead_air_s"]])), 2) if results else None,
         "dead_air_max_s": max([r["dead_air_s"] for r in results if r["dead_air_s"]], default=None),
         "turns_with_pauses_over_1s": sum(1 for r in results if r["pauses_inside_answer_s"]),
-        "live_ended_events": [e["msg"] for e in ended], "idle": idle,
+        "live_ended_events": [(f"{e['msg']} ({e['reason']})" if e.get("reason") else e["msg"]) for e in ended], "idle": idle,
         "warnings_errors": [(e["code"], e["msg"][:80]) for e in events(home) if e["level"] in ("ERROR", "WARNING")][:6],
     }
     print("\n=== SUMMARY ===")

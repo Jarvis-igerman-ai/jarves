@@ -188,6 +188,45 @@ def test_timer_cancel_by_cli_and_dashboard(home, capsys):
     assert cli.main(["timers", "add", "banana"]) == 2
 
 
+def test_timer_snooze_and_edit_by_dashboard_and_cli(home, capsys):
+    """SW-V4 K: Snooze (running: later; rang: a new timer with the same label) and Edit (label, minutes, alarm time)."""
+    now = [1_000_000.0]
+    db = open_db(home)
+    t = timers_mod.Timers(db, clock=lambda: now[0], tz=lambda: __import__("zoneinfo").ZoneInfo("UTC"))
+    try:
+        a = t.start_timer(120, "pasta")
+        s = t.snooze(a["id"], 5)
+        assert s["due"] == pytest.approx(now[0] + 120 + 300)
+        e = t.edit(a["id"], label="spaghetti", minutes=1)
+        assert e["label"] == "spaghetti" and e["due"] == pytest.approx(now[0] + 60)
+        db.x("UPDATE timers SET status='fired' WHERE id=?", (a["id"],))
+        again = t.snooze(a["id"], 2)
+        assert again["id"] != a["id"] and again["label"] == "spaghetti" and again["status"] == "pending"
+        al = t.set_alarm("07:30", "wake")
+        moved = t.edit(al["id"], at="08:15")
+        assert moved["due"] != al["due"] and t.view(moved)["at"].endswith("08:15")
+        with pytest.raises(ValueError):
+            t.snooze(al["id"], 0)
+        with pytest.raises(ValueError):
+            t.edit(999, label="x")
+    finally:
+        db.close()
+    ctx = dashboard.Ctx(home, Config())
+    try:
+        ids = [x["id"] for x in timers_mod.api_timers(ctx, None, None)[1]["timers"]]
+        mt = re.match(r"(\d+)", str(ids[0]))
+        assert timers_mod.api_timer_op(ctx, mt, {"op": "snooze", "minutes": 10})[0] == 200
+        assert timers_mod.api_timer_op(ctx, mt, {"op": "edit", "label": "tea"})[1]["label"] == "tea"
+        assert timers_mod.api_timer_op(ctx, mt, {"op": "snooze", "minutes": -1})[0] == 400
+        assert timers_mod.api_timer_op(ctx, mt, {"op": "explode"})[0] == 400
+    finally:
+        ctx.close()
+    capsys.readouterr()
+    assert cli.main(["timers", "snooze", str(ids[0]), "3"]) == 0
+    assert "snoozed" in capsys.readouterr().out
+    assert cli.main(["timers", "snooze", "9999"]) == 2
+
+
 @pytest.mark.parametrize("text,seconds", [("10", 600), ("90s", 90), ("1h30m", 5400), ("0.5m", 30)])
 def test_duration_parser(text, seconds):
     assert cli_parity.parse_duration(text) == seconds

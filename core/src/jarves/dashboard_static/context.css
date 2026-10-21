@@ -1,7 +1,7 @@
 /* Conversation context page (context.js). Colours from style.css tokens (light + dark). */
 .cx-tabs { display: flex; flex-wrap: wrap; gap: 6px; margin: 4px 0 12px; }
 .cx-tabs button { border-radius: 999px; padding: 4px 12px; }
-.cx-tabs button.on { background: var(--accent); color: #fff; border-color: var(--accent); }
+.cx-tabs button.on { background: var(--accent-fill); color: var(--on-accent); border-color: var(--accent-fill); }
 .cx-search { display: flex; gap: 8px; align-items: center; margin-bottom: 12px; }
 .cx-search input { flex: 1; min-width: 0; }
 .cx-group { margin-bottom: 14px; }

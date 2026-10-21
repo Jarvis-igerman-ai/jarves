@@ -50,8 +50,9 @@
   const KEYWORDS = {        // extra words people search for (both languages)
     home: "status overview dashboard מצב סקירה ראשי", runtime: "mic mute window show hide autostart quit stop wake tray מיקרופון השתקה חלון הפעלה עצירה מגש",
     connections: "google gmail calendar sign in oauth גוגל ג׳ימייל התחברות", devices: "phone lan pair wifi audit טלפון הצמדה רשת ביקורת",
-    conversations: "transcript chat history talk תמליל היסטוריה צ׳אט", recall: "recall search what did i say remember find חיפוש מה אמרתי מה דיברנו שיחות קודמות", issues: "problems errors diagnosis תקלות שגיאות אבחון",
+    conversations: "transcript chat history talk תמליל היסטוריה צ׳אט", recall: "recall search what did i say remember find חיפוש מה אמרתי מה דיברנו שיחות קודמות", agents: "coding agents claude code codex sessions worktree approvals סוכני קוד קלוד קודקס סשנים פרויקט", issues: "problems errors diagnosis תקלות שגיאות אבחון",
     selfcheck: "self check health suggestions improvements בדיקה עצמית הצעות שיפור",
+    health: "health diagnostics anomalies canary preflight ai review repair ticket תקינות אבחון חריגות בדיקת לילה בודק תיקון",
     tasks: "research background מחקר רקע", logs: "log errors events debug יומן שגיאות אירועים",
     calendar: "events meeting אירועים פגישה", jobs: "schedule reminder cron מתוזמן תזכורת", reports: "briefing morning תדריך בוקר",
     timers: "timer alarm countdown wake clock טיימר שעון מעורר התראה זמן", lists: "shopping todo groceries tasks קניות משימות רשימה סופר",
@@ -61,7 +62,7 @@
     setup: "install add-ons wizard התקנה תוספים אשף", features: "switches enable disable pi windows מתגים הפעלה כיבוי",
     skills: "tools health כלים תקינות", newskills: "generated skills proposals כלים חדשים הצעות", autonomy: "permissions approve הרשאות אישור",
     usage: "quota limits chatgpt openai api budget מכסה מגבלות תקציב", costs: "price spend money dollars מחיר הוצאה כסף",
-    browser: "web site chrome playwright allow-list אתר אינטרנט דפדפן רשימת היתר", guides: "help how to עזרה איך", settings: "config toml configuration תצורה", backup: "restore export שחזור ייצוא",
+    browser: "web site chrome playwright allow-list אתר אינטרנט דפדפן רשימת היתר", whatsapp: "whatsapp messages inbox link qr kill send וואטסאפ הודעות קישור שליחה מתג חירום", guides: "help how to עזרה איך", settings: "config toml configuration תצורה", backup: "restore export שחזור ייצוא",
     profiles: "profile users user test switch פרופיל משתמשים משתמש בדיקה החלפה",
   };
   const norm = (s) => String(s || "").toLowerCase().replace(/[֑-ׇ]/g, "").replace(/[׳']/g, "'");
@@ -156,7 +157,21 @@
       : piNotReady ? tx(`${piTotal - piNotReady}/${piTotal} מוכנות`, `${piTotal - piNotReady}/${piTotal} ready`) : tx("הכל מוכן", "all ready"))));
     const priv = typeof window.privacyChips === "function" ? window.privacyChips(rt && rt.privacy, live) : [];
     bar.replaceChildren(core, dev, pi, ...priv);
+    fadeCue(bar);
   }
+  // a sideways scroller shows a fade at the edge where more chips are hidden (D-17); RTL scrollLeft is negative
+  function fadeCue(s) {
+    if (!s) return;
+    s.dataset.fade = "1";
+    const upd = () => {
+      const max = s.scrollWidth - s.clientWidth, pos = Math.abs(s.scrollLeft);
+      s.classList.toggle("fade-end", max > 2 && pos < max - 2);
+      s.classList.toggle("fade-start", max > 2 && pos > 2);
+    };
+    if (!s._fade) { s._fade = true; s.addEventListener("scroll", upd, { passive: true }); window.addEventListener("resize", upd); }
+    upd();
+  }
+  window.fadeCue = fadeCue;
   async function poll() {
     if (document.hidden) return;
     try { rt = await api("/api/runtime"); } catch (e) { rt = null; }

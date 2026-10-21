@@ -33,7 +33,7 @@ from . import timers as timers_mod
 from .userdata import open_db
 
 AUTONOMY_SYNC_S = 600.0
-ROADMAP_ISSUE = "https://github.com/igalgerman/JARVIS/issues/23"     # M3 Raspberry Pi verification (real issue)
+ROADMAP_ISSUE = "https://github.com/igalgerman/jarves/issues/3"     # M3 Raspberry Pi verification (real issue)
 _UNVERIFIED_PI = ("pure Python + SQLite + tzdata, no Windows-only code; not run on a Raspberry Pi yet "
                   "(no device in the test setup)")
 _WIN_EVIDENCE = "core/tests/test_m3_*.py (unit + fault injection on Windows); no real-restart run yet"
@@ -226,6 +226,13 @@ class Operations:
             name="timers")
         # owner request 20 Oct: self-check (voice tools, weekly job, after an unclean stop / an error burst)
         self.selfcheck = selfcheck_mod.attach(self.core, self)
+        # SW-V4 O: Self-Diagnostics 2.0 (monitor, anomalies, canary + AI-review jobs, health voice tools)
+        from .diag import service as health_mod
+        try:
+            self.health_diag = health_mod.attach(self.core, self)
+        except Exception:
+            self.health_diag = None
+            logs.error("health", "HEALTH_ATTACH_FAILED", "self-diagnostics 2.0 not started", exc=True)
 
     async def _connect_nudge(self) -> None:
         """Owner request 20 Oct: once a day at most, remind that Google is not connected (connect.maybe_nudge)."""
@@ -256,6 +263,8 @@ class Operations:
                 logs.error("autonomy", "AUTONOMY_SYNC_FAILED", "diagnostic proposals not updated", exc=True)
 
     async def stop(self) -> None:
+        if getattr(self, "health_diag", None) is not None:
+            await self.health_diag.stop()
         if getattr(self, "selfcheck", None) is not None:
             await self.selfcheck.stop()
         await self.scheduler.stop()

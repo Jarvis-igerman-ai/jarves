@@ -17,6 +17,6 @@ privacy_he = "אין."
 privacy_en = "None."
 
 [[steps]]
-he = "פתחו את עמוד Appearance ובחרו מראה, או בקשו ממנו בקול."
+he = "פתחו את עמוד \"מראה\" ובחרו מראה, או בקשו ממנו בקול."
 en = "Open the Appearance page and pick a look, or ask him by voice."
 action = "open:#/appearance"

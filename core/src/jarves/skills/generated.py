@@ -38,7 +38,7 @@ from typing import Any
 
 from pydantic import BaseModel, Field, create_model
 
-from .. import features, logs
+from .. import features, isolation, logs
 from . import Skill, Tool, ToolResult
 
 ROOT = "skills"
@@ -641,89 +641,13 @@ async def _public_host(host: str) -> str:
 
 
 _CHILD = Path(__file__).with_name("sandbox_child.py")
-WIN_JOB_MEM_BYTES = 512 << 20          # mirrors the POSIX RLIMIT_AS the child sets on Linux
 
 
-def _win_job_limit(pid: int):
-    """Cheap OS hardening on Windows: put the child in a Job Object that caps its memory and forbids it to spawn
-    more processes, and kills the whole job when our handle closes (so a timeout / crash of the parent reaps it).
-    Returns the job handle to keep alive, or None. Fails open (logs): the AST/import/builtins layers still hold.
-
-    NOT done here (tracked, lower value than the restrictions already in place): a restricted token or a
-    low-integrity child. Those need a CreateProcess with a custom token, which asyncio's subprocess does not expose;
-    a from-scratch CreateProcessAsUser/CreateRestrictedToken launcher is a lot of surface for little gain now that
-    the child has no OS modules, no open/eval and an empty environment. Documented for the Pi work too (issue #21)."""
-    if sys.platform != "win32":
-        return None
-    try:
-        import ctypes
-        from ctypes import wintypes
-        k32 = ctypes.WinDLL("kernel32", use_last_error=True)
-        # Declare handle types: the defaults are c_int (32-bit), which TRUNCATES 64-bit HANDLEs and makes the whole
-        # thing fail or, worse, act on the wrong handle. Get this right or do not touch the child at all.
-        k32.OpenProcess.restype = wintypes.HANDLE
-        k32.OpenProcess.argtypes = [wintypes.DWORD, wintypes.BOOL, wintypes.DWORD]
-        k32.CreateJobObjectW.restype = wintypes.HANDLE
-        k32.CreateJobObjectW.argtypes = [wintypes.LPVOID, wintypes.LPCWSTR]
-        k32.SetInformationJobObject.restype = wintypes.BOOL
-        k32.SetInformationJobObject.argtypes = [wintypes.HANDLE, ctypes.c_int, wintypes.LPVOID, wintypes.DWORD]
-        k32.AssignProcessToJobObject.restype = wintypes.BOOL
-        k32.AssignProcessToJobObject.argtypes = [wintypes.HANDLE, wintypes.HANDLE]
-        k32.CloseHandle.restype = wintypes.BOOL
-        k32.CloseHandle.argtypes = [wintypes.HANDLE]
-        k32.IsProcessInJob.restype = wintypes.BOOL
-        k32.IsProcessInJob.argtypes = [wintypes.HANDLE, wintypes.HANDLE, ctypes.POINTER(wintypes.BOOL)]
-        k32.GetCurrentProcess.restype = wintypes.HANDLE
-        # If WE are already inside a job (CI, a test harness, some launchers), putting the child in a nested job of
-        # our own can have the OS tear the child down before it runs. That is worse than no job, so skip and lean on
-        # the AST/import/builtins layers. A normally-launched Core (Explorer, tray, service) is not in a job.
-        in_job = wintypes.BOOL()
-        if k32.IsProcessInJob(k32.GetCurrentProcess(), None, ctypes.byref(in_job)) and in_job.value:
-            return None
-        PROCESS_SET_QUOTA, PROCESS_TERMINATE = 0x0100, 0x0001
-        h_proc = k32.OpenProcess(PROCESS_SET_QUOTA | PROCESS_TERMINATE, False, pid)
-        if not h_proc:
-            return None
-        try:
-            h_job = k32.CreateJobObjectW(None, None)
-            if not h_job:
-                return None
-
-            class _BASIC(ctypes.Structure):
-                _fields_ = [("PerProcessUserTimeLimit", ctypes.c_int64), ("PerJobUserTimeLimit", ctypes.c_int64),
-                            ("LimitFlags", wintypes.DWORD), ("MinimumWorkingSetSize", ctypes.c_size_t),
-                            ("MaximumWorkingSetSize", ctypes.c_size_t), ("ActiveProcessLimit", wintypes.DWORD),
-                            ("Affinity", ctypes.POINTER(ctypes.c_ulong)), ("PriorityClass", wintypes.DWORD),
-                            ("SchedulingClass", wintypes.DWORD)]
-
-            class _IO(ctypes.Structure):
-                _fields_ = [("ReadOperationCount", ctypes.c_uint64), ("WriteOperationCount", ctypes.c_uint64),
-                            ("OtherOperationCount", ctypes.c_uint64), ("ReadTransferCount", ctypes.c_uint64),
-                            ("WriteTransferCount", ctypes.c_uint64), ("OtherTransferCount", ctypes.c_uint64)]
-
-            class _EXT(ctypes.Structure):
-                _fields_ = [("BasicLimitInformation", _BASIC), ("IoInfo", _IO),
-                            ("ProcessMemoryLimit", ctypes.c_size_t), ("JobMemoryLimit", ctypes.c_size_t),
-                            ("PeakProcessMemoryUsed", ctypes.c_size_t), ("PeakJobMemoryUsed", ctypes.c_size_t)]
-            JOB_MEM, JOB_ACTIVE, JOB_KILL = 0x00000100, 0x00000008, 0x00002000
-            JobObjectExtendedLimitInformation = 9
-            info = _EXT()
-            info.BasicLimitInformation.LimitFlags = JOB_MEM | JOB_ACTIVE | JOB_KILL
-            info.BasicLimitInformation.ActiveProcessLimit = 1
-            info.ProcessMemoryLimit = WIN_JOB_MEM_BYTES
-            if not k32.SetInformationJobObject(h_job, JobObjectExtendedLimitInformation, ctypes.byref(info),
-                                               ctypes.sizeof(info)):
-                k32.CloseHandle(h_job)
-                return None
-            if not k32.AssignProcessToJobObject(h_job, h_proc):
-                k32.CloseHandle(h_job)
-                return None
-            return h_job
-        finally:
-            k32.CloseHandle(h_proc)
-    except Exception:
-        logs.warn("skills", "SKILL_JOB_UNAVAILABLE", "could not place the Skill child in a Windows job object")
-        return None
+def _child_python() -> str:
+    """The real interpreter. A Windows venv's python.exe is a small launcher that starts the base python.exe as a
+    SECOND process, which the one-process job limit would refuse; -I -S never uses the venv's packages anyway."""
+    base = getattr(sys, "_base_executable", "") or sys.executable
+    return base if os.path.isfile(base) else sys.executable
 
 
 async def run_sandboxed(code: str, tool: str, args: dict, broker, timeout_s: float = CALL_TIMEOUT_S) -> dict:
@@ -732,11 +656,15 @@ async def run_sandboxed(code: str, tool: str, args: dict, broker, timeout_s: flo
     if sys.platform == "win32":
         env["SYSTEMROOT"] = os.environ.get("SYSTEMROOT", r"C:\Windows")   # needed by Python's own startup / random
     work = tempfile.mkdtemp(prefix="jarves-skill-")
-    proc = await asyncio.create_subprocess_exec(
-        sys.executable, "-I", "-S", "-X", "utf8", str(_CHILD), cwd=work, env=env,
+    # R-01 (#17): created inside its own OS limits (Windows: suspended -> Job Object -> resumed; one process,
+    # 512 MB, 10 s CPU, kill on close, no breakaway, UI restricted. POSIX: own session; the child sets its rlimits)
+    proc, guard = await isolation.exec_async(
+        _child_python(), "-I", "-S", "-X", "utf8", str(_CHILD), limits=isolation.SKILL_LIMITS, cwd=work, env=env,
         stdin=asyncio.subprocess.PIPE, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.DEVNULL,
         limit=MAX_HTTP * 3)
-    job = _win_job_limit(proc.pid)
+    if guard.state != "active":
+        logs.warn("skills", "SKILL_JOB_UNAVAILABLE", "the Skill child runs without its full OS limits",
+                  state=guard.state, reason=guard.reason[:200])
 
     async def talk() -> dict:
         req = {"code": code, "tool": tool, "args": args, "imports": list(ALLOWED_IMPORTS)}
@@ -767,15 +695,7 @@ async def run_sandboxed(code: str, tool: str, args: dict, broker, timeout_s: flo
         if proc.returncode is None:
             proc.kill()
         await proc.wait()
-        if job is not None:
-            try:
-                import ctypes
-                from ctypes import wintypes
-                _close = ctypes.WinDLL("kernel32").CloseHandle
-                _close.argtypes = [wintypes.HANDLE]
-                _close(job)                                  # kill-on-close reaps anything still in the job
-            except Exception:
-                pass
+        guard.close()                                    # kill-on-close / process group: nothing stays behind
         shutil.rmtree(work, ignore_errors=True)
 
 
@@ -897,7 +817,7 @@ def make_builder_skill(mgr: GeneratedSkills) -> Skill:
     return BuilderSkill()
 
 
-_PI = "https://github.com/igalgerman/JARVIS/issues/21"
+_PI = "https://github.com/igalgerman/jarves/issues/3"
 TARGETS = {"windows": {"status": "implemented_unverified",
                        "evidence": "pytest test_skill_creation (incl. malicious drafts incl. the string.Formatter "
                                    "getattr escape); child runs in a Job Object (memory + 1-process cap, kill-on-"

@@ -9,7 +9,7 @@ title_en = "Teach him a new skill"
 what_he = "אפשר לבקש מג'ארביס לבנות יכולת חדשה. הוא כותב אותה, ואתם בודקים ומאשרים לפני שהיא פועלת."
 what_en = "Ask JARVES to build a new skill. He writes it; you review and approve it before it runs."
 say = [["תלמד לבדוק את מחיר הביטקוין", "Learn to check the bitcoin price"], ["אילו יכולות חדשות בנית?", "Which new skills did you build?"]]
-expect_he = "היכולת מופיעה בעמוד New Skills כבויה. אחרי אישור והפעלה הוא משתמש בה."
+expect_he = "היכולת מופיעה בעמוד \"כלים חדשים\" כבויה. אחרי אישור והפעלה הוא משתמש בה."
 expect_en = "The skill appears on the New Skills page switched off. After you approve and enable it, he uses it."
 cost_he = "בקשה אחת למודל לכתיבה (כמה סנטים)."
 cost_en = "One model request to write it (a few cents)."
@@ -22,6 +22,6 @@ en = "Tell him what the skill should do."
 check = "active:skill_creation"
 
 [[steps]]
-he = "פתחו את עמוד New Skills: קראו, אשרו, תנו הרשאות והפעילו."
+he = "פתחו את עמוד \"כלים חדשים\": קראו, אשרו, תנו הרשאות והפעילו."
 en = "Open the New Skills page: review, approve, grant and enable."
 action = "open:#/newskills"

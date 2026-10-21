@@ -71,6 +71,11 @@ def test_waiting_only_tells_lead_ins_from_answers():
     from jarves.voice.live import answer_said
     assert answer_said("חלב, לחם וביצים", "שנייה, אני בודק. כרגע יש שם חלב, לחם ובצים.")   # "כרגע" is no filler
     assert not answer_said("חלב", "רגע, אני בודק")
+    # V4-VC-2: a one-word answer is delivered ("10" said as "עשר."), a long answer still needs a sentence
+    assert answer_said("10", "עשר.") and answer_said("Canberra.", "קנברה.")
+    assert not answer_said("10", "רגע.")
+    assert answer_said("שתיים כפול שלוש זה 6.", "זה שש.")                  # only 2-letter words: still said
+    assert not answer_said("אינטל עלתה בשלושה אחוזים היום", "כן.")
 
 
 def test_user_asked_action_and_language():

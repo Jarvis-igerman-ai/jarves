@@ -38,15 +38,17 @@
     const action = f.action || {};
     const link = action.type === "open" ? el("a", { href: action.page }, tx("פתח", "Open")) :
       action.type === "command" ? el("code", { dir: "ltr" }, action.command) : null;
-    return el("div", { class: "issue card" },
+    // D-13: one fixed layout per card (title row, meta, detail, a two-column cause / fix grid, buttons at the start)
+    return el("div", { class: "finding card" },
       el("div", { class: "row" }, pill(sevCls[f.severity] || "plain", tx(f.severity_he, f.severity)),
         el("b", { dir: "auto" }, `${f.rank}. ${tx(f.title_he, f.title)}`),
         pill("plain", t2(trendTx[f.trend])), f.state !== "open" ? pill("plain", t2(stateTx[f.state])) : null),
       el("div", { class: "muted small" }, `${f.category} · ${tx("מאמץ", "effort")}: ${tx(f.effort_he, f.effort)}` +
         (f.count > 1 ? ` · ×${f.count}` : "")),
       (f.detail || f.detail_he) ? el("div", { class: "detail", dir: "auto" }, tx(f.detail_he, f.detail)) : null,
-      f.cause ? el("div", { class: "small", dir: "auto" }, el("span", { class: "k" }, tx("סיבה משוערת: ", "Likely cause: ")), tx(f.cause_he, f.cause)) : null,
-      el("div", { class: "small", dir: "auto" }, el("span", { class: "k" }, tx("תיקון מוצע: ", "Suggested fix: ")), tx(f.fix_he, f.fix), " ", link),
+      el("dl", { class: "finding-kv small" },
+        f.cause ? [el("dt", {}, tx("סיבה משוערת", "Likely cause")), el("dd", { dir: JL.textDir(tx(f.cause_he, f.cause)) }, tx(f.cause_he, f.cause))] : null,
+        el("dt", {}, tx("תיקון מוצע", "Suggested fix")), el("dd", { dir: JL.textDir(tx(f.fix_he, f.fix)) }, tx(f.fix_he, f.fix), " ", link)),
       f.evidence.length ? el("details", {}, el("summary", {}, tx("הוכחות", "Evidence") + ` (${f.evidence.length})`),
         el("div", { class: "evidence" }, f.evidence.map((e) => el("div", { dir: "ltr" }, e)))) : null,
       buttons);

@@ -120,7 +120,8 @@ def _store_summary(home: Path) -> dict:
 # is a per-bundle pseudonym with its extension (SW-V4 B: a file name can be personal).
 _KNOWN_FILE = re.compile(r"^(config\.toml|(store|memory|faces|userdata|budget|usage)\.db(-wal|-shm|-journal)?|"
                          r"[a-z_]+\.json|[a-z_]+\.jsonl|link_token|pear_client_id(\.paired)?|secrets\.env|"
-                         r"(approvals|wake|google|chatgpt|camera|guides|runtime|skills|cache)/[A-Za-z0-9_.-]+|"
+                         r"(approvals|wake|google|chatgpt|camera|guides|runtime|skills|cache|whatsapp_bridge)/"
+                         r"[A-Za-z0-9_.-]+|"
                          r"workspace/[A-Z_]+\.md)$")
 
 
@@ -151,7 +152,7 @@ def build(home: Path, cfg, out: Path, *, lines: int = 500, max_bytes: int = MAX_
 
     def features_list():
         from .features import Features
-        return [{k: s[k] for k in ("id", "enabled", "available", "active", "reason")} for s in Features(cfg, home).list()]
+        return [{k: s[k] for k in ("id", "enabled", "available", "active", "reason")} for s in Features(cfg, home).list(wait=True)]
 
     def usage_view():
         from .usage import Monitor
