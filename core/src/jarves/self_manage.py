@@ -348,7 +348,7 @@ class SelfManager:
             if r["state"] == "unavailable":
                 out.append({"id": f"feature_{r['id']}", "area": "features",
                             "en": f"{r['title_en']} is on but unavailable: {r.get('reason_en') or r['reason']}",
-                            "he": f"{r['title_he']} דולקת אבל לא זמינה: {r.get('reason_he') or r['reason']}",
+                            "he": f"{r['title_he']} דולקת אבל לא זמינה" + (f": {r['reason_he']}" if r.get("reason_he") else ""),
                             "action": ""})
         try:
             if not _clean_body(self.ws.read("USER.md")):
