@@ -477,7 +477,8 @@ def test_feature_is_registered_safe_off_grouped_bundled_guided_and_declared():
     assert rows and all(r["ok"] for r in rows), rows
 
 
-async def test_core_tools_follow_the_switch_and_the_owner_words_ring(core):
+async def test_core_tools_follow_the_switch_and_the_owner_words_ring(core, monkeypatch):
+    monkeypatch.setattr(dialing, "_is_windows", lambda: True)          # the probe is Windows-only; CI also runs Linux
     assert "dial_prepare" not in {t.name for t in core.registry.tools()}                  # SAFE_OFF: hidden until switched on
     off = await core.registry.call("dial_prepare", {"name": "דנה"})
     assert not off.ok and off.code == "FEATURE_OFF"
