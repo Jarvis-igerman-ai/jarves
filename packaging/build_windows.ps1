@@ -98,6 +98,13 @@ try {
     $whl = Get-ChildItem (Join-Path $Out "wheel") -Filter "jarves-*.whl" | Select-Object -First 1
     Run "uv" @("pip", "install", "--python", $Py, "--break-system-packages", "--no-deps", "--compile-bytecode", $whl.FullName)
 } finally { Pop-Location }
+# SW-V4 P (installer size): the stdlib's own test suite, IDLE, the turtle demos and ensurepip are never used by JARVES
+# (the helper Skill uses the PC's Python, not this one); tkinter and its tcl/tk stay (the approval popup).
+Step "prune unused stdlib parts"
+foreach ($d in "Lib\test", "Lib\idlelib", "Lib\turtledemo", "Lib\ensurepip", "Lib\lib2to3") {
+    $full = Join-Path $Stage ("python\" + $d)
+    if (Test-Path $full) { Remove-Item -Recurse -Force $full }
+}
 $info = [ordered]@{ version = $Version; commit = $Commit; built = $Built; channel = $Channel; platform = "windows-x86_64"
                     python = "3.12.15+20261013"; godot = "4.7.2-stable" }
 # WP-O: default update source baked into the build (repo variable JARVES_UPDATE_BASE_URL, public, not a secret);

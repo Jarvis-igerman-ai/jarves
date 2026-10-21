@@ -328,6 +328,10 @@ register("calendar_write", "הוספה ועדכון ביומן", "Calendar: add 
 register("dashboard_lan", "לוח בקרה ברשת הביתית", "Dashboard on the home network", False, risk="high",
          applies="restart", about="open the dashboard from a paired phone on your home Wi-Fi (pairing code + login; "
                                   "never on the internet). Off = this computer only")
+register("mobile_access", "גישה מהטלפון", "Phone access (PWA)", False, risk="high", needs=["dashboard"],
+         applies="restart", about="talk to this computer's JARVES from a paired phone on your home Wi-Fi: chat, "
+                                  "push-to-talk voice (needs TLS), approvals list, status. Pairing by QR + one-time "
+                                  "code, per-phone tokens you can revoke. Off = this computer only")
 def _probe_client_delegation(c: ProbeCtx) -> tuple[bool, str]:
     v = getattr(c.cfg, "voice", None)
     if v is None or v.mode != "live":

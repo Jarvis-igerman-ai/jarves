@@ -40,6 +40,10 @@ he = "לחצו \"בדוק עכשיו\" ואז אמרו \"היי ג'ארביס\".
 en = "Press Test now, then say \"Hey Jarvis\"."
 action = "test"
 
+[[steps]]
+he = "ב-V4 אפשר לאמן ראש מודל על ההקלטות שלכם: jarvis wake train. אם הוא לא משפר, jarvis wake train --revert מחזיר למודל הרגיל."
+en = "In V4 you can train a head on your own recordings: jarvis wake train. If it does not help, jarvis wake train --revert goes back to the standard model."
+
 [[problems]]
 he = "הוא לא מגיב"
 en = "He does not react"
@@ -51,3 +55,9 @@ he = "הוא נדלק לבד"
 en = "He wakes up by himself"
 fix_he = "בדיקת הדיבור המקומית (voice.wake_confirm) דוחה דמיונות כמו \"היי טרוויס\". אם זה עדיין קורה, הריצו jarvis wake test --false-wakes 30 והעלו את voice.wake_accept."
 fix_en = "The local speech check (voice.wake_confirm) rejects look-alikes such as \"hey Travis\". If it still happens, run jarvis wake test --false-wakes 30 and raise voice.wake_accept."
+
+[[problems]]
+he = "הוא לא מתעורר כשאני אומר \"היי ג'ארביס\" פעמיים ברצף"
+en = "He misses a second \"Hey Jarvis\" said right after the first"
+fix_he = "התעוררות שנייה בתוך כ-4 שניות מההתעוררות הקודמת עלולה להיפספס. חכו כמה שניות ונסו שוב. הוא גם מתעורר על \"Jarvis\" לבד."
+fix_en = "A second wake within about 4 seconds of the previous one can be missed. Wait a few seconds and try again. He also wakes on a bare \"Jarvis\"."

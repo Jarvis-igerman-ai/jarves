@@ -21,6 +21,7 @@ Modules probed at start: jarves.workspace, jarves.curator, jarves.memory, jarves
 from __future__ import annotations
 
 import importlib
+import gzip
 import json
 import re
 import secrets
@@ -31,7 +32,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, unquote, urlsplit
 
-from . import __version__, config_edit, diagnose, locales, logs, logview
+from . import __version__, config_edit, diagnose, locales, logs, logview, mobile
 from .dashboard_auth import (DEVICE_COOKIE, device_body_ok, DEVICE_IDLE_S, LAN_PORT, PUBLIC_PATHS, Access, client_allowed,
                              is_loopback, lan_ip, parse_cookies)
 from .health import read_snapshot
@@ -40,13 +41,13 @@ from .store import TYPED_KINDS, Store, daily_costs, session_cost
 
 STATIC = Path(__file__).with_name("dashboard_static")
 COOKIE = "jarves_dash"
-_EMAIL = re.compile(r"[\w.+-]+@[\w-]+\.[\w.-]+")
+_EMAIL = re.compile(r"(?<![\w.+-])[\w.+-]+@[\w-]+\.[\w.-]+")
 _ROUTES: list[tuple[str, re.Pattern, object]] = []
 PLUGIN_MODULES = ("jarves.workspace", "jarves.curator", "jarves.memory", "jarves.features", "jarves.google_auth",
                   "jarves.google_setup", "jarves.telegram_channel", "jarves.instagram_channel", "jarves.privacy", "jarves.overview",
                   "jarves.usage", "jarves.backup", "jarves.appearance", "jarves.skills.generated",
                   "jarves.operations", "jarves.runtime", "jarves.updates", "jarves.selfcheck", "jarves.connect",
-                  "jarves.identity", "jarves.dashboard_auth", "jarves.guides",     # WP-L: Guides pages
+                  "jarves.identity", "jarves.dashboard_auth", "jarves.mobile", "jarves.guides",     # WP-L: Guides pages
                   "jarves.setup_wizard",                                         # SW-V3: Setup & add-ons page
                   "jarves.profiles",                                             # Issue #17: Profiles page
                   "jarves.context_trace",                                          # his context per conversation
@@ -56,7 +57,8 @@ PLUGIN_MODULES = ("jarves.workspace", "jarves.curator", "jarves.memory", "jarves
                   "jarves.dialing",                                                # SW-V4 H: Phone calls page
                   "jarves.browser",                                                # Browser allow-list page
                   "jarves.approvals", "jarves.skills.helper",                      # V3: Approvals list, Helper switch
-                  "jarves.diag.service")                                           # SW-V4 O: Health page
+                  "jarves.diag.service",                                           # SW-V4 O: Health page
+                  "jarves.selfspeed")                                              # Health & speed page
 MEMORY_UNDO_KEEP = 30
 MEMORY_UNDO_TTL_S = 24 * 3600                        # the undo button works for 24 h, then the entry is purged
 UNDO_PURGE_EVERY_S = 3600
@@ -97,6 +99,7 @@ class Ctx:
         self.lock = threading.Lock()                  # memory undo journal
         self.clock = time.time                        # tests inject a fake clock
         self.access = None                 # dashboard_auth.Access (set by Dashboard)
+        self.mobile = None                 # mobile.MobileAccess (set by Dashboard; V5 phone access)
         self.port = 0
         self._tl = threading.local()       # per-request principal (the server is threaded)
 
@@ -743,7 +746,8 @@ def load_plugins() -> list[str]:
 
 
 # ---------------------------------------------------------------------- HTTP server
-_TYPES = {".html": "text/html; charset=utf-8", ".js": "text/javascript; charset=utf-8",
+_STATIC_CACHE: dict = {}      # path -> ((mtime_ns, size), etag, raw bytes, gzip bytes | None)
+_TYPES = {".webmanifest": "application/manifest+json", ".html": "text/html; charset=utf-8", ".js": "text/javascript; charset=utf-8",
           ".css": "text/css; charset=utf-8", ".svg": "image/svg+xml"}
 
 
@@ -760,7 +764,8 @@ class Handler(BaseHTTPRequestHandler):
         self.send_response(status)
         self.send_header("Content-Type", ctype)
         self.send_header("Content-Length", str(len(body)))
-        self.send_header("Cache-Control", "no-store")
+        if not (extra and "Cache-Control" in extra):
+            self.send_header("Cache-Control", "no-store")
         self.send_header("X-Content-Type-Options", "nosniff")
         self.send_header("X-Frame-Options", "DENY")
         self.send_header("Referrer-Policy", "no-referrer")
@@ -769,18 +774,43 @@ class Handler(BaseHTTPRequestHandler):
         for k, v in (extra or {}).items():
             self.send_header(k, v)
         self.end_headers()
-        if self.command != "HEAD":
+        if self.command != "HEAD" and status != 304:
             self.wfile.write(body)
 
     def _json(self, status: int, obj) -> None:
         self._send(status, json.dumps(clean(obj), ensure_ascii=False, default=str).encode("utf-8"),
                    "application/json; charset=utf-8")
 
+    def _json_extra(self, status: int, obj, extra: dict) -> None:
+        self._send(status, json.dumps(clean(obj), ensure_ascii=False, default=str).encode("utf-8"),
+                   "application/json; charset=utf-8", extra)
+
     def _static(self, name: str) -> None:
         p = (STATIC / name).resolve()
         if STATIC.resolve() not in p.parents or not p.is_file():
             return self._send(404, b"not found", "text/plain")
-        return self._send(200, p.read_bytes(), _TYPES.get(p.suffix, "application/octet-stream"))
+        # SW-V4 P: ETag + 304 and gzip for the public app files (they are re-sent on every page load otherwise; ~670 KB
+        # of JS/CSS, 30+ requests). `no-cache` = the browser keeps them but asks first, so an update shows at once.
+        try:
+            st = p.stat()
+            key = (st.st_mtime_ns, st.st_size)
+            hit = _STATIC_CACHE.get(str(p))
+            if hit is None or hit[0] != key:
+                raw = p.read_bytes()
+                gz = gzip.compress(raw, 6, mtime=0) if len(raw) > 600 and p.suffix in _TYPES else None
+                hit = _STATIC_CACHE[str(p)] = (key, '"%x-%x"' % key, raw, gz)
+        except OSError:
+            return self._send(404, b"not found", "text/plain")
+        _, etag, raw, gz = hit
+        shell = name in ("index.html", "pair.html")          # the page shells stay no-store (no cached copy of the page)
+        extra = {"Vary": "Accept-Encoding"} if shell else {"ETag": etag, "Cache-Control": "no-cache",
+                                                           "Vary": "Accept-Encoding"}
+        if not shell and self.headers.get("If-None-Match") == etag:
+            return self._send(304, b"", _TYPES.get(p.suffix, "application/octet-stream"), extra)
+        if gz is not None and "gzip" in (self.headers.get("Accept-Encoding") or ""):
+            extra["Content-Encoding"] = "gzip"
+            raw = gz
+        return self._send(200, raw, _TYPES.get(p.suffix, "application/octet-stream"), extra)
 
     def _pair(self, ip: str) -> None:
         """POST /api/pair {code, name} from a phone on the LAN -> device cookie (dashboard_auth.Access.pair)."""
@@ -809,10 +839,14 @@ class Handler(BaseHTTPRequestHandler):
 
     def _handle(self) -> None:
         a, ip = self.access, self.client_address[0]
-        if not client_allowed(ip) or (not a.lan and not is_loopback(ip)):
+        mob = self.ctx.mobile
+        if not client_allowed(ip) or not mobile.network_ok(ip, lan=a.lan, mobile_on=bool(mob and mob.enabled), path=urlsplit(self.path).path):
             return self._send(403, b"forbidden network", "text/plain")       # never answer the internet
         if not a.host_ok(self.headers.get("Host") or ""):
             return self._send(403, b"forbidden host", "text/plain")          # DNS rebinding / spoofed Host
+        if mobile.is_mobile_path(urlsplit(self.path).path):                  # V5: the phone API + PWA (own auth)
+            self.connection.settimeout(30)
+            return mobile.serve(self, mob, ip)
         if not (self.command == "GET" and urlsplit(self.path).path.startswith("/static/")) and not a.rate_ok(ip):
             # (a page load fetches ~30 static files; they are public app code and must not eat the 240/min budget)
             return self._send(429, b"too many requests", "text/plain", {"Retry-After": "60"})
@@ -900,6 +934,7 @@ class _Server(ThreadingHTTPServer):
     # approvals banner overflowed it on Windows, and the browser got ERR_CONNECTION_REFUSED for random requests.
     request_queue_size = 128
     daemon_threads = True
+    tls = False
 
 
 class Dashboard:
@@ -908,21 +943,39 @@ class Dashboard:
     lan=True (opt-in, the dashboard_lan switch): also reachable from paired devices on the home network."""
 
     def __init__(self, home: Path, cfg, port: int = 0, *, workspace=None, memory=None, settings=None,
-                 config_path=None, lan: bool = False, lan_host: str | None = None) -> None:
+                 config_path=None, lan: bool = False, lan_host: str | None = None, mobile_on: bool = False,
+                 mobile_bridge=None, tls: tuple | None = None) -> None:
         self.ctx = Ctx(home, cfg, workspace=workspace, memory=memory, settings=settings, config_path=config_path)
         self.plugins = load_plugins()
         token = secrets.token_urlsafe(24)
-        if lan:
+        if lan or mobile_on:
             lan_host = lan_host or lan_ip()
             if lan_host is None:
                 raise OSError("no private home-network address found (Wi-Fi/Ethernet connected?)")
         self.access = Access(home, token, lan=lan, lan_host=lan_host)
         self.ctx.access = self.access
+        self.access.mobile = bool(mobile_on)
+        self.mobile = self.ctx.mobile = mobile.MobileAccess(home)
         handler = type("H", (Handler,), {"ctx": self.ctx, "token": token, "access": self.access})
-        self.httpd = _Server(("0.0.0.0" if lan else "127.0.0.1", port or (LAN_PORT if lan else 0)), handler)
+        wide = lan or mobile_on
+        self.httpd = _Server(("0.0.0.0" if wide else "127.0.0.1", port or (LAN_PORT if wide else 0)), handler)
+        if tls:                                  # V5: optional TLS for the phone (needed for the microphone)
+            import ssl
+            sctx = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+            sctx.minimum_version = ssl.TLSVersion.TLSv1_2
+            sctx.load_cert_chain(str(tls[0]), str(tls[1]))
+            self.httpd.socket = sctx.wrap_socket(self.httpd.socket, server_side=True)
+            self.httpd.tls = True
         self.httpd.daemon_threads = True
         self.port = self.ctx.port = self.httpd.server_address[1]
         self.url = f"http://127.0.0.1:{self.port}/?t={token}"
+        self.mobile.port, self.mobile.host = self.port, lan_host if wide else None
+        self.mobile.scheme = "https" if tls else "http"
+        self.mobile.bridge = mobile_bridge
+        self.mobile.enabled = bool(mobile_on)       # default OFF: no phone path is served, nothing listens beyond 127.0.0.1
+        if mobile_on:
+            self.mobile.audit("mobile_mode_started", host=lan_host, port=self.port, tls=bool(tls))
+            logs.info("dashboard", "MOBILE_MODE_STARTED", "phone access is on", port=self.port, transport="https" if tls else "http")
         self.lan_url = f"http://{lan_host}:{self.port}/pair" if lan else None
         if lan:
             self.access.audit("lan_mode_started", host=lan_host, port=self.port)

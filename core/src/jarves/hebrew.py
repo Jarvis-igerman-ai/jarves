@@ -132,6 +132,15 @@ TEXT: dict[str, str] = {
     "UNIT test_instagram.py (local fake Graph API server)": "בדיקות יחידה: test_instagram.py (שרת Graph API מדומה מקומי)",
     "never run against real Instagram: needs the owner's Meta app, account and token":
         "מעולם לא הורץ מול אינסטגרם אמיתי: דרושים אפליקציית Meta, חשבון ואסימון של הבעלים",
+    "checks his own installation (daily) and his speed (weekly), tells you what is slow or broken and whether it got worse than before; free, read-only, never at night or during a conversation":
+        "בודק את ההתקנה שלו (כל יום) ואת המהירות שלו (פעם בשבוע), אומר מה איטי או שבור והאם זה החמיר לעומת בעבר; חינם, קריאה בלבד, אף פעם לא בלילה או באמצע שיחה",
+    "dashboard Health & speed page, jarvis selftest, jarvis speedtest, Jobs page (times)":
+        "עמוד תקינות ומהירות בלוח הבקרה, jarvis selftest, jarvis speedtest, עמוד המשימות הקבועות (שעות)",
+    "UNIT test_selfspeed.py (planted faults, fake clock, fake Core, real dashboard HTTP)":
+        "בדיקות יחידה: test_selfspeed.py (תקלות מדומות, שעון מדומה, ליבה מדומה, לוח בקרה אמיתי ב-HTTP)",
+    "not yet run on the owner's PC for a week": "טרם הורץ שבוע שלם על המחשב של הבעלים",
+    "pure Python; /proc counters; never run on a Raspberry Pi (no device in the test setup)":
+        "Python בלבד; מונים מ-/proc; מעולם לא הורץ על Raspberry Pi (אין מכשיר בסביבת הבדיקות)",
     "checks health, recent logs, settings and features on demand and weekly, then suggests ranked fixes; settings change only after you approve":
         "בודק תקינות, יומנים אחרונים, הגדרות ויכולות לפי בקשה ופעם בשבוע, ומציע תיקונים לפי סדר חשיבות; הגדרות משתנות רק אחרי שאישרת",
     "UNIT test_selfcheck.py (real store/log/scheduler/autonomy in tmp dirs, synthetic log files)":
@@ -243,6 +252,12 @@ TEXT: dict[str, str] = {
     "systemd user unit generated and tested as a file only": "יחידת systemd נוצרה ונבדקה כקובץ בלבד",
     "the check works, but there is no Pi package to install": "הבדיקה עובדת, אבל אין עדיין חבילה להתקנה ב-Pi",
     # --- platform evidence
+    "talk to this computer's JARVES from a paired phone on your home Wi-Fi: chat, push-to-talk voice (needs TLS), approvals list, status. Pairing by QR + one-time code, per-phone tokens you can revoke. Off = this computer only":
+        "מדברים עם JARVES של המחשב הזה מטלפון מצומד ברשת הביתית: שיחה, דיבור בלחיצה (דורש TLS), רשימת אישורים ומצב. צימוד בקוד QR וקוד חד-פעמי, ואסימון נפרד לכל טלפון שאפשר לבטל. כבוי = המחשב הזה בלבד",
+    "dashboard Phone page / `jarvis dashboard --mobile`": "עמוד טלפון בלוח הבקרה / `jarvis dashboard --mobile`",
+    "UNIT test_mobile_*.py (pairing, tokens, scopes, rate limits, audit, PWA files, TLS); QR decoded once with OpenCV":
+        "בדיקות יחידה: test_mobile_*.py (צימוד, אסימונים, הרשאות, הגבלת קצב, ביקורת, קבצי PWA, TLS); קוד QR פוענח פעם אחת עם OpenCV",
+    "V5 is PC-hosted; the Pi is out of scope": "V5 רץ על המחשב; ה-Pi מחוץ להיקף",
     "UNIT": "בדיקות יחידה",
     "UNIT test_dashboard_lan.py (spoofed host/origin, CSRF, rate limit)":
         "בדיקות יחידה: test_dashboard_lan.py (זיוף host/origin, CSRF, הגבלת קצב)",
@@ -309,6 +324,10 @@ TEXT: dict[str, str] = {
     "privacy mode is off: what you say is kept in the local history (never uploaded)":
         "מצב הפרטיות כבוי: מה שנאמר נשמר בהיסטוריה המקומית (אף פעם לא מועלה)",
     "no OpenAI admin key saved": "לא נשמר מפתח Admin של OpenAI",
+    "optional read-only OpenAI admin key: real monthly cost for the spend display and usage checks; used only for OpenAI's costs endpoint":
+        "מפתח Admin אופציונלי של OpenAI לקריאה בלבד: העלות החודשית האמיתית לתצוגת ההוצאות ולבדיקות שימוש; משמש רק לנקודת העלויות של OpenAI",
+    "core/tests/test_usage_admin_key.py with a fake costs endpoint; no real admin key tested yet (owner decision OD-05)":
+        "core/tests/test_usage_admin_key.py עם נקודת עלויות מדומה; עוד לא נבדק מפתח Admin אמיתי (החלטת בעלים OD-05)",
     "no data folder": "אין תיקיית נתונים",
     "no monthly API budget set": "לא נקבע תקציב חודשי ל-API",
     "no backup made yet": "עוד לא נעשה גיבוי",

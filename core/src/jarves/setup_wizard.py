@@ -60,7 +60,7 @@ ADDON_MODULES = ("jarves.telegram_channel", "jarves.instagram_channel", "jarves.
                  "jarves.recall", "jarves.diag.service", "jarves.whatsapp_bridge", "jarves.orchestrator", "jarves.dialing")
 # Privacy-sensitive or outward-acting: OFF on the first run whatever else says; ON only after an explicit yes.
 SAFE_OFF = frozenset({"camera", "face_recognition", "camera_when_away", "gmail_send", "calendar_write",
-                      "dashboard_lan", "browser", "telegram", "home_assistant", "instagram", "helper",
+                      "dashboard_lan", "mobile_access", "browser", "telegram", "home_assistant", "instagram", "helper",
                       "helper_readonly_auto", "whatsapp_bridge", "whatsapp_send", "agent_orchestrator", "assisted_dialing"})
 # Registered and grouped (so coverage checks see them) but never offered by the wizard: the owner decided (20 Oct)
 # that the Helper asks for EVERY command; the read-only allow-list exists only as `jarvis features on ...`.
@@ -71,8 +71,8 @@ GOOGLE_FEATURES = ("google_calendar", "calendar_write", "gmail_read", "gmail_sen
 # that every registered feature is listed.
 GROUPS: tuple[tuple[str, str, str, tuple[str, ...]], ...] = (
     ("core", "בסיס", "Core", ("web_search", "background_tasks", "memory_curator", "memory_llm_pass",
-                             "diagnosis_llm_pass", "conversation_recall", "self_check", "self_diagnostics_2", "guided_setup", "workspace_agent_edit", "assistant_identity", "skill_creation",
-                             "proactive_help", "usage_monitor", "appearance", "background_core", "display_control",
+                             "diagnosis_llm_pass", "conversation_recall", "self_check", "self_diagnostics_2", "self_tests", "guided_setup", "workspace_agent_edit", "assistant_identity", "skill_creation",
+                             "proactive_help", "usage_monitor", "usage_admin_key", "appearance", "background_core", "display_control",
                              "tray_icon", "autostart")),
     ("voice", "קול", "Voice", ("wake_word", "greeting", "chimes", "voice_change", "client_delegation")),
     ("music", "מוזיקה", "Music", ("music",)),
@@ -84,7 +84,7 @@ GROUPS: tuple[tuple[str, str, str, tuple[str, ...]], ...] = (
     ("channels", "ערוצים ובית חכם", "Channels & smart home", ("telegram", "instagram", "whatsapp_handoff",
                                                                   "whatsapp_bridge", "whatsapp_send", "home_assistant")),
     ("phone", "שיחות טלפון", "Phone calls", ("assisted_dialing",)),
-    ("dashboard", "לוח בקרה וטלפון", "Dashboard & phone", ("dashboard", "dashboard_lan", "context_trace")),
+    ("dashboard", "לוח בקרה וטלפון", "Dashboard & phone", ("dashboard", "dashboard_lan", "mobile_access", "context_trace")),
     ("updates", "עדכונים וגיבוי", "Updates & backup", ("update_check", "backup")),
     ("profiles", "פרופילים", "Profiles", ("profiles",)),
     ("helper", "עזרה במחשב (פקודות והתקנות)", "Computer helper (commands & installs)", ("helper", "helper_readonly_auto")),
@@ -919,6 +919,8 @@ BUNDLE: dict[str, list[Callable[[], tuple[bool, str]]]] = {
     "self_diagnostics_2": [_mod("jarves.diag.service"), _mod("jarves.diag.monitor"), _mod("jarves.diag.ai_review"),
                            _mod("jarves.diag.canary"), _data("jarves", "dashboard_static/health.js"),
                            _data("jarves.guides", "data/health.toml")],
+    "self_tests": [_mod("jarves.selftest"), _mod("jarves.speedtest"), _mod("jarves.selfspeed"), _mod("jarves.procstats"),
+                   _data("jarves", "dashboard_static/selfspeed.js"), _data("jarves.guides", "data/self_tests.toml")],
     "guided_setup": [_mod("jarves.connect"), _mod("jarves.google_setup"), _mod("jarves.telegram_channel"),
                      _data("jarves.guides", "data/guided_setup.toml")],
     "google_calendar": _GOOGLE, "calendar_write": _GOOGLE, "gmail_read": _GOOGLE, "gmail_send": _GOOGLE,
@@ -941,6 +943,7 @@ BUNDLE: dict[str, list[Callable[[], tuple[bool, str]]]] = {
                   _data("jarves", "dashboard_static/shell.js"), _data("jarves", "dashboard_static/locales/en.js"),
                   _data("jarves", "dashboard_static/locales/he.js")],
     "dashboard_lan": [_mod("jarves.dashboard_auth"), _data("jarves", "dashboard_static/pair.html")],
+    "mobile_access": [_mod("jarves.mobile"), _mod("jarves.qrmini"), _data("jarves", "dashboard_static/mobile/index.html")],
     "context_trace": [_mod("jarves.context_trace"), _data("jarves", "dashboard_static/context.js")],
     "agent_orchestrator": [_mod("jarves.orchestrator"), _mod("jarves.orchestrator.service"),
                            _mod("jarves.orchestrator.hook"), _mod("jarves.orchestrator.channel"),
@@ -954,6 +957,7 @@ BUNDLE: dict[str, list[Callable[[], tuple[bool, str]]]] = {
     "skill_creation": [_mod("jarves.skills.generated")],
     "proactive_help": [_mod("jarves.guides"), _data("jarves.guides", "data/help.toml")],
     "usage_monitor": [_mod("jarves.usage")],
+    "usage_admin_key": [_mod("jarves.usage")],
     "scheduler": [_mod("jarves.scheduler"), _tz("Asia/Jerusalem")],
     "reports": [_mod("jarves.scheduler")],
     "timers": [_mod("jarves.timers"), _tz("Asia/Jerusalem")],

@@ -1,0 +1,68 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#0b1020">
+<title>JARVES</title>
+<link rel="manifest" href="/m/manifest.webmanifest">
+<link rel="icon" href="/m/icon.svg" type="image/svg+xml">
+<link rel="stylesheet" href="/m/style.css">
+<script src="/m/app.js" defer></script>
+</head>
+<body>
+<header class="bar">
+  <strong>JARVES</strong>
+  <span id="conn" class="pill" role="status" aria-live="polite"></span>
+  <button type="button" id="lang" class="ghost" aria-label="Language">עב</button>
+</header>
+
+<main id="pairView" hidden>
+  <h1 data-t="pair_title">Pair this phone</h1>
+  <p data-t="pair_help">On the computer open the JARVES dashboard, go to Phone and press Pair a phone. Scan the QR code, or type the 8-digit code here.</p>
+  <form id="pairForm" class="card">
+    <label><span data-t="code">Pairing code</span>
+      <input id="code" inputmode="numeric" autocomplete="one-time-code" maxlength="9" required></label>
+    <label><span data-t="name">Name for this phone</span>
+      <input id="name" maxlength="40" value="phone"></label>
+    <button type="submit" class="primary" data-t="pair">Pair</button>
+    <p id="pairMsg" class="muted" aria-live="polite"></p>
+  </form>
+  <p class="muted" data-t="pair_net">Works on your home network only. Nothing here is reachable from the internet.</p>
+</main>
+
+<main id="appView" hidden>
+  <nav class="tabs" role="tablist">
+    <button type="button" role="tab" data-tab="chat" data-t="tab_chat" aria-selected="true">Chat</button>
+    <button type="button" role="tab" data-tab="voice" data-t="tab_voice" aria-selected="false">Voice</button>
+    <button type="button" role="tab" data-tab="approvals" data-t="tab_approvals" aria-selected="false">Approvals <span id="apprCount" class="badge" hidden></span></button>
+    <button type="button" role="tab" data-tab="status" data-t="tab_status" aria-selected="false">Status</button>
+  </nav>
+
+  <section id="tab-chat" class="panel">
+    <div id="log" class="log" aria-live="polite"></div>
+    <form id="chatForm" class="row">
+      <input id="chatText" maxlength="1000" autocomplete="off" data-ph="type_here" placeholder="Type a message">
+      <button type="submit" class="primary" data-t="send">Send</button>
+    </form>
+  </section>
+
+  <section id="tab-voice" class="panel" hidden>
+    <p id="voiceNote" class="muted"></p>
+    <button type="button" id="ptt" class="ptt" data-t="hold">Hold to talk</button>
+    <p id="voiceOut" class="log" aria-live="polite"></p>
+  </section>
+
+  <section id="tab-approvals" class="panel" hidden>
+    <p id="apprNote" class="muted"></p>
+    <ul id="apprList" class="list"></ul>
+  </section>
+
+  <section id="tab-status" class="panel" hidden>
+    <ul id="statusList" class="list"></ul>
+    <p class="muted" id="meInfo"></p>
+    <button type="button" id="unpair" data-t="unpair">Un-pair this phone</button>
+  </section>
+</main>
+</body>
+</html>
