@@ -317,7 +317,7 @@ class Registry:
 
 
 _FIX_LINE = re.compile(r"\bfix(?:es|ed)?\b", re.I)
-_TOKEN = re.compile(r"\bJI-[0-9a-f]{8}\b|\b[A-Z][A-Z0-9_.:+\-]{3,63}\b")
+_TOKEN = re.compile(r"\bJI-[0-9a-f]{8}\b|\b[A-Z][A-Z0-9]*_[A-Za-z0-9_.:+\-]{1,62}\b|\b[A-Z][A-Z0-9.:+\-]{3,63}\b")
 _ID_TOKEN = re.compile(r"\bJI-[0-9a-f]{8}\b")
 
 

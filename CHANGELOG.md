@@ -2,6 +2,10 @@
 
 All notable changes to JARVES. Newest first. Details per release: [docs/RELEASE_NOTES_4.0.md](docs/RELEASE_NOTES_4.0.md). Dates are 2026.
 
+## 4.0.1 (unreleased)
+
+- Added: Issues registry. JARVES lists the problems he finds in himself (self-test, speed test, diagnostics and crash findings, tools that keep failing, crashes, dashboard script errors), de-duplicated and content-free: `jarvis issues`, dashboard page Bug reports (English and Hebrew) with a Report button that shows the exact text, asks in the approvals popup, then files an issue labelled `from-diagnostics`. Voice: "what issues do you have?". Issues the CHANGELOG lists on a Fixes line are marked fixed in that version. See docs/BUGFIX_LANE.md and `core/tools/triage_issues.py`.
+
 ## 4.0 (unreleased, in integration)
 
 - Added: privacy hardening and redaction audit; independent security re-review fixes; compact approvals popup with signed answers; client-mode GPT-Live delegation with a strict budget; Agent Orchestrator for Claude Code and Codex; WhatsApp bridge (read first, approved sends); conversation recall; Health page and Self-Diagnostics 2.0; performance budgets and nightly CI; owner-trained wake head; dashboard in English and Hebrew with accessibility fixes.

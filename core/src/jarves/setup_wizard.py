@@ -71,7 +71,7 @@ GOOGLE_FEATURES = ("google_calendar", "calendar_write", "gmail_read", "gmail_sen
 # that every registered feature is listed.
 GROUPS: tuple[tuple[str, str, str, tuple[str, ...]], ...] = (
     ("core", "בסיס", "Core", ("web_search", "background_tasks", "memory_curator", "memory_llm_pass",
-                             "diagnosis_llm_pass", "conversation_recall", "self_check", "self_diagnostics_2", "self_tests", "guided_setup", "workspace_agent_edit", "assistant_identity", "skill_creation",
+                             "diagnosis_llm_pass", "conversation_recall", "self_check", "self_diagnostics_2", "self_tests", "issue_reports", "guided_setup", "workspace_agent_edit", "assistant_identity", "skill_creation",
                              "proactive_help", "usage_monitor", "usage_admin_key", "appearance", "background_core", "display_control",
                              "tray_icon", "autostart")),
     ("voice", "קול", "Voice", ("wake_word", "greeting", "chimes", "voice_change", "client_delegation")),
