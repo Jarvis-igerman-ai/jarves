@@ -1739,12 +1739,8 @@ def main(argv: list[str] | None = None) -> int:
             "whatsapp": whatsapp_admin.cmd_whatsapp,
             "agents": agents_cli.cmd_agents,
             "dial": dialing.cmd_dial,
-<<<<<<< HEAD
             "manage": self_manage.cmd_manage, "undo": self_manage.cmd_manage,
-            **cli_parity.COMMANDS, **budget_cli.COMMANDS}[a.cmd](a, cfg, home)
-=======
             **cli_parity.COMMANDS, **budget_cli.COMMANDS, **selfspeed.COMMANDS}[a.cmd](a, cfg, home)
->>>>>>> jarves/main
 
 
 if __name__ == "__main__":
