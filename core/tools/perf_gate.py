@@ -1,7 +1,7 @@
 """SW-V4 M performance gate: fails (exit 1) when a measured value exceeds its budget in core/perf_budgets.toml.
 
     python tools/perf_gate.py [--class owner|ci] [--runs N] [--idle-s S] [--scenario combined]
-                              [--results out.json] [--from-json measured.json] [--log jarves.log] [--propose]
+                              [--results out.json] [--from-json measured.json] [--log jarves.log] [--installer-json m.json] [--propose]
 
 Measures (silent, offline, nothing billable): the real background Core via tools/bench_startup.py (median of the runs)
 plus in-process timings (features_list with an expired slow probe, the live-session probe path, the dashboard's first
@@ -162,6 +162,8 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--results", type=Path, help="write measured values + rows as JSON")
     ap.add_argument("--from-json", type=Path, help="check these measured values instead of measuring")
     ap.add_argument("--log", type=Path, help="also check the newest start in this real jarves.log")
+    ap.add_argument("--installer-json", type=Path, help="installer size/time numbers from packaging/installer_metrics.py "
+                                                         "(SW-V4 L); checked against [installer.*] in perf_budgets.toml")
     ap.add_argument("--no-bench", action="store_true", help="skip the real-Core bench (in-process timings only)")
     ap.add_argument("--propose", action="store_true")
     a = ap.parse_args(argv)
@@ -183,6 +185,12 @@ def main(argv: list[str] | None = None) -> int:
         if a.log:
             measured.update(measure_log(a.log))
     rows = check(measured, budgets, cls)
+    if a.installer_json:
+        sys.path.insert(0, str(CORE.parent / "packaging"))
+        import installer_metrics as im
+        inst = json.loads(a.installer_json.read_text(encoding="utf-8"))
+        rows += im.check(inst, budgets.get("installer", {}), cls)
+        measured = {**measured, **{f"installer.{k}": v for k, v in inst.items()}}
     print(render(rows, cls))
     if a.results:
         a.results.write_text(json.dumps({"class": cls, "measured": measured, "rows": rows}, indent=1), encoding="utf-8")

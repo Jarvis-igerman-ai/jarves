@@ -24,7 +24,7 @@ NOISY = {"WAKE_HEALTH", "WAKE_NEAR_MISS", "MSG_IN", "MSG_OUT", "STARTUP_STAGE", 
          "LIVE_BACKEND_WEB_SEARCH", "LIVE_BACKEND_WRITING", "TASK_BACKEND_WRITING"}
 MAX_PAGE = 2000
 MAX_EXPORT = 50_000
-_EMAIL = re.compile(r"[\w.+-]+@[\w-]+\.[\w.-]+")
+_EMAIL = re.compile(r"(?<![\w.+-])[\w.+-]+@[\w-]+\.[\w.-]+")
 
 
 def log_files(home: Path) -> list[Path]:

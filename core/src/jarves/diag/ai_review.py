@@ -82,7 +82,7 @@ def _phone(m: re.Match) -> str:
     if _DATE.fullmatch(s.strip()) or sum(ch.isdigit() for ch in s) < 7:
         return s                                    # a date / time stamp, not a number
     return "<number>"
-_EMAIL = re.compile(r"[\w.+-]+@[\w-]+\.[\w.-]+")
+_EMAIL = re.compile(r"(?<![\w.+-])[\w.+-]+@[\w-]+\.[\w.-]+")
 _HEBREW = re.compile("[\\u0590-\\u05FF][\\u0590-\\u05FF ]*")      # Hebrew runs (conversation language)
 _LONGTOKEN = re.compile(r"\b[A-Za-z0-9_\-]{32,}\b")
 _SAFE_STR = re.compile(r"^[a-z0-9_.\-<>]{0,32}$")      # enum-like values only; anything else becomes <N chars>

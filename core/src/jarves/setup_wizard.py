@@ -57,11 +57,11 @@ ADDON_MODULES = ("jarves.telegram_channel", "jarves.instagram_channel", "jarves.
                  "jarves.appearance", "jarves.backup", "jarves.usage", "jarves.updates", "jarves.runtime",
                  "jarves.operations", "jarves.guides", "jarves.skills.generated", "jarves.browser", "jarves.profiles",
                  "jarves.selfcheck", "jarves.connect", "jarves.skills.helper", "jarves.context_trace",
-                 "jarves.recall", "jarves.diag.service", "jarves.whatsapp_bridge", "jarves.orchestrator")
+                 "jarves.recall", "jarves.diag.service", "jarves.whatsapp_bridge", "jarves.orchestrator", "jarves.dialing")
 # Privacy-sensitive or outward-acting: OFF on the first run whatever else says; ON only after an explicit yes.
 SAFE_OFF = frozenset({"camera", "face_recognition", "camera_when_away", "gmail_send", "calendar_write",
                       "dashboard_lan", "mobile_access", "browser", "telegram", "home_assistant", "instagram", "helper",
-                      "helper_readonly_auto", "whatsapp_bridge", "whatsapp_send", "agent_orchestrator"})
+                      "helper_readonly_auto", "whatsapp_bridge", "whatsapp_send", "agent_orchestrator", "assisted_dialing"})
 # Registered and grouped (so coverage checks see them) but never offered by the wizard: the owner decided (20 Oct)
 # that the Helper asks for EVERY command; the read-only allow-list exists only as `jarvis features on ...`.
 WIZARD_HIDDEN = frozenset({"helper_readonly_auto",
@@ -72,7 +72,7 @@ GOOGLE_FEATURES = ("google_calendar", "calendar_write", "gmail_read", "gmail_sen
 GROUPS: tuple[tuple[str, str, str, tuple[str, ...]], ...] = (
     ("core", "בסיס", "Core", ("web_search", "background_tasks", "memory_curator", "memory_llm_pass",
                              "diagnosis_llm_pass", "conversation_recall", "self_check", "self_diagnostics_2", "guided_setup", "workspace_agent_edit", "assistant_identity", "skill_creation",
-                             "proactive_help", "usage_monitor", "appearance", "background_core", "display_control",
+                             "proactive_help", "usage_monitor", "usage_admin_key", "appearance", "background_core", "display_control",
                              "tray_icon", "autostart")),
     ("voice", "קול", "Voice", ("wake_word", "greeting", "chimes", "voice_change", "client_delegation")),
     ("music", "מוזיקה", "Music", ("music",)),
@@ -83,6 +83,7 @@ GROUPS: tuple[tuple[str, str, str, tuple[str, ...]], ...] = (
                                               "autonomy", "morning_briefing")),
     ("channels", "ערוצים ובית חכם", "Channels & smart home", ("telegram", "instagram", "whatsapp_handoff",
                                                                   "whatsapp_bridge", "whatsapp_send", "home_assistant")),
+    ("phone", "שיחות טלפון", "Phone calls", ("assisted_dialing",)),
     ("dashboard", "לוח בקרה וטלפון", "Dashboard & phone", ("dashboard", "dashboard_lan", "mobile_access", "context_trace")),
     ("updates", "עדכונים וגיבוי", "Updates & backup", ("update_check", "backup")),
     ("profiles", "פרופילים", "Profiles", ("profiles",)),
@@ -954,6 +955,7 @@ BUNDLE: dict[str, list[Callable[[], tuple[bool, str]]]] = {
     "skill_creation": [_mod("jarves.skills.generated")],
     "proactive_help": [_mod("jarves.guides"), _data("jarves.guides", "data/help.toml")],
     "usage_monitor": [_mod("jarves.usage")],
+    "usage_admin_key": [_mod("jarves.usage")],
     "scheduler": [_mod("jarves.scheduler"), _tz("Asia/Jerusalem")],
     "reports": [_mod("jarves.scheduler")],
     "timers": [_mod("jarves.timers"), _tz("Asia/Jerusalem")],
@@ -963,7 +965,8 @@ BUNDLE: dict[str, list[Callable[[], tuple[bool, str]]]] = {
     "proactive_alerts": [_mod("jarves.alerts")],
     "autonomy": [_mod("jarves.autonomy")],
     "backup": [_mod("jarves.backup")],
-    "update_check": [_mod("jarves.updates")],
+    "update_check": [_mod("jarves.updates"), _mod("jarves.migrations"), _data("jarves", "dashboard_static/updates.js"),
+                     _mod("cryptography.hazmat.primitives.asymmetric.ed25519")],   # the signed-manifest check needs it
     "background_core": [_mod("jarves.runtime.service")],
     "display_control": [_mod("jarves.runtime.viewer")],
     "tray_icon": [_win(_mod("pystray")), _win(_mod("PIL"))],
@@ -980,6 +983,8 @@ BUNDLE: dict[str, list[Callable[[], tuple[bool, str]]]] = {
                         _mod("websockets.asyncio.client"), _data("jarves", "dashboard_static/whatsapp.js"),
                         _data("jarves.guides", "data/whatsapp_bridge.toml")],
     "whatsapp_send": [_mod("jarves.whatsapp_bridge"), _mod("jarves.approvals"), _mod("jarves.approval_popup")],
+    "assisted_dialing": [_mod("jarves.dialing"), _win(_mod("winreg")), _data("jarves", "dashboard_static/dialing.js"),
+                         _data("jarves.guides", "data/assisted_dialing.toml")],
     "morning_briefing": [_mod("jarves.briefing"), _mod("httpx"), _data("jarves.guides", "data/morning_briefing.toml")],
     "home_assistant": [_mod("jarves.homeassistant"), _mod("httpx"), _data("jarves.guides", "data/home_assistant.toml")],
     "profiles": [_mod("jarves.profiles"), _data("jarves", "dashboard_static/profiles.js"),

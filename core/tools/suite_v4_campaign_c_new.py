@@ -203,6 +203,7 @@ async def s67(h, r):
     r.key = (f"tools {x['tools']}, spoken yes refused {refused}, screen {x['screen_clicked']} -> {x['decision']} via "
              f"{x['channel']}, results {res}, beta sessions {len(rows)}; said: {x['said'][-140:]}")
     r.details = [x]
+    await agents_shutdown(h, s)                      # a fresh Core per scenario: no context carried to the next one
 
 
 @scenario(68, "agents_stop_voice", "Orchestrator: stop the JARVES-started session by voice (screen approval)",
@@ -212,13 +213,18 @@ async def s68(h, r):
     if s.boot_error:
         r.ok, r.key = False, s.boot_error
         return
+    started = await asyncio.to_thread(s._o.start_session, "claude", "beta", "write the unit test", by="owner",
+                                      approved=True, here=True)       # the JARVES-started session to stop
+    await asyncio.sleep(3)
+    await h.quiet(s, 3.0, 40)                        # the started fake session announces its first turn: let it finish
     x = await v3.approval_flow(h, s, "תעצור בבקשה את הסשן של קלוד בפרויקט בטא", "כן", wait_ask=50, screen_after=8)
     res = [t for t in x["tool_results"] if t[0] == "agents_stop"]
     r.ok = "agents_stop" in x["tools"] and x["approval_asked"] and x["decision"] == "approved" and \
         any(ok for _, ok, _ in res)
-    r.key = (f"tools {x['tools']}, asked {x['approval_asked']}, {x['decision']} via {x['channel']}, results {res}; "
-             f"said: {x['said'][-140:]}")
+    r.key = (f"started {bool(started.get('ok'))}, tools {x['tools']}, asked {x['approval_asked']}, {x['decision']} "
+             f"via {x['channel']}, results {res}; said: {x['said'][-140:]}")
     r.details = [x]
+    await agents_shutdown(h, s)
 
 
 @scenario(69, "agents_risky_permission", "A worker asks for permission: a medium request (`npm test`) is spoken as "
@@ -242,7 +248,8 @@ async def s69(h, r):
         await wait_for(lambda: time.time() - VAudio.last_play >= 1.6, 20)
         q = _said(s, mark)
         await h.say("כן")
-        await asyncio.sleep(4)
+        await asyncio.sleep(2)
+        await h.quiet(s, 2.5, 40)                    # the refusal is answered aloud: say "לא" only after JARVES is silent
         early = (s.log.codes("APPROVAL_DECIDED", mark) or [{}])[0].get("decision")
         await h.say("לא")
         await wait_for(lambda: bool(s.log.codes("APPROVAL_DECIDED", mark)), 15)
@@ -266,6 +273,7 @@ async def s69(h, r):
              f"{m['channel']}, worker {m['worker_got']}, names cmd {m['names_command']}; high: typed {hi['typed']}, "
              f"yes->{hi['after_yes']}, no->{hi['decision']} via {hi['channel']}, worker {hi['worker_got']}")
     r.details = [out]
+    await agents_shutdown(h, s)
 
 
 @scenario(70, "agents_digest_voice", "Orchestrator: 'מה התקדם מאז שיצאתי?' gives a short digest", "agents_digest (or "
@@ -309,6 +317,7 @@ async def cc_boot(h):
     b.start()
     s._wa = b
     s.core.features.set("whatsapp_bridge", True, by="suite")
+    await wa.restart_live(h, s)                      # the rule joins the live session at its start
     return s
 
 

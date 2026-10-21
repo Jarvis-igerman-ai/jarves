@@ -1,0 +1,51 @@
+order = 26
+category = "everyday"
+features = ["assisted_dialing"]
+suggest = false
+aliases = ["חיוג", "תתקשר", "התקשרות", "phone link", "dial", "call", "assisted dialing", "חיוג מסייע"]
+error_codes = ["DIAL_UNKNOWN_CONTACT", "DIAL_AMBIGUOUS", "DIAL_WHICH_NUMBER", "DIAL_BAD_NUMBER", "DIAL_UNTRUSTED_NUMBER", "DIAL_NUMBER_NOT_HEARD", "DIAL_NO_HANDLER", "DIAL_PHONE_LINK_NOT_PAIRED", "DIAL_RATE_LIMITED", "DIAL_DECLINED", "DIAL_OPEN_FAILED"]
+title_he = "חיוג מסייע (Phone Link)"
+title_en = "Assisted dialing (Phone Link)"
+what_he = "אומרים \"תתקשר לדנה\". ג'ארביס מוצא את המספר, מקריא אותו ספרה אחרי ספרה, מבקש אישור, ואז פותח את Phone Link עם המספר. אתם לוחצים חיוג. הוא לא מחייג, לא עונה ולא מקליט."
+what_en = "Say \"call Dana\". JARVES finds the number, reads it back digit by digit, asks for your approval, then opens Phone Link with the number. You press Call. He never dials, answers or records."
+say = [["תתקשר לדנה", "Call Dana"], ["תתקשר ל-0541234567", "Call 054-123-4567"]]
+expect_he = "הוא מקריא את המספר ספרה אחרי ספרה וחלון אישור מראה את השם, המספר ומאיפה הוא. אחרי אישור נפתח Phone Link ואתם לוחצים חיוג. מספר שלא חייגתם אליו אף פעם דורש אישור על המסך."
+expect_en = "He reads the number digit by digit and the approval window shows the name, the number and where it came from. After you approve, Phone Link opens and you press Call. A number you never called before needs approval on the screen."
+test_he = "הריצו  jarvis dial דנה  ובדקו שהמספר הנכון נפתח ב-Phone Link. אין שיחה עד שאתם לוחצים חיוג."
+test_en = "Run  jarvis dial Dana  and check that Phone Link opens with the right number. No call happens until you press Call."
+cost_he = "חינם."
+cost_en = "Free."
+privacy_he = "המספר נשלח רק לאפליקציית החיוג במחשב הזה. ביומנים נשמר רק גיבוב, לא המספר ולא השם. מספרים ממייל, מאתר או מהודעה לא מחויגים. מספרי חירום (100, 101, 102, 112) רק פותחים את החייגן."
+privacy_en = "The number goes only to the dialer app on this PC. Logs keep a hash, never the number or the name. Numbers from an e-mail, a web page or a message are never dialled. Emergency numbers (100, 101, 102, 112) only open the dialer."
+
+[[steps]]
+he = "התקינו את Phone Link (מובנה ב-Windows 11) וחברו אליו את הטלפון: Phone Link > הוסף טלפון. ודאו שחייגן ברירת המחדל של tel: הוא Phone Link (הגדרות > אפליקציות > אפליקציות ברירת מחדל > tel)."
+en = "Install Phone Link (built into Windows 11) and pair your phone: Phone Link > add phone. Make sure Phone Link is the default app for tel: (Settings > Apps > Default apps > tel)."
+
+[[steps]]
+he = "הפעילו את \"חיוג מסייע\". הוא כבוי כברירת מחדל."
+en = "Turn on \"Assisted dialing\". It is off by default."
+action = "feature_on:assisted_dialing"
+check = "enabled:assisted_dialing"
+
+[[steps]]
+he = "אמרו לג'ארביס מספר פעם אחת (\"המספר של דנה הוא 054-123-4567, תזכור\") או הוסיפו איש קשר. אחר כך: \"תתקשר לדנה\"."
+en = "Tell JARVES a number once (\"Dana's number is 054-123-4567, remember it\") or add a contact. Then: \"Call Dana\"."
+
+[[problems]]
+he = "אין לי מספר של השם הזה"
+en = "He has no number for that name"
+fix_he = "אמרו את המספר בעצמכם, או חברו אנשי קשר של גוגל (jarvis google login --contacts) והפעילו אותם."
+fix_en = "Say the number yourself, or connect Google Contacts (jarvis google login --contacts) and turn it on."
+
+[[problems]]
+he = "אין אפליקציה שמטפלת בחיוג"
+en = "No app handles dialing"
+fix_he = "התקינו Phone Link מחנות Microsoft והגדירו אותו כברירת מחדל ל-tel:."
+fix_en = "Install Phone Link from the Microsoft Store and make it the default for tel:."
+
+[[problems]]
+he = "הוא לא מחייג מספר שהגיע ממייל"
+en = "He will not dial a number from an e-mail"
+fix_he = "זה בכוונה. אמרו את המספר בקול או הקלידו אותו בעצמכם."
+fix_en = "That is on purpose. Say the number aloud or type it yourself."

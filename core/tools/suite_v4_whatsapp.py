@@ -57,6 +57,17 @@ class _Owner:
         pass
 
 
+async def restart_live(h, s) -> None:
+    """The WhatsApp rule is added to the live session at its START (attach_live): the suite switches the feature
+    on after the Core booted, so the first conversation never carried it. Close it and open a fresh one."""
+    if s.core.live is not None:
+        await s.core.live.stop("suite")
+    await wait_for(lambda: s.core.live is None, 10)
+    await s.core._start_live()
+    await wait_for(lambda: s.core.live is not None, 20)
+    await h.quiet(s, 1.5, 20)
+
+
 async def boot(h, fresh: str = ""):
     s = await (h.boot(fresh, over={"voice": {"idle_disconnect_s": 300}}) if fresh
                else h.get(WA, over={"voice": {"idle_disconnect_s": 300}}))
@@ -75,6 +86,7 @@ async def boot(h, fresh: str = ""):
     b.start()
     s._wa = b
     s.core.features.set("whatsapp_bridge", True, by="suite")
+    await restart_live(h, s)
     s.owner = _Owner(s.core.approvals)
     s.core.approvals.channels.append(s.owner)
     return s
@@ -147,8 +159,8 @@ async def s75(h, r):
         r.ok, r.key = False, s.boot_error
         return
     s._wa.deliver(BOB, LONG)
-    x = await h.turn(s, "תקרא לי מה בוב כתב עכשיו", label="long", first_timeout=30)
-    r.ok = "whatsapp_chat" in x["tools"] and len(x["said"]) < 400 and has(x["said"], "מסך", "screen", "להציג", "ארוכה")
+    x = await h.turn(s, "Read me what Bob just wrote", lang="en", label="long", first_timeout=30)
+    r.ok = "whatsapp_chat" in x["tools"] and len(x["said"]) < 400 and has(x["said"], "מסך", "screen", "להציג", "ארוכה", "show", "display", "pull it up", "long message")
     r.key, r.details = f"said {len(x['said'])} chars: {x['said'][:140]}", [x]
 
 
@@ -175,6 +187,7 @@ async def s77(h, r):
     s._wa._save_policy()
     s.core.whatsapp_watcher.refresh()
     s.core.features.set("whatsapp_send", True, by="suite")
+    await restart_live(h, s)
     x = await h.turn(s, "תענה לדנה בוואטסאפ: אני מאחר בעשר דקות", label="send", first_timeout=30)
     await wait_for(lambda: s._wa.outbox, 30)
     a = s.owner.shown[-1] if s.owner.shown else None

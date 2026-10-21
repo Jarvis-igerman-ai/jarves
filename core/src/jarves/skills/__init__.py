@@ -150,6 +150,26 @@ async def _deny(_: str) -> bool:
     return False
 
 
+
+_DROP_KEYS = ("title", "minLength", "maxLength")
+
+
+def slim_schema(node: Any, _in_props: bool = False) -> Any:
+    """SW-V4 P: a tool's JSON schema as the model needs it. Pydantic adds a `title` to every property and the model
+    class (about 20% of the schema tokens) and length bounds the Core validates itself on every call anyway; none of
+    it helps the model choose or fill a tool. Property NAMES (even one called "title") are kept."""
+    if isinstance(node, dict):
+        return {k: slim_schema(v, k == "properties") for k, v in node.items()
+                if _in_props or k not in _DROP_KEYS}
+    if isinstance(node, list):
+        return [slim_schema(v) for v in node]
+    return node
+
+
+def tool_schema(tool: "Tool") -> dict:
+    return slim_schema(tool.args.model_json_schema())
+
+
 class SkillRegistry:
     def __init__(self, disabled: set[str] | None = None,
                  allowed_actions: set[str] | frozenset[str] | None = None) -> None:
@@ -422,7 +442,7 @@ class SkillRegistry:
         def make(t: Tool):
             async def invoke(_ctx, args_json: str) -> str:
                 return (await self.call(t.name, args_json, origin="model")).to_model()
-            return FunctionTool(name=t.name, description=t.description, params_json_schema=t.args.model_json_schema(),
+            return FunctionTool(name=t.name, description=t.description, params_json_schema=tool_schema(t),
                                 on_invoke_tool=invoke, strict_json_schema=False)
         return [make(t) for t in self.tools()]
 

@@ -21,6 +21,7 @@ Modules probed at start: jarves.workspace, jarves.curator, jarves.memory, jarves
 from __future__ import annotations
 
 import importlib
+import gzip
 import json
 import re
 import secrets
@@ -40,7 +41,7 @@ from .store import TYPED_KINDS, Store, daily_costs, session_cost
 
 STATIC = Path(__file__).with_name("dashboard_static")
 COOKIE = "jarves_dash"
-_EMAIL = re.compile(r"[\w.+-]+@[\w-]+\.[\w.-]+")
+_EMAIL = re.compile(r"(?<![\w.+-])[\w.+-]+@[\w-]+\.[\w.-]+")
 _ROUTES: list[tuple[str, re.Pattern, object]] = []
 PLUGIN_MODULES = ("jarves.workspace", "jarves.curator", "jarves.memory", "jarves.features", "jarves.google_auth",
                   "jarves.google_setup", "jarves.telegram_channel", "jarves.instagram_channel", "jarves.privacy", "jarves.overview",
@@ -53,6 +54,7 @@ PLUGIN_MODULES = ("jarves.workspace", "jarves.curator", "jarves.memory", "jarves
                   "jarves.recall",                                                 # SW-V4 G: Recall search page
                   "jarves.whatsapp_admin",                                         # SW-V4 F: WhatsApp page (PC only)
                   "jarves.orchestrator.surfaces",                                  # SW-V4 E: Coding agents page
+                  "jarves.dialing",                                                # SW-V4 H: Phone calls page
                   "jarves.browser",                                                # Browser allow-list page
                   "jarves.approvals", "jarves.skills.helper",                      # V3: Approvals list, Helper switch
                   "jarves.diag.service")                                           # SW-V4 O: Health page
@@ -743,6 +745,7 @@ def load_plugins() -> list[str]:
 
 
 # ---------------------------------------------------------------------- HTTP server
+_STATIC_CACHE: dict = {}      # path -> ((mtime_ns, size), etag, raw bytes, gzip bytes | None)
 _TYPES = {".webmanifest": "application/manifest+json", ".html": "text/html; charset=utf-8", ".js": "text/javascript; charset=utf-8",
           ".css": "text/css; charset=utf-8", ".svg": "image/svg+xml"}
 
@@ -760,7 +763,8 @@ class Handler(BaseHTTPRequestHandler):
         self.send_response(status)
         self.send_header("Content-Type", ctype)
         self.send_header("Content-Length", str(len(body)))
-        self.send_header("Cache-Control", "no-store")
+        if not (extra and "Cache-Control" in extra):
+            self.send_header("Cache-Control", "no-store")
         self.send_header("X-Content-Type-Options", "nosniff")
         self.send_header("X-Frame-Options", "DENY")
         self.send_header("Referrer-Policy", "no-referrer")
@@ -769,7 +773,7 @@ class Handler(BaseHTTPRequestHandler):
         for k, v in (extra or {}).items():
             self.send_header(k, v)
         self.end_headers()
-        if self.command != "HEAD":
+        if self.command != "HEAD" and status != 304:
             self.wfile.write(body)
 
     def _json(self, status: int, obj) -> None:
@@ -784,7 +788,28 @@ class Handler(BaseHTTPRequestHandler):
         p = (STATIC / name).resolve()
         if STATIC.resolve() not in p.parents or not p.is_file():
             return self._send(404, b"not found", "text/plain")
-        return self._send(200, p.read_bytes(), _TYPES.get(p.suffix, "application/octet-stream"))
+        # SW-V4 P: ETag + 304 and gzip for the public app files (they are re-sent on every page load otherwise; ~670 KB
+        # of JS/CSS, 30+ requests). `no-cache` = the browser keeps them but asks first, so an update shows at once.
+        try:
+            st = p.stat()
+            key = (st.st_mtime_ns, st.st_size)
+            hit = _STATIC_CACHE.get(str(p))
+            if hit is None or hit[0] != key:
+                raw = p.read_bytes()
+                gz = gzip.compress(raw, 6, mtime=0) if len(raw) > 600 and p.suffix in _TYPES else None
+                hit = _STATIC_CACHE[str(p)] = (key, '"%x-%x"' % key, raw, gz)
+        except OSError:
+            return self._send(404, b"not found", "text/plain")
+        _, etag, raw, gz = hit
+        shell = name in ("index.html", "pair.html")          # the page shells stay no-store (no cached copy of the page)
+        extra = {"Vary": "Accept-Encoding"} if shell else {"ETag": etag, "Cache-Control": "no-cache",
+                                                           "Vary": "Accept-Encoding"}
+        if not shell and self.headers.get("If-None-Match") == etag:
+            return self._send(304, b"", _TYPES.get(p.suffix, "application/octet-stream"), extra)
+        if gz is not None and "gzip" in (self.headers.get("Accept-Encoding") or ""):
+            extra["Content-Encoding"] = "gzip"
+            raw = gz
+        return self._send(200, raw, _TYPES.get(p.suffix, "application/octet-stream"), extra)
 
     def _pair(self, ip: str) -> None:
         """POST /api/pair {code, name} from a phone on the LAN -> device cookie (dashboard_auth.Access.pair)."""

@@ -269,7 +269,7 @@ def state(g: Guide, f: feat.Features) -> dict:
         if main["active"] and not broken:
             st = "on"
         elif main["enabled"] and not main["available"]:
-            st, reason = "setup", main["reason"]
+            st, reason = ("off" if g.optional else "setup"), main["reason"]    # optional (admin key): off by choice
             reason_he = main.get("reason_he", "")
         elif not main["enabled"]:
             st, reason = "off", "turned off" if main["available"] else f"turned off; also {main['reason']}"
