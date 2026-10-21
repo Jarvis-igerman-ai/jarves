@@ -171,6 +171,8 @@ class Store:
         with self._lock:
             if code in ("LIVE_STARTED", "RT_STARTED"):
                 self._open(d, ts, "realtime" if code == "RT_STARTED" else "live")
+            elif code == "CHAT_NEW":               # `/new` in a text chat: the next typed exchange is a new conversation
+                self._typed = None
             elif code == "CORE_STARTING":
                 if self._cur:                      # previous process died without VOICE_ENDED
                     self._close(self._cur, None, "core_restarted", None, {})
@@ -284,6 +286,22 @@ class Store:
         self._db.execute("UPDATE sessions SET ended = ?, last_event = ?, end_reason = 'typed' WHERE id = ?",
                          (ts, ts, sid))
         self._typed = (sid, ts, kind)
+
+    def record_typed(self, user: str | None, reply: str | None, ts: float, *, ms: float = 0.0, fresh: bool = False,
+                     session: str = "web") -> str:
+        """A typed exchange written straight to the history (the standalone web chat has no Core logging into this
+        file). It joins the newest typed conversation when that is less than TYPED_GAP_S old - also one that another
+        surface (the Core's typed turns, `jarvis chat`) opened - unless `fresh` (a /new). Returns the session id."""
+        with self._lock:
+            if fresh:
+                self._typed = None
+            else:
+                r = self._db.execute("SELECT id, last_event FROM sessions WHERE kind = 'typed' "
+                                     "ORDER BY last_event DESC LIMIT 1").fetchone()
+                self._typed = (r[0], float(r[1] or 0), "typed") if r else None
+            self._typed_reply({"session": session, "utterance": user, "text": reply, "ms": ms, "typed": True}, ts)
+            self.commit()
+            return self._typed[0]
 
     def _session_backend(self, sid: str) -> str | None:
         r = self._db.execute("SELECT backend_model FROM sessions WHERE id = ?", (sid,)).fetchone()

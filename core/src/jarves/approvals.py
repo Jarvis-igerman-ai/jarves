@@ -54,6 +54,13 @@ from typing import Any, Awaitable, Callable
 from . import approval_keys as akeys
 from . import logs
 
+# The terminal text chat turn that is asking (chat_service.py sets it for the turn's task and the tasks it starts):
+# {"client": id, "silent": bool}. None for everything else. A chat turn never uses the voice channel (a spoken
+# approval is not applicable in text mode); a silent one never lights the face either. Popup / tray / dashboard
+# stay, and the terminal itself is one more place to answer: the first answer wins.
+import contextvars as _cv
+CHAT_TURN: "_cv.ContextVar[dict | None]" = _cv.ContextVar("jarves_chat_turn", default=None)
+
 DEFAULT_TIMEOUT_S = 60.0
 MAX_TIMEOUT_S = 600.0
 RATE_LIMIT = (6, 60.0)           # at most 6 NEW requests per 60 s; more are denied without asking
@@ -842,7 +849,8 @@ class PopupChannel:
         nonce = secrets.token_hex(16)
         _write_json(inp, {"id": a.id, "title": a.title, "prompt": a.prompt, "why": a.why, "risk": a.risk,
                           "kind": a.kind, "details": a.details, "typed": bool(a.typed_code),
-                          "timeout_s": max(1, round(a.expires - time.time())), "lang": self.lang})
+                          "timeout_s": max(1, round(a.expires - time.time())), "lang": self.lang,
+                          "silent": bool((CHAT_TURN.get() or {}).get("silent"))})   # a silent chat turn: no bell
         argv = [_popup_python(), "-m", "jarves.approval_popup", "--in", str(inp), "--out", str(out), "--stdin"]
         if self.test_invoke:
             argv += ["--test-invoke", self.test_invoke]
@@ -936,7 +944,16 @@ def api_approval_answer(ctx, m, body):
         return 400, {"error": "body needs {\"approved\": true|false}"}
     ok, why = submit_answer(Path(ctx.home), m.group(1), body["approved"], channel="dashboard",
                             typed=str(body.get("typed") or "")[:12])
-    return (200, {"ok": True}) if ok else (409, {"error": why})
+    return (200, {"ok": True}) if ok else (409, {"error": why, "code": refusal_code(why)})
+
+
+def refusal_code(why: str) -> str:
+    """Fixed code of a refused answer (the first answer already won, or the typed code is needed)."""
+    if str(why).startswith("no such waiting approval"):
+        return "APPROVAL_ALREADY_ANSWERED"
+    if "code" in str(why).lower():
+        return "APPROVAL_CODE_NEEDED"
+    return "APPROVAL_REFUSED"
 
 
 def dashboard_routes(register_route) -> None:

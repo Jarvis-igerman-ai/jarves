@@ -1700,6 +1700,8 @@ def main(argv: list[str] | None = None) -> int:
     health_cli.add_cli(sub)                   # SW-V4 O: jarvis health [report|remediate|ticket|ai-review|canary|...]
     from . import selfspeed
     selfspeed.add_cli(sub)                    # owner request 21 Oct: jarvis selftest [--deep] / jarvis speedtest
+    from . import web_cli
+    web_cli.add_cli(sub)                      # owner request 21 Oct: jarvis web (the dashboard Chat page)
     from . import whatsapp_admin
     whatsapp_admin.add_cli(sub)               # SW-V4 F: jarvis whatsapp status / link / mode / allow / kill ...
     from .orchestrator import surfaces as agents_cli
@@ -1737,7 +1739,8 @@ def main(argv: list[str] | None = None) -> int:
             "whatsapp": whatsapp_admin.cmd_whatsapp,
             "agents": agents_cli.cmd_agents,
             "dial": dialing.cmd_dial,
-            **cli_parity.COMMANDS, **budget_cli.COMMANDS, **selfspeed.COMMANDS}[a.cmd](a, cfg, home)
+            **cli_parity.COMMANDS, **budget_cli.COMMANDS, **selfspeed.COMMANDS,
+            **web_cli.COMMANDS}[a.cmd](a, cfg, home)
 
 
 if __name__ == "__main__":

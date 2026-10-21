@@ -62,7 +62,7 @@
       const main = document.getElementById("main");
       main.parentNode.insertBefore(b, main);                       // in the flow above the page content
     }
-    if (location.hash.startsWith("#/approvals")) { b.replaceChildren(); b.hidden = true; return; }
+    if (location.hash.startsWith("#/approvals") || location.hash.startsWith("#/chat")) { b.replaceChildren(); b.hidden = true; return; }   // the chat shows them inline
     b.hidden = false;
     b.replaceChildren(...pending.map((a) => card(a, true)), ...(msg ? [el("div", { class: "small", role: "alert" }, msg)] : []));
   }

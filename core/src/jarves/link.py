@@ -40,7 +40,8 @@ ALLOWED: dict[str, frozenset[str]] = {
                        "camera.preview", "camera.set_enabled"}) | DEVICE_EVENTS,
     # runtime.set (M1): show/hide the window, software mute, pause alerts - the CLI, dashboard and tray route;
     # camera.preview: the dashboard Home preview (each poll keeps it open a few seconds and returns the last frame)
-    "cli": frozenset({"status.request", "core.shutdown", "debug.enable", "runtime.set", "camera.preview"}),
+    "cli": frozenset({"status.request", "core.shutdown", "debug.enable", "runtime.set", "camera.preview",
+                      "ui.open_dashboard"}),               # `jarvis web`: open the Chat page of the running Core
 }
 KNOWN_TYPES = frozenset().union(*ALLOWED.values())
 

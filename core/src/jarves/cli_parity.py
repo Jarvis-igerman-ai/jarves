@@ -51,6 +51,7 @@ FEATURES: dict[str, object] = {
     "agent_orchestrator": "agents",
     "assisted_dialing": "dial",
     "self_tests": "selftest",
+    "web_chat": "web",
 }
 
 # Skill (tool group) name -> "jarvis <command>" or ("dashboard", reason) or ("voice", reason) for groups that only

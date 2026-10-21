@@ -1,0 +1,48 @@
+order = 73
+category = "system"
+pages = ["chat"]
+features = ["web_chat"]
+aliases = ["שיחה בלוח הבקרה", "צ'אט", "jarvis web", "web chat", "chat page", "dashboard chat", "text chat", "chat from phone", "שיחה בטלפון"]
+links = ["mobile_access", "dashboard", "privacy"]
+error_codes = ["CHAT_UNAVAILABLE", "CHAT_FEATURE_OFF", "CHAT_BUSY", "CHAT_TOO_LONG", "PAGE_NOT_ALLOWED", "PAGE_PC_ONLY", "APPROVAL_ALREADY_ANSWERED", "TYPED_PC_ONLY"]
+title_he = "שיחה בלוח הבקרה"
+title_en = "Chat in the dashboard"
+what_he = "עמוד שיחה בלוח הבקרה: כותבים ל-JARVES ומקבלים תשובה שנכתבת בזמן אמת, עם פקודות / (חדש, המשך, ביטול, מצב, עזרה), שורה קצרה לכל כלי שהוא הפעיל, ואישורים באמצע השיחה. זו אותה שיחה כמו jarvis chat והשיחה הקולית: אותה היסטוריה. שקטה כברירת מחדל: בלי קול ובלי צלצולים. אפשר לפתוח אותה גם מטלפון או ממחשב אחר שצומדו."
+what_en = "A chat page in the dashboard: you type to JARVES and the answer is written live, with / commands (new, resume, undo, status, help), one short line for every tool he used, and approvals right inside the conversation. It is the same conversation as jarvis chat and the voice session: one history. Silent by default: no speech and no chimes. Paired phones and other computers can open it too."
+say = [["איך אני כותב לך מהדפדפן?", "How can I type to you from the browser?"]]
+expect_he = "הפקודה jarvis web פותחת את עמוד השיחה (גם כש-JARVES כבוי). בשעות השקט ובמצב שקט אין קול, אין חלון על הפנים ואין צלצול. בקשות אישור מופיעות בשיחה עם אותו תיאור פשוט כמו בחלון האישור; התשובה הראשונה, בחלון, בטרמינל, בדף או בטלפון, קובעת. בקשות שדורשות קוד מאושרות רק במחשב."
+expect_en = "The command jarvis web opens the chat page (also when JARVES is stopped). In quiet hours and in silent mode there is no speech, no face dialog and no chime. Approval requests appear in the conversation with the same plain description as the approval window; the first answer, in the window, the terminal, the page or the phone, wins. Requests that need a typed code are approved on the computer only."
+test = "feature"
+test_he = "הבדיקה רק מוודאת שהמתג פעיל. את השיחה עצמה בודקים בעמוד השיחה."
+test_en = "The check only sees that the switch is on. Try the conversation itself on the Chat page."
+cost_he = "אותה עלות כמו כל הודעה כתובה ל-JARVES (התקציב והמגבלות הרגילים חלים). הדף עצמו חינם."
+cost_en = "The same cost as any typed message to JARVES (the usual budget and limits apply). The page itself is free."
+privacy_he = "התוכן נשמר כמו כל הודעה כתובה בהיסטוריה המקומית, ולא ביומן הביקורת של הטלפון. תוצאות כלים בשורת הפרטים מוסתרות מסיסמאות ומכתובות מייל. מכשיר מצומד מקבל רק את הדפים שהוגדרו לו (ברירת מחדל: בית, שיחה, אישורים, תקינות ומהירות); הגדרות, סודות, עריכת קבצים וניהול מכשירים נשארים במחשב והשרת מסרב להם."
+privacy_en = "Content is stored like any typed message in the local history, and never in the phone audit log. Tool results in the details line are masked for passwords and e-mail addresses. A paired device gets only the pages set for it (default: Home, Chat, Approvals, Health & speed); settings, secrets, file editing and device management stay on the computer and the server refuses them."
+
+[[steps]]
+he = "פתחו את עמוד השיחה בלוח הבקרה, או הריצו בטרמינל את jarvis web."
+en = "Open the Chat page in the dashboard, or run jarvis web in the terminal."
+action = "open:#/chat"
+
+[[steps]]
+he = "כתבו הודעה ושלחו. כתבו / כדי לראות את הפקודות: /new שיחה חדשה, /resume המשך שיחה קודמת, /undo ביטול השינוי האחרון בקובץ אישיות, /status מצב, /help עזרה."
+en = "Type a message and send. Type / to see the commands: /new a new conversation, /resume continue an earlier one, /undo undo the last persona-file change, /status what is running, /help help."
+action = "command:jarvis web"
+
+[[steps]]
+he = "לשימוש מטלפון או ממחשב אחר: הפעילו \"גישה מהטלפון\", צמדו את המכשיר בעמוד \"טלפון\" ובחרו לו אילו דפים מותרים."
+en = "For a phone or another computer: turn on Phone access, pair the device on the Phone page and choose which pages it may open."
+action = "open:#/phone"
+
+[[problems]]
+he = "העמוד אומר שהשיחה לא פועלת כאן"
+en = "The page says chat is not running here"
+fix_he = "הריצו jarvis web, או הפעילו את JARVES. לוח בקרה שנפתח עם jarvis dashboard אינו מריץ שיחה."
+fix_en = "Run jarvis web, or start JARVES. A dashboard opened with jarvis dashboard does not run a chat."
+
+[[problems]]
+he = "הטלפון אומר שאין לו הרשאה לדף"
+en = "The phone says it was not given the page"
+fix_he = "בעמוד \"טלפון\" במחשב סמנו ליד המכשיר את הדף הרצוי. הגדרות, סודות, קבצים וניהול מכשירים אי אפשר לתת למכשיר."
+fix_en = "On the Phone page on the computer tick the page next to the device. Settings, secrets, files and device management cannot be given to a device."

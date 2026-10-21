@@ -58,7 +58,8 @@ PLUGIN_MODULES = ("jarves.workspace", "jarves.curator", "jarves.memory", "jarves
                   "jarves.browser",                                                # Browser allow-list page
                   "jarves.approvals", "jarves.skills.helper",                      # V3: Approvals list, Helper switch
                   "jarves.diag.service",                                           # SW-V4 O: Health page
-                  "jarves.selfspeed")                                              # Health & speed page
+                  "jarves.selfspeed",                                              # Health & speed page
+                  "jarves.chat_engine")                                            # V5 web chat: Chat page API
 MEMORY_UNDO_KEEP = 30
 MEMORY_UNDO_TTL_S = 24 * 3600                        # the undo button works for 24 h, then the entry is purged
 UNDO_PURGE_EVERY_S = 3600
@@ -100,6 +101,7 @@ class Ctx:
         self.clock = time.time                        # tests inject a fake clock
         self.access = None                 # dashboard_auth.Access (set by Dashboard)
         self.mobile = None                 # mobile.MobileAccess (set by Dashboard; V5 phone access)
+        self.chat = None                   # chat_engine.WebChat (set by Dashboard when a chat engine runs here)
         self.port = 0
         self._tl = threading.local()       # per-request principal (the server is threaded)
 
@@ -944,7 +946,7 @@ class Dashboard:
 
     def __init__(self, home: Path, cfg, port: int = 0, *, workspace=None, memory=None, settings=None,
                  config_path=None, lan: bool = False, lan_host: str | None = None, mobile_on: bool = False,
-                 mobile_bridge=None, tls: tuple | None = None) -> None:
+                 mobile_bridge=None, tls: tuple | None = None, chat=None) -> None:
         self.ctx = Ctx(home, cfg, workspace=workspace, memory=memory, settings=settings, config_path=config_path)
         self.plugins = load_plugins()
         token = secrets.token_urlsafe(24)
@@ -972,6 +974,7 @@ class Dashboard:
         self.mobile.port, self.mobile.host = self.port, lan_host if wide else None
         self.mobile.scheme = "https" if tls else "http"
         self.mobile.bridge = mobile_bridge
+        self.ctx.chat = self.mobile.chat = chat
         self.mobile.enabled = bool(mobile_on)       # default OFF: no phone path is served, nothing listens beyond 127.0.0.1
         if mobile_on:
             self.mobile.audit("mobile_mode_started", host=lan_host, port=self.port, tls=bool(tls))

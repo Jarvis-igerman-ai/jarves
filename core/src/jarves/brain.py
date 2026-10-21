@@ -476,7 +476,22 @@ class AgentBrain:
     def reset_conversation(self) -> None:
         self._session = None
 
-    async def reply(self, text: str) -> str:
+    async def seed_history(self, turns: list[tuple[str, str]]) -> None:
+        """Start from an earlier conversation ((role, text) pairs, oldest first): /resume in the terminal chat."""
+        self.reset_conversation()
+        self._build()                                  # a fresh, empty in-RAM session
+        await self._session.add_items([{"role": r, "content": t} for r, t in turns if r in ("user", "assistant")])
+
+    async def _run_streamed(self, text: str, on_delta):
+        """Runner.run_streamed: every answer text delta goes to on_delta as it arrives; returns the finished result."""
+        from agents import Runner
+        res = Runner.run_streamed(self._agent, text, session=self._session, max_turns=self.cfg.max_turns)
+        async for ev in res.stream_events():
+            if getattr(ev, "type", "") == "raw_response_event" and                     getattr(ev.data, "type", "") == "response.output_text.delta":
+                on_delta(str(getattr(ev.data, "delta", "") or ""))
+        return res
+
+    async def reply(self, text: str, on_delta=None) -> str:
         ok, code, action = self.available()
         if not ok:
             raise BrainUnavailable(code, action, action)
@@ -488,8 +503,9 @@ class AgentBrain:
         t0 = time.monotonic()
         logs.info("ai", "AI_REQUEST", "agent request started", model=self.cfg.text_model)
         try:
-            res = await bounded_ai(Runner.run(self._agent, text, session=self._session, max_turns=self.cfg.max_turns),
-                                   self.cfg.timeout_s, self.registry)
+            run = (self._run_streamed(text, on_delta) if on_delta is not None
+                   else Runner.run(self._agent, text, session=self._session, max_turns=self.cfg.max_turns))
+            res = await bounded_ai(run, self.cfg.timeout_s, self.registry)
         except asyncio.TimeoutError as e:
             raise BrainUnavailable("AI_TIMEOUT", "the AI did not answer in time", "try again; check the network") from e
         except openai.AuthenticationError as e:
@@ -561,7 +577,9 @@ class Brain:
     def __init__(self, registry: SkillRegistry, agent: AgentBrain | None) -> None:
         self.registry, self.agent = registry, agent
 
-    async def respond(self, text: str, *, spoken: bool = True) -> Reply:
+    async def respond(self, text: str, *, spoken: bool = True, on_delta=None) -> Reply:
+        """on_delta(str): optional, called with answer text as it is produced (terminal text chat); backends that do
+        not stream simply never call it and the caller shows the final text."""
         self.registry.new_turn()           # WP-G: a new user turn (untrusted mail/calendar text no longer blocks actions)
         intent = match_intent(text)
         if intent and self.registry.get(intent.tool):
@@ -572,7 +590,8 @@ class Brain:
             return Reply(OFFLINE_HELP, "offline", ok=False, code="AI_DISABLED")
         token = ROUTE.set("text")          # this conversation's untrusted-content taint is its own (skills.ROUTE)
         try:
-            answer = await self.agent.reply(text)
+            answer = await (self.agent.reply(text, on_delta=on_delta) if on_delta is not None
+                            else self.agent.reply(text))
             return Reply((speakable(answer) if spoken else answer) or "…", "ai")
         except BrainUnavailable as e:
             logs.warn("ai", e.code, "AI request not made", detail=e.message, action=e.action)

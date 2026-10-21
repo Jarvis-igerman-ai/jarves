@@ -24,6 +24,8 @@ from .skills.settings import Settings, SettingsSkill
 from . import workspace as wsp
 from . import features as feat
 from . import browser as browser_mod            # SW-V3 P1.2: registers the `browser` switch (default OFF)
+from . import approvals as appr
+from . import chat_engine
 from .curator import _SENSITIVE as SENSITIVE_TEXT, Curator, openai_extractor
 from .dashboard import DashboardSkill
 from .voice.audio import AudioUnavailable, SoundDeviceAudio, StreamingAudio
@@ -84,6 +86,9 @@ class _FaceApproval:
         self.core = core
 
     def available(self, a) -> bool:
+        turn = appr.CHAT_TURN.get()
+        if turn is not None and turn.get("silent"):
+            return False                                  # a silent text chat turn never lights the face
         return not a.typed_code and getattr(self.core, "link", None) is not None \
             and self.core.link.face_client_id() is not None
 
@@ -108,6 +113,8 @@ class _VoiceApproval:
 
     def available(self, a) -> bool:
         live = self.core.live
+        if appr.CHAT_TURN.get() is not None:
+            return False                                  # a text chat turn: spoken approvals do not apply
         return not a.typed_code and live is not None and hasattr(live, "confirm_pending")
 
     async def open(self, a) -> None:
@@ -692,9 +699,9 @@ class Core:
             await camera_wire.on_link(self, t, p, client)
         elif t == "ui.open_dashboard":               # WP-H: the face's Dashboard button
             try:
-                url = await self.open_dashboard()
+                url = await self.open_dashboard(str(p.get("page") or ""), open_browser=p.get("open") is not False)
                 await self.link.reply(ws, "dashboard.opened", {"url": url.split("?", 1)[0],
-                                                               "browser": self.open_url is not None})
+                                                               "browser": self.open_url is not None and p.get("open") is not False})
             except Exception as e:
                 logs.warn("core", "DASHBOARD_FAILED", "dashboard could not start", error_type=type(e).__name__)
                 await self.link.reply(ws, "error", {"code": "DASHBOARD_FAILED", "message": "dashboard did not start",
@@ -719,10 +726,13 @@ class Core:
         cert, key = mobile.tls_paths(self.home)
         tls = (cert, key) if cert.is_file() and key.is_file() else None
 
+        if getattr(self, "web_chat", None) is None:
+            self.web_chat = chat_engine.WebChat(self, loop)       # the shared web conversation (Chat page, phones)
+
         def make(on: bool):
             d = Dashboard(self.home, self.cfg, workspace=self.workspace, memory=self.memory,
                           settings=self.settings, mobile_on=on, tls=tls if on else None,
-                          mobile_bridge=mobile.core_bridge(self, loop) if on else None)
+                          mobile_bridge=mobile.core_bridge(self, loop) if on else None, chat=self.web_chat)
             d.mobile.gate = lambda: self.features.enabled("mobile_access")
             return d.start()
         try:
@@ -748,7 +758,7 @@ class Core:
         except Exception as e:                                  # never blocks the Core
             logs.warn("core", "MOBILE_START_FAILED", "phone access could not start", error_type=type(e).__name__)
 
-    async def open_dashboard(self, page: str = "") -> str:
+    async def open_dashboard(self, page: str = "", open_browser: bool = True) -> str:
         """Start the dashboard inside the Core (once; it shares the Core's workspace, memory and settings) and open
         it in the browser on this computer, on `page` (e.g. "#/guide/music"; kept across the token redirect).
         Returns the full URL with the private access key (without the page)."""
@@ -756,7 +766,7 @@ class Core:
         url = self._dashboard.url
         logs.info("core", "DASHBOARD_OPENED", "dashboard opened", port=self._dashboard.port,
                   browser=self.open_url is not None)
-        if self.open_url is not None:
+        if self.open_url is not None and open_browser:
             page = page if page.startswith("#/") and len(page) < 80 else ""
             await asyncio.to_thread(self.open_url, url + page)
         return url
@@ -868,14 +878,15 @@ class Core:
         self._owner_answer(text, "voice")           # nothing waits here (talk_up routes those): a new turn
         await self.handle_utterance(text, typed=False)
 
-    async def respond_remote(self, text: str):
+    async def respond_remote(self, text: str, *, on_delta=None, fresh: bool = False):
         """A typed turn from a paired phone (V5-G): the SAME Brain, memory and conversation context as a Windows
         turn, logged as a typed exchange so it appears in the desktop history and joins the open typed conversation
         (TYPED_GAP_S). The answer goes back to the phone only: no face update, no speaker, and never the spoken-approval
         path."""
         logs.new_cid()
         t0 = time.monotonic()
-        reply = await self.brain.respond(text, spoken=False)
+        reply = await (self.brain.respond(text, spoken=False, on_delta=on_delta) if on_delta is not None
+                       else self.brain.respond(text, spoken=False))
         logs.info("core", "REPLY", "reply sent", source=reply.source, tool=reply.tool, ok=reply.ok, result_code=reply.code,
                   ms=round((time.monotonic() - t0) * 1000), text=reply.text, typed=True,
                   utterance=f"<{len(text)} chars>" if SENSITIVE_TEXT.search(text) else text)

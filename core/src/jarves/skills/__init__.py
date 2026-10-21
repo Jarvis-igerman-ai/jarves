@@ -52,6 +52,21 @@ ROUTE: contextvars.ContextVar[str] = contextvars.ContextVar("jarves_skill_route"
 # The tool whose handler is running ("" = none). approvals.answer refuses inside a tool: no Skill (or text a tool
 # returned) can ever approve a request; only the owner's own channels can (approvals.py).
 IN_TOOL: contextvars.ContextVar[str] = contextvars.ContextVar("jarves_in_tool", default="")
+# Terminal text chat (chat_service.py): a callable (name, ok, code) told about every tool call of THIS turn, so the
+# terminal shows one short line per call. It never receives arguments or results (nothing to redact or leak).
+TOOL_SINK: contextvars.ContextVar = contextvars.ContextVar("jarves_tool_sink", default=None)
+
+
+def _tool_seen(name: str, ok: bool, code: str, message: str = "") -> None:
+    sink = TOOL_SINK.get()
+    if sink is not None:
+        try:
+            if getattr(sink, "wants_detail", False):   # the web chat shows an expandable (redacted) result line
+                sink(name, ok, code, message)
+            else:
+                sink(name, ok, code)
+        except Exception:
+            pass                                       # a display problem never changes a tool result
 
 
 async def bounded_ai(aw, timeout_s: float, registry: "SkillRegistry | None"):
@@ -394,6 +409,7 @@ class SkillRegistry:
         asked0 = self.asks
         refused = await self._authorize(tool, args, origin)
         if refused is not None:
+            _tool_seen(name, False, refused.code, refused.message)
             return refused
         t_run = time.monotonic()
         try:
@@ -414,6 +430,7 @@ class SkillRegistry:
         log = logs.info if res.ok else logs.warn
         log("skills", "TOOL_RESULT", "tool finished", tool=name, ok=res.ok, result_code=res.code, origin=origin,
             ms=round((time.monotonic() - t_run) * 1000))      # SW-V4 O: tool p50/p95 in the health monitor
+        _tool_seen(name, res.ok, res.code, res.message)
         return self._hinted(skill, tool, res) if not res.ok else res
 
     def _hinted(self, skill: Skill, tool: Tool, res: ToolResult) -> ToolResult:
