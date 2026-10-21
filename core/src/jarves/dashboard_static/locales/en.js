@@ -1544,6 +1544,26 @@
   "no answer": "no answer",
   "Used only to read this month's real cost from OpenAI's usage endpoint. Never shown again, never sent anywhere else.": "Used only to read this month's real cost from OpenAI's usage endpoint. Never shown again, never sent anywhere else.",
   "How to create a read-only key (step by step)": "How to create a read-only key (step by step)",
-  "or in a terminal: jarvis connect openai-admin": "or in a terminal: jarvis connect openai-admin"
+  "or in a terminal: jarvis connect openai-admin": "or in a terminal: jarvis connect openai-admin",
+  "Self-test history": "Self-test history",
+  "Running…": "Running…",
+  "Starts a temporary Core, loads the wake model and checks audio devices (nothing recorded or spoken)": "Starts a temporary Core, loads the wake model and checks audio devices (nothing recorded or spoken)",
+  "Run deep test": "Run deep test",
+  "Self-test": "Self-test",
+  "No self-test yet.": "No self-test yet.",
+  "Speed test": "Speed test",
+  "No speed test yet.": "No speed test yet.",
+  "Metric": "Metric",
+  "Value": "Value",
+  "Budget": "Budget",
+  "vs last 5": "vs last 5",
+  "Trend": "Trend",
+  "Health & speed": "Health & speed",
+  "JARVES checks his own installation and his speed, for free and without changing anything. You can also ask by voice.": "JARVES checks his own installation and his speed, for free and without changing anything. You can also ask by voice.",
+  "Self-test daily at 08:15, speed test weekly (Sunday 13:00). Never in quiet hours or in the middle of a conversation: a skipped run is logged, not queued.": "Self-test daily at 08:15, speed test weekly (Sunday 13:00). Never in quiet hours or in the middle of a conversation: a skipped run is logged, not queued.",
+  "Warning": "Warning",
+  "Skipped": "Skipped",
+  "No data": "No data",
+  "dashboard Health & speed page, jarvis selftest, jarvis speedtest, Jobs page (times)": "dashboard Health & speed page, jarvis selftest, jarvis speedtest, Jobs page (times)"
  }
 };

@@ -144,6 +144,15 @@ TEXT: dict[str, str] = {
     "UNIT test_instagram.py (local fake Graph API server)": "בדיקות יחידה: test_instagram.py (שרת Graph API מדומה מקומי)",
     "never run against real Instagram: needs the owner's Meta app, account and token":
         "מעולם לא הורץ מול אינסטגרם אמיתי: דרושים אפליקציית Meta, חשבון ואסימון של הבעלים",
+    "checks his own installation (daily) and his speed (weekly), tells you what is slow or broken and whether it got worse than before; free, read-only, never at night or during a conversation":
+        "בודק את ההתקנה שלו (כל יום) ואת המהירות שלו (פעם בשבוע), אומר מה איטי או שבור והאם זה החמיר לעומת בעבר; חינם, קריאה בלבד, אף פעם לא בלילה או באמצע שיחה",
+    "dashboard Health & speed page, jarvis selftest, jarvis speedtest, Jobs page (times)":
+        "עמוד תקינות ומהירות בלוח הבקרה, jarvis selftest, jarvis speedtest, עמוד המשימות הקבועות (שעות)",
+    "UNIT test_selfspeed.py (planted faults, fake clock, fake Core, real dashboard HTTP)":
+        "בדיקות יחידה: test_selfspeed.py (תקלות מדומות, שעון מדומה, ליבה מדומה, לוח בקרה אמיתי ב-HTTP)",
+    "not yet run on the owner's PC for a week": "טרם הורץ שבוע שלם על המחשב של הבעלים",
+    "pure Python; /proc counters; never run on a Raspberry Pi (no device in the test setup)":
+        "Python בלבד; מונים מ-/proc; מעולם לא הורץ על Raspberry Pi (אין מכשיר בסביבת הבדיקות)",
     "checks health, recent logs, settings and features on demand and weekly, then suggests ranked fixes; settings change only after you approve":
         "בודק תקינות, יומנים אחרונים, הגדרות ויכולות לפי בקשה ופעם בשבוע, ומציע תיקונים לפי סדר חשיבות; הגדרות משתנות רק אחרי שאישרת",
     "UNIT test_selfcheck.py (real store/log/scheduler/autonomy in tmp dirs, synthetic log files)":

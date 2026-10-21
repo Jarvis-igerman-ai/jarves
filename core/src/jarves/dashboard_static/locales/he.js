@@ -1544,7 +1544,27 @@
   "no answer": "אין תשובה",
   "Used only to read this month's real cost from OpenAI's usage endpoint. Never shown again, never sent anywhere else.": "משמש רק לקריאת העלות האמיתית החודש ממשק השימוש של OpenAI. לא מוצג שוב ולא נשלח לשום מקום אחר.",
   "How to create a read-only key (step by step)": "איך יוצרים מפתח לקריאה בלבד (שלב אחר שלב)",
-  "or in a terminal: jarvis connect openai-admin": "או בטרמינל: jarvis connect openai-admin"
+  "or in a terminal: jarvis connect openai-admin": "או בטרמינל: jarvis connect openai-admin",
+  "Self-test history": "היסטוריית בדיקות עצמיות",
+  "Running…": "רץ עכשיו…",
+  "Starts a temporary Core, loads the wake model and checks audio devices (nothing recorded or spoken)": "מפעיל ליבה זמנית, טוען את מודל מילת ההפעלה ובודק התקני שמע (בלי להקליט ובלי לדבר)",
+  "Run deep test": "הרץ בדיקה מעמיקה",
+  "Self-test": "בדיקה עצמית",
+  "No self-test yet.": "עוד לא רצה בדיקה עצמית.",
+  "Speed test": "בדיקת מהירות",
+  "No speed test yet.": "עוד לא רצה בדיקת מהירות.",
+  "Metric": "מדד",
+  "Value": "ערך",
+  "Budget": "תקציב",
+  "vs last 5": "מול 5 קודמות",
+  "Trend": "מגמה",
+  "Health & speed": "תקינות ומהירות",
+  "JARVES checks his own installation and his speed, for free and without changing anything. You can also ask by voice.": "ג'ארביס בודק את ההתקנה שלו ואת המהירות שלו, בחינם ובלי לשנות כלום. אפשר גם לבקש בקול.",
+  "Self-test daily at 08:15, speed test weekly (Sunday 13:00). Never in quiet hours or in the middle of a conversation: a skipped run is logged, not queued.": "בדיקה עצמית כל יום ב-08:15, בדיקת מהירות פעם בשבוע (ראשון 13:00). לא בשעות השקט ולא באמצע שיחה: ריצה שדולגה נרשמת ביומן ולא נדחית.",
+  "Warning": "אזהרה",
+  "Skipped": "דולג",
+  "No data": "אין נתון",
+  "dashboard Health & speed page, jarvis selftest, jarvis speedtest, Jobs page (times)": "עמוד תקינות ומהירות בלוח הבקרה, jarvis selftest, jarvis speedtest, עמוד המשימות הקבועות (שעות)"
  },
  "rules": [
   [
