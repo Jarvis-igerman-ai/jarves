@@ -1487,7 +1487,17 @@
   "Previous version: ": "הגרסה הקודמת: ",
   " (downloaded from the signed release folder)": " (תורד מתיקיית ההפצה החתומה)",
   "jarvis dial <name|number>, dashboard Calls page (#/calls)": "jarvis dial <שם|מספר>, עמוד השיחות בלוח הבקרה (#/calls)",
-  ", approval on every call (on screen for a new number)": ", אישור על כל שיחה (על המסך למספר חדש)"
+  ", approval on every call (on screen for a new number)": ", אישור על כל שיחה (על המסך למספר חדש)",
+  "Connect": "חיבור",
+  "Skip": "דילוג",
+  "Test again": "בדיקה חוזרת",
+  "Testing…": "בודק…",
+  "Un-skip": "ביטול דילוג",
+  "broken": "שבור",
+  "not set": "לא הוגדר",
+  "not tested": "לא נבדק",
+  "unreachable": "לא זמין",
+  "working": "עובד"
  },
  "rules": [
   [

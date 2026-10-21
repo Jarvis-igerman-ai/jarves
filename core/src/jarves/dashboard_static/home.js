@@ -124,7 +124,7 @@ PAGES.connections = async function () {
         el("div", {}, i.status === "connected" ? pill("ok", tx("מחובר", "connected")) : i.status === "skipped" ? pill("plain", tx("דולג", "skipped"))
           : pill("medium", tx("לא הוגדר", "not set")), " ",
           i.status === "connected" ? pill(CK[0], tx(CK[1], CK[2])) : null, " ",
-          el("span", { class: "muted small" }, tx(i.detail_he, i.detail_en), chk && chk.detail ? " · " + chk.detail : ""),
+          el("span", { class: "muted small" }, tx(i.detail_he, i.detail_en), chk && chk.detail ? " · " + tx(chk.detail_he || chk.detail, chk.detail) : ""),
           i.status !== "connected" && i.fix_en ? el("div", { class: "small" }, tx(i.fix_he, i.fix_en)) : null,
           chk && chk.fix && chk.state !== "working" ? el("div", { class: "small mono" }, chk.fix) : null,
           el("div", { class: "actions" },

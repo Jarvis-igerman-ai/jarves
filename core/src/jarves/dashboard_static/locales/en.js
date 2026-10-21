@@ -1487,6 +1487,16 @@
   "Previous version: ": "Previous version: ",
   " (downloaded from the signed release folder)": " (downloaded from the signed release folder)",
   "jarvis dial <name|number>, dashboard Calls page (#/calls)": "jarvis dial <name|number>, dashboard Calls page (#/calls)",
-  ", approval on every call (on screen for a new number)": ", approval on every call (on screen for a new number)"
+  ", approval on every call (on screen for a new number)": ", approval on every call (on screen for a new number)",
+  "Connect": "Connect",
+  "Skip": "Skip",
+  "Test again": "Test again",
+  "Testing…": "Testing…",
+  "Un-skip": "Un-skip",
+  "broken": "broken",
+  "not set": "not set",
+  "not tested": "not tested",
+  "unreachable": "unreachable",
+  "working": "working"
  }
 };

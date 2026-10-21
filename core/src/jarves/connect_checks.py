@@ -35,6 +35,7 @@ class CheckResult:
     detail: str = ""
     fix: str = ""                    # the exact command that repairs it
     at: float = field(default_factory=time.time)
+    detail_he: str = ""
 
     def to_dict(self) -> dict:
         return asdict(self)
@@ -50,6 +51,37 @@ class CheckCtx:
 
     def transport(self, key: str):
         return self.transports.get(key)
+
+
+HE = {"key accepted": "המפתח התקבל", "no API key": "אין מפתח", "OpenAI could not be reached": "אי אפשר להגיע ל-OpenAI",
+      "OpenAI rejected the key": "OpenAI דחה את המפתח", "no admin key": "אין מפתח אדמין",
+      "admin key accepted (read-only costs)": "מפתח האדמין התקבל (קריאה בלבד)", "OpenAI rejected the admin key": "OpenAI דחה את מפתח האדמין",
+      "signed out": "לא מחובר", "plan usage was not granted": "לא ניתנה הרשאה לשימוש בתוכנית", "token valid": "האסימון תקף",
+      "token refreshed": "האסימון חודש", "token expired and could not be refreshed": "האסימון פג ולא הצלחתי לחדש אותו",
+      "OpenAI sign-in could not be reached": "אי אפשר להגיע להתחברות של OpenAI", "calendar and mail answer": "היומן והמייל עונים",
+      "the Google connection expired": "החיבור לגוגל פג", "not signed in": "לא מחובר", "Google could not be reached": "אי אפשר להגיע לגוגל",
+      "Pear Desktop does not answer": "Pear Desktop לא עונה", "Pear answers but is not paired": "Pear עונה אבל לא מחובר",
+      "Pear answers and is paired": "Pear עונה ומחובר", "wake-word model loads": "מודל מילת ההפעלה נטען",
+      "no bot token": "אין טוקן לבוט", "no paired chat": "אין צ'אט מחובר", "no access token": "אין טוקן גישה",
+      "not set up": "לא הוגדר", "Home Assistant answers": "Home Assistant עונה", "tailscale up": "Tailscale פועל"}
+
+
+def _he(r: CheckResult) -> str:
+    """A short Hebrew line for the dashboard: the known fixed details, else the plain state."""
+    d = r.detail
+    if d in HE:
+        return HE[d]
+    if d.startswith("bot @") and d.endswith(" answers"):
+        return "הבוט " + d[4:-8] + " עונה"
+    if d.endswith(" answers") and d.startswith("@"):
+        return d[:-8] + " עונה"
+    if d.startswith("the wake-word model did not load"):
+        return "מודל מילת ההפעלה לא נטען"
+    if d.startswith("no answer within"):
+        return "אין תשובה בזמן"
+    if not d:
+        return ""
+    return {WORKING: "עובד", BROKEN: "יש תקלה", UNREACHABLE: "אין תשובה", NOT_TESTED: "לא נבדק"}[r.state]
 
 
 Check = Callable[[CheckCtx], CheckResult]
@@ -221,12 +253,14 @@ for _id, _fn in (("openai", check_openai), ("openai_admin", check_openai_admin),
 def _run_one(fid: str, ctx: CheckCtx) -> CheckResult:
     fn = CHECKS.get(fid)
     if fn is None:
-        return CheckResult(NOT_TESTED, "no check for this integration yet")
+        return CheckResult(NOT_TESTED, "no check for this integration yet", detail_he="אין עדיין בדיקה לחיבור הזה")
     try:
-        return fn(ctx)
+        r = fn(ctx)
+        r.detail_he = r.detail_he or _he(r)
+        return r
     except Exception as e:                              # a probe bug must never break the command
         logs.warn("connect", "CONNECT_CHECK_ERROR", "a connectivity check raised an error", step=fid, error=type(e).__name__)
-        return CheckResult(UNREACHABLE, f"the check did not finish ({type(e).__name__})")
+        return CheckResult(UNREACHABLE, f"the check did not finish ({type(e).__name__})", detail_he="הבדיקה לא הסתיימה")
 
 
 def cached(home: Path, fid: str) -> CheckResult | None:
@@ -256,6 +290,7 @@ def run_checks(ctx: CheckCtx, ids: list[str], *, fresh: bool = False, timeout: f
     for fid, t in threads.items():
         t.join(max(0.0, end - time.monotonic()))
         res = slots.get(fid) or CheckResult(UNREACHABLE, f"no answer within {int(timeout)} s")
+        res.detail_he = res.detail_he or _he(res)
         out[fid] = res
         with _LOCK:
             _CACHE[(str(ctx.home), fid)] = (clock(), res)
