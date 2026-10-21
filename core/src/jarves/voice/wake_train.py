@@ -56,7 +56,9 @@ NEG_EN = ["what time is it", "turn on the music", "good morning", "how is the we
 NEAR_EN = ["hey Marcus", "hey Carlos", "hey Jarrett", "hey Travers", "hey Chavez", "hey Darwin", "hey Garvin",
            "hey Jason", "hey Marvel", "hey Arthur", "hey Parvez", "hey Charlie", "hey Davies", "hey Jagger",
            "hey Gervais", "hey Barnes", "hi Marcus", "hi Carlos", "okay Darwin", "hey Jarrah", "hey Larkin",
-           "hey Carver", "hey starfish", "hey Artie", "ok Jason", "hey Charvez", "hey Tavish", "hey Jarmusch"]
+           "hey Carver", "hey starfish", "hey Artie", "ok Jason", "hey Charvez", "hey Tavish", "hey Jarmusch",
+           "hey Charlene", "hey Carl", "hey Chalmers", "hey Sharkey", "hey Marshall", "hey Charmaine", "hey Chandler",
+           "hey Carlton", "hey Sherman", "hey Harlan", "hey Chuck", "hey Marlow"]
 NEG_HE = ["מה השעה", "תדליק מוזיקה", "בוקר טוב", "מה מזג האוויר היום", "תודה רבה", "איפה המפתחות שלי",
           "בוא נלך הביתה", "אני הולך לחנות", "תתקשר לאמא", "הפגישה בעשר", "רגע אחד בבקשה", "היי", "שלום לך",
           "מה נשמע", "יאללה", "ג'ארוויס", "היי ג'ארוויס", "תעשה לי טובה", "סגור", "תסגור את החלון", "מעולה",
