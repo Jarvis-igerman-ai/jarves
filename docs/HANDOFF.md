@@ -40,6 +40,20 @@
 - **Pre-existing failures, also on the base branch (not caused here):** `test_dashboard_locales` ar/ru coverage 19.8 % < 20 %; `test_agents_system::test_voice_tools_cli_and_dashboard_see_the_same_sessions` (TypeError at line 141).
 - **Questions for the user:** (1) OK that a never-checked slow feature shows "checking" for about a second on the very first Features view after a start (instead of blocking)? (2) The owner-class idle write budget (10 KB/min) fails on the integrated V4 tree (~33-37 KB/min): fix in a separate task, or raise the budget?
 
+## SW-V4 H: assisted dialing through Phone Link (20 Oct 2026) - #17, branch `v4/h-dialing` (on `v4/integrated-b-c-d-g-m-r01`), [report](reviews/SWV4_H_DIALING.md)
+
+- "Call Dana" by voice (`dial_prepare` / `dial_open`), `jarvis dial <name|number> [--yes-on-screen]`, and the dashboard Phone calls page: contact resolution (memory contacts, whatsapp book, read-only Google Contacts), E.164 + digit-by-digit read-back, popup with who / number / source / app, then a `tel:` link; the owner presses Call. Numbers from email, web, messages or recalled text are never dialled; a spoken number must be in the owner's own words (memory-only ring). Emergency numbers just open the dialer. Rate limit, hashes-only audit, feature `assisted_dialing` (SAFE_OFF), guide, capability row, wizard group, bundle check, en/he texts and catalogs.
+- Verified: `core/tests/test_dialing.py` 91 passed, 0 skips (fakes only, nothing opened); log lint 0 violations; about 700 related tests green. Pre-existing: `test_redaction_audit` real-Core timeouts on this PC at the base commit too.
+- NOT verified: a real `tel:` handoff into Phone Link (OH-01), Phone Link paired state, the spoken GPT-Live flow (scenarios 85-90), Google phone numbers with a real account, independent Opus security review.
+- Questions for the user: (1) Is Phone Link the default `tel:` app on your PC? (OD-16, needed for OH-01). (2) Read the number aloud before every approval (current) or only for new numbers? Status: USER DECISION REQUIRED (1), DEFERRED (2).
+
+---
+## SW-V4 package L: installer, updates, rollback (20 Oct 2026) - #17, branch `v4/l-installer` (public repo, draft PR to main), [report](reviews/SWV4_L_INSTALLER.md)
+
+- Done (fake/loopback tests, 0 skips): versioned data migrations with backup first and restore-from-backup down path; update flow against a local signed release server (SHA256+size, ask first, failures leave the old version, downgrade refused); `updates.rollback` + `jarvis update --rollback` + Updates page button (approval) + failed-first-start offer; silent installer args; signed-manifest `previous` block; clean-install residue audit; upgrade/rollback CI scenario; pinned-bridge payload check; installer size/time budgets feeding the M gate; restricted-token probe (study, not wired in).
+- Not verified: no real installer was built or run here (CI-only scripts); old-installer fixtures are not pinned (`packaging/upgrade_fixtures.json` empty, CI says NOT RUN); no second-PC run; Go bridge not on main.
+- Questions for the user: (1) **Autostart default**: the installer now leaves "start at sign-in" OFF (you asked for OFF by default), reversing the earlier owner decision "ticked by default" in `jarves.iss`/INSTALL_TEST. Confirm OFF? (2) OD-08 stays unsigned (recorded). (3) Pin real 0.1.0.x and 3.0.0.x installers (URL + SHA256) in `packaging/upgrade_fixtures.json` so the matrix runs. (4) Helper isolation via write-restricted token + protected `<home>` DACL is feasible (report section 8); want it as its own package? Status: WAITING FOR USER + CI run.
+
 ## SW-V4 B: privacy hardening + full redaction audit (20 Oct 2026) - #15 / #17, branch `v4-b-privacy` (off `origin/main`), [report](reviews/SWV4_B_PRIVACY.md), [sinks](reviews/SWV4_B_SINKS.md)
 
 - `logs.*` messages are fixed literals (466 call sites migrated); variable parts are fields classified once in `logs.FIELD_CLASS` (safe/secret/content/pii, unknown = content); provider/exception text -> `provider_error` / `exc_text`; AST lint `tools/log_lint.py` (0 violations). Secret patterns extended (OpenAI/Anthropic, JWT, Google, Telegram, Meta, GitHub, DPAPI, URL tokens, bearer, user-profile paths). Third-party loggers and crashes (main/thread/asyncio/faulthandler) routed and classified.
@@ -951,9 +965,16 @@ reachable from the phone (dashboard_lan) for approvals, or PC-only?
 - Tests: `test_swv4_idle_writes.py` (diag batching over 10 simulated minutes, WAL/NORMAL pragma, real idle Core < 12 KB/min).
 - Open: perf gate `spawn_to_ready_s` 5.11 > 5 on this busy PC (unrelated, noise).
 
+## V4 voice campaign C2 (21 Oct 2026) - #17, branch `test/v4-campaign-c2`
+
+- Credits topped up; re-ran every blocked live scenario: 89 PASS, 2 FAIL (22/23 wake near-misses, P3 unchanged), 1 BLOCKED (62, needs OD-05 admin key). Spend about $2.8. Report: `docs/reviews/SWV4_CAMPAIGN_VOICE.md`, bugs: `SWV4_CAMPAIGN_BUG_TABLE_VOICE.md`.
+- Product fixes: V4-VC-12 `BackendTrace.finish` duplicate `model` kwarg broke the ChatGPT-plan delegation route; V4-VC-13 own-health questions now delegated; V4-VC-14 WhatsApp inbox English phrasing.
+- Harness: the WhatsApp suites restart the live session after switching the feature on; scenario 56 copies (never refreshes) the owner's ChatGPT token.
+- Open: 79/80/84/101 occasionally miss on synthetic-ASR clips (pass on re-run). No questions for the user.
+
 ## V5 mobile access (branch v5/mobile-access, draft PR) - core done, review and real phone open
 
 Plan and security model: `docs/JARVES_SW_V5_WORK_PACKAGE.md`. Built: pairing (QR + one-time code), hashed per-device tokens, revoke, scopes, rate limits, audit without content, phone API (chat, voice PTT over TLS, approvals list/answer, status), PWA EN+HE, dashboard Phone page, `jarvis dashboard --mobile [--tls-selfsigned]`, feature `mobile_access` (default OFF). Tests: `test_mobile_access.py`, `test_mobile_pwa.py`; log lint 0 violations.
 Open: independent security review (V5-F), shared-conversation continuity (V5-G), start phone server with the Core (V5-I), real Android phone acceptance (V5-H, owner). Questions for the user: see section 7 of the work package.
 
-V5 review pass (21 Oct 2026): `docs/reviews/SWV5_SECURITY_REVIEW.md` - 4 findings (1 medium, 3 low), all fixed with regression tests (`test_sr*`): live switch gate, audit flood throttle, 0600 file creation, one chat turn per phone. Phone server now starts with the Core when `mobile_access` is ON (V5-I core); phone turns are logged into the shared typed history (V5-G core). Still open: client message ids, firewall guidance, real phone (V5-H).
+V5 review pass (21 Oct 2026): `docs/reviews/SWV5_SECURITY_REVIEW.md` - 4 findings (1 medium, 3 low), all fixed with regression tests (`test_sr*`): live switch gate, audit flood throttle, 0600 file creation, one chat turn per phone. Phone server now starts with the Core when `mobile_access` is ON (V5-I core); phone turns are logged into the shared typed history (V5-G core). Merged with V4 main (21 Oct). Client message ids closed: the phone sends an `id` per chat message and resends it on reconnect; the PC answers once and replays the stored answer (`test_chat_message_ids_*`). Manual Android steps: `docs/reviews/SWV5_ACCEPTANCE.md`. Still open: real phone run (V5-H, owner).

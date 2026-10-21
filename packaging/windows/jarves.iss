@@ -3,7 +3,11 @@
 ; Per user, no admin: {autopf} = %LOCALAPPDATA%\Programs. User data stays in %LOCALAPPDATA%\jarves (or JARVES_HOME)
 ; and survives upgrade and uninstall; only "remove my data" (asked, default No; silent: /PURGE=1) deletes it, and
 ; only a real JARVES data folder (purge_guard.iss: never a drive root / the profile; config.toml|store.db|memory.db).
-; Not signed (no code-signing certificate yet): Windows SmartScreen shows "Windows protected your PC" ->
+; SW-V4 L: "Start JARVES when I sign in" is OFF by default (the runtime's `jarvis autostart on` is the only writer of the
+; Run key; an upgrade never touches it, and UsePreviousTasks=no keeps the task from re-ticking it). Setup refuses to
+; install OVER A NEWER VERSION unless /ROLLBACK=1 is given (jarvis update --rollback), so a stale installer cannot
+; downgrade by accident. The AppId never changes: every released series (0.1.0.x -> 3.x -> 4.x) is the same app.
+; Not signed (no code-signing certificate yet; owner decision 20 Oct 2026: stay unsigned for now): Windows SmartScreen shows "Windows protected your PC" ->
 ; "More info" -> "Run anyway". See docs/INSTALL_TEST.md.
 
 #ifndef AppVersion
@@ -42,6 +46,7 @@ CloseApplications=yes
 RestartApplications=no
 ChangesEnvironment=yes
 SetupLogging=yes
+UsePreviousTasks=no
 UsedUserAreasWarning=no
 
 [Languages]
@@ -62,7 +67,7 @@ hebrew.AskPurge=למחוק גם את הנתונים של JARVES (זיכרון, �
 
 [Tasks]
 Name: "path"; Description: "{cm:TaskPath}"
-Name: "autostart"; Description: "{cm:TaskAutostart}"
+Name: "autostart"; Description: "{cm:TaskAutostart}"; Flags: unchecked
 Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; Flags: unchecked
 
 [InstallDelete]
@@ -85,6 +90,8 @@ Name: "{userdesktop}\JARVES"; Filename: "{app}\jarvis.cmd"; WorkingDir: "{app}";
 [Run]
 ; Autostart (ticked by default, owner decision) is the runtime's own mechanism: WP-M1 `jarvis autostart on|off`.
 Filename: "{cmd}"; Parameters: "/c """"{app}\jarvis.cmd"" autostart on"""; Tasks: autostart; Flags: runhidden waituntilterminated
+; In-app update / rollback (setup started with /RESTARTJARVES=1 by jarves.updates): start the Core again, windowless.
+Filename: "{app}\python\pythonw.exe"; Parameters: "-m jarves run --background"; WorkingDir: "{app}"; Check: RestartRequested; Flags: nowait runhidden
 Filename: "{cmd}"; Parameters: "/k """"{app}\jarvis.cmd"" setup"""; WorkingDir: "{app}"; Description: "{cm:RunSetup}"; Flags: postinstall nowait skipifsilent
 ; Silent installs: JARVES-Setup.exe /VERYSILENT /SETUPANSWERS=C:\path\answers.json applies a setup answers file (no
 ; secrets in it; see docs/INSTALL_TEST.md). Without /SETUPANSWERS= the command does nothing (exit 0).
@@ -144,6 +151,41 @@ begin
   Delete(Paths, P, Length(Dir) + 1);
   Paths := Copy(Paths, 2, Length(Paths) - 2);
   RegWriteExpandStringValue(HKCU, EnvKey, 'Path', Paths);
+end;
+
+function ParamPresent(const Name: String): Boolean;
+var
+  I: Integer;
+begin
+  Result := False;
+  for I := 1 to ParamCount do
+    if CompareText(ParamStr(I), Name) = 0 then
+      Result := True;
+end;
+
+function RestartRequested(): Boolean;
+begin
+  Result := ParamPresent('/RESTARTJARVES=1');
+end;
+
+#include "downgrade_guard.iss"
+
+function InitializeSetup(): Boolean;
+var
+  Installed: String;
+begin
+  Result := True;
+  if not RegQueryStringValue(HKCU, 'Software\Microsoft\Windows\CurrentVersion\Uninstall\{24F7B79A-973C-462D-BA26-896D8EA30913}_is1',
+                             'DisplayVersion', Installed) then
+    exit;                                   // not installed yet
+  if IsDowngrade(Installed, '{#AppVersion}') and not ParamPresent('/ROLLBACK=1') then
+  begin
+    Log('Refusing to install {#AppVersion} over the newer ' + Installed + ' (use /ROLLBACK=1)');
+    if not WizardSilent() then
+      MsgBox('JARVES ' + Installed + ' is already installed. This older installer will not replace it.' + #13#10 +
+             'To go back deliberately use: jarvis update --rollback', mbError, MB_OK);
+    Result := False;
+  end;
 end;
 
 function PrepareToInstall(var NeedsRestart: Boolean): String;
