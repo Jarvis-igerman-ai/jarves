@@ -41,7 +41,7 @@ FEATURES: dict[str, object] = {
     "proactive_alerts": (D, "alerts are read and answered on the Alerts page"),
     "autonomy": (D, "autonomy proposals are approved on the Autonomy page"),
     "background_core": "start", "display_control": "show", "tray_icon": "start", "autostart": "autostart",
-    "update_check": "update", "proactive_help": (D, "a pure switch; change it with `jarvis features`"),
+    "update_check": "update", "beta_channel": "update", "release_signoff": "release", "proactive_help": (D, "a pure switch; change it with `jarvis features`"),
     "profiles": "profile", "context_trace": (D, "the context trace is a dashboard view of one conversation"),
     "browser": "browser", "helper": "approvals", "helper_readonly_auto": (D, "a pure switch; `jarvis features`"),
     "whatsapp_handoff": (D, "WhatsApp opens a draft in the app; no CLI needed, switch via `jarvis features`"),

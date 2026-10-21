@@ -1534,6 +1534,24 @@
   "Warning": "Warning",
   "Skipped": "Skipped",
   "No data": "No data",
-  "dashboard Health & speed page, jarvis selftest, jarvis speedtest, Jobs page (times)": "dashboard Health & speed page, jarvis selftest, jarvis speedtest, Jobs page (times)"
+  "dashboard Health & speed page, jarvis selftest, jarvis speedtest, Jobs page (times)": "dashboard Health & speed page, jarvis selftest, jarvis speedtest, Jobs page (times)",
+  "Release sign-off": "Release sign-off",
+  "Test the latest beta by hand, record each result, then sign off. A stable release is refused without it.": "Test the latest beta by hand, record each result, then sign off. A stable release is refused without it.",
+  "Stable version": "Stable version",
+  "Open sheet": "Open sheet",
+  "Create the sheet first: python tools/manual_test_sheet.py --version X.Y.Z (docs/RELEASING.md).": "Create the sheet first: python tools/manual_test_sheet.py --version X.Y.Z (docs/RELEASING.md).",
+  "Update channel": "Update channel",
+  "Switch to the stable channel": "Switch to the stable channel",
+  "Switch to the beta channel": "Switch to the beta channel",
+  "Tested beta": "Tested beta",
+  "Expected": "Expected",
+  "Sign off": "Sign off",
+  "Sign off records the beta you have installed (version and commit) and today's date. Same from the command line: jarvis release signoff.": "Sign off records the beta you have installed (version and commit) and today's date. Same from the command line: jarvis release signoff.",
+  "BETA": "BETA",
+  "Signed": "Signed",
+  "Commit": "Commit",
+  "Note": "Note",
+  "Area": "Area",
+  "ID": "ID"
  }
 };
