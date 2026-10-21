@@ -7,8 +7,8 @@ sections are not written here. They must be added to the guide when #24 lands:
   approval popup (who, number, where the number came from) and only after you approve opens Phone Link; you press the
   green call button yourself. Off by default (`assisted_dialing`, Settings > Phone calls); `jarvis dial <name|number>`;
   the Phone calls page. Details: `docs/reviews/SWV4_H_DIALING.md`.
-- **Installer, silent upgrade, update flow, rollback**: updates are offered, never forced; `Setup.exe /SILENT` upgrades
-  in place and keeps the previous installer; a downgrade is refused; the Updates page and `jarvis update rollback`
+- **Installer, silent upgrade, update flow, rollback**: updates are offered, never forced; a silent setup run upgrades
+  in place and keeps the previous installer; a downgrade is refused; the Updates page and `jarvis update --rollback`
   restore the previous version; data migrations back up first. Details: `docs/reviews/SWV4_L_INSTALLER.md`,
   `docs/INSTALL_TEST.md`.
 
