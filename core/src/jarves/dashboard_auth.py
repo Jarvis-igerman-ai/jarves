@@ -52,7 +52,7 @@ LOOPBACK_HOSTS = ("127.0.0.1", "localhost", "::1")
 # reachable without a session in LAN mode (the pairing page itself)
 PUBLIC_PATHS = {("GET", "/pair"), ("POST", "/api/pair"), ("GET", "/static/pair.js"), ("GET", "/static/style.css"),
                 ("GET", "/static/m4.css")}
-ADMIN_ONLY = ("/api/devices", "/api/audit", "/api/features/dashboard_lan")
+ADMIN_ONLY = ("/api/devices", "/api/audit", "/api/mobile", "/api/features/dashboard_lan")
 # A paired phone (device role) gets an ALLOWLIST, never a denylist: reads only, plus the explicit low-risk writes
 # below. Everything a denylist used to let through by omission - approving/granting/enabling a generated Skill,
 # installing an update, adding a folder grant or reading a file, switching a risky feature (camera, gmail_send...)
@@ -125,6 +125,7 @@ class Access:
     def __init__(self, home: Path, admin_token: str, *, lan: bool = False, lan_host: str | None = None,
                  clock=time.time) -> None:
         self.home, self.admin_token, self.lan, self.lan_host = home, admin_token, lan, lan_host
+        self.mobile = False                            # V5: set by Dashboard when the phone paths are on
         self.clock = clock
         self._lock = threading.RLock()
         self.path = home / DEVICES_FILE
@@ -273,7 +274,7 @@ class Access:
             name = host.rsplit(":", 1)[0] if host.count(":") == 1 else host
         if name in LOOPBACK_HOSTS:
             return True
-        return bool(self.lan and self.lan_host and name == self.lan_host)
+        return bool(self.lan_host and name == self.lan_host and (self.lan or self.mobile))
 
     @staticmethod
     def origin_ok(headers, method: str) -> bool:

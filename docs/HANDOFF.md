@@ -950,3 +950,8 @@ reachable from the phone (dashboard_lan) for approvals, or PC-only?
 - Hook fix: `orchestrator/hook.py` printed the Stop reason with `ensure_ascii=False`; a Hebrew message hit the Windows console codec (UnicodeEncodeError, swallowed -> no output after the messages were already claimed). Now ASCII-escaped JSON.
 - Tests: `test_swv4_idle_writes.py` (diag batching over 10 simulated minutes, WAL/NORMAL pragma, real idle Core < 12 KB/min).
 - Open: perf gate `spawn_to_ready_s` 5.11 > 5 on this busy PC (unrelated, noise).
+
+## V5 mobile access (branch v5/mobile-access, draft PR) - core done, review and real phone open
+
+Plan and security model: `docs/JARVES_SW_V5_WORK_PACKAGE.md`. Built: pairing (QR + one-time code), hashed per-device tokens, revoke, scopes, rate limits, audit without content, phone API (chat, voice PTT over TLS, approvals list/answer, status), PWA EN+HE, dashboard Phone page, `jarvis dashboard --mobile [--tls-selfsigned]`, feature `mobile_access` (default OFF). Tests: `test_mobile_access.py`, `test_mobile_pwa.py`; log lint 0 violations.
+Open: independent security review (V5-F), shared-conversation continuity (V5-G), start phone server with the Core (V5-I), real Android phone acceptance (V5-H, owner). Questions for the user: see section 7 of the work package.

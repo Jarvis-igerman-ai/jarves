@@ -651,9 +651,23 @@ class Core:
         Returns the full URL with the private access key (without the page)."""
         if self._dashboard is None or not self._dashboard.running:
             from .dashboard import Dashboard
-            self._dashboard = await asyncio.to_thread(
-                lambda: Dashboard(self.home, self.cfg, workspace=self.workspace, memory=self.memory,
-                                  settings=self.settings).start())
+            from . import mobile
+            loop = asyncio.get_running_loop()
+            mob_on = self.features.enabled("mobile_access")        # V5: default OFF; the dashboard stays on 127.0.0.1
+            cert, key = mobile.tls_paths(self.home)
+            tls = (cert, key) if cert.is_file() and key.is_file() else None
+
+            def make(on: bool):
+                return Dashboard(self.home, self.cfg, workspace=self.workspace, memory=self.memory,
+                                 settings=self.settings, mobile_on=on, tls=tls if on else None,
+                                 mobile_bridge=mobile.core_bridge(self, loop) if on else None).start()
+            try:
+                self._dashboard = await asyncio.to_thread(make, mob_on)
+            except OSError as e:                                    # no home-network address: stay local-only
+                if not mob_on:
+                    raise
+                logs.warn("core", "MOBILE_START_FAILED", "phone access could not start", error_type=type(e).__name__)
+                self._dashboard = await asyncio.to_thread(make, False)
             ops = getattr(self, "ops", None)
             if ops is not None:      # P0.4 Q04: "Run now"/approve wake the Core's own loop (was: next 30 s poll)
                 self._dashboard.ctx._scheduler = ops.scheduler
