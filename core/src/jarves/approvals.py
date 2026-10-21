@@ -90,6 +90,10 @@ HE = {   # Hebrew texts of this module (fixed strings; user content is never tra
 # addresses or other details. The full text stays on the popup / dashboard (Approval.prompt, unchanged).
 # (regex on the tool name/title, English question, Hebrew question, may name the recipient)
 _SPOKEN_KINDS = (
+    (r"self_connect|self_manage_connect", "Open the connection window for an account?", "לפתוח חלון לחיבור חשבון?", False),
+    (r"self_undo|self_manage_undo", "Undo my last change to myself?", "לבטל את השינוי האחרון שעשיתי בעצמי?", False),
+    (r"self_change|self_manage", "Change one of my own files, features or settings?",
+     "לשנות אחד מהקבצים, היכולות או ההגדרות שלי?", False),
     (r"dial_open|\bcall\b", "Open the phone dialer{to}?", "לפתוח את החייגן{to}?", True),
     (r"whatsapp", "Send a WhatsApp message{to}?", "לשלוח הודעת וואטסאפ{to}?", True),
     (r"telegram", "Send a Telegram message{to}?", "לשלוח הודעת טלגרם{to}?", True),
