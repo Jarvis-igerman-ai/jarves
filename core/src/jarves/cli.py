@@ -1385,8 +1385,21 @@ def cmd_dashboard(a, cfg, home) -> int:
         print("Home-network access is switched off. Turn it on with: jarvis features on dashboard_lan "
               "(then phones on your Wi-Fi can pair with a code; never reachable from the internet)", file=sys.stderr)
         return 1
+    mobile_on, tls, bridge = bool(getattr(a, "mobile", False)), None, None
+    if mobile_on:
+        if not _cli_features(cfg, home).enabled("mobile_access"):
+            print("Phone access is switched off. Turn it on with: jarvis features on mobile_access "
+                  "(then phones on your Wi-Fi can pair with a QR code; never reachable from the internet)", file=sys.stderr)
+            return 1
+        from . import mobile as _mobile
+        cert, key = _mobile.tls_paths(home)
+        if getattr(a, "tls_selfsigned", False) and not cert.is_file():
+            from .dashboard_auth import lan_ip
+            _mobile.make_selfsigned(home, lan_ip())
+        if cert.is_file() and key.is_file():
+            tls = (cert, key)
     try:
-        dash = Dashboard(home, cfg, a.port, lan=a.lan)
+        dash = Dashboard(home, cfg, a.port, lan=a.lan, mobile_on=mobile_on, tls=tls)
     except OSError as e:
         print(f"cannot start the dashboard: {e}", file=sys.stderr)
         return 1
@@ -1395,6 +1408,10 @@ def cmd_dashboard(a, cfg, home) -> int:
     if dash.lan_url:
         print(f"Home network: on your phone open {dash.lan_url} and enter the pairing code from the Devices page "
               "(on this computer). If Windows asks, allow PRIVATE networks only.", flush=True)
+    if mobile_on:
+        print(f"Phone access is ON ({'https' if tls else 'http, text only: voice needs TLS, use --tls-selfsigned'}) "
+              f"on {dash.mobile.host}:{dash.port}. Press 'Pair a phone' on the dashboard Phone page for the QR code. "
+              "Standalone dashboard: chat/voice answer only inside a running Core.", flush=True)
     print("Ctrl+C to stop.", flush=True)
     if not a.no_open:
         import webbrowser
@@ -1647,6 +1664,10 @@ def main(argv: list[str] | None = None) -> int:
     db.add_argument("--no-open", action="store_true", help="do not open the browser")
     db.add_argument("--lan", action="store_true", help="also allow paired phones on the home network "
                                                        "(needs: jarvis features on dashboard_lan)")
+    db.add_argument("--mobile", action="store_true", help="also serve the phone app (needs: jarvis features on "
+                                                          "mobile_access); pair with a QR code")
+    db.add_argument("--tls-selfsigned", action="store_true", help="with --mobile: make a self-signed certificate so the "
+                                                                  "phone may use the microphone")
     fe = sub.add_parser("features", help="feature switches: list / on ID / off ID / reset ID; on installs supported "
                                         "locked prerequisites before enabling (stop Core for dependency installation)")
     fe.add_argument("action", nargs="?", default="list", choices=["list", "on", "off", "reset"])

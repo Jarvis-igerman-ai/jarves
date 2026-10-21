@@ -60,7 +60,7 @@ ADDON_MODULES = ("jarves.telegram_channel", "jarves.instagram_channel", "jarves.
                  "jarves.recall", "jarves.diag.service", "jarves.whatsapp_bridge", "jarves.orchestrator", "jarves.dialing")
 # Privacy-sensitive or outward-acting: OFF on the first run whatever else says; ON only after an explicit yes.
 SAFE_OFF = frozenset({"camera", "face_recognition", "camera_when_away", "gmail_send", "calendar_write",
-                      "dashboard_lan", "browser", "telegram", "home_assistant", "instagram", "helper",
+                      "dashboard_lan", "mobile_access", "browser", "telegram", "home_assistant", "instagram", "helper",
                       "helper_readonly_auto", "whatsapp_bridge", "whatsapp_send", "agent_orchestrator", "assisted_dialing"})
 # Registered and grouped (so coverage checks see them) but never offered by the wizard: the owner decided (20 Oct)
 # that the Helper asks for EVERY command; the read-only allow-list exists only as `jarvis features on ...`.
@@ -84,7 +84,7 @@ GROUPS: tuple[tuple[str, str, str, tuple[str, ...]], ...] = (
     ("channels", "ערוצים ובית חכם", "Channels & smart home", ("telegram", "instagram", "whatsapp_handoff",
                                                                   "whatsapp_bridge", "whatsapp_send", "home_assistant")),
     ("phone", "שיחות טלפון", "Phone calls", ("assisted_dialing",)),
-    ("dashboard", "לוח בקרה וטלפון", "Dashboard & phone", ("dashboard", "dashboard_lan", "context_trace")),
+    ("dashboard", "לוח בקרה וטלפון", "Dashboard & phone", ("dashboard", "dashboard_lan", "mobile_access", "context_trace")),
     ("updates", "עדכונים וגיבוי", "Updates & backup", ("update_check", "backup")),
     ("profiles", "פרופילים", "Profiles", ("profiles",)),
     ("helper", "עזרה במחשב (פקודות והתקנות)", "Computer helper (commands & installs)", ("helper", "helper_readonly_auto")),
@@ -941,6 +941,7 @@ BUNDLE: dict[str, list[Callable[[], tuple[bool, str]]]] = {
                   _data("jarves", "dashboard_static/shell.js"), _data("jarves", "dashboard_static/locales/en.js"),
                   _data("jarves", "dashboard_static/locales/he.js")],
     "dashboard_lan": [_mod("jarves.dashboard_auth"), _data("jarves", "dashboard_static/pair.html")],
+    "mobile_access": [_mod("jarves.mobile"), _mod("jarves.qrmini"), _data("jarves", "dashboard_static/mobile/index.html")],
     "context_trace": [_mod("jarves.context_trace"), _data("jarves", "dashboard_static/context.js")],
     "agent_orchestrator": [_mod("jarves.orchestrator"), _mod("jarves.orchestrator.service"),
                            _mod("jarves.orchestrator.hook"), _mod("jarves.orchestrator.channel"),
