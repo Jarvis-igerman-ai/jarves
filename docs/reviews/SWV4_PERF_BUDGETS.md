@@ -26,6 +26,10 @@ with `<=`. The gate has two classes: `owner` (default on a PC) and `ci` (default
 | dashboard slowest page API, first request (ms) | 74 | 500 | 1500 | in-process |
 | LIVE_STARTED after CORE_STARTING (s) | 8.6 | 20 | 40 | real log (`--log`) |
 | LIVE_FIRST_AUDIO after CORE_STARTING (s) | 10.3 | 24 | 45 | real log (`--log`) |
+| tool call p50 / p95 (ms, last 14 days of TOOL_RESULT) | 120 / 2500 | 1000 / 8000 | 3000 / 20000 | `jarvis speedtest` (history; placeholder baselines) |
+| wake-to-first-audio median (s) | 1.8 | 3 | 6 | `jarvis speedtest` (monitor events) |
+| dead air p95 (s) | 1.44 | 1.5 | 3 | `jarvis speedtest` (monitor events) |
+| OpenAI API round trip, one HEAD without key (ms) | 400 | 1500 | 4000 | `jarvis speedtest` (net) |
 
 ## Pending (need a real microphone, Godot window or billed session; owner-assisted in A / AM-P1..P3)
 
@@ -47,3 +51,5 @@ stops growth until AM-P2 explains it.
 A measurement run on a busy PC (5 agents running) exceeded the strict owner ceilings for idle CPU (0.51), idle writes
 (27 KB/min over a 30 s window, which over-weights the 60 s heartbeat write), Core ready (3.1 s) and spawn to ready (8.2 s);
 that is why the CI job uses a 60 s idle window and loose ceilings, and why the owner class is for quiet machines.
+
+`jarvis speedtest` (core/src/jarves/speedtest.py) judges every metric against this file (pass / warn within 15 % of the ceiling / fail) and warns when a value is more than 20 % worse than the median of the last 5 runs; CI runs it as `--class ci --gate`.

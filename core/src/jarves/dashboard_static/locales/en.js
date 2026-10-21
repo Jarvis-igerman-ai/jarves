@@ -1487,6 +1487,25 @@
   "Previous version: ": "Previous version: ",
   " (downloaded from the signed release folder)": " (downloaded from the signed release folder)",
   "jarvis dial <name|number>, dashboard Calls page (#/calls)": "jarvis dial <name|number>, dashboard Calls page (#/calls)",
-  ", approval on every call (on screen for a new number)": ", approval on every call (on screen for a new number)"
+  ", approval on every call (on screen for a new number)": ", approval on every call (on screen for a new number)",
+  "Self-test history": "Self-test history",
+  "Running…": "Running…",
+  "Starts a temporary Core, loads the wake model and checks audio devices (nothing recorded or spoken)": "Starts a temporary Core, loads the wake model and checks audio devices (nothing recorded or spoken)",
+  "Run deep test": "Run deep test",
+  "Self-test": "Self-test",
+  "No self-test yet.": "No self-test yet.",
+  "Speed test": "Speed test",
+  "No speed test yet.": "No speed test yet.",
+  "Metric": "Metric",
+  "Value": "Value",
+  "Budget": "Budget",
+  "vs last 5": "vs last 5",
+  "Trend": "Trend",
+  "Health & speed": "Health & speed",
+  "JARVES checks his own installation and his speed, for free and without changing anything. You can also ask by voice.": "JARVES checks his own installation and his speed, for free and without changing anything. You can also ask by voice.",
+  "Self-test daily at 08:15, speed test weekly (Sunday 13:00). Never in quiet hours or in the middle of a conversation: a skipped run is logged, not queued.": "Self-test daily at 08:15, speed test weekly (Sunday 13:00). Never in quiet hours or in the middle of a conversation: a skipped run is logged, not queued.",
+  "Warning": "Warning",
+  "Skipped": "Skipped",
+  "No data": "No data"
  }
 };

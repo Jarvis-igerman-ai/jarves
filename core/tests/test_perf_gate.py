@@ -22,7 +22,7 @@ def test_budget_file_is_well_formed():
     for name, b in BUDGETS["metrics"].items():
         for key in ("baseline", "unit", "source", "owner_max", "ci_max", "note"):
             assert key in b, (name, key)
-        assert b["source"] in ("bench", "inproc", "log"), name
+        assert b["source"] in ("bench", "inproc", "log", "history", "net"), name
         assert b["baseline"] <= b["owner_max"] <= b["ci_max"], name        # strict owner, loose CI
     assert BUDGETS["history"], "every budget change is recorded"
 

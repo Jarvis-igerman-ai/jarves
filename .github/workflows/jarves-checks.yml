@@ -218,6 +218,9 @@ jobs:
       - name: perf_gate (real background Core, 2 runs, idle 60 s, plus in-process and dashboard timings)
         shell: bash
         run: uv run python tools/perf_gate.py --class ci --results perf-results.json
+      - name: speed gate (jarvis speedtest, class ci, same budgets and code as the app, no history written)
+        shell: bash
+        run: uv run python -m jarves.cli speedtest --class ci --gate --no-store --no-net --idle-window 5
       - uses: actions/upload-artifact@v7
         if: always()
         with:

@@ -1487,7 +1487,26 @@
   "Previous version: ": "הגרסה הקודמת: ",
   " (downloaded from the signed release folder)": " (תורד מתיקיית ההפצה החתומה)",
   "jarvis dial <name|number>, dashboard Calls page (#/calls)": "jarvis dial <שם|מספר>, עמוד השיחות בלוח הבקרה (#/calls)",
-  ", approval on every call (on screen for a new number)": ", אישור על כל שיחה (על המסך למספר חדש)"
+  ", approval on every call (on screen for a new number)": ", אישור על כל שיחה (על המסך למספר חדש)",
+  "Self-test history": "היסטוריית בדיקות עצמיות",
+  "Running…": "רץ עכשיו…",
+  "Starts a temporary Core, loads the wake model and checks audio devices (nothing recorded or spoken)": "מפעיל ליבה זמנית, טוען את מודל מילת ההפעלה ובודק התקני שמע (בלי להקליט ובלי לדבר)",
+  "Run deep test": "הרץ בדיקה מעמיקה",
+  "Self-test": "בדיקה עצמית",
+  "No self-test yet.": "עוד לא רצה בדיקה עצמית.",
+  "Speed test": "בדיקת מהירות",
+  "No speed test yet.": "עוד לא רצה בדיקת מהירות.",
+  "Metric": "מדד",
+  "Value": "ערך",
+  "Budget": "תקציב",
+  "vs last 5": "מול 5 קודמות",
+  "Trend": "מגמה",
+  "Health & speed": "תקינות ומהירות",
+  "JARVES checks his own installation and his speed, for free and without changing anything. You can also ask by voice.": "ג'ארביס בודק את ההתקנה שלו ואת המהירות שלו, בחינם ובלי לשנות כלום. אפשר גם לבקש בקול.",
+  "Self-test daily at 08:15, speed test weekly (Sunday 13:00). Never in quiet hours or in the middle of a conversation: a skipped run is logged, not queued.": "בדיקה עצמית כל יום ב-08:15, בדיקת מהירות פעם בשבוע (ראשון 13:00). לא בשעות השקט ולא באמצע שיחה: ריצה שדולגה נרשמת ביומן ולא נדחית.",
+  "Warning": "אזהרה",
+  "Skipped": "דולג",
+  "No data": "אין נתון"
  },
  "rules": [
   [

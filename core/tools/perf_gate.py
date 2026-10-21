@@ -19,8 +19,6 @@ import json
 import os
 import statistics
 import sys
-import tempfile
-import time
 import tomllib
 from pathlib import Path
 
@@ -68,67 +66,15 @@ def measure_bench(scenario: str, runs: int, idle_s: float, port: int) -> dict:
             if isinstance(v, (int, float)) and all(r[k] is not None for r in rows)}
 
 
-def _timed(fn) -> float:
-    t = time.perf_counter()
-    fn()
-    return round((time.perf_counter() - t) * 1000, 1)
-
-
 def measure_inproc(repeats: int = 3, settle_s: float = 0.5) -> dict:
-    """In-process timings with a private JARVES_HOME. The music probe is made slow (0.3 s, as with Pear closed)."""
-    from jarves import features as feat
-    from jarves.config import Config
-    home = Path(tempfile.mkdtemp(prefix="jarves-gate-"))
-    os.environ["JARVES_HOME"] = str(home)
-    real = feat._tcp_open
-    feat._tcp_open = lambda url, timeout=0.3: (time.sleep(0.3), False)[1]
-    out: dict = {}
-    try:
-        f = feat.Features(Config(), home, components=lambda: {}, skills=lambda: set())
-        f.warm("music")                                                    # first probe (synchronous), then expire
-        lists, probes = [], []
-        for _ in range(repeats):
-            t, ok, why = f._probe_cache["music"]
-            f._probe_cache["music"] = (t - feat.PROBE_TTL_S - 1, ok, why)
-            lists.append(_timed(f.list))
-            time.sleep(settle_s)                                           # let the background re-check finish
-            t, ok, why = f._probe_cache["music"]
-            f._probe_cache["music"] = (t - feat.PROBE_TTL_S - 1, ok, why)
-            probes.append(_timed(lambda: f.available("music")))
-            time.sleep(settle_s)
-        out["features_list_ms"] = statistics.median(lists)
-        out["live_tools_probe_ms"] = statistics.median(probes)
-    finally:
-        feat._tcp_open = real
-    out.update(measure_dashboard(home))
-    return out
+    """The in-process timings live in jarves.speedtest, so the gate and `jarvis speedtest` share one code path."""
+    from jarves import speedtest
+    return speedtest.measure_inproc(repeats=repeats, settle_s=settle_s)
 
 
 def measure_dashboard(home: Path) -> dict:
-    import http.client
-    from jarves import dashboard
-    from jarves.config import Config
-    (home / "workspace").mkdir(exist_ok=True)
-    d = dashboard.Dashboard(home, Config()).start()
-    try:
-        def get(path: str) -> float:
-            c = http.client.HTTPConnection("127.0.0.1", d.port, timeout=10)
-            t = time.perf_counter()
-            c.request("GET", path, headers={"Host": f"127.0.0.1:{d.port}",
-                                            "Cookie": f"{dashboard.COOKIE}={d.url.split('t=')[1]}"})
-            r = c.getresponse()
-            r.read()
-            ms = (time.perf_counter() - t) * 1000
-            c.close()
-            if r.status >= 500:
-                raise SystemExit(f"dashboard {path} -> {r.status}")
-            return round(ms, 1)
-        first = get("/")
-        apis = [get(f"/api/{p}") for p in ("overview", "sessions", "costs?days=30", "issues", "skills", "memory",
-                                           "settings")]
-        return {"dashboard_first_load_ms": first, "dashboard_api_max_ms": max(apis)}
-    finally:
-        d.stop()
+    from jarves import speedtest
+    return speedtest.measure_dashboard(home)
 
 
 def measure_log(path: Path) -> dict:
