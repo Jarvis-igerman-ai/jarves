@@ -151,8 +151,57 @@ owner_max = 24
 ci_max = 45
 note = "LIVE_FIRST_AUDIO in a real desktop start (V3 log: 10.3-17.2 s). Wake-to-first-audio proper is measured 5x in A/AM-P1"
 
+# Installer budgets (SW-V4 L). Measured by packaging/installer_metrics.py from dist/build-info.json and the timings of
+# packaging/smoke_windows.ps1; checked by `python packaging/installer_metrics.py check` and by
+# `perf_gate.py --installer-json FILE`. A metric with `baseline_pending = true` has only a loose ceiling until the first
+# green CI run records its number (then add `baseline` and tighten, with a [[history]] line).
+[installer.installer_size_mb]
+baseline = 198
+unit = "MB"
+owner_max = 240
+ci_max = 300
+note = "JARVES-Setup-<v>.exe (V4 work package M: 198 MB). Growth needs a reason: a new bundled add-on or a bigger Godot export"
+
+[installer.silent_install_s]
+baseline_pending = true
+unit = "s"
+owner_max = 90
+ci_max = 240
+note = "/VERYSILENT clean install, wall clock (CI runner is slow on lzma2 + 600 MB of files)"
+
+[installer.silent_uninstall_s]
+baseline_pending = true
+unit = "s"
+owner_max = 40
+ci_max = 120
+note = "silent uninstall keeping the data folder"
+
+[installer.silent_upgrade_s]
+baseline_pending = true
+unit = "s"
+owner_max = 120
+ci_max = 300
+note = "silent upgrade over the seeded older install (stop Core, replace python and face, migrate data on the next start)"
+
+[installer.silent_rollback_s]
+baseline_pending = true
+unit = "s"
+owner_max = 120
+ci_max = 300
+note = "silent /ROLLBACK=1 reinstall of the previous version"
+
+[installer.build_s]
+baseline_pending = true
+unit = "s"
+owner_max = 900
+ci_max = 1500
+note = "build_windows.ps1 end to end with warm caches (informational on the owner PC)"
+
 # Budgets that need a real microphone, Godot window or billed session are listed in the budgets doc as PENDING (A).
 
 [[history]]
 date = "2026-10-20"
 change = "created from SWV3_P03_REPORT.md numbers; owner ceilings = the V3 P0.3 acceptance budgets"
+[[history]]
+date = "2026-10-20"
+change = "package L: added the [installer.*] size and time budgets (installer 198 MB baseline from the V4 package; times pending the first CI measurement)"
