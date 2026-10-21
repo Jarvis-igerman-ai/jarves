@@ -119,7 +119,7 @@
   function adminKeyCard(d) {
     const present = d.costs_api.key_present;
     const input = el("input", { type: "password", autocomplete: "off", spellcheck: "false", size: 40,
-      placeholder: "sk-admin-...", "aria-label": JL.t("OpenAI admin key (optional, read-only)") });
+      "aria-label": JL.t("OpenAI admin key (optional, read-only)") });
     const out = el("span", { class: "muted small", "aria-live": "polite" });
     const post = async (path, body) => {
       try { const r = await api(path, { method: "POST", body: JSON.stringify(body) }); input.value = ""; return r; }
