@@ -375,7 +375,9 @@ def cmd_autostart(a, cfg, home) -> int:
     except NotImplementedError as e:
         print(str(e), file=sys.stderr)
         return 2
-    Features(cfg, home).set("autostart", a.action == "on", by="cli")     # the dashboard shows the same choice
+    feats, want = Features(cfg, home), a.action == "on"
+    if feats.enabled("autostart") != want:       # an unchanged switch is not rewritten (the uninstaller runs `off`: user data stays byte-for-byte)
+        feats.set("autostart", want, by="cli")   # the dashboard shows the same choice
     return 0
 
 
@@ -1406,6 +1408,8 @@ def cmd_update(a, cfg, home) -> int:
     from .updates import UpdateChecker, UpdateError, launch_installer, version_line
     u = UpdateChecker(home, cfg=cfg)
     print(version_line())
+    if getattr(a, "rollback", False):
+        return _update_rollback(a, cfg, home)
     if a.action == "status":
         s = u.status()
     elif not Features(cfg, home).enabled("update_check"):
@@ -1438,11 +1442,41 @@ def cmd_update(a, cfg, home) -> int:
     if _ws_call(home, cfg.link.port, {"type": "status.request", "payload": {}}, "status") is not None:
         cmd_stop(a, cfg, home)
     try:
-        launch_installer(r["installer"], verified=r)
+        launch_installer(r["installer"], verified=r, silent=a.silent, restart=a.silent)
     except UpdateError as e:
         print(f"{e.code}: {e.message}")
         return 1
-    print("Setup is open. Follow it; JARVES can start again at the end.")
+    if a.silent:
+        print("Setup runs silently and starts JARVES again at the end. If it fails to start, "
+              "`jarvis update --rollback` goes back to the previous version.")
+    else:
+        print("Setup is open. Follow it; JARVES can start again at the end.")
+    return 0
+
+
+def _update_rollback(a, cfg, home) -> int:
+    """jarvis update --rollback: reinstall the previous version and restore the data from before the update."""
+    from .updates import UpdateError, rollback, rollback_info
+    info = rollback_info(home)
+    if not info["possible"]:
+        print("Nothing to roll back to: no previous version is kept (an update has not been installed by JARVES yet).")
+        return 1
+    print(f"Rolling back to {info['version']}: restores your data from before the update ({info['backup'] or 'no backup'}),"
+          " stops JARVES and starts setup.")
+    if not a.keep_data:
+        print("Anything you changed after the update is kept in a safety backup, not in the restored data.")
+    if not a.yes and input("Type yes to continue: ").strip().lower() != "yes":
+        print("Not rolled back.")
+        return 1
+    if _ws_call(home, cfg.link.port, {"type": "status.request", "payload": {}}, "status") is not None:
+        cmd_stop(a, cfg, home)
+    try:
+        r = rollback(home, approved=True, restore_data=not a.keep_data, silent=not a.window, port=cfg.link.port)
+    except UpdateError as e:
+        print(f"{e.code}: {e.message}")
+        return 1
+    print(f"Verified {Path(r['installer']).name}" + (f"; data restored from {r['restored']}" if r["restored"] else "")
+          + ". Setup is starting.")
     return 0
 
 
@@ -1621,7 +1655,12 @@ def main(argv: list[str] | None = None) -> int:
     add_selfcheck_args(dg)                    # owner request 20 Oct: jarvis diagnose --now (self-check)
     up = sub.add_parser("update", help="check GitHub for a newer JARVES; install only after you approve")
     up.add_argument("action", nargs="?", default="check", choices=["check", "install", "status"])
-    up.add_argument("--yes", action="store_true", help="install: you already approved (no question)")
+    up.add_argument("--yes", action="store_true", help="install / rollback: you already approved (no question)")
+    up.add_argument("--silent", action="store_true", help="install: run setup silently (no window) and start JARVES again")
+    up.add_argument("--rollback", action="store_true", help="go back to the previous version and restore the data "
+                                                              "from before the update")
+    up.add_argument("--keep-data", action="store_true", help="rollback: reinstall the program only, keep current data")
+    up.add_argument("--window", action="store_true", help="rollback: show the setup window instead of running silently")
     from . import profiles
     profiles.add_cli(sub)                     # Issue #17: jarvis profile list / create / use / delete / export
     from . import cli_parity
@@ -1636,6 +1675,8 @@ def main(argv: list[str] | None = None) -> int:
     whatsapp_admin.add_cli(sub)               # SW-V4 F: jarvis whatsapp status / link / mode / allow / kill ...
     from .orchestrator import surfaces as agents_cli
     agents_cli.add_cli(sub)                   # SW-V4 E: jarvis agents list | status | ask | tell | start | ...
+    from . import dialing
+    dialing.add_cli(sub)                      # SW-V4 H: jarvis dial <name|number> [--yes-on-screen]
     a = ap.parse_args(argv)
     try:
         if a.profile:
@@ -1666,6 +1707,7 @@ def main(argv: list[str] | None = None) -> int:
             "health": health_cli.cmd_health,
             "whatsapp": whatsapp_admin.cmd_whatsapp,
             "agents": agents_cli.cmd_agents,
+            "dial": dialing.cmd_dial,
             **cli_parity.COMMANDS, **budget_cli.COMMANDS}[a.cmd](a, cfg, home)
 
 

@@ -13,6 +13,17 @@ the same PC is never touched. No audio is played, no network service is called, 
   6 uninstall (silent)                                     -> program folder gone, user data KEPT
   7 install + uninstall /PURGE=1                           -> user data removed only when asked
 
+SW-V4 L (clean machine, upgrade, rollback, budgets). Every run also does a residue audit (packaging\install_audit.py:
+HKCU Run key, user PATH, scheduled tasks, Start menu, program and data folders before the install, after it and after
+each uninstall; autostart must be OFF after a default install, nothing may be left behind, data is kept byte-for-byte unless
+/PURGE=1) and times the silent steps (-MetricsOut writes them for packaging\installer_metrics.py / perf_gate.py).
+  -DefaultTasks         step 1 installs WITHOUT /TASKS (the real defaults: PATH task on, autostart OFF) - for a CI runner
+  -UpgradeFrom EXE      instead of steps 1-7: install the OLD installer (0.1.0.x or 3.x), seed an old-layout data folder,
+                        silently upgrade to -Installer, start the Core (data migration, backup first), verify every seeded
+                        row, settings and the autostart state are unchanged and doctor completes
+  -Rollback             with -UpgradeFrom: record the previous version like the in-app updater does, run
+                        `jarvis update --rollback --yes`, wait for the old version, verify version and data are back
+
   pwsh packaging\smoke_windows.ps1 -Installer dist\JARVES-Setup-0.1.0.57.exe [-Version 0.1.0.57] [-RequireFace]
 #>
 param(
@@ -21,7 +32,12 @@ param(
     [string]$Work = (Join-Path ([IO.Path]::GetTempPath()) "jarves-smoke-$PID"),
     [switch]$RequireFace,
     [switch]$CheckAutostart,     # CI: the reinstall ticks "start at login" (writes HKCU Run\JARVES); uninstall removes it
-    [switch]$SkipDoctor          # local runs: doctor records 1.5 s from the default microphone (CI has none)
+    [switch]$SkipDoctor,         # local runs: doctor records 1.5 s from the default microphone (CI has none)
+    [switch]$DefaultTasks,       # step 1 without /TASKS: the installer's real defaults (see above)
+    [string]$UpgradeFrom = "",   # an older installer: run the upgrade scenario instead of steps 1-7
+    [switch]$Rollback,           # with -UpgradeFrom: also test `jarvis update --rollback`
+    [string]$MetricsOut = "",    # write the silent install / uninstall / upgrade / rollback timings (seconds) as JSON
+    [string]$AuditPython = ""    # python for packaging\install_audit.py / seed_legacy.py (default: python on PATH)
 )
 $ErrorActionPreference = "Stop"
 $Installer = (Resolve-Path $Installer).Path
@@ -40,17 +56,64 @@ function Jarvis([string[]]$argv, [int]$timeoutS = 120) {
     if (-not $p.WaitForExit($timeoutS * 1000)) { $p.Kill($true); return @{ code = -1; text = "TIMEOUT" } }
     return @{ code = $p.ExitCode; text = (Get-Content $out -Raw -ErrorAction SilentlyContinue) + "" }
 }
-function Install([string]$tasks = "", [string[]]$extra = @()) {
-    $p = Start-Process $Installer -Wait -PassThru -ArgumentList (@("/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART",
-        "/SP-", "/TASKS=`"$tasks`"", "/DIR=`"$App`"", "/LOG=`"$(Join-Path $Work "install-$(Get-Random).log")`"") + $extra)
+$Times = [ordered]@{}
+function Install([string]$tasks = "", [string[]]$extra = @(), [string]$exe = "", [string]$time = "") {
+    # $tasks = "DEFAULT": no /TASKS at all (the installer's own defaults); "" : no task at all
+    if (-not $exe) { $exe = $Installer }
+    $taskArg = if ($tasks -eq "DEFAULT") { @() } else { @("/TASKS=`"$tasks`"") }
+    $sw = [Diagnostics.Stopwatch]::StartNew()
+    $p = Start-Process $exe -Wait -PassThru -ArgumentList (@("/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART",
+        "/SP-") + $taskArg + @("/DIR=`"$App`"", "/LOG=`"$(Join-Path $Work "install-$(Get-Random).log")`"") + $extra)
+    if ($time) { $Times[$time] = [math]::Round($sw.Elapsed.TotalSeconds, 1) }
     return $p.ExitCode
 }
-function Uninstall([string[]]$extra = @()) {
+function Uninstall([string[]]$extra = @(), [string]$time = "") {
     $u = Join-Path $App "unins000.exe"
     if (-not (Test-Path $u)) { return -2 }
+    $sw = [Diagnostics.Stopwatch]::StartNew()
     $p = Start-Process $u -Wait -PassThru -ArgumentList (@("/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART") + $extra)
     for ($i = 0; $i -lt 120 -and (Test-Path $u); $i++) { Start-Sleep -Milliseconds 500 }   # the copy in %TEMP% finishes
+    if ($time) { $Times[$time] = [math]::Round($sw.Elapsed.TotalSeconds, 1) }
     return $p.ExitCode
+}
+# residue audit helpers (stdlib python; reads only the HKCU Run key, user PATH, task names, Start menu and the folders)
+$AuditPy = if ($AuditPython) { $AuditPython } else { (Get-Command python -ErrorAction Stop).Source }
+$Tools = $PSScriptRoot
+function Collect([string]$name) {
+    $f = Join-Path $Work "state-$name.json"
+    & $AuditPy -I (Join-Path $Tools "install_audit.py") collect --app $App --home $Home_ --out $f
+    return $f
+}
+function Audit([string]$mode, [string]$before, [string]$after, [string[]]$extra = @()) {
+    $o = & $AuditPy -I (Join-Path $Tools "install_audit.py") $mode --before $before --after $after @extra 2>&1
+    $o | ForEach-Object { Write-Host "       $_" }
+    return ($LASTEXITCODE -eq 0)
+}
+function Seed([string]$cmd, [string[]]$extra = @()) {
+    $o = & $AuditPy -I (Join-Path $Tools "seed_legacy.py") $cmd --home $Home_ @extra 2>&1
+    $o | ForEach-Object { Write-Host "       $_" }
+    return ($LASTEXITCODE -eq 0)
+}
+function Version-Of() {
+    $f = Join-Path $App "python\Lib\site-packages\jarves\_build_info.json"
+    if (-not (Test-Path $f)) { return "" }
+    return ((Get-Content $f -Raw | ConvertFrom-Json).version) + ""
+}
+function Save-Times() {
+    if ($MetricsOut) {
+        $args_ = @("-I", (Join-Path $Tools "installer_metrics.py"), "measure", "--dist", (Split-Path $Installer -Parent), "--out", $MetricsOut)
+        $map = @{ silent_install_s = "--install-s"; silent_uninstall_s = "--uninstall-s"; silent_upgrade_s = "--upgrade-s"; silent_rollback_s = "--rollback-s" }
+        foreach ($k in $map.Keys) { if ($Times.Contains($k)) { $args_ += @($map[$k], $Times[$k]) } }
+        & $AuditPy @args_ | Out-Host
+    }
+}
+function Wait-Log([string]$pattern, [int]$timeoutS = 60) {
+    $log = Join-Path $Home_ "logs\jarves.log"
+    for ($i = 0; $i -lt $timeoutS * 2; $i++) {
+        if ((Test-Path $log) -and (Select-String -Path $log -Pattern $pattern -Quiet)) { return $true }
+        Start-Sleep -Milliseconds 500
+    }
+    return $false
 }
 
 New-Item -ItemType Directory -Force $Work, $Home_ | Out-Null
@@ -67,8 +130,67 @@ port = 18765
 "@ | Set-Content -Encoding utf8NoBOM (Join-Path $Home_ "config.toml")
 "chatgpt" | Set-Content (Join-Path $Home_ "setup_done")
 
+# ---------------------------------------------------------------- SW-V4 L: upgrade (and rollback) scenario
+if ($UpgradeFrom) {
+    $UpgradeFrom = (Resolve-Path $UpgradeFrom).Path
+    $before = Collect "before"
+    Check ((Install "" @() $UpgradeFrom) -eq 0) "old installer installs silently: $(Split-Path $UpgradeFrom -Leaf)"
+    $oldVer = Version-Of
+    Check ($oldVer -match '^\d+\.\d+\.\d+\.\d+$') "old version is $oldVer"
+    Check (Seed "seed") "old-layout data seeded (conversation, memory, job, settings)"
+    $settingsBefore = @("config.toml", "features.json", "identity.json") | ForEach-Object { (Get-FileHash (Join-Path $Home_ $_)).Hash }
+    $mid = Collect "old-installed"                     # Run key / PATH with the old version installed
+    # silent upgrade over it: no /TASKS (the installer keeps its defaults), same AppId, data folder untouched
+    Check ((Install "DEFAULT" @() $Installer "silent_upgrade_s") -eq 0) "silent upgrade $oldVer -> $Version"
+    $newVer = Version-Of
+    Check ($newVer -ne $oldVer -and (-not $Version -or $newVer -eq $Version)) "installed version is now $newVer"
+    $settingsAfter = @("config.toml", "features.json", "identity.json") | ForEach-Object { (Get-FileHash (Join-Path $Home_ $_)).Hash }
+    Check (($settingsBefore -join ",") -eq ($settingsAfter -join ",")) "settings files are byte-for-byte unchanged by the upgrade"
+    $after = Collect "upgraded"
+    $m = Get-Content $mid -Raw | ConvertFrom-Json
+    $a = Get-Content $after -Raw | ConvertFrom-Json
+    Check ((($m.run | ConvertTo-Json -Compress) -eq ($a.run | ConvertTo-Json -Compress))) "autostart (HKCU Run) is exactly as before the upgrade"
+    # first start of the new version: backup, data migration, CORE_READY
+    $core = Start-Process "cmd.exe" -ArgumentList "/c `"`"$App\jarvis.cmd`" run > `"$Work\core.out`" 2>&1`"" -NoNewWindow -PassThru
+    Check (Wait-Log "CORE_READY" 90) "the upgraded Core starts offline (CORE_READY)"
+    $r = Jarvis @("stop")
+    Check (Wait-Log "CORE_STOPPED" 30) "jarvis stop ends it (CORE_STOPPED)"
+    if (-not $core.WaitForExit(20000)) { $core.Kill($true) }
+    Check (Seed "verify") "every seeded row is present after the upgrade, migrated to the newest schema, backup taken first"
+    if (-not $SkipDoctor) {
+        $r = Jarvis @("doctor") 180
+        Check ($r.text -match "JARVES doctor" -and $r.text -match "(problem\(s\) found|All checks passed)") "jarvis doctor completes after the upgrade"
+    }
+    if ($Rollback) {
+        # the in-app updater records the previous version before it starts setup; record the same thing for the test
+        Check (Seed "previous" @("--installer", $UpgradeFrom, "--old-version", $oldVer, "--new-version", $newVer)) "previous version recorded like the updater does"
+        $sw = [Diagnostics.Stopwatch]::StartNew()
+        $r = Jarvis @("update", "--rollback", "--yes") 240
+        Check ($r.code -eq 0) "jarvis update --rollback --yes: $($r.text.Trim().Split("`n")[-1])"
+        for ($i = 0; $i -lt 480 -and (Version-Of) -ne $oldVer; $i++) { Start-Sleep -Milliseconds 500 }
+        $Times["silent_rollback_s"] = [math]::Round($sw.Elapsed.TotalSeconds, 1)
+        Check ((Version-Of) -eq $oldVer) "version is back to $oldVer"
+        Check (Seed "verify" @("--legacy")) "data is back to the old layout with every seeded row"
+        $pending = Get-Content (Join-Path $Home_ "updates\pending.json") -Raw -ErrorAction SilentlyContinue
+        Check ($pending -match "rolled_back") "the rollback is recorded (pending.json: rolled_back)"
+    }
+    Check ((Uninstall @("/PURGE=1") "silent_uninstall_s") -eq 0) "uninstall /PURGE=1"
+    $final = Collect "final"
+    Check (Audit "uninstalled" $before $final @("--purged")) "no residue after uninstall (Run key, PATH, tasks, Start menu, folders)"
+    Save-Times
+    Remove-Item -Recurse -Force $Work -ErrorAction SilentlyContinue
+    if ($failures) { Write-Host "SMOKE RESULT: FAIL ($failures)"; exit 1 }
+    Write-Host "SMOKE RESULT: PASS (upgrade$(if ($Rollback) { ' + rollback' }))"
+    exit 0
+}
+
 # 1 clean install
-Check ((Install) -eq 0) "silent per-user install"
+$stBefore = Collect "before"
+$tasks1 = if ($DefaultTasks) { "DEFAULT" } else { "" }
+Check ((Install $tasks1 @() "" "silent_install_s") -eq 0) "silent per-user install"
+$stInstalled = Collect "installed"
+$auditExtra = if ($DefaultTasks) { @("--path-entry", $App) } else { @() }
+Check (Audit "installed" $stBefore $stInstalled $auditExtra) "clean machine: autostart OFF by default, no scheduled task, PATH as expected"
 foreach ($f in @("jarvis.cmd", "python\python.exe", "unins000.exe", "THIRD_PARTY_NOTICES.txt")) {
     Check (Test-Path (Join-Path $App $f)) "installed $f"
 }
@@ -158,7 +280,10 @@ New-Item -ItemType File -Force (Join-Path $Home_ "memory.db") | Out-Null
 "OPENAI_API_KEY=sk-smoke-not-real" | Set-Content (Join-Path $Home_ "secrets.env")
 
 # 6 uninstall keeps data
-Check ((Uninstall) -eq 0) "silent uninstall"
+$stPreUn = Collect "pre-uninstall"
+Check ((Uninstall @() "silent_uninstall_s") -eq 0) "silent uninstall"
+$stUn = Collect "uninstalled"
+Check (Audit "uninstalled" $stBefore $stUn @("--keep-data", "--data-before", $stPreUn)) "no residue after uninstall; user data kept byte-for-byte"
 Check (-not (Test-Path (Join-Path $App "python"))) "program files removed"
 Check (-not (Test-Path $menu)) "Start menu entry removed"
 Check ((Test-Path (Join-Path $Home_ "memory.db")) -and (Test-Path (Join-Path $Home_ "secrets.env"))) "user data kept"
@@ -174,10 +299,12 @@ if ($CheckAutostart) {
 }
 Check ((Uninstall @("/PURGE=1")) -eq 0) "uninstall /PURGE=1"
 Check (-not (Test-Path $Home_)) "user data removed on request"
+Check (Audit "uninstalled" $stBefore (Collect "purged") @("--purged")) "no residue after uninstall /PURGE=1"
 if ($CheckAutostart) {
     Check (-not (Get-ItemProperty $run -Name JARVES -ErrorAction SilentlyContinue)) "uninstall removed start-at-login"
 }
 
+Save-Times
 Remove-Item -Recurse -Force $Work -ErrorAction SilentlyContinue
 if ($failures) { Write-Host "SMOKE RESULT: FAIL ($failures)"; exit 1 }
 Write-Host "SMOKE RESULT: PASS"

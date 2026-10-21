@@ -25,7 +25,7 @@ Get-FileHash .\JARVES-Setup-*.exe     # must equal the SHA256 in the release not
    *"Windows protected your PC"* → click **More info** → **Run anyway**. (Expected; no admin password is asked.)
    / המתקין עדיין לא חתום: יופיע "Windows protected your PC" → **More info** → **Run anyway**. לא תתבקש סיסמת מנהל.
 2. Choose the language, keep the folder (`%LOCALAPPDATA%\Programs\JARVES`), choose tasks:
-   *Add jarvis to PATH* (recommended), *Start JARVES when I sign in* (ticked by default; untick if you do not want it), desktop icon (optional). / "הפעלה בכניסה ל-Windows" מסומן כברירת מחדל, אפשר לבטל.
+   *Add jarvis to PATH* (recommended), *Start JARVES when I sign in* (**off by default** since SW-V4 L; tick it only if you want it, or later `jarvis autostart on`), desktop icon (optional). / "הפעלה בכניסה ל-Windows" כבוי כברירת מחדל; מדליקים רק אם רוצים.
 3. At the end leave **"Set up JARVES now"** checked: the setup wizard (`jarvis setup`, Hebrew first, English on
    request; Enter = the recommended answer) asks, in order: language → connection (ChatGPT plan / API key /
    both) + paste the key or sign in → the assistant's written and spoken name and how he should address you →
@@ -91,3 +91,20 @@ Open a comment on GitHub issue **#17** (or tell the agent) with:
 4. Installer log if setup itself failed: `%TEMP%\Setup Log *.txt`.
 
 לדווח בתגובה ב-issue ‎#17: גרסה, איזה שלב נכשל, צילום מסך, פלט `jarvis doctor`, וקובץ `jarvis diag`.
+
+## 6. Updates, rollback, upgrade (SW-V4 L) / עדכון וחזרה לאחור
+
+Automatic (CI, `packaging/smoke_windows.ps1`): clean install with the real defaults -> autostart OFF, no leftovers after uninstall, data kept unless `/PURGE=1`; `-UpgradeFrom <old installer> -Rollback` upgrades from the old numbering with seeded data and rolls back. Your part on the second PC (OL-I1..OL-I8):
+
+| Row | Do | Expected |
+|---|---|---|
+| OL-I1 | Install the newest installer on a PC that never had JARVES | SmartScreen "More info > Run anyway" (unsigned by decision), no admin prompt; Start menu entry; **no** start at sign-in unless you ticked it |
+| OL-I2 | `jarvis setup`, then Start/stop JARVES 5 times | face opens, stops cleanly each time |
+| OL-I3 | Dashboard > Updates | shows the version, "Up to date" or the new one |
+| OL-I4 | When a newer build exists: **Install update** | signature/SHA256 checked, setup runs silently, JARVES comes back on the new version, memory/settings/conversations present |
+| OL-I5 | Dashboard > Updates > **Roll back** (approve on the screen) | previous version returns, data from before the update restored |
+| OL-I6 | Uninstall, choose **No** to "delete my data" | no Start-menu entry, no start at sign-in, no `jarvis` on PATH; the data folder stays |
+| OL-I7 | Reinstall | your data is picked up again |
+| OL-I8 | Uninstall, choose **Yes** | the data folder is gone |
+
+/ עדכון חתום, חזרה לגרסה הקודמת (`jarvis update --rollback`), והסרה שלא משאירה כלום.
