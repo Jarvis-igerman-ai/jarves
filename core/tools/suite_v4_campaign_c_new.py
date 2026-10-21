@@ -317,6 +317,7 @@ async def cc_boot(h):
     b.start()
     s._wa = b
     s.core.features.set("whatsapp_bridge", True, by="suite")
+    await wa.restart_live(h, s)                      # the rule joins the live session at its start
     return s
 
 
