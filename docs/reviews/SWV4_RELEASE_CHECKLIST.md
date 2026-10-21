@@ -42,3 +42,14 @@ Legend: **done** = finished in code/docs here, evidence given. **needs-owner** =
 * `core/tools/log_lint.py`: 594 call sites, 0 violations.
 * `core/tools/perf_gate.py --class ci`: PERF GATE OK.
 * Full core suite (`-o pythonpath=src`, 21 Oct): 2402 passed, 6 failed, 7 deselected. One failure was real and is fixed in this branch: `test_update_flow.py::test_in_app_updater_runs_setup_silently_and_restarts_jarves` assumed a source checkout is older than 3.0.0.1; with version 4.0.0 it now pins the running version to the test's OLD value. The other 5 failed only under load (a held `memory.db` file handle on teardown, idle-write churn sample, dashboard load budget 9.7 s, two real-browser tests) and all PASS when re-run (68 passed for the 5 files). The earlier first run (`-x`) also hit `test_privacy_state.py::test_core_preview_with_fake_camera_reaches_the_face` (frame wait timeout under load); it passes alone. Because of these load-sensitive tests the 3x identical run (item 3) must be done on a quiet machine.
+
+## Quick gates on the merged head (22 Oct, after merging main with certifi 2026.10.19 and version 4.0.0)
+
+Run on the agent machine in a temp home; CI on the exact head is the suite evidence (the full offline suite was not re-run locally).
+
+* Redaction audit (`redaction_audit.py`): 0 violations.
+* Repo secret scan (regex over tracked files): hits only in test fixtures and the audit tool itself (planted fixtures; the 2 GitHub secret alerts are the same, already resolved).
+* Failure injection (`failure_injection.py --all`): 8/8 PASS.
+* Performance gate `--class owner`: PASS when run alone. A first run in parallel with four other gates failed `spawn_to_ready_s` 5.57 > 5 from CPU contention only.
+* `all_pages_check.py`: 200 loads, 0 failed, 0 rule hits (one pass, not three; the x3 and axe/owner review stay with the owner).
+* `suite_system.py --skip-pytest` (short soak, run in parallel with the others, hit the 900 s timeout): 16 PASS, 3 FAIL (S12 needs a real ChatGPT plan; V04 virtual camera; V05 calendar CLI output). Not accepted as a PASS; items 4 and 11 remain needs-owner. These three are environment-dependent on this machine and are listed for the owner to re-run on the owner PC.
