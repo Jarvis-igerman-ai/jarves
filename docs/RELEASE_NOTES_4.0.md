@@ -1,6 +1,6 @@
 # JARVES 4.0 release notes
 
-Status: V4 is integrated on branch `v4/integrated-b-c-d-g-m-r01` and its follow-ups. Owner acceptance and a public release have not happened yet. "Verified" below means checked in a real run; everything else was tested with fakes. Owner-facing guide: [USER_GUIDE](USER_GUIDE.md) ([עברית](USER_GUIDE.he.md)).
+Status: release candidate prepared on branch `release/v4-prep` (version 4.0.0). Owner acceptance, the tag and the public release have not happened yet. "Verified" below means checked in a real run; everything else was tested with fakes. Owner-facing guide: [USER_GUIDE](USER_GUIDE.md) ([עברית](USER_GUIDE.he.md)).
 
 ## New
 
@@ -18,8 +18,8 @@ Status: V4 is integrated on branch `v4/integrated-b-c-d-g-m-r01` and its follow-
 | Self-Diagnostics 2.0 | Monitor, baselines, version regression, root-cause hints, preflight, canaries, remediation through approvals, scheduled AI review | [report](reviews/SWV4_O_SELFDIAG2.md) |
 | Wake model | Head trained on the owner's recordings, `jarvis wake train [--revert]` | Measured by cross-validation ([report](reviews/SWV4_WAKE_TRAIN.md)) |
 | Idle writes | Idle disk writes reduced from 36.5 to 4.8 KB/min | [report](reviews/SWV4_IDLE_WRITES.md) |
-| Assisted dialing | Voice, CLI and page open a `tel:` link after approval; the owner presses Call | Branch `v4/h-dialing`, not in every build; Phone Link not verified |
-| Installer, update, rollback | Silent upgrade, signed manifest, `jarvis update --rollback`, migrations with backup | Branch `v4/l-installer`, not in every build; real installer round trip not run |
+| Assisted dialing | Voice, CLI and page open a `tel:` link after approval; the owner presses Call | Off by default (`assisted_dialing`); Phone Link not verified ([report](reviews/SWV4_H_DIALING.md)) |
+| Installer, update, rollback | Silent upgrade, signed manifest, `jarvis update --rollback`, migrations with backup | Fake-tested; real installer round trip and upgrade matrix not run ([report](reviews/SWV4_L_INSTALLER.md)) |
 
 Not in V4: Telegram, Instagram and Home Assistant live verification, rocket alerts, a signed installer (the owner chose to stay unsigned for now), phone and robot hardware.
 
