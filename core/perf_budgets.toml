@@ -64,12 +64,12 @@ ci_max = 60
 note = "idle disk writes (was 58 KB/min before V3 P0.3: runtime.json churn)"
 
 [metrics.idle_disk_read_kb_per_min]
-baseline = 320
+baseline = 20
 unit = "KB/min"
 source = "bench"
-owner_max = 600
-ci_max = 2500
-note = "UNEXPLAINED (V3 range 250-390; Windows counters include non-file I/O). Ceiling only stops growth; explain first (V4 M AM-P2)"
+owner_max = 100
+ci_max = 500
+note = "EXPLAINED and fixed by V4 P: the 20 s music health check opened the first async httpx connection at the warm-up/idle boundary, importing ~1-2 MB of anyio .pyc (V3 range 250-390, now 16-40). See docs/reviews/SWV4_PERF.md"
 
 [metrics.rss_growth_mb]
 baseline = 0.8
@@ -202,6 +202,11 @@ note = "build_windows.ps1 end to end with warm caches (informational on the owne
 [[history]]
 date = "2026-10-20"
 change = "created from SWV3_P03_REPORT.md numbers; owner ceilings = the V3 P0.3 acceptance budgets"
+
+[[history]]
+date = "2026-10-21"
+change = "V4 P: idle_disk_read_kb_per_min baseline 320 -> 20, owner_max 600 -> 100, ci_max 2500 -> 500 (cause found and removed: lazy httpx/anyio import at the first music health check; unreachable player now backed off to 5 min)"
+
 [[history]]
 date = "2026-10-20"
 change = "package L: added the [installer.*] size and time budgets (installer 198 MB baseline from the V4 package; times pending the first CI measurement)"

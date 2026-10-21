@@ -66,8 +66,8 @@ AUDIT_MAX_BYTES = 1_000_000
 RISKS = ("low", "medium", "high")
 KINDS = ("tool", "feature", "camera", "message", "shell", "install", "schedule", "call", "other")
 HASHED_DETAILS = ("number",)       # SW-V4 H: a phone number is never written to the audit file, only a keyed hash
-CHANNELS = ("popup", "tray", "face", "dashboard", "voice", "typed", "cli", "terminal")
-FILE_CHANNELS = ("dashboard", "cli")          # what an answers/<id>.json file may claim to be
+CHANNELS = ("popup", "tray", "face", "dashboard", "voice", "typed", "cli", "terminal", "phone")
+FILE_CHANNELS = ("dashboard", "cli", "phone")          # what an answers/<id>.json file may claim to be
 
 # Owner words (whole utterance; punctuation ignored). Mixed yes+no or anything else = not an answer.
 YES_WORDS = frozenset({"כן", "אישור", "מאשר", "מאשרת", "אשר", "אשרי", "בטח", "approve", "approved", "yes", "yep",
