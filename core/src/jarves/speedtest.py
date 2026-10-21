@@ -180,7 +180,7 @@ def measure_idle(home: Path, *, idle_window_s: float = 10.0, sleep=time.sleep, p
         pid = (holder or {}).get("pid")
     if not pid:
         return {}
-    pid = procstats.target(int(pid))
+    pid = int(pid)                           # the lock holds the real Core pid (no launcher stub to follow)
     a = procstats.sample(pid)
     if not a:
         return {}

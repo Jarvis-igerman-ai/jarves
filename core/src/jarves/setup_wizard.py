@@ -71,7 +71,7 @@ GOOGLE_FEATURES = ("google_calendar", "calendar_write", "gmail_read", "gmail_sen
 # that every registered feature is listed.
 GROUPS: tuple[tuple[str, str, str, tuple[str, ...]], ...] = (
     ("core", "בסיס", "Core", ("web_search", "background_tasks", "memory_curator", "memory_llm_pass",
-                             "diagnosis_llm_pass", "conversation_recall", "self_check", "self_diagnostics_2", "guided_setup", "workspace_agent_edit", "assistant_identity", "skill_creation",
+                             "diagnosis_llm_pass", "conversation_recall", "self_check", "self_diagnostics_2", "self_tests", "guided_setup", "workspace_agent_edit", "assistant_identity", "skill_creation",
                              "proactive_help", "usage_monitor", "appearance", "background_core", "display_control",
                              "tray_icon", "autostart")),
     ("voice", "קול", "Voice", ("wake_word", "greeting", "chimes", "voice_change", "client_delegation")),
@@ -919,6 +919,8 @@ BUNDLE: dict[str, list[Callable[[], tuple[bool, str]]]] = {
     "self_diagnostics_2": [_mod("jarves.diag.service"), _mod("jarves.diag.monitor"), _mod("jarves.diag.ai_review"),
                            _mod("jarves.diag.canary"), _data("jarves", "dashboard_static/health.js"),
                            _data("jarves.guides", "data/health.toml")],
+    "self_tests": [_mod("jarves.selftest"), _mod("jarves.speedtest"), _mod("jarves.selfspeed"), _mod("jarves.procstats"),
+                   _data("jarves", "dashboard_static/selfspeed.js"), _data("jarves.guides", "data/self_tests.toml")],
     "guided_setup": [_mod("jarves.connect"), _mod("jarves.google_setup"), _mod("jarves.telegram_channel"),
                      _data("jarves.guides", "data/guided_setup.toml")],
     "google_calendar": _GOOGLE, "calendar_write": _GOOGLE, "gmail_read": _GOOGLE, "gmail_send": _GOOGLE,
