@@ -128,6 +128,26 @@ class _VoiceApproval:
             live.confirm_done()
 
 
+async def _later(delay_s: float, fn, *args) -> None:
+    """Start-up work that must not compete with CORE_READY: run `fn(*args)` (a coroutine function) after a delay."""
+    await asyncio.sleep(delay_s)
+    await fn(*args)
+
+
+def _warm_http_stack() -> None:
+    """SW-V4 P: httpx imports anyio's submodules lazily at the FIRST async request (~1-2 MB of .pyc from disk). Do it
+    once, in a worker thread at start, so that read never lands in an idle window or in a user-facing request."""
+    try:
+        import anyio
+        import httpcore
+        import httpx  # noqa: F401
+        for attr in ("Event", "Lock", "create_memory_object_stream", "TypedAttributeSet", "ClosedResourceError"):
+            getattr(anyio, attr, None)
+        import anyio._backends._asyncio  # noqa: F401
+    except Exception:
+        pass
+
+
 class Core:
     def __init__(self, cfg: Config, home: Path, *, audio=None, player=None, stt=None, tts=None,
                  live_factory=None, console_logs: bool = True, use_real_audio: bool = True, ai_transport=None,
@@ -358,6 +378,8 @@ class Core:
         self._bg.append(asyncio.create_task(wab.run(self)))   # SW-V4 F: bridge + events (switch on only)
         if self.use_real_audio and openai_key_present() and self.cfg.ai.provider == "openai":
             self._bg.append(asyncio.create_task(asyncio.to_thread(self._prewarm)))
+        elif self.use_real_audio:
+            self._bg.append(asyncio.create_task(_later(5.0, asyncio.to_thread, _warm_http_stack)))
         self._setup_wake()
         self._log_summary()
         _preflight.finish_core(self)                    # red/amber preflight items degrade only their component
@@ -504,11 +526,17 @@ class Core:
         return self.budget.remaining("voice_seconds")
 
     async def _health_loop(self) -> None:
+        music_next, music_gap = 0.0, 10.0
         while True:
             await asyncio.sleep(20)
             try:
-                if self.music is not None:
+                # SW-V4 P: an unreachable player (Pear closed) is asked again after 20 s, 40 s ... 5 min instead of
+                # every 20 s: each ask opens a connection and walked the whole httpx/anyio import tree from disk
+                # at the first tick (the "unexplained" idle reads, V4 M AM-P2); back to 20 s once it answers.
+                if self.music is not None and time.monotonic() >= music_next:
                     st, d = await self.music.health()
+                    music_gap = 20.0 if st == "ok" else min(300.0, music_gap * 2)
+                    music_next = time.monotonic() + music_gap - 1.0
                     self.health.set("music", st, d, "" if st == "ok" else "start Pear Desktop with the API Server plugin")
                 if not self.listening and self.live is None:
                     self.dev.check_audio()
@@ -1146,6 +1174,7 @@ class Core:
                     if name in ("openai", "agents", "agents.realtime"):
                         raise
                     # an optional submodule moved in another SDK version: first use imports what it needs
+            _warm_http_stack()
             logs.info("core", "PREWARM_DONE", "cloud voice libraries loaded", ms=round((time.monotonic() - t0) * 1000),
                       modules=mods)
         except Exception as e:

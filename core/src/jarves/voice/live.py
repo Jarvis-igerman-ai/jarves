@@ -33,7 +33,7 @@ from typing import TYPE_CHECKING, Any, Awaitable, Callable
 
 from .. import logs
 from ..budget import BudgetExceeded
-from ..skills import ROUTE, SkillRegistry, ToolResult
+from ..skills import ROUTE, SkillRegistry, ToolResult, tool_schema
 
 VOICE_ROUTE = "voice"
 
@@ -154,7 +154,7 @@ CLOSE_REASONS = {"expired": "timeout", "close_requested": "remote_closed", "remo
 
 def live_tools(registry: SkillRegistry) -> list[dict]:
     return [{"type": "function", "name": t.name, "description": t.description,
-             "parameters": t.args.model_json_schema(), "strict": False} for t in registry.tools()]
+             "parameters": tool_schema(t), "strict": False} for t in registry.tools()]
 
 
 def _get(obj: Any, key: str, default: Any = None) -> Any:

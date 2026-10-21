@@ -140,6 +140,35 @@ Facts the user asked you to remember:
 
 
 # ------------------------------------------------------------------ backend progress (SW-V2 WP-C)
+
+# SW-V4 P: rule paragraphs that only matter when their tools are offered are left out of the backend prompt otherwise
+# (about 2.3k characters per call with Google, camera and background tasks off). (start, end, tool-name prefixes, text
+# used instead). The first/last words of each block are asserted by tests/test_p_prompt_tokens.py.
+_GATED = (
+    ("Before addressing mail or inviting a person", "Before claiming a camera", ("gmail_", "calendar_", "google_contacts"), ""),
+    ("Before claiming a camera", "Arithmetic: ALWAYS",  ("camera_",),
+     "No camera tool is provided in this session: you cannot see or control the camera; never invent its state.\n"),
+    ("Background tasks: when the user asks", "When asked what you can do", ("task_start",), ""),
+)
+
+
+def render_instructions(registry, name: str, memories: str) -> str:
+    """INSTRUCTIONS for this session's tool list (every paragraph stays when the registry is unknown)."""
+    text = INSTRUCTIONS
+    if registry is not None:
+        try:
+            names = [t.name for t in registry.tools()]
+        except Exception:
+            names = None
+        if names is not None:
+            for start, end, prefixes, instead in _GATED:
+                if any(n.startswith(prefixes) for n in names):
+                    continue
+                i, j = text.find(start), text.find(end)
+                if 0 <= i < j:
+                    text = text[:i] + instead + text[j:]
+    return text.format(name=name, memories=memories)
+
 def _d(obj: Any) -> dict:
     if isinstance(obj, dict):
         return obj
@@ -430,7 +459,7 @@ class AgentBrain:
 
     def instructions(self) -> str:
         mems = self.memory.list(20)
-        return INSTRUCTIONS.format(name=self.name, memories="\n".join(f"- {m['text']}" for m in mems) or "- (none)")
+        return render_instructions(self.registry, self.name, "\n".join(f"- {m['text']}" for m in mems) or "- (none)")
 
     def _build(self):
         from agents import Agent, SQLiteSession, WebSearchTool, set_tracing_disabled

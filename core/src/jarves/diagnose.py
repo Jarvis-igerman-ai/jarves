@@ -373,7 +373,7 @@ def review_input(store: Store, sid: str) -> str | None:
     items += [(e["ts"], f"[{_mmss(t0, e['ts'])}] {e['level']} {e['code']}: {e['msg'][:120]}") for e in tl["events"]
               if e["level"] in ("WARNING", "ERROR")]
     text = "\n".join(line for _, line in sorted(items, key=lambda x: x[0]))
-    text = re.sub(r"[\w.+-]+@[\w-]+\.[\w.-]+", "<email>", logs.redact(text))
+    text = re.sub(r"(?<![\w.+-])[\w.+-]+@[\w-]+\.[\w.-]+", "<email>", logs.redact(text))
     if len(text) > REVIEW_INPUT_CHARS:
         text = text[:REVIEW_INPUT_CHARS // 3] + "\n...\n" + text[-REVIEW_INPUT_CHARS * 2 // 3:]
     hits = {r["fingerprint"] for r in store.rows("SELECT fingerprint FROM issue_hits WHERE session_id = ?", (sid,))}
