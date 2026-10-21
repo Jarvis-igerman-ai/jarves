@@ -534,3 +534,12 @@ def test_dashboard_registers_the_routes_and_the_page_is_wired():
     js = (static / "selfmanage.js").read_text(encoding="utf-8")
     assert "PAGES.selfmanage" in js and "innerHTML" not in js
     assert "jarves.self_manage" in dashboard.PLUGIN_MODULES
+
+
+def test_every_server_text_of_the_feature_has_hebrew():
+    from jarves import capabilities, hebrew
+    f = feat.CATALOG["self_manage"]
+    cap = capabilities.MATRIX["self_manage"]
+    texts = [f.about, cap.settings, f.targets["windows"]["evidence"], f.targets["linux_arm64_pi"]["blocker"]]
+    for t in texts:
+        assert hebrew.he(t), t

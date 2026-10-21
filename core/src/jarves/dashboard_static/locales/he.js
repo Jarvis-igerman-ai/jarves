@@ -1516,7 +1516,8 @@
   "Undo (asks for approval)": "ביטול השינוי (מבקש אישור)",
   "No changes yet.": "עוד לא בוצעו שינויים.",
   "Self-management": "ניהול עצמי",
-  "Every change asks for your approval with BEFORE and AFTER, is backed up and can be undone. Also by voice: 'undo that'.": "כל שינוי מבקש את אישורך עם 'לפני' ו'אחרי', נשמר לו גיבוי ואפשר לבטל אותו. אפשר גם בקול: 'בטל את זה'."
+  "Every change asks for your approval with BEFORE and AFTER, is backed up and can be undone. Also by voice: 'undo that'.": "כל שינוי מבקש את אישורך עם 'לפני' ו'אחרי', נשמר לו גיבוי ואפשר לבטל אותו. אפשר גם בקול: 'בטל את זה'.",
+  "jarvis manage status|file|memory|feature|skill|setting|connect|history|undo, jarvis undo, dashboard Self-management page": "jarvis manage status|file|memory|feature|skill|setting|connect|history|undo, jarvis undo, עמוד ניהול עצמי בלוח הבקרה"
  },
  "rules": [
   [

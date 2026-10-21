@@ -57,7 +57,7 @@
     return card(tx("יכולות", "Features"), el("div", { class: "muted small" }, tx(
       "מתגי הרשאה ובטיחות אינם ניתנים לשינוי מכאן (עמוד התכונות).", "Permission and safety switches cannot be changed here (Features page).")),
       d.features.map((f) => el("div", { class: "conn" }, pill(stCls[f.state] || "plain", t2(stTx[f.state]) || f.state), " ",
-        el("b", {}, tx(f.title_he, f.title_en)), " ", el("span", { class: "muted small" }, f.reason || ""),
+        el("b", {}, tx(f.title_he, f.title_en)), " ", el("span", { class: "muted small" }, txh(f, "reason") || ""),
         f.protected ? el("span", { class: "muted small" }, " · " + tx("מוגן", "protected")) :
           el("button", { type: "button", class: "ghost", onclick: () => change(
             { what: "feature", target: f.id, value: f.state === "off" ? "on" : "off" }, ui) },

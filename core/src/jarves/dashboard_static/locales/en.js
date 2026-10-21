@@ -1516,6 +1516,7 @@
   "Undo (asks for approval)": "Undo (asks for approval)",
   "No changes yet.": "No changes yet.",
   "Self-management": "Self-management",
-  "Every change asks for your approval with BEFORE and AFTER, is backed up and can be undone. Also by voice: 'undo that'.": "Every change asks for your approval with BEFORE and AFTER, is backed up and can be undone. Also by voice: 'undo that'."
+  "Every change asks for your approval with BEFORE and AFTER, is backed up and can be undone. Also by voice: 'undo that'.": "Every change asks for your approval with BEFORE and AFTER, is backed up and can be undone. Also by voice: 'undo that'.",
+  "jarvis manage status|file|memory|feature|skill|setting|connect|history|undo, jarvis undo, dashboard Self-management page": "jarvis manage status|file|memory|feature|skill|setting|connect|history|undo, jarvis undo, dashboard Self-management page"
  }
 };

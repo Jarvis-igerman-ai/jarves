@@ -43,7 +43,7 @@ from typing import Any, Callable, Literal
 
 from pydantic import BaseModel, Field
 
-from . import clilang, logs
+from . import clilang, locales, logs
 from . import features as feat
 from .skills import Skill, Tool, ToolResult
 from .workspace import SPECS, WorkspaceError, _SECRET
@@ -296,9 +296,10 @@ class SelfManager:
             return []
         rows = []
         for s in self.features.list(wait=False):
-            rows.append({"id": s["id"], "title_en": s["title_en"], "title_he": s["title_he"],
-                         "state": feat.state_word(s), "reason": logs.redact(s.get("reason") or ""), "risk": s["risk"],
-                         "protected": protected_feature(s["id"])})
+            row = {"id": s["id"], "title_en": s["title_en"], "title_he": s["title_he"],
+                   "state": feat.state_word(s), "reason": logs.redact(s.get("reason") or ""), "risk": s["risk"],
+                   "protected": protected_feature(s["id"])}
+            rows.append(locales.attach(row, "reason"))      # reason_he / reason_en for the dashboard
         return rows
 
     def skill_rows(self) -> dict:
@@ -346,8 +347,9 @@ class SelfManager:
         for r in self.feature_rows():
             if r["state"] == "unavailable":
                 out.append({"id": f"feature_{r['id']}", "area": "features",
-                            "en": f"{r['title_en']} is on but unavailable: {r['reason']}",
-                            "he": f"{r['title_he']} דולקת אבל לא זמינה: {r['reason']}", "action": ""})
+                            "en": f"{r['title_en']} is on but unavailable: {r.get('reason_en') or r['reason']}",
+                            "he": f"{r['title_he']} דולקת אבל לא זמינה: {r.get('reason_he') or r['reason']}",
+                            "action": ""})
         try:
             if not _clean_body(self.ws.read("USER.md")):
                 out.append({"id": "user_md_empty", "area": "files", "en": "USER.md is empty: tell me how to address you "
