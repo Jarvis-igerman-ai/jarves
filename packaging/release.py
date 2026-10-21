@@ -297,12 +297,37 @@ def keygen(out: Path) -> str:
     return base64.b64encode(pub).decode()
 
 
-def build_manifest(info: dict, exe: Path, url: str, now: _dt.datetime | None = None) -> dict:
-    return {"product": "jarves", "platform": "windows-x64", "channel": info.get("channel"),
-            "version": info["version"], "commit": info.get("commit"), "built": info.get("built"),
-            "installer": exe.name, "sha256": sha256(exe), "size": exe.stat().st_size, "url": url,
-            "python": info.get("python"), "godot": info.get("godot"),
-            "published": (now or _dt.datetime.now(_dt.timezone.utc)).isoformat(timespec="seconds")}
+def build_manifest(info: dict, exe: Path, url: str, now: _dt.datetime | None = None,
+                   previous: dict | None = None) -> dict:
+    m = {"product": "jarves", "platform": "windows-x64", "channel": info.get("channel"),
+         "version": info["version"], "commit": info.get("commit"), "built": info.get("built"),
+         "installer": exe.name, "sha256": sha256(exe), "size": exe.stat().st_size, "url": url,
+         "python": info.get("python"), "godot": info.get("godot"),
+         "published": (now or _dt.datetime.now(_dt.timezone.utc)).isoformat(timespec="seconds")}
+    if previous:                       # SW-V4 L: lets `jarvis update --rollback` fetch the version before this one
+        m["previous"] = previous
+    return m
+
+
+def previous_entry(releases: list[dict], tag: str, repo: str) -> dict | None:
+    """The newest stable release older than `tag` with an installer asset whose SHA256 GitHub reports (asset digest):
+    {version, installer, sha256, size, url}. None when there is no such release (the manifest then has no block)."""
+    cur = version_key(tag)
+    best = None
+    for r in releases:
+        t = str(r.get("tag_name") or "")
+        v = version_key(t)
+        if r.get("draft") or r.get("prerelease") or not t.startswith(TAG_PREFIX) or not v or v >= cur:
+            continue
+        for a in r.get("assets") or []:
+            m = re.fullmatch(r"JARVES-Setup-(\d+(?:\.\d+){1,3})\.exe", str(a.get("name") or ""))
+            digest = str(a.get("digest") or "")
+            if not m or not digest.startswith("sha256:") or not isinstance(a.get("size"), int):
+                continue
+            if best is None or v > best[0]:
+                best = (v, {"version": m.group(1), "installer": a["name"], "sha256": digest.split(":", 1)[1].lower(),
+                            "size": a["size"], "url": f"https://github.com/{repo}/releases/download/{t}/{a['name']}"})
+    return best[1] if best else None
 
 
 # ---------------------------------------------------------------------- publish to the public releases repo
@@ -335,7 +360,8 @@ def public_publish(dist: Path, keep: int = 3, env: dict | None = None, gh: GitHu
         print(f"Public releases: {repo} already has the newer {latest['tag_name']}; not publishing {tag}")
         return 0
     url = f"https://github.com/{repo}/releases/download/{tag}/{exe.name}"
-    envelope = sign_manifest(build_manifest(info, exe, url), env["JARVES_UPDATE_SIGNING_KEY"])
+    prev = previous_entry(gh.releases(), tag, repo)
+    envelope = sign_manifest(build_manifest(info, exe, url, previous=prev), env["JARVES_UPDATE_SIGNING_KEY"])
     rel = gh.call("GET", f"/releases/tags/{tag}", ok404=True)
     if rel is None:     # a draft first: nobody sees a release whose files are not all uploaded yet
         rel = gh.call("POST", "/releases", {"tag_name": tag, "name": f"JARVES {info['version']}",

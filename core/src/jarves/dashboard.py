@@ -54,6 +54,7 @@ PLUGIN_MODULES = ("jarves.workspace", "jarves.curator", "jarves.memory", "jarves
                   "jarves.recall",                                                 # SW-V4 G: Recall search page
                   "jarves.whatsapp_admin",                                         # SW-V4 F: WhatsApp page (PC only)
                   "jarves.orchestrator.surfaces",                                  # SW-V4 E: Coding agents page
+                  "jarves.dialing",                                                # SW-V4 H: Phone calls page
                   "jarves.browser",                                                # Browser allow-list page
                   "jarves.approvals", "jarves.skills.helper",                      # V3: Approvals list, Helper switch
                   "jarves.diag.service")                                           # SW-V4 O: Health page
