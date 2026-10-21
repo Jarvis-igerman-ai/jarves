@@ -142,7 +142,9 @@ async def test_send_only_after_confirmation_with_exact_text(home):
         assert ok.ok and ok.code == "INSTAGRAM_SENT"
         sent = [r for r in srv.requests if r["path"] == "/me/messages"]
         assert len(sent) == 1 and sent[0]["body"] == {"recipient": {"id": "555"}, "message": {"text": "Yes, until 6pm"}}
-        assert (await reg.call("instagram_send", {"draft_id": d.data["draft_id"]})).code == "INSTAGRAM_UNKNOWN_DRAFT"
+        again = await reg.call("instagram_send", {"draft_id": d.data["draft_id"]})
+        assert again.code == "INSTAGRAM_UNKNOWN_DRAFT" or again.data.get("already_done")   # V4-VC-3 replay
+        assert len([r for r in srv.requests if r["path"] == "/me/messages"]) == 1          # never sent twice
         assert [e["event"] for e in audit_events(home)] == ["draft", "sent"]
         assert ig.Inbox(home).get("m1")["status"] == "replied"
     finally:

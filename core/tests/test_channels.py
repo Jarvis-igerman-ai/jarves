@@ -127,7 +127,9 @@ async def test_telegram_send_only_after_confirmation(home):
         sent = [r for r in srv.requests if r["path"].endswith("/sendMessage")]
         assert len(sent) == 1 and sent[0]["body"]["chat_id"] == 555 and sent[0]["body"]["text"] == "הכביסה מוכנה"
         again = await reg.call("telegram_send", {"draft_id": d.data["draft_id"]})
-        assert not again.ok and again.code == "TELEGRAM_UNKNOWN_DRAFT"          # a draft is single use
+        # single use: a repeat is refused, or (V4-VC-3) answered with the earlier result; it is NEVER sent again
+        assert again.code == "TELEGRAM_UNKNOWN_DRAFT" or again.data.get("already_done")
+        assert len([r for r in srv.requests if r["path"].endswith("/sendMessage")]) == 1
     finally:
         srv.close()
 
@@ -240,7 +242,9 @@ async def test_whatsapp_opens_chat_only_after_approval_and_never_sends(home):
     r = await reg.call("whatsapp_open", {"draft_id": d.data["draft_id"]})
     assert r.ok and r.code == "WHATSAPP_CHAT_OPENED" and len(opened) == 1
     assert opened[0].startswith("https://wa.me/972541234567?text=") and "%D7%90%D7%A0%D7%99" in opened[0]
-    assert (await reg.call("whatsapp_open", {"draft_id": d.data["draft_id"]})).code == "WHATSAPP_UNKNOWN_DRAFT"
+    again = await reg.call("whatsapp_open", {"draft_id": d.data["draft_id"]})
+    assert again.code == "WHATSAPP_UNKNOWN_DRAFT" or again.data.get("already_done")     # V4-VC-3 replay
+    assert len(opened) == 1                                                            # never opened twice
 
 
 async def test_whatsapp_remembers_numbers_and_asks_when_unknown(home):
