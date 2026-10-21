@@ -1485,7 +1485,9 @@
   "Not rolled back: ": "לא בוצעה חזרה: ",
   "Check unavailable": "בדיקה לא זמינה",
   "Previous version: ": "הגרסה הקודמת: ",
-  " (downloaded from the signed release folder)": " (תורד מתיקיית ההפצה החתומה)"
+  " (downloaded from the signed release folder)": " (תורד מתיקיית ההפצה החתומה)",
+  "jarvis dial <name|number>, dashboard Calls page (#/calls)": "jarvis dial <שם|מספר>, עמוד השיחות בלוח הבקרה (#/calls)",
+  ", approval on every call (on screen for a new number)": ", אישור על כל שיחה (על המסך למספר חדש)"
  },
  "rules": [
   [

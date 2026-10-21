@@ -1485,6 +1485,8 @@
   "Not rolled back: ": "Not rolled back: ",
   "Check unavailable": "Check unavailable",
   "Previous version: ": "Previous version: ",
-  " (downloaded from the signed release folder)": " (downloaded from the signed release folder)"
+  " (downloaded from the signed release folder)": " (downloaded from the signed release folder)",
+  "jarvis dial <name|number>, dashboard Calls page (#/calls)": "jarvis dial <name|number>, dashboard Calls page (#/calls)",
+  ", approval on every call (on screen for a new number)": ", approval on every call (on screen for a new number)"
  }
 };
