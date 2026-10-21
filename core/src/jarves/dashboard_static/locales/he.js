@@ -1444,7 +1444,13 @@
   "Retention days": "ימי שמירה",
   "WhatsApp is not linked; run: jarvis whatsapp link": "וואטסאפ לא מקושר; הריצו: jarvis whatsapp link",
   "dashboard Health page, jarvis health, health.* settings": "דף הבריאות בלוח הבקרה, jarvis health, הגדרות health.*",
-  "checking": "בודק"
+  "checking": "בודק",
+  "no camera connected; connect a camera (Pi: Camera Module 3 Wide)": "אין מצלמה מחוברת; חברו מצלמה (בפאי: Camera Module 3 Wide)",
+  "(no camera connected; connect a camera (Pi: Camera Module 3 Wide))": "(אין מצלמה מחוברת; חברו מצלמה (בפאי: Camera Module 3 Wide))",
+  "Godot viewer not found (set GODOT_EXE)": "לא נמצא צופה Godot (הגדירו GODOT_EXE)",
+  "(Godot viewer not found (set GODOT_EXE))": "(לא נמצא צופה Godot (הגדירו GODOT_EXE))",
+  "no desktop session (headless): use the dashboard instead": "אין סשן שולחן עבודה (ללא מסך): השתמשו בלוח הבקרה",
+  "מצלמה: no camera connected; connect a camera (Pi: Camera Module 3 Wide)": "מצלמה: אין מצלמה מחוברת; חברו מצלמה (בפאי: Camera Module 3 Wide)"
  },
  "rules": [
   [

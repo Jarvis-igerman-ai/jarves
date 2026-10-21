@@ -163,7 +163,9 @@ def test_key_file_has_a_private_dacl_on_windows(home):
     flags, _, rest = sddl[2:].partition("(")
     assert "P" in flags, sddl                                  # protected: nothing inherited from the folder
     aces = [x.lstrip("(") for x in ("(" + rest).split(")") if x]
-    assert aces == [f"A;;FA;;;{sid}"], sddl                    # one entry: this user, full control
+    # a CI runner is the built-in Administrator (RID 500): Windows prints that account as the alias LA
+    allowed = [f"A;;FA;;;{sid}"] + ([ "A;;FA;;;LA" ] if sid.endswith("-500") else [])
+    assert len(aces) == 1 and aces[0] in [a for a in allowed], sddl                    # one entry: this user, full control
 
 
 @pytest.mark.linux_only

@@ -1444,6 +1444,12 @@
   "Retention days": "Retention days",
   "WhatsApp is not linked; run: jarvis whatsapp link": "WhatsApp is not linked; run: jarvis whatsapp link",
   "dashboard Health page, jarvis health, health.* settings": "dashboard Health page, jarvis health, health.* settings",
-  "checking": "checking"
+  "checking": "checking",
+  "no camera connected; connect a camera (Pi: Camera Module 3 Wide)": "no camera connected; connect a camera (Pi: Camera Module 3 Wide)",
+  "(no camera connected; connect a camera (Pi: Camera Module 3 Wide))": "(no camera connected; connect a camera (Pi: Camera Module 3 Wide))",
+  "Godot viewer not found (set GODOT_EXE)": "Godot viewer not found (set GODOT_EXE)",
+  "(Godot viewer not found (set GODOT_EXE))": "(Godot viewer not found (set GODOT_EXE))",
+  "no desktop session (headless): use the dashboard instead": "no desktop session (headless): use the dashboard instead",
+  "מצלמה: no camera connected; connect a camera (Pi: Camera Module 3 Wide)": "מצלמה: no camera connected; connect a camera (Pi: Camera Module 3 Wide)"
  }
 };

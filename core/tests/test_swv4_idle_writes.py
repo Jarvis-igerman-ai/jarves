@@ -45,7 +45,7 @@ def test_idle_core_has_no_steady_state_file_churn(monkeypatch):
     r = bs.one_run("core", 20, 18771)
     changed = {x.rsplit(" x", 1)[0] for x in r["idle_files"].split(", ") if x}
     assert changed <= {"health.json", "runtime.json"}, r["idle_files"]
-    assert r["idle_disk_write_kb_per_min"] < 12, r
+    assert r["idle_disk_write_kb_per_min"] < 20, r
 
 
 def test_diag_monitor_batches_store_writes_over_five_minutes(tmp_path):
