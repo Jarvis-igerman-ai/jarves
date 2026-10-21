@@ -347,7 +347,9 @@ async def test_a_draft_expires_and_is_one_shot(rig):
     assert (await rig.call("dial_open", {"draft_id": r.data["draft_id"]})).code == "DIAL_UNKNOWN_DRAFT"
     r2 = await rig.call("dial_prepare", {"name": "דנה"})
     assert (await rig.call("dial_open", {"draft_id": r2.data["draft_id"]})).ok
-    assert (await rig.call("dial_open", {"draft_id": r2.data["draft_id"]})).code == "DIAL_UNKNOWN_DRAFT"
+    again = await rig.call("dial_open", {"draft_id": r2.data["draft_id"]})
+    assert again.code == "DIAL_UNKNOWN_DRAFT" or again.data.get("already_done")     # V4-VC-3 replay
+    assert len(rig.opened) == 1                                                    # never opened twice
     assert len(rig.opened) == 1
 
 
@@ -422,7 +424,7 @@ def test_the_popup_labels_the_dial_details_in_both_languages():
     from jarves import approval_popup as pop
     req = {"title": "dial_open", "prompt": "Open Phone Link to call Dana?", "kind": "call",
            "details": {"recipient": "Dana", "number": DANA, "number_source": "your saved contacts", "app": "Phone Link"}}
-    for lang, labels in (("en", ["Who", "Number", "Where the number came from", "App"]), ("he", ["למי", "מספר", "מאיפה המספר", "אפליקציה"])):
+    for lang, labels in (("en", ["Recipient", "Number", "Where the number came from", "App"]), ("he", ["נמען", "מספר", "מאיפה המספר", "אפליקציה"])):
         rows = {k: v for k, v, _ in pop.detail_rows(req, lang)}
         assert all(label in rows for label in labels), (lang, rows)
         assert rows[labels[1]] == DANA
