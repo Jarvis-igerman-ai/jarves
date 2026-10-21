@@ -33,7 +33,7 @@ FEATURES: dict[str, object] = {
     "chimes": (D, "a pure switch; change it with `jarvis features`"), "dashboard": "dashboard",
     "workspace_agent_edit": (D, "persona-file edits are reviewed on the Persona files page"),
     "voice_change": "setup", "calendar_write": "calendar", "dashboard_lan": "dashboard", "mobile_access": "dashboard",
-    "assistant_identity": "setup", "telegram": "telegram", "instagram": "instagram", "usage_monitor": "usage",
+    "assistant_identity": "setup", "telegram": "telegram", "instagram": "instagram", "usage_monitor": "usage", "usage_admin_key": "connect",
     "backup": "backup", "appearance": (D, "face theme and avatar are picked on the Appearance page"),
     "skill_creation": (D, "proposed Skills are reviewed on the New Skills page (risky: approval on screen)"),
     "guided_setup": "setup", "self_check": "diagnose", "scheduler": "jobs", "reports": "reports", "notes": "notes",
@@ -49,6 +49,8 @@ FEATURES: dict[str, object] = {
     "self_diagnostics_2": "health", "client_delegation": "budget",
     "whatsapp_bridge": "whatsapp", "whatsapp_send": "whatsapp",          # SW-V4 F: jarvis whatsapp ...
     "agent_orchestrator": "agents",
+    "assisted_dialing": "dial",
+    "self_tests": "selftest",
 }
 
 # Skill (tool group) name -> "jarvis <command>" or ("dashboard", reason) or ("voice", reason) for groups that only
@@ -70,6 +72,8 @@ TOOL_GROUPS: dict[str, object] = {
     "health": "health",
     "whatsapp_bridge": "whatsapp",                                       # SW-V4 F: inbox / send / status
     "agents": "agents",
+    "dialing": "dial",
+    "selfspeed": "selftest",
 }
 
 

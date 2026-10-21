@@ -233,6 +233,12 @@ class Operations:
         except Exception:
             self.health_diag = None
             logs.error("health", "HEALTH_ATTACH_FAILED", "self-diagnostics 2.0 not started", exc=True)
+        from . import selfspeed                      # owner request 21 Oct: run_selftest / run_speedtest + daily/weekly jobs
+        try:
+            self.selfspeed = selfspeed.attach(self.core, self)
+        except Exception:
+            self.selfspeed = None
+            logs.error("selfspeed", "SELFSPEED_ATTACH_FAILED", "self-test tools not started", exc=True)
 
     async def _connect_nudge(self) -> None:
         """Owner request 20 Oct: once a day at most, remind that Google is not connected (connect.maybe_nudge)."""

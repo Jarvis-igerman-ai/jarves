@@ -160,7 +160,7 @@ FIELD_CLASS: dict[str, str] = {
         deleted_sessions added
         chat_hash chats logout override unread killed text_sha256 retry_after_s days_left
         turn route history_items reserved_usd spent_usd actual_usd requests deleg_s scope err_code daily_usd turn_usd
-        transport plugin provider tailnet tls_source hours bind_tailnet_only
+        transport plugin provider handler tailnet tls_source hours bind_tailnet_only
         """),
     **_reg(SECRET, """
         token access_token refresh_token id_token id_token_hint api_key apikey secret secrets client_secret

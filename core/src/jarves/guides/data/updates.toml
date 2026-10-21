@@ -1,5 +1,6 @@
 order = 61
 category = "system"
+pages = ["updates"]
 features = ["update_check"]
 aliases = ["עדכון", "עדכונים", "התקנה", "update", "updates", "installer", "install"]
 links = ["backup", "runtime", "release_hosting"]
@@ -8,8 +9,8 @@ title_en = "Install and updates"
 what_he = "ג'ארביס בודק אם יש גרסה חדשה, אומר לכם, ומעדכן רק אחרי שאישרתם."
 what_en = "JARVES checks for a new version, tells you, and updates only after you approve."
 say = [["יש עדכון?", "Is there an update?"]]
-expect_he = "לפני עדכון נשמר גיבוי. אם משהו נכשל, חוזרים לגרסה הקודמת."
-expect_en = "A backup is made before an update. If something fails, the previous version comes back."
+expect_he = "לפני עדכון נשמר גיבוי ונשמרת הגרסה הקודמת. אם משהו נכשל, הגרסה הנוכחית ממשיכה לעבוד, ואפשר לחזור אחורה בלחיצה (עמוד Updates או jarvis update --rollback)."
+expect_en = "A backup is made and the previous version is kept before an update. If something fails the current version keeps working, and one click goes back (Updates page or jarvis update --rollback)."
 cost_he = "חינם."
 cost_en = "Free."
 privacy_he = "הבדיקה שואלת רק מה הגרסה האחרונה; לא נשלח שום מידע אישי."
@@ -25,3 +26,35 @@ en = "Keep the Update check switch on. When there is an update he asks you."
 action = "feature_on:update_check"
 check = "enabled:update_check"
 
+[[steps]]
+he = "פתחו את עמוד Updates: רואים את הגרסה הנוכחית, אם יש חדשה, ואת הכפתור \"חזרה לגרסה הקודמת\"."
+en = "Open the Updates page: it shows the current version, whether there is a new one, and the Roll back button."
+action = "open:#/updates"
+
+[[steps]]
+he = "לעדכון: לחצו \"התקן את העדכון\" או jarvis update install. החתימה, ה-SHA256 והגודל נבדקים לפני שמשהו רץ; ג'ארביס לא מתקין בלי אישור שלכם."
+en = "To update: press Install update, or jarvis update install. The signature, SHA256 and size are checked before anything runs; JARVES never installs without your approval."
+action = "command:jarvis update install"
+
+[[steps]]
+he = "אם הגרסה החדשה לא עולה: jarvis update --rollback (או הכפתור בעמוד Updates). הנתונים מלפני העדכון משוחזרים; מה ששונה אחרי העדכון נשמר בגיבוי ביטחון."
+en = "If the new version does not start: jarvis update --rollback (or the button on the Updates page). Your data from before the update is restored; what changed after it is kept in a safety backup."
+action = "command:jarvis update --rollback"
+
+[[problems]]
+he = "Windows כתב \"Windows protected your PC\""
+en = "Windows says \"Windows protected your PC\""
+fix_he = "המתקין עדיין לא חתום דיגיטלית (החלטה של הבעלים לעכשיו). לחצו More info ואז Run anyway, ואם רוצים לוודא - השוו את ה-SHA256 לזה שבדף ההפצה."
+fix_en = "The installer is not code-signed yet (an owner decision for now). Click More info, then Run anyway; to be sure, compare its SHA256 with the one on the release page."
+
+[[problems]]
+he = "העדכון נכשל או נקטע"
+en = "The update failed or was interrupted"
+fix_he = "הגרסה הנוכחית ממשיכה לעבוד והנתונים לא נגעו. נסו שוב מעמוד Updates; אם זה חוזר, הריצו jarvis doctor."
+fix_en = "The current version keeps working and your data was not touched. Try again from the Updates page; if it repeats, run jarvis doctor."
+
+[[problems]]
+he = "אחרי העדכון ג'ארביס לא עולה"
+en = "JARVES does not start after the update"
+fix_he = "בהפעלה השנייה ג'ארביס שואל (באישור על המסך) אם לחזור לגרסה הקודמת. אפשר גם ידנית: jarvis update --rollback."
+fix_en = "On the second start JARVES asks (an approval on the screen) whether to go back to the previous version. You can also do it by hand: jarvis update --rollback."

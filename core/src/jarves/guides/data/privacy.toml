@@ -13,8 +13,8 @@ expect_he = "במצב פרטיות היומן שומר רק אורך וזמני�
 expect_en = "In privacy mode the history keeps only lengths and timings, not what was said. Camera and sending e-mail are off by default."
 cost_he = "חינם."
 cost_en = "Free."
-privacy_he = "קול נשלח ל-OpenAI רק אחרי \"היי ג'ארביס\". מפתחות נשמרים בקובץ פרטי ולא מופיעים ביומן או בלוח הבקרה."
-privacy_en = "Audio goes to OpenAI only after \"Hey Jarvis\". Keys are in a private file and never in logs or the dashboard."
+privacy_he = "קול נשלח ל-OpenAI רק אחרי \"היי ג'ארביס\". מפתחות נשמרים בקובץ פרטי ולא מופיעים ביומן, בגיבויים או בלוח הבקרה. בדיקה עם סודות שנטמנו ב-36 יעדים לא מצאה דליפה באף אחד משני מצבי הפרטיות."
+privacy_en = "Audio goes to OpenAI only after \"Hey Jarvis\". Keys are in a private file and never in logs, backups or the dashboard. A planted-secret audit of 36 sinks found no leak in either privacy mode."
 
 [[steps]]
 he = "בעמוד הבית יש מתג \"פרטיות\": לחיצה אחת, ומיד רק אורך וזמנים נשמרים. שם אפשר גם להסתיר את מה שנשמר קודם."
@@ -31,6 +31,16 @@ action = "open:#/home"
 he = "עברו על עמוד \"יכולות ומתגים\": מה דולק ומה כבוי."
 en = "Go over the Features page: what is on and what is off."
 action = "open:#/features"
+
+[[steps]]
+he = "הלוגים ואבחון נשמרים עם הודעות קבועות: תוכן ונתונים אישיים מוסתרים לפי סוג. jarvis diag בונה חבילת תמיכה שתמיד מסירה תוכן, ומגבבת נתונים אישיים. עברו עליה לפני ששולחים."
+en = "Logs and diagnostics use fixed messages: content and personal data are redacted by class. jarvis diag builds a support bundle that always strips content and hashes personal data. Read it before sharing."
+action = "command:jarvis diag --help"
+
+[[steps]]
+he = "כשמצב פרטיות כבוי מופיע פס אזהרה בלוח הבקרה וב-jarvis status: טקסט שיחה נשמר ביומנים."
+en = "When privacy mode is off a banner shows on the dashboard and in jarvis status: conversation text is kept in the logs."
+action = "command:jarvis status"
 
 [platform]
 windows = "implemented_unverified"

@@ -53,7 +53,7 @@ STRINGS = {
         "risk": {"low": "Low risk", "medium": "Medium risk", "high": "High risk"},
         "ask": {"tool": "Allow this action?", "feature": "Turn on a feature?", "camera": "Use the camera?",
                 "message": "Send a message?", "shell": "Run a command?", "install": "Install software?",
-                "schedule": "Schedule a task?", "other": "Allow this?"},
+                "schedule": "Schedule a task?", "call": "Open the phone dialer?", "other": "Allow this?"},
         "approve": "Approve", "deny": "Deny",
         "details": "Details", "hide": "Hide details",
         "request": "Request", "why": "Why (JARVES's words, not verified)",
@@ -63,7 +63,8 @@ STRINGS = {
                  "manager": "Package manager", "package": "Package", "version": "Version", "source": "Source",
                  "timeout_s": "Time limit (s)", "classification": "Classification", "reasons": "Why it needs approval",
                  "runs_as": "Runs as", "log": "Output log", "to": "To", "text": "Text", "app": "App",
-                 "recipient": "Recipient", "number": "Number", "warning": "Warning", "grant": "Approval id"},
+                 "recipient": "Recipient", "number": "Number", "warning": "Warning", "grant": "Approval id",
+                 "number_source": "Where the number came from"},
     },
     "he": {
         "window": "JARVES - אישור",
@@ -71,7 +72,7 @@ STRINGS = {
         "risk": {"low": "סיכון נמוך", "medium": "סיכון בינוני", "high": "סיכון גבוה"},
         "ask": {"tool": "לאשר את הפעולה?", "feature": "להפעיל יכולת?", "camera": "להשתמש במצלמה?",
                 "message": "לשלוח הודעה?", "shell": "להריץ פקודה?", "install": "להתקין תוכנה?",
-                "schedule": "לתזמן משימה?", "other": "לאשר?"},
+                "schedule": "לתזמן משימה?", "call": "לפתוח את חייגן הטלפון?", "other": "לאשר?"},
         "approve": "אשר", "deny": "דחה",
         "details": "פרטים", "hide": "הסתר פרטים",
         "request": "הבקשה", "why": "למה (במילים של JARVES, לא נבדק)",
@@ -81,7 +82,8 @@ STRINGS = {
                  "manager": "מנהל חבילות", "package": "חבילה", "version": "גרסה", "source": "מקור",
                  "timeout_s": "זמן מקסימלי (שניות)", "classification": "סיווג", "reasons": "למה צריך אישור",
                  "runs_as": "רץ בתור", "log": "יומן פלט", "to": "אל", "text": "טקסט", "app": "אפליקציה",
-                 "recipient": "נמען", "number": "מספר", "warning": "אזהרה", "grant": "מזהה אישור"},
+                 "recipient": "נמען", "number": "מספר", "warning": "אזהרה", "grant": "מזהה אישור",
+                 "number_source": "מאיפה המספר"},
     },
 }
 

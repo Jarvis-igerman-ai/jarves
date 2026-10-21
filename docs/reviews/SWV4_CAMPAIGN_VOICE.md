@@ -1,4 +1,16 @@
-# SW-V4 campaign PASS C — voice (#17, branch `test/v4-campaign-c` off `v4/integrated-b-c-d-g-m-r01`, 20-21 Oct 2026)
+# SW-V4 campaign voice (#17): pass C (20-21 Oct) and pass C2 (21 Oct, credits topped up)
+
+**Pass C2 result (latest valid run of each of the 92 scenarios): 89 PASS, 2 FAIL (22, 23: wake false positives, P3 model
+limit, 2/20 vs V3 4/20, unchanged), 1 BLOCKED (62: needs the read-only admin key OD-05, skipped on purpose).** All the
+scenarios the empty credits had blocked now ran: 39 retest PASS (V4-VC-3 confirmed live), 51-61 (10 PASS), 63-70 (8 PASS),
+71-78 (8 PASS, fake bridge only), 79-84 (6 PASS, 79/80/84 on a re-run), 100-104 (5 PASS), plus 3/24/35 re-runs.
+**Live spend of C2: about $2.8** (97.1 - 47.7 = 49.4 min of live voice x $0.05 = $2.47 upper bound, plus about $0.3 of
+backend tokens and web search); the account had credit (no `credit_balance_exhausted`). The owner's ChatGPT token was only
+**copied** for scenario 56 and never refreshed (the harness no longer refreshes the real account). Key never printed.
+Bugs found and fixed in C2: V4-VC-12 (product, P2), H-C2-1 (harness), V4-VC-13 (product wording, P3), V4-VC-14
+(product wording, P3), plus 3 harness timing defects in 67-69 / 75 / 77. All in [bug table](SWV4_CAMPAIGN_BUG_TABLE_VOICE.md).
+
+## Pass C (20 Oct) summary, kept for history
 
 **Result: 50 PASS, 3 FAIL, 39 BLOCKED of 92 scenarios** (latest valid run of each). FAILs: 22/23 wake false positives
 (P3, model limit, better than V3), 39 helper approval (V4-VC-3, fixed, live retest blocked).
@@ -27,7 +39,7 @@ WhatsApp bridge (tools/fake_whatsapp_bridge.py), local Responses servers (tests/
 |---|---|---|---|
 | 1 | greeting | PASS | first sound 0.52 s after the face connects, greeting 2.2 s |
 | 2 | smalltalk | PASS | 3/3, dead air avg 0.45 s |
-| 3 | time_date | PASS | hour + day right, no delegation |
+| 3 | time_date | PASS | C2 re-run: hour + day right, no delegation (the C row was overwritten by a credit-blocked probe) |
 | 4 | maths | PASS | 3/4 (`calculate`); a later retest ran into the credit stop (BLOCKED) |
 | 5-7 | web: weather / news / USD | PASS | backend 3.2 / 7.0 / 7.1 s, screen "searching" |
 | 8-10 | emotions | PASS | laugh / sad+cry / love |
@@ -42,7 +54,7 @@ WhatsApp bridge (tools/fake_whatsapp_bridge.py), local Responses servers (tests/
 | 21 | wake word x3 | PASS | 3/3, scores 1.0, connect 2.8-3.4 s |
 | 22 | wake false positives | **FAIL** (P3) | 2/20 at 0.15 (V3: 4/20) — CV-04 |
 | 23 | wake thresholds | **FAIL** (P3) | detect 10/10 at 0.15 and 0.35; false 2/20 both (V3: 4/20, 3/20) |
-| 24 | software mute / unmute | PASS | live ended, mics closed, muted wake lost, unmute wake + answer |
+| 24 | software mute / unmute | PASS | C2 re-run: live ended, mics closed, muted wake lost, unmute wake + answer |
 | 25-26 | voice / request budget | PASS | VOICE_BUDGET after 63 s; AI_BUDGET after 2 requests; 0 reservations left |
 | 27 | face protocol | PASS | 30 states, bad [] |
 | 28 | start/stop x5 | PASS | 5/5 clean |
@@ -52,11 +64,11 @@ WhatsApp bridge (tools/fake_whatsapp_bridge.py), local Responses servers (tests/
 | 32 | privacy strip live | PASS | mic muted 0.06 s, cloud off 2.84 s (V3 0.18 / 2.94) |
 | 33 | camera-off honesty | PASS | honest, 0 camera tools, strip camera "disabled" |
 | 34 | calendar not connected | PASS | no claim, `google_connect_help` |
-| 35 | barge-in (half_duplex off) | PASS | old speech stopped **0.6 s** after the interruption, "4" answered, barge_ins 1 |
+| 35 | barge-in (half_duplex off) | PASS | C2 re-run: old speech stopped **0.51 s** after the interruption, "4" answered, barge_ins 1 |
 | 36 | timer, face closed | PASS | TIMER_RANG 2.2 s after due, "הטיימר צלצל." |
 | 37 | alarm, no session | PASS | rang 0.6 s after due, Core speech "שעון מעורר: השכמה" |
 | 38 | lists + clear approval | PASS | "לא" denied via voice 3.07 s, "כן" approved via voice 3.91 s; popup+face+voice; dialogs closed |
-| 39 | helper command approval | **FAIL** | command approved by voice and ran (exit 0) but "זה לא הלך לי" was said: V4-VC-3, fixed; retest BLOCKED |
+| 39 | helper command approval | PASS (C2) | V4-VC-3 retest: `shell_propose`, approved by voice, audit 1 (ran 1), user named |
 | 40 | browser local page | PASS | open + read ok, "אבטיח" |
 | 41 | briefing without Google | PASS | weather + "היומן והמייל לא זמינים" |
 | 42 | WhatsApp / Telegram handoff | PASS | one spoken yes, 1 wa.me link (recorded), Telegram honest |
@@ -68,14 +80,14 @@ WhatsApp bridge (tools/fake_whatsapp_bridge.py), local Responses servers (tests/
 | 48 | redelegate probe | PASS | 2 hand-overs, remember + forget, approved via voice |
 | 49 | told, not asked | PASS | 3/3 answered, memory 0 -> 0, no claim |
 | 50 | names after prefix | PASS | "שלום לנועה, לאביטל ולצחי" 2/2 (V3: partly; CV-16 now confirmed) |
-| 51-61 | client delegation | BLOCKED | credits exhausted before the group (every start `credit_balance_exhausted`) |
-| 62 | delegation cost reconciliation | BLOCKED | needs the read-only admin key (OD-05) and credits |
-| 63-70 | orchestrator by voice (list, status, ask, tell+voice yes, start: voice refused + screen, stop, risky permission: spoken yes refused / no denies, typed popup for high, digest) | BLOCKED | written against the fake Claude Code host; credits |
-| 71-78 | WhatsApp bridge (inbox names/counts, chat, summarize-asked, injection, long text, read-mode reply, send mode, mode by voice) | BLOCKED | credits |
-| 79-84 | recall (incl. the 80 re-run) | BLOCKED | credits |
-| 100-102 | self-diagnostics: "מה מצבך?", "What is your health?", "מה מצא הבודק?" | BLOCKED | written; credits |
-| 103 | approval wording (kind + first name, one language, English request) | BLOCKED | written; credits |
-| 104 | WhatsApp "Did anyone message me?" + send tools absent in read mode | BLOCKED | written; credits |
+| 51-61 | client delegation | 10 PASS, 1 fixed | 51-55, 57-61 PASS (spent $0.01-0.04 each, 0 open reservations); 56 (plan route) FAILED first on **V4-VC-12** (`BackendTrace.finish` TypeError: duplicate `model`), fixed, then PASS: route chatgpt_plan, 1 plan response, API USD 0 |
+| 62 | delegation cost reconciliation | BLOCKED | needs the read-only admin key (OD-05); skipped by instruction |
+| 63-70 | orchestrator by voice | 8 PASS | 63 list, 64 status, 65 ask, 66 tell (spoken yes approves), 67 start (spoken yes refused, screen approves, beta session exists), 68 stop, 69 risky permission (medium + high: spoken yes refused, spoken no denies, worker got deny), 70 digest. 67-69 first failed on harness defects (shared Core, no session to stop, spoken no said while JARVES was still talking): fixed |
+| 71-78 | WhatsApp (fake bridge only, no real linking) | 8 PASS | inbox, chat, summarize, injection (no action), long text (not read aloud, screen offered; asked in English), read-mode reply (draft only), send-mode reply (compose + send, exact text), mode by voice (stays read). First run 2/8: **H-C2-1 harness**, the WhatsApp rule joins the live session at its start but the suite switched the feature on afterwards: now the live session is restarted after the switch |
+| 79-84 | recall (incl. the 80 re-run) | 6 PASS | 81, 82, 83 PASS first time; 79 / 80 / 84 failed once on synthetic-ASR clips ("מה יוסי", "about the" dropped; 4/5) and passed on re-run: 79 5/5 p95 0.82 s, 80 5/5 p95 1.48 s, 84 RECALL_NOTHING after deletion |
+| 100-102 | self-diagnostics | 3 PASS | **V4-VC-13**: "מה מצבך?" was answered as small talk (no tool). Fixed: persona delegates own-health questions + a health line in the backend instructions. 100 `health_summary` 7.4 s Hebrew, 101 English 5.2 s, 102 `health_ai_review_summary` honest "has not run" |
+| 103 | approval wording (kind + first name, one language, English request) | PASS | spoken_in en "Send a WhatsApp message to ...?", no number / text, spoken no denies |
+| 104 | WhatsApp "Did anyone message me?" + send tools absent in read mode | PASS | after the V4-VC-9 harness fix and an English phrase in BACKEND_RULE (the backend picked `whatsapp_status`): `whatsapp_inbox`, four messages by name, no text leaked, outbox 0 |
 | 105 | popup keyboard rules (real Tk window, own process, invisible, bell muted) | PASS | Enter before arming: nothing; Enter armed medium: approve; Enter / KP_Enter on HIGH with the right code typed: nothing; Escape: deny (high + medium) |
 | 106 | pronunciation dictionary default | PASS | `DEFAULT_ENTRIES {}`, the fresh home's `workspace/PRONUNCIATIONS.md` parses to {}, spoken text unchanged |
 | 107 | wake: owner's custom head (a COPY) vs built-in, Hey/Hi/OK Jarvis x 3 volumes x clean+noise + 20 near-misses | PASS | head `hey_jarvis_copy.npz@0.95`: Hey 10/12, Hi 12/12, OK 6/6, Okay 6/6, false 1/20; built-in @0.15: same detections, false 2/20 (both through the wake ASR-confirm stage; synthetic voices only) |
@@ -124,7 +136,21 @@ no longer a warning; `LIVE_GREETING_NUDGE` and `LIVE_FALSE_ACTION_CLAIM` did not
   settle — `test_voice_faults.py` 44 passed. `test_log_message_lint.py` 19 passed.
 - New tools: `suite_v4_campaign_c.py`, `suite_v4_campaign_c_new.py`, `popup_keys_check.py`.
 
-## Not verified / next steps
+## Fixes in pass C2 on `test/v4-campaign-c2`
+- V4-VC-12 `brain.py` `BackendTrace.finish`: the plan route (ChatGPT) passed `model` twice (constructor id + response
+  model) -> `TypeError` -> every delegated turn on the plan route failed AFTER the answer had arrived (scenario 56). Merged.
+- V4-VC-13 `voice/live.py` persona + `diag/service.py` instruction: own-health questions are delegated (`health_summary`).
+- V4-VC-14 `whatsapp_bridge.py` BACKEND_RULE: "did anyone message me" -> `whatsapp_inbox`, not `whatsapp_status`.
+- H-C2-1 harness: `restart_live` after switching WhatsApp on; 67-69 own Core, a started beta session for 68, silence before the
+  spoken "לא"; 56 never refreshes the real ChatGPT token; 75 English; 77 restart after enabling send.
+- Wake 22/23 (CV-04): unchanged P3, same two near-miss phrases ("Jarvis", "hey Jarvie, no") pass the ASR confirm.
+
+## Not verified / next steps (C2)
+1. 62 (cost reconciliation) needs the read-only admin key (OD-05). Dialing (H) is not in the integrated tree.
+2. Real microphone / speaker / room, the owner's real voice for the custom wake head, the visible popup.
+3. 79 / 80 / 84 / 101 are model / ASR sensitive (one miss in some runs): worth a second look in a soak, not a blocker.
+
+## (superseded) Not verified / next steps of pass C
 1. **Owner: add OpenAI credits** (platform.openai.com billing), then run, in this order (about $4-5 live, within the
    remaining slice): `python tools/suite_v4_campaign_c.py --only 4,24,35,39,38 --max-minutes 10` (retests of
    V4-VC-2/3), `--only 51-61 --max-minutes 18`, `--only 63-70,100-104 --max-minutes 16`, `--only 71-84 --max-minutes 20`.

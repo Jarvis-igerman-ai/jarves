@@ -71,6 +71,7 @@ $base = [regex]::Match($pyproject, '(?m)^version\s*=\s*"([^"]+)"').Groups[1].Val
 if (-not $Version) { $Version = "$base.0" }
 if ($Version -notmatch '^\d+\.\d+\.\d+\.\d+$') { throw "Version must be four numbers (got $Version)" }
 if (-not $Commit) { $Commit = (& git -C $Repo rev-parse HEAD).Trim() }
+$BuildClock = [Diagnostics.Stopwatch]::StartNew()      # SW-V4 L: build_s for the installer budget
 $Built = (Get-Date).ToUniversalTime().ToString("yyyy-MM-ddTHH:mm:ssZ")
 Step "JARVES $Version ($Channel, $Commit)"
 
@@ -97,6 +98,13 @@ try {
     $whl = Get-ChildItem (Join-Path $Out "wheel") -Filter "jarves-*.whl" | Select-Object -First 1
     Run "uv" @("pip", "install", "--python", $Py, "--break-system-packages", "--no-deps", "--compile-bytecode", $whl.FullName)
 } finally { Pop-Location }
+# SW-V4 P (installer size): the stdlib's own test suite, IDLE, the turtle demos and ensurepip are never used by JARVES
+# (the helper Skill uses the PC's Python, not this one); tkinter and its tcl/tk stay (the approval popup).
+Step "prune unused stdlib parts"
+foreach ($d in "Lib\test", "Lib\idlelib", "Lib\turtledemo", "Lib\ensurepip", "Lib\lib2to3") {
+    $full = Join-Path $Stage ("python\" + $d)
+    if (Test-Path $full) { Remove-Item -Recurse -Force $full }
+}
 $info = [ordered]@{ version = $Version; commit = $Commit; built = $Built; channel = $Channel; platform = "windows-x86_64"
                     python = "3.12.15+20261013"; godot = "4.7.2-stable" }
 # WP-O: default update source baked into the build (repo variable JARVES_UPDATE_BASE_URL, public, not a secret);
@@ -168,6 +176,22 @@ if (-not $SkipFace) {
     Copy-Item (Join-Path $godotProj "assets\JARVIS.glb") (Join-Path $faceDir "assets\JARVIS.glb")
 }
 
+# ---------------------------------------------------------------- WhatsApp bridge (Go), only when the repo pins one
+# packaging\bridge_pin.json = {"path": "bridge/jarves-whatsapp-bridge.exe", "sha256": "<64 hex>"} appears with the bridge
+# (package F). CI builds the binary (go build, Windows amd64) and passes it in JARVES_BRIDGE_EXE; payload_check.py below
+# fails the build unless the staged file has exactly the pinned SHA256. No pin file = the bridge is not part of this build.
+$bridgePin = Join-Path $PSScriptRoot "bridge_pin.json"
+if (Test-Path $bridgePin) {
+    $pin = Get-Content $bridgePin -Raw | ConvertFrom-Json
+    if (-not $env:JARVES_BRIDGE_EXE -or -not (Test-Path $env:JARVES_BRIDGE_EXE)) {
+        throw "packaging\bridge_pin.json exists but JARVES_BRIDGE_EXE (the CI-built Go binary) is not set or missing"
+    }
+    $dst = Join-Path $Stage ($pin.path -replace '/', '\')
+    New-Item -ItemType Directory -Force (Split-Path $dst -Parent) | Out-Null
+    Copy-Item $env:JARVES_BRIDGE_EXE $dst
+    Step "WhatsApp bridge staged: $($pin.path)"
+}
+
 # ---------------------------------------------------------------- launcher, notices, payload check
 Copy-Item (Join-Path $PSScriptRoot "windows\jarvis.cmd") $Stage
 Copy-Item (Join-Path $PSScriptRoot "windows\THIRD_PARTY_NOTICES.txt") $Stage
@@ -204,6 +228,7 @@ if (-not $SkipInstaller) {
     $info["installer"] = "JARVES-Setup-$Version.exe"
     $info["sha256"] = $sha
     $info["size"] = (Get-Item $exe).Length
+    $info["build_s"] = [math]::Round($BuildClock.Elapsed.TotalSeconds, 1)
     $info | ConvertTo-Json | Set-Content -Encoding utf8NoBOM (Join-Path $Out "build-info.json")
     Step "done: $exe ($([math]::Round($info.size / 1MB)) MB, sha256 $sha)"
 }

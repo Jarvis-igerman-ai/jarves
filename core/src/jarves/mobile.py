@@ -51,6 +51,9 @@ AUTH_FAILS_PER_MIN = 10        # bad tokens per address before a 429
 MAX_JSON_BYTES = 8192
 MAX_CHAT_CHARS = 1000
 MAX_AUDIO_BYTES = 2_000_000    # about 60 s of 16 kHz 16-bit mono WAV
+REPLY_TTL_S = 600                  # how long a chat answer is kept for a resend with the same client message id
+REPLY_KEEP = 200
+MSG_ID_RE = re.compile(r"^[A-Za-z0-9_.:-]{8,64}$")
 DEFAULT_SCOPES = ("chat", "voice", "status", "approvals")
 ALL_SCOPES = DEFAULT_SCOPES
 STATIC_FILES = {"index.html": "text/html; charset=utf-8", "app.js": "text/javascript; charset=utf-8",
@@ -119,6 +122,7 @@ class MobileAccess:
         self.gate: Callable[[], bool] | None = None   # live feature switch: turning mobile_access OFF stops serving at once
         self._noisy: dict[str, list] = {}
         self._busy: set[str] = set()
+        self._replies: dict[tuple[str, str], tuple[float, dict]] = {}   # (device, client message id) -> answered turn
         self.bridge: Bridge | None = None
         self.scheme = "http"
         self.host: str | None = None
@@ -374,6 +378,24 @@ class MobileAccess:
             self._busy.add(device)
             return True
 
+    def replay(self, device: str, mid: str) -> dict | None:
+        """Idempotent chat: a phone that lost the answer (Wi-Fi blip, reconnect) resends the SAME client message id and
+        gets the stored answer; the Core never runs the message a second time."""
+        with self._lock:
+            hit = self._replies.get((device, mid))
+            if hit and self.clock() - hit[0] <= REPLY_TTL_S:
+                return hit[1]
+            return None
+
+    def remember(self, device: str, mid: str, reply: dict) -> None:
+        now = self.clock()
+        with self._lock:
+            self._replies[(device, mid)] = (now, reply)
+            for k in [k for k, v in self._replies.items() if now - v[0] > REPLY_TTL_S]:
+                self._replies.pop(k, None)
+            while len(self._replies) > REPLY_KEEP:               # bounded: oldest out first
+                self._replies.pop(next(iter(self._replies)))
+
     def end(self, device: str) -> None:
         with self._lock:
             self._busy.discard(device)
@@ -557,11 +579,18 @@ def serve(h, mob: MobileAccess, ip: str) -> None:
     if path == "/api/m/chat" and method == "POST":
         if not need("chat"):
             return
-        if not mob.rate_ok("chat:" + dev["id"], CHAT_RATE_PER_MIN):
-            return h._json_extra(429, {"error": "too many messages, slow down"}, {"Retry-After": "30"})
         d = _json_body(h)
         if d is None:
             return
+        mid = d.get("id")
+        if mid is not None and not (isinstance(mid, str) and MSG_ID_RE.match(mid)):
+            return h._json(400, {"error": "message id must be 8-64 letters, digits or _ . : -"})
+        if mid:
+            again = mob.replay(dev["id"], mid)
+            if again is not None:                                # a resend: answer from memory, no second run
+                return done(200, {**again, "replay": True}, replay="yes")
+        if not mob.rate_ok("chat:" + dev["id"], CHAT_RATE_PER_MIN):
+            return h._json_extra(429, {"error": "too many messages, slow down"}, {"Retry-After": "30"})
         text = str(d.get("text", "")).strip()[:MAX_CHAT_CHARS]
         if not text:
             return h._json(400, {"error": "text is empty"})
@@ -576,7 +605,10 @@ def serve(h, mob: MobileAccess, ip: str) -> None:
             return done(502, {"error": "JARVES could not answer right now"}, chars=len(text))
         finally:
             mob.end(dev["id"])
-        return done(200, {"reply": str(r.get("reply", "")), "ok": bool(r.get("ok", True))}, chars=len(text))
+        out = {"reply": str(r.get("reply", "")), "ok": bool(r.get("ok", True))}
+        if mid:
+            mob.remember(dev["id"], mid, out)
+        return done(200, out, chars=len(text))
     if path == "/api/m/voice" and method == "POST":
         if not need("voice"):
             return

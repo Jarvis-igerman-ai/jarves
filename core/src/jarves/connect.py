@@ -47,7 +47,7 @@ from .channels_common import StepSkipped, is_skip_word, read_json, read_secret, 
 FEATURE = "guided_setup"
 COMMAND = "jarvis connect"
 STATE_FILE = "connect.json"
-ONLY = ("google", "telegram", "pear", "wake", "instagram", "home")
+ONLY = ("google", "telegram", "pear", "wake", "instagram", "home", "openai-admin")
 BOTFATHER_URL = "https://t.me/BotFather"
 TOKEN_RE = re.compile(r"(?<![\w-])\d{5,15}:[A-Za-z0-9_-]{30,80}(?![\w-])")     # a Telegram bot token
 NUDGE_EVERY_S = 24 * 3600
@@ -81,6 +81,7 @@ TITLES = {
     "wake": ("מילת ההפעלה (כיול לקול שלך)", "Wake word (calibrated to your voice)", True),
     "instagram": ("אינסטגרם (לא חובה)", "Instagram (optional)", True),
     "home": ("Home Assistant (לא חובה)", "Home Assistant (optional)", True),
+    "openai-admin": ("מפתח אדמין של OpenAI לבדיקות שימוש (לא חובה)", "OpenAI admin key for usage checks (optional)", True),
 }
 # what the first prompt of a step asks about (the Continue / Skip / Never line follows it)
 QUESTIONS = {
@@ -88,6 +89,8 @@ QUESTIONS = {
              "Calibrate the wake word to your voice now (about 20 seconds, say Hey Jarvis a few times)?"),
     "instagram": ("לחבר עכשיו אינסטגרם?", "Connect Instagram now?"),
     "home": ("לחבר עכשיו Home Assistant?", "Connect Home Assistant now?"),
+    "openai-admin": ("לשמור עכשיו מפתח אדמין של OpenAI לקריאה בלבד (העלות האמיתית החודש)?",
+                     "Save a read-only OpenAI admin key now (the real cost this month)?"),
 }
 
 
@@ -272,7 +275,23 @@ def status_items(home: Path, cfg=None, *, pear_probe: Callable[[str], bool] = pe
     else:
         it.detail_he, it.detail_en = "לא מחובר", "not connected"
         it.fix_he, it.fix_en = "jarvis home start", "jarvis home start"
+
+    it = items["openai-admin"]
+    from .usage import admin_key_saved
+    if admin_key_saved(home):
+        it.state, it.detail_he, it.detail_en = "connected", "נשמר (לקריאה בלבד)", "saved (read-only use)"
+    else:
+        it.detail_he, it.detail_en = "לא נשמר (לא חובה)", "not saved (optional)"
+        it.fix_he, it.fix_en = f"{COMMAND} openai-admin, או בלוח הבקרה בעמוד Usage",             f"{COMMAND} openai-admin, or in the dashboard on the Usage page"
     return [items[i] for i in ONLY]
+
+
+ADMIN_STEPS_HE = ("1. נכנסים ל-platform.openai.com כבעלי הארגון: Settings, Organization, Admin keys. "
+                  "2. Create new admin key, שם JARVES-costs, הרשאה Read only. 3. מעתיקים (sk-admin-...) ומדביקים כאן; "
+                  "ההדבקה מוסתרת. כדי לדלג: s.")
+ADMIN_STEPS_EN = ("1. Sign in to platform.openai.com as the organization owner: Settings, Organization, Admin keys. "
+                  "2. Create new admin key, name JARVES-costs, permission Read only. 3. Copy it (sk-admin-...) and "
+                  "paste it here; the paste is hidden. To skip: s.")
 
 
 PEAR_STEPS_HE = ("1. פותחים את Pear Desktop (אפשר: jarvis music open). 2. בתפריט של Pear: Plugins > API Server וסימון V "
@@ -414,7 +433,7 @@ class Connector:
                 if it.state != "connected" and not self._gate(fid):
                     continue
                 try:
-                    getattr(self, "step_" + fid)(it)
+                    getattr(self, "step_" + fid.replace("-", "_"))(it)
                 except StepSkipped:
                     self._finish_clip()
                     self._skipped(fid, "skipped")
@@ -641,6 +660,27 @@ class Connector:
     def step_home(self, it: Item) -> None:
         self._optional("home", ("Home Assistant", "Home Assistant"), "home")
 
+    def step_openai_admin(self, it: Item) -> None:
+        """Optional read-only admin key for usage/cost checks. Hidden input, saved only to secrets.env; skippable."""
+        from .usage import save_admin_key
+        if self.yes:
+            self.results["openai-admin"] = "skipped"
+            self.notes["openai-admin"] = (f"כשתרצו: {COMMAND} openai-admin", f"When you want: {COMMAND} openai-admin")
+            return
+        self.h(ADMIN_STEPS_HE, ADMIN_STEPS_EN)
+        key = read_secret(self.io, "OpenAI admin key (hidden, s = skip): ")
+        if key is None or not key.strip():
+            raise StepSkipped
+        try:
+            save_admin_key(self.home, key)
+        except ValueError as e:
+            self.results["openai-admin"] = "failed"
+            self.notes["openai-admin"] = (f"{COMMAND} openai-admin", f"{COMMAND} openai-admin")
+            self.h("המפתח לא נראה כמו מפתח אדמין (מתחיל ב-sk-admin-). לא נשמר.", str(e))
+            return
+        self.results["openai-admin"] = "connected"
+        self.h("נשמר. הפעילו מחדש את ג'ארביס; הבדיקה בעמוד Usage.", "Saved. Restart JARVES; test it on the Usage page.")
+
     def _wizard_result(self, fid: str, rc: int, fix: tuple[str, str]) -> None:
         if rc == 0:
             self.results[fid] = "connected"
@@ -693,6 +733,7 @@ def add_cli(sub) -> None:
     c = sub.add_parser("connect", help="ONE guided command: checks Google, Telegram, the Pear plugin and the wake "
                                        "word and walks you through only what is missing (opens the pages, watches "
                                        "the clipboard and Downloads, pairs by itself)")
+    c.add_argument("item", nargs="?", choices=list(ONLY), help="just this one (same as --only), e.g. openai-admin")
     c.add_argument("--only", choices=list(ONLY), help="just this one")
     c.add_argument("--status", action="store_true", help="show what is connected; change nothing")
     c.add_argument("--yes", action="store_true", help="accept the default answers and skip the optional accounts")
@@ -724,7 +765,7 @@ def cmd_connect(a, cfg, home) -> int:
     if getattr(a, "json", False) and getattr(a, "status", False):
         print(json.dumps(items_json(home, cfg), ensure_ascii=False, indent=1))
         return 0
-    return Connector(home, cfg, yes=bool(getattr(a, "yes", False)), only=getattr(a, "only", None),
+    return Connector(home, cfg, yes=bool(getattr(a, "yes", False)), only=getattr(a, "only", None) or getattr(a, "item", None),
                      status_only=bool(getattr(a, "status", False)), skip=skip,
                      reset_skips=bool(getattr(a, "reset_skips", False))).run()
 
