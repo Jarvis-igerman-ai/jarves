@@ -1,16 +1,16 @@
-# Pre-use voice test report (silent, headless) — 2026-10-21 00:36
+# Pre-use voice test report (silent, headless) — 2026-10-21 03:14
 
 Produced by `core/tools/suite_voice.py`. Virtual mic with locally synthesised speech (WinRT, never played), virtual speaker (measured, never played), fake face client; REAL Core, GPT-Live, backend model and web search, Skills, budget and openWakeWord. No real microphone, speaker, Godot window or OS volume.
 Each row is the LATEST run of that scenario (runs are listed at the end; live voice is capped, so scenarios ran in groups).
 
-**Result: 47/65 PASS, 18 FAIL, 0 skipped.** Live voice over all 7 suite runs (conservative wall time while a session was open or connecting): **44.6 min ≈ $2.23** plus backend tokens.
+**Result: 46/65 PASS, 19 FAIL, 0 skipped.** Live voice over all 8 suite runs (conservative wall time while a session was open or connecting): **44.8 min ≈ $2.24** plus backend tokens.
 
 
 | # | Scenario | Result | Key number | Time | Live voice | Run |
 |---|---|---|---|---|---|---|
 | 1 | greeting | **PASS** | dead air 0.52 s, greeting 2.2 s | 19 s | 0.2 min | 1020-225418 |
 | 2 | smalltalk | **PASS** | 3/3 answered, dead air avg 0.45 s | 43 s | 0.7 min | 1020-225418 |
-| 3 | time_date | **PASS** | hour ok, day ok, delegations 0 | 15 s | 0.2 min | 1020-225418 |
+| 3 | time_date | **FAIL** | hour WRONG, day WRONG, delegations 0 | 13 s | 0.1 min | 1021-031352 |
 | 4 | maths | **FAIL** | 1/4 correct | 132 s | 2.2 min | 1021-000447 |
 | 5 | weather | **PASS** | backend [3.2] s, screen ['searching', 'thinking'], plausible True | 20 s | 0.3 min | 1020-225418 |
 | 6 | news | **PASS** | backend [7.0] s, screen ['searching', 'thinking'], plausible True | 27 s | 0.5 min | 1020-225418 |
@@ -143,6 +143,19 @@ Each row is the LATEST run of that scenario (runs are listed at the end; live vo
 - **107. wake_custom_model**: Wake word through the real wake listener: a COPY of the owner's trained head (wake/hey_jarvis.npz, its report threshold 0.95) vs the built-in model at the owner's 0.15; Hey / Hi / OK Jarvis x 3 volumes x clean+noise (36 each) + 20 near-miss sentences (no live cost). PASS if: both models load; built-in 'Hey Jarvis' normal+quiet detected; results reported per phrase/level; no lost injections (the custom head's recall is reported honestly, synthetic voices only).
 
 ## Failures with evidence
+
+### 3. time_date
+- Key: hour WRONG, day WRONG, delegations 0
+- asked `מה השעה עכשיו?` heard `` said `` dead air None s, tools [], screen [], face [], open False, errors ['LIVE_ERROR: the voice provider reported an error']
+- asked `ואיזה יום היום?` heard `` said `` dead air None s, tools [], screen [], face [], open False, errors ['LIVE_START_FAILED: live voice failed to start']
+- log: `LIVE_ERROR the voice provider reported an error`
+- log: `LIVE_START_FAILED live voice failed to start`
+- log: `LIVE_ERROR the voice provider reported an error`
+- log: `LIVE_START_FAILED live voice failed to start`
+- log: `[1021-031352-01-main] LIVE_ERROR the voice provider reported an error`
+- log: `[1021-031352-01-main] LIVE_START_FAILED live voice failed to start`
+- log: `[1021-031352-01-main] LIVE_ERROR the voice provider reported an error`
+- log: `[1021-031352-01-main] LIVE_START_FAILED live voice failed to start`
 
 ### 4. maths
 - Key: 1/4 correct
@@ -440,10 +453,10 @@ Each row is the LATEST run of that scenario (runs are listed at the end; live vo
 
 </details>
 
-<details><summary>3. time_date: PASS</summary>
+<details><summary>3. time_date: FAIL</summary>
 
-- `מה השעה עכשיו?` -> said `עכשיו עשר חמישים וחמש בלילה.` (dead air 0.42 s, answer 2.8 s, backend [], screen [], face [])
-- `ואיזה יום היום?` -> said `היום יום שלישי.` (dead air 0.4 s, answer 1.3 s, backend [], screen [], face [])
+- `מה השעה עכשיו?` -> said `` (dead air None s, answer None s, backend [], screen [], face [])
+- `ואיזה יום היום?` -> said `` (dead air None s, answer None s, backend [], screen [], face [])
 
 </details>
 
@@ -966,3 +979,4 @@ Each row is the LATEST run of that scenario (runs are listed at the end; live vo
 | 1021-000447 | 39,43,4,24,35,51-62 | 6.1 min | 8.7 min |
 | 1021-001558 | 105,106,107 | 0.0 min | 8.6 min |
 | 1021-002741 | 105,107 | 0.0 min | 8.8 min |
+| 1021-031352 | 3 | 0.1 min | 0.2 min |

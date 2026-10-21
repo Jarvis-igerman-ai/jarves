@@ -9,7 +9,7 @@ credits are added. Scenarios 63-70 and 100-107 are written and ready (`core/tool
 **Live spend of this pass: at most $2.45** of the $8 slice (live voice wall time 44.6 min x $0.05 = $2.23 upper bound,
 which also counts the failed connects after the credits ran out; backend 117 calls, 2.23 M input tokens of which
 80 % cached, priority price x2 <= $0.20; 7 web searches; 3 output-audio transcriptions ~$0.01). Key never printed.
-Bugs: 5 P2 fixed (1 harness + 4 product), 0 P0/P1, 9 P3 open — [bug table](SWV4_CAMPAIGN_BUG_TABLE_VOICE.md).
+Bugs: 5 P2 fixed (1 harness + 4 product; V4-VC-4 also retested live), 0 P0/P1, 9 P3 open. A probe on 21 Oct 00:14 UTC (after merging integration head fd937bc) found the credits still empty; that blocked probe overwrote scenario 3's raw-report row (the valid 20 Oct run was PASS) — [bug table](SWV4_CAMPAIGN_BUG_TABLE_VOICE.md).
 
 ## Method
 `core/tools/suite_v4_campaign_c.py` = every existing scenario (suite_voice 1-35, suite_v3_voice 36-50, delegation

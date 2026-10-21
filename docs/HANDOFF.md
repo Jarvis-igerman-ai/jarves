@@ -10,6 +10,16 @@
 
 ---
 
+## SW-V4 campaign PASS C — voice (21 Oct 2026) - #17, branch `test/v4-campaign-c`, draft [PR #20](https://github.com/igalgerman/jarves/pull/20), [report](reviews/SWV4_CAMPAIGN_VOICE.md), [bugs](reviews/SWV4_CAMPAIGN_BUG_TABLE_VOICE.md)
+
+- 50 PASS, 3 FAIL (22/23 wake false positives P3; 39 fixed, live retest pending), 39 BLOCKED of 92. Live spend at most $2.45 of the $8 slice.
+- Fixed with focused tests: V4-VC-1 harness reads V4 log fields; V4-VC-2 short answers said twice; V4-VC-3 a re-delegated approved repeat was refused and reported as failed; V4-VC-4 credits error was not fatal (also retested live); V4-VC-5 a hung live shutdown caused a background CRASH. 9 P3 open.
+- Dead air p95 1.44 s over 83 turns, greeting 0.50-0.52 s, barge-in 0.6 s, wake connect 2.8-3.4 s.
+- **Blocker:** the OpenAI account is out of credits (`credit_balance_exhausted` since 21:08 UTC 20 Oct; still empty 00:14 UTC 21 Oct). Not run: 51-62, 63-70, 71-84 (including the 80 re-run), 100-104 and the live retests of 39/4/24/35. The host stopped the full offline suite for low memory; the focused files passed (170) after merging integration head fd937bc.
+- Questions for the user: (1) please add OpenAI credits; the blocked groups need about $4-5 (commands are in the report). (2) OD-05: a read-only admin key for scenario 62. Status: WAITING FOR USER (credits).
+
+---
+
 ## Repoint to the public repo + clean shutdown (21 Oct 2026) - branch `fix/repoint-and-shutdown` (off `v4/integrated-b-c-d-g-m-r01`, draft PR into it)
 
 - **V4-RP-1:** `updates.REPO = igalgerman/jarves` (source repo); signed installers + `latest.json` stay in `igalgerman/jarvis-releases` (`DEFAULT_RELEASES_REPO`). The "releases not reachable" text now names both repos and the download page. New `tests/test_repoint.py`: fake release host with a signed `latest.json` finds a newer 3.x/4.x build, never offers a downgrade, rejects a wrong signature.
