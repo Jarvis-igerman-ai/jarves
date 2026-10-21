@@ -64,12 +64,12 @@ ci_max = 60
 note = "idle disk writes (was 58 KB/min before V3 P0.3: runtime.json churn)"
 
 [metrics.idle_disk_read_kb_per_min]
-baseline = 320
+baseline = 20
 unit = "KB/min"
 source = "bench"
-owner_max = 600
-ci_max = 2500
-note = "UNEXPLAINED (V3 range 250-390; Windows counters include non-file I/O). Ceiling only stops growth; explain first (V4 M AM-P2)"
+owner_max = 100
+ci_max = 500
+note = "EXPLAINED and fixed by V4 P: the 20 s music health check opened the first async httpx connection at the warm-up/idle boundary, importing ~1-2 MB of anyio .pyc (V3 range 250-390, now 16-40). See docs/reviews/SWV4_PERF.md"
 
 [metrics.rss_growth_mb]
 baseline = 0.8
@@ -151,8 +151,105 @@ owner_max = 24
 ci_max = 45
 note = "LIVE_FIRST_AUDIO in a real desktop start (V3 log: 10.3-17.2 s). Wake-to-first-audio proper is measured 5x in A/AM-P1"
 
+[metrics.tool_p50_ms]
+baseline = 120
+unit = "ms"
+source = "history"
+owner_max = 1000
+ci_max = 3000
+note = "tool call median over the last 14 days of TOOL_RESULT log records (jarvis speedtest; n/a below 5 calls). Baseline is a placeholder until the first owner runs"
+
+[metrics.tool_p95_ms]
+baseline = 2500
+unit = "ms"
+source = "history"
+owner_max = 8000
+ci_max = 20000
+note = "tool call 95th percentile, same source (web search and calendar calls dominate). Placeholder baseline"
+
+[metrics.wake_to_first_audio_s]
+baseline = 1.8
+unit = "s"
+source = "history"
+owner_max = 3.0
+ci_max = 6.0
+note = "median WAKE_WORD -> LIVE_FIRST_AUDIO from the Self-Diagnostics monitor events (V3 P03 real-log median 1.78 s). Needs 3 real wake-ups"
+
+[metrics.dead_air_p95_s]
+baseline = 1.44
+unit = "s"
+source = "history"
+owner_max = 1.5
+ci_max = 3.0
+note = "95th percentile of reply waits (question end -> first sound); SWV4_CAMPAIGN_VOICE.md budget 1.5 s, measured p95 1.44 s"
+
+[metrics.openai_roundtrip_ms]
+baseline = 400
+unit = "ms"
+source = "net"
+owner_max = 1500
+ci_max = 4000
+note = "one HEAD https://api.openai.com/v1/models with no key (connection + TLS + response); nothing billed. Placeholder baseline"
+
+# Installer budgets (SW-V4 L). Measured by packaging/installer_metrics.py from dist/build-info.json and the timings of
+# packaging/smoke_windows.ps1; checked by `python packaging/installer_metrics.py check` and by
+# `perf_gate.py --installer-json FILE`. A metric with `baseline_pending = true` has only a loose ceiling until the first
+# green CI run records its number (then add `baseline` and tighten, with a [[history]] line).
+[installer.installer_size_mb]
+baseline = 198
+unit = "MB"
+owner_max = 240
+ci_max = 300
+note = "JARVES-Setup-<v>.exe (V4 work package M: 198 MB). Growth needs a reason: a new bundled add-on or a bigger Godot export"
+
+[installer.silent_install_s]
+baseline_pending = true
+unit = "s"
+owner_max = 90
+ci_max = 240
+note = "/VERYSILENT clean install, wall clock (CI runner is slow on lzma2 + 600 MB of files)"
+
+[installer.silent_uninstall_s]
+baseline_pending = true
+unit = "s"
+owner_max = 40
+ci_max = 120
+note = "silent uninstall keeping the data folder"
+
+[installer.silent_upgrade_s]
+baseline_pending = true
+unit = "s"
+owner_max = 120
+ci_max = 300
+note = "silent upgrade over the seeded older install (stop Core, replace python and face, migrate data on the next start)"
+
+[installer.silent_rollback_s]
+baseline_pending = true
+unit = "s"
+owner_max = 120
+ci_max = 300
+note = "silent /ROLLBACK=1 reinstall of the previous version"
+
+[installer.build_s]
+baseline_pending = true
+unit = "s"
+owner_max = 900
+ci_max = 1500
+note = "build_windows.ps1 end to end with warm caches (informational on the owner PC)"
+
 # Budgets that need a real microphone, Godot window or billed session are listed in the budgets doc as PENDING (A).
 
 [[history]]
 date = "2026-10-20"
 change = "created from SWV3_P03_REPORT.md numbers; owner ceilings = the V3 P0.3 acceptance budgets"
+
+[[history]]
+date = "2026-10-21"
+change = "V4 P: idle_disk_read_kb_per_min baseline 320 -> 20, owner_max 600 -> 100, ci_max 2500 -> 500 (cause found and removed: lazy httpx/anyio import at the first music health check; unreachable player now backed off to 5 min)"
+
+[[history]]
+date = "2026-10-20"
+change = "package L: added the [installer.*] size and time budgets (installer 198 MB baseline from the V4 package; times pending the first CI measurement)"
+[[history]]
+date = "2026-10-21"
+change = "self/speed test (owner request 21 Oct): added tool_p50_ms, tool_p95_ms, wake_to_first_audio_s, dead_air_p95_s (sources: history) and openai_roundtrip_ms (net) with placeholder baselines; the first owner runs of `jarvis speedtest` replace them"

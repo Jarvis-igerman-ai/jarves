@@ -541,3 +541,34 @@ def test_sr7_revocation_is_immediate(srv):
     assert admin(srv, "POST", f"/api/mobile/devices/{dev}/revoke", {})[0] == 200
     assert req(srv, "GET", "/api/m/me", token=tok)[0] == 401
     assert req(srv, "POST", "/api/m/chat", token=tok, body={"text": "x"})[0] == 401
+
+
+def test_chat_message_ids_make_a_resend_idempotent(srv, fake):
+    tok, dev, _ = pair(srv)
+    st, a, _ = req(srv, "POST", "/api/m/chat", token=tok, body={"text": "turn on the light", "id": "c0ffee-0001-abcd"})
+    assert st == 200 and a["reply"] == "echo: turn on the light" and "replay" not in a
+    # the phone lost the answer (Wi-Fi blip) and resends the same id: stored answer, the Core does not run it again
+    st, b, _ = req(srv, "POST", "/api/m/chat", token=tok, body={"text": "turn on the light", "id": "c0ffee-0001-abcd"})
+    assert st == 200 and b["reply"] == a["reply"] and b["replay"] is True
+    assert fake.chats == [("turn on the light", dev)]
+    # a new id is a new message; no id keeps the old behaviour
+    assert req(srv, "POST", "/api/m/chat", token=tok, body={"text": "again", "id": "c0ffee-0002-abcd"})[0] == 200
+    assert req(srv, "POST", "/api/m/chat", token=tok, body={"text": "again"})[0] == 200
+    assert len(fake.chats) == 3
+    # malformed ids are refused
+    assert req(srv, "POST", "/api/m/chat", token=tok, body={"text": "x", "id": "short"})[0] == 400
+    assert req(srv, "POST", "/api/m/chat", token=tok, body={"text": "x", "id": 12345678})[0] == 400
+    assert len(fake.chats) == 3
+
+
+def test_chat_message_ids_are_per_phone_and_expire(home):
+    now = [1000.0]
+    a = MobileAccess(home, clock=lambda: now[0])
+    a.remember("dev-a", "msg-id-0001", {"reply": "r", "ok": True})
+    assert a.replay("dev-a", "msg-id-0001") == {"reply": "r", "ok": True}
+    assert a.replay("dev-b", "msg-id-0001") is None                    # another phone cannot read it
+    now[0] += mobile.REPLY_TTL_S + 1
+    assert a.replay("dev-a", "msg-id-0001") is None
+    for i in range(mobile.REPLY_KEEP + 20):
+        a.remember("dev-a", f"msg-id-{i:06d}", {"reply": "x", "ok": True})
+    assert len(a._replies) <= mobile.REPLY_KEEP

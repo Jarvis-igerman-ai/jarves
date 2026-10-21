@@ -48,7 +48,7 @@
     catch (e) { setConn(false); throw new Error(t("offline")); }
     setConn(true);
     const d = await r.json().catch(() => ({}));
-    if (r.status === 401) { forget(); throw new Error(t("unpaired")); }
+    if (r.status === 401) { forget(); const u = new Error(t("unpaired")); u.status = 401; throw u; }
     if (!r.ok) { const e = new Error(d.error || ("HTTP " + r.status)); e.status = r.status; e.code = d.code; throw e; }
     return d;
   }
@@ -91,7 +91,14 @@
     ev.preventDefault();
     const box = $("chatText"), text = box.value.trim(); if (!text) return;
     box.value = ""; bubble(text, "me"); const wait = bubble(t("thinking"));
-    try { const d = await post("/api/m/chat", { text }); wait.textContent = d.reply; if (!d.ok) wait.classList.add("err"); }
+    const id = (window.crypto && crypto.randomUUID ? crypto.randomUUID() : Date.now().toString(36) + Math.random().toString(36).slice(2, 12));
+    const send = async () => {                       // same id on every resend: the PC answers once, a resend gets the stored answer
+      for (let i = 0; ; i++) {
+        try { return await post("/api/m/chat", { text, id }); }
+        catch (e) { if (i >= 3 || !(e.status === undefined || e.status === 0 || e.code === "BUSY")) throw e; await new Promise((r) => setTimeout(r, 1500 * (i + 1))); }
+      }
+    };
+    try { const d = await send(); wait.textContent = d.reply; if (!d.ok) wait.classList.add("err"); }
     catch (e) { if (e.code === "BUSY") e.message = t("busy"); wait.textContent = e.status === 429 || e.status === 503 || e.status === 502 ? e.message : (e.message || t("err_chat")); wait.classList.add("err"); }
   });
 

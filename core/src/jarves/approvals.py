@@ -64,7 +64,8 @@ VOICE_MIN_AGE_S = 1.5            # speech transcribed sooner than this after the
 POLL_S = 0.4                    # answers written by another process (dashboard, CLI)
 AUDIT_MAX_BYTES = 1_000_000
 RISKS = ("low", "medium", "high")
-KINDS = ("tool", "feature", "camera", "message", "shell", "install", "schedule", "other")
+KINDS = ("tool", "feature", "camera", "message", "shell", "install", "schedule", "call", "other")
+HASHED_DETAILS = ("number",)       # SW-V4 H: a phone number is never written to the audit file, only a keyed hash
 CHANNELS = ("popup", "tray", "face", "dashboard", "voice", "typed", "cli", "terminal", "phone")
 FILE_CHANNELS = ("dashboard", "cli", "phone")          # what an answers/<id>.json file may claim to be
 
@@ -89,6 +90,7 @@ HE = {   # Hebrew texts of this module (fixed strings; user content is never tra
 # addresses or other details. The full text stays on the popup / dashboard (Approval.prompt, unchanged).
 # (regex on the tool name/title, English question, Hebrew question, may name the recipient)
 _SPOKEN_KINDS = (
+    (r"dial_open|\bcall\b", "Open the phone dialer{to}?", "לפתוח את החייגן{to}?", True),
     (r"whatsapp", "Send a WhatsApp message{to}?", "לשלוח הודעת וואטסאפ{to}?", True),
     (r"telegram", "Send a Telegram message{to}?", "לשלוח הודעת טלגרם{to}?", True),
     (r"instagram", "Send an Instagram message{to}?", "לשלוח הודעה באינסטגרם{to}?", True),
@@ -600,6 +602,12 @@ class ApprovalService:
         return ""
 
     # ------------------------------------------------------------------ audit
+    def _hashed(self, value: Any) -> str:
+        """Keyed hash of a detail that must not be written down (a phone number); '<hidden>' without a key."""
+        if not self._key:
+            return "<hidden>"
+        return "hmac:" + hmac.new(self._key, str(value).encode(), hashlib.sha256).hexdigest()[:16]
+
     def _audit(self, a: Approval) -> None:
         self._audit_simple(a.title, a.prompt, a.kind, a.risk, a.source, a.details, a.state, a.channel, a.id,
                            a.decided_at - a.created, a.shown)
@@ -614,10 +622,10 @@ class ApprovalService:
         rec = {"ts": round(time.time(), 3), "id": aid, "kind": kind, "risk": risk, "source": source,
                "title": logs.redact(str(title))[:200], "decision": decision, "channel": channel,
                "waited_s": round(max(0.0, waited), 1), "shown": list(shown or []),
-               "prompt": f"<{len(prompt)} chars>" if private and kind not in ("shell", "install") else
+               "prompt": f"<{len(prompt)} chars>" if (private and kind not in ("shell", "install")) or kind == "call" else
                logs.redact(str(prompt))[:600],
-               "details": {k: logs.redact(str(v))[:600] for k, v in (details or {}).items()
-                           if not logs.is_credential(k)}}
+               "details": {k: (self._hashed(v) if k in HASHED_DETAILS else logs.redact(str(v))[:600])
+                           for k, v in (details or {}).items() if not logs.is_credential(k)}}
         append_audit(self.dir / "audit.jsonl", rec)
 
 

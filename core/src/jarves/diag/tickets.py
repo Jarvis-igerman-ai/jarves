@@ -21,7 +21,7 @@ from .. import logs
 from . import db
 
 Runner = Callable[[list[str], str | None], tuple[int, str]]      # (argv, stdin) -> (returncode, stdout)
-_EMAIL = re.compile(r"[\w.+-]+@[\w-]+\.[\w.-]+")
+_EMAIL = re.compile(r"(?<![\w.+-])[\w.+-]+@[\w-]+\.[\w.-]+")
 
 
 def gh_runner(argv: list[str], stdin: str | None = None) -> tuple[int, str]:

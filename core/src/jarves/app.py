@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import asyncio
 import time
+from collections import deque
 import hashlib
 import json
 from contextlib import aclosing
@@ -128,6 +129,26 @@ class _VoiceApproval:
             live.confirm_done()
 
 
+async def _later(delay_s: float, fn, *args) -> None:
+    """Start-up work that must not compete with CORE_READY: run `fn(*args)` (a coroutine function) after a delay."""
+    await asyncio.sleep(delay_s)
+    await fn(*args)
+
+
+def _warm_http_stack() -> None:
+    """SW-V4 P: httpx imports anyio's submodules lazily at the FIRST async request (~1-2 MB of .pyc from disk). Do it
+    once, in a worker thread at start, so that read never lands in an idle window or in a user-facing request."""
+    try:
+        import anyio
+        import httpcore
+        import httpx  # noqa: F401
+        for attr in ("Event", "Lock", "create_memory_object_stream", "TypedAttributeSet", "ClosedResourceError"):
+            getattr(anyio, attr, None)
+        import anyio._backends._asyncio  # noqa: F401
+    except Exception:
+        pass
+
+
 class Core:
     def __init__(self, cfg: Config, home: Path, *, audio=None, player=None, stt=None, tts=None,
                  live_factory=None, console_logs: bool = True, use_real_audio: bool = True, ai_transport=None,
@@ -162,6 +183,9 @@ class Core:
         self._greeted = False
         self.voice_mode = "off"
         self._voice_connecting = False
+        # the last things the OWNER said (typed or heard), in memory only: assisted dialing checks that a number the
+        # model passes was really said by the owner (dialing.py); never written to disk or logs
+        self.owner_said: deque[str] = deque(maxlen=6)
         self._hold_wake_until = 0.0     # connected-on-open mode: wake word waits until the first live session ended
         self._rollovers: list[float] = []   # times of automatic session resumes (loop guard)
         self.startup = {"phase": "starting", "ready": False, "detail": "Loading JARVES..."}
@@ -187,6 +211,7 @@ class Core:
         asyncio.get_running_loop().set_exception_handler(logs.asyncio_handler)
         from . import backup, usage                     # SW-V2 M5: checkpoint BEFORE the stores open/migrate
         backup.startup_checkpoint(self.home)
+        self._update_guard()                            # SW-V4 L: data migrations (backup first) + failed-update watch
         self.history = store.attach(self.home, c)       # conversation history + self-diagnosis (log sink)
         logs.new_cid()
         logs.info("core", "CORE_STARTING", "JARVES Core starting", version=__version__, home=str(self.home))
@@ -289,6 +314,8 @@ class Core:
         recall.attach(self)
         from . import orchestrator                      # SW-V4 E: coding agents (bridge starts with the switch)
         orchestrator.attach(self)
+        from . import dialing                           # SW-V4 H: dial_prepare / dial_open (assisted dialing)
+        dialing.attach(self)
         from . import guides                            # WP-L: help Skill, setup hints, briefing, suggestions
         self.guides = guides.attach(self)
         self._write_tools_md()                          # after every Skill is registered
@@ -361,6 +388,8 @@ class Core:
         self._bg.append(asyncio.create_task(wab.run(self)))   # SW-V4 F: bridge + events (switch on only)
         if self.use_real_audio and openai_key_present() and self.cfg.ai.provider == "openai":
             self._bg.append(asyncio.create_task(asyncio.to_thread(self._prewarm)))
+        elif self.use_real_audio:
+            self._bg.append(asyncio.create_task(_later(5.0, asyncio.to_thread, _warm_http_stack)))
         self._setup_wake()
         self._bg.append(asyncio.create_task(self.start_mobile()))   # V5-I: phone server with the Core (switch OFF = no-op)
         self._log_summary()
@@ -368,8 +397,33 @@ class Core:
         self.health.mark("ready")
         logs.info("core", "CORE_READY", "Core ready", voice_mode=self.voice_mode, log=str(self.log_path),
                   ms=round((time.monotonic() - started_at) * 1000))
+        self._update_confirmed()
         self._startup_stage("ready" if self.voice_mode == "off" else "core_ready",
                             "Core ready (voice off)" if self.voice_mode == "off" else "Core loaded. Preparing voice...")
+
+    def _update_guard(self) -> None:
+        """Package L: bring the data to the current schema (a verified backup first) and notice an update whose new
+        version did not become ready last time (the second such start offers a rollback through approvals)."""
+        from . import migrations, updates
+        try:
+            migrations.run(self.home)
+        except migrations.MigrationError as e:
+            logs.error("core", "MIGRATION_REFUSED", "data migration refused; data left unchanged", code_name=e.code)
+            raise
+        try:
+            if updates.note_start(self.home)["offer"]:
+                import threading
+                threading.Thread(target=updates.offer_rollback, args=(self.home,), name="update-rollback-offer",
+                                 daemon=True).start()
+        except Exception as e:                           # the watch must never stop the Core from starting
+            logs.warn("core", "UPDATE_WATCH_FAILED", "update watch failed", error_type=type(e).__name__)
+
+    def _update_confirmed(self) -> None:
+        from . import updates
+        try:
+            updates.mark_healthy(self.home)
+        except Exception as e:
+            logs.warn("core", "UPDATE_WATCH_FAILED", "update watch failed", error_type=type(e).__name__)
 
     async def stop(self, grace_s: float = 3.0) -> None:
         """Orderly shutdown (CR-11): refuse new work, end voice, deny pending confirmations, let an in-flight
@@ -508,11 +562,17 @@ class Core:
         return self.budget.remaining("voice_seconds")
 
     async def _health_loop(self) -> None:
+        music_next, music_gap = 0.0, 10.0
         while True:
             await asyncio.sleep(20)
             try:
-                if self.music is not None:
+                # SW-V4 P: an unreachable player (Pear closed) is asked again after 20 s, 40 s ... 5 min instead of
+                # every 20 s: each ask opens a connection and walked the whole httpx/anyio import tree from disk
+                # at the first tick (the "unexplained" idle reads, V4 M AM-P2); back to 20 s once it answers.
+                if self.music is not None and time.monotonic() >= music_next:
                     st, d = await self.music.health()
+                    music_gap = 20.0 if st == "ok" else min(300.0, music_gap * 2)
+                    music_next = time.monotonic() + music_gap - 1.0
                     self.health.set("music", st, d, "" if st == "ok" else "start Pear Desktop with the API Server plugin")
                 if not self.listening and self.live is None:
                     self.dev.check_audio()
@@ -1205,6 +1265,7 @@ class Core:
                     if name in ("openai", "agents", "agents.realtime"):
                         raise
                     # an optional submodule moved in another SDK version: first use imports what it needs
+            _warm_http_stack()
             logs.info("core", "PREWARM_DONE", "cloud voice libraries loaded", ms=round((time.monotonic() - t0) * 1000),
                       modules=mods)
         except Exception as e:
@@ -1506,6 +1567,8 @@ class Core:
     def _owner_answer(self, text: str, channel: str) -> bool:
         """The owner's own words (typed on the face / heard from the mic): a pure yes/no answers the ONE waiting
         approval. Otherwise it is a new turn (a denied request may be asked again)."""
+        if text:
+            self.owner_said.append(str(text)[:500])
         ap = self.approvals
         if ap is None:
             return False

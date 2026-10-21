@@ -68,8 +68,8 @@ TEXT: dict[str, str] = {
         "פנים / דמות דו-ממדית / דמות תלת-ממדית / מוסתר, בקול או כאן; רק התמונה משתנה",
     "keeps what JARVES was given in each conversation (instructions, memory, tools, notes) for the dashboard; only sizes and names while privacy is on":
         "שומר מה ש-JARVES קיבל בכל שיחה (הוראות, זיכרון, כלים, הערות) לתצוגה בלוח הבקרה; במצב פרטיות רק גדלים ושמות",
-    "looks for a newer JARVES once a day (GitHub, or the signed release folder in update.base_url; read-only); installs only after you approve":
-        "בודק פעם ביום אם יש גרסה חדשה (GitHub או תיקיית ההפצה החתומה ב-update.base_url; לקריאה בלבד); מתקין רק באישורך",
+    "looks for a newer JARVES once a day (GitHub, or the signed release folder in update.base_url; read-only); installs only after you approve, and one command or button goes back to the previous version":
+        "בודק פעם ביום אם יש גרסה חדשה (GitHub או תיקיית ההפצה החתומה ב-update.base_url; לקריאה בלבד); מתקין רק באישורך, ופקודה אחת או כפתור אחד חוזרים לגרסה הקודמת",
     "notification-area icon: dashboard, show/hide, mute, pause alerts, status, quit":
         "סמל באזור ההתראות: לוח בקרה, הצגה והסתרה, השתקה, השהיית התראות, מצב ויציאה",
     "now and then suggests one setup step in a short sentence (\"תפסיק להציע\" turns it off)":
@@ -132,6 +132,15 @@ TEXT: dict[str, str] = {
     "UNIT test_instagram.py (local fake Graph API server)": "בדיקות יחידה: test_instagram.py (שרת Graph API מדומה מקומי)",
     "never run against real Instagram: needs the owner's Meta app, account and token":
         "מעולם לא הורץ מול אינסטגרם אמיתי: דרושים אפליקציית Meta, חשבון ואסימון של הבעלים",
+    "checks his own installation (daily) and his speed (weekly), tells you what is slow or broken and whether it got worse than before; free, read-only, never at night or during a conversation":
+        "בודק את ההתקנה שלו (כל יום) ואת המהירות שלו (פעם בשבוע), אומר מה איטי או שבור והאם זה החמיר לעומת בעבר; חינם, קריאה בלבד, אף פעם לא בלילה או באמצע שיחה",
+    "dashboard Health & speed page, jarvis selftest, jarvis speedtest, Jobs page (times)":
+        "עמוד תקינות ומהירות בלוח הבקרה, jarvis selftest, jarvis speedtest, עמוד המשימות הקבועות (שעות)",
+    "UNIT test_selfspeed.py (planted faults, fake clock, fake Core, real dashboard HTTP)":
+        "בדיקות יחידה: test_selfspeed.py (תקלות מדומות, שעון מדומה, ליבה מדומה, לוח בקרה אמיתי ב-HTTP)",
+    "not yet run on the owner's PC for a week": "טרם הורץ שבוע שלם על המחשב של הבעלים",
+    "pure Python; /proc counters; never run on a Raspberry Pi (no device in the test setup)":
+        "Python בלבד; מונים מ-/proc; מעולם לא הורץ על Raspberry Pi (אין מכשיר בסביבת הבדיקות)",
     "checks health, recent logs, settings and features on demand and weekly, then suggests ranked fixes; settings change only after you approve":
         "בודק תקינות, יומנים אחרונים, הגדרות ויכולות לפי בקשה ופעם בשבוע, ומציע תיקונים לפי סדר חשיבות; הגדרות משתנות רק אחרי שאישרת",
     "UNIT test_selfcheck.py (real store/log/scheduler/autonomy in tmp dirs, synthetic log files)":
@@ -286,8 +295,8 @@ TEXT: dict[str, str] = {
     "core/tests/test_m3_*.py (unit + fault injection on Windows); no real-restart run yet":
         "core/tests/test_m3_*.py (יחידה והזרקת תקלות ב-Windows); עוד לא בוצעה הפעלה מחדש אמיתית",
     "core/tests/test_runtime.py": "בדיקות: core/tests/test_runtime.py",
-    "core/tests/test_updates.py (fake GitHub); needs a published release to verify live":
-        "core/tests/test_updates.py (GitHub מדומה); כדי לאמת בפועל צריך גרסה שפורסמה",
+    "core/tests/test_updates.py (fake GitHub), core/tests/test_update_flow.py (local signed release server: ask first, SHA256 + size, failure keeps the old version, downgrade refused, rollback); needs a published release to verify live":
+        "core/tests/test_updates.py (GitHub מדומה), core/tests/test_update_flow.py (שרת הפצה חתום מקומי: שואל קודם, SHA256 וגודל, כשל משאיר את הגרסה הקודמת, ירידת גרסה נדחית, חזרה לאחור); כדי לאמת בפועל צריך גרסה שפורסמה",
     "core/tests/test_usage.py (unit + dashboard HTTP); no live plan-limit event observed yet":
         "core/tests/test_usage.py (יחידה ו-HTTP של לוח הבקרה); עוד לא נצפה אירוע מגבלת תוכנית אמיתי",
     "docs/reviews/SWV2_WP-M1.md (real hidden-mode run, pythonw, no window)":
@@ -331,6 +340,10 @@ TEXT: dict[str, str] = {
     "privacy mode is off: what you say is kept in the local history (never uploaded)":
         "מצב הפרטיות כבוי: מה שנאמר נשמר בהיסטוריה המקומית (אף פעם לא מועלה)",
     "no OpenAI admin key saved": "לא נשמר מפתח Admin של OpenAI",
+    "optional read-only OpenAI admin key: real monthly cost for the spend display and usage checks; used only for OpenAI's costs endpoint":
+        "מפתח Admin אופציונלי של OpenAI לקריאה בלבד: העלות החודשית האמיתית לתצוגת ההוצאות ולבדיקות שימוש; משמש רק לנקודת העלויות של OpenAI",
+    "core/tests/test_usage_admin_key.py with a fake costs endpoint; no real admin key tested yet (owner decision OD-05)":
+        "core/tests/test_usage_admin_key.py עם נקודת עלויות מדומה; עוד לא נבדק מפתח Admin אמיתי (החלטת בעלים OD-05)",
     "no data folder": "אין תיקיית נתונים",
     "no monthly API budget set": "לא נקבע תקציב חודשי ל-API",
     "no backup made yet": "עוד לא נעשה גיבוי",

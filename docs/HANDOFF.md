@@ -16,6 +16,14 @@
 - Goals only track (never act); outward steps and deletes ask the owner; the check-in exists only on request. Preferences are proposals until an explicit yes; sensitive text is refused; all items visible/editable/removable.
 - Verified locally: `test_v5_pillars.py` 18 passed; guides, cli_parity, dashboard_locales, log_message_lint (0 violations), capabilities, features, hebrew_texts, dashboard, backup, privacy, perf_probes pass. Full suite and CI not run.
 - Questions for the user: see "Open for the owner" in the design (inject confirmed preferences into the model instructions now? spoken "well done" on a finished goal?).
+## Self-test and speed test (21 Oct 2026) - branch `v5/self-and-speed-tests`, public repo igalgerman/jarves
+
+- `jarvis selftest [--deep] [--audio] [--json]` (core/src/jarves/selftest.py, `selftest.run(deep=False)` returns `SelfTestResult` dataclasses): quick read-only checks (config, DB integrity, file permissions, feature probes, tool/guide/CLI-parity consistency, EN+HE locale completeness, log privacy, disk, version/updates). `--deep` adds a real Core start/stop in a temp home, wake model load, speech engine and audio device checks; nothing is spoken or recorded unless `--audio` (one quiet tone, 0.5 s mic level, dropped).
+- `jarvis speedtest [--class owner|ci] [--gate] [--bench] [--no-net] [--no-store]` (speedtest.py, `speedtest.run()` returns `SpeedResult`): startup from the log, idle CPU/RAM/disk of the running Core (procstats.py, shared with bench_startup), dashboard and feature probes in-process (perf_gate now calls the same functions), tool p50/p95 from TOOL_RESULT, wake-to-first-audio and dead-air p95 from the monitor events, one HEAD to api.openai.com/v1/models (no key, nothing billed), installer size. Budgets come from core/perf_budgets.toml (5 new metrics with placeholder baselines); result pass/warn/fail, warn when more than 20 % worse than the median of the last 5 runs.
+- selfspeed.py: history is ONE small file `selfspeed.json`, one atomic write at the end of a run (idle-writes gate unaffected); schedule policy (no scheduled run 22:00-07:00 per alerts.quiet_*, nothing heavy during a voice session, a skipped run is logged as `SELFSPEED_SKIPPED` and not queued); jobs: self-test daily 08:15, speed test weekly Sunday 13:00; voice tools `run_selftest` / `run_speedtest` (read, no approval, one sentence plus "details on the dashboard"); dashboard page `#/speed` "Health & speed" (EN+HE, inline SVG sparklines, Run now buttons); feature `self_tests`, guide `self_tests.toml`, CLI parity rows.
+- CI: the perf job also runs `python -m jarves.cli speedtest --class ci --gate --no-store --no-net` (same code path). Tests: core/tests/test_selfspeed.py (fake clock, planted faults, no network or browser).
+- For the self-management skill (branch v5/self-management): call `selftest.run(deep=False)` / `speedtest.run()`; the latest results are also in `selfspeed.History(home).latest("selftest" | "speedtest")`.
+- Unverified: owner-PC numbers (the five new budget baselines are placeholders until the first real runs), deep/audio checks on real hardware, the schedule over a real week.
 
 ---
 
@@ -60,6 +68,20 @@
 - **Tests (one pytest at a time, 0 skips):** new `tests/test_perf_probes.py` (5: fake 2 s `claude` on PATH, stale labelling, background update, undeclared-slow learning, gate in the full-module condition: fails on the base with 1227 ms). Passed: test_perf_gate 44, test_features 19, test_swv3_p03_perf 8, capabilities, feature_setup, camera, camera_cli, log_message_lint, hebrew_texts, google, chatgpt, browser, selfcheck, cli_english, cli_parity, dashboard_lan/phone/wph, execute, m3_core, profiles, workspace_memory, guides, setup_wizard, google_setup, agents_contract, whatsapp_core/surfaces, diag_bundle_strip, runtime.
 - **Pre-existing failures, also on the base branch (not caused here):** `test_dashboard_locales` ar/ru coverage 19.8 % < 20 %; `test_agents_system::test_voice_tools_cli_and_dashboard_see_the_same_sessions` (TypeError at line 141).
 - **Questions for the user:** (1) OK that a never-checked slow feature shows "checking" for about a second on the very first Features view after a start (instead of blocking)? (2) The owner-class idle write budget (10 KB/min) fails on the integrated V4 tree (~33-37 KB/min): fix in a separate task, or raise the budget?
+
+## SW-V4 H: assisted dialing through Phone Link (20 Oct 2026) - #17, branch `v4/h-dialing` (on `v4/integrated-b-c-d-g-m-r01`), [report](reviews/SWV4_H_DIALING.md)
+
+- "Call Dana" by voice (`dial_prepare` / `dial_open`), `jarvis dial <name|number> [--yes-on-screen]`, and the dashboard Phone calls page: contact resolution (memory contacts, whatsapp book, read-only Google Contacts), E.164 + digit-by-digit read-back, popup with who / number / source / app, then a `tel:` link; the owner presses Call. Numbers from email, web, messages or recalled text are never dialled; a spoken number must be in the owner's own words (memory-only ring). Emergency numbers just open the dialer. Rate limit, hashes-only audit, feature `assisted_dialing` (SAFE_OFF), guide, capability row, wizard group, bundle check, en/he texts and catalogs.
+- Verified: `core/tests/test_dialing.py` 91 passed, 0 skips (fakes only, nothing opened); log lint 0 violations; about 700 related tests green. Pre-existing: `test_redaction_audit` real-Core timeouts on this PC at the base commit too.
+- NOT verified: a real `tel:` handoff into Phone Link (OH-01), Phone Link paired state, the spoken GPT-Live flow (scenarios 85-90), Google phone numbers with a real account, independent Opus security review.
+- Questions for the user: (1) Is Phone Link the default `tel:` app on your PC? (OD-16, needed for OH-01). (2) Read the number aloud before every approval (current) or only for new numbers? Status: USER DECISION REQUIRED (1), DEFERRED (2).
+
+---
+## SW-V4 package L: installer, updates, rollback (20 Oct 2026) - #17, branch `v4/l-installer` (public repo, draft PR to main), [report](reviews/SWV4_L_INSTALLER.md)
+
+- Done (fake/loopback tests, 0 skips): versioned data migrations with backup first and restore-from-backup down path; update flow against a local signed release server (SHA256+size, ask first, failures leave the old version, downgrade refused); `updates.rollback` + `jarvis update --rollback` + Updates page button (approval) + failed-first-start offer; silent installer args; signed-manifest `previous` block; clean-install residue audit; upgrade/rollback CI scenario; pinned-bridge payload check; installer size/time budgets feeding the M gate; restricted-token probe (study, not wired in).
+- Not verified: no real installer was built or run here (CI-only scripts); old-installer fixtures are not pinned (`packaging/upgrade_fixtures.json` empty, CI says NOT RUN); no second-PC run; Go bridge not on main.
+- Questions for the user: (1) **Autostart default**: the installer now leaves "start at sign-in" OFF (you asked for OFF by default), reversing the earlier owner decision "ticked by default" in `jarves.iss`/INSTALL_TEST. Confirm OFF? (2) OD-08 stays unsigned (recorded). (3) Pin real 0.1.0.x and 3.0.0.x installers (URL + SHA256) in `packaging/upgrade_fixtures.json` so the matrix runs. (4) Helper isolation via write-restricted token + protected `<home>` DACL is feasible (report section 8); want it as its own package? Status: WAITING FOR USER + CI run.
 
 ## SW-V4 B: privacy hardening + full redaction audit (20 Oct 2026) - #15 / #17, branch `v4-b-privacy` (off `origin/main`), [report](reviews/SWV4_B_PRIVACY.md), [sinks](reviews/SWV4_B_SINKS.md)
 
@@ -972,9 +994,22 @@ reachable from the phone (dashboard_lan) for approvals, or PC-only?
 - Tests: `test_swv4_idle_writes.py` (diag batching over 10 simulated minutes, WAL/NORMAL pragma, real idle Core < 12 KB/min).
 - Open: perf gate `spawn_to_ready_s` 5.11 > 5 on this busy PC (unrelated, noise).
 
+## V4 voice campaign C2 (21 Oct 2026) - #17, branch `test/v4-campaign-c2`
+
+- Credits topped up; re-ran every blocked live scenario: 89 PASS, 2 FAIL (22/23 wake near-misses, P3 unchanged), 1 BLOCKED (62, needs OD-05 admin key). Spend about $2.8. Report: `docs/reviews/SWV4_CAMPAIGN_VOICE.md`, bugs: `SWV4_CAMPAIGN_BUG_TABLE_VOICE.md`.
+- Product fixes: V4-VC-12 `BackendTrace.finish` duplicate `model` kwarg broke the ChatGPT-plan delegation route; V4-VC-13 own-health questions now delegated; V4-VC-14 WhatsApp inbox English phrasing.
+- Harness: the WhatsApp suites restart the live session after switching the feature on; scenario 56 copies (never refreshes) the owner's ChatGPT token.
+- Open: 79/80/84/101 occasionally miss on synthetic-ASR clips (pass on re-run). No questions for the user.
+
+## Optional read-only OpenAI admin key (21 Oct 2026) - branch `v4/admin-key-option` (OD-05)
+
+- The Core already read `OPENAI_ADMIN_KEY` (usage.py Costs API, `jarvis key --admin`). Added: `jarvis connect openai-admin` (hidden input, skippable with `s`, `--yes` never asks), a Usage-page box (password field, Save / Remove / Test now, never echoes the key), one shared `usage.save_admin_key / remove_admin_key / admin_key_saved`, EN+HE guide steps in `api_bill.toml`, feature row "Usage checks (admin key)" (`implemented_unverified`: fake costs endpoint only, no real key tested). Docs: `docs/OPENAI_ADMIN_KEY.md` (create, save, hidden-input pattern for a local helper script; the owner's own script is untouched).
+- Tests: `core/tests/test_usage_admin_key.py` (local fake costs endpoint, no network); log_lint 0 violations; Hebrew via `tools/catalog_add.py`.
+- Open: voice scenario 62 stays BLOCKED until the owner saves a real admin key. Question for the user: create the key (docs/OPENAI_ADMIN_KEY.md) when convenient; OK to leave the switch default-on (shows "off by choice" until a key exists)?
+
 ## V5 mobile access (branch v5/mobile-access, draft PR) - core done, review and real phone open
 
 Plan and security model: `docs/JARVES_SW_V5_WORK_PACKAGE.md`. Built: pairing (QR + one-time code), hashed per-device tokens, revoke, scopes, rate limits, audit without content, phone API (chat, voice PTT over TLS, approvals list/answer, status), PWA EN+HE, dashboard Phone page, `jarvis dashboard --mobile [--tls-selfsigned]`, feature `mobile_access` (default OFF). Tests: `test_mobile_access.py`, `test_mobile_pwa.py`; log lint 0 violations.
 Open: independent security review (V5-F), shared-conversation continuity (V5-G), start phone server with the Core (V5-I), real Android phone acceptance (V5-H, owner). Questions for the user: see section 7 of the work package.
 
-V5 review pass (21 Oct 2026): `docs/reviews/SWV5_SECURITY_REVIEW.md` - 4 findings (1 medium, 3 low), all fixed with regression tests (`test_sr*`): live switch gate, audit flood throttle, 0600 file creation, one chat turn per phone. Phone server now starts with the Core when `mobile_access` is ON (V5-I core); phone turns are logged into the shared typed history (V5-G core). Still open: client message ids, firewall guidance, real phone (V5-H).
+V5 review pass (21 Oct 2026): `docs/reviews/SWV5_SECURITY_REVIEW.md` - 4 findings (1 medium, 3 low), all fixed with regression tests (`test_sr*`): live switch gate, audit flood throttle, 0600 file creation, one chat turn per phone. Phone server now starts with the Core when `mobile_access` is ON (V5-I core); phone turns are logged into the shared typed history (V5-G core). Merged with V4 main (21 Oct). Client message ids closed: the phone sends an `id` per chat message and resends it on reconnect; the PC answers once and replays the stored answer (`test_chat_message_ids_*`). Manual Android steps: `docs/reviews/SWV5_ACCEPTANCE.md`. Still open: real phone run (V5-H, owner).

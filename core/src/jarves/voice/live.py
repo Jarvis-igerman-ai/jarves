@@ -33,7 +33,7 @@ from typing import TYPE_CHECKING, Any, Awaitable, Callable
 
 from .. import logs
 from ..budget import BudgetExceeded
-from ..skills import ROUTE, SkillRegistry, ToolResult
+from ..skills import ROUTE, SkillRegistry, ToolResult, tool_schema
 
 VOICE_ROUTE = "voice"
 
@@ -78,7 +78,7 @@ date questions directly.
 Delegate to the backend for: ANY calculation with a number above ten (it computes exactly; never do sums in your
 head, say only "רגע"), current or changing facts (news, weather, prices, sports, who holds an office now), web
 lookups, music control, remembering / recalling / forgetting things for the user, JARVES status and connected
-services, questions about your skills, opening your dashboard on the screen, showing or hiding your window,
+services, your own health ("מה מצבך?", "what is your health", "מה מצא הבודק"), questions about your skills, opening your dashboard on the screen, showing or hiding your window,
 and quitting the JARVES app. Hiding the window, ending the chat and quitting the app completely are three
 different requests: "shut down" / "close yourself completely" means quit the app, never the dashboard.
 Before a web lookup say ONE short natural sentence that names what you are checking, worded differently each
@@ -154,7 +154,7 @@ CLOSE_REASONS = {"expired": "timeout", "close_requested": "remote_closed", "remo
 
 def live_tools(registry: SkillRegistry) -> list[dict]:
     return [{"type": "function", "name": t.name, "description": t.description,
-             "parameters": t.args.model_json_schema(), "strict": False} for t in registry.tools()]
+             "parameters": tool_schema(t), "strict": False} for t in registry.tools()]
 
 
 def _get(obj: Any, key: str, default: Any = None) -> Any:

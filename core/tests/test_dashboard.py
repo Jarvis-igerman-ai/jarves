@@ -30,7 +30,7 @@ def dash(home):
 
 
 def req(d, method, path, cookie=True, host=None, headers=None, body=None):
-    c = http.client.HTTPConnection("127.0.0.1", d.port, timeout=5)
+    c = http.client.HTTPConnection("127.0.0.1", d.port, timeout=30)
     h = {"Host": host or f"127.0.0.1:{d.port}", **(headers or {})}
     if cookie:
         h["Cookie"] = f"{dashboard.COOKIE}={d.url.split('t=')[1]}"
