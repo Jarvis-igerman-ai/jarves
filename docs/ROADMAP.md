@@ -11,7 +11,7 @@
 | **1. Desktop assistant** | Reliable Windows Core, voice, face, skills, diagnostics and installer | Existing SW-V1/V2/V3/V4 work | V3 integration reported; V4 in development, real acceptance and release gates must be checked |
 | **2. PC-hosted personal server + phone access** | One PC-hosted JARVES, authenticated phone client, shared conversation and abilities | **V5 — JARVES Goes Mobile** | Owner selected for the roadmap, **not implemented or authorized to start coding yet** |
 | **3. Android Auto / car** | Safe hands-free car interaction plus cross-device Skills Platform 2.0 | **V6 — JARVES Drive & Act** | Owner-approved roadmap direction, implementation gated after V5; subject to official platform restrictions |
-| **4. Everyday Android assistant** | Native daily phone companion with notifications and relevant local abilities | Later milestone (version TBD) | Future, not the V5 phone-access client |
+| **4. Everyday Android assistant** | Native daily phone companion with notifications and relevant local abilities | **V7 — Everyday Android + Ecosystem & Agent Studio (proposal)** | Owner requested V7 research and an approval-ready proposal; **not authorized to implement**, distinct from V5 phone access |
 | **5. Phone as robot stand-in** | Docked spare OnePlus 11 used to validate face/mic/speaker/camera/wake behavior | Later milestone (version TBD) | Future; no 1:1 hardware claim |
 | **6. Physical robot** | Serviceable 3D-printed JARVES with approved Pi-class hardware | Final physical milestone (version TBD) | Deferred: CAD, sourcing, print, safety, acoustic and owner approval gates |
 
