@@ -921,6 +921,8 @@ BUNDLE: dict[str, list[Callable[[], tuple[bool, str]]]] = {
                            _data("jarves.guides", "data/health.toml")],
     "self_tests": [_mod("jarves.selftest"), _mod("jarves.speedtest"), _mod("jarves.selfspeed"), _mod("jarves.procstats"),
                    _data("jarves", "dashboard_static/selfspeed.js"), _data("jarves.guides", "data/self_tests.toml")],
+    "issue_reports": [_mod("jarves.issue_registry"), _data("jarves", "dashboard_static/bugs.js"),
+                      _data("jarves.guides", "data/issue_reports.toml")],
     "guided_setup": [_mod("jarves.connect"), _mod("jarves.google_setup"), _mod("jarves.telegram_channel"),
                      _data("jarves.guides", "data/guided_setup.toml")],
     "google_calendar": _GOOGLE, "calendar_write": _GOOGLE, "gmail_read": _GOOGLE, "gmail_send": _GOOGLE,

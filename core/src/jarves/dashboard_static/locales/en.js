@@ -1534,6 +1534,13 @@
   "Warning": "Warning",
   "Skipped": "Skipped",
   "No data": "No data",
-  "dashboard Health & speed page, jarvis selftest, jarvis speedtest, Jobs page (times)": "dashboard Health & speed page, jarvis selftest, jarvis speedtest, Jobs page (times)"
+  "dashboard Health & speed page, jarvis selftest, jarvis speedtest, Jobs page (times)": "dashboard Health & speed page, jarvis selftest, jarvis speedtest, Jobs page (times)",
+  "Bug reports": "Bug reports",
+  "Report": "Report",
+  "Mark fixed": "Mark fixed",
+  "Acknowledge": "Acknowledge",
+  "No issues to show.": "No issues to show.",
+  "Send (asks for approval)": "Send (asks for approval)",
+  "All reports": "All reports"
  }
 };

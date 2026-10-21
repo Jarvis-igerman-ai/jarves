@@ -310,8 +310,8 @@
   "Problems JARVES found in his own conversations (rules run after every conversation).": "בעיות ש-JARVES מצא בשיחות שלו (הכללים רצים אחרי כל שיחה).",
   "Run self-diagnosis now": "הרצת אבחון עצמי עכשיו",
   "Resolved": "נפתר",
-  "Ignore": "התעלמות",
-  "Reopen": "פתיחה מחדש",
+  "Ignore": "התעלם",
+  "Reopen": "פתח מחדש",
   "No open issues.": "אין בעיות פתוחות.",
   "Check diagnostics now": "בדיקת אבחון עכשיו",
   "What JARVES remembers about you (only what you asked him to keep).": "מה JARVES זוכר עליך (רק מה שביקשת לשמור).",
@@ -1534,7 +1534,14 @@
   "Warning": "אזהרה",
   "Skipped": "דולג",
   "No data": "אין נתון",
-  "dashboard Health & speed page, jarvis selftest, jarvis speedtest, Jobs page (times)": "עמוד תקינות ומהירות בלוח הבקרה, jarvis selftest, jarvis speedtest, עמוד המשימות הקבועות (שעות)"
+  "dashboard Health & speed page, jarvis selftest, jarvis speedtest, Jobs page (times)": "עמוד תקינות ומהירות בלוח הבקרה, jarvis selftest, jarvis speedtest, עמוד המשימות הקבועות (שעות)",
+  "Bug reports": "דיווחי תקלות",
+  "Report": "דווחו למפתח",
+  "Mark fixed": "סמן כתוקן",
+  "Acknowledge": "ראיתי",
+  "No issues to show.": "אין תקלות להצגה.",
+  "Send (asks for approval)": "שלחו (יבקש אישור)",
+  "All reports": "כל הדיווחים"
  },
  "rules": [
   [

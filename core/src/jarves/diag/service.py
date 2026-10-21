@@ -200,6 +200,13 @@ class HealthService:
         before = {r["fingerprint"] for r in db.rows(self.store, "SELECT fingerprint FROM diag_findings WHERE active=1")}
         anomaly.save(self.store, found, now)
         rep = self.report()
+        try:                  # issues registry: open findings, incl. the self-check crash finding (content-free)
+            from .. import issue_registry
+            issue_registry.ingest_findings(issue_registry.Registry(self.core.home, clock=self.clock),
+                                           [f for f in rep["findings"] if f.get("state") in ("open", "accepted")
+                                            and f.get("severity") in ("high", "medium")])
+        except Exception:
+            logs.warn("health", "HEALTH_ISSUES_FAILED", "issues registry not updated from the findings")
         self.monitor.metrics.put_hour(now, "health_score", rep["score"])
         return [f for f in found if f.fingerprint not in before]
 

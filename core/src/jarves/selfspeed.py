@@ -86,6 +86,12 @@ class History:
             os.replace(tmp, self.path)
         except OSError:
             logs.warn("selfspeed", "SELFSPEED_HISTORY_FAILED", "result history not saved")
+        try:                                           # the issues registry learns from every recorded run (content-free)
+            from . import issue_registry
+            reg = issue_registry.Registry(self.path.parent, clock=self.clock)
+            (issue_registry.ingest_selftest if kind == "selftest" else issue_registry.ingest_speedtest)(reg, full)
+        except Exception:
+            logs.warn("selfspeed", "SELFSPEED_ISSUES_FAILED", "issues registry not updated from the run")
 
     def spark(self, metric: str, n: int = 20) -> list[float]:
         """Values of one speed metric over the last runs, oldest first (the dashboard sparkline)."""
