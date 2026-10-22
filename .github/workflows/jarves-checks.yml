@@ -162,8 +162,9 @@ jobs:
           os=$(echo "$RUNNER_OS" | tr 'A-Z' 'a-z')
           FILES=$(uv run python tools/ci_plan.py shard-files --plan "$RUNNER_TEMP/plan.json" --os "$os" --shard ${{ matrix.shard }})
           echo "shard ${{ matrix.shard }}: $FILES"
-          XD=(); PX=()
-          if [ "$XDIST_WORKERS" -gt 1 ]; then XD=(--with pytest-xdist==3.8.0); PX=(-n "$XDIST_WORKERS" --dist loadfile); fi
+          # one hung test must not hold the job for its whole timeout: 240 s per test, stack dump, then the run fails
+          XD=(--with pytest-timeout==2.4.0); PX=(--timeout=240 --timeout-method=thread)
+          if [ "$XDIST_WORKERS" -gt 1 ]; then XD+=(--with pytest-xdist==3.8.0); PX+=(-n "$XDIST_WORKERS" --dist loadfile); fi
           set +e
           uv run "${XD[@]}" pytest -q -rs -p no:cacheprovider --browser exclude --shard-files "$FILES" "${PX[@]}" --durations=25 --junitxml=pytest-junit.xml 2>&1 | tee pytest.out
           rc=${PIPESTATUS[0]}

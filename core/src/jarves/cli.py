@@ -796,6 +796,12 @@ def cmd_setup(a, cfg, home) -> int:
 
         from .dashboard import Dashboard
         try:
+            interactive = bool(sys.stdin and sys.stdin.isatty())
+        except (AttributeError, ValueError):
+            interactive = False
+        if not interactive:        # piped input: the dashboard would run until Ctrl+C that nobody can press (hung CI shards)
+            return sw.CONTINUE_IN_TERMINAL
+        try:
             dash = Dashboard(home, cfg, 0)
         except OSError as e:
             print(f"cannot start the dashboard: {e}  (continuing in the terminal)", file=sys.stderr)
