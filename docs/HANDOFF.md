@@ -16,6 +16,27 @@
   "reuse an old connection" uses the `connect` registry states only; the learn card is spoken by asking JARVES, not auto-spoken;
   a failed topic's bug report is a local Issues-list entry (no GitHub upload). Installer pages are Codex's (packaging/ untouched).
 - Questions for the user: none blocking.
+## Wizard PR #70 recovery (22 Oct 2026)
+
+- Reconciled CLI, setup, dashboard plugins, guides and EN/HE locales with main while retaining the wizard and current
+  account/setup safeguards. Integrated the shared #72 pre-push prerequisite locally; merge remains individual.
+- Fixed topic-specific Connect targeting, removed stale owner verification after a failed recheck, and corrected
+  mixed-language learn cards and the missing Hebrew feature description. Added failed-recheck regression.
+- Initial focused wizard/setup/CLI suite: 52 passed. Final checks and hosted exact-head evidence are recorded in #70.
+- Actual headless Edge captures and browser report: `output/playwright/pr70/`, `output/playwright/pr70-results.json`.
+  Reproduction: from core, `python tools/all_pages_check.py --pages setup,addons --langs en,he --widths 1440,390`.
+- Decision queue: merge when reviewed/green ANSWERED; human setup/voice/account/phone acceptance remains USER DECISION
+  REQUIRED at the existing owner sign-off gate. No owner result is inferred from tests; related issues stay open.
+
+## PR readiness recovery (22 Oct 2026) — owner authorized #72, #68, #70
+
+- #72 synchronized with current main, retaining both the local pre-push rule and individual-PR review/merge rule.
+- The guide-state isolation fix is already on main. Corrected failure-summary classification: a test that failed again
+  is not a test that passed on retry; focused regression added. No runtime behavior changed.
+- Verification and exact-head hosted CI are recorded in PR #72. Subsequent #68/#70 merges require their own final-head
+  checks and diff review; no force push, blind merge or test weakening is authorized.
+- Decision queue: merge authorization ANSWERED by the owner's current request. Prior physical, account, paid QA and
+  human sign-off gates remain DEFERRED to their owning milestones; green CI does not satisfy them.
 
 ## Release and test system plan (22 Oct 2026) — docs only, stacked on PR #57, not merged
 

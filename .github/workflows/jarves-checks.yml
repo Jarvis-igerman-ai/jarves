@@ -82,9 +82,11 @@ jobs:
           { cat classify.out; echo "tree=$tree"; echo "reused=$reused"; } >> "$GITHUB_OUTPUT"
           { echo "tree \`${tree:0:12}\` reused=$reused"; grep -E '^[a-z0-9]+=(true|false)$' classify.out | tr '\n' ' '; } >> "$GITHUB_STEP_SUMMARY"
   validate:
+    # Quick stage: every heavy job `needs` it, so a cheap budget/guide/docs failure ends a PR run in about two minutes
+    # and no heavy job starts (on main/next the same gate runs; those runs are never cancelled, see `concurrency`).
     name: Fast CI and documentation validation
     runs-on: ubuntu-24.04
-    timeout-minutes: 5
+    timeout-minutes: 8
     defaults:
       run:
         working-directory: core
@@ -95,8 +97,22 @@ jobs:
           enable-cache: true
           cache-dependency-glob: core/uv.lock
       - run: uv sync --frozen
-      - name: Workflow contracts, shard coverage and documentation links (offline, no extras)
-        run: uv run pytest -q -rs tests/test_ci_workflows.py tests/test_ci_pipeline.py tests/test_ci_speed_tools.py tests/test_docs_links.py
+      - name: Quick gate = the local `python core/tools/prepush.py` (log lint, guides + CLI parity, Hebrew/locales, docs links, prompt-size budget, workflow contracts, network guard, dashboard endpoint timing vs the ci budget)
+        run: uv run python tools/prepush.py 2>&1 | tee prepush.out
+        shell: bash
+      - name: Quick gate table in the job summary
+        if: always()
+        shell: bash
+        run: |
+          { echo '```'; sed -n '/^check /,$p' prepush.out; echo '```'; } >> "$GITHUB_STEP_SUMMARY" || true
+      - name: Quick gate output (for the failure-summary comment)
+        if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: junit-prepush
+          path: core/prepush.out
+          retention-days: 7
+          if-no-files-found: ignore
   core:
     # Both platforms use 3 separate runners planned from measured durations (core/tools/ci_plan.py).
     # Linux stays serial inside each runner to isolate process limits, ports and update-flow fakes.
@@ -596,3 +612,31 @@ jobs:
         run: |
           echo "$NEEDS" | jq -r 'to_entries[] | "\(.key): \(.value.result)"'
           echo "$NEEDS" | jq -e '[.[] | select(.result == "failure" or .result == "cancelled")] | length == 0' > /dev/null
+  failure-summary:
+    # ONE comment per PR (updated in place): failed jobs, first failing test + its first error line, log links, known
+    # flakes marked from the flake-report artifact. No secrets, no log content beyond one redacted line (core/tools/ci_comment.py).
+    name: Failure summary comment (PR only)
+    if: failure() && github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository
+    needs: [changes, validate, core, browser, installer, whatsapp-bridge, perf, cad, blender, godot, e2e]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    continue-on-error: true
+    permissions:
+      contents: read
+      actions: read
+      pull-requests: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/download-artifact@v8
+        continue-on-error: true
+        with:
+          pattern: junit-*
+          path: artifacts
+      - name: Build and post the comment
+        shell: bash
+        run: |
+          gh api "repos/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID/jobs?per_page=100" > jobs.json
+          python3 core/tools/ci_comment.py build --jobs jobs.json --artifacts artifacts             --run-url "$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID" --out comment.md
+          python3 core/tools/ci_comment.py post --repo "$GITHUB_REPOSITORY" --pr ${{ github.event.pull_request.number }} --body comment.md
