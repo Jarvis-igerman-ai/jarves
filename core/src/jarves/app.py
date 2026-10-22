@@ -307,6 +307,9 @@ class Core:
             self.registry.register(TaskSkill(self.tasks))
         from .operations import attach as ops_attach    # WP-M3: scheduler, reports, notes, files, alerts, autonomy
         self.ops = ops_attach(self)
+        if self.agent is not None:                      # V5: confirmed preferences in every typed/delegated request
+            from . import preferences as prefs_mod
+            prefs_mod.augment_instructions(self.agent, self.ops.prefs, self.features)
         from . import recall                            # SW-V4 G: conversation_recall / _search / _show
         recall.attach(self)
         from . import orchestrator                      # SW-V4 E: coding agents (bridge starts with the switch)
@@ -1094,6 +1097,11 @@ class Core:
                                  idle_disconnect_s=v.idle_disconnect_s, **common, **extra)
         live_ref[0] = live
         wsp.attach_live(live, self.workspace, self.memory)   # persona files + known facts in the voice instructions
+        if getattr(self, "ops", None) is not None:            # V5: the owner's confirmed preferences (small budget)
+            from . import preferences as prefs_mod
+            prefs_mod.attach_live(live, self.ops.prefs, self.features)
+            from . import proactive as proactive_mod         # V5: at most ONE offer, only inside this conversation
+            proactive_mod.attach_live(live, self.ops.proactive, self.features)
         feat.attach_live(live, self.features)                 # what is off / unavailable, so he says so truthfully
         from . import recall                                  # SW-V4 G: "what did I say..." -> conversation_recall
         recall.attach_live(live, self.features)

@@ -166,6 +166,22 @@ TEXT: dict[str, str] = {
         "טיימרים לספירה לאחור ושעונים מעוררים; ה-Core מצלצל בקול גם כשהחלון סגור",
     "pure Python + SQLite + tzdata, no Windows-only code; not run on a Raspberry Pi yet (no device in the test setup); ringing needs the Pi speaker":
         "Python, SQLite ו-tzdata בלבד, בלי קוד ייעודי ל-Windows; טרם הורץ על Raspberry Pi (אין מכשיר במערך הבדיקה); הצלצול צריך את הרמקול של ה-Pi",
+    "your goals with steps and progress; a check-in only when you ask; nothing is done or sent for you":
+        "היעדים שלך עם צעדים והתקדמות; סיכום התקדמות רק כשאתה מבקש; שום דבר לא נעשה או נשלח בשבילך",
+    "preferences you state are remembered only after you confirm; all visible, editable, removable":
+        "העדפות שאתה מציין נשמרות רק אחרי שאישרת; הכול גלוי, ניתן לעריכה ולהסרה",
+    "core/tests/test_v5_followups.py (unit tests: real SQLite, fake clock, no network)":
+        "core/tests/test_v5_followups.py (בדיקות יחידה: SQLite אמיתי, שעון מדומה, בלי רשת)",
+    "pure Python + SQLite, no platform code; not run on a Raspberry Pi yet":
+        "Python ו-SQLite בלבד, בלי קוד ייעודי לפלטפורמה; טרם הורץ על Raspberry Pi",
+    "your confirmed preferences (only those you said yes to) are added to the instructions of every conversation within a small size limit; switch off to stop":
+        "ההעדפות שאישרת (רק אלה שאמרת להן כן) מצורפות להוראות של כל שיחה בגודל קטן ומוגבל; כבה כדי להפסיק",
+    "when you finish a goal JARVES says one short calm line, only while you are at the PC and never between 22:00 and 07:00; switch off for silence":
+        "כשאתה מסיים יעד, JARVES אומר משפט קצר ורגוע אחד, רק כשאתה ליד המחשב ולעולם לא בין 22:00 ל-07:00; כבה לשקט מוחלט",
+    "by default JARVES answers only when asked; you can let it offer one item inside a conversation you already started, never outside one and never between 22:00 and 07:00":
+        "כברירת מחדל JARVES עונה רק כשמבקשים; אפשר לאפשר לו להציע פריט אחד בתוך שיחה שכבר התחלת, אף פעם לא מחוץ לשיחה ולא בין 22:00 ל-07:00",
+    "ideas and tickets for JARVES's own development are kept as local drafts; nothing is posted to GitHub unless you approve it on the screen":
+        "רעיונות וכרטיסים לפיתוח של JARVES נשמרים כטיוטות מקומיות; שום דבר לא נשלח ל-GitHub בלי שתאשר על המסך",
     "shopping and to-do lists by voice: add, read back, tick off, clear":
         "רשימות קניות ומשימות בקול: הוספה, הקראה, סימון וניקוי",
     "opens web pages for you: full control only on your allow-list (empty at first), other sites read-only after you approve; purchases, payments and passwords always ask on the screen":
