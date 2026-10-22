@@ -18,7 +18,7 @@
         method: "POST", credentials: "same-origin",
         headers: { "Content-Type": "application/json", "X-Jarves": "1", "X-CSRF-Token": window.JARVES_CSRF || "" },
         body: JSON.stringify({ name: cls(name), file, line: line | 0, col: col | 0, page: page() }),
-      }).catch(() => {});
+      }).then((r) => r.text()).catch(() => {});
     } catch (e) { /* reporting must never raise */ }
   }
   window.addEventListener("error", (ev) => {

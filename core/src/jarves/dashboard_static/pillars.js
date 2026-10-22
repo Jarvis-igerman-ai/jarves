@@ -197,7 +197,7 @@
       try { const r = await post("/api/dev/status/apply", { id: p.id }); msg.textContent = r.status === "done" ? tx("בוצע", "Done") : tx("לא בוצע (לא אושר)", "Not done (not approved)"); route(true); }
       catch (e) { msg.textContent = tx("נכשל: ", "Failed: ") + JL.t(e.message); }
     };
-    const row = (i) => el("tr", {}, el("td", { dir: "ltr" }, (i.type === "pr" ? "PR #" : tx("נושא #", "Issue #")) + i.number),
+    const row = (i) => el("tr", {}, el("td", { dir: "auto" }, (i.type === "pr" ? "PR #" : tx("נושא #", "Issue #")) + i.number),
       el("td", { dir: "auto" }, i.title),
       el("td", {}, pill(BAD[i.state] ? "degraded" : i.state === "green" ? "ok" : "plain", STATE[i.state] || i.state)),
       el("td", { dir: "auto" }, i.blocker || "-"),
