@@ -34,6 +34,16 @@ he = "או בעמוד החיבורים בלוח הבקרה: לחצו 'הפעלת
 en = "Or on the dashboard Connections page: press Run guided setup."
 action = "open:#/connections"
 
+[[steps]]
+he = "יש כבר התקנה קודמת? jarvis setup מזהה את ההגדרות הקיימות, מציג מסך סיכום אחד (שפה, מצב חיבור ל-AI, מפתח או תוכנית, גוגל, Pear, מילת הפעלה, טלגרם, אינסטגרם, בית חכם, וואטסאפ), ושואל רק \"להשאיר את ההגדרות שלי?\" (ברירת המחדל כן) ועל מה שחסר. בכל שאלה אפשר לדלג. jarvis setup --yes משאיר הכול כמו שהוא בלי שאלות. אם בוחרים לשנות, נשמר קודם גיבוי."
+en = "Already installed before? jarvis setup finds your existing settings, shows one summary screen (language, AI connection mode, key or plan, Google, Pear, wake word, Telegram, Instagram, Home, WhatsApp) and asks only \"Keep my settings?\" (default yes) and about what is missing. Every question can be skipped. jarvis setup --yes keeps everything as it is without questions. If you choose to change, a backup is taken first; keys and settings are never overwritten or deleted without that choice."
+action = "command:jarvis setup"
+
+[[steps]]
+he = "עברית במסוף: חלון הפקודות של ווינדוס לא מציג עברית מימין לשמאל, ולכן JARVES כותב עברית בסדר חזותי כשהוא מזהה מסוף כזה. בשפה עברית ההגדרה מציעה להמשיך בדפדפן (מומלץ לעברית): Enter פותח את עמוד \"הגדרה ותוספים\"."
+en = "Hebrew in the terminal: the Windows console does not lay Hebrew out right to left, so JARVES writes Hebrew in visual order when it detects such a terminal. With Hebrew chosen, setup offers to continue in the browser (recommended for Hebrew): Enter opens the Setup & add-ons page."
+action = "open:#/setup"
+
 [[problems]]
 he = "לא רוצים את התזכורת היומית על גוגל"
 en = "I do not want the daily Google reminder"
@@ -51,3 +61,9 @@ he = "Pear לא עונה"
 en = "Pear does not answer"
 fix_he = "פותחים את Pear Desktop, ובתפריט Plugins מסמנים את API Server (כתובת 127.0.0.1, פורט 26538). אחר כך jarvis connect --only pear."
 fix_en = "Open Pear Desktop and tick API Server in the Plugins menu (host 127.0.0.1, port 26538). Then jarvis connect --only pear."
+
+[[problems]]
+he = "העברית במסוף מוצגת הפוך או משובשת"
+en = "Hebrew looks reversed or garbled in the terminal"
+fix_he = "הגדרה בדפדפן (Enter במסך הראשון) מציגה עברית נכון. אפשר גם לכפות מצב: JARVES_CONSOLE_RTL=visual (סדר חזותי) או logical (סדר רגיל, למסוף שתומך בעברית), או להריץ עם --no-rtl-fix. ברירת המחדל auto."
+fix_en = "Setup in the browser (Enter on the first screen) shows Hebrew correctly. You can also force a mode: JARVES_CONSOLE_RTL=visual (visual order) or logical (normal order, for a terminal that supports Hebrew), or run with --no-rtl-fix. The default is auto."
