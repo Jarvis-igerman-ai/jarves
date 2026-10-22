@@ -330,12 +330,8 @@ def test_no_duplicate_runs_per_commit():
     t = _wf("jarves-checks.yml")[True]
     assert t["push"]["branches"] == ["main"] and "pull_request" in t           # branch pushes have no push trigger
     conc = _wf("jarves-checks.yml")["concurrency"]
-<<<<<<< HEAD
-    assert "pull_request.number" in conc["group"] and conc["cancel-in-progress"] == "${{ github.event_name == 'pull_request' }}"
-=======
     assert "pull_request.number" in conc["group"]
     assert "pull_request" in str(conc["cancel-in-progress"])     # only PR runs cancel; a main run is never cancelled
->>>>>>> 672dbb9526909bd5b1234a4cf3434787bbeafe99
 
 
 def test_ci_ok_aggregates_every_job_and_job_names_are_stable():
