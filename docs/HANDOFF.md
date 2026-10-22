@@ -7,7 +7,13 @@
 - Local check: from core, uv run pytest -q -rs --durations=10 tests/test_ci_workflows.py tests/test_ci_pipeline.py
   tests/test_ci_speed_tools.py tests/test_docs_links.py tests/test_units.py::test_cli_setup_paths — 78 passed in 32.16 s,
   zero skips. Setup test 3.80 s locally (prior hosted Windows 173.33 s; different hosts).
-- Hosted CI: pending the final-commit run; no claim of green or of the estimated 8-10 minute target yet.
+- Hosted CI on ed14a9f: https://github.com/igalgerman/jarves/actions/runs/39733332477 passed in 9m46s.
+  Linux shards 4m33s / 2m04s / 4m41s; Windows 5m09s / 3m24s / 9m22s; installer 7m46s; validation 13s.
+  Windows shard 3 recorded one socket-timeout flake in test_perf_probes.py; its failed file passed on the existing
+  one-retry policy. CodeQL passed. This was green with a recorded flake, not a flake-free run.
+- Upstream #44 advanced to 672dbb9 during verification and independently fixed the same two inherited failures.
+  Integrated that commit, kept its concurrency assertion and DOC_MAP rows, and removed duplicate map entries.
+  The merge commit receives a fresh full CI run; its final evidence will be linked in PR #57's description.
 - Decision queue: existing branch-protection choice, beta activation, duplicate CodeQL setup and artifact retention remain
   DEFERRED to the release coordinator; no settings changed. Prior merge freeze is respected: this PR is not merged.
   Browser readiness changes, dependency-stage caching and platform-specific duration histories are DEFERRED; unnecessary

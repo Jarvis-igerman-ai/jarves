@@ -42,6 +42,8 @@ Execution authority: [NOW](NOW.md) (the only active brief) with [AGENTS](../AGEN
 | [RELEASE_NOTES_4.0](RELEASE_NOTES_4.0.md) | What V4 changed for users | V4 | current | itself; [CHANGELOG](../CHANGELOG.md) is the short per-version list |
 | [SWV4_RELEASE_CHECKLIST](reviews/SWV4_RELEASE_CHECKLIST.md) | 4.0.0 checklist state and evidence | V4 | current | [V4 package section 10](JARVES_SW_V4_WORK_PACKAGE.md#10-release-checklist) defines the rows |
 | [ENGINEERING_REVIEW_GATES](ENGINEERING_REVIEW_GATES.md) | Standing review and challenge gates | general | current | itself |
+| [CI_PERFORMANCE](CI_PERFORMANCE.md) | CI speed, shards and the fast release path | general | current | [RELEASING](RELEASING.md) |
+| [RELEASING](RELEASING.md) | How a release is built, signed and published | general | current | [CI_PERFORMANCE](CI_PERFORMANCE.md) |
 | [AGENT_HANDOFF_TEMPLATE](AGENT_HANDOFF_TEMPLATE.md) | Copy-paste resume prompt for a new agent | general | current | [AGENTS](../AGENTS.md) |
 | [MIGRATION_STATUS](MIGRATION_STATUS.md), [MIGRATION_HANDOFF](MIGRATION_HANDOFF.md) | Private-to-public repository migration ledger | general | current until the private repo is archived | MIGRATION_STATUS |
 
