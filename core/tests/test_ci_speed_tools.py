@@ -328,7 +328,7 @@ def test_installer_runs_in_parallel_with_tests_and_publishing_waits_for_the_whol
 
 def test_no_duplicate_runs_per_commit():
     t = _wf("jarves-checks.yml")[True]
-    assert t["push"]["branches"] == ["main"] and "pull_request" in t           # branch pushes have no push trigger
+    assert t["push"]["branches"] == ["main", "next"] and "pull_request" in t           # branch pushes have no push trigger
     conc = _wf("jarves-checks.yml")["concurrency"]
     assert "pull_request.number" in conc["group"] and conc["cancel-in-progress"] == "${{ github.event_name == 'pull_request' }}"
 
