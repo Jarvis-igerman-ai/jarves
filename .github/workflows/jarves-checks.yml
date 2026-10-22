@@ -419,7 +419,14 @@ jobs:
           key: jarves-upgrade-${{ hashFiles('packaging/upgrade_fixtures.json') }}
       - name: Upgrade + rollback matrix (SHA-pinned old installers, fake old data)
         shell: pwsh
-        run: ./packaging/upgrade_matrix.ps1 -Candidate "dist/JARVES-Setup-$env:VERSION.exe" -Version $env:VERSION
+        run: ./packaging/upgrade_matrix.ps1 -Candidate "dist/JARVES-Setup-$env:VERSION.exe" -Version $env:VERSION -MetricsDir dist
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: installer-upgrade-metrics
+          path: dist/upgrade-*-metrics.json
+          if-no-files-found: ignore
+          retention-days: 7
   whatsapp-bridge:
     # SW-V4 F: the Go WhatsApp bridge (bridge/whatsapp). Offline only: go mod verify, vet, unit + API tests against the
     # fake engine (no WhatsApp account is ever contacted), then a reproducible Windows build checked by rebuilding.

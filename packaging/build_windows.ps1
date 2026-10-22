@@ -161,7 +161,7 @@ if ($GoogleOAuthClientFile) {
     @{ installed = @{ client_id = $googleClient.client_id; client_secret = [string]$googleClient.client_secret } } |
         ConvertTo-Json -Depth 8 | Set-Content -Encoding utf8NoBOM (Join-Path $Stage "python\Lib\site-packages\jarves\_google_app_client.json")
 }
-Run $Py @("-I", "-c", "import jarves.cli, jarves.updates; print(jarves.updates.version_line())")
+Run $Py @("-I", "-B", "-c", "import jarves.cli, jarves.updates; print(jarves.updates.version_line())")
 }
 
 # ---------------------------------------------------------------- Godot face (headless export, official template)
@@ -252,6 +252,8 @@ if (Test-Path $bridgePin) {
 
 # ---------------------------------------------------------------- launcher, notices, payload check
 Copy-Item (Join-Path $PSScriptRoot "windows\jarvis.cmd") $Stage
+Copy-Item (Join-Path $PSScriptRoot "installer_state.py") $Stage
+Copy-Item (Join-Path $PSScriptRoot "rollback_windows.ps1") $Stage
 Copy-Item (Join-Path $PSScriptRoot "windows\THIRD_PARTY_NOTICES.txt") $Stage
 # SW-V4 F: the WhatsApp bridge binary (built by scripts/build_whatsapp_bridge.ps1) ships next to the Core when it was
 # built; payload_check.py verifies its .sha256. Its state (tokens, store) lives in the user's data dir, never here.
@@ -265,11 +267,11 @@ if (-not (Test-Path $bridgePin) -and (Test-Path $bridgeExe) -and (Test-Path "$br
 }
 Build-Stage "payload_check"
 Step "payload check (no secrets, tokens, personal databases or logs)"
-Run $Py @("-I", (Join-Path $PSScriptRoot "payload_check.py"), $Stage)
+Run $Py @("-I", "-B", (Join-Path $PSScriptRoot "payload_check.py"), $Stage)
 
 Build-Stage "pack_python"
-Run $Py @("-I", (Join-Path $PSScriptRoot "pack_python.py"), $Stage, "--out", (Join-Path $Out "payload-metrics.json"))
-Run $Py @("-I", "-c", "import jarves.cli, openai, agents, pydantic; print('PACKED IMPORTS: PASS')")
+Run $Py @("-I", "-B", (Join-Path $PSScriptRoot "pack_python.py"), $Stage, "--out", (Join-Path $Out "payload-metrics.json"))
+Run $Py @("-I", "-B", "-c", "import jarves.cli, openai, agents, pydantic; print('PACKED IMPORTS: PASS')")
 $info["payload"] = Get-Content (Join-Path $Out "payload-metrics.json") -Raw | ConvertFrom-Json -AsHashtable
 
 # ---------------------------------------------------------------- installer
@@ -300,6 +302,8 @@ if (-not $SkipInstaller) {
     $info["size"] = (Get-Item $exe).Length
     $info["build_s"] = [math]::Round($BuildClock.Elapsed.TotalSeconds, 1)
     $info | ConvertTo-Json -Depth 8 | Set-Content -Encoding utf8NoBOM (Join-Path $Out "build-info.json")
+    Write-Host ($StageTimes | ConvertTo-Json -Depth 8)
+    Write-Host "RELEASE PROFILE build_s=$($info.build_s)"
     Step "done: $exe ($([math]::Round($info.size / 1MB)) MB, sha256 $sha)"
 }
 

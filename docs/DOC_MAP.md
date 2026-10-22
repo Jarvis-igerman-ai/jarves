@@ -118,3 +118,5 @@ Reports and bug tables are evidence of a past run, not instructions. A package's
 ## 8. Documents that open pull requests will add
 
 Not on `main` yet; when one merges it must add its row here (the docs test enforces it): PR #44 `RELEASING.md`, `CI_PERFORMANCE.md`, `SECURITY.md`; PR #46 `reviews/MANUAL_TEST_4.0.0.md`; PR #47 `GLOSSARY_HE.md` (Hebrew review reference); PR #48 `BUGFIX_LANE.md`; PR #29 `plans/V5_PILLARS.md`.
+
+| [Windows installer #58](INSTALLER_58.md) | current | Installer build timings, setup pages, backup preservation, rollback, and verification limits. |

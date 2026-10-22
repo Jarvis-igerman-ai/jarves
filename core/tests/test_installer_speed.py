@@ -24,6 +24,7 @@ def test_archive_imports_code_and_keeps_native_resources(tmp_path):
         (site / name / "__init__.py").write_text("VALUE = 42\n")
     (site / "openai/data.json").write_text("{}")
     (site / "pydantic/native.pyd").write_bytes(b"native")
+    (site / "httpx/README.md").write_text("documentation, no runtime data")
     (site / "httpx/__pycache__").mkdir()
     (site / "httpx/__pycache__/obsolete.pyc").touch()
     result = load("pack_python").pack(tmp_path)

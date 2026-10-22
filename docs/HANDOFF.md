@@ -1,3 +1,9 @@
+## Installer #58 — PR #68 (22 Oct 2026, Codex writer)
+
+- Scope: measured parallel bundle stages, stable pinned-tool cache, source-only code archive, separate non-publishable fast smoke profile; Inno EN/HE keep-data page, verified app backups and profile migrations, previous program snapshot/offline rollback, first user PATH with reversible known-shim retirement, windowless dashboard button. Restricted wizard/CLI/console files untouched.
+- Baseline run 39737015500: installer job 7m42s, build 134.4s, release compression 91.26s, clean install 50.8s. First checkpoint run 39741458836: build job 4m11s (now separate checks), release build 131.0s/clean install 49.1s, smoke build 59.2s/clean install 45.3s. Both profiles passed; unrelated workspace-memory test failed. These are not owner-PC measurements or a claim all checks finish under 5 minutes.
+- Local packaging/backup tests and Inno compile pass; new SHA-pinned 4.0.0.153 fixture covers real upgrade/rollback with fake 0.95 wake/model/profile/credential data. Final-head CI pending. Visual preview awaits explicit tool-required approval; no owner-PC install performed. See INSTALLER_58.md and PR #68 for current evidence; issue remains open for app wizard and owner verification. No merge authorized for this task.
+
 ## CI pass 3 (22 Oct 2026) — owner asked to continue, extends PR #57 on #44
 
 - Scope: separate measured Linux/Windows shard plans; committed seeds from the full-green run 39733332477; refresh timing

@@ -35,6 +35,9 @@ def measure(dist: Path, **timings: float | None) -> dict:
         v = timings.get(key)
         if v is not None:
             out[name] = round(float(v), 1)
+    for key in ("build_profile", "stage_timings_s", "payload", "profile_compression_s", "shared_bundle_s"):
+        if key in info:
+            out[key] = info[key]
     return out
 
 

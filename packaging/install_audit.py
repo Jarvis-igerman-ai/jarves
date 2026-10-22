@@ -115,9 +115,9 @@ def installed_findings(before: dict, after: dict, path_entry: str | None = None)
         bad.append(f"autostart is ON after a default install: Run value(s) {ours}")
     if after["run"] != before["run"]:
         bad.append("the Run key changed during a default install")
-    want = _path_parts(before["path"]) + ([path_entry] if path_entry else [])
+    want = ([path_entry] + [p for p in _path_parts(before["path"]) if p.rstrip("\\").lower() != path_entry.rstrip("\\").lower()]) if path_entry else _path_parts(before["path"])
     if [x.lower() for x in _path_parts(after["path"])] != [x.lower() for x in want]:
-        bad.append("the user PATH is not " + ("the old PATH plus the program folder" if path_entry else
+        bad.append("the user PATH is not " + ("the program folder first followed by the old PATH" if path_entry else
                                               "unchanged although the PATH task was not asked for"))
     new_tasks = [t for t in after["tasks"] if t not in before["tasks"] or _ours(t)]
     if new_tasks:

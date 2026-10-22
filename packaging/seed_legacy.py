@@ -54,10 +54,17 @@ CREATE TABLE IF NOT EXISTS jobs (
     next_run REAL, last_run REAL, last_outcome TEXT, last_error TEXT, run_requested REAL,
     created REAL NOT NULL, updated REAL NOT NULL, approved_at REAL, approved_by TEXT);
 """
-CONFIG = '[voice]\nmode = "off"\n\n[music]\nprovider = "none"\n\n[link]\nport = 18765\n'
+CONFIG = '[voice]\nmode = "off"\nwake_threshold = 0.95\n\n[music]\nprovider = "none"\n\n[link]\nport = 18765\n'
 FEATURES = {"chimes": {"enabled": False}}
 IDENTITY = {"display_name": "SeedMax"}
 SETTINGS_FILES = {"config.toml": CONFIG, "features.json": json.dumps(FEATURES), "identity.json": json.dumps(IDENTITY)}
+PRESERVED_FILES = {
+    "models/owner-wake.onnx": b"fake owner model, never executed",
+    "secrets.env": b"FAKE_INSTALLER_TEST_CREDENTIAL=not-a-real-key\n",
+    "google/token.json": b'{"fake": "offline-test-only"}',
+    "profiles/owner/profile.json": b'{"id":"owner","name":"Owner"}',
+    "profiles/owner/config.toml": b'[voice]\nmode = "off"\nwake_threshold = 0.95\n',
+}
 LATEST_SCHEMA = 3                    # core/src/jarves/migrations.py LATEST (test_installer_clean.py keeps them equal)
 
 
@@ -80,6 +87,11 @@ def seed(home: Path) -> None:
     db.close()
     for name, text in SETTINGS_FILES.items():
         (home / name).write_text(text, encoding="utf-8")
+    for name, data in PRESERVED_FILES.items():
+        target = home / name
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_bytes(data)
+    (home / "schema.json").unlink(missing_ok=True)
 
 
 def _cols(db: sqlite3.Connection, table: str) -> set[str]:
@@ -126,6 +138,10 @@ def verify(home: Path, legacy: bool) -> list[str]:
             bad.append(f"{name} is missing")
         elif name != "config.toml" and (home / name).read_text(encoding="utf-8") != text:
             bad.append(f"{name} was changed")
+    for name, data in PRESERVED_FILES.items():
+        target = home / name
+        if not target.is_file() or target.read_bytes() != data:
+            bad.append(f"preserved file changed: {name}")
     return bad
 
 

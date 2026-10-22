@@ -62,7 +62,7 @@ function Install([string]$tasks = "", [string[]]$extra = @(), [string]$exe = "",
     if (-not $exe) { $exe = $Installer }
     $taskArg = if ($tasks -eq "DEFAULT") { @() } else { @("/TASKS=`"$tasks`"") }
     $sw = [Diagnostics.Stopwatch]::StartNew()
-    $p = Start-Process $exe -Wait -PassThru -ArgumentList (@("/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART",
+    $p = Start-Process $exe -WindowStyle Hidden -Wait -PassThru -ArgumentList (@("/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART",
         "/SP-") + $taskArg + @("/DIR=`"$App`"", "/LOG=`"$(Join-Path $Work "install-$(Get-Random).log")`"") + $extra)
     if ($time) { $Times[$time] = [math]::Round($sw.Elapsed.TotalSeconds, 1) }
     return $p.ExitCode
@@ -71,7 +71,7 @@ function Uninstall([string[]]$extra = @(), [string]$time = "") {
     $u = Join-Path $App "unins000.exe"
     if (-not (Test-Path $u)) { return -2 }
     $sw = [Diagnostics.Stopwatch]::StartNew()
-    $p = Start-Process $u -Wait -PassThru -ArgumentList (@("/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART") + $extra)
+    $p = Start-Process $u -WindowStyle Hidden -Wait -PassThru -ArgumentList (@("/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART") + $extra)
     for ($i = 0; $i -lt 120 -and (Test-Path $u); $i++) { Start-Sleep -Milliseconds 500 }   # the copy in %TEMP% finishes
     if ($time) { $Times[$time] = [math]::Round($sw.Elapsed.TotalSeconds, 1) }
     return $p.ExitCode
@@ -105,6 +105,9 @@ function Save-Times() {
         $map = @{ silent_install_s = "--install-s"; silent_uninstall_s = "--uninstall-s"; silent_upgrade_s = "--upgrade-s"; silent_rollback_s = "--rollback-s" }
         foreach ($k in $map.Keys) { if ($Times.Contains($k)) { $args_ += @($map[$k], $Times[$k]) } }
         & $AuditPy @args_ | Out-Host
+        $report = Get-Content $MetricsOut -Raw | ConvertFrom-Json -AsHashtable
+        $report["smoke_stages_s"] = $Times
+        $report | ConvertTo-Json -Depth 8 | Set-Content -Encoding utf8NoBOM $MetricsOut
     }
 }
 function Wait-Log([string]$pattern, [int]$timeoutS = 60) {
@@ -138,10 +141,13 @@ if ($UpgradeFrom) {
     $oldVer = Version-Of
     Check ($oldVer -match '^\d+\.\d+\.\d+\.\d+$') "old version is $oldVer"
     Check (Seed "seed") "old-layout data seeded (conversation, memory, job, settings)"
-    $settingsBefore = @("config.toml", "features.json", "identity.json") | ForEach-Object { (Get-FileHash (Join-Path $Home_ $_)).Hash }
+    $settingsBefore = @("config.toml", "features.json", "identity.json", "secrets.env", "models/owner-wake.onnx", "google/token.json", "profiles/owner/config.toml") | ForEach-Object { (Get-FileHash (Join-Path $Home_ $_)).Hash }
     $mid = Collect "old-installed"                     # Run key / PATH with the old version installed
     # silent upgrade over it: no /TASKS (the installer keeps its defaults), same AppId, data folder untouched
-    Check ((Install "DEFAULT" @() $Installer "silent_upgrade_s") -eq 0) "silent upgrade $oldVer -> $Version"
+    Check ((Install "DEFAULT" @("/KEEPDATA=0") $Installer "silent_upgrade_s") -eq 0) "silent upgrade $oldVer -> $Version"
+    Check (Test-Path (Join-Path $App "rollback\python\python.exe")) "previous program retained for offline rollback"
+    $state = Get-Content (Join-Path $App "install-state.json") -Raw | ConvertFrom-Json
+    Check ($state.complete -and $state.backups.Count -ge 1) "installer verified backup and completed migration"
     $newVer = Version-Of
     Check ($newVer -ne $oldVer -and (-not $Version -or $newVer -eq $Version)) "installed version is now $newVer"
     $settingsAfter = @("config.toml", "features.json", "identity.json") | ForEach-Object { (Get-FileHash (Join-Path $Home_ $_)).Hash }
@@ -178,7 +184,7 @@ if ($UpgradeFrom) {
     $final = Collect "final"
     Check (Audit "uninstalled" $before $final @("--purged")) "no residue after uninstall (Run key, PATH, tasks, Start menu, folders)"
     Save-Times
-    Remove-Item -Recurse -Force $Work -ErrorAction SilentlyContinue
+    if (-not $failures) { Remove-Item -LiteralPath $Work -Recurse -Force -ErrorAction SilentlyContinue }
     if ($failures) { Write-Host "SMOKE RESULT: FAIL ($failures)"; exit 1 }
     Write-Host "SMOKE RESULT: PASS (upgrade$(if ($Rollback) { ' + rollback' }))"
     exit 0
@@ -189,7 +195,7 @@ $stBefore = Collect "before"
 $tasks1 = if ($DefaultTasks) { "DEFAULT" } else { "" }
 Check ((Install $tasks1 @() "" "silent_install_s") -eq 0) "silent per-user install"
 $stInstalled = Collect "installed"
-$auditExtra = if ($DefaultTasks) { @("--path-entry", $App) } else { @() }
+$auditExtra = @("--path-entry", $App)
 Check (Audit "installed" $stBefore $stInstalled $auditExtra) "clean machine: autostart OFF by default, no scheduled task, PATH as expected"
 foreach ($f in @("jarvis.cmd", "python\python.exe", "unins000.exe", "THIRD_PARTY_NOTICES.txt")) {
     Check (Test-Path (Join-Path $App $f)) "installed $f"
@@ -266,7 +272,7 @@ if (Test-Path $face) {
 $answers = Join-Path $Work "answers.json"
 '{"language": "en", "connection": "chatgpt", "display_name": "SmokeMax", "spoken_name": "Max","features": {"chimes": false, "camera": false}}' |
     Set-Content -Encoding utf8NoBOM $answers
-Check ((Install "" @("/SETUPANSWERS=`"$answers`"")) -eq 0) "upgrade over the existing install with /SETUPANSWERS"
+Check ((Install "" @("/SETUPANSWERS=`"$answers`"") "" "silent_upgrade_s") -eq 0) "upgrade over the existing install with /SETUPANSWERS"
 $ident = Get-Content (Join-Path $Home_ "identity.json") -Raw -Encoding utf8 -ErrorAction SilentlyContinue
 $feats = Get-Content (Join-Path $Home_ "features.json") -Raw -Encoding utf8 -ErrorAction SilentlyContinue
 Check (($ident -match "SmokeMax") -and ($feats -match '"chimes": false')) "installer applied the setup answers (name, add-on switch)"
@@ -291,11 +297,11 @@ Check ((Test-Path (Join-Path $Home_ "memory.db")) -and (Test-Path (Join-Path $Ho
 # 7 purge only when asked
 $run = "HKCU:\Software\Microsoft\Windows\CurrentVersion\Run"
 if ($CheckAutostart) {
-    Check ((Install "autostart") -eq 0) "reinstall with start-at-login"
+    Check ((Install "autostart" @() "" "autostart_install_s") -eq 0) "reinstall with start-at-login"
     $entry = (Get-ItemProperty $run -Name JARVES -ErrorAction SilentlyContinue).JARVES
     Check ($entry -and $entry -like "*$App*pythonw.exe*") "start-at-login entry points to the installed Core: $entry"
 } else {
-    Check ((Install) -eq 0) "reinstall"
+    Check ((Install "" @() "" "reinstall_s") -eq 0) "reinstall"
 }
 Check ((Uninstall @("/PURGE=1")) -eq 0) "uninstall /PURGE=1"
 Check (-not (Test-Path $Home_)) "user data removed on request"
@@ -305,6 +311,6 @@ if ($CheckAutostart) {
 }
 
 Save-Times
-Remove-Item -Recurse -Force $Work -ErrorAction SilentlyContinue
+if (-not $failures) { Remove-Item -LiteralPath $Work -Recurse -Force -ErrorAction SilentlyContinue }
 if ($failures) { Write-Host "SMOKE RESULT: FAIL ($failures)"; exit 1 }
 Write-Host "SMOKE RESULT: PASS"

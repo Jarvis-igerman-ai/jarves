@@ -12,6 +12,8 @@ import zipfile
 from pathlib import Path
 
 # Code-only candidates reviewed against the locked payload; packages with data/native files are still refused.
+DOCUMENTATION_FILES = {"README.md", "api.md", "LICENSE", "FORK.md", ".keep"}
+
 CANDIDATES = (
     "agents", "openai", "pydantic", "httpx", "httpcore", "httpx2", "httpcore2", "h11", "idna", "sniffio",
     "anyio", "annotated_types", "typing_extensions", "typing_inspection", "packaging", "requests", "urllib3",
@@ -43,7 +45,7 @@ def pack(stage: Path) -> dict:
         files = sorted(p for p in root.rglob("*") if p.is_file()) if root.is_dir() else [root]
         if any(p.is_symlink() for p in [root, *files]):
             raise ValueError("symlink in staged dependency")
-        if any(p.suffix not in (".py", ".pyi") and p.name != "py.typed" for p in files):
+        if any(p.suffix not in (".py", ".pyi") and p.name != "py.typed" and p.name not in DOCUMENTATION_FILES for p in files):
             kept[name] = "native or resource files; keep path-based loading"
             continue
         if files:
