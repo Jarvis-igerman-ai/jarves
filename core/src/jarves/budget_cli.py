@@ -30,6 +30,7 @@ def status_view(cfg, home) -> dict:
         out = usd_status(b)
     finally:
         b.close()
+        b.memory.close()          # Budget does not own its MemoryStore: a leaked handle kept memory.db locked (Windows)
     st = read_state(home)
     try:
         from .cli import _cli_features

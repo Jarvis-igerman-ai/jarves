@@ -94,6 +94,7 @@ class Ctx:
         self.config_path = Path(config_path) if config_path else home / "config.toml"
         self.store = Store(home / "store.db", tier=cfg.ai.voice_service_tier, backend_model=cfg.ai.text_model)
         self._memory, self._own_memory = memory, memory is None
+        self._mem_lock, self._closed = threading.Lock(), False
         self._workspace, self._settings = workspace, settings
         self.logs = logview.LogReader(home)
         self.lock = threading.Lock()                  # memory undo journal
@@ -109,10 +110,13 @@ class Ctx:
 
     @property
     def memory(self):
-        if self._memory is None:
-            from .memory import MemoryStore
-            self._memory = MemoryStore(self.home / "memory.db")
-        return self._memory
+        with self._mem_lock:                          # threaded server: two first requests must not open two handles
+            if self._memory is None:
+                if self._closed:
+                    raise RuntimeError("dashboard context closed")    # a late request must not re-open memory.db
+                from .memory import MemoryStore
+                self._memory = MemoryStore(self.home / "memory.db")
+            return self._memory
 
     @property
     def workspace(self):
@@ -135,8 +139,10 @@ class Ctx:
 
     def close(self) -> None:
         self.store.close()
-        if self._own_memory and self._memory is not None:
-            self._memory.close()
+        with self._mem_lock:
+            self._closed = True
+            if self._own_memory and self._memory is not None:
+                self._memory.close()
         if getattr(self, "_userdata", None) is not None:     # WP-M3 plugin connection (userdata.ctx_db)
             self._userdata.close()
 

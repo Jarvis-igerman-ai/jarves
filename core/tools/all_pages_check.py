@@ -115,6 +115,7 @@ def seed_v4(home: Path) -> None:
                                                       "risk": "medium", "source": "voice", "title": title,
                                                       "decision": decision, "channel": "voice", "waited_s": 4.0,
                                                       "shown": ["voice"], "prompt": title, "details": {}})
+    db.close()                                    # a leaked handle kept memory.db locked (temp dir not removable)
 
 
 def start_dashboard(tmp: Path):
@@ -150,7 +151,14 @@ def check_page(p, url: str, frag: str, lang: str, width: int, *, reduced: bool, 
     p.wait_for_load_state("networkidle", timeout=30000)
     p.wait_for_function("() => !/^\\s*(Loading…|טוען…)\\s*$/.test((document.getElementById('main')||{}).innerText||'')",
                         timeout=15000)
-    p.wait_for_timeout(400)
+    # event-driven settle (a fixed 400 ms was too short on a loaded runner): resolved when #main's DOM was quiet for 300 ms
+    p.evaluate("""() => new Promise((done) => {
+        const m = document.getElementById('main') || document.body; let t;
+        const fin = () => { ob.disconnect(); done(); };
+        const ob = new MutationObserver(() => { clearTimeout(t); t = setTimeout(fin, 300); });
+        ob.observe(m, {childList: true, subtree: true, characterData: true, attributes: true});
+        t = setTimeout(fin, 300); setTimeout(fin, 10000);
+    })""")
     c = p.evaluate(BASIC_JS)
     probs: list[dict] = [{"rule": "browser", "sev": "critical", "msg": e, "where": ""} for e in errs]
     if c["lang"] != lang or c["dir"] != LANGS[lang]:

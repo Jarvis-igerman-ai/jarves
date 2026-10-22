@@ -30,3 +30,7 @@ TODO/FIXME with issue refs in core/src (none), flaky tests named by the owner. S
 | R-02..R-09 | P3 | residual security risks | open (documented) | - |
 | flaky: idle-write sample, dashboard load, privacy_state frame wait, perf gate noise | P3 | tests | fixed here (warm-up + median, event-driven waits, settle) | fix/bug-sweep-4-1 |
 | perf gate noise (spawn_to_ready_s, threads), installer 198 MB, duplicate docs | P3 | perf/docs | open | - |
+| memory.db handle left open (dashboard Ctx lazy open race; budget_cli.status_view leaked MemoryStore; all_pages_check seed) | P3 | tests/dashboard | fixed here: lock + closed flag, status_view closes memory, tests close every MemoryStore | fix/bug-sweep-4-1 |
+| real-browser a11y sweep: fixed 400 ms settle | P3 | tests | fixed here: MutationObserver quiet-period settle | fix/bug-sweep-4-1 |
+| suite_system V04 (fixed 3 s window + sleep) / V05 (now names the failing condition; passes alone) | P3 | suite | V04 fixed here (event-driven); V05 passes in isolation, parallel-run load only, diagnostic added | fix/bug-sweep-4-1 |
+| suite_system S12 | - | needs owner plan | not a failure: `jarvis chatgpt login`, then re-run suite_system | owner |
