@@ -349,6 +349,8 @@ class Core:
         self.appearance = appearance.attach(self)
         from .skills import generated                        # WP-M2: approved generated Skills (skills/generated.py)
         self.generated_skills = generated.attach(self)
+        from . import self_manage                            # owner request 21 Oct: manage myself (approvals + undo)
+        self.self_manage = self_manage.attach(self)
 
         audio = self._audio
         if audio is None and self.use_real_audio and c.voice.mode != "off":

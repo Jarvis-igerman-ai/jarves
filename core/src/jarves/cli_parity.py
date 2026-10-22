@@ -51,7 +51,7 @@ FEATURES: dict[str, object] = {
     "self_diagnostics_2": "health", "client_delegation": "budget",
     "whatsapp_bridge": "whatsapp", "whatsapp_send": "whatsapp",          # SW-V4 F: jarvis whatsapp ...
     "agent_orchestrator": "agents",
-    "assisted_dialing": "dial",
+    "assisted_dialing": "dial", "self_manage": "manage",
     "self_tests": "selftest", "text_chat": "chat",
 }
 
@@ -74,7 +74,7 @@ TOOL_GROUPS: dict[str, object] = {
     "health": "health",
     "whatsapp_bridge": "whatsapp",                                       # SW-V4 F: inbox / send / status
     "agents": "agents",
-    "dialing": "dial",
+    "dialing": "dial", "self_manage": "manage",
     "selfspeed": "selftest",
 }
 

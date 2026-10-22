@@ -108,6 +108,18 @@
 
 ---
 
+## Self-management (21 Oct 2026) - branch `v5/self-management` (off `jarves/main`)
+
+- New `core/src/jarves/self_manage.py`: the `self_manage` Skill (4 tools, ~600 chars of description: `self_status` read; `self_change`, `self_connect`, `self_undo` destructive = always the approval popup with a plain BEFORE / AFTER), `jarvis manage status|file|memory|feature|skill|setting|connect|history|undo` + `jarvis undo`, dashboard page Self-management (`/api/selfmanage*`, EN+HE catalogs), guide `self_manage.toml`, feature `self_manage` (medium risk, honest `implemented_unverified`), CLI/tool parity entries.
+- Reuses: Workspace (backup history, undo), MemoryStore, Settings.ALLOWED, Features + feature_setup.prepare, GeneratedSkills.set_enabled, connect.status_items, the approvals service (`spoken_kind` gained three entries: kind only, one language), the registry untrusted-turn guard (tainted turn = TOOL_UNTRUSTED_TURN for every change tool) and the delegation text (`workspace.FRONT_SELF`).
+- Undo: files via workspace history (refused if the file changed again), other kinds via `<home>/self_manage/changes.json` (previous value only; never secrets). Audit: fixed-literal `SELF_MANAGE_*` log codes, never the written text.
+- Out of reach: TOOLS/SETUP/FEATURES.md, HEARTBEAT, secrets, approvals policy, `PROTECTED_FEATURES` / `PROTECTED_RX` safety switches, settings not on the allow-list, built-in skills (follow their feature). Any text that looks like a secret is refused.
+- **Connect interface:** `jarvis connect --check` (branch `v4/connect-unset-only`) is not on `jarves/main`. `self_manage.default_check` calls `connect.check_items(home, cfg, only)` when it exists, else `connect.status_items`. Adapt `default_check` once that branch merges.
+- Not done / honest limits: the guided connection window opens on Windows only (elsewhere the answer names the `jarvis connect --only X` command); CLI approval is a typed `yes` in an interactive terminal (no `--yes`); `PROTECTED_FEATURES` list is a conservative first cut for the owner to review.
+- Question for the user: should `AGENTS.md` edits by voice stay allowed (with the popup), or be CLI/dashboard only? (Implemented as allowed, per the request.)
+
+---
+
 ## SW-V4 campaign PASS C — voice (21 Oct 2026) - #17, branch `test/v4-campaign-c`, draft [PR #20](https://github.com/igalgerman/jarves/pull/20), [report](reviews/SWV4_CAMPAIGN_VOICE.md), [bugs](reviews/SWV4_CAMPAIGN_BUG_TABLE_VOICE.md)
 
 - 50 PASS, 3 FAIL (22/23 wake false positives P3; 39 fixed, live retest pending), 39 BLOCKED of 92. Live spend at most $2.45 of the $8 slice.

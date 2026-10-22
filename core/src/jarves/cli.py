@@ -1855,6 +1855,8 @@ def main(argv: list[str] | None = None) -> int:
     agents_cli.add_cli(sub)                   # SW-V4 E: jarvis agents list | status | ask | tell | start | ...
     from . import dialing
     dialing.add_cli(sub)                      # SW-V4 H: jarvis dial <name|number> [--yes-on-screen]
+    from . import self_manage
+    self_manage.add_cli(sub)                  # jarvis manage status|file|memory|feature|skill|setting|connect|history|undo
     a = ap.parse_args(argv)
     try:
         if a.profile:
@@ -1886,6 +1888,7 @@ def main(argv: list[str] | None = None) -> int:
             "whatsapp": whatsapp_admin.cmd_whatsapp,
             "agents": agents_cli.cmd_agents,
             "dial": dialing.cmd_dial, "release": release_cmd.cmd_release,
+            "manage": self_manage.cmd_manage, "undo": self_manage.cmd_manage,
             **cli_parity.COMMANDS, **budget_cli.COMMANDS, **privacy_cli.COMMANDS, **phone_cli.COMMANDS, **selfspeed.COMMANDS}[a.cmd](a, cfg, home)
 
 

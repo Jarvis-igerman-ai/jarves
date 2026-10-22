@@ -29,6 +29,18 @@ TEXT: dict[str, str] = {
         "core/tests/test_release_signoff.py (מחזור גיליון, חתימה, שער)",
     "there is no Pi package to install": "אין עדיין חבילה להתקנה על ה-Pi",
     "release tooling runs on the owner's PC": "כלי השחרור רצים על המחשב של הבעלים",
+    # --- self-management (self_manage.py)
+    "I can show my own status (connections, features, skills, memory, files) and, only with your approval on screen, "
+    "change my files, memory, features, skills and settings, with undo; secrets and safety switches are out of reach":
+        "אני יכול להראות את המצב שלי (חיבורים, יכולות, כלים, זיכרון, קבצים) ורק באישור שלך על המסך לשנות את הקבצים, "
+        "הזיכרון, היכולות, הכלים וההגדרות שלי, עם ביטול; סודות ומתגי בטיחות מחוץ להישג ידי",
+    "jarvis manage status|file|memory|feature|skill|setting|connect|history|undo, jarvis undo, "
+    "dashboard Self-management page":
+        "jarvis manage status|file|memory|feature|skill|setting|connect|history|undo, jarvis undo, עמוד ניהול עצמי בלוח הבקרה",
+    "core/tests/test_self_manage.py (fake approvals, no network, no browser)":
+        "core/tests/test_self_manage.py (אישורים מדומים, בלי רשת, בלי דפדפן)",
+    "pure Python; the guided connection window is Windows only so far":
+        "פייתון טהור; חלון החיבור המודרך עובד כרגע רק ב-Windows",
     # --- feature descriptions (features.py and the modules that register features)
     "play / pause / volume in Pear Desktop (YouTube Music)": "ניגון, השהיה ועוצמת קול ב-Pear Desktop (YouTube Music)",
     "answers with fresh facts from the web": "עונה עם מידע עדכני מהאינטרנט",

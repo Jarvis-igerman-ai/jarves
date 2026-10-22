@@ -394,7 +394,9 @@ FRONT_SELF = ("Also delegate (a word or two, like other quick actions) when the 
               "For camera connection/status or requests to open/enable the camera, delegate to the backend to run "
               "camera_status before making any connection claim. Never infer disconnected hardware from an "
               "unavailable describe/enroll tool or a feature flag. If status cannot be checked, say it is unknown; "
-              "never substitute a claim that no camera is connected.")
+              "never substitute a claim that no camera is connected. Delegate too: what is connected/broken, fixing or "
+              "connecting an account, editing your own files or memory, switching features or skills, 'undo that' "
+              "(\"מה מחובר?\", \"תחבר את...\", \"בטל את זה\"). Never speak or take a key or code: the owner types it in the window.")
 
 
 def front_facts(memory) -> str:
