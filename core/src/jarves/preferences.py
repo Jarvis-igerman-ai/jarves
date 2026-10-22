@@ -165,9 +165,9 @@ class Preferences:
 
 # ---------------------------------------------------------------------- voice / agent tools
 class SuggestArgs(BaseModel):
-    text: str = Field(..., min_length=3, max_length=MAX_TEXT, description="the preference, in the owner's terms")
-    evidence: str = Field(..., min_length=3, max_length=MAX_EVIDENCE, description="the owner's own words that state it")
-    topic: str = Field("other", max_length=20, description="voice, schedule, food, music, communication or other")
+    text: str = Field(..., min_length=3, max_length=MAX_TEXT)
+    evidence: str = Field(..., min_length=3, max_length=MAX_EVIDENCE, description="owner's words")
+    topic: str = Field("other", max_length=20, description="voice|schedule|food|music|other")
 
 
 class IdArgs(BaseModel):
@@ -237,8 +237,7 @@ def make_skill(prefs: Preferences):
                 return 1, "לשכוח את ההעדפה? / Forget this preference?"
 
             return [
-                Tool("pref_suggest", "When the owner STATES a lasting preference, propose it (never guess one). It is "
-                     "only a proposal: then ask whether to remember it. Never for secrets, numbers, health or money.",
+                Tool("pref_suggest", "Propose a preference the owner STATED (never guess); then ask to remember it. Not for secrets, health, money.",
                      suggest, SuggestArgs, permission="action"),
                 Tool("pref_confirm", "Remember a proposed preference after the owner said yes.", confirm, IdArgs,
                      permission="action", confirm="לזכור את ההעדפה הזאת? / Remember this preference?"),
