@@ -1625,7 +1625,9 @@
   "What is new and changed, plus a short overall check.": "מה חדש ומה השתנה, ובדיקה קצרה כללית.",
   "later": "אחר כך",
   "set up, needs a test": "הוגדר, צריך בדיקה",
-  "not set": "לא הוגדר"
+  "not set": "לא הוגדר",
+  "one wizard in the dashboard (#/setup) that sets up, tests and teaches every topic; your 'works' answers become the per-feature 'verified by owner' record and the release sign-off sheet": "אשף אחד בלוח הבקרה (#/setup) שמגדיר, בודק ומלמד כל נושא; תשובות \"עובד\" שלכם הופכות לרשומת \"אומת על ידי הבעלים\" לכל יכולת ולגיליון אישור הגרסה",
+  "core/tests/test_wizard.py (state, diff, secrets, bug report, sign-off sheet)": "core/tests/test_wizard.py (מצב, הבדלים, סודות, דיווח באג, גיליון אישור)"
  },
  "rules": [
   [

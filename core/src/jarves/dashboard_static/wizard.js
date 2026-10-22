@@ -99,7 +99,7 @@
     return el("section", { class: "card tour-stage tour-card" }, el("h2", {}, L("3. להכיר (30 שניות)", "3. Learn (30 seconds)")),
       el("dl", {},
         el("dt", {}, L("מה זה עושה", "What it does")), el("dd", {}, L(c.gives_he, c.gives_en)),
-        c.say.length ? [el("dt", {}, L("מה להגיד", "What to say")), el("dd", {}, el("ul", { class: "say" }, c.say.map((s) => el("li", {}, L(s.he, s.en), el("span", { class: "muted small" }, " · " + L(s.en, s.he))))))] : null,
+        c.say.length ? [el("dt", {}, L("מה להגיד", "What to say")), el("dd", {}, el("ul", { class: "say" }, c.say.map((s) => el("li", {}, L(s.he, s.en)))))] : null,
         c.expect_en ? [el("dt", {}, L("מה אמור לקרות", "What to expect")), el("dd", {}, L(c.expect_he, c.expect_en))] : null,
         el("dt", {}, L("איפה בלוח הבקרה", "Where in the dashboard")), el("dd", {}, el("a", { href: c.page }, c.page)),
         el("dt", {}, L("בשורת הפקודה", "On the command line")), el("dd", {}, el("code", {}, c.cli)),

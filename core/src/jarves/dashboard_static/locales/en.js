@@ -1625,6 +1625,8 @@
   "What is new and changed, plus a short overall check.": "What is new and changed, plus a short overall check.",
   "later": "later",
   "set up, needs a test": "set up, needs a test",
-  "not set": "not set"
+  "not set": "not set",
+  "one wizard in the dashboard (#/setup) that sets up, tests and teaches every topic; your 'works' answers become the per-feature 'verified by owner' record and the release sign-off sheet": "one wizard in the dashboard (#/setup) that sets up, tests and teaches every topic; your 'works' answers become the per-feature 'verified by owner' record and the release sign-off sheet",
+  "core/tests/test_wizard.py (state, diff, secrets, bug report, sign-off sheet)": "core/tests/test_wizard.py (state, diff, secrets, bug report, sign-off sheet)"
  }
 };
