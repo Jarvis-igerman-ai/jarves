@@ -215,3 +215,23 @@ def _no_real_browser(monkeypatch):
     if hasattr(os, "startfile"):
         monkeypatch.setattr(os, "startfile", lambda path, *a, **k: opened.append(str(path)), raising=False)
     yield opened
+
+
+@pytest.fixture(autouse=True)
+def _close_memory_stores(monkeypatch):
+    """Every MemoryStore a test opens is closed at teardown: an open memory.db handle kept the file locked on Windows
+    (tmp-dir cleanup failed, rename failed) when a test built a store inline and never closed it."""
+    from jarves.memory import MemoryStore
+    opened: list = []
+    orig = MemoryStore.__init__
+
+    def tracking(self, *a, **kw):
+        orig(self, *a, **kw)
+        opened.append(self)
+    monkeypatch.setattr(MemoryStore, "__init__", tracking)
+    yield
+    for m in opened:
+        try:
+            m.close()
+        except Exception:
+            pass
