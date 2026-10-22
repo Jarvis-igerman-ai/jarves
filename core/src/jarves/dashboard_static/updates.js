@@ -14,6 +14,21 @@
   }
 })();
 
+// The Core reports the update-check problem as an English sentence; show it in the page language (Hebrew page => Hebrew text).
+function updateError(e) {
+  const m = String(e || "");
+  if (m.startsWith("releases not reachable on GitHub")) {
+    return tx("אי אפשר להגיע לגרסאות ב-GitHub (אין שם גרסאות שפורסמו, או שהגעתם למגבלת הבקשות). מתקינים חתומים מתפרסמים ב-github.com/igalgerman/jarvis-releases/releases, או שמגדירים [update] base_url.", m);
+  }
+  if (m.startsWith("no connection to GitHub")) {
+    return tx("אין חיבור ל-GitHub כרגע. בדיקת העדכון לא משפיעה על שום דבר אחר.", m);
+  }
+  if (m.startsWith("GitHub answered HTTP")) {
+    return tx("GitHub החזיר שגיאה בבדיקת העדכון: " + m.replace("GitHub answered ", ""), m);
+  }
+  return m;
+}
+
 PAGES.updates = async function () {
   const d = await api("/api/updates");
   const rb = d.rollback || {};
@@ -58,7 +73,7 @@ PAGES.updates = async function () {
   render(header("Updates", "Install, update and go back to the previous version. JARVES asks before it installs anything and keeps your data.",
       check),
     out,
-    d.error ? el("div", { class: "card" }, pill("degraded", tx("בדיקה לא זמינה", "Check unavailable")), " ", el("span", { class: "small" }, d.error)) : null,
+    d.error ? el("div", { class: "card" }, pill("degraded", tx("בדיקה לא זמינה", "Check unavailable")), " ", el("span", { class: "small" }, updateError(d.error))) : null,
     el("div", { class: "card" }, el("div", { class: "kv" },
       el("div", { class: "k" }, "Current version"), el("div", { class: "v" }, el("code", {}, d.beta_build || d.current), d.beta_build ? " " : "", d.beta_build ? pill("degraded", "BETA") : ""),
       el("div", { class: "k" }, "Update channel"),
