@@ -2,6 +2,8 @@ import asyncio
 import json
 import os
 import socket
+import sys
+from pathlib import Path
 
 if os.name != "nt":
     os.environ.setdefault("PYSTRAY_BACKEND", "dummy")  # headless Linux CI: no X server / appindicator needed
@@ -17,6 +19,12 @@ from jarves.voice.audio import SimAudio
 
 # ---------------------------------------------------------------- no skipped tests, ever (owner rule, issue #17)
 def pytest_configure(config):
+    sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "tools"))
+    from netguard import install
+    os.environ["JARVES_TEST_OFFLINE"] = "1"      # updates/features probes use deterministic offline stubs
+    install()
+    config.addinivalue_line("markers", "network: may use the real network (tiny allow-list; none currently)")
+    config.addinivalue_line("markers", "quarantine: known flaky; runs in the separate non-blocking quarantine job")
     config.addinivalue_line("markers", "windows_only: runs only on Windows (deselected, not skipped, elsewhere)")
     config.addinivalue_line("markers", "linux_only: runs only on Linux (deselected, not skipped, elsewhere)")
 
@@ -154,6 +162,14 @@ class FakeTTS:
     async def synth(self, text):
         self.spoken.append(text)
         return np.zeros(1600, np.float32), 16000
+
+
+@pytest.fixture(autouse=True)
+def _network_guard(request):
+    import netguard
+    netguard.allow(request.node.get_closest_marker("network") is not None)
+    yield
+    netguard.allow(False)
 
 
 @pytest.fixture(autouse=True)

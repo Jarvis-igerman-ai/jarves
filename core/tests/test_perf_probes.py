@@ -151,9 +151,13 @@ def test_one_shot_cli_list_checks_everything_in_line(home, cfg, fake_claude, slo
     assert slow_cli_feature == [threading.get_ident()]
 
 
-def test_perf_gate_inprocess_with_every_v4_module_registered(home):
+def test_perf_gate_inprocess_with_every_v4_module_registered(home, monkeypatch):
     """The gate's own measurement in the full-suite condition (all packages registered), where it measured 357 ms."""
+    from jarves import speedtest
     _import_all()
+    # This regression measures feature-probe latency, not dashboard HTTP startup under xdist contention.
+    # test_perf_gate.py and the real CI perf job still exercise the dashboard measurement and its budgets.
+    monkeypatch.setattr(speedtest, "measure_dashboard", lambda home: {})
     m = pg.measure_inproc(repeats=1, settle_s=0.4)
     assert m["features_list_ms"] < BUDGET_MS, m
     assert m["live_tools_probe_ms"] < pg.load_budgets()["metrics"]["live_tools_probe_ms"]["ci_max"], m

@@ -123,6 +123,9 @@ def start_dashboard(tmp: Path):
     home.mkdir()
     os.environ["JARVES_HOME"] = str(home)
     os.environ.pop("OPENAI_API_KEY", None)
+    os.environ["JARVES_TEST_OFFLINE"] = "1"      # updates/GitHub/OpenAI/Google stubbed: pages render deterministic content
+    import netguard
+    netguard.install()
     import v3_dashboard_screens
     sid = v3_dashboard_screens.fill(home)
     seed_v4(home)

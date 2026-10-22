@@ -69,7 +69,7 @@ PR head (pull_request, merge ref)                      merge (automerge)        
    in `changes` and handed to every shard (`--shard-files`, slowest file first), so shards cannot disagree. After every full
    run on `main` the `durations` job merges the junit files of all shards into a cache entry (`jarves-durations-<run>`) that
    the next `changes` job restores: **rebalancing is automatic, no commit, no token**. Seed or refresh by hand:
-   `python core/tools/ci_plan.py durations-merge --junit <dir of junit xml> --into core/tests/durations.json`.
+   `python core/tools/ci_plan.py durations-merge --junit <one OS artifact directory> --into core/tests/durations-windows.json`.
    Inside a shard, `pytest-xdist` (pinned `pytest-xdist==3.8.0` through `uv run --with`, not in the lock) runs files in
    parallel workers with `--dist loadfile`: one file never splits across workers, and the suite already uses temp homes and
    `free_port()` per test. Workers: 1 (serial) on Linux (3 workers broke 20 process-limit/update-flow tests on ubuntu-24.04), 2 on Windows; repository variable `CI_XDIST_WORKERS` overrides, `1` turns it off.
@@ -173,3 +173,28 @@ socket-timeout retry of test_perf_probes.py (5 tests passed on retry, one initia
 These are observed timings for one run, not a guaranteed budget. The implementation was subsequently incorporated into PR #44 at c00a773; PR #57 retains the evidence/documentation
 follow-up. Its final commit runs fast validation; non-documentation content matches the full-green ed14a9f commit. Branch protection should use ci-ok; any explicitly
 required old Linux shard 1/1 check must be updated when this stacked change reaches main.
+
+## Follow-up: measured platform plans and performance-test isolation (22 Oct 2026)
+
+The previous full run (39733332477) exposed the next bottleneck: Windows shards took 309 / 204 / 562 seconds while Linux
+finished in 281 seconds. The planner's expected times were 311 / 311 / 310 on both OSes because it had no measured cache;
+it was using test counts, not actual seconds. Timing refresh also excluded PRs, so repeated PR runs could not learn.
+
+- Committed seeds, core/tests/durations-linux.json and durations-windows.json, contain file totals from that run's JUnit
+  artifacts: junit-0..2 are Linux, junit-3..5 Windows. They contain test filenames and seconds only, no raw diagnostics.
+- ci_plan.py weights each OS independently. New or unmeasured files retain the count-based fallback; legacy callers can
+  still supply one map. The plan covers each non-browser file exactly once per OS. Linux stays serial per runner.
+- A green full Core matrix now refreshes separate versioned caches on main/manual runs AND same-repository PRs. The timing
+  jobs download only their OS's artifacts, blend new samples with the seed/restored history, then save separately.
+  GitHub scopes PR caches to the merge ref: these help later runs of the same PR, not other branches or main. New branches
+  start with committed seeds (or an accessible main cache); fork PRs do not publish timing caches. Reused/docs/guides-only
+  runs do not overwrite full-suite timings. The timing jobs remain optional for ci-ok and never publish installers.
+- test_perf_probes.py's feature-probe regression no longer starts dashboard HTTP measurements whose result it never
+  asserted. It still times the real feature list and probe paths with every V4 module registered. The separate
+  test_perf_gate.py regression and the actual CI performance job retain real dashboard measurements and budgets.
+
+Local focused check: 61 tests passed in 30.84 seconds, zero skips; isolated feature-probe regression 1.73 seconds.
+This is not yet a hosted timing claim. PR #57 records the final commit's hosted result and comparison. Browser readiness,
+installer dependency-stage caching and remaining slow Core-start fixtures are deferred; no product behavior changed.
+
+Cache scope checked 22 Oct 2026 against [GitHub's dependency caching reference](https://docs.github.com/en/actions/reference/workflows-and-actions/dependency-caching#restrictions-for-accessing-a-cache).

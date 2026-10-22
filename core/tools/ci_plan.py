@@ -4,12 +4,12 @@ Pure standard library (the `changes` job runs it before any dependency is instal
 
     python core/tools/ci_plan.py classify --event pull_request [--files-from -] [--durations FILE] [--reused]
     python core/tools/ci_plan.py shard-files --plan PLAN.json --os windows --shard 2/3
-    python core/tools/ci_plan.py durations-merge --junit DIR_OR_FILE... --into core/tests/durations.json
+    python core/tools/ci_plan.py durations-merge --junit DIR_OR_FILE... --into core/tests/durations-windows.json
 
 `classify` prints key=value lines for $GITHUB_OUTPUT (code, full, perf, installer, cad, blender, godot, whatsapp, e2e,
 plan). The shard plan is balanced by MEASURED seconds per test file (durations file) and falls back to the number of
 test functions for files that have no measurement yet. Docs/CLAUDE.md-only changes need no job; guides-only changes run
-only the Linux Core shard; a merge commit whose tree was already proven on its PR (`--reused`) needs nothing.
+only the Linux Core shards; a merge commit whose tree was already proven on its PR (`--reused`) needs nothing.
 """
 from __future__ import annotations
 
@@ -91,12 +91,15 @@ def split(weights: dict[str, float], n: int) -> list[list[str]]:
     return shards
 
 
-def plan(tests_dir: Path = TESTS, durations: dict[str, float] | None = None, windows: int = 3, linux: int = 3) -> dict:
-    w = file_weights(tests_dir, durations)
-    win, lin = split(w, windows), split(w, linux)
+def plan(tests_dir: Path = TESTS, durations: dict[str, float] | None = None, windows: int = 3, linux: int = 3,
+         linux_durations: dict[str, float] | None = None) -> dict:
+    """Balance each OS from its own measurements; a legacy single map still works for callers."""
+    win_weights = file_weights(tests_dir, durations)
+    lin_weights = file_weights(tests_dir, durations if linux_durations is None else linux_durations)
+    win, lin = split(win_weights, windows), split(lin_weights, linux)
     return {"windows": win, "linux": lin,
-            "expected_s": {"windows": [round(sum(w[f] for f in s)) for s in win],
-                           "linux": [round(sum(w[f] for f in s)) for s in lin]}}
+            "expected_s": {"windows": [round(sum(win_weights[f] for f in s)) for s in win],
+                           "linux": [round(sum(lin_weights[f] for f in s)) for s in lin]}}
 
 
 def shard_files(plan_doc: dict, os_name: str, shard: str) -> list[str]:
@@ -152,7 +155,8 @@ def main(argv: list[str] | None = None) -> int:
     c = sub.add_parser("classify")
     c.add_argument("--event", default="pull_request")
     c.add_argument("--files-from", help="file with one path per line, '-' for stdin; default: git diff HEAD^1 HEAD")
-    c.add_argument("--durations", type=Path, default=TESTS / "durations.json")
+    c.add_argument("--durations", type=Path, default=TESTS / "durations-windows.json")
+    c.add_argument("--linux-durations", type=Path, default=TESTS / "durations-linux.json")
     c.add_argument("--reused", action="store_true", help="the tree was already proven on its PR: nothing to run")
     s = sub.add_parser("shard-files")
     s.add_argument("--plan", type=Path, required=True)
@@ -169,7 +173,7 @@ def main(argv: list[str] | None = None) -> int:
             files = _git_files() if a.event == "pull_request" else []
         for k, v in classify(files, a.event, a.reused).items():
             print(f"{k}={'true' if v else 'false'}")
-        print("plan=" + json.dumps(plan(durations=load_durations(a.durations)), separators=(",", ":")))
+        print("plan=" + json.dumps(plan(durations=load_durations(a.durations), linux_durations=load_durations(a.linux_durations)), separators=(",", ":")))
         return 0
     if a.cmd == "shard-files":
         print(",".join(shard_files(json.loads(a.plan.read_text(encoding="utf-8")), a.os, a.shard)))
@@ -180,7 +184,7 @@ def main(argv: list[str] | None = None) -> int:
     fresh: dict[str, float] = {}
     for p in paths:
         for k, v in junit_file_times(p).items():
-            fresh[k] = max(fresh.get(k, 0.0), v)      # Windows is the long pole: the slowest measurement wins
+            fresh[k] = max(fresh.get(k, 0.0), v)      # caller supplies artifacts from ONE platform only
     merged = merge_durations(load_durations(a.into), fresh)
     a.into.parent.mkdir(parents=True, exist_ok=True)
     a.into.write_text(json.dumps(dict(sorted(merged.items())), indent=1) + "\n", encoding="utf-8")
