@@ -1,0 +1,276 @@
+# Rows for tools/manual_test_sheet.py. One [[row]] per check.
+#   order    sort key (lower first); keeps the owner top to bottom with no setup detours
+#   group    heading in the sheet
+#   do       ONE plain line: exact command or phrase ({version} is replaced)
+#   expect   what the owner should see
+#   optional true = needs an account the owner may have skipped
+#   match    [] = standing row (always in the sheet); otherwise the row is included only when one of these
+#            words appears (case-insensitive) in that version's CHANGELOG section
+#   src      where the row comes from (work package row ids, standing list)
+
+[[row]]
+order = 10
+group = "1. Before the upgrade (read only)"
+do = "Run packaging\\owner_upgrade_check.ps1 in PowerShell"
+expect = "Prints installed version, latest published version, update yes/no, rollback backup place; changes nothing"
+match = []
+src = "standing"
+
+[[row]]
+order = 20
+group = "2. Upgrade over V3"
+do = "Dashboard > Updates > install {version} (or `jarvis update install`), accept the question"
+expect = "Silent upgrade, JARVES restarts, your profile, lists and memory are still there"
+match = []
+src = "standing OL-I1"
+
+[[row]]
+order = 21
+group = "2. Upgrade over V3"
+do = "`jarvis --version`"
+expect = "JARVES {version} (commit ..., channel stable)"
+match = []
+src = "standing"
+
+[[row]]
+order = 22
+group = "2. Upgrade over V3"
+do = "`jarvis doctor`"
+expect = "No red lines; every yellow line says what to fix"
+match = []
+src = "standing OL-I2"
+
+[[row]]
+order = 23
+group = "2. Upgrade over V3"
+do = "`jarvis status; echo $LASTEXITCODE` in PowerShell"
+expect = "Running = 0; running without the face window = 4 (new in 4.0, not an error)"
+match = ["headless"]
+src = "CHANGELOG Changed"
+
+[[row]]
+order = 30
+group = "3. Dashboard (English then Hebrew)"
+do = "`jarvis dashboard`, open Home, Health, Timers, Lists, Approvals, Coding agents in English"
+expect = "Every page loads; no Hebrew text, no broken layout, Health shows no red"
+match = []
+src = "standing OK-02 OK-03"
+
+[[row]]
+order = 31
+group = "3. Dashboard (English then Hebrew)"
+do = "Language picker (top bar)"
+expect = "Only English and Hebrew are offered (no Arabic, no Russian)"
+match = ["arabic"]
+src = "CHANGELOG Changed OK-07"
+
+[[row]]
+order = 32
+group = "3. Dashboard (English then Hebrew)"
+do = "Switch to Hebrew and walk the same pages; add a timer and tick one list item"
+expect = "Right-to-left layout, no English sentences, timer and list work"
+match = []
+src = "standing OK-01 OK-04"
+
+[[row]]
+order = 33
+group = "3. Dashboard (English then Hebrew)"
+do = "Open the Approvals page with a pending request, press Approve on one and Deny on another"
+expect = "Both are recorded in the history; the denied action did not run"
+match = ["approval"]
+src = "OK-05"
+
+[[row]]
+order = 40
+group = "4. Privacy and recall"
+do = "`jarvis diag` and open the ZIP it writes"
+expect = "No conversation text, names, phone numbers or keys inside"
+match = ["privacy"]
+src = "OR-01"
+
+[[row]]
+order = 42
+group = "4. Privacy and recall"
+do = "`jarvis recall \"<a topic you really talked about>\"`, then the same in the dashboard Recall page"
+expect = "Right date and a short quote; both show the same results"
+match = ["recall"]
+src = "OG-R1 OG-R4"
+
+[[row]]
+order = 50
+group = "5. Voice (microphone and speaker)"
+do = "Say: Hey Jarvis, what time is it?"
+expect = "Wakes, answers the right time in English"
+match = []
+src = "standing wake word"
+
+[[row]]
+order = 51
+group = "5. Voice (microphone and speaker)"
+do = "Say: היי ג'רוויס, מה השעה?"
+expect = "Wakes, answers in Hebrew, the right time"
+match = []
+src = "standing Hebrew speech OV-01"
+
+[[row]]
+order = 54
+group = "5. Voice (microphone and speaker)"
+do = "`jarvis wake record --positives 20`, then `--negatives 20`, then `jarvis wake train`"
+expect = "20 and 20 clips saved, training ends with a measured result; `jarvis wake train --revert` undoes it"
+match = ["wake"]
+src = "OW-01 OW-02 J"
+
+[[row]]
+order = 55
+group = "5. Voice (microphone and speaker)"
+do = "After training: say the wake phrase 20 times from 1 m"
+expect = "At least 19 of 20 wake; a TV or talking in the room does not wake him"
+match = ["wake"]
+src = "OW-05"
+
+[[row]]
+order = 56
+group = "5. Voice (microphone and speaker)"
+do = "Say: תצא לגמרי"
+expect = "JARVES exits fully, no dashboard window opens"
+match = []
+src = "OV-07"
+
+[[row]]
+order = 60
+group = "6. Camera and privacy strip"
+do = "Start JARVES again; turn the camera on; dashboard `What does he see?`"
+expect = "Live preview with an on-screen approval; fps shown"
+match = []
+src = "standing OC-01"
+
+[[row]]
+order = 61
+group = "6. Camera and privacy strip"
+do = "Close the preview"
+expect = "The camera light goes off within about a second"
+match = []
+src = "OC-02"
+
+[[row]]
+order = 62
+group = "6. Camera and privacy strip"
+do = "Talk with him and watch the privacy strip; press mute on the strip"
+expect = "The strip words match what you hear (listening, paused, audio to cloud); mute turns the microphone off"
+match = []
+src = "OC-03 OC-04"
+
+[[row]]
+order = 63
+group = "6. Camera and privacy strip"
+do = "Turn the camera off and ask: מה אתה רואה?"
+expect = "Honest answer that the camera is off"
+match = []
+src = "OC-05"
+
+[[row]]
+order = 70
+group = "7. Approval popup"
+do = "Ask for any medium-risk action by voice (for example: פתח את המחשבון), then say: כן"
+expect = "Popup on top and inside the screen, English by default; approved once, no self-approval by his own voice"
+match = []
+src = "standing OP-01 OP-02"
+
+[[row]]
+order = 71
+group = "7. Approval popup"
+do = "Trigger a request again and press Esc"
+expect = "Denied, nothing was done"
+match = []
+src = "OP-03"
+
+[[row]]
+order = 72
+group = "7. Approval popup"
+do = "Trigger a dangerous request (delete a file by voice)"
+expect = "A typed code is required; the code is hidden while typing"
+match = ["approval"]
+src = "OP-04"
+
+[[row]]
+order = 80
+group = "8. Phone Link dialing"
+do = "`jarvis features on dialing`, then say: תתקשר ל<a contact>"
+expect = "He reads the name and the digits, you approve, Phone Link opens with that number; you decide whether to press Call"
+match = ["dialing"]
+src = "standing, OH-01"
+
+[[row]]
+order = 81
+group = "8. Phone Link dialing"
+do = "Say the same, then say: לא (deny); then try a name that does not exist"
+expect = "Deny opens nothing; the unknown name is not guessed"
+match = ["dialing"]
+src = "OH-03 OH-05"
+
+[[row]]
+order = 90
+group = "9. Cloud brain and coding agents"
+do = "Set delegation mode `client` and a test cap of $0.05 (Settings), ask 5 web questions"
+expect = "He stops before the cap with an honest message; spend stays under the cap"
+match = ["delegation"]
+src = "OD-T1"
+
+[[row]]
+order = 100
+group = "10. Accounts (skip freely)"
+do = "`jarvis connect --only telegram`, then send a message to the bot"
+expect = "Paired; the message is shown or read"
+optional = true
+match = ["telegram"]
+src = "OT-01 OT-02"
+
+[[row]]
+order = 101
+group = "10. Accounts (skip freely)"
+do = "Dashboard > WhatsApp > Link (read mode), scan the QR"
+expect = "Status connected; 1:1 texts show, groups stay hidden"
+optional = true
+match = ["whatsapp"]
+src = "OF-01 OF-02"
+
+[[row]]
+order = 102
+group = "10. Accounts (skip freely)"
+do = "`jarvis connect --only instagram` and `jarvis connect --only homeassistant`"
+expect = "Each is connected, or says honestly what is missing"
+optional = true
+match = ["instagram", "home assistant", "homeassistant"]
+src = "standing"
+
+[[row]]
+order = 110
+group = "11. Update flow and rollback (last)"
+do = "Dashboard > Updates > Check, and `jarvis update check`"
+expect = "Says you are on the newest version; the source is igalgerman/jarves"
+match = []
+src = "standing"
+
+[[row]]
+order = 111
+group = "11. Update flow and rollback (last)"
+do = "Close JARVES, then `jarvis update --rollback` and approve"
+expect = "Back on the previous version, data as before the upgrade; `jarvis --version` shows it"
+match = []
+src = "standing OL-I3"
+
+[[row]]
+order = 112
+group = "11. Update flow and rollback (last)"
+do = "Update again to {version} (Dashboard > Updates > install)"
+expect = "Works; `jarvis --version` shows {version} and `jarvis doctor` is green"
+match = []
+src = "standing OL-I4"
+
+[[row]]
+order = 113
+group = "11. Update flow and rollback (last)"
+do = "Run packaging\\owner_upgrade_check.ps1 again"
+expect = "Installed version equals latest; update available: no"
+match = []
+src = "standing"
