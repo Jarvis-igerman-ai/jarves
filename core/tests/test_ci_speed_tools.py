@@ -87,7 +87,7 @@ def test_real_test_directory_plan_is_balanced():
     assert max(exp) <= min(exp) * 1.35 + 5
 
 
-def test_durations_merge_from_junit_blends_and_keeps_the_slowest_os(tmp_path):
+def test_durations_merge_from_junit_blends_and_keeps_the_slowest_sample(tmp_path):
     def junit(name, times):
         cases = "".join(f'<testcase classname="tests.{f[:-3]}" name="t{i}" time="{t}"/>' for i, (f, t) in enumerate(times))
         (tmp_path / name).write_text(f'<testsuites><testsuite name="p">{cases}</testsuite></testsuites>', encoding="utf-8")
@@ -355,3 +355,45 @@ def test_docs_describe_the_pipeline():
     for needle in ("Before / after", "branch protection", "5 minutes", "Version stamping"):
         assert needle in perf, needle
     assert "release_status.py" in rel and "ci-ok" in perf
+
+
+def test_platform_measurements_balance_different_hot_files_without_losing_coverage(tmp_path):
+    d = _tests_dir(tmp_path, {"test_a.py": 1, "test_b.py": 1, "test_c.py": 1, "test_d.py": 1})
+    windows = {"test_a.py": 100, "test_b.py": 2, "test_c.py": 40, "test_d.py": 3}
+    linux = {"test_a.py": 2, "test_b.py": 100, "test_c.py": 3, "test_d.py": 40}
+    p = ci_plan.plan(d, windows, windows=2, linux=2, linux_durations=linux)
+    assert p["windows"][0][0] == "test_a.py" and p["linux"][0][0] == "test_b.py"
+    for platform, times in (("windows", windows), ("linux", linux)):
+        flat = [f for shard in p[platform] for f in shard]
+        assert sorted(flat) == sorted(times) and len(flat) == len(set(flat))
+        assert p["expected_s"][platform] == [round(sum(times[f] for f in shard)) for shard in p[platform]]
+
+
+def test_committed_platform_seeds_are_measured_and_plan_the_current_suite():
+    windows = ci_plan.load_durations(ROOT / "core/tests/durations-windows.json")
+    linux = ci_plan.load_durations(ROOT / "core/tests/durations-linux.json")
+    assert len(windows) >= 100 and len(linux) >= 100 and windows != linux
+    p = ci_plan.plan(durations=windows, linux_durations=linux)
+    expected = sorted(f.name for f in ci_plan.TESTS.glob("test_*.py") if f.name not in ci_plan.BROWSER_FILES)
+    for platform in ("windows", "linux"):
+        assert sorted(f for shard in p[platform] for f in shard) == expected
+        loads = p["expected_s"][platform]
+        weights = ci_plan.file_weights(ci_plan.TESTS, windows if platform == "windows" else linux)
+        assert max(loads) - min(loads) <= max(weights.values()) + 2
+
+
+def test_timing_refresh_separates_platforms_and_includes_successful_same_repo_prs():
+    jobs = _wf("jarves-checks.yml")["jobs"]
+    refresh = jobs["durations"]
+    assert refresh["strategy"]["matrix"]["platform"] == ["linux", "windows"]
+    condition = refresh["if"]
+    assert "needs.core.result == 'success'" in condition and "needs.changes.outputs.full == 'true'" in condition
+    assert "github.event.pull_request.head.repo.full_name == github.repository" in condition
+    steps = refresh["steps"]
+    download = next(s for s in steps if "download-artifact" in s.get("uses", ""))
+    assert download["with"]["pattern"] == "junit-${{ matrix.platform }}-*"
+    save = next(s for s in steps if "cache/save" in s.get("uses", ""))
+    assert save["with"]["path"] == "core/tests/durations-${{ matrix.platform }}.json"
+    assert "v2-${{ matrix.platform }}-" in save["with"]["key"]
+    restores = [s["with"]["path"] for s in jobs["changes"]["steps"] if "cache/restore" in s.get("uses", "")]
+    assert restores == ["core/tests/durations-linux.json", "core/tests/durations-windows.json"]

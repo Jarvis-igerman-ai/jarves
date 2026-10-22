@@ -1,3 +1,17 @@
+## CI pass 3 (22 Oct 2026) — owner asked to continue, extends PR #57 on #44
+
+- Scope: separate measured Linux/Windows shard plans; committed seeds from the full-green run 39733332477; refresh timing
+  caches after successful same-repository PR Core runs as well as main/manual runs; isolate the feature-probe regression
+  from unrelated dashboard HTTP startup. Product/runtime behavior, worker counts and release gates are unchanged.
+- Seed provenance: JUnit artifacts junit-0..2 Linux, junit-3..5 Windows, 144/145 measured files respectively; only file
+  names and aggregate seconds are committed. Cached timings are scoped by OS/schema and Actions branch rules (PR caches
+  help only the same PR). No claim that PR timings automatically become a global main cache.
+- Verification: 61 focused workflow/planner/perf regression tests passed locally in 30.84s, zero skips. The feature-probe
+  regression took 1.73s locally. Final-commit full hosted verification and timing comparison are recorded in PR #57.
+- Decision queue: no new owner choice needed for this authorized CI continuation. Existing beta/branch-protection and
+  artifact-retention decisions remain DEFERRED to the release coordinator. Browser readiness, installer-stage caching
+  and slow Core-start fixtures are DEFERRED beyond this bounded pass; none is needed to validate these changes.
+
 ## CI follow-up (22 Oct 2026) — stacked on PR #44, not merged
 
 - Owner request in this session authorizes the follow-up PR and real Actions verification. One writer, isolated branch
