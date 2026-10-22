@@ -121,6 +121,7 @@ ROUTES = [
     ("what's not set up yet", "whats_not_set_up"), ("מה עוד לא מוגדר", "whats_not_set_up"),
     ("do it for me", "run_guide_step"), ("תעשה את זה בשבילי", "run_guide_step"),
     ("show me the guide", "open_guide"), ("תפתח את המדריך", "open_guide"),
+    ("please show me around", "show_tour"), ("תראה לי סיור", "show_tour"),
     ("not now, later", "setup_snooze"), ("לא עכשיו", "setup_snooze"),
     ("stop suggesting things", "stop_suggestions"), ("תפסיק להציע", "stop_suggestions"),
     ("how do you look now", "appearance_get"), ("איך אתה נראה", "appearance_get"),

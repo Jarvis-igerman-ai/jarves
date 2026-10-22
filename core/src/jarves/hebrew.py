@@ -16,6 +16,10 @@ import re
 
 # ---------------------------------------------------------------------- exact texts (English -> Hebrew)
 TEXT: dict[str, str] = {
+    "one wizard in the dashboard (#/setup) that sets up, tests and teaches every topic; your 'works' answers become the per-feature 'verified by owner' record and the release sign-off sheet":
+        "אשף אחד בלוח הבקרה (#/setup) להגדרה, בדיקה והיכרות עם כל נושא. התשובות שלכם מתעדות מה אומת על ידכם ומעדכנות את גיליון אישור הגרסה.",
+    "core/tests/test_wizard.py (state, diff, secrets, bug report, sign-off sheet)":
+        "core/tests/test_wizard.py (מצב, שינויים, סודות, דיווח באג, גיליון אישור)",
     # --- beta channel and release sign-off (continuous release)
     "gets every green main build automatically as a signed beta (latest-beta.json) instead of waiting for a tested "
     "stable release; one command or button goes back to stable, and the previous version can always be restored":

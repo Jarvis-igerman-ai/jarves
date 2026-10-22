@@ -88,14 +88,14 @@ GROUPS: tuple[tuple[str, str, str, tuple[str, ...]], ...] = (
                                                                   "whatsapp_bridge", "whatsapp_send", "home_assistant")),
     ("phone", "שיחות טלפון", "Phone calls", ("assisted_dialing",)),
     ("dashboard", "לוח בקרה וטלפון", "Dashboard & phone", ("dashboard", "dashboard_lan", "mobile_access", "web_chat", "context_trace")),
-    ("updates", "עדכונים וגיבוי", "Updates & backup", ("update_check", "beta_channel", "release_signoff", "backup")),
+    ("updates", "עדכונים וגיבוי", "Updates & backup", ("update_check", "beta_channel", "release_signoff", "setup_tour", "backup")),
     ("profiles", "פרופילים", "Profiles", ("profiles",)),
     ("helper", "עזרה במחשב (פקודות והתקנות)", "Computer helper (commands & installs)", ("helper", "helper_readonly_auto")),
     ("agents", "סוכני קוד", "Coding agents", ("agent_orchestrator",)),
 )
 ANSWER_KEYS = {"language", "connection", "api_key_from_env", "display_name", "spoken_name", "address_me",
                "wake_model", "voice", "approve_voice_cost", "features", "privacy_mode", "monthly_budget_usd",
-               "connect_google_now", "connect_now"}
+               "connect_google_now", "connect_now", "tour_now"}
 ADDRESS_MARK = "איך לפנות אליי / How to address me:"
 CONNECTIONS = (("chatgpt", "תוכנית ChatGPT שלי (בלי עלות נוספת, קול פשוט)", "My ChatGPT plan (no extra cost, simple voice)"),
                ("combined", "ChatGPT + מפתח API (הקול הכי טוב, הקול מחויב במפתח)",
@@ -151,11 +151,14 @@ T: dict[str, tuple[str, str]] = {
     "connect_now": ("להריץ עכשיו  jarvis connect ? הוא בודק מה מחובר (גוגל, טלגרם, Pear, מילת ההפעלה) ומדריך רק במה שחסר.",
                     "Run  jarvis connect  now? It checks what is connected (Google, Telegram, Pear, wake word) and "
                     "guides you through only what is missing."),
+    "tour_now": ("לפתוח עכשיו בלוח הבקרה את \"הגדרה וסיור\"? נושא אחרי נושא: מגדירים, בודקים ולומדים; אפשר לדלג על הכול.",
+                 "Open \"Setup and tour\" in the dashboard now? Topic by topic: set up, test and learn; every topic can be skipped."),
+    "tour_later": ("להגדרה וסיור בכל זמן:  jarvis tour  או בלוח הבקרה #/setup", "Setup and tour any time:  jarvis tour  or the dashboard #/setup"),
     "connect_later": ("לחיבור כל החשבונות בהדרכה:  jarvis connect", "Connect every account with guidance:  jarvis connect"),
     "summary": ("סיכום", "Summary"),
     "next": ("מה לעשות עכשיו", "What to do next"),
-    "change": ("לשנות הכול בכל זמן:  jarvis setup  או בלוח הבקרה: הגדרה ותוספים (#/setup)",
-               "Change anything later:  jarvis setup  or the dashboard: Setup & add-ons (#/setup)"),
+    "change": ("לשנות הכול בכל זמן:  jarvis setup  או בלוח הבקרה: הגדרה ותוספים (#/addons)",
+               "Change anything later:  jarvis setup  or the dashboard: Setup & add-ons (#/addons)"),
     "done": ("ההגדרה הושלמה.", "Setup complete."),
     "stopped": ("ההגדרה נעצרה. ההתקדמות נשמרה; הריצו  jarvis setup  כדי להמשיך.",
                 "Setup stopped. Progress is saved; run  jarvis setup  to continue."),
@@ -845,6 +848,13 @@ class Wizard:
 
     def step_connect(self) -> None:
         """The wizard ends by offering `jarvis connect` (owner request 20 Oct); never in a silent/scripted run."""
+        tour = self.actions.get("tour_start")
+        if not self.scripted and tour is not None:
+            if self.yesno("tour_now", chr(10) + self.t("tour_now"), True):
+                tour()
+                self.f.invalidate()
+                return
+            self.notes.append(self.t("tour_later"))
         start = self.actions.get("connect_start")
         if self.keep and not self.scripted and not missing_items(self.home, self.cfg):
             return
@@ -1156,6 +1166,7 @@ BUNDLE: dict[str, list[Callable[[], tuple[bool, str]]]] = {
     "backup": [_mod("jarves.backup")],
     "beta_channel": [_mod("jarves.updates")],
     "release_signoff": [_mod("jarves.release_signoff")],
+    "setup_tour": [_mod("jarves.wizard")],
     "update_check": [_mod("jarves.updates"), _mod("jarves.migrations"), _data("jarves", "dashboard_static/updates.js"),
                      _mod("cryptography.hazmat.primitives.asymmetric.ed25519")],   # the signed-manifest check needs it
     "background_core": [_mod("jarves.runtime.service")],

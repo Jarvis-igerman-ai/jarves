@@ -1,0 +1,52 @@
+order = 4
+category = "start"
+pages = ["setup"]
+features = ["setup_tour"]
+aliases = ["הגדרה וסיור", "סיור", "תראה לי מה אפשר", "show me around", "tour", "setup and tour", "wizard", "first run"]
+links = ["guided_setup", "help", "release_signoff"]
+title_he = "הגדרה וסיור (אשף אחד לכל הנושאים)"
+title_en = "Setup and tour (one wizard for every topic)"
+what_he = "עמוד אחד בלוח הבקרה שעובר נושא אחרי נושא: מגדירים (או מדלגים), בודקים שזה עובד, ולומדים בכרטיס של 30 שניות מה אפשר להגיד ואיפה הכול נמצא."
+what_en = "One dashboard page that goes topic by topic: set it up (or skip it), test that it works, and learn in a 30-second card what to say and where everything lives."
+say = [["תראה לי מה אפשר", "Show me around"], ["תגדיר איתי את המוזיקה", "Set up music with me"], ["תבדוק את הוואטסאפ", "Test WhatsApp"]]
+expect_he = "נפתח עמוד הגדרה וסיור בדפדפן. כל נושא: הגדרה, בדיקה, היכרות. אפשר לעצור ולהמשיך; ההתקדמות נשמרת."
+expect_en = "The Setup and tour page opens in the browser. Each topic has Set up, Test and Learn. You can stop and resume; progress is saved."
+cost_he = "חינם. הבדיקות מקומיות בלבד ולא קוראות לשירות בתשלום."
+cost_en = "Free. The checks are local only and never call a paid service."
+privacy_he = "מפתחות וטוקנים נשמרים רק במאגר הסודות. דיווח כשל כולל אבחון בלי תוכן שיחות או שמות."
+privacy_en = "Keys and tokens go only to the secret store. A failure report carries diagnostics without conversation content or names."
+test = "feature"
+test_he = "בודק שהאשף זמין."
+test_en = "Checks that the wizard is available."
+
+[[steps]]
+he = "פותחים את הגדרה וסיור: בלוח הבקרה #/setup, או בטרמינל jarvis tour, או אומרים \"תראה לי מה אפשר\"."
+en = "Open Setup and tour: the dashboard page #/setup, or jarvis tour in a terminal, or say \"Show me around\"."
+action = "open:#/setup"
+
+[[steps]]
+he = "בכל נושא בוחרים להגדיר, לדלג או אחר כך. מפתחות מקלידים רק בשדה הסמוי."
+en = "In each topic choose Set up, Skip or Later. Type keys only into the hidden field."
+action = ""
+
+[[steps]]
+he = "לוחצים \"תעשה את זה בשבילי\" לבדיקה בטוחה, ואז עובד / לא עובד / לדלג. \"לא עובד\" פותח דיווח באג עם אבחון בלי תוכן."
+en = "Press \"Do it for me\" for a safe check, then Works / Does not work / Skip. \"Does not work\" opens a bug report with content-free diagnostics."
+action = ""
+
+[[steps]]
+he = "בסוף: \"לכתוב את גיליון האישור\" (או jarvis tour --signoff) יוצר את docs/reviews/MANUAL_TEST_<גרסה>.md לשער הגרסה היציבה."
+en = "At the end: \"Write the sign-off sheet\" (or jarvis tour --signoff) creates docs/reviews/MANUAL_TEST_<version>.md for the stable release gate."
+action = "command:jarvis tour --signoff"
+
+[[problems]]
+he = "העמוד לא נפתח"
+en = "The page does not open"
+fix_he = "לוח הבקרה כבוי. הפעילו: jarvis features on dashboard ואז jarvis tour."
+fix_en = "The dashboard is off. Turn it on: jarvis features on dashboard, then jarvis tour."
+
+[[problems]]
+he = "נושא נשאר \"הוגדר, צריך בדיקה\""
+en = "A topic stays \"set up, needs a test\""
+fix_he = "לחצו \"תעשה את זה בשבילי\" ואז \"עובד\" או \"לדלג\". רק תשובה שלכם סוגרת את הנושא."
+fix_en = "Press \"Do it for me\" and then Works or Skip. Only your answer closes the topic."

@@ -1,3 +1,77 @@
+## Current individual-PR closeout (22 Oct 2026)
+
+- Owner authorized fixes, tests, review and individual merges of #72, #68 and #70. #72 merged at
+  [98230f8](https://github.com/igalgerman/jarves/commit/98230f89c353f7c7104f1e2b6a17c08d62aa3e36);
+  [exact-head CI](https://github.com/igalgerman/jarves/actions/runs/39814940596) and
+  [post-merge main CI](https://github.com/igalgerman/jarves/actions/runs/39817148513) passed.
+- #68 final source head `9e4ae129050103e1a395f746463a929f7a87bae6` passed its full local gate, 45 installer tests,
+  five PowerShell syntax checks and [full CI](https://github.com/igalgerman/jarves/actions/runs/39817252108), including
+  four smoke scenarios and old-version upgrade/rollback. Merged individually at
+  [cdce8fe](https://github.com/igalgerman/jarves/commit/cdce8fe8a5dcba78e1e608ccfa975afd37e0df55).
+- #70's first hosted run exposed missing tour-routing rows and piped setup launching the tour. Added bilingual routing
+  coverage and restricted the automatic tour offer to an interactive terminal with the dashboard enabled; 7 targeted
+  setup/routing/budget tests passed. Final exact-head CI is linked in the PR. No acceptance criterion was removed.
+- Final Windows CI also exposed a real workspace undo bug: equal backup mtimes sorted the unsuffixed filename ahead
+  of newer numbered backups. The Python workspace owner now orders ties numerically and keeps suffixes increasing
+  after retention pruning. A frozen-clock/equal-mtime regression covers numbers above 9 and pruning; all 36 focused
+  workspace/chat tests passed. No history was mutated on the owner's profile; visual source hashes remain unchanged.
+- Both remaining PRs use isolated worktrees, no force pushes, no runtime sensor/account/paid tests. Preview links and
+  hashes are below. The owner-PC beta installed earlier is build 199; these merges do not prove that PC was updated again.
+- Unrelated inherited `.github/workflows/next-flow.yml` failures on main predate this work; the branch flow remains
+  disabled (`ENABLE_NEXT_FLOW` absent). The primary `jarves-checks` and package results are reported separately.
+- GitHub temporarily retained active workflow records after all their jobs completed. Waited; when the stale main
+  records disappeared, a fresh query confirmed no active main run and #68 merged without needing a rule override.
+  Owner subsequently explicitly authorized proceeding past stale workflow records after verifying no actual jobs run.
+
+### Decision queue (including carried questions)
+
+| Question | Recommendation / tradeoff | Status and exact gate |
+|---|---|---|
+| Merge these three PRs? | Individual reviewed green merges preserve attribution and isolate failures. | ANSWERED: owner explicitly authorized; verify no actual main jobs run. Owner permits ignoring stale workflow records once every job finished. |
+| Enable next branch / bot fast-forward? | Keep disabled for this work; current owner rule prefers individual merges. | DEFERRED: future explicit workflow decision; no variable/token changes. |
+| Publish betas / daily promotion? | Keep existing beta publishing, keep stable behind owner sign-off. | ANSWERED for current beta: `ENABLE_BETA_PUBLISH=true`; daily/stable promotion DEFERRED to release policy. |
+| Which sandbox for future scenario runs? | Use the current fake-data local tests and disposable hosted runners here. | DEFERRED: broader scenario-runner stage, not needed for these PRs. |
+| Defender exclusion? | Leave exclusions unchanged; no need to weaken host protection for these tests. | DEFERRED: owner decision only if measured install performance still requires it. |
+| More paid AI QA budget? | Make no paid calls in this task; prior overall cap is not a new allowance. | DEFERRED: reconcile actual spend and obtain any new budget at live-QA gate. |
+| Branch protection / one required check? | Retain current settings; full exact-head CI evidence is still required for these merges. | DEFERRED: owner repository-settings decision. |
+| Artifact retention? | Keep implemented 7-day PR artifacts; smoke artifacts retain 3 days. | DEFERRED: future retention change; no settings changed here. |
+| Installer under 2 min / interactive layout? | Measure the final installer on the owner's PC; runner times are insufficient. | USER DECISION REQUIRED: #58 owner verification, still open. |
+| Full release wizard, standing rows, real phone/voice/account sign-off? | Merge this tested baseline without treating mocks or viewport captures as owner approval. | USER DECISION REQUIRED at #60 acceptance; missing broader work stays open under #58/#60/#61. |
+| Physical design, purchases and print risks? | Keep previous physical milestone gates; unrelated to these software merges. | DEFERRED: explicit future physical approval and real measurements. |
+
+## Initial wizard checkpoint (historical; current recovery evidence below)
+
+- Built: `core/src/jarves/wizard.py` (16 topics from the guides/features/CLI-parity tables, state in `wizard.json`, routes
+  `/api/wizard/*`), dashboard page `#/setup` (`wizard.js`/`wizard.css`; set up / skip / later, "Do it for me" test, Works /
+  Does not work / Skip, 30-second learn card, progress bar, topic list, resume, EN+HE, 390 px layout), `jarvis tour`
+  (`--status`, `--json`, `--signoff`), voice tool `show_tour` ("show me around", "set up music"), `jarvis setup` offers the tour
+  at its end, link from Settings, guide `setup_tour.toml`, feature `setup_tour` (CLI parity: `tour`).
+- `#/setup` is now the wizard and is the stable entry for the installer button; the old add-ons page moved to `#/addons`.
+- Results: Works writes per-feature "verified in X by owner on <date>" (wizard.json); `jarvis tour --signoff` / the page button
+  generate `docs/reviews/MANUAL_TEST_<version>.md` (rows W-<topic> + W-AUTO; skipped = accepted-blocked with a note; other rows
+  of an existing sheet are kept) for `jarvis release signoff --finish` and `tools/release_gate.py`.
+- Baseline vs diff: diff mode (after "Finish the first full check") shows topics named in the CHANGELOG section of the version,
+  topics with never-verified features, plus the SMOKE topics.
+- Open / not done: standing rows from `tools/manual_test_standing.toml` are not automatically imported (existing
+  sheet rows are preserved); main's connect/issues/self-management/web-chat integration has now been reconciled;
+  "reuse an old connection" uses the `connect` registry states only; the learn card is spoken by asking JARVES, not auto-spoken;
+  a failed topic's bug report is a local Issues-list entry (no GitHub upload). Installer pages are Codex's (packaging/ untouched).
+- Questions for the user: none blocking.
+## Wizard PR #70 recovery (22 Oct 2026)
+
+- Reconciled CLI, setup, dashboard plugins, guides and EN/HE locales with main while retaining the wizard and current
+  account/setup safeguards. Integrated the shared #72 pre-push prerequisite locally; merge remains individual.
+- Fixed topic-specific Connect targeting, removed stale owner verification after a failed recheck, and corrected
+  mixed-language learn cards and the missing Hebrew feature description. Added failed-recheck regression.
+- Initial focused wizard/setup/CLI suite: 52 passed. Final checks and hosted exact-head evidence are recorded in #70.
+- Actual headless Edge captures: [English desktop](../output/playwright/pr70/setup_en_1440.jpg),
+  [Hebrew phone layout](../output/playwright/pr70/setup_he_390.jpg),
+  [source hashes](../output/playwright/pr70/source-manifest.json), [8-page report](../output/playwright/pr70-results.json).
+  All eight page checks passed; updated wizard regression: 13 passed. These are demo-profile headless captures,
+  not owner account, real phone or voice confirmation. The complete local gate passed after backend Hebrew metadata repair.
+  Reproduction: from core, `python tools/all_pages_check.py --pages setup,addons --langs en,he --widths 1440,390`.
+- Decision queue: merge when reviewed/green ANSWERED; human setup/voice/account/phone acceptance remains USER DECISION
+  REQUIRED at the existing owner sign-off gate. No owner result is inferred from tests; related issues stay open.
 ## Installer parallel follow-up — PR #68 held for #67 → #72 (Codex)
 
 - Changes: separate functional/autostart-purge smoke VMs for each compression profile (same three candidate installs); start bundling before Go/bridge preparation; verify bridge before payload join; prepare cold-cache Inno concurrently. No batch product or wizard implementation/test files changed in this follow-up.

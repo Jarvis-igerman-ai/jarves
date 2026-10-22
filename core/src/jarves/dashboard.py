@@ -59,7 +59,7 @@ PLUGIN_MODULES = ("jarves.workspace", "jarves.curator", "jarves.memory", "jarves
                   "jarves.self_manage",                                            # Self-management page
                   "jarves.approvals", "jarves.skills.helper",                      # V3: Approvals list, Helper switch
                   "jarves.diag.service",                                           # SW-V4 O: Health page
-                  "jarves.selfspeed",
+                  "jarves.selfspeed", "jarves.wizard",
                   "jarves.chat_service", "jarves.chat_engine",                     # terminal chat + V5 web Chat page API
                   "jarves.issue_registry")                                         # Bug reports page (issues registry)
 MEMORY_UNDO_KEEP = 30

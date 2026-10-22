@@ -27,7 +27,7 @@ en = "In a terminal: jarvis help lists the topics, and jarvis help <topic> (e.g.
 [[steps]]
 he = "לבחור מחדש שם, קול ואת כל התוספים (מה פועל ומה כבוי): הריצו jarvis setup או פתחו את \"הגדרה ותוספים\"."
 en = "To choose the name, voice and every add-on (on or off) again: run jarvis setup or open Setup & add-ons."
-action = "open:#/setup"
+action = "open:#/addons"
 
 [[steps]]
 he = "לא רוצים הצעות? אמרו \"תפסיק להציע\" או כבו את \"הצעות עזרה בהגדרה\"."
