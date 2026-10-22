@@ -164,6 +164,15 @@ def _update_keys_are_hermetic(monkeypatch):
 
 
 @pytest.fixture(autouse=True)
+def _runtime_privacy_does_not_leak(monkeypatch):
+    """logs keeps the dashboard's runtime privacy switch in module globals; one test turning it on must not make the
+    next test in the same process (pytest-xdist worker) see privacy mode."""
+    from jarves import logs
+    for name, value in (("_runtime", None), ("_flag", None), ("_flag_mtime", None), ("_flag_checked", 0.0)):
+        monkeypatch.setattr(logs, name, value)
+
+
+@pytest.fixture(autouse=True)
 def _pear_probe_is_hermetic(monkeypatch):
     """The music feature probe pings Pear's real port; tests must not depend on whether Pear runs on this PC."""
     from jarves import features as feat
