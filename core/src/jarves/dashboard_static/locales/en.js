@@ -1617,6 +1617,22 @@
   "Warning": "Warning",
   "Skipped": "Skipped",
   "No data": "No data",
-  "dashboard Health & speed page, jarvis selftest, jarvis speedtest, Jobs page (times)": "dashboard Health & speed page, jarvis selftest, jarvis speedtest, Jobs page (times)"
+  "dashboard Health & speed page, jarvis selftest, jarvis speedtest, Jobs page (times)": "dashboard Health & speed page, jarvis selftest, jarvis speedtest, Jobs page (times)",
+  "Development": "Development",
+  "CI failed": "CI failed",
+  "CI running": "CI running",
+  "Green, waiting": "Green, waiting",
+  "Draft": "Draft",
+  "No CI yet": "No CI yet",
+  "In progress": "In progress",
+  "Stuck": "Stuck",
+  "Not done (not approved)": "Not done (not approved)",
+  "Suggested next step": "Suggested next step",
+  "asks first": "asks first",
+  "Agents": "Agents",
+  "No active agents.": "No active agents.",
+  "min": "min",
+  "Notes: ": "Notes: ",
+  "Issue #": "Issue #"
  }
 };

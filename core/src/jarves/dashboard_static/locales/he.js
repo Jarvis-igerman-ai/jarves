@@ -226,7 +226,7 @@
   "Windows": "Windows",
   "Pi (Linux ARM64)": "Pi (Linux ARM64)",
   "Health": "תקינות",
-  "Blocker": "חוסם",
+  "Blocker": "חסם",
   "Blocker: ": "חוסם: ",
   "Provider / model": "ספק / מודל",
   "Used / limit": "בשימוש / מגבלה",
@@ -1617,7 +1617,23 @@
   "Warning": "אזהרה",
   "Skipped": "דולג",
   "No data": "אין נתון",
-  "dashboard Health & speed page, jarvis selftest, jarvis speedtest, Jobs page (times)": "עמוד תקינות ומהירות בלוח הבקרה, jarvis selftest, jarvis speedtest, עמוד המשימות הקבועות (שעות)"
+  "dashboard Health & speed page, jarvis selftest, jarvis speedtest, Jobs page (times)": "עמוד תקינות ומהירות בלוח הבקרה, jarvis selftest, jarvis speedtest, עמוד המשימות הקבועות (שעות)",
+  "Development": "פיתוח",
+  "CI failed": "CI נכשל",
+  "CI running": "CI רץ",
+  "Green, waiting": "ירוק וממתין",
+  "Draft": "טיוטה",
+  "No CI yet": "אין CI",
+  "In progress": "בעבודה",
+  "Stuck": "תקוע",
+  "Not done (not approved)": "לא בוצע (לא אושר)",
+  "Suggested next step": "הצעה לצעד הבא",
+  "asks first": "מבקש אישור",
+  "Agents": "סוכנים",
+  "No active agents.": "אין סוכנים פעילים.",
+  "min": "דק'",
+  "Notes: ": "הערות: ",
+  "Issue #": "נושא #"
  },
  "rules": [
   [

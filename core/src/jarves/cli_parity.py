@@ -39,7 +39,7 @@ FEATURES: dict[str, object] = {
     "guided_setup": "setup", "self_check": "diagnose", "scheduler": "jobs", "reports": "reports", "notes": "notes",
     "timers": "timers", "lists": "lists", "goals": "goals", "adaptive_memory": "prefs", "prefs_in_prompt": "prefs",
     "goal_done_line": (D, "a pure switch; change it with `jarvis features`"), "proactive_intel": "proactive",
-    "dev_manager": "dev", "files": (D, "the file workspace is browsed on the My files page"),
+    "dev_manager": "dev", "dev_status": "dev", "files": (D, "the file workspace is browsed on the My files page"),
     "proactive_alerts": (D, "alerts are read and answered on the Alerts page"),
     "autonomy": (D, "autonomy proposals are approved on the Autonomy page"),
     "background_core": "start", "display_control": "show", "tray_icon": "start", "autostart": "autostart",
@@ -66,7 +66,7 @@ TOOL_GROUPS: dict[str, object] = {
     "contacts": "contacts", "dashboard": "dashboard", "display": "show", "features": "features",
     "files": (D, "the My files page"), "gmail": "mail", "google_connect": "google",
     "google_contacts": "contacts", "help": "help", "helper": "approvals", "home": "home",
-    "goals": "goals", "preferences": "prefs", "proactive": "proactive", "dev": "dev", "identity": "setup", "instagram": "instagram", "lists": "lists", "memory": "memory", "music": "music",
+    "goals": "goals", "preferences": "prefs", "proactive": "proactive", "dev": "dev", "devstatus": "dev", "identity": "setup", "instagram": "instagram", "lists": "lists", "memory": "memory", "music": "music",
     "notes": "notes", "profiles": "profile", "reports": "reports", "scheduler": "jobs", "self_check": "diagnose",
     "settings": (D, "settings are edited on the Settings page"), "skill_builder": (D, "the New Skills page"),
     "status": "status", "tasks": (D, "the Background tasks page"), "telegram": "telegram", "timers": "timers",
@@ -361,6 +361,36 @@ def cmd_proactive(a, cfg, home) -> int:
         db.close()
 
 
+def _dev_status(a, home) -> int:
+    from . import devstatus as ds
+    try:
+        st = ds.build(home, ds.repo_of(home))
+    except ValueError as e:
+        print(f"dev: {e}", file=sys.stderr)
+        return 2
+    lang = clilang.current()
+    if a.action == "digest":
+        print(ds.digest(st, lang))
+    elif a.action == "proposals":
+        for p in ds.proposals(st):
+            print(f"{p['id']:<18} {p['item']:<10} {p['command']}")
+        if not ds.proposals(st):
+            print(clilang.fmt("אין הצעות לפעולה", "no proposals"))
+    elif a.action == "apply":
+        res = ds.apply(home, st, a.proposal)
+        print(f"dev: {res['status']} {res.get('command') or res.get('reason') or ''}")
+        return 0 if res["ok"] else 1
+    else:
+        print(ds.sentence(st, lang))
+        print(f"{'':<5}{'STATE':<12}{'BLOCKER':<34}NEXT")
+        for it in st["items"]:
+            print(f"{'PR' if it['type'] == 'pr' else 'IS'}#{it['number']:<4}{it['state']:<12}{it['blocker'][:32]:<34}"
+                  f"{it['suggestion']['kind']}: {it['title'][:50]}")
+        for n in st["notes"]:
+            print(clilang.fmt(f"הערה: {n}", f"note: {n}"))
+    return 0
+
+
 def cmd_dev(a, cfg, home) -> int:
     from . import devmanager as dm
     from .diag import db as diag_db
@@ -368,6 +398,8 @@ def cmd_dev(a, cfg, home) -> int:
     st = Store(home / "store.db")
     try:
         diag_db.ensure(st)
+        if a.action in ("status", "digest", "proposals", "apply"):
+            return _dev_status(a, home)
         if a.action == "suggest":
             _warn_if_off(a, cfg, home, "dev_manager")
             d = dm.suggest(st, a.title, a.body, a.kind, by="cli")
@@ -556,6 +588,11 @@ def add_cli(sub) -> None:
     dv = sub.add_parser("dev", help="development drafts, kept local: list / suggest / show / discard / file (asks first)")
     dvs = dv.add_subparsers(dest="action", required=True)
     dvs.add_parser("list")
+    dvs.add_parser("status", help="read-only: agents, pull requests, issues and CI of JARVES with the suggested next step")
+    dvs.add_parser("digest", help="the same as a short text, on request only")
+    dvs.add_parser("proposals", help="list the GitHub changes that could be proposed (nothing is run)")
+    dap = dvs.add_parser("apply", help="apply PROPOSAL_ID after you approve its exact command on the approval popup")
+    dap.add_argument("proposal")
     dsg = dvs.add_parser("suggest", help="jarvis dev suggest \"title\" --body \"text\" [--kind ticket]")
     dsg.add_argument("title")
     dsg.add_argument("--body", default="")

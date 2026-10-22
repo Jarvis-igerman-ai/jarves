@@ -28,7 +28,7 @@ from . import lists as lists_mod
 from . import logs
 from . import notes as notes_mod
 from . import preferences as prefs_mod
-from . import calm, devmanager as dev_mod, proactive as proactive_mod
+from . import calm, devmanager as dev_mod, devstatus as devstatus_mod, proactive as proactive_mod
 from . import sandbox as sandbox_mod
 from . import scheduler as sched_mod
 from . import selfcheck as selfcheck_mod
@@ -213,7 +213,7 @@ class Operations:
         reg = core.registry
         for skill in [lists_mod.make_skill(self.lists), goals_mod.make_skill(self.goals, reg),
                       prefs_mod.make_skill(self.prefs), proactive_mod.make_skill(self.proactive),
-                      dev_mod.make_skill(self._open_store), timers_mod.make_skill(self.timers), *sched_mod.make_skills(self.scheduler, reg), notes_mod.make_skill(self.notes, self.sandbox),
+                      dev_mod.make_skill(self._open_store), devstatus_mod.make_skill(home), timers_mod.make_skill(self.timers), *sched_mod.make_skills(self.scheduler, reg), notes_mod.make_skill(self.notes, self.sandbox),
                       sandbox_mod.make_skill(self.sandbox), alerts_mod.make_skill(self.alerts),
                       autonomy_mod.make_skill(self.autonomy, reg)]:
             reg.register(skill)

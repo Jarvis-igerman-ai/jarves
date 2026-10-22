@@ -1,0 +1,43 @@
+order = 40
+category = "everyday"
+pages = ["development"]
+features = ["dev_status"]
+aliases = ["סטטוס פיתוח", "מה מצב הפיתוח", "בקשות משיכה", "development status", "pull requests", "ci status", "what is the status of development"]
+links = ["dev_manager", "agent_orchestrator"]
+title_he = "סטטוס פיתוח"
+title_en = "Development status"
+what_he = "מראה מה סוכני Claude Code ו-Codex, בקשות המשיכה, הנושאים וה-CI של JARVES עושים, מי תקוע או מוכן, ומציע את הצעד הבא. קריאה בלבד: כל שינוי ב-GitHub מוצג כפקודה מדויקת ומבקש אישור על המסך."
+what_en = "Shows what the Claude Code and Codex agents, pull requests, issues and CI of JARVES are doing, what is stuck or ready, and suggests the next step. Read-only: any change on GitHub is shown as an exact command and asks on the screen first."
+say = [["מה מצב הפיתוח?", "What is the status of development?"], ["איזה בקשות משיכה ממתינות?", "Which pull requests are waiting?"]]
+expect_he = "תשובה במשפט אחד בקול, וטבלה בעמוד \"פיתוח\": בקשת משיכה או נושא, מצב, חסם והצעה לצעד הבא. הצעות לשינוי (הרצה מחדש, מיזוג, תגובה, תגית) אינן מורצות לבד."
+expect_en = "A one-sentence answer by voice, and a table on the page \"Development\": pull request or issue, state, blocker and suggested next step. Proposed changes (rerun, merge, comment, label) are never run by themselves."
+cost_he = "חינם. קריאה בלבד מ-GitHub (עם מטמון ועצירה כשמגיעים למגבלת הקצב)."
+cost_en = "Free. Read-only GitHub calls (cached, and it stops when the rate limit is reached)."
+privacy_he = "נשלחות ל-GitHub רק בקשות קריאה. נשמרים רק מספר, כותרת קצרה ללא סודות, ענף, מזהה קומיט ושמות משימות CI; בלי גוף, תגובות או קוד. מהסוכנים נקראים רק ספק, פרויקט, ענף ומצב."
+privacy_en = "Only read requests go to GitHub. Only the number, a short redacted title, branch, commit id and CI job names are kept; no bodies, comments or code. From the agents only provider, project, branch and state are read."
+
+[[steps]]
+he = "אמרו \"מה מצב הפיתוח?\" או פתחו את העמוד \"פיתוח\"."
+en = "Say \"What is the status of development?\" or open the page \"Development\"."
+action = "open:#/development"
+check = "active:dev_status"
+
+[[steps]]
+he = "בלי קול: jarvis dev status (טבלה), jarvis dev digest (תקציר, רק לפי בקשה), jarvis dev proposals (הצעות לשינוי, לא מורצות), jarvis dev apply ID (מציג את הפקודה המדויקת ומבקש אישור)."
+en = "Without voice: jarvis dev status (table), jarvis dev digest (short text, only on request), jarvis dev proposals (proposed changes, not run), jarvis dev apply ID (shows the exact command and asks first)."
+
+[[steps]]
+he = "כדי לכבות: jarvis features off dev_status. למאגר אחר: ההגדרה dev.repo (בעלים/שם). לקריאה בלי הגבלה נמוכה הגדירו JARVES_UPDATE_TOKEN (קריאה בלבד) ב-secrets.env, או היכנסו ל-gh."
+en = "To turn it off: jarvis features off dev_status. Another repository: the setting dev.repo (owner/name). For a higher read limit set a read-only JARVES_UPDATE_TOKEN in secrets.env, or sign in to gh."
+
+[[problems]]
+he = "כתוב שאי אפשר לקרוא את GitHub"
+en = "It says GitHub cannot be read"
+fix_he = "הגדירו JARVES_UPDATE_TOKEN (קריאה בלבד) או היכנסו עם gh auth login. אם הגעתם למגבלת הקצב, התוצאה האחרונה מהמטמון מוצגת עד שהמגבלה מתאפסת."
+fix_en = "Set a read-only JARVES_UPDATE_TOKEN or run gh auth login. If the rate limit was reached, the last cached result is shown until it resets."
+
+[[problems]]
+he = "אין סוכנים בטבלה"
+en = "No agents in the list"
+fix_he = "הסוכנים מגיעים ממתזמר הסוכנים (jarvis agents). הפעילו אותו ובדקו שיש סשנים של Claude Code או Codex."
+fix_en = "Agents come from the agent orchestrator (jarvis agents). Turn it on and check that Claude Code or Codex sessions exist."

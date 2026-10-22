@@ -182,6 +182,8 @@ TEXT: dict[str, str] = {
         "כברירת מחדל JARVES עונה רק כשמבקשים; אפשר לאפשר לו להציע פריט אחד בתוך שיחה שכבר התחלת, אף פעם לא מחוץ לשיחה ולא בין 22:00 ל-07:00",
     "ideas and tickets for JARVES's own development are kept as local drafts; nothing is posted to GitHub unless you approve it on the screen":
         "רעיונות וכרטיסים לפיתוח של JARVES נשמרים כטיוטות מקומיות; שום דבר לא נשלח ל-GitHub בלי שתאשר על המסך",
+    "shows what the coding agents, pull requests and CI of JARVES are doing and suggests the next step; it only reads, and any change on GitHub asks on the screen first":
+        "מראה מה הסוכנים, בקשות המשיכה וה-CI של JARVES עושים ומציע את הצעד הבא; הוא רק קורא, וכל שינוי ב-GitHub מבקש קודם אישור על המסך",
     "shopping and to-do lists by voice: add, read back, tick off, clear":
         "רשימות קניות ומשימות בקול: הוספה, הקראה, סימון וניקוי",
     "opens web pages for you: full control only on your allow-list (empty at first), other sites read-only after you approve; purchases, payments and passwords always ask on the screen":
