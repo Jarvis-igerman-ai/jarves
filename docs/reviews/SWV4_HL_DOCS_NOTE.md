@@ -15,3 +15,5 @@ sections are not written here. They must be added to the guide when #24 lands:
 Integration decisions: the popup label for the dialing recipient is the shared "Recipient" / "נמען"; the bridge
 payload check runs both the F sidecar `.sha256` check and the L pin check (an unpinned bridge in the stage is a finding
 until `packaging/bridge_pin.json` is added by the bridge build).
+
+Update 21 Oct 2026: #24 is merged into `release/v4-prep`, the two guide sections exist (USER_GUIDE sections 10 and 14, en/he) and `packaging/bridge_pin.json` is added, so the payload check reports `BRIDGE: ... verified`. See [SWV4_RELEASE_CHECKLIST](SWV4_RELEASE_CHECKLIST.md).

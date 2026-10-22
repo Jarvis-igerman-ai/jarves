@@ -15,7 +15,7 @@ Evidence classes: **fake** = unit test with temp dirs and fakes; **script** = wr
 | Rollback | `updates.rollback`, `jarvis update --rollback`, dashboard Updates page button (asks approval), failed-first-start offer | **fake**; real installer round trip is the CI scenario (**script**) |
 | Unsigned decision | recorded (section 6) | docs |
 | Size/time budget hooks for M | `[installer.*]` in `core/perf_budgets.toml`, `packaging/installer_metrics.py`, `perf_gate.py --installer-json` | **fake** |
-| Go WhatsApp bridge in payload | pin file + SHA256 check, build stages `JARVES_BRIDGE_EXE` | **fake**; the bridge is **not on main**, so the check says "not part of this build" |
+| Go WhatsApp bridge in payload | pin file + SHA256 check, build stages `JARVES_BRIDGE_EXE` | **fake** + dry run; `packaging/bridge_pin.json` now pins the reproducible build, payload check PASS with it (21 Oct) |
 | Restricted token / AppContainer study | section 8, real probe | measured on this PC |
 
 ## 2. Clean-machine install test (no Windows Sandbox, no VM)
@@ -88,5 +88,5 @@ Findings:
 * A real installer was not built here (no 600 MB payload build). All installer-level steps (`-DefaultTasks`, `-UpgradeFrom`, `-Rollback`, `/ROLLBACK=1` refusal at setup level, `/RESTARTJARVES=1`) are scripts that CI will run; the Pascal pieces compile (downgrade guard harness) but the full `jarves.iss` compile with the new code was not run locally.
 * `packaging/upgrade_fixtures.json` is empty: pin real 0.1.0.x and 3.0.0.x installers (URL + SHA256) for the matrix; until then CI prints "UPGRADE MATRIX: NOT RUN".
 * `[installer.*]` time baselines are pending the first CI numbers.
-* The Go bridge is not on main; pin file and CI build step arrive with package F.
+* The Go bridge is pinned (`packaging/bridge_pin.json`, 21 Oct); CI compares the rebuilt binary with the pin.
 * No second-PC run, no SmartScreen observation, no real update from a published release.

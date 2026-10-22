@@ -186,12 +186,15 @@ if (-not $SkipFace) {
 $bridgePin = Join-Path $PSScriptRoot "bridge_pin.json"
 if (Test-Path $bridgePin) {
     $pin = Get-Content $bridgePin -Raw | ConvertFrom-Json
-    if (-not $env:JARVES_BRIDGE_EXE -or -not (Test-Path $env:JARVES_BRIDGE_EXE)) {
-        throw "packaging\bridge_pin.json exists but JARVES_BRIDGE_EXE (the CI-built Go binary) is not set or missing"
+    $bridgeSrc = $env:JARVES_BRIDGE_EXE
+    if (-not $bridgeSrc) { $bridgeSrc = Join-Path $Repo "bridge\whatsapp\dist\whatsapp_bridge.exe" }   # local build: scripts/build_whatsapp_bridge.ps1 -Version <pin.version>
+    if (-not (Test-Path $bridgeSrc)) {
+        throw "packaging/bridge_pin.json exists but the bridge binary is missing (set JARVES_BRIDGE_EXE or run scripts/build_whatsapp_bridge.ps1 -Version $($pin.version))"
     }
     $dst = Join-Path $Stage ($pin.path -replace '/', '\')
     New-Item -ItemType Directory -Force (Split-Path $dst -Parent) | Out-Null
-    Copy-Item $env:JARVES_BRIDGE_EXE $dst
+    Copy-Item $bridgeSrc $dst
+    if (Test-Path "$bridgeSrc.sha256") { Copy-Item "$bridgeSrc.sha256" "$dst.sha256" }   # checked by payload_check (F sidecar)
     Step "WhatsApp bridge staged: $($pin.path)"
 }
 
@@ -201,11 +204,11 @@ Copy-Item (Join-Path $PSScriptRoot "windows\THIRD_PARTY_NOTICES.txt") $Stage
 # SW-V4 F: the WhatsApp bridge binary (built by scripts/build_whatsapp_bridge.ps1) ships next to the Core when it was
 # built; payload_check.py verifies its .sha256. Its state (tokens, store) lives in the user's data dir, never here.
 $bridgeExe = Join-Path $Repo "bridge\whatsapp\dist\whatsapp_bridge.exe"
-if ((Test-Path $bridgeExe) -and (Test-Path "$bridgeExe.sha256")) {
+if (-not (Test-Path $bridgePin) -and (Test-Path $bridgeExe) -and (Test-Path "$bridgeExe.sha256")) {   # unpinned fallback; a pin (above) wins
     Step "WhatsApp bridge binary -> bridge\"
     New-Item -ItemType Directory -Force (Join-Path $Stage "bridge") | Out-Null
     Copy-Item $bridgeExe, "$bridgeExe.sha256" (Join-Path $Stage "bridge")
-} else {
+} elseif (-not (Test-Path $bridgePin)) {
     Step "WhatsApp bridge not built (run scripts/build_whatsapp_bridge.ps1 first to include it); skipping"
 }
 Step "payload check (no secrets, tokens, personal databases or logs)"
