@@ -853,7 +853,8 @@ class PopupChannel:
         nonce = secrets.token_hex(16)
         _write_json(inp, {"id": a.id, "title": a.title, "prompt": a.prompt, "why": a.why, "risk": a.risk,
                           "kind": a.kind, "details": a.details, "typed": bool(a.typed_code),
-                          "timeout_s": max(1, round(a.expires - time.time())), "lang": self.lang})
+                          "timeout_s": max(1, round(a.expires - time.time())), "lang": self.lang,
+                          "silent": bool((CHAT_TURN.get() or {}).get("silent"))})   # a silent chat turn: no bell
         argv = [_popup_python(), "-m", "jarves.approval_popup", "--in", str(inp), "--out", str(out), "--stdin"]
         if self.test_invoke:
             argv += ["--test-invoke", self.test_invoke]
@@ -947,7 +948,16 @@ def api_approval_answer(ctx, m, body):
         return 400, {"error": "body needs {\"approved\": true|false}"}
     ok, why = submit_answer(Path(ctx.home), m.group(1), body["approved"], channel="dashboard",
                             typed=str(body.get("typed") or "")[:12])
-    return (200, {"ok": True}) if ok else (409, {"error": why})
+    return (200, {"ok": True}) if ok else (409, {"error": why, "code": refusal_code(why)})
+
+
+def refusal_code(why: str) -> str:
+    """Fixed code of a refused answer (the first answer already won, or the typed code is needed)."""
+    if str(why).startswith("no such waiting approval"):
+        return "APPROVAL_ALREADY_ANSWERED"
+    if "code" in str(why).lower():
+        return "APPROVAL_CODE_NEEDED"
+    return "APPROVAL_REFUSED"
 
 
 def dashboard_routes(register_route) -> None:

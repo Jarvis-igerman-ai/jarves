@@ -77,7 +77,17 @@
         if (!confirm(tx("לנתק את כל הטלפונים המצומדים עכשיו?", "Revoke ALL paired phones now?"))) return;
         await api("/api/mobile/revoke-all", { method: "POST", body: "{}" }); route(true);
       } }, tx("ניתוק כל הטלפונים", "Revoke all phones"))));
+    const PG = { home: ["בית", "Home"], chat: ["שיחה", "Chat"], approvals: ["אישורים", "Approvals"], health: ["תקינות ומהירות", "Health & speed"] };
+    const pagesOf = (x) => el("fieldset", { class: "m4-pages" }, el("legend", { class: "small" }, tx("דפים מותרים", "Allowed pages")),
+      Object.keys(PG).map((p) => el("label", { class: "small" }, el("input", { type: "checkbox", checked: (x.pages || []).includes(p) ? true : null,
+        disabled: x.revoked ? true : null, onchange: async (ev) => {
+          const now = Object.keys(PG).filter((q) => (q === p ? ev.target.checked : (x.pages || []).includes(q)));
+          try { await api(`/api/mobile/devices/${x.id}/pages`, { method: "POST", body: JSON.stringify({ pages: now }) }); } catch (e) { ev.target.checked = !ev.target.checked; }
+          route(true);
+        } }), " ", tx(PG[p][0], PG[p][1]))),
+      el("div", { class: "muted small" }, tx("הגדרות, סודות, קבצים וניהול מכשירים תמיד רק במחשב.", "Settings, secrets, files and device management are always computer-only.")));
     const devs = d.devices.map((x) => el("tr", {}, el("td", {}, x.name), el("td", { class: "small" }, x.id),
+      el("td", {}, pagesOf(x)),
       el("td", { class: "small" }, x.last_seen ? `${day(x.last_seen)} ${clock(x.last_seen)}` : "—"), el("td", { class: "small" }, x.last_ip || ""),
       el("td", {}, x.revoked ? pill("plain", tx("בוטל", "revoked")) : el("button", { type: "button", onclick: async () => {
         await api(`/api/mobile/devices/${x.id}/revoke`, { method: "POST", body: "{}" }); route(true);
@@ -86,7 +96,7 @@
       el("td", {}, x.event), el("td", { class: "small" }, [x.method, x.path, x.status, x.device, x.ip, x.reason].filter(Boolean).join(" · "))));
     render(header(tx("טלפון", "Phone"), tx("דיבור עם JARVES מהטלפון. אין שרת בענן: הטלפון מדבר ישירות עם המחשב הזה.", "Talk to JARVES from your phone. No cloud server: the phone talks directly to this computer.")),
       status, el("div", { style: "height:12px" }), tailnetCard(d, box), el("div", { style: "height:12px" }), appr, el("h2", {}, tx("טלפונים מצומדים", "Paired phones")),
-      el("div", { class: "card m4-scroll" }, devs.length ? el("table", {}, el("thead", {}, el("tr", {}, ["", "Id", "", "", ""].map((h) => el("th", {}, h)))), el("tbody", {}, devs))
+      el("div", { class: "card m4-scroll" }, devs.length ? el("table", {}, el("thead", {}, el("tr", {}, ["", "Id", "", "", "", ""].map((h) => el("th", {}, h)))), el("tbody", {}, devs))
         : el("div", { class: "empty" }, tx("אין טלפונים מצומדים.", "No paired phones."))),
       el("h2", {}, tx("יומן ביקורת (ללא תוכן הודעות)", "Audit log (no message text)")),
       el("div", { class: "card m4-scroll" }, audit.length ? el("table", {}, el("tbody", {}, audit)) : el("div", { class: "empty" }, tx("עוד לא נרשם דבר.", "Nothing logged yet."))));

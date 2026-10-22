@@ -1109,3 +1109,13 @@ V5 review pass (21 Oct 2026): `docs/reviews/SWV5_SECURITY_REVIEW.md` - 4 finding
 ## Terminal text chat (`jarvis chat` / `jarvis text`) - branch v5/text-mode
 - Core side `chat_service.py` (link role cli: chat.hello/turn/cancel/command/approval_answer), REPL `chat_cli.py` (stdlib only). Silent hours (quiet hours or --silent) = no speech, chime or face change, enforced by the Core; `/voice on` only outside them. Approvals: terminal channel beside popup/dashboard, first answer wins; no voice channel in chat turns. Streaming via `Runner.run_streamed` (API-key route); ChatGPT-plan route shows the finished text.
 - Tests: `core/tests/test_chat.py` (30, real Core + fake model). UNVERIFIED: hands-on in a real Windows console (Ctrl+C at the idle prompt, RTL display). Merge held until v4.0.0 is tagged (target 4.0.1).
+
+---
+
+## Web chat: `jarvis web` + dashboard Chat page (21 Oct 2026) - #17, branch `v5/web-chat` (based on `v5/text-mode`, PR #42)
+
+- `chat_engine.py` (WebChat: event log + long-poll, slash commands, streaming, inline approvals, first answer wins with popup/terminal/phone), dashboard Chat page (`chat.js`, `chatview.js`), `jarvis web` (works with JARVES stopped via `web_cli.py` text core; with a running Core it opens the Chat page), paired phones use the same engine on `/api/m/chat/*`.
+- Phone/remote use: per-device allowed pages (default Home, Chat, Approvals, Health & speed); settings, secrets, files and devices are computer-only. Forbidden pages are refused SERVER-side with fixed codes; message ids make a resend idempotent (the stored answer, never a second run). `jarvis web --device-pages`, `--set-pages DEVICE chat,home`.
+- Shared with `jarvis chat` (#42): same Brain/Skills/approvals/history, `TOOL_SINK`, quiet hours, `text_session.build`. Honest limit: `chat_engine.py` (HTTP) and `chat_service.py` (link WebSocket) still each carry their own small helpers (slash command table, recent sessions); merging them into one module is a follow-up.
+- Fixed on the way: approval events overwrote the event cursor id; `/undo` passed the wrong file argument; two `/new` in one second merged into one stored conversation; a spoken reply finished after the reply event.
+- Verified (targeted, fakes only, no browser): test_web_chat 32, test_chat, parity, guides, log lint, hebrew, features, wizard, locales, mobile/dashboard phone files all green. NOT verified: a real browser and a real phone.

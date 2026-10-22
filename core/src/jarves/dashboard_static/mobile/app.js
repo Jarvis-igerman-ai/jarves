@@ -6,7 +6,8 @@
   const T = {
     en: { pair_title: "Pair this phone", pair_help: "On the computer open the JARVES dashboard, go to Phone and press Pair a phone. Scan the QR code, or type the 8-digit code here.",
       code: "Pairing code", name: "Name for this phone", pair: "Pair", pair_net: "Works on your home network only. Nothing here is reachable from the internet.",
-      tab_chat: "Chat", tab_voice: "Voice", tab_approvals: "Approvals", tab_status: "Status", send: "Send", type_here: "Type a message",
+      tab_home: "Home", tab_chat: "Chat", tab_voice: "Voice", tab_approvals: "Approvals", tab_health: "Health & speed", send: "Send", type_here: "Type a message",
+      waiting: "Waiting for approval", pages_you_have: "Pages on this device", no_tests: "No self-test or speed test has run yet.", chat_off: "Chat is not running on the computer.",
       hold: "Hold to talk", release: "Release to send", unpair: "Un-pair this phone", online: "connected", offline: "computer unreachable",
       pairing: "Pairing…", bad_code: "Wrong or expired code. Make a new one on the computer.", unpaired: "This phone is no longer paired. Pair again.",
       thinking: "…", err_chat: "JARVES could not answer right now.", voice_tls: "Voice needs a secure (https) connection. On the computer run: jarvis dashboard --mobile --tls-selfsigned. Text chat works without it.",
@@ -16,7 +17,8 @@
       busy: "The previous message is still being answered. Wait a moment.", phone_ap_on: "Phone approvals are on.", phone_ap_off: "Phone approvals are off: approvals are answered on the computer.", sending: "Sending…" },
     he: { pair_title: "צימוד הטלפון", pair_help: "במחשב פתחו את לוח הבקרה של JARVES, עברו אל טלפון ולחצו על צימוד טלפון. סרקו את קוד ה-QR או הקלידו כאן את הקוד בן 8 הספרות.",
       code: "קוד צימוד", name: "שם לטלפון", pair: "לצמד", pair_net: "עובד ברשת הביתית בלבד. שום דבר כאן לא נגיש מהאינטרנט.",
-      tab_chat: "שיחה", tab_voice: "קול", tab_approvals: "אישורים", tab_status: "מצב", send: "שליחה", type_here: "כתבו הודעה",
+      tab_home: "בית", tab_chat: "שיחה", tab_voice: "קול", tab_approvals: "אישורים", tab_health: "תקינות ומהירות", send: "שליחה", type_here: "כתבו הודעה",
+      waiting: "ממתינים לאישור", pages_you_have: "דפים במכשיר הזה", no_tests: "עוד לא רצה בדיקה עצמית או בדיקת מהירות.", chat_off: "השיחה לא פועלת במחשב.",
       hold: "לחצו והחזיקו לדיבור", release: "שחררו לשליחה", unpair: "ניתוק הטלפון", online: "מחובר", offline: "המחשב לא זמין",
       pairing: "מצמיד…", bad_code: "קוד שגוי או שפג תוקפו. הפיקו קוד חדש במחשב.", unpaired: "הטלפון כבר לא מצומד. צמדו מחדש.",
       thinking: "…", err_chat: "JARVES לא הצליח לענות כרגע.", voice_tls: "קול דורש חיבור מאובטח (https). במחשב הריצו: jarvis dashboard --mobile --tls-selfsigned. שיחה בכתב עובדת גם בלי זה.",
@@ -54,7 +56,7 @@
   }
   const post = (p, obj) => api(p, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(obj || {}) });
 
-  function forget() { token = ""; me = null; try { localStorage.removeItem(KEY); } catch (e) { /* ignore */ } show(); }
+  function forget() { unmountChat(); token = ""; me = null; try { localStorage.removeItem(KEY); } catch (e) { /* ignore */ } show(); }
 
   function show() {
     $("pairView").hidden = !!token; $("appView").hidden = !token;
@@ -62,7 +64,7 @@
     if (token) { load(); timer = setInterval(tick, 4000); }
     else { const m = /(?:^|[#&])c=(\d{6,9})/.exec(location.hash); if (m) { $("code").value = m[1]; history.replaceState(null, "", location.pathname); } }
   }
-  async function load() { try { me = await api("/api/m/me"); } catch (e) { return; } info(); tick(); voiceNote(); }
+  async function load() { try { me = await api("/api/m/me"); } catch (e) { return; } info(); allowTabs(); tick(); voiceNote(); }
   function info() { if (me) $("meInfo").textContent = `${me.name} · ${me.phone_approvals ? t("phone_ap_on") : t("phone_ap_off")}`; }
 
   // ---- pairing
@@ -76,31 +78,37 @@
     } catch (e) { msg.textContent = e.status === 403 ? t("bad_code") : e.message; }
   });
 
-  // ---- tabs
-  let tab = "chat";
-  document.querySelectorAll("[data-tab]").forEach((b) => b.addEventListener("click", () => {
-    tab = b.dataset.tab;
-    document.querySelectorAll("[data-tab]").forEach((x) => x.setAttribute("aria-selected", String(x === b)));
-    ["chat", "voice", "approvals", "status"].forEach((n) => { $("tab-" + n).hidden = n !== tab; });
+  // ---- tabs: only the pages the owner gave this device (the server refuses the others anyway: PAGE_NOT_ALLOWED)
+  let tab = "home", chatView = null;
+  const TABS = { home: "home", chat: "chat", voice: "chat", approvals: "approvals", health: "health" };
+  function setTab(name) {
+    tab = name;
+    document.querySelectorAll("[data-tab]").forEach((x) => x.setAttribute("aria-selected", String(x.dataset.tab === tab)));
+    Object.keys(TABS).forEach((n) => { $("tab-" + n).hidden = n !== tab; });
+    if (tab === "chat") mountChat();
     tick();
-  }));
+  }
+  function allowTabs() {
+    const pages = (me && me.pages) || [];
+    Object.keys(TABS).forEach((n) => { $("tabbtn-" + n).hidden = !pages.includes(TABS[n]); });
+    if (!pages.includes(TABS[tab])) setTab(pages.includes("home") ? "home" : (pages[0] ? Object.keys(TABS).find((n) => TABS[n] === pages[0]) : "home"));
+  }
+  document.querySelectorAll("[data-tab]").forEach((b) => b.addEventListener("click", () => setTab(b.dataset.tab)));
 
-  // ---- chat
-  function bubble(text, cls) { const d = document.createElement("div"); d.className = "msg " + (cls || ""); d.textContent = text; $("log").appendChild(d); d.scrollIntoView({ block: "end" }); return d; }
-  $("chatForm").addEventListener("submit", async (ev) => {
-    ev.preventDefault();
-    const box = $("chatText"), text = box.value.trim(); if (!text) return;
-    box.value = ""; bubble(text, "me"); const wait = bubble(t("thinking"));
-    const id = (window.crypto && crypto.randomUUID ? crypto.randomUUID() : Date.now().toString(36) + Math.random().toString(36).slice(2, 12));
-    const send = async () => {                       // same id on every resend: the PC answers once, a resend gets the stored answer
-      for (let i = 0; ; i++) {
-        try { return await post("/api/m/chat", { text, id }); }
-        catch (e) { if (i >= 3 || !(e.status === undefined || e.status === 0 || e.code === "BUSY")) throw e; await new Promise((r) => setTimeout(r, 1500 * (i + 1))); }
-      }
-    };
-    try { const d = await send(); wait.textContent = d.reply; if (!d.ok) wait.classList.add("err"); }
-    catch (e) { if (e.code === "BUSY") e.message = t("busy"); wait.textContent = e.status === 429 || e.status === 503 || e.status === 502 ? e.message : (e.message || t("err_chat")); wait.classList.add("err"); }
-  });
+  // ---- chat: the shared chat view (chatview.js), streaming, slash commands, inline approvals
+  const tx = (he, en) => (lang === "he" ? he : en);
+  const chatApi = {
+    state: (l) => api("/api/m/chat/state?lang=" + l),
+    events: (after, sig, l) => api("/api/m/chat/events?after=" + after + "&sig=" + encodeURIComponent(sig) + "&lang=" + l + "&wait=20"),
+    send: (body) => post("/api/m/chat/send", body),
+    answer: (id, approved, typed) => post("/api/m/approvals/" + id, { approved }),
+    silent: () => Promise.reject(new Error("computer only")),
+  };
+  function mountChat() {
+    if (chatView || !window.JarvesChat) return;
+    chatView = window.JarvesChat.mount($("chatRoot"), { api: chatApi, tx, device: true });
+  }
+  function unmountChat() { if (chatView) { chatView.destroy(); chatView = null; } }
 
   // ---- voice (push to talk): record, encode 16 kHz mono WAV, send
   function voiceNote() {
@@ -149,12 +157,15 @@
 
   // ---- approvals + status polling
   async function tick() {
-    if (!token || document.hidden) return;
+    if (!token || document.hidden || !me) return;
     try {
-      const a = await api("/api/m/approvals"); const n = a.pending.length, badge = $("apprCount");
-      badge.hidden = !n; badge.textContent = String(n);
-      if (tab === "approvals") renderApprovals(a);
-      if (tab === "status") renderStatus(await api("/api/m/status"));
+      if (me.pages.includes("approvals")) {
+        const a = await api("/api/m/approvals"); const n = a.pending.length, badge = $("apprCount");
+        badge.hidden = !n; badge.textContent = String(n);
+        if (tab === "approvals") renderApprovals(a);
+      }
+      if (tab === "home") renderHome(await api("/api/m/home"));
+      if (tab === "health") renderHealth(await api("/api/m/health"));
     } catch (e) { /* the connection pill already says why */ }
   }
   function li(parent, text, cls) { const l = document.createElement("li"); const s = document.createElement("span"); s.className = "grow"; s.textContent = text; l.appendChild(s); parent.appendChild(l); return l; }
@@ -171,13 +182,22 @@
       else { mk(t("approve"), true, true); mk(t("deny"), false, false); }
     });
   }
-  function renderStatus(s) {
+  function renderHealth(s) {
     const ul = $("statusList"); ul.replaceChildren();
     li(ul, `${t("core")}: ${s.core}`); li(ul, `${t("tls")}: ${s.tls ? t("yes") : t("no")}`);
     Object.keys(s.components || {}).sort().forEach((k) => li(ul, `${k}: ${s.components[k]}`));
+    const tl = $("testList"); tl.replaceChildren();
+    const kinds = Object.keys(s.tests || {});
+    if (!kinds.length) li(tl, t("no_tests"));
+    kinds.forEach((k) => li(tl, s.tests[k][lang === "he" ? "he" : "en"]));
+  }
+  function renderHome(s) {
+    const ul = $("homeList"); ul.replaceChildren();
+    li(ul, `${t("core")}: ${s.core}`); li(ul, `${t("waiting")}: ${s.waiting}`);
+    li(ul, `${t("pages_you_have")}: ${s.pages.join(", ")}`);
   }
   $("unpair").addEventListener("click", async () => { try { await post("/api/m/unpair"); } catch (e) { /* already gone */ } forget(); });
-  $("lang").addEventListener("click", () => { lang = lang === "he" ? "en" : "he"; try { localStorage.setItem(LANG, lang); } catch (e) { /* ignore */ } applyLang(); voiceNote(); info(); tick(); });
+  $("lang").addEventListener("click", () => { lang = lang === "he" ? "en" : "he"; try { localStorage.setItem(LANG, lang); } catch (e) { /* ignore */ } applyLang(); voiceNote(); info(); unmountChat(); if (tab === "chat") mountChat(); tick(); });
   document.addEventListener("visibilitychange", tick); window.addEventListener("online", tick);
   if ("serviceWorker" in navigator && window.isSecureContext) navigator.serviceWorker.register("/m/sw.js", { scope: "/m/" }).catch(() => {});
   applyLang(); show();

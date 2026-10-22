@@ -57,11 +57,14 @@ IN_TOOL: contextvars.ContextVar[str] = contextvars.ContextVar("jarves_in_tool", 
 TOOL_SINK: contextvars.ContextVar = contextvars.ContextVar("jarves_tool_sink", default=None)
 
 
-def _tool_seen(name: str, ok: bool, code: str) -> None:
+def _tool_seen(name: str, ok: bool, code: str, message: str = "") -> None:
     sink = TOOL_SINK.get()
     if sink is not None:
         try:
-            sink(name, ok, code)
+            if getattr(sink, "wants_detail", False):   # the web chat shows an expandable (redacted) result line
+                sink(name, ok, code, message)
+            else:
+                sink(name, ok, code)
         except Exception:
             pass                                       # a display problem never changes a tool result
 
@@ -372,7 +375,7 @@ class SkillRegistry:
 
     async def call(self, name: str, raw_args: dict | str | None = None, *, origin: Origin = "model") -> ToolResult:
         res = await self._call(name, raw_args, origin=origin)
-        _tool_seen(name, res.ok, res.code)             # terminal text chat: one short line per call (TOOL_SINK)
+        _tool_seen(name, res.ok, res.code, res.message)   # terminal + web chat: one line per call (TOOL_SINK)
         return res
 
     async def _call(self, name: str, raw_args: dict | str | None = None, *, origin: Origin = "model") -> ToolResult:

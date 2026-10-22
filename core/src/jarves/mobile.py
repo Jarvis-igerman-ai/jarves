@@ -56,9 +56,21 @@ REPLY_KEEP = 200
 MSG_ID_RE = re.compile(r"^[A-Za-z0-9_.:-]{8,64}$")
 DEFAULT_SCOPES = ("chat", "voice", "status", "approvals")
 ALL_SCOPES = DEFAULT_SCOPES
+# Pages a paired device may be given (the owner picks per device; default all four). Everything else is PC-only and is
+# refused by the server with a fixed code, whatever the page shows: PAGE_PC_ONLY (never grantable) and
+# PAGE_NOT_ALLOWED (a remote page this device was not given).
+PAGES = ("home", "chat", "approvals", "health")
+DEFAULT_PAGES = PAGES
+PC_ONLY_PAGES = ("settings", "secrets", "files", "devices")
+PC_ONLY_SEGMENTS = frozenset({"settings", "secrets", "files", "workspace", "memory", "config", "devices", "device",
+                              "mobile", "backup", "features", "connect", "logs", "revoke", "keys", "profiles",
+                              "identity", "google", "telegram", "whatsapp", "updates", "dashboard", "skills"})
+EVENTS_PER_MIN = 600           # chat long-poll: one request per streamed burst, a bucket of its own
 STATIC_FILES = {"index.html": "text/html; charset=utf-8", "app.js": "text/javascript; charset=utf-8",
                 "style.css": "text/css; charset=utf-8", "sw.js": "text/javascript; charset=utf-8",
-                "manifest.webmanifest": "application/manifest+json", "icon.svg": "image/svg+xml"}
+                "manifest.webmanifest": "application/manifest+json", "icon.svg": "image/svg+xml",
+                "chatview.js": "text/javascript; charset=utf-8", "chatview.css": "text/css; charset=utf-8"}
+SHARED_FILES = ("chatview.js", "chatview.css")      # one chat view for the dashboard and the phone page (dashboard_static/)
 
 
 def is_mobile_path(path: str) -> bool:
@@ -93,6 +105,18 @@ def write_private(path: Path, data: bytes) -> None:
         pass
 
 
+def _pages_of(d: dict) -> list[str]:
+    p = d.get("pages")
+    return [x for x in PAGES if x in p] if isinstance(p, list) else list(DEFAULT_PAGES)
+
+
+def page_of(path: str) -> str:
+    """The remote page an API path belongs to ('' = none: /me, /pages, /unpair, /pair)."""
+    seg = path.split("/")[3] if path.startswith("/api/m/") and path.count("/") >= 3 else ""
+    return {"chat": "chat", "voice": "chat", "approvals": "approvals", "status": "health", "health": "health",
+            "home": "home"}.get(seg, "")
+
+
 def _hash(s: str) -> str:
     return hashlib.sha256(s.encode()).hexdigest()
 
@@ -124,6 +148,7 @@ class MobileAccess:
         self._busy: set[str] = set()
         self._replies: dict[tuple[str, str], tuple[float, dict]] = {}   # (device, client message id) -> answered turn
         self.bridge: Bridge | None = None
+        self.chat = None                           # chat_engine.WebChat (the shared web conversation), set by the Dashboard
         self.scheme = "http"
         self.host: str | None = None
         self.port = 0
@@ -197,8 +222,8 @@ class MobileAccess:
 
     def devices(self) -> list[dict]:
         """Safe view (never the hash)."""
-        return [{k: d.get(k) for k in ("id", "name", "created", "last_seen", "last_ip", "revoked", "scopes")}
-                for d in self._devices()]
+        return [{**{k: d.get(k) for k in ("id", "name", "created", "last_seen", "last_ip", "revoked", "scopes")},
+                 "pages": _pages_of(d)} for d in self._devices()]
 
     def revoke(self, device_id: str, by: str) -> bool:
         with self._lock:
@@ -228,6 +253,21 @@ class MobileAccess:
             self.audit("device_scopes", by=by, device=device_id, scopes=",".join(scopes))
         return hit
 
+    def set_pages(self, device_id: str, pages: list[str], by: str) -> bool:
+        """The owner's per-device 'allowed pages'. PC-only pages cannot be granted (they are filtered out)."""
+        pages = [p for p in PAGES if p in pages]
+        with self._lock:
+            devs = self._devices()
+            hit = False
+            for d in devs:
+                if d.get("id") == device_id and not d.get("revoked"):
+                    d["pages"], hit = pages, True
+            if hit:
+                self._write(self.path, {"version": 1, "devices": devs})
+        if hit:
+            self.audit("device_pages", by=by, device=device_id, pages=",".join(pages))
+        return hit
+
     def authenticate(self, token: str) -> dict | None:
         dev_id, _, secret = (token or "").partition(".")
         if not dev_id or not secret or len(token) > 200:
@@ -244,7 +284,8 @@ class MobileAccess:
                     if now - (d.get("last_seen") or 0) > 60:
                         d["last_seen"] = now
                         self._write(self.path, {"version": 1, "devices": devs})
-                    return {"id": d["id"], "name": d.get("name", ""), "scopes": list(d.get("scopes") or DEFAULT_SCOPES)}
+                    return {"id": d["id"], "name": d.get("name", ""), "scopes": list(d.get("scopes") or DEFAULT_SCOPES),
+                            "pages": _pages_of(d)}
         return None
 
     # ------------------------------------------------------------------ pairing
@@ -512,12 +553,13 @@ def serve(h, mob: MobileAccess, ip: str) -> None:
             return h._send(405, b"", "text/plain")
         name = path[3:] or "index.html"
         ctype = STATIC_FILES.get(name)
-        f = STATIC_DIR / name
+        f = (STATIC_DIR.parent if name in SHARED_FILES else STATIC_DIR) / name
         if ctype is None or not f.is_file():
             return h._send(404, b"not found", "text/plain")
         return h._send(200, f.read_bytes(), ctype, {"Service-Worker-Allowed": "/m/"} if name == "sw.js" else None)
     # ---- the API
-    if not mob.rate_ok("ip:" + ip, IP_RATE_PER_MIN):
+    events = path == "/api/m/chat/events"            # the chat long-poll has its own, larger bucket
+    if not mob.rate_ok(("ipev:" if events else "ip:") + ip, EVENTS_PER_MIN if events else IP_RATE_PER_MIN):
         mob.audit_noisy("rate_limited", ip, path=path, scope="address")
         logs.warn("mobile", "MOBILE_RATE_LIMITED", "phone API rate limit hit", path=path)
         return h._json_extra(429, {"error": "too many requests"}, {"Retry-After": "60"})
@@ -544,7 +586,7 @@ def serve(h, mob: MobileAccess, ip: str) -> None:
         mob.audit_noisy("auth_refused", ip, path=path)
         logs.warn("mobile", "MOBILE_AUTH_FAILED", "phone API request without a valid token", path=path)
         return h._json(401, {"error": "not paired or revoked: pair again on the computer"})
-    if not mob.rate_ok("dev:" + dev["id"], DEVICE_RATE_PER_MIN):
+    if not mob.rate_ok(("devev:" if events else "dev:") + dev["id"], EVENTS_PER_MIN if events else DEVICE_RATE_PER_MIN):
         mob.audit("rate_limited", device=dev["id"], path=path, scope="device")
         return h._json_extra(429, {"error": "too many requests"}, {"Retry-After": "60"})
 
@@ -560,15 +602,57 @@ def serve(h, mob: MobileAccess, ip: str) -> None:
             mob.audit("request", device=dev["id"], method=method, path=path, status=status, **extra)
         return h._json(status, obj)
 
+    def need_page(page: str) -> bool:
+        if page in dev["pages"]:
+            return True
+        mob.audit("refused_page", device=dev["id"], path=path, reason=page)
+        h._json(403, {"error": f"this device was not given the {page} page: ask on the computer",
+                      "code": "PAGE_NOT_ALLOWED", "page": page})
+        return False
+
+    seg = path.split("/")[3] if path.count("/") >= 3 else ""
+    if seg in PC_ONLY_SEGMENTS:                   # settings, secrets, files, devices...: never from a phone or a remote PC
+        mob.audit("refused_pc_only", device=dev["id"], path=path, reason=seg)
+        logs.warn("mobile", "MOBILE_PC_ONLY_REFUSED", "a device asked for a computer-only page", path=path)
+        return h._json(403, {"error": "this can only be done on the computer itself", "code": "PAGE_PC_ONLY", "page": seg})
+    m = re.fullmatch(r"/api/m/pages/([a-z_]{1,20})", path)
+    if m and method == "GET":
+        name = m.group(1)
+        if name in PC_ONLY_PAGES:
+            mob.audit("refused_pc_only", device=dev["id"], path=path, reason=name)
+            return h._json(403, {"error": "this can only be done on the computer itself", "code": "PAGE_PC_ONLY", "page": name})
+        if name not in PAGES:
+            return h._json(404, {"error": "no such page", "code": "PAGE_UNKNOWN"})
+        if not need_page(name):
+            return
+        return h._json(200, {"page": name, "allowed": True})
+    if path == "/api/m/pages" and method == "GET":
+        return h._json(200, {"allowed": dev["pages"], "remote_pages": list(PAGES), "pc_only": list(PC_ONLY_PAGES)})
+    if path == "/api/m/home" and method == "GET":
+        if not need_page("home"):
+            return
+        try:
+            st = mob.bridge.status() if mob.bridge else {"core": "unknown", "components": {}}
+        except Exception:
+            st = {"core": "unreachable", "components": {}}
+        from .approvals import read_pending_file
+        return h._json(200, {"name": dev["name"], "core": st.get("core"), "waiting": len(read_pending_file(mob.home, reveal=False)),
+                             "pages": dev["pages"], "chat": mob.chat is not None})
+    if path == "/api/m/health" and method == "GET":
+        if not need_page("health"):
+            return
+        return h._json(200, health_view(mob))
+    if path.startswith("/api/m/chat/") and seg == "chat":
+        return _chat_routes(h, mob, dev, path, method, done, need, need_page)
     if path == "/api/m/me" and method == "GET":
-        return h._json(200, {"device": dev["id"], "name": dev["name"], "scopes": dev["scopes"],
+        return h._json(200, {"device": dev["id"], "name": dev["name"], "scopes": dev["scopes"], "pages": dev["pages"],
                              "phone_approvals": mob.settings()["phone_approvals"],
                              "voice": bool(mob.bridge and mob.bridge.voice_available() and mob.scheme == "https")})
     if path == "/api/m/unpair" and method == "POST":
         mob.revoke(dev["id"], by=dev["id"])
         return h._json(200, {"ok": True})
     if path == "/api/m/status" and method == "GET":
-        if not need("status"):
+        if not need("status") or not need_page("health"):
             return
         try:
             st = mob.bridge.status() if mob.bridge else {"core": "unknown", "components": {}}
@@ -577,7 +661,7 @@ def serve(h, mob: MobileAccess, ip: str) -> None:
             st = {"core": "unreachable", "components": {}}
         return h._json(200, {**st, "tls": mob.scheme == "https"})
     if path == "/api/m/chat" and method == "POST":
-        if not need("chat"):
+        if not need("chat") or not need_page("chat"):
             return
         d = _json_body(h)
         if d is None:
@@ -610,7 +694,7 @@ def serve(h, mob: MobileAccess, ip: str) -> None:
             mob.remember(dev["id"], mid, out)
         return done(200, out, chars=len(text))
     if path == "/api/m/voice" and method == "POST":
-        if not need("voice"):
+        if not need("voice") or not need_page("chat"):
             return
         if mob.scheme != "https" or mob.bridge is None or not mob.bridge.voice_available():
             return h._json(409, {"error": "voice needs TLS (https) and the voice pipeline"})
@@ -633,12 +717,12 @@ def serve(h, mob: MobileAccess, ip: str) -> None:
         return done(200, {"transcript": str(r.get("transcript", "")), "reply": str(r.get("reply", "")),
                           "ok": bool(r.get("ok", False))}, bytes=len(raw))
     if path == "/api/m/approvals" and method == "GET":
-        if not need("approvals"):
+        if not need("approvals") or not need_page("approvals"):
             return
         return h._json(200, approvals_view(mob))
     m = re.fullmatch(r"/api/m/approvals/([0-9a-f]{16})", path)
     if m and method == "POST":
-        if not need("approvals"):
+        if not need("approvals") or not need_page("approvals"):
             return
         d = _json_body(h)
         if d is None:
@@ -647,6 +731,51 @@ def serve(h, mob: MobileAccess, ip: str) -> None:
             return h._json(400, {"error": "body needs {\"approved\": true|false}"})
         status, obj = answer_approval(mob, m.group(1), d["approved"], dev["id"])
         return done(status, obj, decision="approve" if d["approved"] else "deny")
+    return h._json(404, {"error": "not found"})
+
+
+def health_view(mob: MobileAccess) -> dict:
+    """Read-only 'Health & speed' for a device: component status plus the latest self-test / speed-test sentences."""
+    try:
+        st = mob.bridge.status() if mob.bridge else {"core": "unknown", "components": {}}
+    except Exception as e:
+        logs.warn("mobile", "MOBILE_STATUS_FAILED", "status could not be read", error_type=type(e).__name__)
+        st = {"core": "unreachable", "components": {}}
+    out = {**st, "tls": mob.scheme == "https", "tests": {}}
+    try:
+        from . import selfspeed
+        hist = selfspeed.History(mob.home).view()
+        for kind, d in hist.get("latest", {}).items():
+            out["tests"][kind] = {"status": d.get("status"), "ts": d.get("ts"),
+                                  "en": selfspeed._summary(kind, d, "en"), "he": selfspeed._summary(kind, d, "he")}
+    except Exception:
+        pass                                      # no test history yet, or the feature is not installed
+    return out
+
+
+def _chat_routes(h, mob, dev, path, method, done, need, need_page) -> None:
+    """The streaming web chat for a paired device: state / send / events (chat_engine.WebChat). Needs the chat scope AND
+    the chat page; rate limits, message-id idempotency and the content-free audit are the same as the older /chat."""
+    from urllib.parse import parse_qs
+    from . import chat_engine
+    if not need("chat") or not need_page("chat"):
+        return
+    q = parse_qs(urlsplit(h.path).query)
+    if path == "/api/m/chat/state" and method == "GET":
+        st, obj = chat_engine.handle_state(mob.chat, q, device=True, home=mob.home)
+        return h._json(st, {**obj, "phone_approvals": mob.settings()["phone_approvals"]})
+    if path == "/api/m/chat/events" and method == "GET":
+        st, obj = chat_engine.handle_events(mob.chat, q, device=True, home=mob.home)
+        return h._json(st, {**obj, "phone_approvals": mob.settings()["phone_approvals"]})
+    if path == "/api/m/chat/send" and method == "POST":
+        d = _json_body(h)
+        if d is None:
+            return
+        if not mob.rate_ok("chat:" + dev["id"], CHAT_RATE_PER_MIN):
+            return h._json_extra(429, {"error": "too many messages, slow down", "code": "RATE_LIMITED"}, {"Retry-After": "30"})
+        text = str(d.get("text", ""))
+        st, obj = chat_engine.handle_send(mob.chat, {**d, "text": text}, client=dev["id"], device=True)
+        return done(st, obj, chars=len(text))
     return h._json(404, {"error": "not found"})
 
 
@@ -683,7 +812,8 @@ def answer_approval(mob: MobileAccess, aid: str, approved: bool, device: str) ->
         logs.info("mobile", "MOBILE_APPROVAL_ANSWERED", "an approval was answered from a phone", device=device,
                   decision="approve" if approved else "deny")
         return 200, {"ok": True}
-    return 409, {"error": why}
+    from .approvals import refusal_code
+    return 409, {"error": why, "code": refusal_code(why)}
 
 
 # ---------------------------------------------------------------------- TLS helpers
@@ -769,6 +899,15 @@ def dashboard_routes(register) -> None:
         ok = mob(ctx).set_scopes(m.group(1), [str(s) for s in sc], by="local")
         return (200, {"ok": True}) if ok else (404, {"error": "no such active phone"})
 
+    def pages(ctx, m, body):
+        pg = (body or {}).get("pages")
+        if not isinstance(pg, list):
+            return 400, {"error": "body needs {\"pages\": [...]}", "pc_only": list(PC_ONLY_PAGES)}
+        if any(str(p) in PC_ONLY_PAGES for p in pg):
+            return 403, {"error": "settings, secrets, files and devices stay on the computer", "code": "PAGE_PC_ONLY"}
+        ok = mob(ctx).set_pages(m.group(1), [str(p) for p in pg], by="local")
+        return (200, {"ok": True}) if ok else (404, {"error": "no such active phone"})
+
     def audit(ctx, _m, _b):
         return 200, {"entries": mob(ctx).audit_tail()}
     register("GET", r"/api/mobile", info)
@@ -777,4 +916,5 @@ def dashboard_routes(register) -> None:
     register("POST", r"/api/mobile/revoke-all", revoke_all)
     register("POST", r"/api/mobile/devices/([0-9a-f]{12})/revoke", revoke)
     register("POST", r"/api/mobile/devices/([0-9a-f]{12})/scopes", scopes)
+    register("POST", r"/api/mobile/devices/([0-9a-f]{12})/pages", pages)
     register("GET", r"/api/mobile/audit", audit)

@@ -157,6 +157,15 @@ TEXT: dict[str, str] = {
     "UNIT test_instagram.py (local fake Graph API server)": "בדיקות יחידה: test_instagram.py (שרת Graph API מדומה מקומי)",
     "never run against real Instagram: needs the owner's Meta app, account and token":
         "מעולם לא הורץ מול אינסטגרם אמיתי: דרושים אפליקציית Meta, חשבון ואסימון של הבעלים",
+    "the Chat page of the dashboard and `jarvis web`: the same silent text conversation as `jarvis chat`, with streaming answers, slash commands, inline approvals and one shared history; paired phones use it too when phone access is on":
+        "עמוד השיחה בלוח הבקרה ו-`jarvis web`: אותה שיחת טקסט שקטה כמו `jarvis chat`, עם תשובות שנכתבות בזמן אמת, פקודות /, אישורים בתוך השיחה והיסטוריה אחת משותפת; טלפונים מצומדים משתמשים בה גם כשהגישה מהטלפון פועלת",
+    "dashboard Chat page, `jarvis web`, dashboard Phone page (pages per phone)":
+        "עמוד השיחה בלוח הבקרה, `jarvis web`, עמוד הטלפון בלוח הבקרה (דפים לכל טלפון)",
+    "UNIT test_web_chat.py (fake Core and model, real dashboard and phone HTTP, first-answer-wins approvals, forbidden pages refused server-side, Hebrew round trip)":
+        "בדיקות יחידה: test_web_chat.py (ליבה ומודל מדומים, לוח בקרה וטלפון אמיתיים ב-HTTP, התשובה הראשונה לאישור קובעת, דפים אסורים נדחים בשרת, הלוך-חזור בעברית)",
+    "never opened in a real browser on the owner's PC or on a real phone": "מעולם לא נפתח בדפדפן אמיתי במחשב של הבעלים או בטלפון אמיתי",
+    "pure Python and plain JavaScript; not run on a Raspberry Pi yet (no device in the test setup)":
+        "Python ו-JavaScript רגיל בלבד; טרם הורץ על Raspberry Pi (אין מכשיר במערך הבדיקה)",
     "checks his own installation (daily) and his speed (weekly), tells you what is slow or broken and whether it got worse than before; free, read-only, never at night or during a conversation":
         "בודק את ההתקנה שלו (כל יום) ואת המהירות שלו (פעם בשבוע), אומר מה איטי או שבור והאם זה החמיר לעומת בעבר; חינם, קריאה בלבד, אף פעם לא בלילה או באמצע שיחה",
     "dashboard Health & speed page, jarvis selftest, jarvis speedtest, Jobs page (times)":
