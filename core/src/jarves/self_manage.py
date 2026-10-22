@@ -725,14 +725,14 @@ class StatusArgs(BaseModel):
 
 class ChangeArgs(BaseModel):
     what: Literal["file", "memory_add", "memory_remove", "feature", "skill", "setting"]
-    target: str = Field("", max_length=60, description="file name | memory id | feature id | skill id | setting key")
-    value: str = Field("", max_length=MAX_TEXT, description="the text, or on/off, or the setting value")
-    section: str = Field("", max_length=60, description="heading of the section (files)")
+    target: str = Field("", max_length=60, description="file/memory/feature/skill id or setting key")
+    value: str = Field("", max_length=MAX_TEXT, description="text, on/off or value")
+    section: str = Field("", max_length=60, description="section heading (files)")
     mode: Literal["append", "replace_section", "remove_section", "replace_file"] = "append"
 
 
 class ConnectArgs(BaseModel):
-    which: str = Field("", max_length=20, description="google telegram pear wake instagram home; empty = all")
+    which: str = Field("", max_length=20, description="google telegram pear wake instagram home|empty=all")
 
 
 class UndoArgs(BaseModel):
@@ -811,23 +811,20 @@ def make_skill(mgr: SelfManager) -> Skill:
 
     class SelfManageSkill(Skill):
         name = "self_manage"
-        description = "Manage myself: connections, features, skills, my files, memory, settings, undo"
+        description = "Manage myself"
 
         def tools(self) -> list[Tool]:
             return [
-                Tool("self_status", "My own state: connections (what is connected / broken), features, skills, memory, "
-                                    "my files, what to improve. 'מה מחובר?' 'what can be improved?'",
+                Tool("self_status", "My state: connections, features, skills, memory, files, improvements. 'מה מחובר?'",
                      status, StatusArgs, permission="read", timeout_s=20),
-                Tool("self_change", "Change myself, owner approves on screen: edit an .md section (SOUL/IDENTITY/USER/"
-                                    "MEMORY/AGENTS), add/forget memory, feature or skill on/off, a setting. "
-                                    "'תוסיף ל-USER' 'turn off X'. Never secrets.",
+                Tool("self_change", "Change myself (owner approves): .md section, memory, feature/skill on/off, setting. "
+                                    "'תוסיף ל-USER' 'turn off X'. No secrets.",
                      change, ChangeArgs, permission="destructive", impact=impact_change, precheck=pre_change,
                      approval_meta=meta_change, timeout_s=300),
-                Tool("self_connect", "Start guided connecting/fixing of an account (window opens; secrets typed there, "
-                                     "never in chat). 'תחבר את X' 'fix Telegram'",
+                Tool("self_connect", "Guided connect/fix of an account. 'תחבר את X'",
                      connect, ConnectArgs, permission="destructive", impact=impact_connect, precheck=pre_connect,
                      approval_meta=meta_simple),
-                Tool("self_undo", "Undo my last self-change. 'בטל את זה' 'undo that'",
+                Tool("self_undo", "Undo my last self-change. 'בטל את זה'",
                      undo, UndoArgs, permission="destructive", impact=impact_undo, precheck=pre_undo,
                      approval_meta=meta_simple),
             ]
