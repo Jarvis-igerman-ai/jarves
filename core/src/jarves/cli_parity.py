@@ -37,7 +37,7 @@ FEATURES: dict[str, object] = {
     "backup": "backup", "appearance": (D, "face theme and avatar are picked on the Appearance page"),
     "skill_creation": (D, "proposed Skills are reviewed on the New Skills page (risky: approval on screen)"),
     "guided_setup": "setup", "self_check": "diagnose", "scheduler": "jobs", "reports": "reports", "notes": "notes",
-    "timers": "timers", "lists": "lists", "files": (D, "the file workspace is browsed on the My files page"),
+    "timers": "timers", "lists": "lists", "goals": "goals", "adaptive_memory": "prefs", "files": (D, "the file workspace is browsed on the My files page"),
     "proactive_alerts": (D, "alerts are read and answered on the Alerts page"),
     "autonomy": (D, "autonomy proposals are approved on the Autonomy page"),
     "background_core": "start", "display_control": "show", "tray_icon": "start", "autostart": "autostart",
@@ -64,7 +64,7 @@ TOOL_GROUPS: dict[str, object] = {
     "contacts": "contacts", "dashboard": "dashboard", "display": "show", "features": "features",
     "files": (D, "the My files page"), "gmail": "mail", "google_connect": "google",
     "google_contacts": "contacts", "help": "help", "helper": "approvals", "home": "home",
-    "identity": "setup", "instagram": "instagram", "lists": "lists", "memory": "memory", "music": "music",
+    "goals": "goals", "preferences": "prefs", "identity": "setup", "instagram": "instagram", "lists": "lists", "memory": "memory", "music": "music",
     "notes": "notes", "profiles": "profile", "reports": "reports", "scheduler": "jobs", "self_check": "diagnose",
     "settings": (D, "settings are edited on the Settings page"), "skill_builder": (D, "the New Skills page"),
     "status": "status", "tasks": (D, "the Background tasks page"), "telegram": "telegram", "timers": "timers",
@@ -214,6 +214,111 @@ def cmd_lists(a, cfg, home) -> int:
     return 2
 
 
+# ---------------------------------------------------------------------- goals / learned preferences (V5 pillars)
+def cmd_goals(a, cfg, home) -> int:
+    from .goals import Goals, checkin_text
+    db = _db(home)
+    g = Goals(db)
+    try:
+        if a.action == "list":
+            rows = g.list("" if a.all else "active")
+            for r in rows:
+                due = f"  by {r['target_date']}" if r["target_date"] else ""
+                print(f"{r['id']:>3} [{r['status']}] {r['progress']:>3}%  {r['title']}{due}")
+                for s in r["steps"]:
+                    print(f"      [{'x' if s['done'] else ' '}] {s['id']}: {s['text']}" + ("  (outward)" if s["outward"] else ""))
+            if not rows:
+                print(clilang.fmt("אין יעדים", "no goals yet"))
+            return 0
+        if a.action == "add":
+            _warn_if_off(a, cfg, home, "goals")
+            r = g.add(a.title, a.details, a.by_date, a.step, by="cli")
+            print(clilang.fmt(f"יעד {r['id']} נוסף", f"goal {r['id']} added"))
+            return 0
+        if a.action == "step":
+            r = g.add_step(a.id, a.text, a.outward, by="cli")
+            print(clilang.fmt(f"התקדמות {r['progress']}%", f"progress {r['progress']}%"))
+            return 0
+        if a.action in ("done", "undone"):
+            r = g.set_step(a.step_id, a.action == "done", by="cli")
+            print(f"{r['title']}: {r['progress']}%")
+            return 0
+        if a.action == "status":
+            r = g.set_status(a.id, a.status, by="cli")
+            print(f"{r['title']}: {r['status']}")
+            return 0
+        if a.action == "checkin":          # only when you run it: nothing schedules this
+            print(checkin_text(g.checkin(by="cli")))
+            return 0
+        if a.action == "delete":
+            goal = g.get(a.id)
+            if not goal:
+                print(clilang.fmt("אין יעד כזה", "no such goal"), file=sys.stderr)
+                return 1
+            if not _confirm(f"Delete goal '{goal['title']}' and its steps?", a.yes):
+                print(clilang.fmt("לא נמחק", "nothing deleted"))
+                return 1
+            g.delete(a.id, by="cli")
+            print(clilang.fmt("נמחק", "deleted"))
+            return 0
+    except KeyError:
+        print(clilang.fmt("אין יעד או צעד כזה", "no such goal or step"), file=sys.stderr)
+        return 1
+    except ValueError as e:
+        print(f"goals: {e}", file=sys.stderr)
+        return 2
+    finally:
+        db.close()
+    return 2
+
+
+def cmd_prefs(a, cfg, home) -> int:
+    from .preferences import Preferences
+    db = _db(home)
+    p = Preferences(db)
+    try:
+        if a.action == "list":
+            rows = p.items()
+            for r in rows:
+                flag = " (stale: reaffirm it)" if r["stale"] else ""
+                print(f"{r['id']:>3} [{r['state']}] {r['topic']}: {r['text']}{flag}")
+                if r["state"] == "proposed":
+                    print(f"      you said: {r['evidence']}")
+            if not rows:
+                print(clilang.fmt("אין העדפות נלמדות", "no learned preferences"))
+            return 0
+        if a.action == "add":
+            _warn_if_off(a, cfg, home, "adaptive_memory")
+            r = p.add_confirmed(a.text, a.topic, by="cli")
+            print(clilang.fmt(f"נשמר: {r['item']['id']}", f"saved: {r['item']['id']}"))
+            return 0
+        if not p.get(a.id):
+            print(clilang.fmt("אין העדפה כזאת", "no such preference"), file=sys.stderr)
+            return 1
+        if a.action == "confirm":
+            r = p.confirm(a.id, by="cli")
+            print(clilang.fmt("נשמר", "remembered")
+                  + ("; may conflict with: " + "; ".join(c["text"] for c in r["conflicts"]) if r["conflicts"] else ""))
+        elif a.action == "decline":
+            p.decline(a.id, by="cli")
+            print(clilang.fmt("לא אזכור", "will not remember"))
+        elif a.action == "reaffirm":
+            p.reaffirm(a.id, by="cli")
+            print(clilang.fmt("אושר מחדש", "reaffirmed"))
+        elif a.action == "edit":
+            p.edit(a.id, a.text, by="cli")
+            print(clilang.fmt("עודכן", "updated"))
+        elif a.action == "remove":
+            p.remove(a.id, by="cli")
+            print(clilang.fmt("הוסר", "removed"))
+        return 0
+    except ValueError as e:
+        print(f"prefs: {e}", file=sys.stderr)
+        return 2
+    finally:
+        db.close()
+
+
 # ---------------------------------------------------------------------- notes / jobs / reports (read-only)
 def cmd_notes(a, cfg, home) -> int:
     from .notes import Notes
@@ -310,6 +415,43 @@ def add_cli(sub) -> None:
     cl.add_argument("--everything", action="store_true")
     cl.add_argument("--yes", action="store_true", help="you already approved (no question)")
 
+    go = sub.add_parser("goals", help="your goals: list / add / step / done / undone / status / checkin / delete")
+    gs = go.add_subparsers(dest="action", required=True)
+    gl = gs.add_parser("list")
+    gl.add_argument("--all", action="store_true", help="include done / dropped goals")
+    ga = gs.add_parser("add", help="jarvis goals add \"run a 10k\" --by 2026-12-31 --step \"buy shoes\"")
+    ga.add_argument("title")
+    ga.add_argument("--details", default="")
+    ga.add_argument("--by", dest="by_date", default="", help="target date YYYY-MM-DD")
+    ga.add_argument("--step", action="append", default=[])
+    gst = gs.add_parser("step", help="add a step: step GOAL_ID TEXT [--outward]")
+    gst.add_argument("id", type=int)
+    gst.add_argument("text")
+    gst.add_argument("--outward", action="store_true", help="involves other people or the outside world")
+    for act in ("done", "undone"):
+        gd = gs.add_parser(act, help=f"mark a step {act}: {act} STEP_ID")
+        gd.add_argument("step_id", type=int)
+    gss = gs.add_parser("status", help="status GOAL_ID active|paused|done|dropped")
+    gss.add_argument("id", type=int)
+    gss.add_argument("status")
+    gs.add_parser("checkin", help="your check-in, produced only when you run this")
+    gx = gs.add_parser("delete", help="delete a goal and its steps (asks first)")
+    gx.add_argument("id", type=int)
+    gx.add_argument("--yes", action="store_true", help="you already approved (no question)")
+
+    pr = sub.add_parser("prefs", help="learned preferences: list / add / confirm / decline / reaffirm / edit / remove")
+    ps = pr.add_subparsers(dest="action", required=True)
+    ps.add_parser("list")
+    pa = ps.add_parser("add", help="a preference you type yourself (saved as confirmed)")
+    pa.add_argument("text")
+    pa.add_argument("--topic", default="other")
+    for act in ("confirm", "decline", "reaffirm", "remove"):
+        pp = ps.add_parser(act, help=f"{act} one item: {act} ID")
+        pp.add_argument("id", type=int)
+    pe = ps.add_parser("edit", help="edit ID TEXT")
+    pe.add_argument("id", type=int)
+    pe.add_argument("text")
+
     nt = sub.add_parser("notes", help="your notes (read-only): list [--query Q] [--tag T] / show ID")
     ns = nt.add_subparsers(dest="action", required=True)
     nl = ns.add_parser("list")
@@ -329,4 +471,4 @@ def add_cli(sub) -> None:
     rsh.add_argument("id", type=int)
 
 
-COMMANDS = {"timers": cmd_timers, "lists": cmd_lists, "notes": cmd_notes, "jobs": cmd_jobs, "reports": cmd_reports}
+COMMANDS = {"timers": cmd_timers, "lists": cmd_lists, "goals": cmd_goals, "prefs": cmd_prefs, "notes": cmd_notes, "jobs": cmd_jobs, "reports": cmd_reports}

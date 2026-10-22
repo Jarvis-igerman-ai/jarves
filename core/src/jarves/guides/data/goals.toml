@@ -1,0 +1,36 @@
+order = 36
+category = "everyday"
+pages = ["goals"]
+features = ["goals"]
+aliases = ["יעדים", "יעד", "מטרה", "מטרות", "goals", "goal", "my goals", "check-in", "check in"]
+links = ["lists", "scheduler"]
+title_he = "יעדים"
+title_en = "Goals"
+what_he = "אתה קובע יעד בקול או בהקלדה, ו-JARVES עוקב אחרי ההתקדמות לפי צעדים. סיכום שבועי רק כשאתה מבקש."
+what_en = "You set a goal by voice or text and JARVES tracks progress by steps. A weekly check-in only when you ask."
+say = [["אני רוצה לרוץ עשרה קילומטר עד מרץ", "I want to run a 10k by March"], ["תוסיף צעד ליעד: לקנות נעליים", "Add a step to the goal: buy shoes"], ["סיימתי את הצעד", "I finished that step"], ["תן לי סיכום של היעדים שלי", "Give me a check-in on my goals"]]
+expect_he = "היעד נשמר ומופיע בעמוד \"יעדים\". JARVES לא מבצע צעדים בעצמו ולא שולח כלום; צעד שנוגע באנשים אחרים מבקש את אישורך. מחיקת יעד מבקשת אישור על המסך."
+expect_en = "The goal is saved and shown on the Goals page. JARVES never carries out steps or sends anything on its own; a step that involves other people asks for your approval. Deleting a goal asks on the screen."
+cost_he = "חינם. הכול מקומי."
+cost_en = "Free. All local."
+privacy_he = "היעדים נשמרים רק במחשב ונכללים בגיבוי. סיסמאות, מספרים ופרטי בריאות וכסף לא נשמרים."
+privacy_en = "Goals stay on this computer and are included in the backup. Passwords, numbers, health and money details are not stored."
+
+[[steps]]
+he = "אמרו \"אני רוצה לרוץ עשרה קילומטר עד מרץ\"."
+en = "Say \"I want to run a 10k by March\"."
+check = "active:goals"
+
+[[steps]]
+he = "הוסיפו צעדים וסמנו אותם כשהם בוצעו. כדי לשמוע איך הולך, בקשו \"תן לי סיכום של היעדים שלי\" (לא יגיע מעצמו)."
+en = "Add steps and tick them off as you do them. To hear how it is going, ask \"give me a check-in on my goals\" (it never arrives on its own)."
+
+[[steps]]
+he = "בלי קול: בלוח הבקרה, בעמוד \"יעדים\", או בשורת הפקודה: jarvis goals add \"לרוץ 10 ק\\\"מ\" --by 2026-12-31, jarvis goals list, jarvis goals checkin, jarvis goals delete ID (מבקש אישור)."
+en = "Without voice: on the dashboard page \"Goals\", or on the command line: jarvis goals add \"run a 10k\" --by 2026-12-31, jarvis goals list, jarvis goals checkin, jarvis goals delete ID (asks first)."
+
+[[problems]]
+he = "ה-JARVES לא ביצע את הצעד בשבילי"
+en = "JARVES did not carry out the step for me"
+fix_he = "זה בכוונה: יעד רק עוקב. בקשו את הפעולה עצמה (למשל \"תשלח הודעה...\") והיא תבקש אישור כרגיל."
+fix_en = "That is by design: a goal only tracks. Ask for the action itself (for example \"send a message...\") and it asks for approval as usual."
