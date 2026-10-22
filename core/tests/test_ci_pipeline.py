@@ -195,8 +195,13 @@ def test_security_files_exist():
 def test_fast_validation_blocks_expensive_jobs_and_reports_to_ci_ok():
     jobs = load("jarves-checks.yml")["jobs"]
     validation = steps_text(jobs["validate"])
-    for file in ("test_ci_workflows.py", "test_ci_pipeline.py", "test_ci_speed_tools.py", "test_docs_links.py"):
-        assert file in validation
+    assert "tools/prepush.py" in validation               # the quick gate IS the local pre-push command
+    sys.path.insert(0, str(ROOT / "core" / "tools"))
+    import prepush
+    gated = {Path(t).name for c in prepush.CHECKS for t in c.tests}
+    for file in ("test_ci_workflows.py", "test_ci_pipeline.py", "test_ci_speed_tools.py", "test_docs_links.py",
+                 "test_p_perf.py", "test_guides.py", "test_cli_parity.py", "test_hebrew_texts.py", "test_netguard.py"):
+        assert file in gated, file
     assert "--all-extras" not in validation
     for jid in ("core", "browser", "installer", "whatsapp-bridge", "perf", "cad", "blender", "godot", "e2e"):
         assert "validate" in jobs[jid]["needs"], jid

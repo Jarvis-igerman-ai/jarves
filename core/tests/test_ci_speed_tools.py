@@ -335,7 +335,7 @@ def test_no_duplicate_runs_per_commit():
 
 def test_ci_ok_aggregates_every_job_and_job_names_are_stable():
     jobs = _wf("jarves-checks.yml")["jobs"]
-    assert set(jobs["ci-ok"]["needs"]) == set(jobs) - {"ci-ok", "durations"}
+    assert set(jobs["ci-ok"]["needs"]) == set(jobs) - {"ci-ok", "durations", "failure-summary"}
     assert jobs["core"]["name"] == "Python Core tests (${{ matrix.os }} shard ${{ matrix.shard }})"
     assert jobs["ci-ok"]["if"] == "always()"
 

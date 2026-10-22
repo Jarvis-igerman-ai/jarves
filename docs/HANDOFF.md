@@ -1,3 +1,13 @@
+## PR readiness recovery (22 Oct 2026) — owner authorized #72, #68, #70
+
+- #72 synchronized with current main, retaining both the local pre-push rule and individual-PR review/merge rule.
+- The guide-state isolation fix is already on main. Corrected failure-summary classification: a test that failed again
+  is not a test that passed on retry; focused regression added. No runtime behavior changed.
+- Verification and exact-head hosted CI are recorded in PR #72. Subsequent #68/#70 merges require their own final-head
+  checks and diff review; no force push, blind merge or test weakening is authorized.
+- Decision queue: merge authorization ANSWERED by the owner's current request. Prior physical, account, paid QA and
+  human sign-off gates remain DEFERRED to their owning milestones; green CI does not satisfy them.
+
 ## Release and test system plan (22 Oct 2026) — docs only, stacked on PR #57, not merged
 
 - New plan: [docs/plans/RELEASE_AND_TEST_SYSTEM.md](plans/RELEASE_AND_TEST_SYSTEM.md) (DOC_MAP row added). Increments on

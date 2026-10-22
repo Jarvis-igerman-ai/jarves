@@ -1,5 +1,7 @@
 # NOW — V4 delivery + public-only repository consolidation (owner decision, 20 October 2026)
 
+**Owner authorization, 22 Oct:** repair and test open PRs #72, #68 and #70, review their final diffs and merge each individually only when ready and green. One writer; no force pushes or large integration batch. Wait for main checks/package between merges. No new account, paid-call, sensor or physical testing is authorized by this maintenance task.
+
 **Current execution contract (supersedes older dated status entries below):** `igalgerman/jarves` is the only active writable repository. `igalgerman/JARVIS` is deprecated and is only a **read-only historical migration source**. No new commits, sync pushes, PRs or Issues to the old private repo. Existing Claude/Codex worktrees must be repointed only after their ongoing writes are safely stopped; do not lose agent work.
 
 **Current approved software work: V4** (see [work package](JARVES_SW_V4_WORK_PACKAGE.md) and [owner decisions](plans/PRIORITIES.md)). V4's total authorized live-call budget remains **$25 overall**, *not an additional grant*; determine prior usage before spending. No new account linking, external messages, private data publication, microphone/camera activation, physical work or V5/V6 implementation without the corresponding user gate.
