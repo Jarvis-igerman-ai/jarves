@@ -1,0 +1,170 @@
+[
+ {
+  "page": "setup",
+  "lang": "en",
+  "width": 1440,
+  "theme": "light",
+  "dir": "ltr",
+  "scrollW": 1440,
+  "innerW": 1440,
+  "mainText": 1402,
+  "stats": {
+   "controls": 108,
+   "contrastChecked": 179,
+   "untranslated": 0,
+   "hebrewOnEnglish": 0,
+   "issues": 0
+  },
+  "problems": [],
+  "group": "capabilities",
+  "sweep": 0,
+  "ms": 7659
+ },
+ {
+  "page": "addons",
+  "lang": "en",
+  "width": 1440,
+  "theme": "light",
+  "dir": "ltr",
+  "scrollW": 1440,
+  "innerW": 1440,
+  "mainText": 29183,
+  "stats": {
+   "controls": 245,
+   "contrastChecked": 725,
+   "untranslated": 0,
+   "hebrewOnEnglish": 0,
+   "issues": 0
+  },
+  "problems": [],
+  "group": "capabilities",
+  "sweep": 0,
+  "ms": 11869
+ },
+ {
+  "page": "setup",
+  "lang": "en",
+  "width": 390,
+  "theme": "light",
+  "dir": "ltr",
+  "scrollW": 390,
+  "innerW": 390,
+  "mainText": 935,
+  "stats": {
+   "controls": 40,
+   "contrastChecked": 78,
+   "untranslated": 0,
+   "hebrewOnEnglish": 0,
+   "issues": 0
+  },
+  "problems": [],
+  "group": "capabilities",
+  "sweep": 0,
+  "ms": 4991
+ },
+ {
+  "page": "addons",
+  "lang": "en",
+  "width": 390,
+  "theme": "light",
+  "dir": "ltr",
+  "scrollW": 390,
+  "innerW": 390,
+  "mainText": 29183,
+  "stats": {
+   "controls": 192,
+   "contrastChecked": 655,
+   "untranslated": 0,
+   "hebrewOnEnglish": 0,
+   "issues": 0
+  },
+  "problems": [],
+  "group": "capabilities",
+  "sweep": 0,
+  "ms": 9389
+ },
+ {
+  "page": "setup",
+  "lang": "he",
+  "width": 1440,
+  "theme": "light",
+  "dir": "rtl",
+  "scrollW": 1440,
+  "innerW": 1440,
+  "mainText": 1228,
+  "stats": {
+   "controls": 108,
+   "contrastChecked": 179,
+   "untranslated": 0,
+   "hebrewOnEnglish": 0,
+   "issues": 0
+  },
+  "problems": [],
+  "group": "capabilities",
+  "sweep": 0,
+  "ms": 6289
+ },
+ {
+  "page": "addons",
+  "lang": "he",
+  "width": 1440,
+  "theme": "light",
+  "dir": "rtl",
+  "scrollW": 1440,
+  "innerW": 1440,
+  "mainText": 23774,
+  "stats": {
+   "controls": 245,
+   "contrastChecked": 725,
+   "untranslated": 0,
+   "hebrewOnEnglish": 0,
+   "issues": 0
+  },
+  "problems": [],
+  "group": "capabilities",
+  "sweep": 0,
+  "ms": 10058
+ },
+ {
+  "page": "setup",
+  "lang": "he",
+  "width": 390,
+  "theme": "light",
+  "dir": "rtl",
+  "scrollW": 390,
+  "innerW": 390,
+  "mainText": 799,
+  "stats": {
+   "controls": 40,
+   "contrastChecked": 78,
+   "untranslated": 0,
+   "hebrewOnEnglish": 0,
+   "issues": 0
+  },
+  "problems": [],
+  "group": "capabilities",
+  "sweep": 0,
+  "ms": 5695
+ },
+ {
+  "page": "addons",
+  "lang": "he",
+  "width": 390,
+  "theme": "light",
+  "dir": "rtl",
+  "scrollW": 390,
+  "innerW": 390,
+  "mainText": 23774,
+  "stats": {
+   "controls": 192,
+   "contrastChecked": 655,
+   "untranslated": 0,
+   "hebrewOnEnglish": 0,
+   "issues": 0
+  },
+  "problems": [],
+  "group": "capabilities",
+  "sweep": 0,
+  "ms": 9613
+ }
+]

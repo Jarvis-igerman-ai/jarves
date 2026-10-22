@@ -1,4 +1,4 @@
-## Setup and tour wizard, dashboard part (22 Oct 2026) - branch v5/wizard, draft PR, issues #58/#60/#61
+## Initial wizard checkpoint (historical; current recovery evidence below)
 
 - Built: `core/src/jarves/wizard.py` (16 topics from the guides/features/CLI-parity tables, state in `wizard.json`, routes
   `/api/wizard/*`), dashboard page `#/setup` (`wizard.js`/`wizard.css`; set up / skip / later, "Do it for me" test, Works /
@@ -11,8 +11,8 @@
   of an existing sheet are kept) for `jarvis release signoff --finish` and `tools/release_gate.py`.
 - Baseline vs diff: diff mode (after "Finish the first full check") shows topics named in the CHANGELOG section of the version,
   topics with never-verified features, plus the SMOKE topics.
-- Open / not done: `tools/manual_test_standing.toml` (PR #46) is not on main yet, so its standing rows are not imported (existing
-  sheet rows are preserved); merge main after the 4.0.1 integration batch (connect #34, issues #48, self-management #37, web chat #49);
+- Open / not done: standing rows from `tools/manual_test_standing.toml` are not automatically imported (existing
+  sheet rows are preserved); main's connect/issues/self-management/web-chat integration has now been reconciled;
   "reuse an old connection" uses the `connect` registry states only; the learn card is spoken by asking JARVES, not auto-spoken;
   a failed topic's bug report is a local Issues-list entry (no GitHub upload). Installer pages are Codex's (packaging/ untouched).
 - Questions for the user: none blocking.
@@ -23,7 +23,11 @@
 - Fixed topic-specific Connect targeting, removed stale owner verification after a failed recheck, and corrected
   mixed-language learn cards and the missing Hebrew feature description. Added failed-recheck regression.
 - Initial focused wizard/setup/CLI suite: 52 passed. Final checks and hosted exact-head evidence are recorded in #70.
-- Actual headless Edge captures and browser report: `output/playwright/pr70/`, `output/playwright/pr70-results.json`.
+- Actual headless Edge captures: [English desktop](../output/playwright/pr70/setup_en_1440.jpg),
+  [Hebrew phone layout](../output/playwright/pr70/setup_he_390.jpg),
+  [source hashes](../output/playwright/pr70/source-manifest.json), [8-page report](../output/playwright/pr70-results.json).
+  All eight page checks passed; updated wizard regression: 13 passed. These are demo-profile headless captures,
+  not owner account, real phone or voice confirmation. The complete local gate passed after backend Hebrew metadata repair.
   Reproduction: from core, `python tools/all_pages_check.py --pages setup,addons --langs en,he --widths 1440,390`.
 - Decision queue: merge when reviewed/green ANSWERED; human setup/voice/account/phone acceptance remains USER DECISION
   REQUIRED at the existing owner sign-off gate. No owner result is inferred from tests; related issues stay open.

@@ -1,0 +1,16 @@
+{
+  "source_sha256": {
+    "core/src/jarves/dashboard_static/locales/he.js": "617F548A6292FD4D2F9FCB1694DE8F44BB639614645577D837F2063E6B5FA30E",
+    "core/src/jarves/dashboard_static/wizard.css": "BCA324E41140915337ECE388D7E535589636464490190411EC996D0A2C8347CE",
+    "core/src/jarves/wizard.py": "BC15C17A887B4CFC746B0494233743D3FF5D1AA28A9152A1357127A8DC946084",
+    "core/src/jarves/dashboard_static/locales/en.js": "C20F1A15016EC99A6C3155E7D166465C18518855166A53FF107726A0D1CD5CEE",
+    "core/src/jarves/dashboard_static/wizard.js": "CC932E968F180D1C302BE30141AA952548D36111F0FA73E0623E2E90A4359FC2"
+  },
+  "captures": {
+    "setup_en_1440.jpg": "40A70E64B973AB5D887EE9CD27B3D13D6D353CA77164DD62466CBEAFB9F1468E",
+    "setup_he_390.jpg": "069EF0FDC4C9CC519C530419F67763D836EA573D46FF3C7DE5D01445849D9752"
+  },
+  "source_commit": "7d3338deff029a386962979775e0f5828b0dc65f",
+  "profile": "isolated seeded demo; no owner data, sensors or paid calls",
+  "command": "python tools/all_pages_check.py --pages setup,addons --langs en,he --widths 1440,390"
+}

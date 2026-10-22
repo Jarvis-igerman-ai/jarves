@@ -6,6 +6,8 @@
 
 Repository: `igalgerman/jarves` (public) is the only active repo; the private `igalgerman/JARVIS` is a read-only migration source ([MIGRATION_STATUS](MIGRATION_STATUS.md)). Dashboard languages are English and Hebrew only (Arabic and Russian were dropped in V4).
 
+**Integration update, 22 Oct evening:** #67 merged and 4.0.1-beta.1 was published; #72's local pre-push gate and CI failure summary are merged. Installer changes are delivered through #68 and the setup/tour baseline through #70, each with its own exact-head CI/review evidence. These are beta software increments, not completion of owner acceptance: #58's installer timing/visual gates, #60's full release-signoff workflow and real-device acceptance, and #61's broader self-awareness remain open. The earlier per-PR version inventory below is a historical checkpoint; current evidence is in [HANDOFF](HANDOFF.md) and the linked PRs.
+
 ### V4 — released as 4.0.0, 4.0.1 in open PRs
 
 - **4.0.0** = `main` after the V4 release PR #41 (21 Oct 2026; version 4.0.0 in `core/pyproject.toml`; scope decision: only what was merged in `main`). The signed installer is built and published by the package workflow (`package.yml`) to `igalgerman/jarvis-releases` after `jarves-checks` is green on `main`. At the time of writing the newest published installer there was still 3.0.0.130; check `gh release list -R igalgerman/jarvis-releases`. What it contains and its limits: [RELEASE_NOTES_4.0](RELEASE_NOTES_4.0.md), checklist [SWV4_RELEASE_CHECKLIST](reviews/SWV4_RELEASE_CHECKLIST.md), plan [V4 package](JARVES_SW_V4_WORK_PACKAGE.md). Owner live gates still open: real Telegram/Instagram/Home Assistant, WhatsApp real account, Phone Link, real installer round trip, live Claude/Codex sessions.
