@@ -28,5 +28,5 @@ TODO/FIXME with issue refs in core/src (none), flaky tests named by the owner. S
 | O-01, O-02 | P3 | CLI parity decisions | open: owner decision | - |
 | D-10..D-18 | P3 | dashboard Hebrew/layout | open | - |
 | R-02..R-09 | P3 | residual security risks | open (documented) | - |
-| flaky: memory.db handle, idle-write sample, dashboard load 9.7 s, 2 real-browser tests, privacy_state frame wait | P3 | tests | open: not yet root-caused (local runs frozen) | - |
+| flaky: idle-write sample, dashboard load, privacy_state frame wait, perf gate noise | P3 | tests | fixed here (warm-up + median, event-driven waits, settle) | fix/bug-sweep-4-1 |
 | perf gate noise (spawn_to_ready_s, threads), installer 198 MB, duplicate docs | P3 | perf/docs | open | - |

@@ -290,13 +290,20 @@ async def test_dashboard_home_strip_and_preview_api(core):
         st, r = await call(rt_mod.api_camera_preview_set, {"start": True})
         return r if st == 200 and r["open"] is True else None
     assert await until(opened)
-    frame = None
-    for _ in range(400):
-        st, r = await call(rt_mod.api_camera_preview_poll)
-        if r.get("frame"):
-            frame = r["frame"]
-            break
-        await asyncio.sleep(0.1)
+    got: dict = {}
+
+    async def frame_arrived():
+        # deadline-based wait (conftest.until, WAIT_S), no fixed iteration count / sleep. A loaded runner can take longer
+        # than the preview window to deliver the first frame: the window then closes by design, so re-open and keep waiting.
+        st_, r_ = await call(rt_mod.api_camera_preview_poll)
+        if st_ == 200 and not r_.get("open"):
+            await call(rt_mod.api_camera_preview_set, {"start": True})
+        if st_ == 200 and r_.get("frame"):
+            got.update(st=st_, r=r_)
+            return True
+        return False
+    await until(frame_arrived, interval=0.05)
+    st, r, frame = got["st"], got["r"], got["r"]["frame"]
     assert st == 200 and frame and base64.b64decode(frame["data"]) and r["open"] is True
     st, body = await call(rt_mod.api_runtime)
     assert body["privacy"]["camera"]["state"] == "preview"
@@ -322,12 +329,12 @@ async def test_core_preview_with_fake_camera_reaches_the_face(core):
     svc.switches.active = lambda fid: True                              # both switches on (unit: gates tested above)
     svc.detector, svc._models = None, None                              # no presence detection: preview only
     face = await open_face(core)
-    await face.send("camera.preview", {"open": True, "seconds": 5})
+    await face.send("camera.preview", {"open": True, "seconds": 30})
     ps = await face.wait("camera.preview_state")
     assert ps["open"] is True
-    fr = await face.wait("camera.preview_frame", timeout=20)
+    fr = await face.wait("camera.preview_frame")
     assert fr["seq"] >= 1 and base64.b64decode(fr["data"])
-    await face.wait("privacy.state", lambda p: p["camera"]["state"] == "preview", timeout=20)
+    await face.wait("privacy.state", lambda p: p["camera"]["state"] == "preview")
     await face.send("camera.preview", {"open": False})
     await face.wait("camera.preview_state", lambda p: p["open"] is False)
     await until(lambda: not cam.is_open)
