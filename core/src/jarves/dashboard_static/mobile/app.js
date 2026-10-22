@@ -33,6 +33,7 @@
     document.documentElement.lang = lang; document.documentElement.dir = lang === "he" ? "rtl" : "ltr";
     document.querySelectorAll("[data-t]").forEach((n) => { const c = n.querySelector(".badge"); if (c) { n.firstChild.textContent = t(n.dataset.t) + " "; } else n.textContent = t(n.dataset.t); });
     document.querySelectorAll("[data-ph]").forEach((n) => { n.placeholder = t(n.dataset.ph); });
+    const lb = $("lang"); lb.textContent = lang === "he" ? "EN" : "עב"; lb.lang = lang === "he" ? "en" : "he"; lb.setAttribute("aria-label", lang === "he" ? "English" : "עברית");
     setConn(connected);
   }
   let token = ""; try { token = localStorage.getItem(KEY) || ""; } catch (e) { /* storage blocked */ }
