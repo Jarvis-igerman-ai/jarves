@@ -8,6 +8,7 @@ All notable changes to JARVES. Newest first. Details per release: [docs/RELEASE_
 - Added: stable releases are tag-driven and gated by a manual test sign-off (`jarvis release signoff`, dashboard page Release sign-off), see docs/RELEASING.md; `core/tools/release_rollback.py` with a dry run.
 - Changed: CI runs the Windows Python tests in 3 shards and the real-browser tests as their own job with one retry; every green `main` builds a signed candidate (not published).
 - Added: SECURITY.md, Dependabot, CodeQL (Python), secret scanning exclusions for the planted test tokens.
+- Added: Issues registry. JARVES lists the problems he finds in himself (self-test, speed test, diagnostics and crash findings, tools that keep failing, crashes, dashboard script errors), de-duplicated and content-free: `jarvis issues`, dashboard page Bug reports (English and Hebrew) with a Report button that shows the exact text, asks in the approvals popup, then files an issue labelled `from-diagnostics`. Voice: "what issues do you have?". Issues the CHANGELOG lists on a Fixes line are marked fixed in that version. See docs/BUGFIX_LANE.md and `core/tools/triage_issues.py`.
 
 ## 4.0 (unreleased, in integration)
 ## 4.0.0 (release candidate, not yet released)

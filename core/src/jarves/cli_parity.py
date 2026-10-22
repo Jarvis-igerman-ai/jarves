@@ -53,6 +53,7 @@ FEATURES: dict[str, object] = {
     "agent_orchestrator": "agents",
     "assisted_dialing": "dial", "self_manage": "manage",
     "self_tests": "selftest", "text_chat": "chat",
+    "issue_reports": "issues",
 }
 
 # Skill (tool group) name -> "jarvis <command>" or ("dashboard", reason) or ("voice", reason) for groups that only
@@ -76,6 +77,7 @@ TOOL_GROUPS: dict[str, object] = {
     "agents": "agents",
     "dialing": "dial", "self_manage": "manage",
     "selfspeed": "selftest",
+    "issues": "issues",
 }
 
 

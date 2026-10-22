@@ -164,6 +164,13 @@ TEXT: dict[str, str] = {
     "UNIT test_selfspeed.py (planted faults, fake clock, fake Core, real dashboard HTTP)":
         "בדיקות יחידה: test_selfspeed.py (תקלות מדומות, שעון מדומה, ליבה מדומה, לוח בקרה אמיתי ב-HTTP)",
     "not yet run on the owner's PC for a week": "טרם הורץ שבוע שלם על המחשב של הבעלים",
+    "collects the problems he finds in himself into one list and, only after you approve the exact text, reports them to the developer so the next version fixes them":
+        "אוסף את הבעיות שהוא מוצא בעצמו לרשימה אחת, ורק אחרי שאישרת את הנוסח המדויק מדווח עליהן למפתח כדי שהגרסה הבאה תתקן אותן",
+    "dashboard Bug reports page, jarvis issues, header badge": "עמוד דיווחי תקלות בלוח הבקרה, jarvis issues, תג בכותרת",
+    "UNIT test_issue_registry.py (fake Core, fake GitHub endpoint, planted faults, real dashboard HTTP)":
+        "בדיקות יחידה: test_issue_registry.py (ליבה מדומה, שרת GitHub מדומה, תקלות מדומות, לוח בקרה אמיתי ב-HTTP)",
+    "no real report filed yet with an owner token": "עוד לא נשלח דיווח אמיתי עם אסימון של הבעלים",
+    "pure Python; never run on a Raspberry Pi (no device in the test setup)": "Python טהור; מעולם לא הורץ על Raspberry Pi (אין מכשיר בסביבת הבדיקות)",
     "pure Python; /proc counters; never run on a Raspberry Pi (no device in the test setup)":
         "Python בלבד; מונים מ-/proc; מעולם לא הורץ על Raspberry Pi (אין מכשיר בסביבת הבדיקות)",
     "checks health, recent logs, settings and features on demand and weekly, then suggests ranked fixes; settings change only after you approve":

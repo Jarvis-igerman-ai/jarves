@@ -280,6 +280,12 @@ class Operations:
         except Exception:
             self.selfspeed = None
             logs.error("selfspeed", "SELFSPEED_ATTACH_FAILED", "self-test tools not started", exc=True)
+        from . import issue_registry                 # owner request 21 Oct: issues registry, log sink, list_issues, fixed-in check
+        try:
+            self.issues = issue_registry.attach(self.core, self)
+        except Exception:
+            self.issues = None
+            logs.error("issues", "ISSUES_ATTACH_FAILED", "issues registry not started", exc=True)
 
     async def _connect_nudge(self) -> None:
         """Owner request 20 Oct: once a day at most, remind that Google is not connected (connect.maybe_nudge)."""
@@ -314,6 +320,9 @@ class Operations:
                 logs.error("autonomy", "AUTONOMY_SYNC_FAILED", "diagnostic proposals not updated", exc=True)
 
     async def stop(self) -> None:
+        if getattr(self, "issues", None) is not None:
+            from . import issue_registry
+            issue_registry.detach(self.issues)
         if getattr(self, "health_diag", None) is not None:
             await self.health_diag.stop()
         if getattr(self, "selfcheck", None) is not None:

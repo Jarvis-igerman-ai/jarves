@@ -83,6 +83,14 @@
 - Goals only track (never act); outward steps and deletes ask the owner; the check-in exists only on request. Preferences are proposals until an explicit yes; sensitive text is refused; all items visible/editable/removable.
 - Verified locally: `test_v5_pillars.py` 18 passed; guides, cli_parity, dashboard_locales, log_message_lint (0 violations), capabilities, features, hebrew_texts, dashboard, backup, privacy, perf_probes pass. Full suite and CI not run.
 - Questions for the user: see "Open for the owner" in the design (inject confirmed preferences into the model instructions now? spoken "well done" on a finished goal?).
+## Issues pipeline (21 Oct 2026) - branch `v5/issues-pipeline`, public repo igalgerman/jarves
+
+- Done: `core/src/jarves/issue_registry.py` (registry file issues_registry.json, ids JI-xxxxxxxx, content-free evidence by construction, feeders: selftest/speedtest via selfspeed, diag findings incl. crash finding, tool-failure and crash log sink, dashboard JS errors, `jarvis issues add`), dashboard page **Bug reports** (EN+HE, `bugs.js`; named so it does not clash with the existing conversation "Issues" page) with Report button: exact bundle shown, approvals popup, then GitHub issue labelled `from-diagnostics` on igalgerman/jarves (no token: saved to issue_reports/), `jarvis issues`, voice tool `list_issues`, fixed-in tracking from CHANGELOG "Fixes" lines, `core/tools/triage_issues.py`, docs/BUGFIX_LANE.md, guide issue_reports.toml, feature row `issue_reports`. Tests: core/tests/test_issue_registry.py (fake GitHub on loopback).
+- Not verified: a real report filed with an owner token; the dashboard page in a real browser (no browser test added).
+- Questions for the user: (1) page name: kept "Bug reports" because "Issues" already exists for conversation problems; say if you want them merged or renamed. (2) Create the label `from-diagnostics` on igalgerman/jarves.
+
+---
+
 ## Self-test and speed test (21 Oct 2026) - branch `v5/self-and-speed-tests`, public repo igalgerman/jarves
 
 - `jarvis selftest [--deep] [--audio] [--json]` (core/src/jarves/selftest.py, `selftest.run(deep=False)` returns `SelfTestResult` dataclasses): quick read-only checks (config, DB integrity, file permissions, feature probes, tool/guide/CLI-parity consistency, EN+HE locale completeness, log privacy, disk, version/updates). `--deep` adds a real Core start/stop in a temp home, wake model load, speech engine and audio device checks; nothing is spoken or recorded unless `--audio` (one quiet tone, 0.5 s mic level, dropped).
