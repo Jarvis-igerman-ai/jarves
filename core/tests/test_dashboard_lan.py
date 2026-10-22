@@ -74,7 +74,7 @@ def test_lan_mode_binds_all_but_answers_only_the_home_network(lan, monkeypatch):
         assert client_allowed(ip), ip
     for ip in ("8.8.8.8", "1.1.1.1", "2001:4860:4860::8888", "100.64.0.1", "not-an-ip"):
         assert not client_allowed(ip), ip
-    monkeypatch.setattr(dashboard, "client_allowed", lambda ip: False)    # e.g. a port-forward from the internet
+    monkeypatch.setattr(dashboard_auth, "client_allowed", lambda ip: False)    # e.g. a port-forward from the internet
     r, body = req(lan, "GET", "/pair")
     assert r.status == 403 and b"network" in body
 

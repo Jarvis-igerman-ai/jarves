@@ -6,7 +6,7 @@ aliases = ["תקציב קשיח", "תקרה קשיחה", "client delegation", "s
 links = ["api_budget", "voice_ai", "web_search"]
 title_he = "תקציב קשיח לחיפושים בשיחה"
 title_en = "Strict budget for spoken lookups"
-what_he = "כשהמתג דולק, ג'ארביס עצמו מריץ כל חיפוש שהקול החי מעביר, ושומר את העלות שלו לפני השליחה. כך תקרת היום ותקרת השאלה אף פעם לא נחצות, אפילו לא בבקשה אחת. עם ChatGPT + מפתח API החשיבה רצה על המנוי שלך (0 דולר API לחשיבה)."
+what_he = "כשהמתג דולק, ג'ארביס עצמו מריץ כל חיפוש שהקול החי מעביר, ושומר את העלות שלו לפני השליחה. כך תקרת היום ותקרת השאלה אף פעם לא נחצות, אפילו לא בבקשה אחת. עם ChatGPT + מפתח API החשיבה רצה על המנוי שלכם (0 דולר API לחשיבה)."
 what_en = "With the switch on, JARVES itself runs every lookup the live voice hands over and reserves its cost before sending it, so the daily and per-question limits are never exceeded, not even by one request. With ChatGPT + API key the reasoning runs on your plan ($0 API for the reasoning)."
 say = [["מה מזג האוויר עכשיו בתל אביב?", "What is the weather in Tel Aviv right now?"], ["עזוב, לא משנה", "Never mind"]]
 expect_he = "הוא עונה כרגיל, אולי שבריר שנייה לאט יותר. כשהתקציב היומי נגמר הוא אומר זאת בכנות ומציע לענות ממה שהוא כבר יודע. \"עזוב\" באמצע חיפוש עוצר אותו."
@@ -33,7 +33,7 @@ en = "Set the caps: Settings (Cost limits) or jarvis budget set --daily-usd 1 --
 action = "command:jarvis budget set --daily-usd 1 --turn-usd 0.05"
 
 [[steps]]
-he = "בדקו שהתקרה עובדת, בלי עלות: jarvis budget test-cap. ההזמנות החיות מופיעות בעמוד העלויות ו-jarvis budget status."
+he = "בדקו שהתקרה עובדת, בלי עלות: jarvis budget test-cap. הבקשות החיות מופיעות בעמוד העלויות ו-jarvis budget status."
 en = "Check the cap works, free: jarvis budget test-cap. Live reservations show on the Costs page and in jarvis budget status."
 action = "command:jarvis budget test-cap"
 

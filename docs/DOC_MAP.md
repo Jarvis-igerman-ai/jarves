@@ -56,6 +56,7 @@ Execution authority: [NOW](NOW.md) (the only active brief) with [AGENTS](../AGEN
 | [PRODUCT_VISION](PRODUCT_VISION.md) | Six product stages (north star) | general | current | itself |
 | [PROJECT_PRINCIPLES](PROJECT_PRINCIPLES.md) | Durable principles, printability, Israel sourcing, owner decisions | general | current | itself |
 | [plans/PRIORITIES](plans/PRIORITIES.md) | Owner decisions log (V4 approval, WhatsApp, 21 Oct decisions) | V4-V5 | current, append-only | itself |
+| [plans/RELEASE_AND_TEST_SYSTEM](plans/RELEASE_AND_TEST_SYSTEM.md) | Release and test system plan: alpha/beta/stable, `next` batches, 12 shards, scenario runner, sandbox, owner sheet < 15 min | 4.1-V5 | plan for owner review (increments on PRs #44/#57) | [RELEASING](RELEASING.md), [CI_PERFORMANCE](CI_PERFORMANCE.md) |
 | [SW_V1_WORK_PACKAGE](SW_V1_WORK_PACKAGE.md) | First assistant, CI, music | V1 | historical | [CHANGELOG](../CHANGELOG.md) |
 | [JARVES_SW_V2_IMPLEMENTATION_SPEC](JARVES_SW_V2_IMPLEMENTATION_SPEC.md) | Milestones M1-M6 spec | V2 | historical | CHANGELOG |
 | [JARVES_SW_V3_WORK_PACKAGE](JARVES_SW_V3_WORK_PACKAGE.md) | V3 prioritized package | V3 | historical (released) | CHANGELOG |
@@ -116,6 +117,16 @@ Reports and bug tables are evidence of a past run, not instructions. A package's
 | Raw suite output | [V3 voice suite raw](reviews/swv3_campaign_voice/SUITE_RAW_REPORT.md), [V4 voice suite raw](reviews/swv4_campaign_voice/SUITE_RAW_REPORT.md) |
 | Screenshots | `docs/reviews/swv2_*`, `swv3_*` image folders (evidence only) |
 
-## 8. Documents that open pull requests will add
+## 8. Added by the 4.0.1 integration batch
 
-Not on `main` yet; when one merges it must add its row here (the docs test enforces it): PR #44 `RELEASING.md`, `CI_PERFORMANCE.md`, `SECURITY.md`; PR #46 `reviews/MANUAL_TEST_4.0.0.md`; PR #47 `GLOSSARY_HE.md` (Hebrew review reference); PR #48 `BUGFIX_LANE.md`; PR #29 `plans/V5_PILLARS.md`.
+| Document | Purpose | Version | Status | Owner doc |
+|---|---|---|---|---|
+| [BUGFIX_LANE](BUGFIX_LANE.md) | Bugfix lane: from a problem JARVES finds in himself to a fixed release | 4.1+ | current | [reviews/BUG_TABLE_4_1](reviews/BUG_TABLE_4_1.md) |
+| [GLOSSARY_HE](GLOSSARY_HE.md) | Hebrew glossary: one Hebrew term per concept in guides and the dashboard | general | current | [USER_GUIDE](USER_GUIDE.md) |
+| [MIGRATION_AUDIT](MIGRATION_AUDIT.md) | Legacy repository migration audit (20 Oct 2026) | general | historical | [reviews/SWV4_P01_VERIFY](reviews/SWV4_P01_VERIFY.md) |
+| [PHONE_ACCESS_TAILSCALE](PHONE_ACCESS_TAILSCALE.md) ([HE](PHONE_ACCESS_TAILSCALE_HE.md)) | Phone access over Tailscale, setup guide | V5 | current | [plans/V5_PILLARS](plans/V5_PILLARS.md) |
+| [plans/V5_PILLARS](plans/V5_PILLARS.md) | V5 pillars 2 and 3: Goals and Adaptive Memory (software slice) | V5 | current | [ROADMAP](ROADMAP.md) |
+| [plans/WHATSAPP_GREENAPI_FLOWAPI_EVAL](plans/WHATSAPP_GREENAPI_FLOWAPI_EVAL.md) | GREEN-API and Flow API evaluation for WhatsApp (research only) | V5+ | research | [plans/WHATSAPP_REAL_ACCESS](plans/WHATSAPP_REAL_ACCESS.md) |
+| [reviews/BUG_TABLE_4_1](reviews/BUG_TABLE_4_1.md) | Bug table 4.1, first sweep | 4.0.1 | current | [BUGFIX_LANE](BUGFIX_LANE.md) |
+| [reviews/MANUAL_TEST_4.0.0](reviews/MANUAL_TEST_4.0.0.md) | Manual test sheet for 4.0.0 (owner) | 4.0.0 | current | [RELEASING](RELEASING.md) |
+| [reviews/SWV4_P01_VERIFY](reviews/SWV4_P01_VERIFY.md) | Owner-assisted verification, ported from the legacy branch | V4 | historical | [MIGRATION_AUDIT](MIGRATION_AUDIT.md) |

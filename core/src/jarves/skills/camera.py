@@ -23,12 +23,11 @@ ENROLL_CONSENT = ("לשמור את תווי הפנים שלך במכשיר כד�
 
 
 class LookArgs(BaseModel):
-    question: str = Field("מה זה?", max_length=300, description="What the user asked about the thing in front of "
-                                                              "the camera, in their words")
+    question: str = Field("מה זה?", max_length=300, description="the user's question, in their words")
 
 
 class NameArgs(BaseModel):
-    name: str = Field(..., min_length=1, max_length=60, description="The person's name as they said it")
+    name: str = Field(..., min_length=1, max_length=60)
 
 
 class NoArgs(BaseModel):
@@ -120,21 +119,18 @@ class CameraSkill(Skill):
 
     def tools(self) -> list[Tool]:
         return [
-            Tool("camera_describe", "Look through the camera at what the user is showing ('מה זה?') and answer: "
-                 "takes ONE photo and sends it to the vision model. Only when the user asks you to look.",
+            Tool("camera_describe", "Look through the camera and answer ('what is this', 'מה זה'): ONE photo to the vision model, only when the user asks you to look.",
                  self._describe, LookArgs, permission="read", timeout_s=45),
-            Tool("camera_read_text", "Read aloud a letter, label or document the user holds up ('תקרא לי את זה'): "
-                 "one sharp photo, transcript + short summary.", self._read_text, NoArgs, permission="read",
+            Tool("camera_read_text", "Read aloud a label/document the user holds up ('read this', 'תקרא לי את זה'): one sharp photo, transcript + short summary.", self._read_text, NoArgs, permission="read",
                  timeout_s=45),
-            Tool("camera_who", "Who is in front of the camera? Local face recognition of people who opted in.",
+            Tool("camera_who", "Who is in front of the camera ('who am I', 'מי זה')? Local face recognition of opted-in people.",
                  self._who, NoArgs, permission="read", timeout_s=20),
-            Tool("camera_enroll", "Remember a person's face so you greet them by name. ONLY when that person asks "
-                 "for it themselves; they must be alone in front of the camera. Asks them to confirm first.",
+            Tool("camera_enroll", "Remember a face to greet by name, ONLY when that person asks and is alone in front of the camera; asks them to confirm first ('remember my face', 'תזכור את הפנים שלי').",
                  self._enroll, NameArgs, permission="action", timeout_s=50),
-            Tool("camera_forget", "Delete one person's face data ('תשכח את הפנים שלי').", self._forget, NameArgs,
+            Tool("camera_forget", "Delete one person's face data ('forget my face', 'תשכח את הפנים שלי').", self._forget, NameArgs,
                  permission="destructive", impact=self._forget_impact),
-            Tool("camera_forget_all", "Delete the face data of everyone.", self._forget_all, NoArgs,
+            Tool("camera_forget_all", "Delete everyone's face data.", self._forget_all, NoArgs,
                  permission="destructive", impact=self._forget_all_impact),
-            Tool("camera_status", "Is the camera connected / on / off right now?", self._status, NoArgs,
+            Tool("camera_status", 'Camera connected/on/off now?', self._status, NoArgs,
                  permission="read"),
         ]

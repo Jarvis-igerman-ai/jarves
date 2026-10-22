@@ -6,7 +6,7 @@ links = ["privacy", "web_search"]
 pages = ["browser"]
 title_he = "דפדפן"
 title_en = "Browser"
-what_he = "ג'ארביס פותח דפי אינטרנט בשבילך. שליטה מלאה (קריאה, לחיצה, מילוי טפסים) רק באתרים שאישרת ברשימה; כל אתר אחר נפתח לקריאה בלבד ורק אחרי שאישרת על המסך. קנייה, תשלום וסיסמאות תמיד דורשים אישור שלך."
+what_he = "ג'ארביס פותח דפי אינטרנט בשבילכם. שליטה מלאה (קריאה, לחיצה, מילוי טפסים) רק באתרים שאישרתם ברשימה; כל אתר אחר נפתח לקריאה בלבד ורק אחרי שאישרתם על המסך. קנייה, תשלום וסיסמאות תמיד דורשים אישור שלכם."
 what_en = "JARVES opens web pages for you. Full control (read, click, fill forms) only on the sites in your allow-list; any other site opens read-only and only after you approve it on the screen. Purchases, payments and passwords always need your approval."
 say = [["תפתח את האתר של העירייה ותקרא לי מה כתוב", "Open the city's website and read it to me"],
        ["תחפש באתר את שעות הפתיחה", "Search the site for the opening hours"]]
@@ -17,7 +17,7 @@ test_he = "הבדיקה רק מחפשת את Playwright ודפדפן מותקן 
 test_en = "The check only looks for Playwright and an installed browser (Edge / Chrome / Chromium). No page is opened."
 cost_he = "חינם (הדפדפן רץ במחשב). קריאת דף ארוך מוסיפה טקסט לשיחה, כלומר קצת יותר טוקנים."
 cost_en = "Free (the browser runs on this computer). Reading a long page adds text to the conversation, i.e. a few more tokens."
-privacy_he = "דפדפן פרטי חדש בכל פעם: בלי הפרופיל שלך, בלי עוגיות ובלי סיסמאות שמורות. הורדות חסומות. טקסט מהאתר לא נחשב כהוראה, ואחרי קריאת דף כל פעולה אחרת מבקשת אישור."
+privacy_he = "דפדפן פרטי חדש בכל פעם: בלי הפרופיל שלכם, בלי עוגיות ובלי סיסמאות שמורות. הורדות חסומות. טקסט מהאתר לא נחשב כהוראה, ואחרי קריאת דף כל פעולה אחרת מבקשת אישור."
 privacy_en = "A fresh private browser every time: no personal profile, cookies or saved passwords. Downloads are refused. Website text is never treated as an instruction, and after a page is read every other action asks you first."
 
 [[steps]]

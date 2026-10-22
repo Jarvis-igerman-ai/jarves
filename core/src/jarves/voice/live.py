@@ -677,6 +677,7 @@ class LiveVoice(SessionLifecycle):
             self._presented.set()
         self._started = asyncio.Event()
         self._closed = asyncio.Event()
+        self._closing = False           # set when our own close starts (V4-VC-6: provider errors after it are noise)
         self.usage_s = 0.0
         self._usage_final = False       # True once session.closed carried the server's final usage
         self._t_started: float | None = None
@@ -880,6 +881,7 @@ class LiveVoice(SessionLifecycle):
     async def _close_transport(self, reason: str) -> None:
         if self.conn is None or self._closed.is_set():
             return
+        self._closing = True
         # Graceful close: keep receiving until session.closed (final usage), bounded wait (docs).
         await asyncio.wait_for(self.conn.session.close(event_id="jarves_close"), self.close_timeout_s)
         try:
@@ -1289,6 +1291,13 @@ class LiveVoice(SessionLifecycle):
         code, msg, etype = error_info(err)
         self._stats["errors"] += 1
         fatal = is_fatal(code, etype)
+        if self._closing and not fatal and not backend and "clos" in str(msg).lower():
+            # V4-VC-6: "The session is closing and cannot accept new client events" is the provider answering OUR
+            # shutdown (a late client event); not a fault, so no ERROR line and no degraded health.
+            self._stats["errors"] -= 1
+            logs.debug("live", "LIVE_ERROR_WHILE_CLOSING", "provider refused a client event while our close ran",
+                       error_code=code, provider_error=msg)
+            return
         logs.error("live", "LIVE_BACKEND_ERROR" if backend else "LIVE_ERROR", "the voice provider reported an error",
                    error_code=code, error_type=etype, provider_error=msg, backend=backend, fatal=fatal)
         if self.delegation is not None and "deleg" in f"{code} {msg}".lower():

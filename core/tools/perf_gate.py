@@ -59,6 +59,10 @@ def propose(budgets: dict) -> str:
 # ------------------------------------------------------------------ measuring
 def measure_bench(scenario: str, runs: int, idle_s: float, port: int) -> dict:
     import bench_startup as bs
+    # Discarded warm-up run: the first start on a runner pays cold disk / import caches (spawn_to_ready_s was the noisiest
+    # metric). It starts and stops the real Core once with no settle or idle window, then `runs` measured runs follow
+    # (the gate judges their median; use >= 3 so the median is a real middle value, not a mean of two).
+    bs.one_run(scenario, 1.0, port, warmup_s=0.0)
     rows = [bs.one_run(scenario, idle_s, port) for _ in range(runs)]
     for i, r in enumerate(rows):          # diagnosis in the CI log: which files changed during the idle window
         print(f"run {i + 1}: idle write {r['idle_disk_write_kb_per_min']} KB/min; files changed: {r['idle_files'] or '-'}")

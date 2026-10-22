@@ -37,9 +37,17 @@ class _TextWorkspace(wsp.Workspace):
         return super().read(name)
 
 
-async def execute(cfg, home: Path, text: str, *, interactive=False, read=input, write=print,
-                  agent_factory=None, transport=None) -> int:
-    """No runtime launch, device capture, scheduler or implicit feature activation. Input is always user text."""
+NOTE_TERMINAL = ("\nThis is a standalone terminal text session. No Core, microphone, camera capture, face, scheduler "
+                 "or background task service was started. Only the supplied tools are executable. Reply in text "
+                 "with useful detail and real returned links if requested. Terminal confirmation handles actions. "
+                 "If details are missing, ask; never invent a title, time, recipient or permission. Feature activation "
+                 "uses jarvis features on ID; runtime-only operations require starting JARVES explicitly.")
+
+
+def build(cfg, home: Path, confirm, *, agent_factory=None, transport=None, note: str = NOTE_TERMINAL):
+    """The text-only pieces (memory, budget, Skills, Brain) without any runtime start. `confirm` is the registry's
+    approval callable. Returns a namespace; the caller closes it with `await close_session(s)`."""
+    from types import SimpleNamespace
     from .app import make_agent
     from .identity import Identity
     from .skills.google import register_google
@@ -53,19 +61,7 @@ async def execute(cfg, home: Path, text: str, *, interactive=False, read=input, 
     features.apply_to_config(cfg)
     Identity(home, cfg, memory).apply_to_config(cfg)
     registry.gate = features.gate
-
-    async def confirm(prompt):
-        try:
-            # Terminal-only session: synchronous input leaves no abandoned stdin thread on cancellation.
-            answer = read(prompt + "\nType yes (כן) to confirm, anything else cancels: ")
-            ok = answer.strip().lower() in CONFIRM_WORDS
-            if not ok:
-                write("Not confirmed: nothing was done.")
-            return ok
-        except EOFError:
-            return False
-    from .approvals import audited
-    registry.confirm = audited(home, confirm)    # same approvals audit log as the Core
+    registry.confirm = confirm
     registry.register(ClockSkill())
     registry.register(MemorySkill(memory))
     registry.register(LocalContactsSkill(memory))
@@ -85,18 +81,38 @@ async def execute(cfg, home: Path, text: str, *, interactive=False, read=input, 
     workspace.references = {"TOOLS.md": wsp.tools_markdown(registry, settings.view()),
                             "FEATURES.md": "# Features\n" + features.capabilities_markdown() + "\n" +
                             "\n".join(f"- {f.id}: {f.about or f.title_en}" for f in list(feat.CATALOG.values()))}
+    agent = (agent_factory or make_agent)(cfg, registry, memory, home, budget=budget)
+    if agent is not None:
+        wsp.augment_instructions(agent, workspace)
+        previous = agent.instructions
+        agent.instructions = lambda: previous() + note
+    return SimpleNamespace(brain=Brain(registry, agent), agent=agent, registry=registry, memory=memory, budget=budget,
+                           features=features, workspace=workspace, settings=settings)
+
+
+async def close_session(s) -> None:
+    await s.registry.drain()
+    s.budget.close()
+    s.memory.close()
+
+
+async def execute(cfg, home: Path, text: str, *, interactive=False, read=input, write=print,
+                  agent_factory=None, transport=None) -> int:
+    """No runtime launch, device capture, scheduler or implicit feature activation. Input is always user text."""
+    async def confirm(prompt):
+        try:
+            # Terminal-only session: synchronous input leaves no abandoned stdin thread on cancellation.
+            answer = read(prompt + "\nType yes (כן) to confirm, anything else cancels: ")
+            ok = answer.strip().lower() in CONFIRM_WORDS
+            if not ok:
+                write("Not confirmed: nothing was done.")
+            return ok
+        except EOFError:
+            return False
+    from .approvals import audited
+    sess = build(cfg, home, audited(home, confirm), agent_factory=agent_factory, transport=transport)
+    brain = sess.brain
     try:
-        agent = (agent_factory or make_agent)(cfg, registry, memory, home, budget=budget)
-        if agent is not None:
-            wsp.augment_instructions(agent, workspace)
-            previous = agent.instructions
-            agent.instructions = lambda: previous() + (
-                "\nThis is a standalone terminal text session. No Core, microphone, camera capture, face, scheduler "
-                "or background task service was started. Only the supplied tools are executable. Reply in text "
-                "with useful detail and real returned links if requested. Terminal confirmation handles actions. "
-                "If details are missing, ask; never invent a title, time, recipient or permission. Feature activation "
-                "uses jarvis features on ID; runtime-only operations require starting JARVES explicitly.")
-        brain = Brain(registry, agent)
         while True:
             reply = await brain.respond(text, spoken=False)
             write(reply.text)
@@ -111,6 +127,4 @@ async def execute(cfg, home: Path, text: str, *, interactive=False, read=input, 
             if not text:
                 return 0 if reply.ok else 1
     finally:
-        await registry.drain()
-        budget.close()
-        memory.close()
+        await close_session(sess)

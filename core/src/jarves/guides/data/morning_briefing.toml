@@ -41,5 +41,5 @@ fix_en = "Change briefing.city, briefing.lat and briefing.lon in the agent setti
 [[problems]]
 he = "הוא אומר שהיומן לא זמין"
 en = "He says the calendar is not available"
-fix_he = "הריצו jarvis google start וודאו שמתג \"יומן גוגל\" דולק."
+fix_he = "הריצו jarvis google start ודאו שמתג \"יומן גוגל\" דולק."
 fix_en = "Run jarvis google start and make sure the Google Calendar switch is on."

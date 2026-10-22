@@ -102,7 +102,7 @@ class Lists:
 # ---------------------------------------------------------------------- voice / agent tools
 class AddArgs(BaseModel):
     list_name: str = Field("shopping", max_length=40, description="'shopping' (קניות), 'todo' (משימות) or any name")
-    items: list[str] = Field(..., min_length=1, max_length=30, description="short items, one per entry")
+    items: list[str] = Field(..., min_length=1, max_length=30)
 
 
 class ShowArgs(BaseModel):
@@ -117,7 +117,7 @@ class ItemArgs(BaseModel):
 
 class ClearArgs(BaseModel):
     list_name: str = Field("shopping", max_length=40)
-    only_done: bool = Field(True, description="True = clear the ticked-off items only; False = the whole list")
+    only_done: bool = Field(True, description='true = ticked items only; false = whole list')
 
 
 def make_skill(lists: Lists):
@@ -167,13 +167,13 @@ def make_skill(lists: Lists):
                 return n, f"לנקות {n} פריטים מ{title(list_key(a.list_name))}? / Clear {n} item(s)?"
 
             return [
-                Tool("list_add", "Add items to the shopping list or the to-do list ('תוסיף חלב ולחם לרשימת הקניות').",
+                Tool("list_add", "Add items to the shopping/to-do list: 'add milk', 'תוסיף חלב לקניות'.",
                      add, AddArgs, permission="action"),
-                Tool("list_show", "Read a list back (shopping, todo, or any name), or say which lists exist.", show,
+                Tool("list_show", "Read a list back or say which exist: 'what's on my list', 'מה ברשימת הקניות'.", show,
                      ShowArgs, permission="read"),
-                Tool("list_check", "Tick an item off a list as bought / done.", check, ItemArgs, permission="action"),
-                Tool("list_remove", "Take one item off a list.", remove, ItemArgs, permission="action"),
-                Tool("list_clear", "Clear the ticked-off items (or the whole list) after the user approves.", clear,
+                Tool("list_check", "Tick an item off as done: 'bought the milk', 'קניתי חלב'.", check, ItemArgs, permission="action"),
+                Tool("list_remove", "Remove one item from a list: 'remove milk', 'תמחק חלב מהרשימה'.", remove, ItemArgs, permission="action"),
+                Tool("list_clear", "Clear ticked items or the whole list after the user approves: 'clear the list', 'תנקה את הרשימה'.", clear,
                      ClearArgs, permission="destructive", impact=clear_impact),
             ]
 

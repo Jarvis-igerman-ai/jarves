@@ -260,8 +260,11 @@ def measure_dashboard(home: Path) -> dict:
                 raise RuntimeError(f"dashboard {path} -> {r.status}")
             return round(ms, 1)
         first = get("/")
-        apis = [get(f"/api/{p}") for p in ("overview", "sessions", "costs?days=30", "issues", "skills", "memory",
-                                           "settings")]
+        paths = [f"/api/{p}" for p in ("overview", "sessions", "costs?days=30", "issues", "skills", "memory", "settings")]
+        for p in paths:                      # one unmeasured pass pays the one-off costs of a fresh process (lazy imports,
+            get(p)                           # first creation of each database file, antivirus scan of new files)
+        # the slowest endpoint's MEDIAN of three calls: one scheduler/antivirus stall of a loaded runner is not a slow API
+        apis = [statistics.median([get(p) for _ in range(3)]) for p in paths]
         return {"dashboard_first_load_ms": first, "dashboard_api_max_ms": max(apis)}
     finally:
         d.stop()

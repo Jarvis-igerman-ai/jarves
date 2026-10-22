@@ -126,12 +126,12 @@ def spoken(rep: dict) -> tuple[str, str]:
 # ---------------------------------------------------------------------- the Core service
 class RemediateArgs(BaseModel):
     remedy: str = Field(..., description="one of: " + ", ".join(remediation.REMEDIES))
-    finding: str = Field("", description="the finding fingerprint it is for (optional)")
-    feature: str = Field("", description="rerun_feature_setup only: the feature id")
+    finding: str = Field("")
+    feature: str = Field("")
 
 
 class JobArgs(BaseModel):
-    trigger: str = Field("schedule", description="leave as schedule")
+    trigger: str = Field("schedule")
 
 
 class HealthService:
@@ -200,6 +200,13 @@ class HealthService:
         before = {r["fingerprint"] for r in db.rows(self.store, "SELECT fingerprint FROM diag_findings WHERE active=1")}
         anomaly.save(self.store, found, now)
         rep = self.report()
+        try:                  # issues registry: open findings, incl. the self-check crash finding (content-free)
+            from .. import issue_registry
+            issue_registry.ingest_findings(issue_registry.Registry(self.core.home, clock=self.clock),
+                                           [f for f in rep["findings"] if f.get("state") in ("open", "accepted")
+                                            and f.get("severity") in ("high", "medium")])
+        except Exception:
+            logs.warn("health", "HEALTH_ISSUES_FAILED", "issues registry not updated from the findings")
         self.monitor.metrics.put_hour(now, "health_score", rep["score"])
         return [f for f in found if f.fingerprint not in before]
 
@@ -355,27 +362,23 @@ def make_skill(svc: HealthService):
                 return ToolResult(st in ("done", "skipped", "not_due"), f"AI review: {st}",
                                   {"status": st, "cost_usd": (v or {}).get("cost_usd", 0.0)}, code="HEALTH_AI_REVIEW")
 
-            return [Tool("health_summary", "How JARVES is doing: a 2-3 sentence health summary (score, the main issue,"
-                         " what to do). Use for 'מה מצבך?', 'איך אתה מרגיש?', 'how are you doing?'.", summary_, NoArgs,
+            return [Tool("health_summary", "Own health in 2-3 sentences: 'how are you doing', 'מה שלומך'.", summary_, NoArgs,
                          permission="read", timeout_s=30),
-                    Tool("health_ai_review_summary", "What the last AI review found (spoken summary). Use for "
-                         "'מה מצא הבודק?', 'what did the reviewer find?'.", review_, NoArgs, permission="read"),
-                    Tool("health_remediate", "Run ONE repair from the closed list, only after the user asked for it; "
-                         "it always asks for approval on screen first.", remediate_, RemediateArgs, permission="action",
+                    Tool("health_ai_review_summary", "What the last AI review found: 'what did the reviewer find', 'מה מצא הבודק'.", review_, NoArgs, permission="read"),
+                    Tool("health_remediate", "Run ONE repair from the closed list, only if the user asked; asks approval on screen: 'restart the face', 'תתקן'.", remediate_, RemediateArgs, permission="action",
                          timeout_s=180),
-                    Tool("health_canary_run", "Run the nightly health canary journeys now (scheduler job).", canary_,
+                    Tool("health_canary_run", 'Run the nightly health canary journeys now (scheduler job).', canary_,
                          JobArgs, permission="read", timeout_s=600),
-                    Tool("health_ai_review_run", "Run the scheduled selective AI review if it is due (scheduler job).",
+                    Tool("health_ai_review_run", 'Run the scheduled AI review if due (scheduler job).',
                          ai_, JobArgs, permission="read", timeout_s=180)]
 
     return HealthSkill()
 
 
 ALLOWED_ACTIONS = {"health_remediate"}
-INSTRUCTION = ("Your own health: for 'מה מצבך?', 'מה שלומך הטכני', 'how is your health / what is your status' call "
-               "health_summary and say its 2-3 sentences in the user's language; for 'מה מצא הבודק?' / 'what did the "
-               "reviewer find' call health_ai_review_summary (say honestly if it has not run). Never invent a score "
-               "or a finding.")
+INSTRUCTION = ("Own health ('מה מצבך?', 'how is your health'): health_summary, say its 2-3 sentences; 'מה מצא הבודק?' / "
+               "'what did the reviewer find': health_ai_review_summary (say honestly if it has not run). Never invent a "
+               "score or finding.")
 
 
 def attach(core, ops) -> HealthService:

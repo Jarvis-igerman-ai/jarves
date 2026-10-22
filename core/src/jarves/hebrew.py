@@ -29,6 +29,18 @@ TEXT: dict[str, str] = {
         "core/tests/test_release_signoff.py (מחזור גיליון, חתימה, שער)",
     "there is no Pi package to install": "אין עדיין חבילה להתקנה על ה-Pi",
     "release tooling runs on the owner's PC": "כלי השחרור רצים על המחשב של הבעלים",
+    # --- self-management (self_manage.py)
+    "I can show my own status (connections, features, skills, memory, files) and, only with your approval on screen, "
+    "change my files, memory, features, skills and settings, with undo; secrets and safety switches are out of reach":
+        "אני יכול להראות את המצב שלי (חיבורים, יכולות, כלים, זיכרון, קבצים) ורק באישור שלך על המסך לשנות את הקבצים, "
+        "הזיכרון, היכולות, הכלים וההגדרות שלי, עם ביטול; סודות ומתגי בטיחות מחוץ להישג ידי",
+    "jarvis manage status|file|memory|feature|skill|setting|connect|history|undo, jarvis undo, "
+    "dashboard Self-management page":
+        "jarvis manage status|file|memory|feature|skill|setting|connect|history|undo, jarvis undo, עמוד ניהול עצמי בלוח הבקרה",
+    "core/tests/test_self_manage.py (fake approvals, no network, no browser)":
+        "core/tests/test_self_manage.py (אישורים מדומים, בלי רשת, בלי דפדפן)",
+    "pure Python; the guided connection window is Windows only so far":
+        "פייתון טהור; חלון החיבור המודרך עובד כרגע רק ב-Windows",
     # --- feature descriptions (features.py and the modules that register features)
     "play / pause / volume in Pear Desktop (YouTube Music)": "ניגון, השהיה ועוצמת קול ב-Pear Desktop (YouTube Music)",
     "answers with fresh facts from the web": "עונה עם מידע עדכני מהאינטרנט",
@@ -145,6 +157,15 @@ TEXT: dict[str, str] = {
     "UNIT test_instagram.py (local fake Graph API server)": "בדיקות יחידה: test_instagram.py (שרת Graph API מדומה מקומי)",
     "never run against real Instagram: needs the owner's Meta app, account and token":
         "מעולם לא הורץ מול אינסטגרם אמיתי: דרושים אפליקציית Meta, חשבון ואסימון של הבעלים",
+    "the Chat page of the dashboard and `jarvis web`: the same silent text conversation as `jarvis chat`, with streaming answers, slash commands, inline approvals and one shared history; paired phones use it too when phone access is on":
+        "עמוד השיחה בלוח הבקרה ו-`jarvis web`: אותה שיחת טקסט שקטה כמו `jarvis chat`, עם תשובות שנכתבות בזמן אמת, פקודות /, אישורים בתוך השיחה והיסטוריה אחת משותפת; טלפונים מצומדים משתמשים בה גם כשהגישה מהטלפון פועלת",
+    "dashboard Chat page, `jarvis web`, dashboard Phone page (pages per phone)":
+        "עמוד השיחה בלוח הבקרה, `jarvis web`, עמוד הטלפון בלוח הבקרה (דפים לכל טלפון)",
+    "UNIT test_web_chat.py (fake Core and model, real dashboard and phone HTTP, first-answer-wins approvals, forbidden pages refused server-side, Hebrew round trip)":
+        "בדיקות יחידה: test_web_chat.py (ליבה ומודל מדומים, לוח בקרה וטלפון אמיתיים ב-HTTP, התשובה הראשונה לאישור קובעת, דפים אסורים נדחים בשרת, הלוך-חזור בעברית)",
+    "never opened in a real browser on the owner's PC or on a real phone": "מעולם לא נפתח בדפדפן אמיתי במחשב של הבעלים או בטלפון אמיתי",
+    "pure Python and plain JavaScript; not run on a Raspberry Pi yet (no device in the test setup)":
+        "Python ו-JavaScript רגיל בלבד; טרם הורץ על Raspberry Pi (אין מכשיר במערך הבדיקה)",
     "checks his own installation (daily) and his speed (weekly), tells you what is slow or broken and whether it got worse than before; free, read-only, never at night or during a conversation":
         "בודק את ההתקנה שלו (כל יום) ואת המהירות שלו (פעם בשבוע), אומר מה איטי או שבור והאם זה החמיר לעומת בעבר; חינם, קריאה בלבד, אף פעם לא בלילה או באמצע שיחה",
     "dashboard Health & speed page, jarvis selftest, jarvis speedtest, Jobs page (times)":
@@ -152,6 +173,13 @@ TEXT: dict[str, str] = {
     "UNIT test_selfspeed.py (planted faults, fake clock, fake Core, real dashboard HTTP)":
         "בדיקות יחידה: test_selfspeed.py (תקלות מדומות, שעון מדומה, ליבה מדומה, לוח בקרה אמיתי ב-HTTP)",
     "not yet run on the owner's PC for a week": "טרם הורץ שבוע שלם על המחשב של הבעלים",
+    "collects the problems he finds in himself into one list and, only after you approve the exact text, reports them to the developer so the next version fixes them":
+        "אוסף את הבעיות שהוא מוצא בעצמו לרשימה אחת, ורק אחרי שאישרת את הנוסח המדויק מדווח עליהן למפתח כדי שהגרסה הבאה תתקן אותן",
+    "dashboard Bug reports page, jarvis issues, header badge": "עמוד דיווחי תקלות בלוח הבקרה, jarvis issues, תג בכותרת",
+    "UNIT test_issue_registry.py (fake Core, fake GitHub endpoint, planted faults, real dashboard HTTP)":
+        "בדיקות יחידה: test_issue_registry.py (ליבה מדומה, שרת GitHub מדומה, תקלות מדומות, לוח בקרה אמיתי ב-HTTP)",
+    "no real report filed yet with an owner token": "עוד לא נשלח דיווח אמיתי עם אסימון של הבעלים",
+    "pure Python; never run on a Raspberry Pi (no device in the test setup)": "Python טהור; מעולם לא הורץ על Raspberry Pi (אין מכשיר בסביבת הבדיקות)",
     "pure Python; /proc counters; never run on a Raspberry Pi (no device in the test setup)":
         "Python בלבד; מונים מ-/proc; מעולם לא הורץ על Raspberry Pi (אין מכשיר בסביבת הבדיקות)",
     "checks health, recent logs, settings and features on demand and weekly, then suggests ranked fixes; settings change only after you approve":
@@ -179,6 +207,28 @@ TEXT: dict[str, str] = {
         "טיימרים לספירה לאחור ושעונים מעוררים; ה-Core מצלצל בקול גם כשהחלון סגור",
     "pure Python + SQLite + tzdata, no Windows-only code; not run on a Raspberry Pi yet (no device in the test setup); ringing needs the Pi speaker":
         "Python, SQLite ו-tzdata בלבד, בלי קוד ייעודי ל-Windows; טרם הורץ על Raspberry Pi (אין מכשיר במערך הבדיקה); הצלצול צריך את הרמקול של ה-Pi",
+    "your goals with steps and progress; a check-in only when you ask; nothing is done or sent for you":
+        "היעדים שלך עם צעדים והתקדמות; סיכום התקדמות רק כשאתה מבקש; שום דבר לא נעשה או נשלח בשבילך",
+    "preferences you state are remembered only after you confirm; all visible, editable, removable":
+        "העדפות שאתה מציין נשמרות רק אחרי שאישרת; הכול גלוי, ניתן לעריכה ולהסרה",
+    "core/tests/test_v5_followups.py (unit tests: real SQLite, fake clock, no network)":
+        "core/tests/test_v5_followups.py (בדיקות יחידה: SQLite אמיתי, שעון מדומה, בלי רשת)",
+    "pure Python + SQLite, no platform code; not run on a Raspberry Pi yet":
+        "Python ו-SQLite בלבד, בלי קוד ייעודי לפלטפורמה; טרם הורץ על Raspberry Pi",
+    "your confirmed preferences (only those you said yes to) are added to the instructions of every conversation within a small size limit; switch off to stop":
+        "ההעדפות שאישרת (רק אלה שאמרת להן כן) מצורפות להוראות של כל שיחה בגודל קטן ומוגבל; כבה כדי להפסיק",
+    "when you finish a goal JARVES says one short calm line, only while you are at the PC and never between 22:00 and 07:00; switch off for silence":
+        "כשאתה מסיים יעד, JARVES אומר משפט קצר ורגוע אחד, רק כשאתה ליד המחשב ולעולם לא בין 22:00 ל-07:00; כבה לשקט מוחלט",
+    "by default JARVES answers only when asked; you can let it offer one item inside a conversation you already started, never outside one and never between 22:00 and 07:00":
+        "כברירת מחדל JARVES עונה רק כשמבקשים; אפשר לאפשר לו להציע פריט אחד בתוך שיחה שכבר התחלת, אף פעם לא מחוץ לשיחה ולא בין 22:00 ל-07:00",
+    "ideas and tickets for JARVES's own development are kept as local drafts; nothing is posted to GitHub unless you approve it on the screen":
+        "רעיונות וכרטיסים לפיתוח של JARVES נשמרים כטיוטות מקומיות; שום דבר לא נשלח ל-GitHub בלי שתאשר על המסך",
+    "shows what the coding agents, pull requests and CI of JARVES are doing and suggests the next step; it only reads, and any change on GitHub asks on the screen first":
+        "מראה מה הסוכנים, בקשות המשיכה וה-CI של JARVES עושים ומציע את הצעד הבא; הוא רק קורא, וכל שינוי ב-GitHub מבקש קודם אישור על המסך",
+    "off by default: when ON, an event (a goal stalling, a calendar event, a reminder) may queue ONE short note for the device you are using; never 22:00-07:00, with snooze, stop, hourly and daily limits; it only tells you, it never does anything and never calls the AI on its own":
+        "כבוי כברירת מחדל: כשדלוק, אירוע (יעד שנתקע, אירוע ביומן, תזכורת) יכול להשאיר הודעה קצרה אחת במכשיר שבו אתה משתמש; אף פעם לא בין 22:00 ל-07:00, עם השהיה, עצירה ומגבלות לשעה וליום; היא רק מודיעה, לא עושה דבר ולא קוראת ל-AI מעצמה",
+    "turns a goal into a short plan of existing tools; runs only after you approve it, asks before every step that changes something, and can be paused, cancelled or resumed":
+        "הופך יעד לתוכנית קצרה של כלים קיימים; רץ רק אחרי שאישרת, שואל לפני כל צעד ששינה משהו, ואפשר להשהות, לבטל ולהמשיך",
     "shopping and to-do lists by voice: add, read back, tick off, clear":
         "רשימות קניות ומשימות בקול: הוספה, הקראה, סימון וניקוי",
     "opens web pages for you: full control only on your allow-list (empty at first), other sites read-only after you approve; purchases, payments and passwords always ask on the screen":
@@ -271,9 +321,13 @@ TEXT: dict[str, str] = {
     "systemd user unit generated and tested as a file only": "יחידת systemd נוצרה ונבדקה כקובץ בלבד",
     "the check works, but there is no Pi package to install": "הבדיקה עובדת, אבל אין עדיין חבילה להתקנה ב-Pi",
     # --- platform evidence
+    "talk to this computer's JARVES from a paired phone on your home Wi-Fi or over Tailscale (detected, never installed by JARVES): chat, push-to-talk voice (needs TLS), approvals, status. Pairing by QR + one-time code, per-phone tokens you can revoke. Off = this computer only":
+        "מדברים עם JARVES של המחשב הזה מטלפון מצומד ברשת הביתית או דרך Tailscale (JARVES רק מזהה אותו ולא מתקין): שיחה, דיבור בלחיצה (דורש TLS), אישורים ומצב. צימוד בקוד QR וקוד חד-פעמי, ואסימון נפרד לכל טלפון שאפשר לבטל. כבוי = המחשב הזה בלבד",
     "talk to this computer's JARVES from a paired phone on your home Wi-Fi: chat, push-to-talk voice (needs TLS), approvals list, status. Pairing by QR + one-time code, per-phone tokens you can revoke. Off = this computer only":
         "מדברים עם JARVES של המחשב הזה מטלפון מצומד ברשת הביתית: שיחה, דיבור בלחיצה (דורש TLS), רשימת אישורים ומצב. צימוד בקוד QR וקוד חד-פעמי, ואסימון נפרד לכל טלפון שאפשר לבטל. כבוי = המחשב הזה בלבד",
     "dashboard Phone page / `jarvis dashboard --mobile`": "עמוד טלפון בלוח הבקרה / `jarvis dashboard --mobile`",
+    "UNIT test_mobile_*.py + test_tailnet.py (pairing, tokens, scopes, rate limits, audit, PWA files, TLS, Tailscale with fake interfaces); QR decoded once with OpenCV":
+        "בדיקות יחידה: test_mobile_*.py ו-test_tailnet.py (צימוד, אסימונים, הרשאות, הגבלת קצב, ביקורת, קבצי PWA, TLS, Tailscale עם ממשקים מדומים); קוד QR פוענח פעם אחת עם OpenCV",
     "UNIT test_mobile_*.py (pairing, tokens, scopes, rate limits, audit, PWA files, TLS); QR decoded once with OpenCV":
         "בדיקות יחידה: test_mobile_*.py (צימוד, אסימונים, הרשאות, הגבלת קצב, ביקורת, קבצי PWA, TLS); קוד QR פוענח פעם אחת עם OpenCV",
     "V5 is PC-hosted; the Pi is out of scope": "V5 רץ על המחשב; ה-Pi מחוץ להיקף",

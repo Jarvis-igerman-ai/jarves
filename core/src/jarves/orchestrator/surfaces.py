@@ -29,28 +29,27 @@ def make_skill(home: Path, cfg):
     from ..skills import Skill, Tool, ToolResult
 
     class ListArgs(BaseModel):
-        project: str = Field("", description="optional project name, e.g. 'jarvis'")
+        project: str = Field("")
 
     class RefArgs(BaseModel):
-        session: str = Field("", description="which session: 'claude', 'codex', a project name ('jarvis'), "
-                                             "'claude jarvis', or an id from agents_list; '' = the only live one")
+        session: str = Field("", description="'claude', 'codex', project name, or id from agents_list; '' = the only live one")
 
     class AskArgs(BaseModel):
-        session: str = Field("", description="as in agents_status")
-        question: str = Field(..., description="the owner's question as said, any language")
+        session: str = Field("")
+        question: str = Field(...)
 
     class TellArgs(BaseModel):
-        session: str = Field("", description="as in agents_status")
-        action: str = Field("tell", description="tell | continue | pause")
-        text: str = Field("", description="tell: what to tell it (the owner's words)")
+        session: str = Field("")
+        action: str = Field("tell", description='tell | continue | pause')
+        text: str = Field("")
 
     class StartArgs(BaseModel):
-        provider: str = Field(..., description="claude or codex")
-        project: str = Field(..., description="an allow-listed project name")
-        task: str = Field(..., description="the task, in the owner's words")
+        provider: str = Field(..., description='claude | codex')
+        project: str = Field(..., description='allow-listed project')
+        task: str = Field(...)
 
     class DigestArgs(BaseModel):
-        hours: float = Field(0, ge=0, le=168, description="look back this many hours; 0 = since the last digest")
+        hours: float = Field(0, ge=0, le=168, description='0 = since the last digest')
 
     def _lang(text: str) -> str:
         return svc.lang_of(text)
@@ -119,14 +118,11 @@ def make_skill(home: Path, cfg):
                      "Status questions are answered from the snapshot; others are sent to that same session (live "
                      "when possible, else at its next safe stop) and its reply comes later. " + VOICE_RULE + " " +
                      UNTRUSTED_NOTE, ask_, AskArgs, permission="action", timeout_s=40, untrusted_output=True),
-                Tool("agents_tell", "Tell a coding session something for the owner, or ask it to continue / pause "
-                     "('תגיד לו להמשיך', 'pause'). Needs the owner's yes.", tell_, TellArgs, permission="action",
+                Tool("agents_tell", "Tell a coding session something or ask it to continue/pause ('תגיד לו להמשיך', 'tell it to pause'). Needs the owner's yes.", tell_, TellArgs, permission="action",
                      confirm="Send this to the coding agent?", timeout_s=40),
-                Tool("agents_start", "Start a NEW Claude Code or Codex session in an allow-listed project (a new "
-                     "worktree). The owner approves on the screen.", start_, StartArgs, permission="action",
+                Tool("agents_start", "Start a NEW Claude Code or Codex session in an allow-listed project: 'start a session on jarvis', 'תפתח סשן'. Owner approves on screen.", start_, StartArgs, permission="action",
                      timeout_s=200),
-                Tool("agents_stop", "Stop a session JARVES started (gracefully; the owner approves on the screen). A "
-                     "session the owner started is asked to wrap up instead.", stop_, RefArgs, permission="action",
+                Tool("agents_stop", "Stop a session JARVES started ('stop it', 'תעצור אותו'); owner approves on screen. An owner-started session is asked to wrap up.", stop_, RefArgs, permission="action",
                      timeout_s=200),
                 Tool("agents_digest", "Portfolio digest: which sessions progressed since the owner left, which project "
                      "is blocked. " + UNTRUSTED_NOTE, digest_, DigestArgs, permission="read", timeout_s=40,

@@ -771,9 +771,7 @@ def make_skill(home: Path, cfg=None):
                 return ToolResult(True, mon.summary_he(ms), {"meters": [
                     {k: m.to_dict()[k] for k in ("id", "category", "unit", "used_text", "limit_text", "percent_text",
                                                  "window_text", "reset_text", "state")} for m in ms]})
-            return [Tool("usage_status", "Usage and limits: the user asks 'כמה נשאר לי?', 'how much quota is left', "
-                                         "'how much did I spend'. Says Unknown when the provider does not report it; "
-                                         "never guess.", status, permission="read")]
+            return [Tool("usage_status", "Quota/spend: 'how much quota is left', 'כמה נשאר לי'. Unknown if not reported; never guess.", status, permission="read")]
 
         async def health(self) -> tuple[str, str]:
             return "ok", ""

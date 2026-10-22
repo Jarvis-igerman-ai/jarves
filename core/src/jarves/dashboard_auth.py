@@ -58,7 +58,7 @@ ADMIN_ONLY = ("/api/devices", "/api/audit", "/api/mobile", "/api/features/dashbo
 # installing an update, adding a folder grant or reading a file, switching a risky feature (camera, gmail_send...)
 # on, stopping the Core, deleting/restoring data, editing config.toml, running a backup/restore - is now refused
 # by default because it is not on the list. These stay the computer's own job (loopback session).
-DEVICE_READ_DENY = ADMIN_ONLY + ("/api/files", "/api/backup")       # not even readable from a phone
+DEVICE_READ_DENY = ADMIN_ONLY + ("/api/files", "/api/backup", "/api/chat")       # not even readable from a phone
 _DEVICE_WRITE_OK = re.compile(
     r"/api/diagnose"                                               # run self-diagnosis
     r"|/api/issues/\d+"                                            # change an issue's status
@@ -126,6 +126,7 @@ class Access:
                  clock=time.time) -> None:
         self.home, self.admin_token, self.lan, self.lan_host = home, admin_token, lan, lan_host
         self.mobile = False                            # V5: set by Dashboard when the phone paths are on
+        self.extra_hosts: set[str] = set()             # V5: tailnet address / name accepted as Host in phone mode
         self.clock = clock
         self._lock = threading.RLock()
         self.path = home / DEVICES_FILE
@@ -273,6 +274,8 @@ class Access:
         else:
             name = host.rsplit(":", 1)[0] if host.count(":") == 1 else host
         if name in LOOPBACK_HOSTS:
+            return True
+        if name in self.extra_hosts and (self.lan or self.mobile):
             return True
         return bool(self.lan_host and name == self.lan_host and (self.lan or self.mobile))
 

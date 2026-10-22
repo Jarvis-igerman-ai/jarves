@@ -42,7 +42,7 @@ from .. import hebrew, locales, logs
 DATA = Path(__file__).with_name("data")
 STATE_FILE = "guides_state.json"
 SUGGEST_EVERY_DAYS = 7.0
-BRIEFING_BACKEND_CHARS = 2600
+BRIEFING_BACKEND_CHARS = 2000
 BRIEFING_FRONT_CHARS = 900
 STATES = ("on", "setup", "off", "partly", "planned", "missing", "info")
 # A guide may name features another package registers later ("missing" until then); the test demands a guide for
@@ -698,23 +698,22 @@ def make_skill(features: feat.Features, gstate: GuideState, registry=None, *, op
     from ..skills import Skill, Tool, ToolResult
 
     class NameArgs(BaseModel):
-        name: str = Field(..., description="Feature or guide name in Hebrew or English, e.g. 'google', 'מוזיקה', "
-                                           "'camera', 'wake word'")
+        name: str = Field(..., description="feature/guide name, e.g. 'google', 'מוזיקה'")
 
     class NextArgs(BaseModel):
-        name: str = Field(..., description="Feature or guide name")
-        done: bool = Field(False, description="true when the user says the current step is done / 'next'")
+        name: str = Field(...)
+        done: bool = Field(False, description="true when the user says done / 'next'")
 
     class StepArgs(BaseModel):
-        name: str = Field(..., description="Feature or guide name")
-        step: int = Field(0, description="step number (1-based); 0 = the current step")
+        name: str = Field(...)
+        step: int = Field(0, description='1-based; 0 = current')
 
     class SnoozeArgs(BaseModel):
-        name: str = Field(..., description="Guide name, or 'all'")
-        days: float = Field(7, description="days to wait before suggesting it again; 0 = never again")
+        name: str = Field(..., description="guide name or 'all'")
+        days: float = Field(7, description='0 = never again')
 
     class OnArgs(BaseModel):
-        on: bool = Field(False, description="false = stop suggesting setup steps; true = allow again")
+        on: bool = Field(False, description='false = stop suggesting')
 
     def unknown(name: str) -> ToolResult:
         return ToolResult(False, f"לא מצאתי מדריך בשם {name}.", {"guides": list(load())}, "GUIDE_UNKNOWN")
@@ -869,23 +868,18 @@ def make_skill(features: feat.Features, gstate: GuideState, registry=None, *, op
                                   {"proactive_help": bool(a.on)})
 
             return [
-                Tool("explain_feature", "Explain one of my features (what it is, is it on and why not, the setup "
-                                        "steps, what to say). Use for 'how do I connect Google / turn on the "
-                                        "camera / what is X'.", explain, NameArgs, permission="read"),
-                Tool("whats_not_set_up", "Which of my features still need setup, and the first steps to do.",
+                Tool("explain_feature", "Explain one feature (what, on/off, setup, what to say): 'how do I connect Google', 'איך מחברים מצלמה'.", explain, NameArgs, permission="read"),
+                Tool("whats_not_set_up", "Features still needing setup and first steps: 'what's not set up', 'מה עוד לא מוגדר'.",
                      not_set_up, permission="read"),
-                Tool("setup_next_step", "Walk the user through setting up a feature ONE step at a time. Call with "
-                                        "done=true when the user says the step is done; it checks the result.",
+                Tool("setup_next_step", "Walk through a feature setup ONE step at a time; done=true when the user says done ('done', 'סיימתי'); it checks.",
                      next_step, NextArgs, permission="read"),
-                Tool("run_guide_step", "Do a setup step for the user when it is safe (switch a low-risk feature on, "
-                                       "run the check, open the page). Risky switches ask on the screen.",
+                Tool("run_guide_step", "Do a safe setup step for the user (low-risk switch, check, open page); risky switches ask on screen: 'do it for me', 'תעשה את זה בשבילי'.",
                      run_step, StepArgs, permission="action", timeout_s=30),
-                Tool("open_guide", "Open the dashboard guide page of a feature in the browser on this computer.",
+                Tool("open_guide", "Open a feature's dashboard guide page: 'show me the guide', 'תפתח את המדריך'.",
                      open_guide, NameArgs, permission="action"),
-                Tool("setup_snooze", "The user does not want this setup suggestion now: wait N days (0 = never).",
+                Tool("setup_snooze", "Not now for this setup suggestion: wait N days (0 = never): 'later', 'לא עכשיו'.",
                      snooze, SnoozeArgs, permission="action"),
-                Tool("stop_suggestions", "The user says 'stop suggesting' (or allows it again): my proactive setup "
-                                         "suggestions switch.", stop, OnArgs, permission="action"),
+                Tool("stop_suggestions", "Stop/allow proactive setup suggestions: 'stop suggesting', 'תפסיק להציע'.", stop, OnArgs, permission="action"),
             ]
 
     return HelpSkill()

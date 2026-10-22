@@ -223,20 +223,20 @@ class Timers:
 
 # ---------------------------------------------------------------------- voice / agent tools
 class TimerArgs(BaseModel):
-    minutes: float = Field(0, ge=0, le=1440, description="length in minutes (can be fractional)")
-    seconds: float = Field(0, ge=0, le=86400, description="extra seconds")
+    minutes: float = Field(0, ge=0, le=1440)
+    seconds: float = Field(0, ge=0, le=86400)
     label: str = Field("", max_length=80, description="what it is for, e.g. 'פסטה'")
 
 
 class AlarmArgs(BaseModel):
-    at: str = Field(..., description="clock time HH:MM, 24-hour, local ('07:30')")
-    date: str = Field("", description="YYYY-MM-DD; '' = the next time that clock time comes")
+    at: str = Field(..., description='HH:MM 24-hour local')
+    date: str = Field("", description="YYYY-MM-DD; '' = next occurrence")
     label: str = Field("", max_length=80)
 
 
 class CancelArgs(BaseModel):
-    timer_id: int = Field(0, ge=0, description="0 = by label or all")
-    label: str = Field("", max_length=80, description="part of the label, or 'timer' / 'alarm'; '' with id 0 = all")
+    timer_id: int = Field(0, ge=0, description='0 = by label or all')
+    label: str = Field("", max_length=80, description="part of label, or 'timer' / 'alarm'; '' with id 0 = all")
 
 
 def make_skill(timers: Timers):
@@ -278,13 +278,13 @@ def make_skill(timers: Timers):
                 return ToolResult(True, f"cancelled {len(hit)}", {"cancelled": [timers.view(t) for t in hit]})
 
             return [
-                Tool("timer_start", "Start a countdown timer ('טיימר ל-10 דקות'). It rings aloud when done.", timer,
+                Tool("timer_start", "Countdown timer, rings aloud: 'timer 10 minutes', 'טיימר ל-10 דקות'.", timer,
                      TimerArgs, permission="action"),
-                Tool("alarm_set", "Set an alarm for a clock time ('תעיר אותי ב-7:30'). It rings aloud.", alarm,
+                Tool("alarm_set", "Alarm for a clock time: 'wake me at 7:30', 'תעיר אותי ב-7:30'.", alarm,
                      AlarmArgs, permission="action"),
-                Tool("timers_list", "List the running timers and alarms and the time left.", listing, NoArgs,
+                Tool("timers_list", "Running timers/alarms and time left: 'how long is left', 'כמה זמן נשאר'.", listing, NoArgs,
                      permission="read"),
-                Tool("timer_cancel", "Cancel a timer or alarm by id or label, or all of them.", cancel, CancelArgs,
+                Tool("timer_cancel", "Cancel a timer/alarm by id or label, or all: 'cancel the timer', 'תבטל את הטיימר'.", cancel, CancelArgs,
                      permission="action"),
             ]
 

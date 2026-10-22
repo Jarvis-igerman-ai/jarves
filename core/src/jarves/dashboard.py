@@ -46,7 +46,7 @@ _ROUTES: list[tuple[str, re.Pattern, object]] = []
 PLUGIN_MODULES = ("jarves.workspace", "jarves.curator", "jarves.memory", "jarves.features", "jarves.google_auth",
                   "jarves.google_setup", "jarves.telegram_channel", "jarves.instagram_channel", "jarves.privacy", "jarves.overview",
                   "jarves.usage", "jarves.backup", "jarves.appearance", "jarves.skills.generated",
-                  "jarves.operations", "jarves.runtime", "jarves.updates", "jarves.release_cmd", "jarves.selfcheck", "jarves.connect",
+                  "jarves.operations", "jarves.goals", "jarves.preferences", "jarves.proactive", "jarves.continuity", "jarves.devmanager", "jarves.devstatus", "jarves.runtime", "jarves.updates", "jarves.release_cmd", "jarves.selfcheck", "jarves.connect",
                   "jarves.identity", "jarves.dashboard_auth", "jarves.mobile", "jarves.guides",     # WP-L: Guides pages
                   "jarves.setup_wizard",                                         # SW-V3: Setup & add-ons page
                   "jarves.profiles",                                             # Issue #17: Profiles page
@@ -56,10 +56,12 @@ PLUGIN_MODULES = ("jarves.workspace", "jarves.curator", "jarves.memory", "jarves
                   "jarves.orchestrator.surfaces",                                  # SW-V4 E: Coding agents page
                   "jarves.dialing",                                                # SW-V4 H: Phone calls page
                   "jarves.browser",                                                # Browser allow-list page
+                  "jarves.self_manage",                                            # Self-management page
                   "jarves.approvals", "jarves.skills.helper",                      # V3: Approvals list, Helper switch
                   "jarves.diag.service",                                           # SW-V4 O: Health page
                   "jarves.selfspeed",
-                  "jarves.chat_service")                                              # Health & speed page
+                  "jarves.chat_service", "jarves.chat_engine",                     # terminal chat + V5 web Chat page API
+                  "jarves.issue_registry")                                         # Bug reports page (issues registry)
 MEMORY_UNDO_KEEP = 30
 MEMORY_UNDO_TTL_S = 24 * 3600                        # the undo button works for 24 h, then the entry is purged
 UNDO_PURGE_EVERY_S = 3600
@@ -95,12 +97,14 @@ class Ctx:
         self.config_path = Path(config_path) if config_path else home / "config.toml"
         self.store = Store(home / "store.db", tier=cfg.ai.voice_service_tier, backend_model=cfg.ai.text_model)
         self._memory, self._own_memory = memory, memory is None
+        self._mem_lock, self._closed = threading.Lock(), False
         self._workspace, self._settings = workspace, settings
         self.logs = logview.LogReader(home)
         self.lock = threading.Lock()                  # memory undo journal
         self.clock = time.time                        # tests inject a fake clock
         self.access = None                 # dashboard_auth.Access (set by Dashboard)
         self.mobile = None                 # mobile.MobileAccess (set by Dashboard; V5 phone access)
+        self.chat = None                   # chat_engine.WebChat (set by Dashboard when a chat engine runs here)
         self.port = 0
         self._tl = threading.local()       # per-request principal (the server is threaded)
 
@@ -110,10 +114,13 @@ class Ctx:
 
     @property
     def memory(self):
-        if self._memory is None:
-            from .memory import MemoryStore
-            self._memory = MemoryStore(self.home / "memory.db")
-        return self._memory
+        with self._mem_lock:                          # threaded server: two first requests must not open two handles
+            if self._memory is None:
+                if self._closed:
+                    raise RuntimeError("dashboard context closed")    # a late request must not re-open memory.db
+                from .memory import MemoryStore
+                self._memory = MemoryStore(self.home / "memory.db")
+            return self._memory
 
     @property
     def workspace(self):
@@ -136,8 +143,10 @@ class Ctx:
 
     def close(self) -> None:
         self.store.close()
-        if self._own_memory and self._memory is not None:
-            self._memory.close()
+        with self._mem_lock:
+            self._closed = True
+            if self._own_memory and self._memory is not None:
+                self._memory.close()
         if getattr(self, "_userdata", None) is not None:     # WP-M3 plugin connection (userdata.ctx_db)
             self._userdata.close()
 
@@ -842,7 +851,8 @@ class Handler(BaseHTTPRequestHandler):
     def _handle(self) -> None:
         a, ip = self.access, self.client_address[0]
         mob = self.ctx.mobile
-        if not client_allowed(ip) or not mobile.network_ok(ip, lan=a.lan, mobile_on=bool(mob and mob.enabled), path=urlsplit(self.path).path):
+        if not mobile.network_ok(ip, lan=a.lan, mobile_on=bool(mob and mob.enabled), path=urlsplit(self.path).path,
+                                 tailnet=bool(mob and (mob.tailnet or {}).get("present"))):
             return self._send(403, b"forbidden network", "text/plain")       # never answer the internet
         if not a.host_ok(self.headers.get("Host") or ""):
             return self._send(403, b"forbidden host", "text/plain")          # DNS rebinding / spoofed Host
@@ -946,21 +956,31 @@ class Dashboard:
 
     def __init__(self, home: Path, cfg, port: int = 0, *, workspace=None, memory=None, settings=None,
                  config_path=None, lan: bool = False, lan_host: str | None = None, mobile_on: bool = False,
-                 mobile_bridge=None, tls: tuple | None = None) -> None:
+                 mobile_bridge=None, tls: tuple | None = None, tailnet: dict | None = None,
+                 tls_source: str | None = None, bind_tailnet_only: bool = False, chat=None) -> None:
         self.ctx = Ctx(home, cfg, workspace=workspace, memory=memory, settings=settings, config_path=config_path)
         self.plugins = load_plugins()
         token = secrets.token_urlsafe(24)
-        if lan or mobile_on:
+        tail = dict(tailnet or {})
+        tail_ip = tail.get("ip") if tail.get("present") else None
+        only_tail = bool(mobile_on and bind_tailnet_only and not lan)
+        if only_tail:                           # owner choice: listen on the tailnet address ONLY, never on 0.0.0.0
+            if not tail_ip:
+                raise OSError("tailnet-only mode needs a Tailscale address on this computer (is Tailscale running?)")
+            lan_host = None
+        elif lan or mobile_on:
             lan_host = lan_host or lan_ip()
-            if lan_host is None:
+            if lan_host is None and not tail_ip:
                 raise OSError("no private home-network address found (Wi-Fi/Ethernet connected?)")
         self.access = Access(home, token, lan=lan, lan_host=lan_host)
+        self.access.extra_hosts = {h for h in (tail_ip, tail.get("name")) if h} if mobile_on else set()
         self.ctx.access = self.access
         self.access.mobile = bool(mobile_on)
         self.mobile = self.ctx.mobile = mobile.MobileAccess(home)
         handler = type("H", (Handler,), {"ctx": self.ctx, "token": token, "access": self.access})
         wide = lan or mobile_on
-        self.httpd = _Server(("0.0.0.0" if wide else "127.0.0.1", port or (LAN_PORT if wide else 0)), handler)
+        bind = tail_ip if only_tail else "0.0.0.0" if wide else "127.0.0.1"
+        self.httpd = _Server((bind, port or (LAN_PORT if wide else 0)), handler)
         if tls:                                  # V5: optional TLS for the phone (needed for the microphone)
             import ssl
             sctx = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
@@ -971,13 +991,20 @@ class Dashboard:
         self.httpd.daemon_threads = True
         self.port = self.ctx.port = self.httpd.server_address[1]
         self.url = f"http://127.0.0.1:{self.port}/?t={token}"
-        self.mobile.port, self.mobile.host = self.port, lan_host if wide else None
+        self.mobile.tailnet = tail if mobile_on else {}
+        self.mobile.tls_source = tls_source or ("selfsigned" if tls else "none")
+        self.mobile.bind = bind
+        self.mobile.port = self.port
+        self.mobile.host = (lan_host or self.mobile.tailnet_host()) if wide else None
         self.mobile.scheme = "https" if tls else "http"
         self.mobile.bridge = mobile_bridge
+        self.ctx.chat = self.mobile.chat = chat
         self.mobile.enabled = bool(mobile_on)       # default OFF: no phone path is served, nothing listens beyond 127.0.0.1
         if mobile_on:
-            self.mobile.audit("mobile_mode_started", host=lan_host, port=self.port, tls=bool(tls))
-            logs.info("dashboard", "MOBILE_MODE_STARTED", "phone access is on", port=self.port, transport="https" if tls else "http")
+            self.mobile.audit("mobile_mode_started", host=lan_host, port=self.port, tls=bool(tls), bind=bind,
+                              tailnet=bool(tail_ip), tls_source=self.mobile.tls_source)
+            logs.info("dashboard", "MOBILE_MODE_STARTED", "phone access is on", port=self.port, transport="https" if tls else "http",
+                      tailnet=bool(tail_ip), tls_source=self.mobile.tls_source, bind_tailnet_only=only_tail)
         self.lan_url = f"http://{lan_host}:{self.port}/pair" if lan else None
         if lan:
             self.access.audit("lan_mode_started", host=lan_host, port=self.port)
@@ -1035,5 +1062,4 @@ class DashboardSkill(Skill):
                                   code="DASHBOARD_FAILED")
             local = url.split("?", 1)[0]
             return ToolResult(True, "פתחתי את לוח הבקרה בדפדפן.", {"url": local}, code="ok")
-        return [Tool("open_dashboard", "Open JARVES's dashboard (conversations, logs, costs, memory, settings) in "
-                     "the browser on this computer. Returns its local address.", open_, permission="action")]
+        return [Tool("open_dashboard", "Open the dashboard in the browser: 'open the dashboard', 'תפתח את הדשבורד'. Never a way to close anything.", open_, permission="action")]
