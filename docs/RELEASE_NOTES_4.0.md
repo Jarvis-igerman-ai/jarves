@@ -1,6 +1,6 @@
 # JARVES 4.0 release notes
 
-Status: release candidate prepared from `main` (version 4.0.0). Owner decision 21 Oct 2026: v4.0.0 is the current `main` only; open pull requests are not part of it. Owner acceptance, the tag and the public release have not happened yet. "Verified" below means checked in a real run; everything else was tested with fakes. Owner-facing guide: [USER_GUIDE](USER_GUIDE.md) ([עברית](USER_GUIDE.he.md)).
+Status (22 Oct 2026): 4.0.0 is `main` after release PR #41; the installer is published by the package workflow once `jarves-checks` is green on `main` (check the releases repo). The 4.0.1 list below is tracked in [ROADMAP](ROADMAP.md). Earlier status: release candidate prepared from `main` (version 4.0.0). Owner decision 21 Oct 2026: v4.0.0 is the current `main` only; open pull requests are not part of it. Owner acceptance, the tag and the public release have not happened yet. "Verified" below means checked in a real run; everything else was tested with fakes. Owner-facing guide: [USER_GUIDE](USER_GUIDE.md) ([עברית](USER_GUIDE.he.md)).
 
 ## New
 

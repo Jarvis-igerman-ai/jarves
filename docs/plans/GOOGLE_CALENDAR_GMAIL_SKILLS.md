@@ -1,3 +1,5 @@
+> **Historical, superseded by [GOOGLE_SETUP](../GOOGLE_SETUP.md) (the skills are built).** Kept as evidence and owner decision record; do not use it as the current plan. Index: [DOC_MAP](../DOC_MAP.md).
+
 # Plan: Google Calendar and Gmail Skills (Issue #17 items 12, 13)
 
 > **Research and plan only.** Nothing here is authorized for implementation until `docs/NOW.md` says so.

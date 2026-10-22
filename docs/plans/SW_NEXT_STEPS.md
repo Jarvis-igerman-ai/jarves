@@ -1,3 +1,5 @@
+> **Historical, superseded by [ROADMAP](../ROADMAP.md) status block and the [V4 package](../JARVES_SW_V4_WORK_PACKAGE.md) (V3 closed, campaign done, recall, dialing and the other step-4 items are built).** Kept as evidence and owner decision record; do not use it as the current plan. Index: [DOC_MAP](../DOC_MAP.md).
+
 # SW next steps (software only; phone / Pi / remote / multi-device are LATER)
 
 Owner decisions 20 Oct 2026. Follow this file in order; tick items as done and link evidence (PR, run URL, report).

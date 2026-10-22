@@ -1,3 +1,5 @@
+> **Historical, superseded by the test sections 6-9 of the [V4 package](../JARVES_SW_V4_WORK_PACKAGE.md) and the per-version sheets in DOC_MAP section 2 (the pass A-F method is still reused). The line "Arabic/Russian stay partial" is outdated: both were removed in V4, the dashboard is English and Hebrew only.** Kept as evidence and owner decision record; do not use it as the current plan. Index: [DOC_MAP](../DOC_MAP.md).
+
 # Full test plan — manual, real-system, plus log review
 
 Goal: find real bugs before more features. Every test = steps, expected result, evidence (log excerpt/screenshot/recording), verdict PASS/FAIL/BLOCKED. Failures go to `docs/reviews/SWV3_FULL_TEST_BUG_TABLE.md` (severity P0–P3), get fixed, and are retested.

@@ -1,3 +1,5 @@
+> **Historical, superseded by [CHANGELOG](../CHANGELOG.md) (V1 delivered).** Kept as evidence and owner decision record; do not use it as the current plan. Index: [DOC_MAP](DOC_MAP.md).
+
 # JARVES — SW-V1: approved end-to-end software work package
 
 **User authorization: 18 October 2026.** The user is going away and explicitly wants the engineering agent to make substantial progress **without asking approval at every intermediate step**, starting immediately after the delivered R5b CAD milestone. This document is **an approved bundled scope** for the next implementing Claude Code/Codex session; it supersedes earlier "parked/not authorized" wording in Issues #2, #5, #6 and #7 **for the specific work described below**. The active work is authorized in [NOW](NOW.md).

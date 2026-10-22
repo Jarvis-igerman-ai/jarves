@@ -1,5 +1,7 @@
 # Context map — open only what this task requires
 
+Full index of every document (per version, status, owner doc, testing): [DOC_MAP](DOC_MAP.md). This table only routes a task to the one document it needs.
+
 | Need | Read only |
 |---|---|
 | Durable project principles, printability, Israel sourcing and user decisions | `PROJECT_PRINCIPLES.md` |
@@ -16,8 +18,10 @@
 | Assistant software: stack, models, costs (checked dates) | `reviews/SW_V1_TECH_DECISION.md` |
 | Run/debug the Core, Skills, music pairing | `../core/README.md` |
 | Using JARVES end to end (en/he), V4 features, troubleshooting | `USER_GUIDE.md`, `USER_GUIDE.he.md` |
-| Which document is where | `README.md` (docs index) |
+| Which document is where, which is current or historical | `DOC_MAP.md` |
 | What V4 changed (behaviour, exit codes) | `RELEASE_NOTES_4.0.md`, `../CHANGELOG.md` |
+| Roadmap status per version (V4 released, V5 built vs open, V6, V7) | `ROADMAP.md` |
+| Testing, manual test sheets, release sign-off | `DOC_MAP.md` section 2 |
 | V4 package evidence (privacy, orchestrator, WhatsApp, recall, diagnostics, perf) | `reviews/SWV4_*.md` (one per package) |
 | Historical decisions and alternatives | `archive/DECISIONS.md` |
 | Component slots/fit/assembly | `archive/MECHANICAL.md` |

@@ -1,3 +1,5 @@
+> **Historical, superseded by [CHANGELOG](../CHANGELOG.md) (V2 delivered).** Kept as evidence and owner decision record; do not use it as the current plan. Index: [DOC_MAP](DOC_MAP.md).
+
 # JARVES — SW-V2 Software Product & Engineering Specification
 
 **Version:** 1.0 — 19 October 2026  

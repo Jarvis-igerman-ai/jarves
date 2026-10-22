@@ -8,6 +8,8 @@
 
 **Future product direction:** [ROADMAP](ROADMAP.md) now retains owner-selected V5 (stage 2: mobile access + personal intelligence) and owner-approved V6 (stage 3: Drive & Act + Skills Platform 2.0). They are *roadmap decisions*, **NOT permission to code yet**. Family Intelligence remains future F11. No work on Raspberry Pi physical hardware until explicit future approval.
 
+**Update 22 Oct 2026 (minimal, purpose unchanged):** V4 is 4.0.0 on `main` (draft PRs #6-#10 below were replaced by the reconciled PR #11 and later V4 PRs); V5 coding has started (status per version in [ROADMAP](ROADMAP.md), every document in [DOC_MAP](DOC_MAP.md)); the "NOT permission to code yet" sentence above is superseded for V5, still true for V6 and V7.
+
 **Older notes below are historical checkpoints, not newer execution authorization.** Follow [AGENTS](../AGENTS.md), public issue scope, V4 work package, latest verified code and CI; never treat historical private links as the active issue tracker.
 
 ---
@@ -16,7 +18,7 @@
 
 **Active review request (19 Oct):** analyze all available retained runtime logs and stored sessions for conversation quality and improvement opportunities, not just ERROR events. Authorized read-only private log/history inspection, session/timing/tool correlation and a redacted evidence-based report with prioritized follow-ups. No paid replay, device activation, history mutation or runtime behavior change in this review. Commit/push report and handoff; distinguish current confirmed defects, historical corrected defects, benign behavior and unverified concerns.
 
-**Review delivered:** [all retained logs report](reviews/ALL_RETAINED_LOGS_19OCT2026.md): all 988 records, 100 voice transcript entries, 74 stored turns and duplicate history backups reconciled. P0: explicit exit opened dashboard; historical backend completion failed to become an answer. Additional priorities cover grounding/query intent, failed-review retry state, missing-session import, startup/speech measurement and conversational usability. Report only; no runtime fixes or historical import. Proposed next gate: targeted P0 implementation under existing #7/#17; not started by this review.
+**Review delivered:** all retained logs report `ALL_RETAINED_LOGS_19OCT2026` (private, not in the public repo): all 988 records, 100 voice transcript entries, 74 stored turns and duplicate history backups reconciled. P0: explicit exit opened dashboard; historical backend completion failed to become an answer. Additional priorities cover grounding/query intent, failed-review retry state, missing-session import, startup/speech measurement and conversational usability. Report only; no runtime fixes or historical import. Proposed next gate: targeted P0 implementation under existing #7/#17; not started by this review.
 
 **Latest explicit check authorization (19 Oct):** user asks the agent to test the actual webcam and review the last log for bugs. One bounded local in-memory capture through the existing camera adapter is authorized; no saved photo, cloud image/paid request, enrollment, microphone or runtime restart. Review the latest session logs with private text redacted; identify confirmed bugs separately from warnings.
 
