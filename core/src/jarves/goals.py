@@ -248,10 +248,10 @@ def checkin_text(c: dict) -> str:
 
 # ---------------------------------------------------------------------- voice / agent tools
 class AddArgs(BaseModel):
-    title: str = Field(..., min_length=1, max_length=MAX_TITLE, description="the outcome, e.g. 'run a 10k by March'")
+    title: str = Field(..., min_length=1, max_length=MAX_TITLE, description="the outcome")
     details: str = Field("", max_length=MAX_DETAILS)
-    target_date: str = Field("", max_length=10, description="YYYY-MM-DD or empty")
-    steps: list[str] = Field(default_factory=list, max_length=MAX_STEPS, description="optional first steps")
+    target_date: str = Field("", max_length=10, description="YYYY-MM-DD")
+    steps: list[str] = Field(default_factory=list, max_length=MAX_STEPS)
 
 
 class GoalArgs(BaseModel):
@@ -261,7 +261,7 @@ class GoalArgs(BaseModel):
 class StepAddArgs(BaseModel):
     id: int = Field(..., ge=1, description="goal id")
     text: str = Field(..., min_length=1, max_length=MAX_STEP)
-    outward: bool = Field(False, description="True when the step contacts other people or acts outside the PC")
+    outward: bool = Field(False, description="contacts others")
 
 
 class StepArgs(BaseModel):
@@ -271,12 +271,12 @@ class StepArgs(BaseModel):
 
 class StatusArgs(BaseModel):
     id: int = Field(..., ge=1)
-    status: str = Field(..., max_length=10, description="active, paused, done or dropped")
+    status: str = Field(..., max_length=10, description="active|paused|done|dropped")
 
 
 class ProgressArgs(BaseModel):
     id: int = Field(..., ge=1)
-    percent: int = Field(..., ge=0, le=100, description="only for a goal without steps")
+    percent: int = Field(..., ge=0, le=100, description="no-step goals only")
 
 
 class NoArgs(BaseModel):
@@ -356,19 +356,18 @@ def make_skill(goals: Goals, registry=None):
                 return (1 if g else 0), f"למחוק את היעד '{g['title'] if g else a.id}'? / Delete this goal?"
 
             return [
-                Tool("goal_add", "Set a goal the owner asked for ('אני רוצה לרוץ 10 ק\"מ עד מרץ'), optionally with steps.",
+                Tool("goal_add", "Set a goal ('אני רוצה לרוץ 10 ק\"מ').",
                      add, AddArgs, permission="action"),
                 Tool("goal_show", "Read the owner's open goals and their progress.", show, NoArgs, permission="read"),
-                Tool("goal_checkin", "The owner ASKED for a check-in on their goals: progress, stalled or overdue ones. "
-                     "Never offer or run one unprompted.", checkin, NoArgs, permission="action"),
-                Tool("goal_step_add", "Add a step to a goal (outward=true if it contacts others or acts outside).",
+                Tool("goal_checkin", "Goal check-in, only when the owner asks.", checkin, NoArgs, permission="action"),
+                Tool("goal_step_add", "Add a goal step (outward=true if it contacts others).",
                      step_add, StepAddArgs, permission="action"),
-                Tool("goal_step_done", "Mark a goal step done (or not done). Outward-facing steps ask the owner.",
+                Tool("goal_step_done", "Mark a goal step done; outward steps ask the owner.",
                      step_done, StepArgs, permission="action", timeout_s=120.0),
                 Tool("goal_status", "Pause, resume, finish or drop a goal.", status, StatusArgs, permission="action"),
-                Tool("goal_progress", "Set the percent of a goal that has no steps.", progress, ProgressArgs,
+                Tool("goal_progress", "Set percent for a goal without steps.", progress, ProgressArgs,
                      permission="action"),
-                Tool("goal_delete", "Delete a goal and its steps (asks the owner first).", delete, GoalArgs,
+                Tool("goal_delete", "Delete a goal (asks first).", delete, GoalArgs,
                      permission="destructive", impact=delete_impact),
             ]
 
