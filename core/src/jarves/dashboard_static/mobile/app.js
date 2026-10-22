@@ -200,7 +200,8 @@
   const sig = (op, key) => async () => { try { await post("/api/m/signals", { op, minutes: 60, id: newId() }); $("sigNote").textContent = t(key); } catch (e) { $("sigNote").textContent = e.message; } };
   $("sigSnooze").addEventListener("click", sig("snooze", "sig_snoozed")); $("sigStop").addEventListener("click", sig("stop", "sig_stopped"));
   async function tick() {
-    if (!token || document.hidden || !me) return;
+    if (!token || document.hidden) return;
+    if (!me) { load(); return; }                      // opened while the computer was unreachable: try again
     syncNow();
     try {
       if (me.pages.includes("approvals")) {
@@ -238,7 +239,7 @@
   function renderHome(s) {
     const ul = $("homeList"); ul.replaceChildren();
     li(ul, `${t("core")}: ${s.core}`); li(ul, `${t("waiting")}: ${s.waiting}`);
-    li(ul, `${t("pages_you_have")}: ${s.pages.join(", ")}`);
+    li(ul, `${t("pages_you_have")}: ${s.pages.map((x) => ({ home: tx("בית", "Home"), chat: tx("שיחה", "Chat"), approvals: tx("אישורים", "Approvals"), health: tx("תקינות ומהירות", "Health & speed") }[x] || x)).join(", ")}`);
   }
   $("unpair").addEventListener("click", async () => { try { await post("/api/m/unpair"); } catch (e) { /* already gone */ } forget(); });
   $("lang").addEventListener("click", () => { lang = lang === "he" ? "en" : "he"; try { localStorage.setItem(LANG, lang); } catch (e) { /* ignore */ } applyLang(); voiceNote(); info(); unmountChat(); if (tab === "chat") mountChat(); tick(); });

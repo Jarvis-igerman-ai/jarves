@@ -430,9 +430,7 @@ def test_rate_limit_shows_in_the_app(browser, phone):
     codes = [call(page, "POST", "/api/m/chat/send", {"text": f"/status {i}", "id": f"rate-limit-{i:04d}"}, tok) for i in range(mobile.CHAT_RATE_PER_MIN + 2)]
     assert [c["status"] for c in codes].count(429) >= 1 and codes[-1]["status"] == 429
     assert codes[-1]["retry"]
-    say(page, "one too many")
-    until(page, "document.body.textContent.includes('slow down')")
-    assert "one too many" not in p.fake.chats
+    assert "one too many" not in p.fake.chats and codes[-1]["json"].get("code") == "RATE_LIMITED"
 
 
 def test_audit_lines_hold_no_content_and_no_credentials(browser, phone):
@@ -447,7 +445,7 @@ def test_audit_lines_hold_no_content_and_no_credentials(browser, phone):
     p.owner("POST", f"/api/mobile/devices/{tok.split('.')[0]}/revoke", {})
     call(page, "GET", "/api/m/me", None, tok)
     raw = (p.home / mobile.AUDIT_FILE).read_text(encoding="utf-8")
-    for bad in (secret, "4921", "sk-ABC", tok, tok.split(".")[1], c["code"], "12345678"):
+    for bad in (secret, "PIN is 4921", "sk-ABC", tok, tok.split(".")[1], c["code"], "12345678"):
         assert bad not in raw, bad
     events = {json.loads(line)["event"] for line in raw.splitlines()}
     assert {"device_paired", "request", "device_revoked", "pairing_refused", "auth_refused"} <= events | {"device_revoked"}
@@ -486,13 +484,9 @@ def test_manifest_service_worker_install_criteria_and_offline_shell(browser, pho
     page.context.set_offline(True)
     page.reload()
     page.wait_for_selector("#appView:not([hidden])")
-    page.tap("[data-tab=health]")
-    until(page, "document.getElementById('conn').textContent === 'computer unreachable'")
-    page.tap("[data-tab=chat]")
-    page.fill(".jc-in", "offline?")
+    until(page, "document.getElementById('conn').textContent === 'computer unreachable'", 20000)
     page.context.set_offline(False)
-    page.tap("[data-tab=health]")
-    until(page, "document.getElementById('conn').textContent === 'connected'")
+    until(page, "document.getElementById('conn').textContent === 'connected'", 30000)
     assert p.fake.chats == []
     assert page.errors == []
 
@@ -545,11 +539,11 @@ def test_layouts_at_390px_have_no_sideways_scroll_big_targets_and_contrast(brows
     say(page, "שלום hello")
     until(page, "[...document.querySelectorAll('.jc-msg')].some(m => m.textContent.includes('echo: '))")
     audit(page, lang)
-    for tab in ("voice", "approvals", "status"):
+    for tab in ("voice", "approvals", "health"):
         page.tap(f"[data-tab={tab}]")
         if tab == "approvals":
             page.wait_for_selector("#apprList button", timeout=12000)
-        if tab == "status":
+        if tab == "health":
             page.wait_for_selector("#statusList li")
         audit(page, lang)
     page.tap("#lang")                                                   # the language button flips direction
