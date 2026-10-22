@@ -63,6 +63,7 @@ Execution authority: [NOW](NOW.md) (the only active brief) with [AGENTS](../AGEN
 | [JARVES_SW_V4_WORK_PACKAGE](JARVES_SW_V4_WORK_PACKAGE.md) | V4 packages A-O, test scripts (sections 6-9), release checklist, owner decisions | V4 | current for plan and test scripts; delivery state lives in ROADMAP and HANDOFF | ROADMAP for status |
 | [JARVES_SW_V5_WORK_PACKAGE](JARVES_SW_V5_WORK_PACKAGE.md) | V5 phone-access package (security model, PWA) | V5 | current; the other V5 pillars are in ROADMAP | ROADMAP |
 | [plans/V7_PROPOSAL_2026-10-21](plans/V7_PROPOSAL_2026-10-21.md) | V7 research proposal | V7 | proposal | ROADMAP |
+| [plans/WEBTOP_SCHOOL_SKILL_PROPOSAL](plans/WEBTOP_SCHOOL_SKILL_PROPOSAL.md) | Webtop parent and separate teacher-account School Skill research (unofficial API; no live account) | F11 / V7.x candidate | proposal, not authorized | ROADMAP / FUTURE_IDEAS |
 | [FUTURE_IDEAS](FUTURE_IDEAS.md) | Deferred backlog (F01-F11) | general | backlog | ROADMAP |
 | [plans/FEATURE_SUGGESTIONS](plans/FEATURE_SUGGESTIONS.md) | Ranked feature ideas | general | backlog | FUTURE_IDEAS |
 | [plans/SW_NEXT_STEPS](plans/SW_NEXT_STEPS.md) | Old "next steps" after V3 | V3 | superseded by ROADMAP and the V4 package | ROADMAP |
