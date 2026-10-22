@@ -9,6 +9,7 @@ dependencies = [
     "pydantic>=2.12,<3",
     "httpx>=0.27",
     "pyjwt[crypto]>=2.10",           # Sign in with ChatGPT: verify the OpenAI ID token (RS256, JWKS)
+    "cryptography>=46",              # update-signature verification (ed25519) and TLS helpers: declared, not only via pyjwt[crypto]
     "numpy>=2",
     "tzdata>=2025.2",                # IANA time zones for zoneinfo (Windows has none built in): scheduler DST
 ]

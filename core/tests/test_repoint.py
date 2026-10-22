@@ -120,3 +120,12 @@ def test_no_product_file_links_to_the_deprecated_private_repo():
             if OLD in text and rel not in ALLOW:
                 bad.append(rel)
     assert not bad, f"product files still name the deprecated repo: {bad}"
+
+
+def test_plain_http_update_base_is_named_not_silently_replaced(tmp_path, monkeypatch):
+    """V4-UP-1: an http:// base is refused with its own message (not the 'private repository' GitHub fallback)."""
+    monkeypatch.delenv("JARVES_UPDATE_BASE_URL", raising=False)
+    hits = []
+    s = UpdateChecker(tmp_path, http=lambda url, h: hits.append(url) or (404, None), current="3.0.0.5",
+                      public_keys=[], base_url="http://example.test/releases").check(force=True)
+    assert not s["available"] and "must be an https://" in s["error"] and hits == []

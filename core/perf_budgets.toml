@@ -12,7 +12,7 @@ baseline_machine = "owner PC: AMD Ryzen 3 5300U, 7.5 GB RAM, Windows 11, Python 
 scenario = "combined"
 default_runs = 3
 default_idle_s = 60
-ci_runs = 2
+ci_runs = 3
 ci_idle_s = 60
 
 [metrics.private_mb]
