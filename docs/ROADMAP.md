@@ -11,7 +11,7 @@
 | **1. Desktop assistant** | Reliable Windows Core, voice, face, skills, diagnostics and installer | Existing SW-V1/V2/V3/V4 work | V3 integration reported; V4 in development, real acceptance and release gates must be checked |
 | **2. PC-hosted personal server + phone access** | One PC-hosted JARVES, authenticated phone client, shared conversation and abilities | **V5 — JARVES Goes Mobile** | Owner selected for the roadmap, **not implemented or authorized to start coding yet** |
 | **3. Android Auto / car** | Safe hands-free car interaction plus cross-device Skills Platform 2.0 | **V6 — JARVES Drive & Act** | Owner-approved roadmap direction, implementation gated after V5; subject to official platform restrictions |
-| **4. Everyday Android assistant** | Native daily phone companion with notifications and relevant local abilities | Later milestone (version TBD) | Future, not the V5 phone-access client |
+| **4. Everyday Android assistant** | Native daily phone companion with notifications and relevant local abilities | **V7 — Everyday Android + Ecosystem & Agent Studio (proposal)** | Owner requested V7 research and an approval-ready proposal; **not authorized to implement**, distinct from V5 phone access |
 | **5. Phone as robot stand-in** | Docked spare OnePlus 11 used to validate face/mic/speaker/camera/wake behavior | Later milestone (version TBD) | Future; no 1:1 hardware claim |
 | **6. Physical robot** | Serviceable 3D-printed JARVES with approved Pi-class hardware | Final physical milestone (version TBD) | Deferred: CAD, sourcing, print, safety, acoustic and owner approval gates |
 
@@ -86,9 +86,29 @@
 - Demonstrate opt-in briefings with quiet-hours, passenger-privacy and deduplication tests; demonstrate two maintained Skills with permission separation, update and rollback, and no regression to existing V4/V5 Skills.
 - Complete security/privacy review, CI/real-device regression matrix and an honest Android Auto compatibility matrix (supported, phone-mediated, blocked/unavailable), with no purchases or paid external service calls without owner approval.
 
-**Out of scope:** turning V6 into the everyday native standalone Android assistant (vision stage 4), docked-phone robot (stage 5), physical robot (stage 6), Family Intelligence (future F11), hidden vehicle controls or broad unapproved automation. Future V7+ version numbers remain tentative until approved.
+**Out of scope:** turning V6 into the everyday native standalone Android assistant (vision stage 4), docked-phone robot (stage 5), physical robot (stage 6), Family Intelligence (future F11), hidden vehicle controls or broad unapproved automation. V7 now has an **owner-requested research proposal for stage 4**, with scope and implementation still pending approval; do not shift those items into V6.
 
 **Planning authority:** this V6 scope is **approved to be retained in the roadmap**. `docs/NOW.md` and a later bounded V6 implementation package/Issues must explicitly authorize coding. Do not interrupt V4 migration, active delivery or V5 stage-2 sequence.
+
+
+## V7 — JARVES Everyday Android + Ecosystem & Agent Studio (proposal for review, 21 October 2026)
+
+> **PROPOSAL ONLY — NOT APPROVED FOR IMPLEMENTATION.** [Read the full sourced V7 proposal and checkboxes for owner review](plans/V7_PROPOSAL_2026-10-21.md) · [GitHub tracking Issue #50](https://github.com/igalgerman/jarves/issues/50). This is an owner request to **investigate and prepare** V7 for approval, *not* a decision to begin V7 development.
+
+**Mandatory product outcome: [PRODUCT_VISION stage 4](PRODUCT_VISION.md) — an everyday native Android companion to the single JARVES Core**. Reuse V5's paired PC-hosted access and V6's voice/car learnings; support native phone experience, approved notifications, device-aware Skills, Hebrew conversation, same memory/tasks/permissions, continuity and truthful offline/reconnect status. Investigate official Android assistant-role, voice/background/audio and privacy constraints before promising wake or replacement of the OS assistant. Later docked-phone/physical stages remain deferred.
+
+**Additional owner-requested V7 research tracks:**
+1. **OpenClaw & peers:** compare transferable features and security patterns (nanobot, IronClaw etc.) and recommend **adopt/adapt/reject**, not a Core rewrite.
+2. **OpenCode:** optional third coding-agent harness under existing Claude Code/Codex Development Manager/Orchestrator; evaluate documented API/SDK/session interfaces.
+3. **GitHub:** read-first integration mapping agent work to Issues/PR/commits/Actions/CI, with narrowly approved write operations. Reuse existing V4/V5 tracking and official MCP/API where appropriate.
+4. **OpenRouter + Model Lab:** support curated free/paid models **both for JARVES user tasks and coding agents**, based on each harness's actual supported providers. Reproducible evaluation, transparent model choice, token/total-cost and quality comparisons, explicit free-only/spending and data-handling controls.
+5. **Supervised Browser Studio:** expand actionable browser workflows with **live viewing**, optional recorded video/replay, user **takeover and return** in the *same browser session* for login/MFA or difficult steps. Compare local Playwright, Browser Use, Cloudflare and self-hosted handoff; security/consent/recording gates are mandatory.
+6. **“buz” investigation:** **tentatively** assess [Buzz by Block](https://github.com/block/buzz) as a shared humans+agents collaboration platform; exact intended product unconfirmed, no integration selection yet.
+7. **Optional small improvements**: MCP interoperability, Skill trust profiles, model routing/local-model research, workflow recipes, agent cost dashboards, action receipts — pick a few proven wins rather than feature bloat.
+
+**Sequencing:** finish V4 verified release gates → deliver V5 stage 2 → verify V6 stage 3 → scoped V7 research approval → stage-4 native Android vertical slice → carefully selected agent/browser/model adapters. The document may be reviewed now; **only a separately approved bounded V7 work package** may start implementation, tests requiring paid API calls, account linking or new Android/browser permissions. Existing V6 six pillars remain intact and are not replaced by this proposal.
+
+
 
 ---
 ## Active software bundle — approved 18 October 2026

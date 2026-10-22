@@ -99,7 +99,7 @@ def bridge_findings(stage: Path, pin_file: Path = BRIDGE_PIN) -> tuple[list[str]
     out = []
     if got != want:
         out.append(f"bridge binary SHA256 {got[:16]}... differs from the pin {want[:16]}...: {rel}")
-    extra = [x for x in present if x != rel]
+    extra = [x for x in present if x not in (rel, rel + ".sha256")]   # the build-script sidecar is allowed
     if extra:
         out.append(f"unexpected files next to the bridge binary: {', '.join(extra)}")
     return out, f"BRIDGE: {rel} sha256 {'verified' if not out else 'MISMATCH'} ({f.stat().st_size} bytes)"
