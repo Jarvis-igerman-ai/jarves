@@ -1,3 +1,10 @@
+## Setup: Hebrew console + keep existing settings (22 Oct 2026) - branch `fix/setup-hebrew-keep`, related to #58
+
+- `console_rtl.py`: consoles without bidi (Windows conhost / Windows Terminal / VS Code terminal) get Hebrew in visual order (Hebrew runs reversed, commands/keys/paths/numbers kept left to right, run order reversed, brackets mirrored, long lines wrapped before reversing). `JARVES_CONSOLE_RTL=auto|logical|visual`, `--no-rtl-fix`; auto is visual only on a Windows tty outside mintty/WSL. Installed once in `cli.main` as a stdout/stderr wrapper, so every CLI print/prompt (setup, connect, features, doctor) goes through it; wizard prompts are written via `sys.stdout`.
+- Wizard: Hebrew first offers (in English) to continue in the browser, Enter opens the dashboard `#/setup` page (`browser_setup` action; falls back to the terminal). The `<-` marker is now a `>` prefix on the current value and the pick is echoed.
+- Existing profile (config.toml / secrets.env / setup_done): one-screen summary, default "keep my settings", only missing items asked (API key, ChatGPT sign-in, guided connect when something required is missing); `jarvis setup --yes` keeps everything non-interactively; choosing "change" or an answers file takes a backup first (`backup.create`) and stops if it fails. No secret value is ever printed.
+- Open for the owner: the visual-order output is verified by unit tests only; please confirm on the real Windows Terminal that a Hebrew menu reads right. Guide: `guided_setup.toml` (EN+HE). No dashboard catalog strings were added, so `catalog_add.py` was not needed.
+
 ## Docs alignment: DOC_MAP and roadmap status (22 Oct 2026) - branch `docs/roadmap-alignment`, docs only
 
 - New [DOC_MAP](DOC_MAP.md): the single index (per version V3-V7, status, owner doc, testing and manual testing, evidence reports). README and CONTEXT_MAP point to it; CLAUDE.md has one line.

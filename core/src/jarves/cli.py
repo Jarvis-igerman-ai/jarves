@@ -773,10 +773,31 @@ def cmd_setup(a, cfg, home) -> int:
     def connect_start() -> int:
         from .connect import Connector
         return Connector(home, cfg).run()
+
+    def browser_setup() -> int:
+        """Hebrew: continue in the browser (the Setup page renders Hebrew correctly in any terminal)."""
+        import webbrowser
+
+        from .dashboard import Dashboard
+        try:
+            dash = Dashboard(home, cfg, 0)
+        except OSError as e:
+            print(f"cannot start the dashboard: {e}  (continuing in the terminal)", file=sys.stderr)
+            return sw.CONTINUE_IN_TERMINAL
+        print("Setup is open in your browser (page Setup & add-ons). Press Ctrl+C here when you are done.", flush=True)
+        webbrowser.open(dash.url + "#/setup")
+        try:
+            dash.serve_forever()
+        except KeyboardInterrupt:
+            pass
+        finally:
+            dash.stop()
+        return 0
     try:
         wiz = sw.Wizard(cfg, home, config_path=path, answers=answers, defaults=getattr(a, "defaults", False),
-                        lang=getattr(a, "lang", None), restart=getattr(a, "restart", False),
-                        actions={"chatgpt_login": chatgpt_login, "google_start": google_start, "connect_start": connect_start})
+                        lang=getattr(a, "lang", None), restart=getattr(a, "restart", False), yes=getattr(a, "yes", False),
+                        actions={"chatgpt_login": chatgpt_login, "google_start": google_start, "connect_start": connect_start,
+                                 **({"browser_setup": browser_setup} if _cli_features(cfg, home).enabled("dashboard") else {})})
         return wiz.run()
     except sw.AnswerError as e:
         print(f"answers: {e}", file=sys.stderr)
@@ -1539,7 +1560,10 @@ def main(argv: list[str] | None = None) -> int:
             stream.reconfigure(encoding="utf-8")
         except (AttributeError, ValueError):
             pass
+    from . import console_rtl
+    console_rtl.install(sys.argv[1:] if argv is None else list(argv))   # Hebrew in consoles without bidi (--no-rtl-fix / JARVES_CONSOLE_RTL)
     ap = argparse.ArgumentParser(prog="jarves", description="JARVES assistant Core")
+    ap.add_argument("--no-rtl-fix", action="store_true", help="print Hebrew in logical order (consoles that do their own bidi)")
     ap.add_argument("--config", type=Path, help="config.toml (default: <JARVES_HOME>/config.toml)")
     ap.add_argument("--profile", metavar="NAME", help="use this profile (its own memory, conversations, costs, "
                                                       "settings, keys); also JARVES_PROFILE. See: jarvis profile list")
@@ -1671,6 +1695,10 @@ def main(argv: list[str] | None = None) -> int:
     su.add_argument("--defaults", action="store_true", help="non-interactive: take every recommended answer")
     su.add_argument("--lang", choices=["he", "en"], help="wizard language (default Hebrew)")
     su.add_argument("--restart", action="store_true", help="forget the progress of an interrupted run")
+    su.add_argument("--yes", "-y", action="store_true", help="non-interactive: keep every existing setting and secret, "
+                    "take the safe defaults for the rest (never overwrites)")
+    su.add_argument("--no-rtl-fix", action="store_true", default=argparse.SUPPRESS,
+                    help="print Hebrew in logical order (same as JARVES_CONSOLE_RTL=logical)")
     su.add_argument("--check-addons", action="store_true",
                     help="check that every add-on's code, models and data are in this install (no sensors, no network)")
     su.add_argument("--json", action="store_true", help="with --check-addons: machine-readable output")
