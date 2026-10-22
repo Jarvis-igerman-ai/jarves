@@ -280,8 +280,24 @@ _probe_cache: dict | None = None
 listeners: dict[str, Callable[[dict], None]] = {}   # by owner name: the newest registration wins
 
 
+_restricted_token = False
+
+
+def set_restricted_token(on: bool) -> None:
+    """[helper] restricted_token (default off): on Windows the child also gets a restricted token at the Low
+    integrity level (winsandbox.py). It fails closed: if that launch fails the command does not run."""
+    global _restricted_token
+    _restricted_token = bool(on)
+
+
+def restricted_token_enabled() -> bool:
+    return _restricted_token and sys.platform == "win32"
+
+
 def mechanism() -> str:
     if sys.platform == "win32":
+        if restricted_token_enabled():
+            return "Windows Job Object + restricted token (Low integrity)"
         return "Windows Job Object"
     return "POSIX rlimits + own session"
 
@@ -404,6 +420,30 @@ def _win_job(limits: Limits) -> tuple["WinJob | None", str]:
         return None, f"no Windows job object ({type(e).__name__})"
 
 
+def _stdio(kw: dict) -> dict:
+    """The subprocess stdio arguments as winsandbox.spawn wants them (DEVNULL / PIPE / STDOUT only)."""
+    return dict(stdin="pipe" if kw.get("stdin") == subprocess.PIPE else "null",
+                stderr="stdout" if kw.get("stderr") == subprocess.STDOUT else "null")
+
+
+def _restricted_popen(args, shell: bool, kw: dict):
+    """Popen look-alike started with the restricted token, suspended (the caller joins the job, then resumes)."""
+    from . import winsandbox
+    cmd = f'"{os.environ.get("COMSPEC", "cmd.exe")}" /c {args}' if shell and isinstance(args, str) else args
+    return winsandbox.spawn(cmd, cwd=kw.get("cwd"), env=kw.get("env"), suspended=True, **_stdio(kw))
+
+
+async def _restricted_exec(args, kw: dict):
+    from . import winsandbox
+    p = winsandbox.spawn(list(args), cwd=kw.get("cwd"), env=kw.get("env"), suspended=True, **_stdio(kw))
+    return winsandbox.AsyncProc(p, int(kw.get("limit") or (1 << 20)))
+
+
+def _note_token(g: "Guard") -> None:
+    if restricted_token_enabled() and g.state == "active":
+        g.reason += "; restricted token, Low integrity"
+
+
 def _posix_wrap(args: list[str], limits: Limits) -> list[str]:
     return [sys.executable, "-I", "-S", str(_EXEC), json.dumps(asdict(limits)), "--", *args]
 
@@ -430,7 +470,8 @@ def popen(args, *, limits: Limits | None = None, shell: bool = False, record: bo
         job, err = _win_job(limits)
         _win_flags(kw)
         try:
-            p = subprocess.Popen(args, shell=shell, **kw)
+            p = _restricted_popen(args, shell, kw) if restricted_token_enabled() else subprocess.Popen(
+                args, shell=shell, **kw)
         except BaseException:
             if job is not None:
                 job.close()
@@ -442,6 +483,7 @@ def popen(args, *, limits: Limits | None = None, shell: bool = False, record: bo
                 job.close()
             p.wait(timeout=5)
             raise
+        _note_token(g)
     else:
         kw["start_new_session"] = True
         argv = list(args) if not isinstance(args, str) else ["/bin/sh", "-c", args]
@@ -461,7 +503,8 @@ async def exec_async(*args: str, limits: Limits = SKILL_LIMITS, posix_launcher: 
         job, err = _win_job(limits)
         _win_flags(kw)
         try:
-            proc = await asyncio.create_subprocess_exec(*args, **kw)
+            proc = await _restricted_exec(args, kw) if restricted_token_enabled() else \
+                await asyncio.create_subprocess_exec(*args, **kw)
         except BaseException:
             if job is not None:
                 job.close()
@@ -473,6 +516,7 @@ async def exec_async(*args: str, limits: Limits = SKILL_LIMITS, posix_launcher: 
                 job.close()
             await proc.wait()
             raise
+        _note_token(g)
     else:
         kw["start_new_session"] = True
         argv = _posix_wrap(list(args), limits) if posix_launcher else list(args)

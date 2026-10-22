@@ -51,13 +51,15 @@ from . import hebrew, logs
 
 STATE_FILE = "setup_state.json"
 PEAR_URL = "https://github.com/pear-devs/pear-desktop/releases"
+CONTINUE_IN_TERMINAL = -1          # a browser action returns this when it could not start: setup goes on in the terminal
+KEEP_SKIPPED = ("names", "wake", "voice", "addons", "privacy", "budget")      # "keep my settings": never asked
 STEPS = ("language", "connection", "names", "wake", "voice", "addons", "privacy", "budget", "google", "connect")
 # Modules that register add-ons in jarves.features at import (the dashboard imports the same ones).
 ADDON_MODULES = ("jarves.telegram_channel", "jarves.instagram_channel", "jarves.whatsapp", "jarves.briefing", "jarves.homeassistant",
                  "jarves.appearance", "jarves.backup", "jarves.usage", "jarves.updates", "jarves.runtime",
                  "jarves.operations", "jarves.guides", "jarves.skills.generated", "jarves.browser", "jarves.profiles",
                  "jarves.selfcheck", "jarves.connect", "jarves.skills.helper", "jarves.context_trace",
-                 "jarves.recall", "jarves.diag.service", "jarves.whatsapp_bridge", "jarves.orchestrator", "jarves.dialing")
+                 "jarves.recall", "jarves.diag.service", "jarves.whatsapp_bridge", "jarves.orchestrator", "jarves.dialing", "jarves.self_manage")
 # Privacy-sensitive or outward-acting: OFF on the first run whatever else says; ON only after an explicit yes.
 SAFE_OFF = frozenset({"camera", "face_recognition", "camera_when_away", "gmail_send", "calendar_write",
                       "dashboard_lan", "mobile_access", "browser", "telegram", "home_assistant", "instagram", "helper",
@@ -71,8 +73,8 @@ GOOGLE_FEATURES = ("google_calendar", "calendar_write", "gmail_read", "gmail_sen
 # that every registered feature is listed.
 GROUPS: tuple[tuple[str, str, str, tuple[str, ...]], ...] = (
     ("core", "בסיס", "Core", ("web_search", "background_tasks", "memory_curator", "memory_llm_pass",
-                             "diagnosis_llm_pass", "conversation_recall", "self_check", "self_diagnostics_2", "self_tests", "guided_setup", "workspace_agent_edit", "assistant_identity", "skill_creation",
-                             "proactive_help", "usage_monitor", "usage_admin_key", "appearance", "background_core", "display_control",
+                             "diagnosis_llm_pass", "conversation_recall", "self_check", "self_diagnostics_2", "self_tests", "issue_reports", "guided_setup", "workspace_agent_edit", "assistant_identity", "skill_creation",
+                             "proactive_help", "self_manage", "usage_monitor", "usage_admin_key", "appearance", "background_core", "display_control",
                              "tray_icon", "autostart")),
     ("voice", "קול", "Voice", ("wake_word", "greeting", "chimes", "voice_change", "client_delegation")),
     ("music", "מוזיקה", "Music", ("music",)),
@@ -80,11 +82,12 @@ GROUPS: tuple[tuple[str, str, str, tuple[str, ...]], ...] = (
     ("camera", "מצלמה ופרטיות", "Camera & privacy", ("camera", "camera_preview", "face_recognition", "camera_when_away")),
     ("browser", "דפדפן", "Browser", ("browser",)),
     ("automation", "אוטומציה", "Automation", ("scheduler", "reports", "timers", "lists", "notes", "files", "proactive_alerts",
-                                              "autonomy", "morning_briefing", "text_chat")),
+                                              "autonomy", "morning_briefing", "text_chat", "goals", "goal_plans", "goal_done_line", "adaptive_memory", "prefs_in_prompt",
+                                              "proactive_intel", "proactive_signals", "dev_manager", "dev_status")),
     ("channels", "ערוצים ובית חכם", "Channels & smart home", ("telegram", "instagram", "whatsapp_handoff",
                                                                   "whatsapp_bridge", "whatsapp_send", "home_assistant")),
     ("phone", "שיחות טלפון", "Phone calls", ("assisted_dialing",)),
-    ("dashboard", "לוח בקרה וטלפון", "Dashboard & phone", ("dashboard", "dashboard_lan", "mobile_access", "context_trace")),
+    ("dashboard", "לוח בקרה וטלפון", "Dashboard & phone", ("dashboard", "dashboard_lan", "mobile_access", "web_chat", "context_trace")),
     ("updates", "עדכונים וגיבוי", "Updates & backup", ("update_check", "beta_channel", "release_signoff", "setup_tour", "backup")),
     ("profiles", "פרופילים", "Profiles", ("profiles",)),
     ("helper", "עזרה במחשב (פקודות והתקנות)", "Computer helper (commands & installs)", ("helper", "helper_readonly_auto")),
@@ -163,7 +166,23 @@ T: dict[str, tuple[str, str]] = {
     "yes_no": ("כ/ל", "y/n"),
     "on": ("פועל", "on"), "off": ("כבוי", "off"),
     "pear": ("Pear Desktop (תוכנה נפרדת, חינם) להורדה:", "Get Pear Desktop (separate free app):"),
+    "have": ("מצאתי הגדרות קיימות", "Found your existing settings"),
+    "keep_q": ("להשאיר את ההגדרות הקיימות שלי כמו שהן? (לא = לעבור על ההגדרות ולשנות; לפני כן נשמר גיבוי)",
+               "Keep my current settings as they are? (no = go through them and change; a backup is taken first)"),
+    "keep_done": ("ההגדרות הקיימות נשארו כמו שהן. שואלים רק על מה שחסר.",
+                  "Your current settings are kept as they are. Only what is missing is asked."),
+    "backup_ok": ("גיבוי נשמר לפני השינוי:", "Backup saved before any change:"),
+    "backup_fail": ("הגיבוי נכשל, לכן שום דבר לא שונה:", "The backup failed, so nothing was changed:"),
+    "key_missing_ask": ("חסר מפתח API. להוסיף עכשיו? (Enter ריק = לדלג)", "The API key is missing. Add it now? (empty Enter = skip)"),
+    "sum_language": ("שפה", "Language"), "sum_conn": ("מצב חיבור ל-AI", "AI connection mode"),
+    "sum_key": ("מפתח API", "API key"), "sum_plan": ("תוכנית ChatGPT", "ChatGPT plan"),
+    "sum_whatsapp": ("וואטסאפ", "WhatsApp"),
+    "st_connected": ("מחובר", "connected"), "st_missing": ("חסר", "missing"), "st_saved": ("שמור", "saved"),
+    "st_attention": ("דורש טיפול", "needs attention"),
 }
+# English on purpose: it is the first Hebrew-mode line and must read correctly even in a console without bidi.
+BROWSER_OFFER = ("Hebrew looks best in the browser: press Enter to continue setup in the browser (recommended for "
+                 "Hebrew), or type c to continue here in the terminal.")
 
 
 class Abort(Exception):
@@ -342,7 +361,9 @@ class ConsoleIO:
             self.write(prompt)
             return self.lines.pop(0) if self.lines else None
         try:
-            return input(prompt)
+            sys.stdout.write(prompt)             # through sys.stdout so the Hebrew console fix (console_rtl) sees it
+            sys.stdout.flush()
+            return input()
         except EOFError:
             return None
 
@@ -351,10 +372,10 @@ class Wizard:
     def __init__(self, cfg, home: Path, *, config_path: Path, io: ConsoleIO | None = None,
                  answers: dict | None = None, defaults: bool = False, lang: str | None = None,
                  features: feat.Features | None = None, actions: dict[str, Callable] | None = None,
-                 restart: bool = False) -> None:
+                 restart: bool = False, keep: bool | None = None, yes: bool = False) -> None:
         self.cfg, self.home, self.config_path = cfg, Path(home), Path(config_path)
         self.io = io or ConsoleIO()
-        self.scripted = answers is not None or defaults
+        self.scripted = answers is not None or defaults or yes
         self.answers = dict(answers or {})
         bad = set(self.answers) - ANSWER_KEYS
         if bad:
@@ -371,11 +392,18 @@ class Wizard:
         mode = clilang.current()
         self.both = not picked and mode == "both"            # JARVES_CLI_LANG / ui.cli_language = both: print both
         self.lang = picked or ("he" if mode in ("he", "both") else "en")
+        self._offered = False
         self.actions = {"ask_key": _ask_key, "chatgpt_login": None, "google_start": None, "prepare": _prepare,
                         "autostart": _autostart, **(actions or {})}
         self.notes: list[str] = []          # "do later" lines collected for the summary
         self.changed: list[str] = []        # what this run changed (for the log and tests)
         self._memory = None
+        # keep: True = keep every existing setting (ask only what is missing; --yes), False = change (backup first),
+        # None = decide in run(): an existing profile asks once, default "keep".
+        self.keep = keep
+        self.existing = existing_profile(self.home, self.config_path)
+        if yes and keep is None:
+            self.keep = self.existing               # --yes: keep everything that exists, take safe defaults otherwise
 
     # --- text + questions
     def t(self, key: str) -> str:
@@ -434,7 +462,7 @@ class Wizard:
             return v
         self.say(prompt)
         for i, (v, label) in enumerate(options, 1):
-            self.say(f"  {i}  {label}" + ("   <-" if v == default else ""))
+            self.say(f"{'>' if v == default else ' '} {i}  {label}")
         di = values.index(default) + 1 if default in values else 1
 
         def parse(s: str):
@@ -443,7 +471,10 @@ class Wizard:
             if s in values:
                 return s
             raise ValueError(s)
-        return self._ask(f"[{di}]: ", parse, values[di - 1])
+        picked = self._ask(f"[{di}]: ", parse, values[di - 1])
+        if picked != default:                  # the "current" marker followed the old value: show what was chosen
+            self.say(f"> {values.index(picked) + 1}  {dict(options)[picked]}")
+        return picked
 
     def text(self, key: str, prompt: str, default: str, check: Callable[[str], str] | None = None) -> str:
         if self.scripted:
@@ -468,6 +499,15 @@ class Wizard:
         done = list(self.state.get("completed") or [])
         resumable = bool(done) and not self.state.get("finished_at") and not self.scripted
         self.say(f"== {T['title'][0]} / {T['title'][1]} ==" if self.both else f"== {self.t('title')} ==")
+        if not self.scripted and self.lang == "he":
+            rc = self._offer_browser()
+            if rc is not None:
+                return rc
+        if self.keep is None:
+            self.keep = self._decide_keep() if not resumable else False
+        if not self.keep and self.existing and not resumable:
+            if not self._backup():
+                return 1
         if resumable and not self.yesno("resume", self.t("resume"), True):
             done = []
         elif not resumable:
@@ -476,9 +516,14 @@ class Wizard:
             for step in STEPS:
                 if step in done:
                     continue
+                if self.keep and step in KEEP_SKIPPED:
+                    done.append(step)
+                    continue
                 getattr(self, "step_" + step)()
                 done.append(step)
                 self._save_state(done)
+                if getattr(self, "_browser_rc", None) is not None:
+                    return self._browser_rc
         except (Abort, KeyboardInterrupt):
             self.say("\n" + self.t("stopped"))
             logs.info("setup", "SETUP_STOPPED", "setup wizard stopped; progress kept", done=len(done))
@@ -495,9 +540,63 @@ class Wizard:
         return 0
 
     # --- steps
+    def _decide_keep(self) -> bool:
+        """An existing profile: show what is set, default 'keep' (nothing overwritten). --yes/keep=True never asks."""
+        if not self.existing:
+            return False
+        if self.scripted and self.answers:                       # an explicit answers file: apply it (backup first)
+            return False
+        self.show_profile()
+        if self.scripted:
+            return False                                         # --defaults on an existing profile: current values
+        keep = self.yesno("keep", self.t("keep_q"), True)
+        if keep:
+            self.say(self.t("keep_done"))
+        return keep
+
+    def show_profile(self) -> None:
+        self.say(chr(10) + "== " + self.t("have") + " ==")
+        for label, value in profile_rows(self):
+            self.say(f"  {label}: {value}")
+        self.say()
+
+    def _backup(self) -> bool:
+        """Back up with the existing backup mechanism before anything is changed; False = stop (nothing changed)."""
+        from . import backup
+        try:
+            path = backup.create(self.home, "manual", note="before jarvis setup")
+        except Exception as e:                                   # BackupError, OSError: never change without a copy
+            self.say(f"{self.t('backup_fail')} {type(e).__name__}")
+            logs.warn("setup", "SETUP_BACKUP_FAILED", "setup stopped: the backup before changing settings failed",
+                      error=type(e).__name__)
+            return False
+        self.say(f"{self.t('backup_ok')} {path}")
+        self.backup_path = path
+        return True
+
+    def _offer_browser(self) -> int | None:
+        """Hebrew: a console without bidi garbles it, the dashboard Setup page does not. Enter = go to the browser."""
+        go = self.actions.get("browser_setup")
+        if go is None:
+            return None
+        self._offered = True
+        self.say(BROWSER_OFFER)
+        raw = self.io.read("> ")                                  # Enter (or end of input) = the browser
+        if raw is not None and raw.strip().lower() in ("c", "continue", "n", "no"):
+            return None
+        self._save_state(list(self.state.get("completed") or []))
+        rc = go()
+        return None if rc == CONTINUE_IN_TERMINAL else rc
+
     def step_language(self) -> None:
+        if self.keep and self.state.get("language"):
+            return
         self.lang = self.choose("language", "Language / שפה", [("he", "עברית"), ("en", "English")], self.lang)
         self.say(self.t("enter") if not self.scripted else "")
+        if self.lang == "he" and not self.scripted and not self._offered:
+            rc = self._offer_browser()
+            if rc is not None:
+                self._browser_rc = rc
 
     def step_connection(self) -> None:
         from .chatgpt_auth import ChatGPTAuth
@@ -505,18 +604,19 @@ class Wizard:
         from .config import openai_key_present, save_secret
         cur = self.cfg.ai.connection
         opts = [(v, self.L(he, en)) for v, he, en in CONNECTIONS]
-        conn = self.choose("connection", "\n" + self.t("conn"), opts, cur)
-        if conn != cur or not self.config_path.exists():
+        conn = cur if self.keep else self.choose("connection", "\n" + self.t("conn"), opts, cur)
+        if conn != cur or (not self.config_path.exists() and not self.keep):
             set_connection(self.config_path, conn)
             self.cfg.ai.connection = conn
             self.changed.append("connection")
         if conn in ("combined", "api_key"):
-            if not openai_key_present():
+            if not openai_key_present() and not (self.keep and "OPENAI_API_KEY" in secret_names(self.home)):
                 env = os.environ.get("OPENAI_API_KEY", "").strip()
                 if self.scripted and self.answers.get("api_key_from_env") and env.startswith("sk-"):
                     save_secret("OPENAI_API_KEY", env, self.home)
                     self.say(self.t("key_env_saved"))
-                elif self.scripted or self.actions["ask_key"](self.home) != 0:
+                elif self.scripted or (self.keep and not self.yesno("add_key", self.t("key_missing_ask"), True)) \
+                        or self.actions["ask_key"](self.home) != 0:
                     self.notes.append(self.t("key_later"))
             self.say(SPEND_LIMIT_ADVICE)
         if conn in ("chatgpt", "combined") and not ChatGPTAuth(self.home).status()["plan_usage"]:
@@ -707,7 +807,7 @@ class Wizard:
         self.say("\n" + self.t("privacy_note"))
         # A fresh install recommends privacy ON (nothing needs the words yet); a re-run offers the current choice.
         on = self.yesno("privacy_mode", self.t("privacy"), True if self.first else cur)
-        if on != cur:
+        if on != cur or self.first:               # the first run writes the explicit choice down
             privacy.set_privacy(SimpleNamespace(home=self.home, cfg=self.cfg, config_path=self.config_path), on)
             self.changed.append(f"privacy={'on' if on else 'off'}")
 
@@ -756,6 +856,8 @@ class Wizard:
                 return
             self.notes.append(self.t("tour_later"))
         start = self.actions.get("connect_start")
+        if self.keep and not self.scripted and not missing_items(self.home, self.cfg):
+            return
         if not self.scripted and start is not None and self.yesno("connect_now", "\n" + self.t("connect_now"), True):
             start()
             self.f.invalidate()
@@ -792,6 +894,75 @@ class Wizard:
             if any(not self.f.available(x)[0] for x in ("music",) if x in feat.CATALOG and self.f.enabled(x)):
                 self.say(f"  {self.t('pear')} {PEAR_URL}")
         self.say("\n" + self.t("done") + "\n" + self.t("change"))
+
+
+# ---------------------------------------------------------------------- existing profile
+def secret_names(home: Path) -> set[str]:
+    """Names (never values) of the non-empty entries in secrets.env."""
+    from .config import secrets_file
+    names: set[str] = set()
+    try:
+        for line in secrets_file(home).read_text(encoding="utf-8-sig").splitlines():
+            k, sep, v = line.partition("=")
+            if sep and v.strip() and not k.strip().startswith("#"):
+                names.add(k.strip())
+    except OSError:
+        pass
+    return names
+
+
+def existing_profile(home: Path, config_path: Path) -> bool:
+    """A profile from an earlier install: a config file, saved secrets or a finished setup."""
+    from .config import secrets_file
+    try:
+        if Path(config_path).is_file() and Path(config_path).stat().st_size > 0:
+            return True
+    except OSError:
+        pass
+    return secrets_file(home).is_file() or (Path(home) / "setup_done").exists() or bool(read_state(home).get("finished_at"))
+
+
+def missing_items(home: Path, cfg) -> list[str]:
+    """Required (not optional) accounts that are not connected, via the same checklist as `jarvis connect --status`."""
+    try:
+        from .connect import status_items
+        return [i.id for i in status_items(home, cfg) if not i.optional and i.state != "connected"]
+    except Exception:                                            # a probe must never break setup
+        return []
+
+
+def profile_rows(w: "Wizard") -> list[tuple[str, str]]:
+    """One line per area: what is already set. Never a key, token, address or path to a secret."""
+    from .chatgpt_auth import ChatGPTAuth
+    home, cfg = w.home, w.cfg
+    names = secret_names(home)
+    rows: list[tuple[str, str]] = []
+    lang = w.state.get("language") or ("he" if w.lang == "he" else "en")
+    rows.append((w.t("sum_language"), "עברית" if lang == "he" else "English"))
+    rows.append((w.t("sum_conn"), cfg.ai.connection))
+    key = "OPENAI_API_KEY" in names or bool(os.environ.get("OPENAI_API_KEY", "").strip())
+    rows.append((w.t("sum_key"), w.t("st_saved") if key else w.t("st_missing")))
+    try:
+        plan = bool(ChatGPTAuth(home).status()["plan_usage"])
+    except Exception:
+        plan = False
+    rows.append((w.t("sum_plan"), w.t("st_connected") if plan else w.t("st_missing")))
+    from .connect import status_items
+    try:
+        items = status_items(home, cfg)
+    except Exception:
+        items = []
+    for it in items:
+        if it.id == "openai-admin":
+            continue
+        state = {"connected": "st_connected", "attention": "st_attention"}.get(it.state, "st_missing")
+        rows.append((w.L(it.title_he, it.title_en), w.t(state)))
+    try:
+        from .whatsapp import contacts_file
+        rows.append((w.t("sum_whatsapp"), w.t("st_saved") if contacts_file(home).is_file() else w.t("st_missing")))
+    except Exception:
+        pass
+    return rows
 
 
 # ---------------------------------------------------------------------- helpers
@@ -931,8 +1102,12 @@ BUNDLE: dict[str, list[Callable[[], tuple[bool, str]]]] = {
                            _data("jarves.guides", "data/health.toml")],
     "self_tests": [_mod("jarves.selftest"), _mod("jarves.speedtest"), _mod("jarves.selfspeed"), _mod("jarves.procstats"),
                    _data("jarves", "dashboard_static/selfspeed.js"), _data("jarves.guides", "data/self_tests.toml")],
+    "issue_reports": [_mod("jarves.issue_registry"), _data("jarves", "dashboard_static/bugs.js"),
+                      _data("jarves.guides", "data/issue_reports.toml")],
     "guided_setup": [_mod("jarves.connect"), _mod("jarves.google_setup"), _mod("jarves.telegram_channel"),
                      _data("jarves.guides", "data/guided_setup.toml")],
+    "self_manage": [_mod("jarves.self_manage"), _data("jarves", "dashboard_static/selfmanage.js"),
+                    _data("jarves.guides", "data/self_manage.toml")],
     "google_calendar": _GOOGLE, "calendar_write": _GOOGLE, "gmail_read": _GOOGLE, "gmail_send": _GOOGLE,
     "google_contacts": [*_GOOGLE, _mod("jarves.skills.contacts")],
     "camera": [_mod("cv2"), _mod("jarves.camera.service"), _data("jarves.camera", "models/face_detection_yunet_2023mar.onnx")],
@@ -953,7 +1128,9 @@ BUNDLE: dict[str, list[Callable[[], tuple[bool, str]]]] = {
                   _data("jarves", "dashboard_static/shell.js"), _data("jarves", "dashboard_static/locales/en.js"),
                   _data("jarves", "dashboard_static/locales/he.js")],
     "dashboard_lan": [_mod("jarves.dashboard_auth"), _data("jarves", "dashboard_static/pair.html")],
-    "mobile_access": [_mod("jarves.mobile"), _mod("jarves.qrmini"), _data("jarves", "dashboard_static/mobile/index.html")],
+    "mobile_access": [_mod("jarves.mobile"), _mod("jarves.tailnet"), _mod("jarves.qrmini"), _data("jarves", "dashboard_static/mobile/index.html")],
+    "web_chat": [_mod("jarves.chat_engine"), _mod("jarves.web_cli"), _data("jarves", "dashboard_static/chatview.js"),
+                 _data("jarves", "dashboard_static/chat.js"), _data("jarves.guides", "data/web_chat.toml")],
     "context_trace": [_mod("jarves.context_trace"), _data("jarves", "dashboard_static/context.js")],
     "agent_orchestrator": [_mod("jarves.orchestrator"), _mod("jarves.orchestrator.service"),
                            _mod("jarves.orchestrator.hook"), _mod("jarves.orchestrator.channel"),
@@ -973,6 +1150,15 @@ BUNDLE: dict[str, list[Callable[[], tuple[bool, str]]]] = {
     "timers": [_mod("jarves.timers"), _tz("Asia/Jerusalem")],
     "text_chat": [_mod("jarves.chat_service")],
     "lists": [_mod("jarves.lists")],
+    "goals": [_mod("jarves.goals")],
+    "goal_plans": [_mod("jarves.goal_plans")],
+    "goal_done_line": [_mod("jarves.goals")],
+    "adaptive_memory": [_mod("jarves.preferences")],
+    "prefs_in_prompt": [_mod("jarves.preferences")],
+    "proactive_intel": [_mod("jarves.proactive")],
+    "proactive_signals": [_mod("jarves.continuity")],
+    "dev_manager": [_mod("jarves.devmanager")],
+    "dev_status": [_mod("jarves.devstatus")],
     "notes": [_mod("jarves.notes")],
     "files": [_mod("jarves.sandbox")],
     "proactive_alerts": [_mod("jarves.alerts")],

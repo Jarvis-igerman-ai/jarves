@@ -23,12 +23,17 @@ action = "open:#/home"
 check = "probe:privacy"
 
 [[steps]]
+he = "צריכים טקסט מלא לבדיקה? בעמוד הבית לחצו \"טקסט מלא לפי בקשה\" (או jarvis privacy full-text on). זה נשמר 24 שעות בלבד, ואז הפרטיות חוזרת לבד. בהתקנה חדשה הפרטיות פועלת מראש."
+en = "Need full text for a check? On the Home page press Full text on request (or jarvis privacy full-text on). It lasts 24 hours only, then privacy turns on again by itself. A new install starts with privacy on."
+action = "open:#/home"
+
+[[steps]]
 he = "עברו על עמוד \"יכולות ומתגים\": מה דולק ומה כבוי."
 en = "Go over the Features page: what is on and what is off."
 action = "open:#/features"
 
 [[steps]]
-he = "הלוגים ואבחון נשמרים עם הודעות קבועות: תוכן ונתונים אישיים מוסתרים לפי סוג. jarvis diag בונה חבילת תמיכה שתמיד מסירה תוכן, ומגבבת נתונים אישיים. עברו עליה לפני ששולחים."
+he = "הלוגים ואבחון נשמרים עם הודעות קבועות: תוכן ונתונים אישיים מוסתרים לפי סוג. jarvis diag בונה חבילת תמיכה שתמיד מסירה תוכן, ומחליפה נתונים אישיים בגיבוב (hash). עברו עליה לפני ששולחים."
 en = "Logs and diagnostics use fixed messages: content and personal data are redacted by class. jarvis diag builds a support bundle that always strips content and hashes personal data. Read it before sharing."
 action = "command:jarvis diag --help"
 

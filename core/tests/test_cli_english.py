@@ -149,11 +149,10 @@ def test_skip_now_moves_on_and_status_says_skipped(home):
     conn, out = make(home, ["s"], only="pear")
     assert conn.run() == 0 and conn.results == {"pear": "skipped"}
     text = "\n".join(out)
-    assert "[C]ontinue / [S]kip now / [N]ever ask again (Enter = continue)" in text
-    assert "skipped (run jarvis connect --only pear)" in text.replace("  ", " ").replace("skipped  (", "skipped (") \
-        or "(run jarvis connect --only pear)" in text
+    assert "[C]ontinue / [S]kip (not offered again) (Enter = continue)" in text
+    assert "(run jarvis connect pear)" in text
     assert "skipped" in text and not clilang.has_hebrew(text)
-    assert connect.never_list(home) == []                      # only this run
+    assert connect.never_list(home) == ["pear"]                # a skip is remembered: never offered again
 
 
 def test_enter_continues(home):
@@ -183,7 +182,7 @@ def test_never_is_remembered_and_hidden_until_only_or_reset(home):
     conn3.run()
     assert any("Instagram" in l and "skipped" in l for l in out3)
     # --only brings it back (and clears the memory)
-    conn4, _ = make(home, ["s"], only="instagram")
+    conn4, _ = make(home, [""], only="instagram", optional_runners={"instagram": lambda: 0})
     conn4.run()
     assert connect.never_list(home) == []
     # --reset-skips
@@ -200,7 +199,7 @@ def test_skip_flag_skips_named_items_for_this_run_only(home):
     assert conn.results["telegram"] == conn.results["pear"] == conn.results["instagram"] == "skipped"
     assert conn.results["google"] == "connected"
     text = "\n".join(out)
-    assert "skipped (run jarvis connect --only telegram)" in text or "(run jarvis connect --only telegram)" in text
+    assert "(run jarvis connect telegram)" in text
     assert connect.never_list(home) == []
 
 
@@ -234,7 +233,8 @@ def test_skip_inside_a_step_continues_with_the_next_item(home):
             self.ask("Something: ")
             return 0
     conn, out = make(home, ["", "skip", "s"], yes=False, google_factory=lambda h, c, **kw: Skipper(ask=kw["ask"]),
-                     skip=["telegram", "pear", "instagram", "home"], wake_runner=lambda: 0)
+                     skip=["openai", "chatgpt", "openai-admin", "telegram", "pear", "instagram", "home"],
+                     wake_runner=lambda: 0)
     assert conn.run() == 0
     assert conn.results["google"] == "skipped"
     assert conn.results["wake"] == "skipped"                  # the next item was reached and could be skipped too

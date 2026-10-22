@@ -28,7 +28,7 @@ Always-on: `jarvis start` runs JARVES in the background with a tray icon. `jarvi
 
 `jarvis dashboard` opens a page on this computer (English by default, Hebrew in Settings; Arabic and Russian were removed in V4). The link carries a private key that is valid until the dashboard stops.
 
-Main pages: Home (privacy switch, health, approvals), Conversations and Recall, Memory, Skills and tools, Features, Settings, Costs, Timers and Lists, Approvals, Coding agents, WhatsApp, Health, Updates, Logs. The Features page shows every switch with its state and the reason when something is unavailable. Every page is keyboard-usable and has text contrast checked against WCAG AA. On a phone, home-network access is opt-in (`dashboard_lan`) and needs pairing.
+Main pages: Home (privacy switch, health, approvals), Conversations and Recall, Memory, Skills and tools, Features, Guides, Settings, Costs, Timers and Lists, Approvals, Coding agents, WhatsApp, Phone calls, Health, Updates, Logs. The Features page shows every switch with its state, the reason when something is unavailable, and per device (Windows, Raspberry Pi) whether the feature is verified on a real device, implemented but not verified, or planned. Most features are still "implemented, not verified"; only the wake word, chimes, greeting and music are marked verified. Every page is keyboard-usable and has text contrast checked against WCAG AA. On a phone, home-network access is opt-in (`dashboard_lan`) and needs pairing.
 
 Every feature also has a guide: dashboard Guides, or `jarvis help <topic>`. Ask JARVES "how do I set up X?" and he walks you through it one step at a time.
 

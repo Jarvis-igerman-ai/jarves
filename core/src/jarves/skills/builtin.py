@@ -22,12 +22,12 @@ class ClockSkill(Skill):
             t = datetime.now().astimezone()
             return ToolResult(True, f"השעה {t:%H:%M}, יום {HE_DAYS[t.weekday()]} {t:%d.%m.%Y}",
                               {"iso": t.isoformat(timespec="minutes")})
-        return [Tool("get_time", "Current local date and time.", now, permission="read")]
+        return [Tool("get_time", "Local date/time: 'what time is it', 'מה השעה'.", now, permission="read")]
 
 
 class CalcArgs(BaseModel):
     expression: str = Field(..., min_length=1, max_length=200,
-                            description="arithmetic in digits and + - * / ** % ( ), sqrt(x), e.g. '347*18' or 'sqrt(81)'")
+                            description="digits + - * / ** % ( ), sqrt(x), e.g. '347*18'")
 
 
 def calculate(expression: str) -> float | int:
@@ -76,21 +76,20 @@ class CalcSkill(Skill):
             except (ValueError, SyntaxError, ZeroDivisionError, OverflowError, TypeError) as e:
                 return ToolResult(False, f"לא הצלחתי לחשב את זה ({type(e).__name__}).", code="CALC_FAILED")
             return ToolResult(True, f"{a.expression} = {v}", {"result": v})
-        return [Tool("calculate", "Exact arithmetic (use it for ANY calculation instead of web search or mental "
-                     "maths): + - * / ** % ( ) and sqrt().", calc, CalcArgs, permission="read")]
+        return [Tool("calculate", "Exact arithmetic, ALWAYS for any calculation, never web search: 'what is 347*18', 'כמה זה 12 כפול 8'.", calc, CalcArgs, permission="read")]
 
 
 class RememberArgs(BaseModel):
-    text: str = Field(..., min_length=1, max_length=500, description="The fact the user explicitly asked to remember")
+    text: str = Field(..., min_length=1, max_length=500)
 
 
 class ForgetArgs(BaseModel):
-    id: int | None = Field(None, description="Memory id to delete")
-    match: str | None = Field(None, description="Delete the memories containing this text")
+    id: int | None = Field(None)
+    match: str | None = Field(None, description='delete memories containing this text')
 
 
 class RecallArgs(BaseModel):
-    query: str | None = Field(None, description="Optional text to search for")
+    query: str | None = Field(None)
 
 
 class MemorySkill(Skill):
@@ -141,13 +140,13 @@ class MemorySkill(Skill):
             return None, f"למחוק את כל הזיכרונות ({self.store.count()})? / Delete all memories?"
 
         return [
-            Tool("remember", "Store a fact ONLY when the user explicitly asks you to remember it.", remember,
+            Tool("remember", "Store a fact ONLY on an explicit request: 'remember that...', 'תזכור ש...'.", remember,
                  RememberArgs, permission="action"),
-            Tool("recall", "List or search what the user asked you to remember.", recall, RecallArgs,
+            Tool("recall", "List/search what the user asked to remember: 'what do you remember', 'מה אתה זוכר עליי'.", recall, RecallArgs,
                  permission="read"),
-            Tool("forget", "Delete one memory by id or by matching text (asks the user to confirm).", forget,
+            Tool("forget", "Delete one memory by id or text, asks to confirm: 'forget that', 'תשכח את זה'.", forget,
                  ForgetArgs, permission="destructive", impact=forget_impact),
-            Tool("forget_all", "Delete ALL stored memories (asks the user to confirm).", forget_all,
+            Tool("forget_all", "Delete ALL memories, asks to confirm: 'forget everything', 'תשכח הכל'.", forget_all,
                  permission="destructive", impact=forget_all_impact,
                  confirm="למחוק את כל הזיכרונות? / Delete all memories?"),
         ]
@@ -168,5 +167,5 @@ class StatusSkill(Skill):
                 return ToolResult(True, "כל המערכות תקינות.", {"core": s["core"]})
             parts = [f"{k}: {v['detail'] or v['status']}" for k, v in bad.items()]
             return ToolResult(True, "בעיות: " + "; ".join(parts), {"core": s["core"], "problems": bad})
-        return [Tool("get_status", "Report JARVES component health (what works, what is broken, what to try).",
+        return [Tool("get_status", "Component health: 'what is broken', 'מה מחובר'.",
                      status, permission="read")]

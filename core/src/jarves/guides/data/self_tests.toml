@@ -17,7 +17,7 @@ test_he = "הבדיקה רק מוודאת שהרכיב מותקן. הבדיקו�
 test_en = "The check only sees that the component is installed. The tests themselves run from the Health & speed page or jarvis selftest."
 cost_he = "חינם. הבדיקות מקומיות ורק קוראות. מול OpenAI נשלחת בקשת HEAD אחת בלי מפתח: אין עלות ואין אסימונים."
 cost_en = "Free. The tests are local and read-only. Against OpenAI only one HEAD request without a key is sent: no cost, no tokens."
-privacy_he = "הכל נשאר במחשב. התוצאות נשמרות בקובץ קטן מקומי (selfspeed.json). בדיקת הפרטיות של היומן לא מציגה את התוכן שמצאה. בדיקה מעמיקה לא מקליטה ולא מדברת אלא אם ביקשתם --audio."
+privacy_he = "הכול נשאר במחשב. התוצאות נשמרות בקובץ קטן מקומי (selfspeed.json). בדיקת הפרטיות של היומן לא מציגה את התוכן שמצאה. בדיקה מעמיקה לא מקליטה ולא מדברת אלא אם ביקשתם --audio."
 privacy_en = "Everything stays on this computer. Results are kept in one small local file (selfspeed.json). The log privacy check never shows what it found. The deep test neither records nor speaks unless you ask for --audio."
 
 [[steps]]

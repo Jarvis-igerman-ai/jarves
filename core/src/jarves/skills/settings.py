@@ -94,34 +94,32 @@ class Settings:
 
 
 class FileArgs(BaseModel):
-    file: FileName = Field(..., description="Workspace file: SOUL (personality), IDENTITY, USER (about the user), "
-                                            "MEMORY (notes), AGENTS (rules), TOOLS (tools), SETUP (install help), "
-                                            "FEATURES (complete feature catalog), HEARTBEAT")
+    file: FileName = Field(...)
 
 
 class ReadFileArgs(FileArgs):
-    offset: int = Field(0, ge=0, description="Character offset; follow next_offset to read long docs")
+    offset: int = Field(0, ge=0)
 
 
 class NoteArgs(BaseModel):
-    file: NoteName = Field("USER", description="USER for facts/preferences about the user, MEMORY for other notes")
-    text: str = Field(..., min_length=1, max_length=400, description="One short line to add")
-    section: str | None = Field(None, max_length=60, description="Optional heading to put the line under")
+    file: NoteName = Field("USER", description='USER = about the user, MEMORY = other notes')
+    text: str = Field(..., min_length=1, max_length=400)
+    section: str | None = Field(None, max_length=60)
 
 
 class EditArgs(BaseModel):
-    file: EditName = Field(..., description="SOUL to change personality/tone, IDENTITY, USER or MEMORY")
-    text: str = Field(..., min_length=1, max_length=3000, description="The new text (whole file for replace)")
-    mode: Literal["append", "replace"] = Field("append", description="append a line/paragraph, or replace the file")
+    file: EditName = Field(...)
+    text: str = Field(..., min_length=1, max_length=3000)
+    mode: Literal["append", "replace"] = Field("append")
 
 
 class VoiceArgs(BaseModel):
-    voice: str = Field(..., description="A voice name from list_settings, e.g. vesper, meridian, stone")
-    restart_now: bool = Field(True, description="Restart this conversation right away so the new voice is heard")
+    voice: str = Field(..., description='voice name from list_settings')
+    restart_now: bool = Field(True, description='restart the conversation so the new voice is heard')
 
 
 class SettingArgs(BaseModel):
-    key: str = Field(..., description="One of the keys from list_settings")
+    key: str = Field(..., description='key from list_settings')
     value: str = Field(..., max_length=40)
 
 
@@ -228,24 +226,19 @@ class SettingsSkill(Skill):
             return ToolResult(True, f"עדכנתי: {a.key} = {value}.", {"key": a.key, "value": value})
 
         return [
-            Tool("workspace_read", "Read one of my workspace files (personality, identity, notes about the user, "
-                                   "rules, abilities, SETUP install guide, FEATURES complete catalog). "
-                                   "For long files keep reading with next_offset until it is null.",
+            Tool("workspace_read", "Read a workspace file (SOUL, IDENTITY, USER, MEMORY, AGENTS, TOOLS, SETUP, FEATURES): 'read SETUP', 'תקרא את מדריך ההתקנה'; long ones: follow next_offset until null.",
                  read_file, ReadFileArgs, permission="read"),
-            Tool("workspace_note", "Add ONE short line to USER.md (stable facts/preferences about the user) or "
-                                   "MEMORY.md (other long-term notes). Never passwords or codes.", note, NoteArgs,
+            Tool("workspace_note", "Add ONE short line to USER.md or MEMORY.md: 'note that I like tea', 'תרשום שאני אוהב תה'. Never passwords or codes.", note, NoteArgs,
                  permission="action"),
-            Tool("workspace_edit", "Change my personality (SOUL), identity (IDENTITY) or the USER / MEMORY files when "
-                                   "the user asks (e.g. 'תשנה את האופי שלך'). Asks the user to approve first.",
+            Tool("workspace_edit", "Change SOUL/IDENTITY/USER/MEMORY on request ('be funnier', 'תשנה את האופי שלך'). Asks the user to approve first.",
                  edit, EditArgs, permission="destructive", impact=edit_impact),
-            Tool("workspace_undo", "Undo the last change to a workspace file (asks the user first).", undo, FileArgs,
+            Tool("workspace_undo", "Undo the last workspace file change (asks first): 'undo that', 'תבטל את השינוי'.", undo, FileArgs,
                  permission="destructive", impact=undo_impact),
-            Tool("list_skills", "List my skills and their tools (what I can actually do).", list_skills,
+            Tool("list_skills", "My skills and their tools: 'what skills do you have', 'אילו יכולות יש לך'.", list_skills,
                  permission="read"),
-            Tool("list_settings", "List the settings I may change, their values and the available voices.",
+            Tool("list_settings", "Settings I may change, values and voices: 'what can I change', 'אילו הגדרות יש'.",
                  list_settings, permission="read"),
-            Tool("set_voice", "Change my speaking voice ('תחליף קול'). If the user names no voice, offer two or "
-                              "three from list_settings first.", set_voice, VoiceArgs, permission="action"),
-            Tool("set_setting", "Change one allowlisted setting from list_settings.", set_setting, SettingArgs,
+            Tool("set_voice", "Change my voice ('change voice', 'תחליף קול'). No voice named: offer two or three from list_settings first.", set_voice, VoiceArgs, permission="action"),
+            Tool("set_setting", "Change one allowlisted setting from list_settings: 'change a setting', 'תשנה הגדרה'.", set_setting, SettingArgs,
                  permission="action"),
         ]

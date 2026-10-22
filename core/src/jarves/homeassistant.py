@@ -121,14 +121,13 @@ class HAClient:
 
 # ---------------------------------------------------------------------- the Skill
 class StateArgs(BaseModel):
-    entity: str = Field(..., min_length=1, max_length=80, description="an entity id (light.living_room) or its name")
+    entity: str = Field(..., min_length=1, max_length=80, description='entity id or name')
 
 
 class ControlArgs(BaseModel):
-    entity: str = Field(..., min_length=1, max_length=80, description="an entity id or its name from home_list")
-    action: str = Field(..., pattern=r"^[a-z]{2,10}$", description="on | off | toggle | pause | set | start | dock | "
-                                                                    "lock | unlock | open | close | stop")
-    value: float | None = Field(None, ge=0, le=100, description="light: brightness percent; climate set: temperature")
+    entity: str = Field(..., min_length=1, max_length=80, description='entity id or name from home_list')
+    action: str = Field(..., pattern=r"^[a-z]{2,10}$")
+    value: float | None = Field(None, ge=0, le=100, description='light: brightness %; climate set: temperature')
 
 
 class HomeSkill(Skill):
@@ -235,15 +234,13 @@ class HomeSkill(Skill):
             return None, f"לבצע ב-Home Assistant: {a.action} על \"{name}\"? / Do \"{a.action}\" on \"{name}\"?"
 
         return [
-            Tool("home_list", "List the smart-home devices the owner allowed (name, state, whether they need confirmation).",
+            Tool("home_list", "Allowed smart-home devices, state, whether they need confirmation: 'which lights', 'אילו מכשירים יש'.",
                  list_, NoArgs, permission="read", timeout_s=15),
-            Tool("home_state", "Current state of one allowed smart-home device.", state, StateArgs, permission="read",
+            Tool("home_state", "State of one allowed device: 'is the light on', 'האור דולק'.", state, StateArgs, permission="read",
                  timeout_s=15),
-            Tool("home_control", "Switch a normal allowed device (lights, switches, fans, media, climate, scenes). Devices "
-                 "that need confirmation (locks, covers, scripts, alarm) are refused here.", control, ControlArgs,
+            Tool("home_control", "Switch a normal allowed device (light, switch, fan, media, climate, scene): 'turn on the light', 'תדליק את האור'. Locks/covers/scripts/alarm are refused here.", control, ControlArgs,
                  permission="action", timeout_s=15),
-            Tool("home_control_risky", "Control a device that needs the owner's confirmation (lock, cover/garage, script, "
-                 "valve...). The user approves the exact action on the screen.", control_risky, ControlArgs,
+            Tool("home_control_risky", "Control a device that needs confirmation (lock, garage, script, valve): 'lock the door', 'תנעל את הדלת'. The user approves the exact action on screen.", control_risky, ControlArgs,
                  permission="destructive", timeout_s=20, impact=risky_impact),
         ]
 

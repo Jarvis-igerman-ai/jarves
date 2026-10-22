@@ -1,0 +1,48 @@
+order = 40
+category = "system"
+pages = ["bugs"]
+features = ["issue_reports"]
+aliases = ["דיווחי תקלות", "תקלות", "דיווח למפתח", "bug report", "bug reports", "issues", "report a problem", "what issues do you have", "known problems"]
+links = ["self_tests", "health", "self_check"]
+error_codes = ["ISSUE_NEW", "ISSUE_REGRESSED", "ISSUE_FIXED_IN", "ISSUE_STATUS", "ISSUE_REPORTED", "ISSUE_REPORT_SAVED", "ISSUE_REPORT_FAILED", "ISSUE_REPORT_DENIED", "ISSUES_SAVE_FAILED"]
+title_he = "דיווחי תקלות"
+title_en = "Bug reports"
+what_he = "ג'ארביס אוסף לרשימה אחת את הבעיות שהוא מוצא בעצמו: בדיקה עצמית ובדיקת מהירות, ממצאי האבחון, כלים שנכשלים שוב ושוב, קריסות ושגיאות בלוח הבקרה. כל בעיה מופיעה פעם אחת עם חומרה (P1 עד P3), כמה פעמים נראתה ומתי, ובלי תוכן. אפשר לדווח עליה למפתח כדי שהגרסה הבאה תתקן אותה."
+what_en = "JARVES collects the problems he finds in himself into one list: the self-test and the speed test, the diagnostics findings, tools that keep failing, crashes and dashboard errors. Each problem appears once with a severity (P1 to P3), how often and when it was seen, and no content. You can report it to the developer so the next version fixes it."
+say = [["אילו תקלות יש לך?", "What issues do you have?"], ["יש בעיות שצריך לדווח עליהן?", "Is there anything to report?"]]
+expect_he = "משפט אחד: כמה תקלות פתוחות, כמה חמורות והראשונה. הפרטים בעמוד 'דיווחי תקלות', ומספר התקלות הפתוחות מופיע בכותרת."
+expect_en = "One sentence: how many issues are open, how many are serious and the first. The details are on the Bug reports page, and the open count shows in the header."
+test = "feature"
+test_he = "הבדיקה רק מוודאת שהרכיב מותקן. אפשר לבדוק את הרשימה עם jarvis issues list."
+test_en = "The check only sees that the component is installed. You can look at the list with jarvis issues list."
+cost_he = "חינם. הרשימה מקומית. רק שליחת דיווח (אחרי אישור) פונה לאינטרנט, לפרויקט igalgerman/jarves ב-GitHub."
+cost_en = "Free. The list is local. Only sending a report (after your approval) uses the internet, to the igalgerman/jarves project on GitHub."
+privacy_he = "הרשימה נשמרת בקובץ מקומי (issues_registry.json) ומכילה רק קודים, מספרים, זמנים, גרסאות ושמות פונקציות. בלי שיחות, שמות, כתובות, נתיבים או מפתחות. שום דבר לא נשלח בלי שאישרתם את הטקסט המדויק שמוצג לכם. בלי אסימון GitHub הדיווח נשמר בקובץ לצירוף ידני."
+privacy_en = "The list is kept in one local file (issues_registry.json) and holds only codes, numbers, times, versions and function names. No conversations, names, addresses, paths or keys. Nothing is sent unless you approve the exact text shown to you. Without a GitHub token the report is saved to a file you can attach yourself."
+
+[[steps]]
+he = "פתחו את העמוד 'דיווחי תקלות'. אפשר לסנן לפי מצב, חומרה ותחום, ולפתוח כל תקלה לפרטים."
+en = "Open the Bug reports page. Filter by status, severity and area, and open any issue for the details."
+action = "open:#/bugs"
+
+[[steps]]
+he = "בתקלה לחצו 'דווחו למפתח': יוצג הטקסט המדויק שיישלח, ורק אחרי אישור בחלון האישורים הוא נשלח כתקלה בפרויקט עם התווית from-diagnostics."
+en = "On an issue press Report: the exact text that would be sent is shown, and only after you approve it in the approvals popup is it filed on the project with the label from-diagnostics."
+action = "open:#/bugs"
+
+[[steps]]
+he = "מהטרמינל: רשימה, פרטים, דיווח והתעלמות."
+en = "From the terminal: list, details, report and ignore."
+action = "command:jarvis issues list"
+
+[[problems]]
+he = "הדיווח נשמר בקובץ ולא נשלח"
+en = "The report was saved to a file, not sent"
+fix_he = "אין במחשב אסימון GitHub (משתנה הסביבה GH_TOKEN או כניסה ב-gh). צרפו את הקובץ מהתיקייה issue_reports לתקלה חדשה ב-github.com/igalgerman/jarves עם התווית from-diagnostics."
+fix_en = "There is no GitHub token on this computer (the GH_TOKEN environment variable or a gh login). Attach the file from the issue_reports folder to a new issue at github.com/igalgerman/jarves with the label from-diagnostics."
+
+[[problems]]
+he = "תקלה סומנה כתוקנה בגרסה חדשה"
+en = "An issue was marked fixed in a new version"
+fix_he = "הגרסה שעודכנה מציינת את התקלה בשורת Fixes ביומן השינויים. אם היא חוזרת בגרסה הזאת או מאוחרת יותר, היא נפתחת מחדש אוטומטית."
+fix_en = "The version you updated to lists the issue on a Fixes line of its changelog. If it comes back in that version or a later one, it is reopened automatically."

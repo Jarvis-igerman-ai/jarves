@@ -37,7 +37,9 @@ FEATURES: dict[str, object] = {
     "backup": "backup", "appearance": (D, "face theme and avatar are picked on the Appearance page"),
     "skill_creation": (D, "proposed Skills are reviewed on the New Skills page (risky: approval on screen)"),
     "guided_setup": "setup", "self_check": "diagnose", "scheduler": "jobs", "reports": "reports", "notes": "notes",
-    "timers": "timers", "lists": "lists", "files": (D, "the file workspace is browsed on the My files page"),
+    "timers": "timers", "lists": "lists", "goals": "goals", "goal_plans": "goals", "adaptive_memory": "prefs", "prefs_in_prompt": "prefs",
+    "goal_done_line": (D, "a pure switch; change it with `jarvis features`"), "proactive_intel": "proactive", "proactive_signals": "proactive",
+    "dev_manager": "dev", "dev_status": "dev", "files": (D, "the file workspace is browsed on the My files page"),
     "proactive_alerts": (D, "alerts are read and answered on the Alerts page"),
     "autonomy": (D, "autonomy proposals are approved on the Autonomy page"),
     "background_core": "start", "display_control": "show", "tray_icon": "start", "autostart": "autostart",
@@ -49,8 +51,9 @@ FEATURES: dict[str, object] = {
     "self_diagnostics_2": "health", "client_delegation": "budget",
     "whatsapp_bridge": "whatsapp", "whatsapp_send": "whatsapp",          # SW-V4 F: jarvis whatsapp ...
     "agent_orchestrator": "agents",
-    "assisted_dialing": "dial",
+    "assisted_dialing": "dial", "self_manage": "manage",
     "self_tests": "selftest", "text_chat": "chat", "setup_tour": "tour",
+    "issue_reports": "issues", "web_chat": "web",
 }
 
 # Skill (tool group) name -> "jarvis <command>" or ("dashboard", reason) or ("voice", reason) for groups that only
@@ -64,7 +67,7 @@ TOOL_GROUPS: dict[str, object] = {
     "contacts": "contacts", "dashboard": "dashboard", "display": "show", "features": "features",
     "files": (D, "the My files page"), "gmail": "mail", "google_connect": "google",
     "google_contacts": "contacts", "help": "help", "helper": "approvals", "home": "home",
-    "identity": "setup", "instagram": "instagram", "lists": "lists", "memory": "memory", "music": "music",
+    "goals": "goals", "goal_plans": "goals", "preferences": "prefs", "proactive": "proactive", "dev": "dev", "devstatus": "dev", "identity": "setup", "instagram": "instagram", "lists": "lists", "memory": "memory", "music": "music",
     "notes": "notes", "profiles": "profile", "reports": "reports", "scheduler": "jobs", "self_check": "diagnose",
     "settings": (D, "settings are edited on the Settings page"), "skill_builder": (D, "the New Skills page"),
     "status": "status", "tasks": (D, "the Background tasks page"), "telegram": "telegram", "timers": "timers",
@@ -72,8 +75,9 @@ TOOL_GROUPS: dict[str, object] = {
     "health": "health",
     "whatsapp_bridge": "whatsapp",                                       # SW-V4 F: inbox / send / status
     "agents": "agents",
-    "dialing": "dial",
+    "dialing": "dial", "self_manage": "manage",
     "selfspeed": "selftest",
+    "issues": "issues",
 }
 
 
@@ -214,6 +218,332 @@ def cmd_lists(a, cfg, home) -> int:
     return 2
 
 
+# ---------------------------------------------------------------------- goals / learned preferences (V5 pillars)
+def _cmd_plan(a, cfg, home, db) -> int:
+    """`jarvis goals plan ...`: the same PlanStore as the voice tools and the dashboard Goal plans page. The running
+    Core executes approved plans (it polls every 2 s); without a Core they wait, nothing runs from this command."""
+    import json as _json
+    from .goal_plans import PlanStore, describe, summary
+    st = PlanStore(db)
+    act = a.plan_action
+
+    def show(p):
+        print(summary(p))
+        for s in p["steps"]:
+            print(f"   {s['idx'] + 1}. [{s['status']}] {s['tool']} {_json.dumps(s['args'], ensure_ascii=False)}"
+                  + (f"  -> {s['evidence']}" if s["evidence"] else "") + (f"  ({s['error']})" if s["error"] else ""))
+        if p["result"]:
+            print("   " + clilang.fmt("תוצאה: ", "result: ") + p["result"])
+    try:
+        if act == "list":
+            rows = st.list()
+            for p in rows:
+                print(summary(p))
+            if not rows:
+                print(clilang.fmt("אין תוכניות", "no plans yet"))
+            return 0
+        if act == "show":
+            p = st.get(a.id)
+            if not p:
+                print(clilang.fmt("אין תוכנית כזו", "no such plan"), file=sys.stderr)
+                return 1
+            show(p)
+            return 0
+        if act == "new":
+            steps = []
+            for spec in a.step:
+                tool, _, raw = spec.partition("=")
+                steps.append({"tool": tool.strip(), "args": _json.loads(raw) if raw.strip() else {}})
+            p = st.propose(a.title, steps, goal_id=a.goal or 0, timeout_s=a.timeout * 60, max_ai=a.max_ai, by="cli")
+            print(clilang.fmt(f"תוכנית {p['id']} נוצרה כטיוטה; לאישור: jarvis goals plan approve {p['id']}",
+                              f"plan {p['id']} drafted; approve with: jarvis goals plan approve {p['id']}"))
+            return 0
+        if act == "approve":
+            p = st.get(a.id)
+            if not p:
+                print(clilang.fmt("אין תוכנית כזו", "no such plan"), file=sys.stderr)
+                return 1
+            if not _confirm("Run this plan?\n" + describe(p) + "\n", a.yes):
+                print(clilang.fmt("לא אושר", "not approved"))
+                return 1
+            st.approve(a.id, by="cli")
+            print(clilang.fmt("אושר; הליבה תריץ ותבקש אישור לפני כל צעד שמשנה משהו",
+                              "approved; the Core runs it and asks before each step that changes something"))
+            return 0
+        if act == "retry":
+            st.retry(a.id, a.step_no - 1 if a.step_no else None, by="cli")
+        elif act == "skip":
+            st.skip(a.id, a.step_no - 1, by="cli")
+        elif act in ("pause", "resume", "cancel"):
+            getattr(st, act)(a.id, by="cli")
+        elif act == "delete":
+            if not _confirm(f"Delete plan {a.id}?", a.yes):
+                print(clilang.fmt("לא נמחק", "nothing deleted"))
+                return 1
+            st.delete(a.id, by="cli")
+        print(clilang.fmt("בוצע", "done"))
+        return 0
+    except KeyError:
+        print(clilang.fmt("אין תוכנית כזו", "no such plan"), file=sys.stderr)
+        return 1
+    except (ValueError, _json.JSONDecodeError) as e:
+        print(f"goals plan: {e}", file=sys.stderr)
+        return 2
+
+
+def cmd_goals(a, cfg, home) -> int:
+    from .goals import Goals, checkin_text
+    db = _db(home)
+    g = Goals(db)
+    try:
+        if a.action == "plan":
+            return _cmd_plan(a, cfg, home, db)
+        if a.action == "list":
+            rows = g.list("" if a.all else "active")
+            for r in rows:
+                due = f"  by {r['target_date']}" if r["target_date"] else ""
+                print(f"{r['id']:>3} [{r['status']}] {r['progress']:>3}%  {r['title']}{due}")
+                for s in r["steps"]:
+                    print(f"      [{'x' if s['done'] else ' '}] {s['id']}: {s['text']}" + ("  (outward)" if s["outward"] else ""))
+            if not rows:
+                print(clilang.fmt("אין יעדים", "no goals yet"))
+            return 0
+        if a.action == "add":
+            _warn_if_off(a, cfg, home, "goals")
+            r = g.add(a.title, a.details, a.by_date, a.step, by="cli")
+            print(clilang.fmt(f"יעד {r['id']} נוסף", f"goal {r['id']} added"))
+            return 0
+        if a.action == "step":
+            r = g.add_step(a.id, a.text, a.outward, by="cli")
+            print(clilang.fmt(f"התקדמות {r['progress']}%", f"progress {r['progress']}%"))
+            return 0
+        if a.action in ("done", "undone"):
+            r = g.set_step(a.step_id, a.action == "done", by="cli")
+            print(f"{r['title']}: {r['progress']}%")
+            return 0
+        if a.action == "status":
+            r = g.set_status(a.id, a.status, by="cli")
+            print(f"{r['title']}: {r['status']}")
+            return 0
+        if a.action == "checkin":          # only when you run it: nothing schedules this
+            print(checkin_text(g.checkin(by="cli")))
+            return 0
+        if a.action == "delete":
+            goal = g.get(a.id)
+            if not goal:
+                print(clilang.fmt("אין יעד כזה", "no such goal"), file=sys.stderr)
+                return 1
+            if not _confirm(f"Delete goal '{goal['title']}' and its steps?", a.yes):
+                print(clilang.fmt("לא נמחק", "nothing deleted"))
+                return 1
+            g.delete(a.id, by="cli")
+            print(clilang.fmt("נמחק", "deleted"))
+            return 0
+    except KeyError:
+        print(clilang.fmt("אין יעד או צעד כזה", "no such goal or step"), file=sys.stderr)
+        return 1
+    except ValueError as e:
+        print(f"goals: {e}", file=sys.stderr)
+        return 2
+    finally:
+        db.close()
+    return 2
+
+
+def cmd_prefs(a, cfg, home) -> int:
+    from .preferences import Preferences
+    db = _db(home)
+    p = Preferences(db)
+    try:
+        if a.action == "list":
+            rows = p.items()
+            for r in rows:
+                flag = " (stale: reaffirm it)" if r["stale"] else ""
+                print(f"{r['id']:>3} [{r['state']}] {r['topic']}: {r['text']}{flag}")
+                if r["state"] == "proposed":
+                    print(f"      you said: {r['evidence']}")
+            if not rows:
+                print(clilang.fmt("אין העדפות נלמדות", "no learned preferences"))
+            return 0
+        if a.action == "prompt":
+            from .features import switch
+            from .cli import _cli_features
+            from .preferences import FEATURE, prompt_block
+            if a.state in ("on", "off"):
+                switch(_cli_features(cfg, home), FEATURE, a.state == "on", by="cli")
+            on = _cli_features(cfg, home).enabled(FEATURE)
+            print(clilang.fmt("שימוש בהעדפות בשיחות: " + ("פעיל" if on else "כבוי"),
+                              "preferences in conversations: " + ("on" if on else "off")))
+            if a.state == "show" or a.state is None:
+                print(prompt_block(p) or clilang.fmt("(אין העדפות שמאושרות לשליחה)", "(no confirmed preferences to send)"))
+            return 0
+        if a.action == "add":
+            _warn_if_off(a, cfg, home, "adaptive_memory")
+            r = p.add_confirmed(a.text, a.topic, by="cli")
+            print(clilang.fmt(f"נשמר: {r['item']['id']}", f"saved: {r['item']['id']}"))
+            return 0
+        if not p.get(a.id):
+            print(clilang.fmt("אין העדפה כזאת", "no such preference"), file=sys.stderr)
+            return 1
+        if a.action == "confirm":
+            r = p.confirm(a.id, by="cli")
+            print(clilang.fmt("נשמר", "remembered")
+                  + ("; may conflict with: " + "; ".join(c["text"] for c in r["conflicts"]) if r["conflicts"] else ""))
+        elif a.action == "decline":
+            p.decline(a.id, by="cli")
+            print(clilang.fmt("לא אזכור", "will not remember"))
+        elif a.action == "reaffirm":
+            p.reaffirm(a.id, by="cli")
+            print(clilang.fmt("אושר מחדש", "reaffirmed"))
+        elif a.action == "edit":
+            p.edit(a.id, a.text, by="cli")
+            print(clilang.fmt("עודכן", "updated"))
+        elif a.action == "remove":
+            p.remove(a.id, by="cli")
+            print(clilang.fmt("הוסר", "removed"))
+        return 0
+    except ValueError as e:
+        print(f"prefs: {e}", file=sys.stderr)
+        return 2
+    finally:
+        db.close()
+
+
+# ---------------------------------------------------------------------- proactive offers / development drafts
+def cmd_proactive(a, cfg, home) -> int:
+    from .goals import Goals
+    from .proactive import Proactive
+    db = _db(home)
+    p = Proactive(db, Goals(db))
+    try:
+        if a.action == "signals":
+            return _cmd_signals(a, home, db)
+        if a.action == "mode":
+            if a.value:
+                p.set_mode(a.value, by="cli")
+            print(clilang.fmt("מצב: ", "mode: ") + p.mode())
+            return 0
+        if a.action == "dismiss":
+            print(clilang.fmt("נסגר", "dismissed") if p.dismiss(a.id, by="cli") else clilang.fmt("אין פריט כזה", "no such item"))
+            return 0
+        rows = p.refresh()
+        for r in rows:
+            print(f"{r['id']:>3} [{r['state']}] {r['text']}")
+        if not rows:
+            print(clilang.fmt("אין מה להציע", "nothing to mention"))
+        return 0
+    except ValueError as e:
+        print(f"proactive: {e}", file=sys.stderr)
+        return 2
+    finally:
+        db.close()
+
+
+def _dev_status(a, home) -> int:
+    from . import devstatus as ds
+    try:
+        st = ds.build(home, ds.repo_of(home))
+    except ValueError as e:
+        print(f"dev: {e}", file=sys.stderr)
+        return 2
+    lang = clilang.current()
+    if a.action == "digest":
+        print(ds.digest(st, lang))
+    elif a.action == "proposals":
+        for p in ds.proposals(st):
+            print(f"{p['id']:<18} {p['item']:<10} {p['command']}")
+        if not ds.proposals(st):
+            print(clilang.fmt("אין הצעות לפעולה", "no proposals"))
+    elif a.action == "apply":
+        res = ds.apply(home, st, a.proposal)
+        print(f"dev: {res['status']} {res.get('command') or res.get('reason') or ''}")
+        return 0 if res["ok"] else 1
+    else:
+        print(ds.sentence(st, lang))
+        print(f"{'':<5}{'STATE':<12}{'BLOCKER':<34}NEXT")
+        for it in st["items"]:
+            print(f"{'PR' if it['type'] == 'pr' else 'IS'}#{it['number']:<4}{it['state']:<12}{it['blocker'][:32]:<34}"
+                  f"{it['suggestion']['kind']}: {it['title'][:50]}")
+        for n in st["notes"]:
+            print(clilang.fmt(f"הערה: {n}", f"note: {n}"))
+    return 0
+
+
+def _cmd_signals(a, home, db) -> int:
+    from . import calm
+    from .continuity import Continuity
+    c = Continuity(home, quiet=lambda ts: calm.quiet_hours_now(db, ts))
+    if a.what == "on":
+        c.configure_signals(on=True, by="cli")
+    elif a.what == "off":
+        c.configure_signals(on=False, by="cli")
+    elif a.what == "snooze":
+        c.snooze(a.minutes, by="cli")
+    elif a.what == "stop":
+        c.stop_signals(by="cli")
+    elif a.what == "notices":
+        for n in c.fetch_notices("desktop"):
+            print(f"{n['id']:>3} [{n['kind']}] {n['text']}")
+            c.ack_notice("desktop", n["id"])
+        return 0
+    s = c.signals_state()
+    print(clilang.fmt("אותות יזומים: ", "signals: ") + ("on" if s["on"] and not s["stopped"] else "off")
+          + (" (snoozed)" if s["snoozed_until"] else "") + (" (quiet hours now)" if s["quiet_now"] else "")
+          + f"  {s['sent_hour']}/{s['hourly']} per hour, {s['sent_day']}/{s['daily']} per day")
+    return 0
+
+
+def cmd_dev(a, cfg, home) -> int:
+    from . import devmanager as dm
+    from .diag import db as diag_db
+    from .store import Store
+    st = Store(home / "store.db")
+    try:
+        diag_db.ensure(st)
+        if a.action in ("status", "digest", "proposals", "apply"):
+            return _dev_status(a, home)
+        if a.action == "suggest":
+            _warn_if_off(a, cfg, home, "dev_manager")
+            d = dm.suggest(st, a.title, a.body, a.kind, by="cli")
+            print(clilang.fmt(f"טיוטה {d['id']} נשמרה מקומית, שום דבר לא נשלח",
+                              f"draft {d['id']} saved locally, nothing was posted"))
+        elif a.action == "list":
+            rows = dm.listing(st)
+            for r in rows:
+                print(f"{r['id']:>3} [{r['severity']}] {r['title']}")
+            if not rows:
+                print(clilang.fmt("אין טיוטות", "no drafts"))
+        elif a.action == "show":
+            d = dm.get(st, a.id)
+            if d is None:
+                print(clilang.fmt("אין טיוטה כזאת", "no such draft"), file=sys.stderr)
+                return 1
+            print(f"# {d['title']}\n\n{d['body']}")
+        elif a.action == "discard":
+            print(clilang.fmt("נמחקה", "discarded") if dm.discard(st, a.id, by="cli") else clilang.fmt("אין טיוטה כזאת", "no such draft"))
+        elif a.action == "file":
+            if dm.get(st, a.id) is None:
+                print(clilang.fmt("אין טיוטה כזאת", "no such draft"), file=sys.stderr)
+                return 1
+            import asyncio
+            from .diag import tickets
+            from .diag.service import _tty_ask
+            from .userdata import open_db
+            dbs = open_db(home)
+            try:
+                res = asyncio.run(tickets.file(st, a.id, ask=_tty_ask(home), repo=str(dbs.setting("health.ticket_repo") or ""),
+                                               by="cli"))
+            finally:
+                dbs.close()
+            print(f"dev: {res['status']} {res.get('issue_url') or res.get('reason') or ''}")
+        return 0
+    except ValueError as e:
+        print(f"dev: {e}", file=sys.stderr)
+        return 2
+    finally:
+        st.close()
+
+
 # ---------------------------------------------------------------------- notes / jobs / reports (read-only)
 def cmd_notes(a, cfg, home) -> int:
     from .notes import Notes
@@ -310,6 +640,88 @@ def add_cli(sub) -> None:
     cl.add_argument("--everything", action="store_true")
     cl.add_argument("--yes", action="store_true", help="you already approved (no question)")
 
+    go = sub.add_parser("goals", help="your goals: list / add / step / done / undone / status / checkin / delete")
+    gs = go.add_subparsers(dest="action", required=True)
+    gl = gs.add_parser("list")
+    gl.add_argument("--all", action="store_true", help="include done / dropped goals")
+    ga = gs.add_parser("add", help="jarvis goals add \"run a 10k\" --by 2026-12-31 --step \"buy shoes\"")
+    ga.add_argument("title")
+    ga.add_argument("--details", default="")
+    ga.add_argument("--by", dest="by_date", default="", help="target date YYYY-MM-DD")
+    ga.add_argument("--step", action="append", default=[])
+    gst = gs.add_parser("step", help="add a step: step GOAL_ID TEXT [--outward]")
+    gst.add_argument("id", type=int)
+    gst.add_argument("text")
+    gst.add_argument("--outward", action="store_true", help="involves other people or the outside world")
+    for act in ("done", "undone"):
+        gd = gs.add_parser(act, help=f"mark a step {act}: {act} STEP_ID")
+        gd.add_argument("step_id", type=int)
+    gss = gs.add_parser("status", help="status GOAL_ID active|paused|done|dropped")
+    gss.add_argument("id", type=int)
+    gss.add_argument("status")
+    gs.add_parser("checkin", help="your check-in, produced only when you run this")
+    gp = gs.add_parser("plan", help="multi-step plans: list / show / new / approve / pause / resume / cancel / retry / skip / delete")
+    gps = gp.add_subparsers(dest="plan_action", required=True)
+    gps.add_parser("list")
+    pn = gps.add_parser("new", help="jarvis goals plan new \"title\" --step 'timer_set={\"minutes\":5}' --step 'goal_show'")
+    pn.add_argument("title")
+    pn.add_argument("--step", action="append", default=[], help="TOOL or TOOL=JSON-ARGS, in order")
+    pn.add_argument("--goal", type=int, default=0, help="link to a goal id")
+    pn.add_argument("--timeout", type=float, default=30.0, help="total minutes the plan may run")
+    pn.add_argument("--max-ai", dest="max_ai", type=int, default=20, help="AI requests the plan may use")
+    for act in ("show", "approve", "pause", "resume", "cancel", "delete", "retry", "skip"):
+        px = gps.add_parser(act, help=f"{act} PLAN_ID" + (" [STEP_NO]" if act in ("retry", "skip") else ""))
+        px.add_argument("id", type=int)
+        if act in ("retry", "skip"):
+            px.add_argument("step_no", type=int, nargs="?" if act == "retry" else None, default=0, help="1-based step number")
+        if act in ("approve", "delete"):
+            px.add_argument("--yes", action="store_true", help="you already approved (no question)")
+    gx = gs.add_parser("delete", help="delete a goal and its steps (asks first)")
+    gx.add_argument("id", type=int)
+    gx.add_argument("--yes", action="store_true", help="you already approved (no question)")
+
+    pr = sub.add_parser("prefs", help="learned preferences: list / add / confirm / decline / reaffirm / edit / remove")
+    ps = pr.add_subparsers(dest="action", required=True)
+    ps.add_parser("list")
+    pa = ps.add_parser("add", help="a preference you type yourself (saved as confirmed)")
+    pa.add_argument("text")
+    pa.add_argument("--topic", default="other")
+    for act in ("confirm", "decline", "reaffirm", "remove"):
+        pp = ps.add_parser(act, help=f"{act} one item: {act} ID")
+        pp.add_argument("id", type=int)
+    pp2 = ps.add_parser("prompt", help="use confirmed preferences in every conversation: prompt [on|off|show]")
+    pp2.add_argument("state", nargs="?", choices=["on", "off", "show"])
+    pe = ps.add_parser("edit", help="edit ID TEXT")
+    pe.add_argument("id", type=int)
+    pe.add_argument("text")
+
+    pi = sub.add_parser("proactive", help="proactive offers: list / mode [on_request|in_conversation] / dismiss ID")
+    pis = pi.add_subparsers(dest="action", required=True)
+    pis.add_parser("list")
+    pim = pis.add_parser("mode", help="show or set: on_request (default) or in_conversation")
+    pim.add_argument("value", nargs="?", choices=["on_request", "in_conversation"])
+    pid_ = pis.add_parser("dismiss", help="dismiss ID")
+    pid_.add_argument("id", type=int)
+    pig = pis.add_parser("signals", help="event-driven signals: status / on / off / snooze MINUTES / stop / notices")
+    pig.add_argument("what", nargs="?", default="status", choices=["status", "on", "off", "snooze", "stop", "notices"])
+    pig.add_argument("minutes", nargs="?", type=float, default=60)
+
+    dv = sub.add_parser("dev", help="development drafts, kept local: list / suggest / show / discard / file (asks first)")
+    dvs = dv.add_subparsers(dest="action", required=True)
+    dvs.add_parser("list")
+    dvs.add_parser("status", help="read-only: agents, pull requests, issues and CI of JARVES with the suggested next step")
+    dvs.add_parser("digest", help="the same as a short text, on request only")
+    dvs.add_parser("proposals", help="list the GitHub changes that could be proposed (nothing is run)")
+    dap = dvs.add_parser("apply", help="apply PROPOSAL_ID after you approve its exact command on the approval popup")
+    dap.add_argument("proposal")
+    dsg = dvs.add_parser("suggest", help="jarvis dev suggest \"title\" --body \"text\" [--kind ticket]")
+    dsg.add_argument("title")
+    dsg.add_argument("--body", default="")
+    dsg.add_argument("--kind", choices=["suggestion", "ticket"], default="suggestion")
+    for act in ("show", "discard", "file"):
+        dd = dvs.add_parser(act, help=f"{act} ID" + (" (asks on the approval popup; needs health.ticket_repo)" if act == "file" else ""))
+        dd.add_argument("id", type=int)
+
     nt = sub.add_parser("notes", help="your notes (read-only): list [--query Q] [--tag T] / show ID")
     ns = nt.add_subparsers(dest="action", required=True)
     nl = ns.add_parser("list")
@@ -329,4 +741,4 @@ def add_cli(sub) -> None:
     rsh.add_argument("id", type=int)
 
 
-COMMANDS = {"timers": cmd_timers, "lists": cmd_lists, "notes": cmd_notes, "jobs": cmd_jobs, "reports": cmd_reports}
+COMMANDS = {"timers": cmd_timers, "lists": cmd_lists, "goals": cmd_goals, "prefs": cmd_prefs, "proactive": cmd_proactive, "dev": cmd_dev, "notes": cmd_notes, "jobs": cmd_jobs, "reports": cmd_reports}

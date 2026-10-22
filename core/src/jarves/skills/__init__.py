@@ -57,11 +57,14 @@ IN_TOOL: contextvars.ContextVar[str] = contextvars.ContextVar("jarves_in_tool", 
 TOOL_SINK: contextvars.ContextVar = contextvars.ContextVar("jarves_tool_sink", default=None)
 
 
-def _tool_seen(name: str, ok: bool, code: str) -> None:
+def _tool_seen(name: str, ok: bool, code: str, message: str = "") -> None:
     sink = TOOL_SINK.get()
     if sink is not None:
         try:
-            sink(name, ok, code)
+            if getattr(sink, "wants_detail", False):   # the web chat shows an expandable (redacted) result line
+                sink(name, ok, code, message)
+            else:
+                sink(name, ok, code)
         except Exception:
             pass                                       # a display problem never changes a tool result
 
@@ -163,14 +166,19 @@ async def _deny(_: str) -> bool:
 
 
 
-_DROP_KEYS = ("title", "minLength", "maxLength")
+_DROP_KEYS = ("title", "minLength", "maxLength", "default", "minimum", "maximum", "minItems", "maxItems")   # bounds: the Core validates every call itself
 
 
 def slim_schema(node: Any, _in_props: bool = False) -> Any:
     """SW-V4 P: a tool's JSON schema as the model needs it. Pydantic adds a `title` to every property and the model
-    class (about 20% of the schema tokens) and length bounds the Core validates itself on every call anyway; none of
-    it helps the model choose or fill a tool. Property NAMES (even one called "title") are kept."""
+    class (about 20% of the schema tokens), length bounds and defaults the Core validates/fills itself on every call
+    anyway, and `anyOf [X, null]` for an optional field (the model just leaves it out); none of it helps the model
+    choose or fill a tool. Property NAMES (even one called "title" or "default") are kept."""
     if isinstance(node, dict):
+        if not _in_props and isinstance(node.get("anyOf"), list):
+            rest = [v for v in node["anyOf"] if v != {"type": "null"}]
+            if len(rest) == 1 and len(rest) < len(node["anyOf"]) and isinstance(rest[0], dict):
+                node = {**{k: v for k, v in node.items() if k != "anyOf"}, **rest[0]}
         return {k: slim_schema(v, k == "properties") for k, v in node.items()
                 if _in_props or k not in _DROP_KEYS}
     if isinstance(node, list):
@@ -227,6 +235,10 @@ class SkillRegistry:
         # V4-VC-3: only a repeat inside the turn of the approval answer is replayed; a later turn runs it anew
         now = self.clock()
         self._recent_ok = {k: v for k, v in self._recent_ok.items() if k[0] != key or now - v[0] < UNTRUSTED_GRACE_S}
+
+    def clear_taint(self, route: str) -> None:
+        """The owner explicitly resumed work on `route` (a goal plan): the untrusted-content block is lifted there."""
+        self._untrusted.pop(route, None)
 
     async def _ask(self, prompt: str, **meta) -> bool:
         """registry.confirm, with the human's thinking time recorded (it must never count as an AI timeout).
@@ -367,7 +379,7 @@ class SkillRegistry:
 
     async def call(self, name: str, raw_args: dict | str | None = None, *, origin: Origin = "model") -> ToolResult:
         res = await self._call(name, raw_args, origin=origin)
-        _tool_seen(name, res.ok, res.code)             # terminal text chat: one short line per call (TOOL_SINK)
+        _tool_seen(name, res.ok, res.code, res.message)   # terminal + web chat: one line per call (TOOL_SINK)
         return res
 
     async def _call(self, name: str, raw_args: dict | str | None = None, *, origin: Origin = "model") -> ToolResult:

@@ -38,7 +38,7 @@ from typing import Any
 
 from pydantic import BaseModel, Field, create_model
 
-from .. import features, isolation, logs
+from .. import features, isolation, logs, winsandbox
 from . import Skill, Tool, ToolResult
 
 ROOT = "skills"
@@ -658,10 +658,15 @@ async def run_sandboxed(code: str, tool: str, args: dict, broker, timeout_s: flo
     work = tempfile.mkdtemp(prefix="jarves-skill-")
     # R-01 (#17): created inside its own OS limits (Windows: suspended -> Job Object -> resumed; one process,
     # 512 MB, 10 s CPU, kill on close, no breakaway, UI restricted. POSIX: own session; the child sets its rlimits)
-    proc, guard = await isolation.exec_async(
-        _child_python(), "-I", "-S", "-X", "utf8", str(_CHILD), limits=isolation.SKILL_LIMITS, cwd=work, env=env,
-        stdin=asyncio.subprocess.PIPE, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.DEVNULL,
-        limit=MAX_HTTP * 3)
+    try:
+        proc, guard = await isolation.exec_async(
+            _child_python(), "-I", "-S", "-X", "utf8", str(_CHILD), limits=isolation.SKILL_LIMITS, cwd=work, env=env,
+            stdin=asyncio.subprocess.PIPE, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.DEVNULL,
+            limit=MAX_HTTP * 3)
+    except winsandbox.RestrictedLaunchError as e:       # [helper] restricted_token is on: never run it unrestricted
+        shutil.rmtree(work, ignore_errors=True)
+        logs.warn("skills", "SKILL_RESTRICTED_LAUNCH_FAILED", "restricted launch failed; Skill not run", error=str(e))
+        return {"ok": False, "error": "restricted launch failed; the Skill was not run"}
     if guard.state != "active":
         logs.warn("skills", "SKILL_JOB_UNAVAILABLE", "the Skill child runs without its full OS limits",
                   state=guard.state, reason=guard.reason[:200])
@@ -773,13 +778,8 @@ def sync(mgr: GeneratedSkills, registry) -> list[str]:
 
 # ---------------------------------------------------------------------- model tools (propose only)
 class ProposeArgs(BaseModel):
-    skill_md: str = Field(..., description="Full SKILL.md: '---' frontmatter with name (id, lower_case), title, "
-                                           "description, capabilities [storage, network:<host>], '---', then "
-                                           "Markdown instructions")
-    skill_py: str | None = Field(None, description="Optional Python: TOOLS = [{name: '<id>_<word>', description, "
-                                                   "permission: read|action, args: {x: string|integer|number|boolean}}]"
-                                                   " and def <tool>(args, ctx) per tool; stdlib json/math/re/"
-                                                   "datetime... only; ctx.storage_get/set, ctx.http_get(url)")
+    skill_md: str = Field(..., description="Full SKILL.md: '---' frontmatter (name lower_case id, title, description, capabilities [storage, network:<host>]) '---' then Markdown instructions")
+    skill_py: str | None = Field(None, description="Optional Python: TOOLS = [{name:'<id>_<word>', description, permission: read|action, args:{x: string|integer|number|boolean}}] + def <tool>(args, ctx); stdlib only; ctx.storage_get/set, ctx.http_get(url)")
 
 
 def make_builder_skill(mgr: GeneratedSkills) -> Skill:
@@ -806,12 +806,9 @@ def make_builder_skill(mgr: GeneratedSkills) -> Skill:
                                                  for s in ov["installed"]], "drafts": [d["id"] for d in ov["drafts"]]})
 
             return [
-                Tool("skill_propose", "Write a NEW Skill draft when the user asks for a new ability: SKILL.md + "
-                     "optional Python. It is only a draft: the owner reviews, approves, grants and enables it on the "
-                     "dashboard. Never claim it works before that.", propose, ProposeArgs, permission="action",
+                Tool("skill_propose", "Draft a NEW Skill (SKILL.md + optional Python) on request: 'learn a new skill', 'תלמד יכולת חדשה'. Draft only; the owner approves and enables it. Never claim it works before.", propose, ProposeArgs, permission="action",
                      timeout_s=15),
-                Tool("skills_generated_list", "List generated Skills (installed and on/off) and drafts waiting for "
-                     "the owner's approval.", list_, permission="read"),
+                Tool("skills_generated_list", "Generated Skills (on/off) and drafts awaiting approval: 'my new skills', 'אילו יכולות יצרת'.", list_, permission="read"),
             ]
 
     return BuilderSkill()

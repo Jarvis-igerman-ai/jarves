@@ -8,6 +8,7 @@
 <link rel="stylesheet" href="/static/style.css">
 <link rel="stylesheet" href="/static/m4.css">
 <link rel="stylesheet" href="/static/shell.css">
+<script src="/static/bugs_guard.js"></script>
 <script src="/static/locales/en.js" defer></script>
 <script src="/static/locales/he.js" defer></script>
 <script src="/static/i18n.js" defer></script>
@@ -30,15 +31,21 @@
 <link rel="stylesheet" href="/static/context.css">
 <script src="/static/context.js" defer></script>
 <script src="/static/recall.js" defer></script>
+<script src="/static/pillars.js" defer></script>
 <script src="/static/agents.js" defer></script>
 <script src="/static/dialing.js" defer></script>
 <script src="/static/browser.js" defer></script>
 <script src="/static/whatsapp.js" defer></script>
 <script src="/static/updates.js" defer></script>
 <script src="/static/profiles.js" defer></script>
+<script src="/static/selfmanage.js" defer></script>
 <script src="/static/selfcheck.js" defer></script>
 <script src="/static/health.js" defer></script>
 <script src="/static/selfspeed.js" defer></script>
+<script src="/static/bugs.js" defer></script>
+<link rel="stylesheet" href="/static/chatview.css">
+<script src="/static/chatview.js" defer></script>
+<script src="/static/chat.js" defer></script>
 <link rel="stylesheet" href="/static/approvals.css">
 <script src="/static/approvals.js" defer></script>
 <script src="/static/shell.js" defer></script>
@@ -60,12 +67,14 @@
       </div>
       <div class="nav-group" data-group="activity">
         <div class="nav-h" data-he="פעילות" data-en="Activity">Activity</div>
+        <a href="#/chat" data-page="chat"><span data-he="שיחה" data-en="Chat">Chat</span></a>
         <a href="#/approvals" data-page="approvals"><span data-he="אישורים" data-en="Approvals">Approvals</span></a>
         <a href="#/conversations" data-page="conversations"><span data-he="שיחות" data-en="Conversations">Conversations</span></a>
         <a href="#/recall" data-page="recall"><span data-he="חיפוש בשיחות" data-en="Recall">Recall</span></a>
         <a href="#/agents" data-page="agents"><span data-he="סוכני קוד" data-en="Coding agents">Coding agents</span></a>
         <a href="#/issues" data-page="issues"><span data-he="בעיות" data-en="Issues">Issues</span> <span class="count" id="issueCount"></span></a>
         <a href="#/health" data-page="health"><span data-he="תקינות" data-en="Health">Health</span></a>
+        <a href="#/bugs" data-page="bugs"><span data-he="דיווחי תקלות" data-en="Bug reports">Bug reports</span></a>
         <a href="#/speed" data-page="speed"><span data-he="תקינות ומהירות" data-en="Health &amp; speed">Health &amp; speed</span></a>
         <a href="#/selfcheck" data-page="selfcheck"><span data-he="בדיקה עצמית" data-en="Self-check">Self-check</span></a>
         <a href="#/tasks" data-page="tasks"><span data-he="משימות רקע" data-en="Background tasks">Background tasks</span></a>
@@ -77,6 +86,12 @@
         <a href="#/jobs" data-page="jobs"><span data-he="משימות קבועות" data-en="Scheduled jobs">Scheduled jobs</span></a>
         <a href="#/timers" data-page="timers"><span data-he="טיימרים ושעונים" data-en="Timers &amp; alarms">Timers &amp; alarms</span></a>
         <a href="#/lists" data-page="lists"><span data-he="רשימות" data-en="Lists">Lists</span></a>
+        <a href="#/goals" data-page="goals"><span data-he="יעדים" data-en="Goals">Goals</span></a>
+        <a href="#/goalplans" data-page="goalplans"><span data-he="תוכניות ליעדים" data-en="Goal plans">Goal plans</span></a>
+        <a href="#/preferences" data-page="preferences"><span data-he="העדפות נלמדות" data-en="Learned preferences">Learned preferences</span></a>
+        <a href="#/proactive" data-page="proactive"><span data-he="הצעות יזומות" data-en="Proactive offers">Proactive offers</span></a>
+        <a href="#/development" data-page="development"><span data-he="פיתוח" data-en="Development">Development</span></a>
+        <a href="#/devdrafts" data-page="devdrafts"><span data-he="טיוטות פיתוח" data-en="Development drafts">Development drafts</span></a>
         <a href="#/calls" data-page="calls"><span data-he="שיחות טלפון" data-en="Phone calls">Phone calls</span></a>
         <a href="#/reports" data-page="reports"><span data-he="דוחות" data-en="Reports">Reports</span></a>
         <a href="#/alerts" data-page="alerts"><span data-he="התראות" data-en="Alerts">Alerts</span></a>
@@ -114,6 +129,7 @@
         <a href="#/backup" data-page="backup"><span data-he="גיבוי" data-en="Backup">Backup</span></a>
         <a href="#/updates" data-page="updates"><span data-he="עדכונים" data-en="Updates">Updates</span></a>
         <a href="#/signoff" data-page="signoff"><span data-he="אישור גרסה" data-en="Release sign-off">Release sign-off</span></a>
+        <a href="#/selfmanage" data-page="selfmanage"><span data-he="ניהול עצמי" data-en="Self-management">Self-management</span></a>
         <a href="#/profiles" data-page="profiles"><span data-he="פרופילים" data-en="Profiles">Profiles</span></a>
       </div>
     </nav>

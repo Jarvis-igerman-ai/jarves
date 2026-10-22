@@ -77,6 +77,15 @@ def test_fails_creates_one_content_free_bug_report(ctx):
     assert "no sound" not in ev and "topic" in ev and "features" in ev
 
 
+def test_failed_recheck_clears_previous_owner_verification(ctx):
+    call(ctx, "POST", "/api/wizard/topic/telegram/result", {"result": "works"})
+    assert wizard.read_state(ctx.home)["features"]["telegram"]["by"] == "owner"
+    call(ctx, "POST", "/api/wizard/topic/telegram/result", {"result": "fails"})
+    st = wizard.read_state(ctx.home)
+    assert "telegram" not in st["features"]
+    assert "verified_in" not in st["topics"]["telegram"]
+
+
 def test_secret_goes_to_secret_store_not_state(ctx, home):
     tok = "123456789:" + "A" * 35
     assert call(ctx, "POST", "/api/wizard/secret/telegram", {"value": "bad"})[0] == 400

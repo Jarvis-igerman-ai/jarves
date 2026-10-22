@@ -40,12 +40,14 @@ def _clean(s: str) -> str:
     return _EMAIL.sub("<email>", logs.redact(str(s or "")))
 
 
-def draft(f: dict, *, version: tuple[str, str] | None = None) -> dict:
-    """A Markdown issue draft of one finding (monitor finding or accepted AI-review item)."""
+def draft(f: dict, *, version: tuple[str, str] | None = None, prefix: str = "[health]",
+          origin: str = "JARVES Self-Diagnostics 2.0") -> dict:
+    """A Markdown issue draft of one finding (monitor finding or accepted AI-review item). The Development Manager
+    reuses it for its local suggestions (prefix "[dev]", its own origin line)."""
     from . import db as _db
     ver, commit = version or _db.version_info()
     fp = fingerprint(f["fingerprint"])
-    title = f"[health] {f.get('title', f['fingerprint'])}"[:120]
+    title = f"{prefix} {f.get('title', f['fingerprint'])}"[:120]
     lines = [f"**Severity:** {f.get('severity', '?')} · **Version:** {ver}" + (f" · **Commit:** `{commit}`" if commit else "")
              + f" · **Platform:** {sys.platform}", "",
              f"**Finding:** `{f['fingerprint']}` (count {f.get('count', 1)}, category {f.get('category', '?')})", ""]
@@ -66,7 +68,7 @@ def draft(f: dict, *, version: tuple[str, str] | None = None) -> dict:
         lines += [f"**Suggested fix:** {_clean(f['fix'])}", ""]
     if f.get("repro"):
         lines += ["**Reproduction:**"] + [f"{i}. {_clean(s)}" for i, s in enumerate(f["repro"], 1)] + [""]
-    lines += ["Drafted by JARVES Self-Diagnostics 2.0; filed after the owner approved it. (#17)",
+    lines += [f"Drafted by {origin}; filed after the owner approved it. (#17)",
               f"<!-- jarves-fingerprint: {fp} -->"]
     return {"fingerprint": fp, "finding": f["fingerprint"], "title": title, "body": "\n".join(lines),
             "severity": f.get("severity", "")}
@@ -88,8 +90,10 @@ def get(store, tid: int) -> dict | None:
     return r[0] if r else None
 
 
-def listing(store, limit: int = 30) -> list[dict]:
-    return db.rows(store, "SELECT * FROM diag_tickets ORDER BY id DESC LIMIT ?", (limit,))
+def listing(store, limit: int = 30, *, dev: bool = False) -> list[dict]:
+    """Health ticket drafts (default) or the Development Manager's drafts (dev=True, finding "dev:...")."""
+    return db.rows(store, "SELECT * FROM diag_tickets WHERE finding " + ("" if dev else "NOT ") +
+                   "LIKE 'dev:%' AND status<>'discarded' ORDER BY id DESC LIMIT ?", (limit,))
 
 
 def _private(repo: str, run: Runner) -> tuple[bool, str]:

@@ -414,6 +414,11 @@ def record_result(ctx, f: feat.Features, tid: str, result: str, note: str = "") 
         for fid in _features_of(t):
             st["features"][fid] = {"version": __version__, "date": today, "by": "owner", "topic": t.id}
     elif result == "fails":
+        e.pop("verified_in", None)
+        e.pop("verified_on", None)
+        for fid in _features_of(t):
+            if st["features"].get(fid, {}).get("topic") == t.id:
+                st["features"].pop(fid, None)
         out["bug"] = bug_report(ctx, t, f, note)
         e["bug"] = out["bug"]
     _save(home, st)

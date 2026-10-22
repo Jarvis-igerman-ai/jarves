@@ -1,0 +1,51 @@
+order = 6
+category = "start"
+pages = ["selfmanage"]
+features = ["self_manage"]
+aliases = ["ניהול עצמי", "תנהל את עצמך", "self management", "manage yourself", "jarvis manage", "undo that", "בטל את זה", "מה מחובר", "what is connected", "תתקן חיבור", "fix connection"]
+links = ["guided_setup", "persona", "memory", "backup"]
+title_he = "ניהול עצמי"
+title_en = "Self-management"
+what_he = "ג'ארוויס יכול לנהל את עצמו לפי בקשה, בקול או בכתב: להראות מה מחובר ומה שבור, להדריך אותך בחיבור או בתיקון של חשבון, ולשנות את הקבצים שלו (SOUL, IDENTITY, USER, MEMORY, AGENTS), הזיכרון, היכולות, הכלים וההגדרות. כל שינוי מוצג בחלון אישור עם 'לפני' ו'אחרי', נשמר לו גיבוי, ואפשר לבטל אותו."
+what_en = "JARVES can manage itself on request, by voice or text: show what is connected and what is broken, guide you through connecting or fixing an account, and change its own files (SOUL, IDENTITY, USER, MEMORY, AGENTS), memory, features, skills and settings. Every change shows an approval window with BEFORE and AFTER, is backed up, and can be undone."
+say = [["מה מחובר ומה שבור?", "What is connected and what is broken?"], ["תתקן את החיבור לטלגרם", "Fix the Telegram connection"], ["תוסיף ל-USER שאני אוהב קפה שחור", "Add to USER that I like black coffee"], ["תכבה את הצ'ימס", "Turn off the chimes"], ["מה אפשר לשפר אצלך?", "What could be improved?"], ["בטל את זה", "Undo that"]]
+expect_he = "לפני כל שינוי קופץ חלון אישור עם 'לפני' ו'אחרי'. בקול נשאל רק איזה סוג פעולה. אחרי אישור מתבצע השינוי, ואפשר לומר 'בטל את זה' או להריץ jarvis undo."
+expect_en = "Before every change an approval window shows BEFORE and AFTER. By voice only the kind of action is asked. After you approve it is done, and you can say 'undo that' or run jarvis undo."
+test = "feature"
+test_he = "הבדיקה רק מוודאת שהיכולת דולקת. את המצב האמיתי של החיבורים רואים ב-jarvis manage status connections."
+test_en = "The check only sees that the ability is on. See the real state of the connections with jarvis manage status connections."
+cost_he = "חינם. אין שום בקשה בתשלום."
+cost_en = "Free. No paid request is made."
+privacy_he = "סודות (מפתחות, טוקנים, סיסמאות) אף פעם לא נאמרים ולא מוקלדים בצ'אט ואף פעם לא נכתבים בקבצים: המפתח מוקלד בחלון החיבור (הקלדה מוסתרת). קבצים שנוצרים אוטומטית, כללי האישורים ומתגי ההרשאות והבטיחות מחוץ להישג ידו. טקסט שנקרא מאתר, ממייל או מהודעה לא יכול לגרום לשינוי."
+privacy_en = "Secrets (keys, tokens, passwords) are never spoken or typed in chat and never written to files: the key is typed in the connection window (hidden input). Generated files, the approvals rules and the permission and safety switches are out of its reach. Text read from a web page, a mail or a message can never cause a change."
+
+[[steps]]
+he = "בטרמינל הקלידו jarvis manage status כדי לראות מה מחובר, אילו יכולות דולקות ומה אפשר לשפר (לא משנה כלום)."
+en = "In a terminal type jarvis manage status to see what is connected, which features are on and what could be improved (it changes nothing)."
+action = "command:jarvis manage status"
+
+[[steps]]
+he = "או פשוט תגידו לו: 'מה מחובר ומה שבור?'."
+en = "Or just ask him: 'What is connected and what is broken?'."
+
+[[steps]]
+he = "לתיקון חיבור תגידו 'תתקן את החיבור ל...'. ייפתח חלון הנחיה; מפתחות מקלידים שם בלבד."
+en = "To fix a connection say 'Fix the connection to ...'. A guided window opens; keys are typed there only."
+action = "open:#/selfmanage"
+
+[[steps]]
+he = "כל שינוי אפשר לבטל: 'בטל את זה', jarvis undo, או הכפתור בעמוד ניהול עצמי."
+en = "Every change can be undone: 'undo that', jarvis undo, or the button on the Self-management page."
+action = "open:#/selfmanage"
+
+[[problems]]
+he = "הוא סירב לשנות קובץ או הגדרה"
+en = "He refused to change a file or setting"
+fix_he = "קבצים שנוצרים אוטומטית (TOOLS, SETUP, FEATURES), כללי האישורים ומתגי הבטיחות לא ניתנים לשינוי בקול. בעלים משנה אותם בעמוד התכונות או ב-jarvis features."
+fix_en = "Generated files (TOOLS, SETUP, FEATURES), the approvals rules and the safety switches cannot be changed by voice. The owner changes them on the Features page or with jarvis features."
+
+[[problems]]
+he = "חלון האישור לא הופיע"
+en = "The approval window did not appear"
+fix_he = "אפשר לאשר גם בלוח הבקרה (עמוד אישורים) או ב-jarvis approvals approve. בלי אישור לא משתנה כלום."
+fix_en = "You can also approve on the dashboard (Approvals) or with jarvis approvals approve. Without approval nothing changes."
