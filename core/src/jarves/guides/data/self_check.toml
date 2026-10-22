@@ -17,7 +17,7 @@ test_he = "הבדיקה רק מוודאת שהרכיב מותקן. את הבדי
 test_en = "The check only sees that the component is installed. Run the self-check itself from the Self-check page."
 cost_he = "הבדיקה לפי כללים חינם ומקומית. אם הבדיקה בעזרת המודל דולקת: עד שתי בקשות קטנות לבדיקה, בתוך התקציב היומי, והעלות מוצגת."
 cost_en = "The rule-based check is free and local. If the AI review is on: at most two small requests per check, within the daily budget, and the cost is shown."
-privacy_he = "הכל נשאר במחשב. רק הבדיקה בעזרת המודל (אם דולקת) שולחת תמליל שיחה ל-OpenAI, כמו באבחון העצמי. במצב פרטיות היא לא רצה."
+privacy_he = "הכול נשאר במחשב. רק הבדיקה בעזרת המודל (אם דולקת) שולחת תמליל שיחה ל-OpenAI, כמו באבחון העצמי. במצב פרטיות היא לא רצה."
 privacy_en = "Everything stays on this computer. Only the AI review (if on) sends a conversation transcript to OpenAI, as in self-diagnosis. In privacy mode it does not run."
 
 [[steps]]

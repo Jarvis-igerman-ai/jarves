@@ -33,7 +33,7 @@ en = "Go over the Features page: what is on and what is off."
 action = "open:#/features"
 
 [[steps]]
-he = "הלוגים ואבחון נשמרים עם הודעות קבועות: תוכן ונתונים אישיים מוסתרים לפי סוג. jarvis diag בונה חבילת תמיכה שתמיד מסירה תוכן, ומגבבת נתונים אישיים. עברו עליה לפני ששולחים."
+he = "הלוגים ואבחון נשמרים עם הודעות קבועות: תוכן ונתונים אישיים מוסתרים לפי סוג. jarvis diag בונה חבילת תמיכה שתמיד מסירה תוכן, ומחליפה נתונים אישיים בגיבוב (hash). עברו עליה לפני ששולחים."
 en = "Logs and diagnostics use fixed messages: content and personal data are redacted by class. jarvis diag builds a support bundle that always strips content and hashes personal data. Read it before sharing."
 action = "command:jarvis diag --help"
 

@@ -12,6 +12,7 @@
 | [CAMERA_SETUP](CAMERA_SETUP.md) | Camera, privacy rules, face recognition |
 | [APPEARANCE](APPEARANCE.md) | Face, 2D and 3D avatar, hidden presentations |
 | [SKILL_CREATION](SKILL_CREATION.md) | Skills JARVES drafts for you, grants and sandbox |
+| [GLOSSARY_HE](GLOSSARY_HE.md) | Hebrew terms and style rules for the guides and dashboard |
 | [core/README](../core/README.md) | Running and debugging the Core, CLI reference, cost, logs |
 | [RELEASE_NOTES_4.0](RELEASE_NOTES_4.0.md), [CHANGELOG](../CHANGELOG.md) | What changed, behaviour and exit-code changes |
 
