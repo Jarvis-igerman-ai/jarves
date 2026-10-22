@@ -96,8 +96,21 @@ jobs:
         env:
           JARVES_BUILD_CACHE: ${{ runner.temp }}/jarves-test-tools
         run: |
-          uv run pytest -q -rs -p no:cacheprovider --durations=25 --junitxml=pytest-junit.xml | tee pytest.out
+          # a failing test FILE is retried once (only that file); flakes are recorded in flake-report.json (docs/CI_DETERMINISM.md)
+          uv run python tools/pytest_ci.py --durations=25 | tee pytest.out
           if grep -E "(^SKIPPED|[0-9]+ skipped|xfailed)" pytest.out; then echo "::error::tests were skipped"; exit 1; fi
+      - name: Upload flake report
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: flake-report-core-${{ matrix.os }}
+          path: core/flake-report.json
+          if-no-files-found: ignore
+      - name: Quarantined tests (non-blocking; still run, never skipped)
+        continue-on-error: true
+        shell: bash
+        run: |
+          uv run pytest -q -p no:cacheprovider -m quarantine || [ $? -eq 5 ]   # 5 = none quarantined
       - name: Redacted diagnostics on failure (pytest output, junit, Core logs; no secrets, no user content)
         if: failure()
         shell: bash
