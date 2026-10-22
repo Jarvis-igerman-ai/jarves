@@ -343,7 +343,12 @@ def test_kill_on_close_ends_processes_the_command_left_behind():
     try:
         child = int(p.stdout.readline())
         assert p.wait(timeout=30) == 0
-        assert g.job.contains(child) and g.job.query()["active_processes"] == 1   # the sleeper is still there
+        assert g.job.contains(child)
+        for _ in range(100):                      # a launcher stub of the interpreter may still be exiting under load
+            if g.job.query()["active_processes"] == 1:
+                break
+            time.sleep(0.1)
+        assert g.job.query()["active_processes"] == 1                              # the sleeper is still there
     finally:
         g.close()
     assert _win_wait_gone(child), "kill-on-close did not end the leftover process"
