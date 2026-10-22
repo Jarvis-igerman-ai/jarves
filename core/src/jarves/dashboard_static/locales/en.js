@@ -1710,7 +1710,6 @@
   "Note for ": "Note for ",
   "Result for ": "Result for ",
   "Stable: only releases that were tested by hand and signed off.": "Stable: only releases that were tested by hand and signed off.",
-  "dashboard Health & speed page, jarvis selftest, jarvis speedtest, Jobs page (times)": "dashboard Health & speed page, jarvis selftest, jarvis speedtest, Jobs page (times)",
   "Bug reports": "Bug reports",
   "Report": "Report",
   "Mark fixed": "Mark fixed",
@@ -1721,7 +1720,6 @@
   "Fixed": "Fixed",
   "Ignored": "Ignored",
   "Severity": "Severity",
-  "Area": "Area",
   " · reported": " · reported",
   " · saved to attach": " · saved to attach",
   "Problems JARVES found in himself (self-test, speed, diagnostics, failing tools, crashes, dashboard errors). A report goes to the developer only after you approve the exact text, and it holds no conversation content.": "Problems JARVES found in himself (self-test, speed, diagnostics, failing tools, crashes, dashboard errors). A report goes to the developer only after you approve the exact text, and it holds no conversation content.",
@@ -1800,7 +1798,6 @@
   "op must be approve, pause, resume, cancel, retry, skip or [0-9]elete": "op must be approve, pause, resume, cancel, retry, skip or [0-9]elete",
   "Asks first": "Asks first",
   "Retry": "Retry",
-  "Skip": "Skip",
   "Time cap ": "Time cap ",
   " min, AI requests ": " min, AI requests ",
   "Approve and run (asks on your screen)": "Approve and run (asks on your screen)",
@@ -1813,6 +1810,8 @@
   "Cancelled": "Cancelled",
   "Pending": "Pending",
   "Blocked": "Blocked",
-  "May have run": "May have run"
+  "May have run": "May have run",
+  "No open pull requests or issues (or GitHub could not be read).": "No open pull requests or issues (or GitHub could not be read).",
+  "What the agents, pull requests and CI of JARVES are doing. This page only reads; any change on GitHub shows the exact command and asks on the screen.": "What the agents, pull requests and CI of JARVES are doing. This page only reads; any change on GitHub shows the exact command and asks on the screen."
  }
 };

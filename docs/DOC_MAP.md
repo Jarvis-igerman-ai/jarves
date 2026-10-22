@@ -116,6 +116,16 @@ Reports and bug tables are evidence of a past run, not instructions. A package's
 | Raw suite output | [V3 voice suite raw](reviews/swv3_campaign_voice/SUITE_RAW_REPORT.md), [V4 voice suite raw](reviews/swv4_campaign_voice/SUITE_RAW_REPORT.md) |
 | Screenshots | `docs/reviews/swv2_*`, `swv3_*` image folders (evidence only) |
 
-## 8. Documents that open pull requests will add
+## 8. Added by the 4.0.1 integration batch
 
-Not on `main` yet; when one merges it must add its row here (the docs test enforces it): PR #44 `RELEASING.md`, `CI_PERFORMANCE.md`, `SECURITY.md`; PR #46 `reviews/MANUAL_TEST_4.0.0.md`; PR #47 `GLOSSARY_HE.md` (Hebrew review reference); PR #48 `BUGFIX_LANE.md`; PR #29 `plans/V5_PILLARS.md`.
+| Document | Purpose | Version | Status | Owner doc |
+|---|---|---|---|---|
+| [BUGFIX_LANE](BUGFIX_LANE.md) | Bugfix lane: from a problem JARVES finds in himself to a fixed release | 4.1+ | current | [reviews/BUG_TABLE_4_1](reviews/BUG_TABLE_4_1.md) |
+| [GLOSSARY_HE](GLOSSARY_HE.md) | Hebrew glossary: one Hebrew term per concept in guides and the dashboard | general | current | [USER_GUIDE](USER_GUIDE.md) |
+| [MIGRATION_AUDIT](MIGRATION_AUDIT.md) | Legacy repository migration audit (20 Oct 2026) | general | historical | [reviews/SWV4_P01_VERIFY](reviews/SWV4_P01_VERIFY.md) |
+| [PHONE_ACCESS_TAILSCALE](PHONE_ACCESS_TAILSCALE.md) ([HE](PHONE_ACCESS_TAILSCALE_HE.md)) | Phone access over Tailscale, setup guide | V5 | current | [plans/V5_PILLARS](plans/V5_PILLARS.md) |
+| [plans/V5_PILLARS](plans/V5_PILLARS.md) | V5 pillars 2 and 3: Goals and Adaptive Memory (software slice) | V5 | current | [ROADMAP](ROADMAP.md) |
+| [plans/WHATSAPP_GREENAPI_FLOWAPI_EVAL](plans/WHATSAPP_GREENAPI_FLOWAPI_EVAL.md) | GREEN-API and Flow API evaluation for WhatsApp (research only) | V5+ | research | [plans/WHATSAPP_REAL_ACCESS](plans/WHATSAPP_REAL_ACCESS.md) |
+| [reviews/BUG_TABLE_4_1](reviews/BUG_TABLE_4_1.md) | Bug table 4.1, first sweep | 4.0.1 | current | [BUGFIX_LANE](BUGFIX_LANE.md) |
+| [reviews/MANUAL_TEST_4.0.0](reviews/MANUAL_TEST_4.0.0.md) | Manual test sheet for 4.0.0 (owner) | 4.0.0 | current | [RELEASING](RELEASING.md) |
+| [reviews/SWV4_P01_VERIFY](reviews/SWV4_P01_VERIFY.md) | Owner-assisted verification, ported from the legacy branch | V4 | historical | [MIGRATION_AUDIT](MIGRATION_AUDIT.md) |

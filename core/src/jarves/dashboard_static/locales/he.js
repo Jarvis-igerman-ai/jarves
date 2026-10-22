@@ -1710,7 +1710,6 @@
   "Note for ": "הערה ל-",
   "Result for ": "תוצאה ל-",
   "Stable: only releases that were tested by hand and signed off.": "יציב: רק גרסאות שנבדקו ידנית ואושרו.",
-  "dashboard Health & speed page, jarvis selftest, jarvis speedtest, Jobs page (times)": "עמוד תקינות ומהירות בלוח הבקרה, jarvis selftest, jarvis speedtest, עמוד המשימות הקבועות (שעות)",
   "Bug reports": "דיווחי תקלות",
   "Report": "דווחו למפתח",
   "Mark fixed": "סמן כתוקן",
@@ -1721,7 +1720,6 @@
   "Fixed": "תוקן",
   "Ignored": "מתעלמים",
   "Severity": "חומרה",
-  "Area": "תחום",
   " · reported": " · דווח",
   " · saved to attach": " · נשמר לצירוף",
   "Problems JARVES found in himself (self-test, speed, diagnostics, failing tools, crashes, dashboard errors). A report goes to the developer only after you approve the exact text, and it holds no conversation content.": "בעיות ש-JARVES מצא בעצמו (בדיקה עצמית, מהירות, אבחון, כלים שנכשלים, קריסות, שגיאות בלוח הבקרה). הדיווח למפתח נשלח רק אחרי שתאשרו את הטקסט המדויק, ואין בו תוכן שיחות.",
@@ -1800,7 +1798,6 @@
   "op must be approve, pause, resume, cancel, retry, skip or [0-9]elete": "הפעולה חייבת להיות approve, pause, resume, cancel, retry, skip או [0-9]elete",
   "Asks first": "שואל לפני ביצוע",
   "Retry": "ניסיון חוזר",
-  "Skip": "דילוג",
   "Time cap ": "זמן מרבי ",
   " min, AI requests ": " דק׳, בקשות AI ",
   "Approve and run (asks on your screen)": "אישור והרצה (מבקש אישור על המסך)",
@@ -1813,7 +1810,9 @@
   "Cancelled": "בוטלה",
   "Pending": "ממתין",
   "Blocked": "חסום",
-  "May have run": "לא ברור אם בוצע"
+  "May have run": "לא ברור אם בוצע",
+  "No open pull requests or issues (or GitHub could not be read).": "אין בקשות משיכה או נושאים פתוחים (או שלא ניתן היה לקרוא את GitHub).",
+  "What the agents, pull requests and CI of JARVES are doing. This page only reads; any change on GitHub shows the exact command and asks on the screen.": "מה הסוכנים, בקשות המשיכה וה-CI של JARVES עושים. הדף רק קורא; כל שינוי ב-GitHub מציג את הפקודה המדויקת ומבקש אישור על המסך."
  },
  "rules": [
   [

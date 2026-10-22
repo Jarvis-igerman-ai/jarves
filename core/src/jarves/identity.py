@@ -228,8 +228,8 @@ class Identity:
         if cfg.voice.wake_word not in (w["model"], "hey_jarvis"):
             # V4-VC-8: identity.json owns the wake model; a different config.toml value used to vanish silently.
             logs.warn("identity", "WAKE_CONFIG_OVERRIDDEN", "voice.wake_word in config.toml is replaced by the wake "
-                      "model chosen with `jarvis wake use`", config=Path(str(cfg.voice.wake_word)).name,
-                      used=Path(str(w["model"])).name)
+                      "model chosen with `jarvis wake use`", source=Path(str(cfg.voice.wake_word)).name,
+                      target=Path(str(w["model"])).name)
         cfg.voice.wake_word = w["model"]
         if w.get("threshold") is not None:
             cfg.voice.wake_threshold = w["threshold"]
