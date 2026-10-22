@@ -186,7 +186,7 @@ if (Test-Path $bridgePin) {
     $bridgeSrc = $env:JARVES_BRIDGE_EXE
     if (-not $bridgeSrc) { $bridgeSrc = Join-Path $Repo "bridge\whatsapp\dist\whatsapp_bridge.exe" }   # local build: scripts/build_whatsapp_bridge.ps1 -Version <pin.version>
     if (-not (Test-Path $bridgeSrc)) {
-        throw "packagingridge_pin.json exists but the bridge binary is missing (set JARVES_BRIDGE_EXE or run scripts/build_whatsapp_bridge.ps1 -Version $($pin.version))"
+        throw "packaging/bridge_pin.json exists but the bridge binary is missing (set JARVES_BRIDGE_EXE or run scripts/build_whatsapp_bridge.ps1 -Version $($pin.version))"
     }
     $dst = Join-Path $Stage ($pin.path -replace '/', '\')
     New-Item -ItemType Directory -Force (Split-Path $dst -Parent) | Out-Null
