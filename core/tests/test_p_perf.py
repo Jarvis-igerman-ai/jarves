@@ -22,7 +22,7 @@ async def test_backend_prompt_does_not_grow(core):
     total = len(tools) + len(core.agent.instructions())
     assert total <= BACKEND_CHARS_BUDGET, f"backend prompt+tools is {total} chars (budget {BACKEND_CHARS_BUDGET:.0f})"
     assert '"title": "' not in tools                      # slimmed schemas carry no pydantic titles
-    assert total <= 59_400 * 0.92                      # package P: at least 8% below the V4 integration baseline
+    assert total <= 48_400                             # 4.0.1: -18% vs the V4 baseline; the -30% target (41.6k) is deferred to 4.0.2 (lazy tool exposure), docs/reviews/SWV4_PERF.md
 
 
 class _Args(BaseModel):
@@ -35,7 +35,7 @@ def test_slim_schema_drops_titles_and_length_bounds_but_keeps_property_names():
     slim = slim_schema(full)
     assert "title" not in slim and "title" in slim["properties"]            # a property NAMED title stays
     assert set(slim["properties"]["title"]) == {"description", "type"}
-    assert slim["properties"]["n"]["minimum"] == 1 and slim["properties"]["n"]["maximum"] == 9   # numeric bounds stay
+    assert "minimum" not in slim["properties"]["n"] and slim["properties"]["n"]["type"] == "integer"   # 4.0.1: bounds are dropped too (the Core validates)
     assert slim["required"] == full["required"] if "required" in full else True
     assert len(json.dumps(slim)) < len(json.dumps(full))
 

@@ -1,0 +1,40 @@
+order = 37
+category = "everyday"
+pages = ["preferences"]
+features = ["adaptive_memory", "prefs_in_prompt"]
+aliases = ["העדפות", "העדפות נלמדות", "לזכור העדפה", "preferences", "learned preferences", "adaptive memory", "my preferences"]
+links = ["memory", "privacy"]
+title_he = "העדפות נלמדות"
+title_en = "Learned preferences"
+what_he = "כשאתה אומר מה אתה מעדיף, JARVES מציע לזכור את זה ושואל אותך. רק אחרי \"כן\" זה נשמר ומשפיע."
+what_en = "When you say what you prefer, JARVES offers to remember it and asks you. It is saved and used only after you say yes."
+say = [["אני מעדיף תשובות קצרות בבוקר", "I prefer short answers in the morning"], ["כן, תזכור את זה", "Yes, remember that"], ["מה למדת עליי?", "What have you learned about me?"], ["תשכח את ההעדפה על תשובות קצרות", "Forget the preference about short answers"]]
+expect_he = "כל העדפה מופיעה בעמוד \"העדפות נלמדות\" עם המילים שלך כראיה: אפשר לאשר, לערוך, לדחות או להסיר. הצעות שלא נענו נעלמות אחרי 14 יום; העדפה שלא אושרה מחדש חצי שנה מפסיקה להשפיע עד שתאשר שוב."
+expect_en = "Every preference is on the Learned preferences page with your own words as evidence: confirm, edit, decline or remove it. Unanswered suggestions disappear after 14 days; a preference not reaffirmed for half a year stops being used until you confirm it again."
+cost_he = "חינם. הכול מקומי."
+cost_en = "Free. All local."
+privacy_he = "נשמר רק מה שאמרת במפורש ואישרת. סיסמאות, מספרים, פרטי בריאות וכסף לא נשמרים, גם אם תבקש. אפשר למחוק הכול."
+privacy_en = "Only what you said explicitly and confirmed is kept. Passwords, numbers, health and money details are never stored, even on request. You can delete everything."
+
+[[steps]]
+he = "אמרו \"אני מעדיף תשובות קצרות בבוקר\". JARVES יציע לזכור."
+en = "Say \"I prefer short answers in the morning\". JARVES offers to remember it."
+check = "active:adaptive_memory"
+
+[[steps]]
+he = "ענו \"כן\" כדי לשמור או \"לא\" כדי לא לשמור. בכל רגע אפשר לפתוח את העמוד \"העדפות נלמדות\" לערוך או להסיר."
+en = "Answer yes to keep it or no to drop it. Any time, open the Learned preferences page to edit or remove."
+
+[[steps]]
+he = "העדפות שאישרתם מצורפות להוראות של כל שיחה, בגודל קטן וקבוע, ואפשר לראות בדיוק מה נשלח בעמוד \"העדפות נלמדות\". המתג בעמוד, או: jarvis prefs prompt on|off|show. תקף מהשיחה הבאה."
+en = "Preferences you confirmed are added to the instructions of every conversation, within a small fixed size, and the page \"Learned preferences\" shows exactly what is sent. The switch is on the page, or: jarvis prefs prompt on|off|show. It applies from the next conversation."
+
+[[steps]]
+he = "בלי קול: jarvis prefs list, jarvis prefs add \"...\", jarvis prefs confirm ID, jarvis prefs remove ID."
+en = "Without voice: jarvis prefs list, jarvis prefs add \"...\", jarvis prefs confirm ID, jarvis prefs remove ID."
+
+[[problems]]
+he = "ביקשתי שיזכור משהו והוא סירב"
+en = "I asked it to remember something and it refused"
+fix_he = "פרטים רגישים (סיסמה, מספרים ארוכים, בריאות, כסף) לא נשמרים בכוונה. נסחו העדפה כללית, למשל סגנון תשובה."
+fix_en = "Sensitive details (passwords, long numbers, health, money) are deliberately not stored. Word it as a general preference, such as answer style."

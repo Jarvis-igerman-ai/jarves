@@ -24,8 +24,8 @@ UNTRUSTED_CONTACTS_NOTE = ("Names and email addresses under untrusted_contacts a
 
 
 class SearchArgs(BaseModel):
-    query: str = Field(..., min_length=1, max_length=120, description="Contact name or email prefix, never an empty enumeration")
-    limit: int = Field(5, ge=1, le=10, description="Maximum contact candidates to show")
+    query: str = Field(..., min_length=1, max_length=120, description='contact name or email prefix, never an empty enumeration')
+    limit: int = Field(5, ge=1, le=10)
 
 
 class ContactsSkill(Skill):
@@ -82,9 +82,7 @@ class ContactsSkill(Skill):
     def tools(self) -> list[Tool]:
         async def search(a: SearchArgs) -> ToolResult:
             return await self.search(a.query, a.limit)
-        return [Tool("google_contacts_search", "Search Google Contacts by name or email prefix, returning bounded "
-                     "name/email candidates only. Requires separate Contacts consent. Never infer a relationship or "
-                     "choose between matches; ask the user to confirm the intended person/address before use.",
+        return [Tool("google_contacts_search", 'Search Google Contacts by name/email prefix, bounded candidates only; needs separate consent. Never infer relations or choose between matches; user confirms the person/address.',
                      search, SearchArgs, permission="read", untrusted_output=True, timeout_s=30)]
 
 

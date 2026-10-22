@@ -74,7 +74,6 @@ def known_flakes(artifacts: Path) -> set[str]:
         except (ValueError, OSError):
             continue
         names.update(f.get("test", "") for f in doc.get("flaky_passed_on_retry", []))
-        names.update(doc.get("failed_again", []))
     return names
 
 

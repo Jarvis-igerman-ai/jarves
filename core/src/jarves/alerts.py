@@ -228,8 +228,8 @@ def speech_note(a: dict, limit: int = 600) -> str:
 # ---------------------------------------------------------------------- voice tools
 class AlertControlArgs(BaseModel):
     op: str = Field(..., pattern="^(pause|resume|dismiss_all)$",
-                    description="pause = no proactive alerts for a while ('אל תפריע לי'), resume, dismiss_all")
-    minutes: int = Field(60, ge=1, le=24 * 60, description="for pause: how long")
+                    description='pause | resume | dismiss_all')
+    minutes: int = Field(60, ge=1, le=24 * 60)
 
 
 def make_skill(engine: AlertEngine):
@@ -257,9 +257,9 @@ def make_skill(engine: AlertEngine):
                     return ToolResult(True, "proactive alerts are on again")
                 return ToolResult(True, f"dismissed {engine.dismiss(by='voice')} pending alert(s)")
 
-            return [Tool("alerts_list", "Pending proactive alerts (and whether alerts are paused / quiet hours).",
+            return [Tool("alerts_list", "Pending proactive alerts, paused/quiet hours: 'any alerts', 'יש התראות'.",
                          list_, NoArgs, permission="read"),
-                    Tool("alerts_control", "Pause or resume proactive alerts, or dismiss the pending ones.", control,
+                    Tool("alerts_control", "Pause/resume alerts or dismiss pending: 'quiet please', 'אל תפריע לי'.", control,
                          AlertControlArgs, permission="action")]
 
     return AlertSkill()

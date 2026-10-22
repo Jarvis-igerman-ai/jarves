@@ -1,5 +1,5 @@
 :root { color-scheme: dark light; --bg:#0b1020; --fg:#e8ecf8; --muted:#8c97b5; --card:#151c33; --accent:#1e6bff; --bad:#ff5d6c; --ok:#3ecf8e; }
-@media (prefers-color-scheme: light) { :root { --bg:#f4f6fb; --fg:#10162b; --muted:#5b6585; --card:#fff; } }
+@media (prefers-color-scheme: light) { :root { --bg:#f4f6fb; --fg:#10162b; --muted:#5b6585; --card:#fff; --ok:#0a7a4b; --bad:#b3122a; --accent:#1553cc; } }
 * { box-sizing: border-box; }
 body { margin:0; background:var(--bg); color:var(--fg); font:16px/1.4 system-ui, sans-serif; padding-bottom: env(safe-area-inset-bottom); }
 [hidden] { display:none !important; }
@@ -13,7 +13,7 @@ label { display:grid; gap:4px; }
 input { font:inherit; padding:12px; border-radius:10px; border:1px solid var(--muted); background:transparent; color:inherit; min-width:0; }
 button { font:inherit; padding:12px 16px; border-radius:10px; border:1px solid var(--muted); background:transparent; color:inherit; min-height:44px; }
 button.primary { background:var(--accent); border-color:var(--accent); color:#fff; }
-button.ghost { border:none; min-height:36px; padding:6px 10px; }
+button.ghost { border:none; min-height:44px; min-width:44px; padding:6px 10px; }
 .row { display:flex; gap:8px; } .row input { flex:1; }
 .tabs { display:flex; gap:6px; margin-bottom:12px; overflow-x:auto; }
 .tabs button[aria-selected="true"] { background:var(--accent); border-color:var(--accent); color:#fff; }
@@ -27,4 +27,8 @@ button.ghost { border:none; min-height:36px; padding:6px 10px; }
 .list li { background:var(--card); border-radius:12px; padding:10px 12px; display:flex; gap:8px; align-items:center; flex-wrap:wrap; }
 .list li .grow { flex:1; min-width:140px; }
 .muted { color:var(--muted); font-size:.9rem; }
-.badge { background:var(--bad); color:#fff; border-radius:99px; padding:0 7px; font-size:.75rem; }
+.badge { background:#c4263a; color:#fff; border-radius:99px; padding:0 7px; font-size:.75rem; }
+.banner { background:var(--bad); color:#fff; padding:10px 14px; text-align:center; font-weight:600; }
+.msg.note { background:transparent; border:1px dashed var(--accent); }
+.msg.unsent { border:1px dashed var(--bad); }
+.msg .small { display:block; font-size:.8rem; opacity:.85; margin-top:4px; }

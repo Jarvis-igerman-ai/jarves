@@ -1546,15 +1546,15 @@ def quiet_note(db, view: dict, scheduler) -> str:
 
 # ---------------------------------------------------------------------- voice tools
 class RunArgs(BaseModel):
-    days: int = Field(0, ge=0, le=90, description="look back this many days (0 = the default, 7)")
-    ai: bool | None = Field(None, description="also run the AI review of recent conversations (default: setting)")
-    trigger: str = Field("voice", description="leave as voice")
+    days: int = Field(0, ge=0, le=90, description='0 = default 7')
+    ai: bool | None = Field(None, description='also run the AI review')
+    trigger: str = Field("voice")
 
 
 class DecideArgs(BaseModel):
-    number: int = Field(..., ge=1, le=50, description="the suggestion's number in the last self-check")
-    decision: str = Field(..., description="accept | dismiss | snooze")
-    days: int = Field(7, ge=1, le=90, description="snooze: for how many days")
+    number: int = Field(..., ge=1, le=50)
+    decision: str = Field(..., description='accept | dismiss | snooze')
+    days: int = Field(7, ge=1, le=90, description='snooze days')
 
 
 def make_skill(service: SelfCheckService, registry=None):
@@ -1639,17 +1639,12 @@ def make_skill(service: SelfCheckService, registry=None):
                 return ToolResult(True, "הכנתי טיוטת כרטיס בלוח הבקרה, בעמוד בדיקה עצמית. לא שלחתי אותה לשום מקום.",
                                   {"title": t["title"], "dashboard": "#/selfcheck"})
 
-            return [Tool("self_check_run", "Run a SELF-CHECK now: health, recent logs, settings and features; returns "
-                         "a ranked list of problems and suggested fixes. Use for 'תבדוק את עצמך', 'בדיקה עצמית', "
-                         "'run a self check', 'check yourself'. Local rules; costs nothing unless the AI review runs.",
+            return [Tool("self_check_run", "Run a SELF-CHECK (health, logs, settings): 'check yourself', 'תבדוק את עצמך'. Ranked problems and fixes; free unless AI review runs.",
                          run_, RunArgs, permission="read", timeout_s=120),
-                    Tool("self_check_suggestions", "The suggestions of the last self-check (numbered).", list_, NoArgs,
+                    Tool("self_check_suggestions", "Numbered suggestions of the last self-check: 'what did it find', 'מה הצעות הבדיקה'.", list_, NoArgs,
                          permission="read"),
-                    Tool("self_check_decide", "Accept, dismiss or snooze one self-check suggestion by its number, "
-                         "only after the user said so. Accepting a settings change asks the user again before it "
-                         "is applied.", decide_, DecideArgs, permission="action", timeout_s=120),
-                    Tool("self_check_ticket", "Prepare a ticket draft (Markdown, on the dashboard) from the last "
-                         "self-check. Nothing is sent anywhere.", ticket_, NoArgs, permission="read")]
+                    Tool("self_check_decide", "Accept, dismiss or snooze one suggestion by number, only after the user said so ('accept 2', 'תאשר 2'). Settings changes ask again.", decide_, DecideArgs, permission="action", timeout_s=120),
+                    Tool("self_check_ticket", "Draft a ticket (Markdown, on the dashboard) from the last self-check: 'make a ticket', 'תכין פנייה'. Nothing is sent.", ticket_, NoArgs, permission="read")]
 
     return SelfCheckSkill()
 

@@ -97,6 +97,10 @@ HE = {   # Hebrew texts of this module (fixed strings; user content is never tra
 # addresses or other details. The full text stays on the popup / dashboard (Approval.prompt, unchanged).
 # (regex on the tool name/title, English question, Hebrew question, may name the recipient)
 _SPOKEN_KINDS = (
+    (r"self_connect|self_manage_connect", "Open the connection window for an account?", "לפתוח חלון לחיבור חשבון?", False),
+    (r"self_undo|self_manage_undo", "Undo my last change to myself?", "לבטל את השינוי האחרון שעשיתי בעצמי?", False),
+    (r"self_change|self_manage", "Change one of my own files, features or settings?",
+     "לשנות אחד מהקבצים, היכולות או ההגדרות שלי?", False),
     (r"dial_open|\bcall\b", "Open the phone dialer{to}?", "לפתוח את החייגן{to}?", True),
     (r"whatsapp", "Send a WhatsApp message{to}?", "לשלוח הודעת וואטסאפ{to}?", True),
     (r"telegram", "Send a Telegram message{to}?", "לשלוח הודעת טלגרם{to}?", True),
@@ -849,7 +853,8 @@ class PopupChannel:
         nonce = secrets.token_hex(16)
         _write_json(inp, {"id": a.id, "title": a.title, "prompt": a.prompt, "why": a.why, "risk": a.risk,
                           "kind": a.kind, "details": a.details, "typed": bool(a.typed_code),
-                          "timeout_s": max(1, round(a.expires - time.time())), "lang": self.lang})
+                          "timeout_s": max(1, round(a.expires - time.time())), "lang": self.lang,
+                          "silent": bool((CHAT_TURN.get() or {}).get("silent"))})   # a silent chat turn: no bell
         argv = [_popup_python(), "-m", "jarves.approval_popup", "--in", str(inp), "--out", str(out), "--stdin"]
         if self.test_invoke:
             argv += ["--test-invoke", self.test_invoke]
@@ -943,7 +948,16 @@ def api_approval_answer(ctx, m, body):
         return 400, {"error": "body needs {\"approved\": true|false}"}
     ok, why = submit_answer(Path(ctx.home), m.group(1), body["approved"], channel="dashboard",
                             typed=str(body.get("typed") or "")[:12])
-    return (200, {"ok": True}) if ok else (409, {"error": why})
+    return (200, {"ok": True}) if ok else (409, {"error": why, "code": refusal_code(why)})
+
+
+def refusal_code(why: str) -> str:
+    """Fixed code of a refused answer (the first answer already won, or the typed code is needed)."""
+    if str(why).startswith("no such waiting approval"):
+        return "APPROVAL_ALREADY_ANSWERED"
+    if "code" in str(why).lower():
+        return "APPROVAL_CODE_NEEDED"
+    return "APPROVAL_REFUSED"
 
 
 def dashboard_routes(register_route) -> None:

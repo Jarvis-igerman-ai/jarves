@@ -67,6 +67,16 @@ def test_find_comment_updates_in_place():
     assert ci_comment.find_comment(cs[:1]) is None
 
 
+def test_repeat_failure_is_not_reported_as_passed_on_retry(tmp_path):
+    (tmp_path / "flake-report.json").write_text(json.dumps({
+        "flaky_passed_on_retry": [], "failed_again": ["tests.test_p_perf::test_big"],
+    }), encoding="utf-8")
+    (tmp_path / "pytest-junit.xml").write_text(JUNIT, encoding="utf-8")
+    body = ci_comment.build(JOBS, tmp_path, "https://x/run")
+    assert "tests.test_p_perf::test_big" in body
+    assert "known flake" not in body.lower()
+
+
 def test_quick_gate_table_is_parsed(tmp_path):
     art = tmp_path / "junit-prepush"
     art.mkdir()

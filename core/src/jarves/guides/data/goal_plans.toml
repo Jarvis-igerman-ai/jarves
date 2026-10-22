@@ -1,0 +1,50 @@
+order = 37
+category = "everyday"
+pages = ["goalplans"]
+features = ["goal_plans"]
+aliases = ["תוכנית", "תוכניות", "תוכנית ליעד", "תתכנן", "goal plan", "goal plans", "plan", "plans", "plan how to", "execute goal"]
+links = ["goals", "helper", "api_budget"]
+title_he = "תוכניות ליעדים"
+title_en = "Goal plans"
+what_he = "אתה מבקש \"תתכנן איך ל...\" ו-JARVES מציע תוכנית קצרה של צעדים מהכלים הקיימים. אתה מאשר את התוכנית פעם אחת, והיא רצה צעד אחר צעד, ושואלת לפני כל צעד ששינה משהו."
+what_en = "You say \"plan how to ...\" and JARVES proposes a short plan of steps using its existing tools. You approve the plan once; it then runs step by step and asks before every step that changes something."
+say = [["תתכנן איך להכין את הפגישה של מחר", "Plan how to prepare for tomorrow's meeting"], ["תריץ את תוכנית 3", "Run plan 3"], ["מה מצב התוכניות שלי", "What is the status of my plans"]]
+expect_he = "התוכנית נשמרת כטיוטה ולא רצה. רק אחרי שאישרת על המסך היא מתחילה. כל צעד שמשנה משהו מבקש אישור נפרד; קריאה בלבד רצה בלי לשאול. אפשר להשהות, לבטל, לנסות שוב, לדלג ולהמשיך, גם אחרי הפעלה מחדש של JARVES. בסוף יש תוצאה קצרה עם עדות לכל צעד."
+expect_en = "The plan is saved as a draft and does not run. It starts only after you approve it on the screen. Every step that changes something asks again; read-only steps run without asking. You can pause, cancel, retry, skip and resume, also after JARVES restarts. At the end there is a short result with the evidence for each step."
+cost_he = "הצעדים עצמם חינם. יש תקרה לכל תוכנית: 30 דקות ו-20 בקשות AI כברירת מחדל, ותקרת התקציב היומי תקפה גם כן."
+cost_en = "The steps themselves are free. Each plan has caps: 30 minutes and 20 AI requests by default, and the daily budget limit still applies."
+privacy_he = "התוכניות נשמרות רק במחשב ונכללות בגיבוי. טקסט שנכתב על ידי אחרים (דואר, יומן) לא יכול להפעיל צעד: אחרי קריאה כזו כל צעד שמשנה משהו נחסם עד שתמשיך בעצמך."
+privacy_en = "Plans stay on this computer and are included in the backup. Text written by others (mail, calendar) can never trigger a step: after reading it, any step that changes something is blocked until you resume the plan yourself."
+
+[[steps]]
+he = "אמרו \"תתכנן איך להכין את הפגישה של מחר\". JARVES מציע צעדים ושומר אותם כטיוטה."
+en = "Say \"plan how to prepare for tomorrow's meeting\". JARVES proposes steps and saves them as a draft."
+check = "active:goal_plans"
+
+[[steps]]
+he = "קראו את הצעדים בעמוד \"תוכניות ליעדים\" ואשרו (או אמרו \"תריץ את תוכנית 3\"). האישור על המסך הוא האישור היחיד לתוכנית כולה."
+en = "Read the steps on the \"Goal plans\" page and approve (or say \"run plan 3\"). The approval on the screen is the one approval for the whole plan."
+
+[[steps]]
+he = "במהלך הריצה: צעד שמשנה משהו מבקש אישור נפרד. אפשר להשהות, לבטל, לנסות שוב או לדלג על צעד. אחרי הפעלה מחדש התוכנית מושהית ומחכה לך; צעד שאולי כבר בוצע לא ייחזר בלי שתחליט."
+en = "While it runs, a step that changes something asks for its own approval. You can pause, cancel, retry or skip a step. After a restart the plan is paused and waits for you; a step that may already have run is never repeated until you decide."
+
+[[steps]]
+he = "בלי קול: jarvis goals plan new \"כותרת\" --step goal_show (כל צעד הוא שם כלי, ואפשר גם כלי=ארגומנטים ב-JSON), ואז jarvis goals plan approve ID. עוד: list, show, pause, resume, cancel, retry, skip, delete."
+en = "Without voice: jarvis goals plan new \"title\" --step goal_show (each step is a tool name, optionally tool=JSON-arguments), then jarvis goals plan approve ID. More: list, show, pause, resume, cancel, retry, skip, delete."
+
+[[steps]]
+he = "לכיבוי מלא: jarvis features off goal_plans. תוכניות קיימות נשארות ולא ירוצו עד שתדליקו שוב."
+en = "To switch it off: jarvis features off goal_plans. Existing plans stay and do not run until you switch it on again."
+
+[[problems]]
+he = "התוכנית חסומה"
+en = "The plan is blocked"
+fix_he = "ההודעה על התוכנית אומרת למה: לא אישרת צעד, נקראו נתונים מאנשים אחרים, או הגעה לתקרת זמן או עלות. תקנו את הסיבה ולחצו המשך (jarvis goals plan resume ID)."
+fix_en = "The note on the plan says why: a step was not approved, text from others was read, or a time or cost cap was reached. Fix the reason and press Resume (jarvis goals plan resume ID)."
+
+[[problems]]
+he = "התוכנית אינה מתחילה אחרי האישור"
+en = "The plan does not start after approval"
+fix_he = "התוכנית רצה בליבה של JARVES. ודאו ש-JARVES פועל ושהתכונה דולקת (jarvis features)."
+fix_en = "Plans run inside the JARVES Core. Make sure JARVES is running and the feature is on (jarvis features)."

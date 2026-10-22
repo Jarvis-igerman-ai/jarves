@@ -608,7 +608,7 @@ def build(req: dict, out: Path, test_invoke: str | None = None, *, theme: str | 
                         pass
     root.bind("<Destroy>", on_destroy, add="+")
     tick()
-    if not test_invoke:
+    if not test_invoke and not req.get("silent"):        # a silent text-chat turn never rings the bell
         root.bell()
     elif test_invoke in ("hold", "show"):
         pass                                      # silent voice tests / screenshots: a real window that never answers

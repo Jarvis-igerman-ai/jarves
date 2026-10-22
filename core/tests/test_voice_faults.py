@@ -781,3 +781,22 @@ async def test_wake_started_session_with_no_speech_closes_quickly_but_a_normal_o
     await asyncio.sleep(1.5)
     assert rec3.ends == []
     await lv3.stop()
+
+
+async def test_provider_error_during_our_own_close_is_debug_not_error_or_degraded(caplog):
+    """V4-VC-6: 'session is closing' answers to a late client event are noise: no ERROR line, no degraded health."""
+    import logging
+    rec, client = Rec(), FakeClient()
+    lv = make_live(rec, client)
+    await lv.start()
+    health_before = list(rec.health)
+    lv._closing = True
+    with caplog.at_level(logging.DEBUG):
+        await lv._on_error({"code": "invalid_request_error", "type": "invalid_request_error",
+                            "message": "The session is closing and cannot accept new client events"})
+        await lv._on_error({"code": "unknown_parameter", "type": "invalid_request_error", "message": "bad param"})
+    assert not any(r.levelno >= logging.ERROR and "closing" in r.getMessage() for r in caplog.records)
+    assert rec.health[len(health_before):] and "unknown_parameter" in rec.health[-1][1]   # a real error still counts
+    assert len(rec.health) == len(health_before) + 1
+    lv._closing = False
+    await lv.stop()

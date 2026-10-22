@@ -71,7 +71,29 @@ def _env(home: Path, scenario: str) -> dict:
     return env
 
 
-def one_run(scenario: str, idle_s: float, port: int) -> dict:
+HEARTBEAT_FILES = {"health.json", "runtime.json"}     # the only files an idle Core may keep rewriting
+QUIET_S = 3.0                                          # settled = this long without any other file change
+SETTLE_MAX_S = 60.0                                    # never wait longer than this beyond the minimum warm-up
+
+
+def settle(home: Path, min_s: float, quiet_s: float = QUIET_S, max_extra_s: float = SETTLE_MAX_S) -> float:
+    """Event-driven warm-up: wait at least `min_s`, then until no file other than the heartbeat files changed for
+    `quiet_s` (start-up work such as prewarm / first scheduler pass / log lines is over), capped at `max_extra_s`.
+    On a loaded runner start-up work simply takes longer; a fixed sleep then counted it as idle churn. Returns seconds."""
+    t0 = time.perf_counter()
+    prev, last_change = snapshot_files(home), time.perf_counter()
+    while True:
+        time.sleep(0.5)
+        cur = snapshot_files(home)
+        now = time.perf_counter()
+        if {f for f, v in cur.items() if prev.get(f) != v and f.rsplit("/", 1)[-1] not in HEARTBEAT_FILES}:
+            last_change = now
+        prev = cur
+        if now - t0 >= min_s and (now - last_change >= quiet_s or now - t0 >= min_s + max_extra_s):
+            return now - t0
+
+
+def one_run(scenario: str, idle_s: float, port: int, warmup_s: float | None = None) -> dict:
     home = Path(tempfile.mkdtemp(prefix="jarves-bench-"))
     (home / "setup_done").write_text("bench", encoding="utf-8")
     (home / "config.toml").write_text(f"[link]\nport = {port}\n" + CONFIGS[scenario], encoding="utf-8")
@@ -105,19 +127,23 @@ def one_run(scenario: str, idle_s: float, port: int) -> dict:
         raise SystemExit(f"Core did not become ready: {err}")
     at_ready = sample(pid)
     # settle: background prewarm / first scheduler pass finish; then measure the steady idle window
-    time.sleep(WARMUP_S)
+    settle(home, WARMUP_S if warmup_s is None else warmup_s)
     a = sample(pid)
-    rss_series, t_idle = [], time.perf_counter()
+    rss_series, thread_series, t_idle = [], [], time.perf_counter()
     files_prev, file_changes = snapshot_files(home), {}
     while time.perf_counter() - t_idle < idle_s:
         time.sleep(1.0)
         s = sample(pid)
         if s:
             rss_series.append(s["rss_mb"])
+            thread_series.append(s["threads"])
         files_prev = diff_files(files_prev, snapshot_files(home), file_changes)
     b = sample(pid)
+    # threads: median over the idle window. A point sample at the end counted short-lived to_thread / executor workers
+    # that happened to be alive at that instant (flaky on loaded runners); the steady idle thread set is what is budgeted.
+    threads = int(statistics.median(thread_series)) if thread_series else b["threads"]
     kids = children(pid)
-    wall = time.perf_counter() - t_idle
+    wall = max(time.perf_counter() - t_idle, 1e-3)
     ts = time.perf_counter()
     subprocess.run([sys.executable, "-m", "jarves.cli", "stop"], env=env, cwd=str(CORE), capture_output=True, timeout=60)
     try:
@@ -131,14 +157,14 @@ def one_run(scenario: str, idle_s: float, port: int) -> dict:
             prewarm = json.loads(line).get("ms")
     return {"scenario": scenario, "spawn_to_ready_s": round(ready_s, 2), "core_start_ms": core_ms,
             "prewarm_ms": prewarm, "rss_at_ready_mb": round(at_ready["rss_mb"], 1),
-            "peak_rss_mb": round(max(b["peak_mb"], peak_start), 1), "steady_rss_mb": round(statistics.median(rss_series), 1),
-            "rss_growth_mb": round(rss_series[-1] - rss_series[0], 1), "private_mb": round(b["private_mb"], 1),
+            "peak_rss_mb": round(max(b["peak_mb"], peak_start), 1), "steady_rss_mb": round(statistics.median(rss_series or [b["rss_mb"]]), 1),
+            "rss_growth_mb": round(rss_series[-1] - rss_series[0], 1) if rss_series else 0.0, "private_mb": round(b["private_mb"], 1),
             "idle_cpu_pct": round(100 * (b["cpu_s"] - a["cpu_s"]) / wall, 2),
             "startup_cpu_s": round(a["cpu_s"], 2),
             "idle_files": ", ".join(f"{f} x{n}" for f, n in sorted(file_changes.items(), key=lambda kv: -kv[1])),
             "idle_disk_write_kb_per_min": round((b["write_mb"] - a["write_mb"]) * 1024 * 60 / wall, 1),
             "idle_disk_read_kb_per_min": round((b["read_mb"] - a["read_mb"]) * 1024 * 60 / wall, 1),
-            "threads": b["threads"], "child_processes": kids, "stop_s": round(stop_s, 2), "exit": p.returncode}
+            "threads": threads, "child_processes": kids, "stop_s": round(stop_s, 2), "exit": p.returncode}
 
 
 STAGES = {"CORE_READY": "ready", "LIVE_STARTED": "live_started", "LIVE_FIRST_AUDIO": "first_audio",

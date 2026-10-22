@@ -134,3 +134,18 @@ def test_dashboard_routes(home, mem):
     assert routes[("POST", r"/api/identity/voice")](ctx, None, {"voice": "realtime:cedar", "approve_cost": True})[0] == 200
     assert routes[("POST", r"/api/identity/wake")](ctx, None, {"model": "C:/Windows/win.ini"})[0] == 400
     assert not any(m == "DELETE" for m, _ in routes)
+
+
+def test_config_wake_word_replaced_by_identity_is_warned_not_silent(home, mem, caplog):
+    """V4-VC-8: a custom voice.wake_word in config.toml is overridden by identity.json; that is now said once."""
+    import logging
+    cfg = Config()
+    cfg.voice.wake_word = str(home / "my_head.npz")
+    with caplog.at_level(logging.WARNING):
+        Identity(home, cfg, mem).apply_to_config()
+    assert cfg.voice.wake_word == "hey_jarvis"
+    assert any("wake model chosen" in r.getMessage() for r in caplog.records)
+    caplog.clear()
+    with caplog.at_level(logging.WARNING):
+        Identity(home, Config(), mem).apply_to_config()          # the default config: nothing to say
+    assert not any("wake model chosen" in r.getMessage() for r in caplog.records)

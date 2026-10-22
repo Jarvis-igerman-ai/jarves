@@ -81,6 +81,8 @@ FRONT_MARKERS = [
     (r"Also delegate \(a word or two", "self", "Self-settings rules", "workspace.FRONT_SELF"),
     (r"Workspace files \(the user can edit them", "workspace", "Workspace files", "workspace.section('front')"),
     (r"Things you know about the user \(from memory\):", "memory", "Remembered facts", "memory.for_prompt"),
+    (r"Preferences the owner confirmed \(follow them", "prefs", "Confirmed preferences",
+     "preferences.prompt_block"),
     (r"Features that are OFF or not available right now:", "features", "Feature on/off note",
      "features.front_note"),
     (r"When the user asks what you can do, or how to set up", "guides", "Capability briefing (guides)",
@@ -90,6 +92,8 @@ FRONT_MARKERS = [
 BACKEND_MARKERS = [
     (r"Facts the user asked you to remember:", "memory", "Remembered facts", "memory.list"),
     (r"Workspace files \(the user can edit them", "workspace", "Workspace files", "workspace.section('backend')"),
+    (r"Preferences the owner confirmed \(follow them", "prefs", "Confirmed preferences",
+     "preferences.prompt_block"),
     (r"## What I can do and how to set it up \(guides\)", "guides", "Capability briefing (guides)",
      "guides.briefing"),
 ]

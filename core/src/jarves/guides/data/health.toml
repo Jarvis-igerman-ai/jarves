@@ -17,7 +17,7 @@ test_he = "הבדיקה רק מוודאת שהרכיב מותקן. את הדוח
 test_en = "The check only sees that the component is installed. The report itself is on the Health page."
 cost_he = "המעקב, הבדיקות הליליות ובדיקת ההפעלה חינם ומקומיים. בדיקת ה-AI רצה כל יומיים רק כשיש משהו חדש, עד 10 סנט לבדיקה ודולר לחודש, והעלות מוצגת לפני ואחרי."
 cost_en = "Monitoring, nightly canaries and the start-up check are free and local. The AI review runs every 2 days only when something is new, at most 10 cents per run and $1 per month, and the cost is shown before and after."
-privacy_he = "הכל נשאר במחשב. לבודק ה-AI נשלחים רק קודי יומן, ספירות, זמנים ומיקומים בקוד, אחרי סינון. הוא לעולם לא רואה סודות, תוכן הודעות, אנשי קשר, טקסט מהיומן או טקסט שיחה."
+privacy_he = "הכול נשאר במחשב. לבודק ה-AI נשלחים רק קודי יומן, ספירות, זמנים ומיקומים בקוד, אחרי סינון. הוא לעולם לא רואה סודות, תוכן הודעות, אנשי קשר, טקסט מהיומן או טקסט שיחה."
 privacy_en = "Everything stays on this computer. The AI reviewer gets only log codes, counts, timings and code locations, after redaction. It never sees secrets, message bodies, contacts, calendar text or conversation text."
 
 [[steps]]
@@ -44,5 +44,5 @@ fix_en = "That is right when nothing is new: it costs nothing. See what it would
 [[problems]]
 he = "תיקון לא בוצע"
 en = "A repair did not happen"
-fix_he = "כל תיקון מחכה לאישור על המסך. אם לא אישרתם, שום דבר לא נעשה. חלק מהתיקונים צריכים את ג'ארביס פועל."
+fix_he = "כל תיקון מחכה לאישור על המסך. אם לא אישרתם, שום דבר לא נעשה. חלק מהתיקונים דורשים שג'ארביס יהיה פועל."
 fix_en = "Every repair waits for approval on the screen. If you did not approve, nothing was done. Some repairs need JARVES running."

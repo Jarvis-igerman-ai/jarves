@@ -535,4 +535,4 @@ def summary(view: dict | None) -> tuple[str, str]:
     return (f"The AI reviewer found {len(items)} item(s), cost ${cost:.3f}. The main one: {top['title']}. "
             f"Suggested: {top['fix'] or 'see the Health page'}. Nothing was changed; you decide on the Health page.",
             f"הבודק מצא {len(items)} נקודות, בעלות של ${cost:.3f}. העיקרית: {top['title']}. "
-            "שום דבר לא שונה; ההחלטה שלכם בעמוד התקינות.")
+            "שום דבר לא שונה; ההחלטה שלך בעמוד התקינות.")

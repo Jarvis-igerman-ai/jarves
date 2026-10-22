@@ -55,9 +55,9 @@ def chat_link(phone: str, text: str) -> str:
 
 
 class DraftArgs(BaseModel):
-    text: str = Field(..., min_length=1, max_length=MAX_TEXT, description="the message the user wants to send")
-    name: str = Field("", max_length=60, description="who it is for, as the user said it")
-    phone: str = Field("", max_length=30, description="the phone number if the user said it (saved for next time)")
+    text: str = Field(..., min_length=1, max_length=MAX_TEXT)
+    name: str = Field("", max_length=60)
+    phone: str = Field("", max_length=30, description='only if the user said it (saved for next time)')
 
 
 class OpenArgs(BaseModel):
@@ -135,12 +135,9 @@ class WhatsAppSkill(Skill):
                               code="WHATSAPP_CHAT_OPENED")
 
         return [
-            Tool("whatsapp_draft", "Prepare a WhatsApp message for someone (text + name or phone). Nothing is opened "
-                 "or sent. Then call whatsapp_open at once: its approval reads the draft back to the user (one yes).",
+            Tool("whatsapp_draft", "Prepare a WhatsApp message (text + name or phone): 'WhatsApp Dana I'm late', 'תשלח לדנה בוואטסאפ'. Nothing opened or sent; then call whatsapp_open at once.",
                  draft, DraftArgs, permission="action"),
-            Tool("whatsapp_open", "Open the WhatsApp chat with the drafted text pre-filled. The system first reads the "
-                 "draft back and asks the user's approval (do not ask yourself). The user presses send; you cannot "
-                 "send WhatsApp messages.", open_, OpenArgs,
+            Tool("whatsapp_open", 'Open the WhatsApp chat with the draft pre-filled. The system reads the draft back and asks approval (do not ask yourself). The user presses send; you never send.', open_, OpenArgs,
                  permission="destructive", impact=open_impact,
                  recipient=lambda a: (self._drafts.get(a.draft_id) or {}).get("name")),
         ]

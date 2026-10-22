@@ -9,7 +9,7 @@ import json
 from contextlib import aclosing
 from pathlib import Path
 
-from . import __version__, logs, store
+from . import __version__, calm, logs, store
 from .brain import AgentBrain, Brain, billing_routes
 from .budget import Budget, BudgetExceeded
 from .config import Config, api_billing_allowed, openai_key_present
@@ -25,6 +25,7 @@ from . import workspace as wsp
 from . import features as feat
 from . import browser as browser_mod            # SW-V3 P1.2: registers the `browser` switch (default OFF)
 from . import approvals as appr
+from . import chat_engine
 from . import chat_service
 from .curator import _SENSITIVE as SENSITIVE_TEXT, Curator, openai_extractor
 from .dashboard import DashboardSkill
@@ -86,6 +87,9 @@ class _FaceApproval:
         self.core = core
 
     def available(self, a) -> bool:
+        turn = appr.CHAT_TURN.get()
+        if turn is not None and turn.get("silent"):
+            return False                                  # a silent text chat turn never lights the face
         return not a.typed_code and getattr(self.core, "link", None) is not None \
             and self.core.link.face_client_id() is not None
 
@@ -313,6 +317,9 @@ class Core:
             self.registry.register(TaskSkill(self.tasks))
         from .operations import attach as ops_attach    # WP-M3: scheduler, reports, notes, files, alerts, autonomy
         self.ops = ops_attach(self)
+        if self.agent is not None:                      # V5: confirmed preferences in every typed/delegated request
+            from . import preferences as prefs_mod
+            prefs_mod.augment_instructions(self.agent, self.ops.prefs, self.features)
         from . import recall                            # SW-V4 G: conversation_recall / _search / _show
         recall.attach(self)
         from . import orchestrator                      # SW-V4 E: coding agents (bridge starts with the switch)
@@ -346,6 +353,8 @@ class Core:
         self.appearance = appearance.attach(self)
         from .skills import generated                        # WP-M2: approved generated Skills (skills/generated.py)
         self.generated_skills = generated.attach(self)
+        from . import self_manage                            # owner request 21 Oct: manage myself (approvals + undo)
+        self.self_manage = self_manage.attach(self)
 
         audio = self._audio
         if audio is None and self.use_real_audio and c.voice.mode != "off":
@@ -360,6 +369,7 @@ class Core:
         self.approvals.channels.append(appr.TrayChannel(self.runtime))   # balloon -> popup / dashboard
         from .skills.helper import register_helper       # V3: shell / install helper, every action approved first
         from . import isolation                          # R-01: OS limits around every approved command
+        isolation.set_restricted_token(c.helper.restricted_token)       # V4 J: opt-in, off by default
         register_helper(self.registry, self.home, self.health, isolation.Limits.from_config(c.helper))
         self._write_tools_md()                          # again: camera + display + profile + helper Skills registered after the first
 
@@ -703,9 +713,9 @@ class Core:
             await camera_wire.on_link(self, t, p, client)
         elif t == "ui.open_dashboard":               # WP-H: the face's Dashboard button
             try:
-                url = await self.open_dashboard()
+                url = await self.open_dashboard(str(p.get("page") or ""), open_browser=p.get("open") is not False)
                 await self.link.reply(ws, "dashboard.opened", {"url": url.split("?", 1)[0],
-                                                               "browser": self.open_url is not None})
+                                                               "browser": self.open_url is not None and p.get("open") is not False})
             except Exception as e:
                 logs.warn("core", "DASHBOARD_FAILED", "dashboard could not start", error_type=type(e).__name__)
                 await self.link.reply(ws, "error", {"code": "DASHBOARD_FAILED", "message": "dashboard did not start",
@@ -727,14 +737,22 @@ class Core:
         from . import mobile
         loop = asyncio.get_running_loop()
         mob_on = self.features.enabled("mobile_access")        # V5: default OFF; the dashboard stays on 127.0.0.1
-        cert, key = mobile.tls_paths(self.home)
-        tls = (cert, key) if cert.is_file() and key.is_file() else None
+        from . import tailnet as tn
+
+        if getattr(self, "web_chat", None) is None:
+            self.web_chat = chat_engine.WebChat(self, loop)       # the shared web conversation (Chat page, phones)
 
         def make(on: bool):
+            tail, tls, src = {}, None, "none"
+            if on:                              # detection only: JARVES never installs or logs in to Tailscale
+                tail = tn.detect()
+                tls, src = tn.choose_tls(self.home, tail)
             d = Dashboard(self.home, self.cfg, workspace=self.workspace, memory=self.memory,
-                          settings=self.settings, mobile_on=on, tls=tls if on else None,
-                          mobile_bridge=mobile.core_bridge(self, loop) if on else None)
+                          settings=self.settings, mobile_on=on, tls=tls, tailnet=tail, tls_source=src,
+                          bind_tailnet_only=mobile.MobileAccess(self.home).settings()["bind_tailnet_only"] if on else False,
+                          mobile_bridge=mobile.core_bridge(self, loop) if on else None, chat=self.web_chat)
             d.mobile.gate = lambda: self.features.enabled("mobile_access")
+            d.mobile.quiet = lambda ts: calm.quiet_hours_now(self.ops.db, ts)
             return d.start()
         try:
             self._dashboard = await asyncio.to_thread(make, mob_on)
@@ -759,7 +777,7 @@ class Core:
         except Exception as e:                                  # never blocks the Core
             logs.warn("core", "MOBILE_START_FAILED", "phone access could not start", error_type=type(e).__name__)
 
-    async def open_dashboard(self, page: str = "") -> str:
+    async def open_dashboard(self, page: str = "", open_browser: bool = True) -> str:
         """Start the dashboard inside the Core (once; it shares the Core's workspace, memory and settings) and open
         it in the browser on this computer, on `page` (e.g. "#/guide/music"; kept across the token redirect).
         Returns the full URL with the private access key (without the page)."""
@@ -767,7 +785,7 @@ class Core:
         url = self._dashboard.url
         logs.info("core", "DASHBOARD_OPENED", "dashboard opened", port=self._dashboard.port,
                   browser=self.open_url is not None)
-        if self.open_url is not None:
+        if self.open_url is not None and open_browser:
             page = page if page.startswith("#/") and len(page) < 80 else ""
             await asyncio.to_thread(self.open_url, url + page)
         return url
@@ -879,20 +897,33 @@ class Core:
         self._owner_answer(text, "voice")           # nothing waits here (talk_up routes those): a new turn
         await self.handle_utterance(text, typed=False)
 
-    async def respond_remote(self, text: str):
+    async def respond_remote(self, text: str, *, on_delta=None, fresh: bool = False):
         """A typed turn from a paired phone (V5-G): the SAME Brain, memory and conversation context as a Windows
         turn, logged as a typed exchange so it appears in the desktop history and joins the open typed conversation
         (TYPED_GAP_S). The answer goes back to the phone only: no face update, no speaker, and never the spoken-approval
         path."""
         logs.new_cid()
         t0 = time.monotonic()
-        reply = await self.brain.respond(text, spoken=False)
+        reply = await (self.brain.respond(text, spoken=False, on_delta=on_delta) if on_delta is not None
+                       else self.brain.respond(text, spoken=False))
         logs.info("core", "REPLY", "reply sent", source=reply.source, tool=reply.tool, ok=reply.ok, result_code=reply.code,
                   ms=round((time.monotonic() - t0) * 1000), text=reply.text, typed=True,
                   utterance=f"<{len(text)} chars>" if SENSITIVE_TEXT.search(text) else text)
         self.curator.observe("user", text)
         self.curator.observe("assistant", reply.text, idle=self.live is None)
         return reply
+
+    def _journal_turn(self, device: str, text: str, answer: str) -> None:
+        """The desktop turn joins the shared conversation (the phone reads it); sensitive text is never stored."""
+        try:
+            ops = getattr(self, "ops", None)
+            if ops is None or SENSITIVE_TEXT.search(text):
+                return
+            ops.cont.add_turn(device, "user", text)
+            ops.cont.add_turn(device, "assistant", answer)
+            ops.cont.beat(device, "desktop", used=True)
+        except Exception:
+            logs.warn("continuity", "JOURNAL_FAILED", "the shared conversation could not be written")
 
     async def handle_utterance(self, text: str, typed: bool) -> None:
         if typed:
@@ -903,6 +934,7 @@ class Core:
         logs.info("core", "REPLY", "reply sent", source=reply.source, tool=reply.tool, ok=reply.ok, result_code=reply.code,
                   ms=round((time.monotonic() - t0) * 1000), text=reply.text, typed=typed,  # WP-H history: what was asked
                   utterance=f"<{len(text)} chars>" if SENSITIVE_TEXT.search(text) else text)   # codes never logged
+        self._journal_turn("desktop", text, reply.text)
         self.curator.observe("user", text)
         self.curator.observe("assistant", reply.text, idle=self.live is None)   # typed chat: curate when quiet
         await self.link.send_face("assistant.text", {"text": reply.text, "source": reply.source, "ok": reply.ok,
@@ -1105,6 +1137,11 @@ class Core:
                                  idle_disconnect_s=v.idle_disconnect_s, **common, **extra)
         live_ref[0] = live
         wsp.attach_live(live, self.workspace, self.memory)   # persona files + known facts in the voice instructions
+        if getattr(self, "ops", None) is not None:            # V5: the owner's confirmed preferences (small budget)
+            from . import preferences as prefs_mod
+            prefs_mod.attach_live(live, self.ops.prefs, self.features)
+            from . import proactive as proactive_mod         # V5: at most ONE offer, only inside this conversation
+            proactive_mod.attach_live(live, self.ops.proactive, self.features)
         feat.attach_live(live, self.features)                 # what is off / unavailable, so he says so truthfully
         from . import recall                                  # SW-V4 G: "what did I say..." -> conversation_recall
         recall.attach_live(live, self.features)
