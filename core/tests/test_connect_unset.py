@@ -276,8 +276,10 @@ def test_plain_run_offers_to_reconnect_failing_ones_before_the_unset_ones(home, 
 def test_yes_reports_failures_but_never_reconnects_unattended(home, monkeypatch):
     monkeypatch.setenv("OPENAI_API_KEY", "sk-test")
     reran = []
+    from types import SimpleNamespace
     conn, out = make(home, [], yes=True, check_transports={"openai": mock(401)},
-                     optional_runners={"openai": lambda: reran.append(1) or 0})
+                     optional_runners={"openai": lambda: reran.append(1) or 0},
+                     google_factory=lambda *a, **k: SimpleNamespace(run=lambda: 0))   # the real wizard waits for a download
     conn.run()
     assert reran == [] and any("broken" in line for line in out)
 
