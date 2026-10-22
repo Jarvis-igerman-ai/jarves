@@ -9,7 +9,7 @@ JARVES is a voice assistant for your Windows PC with a face on the screen. V4 ad
 
 - **[User guide](docs/USER_GUIDE.md)** ([עברית](docs/USER_GUIDE.he.md)): install, voice, dashboard, each feature, privacy, update and rollback, troubleshooting.
 - [Release notes 4.0](docs/RELEASE_NOTES_4.0.md) and [CHANGELOG](CHANGELOG.md): what changed, including behaviour and exit-code changes.
-- [Documentation index](docs/README.md) and [core/README](core/README.md) (CLI reference). Quick start: type `jarvis`.
+- [Documentation map (every doc, per version)](docs/DOC_MAP.md), [documentation index](docs/README.md) and [core/README](core/README.md) (CLI reference). Quick start: type `jarvis`.
 - Hebrew short README: [README_HE](README_HE.md).
 
 A cute, friendly, premium-looking stationary home companion. **Simulation first, practical DIY build later.**

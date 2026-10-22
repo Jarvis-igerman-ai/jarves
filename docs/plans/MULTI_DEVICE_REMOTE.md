@@ -1,3 +1,5 @@
+> **Update 21 Oct 2026:** the Tailscale part is decided (phone over home Wi-Fi and Tailscale, off by default, detection only; see [PRIORITIES](PRIORITIES.md) and [ROADMAP](../ROADMAP.md) V5). Satellites, the Pi and multi-device stay design only. Index: [DOC_MAP](../DOC_MAP.md).
+
 # JARVES — Multi-device satellites and remote access over a private VPN (design)
 
 **Status:** design only, 19-20 Oct 2026, Issue #17 follow-up. No code, no install on any phone until the owner approves.

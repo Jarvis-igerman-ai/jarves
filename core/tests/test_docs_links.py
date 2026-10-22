@@ -70,3 +70,50 @@ def test_no_personal_data_or_secrets_in_the_new_docs():
         assert not secret.search(text), rel
         assert "gmail.com" not in text and "97254" not in text, rel
         assert "igalgerman/JARVIS" not in text, rel
+
+
+def _resolved_links(path: Path):
+    out = set()
+    for target in _links(path):
+        if re.match(r"[a-z][a-z0-9+.-]*:", target, re.I) or target.startswith("#"):
+            continue
+        out.add((path.parent / target.split("#", 1)[0]).resolve())
+    return out
+
+
+def test_every_doc_is_listed_in_doc_map():
+    """docs/DOC_MAP.md is the single index: every Markdown file under docs/ must be linked from it."""
+    doc_map = ROOT / "docs" / "DOC_MAP.md"
+    listed = _resolved_links(doc_map)
+    missing = [str(p.relative_to(ROOT)) for p in sorted((ROOT / "docs").rglob("*.md"))
+               if p.resolve() != doc_map.resolve() and p.resolve() not in listed]
+    assert not missing, f"add these to docs/DOC_MAP.md: {missing}"
+
+
+def test_doc_map_is_the_entry_point():
+    for rel in ("docs/README.md", "docs/CONTEXT_MAP.md", "CLAUDE.md"):
+        assert "DOC_MAP.md" in (ROOT / rel).read_text(encoding="utf-8"), rel
+    text = (ROOT / "docs" / "DOC_MAP.md").read_text(encoding="utf-8")
+    for needle in ("Testing and manual testing", "V4", "V5", "V6", "V7"):
+        assert needle in text, needle
+
+
+def test_all_relative_links_under_docs_resolve():
+    """Every relative link in every Markdown file under docs/ (not the evidence reports, which quote old paths)."""
+    broken = []
+    for path in sorted((ROOT / "docs").rglob("*.md")):
+        if "reviews" in path.relative_to(ROOT / "docs").parts:
+            continue
+        for target in _links(path):
+            if re.match(r"[a-z][a-z0-9+.-]*:", target, re.I) or target.startswith("#"):
+                continue
+            file_part = target.split("#", 1)[0]
+            if file_part and not (path.parent / file_part).resolve().exists():
+                broken.append(f"{path.relative_to(ROOT)} -> {target}")
+    assert not broken, broken
+
+
+def test_historical_docs_are_marked():
+    for rel in ("docs/plans/SW_NEXT_STEPS.md", "docs/plans/FULL_TEST_PLAN.md", "docs/SW_V1_WORK_PACKAGE.md",
+                "docs/JARVES_SW_V2_IMPLEMENTATION_SPEC.md", "docs/JARVES_SW_V3_WORK_PACKAGE.md", "docs/archive/ROADMAP.md"):
+        assert "Historical, superseded by" in (ROOT / rel).read_text(encoding="utf-8")[:600], rel

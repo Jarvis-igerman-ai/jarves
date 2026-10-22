@@ -1,3 +1,5 @@
+> **Status (22 Oct 2026):** phone access (this package) is merged (PR #25). The other V5 pillars and the owner decisions of 21 Oct are tracked in [ROADMAP](ROADMAP.md) (status block) and [PRIORITIES](plans/PRIORITIES.md). Real Android phone acceptance is open: [SWV5_ACCEPTANCE](reviews/SWV5_ACCEPTANCE.md). Index: [DOC_MAP](DOC_MAP.md).
+
 # JARVES — SW-V5 Work Package: PC-hosted mobile access
 
 > Branch `v5/mobile-access`, base `v4/integrated-b-c-d-g-m-r01`. Planning authority: [ROADMAP](ROADMAP.md) (V5, vision stage 2), [V4 package](JARVES_SW_V4_WORK_PACKAGE.md) (rules, privacy package B, test pyramid), [PRIORITIES](plans/PRIORITIES.md). Only `docs/NOW.md` authorizes work on `main`; this is a **draft** for owner review, not merged.

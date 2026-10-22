@@ -1,3 +1,5 @@
+> **Historical, superseded by [CHANGELOG](../CHANGELOG.md) and the [V3 integration report](reviews/SWV3_INTEGRATION_REPORT.md) (V3 released).** Kept as evidence and owner decision record; do not use it as the current plan. Index: [DOC_MAP](DOC_MAP.md).
+
 # JARVES — SW-V3 Work Package (prioritized)
 
 **Owner approval:** 19 October 2026. **Status:** approved scope for the implementing Claude Code lead to plan, research, implement, test, and integrate.  
@@ -19,7 +21,7 @@
 ### P0 — MUST COMPLETE FIRST: real quality, reliability, usability, and verified integration
 
 **P0.1 — Review actual prior conversations and fix bugs (NEW, highest-priority task).**
-- Inspect existing user conversations / logs / diagnostic records **on the authorized local JARVES installation**, and the documented [19 Oct conversation review](reviews/CONVERSATION_LOG_REVIEW_19OCT.md); inventory the actual sessions since then. Respect privacy settings and never commit transcripts/secrets to Git.
+- Inspect existing user conversations / logs / diagnostic records **on the authorized local JARVES installation**, and the documented 19 Oct conversation review (report not in the public repo); inventory the actual sessions since then. Respect privacy settings and never commit transcripts/secrets to Git.
 - Inspect all recorded failures **and recurring bad behavior**, including false or delayed replies, transcript/microphone/audio issues, incorrect tool actions, music playback and volume, stuck web lookups, failed/slow Skills, wasted tokens, incorrect status, Godot disconnects, false diagnostics and forgotten/repeated context. Compare past issue fixes before filing duplicates.
 - Build a severity-ranked table: observed session/time, user impact, root cause/evidence, owner, proposed fix, reproducibility, regression test and status. Differentiate **reproduced bug**, **likely bug** and **unverified suspicion**.
 - Fix critical/high-impact defects before extending agent autonomy or browser control. Add tests reproducing failures and verify fixes with the actual running Core. Track unreproducible issues honestly. Do not just summarize logs; **fix validated bugs**.

@@ -1,3 +1,5 @@
+> **Historical, superseded by [../ROADMAP.md](../ROADMAP.md).** Index: [DOC_MAP](../DOC_MAP.md).
+
 # Roadmap — ARCHIVE, never auto-execute
 
 **Stage 1 — Windows digital twin. One task at a time:**
