@@ -87,7 +87,8 @@ def collect(app: Path, home: Path, *, read_run: Callable[[], dict] = _real_run, 
         "Start Menu" / "Programs" / "JARVES"
     app, home = Path(app), Path(home)
     return {"run": read_run(), "path": read_path(), "tasks": list_tasks(), "menu": menu.is_dir(),
-            "app": app.is_dir() and any(app.iterdir()), "uninstaller": (app / "unins000.exe").is_file(),
+            "app": app.is_dir() and any(app.iterdir()),
+            "app_children": sorted(p.name for p in app.iterdir()) if app.is_dir() else [], "uninstaller": (app / "unins000.exe").is_file(),
             "data": tree_hashes(home), "data_dir": home.is_dir()}
 
 
@@ -115,9 +116,9 @@ def installed_findings(before: dict, after: dict, path_entry: str | None = None)
         bad.append(f"autostart is ON after a default install: Run value(s) {ours}")
     if after["run"] != before["run"]:
         bad.append("the Run key changed during a default install")
-    want = _path_parts(before["path"]) + ([path_entry] if path_entry else [])
+    want = ([path_entry] + [p for p in _path_parts(before["path"]) if p.rstrip("\\").lower() != path_entry.rstrip("\\").lower()]) if path_entry else _path_parts(before["path"])
     if [x.lower() for x in _path_parts(after["path"])] != [x.lower() for x in want]:
-        bad.append("the user PATH is not " + ("the old PATH plus the program folder" if path_entry else
+        bad.append("the user PATH is not " + ("the program folder first followed by the old PATH" if path_entry else
                                               "unchanged although the PATH task was not asked for"))
     new_tasks = [t for t in after["tasks"] if t not in before["tasks"] or _ours(t)]
     if new_tasks:
@@ -129,7 +130,7 @@ def uninstalled_findings(before: dict, after: dict, *, keep_data: bool, data_bef
     """After the uninstall. `before` = the state before the install, `data_before` = the data hashes just before the uninstall."""
     bad = []
     if after["app"]:
-        bad.append("program files are still there after the uninstall")
+        bad.append("program files are still there after the uninstall: " + ", ".join(after.get("app_children", [])))
     if after["menu"]:
         bad.append("the Start-menu entry is still there")
     left_run = sorted(k for k in after["run"] if _ours(k))
@@ -148,7 +149,7 @@ def uninstalled_findings(before: dict, after: dict, *, keep_data: bool, data_bef
             changed = sorted(set(want) ^ set(after["data"]) | {k for k in want if k in after["data"] and want[k] != after["data"][k]})
             bad.append(f"user data was not kept byte-for-byte: {changed[:5]}")
     elif after["data_dir"]:
-        bad.append("the data folder is still there although the purge was asked for")
+        bad.append("the data folder is still there although the purge was asked for: " + ", ".join(list(after.get("data", {}))[:8]))
     return bad
 
 

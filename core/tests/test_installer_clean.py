@@ -58,8 +58,8 @@ def test_autostart_on_after_a_default_install_is_caught():
 def test_path_must_be_unchanged_or_gain_exactly_the_program_folder():
     before = machine()
     app = "C:\\Users\\x\\JARVES"
-    assert audit.installed_findings(before, installed_machine(before, path=before["path"] + ";" + app), app) == []
-    assert audit.installed_findings(before, installed_machine(before, path=before["path"] + ";" + app.upper()), app) == []
+    assert audit.installed_findings(before, installed_machine(before, path=app + ";" + before["path"]), app) == []
+    assert audit.installed_findings(before, installed_machine(before, path=app.upper() + ";" + before["path"]), app) == []
     assert audit.installed_findings(before, installed_machine(before, path=before["path"] + ";" + app))   # not asked for
     assert audit.installed_findings(before, installed_machine(before, path=before["path"] + ";C:\\Else"), app)
     assert audit.installed_findings(before, installed_machine(before, path="C:\\Tools"), app)               # entries lost
@@ -233,10 +233,12 @@ def test_uninstall_without_the_purge_switch_never_deletes_the_data_folder():
 
 def test_silent_updates_stop_the_core_first_and_restart_it_only_when_asked():
     iss = (PKG / "windows" / "jarves.iss").read_text(encoding="utf-8-sig")
-    assert '" stop' in iss.split("function PrepareToInstall", 1)[1].split("end;", 1)[0]
+    prepare = iss.split("function PrepareToInstall", 1)[1].split("procedure RestoreProgramPart", 1)[0]
+    assert '" stop' in prepare
+    assert prepare.index('" stop') < prepare.index("ExtractTemporaryFile")
     assert "CloseApplications=yes" in iss
     assert "Check: RestartRequested" in iss and "/RESTARTJARVES=1" in iss
-    assert "skipifsilent" in iss.split("{cm:RunSetup}", 1)[1].split("\n", 1)[0]       # no wizard in a silent update
+    assert "if WizardSilent() then exit;" in iss.split("procedure OpenSetup", 1)[1].split("procedure InitializeWizard", 1)[0]
     assert updates.installer_args("x.exe", silent=True, restart=True)[1:] == [
         "/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART", "/CLOSEAPPLICATIONS", "/RESTARTJARVES=1"]
 

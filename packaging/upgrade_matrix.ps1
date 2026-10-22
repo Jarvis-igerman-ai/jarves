@@ -13,6 +13,7 @@ param(
     [Parameter(Mandatory)] [string]$Candidate,
     [string]$Version = "",
     [string]$Cache = (Join-Path ([IO.Path]::GetTempPath()) "jarves-upgrade-fixtures"),
+    [string]$MetricsDir = "",
     [switch]$SkipDoctor
 )
 $ErrorActionPreference = "Stop"
@@ -32,7 +33,11 @@ foreach ($f in $fx) {
         if ($h -ne $f.sha256) { Remove-Item $exe; throw "SHA256 mismatch for fixture $($f.version): $h" }
     }
     Write-Host "==> upgrade matrix: $($f.series) ($($f.version)) -> $Version"
-    $extra = @(); if ($SkipDoctor) { $extra += "-SkipDoctor" }
+    $extra = @{}; if ($SkipDoctor) { $extra.SkipDoctor = $true }
+    if ($MetricsDir) {
+        New-Item -ItemType Directory -Force $MetricsDir | Out-Null
+        $extra.MetricsOut = Join-Path $MetricsDir "upgrade-$($f.version)-metrics.json"
+    }
     & (Join-Path $PSScriptRoot "smoke_windows.ps1") -Installer $Candidate -Version $Version -UpgradeFrom $exe -Rollback @extra
     if ($LASTEXITCODE -ne 0) { $failed++; Write-Host "UPGRADE MATRIX: $($f.version) FAILED" }
 }

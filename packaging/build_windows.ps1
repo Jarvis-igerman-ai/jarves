@@ -22,7 +22,12 @@ param(
     [string]$Out = "",
     [string]$GoogleOAuthClientFile = "",  # explicitly supplied app-owned Desktop client; never private user state
     [switch]$SkipFace,
-    [switch]$SkipInstaller
+    [switch]$SkipInstaller,
+    [switch]$AlsoSmokeInstaller,      # compile a separate non-publishable profile from this same bundle
+    [switch]$SmokeBuild,             # faster compression; NEVER a publishable installer
+    [switch]$SerialBundle,           # reproducible baseline comparison / low-memory local host
+    [string]$BridgeReadyFile = "", # CI worker waits for the separately prepared bridge before payload verification
+    [ValidateSet("all", "face", "compiler")] [string]$Phase = "all"
 )
 $ErrorActionPreference = "Stop"
 $ProgressPreference = "SilentlyContinue"
@@ -47,6 +52,15 @@ $Pins = @{
 }
 
 function Step($m) { Write-Host "==> $m" }
+$StageTimes = [ordered]@{}
+$StageName = ""
+$StageClock = [Diagnostics.Stopwatch]::StartNew()
+function Build-Stage([string]$Name) {
+    if ($script:StageName) { $script:StageTimes[$script:StageName] = [math]::Round($script:StageClock.Elapsed.TotalSeconds, 3) }
+    $script:StageName = $Name
+    $script:StageClock.Restart()
+    if ($Name) { Step "stage: $Name" }
+}
 function Run([string]$exe, [string[]]$argv) {
     & $exe @argv
     if ($LASTEXITCODE -ne 0) { throw "$exe failed with exit code $LASTEXITCODE" }
@@ -66,6 +80,18 @@ function Get-Pinned([string]$name) {
     return $f
 }
 
+function Get-Compiler() {
+    $iscc = Join-Path $Cache "inno-7.1.0\ISCC.exe"
+    if (-not (Test-Path $iscc)) {
+        Step "Inno Setup 7.1.0 (portable, current user)"
+        $p = Start-Process (Get-Pinned "inno") -WindowStyle Hidden -Wait -PassThru -ArgumentList @(
+            "/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART", "/SP-", "/CURRENTUSER", "/PORTABLE=1",
+            "/DIR=`"$(Join-Path $Cache 'inno-7.1.0')`"")
+        if ($p.ExitCode -ne 0 -or -not (Test-Path $iscc)) { throw "Inno Setup install failed ($($p.ExitCode))" }
+    }
+    return $iscc
+}
+
 # ---------------------------------------------------------------- identity
 $pyproject = Get-Content (Join-Path $Repo "core\pyproject.toml") -Raw
 $base = [regex]::Match($pyproject, '(?m)^version\s*=\s*"([^"]+)"').Groups[1].Value
@@ -77,27 +103,60 @@ $Built = (Get-Date).ToUniversalTime().ToString("yyyy-MM-ddTHH:mm:ssZ")
 Step "JARVES $Version ($Channel, $Commit)"
 
 $Stage = Join-Path $Out "stage"
-if (Test-Path $Out) { Remove-Item -Recurse -Force $Out }
-New-Item -ItemType Directory -Force $Stage | Out-Null
+if ($SmokeBuild -and $Channel -eq "main") { throw "Smoke builds cannot be release builds" }
+if ($Phase -eq "all") {
+    # Only disposable output below this checkout or the system temp directory may be replaced.
+    $allowed = @($Repo, [IO.Path]::GetTempPath()) | ForEach-Object { [IO.Path]::GetFullPath($_).TrimEnd('\') + '\' }
+    if (-not ($allowed | Where-Object { $Out.StartsWith($_, [StringComparison]::OrdinalIgnoreCase) }) -or
+        $Out.TrimEnd('\') -eq $Repo.TrimEnd('\') -or $Out.TrimEnd('\') -eq ([IO.Path]::GetTempPath()).TrimEnd('\')) {
+        throw "Unsafe build output directory: $Out"
+    }
+    if (Test-Path -LiteralPath $Out) { Remove-Item -LiteralPath $Out -Recurse -Force }
+    New-Item -ItemType Directory -Force $Stage | Out-Null
+}
+if ($Phase -eq "compiler") {
+    Build-Stage "compiler_prepare"
+    $null = Get-Compiler
+    Build-Stage ""
+    $StageTimes | ConvertTo-Json | Set-Content -Encoding utf8NoBOM (Join-Path $Out "compiler-stages.json")
+    exit 0
+}
+$CompilerJob = $null
+if ($Phase -eq "all" -and -not $SkipInstaller -and -not (Test-Path (Join-Path $Cache "inno-7.1.0\ISCC.exe"))) {
+    $compilerOptions = @{ Phase = "compiler"; Version = $Version; Channel = $Channel; Commit = $Commit;
+                          Tree = $Tree; Cache = $Cache; Out = $Out }
+    $CompilerJob = Start-Job -ScriptBlock { param($script, $options); & $script @options } -ArgumentList $PSCommandPath, $compilerOptions
+}
+$FaceJob = $null
+if ($Phase -eq "all" -and -not $SkipFace -and -not $SerialBundle) {
+    $faceOptions = @{ Phase = "face"; Version = $Version; Channel = $Channel; Commit = $Commit; Tree = $Tree;
+                      Cache = $Cache; Out = $Out; SkipInstaller = $true }
+    $FaceJob = Start-Job -ScriptBlock { param($script, $options); & $script @options } -ArgumentList $PSCommandPath, $faceOptions
+    $SkipFace = $true   # the isolated child writes only stage/face; Python writes stage/python
+}
 
 # ---------------------------------------------------------------- Python + locked dependencies
+if ($Phase -eq "all") {
+Build-Stage "python_extract"
 Step "python-build-standalone"
 Run "tar.exe" @("-xzf", (Get-Pinned "python"), "-C", $Stage)          # -> $Stage\python\python.exe
 $Py = Join-Path $Stage "python\python.exe"
 $req = Join-Path $Out "requirements.txt"
 Push-Location (Join-Path $Repo "core")
 try {
+    Build-Stage "python_dependencies"
     Step "locked wheels (uv.lock, extras voice + camera + tray + browser, no dev)"
     Run "uv" @("export", "--frozen", "--no-dev", "--extra", "voice", "--extra", "camera", "--extra", "tray", "--extra", "browser", "--no-emit-project",
                "--format", "requirements-txt", "-o", $req)
-    Run "uv" @("pip", "install", "--python", $Py, "--break-system-packages", "--require-hashes", "--compile-bytecode",
+    Run "uv" @("pip", "install", "--python", $Py, "--break-system-packages", "--require-hashes",
                "-r", $req)
+    Build-Stage "application_wheel"
     Step "log-code index for root-cause hints (SW-V4 O: git blame at build time, never at runtime)"
     Run "uv" @("run", "--frozen", "--no-dev", "python", "tools/build_log_index.py")
     Step "jarves wheel"
     Run "uv" @("build", "--wheel", "--out-dir", (Join-Path $Out "wheel"))
     $whl = Get-ChildItem (Join-Path $Out "wheel") -Filter "jarves-*.whl" | Select-Object -First 1
-    Run "uv" @("pip", "install", "--python", $Py, "--break-system-packages", "--no-deps", "--compile-bytecode", $whl.FullName)
+    Run "uv" @("pip", "install", "--python", $Py, "--break-system-packages", "--no-deps", $whl.FullName)
 } finally { Pop-Location }
 # SW-V4 P (installer size): the stdlib's own test suite, IDLE, the turtle demos and ensurepip are never used by JARVES
 # (the helper Skill uses the PC's Python, not this one); tkinter and its tcl/tk stay (the approval popup).
@@ -106,14 +165,14 @@ foreach ($d in "Lib\test", "Lib\idlelib", "Lib\turtledemo", "Lib\ensurepip", "Li
     $full = Join-Path $Stage ("python\" + $d)
     if (Test-Path $full) { Remove-Item -Recurse -Force $full }
 }
-$info = [ordered]@{ version = $Version; commit = $Commit; built = $Built; channel = $Channel; platform = "windows-x86_64"
+$info = [ordered]@{ build_profile = $(if ($SmokeBuild) { "ci-smoke" } else { "release" }); version = $Version; commit = $Commit; built = $Built; channel = $(if ($SmokeBuild) { "ci-smoke" } else { $Channel }); platform = "windows-x86_64"
                     python = "3.12.15+20261013"; godot = "4.7.2-stable" }
 if (-not $Tree) { $Tree = (& git -C $Repo rev-parse "HEAD^{tree}" 2>$null) }
 if ($Tree) { $info["tree"] = "$Tree".Trim() }
 # WP-O: default update source baked into the build (repo variable JARVES_UPDATE_BASE_URL, public, not a secret);
 # a PC's config.toml [update] base_url still wins. Empty = GitHub releases.
 if ($env:JARVES_UPDATE_BASE_URL) { $info["update_base_url"] = $env:JARVES_UPDATE_BASE_URL.Trim().TrimEnd("/") }
-$info | ConvertTo-Json | Set-Content -Encoding utf8NoBOM (Join-Path $Stage "python\Lib\site-packages\jarves\_build_info.json")
+$info | ConvertTo-Json -Depth 8 | Set-Content -Encoding utf8NoBOM (Join-Path $Stage "python\Lib\site-packages\jarves\_build_info.json")
 if ($GoogleOAuthClientFile) {
     Step "app-owned Google Desktop OAuth client (public-client configuration, no user tokens)"
     $googleConfig = Get-Content -LiteralPath $GoogleOAuthClientFile -Raw | ConvertFrom-Json
@@ -126,12 +185,14 @@ if ($GoogleOAuthClientFile) {
     # Desktop apps are public clients (Google native-app OAuth docs). Ship only these registration values;
     # never copy arbitrary JSON, tokens, accounts or the developer's private state directory into a release.
     @{ installed = @{ client_id = $googleClient.client_id; client_secret = [string]$googleClient.client_secret } } |
-        ConvertTo-Json | Set-Content -Encoding utf8NoBOM (Join-Path $Stage "python\Lib\site-packages\jarves\_google_app_client.json")
+        ConvertTo-Json -Depth 8 | Set-Content -Encoding utf8NoBOM (Join-Path $Stage "python\Lib\site-packages\jarves\_google_app_client.json")
 }
-Run $Py @("-I", "-c", "import jarves.cli, jarves.updates; print(jarves.updates.version_line())")
+Run $Py @("-I", "-B", "-c", "import jarves.cli, jarves.updates; print(jarves.updates.version_line())")
+}
 
 # ---------------------------------------------------------------- Godot face (headless export, official template)
 if (-not $SkipFace) {
+    Build-Stage "godot_tools"
     $gdir = Join-Path $Cache "godot-4.7.2"
     $editor = Join-Path $gdir "Godot_v4.7.2-stable_win64_console.exe"
     if (-not (Test-Path $editor)) {
@@ -162,6 +223,7 @@ if (-not $SkipFace) {
     $faceDir = Join-Path $Stage "face"
     New-Item -ItemType Directory -Force $faceDir | Out-Null
     try {
+        Build-Stage "godot_export"
         Step "Godot import + export"
         & $editor --headless --path $godotProj --import 2>&1 | Out-Host
         & $editor --headless --path $godotProj --export-release "Windows Desktop" (Join-Path $faceDir "JARVES Face.exe") 2>&1 | Out-Host
@@ -177,6 +239,41 @@ if (-not $SkipFace) {
     "[application]`n`nrun/main_scene=`"res://loading.tscn`"`n" | Set-Content -Encoding utf8NoBOM (Join-Path $faceDir "override.cfg")
     New-Item -ItemType Directory -Force (Join-Path $faceDir "assets") | Out-Null
     Copy-Item (Join-Path $godotProj "assets\JARVIS.glb") (Join-Path $faceDir "assets\JARVIS.glb")
+}
+
+if ($Phase -eq "face") {
+    Build-Stage ""
+    $StageTimes | ConvertTo-Json -Depth 8 | Set-Content -Encoding utf8NoBOM (Join-Path $Out "face-stages.json")
+    exit 0
+}
+if ($FaceJob) {
+    Build-Stage "await_parallel_face"
+    try {
+        $null = Wait-Job $FaceJob
+        Receive-Job $FaceJob -ErrorAction Stop
+        if ($FaceJob.State -ne "Completed") { throw "Godot bundle failed" }
+    } finally { Remove-Job $FaceJob -Force }
+    $faceTimes = Get-Content (Join-Path $Out "face-stages.json") -Raw | ConvertFrom-Json -AsHashtable
+    foreach ($key in $faceTimes.Keys) { $StageTimes[$key] = $faceTimes[$key] }
+}
+
+if ($CompilerJob) {
+    Build-Stage "await_compiler"
+    try {
+        $null = Wait-Job $CompilerJob
+        Receive-Job $CompilerJob -ErrorAction Stop
+        if ($CompilerJob.State -ne "Completed") { throw "Compiler preparation failed" }
+    } finally { Remove-Job $CompilerJob -Force }
+    $compilerTimes = Get-Content (Join-Path $Out "compiler-stages.json") -Raw | ConvertFrom-Json -AsHashtable
+    foreach ($key in $compilerTimes.Keys) { $StageTimes[$key] = $compilerTimes[$key] }
+}
+if ($BridgeReadyFile) {
+    Build-Stage "await_bridge"
+    $deadline = [DateTime]::UtcNow.AddMinutes(15)
+    while (-not (Test-Path -LiteralPath $BridgeReadyFile)) {
+        if ([DateTime]::UtcNow -gt $deadline) { throw "Bridge preparation did not complete" }
+        Start-Sleep -Milliseconds 500
+    }
 }
 
 # ---------------------------------------------------------------- WhatsApp bridge (Go), only when the repo pins one
@@ -200,6 +297,8 @@ if (Test-Path $bridgePin) {
 
 # ---------------------------------------------------------------- launcher, notices, payload check
 Copy-Item (Join-Path $PSScriptRoot "windows\jarvis.cmd") $Stage
+Copy-Item (Join-Path $PSScriptRoot "installer_state.py") $Stage
+Copy-Item (Join-Path $PSScriptRoot "rollback_windows.ps1") $Stage
 Copy-Item (Join-Path $PSScriptRoot "windows\THIRD_PARTY_NOTICES.txt") $Stage
 # SW-V4 F: the WhatsApp bridge binary (built by scripts/build_whatsapp_bridge.ps1) ships next to the Core when it was
 # built; payload_check.py verifies its .sha256. Its state (tokens, store) lives in the user's data dir, never here.
@@ -211,22 +310,27 @@ if (-not (Test-Path $bridgePin) -and (Test-Path $bridgeExe) -and (Test-Path "$br
 } elseif (-not (Test-Path $bridgePin)) {
     Step "WhatsApp bridge not built (run scripts/build_whatsapp_bridge.ps1 first to include it); skipping"
 }
+Build-Stage "payload_check"
 Step "payload check (no secrets, tokens, personal databases or logs)"
-Run $Py @("-I", (Join-Path $PSScriptRoot "payload_check.py"), $Stage)
+Run $Py @("-I", "-B", (Join-Path $PSScriptRoot "payload_check.py"), $Stage)
+
+Build-Stage "pack_python"
+Run $Py @("-I", "-B", (Join-Path $PSScriptRoot "pack_python.py"), $Stage, "--out", (Join-Path $Out "payload-metrics.json"))
+Run $Py @("-I", "-B", "-c", "import jarves.cli, openai, agents, pydantic; print('PACKED IMPORTS: PASS')")
+$info["payload"] = Get-Content (Join-Path $Out "payload-metrics.json") -Raw | ConvertFrom-Json -AsHashtable
 
 # ---------------------------------------------------------------- installer
 if (-not $SkipInstaller) {
-    $iscc = Join-Path $Cache "inno-7.1.0\ISCC.exe"
-    if (-not (Test-Path $iscc)) {
-        Step "Inno Setup 7.1.0 (portable, current user)"
-        $p = Start-Process (Get-Pinned "inno") -Wait -PassThru -ArgumentList @(
-            "/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART", "/SP-", "/CURRENTUSER", "/PORTABLE=1",
-            "/DIR=`"$(Join-Path $Cache 'inno-7.1.0')`"")
-        if ($p.ExitCode -ne 0 -or -not (Test-Path $iscc)) { throw "Inno Setup install failed ($($p.ExitCode))" }
-    }
+    Build-Stage "compiler_tools"
+    $iscc = Get-Compiler
+    Build-Stage "compression"
     Step "ISCC"
-    Run $iscc @("-q", "/DAppVersion=$Version", "/DStage=$Stage", "/DOutDir=$Out", "/DCommit=$Commit",
+    $compression = if ($SmokeBuild) { "lzma2/fast" } else { "lzma2/max" }
+    Run $iscc @("-q", "/DAppVersion=$Version", "/DStage=$Stage", "/DOutDir=$Out", "/DCommit=$Commit", "/DBuildCompression=$compression",
                 (Join-Path $PSScriptRoot "windows\jarves.iss"))
+    Build-Stage ""
+    $info["stage_timings_s"] = $StageTimes
+    $StageTimes | ConvertTo-Json -Depth 8 | Set-Content -Encoding utf8NoBOM (Join-Path $Out "build-stages.json")
     $exe = Join-Path $Out "JARVES-Setup-$Version.exe"
     if (-not (Test-Path $exe)) { throw "ISCC produced no $exe" }
     $sha = (Get-FileHash $exe -Algorithm SHA256).Hash.ToLower()
@@ -235,6 +339,33 @@ if (-not $SkipInstaller) {
     $info["sha256"] = $sha
     $info["size"] = (Get-Item $exe).Length
     $info["build_s"] = [math]::Round($BuildClock.Elapsed.TotalSeconds, 1)
-    $info | ConvertTo-Json | Set-Content -Encoding utf8NoBOM (Join-Path $Out "build-info.json")
+    $info | ConvertTo-Json -Depth 8 | Set-Content -Encoding utf8NoBOM (Join-Path $Out "build-info.json")
+    Write-Host ($StageTimes | ConvertTo-Json -Depth 8)
+    Write-Host "RELEASE PROFILE build_s=$($info.build_s)"
     Step "done: $exe ($([math]::Round($info.size / 1MB)) MB, sha256 $sha)"
+}
+
+if ($AlsoSmokeInstaller -and -not $SkipInstaller -and -not $SmokeBuild) {
+    $smokeOut = Join-Path $Out "smoke"
+    New-Item -ItemType Directory -Force $smokeOut | Out-Null
+    $embedded = Join-Path $Stage "python\Lib\site-packages\jarves\_build_info.json"
+    $savedInfo = [IO.File]::ReadAllText($embedded)
+    $smokeInfo = $info | ConvertTo-Json -Depth 8 | ConvertFrom-Json -AsHashtable
+    $smokeInfo["channel"] = "ci-smoke"
+    $smokeInfo["build_profile"] = "ci-smoke"
+    $clock = [Diagnostics.Stopwatch]::StartNew()
+    try {
+        $smokeInfo | ConvertTo-Json -Depth 8 | Set-Content -Encoding utf8NoBOM $embedded
+        Run $iscc @("-q", "/DAppVersion=$Version", "/DStage=$Stage", "/DOutDir=$smokeOut", "/DCommit=$Commit",
+                    "/DBuildCompression=lzma2/fast", (Join-Path $PSScriptRoot "windows\jarves.iss"))
+    } finally { [IO.File]::WriteAllText($embedded, $savedInfo) }
+    $smokeExe = Join-Path $smokeOut "JARVES-Setup-$Version.exe"
+    $smokeInfo["sha256"] = (Get-FileHash $smokeExe -Algorithm SHA256).Hash.ToLower()
+    $smokeInfo["size"] = (Get-Item $smokeExe).Length
+    $smokeInfo["profile_compression_s"] = [math]::Round($clock.Elapsed.TotalSeconds, 3)
+    $smokeInfo["shared_bundle_s"] = [math]::Round($info.build_s - $StageTimes["compression"], 3)
+    $smokeInfo["build_s"] = $smokeInfo.shared_bundle_s + $smokeInfo.profile_compression_s
+    "$($smokeInfo.sha256)  JARVES-Setup-$Version.exe" | Set-Content -Encoding ascii "$smokeExe.sha256"
+    $smokeInfo | ConvertTo-Json -Depth 8 | Set-Content -Encoding utf8NoBOM (Join-Path $smokeOut "build-info.json")
+    Step "CI smoke profile compression: $($smokeInfo.profile_compression_s) s (never published)"
 }

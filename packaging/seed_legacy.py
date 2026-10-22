@@ -54,10 +54,17 @@ CREATE TABLE IF NOT EXISTS jobs (
     next_run REAL, last_run REAL, last_outcome TEXT, last_error TEXT, run_requested REAL,
     created REAL NOT NULL, updated REAL NOT NULL, approved_at REAL, approved_by TEXT);
 """
-CONFIG = '[voice]\nmode = "off"\n\n[music]\nprovider = "none"\n\n[link]\nport = 18765\n'
-FEATURES = {"chimes": {"enabled": False}}
+CONFIG = '[voice]\nmode = "off"\nwake_threshold = 0.95\n\n[music]\nprovider = "none"\n\n[link]\nport = 18765\n'
+FEATURES = {"version": 1, "enabled": {"chimes": False, "autostart": True}, "changed": {}, "requests": {}}
 IDENTITY = {"display_name": "SeedMax"}
 SETTINGS_FILES = {"config.toml": CONFIG, "features.json": json.dumps(FEATURES), "identity.json": json.dumps(IDENTITY)}
+PRESERVED_FILES = {
+    "models/owner-wake.onnx": b"fake owner model, never executed",
+    "secrets.env": b"FAKE_INSTALLER_TEST_CREDENTIAL=not-a-real-key\n",
+    "google/token.json": b'{"fake": "offline-test-only"}',
+    "profiles/owner/profile.json": b'{"id":"owner","name":"Owner"}',
+    "profiles/owner/config.toml": b'[voice]\nmode = "off"\nwake_threshold = 0.95\n',
+}
 LATEST_SCHEMA = 3                    # core/src/jarves/migrations.py LATEST (test_installer_clean.py keeps them equal)
 
 
@@ -65,9 +72,10 @@ def seed(home: Path) -> None:
     home.mkdir(parents=True, exist_ok=True)
     db = sqlite3.connect(home / "store.db")
     db.executescript(STORE_SQL)
-    db.execute("INSERT INTO sessions (id, kind, started) VALUES ('s1', 'typed', 1000.0)")
-    db.execute("INSERT INTO turns (session_id, ts, role, text, chars) VALUES ('s1', 1001.0, 'user', 'hello legacy', 12)")
-    db.execute("INSERT INTO delegations (session_id, ts, kind, status) VALUES ('s1', 1002.0, 'voice', 'done')")
+    now = time.time() - 10  # realistic old data; avoid Core retention pruning a 1970 fixture
+    db.execute("INSERT INTO sessions (id, kind, started) VALUES ('s1', 'typed', ?)", (now,))
+    db.execute("INSERT INTO turns (session_id, ts, role, text, chars) VALUES ('s1', ?, 'user', 'hello legacy', 12)", (now + 1,))
+    db.execute("INSERT INTO delegations (session_id, ts, kind, status) VALUES ('s1', ?, 'voice', 'done')", (now + 2,))
     db.commit()
     db.close()
     db = sqlite3.connect(home / "memory.db")
@@ -80,6 +88,11 @@ def seed(home: Path) -> None:
     db.close()
     for name, text in SETTINGS_FILES.items():
         (home / name).write_text(text, encoding="utf-8")
+    for name, data in PRESERVED_FILES.items():
+        target = home / name
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_bytes(data)
+    (home / "schema.json").unlink(missing_ok=True)
 
 
 def _cols(db: sqlite3.Connection, table: str) -> set[str]:
@@ -126,6 +139,10 @@ def verify(home: Path, legacy: bool) -> list[str]:
             bad.append(f"{name} is missing")
         elif name != "config.toml" and (home / name).read_text(encoding="utf-8") != text:
             bad.append(f"{name} was changed")
+    for name, data in PRESERVED_FILES.items():
+        target = home / name
+        if not target.is_file() or target.read_bytes() != data:
+            bad.append(f"preserved file changed: {name}")
     return bad
 
 

@@ -6,7 +6,8 @@
   [post-merge main CI](https://github.com/igalgerman/jarves/actions/runs/39817148513) passed.
 - #68 final source head `9e4ae129050103e1a395f746463a929f7a87bae6` passed its full local gate, 45 installer tests,
   five PowerShell syntax checks and [full CI](https://github.com/igalgerman/jarves/actions/runs/39817252108), including
-  four smoke scenarios and old-version upgrade/rollback. Final merge state/evidence is maintained in the PR.
+  four smoke scenarios and old-version upgrade/rollback. Merged individually at
+  [cdce8fe](https://github.com/igalgerman/jarves/commit/cdce8fe8a5dcba78e1e608ccfa975afd37e0df55).
 - #70's first hosted run exposed missing tour-routing rows and piped setup launching the tour. Added bilingual routing
   coverage and restricted the automatic tour offer to an interactive terminal with the dashboard enabled; 7 targeted
   setup/routing/budget tests passed. Final exact-head CI is linked in the PR. No acceptance criterion was removed.
@@ -14,6 +15,8 @@
   hashes are below. The owner-PC beta installed earlier is build 199; these merges do not prove that PC was updated again.
 - Unrelated inherited `.github/workflows/next-flow.yml` failures on main predate this work; the branch flow remains
   disabled (`ENABLE_NEXT_FLOW` absent). The primary `jarves-checks` and package results are reported separately.
+- GitHub temporarily retained active workflow records after all their jobs completed. Waited; when the stale main
+  records disappeared, a fresh query confirmed no active main run and #68 merged without needing a rule override.
 
 ### Decision queue (including carried questions)
 
@@ -64,6 +67,26 @@
   Reproduction: from core, `python tools/all_pages_check.py --pages setup,addons --langs en,he --widths 1440,390`.
 - Decision queue: merge when reviewed/green ANSWERED; human setup/voice/account/phone acceptance remains USER DECISION
   REQUIRED at the existing owner sign-off gate. No owner result is inferred from tests; related issues stay open.
+## Installer parallel follow-up — PR #68 held for #67 → #72 (Codex)
+
+- Changes: separate functional/autostart-purge smoke VMs for each compression profile (same three candidate installs); start bundling before Go/bridge preparation; verify bridge before payload join; prepare cold-cache Inno concurrently. No batch product or wizard implementation/test files changed in this follow-up.
+- Local verification: 48 targeted worker/workflow/packaging checks passed; actual Windows child process outlives its start step and success/failure/abort propagate. First hosted follow-up b287a36: build 4m09, both functional smokes and real upgrade/rollback passed; autostart/data-only verification caught an incorrectly shaped feature fixture. Corrected fixture to runtime schema, keeping strict byte-for-byte preservation; regression test checks both seeded choices through Features. Corrected exact-head timing refresh pending; prior complete green baseline is bc23260 / run 39749405345 (3m54 build job, 7m52 all installer checks).
+- Decision queue: merge order ANSWERED — #67 first, then #72; hold #68 until owner notification and both gates. Published-branch synchronization must preserve the standing no-force-push rule; reconcile a literal rebase versus a merge update when that gate opens, before rewriting any remote history. Owner-PC timing and visual review remain DEFERRED in open #58; prior preview approval remains valid, desktop tool launch was unavailable.
+
+## Installer #58 — PR #68 (22 Oct 2026, Codex writer)
+
+- Scope: measured parallel bundle stages, stable pinned-tool cache, source-only code archive, separate non-publishable fast smoke profile; Inno EN/HE keep-data page, verified app backups and profile migrations, previous program snapshot/offline rollback, first user PATH with reversible known-shim retirement, windowless dashboard button. Restricted wizard/CLI/console implementation files untouched; one installer assertion in test_setup_wizard.py updated for the button.
+- Baseline run 39737015500: installer job 7m42s, build 134.4s, release compression 91.26s, clean install 50.8s. Green checkpoint run 39747590940 (76983c5): build job 3m43s (now separate checks), release build 118.7s/clean install 41.9s, smoke build 46.8s/clean install 51.0s; 7,918 staged files, 2,656 archived. Both smoke profiles passed; the new matrix argument forwarding was fixed/regression-tested. Follow-up fixes compare the same preservation files, avoid 1970 timestamps triggering normal retention, and wait for actual rollback completion before uninstall. These are not owner-PC measurements or a claim all checks finish under 5 minutes.
+- Local packaging/backup tests and Inno compile pass; new SHA-pinned 4.0.0.153 fixture covers real upgrade/rollback with fake 0.95 wake/model/profile/credential data. Merged coordinator main dd77cf0 cleanly; all jobs passed on 76983c5. A final directive makes English the fresh default; exact final-head evidence is recorded in PR #68. User approved visual preview; the desktop tool could not launch it (app approval/elicitation unavailable). No installer window opened or owner-PC install performed. See INSTALLER_58.md and PR #68 for current evidence; issue remains open for app wizard and owner verification. No merge authorized for this task.
+## Installer PR #68 recovery (22 Oct 2026)
+
+- Synchronized main and the declared #72 prerequisite without rewriting branch history. Reconciled DOC_MAP and
+  included the installer smoke/upgrade jobs in the failure summary's dependencies as well as the required CI result.
+- Focused local installer/packaging regression: 45 passed. Full local gate and exact-head hosted results are in #68.
+- Owner-PC timing and interactive installer layout remain UNVERIFIED; issue #58 stays open. The installed beta was
+  not replaced by local smoke tests. CI uses disposable Windows runners and fake account/data fixtures.
+- Decision queue: merging this PR when reviewed and green ANSWERED by the owner's request; physical/account/live
+  behavior gates DEFERRED. No new user decision is required for this bounded integration.
 
 ## PR readiness recovery (22 Oct 2026) — owner authorized #72, #68, #70
 

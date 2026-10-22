@@ -1,4 +1,10 @@
 {
-  "_comment": "Old installers the upgrade matrix (packaging/upgrade_matrix.ps1, CI job 'installer') upgrades FROM. Each entry is a released JARVES-Setup-<v>.exe, pinned by SHA256 (download it from the release assets, record the hash once). Series: 0.1.0.x (old run-number series), 3.0.0.x, later 4.0.0.x. Empty until the owner / first release pins them; the CI step then says so and does not pretend the matrix ran.",
-  "fixtures": []
+  "fixtures": [
+    {
+      "series": "4.0.0.x",
+      "version": "4.0.0.153",
+      "url": "https://github.com/igalgerman/jarvis-releases/releases/download/win-v4.0.0.153/JARVES-Setup-4.0.0.153.exe",
+      "sha256": "7205687f8b5c645280a345f44b4a8adc0caf7dd31299a1f9cd752e3c5164acd2"
+    }
+  ]
 }
