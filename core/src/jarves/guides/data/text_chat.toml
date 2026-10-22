@@ -1,0 +1,47 @@
+order = 72
+category = "everyday"
+features = ["text_chat"]
+aliases = ["צ'אט טקסט", "שיחת טקסט", "מצב שקט", "שעות שקט בטרמינל", "text chat", "chat", "jarvis chat", "jarvis text", "terminal chat", "silent mode", "silent hours"]
+links = ["alerts", "privacy"]
+title_he = "שיחת טקסט בטרמינל"
+title_en = "Terminal text chat"
+what_he = "שיחה עם ג'ארביס בהקלדה בלבד, בחלון הטרמינל, בשעות שקטות: בלי מיקרופון, בלי קול, בלי צלילים ובלי הארה בפנים. התשובות נכתבות תוך כדי. הפקודה: jarvis chat (או jarvis text)."
+what_en = "Talk to JARVES by typing only, in the terminal, for silent hours: no microphone, no speech, no chimes and no light on the face. Answers are written as they arrive. Command: jarvis chat (or jarvis text)."
+say = []
+expect_he = "נפתחת שורת הקלדה. בשעות השקט (ברירת מחדל 22:00-07:00) או עם --silent רואים [silent] בשורת ההקלדה. אישורים מוצגים באותו חלון: y/n, ובקוד מוסתר לפעולות מסוכנות. Ctrl+C מבטל תשובה, Ctrl+D או /exit יוצא."
+expect_en = "A typing prompt opens. During quiet hours (default 22:00-07:00) or with --silent the prompt shows [silent]. Approvals appear in the same window: y/n, and a hidden code for dangerous actions. Ctrl+C cancels an answer, Ctrl+D or /exit leaves."
+cost_he = "כמו כל שיחה מוקלדת: על חשבון תוכנית ChatGPT או מפתח ה-API, באותו תקציב יומי. הקראה בקול (/voice on) כבויה כברירת מחדל ואסורה בשעות שקט."
+cost_en = "Like any typed conversation: on your ChatGPT plan or API key, within the same daily budget. Speaking the answers (/voice on) is off by default and not allowed in silent hours."
+privacy_he = "השיחה נשמרת בדיוק כמו הקלדה בלוח הבקרה (ובמצב פרטיות לא נשמר הטקסט). קודי אישור ומפתחות לא מוצגים ולא נרשמים ביומן. ההיסטוריה של השורות נשמרת בקובץ chat_history.txt בתיקיית הנתונים."
+privacy_en = "The conversation is stored exactly like a message typed in the dashboard (in privacy mode the text is not stored). Approval codes and keys are not shown or logged. Your typed lines are kept in chat_history.txt in the data folder."
+
+[[steps]]
+he = "פתחו טרמינל והריצו: jarvis chat (אם ג'ארביס לא רץ הוא יותנע ברקע). לשיחה שקטה בכל שעה: jarvis chat --silent."
+en = "Open a terminal and run: jarvis chat (JARVES is started in the background if it is not running). For a silent session at any hour: jarvis chat --silent."
+action = "command:jarvis chat"
+
+[[steps]]
+he = "הקלידו שאלה ו-Enter. שורה שמסתיימת ב-\\ ממשיכה לשורה הבאה, ו-\"\"\" פותח ומסיים בלוק. /help מציג את כל הפקודות: /status, /new, /resume, /voice, /quiet, /approvals, /undo, /model, /exit."
+en = "Type a question and press Enter. A line ending in \\ continues on the next line, and \"\"\" opens and closes a block. /help lists every command: /status, /new, /resume, /voice, /quiet, /approvals, /undo, /model, /exit."
+
+[[steps]]
+he = "כשפעולה צריכה אישור, התיאור מופיע בטרמינל: הקלידו y או n. אפשר לענות גם בחלון הקופץ: התשובה הראשונה קובעת והאחר נסגר."
+en = "When an action needs approval, the description appears in the terminal: type y or n. You may also answer in the popup: the first answer wins and the other closes."
+
+[[problems]]
+he = "הטרמינל כותב \"JARVES did not answer\""
+en = "The terminal says \"JARVES did not answer\""
+fix_he = "ג'ארביס לא עלה בזמן. הריצו jarvis logs -n 80 וגם jarvis doctor, ואז נסו שוב."
+fix_en = "JARVES did not start in time. Run jarvis logs -n 80 and jarvis doctor, then try again."
+
+[[problems]]
+he = "/voice on אומר שאי אפשר"
+en = "/voice on says it is not possible"
+fix_he = "בשעות שקט או עם --silent אין קול בכלל. מחוץ לשעות שקט צריך רמקול זמין בליבה (jarvis doctor)."
+fix_en = "In silent hours or with --silent there is never any speech. Outside them the Core needs a working speaker (jarvis doctor)."
+
+[[problems]]
+he = "עברית מוצגת הפוכה"
+en = "Hebrew looks reversed"
+fix_he = "ג'ארביס מדפיס עברית בסדר לוגי ולא הופך אותה. השתמשו בחלון Windows Terminal שתומך בכתיבה מימין לשמאל, או בתוכנה כמו ConEmu."
+fix_en = "JARVES prints Hebrew in logical order and never reverses it. Use a terminal that supports right-to-left text, such as Windows Terminal."

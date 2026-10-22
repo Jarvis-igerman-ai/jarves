@@ -22,7 +22,7 @@ from pathlib import Path
 
 CORE = Path(__file__).resolve().parents[1]
 REPO = CORE.parent
-REAL = Path(os.environ.get("LOCALAPPDATA", str(Path.home() / ".local/state"))) / "jarves"
+REAL = Path(os.environ.get("JARVES_SUITE_REAL") or Path(os.environ.get("LOCALAPPDATA", str(Path.home() / ".local/state"))) / "jarves")   # JARVES_SUITE_REAL = a throw-away home instead of the owner's real profile
 RESULTS: list[tuple[str, bool, str]] = []
 
 
