@@ -1,0 +1,145 @@
+name: jarves-next-flow
+# The `next` integration-branch flow (docs/NEXT_FLOW.md, plan docs/plans/RELEASE_AND_TEST_SYSTEM.md section 5.1).
+#  * PRs into `next` get LIGHT CI (job "CI result (single required check)"): fast validation + only the test files the
+#    change affects (core/tools/ci_affected.py). The full proof is the batch run of jarves-checks on every push to `next`.
+#  * Batch runs on `next` queue and are never cancelled (jarves-checks concurrency); a newer push replaces only the
+#    PENDING run, so pushes batch up by themselves.
+#  * When the batch on `next` is green, the bot fast-forwards `main` to that exact commit (same tree, so main re-runs
+#    nothing and jarves-package continues from the proof) and green light PRs labelled `automerge` merge into `next`.
+# The two automations (fast-forward, automerge into next) run ONLY when the repository variable ENABLE_NEXT_FLOW is
+# "true" (default: not set = off). Flip: gh variable set ENABLE_NEXT_FLOW --body true
+# Both use the secret AUTOMERGE_TOKEN so the pushes start the follow-up workflows (GITHUB_TOKEN pushes do not).
+on:
+  pull_request:
+    branches: [next]
+    types: [opened, synchronize, reopened, ready_for_review, labeled]
+  workflow_run:
+    workflows: [jarves-checks, jarves-next-flow]
+    types: [completed]
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.event.workflow_run.id || github.run_id }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+jobs:
+  light:
+    name: Light PR checks (validation + affected tests)
+    if: github.event_name == 'pull_request' && github.event.pull_request.draft == false
+    runs-on: ubuntu-24.04
+    timeout-minutes: 40
+    defaults:
+      run:
+        working-directory: core
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884  # v10.3.0
+        with:
+          enable-cache: true
+          cache-dependency-glob: core/uv.lock
+      - name: "System libraries (PortAudio for sounddevice)"
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq libportaudio2
+      - run: uv sync --frozen --all-extras
+      - name: Workflow contracts, shard coverage and documentation links
+        run: uv run pytest -q -rs -p no:cacheprovider tests/test_ci_workflows.py tests/test_ci_pipeline.py tests/test_ci_speed_tools.py tests/test_docs_links.py tests/test_next_flow.py tests/test_ci_affected.py
+      - name: Affected test files (import graph; lock/CI/conftest changes or the label full-ci select everything)
+        id: aff
+        env:
+          BASE: origin/${{ github.base_ref }}
+          LABELS: ${{ toJSON(github.event.pull_request.labels.*.name) }}
+        run: |
+          files=$(uv run python tools/ci_affected.py --base "$BASE")
+          if echo "$LABELS" | jq -e 'index("full-ci")' >/dev/null; then files=all; fi
+          echo "affected: $files"
+          echo "files=$files" >> "$GITHUB_OUTPUT"
+      - name: pytest on the affected files (offline; any skip fails; the batch on next runs everything)
+        shell: bash
+        env:
+          FILES: ${{ steps.aff.outputs.files }}
+        run: |
+          set +e
+          if [ -z "$FILES" ]; then echo "no test file is affected"; exit 0; fi
+          if [ "$FILES" = "all" ]; then targets=(); else targets=($FILES); targets=("${targets[@]/#/tests/}"); fi
+          # real-browser files run in the batch (jarves-checks job `browser`)
+          uv run pytest -q -rs -p no:cacheprovider --browser exclude "${targets[@]}" 2>&1 | tee pytest.out
+          rc=${PIPESTATUS[0]}
+          if grep -E "(^SKIPPED|[0-9]+ skipped|xfailed)" pytest.out; then echo "::error::tests were skipped"; exit 1; fi
+          # pytest exit 5 = nothing collected (only browser files affected): fine, the batch covers them
+          [ "$rc" -eq 5 ] && exit 0
+          exit $rc
+  ci-ok:
+    # Same name as the batch check, so one rule ("CI result (single required check)") works for PRs into main and next.
+    name: CI result (single required check)
+    if: always() && github.event_name == 'pull_request'
+    needs: [light]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - env:
+          NEEDS: ${{ toJSON(needs) }}
+        run: echo "$NEEDS" | jq -e '[.[] | select(.result == "failure" or .result == "cancelled")] | length == 0' > /dev/null
+  automerge-into-next:
+    # Merges green PRs labelled `automerge` into next (no "up to date" requirement). Off unless ENABLE_NEXT_FLOW.
+    if: >-
+      vars.ENABLE_NEXT_FLOW == 'true' && github.event_name == 'workflow_run' &&
+      github.event.workflow_run.name == 'jarves-next-flow' &&
+      github.event.workflow_run.event == 'pull_request' && github.event.workflow_run.conclusion == 'success'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    concurrency:
+      group: jarves-next-automerge
+      cancel-in-progress: false
+    env:
+      GH_TOKEN: ${{ secrets.AUTOMERGE_TOKEN || github.token }}
+      REPO: ${{ github.repository }}
+    steps:
+      - name: Merge the green PRs labelled automerge (oldest first, only if the light run of the exact head is green)
+        run: |
+          set -euo pipefail
+          for n in $(gh pr list -R "$REPO" --state open --base next --label automerge --json number --jq 'sort_by(.number)|.[].number'); do
+            info=$(gh pr view "$n" -R "$REPO" --json isDraft,mergeable,headRefOid)
+            [ "$(echo "$info" | jq -r .isDraft)" = "true" ] && continue
+            [ "$(echo "$info" | jq -r .mergeable)" = "CONFLICTING" ] && { echo "#$n conflicts: skipped"; continue; }
+            sha=$(echo "$info" | jq -r .headRefOid)
+            ok=$(gh api "repos/$REPO/commits/$sha/check-runs" --jq '[.check_runs[]|select(.name=="CI result (single required check)" and .conclusion=="success")]|length')
+            bad=$(gh api "repos/$REPO/commits/$sha/check-runs" --jq '[.check_runs[]|select(.status!="completed" or (.conclusion!="success" and .conclusion!="skipped" and .conclusion!="neutral"))]|length')
+            echo "#$n ${sha:0:7} ok=$ok not-green=$bad"
+            if [ "$ok" -ge 1 ] && [ "$bad" = "0" ]; then gh pr merge "$n" -R "$REPO" --merge --delete-branch; fi
+          done
+  fast-forward-main:
+    # Batch on `next` is green (jarves-checks, event push, branch next) => main moves to that exact commit, fast-forward
+    # only (the script refuses anything else). main's own jarves-checks run then finds the proof and jarves-package
+    # continues. Off unless ENABLE_NEXT_FLOW. Needs AUTOMERGE_TOKEN with permission to push main (branch protection:
+    # docs/NEXT_FLOW.md; protections are NOT enabled yet).
+    if: >-
+      vars.ENABLE_NEXT_FLOW == 'true' && github.event_name == 'workflow_run' &&
+      github.event.workflow_run.name == 'jarves-checks' && github.event.workflow_run.event == 'push' &&
+      github.event.workflow_run.head_branch == 'next' && github.event.workflow_run.conclusion == 'success'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    concurrency:
+      group: jarves-next-fast-forward
+      cancel-in-progress: false
+    steps:
+      - name: Require the token
+        env:
+          TOKEN: ${{ secrets.AUTOMERGE_TOKEN }}
+        run: '[ -n "$TOKEN" ] || { echo "::error::AUTOMERGE_TOKEN is not set: cannot fast-forward main"; exit 1; }'
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.AUTOMERGE_TOKEN }}
+      - name: Fast-forward main to the green batch commit
+        env:
+          SHA: ${{ github.event.workflow_run.head_sha }}
+        run: |
+          set -euo pipefail
+          git fetch origin main next
+          if git merge-base --is-ancestor "$SHA" origin/main; then echo "main already contains $SHA"; exit 0; fi
+          if ! git merge-base --is-ancestor origin/main "$SHA"; then
+            echo "::error::main is not an ancestor of the green batch commit $SHA (a hotfix landed on main?). Merge main into next; the next batch moves it."; exit 1
+          fi
+          git push origin "$SHA:refs/heads/main"
+          echo "main -> $SHA" >> "$GITHUB_STEP_SUMMARY"

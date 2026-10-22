@@ -93,3 +93,27 @@ weekly and on core changes; Dependabot (pip, gomod, github-actions) weekly, patc
 Branch protection: require **`CI result (single required check)`**. The individual names remain valid: `Python Core tests
 (windows-2025 shard 1/3)` ... `3/3`, `Python Core tests (ubuntu-24.04 shard 1/1)`, `Real-browser tests (ubuntu-24.04)`,
 `Real-browser tests (windows-2025)`, `Windows installer (build + silent install smoke)`. Full list: `docs/CI_PERFORMANCE.md`.
+
+## Automatic labelling of low-risk PRs (`autolabel.yml`, `core/tools/risk_class.py`)
+
+Low-risk PRs get the `automerge` label by themselves; the queue (`automerge.yml`) then merges them one at a time when
+`CI result (single required check)` is green. Nothing is bypassed: no label ever skips a check, and the queue waits while a
+`jarves-checks` run on `main` is in progress (runs on `main` queue and are never cancelled).
+
+| Class | Rule |
+| --- | --- |
+| docs | only `docs/`, `*.md`, `CHANGELOG*`, `DOC_MAP.md` |
+| tests | only `core/tests/test_*.py` (plus docs) |
+| guides | only `core/src/jarves/guides/data/*.toml` and dashboard locale / translation catalogs (plus docs) |
+| dependabot | patch and minor of pip, gomod, npm, github-actions get `automerge` (`dependabot-automerge.yml`); major gets `needs-review` |
+| bugfix | label `bugfix`, fewer than 150 changed lines, no high-risk path (only when `ENABLE_AUTOLABEL=all`) |
+
+**High-risk paths never get the label** (even with the `bugfix` label): `.github/**`, `packaging/**`, `CLAUDE.md`,
+`AGENTS.md`, `core/pyproject.toml`, `uv.lock`, approvals / helper / isolation / winsandbox / mobile / secrets /
+dashboard_auth / privacy / permissions / updates / signing / security / redact modules under `core/src/jarves/`, release,
+promote and CI tooling (`core/tools/release*`, `promote*`, `ci_*`, `risk_class.py`), `core/tests/conftest.py`. The labels
+`needs-review`, `no-automerge`, `do-not-merge` and `wip` block the merge. The label is withdrawn when a later push makes the
+PR stop qualifying (only if `autolabel.yml` added it: marker label `automerge-auto`).
+
+Switch: `gh variable set ENABLE_AUTOLABEL --body all` (also bugfix PRs), `--body false` (off), unset or `true` (default:
+docs, tests, guides). Dependabot has its own switch `DEPENDABOT_AUTOMERGE=false`. The workflow never checks out PR code.

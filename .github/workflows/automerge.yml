@@ -35,7 +35,12 @@ jobs:
           if [ -z "${{ secrets.AUTOMERGE_TOKEN }}" ]; then
             echo "::warning::AUTOMERGE_TOKEN is not set: merging with GITHUB_TOKEN will NOT start CI/installer publish on main"
           fi
-          prs=$(gh pr list -R "$REPO" --state open --base main --label automerge --json number --jq 'sort_by(.number)|.[].number')
+          # a run of jarves-checks on main is in progress: wait (merging would queue behind it; the release run is never cancelled).
+          # This workflow runs again when that run completes (workflow_run trigger above).
+          busy=$(gh run list -R "$REPO" --branch main --workflow jarves-checks --json status --jq '[.[]|select(.status!="completed")]|length')
+          if [ "$busy" != "0" ]; then echo "main has $busy jarves-checks run(s) in progress: waiting"; exit 0; fi
+          # labels needs-review / no-automerge block the merge (autolabel.yml, dependabot-automerge.yml, or a human)
+          prs=$(gh pr list -R "$REPO" --state open --base main --label automerge --json number,labels --jq '[.[]|select([.labels[].name]|(index("needs-review") or index("no-automerge"))|not)]|sort_by(.number)|.[].number')
           for n in $prs; do
             info=$(gh pr view "$n" -R "$REPO" --json isDraft,mergeable,headRefOid,headRefName,mergeStateStatus)
             draft=$(echo "$info" | jq -r .isDraft); mer=$(echo "$info" | jq -r .mergeable)
