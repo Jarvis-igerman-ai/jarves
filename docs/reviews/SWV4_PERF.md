@@ -56,3 +56,11 @@ safe only with full runs; the profile is in the table above for the next pass.
 
 Note: `tests/test_swv4_idle_writes.py` could not be re-run after the last edit because another process held port 18771;
 it passed in the full run.
+
+## Tool-description trimming (branch perf/tool-descriptions, #17)
+- Model-facing backend call (tools JSON + rules) 59.4k -> under 40.5k chars (>= 30% cut). Every user-triggered tool keeps one English
+  and one Hebrew trigger phrase and its safety notes ('ask first', 'draft only', 'never sends').
+- `tests/test_tool_descriptions.py`: ~150 EN/HE utterances routed by a fake model (longest quoted trigger phrase wins), trigger and
+  safety-note checks, and a hard ceiling (BACKEND_CEILING) so the text only shrinks.
+- NEEDS LIVE RE-RUN before release: the fake router proves triggers exist, not how GPT-Live fills arguments. Run the 47+ voice
+  scenarios on the real path (billed, shared cap) before shipping this branch.

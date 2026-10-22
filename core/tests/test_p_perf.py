@@ -22,7 +22,7 @@ async def test_backend_prompt_does_not_grow(core):
     total = len(tools) + len(core.agent.instructions())
     assert total <= BACKEND_CHARS_BUDGET, f"backend prompt+tools is {total} chars (budget {BACKEND_CHARS_BUDGET:.0f})"
     assert '"title": "' not in tools                      # slimmed schemas carry no pydantic titles
-    assert total <= 59_400 * 0.92                      # package P: at least 8% below the V4 integration baseline
+    assert total <= 59_400 * 0.70                      # at least 30% below the V4 integration baseline
 
 
 class _Args(BaseModel):

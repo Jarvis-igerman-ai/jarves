@@ -123,11 +123,8 @@ def make_skill(rt: Runtime):
                                   {"display": "hidden"})
 
             return [
-                Tool("show_yourself", "Open my window (face/room) on the screen when the user asks to see me "
-                     "(\"show yourself\", \"תופיע\", \"תראה את עצמך\").", show, permission="action", timeout_s=20),
-                Tool("hide_yourself", "Close my window when the user asks me to hide (\"hide yourself\", "
-                     "\"תיעלם\", \"תסתתר\"). I keep running and listening. NOT for quitting / shutting down / "
-                     "closing the app completely: that is quit_jarves.", hide, permission="action",
+                Tool("show_yourself", "Open my window: 'show yourself', 'תופיע'.", show, permission="action", timeout_s=20),
+                Tool("hide_yourself", "Close my window, I keep listening: 'hide yourself', 'תיעלם'. NOT quitting: that is quit_jarves.", hide, permission="action",
                      timeout_s=10),
             ]
 
@@ -160,16 +157,9 @@ def make_skill(rt: Runtime):
                                   "הדיבור.", {"ending": True})
 
             return [
-                Tool("end_conversation", "End only this voice conversation (stop listening until the user calls me "
-                     "again) when the user asks to end / close the conversation or session (\"תסגור את הסשן\", "
-                     "\"סיימנו\", \"end the conversation\", and a bare \"תסגור\" / \"close\" with nothing else). "
-                     "JARVES keeps running; the smaller, safe choice when closing is unclear. Not for quitting the app.",
+                Tool("end_conversation", "End only this voice conversation (JARVES keeps running): 'end the conversation', 'תסגור את השיחה', or a bare 'תסגור'. The safe choice when unclear. Not quitting.",
                      end_, permission="action", timeout_s=5),
-                Tool("quit_jarves", "Quit the JARVES app completely (the Core stops, the microphone closes, no more "
-                     "listening) ONLY when the user explicitly asks to quit, exit or shut down JARVES / the whole app "
-                     "entirely (\"תסגור את עצמך לגמרי\", \"לסגור את האפליקציה\", \"שט דאון\", \"צא\", \"quit\"). "
-                     "A bare \"close\" or \"close the session/conversation\" is end_conversation, not this. Never "
-                     "the computer itself. If unclear, ask once first. Never open the dashboard instead.", quit_,
+                Tool("quit_jarves", "Quit the whole JARVES app (mic closes) ONLY on an explicit quit/shut down ('quit', 'שט דאון', 'תסגור את עצמך לגמרי'). A bare close is end_conversation. Never the computer. Unclear: ask once. Never open the dashboard instead.", quit_,
                      permission="action", timeout_s=5),
             ]
 

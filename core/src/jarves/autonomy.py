@@ -326,9 +326,8 @@ def make_skill(auto: Autonomy, registry=None):
                 return ToolResult(True, f"{p['status']}: {p['result'] or p['title']}",
                                   {"id": p["id"], "status": p["status"]})
 
-            return [Tool("proposals_list", "My open self-improvement proposals from diagnostics (and the autonomy "
-                         "level).", list_, NoArgs, permission="read"),
-                    Tool("proposal_decide", "Approve or reject one proposal after asking the user.", decide,
+            return [Tool("proposals_list", "Open self-improvement proposals and autonomy level: 'any proposals', 'יש הצעות לשיפור'.", list_, NoArgs, permission="read"),
+                    Tool("proposal_decide", "Approve or reject one proposal, only after asking the user: 'approve it', 'תאשר את ההצעה'.", decide,
                          DecideArgs, permission="action")]
 
     return AutonomySkill()

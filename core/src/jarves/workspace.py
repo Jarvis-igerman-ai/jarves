@@ -61,13 +61,13 @@ SPECS: dict[str, FileSpec] = {s.name: s for s in (
              True, False, ("front",), 700),
     FileSpec("MEMORY.md", "long-term notes", True, False, ("backend",), 2500),
     FileSpec("SETUP.md", "installation and connection guide (generated; read full file for a topic)", False, False,
-             ("backend",), 1700, True),
+             ("backend",), 700, True),
     FileSpec("FEATURES.md", "all supported features and readiness snapshot (generated)", False, False,
-             ("backend",), 2000, True),
-    FileSpec("TOOLS.md", "skills, settings and voices (generated)", False, False, ("backend",), 3000, True),
+             ("backend",), 600, True),
+    FileSpec("TOOLS.md", "skills, settings and voices (generated)", False, False, ("backend",), 700, True),
     FileSpec("HEARTBEAT.md", "periodic checklist (not active yet)", False, False, (), 0),
 )}
-TOTAL_CHARS = {"front": 2500, "backend": 9000}   # GPT-Live front instructions stay short (latency)
+TOTAL_CHARS = {"front": 2500, "backend": 5000}   # GPT-Live front instructions stay short (latency)
 MAX_FILE_CHARS = 20_000                          # a write larger than this is refused (file kept unchanged)
 MAX_AGENT_WRITE = 3_000                          # one assistant edit may write at most this much
 HISTORY_KEEP = 50                                # backups kept per file

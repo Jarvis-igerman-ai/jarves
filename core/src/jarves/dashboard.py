@@ -1035,5 +1035,4 @@ class DashboardSkill(Skill):
                                   code="DASHBOARD_FAILED")
             local = url.split("?", 1)[0]
             return ToolResult(True, "פתחתי את לוח הבקרה בדפדפן.", {"url": local}, code="ok")
-        return [Tool("open_dashboard", "Open JARVES's dashboard (conversations, logs, costs, memory, settings) in "
-                     "the browser on this computer. Returns its local address.", open_, permission="action")]
+        return [Tool("open_dashboard", "Open the dashboard in the browser: 'open the dashboard', 'תפתח את הדשבורד'. Never a way to close anything.", open_, permission="action")]

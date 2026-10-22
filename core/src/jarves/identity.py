@@ -244,8 +244,8 @@ def make_skill(identity: Identity, on_change=None):
     from .skills import Skill, Tool, ToolResult
 
     class RenameArgs(BaseModel):
-        display_name: str | None = Field(None, max_length=40, description="written name, e.g. Max")
-        spoken_name: str | None = Field(None, max_length=40, description="how to SAY it in Hebrew, e.g. מקס")
+        display_name: str | None = Field(None, max_length=40, description='written name, e.g. Max')
+        spoken_name: str | None = Field(None, max_length=40, description='Hebrew spoken form, e.g. מקס')
 
     class IdentitySkill(Skill):
         name = "identity"
@@ -279,11 +279,9 @@ def make_skill(identity: Identity, on_change=None):
                                    "rule": "Use set_voice for a voice of the same model. Switching to another voice "
                                            "model changes cost: tell the user to approve it on the dashboard."})
             return [
-                Tool("assistant_rename", "Change my name when the user says 'your name is X' / 'קוראים לך X'. "
-                     "Give the written name and the Hebrew spoken form. The user approves a read-back first. The "
-                     "wake phrase does not change.", rename, RenameArgs, permission="destructive", impact=impact,
+                Tool("assistant_rename", "Change my name: 'your name is Max', 'קוראים לך מקס'. Give written + Hebrew spoken form; user approves a read-back. Wake phrase unchanged.", rename, RenameArgs, permission="destructive", impact=impact,
                      timeout_s=30),
-                Tool("voice_catalog", "Which voices I can use, the current one and the cost rule.", catalog,
+                Tool("voice_catalog", "Voices I can use, current one, cost rule: 'which voices', 'אילו קולות יש'.", catalog,
                      permission="read"),
             ]
     return IdentitySkill()

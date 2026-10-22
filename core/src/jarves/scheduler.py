@@ -989,31 +989,30 @@ def report_get(db: UserDB, rid: int, tz: ZoneInfo | None = None) -> dict | None:
 # ---------------------------------------------------------------------- voice / agent tools
 class PreviewArgs(BaseModel):
     when: str = Field(..., min_length=1, max_length=120,
-                      description="When, in the user's words: 'כל בוקר ב-8', 'מחר ב-9:30', 'every monday at 10', "
-                                  "'בעוד 20 דקות', or a 5-field cron expression")
+                      description="'כל בוקר ב-8', 'every monday at 10', or 5-field cron")
     task: str = Field(..., min_length=2, max_length=600,
-                      description="What to do then, self-contained (research question, or the reminder text)")
+                      description='self-contained research question or reminder text')
     kind: str = Field("research", pattern="^(research|reminder)$",
-                      description="research = look it up and save a report; reminder = just remind the user")
-    name: str = Field("", max_length=80, description="Short job name (optional)")
-    speak: bool = Field(False, description="Read the result aloud when ready (else: save it and tell briefly)")
+                      description='research (saves a report) | reminder')
+    name: str = Field("", max_length=80)
+    speak: bool = Field(False, description='read aloud when ready')
 
 
 class JobIdArgs(BaseModel):
-    job_id: str = Field(..., min_length=1, max_length=40, description="job id from jobs_list / schedule_preview")
+    job_id: str = Field(..., min_length=1, max_length=40)
 
 
 class JobControlArgs(JobIdArgs):
-    op: str = Field(..., pattern="^(pause|resume|run_now)$", description="pause, resume or run_now")
+    op: str = Field(..., pattern="^(pause|resume|run_now)$", description='pause | resume | run_now')
 
 
 class ReportFindArgs(BaseModel):
     period: str = Field("latest", pattern="^(latest|this_morning|today|yesterday|this_week)$")
-    query: str = Field("", max_length=80, description="words from the report or job name, e.g. 'AI', 'מזג אוויר'")
+    query: str = Field("", max_length=80)
 
 
 class ReportReadArgs(ReportFindArgs):
-    report_id: int = Field(0, ge=0, description="report id from report_find; 0 = the newest match")
+    report_id: int = Field(0, ge=0, description='0 = newest match')
 
 
 def make_skills(sched: Scheduler, registry=None) -> list:
@@ -1102,16 +1101,15 @@ def make_skills(sched: Scheduler, registry=None) -> list:
 
             from .skills import NoArgs
             return [
-                Tool("schedule_preview", "Plan a scheduled job from the user's words (reminder or recurring/one-off "
-                     "research report). Creates an INACTIVE preview; read it back and ask before approving.",
+                Tool("schedule_preview", "Plan a scheduled job (reminder or research report) from the user's words: 'every morning at 8 news', 'כל בוקר ב-8 תסכם חדשות'. Makes an INACTIVE preview; read back and ask before approving.",
                      preview, PreviewArgs, permission="action"),
-                Tool("schedule_approve", "Activate a previewed job after the user clearly said yes.", approve,
+                Tool("schedule_approve", "Activate a previewed job only after a clear yes: 'yes, activate', 'כן, תפעיל'.", approve,
                      JobIdArgs, permission="action"),
-                Tool("jobs_list", "List scheduled jobs with their next run times and last outcome.", list_, NoArgs,
+                Tool("jobs_list", "Scheduled jobs, next run, last result: 'what jobs are scheduled', 'אילו משימות מתוזמנות'.", list_, NoArgs,
                      permission="read"),
-                Tool("job_control", "Pause, resume or run a scheduled job now.", control, JobControlArgs,
+                Tool("job_control", "Pause, resume or run a job now: 'pause the job', 'תשהה את המשימה'.", control, JobControlArgs,
                      permission="action"),
-                Tool("job_delete", "Delete a scheduled job (asks the user first).", delete, JobIdArgs,
+                Tool("job_delete", "Delete a scheduled job (asks first): 'delete the job', 'תמחק את המשימה'.", delete, JobIdArgs,
                      permission="destructive", impact=delete_impact),
             ]
 
@@ -1142,10 +1140,9 @@ def make_skills(sched: Scheduler, registry=None) -> list:
                                    "sources": r["sources"][:8]})
 
             return [
-                Tool("report_find", "Find saved reports from scheduled jobs (by period and words).", find,
+                Tool("report_find", "Find saved job reports: 'find my AI report', 'תמצא את הדוח'.", find,
                      ReportFindArgs, permission="read"),
-                Tool("report_read", "Get the text of a saved report to read aloud ('read this morning's AI "
-                     "report'). Reads the stored result; never regenerates it.", read, ReportReadArgs,
+                Tool("report_read", "Text of a saved report, never regenerated: 'read this morning's report', 'תקריא את הדוח'.", read, ReportReadArgs,
                      permission="read", untrusted_output=True),
             ]
 
