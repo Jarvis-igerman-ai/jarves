@@ -1,0 +1,32 @@
+order = 39
+category = "everyday"
+pages = ["devdrafts"]
+features = ["dev_manager"]
+aliases = ["מנהל פיתוח", "טיוטות פיתוח", "רעיון לפיתוח", "כרטיס", "development manager", "dev drafts", "ticket", "suggestion", "idea for jarves"]
+links = ["health", "agent_orchestrator"]
+title_he = "מנהל פיתוח"
+title_en = "Development manager"
+what_he = "רעיונות והצעות לשיפור JARVES נשמרים כטיוטות מקומיות בלבד. שום דבר לא נשלח ל-GitHub בלי אישור שלכם."
+what_en = "Ideas and suggestions to improve JARVES are kept as local drafts only. Nothing is posted to GitHub without your approval."
+say = [["תשמור רעיון: להוסיף מצב כהה לפנים", "Save an idea: add a dark mode to the face"], ["אילו טיוטות פיתוח יש?", "What development drafts are there?"]]
+expect_he = "הטיוטה מופיעה בעמוד \"טיוטות פיתוח\" ונשארת במחשב. פרסום ב-GitHub אפשרי רק אם הגדרתם מאגר פרטי (health.ticket_repo), ותמיד מבקש אישור על המסך עם הטקסט המלא."
+expect_en = "The draft appears on the page \"Development drafts\" and stays on this computer. Posting to GitHub is possible only if you set a private repository (health.ticket_repo), and it always asks on the screen with the full text."
+cost_he = "חינם. הכול מקומי."
+cost_en = "Free. All local."
+privacy_he = "הטקסט עובר הסתרת סודות וכתובות מייל. סיסמאות, מספרים ופרטי בריאות וכסף לא נשמרים."
+privacy_en = "The text has secrets and e-mail addresses redacted. Passwords, numbers, health and money details are not stored."
+
+[[steps]]
+he = "אמרו \"תשמור רעיון: ...\" או פתחו את העמוד \"טיוטות פיתוח\" ולחצו \"שמירה כטיוטה\"."
+en = "Say \"Save an idea: ...\" or open the page \"Development drafts\" and press \"Save as draft\"."
+check = "active:dev_manager"
+
+[[steps]]
+he = "בלי קול: jarvis dev suggest \"כותרת\" --body \"פרטים\", jarvis dev list, jarvis dev show ID, jarvis dev discard ID. פרסום (מבקש אישור): jarvis dev file ID."
+en = "Without voice: jarvis dev suggest \"title\" --body \"details\", jarvis dev list, jarvis dev show ID, jarvis dev discard ID. Posting (asks first): jarvis dev file ID."
+
+[[problems]]
+he = "אין כפתור פרסום ב-GitHub"
+en = "There is no Post to GitHub button"
+fix_he = "זה בכוונה: הכפתור מופיע רק אחרי שהוגדר מאגר פרטי (health.ticket_repo). בלעדיו הטיוטות נשארות מקומיות."
+fix_en = "That is by design: the button appears only after a private repository is set (health.ticket_repo). Without it the drafts stay local."

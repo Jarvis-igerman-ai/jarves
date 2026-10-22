@@ -1,3 +1,21 @@
+## V5 follow-ups: the four owner decisions of 21 Oct 2026 built - branch `v5/pillars-followups`, draft PR into `v5/mobile-access`
+
+- **Preferences in every conversation:** `preferences.prompt_block/attach_live/augment_instructions`; confirmed, non-stale, non-sensitive items only, newest first, 120 estimated tokens max; a named block on the Context page; switch = feature `prefs_in_prompt` (dashboard checkbox on the Learned preferences page with the exact text sent, `jarvis prefs prompt on|off|show`). Applies from the next conversation (voice) / next request (typed).
+- **Goal-done line:** `goals.GoalCheer` polled from the Core tick (feature `goal_done_line`): one fixed line ("Done, nice work." / Hebrew if the goal text has Hebrew), only if a conversation is open or the camera sees the owner (unknown = silent), never 22:00-07:00 (alerts' window; the alerts' own quiet switch does not unlock it), expires after 10 minutes. Gates in `calm.py`.
+- **Proactive Intelligence:** `proactive.py`, feature `proactive_intel`, setting `proactive.mode` = `on_request` (DEFAULT) | `in_conversation`. Items come from the owner's goals (no movement 7 days, past its date); listed on the Proactive offers page / `jarvis proactive` / `proactive_show`. In `in_conversation` mode at most ONE item is added to the instructions when a voice conversation starts (not in quiet hours); nothing outside a conversation, no job, no alert.
+- **Development Manager:** `devmanager.py`, feature `dev_manager`: local drafts only, saved with the existing `diag/tickets.py` code (`draft(prefix, origin)` parameters; `listing(dev=)` keeps them off the Health page). Page Development drafts, `jarvis dev`, tools `dev_suggest/dev_drafts/dev_discard`. Posting exists only through the existing approval-gated `tickets.file` (popup with full text, private repo in `health.ticket_repo`; empty = stays local); no voice tool posts.
+- Every feature: guide TOML (EN+HE) - `goals`/`adaptive_memory` extended, new `proactive`, `dev_manager`; CLI parity entries; Hebrew `about` + dashboard catalog through `tools/catalog_add.py`; tool descriptions <= 80 characters.
+- Tests: `core/tests/test_v5_followups.py` (27, no skips, fake clock, no network/browser); `log_lint` 0 violations.
+- Questions for the user: (1) Proactive offers are OFF until the mode is switched to "in_conversation" (read "default = only on request" literally); should that be the default? (2) The goal line also needs the camera or an open conversation to know you are at the PC; without a camera it is only spoken during a conversation. OK? (3) Offers use goals only for now; which other sources (calendar, unread mail) may become items?
+
+---
+
+## V5 pillars 2+3 software slice: Goals and Adaptive Memory (21 Oct 2026) - branch `v5/pillars-goals-memory`, draft PR into `v5/mobile-access`
+
+- Design: [plans/V5_PILLARS.md](plans/V5_PILLARS.md). New `goals.py`, `preferences.py`, `dashboard_static/pillars.js` (Goals + Learned preferences pages), `jarvis goals` / `jarvis prefs`, features `goals` and `adaptive_memory`, two guides, EN+HE catalog.
+- Goals only track (never act); outward steps and deletes ask the owner; the check-in exists only on request. Preferences are proposals until an explicit yes; sensitive text is refused; all items visible/editable/removable.
+- Verified locally: `test_v5_pillars.py` 18 passed; guides, cli_parity, dashboard_locales, log_message_lint (0 violations), capabilities, features, hebrew_texts, dashboard, backup, privacy, perf_probes pass. Full suite and CI not run.
+- Questions for the user: see "Open for the owner" in the design (inject confirmed preferences into the model instructions now? spoken "well done" on a finished goal?).
 ## Self-test and speed test (21 Oct 2026) - branch `v5/self-and-speed-tests`, public repo igalgerman/jarves
 
 - `jarvis selftest [--deep] [--audio] [--json]` (core/src/jarves/selftest.py, `selftest.run(deep=False)` returns `SelfTestResult` dataclasses): quick read-only checks (config, DB integrity, file permissions, feature probes, tool/guide/CLI-parity consistency, EN+HE locale completeness, log privacy, disk, version/updates). `--deep` adds a real Core start/stop in a temp home, wake model load, speech engine and audio device checks; nothing is spoken or recorded unless `--audio` (one quiet tone, 0.5 s mic level, dropped).
