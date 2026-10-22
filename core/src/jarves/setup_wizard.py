@@ -85,7 +85,7 @@ GROUPS: tuple[tuple[str, str, str, tuple[str, ...]], ...] = (
                                                                   "whatsapp_bridge", "whatsapp_send", "home_assistant")),
     ("phone", "שיחות טלפון", "Phone calls", ("assisted_dialing",)),
     ("dashboard", "לוח בקרה וטלפון", "Dashboard & phone", ("dashboard", "dashboard_lan", "mobile_access", "context_trace")),
-    ("updates", "עדכונים וגיבוי", "Updates & backup", ("update_check", "backup")),
+    ("updates", "עדכונים וגיבוי", "Updates & backup", ("update_check", "beta_channel", "release_signoff", "backup")),
     ("profiles", "פרופילים", "Profiles", ("profiles",)),
     ("helper", "עזרה במחשב (פקודות והתקנות)", "Computer helper (commands & installs)", ("helper", "helper_readonly_auto")),
     ("agents", "סוכני קוד", "Coding agents", ("agent_orchestrator",)),
@@ -967,6 +967,8 @@ BUNDLE: dict[str, list[Callable[[], tuple[bool, str]]]] = {
     "proactive_alerts": [_mod("jarves.alerts")],
     "autonomy": [_mod("jarves.autonomy")],
     "backup": [_mod("jarves.backup")],
+    "beta_channel": [_mod("jarves.updates")],
+    "release_signoff": [_mod("jarves.release_signoff")],
     "update_check": [_mod("jarves.updates"), _mod("jarves.migrations"), _data("jarves", "dashboard_static/updates.js"),
                      _mod("cryptography.hazmat.primitives.asymmetric.ed25519")],   # the signed-manifest check needs it
     "background_core": [_mod("jarves.runtime.service")],
