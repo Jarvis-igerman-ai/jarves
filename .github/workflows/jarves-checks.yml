@@ -97,8 +97,8 @@ jobs:
     env:
       PLAN: ${{ needs.changes.outputs.plan }}
       # pytest-xdist workers inside the shard (file-isolated: --dist loadfile). Repository variable CI_XDIST_WORKERS
-      # overrides; 1 = serial. Default: 3 on Linux, 2 on Windows.
-      XDIST_WORKERS: ${{ vars.CI_XDIST_WORKERS || (matrix.os == 'ubuntu-24.04' && '3' || '2') }}
+      # overrides; 1 = serial. Default: 2 on Windows; Linux is serial (3 workers made the per-user process limit of the isolation tests and the update-flow fakes fail on ubuntu-24.04: 20 failures).
+      XDIST_WORKERS: ${{ vars.CI_XDIST_WORKERS || (matrix.os == 'ubuntu-24.04' && '1' || '2') }}
     steps:
       - uses: actions/checkout@v7
       - id: gate

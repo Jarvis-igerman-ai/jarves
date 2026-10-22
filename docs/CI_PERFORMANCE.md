@@ -72,7 +72,7 @@ PR head (pull_request, merge ref)                      merge (automerge)        
    `python core/tools/ci_plan.py durations-merge --junit <dir of junit xml> --into core/tests/durations.json`.
    Inside a shard, `pytest-xdist` (pinned `pytest-xdist==3.8.0` through `uv run --with`, not in the lock) runs files in
    parallel workers with `--dist loadfile`: one file never splits across workers, and the suite already uses temp homes and
-   `free_port()` per test. Workers: 3 on Linux, 2 on Windows; repository variable `CI_XDIST_WORKERS` overrides, `1` turns it off.
+   `free_port()` per test. Workers: 1 (serial) on Linux (3 workers broke 20 process-limit/update-flow tests on ubuntu-24.04), 2 on Windows; repository variable `CI_XDIST_WORKERS` overrides, `1` turns it off.
    This replaces the old "serial on purpose" rule; the safety net is item 7.
 6. **Caching.** uv (lock hash), the Go module and build cache (`setup-go`), Playwright browsers (Linux), the Godot and Inno
    Setup downloads (`jarves-test-tools`), the installer build tools (Python, Godot templates, Inno Setup:
