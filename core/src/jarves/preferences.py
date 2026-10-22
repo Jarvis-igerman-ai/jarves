@@ -225,9 +225,9 @@ def augment_instructions(agent, prefs: "Preferences", feats=None) -> None:
 
 # ---------------------------------------------------------------------- voice / agent tools
 class SuggestArgs(BaseModel):
-    text: str = Field(..., min_length=3, max_length=MAX_TEXT, description="the preference, in the owner's terms")
-    evidence: str = Field(..., min_length=3, max_length=MAX_EVIDENCE, description="the owner's own words that state it")
-    topic: str = Field("other", max_length=20, description="voice, schedule, food, music, communication or other")
+    text: str = Field(..., min_length=3, max_length=MAX_TEXT)
+    evidence: str = Field(..., min_length=3, max_length=MAX_EVIDENCE)
+    topic: str = Field("other", max_length=20)
 
 
 class IdArgs(BaseModel):
@@ -297,16 +297,15 @@ def make_skill(prefs: Preferences):
                 return 1, "לשכוח את ההעדפה? / Forget this preference?"
 
             return [
-                Tool("pref_suggest", "When the owner STATES a lasting preference, propose it (never guess one). It is "
-                     "only a proposal: then ask whether to remember it. Never for secrets, numbers, health or money.",
+                Tool("pref_suggest", "Owner STATED a lasting preference: propose it, then ask. 'I always prefer', 'אני תמיד מעדיף'. Never secrets, health or money.",
                      suggest, SuggestArgs, permission="action"),
-                Tool("pref_confirm", "Remember a proposed preference after the owner said yes.", confirm, IdArgs,
+                Tool("pref_confirm", "Owner said yes: 'yes keep that preference', 'כן תשמור את ההעדפה'.", confirm, IdArgs,
                      permission="action", confirm="לזכור את ההעדפה הזאת? / Remember this preference?"),
-                Tool("pref_decline", "The owner said no to a proposed preference.", decline, IdArgs, permission="action"),
-                Tool("pref_show", "Read back the learned preferences and pending proposals.", show, NoArgs,
+                Tool("pref_decline", "Owner said no: 'no do not keep that preference', 'לא תשמור את ההעדפה'.", decline, IdArgs, permission="action"),
+                Tool("pref_show", "Read learned preferences: 'what preferences did you learn', 'אילו העדפות למדת'.", show, NoArgs,
                      permission="read"),
-                Tool("pref_edit", "Change the wording of a learned preference.", edit, EditArgs, permission="action"),
-                Tool("pref_forget", "Forget a learned preference (asks the owner first).", forget, IdArgs,
+                Tool("pref_edit", "Reword a preference: 'change the preference', 'תשנה את ההעדפה'.", edit, EditArgs, permission="action"),
+                Tool("pref_forget", "Forget a preference (asks): 'forget that preference', 'תשכח את ההעדפה'.", forget, IdArgs,
                      permission="destructive", impact=forget_impact),
             ]
 

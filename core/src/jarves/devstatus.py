@@ -395,7 +395,7 @@ def make_skill(home: Path, fetch: Fetch | None = None):
                 import asyncio
                 st = await asyncio.to_thread(build, Path(home), repo_of(home), fetch=fetch)
                 return ToolResult(True, sentence(st, "en"), {"summary": st["summary"], "notes": st["notes"]})
-            return [Tool("dev_status", "Say how development is going (read only).", status, NoArgs, permission="read")]
+            return [Tool("dev_status", "Dev status, read only: 'how is development going', 'מה מצב הפיתוח'.", status, NoArgs, permission="read")]
     return DevStatusSkill()
 
 

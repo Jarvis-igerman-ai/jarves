@@ -166,7 +166,7 @@ async def _deny(_: str) -> bool:
 
 
 
-_DROP_KEYS = ("title", "minLength", "maxLength", "default")
+_DROP_KEYS = ("title", "minLength", "maxLength", "default", "minimum", "maximum", "minItems", "maxItems")   # bounds: the Core validates every call itself
 
 
 def slim_schema(node: Any, _in_props: bool = False) -> Any:

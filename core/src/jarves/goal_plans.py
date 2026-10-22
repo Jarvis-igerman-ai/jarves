@@ -443,7 +443,7 @@ class PlanRunner:
 # ---------------------------------------------------------------------- voice / agent tools (tiny on purpose)
 class ProposeArgs(BaseModel):
     title: str = Field(..., min_length=1, max_length=MAX_TITLE)
-    steps: list[dict] = Field(..., min_length=1, max_length=MAX_STEPS, description="[{tool, args, why}]")
+    steps: list[dict] = Field(..., min_length=1, max_length=MAX_STEPS)
 
 
 class PlanIdArgs(BaseModel):
@@ -499,11 +499,11 @@ def make_skill(store: PlanStore, registry=None):
                 return ToolResult(True, "plan approved; it starts now and asks before each step that changes something")
 
             return [
-                Tool("goal_plan_propose", "Draft a plan of tool steps; does not run it.",
+                Tool("goal_plan_propose", "Draft a plan, does not run it: 'plan how to', 'תתכנן איך'.",
                      propose, ProposeArgs, permission="action"),
-                Tool("goal_plan_show", "Read plan status and result.", show, ShowArgs,
+                Tool("goal_plan_show", "Plan status: 'how is the plan', 'מה מצב התוכנית'.", show, ShowArgs,
                      permission="read"),
-                Tool("goal_plan_run", "Owner approves a drafted plan, then it runs.", run, PlanIdArgs,
+                Tool("goal_plan_run", "Run an approved plan: 'run the plan', 'תריץ את התוכנית'.", run, PlanIdArgs,
                      permission="action", timeout_s=300.0),
             ]
 

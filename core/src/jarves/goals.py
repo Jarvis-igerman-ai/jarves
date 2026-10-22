@@ -248,10 +248,10 @@ def checkin_text(c: dict) -> str:
 
 # ---------------------------------------------------------------------- voice / agent tools
 class AddArgs(BaseModel):
-    title: str = Field(..., min_length=1, max_length=MAX_TITLE, description="the outcome, e.g. 'run a 10k by March'")
+    title: str = Field(..., min_length=1, max_length=MAX_TITLE)
     details: str = Field("", max_length=MAX_DETAILS)
-    target_date: str = Field("", max_length=10, description="YYYY-MM-DD or empty")
-    steps: list[str] = Field(default_factory=list, max_length=MAX_STEPS, description="optional first steps")
+    target_date: str = Field("", max_length=10)
+    steps: list[str] = Field(default_factory=list, max_length=MAX_STEPS)
 
 
 class GoalArgs(BaseModel):
@@ -259,9 +259,9 @@ class GoalArgs(BaseModel):
 
 
 class StepAddArgs(BaseModel):
-    id: int = Field(..., ge=1, description="goal id")
+    id: int = Field(..., ge=1)
     text: str = Field(..., min_length=1, max_length=MAX_STEP)
-    outward: bool = Field(False, description="True when the step contacts other people or acts outside the PC")
+    outward: bool = Field(False)
 
 
 class StepArgs(BaseModel):
@@ -271,12 +271,12 @@ class StepArgs(BaseModel):
 
 class StatusArgs(BaseModel):
     id: int = Field(..., ge=1)
-    status: str = Field(..., max_length=10, description="active, paused, done or dropped")
+    status: str = Field(..., max_length=10)
 
 
 class ProgressArgs(BaseModel):
     id: int = Field(..., ge=1)
-    percent: int = Field(..., ge=0, le=100, description="only for a goal without steps")
+    percent: int = Field(..., ge=0, le=100)
 
 
 class NoArgs(BaseModel):
@@ -356,19 +356,18 @@ def make_skill(goals: Goals, registry=None):
                 return (1 if g else 0), f"למחוק את היעד '{g['title'] if g else a.id}'? / Delete this goal?"
 
             return [
-                Tool("goal_add", "Set a goal the owner asked for ('אני רוצה לרוץ 10 ק\"מ עד מרץ'), optionally with steps.",
+                Tool("goal_add", "Set a goal: 'set a goal to run a 10k', 'אני רוצה לרוץ 10 ק\"מ'.",
                      add, AddArgs, permission="action"),
-                Tool("goal_show", "Read the owner's open goals and their progress.", show, NoArgs, permission="read"),
-                Tool("goal_checkin", "The owner ASKED for a check-in on their goals: progress, stalled or overdue ones. "
-                     "Never offer or run one unprompted.", checkin, NoArgs, permission="action"),
-                Tool("goal_step_add", "Add a step to a goal (outward=true if it contacts others or acts outside).",
+                Tool("goal_show", "Read my goals: 'what are my goals', 'מה היעדים שלי'.", show, NoArgs, permission="read"),
+                Tool("goal_checkin", "Only when asked: 'goals check-in', 'סיכום יעדים'.", checkin, NoArgs, permission="action"),
+                Tool("goal_step_add", "Add a goal step: 'add a step to the goal', 'תוסיף צעד ליעד'.",
                      step_add, StepAddArgs, permission="action"),
-                Tool("goal_step_done", "Mark a goal step done (or not done). Outward-facing steps ask the owner.",
+                Tool("goal_step_done", "Tick a goal step (outward steps ask): 'step is done', 'סיימתי את הצעד'.",
                      step_done, StepArgs, permission="action", timeout_s=120.0),
-                Tool("goal_status", "Pause, resume, finish or drop a goal.", status, StatusArgs, permission="action"),
-                Tool("goal_progress", "Set the percent of a goal that has no steps.", progress, ProgressArgs,
+                Tool("goal_status", "Pause/resume/finish/drop a goal: 'pause the goal', 'תשהה את היעד'.", status, StatusArgs, permission="action"),
+                Tool("goal_progress", "Goal percent: 'goal is at 50 percent', 'היעד ב-50 אחוז'.", progress, ProgressArgs,
                      permission="action"),
-                Tool("goal_delete", "Delete a goal and its steps (asks the owner first).", delete, GoalArgs,
+                Tool("goal_delete", "Delete a goal (asks first): 'delete the goal', 'תמחק את היעד'.", delete, GoalArgs,
                      permission="destructive", impact=delete_impact),
             ]
 

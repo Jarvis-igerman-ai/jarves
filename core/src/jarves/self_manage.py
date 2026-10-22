@@ -725,18 +725,18 @@ class StatusArgs(BaseModel):
 
 class ChangeArgs(BaseModel):
     what: Literal["file", "memory_add", "memory_remove", "feature", "skill", "setting"]
-    target: str = Field("", max_length=60, description="file/memory/feature/skill id or setting key")
-    value: str = Field("", max_length=MAX_TEXT, description="text, on/off or value")
-    section: str = Field("", max_length=60, description="section heading (files)")
+    target: str = Field("", max_length=60)
+    value: str = Field("", max_length=MAX_TEXT)
+    section: str = Field("", max_length=60)
     mode: Literal["append", "replace_section", "remove_section", "replace_file"] = "append"
 
 
 class ConnectArgs(BaseModel):
-    which: str = Field("", max_length=20, description="google telegram pear wake instagram home|empty=all")
+    which: str = Field("", max_length=20)
 
 
 class UndoArgs(BaseModel):
-    change_id: str = Field("", max_length=20, description="empty = the last change")
+    change_id: str = Field("", max_length=20)
 
 
 def make_skill(mgr: SelfManager) -> Skill:
@@ -815,16 +815,15 @@ def make_skill(mgr: SelfManager) -> Skill:
 
         def tools(self) -> list[Tool]:
             return [
-                Tool("self_status", "My state: connections, features, skills, memory, files, improvements. 'מה מחובר?'",
+                Tool("self_status", "My own setup: 'self status', 'סטטוס עצמי'.",
                      status, StatusArgs, permission="read", timeout_s=20),
-                Tool("self_change", "Change myself (owner approves): .md section, memory, feature/skill on/off, setting. "
-                                    "'תוסיף ל-USER' 'turn off X'. No secrets.",
+                Tool("self_change", "Change myself, owner approves: 'change yourself', 'תשנה את עצמך'. No secrets.",
                      change, ChangeArgs, permission="destructive", impact=impact_change, precheck=pre_change,
                      approval_meta=meta_change, timeout_s=300),
-                Tool("self_connect", "Guided connect/fix of an account. 'תחבר את X'",
+                Tool("self_connect", "Guided account connect: 'connect my account', 'תחבר את החשבון'.",
                      connect, ConnectArgs, permission="destructive", impact=impact_connect, precheck=pre_connect,
                      approval_meta=meta_simple),
-                Tool("self_undo", "Undo my last self-change. 'בטל את זה'",
+                Tool("self_undo", "Undo my last self-change: 'undo your change', 'בטל את שינוי העצמי'.",
                      undo, UndoArgs, permission="destructive", impact=impact_undo, precheck=pre_undo,
                      approval_meta=meta_simple),
             ]

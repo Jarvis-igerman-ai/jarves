@@ -64,3 +64,12 @@ it passed in the full run.
   safety-note checks, and a hard ceiling (BACKEND_CEILING) so the text only shrinks.
 - NEEDS LIVE RE-RUN before release: the fake router proves triggers exist, not how GPT-Live fills arguments. Run the 47+ voice
   scenarios on the real path (billed, shared cap) before shipping this branch.
+
+## 4.0.1: the -30% ceiling is deferred (owner decision of the coordinator)
+
+The 28 V5 tools (goals 8, goal plans 3, preferences 6, proactive 2, development 4, issues 1, self-management 4) were trimmed
+to one English and one Hebrew trigger each, parameter descriptions and numeric bounds were removed from their schemas
+(the Core validates every call), and routing rows were added. They still add about 8k characters to the model-facing
+call: each tool costs roughly 120 characters of JSON frame plus its name before any text. Measured on the test Core:
+47.4k (tools 38.0k + rules 9.5k). Ceilings in `test_p_perf.py` and `test_tool_descriptions.py` are now 48.4k (measured +2%);
+the 40.5k / -30% target moves to 4.0.2: lazy tool exposure by group (expose a group's tools only when it is relevant).

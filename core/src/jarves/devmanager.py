@@ -70,7 +70,7 @@ def discard(store, tid: int, *, by: str = "user") -> bool:
 class SuggestArgs(BaseModel):
     title: str = Field(..., min_length=3, max_length=MAX_TITLE)
     body: str = Field("", max_length=MAX_BODY)
-    kind: str = Field("suggestion", max_length=10, description="suggestion or ticket")
+    kind: str = Field("suggestion", max_length=10)
 
 
 class IdArgs(BaseModel):
@@ -111,10 +111,10 @@ def make_skill(open_store):
             async def drop(a: IdArgs):
                 return (ToolResult(True, "discarded") if with_store(lambda s: discard(s, a.id, by="voice"))
                         else ToolResult(False, "no such draft", code="DEV_NOT_FOUND"))
-            return [Tool("dev_suggest", "Save a development idea or ticket as a LOCAL draft (never posted).", add,
+            return [Tool("dev_suggest", "Save a dev idea as LOCAL draft, never posted: 'idea for JARVES', 'רעיון לפיתוח'.", add,
                          SuggestArgs, permission="action"),
-                    Tool("dev_drafts", "List the local development drafts.", show, NoArgs, permission="read"),
-                    Tool("dev_discard", "Discard a local development draft.", drop, IdArgs, permission="action")]
+                    Tool("dev_drafts", "List dev drafts: 'dev drafts', 'טיוטות פיתוח'.", show, NoArgs, permission="read"),
+                    Tool("dev_discard", "Discard a dev draft: 'discard the draft', 'תמחק את הטיוטה'.", drop, IdArgs, permission="action")]
     return DevSkill()
 
 

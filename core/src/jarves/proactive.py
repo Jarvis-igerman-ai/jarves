@@ -131,9 +131,9 @@ def make_skill(p: Proactive):
             async def dismiss(a: IdArgs):
                 return (ToolResult(True, "dismissed") if p.dismiss(a.id, by="voice")
                         else ToolResult(False, "no such item", code="PROACTIVE_NOT_FOUND"))
-            return [Tool("proactive_show", "List what JARVES could mention (only when asked).", show, NoArgs,
+            return [Tool("proactive_show", "On request only: 'anything to mention', 'יש משהו להזכיר'.", show, NoArgs,
                          permission="read"),
-                    Tool("proactive_dismiss", "Dismiss a proactive item.", dismiss, IdArgs, permission="action")]
+                    Tool("proactive_dismiss", "Dismiss a proactive item: 'dismiss that offer', 'תתעלם מההצעה'.", dismiss, IdArgs, permission="action")]
     return ProactiveSkill()
 
 
