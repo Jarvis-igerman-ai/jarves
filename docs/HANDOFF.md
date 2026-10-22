@@ -1,3 +1,18 @@
+## CI follow-up (22 Oct 2026) — stacked on PR #44, not merged
+
+- Owner request in this session authorizes the follow-up PR and real Actions verification. One writer, isolated branch
+  ci/linux-shards-and-fast-validation; base ci/speedup-and-continuous-release. No release, merge or branch-protection change.
+- Changes: three serial Linux runners; early workflow/planner/docs validation gates all heavy jobs; setup CLI unit test
+  fakes external setup actions but asserts connector wiring; fix the inherited cancellation assertion and DOC_MAP entries.
+- Local check: from core, uv run pytest -q -rs --durations=10 tests/test_ci_workflows.py tests/test_ci_pipeline.py
+  tests/test_ci_speed_tools.py tests/test_docs_links.py tests/test_units.py::test_cli_setup_paths — 78 passed in 32.16 s,
+  zero skips. Setup test 3.80 s locally (prior hosted Windows 173.33 s; different hosts).
+- Hosted CI: pending the final-commit run; no claim of green or of the estimated 8-10 minute target yet.
+- Decision queue: existing branch-protection choice, beta activation, duplicate CodeQL setup and artifact retention remain
+  DEFERRED to the release coordinator; no settings changed. Prior merge freeze is respected: this PR is not merged.
+  Browser readiness changes, dependency-stage caching and platform-specific duration histories are DEFERRED; unnecessary
+  to validate this bounded first follow-up. No new user decision is needed to test the requested PR.
+
 ## CI/release speed pass 2 (22 Oct 2026) - branch `ci/perf2` (on PR #44), NOT pushed (merge freeze until 4.0.0 is released)
 
 - Installer build + smoke now runs in parallel with the tests; publishing waits for the whole green run. The installer artifact is `jarves-installer-<tree>` (tree = git tree minus docs); a `main` push whose tree is already proven by a green PR run skips every job, and `jarves-package` / `release.yml` use the PR's artifact (verify by tree, `release.py stamp` at manifest level, no rebuild). Duplicate runs removed, `ci-ok` single required check, path filters in `core/tools/ci_plan.py`, duration-planned shards + xdist (`CI_XDIST_WORKERS`), per-file known-flake retry (`ci_flake.py`), `release_status.py`, `gh workflow run package.yml -f ref=main`, Dependabot patch/minor auto-label (`DEPENDABOT_AUTOMERGE=false` disables).

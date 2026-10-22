@@ -91,7 +91,7 @@ def split(weights: dict[str, float], n: int) -> list[list[str]]:
     return shards
 
 
-def plan(tests_dir: Path = TESTS, durations: dict[str, float] | None = None, windows: int = 3, linux: int = 1) -> dict:
+def plan(tests_dir: Path = TESTS, durations: dict[str, float] | None = None, windows: int = 3, linux: int = 3) -> dict:
     w = file_weights(tests_dir, durations)
     win, lin = split(w, windows), split(w, linux)
     return {"windows": win, "linux": lin,

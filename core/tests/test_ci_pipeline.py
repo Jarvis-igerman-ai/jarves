@@ -136,11 +136,12 @@ def test_ci_minutes_summary():
 def test_windows_core_tests_run_in_three_shards_and_browser_tests_are_their_own_job():
     jobs = load("jarves-checks.yml")["jobs"]
     inc = jobs["core"]["strategy"]["matrix"]["include"]
-    assert sorted(i["shard"] for i in inc if i["os"] == "windows-2025") == ["1/3", "2/3", "3/3"]
+    for os_name in ("ubuntu-24.04", "windows-2025"):
+        assert sorted(i["shard"] for i in inc if i["os"] == os_name) == ["1/3", "2/3", "3/3"]
     run = "\n".join(s.get("run", "") for s in jobs["core"]["steps"])
     assert "--browser exclude --shard-files" in run and "--shard ${{ matrix.shard }}" in run and "skipped" in run
     b = jobs["browser"]
-    assert b["needs"] == "changes" and "retry" in steps_text(b) and "--browser only" in steps_text(b)
+    assert set(b["needs"]) == {"changes", "validate"} and "retry" in steps_text(b) and "--browser only" in steps_text(b)
     assert "skipped" in steps_text(b)
 
 
@@ -189,3 +190,14 @@ def test_security_files_exist():
     ss = yaml.safe_load((ROOT / ".github" / "secret_scanning.yml").read_text(encoding="utf-8"))
     assert set(ss["paths-ignore"]) == {"core/tools/redaction_audit.py", "core/tools/campaign_stages_v4.py"}
     assert all((ROOT / p).is_file() for p in ss["paths-ignore"])
+
+
+def test_fast_validation_blocks_expensive_jobs_and_reports_to_ci_ok():
+    jobs = load("jarves-checks.yml")["jobs"]
+    validation = steps_text(jobs["validate"])
+    for file in ("test_ci_workflows.py", "test_ci_pipeline.py", "test_ci_speed_tools.py", "test_docs_links.py"):
+        assert file in validation
+    assert "--all-extras" not in validation
+    for jid in ("core", "browser", "installer", "whatsapp-bridge", "perf", "cad", "blender", "godot", "e2e"):
+        assert "validate" in jobs[jid]["needs"], jid
+    assert "validate" in jobs["ci-ok"]["needs"]

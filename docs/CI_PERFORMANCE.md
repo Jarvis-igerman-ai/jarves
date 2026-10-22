@@ -11,7 +11,7 @@ first CI run after the 4.0.0 freeze replaces every "est." with a measurement (re
 | Step | Before (4.0.0 main, run 39676015294, measured) | PR #44 sharding (run 39669040218, measured) | This change |
 | --- | --- | --- | --- |
 | Windows Core tests | 1726 s serial (28.8 min) | 366 / 437 / 637 s shards, +105 s and +235 s runner queue (wall 14.7 min) | 3 shards balanced by measured seconds, slowest file first, xdist x2 in each: est. 4-6 min |
-| Linux Core tests | 851 s (14.2 min) | 771 s | xdist x3, est. 5-6 min |
+| Linux Core tests | 851 s (14.2 min) | 771 s | 3 isolated runners, serial within each; est. 5-6 min, pending CI |
 | Installer build + smoke | 451 s, started only AFTER the tests | same, still after the tests | 400-450 s (measured on 3 runs), **in parallel with the tests** |
 | PR wall clock (tests + installer) | 36.3 min (1726 + 451 s) | about 22 min (14.7 + 7.5) | **est. 8-9 min** (installer is the long pole) |
 | Push to `main` after the merge | 37.1 min (21:06:15 to 21:43:24): repeats tests and installer | same | **about 30 s**: finds the PR proof, skips everything |
@@ -27,8 +27,8 @@ the 20-concurrent-job limit is not close (a PR now uses 7 Windows jobs at peak).
 
 ```
 PR head (pull_request, merge ref)                      merge (automerge)              main push
- changes (20 s)                                                                        changes (30 s)
-  |-- core: 3 Windows shards + Linux (xdist, planned)  \                                 tree == a proven PR tree?
+ changes + fast validation                                                                        changes (30 s)
+  |-- core: 3 Windows + 3 serial Linux shards (planned)  \                                 tree == a proven PR tree?
   |-- browser, e2e, perf, bridge, cad, blender, godot  >  ci-ok (single required check)    yes: every job skipped
   '-- installer: build + silent-install smoke ---------/                                 no : full matrix (fallback)
         uploads jarves-installer-<tree>                                                  |
@@ -59,12 +59,12 @@ PR head (pull_request, merge ref)                      merge (automerge)        
    `.exe` is never touched, so its SHA256 (checked by `verify`) is the one the smoke test ran. Nothing signs the exe itself
    today (the manifest is the Ed25519-signed object), so no re-signing of the binary is needed.
 4. **Path filters** (`core/tools/ci_plan.py`, unit-tested): docs, `CLAUDE.md`, root `*.md` run nothing; guides-only
-   (`core/src/jarves/guides/data/*.toml`) run only the Linux Core shard (the Windows shard jobs start, see the gate step, and
+   (`core/src/jarves/guides/data/*.toml`) run only the Linux Core shards (the Windows shard jobs start, see the gate step, and
    finish in seconds so required check names still report); the Go bridge only for `bridge/`, `packaging/bridge_pin.json`
    or its build script; CAD for `cad/`; Blender for `blender/`, `cad/`, `godot/`; Godot for `godot/`, `blender/`; the
    installer, perf and e2e for `core/src`, packaging, Godot and the dependency lock. Changing the workflow file, the CI tools
    or `tests/conftest.py` runs everything. Main pushes, tags and manual runs always run everything unless the tree is proven.
-5. **Test sharding by measured duration.** `ci_plan.py` plans 3 Windows shards and 1 Linux shard from
+5. **Test sharding by measured duration.** `ci_plan.py` plans 3 Windows shards and 3 Linux shards from
    `durations.json` (seconds per test file), falling back to test counts for unmeasured files. The plan is computed once
    in `changes` and handed to every shard (`--shard-files`, slowest file first), so shards cannot disagree. After every full
    run on `main` the `durations` job merges the junit files of all shards into a cache entry (`jarves-durations-<run>`) that
@@ -118,7 +118,8 @@ legitimately skipped, red on failure or cancellation). The per-job names below a
 | Job id | Name |
 | --- | --- |
 | changes | Classify the change (docs-only skips heavy jobs; reuse of the PR proof) |
-| core | Python Core tests (ubuntu-24.04 shard 1/1), (windows-2025 shard 1/3), (windows-2025 shard 2/3), (windows-2025 shard 3/3) |
+| validate | Fast CI and documentation validation |
+| core | Python Core tests (ubuntu-24.04 shard 1/3), (ubuntu-24.04 shard 2/3), (ubuntu-24.04 shard 3/3), (windows-2025 shard 1/3), (windows-2025 shard 2/3), (windows-2025 shard 3/3) |
 | browser | Real-browser tests (ubuntu-24.04), Real-browser tests (windows-2025) |
 | installer | Windows installer (build + silent install smoke) |
 | whatsapp-bridge | WhatsApp bridge (Go vet/test + reproducible build) |
@@ -147,3 +148,24 @@ xfailed test. Filtering is by *deselection* (file plan, OS markers), never by sk
 | `packaging/release.py verify / stamp / candidate` | provenance by commit or tree, manifest-level stamping |
 
 Unit tests: `core/tests/test_ci_speed_tools.py` (offline, no skips).
+
+## Follow-up: isolated Linux shards and early validation (22 Oct 2026)
+
+Stacked on PR #44. Linux uses three separate hosted runners with one pytest worker each by default, so its tests do not
+share a process quota, ports or working directory across shards. Both platforms execute the complete non-browser file
+set exactly once; the fast gate checks coverage before the heavy jobs start. The existing CI_XDIST_WORKERS override is
+unchanged. The installer still runs concurrently with the Core shards after validation.
+
+The fast validation job runs workflow contracts, CI helper tests, shard coverage and documentation links using the
+locked base dependencies without optional extras. Every expensive job depends on its success, and ci-ok includes its
+result. It also runs for docs-only changes: an invalid documentation map must fail even when runtime jobs are deselected.
+The two failures inherited from PR #44 (missing document-map entries and a stale cancellation assertion) are corrected.
+
+The setup CLI unit test substitutes the connection runner and prerequisite preparation while asserting that the real
+CLI/wizard invokes the connector. Real connector behavior remains covered by test_connect.py; the unit test no longer
+waits for an absent Pear Desktop or installs optional software. Local Windows result: 3.80 s for this test; prior hosted
+Windows result: 173.33 s (different machines, so this is not a controlled speedup measurement).
+
+Local focused validation: 78 passed in 32.16 s, zero skips. Full hosted-run timings and results belong in HANDOFF.md.
+Linux estimates above remain estimates until that run completes. Branch protection should use ci-ok; any explicitly
+required old Linux shard 1/1 check must be updated when this stacked change reaches main.
