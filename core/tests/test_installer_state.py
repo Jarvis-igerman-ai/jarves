@@ -104,3 +104,30 @@ def test_offline_rollback_restores_verified_legacy_data(tmp_path):
     installer.complete(home, state)
     installer.restore_data(home, state)
     assert seed.verify(home, legacy=True) == []
+
+
+@pytest.mark.windows_only
+def test_upgrade_matrix_forwards_named_metrics_and_switches(tmp_path):
+    import hashlib
+    import shutil
+    import subprocess
+    cache = tmp_path / "cache"
+    cache.mkdir()
+    fixture = cache / "JARVES-Setup-4.0.0.153.exe"
+    fixture.write_bytes(b"fake fixture; never executed")
+    (tmp_path / "upgrade_fixtures.json").write_text(json.dumps({"fixtures": [{
+        "series": "fake", "version": "4.0.0.153", "url": "https://invalid.example/unused",
+        "sha256": hashlib.sha256(fixture.read_bytes()).hexdigest()}]}))
+    shutil.copyfile(PKG / "upgrade_matrix.ps1", tmp_path / "upgrade_matrix.ps1")
+    (tmp_path / "smoke_windows.ps1").write_text('''param([string]$Installer, [string]$Version, [string]$Work = "",
+        [string]$UpgradeFrom, [switch]$Rollback, [switch]$SkipDoctor, [string]$MetricsOut)
+if ($Work -or -not $Rollback -or -not $SkipDoctor -or -not $MetricsOut) { throw "wrong argument binding" }
+@{version=$Version; old=$UpgradeFrom; candidate=$Installer} | ConvertTo-Json | Set-Content $MetricsOut
+exit 0
+''')
+    metrics = tmp_path / "metrics"
+    subprocess.run(["pwsh", "-NoProfile", "-File", str(tmp_path / "upgrade_matrix.ps1"),
+                    "-Candidate", str(tmp_path / "candidate.exe"), "-Version", "4.0.1.1", "-Cache", str(cache),
+                    "-MetricsDir", str(metrics), "-SkipDoctor"], check=True, capture_output=True, text=True)
+    report = json.loads((metrics / "upgrade-4.0.0.153-metrics.json").read_text(encoding="utf-8-sig"))
+    assert report["old"] == str(fixture) and report["version"] == "4.0.1.1"

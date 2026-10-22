@@ -7,25 +7,29 @@ Status: implementation and measurement in PR #68; owner-PC timing and guided das
 Baseline: [green run 39737015500](https://github.com/igalgerman/jarves/actions/runs/39737015500), installer job 119685890222.
 First speed checkpoint: [run 39741458836](https://github.com/igalgerman/jarves/actions/runs/39741458836), head 84742a9. Both installer smoke profiles passed; the overall run failed an unrelated workspace-memory test.
 
-| Stage | Baseline | First checkpoint |
+| Stage | Baseline | Full installer checkpoint (01f78cd) |
 |---|---:|---:|
-| Python extraction | 1.43 s | 2.06 s |
-| Dependencies | 8.39 s | 3.22 s |
-| Wheel/log index and Python checks | about 7.95 s | 21.43 s |
-| Godot export | 23.09 s, serial | overlaps Python; exact duration in build-stages.json |
-| Payload check | 2.27 s | 1.90 s |
-| Archive plus import verification | absent | 7.68 s |
-| Release compression (lzma2/max) | 91.26 s | about 89.48 s |
-| Fast CI compression (lzma2/fast) | absent | 17.40 s |
-| Release script build | 134.4 s | 131.0 s |
-| CI smoke script build (shared bundle plus fast compression) | absent | 59.2 s |
-| Clean release install on GitHub runner | 50.8 s | 49.1 s |
-| Clean fast-profile install on GitHub runner | absent | 45.3 s |
-| Release uninstall | 19.5 s | 8.8 s |
+| Python extraction | 1.43 s | 1.47 s |
+| Dependencies | 8.39 s | 2.60 s |
+| Wheel/log index and Python checks | about 7.95 s | 14.59 s |
+| Godot export | 23.09 s, serial | 22.05 s, overlaps Python |
+| Wait for parallel face bundle | absent | 3.80 s |
+| Payload check | 2.27 s | 1.07 s |
+| Archive plus import verification | absent | 5.12 s |
+| Release compression (lzma2/max) | 91.26 s | 78.05 s |
+| Fast CI compression (lzma2/fast) | absent | 14.62 s |
+| Release script build | 134.4 s | 107.3 s |
+| CI smoke script build (shared bundle plus fast compression) | absent | 43.9 s |
+| Clean release install on GitHub runner | 50.8 s | 38.0 s |
+| Clean fast-profile install on GitHub runner | absent | 40.6 s |
+| Release same-version upgrade | about 67.7 s | 44.7 s |
+| Release uninstall | 19.5 s | 12.9 s |
 
-The first build job was 4m11s, including Go/tool setup and both compiler profiles. The old 7m42s job also included sequential smoke checks; those are now separate concurrent jobs. This is **not** evidence that all installer checks finish within five minutes. The final old-version fixture adds real coverage which the empty baseline matrix never ran. Build, clean install, upgrade, rollback and all-checks elapsed time must be reported separately.
+The full installer checkpoint is [run 39744188052](https://github.com/igalgerman/jarves/actions/runs/39744188052). Both release and fast-profile full smoke checks passed. Its newly activated real-version matrix exposed a PowerShell named-argument binding error, fixed with a regression check before the synchronized final run.
 
-The owner's roughly four-minute install and the under-two-minute target are not verified by GitHub runner timings. The first archive reduced 11,236 staged files to 9,911. The final checkpoint also permits documentation-only files in reviewed code packages, including OpenAI; runtime prompt/resource packages and native modules remain unpacked. Final figures are recorded in the PR after CI.
+The build job was 3m21s, including Go/tool setup and both compiler profiles. The old 7m42s job also included sequential smoke checks; those are now separate concurrent jobs. This is **not** evidence that all installer checks finish within five minutes: release smoke finished at 08:04:41Z after the build began at 07:57:52Z, about 6m49s. The old-version fixture adds real coverage which the empty baseline matrix never ran. Build, clean install, upgrade, rollback and all-checks elapsed time must be reported separately.
+
+The owner's roughly four-minute install and the under-two-minute target are not verified by GitHub runner timings. The full checkpoint stages 7,918 files, including one archive containing 2,656 library files (16.98 MB). Runtime prompt/resource packages and native modules remain unpacked. Exact final-head figures are recorded in the PR after CI.
 
 ## Build and publication
 
