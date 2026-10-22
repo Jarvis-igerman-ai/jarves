@@ -24,6 +24,7 @@ from . import autonomy as autonomy_mod
 from . import connect as connect_mod
 from . import features as feat
 from . import goals as goals_mod
+from . import goal_plans as plans_mod
 from . import lists as lists_mod
 from . import logs
 from . import notes as notes_mod
@@ -205,6 +206,11 @@ class Operations:
                                               alerts=self.alerts)
         self.lists = lists_mod.Lists(self.db)
         self.goals = goals_mod.Goals(self.db)
+        self.plans = plans_mod.PlanStore(self.db, known=core.registry.get)
+        self.plans.recover()                 # a plan that was running when the Core stopped is paused, never repeated
+        self.plan_runner = plans_mod.PlanRunner(self.plans, core.registry, budget=getattr(core, "budget", None),
+                                                features=core.features)
+        self._plan_task: asyncio.Task | None = None
         self.prefs = prefs_mod.Preferences(self.db)
         self.proactive = proactive_mod.Proactive(self.db, self.goals)
         self.cheer = goals_mod.GoalCheer(self.goals, quiet=lambda: calm.quiet_hours_now(self.db, time.time()),
@@ -212,6 +218,7 @@ class Operations:
         self.timers = timers_mod.Timers(self.db, tz=self.scheduler.tz)
         reg = core.registry
         for skill in [lists_mod.make_skill(self.lists), goals_mod.make_skill(self.goals, reg),
+                      plans_mod.make_skill(self.plans, reg),
                       prefs_mod.make_skill(self.prefs), proactive_mod.make_skill(self.proactive),
                       dev_mod.make_skill(self._open_store), devstatus_mod.make_skill(home), timers_mod.make_skill(self.timers), *sched_mod.make_skills(self.scheduler, reg), notes_mod.make_skill(self.notes, self.sandbox),
                       sandbox_mod.make_skill(self.sandbox), alerts_mod.make_skill(self.alerts),
@@ -222,7 +229,7 @@ class Operations:
         reg.allowed_actions |= (sched_mod.ALLOWED_ACTIONS | notes_mod.ALLOWED_ACTIONS | sandbox_mod.ALLOWED_ACTIONS
                                 | alerts_mod.ALLOWED_ACTIONS | autonomy_mod.ALLOWED_ACTIONS
                                 | lists_mod.ALLOWED_ACTIONS | timers_mod.ALLOWED_ACTIONS
-                                | goals_mod.ALLOWED_ACTIONS | prefs_mod.ALLOWED_ACTIONS
+                                | goals_mod.ALLOWED_ACTIONS | plans_mod.ALLOWED_ACTIONS | prefs_mod.ALLOWED_ACTIONS
                                 | proactive_mod.ALLOWED_ACTIONS | dev_mod.ALLOWED_ACTIONS)
         self._task: asyncio.Task | None = None
         self._timer_task: asyncio.Task | None = None
@@ -261,6 +268,7 @@ class Operations:
 
     def start(self) -> None:
         self._task = asyncio.get_running_loop().create_task(self.scheduler.run(self._after_tick), name="operations")
+        self._plan_task = asyncio.get_running_loop().create_task(self.plan_runner.run(), name="goal_plans")
         ring = TimerRinger(self.core)
         self._timer_task = asyncio.get_running_loop().create_task(
             self.timers.run(lambda t, text: ring(t, text) if self.core.features.active("timers") else _false()),
@@ -329,6 +337,10 @@ class Operations:
             await self.selfcheck.stop()
         await self.scheduler.stop()
         self.timers.stop()
+        self.plan_runner.stop()
+        if self._plan_task is not None and not self._plan_task.done():
+            self._plan_task.cancel()
+            await asyncio.gather(self._plan_task, return_exceptions=True)
         if self._timer_task is not None:
             await asyncio.gather(self._timer_task, return_exceptions=True)
         if self._task is not None and not self._task.done():
@@ -350,6 +362,6 @@ def api_platforms(ctx, m, body):
 
 
 def dashboard_routes(register) -> None:
-    for mod in (sched_mod, alerts_mod, notes_mod, sandbox_mod, autonomy_mod, timers_mod, lists_mod):
+    for mod in (sched_mod, alerts_mod, notes_mod, sandbox_mod, autonomy_mod, timers_mod, lists_mod, plans_mod):
         mod.dashboard_routes(register)
     register("GET", r"/api/m3/platforms", api_platforms)

@@ -57,6 +57,19 @@ CREATE TABLE IF NOT EXISTS goal_steps (
     id INTEGER PRIMARY KEY AUTOINCREMENT, goal_id INTEGER NOT NULL, text TEXT NOT NULL,
     done INTEGER NOT NULL DEFAULT 0, outward INTEGER NOT NULL DEFAULT 0, created REAL NOT NULL, done_at REAL);
 CREATE INDEX IF NOT EXISTS goal_steps_g ON goal_steps (goal_id);
+CREATE TABLE IF NOT EXISTS goal_plans (
+    id INTEGER PRIMARY KEY AUTOINCREMENT, goal_id INTEGER NOT NULL DEFAULT 0, title TEXT NOT NULL,
+    state TEXT NOT NULL,                        -- draft | ready | running | paused | blocked | done | failed | cancelled
+    note TEXT NOT NULL DEFAULT '', result TEXT NOT NULL DEFAULT '', created REAL NOT NULL, updated REAL NOT NULL,
+    approved_at REAL, started REAL, finished REAL, timeout_s REAL NOT NULL DEFAULT 1800, max_ai INTEGER NOT NULL DEFAULT 20,
+    ai_base INTEGER NOT NULL DEFAULT 0, spent_s REAL NOT NULL DEFAULT 0, tainted INTEGER NOT NULL DEFAULT 0);
+CREATE TABLE IF NOT EXISTS goal_plan_steps (
+    id INTEGER PRIMARY KEY AUTOINCREMENT, plan_id INTEGER NOT NULL, idx INTEGER NOT NULL, tool TEXT NOT NULL,
+    args TEXT NOT NULL DEFAULT '{}', why TEXT NOT NULL DEFAULT '',
+    status TEXT NOT NULL,                       -- pending | running | done | failed | blocked | unknown | skipped
+    consequential INTEGER NOT NULL DEFAULT 0, attempts INTEGER NOT NULL DEFAULT 0, started REAL, finished REAL,
+    evidence TEXT NOT NULL DEFAULT '', error TEXT NOT NULL DEFAULT '');
+CREATE INDEX IF NOT EXISTS goal_plan_steps_p ON goal_plan_steps (plan_id, idx);
 CREATE TABLE IF NOT EXISTS learned_prefs (
     id INTEGER PRIMARY KEY AUTOINCREMENT, text TEXT NOT NULL, norm TEXT NOT NULL, topic TEXT NOT NULL DEFAULT 'other',
     state TEXT NOT NULL,                        -- proposed | confirmed | declined
