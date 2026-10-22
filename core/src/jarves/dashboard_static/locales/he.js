@@ -1617,7 +1617,35 @@
   "Warning": "אזהרה",
   "Skipped": "דולג",
   "No data": "אין נתון",
-  "dashboard Health & speed page, jarvis selftest, jarvis speedtest, Jobs page (times)": "עמוד תקינות ומהירות בלוח הבקרה, jarvis selftest, jarvis speedtest, עמוד המשימות הקבועות (שעות)"
+  "dashboard Health & speed page, jarvis selftest, jarvis speedtest, Jobs page (times)": "עמוד תקינות ומהירות בלוח הבקרה, jarvis selftest, jarvis speedtest, עמוד המשימות הקבועות (שעות)",
+  "only a [0-9]raft plan can be approve[0-9]": "ניתן לאשר רק תוכנית שהיא טיוטה",
+  "only a rea[0-9]y or running plan can be pause[0-9]": "ניתן להשהות רק תוכנית מאושרת או רצה",
+  "only a pause[0-9] or blocke[0-9] plan can be resume[0-9]": "ניתן להמשיך רק תוכנית מושהית או חסומה",
+  "only a faile[0-9], blocke[0-9] or pause[0-9] plan can be retrie[0-9]": "ניתן לנסות שוב רק תוכנית שנכשלה, חסומה או מושהית",
+  "no faile[0-9] or blocke[0-9] step to retry": "אין צעד שנכשל או חסום לנסות שוב",
+  "this plan is alrea[0-9]y finishe[0-9]": "התוכנית כבר הסתיימה",
+  "no such step to skip": "אין צעד כזה לדילוג",
+  "pause or cancel the plan first": "קודם להשהות או לבטל את התוכנית",
+  "a plan nee[0-9]s a title": "לתוכנית נדרשת כותרת",
+  "a plan nee[0-9]s at least one step": "לתוכנית נדרש לפחות צעד אחד",
+  "no such plan": "אין תוכנית כזו",
+  "op must be approve, pause, resume, cancel, retry, skip or [0-9]elete": "הפעולה חייבת להיות approve, pause, resume, cancel, retry, skip או [0-9]elete",
+  "Asks first": "שואל לפני ביצוע",
+  "Retry": "ניסיון חוזר",
+  "Skip": "דילוג",
+  "Time cap ": "זמן מרבי ",
+  " min, AI requests ": " דק׳, בקשות AI ",
+  "Approve and run (asks on your screen)": "אישור והרצה (מבקש אישור על המסך)",
+  "Goal plans": "תוכניות ליעדים",
+  "A plan is a short list of steps using existing tools. It runs only after you approve it and asks before every step that changes something.": "תוכנית היא רשימת צעדים קצרה של כלים קיימים. היא רצה רק אחרי שאישרת אותה, ושואלת לפני כל צעד ששינה משהו.",
+  "No plans. Say: \"plan how to ...\" or run: jarvis goals plan new.": "אין תוכניות. אמרו: \"תתכנן איך ל...\" או: jarvis goals plan new.",
+  "Draft, waiting for your approval": "טיוטה, ממתינה לאישורך",
+  "Approved, starting": "מאושרת, מתחילה",
+  "Blocked, needs you": "חסומה, צריכה אותך",
+  "Cancelled": "בוטלה",
+  "Pending": "ממתין",
+  "Blocked": "חסום",
+  "May have run": "לא ברור אם בוצע"
  },
  "rules": [
   [
@@ -1803,6 +1831,34 @@
   [
    "^config (\\S.*)$",
    "הגדרה: $1"
+  ],
+  [
+   "^at most ([0-9]+) steps in a plan$",
+   "לכל היותר $1 צעדים בתוכנית"
+  ],
+  [
+   "^at most ([0-9]+) open plans$",
+   "לכל היותר $1 תוכניות פתוחות"
+  ],
+  [
+   "^step ([0-9]+): unknown or unavailable tool (.+)$",
+   "צעד $1: כלי לא מוכר או לא זמין $2"
+  ],
+  [
+   "^step ([0-9]+): a plan cannot contain plan tools$",
+   "צעד $1: תוכנית אינה יכולה להכיל כלי תוכנית"
+  ],
+  [
+   "^step ([0-9]+): invali[0-9] arguments for (.+)$",
+   "צעד $1: ארגומנטים לא תקינים עבור $2"
+  ],
+  [
+   "^step ([0-9]+): arguments too long$",
+   "צעד $1: הארגומנטים ארוכים מדי"
+  ],
+  [
+   "^step ([0-9]+) may alrea[0-9]y have run before the stop: retry or skip it first$",
+   "ייתכן שצעד $1 כבר בוצע לפני העצירה: קודם לנסות שוב או לדלג"
   ]
  ]
 };

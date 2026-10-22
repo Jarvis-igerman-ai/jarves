@@ -37,7 +37,7 @@ FEATURES: dict[str, object] = {
     "backup": "backup", "appearance": (D, "face theme and avatar are picked on the Appearance page"),
     "skill_creation": (D, "proposed Skills are reviewed on the New Skills page (risky: approval on screen)"),
     "guided_setup": "setup", "self_check": "diagnose", "scheduler": "jobs", "reports": "reports", "notes": "notes",
-    "timers": "timers", "lists": "lists", "goals": "goals", "adaptive_memory": "prefs", "prefs_in_prompt": "prefs",
+    "timers": "timers", "lists": "lists", "goals": "goals", "goal_plans": "goals", "adaptive_memory": "prefs", "prefs_in_prompt": "prefs",
     "goal_done_line": (D, "a pure switch; change it with `jarvis features`"), "proactive_intel": "proactive",
     "dev_manager": "dev", "files": (D, "the file workspace is browsed on the My files page"),
     "proactive_alerts": (D, "alerts are read and answered on the Alerts page"),
@@ -66,7 +66,7 @@ TOOL_GROUPS: dict[str, object] = {
     "contacts": "contacts", "dashboard": "dashboard", "display": "show", "features": "features",
     "files": (D, "the My files page"), "gmail": "mail", "google_connect": "google",
     "google_contacts": "contacts", "help": "help", "helper": "approvals", "home": "home",
-    "goals": "goals", "preferences": "prefs", "proactive": "proactive", "dev": "dev", "identity": "setup", "instagram": "instagram", "lists": "lists", "memory": "memory", "music": "music",
+    "goals": "goals", "goal_plans": "goals", "preferences": "prefs", "proactive": "proactive", "dev": "dev", "identity": "setup", "instagram": "instagram", "lists": "lists", "memory": "memory", "music": "music",
     "notes": "notes", "profiles": "profile", "reports": "reports", "scheduler": "jobs", "self_check": "diagnose",
     "settings": (D, "settings are edited on the Settings page"), "skill_builder": (D, "the New Skills page"),
     "status": "status", "tasks": (D, "the Background tasks page"), "telegram": "telegram", "timers": "timers",
@@ -217,11 +217,85 @@ def cmd_lists(a, cfg, home) -> int:
 
 
 # ---------------------------------------------------------------------- goals / learned preferences (V5 pillars)
+def _cmd_plan(a, cfg, home, db) -> int:
+    """`jarvis goals plan ...`: the same PlanStore as the voice tools and the dashboard Goal plans page. The running
+    Core executes approved plans (it polls every 2 s); without a Core they wait, nothing runs from this command."""
+    import json as _json
+    from .goal_plans import PlanStore, describe, summary
+    st = PlanStore(db)
+    act = a.plan_action
+
+    def show(p):
+        print(summary(p))
+        for s in p["steps"]:
+            print(f"   {s['idx'] + 1}. [{s['status']}] {s['tool']} {_json.dumps(s['args'], ensure_ascii=False)}"
+                  + (f"  -> {s['evidence']}" if s["evidence"] else "") + (f"  ({s['error']})" if s["error"] else ""))
+        if p["result"]:
+            print("   " + clilang.fmt("תוצאה: ", "result: ") + p["result"])
+    try:
+        if act == "list":
+            rows = st.list()
+            for p in rows:
+                print(summary(p))
+            if not rows:
+                print(clilang.fmt("אין תוכניות", "no plans yet"))
+            return 0
+        if act == "show":
+            p = st.get(a.id)
+            if not p:
+                print(clilang.fmt("אין תוכנית כזו", "no such plan"), file=sys.stderr)
+                return 1
+            show(p)
+            return 0
+        if act == "new":
+            steps = []
+            for spec in a.step:
+                tool, _, raw = spec.partition("=")
+                steps.append({"tool": tool.strip(), "args": _json.loads(raw) if raw.strip() else {}})
+            p = st.propose(a.title, steps, goal_id=a.goal or 0, timeout_s=a.timeout * 60, max_ai=a.max_ai, by="cli")
+            print(clilang.fmt(f"תוכנית {p['id']} נוצרה כטיוטה; לאישור: jarvis goals plan approve {p['id']}",
+                              f"plan {p['id']} drafted; approve with: jarvis goals plan approve {p['id']}"))
+            return 0
+        if act == "approve":
+            p = st.get(a.id)
+            if not p:
+                print(clilang.fmt("אין תוכנית כזו", "no such plan"), file=sys.stderr)
+                return 1
+            if not _confirm("Run this plan?\n" + describe(p) + "\n", a.yes):
+                print(clilang.fmt("לא אושר", "not approved"))
+                return 1
+            st.approve(a.id, by="cli")
+            print(clilang.fmt("אושר; הליבה תריץ ותבקש אישור לפני כל צעד שמשנה משהו",
+                              "approved; the Core runs it and asks before each step that changes something"))
+            return 0
+        if act == "retry":
+            st.retry(a.id, a.step_no - 1 if a.step_no else None, by="cli")
+        elif act == "skip":
+            st.skip(a.id, a.step_no - 1, by="cli")
+        elif act in ("pause", "resume", "cancel"):
+            getattr(st, act)(a.id, by="cli")
+        elif act == "delete":
+            if not _confirm(f"Delete plan {a.id}?", a.yes):
+                print(clilang.fmt("לא נמחק", "nothing deleted"))
+                return 1
+            st.delete(a.id, by="cli")
+        print(clilang.fmt("בוצע", "done"))
+        return 0
+    except KeyError:
+        print(clilang.fmt("אין תוכנית כזו", "no such plan"), file=sys.stderr)
+        return 1
+    except (ValueError, _json.JSONDecodeError) as e:
+        print(f"goals plan: {e}", file=sys.stderr)
+        return 2
+
+
 def cmd_goals(a, cfg, home) -> int:
     from .goals import Goals, checkin_text
     db = _db(home)
     g = Goals(db)
     try:
+        if a.action == "plan":
+            return _cmd_plan(a, cfg, home, db)
         if a.action == "list":
             rows = g.list("" if a.all else "active")
             for r in rows:
@@ -526,6 +600,22 @@ def add_cli(sub) -> None:
     gss.add_argument("id", type=int)
     gss.add_argument("status")
     gs.add_parser("checkin", help="your check-in, produced only when you run this")
+    gp = gs.add_parser("plan", help="multi-step plans: list / show / new / approve / pause / resume / cancel / retry / skip / delete")
+    gps = gp.add_subparsers(dest="plan_action", required=True)
+    gps.add_parser("list")
+    pn = gps.add_parser("new", help="jarvis goals plan new \"title\" --step 'timer_set={\"minutes\":5}' --step 'goal_show'")
+    pn.add_argument("title")
+    pn.add_argument("--step", action="append", default=[], help="TOOL or TOOL=JSON-ARGS, in order")
+    pn.add_argument("--goal", type=int, default=0, help="link to a goal id")
+    pn.add_argument("--timeout", type=float, default=30.0, help="total minutes the plan may run")
+    pn.add_argument("--max-ai", dest="max_ai", type=int, default=20, help="AI requests the plan may use")
+    for act in ("show", "approve", "pause", "resume", "cancel", "delete", "retry", "skip"):
+        px = gps.add_parser(act, help=f"{act} PLAN_ID" + (" [STEP_NO]" if act in ("retry", "skip") else ""))
+        px.add_argument("id", type=int)
+        if act in ("retry", "skip"):
+            px.add_argument("step_no", type=int, nargs="?" if act == "retry" else None, default=0, help="1-based step number")
+        if act in ("approve", "delete"):
+            px.add_argument("--yes", action="store_true", help="you already approved (no question)")
     gx = gs.add_parser("delete", help="delete a goal and its steps (asks first)")
     gx.add_argument("id", type=int)
     gx.add_argument("--yes", action="store_true", help="you already approved (no question)")

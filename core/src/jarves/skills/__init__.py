@@ -216,6 +216,10 @@ class SkillRegistry:
         now = self.clock()
         self._recent_ok = {k: v for k, v in self._recent_ok.items() if k[0] != key or now - v[0] < UNTRUSTED_GRACE_S}
 
+    def clear_taint(self, route: str) -> None:
+        """The owner explicitly resumed work on `route` (a goal plan): the untrusted-content block is lifted there."""
+        self._untrusted.pop(route, None)
+
     async def _ask(self, prompt: str, **meta) -> bool:
         """registry.confirm, with the human's thinking time recorded (it must never count as an AI timeout).
         `meta` (title, why, risk, kind, details, typed, timeout) reaches a confirm that declares `accepts_meta`

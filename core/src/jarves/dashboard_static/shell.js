@@ -58,7 +58,7 @@
     tasks: "research background מחקר רקע", calls: "call phone dial dialer phone link contact התקשר חיוג טלפון שיחה איש קשר", logs: "log errors events debug יומן שגיאות אירועים",
     calendar: "events meeting אירועים פגישה", jobs: "schedule reminder cron מתוזמן תזכורת", reports: "briefing morning תדריך בוקר",
     timers: "timer alarm countdown wake clock טיימר שעון מעורר התראה זמן", lists: "shopping todo groceries tasks קניות משימות רשימה סופר",
-    goals: "goal objective target progress steps check-in יעד יעדים מטרה התקדמות צעדים סיכום", preferences: "preferences learned memory likes remember העדפות נלמדות זיכרון אוהב לזכור",
+    goalplans: "goal plan plans steps execute run approve pause resume cancel תוכנית תוכניות יעד צעדים הרצה", goals: "goal objective target progress steps check-in יעד יעדים מטרה התקדמות צעדים סיכום", preferences: "preferences learned memory likes remember העדפות נלמדות זיכרון אוהב לזכור",
     proactive: "proactive offers suggest mention quiet הצעות יזומות הצעה שקט", devdrafts: "development manager tickets ideas drafts github טיוטות פיתוח הצעות כרטיסים",
     alerts: "notifications התראות", notes: "markdown memo רשימות", files: "folders documents תיקיות מסמכים",
     identity: "name wake word voice שם מילת הפעלה קול", appearance: "face avatar theme פנים אווטאר",

@@ -185,5 +185,53 @@
         "No private repository is set (health.ticket_repo), so posting is not possible; drafts stay local.")));
   }
 
-  Object.assign(PAGES, { goals: pageGoals, preferences: pagePreferences, proactive: pageProactive, devdrafts: pageDevDrafts });
+  // ------------------------------------------------------------- Goal plans (the executor)
+  const PLAN_STATE = { draft: ["טיוטה, ממתינה לאישורך", "Draft, waiting for your approval"], ready: ["מאושרת, מתחילה", "Approved, starting"],
+    running: ["רצה", "Running"], paused: ["מושהית", "Paused"], blocked: ["חסומה, צריכה אותך", "Blocked, needs you"], done: ["הושלמה", "Done"],
+    failed: ["נכשלה", "Failed"], cancelled: ["בוטלה", "Cancelled"] };
+  const STEP_STATE = { pending: ["ממתין", "Pending"], running: ["רץ", "Running"], done: ["בוצע", "Done"], failed: ["נכשל", "Failed"],
+    blocked: ["חסום", "Blocked"], unknown: ["לא ברור אם בוצע", "May have run"], skipped: ["דולג", "Skipped"] };
+  const pillFor = (st) => st === "done" ? "ok" : (st === "failed" || st === "blocked" || st === "unknown" ? "fail" : "plain");
+  async function pageGoalPlans() {
+    const d = await api("/api/goal-plans");
+    const msg = msgSpan();
+    const op = (o, id, extra) => () => act(msg, () => post("/api/goal-plans/op", Object.assign({ op: o, id: id }, extra || {})));
+    const btn = (label, fn, cls) => el("button", { type: "button", class: cls || "ghost", onclick: fn }, label);
+    const stepEl = (p, s) => el("div", { class: "row", style: "gap:8px;flex-wrap:wrap" },
+      el("b", {}, String(s.idx + 1) + "."), el("code", { dir: "ltr" }, s.tool), pill(pillFor(s.status), tx(STEP_STATE[s.status][0], STEP_STATE[s.status][1])),
+      s.consequential ? pill("degraded", tx("שואל לפני ביצוע", "Asks first")) : null,
+      s.why ? el("span", { class: "muted small", dir: "auto" }, s.why) : null,
+      s.evidence ? el("span", { class: "small", dir: "auto" }, tx("עדות: ", "Evidence: ") + s.evidence) : null,
+      s.error ? el("span", { class: "small", dir: "auto" }, s.error) : null, el("span", { class: "spacer" }),
+      (s.status === "failed" || s.status === "blocked" || s.status === "unknown") && p.state !== "cancelled"
+        ? btn(tx("ניסיון חוזר", "Retry"), op("retry", p.id, { step: s.idx })) : null,
+      (s.status === "failed" || s.status === "blocked" || s.status === "unknown" || s.status === "pending") && p.state !== "done" && p.state !== "cancelled"
+        ? btn(tx("דילוג", "Skip"), op("skip", p.id, { step: s.idx })) : null);
+    const card = (p) => {
+      const live = p.state === "ready" || p.state === "running";
+      return el("div", { class: "card" },
+        el("div", { class: "row", style: "gap:8px;flex-wrap:wrap" }, el("h2", { dir: "auto", style: "margin:0" }, p.title),
+          pill(pillFor(p.state), tx(PLAN_STATE[p.state][0], PLAN_STATE[p.state][1])), el("span", { class: "spacer" }),
+          el("span", { class: "muted small" }, tx("זמן מרבי ", "Time cap ") + Math.round(p.timeout_s / 60) + tx(" דק׳, בקשות AI ", " min, AI requests ") + p.max_ai)),
+        el("div", { class: "row", style: "gap:8px;margin:8px 0" }, bar(p.progress), el("span", {}, p.progress + "%")),
+        p.note ? el("p", { dir: "auto", class: "muted", role: "status" }, p.note) : null,
+        p.steps.map((s) => stepEl(p, s)),
+        p.result ? el("p", { dir: "auto" }, el("b", {}, tx("תוצאה: ", "Result: ")), p.result) : null,
+        el("div", { class: "row", style: "gap:8px;flex-wrap:wrap;margin-top:8px" },
+          p.state === "draft" ? btn(tx("אישור והרצה (מבקש אישור על המסך)", "Approve and run (asks on your screen)"), () => {
+            msg.textContent = WAITING(); act(msg, () => post("/api/goal-plans/op", { op: "approve", id: p.id }));
+          }, "primary") : null,
+          live ? btn(tx("השהיה", "Pause"), op("pause", p.id)) : null,
+          p.state === "paused" || p.state === "blocked" ? btn(tx("המשך", "Resume"), op("resume", p.id), "primary") : null,
+          p.state === "failed" ? btn(tx("ניסיון חוזר", "Retry"), op("retry", p.id)) : null,
+          p.state !== "done" && p.state !== "failed" && p.state !== "cancelled" ? btn(tx("ביטול", "Cancel"), op("cancel", p.id)) : null,
+          el("span", { class: "spacer" }),
+          !live ? btn(tx("מחיקה", "Delete"), op("delete", p.id)) : null));
+    };
+    render(header(tx("תוכניות ליעדים", "Goal plans"), tx("תוכנית היא רשימת צעדים קצרה של כלים קיימים. היא רצה רק אחרי שאישרת אותה, ושואלת לפני כל צעד ששינה משהו.",
+        "A plan is a short list of steps using existing tools. It runs only after you approve it and asks before every step that changes something.")),
+      msg, d.plans.length ? d.plans.map(card) : el("div", { class: "empty" }, tx("אין תוכניות. אמרו: \"תתכנן איך ל...\" או: jarvis goals plan new.", "No plans. Say: \"plan how to ...\" or run: jarvis goals plan new.")));
+  }
+
+  Object.assign(PAGES, { goals: pageGoals, preferences: pagePreferences, proactive: pageProactive, devdrafts: pageDevDrafts, goalplans: pageGoalPlans });
 })();
