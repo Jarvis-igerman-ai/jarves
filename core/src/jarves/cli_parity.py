@@ -37,7 +37,9 @@ FEATURES: dict[str, object] = {
     "backup": "backup", "appearance": (D, "face theme and avatar are picked on the Appearance page"),
     "skill_creation": (D, "proposed Skills are reviewed on the New Skills page (risky: approval on screen)"),
     "guided_setup": "setup", "self_check": "diagnose", "scheduler": "jobs", "reports": "reports", "notes": "notes",
-    "timers": "timers", "lists": "lists", "goals": "goals", "adaptive_memory": "prefs", "files": (D, "the file workspace is browsed on the My files page"),
+    "timers": "timers", "lists": "lists", "goals": "goals", "adaptive_memory": "prefs", "prefs_in_prompt": "prefs",
+    "goal_done_line": (D, "a pure switch; change it with `jarvis features`"), "proactive_intel": "proactive",
+    "dev_manager": "dev", "files": (D, "the file workspace is browsed on the My files page"),
     "proactive_alerts": (D, "alerts are read and answered on the Alerts page"),
     "autonomy": (D, "autonomy proposals are approved on the Autonomy page"),
     "background_core": "start", "display_control": "show", "tray_icon": "start", "autostart": "autostart",
@@ -64,7 +66,7 @@ TOOL_GROUPS: dict[str, object] = {
     "contacts": "contacts", "dashboard": "dashboard", "display": "show", "features": "features",
     "files": (D, "the My files page"), "gmail": "mail", "google_connect": "google",
     "google_contacts": "contacts", "help": "help", "helper": "approvals", "home": "home",
-    "goals": "goals", "preferences": "prefs", "identity": "setup", "instagram": "instagram", "lists": "lists", "memory": "memory", "music": "music",
+    "goals": "goals", "preferences": "prefs", "proactive": "proactive", "dev": "dev", "identity": "setup", "instagram": "instagram", "lists": "lists", "memory": "memory", "music": "music",
     "notes": "notes", "profiles": "profile", "reports": "reports", "scheduler": "jobs", "self_check": "diagnose",
     "settings": (D, "settings are edited on the Settings page"), "skill_builder": (D, "the New Skills page"),
     "status": "status", "tasks": (D, "the Background tasks page"), "telegram": "telegram", "timers": "timers",
@@ -287,6 +289,18 @@ def cmd_prefs(a, cfg, home) -> int:
             if not rows:
                 print(clilang.fmt("אין העדפות נלמדות", "no learned preferences"))
             return 0
+        if a.action == "prompt":
+            from .features import switch
+            from .cli import _cli_features
+            from .preferences import FEATURE, prompt_block
+            if a.state in ("on", "off"):
+                switch(_cli_features(cfg, home), FEATURE, a.state == "on", by="cli")
+            on = _cli_features(cfg, home).enabled(FEATURE)
+            print(clilang.fmt("שימוש בהעדפות בשיחות: " + ("פעיל" if on else "כבוי"),
+                              "preferences in conversations: " + ("on" if on else "off")))
+            if a.state == "show" or a.state is None:
+                print(prompt_block(p) or clilang.fmt("(אין העדפות שמאושרות לשליחה)", "(no confirmed preferences to send)"))
+            return 0
         if a.action == "add":
             _warn_if_off(a, cfg, home, "adaptive_memory")
             r = p.add_confirmed(a.text, a.topic, by="cli")
@@ -317,6 +331,83 @@ def cmd_prefs(a, cfg, home) -> int:
         return 2
     finally:
         db.close()
+
+
+# ---------------------------------------------------------------------- proactive offers / development drafts
+def cmd_proactive(a, cfg, home) -> int:
+    from .goals import Goals
+    from .proactive import Proactive
+    db = _db(home)
+    p = Proactive(db, Goals(db))
+    try:
+        if a.action == "mode":
+            if a.value:
+                p.set_mode(a.value, by="cli")
+            print(clilang.fmt("מצב: ", "mode: ") + p.mode())
+            return 0
+        if a.action == "dismiss":
+            print(clilang.fmt("נסגר", "dismissed") if p.dismiss(a.id, by="cli") else clilang.fmt("אין פריט כזה", "no such item"))
+            return 0
+        rows = p.refresh()
+        for r in rows:
+            print(f"{r['id']:>3} [{r['state']}] {r['text']}")
+        if not rows:
+            print(clilang.fmt("אין מה להציע", "nothing to mention"))
+        return 0
+    except ValueError as e:
+        print(f"proactive: {e}", file=sys.stderr)
+        return 2
+    finally:
+        db.close()
+
+
+def cmd_dev(a, cfg, home) -> int:
+    from . import devmanager as dm
+    from .diag import db as diag_db
+    from .store import Store
+    st = Store(home / "store.db")
+    try:
+        diag_db.ensure(st)
+        if a.action == "suggest":
+            _warn_if_off(a, cfg, home, "dev_manager")
+            d = dm.suggest(st, a.title, a.body, a.kind, by="cli")
+            print(clilang.fmt(f"טיוטה {d['id']} נשמרה מקומית, שום דבר לא נשלח",
+                              f"draft {d['id']} saved locally, nothing was posted"))
+        elif a.action == "list":
+            rows = dm.listing(st)
+            for r in rows:
+                print(f"{r['id']:>3} [{r['severity']}] {r['title']}")
+            if not rows:
+                print(clilang.fmt("אין טיוטות", "no drafts"))
+        elif a.action == "show":
+            d = dm.get(st, a.id)
+            if d is None:
+                print(clilang.fmt("אין טיוטה כזאת", "no such draft"), file=sys.stderr)
+                return 1
+            print(f"# {d['title']}\n\n{d['body']}")
+        elif a.action == "discard":
+            print(clilang.fmt("נמחקה", "discarded") if dm.discard(st, a.id, by="cli") else clilang.fmt("אין טיוטה כזאת", "no such draft"))
+        elif a.action == "file":
+            if dm.get(st, a.id) is None:
+                print(clilang.fmt("אין טיוטה כזאת", "no such draft"), file=sys.stderr)
+                return 1
+            import asyncio
+            from .diag import tickets
+            from .diag.service import _tty_ask
+            from .userdata import open_db
+            dbs = open_db(home)
+            try:
+                res = asyncio.run(tickets.file(st, a.id, ask=_tty_ask(home), repo=str(dbs.setting("health.ticket_repo") or ""),
+                                               by="cli"))
+            finally:
+                dbs.close()
+            print(f"dev: {res['status']} {res.get('issue_url') or res.get('reason') or ''}")
+        return 0
+    except ValueError as e:
+        print(f"dev: {e}", file=sys.stderr)
+        return 2
+    finally:
+        st.close()
 
 
 # ---------------------------------------------------------------------- notes / jobs / reports (read-only)
@@ -448,9 +539,30 @@ def add_cli(sub) -> None:
     for act in ("confirm", "decline", "reaffirm", "remove"):
         pp = ps.add_parser(act, help=f"{act} one item: {act} ID")
         pp.add_argument("id", type=int)
+    pp2 = ps.add_parser("prompt", help="use confirmed preferences in every conversation: prompt [on|off|show]")
+    pp2.add_argument("state", nargs="?", choices=["on", "off", "show"])
     pe = ps.add_parser("edit", help="edit ID TEXT")
     pe.add_argument("id", type=int)
     pe.add_argument("text")
+
+    pi = sub.add_parser("proactive", help="proactive offers: list / mode [on_request|in_conversation] / dismiss ID")
+    pis = pi.add_subparsers(dest="action", required=True)
+    pis.add_parser("list")
+    pim = pis.add_parser("mode", help="show or set: on_request (default) or in_conversation")
+    pim.add_argument("value", nargs="?", choices=["on_request", "in_conversation"])
+    pid_ = pis.add_parser("dismiss", help="dismiss ID")
+    pid_.add_argument("id", type=int)
+
+    dv = sub.add_parser("dev", help="development drafts, kept local: list / suggest / show / discard / file (asks first)")
+    dvs = dv.add_subparsers(dest="action", required=True)
+    dvs.add_parser("list")
+    dsg = dvs.add_parser("suggest", help="jarvis dev suggest \"title\" --body \"text\" [--kind ticket]")
+    dsg.add_argument("title")
+    dsg.add_argument("--body", default="")
+    dsg.add_argument("--kind", choices=["suggestion", "ticket"], default="suggestion")
+    for act in ("show", "discard", "file"):
+        dd = dvs.add_parser(act, help=f"{act} ID" + (" (asks on the approval popup; needs health.ticket_repo)" if act == "file" else ""))
+        dd.add_argument("id", type=int)
 
     nt = sub.add_parser("notes", help="your notes (read-only): list [--query Q] [--tag T] / show ID")
     ns = nt.add_subparsers(dest="action", required=True)
@@ -471,4 +583,4 @@ def add_cli(sub) -> None:
     rsh.add_argument("id", type=int)
 
 
-COMMANDS = {"timers": cmd_timers, "lists": cmd_lists, "goals": cmd_goals, "prefs": cmd_prefs, "notes": cmd_notes, "jobs": cmd_jobs, "reports": cmd_reports}
+COMMANDS = {"timers": cmd_timers, "lists": cmd_lists, "goals": cmd_goals, "prefs": cmd_prefs, "proactive": cmd_proactive, "dev": cmd_dev, "notes": cmd_notes, "jobs": cmd_jobs, "reports": cmd_reports}

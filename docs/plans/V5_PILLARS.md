@@ -14,7 +14,7 @@ Branch `v5/pillars-goals-memory` (draft PR into `v5/mobile-access`). Rules from 
 - Becoming `confirmed` needs an explicit yes: the `pref_confirm` tool always asks on screen/voice (any origin), or the owner presses Confirm / types it on the dashboard or CLI. Declined items keep only normalised text so the same suggestion is not asked again (visible, removable).
 - Guards against silent profiling: sensitive filter (stricter than the curator's), at most 20 pending proposals, unanswered proposals expire after 14 days, a confirmed item not reaffirmed for 180 days is "stale" and unused until reaffirmed, similar confirmed items on one topic are reported as possible conflicts and never auto-merged.
 - Every item is listable, editable, removable on the Learned preferences page, `jarvis prefs`, and by voice (`pref_show`, `pref_edit`, `pref_forget`, forget asks).
-- Not wired yet: injecting confirmed preferences into the model instructions (`context_trace` and workspace prompt tests would change). Follow-up once the owner approves the wording and placement.
+- Confirmed preferences are added to the instructions of every conversation (owner decision 21 Oct, built in `v5/pillars-followups`): small token budget, switch `prefs_in_prompt`, shown on the Context page.
 
 ## Privacy and logging
 All `logs.*` calls use fixed literal messages and only classified fields (`id`, `n`, `by`, `status`); goal and preference text never reaches a log (test with a planted word). Dashboard text is shown with `dir="auto"` and not translated.
@@ -24,4 +24,4 @@ Features `goals`, `adaptive_memory` (guides `goals.toml`, `adaptive_memory.toml`
 
 ## Open for the owner
 1. Should confirmed preferences be added to the model instructions now (small, listed on the Context page), or wait?
-2. Should a finished goal offer a spoken "well done" (only when you are already talking)? Currently silent.
+2. Answered 21 Oct: one calm line when a goal is finished, only when the owner is at the PC and not 22:00-07:00 (feature `goal_done_line`). Proactive offers (`proactive.py`) and local development drafts (`devmanager.py`) follow `docs/plans/PRIORITIES.md`.

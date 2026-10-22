@@ -124,6 +124,12 @@
         "Only what you said and confirmed. Everything is visible, editable and removable.")),
       el("div", { class: "card" }, el("div", { class: "row", style: "gap:8px;flex-wrap:wrap" }, text, topic,
         el("button", { type: "button", class: "primary", onclick: add }, tx("שמירה", "Save")), msg)),
+      el("div", { class: "card" },
+        el("label", { class: "check" }, el("input", { type: "checkbox", checked: d.in_prompt,
+          onchange: (e) => act(msg, () => api("/api/features/prefs_in_prompt", { method: "POST", body: JSON.stringify({ enabled: e.target.checked }) })) }),
+          el("span", {}, tx("להשתמש בהעדפות המאושרות בכל שיחה", "Use my confirmed preferences in every conversation"))),
+        el("p", { class: "muted small" }, tx("רק העדפות שאישרת, בגודל קטן וקבוע. תקף מהשיחה הבאה. כך זה נשלח:", "Only preferences you confirmed, within a small fixed size. Applies from the next conversation. This is what is sent:")),
+        el("pre", { dir: "auto", class: "small" }, d.prompt_text || tx("(אין מה לשלוח)", "(nothing to send)"))),
       el("h2", {}, tx("ממתינות לאישור שלך", "Waiting for your confirmation")),
       proposed.length ? proposed : el("div", { class: "empty" }, tx("אין הצעות ממתינות.", "No pending suggestions.")),
       el("h2", {}, tx("נזכרות", "Remembered")),
@@ -134,5 +140,50 @@
     communication: ["תקשורת", "Communication"], other: ["אחר", "Other"] };
   function topicText(t) { const p = TOPICS[t] || TOPICS.other; return tx(p[0], p[1]); }
 
-  Object.assign(PAGES, { goals: pageGoals, preferences: pagePreferences });
+  // ------------------------------------------------------------- Proactive offers
+  async function pageProactive() {
+    const d = await api("/api/proactive");
+    const msg = msgSpan();
+    const MODE = { on_request: tx("רק לפי בקשה (ברירת מחדל)", "Only when I ask (default)"), in_conversation: tx("הצעה אחת בתוך שיחה שכבר התחלתי", "One offer inside a conversation I already started") };
+    const mode = el("select", { "aria-label": tx("מצב", "Mode"), onchange: (e) => act(msg, () => post("/api/proactive/op", { op: "mode", mode: e.target.value })) },
+      d.modes.map((m) => el("option", { value: m, selected: m === d.mode }, MODE[m])));
+    render(header(tx("הצעות יזומות", "Proactive offers"), tx("JARVES לא מדבר מעצמו מחוץ לשיחה ולא בשעות שקט (22:00-07:00).",
+        "JARVES never speaks on its own outside a conversation, and never in quiet hours (22:00-07:00).")),
+      el("div", { class: "card" }, el("div", { class: "row", style: "gap:8px;flex-wrap:wrap" }, el("label", {}, tx("מצב: ", "Mode: "), mode), msg,
+        d.quiet_now ? pill("plain", tx("שעות שקט עכשיו", "Quiet hours now")) : null)),
+      d.items.length ? d.items.map((i) => el("div", { class: "card" }, el("div", { class: "row", style: "gap:8px;flex-wrap:wrap" },
+        el("b", { dir: "auto" }, i.text), pill("plain", i.kind === "goal_overdue" ? tx("עבר התאריך", "Past its date") : tx("בלי התקדמות", "No movement")),
+        i.state === "offered" ? pill("degraded", tx("הוצע בשיחה", "Offered in a conversation")) : null, el("span", { class: "spacer" }),
+        el("button", { type: "button", class: "ghost", onclick: () => act(msg, () => post("/api/proactive/op", { op: "dismiss", id: i.id })) }, tx("סגירה", "Dismiss")))))
+        : el("div", { class: "empty" }, tx("אין מה להציע כרגע.", "Nothing to mention right now.")));
+  }
+
+  // ------------------------------------------------------------- Development drafts (local only)
+  async function pageDevDrafts() {
+    const d = await api("/api/dev/drafts");
+    const msg = msgSpan();
+    const title = el("input", { type: "text", dir: "auto", maxlength: "100", style: "min-width:220px;flex:1", "aria-label": tx("כותרת", "Title"), placeholder: tx("רעיון או כרטיס חדש", "New idea or ticket") });
+    const body = el("textarea", { dir: "auto", maxlength: "1500", rows: "3", style: "width:100%", "aria-label": tx("פרטים", "Details"), placeholder: tx("פרטים (לא חובה)", "Details (optional)") });
+    const kind = el("select", { "aria-label": tx("סוג", "Kind") }, d.kinds.map((k) => el("option", { value: k }, k === "ticket" ? tx("כרטיס", "Ticket") : tx("הצעה", "Suggestion"))));
+    const add = () => title.value.trim() && act(msg, () => post("/api/dev/drafts", { title: title.value, body: body.value, kind: kind.value }));
+    const file = (i) => async () => {
+      msg.textContent = WAITING();
+      try { const r = await post("/api/health/ticket/file", { id: i.id }); msg.textContent = r.status === "draft" ? JL.t(r.reason || "") : r.status; route(true); }
+      catch (e) { msg.textContent = tx("נכשל: ", "Failed: ") + JL.t(e.message); }
+    };
+    render(header(tx("טיוטות פיתוח", "Development drafts"), tx("רעיונות וכרטיסים נשמרים כאן, מקומית בלבד. שום דבר לא נשלח ל-GitHub בלי אישור שלך על המסך.",
+        "Ideas and tickets are kept here, locally only. Nothing is posted to GitHub without your approval on the screen.")),
+      el("div", { class: "card" }, el("div", { class: "row", style: "gap:8px;flex-wrap:wrap" }, title, kind, el("button", { type: "button", class: "primary", onclick: add }, tx("שמירה כטיוטה", "Save as draft")), msg), body),
+      d.drafts.length ? d.drafts.map((i) => el("div", { class: "card" }, el("div", { class: "row", style: "gap:8px;flex-wrap:wrap" },
+        el("b", { dir: "auto" }, i.title), pill("plain", i.severity === "ticket" ? tx("כרטיס", "Ticket") : tx("הצעה", "Suggestion")),
+        pill(i.status === "draft" ? "plain" : "ok", i.status === "draft" ? tx("טיוטה מקומית", "Local draft") : i.status), el("span", { class: "spacer" }),
+        i.status === "draft" && d.repo_set ? el("button", { type: "button", class: "ghost", onclick: file(i) }, tx("פרסום ב-GitHub (מבקש אישור)", "Post to GitHub (asks first)")) : null,
+        el("button", { type: "button", class: "ghost", onclick: () => act(msg, () => post("/api/dev/op", { op: "discard", id: i.id })) }, tx("מחיקה", "Discard"))),
+        el("pre", { dir: "auto", class: "small", style: "white-space:pre-wrap" }, i.body)))
+        : el("div", { class: "empty" }, tx("אין טיוטות.", "No drafts.")),
+      d.repo_set ? null : el("p", { class: "muted small" }, tx("לא הוגדר מאגר פרטי (health.ticket_repo), לכן אי אפשר לפרסם; הטיוטות נשארות מקומיות.",
+        "No private repository is set (health.ticket_repo), so posting is not possible; drafts stay local.")));
+  }
+
+  Object.assign(PAGES, { goals: pageGoals, preferences: pagePreferences, proactive: pageProactive, devdrafts: pageDevDrafts });
 })();

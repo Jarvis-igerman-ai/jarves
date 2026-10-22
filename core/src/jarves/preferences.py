@@ -16,8 +16,18 @@ import time
 
 from pydantic import BaseModel, Field
 
+from . import calm
+from . import features as feat
 from . import logs
 from .userdata import UserDB
+
+FEATURE = "prefs_in_prompt"
+feat.register(FEATURE, "שימוש בהעדפות בכל שיחה", "Use learned preferences in conversations", True, applies="next_session",
+              about="your confirmed preferences (only those you said yes to) are added to the instructions of every "
+                    "conversation within a small size limit; switch off to stop",
+              targets=calm.TARGETS)
+PROMPT_TOKENS = 120               # estimated-token budget of the preference block in the instructions
+PROMPT_HEAD = "Preferences the owner confirmed (follow them quietly, never recite this list):"
 
 MAX_TEXT = 200
 MAX_EVIDENCE = 200
@@ -163,6 +173,56 @@ class Preferences:
         return [r["text"] for r in self.items("confirmed") if not r["stale"]][:limit]
 
 
+def prompt_block(prefs: "Preferences", limit_tokens: int = PROMPT_TOKENS) -> str:
+    """The instruction block: confirmed, not stale, not sensitive items, newest first, within the token budget."""
+    from .context_trace import estimate_tokens
+    rows = sorted((r for r in prefs.items("confirmed") if not r["stale"] and not looks_sensitive(r["text"])),
+                  key=lambda r: -(r["confirmed_at"] or r["updated"]))
+    out, used = [], estimate_tokens(PROMPT_HEAD)
+    for r in rows:
+        cost = estimate_tokens(r["text"]) + 2
+        if used + cost > limit_tokens:
+            break
+        out.append("- " + r["text"])
+        used += cost
+    return PROMPT_HEAD + "\n" + "\n".join(out) if out else ""
+
+
+def _block(prefs, feats) -> str:
+    try:
+        if feats is not None and not feats.active(FEATURE):
+            return ""
+        return prompt_block(prefs)
+    except Exception:
+        logs.error("prefs", "PREF_PROMPT_FAILED", "preferences not added to the instructions", exc=True)
+        return ""
+
+
+def attach_live(live, prefs: "Preferences", feats=None) -> None:
+    """Voice: add the block to the instructions built at the start of every conversation."""
+    orig = getattr(live, "session_config", None)
+    if orig is None:
+        return
+
+    def session_config() -> dict:
+        cfg = orig()
+        extra = _block(prefs, feats)
+        if extra:
+            cfg["instructions"] = f"{cfg.get('instructions', '')}\n\n{extra}"
+        return cfg
+    live.session_config = session_config
+
+
+def augment_instructions(agent, prefs: "Preferences", feats=None) -> None:
+    """Backend (typed chat and delegation): recomputed for every request, so a change applies at once."""
+    base = agent.instructions
+
+    def instructions() -> str:
+        extra = _block(prefs, feats)
+        return f"{base()}\n\n{extra}" if extra else base()
+    agent.instructions = instructions
+
+
 # ---------------------------------------------------------------------- voice / agent tools
 class SuggestArgs(BaseModel):
     text: str = Field(..., min_length=3, max_length=MAX_TEXT, description="the preference, in the owner's terms")
@@ -267,8 +327,12 @@ def _ctx(ctx) -> Preferences:
 
 
 def api_prefs(ctx, m, body, q=None):
-    rows = _ctx(ctx).items()
-    return 200, {"items": [r for r in rows if r["state"] == "confirmed"],
+    p = _ctx(ctx)
+    rows = p.items()
+    from . import features as _f
+    on = _f._ctx_features(ctx).enabled(FEATURE)
+    return 200, {"in_prompt": on, "prompt_text": prompt_block(p) if on else "",
+                 "items": [r for r in rows if r["state"] == "confirmed"],
                  "proposed": [r for r in rows if r["state"] == "proposed"],
                  "declined": [r for r in rows if r["state"] == "declined"], "topics": list(TOPICS)}
 

@@ -63,6 +63,10 @@ CREATE TABLE IF NOT EXISTS learned_prefs (
     evidence TEXT NOT NULL DEFAULT '', source TEXT NOT NULL DEFAULT 'voice',
     created REAL NOT NULL, updated REAL NOT NULL, confirmed_at REAL);
 CREATE INDEX IF NOT EXISTS learned_prefs_s ON learned_prefs (state);
+CREATE TABLE IF NOT EXISTS proactive_items (
+    id INTEGER PRIMARY KEY AUTOINCREMENT, kind TEXT NOT NULL, ref TEXT NOT NULL, text TEXT NOT NULL,
+    state TEXT NOT NULL DEFAULT 'new',          -- new | offered | dismissed
+    created REAL NOT NULL, offered_at REAL, UNIQUE (kind, ref));
 CREATE INDEX IF NOT EXISTS list_i ON list_items (list_name, done);
 CREATE INDEX IF NOT EXISTS timers_s ON timers (status, due);
 CREATE TABLE IF NOT EXISTS alerts (
@@ -126,6 +130,8 @@ DEFAULTS: dict[str, Any] = {
     "connect.last_nudge": 0.0,
     "connect.skipped": [],                      # items the owner chose "never ask again" for (jarvis connect)
     "connect.state": {},                        # per-integration state: id -> connected | skipped (jarvis connect)
+    "goals.cheer_cursor": 0.0,                  # finished goals up to this time were announced or expired (goals.py)
+    "proactive.mode": "on_request",             # on_request | in_conversation (proactive.py)
     "files.quota_mb": 200,
     "files.max_file_mb": 10,
 }

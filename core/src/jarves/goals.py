@@ -14,6 +14,8 @@ from datetime import date, datetime, timezone
 
 from pydantic import BaseModel, Field
 
+from . import calm
+from . import features as feat
 from . import logs
 from .preferences import looks_sensitive
 from .userdata import UserDB
@@ -24,6 +26,13 @@ MAX_STEP = 160
 MAX_STEPS = 30
 MAX_GOALS = 50
 STATUSES = ("active", "paused", "done", "dropped")
+FEATURE = "goal_done_line"
+feat.register(FEATURE, "משפט קצר כשיעד הושלם", "One calm line when a goal is finished", True,
+              about="when you finish a goal JARVES says one short calm line, only while you are at the PC and never "
+                    "between 22:00 and 07:00; switch off for silence",
+              targets=calm.TARGETS)
+CHEER = {"en": "Done, nice work.", "he": "סיימת, כל הכבוד."}      # fixed lines, nothing else is ever said
+CHEER_MAX_AGE_S = 600                                              # a finished goal older than this is not announced
 STALE_DAYS = 7                      # "no progress for a week" in a check-in
 
 
@@ -182,6 +191,41 @@ class Goals:
             self.db.x("UPDATE goals SET last_checkin=? WHERE id=?", (now, g["id"]))
         logs.info("goals", "GOAL_CHECKIN", "goal check-in on request", n=len(out), by=by)
         return {"goals": out}
+
+
+class GoalCheer:
+    """ONE short calm line when a goal has been finished (status done), whoever finished it (voice, dashboard, CLI):
+    polled from the Core tick. Spoken only while `at_pc()` and not `quiet()`; a goal finished at night or while the
+    owner is away is simply not announced once CHEER_MAX_AGE_S has passed. Never touches the goal."""
+    CURSOR = "goals.cheer_cursor"
+
+    def __init__(self, goals: Goals, *, quiet, at_pc, say, clock=time.time) -> None:
+        self.goals, self.quiet, self.at_pc, self.say, self.clock = goals, quiet, at_pc, say, clock
+        if not float(goals.db.setting(self.CURSOR) or 0):
+            goals.db.set_setting(self.CURSOR, clock(), actor="system")      # goals finished before now: never cheered
+
+    async def check(self) -> str:
+        """The line that was spoken ('' = nothing)."""
+        db, now = self.goals.db, self.clock()
+        cursor = float(db.setting(self.CURSOR) or 0)
+        rows = db.rows("SELECT id, title, done_at FROM goals WHERE status='done' AND done_at > ? ORDER BY done_at",
+                       (cursor,))
+        fresh = [r for r in rows if now - r["done_at"] <= CHEER_MAX_AGE_S]
+        if not fresh:
+            if rows:
+                db.set_setting(self.CURSOR, rows[-1]["done_at"], actor="system")
+            return ""
+        if self.quiet() or not self.at_pc():
+            return ""                                      # wait; it expires by itself
+        from .calm import uses_hebrew
+        last = fresh[-1]
+        steps = " ".join(x["text"] for x in db.rows("SELECT text FROM goal_steps WHERE goal_id=?", (last["id"],)))
+        line = CHEER["he" if uses_hebrew(last["title"], steps) else "en"]
+        if not await self.say(line):
+            return ""
+        db.set_setting(self.CURSOR, last["done_at"], actor="system")
+        logs.info("goals", "GOAL_DONE_LINE", "goal finished line spoken", n=len(fresh))
+        return line
 
 
 def checkin_text(c: dict) -> str:

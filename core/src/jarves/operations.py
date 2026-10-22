@@ -28,6 +28,7 @@ from . import lists as lists_mod
 from . import logs
 from . import notes as notes_mod
 from . import preferences as prefs_mod
+from . import calm, devmanager as dev_mod, proactive as proactive_mod
 from . import sandbox as sandbox_mod
 from . import scheduler as sched_mod
 from . import selfcheck as selfcheck_mod
@@ -205,10 +206,14 @@ class Operations:
         self.lists = lists_mod.Lists(self.db)
         self.goals = goals_mod.Goals(self.db)
         self.prefs = prefs_mod.Preferences(self.db)
+        self.proactive = proactive_mod.Proactive(self.db, self.goals)
+        self.cheer = goals_mod.GoalCheer(self.goals, quiet=lambda: calm.quiet_hours_now(self.db, time.time()),
+                                         at_pc=lambda: calm.owner_at_pc(core), say=self._say_goal_line)
         self.timers = timers_mod.Timers(self.db, tz=self.scheduler.tz)
         reg = core.registry
         for skill in [lists_mod.make_skill(self.lists), goals_mod.make_skill(self.goals, reg),
-                      prefs_mod.make_skill(self.prefs), timers_mod.make_skill(self.timers), *sched_mod.make_skills(self.scheduler, reg), notes_mod.make_skill(self.notes, self.sandbox),
+                      prefs_mod.make_skill(self.prefs), proactive_mod.make_skill(self.proactive),
+                      dev_mod.make_skill(self._open_store), timers_mod.make_skill(self.timers), *sched_mod.make_skills(self.scheduler, reg), notes_mod.make_skill(self.notes, self.sandbox),
                       sandbox_mod.make_skill(self.sandbox), alerts_mod.make_skill(self.alerts),
                       autonomy_mod.make_skill(self.autonomy, reg)]:
             reg.register(skill)
@@ -217,7 +222,8 @@ class Operations:
         reg.allowed_actions |= (sched_mod.ALLOWED_ACTIONS | notes_mod.ALLOWED_ACTIONS | sandbox_mod.ALLOWED_ACTIONS
                                 | alerts_mod.ALLOWED_ACTIONS | autonomy_mod.ALLOWED_ACTIONS
                                 | lists_mod.ALLOWED_ACTIONS | timers_mod.ALLOWED_ACTIONS
-                                | goals_mod.ALLOWED_ACTIONS | prefs_mod.ALLOWED_ACTIONS)
+                                | goals_mod.ALLOWED_ACTIONS | prefs_mod.ALLOWED_ACTIONS
+                                | proactive_mod.ALLOWED_ACTIONS | dev_mod.ALLOWED_ACTIONS)
         self._task: asyncio.Task | None = None
         self._timer_task: asyncio.Task | None = None
         self._synced = 0.0
@@ -229,6 +235,29 @@ class Operations:
         except sched_mod.ScheduleError as e:
             core.health.set("scheduler", "unavailable", e.message, "uv sync (installs tzdata), or set the "
                                                                    "time zone on the dashboard Jobs page")
+
+    def _open_store(self):
+        from .diag import db as diag_db
+        from .store import Store
+        st = Store(self.core.home / "store.db")
+        diag_db.ensure(st)
+        return st
+
+    async def _say_goal_line(self, text: str) -> bool:
+        """The ONE line after a finished goal (GoalCheer has already checked: switch on is the caller's, at the PC,
+        not in quiet hours). Inside an open conversation it is announced at a good moment; otherwise spoken by the Core."""
+        c = self.core
+        if c.stopping or not c.features.active(goals_mod.FEATURE):
+            return False
+        live = c.live
+        if live is not None and hasattr(live, "announce"):
+            note = ("[goal] The user just finished a goal. Say exactly this one short calm line, nothing else, and do "
+                    f"not call tools: {text}")
+            return bool(await live.announce(note, max_wait_s=8.0, tag="goaldone"))
+        if not SpeechOutput(c).available():
+            return False
+        await c.speak(text)
+        return True
 
     def start(self) -> None:
         self._task = asyncio.get_running_loop().create_task(self.scheduler.run(self._after_tick), name="operations")
@@ -269,6 +298,10 @@ class Operations:
 
     async def _after_tick(self) -> None:
         await self._connect_nudge()
+        try:
+            await self.cheer.check()
+        except Exception:
+            logs.error("goals", "GOAL_DONE_LINE_FAILED", "goal finished line failed", exc=True)
         await self.alerts.flush()
         now = time.time()
         if now - self._synced >= AUTONOMY_SYNC_S:
