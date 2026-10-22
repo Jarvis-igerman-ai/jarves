@@ -360,6 +360,7 @@ class Core:
         self.approvals.channels.append(appr.TrayChannel(self.runtime))   # balloon -> popup / dashboard
         from .skills.helper import register_helper       # V3: shell / install helper, every action approved first
         from . import isolation                          # R-01: OS limits around every approved command
+        isolation.set_restricted_token(c.helper.restricted_token)       # V4 J: opt-in, off by default
         register_helper(self.registry, self.home, self.health, isolation.Limits.from_config(c.helper))
         self._write_tools_md()                          # again: camera + display + profile + helper Skills registered after the first
 
