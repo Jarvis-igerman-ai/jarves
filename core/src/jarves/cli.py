@@ -6,6 +6,7 @@ import asyncio
 import json
 import os
 import platform
+import re
 import subprocess
 import sys
 import zipfile
@@ -779,10 +780,16 @@ def cmd_setup(a, cfg, home) -> int:
     def connect_start() -> int:
         from .connect import Connector
         return Connector(home, cfg).run()
+
+    def tour_start() -> int:
+        """Hand-off to the dashboard page Setup and tour (#/setup) in its own window, so this wizard can finish."""
+        kw = {"creationflags": subprocess.CREATE_NEW_CONSOLE} if sys.platform == "win32" else {}
+        subprocess.Popen([sys.executable, "-m", "jarves", "tour"], **kw)
+        return 0
     try:
         wiz = sw.Wizard(cfg, home, config_path=path, answers=answers, defaults=getattr(a, "defaults", False),
                         lang=getattr(a, "lang", None), restart=getattr(a, "restart", False),
-                        actions={"chatgpt_login": chatgpt_login, "google_start": google_start, "connect_start": connect_start})
+                        actions={"chatgpt_login": chatgpt_login, "google_start": google_start, "connect_start": connect_start, "tour_start": tour_start})
         return wiz.run()
     except sw.AnswerError as e:
         print(f"answers: {e}", file=sys.stderr)
@@ -1451,7 +1458,8 @@ def cmd_dashboard(a, cfg, home) -> int:
     print("Ctrl+C to stop.", flush=True)
     if not a.no_open:
         import webbrowser
-        webbrowser.open(dash.url)
+        page = str(getattr(a, "page", "") or "")
+        webbrowser.open(dash.url + (page if re.fullmatch(r"#/[a-z0-9_/-]{1,40}", page) else ""))
     try:
         dash.serve_forever()
     except KeyboardInterrupt:
@@ -1712,6 +1720,7 @@ def main(argv: list[str] | None = None) -> int:
     db = sub.add_parser("dashboard", help="local web dashboard: conversations, costs, issues, memory, skills")
     db.add_argument("--port", type=int, default=0, help="default: a free port")
     db.add_argument("--no-open", action="store_true", help="do not open the browser")
+    db.add_argument("--page", default="", help="open this dashboard page, e.g. #/setup (Setup and tour)")
     db.add_argument("--lan", action="store_true", help="also allow paired phones on the home network "
                                                        "(needs: jarvis features on dashboard_lan)")
     db.add_argument("--mobile", action="store_true", help="also serve the phone app (needs: jarvis features on "
@@ -1742,6 +1751,8 @@ def main(argv: list[str] | None = None) -> int:
     up.add_argument("--window", action="store_true", help="rollback: show the setup window instead of running silently")
     from . import profiles
     profiles.add_cli(sub)                     # Issue #17: jarvis profile list / create / use / delete / export
+    from . import wizard
+    wizard.add_cli(sub)                       # owner issues #58/#60/#61: jarvis tour (Setup and tour wizard)
     from . import release_cmd
     release_cmd.add_cli(sub)                  # jarvis release signoff (stable release manual test sign-off)
     from . import cli_parity
@@ -1790,7 +1801,7 @@ def main(argv: list[str] | None = None) -> int:
             "health": health_cli.cmd_health,
             "whatsapp": whatsapp_admin.cmd_whatsapp,
             "agents": agents_cli.cmd_agents,
-            "dial": dialing.cmd_dial, "release": release_cmd.cmd_release,
+            "dial": dialing.cmd_dial, "release": release_cmd.cmd_release, "tour": wizard.cmd_tour,
             **cli_parity.COMMANDS, **budget_cli.COMMANDS, **selfspeed.COMMANDS}[a.cmd](a, cfg, home)
 
 

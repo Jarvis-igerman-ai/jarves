@@ -58,7 +58,7 @@ PLUGIN_MODULES = ("jarves.workspace", "jarves.curator", "jarves.memory", "jarves
                   "jarves.browser",                                                # Browser allow-list page
                   "jarves.approvals", "jarves.skills.helper",                      # V3: Approvals list, Helper switch
                   "jarves.diag.service",                                           # SW-V4 O: Health page
-                  "jarves.selfspeed",
+                  "jarves.selfspeed", "jarves.wizard",                           # Setup and tour (#/setup)
                   "jarves.chat_service")                                              # Health & speed page
 MEMORY_UNDO_KEEP = 30
 MEMORY_UNDO_TTL_S = 24 * 3600                        # the undo button works for 24 h, then the entry is purged

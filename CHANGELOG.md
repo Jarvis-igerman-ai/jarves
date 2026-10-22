@@ -4,6 +4,7 @@ All notable changes to JARVES. Newest first. Details per release: [docs/RELEASE_
 
 ## 4.0.1 (unreleased)
 
+- Added: Setup and tour, one wizard for every topic (dashboard page `#/setup`, `jarvis tour`, voice "show me around"): set up (or skip) -> safe test with Works / Does not work / Skip (a failure writes a bug report with content-free diagnostics) -> 30-second learn card. First run is the full baseline; later versions show what is new plus a smoke check. Your answers become a per-feature "verified in version X by owner" record and generate `docs/reviews/MANUAL_TEST_<version>.md` for the release gate. The old add-ons page moved to `#/addons`; `jarvis setup` offers the tour at its end.
 - Added: update channels. `jarvis update --channel beta` (dashboard Updates page, English and Hebrew) follows every green `main` build as a signed beta; beta builds show BETA in status and the dashboard header. Beta publishing is off until the owner sets `ENABLE_BETA_PUBLISH`.
 - Added: stable releases are tag-driven and gated by a manual test sign-off (`jarvis release signoff`, dashboard page Release sign-off), see docs/RELEASING.md; `core/tools/release_rollback.py` with a dry run.
 - Changed: CI runs the Windows Python tests in 3 shards and the real-browser tests as their own job with one retry; every green `main` builds a signed candidate (not published).

@@ -713,6 +713,10 @@ def make_skill(features: feat.Features, gstate: GuideState, registry=None, *, op
         name: str = Field(..., description="Guide name, or 'all'")
         days: float = Field(7, description="days to wait before suggesting it again; 0 = never again")
 
+    class TourArgs(BaseModel):
+        topic: str = Field("", description="Optional topic: voice, music, google, whatsapp, telegram, instagram, home, "
+                                           "dashboard, phone, backup, diagnostics... empty = the whole tour")
+
     class OnArgs(BaseModel):
         on: bool = Field(False, description="false = stop suggesting setup steps; true = allow again")
 
@@ -851,6 +855,19 @@ def make_skill(features: feat.Features, gstate: GuideState, registry=None, *, op
                 g = find(a.name)
                 return await open_page(f"#/guide/{g.id}" if g else "#/guides")
 
+            async def show_tour(a: TourArgs):
+                from .. import wizard
+                topic = a.topic.strip().lower().replace(" ", "_").replace("-", "_")
+                if topic not in wizard.BY_ID:      # a spoken name ("music", "whatsapp", "מוזיקה") or empty = the whole tour
+                    hit = next((t.id for t in wizard.TOPICS if topic and (topic in t.id or topic in t.en.lower() or topic in t.he)), "")
+                    topic = hit
+                res = await open_page("#/setup" + (f"/{topic}" if topic else ""))
+                if res.ok:
+                    return ToolResult(True, "פתחתי את ההגדרה והסיור בלוח הבקרה, נושא אחרי נושא." if not topic
+                                      else f"פתחתי את הנושא {wizard.BY_ID[topic].he} בהגדרה והסיור.",
+                                      {"dashboard": "#/setup" + (f"/{topic}" if topic else ""), "topic": topic})
+                return res
+
             async def snooze(a: SnoozeArgs):
                 if a.name.strip().lower() in ("all", "הכול", "הכל"):
                     return await stop(OnArgs(on=False))
@@ -882,6 +899,9 @@ def make_skill(features: feat.Features, gstate: GuideState, registry=None, *, op
                      run_step, StepArgs, permission="action", timeout_s=30),
                 Tool("open_guide", "Open the dashboard guide page of a feature in the browser on this computer.",
                      open_guide, NameArgs, permission="action"),
+                Tool("show_tour", "Open the dashboard page 'Setup and tour': set up, test and learn every topic one by "
+                                  "one. Use for 'show me around', 'give me a tour', 'set up music', 'test WhatsApp'.",
+                     show_tour, TourArgs, permission="action"),
                 Tool("setup_snooze", "The user does not want this setup suggestion now: wait N days (0 = never).",
                      snooze, SnoozeArgs, permission="action"),
                 Tool("stop_suggestions", "The user says 'stop suggesting' (or allows it again): my proactive setup "
@@ -891,7 +911,7 @@ def make_skill(features: feat.Features, gstate: GuideState, registry=None, *, op
     return HelpSkill()
 
 
-HELP_ACTIONS = {"run_guide_step", "open_guide", "setup_snooze", "stop_suggestions"}
+HELP_ACTIONS = {"run_guide_step", "open_guide", "show_tour", "setup_snooze", "stop_suggestions"}
 
 
 def _can_run(action: str) -> bool:

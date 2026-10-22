@@ -487,6 +487,8 @@ PAGES.settings = async function () {
       : [el("div", { class: "k" }, sec), el("div", { class: "v" }, String(v))])));
   render(header("Settings", "Change JARVES's non-secret settings. They are checked before saving, the old config.toml is backed up, and most apply when JARVES starts next.", undo, save),
     msg, d.error ? el("div", { class: "card", style: "margin-bottom:12px" }, "config.toml cannot be edited here: " + d.error) : null,
+    el("div", { class: "card", style: "margin-bottom:12px" }, el("b", {}, tx("הגדרה וסיור", "Setup and tour")), el("div", { class: "small" },
+      tx("להגדיר, לבדוק וללמוד כל נושא, צעד אחר צעד: ", "Set up, test and learn every topic, step by step: "), el("a", { href: "#/setup" }, tx("פתיחת הגדרה וסיור", "Open Setup and tour")))),
     el("div", { class: "card", style: "margin-bottom:12px" }, el("b", {}, "Switches"), el("div", { class: "small" },
       "Turning features on or off (camera, music, web search, background tasks, AI review, learning from conversations, greeting, chimes…) is on the ",
       el("a", { href: "#/features" }, "Features page"), ". They apply at once or at the next conversation.")),

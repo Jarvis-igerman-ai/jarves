@@ -1,3 +1,22 @@
+## Setup and tour wizard, dashboard part (22 Oct 2026) - branch v5/wizard, draft PR, issues #58/#60/#61
+
+- Built: `core/src/jarves/wizard.py` (16 topics from the guides/features/CLI-parity tables, state in `wizard.json`, routes
+  `/api/wizard/*`), dashboard page `#/setup` (`wizard.js`/`wizard.css`; set up / skip / later, "Do it for me" test, Works /
+  Does not work / Skip, 30-second learn card, progress bar, topic list, resume, EN+HE, 390 px layout), `jarvis tour`
+  (`--status`, `--json`, `--signoff`), voice tool `show_tour` ("show me around", "set up music"), `jarvis setup` offers the tour
+  at its end, link from Settings, guide `setup_tour.toml`, feature `setup_tour` (CLI parity: `tour`).
+- `#/setup` is now the wizard and is the stable entry for the installer button; the old add-ons page moved to `#/addons`.
+- Results: Works writes per-feature "verified in X by owner on <date>" (wizard.json); `jarvis tour --signoff` / the page button
+  generate `docs/reviews/MANUAL_TEST_<version>.md` (rows W-<topic> + W-AUTO; skipped = accepted-blocked with a note; other rows
+  of an existing sheet are kept) for `jarvis release signoff --finish` and `tools/release_gate.py`.
+- Baseline vs diff: diff mode (after "Finish the first full check") shows topics named in the CHANGELOG section of the version,
+  topics with never-verified features, plus the SMOKE topics.
+- Open / not done: `tools/manual_test_standing.toml` (PR #46) is not on main yet, so its standing rows are not imported (existing
+  sheet rows are preserved); merge main after the 4.0.1 integration batch (connect #34, issues #48, self-management #37, web chat #49);
+  "reuse an old connection" uses the `connect` registry states only; the learn card is spoken by asking JARVES, not auto-spoken;
+  a failed topic's bug report is a local Issues-list entry (no GitHub upload). Installer pages are Codex's (packaging/ untouched).
+- Questions for the user: none blocking.
+
 ## CI pass 3 (22 Oct 2026) — owner asked to continue, extends PR #57 on #44
 
 - Scope: separate measured Linux/Windows shard plans; committed seeds from the full-green run 39733332477; refresh timing

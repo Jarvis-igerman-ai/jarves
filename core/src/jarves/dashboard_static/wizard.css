@@ -1,0 +1,25 @@
+/* Setup and tour (#/setup): topic list + one topic at a time; phone-first (works at 390px). Uses the tokens of style.css. */
+.tour { display: grid; grid-template-columns: 250px 1fr; gap: 14px; align-items: start; }
+.tour-list { position: sticky; top: 8px; margin: 0; padding: 0; list-style: none; }
+.tour-list li { margin: 0 0 4px; }
+.tour-list button { width: 100%; text-align: start; display: flex; gap: 8px; align-items: center; min-height: 40px; }
+.tour-list button[aria-current="true"] { border-color: var(--accent); font-weight: 600; }
+.tour-mark { display: inline-block; min-width: 1.4em; text-align: center; }
+.tour-bar { height: 10px; background: var(--surface-2); border-radius: 6px; overflow: hidden; margin: 8px 0 12px; }
+.tour-bar > div { height: 100%; background: var(--accent); }
+.tour-stage { margin-bottom: 12px; }
+.tour-stage h2 { margin: 0 0 6px; font-size: 1.05em; }
+.tour-actions { display: flex; gap: 8px; flex-wrap: wrap; margin: 8px 0; align-items: center; }
+.tour-actions button, .tour-secret button { min-height: 44px; }
+.tour-secret { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; margin: 6px 0; }
+.tour-secret input { flex: 1; min-width: 180px; min-height: 44px; }
+.tour-out { margin-top: 6px; }
+.tour-card dt { font-weight: 600; margin-top: 8px; }
+.tour-card dd { margin: 2px 0 0; }
+.tour-list-toggle { display: none; }
+@media (max-width: 700px) {
+  .tour { grid-template-columns: 1fr; }
+  .tour-list { position: static; }
+  .tour-list.closed { display: none; }
+  .tour-list-toggle { display: inline-block; margin-bottom: 8px; min-height: 44px; }
+}

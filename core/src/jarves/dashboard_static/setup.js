@@ -1,4 +1,4 @@
-// Setup & add-ons (#/setup): the dashboard face of `jarvis setup` (setup_wizard.py). Same groups, same
+// Setup & add-ons (#/addons; #/setup is the Setup and tour wizard, wizard.js): the dashboard face of `jarvis setup` (setup_wizard.py). Same groups, same
 // recommendations and availability as the CLI wizard (GET /api/setup); the switches are the Features switches
 // (POST /api/features/<id>), names / wake phrase / voice link to the Identity & voice page, and every add-on links
 // to its Guide. Nothing is duplicated here. Uses the app.js helpers (el, api, render, header, pill, route).
@@ -58,10 +58,10 @@
 
   // nav entry (index.html is shared; add it once, before Features)
   const nav = document.getElementById("nav");
-  if (nav && !nav.querySelector('[data-page="setup"]')) {
-    const a = el("a", { href: "#/setup", "data-page": "setup" }, el("span", {}, "Setup & add-ons ", el("small", { class: "he" }, "הגדרה ותוספים")));
+  if (nav && !nav.querySelector('[data-page="addons"]')) {
+    const a = el("a", { href: "#/addons", "data-page": "addons" }, el("span", {}, "Setup & add-ons ", el("small", { class: "he" }, "הגדרה ותוספים")));
     const before = nav.querySelector('[data-page="features"]');
     before ? before.before(a) : nav.append(a);
   }
-  PAGES.setup = pageSetup;
+  PAGES.addons = pageSetup;
 })();
