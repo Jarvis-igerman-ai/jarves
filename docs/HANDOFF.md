@@ -1,3 +1,13 @@
+## Release and test system plan (22 Oct 2026) — docs only, stacked on PR #57, not merged
+
+- New plan: [docs/plans/RELEASE_AND_TEST_SYSTEM.md](plans/RELEASE_AND_TEST_SYSTEM.md) (DOC_MAP row added). Increments on
+  #44/#57 only; no workflow file changed. Covers alpha/beta/stable without rebuild, `next` batch branch, 12 shards,
+  affected tests + passed-hash cache, scenario runner (TOML, fake model via `OPENAI_BASE_URL`), Linux container + GitHub
+  Windows VM sandbox, owner sheet 31 -> 9 human rows (about 14 min), installer speed, cost, phases (about 16.5 agent-days).
+- Found: `ci/deterministic-tests` (netguard, quarantine) exists only locally (C:\work\jarves-det, f1977cf), not pushed.
+- Questions for the user: the 6 decisions in section 11 of the plan (`next` branch, bot fast-forward of main, daily
+  beta promotion, sandbox choice, Defender exclusion option, AI QA budget). Status: WAITING FOR USER.
+
 ## CI follow-up (22 Oct 2026) — stacked on PR #44, not merged
 
 - Owner request in this session authorizes the follow-up PR and real Actions verification. One writer, isolated branch

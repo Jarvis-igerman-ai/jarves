@@ -54,6 +54,7 @@ Execution authority: [NOW](NOW.md) (the only active brief) with [AGENTS](../AGEN
 | [PRODUCT_VISION](PRODUCT_VISION.md) | Six product stages (north star) | general | current | itself |
 | [PROJECT_PRINCIPLES](PROJECT_PRINCIPLES.md) | Durable principles, printability, Israel sourcing, owner decisions | general | current | itself |
 | [plans/PRIORITIES](plans/PRIORITIES.md) | Owner decisions log (V4 approval, WhatsApp, 21 Oct decisions) | V4-V5 | current, append-only | itself |
+| [plans/RELEASE_AND_TEST_SYSTEM](plans/RELEASE_AND_TEST_SYSTEM.md) | Release and test system plan: alpha/beta/stable, `next` batches, 12 shards, scenario runner, sandbox, owner sheet < 15 min | 4.1-V5 | plan for owner review (increments on PRs #44/#57) | [RELEASING](RELEASING.md), [CI_PERFORMANCE](CI_PERFORMANCE.md) |
 | [SW_V1_WORK_PACKAGE](SW_V1_WORK_PACKAGE.md) | First assistant, CI, music | V1 | historical | [CHANGELOG](../CHANGELOG.md) |
 | [JARVES_SW_V2_IMPLEMENTATION_SPEC](JARVES_SW_V2_IMPLEMENTATION_SPEC.md) | Milestones M1-M6 spec | V2 | historical | CHANGELOG |
 | [JARVES_SW_V3_WORK_PACKAGE](JARVES_SW_V3_WORK_PACKAGE.md) | V3 prioritized package | V3 | historical (released) | CHANGELOG |
