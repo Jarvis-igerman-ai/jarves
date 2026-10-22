@@ -8,6 +8,7 @@ import os
 import platform
 import subprocess
 import sys
+import time
 import zipfile
 from datetime import datetime, timezone
 from pathlib import Path
@@ -256,15 +257,24 @@ def runtime_summary(rt: dict | None) -> str:
 
 def _privacy_note(cfg, home) -> str:
     """"Privacy: off — conversation text is kept in logs" when log.privacy is off (config, or the runtime switch)."""
-    on = bool(cfg.log.privacy)
+    on, until = bool(cfg.log.privacy), 0.0
     try:
-        flag = json.loads((home / "logs" / logs.PRIVACY_FILE).read_text(encoding="utf-8")).get("privacy")
+        d = json.loads((home / "logs" / logs.PRIVACY_FILE).read_text(encoding="utf-8"))
+        flag = d.get("privacy")
         on = flag if isinstance(flag, bool) else on
+        u = d.get("until")
+        until = float(u) if flag is False and isinstance(u, (int, float)) and not isinstance(u, bool) else 0.0
+        if until and until <= time.time():           # the 24 hour full-text window is over: privacy is on again
+            on, until = True, 0.0
     except (OSError, ValueError, AttributeError):
         pass
     if on:
         return ""
     from .clilang import fmt
+    if until:
+        end = time.strftime("%H:%M %d/%m", time.localtime(until))
+        return fmt(f"טקסט מלא לפי בקשה עד {end}, ואז הפרטיות חוזרת לבד",
+                   f"Full text on request until {end}, then privacy turns on again by itself")
     return fmt(logs.PRIVACY_OFF_NOTE_HE, logs.PRIVACY_OFF_NOTE)
 
 
@@ -779,10 +789,37 @@ def cmd_setup(a, cfg, home) -> int:
     def connect_start() -> int:
         from .connect import Connector
         return Connector(home, cfg).run()
+
+    def browser_setup() -> int:
+        """Hebrew: continue in the browser (the Setup page renders Hebrew correctly in any terminal)."""
+        import webbrowser
+
+        from .dashboard import Dashboard
+        try:
+            interactive = bool(sys.stdin and sys.stdin.isatty())
+        except (AttributeError, ValueError):
+            interactive = False
+        if not interactive:        # piped input: the dashboard would run until Ctrl+C that nobody can press (hung CI shards)
+            return sw.CONTINUE_IN_TERMINAL
+        try:
+            dash = Dashboard(home, cfg, 0)
+        except OSError as e:
+            print(f"cannot start the dashboard: {e}  (continuing in the terminal)", file=sys.stderr)
+            return sw.CONTINUE_IN_TERMINAL
+        print("Setup is open in your browser (page Setup & add-ons). Press Ctrl+C here when you are done.", flush=True)
+        webbrowser.open(dash.url + "#/setup")
+        try:
+            dash.serve_forever()
+        except KeyboardInterrupt:
+            pass
+        finally:
+            dash.stop()
+        return 0
     try:
         wiz = sw.Wizard(cfg, home, config_path=path, answers=answers, defaults=getattr(a, "defaults", False),
-                        lang=getattr(a, "lang", None), restart=getattr(a, "restart", False),
-                        actions={"chatgpt_login": chatgpt_login, "google_start": google_start, "connect_start": connect_start})
+                        lang=getattr(a, "lang", None), restart=getattr(a, "restart", False), yes=getattr(a, "yes", False),
+                        actions={"chatgpt_login": chatgpt_login, "google_start": google_start, "connect_start": connect_start,
+                                 **({"browser_setup": browser_setup} if _cli_features(cfg, home).enabled("dashboard") else {})})
         return wiz.run()
     except sw.AnswerError as e:
         print(f"answers: {e}", file=sys.stderr)
@@ -1081,49 +1118,115 @@ def _wake_eval(a, cfg, home) -> int:
 
 
 def _wake_train(a, cfg, home) -> int:
-    """`jarvis wake train "<phrase>"`: local synthetic samples -> trained head in <state_dir>/wake (voice/wake_train)."""
-    from .identity import Identity, IdentityError
+    """`jarvis wake train "<phrase>"`: local synthetic samples + the owner's recordings -> a CANDIDATE head in
+    <state_dir>/wake/candidates (voice/wake_train). Nothing active changes without --apply; --revert undoes the last
+    --apply (voice/wake_prod)."""
+    from .identity import IdentityError
+    from .voice import wake_prod
     from .voice.wake_train import local_voices, slug, train_phrase
     if getattr(a, "revert", False):
-        # back to the built-in "Hey Jarvis" (threshold from config.toml); the trained .npz file is kept on disk
-        old = Identity(home, cfg).wake()
-        Identity(home, cfg).set_wake("hey_jarvis", "Hey Jarvis", None, by="cli")
-        print(f"Reverted: JARVES wakes on the standard \"Hey Jarvis\" model again after the next start (was "
-              f"{Path(old['model']).name}). The trained file is kept; delete it by hand if you no longer want it.")
+        try:
+            r = wake_prod.revert(home, cfg)
+        except (IdentityError, OSError) as e:
+            print(f"not reverted: {e}", file=sys.stderr)
+            return 1
+        if r is None:
+            print("Nothing to revert: no wake model was applied with `jarvis wake train --apply`.", file=sys.stderr)
+            return 1
+        now = "the stock Hey Jarvis" if r["model"] == "hey_jarvis" else Path(r["model"]).name
+        print(f"Reverted: the wake model is now {now}. Restart JARVES to use it (jarvis stop, then jarvis).")
         return 0
+    samples = Path(a.samples) if a.samples else None
+    if samples is None and wake_prod.default_samples_dir(home).is_dir()             and any(wake_prod.default_samples_dir(home).glob("*.wav")):
+        samples = wake_prod.default_samples_dir(home)           # the owner's recordings, no flag needed
+    files = None
+    if samples is not None:
+        checks = wake_prod.check_samples(samples)
+        sm = wake_prod.sample_summary(checks)
+        print(f"Your recordings in {samples}: {sm['usable']} usable of {sm['files']}.")
+        for c in checks:
+            for msg in c.problems:
+                print(f"  REJECTED {c.path.name}: {msg}")
+            for msg in c.warnings:
+                print(f"  warning  {c.path.name}: {msg}")
+        if not sm["enough"]:
+            print(f"  Fewer than {wake_prod.RECOMMENDED_SAMPLES} usable recordings: the model will lean on synthetic "
+                  "voices. Record more phrases in a quiet room, 20-50 cm from the microphone.")
+        files = [c.path for c in checks if c.ok]
+        if a.check_samples:
+            return 0 if sm["minimum"] else 1
+        if a.samples and not files:
+            print("No usable recording in --samples: nothing trained.", file=sys.stderr)
+            return 1
+    elif a.check_samples:
+        print(f"No recordings found. Put WAV files of you saying the phrase in {wake_prod.default_samples_dir(home)}.",
+              file=sys.stderr)
+        return 1
     if not a.phrase:
-        print('usage: jarvis wake train "hey max" --say "היי מקס" [--samples DIR] [--apply]', file=sys.stderr)
+        print('usage: jarvis wake train "hey max" --say "היי מקס" [--samples DIR] [--apply] | --revert | '
+              '--check-samples', file=sys.stderr)
         return 2
     phrase = " ".join(a.phrase)
     voices = local_voices()
     print(f"Training a wake phrase for \"{phrase}\" on this device (free, local; nothing is played or sent).")
     print("Voices: " + (", ".join(f"{x.id} ({x.lang})" for x in voices) or "none") +
-          (f"; your recordings: {a.samples}" if a.samples else ""))
-    if not voices and not a.samples:
+          (f"; your recordings: {len(files)} usable" if files is not None else ""))
+    if not voices and not files:
         print("No local voice found: install a Windows speech voice (Settings > Time & language > Speech) or "
               "espeak-ng (Linux/Pi), or record yourself and pass --samples DIR.", file=sys.stderr)
         return 1
-    out = Path(a.out) if a.out else home / "wake" / f"{slug(phrase)}.npz"
+    active = home / "wake" / f"{slug(phrase)}.npz"
+    if a.out:
+        out = Path(a.out)
+        if out.exists() and not a.apply:
+            print(f"{out} exists and is not replaced without --apply (the old one is kept in history then).",
+                  file=sys.stderr)
+            return 1
+    else:
+        out = wake_prod.candidate_path(home, slug(phrase))      # never the active model: that needs --apply
     try:
-        rep = train_phrase(phrase, out, say=a.say, samples=Path(a.samples) if a.samples else None, voices=voices,
-                           progress=lambda s: print("  " + s, flush=True))
+        rep = train_phrase(phrase, out, say=a.say, samples=samples, voices=voices, seed=a.seed,
+                           sample_files=files, progress=lambda s: print("  " + s, flush=True))
     except (RuntimeError, ImportError, OSError) as e:
         print(f"WAKE_TRAIN_FAILED: {e}", file=sys.stderr)
         return 1
     ev = rep["eval"]
-    print(f"\nSaved {out} ({rep['seconds']} s).")
+    print(f"\nSaved the candidate {out} ({rep['seconds']} s, seed {rep['seed']}).")
     print(f"Held-out check ({rep['held_out_voice'] or 'random 20 %'}): recall {ev['recall']:.0%}, "
           f"{ev['false_wakes']} false wakes in {ev['hours'] * 60:.0f} min of synthetic speech/noise "
           f"(threshold {rep['threshold']}). Synthetic only: test it with your voice next.")
+    print("Calibration (threshold vs misses and false wakes):")
+    for line in wake_prod.format_curve(rep["curve"], rep["threshold"]):
+        print(line)
+    ow = rep["owner"]
+    if ow["recordings"]:
+        print(f"Your recordings wake it {ow['recall_at_threshold']:.0%} of the time at {rep['threshold']}"
+              + (f" (held out, not trained on: {ow['held_out_recall_at_threshold']:.0%})"
+                 if ow["held_out_recall_at_threshold"] is not None else "") + ".")
+    nm = rep["near_miss"]
+    print(f"Near-miss sentences: {len(nm['false_wakes'])} false wakes in {nm['rendered']} renderings "
+          f"(worst score {nm['worst_score']}).")
+    for w in nm["false_wakes"]:
+        print(f"  WOULD WAKE on \"{w['text']}\" ({w['voice']}, score {w['score']})")
     for line in rep["next"]:
         print("  " + line)
-    if a.apply:
-        try:
-            Identity(home, cfg).set_wake(str(out), phrase, rep["threshold"], by="cli")
-        except IdentityError as e:
-            print(f"not applied: {e}", file=sys.stderr)
-            return 1
-        print(f"Applied: JARVES will wake on \"{phrase}\" after the next start (jarvis stop, then jarvis).")
+    if not a.apply:
+        print(f"\nNot applied. The active wake model is unchanged. Use it with: "
+              f"jarvis wake train {' '.join(a.phrase)} --apply   (undo later with: jarvis wake train --revert)")
+        return 0
+    why = wake_prod.gate(rep)
+    if why and not a.accept_risk:
+        for w in why:
+            print(f"not applied: {w}", file=sys.stderr)
+        print("Record better samples or retrain; --accept-risk applies it anyway.", file=sys.stderr)
+        return 1
+    try:
+        wake_prod.promote(home, cfg, out, phrase, rep["threshold"], active)
+    except (IdentityError, OSError) as e:
+        print(f"not applied: {e}", file=sys.stderr)
+        return 1
+    print(f"Applied: JARVES will wake on \"{phrase}\" after the next start (jarvis stop, then jarvis). "
+          "Undo with: jarvis wake train --revert")
     return 0
 
 
@@ -1422,6 +1525,7 @@ def cmd_dashboard(a, cfg, home) -> int:
               "(then phones on your Wi-Fi can pair with a code; never reachable from the internet)", file=sys.stderr)
         return 1
     mobile_on, tls, bridge = bool(getattr(a, "mobile", False)), None, None
+    tail, tls_src, only_tail = {}, "none", False
     if mobile_on:
         if not _cli_features(cfg, home).enabled("mobile_access"):
             print("Phone access is switched off. Turn it on with: jarvis features on mobile_access "
@@ -1432,10 +1536,13 @@ def cmd_dashboard(a, cfg, home) -> int:
         if getattr(a, "tls_selfsigned", False) and not cert.is_file():
             from .dashboard_auth import lan_ip
             _mobile.make_selfsigned(home, lan_ip())
-        if cert.is_file() and key.is_file():
-            tls = (cert, key)
+        from . import tailnet as _tn
+        tail = _tn.detect()                              # detection only: JARVES never installs or logs in to Tailscale
+        tls, tls_src = _tn.choose_tls(home, tail)
+        only_tail = bool(getattr(a, "tailnet_only", False)) or _mobile.MobileAccess(home).settings()["bind_tailnet_only"]
     try:
-        dash = Dashboard(home, cfg, a.port, lan=a.lan, mobile_on=mobile_on, tls=tls)
+        dash = Dashboard(home, cfg, a.port, lan=a.lan, mobile_on=mobile_on, tls=tls, tailnet=tail, tls_source=tls_src,
+                         bind_tailnet_only=only_tail)
     except OSError as e:
         print(f"cannot start the dashboard: {e}", file=sys.stderr)
         return 1
@@ -1448,6 +1555,11 @@ def cmd_dashboard(a, cfg, home) -> int:
         print(f"Phone access is ON ({'https' if tls else 'http, text only: voice needs TLS, use --tls-selfsigned'}) "
               f"on {dash.mobile.host}:{dash.port}. Press 'Pair a phone' on the dashboard Phone page for the QR code. "
               "Standalone dashboard: chat/voice answer only inside a running Core.", flush=True)
+    if mobile_on and tail.get("present"):
+        print(f"Tailscale: {dash.mobile.scheme}://{dash.mobile.tailnet_host()}:{dash.port}/m/ "
+              f"({'listening on the tailnet address only' if only_tail else 'also reachable from your tailnet'}).", flush=True)
+    elif mobile_on:
+        print("Tailscale was not found on this computer (optional). Setup guide: docs/PHONE_ACCESS_TAILSCALE.md", flush=True)
     print("Ctrl+C to stop.", flush=True)
     if not a.no_open:
         import webbrowser
@@ -1553,7 +1665,10 @@ def main(argv: list[str] | None = None) -> int:
             stream.reconfigure(encoding="utf-8")
         except (AttributeError, ValueError):
             pass
+    from . import console_rtl
+    console_rtl.install(sys.argv[1:] if argv is None else list(argv))   # Hebrew in consoles without bidi (--no-rtl-fix / JARVES_CONSOLE_RTL)
     ap = argparse.ArgumentParser(prog="jarves", description="JARVES assistant Core")
+    ap.add_argument("--no-rtl-fix", action="store_true", help="print Hebrew in logical order (consoles that do their own bidi)")
     ap.add_argument("--config", type=Path, help="config.toml (default: <JARVES_HOME>/config.toml)")
     ap.add_argument("--profile", metavar="NAME", help="use this profile (its own memory, conversations, costs, "
                                                       "settings, keys); also JARVES_PROFILE. See: jarvis profile list")
@@ -1658,7 +1773,7 @@ def main(argv: list[str] | None = None) -> int:
     add_approvals_cli(sub)                    # V3: jarvis approvals list / approve / deny / history
     wk = sub.add_parser("wake", help="calibrate the wake word to your voice and mic, or train a new wake phrase")
     wk.add_argument("action", choices=["test", "train", "eval"],
-                    help="test = live check of your voice + mic with an exact fix; train = new phrase; "
+                    help="test = live check of your voice + mic with an exact fix; train = new phrase (candidate; --apply to use, --revert to undo); "
                          "eval = measured detection rate / false wakes per hour on a synthetic corpus")
     wk.add_argument("--list-mics", action="store_true", help="test: list the input devices and exit")
     wk.add_argument("--openai", action="store_true", help="eval: add OpenAI TTS voices (metered once, cached)")
@@ -1667,14 +1782,19 @@ def main(argv: list[str] | None = None) -> int:
     wk.add_argument("--seconds", type=int, default=20)
     wk.add_argument("--apply", action="store_true", help="test: save the recommended threshold; train: use the "
                                                          "new phrase from the next start")
-    wk.add_argument("--revert", action="store_true", help="train: go back to the standard \"Hey Jarvis\" model "
+    wk.add_argument("--revert", action="store_true", help="train: undo the last --apply (the previous model and setting; else the standard \"Hey Jarvis\") "
                                                           "(the trained file is kept)")
     wk.add_argument("--model", help="test: a trained .npz / .tflite instead of the current wake model")
     wk.add_argument("--false-wakes", type=int, default=0, metavar="MIN",
                     help="test: count false wakes over MIN minutes of normal room audio")
     wk.add_argument("--say", action="append", help="train: another way to say it (e.g. the Hebrew spelling); repeat")
     wk.add_argument("--samples", help="train: a folder of WAV recordings of YOU saying the phrase (recommended)")
-    wk.add_argument("--out", help="train: output .npz (default <state_dir>/wake/<phrase>.npz)")
+    wk.add_argument("--out", help="train: output .npz (default <state_dir>/wake/candidates/<phrase>.npz)")
+    wk.add_argument("--check-samples", action="store_true",
+                    help="train: only check the quality of your recordings (default folder <state_dir>/wake/samples)")
+    wk.add_argument("--seed", type=int, default=7, help="train: random seed (same seed + same samples = same model)")
+    wk.add_argument("--accept-risk", action="store_true",
+                    help="train: apply even if a near-miss sentence or your held-out recordings fail the check")
     dr = sub.add_parser("doctor", help="check microphone, wake word, keys, music; say what to fix")
     dr.add_argument("--sound", action="store_true", help="also play a beep on the speakers")
     dr.add_argument("--live", action="store_true", help="also open one real GPT-Live session (~1 cent, asks first)")
@@ -1685,6 +1805,10 @@ def main(argv: list[str] | None = None) -> int:
     su.add_argument("--defaults", action="store_true", help="non-interactive: take every recommended answer")
     su.add_argument("--lang", choices=["he", "en"], help="wizard language (default Hebrew)")
     su.add_argument("--restart", action="store_true", help="forget the progress of an interrupted run")
+    su.add_argument("--yes", "-y", action="store_true", help="non-interactive: keep every existing setting and secret, "
+                    "take the safe defaults for the rest (never overwrites)")
+    su.add_argument("--no-rtl-fix", action="store_true", default=argparse.SUPPRESS,
+                    help="print Hebrew in logical order (same as JARVES_CONSOLE_RTL=logical)")
     su.add_argument("--check-addons", action="store_true",
                     help="check that every add-on's code, models and data are in this install (no sensors, no network)")
     su.add_argument("--json", action="store_true", help="with --check-addons: machine-readable output")
@@ -1716,6 +1840,8 @@ def main(argv: list[str] | None = None) -> int:
                                                        "(needs: jarvis features on dashboard_lan)")
     db.add_argument("--mobile", action="store_true", help="also serve the phone app (needs: jarvis features on "
                                                           "mobile_access); pair with a QR code")
+    db.add_argument("--tailnet-only", action="store_true", help="with --mobile: listen on the Tailscale address only "
+                                                                  "(never on all interfaces); needs Tailscale running")
     db.add_argument("--tls-selfsigned", action="store_true", help="with --mobile: make a self-signed certificate so the "
                                                                   "phone may use the microphone")
     fe = sub.add_parser("features", help="feature switches: list / on ID / off ID / reset ID; on installs supported "
@@ -1749,17 +1875,26 @@ def main(argv: list[str] | None = None) -> int:
     from . import budget_cli
     budget_cli.add_cli(sub)                   # SW-V4 D (#14): jarvis budget status / test-cap / set / reset-ladder
     from . import recall
+    from . import privacy as privacy_cli, phone_cli
+    privacy_cli.add_cli(sub)                  # OD-12: jarvis privacy status | full-text on|off
+    phone_cli.add_cli(sub)                    # V5: jarvis phone status | approvals | revoke-all | bind
     recall.add_cli(sub)                       # SW-V4 G: jarvis recall "query" [--since] [--json]
     from .diag import service as health_cli
     health_cli.add_cli(sub)                   # SW-V4 O: jarvis health [report|remediate|ticket|ai-review|canary|...]
     from . import selfspeed
     selfspeed.add_cli(sub)                    # owner request 21 Oct: jarvis selftest [--deep] / jarvis speedtest
+    from . import issue_registry
+    issue_registry.add_cli(sub)               # owner request 21 Oct: jarvis issues [list|show|report|ignore|fixed|add]
+    from . import web_cli
+    web_cli.add_cli(sub)                      # owner request 21 Oct: jarvis web (the dashboard Chat page)
     from . import whatsapp_admin
     whatsapp_admin.add_cli(sub)               # SW-V4 F: jarvis whatsapp status / link / mode / allow / kill ...
     from .orchestrator import surfaces as agents_cli
     agents_cli.add_cli(sub)                   # SW-V4 E: jarvis agents list | status | ask | tell | start | ...
     from . import dialing
     dialing.add_cli(sub)                      # SW-V4 H: jarvis dial <name|number> [--yes-on-screen]
+    from . import self_manage
+    self_manage.add_cli(sub)                  # jarvis manage status|file|memory|feature|skill|setting|connect|history|undo
     a = ap.parse_args(argv)
     try:
         if a.profile:
@@ -1791,7 +1926,9 @@ def main(argv: list[str] | None = None) -> int:
             "whatsapp": whatsapp_admin.cmd_whatsapp,
             "agents": agents_cli.cmd_agents,
             "dial": dialing.cmd_dial, "release": release_cmd.cmd_release,
-            **cli_parity.COMMANDS, **budget_cli.COMMANDS, **selfspeed.COMMANDS}[a.cmd](a, cfg, home)
+            "manage": self_manage.cmd_manage, "undo": self_manage.cmd_manage,
+            **cli_parity.COMMANDS, **budget_cli.COMMANDS, **privacy_cli.COMMANDS, **phone_cli.COMMANDS, **selfspeed.COMMANDS,
+            **issue_registry.COMMANDS, **web_cli.COMMANDS}[a.cmd](a, cfg, home)
 
 
 if __name__ == "__main__":

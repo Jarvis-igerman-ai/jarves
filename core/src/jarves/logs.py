@@ -160,7 +160,7 @@ FIELD_CLASS: dict[str, str] = {
         deleted_sessions added
         chat_hash chats logout override unread killed text_sha256 retry_after_s days_left
         turn route history_items reserved_usd spent_usd actual_usd requests deleg_s scope err_code daily_usd turn_usd
-        transport plugin provider handler
+        transport plugin provider handler tailnet tls_source hours bind_tailnet_only
         """),
     **_reg(SECRET, """
         token access_token refresh_token id_token id_token_hint api_key apikey secret secrets client_secret
@@ -231,9 +231,32 @@ def runtime_privacy() -> bool | None:
     return _runtime
 
 
+FULL_TEXT_HOURS = 24                  # "full text on request" (owner decision OD-12, 2026-10-21): never longer
+_clock = time.time                    # tests move this clock
+_until = 0.0                          # end of the current full-text window (0 = none)
+
+
+def full_text_until() -> float:
+    """End (epoch seconds) of a running "full text on request" window, else 0.0. Applies the expiry first."""
+    _poll_privacy()
+    return _until if _until and not privacy() else 0.0
+
+
+def _expire_full_text() -> None:
+    """The window is over: privacy back on for every process (flag file), then one fixed-literal line."""
+    global _until
+    _until = 0.0
+    if _flag is not None:
+        write_privacy(_flag.parent, True)
+    info("privacy", "PRIVACY_FULL_TEXT_EXPIRED", "the 24 hour full text window ended, privacy is on again")
+
+
 def _poll_privacy(force: bool = False) -> None:
-    global _flag_mtime, _flag_checked, _runtime
+    global _flag_mtime, _flag_checked, _runtime, _until
     if _flag is None:
+        return
+    if _until and _clock() >= _until:
+        _expire_full_text()
         return
     now = time.monotonic()
     if not force and now - _flag_checked < 1.0:
@@ -247,32 +270,42 @@ def _poll_privacy(force: bool = False) -> None:
         return
     _flag_mtime = m
     try:
-        v = json.loads(_flag.read_text(encoding="utf-8")).get("privacy")
+        d = json.loads(_flag.read_text(encoding="utf-8"))
+        v = d.get("privacy")
     except (OSError, ValueError, AttributeError):
         return
     if isinstance(v, bool):
+        u = d.get("until")
+        _until = float(u) if v is False and isinstance(u, (int, float)) and not isinstance(u, bool) else 0.0
         set_privacy(v)
         _runtime = v
+        if _until and _clock() >= _until:
+            _expire_full_text()
 
 
 def watch_privacy(log_dir: Path) -> None:
     """Follow the runtime switch in <log_dir>/privacy.json from now on (called by setup())."""
-    global _flag, _flag_mtime, _runtime
-    _flag, _runtime = Path(log_dir) / PRIVACY_FILE, None
+    global _flag, _flag_mtime, _runtime, _until
+    _flag, _runtime, _until = Path(log_dir) / PRIVACY_FILE, None, 0.0
     try:
         _flag_mtime = _flag.stat().st_mtime         # baseline: only LATER switches apply
     except OSError:
         _flag_mtime = None
 
 
-def write_privacy(log_dir: Path, on: bool) -> None:
-    """Flip privacy now for this process and (via the flag file) for every process logging into log_dir."""
-    global _flag_mtime, _runtime
+def write_privacy(log_dir: Path, on: bool, until: float | None = None) -> None:
+    """Flip privacy now for this process and (via the flag file) for every process logging into log_dir.
+    `until` (only with on=False) = the full-text window: privacy returns by itself at that time."""
+    global _flag_mtime, _runtime, _until
     log_dir = Path(log_dir)
     log_dir.mkdir(parents=True, exist_ok=True)
     tmp = log_dir / (PRIVACY_FILE + ".tmp")
-    tmp.write_text(json.dumps({"privacy": bool(on), "at": time.time()}), encoding="utf-8")
+    rec = {"privacy": bool(on), "at": time.time()}
+    if until and not on:
+        rec["until"] = float(until)
+    tmp.write_text(json.dumps(rec), encoding="utf-8")
     os.replace(tmp, log_dir / PRIVACY_FILE)
+    _until = float(until) if until and not on else 0.0
     set_privacy(on)
     _runtime = bool(on)
     if _flag is not None and _flag == log_dir / PRIVACY_FILE:

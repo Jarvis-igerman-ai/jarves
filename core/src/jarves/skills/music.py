@@ -577,15 +577,15 @@ async def _false() -> bool:
 
 # ------------------------------------------------------------------ Skill
 class PlayArgs(BaseModel):
-    query: str = Field(..., min_length=1, max_length=200, description="Song, artist or 'artist song' to play")
+    query: str = Field(..., min_length=1, max_length=200)
 
 
 class VolumeArgs(BaseModel):
     percent: int | None = Field(None, ge=0, le=100,
-                                description="Absolute music volume 0-100 (only when the user names a number)")
+                                description='0-100, only when the user names a number')
     change: Literal["up", "down"] | None = Field(
-        None, description="Relative change: 'up' for louder (תגביר/יותר חזק), 'down' for quieter (תנמיך/יותר חלש)")
-    step: int = Field(10, ge=1, le=50, description="Points per relative change (default 10; 'a lot' = 20)")
+        None, description='up = louder (תגביר), down = quieter (תנמיך)')
+    step: int = Field(10, ge=1, le=50, description="points per change (default 10; 'a lot' = 20)")
 
     @model_validator(mode="after")
     def _one(self):
@@ -957,27 +957,18 @@ class MusicSkill(Skill):
             return await self._guard(go())
 
         return [
-            Tool("music_play", "Search YouTube Music and start playing the best match. query: song and/or artist in "
-                 "its usual spelling (e.g. 'Daft Punk Get Lucky', 'שלום חנוך'); for a mood or genre use concrete genre "
-                 "words ('calm piano', 'lofi'). The result says what the PLAYER reports playing.", play,
+            Tool("music_play", "Search YouTube Music and play the best match: 'play Daft Punk', 'תנגן שיר רגוע'. Result says what the PLAYER plays.", play,
                  PlayArgs, permission="action", timeout_s=PLAY_TIMEOUT_S),
-            Tool("music_pause", "Pause the music: the song stops where it is (music_resume continues it). NOT for "
-                 "'mute'/'השתק'/'מיוט': use music_mute.", simple("pause", "השהיתי."), permission="action"),
-            Tool("music_resume", "Resume paused music.", simple("resume", "ממשיך לנגן:"), permission="action"),
-            Tool("music_next", "Skip to the next track.", simple("next", "השיר הבא:"), permission="action",
+            Tool("music_pause", "Pause (music_resume continues): 'pause', 'תעצור'. NOT for mute: use music_mute.", simple("pause", "השהיתי."), permission="action"),
+            Tool("music_resume", "Resume paused music: 'continue', 'תמשיך'.", simple("resume", "ממשיך לנגן:"), permission="action"),
+            Tool("music_next", "Next track: 'next song', 'השיר הבא'.", simple("next", "השיר הבא:"), permission="action",
                  timeout_s=15),
-            Tool("music_stop", "Stop the music (pauses the player).", simple("pause", "עצרתי את המוזיקה."),
+            Tool("music_stop", "Stop the music: 'stop the music', 'תפסיק מוזיקה'.", simple("pause", "עצרתי את המוזיקה."),
                  permission="action"),
-            Tool("music_mute", "Mute the music WITHOUT pausing it: the song keeps playing silently. Use for 'mute', "
-                 "'השתק', 'תעשה מיוט', 'בלי קול'.", mute_tool(True), permission="action"),
-            Tool("music_unmute", "Unmute the music (bring its sound back). Use for 'unmute', 'בטל השתקה', "
-                 "'תחזיר את הקול'.", mute_tool(False), permission="action"),
-            Tool("music_volume", "Change the music volume (0-100, Pear's slider). Louder/'תגביר': change='up'; "
-                 "quieter/'תנמיך': change='down' (10 points a step; never jump to the maximum). Use percent only "
-                 "when the user names a number. The result reports the real level before and after and the allowed "
-                 "maximum (max_volume).", volume, VolumeArgs, permission="action"),
-            Tool("music_status", "What is playing now, whether it is paused, and the current volume (0-100) and "
-                 "mute state. Use it to answer 'what volume is it?'.", status, permission="read"),
+            Tool("music_mute", "Mute WITHOUT pausing (plays silently): 'mute', 'השתק', 'שתוק'.", mute_tool(True), permission="action"),
+            Tool("music_unmute", "Bring the sound back: 'unmute', 'תחזיר קול'.", mute_tool(False), permission="action"),
+            Tool("music_volume", "Volume 0-100. 'louder', 'תגביר': change='up'; 'quieter', 'תנמיך': change='down' (10 a step, never jump to max). percent only for a named number. Result gives before/after and max_volume.", volume, VolumeArgs, permission="action"),
+            Tool("music_status", "What plays, paused?, volume 0-100, muted: 'what's playing', 'מה מתנגן', 'what volume is it'.", status, permission="read"),
         ]
 
     async def _read_volume(self, expect: int | None = None, muted: bool | None = None) -> tuple[int, bool] | None:

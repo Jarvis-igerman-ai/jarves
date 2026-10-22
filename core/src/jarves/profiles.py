@@ -551,7 +551,7 @@ def make_skill(core):
     from .skills import NoArgs, Skill, Tool, ToolResult
 
     class SwitchArgs(BaseModel):
-        name: str = Field(..., min_length=1, max_length=24, description="the profile name the user said, e.g. dana, test")
+        name: str = Field(..., min_length=1, max_length=24, description='profile name as said')
 
     class ProfileSkill(Skill):
         name = "profiles"
@@ -602,11 +602,9 @@ def make_skill(core):
                                   "PROFILE_SWITCHING")
 
             return [
-                Tool("profile_list", "List JARVES's profiles (users and the test profile) and which one is current.",
+                Tool("profile_list", "Profiles (users, test) and the current one: 'which profile', 'איזה פרופיל'.",
                      list_, NoArgs, permission="read"),
-                Tool("profile_switch", "Switch to another profile when the user explicitly asks (\"תעבור לפרופיל של "
-                     "דנה\", \"switch to the test profile\"). The user approves on the screen; JARVES then restarts "
-                     "in that profile. Never guess who is speaking.", switch, SwitchArgs, permission="action",
+                Tool("profile_switch", "Switch profile on explicit request ('switch to the test profile', 'תעבור לפרופיל של דנה'); user approves on screen; JARVES restarts. Never guess who speaks.", switch, SwitchArgs, permission="action",
                      timeout_s=60),
             ]
 

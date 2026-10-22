@@ -118,7 +118,8 @@ def test_find_by_hebrew_english_and_alias():
 
 
 # ---------------------------------------------------------------------- live state
-def test_state_follows_live_switches_and_probes(home):
+def test_state_follows_live_switches_and_probes(home, monkeypatch):
+    monkeypatch.delenv("OPENAI_ADMIN_KEY", raising=False)     # a leaked admin key from an earlier test makes api_bill "on"
     f = make(home, skills=lambda: {"calendar", "gmail"})
     g = guides.load()["google_calendar"]
     s = guides.state(g, f)

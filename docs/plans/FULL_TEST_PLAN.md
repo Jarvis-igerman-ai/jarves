@@ -35,3 +35,4 @@ No open P0/P1; every feature has a PASS or an explicit BLOCKED reason; log revie
 - Helper skill: always ask per command (no read-only auto-allow). Approval popup: small always-on-top window. Instagram sends: voice + on-screen popup. Installer signing: stay unsigned for now.
 - Owner-assisted session: the owner will say when. Fix policy: fix P0–P2 immediately, list P3. Blockers reported only in chat + HANDOFF. After the campaign passes: tag v3.0.0 and publish the signed installer automatically.
 - Morning briefing: only on request (no auto schedule). Quiet hours: 22:00–07:00 (alarms the owner set still ring). Conversation recall: build next after the campaign. Assisted dialing: Phone Link / default dialer.
+- Approvals: timeout 60 s (120 s for helper), PC only for now. Self-check weekly Sunday 10:00. Profiles: just default + test for now. *(Restored in the 20 Oct 2026 migration audit from legacy branch `v3-plan` `cd8eabf`; it never reached `main`.)*

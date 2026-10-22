@@ -1,0 +1,36 @@
+order = 38
+category = "everyday"
+pages = ["proactive"]
+features = ["proactive_intel"]
+aliases = ["הצעות יזומות", "הצעה יזומה", "תציע לי", "proactive", "proactive offers", "suggestions", "offer"]
+links = ["goals", "alerts"]
+title_he = "הצעות יזומות"
+title_en = "Proactive offers"
+what_he = "כברירת מחדל JARVES עונה רק כשמבקשים. אפשר לאפשר לו להציע דבר אחד בתוך שיחה שכבר התחלתם."
+what_en = "By default JARVES answers only when you ask. You can let it offer one thing inside a conversation you already started."
+say = [["מה כדאי לך להזכיר לי?", "What could you mention to me?"], ["לא, תסגור את ההצעה הזאת", "No, dismiss that offer"]]
+expect_he = "בעמוד \"הצעות יזומות\" רואים את הרשימה (למשל יעד שלא התקדם שבוע) ובוחרים מצב: רק לפי בקשה, או הצעה אחת בתוך שיחה. JARVES לא מדבר מעצמו מחוץ לשיחה ולא בין 22:00 ל-07:00."
+expect_en = "The page \"Proactive offers\" shows the list (for example a goal with no movement for a week) and lets you pick a mode: only when asked, or one offer inside a conversation. JARVES never speaks on its own outside a conversation and never between 22:00 and 07:00."
+cost_he = "חינם. הכול מקומי."
+cost_en = "Free. All local."
+privacy_he = "הפריטים נגזרים מהיעדים שלכם במחשב בלבד. פריט שסגרתם לא יחזור באותו מצב."
+privacy_en = "Items are derived from your own goals on this computer only. An item you dismissed does not come back for the same situation."
+
+[[steps]]
+he = "פתחו את העמוד \"הצעות יזומות\" כדי לראות מה היה מוצע."
+en = "Open the page \"Proactive offers\" to see what could be offered."
+check = "active:proactive_intel"
+
+[[steps]]
+he = "כדי לאפשר הצעה בתוך שיחה, בחרו במצב \"הצעה אחת בתוך שיחה\". בלי קול: jarvis proactive mode in_conversation (חזרה: jarvis proactive mode on_request)."
+en = "To allow an offer inside a conversation, choose the mode \"One offer inside a conversation\". Without voice: jarvis proactive mode in_conversation (back: jarvis proactive mode on_request)."
+
+[[steps]]
+he = "לרשימה ולסגירה בשורת הפקודה: jarvis proactive list, jarvis proactive dismiss ID."
+en = "To list and dismiss on the command line: jarvis proactive list, jarvis proactive dismiss ID."
+
+[[problems]]
+he = "JARVES לא הציע לי כלום"
+en = "JARVES did not offer me anything"
+fix_he = "זו ברירת המחדל: הוא עונה רק כשמבקשים. עברו למצב \"הצעה אחת בתוך שיחה\"; הצעה מגיעה רק בתחילת שיחה, לא בשעות שקט, ורק אם יש פריט."
+fix_en = "That is the default: it answers only when asked. Switch to \"One offer inside a conversation\"; an offer comes only when a conversation starts, never in quiet hours, and only if there is an item."

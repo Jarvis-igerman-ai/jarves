@@ -1,0 +1,45 @@
+/* JARVES chat view: shared by the dashboard Chat page and the phone page. Colours come from whichever palette the page
+   has (dashboard tokens first, the phone page's second); every pair is at least 4.5:1. Logical properties: RTL-safe. */
+.jchat { --jc-bg: var(--surface, var(--card, #fff)); --jc-fg: var(--text, var(--fg, #111)); --jc-line: var(--line, var(--muted, #888));
+  --jc-acc: var(--accent-fill, var(--accent, #1d68c4)); --jc-on: var(--on-accent, #fff); --jc-bad: var(--critical, var(--bad, #c00));
+  --jc-soft: var(--surface-2, var(--card, #eee)); --jc-muted: var(--text-2, var(--muted, #555));
+  display: flex; flex-direction: column; gap: 10px; min-width: 0; max-width: 100%; }
+.jchat * { box-sizing: border-box; }
+.jc-sr { position: absolute; inline-size: 1px; block-size: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+.jc-status { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; min-block-size: 24px; }
+.jc-pill { display: inline-block; padding: 2px 10px; border-radius: 99px; background: var(--jc-soft); color: var(--jc-fg); font-size: 13px; border: 1px solid var(--jc-line); }
+.jc-pill.on { border-color: var(--jc-acc); }
+.jc-opts { display: flex; gap: 6px 18px; flex-wrap: wrap; }
+.jc-chk { display: flex; align-items: center; gap: 6px; font-size: 14px; color: var(--jc-fg); min-block-size: 32px; }
+.jc-chk input[type="checkbox"] { inline-size: 20px; block-size: 20px; }
+.jc-log { display: flex; flex-direction: column; gap: 8px; min-block-size: 40vh; max-block-size: 62vh; overflow-y: auto; overflow-x: hidden;
+  padding: 8px; border: 1px solid var(--jc-line); border-radius: 12px; background: var(--jc-bg); }
+.jc-log:focus-visible, .jc-in:focus-visible, .jchat button:focus-visible, .jchat summary:focus-visible, .jc-code:focus-visible, .jchat input:focus-visible {
+  outline: 3px solid var(--jc-acc); outline-offset: 2px; }
+.jc-msg { padding: 8px 12px; border-radius: 14px; max-inline-size: 88%; white-space: pre-wrap; overflow-wrap: anywhere; line-height: 1.5; font-size: 15px; unicode-bidi: plaintext; }
+.jc-user { align-self: flex-end; background: var(--jc-acc); color: var(--jc-on); }
+.jc-assistant { align-self: flex-start; background: var(--jc-soft); color: var(--jc-fg); }
+.jc-assistant.streaming { border: 1px dashed var(--jc-line); }
+.jc-assistant.err, .jc-notice.err { color: var(--jc-bad); border: 1px solid var(--jc-bad); }
+.jc-notice { align-self: center; max-inline-size: 96%; background: transparent; color: var(--jc-muted); border: 1px solid var(--jc-line); font-size: 14px; }
+.jc-tool { align-self: flex-start; max-inline-size: 96%; font-size: 13px; color: var(--jc-muted); }
+.jc-tool summary { cursor: pointer; padding: 4px 8px; border-radius: 8px; border: 1px solid var(--jc-line); min-block-size: 28px; }
+.jc-tool.bad summary { border-color: var(--jc-bad); }
+.jc-detail { margin: 4px 0 0; padding: 6px 8px; white-space: pre-wrap; overflow-wrap: anywhere; background: var(--jc-soft); color: var(--jc-fg); border-radius: 8px; font: 12px/1.4 ui-monospace, Consolas, monospace; }
+.jc-appr { display: grid; gap: 8px; }
+.jc-card { border: 2px solid var(--jc-line); border-radius: 12px; padding: 10px 12px; background: var(--jc-bg); color: var(--jc-fg); display: grid; gap: 6px; }
+.jc-card.risk-high { border-color: var(--jc-bad); }
+.jc-chead { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+.jc-small { font-size: 13px; color: var(--jc-muted); }
+.jc-rows dl { display: grid; grid-template-columns: max-content 1fr; gap: 2px 10px; margin: 4px 0 0; font-size: 13px; }
+.jc-rows dt { color: var(--jc-muted); } .jc-rows dd { margin: 0; overflow-wrap: anywhere; } .jc-rows dd.mono { font-family: ui-monospace, Consolas, monospace; }
+.jc-row { display: flex; gap: 8px; flex-wrap: wrap; }
+.jc-code { inline-size: 7ch; font: inherit; padding: 6px; border-radius: 8px; border: 1px solid var(--jc-line); background: transparent; color: var(--jc-fg); }
+.jc-cmds { display: flex; gap: 6px; flex-wrap: wrap; }
+.jc-cmd { min-block-size: 36px; padding: 4px 12px; font-family: ui-monospace, Consolas, monospace; font-size: 13px; }
+.jc-form { display: flex; gap: 8px; align-items: flex-end; }
+.jc-in { flex: 1; min-inline-size: 0; font: inherit; font-size: 16px; padding: 10px; border-radius: 10px; border: 1px solid var(--jc-line); background: var(--jc-bg); color: var(--jc-fg); resize: vertical; min-block-size: 48px; max-block-size: 30vh; }
+.jchat button { min-block-size: 44px; min-inline-size: 44px; }
+.jc-send { padding-inline: 18px; }
+@media (max-width: 480px) { .jc-log { min-block-size: 36vh; max-block-size: 52vh; } .jc-msg { max-inline-size: 94%; } .jc-rows dl { grid-template-columns: 1fr; } }
+@media (prefers-reduced-motion: no-preference) { .jc-log { scroll-behavior: smooth; } }

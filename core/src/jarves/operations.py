@@ -23,15 +23,20 @@ from . import alerts as alerts_mod
 from . import autonomy as autonomy_mod
 from . import connect as connect_mod
 from . import features as feat
+from . import goals as goals_mod
+from . import goal_plans as plans_mod
 from . import lists as lists_mod
 from . import logs
 from . import notes as notes_mod
+from . import preferences as prefs_mod
+from . import calm, continuity as continuity_mod, devmanager as dev_mod, devstatus as devstatus_mod, proactive as proactive_mod
 from . import sandbox as sandbox_mod
 from . import scheduler as sched_mod
 from . import selfcheck as selfcheck_mod
 from . import timers as timers_mod
 from .userdata import open_db
 
+SIGNAL_SCAN_S = 3600                              # how often the proactive-signal scan may run
 AUTONOMY_SYNC_S = 600.0
 ROADMAP_ISSUE = "https://github.com/igalgerman/jarves/issues/3"     # M3 Raspberry Pi verification (real issue)
 _UNVERIFIED_PI = ("pure Python + SQLite + tzdata, no Windows-only code; not run on a Raspberry Pi yet "
@@ -53,6 +58,12 @@ M3_FEATURES = {
     "lists": ("רשימות קניות ומשימות", "Shopping and to-do lists", ["lists"],
               "shopping and to-do lists by voice: add, read back, tick off, clear",
               "implemented_unverified", "implemented_unverified", _UNVERIFIED_PI),
+    "goals": ("יעדים", "Goals", ["goals"],
+              "your goals with steps and progress; a check-in only when you ask; nothing is done or sent for you",
+              "implemented_unverified", "implemented_unverified", _UNVERIFIED_PI),
+    "adaptive_memory": ("העדפות נלמדות", "Learned preferences", ["preferences"],
+                        "preferences you state are remembered only after you confirm; all visible, editable, removable",
+                        "implemented_unverified", "implemented_unverified", _UNVERIFIED_PI),
     "files": ("קבצים בסביבה פרטית", "File workspace", ["files"],
               "documents JARVES writes, only in its private folder; your folders only after you approve",
               "implemented_unverified", "implemented_unverified",
@@ -195,9 +206,24 @@ class Operations:
         self.autonomy = autonomy_mod.Autonomy(self.db, cfg=core.cfg, home=home, features=core.features,
                                               alerts=self.alerts)
         self.lists = lists_mod.Lists(self.db)
+        self.goals = goals_mod.Goals(self.db)
+        self.plans = plans_mod.PlanStore(self.db, known=core.registry.get)
+        self.plans.recover()                 # a plan that was running when the Core stopped is paused, never repeated
+        self.plan_runner = plans_mod.PlanRunner(self.plans, core.registry, budget=getattr(core, "budget", None),
+                                                features=core.features)
+        self._plan_task: asyncio.Task | None = None
+        self.prefs = prefs_mod.Preferences(self.db)
+        self.proactive = proactive_mod.Proactive(self.db, self.goals)
+        self.cont = continuity_mod.Continuity(home, quiet=lambda ts: calm.quiet_hours_now(self.db, ts))
+        self._scanned = 0.0
+        self.cheer = goals_mod.GoalCheer(self.goals, quiet=lambda: calm.quiet_hours_now(self.db, time.time()),
+                                         at_pc=lambda: calm.owner_at_pc(core), say=self._say_goal_line)
         self.timers = timers_mod.Timers(self.db, tz=self.scheduler.tz)
         reg = core.registry
-        for skill in [lists_mod.make_skill(self.lists), timers_mod.make_skill(self.timers), *sched_mod.make_skills(self.scheduler, reg), notes_mod.make_skill(self.notes, self.sandbox),
+        for skill in [lists_mod.make_skill(self.lists), goals_mod.make_skill(self.goals, reg),
+                      plans_mod.make_skill(self.plans, reg),
+                      prefs_mod.make_skill(self.prefs), proactive_mod.make_skill(self.proactive),
+                      dev_mod.make_skill(self._open_store), devstatus_mod.make_skill(home), timers_mod.make_skill(self.timers), *sched_mod.make_skills(self.scheduler, reg), notes_mod.make_skill(self.notes, self.sandbox),
                       sandbox_mod.make_skill(self.sandbox), alerts_mod.make_skill(self.alerts),
                       autonomy_mod.make_skill(self.autonomy, reg)]:
             reg.register(skill)
@@ -205,7 +231,9 @@ class Operations:
         register_briefing(reg, self.db)                # V3 P1: morning briefing (calls the Calendar/Gmail tools)
         reg.allowed_actions |= (sched_mod.ALLOWED_ACTIONS | notes_mod.ALLOWED_ACTIONS | sandbox_mod.ALLOWED_ACTIONS
                                 | alerts_mod.ALLOWED_ACTIONS | autonomy_mod.ALLOWED_ACTIONS
-                                | lists_mod.ALLOWED_ACTIONS | timers_mod.ALLOWED_ACTIONS)
+                                | lists_mod.ALLOWED_ACTIONS | timers_mod.ALLOWED_ACTIONS
+                                | goals_mod.ALLOWED_ACTIONS | plans_mod.ALLOWED_ACTIONS | prefs_mod.ALLOWED_ACTIONS
+                                | proactive_mod.ALLOWED_ACTIONS | dev_mod.ALLOWED_ACTIONS)
         self._task: asyncio.Task | None = None
         self._timer_task: asyncio.Task | None = None
         self._synced = 0.0
@@ -218,11 +246,35 @@ class Operations:
             core.health.set("scheduler", "unavailable", e.message, "uv sync (installs tzdata), or set the "
                                                                    "time zone on the dashboard Jobs page")
 
+    def _open_store(self):
+        from .diag import db as diag_db
+        from .store import Store
+        st = Store(self.core.home / "store.db")
+        diag_db.ensure(st)
+        return st
+
+    async def _say_goal_line(self, text: str) -> bool:
+        """The ONE line after a finished goal (GoalCheer has already checked: switch on is the caller's, at the PC,
+        not in quiet hours). Inside an open conversation it is announced at a good moment; otherwise spoken by the Core."""
+        c = self.core
+        if c.stopping or not c.features.active(goals_mod.FEATURE):
+            return False
+        live = c.live
+        if live is not None and hasattr(live, "announce"):
+            note = ("[goal] The user just finished a goal. Say exactly this one short calm line, nothing else, and do "
+                    f"not call tools: {text}")
+            return bool(await live.announce(note, max_wait_s=8.0, tag="goaldone"))
+        if not SpeechOutput(c).available():
+            return False
+        await c.speak(text)
+        return True
+
     def start(self) -> None:
         self._task = asyncio.get_running_loop().create_task(self.scheduler.run(self._after_tick), name="operations")
+        self._plan_task = asyncio.get_running_loop().create_task(self.plan_runner.run(), name="goal_plans")
         ring = TimerRinger(self.core)
         self._timer_task = asyncio.get_running_loop().create_task(
-            self.timers.run(lambda t, text: ring(t, text) if self.core.features.active("timers") else _false()),
+            self.timers.run(lambda t, text: self._ring_once(ring, t, text)),
             name="timers")
         # owner request 20 Oct: self-check (voice tools, weekly job, after an unclean stop / an error burst)
         self.selfcheck = selfcheck_mod.attach(self.core, self)
@@ -239,6 +291,12 @@ class Operations:
         except Exception:
             self.selfspeed = None
             logs.error("selfspeed", "SELFSPEED_ATTACH_FAILED", "self-test tools not started", exc=True)
+        from . import issue_registry                 # owner request 21 Oct: issues registry, log sink, list_issues, fixed-in check
+        try:
+            self.issues = issue_registry.attach(self.core, self)
+        except Exception:
+            self.issues = None
+            logs.error("issues", "ISSUES_ATTACH_FAILED", "issues registry not started", exc=True)
 
     async def _connect_nudge(self) -> None:
         """Owner request 20 Oct: once a day at most, remind that Google is not connected (connect.maybe_nudge)."""
@@ -255,8 +313,42 @@ class Operations:
         except Exception:
             logs.error("connect", "CONNECT_NUDGE_FAILED", "setup reminder failed", exc=True)
 
+    async def _ring_once(self, ring, t: dict, text: str) -> bool:
+        """A due timer is announced on ONE device: the one the owner is using (desktop speaker, or a paired phone's
+        notice). The other never repeats it, also not after a reconnect (dedupe key = the timer id)."""
+        c = self.core
+        if not c.features.active("timers"):
+            return False
+        if c.features.active("mobile_access"):
+            try:
+                target = self.cont.on_timer_event(t["id"], text, desktop_present=calm.owner_at_pc(c))
+            except Exception:
+                logs.error("continuity", "TIMER_ROUTE_FAILED", "timer routing failed: ringing here", exc=True)
+                target = None
+            if target == "duplicate":
+                return True
+            if target not in (None, "desktop"):
+                return True                     # queued for the phone the owner is using; it acknowledges the notice
+        return await ring(t, text)
+
+    async def _signals_tick(self) -> None:
+        """Event-driven, no model call: at most once an hour turn the already-computed proactive items into signals."""
+        now = time.time()
+        if now - self._scanned < SIGNAL_SCAN_S or not self.core.features.active(continuity_mod.FEATURE):
+            return
+        self._scanned = now
+        try:
+            self.cont.scan_proactive(self.proactive)
+        except Exception:
+            logs.error("continuity", "SIGNAL_SCAN_FAILED", "proactive signal scan failed", exc=True)
+
     async def _after_tick(self) -> None:
+        await self._signals_tick()
         await self._connect_nudge()
+        try:
+            await self.cheer.check()
+        except Exception:
+            logs.error("goals", "GOAL_DONE_LINE_FAILED", "goal finished line failed", exc=True)
         await self.alerts.flush()
         now = time.time()
         if now - self._synced >= AUTONOMY_SYNC_S:
@@ -269,12 +361,19 @@ class Operations:
                 logs.error("autonomy", "AUTONOMY_SYNC_FAILED", "diagnostic proposals not updated", exc=True)
 
     async def stop(self) -> None:
+        if getattr(self, "issues", None) is not None:
+            from . import issue_registry
+            issue_registry.detach(self.issues)
         if getattr(self, "health_diag", None) is not None:
             await self.health_diag.stop()
         if getattr(self, "selfcheck", None) is not None:
             await self.selfcheck.stop()
         await self.scheduler.stop()
         self.timers.stop()
+        self.plan_runner.stop()
+        if self._plan_task is not None and not self._plan_task.done():
+            self._plan_task.cancel()
+            await asyncio.gather(self._plan_task, return_exceptions=True)
         if self._timer_task is not None:
             await asyncio.gather(self._timer_task, return_exceptions=True)
         if self._task is not None and not self._task.done():
@@ -296,6 +395,6 @@ def api_platforms(ctx, m, body):
 
 
 def dashboard_routes(register) -> None:
-    for mod in (sched_mod, alerts_mod, notes_mod, sandbox_mod, autonomy_mod, timers_mod, lists_mod):
+    for mod in (sched_mod, alerts_mod, notes_mod, sandbox_mod, autonomy_mod, timers_mod, lists_mod, plans_mod):
         mod.dashboard_routes(register)
     register("GET", r"/api/m3/platforms", api_platforms)

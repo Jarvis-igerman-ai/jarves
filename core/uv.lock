@@ -658,9 +658,10 @@ wheels = [
 
 [[package]]
 name = "jarves"
-version = "4.0.0"
+version = "4.0.1"
 source = { editable = "." }
 dependencies = [
+    { name = "cryptography" },
     { name = "httpx" },
     { name = "numpy" },
     { name = "openai-agents" },
@@ -701,6 +702,7 @@ dev = [
 
 [package.metadata]
 requires-dist = [
+    { name = "cryptography", specifier = ">=46" },
     { name = "faster-whisper", marker = "extra == 'voice'", specifier = ">=1.2" },
     { name = "httpx", specifier = ">=0.27" },
     { name = "numpy", specifier = ">=2" },
@@ -714,7 +716,7 @@ requires-dist = [
     { name = "pystray", marker = "extra == 'tray'", specifier = ">=0.19.5,<0.20" },
     { name = "sounddevice", marker = "extra == 'voice'", specifier = ">=0.5" },
     { name = "tzdata", specifier = ">=2025.2" },
-    { name = "websockets", specifier = ">=15,<17" },
+    { name = "websockets", specifier = ">=15,<18" },
     { name = "winrt-runtime", marker = "sys_platform == 'win32' and extra == 'voice'", specifier = ">=3.2" },
     { name = "winrt-windows-foundation", marker = "sys_platform == 'win32' and extra == 'voice'", specifier = ">=3.2" },
     { name = "winrt-windows-foundation-collections", marker = "sys_platform == 'win32' and extra == 'voice'", specifier = ">=3.2" },

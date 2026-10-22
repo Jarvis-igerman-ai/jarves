@@ -277,17 +277,17 @@ class Sandbox:
 # ---------------------------------------------------------------------- voice / agent tools
 class WriteArgs(BaseModel):
     path: str = Field(..., min_length=1, max_length=MAX_PATH_CHARS,
-                      description="file inside my workspace, e.g. 'reports/summary.md' (or grant:<id>/file.txt)")
+                      description="e.g. 'reports/summary.md' (or grant:<id>/file.txt)")
     text: str = Field(..., max_length=200_000)
-    overwrite: bool = Field(False, description="replace an existing file")
+    overwrite: bool = Field(False)
 
 
 class PathArgs(BaseModel):
-    path: str = Field("", max_length=MAX_PATH_CHARS, description="file or folder in my workspace ('' = top)")
+    path: str = Field("", max_length=MAX_PATH_CHARS, description="'' = top")
 
 
 class GrantArgs(BaseModel):
-    path: str = Field(..., min_length=3, max_length=400, description="full path of the folder the user wants shared")
+    path: str = Field(..., min_length=3, max_length=400, description='full folder path')
     mode: str = Field("read", pattern="^(read|readwrite)$")
     reason: str = Field("", max_length=200)
 
@@ -330,12 +330,10 @@ def make_skill(sb: Sandbox):
                                         "can use that folder", {"grant_id": g["id"], "status": g["status"]})
 
             return [
-                Tool("file_write", "Save a document I generated (Markdown, text, CSV, JSON, HTML...) in my private "
-                     "workspace. Never executables.", write, WriteArgs, permission="action"),
-                Tool("file_read", "Read a file, or list a folder, in my workspace or an approved folder.", read,
+                Tool("file_write", "Save a generated document (Markdown, text, CSV, JSON, HTML) in my workspace: 'save it as a file', 'תשמור כקובץ'. Never executables.", write, WriteArgs, permission="action"),
+                Tool("file_read", "Read a file or list a folder in my workspace/approved folders: 'read the file', 'תקרא את הקובץ'.", read,
                      PathArgs, permission="read", untrusted_output=True),
-                Tool("folder_grant_request", "Ask for access to one of the user's folders (stays pending until the "
-                     "user approves it on the dashboard).", grant, GrantArgs, permission="action"),
+                Tool("folder_grant_request", "Ask access to a user folder, pending until approved on the dashboard: 'let me use my Documents folder', 'תן לי גישה לתיקייה'.", grant, GrantArgs, permission="action"),
             ]
 
     return FileSkill()

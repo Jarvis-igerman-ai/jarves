@@ -329,9 +329,10 @@ register("dashboard_lan", "לוח בקרה ברשת הביתית", "Dashboard on
          applies="restart", about="open the dashboard from a paired phone on your home Wi-Fi (pairing code + login; "
                                   "never on the internet). Off = this computer only")
 register("mobile_access", "גישה מהטלפון", "Phone access (PWA)", False, risk="high", needs=["dashboard"],
-         applies="restart", about="talk to this computer's JARVES from a paired phone on your home Wi-Fi: chat, "
-                                  "push-to-talk voice (needs TLS), approvals list, status. Pairing by QR + one-time "
-                                  "code, per-phone tokens you can revoke. Off = this computer only")
+         applies="restart", about="talk to this computer's JARVES from a paired phone on your home Wi-Fi or over Tailscale "
+                                  "(detected, never installed by JARVES): chat, push-to-talk voice (needs TLS), "
+                                  "approvals, status. Pairing by QR + one-time code, per-phone tokens you can revoke. "
+                                  "Off = this computer only")
 def _probe_client_delegation(c: ProbeCtx) -> tuple[bool, str]:
     v = getattr(c.cfg, "voice", None)
     if v is None or v.mode != "live":
@@ -339,7 +340,7 @@ def _probe_client_delegation(c: ProbeCtx) -> tuple[bool, str]:
     return _api_billing(c)
 
 
-# SW-V4 D (#14): default OFF until the owner decides OD-15 (ai.delegation_mode is the config default and mirror)
+# SW-V4 D (#14): default follows ai.delegation_mode (NEW installs: client, owner decision OD-15, 2026-10-21; existing configs unchanged)
 register("client_delegation", "תקציב קשיח לחיפושים בשיחה", "Strict budget for spoken lookups (client delegation)",
          False, probe=_probe_client_delegation, needs=["openai_api"], risk="medium", config="ai.delegation_mode",
          applies="next_session",
@@ -836,8 +837,8 @@ def make_skill(features: Features, registry=None):
     from .skills import Skill, Tool, ToolResult
 
     class SetArgs(BaseModel):
-        id: str = Field(..., description="Feature id from features_list, e.g. music, web_search, camera")
-        on: bool = Field(..., description="true = turn on, false = turn off")
+        id: str = Field(..., description='id from features_list')
+        on: bool = Field(...)
 
     class FeatureSkill(Skill):
         name = "features"
@@ -879,10 +880,8 @@ def make_skill(features: Features, registry=None):
                 return ToolResult(True, msg, st)
 
             return [
-                Tool("features_list", "List my features (music, web search, camera, Gmail...): on, off or "
-                                      "unavailable, and why.", list_, permission="read"),
-                Tool("feature_set", "Turn one feature on or off when the user asks. Risky ones (camera, sending "
-                                    "e-mail...) need the user's approval on the screen.", set_, SetArgs,
+                Tool("features_list", "My features on/off/unavailable and why: 'what can you do', 'מה אתה יודע לעשות'.", list_, permission="read"),
+                Tool("feature_set", "Turn one feature on/off on request: 'turn on the camera', 'תפעיל את המצלמה'. Risky ones need on-screen approval.", set_, SetArgs,
                      permission="action", timeout_s=30),
             ]
 

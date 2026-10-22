@@ -61,13 +61,13 @@ SPECS: dict[str, FileSpec] = {s.name: s for s in (
              True, False, ("front",), 700),
     FileSpec("MEMORY.md", "long-term notes", True, False, ("backend",), 2500),
     FileSpec("SETUP.md", "installation and connection guide (generated; read full file for a topic)", False, False,
-             ("backend",), 1700, True),
+             ("backend",), 700, True),
     FileSpec("FEATURES.md", "all supported features and readiness snapshot (generated)", False, False,
-             ("backend",), 2000, True),
-    FileSpec("TOOLS.md", "skills, settings and voices (generated)", False, False, ("backend",), 3000, True),
+             ("backend",), 600, True),
+    FileSpec("TOOLS.md", "skills, settings and voices (generated)", False, False, ("backend",), 700, True),
     FileSpec("HEARTBEAT.md", "periodic checklist (not active yet)", False, False, (), 0),
 )}
-TOTAL_CHARS = {"front": 2500, "backend": 9000}   # GPT-Live front instructions stay short (latency)
+TOTAL_CHARS = {"front": 2500, "backend": 5000}   # GPT-Live front instructions stay short (latency)
 MAX_FILE_CHARS = 20_000                          # a write larger than this is refused (file kept unchanged)
 MAX_AGENT_WRITE = 3_000                          # one assistant edit may write at most this much
 HISTORY_KEEP = 50                                # backups kept per file
@@ -394,7 +394,9 @@ FRONT_SELF = ("Also delegate (a word or two, like other quick actions) when the 
               "For camera connection/status or requests to open/enable the camera, delegate to the backend to run "
               "camera_status before making any connection claim. Never infer disconnected hardware from an "
               "unavailable describe/enroll tool or a feature flag. If status cannot be checked, say it is unknown; "
-              "never substitute a claim that no camera is connected.")
+              "never substitute a claim that no camera is connected. Delegate too: what is connected/broken, fixing or "
+              "connecting an account, editing your own files or memory, switching features or skills, 'undo that' "
+              "(\"מה מחובר?\", \"תחבר את...\", \"בטל את זה\"). Never speak or take a key or code: the owner types it in the window.")
 
 
 def front_facts(memory) -> str:
