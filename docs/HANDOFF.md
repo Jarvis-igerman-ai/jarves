@@ -1,3 +1,36 @@
+## Current individual-PR closeout (22 Oct 2026)
+
+- Owner authorized fixes, tests, review and individual merges of #72, #68 and #70. #72 merged at
+  [98230f8](https://github.com/igalgerman/jarves/commit/98230f89c353f7c7104f1e2b6a17c08d62aa3e36);
+  [exact-head CI](https://github.com/igalgerman/jarves/actions/runs/39814940596) and
+  [post-merge main CI](https://github.com/igalgerman/jarves/actions/runs/39817148513) passed.
+- #68 final source head `9e4ae129050103e1a395f746463a929f7a87bae6` passed its full local gate, 45 installer tests,
+  five PowerShell syntax checks and [full CI](https://github.com/igalgerman/jarves/actions/runs/39817252108), including
+  four smoke scenarios and old-version upgrade/rollback. Final merge state/evidence is maintained in the PR.
+- #70's first hosted run exposed missing tour-routing rows and piped setup launching the tour. Added bilingual routing
+  coverage and restricted the automatic tour offer to an interactive terminal with the dashboard enabled; 7 targeted
+  setup/routing/budget tests passed. Final exact-head CI is linked in the PR. No acceptance criterion was removed.
+- Both remaining PRs use isolated worktrees, no force pushes, no runtime sensor/account/paid tests. Preview links and
+  hashes are below. The owner-PC beta installed earlier is build 199; these merges do not prove that PC was updated again.
+- Unrelated inherited `.github/workflows/next-flow.yml` failures on main predate this work; the branch flow remains
+  disabled (`ENABLE_NEXT_FLOW` absent). The primary `jarves-checks` and package results are reported separately.
+
+### Decision queue (including carried questions)
+
+| Question | Recommendation / tradeoff | Status and exact gate |
+|---|---|---|
+| Merge these three PRs? | Individual reviewed green merges preserve attribution and isolate failures. | ANSWERED: owner explicitly authorized; no main-run overlap. |
+| Enable next branch / bot fast-forward? | Keep disabled for this work; current owner rule prefers individual merges. | DEFERRED: future explicit workflow decision; no variable/token changes. |
+| Publish betas / daily promotion? | Keep existing beta publishing, keep stable behind owner sign-off. | ANSWERED for current beta: `ENABLE_BETA_PUBLISH=true`; daily/stable promotion DEFERRED to release policy. |
+| Which sandbox for future scenario runs? | Use the current fake-data local tests and disposable hosted runners here. | DEFERRED: broader scenario-runner stage, not needed for these PRs. |
+| Defender exclusion? | Leave exclusions unchanged; no need to weaken host protection for these tests. | DEFERRED: owner decision only if measured install performance still requires it. |
+| More paid AI QA budget? | Make no paid calls in this task; prior overall cap is not a new allowance. | DEFERRED: reconcile actual spend and obtain any new budget at live-QA gate. |
+| Branch protection / one required check? | Retain current settings; full exact-head CI evidence is still required for these merges. | DEFERRED: owner repository-settings decision. |
+| Artifact retention? | Keep implemented 7-day PR artifacts; smoke artifacts retain 3 days. | DEFERRED: future retention change; no settings changed here. |
+| Installer under 2 min / interactive layout? | Measure the final installer on the owner's PC; runner times are insufficient. | USER DECISION REQUIRED: #58 owner verification, still open. |
+| Full release wizard, standing rows, real phone/voice/account sign-off? | Merge this tested baseline without treating mocks or viewport captures as owner approval. | USER DECISION REQUIRED at #60 acceptance; missing broader work stays open under #58/#60/#61. |
+| Physical design, purchases and print risks? | Keep previous physical milestone gates; unrelated to these software merges. | DEFERRED: explicit future physical approval and real measurements. |
+
 ## Initial wizard checkpoint (historical; current recovery evidence below)
 
 - Built: `core/src/jarves/wizard.py` (16 topics from the guides/features/CLI-parity tables, state in `wizard.json`, routes

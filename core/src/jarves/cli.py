@@ -823,9 +823,14 @@ def cmd_setup(a, cfg, home) -> int:
             dash.stop()
         return 0
     try:
+        interactive_setup = bool(sys.stdin and sys.stdin.isatty())
+    except (AttributeError, ValueError):
+        interactive_setup = False
+    try:
         wiz = sw.Wizard(cfg, home, config_path=path, answers=answers, defaults=getattr(a, "defaults", False),
                         lang=getattr(a, "lang", None), restart=getattr(a, "restart", False), yes=getattr(a, "yes", False),
-                        actions={"chatgpt_login": chatgpt_login, "google_start": google_start, "connect_start": connect_start, "tour_start": tour_start,
+                        actions={"chatgpt_login": chatgpt_login, "google_start": google_start, "connect_start": connect_start,
+                                 **({"tour_start": tour_start} if interactive_setup and _cli_features(cfg, home).enabled("dashboard") else {}),
                                  **({"browser_setup": browser_setup} if _cli_features(cfg, home).enabled("dashboard") else {})})
         return wiz.run()
     except sw.AnswerError as e:
