@@ -1,3 +1,5 @@
+> **Historical, superseded by [CAMERA_SETUP](../CAMERA_SETUP.md) (software built; hardware phases wait for the physical stage).** Kept as evidence and owner decision record; do not use it as the current plan. Index: [DOC_MAP](../DOC_MAP.md).
+
 # Plan: JARVES camera (Issue #17, camera item; physical side tracked in #8)
 
 > **Research and plan only.** No hardware was bought, connected or switched on, and no camera code was written.

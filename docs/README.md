@@ -1,6 +1,6 @@
 # JARVES documentation index
 
-Start with [AGENTS.md](../AGENTS.md) and [NOW.md](NOW.md) if you are an agent. Owners and users start below. Open only what you need ([CONTEXT_MAP](CONTEXT_MAP.md)).
+**Every document, per version (V4/V5/V6), with status and owner doc, is indexed in [DOC_MAP](DOC_MAP.md).** Agents start with [AGENTS.md](../AGENTS.md) and [NOW.md](NOW.md) and open only what they need ([CONTEXT_MAP](CONTEXT_MAP.md)). Owners and users start below.
 
 ## Using JARVES
 
@@ -15,18 +15,6 @@ Start with [AGENTS.md](../AGENTS.md) and [NOW.md](NOW.md) if you are an agent. O
 | [core/README](../core/README.md) | Running and debugging the Core, CLI reference, cost, logs |
 | [RELEASE_NOTES_4.0](RELEASE_NOTES_4.0.md), [CHANGELOG](../CHANGELOG.md) | What changed, behaviour and exit-code changes |
 
-## Plans and status
+## Plans, design, evidence, archive
 
-[NOW](NOW.md) (the only active brief), [HANDOFF](HANDOFF.md), [ROADMAP](ROADMAP.md), [JARVES_SW_V4_WORK_PACKAGE](JARVES_SW_V4_WORK_PACKAGE.md), [MIGRATION_STATUS](MIGRATION_STATUS.md), [PROJECT_PRINCIPLES](PROJECT_PRINCIPLES.md).
-
-## Design and engineering
-
-[ARCHITECTURE](ARCHITECTURE.md), [DEVICE_CONTRACT](DEVICE_CONTRACT.md), [FACE_RUNTIME](FACE_RUNTIME.md), [ENGINEERING_REVIEW_GATES](ENGINEERING_REVIEW_GATES.md), [RELEASE_HOSTING](RELEASE_HOSTING.md), [GITHUB_FLOW](GITHUB_FLOW.md), [WhatsApp protocol](../bridge/whatsapp/PROTOCOL.md).
-
-## V4 reports (evidence)
-
-Privacy [B](reviews/SWV4_B_PRIVACY.md), review [C](reviews/SWV4_C_REVIEW.md), delegation [D](reviews/SWV4_D_DELEGATION.md), orchestrator [E](reviews/SWV4_E_ORCHESTRATOR.md), WhatsApp [F](reviews/SWV4_F_WHATSAPP.md), recall [G](reviews/SWV4_G_RECALL.md), dashboard [K](reviews/SWV4_K_DASHBOARD.md), performance [M](reviews/SWV4_M_PERF_CI.md) and [budgets](reviews/SWV4_PERF_BUDGETS.md), self-diagnostics [O](reviews/SWV4_O_SELFDIAG2.md), helper defence [R-01](reviews/SWV4_R01_DEFENSE.md), [wake training](reviews/SWV4_WAKE_TRAIN.md), campaigns [features](reviews/SWV4_CAMPAIGN_FEATURES.md) and [voice](reviews/SWV4_CAMPAIGN_VOICE.md).
-
-## Archive
-
-Superseded plans and old decisions: [archive/](archive/). Not read by default.
+Status and plans: [NOW](NOW.md) (the only active brief), [HANDOFF](HANDOFF.md), [ROADMAP](ROADMAP.md). Everything else (work packages, design and engineering notes, release process, the V4/V5 evidence reports, testing and manual-test sheets, the archive) is listed in [DOC_MAP](DOC_MAP.md); it is not repeated here.

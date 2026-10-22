@@ -1,6 +1,28 @@
 # JARVES — roadmap and milestones
 
-> Planning and future backlog only. **Only [docs/NOW.md](NOW.md) authorizes work.** Future Issues are NOT permission to start them.
+> Planning and status per version. **Only [docs/NOW.md](NOW.md) authorizes work.** Future Issues are NOT permission to start them. Every document is indexed in [DOC_MAP](DOC_MAP.md).
+
+## Status as of 22 October 2026 (current; the sections below keep the owner's decision records)
+
+Repository: `igalgerman/jarves` (public) is the only active repo; the private `igalgerman/JARVIS` is a read-only migration source ([MIGRATION_STATUS](MIGRATION_STATUS.md)). Dashboard languages are English and Hebrew only (Arabic and Russian were dropped in V4).
+
+### V4 — released as 4.0.0, 4.0.1 in open PRs
+
+- **4.0.0** = `main` after the V4 release PR #41 (21 Oct 2026; version 4.0.0 in `core/pyproject.toml`; scope decision: only what was merged in `main`). The signed installer is built and published by the package workflow (`package.yml`) to `igalgerman/jarvis-releases` after `jarves-checks` is green on `main`. At the time of writing the newest published installer there was still 3.0.0.130; check `gh release list -R igalgerman/jarvis-releases`. What it contains and its limits: [RELEASE_NOTES_4.0](RELEASE_NOTES_4.0.md), checklist [SWV4_RELEASE_CHECKLIST](reviews/SWV4_RELEASE_CHECKLIST.md), plan [V4 package](JARVES_SW_V4_WORK_PACKAGE.md). Owner live gates still open: real Telegram/Instagram/Home Assistant, WhatsApp real account, Phone Link, real installer round trip, live Claude/Codex sessions.
+- **4.0.1 content (open PRs, not in 4.0.0):** `jarvis connect` (unset only, remembered skips, read-only checks, #34); wake-model production training and the restricted-token isolation flag (#32); self-management by voice, text, CLI and dashboard (#37); chat/web: `jarvis chat` text mode (#42) and `jarvis web` shared chat engine with a dashboard Chat page (#49); CI speed-up, continuous (beta) release, gated stable release, security files (#44); issues pipeline: registry, Bug reports page, `jarvis issues`, triage, bugfix lane (#48); bug sweep 4.1 part 1 (#40); tool-description trim; docs quality review (#47) and the 4.0.0 manual test sheet (#46).
+- From 4.1 and 5.0 on every release fixes all known bugs first (rule in [CLAUDE.md](../CLAUDE.md)).
+
+### V5 — built vs definition of done
+
+- **Built and merged:** PC-hosted phone access (PR #25: pairing code and QR, per-device tokens, PWA chat and push-to-talk, read-only approvals list, optional self-signed TLS, audit, [package](JARVES_SW_V5_WORK_PACKAGE.md), [security review](reviews/SWV5_SECURITY_REVIEW.md)); self-test and speed test (#35).
+- **Built, in open PRs:** Goals and Adaptive Memory (#29), proactive offers, preferences in instructions and local follow-ups (#36), owner decisions of 21 Oct: Tailscale detection and tailnet-only bind, phone approvals (default off), OD-12 privacy default with "full text on request" for 24 h, OD-15 client delegation default for new installs (#33), phone end-to-end test with an emulated phone (#51).
+- **In progress, no merged code yet:** goal executor, Development Manager, continuity across desktop and phone.
+- **Needs a real Android phone (definition of done, unchanged below):** pairing and revoke, live voice and reconnection, approvals from the phone, suspend/resume, permission denial, a real-vs-fake evidence table. Manual sheet: [SWV5_ACCEPTANCE](reviews/SWV5_ACCEPTANCE.md). Until then the capability row `mobile_access` stays `implemented_unverified`.
+
+### V6 and V7
+
+- **V6** keeps its six approved pillars unchanged. It depends on the V5 gates (phone pairing, shared Core/memory/permissions, voice and reconnection verified on a real Android device); no V6 code before them.
+- **V7** is a proposal only, not authorized: [V7 proposal](plans/V7_PROPOSAL_2026-10-21.md), issue #50.
 
 ## Product stages and release direction — owner decision, 20 October 2026
 
@@ -8,8 +30,8 @@
 
 | Vision stage | Outcome | Intended release direction | Status |
 | --- | --- | --- | --- |
-| **1. Desktop assistant** | Reliable Windows Core, voice, face, skills, diagnostics and installer | Existing SW-V1/V2/V3/V4 work | V3 integration reported; V4 in development, real acceptance and release gates must be checked |
-| **2. PC-hosted personal server + phone access** | One PC-hosted JARVES, authenticated phone client, shared conversation and abilities | **V5 — JARVES Goes Mobile** | Owner selected for the roadmap, **not implemented or authorized to start coding yet** |
+| **1. Desktop assistant** | Reliable Windows Core, voice, face, skills, diagnostics and installer | Existing SW-V1/V2/V3/V4 work | V3 released; V4 = 4.0.0 on `main`, installer publication and owner live gates per the status block above |
+| **2. PC-hosted personal server + phone access** | One PC-hosted JARVES, authenticated phone client, shared conversation and abilities | **V5 — JARVES Goes Mobile** | Owner selected; **partly built** (phone access merged, other pillars in open PRs), real Android phone gates open (see status block) |
 | **3. Android Auto / car** | Safe hands-free car interaction plus cross-device Skills Platform 2.0 | **V6 — JARVES Drive & Act** | Owner-approved roadmap direction, implementation gated after V5; subject to official platform restrictions |
 | **4. Everyday Android assistant** | Native daily phone companion with notifications and relevant local abilities | **V7 — Everyday Android + Ecosystem & Agent Studio (proposal)** | Owner requested V7 research and an approval-ready proposal; **not authorized to implement**, distinct from V5 phone access |
 | **5. Phone as robot stand-in** | Docked spare OnePlus 11 used to validate face/mic/speaker/camera/wake behavior | Later milestone (version TBD) | Future; no 1:1 hardware claim |
@@ -19,7 +41,9 @@
 
 ## V5 — JARVES Goes Mobile + personal intelligence (owner-selected roadmap scope)
 
-**Decision recorded 20 Oct 2026:** preserve all the proposed V5 concepts except Family Intelligence. Family Intelligence is intentionally **deferred**, not rejected; see [F11 in FUTURE_IDEAS](FUTURE_IDEAS.md#f11--family-intelligence-deferred-not-v5). V5 should deliver stage 2 of PRODUCT_VISION while making the already-working desktop assistant more useful. This is a **scope/direction decision**, not permission to start the implementation. Finish and verify V4 first.
+> **Status 22 Oct 2026:** see "V5 — built vs definition of done" at the top. The wording below is the owner's original definition and is kept as the acceptance reference. Where it says "future" or "not authorized", read: V5 coding was started by the owner after 4.0.0.
+
+**Decision recorded 20 Oct 2026:** preserve all the proposed V5 concepts except Family Intelligence. Family Intelligence is intentionally **deferred**, not rejected; see [F11 in FUTURE_IDEAS](FUTURE_IDEAS.md#f11--family-intelligence-deferred-not-v5). V5 should deliver stage 2 of PRODUCT_VISION while making the already-working desktop assistant more useful. This was a **scope/direction decision**; implementation has since started (see the status block at the top). Finish and verify V4 first still applies to release gates.
 
 ### V5 feature pillars
 
@@ -54,7 +78,7 @@
 3. Implement stage-2 phone access and shared-session/approval reliability first; layer Goals, Adaptive Memory, Proactivity and Development Manager onto that proven backbone, with bounded parallel work only when independent.
 4. Perform real-device, real-agent and release acceptance. Do not start stage 3, hardware purchases, new subscriptions, paid tests or network exposure without separate owner approval.
 
-**Docs-only update:** this roadmap entry does not update `NOW.md`, install software, create a V5 implementation branch or start V5 before its separate execution approval. Earlier SW-V1/V2 review notes below are retained as historical evidence, not current completion claims.
+**Superseded note (was: docs-only, V5 not started):** V5 branches exist since 21 Oct 2026. Earlier SW-V1/V2 review notes below are retained as historical evidence, not current completion claims.
 
 ## V6 — JARVES Drive & Act (owner-approved future product direction, 20 October 2026)
 
@@ -78,7 +102,7 @@
 
 ### Proposed V6 acceptance and dependency gates
 
-- **V5 must first deliver stage 2**: phone pairing, shared Core/memory/permissions, reliable voice, transport and truthful offline state on a real Android device. No separate car 'brain'.
+- **Depends on the V5 gates (real Android phone, see the status block at the top):** V5 must first deliver stage 2: phone pairing, shared Core/memory/permissions, reliable voice, transport and truthful offline state on a real Android device. No separate car 'brain'.
 - User can start and end a hands-free conversation through the **validated** Android Auto or Bluetooth phone path in an actual compatible parked vehicle, then continue it on the desktop/phone without losing context or duplicating commands.
 - Demonstrate accurate planning of at least one calendar-related trip using real permitted inputs, report estimated vs observed times/freshness and a useful fallback for missing location/traffic/weather provider data.
 - Demonstrate authorized driving-mode actions with confirmations, app/OS handoff as needed, and denied-action/unsupported flows that never pretend success.
@@ -88,7 +112,7 @@
 
 **Out of scope:** turning V6 into the everyday native standalone Android assistant (vision stage 4), docked-phone robot (stage 5), physical robot (stage 6), Family Intelligence (future F11), hidden vehicle controls or broad unapproved automation. V7 now has an **owner-requested research proposal for stage 4**, with scope and implementation still pending approval; do not shift those items into V6.
 
-**Planning authority:** this V6 scope is **approved to be retained in the roadmap**. `docs/NOW.md` and a later bounded V6 implementation package/Issues must explicitly authorize coding. Do not interrupt V4 migration, active delivery or V5 stage-2 sequence.
+**Status 22 Oct 2026:** no V6 code; V6 starts only after the V5 real-phone gates pass. **Planning authority:** this V6 scope is **approved to be retained in the roadmap**. `docs/NOW.md` and a later bounded V6 implementation package/Issues must explicitly authorize coding. Do not interrupt V4 migration, active delivery or V5 stage-2 sequence.
 
 
 ## V7 — JARVES Everyday Android + Ecosystem & Agent Studio (proposal for review, 21 October 2026)
@@ -111,6 +135,8 @@
 
 
 ---
+> **HISTORICAL from here down (SW-V1 to SW-V3 era, 18-20 Oct 2026).** Kept as the owner's decision record and evidence. It is superseded by the status block at the top, the [V4 package](JARVES_SW_V4_WORK_PACKAGE.md) and [HANDOFF](HANDOFF.md). Links to `igalgerman/JARVIS` issues point to the deprecated private repository (read-only); the public issues are listed in [MIGRATION_STATUS](MIGRATION_STATUS.md). Statements such as "not authorized", "Done" for V1 stages and "Not at this stage" describe that time, not today.
+
 ## Active software bundle — approved 18 October 2026
 
 The user explicitly authorized one sustained implementation package: **[SW_V1_WORK_PACKAGE.md](SW_V1_WORK_PACKAGE.md)**. It covers **#2 CI → #5 library choice → #6 real Core/Godot → #7 Hebrew voice/face → the first YouTube Music Skill → integration testing and handoff**. The agent proceeds automatically between related phases; no new approval at each checkpoint. R5b remains a software baseline, not an approved physical print. No new subscriptions or account connections without consent.
@@ -119,7 +145,7 @@ Latest #7 correction: hands-free wake/conversation with 180 s quiet timeout; per
 
 ## Current and upcoming
 
-19 Oct complete retained-log quality review: [report](reviews/ALL_RETAINED_LOGS_19OCT2026.md), all988 records and
+19 Oct complete retained-log quality review: report `ALL_RETAINED_LOGS_19OCT2026` (private, not in the public repo), all988 records and
 100 voice text entries with history/backup reconciliation. Recommended P0: correct full-exit intent and recover
 when a completed backend does not produce an answer. Further diagnostics/grounding/startup/voice improvements
 are prioritized under existing #7/#17. This checkpoint delivers analysis, not runtime changes or new live tests.

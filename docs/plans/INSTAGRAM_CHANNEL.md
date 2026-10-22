@@ -1,3 +1,5 @@
+> **Historical, superseded by the built channel (see the features table; live verification is still an owner gate).** Kept as evidence and owner decision record; do not use it as the current plan. Index: [DOC_MAP](../DOC_MAP.md).
+
 # Instagram channel (#17)
 
 Status: research + design, 2026-10-20. Meta docs change often; verify the permission list in App Review.
