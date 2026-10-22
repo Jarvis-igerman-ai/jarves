@@ -51,6 +51,7 @@ ChangesEnvironment=yes
 SetupLogging=yes
 UsePreviousTasks=no
 ShowLanguageDialog=yes
+LanguageDetectionMethod=none
 UsedUserAreasWarning=no
 
 [Languages]

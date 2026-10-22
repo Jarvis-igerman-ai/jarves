@@ -7,27 +7,27 @@ Status: implementation and measurement in PR #68; owner-PC timing and guided das
 Baseline: [green run 39737015500](https://github.com/igalgerman/jarves/actions/runs/39737015500), installer job 119685890222.
 First speed checkpoint: [run 39741458836](https://github.com/igalgerman/jarves/actions/runs/39741458836), head 84742a9. Both installer smoke profiles passed; the overall run failed an unrelated workspace-memory test.
 
-| Stage | Baseline | Full installer checkpoint (01f78cd) |
+| Stage | Baseline | Green installer checkpoint (76983c5) |
 |---|---:|---:|
-| Python extraction | 1.43 s | 1.47 s |
-| Dependencies | 8.39 s | 2.60 s |
-| Wheel/log index and Python checks | about 7.95 s | 14.59 s |
-| Godot export | 23.09 s, serial | 22.05 s, overlaps Python |
-| Wait for parallel face bundle | absent | 3.80 s |
-| Payload check | 2.27 s | 1.07 s |
-| Archive plus import verification | absent | 5.12 s |
-| Release compression (lzma2/max) | 91.26 s | 78.05 s |
-| Fast CI compression (lzma2/fast) | absent | 14.62 s |
-| Release script build | 134.4 s | 107.3 s |
-| CI smoke script build (shared bundle plus fast compression) | absent | 43.9 s |
-| Clean release install on GitHub runner | 50.8 s | 38.0 s |
-| Clean fast-profile install on GitHub runner | absent | 40.6 s |
-| Release same-version upgrade | about 67.7 s | 44.7 s |
-| Release uninstall | 19.5 s | 12.9 s |
+| Python extraction | 1.43 s | 1.00 s |
+| Dependencies | 8.39 s | 3.65 s |
+| Wheel/log index and Python checks | about 7.95 s | 17.16 s |
+| Godot export | 23.09 s, serial | 25.35 s, overlaps Python |
+| Wait for parallel face bundle | absent | See build-stages.json |
+| Payload check | 2.27 s | 1.09 s |
+| Archive plus import verification | absent | 5.45 s |
+| Release compression (lzma2/max) | 91.26 s | 85.90 s |
+| Fast CI compression (lzma2/fast) | absent | 14.00 s |
+| Release script build | 134.4 s | 118.7 s |
+| CI smoke script build (shared bundle plus fast compression) | absent | 46.8 s |
+| Clean release install on GitHub runner | 50.8 s | 41.9 s |
+| Clean fast-profile install on GitHub runner | absent | 51.0 s |
+| Release same-version upgrade | about 67.7 s | 39.7 s |
+| Release uninstall | 19.5 s | 12.1 s |
 
-The full installer checkpoint is [run 39744188052](https://github.com/igalgerman/jarves/actions/runs/39744188052). Both release and fast-profile full smoke checks passed. Its newly activated real-version matrix exposed a PowerShell named-argument binding error, fixed with a regression check before the synchronized final run.
+The green checkpoint is [run 39747590940](https://github.com/igalgerman/jarves/actions/runs/39747590940), head 76983c5. All jobs passed, including both smoke profiles and the real old-version matrix. Old-version upgrade took 36.7s; rollback, including waiting for Setup, took 69.8s. A following one-directive change makes the issue's English fresh-install default explicit; the exact final-head result is recorded in PR #68.
 
-The build job was 3m21s, including Go/tool setup and both compiler profiles. The old 7m42s job also included sequential smoke checks; those are now separate concurrent jobs. This is **not** evidence that all installer checks finish within five minutes: release smoke finished at 08:04:41Z after the build began at 07:57:52Z, about 6m49s. The old-version fixture adds real coverage which the empty baseline matrix never ran. Build, clean install, upgrade, rollback and all-checks elapsed time must be reported separately.
+The build job was 3m43s, including Go/tool setup and both compiler profiles. The old 7m42s job also included sequential smoke checks; those are now separate concurrent jobs. This is **not** evidence that all installer checks finish within five minutes: release smoke finished at 08:34:30Z after the build began at 08:27:33Z, about 6m57s. All installer jobs completed by 08:35:19Z, about 7m46s; the under-five-minute complete-validation target is not met. The old-version fixture adds real coverage which the empty baseline matrix never ran. Build, clean install, upgrade, rollback and all-checks elapsed time must be reported separately.
 
 The owner's roughly four-minute install and the under-two-minute target are not verified by GitHub runner timings. The full checkpoint stages 7,918 files, including one archive containing 2,656 library files (16.98 MB). Runtime prompt/resource packages and native modules remain unpacked. Exact final-head figures are recorded in the PR after CI.
 
@@ -41,7 +41,7 @@ The versions are retained, not upgraded in this change. References checked 22 Oc
 
 ## Setup and preservation
 
-English/Hebrew are shown on interactive installs and upgrades. Existing program/data paths are shown; keep settings is ON. Autostart and desktop shortcut default OFF; interactive unchecked choices remove those integrations, while silent upgrades preserve existing choices. Language sets the initial voice language only for a new config; keeping an existing config preserves it byte-for-byte. Silent installs force keep regardless of /KEEPDATA=0, never open a browser, and retain the existing autostart state unless explicitly requested. The legacy /SETUPANSWERS parameter still applies an explicitly supplied answer file.
+English/Hebrew are shown on interactive installs and upgrades. English is the fresh-install default; a previously chosen installer language is retained. Existing program/data paths are shown; keep settings is ON. Autostart and desktop shortcut default OFF; interactive unchecked choices remove those integrations, while silent upgrades preserve existing choices. Language sets the initial voice language only for a new config; keeping an existing config preserves it byte-for-byte. Silent installs force keep regardless of /KEEPDATA=0, never open a browser, and retain the existing autostart state unless explicitly requested. The legacy /SETUPANSWERS parameter still applies an explicitly supplied answer file.
 
 Before replacing an installed runtime, the old bundled Python runs the installer adapter with the app backup tool. Every archive is verified and unreadable-file failures stop installation. Each existing profile gets its own backup. A data-only installation uses the new runtime to verify backup before any data migration. Migrations reuse the verified checkpoints; failure restores the old database state. The portable backup deliberately excludes credentials and models; those stay untouched in the original data folder. A fresh interactive choice renames the entire previous folder, retaining excluded private files too.
 
@@ -53,6 +53,6 @@ The final-page button uses pythonw and the dashboard API. A registered guided se
 
 ## Verification
 
-The targeted suite covers real ZIP imports; resource/native exclusions; smoke publication rejection; verified backup, corruption and migration failure; preserved wake/model/profile/credential fixtures; fresh-choice retention; shim reversal; and the dashboard fallback. Inno compiles locally. Visual preview is pending explicit approval required by the computer-use tool. The installer-specific assertion in test_setup_wizard.py was updated for the final-page button; the wizard implementation is untouched.
+The targeted suite covers real ZIP imports; resource/native exclusions; smoke publication rejection; verified backup, corruption and migration failure; preserved wake/model/profile/credential fixtures; fresh-choice retention; shim reversal; and the dashboard fallback. Inno compiles locally. Visual preview was approved by the user, but the desktop tool reported app approval/elicitation unavailable; no preview window opened. Inno compilation passed; visual layout is unverified. The installer-specific assertion in test_setup_wizard.py was updated for the final-page button; the wizard implementation is untouched.
 
 The Windows smoke installs into a disposable CI runner, audits HKCU Run/PATH/menu residue and exercises both compression profiles. The upgrade matrix pins public 4.0.0.153 by SHA256, seeds fake legacy rows, a 0.95 wake threshold, custom model, profile and fake credential files, upgrades silently, verifies preservation, then exercises updater rollback. The test waits for rollback Setup to exit and the old Core to restart before stopping it and auditing uninstall. Fixture timestamps are recent so the app's normal 90-day history retention does not prune the seeded conversation. Do not run this smoke on a personal PC casually: even with isolated app/data paths, it changes that Windows user's PATH, Run key and uninstall registration.
