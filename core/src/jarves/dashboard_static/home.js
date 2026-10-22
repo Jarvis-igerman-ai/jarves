@@ -36,7 +36,8 @@ async function renderTopbar() {
   const msg = el("span", { class: "muted small" });
   // SW-V4 B: development mode is said plainly on every page (the server sends the text, empty when privacy is on)
   const banner = privacyState.privacy ? null : el("span", { class: "priv-banner small", role: "status", id: "privacyBanner" },
-    tx(privacyState.banner_he, privacyState.banner_en));
+    tx(privacyState.full_text_active ? privacyState.full_text_note_he : privacyState.banner_he,
+      privacyState.full_text_active ? privacyState.full_text_note_en : privacyState.banner_en));
   bar.replaceChildren(el("span", { class: "priv" }, privacyButton(msg, true)), ...(banner ? [banner] : []), msg);
 }
 function privacyCard(p) {
@@ -53,7 +54,14 @@ function privacyCard(p) {
     el("div", { class: "big-status" }, el("span", { class: "lamp " + (p.privacy ? "ok" : "warn") }),
       el("div", {}, el("div", { class: "title" }, tx(p.label_he, p.label_en)))),
     el("div", { class: "small" }, tx(p.explain_he, p.explain_en)),
+    p.full_text_active ? el("div", { class: "small", id: "fullTextNote" }, tx(p.full_text_note_he, p.full_text_note_en)) : "",
     el("div", { class: "actions" }, privacyButton(msg),
+      el("button", { type: "button", id: "fullTextBtn", onclick: async () => {
+        const to = !p.full_text_active;
+        if (to && !confirm(tx("לשמור טקסט מלא ל-24 שעות בלבד? אחר כך הפרטיות חוזרת לבד.", "Keep full text for 24 hours only? Privacy then turns on again by itself."))) return;
+        try { await post("/api/privacy/full-text", { full_text: to }); await renderTopbar(); route(true); }
+        catch (e) { msg.textContent = tx("לא שונה: ", "Not changed: ") + e.message; }
+      } }, p.full_text_active ? tx("סיום טקסט מלא עכשיו", "End full text now") : tx("טקסט מלא לפי בקשה (24 שעות)", "Full text on request (24 hours)")),
       oneWay(tx("הסתרת ההיסטוריה", "Mask existing history"), "/api/privacy/mask-history",
         tx("למחוק את המילים מכל השיחות והיומנים השמורים? אורכים, זמנים ועלויות נשארים.",
           "Remove the words from ALL saved conversations and log files? Lengths, times and costs stay.")),

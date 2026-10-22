@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import json
 import sqlite3
+import time
 from pathlib import Path
 
 from . import config_edit, logs
@@ -27,7 +28,12 @@ def state(ctx) -> dict:
     if logs._flag == ctx.home / "logs" / logs.PRIVACY_FILE and logs.runtime_privacy() is not None:
         ctx.cfg.log.privacy = logs.runtime_privacy()  # switched meanwhile by another dashboard / process
     on = bool(ctx.cfg.log.privacy)
-    return {"privacy": on,
+    until = _window_until(ctx.home) if not on else 0.0
+    return {"privacy": on, "full_text_until": until or None, "full_text_active": bool(until),
+            "full_text_note_en": (f"Full text on request: ends at {time.strftime('%H:%M on %d %b', time.localtime(until))}, "
+                                  "then privacy turns on by itself" if until else ""),
+            "full_text_note_he": (f"טקסט מלא לפי בקשה: מסתיים ב-{time.strftime('%H:%M %d/%m', time.localtime(until))}, "
+                                  "ואז הפרטיות חוזרת לבד" if until else ""),
             "label_he": "פרטיות פועלת: מה שנאמר לא נשמר" if on else "פרטיות כבויה: הטקסט המלא נשמר (לפיתוח)",
             "label_en": "Privacy ON: what is said is not kept" if on else "Privacy OFF: full text is kept (development)",
             "explain_en": ("New log lines and conversation history keep only lengths and timings, never the words. "
@@ -39,6 +45,31 @@ def state(ctx) -> dict:
             "applies": "now",
             # SW-V4 B: the plain state line shown by the dashboard banner and `jarvis status` (empty when on)
             "banner_en": "" if on else logs.PRIVACY_OFF_NOTE, "banner_he": "" if on else logs.PRIVACY_OFF_NOTE_HE}
+
+
+def _window_until(home: Path) -> float:
+    """The end of a running full-text window from the flag file (read directly, so any process sees it), else 0."""
+    try:
+        d = json.loads((home / "logs" / logs.PRIVACY_FILE).read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return 0.0
+    u = d.get("until") if isinstance(d, dict) and d.get("privacy") is False else None
+    return float(u) if isinstance(u, (int, float)) and not isinstance(u, bool) and u > time.time() else 0.0
+
+
+def set_full_text(ctx, on: bool) -> dict:
+    """"Full text on request" (owner decision OD-12, 2026-10-21): full text for 24 hours ONLY, then privacy turns on
+    again by itself (logs._expire_full_text, in every process). config.toml is not changed: a restart also ends it."""
+    if on:
+        until = time.time() + logs.FULL_TEXT_HOURS * 3600
+        logs.write_privacy(ctx.home / "logs", False, until=until)
+        ctx.cfg.log.privacy = False
+        logs.info("privacy", "PRIVACY_FULL_TEXT_ON", "full text switched on for a limited time", hours=logs.FULL_TEXT_HOURS)
+    else:
+        logs.write_privacy(ctx.home / "logs", True)
+        ctx.cfg.log.privacy = True
+        logs.info("privacy", "PRIVACY_FULL_TEXT_OFF", "full text switched off by the owner", enabled=False)
+    return state(ctx)
 
 
 def set_privacy(ctx, on: bool) -> dict:
@@ -226,7 +257,47 @@ def dashboard_routes(register) -> None:
                 return 403, dict(approvals.APPROVAL_REFUSED)
             return 200, fn(ctx, prune_backups=bool(body.get("prune_backups")))
         return h
+    def full_text(ctx, _m, body):
+        on = (body or {}).get("full_text")
+        if not isinstance(on, bool):
+            return 400, {"error": "send {\"full_text\": true|false}"}
+        return 200, set_full_text(ctx, on)
+    register("POST", r"/api/privacy/full-text", full_text)
     register("GET", r"/api/privacy", get)
     register("POST", r"/api/privacy", post)
     register("POST", r"/api/privacy/mask-history", confirmed(mask_history, "mask the conversation history", "dashboard_mask_history"))
     register("POST", r"/api/privacy/delete-conversations", confirmed(delete_conversations, "delete all conversations", "dashboard_delete_conversations"))
+
+
+# ---------------------------------------------------------------------- CLI: jarvis privacy status | full-text on|off
+def cmd_privacy(a, cfg, home) -> int:
+    from types import SimpleNamespace
+    from . import clilang
+    logs.setup(home / "logs", cfg.log.level, console=False, privacy=cfg.log.privacy)
+    ctx = SimpleNamespace(home=home, cfg=cfg, config_path=home / "config.toml")
+    if a.action == "full-text":
+        st = set_full_text(ctx, a.state == "on")
+    else:
+        flag = _window_until(home)
+        if flag:                                     # another process switched it: the file is the truth
+            ctx.cfg.log.privacy = False
+        st = state(ctx)
+    if st["privacy"]:
+        print(clilang.fmt("פרטיות פועלת: מה שנאמר לא נשמר.", "Privacy is on: what is said is not kept."))
+    elif st["full_text_active"]:
+        print(clilang.fmt(st["full_text_note_he"], st["full_text_note_en"]))
+    else:
+        print(clilang.fmt(logs.PRIVACY_OFF_NOTE_HE, logs.PRIVACY_OFF_NOTE))
+    return 0
+
+
+def add_cli(sub) -> None:
+    p = sub.add_parser("privacy", help="privacy status; 'full-text on' keeps full text for 24 hours only, then privacy "
+                                       "turns on again by itself")
+    ps = p.add_subparsers(dest="action", required=True)
+    ps.add_parser("status", help="is privacy on, or is a full-text window running (and until when)")
+    ft = ps.add_parser("full-text", help="full text on request: on = 24 hours then automatic revert, off = back now")
+    ft.add_argument("state", choices=["on", "off"])
+
+
+COMMANDS = {"privacy": cmd_privacy}

@@ -8,6 +8,7 @@ import os
 import platform
 import subprocess
 import sys
+import time
 import zipfile
 from datetime import datetime, timezone
 from pathlib import Path
@@ -256,15 +257,24 @@ def runtime_summary(rt: dict | None) -> str:
 
 def _privacy_note(cfg, home) -> str:
     """"Privacy: off — conversation text is kept in logs" when log.privacy is off (config, or the runtime switch)."""
-    on = bool(cfg.log.privacy)
+    on, until = bool(cfg.log.privacy), 0.0
     try:
-        flag = json.loads((home / "logs" / logs.PRIVACY_FILE).read_text(encoding="utf-8")).get("privacy")
+        d = json.loads((home / "logs" / logs.PRIVACY_FILE).read_text(encoding="utf-8"))
+        flag = d.get("privacy")
         on = flag if isinstance(flag, bool) else on
+        u = d.get("until")
+        until = float(u) if flag is False and isinstance(u, (int, float)) and not isinstance(u, bool) else 0.0
+        if until and until <= time.time():           # the 24 hour full-text window is over: privacy is on again
+            on, until = True, 0.0
     except (OSError, ValueError, AttributeError):
         pass
     if on:
         return ""
     from .clilang import fmt
+    if until:
+        end = time.strftime("%H:%M %d/%m", time.localtime(until))
+        return fmt(f"טקסט מלא לפי בקשה עד {end}, ואז הפרטיות חוזרת לבד",
+                   f"Full text on request until {end}, then privacy turns on again by itself")
     return fmt(logs.PRIVACY_OFF_NOTE_HE, logs.PRIVACY_OFF_NOTE)
 
 
@@ -1488,6 +1498,7 @@ def cmd_dashboard(a, cfg, home) -> int:
               "(then phones on your Wi-Fi can pair with a code; never reachable from the internet)", file=sys.stderr)
         return 1
     mobile_on, tls, bridge = bool(getattr(a, "mobile", False)), None, None
+    tail, tls_src, only_tail = {}, "none", False
     if mobile_on:
         if not _cli_features(cfg, home).enabled("mobile_access"):
             print("Phone access is switched off. Turn it on with: jarvis features on mobile_access "
@@ -1498,10 +1509,13 @@ def cmd_dashboard(a, cfg, home) -> int:
         if getattr(a, "tls_selfsigned", False) and not cert.is_file():
             from .dashboard_auth import lan_ip
             _mobile.make_selfsigned(home, lan_ip())
-        if cert.is_file() and key.is_file():
-            tls = (cert, key)
+        from . import tailnet as _tn
+        tail = _tn.detect()                              # detection only: JARVES never installs or logs in to Tailscale
+        tls, tls_src = _tn.choose_tls(home, tail)
+        only_tail = bool(getattr(a, "tailnet_only", False)) or _mobile.MobileAccess(home).settings()["bind_tailnet_only"]
     try:
-        dash = Dashboard(home, cfg, a.port, lan=a.lan, mobile_on=mobile_on, tls=tls)
+        dash = Dashboard(home, cfg, a.port, lan=a.lan, mobile_on=mobile_on, tls=tls, tailnet=tail, tls_source=tls_src,
+                         bind_tailnet_only=only_tail)
     except OSError as e:
         print(f"cannot start the dashboard: {e}", file=sys.stderr)
         return 1
@@ -1514,6 +1528,11 @@ def cmd_dashboard(a, cfg, home) -> int:
         print(f"Phone access is ON ({'https' if tls else 'http, text only: voice needs TLS, use --tls-selfsigned'}) "
               f"on {dash.mobile.host}:{dash.port}. Press 'Pair a phone' on the dashboard Phone page for the QR code. "
               "Standalone dashboard: chat/voice answer only inside a running Core.", flush=True)
+    if mobile_on and tail.get("present"):
+        print(f"Tailscale: {dash.mobile.scheme}://{dash.mobile.tailnet_host()}:{dash.port}/m/ "
+              f"({'listening on the tailnet address only' if only_tail else 'also reachable from your tailnet'}).", flush=True)
+    elif mobile_on:
+        print("Tailscale was not found on this computer (optional). Setup guide: docs/PHONE_ACCESS_TAILSCALE.md", flush=True)
     print("Ctrl+C to stop.", flush=True)
     if not a.no_open:
         import webbrowser
@@ -1787,6 +1806,8 @@ def main(argv: list[str] | None = None) -> int:
                                                        "(needs: jarvis features on dashboard_lan)")
     db.add_argument("--mobile", action="store_true", help="also serve the phone app (needs: jarvis features on "
                                                           "mobile_access); pair with a QR code")
+    db.add_argument("--tailnet-only", action="store_true", help="with --mobile: listen on the Tailscale address only "
+                                                                  "(never on all interfaces); needs Tailscale running")
     db.add_argument("--tls-selfsigned", action="store_true", help="with --mobile: make a self-signed certificate so the "
                                                                   "phone may use the microphone")
     fe = sub.add_parser("features", help="feature switches: list / on ID / off ID / reset ID; on installs supported "
@@ -1820,6 +1841,9 @@ def main(argv: list[str] | None = None) -> int:
     from . import budget_cli
     budget_cli.add_cli(sub)                   # SW-V4 D (#14): jarvis budget status / test-cap / set / reset-ladder
     from . import recall
+    from . import privacy as privacy_cli, phone_cli
+    privacy_cli.add_cli(sub)                  # OD-12: jarvis privacy status | full-text on|off
+    phone_cli.add_cli(sub)                    # V5: jarvis phone status | approvals | revoke-all | bind
     recall.add_cli(sub)                       # SW-V4 G: jarvis recall "query" [--since] [--json]
     from .diag import service as health_cli
     health_cli.add_cli(sub)                   # SW-V4 O: jarvis health [report|remediate|ticket|ai-review|canary|...]
@@ -1862,7 +1886,7 @@ def main(argv: list[str] | None = None) -> int:
             "whatsapp": whatsapp_admin.cmd_whatsapp,
             "agents": agents_cli.cmd_agents,
             "dial": dialing.cmd_dial, "release": release_cmd.cmd_release,
-            **cli_parity.COMMANDS, **budget_cli.COMMANDS, **selfspeed.COMMANDS}[a.cmd](a, cfg, home)
+            **cli_parity.COMMANDS, **budget_cli.COMMANDS, **privacy_cli.COMMANDS, **phone_cli.COMMANDS, **selfspeed.COMMANDS}[a.cmd](a, cfg, home)
 
 
 if __name__ == "__main__":

@@ -8,7 +8,7 @@
 
 **In:** a phone talks to the owner's PC Core. The phone side is a PWA that the Core's own dashboard server serves. There is **no cloud relay owned by us**: the phone reaches the PC directly over the home network. Everything is **default OFF** and nothing listens beyond `127.0.0.1` until the owner turns it on.
 
-**Out (separate owner approval, not in V5-core):** Raspberry Pi / hardware, Tailscale or any multi-device network, an internet-reachable endpoint, a native Android app, Android Auto (V6), docked-phone robot, Family Intelligence. The other V5 roadmap pillars (Goals, Adaptive Memory, Proactive Intelligence, Development Manager) layer on this backbone later; they are listed in section 3 as later packages and not started here.
+**Out (separate owner approval, not in V5-core):** Raspberry Pi / hardware, any multi-device network beyond a single paired phone, an internet-reachable endpoint (Tailscale is IN since 2026-10-21, see section 8), a native Android app, Android Auto (V6), docked-phone robot, Family Intelligence. The other V5 roadmap pillars (Goals, Adaptive Memory, Proactive Intelligence, Development Manager) layer on this backbone later; they are listed in section 3 as later packages and not started here.
 
 ## 2. Security model
 
@@ -84,3 +84,15 @@ Packages A-E done and tested (this branch); F (review) and H (real phone) pass o
 2. Trusted certificate: accept the one-time self-signed warning, or add a local CA installed on the phone (more work, better UX)?
 3. Should phone approvals ever be allowed for `high` risk requests, or only `low`/`medium`? (Now: all non-typed requests once the owner enables it.)
 4. Should the Core start the phone server at boot (V5-I) when the switch is on, or only after "open the dashboard"? Recommendation: at boot.
+
+## 8. Owner decisions 2026-10-21 (recorded; implemented on branch `v5/owner-decisions`)
+
+| ID | Decision | Where |
+|---|---|---|
+| OD-15 | Delegation default for NEW installs = **client** mode | `config.NEW_INSTALL_DEFAULTS`, `features.client_delegation` |
+| OD-12 | `log.privacy` default for NEW installs = on ("no content"); switch **Full text on request** = full text for 24 hours only, then automatic revert (visible in dashboard and CLI, fixed-literal logs, log_lint 0) | `logs._expire_full_text`, `privacy.set_full_text`, `jarvis privacy` |
+| V5-T | Phone access over home Wi-Fi AND Tailscale: detection of a 100.64.0.0/10 address, optional bind to it only (never 0.0.0.0 in that mode, refuses to start without it), `tailscale cert` for TLS else the self-signed path, tailnet URL + QR on the Phone page, status row, EN+HE docs. Still OFF by default; JARVES never installs or signs in to Tailscale | `tailnet.py`, `mobile.py`, `docs/PHONE_ACCESS_TAILSCALE.md` (+ `_HE`), `tests/test_tailnet.py` (fake interfaces and a fake `tailscale` command, no network) |
+| V5-AP | Phone approvals (default OFF): when enabled the phone may approve every risk level EXCEPT typed-code approvals (PC only); needs the `approvals` device scope; each answer audited without content; dashboard toggle with a lost-phone warning (EN+HE) and one-click revoke-all | `mobile.answer_approval`, `mobile.MobileAccess.revoke_all`, Phone page |
+
+This answers section 7 questions 3 (phone approvals: all non-typed risk levels once enabled) and, together with the Tailscale scope change, replaces the "Tailscale out of scope" line in section 1.
+Tests: `tests/test_tailnet.py` (26 tests) next to `test_mobile_access.py`; evidence class `virtual/unit`. Not verified with a real Tailscale or phone.

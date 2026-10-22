@@ -704,7 +704,7 @@ class Wizard:
         self.say("\n" + self.t("privacy_note"))
         # A fresh install recommends privacy ON (nothing needs the words yet); a re-run offers the current choice.
         on = self.yesno("privacy_mode", self.t("privacy"), True if self.first else cur)
-        if on != cur:
+        if on != cur or self.first:               # the first run writes the explicit choice down
             privacy.set_privacy(SimpleNamespace(home=self.home, cfg=self.cfg, config_path=self.config_path), on)
             self.changed.append(f"privacy={'on' if on else 'off'}")
 
@@ -943,7 +943,7 @@ BUNDLE: dict[str, list[Callable[[], tuple[bool, str]]]] = {
                   _data("jarves", "dashboard_static/shell.js"), _data("jarves", "dashboard_static/locales/en.js"),
                   _data("jarves", "dashboard_static/locales/he.js")],
     "dashboard_lan": [_mod("jarves.dashboard_auth"), _data("jarves", "dashboard_static/pair.html")],
-    "mobile_access": [_mod("jarves.mobile"), _mod("jarves.qrmini"), _data("jarves", "dashboard_static/mobile/index.html")],
+    "mobile_access": [_mod("jarves.mobile"), _mod("jarves.tailnet"), _mod("jarves.qrmini"), _data("jarves", "dashboard_static/mobile/index.html")],
     "context_trace": [_mod("jarves.context_trace"), _data("jarves", "dashboard_static/context.js")],
     "agent_orchestrator": [_mod("jarves.orchestrator"), _mod("jarves.orchestrator.service"),
                            _mod("jarves.orchestrator.hook"), _mod("jarves.orchestrator.channel"),

@@ -64,7 +64,7 @@ class AIConfig(_Strict):
     # requests itself, JARVES can only COUNT them. client = JARVES runs every backend request itself, so each one is
     # reserved against the budget BEFORE it is sent (a strict cap); in `combined` the reasoning runs on the ChatGPT
     # plan. The dashboard/CLI switch is the `client_delegation` feature (this value is its default and its mirror).
-    delegation_mode: Literal["server", "client"] = "server"     # default pending owner decision OD-15
+    delegation_mode: Literal["server", "client"] = "server"     # library default; NEW installs get "client" (OD-15, NEW_INSTALL_DEFAULTS)
     # client mode, protocol failure: "local" = honest "I can't look that up now" (text-only); "server" = the owner
     # allows falling back to server delegation (counting cap) for the next conversation. Always logged and shown.
     delegation_fallback: Literal["local", "server"] = "local"
@@ -353,10 +353,16 @@ def _find_secrets(d: dict, prefix: str = "") -> list[str]:
     return out
 
 
+# Owner decisions 2026-10-21: a NEW install (no config.toml yet) starts with OD-15 delegation_mode = client and OD-12
+# log.privacy = on ("no content"). An existing config.toml, written by the owner or by any save, is never touched.
+NEW_INSTALL_DEFAULTS = {"log": {"privacy": True}, "ai": {"delegation_mode": "client"}}
+NEW_INSTALL_TOML = '[log]\nprivacy = true\n\n[ai]\ndelegation_mode = "client"\n'
+
+
 def load_config(path: Path | None = None) -> tuple[Config, Path]:
     path = path or state_dir() / "config.toml"
     if not path.exists():
-        return Config(), path
+        return Config.model_validate(NEW_INSTALL_DEFAULTS), path
     try:
         raw = tomllib.loads(path.read_text(encoding="utf-8"))
     except (OSError, tomllib.TOMLDecodeError) as e:

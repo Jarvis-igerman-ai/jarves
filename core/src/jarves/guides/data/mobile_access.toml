@@ -29,6 +29,20 @@ en = "In the dashboard on the computer open the Phone page and press Pair a phon
 he = "בטלפון סרקו את קוד ה-QR במצלמה. אם הוא לא נסרק, הקלידו את הקוד בן 8 הספרות. הקוד תקף 5 דקות ופעם אחת."
 en = "On the phone scan the QR code with the camera. If it does not scan, type the 8-digit code. It works for 5 minutes and once."
 
+[[steps]]
+he = "מחוץ לבית? התקינו Tailscale במחשב ובטלפון והתחברו לאותו חשבון (בעצמכם: JARVES לא מתקין ולא מתחבר). בעמוד \"טלפון\" יופיעו כתובת ה-Tailscale ו-QR נפרד. אפשר גם להאזין לכתובת Tailscale בלבד."
+en = "Away from home? Install Tailscale on the computer and the phone and sign in to the same account (yourself: JARVES never installs or signs in). The Phone page then shows the Tailscale address and its own QR. You can also listen on the Tailscale address only."
+
+[[steps]]
+he = "אישורים מהטלפון (כבוי מראש): טלפון מצומד יכול לאשר כל רמת סיכון, חוץ מבקשות עם קוד מוקלד. טלפון אבוד: \"ניתוק כל הטלפונים\" בלחיצה אחת, או jarvis phone revoke-all."
+en = "Phone approvals (off by default): a paired phone can approve any risk level except typed-code requests. A lost phone: one click on Revoke all phones, or jarvis phone revoke-all."
+
+[[problems]]
+he = "Tailscale לא מזוהה"
+en = "Tailscale is not detected"
+fix_he = "ודאו ש-Tailscale פועל ומחובר במחשב (jarvis phone status מראה את המצב). לתעודה מאובטחת הפעילו HTTPS בלוח הניהול של Tailscale; בלעדיה JARVES משתמש בתעודה עצמית."
+fix_en = "Make sure Tailscale is running and signed in on the computer (jarvis phone status shows the state). For a trusted certificate enable HTTPS in the Tailscale admin console; without it JARVES uses the self-signed certificate."
+
 [[problems]]
 he = "הטלפון לא מגיע למחשב"
 en = "The phone cannot reach the computer"

@@ -728,12 +728,16 @@ class Core:
         from . import mobile
         loop = asyncio.get_running_loop()
         mob_on = self.features.enabled("mobile_access")        # V5: default OFF; the dashboard stays on 127.0.0.1
-        cert, key = mobile.tls_paths(self.home)
-        tls = (cert, key) if cert.is_file() and key.is_file() else None
+        from . import tailnet as tn
 
         def make(on: bool):
+            tail, tls, src = {}, None, "none"
+            if on:                              # detection only: JARVES never installs or logs in to Tailscale
+                tail = tn.detect()
+                tls, src = tn.choose_tls(self.home, tail)
             d = Dashboard(self.home, self.cfg, workspace=self.workspace, memory=self.memory,
-                          settings=self.settings, mobile_on=on, tls=tls if on else None,
+                          settings=self.settings, mobile_on=on, tls=tls, tailnet=tail, tls_source=src,
+                          bind_tailnet_only=mobile.MobileAccess(self.home).settings()["bind_tailnet_only"] if on else False,
                           mobile_bridge=mobile.core_bridge(self, loop) if on else None)
             d.mobile.gate = lambda: self.features.enabled("mobile_access")
             return d.start()

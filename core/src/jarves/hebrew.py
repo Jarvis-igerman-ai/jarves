@@ -271,9 +271,13 @@ TEXT: dict[str, str] = {
     "systemd user unit generated and tested as a file only": "יחידת systemd נוצרה ונבדקה כקובץ בלבד",
     "the check works, but there is no Pi package to install": "הבדיקה עובדת, אבל אין עדיין חבילה להתקנה ב-Pi",
     # --- platform evidence
+    "talk to this computer's JARVES from a paired phone on your home Wi-Fi or over Tailscale (detected, never installed by JARVES): chat, push-to-talk voice (needs TLS), approvals, status. Pairing by QR + one-time code, per-phone tokens you can revoke. Off = this computer only":
+        "מדברים עם JARVES של המחשב הזה מטלפון מצומד ברשת הביתית או דרך Tailscale (JARVES רק מזהה אותו ולא מתקין): שיחה, דיבור בלחיצה (דורש TLS), אישורים ומצב. צימוד בקוד QR וקוד חד-פעמי, ואסימון נפרד לכל טלפון שאפשר לבטל. כבוי = המחשב הזה בלבד",
     "talk to this computer's JARVES from a paired phone on your home Wi-Fi: chat, push-to-talk voice (needs TLS), approvals list, status. Pairing by QR + one-time code, per-phone tokens you can revoke. Off = this computer only":
         "מדברים עם JARVES של המחשב הזה מטלפון מצומד ברשת הביתית: שיחה, דיבור בלחיצה (דורש TLS), רשימת אישורים ומצב. צימוד בקוד QR וקוד חד-פעמי, ואסימון נפרד לכל טלפון שאפשר לבטל. כבוי = המחשב הזה בלבד",
     "dashboard Phone page / `jarvis dashboard --mobile`": "עמוד טלפון בלוח הבקרה / `jarvis dashboard --mobile`",
+    "UNIT test_mobile_*.py + test_tailnet.py (pairing, tokens, scopes, rate limits, audit, PWA files, TLS, Tailscale with fake interfaces); QR decoded once with OpenCV":
+        "בדיקות יחידה: test_mobile_*.py ו-test_tailnet.py (צימוד, אסימונים, הרשאות, הגבלת קצב, ביקורת, קבצי PWA, TLS, Tailscale עם ממשקים מדומים); קוד QR פוענח פעם אחת עם OpenCV",
     "UNIT test_mobile_*.py (pairing, tokens, scopes, rate limits, audit, PWA files, TLS); QR decoded once with OpenCV":
         "בדיקות יחידה: test_mobile_*.py (צימוד, אסימונים, הרשאות, הגבלת קצב, ביקורת, קבצי PWA, TLS); קוד QR פוענח פעם אחת עם OpenCV",
     "V5 is PC-hosted; the Pi is out of scope": "V5 רץ על המחשב; ה-Pi מחוץ להיקף",

@@ -538,7 +538,12 @@ def test_cli_budget_status_test_cap_set_and_reset(home, capsys):
     from jarves import cli
     assert cli.main(["budget", "status", "--json"]) == 0
     v = json.loads(capsys.readouterr().out)
-    assert v["mode"] == "server" and v["limit_usd"] == 1.0 and v["reservations"] == []
+    assert v["mode"] == "client"                                  # owner decision OD-15: new installs start in client mode
+    assert v["limit_usd"] == 1.0 and v["reservations"] == []
+    assert cli.main(["budget", "set", "--mode", "server"]) == 0
+    capsys.readouterr()
+    assert cli.main(["budget", "status", "--json"]) == 0
+    assert json.loads(capsys.readouterr().out)["mode"] == "server"
     assert cli.main(["budget", "set", "--daily-usd", "0.5", "--turn-usd", "0.04", "--fallback", "server",
                      "--mode", "client"]) == 0
     capsys.readouterr()
