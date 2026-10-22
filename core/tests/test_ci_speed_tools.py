@@ -80,6 +80,9 @@ def test_real_test_directory_plan_is_balanced():
     flat = [f for s in p["windows"] for f in s]
     assert len(flat) == len(set(flat)) and not set(flat) & set(ci_plan.BROWSER_FILES)
     assert len(flat) >= 100
+    linux_flat = [f for shard in p["linux"] for f in shard]
+    assert len(p["linux"]) == 3 and sorted(linux_flat) == sorted(flat)
+    assert len(linux_flat) == len(set(linux_flat))
     exp = p["expected_s"]["windows"]
     assert max(exp) <= min(exp) * 1.35 + 5
 
@@ -105,7 +108,7 @@ def test_classify_cli_prints_outputs_and_a_plan(tmp_path, capsys):
     kv = dict(line.split("=", 1) for line in out)
     assert kv["code"] == "true" and kv["cad"] == "false"
     plan = json.loads(kv["plan"])
-    assert len(plan["windows"]) == 3 and len(plan["linux"]) == 1
+    assert len(plan["windows"]) == 3 and len(plan["linux"]) == 3
 
 
 def test_conftest_runs_exactly_the_planned_files_slowest_first():
@@ -314,7 +317,7 @@ def _wf(name):
 def test_installer_runs_in_parallel_with_tests_and_publishing_waits_for_the_whole_run():
     checks = _wf("jarves-checks.yml")
     inst = checks["jobs"]["installer"]
-    assert inst["needs"] == "changes"                                   # NOT after `core`: parallel critical path
+    assert set(inst["needs"]) == {"changes", "validate"}  # no dependency on Core tests
     assert any("jarves-installer-" in str(s.get("with", {}).get("name", "")) for s in inst["steps"])
     pkg = _wf("package.yml")
     cond = pkg["jobs"]["candidate"]["if"]
@@ -327,7 +330,7 @@ def test_no_duplicate_runs_per_commit():
     t = _wf("jarves-checks.yml")[True]
     assert t["push"]["branches"] == ["main"] and "pull_request" in t           # branch pushes have no push trigger
     conc = _wf("jarves-checks.yml")["concurrency"]
-    assert "pull_request.number" in conc["group"] and conc["cancel-in-progress"] is True
+    assert "pull_request.number" in conc["group"] and conc["cancel-in-progress"] == "${{ github.event_name == 'pull_request' }}"
 
 
 def test_ci_ok_aggregates_every_job_and_job_names_are_stable():

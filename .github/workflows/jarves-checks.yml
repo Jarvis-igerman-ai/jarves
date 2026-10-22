@@ -74,18 +74,37 @@ jobs:
           if [ "$GITHUB_EVENT_NAME" != "pull_request" ] && [ "$reused" != "true" ]; then echo "full matrix ($GITHUB_EVENT_NAME $GITHUB_REF)"; fi
           { cat classify.out; echo "tree=$tree"; echo "reused=$reused"; } >> "$GITHUB_OUTPUT"
           { echo "tree \`${tree:0:12}\` reused=$reused"; grep -E '^[a-z0-9]+=(true|false)$' classify.out | tr '\n' ' '; } >> "$GITHUB_STEP_SUMMARY"
+  validate:
+    name: Fast CI and documentation validation
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    defaults:
+      run:
+        working-directory: core
+    steps:
+      - uses: actions/checkout@v7
+      - uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884  # v10.3.0
+        with:
+          enable-cache: true
+          cache-dependency-glob: core/uv.lock
+      - run: uv sync --frozen
+      - name: Workflow contracts, shard coverage and documentation links (offline, no extras)
+        run: uv run pytest -q -rs tests/test_ci_workflows.py tests/test_ci_pipeline.py tests/test_ci_speed_tools.py tests/test_docs_links.py
   core:
-    # Windows is split into 3 shards planned from measured durations (core/tools/ci_plan.py), Linux runs the whole
-    # non-browser suite in one job. The real-browser files are their own job (`browser`, one retry). A guides-only change
-    # runs the Linux shard only (the Windows shards finish in seconds). Matrix job names are required-check names.
+    # Both platforms use 3 separate runners planned from measured durations (core/tools/ci_plan.py).
+    # Linux stays serial inside each runner to isolate process limits, ports and update-flow fakes.
+    # The real-browser files are their own job (`browser`, one retry). A guides-only change
+    # runs the Linux shards only (the Windows shards finish in seconds). Matrix job names are required-check names.
     name: Python Core tests (${{ matrix.os }} shard ${{ matrix.shard }})
-    needs: changes
+    needs: [changes, validate]
     if: needs.changes.outputs.code == 'true'
     strategy:
       fail-fast: false
       matrix:
         include:
-          - {os: ubuntu-24.04, shard: "1/1"}
+          - {os: ubuntu-24.04, shard: "1/3"}
+          - {os: ubuntu-24.04, shard: "2/3"}
+          - {os: ubuntu-24.04, shard: "3/3"}
           - {os: windows-2025, shard: "1/3"}
           - {os: windows-2025, shard: "2/3"}
           - {os: windows-2025, shard: "3/3"}
@@ -211,7 +230,7 @@ jobs:
     # Real-browser tests (Playwright: Chromium on Linux, the preinstalled Edge on Windows) as their own job so the
     # shards stay fast. One retry of the browser files only; a second failure fails the job. Never skipped.
     name: Real-browser tests (${{ matrix.os }})
-    needs: changes
+    needs: [changes, validate]
     if: needs.changes.outputs.full == 'true'
     strategy:
       fail-fast: false
@@ -271,7 +290,7 @@ jobs:
     # (`jarves-installer-<git tree>`); jarves-package publishes exactly that artifact once the WHOLE run is green (tests
     # included), for the PR's merge commit as well (no second build when the tree matches). PR artifacts live 7 days.
     name: Windows installer (build + silent install smoke)
-    needs: changes
+    needs: [changes, validate]
     if: needs.changes.outputs.installer == 'true'
     runs-on: windows-2025
     timeout-minutes: 45
@@ -334,7 +353,7 @@ jobs:
     # SW-V4 F: the Go WhatsApp bridge (bridge/whatsapp). Offline only: go mod verify, vet, unit + API tests against the
     # fake engine (no WhatsApp account is ever contacted), then a reproducible Windows build checked by rebuilding.
     name: WhatsApp bridge (Go vet/test + reproducible build)
-    needs: changes
+    needs: [changes, validate]
     if: needs.changes.outputs.whatsapp == 'true'
     runs-on: windows-2025
     timeout-minutes: 25
@@ -365,7 +384,7 @@ jobs:
   perf:
     # SW-V4 M: performance gate (core/perf_budgets.toml, class ci = loose). Fails when a budget is exceeded.
     name: Performance gate (Windows)
-    needs: changes
+    needs: [changes, validate]
     if: needs.changes.outputs.perf == 'true'
     runs-on: windows-2025
     timeout-minutes: 15
@@ -392,7 +411,7 @@ jobs:
           retention-days: 14
           if-no-files-found: ignore
   cad:
-    needs: changes
+    needs: [changes, validate]
     if: needs.changes.outputs.cad == 'true'
     runs-on: ubuntu-24.04
     timeout-minutes: 25
@@ -419,7 +438,7 @@ jobs:
           QT_QPA_PLATFORM=offscreen "$FC" cad/mech_estimates.py | tee mech.txt
           grep -q "MECH DONE" mech.txt
   blender:
-    needs: changes
+    needs: [changes, validate]
     if: needs.changes.outputs.blender == 'true'
     runs-on: ubuntu-24.04
     timeout-minutes: 20
@@ -437,7 +456,7 @@ jobs:
       - name: Blender smoke (committed .glb vs CAD manifest, materials, Godot asset sync, renders present)
         run: ./blender-5.2.2-linux-x64/blender -b --python blender/smoke_blender.py
   godot:
-    needs: changes
+    needs: [changes, validate]
     if: needs.changes.outputs.godot == 'true'
     runs-on: ubuntu-24.04
     timeout-minutes: 15
@@ -464,7 +483,7 @@ jobs:
           grep -q "FACE CHECK RESULT: PASS" face.txt
   e2e:
     name: Core-Godot E2E (real processes)
-    needs: changes
+    needs: [changes, validate]
     if: needs.changes.outputs.e2e == 'true'
     runs-on: ubuntu-24.04
     timeout-minutes: 15
@@ -550,7 +569,7 @@ jobs:
     # (docs-only, reused proof). Failed or cancelled needs make it red. Per-shard names stay valid required checks too.
     name: CI result (single required check)
     if: always()
-    needs: [changes, core, browser, installer, whatsapp-bridge, perf, cad, blender, godot, e2e]
+    needs: [changes, validate, core, browser, installer, whatsapp-bridge, perf, cad, blender, godot, e2e]
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     env:
