@@ -186,6 +186,12 @@ jobs:
             core/flake-report.json
           retention-days: 7
           if-no-files-found: ignore
+      - name: Quarantined tests (non-blocking; still run, never skipped; docs/CI_DETERMINISM.md)
+        if: steps.gate.outputs.run == 'true' && matrix.shard == 1
+        continue-on-error: true
+        shell: bash
+        run: |
+          uv run pytest -q -p no:cacheprovider --browser exclude -m quarantine || [ $? -eq 5 ]   # 5 = none quarantined
       - name: Redacted diagnostics on failure (pytest output, junit, Core logs; no secrets, no user content)
         if: failure()
         shell: bash

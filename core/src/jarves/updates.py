@@ -209,7 +209,14 @@ def pick_release(releases: list, current: str) -> dict | None:
     return best
 
 
+def _offline_get(url: str, headers: dict) -> tuple[int, object]:
+    """JARVES_TEST_OFFLINE=1: deterministic stand-in for GitHub (no releases published), never the network."""
+    return (200, []) if "/releases" in url and "latest.json" not in url else (404, None)
+
+
 def _httpx_get(url: str, headers: dict) -> tuple[int, object]:
+    if os.environ.get("JARVES_TEST_OFFLINE"):
+        return _offline_get(url, headers)
     import httpx
     r = httpx.get(url, headers=headers, timeout=20, follow_redirects=True)
     if r.status_code != 200:
