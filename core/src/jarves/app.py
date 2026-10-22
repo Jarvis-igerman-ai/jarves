@@ -24,6 +24,8 @@ from .skills.settings import Settings, SettingsSkill
 from . import workspace as wsp
 from . import features as feat
 from . import browser as browser_mod            # SW-V3 P1.2: registers the `browser` switch (default OFF)
+from . import approvals as appr
+from . import chat_service
 from .curator import _SENSITIVE as SENSITIVE_TEXT, Curator, openai_extractor
 from .dashboard import DashboardSkill
 from .voice.audio import AudioUnavailable, SoundDeviceAudio, StreamingAudio
@@ -108,6 +110,8 @@ class _VoiceApproval:
 
     def available(self, a) -> bool:
         live = self.core.live
+        if appr.CHAT_TURN.get() is not None:
+            return False                                  # a text chat turn: spoken approvals do not apply
         return not a.typed_code and live is not None and hasattr(live, "confirm_pending")
 
     async def open(self, a) -> None:
@@ -241,6 +245,8 @@ class Core:
         self.approvals.channels += [appr.PopupChannel(self.approvals, enabled=self.use_real_audio,
                                                        lang=c.ui.popup_language),
                                     _FaceApproval(self), _VoiceApproval(self)]
+        self.chat = chat_service.ChatService(self)            # `jarvis chat`: silent terminal text + its approvals
+        self.approvals.channels.append(self.chat.channel)
         self.registry = SkillRegistry()
         self.registry.confirm = self.ask_confirm
         self.registry.gate = self.features.gate          # inactive features: tools not offered, calls refused
@@ -330,6 +336,7 @@ class Core:
 
         self.link = GodotLink(c.link.host, c.link.port, load_token(self.home / "link_token"), self.health,
                               self.on_message, self._face_connected)
+        self.link.on_client_closed = self.chat.forget
         from .camera import wire as camera_wire              # WP-J camera: switches default OFF (camera/wire.py)
         self.camera = camera_wire.attach(self)
         self.browser = browser_mod.attach(self)              # Browser Skill: allow-list control, read-only + ask
@@ -438,6 +445,8 @@ class Core:
             from . import approvals as appr
             appr.detach(self.approvals)
         self._confirm.clear()
+        if getattr(self, "chat", None) is not None:
+            await self.chat.close()                 # open terminal answers end; their waiting approvals are denied
         if self.live is not None:
             live, self.live = self.live, None
             try:
@@ -665,6 +674,8 @@ class Core:
                 self._run_busy(self.handle_utterance(text, typed=True))
         elif t in ("mic.set_mute", "mic.mute_changed"):
             await self.set_muted(bool(p.get("muted")))
+        elif t in chat_service.CHAT_TYPES:
+            await self.chat.handle(t, p, client)           # `jarvis chat`: silent terminal text (chat_service.py)
         elif t == "status.request":
             await self.link.reply(ws, "status", self.snapshot())
         elif t == "confirm.reply":

@@ -52,6 +52,18 @@ ROUTE: contextvars.ContextVar[str] = contextvars.ContextVar("jarves_skill_route"
 # The tool whose handler is running ("" = none). approvals.answer refuses inside a tool: no Skill (or text a tool
 # returned) can ever approve a request; only the owner's own channels can (approvals.py).
 IN_TOOL: contextvars.ContextVar[str] = contextvars.ContextVar("jarves_in_tool", default="")
+# Terminal text chat (chat_service.py): a callable (name, ok, code) told about every tool call of THIS turn, so the
+# terminal shows one short line per call. It never receives arguments or results (nothing to redact or leak).
+TOOL_SINK: contextvars.ContextVar = contextvars.ContextVar("jarves_tool_sink", default=None)
+
+
+def _tool_seen(name: str, ok: bool, code: str) -> None:
+    sink = TOOL_SINK.get()
+    if sink is not None:
+        try:
+            sink(name, ok, code)
+        except Exception:
+            pass                                       # a display problem never changes a tool result
 
 
 async def bounded_ai(aw, timeout_s: float, registry: "SkillRegistry | None"):
@@ -354,6 +366,11 @@ class SkillRegistry:
             raise
 
     async def call(self, name: str, raw_args: dict | str | None = None, *, origin: Origin = "model") -> ToolResult:
+        res = await self._call(name, raw_args, origin=origin)
+        _tool_seen(name, res.ok, res.code)             # terminal text chat: one short line per call (TOOL_SINK)
+        return res
+
+    async def _call(self, name: str, raw_args: dict | str | None = None, *, origin: Origin = "model") -> ToolResult:
         """Run a tool under the permission policy. origin="user" only when the deterministic command parser matched
         the user's own words; everything from a model (text agent, voice agent, ChatGPT plan) is "model"."""
         st = self._tools.get(name)
