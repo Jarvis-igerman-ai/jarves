@@ -36,8 +36,6 @@ Execution authority: [NOW](NOW.md) (the only active brief) with [AGENTS](../AGEN
 | Document | Purpose | Version | Status | Owner doc |
 |---|---|---|---|---|
 | [RELEASE_HOSTING](RELEASE_HOSTING.md) | How signed installers and `latest.json` are published to the releases repo and how clients update | V2 on | current (the source repo is now `igalgerman/jarves`; `RELEASING.md` and `CI_PERFORMANCE.md` join with PR #44) | itself |
-| [CI_PERFORMANCE](CI_PERFORMANCE.md) | CI timing, sharding, validation and reuse of tested installers | V4 on | current | itself |
-| [RELEASING](RELEASING.md) | Candidate, beta and gated stable releases | V4 on | current | itself |
 | [GITHUB_FLOW](GITHUB_FLOW.md) | Branch, PR, `automerge` label, post-merge package | general | current | itself |
 | [RELEASE_NOTES_4.0](RELEASE_NOTES_4.0.md) | What V4 changed for users | V4 | current | itself; [CHANGELOG](../CHANGELOG.md) is the short per-version list |
 | [SWV4_RELEASE_CHECKLIST](reviews/SWV4_RELEASE_CHECKLIST.md) | 4.0.0 checklist state and evidence | V4 | current | [V4 package section 10](JARVES_SW_V4_WORK_PACKAGE.md#10-release-checklist) defines the rows |
@@ -56,6 +54,7 @@ Execution authority: [NOW](NOW.md) (the only active brief) with [AGENTS](../AGEN
 | [PRODUCT_VISION](PRODUCT_VISION.md) | Six product stages (north star) | general | current | itself |
 | [PROJECT_PRINCIPLES](PROJECT_PRINCIPLES.md) | Durable principles, printability, Israel sourcing, owner decisions | general | current | itself |
 | [plans/PRIORITIES](plans/PRIORITIES.md) | Owner decisions log (V4 approval, WhatsApp, 21 Oct decisions) | V4-V5 | current, append-only | itself |
+| [plans/RELEASE_AND_TEST_SYSTEM](plans/RELEASE_AND_TEST_SYSTEM.md) | Release and test system plan: alpha/beta/stable, `next` batches, 12 shards, scenario runner, sandbox, owner sheet < 15 min | 4.1-V5 | plan for owner review (increments on PRs #44/#57) | [RELEASING](RELEASING.md), [CI_PERFORMANCE](CI_PERFORMANCE.md) |
 | [SW_V1_WORK_PACKAGE](SW_V1_WORK_PACKAGE.md) | First assistant, CI, music | V1 | historical | [CHANGELOG](../CHANGELOG.md) |
 | [JARVES_SW_V2_IMPLEMENTATION_SPEC](JARVES_SW_V2_IMPLEMENTATION_SPEC.md) | Milestones M1-M6 spec | V2 | historical | CHANGELOG |
 | [JARVES_SW_V3_WORK_PACKAGE](JARVES_SW_V3_WORK_PACKAGE.md) | V3 prioritized package | V3 | historical (released) | CHANGELOG |

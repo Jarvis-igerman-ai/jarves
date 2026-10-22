@@ -1,3 +1,13 @@
+## Release and test system plan (22 Oct 2026) — docs only, stacked on PR #57, not merged
+
+- New plan: [docs/plans/RELEASE_AND_TEST_SYSTEM.md](plans/RELEASE_AND_TEST_SYSTEM.md) (DOC_MAP row added). Increments on
+  #44/#57 only; no workflow file changed. Covers alpha/beta/stable without rebuild, `next` batch branch, 12 shards,
+  affected tests + passed-hash cache, scenario runner (TOML, fake model via `OPENAI_BASE_URL`), Linux container + GitHub
+  Windows VM sandbox, owner sheet 31 -> 9 human rows (about 14 min), installer speed, cost, phases (about 16.5 agent-days).
+- Found: `ci/deterministic-tests` (netguard, quarantine) exists only locally (C:\work\jarves-det, f1977cf), not pushed.
+- Questions for the user: the 6 decisions in section 11 of the plan (`next` branch, bot fast-forward of main, daily
+  beta promotion, sandbox choice, Defender exclusion option, AI QA budget). Status: WAITING FOR USER.
+
 ## CI follow-up (22 Oct 2026) — stacked on PR #44, not merged
 
 - Owner request in this session authorizes the follow-up PR and real Actions verification. One writer, isolated branch
@@ -7,7 +17,17 @@
 - Local check: from core, uv run pytest -q -rs --durations=10 tests/test_ci_workflows.py tests/test_ci_pipeline.py
   tests/test_ci_speed_tools.py tests/test_docs_links.py tests/test_units.py::test_cli_setup_paths — 78 passed in 32.16 s,
   zero skips. Setup test 3.80 s locally (prior hosted Windows 173.33 s; different hosts).
-- Hosted CI: pending the final-commit run; no claim of green or of the estimated 8-10 minute target yet.
+- Hosted CI on ed14a9f: https://github.com/igalgerman/jarves/actions/runs/39733332477 passed in 9m46s.
+  Linux shards 4m33s / 2m04s / 4m41s; Windows 5m09s / 3m24s / 9m22s; installer 7m46s; validation 13s.
+  Windows shard 3 recorded one socket-timeout flake in test_perf_probes.py; its failed file passed on the existing
+  one-retry policy. CodeQL passed. This was green with a recorded flake, not a flake-free run.
+- Upstream #44 advanced during verification: 672dbb9 independently fixed the same inherited failures, then c00a773
+  incorporated this follow-up's implementation. Synced both updates, retained the stronger equivalent assertion and
+  removed duplicate DOC_MAP rows. A temporary conflict-marker resolution failed validation and was corrected before
+  final verification. Non-documentation content is identical to the full-green ed14a9f commit.
+- PR #57 now carries evidence/documentation follow-up to the implementation already incorporated in #44. Its final
+  commit receives the fast validation check; the full code run above remains the implementation evidence. No merge
+  into main or release was performed here.
 - Decision queue: existing branch-protection choice, beta activation, duplicate CodeQL setup and artifact retention remain
   DEFERRED to the release coordinator; no settings changed. Prior merge freeze is respected: this PR is not merged.
   Browser readiness changes, dependency-stage caching and platform-specific duration histories are DEFERRED; unnecessary

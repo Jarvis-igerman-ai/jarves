@@ -167,5 +167,9 @@ waits for an absent Pear Desktop or installs optional software. Local Windows re
 Windows result: 173.33 s (different machines, so this is not a controlled speedup measurement).
 
 Local focused validation: 78 passed in 32.16 s, zero skips. Full hosted-run timings and results belong in HANDOFF.md.
-Linux estimates above remain estimates until that run completes. Branch protection should use ci-ok; any explicitly
+First full hosted result (commit ed14a9f, run 39733332477): green in 9m46s. Linux shards took 4m33s / 2m04s / 4m41s;
+Windows shards 5m09s / 3m24s / 9m22s; installer 7m46s; fast validation 13s. Windows shard 3 needed one known-transient
+socket-timeout retry of test_perf_probes.py (5 tests passed on retry, one initially failed). CodeQL also passed.
+These are observed timings for one run, not a guaranteed budget. The implementation was subsequently incorporated into PR #44 at c00a773; PR #57 retains the evidence/documentation
+follow-up. Its final commit runs fast validation; non-documentation content matches the full-green ed14a9f commit. Branch protection should use ci-ok; any explicitly
 required old Linux shard 1/1 check must be updated when this stacked change reaches main.
