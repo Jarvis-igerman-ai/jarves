@@ -31,6 +31,7 @@ def server():
 @pytest.fixture(autouse=True)
 def windows(monkeypatch):
     monkeypatch.setattr(sys, "platform", "win32")          # the update path is Windows-only; nothing Windows is run
+    monkeypatch.setattr(updates, "build_info", lambda: {"version": OLD})   # the running copy is OLD, whatever __version__ is
 
 
 @pytest.fixture
