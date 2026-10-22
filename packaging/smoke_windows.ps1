@@ -57,6 +57,7 @@ function Jarvis([string[]]$argv, [int]$timeoutS = 120) {
     return @{ code = $p.ExitCode; text = (Get-Content $out -Raw -ErrorAction SilentlyContinue) + "" }
 }
 $Times = [ordered]@{}
+$InstallStages = [ordered]@{}
 function Install([string]$tasks = "", [string[]]$extra = @(), [string]$exe = "", [string]$time = "") {
     # $tasks = "DEFAULT": no /TASKS at all (the installer's own defaults); "" : no task at all
     if (-not $exe) { $exe = $Installer }
@@ -64,7 +65,14 @@ function Install([string]$tasks = "", [string[]]$extra = @(), [string]$exe = "",
     $sw = [Diagnostics.Stopwatch]::StartNew()
     $p = Start-Process $exe -WindowStyle Hidden -Wait -PassThru -ArgumentList (@("/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART",
         "/SP-") + $taskArg + @("/DIR=`"$App`"", "/LOG=`"$(Join-Path $Work "install-$(Get-Random).log")`"") + $extra)
-    if ($time) { $Times[$time] = [math]::Round($sw.Elapsed.TotalSeconds, 1) }
+    if ($time) {
+        $Times[$time] = [math]::Round($sw.Elapsed.TotalSeconds, 1)
+        $stateFile = Join-Path $App "install-state.json"
+        if (Test-Path $stateFile) {
+            $installState = Get-Content $stateFile -Raw | ConvertFrom-Json
+            $InstallStages[$time] = $installState.stage_timings_s
+        }
+    }
     return $p.ExitCode
 }
 function Uninstall([string[]]$extra = @(), [string]$time = "") {
@@ -107,6 +115,7 @@ function Save-Times() {
         & $AuditPy @args_ | Out-Host
         $report = Get-Content $MetricsOut -Raw | ConvertFrom-Json -AsHashtable
         $report["smoke_stages_s"] = $Times
+        $report["install_stages_s"] = $InstallStages
         $report | ConvertTo-Json -Depth 8 | Set-Content -Encoding utf8NoBOM $MetricsOut
     }
 }
@@ -137,11 +146,13 @@ port = 18765
 if ($UpgradeFrom) {
     $UpgradeFrom = (Resolve-Path $UpgradeFrom).Path
     $before = Collect "before"
-    Check ((Install "" @() $UpgradeFrom) -eq 0) "old installer installs silently: $(Split-Path $UpgradeFrom -Leaf)"
+    Check ((Install "autostart,desktopicon" @() $UpgradeFrom "old_install_s") -eq 0) "old installer installs silently: $(Split-Path $UpgradeFrom -Leaf)"
     $oldVer = Version-Of
     Check ($oldVer -match '^\d+\.\d+\.\d+\.\d+$') "old version is $oldVer"
     Check (Seed "seed") "old-layout data seeded (conversation, memory, job, settings)"
     $settingsBefore = @("config.toml", "features.json", "identity.json", "secrets.env", "models/owner-wake.onnx", "google/token.json", "profiles/owner/config.toml") | ForEach-Object { (Get-FileHash (Join-Path $Home_ $_)).Hash }
+    $desktop = Join-Path ([Environment]::GetFolderPath("Desktop")) "JARVES.lnk"
+    Check (Test-Path $desktop) "old desktop shortcut created for preservation test"
     $mid = Collect "old-installed"                     # Run key / PATH with the old version installed
     # silent upgrade over it: no /TASKS (the installer keeps its defaults), same AppId, data folder untouched
     Check ((Install "DEFAULT" @("/KEEPDATA=0") $Installer "silent_upgrade_s") -eq 0) "silent upgrade $oldVer -> $Version"
@@ -150,12 +161,15 @@ if ($UpgradeFrom) {
     Check ($state.complete -and $state.backups.Count -ge 1) "installer verified backup and completed migration"
     $newVer = Version-Of
     Check ($newVer -ne $oldVer -and (-not $Version -or $newVer -eq $Version)) "installed version is now $newVer"
-    $settingsAfter = @("config.toml", "features.json", "identity.json") | ForEach-Object { (Get-FileHash (Join-Path $Home_ $_)).Hash }
+    $settingsAfter = @("config.toml", "features.json", "identity.json", "secrets.env", "models/owner-wake.onnx", "google/token.json", "profiles/owner/config.toml") | ForEach-Object { (Get-FileHash (Join-Path $Home_ $_)).Hash }
     Check (($settingsBefore -join ",") -eq ($settingsAfter -join ",")) "settings files are byte-for-byte unchanged by the upgrade"
     $after = Collect "upgraded"
     $m = Get-Content $mid -Raw | ConvertFrom-Json
     $a = Get-Content $after -Raw | ConvertFrom-Json
     Check ((($m.run | ConvertTo-Json -Compress) -eq ($a.run | ConvertTo-Json -Compress))) "autostart (HKCU Run) is exactly as before the upgrade"
+    Check ($m.run.JARVES -and $a.run.JARVES) "enabled start-with-Windows survives a silent upgrade"
+    Check (Test-Path $desktop) "desktop shortcut survives a silent upgrade"
+    Check (Seed "verify") "installer migration preserves all seeded rows before Core startup"
     # first start of the new version: backup, data migration, CORE_READY
     $core = Start-Process "cmd.exe" -ArgumentList "/c `"`"$App\jarvis.cmd`" run > `"$Work\core.out`" 2>&1`"" -NoNewWindow -PassThru
     Check (Wait-Log "CORE_READY" 90) "the upgraded Core starts offline (CORE_READY)"
@@ -170,17 +184,31 @@ if ($UpgradeFrom) {
     if ($Rollback) {
         # the in-app updater records the previous version before it starts setup; record the same thing for the test
         Check (Seed "previous" @("--installer", $UpgradeFrom, "--old-version", $oldVer, "--new-version", $newVer)) "previous version recorded like the updater does"
+        $readyBefore = @(Select-String -Path (Join-Path $Home_ "logs\jarves.log") -Pattern CORE_READY -ErrorAction SilentlyContinue).Count
         $sw = [Diagnostics.Stopwatch]::StartNew()
         $r = Jarvis @("update", "--rollback", "--yes") 240
         Check ($r.code -eq 0) "jarvis update --rollback --yes: $($r.text.Trim().Split("`n")[-1])"
+        # The version file is extracted before Setup finishes: wait for the bootstrap process too.
+        foreach ($setup in @(Get-Process -Name "JARVES-Setup-$oldVer" -ErrorAction SilentlyContinue)) {
+            if (-not $setup.WaitForExit(240000)) { throw "rollback installer did not finish" }
+        }
         for ($i = 0; $i -lt 480 -and (Version-Of) -ne $oldVer; $i++) { Start-Sleep -Milliseconds 500 }
         $Times["silent_rollback_s"] = [math]::Round($sw.Elapsed.TotalSeconds, 1)
         Check ((Version-Of) -eq $oldVer) "version is back to $oldVer"
-        Check (Seed "verify" @("--legacy")) "data is back to the old layout with every seeded row"
+        # The pinned 4.0.0 old version also uses schema 3 and migrates restored legacy data on restart.
+        for ($i = 0; $i -lt 120; $i++) {
+            $readyNow = @(Select-String -Path (Join-Path $Home_ "logs\jarves.log") -Pattern CORE_READY -ErrorAction SilentlyContinue).Count
+            if ($readyNow -gt $readyBefore) { break }
+            Start-Sleep -Milliseconds 500
+        }
+        Check ($readyNow -gt $readyBefore) "rolled-back version restarts successfully"
+        $r = Jarvis @("stop")
+        Check (Seed "verify") "rolled-back version retains every seeded row and setting"
         $pending = Get-Content (Join-Path $Home_ "updates\pending.json") -Raw -ErrorAction SilentlyContinue
         Check ($pending -match "rolled_back") "the rollback is recorded (pending.json: rolled_back)"
     }
     Check ((Uninstall @("/PURGE=1") "silent_uninstall_s") -eq 0) "uninstall /PURGE=1"
+    Check (-not (Test-Path $desktop)) "uninstall removes the desktop shortcut"
     $final = Collect "final"
     Check (Audit "uninstalled" $before $final @("--purged")) "no residue after uninstall (Run key, PATH, tasks, Start menu, folders)"
     Save-Times

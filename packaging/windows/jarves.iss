@@ -4,7 +4,7 @@
 ; and survives upgrade and uninstall; only "remove my data" (asked, default No; silent: /PURGE=1) deletes it, and
 ; only a real JARVES data folder (purge_guard.iss: never a drive root / the profile; config.toml|store.db|memory.db).
 ; SW-V4 L: "Start JARVES when I sign in" is OFF by default (the runtime's `jarvis autostart on` is the only writer of the
-; Run key; an upgrade never touches it, and UsePreviousTasks=no keeps the task from re-ticking it). Setup refuses to
+; Run key; silent upgrades preserve it and interactive choices take effect). Setup refuses to
 ; install OVER A NEWER VERSION unless /ROLLBACK=1 is given (jarvis update --rollback), so a stale installer cannot
 ; downgrade by accident. The AppId never changes: every released series (0.1.0.x -> 3.x -> 4.x) is the same app.
 ; Not signed (no code-signing certificate yet; owner decision 20 Oct 2026: stay unsigned for now): Windows SmartScreen shows "Windows protected your PC" ->
@@ -50,6 +50,7 @@ RestartApplications=no
 ChangesEnvironment=yes
 SetupLogging=yes
 UsePreviousTasks=no
+ShowLanguageDialog=yes
 UsedUserAreasWarning=no
 
 [Languages]
@@ -90,6 +91,7 @@ Name: "autostart"; Description: "{cm:TaskAutostart}"; Flags: unchecked
 Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; Flags: unchecked
 
 [InstallDelete]
+Type: files; Name: "{userdesktop}\JARVES.lnk"; Check: RemoveDesktopShortcut
 ; upgrade: replace the bundled Python and face completely (no stale packages from an older version)
 Type: filesandordirs; Name: "{app}\python"
 Type: filesandordirs; Name: "{app}\face"
@@ -110,6 +112,7 @@ Name: "{userdesktop}\JARVES"; Filename: "{app}\jarvis.cmd"; WorkingDir: "{app}";
 [Run]
 ; Autostart is OFF by default; use the app's own mechanism when explicitly selected.
 Filename: "{cmd}"; Parameters: "/c """"{app}\jarvis.cmd"" autostart on"""; Tasks: autostart; Flags: runhidden waituntilterminated
+Filename: "{cmd}"; Parameters: "/c """"{app}\jarvis.cmd"" autostart off"""; Check: DisableAutostart; Flags: runhidden waituntilterminated
 ; In-app update / rollback (setup started with /RESTARTJARVES=1 by jarves.updates): start the Core again, windowless.
 Filename: "{app}\python\pythonw.exe"; Parameters: "-m jarves run --background"; WorkingDir: "{app}"; Check: RestartRequested; Flags: nowait runhidden
 ; The finish-page button below opens the dashboard without a console.
@@ -207,6 +210,16 @@ begin
   for I := 1 to ParamCount do
     if CompareText(ParamStr(I), Name) = 0 then
       Result := True;
+end;
+
+function RemoveDesktopShortcut(): Boolean;
+begin
+  Result := not WizardSilent() and not WizardIsTaskSelected('desktopicon');
+end;
+
+function DisableAutostart(): Boolean;
+begin
+  Result := not WizardSilent() and not WizardIsTaskSelected('autostart');
 end;
 
 function RestartRequested(): Boolean;

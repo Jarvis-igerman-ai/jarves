@@ -275,7 +275,7 @@ def test_installer_and_smoke_wire_the_wizard():
     pkg = Path(sw.__file__).parents[3] / "packaging"
     iss = (pkg / "windows" / "jarves.iss").read_text(encoding="utf-8-sig")
     assert "setup --answers" in iss and "{param:SETUPANSWERS|}" in iss and "Check: WizardSilent" in iss
-    assert "postinstall nowait skipifsilent" in iss               # the interactive wizard stays a ticked last page
+    assert "SetupButton.OnClick := @OpenSetup" in iss and "if WizardSilent() then exit;" in iss  # GUI button, silent-safe
     smoke = (pkg / "smoke_windows.ps1").read_text(encoding="utf-8")
     assert "--check-addons" in smoke and "ADDON CHECK: PASS" in smoke and "/SETUPANSWERS=" in smoke
     index = (Path(sw.__file__).parent / "dashboard_static" / "index.html").read_text(encoding="utf-8")

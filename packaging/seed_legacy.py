@@ -55,7 +55,7 @@ CREATE TABLE IF NOT EXISTS jobs (
     created REAL NOT NULL, updated REAL NOT NULL, approved_at REAL, approved_by TEXT);
 """
 CONFIG = '[voice]\nmode = "off"\nwake_threshold = 0.95\n\n[music]\nprovider = "none"\n\n[link]\nport = 18765\n'
-FEATURES = {"chimes": {"enabled": False}}
+FEATURES = {"chimes": {"enabled": False}, "autostart": {"enabled": True}}
 IDENTITY = {"display_name": "SeedMax"}
 SETTINGS_FILES = {"config.toml": CONFIG, "features.json": json.dumps(FEATURES), "identity.json": json.dumps(IDENTITY)}
 PRESERVED_FILES = {
@@ -72,9 +72,10 @@ def seed(home: Path) -> None:
     home.mkdir(parents=True, exist_ok=True)
     db = sqlite3.connect(home / "store.db")
     db.executescript(STORE_SQL)
-    db.execute("INSERT INTO sessions (id, kind, started) VALUES ('s1', 'typed', 1000.0)")
-    db.execute("INSERT INTO turns (session_id, ts, role, text, chars) VALUES ('s1', 1001.0, 'user', 'hello legacy', 12)")
-    db.execute("INSERT INTO delegations (session_id, ts, kind, status) VALUES ('s1', 1002.0, 'voice', 'done')")
+    now = time.time() - 10  # realistic old data; avoid Core retention pruning a 1970 fixture
+    db.execute("INSERT INTO sessions (id, kind, started) VALUES ('s1', 'typed', ?)", (now,))
+    db.execute("INSERT INTO turns (session_id, ts, role, text, chars) VALUES ('s1', ?, 'user', 'hello legacy', 12)", (now + 1,))
+    db.execute("INSERT INTO delegations (session_id, ts, kind, status) VALUES ('s1', ?, 'voice', 'done')", (now + 2,))
     db.commit()
     db.close()
     db = sqlite3.connect(home / "memory.db")

@@ -40,6 +40,7 @@ def prepare(home: Path, state: Path) -> dict:
     from jarves import backup, migrations
     home = safe_home(home)
     restore_shims(Path(sys.executable).parent.parent / "install-state.json")
+    started = time.monotonic()
     records = []
     for profile in profiles(home):
         if not profile.is_dir() or not any(profile.iterdir()):
@@ -49,7 +50,8 @@ def prepare(home: Path, state: Path) -> dict:
         if not checked["ok"] or any("unreadable" in item["reason"] for item in checked["manifest"].get("excluded", [])):
             raise ValueError("backup verification failed; data was not migrated")
         records.append({"home": str(profile), "backup": str(archive), "schema_marker": (profile / migrations.MARKER).is_file()})
-    record = {"format": 1, "home": str(home), "backups": records, "created": time.time()}
+    record = {"format": 1, "home": str(home), "backups": records, "created": time.time(),
+              "stage_timings_s": {"backup_and_verify": round(time.monotonic() - started, 3)}}
     state.write_text(json.dumps(record, indent=2), encoding="utf-8")
     return record
 
@@ -74,6 +76,7 @@ def complete(home: Path, state: Path, *, keep: bool = True, language: str = "en"
     home.mkdir(parents=True, exist_ok=True)
     if not (home / "config.toml").exists():
         (home / "config.toml").write_text('[voice]\nlanguage = "' + language + '"\n', encoding="utf-8")
+    started = time.monotonic()
     if keep:
         try:
             for item in record["backups"]:
@@ -85,6 +88,7 @@ def complete(home: Path, state: Path, *, keep: bool = True, language: str = "en"
                 if not item["schema_marker"]:
                     (target / migrations.MARKER).unlink(missing_ok=True)
             raise
+    record.setdefault("stage_timings_s", {})["migration"] = round(time.monotonic() - started, 3)
     record["complete"] = True
     state.write_text(json.dumps(record, indent=2), encoding="utf-8")
     return record
