@@ -145,6 +145,16 @@ jobs:
         with:
           path: ${{ runner.temp }}/jarves-build-cache
           key: jarves-build-tools-${{ hashFiles('packaging/build_windows.ps1') }}
+      - uses: actions/setup-go@v7
+        with:
+          go-version: "1.27.0"
+          cache-dependency-path: bridge/whatsapp/go.sum
+      - name: Build the pinned WhatsApp bridge (same reproducible build as the whatsapp-bridge job)
+        shell: pwsh
+        run: |
+          $pin = Get-Content packaging/bridge_pin.json -Raw | ConvertFrom-Json
+          ./scripts/build_whatsapp_bridge.ps1 -Version $pin.version
+          "JARVES_BRIDGE_EXE=$((Resolve-Path bridge/whatsapp/dist/whatsapp_bridge.exe).Path)" >> $env:GITHUB_ENV
       - name: Build installer
         shell: pwsh
         run: |
@@ -189,10 +199,16 @@ jobs:
           cache-dependency-path: bridge/whatsapp/go.sum
       - name: Build (pinned go1.27.0 check, go mod verify, go vet, go test, reproducible build)
         shell: pwsh
-        run: ./scripts/build_whatsapp_bridge.ps1 -Version "0.1.0.${{ github.run_number }}"
+        run: ./scripts/build_whatsapp_bridge.ps1 -Version "0.1.0"
       - name: Rebuild and compare SHA-256 (reproducibility)
         shell: pwsh
-        run: ./scripts/build_whatsapp_bridge.ps1 -Version "0.1.0.${{ github.run_number }}" -Verify bridge/whatsapp/dist/whatsapp_bridge.exe.sha256
+        run: ./scripts/build_whatsapp_bridge.ps1 -Version "0.1.0" -Verify bridge/whatsapp/dist/whatsapp_bridge.exe.sha256
+      - name: Compare with packaging/bridge_pin.json
+        shell: pwsh
+        run: |
+          $pin = Get-Content packaging/bridge_pin.json -Raw | ConvertFrom-Json
+          $got = (Get-FileHash bridge/whatsapp/dist/whatsapp_bridge.exe -Algorithm SHA256).Hash.ToLower()
+          if ($got -ne $pin.sha256) { throw "bridge SHA256 $got differs from packaging/bridge_pin.json ($($pin.sha256)); rebuild with -Version $($pin.version) and update the pin" }
       - uses: actions/upload-artifact@v7
         with:
           name: whatsapp-bridge-windows
