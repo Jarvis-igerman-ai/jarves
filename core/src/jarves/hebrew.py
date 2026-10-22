@@ -257,6 +257,12 @@ TEXT: dict[str, str] = {
         "Python ו-SQLite בלבד, בלי קוד ייעודי ל-Windows; טרם הורץ על Raspberry Pi (אין מכשיר במערך הבדיקה); ההגנות של Linux על קישורים והרשאות נבדקות רק ב-CI",
     "pure Python + SQLite, no platform code; not run on a Pi yet": "Python ו-SQLite בלבד, בלי קוד ייעודי לפלטפורמה; טרם הורץ על Pi",
     "pure Python + SQLite, no platform code; not yet run on a Pi": "Python ו-SQLite בלבד, בלי קוד ייעודי לפלטפורמה; טרם הורץ על Pi",
+    "silent text chat with JARVES in the terminal (`jarvis chat`): no microphone, no speech, approvals answered in the terminal":
+        "שיחת טקסט שקטה עם JARVES בטרמינל (`jarvis chat`): בלי מיקרופון, בלי קול, ואישורים נענים בטרמינל",
+    "core/tests/test_chat.py (scripted terminal, fake Core and model); no hands-on run in a real Windows console yet":
+        "core/tests/test_chat.py (טרמינל מתוסרט, ליבה ומודל מדומים); טרם הורץ ידנית בקונסולת Windows אמיתית",
+    "pure Python over the local link; not run on a Raspberry Pi yet (no device in the test setup)":
+        "Python בלבד מעל הקישור המקומי; טרם הורץ על Raspberry Pi (אין מכשיר במערך הבדיקה)",
     "pure Python, no platform code; not run on a Pi yet": "Python בלבד, בלי קוד ייעודי לפלטפורמה; טרם הורץ על Pi",
     "sandbox runner not run on Pi OS; OS-level sandbox (bubblewrap/seccomp) open":
         "מריץ ה-sandbox לא רץ על Pi OS; בידוד ברמת מערכת ההפעלה (bubblewrap/seccomp) עוד פתוח",

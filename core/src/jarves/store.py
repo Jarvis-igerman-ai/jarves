@@ -171,6 +171,8 @@ class Store:
         with self._lock:
             if code in ("LIVE_STARTED", "RT_STARTED"):
                 self._open(d, ts, "realtime" if code == "RT_STARTED" else "live")
+            elif code == "CHAT_NEW":               # `/new` in the terminal chat: the next typed exchange is a new conversation
+                self._typed = None
             elif code == "CORE_STARTING":
                 if self._cur:                      # previous process died without VOICE_ENDED
                     self._close(self._cur, None, "core_restarted", None, {})

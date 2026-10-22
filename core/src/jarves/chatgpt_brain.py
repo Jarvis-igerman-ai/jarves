@@ -245,7 +245,14 @@ class ChatGPTBrain:
         raise BrainUnavailable("CHATGPT_UNAVAILABLE", "ChatGPT plan service is temporarily unavailable", "try again later")
 
     # ------------------------------------------------------------------ conversation
-    async def reply(self, text: str) -> str:
+    async def seed_history(self, turns: list[tuple[str, str]]) -> None:
+        """Start from an earlier conversation ((role, text) pairs): /resume in the terminal chat."""
+        self.history = [{"role": r, "content": t} for r, t in turns if r in ("user", "assistant")][-MAX_HISTORY_ITEMS:]
+        while self.history and self.history[0].get("role") != "user":
+            self.history.pop(0)
+
+    async def reply(self, text: str, on_delta=None) -> str:
+        """on_delta is accepted for the terminal chat; this route returns the finished text (not streamed)."""
         ok, code, action = self.available()
         if not ok:
             raise BrainUnavailable(code, action, action)

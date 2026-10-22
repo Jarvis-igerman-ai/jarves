@@ -54,6 +54,13 @@ from typing import Any, Awaitable, Callable
 from . import approval_keys as akeys
 from . import logs
 
+# The terminal text chat turn that is asking (chat_service.py sets it for the turn's task and the tasks it starts):
+# {"client": id, "silent": bool}. None for everything else. A chat turn never uses the voice channel (a spoken
+# approval is not applicable in text mode); a silent one never lights the face either. Popup / tray / dashboard
+# stay, and the terminal itself is one more place to answer: the first answer wins.
+import contextvars as _cv
+CHAT_TURN: "_cv.ContextVar[dict | None]" = _cv.ContextVar("jarves_chat_turn", default=None)
+
 DEFAULT_TIMEOUT_S = 60.0
 MAX_TIMEOUT_S = 600.0
 RATE_LIMIT = (6, 60.0)           # at most 6 NEW requests per 60 s; more are denied without asking

@@ -327,6 +327,36 @@ def _background_spawn(home: Path, show: bool) -> None:
         subprocess.Popen(cmd, creationflags=flags, **kw)
 
 
+def ensure_core(home: Path, cfg, wait: float = 60.0) -> bool:
+    """The Core answers on the local link, starting it in the background (like `jarvis start`) when it does not."""
+    import time as _time
+    if _ws_call(home, cfg.link.port, {"type": "status.request", "payload": {}}, "status", timeout=2) is not None:
+        return True
+    print("Starting JARVES in the background...", file=sys.stderr)
+    _background_spawn(home, False)
+    deadline = _time.monotonic() + wait
+    while _time.monotonic() < deadline:
+        _time.sleep(0.5)
+        if _ws_call(home, cfg.link.port, {"type": "status.request", "payload": {}}, "status", timeout=2) is not None:
+            return True
+    return False
+
+
+def cmd_chat(a, cfg, home) -> int:
+    """jarvis chat / jarvis text: silent terminal text chat with the running Core (no microphone, no speech)."""
+    from . import chat_cli
+    if not ensure_core(home, cfg, wait=a.wait):
+        print(f"JARVES did not answer within {a.wait} s. See: jarvis logs -n 80", file=sys.stderr)
+        return 1
+    try:
+        return asyncio.run(chat_cli.run_chat(home, cfg.link.port, silent=a.silent, verbose=a.verbose))
+    except KeyboardInterrupt:
+        return 0
+    except OSError:
+        print("Could not connect to the Core on the local link. See: jarvis status", file=sys.stderr)
+        return 1
+
+
 def cmd_start(a, cfg, home) -> int:
     """jarvis start [--show]: JARVES in the background (tray icon, "Hey Jarvis"), returning the terminal at once."""
     import time as _time
@@ -1662,6 +1692,12 @@ def main(argv: list[str] | None = None) -> int:
     k.add_argument("--remove", action="store_true")
     k.add_argument("--show-path", action="store_true")
     k.add_argument("--admin", action="store_true", help="the optional read-only Admin key (real monthly API bill)")
+    ch = sub.add_parser("chat", aliases=["text"], help="silent text chat in this terminal with the running JARVES "
+                        "(no microphone, no speech; /help inside; starts the Core if needed)")
+    ch.add_argument("--silent", action="store_true", help="never speak, chime or light the face in this session "
+                    "(automatic during quiet hours)")
+    ch.add_argument("--verbose", "-v", action="store_true", help="show codes and details on tool and approval lines")
+    ch.add_argument("--wait", type=float, default=60.0, help="seconds to wait for the Core to start")
     q = sub.add_parser("ask", help="ask one question (brain + Skills, no Godot)")
     ex = sub.add_parser("execute", help="run a text request with JARVES stopped; Google/memory/tools, terminal confirmations")
     ex.add_argument("text", nargs="+", help='request, e.g. "add a calendar event tomorrow at 10"')
@@ -1743,7 +1779,7 @@ def main(argv: list[str] | None = None) -> int:
         return 2
     return {"run": cmd_run, "stop": cmd_stop, "status": cmd_status, "diag": cmd_diag, "memory": cmd_memory, "music": cmd_music,
             "contacts": cmd_personal, "calendar": cmd_personal, "mail": cmd_personal,
-            "execute": cmd_execute,
+            "execute": cmd_execute, "chat": cmd_chat, "text": cmd_chat,
             "ask": cmd_ask, "say": cmd_say, "chatgpt": cmd_chatgpt, "setup": cmd_setup, "logs": cmd_logs, "key": cmd_key,
             "wake": cmd_wake, "doctor": cmd_doctor, "cost": cmd_cost, "dashboard": cmd_dashboard,
             "diagnose": cmd_diagnose, "features": cmd_features, "help": cmd_help, "google": cmd_google,
