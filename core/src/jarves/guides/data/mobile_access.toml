@@ -54,3 +54,9 @@ he = "כפתור הדיבור לא פעיל"
 en = "The talk button is disabled"
 fix_he = "דיבור דורש חיבור מאובטח. במחשב הריצו jarvis dashboard --mobile --tls-selfsigned ואשרו את אזהרת התעודה בטלפון פעם אחת."
 fix_en = "Talking needs a secure connection. On the computer run jarvis dashboard --mobile --tls-selfsigned and accept the certificate warning on the phone once."
+
+[[problems]]
+he = "הטלפון התנתק ואז חזר: האם הודעות יישלחו פעמיים?"
+en = "The phone dropped and came back: will messages be sent twice?"
+fix_he = "לא. לכל הודעה, תשובת אישור ופעולת יעד יש מזהה; המחשב מבצע אותם פעם אחת וזוכר את התשובה גם אחרי הפעלה מחדש. הודעה שלא נשלחה מסומנת בטלפון ונשלחת מחדש אוטומטית רק בתוך שתי דקות. רשימת היעדים והשהיית אותות דורשות להרשות לטלפון \"משימות\" בעמוד טלפון."
+fix_en = "No. Every message, approval answer and goal action carries an id; the computer runs it once and remembers the answer, also after a restart. A message that was not sent is marked on the phone and re-sent automatically only within two minutes. The goals list and snoozing signals need the \"tasks\" permission for the phone on the Phone page."

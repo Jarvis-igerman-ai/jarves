@@ -14,7 +14,11 @@
       voice_ready: "Press and hold the button, speak, then release.", voice_nomic: "Microphone permission was denied or is unavailable.",
       heard: "You said", nothing: "Nothing is waiting for approval.", pc_only: "Answer on the computer.", approve: "Approve", deny: "Deny",
       typed_pc: "Needs the code shown on the computer.", sec: "s", core: "Core", tls: "Secure connection", yes: "yes", no: "no (text only)",
-      busy: "The previous message is still being answered. Wait a moment.", phone_ap_on: "Phone approvals are on.", phone_ap_off: "Phone approvals are off: approvals are answered on the computer.", sending: "Sending…" },
+      busy: "The previous message is still being answered. Wait a moment.", phone_ap_on: "Phone approvals are on.", phone_ap_off: "Phone approvals are off: approvals are answered on the computer.", sending: "Sending…",
+      banner: "The computer is unreachable. Messages you type are kept here, marked not sent, and are not sent silently later.",
+      not_sent: "Not sent", waiting: "Waiting for the connection…", send_again: "Send again", stale: "Waited too long while offline. Send it again if you still want it.",
+      note: "Note", goals: "Goals", pause: "Pause", resume: "Resume", drop: "Drop", snooze: "Snooze notes 1 h", stop_notes: "Stop notes",
+      sig_snoozed: "Notes snoozed for one hour.", sig_stopped: "Notes stopped. Turn them on again on the computer.", from_pc: "computer", no_goals: "No active goals." },
     he: { pair_title: "צימוד הטלפון", pair_help: "במחשב פתחו את לוח הבקרה של JARVES, עברו אל טלפון ולחצו על צימוד טלפון. סרקו את קוד ה-QR או הקלידו כאן את הקוד בן 8 הספרות.",
       code: "קוד צימוד", name: "שם לטלפון", pair: "לצמד", pair_net: "עובד ברשת הביתית בלבד. שום דבר כאן לא נגיש מהאינטרנט.",
       tab_home: "בית", tab_chat: "שיחה", tab_voice: "קול", tab_approvals: "אישורים", tab_health: "תקינות ומהירות", send: "שליחה", type_here: "כתבו הודעה",
@@ -25,7 +29,11 @@
       voice_ready: "לחצו והחזיקו את הכפתור, דברו ושחררו.", voice_nomic: "הרשאת המיקרופון נדחתה או לא זמינה.",
       heard: "אמרתם", nothing: "שום דבר לא ממתין לאישור.", pc_only: "עונים במחשב.", approve: "אישור", deny: "דחייה",
       typed_pc: "דורש את הקוד שמוצג במחשב.", sec: "ש׳", core: "ליבה", tls: "חיבור מאובטח", yes: "כן", no: "לא (טקסט בלבד)",
-      busy: "ההודעה הקודמת עדיין בטיפול. המתינו רגע.", phone_ap_on: "אישורים מהטלפון פעילים.", phone_ap_off: "אישורים מהטלפון כבויים: עונים על אישורים במחשב.", sending: "שולח…" },
+      busy: "ההודעה הקודמת עדיין בטיפול. המתינו רגע.", phone_ap_on: "אישורים מהטלפון פעילים.", phone_ap_off: "אישורים מהטלפון כבויים: עונים על אישורים במחשב.", sending: "שולח…",
+      banner: "המחשב לא זמין. הודעות שתכתבו נשמרות כאן, מסומנות \"לא נשלחה\", ולא נשלחות בשקט בהמשך.",
+      not_sent: "לא נשלחה", waiting: "ממתין לחיבור…", send_again: "לשלוח שוב", stale: "ההודעה חיכתה יותר מדי זמן בלי חיבור. שלחו שוב אם עדיין רוצים.",
+      note: "הודעה", goals: "יעדים", pause: "השהיה", resume: "המשך", drop: "ויתור", snooze: "השתקת הודעות לשעה", stop_notes: "עצירת הודעות",
+      sig_snoozed: "ההודעות הושתקו לשעה.", sig_stopped: "ההודעות נעצרו. מדליקים שוב במחשב.", from_pc: "מחשב", no_goals: "אין יעדים פעילים." },
   };
   const $ = (id) => document.getElementById(id);
   let lang = "en";
@@ -41,7 +49,11 @@
   let token = ""; try { token = localStorage.getItem(KEY) || ""; } catch (e) { /* storage blocked */ }
   let me = null, connected = true, timer = 0;
 
-  function setConn(ok) { connected = ok; const c = $("conn"); c.textContent = ok ? t("online") : t("offline"); c.className = "pill " + (ok ? "ok" : "bad"); }
+  function setConn(ok) {
+    const was = connected; connected = ok; const c = $("conn"); c.textContent = ok ? t("online") : t("offline"); c.className = "pill " + (ok ? "ok" : "bad");
+    const b = $("banner"); b.hidden = ok || !token; b.textContent = ok ? "" : t("banner");
+    if (ok && !was) syncNow();                      // back online: catch up with the one conversation on the PC
+  }
 
   async function api(path, opts = {}) {
     const headers = { "X-Jarves": "1", ...(opts.headers || {}) };
@@ -157,8 +169,39 @@
   ["pointerup", "pointercancel", "pointerleave"].forEach((n) => ptt.addEventListener(n, () => stopRec()));
 
   // ---- approvals + status polling
+  function bubble(text, cls) { const d = document.createElement("div"); d.className = "msg " + (cls || ""); d.textContent = text; $("noteLog").appendChild(d); return d; }
+  // ---- sync: the PC holds the one conversation; this phone only reads it and acknowledges notes
+  let seq = 0; const mine = new Set(), shown = new Set();
+  async function syncNow() {
+    if (!token || document.hidden) return;
+    let s; try { s = await api("/api/m/sync?since=" + seq); } catch (e) { return; }
+    if (s.head < seq) seq = 0;                                  // the PC was restarted with a fresh journal
+    const first = seq === 0;
+    (s.turns || []).forEach((x) => { seq = Math.max(seq, x.seq); });          // the chat itself is drawn by the shared chat view
+    (s.notices || []).forEach(async (n) => {
+      if (!shown.has(n.id)) { shown.add(n.id); const b = bubble(t("note") + ": " + n.text, "note"); b.setAttribute("role", "status"); }
+      try { await post("/api/m/notices/" + n.id + "/ack"); } catch (e) { /* shown again next sync, never twice on screen */ }
+    });
+    renderGoals(s);
+  }
+  function renderGoals(s) {
+    const on = !!(s.signals || (me && me.scopes && me.scopes.includes("tasks")));
+    $("goalsHead").hidden = $("goalList").hidden = $("sigBox").hidden = !on; if (!on) return;
+    const ul = $("goalList"); ul.replaceChildren();
+    if (!(s.goals || []).length) li(ul, t("no_goals"));
+    (s.goals || []).forEach((g) => {
+      const row = li(ul, `${g.title} (${g.percent == null ? 0 : g.percent}%)`);
+      const act = (label, status) => { const b = document.createElement("button"); b.type = "button"; b.textContent = label;
+        b.addEventListener("click", async () => { b.disabled = true; try { await post("/api/m/goals/op", { op: "status", goal: g.id, status, id: newId() }); } catch (e) { row.firstChild.textContent = e.message; } syncNow(); }); row.appendChild(b); };
+      if (g.status === "paused") act(t("resume"), "active"); else act(t("pause"), "paused");
+      act(t("drop"), "dropped");
+    });
+  }
+  const sig = (op, key) => async () => { try { await post("/api/m/signals", { op, minutes: 60, id: newId() }); $("sigNote").textContent = t(key); } catch (e) { $("sigNote").textContent = e.message; } };
+  $("sigSnooze").addEventListener("click", sig("snooze", "sig_snoozed")); $("sigStop").addEventListener("click", sig("stop", "sig_stopped"));
   async function tick() {
     if (!token || document.hidden || !me) return;
+    syncNow();
     try {
       if (me.pages.includes("approvals")) {
         const a = await api("/api/m/approvals"); const n = a.pending.length, badge = $("apprCount");
@@ -178,7 +221,7 @@
       const row = li(ul, `${p.title} (${p.seconds_left}${t("sec")})`);
       if (!a.phone_approvals) return;
       const mk = (label, ok, primary) => { const b = document.createElement("button"); b.type = "button"; b.textContent = label; if (primary) b.className = "primary";
-        b.addEventListener("click", async () => { b.disabled = true; try { await post("/api/m/approvals/" + p.id, { approved: ok }); } catch (e) { row.firstChild.textContent = e.message; } tick(); }); row.appendChild(b); };
+        b.addEventListener("click", async () => { b.disabled = true; try { await post("/api/m/approvals/" + p.id, { approved: ok, id: "appr-" + p.id + (ok ? "-yes" : "-no") }); } catch (e) { row.firstChild.textContent = e.message; } tick(); }); row.appendChild(b); };
       if (p.typed) { const s = document.createElement("span"); s.className = "muted"; s.textContent = t("typed_pc"); row.appendChild(s); mk(t("deny"), false, false); }
       else { mk(t("approve"), true, true); mk(t("deny"), false, false); }
     });

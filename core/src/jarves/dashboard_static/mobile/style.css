@@ -28,3 +28,7 @@ button.ghost { border:none; min-height:44px; min-width:44px; padding:6px 10px; }
 .list li .grow { flex:1; min-width:140px; }
 .muted { color:var(--muted); font-size:.9rem; }
 .badge { background:#c4263a; color:#fff; border-radius:99px; padding:0 7px; font-size:.75rem; }
+.banner { background:var(--bad); color:#fff; padding:10px 14px; text-align:center; font-weight:600; }
+.msg.note { background:transparent; border:1px dashed var(--accent); }
+.msg.unsent { border:1px dashed var(--bad); }
+.msg .small { display:block; font-size:.8rem; opacity:.85; margin-top:4px; }

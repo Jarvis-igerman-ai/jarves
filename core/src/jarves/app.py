@@ -9,7 +9,7 @@ import json
 from contextlib import aclosing
 from pathlib import Path
 
-from . import __version__, logs, store
+from . import __version__, calm, logs, store
 from .brain import AgentBrain, Brain, billing_routes
 from .budget import Budget, BudgetExceeded
 from .config import Config, api_billing_allowed, openai_key_present
@@ -752,6 +752,7 @@ class Core:
                           bind_tailnet_only=mobile.MobileAccess(self.home).settings()["bind_tailnet_only"] if on else False,
                           mobile_bridge=mobile.core_bridge(self, loop) if on else None, chat=self.web_chat)
             d.mobile.gate = lambda: self.features.enabled("mobile_access")
+            d.mobile.quiet = lambda ts: calm.quiet_hours_now(self.ops.db, ts)
             return d.start()
         try:
             self._dashboard = await asyncio.to_thread(make, mob_on)
@@ -912,6 +913,18 @@ class Core:
         self.curator.observe("assistant", reply.text, idle=self.live is None)
         return reply
 
+    def _journal_turn(self, device: str, text: str, answer: str) -> None:
+        """The desktop turn joins the shared conversation (the phone reads it); sensitive text is never stored."""
+        try:
+            ops = getattr(self, "ops", None)
+            if ops is None or SENSITIVE_TEXT.search(text):
+                return
+            ops.cont.add_turn(device, "user", text)
+            ops.cont.add_turn(device, "assistant", answer)
+            ops.cont.beat(device, "desktop", used=True)
+        except Exception:
+            logs.warn("continuity", "JOURNAL_FAILED", "the shared conversation could not be written")
+
     async def handle_utterance(self, text: str, typed: bool) -> None:
         if typed:
             logs.new_cid()
@@ -921,6 +934,7 @@ class Core:
         logs.info("core", "REPLY", "reply sent", source=reply.source, tool=reply.tool, ok=reply.ok, result_code=reply.code,
                   ms=round((time.monotonic() - t0) * 1000), text=reply.text, typed=typed,  # WP-H history: what was asked
                   utterance=f"<{len(text)} chars>" if SENSITIVE_TEXT.search(text) else text)   # codes never logged
+        self._journal_turn("desktop", text, reply.text)
         self.curator.observe("user", text)
         self.curator.observe("assistant", reply.text, idle=self.live is None)   # typed chat: curate when quiet
         await self.link.send_face("assistant.text", {"text": reply.text, "source": reply.source, "ok": reply.ok,
