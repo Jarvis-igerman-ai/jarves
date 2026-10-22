@@ -1,17 +1,27 @@
 name: jarves-package
-# Continuous release (docs/RELEASING.md). After EVERY green `main` (all jarves-checks jobs passed, including the
-# installer build + silent install smoke) this workflow takes the exact installer that run tested - nothing is rebuilt -
-# and
-#   1. builds a signed CANDIDATE (installer + signed manifest) and keeps it as a workflow artifact for 30 days.
-#      Nothing is published.
+# Continuous release (docs/RELEASING.md, docs/CI_PERFORMANCE.md). After EVERY green `main` (all jarves-checks jobs passed)
+# this workflow takes the installer that was already built and smoke-tested for the SAME git tree - on the PR before the
+# merge, or by the main run itself when the tree was new - and NEVER rebuilds it:
+#   0. finds `jarves-installer-<tree>` (core/tools/ci_reuse.py: green jarves-checks run of this repo, not expired),
+#      verifies the SHA256 and the tree, and stamps the metadata (commit, channel) at manifest level; the .exe is untouched;
+#   1. builds a signed CANDIDATE (installer + signed manifest) and keeps it as a workflow artifact for 30 days. Nothing
+#      is published.
 #   2. BETA channel: publishes JARVES X.Y.Z-beta.N to the releases repo with latest-beta.json, ONLY when the repository
-#      variable ENABLE_BETA_PUBLISH is "true" (default: unset = disabled).
+#      variable ENABLE_BETA_PUBLISH is "true" (default: unset = disabled). It uses the candidate's installer: no second build.
 # STABLE is never published here: it is tag-driven (.github/workflows/release.yml) and gated by tools/release_gate.py.
+# Manual: `gh workflow run package.yml -f ref=main` makes a release candidate (and a beta, if enabled) of any commit
+# whose tree has a proven installer.
 on:
   workflow_run:
     workflows: [jarves-checks]
     types: [completed]
     branches: [main]
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: "Commit or branch to make a release candidate of (its tree needs a green jarves-checks installer)"
+        default: main
+        required: false
 permissions: {}
 concurrency:
   group: jarves-package
@@ -19,37 +29,53 @@ concurrency:
 jobs:
   candidate:
     if: >-
-      github.event.workflow_run.conclusion == 'success' &&
-      github.event.workflow_run.event == 'push' &&
-      github.event.workflow_run.head_branch == 'main'
+      github.event_name == 'workflow_dispatch' ||
+      (github.event.workflow_run.conclusion == 'success' &&
+       github.event.workflow_run.event == 'push' &&
+       github.event.workflow_run.head_branch == 'main')
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     permissions:
       contents: read       # check out the tested commit
       actions: read        # read the tested artifact
     env:
-      SHA: ${{ github.event.workflow_run.head_sha }}
+      GH_TOKEN: ${{ github.token }}
+    outputs:
+      sha: ${{ steps.c.outputs.sha }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
         with:
-          ref: ${{ github.event.workflow_run.head_sha }}
-      - name: Download the installer that jarves-checks built and smoke-tested
+          ref: ${{ github.event.workflow_run.head_sha || inputs.ref || 'main' }}
+      - name: Resolve the commit, its tree and the proven installer (no build)
+        id: c
+        run: |
+          set -euo pipefail
+          sha=$(git rev-parse HEAD); tree=$(python3 core/tools/ci_reuse.py tree)
+          python3 core/tools/ci_reuse.py resolve --repo "$GITHUB_REPOSITORY" --tree "$tree" | tee reuse.out || { echo "::error::no green jarves-checks run built an installer for tree $tree (commit $sha). Let the checks finish, or re-run them."; exit 1; }
+          { echo "sha=$sha"; echo "tree=$tree"; grep -E '^(run_id|name)=' reuse.out; } >> "$GITHUB_OUTPUT"
+      - name: Download the installer that jarves-checks built and smoke-tested for this tree
         uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333  # v8.0.2
         with:
-          name: jarves-windows-installer-main
-          run-id: ${{ github.event.workflow_run.id }}
+          name: ${{ steps.c.outputs.name }}
+          run-id: ${{ steps.c.outputs.run_id }}
           github-token: ${{ github.token }}
           path: dist
-      - name: Verify provenance (tested commit, channel main, SHA256)
-        run: python3 packaging/release.py verify --dir dist --commit "$SHA"
+      - name: Verify provenance (tree, SHA256), stamp the commit and channel at manifest level
+        env:
+          SHA: ${{ steps.c.outputs.sha }}
+          TREE: ${{ steps.c.outputs.tree }}
+        run: |
+          python3 packaging/release.py verify --dir dist --commit "$SHA" --tree "$TREE"
+          python3 packaging/release.py stamp --dir dist --commit "$SHA" --tree "$TREE"
       - name: Signed candidate (installer + manifest; published nowhere)
         env:
+          SHA: ${{ steps.c.outputs.sha }}
           JARVES_UPDATE_SIGNING_KEY: ${{ secrets.JARVES_UPDATE_SIGNING_KEY }}
           RELEASES_REPO: ${{ vars.RELEASES_REPO }}
         run: python3 packaging/release.py candidate --dir dist --commit "$SHA" --out candidate
       - uses: actions/upload-artifact@v7
         with:
-          name: jarves-release-candidate-${{ github.event.workflow_run.head_sha }}
+          name: jarves-release-candidate-${{ steps.c.outputs.sha }}
           path: candidate
           retention-days: 30
           compression-level: 0
@@ -57,6 +83,7 @@ jobs:
       - name: What the beta step would do (dry run; no network, no secrets)
         run: python3 packaging/release.py beta-publish --dir dist --dry-run
       - name: Keep the verified installer for the beta job
+        if: ${{ vars.ENABLE_BETA_PUBLISH == 'true' }}
         uses: actions/upload-artifact@v7
         with:
           name: beta-input
@@ -64,7 +91,8 @@ jobs:
           retention-days: 1
           compression-level: 0
   beta:
-    # DISABLED by default: runs only when the repository variable ENABLE_BETA_PUBLISH is "true".
+    # DISABLED by default: runs only when the repository variable ENABLE_BETA_PUBLISH is "true". Publishes the installer
+    # the candidate job verified (already built and smoke-tested on the PR); it never builds.
     needs: candidate
     if: ${{ vars.ENABLE_BETA_PUBLISH == 'true' }}
     runs-on: ubuntu-24.04
@@ -77,7 +105,7 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
         with:
-          ref: ${{ github.event.workflow_run.head_sha }}
+          ref: ${{ needs.candidate.outputs.sha }}
       - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333  # v8.0.2
         with:
           name: beta-input

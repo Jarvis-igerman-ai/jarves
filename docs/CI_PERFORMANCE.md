@@ -1,0 +1,149 @@
+# CI performance and the fast release path
+
+Goal: the next release is cheap. Owner stretch goal: **merge to published installer in about 5 minutes**, and a PR green in
+under 10 minutes. This page has the measurements, the design, what is implemented, and what honestly blocks 5 minutes.
+
+## Before / after
+
+Measured = taken from `gh api .../actions/runs/<id>/jobs` for the runs named. Estimated = derived from measured parts; the
+first CI run after the 4.0.0 freeze replaces every "est." with a measurement (record it in `docs/HANDOFF.md`).
+
+| Step | Before (4.0.0 main, run 39676015294, measured) | PR #44 sharding (run 39669040218, measured) | This change |
+| --- | --- | --- | --- |
+| Windows Core tests | 1726 s serial (28.8 min) | 366 / 437 / 637 s shards, +105 s and +235 s runner queue (wall 14.7 min) | 3 shards balanced by measured seconds, slowest file first, xdist x2 in each: est. 4-6 min |
+| Linux Core tests | 851 s (14.2 min) | 771 s | xdist x3, est. 5-6 min |
+| Installer build + smoke | 451 s, started only AFTER the tests | same, still after the tests | 400-450 s (measured on 3 runs), **in parallel with the tests** |
+| PR wall clock (tests + installer) | 36.3 min (1726 + 451 s) | about 22 min (14.7 + 7.5) | **est. 8-9 min** (installer is the long pole) |
+| Push to `main` after the merge | 37.1 min (21:06:15 to 21:43:24): repeats tests and installer | same | **about 30 s**: finds the PR proof, skips everything |
+| `jarves-package` (candidate + signing) | 39 s (job) + trigger latency | same | est. 60-90 s (download of the 198 MB installer is the new cost, it was already local to the run before) |
+| **Merge to a published candidate/beta** | **about 38 min** | about 38 min | **est. 2-3 min** |
+| Duplicate runs per commit | a merged commit ran the full matrix twice (PR, then main) and superseded main runs ran to cancellation | same | one proof per tree; main run is a 30 s lookup when the tree matches |
+
+Queue time on the hosted runners was 1-4 s in every measured run except when 3 shards plus the other Windows jobs competed
+(105 s and 235 s). Moving the installer next to the tests adds one more concurrent Windows job; the repository is public, so
+the 20-concurrent-job limit is not close (a PR now uses 7 Windows jobs at peak).
+
+## The design
+
+```
+PR head (pull_request, merge ref)                      merge (automerge)              main push
+ changes (20 s)                                                                        changes (30 s)
+  |-- core: 3 Windows shards + Linux (xdist, planned)  \                                 tree == a proven PR tree?
+  |-- browser, e2e, perf, bridge, cad, blender, godot  >  ci-ok (single required check)    yes: every job skipped
+  '-- installer: build + silent-install smoke ---------/                                 no : full matrix (fallback)
+        uploads jarves-installer-<tree>                                                  |
+                                                                                         v
+                                                              jarves-package (workflow_run, or `gh workflow run package.yml`)
+                                                               resolve artifact by tree -> verify SHA256 + tree -> stamp
+                                                               -> signed candidate -> beta (if enabled, off by default)
+```
+
+1. **Parallel critical path.** `installer` needs only `changes` (checkout, tool cache). The tests and the installer run
+   side by side; publishing (`jarves-package`) starts only from a `workflow_run` whose conclusion is `success`, i.e. after
+   **both** are green (a green installer next to red tests never publishes, because `resolve` also requires the producing run
+   to be green).
+2. **Content-addressed proof.** `core/tools/ci_reuse.py tree` computes the *tree*: a sha1 over `git ls-tree -r` of the
+   checkout without documentation (`docs/`, root `*.md`, `LICENSE`, `.gitignore`). The installer artifact is named
+   `jarves-installer-<tree>`. On a PR run the checkout is the merge of the PR head and its base; when automerge merges it
+   (`--merge`, only when the PR is not behind main) the merge commit has the **same tree**. The `main` push therefore finds
+   the proof (`resolve`: not expired, from a *green* `jarves-checks` run of **this** repository, not a fork) and skips all
+   jobs. A docs-only change merges with the same tree as before and reuses the previous proof, too.
+   Fallbacks, all safe: a different tree (someone pushed to main in between, a direct push, a release tag, a manual run) runs
+   the full matrix including the installer; an expired artifact (PR 7 days, main 30 days) does the same.
+3. **Version stamping without a rebuild.** Before: the installer filename and `build-info.json` carry
+   `X.Y.Z.<run number>` baked in at build time, which forced a rebuild per commit. Now: the version is the run number of the
+   build that was *tested* and is kept as is. This stays strictly increasing because automerge only merges a PR after a run
+   on top of the current `main` (a PR that falls behind is updated and gets a new, higher run number before it merges). The
+   metadata that must describe the *published* commit is stamped at **manifest level** by `packaging/release.py stamp`:
+   `commit` = the commit on main, `built_from_commit` = the commit the bytes were built from, `channel` = main, `tree`. The
+   `.exe` is never touched, so its SHA256 (checked by `verify`) is the one the smoke test ran. Nothing signs the exe itself
+   today (the manifest is the Ed25519-signed object), so no re-signing of the binary is needed.
+4. **Path filters** (`core/tools/ci_plan.py`, unit-tested): docs, `CLAUDE.md`, root `*.md` run nothing; guides-only
+   (`core/src/jarves/guides/data/*.toml`) run only the Linux Core shard (the Windows shard jobs start, see the gate step, and
+   finish in seconds so required check names still report); the Go bridge only for `bridge/`, `packaging/bridge_pin.json`
+   or its build script; CAD for `cad/`; Blender for `blender/`, `cad/`, `godot/`; Godot for `godot/`, `blender/`; the
+   installer, perf and e2e for `core/src`, packaging, Godot and the dependency lock. Changing the workflow file, the CI tools
+   or `tests/conftest.py` runs everything. Main pushes, tags and manual runs always run everything unless the tree is proven.
+5. **Test sharding by measured duration.** `ci_plan.py` plans 3 Windows shards and 1 Linux shard from
+   `durations.json` (seconds per test file), falling back to test counts for unmeasured files. The plan is computed once
+   in `changes` and handed to every shard (`--shard-files`, slowest file first), so shards cannot disagree. After every full
+   run on `main` the `durations` job merges the junit files of all shards into a cache entry (`jarves-durations-<run>`) that
+   the next `changes` job restores: **rebalancing is automatic, no commit, no token**. Seed or refresh by hand:
+   `python core/tools/ci_plan.py durations-merge --junit <dir of junit xml> --into core/tests/durations.json`.
+   Inside a shard, `pytest-xdist` (pinned `pytest-xdist==3.8.0` through `uv run --with`, not in the lock) runs files in
+   parallel workers with `--dist loadfile`: one file never splits across workers, and the suite already uses temp homes and
+   `free_port()` per test. Workers: 3 on Linux, 2 on Windows; repository variable `CI_XDIST_WORKERS` overrides, `1` turns it off.
+   This replaces the old "serial on purpose" rule; the safety net is item 7.
+6. **Caching.** uv (lock hash), the Go module and build cache (`setup-go`), Playwright browsers (Linux), the Godot and Inno
+   Setup downloads (`jarves-test-tools`), the installer build tools (Python, Godot templates, Inno Setup:
+   `jarves-build-tools`), FreeCAD, Blender, the Godot zip, and the measured durations. pip wheels are covered by the uv cache.
+7. **Flakes.** The shard step re-runs **only the failed test files, once**, and only when every failure matches a known
+   transient pattern (WinError 10048/10053/10054/10061, address in use, connection reset/refused, "condition not reached",
+   timeouts) and there are at most 6 failing files (`core/tools/ci_flake.py`). A real assertion failure is never retried.
+   Every retry that turned green is written to `flake-report.json` in the `junit-<n>` artifact, so flakes stay visible. The
+   zero-skips check still reads the whole output.
+8. **No duplicate runs.** `pull_request` runs the checks; `push` is limited to `main` and tags, so a branch push never
+   starts a second run for the same commit. Superseded runs of the same PR or ref are cancelled (`concurrency` group is the
+   PR number). Drafts are not special-cased; automerge skips them. `ci-ok` is the one stable required check.
+9. **Dependabot.** `dependabot-automerge.yml` labels patch and minor updates `automerge`
+   (`core/tools/dependabot_gate.py`); major updates and anything it cannot parse get a comment and wait for a human. The queue
+   then merges only on a green `jarves-checks`. Kill switch: repository variable `DEPENDABOT_AUTOMERGE=false`.
+
+## Merge to published in about 5 minutes: honest minimum
+
+After the merge the only work is: automerge push event, `changes` (checkout + two API calls, about 25 s), the
+`workflow_run` hand-off (about 5-15 s), then `jarves-package`: checkout, resolve, **download of the installer (about 198 MB)**,
+`sha256` verify, stamp, sign, upload the candidate artifact (another 198 MB, uncompressed on purpose), and for a beta the
+upload to the releases repository. Estimated 2-3 minutes in total, so **5 minutes from merge to a published beta is
+reachable**; it is not measured yet. Biggest items, in order: the two 198 MB transfers (about 20-40 s each, depends on the
+runner region), the candidate artifact upload (can be skipped when only publishing; the beta job downloads `beta-input`
+instead), and Windows/Ubuntu runner start (1-4 s measured when idle).
+
+What blocks "5 minutes including the tests" is not the merge side but the **pre-merge** side: the PR cannot be green before
+the installer is built and smoke-tested, about 7-7.5 minutes (Godot export, embedded Python, Inno LZMA compression, silent
+install/upgrade/uninstall smoke, upgrade matrix). The honest minimum for a PR is therefore about 8 minutes, not 5. Ways to go
+lower, none done yet: cache the staged payload per content hash of `core/`, `godot/` and `packaging/` so most PRs only
+re-compress; use Inno `lzma2/fast` for CI builds only (bigger exe, faster build, but then the proven exe is not the
+published exe, which breaks the "same bytes" rule, so only for the smoke); split the smoke into the install path (blocking)
+and the upgrade matrix (parallel job). Each of these needs measuring on a runner.
+
+Other limits: the artifact must exist (PR 7 days, main 30 days); the PR has to be tested on top of the current main (a merge
+behind main re-runs the PR checks first, about 8 minutes); a runner outage or a contended Windows pool can add minutes.
+
+## Required status checks (branch protection) and job names
+
+Recommended: require only **`CI result (single required check)`** (job `ci-ok`, green when every other job passed or was
+legitimately skipped, red on failure or cancellation). The per-job names below are stable and still valid to require:
+
+| Job id | Name |
+| --- | --- |
+| changes | Classify the change (docs-only skips heavy jobs; reuse of the PR proof) |
+| core | Python Core tests (ubuntu-24.04 shard 1/1), (windows-2025 shard 1/3), (windows-2025 shard 2/3), (windows-2025 shard 3/3) |
+| browser | Real-browser tests (ubuntu-24.04), Real-browser tests (windows-2025) |
+| installer | Windows installer (build + silent install smoke) |
+| whatsapp-bridge | WhatsApp bridge (Go vet/test + reproducible build) |
+| perf | Performance gate (Windows) |
+| e2e | Core-Godot E2E (real processes) |
+| cad, blender, godot | cad, blender, godot |
+| ci-ok | CI result (single required check) |
+
+A skipped job reports as passed. Do not require `Update the shard timing data` (job `durations`; main and manual runs only).
+Because a merge commit whose tree is proven skips every job, the push run on `main` is green in about 30 s.
+
+## Zero skips
+
+Unchanged: the sessionfinish hook in `tests/conftest.py` and the grep in each pytest step fail the run on any skipped or
+xfailed test. Filtering is by *deselection* (file plan, OS markers), never by skipping.
+
+## Tools
+
+| Tool | Purpose |
+| --- | --- |
+| `core/tools/ci_plan.py` | classify a diff, plan shards from measured durations, merge junit timings |
+| `core/tools/ci_flake.py` | pick the known-flake failed files to retry, write the flake report |
+| `core/tools/ci_reuse.py` | content tree, find the proven installer artifact |
+| `core/tools/release_status.py` | one screen: main CI, installer artifact, candidate, beta/stable, blockers |
+| `core/tools/dependabot_gate.py` | patch/minor vs major |
+| `packaging/release.py verify / stamp / candidate` | provenance by commit or tree, manifest-level stamping |
+
+Unit tests: `core/tests/test_ci_speed_tools.py` (offline, no skips).

@@ -54,13 +54,42 @@ Installed copies run `jarvis update --rollback`. Fix forward with a higher versi
 
 Dry runs of the publishers: `python packaging/release.py beta-publish --dir dist --dry-run`, same for `public-publish`.
 
+## What is the state of the release? `release_status.py`
+
+```
+python core/tools/release_status.py            # needs `gh auth login`; --json for scripts; exit 1 = something blocks
+```
+
+Prints, for the head of `main`: the latest `jarves-checks` run, the installer artifact of the head tree (and which run
+proved it), the `jarves-package` run and the signed candidate artifact, the newest beta and stable releases, whether beta
+publishing is on, the stable gate, and a **BLOCKING** list (main CI red or running, no proven installer, no candidate, ...).
+
+## Release candidate on demand
+
+`gh workflow run package.yml -f ref=main` (or any commit or branch) makes a signed candidate, and a beta when
+`ENABLE_BETA_PUBLISH` is `true`, from the installer that CI already built and smoke-tested for that commit's tree. It never
+builds; if no green run built that tree it fails with the reason. Stable still needs the tag and the manual sign-off.
+
+## How the installer gets from the PR to the release (no second build)
+
+The installer is built and smoke-tested **on the PR**, in parallel with the tests, and uploaded as
+`jarves-installer-<tree>` (tree = git tree without documentation). When the merge commit has the same tree, `main` runs no
+tests and builds nothing; `jarves-package` (beta/candidate) and `release.yml` (stable, tag) download that artifact, check
+the SHA256 and the tree (`release.py verify --tree`), and stamp the commit and channel into `build-info.json` and the signed
+manifest (`release.py stamp`). The `.exe` bytes and its version (`X.Y.Z.<run number of the tested build>`) are unchanged.
+A different tree falls back to the full matrix on `main`. Details, numbers and limits: `docs/CI_PERFORMANCE.md`.
+
 ## CI shape
 
-Windows Python tests run in 3 shards (`tests/conftest.py --shard I/N`, balanced by test count), Linux in one job; the
-real-browser files (`test_browser.py`, `test_canary.py`, `test_dashboard_a11y.py`) are their own job with one retry. No test
-may be skipped. Superseded runs of the same ref are cancelled; uv, Go modules, Playwright and tool downloads are cached;
-docs-only changes skip the heavy jobs. CodeQL (Python) runs weekly and on core changes; Dependabot (pip, gomod,
-github-actions) weekly; see `SECURITY.md`.
+Windows Python tests run in 3 shards planned from measured per-file durations (`core/tools/ci_plan.py`, rebalanced after
+each full run on main), Linux in one job; inside a shard pytest-xdist runs files in parallel (`--dist loadfile`). The
+real-browser files (`test_browser.py`, `test_canary.py`, `test_dashboard_a11y.py`) are their own job with one retry. Known
+socket/load flakes re-run only the failed files once and are listed in `flake-report.json`. No test may be skipped.
+Superseded runs of the same PR or ref are cancelled; branch pushes have no second run; uv, Go modules, Playwright and tool
+downloads are cached; docs-only changes skip all jobs and guides-only changes run the Linux shard only. CodeQL (Python) runs
+weekly and on core changes; Dependabot (pip, gomod, github-actions) weekly, patch and minor updates auto-merge when green
+(`dependabot-automerge.yml`, kill switch `DEPENDABOT_AUTOMERGE=false`, majors never); see `SECURITY.md`.
 
-Required status check names changed with the sharding: `Python Core tests (windows-2025 shard 1/3)` ... `3/3`,
-`Python Core tests (ubuntu-24.04 shard 1/1)`, `Real-browser tests (...)`.
+Branch protection: require **`CI result (single required check)`**. The individual names remain valid: `Python Core tests
+(windows-2025 shard 1/3)` ... `3/3`, `Python Core tests (ubuntu-24.04 shard 1/1)`, `Real-browser tests (ubuntu-24.04)`,
+`Real-browser tests (windows-2025)`, `Windows installer (build + silent install smoke)`. Full list: `docs/CI_PERFORMANCE.md`.

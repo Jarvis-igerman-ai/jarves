@@ -7,12 +7,12 @@ uv or Godot). About 15 minutes. / רשימה קצרה לבדיקת המתקין,
 
 - **After the merge to `main`:** GitHub → *Releases* → the newest `JARVES <version> (Windows)` →
   `JARVES-Setup-<version>.exe` (+ `.sha256`). Only the newest 3 builds are kept.
-- **Before that:** GitHub → *Actions* → the run → *Artifacts* → `jarves-windows-installer-main` (zip; contains
+- **Before that:** GitHub → *Actions* → the run → *Artifacts* → `jarves-installer-<tree>` (zip; contains
   the same files). The repository is private, so you must be signed in to GitHub. A test build that passed all
   CI checks: https://github.com/igalgerman/JARVIS/actions/runs/39290421823 (artifact kept until 2 Nov 2026).
 
 - **אחרי המיזוג ל-main:** בגיטהאב → Releases → הגרסה העליונה → `JARVES-Setup-<version>.exe`.
-- **לפני כן:** Actions → הריצה → Artifacts → `jarves-windows-installer-main`.
+- **לפני כן:** Actions → הריצה → Artifacts → `jarves-installer-<tree>`.
 
 Check the file (optional but recommended) / בדיקת קובץ (מומלץ):
 ```powershell

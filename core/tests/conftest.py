@@ -29,6 +29,9 @@ BROWSER_FILES = ("test_browser.py", "test_canary.py", "test_dashboard_a11y.py")
 
 def pytest_addoption(parser):
     parser.addoption("--shard", default="1/1", help="I/N: run only the I-th of N balanced shards of the files")
+    parser.addoption("--shard-files", default="", help="comma list of test file names: run exactly these files "
+                     "(the CI plan from core/tools/ci_plan.py, balanced by measured durations); overrides --shard")
+    parser.addoption("--durations-file", default="", help="JSON {file: seconds}: run the slowest files first")
     parser.addoption("--browser", default="include", choices=["include", "exclude", "only"],
                      help="real-browser test files (CI runs them as their own job): include, exclude or only")
 
@@ -53,7 +56,16 @@ def pytest_collection_modifyitems(config, items):
             config.hook.pytest_deselected(items=gone)
             items[:] = [i for i in items if i not in gone]
     idx, n = (int(x) for x in config.getoption("--shard").split("/"))
-    if n > 1:
+    listed = [x.strip() for x in config.getoption("--shard-files").split(",") if x.strip()]
+    names = set(listed)
+    if names:
+        out = [i for i in items if os.path.basename(str(i.fspath)) not in names]
+        if out:
+            config.hook.pytest_deselected(items=out)
+            items[:] = [i for i in items if os.path.basename(str(i.fspath)) in names]
+        pos = {name: k for k, name in enumerate(listed)}      # the plan lists the slowest file first: run it first
+        items.sort(key=lambda i: pos[os.path.basename(str(i.fspath))])
+    elif n > 1:
         counts = {}
         for i in items:
             counts[str(i.fspath)] = counts.get(str(i.fspath), 0) + 1
@@ -62,6 +74,17 @@ def pytest_collection_modifyitems(config, items):
         if out:
             config.hook.pytest_deselected(items=out)
             items[:] = [i for i in items if str(i.fspath) in mine]
+    dfile = config.getoption("--durations-file")
+    if dfile and os.path.isfile(dfile) and not names:         # slowest files first: the long pole starts at once, the tail is short
+        try:
+            with open(dfile, encoding="utf-8") as fh:
+                dur = json.load(fh)
+        except ValueError:
+            dur = {}
+        order = {}
+        for i in items:
+            order.setdefault(str(i.fspath), len(order))
+        items.sort(key=lambda i: (-float(dur.get(os.path.basename(str(i.fspath)), 0)), order[str(i.fspath)]))
     keep, drop = [], []
     for item in items:
         wrong = (item.get_closest_marker("windows_only") and sys.platform != "win32") or \

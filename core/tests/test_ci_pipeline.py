@@ -43,9 +43,9 @@ def test_checks_cancel_superseded_runs_and_keep_the_core_timeout():
 def test_docs_only_changes_skip_the_heavy_jobs():
     doc = load("jarves-checks.yml")
     jobs = doc["jobs"]
-    assert "changes" in jobs and "docs/" in steps_text(jobs["changes"])
-    heavy = {"core": "code", "e2e": "code", "installer": "installer", "perf": "perf", "cad": "cad", "blender": "blender",
-             "godot": "godot"}
+    assert "changes" in jobs and "ci_plan.py classify" in steps_text(jobs["changes"])     # rules: core/tools/ci_plan.py
+    heavy = {"core": "code", "browser": "full", "e2e": "e2e", "installer": "installer", "perf": "perf", "cad": "cad",
+             "blender": "blender", "godot": "godot", "whatsapp-bridge": "whatsapp"}
     for jid, out in heavy.items():
         job = jobs[jid]
         assert "changes" in (job["needs"] if isinstance(job["needs"], list) else [job["needs"]]), jid
@@ -79,14 +79,15 @@ def test_failures_upload_redacted_diagnostics_never_raw_logs():
                 assert s["if"] == "failure()" and s["with"]["path"].endswith("diag")
 
 
-def test_core_suite_stays_serial_and_zero_skips_is_enforced():
-    for name in ("jarves-checks.yml", "nightly.yml"):
-        doc = load(name)
-        runs = "\n".join(s.get("run", "") for j in doc["jobs"].values() for s in j.get("steps", []))
-        assert "-n auto" not in runs and "--dist" not in runs and "xdist" not in runs   # serial on purpose (see the M report)
-        assert "--reruns" not in runs                                                   # a flake is a bug, never retried
-        assert "tests were skipped" in runs
-    assert "xdist" not in (ROOT / "core" / "pyproject.toml").read_text(encoding="utf-8")
+def test_core_suite_xdist_is_file_isolated_flake_retry_is_per_file_and_zero_skips_is_enforced():
+    # 4.0.1 policy (supersedes "serial on purpose"): xdist only with --dist loadfile and never "-n auto"; the only retry
+    # is ci_flake.py re-running the FAILED FILES of known transient errors (no pytest-rerunfailures, no whole-job retry).
+    runs = "\n".join(s.get("run", "") for j in load("jarves-checks.yml")["jobs"].values() for s in j.get("steps", []))
+    assert "-n auto" not in runs and "--dist loadfile" in runs and "--reruns" not in runs
+    assert "ci_flake.py failed-files" in runs and "tests were skipped" in runs
+    nightly = "\n".join(s.get("run", "") for j in load("nightly.yml")["jobs"].values() for s in j.get("steps", []))
+    assert "-n auto" not in nightly and "--reruns" not in nightly and "tests were skipped" in nightly
+    assert "xdist" not in (ROOT / "core" / "pyproject.toml").read_text(encoding="utf-8")   # pinned via `uv run --with`
 
 
 def test_nightly_workflow_shape():
@@ -137,7 +138,7 @@ def test_windows_core_tests_run_in_three_shards_and_browser_tests_are_their_own_
     inc = jobs["core"]["strategy"]["matrix"]["include"]
     assert sorted(i["shard"] for i in inc if i["os"] == "windows-2025") == ["1/3", "2/3", "3/3"]
     run = "\n".join(s.get("run", "") for s in jobs["core"]["steps"])
-    assert "--browser exclude --shard ${{ matrix.shard }}" in run and "skipped" in run      # zero-skips check kept
+    assert "--browser exclude --shard-files" in run and "--shard ${{ matrix.shard }}" in run and "skipped" in run
     b = jobs["browser"]
     assert b["needs"] == "changes" and "retry" in steps_text(b) and "--browser only" in steps_text(b)
     assert "skipped" in steps_text(b)

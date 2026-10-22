@@ -98,13 +98,23 @@ def sha256(path: Path) -> str:
     return h.hexdigest()
 
 
-def verify(dist: Path, commit: str) -> dict:
+def verify(dist: Path, commit: str | None = None, tree: str | None = None) -> dict:
+    """Check the installer in `dist`. Either it was built from exactly `commit` on main, or (reuse of the PR's
+    installer, docs/CI_PERFORMANCE.md) it was built from a checkout whose git TREE equals `tree`: the code is
+    byte-identical, only the commit that carries it differs. The caller proves that the producing run was a green
+    jarves-checks run of this repository (core/tools/ci_reuse.py)."""
     info = json.loads((dist / "build-info.json").read_text(encoding="utf-8-sig"))
     problems = []
-    if info.get("commit") != commit:
-        problems.append(f"commit {info.get('commit')} != tested {commit}")
-    if info.get("channel") != "main":
-        problems.append(f"channel {info.get('channel')!r} is not 'main' (PR/dev builds are never published)")
+    if tree:
+        if info.get("tree") != tree:
+            problems.append(f"tree {info.get('tree')} != published tree {tree}")
+        if info.get("channel") not in ("main", "pr"):
+            problems.append(f"channel {info.get('channel')!r} is not 'main' or 'pr' (dev builds are never published)")
+    else:
+        if not commit or info.get("commit") != commit:
+            problems.append(f"commit {info.get('commit')} != tested {commit}")
+        if info.get("channel") != "main":
+            problems.append(f"channel {info.get('channel')!r} is not 'main' (PR/dev builds are never published)")
     exe = dist / str(info.get("installer"))
     if not exe.is_file():
         problems.append(f"installer {exe.name} missing")
@@ -118,6 +128,23 @@ def verify(dist: Path, commit: str) -> dict:
         problems.append(f"bad version {info.get('version')!r}")
     if problems:
         raise SystemExit("VERIFY FAILED: " + "; ".join(problems))
+    return info
+
+
+def stamp(dist: Path, commit: str, tree: str) -> dict:
+    """Manifest-level stamping of a REUSED installer: the executable is never touched (no rebuild). The version is the
+    one already in the installer (`X.Y.Z.<run number of the build>`; run numbers only grow, and a PR is only merged
+    after being tested on top of the current main, so merged builds are strictly increasing). What changes is the
+    metadata that describes it: `commit` becomes the commit on main that carries the tree, the commit the installer was
+    really built from is kept as `built_from_commit`, and the channel becomes `main`. Writes dist/build-info.json."""
+    path = dist / "build-info.json"
+    info = verify(dist, None, tree)
+    if info.get("commit") != commit:
+        info["built_from_commit"] = info.get("commit")
+        info["commit"] = commit
+    info["channel"] = "main"
+    info["tree"] = tree
+    path.write_text(json.dumps(info, indent=1), encoding="utf-8")
     return info
 
 
@@ -555,7 +582,8 @@ def beta_publish(dist: Path, env: dict | None = None, gh: GitHub | None = None, 
 
 def candidate(dist: Path, commit: str, out: Path, env: dict | None = None) -> dict:
     """Release CANDIDATE of a green main: the verified installer files plus a signed manifest (when the signing key
-    is available) in `out`, to be uploaded as a workflow artifact. Publishes nothing, ever."""
+    is available) in `out`, to be uploaded as a workflow artifact. Publishes nothing, ever. `dist` must already be
+    stamped (`stamp`) when the installer was reused from the PR run."""
     env = os.environ if env is None else env
     info = verify(dist, commit)
     out.mkdir(parents=True, exist_ok=True)
@@ -598,6 +626,11 @@ def main(argv: list[str] | None = None) -> int:
     v = sub.add_parser("verify")
     v.add_argument("--dir", type=Path, required=True)
     v.add_argument("--commit", required=True)
+    v.add_argument("--tree", help="accept an installer built from this git tree (reuse of the PR build)")
+    st = sub.add_parser("stamp", help="rewrite build-info.json of a reused installer (commit, channel); never rebuilds")
+    st.add_argument("--dir", type=Path, required=True)
+    st.add_argument("--commit", required=True)
+    st.add_argument("--tree", required=True)
     n = sub.add_parser("notes")
     n.add_argument("--dir", type=Path, required=True)
     n.add_argument("--run-url", default="")
@@ -622,10 +655,15 @@ def main(argv: list[str] | None = None) -> int:
         candidate(a.dir, a.commit, a.out)
         return 0
     if a.cmd == "verify":
-        info = verify(a.dir, a.commit)
+        info = verify(a.dir, a.commit, a.tree)
         print(f"VERIFY OK: {info['installer']} {info['version']} {info['sha256']}")
         print(f"version={info['version']}", file=open(os.environ["GITHUB_OUTPUT"], "a")
               if os.environ.get("GITHUB_OUTPUT") else sys.stdout)
+        return 0
+    if a.cmd == "stamp":
+        info = stamp(a.dir, a.commit, a.tree)
+        print(f"STAMPED: {info['installer']} {info['version']} commit {a.commit[:12]} tree {a.tree[:12]} "
+              f"(built from {str(info.get('built_from_commit', a.commit))[:12]}); installer bytes untouched")
         return 0
     if a.cmd == "notes":
         print(notes(json.loads((a.dir / "build-info.json").read_text(encoding="utf-8-sig")), a.run_url))
