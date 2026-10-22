@@ -274,6 +274,9 @@ def cmd_status(a, cfg, home) -> int:
         from .runtime import read_state
         snap = read_snapshot(home / "health.json")
         print("Core is NOT running (no answer on the local link).")
+        from .updates import beta_label
+        if beta_label(home):
+            print(f"This is a BETA build ({beta_label(home)}); `jarvis update --channel stable` goes back to stable updates.")
         prefs = read_state(home).get("prefs") or {}
         if prefs:
             print(f"Saved choices: window {'hidden' if prefs.get('display_hidden') else 'shown'}, mic "
@@ -283,8 +286,11 @@ def cmd_status(a, cfg, home) -> int:
             print(json.dumps(snap, indent=1, ensure_ascii=False))
         return 1
     prof = live.get("profile") or {}
+    from .updates import beta_label
+    beta = beta_label(home)
     print(runtime_summary(live.get("runtime"))
-          + (f" | profile {prof.get('name')}{' (TEST)' if prof.get('test') else ''}" if prof else ""))
+          + (f" | profile {prof.get('name')}{' (TEST)' if prof.get('test') else ''}" if prof else "")
+          + (f" | BETA {beta}" if beta else ""))
     note = _privacy_note(cfg, home)
     if note:                                 # SW-V4 B: development mode is said plainly
         print(note)
@@ -1458,9 +1464,17 @@ def cmd_dashboard(a, cfg, home) -> int:
 def cmd_update(a, cfg, home) -> int:
     """jarvis update [check | install | status]: notify + ask approval (D16); never installs on its own."""
     from .features import Features
-    from .updates import UpdateChecker, UpdateError, launch_installer, version_line
+    from .updates import UpdateChecker, UpdateError, launch_installer, set_channel, version_line
+    if getattr(a, "channel", None):
+        try:
+            ch = set_channel(home, cfg, a.channel)
+        except UpdateError as e:
+            print(f"{e.code}: {e.message}")
+            return 1
+        print(clilang.fmt(f"ערוץ העדכונים: {'בטא (כל בנייה ירוקה של main)' if ch == 'beta' else 'יציב'}.",
+                          f"Update channel: {'beta (every green main build)' if ch == 'beta' else 'stable'}."))
     u = UpdateChecker(home, cfg=cfg)
-    print(version_line())
+    print(version_line(home) + f"; update channel {u.channel}")
     if getattr(a, "rollback", False):
         return _update_rollback(a, cfg, home)
     if a.action == "status":
@@ -1718,6 +1732,8 @@ def main(argv: list[str] | None = None) -> int:
     add_selfcheck_args(dg)                    # owner request 20 Oct: jarvis diagnose --now (self-check)
     up = sub.add_parser("update", help="check GitHub for a newer JARVES; install only after you approve")
     up.add_argument("action", nargs="?", default="check", choices=["check", "install", "status"])
+    up.add_argument("--channel", choices=["stable", "beta"], help="choose the update channel: stable (default, "
+                    "tested releases) or beta (every green main build, early); then check on it")
     up.add_argument("--yes", action="store_true", help="install / rollback: you already approved (no question)")
     up.add_argument("--silent", action="store_true", help="install: run setup silently (no window) and start JARVES again")
     up.add_argument("--rollback", action="store_true", help="go back to the previous version and restore the data "
@@ -1726,6 +1742,8 @@ def main(argv: list[str] | None = None) -> int:
     up.add_argument("--window", action="store_true", help="rollback: show the setup window instead of running silently")
     from . import profiles
     profiles.add_cli(sub)                     # Issue #17: jarvis profile list / create / use / delete / export
+    from . import release_cmd
+    release_cmd.add_cli(sub)                  # jarvis release signoff (stable release manual test sign-off)
     from . import cli_parity
     cli_parity.add_cli(sub)                   # V4 P0.3: jarvis timers / lists / notes / jobs / reports
     from . import budget_cli
@@ -1772,7 +1790,7 @@ def main(argv: list[str] | None = None) -> int:
             "health": health_cli.cmd_health,
             "whatsapp": whatsapp_admin.cmd_whatsapp,
             "agents": agents_cli.cmd_agents,
-            "dial": dialing.cmd_dial,
+            "dial": dialing.cmd_dial, "release": release_cmd.cmd_release,
             **cli_parity.COMMANDS, **budget_cli.COMMANDS, **selfspeed.COMMANDS}[a.cmd](a, cfg, home)
 
 

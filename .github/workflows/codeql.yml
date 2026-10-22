@@ -1,0 +1,31 @@
+name: codeql
+# CodeQL static analysis for the Python Core. Weekly and on pushes to main; pull requests that touch Python.
+on:
+  push:
+    branches: [main]
+  pull_request:
+    paths: ["core/**", ".github/workflows/codeql.yml"]
+  schedule:
+    - cron: "0 4 * * 1"
+permissions:
+  contents: read
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+jobs:
+  analyze:
+    name: CodeQL (Python)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      security-events: write
+    steps:
+      - uses: actions/checkout@v7
+      - uses: github/codeql-action/init@v4
+        with:
+          languages: python
+          build-mode: none
+      - uses: github/codeql-action/analyze@v4
+        with:
+          category: "/language:python"

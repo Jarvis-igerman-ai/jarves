@@ -1,0 +1,35 @@
+name: jarves-dependabot
+# Dependabot PRs: patch and minor bumps get the `automerge` label, so the queue (automerge.yml) merges them as soon as ALL
+# jarves-checks are green. Major bumps (and anything the parser cannot classify) never get the label: a human decides.
+# Kill switch: repository variable DEPENDABOT_AUTOMERGE = "false". This workflow never checks out or runs the PR's code:
+# it only reads the PR title/body through the event payload (core/tools/dependabot_gate.py, standard library).
+on:
+  pull_request_target:
+    types: [opened, reopened, synchronize]
+permissions:
+  contents: read
+  pull-requests: write
+jobs:
+  label:
+    if: github.event.pull_request.user.login == 'dependabot[bot]' && vars.DEPENDABOT_AUTOMERGE != 'false'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    env:
+      # AUTOMERGE_TOKEN (when set) lets the label event start the queue; with GITHUB_TOKEN the queue runs when the checks end.
+      GH_TOKEN: ${{ secrets.AUTOMERGE_TOKEN || github.token }}
+      TITLE: ${{ github.event.pull_request.title }}
+      BODY: ${{ github.event.pull_request.body }}
+      PR: ${{ github.event.pull_request.number }}
+    steps:
+      - uses: actions/checkout@v7          # the base branch (pull_request_target), never the PR head
+        with:
+          sparse-checkout: core/tools/dependabot_gate.py
+      - name: Classify the update and label patch/minor
+        run: |
+          kind=$(python3 core/tools/dependabot_gate.py --title "$TITLE" --body "$BODY") && ok=true || ok=false
+          echo "update type: $kind (eligible: $ok)"
+          if [ "$ok" = "true" ]; then
+            gh pr edit "$PR" -R "$GITHUB_REPOSITORY" --add-label automerge
+          else
+            gh pr comment "$PR" -R "$GITHUB_REPOSITORY" --body "dependabot-automerge: '$kind' update is not auto-merged; review it manually." > /dev/null
+          fi

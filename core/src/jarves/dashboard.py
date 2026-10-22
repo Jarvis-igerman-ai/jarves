@@ -46,7 +46,7 @@ _ROUTES: list[tuple[str, re.Pattern, object]] = []
 PLUGIN_MODULES = ("jarves.workspace", "jarves.curator", "jarves.memory", "jarves.features", "jarves.google_auth",
                   "jarves.google_setup", "jarves.telegram_channel", "jarves.instagram_channel", "jarves.privacy", "jarves.overview",
                   "jarves.usage", "jarves.backup", "jarves.appearance", "jarves.skills.generated",
-                  "jarves.operations", "jarves.runtime", "jarves.updates", "jarves.selfcheck", "jarves.connect",
+                  "jarves.operations", "jarves.runtime", "jarves.updates", "jarves.release_cmd", "jarves.selfcheck", "jarves.connect",
                   "jarves.identity", "jarves.dashboard_auth", "jarves.mobile", "jarves.guides",     # WP-L: Guides pages
                   "jarves.setup_wizard",                                         # SW-V3: Setup & add-ons page
                   "jarves.profiles",                                             # Issue #17: Profiles page
@@ -279,7 +279,8 @@ def api_overview(ctx: Ctx, m, body):
     live = st.live_session()
     snap = read_snapshot(ctx.home / "health.json") or {}
     issues = st.issues("open")
-    return 200, {"version": __version__, "today": next((d for d in days if d["day"] == today), None), "week": days,
+    from .updates import beta_label
+    return 200, {"version": __version__, "beta": beta_label(ctx.home), "today": next((d for d in days if d["day"] == today), None), "week": days,
                  "live": _session_summary(ctx, live) if live else None,
                  "issues": {"open": len(issues), "high": sum(i["severity"] == "high" for i in issues)},
                  "core": {"state": snap.get("core"), "age_s": snap.get("age_s")}, "privacy": ctx.cfg.log.privacy,

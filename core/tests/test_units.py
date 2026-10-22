@@ -284,6 +284,11 @@ def _cli(home, monkeypatch, *argv, stdin=""):
 
 
 def test_cli_setup_paths(tmp_path, monkeypatch, capsys):
+    # Keep CLI/wizard wiring real; connection waits and prerequisite installs have their own tests.
+    from jarves import connect, setup_wizard
+    connected_homes = []
+    monkeypatch.setattr(connect.Connector, "run", lambda self: connected_homes.append(self.home) or 0)
+    monkeypatch.setattr(setup_wizard, "_prepare", lambda *args: (True, ""))
     (tmp_path / "config.toml").write_text("[ai]\nconnection = 'nope'\n", encoding="utf-8")
     assert _cli(tmp_path, monkeypatch, "setup") == 2                       # invalid config -> clear error
     assert "CONFIG ERROR" in capsys.readouterr().err
@@ -296,6 +301,7 @@ def test_cli_setup_paths(tmp_path, monkeypatch, capsys):
     assert not (tmp_path / "setup_done").exists()
     assert _cli(tmp_path, monkeypatch, "setup", "--restart", stdin="1\n3\n") == 0   # Hebrew, api key, key skipped
     assert "jarvis key" in capsys.readouterr().out and (tmp_path / "setup_done").exists()
+    assert connected_homes == [tmp_path]  # default connect offer is still wired through the CLI
     (tmp_path / "config.toml").write_text("[ai]\nconnection = \"chatgpt\"\n", encoding="utf-8")
     assert _cli(tmp_path, monkeypatch, "setup", "--if-needed") == 0        # signed out later: hint, no forced login
     assert "jarvis chatgpt login" in capsys.readouterr().out

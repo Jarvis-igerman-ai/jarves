@@ -1,0 +1,79 @@
+name: jarves-release
+# STABLE release, tag-driven (docs/RELEASING.md). Push a tag vX.Y.Z. The gate (core/tools/release_gate.py) must pass:
+# the tested commit has a green jarves-checks run, no open P0-P2, nightly green, and the owner's manual test sign-off
+# docs/reviews/MANUAL_TEST_<X.Y.Z>.md (recorded with `jarvis release signoff`) names the tested beta commit = this
+# tag's commit (or only documentation changed since). Only then is the tested installer published as the stable release.
+on:
+  push:
+    tags: ["v[0-9]+.[0-9]+.[0-9]+"]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Stable tag to check, e.g. v4.1.0"
+        required: true
+      dry_run:
+        description: "Only run the gate and print the publish plan"
+        type: boolean
+        default: true
+permissions: {}
+concurrency:
+  group: jarves-release
+  cancel-in-progress: false
+jobs:
+  stable:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      actions: read
+    env:
+      TAG: ${{ github.event.inputs.tag || github.ref_name }}
+      DRY_RUN: ${{ github.event.inputs.dry_run || 'false' }}
+      GH_TOKEN: ${{ github.token }}
+      GITHUB_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          ref: ${{ github.event.inputs.tag || github.ref }}
+          fetch-depth: 0
+      - uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884  # v10.3.0
+        with:
+          enable-cache: true
+          cache-dependency-glob: core/uv.lock
+      - name: Find the tested installer (the jarves-checks run of the signed-off commit)
+        id: find
+        run: |
+          ver="${TAG#v}"
+          sha=$(grep -m1 -E '^- Commit: [0-9a-f]{40}' "docs/reviews/MANUAL_TEST_${ver}.md" | grep -oE '[0-9a-f]{40}' || true)
+          [ -n "$sha" ] || { echo "::error::no signed-off commit in docs/reviews/MANUAL_TEST_${ver}.md"; exit 1; }
+          echo "sha=$sha" >> "$GITHUB_OUTPUT"
+          run_id=$(gh run list --workflow jarves-checks.yml --branch main --event push --commit "$sha" --status success --json databaseId --jq '.[0].databaseId')
+          [ -n "$run_id" ] || { echo "::error::no green jarves-checks run for $sha"; exit 1; }
+          echo "run_id=$run_id" >> "$GITHUB_OUTPUT"
+          # the installer is content-addressed by the commit's tree: built on the PR (or by the main run), never rebuilt
+          tree=$(python3 core/tools/ci_reuse.py tree "$sha")
+          python3 core/tools/ci_reuse.py resolve --repo "$GITHUB_REPOSITORY" --tree "$tree" | tee reuse.out
+          { echo "tree=$tree"; grep -E '^(run_id|name)=' reuse.out | sed 's/^run_id=/art_run=/'; } >> "$GITHUB_OUTPUT"
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333  # v8.0.2
+        with:
+          name: ${{ steps.find.outputs.name }}
+          run-id: ${{ steps.find.outputs.art_run }}
+          github-token: ${{ github.token }}
+          path: dist
+      - name: Verify the installer is the tested one
+        run: |
+          python3 packaging/release.py verify --dir dist --commit "${{ steps.find.outputs.sha }}" --tree "${{ steps.find.outputs.tree }}"
+          python3 packaging/release.py stamp --dir dist --commit "${{ steps.find.outputs.sha }}" --tree "${{ steps.find.outputs.tree }}"
+      - name: Release gate (sign-off, SHA, checklist, nightly)
+        working-directory: core
+        run: uv run python tools/release_gate.py --tag "$TAG" --sha "$(git rev-parse HEAD)" --verified-sha "${{ steps.find.outputs.sha }}" --candidate-dir ../dist --bug-tables 'docs/reviews/*BUG_TABLE*.md'
+      - name: Plan (dry run)
+        if: ${{ env.DRY_RUN == 'true' }}
+        run: python3 packaging/release.py public-publish --dir dist --dry-run
+      - name: Publish the stable release (signed latest.json, newest 3 kept)
+        if: ${{ env.DRY_RUN != 'true' }}
+        env:
+          RELEASES_TOKEN: ${{ secrets.RELEASES_TOKEN }}
+          RELEASES_REPO: ${{ vars.RELEASES_REPO }}
+          JARVES_UPDATE_SIGNING_KEY: ${{ secrets.JARVES_UPDATE_SIGNING_KEY }}
+        run: python3 packaging/release.py public-publish --dir dist --keep 3

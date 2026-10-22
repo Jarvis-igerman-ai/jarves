@@ -16,6 +16,19 @@ import re
 
 # ---------------------------------------------------------------------- exact texts (English -> Hebrew)
 TEXT: dict[str, str] = {
+    # --- beta channel and release sign-off (continuous release)
+    "gets every green main build automatically as a signed beta (latest-beta.json) instead of waiting for a tested "
+    "stable release; one command or button goes back to stable, and the previous version can always be restored":
+        "מקבל אוטומטית כל בנייה ירוקה של main כבטא חתומה (latest-beta.json) במקום לחכות לגרסה יציבה שנבדקה; "
+        "פקודה אחת או כפתור אחד חוזרים ליציב, ותמיד אפשר לשחזר את הגרסה הקודמת",
+    "the owner's checklist for a stable release: test the latest beta by hand, record the results, sign off; a stable tag is refused without it":
+        "רשימת הבדיקה של הבעלים לגרסה יציבה: בודקים את הבטא האחרונה ידנית, רושמים תוצאות וחותמים; בלי זה תג יציב נדחה",
+    "core/tests/test_release_channels.py (channel selection, signed beta manifest, beta label); the first live beta needs the owner to enable ENABLE_BETA_PUBLISH":
+        "core/tests/test_release_channels.py (בחירת ערוץ, מניפסט בטא חתום, תווית בטא); הבטא החיה הראשונה דורשת מהבעלים להפעיל את ENABLE_BETA_PUBLISH",
+    "core/tests/test_release_signoff.py (sheet round trip, sign-off, gate)":
+        "core/tests/test_release_signoff.py (מחזור גיליון, חתימה, שער)",
+    "there is no Pi package to install": "אין עדיין חבילה להתקנה על ה-Pi",
+    "release tooling runs on the owner's PC": "כלי השחרור רצים על המחשב של הבעלים",
     # --- feature descriptions (features.py and the modules that register features)
     "play / pause / volume in Pear Desktop (YouTube Music)": "ניגון, השהיה ועוצמת קול ב-Pear Desktop (YouTube Music)",
     "answers with fresh facts from the web": "עונה עם מידע עדכני מהאינטרנט",

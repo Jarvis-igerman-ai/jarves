@@ -9,6 +9,9 @@
   if (nav && !nav.querySelector('[data-page="updates"]')) {
     nav.insertBefore(el("a", { href: "#/updates", "data-page": "updates" }, "Updates"), settings || null);
   }
+  if (nav && !nav.querySelector('[data-page="signoff"]')) {
+    nav.insertBefore(el("a", { href: "#/signoff", "data-page": "signoff" }, "Release sign-off"), settings || null);
+  }
 })();
 
 // The Core reports the update-check problem as an English sentence; show it in the page language (Hebrew page => Hebrew text).
@@ -59,13 +62,25 @@ PAGES.updates = async function () {
     busy(ev.currentTarget, false);
   } }, "Roll back to the previous version");
 
-  const latest = d.latest ? d.latest.version : null;
+  const isBeta = d.channel === "beta";
+  const chan = el("button", { type: "button", class: "ghost", "aria-pressed": isBeta ? "true" : "false", onclick: async (ev) => {
+    busy(ev.currentTarget, true);
+    try { await post("/api/updates/channel", { channel: isBeta ? "stable" : "beta" }); await post("/api/updates/check"); route(true); }
+    catch (e) { out.textContent = tx("הערוץ לא הוחלף: ", "Channel not changed: ") + e.message; }
+    busy(ev.currentTarget, false);
+  } }, isBeta ? "Switch to the stable channel" : "Switch to the beta channel");
+  const latest = d.latest ? (d.latest.display || d.latest.version) : null;
   render(header("Updates", "Install, update and go back to the previous version. JARVES asks before it installs anything and keeps your data.",
       check),
     out,
     d.error ? el("div", { class: "card" }, pill("degraded", tx("בדיקה לא זמינה", "Check unavailable")), " ", el("span", { class: "small" }, updateError(d.error))) : null,
     el("div", { class: "card" }, el("div", { class: "kv" },
-      el("div", { class: "k" }, "Current version"), el("div", { class: "v" }, el("code", {}, d.current)),
+      el("div", { class: "k" }, "Current version"), el("div", { class: "v" }, el("code", {}, d.beta_build || d.current), d.beta_build ? " " : "", d.beta_build ? pill("degraded", "BETA") : ""),
+      el("div", { class: "k" }, "Update channel"),
+      el("div", { class: "v" }, el("code", {}, isBeta ? "beta" : "stable"), " ", chan,
+        el("div", { class: "muted small" }, isBeta
+          ? tx("בטא: כל בנייה ירוקה של main מגיעה אליך, חתומה. לחזרה לגרסה קודמת: כפתור החזרה למטה.", "Beta: every green main build reaches you, signed. To go back a version use the Roll back button below.")
+          : tx("יציב: רק גרסאות שנבדקו ידנית ואושרו.", "Stable: only releases that were tested by hand and signed off."))),
       el("div", { class: "k" }, "Latest available"),
       el("div", { class: "v" }, latest ? el("code", {}, latest) : pill("ok", "Up to date")),
       el("div", { class: "k" }, "Last checked"), el("div", { class: "v" }, d.checked_at || "—")),
@@ -82,4 +97,44 @@ PAGES.updates = async function () {
     el("div", { class: "muted small", style: "margin-top:10px" },
       "The installer is not code-signed yet. Windows SmartScreen may say Windows protected your PC: choose More info, then Run anyway."),
     el("div", { class: "muted small" }, "Starting JARVES when you sign in stays off unless you turn it on (jarvis autostart on)."));
+};
+
+// Release sign-off page: the owner's manual test sheet for one stable version (docs/reviews/MANUAL_TEST_<version>.md).
+PAGES.signoff = async function () {
+  const params = new URLSearchParams((location.hash.split("?")[1]) || "");
+  const out = el("div", { class: "muted small", role: "status", "aria-live": "polite" });
+  const input = el("input", { type: "text", id: "signoff-version", value: params.get("version") || "", placeholder: "4.1.0", "aria-label": tx("גרסה יציבה", "Stable version") });
+  const open = el("button", { type: "button", class: "primary", onclick: () => { location.hash = "#/signoff?version=" + encodeURIComponent(input.value.trim()); } }, "Open sheet");
+  const version = params.get("version");
+  const head = header("Release sign-off", "Test the latest beta by hand, record each result, then sign off. A stable release is refused without it.");
+  if (!version) {
+    render(head, el("div", { class: "card" }, el("div", { class: "row" }, el("label", { for: "signoff-version" }, "Stable version"), input, open),
+      el("div", { class: "muted small" }, "Create the sheet first: python tools/manual_test_sheet.py --version X.Y.Z (docs/RELEASING.md).")));
+    return;
+  }
+  let d;
+  try { d = await api("/api/release/signoff?version=" + encodeURIComponent(version)); }
+  catch (e) { render(head, el("div", { class: "card" }, pill("degraded", tx("אין גיליון", "No sheet")), " ", el("span", { class: "small" }, e.message))); return; }
+  const post = (body) => api("/api/release/signoff", { method: "POST", body: JSON.stringify({ version, ...body }) });
+  const rows = d.rows.map((r) => {
+    const note = el("input", { type: "text", value: r.note || "", "aria-label": tx("הערה ל-", "Note for ") + r.id });
+    const sel = el("select", { "aria-label": tx("תוצאה ל-", "Result for ") + r.id }, ...["pending", "pass", "fail", "blocked", "accepted-blocked"].map((v) => el("option", { value: v, selected: v === r.result }, v)));
+    const save = el("button", { type: "button", class: "ghost", onclick: async () => {
+      try { await post({ row: r.id, result: sel.value, note: note.value }); route(true); } catch (e) { out.textContent = e.message; }
+    } }, "Save");
+    return el("tr", {}, el("td", {}, r.id), el("td", {}, r.area), el("td", {}, r.todo), el("td", {}, r.expected), el("td", {}, sel), el("td", {}, note), el("td", {}, save));
+  });
+  const finish = el("button", { type: "button", class: "primary", disabled: d.open.length > 0, onclick: async () => {
+    try { await post({ finish: true }); route(true); } catch (e) { out.textContent = tx("לא נחתם: ", "Not signed: ") + e.message; }
+  } }, "Sign off");
+  render(head, out,
+    el("div", { class: "card" }, el("div", { class: "kv" },
+      el("div", { class: "k" }, "Version"), el("div", { class: "v" }, el("code", {}, d.version)),
+      el("div", { class: "k" }, "Signed"), el("div", { class: "v" }, d.signed ? pill("ok", tx("נחתם", "Signed")) : pill("degraded", tx("לא נחתם", "Not signed"))),
+      el("div", { class: "k" }, "Tested beta"), el("div", { class: "v" }, d.beta || "—"),
+      el("div", { class: "k" }, "Commit"), el("div", { class: "v" }, d.commit ? el("code", {}, d.commit.slice(0, 12)) : "—"),
+      el("div", { class: "k" }, "Date"), el("div", { class: "v" }, d.date || "—"))),
+    el("table", { class: "table" }, el("thead", {}, el("tr", {}, ...["ID", "Area", "What to do", "Expected", "Result", "Note", ""].map((h) => el("th", { scope: "col" }, h)))), el("tbody", {}, ...rows)),
+    el("div", { class: "row", style: "margin-top:10px" }, finish),
+    el("div", { class: "muted small" }, "Sign off records the beta you have installed (version and commit) and today's date. Same from the command line: jarvis release signoff."));
 };

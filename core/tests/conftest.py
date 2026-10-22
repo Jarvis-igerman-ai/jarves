@@ -21,8 +21,70 @@ def pytest_configure(config):
     config.addinivalue_line("markers", "linux_only: runs only on Linux (deselected, not skipped, elsewhere)")
 
 
+# ---------------------------------------------------------------- CI sharding (no plugin, no reruns of the whole suite)
+# The real-browser files run as their own CI job (own retry); the rest is split into N shards by file, balanced by
+# test count, the same on every shard because each shard collects the same tests. Deselected, never skipped.
+BROWSER_FILES = ("test_browser.py", "test_canary.py", "test_dashboard_a11y.py")
+
+
+def pytest_addoption(parser):
+    parser.addoption("--shard", default="1/1", help="I/N: run only the I-th of N balanced shards of the files")
+    parser.addoption("--shard-files", default="", help="comma list of test file names: run exactly these files "
+                     "(the CI plan from core/tools/ci_plan.py, balanced by measured durations); overrides --shard")
+    parser.addoption("--durations-file", default="", help="JSON {file: seconds}: run the slowest files first")
+    parser.addoption("--browser", default="include", choices=["include", "exclude", "only"],
+                     help="real-browser test files (CI runs them as their own job): include, exclude or only")
+
+
+def shard_files(counts: dict, n: int) -> list:
+    """Greedy longest-first split of {file: test count} into n shards (deterministic)."""
+    shards = [[] for _ in range(n)]
+    load = [0] * n
+    for name, c in sorted(counts.items(), key=lambda kv: (-kv[1], kv[0])):
+        i = load.index(min(load))
+        shards[i].append(name)
+        load[i] += c
+    return shards
+
+
 def pytest_collection_modifyitems(config, items):
     import sys
+    mode = config.getoption("--browser")
+    if mode != "include":
+        gone = [i for i in items if (os.path.basename(str(i.fspath)) in BROWSER_FILES) == (mode == "exclude")]
+        if gone:
+            config.hook.pytest_deselected(items=gone)
+            items[:] = [i for i in items if i not in gone]
+    idx, n = (int(x) for x in config.getoption("--shard").split("/"))
+    listed = [x.strip() for x in config.getoption("--shard-files").split(",") if x.strip()]
+    names = set(listed)
+    if names:
+        out = [i for i in items if os.path.basename(str(i.fspath)) not in names]
+        if out:
+            config.hook.pytest_deselected(items=out)
+            items[:] = [i for i in items if os.path.basename(str(i.fspath)) in names]
+        pos = {name: k for k, name in enumerate(listed)}      # the plan lists the slowest file first: run it first
+        items.sort(key=lambda i: pos[os.path.basename(str(i.fspath))])
+    elif n > 1:
+        counts = {}
+        for i in items:
+            counts[str(i.fspath)] = counts.get(str(i.fspath), 0) + 1
+        mine = set(shard_files(counts, n)[idx - 1])
+        out = [i for i in items if str(i.fspath) not in mine]
+        if out:
+            config.hook.pytest_deselected(items=out)
+            items[:] = [i for i in items if str(i.fspath) in mine]
+    dfile = config.getoption("--durations-file")
+    if dfile and os.path.isfile(dfile) and not names:         # slowest files first: the long pole starts at once, the tail is short
+        try:
+            with open(dfile, encoding="utf-8") as fh:
+                dur = json.load(fh)
+        except ValueError:
+            dur = {}
+        order = {}
+        for i in items:
+            order.setdefault(str(i.fspath), len(order))
+        items.sort(key=lambda i: (-float(dur.get(os.path.basename(str(i.fspath)), 0)), order[str(i.fspath)]))
     keep, drop = [], []
     for item in items:
         wrong = (item.get_closest_marker("windows_only") and sys.platform != "win32") or \
@@ -99,6 +161,15 @@ def _update_keys_are_hermetic(monkeypatch):
     """The shipped public key must not change what update tests expect; tests pass their own keys explicitly."""
     from jarves import updates
     monkeypatch.setattr(updates, "UPDATE_PUBLIC_KEYS", ())
+
+
+@pytest.fixture(autouse=True)
+def _runtime_privacy_does_not_leak(monkeypatch):
+    """logs keeps the dashboard's runtime privacy switch in module globals; one test turning it on must not make the
+    next test in the same process (pytest-xdist worker) see privacy mode."""
+    from jarves import logs
+    for name, value in (("_runtime", None), ("_flag", None), ("_flag_mtime", None), ("_flag_checked", 0.0)):
+        monkeypatch.setattr(logs, name, value)
 
 
 @pytest.fixture(autouse=True)

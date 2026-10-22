@@ -17,6 +17,7 @@ param(
     [string]$Version = "",
     [string]$Channel = "dev",
     [string]$Commit = "",
+    [string]$Tree = "",                   # git tree hash of the built checkout: the content address CI reuses the build by
     [string]$Cache = (Join-Path ([IO.Path]::GetTempPath()) "jarves-build-cache"),
     [string]$Out = "",
     [string]$GoogleOAuthClientFile = "",  # explicitly supplied app-owned Desktop client; never private user state
@@ -107,6 +108,8 @@ foreach ($d in "Lib\test", "Lib\idlelib", "Lib\turtledemo", "Lib\ensurepip", "Li
 }
 $info = [ordered]@{ version = $Version; commit = $Commit; built = $Built; channel = $Channel; platform = "windows-x86_64"
                     python = "3.12.15+20261013"; godot = "4.7.2-stable" }
+if (-not $Tree) { $Tree = (& git -C $Repo rev-parse "HEAD^{tree}" 2>$null) }
+if ($Tree) { $info["tree"] = "$Tree".Trim() }
 # WP-O: default update source baked into the build (repo variable JARVES_UPDATE_BASE_URL, public, not a secret);
 # a PC's config.toml [update] base_url still wins. Empty = GitHub releases.
 if ($env:JARVES_UPDATE_BASE_URL) { $info["update_base_url"] = $env:JARVES_UPDATE_BASE_URL.Trim().TrimEnd("/") }

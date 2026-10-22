@@ -28,9 +28,27 @@ def server():
     s.close()
 
 
+_WARM = []
+
+
+def _warm_up_http():
+    """urllib / http.client import parts of themselves on the first request. Do that once under the REAL platform,
+    not under the patched win32 below (on Linux the lazy imports then fail with a NameError whenever this file runs
+    before any other test has made a request, e.g. when CI runs the slowest files first)."""
+    if not _WARM:
+        _WARM.append(1)
+        s = FakeReleaseServer()
+        try:
+            s.http()(BASE + "/warm-up.json", {})
+        finally:
+            s.close()
+
+
 @pytest.fixture(autouse=True)
 def windows(monkeypatch):
+    _warm_up_http()
     monkeypatch.setattr(sys, "platform", "win32")          # the update path is Windows-only; nothing Windows is run
+    monkeypatch.setattr(updates, "build_info", lambda: {"version": OLD})   # the running copy is OLD, whatever __version__ is
 
 
 @pytest.fixture

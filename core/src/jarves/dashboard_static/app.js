@@ -82,7 +82,13 @@ async function refreshOverview() {
       : overview.core.state === "degraded" ? "bad" : "");
     dot.title = overview.live ? tx("שיחה מתנהלת", "conversation in progress") : tx("ליבה: ", "Core: ") + (overview.core.state || "unknown");
     document.getElementById("issueCount").textContent = overview.issues.open || "";
-    document.getElementById("footInfo").textContent = `v${overview.version} · ` +
+    const brand = document.querySelector(".brand");          // the owner must always see that this is a beta build
+    let badge = document.getElementById("betaBadge");
+    if (overview.beta && brand && !badge) {
+      badge = el("span", { id: "betaBadge", class: "pill degraded", title: overview.beta, role: "status" }, "BETA");
+      brand.insertBefore(badge, brand.querySelector("button"));
+    } else if (!overview.beta && badge) badge.remove();
+    document.getElementById("footInfo").textContent = `v${overview.version}${overview.beta ? " BETA " + overview.beta : ""} · ` +
       tx(`${overview.sessions} שיחות`, `${overview.sessions} conversations`) + (overview.privacy ? tx(" · פרטיות פועלת", " · privacy on") : "");
     if (typeof window.shellOverview === "function") window.shellOverview(overview);     // shell.js: status chips + cost
   } catch (e) { /* page shows its own error */ }

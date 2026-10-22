@@ -1,103 +1,185 @@
 name: jarves-checks
 # CI for Issue #2. No secrets used; no paid API calls (all AI/voice tests are offline fakes).
 #
-# SW-V4 M: a `changes` job classifies the diff so a docs-only PR skips every heavy job (skipped jobs count as green for
-# the merge queue). `main` pushes, release tags and manual runs ALWAYS run the full matrix. Every job has a timeout;
-# superseded runs of the same ref are cancelled; tool downloads (uv, Godot, Inno Setup, Blender, FreeCAD) are cached.
-# The core suite stays serial on purpose (no pytest-xdist): see docs/reviews/SWV4_M_PERF_CI.md. Nightly: nightly.yml.
+# Fast-release design (docs/CI_PERFORMANCE.md):
+#  * the full tests AND the installer build + silent-install smoke run in PARALLEL on the PR head, before the merge;
+#  * every installer build uploads `jarves-installer-<git tree hash>`; the merge commit on `main` has the same tree when
+#    the PR was tested on top of the current main, so the `main` push re-runs NOTHING (job `changes` finds the proof,
+#    `reused=true`) and jarves-package publishes the PR's installer;
+#  * a different tree (a direct push, a stale merge) falls back to the full matrix, including the installer build;
+#  * only `pull_request` and `push` to main trigger this workflow (a branch push has no push trigger: no duplicate run
+#    for the same commit); superseded runs of the same PR/ref are cancelled; docs/guides-only changes skip heavy jobs.
+# Python tests are sharded by MEASURED file durations (core/tools/ci_plan.py), slowest files first, with pytest-xdist
+# inside a shard (file-isolated) and ONE automatic retry of only the failed files for known socket/load flakes
+# (core/tools/ci_flake.py, flake-report artifact). Zero skips stay enforced. Nightly: nightly.yml.
 on:
   push:
     branches: [main]
     tags: ["v*", "win-v*"]
   pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
   workflow_dispatch:
 permissions:
   contents: read
 concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}   # main runs queue, never cancelled by a newer push
 jobs:
   changes:
-    name: Classify the change (docs-only skips heavy jobs)
+    name: Classify the change (docs-only skips heavy jobs; reuse of the PR proof)
     runs-on: ubuntu-24.04
     timeout-minutes: 5
+    permissions:
+      contents: read
+      actions: read        # find the PR run's installer artifact for the merge commit
+    env:
+      GH_TOKEN: ${{ github.token }}
     outputs:
       code: ${{ steps.c.outputs.code }}
+      full: ${{ steps.c.outputs.full }}
       perf: ${{ steps.c.outputs.perf }}
       installer: ${{ steps.c.outputs.installer }}
       cad: ${{ steps.c.outputs.cad }}
       blender: ${{ steps.c.outputs.blender }}
       godot: ${{ steps.c.outputs.godot }}
       whatsapp: ${{ steps.c.outputs.whatsapp }}
+      e2e: ${{ steps.c.outputs.e2e }}
+      plan: ${{ steps.c.outputs.plan }}
+      tree: ${{ steps.c.outputs.tree }}
+      reused: ${{ steps.c.outputs.reused }}
     steps:
       - uses: actions/checkout@v7
         with:
           fetch-depth: 2
+      - name: Restore the measured test durations (last full run on main)
+        uses: actions/cache/restore@v6
+        with:
+          path: core/tests/durations.json
+          key: jarves-durations-none
+          restore-keys: jarves-durations-
       - id: c
         shell: bash
         run: |
           set -euo pipefail
-          out() { echo "$1=$2" >> "$GITHUB_OUTPUT"; }
-          if [ "$GITHUB_EVENT_NAME" != "pull_request" ]; then
-            for k in code perf installer cad blender godot whatsapp; do out $k true; done
-            echo "full matrix ($GITHUB_EVENT_NAME $GITHUB_REF)"; exit 0
+          tree=$(python3 core/tools/ci_reuse.py tree)
+          reused=false
+          if [ "$GITHUB_EVENT_NAME" = "push" ] && [ "$GITHUB_REF" = "refs/heads/main" ]; then
+            # same tree as a green PR run => nothing to test or build (docs/CI_PERFORMANCE.md "reuse")
+            if python3 core/tools/ci_reuse.py resolve --repo "$GITHUB_REPOSITORY" --tree "$tree" > reuse.out; then reused=true; fi
+            cat reuse.out || true
           fi
-          files=$(git diff --name-only HEAD^1 HEAD)   # the PR merge commit against its base
-          echo "$files"
-          any() { grep -Eq "$1" <<< "$files" && echo true || echo false; }
-          out code      "$(grep -Evq '^(docs/|[^/]+\.md$|LICENSE|\.gitignore)' <<< "$files" && echo true || echo false)"
-          out perf      "$(any '^(core/(src/|tools/(bench_startup|perf_gate)|perf_budgets|pyproject|uv\.lock)|\.github/)')"
-          out installer "$(any '^(packaging/|core/(src/|pyproject|uv\.lock)|godot/|\.github/|jarvis\.cmd)')"
-          out cad       "$(any '^(cad/|\.github/)')"
-          out blender   "$(any '^(blender/|cad/|godot/|\.github/)')"
-          out godot     "$(any '^(godot/|blender/|core/src/|\.github/)')"
-          out whatsapp  "$(any '^(bridge/|scripts/build_whatsapp_bridge\.ps1|packaging/|\.github/)')"
-  core:
-    name: Python Core tests (${{ matrix.os }})
-    needs: changes
-    if: needs.changes.outputs.code == 'true'
-    strategy:
-      fail-fast: false
-      matrix:
-        os: [ubuntu-24.04, windows-2025]
-    runs-on: ${{ matrix.os }}
-    timeout-minutes: 40
+          args=(--event "$GITHUB_EVENT_NAME")
+          [ "$reused" = "true" ] && args+=(--reused)
+          python3 core/tools/ci_plan.py classify "${args[@]}" | tee classify.out
+          if [ "$GITHUB_EVENT_NAME" != "pull_request" ] && [ "$reused" != "true" ]; then echo "full matrix ($GITHUB_EVENT_NAME $GITHUB_REF)"; fi
+          { cat classify.out; echo "tree=$tree"; echo "reused=$reused"; } >> "$GITHUB_OUTPUT"
+          { echo "tree \`${tree:0:12}\` reused=$reused"; grep -E '^[a-z0-9]+=(true|false)$' classify.out | tr '\n' ' '; } >> "$GITHUB_STEP_SUMMARY"
+  validate:
+    name: Fast CI and documentation validation
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
     defaults:
       run:
         working-directory: core
     steps:
       - uses: actions/checkout@v7
-      - uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884  # v10.3.0 (no major tags since v8)
+      - uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884  # v10.3.0
         with:
           enable-cache: true
+          cache-dependency-glob: core/uv.lock
+      - run: uv sync --frozen
+      - name: Workflow contracts, shard coverage and documentation links (offline, no extras)
+        run: uv run pytest -q -rs tests/test_ci_workflows.py tests/test_ci_pipeline.py tests/test_ci_speed_tools.py tests/test_docs_links.py
+  core:
+    # Both platforms use 3 separate runners planned from measured durations (core/tools/ci_plan.py).
+    # Linux stays serial inside each runner to isolate process limits, ports and update-flow fakes.
+    # The real-browser files are their own job (`browser`, one retry). A guides-only change
+    # runs the Linux shards only (the Windows shards finish in seconds). Matrix job names are required-check names.
+    name: Python Core tests (${{ matrix.os }} shard ${{ matrix.shard }})
+    needs: [changes, validate]
+    if: needs.changes.outputs.code == 'true'
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - {os: ubuntu-24.04, shard: "1/3"}
+          - {os: ubuntu-24.04, shard: "2/3"}
+          - {os: ubuntu-24.04, shard: "3/3"}
+          - {os: windows-2025, shard: "1/3"}
+          - {os: windows-2025, shard: "2/3"}
+          - {os: windows-2025, shard: "3/3"}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 40
+    defaults:
+      run:
+        working-directory: core
+    env:
+      PLAN: ${{ needs.changes.outputs.plan }}
+      # pytest-xdist workers inside the shard (file-isolated: --dist loadfile). Repository variable CI_XDIST_WORKERS
+      # overrides; 1 = serial. Default: 2 on Windows; Linux is serial (3 workers made the per-user process limit of the isolation tests and the update-flow fakes fail on ubuntu-24.04: 20 failures).
+      XDIST_WORKERS: ${{ vars.CI_XDIST_WORKERS || (matrix.os == 'ubuntu-24.04' && '1' || '2') }}
+    steps:
+      - uses: actions/checkout@v7
+      - id: gate
+        shell: bash
+        run: |
+          if [ "${{ matrix.os }}" = "ubuntu-24.04" ] || [ "${{ needs.changes.outputs.full }}" = "true" ]; then run=true; else run=false; echo "guides/docs-level change: the Windows shard is not needed"; fi
+          echo "run=$run" >> "$GITHUB_OUTPUT"
+      - uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884  # v10.3.0 (no major tags since v8)
+        if: steps.gate.outputs.run == 'true'
+        with:
+          enable-cache: true
+          cache-dependency-glob: core/uv.lock
       # Owner rule: NO skipped tests. Every extra is installed (camera/OpenCV, voice, tray, browser/Playwright once it
       # exists) and the real tools are fetched/located by tests/_tools.py (Godot 4.7.2 everywhere, Inno Setup on
       # Windows, openssl from PATH/Git). Platform-only tests are deselected per OS (markers), never skipped.
       - name: "System libraries (Linux, PortAudio for sounddevice)"
-        if: runner.os == 'Linux'
+        if: steps.gate.outputs.run == 'true' && runner.os == 'Linux'
         run: sudo apt-get update -qq && sudo apt-get install -y -qq libportaudio2
       - name: Install (locked, all extras)
+        if: steps.gate.outputs.run == 'true'
         run: uv sync --frozen --all-extras
-      - name: Browser for the real-browser tests (Chromium on Linux, preinstalled Edge on Windows)
-        shell: bash
-        run: |
-          if uv run python -c "import playwright" 2>/dev/null; then
-            if [ "$RUNNER_OS" = "Linux" ]; then uv run playwright install --with-deps chromium; else echo "using the preinstalled Edge"; fi
-          else
-            echo "no browser extra yet"
-          fi
       - name: Cache tool downloads (Godot, Inno Setup; SHA-pinned in tests/_tools.py)
+        if: steps.gate.outputs.run == 'true'
         uses: actions/cache@v6
         with:
           path: ${{ runner.temp }}/jarves-test-tools
           key: jarves-test-tools-${{ runner.os }}-${{ hashFiles('core/tests/_tools.py') }}
-      - name: pytest (offline; fakes for OpenAI, audio and the music player; ANY skip fails the run)
+      - name: pytest (offline; planned shard, slowest first, xdist; known-flake retry of failed files only; ANY skip fails)
+        if: steps.gate.outputs.run == 'true'
         shell: bash
         env:
           JARVES_BUILD_CACHE: ${{ runner.temp }}/jarves-test-tools
         run: |
-          uv run pytest -q -rs -p no:cacheprovider --durations=25 --junitxml=pytest-junit.xml | tee pytest.out
+          printf '%s' "$PLAN" > "$RUNNER_TEMP/plan.json"
+          os=$(echo "$RUNNER_OS" | tr 'A-Z' 'a-z')
+          FILES=$(uv run python tools/ci_plan.py shard-files --plan "$RUNNER_TEMP/plan.json" --os "$os" --shard ${{ matrix.shard }})
+          echo "shard ${{ matrix.shard }}: $FILES"
+          XD=(); PX=()
+          if [ "$XDIST_WORKERS" -gt 1 ]; then XD=(--with pytest-xdist==3.8.0); PX=(-n "$XDIST_WORKERS" --dist loadfile); fi
+          set +e
+          uv run "${XD[@]}" pytest -q -rs -p no:cacheprovider --browser exclude --shard-files "$FILES" "${PX[@]}" --durations=25 --junitxml=pytest-junit.xml 2>&1 | tee pytest.out
+          rc=${PIPESTATUS[0]}
+          if [ "$rc" -ne 0 ] && RETRY=$(uv run python tools/ci_flake.py failed-files --junit pytest-junit.xml); then
+            echo "::warning::known transient (socket/load) failures; retrying ONLY these files once: $RETRY"
+            cp pytest-junit.xml first-junit.xml
+            uv run pytest -q -rs -p no:cacheprovider --junitxml=retry-junit.xml $RETRY 2>&1 | tee -a pytest.out
+            rc=${PIPESTATUS[0]}
+            uv run python tools/ci_flake.py report --first first-junit.xml --second retry-junit.xml --out flake-report.json
+            [ "$rc" -eq 0 ] && cp first-junit.xml pytest-junit.xml
+          fi
           if grep -E "(^SKIPPED|[0-9]+ skipped|xfailed)" pytest.out; then echo "::error::tests were skipped"; exit 1; fi
+          exit $rc
+      - name: Timing data and flake report (feeds the next shard plan)
+        if: always() && steps.gate.outputs.run == 'true'
+        uses: actions/upload-artifact@v7
+        with:
+          name: junit-${{ strategy.job-index }}
+          path: |
+            core/pytest-junit.xml
+            core/flake-report.json
+          retention-days: 7
+          if-no-files-found: ignore
       - name: Redacted diagnostics on failure (pytest output, junit, Core logs; no secrets, no user content)
         if: failure()
         shell: bash
@@ -108,30 +190,113 @@ jobs:
         if: failure()
         uses: actions/upload-artifact@v7
         with:
-          name: diagnostics-core-${{ matrix.os }}
+          name: diagnostics-core-${{ matrix.os }}-${{ strategy.job-index }}
           path: core/diag
           retention-days: 7
           if-no-files-found: ignore
-      - name: jarvis.cmd launcher smoke (Windows)
-        if: runner.os == 'Windows'
+      - name: jarvis.cmd launcher smoke (Windows, shard 1 only)
+        if: steps.gate.outputs.run == 'true' && runner.os == 'Windows' && matrix.shard == '1/3'
         shell: cmd
         run: |
           call ..\jarvis.cmd setup --help || exit /b 1
           call ..\jarvis.cmd status > status.txt
           type status.txt
           findstr /C:"Core is NOT running" status.txt || exit /b 1
+  durations:
+    # Rebalances the shards automatically: after a FULL run on main (or a manual run) the measured seconds per test file
+    # are merged into the cache the `changes` job restores. No commit, no token.
+    name: Update the shard timing data
+    needs: [changes, core]
+    if: ${{ always() && needs.core.result == 'success' && github.event_name != 'pull_request' && needs.changes.outputs.reused != 'true' }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/cache/restore@v6
+        with:
+          path: core/tests/durations.json
+          key: jarves-durations-none
+          restore-keys: jarves-durations-
+      - uses: actions/download-artifact@v8
+        with:
+          pattern: junit-*
+          path: junit
+      - run: python3 core/tools/ci_plan.py durations-merge --junit junit --into core/tests/durations.json
+      - uses: actions/cache/save@v6
+        with:
+          path: core/tests/durations.json
+          key: jarves-durations-${{ github.run_id }}
+  browser:
+    # Real-browser tests (Playwright: Chromium on Linux, the preinstalled Edge on Windows) as their own job so the
+    # shards stay fast. One retry of the browser files only; a second failure fails the job. Never skipped.
+    name: Real-browser tests (${{ matrix.os }})
+    needs: [changes, validate]
+    if: needs.changes.outputs.full == 'true'
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, windows-2025]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    defaults:
+      run:
+        working-directory: core
+    steps:
+      - uses: actions/checkout@v7
+      - uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884  # v10.3.0
+        with:
+          enable-cache: true
+          cache-dependency-glob: core/uv.lock
+      - name: "System libraries (Linux, PortAudio for sounddevice)"
+        if: runner.os == 'Linux'
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq libportaudio2
+      - name: Install (locked, all extras)
+        run: uv sync --frozen --all-extras
+      - name: Cache Playwright browsers (Linux)
+        if: runner.os == 'Linux'
+        uses: actions/cache@v6
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ runner.os }}-${{ hashFiles('core/uv.lock') }}
+      - name: Browser (Chromium on Linux, preinstalled Edge on Windows)
+        shell: bash
+        run: |
+          if [ "$RUNNER_OS" = "Linux" ]; then uv run playwright install --with-deps chromium; else echo "using the preinstalled Edge"; fi
+      - name: pytest real-browser files (one retry; ANY skip fails the run)
+        shell: bash
+        run: |
+          run() { uv run pytest -q -rs -p no:cacheprovider --browser only --junitxml=pytest-junit.xml 2>&1 | tee pytest.out; return "${PIPESTATUS[0]}"; }
+          run || { echo "::warning::real-browser tests failed once; retrying the browser files one time"; run; }
+          rc=$?
+          if grep -E "(^SKIPPED|[0-9]+ skipped|xfailed)" pytest.out; then echo "::error::tests were skipped"; exit 1; fi
+          exit $rc
+      - name: Redacted diagnostics on failure
+        if: failure()
+        shell: bash
+        run: uv run python tools/ci_diagnostics.py diag pytest.out pytest-junit.xml || true
+      - name: Upload redacted diagnostics
+        if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: diagnostics-browser-${{ matrix.os }}
+          path: core/diag
+          retention-days: 7
+          if-no-files-found: ignore
   installer:
     # SW-V2 M6: build the real Windows installer and smoke-test it (silent per-user install into a temp dir,
     # --version/status/features/doctor, offline Core start/stop, exported face self-checks, upgrade, uninstall keeps
-    # data, /PURGE=1). On `main` the tested artifact is what .github/workflows/package.yml publishes; PR artifacts are
-    # CI-only (3 days) and never become releases.
+    # data, /PURGE=1). It runs IN PARALLEL with the Python tests (it needs only the checkout, the tool cache and `changes`),
+    # so the release critical path is max(tests, installer), not their sum. The artifact is content-addressed
+    # (`jarves-installer-<git tree>`); jarves-package publishes exactly that artifact once the WHOLE run is green (tests
+    # included), for the PR's merge commit as well (no second build when the tree matches). PR artifacts live 7 days.
     name: Windows installer (build + silent install smoke)
-    needs: [core, changes]
+    needs: [changes, validate]
     if: needs.changes.outputs.installer == 'true'
     runs-on: windows-2025
     timeout-minutes: 45
     env:
       CHANNEL: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' && 'main' || 'pr' }}
+      TREE: ${{ needs.changes.outputs.tree }}
       # WP-O: optional custom update folder baked in as the default (docs/RELEASE_HOSTING.md); unset = the public
       # releases repo (once a signing key is built in), else the private repo's releases
       JARVES_UPDATE_BASE_URL: ${{ vars.JARVES_UPDATE_BASE_URL }}
@@ -158,10 +323,11 @@ jobs:
       - name: Build installer
         shell: pwsh
         run: |
-          # 3.0.0.<run_number>: the public repo restarted its run counter, so the 3.x base keeps versions above the old 0.1.0.<run> series.
+          # X.Y.Z.<run_number>: the version stamp is the run number of THIS build. A reused build keeps it (no rebuild,
+          # no re-stamp): a PR is merged only after a run on top of the current main, so merged builds only grow.
           $base = (Select-String -Path core/pyproject.toml -Pattern '^version\s*=\s*"([^"]+)"').Matches[0].Groups[1].Value
           $v = "$base.${{ github.run_number }}"
-          ./packaging/build_windows.ps1 -Version $v -Channel $env:CHANNEL -Commit $env:GITHUB_SHA `
+          ./packaging/build_windows.ps1 -Version $v -Channel $env:CHANNEL -Commit $env:GITHUB_SHA -Tree $env:TREE `
             -Cache "$env:RUNNER_TEMP/jarves-build-cache" -Out dist
           "VERSION=$v" >> $env:GITHUB_ENV
       - name: Silent install / run / upgrade / uninstall smoke
@@ -175,19 +341,19 @@ jobs:
         run: ./packaging/upgrade_matrix.ps1 -Candidate "dist/JARVES-Setup-$env:VERSION.exe" -Version $env:VERSION
       - uses: actions/upload-artifact@v7
         with:
-          name: jarves-windows-installer-${{ env.CHANNEL }}
+          name: jarves-installer-${{ env.TREE }}
           path: |
             dist/JARVES-Setup-*.exe
             dist/JARVES-Setup-*.exe.sha256
             dist/build-info.json
-          retention-days: ${{ env.CHANNEL == 'main' && 14 || 3 }}
+          retention-days: ${{ env.CHANNEL == 'main' && 30 || 7 }}
           compression-level: 0
           if-no-files-found: error
   whatsapp-bridge:
     # SW-V4 F: the Go WhatsApp bridge (bridge/whatsapp). Offline only: go mod verify, vet, unit + API tests against the
     # fake engine (no WhatsApp account is ever contacted), then a reproducible Windows build checked by rebuilding.
     name: WhatsApp bridge (Go vet/test + reproducible build)
-    needs: changes
+    needs: [changes, validate]
     if: needs.changes.outputs.whatsapp == 'true'
     runs-on: windows-2025
     timeout-minutes: 25
@@ -218,7 +384,7 @@ jobs:
   perf:
     # SW-V4 M: performance gate (core/perf_budgets.toml, class ci = loose). Fails when a budget is exceeded.
     name: Performance gate (Windows)
-    needs: changes
+    needs: [changes, validate]
     if: needs.changes.outputs.perf == 'true'
     runs-on: windows-2025
     timeout-minutes: 15
@@ -245,7 +411,7 @@ jobs:
           retention-days: 14
           if-no-files-found: ignore
   cad:
-    needs: changes
+    needs: [changes, validate]
     if: needs.changes.outputs.cad == 'true'
     runs-on: ubuntu-24.04
     timeout-minutes: 25
@@ -272,7 +438,7 @@ jobs:
           QT_QPA_PLATFORM=offscreen "$FC" cad/mech_estimates.py | tee mech.txt
           grep -q "MECH DONE" mech.txt
   blender:
-    needs: changes
+    needs: [changes, validate]
     if: needs.changes.outputs.blender == 'true'
     runs-on: ubuntu-24.04
     timeout-minutes: 20
@@ -290,7 +456,7 @@ jobs:
       - name: Blender smoke (committed .glb vs CAD manifest, materials, Godot asset sync, renders present)
         run: ./blender-5.2.2-linux-x64/blender -b --python blender/smoke_blender.py
   godot:
-    needs: changes
+    needs: [changes, validate]
     if: needs.changes.outputs.godot == 'true'
     runs-on: ubuntu-24.04
     timeout-minutes: 15
@@ -317,8 +483,8 @@ jobs:
           grep -q "FACE CHECK RESULT: PASS" face.txt
   e2e:
     name: Core-Godot E2E (real processes)
-    needs: changes
-    if: needs.changes.outputs.code == 'true'
+    needs: [changes, validate]
+    if: needs.changes.outputs.e2e == 'true'
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     steps:
@@ -398,3 +564,18 @@ jobs:
           path: diag
           retention-days: 7
           if-no-files-found: ignore
+  ci-ok:
+    # ONE stable required check for branch protection: green when every job above passed or was legitimately skipped
+    # (docs-only, reused proof). Failed or cancelled needs make it red. Per-shard names stay valid required checks too.
+    name: CI result (single required check)
+    if: always()
+    needs: [changes, validate, core, browser, installer, whatsapp-bridge, perf, cad, blender, godot, e2e]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    env:
+      NEEDS: ${{ toJSON(needs) }}
+    steps:
+      - shell: bash
+        run: |
+          echo "$NEEDS" | jq -r 'to_entries[] | "\(.key): \(.value.result)"'
+          echo "$NEEDS" | jq -e '[.[] | select(.result == "failure" or .result == "cancelled")] | length == 0' > /dev/null

@@ -1,0 +1,38 @@
+order = 63
+category = "system"
+pages = ["signoff"]
+features = ["release_signoff"]
+aliases = ["אישור גרסה", "בדיקה ידנית", "גרסה יציבה", "sign-off", "signoff", "manual test", "release"]
+links = ["updates", "beta_channel"]
+title_he = "אישור גרסה (בדיקה ידנית)"
+title_en = "Release sign-off (manual test)"
+what_he = "לפני גרסה יציבה אתם בודקים ידנית את הבטא האחרונה לפי גיליון קצר, ורושמים תוצאות. בלי חתימה הגרסה היציבה לא יוצאת."
+what_en = "Before a stable release you test the latest beta by hand against a short sheet and record the results. Without your sign-off the stable release is refused."
+say = [["איפה אנחנו באישור הגרסה?", "Where are we with the release sign-off?"]]
+expect_he = "הגיליון docs/reviews/MANUAL_TEST_<גרסה>.md מציג שורה לכל בדיקה. החתימה רושמת את הבטא שנבדקה, ה-SHA שלה והתאריך."
+expect_en = "The sheet docs/reviews/MANUAL_TEST_<version>.md has one row per check. Signing records the beta tested, its SHA and the date."
+cost_he = "חינם."
+cost_en = "Free."
+privacy_he = "הגיליון נשמר בקובץ בפרויקט ולא מכיל מידע אישי."
+privacy_en = "The sheet is a file in the project and holds no personal data."
+
+[[steps]]
+he = "צרו גיליון לגרסה: python tools/manual_test_sheet.py --version X.Y.Z (בתיקיית core)."
+en = "Create the sheet for the version: python tools/manual_test_sheet.py --version X.Y.Z (in the core folder)."
+action = "command:python tools/manual_test_sheet.py --version X.Y.Z"
+
+[[steps]]
+he = "עברו על השורות מול הבטא המותקנת ורשמו כל תוצאה: בעמוד אישור גרסה, או jarvis release signoff --version X.Y.Z --row ID --result pass."
+en = "Go through the rows with the installed beta and record each result: on the Release sign-off page, or jarvis release signoff --version X.Y.Z --row ID --result pass."
+action = "open:#/signoff"
+
+[[steps]]
+he = "כשכל שורה pass (או accepted-blocked עם הערה): jarvis release signoff --version X.Y.Z --finish. עכשיו אפשר לתייג vX.Y.Z."
+en = "When every row is pass (or accepted-blocked with a note): jarvis release signoff --version X.Y.Z --finish. Now you can tag vX.Y.Z."
+action = "command:jarvis release signoff --finish"
+
+[[problems]]
+he = "החתימה מסרבת"
+en = "Signing is refused"
+fix_he = "נשארה שורה פתוחה, או שאין בטא מותקנת מערוץ הבטא. עברו לבטא (jarvis update --channel beta), התקינו אותה ונסו שוב; אפשר גם לתת --beta ו---commit."
+fix_en = "A row is still open, or no beta from the beta channel is installed. Switch to beta (jarvis update --channel beta), install it and try again; you can also pass --beta and --commit."

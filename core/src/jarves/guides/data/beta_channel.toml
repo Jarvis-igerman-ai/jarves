@@ -1,0 +1,38 @@
+order = 62
+category = "system"
+pages = ["updates"]
+features = ["beta_channel"]
+aliases = ["בטא", "ערוץ בטא", "גרסת בטא", "beta", "beta channel", "early builds", "update channel"]
+links = ["updates", "backup", "release_signoff"]
+title_he = "ערוץ בטא (גרסאות מוקדמות)"
+title_en = "Beta channel (early builds)"
+what_he = "במקום לחכות לגרסה יציבה, אפשר לקבל כל בנייה ירוקה של הפיתוח, חתומה, מיד כשהיא מוכנה. תמיד אפשר לחזור."
+what_en = "Instead of waiting for a stable release you can get every green development build, signed, as soon as it is ready. You can always go back."
+say = [["תעבור לערוץ בטא", "Switch to the beta channel"]]
+expect_he = "בכותרת הלוח, ב-jarvis status וב-jarvis update כתוב BETA עם מספר הבטא (למשל 4.1.0-beta.7). ג'ארביס שואל לפני כל התקנה, מגבה, ושומר את הגרסה הקודמת."
+expect_en = "The dashboard header, jarvis status and jarvis update say BETA with the beta number (for example 4.1.0-beta.7). JARVES asks before every install, makes a backup and keeps the previous version."
+cost_he = "חינם."
+cost_en = "Free."
+privacy_he = "הבדיקה מורידה קובץ חתום אחד (latest-beta.json); לא נשלח שום מידע אישי."
+privacy_en = "The check downloads one signed file (latest-beta.json); no personal data is sent."
+
+[[steps]]
+he = "הריצו jarvis update --channel beta, או בעמוד Updates לחצו \"מעבר לערוץ הבטא\"."
+en = "Run jarvis update --channel beta, or on the Updates page press Switch to the beta channel."
+action = "command:jarvis update --channel beta"
+
+[[steps]]
+he = "ג'ארביס בודק מיד. אם יש בטא חדשה הוא שואל; אשרו עם jarvis update install או הכפתור בעמוד Updates."
+en = "He checks right away. If there is a newer beta he asks; approve with jarvis update install or the button on the Updates page."
+action = "open:#/updates"
+
+[[steps]]
+he = "אם בטא מקלקלת משהו: jarvis update --rollback חוזר לגרסה הקודמת עם הנתונים מלפניה. לחזרה לערוץ היציב: jarvis update --channel stable."
+en = "If a beta breaks something: jarvis update --rollback goes back to the previous version with the data from before it. To return to the stable channel: jarvis update --channel stable."
+action = "command:jarvis update --channel stable"
+
+[[problems]]
+he = "כתוב שערוץ הבטא לא זמין"
+en = "It says the beta channel is unavailable"
+fix_he = "בטא מתפרסמת רק אחרי שהבעלים הפעיל את הפרסום (ENABLE_BETA_PUBLISH) ואחרי שבנייה ירוקה הושלמה. עד אז אין קובץ בטא, וזה תקין."
+fix_en = "Betas are published only after the owner turned publishing on (ENABLE_BETA_PUBLISH) and a green build finished. Until then there is no beta file, which is normal."
