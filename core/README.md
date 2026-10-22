@@ -244,7 +244,8 @@ User-facing walkthrough: [USER_GUIDE](../docs/USER_GUIDE.md) ([עברית](../do
 | Wake model | `jarvis wake test --apply`, `jarvis wake train [--revert]` | `wake_word` | [SWV4_WAKE_TRAIN](../docs/reviews/SWV4_WAKE_TRAIN.md) |
 | Performance gates | `python tools/perf_gate.py --class ci` (or `owner`); budgets in `perf_budgets.toml` | none | [SWV4_PERF_BUDGETS](../docs/reviews/SWV4_PERF_BUDGETS.md), [SWV4_M_PERF_CI](../docs/reviews/SWV4_M_PERF_CI.md) |
 | Dashboard (English, Hebrew) | `jarvis dashboard` | `dashboard` | [SWV4_K_DASHBOARD](../docs/reviews/SWV4_K_DASHBOARD.md) |
+| Assisted dialing | `jarvis dial <name\|number>` | `assisted_dialing` (off by default) | [SWV4_H_DIALING](../docs/reviews/SWV4_H_DIALING.md) |
 
-Assisted dialing (`jarvis dial`, branch `v4/h-dialing`) and installer upgrade, `jarvis update --rollback` (branch `v4/l-installer`) are documented in the user guide and become part of this table when merged. The test count in the Tests section above is historical; run `uv run pytest -q` for the current suite (one pytest at a time).
+Installer upgrade and `jarvis update --rollback`: [SWV4_L_INSTALLER](../docs/reviews/SWV4_L_INSTALLER.md).
 
 Exit codes: `jarvis status` returns 4 when the Core runs headless (face absent). `jarvis features on ID` exits 0 even when the feature is unavailable; read the printed reason.
