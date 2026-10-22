@@ -9,6 +9,25 @@
 - Scope: measured parallel bundle stages, stable pinned-tool cache, source-only code archive, separate non-publishable fast smoke profile; Inno EN/HE keep-data page, verified app backups and profile migrations, previous program snapshot/offline rollback, first user PATH with reversible known-shim retirement, windowless dashboard button. Restricted wizard/CLI/console implementation files untouched; one installer assertion in test_setup_wizard.py updated for the button.
 - Baseline run 39737015500: installer job 7m42s, build 134.4s, release compression 91.26s, clean install 50.8s. Green checkpoint run 39747590940 (76983c5): build job 3m43s (now separate checks), release build 118.7s/clean install 41.9s, smoke build 46.8s/clean install 51.0s; 7,918 staged files, 2,656 archived. Both smoke profiles passed; the new matrix argument forwarding was fixed/regression-tested. Follow-up fixes compare the same preservation files, avoid 1970 timestamps triggering normal retention, and wait for actual rollback completion before uninstall. These are not owner-PC measurements or a claim all checks finish under 5 minutes.
 - Local packaging/backup tests and Inno compile pass; new SHA-pinned 4.0.0.153 fixture covers real upgrade/rollback with fake 0.95 wake/model/profile/credential data. Merged coordinator main dd77cf0 cleanly; all jobs passed on 76983c5. A final directive makes English the fresh default; exact final-head evidence is recorded in PR #68. User approved visual preview; the desktop tool could not launch it (app approval/elicitation unavailable). No installer window opened or owner-PC install performed. See INSTALLER_58.md and PR #68 for current evidence; issue remains open for app wizard and owner verification. No merge authorized for this task.
+## Installer PR #68 recovery (22 Oct 2026)
+
+- Synchronized main and the declared #72 prerequisite without rewriting branch history. Reconciled DOC_MAP and
+  included the installer smoke/upgrade jobs in the failure summary's dependencies as well as the required CI result.
+- Focused local installer/packaging regression: 45 passed. Full local gate and exact-head hosted results are in #68.
+- Owner-PC timing and interactive installer layout remain UNVERIFIED; issue #58 stays open. The installed beta was
+  not replaced by local smoke tests. CI uses disposable Windows runners and fake account/data fixtures.
+- Decision queue: merging this PR when reviewed and green ANSWERED by the owner's request; physical/account/live
+  behavior gates DEFERRED. No new user decision is required for this bounded integration.
+
+## PR readiness recovery (22 Oct 2026) — owner authorized #72, #68, #70
+
+- #72 synchronized with current main, retaining both the local pre-push rule and individual-PR review/merge rule.
+- The guide-state isolation fix is already on main. Corrected failure-summary classification: a test that failed again
+  is not a test that passed on retry; focused regression added. No runtime behavior changed.
+- Verification and exact-head hosted CI are recorded in PR #72. Subsequent #68/#70 merges require their own final-head
+  checks and diff review; no force push, blind merge or test weakening is authorized.
+- Decision queue: merge authorization ANSWERED by the owner's current request. Prior physical, account, paid QA and
+  human sign-off gates remain DEFERRED to their owning milestones; green CI does not satisfy them.
 
 ## Release and test system plan (22 Oct 2026) — docs only, stacked on PR #57, not merged
 
