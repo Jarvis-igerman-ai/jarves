@@ -11,18 +11,23 @@
 - #70's first hosted run exposed missing tour-routing rows and piped setup launching the tour. Added bilingual routing
   coverage and restricted the automatic tour offer to an interactive terminal with the dashboard enabled; 7 targeted
   setup/routing/budget tests passed. Final exact-head CI is linked in the PR. No acceptance criterion was removed.
+- Final Windows CI also exposed a real workspace undo bug: equal backup mtimes sorted the unsuffixed filename ahead
+  of newer numbered backups. The Python workspace owner now orders ties numerically and keeps suffixes increasing
+  after retention pruning. A frozen-clock/equal-mtime regression covers numbers above 9 and pruning; all 36 focused
+  workspace/chat tests passed. No history was mutated on the owner's profile; visual source hashes remain unchanged.
 - Both remaining PRs use isolated worktrees, no force pushes, no runtime sensor/account/paid tests. Preview links and
   hashes are below. The owner-PC beta installed earlier is build 199; these merges do not prove that PC was updated again.
 - Unrelated inherited `.github/workflows/next-flow.yml` failures on main predate this work; the branch flow remains
   disabled (`ENABLE_NEXT_FLOW` absent). The primary `jarves-checks` and package results are reported separately.
 - GitHub temporarily retained active workflow records after all their jobs completed. Waited; when the stale main
   records disappeared, a fresh query confirmed no active main run and #68 merged without needing a rule override.
+  Owner subsequently explicitly authorized proceeding past stale workflow records after verifying no actual jobs run.
 
 ### Decision queue (including carried questions)
 
 | Question | Recommendation / tradeoff | Status and exact gate |
 |---|---|---|
-| Merge these three PRs? | Individual reviewed green merges preserve attribution and isolate failures. | ANSWERED: owner explicitly authorized; no main-run overlap. |
+| Merge these three PRs? | Individual reviewed green merges preserve attribution and isolate failures. | ANSWERED: owner explicitly authorized; verify no actual main jobs run. Owner permits ignoring stale workflow records once every job finished. |
 | Enable next branch / bot fast-forward? | Keep disabled for this work; current owner rule prefers individual merges. | DEFERRED: future explicit workflow decision; no variable/token changes. |
 | Publish betas / daily promotion? | Keep existing beta publishing, keep stable behind owner sign-off. | ANSWERED for current beta: `ENABLE_BETA_PUBLISH=true`; daily/stable promotion DEFERRED to release policy. |
 | Which sandbox for future scenario runs? | Use the current fake-data local tests and disposable hosted runners here. | DEFERRED: broader scenario-runner stage, not needed for these PRs. |

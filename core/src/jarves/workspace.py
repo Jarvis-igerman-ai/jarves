@@ -288,21 +288,33 @@ class Workspace:
         d = self._hdir(name)
         d.mkdir(parents=True, exist_ok=True)
         stamp = datetime.now().strftime("%Y%m%d-%H%M%S")
-        n, version = 0, stamp
+        n = 0
+        for path in d.glob(f"{stamp}*.md"):
+            suffix = path.stem.removeprefix(stamp)
+            if not suffix or suffix.startswith("-") and suffix[1:].isdigit():
+                n = max(n, int(suffix[1:] or 0) + 1)
+        version = stamp if n == 0 else f"{stamp}-{n}"
         while (d / f"{version}.md").exists():
             n += 1
             version = f"{stamp}-{n}"
         (d / f"{version}.md").write_text(text, encoding="utf-8")
-        for old in sorted(d.glob("*.md"), key=lambda p: (p.stat().st_mtime_ns, p.name))[:-HISTORY_KEEP]:
+        for old in sorted(d.glob("*.md"), key=self._history_order)[:-HISTORY_KEEP]:
             old.unlink(missing_ok=True)
         return version
+
+    @staticmethod
+    def _history_order(path: Path) -> tuple:
+        # Windows can give rapid writes the same mtime. Compare the numeric suffix,
+        # including the unsuffixed first backup, rather than '.md' versus '-1.md'.
+        version = tuple(int(part) for part in path.stem.split("-") if part.isdecimal())
+        return path.stat().st_mtime_ns, version, path.name
 
     def history(self, name: str) -> list[dict]:
         """Saved previous versions, newest first: [{version, chars, saved}]."""
         d = self._hdir(self.path(name).name)
         if not d.exists():
             return []
-        items = sorted(d.glob("*.md"), key=lambda p: (p.stat().st_mtime_ns, p.name), reverse=True)
+        items = sorted(d.glob("*.md"), key=self._history_order, reverse=True)
         return [{"version": p.stem, "chars": p.stat().st_size,
                  "saved": datetime.fromtimestamp(p.stat().st_mtime).isoformat(timespec="seconds")} for p in items]
 

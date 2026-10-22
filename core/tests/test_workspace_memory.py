@@ -65,6 +65,29 @@ def test_workspace_defaults_sections_and_hot_reload(tmp_path):
     assert len(ws.section("front")) <= wsp.TOTAL_CHARS["front"] + 300 and "(truncated)" in ws.section("front")
 
 
+def test_workspace_undo_orders_equal_timestamp_backups_numerically(tmp_path, monkeypatch):
+    from datetime import datetime
+
+    class FrozenDateTime(datetime):
+        @classmethod
+        def now(cls, tz=None):
+            return cls(2026, 10, 22, 12, 0, 0)
+
+    monkeypatch.setattr(wsp, "datetime", FrozenDateTime)
+    monkeypatch.setattr(wsp, "HISTORY_KEEP", 3)
+    ws = wsp.Workspace(tmp_path / "ws")
+    for i in range(12):
+        result = ws.write("USER", f"version {i}\n", by="user")
+        path = ws._hdir("USER.md") / f"{result['version']}.md"
+        os.utime(path, ns=(1_000_000_000, 1_000_000_000))
+    history = ws.history("USER")
+    assert len(history) == 3
+    assert history[0]["version"].endswith("-11")
+    assert ws.read_version("USER", history[0]["version"]) == "version 10\n"
+    ws.undo("USER")
+    assert ws.read("USER") == "version 10\n"
+
+
 def test_workspace_write_backup_undo_and_limits(tmp_path):
     ws = wsp.Workspace(tmp_path / "ws")
     seen = []
