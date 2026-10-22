@@ -55,7 +55,7 @@ CREATE TABLE IF NOT EXISTS jobs (
     created REAL NOT NULL, updated REAL NOT NULL, approved_at REAL, approved_by TEXT);
 """
 CONFIG = '[voice]\nmode = "off"\nwake_threshold = 0.95\n\n[music]\nprovider = "none"\n\n[link]\nport = 18765\n'
-FEATURES = {"chimes": {"enabled": False}, "autostart": {"enabled": True}}
+FEATURES = {"version": 1, "enabled": {"chimes": False, "autostart": True}, "changed": {}, "requests": {}}
 IDENTITY = {"display_name": "SeedMax"}
 SETTINGS_FILES = {"config.toml": CONFIG, "features.json": json.dumps(FEATURES), "identity.json": json.dumps(IDENTITY)}
 PRESERVED_FILES = {

@@ -72,3 +72,17 @@ def test_independent_smokes_are_isolated_and_all_required():
     positions = {step.get("id"): i for i, step in enumerate(build_steps) if step.get("id")}
     assert positions["start"] < positions["bridge"] < positions["build"]
     assert "always()" in build_steps[positions["build"]]["if"]
+
+
+def test_seeded_feature_choices_match_the_runtime_schema(tmp_path):
+    import importlib.util
+    from jarves.features import Features
+    spec = importlib.util.spec_from_file_location("parallel_seed", PKG / "seed_legacy.py")
+    seed = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(seed)
+    seed.seed(tmp_path)
+    # A data-only install must recognize existing choices; an unchanged autostart command does not rewrite them.
+    features = Features(home=tmp_path)
+    assert features.enabled("autostart") is True
+    assert features.enabled("chimes") is False
+    assert seed.verify(tmp_path, legacy=True) == []
