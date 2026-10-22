@@ -327,6 +327,8 @@ jobs:
     if: needs.changes.outputs.installer == 'true'
     runs-on: windows-2025
     timeout-minutes: 45
+    outputs:
+      version: ${{ steps.build.outputs.version }}
     env:
       CHANNEL: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' && 'main' || 'pr' }}
       TREE: ${{ needs.changes.outputs.tree }}
@@ -342,36 +344,40 @@ jobs:
         uses: actions/cache@v6
         with:
           path: ${{ runner.temp }}/jarves-build-cache
-          key: jarves-build-tools-${{ hashFiles('packaging/build_windows.ps1') }}
+          key: jarves-build-tools-v2-${{ hashFiles('packaging/windows/tool-cache.txt') }}
+          restore-keys: jarves-build-tools-
+      - name: Start Python/Godot bundle while Go and bridge are prepared
+        id: start
+        shell: pwsh
+        run: |
+          $base = (Select-String -Path core/pyproject.toml -Pattern '^version\s*=\s*"([^"]+)"').Matches[0].Groups[1].Value
+          $v = "$base.${{ github.run_number }}"
+          "VERSION=$v" >> $env:GITHUB_ENV
+          ./packaging/installer_job.ps1 -Action Start -StateDir "$env:RUNNER_TEMP/jarves-bundle" `
+            -Version $v -Channel $env:CHANNEL -Commit $env:GITHUB_SHA -Tree $env:TREE `
+            -Cache "$env:RUNNER_TEMP/jarves-build-cache" -Out "$env:GITHUB_WORKSPACE/dist"
       - uses: actions/setup-go@v7
         with:
           go-version: "1.27.0"
           cache-dependency-path: bridge/whatsapp/go.sum
       - name: Build the pinned WhatsApp bridge (same reproducible build as the whatsapp-bridge job)
+        id: bridge
         shell: pwsh
         run: |
           $pin = Get-Content packaging/bridge_pin.json -Raw | ConvertFrom-Json
           ./scripts/build_whatsapp_bridge.ps1 -Version $pin.version
-          "JARVES_BRIDGE_EXE=$((Resolve-Path bridge/whatsapp/dist/whatsapp_bridge.exe).Path)" >> $env:GITHUB_ENV
-      - name: Build installer
+          if ($LASTEXITCODE -ne 0) { throw "Bridge build failed" }
+          $got = (Get-FileHash bridge/whatsapp/dist/whatsapp_bridge.exe -Algorithm SHA256).Hash.ToLower()
+          if ($got -ne $pin.sha256) { throw "Bridge SHA256 does not match the pin" }
+          New-Item -ItemType File -Path "$env:RUNNER_TEMP/jarves-bundle/bridge.ready" | Out-Null
+      - name: Build installer (join background bundle)
+        id: build
+        if: always() && steps.start.outcome == 'success'
         shell: pwsh
         run: |
-          # X.Y.Z.<run_number>: the version stamp is the run number of THIS build. A reused build keeps it (no rebuild,
-          # no re-stamp): a PR is merged only after a run on top of the current main, so merged builds only grow.
-          $base = (Select-String -Path core/pyproject.toml -Pattern '^version\s*=\s*"([^"]+)"').Matches[0].Groups[1].Value
-          $v = "$base.${{ github.run_number }}"
-          ./packaging/build_windows.ps1 -Version $v -Channel $env:CHANNEL -Commit $env:GITHUB_SHA -Tree $env:TREE `
-            -Cache "$env:RUNNER_TEMP/jarves-build-cache" -Out dist
-          "VERSION=$v" >> $env:GITHUB_ENV
-      - name: Silent install / run / upgrade / uninstall smoke
-        shell: pwsh
-        run: ./packaging/smoke_windows.ps1 -Installer "dist/JARVES-Setup-$env:VERSION.exe" -Version $env:VERSION -RequireFace -CheckAutostart -DefaultTasks -MetricsOut dist/installer-metrics.json
-      - name: Installer size / time budget (SW-V4 L; same numbers feed core/tools/perf_gate.py --installer-json)
-        shell: pwsh
-        run: python packaging/installer_metrics.py check --metrics dist/installer-metrics.json --class ci
-      - name: Upgrade + rollback matrix (old installers pinned in packaging/upgrade_fixtures.json)
-        shell: pwsh
-        run: ./packaging/upgrade_matrix.ps1 -Candidate "dist/JARVES-Setup-$env:VERSION.exe" -Version $env:VERSION
+          ./packaging/installer_job.ps1 -Action Wait -StateDir "$env:RUNNER_TEMP/jarves-bundle" `
+            -Abort:("${{ steps.bridge.outcome }}" -ne "success")
+          "version=$env:VERSION" >> $env:GITHUB_OUTPUT
       - uses: actions/upload-artifact@v7
         with:
           name: jarves-installer-${{ env.TREE }}
@@ -379,9 +385,77 @@ jobs:
             dist/JARVES-Setup-*.exe
             dist/JARVES-Setup-*.exe.sha256
             dist/build-info.json
+            dist/build-stages.json
+            dist/payload-metrics.json
           retention-days: ${{ env.CHANNEL == 'main' && 30 || 7 }}
           compression-level: 0
           if-no-files-found: error
+      - uses: actions/upload-artifact@v7
+        with:
+          name: jarves-smoke-installer-${{ env.TREE }}
+          path: dist/smoke/*
+          retention-days: 3
+          compression-level: 0
+          if-no-files-found: error
+  installer-smoke:
+    name: Installer smoke (${{ matrix.profile }}, ${{ matrix.scenario }})
+    needs: [installer, changes]
+    runs-on: windows-2025
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        profile: [release, ci-smoke]
+        scenario: [functional, autostart-purge]
+    env:
+      VERSION: ${{ needs.installer.outputs.version }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/download-artifact@v8
+        with:
+          name: ${{ matrix.profile == 'release' && 'jarves-installer-' || 'jarves-smoke-installer-' }}${{ needs.changes.outputs.tree }}
+          path: dist
+      - name: Silent install / run / upgrade / uninstall smoke
+        shell: pwsh
+        run: ./packaging/smoke_windows.ps1 -Installer "dist/JARVES-Setup-$env:VERSION.exe" -Version $env:VERSION -RequireFace -CheckAutostart -DefaultTasks -Scenario ${{ matrix.scenario }} -MetricsOut dist/installer-metrics.json
+      - name: Installer size / time budget
+        if: matrix.profile == 'release'
+        shell: pwsh
+        run: python packaging/installer_metrics.py check --metrics dist/installer-metrics.json --class ci
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: installer-metrics-${{ matrix.profile }}-${{ matrix.scenario }}
+          path: dist/*metrics.json
+          retention-days: 7
+          if-no-files-found: ignore
+  installer-upgrade:
+    name: Installer upgrade and rollback
+    needs: [installer, changes]
+    runs-on: windows-2025
+    timeout-minutes: 20
+    env:
+      VERSION: ${{ needs.installer.outputs.version }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/download-artifact@v8
+        with:
+          name: jarves-installer-${{ needs.changes.outputs.tree }}
+          path: dist
+      - uses: actions/cache@v6
+        with:
+          path: ${{ runner.temp }}/jarves-upgrade-fixtures
+          key: jarves-upgrade-${{ hashFiles('packaging/upgrade_fixtures.json') }}
+      - name: Upgrade + rollback matrix (SHA-pinned old installers, fake old data)
+        shell: pwsh
+        run: ./packaging/upgrade_matrix.ps1 -Candidate "dist/JARVES-Setup-$env:VERSION.exe" -Version $env:VERSION -MetricsDir dist
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: installer-upgrade-metrics
+          path: dist/upgrade-*-metrics.json
+          if-no-files-found: ignore
+          retention-days: 7
   whatsapp-bridge:
     # SW-V4 F: the Go WhatsApp bridge (bridge/whatsapp). Offline only: go mod verify, vet, unit + API tests against the
     # fake engine (no WhatsApp account is ever contacted), then a reproducible Windows build checked by rebuilding.
@@ -602,7 +676,7 @@ jobs:
     # (docs-only, reused proof). Failed or cancelled needs make it red. Per-shard names stay valid required checks too.
     name: CI result (single required check)
     if: always()
-    needs: [changes, validate, core, browser, installer, whatsapp-bridge, perf, cad, blender, godot, e2e]
+    needs: [changes, validate, core, browser, installer, installer-smoke, installer-upgrade, whatsapp-bridge, perf, cad, blender, godot, e2e]
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     env:
@@ -617,7 +691,7 @@ jobs:
     # flakes marked from the flake-report artifact. No secrets, no log content beyond one redacted line (core/tools/ci_comment.py).
     name: Failure summary comment (PR only)
     if: failure() && github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository
-    needs: [changes, validate, core, browser, installer, whatsapp-bridge, perf, cad, blender, godot, e2e]
+    needs: [changes, validate, core, browser, installer, installer-smoke, installer-upgrade, whatsapp-bridge, perf, cad, blender, godot, e2e]
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     continue-on-error: true

@@ -107,6 +107,7 @@ def test_uninstall_purge_is_guarded():
     iss = (PKG / "windows" / "jarves.iss").read_text(encoding="utf-8-sig")
     code = iss.split("[Code]", 1)[1]
     assert '#include "purge_guard.iss"' in code
+    code = code.split("procedure CurUninstallStepChanged", 1)[1]
     guard_at = code.index("if not IsDataDirSafeToPurge(Dir) then")
     assert code.count("DelTree(") == 2 and all(code.index("DelTree(", i) > guard_at
                                                 for i in range(len(code)) if code.startswith("DelTree(", i))

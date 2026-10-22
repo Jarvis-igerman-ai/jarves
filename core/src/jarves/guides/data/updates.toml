@@ -21,6 +21,18 @@ he = "התקנה ראשונה: הריצו את קובץ ההתקנה של ג'א�
 en = "First install: run the JARVES installer, or jarvis from the project folder."
 
 [[steps]]
+he = "במתקין בחרו English או עברית. האפשרות לשמור הגדרות ונתונים מהגרסה הישנה מסומנת כברירת מחדל. לפני הסבה נוצר גיבוי מאומת; מודלים ופרטי כניסה נשארים בתיקייה המקומית. ביטול הסימון מעביר את התיקייה הישנה הצידה ושומר אותה לחזרה."
+en = "Choose English or Hebrew in Setup. Keep my settings and data from the old version is ON by default. Setup verifies an app backup before migration; models and sign-in data remain local. Clearing the box moves the old data aside and retains it for rollback."
+
+[[steps]]
+he = "הפעלה עם Windows וקיצור דרך לשולחן העבודה כבויים כברירת מחדל. התיקייה המותקנת מתווספת לראש PATH של המשתמש; הסרת ההתקנה מבטלת זאת. בסיום לחצו Set up JARVES now לפתיחת הדשבורד ללא חלון מסוף."
+en = "Start with Windows and Desktop shortcut are OFF by default. The installed folder goes first in your user PATH; uninstall reverses it. Press Set up JARVES now on the final page to open the dashboard without a terminal."
+
+[[steps]]
+he = "עדכון שקט (/VERYSILENT) מדלג על המסכים ושומר נתונים. חלון ההתקנה לא מבקש מפתחות: חיבורים והרשאות מוגדרים באפליקציה."
+en = "Silent updates (/VERYSILENT) skip the pages and keep data. Setup does not ask for keys: connections and permissions are configured inside the app."
+
+[[steps]]
 he = "ודאו שהמתג \"בדיקת עדכונים\" דולק. כשיש עדכון הוא שואל אתכם."
 en = "Keep the Update check switch on. When there is an update he asks you."
 action = "feature_on:update_check"

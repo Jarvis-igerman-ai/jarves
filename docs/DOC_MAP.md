@@ -132,3 +132,5 @@ Reports and bug tables are evidence of a past run, not instructions. A package's
 | [reviews/BUG_TABLE_4_1](reviews/BUG_TABLE_4_1.md) | Bug table 4.1, first sweep | 4.0.1 | current | [BUGFIX_LANE](BUGFIX_LANE.md) |
 | [reviews/MANUAL_TEST_4.0.0](reviews/MANUAL_TEST_4.0.0.md) | Manual test sheet for 4.0.0 (owner) | 4.0.0 | current | [RELEASING](RELEASING.md) |
 | [reviews/SWV4_P01_VERIFY](reviews/SWV4_P01_VERIFY.md) | Owner-assisted verification, ported from the legacy branch | V4 | historical | [MIGRATION_AUDIT](MIGRATION_AUDIT.md) |
+
+| [Windows installer #58](INSTALLER_58.md) | Installer setup, backup, rollback and measured timings | V4 | current | itself |

@@ -1,0 +1,4 @@
+python=3.12.15+20261013
+godot=4.7.2-stable
+inno=7.1.0
+cache-schema=1
