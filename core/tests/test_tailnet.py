@@ -100,6 +100,7 @@ def test_tailnet_clients_reach_only_phone_paths_and_only_when_tailscale_is_used(
 
 def tail_dash(home, **kw):
     info = {"present": True, "ip": "127.0.0.1", "name": TAIL_NAME, "state": "ready"}   # loopback stands in for the tailnet NIC
+    kw.setdefault("lan_host", "127.0.0.1")                  # no routing probe (the offline test guard blocks it)
     return dashboard.Dashboard(home, Config(), free_port(), mobile_on=True, tailnet=info,
                                mobile_bridge=FakeCore().bridge(), **kw)
 
@@ -323,8 +324,9 @@ def test_first_save_keeps_new_install_values(tmp_path):
     assert cfg.log.level == "DEBUG" and cfg.log.privacy is True and cfg.ai.delegation_mode == "client"
 
 
-def test_cli_phone_commands(home, capsys):
-    from jarves import phone_cli
+def test_cli_phone_commands(home, capsys, monkeypatch):
+    from jarves import phone_cli, tailnet
+    monkeypatch.setattr(tailnet, "local_addresses", lambda: [])        # no hostname lookup (offline test guard)
     cfg = Config()
     ns = lambda **k: SimpleNamespace(json=False, **k)
     assert phone_cli.cmd_phone(ns(action="approvals", state="on"), cfg, home) == 0

@@ -140,6 +140,8 @@ class Continuity:
     def add_turn(self, device: str, role: str, text: str, cid: str | None = None) -> int:
         """Append one turn (role user|assistant). The same (device, cid, role) is stored once."""
         text = str(text or "")[:4000]
+        if logs.privacy():                       # privacy on: the journal keeps who spoke and when, never the words
+            text = ""
         with self._lock:
             if cid:
                 got = self._rows("SELECT seq FROM journal WHERE device=? AND cid=? AND role=?", (device, cid, role))

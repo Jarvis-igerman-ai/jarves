@@ -16,7 +16,6 @@ All notable changes to JARVES. Newest first. Details per release: [docs/RELEASE_
 - Fixed: bug sweep 4.1 part 1 (leaked memory.db handles, quiet-wait and warm-up in tests, suite V04/V05/S12 triage).
 - Docs: release and test system plan, quality review, migration audit and owner decisions, GREEN-API/Flow API evaluation.
 
-## 4.0 (unreleased, in integration)
 ## 4.0.0 (release candidate, not yet released)
 
 - Added: privacy hardening and redaction audit; independent security re-review fixes; compact approvals popup with signed answers; client-mode GPT-Live delegation with a strict budget; Agent Orchestrator for Claude Code and Codex; WhatsApp bridge (read first, approved sends); conversation recall; Health page and Self-Diagnostics 2.0; performance budgets and nightly CI; owner-trained wake head; dashboard in English and Hebrew with accessibility fixes.

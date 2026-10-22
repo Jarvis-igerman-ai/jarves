@@ -40,6 +40,7 @@ from pathlib import Path
 from . import approvals as appr
 from . import features as feat
 from . import logs
+from .capabilities import PI_ROADMAP
 from .skills import TOOL_SINK
 
 FEATURE = "web_chat"
@@ -79,7 +80,7 @@ feat.register(FEATURE, "שיחה בלוח הבקרה", "Web chat (dashboard Chat
                                    "evidence": "UNIT test_web_chat.py (fake Core and model, real dashboard and phone HTTP, "
                                                "first-answer-wins approvals, forbidden pages refused server-side, Hebrew round trip)",
                                    "blocker": "never opened in a real browser on the owner's PC or on a real phone"},
-                       "linux_arm64_pi": {"status": "implemented_unverified",
+                       "linux_arm64_pi": {"status": "implemented_unverified", "roadmap_issue": PI_ROADMAP,
                                           "blocker": "pure Python and plain JavaScript; not run on a Raspberry Pi yet (no device in the test setup)"}},
               permissions=["read", "action"],
               settings="dashboard Chat page, `jarvis web`, dashboard Phone page (pages per phone)")

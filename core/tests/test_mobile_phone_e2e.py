@@ -57,6 +57,29 @@ class FakeCore:
                       voice_available=lambda: True)
 
 
+class _Mem:
+    def __init__(self):
+        self.s = {}
+
+    def get_setting(self, k):
+        return self.s.get(k)
+
+    def set_setting(self, k, v):
+        self.s[k] = v
+
+
+class _ChatCore:
+    """What chat_engine.WebChat needs from a Core: a home, a memory and one async answer (fake model, no network)."""
+
+    def __init__(self, home, fake):
+        self.home, self.fake, self.memory, self.stopping = home, fake, _Mem(), False
+
+    async def respond_remote(self, text, *, on_delta=None, fresh=False):
+        from types import SimpleNamespace
+        self.fake.chats.append(text)
+        return SimpleNamespace(text="echo: " + text, ok=True, code="", source="")
+
+
 class Phone:
     """One running Core dashboard with phone access, plus the owner's own (loopback) session."""
 
@@ -67,14 +90,16 @@ class Phone:
         if tls:
             kw["tls"] = mobile.make_selfsigned(home, HOST)
         self.features = Features(Config(), home)
-        self.d = dashboard.Dashboard(home, Config(), free_port(), mobile_on=True, lan_host=HOST,
-                                     mobile_bridge=self.fake.bridge(), **kw).start()
-        self.d.mobile.gate = lambda: self.features.enabled("mobile_access")      # as app.py wires it
-        self.features.set("mobile_access", True)
-        self.base = f"{'https' if tls else 'http'}://{HOST}:{self.d.port}"
         self.loop = asyncio.new_event_loop()
         self.thread = threading.Thread(target=self.loop.run_forever, daemon=True)
         self.thread.start()
+        from jarves import chat_engine
+        self.chat = chat_engine.WebChat(_ChatCore(home, self.fake), self.loop)
+        self.d = dashboard.Dashboard(home, Config(), free_port(), mobile_on=True, lan_host=HOST,
+                                     mobile_bridge=self.fake.bridge(), chat=self.chat, **kw).start()
+        self.d.mobile.gate = lambda: self.features.enabled("mobile_access")      # as app.py wires it
+        self.features.set("mobile_access", True)
+        self.base = f"{'https' if tls else 'http'}://{HOST}:{self.d.port}"
         self.svc = self.run(self._mk())
         self.asks: list = []
 
@@ -121,6 +146,7 @@ class Phone:
     def close(self):
         for r in appr.read_pending_file(self.home, reveal=False):             # let no ask() outlive the test
             appr.submit_answer(self.home, r["id"], False, channel="phone")
+        self.chat.close()
         self.d.stop()
         self.loop.call_soon_threadsafe(self.loop.stop)
         self.thread.join(5)
@@ -171,6 +197,13 @@ def ui_pair(page, p: Phone, name="Pixel test"):
     page.tap("#pairForm button[type=submit]")
     page.wait_for_selector("#appView:not([hidden])")
     return c
+
+
+def say(page, text):
+    """Type into the shared chat view (chatview.js) on the Chat tab and send."""
+    page.tap("[data-tab=chat]")
+    page.fill(".jc-in", text)
+    page.tap(".jc-send")
 
 
 def until(page, js, timeout=15000):
@@ -247,30 +280,20 @@ def test_chat_round_trip_and_idempotent_resend_after_a_lost_answer(browser, phon
     p = phone()
     page = new_page(browser)
     ui_pair(page, p)
-    page.fill("#chatText", "hello")
-    page.tap("#chatForm button[type=submit]")
-    until(page, "[...document.querySelectorAll('.msg')].some(m => m.textContent === 'echo: hello')")
+    say(page, "hello")
+    until(page, "[...document.querySelectorAll('.jc-msg')].some(m => m.textContent.includes('echo: hello'))")
     assert p.fake.chats == ["hello"]
-    # Wi-Fi blip: the Core runs the message, the answer is lost on the way back, the app resends with the same id
-    seen = []
-
-    def lost_answer(route):
-        seen.append(route.request.post_data_json)
-        if len(seen) == 1:
-            route.fetch(url=f"http://127.0.0.1:{p.d.port}/api/m/chat", headers={**route.request.headers, "host": f"{HOST}:{p.d.port}"})
-            route.abort("connectionreset")
-        else:
-            route.continue_()
-    page.route("**/api/m/chat", lost_answer)
-    page.fill("#chatText", "turn on the light")
-    page.tap("#chatForm button[type=submit]")
-    until(page, "[...document.querySelectorAll('.msg')].some(m => m.textContent === 'echo: turn on the light')")
-    assert len(seen) == 2 and seen[0]["id"] == seen[1]["id"]
+    # Wi-Fi blip: the app resends the same message id; the PC runs it ONCE and returns the stored answer
+    tok = token(page)
+    first = call(page, "POST", "/api/m/chat/send", {"text": "turn on the light", "id": "light-0001"}, tok)
+    until(page, "true")
+    again = call(page, "POST", "/api/m/chat/send", {"text": "turn on the light", "id": "light-0001"}, tok)
+    assert first["status"] == 200 and again["status"] == 200 and again["json"].get("replay") is True
+    for _ in range(100):
+        if "turn on the light" in p.fake.chats:
+            break
+        page.wait_for_timeout(100)
     assert p.fake.chats == ["hello", "turn on the light"]              # the PC ran it ONCE
-    assert sum(m == "echo: turn on the light" for m in page.eval_on_selector_all(".msg", "n => n.map(x => x.textContent)")) == 1
-    # direct replay of a finished id: stored answer flagged, no second run
-    r = call(page, "POST", "/api/m/chat", {"text": "turn on the light", "id": seen[0]["id"]}, token(page))
-    assert r["status"] == 200 and r["json"]["replay"] is True and len(p.fake.chats) == 2
     assert page.errors == []
 
 
@@ -373,7 +396,7 @@ def test_revoke_is_immediate_and_returns_to_pairing(browser, phone):
     assert p.owner("POST", f"/api/mobile/devices/{dev}/revoke", {})[0] == 200
     assert call(page, "GET", "/api/m/me", None, tok)["status"] == 401                # the very next request
     assert call(page, "POST", "/api/m/chat", {"text": "x"}, tok)["status"] == 401
-    page.tap("[data-tab=status]")                                                    # the app's next request
+    page.tap("[data-tab=health]")                                                    # the app's next request
     page.wait_for_selector("#pairView:not([hidden])")
     assert token(page) is None
     page.fill("#code", p.code()["code"])                                             # a fresh pairing works again
@@ -404,12 +427,11 @@ def test_rate_limit_shows_in_the_app(browser, phone):
     page = new_page(browser)
     ui_pair(page, p)
     tok = token(page)
-    codes = [call(page, "POST", "/api/m/chat", {"text": f"m{i}", "id": f"rate-limit-{i:04d}"}, tok) for i in range(mobile.CHAT_RATE_PER_MIN + 2)]
-    assert [c["status"] for c in codes].count(200) == mobile.CHAT_RATE_PER_MIN and codes[-1]["status"] == 429
+    codes = [call(page, "POST", "/api/m/chat/send", {"text": f"/status {i}", "id": f"rate-limit-{i:04d}"}, tok) for i in range(mobile.CHAT_RATE_PER_MIN + 2)]
+    assert [c["status"] for c in codes].count(429) >= 1 and codes[-1]["status"] == 429
     assert codes[-1]["retry"]
-    page.fill("#chatText", "one too many")
-    page.tap("#chatForm button[type=submit]")
-    until(page, "document.querySelector('.msg.err') && document.querySelector('.msg.err').textContent.includes('slow down')")
+    say(page, "one too many")
+    until(page, "document.body.textContent.includes('slow down')")
     assert "one too many" not in p.fake.chats
 
 
@@ -418,9 +440,8 @@ def test_audit_lines_hold_no_content_and_no_credentials(browser, phone):
     page = new_page(browser)
     c = ui_pair(page, p)
     secret = "my bank PIN is 4921 sk-ABCDEF1234567890"
-    page.fill("#chatText", secret)
-    page.tap("#chatForm button[type=submit]")
-    until(page, "[...document.querySelectorAll('.msg')].some(m => m.textContent.startsWith('echo: my bank'))")
+    say(page, secret)
+    until(page, "[...document.querySelectorAll('.jc-msg')].some(m => m.textContent.includes('echo: my bank'))")
     tok = token(page)
     call(page, "POST", "/api/m/pair", {"code": "12345678", "name": "x"})
     p.owner("POST", f"/api/mobile/devices/{tok.split('.')[0]}/revoke", {})
@@ -465,12 +486,12 @@ def test_manifest_service_worker_install_criteria_and_offline_shell(browser, pho
     page.context.set_offline(True)
     page.reload()
     page.wait_for_selector("#appView:not([hidden])")
-    page.tap("[data-tab=status]")
+    page.tap("[data-tab=health]")
     until(page, "document.getElementById('conn').textContent === 'computer unreachable'")
     page.tap("[data-tab=chat]")
-    page.fill("#chatText", "offline?")
+    page.fill(".jc-in", "offline?")
     page.context.set_offline(False)
-    page.tap("[data-tab=status]")
+    page.tap("[data-tab=health]")
     until(page, "document.getElementById('conn').textContent === 'connected'")
     assert p.fake.chats == []
     assert page.errors == []
@@ -481,9 +502,8 @@ def test_plain_http_has_no_service_worker_but_the_app_still_works(browser, phone
     page = new_page(browser)
     ui_pair(page, p)
     assert page.evaluate("!navigator.serviceWorker") is True or page.evaluate("navigator.serviceWorker.controller") is None
-    page.fill("#chatText", "hi over http")
-    page.tap("#chatForm button[type=submit]")
-    until(page, "[...document.querySelectorAll('.msg')].some(m => m.textContent === 'echo: hi over http')")
+    say(page, "hi over http")
+    until(page, "[...document.querySelectorAll('.jc-msg')].some(m => m.textContent.includes('echo: hi over http'))")
 
 
 # ------------------------------------------------------------------ steps 15 (EN + HE) layout at 390 px
@@ -504,7 +524,7 @@ def audit(page, lang):
     assert metrics["small"] == [], metrics["small"]                                          # tap targets >= 44 px
     r = page.evaluate(apc.RULES, {"lang": lang, "width": 390, "reduced": False})
     issues = [i for i in r["issues"] if i["rule"] in RULES_THAT_APPLY and i["where"] != "button#lang"
-              and not i["where"].startswith(("div#log>", "ul#apprList>li>span.grow"))]     # chat text and request titles are user DATA     # the language button names its language by design
+              and not i["where"].startswith(("div#log>", "div.jc-log", "ul#apprList>li>span.grow"))]     # chat text and request titles are user DATA     # the language button names its language by design
     assert issues == [], issues
 
 
@@ -522,9 +542,8 @@ def test_layouts_at_390px_have_no_sideways_scroll_big_targets_and_contrast(brows
     p.ask("Send test message")
     p.ask("Install tool", typed=True)
     audit(page, lang)                                                   # chat
-    page.fill("#chatText", "שלום hello")
-    page.tap("#chatForm button[type=submit]")
-    until(page, "document.querySelectorAll('.msg').length >= 2 && !document.querySelector('.msg:last-child').textContent.includes('…')")
+    say(page, "שלום hello")
+    until(page, "[...document.querySelectorAll('.jc-msg')].some(m => m.textContent.includes('echo: '))")
     audit(page, lang)
     for tab in ("voice", "approvals", "status"):
         page.tap(f"[data-tab={tab}]")

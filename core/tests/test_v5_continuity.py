@@ -14,6 +14,25 @@ import pytest
 from jarves import calm, continuity, dashboard, mobile
 from jarves.config import Config
 from jarves.continuity import Continuity
+
+
+@pytest.fixture(autouse=True)
+def _full_text():
+    """These tests read the journal back, so they run with privacy off; test_journal_keeps_no_words_when_privacy_is_on
+    covers the default."""
+    from jarves import logs
+    before = logs.privacy()
+    logs.set_privacy(False)
+    yield
+    logs.set_privacy(before)
+
+
+def test_journal_keeps_no_words_when_privacy_is_on(tmp_path):
+    from jarves import logs
+    logs.set_privacy(True)
+    c = Continuity(tmp_path)
+    c.add_turn("d1", "user", "secret words")
+    assert [t["text"] for t in c.turns()] == [""]
 from jarves.mobile import Bridge
 
 DAY = datetime(2026, 10, 22, 12, 0, tzinfo=timezone.utc).timestamp()      # noon
@@ -393,14 +412,13 @@ def test_the_pwa_has_an_honest_offline_banner_outbox_and_bilingual_texts():
     js = (MOBILE_DIR / "app.js").read_text(encoding="utf-8")
     html = (MOBILE_DIR / "index.html").read_text(encoding="utf-8")
     assert 'id="banner"' in html and 'role="alert"' in html
-    assert "REPLAY_S = 120" in js and "age_s" in js and "not_sent" in js and "send_again" in js
+    assert "chatView" in js and "localStorage.setItem(\"jarves_m_outbox" not in js    # the shared chat view sends; nothing queues silently
     en = re.search(r"en: \{(.*?)\n    he: \{", js, re.S).group(1)
-    he = re.search(r"\n    he: \{(.*)\n  \};", js, re.S).group(1)
+    he = re.search(r"\n    he: \{(.*?)\n  \};", js, re.S).group(1)
     keys = lambda blob: set(re.findall(r"(\w+): \"", blob))
     assert keys(en) == keys(he)
-    for k in ("banner", "not_sent", "waiting", "send_again", "stale", "snooze", "stop_notes"):
+    for k in ("banner", "snooze", "stop_notes"):
         assert k in keys(en)
-    assert "localStorage.setItem" not in js.split("function unsent")[1].split("async function transmit")[0]   # no silent disk queue
 
 
 # ---------------------------------------------------------------- the Core wiring of a due timer

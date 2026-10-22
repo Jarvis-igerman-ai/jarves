@@ -3,7 +3,6 @@
 `attach(core)` (called once from Core.start after the background tasks) opens the user database, registers the
 Skills (scheduler, reports, notes, files, alerts, autonomy) and their low-risk actions, and starts ONE background
 loop: the scheduler tick (local SQLite only, at most every 30 s), then alert delivery, then (every
-SIGNAL_SCAN_S = 3600
 AUTONOMY_SYNC_S) diagnostic proposals from the self-diagnosis issues. No voice session or model call is opened to
 poll anything. `Operations.stop()` is awaited by Core.stop.
 
@@ -37,6 +36,7 @@ from . import selfcheck as selfcheck_mod
 from . import timers as timers_mod
 from .userdata import open_db
 
+SIGNAL_SCAN_S = 3600                              # how often the proactive-signal scan may run
 AUTONOMY_SYNC_S = 600.0
 ROADMAP_ISSUE = "https://github.com/igalgerman/jarves/issues/3"     # M3 Raspberry Pi verification (real issue)
 _UNVERIFIED_PI = ("pure Python + SQLite + tzdata, no Windows-only code; not run on a Raspberry Pi yet "

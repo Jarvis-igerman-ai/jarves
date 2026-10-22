@@ -1812,7 +1812,9 @@
   "Blocked": "חסום",
   "May have run": "לא ברור אם בוצע",
   "No open pull requests or issues (or GitHub could not be read).": "אין בקשות משיכה או נושאים פתוחים (או שלא ניתן היה לקרוא את GitHub).",
-  "What the agents, pull requests and CI of JARVES are doing. This page only reads; any change on GitHub shows the exact command and asks on the screen.": "מה הסוכנים, בקשות המשיכה וה-CI של JARVES עושים. הדף רק קורא; כל שינוי ב-GitHub מציג את הפקודה המדויקת ומבקש אישור על המסך."
+  "What the agents, pull requests and CI of JARVES are doing. This page only reads; any change on GitHub shows the exact command and asks on the screen.": "מה הסוכנים, בקשות המשיכה וה-CI של JARVES עושים. הדף רק קורא; כל שינוי ב-GitHub מציג את הפקודה המדויקת ומבקש אישור על המסך.",
+  "dashboard Chat page, `jarvis web`, dashboard Phone page (pages per phone)": "עמוד שיחה בלוח הבקרה, `jarvis web`, עמוד טלפון בלוח הבקרה (דפים לכל טלפון)",
+  "dashboard Bug reports page, jarvis issues, header badge": "עמוד דיווחי תקלות בלוח הבקרה, jarvis issues, תג בכותרת"
  },
  "rules": [
   [

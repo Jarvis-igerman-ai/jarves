@@ -1812,6 +1812,8 @@
   "Blocked": "Blocked",
   "May have run": "May have run",
   "No open pull requests or issues (or GitHub could not be read).": "No open pull requests or issues (or GitHub could not be read).",
-  "What the agents, pull requests and CI of JARVES are doing. This page only reads; any change on GitHub shows the exact command and asks on the screen.": "What the agents, pull requests and CI of JARVES are doing. This page only reads; any change on GitHub shows the exact command and asks on the screen."
+  "What the agents, pull requests and CI of JARVES are doing. This page only reads; any change on GitHub shows the exact command and asks on the screen.": "What the agents, pull requests and CI of JARVES are doing. This page only reads; any change on GitHub shows the exact command and asks on the screen.",
+  "dashboard Chat page, `jarvis web`, dashboard Phone page (pages per phone)": "dashboard Chat page, `jarvis web`, dashboard Phone page (pages per phone)",
+  "dashboard Bug reports page, jarvis issues, header badge": "dashboard Bug reports page, jarvis issues, header badge"
  }
 };
