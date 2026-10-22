@@ -52,12 +52,18 @@ jobs:
       - uses: actions/checkout@v7
         with:
           fetch-depth: 2
-      - name: Restore the measured test durations (last full run on main)
+      - name: Restore measured Linux durations (otherwise use committed seed)
         uses: actions/cache/restore@v6
         with:
-          path: core/tests/durations.json
-          key: jarves-durations-none
-          restore-keys: jarves-durations-
+          path: core/tests/durations-linux.json
+          key: jarves-durations-v2-linux-none
+          restore-keys: jarves-durations-v2-linux-
+      - name: Restore measured Windows durations (otherwise use committed seed)
+        uses: actions/cache/restore@v6
+        with:
+          path: core/tests/durations-windows.json
+          key: jarves-durations-v2-windows-none
+          restore-keys: jarves-durations-v2-windows-
       - id: c
         shell: bash
         run: |
@@ -103,12 +109,12 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - {os: ubuntu-24.04, shard: "1/3"}
-          - {os: ubuntu-24.04, shard: "2/3"}
-          - {os: ubuntu-24.04, shard: "3/3"}
-          - {os: windows-2025, shard: "1/3"}
-          - {os: windows-2025, shard: "2/3"}
-          - {os: windows-2025, shard: "3/3"}
+          - {os: ubuntu-24.04, platform: linux, shard: "1/3"}
+          - {os: ubuntu-24.04, platform: linux, shard: "2/3"}
+          - {os: ubuntu-24.04, platform: linux, shard: "3/3"}
+          - {os: windows-2025, platform: windows, shard: "1/3"}
+          - {os: windows-2025, platform: windows, shard: "2/3"}
+          - {os: windows-2025, platform: windows, shard: "3/3"}
     runs-on: ${{ matrix.os }}
     timeout-minutes: 40
     defaults:
@@ -175,12 +181,18 @@ jobs:
         if: always() && steps.gate.outputs.run == 'true'
         uses: actions/upload-artifact@v7
         with:
-          name: junit-${{ strategy.job-index }}
+          name: junit-${{ matrix.platform }}-${{ strategy.job-index }}
           path: |
             core/pytest-junit.xml
             core/flake-report.json
           retention-days: 7
           if-no-files-found: ignore
+      - name: Quarantined tests (non-blocking; still run, never skipped; docs/CI_DETERMINISM.md)
+        if: steps.gate.outputs.run == 'true' && matrix.shard == 1
+        continue-on-error: true
+        shell: bash
+        run: |
+          uv run pytest -q -p no:cacheprovider --browser exclude -m quarantine || [ $? -eq 5 ]   # 5 = none quarantined
       - name: Redacted diagnostics on failure (pytest output, junit, Core logs; no secrets, no user content)
         if: failure()
         shell: bash
@@ -204,29 +216,32 @@ jobs:
           type status.txt
           findstr /C:"Core is NOT running" status.txt || exit /b 1
   durations:
-    # Rebalances the shards automatically: after a FULL run on main (or a manual run) the measured seconds per test file
-    # are merged into the cache the `changes` job restores. No commit, no token.
-    name: Update the shard timing data
+    # Refresh each OS after a green full Core matrix, including same-repository PRs.
+    # Actions PR caches are merge-ref scoped: they accelerate subsequent runs of that PR, not other branches.
+    name: Update shard timing data (${{ matrix.platform }})
     needs: [changes, core]
-    if: ${{ always() && needs.core.result == 'success' && github.event_name != 'pull_request' && needs.changes.outputs.reused != 'true' }}
+    if: ${{ always() && needs.core.result == 'success' && needs.changes.outputs.full == 'true' && needs.changes.outputs.reused != 'true' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) }}
     runs-on: ubuntu-24.04
     timeout-minutes: 5
+    strategy:
+      matrix:
+        platform: [linux, windows]
     steps:
       - uses: actions/checkout@v7
       - uses: actions/cache/restore@v6
         with:
-          path: core/tests/durations.json
-          key: jarves-durations-none
-          restore-keys: jarves-durations-
+          path: core/tests/durations-${{ matrix.platform }}.json
+          key: jarves-durations-v2-${{ matrix.platform }}-none
+          restore-keys: jarves-durations-v2-${{ matrix.platform }}-
       - uses: actions/download-artifact@v8
         with:
-          pattern: junit-*
+          pattern: junit-${{ matrix.platform }}-*
           path: junit
-      - run: python3 core/tools/ci_plan.py durations-merge --junit junit --into core/tests/durations.json
+      - run: python3 core/tools/ci_plan.py durations-merge --junit junit --into core/tests/durations-${{ matrix.platform }}.json
       - uses: actions/cache/save@v6
         with:
-          path: core/tests/durations.json
-          key: jarves-durations-${{ github.run_id }}
+          path: core/tests/durations-${{ matrix.platform }}.json
+          key: jarves-durations-v2-${{ matrix.platform }}-${{ github.run_id }}
   browser:
     # Real-browser tests (Playwright: Chromium on Linux, the preinstalled Edge on Windows) as their own job so the
     # shards stay fast. One retry of the browser files only; a second failure fails the job. Never skipped.

@@ -1,3 +1,17 @@
+## CI pass 3 (22 Oct 2026) — owner asked to continue, extends PR #57 on #44
+
+- Scope: separate measured Linux/Windows shard plans; committed seeds from the full-green run 39733332477; refresh timing
+  caches after successful same-repository PR Core runs as well as main/manual runs; isolate the feature-probe regression
+  from unrelated dashboard HTTP startup. Product/runtime behavior, worker counts and release gates are unchanged.
+- Seed provenance: JUnit artifacts junit-0..2 Linux, junit-3..5 Windows, 144/145 measured files respectively; only file
+  names and aggregate seconds are committed. Cached timings are scoped by OS/schema and Actions branch rules (PR caches
+  help only the same PR). No claim that PR timings automatically become a global main cache.
+- Verification: 61 focused workflow/planner/perf regression tests passed locally in 30.84s, zero skips. The feature-probe
+  regression took 1.73s locally. Final-commit full hosted verification and timing comparison are recorded in PR #57.
+- Decision queue: no new owner choice needed for this authorized CI continuation. Existing beta/branch-protection and
+  artifact-retention decisions remain DEFERRED to the release coordinator. Browser readiness, installer-stage caching
+  and slow Core-start fixtures are DEFERRED beyond this bounded pass; none is needed to validate these changes.
+
 ## CI follow-up (22 Oct 2026) — stacked on PR #44, not merged
 
 - Owner request in this session authorizes the follow-up PR and real Actions verification. One writer, isolated branch
@@ -7,7 +21,17 @@
 - Local check: from core, uv run pytest -q -rs --durations=10 tests/test_ci_workflows.py tests/test_ci_pipeline.py
   tests/test_ci_speed_tools.py tests/test_docs_links.py tests/test_units.py::test_cli_setup_paths — 78 passed in 32.16 s,
   zero skips. Setup test 3.80 s locally (prior hosted Windows 173.33 s; different hosts).
-- Hosted CI: pending the final-commit run; no claim of green or of the estimated 8-10 minute target yet.
+- Hosted CI on ed14a9f: https://github.com/igalgerman/jarves/actions/runs/39733332477 passed in 9m46s.
+  Linux shards 4m33s / 2m04s / 4m41s; Windows 5m09s / 3m24s / 9m22s; installer 7m46s; validation 13s.
+  Windows shard 3 recorded one socket-timeout flake in test_perf_probes.py; its failed file passed on the existing
+  one-retry policy. CodeQL passed. This was green with a recorded flake, not a flake-free run.
+- Upstream #44 advanced during verification: 672dbb9 independently fixed the same inherited failures, then c00a773
+  incorporated this follow-up's implementation. Synced both updates, retained the stronger equivalent assertion and
+  removed duplicate DOC_MAP rows. A temporary conflict-marker resolution failed validation and was corrected before
+  final verification. Non-documentation content is identical to the full-green ed14a9f commit.
+- PR #57 now carries evidence/documentation follow-up to the implementation already incorporated in #44. Its final
+  commit receives the fast validation check; the full code run above remains the implementation evidence. No merge
+  into main or release was performed here.
 - Decision queue: existing branch-protection choice, beta activation, duplicate CodeQL setup and artifact retention remain
   DEFERRED to the release coordinator; no settings changed. Prior merge freeze is respected: this PR is not merged.
   Browser readiness changes, dependency-stage caching and platform-specific duration histories are DEFERRED; unnecessary
