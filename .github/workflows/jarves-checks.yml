@@ -23,7 +23,7 @@ permissions:
   contents: read
 concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}   # main runs queue, never cancelled by a newer push
 jobs:
   changes:
     name: Classify the change (docs-only skips heavy jobs; reuse of the PR proof)

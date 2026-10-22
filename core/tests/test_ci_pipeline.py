@@ -34,7 +34,7 @@ def test_every_job_in_every_workflow_has_a_timeout():
 
 def test_checks_cancel_superseded_runs_and_keep_the_core_timeout():
     doc = load("jarves-checks.yml")
-    assert doc["concurrency"]["cancel-in-progress"] is True
+    assert "pull_request" in str(doc["concurrency"]["cancel-in-progress"])   # PRs cancel; main runs queue
     assert doc["jobs"]["core"]["timeout-minutes"] == 40
     t = triggers(doc)
     assert "pull_request" in t and "main" in t["push"]["branches"] and t["push"]["tags"]
@@ -158,7 +158,7 @@ def test_shards_cover_every_test_file_exactly_once():
 def test_caches_and_cancellation():
     doc = load("jarves-checks.yml")
     text = (WF / "jarves-checks.yml").read_text(encoding="utf-8")
-    assert doc["concurrency"]["cancel-in-progress"] is True
+    assert "pull_request" in str(doc["concurrency"]["cancel-in-progress"])   # PRs cancel; main runs queue
     assert "cache-dependency-glob: core/uv.lock" in text and "cache-dependency-path: bridge/whatsapp/go.sum" in text
 
 
