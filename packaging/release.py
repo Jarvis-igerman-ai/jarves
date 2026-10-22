@@ -105,6 +105,8 @@ def verify(dist: Path, commit: str | None = None, tree: str | None = None) -> di
     jarves-checks run of this repository (core/tools/ci_reuse.py)."""
     info = json.loads((dist / "build-info.json").read_text(encoding="utf-8-sig"))
     problems = []
+    if info.get("build_profile", "release") != "release":
+        problems.append("CI smoke builds are never published")
     if tree:
         if info.get("tree") != tree:
             problems.append(f"tree {info.get('tree')} != published tree {tree}")

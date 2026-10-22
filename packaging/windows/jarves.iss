@@ -13,6 +13,9 @@
 #ifndef AppVersion
   #define AppVersion "0.1.0.0"
 #endif
+#ifndef BuildCompression
+  #define BuildCompression "lzma2/max"
+#endif
 #ifndef Commit
   #define Commit "unknown"
 #endif
@@ -36,7 +39,7 @@ SetupArchitecture=x64
 ArchitecturesAllowed=x64compatible
 OutputDir={#OutDir}
 OutputBaseFilename=JARVES-Setup-{#AppVersion}
-Compression=lzma2/max
+Compression={#BuildCompression}
 SolidCompression=yes
 LZMANumBlockThreads=4
 WizardStyle=modern
