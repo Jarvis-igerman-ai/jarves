@@ -1,3 +1,9 @@
+## Installer parallel follow-up — PR #68 held for #67 → #72 (Codex)
+
+- Changes: separate functional/autostart-purge smoke VMs for each compression profile (same three candidate installs); start bundling before Go/bridge preparation; verify bridge before payload join; prepare cold-cache Inno concurrently. No batch product or wizard implementation/test files changed in this follow-up.
+- Local verification: 47 targeted worker/workflow/packaging checks passed; actual Windows child process outlives its start step and success/failure/abort propagate. Hosted exact-head timing refresh pending; prior complete green baseline is bc23260 / run 39749405345 (3m54 build job, 7m52 all installer checks).
+- Decision queue: merge order ANSWERED — #67 first, then #72; hold #68 until owner notification and both gates. Published-branch synchronization must preserve the standing no-force-push rule; reconcile a literal rebase versus a merge update when that gate opens, before rewriting any remote history. Owner-PC timing and visual review remain DEFERRED in open #58; prior preview approval remains valid, desktop tool launch was unavailable.
+
 ## Installer #58 — PR #68 (22 Oct 2026, Codex writer)
 
 - Scope: measured parallel bundle stages, stable pinned-tool cache, source-only code archive, separate non-publishable fast smoke profile; Inno EN/HE keep-data page, verified app backups and profile migrations, previous program snapshot/offline rollback, first user PATH with reversible known-shim retirement, windowless dashboard button. Restricted wizard/CLI/console implementation files untouched; one installer assertion in test_setup_wizard.py updated for the button.

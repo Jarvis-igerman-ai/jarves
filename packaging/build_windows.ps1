@@ -26,7 +26,8 @@ param(
     [switch]$AlsoSmokeInstaller,      # compile a separate non-publishable profile from this same bundle
     [switch]$SmokeBuild,             # faster compression; NEVER a publishable installer
     [switch]$SerialBundle,           # reproducible baseline comparison / low-memory local host
-    [ValidateSet("all", "face")] [string]$Phase = "all"
+    [string]$BridgeReadyFile = "", # CI worker waits for the separately prepared bridge before payload verification
+    [ValidateSet("all", "face", "compiler")] [string]$Phase = "all"
 )
 $ErrorActionPreference = "Stop"
 $ProgressPreference = "SilentlyContinue"
@@ -79,6 +80,18 @@ function Get-Pinned([string]$name) {
     return $f
 }
 
+function Get-Compiler() {
+    $iscc = Join-Path $Cache "inno-7.1.0\ISCC.exe"
+    if (-not (Test-Path $iscc)) {
+        Step "Inno Setup 7.1.0 (portable, current user)"
+        $p = Start-Process (Get-Pinned "inno") -WindowStyle Hidden -Wait -PassThru -ArgumentList @(
+            "/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART", "/SP-", "/CURRENTUSER", "/PORTABLE=1",
+            "/DIR=`"$(Join-Path $Cache 'inno-7.1.0')`"")
+        if ($p.ExitCode -ne 0 -or -not (Test-Path $iscc)) { throw "Inno Setup install failed ($($p.ExitCode))" }
+    }
+    return $iscc
+}
+
 # ---------------------------------------------------------------- identity
 $pyproject = Get-Content (Join-Path $Repo "core\pyproject.toml") -Raw
 $base = [regex]::Match($pyproject, '(?m)^version\s*=\s*"([^"]+)"').Groups[1].Value
@@ -100,6 +113,19 @@ if ($Phase -eq "all") {
     }
     if (Test-Path -LiteralPath $Out) { Remove-Item -LiteralPath $Out -Recurse -Force }
     New-Item -ItemType Directory -Force $Stage | Out-Null
+}
+if ($Phase -eq "compiler") {
+    Build-Stage "compiler_prepare"
+    $null = Get-Compiler
+    Build-Stage ""
+    $StageTimes | ConvertTo-Json | Set-Content -Encoding utf8NoBOM (Join-Path $Out "compiler-stages.json")
+    exit 0
+}
+$CompilerJob = $null
+if ($Phase -eq "all" -and -not $SkipInstaller -and -not (Test-Path (Join-Path $Cache "inno-7.1.0\ISCC.exe"))) {
+    $compilerOptions = @{ Phase = "compiler"; Version = $Version; Channel = $Channel; Commit = $Commit;
+                          Tree = $Tree; Cache = $Cache; Out = $Out }
+    $CompilerJob = Start-Job -ScriptBlock { param($script, $options); & $script @options } -ArgumentList $PSCommandPath, $compilerOptions
 }
 $FaceJob = $null
 if ($Phase -eq "all" -and -not $SkipFace -and -not $SerialBundle) {
@@ -231,6 +257,25 @@ if ($FaceJob) {
     foreach ($key in $faceTimes.Keys) { $StageTimes[$key] = $faceTimes[$key] }
 }
 
+if ($CompilerJob) {
+    Build-Stage "await_compiler"
+    try {
+        $null = Wait-Job $CompilerJob
+        Receive-Job $CompilerJob -ErrorAction Stop
+        if ($CompilerJob.State -ne "Completed") { throw "Compiler preparation failed" }
+    } finally { Remove-Job $CompilerJob -Force }
+    $compilerTimes = Get-Content (Join-Path $Out "compiler-stages.json") -Raw | ConvertFrom-Json -AsHashtable
+    foreach ($key in $compilerTimes.Keys) { $StageTimes[$key] = $compilerTimes[$key] }
+}
+if ($BridgeReadyFile) {
+    Build-Stage "await_bridge"
+    $deadline = [DateTime]::UtcNow.AddMinutes(15)
+    while (-not (Test-Path -LiteralPath $BridgeReadyFile)) {
+        if ([DateTime]::UtcNow -gt $deadline) { throw "Bridge preparation did not complete" }
+        Start-Sleep -Milliseconds 500
+    }
+}
+
 # ---------------------------------------------------------------- WhatsApp bridge (Go), only when the repo pins one
 # packaging\bridge_pin.json = {"path": "bridge/jarves-whatsapp-bridge.exe", "sha256": "<64 hex>"} appears with the bridge
 # (package F). CI builds the binary (go build, Windows amd64) and passes it in JARVES_BRIDGE_EXE; payload_check.py below
@@ -277,14 +322,7 @@ $info["payload"] = Get-Content (Join-Path $Out "payload-metrics.json") -Raw | Co
 # ---------------------------------------------------------------- installer
 if (-not $SkipInstaller) {
     Build-Stage "compiler_tools"
-    $iscc = Join-Path $Cache "inno-7.1.0\ISCC.exe"
-    if (-not (Test-Path $iscc)) {
-        Step "Inno Setup 7.1.0 (portable, current user)"
-        $p = Start-Process (Get-Pinned "inno") -Wait -PassThru -ArgumentList @(
-            "/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART", "/SP-", "/CURRENTUSER", "/PORTABLE=1",
-            "/DIR=`"$(Join-Path $Cache 'inno-7.1.0')`"")
-        if ($p.ExitCode -ne 0 -or -not (Test-Path $iscc)) { throw "Inno Setup install failed ($($p.ExitCode))" }
-    }
+    $iscc = Get-Compiler
     Build-Stage "compression"
     Step "ISCC"
     $compression = if ($SmokeBuild) { "lzma2/fast" } else { "lzma2/max" }

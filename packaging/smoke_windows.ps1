@@ -1,7 +1,7 @@
 <#
 Silent install smoke test of a built JARVES installer (CI: jarves-checks `installer` job; also runs locally).
-Everything happens in a temp folder: program dir, JARVES_HOME (data) and the Core's link port, so a real JARVES on
-the same PC is never touched. No audio is played, no network service is called, no key is needed.
+Run on a disposable Windows runner: program/data use temp folders, but HKCU, PATH and Start menu are real.
+Parallel scenarios MUST use separate Windows users/VMs; do not run them together on a personal PC. No audio is played, no network service is called, no key is needed.
 
   1 clean install (/VERYSILENT, per user, no tasks)      -> files, Start-menu entry, uninstaller present
   2 jarvis --version / status / features / doctor         -> build identity, "NOT running", update_check listed
@@ -30,6 +30,7 @@ param(
     [Parameter(Mandatory)] [string]$Installer,
     [string]$Version = "",
     [string]$Work = (Join-Path ([IO.Path]::GetTempPath()) "jarves-smoke-$PID"),
+    [ValidateSet("full", "functional", "autostart-purge")] [string]$Scenario = "full",
     [switch]$RequireFace,
     [switch]$CheckAutostart,     # CI: the reinstall ticks "start at login" (writes HKCU Run\JARVES); uninstall removes it
     [switch]$SkipDoctor,         # local runs: doctor records 1.5 s from the default microphone (CI has none)
@@ -218,6 +219,24 @@ if ($UpgradeFrom) {
     exit 0
 }
 
+# Independent of CLI/Core/face and answers checks; this runner has its own HKCU/AppId.
+if ($Scenario -eq "autostart-purge") {
+    if ($UpgradeFrom) { throw "autostart-purge cannot be combined with UpgradeFrom" }
+    $stBefore = Collect "before"
+    Check (Seed "seed") "retained old data exists before the fresh program install"
+    Check ((Install "autostart" @() "" "silent_install_s") -eq 0) "install with start-at-login"
+    $entry = (Get-ItemProperty "HKCU:\Software\Microsoft\Windows\CurrentVersion\Run" -Name JARVES -ErrorAction SilentlyContinue).JARVES
+    Check ($entry -and $entry -like "*$App*pythonw.exe*") "start-at-login points to the installed Core"
+    Check (Seed "verify") "data-only upgrade preserves seeded rows, model and settings"
+    Check ((Uninstall @("/PURGE=1") "silent_uninstall_s") -eq 0) "uninstall /PURGE=1"
+    Check (Audit "uninstalled" $stBefore (Collect "purged") @("--purged")) "no residue after autostart/purge scenario"
+    Save-Times
+    if (-not $failures) { Remove-Item -LiteralPath $Work -Recurse -Force -ErrorAction SilentlyContinue }
+    if ($failures) { Write-Host "SMOKE RESULT: FAIL ($failures)"; exit 1 }
+    Write-Host "SMOKE RESULT: PASS (autostart-purge)"
+    exit 0
+}
+
 # 1 clean install
 $stBefore = Collect "before"
 $tasks1 = if ($DefaultTasks) { "DEFAULT" } else { "" }
@@ -322,6 +341,8 @@ Check (-not (Test-Path (Join-Path $App "python"))) "program files removed"
 Check (-not (Test-Path $menu)) "Start menu entry removed"
 Check ((Test-Path (Join-Path $Home_ "memory.db")) -and (Test-Path (Join-Path $Home_ "secrets.env"))) "user data kept"
 
+# Functional and integration/purge scenarios run on independent Windows VMs in CI.
+if ($Scenario -eq "full") {
 # 7 purge only when asked
 $run = "HKCU:\Software\Microsoft\Windows\CurrentVersion\Run"
 if ($CheckAutostart) {
@@ -336,6 +357,8 @@ Check (-not (Test-Path $Home_)) "user data removed on request"
 Check (Audit "uninstalled" $stBefore (Collect "purged") @("--purged")) "no residue after uninstall /PURGE=1"
 if ($CheckAutostart) {
     Check (-not (Get-ItemProperty $run -Name JARVES -ErrorAction SilentlyContinue)) "uninstall removed start-at-login"
+}
+
 }
 
 Save-Times

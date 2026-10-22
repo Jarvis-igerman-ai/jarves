@@ -329,28 +329,38 @@ jobs:
           path: ${{ runner.temp }}/jarves-build-cache
           key: jarves-build-tools-v2-${{ hashFiles('packaging/windows/tool-cache.txt') }}
           restore-keys: jarves-build-tools-
+      - name: Start Python/Godot bundle while Go and bridge are prepared
+        id: start
+        shell: pwsh
+        run: |
+          $base = (Select-String -Path core/pyproject.toml -Pattern '^version\s*=\s*"([^"]+)"').Matches[0].Groups[1].Value
+          $v = "$base.${{ github.run_number }}"
+          "VERSION=$v" >> $env:GITHUB_ENV
+          ./packaging/installer_job.ps1 -Action Start -StateDir "$env:RUNNER_TEMP/jarves-bundle" `
+            -Version $v -Channel $env:CHANNEL -Commit $env:GITHUB_SHA -Tree $env:TREE `
+            -Cache "$env:RUNNER_TEMP/jarves-build-cache" -Out "$env:GITHUB_WORKSPACE/dist"
       - uses: actions/setup-go@v7
         with:
           go-version: "1.27.0"
           cache-dependency-path: bridge/whatsapp/go.sum
       - name: Build the pinned WhatsApp bridge (same reproducible build as the whatsapp-bridge job)
+        id: bridge
         shell: pwsh
         run: |
           $pin = Get-Content packaging/bridge_pin.json -Raw | ConvertFrom-Json
           ./scripts/build_whatsapp_bridge.ps1 -Version $pin.version
-          "JARVES_BRIDGE_EXE=$((Resolve-Path bridge/whatsapp/dist/whatsapp_bridge.exe).Path)" >> $env:GITHUB_ENV
-      - name: Build installer
+          if ($LASTEXITCODE -ne 0) { throw "Bridge build failed" }
+          $got = (Get-FileHash bridge/whatsapp/dist/whatsapp_bridge.exe -Algorithm SHA256).Hash.ToLower()
+          if ($got -ne $pin.sha256) { throw "Bridge SHA256 does not match the pin" }
+          New-Item -ItemType File -Path "$env:RUNNER_TEMP/jarves-bundle/bridge.ready" | Out-Null
+      - name: Build installer (join background bundle)
         id: build
+        if: always() && steps.start.outcome == 'success'
         shell: pwsh
         run: |
-          # X.Y.Z.<run_number>: the version stamp is the run number of THIS build. A reused build keeps it (no rebuild,
-          # no re-stamp): a PR is merged only after a run on top of the current main, so merged builds only grow.
-          $base = (Select-String -Path core/pyproject.toml -Pattern '^version\s*=\s*"([^"]+)"').Matches[0].Groups[1].Value
-          $v = "$base.${{ github.run_number }}"
-          ./packaging/build_windows.ps1 -Version $v -Channel $env:CHANNEL -Commit $env:GITHUB_SHA -Tree $env:TREE `
-            -Cache "$env:RUNNER_TEMP/jarves-build-cache" -Out dist -AlsoSmokeInstaller
-          "VERSION=$v" >> $env:GITHUB_ENV
-          "version=$v" >> $env:GITHUB_OUTPUT
+          ./packaging/installer_job.ps1 -Action Wait -StateDir "$env:RUNNER_TEMP/jarves-bundle" `
+            -Abort:("${{ steps.bridge.outcome }}" -ne "success")
+          "version=$env:VERSION" >> $env:GITHUB_OUTPUT
       - uses: actions/upload-artifact@v7
         with:
           name: jarves-installer-${{ env.TREE }}
@@ -371,7 +381,7 @@ jobs:
           compression-level: 0
           if-no-files-found: error
   installer-smoke:
-    name: Installer smoke (${{ matrix.profile }})
+    name: Installer smoke (${{ matrix.profile }}, ${{ matrix.scenario }})
     needs: [installer, changes]
     runs-on: windows-2025
     timeout-minutes: 15
@@ -379,6 +389,7 @@ jobs:
       fail-fast: false
       matrix:
         profile: [release, ci-smoke]
+        scenario: [functional, autostart-purge]
     env:
       VERSION: ${{ needs.installer.outputs.version }}
     steps:
@@ -389,7 +400,7 @@ jobs:
           path: dist
       - name: Silent install / run / upgrade / uninstall smoke
         shell: pwsh
-        run: ./packaging/smoke_windows.ps1 -Installer "dist/JARVES-Setup-$env:VERSION.exe" -Version $env:VERSION -RequireFace -CheckAutostart -DefaultTasks -MetricsOut dist/installer-metrics.json
+        run: ./packaging/smoke_windows.ps1 -Installer "dist/JARVES-Setup-$env:VERSION.exe" -Version $env:VERSION -RequireFace -CheckAutostart -DefaultTasks -Scenario ${{ matrix.scenario }} -MetricsOut dist/installer-metrics.json
       - name: Installer size / time budget
         if: matrix.profile == 'release'
         shell: pwsh
@@ -397,7 +408,7 @@ jobs:
       - uses: actions/upload-artifact@v7
         if: always()
         with:
-          name: installer-metrics-${{ matrix.profile }}
+          name: installer-metrics-${{ matrix.profile }}-${{ matrix.scenario }}
           path: dist/*metrics.json
           retention-days: 7
           if-no-files-found: ignore
