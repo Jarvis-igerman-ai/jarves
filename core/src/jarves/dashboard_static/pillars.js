@@ -185,5 +185,39 @@
         "No private repository is set (health.ticket_repo), so posting is not possible; drafts stay local.")));
   }
 
-  Object.assign(PAGES, { goals: pageGoals, preferences: pagePreferences, proactive: pageProactive, devdrafts: pageDevDrafts });
+  // ------------------------------------------------------------- Development status (read-only; changes ask first)
+  async function pageDevelopment() {
+    const d = await api("/api/dev/status");
+    const msg = msgSpan();
+    const STATE = { ci_failed: tx("CI נכשל", "CI failed"), ci_running: tx("CI רץ", "CI running"), green: tx("ירוק וממתין", "Green, waiting"),
+      draft: tx("טיוטה", "Draft"), no_ci: tx("אין CI", "No CI yet"), open: tx("פתוח", "Open"), in_progress: tx("בעבודה", "In progress"), stuck: tx("תקוע", "Stuck") };
+    const BAD = { ci_failed: 1, stuck: 1 };
+    const ask = (p) => async () => {
+      msg.textContent = WAITING();
+      try { const r = await post("/api/dev/status/apply", { id: p.id }); msg.textContent = r.status === "done" ? tx("בוצע", "Done") : tx("לא בוצע (לא אושר)", "Not done (not approved)"); route(true); }
+      catch (e) { msg.textContent = tx("נכשל: ", "Failed: ") + JL.t(e.message); }
+    };
+    const row = (i) => el("tr", {}, el("td", { dir: "ltr" }, (i.type === "pr" ? "PR #" : tx("נושא #", "Issue #")) + i.number),
+      el("td", { dir: "auto" }, i.title),
+      el("td", {}, pill(BAD[i.state] ? "degraded" : i.state === "green" ? "ok" : "plain", STATE[i.state] || i.state)),
+      el("td", { dir: "auto" }, i.blocker || "-"),
+      el("td", { dir: "auto" }, tx(i.suggestion.text_he, i.suggestion.text_en),
+        i.proposals.map((p) => el("div", {}, el("button", { type: "button", class: "ghost", title: p.command, onclick: ask(p) }, tx(p.text_he, p.text_en) + " (" + tx("מבקש אישור", "asks first") + ")"),
+          el("code", { dir: "ltr", class: "small" }, " " + p.command)))));
+    render(header(tx("פיתוח", "Development"), tx("מה הסוכנים, בקשות המשיכה וה-CI של JARVES עושים. הדף קורא בלבד; כל שינוי ב-GitHub מציג את הפקודה המדויקת ומבקש אישור על המסך.",
+        "What the agents, pull requests and CI of JARVES are doing. This page only reads; any change on GitHub shows the exact command and asks on the screen.")),
+      el("div", { class: "card" }, el("b", { dir: "auto" }, tx(d.sentence_he, d.sentence_en)), " ", msg,
+        d.notes.length ? el("p", { class: "muted small" }, tx("הערות: ", "Notes: ") + d.notes.join(", ")) : null),
+      d.items.length ? el("div", { class: "card", style: "overflow-x:auto" }, el("table", { class: "table" },
+        el("thead", {}, el("tr", {}, ["", tx("כותרת", "Title"), tx("מצב", "State"), tx("חסם", "Blocker"), tx("הצעה לצעד הבא", "Suggested next step")].map((h) => el("th", {}, h)))),
+        el("tbody", {}, d.items.map(row)))) : el("div", { class: "empty" }, tx("אין בקשות משיכה או נושאים פתוחים (או ש-GitHub לא נקרא).", "No open pull requests or issues (or GitHub could not be read).")),
+      el("h3", {}, tx("סוכנים", "Agents")),
+      d.agents.length ? d.agents.map((a) => el("div", { class: "card" }, el("div", { class: "row", style: "gap:8px;flex-wrap:wrap" },
+        el("b", { dir: "ltr" }, a.provider + (a.project ? " / " + a.project : "")), el("span", { dir: "ltr", class: "muted small" }, a.branch),
+        pill(a.health === "stuck" || a.health === "idle_long" || a.health === "blocked" ? "degraded" : a.health === "finished" ? "ok" : "plain", a.health),
+        el("span", { class: "muted small" }, Math.round(a.age_s / 60) + " " + tx("דק'", "min")))))
+        : el("div", { class: "empty" }, tx("אין סוכנים פעילים.", "No active agents.")));
+  }
+
+  Object.assign(PAGES, { development: pageDevelopment, goals: pageGoals, preferences: pagePreferences, proactive: pageProactive, devdrafts: pageDevDrafts });
 })();

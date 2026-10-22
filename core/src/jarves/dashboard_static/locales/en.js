@@ -1769,6 +1769,22 @@
   "Phone approvals are off: answer on the computer.": "Phone approvals are off: answer on the computer.",
   "Too many messages. Slow down.": "Too many messages. Slow down.",
   "Allowed pages": "Allowed pages",
-  "Settings, secrets, files and device management are always computer-only.": "Settings, secrets, files and device management are always computer-only."
+  "Settings, secrets, files and device management are always computer-only.": "Settings, secrets, files and device management are always computer-only.",
+  "Development": "Development",
+  "CI failed": "CI failed",
+  "CI running": "CI running",
+  "Green, waiting": "Green, waiting",
+  "Draft": "Draft",
+  "No CI yet": "No CI yet",
+  "In progress": "In progress",
+  "Stuck": "Stuck",
+  "Not done (not approved)": "Not done (not approved)",
+  "Suggested next step": "Suggested next step",
+  "asks first": "asks first",
+  "Agents": "Agents",
+  "No active agents.": "No active agents.",
+  "min": "min",
+  "Notes: ": "Notes: ",
+  "Issue #": "Issue #"
  }
 };

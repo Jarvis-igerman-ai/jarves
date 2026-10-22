@@ -61,7 +61,7 @@
     calendar: "events meeting אירועים פגישה", jobs: "schedule reminder cron מתוזמן תזכורת", reports: "briefing morning תדריך בוקר",
     timers: "timer alarm countdown wake clock טיימר שעון מעורר התראה זמן", lists: "shopping todo groceries tasks קניות משימות רשימה סופר",
     goals: "goal objective target progress steps check-in יעד יעדים מטרה התקדמות צעדים סיכום", preferences: "preferences learned memory likes remember העדפות נלמדות זיכרון אוהב לזכור",
-    proactive: "proactive offers suggest mention quiet הצעות יזומות הצעה שקט", devdrafts: "development manager tickets ideas drafts github טיוטות פיתוח הצעות כרטיסים",
+    proactive: "proactive offers suggest mention quiet הצעות יזומות הצעה שקט", development: "development status pull requests ci agents issues פיתוח סטטוס בקשות משיכה סוכנים", devdrafts: "development manager tickets ideas drafts github טיוטות פיתוח הצעות כרטיסים",
     alerts: "notifications התראות", notes: "markdown memo רשימות", files: "folders documents תיקיות מסמכים",
     identity: "name wake word voice שם מילת הפעלה קול", appearance: "face avatar theme פנים אווטאר",
     memory: "facts remember forget עובדות לזכור לשכוח", workspace: "persona soul user identity אישיות",

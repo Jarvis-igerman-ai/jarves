@@ -226,7 +226,7 @@
   "Windows": "Windows",
   "Pi (Linux ARM64)": "Pi (Linux ARM64)",
   "Health": "תקינות",
-  "Blocker": "חוסם",
+  "Blocker": "חסם",
   "Blocker: ": "חוסם: ",
   "Provider / model": "ספק / מודל",
   "Used / limit": "בשימוש / מגבלה",
@@ -1769,7 +1769,23 @@
   "Phone approvals are off: answer on the computer.": "אישורים מהטלפון כבויים: עונים במחשב.",
   "Too many messages. Slow down.": "יותר מדי הודעות. האטו קצת.",
   "Allowed pages": "דפים מותרים",
-  "Settings, secrets, files and device management are always computer-only.": "הגדרות, סודות, קבצים וניהול מכשירים תמיד רק במחשב."
+  "Settings, secrets, files and device management are always computer-only.": "הגדרות, סודות, קבצים וניהול מכשירים תמיד רק במחשב.",
+  "Development": "פיתוח",
+  "CI failed": "CI נכשל",
+  "CI running": "CI רץ",
+  "Green, waiting": "ירוק וממתין",
+  "Draft": "טיוטה",
+  "No CI yet": "אין CI",
+  "In progress": "בעבודה",
+  "Stuck": "תקוע",
+  "Not done (not approved)": "לא בוצע (לא אושר)",
+  "Suggested next step": "הצעה לצעד הבא",
+  "asks first": "מבקש אישור",
+  "Agents": "סוכנים",
+  "No active agents.": "אין סוכנים פעילים.",
+  "min": "דק'",
+  "Notes: ": "הערות: ",
+  "Issue #": "נושא #"
  },
  "rules": [
   [
