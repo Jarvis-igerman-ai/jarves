@@ -127,7 +127,8 @@ def test_install_asks_first_verifies_sha_and_size_and_backs_up(home, server, key
     assert not list((home / "updates").glob("*.partial"))
 
 
-def test_in_app_updater_runs_setup_silently_and_restarts_jarves(home, server, keys):
+def test_in_app_updater_runs_setup_silently_and_restarts_jarves(home, server, keys, monkeypatch):
+    monkeypatch.setattr(updates, "build_info", lambda: {"version": OLD})      # a source checkout reports <__version__>+dev (4.0.0 now)
     server.publish(keys, NEW)
     u = checker(home, server, keys)
     u.check(force=True)
