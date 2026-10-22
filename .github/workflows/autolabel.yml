@@ -1,0 +1,52 @@
+name: jarves-autolabel
+# Adds the `automerge` label to LOW-RISK PRs (docs/RELEASING.md "Automatic labelling of low-risk PRs"), so the queue
+# (automerge.yml) merges them once `CI result (single required check)` is green. It never merges, never bypasses a check.
+# Classification: core/tools/risk_class.py (standard library, no network). Dependabot: dependabot-automerge.yml.
+# Switch: repository variable ENABLE_AUTOLABEL = "true" or unset (docs, tests, guides/locales), "all" (also PRs labelled
+# `bugfix` with < 150 changed lines), "false" (off). Labels `needs-review` / `no-automerge` always block.
+# This workflow never checks out or runs the PR's code: the base branch is checked out and only file NAMES are read.
+on:
+  pull_request_target:
+    branches: [main, next]
+    types: [opened, reopened, synchronize, ready_for_review, labeled, unlabeled]
+permissions:
+  contents: read
+  pull-requests: write
+concurrency:
+  group: autolabel-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+jobs:
+  label:
+    if: vars.ENABLE_AUTOLABEL != 'false' && github.event.pull_request.draft == false
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    env:
+      # AUTOMERGE_TOKEN (when set) lets the label event start the queue; with GITHUB_TOKEN the queue runs when the checks end.
+      GH_TOKEN: ${{ secrets.AUTOMERGE_TOKEN || github.token }}
+      PR: ${{ github.event.pull_request.number }}
+      AUTHOR: ${{ github.event.pull_request.user.login }}
+      MODE: ${{ vars.ENABLE_AUTOLABEL }}
+    steps:
+      - uses: actions/checkout@v7          # the base branch (pull_request_target), never the PR head
+        with:
+          sparse-checkout: core/tools/risk_class.py
+      - name: Classify the change and label low-risk PRs
+        run: |
+          set -euo pipefail
+          gh api --paginate "repos/$GITHUB_REPOSITORY/pulls/$PR/files" --jq '.[].filename' > files.txt
+          lines=$(gh api "repos/$GITHUB_REPOSITORY/pulls/$PR" --jq '.additions + .deletions')
+          labels=$(gh api "repos/$GITHUB_REPOSITORY/issues/$PR/labels" --jq '[.[].name]|join(",")')
+          for l in automerge automerge-auto; do gh label create "$l" -R "$GITHUB_REPOSITORY" --color 0e8a16 2>/dev/null || true; done
+          if out=$(python3 core/tools/risk_class.py --files-from files.txt --lines "$lines" --labels "$labels" --author "$AUTHOR" --mode "${MODE:-true}"); then
+            echo "$out"
+            case ",$labels," in
+              *,automerge,*) ;;
+              *) gh pr edit "$PR" -R "$GITHUB_REPOSITORY" --add-label automerge --add-label automerge-auto ;;
+            esac
+          else
+            echo "$out"
+            # a label this workflow added earlier is withdrawn when the PR stops qualifying (new high-risk file, blocking label)
+            case ",$labels," in
+              *,automerge-auto,*) gh pr edit "$PR" -R "$GITHUB_REPOSITORY" --remove-label automerge --remove-label automerge-auto ;;
+            esac
+          fi
