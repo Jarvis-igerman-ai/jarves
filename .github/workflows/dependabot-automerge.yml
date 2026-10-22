@@ -31,5 +31,7 @@ jobs:
           if [ "$ok" = "true" ]; then
             gh pr edit "$PR" -R "$GITHUB_REPOSITORY" --add-label automerge
           else
+            gh label create needs-review -R "$GITHUB_REPOSITORY" --color d93f0b 2>/dev/null || true
+            gh pr edit "$PR" -R "$GITHUB_REPOSITORY" --add-label needs-review
             gh pr comment "$PR" -R "$GITHUB_REPOSITORY" --body "dependabot-automerge: '$kind' update is not auto-merged; review it manually." > /dev/null
           fi
