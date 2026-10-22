@@ -13,7 +13,11 @@
       voice_ready: "Press and hold the button, speak, then release.", voice_nomic: "Microphone permission was denied or is unavailable.",
       heard: "You said", nothing: "Nothing is waiting for approval.", pc_only: "Answer on the computer.", approve: "Approve", deny: "Deny",
       typed_pc: "Needs the code shown on the computer.", sec: "s", core: "Core", tls: "Secure connection", yes: "yes", no: "no (text only)",
-      busy: "The previous message is still being answered. Wait a moment.", phone_ap_on: "Phone approvals are on.", phone_ap_off: "Phone approvals are off: approvals are answered on the computer.", sending: "Sending…" },
+      busy: "The previous message is still being answered. Wait a moment.", phone_ap_on: "Phone approvals are on.", phone_ap_off: "Phone approvals are off: approvals are answered on the computer.", sending: "Sending…",
+      banner: "The computer is unreachable. Messages you type are kept here, marked not sent, and are not sent silently later.",
+      not_sent: "Not sent", waiting: "Waiting for the connection…", send_again: "Send again", stale: "Waited too long while offline. Send it again if you still want it.",
+      note: "Note", goals: "Goals", pause: "Pause", resume: "Resume", drop: "Drop", snooze: "Snooze notes 1 h", stop_notes: "Stop notes",
+      sig_snoozed: "Notes snoozed for one hour.", sig_stopped: "Notes stopped. Turn them on again on the computer.", from_pc: "computer", no_goals: "No active goals." },
     he: { pair_title: "צימוד הטלפון", pair_help: "במחשב פתחו את לוח הבקרה של JARVES, עברו אל טלפון ולחצו על צימוד טלפון. סרקו את קוד ה-QR או הקלידו כאן את הקוד בן 8 הספרות.",
       code: "קוד צימוד", name: "שם לטלפון", pair: "לצמד", pair_net: "עובד ברשת הביתית בלבד. שום דבר כאן לא נגיש מהאינטרנט.",
       tab_chat: "שיחה", tab_voice: "קול", tab_approvals: "אישורים", tab_status: "מצב", send: "שליחה", type_here: "כתבו הודעה",
@@ -23,7 +27,11 @@
       voice_ready: "לחצו והחזיקו את הכפתור, דברו ושחררו.", voice_nomic: "הרשאת המיקרופון נדחתה או לא זמינה.",
       heard: "אמרתם", nothing: "שום דבר לא ממתין לאישור.", pc_only: "עונים במחשב.", approve: "אישור", deny: "דחייה",
       typed_pc: "דורש את הקוד שמוצג במחשב.", sec: "ש׳", core: "ליבה", tls: "חיבור מאובטח", yes: "כן", no: "לא (טקסט בלבד)",
-      busy: "ההודעה הקודמת עדיין בטיפול. המתינו רגע.", phone_ap_on: "אישורים מהטלפון פעילים.", phone_ap_off: "אישורים מהטלפון כבויים: עונים על אישורים במחשב.", sending: "שולח…" },
+      busy: "ההודעה הקודמת עדיין בטיפול. המתינו רגע.", phone_ap_on: "אישורים מהטלפון פעילים.", phone_ap_off: "אישורים מהטלפון כבויים: עונים על אישורים במחשב.", sending: "שולח…",
+      banner: "המחשב לא זמין. הודעות שתכתבו נשמרות כאן, מסומנות \"לא נשלחה\", ולא נשלחות בשקט בהמשך.",
+      not_sent: "לא נשלחה", waiting: "ממתין לחיבור…", send_again: "לשלוח שוב", stale: "ההודעה חיכתה יותר מדי זמן בלי חיבור. שלחו שוב אם עדיין רוצים.",
+      note: "הודעה", goals: "יעדים", pause: "השהיה", resume: "המשך", drop: "ויתור", snooze: "השתקת הודעות לשעה", stop_notes: "עצירת הודעות",
+      sig_snoozed: "ההודעות הושתקו לשעה.", sig_stopped: "ההודעות נעצרו. מדליקים שוב במחשב.", from_pc: "מחשב", no_goals: "אין יעדים פעילים." },
   };
   const $ = (id) => document.getElementById(id);
   let lang = "en";
@@ -38,7 +46,11 @@
   let token = ""; try { token = localStorage.getItem(KEY) || ""; } catch (e) { /* storage blocked */ }
   let me = null, connected = true, timer = 0;
 
-  function setConn(ok) { connected = ok; const c = $("conn"); c.textContent = ok ? t("online") : t("offline"); c.className = "pill " + (ok ? "ok" : "bad"); }
+  function setConn(ok) {
+    const was = connected; connected = ok; const c = $("conn"); c.textContent = ok ? t("online") : t("offline"); c.className = "pill " + (ok ? "ok" : "bad");
+    const b = $("banner"); b.hidden = ok || !token; b.textContent = ok ? "" : t("banner");
+    if (ok && !was) syncNow();                      // back online: catch up with the one conversation on the PC
+  }
 
   async function api(path, opts = {}) {
     const headers = { "X-Jarves": "1", ...(opts.headers || {}) };
@@ -87,19 +99,40 @@
 
   // ---- chat
   function bubble(text, cls) { const d = document.createElement("div"); d.className = "msg " + (cls || ""); d.textContent = text; $("log").appendChild(d); d.scrollIntoView({ block: "end" }); return d; }
-  $("chatForm").addEventListener("submit", async (ev) => {
+  // The outbox: a typed message keeps ONE id. While the PC is unreachable it is retried only for REPLAY_S seconds; after
+  // that it stays on screen marked "not sent" with a button (the user decides). The PC answers each id once.
+  const REPLAY_S = 120;
+  const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+  const newId = () => (window.crypto && crypto.randomUUID ? crypto.randomUUID() : Date.now().toString(36) + Math.random().toString(36).slice(2, 12));
+  function unsent(el, item) {
+    el.className = "msg me unsent"; el.textContent = item.text;
+    const s = document.createElement("span"); s.className = "small"; s.textContent = t("not_sent"); el.appendChild(s);
+    const b = document.createElement("button"); b.type = "button"; b.textContent = t("send_again");
+    b.addEventListener("click", () => { item.t0 = Date.now(); item.mark.remove(); transmit(item, el); }); el.appendChild(b);
+  }
+  async function transmit(item, el) {
+    el.className = "msg me"; el.textContent = item.text; item.mark = document.createElement("span"); item.mark.className = "small";
+    el.appendChild(item.mark); item.mark.textContent = t("sending");
+    const wait = item.wait || (item.wait = bubble(t("thinking")));
+    for (let i = 0; ; i++) {
+      const age = (Date.now() - item.t0) / 1000;
+      if (age > REPLAY_S) { wait.remove(); item.wait = null; unsent(el, item); return; }
+      try {
+        const d = await post("/api/m/chat", { text: item.text, id: item.id, age_s: Math.round(age) });
+        item.mark.remove(); wait.textContent = d.reply; if (!d.ok) wait.classList.add("err"); item.wait = null; return;
+      } catch (e) {
+        if (e.code === "STALE" || e.status === 410) { wait.remove(); item.wait = null; unsent(el, item); return; }
+        if (e.status === undefined || e.status === 0) { item.mark.textContent = t("waiting"); await sleep(3000); continue; }   // offline: keep waiting inside the window
+        if (e.code === "BUSY" && i < 6) { await sleep(1500 * (i + 1)); continue; }
+        if (e.code === "BUSY") e.message = t("busy");
+        wait.textContent = e.message || t("err_chat"); wait.classList.add("err"); item.mark.remove(); item.wait = null; return;
+      }
+    }
+  }
+  $("chatForm").addEventListener("submit", (ev) => {
     ev.preventDefault();
     const box = $("chatText"), text = box.value.trim(); if (!text) return;
-    box.value = ""; bubble(text, "me"); const wait = bubble(t("thinking"));
-    const id = (window.crypto && crypto.randomUUID ? crypto.randomUUID() : Date.now().toString(36) + Math.random().toString(36).slice(2, 12));
-    const send = async () => {                       // same id on every resend: the PC answers once, a resend gets the stored answer
-      for (let i = 0; ; i++) {
-        try { return await post("/api/m/chat", { text, id }); }
-        catch (e) { if (i >= 3 || !(e.status === undefined || e.status === 0 || e.code === "BUSY")) throw e; await new Promise((r) => setTimeout(r, 1500 * (i + 1))); }
-      }
-    };
-    try { const d = await send(); wait.textContent = d.reply; if (!d.ok) wait.classList.add("err"); }
-    catch (e) { if (e.code === "BUSY") e.message = t("busy"); wait.textContent = e.status === 429 || e.status === 503 || e.status === 502 ? e.message : (e.message || t("err_chat")); wait.classList.add("err"); }
+    box.value = ""; const el = bubble(text, "me"); mine.add(text); transmit({ text, id: newId(), t0: Date.now() }, el);
   });
 
   // ---- voice (push to talk): record, encode 16 kHz mono WAV, send
@@ -148,8 +181,42 @@
   ["pointerup", "pointercancel", "pointerleave"].forEach((n) => ptt.addEventListener(n, () => stopRec()));
 
   // ---- approvals + status polling
+  // ---- sync: the PC holds the one conversation; this phone only reads it and acknowledges notes
+  let seq = 0; const mine = new Set(), shown = new Set();
+  async function syncNow() {
+    if (!token || document.hidden) return;
+    let s; try { s = await api("/api/m/sync?since=" + seq); } catch (e) { return; }
+    if (s.head < seq) seq = 0;                                  // the PC was restarted with a fresh journal
+    const first = seq === 0;
+    (s.turns || []).forEach((x) => {
+      seq = Math.max(seq, x.seq);
+      if (!first && me && x.device === me.device) return;                 // this phone already shows its own turns
+      bubble(x.text, x.role === "user" ? "me" : "").title = t("from_pc");
+    });
+    (s.notices || []).forEach(async (n) => {
+      if (!shown.has(n.id)) { shown.add(n.id); const b = bubble(t("note") + ": " + n.text, "note"); b.setAttribute("role", "status"); }
+      try { await post("/api/m/notices/" + n.id + "/ack"); } catch (e) { /* shown again next sync, never twice on screen */ }
+    });
+    renderGoals(s);
+  }
+  function renderGoals(s) {
+    const on = !!(s.signals || (me && me.scopes && me.scopes.includes("tasks")));
+    $("goalsHead").hidden = $("goalList").hidden = $("sigBox").hidden = !on; if (!on) return;
+    const ul = $("goalList"); ul.replaceChildren();
+    if (!(s.goals || []).length) li(ul, t("no_goals"));
+    (s.goals || []).forEach((g) => {
+      const row = li(ul, `${g.title} (${g.percent == null ? 0 : g.percent}%)`);
+      const act = (label, status) => { const b = document.createElement("button"); b.type = "button"; b.textContent = label;
+        b.addEventListener("click", async () => { b.disabled = true; try { await post("/api/m/goals/op", { op: "status", goal: g.id, status, id: newId() }); } catch (e) { row.firstChild.textContent = e.message; } syncNow(); }); row.appendChild(b); };
+      if (g.status === "paused") act(t("resume"), "active"); else act(t("pause"), "paused");
+      act(t("drop"), "dropped");
+    });
+  }
+  const sig = (op, key) => async () => { try { await post("/api/m/signals", { op, minutes: 60, id: newId() }); $("sigNote").textContent = t(key); } catch (e) { $("sigNote").textContent = e.message; } };
+  $("sigSnooze").addEventListener("click", sig("snooze", "sig_snoozed")); $("sigStop").addEventListener("click", sig("stop", "sig_stopped"));
   async function tick() {
     if (!token || document.hidden) return;
+    syncNow();
     try {
       const a = await api("/api/m/approvals"); const n = a.pending.length, badge = $("apprCount");
       badge.hidden = !n; badge.textContent = String(n);
@@ -166,7 +233,7 @@
       const row = li(ul, `${p.title} (${p.seconds_left}${t("sec")})`);
       if (!a.phone_approvals) return;
       const mk = (label, ok, primary) => { const b = document.createElement("button"); b.type = "button"; b.textContent = label; if (primary) b.className = "primary";
-        b.addEventListener("click", async () => { b.disabled = true; try { await post("/api/m/approvals/" + p.id, { approved: ok }); } catch (e) { row.firstChild.textContent = e.message; } tick(); }); row.appendChild(b); };
+        b.addEventListener("click", async () => { b.disabled = true; try { await post("/api/m/approvals/" + p.id, { approved: ok, id: "appr-" + p.id + (ok ? "-yes" : "-no") }); } catch (e) { row.firstChild.textContent = e.message; } tick(); }); row.appendChild(b); };
       if (p.typed) { const s = document.createElement("span"); s.className = "muted"; s.textContent = t("typed_pc"); row.appendChild(s); mk(t("deny"), false, false); }
       else { mk(t("approve"), true, true); mk(t("deny"), false, false); }
     });

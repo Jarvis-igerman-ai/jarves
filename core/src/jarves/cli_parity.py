@@ -38,7 +38,7 @@ FEATURES: dict[str, object] = {
     "skill_creation": (D, "proposed Skills are reviewed on the New Skills page (risky: approval on screen)"),
     "guided_setup": "setup", "self_check": "diagnose", "scheduler": "jobs", "reports": "reports", "notes": "notes",
     "timers": "timers", "lists": "lists", "goals": "goals", "adaptive_memory": "prefs", "prefs_in_prompt": "prefs",
-    "goal_done_line": (D, "a pure switch; change it with `jarvis features`"), "proactive_intel": "proactive",
+    "goal_done_line": (D, "a pure switch; change it with `jarvis features`"), "proactive_intel": "proactive", "proactive_signals": "proactive",
     "dev_manager": "dev", "files": (D, "the file workspace is browsed on the My files page"),
     "proactive_alerts": (D, "alerts are read and answered on the Alerts page"),
     "autonomy": (D, "autonomy proposals are approved on the Autonomy page"),
@@ -340,6 +340,8 @@ def cmd_proactive(a, cfg, home) -> int:
     db = _db(home)
     p = Proactive(db, Goals(db))
     try:
+        if a.action == "signals":
+            return _cmd_signals(a, home, db)
         if a.action == "mode":
             if a.value:
                 p.set_mode(a.value, by="cli")
@@ -359,6 +361,30 @@ def cmd_proactive(a, cfg, home) -> int:
         return 2
     finally:
         db.close()
+
+
+def _cmd_signals(a, home, db) -> int:
+    from . import calm
+    from .continuity import Continuity
+    c = Continuity(home, quiet=lambda ts: calm.quiet_hours_now(db, ts))
+    if a.what == "on":
+        c.configure_signals(on=True, by="cli")
+    elif a.what == "off":
+        c.configure_signals(on=False, by="cli")
+    elif a.what == "snooze":
+        c.snooze(a.minutes, by="cli")
+    elif a.what == "stop":
+        c.stop_signals(by="cli")
+    elif a.what == "notices":
+        for n in c.fetch_notices("desktop"):
+            print(f"{n['id']:>3} [{n['kind']}] {n['text']}")
+            c.ack_notice("desktop", n["id"])
+        return 0
+    s = c.signals_state()
+    print(clilang.fmt("אותות יזומים: ", "signals: ") + ("on" if s["on"] and not s["stopped"] else "off")
+          + (" (snoozed)" if s["snoozed_until"] else "") + (" (quiet hours now)" if s["quiet_now"] else "")
+          + f"  {s['sent_hour']}/{s['hourly']} per hour, {s['sent_day']}/{s['daily']} per day")
+    return 0
 
 
 def cmd_dev(a, cfg, home) -> int:
@@ -552,6 +578,9 @@ def add_cli(sub) -> None:
     pim.add_argument("value", nargs="?", choices=["on_request", "in_conversation"])
     pid_ = pis.add_parser("dismiss", help="dismiss ID")
     pid_.add_argument("id", type=int)
+    pig = pis.add_parser("signals", help="event-driven signals: status / on / off / snooze MINUTES / stop / notices")
+    pig.add_argument("what", nargs="?", default="status", choices=["status", "on", "off", "snooze", "stop", "notices"])
+    pig.add_argument("minutes", nargs="?", type=float, default=60)
 
     dv = sub.add_parser("dev", help="development drafts, kept local: list / suggest / show / discard / file (asks first)")
     dvs = dv.add_subparsers(dest="action", required=True)

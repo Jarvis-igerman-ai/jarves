@@ -17,6 +17,8 @@
   <button type="button" id="lang" class="ghost" aria-label="Language">עב</button>
 </header>
 
+<div id="banner" class="banner" role="alert" hidden></div>
+
 <main id="pairView" hidden>
   <h1 data-t="pair_title">Pair this phone</h1>
   <p data-t="pair_help">On the computer open the JARVES dashboard, go to Phone and press Pair a phone. Scan the QR code, or type the 8-digit code here.</p>
@@ -60,6 +62,13 @@
 
   <section id="tab-status" class="panel" hidden>
     <ul id="statusList" class="list"></ul>
+    <h2 data-t="goals" id="goalsHead" hidden>Goals</h2>
+    <ul id="goalList" class="list" hidden></ul>
+    <div id="sigBox" class="row" hidden>
+      <button type="button" id="sigSnooze" data-t="snooze">Snooze notes 1 h</button>
+      <button type="button" id="sigStop" data-t="stop_notes">Stop notes</button>
+    </div>
+    <p id="sigNote" class="muted" aria-live="polite"></p>
     <p class="muted" id="meInfo"></p>
     <button type="button" id="unpair" data-t="unpair">Un-pair this phone</button>
   </section>

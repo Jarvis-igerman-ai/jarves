@@ -1,0 +1,52 @@
+order = 39
+category = "everyday"
+features = ["proactive_signals"]
+aliases = ["אותות יזומים", "תזכורת בטלפון", "שעות שקט", "נודניק", "proactive signals", "quiet hours", "snooze", "reminders on phone", "continuity"]
+links = ["proactive", "mobile_access", "goals"]
+title_he = "אותות יזומים והמשכיות בין מחשב לטלפון"
+title_en = "Proactive signals and phone continuity"
+what_he = "כשמשהו קורה (יעד שנתקע, אירוע ביומן, תזכורת), JARVES משאיר הודעה קצרה אחת למכשיר שבו אתם משתמשים עכשיו: המחשב או הטלפון, לא שניהם. בלי שיחה עם ה-AI ובלי לעשות דבר בשבילכם. כבוי מראש."
+what_en = "When something happens (a goal stalls, a calendar event, a reminder) JARVES leaves one short note on the device you are using right now: the computer or the phone, not both. No AI call and nothing is done for you. Off by default."
+say = [["תשתיק את ההצעות לשעה", "Snooze the suggestions for an hour"], ["תפסיק עם ההודעות היזומות", "Stop the proactive notes"]]
+expect_he = "הודעה מגיעה פעם אחת בלבד, למכשיר הפעיל. לא בין 22:00 ל-07:00, לא יותר משתיים בשעה ושש ביום (אפשר לשנות), ואפשר להשהות או לעצור. כשהטלפון מתנתק ומתחבר מחדש, הודעות ופעולות שכבר בוצעו לא חוזרות. הודעה שנשלחה בזמן שאין חיבור מסומנת בטלפון \"לא נשלחה\" ולא נשלחת בשקט אחרי כמה דקות."
+expect_en = "A note arrives once, on the active device. Never between 22:00 and 07:00, at most two per hour and six per day (adjustable), and you can snooze or stop it. When the phone drops and reconnects, notes and actions that already happened do not repeat. A message typed while there is no connection is shown on the phone as \"not sent\" and is never sent silently after a few minutes."
+cost_he = "חינם. אות לא קורא ל-AI; תקרת עלות יומית (ברירת מחדל 0) חוסמת כל אות שיעלה בבקשות AI."
+cost_en = "Free. A signal never calls the AI; a daily cost cap (default 0) blocks any signal that would cost AI requests."
+privacy_he = "הכול נשמר במחשב בקובץ continuity.db. טקסט שנראה כסוד, מספר או פרט רפואי לא נשמר בשיחה המשותפת."
+privacy_en = "Everything is kept on this computer in continuity.db. Text that looks like a secret, number or health detail is not stored in the shared conversation."
+
+[[steps]]
+he = "הדליקו את \"אותות יזומים\" בעמוד \"יכולות ומתגים\", או בשורת הפקודה: jarvis proactive signals on."
+en = "Turn on \"Proactive signals\" on the Features page, or on the command line: jarvis proactive signals on."
+action = "feature_on:proactive_signals"
+check = "enabled:proactive_signals"
+
+[[steps]]
+he = "להשהיה: jarvis proactive signals snooze 60. לעצירה עד שתדליקו שוב: jarvis proactive signals stop. הטלפון (אם הרשיתם לו \"משימות\") יכול להשהות ולעצור גם הוא."
+en = "To snooze: jarvis proactive signals snooze 60. To stop until you switch it on again: jarvis proactive signals stop. The phone (if you allowed it \"tasks\") can snooze and stop too."
+
+[[steps]]
+he = "לראות את ההודעות בשורת הפקודה ולסמן אותן כנקראו: jarvis proactive signals notices. הטלפון מציג אותן בעצמו."
+en = "To read the notes on the command line and mark them read: jarvis proactive signals notices. The phone shows them by itself."
+
+[[steps]]
+he = "לראות את המצב ואת המכסות: jarvis proactive signals status."
+en = "To see the state and the limits: jarvis proactive signals status."
+
+[[problems]]
+he = "לא הגיעה אליי שום הודעה"
+en = "No note ever arrived"
+fix_he = "בדקו שהמתג דלוק, שלא השהיתם או עצרתם, שלא עכשיו בין 22:00 ל-07:00 ושלא הגעתם למכסה (jarvis proactive signals status). אותות נוצרים רק כשיש אירוע, לא לפי שאילתת AI."
+fix_en = "Check that the switch is on, that you did not snooze or stop it, that it is not between 22:00 and 07:00 and that the limit was not reached (jarvis proactive signals status). Signals exist only when an event happens, never from an AI poll."
+
+[[problems]]
+he = "הטלפון מראה \"המחשב לא זמין\" או הודעה \"לא נשלחה\""
+en = "The phone says \"computer unreachable\" or a message shows \"not sent\""
+fix_he = "המחשב כבוי, ישן או ברשת אחרת. אחרי שהחיבור חוזר ההודעה נשלחת שוב אוטומטית רק בתוך שתי דקות; אחרי זה לחצו \"לשלוח שוב\". אין כפילויות: אותה הודעה נענית פעם אחת."
+fix_en = "The computer is off, asleep or on another network. After the connection returns, the message is re-sent automatically only within two minutes; after that tap \"Send again\". There are no duplicates: the same message is answered once."
+
+[[problems]]
+he = "קיבלתי את אותה תזכורת במחשב ובטלפון"
+en = "I got the same reminder on the computer and the phone"
+fix_he = "זה לא אמור לקרות: כל תזכורת מנותבת למכשיר אחד. אם זה קרה, שמרו חבילת אבחון ופתחו דיווח."
+fix_en = "This should not happen: every reminder is routed to one device. If it did, save a diagnostic bundle and file a report."

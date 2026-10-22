@@ -3,6 +3,7 @@
 `attach(core)` (called once from Core.start after the background tasks) opens the user database, registers the
 Skills (scheduler, reports, notes, files, alerts, autonomy) and their low-risk actions, and starts ONE background
 loop: the scheduler tick (local SQLite only, at most every 30 s), then alert delivery, then (every
+SIGNAL_SCAN_S = 3600
 AUTONOMY_SYNC_S) diagnostic proposals from the self-diagnosis issues. No voice session or model call is opened to
 poll anything. `Operations.stop()` is awaited by Core.stop.
 
@@ -28,7 +29,7 @@ from . import lists as lists_mod
 from . import logs
 from . import notes as notes_mod
 from . import preferences as prefs_mod
-from . import calm, devmanager as dev_mod, proactive as proactive_mod
+from . import calm, continuity as continuity_mod, devmanager as dev_mod, proactive as proactive_mod
 from . import sandbox as sandbox_mod
 from . import scheduler as sched_mod
 from . import selfcheck as selfcheck_mod
@@ -207,6 +208,8 @@ class Operations:
         self.goals = goals_mod.Goals(self.db)
         self.prefs = prefs_mod.Preferences(self.db)
         self.proactive = proactive_mod.Proactive(self.db, self.goals)
+        self.cont = continuity_mod.Continuity(home, quiet=lambda ts: calm.quiet_hours_now(self.db, ts))
+        self._scanned = 0.0
         self.cheer = goals_mod.GoalCheer(self.goals, quiet=lambda: calm.quiet_hours_now(self.db, time.time()),
                                          at_pc=lambda: calm.owner_at_pc(core), say=self._say_goal_line)
         self.timers = timers_mod.Timers(self.db, tz=self.scheduler.tz)
@@ -263,7 +266,7 @@ class Operations:
         self._task = asyncio.get_running_loop().create_task(self.scheduler.run(self._after_tick), name="operations")
         ring = TimerRinger(self.core)
         self._timer_task = asyncio.get_running_loop().create_task(
-            self.timers.run(lambda t, text: ring(t, text) if self.core.features.active("timers") else _false()),
+            self.timers.run(lambda t, text: self._ring_once(ring, t, text)),
             name="timers")
         # owner request 20 Oct: self-check (voice tools, weekly job, after an unclean stop / an error burst)
         self.selfcheck = selfcheck_mod.attach(self.core, self)
@@ -296,7 +299,37 @@ class Operations:
         except Exception:
             logs.error("connect", "CONNECT_NUDGE_FAILED", "setup reminder failed", exc=True)
 
+    async def _ring_once(self, ring, t: dict, text: str) -> bool:
+        """A due timer is announced on ONE device: the one the owner is using (desktop speaker, or a paired phone's
+        notice). The other never repeats it, also not after a reconnect (dedupe key = the timer id)."""
+        c = self.core
+        if not c.features.active("timers"):
+            return False
+        if c.features.active("mobile_access"):
+            try:
+                target = self.cont.on_timer_event(t["id"], text, desktop_present=calm.owner_at_pc(c))
+            except Exception:
+                logs.error("continuity", "TIMER_ROUTE_FAILED", "timer routing failed: ringing here", exc=True)
+                target = None
+            if target == "duplicate":
+                return True
+            if target not in (None, "desktop"):
+                return True                     # queued for the phone the owner is using; it acknowledges the notice
+        return await ring(t, text)
+
+    async def _signals_tick(self) -> None:
+        """Event-driven, no model call: at most once an hour turn the already-computed proactive items into signals."""
+        now = time.time()
+        if now - self._scanned < SIGNAL_SCAN_S or not self.core.features.active(continuity_mod.FEATURE):
+            return
+        self._scanned = now
+        try:
+            self.cont.scan_proactive(self.proactive)
+        except Exception:
+            logs.error("continuity", "SIGNAL_SCAN_FAILED", "proactive signal scan failed", exc=True)
+
     async def _after_tick(self) -> None:
+        await self._signals_tick()
         await self._connect_nudge()
         try:
             await self.cheer.check()

@@ -32,6 +32,7 @@ from typing import Callable
 from urllib.parse import urlsplit
 
 from . import logs, qrmini
+from .continuity import Continuity
 
 FEATURE = "mobile_access"
 DEVICES_FILE = "mobile_devices.json"
@@ -55,7 +56,7 @@ REPLY_TTL_S = 600                  # how long a chat answer is kept for a resend
 REPLY_KEEP = 200
 MSG_ID_RE = re.compile(r"^[A-Za-z0-9_.:-]{8,64}$")
 DEFAULT_SCOPES = ("chat", "voice", "status", "approvals")
-ALL_SCOPES = DEFAULT_SCOPES
+ALL_SCOPES = DEFAULT_SCOPES + ("tasks",)     # tasks: goal actions + proactive snooze/stop (off until granted)
 STATIC_FILES = {"index.html": "text/html; charset=utf-8", "app.js": "text/javascript; charset=utf-8",
                 "style.css": "text/css; charset=utf-8", "sw.js": "text/javascript; charset=utf-8",
                 "manifest.webmanifest": "application/manifest+json", "icon.svg": "image/svg+xml"}
@@ -99,6 +100,8 @@ class Bridge:
     voice: Callable[[bytes, str], dict]             # (wav bytes, device id) -> {"transcript": str, "reply": str, "ok": bool}
     status: Callable[[], dict]                      # -> {"core": str, "components": {name: status}}
     voice_available: Callable[[], bool] = field(default=lambda: True)
+    goals: Callable[[], object] = field(default=lambda: None)              # -> goals.Goals (the one goal store) or None
+    desktop_present: Callable[[], bool] = field(default=lambda: False)     # the owner is at the PC right now
 
 
 class MobileAccess:
@@ -119,6 +122,8 @@ class MobileAccess:
         self._busy: set[str] = set()
         self._replies: dict[tuple[str, str], tuple[float, dict]] = {}   # (device, client message id) -> answered turn
         self.bridge: Bridge | None = None
+        self._cont: Continuity | None = None
+        self.quiet: Callable[[float], bool] | None = None     # calm.quiet_hours_now bound to the user DB (set by the Core)
         self.scheme = "http"
         self.host: str | None = None
         self.port = 0
@@ -323,6 +328,13 @@ class MobileAccess:
                     self._hits.pop(k, None)
         return True
 
+    @property
+    def cont(self) -> Continuity:
+        """The continuity store (ledger, shared conversation, presence, notices)."""
+        if self._cont is None:
+            self._cont = Continuity(self.home, clock=self.clock, quiet=self.quiet)
+        return self._cont
+
     def begin(self, device: str) -> bool:
         """One chat/voice turn per phone at a time: a double tap or a retry after a Wi-Fi blip cannot run the same
         message twice in parallel or pile up Brain calls (the phone shows the busy answer and waits)."""
@@ -339,6 +351,9 @@ class MobileAccess:
             hit = self._replies.get((device, mid))
             if hit and self.clock() - hit[0] <= REPLY_TTL_S:
                 return hit[1]
+        try:
+            return self.cont.seen(device, mid, REPLY_TTL_S)          # survives a PC restart (the in-memory copy is gone then)
+        except Exception:
             return None
 
     def remember(self, device: str, mid: str, reply: dict) -> None:
@@ -349,6 +364,10 @@ class MobileAccess:
                 self._replies.pop(k, None)
             while len(self._replies) > REPLY_KEEP:               # bounded: oldest out first
                 self._replies.pop(next(iter(self._replies)))
+        try:
+            self.cont.store(device, mid, "chat", 200, reply)
+        except Exception:
+            logs.warn("mobile", "MOBILE_LEDGER_FAILED", "the command ledger could not be written")
 
     def end(self, device: str) -> None:
         with self._lock:
@@ -408,7 +427,17 @@ def core_bridge(core, loop) -> Bridge:
         return {"core": getattr(core.health, "core", "running"),
                 "components": {k: str(v.get("status")) for k, v in comps.items()}}
 
-    return Bridge(chat=chat, voice=voice, status=status, voice_available=lambda: getattr(core, "stt", None) is not None)
+    def goals():
+        return getattr(getattr(core, "ops", None), "goals", None)
+
+    def desktop_present() -> bool:
+        from .calm import owner_at_pc
+        try:
+            return bool(owner_at_pc(core))
+        except Exception:
+            return False
+    return Bridge(chat=chat, voice=voice, status=status, voice_available=lambda: getattr(core, "stt", None) is not None,
+                  goals=goals, desktop_present=desktop_present)
 
 
 # ---------------------------------------------------------------------- HTTP (called by dashboard.Handler)
@@ -543,6 +572,8 @@ def serve(h, mob: MobileAccess, ip: str) -> None:
             again = mob.replay(dev["id"], mid)
             if again is not None:                                # a resend: answer from memory, no second run
                 return done(200, {**again, "replay": True}, replay="yes")
+            if mob.cont.stale(d.get("age_s")):                   # queued while offline for too long: never run it late
+                return done(410, {"error": "this message waited too long while offline: send it again", "code": "STALE"})
         if not mob.rate_ok("chat:" + dev["id"], CHAT_RATE_PER_MIN):
             return h._json_extra(429, {"error": "too many messages, slow down"}, {"Retry-After": "30"})
         text = str(d.get("text", "")).strip()[:MAX_CHAT_CHARS]
@@ -562,6 +593,12 @@ def serve(h, mob: MobileAccess, ip: str) -> None:
         out = {"reply": str(r.get("reply", "")), "ok": bool(r.get("ok", True))}
         if mid:
             mob.remember(dev["id"], mid, out)
+        try:                                                     # the one shared conversation (desktop + web read it too)
+            mob.cont.add_turn(dev["id"], "user", text, mid)
+            mob.cont.add_turn(dev["id"], "assistant", out["reply"], mid)
+            mob.cont.beat(dev["id"], used=True)
+        except Exception:
+            logs.warn("mobile", "MOBILE_JOURNAL_FAILED", "the shared conversation could not be written")
         return done(200, out, chars=len(text))
     if path == "/api/m/voice" and method == "POST":
         if not need("voice"):
@@ -586,6 +623,53 @@ def serve(h, mob: MobileAccess, ip: str) -> None:
             mob.end(dev["id"])
         return done(200, {"transcript": str(r.get("transcript", "")), "reply": str(r.get("reply", "")),
                           "ok": bool(r.get("ok", False))}, bytes=len(raw))
+    # ---- continuity: one state for every client, notices routed to one device, goal actions, proactive controls
+    if path == "/api/m/sync" and method == "GET":
+        if not need("status"):
+            return
+        q = dict(p.split("=", 1) for p in url.query.split("&") if "=" in p)
+        try:
+            since = max(0, int(q.get("since", "0")))
+        except ValueError:
+            since = 0
+        c = mob.cont
+        c.beat(dev["id"], "phone")
+        goals = mob.bridge.goals() if mob.bridge else None
+        want_goals = "tasks" in dev["scopes"] and goals is not None
+        return h._json(200, {"head": c.head(), "turns": c.turns(since, 50) if "chat" in dev["scopes"] else [],
+                             "notices": c.fetch_notices(dev["id"]), "desktop_here": bool(mob.bridge and mob.bridge.desktop_present()),
+                             "goals": [_goal_brief(g) for g in goals.list("active")] if want_goals else [],
+                             "approvals_waiting": len(approvals_view(mob)["pending"]) if "approvals" in dev["scopes"] else 0,
+                             "signals": c.signals_state() if "tasks" in dev["scopes"] else None})
+    m = re.fullmatch(r"/api/m/notices/([0-9]{1,9})/ack", path)
+    if m and method == "POST":
+        if not need("status"):
+            return
+        return h._json(200, {"ok": mob.cont.ack_notice(dev["id"], int(m.group(1)))})
+    if path == "/api/m/goals/op" and method == "POST":
+        if not need("tasks"):
+            return
+        d = _json_body(h)
+        if d is None:
+            return
+        cid = d.get("id")
+        if not (isinstance(cid, str) and MSG_ID_RE.match(cid)):
+            return h._json(400, {"error": "command id (8-64 letters, digits or _ . : -) is required"})
+        mob.cont.beat(dev["id"], used=True)
+        status, obj, again = mob.cont.execute(dev["id"], cid, "goal", lambda: goal_action(mob, d), age_s=d.get("age_s"))
+        return done(status, {**obj, "replay": True} if again else obj, op=str(d.get("op", ""))[:20])
+    if path == "/api/m/signals" and method == "POST":
+        if not need("tasks"):
+            return
+        d = _json_body(h)
+        if d is None:
+            return
+        cid = d.get("id")
+        if not (isinstance(cid, str) and MSG_ID_RE.match(cid)):
+            return h._json(400, {"error": "command id (8-64 letters, digits or _ . : -) is required"})
+        status, obj, again = mob.cont.execute(dev["id"], cid, "signals", lambda: signals_action(mob, d, dev["id"]),
+                                              age_s=d.get("age_s"))
+        return done(status, {**obj, "replay": True} if again else obj, op=str(d.get("op", ""))[:20])
     if path == "/api/m/approvals" and method == "GET":
         if not need("approvals"):
             return
@@ -599,9 +683,57 @@ def serve(h, mob: MobileAccess, ip: str) -> None:
             return
         if not isinstance(d.get("approved"), bool):
             return h._json(400, {"error": "body needs {\"approved\": true|false}"})
-        status, obj = answer_approval(mob, m.group(1), d["approved"], dev["id"])
-        return done(status, obj, decision="approve" if d["approved"] else "deny")
+        cid = d.get("id")
+        if cid is not None and not (isinstance(cid, str) and MSG_ID_RE.match(cid)):
+            return h._json(400, {"error": "command id must be 8-64 letters, digits or _ . : -"})
+        mob.cont.beat(dev["id"], used=True)
+        status, obj, again = mob.cont.execute(
+            dev["id"], cid, "approval", lambda: answer_approval(mob, m.group(1), d["approved"], dev["id"]),
+            age_s=d.get("age_s"))
+        return done(status, {**obj, "replay": True} if again else obj, decision="approve" if d["approved"] else "deny")
     return h._json(404, {"error": "not found"})
+
+
+def _goal_brief(g: dict) -> dict:
+    return {"id": g["id"], "title": str(g["title"])[:120], "status": g["status"], "percent": g.get("progress"),
+            "steps": [{"id": x["id"], "text": str(x["text"])[:120], "done": bool(x.get("done"))} for x in g.get("steps", [])]}
+
+
+GOAL_OPS = ("status", "step_set")
+
+
+def goal_action(mob: MobileAccess, d: dict) -> tuple[int, dict]:
+    """A phone may pause/resume/drop/finish a goal and tick a step; it may NOT delete, edit or add (PC only)."""
+    goals = mob.bridge.goals() if mob.bridge else None
+    if goals is None:
+        return 503, {"error": "goals are not available right now"}
+    op = d.get("op")
+    try:
+        if op == "status":
+            if d.get("status") not in ("active", "paused", "dropped", "done"):
+                return 400, {"error": "status must be active, paused, dropped or done"}
+            return 200, {"goal": _goal_brief(goals.set_status(int(d.get("goal", 0)), d["status"], by="phone"))}
+        if op == "step_set":
+            return 200, {"goal": _goal_brief(goals.set_step(int(d.get("step", 0)), bool(d.get("done", True)), by="phone"))}
+    except KeyError:
+        return 404, {"error": "no such goal"}
+    except (ValueError, TypeError) as e:
+        return 400, {"error": str(e)}
+    return 400, {"error": "op must be " + " or ".join(GOAL_OPS)}
+
+
+def signals_action(mob: MobileAccess, d: dict, device: str) -> tuple[int, dict]:
+    c, op = mob.cont, d.get("op")
+    if op == "snooze":
+        try:
+            until = c.snooze(float(d.get("minutes", 60)), by=device)
+        except (TypeError, ValueError):
+            return 400, {"error": "minutes must be a number"}
+        return 200, {"snoozed_until": until}
+    if op == "stop":
+        c.stop_signals(by=device)
+        return 200, {"stopped": True}
+    return 400, {"error": "op must be snooze or stop (switching on is done on the computer)"}
 
 
 def approvals_view(mob: MobileAccess) -> dict:
