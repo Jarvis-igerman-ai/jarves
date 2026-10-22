@@ -151,14 +151,19 @@ async def _deny(_: str) -> bool:
 
 
 
-_DROP_KEYS = ("title", "minLength", "maxLength")
+_DROP_KEYS = ("title", "minLength", "maxLength", "default")
 
 
 def slim_schema(node: Any, _in_props: bool = False) -> Any:
     """SW-V4 P: a tool's JSON schema as the model needs it. Pydantic adds a `title` to every property and the model
-    class (about 20% of the schema tokens) and length bounds the Core validates itself on every call anyway; none of
-    it helps the model choose or fill a tool. Property NAMES (even one called "title") are kept."""
+    class (about 20% of the schema tokens), length bounds and defaults the Core validates/fills itself on every call
+    anyway, and `anyOf [X, null]` for an optional field (the model just leaves it out); none of it helps the model
+    choose or fill a tool. Property NAMES (even one called "title" or "default") are kept."""
     if isinstance(node, dict):
+        if not _in_props and isinstance(node.get("anyOf"), list):
+            rest = [v for v in node["anyOf"] if v != {"type": "null"}]
+            if len(rest) == 1 and len(rest) < len(node["anyOf"]) and isinstance(rest[0], dict):
+                node = {**{k: v for k, v in node.items() if k != "anyOf"}, **rest[0]}
         return {k: slim_schema(v, k == "properties") for k, v in node.items()
                 if _in_props or k not in _DROP_KEYS}
     if isinstance(node, list):

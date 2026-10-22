@@ -163,8 +163,7 @@ def make_skill(app: Appearance):
     from .skills import Skill, Tool, ToolResult
 
     class SetArgs(BaseModel):
-        mode: str = Field(..., description="face | avatar2d | avatar3d | hidden (Hebrew words are accepted too, "
-                                           "e.g. 'אווטאר תלת מימד')")
+        mode: str = Field(..., description='face | avatar2d | avatar3d | hidden')
 
     class AppearanceSkill(Skill):
         name = "appearance"
@@ -188,9 +187,8 @@ def make_skill(app: Appearance):
                 return ToolResult(True, msg, {"mode": m, "shown": shown})
 
             return [
-                Tool("appearance_get", "Which presentation I use on the screen now.", get, permission="read"),
-                Tool("set_appearance", "Switch how I look on the screen when the user asks (\"תחליף לאווטאר תלת "
-                     "מימד\", \"תחזור לפנים\"): face, avatar2d, avatar3d or hidden. Only the picture changes.",
+                Tool("appearance_get", "Current on-screen look: 'how do you look now', 'איך אתה נראה'.", get, permission="read"),
+                Tool("set_appearance", "Switch look: face, avatar2d, avatar3d, hidden: 'be a 3D avatar', 'תעבור לאווטאר תלת מימד'. Only the picture changes.",
                      set_, SetArgs, permission="action"),
             ]
 

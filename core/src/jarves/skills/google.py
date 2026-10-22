@@ -232,8 +232,7 @@ def _fail(e: GoogleAuthError) -> ToolResult:
 
 # ---------------------------------------------------------------------- Calendar
 class DayArgs(BaseModel):
-    day: str = Field("today", max_length=40, description="today | tomorrow | מחרתיים | a weekday (e.g. thursday / "
-                                                         "חמישי) | week | YYYY-MM-DD. Resolved locally.")
+    day: str = Field("today", max_length=40, description='today | tomorrow | מחרתיים | weekday (thursday/חמישי) | week | YYYY-MM-DD')
 
 
 def _event_time(e: dict, key: str, tz: tzinfo) -> tuple[datetime | None, bool]:
@@ -345,23 +344,22 @@ def _q(s: str) -> str:
 # ---------------------------------------------------------------------- Gmail
 class SearchArgs(BaseModel):
     query: str = Field("is:important is:unread newer_than:2d", max_length=200,
-                       description="Gmail search, e.g. 'is:important is:unread newer_than:2d', 'from:dana newer_than:7d'")
+                       description="Gmail search, e.g. 'is:unread newer_than:2d', 'from:dana'")
     limit: int = Field(5, ge=1, le=10)
 
 
 class ReadArgs(BaseModel):
-    id: str = Field(..., min_length=1, max_length=64, description="a mail id returned by gmail_search")
+    id: str = Field(..., min_length=1, max_length=64, description='mail id from gmail_search')
 
 
 class DraftArgs(BaseModel):
-    to: str = Field(..., min_length=1, max_length=120, description="recipient e-mail address, or the person's name "
-                                                                   "as the user said it (looked up in recent mail)")
+    to: str = Field(..., min_length=1, max_length=120, description="e-mail address, or the person's name as said")
     subject: str = Field("", max_length=150)
-    body: str = Field(..., min_length=1, max_length=3000, description="the text the user asked to send")
+    body: str = Field(..., min_length=1, max_length=3000)
 
 
 class SendArgs(BaseModel):
-    draft_id: str = Field(..., min_length=1, max_length=64, description="the id from gmail_create_draft")
+    draft_id: str = Field(..., min_length=1, max_length=64, description='id from gmail_create_draft')
 
 
 _EMAIL = re.compile(r"^[^@\s<>\"',;]+@[^@\s<>\"',;]+\.[A-Za-z]{2,}$")
@@ -544,11 +542,9 @@ class GmailSkill(Skill):
                  permission="read", timeout_s=15, untrusted_output=True),
             Tool("gmail_read", "Read one mail found by gmail_search, ONLY after the user said yes to hearing it. "
                  + UNTRUSTED_NOTE, read, ReadArgs, permission="read", timeout_s=12, untrusted_output=True),
-            Tool("gmail_create_draft", "Write a mail as a DRAFT (nothing is sent). Use for 'תשלח מייל ל...'. Then read "
-                 "the draft back and ask before sending.", create_draft, DraftArgs, permission="action",
+            Tool("gmail_create_draft", "Write a mail as a DRAFT (nothing sent): 'email Dana', 'תשלח מייל ל...'. Read it back and ask before sending.", create_draft, DraftArgs, permission="action",
                  timeout_s=20),
-            Tool("gmail_send_draft", "Send a draft made by gmail_create_draft, only after reading it back and the user "
-                 "said yes. The user also approves on the screen.", send, SendArgs, permission="destructive",
+            Tool("gmail_send_draft", 'Send a gmail_create_draft only after read-back and a yes; the user also approves on screen.', send, SendArgs, permission="destructive",
                  timeout_s=20, impact=send_impact,
                  recipient=lambda a: (self._drafts.get(a.draft_id) or {}).get("name")),
         ]
@@ -592,35 +588,34 @@ def _event_link(value) -> str | None:
 
 class CreateArgs(BaseModel):
     title: str = Field(..., min_length=1, max_length=120)
-    day: str = Field(..., max_length=40, description="today | tomorrow | a weekday | YYYY-MM-DD | D.M (resolved locally)")
-    start: str | None = Field(None, pattern=r"^\d{1,2}:\d{2}$", description="HH:MM, omit for an all-day event")
-    end: str | None = Field(None, pattern=r"^\d{1,2}:\d{2}$", description="HH:MM (default: start + duration)")
+    day: str = Field(..., max_length=40, description='today | tomorrow | weekday | YYYY-MM-DD | D.M')
+    start: str | None = Field(None, pattern=r"^\d{1,2}:\d{2}$", description='HH:MM; omit for all-day')
+    end: str | None = Field(None, pattern=r"^\d{1,2}:\d{2}$", description='HH:MM (default start + duration)')
     duration_min: int = Field(60, ge=5, le=24 * 60)
-    calendar: str = Field("primary", max_length=80, description="calendar name, default the main calendar")
+    calendar: str = Field("primary", max_length=80, description='default: main calendar')
     recurrence: str = Field("none", pattern="^(none|daily|weekly|monthly|yearly)$")
-    count: int | None = Field(None, ge=1, le=100, description="repeat this many times (with recurrence)")
+    count: int | None = Field(None, ge=1, le=100)
     reminder_minutes: list[int] = Field(default_factory=list, max_length=5,
-                                        description="popup reminders, minutes before (e.g. [10]); [] = calendar default")
+                                        description='minutes before, e.g. [10]; [] = calendar default')
     location: str = Field("", max_length=120)
     description: str = Field("", max_length=1000)
     guests: list[str] = Field(default_factory=list, max_length=100,
-                              description="Plain email addresses, explicitly chosen by the user; sends invitations")
+                              description='plain emails chosen by the user; sends invitations')
 
     _validate_guests = field_validator("guests")(_guest_emails)
 
 
 class FindArgs(BaseModel):
     day: str = Field("week", max_length=40)
-    query: str = Field("", max_length=80, description="words in the title, e.g. dentist")
+    query: str = Field("", max_length=80, description='words in the title')
 
 
 class UpdateArgs(BaseModel):
-    handle: str = Field(..., pattern=r"^e\d{1,3}$", description="an event handle from calendar_find_events (e1, e2...)")
+    handle: str = Field(..., pattern=r"^e\d{1,3}$", description='handle from calendar_find_events (e1, e2...)')
     scope: str | None = Field(None, pattern="^(this|series)$",
-                              description="recurring events only: 'this' = only this occurrence, 'series' = all "
-                                          "of them. ASK the user; never guess.")
+                              description="recurring only: 'this' | 'series'. ASK the user; never guess.")
     title: str | None = Field(None, min_length=1, max_length=120)
-    day: str | None = Field(None, max_length=40, description="new day (one occurrence / single events only)")
+    day: str | None = Field(None, max_length=40)
     start: str | None = Field(None, pattern=r"^\d{1,2}:\d{2}$")
     end: str | None = Field(None, pattern=r"^\d{1,2}:\d{2}$")
     location: str | None = Field(None, max_length=120)
@@ -632,7 +627,7 @@ class ShareArgs(BaseModel):
     handle: str = Field(..., pattern=r"^e\d{1,3}$")
     guests: list[str] = Field(..., min_length=1, max_length=100)
     scope: str | None = Field(None, pattern="^(this|series)$",
-                              description="For recurring events ASK whether this occurrence or the whole series")
+                              description='recurring: ASK this occurrence or whole series')
 
     _validate_guests = field_validator("guests")(_guest_emails)
 
@@ -955,18 +950,11 @@ class CalendarWriteSkill(Skill):
         return [
             Tool("calendar_find_events", "Find events to change, share or obtain their real Calendar link (handles e1, e2...). "
                  + UNTRUSTED_NOTE, find, FindArgs, permission="read", timeout_s=15, untrusted_output=True),
-            Tool("calendar_create_event", "Add an event to the user's Google Calendar. The user hears a read-back "
-                 "(calendar, title, day, time, time zone, repeat, reminder, optional guest email invitations) "
-                 "and approves on the screen first.",
+            Tool("calendar_create_event", "Add a Google Calendar event ('meeting tomorrow at 10', 'תקבע פגישה מחר ב-10'). The user hears a read-back (calendar, title, day, time, zone, repeat, reminder, guests) and approves on screen first.",
                  run("create"), CreateArgs, permission="destructive", impact=impact("create"), timeout_s=40),
-            Tool("calendar_update_event", "Change an event found by calendar_find_events (title, time, place, "
-                 "reminder). For a recurring event ask 'only this time or the whole series?' and pass scope. "
-                 "There is NO way to delete events.", run("update"), UpdateArgs, permission="destructive",
+            Tool("calendar_update_event", "Change an event found by calendar_find_events (title, time, place, reminder). Recurring: ask 'this time or whole series?' and pass scope. NO deleting events.", run("update"), UpdateArgs, permission="destructive",
                  impact=impact("update"), timeout_s=40),
-            Tool("calendar_share_event", "Invite explicitly chosen guest email addresses to a found event. "
-                 "Preserves existing guests; sends Calendar invitations only after exact user confirmation. "
-                 "For recurring events ASK this occurrence or series. Returns the real Calendar htmlLink if available; "
-                 "emailing that link through Gmail requires a separate draft/send confirmation.", run("share"),
+            Tool("calendar_share_event", 'Invite explicitly chosen guest emails to a found event; keeps existing guests; sends invitations only after exact user confirmation. Recurring: ASK occurrence or series. Returns htmlLink; mailing it needs a separate Gmail draft/send confirmation.', run("share"),
                  ShareArgs, permission="destructive", impact=impact("share"), timeout_s=40),
         ]
 
@@ -1018,10 +1006,7 @@ class GoogleConnectSkill(Skill):
                                   code="GOOGLE_APP_NOT_CONFIGURED")
             return ToolResult(True, NOT_CONNECTED_HE, {"command": START_COMMAND, "connected": False},
                               code="GOOGLE_NOT_CONNECTED")
-        return [Tool("google_connect_help", "Google Calendar and Gmail are NOT connected yet. Call this whenever the "
-                     "user asks about their calendar, meetings, schedule or e-mail; say its answer (how to connect: "
-                     "use its returned setup instructions; app users use Connect Google, developer builds may "
-                     f"use {START_COMMAND}).", help_, permission="read")]
+        return [Tool("google_connect_help", "Google Calendar/Gmail are NOT connected. Call for any calendar, meeting or e-mail request ('what's on my calendar', 'יש לי פגישות') and say its setup instructions.", help_, permission="read")]
 
 
 def _register_connected(registry, auth: GoogleAuth, transport, health, calendar_kw: dict) -> None:

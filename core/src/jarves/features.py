@@ -836,8 +836,8 @@ def make_skill(features: Features, registry=None):
     from .skills import Skill, Tool, ToolResult
 
     class SetArgs(BaseModel):
-        id: str = Field(..., description="Feature id from features_list, e.g. music, web_search, camera")
-        on: bool = Field(..., description="true = turn on, false = turn off")
+        id: str = Field(..., description='id from features_list')
+        on: bool = Field(...)
 
     class FeatureSkill(Skill):
         name = "features"
@@ -879,10 +879,8 @@ def make_skill(features: Features, registry=None):
                 return ToolResult(True, msg, st)
 
             return [
-                Tool("features_list", "List my features (music, web search, camera, Gmail...): on, off or "
-                                      "unavailable, and why.", list_, permission="read"),
-                Tool("feature_set", "Turn one feature on or off when the user asks. Risky ones (camera, sending "
-                                    "e-mail...) need the user's approval on the screen.", set_, SetArgs,
+                Tool("features_list", "My features on/off/unavailable and why: 'what can you do', 'מה אתה יודע לעשות'.", list_, permission="read"),
+                Tool("feature_set", "Turn one feature on/off on request: 'turn on the camera', 'תפעיל את המצלמה'. Risky ones need on-screen approval.", set_, SetArgs,
                      permission="action", timeout_s=30),
             ]
 

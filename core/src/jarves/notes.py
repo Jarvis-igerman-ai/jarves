@@ -135,16 +135,16 @@ class AddArgs(BaseModel):
 
 
 class FindArgs(BaseModel):
-    query: str = Field("", max_length=120, description="words to find (title, text or tag); '' = newest notes")
+    query: str = Field("", max_length=120, description="'' = newest notes")
     tag: str = Field("", max_length=30)
-    note_id: int = Field(0, ge=0, description="read one note by id (0 = search)")
+    note_id: int = Field(0, ge=0, description='0 = search')
 
 
 class EditArgs(BaseModel):
     note_id: int = Field(..., ge=1)
     title: str | None = Field(None, max_length=MAX_TITLE)
-    text: str | None = Field(None, max_length=MAX_TEXT, description="the new full text (replaces it)")
-    append: str | None = Field(None, max_length=4000, description="text to add at the end")
+    text: str | None = Field(None, max_length=MAX_TEXT, description='replaces the text')
+    append: str | None = Field(None, max_length=4000)
     tags: list[str] | None = Field(None, max_length=MAX_TAGS)
 
 
@@ -153,7 +153,7 @@ class IdArgs(BaseModel):
 
 
 class ExportArgs(BaseModel):
-    note_id: int = Field(0, ge=0, description="0 = all notes")
+    note_id: int = Field(0, ge=0, description='0 = all')
 
 
 def make_skill(notes: Notes, sandbox=None):
@@ -215,15 +215,14 @@ def make_skill(notes: Notes, sandbox=None):
                 return ToolResult(True, f"exported to {r['path']} in my workspace", r)
 
             return [
-                Tool("note_add", "Save a note for the user (title, text, tags) when they ask to write something "
-                     "down ('תרשום פתק', 'שמור הערה').", add, AddArgs, permission="action"),
-                Tool("note_find", "Find the user's notes by words or tag, or read one by id.", find, FindArgs,
+                Tool("note_add", "Save a note (title, text, tags): 'write a note', 'תרשום פתק'.", add, AddArgs, permission="action"),
+                Tool("note_find", "Find notes by words/tag or read one by id: 'find my note about', 'תמצא פתק על'.", find, FindArgs,
                      permission="read"),
-                Tool("note_edit", "Change a note: new title/text/tags, or append text.", edit, EditArgs,
+                Tool("note_edit", "Change a note: new title/text/tags or append: 'add to the note', 'תוסיף לפתק'.", edit, EditArgs,
                      permission="action"),
-                Tool("note_delete", "Delete a note (asks the user first).", delete, IdArgs, permission="destructive",
+                Tool("note_delete", "Delete a note (asks first): 'delete the note', 'תמחק את הפתק'.", delete, IdArgs, permission="destructive",
                      impact=delete_impact),
-                Tool("note_export", "Export one note or all notes as a Markdown file in my workspace.", export,
+                Tool("note_export", "Export one or all notes as Markdown to my workspace: 'export my notes', 'תייצא את הפתקים'.", export,
                      ExportArgs, permission="action"),
             ]
 

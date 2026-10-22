@@ -22,10 +22,10 @@ def _dump(a: "ContactArgs") -> dict:
 
 
 class ContactArgs(BaseModel):
-    label: str = Field(..., min_length=1, max_length=80, description="User's relationship or alias, e.g. my wife")
+    label: str = Field(..., min_length=1, max_length=80, description='relationship or alias, e.g. my wife')
     email: str = Field(..., min_length=3, max_length=254)
     name: str = Field("", max_length=80)
-    phone: str = Field("", max_length=30, description="Optional phone number the user said, for assisted dialing")
+    phone: str = Field("", max_length=30, description='phone the user said, for assisted dialing')
 
     @field_validator("phone")
     @classmethod
@@ -115,12 +115,9 @@ class LocalContactsSkill(Skill):
                               "Contacts by a known name if enabled; never guess a relationship.",
                               {"contacts": rows[:20], "ambiguous": len(rows) > 1, "truncated": len(rows) > 20})
 
-        return [Tool("contact_remember", "Save a relationship/name and email ONLY when the user explicitly asks. "
-                     "Never infer who is the user's wife from a contact name. Does not edit Google Contacts.",
+        return [Tool("contact_remember", "Save a relationship/name and email ONLY when explicitly asked ('Dana is my wife', 'דנה היא אשתי'). Never infer relations. Not Google Contacts.",
                      remember, ContactArgs, permission="action"),
-                Tool("contact_lookup", "Find a locally remembered relationship/name/email before addressing mail "
-                     "or inviting guests. Multiple results require the user's choice. Older unstructured facts "
-                     "can be checked with recall. No automatic sending.", lookup, LookupArgs, permission="read")]
+                Tool("contact_lookup", "Find a saved relationship/name/email before addressing mail or inviting: 'email my wife', 'תשלח לאשתי'. Several matches: user chooses. Never sends.", lookup, LookupArgs, permission="read")]
 
 
 # Specific remember forms must precede the general remember intent.

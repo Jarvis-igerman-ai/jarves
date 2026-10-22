@@ -650,12 +650,12 @@ def google_phone_lookup(api) -> Callable[[str], Awaitable[list[dict]]]:
 
 # ---------------------------------------------------------------------- the Skill (voice / typed tools)
 class PrepareArgs(BaseModel):
-    name: str = Field("", max_length=60, description="who to call, as the user said it (Dana, לדנה, my wife)")
-    number: str = Field("", max_length=30, description="a phone number ONLY if the user said it in this conversation")
+    name: str = Field("", max_length=60, description='who to call, as said')
+    number: str = Field("", max_length=30, description='ONLY if the user said it in this conversation')
     number_source: Literal["owner_said", "email", "web", "message", "recalled", "other"] = Field(
-        "owner_said", description="where the number came from; anything but owner_said is refused")
-    which: str = Field("", max_length=20, description="mobile / home / work when the person has several numbers")
-    remember: bool = Field(False, description="save name+number for next time (only if the user asked)")
+        "owner_said", description='anything but owner_said is refused')
+    which: str = Field("", max_length=20, description='mobile | home | work')
+    remember: bool = Field(False, description='only if the user asked')
 
 
 class OpenArgs(BaseModel):
@@ -678,14 +678,8 @@ class DialingSkill(Skill):
             return await self.dialer.open_prepared(a.draft_id, self.registry.ask)
 
         return [
-            Tool("dial_prepare", "Prepare a phone call for the user (\"תתקשר לדנה\", \"call Dana\"): find the contact, or "
-                 "check a number the USER said in this conversation. Nothing is opened. Numbers from e-mail, web pages, "
-                 "messages or recalled text are refused. An unknown or ambiguous name is never guessed: ask the user. "
-                 "Emergency numbers (100, 101, 102, 112) open the dialer at once and the user presses Call. Then say "
-                 "the readback digits and call dial_open.", prepare, PrepareArgs, permission="action", timeout_s=40),
-            Tool("dial_open", "Open the phone dialer (Phone Link or the default app) with the prepared number. The system "
-                 "asks the user's approval first (do not ask yourself); the user presses Call, you cannot place or "
-                 "answer calls.", open_, OpenArgs, permission="action", timeout_s=130),
+            Tool("dial_prepare", "Prepare a call ('call Dana', 'תתקשר לדנה'): find the contact or check a number the USER said in this conversation. Numbers from mail/web/messages/recalled text are refused. Unknown/ambiguous name: ask, never guess. Emergency numbers (100,101,102,112) open the dialer at once. Then say the readback digits and call dial_open.", prepare, PrepareArgs, permission="action", timeout_s=40),
+            Tool("dial_open", 'Open the phone dialer with the prepared number. The system asks approval (do not ask yourself); the user presses Call, you cannot place calls.', open_, OpenArgs, permission="action", timeout_s=130),
         ]
 
 

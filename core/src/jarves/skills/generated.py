@@ -773,13 +773,8 @@ def sync(mgr: GeneratedSkills, registry) -> list[str]:
 
 # ---------------------------------------------------------------------- model tools (propose only)
 class ProposeArgs(BaseModel):
-    skill_md: str = Field(..., description="Full SKILL.md: '---' frontmatter with name (id, lower_case), title, "
-                                           "description, capabilities [storage, network:<host>], '---', then "
-                                           "Markdown instructions")
-    skill_py: str | None = Field(None, description="Optional Python: TOOLS = [{name: '<id>_<word>', description, "
-                                                   "permission: read|action, args: {x: string|integer|number|boolean}}]"
-                                                   " and def <tool>(args, ctx) per tool; stdlib json/math/re/"
-                                                   "datetime... only; ctx.storage_get/set, ctx.http_get(url)")
+    skill_md: str = Field(..., description="Full SKILL.md: '---' frontmatter (name lower_case id, title, description, capabilities [storage, network:<host>]) '---' then Markdown instructions")
+    skill_py: str | None = Field(None, description="Optional Python: TOOLS = [{name:'<id>_<word>', description, permission: read|action, args:{x: string|integer|number|boolean}}] + def <tool>(args, ctx); stdlib only; ctx.storage_get/set, ctx.http_get(url)")
 
 
 def make_builder_skill(mgr: GeneratedSkills) -> Skill:
@@ -806,12 +801,9 @@ def make_builder_skill(mgr: GeneratedSkills) -> Skill:
                                                  for s in ov["installed"]], "drafts": [d["id"] for d in ov["drafts"]]})
 
             return [
-                Tool("skill_propose", "Write a NEW Skill draft when the user asks for a new ability: SKILL.md + "
-                     "optional Python. It is only a draft: the owner reviews, approves, grants and enables it on the "
-                     "dashboard. Never claim it works before that.", propose, ProposeArgs, permission="action",
+                Tool("skill_propose", "Draft a NEW Skill (SKILL.md + optional Python) on request: 'learn a new skill', 'תלמד יכולת חדשה'. Draft only; the owner approves and enables it. Never claim it works before.", propose, ProposeArgs, permission="action",
                      timeout_s=15),
-                Tool("skills_generated_list", "List generated Skills (installed and on/off) and drafts waiting for "
-                     "the owner's approval.", list_, permission="read"),
+                Tool("skills_generated_list", "Generated Skills (on/off) and drafts awaiting approval: 'my new skills', 'אילו יכולות יצרת'.", list_, permission="read"),
             ]
 
     return BuilderSkill()

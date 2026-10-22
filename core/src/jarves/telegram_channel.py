@@ -136,12 +136,12 @@ def private_chats(updates: list[dict]) -> list[dict]:
 
 # ---------------------------------------------------------------------- the Skill
 class DraftArgs(BaseModel):
-    text: str = Field(..., min_length=1, max_length=MAX_TEXT, description="the message text the user asked to send")
-    to: str = Field("", max_length=60, description="a paired chat's name; empty = the owner's own chat")
+    text: str = Field(..., min_length=1, max_length=MAX_TEXT)
+    to: str = Field("", max_length=60, description="paired chat name; empty = the owner's own chat")
 
 
 class SendArgs(BaseModel):
-    draft_id: str = Field(..., min_length=1, max_length=40, description="the id from telegram_draft")
+    draft_id: str = Field(..., min_length=1, max_length=40)
 
 
 class TelegramSkill(Skill):
@@ -217,13 +217,11 @@ class TelegramSkill(Skill):
 
         from .skills import NoArgs
         return [
-            Tool("telegram_status", "Is the Telegram channel set up (bot token saved, chat paired)?", status, NoArgs,
+            Tool("telegram_status", 'Is Telegram set up (bot token saved, chat paired)?', status, NoArgs,
                  permission="read"),
-            Tool("telegram_draft", "Write a message to the owner's Telegram as a DRAFT (nothing is sent). Use for "
-                 "'תשלח לי הודעה בטלגרם'. Then read it back and ask before sending.", draft, DraftArgs,
+            Tool("telegram_draft", "Draft a Telegram message to the owner (nothing sent): 'message me on Telegram', 'תשלח לי בטלגרם'. Read back and ask before sending.", draft, DraftArgs,
                  permission="action"),
-            Tool("telegram_send", "Send a draft made by telegram_draft, only after reading it back and the user said "
-                 "yes. The user also approves on the screen.", send, SendArgs, permission="destructive",
+            Tool("telegram_send", 'Send a telegram_draft only after read-back and a yes; the user also approves on screen.', send, SendArgs, permission="destructive",
                  timeout_s=20, impact=send_impact,
                  recipient=lambda a: (self._drafts.get(a.draft_id) or {}).get("name")),
         ]

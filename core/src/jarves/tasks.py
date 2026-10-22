@@ -479,11 +479,11 @@ def make_retry_lookup(cfg, budget, *, client=None, attempt_s: float = 24.0):
 # ------------------------------------------------------------------ Skill
 class StartArgs(BaseModel):
     description: str = Field(..., min_length=3, max_length=600,
-                             description="self-contained description of what to research, in the user's language")
+                             description="self-contained, in the user's language")
 
 
 class TaskIdArgs(BaseModel):
-    task_id: str = Field("", max_length=40, description="task id; empty = the newest task")
+    task_id: str = Field("", max_length=40, description='empty = newest')
 
 
 class TaskSkill(Skill):
@@ -495,12 +495,10 @@ class TaskSkill(Skill):
 
     def tools(self) -> list[Tool]:
         return [
-            Tool("task_start", "Start a LONG background research task (several sources, comparisons, deep checks: "
-                 "anything likely to take more than ~15 s). Returns at once; the result is announced to the user "
-                 "automatically when it is ready. Not for quick facts.", self._start, StartArgs, permission="action"),
-            Tool("task_status", "Status of background tasks (running, finished, their results).", self._status,
+            Tool("task_start", "Start a LONG background research task (comparisons, deep checks, >15 s): 'research in depth', 'תחקור לעומק'. Returns at once; the result is announced automatically. Not for quick facts.", self._start, StartArgs, permission="action"),
+            Tool("task_status", "Background task status and results: 'what about the task', 'מה עם המשימה'.", self._status,
                  TaskIdArgs, permission="read"),
-            Tool("task_cancel", "Cancel a running background task (empty id = the newest one).", self._cancel,
+            Tool("task_cancel", "Cancel a background task (empty id = newest): 'cancel the task', 'תבטל את המשימה'.", self._cancel,
                  TaskIdArgs, permission="action"),
         ]
 

@@ -226,9 +226,9 @@ def make_skill(svc: SelfSpeed, lang: Callable[[], str]):
                                   {"status": d["status"], "counts": d["counts"], "dashboard": "#/speed"},
                                   code="SPEEDTEST_" + d["status"].upper())
 
-            return [Tool("run_selftest", "Run the self-test (read-only).", selftest_, SelfTestArgs, permission="read",
+            return [Tool("run_selftest", "Read-only self-test: 'is anything broken', 'בדיקת תקינות'.", selftest_, SelfTestArgs, permission="read",
                          timeout_s=300),
-                    Tool("run_speedtest", "Run the speed test (read-only, free).", speedtest_, SpeedTestArgs,
+                    Tool("run_speedtest", "Read-only free speed test: 'how fast are you', 'בדיקת מהירות'.", speedtest_, SpeedTestArgs,
                          permission="read", timeout_s=SPEED_TIMEOUT_S + 30)]
 
     return SelfSpeedSkill()
