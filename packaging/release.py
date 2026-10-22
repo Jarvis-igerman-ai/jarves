@@ -533,7 +533,7 @@ def beta_publish(dist: Path, env: dict | None = None, gh: GitHub | None = None, 
         return 0
     missing = [k for k in PUBLIC_SECRETS if not str(env.get(k) or "").strip()]
     if missing:
-        print(f"::warning::Beta publish: SKIPPED - missing secret {', '.join(missing)} (docs/RELEASE_HOSTING.md)")
+        print(f"::warning::Beta publish: SKIPPED - {len(missing)} required repository secret(s) not set (docs/RELEASE_HOSTING.md)")
         return 0
     repo = str(env.get("RELEASES_REPO") or "").strip() or DEFAULT_RELEASES_REPO
     if not re.fullmatch(r"[\w.-]+/[\w.-]+", repo):
