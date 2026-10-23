@@ -559,3 +559,30 @@ async def test_stopping_core_cancels_the_running_check_and_logs_no_error_afterwa
         assert stopped and not [r for r in seen[stopped[-1] + 1:] if getattr(r, "component", "") == "selfcheck"]
     finally:
         logs.remove_sink(sink)
+
+
+@pytest.mark.parametrize("code,origin,defect", [
+    ("FEATURE_NEEDS_APPROVAL", "model", False),
+    ("TOOL_UNTRUSTED_TURN", "model", False),
+    ("TOOL_DECLINED", "model", False),
+    ("FEATURE_OFF", "model", False),
+    ("SKILL_DISABLED", "model", False),
+    ("TOOL_FORBIDDEN", "model", False),
+    ("TOOL_BAD_ARGS", "user", False),
+    ("TOOL_BAD_ARGS", "model", True),
+    ("TOOL_TIMEOUT", "model", True),
+    ("TOOL_CRASH", "model", True),
+    ("PEAR_DOWN", "model", True),
+])
+def test_expected_refusals_do_not_become_selfcheck_findings(home, code, origin, defect):
+    check = selfcheck.SelfCheck(home, Config(), clock=lambda: T0)
+    records = [{"_t": T0 - 100 + i, "code": "TOOL_RESULT", "level": "WARNING", "component": "skills",
+                "session": "fake", "tool": "test", "ok": False, "result_code": code,
+                "origin": origin, "msg": "tool finished"} for i in range(5)]
+    out, metrics = [], {}
+    check._tools(records, out, metrics)
+    assert any(f.fingerprint == "tool:test" for f in out) == defect
+    # Explicit guard warnings have their own code before the final TOOL_RESULT.
+    out = []
+    check._logs([dict(r, code=code) for r in records], out, {"days": 7})
+    assert any(f.fingerprint == "log:WARNING:" + code for f in out) == defect
