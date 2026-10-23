@@ -1,0 +1,46 @@
+name: jarves-main-health
+# Owner request 23 Oct 2026 (#89): when jarves-checks fails on main, open ONE issue "main is red" (or comment on it when
+# it is already open) with the run link, so agents fix main first (CLAUDE.md: nothing merges while main is red, and
+# automerge.yml stops by itself). When main is green again the issue is closed with the green run's link.
+# Reads only the run's metadata: never checks out or runs repository code.
+on:
+  workflow_run:
+    workflows: [jarves-checks]
+    types: [completed]
+    branches: [main]
+permissions:
+  contents: read
+  issues: write
+concurrency:
+  group: jarves-main-health
+  cancel-in-progress: false
+jobs:
+  alert:
+    if: >-
+      github.event.workflow_run.event == 'push' &&
+      (github.event.workflow_run.conclusion == 'failure' || github.event.workflow_run.conclusion == 'success')
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    env:
+      GH_TOKEN: ${{ github.token }}
+      REPO: ${{ github.repository }}
+      CONCL: ${{ github.event.workflow_run.conclusion }}
+      URL: ${{ github.event.workflow_run.html_url }}
+      SHA: ${{ github.event.workflow_run.head_sha }}
+    steps:
+      - name: Open, update or close the "main is red" issue
+        run: |
+          set -euo pipefail
+          title="main is red: jarves-checks failed"
+          n=$(gh issue list -R "$REPO" --state open --search "\"$title\" in:title" --json number,title --jq "[.[]|select(.title==\"$title\")][0].number // empty")
+          if [ "$CONCL" = "failure" ]; then
+            if [ -n "$n" ]; then
+              gh issue comment "$n" -R "$REPO" --body "Still red at ${SHA:0:7}: $URL"
+            else
+              gh issue create -R "$REPO" --title "$title" --body "jarves-checks failed on \`main\` at ${SHA:0:7}: $URL
+
+          Fix \`main\` first: nothing else merges while it is red (CLAUDE.md, automerge.yml). This issue closes itself when \`main\` is green again."
+            fi
+          elif [ -n "$n" ]; then
+            gh issue close "$n" -R "$REPO" --comment "main is green again at ${SHA:0:7}: $URL"
+          fi

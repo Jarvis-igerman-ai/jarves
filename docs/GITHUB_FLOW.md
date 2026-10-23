@@ -8,7 +8,8 @@
 3. A PR that is only **behind** `main` is not updated and re-tested: merge `main` into it only to resolve a real conflict.
    Its run tested the merge with `main` as it was; the run on `main` after the merge is the integration check (the full
    matrix when the merged tree was not proven on the PR; queued `main` runs batch on their own). While the latest run on
-   `main` is red nothing else is merged (the queue stops by itself); fix `main` first.
+   `main` is red nothing else is merged (the queue stops by itself); fix `main` first. A red run on `main` opens
+   one issue "main is red: jarves-checks failed" by itself (`main-health.yml`), closed again by the next green run.
 4. After the merge, `jarves-checks` runs on `main` and, when green, `jarves-package` makes the signed candidate and the
    beta.
 

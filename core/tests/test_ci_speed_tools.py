@@ -482,3 +482,16 @@ def test_planner_and_conftest_agree_on_the_real_browser_files():
                 and any(getattr(t, "id", "") == "BROWSER_FILES" for t in n.targets))
     assert set(conf) == set(ci_plan.BROWSER_FILES)
     assert all((ci_plan.TESTS / f).is_file() for f in conf)
+
+
+def test_main_red_opens_one_issue_and_closes_it_when_green():
+    """#89: agents learn at once that main is red (nothing merges until it is fixed). Metadata only, no PR code."""
+    doc = _wf("main-health.yml")
+    on = doc[True]["workflow_run"]
+    assert on["workflows"] == ["jarves-checks"] and on["types"] == ["completed"] and on["branches"] == ["main"]
+    assert doc["permissions"] == {"contents": "read", "issues": "write"}
+    job = doc["jobs"]["alert"]
+    assert "workflow_run.event == 'push'" in job["if"]
+    assert not any("checkout" in s.get("uses", "") for s in job["steps"])            # never runs repository code
+    run = job["steps"][0]["run"]
+    assert "gh issue create" in run and "gh issue comment" in run and "gh issue close" in run
