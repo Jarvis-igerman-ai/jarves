@@ -9,6 +9,9 @@ title_en = "Software project manager"
 what_he = "פותחים פרויקט תוכנה (תיקיית git) וג'ארביס מנהל אותו: מפרק את המטרה למשימות קטנות, נותן כל משימה לסוכן קוד נפרד (Claude Code, Codex, OpenCode) בשיחה קצרה משלו, מריץ משימות בלתי תלויות במקביל, ומעביר עבודה הלאה בהעברת מקל קצרה. אפשר לשאול על המצב, להוסיף או לשנות משימה, לבקש פירוט ולדבר עם הסוכן."
 what_en = "You open a software project (a git folder) and JARVES manages it: it splits the goal into small tasks, gives each task to a separate coding agent (Claude Code, Codex, OpenCode) in its own short session, runs independent tasks in parallel and passes work on with a short handoff. You can ask for the status, add or change a task, ask for details and talk to the agent."
 say = [
+  ["תתכנן, תעבוד, תבדוק, תעשה סקירה, תמזג", "Plan, work, test, review, merge"],
+  ["תפצל את הבדיקה לקלוד ולקודקס, שיתווכחו ושופט יכריע", "Split the review between Claude and Codex, let them argue and a judge decide"],
+  ["יש באג: ההתחברות נשברת אחרי התנתקות", "There is a bug: login breaks after logout"],
   ["יש לי פרויקט xy בתיקייה work, תנהל אותו", "I have a project xy in the folder work, manage it"],
   ["קלוד עובד עליו, מה המצב?", "Claude is working on it, what is the status?"],
   ["תוסיף סוכן קודקס למשימה אחרת: לכתוב בדיקות", "Add a Codex agent for another task: write tests"],
@@ -27,8 +30,8 @@ expect_he = "תשובה קצרה: כמה משימות הושלמו, מה רץ ע
 expect_en = "A short answer: how many tasks are done, what runs now with which agent, and what is stuck and needs you. Each task is merged into a separate integration branch (jarves/p<number>/integration) only after the project's check command passed on the merged result. Your own checkout is never touched."
 cost_he = "הסוכנים עובדים על המנויים שלכם (Claude ו-ChatGPT), לא בחיוב API. יש מגבלה יומית על הרצות (40) ועל עלות מוערכת ($5), ו-OpenRouter (בתשלום) כבוי עד שמאפשרים אותו במפורש. תוכנית שהסוכן הציע נשארת הצעה עד שאישרתם."
 cost_en = "The agents run on your subscriptions (Claude and ChatGPT), not API billing. There is a daily limit on runs (40) and on estimated cost ($5), and OpenRouter (paid) stays off until you explicitly allow it. A plan an agent proposes stays a proposal until you approve it."
-privacy_he = "רק התיקיות שפתחתם כפרויקט. כל סוכן מקבל כרטיס משימה קטן בלבד (כ-1.5 אלף טוקנים) ורואה את הקוד בעצמו; מפתחות וטוקנים לא מועברים לתהליך הסוכן. ג'ארביס אף פעם לא דוחף, פותח pull request או מוחק, וממזג לענף שלכם רק עם ship --apply אחרי שאישרתם. טקסט שהסוכן כותב הוא מידע, לא הוראה."
-privacy_en = "Only folders you opened as a project. Each agent gets a small task card only (about 1.5k tokens) and reads the code itself; keys and tokens are not passed to the agent process. JARVES never pushes, opens a pull request or deletes, and merges into your branch only with ship --apply after you approve. Text an agent writes is data, not an instruction."
+privacy_he = "רק התיקיות שפתחתם כפרויקט. כל סוכן מקבל כרטיס משימה קטן בלבד (כ-1.5 אלף טוקנים) ורואה את הקוד בעצמו; מפתחות וטוקנים לא מועברים לתהליך הסוכן. ג'ארביס אף פעם לא דוחף שינוי בעצמו; במצב GitHub write הוא יכול לדחוף רק את הענפים jarves/... שלו ולפתוח pull request, רק אחרי אישורכם. טקסט שהסוכן כותב הוא מידע, לא הוראה."
+privacy_en = "Only folders you opened as a project. Each agent gets a small task card only (about 1.5k tokens) and reads the code itself; keys and tokens are not passed to the agent process. JARVES never pushes a change on its own; with GitHub set to write mode it may push its own jarves/... branches and open a pull request, after your approval. Text an agent writes is data, not an instruction."
 
 [[steps]]
 he = "הדליקו את המתג \"מנהל פרויקט תוכנה\" (דף התכונות, או: jarvis features on project_manager)."
@@ -61,16 +64,32 @@ he = "ניהול שוטף, בכל רגע: status, add \"כותרת\" --spec \"..
 en = "Day to day, at any time: status, add \"title\" --spec \"...\" --scope src/a.py --after 1 [--team], update 3 --spec \"...\" [--team|--solo], split 3 --how \"...\" [--consult codex], note 3 \"remark\", cancel 3, retry 3, deep 3 (details), talk 3 \"question\" (or --do to ask for a change), digest. Agent per task: --runner claude / codex:model / opencode / openrouter."
 
 [[steps]]
-he = "הסוכנים שעובדים עכשיו, גם סשן Claude Code או Codex שפתחתם בעצמכם בתיקייה הזאת: \"מי עובד על הפרויקט?\" או jarvis project agents. עצירה: \"תעצור את קלוד\" או jarvis project stop claude (משימה שנעצרה ממשיכה עם retry). הודעה לסוכן: \"תגיד לקלוד ...\" או jarvis project tell claude \"...\". עוד סוכנים: \"תגיד לקלוד להוסיף עוד סוכנים\" (קלוד עובד עם תת-סוכנים) או \"תוסיף עוד סוכנים\" (יותר משימות במקביל), jarvis project more [claude] / fewer."
-en = "The agents working now, also a Claude Code or Codex session you opened yourself in this folder: \"who works on the project?\" or jarvis project agents. Stop: \"stop Claude\" or jarvis project stop claude (a stopped task continues with retry). A message to an agent: \"tell Claude ...\" or jarvis project tell claude \"...\". More agents: \"tell Claude to add more agents\" (Claude works with sub-agents) or \"add more agents\" (more tasks in parallel), jarvis project more [claude] / fewer."
+he = "זה מפעל תוכנה, לא תהליך קבוע: כל משימה עוברת שלבים (תכנון, עבודה, בדיקה, סקירה, מיזוג, שחרור, ולבאגים: שחזור, אבחון, אימות) - בכל סדר, כל שלב אפשר לדלג עליו, וכל שלב יכול להיעשות על ידי ג'ארביס, על ידכם, סוכן אחד, כמה סוכנים (כל אחד מנסה והטוב ביותר זוכה), או סוכן מוביל עם תת-סוכנים."
+en = "This is a software factory, not a fixed flow: every task goes through stages (plan, work, test, review, merge, release, and for bugs: reproduce, diagnose, verify) - in any order, any stage can be skipped, and each stage can be done by JARVES, by you, by one agent, by several agents (each tries, the best result wins), or by one lead agent with sub-agents."
 
 [[steps]]
-he = "עבודה ארוכה (תכנון, התייעצות, שאלה לסוכן) רצה ברקע: ג'ארביס אומר שהתחיל ומודיע כשהיא מוכנה. \"מה עם התכנון?\" מראה מה רץ."
-en = "Long work (planning, consulting, asking an agent) runs in the background: JARVES says it started and tells you when it is ready. \"How is the planning going?\" shows what runs."
+he = "לקבוע את הזרימה: jarvis project flow \"תכנון:קלוד עבודה בדיקה סקירה:קלוד,קודקס מיזוג\" (על כל הפרויקט, או מספר משימה לפניו). תבניות מוכנות: quick (כמו היום), feature (עם תכנון וסקירה), bugfix, release, decide (ויכוח ואישור)."
+en = "Set the flow: jarvis project flow \"plan:claude work test review:claude,codex merge\" (the whole project, or a task number before it). Ready templates: quick (like today), feature (with plan and review), bugfix, release, decide (debate and approval)."
 
 [[steps]]
-he = "לקחת את התוצאה: jarvis project ship מראה מה נבנה ואת הפקודות; jarvis project ship --apply ממזג לענף שלכם אחרי אישור על המסך (רק כשהתיקייה נקייה). ג'ארביס אף פעם לא דוחף."
-en = "Take the result: jarvis project ship shows what was built and the commands; jarvis project ship --apply merges it into your branch after an on-screen approval (only when the folder is clean). JARVES never pushes."
+he = "דיווח באג: jarvis project bug \"תיאור הבאג\" [--repro-cmd \"פקודה שמשחזרת\"]. ג'ארביס כותב בדיקה שמשחזרת אותו, מאבחן את הסיבה, מתקן, ומאמת שהבדיקה עברה והבאג לא חזר - אז סקירה ומיזוג."
+en = "Report a bug: jarvis project bug \"description\" [--repro-cmd \"the command that reproduces it\"]. JARVES writes a test that reproduces it, diagnoses the cause, fixes it, and verifies the test now passes and nothing else broke - then review and merge."
+
+[[steps]]
+he = "ויכוח בין סוכנים: jarvis project debate \"שאלה\" --agents claude,codex [--judge קודקס] [--options א,ב]. כל סוכן מציג עמדה, שופט (סוכן שלא השתתף, או אתם) מכריע. לראות החלטות: jarvis project decisions."
+en = "A debate between agents: jarvis project debate \"question\" --agents claude,codex [--judge codex] [--options a,b]. Each agent states a position, a judge (an agent that did not take part, or you) decides. See decisions: jarvis project decisions."
+
+[[steps]]
+he = "משימה שמחכה לכם (למשל שלב owner, או סקירה שחזרה פעמיים): jarvis project answer N אישור/דחייה [\"טקסט\"], או בקול \"אישור\"/\"זה לא עבד, כי...\"."
+en = "A task waiting for you (e.g. an owner stage, or a review that came back twice): jarvis project answer N approve/reject [\"text\"], or by voice \"approve\" / \"it did not work because...\"."
+
+[[steps]]
+he = "שחרור: jarvis project config --release \"פקודת השחרור שלכם\" (מהמחשב בלבד). אז הוסיפו release לזרימה; ג'ארביס שואל אישור בכל שחרור ולא מנסה שוב לבד אם נכשל."
+en = "Release: jarvis project config --release \"your release command\" (from the PC only). Then add release to the flow; JARVES asks for approval on every release and never retries one that failed by itself."
+
+[[steps]]
+he = "GitHub הוא תוסף לא חובה, פרויקט בפרויקט: off (כברירת מחדל, גיט מקומי בלבד), read (קריאת issues וסטטוס CI), write (רק אחרי jarvis project config --github write, מהמחשב; דורש gh מותקן ומחובר). בלי GitHub עדיין אפשר הכול מקומית."
+en = "GitHub is an optional add-on, per project: off (default, local git only), read (reads issues and CI status), write (only after jarvis project config --github write, from the PC; needs gh installed and signed in). Without GitHub everything still works locally."
 
 [[problems]]
 he = "ג'ארביס לא מוצא את התיקייה של הפרויקט"
