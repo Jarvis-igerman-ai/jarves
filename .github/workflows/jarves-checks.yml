@@ -706,8 +706,12 @@ jobs:
   ci-ok:
     # ONE stable required check for branch protection: green when every job above passed or was legitimately skipped
     # (docs-only, reused proof). Failed or cancelled needs make it red. Per-shard names stay valid required checks too.
+    # `!cancelled()`, not `always()`: GitHub never cancels an always() job, so a cancelled run (a newer push, marked
+    # ready, a draft's own run) ended this check RED and woke agents with a false failure. Now a cancelled run ends it
+    # cancelled (grey), never skipped: a job whose `if` turns false because the run was cancelled is cancelled
+    # (run 40004513490: failure-summary), so a cancelled run can never leave a green check behind.
     name: CI result (single required check)
-    if: always()
+    if: ${{ !cancelled() }}
     needs: [changes, validate, core, browser, installer, installer-smoke, installer-upgrade, whatsapp-bridge, perf, cad, blender, godot, e2e]
     runs-on: ubuntu-24.04
     timeout-minutes: 5
@@ -719,25 +723,18 @@ jobs:
       DRAFT: ${{ needs.changes.outputs.draft }}
       GH_TOKEN: ${{ github.token }}
     steps:
-      # A draft must never read green: its skipped heavy jobs would pass, and a green check on the draft's head lets
-      # auto-merge through the moment the PR is marked ready. The draft's run cancels itself (grey, not a red failure
-      # that wakes agents). GitHub never cancels an `always()` JOB, but it cancels a running STEP whose `if` turns
-      # false, so this step stops on the cancel and the job ends cancelled (run 40012547664: one job-level step ran
-      # its full sleep and ended red). If the cancel does not land, the step fails: red, never green.
-      - id: draft
-        if: ${{ !cancelled() && needs.changes.outputs.draft == 'true' }}
-        shell: bash
-        run: |
-          echo "::notice::Draft PR: only the fast checks ran. Mark it ready for review: the full CI runs then, and only that run can turn this check green."
-          gh run cancel "$GITHUB_RUN_ID" -R "$GITHUB_REPOSITORY" || true
-          sleep 90
-          exit 1
-      # every other case, and a draft whose run was cancelled before this job started (the step above skipped): red
-      - if: ${{ always() && steps.draft.outcome != 'cancelled' }}
-        shell: bash
+      - shell: bash
         run: |
           echo "$NEEDS" | jq -r 'to_entries[] | "\(.key): \(.value.result)"'
-          if [ "$DRAFT" = "true" ]; then echo "::error::Draft PR run: only the fast checks ran, so this is not a pass"; exit 1; fi
+          if [ "$DRAFT" = "true" ]; then
+            # skipped heavy jobs would make this required check green, and a green check on the draft's head could let
+            # auto-merge through the moment the PR is marked ready. The run cancels itself, which cancels this job
+            # (grey); if the cancel does not land, it fails (red). Never green.
+            echo "::notice::Draft PR: only the fast checks ran. Mark it ready for review: the full CI runs then, and only that run can turn this check green."
+            gh run cancel "$GITHUB_RUN_ID" -R "$GITHUB_REPOSITORY" || true
+            sleep 90
+            exit 1
+          fi
           echo "$NEEDS" | jq -e '[.[] | select(.result == "failure" or .result == "cancelled")] | length == 0' > /dev/null
   failure-summary:
     # ONE comment per PR (updated in place): failed jobs, first failing test + its first error line, log links, known
