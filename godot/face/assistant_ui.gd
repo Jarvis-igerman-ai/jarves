@@ -22,6 +22,9 @@ signal inspector_toggled(on: bool)   # "Model inspector" (3D twin review panel);
 const UI_FONT := 20               # readable on a desk monitor; the default 16 px was too small
 var options_box: VBoxContainer
 var inspector_chk: CheckButton
+var legend_lbl: Label
+var pages := {}                   # settings "tree": page name -> VBoxContainer (root = the list)
+var main_view: Array = []         # hidden while Settings is open
 var connection: Label
 var _state := "idle"
 var _linked := false
@@ -62,7 +65,7 @@ func _ready() -> void:
 	var toggle := Button.new()
 	toggle.text = "Options"
 	toggle.toggle_mode = true
-	toggle.toggled.connect(func(on): options_box.visible = on)
+	toggle.toggled.connect(_on_options)
 	box.add_child(toggle)
 	options_box = VBoxContainer.new()
 	options_box.add_theme_constant_override("separation", 8)
@@ -74,6 +77,7 @@ func _ready() -> void:
 	status_lbl.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	options_box.add_child(status_lbl)
 	var legend := Label.new()
+	legend_lbl = legend
 	legend.text = LINK_LEGEND
 	legend.modulate = Color(1, 1, 1, 0.6)
 	legend.custom_minimum_size = Vector2(400, 0)
@@ -115,6 +119,7 @@ func _ready() -> void:
 	inspector_chk.visible = false     # main.gd (3D twin) turns it on; the face display has no inspector
 	inspector_chk.toggled.connect(func(on): inspector_toggled.emit(on))
 	options_box.add_child(inspector_chk)
+	_build_menu()
 	confirm = ConfirmationDialog.new()
 	confirm.confirmed.connect(func(): _answer(true))
 	confirm.canceled.connect(func(): _answer(false))
@@ -173,6 +178,63 @@ static func make_ui_theme(font := 20) -> Theme:
 
 func _make_theme() -> Theme:
 	return make_ui_theme(UI_FONT)
+
+
+## Settings as a tree (like phone settings): a short list of rows; each row opens one small page with a Back row.
+func _build_menu() -> void:
+	for w in [activity, who, caption]:
+		main_view.append(w)
+	var take := func(w: Control, page: VBoxContainer) -> void:
+		w.get_parent().remove_child(w)
+		page.add_child(w)
+	var root := _page("root", "")
+	for spec in [["Status", "status"], ["Microphone", "mic"], ["Dashboard", "dashboard"], ["Help", "help"]]:
+		var row := Button.new()
+		row.text = "%s    ›" % spec[0]
+		row.alignment = HORIZONTAL_ALIGNMENT_LEFT
+		row.pressed.connect(_open_page.bind(spec[1]))
+		root.add_child(row)
+	inspector_chk.get_parent().remove_child(inspector_chk)
+	root.add_child(inspector_chk)
+	take.call(status_lbl, _page("status", "Status"))
+	var mic := _page("mic", "Microphone")
+	take.call(mute_chk, mic)
+	take.call(level_bar, mic)
+	take.call(dash_btn, _page("dashboard", "Dashboard"))
+	take.call(legend_lbl, _page("help", "What the dot means"))
+	_open_page("root")
+
+
+func _page(key: String, title: String) -> VBoxContainer:
+	var pg := VBoxContainer.new()
+	pg.add_theme_constant_override("separation", 8)
+	if key != "root":
+		var back := Button.new()
+		back.text = "‹    Back"
+		back.alignment = HORIZONTAL_ALIGNMENT_LEFT
+		back.pressed.connect(_open_page.bind("root"))
+		pg.add_child(back)
+		var t := Label.new()
+		t.text = title
+		t.add_theme_font_size_override("font_size", UI_FONT + 4)
+		pg.add_child(t)
+	pg.visible = false
+	options_box.add_child(pg)
+	pages[key] = pg
+	return pg
+
+
+func _open_page(key: String) -> void:
+	for k in pages:
+		pages[k].visible = k == key
+
+
+func _on_options(on: bool) -> void:
+	options_box.visible = on
+	for w in main_view:
+		w.visible = not on
+	if on:
+		_open_page("root")
 
 
 func _process(delta: float) -> void:
@@ -259,7 +321,7 @@ func _on_link(connected: bool, detail: String) -> void:
 		preview.close_preview("offline")      # no frames without the Core; nothing kept
 		strip.set_preview_open(false)
 		status_lbl.text = "Core: " + detail
-		activity.text = "JARVES is not running: " + detail
+		activity.text = "Not connected"
 		if face:
 			face.set_state("idle")
 			face.set_link("offline")
