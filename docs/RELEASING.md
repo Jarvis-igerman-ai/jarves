@@ -19,6 +19,21 @@ Three layers. Only the first runs without the owner.
 `jarvis features on beta_channel`. A beta build shows **BETA 4.1.0-beta.N** in `jarvis status`, in the dashboard header
 and in the footer. Going back: `jarvis update --channel stable`, and `jarvis update --rollback` restores the previous version.
 
+## Stable release, step by step
+
+Every green `main` is already a beta (layer 2). A stable release promotes a beta that the owner tested:
+
+1. Pick the version: `version` in `core/pyproject.toml` (for example `4.0.1`); the tag will be `v4.0.1`.
+2. Add `docs/reviews/RELEASE_CHECKLIST_<version>.md` (rows `| # | item | status |`, every row `done`, `n/a` or
+   `accepted`); it records the bug-table state. Only 4.0.0 used the old `SWV4_RELEASE_CHECKLIST.md`.
+3. Make the sign-off sheet (`manual_test_sheet.py`, below), install the newest beta, test it and sign it off
+   (`jarvis release signoff ... --finish`); commit the signed sheet.
+4. Wait for 5 green nightly runs in a row on `main`.
+5. Dry run: Actions > `jarves-release` > Run workflow with the tag and `dry_run` ticked (or
+   `python core/tools/release_gate.py --tag v<version> --sha <commit>`); it lists everything still missing.
+6. Tag the signed-off commit and push the tag (`git tag v<version> <sha> && git push origin v<version>`):
+   `release.yml` re-checks the gate and publishes the tested installer as the stable release.
+
 ## The stable gate (`core/tools/release_gate.py`)
 
 All of these must hold, else the tag is refused:
@@ -105,9 +120,11 @@ Branch protection: require **`CI result (single required check)`**. The individu
 
 ## Automatic labelling of low-risk PRs (`autolabel.yml`, `core/tools/risk_class.py`)
 
-Low-risk PRs get the `automerge` label by themselves; the queue (`automerge.yml`) then merges them one at a time when
-`CI result (single required check)` is green. Nothing is bypassed: no label ever skips a check, and the queue waits while a
-`jarves-checks` run on `main` is in progress (runs on `main` queue and are never cancelled).
+Low-risk PRs get the `automerge` label by themselves; the queue (`automerge.yml`) then merges them when
+`CI result (single required check)` is green. Nothing is bypassed: no label ever skips a check, a conflicting PR waits, and
+nothing merges while the latest finished `jarves-checks` run on `main` is red. A PR that is only behind `main` is not
+updated and re-tested (owner decision 23 Oct 2026, #89): the run on `main` after the merge is the integration check (runs
+on `main` queue, batch and are never cancelled while running).
 
 | Class | Rule |
 | --- | --- |
