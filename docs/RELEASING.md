@@ -107,7 +107,7 @@ A different tree falls back to the full matrix on `main`. Details, numbers and l
 
 Windows Python tests run in 3 shards planned from measured per-file durations (`core/tools/ci_plan.py`, rebalanced after
 each full run on main), Linux in one job; inside a shard pytest-xdist runs files in parallel (`--dist loadfile`). The
-real-browser files (`test_browser.py`, `test_canary.py`, `test_dashboard_a11y.py`) are their own job with one retry. Known
+real-browser files (`BROWSER_FILES` in `core/tests/conftest.py`: browser, canary, dashboard a11y, chat markdown, phone e2e) are their own job with one retry. Known
 socket/load flakes re-run only the failed files once and are listed in `flake-report.json`. No test may be skipped.
 Superseded runs of the same PR or ref are cancelled; branch pushes have no second run; uv, Go modules, Playwright and tool
 downloads are cached; docs-only changes skip all jobs and guides-only changes run the Linux shard only. CodeQL (Python) runs

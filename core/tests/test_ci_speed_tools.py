@@ -471,3 +471,14 @@ def test_plan_names_unmeasured_files_and_the_summary_shows_them(tmp_path, capsys
     assert ci_plan.main(["summary", "--plan-line", "plan=" + json.dumps(p)]) == 0
     assert capsys.readouterr().out.strip() == line
     assert ci_plan.main(["summary", "--plan-line", ""]) == 0      # no plan line: an empty summary, never an error
+
+
+def test_planner_and_conftest_agree_on_the_real_browser_files():
+    """ci_plan.py (stdlib only, cannot import conftest) keeps its own copy of BROWSER_FILES. They drifted
+    (test_chat_markdown_browser.py was only in conftest), so the shard plan weighed a file no shard runs (#89)."""
+    import ast
+    tree = ast.parse((ROOT / "core" / "tests" / "conftest.py").read_text(encoding="utf-8"))
+    conf = next(ast.literal_eval(n.value) for n in tree.body if isinstance(n, ast.Assign)
+                and any(getattr(t, "id", "") == "BROWSER_FILES" for t in n.targets))
+    assert set(conf) == set(ci_plan.BROWSER_FILES)
+    assert all((ci_plan.TESTS / f).is_file() for f in conf)
