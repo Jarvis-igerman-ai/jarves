@@ -2,6 +2,11 @@
 its Hebrew to locales/he.js; patterns go to the "rules" of he.js. Keeps the strict-JSON format the locale tests parse.
 
     python tools/catalog_add.py texts.json     # {"dict": {"English": "עברית", ...}, "rules": [["^re$", "עברית $1"]]}
+    python tools/catalog_add.py --sort         # re-sort and re-format both catalogs (after a hand edit)
+
+The "dict" entries are kept SORTED by key. Appending every new text at the end made any two PRs that add texts edit
+the same last lines of en.js and he.js, so they always conflicted (10 of 21 PRs on 22-23 Oct touched them, #89);
+sorted, a new text lands at its own place. The Hebrew "rules" keep their order (it matters: first match wins).
 """
 from __future__ import annotations
 
@@ -18,9 +23,19 @@ def load(code: str) -> tuple[str, dict]:
     return head + "=\n", json.loads(body.strip().rstrip(";"))
 
 
+def sort_key(text: str) -> tuple[str, str]:
+    return (text.casefold(), text)
+
+
+def render(head: str, cat: dict) -> str:
+    """The one canonical file text: texts sorted, indent 1. A file in any other layout rewrites every line of the
+    diff, so it conflicts with every other PR that adds a text (test_dashboard_locales checks it)."""
+    cat = {**cat, "dict": dict(sorted(cat["dict"].items(), key=lambda kv: sort_key(kv[0])))}
+    return head + json.dumps(cat, ensure_ascii=False, indent=1) + ";\n"
+
+
 def save(code: str, head: str, cat: dict) -> None:
-    (LOCALES / f"{code}.js").write_text(head + json.dumps(cat, ensure_ascii=False, indent=1) + ";\n", encoding="utf-8",
-                                        newline="\n")
+    (LOCALES / f"{code}.js").write_text(render(head, cat), encoding="utf-8", newline="\n")
 
 
 def add(texts: dict[str, str], rules: list | None = None) -> tuple[int, int]:
@@ -48,5 +63,10 @@ def add(texts: dict[str, str], rules: list | None = None) -> tuple[int, int]:
 
 
 if __name__ == "__main__":
+    if sys.argv[1:] == ["--sort"]:
+        for code in ("en", "he"):
+            save(code, *load(code))
+        print("sorted en.js and he.js")
+        sys.exit(0)
     d = json.loads(Path(sys.argv[1]).read_text(encoding="utf-8"))
     print("added/changed %d texts, %d rules" % add(d.get("dict", {}), d.get("rules", [])))

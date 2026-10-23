@@ -213,3 +213,43 @@ def test_new_pages_search_keywords_in_both_languages():
     for page in ("timers", "lists"):
         m = re.search(rf'\b{page}: "([^"]+)"', js)
         assert m and re.search(r"[A-Za-z]", m.group(1)) and re.search(r"[֐-׿]", m.group(1)), page
+
+
+def _catalog(code):
+    src = (LOCALES / f"{code}.js").read_text(encoding="utf-8")
+    return json.loads(src.split("=\n", 1)[1].strip().rstrip(";"))
+
+
+def test_catalog_texts_stay_sorted_so_parallel_prs_do_not_collide():
+    """#89: catalog_add.py appended every new text at the END of en.js/he.js, so any two PRs adding texts edited the
+    same last lines and always conflicted (10 of 21 PRs on 22-23 Oct). Sorted, a new text lands at its own place.
+    After a hand edit: python core/tools/catalog_add.py --sort"""
+    import sys
+    sys.path.insert(0, str(LOCALES.parents[3] / "tools"))
+    import catalog_add
+    for code in ("en", "he"):
+        keys = list(_catalog(code)["dict"])
+        assert keys == sorted(keys, key=catalog_add.sort_key), f"{code}.js texts are not sorted: run catalog_add.py --sort"
+        # the exact layout too: a re-indented file (2 spaces instead of 1) rewrote all ~3900 lines and conflicted
+        # with every PR that added a text
+        text = (LOCALES / f"{code}.js").read_text(encoding="utf-8").replace("\r\n", "\n")
+        assert text == catalog_add.render(*catalog_add.load(code)), f"{code}.js is not in the canonical layout: run catalog_add.py --sort"
+
+
+def test_catalog_add_inserts_in_sorted_place_and_keeps_rule_order(tmp_path, monkeypatch):
+    import shutil
+    import sys
+    sys.path.insert(0, str(LOCALES.parents[3] / "tools"))
+    import catalog_add
+    for code in ("en", "he"):
+        shutil.copy(LOCALES / f"{code}.js", tmp_path / f"{code}.js")
+    monkeypatch.setattr(catalog_add, "LOCALES", tmp_path)
+    catalog_add.save("en", *catalog_add.load("en"))
+    catalog_add.save("he", *catalog_add.load("he"))
+    rules_before = catalog_add.load("he")[1].get("rules", [])
+    catalog_add.add({"Aaa first text #89": "טקסט ראשון", "zzz last text #89": "טקסט אחרון"}, [["^x89$", "x"]])
+    for code in ("en", "he"):
+        keys = list(catalog_add.load(code)[1]["dict"])
+        assert keys == sorted(keys, key=catalog_add.sort_key)
+    he = catalog_add.load("he")[1]
+    assert he["rules"][:len(rules_before)] == rules_before and he["rules"][-1] == ["^x89$", "x"]   # rules: order kept
