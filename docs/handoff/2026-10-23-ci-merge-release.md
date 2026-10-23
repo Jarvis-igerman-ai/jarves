@@ -39,3 +39,11 @@
   on failure; fake-clock tests. NOT verified: the Windows race itself (Linux container); first label-queue merge of a
   PR that is behind `main`. Found, not changed: a dashboard canary page-load timeout reports only `TimeoutError` and drops
   the page errors it collected (`diag/canary.py` `j_dashboard`, run 39740077144).
+- 4.0.1 stable prep (owner asked 23 Oct): `docs/reviews/RELEASE_CHECKLIST_4.0.1.md` (gate-readable, evidence per row) and
+  `docs/reviews/MANUAL_TEST_4.0.1.md` (28 rows; the generator made 84: one per sentence, guide and page file). The gate
+  no longer falls back to the 4.0.0 checklist for later versions. Left for the owner: test the beta and sign off
+  (`jarvis release signoff`), then 5 green nightlies, dry run, tag `v4.0.1` on the owner's go.
+- Handoff notes are now one file per task in `docs/handoff/` (this file is the first); `docs/HANDOFF.md` keeps history.
+- Next (owner approved 23 Oct, separate small PRs): wake-word tests train once; each shard loads only its files; phone
+  e2e test to the browser job; Windows xdist 3; installer smoke jobs 4 -> 2; nightly browser files get one retry; an
+  issue opens when `main` turns red. Running some tests only on Linux was advised against (Windows-only bugs) and not done.
