@@ -1935,7 +1935,16 @@
   "Add task": "הוספת משימה",
   "Hi, I am JARVES. How can I help? Type a message, or / for commands.": "שלום, אני JARVES. במה אפשר לעזור? כתבו הודעה או / לפקודות.",
   "Scroll to the latest message": "לגלול להודעה האחרונה",
-  "Writing": "כותב"
+  "Writing": "כותב",
+  "How to split (optional)": "איך לפצל (לא חובה)",
+  "Consult (agents)": "להתייעץ עם (סוכנים)",
+  "Split into smaller tasks": "פיצול למשימות קטנות",
+  "e.g. one task per module, tests last": "למשל: משימה לכל מודול, בדיקות בסוף",
+  "JARVES splits into small tasks": "ג'ארביס מפצל למשימות קטנות",
+  "One lead agent with its own sub-agents": "סוכן מוביל אחד עם תת-סוכנים משלו",
+  "Strategy": "אסטרטגיה",
+  "Agent with sub-agents": "סוכן עם תת-סוכנים",
+  "Already done (record it)": "כבר בוצע (לתיעוד)"
  },
  "rules": [
   [

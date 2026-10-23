@@ -165,3 +165,19 @@ def run_check(wt: Path, argv: list[str], timeout: float = 900) -> tuple[bool, st
         return False, f"check could not start: {e}"
     out = ((p.stdout or "") + (p.stderr or "")).strip()
     return p.returncode == 0, re.sub(r"\s+", " ", out[-600:])
+
+
+def repo_state(path: str) -> dict:
+    """Branch, commit count and uncommitted changes of a folder (read-only)."""
+    out = {"branch": "", "commits": 0, "dirty": 0, "untracked": 0}
+    try:
+        out["branch"] = current_branch(path)
+        out["commits"] = int(git(path, "rev-list", "--count", "HEAD", check=False).stdout.strip() or 0)
+        for line in git(path, "status", "--porcelain", check=False).stdout.splitlines():
+            if line.startswith("??"):
+                out["untracked"] += 1
+            elif line.strip():
+                out["dirty"] += 1
+    except (GitError, OSError, ValueError):
+        pass
+    return out

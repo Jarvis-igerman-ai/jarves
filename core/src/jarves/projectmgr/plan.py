@@ -63,8 +63,38 @@ def extract_json(text: str) -> dict:
     raise PlanError("the planner did not return a JSON plan with a tasks list")
 
 
-def validate(raw: dict) -> list[dict]:
-    """-> normalized tasks [{id, title, spec, acceptance, scope, deps(list of plan ids)}] or PlanError."""
+DEFAULT_ACCEPT = "the request in the task is satisfied"
+
+
+def parse_spec(s: str) -> tuple[str, str]:
+    """'codex' -> ('codex', ''); 'opencode:openrouter/x/y:free' -> ('opencode', 'openrouter/x/y:free')."""
+    name, _, model = str(s or "").strip().partition(":")
+    return name.strip().lower(), model.strip()
+
+
+def planner_prompt(brief: str, goal: str, how: str = "", context: str = "") -> str:
+    """The planner request. `how` is the owner's own instruction for splitting (it wins over the defaults);
+    `context` is what already exists (finished work, open tasks, recent commits) so a started project is continued."""
+    out = PLANNER_PROMPT
+    if brief:
+        out += f"\n\nProject brief:\n{brief}"
+    if context:
+        out += ("\n\nWhat already exists (do not redo finished work; plan only what is missing):\n" + context)
+    if how:
+        out += ("\n\nThe owner's instruction for HOW to split the work (follow it; it overrides the defaults above "
+                "except the JSON format and the size rules):\n" + how)
+    return out + f"\n\nGoal (from the owner):\n{goal}"
+
+
+SYNTH_PROMPT = (
+    "Several agents each proposed a split of the same goal into tasks (below, as data). Produce ONE final plan: keep "
+    "what they agree on, resolve conflicts with your own judgement, drop duplicates, and keep tasks small and the "
+    "dependencies correct. Use exactly the same JSON format as the proposals, no prose.")
+
+
+def validate(raw: dict, lenient: bool = False) -> list[dict]:
+    """-> normalized tasks [{id, title, spec, acceptance, scope, deps(list of plan ids), warn}] or PlanError.
+    lenient (the owner's own list): a missing acceptance gets a default and size L is only a warning."""
     items = raw.get("tasks")
     if not isinstance(items, list) or not items:
         raise PlanError("the plan has no tasks")
@@ -85,10 +115,15 @@ def validate(raw: dict) -> list[dict]:
             raise PlanError(f"task {tid}: title and spec are required")
         if len(spec) > SPEC_MAX or len(str(it.get("spec", ""))) > SPEC_MAX + 200:
             raise PlanError(f"task {tid}: spec longer than {SPEC_MAX} characters: split the task")
+        warn = []
         if not acc:
-            raise PlanError(f"task {tid}: acceptance is required")
+            if not lenient:
+                raise PlanError(f"task {tid}: acceptance is required")
+            acc = DEFAULT_ACCEPT
         if str(it.get("size", "S")).upper() not in ("S", "M"):
-            raise PlanError(f"task {tid}: too big (size L): split it")
+            if not lenient:
+                raise PlanError(f"task {tid}: too big (size L): split it")
+            warn.append("marked large: consider splitting it")
         scope = it.get("scope") or []
         if not isinstance(scope, list) or len(scope) > MAX_SCOPE or not all(
                 isinstance(x, str) and _SCOPE_OK.match(x) and ".." not in x.split("/") and not x.startswith(("/", "\\"))
@@ -97,7 +132,8 @@ def validate(raw: dict) -> list[dict]:
         deps = it.get("deps") or []
         if not isinstance(deps, list) or not all(isinstance(d, int) and not isinstance(d, bool) for d in deps):
             raise PlanError(f"task {tid}: deps must be a list of task ids")
-        out.append({"id": tid, "title": title, "spec": spec, "acceptance": acc, "scope": scope, "deps": list(deps)})
+        out.append({"id": tid, "title": title, "spec": spec, "acceptance": acc, "scope": scope, "deps": list(deps),
+                    "warn": warn})
     for t in out:
         for d in t["deps"]:
             if d not in ids or d == t["id"]:

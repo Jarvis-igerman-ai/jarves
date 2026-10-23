@@ -13,6 +13,7 @@ import time
 from pathlib import Path
 from typing import Any, Callable
 
+MODES = ("solo", "team")      # team = the agent may hand parts of the task to its own sub-agents
 TASK_STATES = ("proposed", "todo", "ready", "running", "review", "done", "blocked", "failed", "cancelled")
 OPEN_STATES = ("todo", "ready", "running", "review", "blocked")      # work that still needs doing
 FINAL_STATES = ("done", "failed", "cancelled")
@@ -33,7 +34,7 @@ CREATE TABLE IF NOT EXISTS tasks (
     branch TEXT NOT NULL DEFAULT '', worktree TEXT NOT NULL DEFAULT '', session_ref TEXT NOT NULL DEFAULT '',
     handoff TEXT NOT NULL DEFAULT '', handoff_kind TEXT NOT NULL DEFAULT '', result TEXT NOT NULL DEFAULT '',
     reason TEXT NOT NULL DEFAULT '', notes TEXT NOT NULL DEFAULT '[]', cost_usd REAL NOT NULL DEFAULT 0,
-    tokens INTEGER NOT NULL DEFAULT 0, pid INTEGER NOT NULL DEFAULT 0, created REAL NOT NULL, updated REAL NOT NULL, started REAL, finished REAL,
+    tokens INTEGER NOT NULL DEFAULT 0, pid INTEGER NOT NULL DEFAULT 0, mode TEXT NOT NULL DEFAULT 'solo', created REAL NOT NULL, updated REAL NOT NULL, started REAL, finished REAL,
     UNIQUE (project_id, seq));
 CREATE INDEX IF NOT EXISTS tasks_proj ON tasks (project_id, status);
 CREATE TABLE IF NOT EXISTS events (
@@ -69,6 +70,10 @@ class ProjectDB:
         self._c.execute("PRAGMA journal_mode=WAL")
         self._c.execute("PRAGMA busy_timeout=15000")
         self._c.executescript(SCHEMA)
+        cols = {r[1] for r in self._c.execute("PRAGMA table_info(tasks)")}
+        if "mode" not in cols:                                   # databases from 4.0.1 before task modes
+            self._c.execute("ALTER TABLE tasks ADD COLUMN mode TEXT NOT NULL DEFAULT 'solo'")
+            self._c.commit()
 
     def close(self) -> None:
         with self._lock:
@@ -111,16 +116,17 @@ class ProjectDB:
 
     # ------------------------------------------------------------------ tasks
     def add_task(self, pid: int, title: str, spec: str = "", acceptance: str = "", scope: list[str] | None = None,
-                 deps: list[int] | None = None, status: str = "todo", runner: str = "", model: str = "") -> int:
+                 deps: list[int] | None = None, status: str = "todo", runner: str = "", model: str = "",
+                 mode: str = "solo") -> int:
         now = self.clock()
         with self._lock:
             seq = (self._c.execute("SELECT COALESCE(MAX(seq),0)+1 FROM tasks WHERE project_id=?", (pid,))
                    .fetchone()[0])
             cur = self._c.execute(
                 "INSERT INTO tasks (project_id, seq, title, spec, acceptance, scope, deps, status, runner, model,"
-                " created, updated) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
+                " mode, created, updated) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)",
                 (pid, seq, title, spec, acceptance, json.dumps(scope or []), json.dumps(deps or []), status,
-                 runner, model, now, now))
+                 runner, model, mode, now, now))
             self._c.commit()
             return cur.lastrowid
 
