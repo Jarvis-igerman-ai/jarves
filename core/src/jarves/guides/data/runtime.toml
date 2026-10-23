@@ -17,8 +17,8 @@ privacy_he = "בקשו להשתיק את המיקרופון כדי להפסיק 
 privacy_en = "Ask to mute the microphone to stop listening. Unmute using the visible microphone button in the window, the tray icon, or jarvis mic unmute. A muted microphone cannot hear an unmute command."
 
 [[steps]]
-he = "בשורת הפקודה: jarvis mic status, jarvis mic mute או jarvis mic unmute. המצב נשמר גם אחרי הפעלה מחדש."
-en = "From the command line: jarvis mic status, jarvis mic mute, or jarvis mic unmute. The choice survives restart."
+he = "בשורת הפקודה: jarvis mic status, jarvis mic mute או jarvis mic unmute. המצב נשמר גם אחרי הפעלה מחדש. כשהליבה עצורה נשמרת בחירה להפעלה הבאה, בלי לטעון שהמיקרופון פעיל כרגע."
+en = "From the command line: jarvis mic status, jarvis mic mute, or jarvis mic unmute. The choice survives restart. With Core stopped, the preference is saved for next start and is not live-verified."
 
 [[steps]]
 he = "ודאו שהמתג \"ממשיך לפעול ברקע\" דולק."

@@ -89,7 +89,20 @@ async def test_muted_microphone_blocks_every_voice_session_start(home, cfg):
 
 
 def test_cli_mic_disconnected_is_not_success(home, cfg, monkeypatch):
+    from jarves.runtime import lock
     monkeypatch.setattr(cli, "_ws_call", lambda *a, **k: None)
+    monkeypatch.setattr(lock, "held", lambda *a: True)
     assert cli.cmd_mic(SimpleNamespace(action="unmute"), cfg, home) == 1
     monkeypatch.setattr(cli, "_ws_call", lambda *a, **k: {"runtime": {"mic": {"muted": False}}})
     assert cli.cmd_mic(SimpleNamespace(action="mute"), cfg, home) == 1
+
+
+def test_cli_mic_stopped_saves_explicit_choice_without_starting_audio(home, cfg, monkeypatch, capsys):
+    from jarves.runtime import lock
+    monkeypatch.setattr(lock, "held", lambda *a: False)
+    monkeypatch.setattr(cli, "_ws_call", lambda *a, **k: None)
+    for action, muted in (("mute", True), ("unmute", False)):
+        assert cli.cmd_mic(SimpleNamespace(action=action), cfg, home) == 0
+        assert read_state(home)["prefs"]["mic_muted"] is muted
+        assert "not live-verified" in capsys.readouterr().out
+    assert cli.cmd_mic(SimpleNamespace(action="status"), cfg, home) == 0

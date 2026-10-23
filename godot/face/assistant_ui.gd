@@ -219,7 +219,7 @@ func _build_menu() -> void:
 	root.add_child(dash_btn)
 	take.call(status_lbl, _page("status", "Status"))
 	var mic := _page("mic", "Microphone")
-	take.call(mute_chk, mic)
+	# The recovery toggle stays on the main panel, including while this settings page is hidden.
 	take.call(level_bar, mic)
 	take.call(legend_lbl, _page("help", "What the dot means"))
 	var manage := _page("manage", "Manage")

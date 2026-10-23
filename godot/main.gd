@@ -1077,7 +1077,7 @@ func _check_room(errs: Array[String]) -> void:
 		assistant.strip.locale = "en"
 		assistant._on_message("status", {"mic_muted": true})
 		if assistant.options_box.visible or assistant.mute_chk.get_parent() == assistant.options_box \
-				or not assistant.mute_chk.visible or assistant.mute_chk.text != "Unmute microphone":
+				or not assistant.mute_chk.is_visible_in_tree() or assistant.mute_chk.text != "Unmute microphone":
 			errs.append("room microphone recovery hidden or mislabeled")
 		assistant.mute_chk.toggled.emit(false)
 		if assistant.last_sent != ["mic.set_mute", {"muted": false}]:

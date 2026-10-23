@@ -59,7 +59,7 @@ Reviewed: 25 conversation issues, 13 Bug reports, six monitor findings (four act
 
 ## Verified private status checkpoint
 
-A verified standard backup was created before writes. The installed classifier was rerun on the exact historical sessions and produced no stall findings. Conversation records 2/3 and recovered incident 21 are now resolved; expected refusal records 13/14/18 and unconfirmed AI hypothesis 22 are ignored. Seven statuses changed, zero records/history deleted. The private audit records the backup and each rationale. Other gates remain open; source fixes are not proof that the installed runtime has changed.
+A verified standard backup was created before writes. The installed classifier was rerun on the exact historical sessions and produced no stall findings. Conversation records 2/3/13/14 and recovered incident 21 are now resolved; permanently benign guard warning 18 and unconfirmed AI hypothesis 22 are ignored. Generic failure fingerprints 13/14 use resolved rather than ignored, so genuine new failures can reopen them. Seven statuses changed, zero records/history deleted. The private audit records the backup and each rationale. Other gates remain open; source fixes are not proof that the installed runtime has changed.
 
 ## Recheck and resolution policy
 

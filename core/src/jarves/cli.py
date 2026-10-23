@@ -411,6 +411,19 @@ def cmd_mic(a, cfg, home) -> int:
         r = _ws_call(home, cfg.link.port, {"type": "runtime.set", "payload": {"mic_muted": a.action == "mute"}},
                      "runtime.state", timeout=8)
         mic = ((r or {}).get("runtime") or {}).get("mic") or {}
+    if r is None:
+        from .runtime.lock import held
+        from .runtime.service import read_state, save_prefs
+        if not held(home):
+            try:
+                prefs = ((read_state(home).get("prefs") or {}) if a.action == "status"
+                         else save_prefs(home, {"mic_muted": a.action == "mute"}))
+            except OSError:
+                prefs = {}
+            if isinstance(prefs.get("mic_muted"), bool):
+                state = "MUTED" if prefs["mic_muted"] else "on"
+                print(f"Saved microphone preference: {state}. Core stopped; applies at next start (not live-verified).")
+                return 0
     if r is None or not isinstance(mic.get("muted"), bool):
         print("No live microphone status. Start JARVES with: jarvis start")
         return 1

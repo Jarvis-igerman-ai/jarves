@@ -1896,7 +1896,8 @@
   "Set up WhatsApp in one go": "הגדרת וואטסאפ בלחיצה אחת",
   "Starts the bridge if needed and shows a QR code. You scan it on your phone, then you can switch on read-only. No message is sent.": "מפעיל את הגשר במידת הצורך ומציג קוד QR. את הסריקה בטלפון עושים אתם, ואחריה אפשר להפעיל קריאה בלבד. לא נשלחת שום הודעה.",
   "Set up WhatsApp": "הגדרת וואטסאפ",
-  "Switch on read-only mode now? JARVES will read and never send.": "להפעיל עכשיו מצב קריאה בלבד? ג'ארביס יקרא ולא ישלח."
+  "Switch on read-only mode now? JARVES will read and never send.": "להפעיל עכשיו מצב קריאה בלבד? ג'ארביס יקרא ולא ישלח.",
+  "From the command line: jarvis mic status, jarvis mic mute, or jarvis mic unmute. The choice survives restart. With Core stopped, the preference is saved for next start and is not live-verified.": "בשורת הפקודה: jarvis mic status, jarvis mic mute או jarvis mic unmute. המצב נשמר גם אחרי הפעלה מחדש. כשהליבה עצורה נשמרת בחירה להפעלה הבאה, בלי לטעון שהמיקרופון פעיל כרגע."
  },
  "rules": [
   [

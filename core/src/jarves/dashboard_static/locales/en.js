@@ -1896,6 +1896,7 @@
   "Set up WhatsApp in one go": "Set up WhatsApp in one go",
   "Starts the bridge if needed and shows a QR code. You scan it on your phone, then you can switch on read-only. No message is sent.": "Starts the bridge if needed and shows a QR code. You scan it on your phone, then you can switch on read-only. No message is sent.",
   "Set up WhatsApp": "Set up WhatsApp",
-  "Switch on read-only mode now? JARVES will read and never send.": "Switch on read-only mode now? JARVES will read and never send."
+  "Switch on read-only mode now? JARVES will read and never send.": "Switch on read-only mode now? JARVES will read and never send.",
+  "From the command line: jarvis mic status, jarvis mic mute, or jarvis mic unmute. The choice survives restart. With Core stopped, the preference is saved for next start and is not live-verified.": "From the command line: jarvis mic status, jarvis mic mute, or jarvis mic unmute. The choice survives restart. With Core stopped, the preference is saved for next start and is not live-verified."
  }
 };
