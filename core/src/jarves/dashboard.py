@@ -46,7 +46,7 @@ _ROUTES: list[tuple[str, re.Pattern, object]] = []
 PLUGIN_MODULES = ("jarves.workspace", "jarves.curator", "jarves.memory", "jarves.features", "jarves.google_auth",
                   "jarves.google_setup", "jarves.telegram_channel", "jarves.instagram_channel", "jarves.privacy", "jarves.overview",
                   "jarves.usage", "jarves.backup", "jarves.appearance", "jarves.skills.generated",
-                  "jarves.operations", "jarves.goals", "jarves.preferences", "jarves.proactive", "jarves.continuity", "jarves.devmanager", "jarves.devstatus", "jarves.runtime", "jarves.updates", "jarves.release_cmd", "jarves.selfcheck", "jarves.connect",
+                  "jarves.operations", "jarves.goals", "jarves.preferences", "jarves.proactive", "jarves.continuity", "jarves.devmanager", "jarves.devstatus", "jarves.runtime", "jarves.updates", "jarves.release_cmd", "jarves.release_notes", "jarves.selfcheck", "jarves.connect",
                   "jarves.identity", "jarves.dashboard_auth", "jarves.mobile", "jarves.guides",     # WP-L: Guides pages
                   "jarves.setup_wizard",                                         # SW-V3: Setup & add-ons page
                   "jarves.profiles",                                             # Issue #17: Profiles page
@@ -54,6 +54,7 @@ PLUGIN_MODULES = ("jarves.workspace", "jarves.curator", "jarves.memory", "jarves
                   "jarves.recall",                                                 # SW-V4 G: Recall search page
                   "jarves.whatsapp_admin",                                         # SW-V4 F: WhatsApp page (PC only)
                   "jarves.orchestrator.surfaces",                                  # SW-V4 E: Coding agents page
+                  "jarves.projectmgr.surfaces",                                    # Projects page (project manager)
                   "jarves.dialing",                                                # SW-V4 H: Phone calls page
                   "jarves.browser",                                                # Browser allow-list page
                   "jarves.self_manage",                                            # Self-management page

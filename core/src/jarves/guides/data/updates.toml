@@ -53,6 +53,11 @@ he = "אם הגרסה החדשה לא עולה: jarvis update --rollback (או �
 en = "If the new version does not start: jarvis update --rollback (or the button on the Updates page). Your data from before the update is restored; what changed after it is kept in a safety backup."
 action = "command:jarvis update --rollback"
 
+[[steps]]
+he = "מה חדש בכל גרסה: עמוד Release notes בדשבורד (בחירת גרסה), או jarvis release-notes --open שפותח דף HTML. אחרי התקנה או עדכון, בסוף המתקין יש תיבת סימון \"הצג מה חדש\" שפותחת את הדף. אפשר לכבות אותה; הבדיקה היא מקומית, בלי רשת."
+en = "What is new in each version: the Release notes page in the dashboard (pick a version), or jarvis release-notes --open, which opens an HTML page. After an install or update the last installer page has a Show what is new box that opens it. You can untick it; it is local, no network."
+action = "open:#/releasenotes"
+
 [[problems]]
 he = "Windows כתב \"Windows protected your PC\""
 en = "Windows says \"Windows protected your PC\""

@@ -46,11 +46,58 @@
     if (a && a.scrollIntoView) a.scrollIntoView({ block: "nearest" });
   });
 
+  // ---------------------------------------------------------------- navigation tree (parents fold; the branch you are in stays open)
+  const openGroups = new Set();
+  try { for (const g of JSON.parse(localStorage.getItem("jarves.nav") || "[]")) openGroups.add(g); } catch (e) { /* no storage: still works */ }
+  const saveGroups = () => { try { localStorage.setItem("jarves.nav", JSON.stringify([...openGroups])); } catch (e) { /* ignore */ } };
+  function syncGroups() {
+    for (const g of document.querySelectorAll("#nav .nav-group")) {
+      const head = g.querySelector(".nav-h");
+      if (!head) continue;                                         // top level leaves never fold
+      const open = !!g.querySelector("a.active") || openGroups.has(g.dataset.group);
+      g.classList.toggle("collapsed", !open);
+      head.setAttribute("aria-expanded", open ? "true" : "false");
+    }
+  }
+  const visibleItems = () => Array.from(document.querySelectorAll("#nav .nav-h, #nav a")).filter((x) => x.classList.contains("nav-h") || !x.closest(".nav-group.collapsed"));
+  for (const head of document.querySelectorAll("#nav .nav-h")) {
+    head.setAttribute("role", "treeitem"); head.tabIndex = 0;
+    const flip = () => {
+      const g = head.closest(".nav-group").dataset.group;
+      if (openGroups.has(g)) openGroups.delete(g); else openGroups.add(g);
+      saveGroups(); syncGroups();
+    };
+    head.addEventListener("click", flip);
+    head.addEventListener("keydown", (ev) => { if (ev.key === "Enter" || ev.key === " ") { ev.preventDefault(); flip(); } });
+  }
+  $("nav").addEventListener("keydown", (ev) => {                  // arrow keys walk the tree, right/left open and close a branch
+    const items = visibleItems(), i = items.indexOf(document.activeElement);
+    if (i < 0) return;
+    const rtl = document.documentElement.dir === "rtl", cur = items[i], isHead = cur.classList.contains("nav-h");
+    const openKey = rtl ? "ArrowLeft" : "ArrowRight", closeKey = rtl ? "ArrowRight" : "ArrowLeft";
+    if (ev.key === "ArrowDown") { ev.preventDefault(); (items[i + 1] || items[0]).focus(); }
+    else if (ev.key === "ArrowUp") { ev.preventDefault(); (items[i - 1] || items[items.length - 1]).focus(); }
+    else if (ev.key === "Home") { ev.preventDefault(); items[0].focus(); }
+    else if (ev.key === "End") { ev.preventDefault(); items[items.length - 1].focus(); }
+    else if (ev.key === openKey && isHead) { ev.preventDefault(); const g = cur.closest(".nav-group"); if (g.classList.contains("collapsed")) cur.click(); else (g.querySelector("a") || cur).focus(); }
+    else if (ev.key === closeKey) { ev.preventDefault(); const g = cur.closest(".nav-group"), h = g.querySelector(".nav-h"); if (h) { if (isHead && !g.classList.contains("collapsed") && !g.querySelector("a.active")) cur.click(); else h.focus(); } }
+  });
+  function syncAria() {
+    const cur = document.querySelector("#nav a.active");
+    for (const a of document.querySelectorAll("#nav a")) { if (a === cur) a.setAttribute("aria-current", "page"); else a.removeAttribute("aria-current"); a.setAttribute("aria-level", a.closest(".nav-kids") ? "2" : "1"); }
+    for (const h of document.querySelectorAll("#nav .nav-h")) h.setAttribute("aria-level", "1");
+    const items = visibleItems(), keep = (items.includes(document.activeElement) && document.activeElement) || cur || items[0];
+    for (const x of document.querySelectorAll("#nav .nav-h, #nav a")) x.tabIndex = x === keep ? 0 : -1;
+  }
+  $("nav").addEventListener("focusin", (ev) => { for (const x of document.querySelectorAll("#nav .nav-h, #nav a")) x.tabIndex = x === ev.target ? 0 : -1; });
+  new MutationObserver(() => { syncGroups(); syncAria(); }).observe($("nav"), { subtree: true, attributes: true, attributeFilter: ["class"] });
+  syncGroups(); syncAria();
+
   // ---------------------------------------------------------------- global search
   const KEYWORDS = {        // extra words people search for (both languages)
     home: "status overview dashboard מצב סקירה ראשי", runtime: "mic mute window show hide autostart quit stop wake tray מיקרופון השתקה חלון הפעלה עצירה מגש",
     connections: "google gmail calendar sign in oauth גוגל ג׳ימייל התחברות", devices: "phone lan pair wifi audit טלפון הצמדה רשת ביקורת",
-    conversations: "transcript chat history talk תמליל היסטוריה צ׳אט", recall: "recall search what did i say remember find חיפוש מה אמרתי מה דיברנו שיחות קודמות", agents: "coding agents claude code codex sessions worktree approvals סוכני קוד קלוד קודקס סשנים פרויקט", issues: "problems errors diagnosis תקלות שגיאות אבחון",
+    conversations: "transcript chat history talk תמליל היסטוריה צ׳אט", recall: "recall search what did i say remember find חיפוש מה אמרתי מה דיברנו שיחות קודמות", projects: "projects tasks plan board ship runners פרויקטים משימות תוכנית לוח", agents: "coding agents claude code codex sessions worktree approvals סוכני קוד קלוד קודקס סשנים פרויקט", issues: "problems errors diagnosis תקלות שגיאות אבחון",
     selfcheck: "self check health suggestions improvements בדיקה עצמית הצעות שיפור",
     updates: "update upgrade rollback version previous installer עדכון שדרוג חזרה לגרסה קודמת מתקין",
     bugs: "bug reports issues problems errors crashes report developer fixed github דיווחי תקלות תקלות שגיאות קריסות דיווח למפתח תוקן",
@@ -164,7 +211,8 @@
     el("span", { class: "schip-t" }, "Pi: " + (piNotReady === null ? tx("לא ידוע", "Unknown")
       : piNotReady ? tx(`${piTotal - piNotReady}/${piTotal} מוכנות`, `${piTotal - piNotReady}/${piTotal} ready`) : tx("הכל מוכן", "all ready"))));
     const priv = typeof window.privacyChips === "function" ? window.privacyChips(rt && rt.privacy, live) : [];
-    bar.replaceChildren(core, dev, pi, ...priv);
+    core.title += " · " + dev.title + " · " + pi.title;       // device and Pi readiness live on System pages, not on every screen
+    bar.replaceChildren(core, ...priv);
     fadeCue(bar);
   }
   // a sideways scroller shows a fade at the edge where more chips are hidden (D-17); RTL scrollLeft is negative

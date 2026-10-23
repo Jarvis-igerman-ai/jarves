@@ -324,6 +324,8 @@ class Core:
         recall.attach(self)
         from . import orchestrator                      # SW-V4 E: coding agents (bridge starts with the switch)
         orchestrator.attach(self)
+        from .projectmgr import surfaces as project_surfaces   # project manager: tasks run by coding agents
+        project_surfaces.attach(self)
         from . import dialing                           # SW-V4 H: dial_prepare / dial_open (assisted dialing)
         dialing.attach(self)
         from . import guides                            # WP-L: help Skill, setup hints, briefing, suggestions
@@ -482,6 +484,8 @@ class Core:
             await self.tasks.shutdown()             # running background tasks end as "cancelled" (stored)
         if getattr(self, "ops", None) is not None:
             await self.ops.stop()                   # running jobs stop; the next start resumes or marks them
+        if getattr(self, "project_stop", None) is not None:
+            await asyncio.to_thread(self.project_stop)  # dispatcher stopped, running agent processes cancelled
         if getattr(self, "agents_stop", None) is not None:
             await asyncio.to_thread(self.agents_stop)   # SW-V4 E: managed sessions closed, bridge down, last known kept
         await self.registry.drain()                 # shielded side effects finish before the store closes
