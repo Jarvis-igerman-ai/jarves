@@ -233,16 +233,17 @@ class UpdateError(Exception):
 
 
 # ---------------------------------------------------------------------- hosted manifest (public releases repo), Ed25519-signed
-def canonical(manifest: dict) -> bytes:
-    """The exact signed bytes (same function in packaging/release.py)."""
-    return SIGN_DOMAIN + json.dumps(manifest, sort_keys=True, separators=(",", ":"), ensure_ascii=True).encode("ascii")
+def canonical(manifest: dict, domain: bytes = SIGN_DOMAIN) -> bytes:
+    """The exact signed bytes (same function in packaging/release.py). `domain` keeps the signatures of different
+    manifest kinds (installer vs WhatsApp bridge) from being valid for each other."""
+    return domain + json.dumps(manifest, sort_keys=True, separators=(",", ":"), ensure_ascii=True).encode("ascii")
 
 
 def key_id(public_raw: bytes) -> str:
     return hashlib.sha256(public_raw).hexdigest()[:16]
 
 
-def verify_manifest(envelope: object, public_keys: list[str] | tuple[str, ...]) -> dict:
+def verify_manifest(envelope: object, public_keys: list[str] | tuple[str, ...], domain: bytes = SIGN_DOMAIN) -> dict:
     """The manifest inside a latest.json envelope, only if an Ed25519 signature by one of `public_keys` covers it."""
     from cryptography.exceptions import InvalidSignature
     from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PublicKey
@@ -259,7 +260,7 @@ def verify_manifest(envelope: object, public_keys: list[str] | tuple[str, ...]) 
         raw_sig = base64.b64decode(str(sig.get("sig") or ""), validate=True)
     except ValueError:
         raise UpdateError("UPDATE_BAD_SIGNATURE", "latest.json signature is not base64") from None
-    msg = canonical(envelope["manifest"])
+    msg = canonical(envelope["manifest"], domain)
     for k in public_keys:
         try:
             pub = base64.b64decode(k.strip(), validate=True)

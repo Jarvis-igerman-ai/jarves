@@ -382,9 +382,15 @@ def _step_whatsapp(conn, it: Item) -> None:
     from . import whatsapp_bridge as wab
     if not wab.bridge_installed(conn.home) and wab.status_or_none(conn.home) is None:
         conn.h(wab.NOT_INSTALLED_HE, wab.NOT_INSTALLED_EN)
-        conn.results["whatsapp"] = "attention"
-        conn.notes["whatsapp"] = (wab.NOT_INSTALLED_HE, wab.NOT_INSTALLED_EN)
-        return
+        r = {"ok": False}
+        if conn._yn("להוריד את גשר הוואטסאפ עכשיו (קובץ חתום, נבדק לפני ההתקנה)?",
+                    "Download the WhatsApp bridge now (a signed file, verified before it is installed)?", False):
+            r = wad.install_bridge(conn.home)                 # the same owner-initiated backend as the dashboard button
+            conn.h(r.get("message_he", ""), r.get("message", ""))
+        if not r["ok"]:
+            conn.results["whatsapp"] = "attention"
+            conn.notes["whatsapp"] = (wab.NOT_INSTALLED_HE, wab.NOT_INSTALLED_EN)
+            return
     conn.h("מפעיל את גשר הוואטסאפ ומציג קוד QR. סורקים אותו בטלפון בעצמכם (וואטסאפ > הגדרות > מכשירים מקושרים).",
            "Starting the WhatsApp bridge and showing a QR code. You scan it on your phone yourself "
            "(WhatsApp > Settings > Linked devices).")
@@ -1062,7 +1068,10 @@ def dashboard_routes(register) -> None:
             except wad.BridgeError as e:
                 return 200, {"started": False, "step": "bridge_down", "message_en": e.message, "message_he": e.he}
             if r["step"] in ("not_installed", "bridge_down"):
-                return 200, {"started": False, "step": r["step"], "message_en": r["message"], "message_he": r["message_he"]}
+                out = {"started": False, "step": r["step"], "message_en": r["message"], "message_he": r["message_he"]}
+                if r["step"] == "not_installed":           # the WhatsApp page has the one "Download the WhatsApp bridge" button
+                    out["open"] = "#/whatsapp"
+                return 200, out
             return 200, {"started": True, "step": r["step"], "open": "#/whatsapp",
                          "message_en": "The bridge is running. Scan the QR on the WhatsApp page with your phone.",
                          "message_he": "הגשר פועל. סורקים את קוד ה-QR בעמוד וואטסאפ עם הטלפון."}
