@@ -239,6 +239,43 @@ async def test_typed_chat_records_requests_and_changes(home):
     assert ev == [("block_changed", "backend.memory")]
 
 
+async def test_typed_chat_wrapper_passes_on_delta_through(home):
+    """The terminal chat (jarvis chat) calls agent.reply(text, on_delta=...): the context wrapper must accept and forward
+    it, not raise TypeError (every chat turn failed with CORE_INTERNAL), and a brain without streaming still works."""
+    reg = SkillRegistry()
+    reg.register(ClockSkill())
+    seen = []
+
+    class Streaming:
+        cfg = Config().ai
+        connection = "api_key"
+
+        def instructions(self):
+            return "You are JARVES."
+
+        async def reply(self, text, on_delta=None):
+            if on_delta is not None:
+                on_delta("par")
+                on_delta("tial")
+            return "partial"
+
+    class Plain:
+        cfg = Config().ai
+        connection = "api_key"
+
+        def instructions(self):
+            return "You are JARVES."
+
+        async def reply(self, text):
+            return "plain"
+    s, p = Streaming(), Plain()
+    assert ct.attach_brain(s, home=home, cfg=Config(), memory=None, registry=reg)
+    assert ct.attach_brain(p, home=home, cfg=Config(), memory=None, registry=reg)
+    assert await s.reply("hi", on_delta=seen.append) == "partial" and seen == ["par", "tial"]
+    assert await s.reply("hi") == "partial"                      # no callback: unchanged call
+    assert await p.reply("hi") == "plain"
+
+
 def test_switch_off_captures_nothing(home):
     lv, *_ = _core_like(home)
     f = features.Features(Config(), home)
