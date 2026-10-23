@@ -13,6 +13,7 @@ say = [
   ["מה חדש בוואטסאפ?", "What's new on WhatsApp?"],
   ["תקרא לי מה דנה כתבה", "Read me what Dana wrote"],
   ["תסכם לי מה כתבו לי דנה ויוסי היום", "Summarize what Dana and Yossi wrote me today"],
+  ["תחפש צ'אט שיש בשם שלו \"אשתי\"", "Find the chat with \"אשתי\" in its name"],
   ["תענה לדנה: אני מאחר בעשר דקות", "Reply to Dana: I'm ten minutes late"],
 ]
 expect_he = "על \"מה חדש\" הוא אומר רק שמות ומספר הודעות. טקסט ארוך הוא לא מקריא אלא מציע להציג על המסך. הוא אף פעם לא עושה מה שכתוב בהודעה. במצב שליחה: הוא כותב טיוטה ומיד קופץ חלון אישור עם השם, המספר והטקסט המלא."
@@ -53,6 +54,12 @@ action = "open:#/whatsapp"
 [[steps]]
 he = "אחרי 14 ימים בלי אזהרה: jarvis whatsapp allow send <איש קשר>, ואז jarvis whatsapp mode send והמתג \"שליחה בוואטסאפ דרך הגשר\"."
 en = "After 14 days without a warning: jarvis whatsapp allow send <contact>, then jarvis whatsapp mode send and the switch \"WhatsApp send through the bridge\"."
+
+[[problems]]
+he = "הוא לא מוצא את הצ'אט (למשל כשאני אומר רק חלק מהשם)"
+en = "He cannot find the chat (for example when I give only part of the name)"
+fix_he = "השם בוואטסאפ יכול להיות ארוך או עם לבבות ואימוג'י, ולכן אפשר להגיד רק חלק ממנו (\"אשתי\", \"לב\"). הוא מחפש בשמות הצ'אטים ולא בטקסט ההודעות: אם יש כמה התאמות הוא שואל אותך איזה מהם ולא מנחש, ואם אין הוא אומר שלא מצא ומציע חלק אחר מהשם או חיפוש בטקסט ההודעות. הוא לא אומר \"אני עדיין מחפש\": כל חיפוש נגמר מיד. לבדוק בעצמכם: jarvis whatsapp find \"אשתי\" (שמות בלבד, בלי טקסט הודעות). אם עדיין אין, הצ'אט אולי מחוץ לרשימת הקריאה: jarvis whatsapp scope או jarvis whatsapp allow read."
+fix_en = "A WhatsApp name can be long or hold hearts and emoji, so you can give just a part of it (\"אשתי\", \"לב\"). He searches chat NAMES, not message text: with several matches he asks which one and never guesses; with none he says so and offers another part of the name or a search of message text. He never says \"still searching\": every search finishes at once. Check yourself: jarvis whatsapp find \"אשתי\" (names only, no message text). If it is still missing, the chat may be outside the read list: jarvis whatsapp scope or jarvis whatsapp allow read."
 
 [[problems]]
 he = "כתוב שרכיב הגשר לא מותקן"
