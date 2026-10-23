@@ -18,7 +18,7 @@
 .jc-log { flex: 1; min-inline-size: 0; display: flex; flex-direction: column; gap: 10px; overflow-y: auto; overflow-x: hidden;
   padding: 14px; border: 1px solid var(--jc-line); border-radius: 14px; background: var(--jc-bg); }
 .jc-log:empty::before { content: attr(data-empty); margin: auto; max-inline-size: 36ch; text-align: center; color: var(--jc-muted); font-size: 16px; line-height: 1.6; }
-.jc-jump { position: absolute; inset-block-end: 12px; inset-inline-end: 16px; inline-size: 40px; block-size: 40px; min-block-size: 40px !important; min-inline-size: 40px !important;
+.jc-jump { position: absolute; inset-block-end: 12px; inset-inline-end: 16px; inline-size: 44px; block-size: 44px;
   border-radius: 50%; padding: 0; background: var(--jc-acc); color: var(--jc-on); border: 0; font-size: 18px; box-shadow: 0 2px 8px rgba(0,0,0,.35); cursor: pointer; }
 .jc-jump[hidden] { display: none; }
 .jc-log:focus-visible, .jc-in:focus-visible, .jchat button:focus-visible, .jchat summary:focus-visible, .jc-code:focus-visible, .jchat input:focus-visible {
@@ -44,7 +44,7 @@
 .jc-code { inline-size: 7ch; font: inherit; padding: 6px; border-radius: 8px; border: 1px solid var(--jc-line); background: transparent; color: var(--jc-fg); }
 .jc-cmds { display: flex; gap: 6px; overflow-x: auto; padding-block-end: 2px; scrollbar-width: thin; }
 .jc-cmds .jc-cmd { flex: none; }
-.jc-cmd { min-block-size: 32px !important; border-radius: 99px; padding: 2px 12px; font-family: ui-monospace, Consolas, monospace; font-size: 13px; }
+.jc-cmd { border-radius: 99px; padding: 2px 14px; font-family: ui-monospace, Consolas, monospace; font-size: 13px; }
 .jc-form { display: flex; gap: 8px; align-items: flex-end; padding: 6px; border: 1px solid var(--jc-line); border-radius: 16px; background: var(--jc-bg); }
 .jc-form:focus-within { border-color: var(--jc-acc); box-shadow: 0 0 0 2px var(--jc-acc); }
 .jc-in { flex: 1; min-inline-size: 0; font: inherit; font-size: 16px; padding: 10px; border: 0; outline: none; background: transparent; color: var(--jc-fg); resize: none; min-block-size: 44px; max-block-size: 180px; line-height: 1.5; }
@@ -67,8 +67,8 @@
 .jc-h { font-weight: 700; } .jc-h1 { font-size: 1.2em; } .jc-h2 { font-size: 1.1em; }
 .jc-ic { font: 0.9em ui-monospace, Consolas, monospace; padding: 1px 5px; border-radius: 5px; background: var(--jc-bg); border: 1px solid var(--jc-line); }
 .jc-code-block { border: 1px solid var(--jc-line); border-radius: 10px; background: var(--jc-bg); overflow: hidden; max-inline-size: 100%; }
-.jc-code-head { display: flex; justify-content: space-between; align-items: center; padding: 2px 8px; font-size: 12px; color: var(--jc-muted); border-block-end: 1px solid var(--jc-line); }
-.jchat .jc-copy { min-block-size: 28px; min-inline-size: 0; padding: 0 10px; font-size: 12px; border-radius: 8px; }
+.jc-code-head { display: flex; justify-content: space-between; align-items: center; padding: 0 4px 0 10px; font-size: 12px; color: var(--jc-muted); border-block-end: 1px solid var(--jc-line); }
+.jchat .jc-copy { padding: 0 12px; font-size: 13px; border-radius: 8px; }
 .jc-code-block pre { margin: 0; padding: 10px 12px; overflow-x: auto; color: var(--jc-fg); font: 13px/1.5 ui-monospace, Consolas, monospace; white-space: pre; }
 /* slash pop-up */
 .jc-formwrap { position: relative; }
