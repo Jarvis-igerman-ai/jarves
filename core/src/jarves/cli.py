@@ -103,11 +103,11 @@ def cmd_run(a, cfg, home) -> int:
     _fault = logs.enable_faulthandler(home / "logs")    # SW-V4 B: native crashes -> logs/crash.txt (frames only)
     try:
         if mode == "desktop":
-            asyncio.run(_run_desktop(core))
+            asyncio.run(_with_stop_handlers(core, _run_desktop(core)))
         elif mode == "background":
-            asyncio.run(_run_background(core, show=getattr(a, "show", False)))
+            asyncio.run(_with_stop_handlers(core, _run_background(core, show=getattr(a, "show", False))))
         else:
-            asyncio.run(core.run())
+            asyncio.run(_with_stop_handlers(core, core.run()))
     except KeyboardInterrupt:
         pass
     except OSError as e:
@@ -119,6 +119,17 @@ def cmd_run(a, cfg, home) -> int:
     finally:
         lock.release()
     return 0
+
+
+async def _with_stop_handlers(core, coro) -> None:
+    """Issue #17: a closed terminal window, a Windows logoff / shutdown, SIGTERM and Ctrl+C all end in the same orderly
+    Core.stop() (which writes the CORE_STOPPED clean-stop marker) instead of the OS killing the process mid-run."""
+    from .runtime import shutdown
+    uninstall = shutdown.install(asyncio.get_running_loop(), core.request_stop, core.stopped_evt)
+    try:
+        await coro
+    finally:
+        uninstall()
 
 
 async def _run_background(core, show: bool = False) -> None:

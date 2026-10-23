@@ -20,6 +20,7 @@ Modules probed at start: jarves.workspace, jarves.curator, jarves.memory, jarves
 """
 from __future__ import annotations
 
+import asyncio
 import importlib
 import gzip
 import json
@@ -1051,16 +1052,22 @@ class DashboardSkill(Skill):
     name = "dashboard"
     description = "the local web dashboard (conversations, logs, costs, memory, settings)"
 
-    def __init__(self, opener) -> None:
+    def __init__(self, opener, browser_state=None) -> None:
         self.opener = opener                         # async () -> url (Core.open_dashboard)
+        self.browser_state = browser_state or (lambda: "")   # "pending" = the server runs, the browser is still opening
 
     def tools(self) -> list[Tool]:
         async def open_(a):
             try:
                 url = await self.opener()
-            except Exception as e:
+            except (Exception, asyncio.TimeoutError) as e:      # Issue #17: a slow start is an answer, not a hang
+                logs.warn("dashboard", "DASHBOARD_FAILED", "open_dashboard failed", error_type=type(e).__name__)
                 return ToolResult(False, "לא הצלחתי לפתוח את לוח הבקרה.", {"error": type(e).__name__},
                                   code="DASHBOARD_FAILED")
             local = url.split("?", 1)[0]
+            if self.browser_state() == "pending":
+                return ToolResult(True, "לוח הבקרה פועל, אבל הדפדפן עוד לא נפתח. אם לא יופיע בעוד רגע, "
+                                  "אפשר לפתוח את הכתובת ידנית.", {"url": local, "browser": "pending"}, code="ok")
             return ToolResult(True, "פתחתי את לוח הבקרה בדפדפן.", {"url": local}, code="ok")
-        return [Tool("open_dashboard", "Open the dashboard in the browser: 'open the dashboard', 'תפתח את הדשבורד'. Never a way to close anything.", open_, permission="action")]
+        return [Tool("open_dashboard", "Open the dashboard in the browser: 'open the dashboard', 'תפתח את הדשבורד'. Never a way to close anything.", open_, permission="action",
+                     timeout_s=15)]

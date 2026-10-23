@@ -209,12 +209,25 @@ class Store:
                 if pend:
                     rid = pend.pop(0)
                     t0 = self._db.execute("SELECT ts FROM tool_calls WHERE id = ?", (rid,)).fetchone()[0]
+                    # Issue #17: the tool's own run time (the log's ms, which leaves out the minutes a person spent on
+                    # an approval); older lines without it fall back to the call-to-result interval
+                    dur = d["ms"] / 1000 if isinstance(d.get("ms"), (int, float)) and not isinstance(d.get("ms"), bool) \
+                        else ts - t0
                     self._db.execute("UPDATE tool_calls SET ok=?, code=?, origin=?, done_ts=?, duration_s=? WHERE id=?",
-                                     (int(bool(d.get("ok"))), rc, d.get("origin"), ts, round(ts - t0, 3), rid))
+                                     (int(bool(d.get("ok"))), rc, d.get("origin"), ts, round(dur, 3), rid))
                 else:                              # typed chat / local command: no matching LIVE_TOOL_CALL
                     self._db.execute("INSERT INTO tool_calls (session_id, ts, name, ok, code, origin, done_ts) "
                                      "VALUES (?,?,?,?,?,?,?)", (sid, ts, name, int(bool(d.get("ok"))), rc,
                                                                 d.get("origin"), ts))
+            elif code in ("TOOL_REFUSED", "TOOL_CANCELLED", "TOOL_REPLAYED"):
+                # Issue #17: a call that ended without running (refused, cancelled, answered from a replay) is CLOSED,
+                # not "never returned"; ok stays unknown so it is neither a success nor a tool failure
+                pend = self._pending_tools.get(str(d.get("tool") or "")) or []
+                if pend:
+                    rid = pend.pop(0)
+                    t0 = self._db.execute("SELECT ts FROM tool_calls WHERE id = ?", (rid,)).fetchone()[0]
+                    self._db.execute("UPDATE tool_calls SET code=?, origin=?, done_ts=?, duration_s=? WHERE id=?",
+                                     (str(d.get("result_code") or code), d.get("origin"), ts, round(ts - t0, 3), rid))
             elif code in BACKEND_START:
                 rid = d.get("response_id")
                 if rid:                            # open row: a request that never finishes still shows (stall)

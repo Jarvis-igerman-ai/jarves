@@ -1,6 +1,7 @@
 """Built-in offline Skills: clock, memory, status."""
 from __future__ import annotations
 
+import asyncio
 from datetime import datetime
 from typing import Callable
 
@@ -101,7 +102,10 @@ class MemorySkill(Skill):
 
     def tools(self) -> list[Tool]:
         async def remember(a: RememberArgs):
-            mid, _ = self.store.upsert(a.text, source="user", confidence=1.0)   # no duplicates
+            # Issue #17 ("Slow tool remember 10.0 s"): upsert is a duplicate scan (difflib over up to 500 facts) and a
+            # SQLite write that waits for any other connection's lock; run on the event loop it froze the whole
+            # voice session for that long. Off the loop it only delays this one call.
+            mid, _ = await asyncio.to_thread(self.store.upsert, a.text, source="user", confidence=1.0)   # no duplicates
             return ToolResult(True, "זכרתי.", {"id": mid})
 
         async def recall(a: RecallArgs):

@@ -872,8 +872,17 @@ def make_skill(features: Features, registry=None):
                         ok = await confirm(prompt) if confirm else False
                     if not ok:
                         features.request(fid, by="voice")
-                        return ToolResult(False, f"{f.title_he} דורשת אישור על המסך או בלוח הבקרה. לא הפעלתי.",
-                                          {"id": fid, "risk": f.risk}, "FEATURE_NEEDS_APPROVAL")
+                        why = getattr(registry, "last_ask_outcome", "")
+                        if why == "timeout":      # Issue #17: nobody answered: say so, the request waits on the Features page
+                            msg = (f"ביקשתי את האישור שלך על המסך עבור {f.title_he} ולא קיבלתי תשובה בזמן. "
+                                   "לא הפעלתי כלום. הבקשה ממתינה בעמוד היכולות בלוח הבקרה.")
+                        elif why == "no_channel":
+                            msg = (f"לא הצלחתי להציג לך את שאלת האישור עבור {f.title_he} (אין מסך או אפליקציה פתוחים). "
+                                   f"לא הפעלתי כלום. אפשר לאשר בלוח הבקרה או עם jarvis features on {fid}.")
+                        else:
+                            msg = f"{f.title_he} דורשת אישור על המסך או בלוח הבקרה. לא הפעלתי."
+                        return ToolResult(False, msg, {"id": fid, "risk": f.risk, **({"approval": why} if why else {})},
+                                          "FEATURE_NEEDS_APPROVAL")
                 st = switch(features, fid, a.on, by="voice")
                 msg = (f"{'הפעלתי' if a.on else 'כיביתי'} את {f.title_he} ({APPLIES_HE[f.applies]}). "
                        f"מצב: {state_text(st, 'he')}")
@@ -882,7 +891,7 @@ def make_skill(features: Features, registry=None):
             return [
                 Tool("features_list", "My features on/off/unavailable and why: 'what can you do', 'מה אתה יודע לעשות'.", list_, permission="read"),
                 Tool("feature_set", "Turn one feature on/off on request: 'turn on the camera', 'תפעיל את המצלמה'. Risky ones need on-screen approval.", set_, SetArgs,
-                     permission="action", timeout_s=30),
+                     permission="action", timeout_s=30),     # approval wait is not counted (SkillRegistry._bounded)
             ]
 
     return FeatureSkill()

@@ -349,11 +349,18 @@ class PearDesktopPlayer:
         await self.pair(wait_s=self.timeout)    # already-approved id: Pear returns a token without a dialog
 
     async def reachable(self) -> bool:
+        return await self.probe() != "not_running"
+
+    async def probe(self) -> str:
+        """running | unresponsive | not_running. A refused connection means the app is not running; a connection that
+        opens but does not answer in time means it is running but frozen (Issue #17: never say "not running" for that)."""
         try:
             await self._client.get("/api/v1/song")     # 401 without a token still proves the server is up
-            return True
+            return "running"
+        except httpx.TimeoutException:
+            return "unresponsive"
         except httpx.TransportError:
-            return False
+            return "not_running"
 
     async def _req(self, method: str, path: str, json: dict | None = None, retry: bool = True) -> httpx.Response:
         await self._ensure_token()
@@ -528,6 +535,9 @@ class FakePlayer:
         if self.offline:
             raise MusicError("MUSIC_PLAYER_OFFLINE", "fake player offline", "start the player")
 
+    async def probe(self) -> str:
+        return "not_running" if self.offline else "running"
+
     async def search(self, query: str) -> list[Track]:
         self._chk("search")
         return [t for t in self.catalog if query.lower() in (t.title + " " + t.subtitle).lower()]
@@ -621,6 +631,25 @@ class MusicSkill(Skill):
         self.max_volume = max_volume
         self.last_error: MusicError | None = None
 
+    async def _require_player(self, *, late: bool = False) -> None:
+        """Issue #17: look at the player ONCE before any search or candidate. Not running / frozen is the answer right
+        away (and `jarvis music open` is the fix); it is never "not confirmed" after three pointless tries."""
+        probe = getattr(self.player, "probe", None)
+        if probe is None:
+            return
+        try:
+            state = await asyncio.wait_for(probe(), 1.5 if late else 3.0)
+        except TimeoutError:
+            state = "unresponsive"
+        if late and state == "unresponsive":
+            return                    # mid-play a slow answer is a slow player (reported as such), not a closed one
+        if state == "not_running":
+            raise MusicError("MUSIC_PLAYER_OFFLINE", "Pear Desktop is not running",
+                             "start Pear Desktop (`jarvis music open`)")
+        if state == "unresponsive":
+            raise MusicError("MUSIC_TIMEOUT", "Pear Desktop is running but does not answer",
+                             "check that the app is not frozen; close and reopen it (`jarvis music open`)")
+
     async def _guard(self, coro) -> ToolResult:
         try:
             res = await coro
@@ -629,11 +658,12 @@ class MusicSkill(Skill):
         except MusicError as e:
             self.last_error = e
             logs.warn("music", e.code, "music player problem", detail=e.message, action=e.action)
-            msg = {"MUSIC_PLAYER_OFFLINE": "נגן המוזיקה לא פועל. צריך להפעיל את Pear Desktop.",
+            msg = {"MUSIC_PLAYER_OFFLINE": "נגן המוזיקה (Pear Desktop) לא פועל. אפשר להפעיל אותו בפקודה jarvis music open.",
                    "MUSIC_PAIR_DENIED": "החיבור לנגן נדחה. צריך לאשר אותו ב-Pear Desktop.",
                    "MUSIC_NOT_PAIRED": "עוד לא חיברו אותי לנגן המוזיקה. צריך להריץ jarves music pair ולאשר.",
                    "MUSIC_TIMEOUT": "נגן המוזיקה לא עונה."}.get(e.code, "יש בעיה בנגן המוזיקה.")
-            return ToolResult(False, msg, {"action": e.action}, e.code)
+            extra = {"fix_command": "jarvis music open"} if e.code == "MUSIC_PLAYER_OFFLINE" else {}
+            return ToolResult(False, msg, {"action": e.action, **extra}, e.code)
 
     @staticmethod
     def _same_track(np: NowPlaying, t: Track) -> bool:
@@ -730,6 +760,7 @@ class MusicSkill(Skill):
                 loop = asyncio.get_running_loop()
                 deadline = loop.time() + self.play_budget_s
                 left = lambda: deadline - loop.time()           # noqa: E731
+                await self._require_player()
                 try:
                     found = await asyncio.wait_for(p.search(a.query), max(0.5, left() - MIN_CANDIDATE_S))
                 except TimeoutError as e:
@@ -753,6 +784,8 @@ class MusicSkill(Skill):
                     if tried and left() < MIN_CANDIDATE_S:
                         out_of_time = True
                         break
+                    if tried:
+                        await self._require_player(late=True)   # the app closed while we tried: stop, do not retry
                     tried.append(cand)
                     t = cand
                     try:
@@ -784,6 +817,7 @@ class MusicSkill(Skill):
                         if hit is not None:
                             np, t = last, hit
                 if np is None:
+                    await self._require_player(late=True)       # "not confirmed" only when the player is really there
                     if out_of_time or slow or left() <= 0.5:
                         logs.warn("music", "MUSIC_PLAY_DEADLINE", "the player was too slow; stopped trying candidates",
                                   tried=len(tried), budget_s=self.play_budget_s)

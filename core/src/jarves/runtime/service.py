@@ -333,7 +333,7 @@ class Runtime:
                 _reveal(path)
             elif action == "quit":
                 logs.info("runtime", "QUIT_REQUESTED", "Quit chosen in the tray")
-                self.core.stop_event.set()
+                getattr(self.core, "request_stop", lambda _r: self.core.stop_event.set())("tray_quit")
             if self.tray is not None:
                 await asyncio.to_thread(self.tray.refresh)
         except Exception:
