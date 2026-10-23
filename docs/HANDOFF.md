@@ -27,8 +27,15 @@
   shard and few unmeasured files).
 - Owner decisions (#89): merge policy (required check `CI result (single required check)` + Allow auto-merge, no
   "up to date" requirement, drop the update-and-re-run habit; changes CLAUDE.md); stable release needs SWV3_P01 B13/B14
-  and SWV3_P04 Q05 live-verified or accepted, and 5 consecutive green nightlies. Merge #84 (next-flow parse failure, every
-  push shows a red run) before anything else.
+  and SWV3_P04 Q05 live-verified or accepted, and 5 consecutive green nightlies. #84 (next-flow parse failure, every push
+  showed a red run) merged as a0c0762.
+
+## Release notes by version (dashboard, CLI, installer page) — 23 Oct 2026
+
+- Owner request: see release notes per version in the dashboard, and an HTML page with the notes when installing. New `jarves/release_notes.py` parses CHANGELOG.md: dashboard page `#/releasenotes` (version picker, EN/HE), `GET /api/release-notes[?version=]`, `jarvis release-notes [--version V] [--list] [--open] [--he]` (writes `<home>/release-notes/release-notes-<ver>.html`, all text escaped; a beta shows its stable version's notes).
+- Packaging: `build_windows.ps1` copies CHANGELOG.md into the stage (the installed app finds it in the program folder); `jarves.iss` adds a finish-page checkbox "Show what is new" (on by default, skipped for silent installs, so in-app silent updates do not pop it).
+- Guide: new step in `updates.toml` (EN+HE); CLI parity unchanged (covered by `update_check` -> `update`); Hebrew strings via `catalog_add.py`. Tests: `core/tests/test_release_notes.py`; guides, cli_parity and the local pre-push gate pass.
+- NOT verified: the real Inno Setup build, the finish-page checkbox and the page opening in a real browser on Windows (CI builds the installer; owner to confirm on the next beta install). Open question: also auto-open the page after a silent in-app update?
 
 ## Admin-key prompt for personal OpenAI accounts — 23 Oct 2026
 
@@ -1321,6 +1328,12 @@ V5 review pass (21 Oct 2026): `docs/reviews/SWV5_SECURITY_REVIEW.md` - 4 finding
 
 Built: `core/src/jarves/continuity.py` (SQLite `continuity.db`): command ledger (chat, approval answers, goal actions, signal snooze/stop; same client id runs once, also after a PC restart; a command the phone queued over 120 s is refused `STALE`), one shared conversation journal (phone + desktop turns, `/api/m/sync?since=`), presence and one-device routing (timers via `Operations._ring_once`, notices acknowledged per device, lost responses re-sent only to the same device), event-driven signal gate (off by default, quiet hours 22:00-07:00, snooze/stop, hourly/daily limits, cost cap 0, dedupe; no LLM calls). PWA: offline banner EN+HE, outbox with "not sent" and one auto-retry window (2 min), notes, goals list, snooze/stop; new device scope `tasks` (off until granted; phone cannot delete/edit goals). Feature `proactive_signals` (default OFF), guide `proactive_signals.toml` (+ mobile_access problems), CLI `jarvis proactive signals ...`, dashboard `/api/continuity`. Tests: `core/tests/test_v5_continuity.py` (fake clock, fake devices, restart/resend, no network, no browser).
 Open: real phone/Wi-Fi/sleep run (owner); no calendar scheduler exists yet (`on_calendar_event` is the hook, tested with fakes); GPT-Live voice turns are not journaled yet; the desktop only sees notices via dashboard/CLI (never spoken). `test_p_perf::test_backend_prompt_does_not_grow` fails (58998 vs 57310 chars) already after merging PR #36 (v5/pillars-followups), not from this branch: slim the goal/pref/proactive/dev tool texts there.
+
+## next-flow.yml parse failure - 23 Oct 2026
+
+- Root cause: `workflow_run.workflows` listed the workflow's own name (`jarves-next-flow`), for the old automerge job. GitHub rejects the file (every push showed a failed run named by file path, zero jobs); YAML and actionlint 1.7.12 accept it, so only GitHub's server-side check catches it. Confirmed by a probe push: with the self-reference removed no failing next-flow run appeared on that branch.
+- Fix (only this workflow): `workflow_run` now lists only `jarves-checks`; `automerge-into-next` runs inside the PR run after `ci-ok` and merges that one PR (open, not draft, no conflict, head unchanged). Still off unless `ENABLE_NEXT_FLOW`. `docs/NEXT_FLOW.md` line updated.
+- NOT verified: a real automerge on a PR into `next` (flow is off), the fast-forward job (unchanged, untested).
 
 ## Viewer UI/UX simplification (23 Oct 2026) - branch `claude/keen-euler-ggmq14`
 
