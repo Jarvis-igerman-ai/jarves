@@ -79,6 +79,10 @@ def _arity(fn: Callable) -> int:
     return sum(1 for p in ps if p.kind in (p.POSITIONAL_ONLY, p.POSITIONAL_OR_KEYWORD))
 
 
+FACE_HIDDEN_DETAIL = "face hidden: shown on request"
+FACE_HIDDEN_ACTION = "jarvis show"
+
+
 class GodotLink:
     def __init__(self, host: str, port: int, token: str, health: Health, on_message: Handler,
                  on_face_connected: Callable[[], Awaitable[None]] | None = None) -> None:
@@ -91,6 +95,29 @@ class GodotLink:
         self._server = None
         self._close_expected_until = 0.0   # a close the Core asked for / the user chose (not a fault)
         self.on_client_closed: Callable[[Client], None] | None = None   # a text-chat terminal went away
+        # Runtime sets this: False while no window is wanted (hidden / background mode). A missing face is then idle
+        # ("shown on request"), not a fault, and must not degrade the Core.
+        self.face_expected: Callable[[], bool] | None = None
+
+    def wants_face(self) -> bool:
+        try:
+            return True if self.face_expected is None else bool(self.face_expected())
+        except Exception:
+            return True
+
+    def set_face_idle(self) -> None:
+        """No face and none expected: report it as idle (status "disabled" never degrades the Core)."""
+        self.health.set("face_link", "disabled", FACE_HIDDEN_DETAIL, FACE_HIDDEN_ACTION)
+
+    def refresh_face_health(self) -> None:
+        """Re-derive face_link after the Runtime's wish changed (hide / show / window closed). A connected face wins."""
+        if self.face is not None or self._server is None:
+            return
+        cur = self.health.components.get("face_link")
+        if not self.wants_face():
+            self.set_face_idle()
+        elif cur is not None and cur.status == "disabled":
+            self.health.set("face_link", "unknown", "face window starting", "")
 
     def face_client_id(self) -> str | None:
         """Id of the currently connected face (bind confirm.request/confirm.reply to it); None if no face."""
@@ -104,7 +131,11 @@ class GodotLink:
             self.health.set("face_link", "unavailable", f"cannot listen on {self.host}:{self.port}: {e.strerror}",
                             "another Core may be running; stop it or change link.port")
             raise
-        self.health.set("face_link", "unavailable", "waiting for the Godot face to connect", "start godot\\run_face.cmd")
+        if self.wants_face():
+            self.health.set("face_link", "unavailable", "waiting for the Godot face to connect",
+                            "start godot\\run_face.cmd")
+        else:
+            self.set_face_idle()
         logs.info("link", "LINK_LISTENING", "link listening", bind_host=self.host, port=self.port)
 
     async def stop(self) -> None:
@@ -190,8 +221,11 @@ class GodotLink:
                 if time.monotonic() < self._close_expected_until:
                     # SW-V3 P0.1 (review Q13): hide / window closed / Core stopping logged a WARNING and became a
                     # dashboard issue every time; a requested close is normal, only an unexpected loss is a fault
-                    self.health.set("face_link", "unavailable", "display window closed", "")
+                    self.health.set("face_link", "disabled", "display window closed", FACE_HIDDEN_ACTION)
                     logs.info("link", "LINK_FACE_CLOSED", "Godot face closed as requested", peer=peer)
+                elif not self.wants_face():
+                    self.set_face_idle()
+                    logs.info("link", "LINK_FACE_CLOSED", "Godot face closed (none wanted)", peer=peer)
                 else:
                     self.health.set("face_link", "unavailable", "Godot face disconnected",
                                     "restart godot\\run_face.cmd; it reconnects automatically")
