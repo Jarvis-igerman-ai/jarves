@@ -13,11 +13,13 @@ import time
 from pathlib import Path
 from typing import Any, Callable
 
-TASK_STATES = ("proposed", "todo", "ready", "running", "review", "done", "blocked", "failed", "cancelled")
-OPEN_STATES = ("todo", "ready", "running", "review", "blocked")      # work that still needs doing
+MODES = ("solo", "team")      # team = the agent may hand parts of the task to its own sub-agents
+TASK_STATES = ("proposed", "todo", "ready", "running", "review", "waiting", "done", "blocked", "failed", "cancelled")
+OPEN_STATES = ("todo", "ready", "running", "review", "waiting", "blocked")   # work that still needs doing
 FINAL_STATES = ("done", "failed", "cancelled")
 PROJECT_STATES = ("active", "paused", "done", "archived")
-EVENTS_KEEP = 400                                                     # timeline rows kept per task
+EVENTS_KEEP = 400
+DEP_BLOCK = "dependency "                                             # reason prefix of a dependency block                                                     # timeline rows kept per task
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS projects (
@@ -33,17 +35,31 @@ CREATE TABLE IF NOT EXISTS tasks (
     branch TEXT NOT NULL DEFAULT '', worktree TEXT NOT NULL DEFAULT '', session_ref TEXT NOT NULL DEFAULT '',
     handoff TEXT NOT NULL DEFAULT '', handoff_kind TEXT NOT NULL DEFAULT '', result TEXT NOT NULL DEFAULT '',
     reason TEXT NOT NULL DEFAULT '', notes TEXT NOT NULL DEFAULT '[]', cost_usd REAL NOT NULL DEFAULT 0,
-    tokens INTEGER NOT NULL DEFAULT 0, pid INTEGER NOT NULL DEFAULT 0, created REAL NOT NULL, updated REAL NOT NULL, started REAL, finished REAL,
+    tokens INTEGER NOT NULL DEFAULT 0, pid INTEGER NOT NULL DEFAULT 0, mode TEXT NOT NULL DEFAULT 'solo', created REAL NOT NULL, updated REAL NOT NULL, started REAL, finished REAL,
     UNIQUE (project_id, seq));
 CREATE INDEX IF NOT EXISTS tasks_proj ON tasks (project_id, status);
 CREATE TABLE IF NOT EXISTS events (
     id INTEGER PRIMARY KEY AUTOINCREMENT, task_id INTEGER NOT NULL, ts REAL NOT NULL, who TEXT NOT NULL,
     kind TEXT NOT NULL, text TEXT NOT NULL);
 CREATE INDEX IF NOT EXISTS events_task ON events (task_id, id);
+CREATE TABLE IF NOT EXISTS decisions (
+    id INTEGER PRIMARY KEY AUTOINCREMENT, project_id INTEGER NOT NULL, task_id INTEGER, ts REAL NOT NULL,
+    question TEXT NOT NULL, participants TEXT NOT NULL DEFAULT '[]', judge TEXT NOT NULL DEFAULT '',
+    decision TEXT NOT NULL DEFAULT '', reasons TEXT NOT NULL DEFAULT '', transcript TEXT NOT NULL DEFAULT '[]',
+    state TEXT NOT NULL DEFAULT 'decided');
 CREATE TABLE IF NOT EXISTS counters (day TEXT NOT NULL, name TEXT NOT NULL, n INTEGER NOT NULL DEFAULT 0,
     PRIMARY KEY (day, name));
 """
-_JSON_COLS = {"scope", "deps", "notes", "check_cmd", "runners"}
+_JSON_COLS = {"scope", "deps", "notes", "check_cmd", "runners", "pipeline", "release_cmd", "cloud", "job"}
+# columns added after the first 4.0.1 beta: (name, DDL) per table, applied in order on open
+MIGRATIONS = {
+    "tasks": [("mode", "TEXT NOT NULL DEFAULT 'solo'"), ("pipeline", "TEXT NOT NULL DEFAULT '[]'"),
+              ("stage", "INTEGER NOT NULL DEFAULT 0"), ("rounds", "INTEGER NOT NULL DEFAULT 0"),
+              ("job", "TEXT NOT NULL DEFAULT '{}'"), ("waiting", "TEXT NOT NULL DEFAULT ''"),
+              ("kind", "TEXT NOT NULL DEFAULT 'task'")],
+    "projects": [("flow", "TEXT NOT NULL DEFAULT ''"), ("github", "TEXT NOT NULL DEFAULT 'off'"),
+                 ("release_cmd", "TEXT NOT NULL DEFAULT '[]'"), ("cloud", "TEXT NOT NULL DEFAULT '{}'")],
+}
 
 
 def _row(r: sqlite3.Row | None) -> dict | None:
@@ -69,6 +85,17 @@ class ProjectDB:
         self._c.execute("PRAGMA journal_mode=WAL")
         self._c.execute("PRAGMA busy_timeout=15000")
         self._c.executescript(SCHEMA)
+        for table, cols in MIGRATIONS.items():                   # databases from earlier 4.0.1 betas
+            have = {r[1] for r in self._c.execute(f"PRAGMA table_info({table})")}
+            for col, ddl in cols:
+                if col in have:
+                    continue
+                try:
+                    self._c.execute(f"ALTER TABLE {table} ADD COLUMN {col} {ddl}")
+                    self._c.commit()
+                except sqlite3.OperationalError as e:            # another process added it a moment ago
+                    if "duplicate column" not in str(e).lower():
+                        raise
 
     def close(self) -> None:
         with self._lock:
@@ -93,6 +120,10 @@ class ProjectDB:
                        (name, path, goal, brief, json.dumps(check_cmd or []), json.dumps(runners or []),
                         base_branch, now, now))
 
+    def delete_project(self, pid: int) -> None:
+        """Only for a project whose opening failed half way (no tasks yet)."""
+        self._x("DELETE FROM projects WHERE id=? AND NOT EXISTS (SELECT 1 FROM tasks WHERE project_id=?)", (pid, pid))
+
     def project(self, pid: int) -> dict | None:
         r = self._q("SELECT * FROM projects WHERE id=?", (pid,))
         return r[0] if r else None
@@ -111,16 +142,17 @@ class ProjectDB:
 
     # ------------------------------------------------------------------ tasks
     def add_task(self, pid: int, title: str, spec: str = "", acceptance: str = "", scope: list[str] | None = None,
-                 deps: list[int] | None = None, status: str = "todo", runner: str = "", model: str = "") -> int:
+                 deps: list[int] | None = None, status: str = "todo", runner: str = "", model: str = "",
+                 mode: str = "solo") -> int:
         now = self.clock()
         with self._lock:
             seq = (self._c.execute("SELECT COALESCE(MAX(seq),0)+1 FROM tasks WHERE project_id=?", (pid,))
                    .fetchone()[0])
             cur = self._c.execute(
                 "INSERT INTO tasks (project_id, seq, title, spec, acceptance, scope, deps, status, runner, model,"
-                " created, updated) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
+                " mode, created, updated) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)",
                 (pid, seq, title, spec, acceptance, json.dumps(scope or []), json.dumps(deps or []), status,
-                 runner, model, now, now))
+                 runner, model, mode, now, now))
             self._c.commit()
             return cur.lastrowid
 
@@ -147,36 +179,80 @@ class ProjectDB:
         vals = tuple(json.dumps(v) if k in _JSON_COLS else v for k, v in f.items())
         self._x(f"UPDATE tasks SET {cols} WHERE id=?", (*vals, tid))
 
-    def claim(self, tid: int) -> bool:
-        """ready -> running, atomically: exactly one dispatcher pass wins a task."""
+    def claim_stage(self, tid: int, stage: int, status: str) -> bool:
+        """Move into a stage ONLY if the task is still in a dispatcher-owned state (running/review): the single
+        atomic guard against a concurrent stop_agent/cancel_task (two separate check-then-write calls could race)."""
         now = self.clock()
         with self._lock:
-            cur = self._c.execute("UPDATE tasks SET status='running', started=?, updated=?, attempts=attempts+1"
+            cur = self._c.execute("UPDATE tasks SET stage=?, status=?, updated=? WHERE id=? AND status IN "
+                                  "('running','review')", (stage, status, now, tid))
+            self._c.commit()
+            return cur.rowcount == 1
+
+    def claim(self, tid: int) -> bool:
+        """ready -> running, atomically: exactly one dispatcher pass wins a task (attempts are counted by the code
+        stages, engine.py)."""
+        now = self.clock()
+        with self._lock:
+            cur = self._c.execute("UPDATE tasks SET status='running', started=?, updated=?"
                                   " WHERE id=? AND status='ready'", (now, now, tid))
             self._c.commit()
             return cur.rowcount == 1
 
     def promote(self, pid: int) -> int:
         """todo -> ready for every task whose dependencies are all done; ready/todo with a failed or cancelled
-        dependency -> blocked (reason says which). Returns how many changed."""
+        dependency -> blocked (reason says which); a task blocked only BY a dependency goes back to todo when that
+        dependency is no longer failed/cancelled (retried, split, replaced). Returns how many changed."""
         n = 0
         rows = self.tasks(pid)
         state = {t["id"]: t["status"] for t in rows}
+        seq = {t["id"]: t["seq"] for t in rows}
         for t in rows:
+            ds = [state.get(d) for d in t["deps"]]
+            if t["status"] == "blocked" and t["reason"].startswith(DEP_BLOCK):
+                if not any(s in ("failed", "cancelled") for s in ds):
+                    self.update_task(t["id"], status="todo", reason="")
+                    state[t["id"]] = t["status"] = "todo"
+                    n += 1
+                else:
+                    continue
             if t["status"] not in ("todo", "ready"):
                 continue
-            ds = [state.get(d) for d in t["deps"]]
             if any(s in ("failed", "cancelled") for s in ds):
                 bad = next(d for d in t["deps"] if state.get(d) in ("failed", "cancelled"))
-                self.update_task(t["id"], status="blocked", reason=f"dependency #{bad} {state[bad]}")
+                self.update_task(t["id"], status="blocked", reason=f"{DEP_BLOCK}#{seq.get(bad, bad)} {state[bad]}")
+                state[t["id"]] = "blocked"
                 n += 1
             elif all(s == "done" for s in ds) and t["status"] == "todo":
                 self.update_task(t["id"], status="ready")
+                state[t["id"]] = "ready"
                 n += 1
             elif not all(s == "done" for s in ds) and t["status"] == "ready":
                 self.update_task(t["id"], status="todo")
                 n += 1
         return n
+
+    # ------------------------------------------------------------------ decisions (debates)
+    def add_decision(self, pid: int, question: str, participants: list[str], judge: str, decision: str, reasons: str,
+                     transcript: list, state: str = "decided", task_id: int | None = None) -> int:
+        return self._x("INSERT INTO decisions (project_id, task_id, ts, question, participants, judge, decision, "
+                       "reasons, transcript, state) VALUES (?,?,?,?,?,?,?,?,?,?)",
+                       (pid, task_id, self.clock(), question, json.dumps(participants), judge, decision, reasons,
+                        json.dumps(transcript, ensure_ascii=False), state))
+
+    def decisions(self, pid: int, limit: int = 20) -> list[dict]:
+        rows = self._q("SELECT * FROM decisions WHERE project_id=? ORDER BY id DESC LIMIT ?", (pid, limit))
+        for r in rows:
+            for k in ("participants", "transcript"):
+                try:
+                    r[k] = json.loads(r[k] or "[]")
+                except ValueError:
+                    r[k] = []
+        return rows
+
+    def update_decision(self, did: int, **f: Any) -> None:
+        cols = ", ".join(f"{k}=?" for k in f)
+        self._x(f"UPDATE decisions SET {cols} WHERE id=?", (*f.values(), did))
 
     # ------------------------------------------------------------------ timeline and counters
     def event(self, tid: int, who: str, kind: str, text: str) -> None:

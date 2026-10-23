@@ -32,8 +32,10 @@ def child_env(extra: dict[str, str] | None = None) -> dict[str, str]:
     return env
 
 
-def git(cwd: str | Path, *args: str, check: bool = True, timeout: float = 120) -> subprocess.CompletedProcess:
-    p = subprocess.run(["git", *IDENT, *args], cwd=str(cwd), capture_output=True, text=True, timeout=timeout,
+def git(cwd: str | Path, *args: str, check: bool = True, timeout: float = 120, ident: bool = True
+        ) -> subprocess.CompletedProcess:
+    """ident=False: the owner's own git identity and signing settings (a merge into the owner's branch)."""
+    p = subprocess.run(["git", *(IDENT if ident else []), *args], cwd=str(cwd), capture_output=True, text=True, timeout=timeout,
                        creationflags=_NOWIN, env=child_env({"GIT_TERMINAL_PROMPT": "0"}), encoding="utf-8",
                        errors="replace")
     if check and p.returncode != 0:
@@ -89,6 +91,15 @@ def new_task_worktree(home: Path, repo: str, pid: int, seq: int, attempt: int) -
     return wt, br
 
 
+def detached_worktree(home: Path, repo: str, pid: int, sha: str) -> Path:
+    """A throw-away worktree at one exact commit (a release runs there, never in your folder)."""
+    wt = project_root(home, pid) / "release" / sha[:12]
+    remove_worktree(repo, wt)
+    wt.parent.mkdir(parents=True, exist_ok=True)
+    git(repo, "worktree", "add", "--detach", str(wt), sha)
+    return wt
+
+
 def remove_worktree(repo: str, wt: Path, branch: str = "") -> None:
     """Only ever called for paths under <home>/projects (callers build them); a missing one is fine."""
     if "projects" not in Path(wt).parts:
@@ -138,30 +149,52 @@ def violations(files: list[str], scope: list[str]) -> tuple[list[str], list[str]
     return prot, out
 
 
-def merge_in(wt: Path, branch: str) -> list[str]:
-    """Bring `branch` into the worktree's branch. Returns conflicting files ([] = merged); a conflict is aborted."""
-    p = git(wt, "merge", "--no-edit", branch, check=False)
+def merge_in(wt: Path, branch: str, ident: bool = True) -> list[str]:
+    """Bring `branch` into the worktree's branch. Returns conflicting files ([] = merged); a conflict is aborted
+    (nothing changes). A refusal without conflicts (e.g. an untracked file in the way) returns git's own reason."""
+    p = git(wt, "merge", "--no-edit", branch, check=False, ident=ident)
     if p.returncode == 0:
         return []
     files = [x for x in git(wt, "diff", "--name-only", "--diff-filter=U", check=False).stdout.split() if x]
     git(wt, "merge", "--abort", check=False)
-    return files or ["(merge failed)"]
+    if files:
+        return files
+    why = " ".join((p.stderr or p.stdout or "merge failed").split())[:200]
+    return [f"(not merged: {why})"]
 
 
 def fast_forward(integration_wt: Path, branch: str) -> None:
     git(integration_wt, "merge", "--ff-only", branch)
 
 
-def run_check(wt: Path, argv: list[str], timeout: float = 900) -> tuple[bool, str]:
-    """The project's check command, run by JARVES (never by the agent): shell=False, allow-listed env, in the worktree."""
+def run_check(wt: Path, argv: list[str], timeout: float = 900, env_keep: list[str] | None = None) -> tuple[bool, str]:
+    """The project's check command, run by JARVES (never by the agent): shell=False, allow-listed env, in the worktree.
+    env_keep: extra variable names the owner allowed for this command (a release may need a token)."""
     if not argv:
         return True, ""
+    extra = {k: os.environ[k] for k in (env_keep or []) if k in os.environ}
     try:
         p = subprocess.run(argv, cwd=str(wt), capture_output=True, text=True, timeout=timeout, creationflags=_NOWIN,
-                           env=child_env(), encoding="utf-8", errors="replace", stdin=subprocess.DEVNULL)
+                           env=child_env(extra), encoding="utf-8", errors="replace", stdin=subprocess.DEVNULL)
     except subprocess.TimeoutExpired:
         return False, "check timed out"
     except OSError as e:
         return False, f"check could not start: {e}"
     out = ((p.stdout or "") + (p.stderr or "")).strip()
     return p.returncode == 0, re.sub(r"\s+", " ", out[-600:])
+
+
+def repo_state(path: str) -> dict:
+    """Branch, commit count and uncommitted changes of a folder (read-only)."""
+    out = {"branch": "", "commits": 0, "dirty": 0, "untracked": 0}
+    try:
+        out["branch"] = current_branch(path)
+        out["commits"] = int(git(path, "rev-list", "--count", "HEAD", check=False).stdout.strip() or 0)
+        for line in git(path, "status", "--porcelain", check=False).stdout.splitlines():
+            if line.startswith("??"):
+                out["untracked"] += 1
+            elif line.strip():
+                out["dirty"] += 1
+    except (GitError, OSError, ValueError):
+        pass
+    return out

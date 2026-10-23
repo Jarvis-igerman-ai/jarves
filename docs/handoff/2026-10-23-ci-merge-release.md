@@ -47,3 +47,8 @@
 - Next (owner approved 23 Oct, separate small PRs): wake-word tests train once; each shard loads only its files; phone
   e2e test to the browser job; Windows xdist 3; installer smoke jobs 4 -> 2; nightly browser files get one retry; an
   issue opens when `main` turns red. Running some tests only on Linux was advised against (Windows-only bugs) and not done.
+- #90 and #93 merged by auto-merge (18:24, 18:41). Next PR (test execution): `test_mobile_phone_e2e.py` runs in the
+  browser job (one retry; planner and conftest browser lists synced, a test keeps them equal); each Core shard passes
+  only its planned files to pytest (cold collection 5.8-6.3 s instead of 9.8-10.4 s per Linux shard, same tests);
+  Windows shards were tried with 3 xdist workers and set back to 2 in the same PR (#96: no faster, and
+  test_projectmgr's parallel-worktree test failed under the load; that test is load-sensitive, a candidate for the next flake sweep).

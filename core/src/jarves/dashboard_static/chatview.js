@@ -163,9 +163,20 @@
     function setText(d, text) {
       if (d.classList.contains("jc-assistant")) d.replaceChildren(...markdown(text, tx)); else d.textContent = text;
     }
-    function bubble(role, text, turn) {
+    // Time of a message: shown small under it (CSS, from data-time); the full date and time on hover. Messages without
+    // a time (a resumed older conversation) show none.
+    function stamp(d, ts) {
+      if (!ts) return;
+      try {
+        const t = new Date(ts * 1000), now = new Date();
+        const hm = t.toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" });
+        d.dataset.time = t.toDateString() === now.toDateString() ? hm : t.toLocaleDateString(undefined, { day: "numeric", month: "short" }) + " " + hm;
+        d.title = t.toLocaleString();
+      } catch (e) { /* no time shown */ }
+    }
+    function bubble(role, text, turn, ts) {
       const d = h("div", { class: "jc-msg jc-" + role, dir: "auto" });
-      setText(d, text);
+      setText(d, text); stamp(d, ts);
       if (turn) d.dataset.turn = turn;
       log.append(d); scroll(); return d;
     }
@@ -179,7 +190,7 @@
     function renderMessage(m) {
       if (m.role === "tool") return toolLine(m);
       if (m.role === "notice") return bubble("notice", noticeText(m));
-      return bubble(m.role === "user" ? "user" : "assistant", m.text, m.turn);
+      return bubble(m.role === "user" ? "user" : "assistant", m.text, m.turn, m.ts);
     }
     function load(s) {
       state = s; log.replaceChildren(); turns.clear();
@@ -188,15 +199,15 @@
       paintSilent(s.silent); paintAppr(s.approvals || []);
     }
     function onEvent(e) {
-      if (e.type === "user") { bubble("user", e.text, e.turn); scroll(true); }
+      if (e.type === "user") { bubble("user", e.text, e.turn, e.ts); scroll(true); }
       else if (e.type === "delta") {
         let b = turns.get(e.turn);
-        if (!b) { b = bubble("assistant", "", e.turn); b.classList.add("streaming"); b.setAttribute("aria-busy", "true"); turns.set(e.turn, b); }
+        if (!b) { b = bubble("assistant", "", e.turn, e.ts); b.classList.add("streaming"); b.setAttribute("aria-busy", "true"); turns.set(e.turn, b); }
         setText(b, e.text); scroll();
       } else if (e.type === "reply") {
         let b = turns.get(e.turn);
         const text = e.text || (e.ok ? "" : word(e.code, tx("משהו השתבש. ראו את היומן.", "Something went wrong. See the log.")));
-        if (!b && text) b = bubble("assistant", "", e.turn);
+        if (!b && text) b = bubble("assistant", "", e.turn, e.ts);
         if (b) { setText(b, text); b.classList.remove("streaming"); b.removeAttribute("aria-busy"); if (!e.ok) b.classList.add("err"); }
         turns.delete(e.turn);
       } else if (e.type === "tool") toolLine(e);

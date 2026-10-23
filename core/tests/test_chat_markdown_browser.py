@@ -19,7 +19,7 @@ const answer = %s;
 JarvesChat.mount(document.getElementById('r'), { tx: (h, e) => e, device: false, api: {
   state: async () => ({ available: true, cursor: 1, silent: { on: false }, approvals: [], busy: '',
     commands: [{ name: '/new', en: 'start a new conversation', he: 'x' }, { name: '/help', en: 'this list', he: 'y' }, { name: '/status', en: 'status', he: 'z' }],
-    messages: [{ role: 'user', text: 'hi' }, { role: 'assistant', text: answer }] }),
+    messages: [{ role: 'user', text: 'hi', ts: 1760000000 }, { role: 'assistant', text: answer, ts: Math.floor(Date.now() / 1000) }, { role: 'user', text: 'old', turn: '' }] }),
   events: () => new Promise(() => {}), send: async (b) => { window.__sent.push(b.text); return {}; },
   silent: async () => ({}), answer: async () => ({}) } });
 """
@@ -81,3 +81,12 @@ def test_slash_popup_lists_filters_and_picks(page):
     assert page.evaluate("window.__sent") == []
     page.fill(".jc-in", "hello")
     assert page.locator(".jc-opt").count() == 0
+
+
+def test_messages_show_their_time_and_none_without_one(page):
+    user, assistant, old = (page.locator(".jc-msg").nth(i) for i in range(3))
+    assert user.get_attribute("data-time") and user.get_attribute("title")        # an older day shows the date too
+    assert assistant.get_attribute("data-time") and ":" in assistant.get_attribute("data-time")
+    assert old.get_attribute("data-time") is None                                   # a resumed message has no time
+    assert page.evaluate("getComputedStyle(document.querySelectorAll('.jc-msg')[1], '::after').content").strip('"') == \
+        assistant.get_attribute("data-time")

@@ -22,7 +22,10 @@ _NOWIN = getattr(subprocess, "CREATE_NO_WINDOW", 0) if os.name == "nt" else 0
 OUT_CAP = 200_000
 SAFE_BASH = ("Bash(git status:*)", "Bash(git diff:*)", "Bash(git log:*)", "Bash(git add:*)", "Bash(git commit:*)")
 DENY = ("Bash(git push:*)", "Bash(git rebase:*)", "Bash(git reset:*)", "Bash(git checkout:*)", "Bash(git branch:*)",
-        "Bash(rm:*)", "Bash(curl:*)", "Bash(wget:*)", "Bash(sudo:*)", "WebFetch")
+        "Bash(rm:*)", "Bash(curl:*)", "Bash(wget:*)", "Bash(sudo:*)", "WebFetch",
+        # agent and sub-agent definitions/settings: an agent must not widen its own (or its sub-agents') permissions
+        "Edit(.claude/**)", "Write(.claude/**)", "Edit(.codex/**)", "Write(.codex/**)", "Edit(.opencode/**)",
+        "Write(.opencode/**)", "Edit(opencode.json)", "Write(opencode.json)", "Edit(.mcp.json)", "Write(.mcp.json)")
 
 
 @dataclass
@@ -77,17 +80,18 @@ class Runner:
         return bool(self.command())
 
     def build(self, prompt: str, cwd: str, *, model: str = "", resume: str = "", read_only: bool = False,
-              check_argv: list[str] | None = None) -> Spec:
+              check_argv: list[str] | None = None, team: bool = False) -> Spec:
         raise NotImplementedError
 
     def parse(self, stdout: str, rc: int) -> Result:
         raise NotImplementedError
 
     def run(self, prompt: str, cwd: str, *, model: str = "", resume: str = "", read_only: bool = False,
-            check_argv: list[str] | None = None, timeout: float = 1800, on_start=None, cancel: threading.Event | None = None
-            ) -> Result:
+            check_argv: list[str] | None = None, timeout: float = 1800, on_start=None, cancel: threading.Event | None = None,
+            team: bool = False) -> Result:
         try:
-            spec = self.build(prompt, cwd, model=model, resume=resume, read_only=read_only, check_argv=check_argv)
+            spec = self.build(prompt, cwd, model=model, resume=resume, read_only=read_only, check_argv=check_argv,
+                              team=team)
             check_flags(spec.argv)
         except ValueError as e:
             return Result(error=str(e))
@@ -143,11 +147,15 @@ def kill_tree(p: subprocess.Popen) -> None:
         pass
 
 
-def _tools(read_only: bool, check_argv: list[str] | None) -> list[str]:
+def _tools(read_only: bool, check_argv: list[str] | None, team: bool = False) -> list[str]:
     t = ["Read", "Glob", "Grep"]
     if read_only:
         return t + ["Bash(git status:*)", "Bash(git diff:*)", "Bash(git log:*)"]
     t += ["Edit", "Write", *SAFE_BASH]
+    if team:
+        t += ["Task", "Agent"]                    # Claude Code's own sub-agents; their definitions under .claude/ are
+                                                  # denied (DENY) and checked again after the run (PROTECTED); real
+                                                  # sub-agent limits are UNVERIFIED against a live Claude Code
     if check_argv:
         t.append(f"Bash({' '.join(check_argv[:3])}:*)")
     return t
@@ -160,9 +168,10 @@ class ClaudeRunner(Runner):
     def command(self) -> list[str]:
         return _resolve(list(getattr(self.cfg, "claude_command", []) or []), ("claude", "claude.cmd"))
 
-    def build(self, prompt, cwd, *, model="", resume="", read_only=False, check_argv=None) -> Spec:
+    def build(self, prompt, cwd, *, model="", resume="", read_only=False, check_argv=None, team=False) -> Spec:
         argv = [*self.command(), "-p", "--output-format", "json", "--permission-mode", "dontAsk",
-                "--permission-prompts", "none", "--setting-sources", "user", "--allowedTools", *_tools(read_only, check_argv),
+                "--permission-prompts", "none", "--setting-sources", "user", "--allowedTools",
+                *_tools(read_only, check_argv, team),
                 "--disallowedTools", *DENY]
         if model:
             argv += ["--model", model]
@@ -188,12 +197,12 @@ class CodexRunner(Runner):
     def command(self) -> list[str]:
         return _resolve(list(getattr(self.cfg, "codex_command", []) or []), ("codex", "codex.exe", "codex.cmd"))
 
-    def build(self, prompt, cwd, *, model="", resume="", read_only=False, check_argv=None) -> Spec:
+    def build(self, prompt, cwd, *, model="", resume="", read_only=False, check_argv=None, team=False) -> Spec:
         sandbox = "read-only" if read_only else "workspace-write"
         argv = [*self.command(), "exec", "--json", "--sandbox", sandbox, "-C", cwd, "--skip-git-repo-check"]
         if model:
             argv += ["-m", model]
-        if resume:
+        if resume and not read_only:            # `exec resume` takes no --sandbox: a read-only question is a fresh run
             argv = [*self.command(), "exec", "resume", resume, "--json"] + (["-m", model] if model else [])
         argv.append("-")
         return Spec(argv, prompt, gitops.child_env())
@@ -231,7 +240,7 @@ class OpenCodeRunner(Runner):
     def command(self) -> list[str]:
         return _resolve(list(getattr(self.cfg, "opencode_command", []) or []), ("opencode", "opencode.cmd", "opencode.exe"))
 
-    def build(self, prompt, cwd, *, model="", resume="", read_only=False, check_argv=None) -> Spec:
+    def build(self, prompt, cwd, *, model="", resume="", read_only=False, check_argv=None, team=False) -> Spec:
         extra: dict[str, str] = {}
         if model.startswith("openrouter/"):
             if not getattr(self.cfg, "allow_openrouter", False):

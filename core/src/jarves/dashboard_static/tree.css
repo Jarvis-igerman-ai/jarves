@@ -75,3 +75,7 @@ td.num { text-align: end; }
 .status-chips { flex: 0 1 auto; }
 .priv-banner, .status-chips .schip { max-width: 230px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 @media (max-width: 900px) { .status-chips { display: none; } .search { min-width: 0; flex: 1 1 120px; } }
+.tile-link { display: block; color: inherit; text-decoration: none; }
+.tile-link:hover, .tile-link:focus-visible { box-shadow: 0 0 0 2px var(--ring); outline: none; transform: translateY(-1px); }
+.check-bar { width: 100%; height: 8px; margin: 8px 0 4px; accent-color: var(--accent); }
+#nav a .count { margin-inline-start: auto; }

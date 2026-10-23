@@ -298,8 +298,12 @@ class ProjectsConfig(_Strict):
     codex_command: list[str] = []
     opencode_command: list[str] = []
     allow_openrouter: bool = False                         # paid models through OpenCode; off by default
-    openrouter_model: str = "openrouter/anthropic/claude-sonnet-4.5"
+    openrouter_model: str = "openrouter/anthropic/claude-sonnet-5.5"   # checked 23 Oct 2026 (openrouter.ai, models.dev)
     tick_s: float = Field(5, ge=1, le=300)                 # dispatcher pass while a project is active
+    approve_plans: bool = True                             # a plan an agent proposes waits for your approval
+    max_review_rounds: int = Field(2, ge=0, le=10)         # review -> work -> review loops before it asks you
+    release_env: list[str] = []                            # env variable NAMES your release command may see (e.g. a token)
+    search_roots: list[str] = []                           # where "my project xy in folder work" is looked for; [] = home, work, projects, src, code, Documents...
 
 
 class HelperConfig(_Strict):
