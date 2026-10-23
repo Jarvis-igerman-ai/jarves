@@ -5,7 +5,8 @@ reconciliation, `jarvis usage`). Everything else works without it; the spend dis
 decision OD-05: add it whenever you want.
 
 ## Create a read-only key
-1. Sign in to platform.openai.com as the organization owner.
+1. Sign in to platform.openai.com. A personal account is its own organization and you are its owner. If the
+   Admin keys page is missing for your account, skip this key: everything works, the cost is just an estimate.
 2. Settings, Organization, Admin keys (platform.openai.com/settings/organization/admin-keys).
 3. Create new admin key, name it `JARVES-costs`, permission **Read only**. Copy it (starts with `sk-admin-`).
    OpenAI shows it once. The same guide, in Hebrew and English, is in the dashboard (Guides, "Real API bill").

@@ -21,8 +21,8 @@ privacy_he = "המפתח נשמר רק בקובץ הפרטי secrets.env. הוא
 privacy_en = "The key is kept only in the private secrets.env file and used only to read costs."
 
 [[steps]]
-he = "היכנסו ל-platform.openai.com כבעלי הארגון: \"Settings\", \"Organization\", \"Admin keys\" (הכתובת platform.openai.com/settings/organization/admin-keys)."
-en = "Sign in to platform.openai.com as the organization owner: Settings, Organization, Admin keys (platform.openai.com/settings/organization/admin-keys)."
+he = "היכנסו ל-platform.openai.com. בחשבון אישי החשבון שלכם הוא הארגון ואתם הבעלים: \"Settings\", \"Organization\", \"Admin keys\" (הכתובת platform.openai.com/settings/organization/admin-keys). אין לכם את העמוד? דלגו, הכול עובד בלי המפתח והעלות תוצג כהערכה."
+en = "Sign in to platform.openai.com. On a personal account your account is your own organization and you are its owner: Settings, Organization, Admin keys (platform.openai.com/settings/organization/admin-keys). No such page? Skip it: everything works without the key and the cost is shown as an estimate."
 
 [[steps]]
 he = "לחצו \"Create new admin key\", תנו שם כמו JARVES-costs, ובחרו הרשאת Read only. העתיקו את המפתח (מתחיל ב-sk-admin-)."

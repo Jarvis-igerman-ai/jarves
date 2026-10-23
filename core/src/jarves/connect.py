@@ -380,12 +380,16 @@ def _step_whatsapp(conn, it: Item) -> None:
 EXTRA_STATUS.update({"openai": _status_openai, "chatgpt": _status_chatgpt, "openai-admin": _status_admin})
 
 
-ADMIN_STEPS_HE = ("1. נכנסים ל-platform.openai.com כבעלי הארגון: Settings, Organization, Admin keys. "
+ADMIN_STEPS_HE = ("1. נכנסים ל-platform.openai.com. בחשבון אישי החשבון שלכם הוא הארגון ואתם הבעלים: Settings, Organization, "
+                  "Admin keys (platform.openai.com/settings/organization/admin-keys). אם אין לכם את העמוד הזה, "
+                  "דלגו (s): הכול עובד בלי המפתח, רק שהעלות מוצגת כהערכה. "
                   "2. Create new admin key, שם JARVES-costs, הרשאה Read only. 3. מעתיקים (sk-admin-...) ומדביקים כאן; "
                   "ההדבקה מוסתרת. כדי לדלג: s.")
-ADMIN_STEPS_EN = ("1. Sign in to platform.openai.com as the organization owner: Settings, Organization, Admin keys. "
-                  "2. Create new admin key, name JARVES-costs, permission Read only. 3. Copy it (sk-admin-...) and "
-                  "paste it here; the paste is hidden. To skip: s.")
+ADMIN_STEPS_EN = ("1. Sign in to platform.openai.com. On a personal account your account is your own organization and "
+                  "you are its owner: Settings, Organization, Admin keys (platform.openai.com/settings/organization/"
+                  "admin-keys). If you do not have that page, skip (s): everything works without the key, the cost is "
+                  "just shown as an estimate. 2. Create new admin key, name JARVES-costs, permission Read only. "
+                  "3. Copy it (sk-admin-...) and paste it here; the paste is hidden. To skip: s.")
 
 
 PEAR_STEPS_HE = ("1. פותחים את Pear Desktop (אפשר: jarvis music open). 2. בתפריט של Pear: Plugins > API Server וסימון V "
