@@ -183,3 +183,16 @@ release**. Pinned releases are never deleted and do not count towards the 3.
 `public-publish`, Ed25519 signing, retention), `core/src/jarves/updates.py` (public source, signature + SHA256 +
 size), `core/src/jarves/config.py` (`[update] base_url`, `public_key`), `core/tests/test_release_hosting.py`
 (local fake GitHub API, signing round trip, CI-to-app end to end; no network).
+
+---
+
+## WhatsApp bridge download / הורדת גשר הוואטסאפ (issue #17)
+
+The prebuilt bridge uses the same hosting, token, signing key and trust rules as the installer, with its own signing
+domain so the two manifests cannot be swapped. `python packaging/release.py bridge-publish --dir bridge/whatsapp/dist`
+uploads `whatsapp_bridge-<version>.exe`, its `.sha256` and then the signed `whatsapp-bridge.json` to the rolling
+pre-release `whatsapp-bridge` of the releases repo. JARVES downloads it only when the owner presses "Download the
+WhatsApp bridge" (or runs `jarvis whatsapp install`), verifies signature, SHA256 and size, installs to
+`<home>/bridge/`, and re-verifies before every start. Details: HANDOFF "WhatsApp bridge: one signed ... step".
+הגשר המוכן משתמש באותו אחסון, אותו מפתח חתימה ואותם כללי אמון, עם תחום חתימה נפרד. ההורדה קורית רק כשהבעלים לוחץ
+"הורדת גשר הוואטסאפ", והקובץ נבדק (חתימה, SHA256, גודל) לפני ההתקנה ושוב לפני כל הפעלה.
