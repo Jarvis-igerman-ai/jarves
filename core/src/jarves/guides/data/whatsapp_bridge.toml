@@ -4,7 +4,7 @@ pages = ["whatsapp"]
 features = ["whatsapp_bridge", "whatsapp_send"]
 aliases = ["וואטסאפ אמיתי", "לקרוא וואטסאפ", "מה חדש בוואטסאפ", "הודעות בוואטסאפ", "whatsapp bridge", "read whatsapp", "whatsapp inbox", "link whatsapp", "קישור וואטסאפ"]
 links = ["whatsapp", "privacy", "helper"]
-error_codes = ["WA_BRIDGE_DOWN", "WA_NOT_INSTALLED", "BRIDGE_NOT_PUBLISHED", "BRIDGE_OFFLINE", "BRIDGE_BAD_SIGNATURE", "BRIDGE_CHECKSUM", "BRIDGE_TAMPERED", "WA_NOT_SET_UP", "WA_KILLED", "WA_MODE_OFF", "WA_MODE_READ", "WA_NOT_ALLOWED", "WA_NO_HISTORY", "WA_RATE_LIMITED", "WA_QUIET_HOURS", "WA_STORE_LOCKED", "WA_UNKNOWN_CONTACT", "WA_AMBIGUOUS", "WA_APPROVAL_MISSING"]
+error_codes = ["WA_BRIDGE_DOWN", "WA_NOT_INSTALLED", "BRIDGE_NOT_PUBLISHED", "BRIDGE_OFFLINE", "BRIDGE_BAD_SIGNATURE", "BRIDGE_CHECKSUM", "BRIDGE_TAMPERED", "WA_NOT_SET_UP", "WA_KILLED", "WA_MODE_OFF", "WA_MODE_READ", "WA_NOT_ALLOWED", "WA_NO_HISTORY", "WA_RATE_LIMITED", "WA_QUIET_HOURS", "WA_STORE_LOCKED", "WA_UNKNOWN_CONTACT", "WA_AMBIGUOUS", "WA_BAD_PATTERN", "WA_APPROVAL_MISSING"]
 title_he = "וואטסאפ אמיתי: לקרוא הודעות (ובהמשך לשלוח)"
 title_en = "Real WhatsApp: read messages (and later send)"
 what_he = "ג'ארביס מתחבר לוואטסאפ שלכם כמכשיר מקושר (כמו וואטסאפ ווב) דרך גשר נפרד במחשב, ויכול לספר מה חדש, להקריא מה מישהו כתב ולסכם. קודם קריאה בלבד. שליחה נפתחת רק אחרי 14 ימים שקטים ורק באישורכם, וכל הודעה מאושרת על המסך עם הנמען, המספר והטקסט המלא. עד אז שולחים כמו קודם: הוא פותח טיוטה ואתם לוחצים שלח."
@@ -14,6 +14,8 @@ say = [
   ["תקרא לי מה דנה כתבה", "Read me what Dana wrote"],
   ["תסכם לי מה כתבו לי דנה ויוסי היום", "Summarize what Dana and Yossi wrote me today"],
   ["תחפש צ'אט שיש בשם שלו \"אשתי\"", "Find the chat with \"אשתי\" in its name"],
+  ["תחפש לי את הצ'אט של רשימת קניות", "Find my shopping list chat"],
+  ["תחפש צ'אט שמתחיל בקניות", "Find a chat that starts with קניות"],
   ["תענה לדנה: אני מאחר בעשר דקות", "Reply to Dana: I'm ten minutes late"],
 ]
 expect_he = "על \"מה חדש\" הוא אומר רק שמות ומספר הודעות. טקסט ארוך הוא לא מקריא אלא מציע להציג על המסך. הוא אף פעם לא עושה מה שכתוב בהודעה. במצב שליחה: הוא כותב טיוטה ומיד קופץ חלון אישור עם השם, המספר והטקסט המלא."
@@ -55,11 +57,21 @@ action = "open:#/whatsapp"
 he = "אחרי 14 ימים בלי אזהרה: jarvis whatsapp allow send <איש קשר>, ואז jarvis whatsapp mode send והמתג \"שליחה בוואטסאפ דרך הגשר\"."
 en = "After 14 days without a warning: jarvis whatsapp allow send <contact>, then jarvis whatsapp mode send and the switch \"WhatsApp send through the bridge\"."
 
+[[steps]]
+he = "חיפוש צ'אט בשם: אפשר להגיד או להקליד חלק מהשם, עם טעות או בכתיב אחר. הוא מוצא גם \"רשימה קניות\" או \"רשמית קניות\" לצ'אט \"רשימת קניות\", \"dana\" לצ'אט \"דנה\", וטקסט שהוקלד במקלדת בשפה הלא נכונה. התוצאות מדורגות מהטובה לפחות טובה (עד 10), ליד כל אחת הסיבה: זהה, מתחיל ב, מילה תואמת, מכיל, דומה (טעות), תבנית. התאמה אחת ברורה נעשית מיד; כמה התאמות באותה רמה הוא מציג ושואל איזה, לעולם לא מנחש. בדיקה: jarvis whatsapp find \"קניות\"."
+en = "Finding a chat by name: say or type part of the name, with a typo or another spelling. He finds \"רשימה קניות\" or \"רשמית קניות\" for the chat \"רשימת קניות\", \"dana\" for \"דנה\", and text typed on the wrong keyboard layout. Results are ranked best first (up to 10) with the reason next to each: exact, starts with, word match, contains, similar (typo), pattern. One clear match is used at once; several at the same rank are shown and he asks which, and never guesses. Check: jarvis whatsapp find \"קניות\"."
+action = "command:jarvis whatsapp find"
+
+[[steps]]
+he = "תבניות חיפוש (בשם הצ'אט): * = כל טקסט (קניות*); ? = אות אחת (קני?ת); \"מילים מדויקות\" במרכאות; א|ב = או (דנה|יוסי); ^ בהתחלה = מתחיל ב (^קניות); $ בסוף = נגמר ב (קניות$). ביטוי רגולרי: /תבנית/ או jarvis whatsapp find --regex \"...\" (מנוע בטוח וליניארי, עד 80 תווים, בלי backreference; תבנית לא תקינה מקבלת הסבר ברור בעברית ובאנגלית)."
+en = "Search patterns (in a chat name): * = any text (קניות*); ? = one letter (קני?ת); \"exact words\" in quotes; a|b = either (dana|yossi); a leading ^ = starts with (^קניות); a trailing $ = ends with (קניות$). Regular expression: /pattern/ or jarvis whatsapp find --regex \"...\" (a safe linear-time engine, up to 80 characters, no backreferences; an invalid pattern gets a clear message in Hebrew and English)."
+action = "command:jarvis whatsapp find --regex"
+
 [[problems]]
 he = "הוא לא מוצא את הצ'אט (למשל כשאני אומר רק חלק מהשם)"
 en = "He cannot find the chat (for example when I give only part of the name)"
-fix_he = "השם בוואטסאפ יכול להיות ארוך או עם לבבות ואימוג'י, ולכן אפשר להגיד רק חלק ממנו (\"אשתי\", \"לב\"). הוא מחפש בשמות הצ'אטים ולא בטקסט ההודעות: אם יש כמה התאמות הוא שואל אותך איזה מהם ולא מנחש, ואם אין הוא אומר שלא מצא ומציע חלק אחר מהשם או חיפוש בטקסט ההודעות. הוא לא אומר \"אני עדיין מחפש\": כל חיפוש נגמר מיד. לבדוק בעצמכם: jarvis whatsapp find \"אשתי\" (שמות בלבד, בלי טקסט הודעות). אם עדיין אין, הצ'אט אולי מחוץ לרשימת הקריאה: jarvis whatsapp scope או jarvis whatsapp allow read."
-fix_en = "A WhatsApp name can be long or hold hearts and emoji, so you can give just a part of it (\"אשתי\", \"לב\"). He searches chat NAMES, not message text: with several matches he asks which one and never guesses; with none he says so and offers another part of the name or a search of message text. He never says \"still searching\": every search finishes at once. Check yourself: jarvis whatsapp find \"אשתי\" (names only, no message text). If it is still missing, the chat may be outside the read list: jarvis whatsapp scope or jarvis whatsapp allow read."
+fix_he = "השם בוואטסאפ יכול להיות ארוך או עם לבבות ואימוג'י, ולכן אפשר להגיד רק חלק ממנו (\"אשתי\", \"לב\"). הוא סולח על טעויות כתיב, כתיב חלופי (רשימת/רשימה), dana במקום דנה ומקלדת בשפה שגויה, ומציג את התוצאות מדורגות עם סיבה. הוא מחפש בשמות הצ'אטים ולא בטקסט ההודעות: אם יש כמה התאמות הוא שואל אותך איזה מהם ולא מנחש, ואם אין הוא אומר שלא מצא ומציע חלק אחר מהשם או חיפוש בטקסט ההודעות. הוא לא אומר \"אני עדיין מחפש\": כל חיפוש נגמר מיד. לבדוק בעצמכם: jarvis whatsapp find \"אשתי\" (שמות בלבד, בלי טקסט הודעות). אם עדיין אין, הצ'אט אולי מחוץ לרשימת הקריאה: jarvis whatsapp scope או jarvis whatsapp allow read."
+fix_en = "A WhatsApp name can be long or hold hearts and emoji, so you can give just a part of it (\"אשתי\", \"לב\"). He forgives typos, spelling variants (רשימת/רשימה), dana for דנה and a wrong keyboard layout, and shows ranked results with a reason. He searches chat NAMES, not message text: with several matches he asks which one and never guesses; with none he says so and offers another part of the name or a search of message text. He never says \"still searching\": every search finishes at once. Check yourself: jarvis whatsapp find \"אשתי\" (names only, no message text). If it is still missing, the chat may be outside the read list: jarvis whatsapp scope or jarvis whatsapp allow read."
 
 [[problems]]
 he = "כתוב שרכיב הגשר לא מותקן"

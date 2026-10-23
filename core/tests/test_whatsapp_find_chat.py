@@ -146,7 +146,7 @@ def test_find_chat_is_a_read_tool_everywhere(home):
     s = WhatsAppBridgeSkill(home)
     t = tool(s, "whatsapp_find_chat")
     assert t.permission == "read" and t.untrusted_output and "whatsapp_find_chat" in wab.READ_TOOLS
-    assert set(t.args.model_json_schema()["properties"]) == {"text", "limit"}
+    assert set(t.args.model_json_schema()["properties"]) == {"text", "regex", "limit"}
 
 
 def test_instructions_forbid_claiming_a_search():
