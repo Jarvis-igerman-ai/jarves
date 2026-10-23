@@ -1907,6 +1907,8 @@ def main(argv: list[str] | None = None) -> int:
     whatsapp_admin.add_cli(sub)               # SW-V4 F: jarvis whatsapp status / link / mode / allow / kill ...
     from .orchestrator import surfaces as agents_cli
     agents_cli.add_cli(sub)                   # SW-V4 E: jarvis agents list | status | ask | tell | start | ...
+    from .projectmgr import surfaces as project_cli
+    project_cli.add_cli(sub)                  # project manager: jarvis project open | plan | status | add | talk | run ...
     from . import dialing
     dialing.add_cli(sub)                      # SW-V4 H: jarvis dial <name|number> [--yes-on-screen]
     from . import self_manage
@@ -1940,7 +1942,7 @@ def main(argv: list[str] | None = None) -> int:
             "profile": profiles.cmd_profile, "approvals": cmd_approvals, "recall": recall.cmd_recall,
             "health": health_cli.cmd_health,
             "whatsapp": whatsapp_admin.cmd_whatsapp,
-            "agents": agents_cli.cmd_agents,
+            "agents": agents_cli.cmd_agents, "project": project_cli.cmd_project,
             "dial": dialing.cmd_dial, "release": release_cmd.cmd_release, "tour": wizard.cmd_tour,
             "manage": self_manage.cmd_manage, "undo": self_manage.cmd_manage,
             **cli_parity.COMMANDS, **budget_cli.COMMANDS, **privacy_cli.COMMANDS, **phone_cli.COMMANDS, **selfspeed.COMMANDS,
