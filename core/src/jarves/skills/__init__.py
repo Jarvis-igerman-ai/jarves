@@ -132,6 +132,9 @@ class Tool:
     # (validated args) -> a refusal, or None: runs BEFORE the owner is asked, so an impossible call is never put to
     # the owner as a question (V4-WA-2: unknown/used WhatsApp draft id)
     precheck: Callable[[Any], "ToolResult | None"] | None = None
+    # read tools only: an identical successful call within this many seconds returns the earlier result (issue #17:
+    # workspace_read ran 4x in 30 s). Any successful side effect or a new user turn drops the cache.
+    cache_s: float = 0.0
 
     @property
     def side_effect(self) -> bool:     # read-only view of the old flag
@@ -211,6 +214,7 @@ class SkillRegistry:
         self.confirm_wait_s = 0.0
         self._confirming_since: float | None = None
         self.asks = 0                              # approvals asked through this registry (V4-VC-3)
+        self._read_cache: dict[tuple, tuple] = {}   # issue #17: (route, tool, args) -> (t, result) for cache_s tools
         self._recent_ok: dict[tuple, tuple] = {}   # V4-VC-3: (route, tool, args) -> (t, result, owner approved it)
 
     @property
@@ -229,6 +233,7 @@ class SkillRegistry:
         there. A taint younger than UNTRUSTED_GRACE_S is kept: a voice transcript can complete just after the tool
         of that same turn returned."""
         key = route or ROUTE.get()
+        self._read_cache = {k: v for k, v in self._read_cache.items() if k[0] != key}
         at = self._untrusted.get(key)
         if at is not None and self.clock() - at >= UNTRUSTED_GRACE_S:
             self._untrusted.pop(key, None)
@@ -420,6 +425,13 @@ class SkillRegistry:
             prev = last[1]
             return ToolResult(prev.ok, prev.message, {**prev.data, "already_done": "this exact action already ran a "
                               "moment ago (approved); do NOT run it again: report this result"}, code=prev.code)
+        if tool.cache_s and tool.permission == "read":
+            hit = self._read_cache.get(key)
+            if hit is not None and self.clock() - hit[0] < tool.cache_s:
+                logs.info("skills", "TOOL_CACHED", "identical read repeated; earlier result returned", tool=name)
+                prev = hit[1]
+                return ToolResult(prev.ok, prev.message, {**prev.data, "cached": "same result as a moment ago; "
+                                  "do not call this tool again with the same arguments"}, code=prev.code)
         asked0 = self.asks
         refused = await self._authorize(tool, args, origin)
         if refused is not None:
@@ -436,7 +448,10 @@ class SkillRegistry:
             # review C (SWV4): a FAILED run still returns third-party text (a helper command exiting 1 prints
             # whatever it likes into output_tail): that taints the turn exactly like a successful one
             self._untrusted_at = self.clock()
+        if res.ok and tool.cache_s and tool.permission == "read":
+            self._read_cache[key] = (self.clock(), res)
         if res.ok and tool.permission != "read":
+            self._read_cache.clear()           # a side effect may change what a read returns
             now = self.clock()
             self._recent_ok = {k: v for k, v in self._recent_ok.items() if now - v[0] < REPEAT_REPLAY_S}
             self._recent_ok[key] = (now, res, self.asks > asked0)    # approved by the owner this call

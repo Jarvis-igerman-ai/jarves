@@ -25,14 +25,13 @@ import time
 from datetime import date, datetime
 from pathlib import Path
 
-from . import logs
+from . import logs, phrases
 from .store import Store, daily_costs, session_cost
 
 SEVERITY = {"low": 0, "medium": 1, "high": 2}
 _PUNCT = re.compile(r"[.,!?…:;\"'“”״׳()\-–—]+")
 # Short acknowledgements; a sentence that is ONLY one of these is a filler. Same-root variants count together.
-ACK = {"סגור": "סגור", "סוגר": "סגור", "בטח": "בטח", "אוקיי": "אוקיי", "אוקי": "אוקיי", "ok": "אוקיי",
-       "okay": "אוקיי", "בסדר": "בסדר", "מעולה": "מעולה", "יופי": "יופי", "sure": "sure", "done": "done"}
+ACK = phrases.ACK_WORDS       # one reviewed list: jarves/phrases.py
 WAITING = re.compile(r"בודק|בודקת|מחפש|מחפשת|\bרגע\b|שנייה|שניה|כמעט שם|מתעכב|one moment|just a (sec|moment)|"
                      r"checking|looking (it )?up|hold on", re.I)
 CONFUSION = re.compile(r"לא הבנתי|לא שמעתי|מה אמרת|מה אתה אומר|מה זה אומר|מה זאת אומרת|תחזור על|לא ברור|"
