@@ -56,6 +56,9 @@ FEATURES: dict[str, object] = {
     "issue_reports": "issues", "web_chat": "web",
 }
 
+# Extra command-line surfaces of a feature (one-shot variants of the same Core path): feature id -> commands.
+ALSO: dict[str, tuple[str, ...]] = {"text_chat": ("ask --full", "tell")}     # `jarvis ask --full "..."` = one chat message
+
 # Skill (tool group) name -> "jarvis <command>" or ("dashboard", reason) or ("voice", reason) for groups that only
 # make sense inside a conversation.
 V = "voice"

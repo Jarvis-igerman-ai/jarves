@@ -637,8 +637,44 @@ def cmd_music(a, cfg, home) -> int:
     return asyncio.run(go())
 
 
+CANT_RE = re.compile(r"can.?t|cannot|don.?t have access|no access|unable to|אין לי גישה|לא יכול", re.I)
+
+
+def _add_full_args(p) -> None:
+    p.add_argument("--json", action="store_true", help="print one JSON object {ok, text, tools:[{name,ok,code}], code}")
+    p.add_argument("--speak", action="store_true", help="also speak the answer (default: silent; never in quiet hours)")
+    p.add_argument("--timeout", type=float, default=300.0, help="seconds to wait for the answer (default 300)")
+    p.add_argument("--wait", type=float, default=60.0, help="seconds to wait for the Core to start")
+
+
+def cmd_ask_full(a, cfg, home) -> int:
+    """jarvis ask --full / jarvis tell: ONE message to the running Core, exactly like `jarvis chat` (every Skill)."""
+    from . import chat_cli
+    text = chat_cli.read_ask_text(a.text)
+    if not text:
+        print('Provide a question: jarvis ask --full "do I have new WhatsApp messages?" (or pipe it on stdin)',
+              file=sys.stderr)
+        return 2
+    if not ensure_core(home, cfg, wait=a.wait):
+        print(f"JARVES did not answer within {a.wait} s. See: jarvis logs -n 80", file=sys.stderr)
+        return 1
+    try:
+        return asyncio.run(chat_cli.run_ask(home, cfg.link.port, text, as_json=a.json, speak=a.speak,
+                                            verbose=True, timeout=a.timeout))
+    except KeyboardInterrupt:
+        return 1
+    except OSError:
+        print("Could not connect to the Core on the local link. See: jarvis status", file=sys.stderr)
+        return 1
+
+
 def cmd_ask(a, cfg, home) -> int:
     """One-shot question through the full brain + Skills, without Godot."""
+    if getattr(a, "full", False) or a.cmd == "tell":
+        return cmd_ask_full(a, cfg, home)
+    if not a.text:
+        print('Provide a question: jarvis ask "what time is it?"', file=sys.stderr)
+        return 2
     from .app import make_agent
     from .brain import Brain
     from .memory import MemoryStore
@@ -657,6 +693,9 @@ def cmd_ask(a, cfg, home) -> int:
     agent = make_agent(cfg, reg, mem, home)
     r = asyncio.run(Brain(reg, agent).respond(" ".join(a.text)))
     print(f"[{r.source}{'/' + r.tool if r.tool else ''} {r.code}] {r.text}")
+    if not r.ok or CANT_RE.search(r.text or ""):
+        print('(limited tool set: for WhatsApp, calendar, mail, browser and every other Skill use: '
+              'jarvis ask --full "..."  or  jarvis chat)', file=sys.stderr)
     return 0 if r.ok else 1
 
 
@@ -1835,11 +1874,19 @@ def main(argv: list[str] | None = None) -> int:
                     "(automatic during quiet hours)")
     ch.add_argument("--verbose", "-v", action="store_true", help="show codes and details on tool and approval lines")
     ch.add_argument("--wait", type=float, default=60.0, help="seconds to wait for the Core to start")
-    q = sub.add_parser("ask", help="ask one question (brain + Skills, no Godot)")
+    q = sub.add_parser("ask", help="ask one question; limited tool set: use --full for every Skill (WhatsApp, "
+                       "calendar, mail, browser...) through the running JARVES")
     ex = sub.add_parser("execute", help="run a text request with JARVES stopped; Google/memory/tools, terminal confirmations")
     ex.add_argument("text", nargs="+", help='request, e.g. "add a calendar event tomorrow at 10"')
     ex.add_argument("--interactive", "-i", action="store_true", help="keep this text session for follow-up answers; Enter exits")
-    q.add_argument("text", nargs="+")
+    q.add_argument("text", nargs="*", help="the question (with --full: or pipe it on stdin)")
+    q.add_argument("--full", action="store_true", help="full access: send ONE message to the running JARVES like "
+                   "`jarvis chat` does (every Skill; starts the Core if needed; silent; risky actions ask y/N, "
+                   "denied when stdin is not a terminal)")
+    _add_full_args(q)
+    tl = sub.add_parser("tell", help="same as `jarvis ask --full`: one message to the running JARVES, every Skill")
+    tl.add_argument("text", nargs="*", help="the message (or pipe it on stdin)")
+    _add_full_args(tl)
     s = sub.add_parser("say", help="speak a sentence with the configured voice")
     s.add_argument("text", nargs="+")
     s.add_argument("--verbose", "-v", action="store_true", help="show every speech engine and its state")
@@ -1935,7 +1982,7 @@ def main(argv: list[str] | None = None) -> int:
     return {"run": cmd_run, "stop": cmd_stop, "status": cmd_status, "diag": cmd_diag, "memory": cmd_memory, "music": cmd_music,
             "contacts": cmd_personal, "calendar": cmd_personal, "mail": cmd_personal,
             "execute": cmd_execute, "chat": cmd_chat, "text": cmd_chat,
-            "ask": cmd_ask, "say": cmd_say, "chatgpt": cmd_chatgpt, "setup": cmd_setup, "logs": cmd_logs, "key": cmd_key,
+            "ask": cmd_ask, "tell": cmd_ask, "say": cmd_say, "chatgpt": cmd_chatgpt, "setup": cmd_setup, "logs": cmd_logs, "key": cmd_key,
             "wake": cmd_wake, "doctor": cmd_doctor, "cost": cmd_cost, "dashboard": cmd_dashboard,
             "diagnose": cmd_diagnose, "features": cmd_features, "help": cmd_help, "google": cmd_google,
             "backup": cmd_backup, "restore": cmd_restore, "usage": cmd_usage, "start": cmd_start,
