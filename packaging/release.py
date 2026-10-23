@@ -472,7 +472,8 @@ def bridge_publish(dist: Path, env: dict | None = None, gh: GitHub | None = None
         return 0
     missing = [k for k in PUBLIC_SECRETS if not str(env.get(k) or "").strip()]
     if missing:
-        print(f"::warning::Bridge publish: SKIPPED - missing secret {', '.join(missing)} (docs/RELEASE_HOSTING.md)")
+        print("::warning::Bridge publish: SKIPPED - RELEASES_TOKEN and/or JARVES_UPDATE_SIGNING_KEY is not set "
+              "(docs/RELEASE_HOSTING.md)")
         return 0
     gh = gh or GitHub(repo, env["RELEASES_TOKEN"].strip())
     envelope = sign_manifest(bridge_manifest(info, exe, url), env["JARVES_UPDATE_SIGNING_KEY"], BRIDGE_SIGN_DOMAIN)
