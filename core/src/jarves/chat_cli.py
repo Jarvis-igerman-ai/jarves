@@ -13,6 +13,7 @@ from __future__ import annotations
 import asyncio
 import getpass
 import json
+import os
 import signal
 import sys
 import uuid
@@ -172,6 +173,14 @@ class ChatSession:
         self.exit_code = 0
 
     # -------------------------------------------------------------- output
+    @property
+    def color(self) -> bool:
+        """ANSI colour only on a real terminal, never when piped, and never with NO_COLOR set (no-color.org)."""
+        return bool(getattr(self.out, "isatty", lambda: False)()) and "NO_COLOR" not in os.environ
+
+    def paint(self, code: str, text: str) -> str:
+        return f"\x1b[{code}m{text}\x1b[0m" if self.color else text
+
     def say(self, text: str = "", end: str = "\n") -> None:
         self.out.write(text + end)
         self.out.flush()
@@ -256,7 +265,7 @@ class ChatSession:
                     continue
                 if t == "chat.delta" and p.get("id") == tid:
                     if not streamed:
-                        self.say("jarvis> ", end="")
+                        self.say(self.paint("1;36", "jarvis> "), end="")
                         streamed = True
                     self.say(p.get("text", ""), end="")
                 elif t == "chat.tool" and p.get("id") == tid:
@@ -310,7 +319,7 @@ class ChatSession:
         name = logs.redact(str(p.get("name", "?")))[:60]
         ok = bool(p.get("ok"))
         extra = f" [{logs.redact(str(p.get('code', '')))}]" if (self.verbose or not ok) else ""
-        self.say(f"  > {name}  {'ok' if ok else 'FAILED'}{extra}")
+        self.say(self.paint("2" if ok else "31", f"  > {name}  {'ok' if ok else 'FAILED'}{extra}"))
 
     # -------------------------------------------------------------- approvals
     def _show_request(self, p: dict) -> None:
@@ -531,6 +540,7 @@ class ChatSession:
             self.state = st
             self.quiet = bool(st.get("quiet"))
             w = st.get("quiet_window") or {}
+            self.say(self.paint("1", "JARVES") + " " + self.paint("2", f"{st.get('version') or ''}".strip()))
             self.say(T("שיחת טקסט עם JARVES. /help לעזרה, Ctrl+D ליציאה.",
                        "JARVES text chat. /help for help, Ctrl+D to leave."))
             if self.silent:
@@ -577,9 +587,11 @@ class ChatSession:
                 self.voice = False
             self.quiet = now
         if not p.get("streamed") and p.get("text"):
-            self.say("jarvis> " + p["text"])
+            self.say(self.paint("1;36", "jarvis> ") + p["text"])
         if not p.get("ok"):
-            self.say(f"[{p.get('code')}]")
+            self.say(self.paint("31", f"[{p.get('code')}]"))
+        if self.color:
+            self.say(self.paint("2", "-" * 40))
 
 
 # ---------------------------------------------------------------------- entry point

@@ -778,7 +778,7 @@
   "not yet": "עוד לא",
   "(not in this version)": "(לא בגרסה הזאת)",
   "Open": "פתח",
-  "Copy": "העתק",
+  "Copy": "העתקה",
   "← all guides": "כל המדריכים ←",
   "What to say": "מה להגיד לו",
   "Privacy": "פרטיות",
@@ -1932,7 +1932,10 @@
   "Summary: ": "תקציר: ",
   "Task board": "לוח משימות",
   "Plan": "תכנון",
-  "Add task": "הוספת משימה"
+  "Add task": "הוספת משימה",
+  "Hi, I am JARVES. How can I help? Type a message, or / for commands.": "שלום, אני JARVES. במה אפשר לעזור? כתבו הודעה או / לפקודות.",
+  "Scroll to the latest message": "לגלול להודעה האחרונה",
+  "Writing": "כותב"
  },
  "rules": [
   [

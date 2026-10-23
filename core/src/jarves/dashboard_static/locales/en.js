@@ -1932,6 +1932,9 @@
   "Summary: ": "Summary: ",
   "Task board": "Task board",
   "Plan": "Plan",
-  "Add task": "Add task"
+  "Add task": "Add task",
+  "Hi, I am JARVES. How can I help? Type a message, or / for commands.": "Hi, I am JARVES. How can I help? Type a message, or / for commands.",
+  "Scroll to the latest message": "Scroll to the latest message",
+  "Writing": "Writing"
  }
 };
