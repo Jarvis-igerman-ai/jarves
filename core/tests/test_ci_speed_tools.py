@@ -512,7 +512,13 @@ def test_draft_prs_run_only_the_fast_checks_and_never_read_green():
     assert "args+=(--draft)" in script and 'echo "draft=$draft"' in script
     ok = doc["jobs"]["ci-ok"]
     assert ok["env"]["DRAFT"] == "${{ needs.changes.outputs.draft }}" and ok["permissions"]["actions"] == "write"
-    run = ok["steps"][0]["run"]
-    draft_branch = run[run.index('if [ "$DRAFT" = "true" ]'):run.index("fi")]
-    assert "gh run cancel" in draft_branch and "exit 1" in draft_branch                # never success on a draft
+    assert ok["if"] == "always()"                     # failed or cancelled needs must still make this check red
+    draft, result = ok["steps"]
+    # the job-level `always()` is never cancelled (run 40012547664): only a STEP whose `if` turns false on the cancel
+    # stops, so the draft step's `if` must contain `!cancelled()`; if the cancel does not land it fails
+    assert draft["id"] == "draft" and "!cancelled()" in draft["if"] and "draft == 'true'" in draft["if"]
+    assert "gh run cancel" in draft["run"] and draft["run"].rstrip().endswith("exit 1")
+    # the result step runs unless the draft step was cancelled; on a draft (a run cancelled early) it fails, never passes
+    assert "always()" in result["if"] and "steps.draft.outcome != 'cancelled'" in result["if"]
+    assert 'if [ "$DRAFT" = "true" ]; then' in result["run"] and "exit 1; fi" in result["run"]
     assert "github.event.pull_request.draft != true" in doc["jobs"]["failure-summary"]["if"]

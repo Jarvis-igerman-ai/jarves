@@ -719,17 +719,25 @@ jobs:
       DRAFT: ${{ needs.changes.outputs.draft }}
       GH_TOKEN: ${{ github.token }}
     steps:
-      - shell: bash
+      # A draft must never read green: its skipped heavy jobs would pass, and a green check on the draft's head lets
+      # auto-merge through the moment the PR is marked ready. The draft's run cancels itself (grey, not a red failure
+      # that wakes agents). GitHub never cancels an `always()` JOB, but it cancels a running STEP whose `if` turns
+      # false, so this step stops on the cancel and the job ends cancelled (run 40012547664: one job-level step ran
+      # its full sleep and ended red). If the cancel does not land, the step fails: red, never green.
+      - id: draft
+        if: ${{ !cancelled() && needs.changes.outputs.draft == 'true' }}
+        shell: bash
+        run: |
+          echo "::notice::Draft PR: only the fast checks ran. Mark it ready for review: the full CI runs then, and only that run can turn this check green."
+          gh run cancel "$GITHUB_RUN_ID" -R "$GITHUB_REPOSITORY" || true
+          sleep 90
+          exit 1
+      # every other case, and a draft whose run was cancelled before this job started (the step above skipped): red
+      - if: ${{ always() && steps.draft.outcome != 'cancelled' }}
+        shell: bash
         run: |
           echo "$NEEDS" | jq -r 'to_entries[] | "\(.key): \(.value.result)"'
-          if [ "$DRAFT" = "true" ]; then
-            # skipped heavy jobs would make this required check green, and a green check on the draft's head could let
-            # auto-merge through the moment the PR is marked ready. Cancel instead (grey); if that fails, fail (red).
-            echo "::notice::Draft PR: only the fast checks ran. Mark it ready for review: the full CI runs then, and only that run can turn this check green."
-            gh run cancel "$GITHUB_RUN_ID" -R "$GITHUB_REPOSITORY" || true
-            sleep 90
-            exit 1
-          fi
+          if [ "$DRAFT" = "true" ]; then echo "::error::Draft PR run: only the fast checks ran, so this is not a pass"; exit 1; fi
           echo "$NEEDS" | jq -e '[.[] | select(.result == "failure" or .result == "cancelled")] | length == 0' > /dev/null
   failure-summary:
     # ONE comment per PR (updated in place): failed jobs, first failing test + its first error line, log links, known
