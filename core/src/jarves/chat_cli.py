@@ -611,3 +611,114 @@ async def run_chat(home: Path, port: int, *, silent: bool, verbose: bool) -> int
     finally:
         if old is not None:
             signal.signal(signal.SIGINT, old)
+
+
+# ---------------------------------------------------------------------- one shot: `jarvis ask --full` / `jarvis tell`
+ASK_TIMEOUT_S = 300.0
+
+
+class DenyLines:
+    """The stdin of a non-interactive run (pipe, CI, no terminal): an approval is NEVER answered silently, it is denied.
+    An empty answer is "no" for a y/N prompt and "deny" for a typed-code prompt."""
+
+    def __init__(self, out=None) -> None:
+        self.out = out or sys.stderr
+
+    async def read(self, prompt: str, *, secret: bool = False) -> str:
+        self.out.write(T("אין טרמינל אינטראקטיבי: האישור נדחה.", "No interactive terminal: approval denied.") + "\n")
+        self.out.flush()
+        return ""
+
+
+class AskSession(ChatSession):
+    """One message to the running Core exactly like `jarvis chat` sends it (same protocol, same approvals, same tool
+    lines), then the answer and an exit code. Nothing here owns a registry or a brain: the Core does."""
+
+    def __init__(self, *args, **kw) -> None:
+        super().__init__(*args, **kw)
+        self.tools: list[dict] = []
+
+    def _tool_line(self, p: dict, streaming: bool) -> None:
+        self.tools.append({"name": logs.redact(str(p.get("name", "?")))[:60], "ok": bool(p.get("ok")),
+                           "code": logs.redact(str(p.get("code", "")))})
+        super()._tool_line(p, streaming)
+
+    async def ask(self, text: str, *, speak: bool = False, timeout: float = ASK_TIMEOUT_S) -> dict:
+        """{ok, text, tools, code}. code: the Core's result code, or CORE_INTERNAL / CANCELLED / TIMEOUT / CORE_CLOSED."""
+        def result(ok: bool, answer: str, code: str) -> dict:
+            self.exit_code = 0 if ok else 1
+            return {"ok": ok, "text": answer, "tools": self.tools, "code": code}
+
+        self._pump_task = asyncio.ensure_future(self._pump())
+        try:
+            await self.t.send("chat.hello", {})
+            t, st = await self.wait_for({"chat.state", "chat.error"})
+            if t != "chat.state":
+                return result(False, "", str(st.get("code") or "CORE_CLOSED"))
+            self.state = st
+            self.quiet = bool(st.get("quiet"))
+            voice = bool(speak and not self.silent and st.get("can_speak"))
+            tid = uuid.uuid4().hex[:8]
+            await self.t.send("chat.turn", {"id": tid, "text": text, "voice": voice, "silent": not voice})
+            try:
+                t, p = await asyncio.wait_for(self.wait_for({"chat.done", "chat.error"}, tid), timeout)
+            except asyncio.TimeoutError:
+                await self.t.send("chat.cancel", {})
+                return result(False, "", "TIMEOUT")
+            if t == "__closed__":
+                return result(False, "", "CORE_CLOSED")
+            if t == "chat.error":
+                return result(False, "", str(p.get("code") or "CORE_INTERNAL"))
+            if p.get("cancelled"):
+                return result(False, "", "CANCELLED")
+            answer = str(p.get("text") or "")
+            if not p.get("streamed") and answer:
+                self.say(answer)                                  # a streamed answer is already on the screen
+            return result(bool(p.get("ok")), answer, str(p.get("code") or ("OK" if p.get("ok") else "FAILED")))
+        finally:
+            if self._pump_task is not None:
+                self._pump_task.cancel()
+            await self.t.close()
+
+
+def read_ask_text(words: list[str], stdin=None) -> str:
+    """The question: the words given, else everything on a piped stdin."""
+    text = " ".join(words or []).strip()
+    if text:
+        return text
+    stdin = stdin or sys.stdin
+    if getattr(stdin, "isatty", lambda: False)():
+        return ""
+    try:
+        return stdin.read().strip()
+    except (OSError, ValueError):
+        return ""
+
+
+async def run_ask(home: Path, port: int, text: str, *, as_json: bool = False, speak: bool = False,
+                  verbose: bool = True, timeout: float = ASK_TIMEOUT_S, stdin=None, stdout=None, stderr=None) -> int:
+    """Send ONE message to the running Core. Silent unless `speak`. Exit 0 = a normal answer; 1 = failure."""
+    prepare_streams()
+    stdin, stdout, stderr = stdin or sys.stdin, stdout or sys.stdout, stderr or sys.stderr
+    transport = await LinkTransport.connect(home, port)
+    interactive = bool(getattr(stdin, "isatty", lambda: False)())
+    human = stderr if as_json else stdout                       # --json: stdout carries the JSON object only
+    lines = StdinLines(stdin, human) if interactive else DenyLines(stderr)
+    session = AskSession(transport, lines, human, silent=not speak, verbose=verbose)
+    loop = asyncio.get_running_loop()
+    old = None
+    try:
+        old = signal.signal(signal.SIGINT, lambda *_: loop.call_soon_threadsafe(session.interrupt))
+    except ValueError:
+        old = None
+    try:
+        res = await session.ask(text, speak=speak, timeout=timeout)
+    finally:
+        if old is not None:
+            signal.signal(signal.SIGINT, old)
+    if as_json:
+        stdout.write(json.dumps(res, ensure_ascii=False) + "\n")
+    elif not res["ok"]:
+        stderr.write(f"[{res['code']}]\n")
+    stdout.flush()
+    return 0 if res["ok"] else 1
