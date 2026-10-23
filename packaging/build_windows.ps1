@@ -300,6 +300,7 @@ Copy-Item (Join-Path $PSScriptRoot "windows\jarvis.cmd") $Stage
 Copy-Item (Join-Path $PSScriptRoot "installer_state.py") $Stage
 Copy-Item (Join-Path $PSScriptRoot "rollback_windows.ps1") $Stage
 Copy-Item (Join-Path $PSScriptRoot "windows\THIRD_PARTY_NOTICES.txt") $Stage
+Copy-Item (Join-Path $PSScriptRoot "..\CHANGELOG.md") $Stage          # release notes (jarves.release_notes reads it)
 # SW-V4 F: the WhatsApp bridge binary (built by scripts/build_whatsapp_bridge.ps1) ships next to the Core when it was
 # built; payload_check.py verifies its .sha256. Its state (tokens, store) lives in the user's data dir, never here.
 $bridgeExe = Join-Path $Repo "bridge\whatsapp\dist\whatsapp_bridge.exe"
