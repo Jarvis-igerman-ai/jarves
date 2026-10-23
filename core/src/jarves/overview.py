@@ -30,6 +30,15 @@ def _last_conversation(ctx) -> dict | None:
             "cost": s["cost"]["total"]}
 
 
+def limits_view(ctx) -> list[dict]:
+    """No silent limits: every daily cap that is above 80% or used up (exhausted first), with used/max + the fix."""
+    try:
+        from . import limits
+        return limits.worst(limits.views_from_home(ctx.home, ctx.cfg.ai))
+    except Exception:
+        return []
+
+
 def api_home(ctx, _m, _body):
     from .google_setup import checklist
     from .privacy import state as privacy_state
@@ -80,6 +89,8 @@ def api_home(ctx, _m, _body):
     else:
         nxt = ("הכל תקין. אומרים \"היי ג'ארביס\" ומדברים.", "All good. Say \"Hey JARVES\" and talk.", "")
     status = ("ok" if fresh and core == "ready" and not high else "warn" if fresh and core else "off")
+    if status == "ok" and limits_view(ctx):
+        status = "warn"
     return 200, {
         "status": status,
         "status_he": {"ok": "הכל עובד", "warn": "עובד, עם משהו לבדוק", "off": "JARVES כבוי"}[status],
@@ -94,6 +105,7 @@ def api_home(ctx, _m, _body):
         "today": {"cost": round((day or {}).get("total", 0.0), 4), "conversations": (day or {}).get("sessions", 0),
                   "voice_minutes": (day or {}).get("voice_minutes", 0.0)},
         "issues": {"open": len(issues), "high": high},
+        "limits": limits_view(ctx),
         "last_conversation": _last_conversation(ctx),
         "privacy": privacy_state(ctx),
         "at": time.time()}

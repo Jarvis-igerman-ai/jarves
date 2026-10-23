@@ -298,6 +298,12 @@ def cmd_status(a, cfg, home) -> int:
     if live is None:
         from .runtime import read_state
         snap = read_snapshot(home / "health.json")
+        try:
+            from . import limits as _limits
+            for line in _limits.status_lines(_limits.views_from_home(home, cfg.ai)):
+                print(line)
+        except Exception:
+            pass
         print("Core is NOT running (no answer on the local link).")
         from .updates import beta_label
         if beta_label(home):
@@ -312,6 +318,9 @@ def cmd_status(a, cfg, home) -> int:
         return 1
     prof = live.get("profile") or {}
     from .updates import beta_label
+    from . import limits as _limits
+    for line in _limits.status_lines(live.get("limits") or []):      # no silent limits: the FIRST lines of the status
+        print(line)
     beta = beta_label(home)
     print(runtime_summary(live.get("runtime"))
           + (f" | profile {prof.get('name')}{' (TEST)' if prof.get('test') else ''}" if prof else "")
@@ -1292,6 +1301,15 @@ def cmd_doctor(a, cfg, home) -> int:
             "" if ok else "run:  jarvis chatgpt login")
     live = _ws_call(home, cfg.link.port, {"type": "status.request", "payload": {}}, "status")
     add("info", "Core is " + ("running" if live else "not running (start it with: jarvis)"))
+    try:                                     # no silent limits: a used-up or nearly used-up daily cap is a finding
+        from . import limits as _limits
+        _vs = _limits.views_from_home(home, cfg.ai)
+        for _v in _limits.worst(_vs):
+            add("fail" if _v["level"] == "exhausted" else "warn", _v["text_en"], "fix:  " + _v["action_en"])
+        if not _limits.worst(_vs):
+            add("ok", "daily limits have room left (" + "; ".join(v["text_en"] for v in _vs) + ")")
+    except Exception as e:
+        add("warn", f"could not read the daily limits ({type(e).__name__})")
 
     # --- R-01: OS limits around approved helper commands and generated-Skill children
     try:

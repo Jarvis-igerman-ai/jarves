@@ -177,7 +177,7 @@ async def test_live_mode_toggle_and_budget(home, cfg, monkeypatch):
         assert c.live is None and c.memory.usage_today("voice_seconds") == 90
         c.cfg.ai.daily_realtime_minutes = 1           # 90 s already used > 60 s budget
         await f.send("talk.down")
-        assert (await f.wait("error"))["code"] == "VOICE_BUDGET" and len(started) == 1
+        assert (await f.wait("error"))["code"] == "VOICE_DAILY_LIMIT" and len(started) == 1
     finally:
         await c.stop()
 

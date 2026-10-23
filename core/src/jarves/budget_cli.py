@@ -28,6 +28,9 @@ def status_view(cfg, home) -> dict:
     b = _budget(cfg, home)
     try:
         out = usd_status(b)
+        from . import limits as _limits
+        out["limits"] = _limits.views_from(b.used, b.limit)
+        out["limit_lines"] = _limits.status_lines(out["limits"])
     finally:
         b.close()
         b.memory.close()          # Budget does not own its MemoryStore: a leaked handle kept memory.db locked (Windows)
@@ -59,6 +62,8 @@ def cmd_budget(a, cfg, home) -> int:
                           f"נשאר ${v['remaining_usd']:.4f}",
                           f"delegated lookups today: ${v['used_usd']:.4f} used, ${v['held_usd']:.4f} held now, cap "
                           f"${v['limit_usd']:.2f}, ${v['remaining_usd']:.4f} left"))
+        for ln in v["limit_lines"]:
+            print(ln)
         print(clilang.fmt(f"בקשות AI היום: {v['requests_today']} מתוך {v['requests_limit']}",
                           f"AI requests today: {v['requests_today']} of {v['requests_limit']}"))
         c = v["caps"]
@@ -86,7 +91,8 @@ def cmd_budget(a, cfg, home) -> int:
         return 0 if r["ok"] else 1
     if a.action == "set":
         from . import config_edit
-        upd = {k: v for k, v in (("ai.delegation_daily_usd", a.daily_usd), ("ai.delegation_turn_usd", a.turn_usd),
+        upd = {k: v for k, v in (("ai.daily_realtime_minutes", a.voice_minutes), ("ai.daily_request_limit", a.requests),
+                                 ("ai.delegation_daily_usd", a.daily_usd), ("ai.delegation_turn_usd", a.turn_usd),
                                  ("ai.delegation_turn_requests", a.turn_requests),
                                  ("ai.delegation_max_searches", a.searches), ("ai.delegation_timeout_s", a.timeout),
                                  ("ai.delegation_fallback", a.fallback)) if v is not None}
@@ -130,6 +136,8 @@ def add_cli(sub) -> None:
     tc.add_argument("--schedules", type=int, default=5)
     tc.add_argument("--seed", type=int, default=7)
     se = bs.add_parser("set", help="caps / fallback / mode (same as the dashboard Settings + Features pages)")
+    se.add_argument("--voice-minutes", type=int, help="live-voice minutes per day (ai.daily_realtime_minutes)")
+    se.add_argument("--requests", type=int, help="AI requests per day (ai.daily_request_limit)")
     se.add_argument("--daily-usd", type=float, help="strict daily cap for spoken lookups (USD)")
     se.add_argument("--turn-usd", type=float, help="strict cap for one spoken question (USD)")
     se.add_argument("--turn-requests", type=int, help="model requests for one spoken question")
