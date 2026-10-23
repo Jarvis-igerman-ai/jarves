@@ -404,6 +404,13 @@ async function pageHome() {
     try { await api("/api/runtime", { method: "POST", body: JSON.stringify(body) }); msg.textContent = tx("בוצע", "Done"); route(true); }
     catch (e) { msg.textContent = tx("לא שונה: ", "Not changed: ") + e.message; }
   };
+  const talk = async (what) => {      // same Core handler as `jarvis talk` and the tray; refuses with a clear message
+    try {
+      const r = await api("/api/runtime", { method: "POST", body: JSON.stringify({ talk: what }) });
+      const t = (r.applied || {}).talk || {};
+      msg.textContent = t.ok ? (t.live ? tx("השיחה פתוחה: דברו", "Conversation open: just talk") : tx("השיחה הסתיימה", "Conversation ended")) : tx("לא נפתחה שיחה: ", "No conversation: ") + (t.message || "");
+    } catch (e) { msg.textContent = tx("לא נפתחה שיחה: ", "No conversation: ") + e.message; }
+  };
   const onOff = (on) => on ? tx("פועל", "On") : tx("כבוי", "Off");
   const toggle = (on, label, body) => el("button", { type: "button", class: "switch", "aria-pressed": on ? "true" : "false",
     "aria-label": switchLabel(label, on), onclick: () => send(body) }, onOff(on));
@@ -427,6 +434,9 @@ async function pageHome() {
         el("button", { type: "button", disabled: running && disp.state !== "hidden" ? null : true, onclick: () => send({ display: "hide" }) }, tx("הסתרה", "Hide"))))),
       el("tr", {}, el("td", {}, tx("השתקת המיקרופון (בתוכנה)", "Mute microphone (software)")), el("td", {}, toggle(micMuted, tx("השתקה", "Mute"), { mic_muted: !micMuted }))),
       el("tr", {}, el("td", {}, tx("השהיית התראות יזומות", "Pause proactive alerts")), el("td", {}, toggle(alertsPaused, tx("השהיית התראות", "Pause alerts"), { alerts_paused: !alertsPaused }))),
+      el("tr", {}, el("td", {}, tx("שיחה עכשיו (בלי מילת הפעלה)", "Talk now (no wake word)")), el("td", {}, el("div", { class: "row" },
+        el("button", { type: "button", class: "primary", onclick: () => talk("start") }, tx("דברו", "Talk")),
+        el("button", { type: "button", onclick: () => talk("stop") }, tx("סיום שיחה", "End"))))),
       el("tr", {}, el("td", {}, tx("הפעלה בכניסה למחשב (בלי חלון)", "Start at login (invisible)")), el("td", {},
         el("button", { type: "button", class: "switch", "aria-pressed": auto.enabled ? "true" : "false", "aria-label": switchLabel(tx("הפעלה בכניסה", "Start at login"), auto.enabled),
           onclick: () => send({ autostart: !auto.enabled }) }, onOff(auto.enabled)),

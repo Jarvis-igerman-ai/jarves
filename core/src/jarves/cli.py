@@ -39,6 +39,20 @@ def _ws_call(home: Path, port: int, msg: dict, expect: str, timeout: float = 5) 
         return None
 
 
+def apply_wake_threshold(home: Path, cfg, config_path: Path, rec: float) -> str:
+    """`jarvis wake test --apply`: write the threshold where it is really read. A threshold saved with a custom
+    wake model (identity.json) beats config.toml at every start (Identity.apply_to_config), so it goes there."""
+    from .identity import Identity
+    ident = Identity(home, cfg)
+    w = ident.wake()
+    if w.get("threshold") is not None:
+        ident.set_wake(w["model"], w["phrase"], rec, by="cli")
+        return (f"Saved: wake_threshold {rec} for {Path(str(w['model'])).name} in identity.json (it overrides "
+                f"config.toml, so this is the value used). Restart JARVES to use it.")
+    set_toml_value(config_path, "voice", "wake_threshold", str(rec))
+    return f"Saved: wake_threshold {rec} in {config_path}, which is the value used. Restart JARVES to use it."
+
+
 def _apply_log_args(a, cfg) -> None:
     if getattr(a, "log_level", None):
         cfg.log.console_level = a.log_level.upper()
@@ -284,6 +298,12 @@ def cmd_status(a, cfg, home) -> int:
     if live is None:
         from .runtime import read_state
         snap = read_snapshot(home / "health.json")
+        try:
+            from . import limits as _limits
+            for line in _limits.status_lines(_limits.views_from_home(home, cfg.ai)):
+                print(line)
+        except Exception:
+            pass
         print("Core is NOT running (no answer on the local link).")
         from .updates import beta_label
         if beta_label(home):
@@ -298,6 +318,9 @@ def cmd_status(a, cfg, home) -> int:
         return 1
     prof = live.get("profile") or {}
     from .updates import beta_label
+    from . import limits as _limits
+    for line in _limits.status_lines(live.get("limits") or []):      # no silent limits: the FIRST lines of the status
+        print(line)
     beta = beta_label(home)
     print(runtime_summary(live.get("runtime"))
           + (f" | profile {prof.get('name')}{' (TEST)' if prof.get('test') else ''}" if prof else "")
@@ -400,6 +423,19 @@ def cmd_display(a, cfg, home) -> int:
     res = (r.get("applied") or {}).get("display") or {}
     print(f"{what}: {res.get('detail', '?')}" + ("" if res.get("ok", True) else "  (failed)"))
     return 0 if res.get("ok", True) else 1
+
+
+def cmd_talk(a, cfg, home) -> int:
+    """jarvis talk [--stop]: start (or end) a live voice conversation without the wake word - tests the whole voice path."""
+    r = _ws_call(home, cfg.link.port, {"type": "talk.stop" if a.stop else "talk.start", "payload": {}}, "talk.state",
+                 timeout=20)
+    if r is None:
+        print("JARVES is not running. Start it with: jarvis start")
+        return 1
+    print(r.get("message", "?"))
+    if r.get("ok") and r.get("live"):
+        print("Speak now. End it with: jarvis talk --stop")
+    return 0 if r.get("ok") else 1
 
 
 def cmd_autostart(a, cfg, home) -> int:
@@ -1059,8 +1095,7 @@ def cmd_wake(a, cfg, home) -> int:
             Identity(home, cfg).set_wake(a.model, threshold=rec, by="cli")
             print(f"Saved: {Path(a.model).name} is now the wake phrase (threshold {rec}). Restart JARVES to use it.")
         elif a.apply:
-            set_toml_value(Path(a.config) if a.config else home / "config.toml", "voice", "wake_threshold", str(rec))
-            print("Saved. Restart JARVES to use it.")
+            print(apply_wake_threshold(home, cfg, Path(a.config) if a.config else home / "config.toml", rec))
         else:
             print("Apply it with:  jarvis wake test --apply" + (f' --model "{a.model}"' if a.model else ""))
         return 0
@@ -1266,6 +1301,15 @@ def cmd_doctor(a, cfg, home) -> int:
             "" if ok else "run:  jarvis chatgpt login")
     live = _ws_call(home, cfg.link.port, {"type": "status.request", "payload": {}}, "status")
     add("info", "Core is " + ("running" if live else "not running (start it with: jarvis)"))
+    try:                                     # no silent limits: a used-up or nearly used-up daily cap is a finding
+        from . import limits as _limits
+        _vs = _limits.views_from_home(home, cfg.ai)
+        for _v in _limits.worst(_vs):
+            add("fail" if _v["level"] == "exhausted" else "warn", _v["text_en"], "fix:  " + _v["action_en"])
+        if not _limits.worst(_vs):
+            add("ok", "daily limits have room left (" + "; ".join(v["text_en"] for v in _vs) + ")")
+    except Exception as e:
+        add("warn", f"could not read the daily limits ({type(e).__name__})")
 
     # --- R-01: OS limits around approved helper commands and generated-Skill children
     try:
@@ -1741,6 +1785,8 @@ def main(argv: list[str] | None = None) -> int:
     sta.add_argument("--wait", type=int, default=90, help="seconds to wait for the Core to answer")
     sub.add_parser("show", help="open the JARVES window (the Core keeps running)")
     sub.add_parser("hide", help="close the JARVES window (the Core keeps running)")
+    tk = sub.add_parser("talk", help="start a live voice conversation now, without the wake word (tests voice)")
+    tk.add_argument("--stop", action="store_true", help="end the open conversation")
     au = sub.add_parser("autostart", help="start JARVES invisibly at login: on / off / status")
     au.add_argument("action", choices=["on", "off", "status"])
     lg = sub.add_parser("logs", help="show the log (filter by --log-level / --module; -f to follow)")
@@ -1980,7 +2026,7 @@ def main(argv: list[str] | None = None) -> int:
             "wake": cmd_wake, "doctor": cmd_doctor, "cost": cmd_cost, "dashboard": cmd_dashboard,
             "diagnose": cmd_diagnose, "features": cmd_features, "help": cmd_help, "google": cmd_google,
             "backup": cmd_backup, "restore": cmd_restore, "usage": cmd_usage, "start": cmd_start,
-            "show": cmd_display, "hide": cmd_display, "autostart": cmd_autostart,
+            "talk": cmd_talk, "show": cmd_display, "hide": cmd_display, "autostart": cmd_autostart,
             "update": cmd_update, "browser": cmd_browser, "connect": cmd_connect, "telegram": cmd_telegram, "instagram": cmd_instagram, "home": cmd_home,
             "profile": profiles.cmd_profile, "approvals": cmd_approvals, "recall": recall.cmd_recall,
             "health": health_cli.cmd_health,

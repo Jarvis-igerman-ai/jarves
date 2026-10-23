@@ -35,13 +35,14 @@ def db(pcm):
 
 # ------------------------------------------------------------------------------------------------ name matching
 @pytest.mark.parametrize("text", ["Hey Jarvis.", "Hi, Jarvis!", "ok jarves", "Okay Jarvis, what time is it",
-                                  "היי ג'רוויס", "הי ג׳ארוויס", "Hello Jarvis", "heyjarvis", "Hey, Jervis."])
+                                  "היי ג'רוויס", "הי ג׳ארוויס", "Hello Jarvis", "heyjarvis", "Hey, Jervis.", "Hi, Javis.", "Hey Javis",
+                                  "hey Yarvis", "Hi Jarbis", "Hey Jarvish"])
 def test_name_match_accepts_natural_variants(text):
     assert name_match(text)
 
 
 @pytest.mark.parametrize("text", ["Hey Travis", "hey Charles", "Hey Jarvie", "Hey Harvey", "Jarvis", "",
-                                  "Thank you.", "service", "hey Marvin"])
+                                  "Thank you.", "service", "hey Marvin", "hey Davis", "hey Harvis", "hi Yarn", "hey Marvis"])
 def test_name_match_rejects_near_misses_and_the_bare_name(text):
     assert not name_match(text)
 
@@ -320,3 +321,11 @@ async def test_core_says_heard_speech_no_wake_match_and_shows_it(home, cfg):
         assert entry["by"] == "core" and entry["speech_db"] > -20     # first-run level calibration, levels only
     finally:
         await c.stop()
+
+
+def test_agc_keeps_the_calibrated_starting_gain():
+    agc = AutoGain(initial_gain_db=2.3)
+    for f in frames(tone(4000, amp=0.3)):               # loud speech: the tracker alone would drop to 0 dB
+        agc.process(f)
+    assert agc.state()["gain_db"] >= 2.3
+    assert AutoGain().state()["gain_db"] == 0.0
