@@ -575,8 +575,14 @@ async def test_dashboard_runtime_api_live_and_stopped(home, cfg):
         await core.stop()
     st, body = await asyncio.to_thread(rt_mod.api_runtime, ctx, None, None)
     assert not body["live"] and body["runtime"]["core"]["state"] == "stopped" and body["runtime"]["prefs"]["alerts_paused"]
-    st, body = await asyncio.to_thread(rt_mod.api_runtime_set, ctx, None, {"mic_muted": True})
-    assert st == 409
+    st, body = await asyncio.to_thread(rt_mod.api_runtime_set, ctx, None, {"display": "show"})
+    assert st == 409                                   # a window needs the running Core
+    # mute / pause are saved choices: they can be changed while the Core is stopped and apply at the next start
+    st, body = await asyncio.to_thread(rt_mod.api_runtime_set, ctx, None, {"mic_muted": True, "alerts_paused": False})
+    assert st == 200 and body["live"] is False and body["saved"]["mic_muted"] and not body["saved"]["alerts_paused"]
+    st, body = await asyncio.to_thread(rt_mod.api_runtime, ctx, None, None)
+    assert body["runtime"]["prefs"]["mic_muted"] and not body["runtime"]["prefs"]["alerts_paused"]
+    assert rt_mod.read_state(home)["prefs"]["mic_muted"] and rt_mod.alerts_paused(home) is False
     ctx.close()
 
 
