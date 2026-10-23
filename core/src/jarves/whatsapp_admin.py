@@ -17,6 +17,7 @@ import time
 from pathlib import Path
 
 from . import clilang, logs
+from . import whatsapp_archive as arc
 from . import whatsapp_bridge as wab
 from . import whatsapp_bridge_install as wbi
 from . import whatsapp_policy as pol
@@ -137,19 +138,132 @@ def send(home: Path, who: str, text: str, *, test_invoke: str | None = None) -> 
     return r
 
 
+# ---------------------------------------------------------------------- retention, purge, unlink, archive
+ARCHIVE_ON_EN = ("The WhatsApp archive keeps a second copy of your private messages on this computer for as long as "
+                 "you choose (90 days, a year or forever) so you can search them fast. It is encrypted (AES-256-GCM, "
+                 "key protected by Windows DPAPI) and never goes into backups, logs or diagnostics, but anyone signed "
+                 "in to this Windows account can open it through JARVES. Only chats you made readable are copied. "
+                 "WhatsApp syncs only limited history to a linked device, so 'forever' means from now on plus "
+                 "whatever history arrived. Message text goes to the AI only for messages you ask about. Turn off: "
+                 "jarvis whatsapp archive off; delete it: jarvis whatsapp archive wipe.")
+ARCHIVE_ON_HE = ("הארכיון שומר עותק שני של ההודעות הפרטיות שלך במחשב הזה, כמה זמן שתבחר (90 יום, שנה או לתמיד), "
+                 "כדי לחפש בהן מהר. הוא מוצפן (AES-256-GCM, המפתח מוגן ב-DPAPI של Windows) ולא נכנס לגיבויים, ליומנים "
+                 "או לאבחון, אבל מי שמחובר למשתמש ה-Windows הזה יכול לפתוח אותו דרך JARVES. מועתקים רק צ'אטים שהגדרת "
+                 "כקריאים. וואטסאפ מסנכרן למכשיר מקושר רק היסטוריה מוגבלת, לכן \"לתמיד\" אומר מעכשיו ועוד מה שהגיע. "
+                 "טקסט הודעות נשלח ל-AI רק להודעות שביקשת. לכיבוי: jarvis whatsapp archive off; למחיקה: "
+                 "jarvis whatsapp archive wipe.")
+
+
+KEEP_NOTE_EN = ("Messages are kept 14 days by default (jarvis whatsapp retention 90 changes it, up to 90). To keep "
+                "them for a year or forever and search them fast, optionally turn on the encrypted local archive: "
+                "jarvis whatsapp archive on. WhatsApp only syncs limited history to a linked device.")
+KEEP_NOTE_HE = ("ברירת המחדל: הודעות נשמרות 14 ימים (jarvis whatsapp retention 90 משנה עד 90). כדי לשמור שנה או "
+                "לתמיד ולחפש מהר אפשר להפעיל ארכיון מקומי מוצפן (לא חובה): jarvis whatsapp archive on. וואטסאפ "
+                "מסנכרן למכשיר מקושר רק היסטוריה מוגבלת.")
+
+
+def parse_keep(text: str) -> int:
+    """'14', '90', 'year', '1y', 'forever' -> days (0 = forever)."""
+    t = str(text).strip().lower()
+    if t in ("forever", "always", "for-ever", "לתמיד", "0"):
+        return 0
+    if t in ("year", "1y", "שנה"):
+        return 365
+    n = int(t)
+    if n < 1:
+        raise ValueError(t)
+    return n
+
+
+def set_retention(home: Path, *, days: int | None = None, keep_nothing: bool | None = None, archive_on: bool = False,
+                  by: str = "cli") -> dict:
+    """ONE retention backend (CLI + dashboard). `days` 0 = forever. Up to 90 days the bridge keeps them itself (as
+    before). Longer needs the archive switch: the bridge then keeps 90 and the archive holds the chosen time.
+    keep_nothing wipes the archive at once."""
+    body: dict = {}
+    if days is not None:
+        if days < 0:
+            raise BridgeError("WA_BAD_REQUEST", "days must be 1 or more, or forever", 400)
+        if days == 0 or days > 90:
+            if not archive_on:
+                raise BridgeError("WA_ARCHIVE_OFF", "more than 90 days needs the encrypted archive", 409)
+            body["days"] = 90
+        else:
+            body["days"] = days
+    if keep_nothing is not None:
+        body["keep_nothing"] = bool(keep_nothing)
+    r = admin(home).call("POST", "/retention", body=body) if body else {}
+    a = arc.get(home)
+    out = {**r, "archive": {}}
+    if days is not None:
+        out["archive"] = a.set_keep_days(days)
+    if keep_nothing:
+        a.wipe()
+    out["archive"].update(a.stats())
+    out["keep_days"] = out["archive"].get("keep_days") if archive_on else r.get("retention_days", days)
+    logs.info("whatsapp", "WA_RETENTION_CHANGED", "WhatsApp retention changed on the PC", days=days, by=by)
+    return out
+
+
+def purge_messages(home: Path, older_than_days: int | None = None) -> dict:
+    """Delete stored messages in the bridge AND the archive (rows and index)."""
+    r = admin(home).call("POST", "/purge", body={"older_than_days": older_than_days})
+    a = arc.get(home)
+    try:
+        r["archive_deleted"] = a.purge(older_than_days=older_than_days)
+    except arc.StoreLocked:
+        a.wipe()
+        r["archive_deleted"] = 0
+    return r
+
+
+def unlink_bridge(home: Path) -> dict:
+    r = admin(home).call("POST", "/unlink")
+    arc.get(home).wipe()
+    return r
+
+
+def search(home: Path, query: str, *, who: str = "", since: str = "", until: str = "", limit: int = 10,
+           archive_on: bool = False) -> dict:
+    """`jarvis whatsapp search`: the owner's own search at the PC. Archive when its switch is on, else the bridge's own
+    (retention-window) search. The bridge's chat list is the live read gate either way."""
+    now = time.time()
+    t0, t1 = arc.parse_when(since, now), arc.parse_when(until, now, end=True)
+    user = BridgeClient(home)
+    chats = user.chats(None, 500)
+    names = {c["id"]: pol.clean_text(c.get("name") or "")[0][:40] for c in chats}
+    only = None
+    if who.strip():
+        hits = wab.resolve(chats, who, wab.contacts_book(home))
+        if len(hits) != 1:
+            raise BridgeError("WA_AMBIGUOUS" if hits else "WA_UNKNOWN_CONTACT", "", 404)
+        only = hits[0]["id"]
+    if archive_on:
+        ms = arc.get(home).search(query, chat=only, since=t0, until=t1, readable=set(names), limit=limit)
+    else:
+        ms = [m for m in user.search(query, 200) if (only is None or m.get("chat") == only)
+              and (t0 is None or m.get("ts", 0) >= t0) and (t1 is None or m.get("ts", 0) < t1)][:limit]
+    rows = [wab.message_view(m, names) | {"chat": names.get(m.get("chat", ""), ""), "date": wab._ymd(m.get("ts", 0))}
+            for m in ms]
+    return {"messages": rows, "archive": bool(archive_on), "untrusted": True}
+
+
 # ---------------------------------------------------------------------- CLI
 ACTIONS = ("status", "start", "stop", "install", "setup", "link", "unlink", "mode", "allow", "remove", "scope", "inbox", "send", "kill",
-           "purge", "retention", "audit")
+           "purge", "retention", "audit", "search", "archive")
 
 
 def add_cli(sub) -> None:
     w = sub.add_parser("whatsapp", help="real WhatsApp access through the local bridge (PC only): status | start | "
                                         "stop | install | setup | link | unlink | mode off|read|send | allow read|send <contact> | "
                                         "remove read|send <contact> | scope | inbox | send <contact> \"<text>\" | "
-                                        "kill | purge | retention <days> | audit")
+                                        "kill | purge | retention <days|year|forever> | audit | search \"<words>\" | archive on|off|status|sync|wipe")
     w.add_argument("action", choices=ACTIONS)
     w.add_argument("args", nargs="*", help="mode: off|read|send; allow/remove: read|send <contact>; send: <contact> "
-                                          "<text>; retention: <days>; inbox: [contact]")
+                                          "<text>; retention: <days>|year|forever; inbox: [contact]; search: <words>; archive: on|off|status|sync|wipe")
+    w.add_argument("--from", dest="from_who", default="", help="search: only the chat with this contact")
+    w.add_argument("--since", default="", help="search: from this date (2026-09-01) or ago (30d, 2w, 3m, 1y)")
+    w.add_argument("--until", default="", help="search: up to this date (inclusive)")
     w.add_argument("--phone", default="", help="link: get an 8-character pairing code for this number instead of a QR")
     w.add_argument("--window", action="store_true", help="link: also show the QR on the dashboard WhatsApp page")
     w.add_argument("--override-watch", action="store_true",
@@ -232,6 +346,7 @@ def _setup(home: Path, a) -> int:
         print(f"mode: {set_mode(home, 'read').get('mode')}")
     else:
         print("Mode left as it is. Later: jarvis whatsapp mode read")
+    print(clilang.fmt(KEEP_NOTE_HE, KEEP_NOTE_EN))
     return 0
 
 
@@ -312,6 +427,55 @@ def _qr_window(ad: BridgeClient, first: dict) -> int:
     return result["rc"]
 
 
+def _arch_enabled(cfg, home) -> bool:
+    try:
+        from .cli import _cli_features
+        return bool(_cli_features(cfg, home).enabled(arc.FEATURE))
+    except Exception:
+        return False
+
+
+def _archive_cli(home: Path, cfg, a, args: list[str]) -> int:
+    from .cli import _cli_features
+    op = args[0] if args else "status"
+    f = _cli_features(cfg, home)
+    if op not in ("on", "off", "status", "sync", "wipe"):
+        print("usage: jarvis whatsapp archive on|off|status|sync|wipe", file=sys.stderr)
+        return 2
+    if op == "on":
+        print(clilang.fmt(ARCHIVE_ON_HE, ARCHIVE_ON_EN))
+        if not a.yes and not _confirm(clilang.fmt("להפעיל את הארכיון? [y/N] ", "Turn the archive on? [y/N] ")):
+            print("not changed")
+            return 1
+        st = f.set(arc.FEATURE, True, by="cli")
+        print(f"archive: {'on' if st.get('enabled') else 'off'}"
+              + ("" if st.get("active") else f" (not ready: {st.get('reason')})"))
+        print("Choose how long: jarvis whatsapp retention 90|year|forever")
+        return 0
+    if op == "off":
+        f.set(arc.FEATURE, False, by="cli")
+        print("archive: off (nothing new is copied and searches use only the bridge). The saved file stays; delete it: "
+              "jarvis whatsapp archive wipe")
+        return 0
+    if op == "wipe":
+        if not a.yes and not _confirm("Delete the whole WhatsApp archive and its search index on this PC? [y/N] "):
+            print("not changed")
+            return 1
+        arc.get(home).wipe()
+        print("archive wiped")
+        return 0
+    if op == "sync":
+        if not f.enabled(arc.FEATURE):
+            print("archive is off: jarvis whatsapp archive on")
+            return 1
+        res = arc.get(home).sync(BridgeClient(home))
+        arc.get(home).flush(force=True)
+        _print(res, a.json)
+        return 0 if not res.get("skipped") else 1
+    _print({"enabled": f.enabled(arc.FEATURE), **arc.get(home).stats()}, a.json)
+    return 0
+
+
 def cmd_whatsapp(a, cfg, home) -> int:
     logs.setup(home / "logs", cfg.log.level, console=False, privacy=cfg.log.privacy)
     home = Path(home)
@@ -324,7 +488,8 @@ def cmd_whatsapp(a, cfg, home) -> int:
                    "bridge_installed": wab.bridge_installed(home), "bridge_download": wbi.status(home),
                    "bridge": None if st is None else {k: st.get(k) for k in (
                        "engine", "version", "mode", "killed", "connection", "linked", "watch_days_left",
-                       "retention_days", "keep_nothing", "counts", "rate", "warnings_total", "key_protection")}}
+                       "retention_days", "keep_nothing", "counts", "rate", "warnings_total", "key_protection")},
+                   "archive": {"enabled": _arch_enabled(cfg, home), **arc.get(home).stats()}}
             _print(out, a.json)
             return 0 if s == "ok" else 1
         if a.action == "start":
@@ -345,7 +510,7 @@ def cmd_whatsapp(a, cfg, home) -> int:
             if not a.yes and not _confirm("Unlink the JARVES bridge and wipe its store on this PC? [y/N] "):
                 print("not changed")
                 return 1
-            admin(home).call("POST", "/unlink")
+            unlink_bridge(home)
             print("Unlinked and wiped. Check the phone: Linked devices should no longer list \"JARVES bridge\" "
                   "(if it does, log it out there).")
             return 0
@@ -413,16 +578,52 @@ def cmd_whatsapp(a, cfg, home) -> int:
                                           + (f" older than {a.older_than} days" if a.older_than else "") + "? [y/N] "):
                 print("not changed")
                 return 1
-            _print(admin(home).call("POST", "/purge", body={"older_than_days": a.older_than}), a.json)
+            _print(purge_messages(home, a.older_than), a.json)
             return 0
         if a.action == "retention":
-            body: dict = {}
+            from .cli import _cli_features
+            on = _cli_features(cfg, home).enabled(arc.FEATURE)
+            keep = None
             if args:
-                body["days"] = int(args[0])
-            if a.keep_nothing is not None:
-                body["keep_nothing"] = a.keep_nothing == "on"
-            _print(admin(home).call("POST", "/retention", body=body), a.json)
+                try:
+                    keep = parse_keep(args[0])
+                except ValueError:
+                    print("usage: jarvis whatsapp retention <days>|year|forever [--keep-nothing on|off]", file=sys.stderr)
+                    return 2
+            r = set_retention(home, days=keep, keep_nothing=None if a.keep_nothing is None else a.keep_nothing == "on",
+                              archive_on=on)
+            _print(r, a.json)
+            if keep is not None and (keep > 14 or keep == 0):
+                print(clilang.fmt("שימו לב: וואטסאפ מסנכרן למכשיר מקושר רק היסטוריה מוגבלת, אז \"לתמיד\" הוא מעכשיו "
+                                  "ועוד מה שהגיע.", "Note: WhatsApp only syncs limited history to a linked device, so "
+                                  "'forever' means from now on plus whatever history arrived."))
             return 0
+        if a.action == "search":
+            from .cli import _cli_features
+            if not args:
+                print("usage: jarvis whatsapp search \"<words>\" [--from <contact>] [--since <date>] [--until <date>]",
+                      file=sys.stderr)
+                return 2
+            try:
+                res = search(home, " ".join(args), who=a.from_who, since=a.since, until=a.until, limit=a.limit,
+                             archive_on=_cli_features(cfg, home).enabled(arc.FEATURE))
+            except arc.DateError:
+                print(f"WA_BAD_DATE: {clilang.fmt(wab.HE['WA_BAD_DATE'], 'use a date like 2026-09-01, or 30d / 2w / 3m / 1y')}")
+                return 2
+            if a.json:
+                _print(res, True)
+            else:
+                if not res["archive"]:
+                    print(clilang.fmt("(חיפוש רק בהודעות שהגשר שומר. לחיפוש בארכיון הארוך: jarvis whatsapp archive on)",
+                                      "(searching only what the bridge keeps. For the long archive: jarvis whatsapp archive on)"))
+                for m in res["messages"]:
+                    print(f"[{m['date']} {m['time']}] {m['chat']} / {m['from']}: "
+                          f"{m['text'] if m['kind'] == 'text' else m.get('media', '')}")
+                if not res["messages"]:
+                    print(clilang.fmt("לא נמצאו הודעות.", "No messages found."))
+            return 0
+        if a.action == "archive":
+            return _archive_cli(home, cfg, a, args)
         if a.action == "audit":
             _print(admin(home).call("GET", "/audit", params={"limit": a.limit}), a.json)
             return 0
@@ -471,7 +672,9 @@ def view(ctx) -> dict:
            "bridge_installed": wab.bridge_installed(ctx.home),
            "not_installed": {"en": wab.NOT_INSTALLED_EN, "he": wab.NOT_INSTALLED_HE},
            "bridge_download": wbi.status(ctx.home),
-           "tos": TOS_NOTE, "tos_he": TOS_NOTE_HE, "local": _local(ctx)}
+           "tos": TOS_NOTE, "tos_he": TOS_NOTE_HE, "local": _local(ctx),
+           "archive": {**arc.get(ctx.home).stats(), "feature": f.status(arc.FEATURE),
+                       "enabled": f.enabled(arc.FEATURE), "about": ARCHIVE_ON_EN, "about_he": ARCHIVE_ON_HE}}
     if st is not None and _local(ctx):
         try:
             ad = admin(ctx.home)
@@ -510,6 +713,24 @@ def dashboard_routes(register) -> None:
         return 200, {"chat": {"id": _ref(chat), "name": pol.clean_text(name)[0]},
                      "messages": [wab.message_view(m, {chat: name}) for m in res.get("messages", [])],
                      "untrusted": True}
+
+    def search_(ctx, _m, _b, q=None):
+        if not _local(ctx):
+            return PC_ONLY
+        from .features import _ctx_features
+        g = lambda k: str(((q or {}).get(k) or [""])[0])        # noqa: E731
+        if len(g("q").strip()) < 2:
+            return 400, {"error": "type at least two letters", "error_he": "כותבים לפחות שתי אותיות"}
+        try:
+            return 200, search(ctx.home, g("q"), who=g("from"), since=g("since"), until=g("until"), limit=30,
+                               archive_on=_ctx_features(ctx).enabled(arc.FEATURE))
+        except arc.DateError:
+            return 400, {"error": "bad date", "code": "WA_BAD_DATE", "error_he": wab.HE["WA_BAD_DATE"]}
+        except arc.StoreLocked:
+            return 423, {"error": "the archive does not open here", "code": "WA_STORE_LOCKED",
+                         "error_he": wab.HE["WA_STORE_LOCKED"]}
+        except BridgeError as e:
+            return _err(e)
 
     def post(fn):
         def h(ctx, _m, body):
@@ -560,16 +781,34 @@ def dashboard_routes(register) -> None:
                                     title="whatsapp_unlink", risk="high", why="you pressed Unlink on the dashboard")
         if not ok:
             raise BridgeError("WA_APPROVAL_MISSING", "not approved on the screen", 403)
-        return admin(ctx.home).call("POST", "/unlink")
+        return unlink_bridge(ctx.home)
 
     def retention(ctx, b):
-        body = {k: b[k] for k in ("days", "keep_nothing") if k in b}
-        return admin(ctx.home).call("POST", "/retention", body=body)
+        from .features import _ctx_features
+        days = b.get("days")
+        if days is not None and (not isinstance(days, int) or isinstance(days, bool)):
+            raise BridgeError("WA_BAD_REQUEST", "days must be a number (0 = forever)", 400)
+        keep = b.get("keep_nothing")
+        return set_retention(ctx.home, days=days, keep_nothing=keep if isinstance(keep, bool) else None,
+                             archive_on=_ctx_features(ctx).enabled(arc.FEATURE), by="dashboard")
+
+    def archive_(ctx, b):
+        from .features import _ctx_features, switch
+        op = str(b.get("op") or "")
+        if op in ("on", "off"):
+            st = switch(_ctx_features(ctx), arc.FEATURE, op == "on", by="dashboard")
+            return {"ok": True, "feature": st, "archive": arc.get(ctx.home).stats()}
+        if op == "wipe":
+            if b.get("confirm") is not True:
+                raise BridgeError("WA_BAD_REQUEST", "this cannot be undone: send {\"confirm\": true}", 400)
+            arc.get(ctx.home).wipe()
+            return {"ok": True, "archive": arc.get(ctx.home).stats()}
+        raise BridgeError("WA_BAD_REQUEST", "op must be on, off or wipe", 400)
 
     def purge(ctx, b):
         if b.get("confirm") is not True:
             raise BridgeError("WA_BAD_REQUEST", "this cannot be undone: send {\"confirm\": true}", 400)
-        return admin(ctx.home).call("POST", "/purge", body={"older_than_days": b.get("older_than_days")})
+        return purge_messages(ctx.home, b.get("older_than_days"))
 
     def scope(ctx, b):
         return admin(ctx.home).call("POST", "/read_scope", body={k: b[k] for k in ("groups", "all_direct")
@@ -590,7 +829,8 @@ def dashboard_routes(register) -> None:
     register("GET", r"/api/whatsapp", get)
     register("GET", r"/api/whatsapp/messages", messages)
     register("GET", r"/api/whatsapp/link", link_state)
+    register("GET", r"/api/whatsapp/search", search_)
     for path, fn in (("mode", mode), ("allow", allow_), ("kill", kill_), ("link", link), ("unlink", unlink),
-                     ("retention", retention), ("purge", purge), ("scope", scope), ("start", start), ("setup", setup),
+                     ("retention", retention), ("archive", archive_), ("purge", purge), ("scope", scope), ("start", start), ("setup", setup),
                      ("install", install)):
         register("POST", rf"/api/whatsapp/{path}", post(fn))

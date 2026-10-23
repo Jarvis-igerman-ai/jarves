@@ -63,10 +63,11 @@ ADDON_MODULES = ("jarves.telegram_channel", "jarves.instagram_channel", "jarves.
 # Privacy-sensitive or outward-acting: OFF on the first run whatever else says; ON only after an explicit yes.
 SAFE_OFF = frozenset({"camera", "face_recognition", "camera_when_away", "gmail_send", "calendar_write",
                       "dashboard_lan", "mobile_access", "browser", "telegram", "home_assistant", "instagram", "helper",
-                      "helper_readonly_auto", "whatsapp_bridge", "whatsapp_send", "agent_orchestrator", "assisted_dialing"})
+                      "helper_readonly_auto", "whatsapp_bridge", "whatsapp_send", "whatsapp_archive", "agent_orchestrator",
+                      "assisted_dialing"})
 # Registered and grouped (so coverage checks see them) but never offered by the wizard: the owner decided (20 Oct)
 # that the Helper asks for EVERY command; the read-only allow-list exists only as `jarvis features on ...`.
-WIZARD_HIDDEN = frozenset({"helper_readonly_auto",
+WIZARD_HIDDEN = frozenset({"helper_readonly_auto", "whatsapp_archive",     # archive: explained and confirmed on its own
                            "whatsapp_send"})   # SW-V4 F: send mode only after 14 read-only days: never a wizard offer
 GOOGLE_FEATURES = ("google_calendar", "calendar_write", "gmail_read", "gmail_send", "google_contacts")
 # (id, Hebrew, English, feature ids). A feature missing here lands in "other" (never hidden); a test demands
@@ -85,7 +86,7 @@ GROUPS: tuple[tuple[str, str, str, tuple[str, ...]], ...] = (
                                               "autonomy", "morning_briefing", "text_chat", "goals", "goal_plans", "goal_done_line", "adaptive_memory", "prefs_in_prompt",
                                               "proactive_intel", "proactive_signals", "dev_manager", "dev_status")),
     ("channels", "ערוצים ובית חכם", "Channels & smart home", ("telegram", "instagram", "whatsapp_handoff",
-                                                                  "whatsapp_bridge", "whatsapp_send", "home_assistant")),
+                                                                  "whatsapp_bridge", "whatsapp_send", "whatsapp_archive", "home_assistant")),
     ("phone", "שיחות טלפון", "Phone calls", ("assisted_dialing",)),
     ("dashboard", "לוח בקרה וטלפון", "Dashboard & phone", ("dashboard", "dashboard_lan", "mobile_access", "web_chat", "context_trace")),
     ("updates", "עדכונים וגיבוי", "Updates & backup", ("update_check", "beta_channel", "release_signoff", "setup_tour", "backup")),
@@ -289,6 +290,9 @@ def hint(fid: str, ok: bool, why: str) -> dict:
     if fid == "whatsapp_bridge":
         return {"command": "jarvis whatsapp link", "he": "צריך לקשר את וואטסאפ (מכשיר מקושר, קריאה בלבד קודם):  "
                 "jarvis whatsapp link", "en": "Link WhatsApp (a linked device, read-only first):  jarvis whatsapp link"}
+    if fid == "whatsapp_archive":
+        return {"command": "jarvis whatsapp archive on", "he": "ארכיון מוצפן להודעות לטווח ארוך:  jarvis whatsapp archive on",
+                "en": "Encrypted long-term message archive:  jarvis whatsapp archive on"}
     if fid == "whatsapp_send":
         return {"command": "jarvis whatsapp mode send", "he": "שליחה רק אחרי 14 ימי קריאה שקטים ואישור שלך:  "
                 "jarvis whatsapp mode send", "en": "Send only after 14 quiet read-only days and your go:  "
@@ -1187,6 +1191,9 @@ BUNDLE: dict[str, list[Callable[[], tuple[bool, str]]]] = {
                         _mod("websockets.asyncio.client"), _data("jarves", "dashboard_static/whatsapp.js"),
                         _data("jarves.guides", "data/whatsapp_bridge.toml")],
     "whatsapp_send": [_mod("jarves.whatsapp_bridge"), _mod("jarves.approvals"), _mod("jarves.approval_popup")],
+    "whatsapp_archive": [_mod("jarves.whatsapp_archive"), _mod("jarves.whatsapp_store"),
+                         _mod("cryptography.hazmat.primitives.ciphers.aead"),
+                         _data("jarves.guides", "data/whatsapp_archive.toml")],
     "assisted_dialing": [_mod("jarves.dialing"), _win(_mod("winreg")), _data("jarves", "dashboard_static/dialing.js"),
                          _data("jarves.guides", "data/assisted_dialing.toml")],
     "morning_briefing": [_mod("jarves.briefing"), _mod("httpx"), _data("jarves.guides", "data/morning_briefing.toml")],

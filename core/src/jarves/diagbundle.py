@@ -129,7 +129,8 @@ def _inventory(home: Path, salt: bytes | None = None) -> list[dict]:
     out = []
     for p in sorted(home.rglob("*")):
         rel = p.relative_to(home).as_posix()
-        if p.is_file() and not rel.startswith(("backups/", "logs/", "profiles/")) and rel.count("/") < 3:
+        if p.is_file() and not rel.startswith(("backups/", "logs/", "profiles/", "whatsapp_bridge/archive/")) \
+                and rel.count("/") < 3:       # the encrypted WhatsApp archive is not even listed
             shown = rel if _KNOWN_FILE.match(rel) else (
                 f"{rel.split('/')[0] + '/' if '/' in rel else ''}{logs.pii_hash(rel, salt or _SALT)}{p.suffix[:8]}")
             out.append({"file": shown, "size": p.stat().st_size})

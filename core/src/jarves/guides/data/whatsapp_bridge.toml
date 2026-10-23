@@ -3,7 +3,7 @@ category = "everyday"
 pages = ["whatsapp"]
 features = ["whatsapp_bridge", "whatsapp_send"]
 aliases = ["וואטסאפ אמיתי", "לקרוא וואטסאפ", "מה חדש בוואטסאפ", "הודעות בוואטסאפ", "whatsapp bridge", "read whatsapp", "whatsapp inbox", "link whatsapp", "קישור וואטסאפ"]
-links = ["whatsapp", "privacy", "helper"]
+links = ["whatsapp", "privacy", "helper", "whatsapp_archive"]
 error_codes = ["WA_BRIDGE_DOWN", "WA_NOT_INSTALLED", "BRIDGE_NOT_PUBLISHED", "BRIDGE_OFFLINE", "BRIDGE_BAD_SIGNATURE", "BRIDGE_CHECKSUM", "BRIDGE_TAMPERED", "WA_NOT_SET_UP", "WA_KILLED", "WA_MODE_OFF", "WA_MODE_READ", "WA_NOT_ALLOWED", "WA_NO_HISTORY", "WA_RATE_LIMITED", "WA_QUIET_HOURS", "WA_STORE_LOCKED", "WA_UNKNOWN_CONTACT", "WA_AMBIGUOUS", "WA_APPROVAL_MISSING"]
 title_he = "וואטסאפ אמיתי: לקרוא הודעות (ובהמשך לשלוח)"
 title_en = "Real WhatsApp: read messages (and later send)"
@@ -21,8 +21,8 @@ test_he = "jarvis whatsapp status מראה מחובר, מצב ומספר הוד�
 test_en = "jarvis whatsapp status shows connected, the mode and the unread count."
 cost_he = "חינם. טקסט של הודעה עובר למודל ה-AI רק כשאתם שואלים עליה."
 cost_en = "Free. A message's text goes to the AI model only when you ask about it."
-privacy_he = "זה לקוח לא רשמי: הוא עלול לסתור את תנאי השימוש של וואטסאפ ויש סיכון לחסימה זמנית או קבועה של המספר (אישרתם את זה למספר הראשי, קודם לקריאה בלבד). המפתחות של החיבור מוצפנים במחשב (DPAPI) ולא נכנסים לגיבויים, ליומנים או לאבחון. הודעות נשמרות 14 יום (ניתן לשנות או לא לשמור כלום), מדיה לא יורדת אף פעם. ביומנים יש רק קודים, מספרים ותמצית מוצפנת של הצ'אט, בלי טקסט, שמות או מספרי טלפון. ניתוק בטלפון (מכשירים מקושרים > JARVES bridge > התנתקות) עובד תמיד."
-privacy_en = "This is an unofficial client: it may go against WhatsApp's Terms and there is a risk of a temporary or permanent ban of the number (you accepted this for your main number, read-only first). The connection keys are encrypted on this computer (DPAPI) and never go into backups, logs or diagnostics. Messages are kept 14 days (changeable, or keep nothing); media is never downloaded. Logs hold only codes, counts and a chat hash, never text, names or phone numbers. Unlinking on the phone (Linked devices > JARVES bridge > Log out) always works."
+privacy_he = "זה לקוח לא רשמי: הוא עלול לסתור את תנאי השימוש של וואטסאפ ויש סיכון לחסימה זמנית או קבועה של המספר (אישרתם את זה למספר הראשי, קודם לקריאה בלבד). המפתחות של החיבור מוצפנים במחשב (DPAPI) ולא נכנסים לגיבויים, ליומנים או לאבחון. הודעות נשמרות 14 יום (ניתן לשנות עד 90, לא לשמור כלום, או לשמור שנה ויותר עם הארכיון המוצפן האופציונלי: המדריך whatsapp_archive), מדיה לא יורדת אף פעם. ביומנים יש רק קודים, מספרים ותמצית מוצפנת של הצ'אט, בלי טקסט, שמות או מספרי טלפון. ניתוק בטלפון (מכשירים מקושרים > JARVES bridge > התנתקות) עובד תמיד."
+privacy_en = "This is an unofficial client: it may go against WhatsApp's Terms and there is a risk of a temporary or permanent ban of the number (you accepted this for your main number, read-only first). The connection keys are encrypted on this computer (DPAPI) and never go into backups, logs or diagnostics. Messages are kept 14 days (changeable up to 90, or keep nothing, or a year and more with the optional encrypted archive: the whatsapp_archive guide); media is never downloaded. Logs hold only codes, counts and a chat hash, never text, names or phone numbers. Unlinking on the phone (Linked devices > JARVES bridge > Log out) always works."
 
 [[steps]]
 he = "אם רכיב הגשר לא מותקן: בלוח הבקרה, בעמוד וואטסאפ, לוחצים \"הורדת גשר הוואטסאפ\" (או jarvis whatsapp install). הקובץ מורד פעם אחת, רק כשלחצתם, מרשימה חתומה של JARVES; החתימה, ה-SHA256 והגודל נבדקים לפני ההתקנה, והקובץ נבדק שוב לפני כל הפעלה. אין צורך לבנות כלום. אם ההורדה עוד לא פורסמה תופיע הודעה ברורה ולא קורה כלום."
