@@ -1,3 +1,10 @@
+## Release notes by version (dashboard, CLI, installer page) — 23 Oct 2026
+
+- Owner request: see release notes per version in the dashboard, and an HTML page with the notes when installing. New `jarves/release_notes.py` parses CHANGELOG.md: dashboard page `#/releasenotes` (version picker, EN/HE), `GET /api/release-notes[?version=]`, `jarvis release-notes [--version V] [--list] [--open] [--he]` (writes `<home>/release-notes/release-notes-<ver>.html`, all text escaped; a beta shows its stable version's notes).
+- Packaging: `build_windows.ps1` copies CHANGELOG.md into the stage (the installed app finds it in the program folder); `jarves.iss` adds a finish-page checkbox "Show what is new" (on by default, skipped for silent installs, so in-app silent updates do not pop it).
+- Guide: new step in `updates.toml` (EN+HE); CLI parity unchanged (covered by `update_check` -> `update`); Hebrew strings via `catalog_add.py`. Tests: `core/tests/test_release_notes.py`; guides, cli_parity and the local pre-push gate pass.
+- NOT verified: the real Inno Setup build, the finish-page checkbox and the page opening in a real browser on Windows (CI builds the installer; owner to confirm on the next beta install). Open question: also auto-open the page after a silent in-app update?
+
 ## Admin-key prompt for personal OpenAI accounts — 23 Oct 2026
 
 - Owner report: on a personal OpenAI account the guided setup text ("as the organization owner") did not match what they see. Reworded the `jarvis connect openai-admin` steps, the "Real API bill" guide (he/en) and `OPENAI_ADMIN_KEY.md`: a personal account is its own organization and its owner; if the Admin keys page is missing, skip (`s`), everything works and cost shows as an estimate. No logic change; key handling unchanged.
