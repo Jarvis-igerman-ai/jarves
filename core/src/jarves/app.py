@@ -348,11 +348,6 @@ class Core:
         self.health.set("delegation", "ok", self.delegation_state.describe())
         self._check_ai()
         self.limits_refresh()
-        try:                                            # SW-V4 O preflight (<= 1.5 s) while the ports are still free
-            self.preflight = _preflight.run_core(self)
-        except Exception:
-            self.preflight = None
-            logs.error("health", "PREFLIGHT_FAILED", "preflight did not run", exc=True)
 
         self.link = GodotLink(c.link.host, c.link.port, load_token(self.home / "link_token"), self.health,
                               self.on_message, self._face_connected)
@@ -408,6 +403,12 @@ class Core:
                         detail, "" if quality == "cloud" else
                         ("ChatGPT plan has no voice; use ai.connection = \"combined\" + OPENAI_API_KEY for the premium voice"
                          if c.ai.connection == "chatgpt" else "run `jarvis key` for the high-quality voice"))
+
+        try:                                            # Preflight after every Skill is attached, while the link port is still free
+            self.preflight = _preflight.run_core(self)
+        except Exception:
+            self.preflight = None
+            logs.error("health", "PREFLIGHT_FAILED", "preflight did not run", exc=True)
 
         # Accept the room/face connection only after audio and speech are initialized.
         await self.link.start()
@@ -1169,7 +1170,7 @@ class Core:
                 logs.debug("tts", "CHIME_FAILED", "could not play the chime")
 
     async def _start_live(self, *, greeting: str | None = None, hold_output: bool = False, ack: bool = False) -> None:
-        if self.stopping:
+        if self.stopping or getattr(self.dev, "mic_muted", False):
             return
         if self.live is not None or self._voice_connecting:
             # QA 19 Oct (suite_voice): a face connecting after a failed startup started a SECOND live session while

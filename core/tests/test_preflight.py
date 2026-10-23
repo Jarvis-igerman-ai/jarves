@@ -123,7 +123,7 @@ def test_a_red_item_degrades_only_its_component():
     assert "features" not in h.components and "core" not in h.components     # never invented
 
 
-async def test_core_runs_preflight_before_ready_and_stores_it(home, cfg):
+async def test_core_runs_preflight_before_ready_and_stores_it(home, cfg, monkeypatch):
     from conftest import FakeSTT, FakeTTS
     from jarves.app import Core
     from jarves.diag import db
@@ -133,8 +133,20 @@ async def test_core_runs_preflight_before_ready_and_stores_it(home, cfg):
     (home / "health.json").write_text(json.dumps({"core": "ready", "ts": time.time() - 30}))    # last run crashed
     c = Core(cfg, home, audio=SimAudio(), player=FakePlayer(), stt=FakeSTT(), tts=FakeTTS(), console_logs=False,
              use_real_audio=False)
+    real_preflight = pf.run_core
+    attached = []
+
+    def after_attachment(core):
+        # No devices: inspect the registry at the actual lifecycle boundary.
+        attached.append(set(core.registry.skills))
+        assert {"camera", "appearance", "profiles", "self_manage"} <= attached[-1]
+        assert core.dev is not None and core.runtime is not None
+        return real_preflight(core)
+
+    monkeypatch.setattr(pf, "run_core", after_attachment)
     await c.start()
     try:
+        assert len(attached) == 1
         assert c.preflight is not None and c.preflight["within_budget"]
         assert statuses(c.preflight)["shutdown"] == "amber"
         assert statuses(c.preflight)["ports"] == "green"                     # checked before the link opened

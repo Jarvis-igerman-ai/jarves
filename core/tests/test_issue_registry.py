@@ -279,3 +279,81 @@ def test_triage_groups_ranks_and_spots_fixed_issues(tmp_path):
     f = tmp_path / "i.json"
     f.write_text(json.dumps(issues), encoding="utf-8")
     assert t.main(["--json", str(f), "--changelog", str(tmp_path / "none.md")]) == 0
+
+
+@pytest.mark.parametrize("source", ["monitor", "selfcheck"])
+def test_unchanged_finding_snapshot_does_not_recount_or_reopen(reg, source):
+    finding = {"fingerprint": "test:repeat", "category": "logs", "severity": "high", "count": 2,
+               "source": source, "evidence": {"failures": 2}}
+    if source == "selfcheck":
+        finding["observation_run"] = 3
+    ir.ingest_findings(reg, [finding])
+    issue = reg.list()[0]
+    first = issue["last_seen"]
+    reg.clock.t += 600
+    ir.ingest_findings(reg, [finding])
+    assert reg.get(issue["id"])["count"] == 1
+    assert reg.get(issue["id"])["last_seen"] == first
+    reg.set_status(issue["id"], "fixed")
+    reg.version = "4.0.2"
+    # A different scan time / installed version / translated title is no new observation.
+    finding.update(last_seen=reg.clock.t, title="private local note not persisted as identity")
+    ir.ingest_findings(reg, [finding])
+    unchanged = reg.get(issue["id"])
+    assert unchanged["count"] == 1 and unchanged["status"] == "fixed"
+    assert unchanged["fixed_in"] == "4.0.1"
+    assert re.fullmatch(r"[0-9a-f]{64}", unchanged["observation"])
+    if source == "selfcheck":
+        finding["observation_run"] = 4
+    else:
+        finding["evidence"]["failures"] = 3
+    ir.ingest_findings(reg, [finding])
+    changed = reg.get(issue["id"])
+    assert changed["count"] == 2 and changed["status"] == "new"
+
+
+def test_legacy_finding_baselines_identity_without_reopening(reg):
+    evidence = {"category": "logs", "count": 2, "finding": "legacy"}
+    old = reg.record("health", "FINDING_legacy", "P1", evidence, source="diag")
+    reg.set_status(old["id"], "fixed")
+    reg.version = "4.0.2"
+    finding = {"fingerprint": "legacy", "category": "logs", "severity": "high", "count": 2,
+               "observation_run": 8}
+    ir.ingest_findings(reg, [finding])
+    current = reg.get(old["id"])
+    assert current["status"] == "fixed" and current["count"] == 1
+    finding["count"] = 3
+    ir.ingest_findings(reg, [finding])
+    assert reg.get(old["id"])["status"] == "new" and reg.get(old["id"])["count"] == 2
+
+
+def test_identical_monitor_finding_after_recovery_is_a_new_occurrence(reg):
+    finding = {"fingerprint": "recur", "category": "logs", "severity": "high", "count": 2}
+    ir.ingest_findings(reg, [finding])
+    issue = reg.list()[0]
+    reg.set_status(issue["id"], "fixed")
+    ir.ingest_findings(reg, [])  # the detector no longer finds it
+    ir.ingest_findings(reg, [finding])  # same count, genuinely back after recovery
+    current = reg.get(issue["id"])
+    assert current["status"] == "new" and current["count"] == 2
+
+
+@pytest.mark.parametrize("code,origin,defect", [
+    ("FEATURE_NEEDS_APPROVAL", "model", False),
+    ("TOOL_UNTRUSTED_TURN", "model", False),
+    ("TOOL_DECLINED", "model", False),
+    ("FEATURE_OFF", "model", False),
+    ("SKILL_DISABLED", "model", False),
+    ("TOOL_FORBIDDEN", "model", False),
+    ("TOOL_BAD_ARGS", "user", False),
+    ("TOOL_BAD_ARGS", "model", True),
+    ("TOOL_CRASH", "model", True),
+    ("TOOL_TIMEOUT", "model", True),
+    ("PEAR_DOWN", "model", True),
+])
+def test_expected_tool_refusals_do_not_create_failure_bug_reports(reg, code, origin, defect):
+    sink = ir.IssueSink(reg, threshold=3)
+    for _ in range(5):
+        sink.emit(_rec("TOOL_RESULT", tool="test", ok=False, result_code=code, origin=origin))
+    sink.flush()
+    assert bool(reg.list()) == defect

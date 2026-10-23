@@ -19,6 +19,9 @@ var _active := true
 
 
 func _ready() -> void:
+	if "--no-core" in OS.get_cmdline_user_args():
+		_active = false
+		return                          # offline checks/previews must never connect to an owner's running Core
 	for a in OS.get_cmdline_user_args():
 		if a.begins_with("--core-port="):
 			url = "ws://127.0.0.1:%s" % a.substr(12)

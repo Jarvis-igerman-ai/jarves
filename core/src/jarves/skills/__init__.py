@@ -44,6 +44,15 @@ DEFAULT_ALLOWED_ACTIONS = frozenset({"remember", "music_play", "music_pause", "m
                                      "music_stop", "music_volume", "music_mute", "music_unmute",
                                      # settings Skill: one appended line (backed up, undoable) / allowlisted keys
                                      "workspace_note", "set_voice", "set_setting"})
+# Expected policy/configuration outcomes remain in the timeline, but are not runtime defects.
+EXPECTED_TOOL_REFUSALS = frozenset({"FEATURE_NEEDS_APPROVAL", "TOOL_UNTRUSTED_TURN", "TOOL_DECLINED",
+                                    "FEATURE_OFF", "SKILL_DISABLED", "TOOL_FORBIDDEN"})
+
+
+def expected_tool_refusal(code: str | None, origin: str | None = None) -> bool:
+    return code in EXPECTED_TOOL_REFUSALS or (code == "TOOL_BAD_ARGS" and origin == "user")
+
+
 UNTRUSTED_GRACE_S = 3.0    # see SkillRegistry.new_turn
 REPEAT_REPLAY_S = 30.0     # V4-VC-3: an identical successful action repeated in a tainted turn gets its result back
 # Which conversation a tool call belongs to ("voice", "text", default "default": scheduler / other callers). The
@@ -378,7 +387,12 @@ class SkillRegistry:
             raise
 
     async def call(self, name: str, raw_args: dict | str | None = None, *, origin: Origin = "model") -> ToolResult:
+        t_run = time.monotonic()
+        approval_wait = self.confirm_elapsed()
         res = await self._call(name, raw_args, origin=origin)
+        log = logs.info if res.ok else logs.warn
+        log("skills", "TOOL_RESULT", "tool finished", tool=name, ok=res.ok, result_code=res.code, origin=origin,
+            ms=round(max(0.0, time.monotonic() - t_run - (self.confirm_elapsed() - approval_wait)) * 1000))
         _tool_seen(name, res.ok, res.code, res.message)   # terminal + web chat: one line per call (TOOL_SINK)
         return res
 
@@ -401,10 +415,10 @@ class SkillRegistry:
             args = tool.args.model_validate(raw_args or {})
         except ValidationError as e:        # never log the input values (may be private)
             bad = [".".join(map(str, err.get("loc", ()))) for err in e.errors(include_input=False)]
-            logs.warn("skills", "TOOL_BAD_ARGS", "invalid tool arguments", tool=name, bad_fields=bad)
+            logs.warn("skills", "TOOL_BAD_ARGS", "invalid tool arguments", tool=name, origin=origin, bad_fields=bad)
             return ToolResult(False, f"invalid arguments for {name}", code="TOOL_BAD_ARGS")
         except ValueError:
-            logs.warn("skills", "TOOL_BAD_ARGS", "invalid tool arguments", tool=name)
+            logs.warn("skills", "TOOL_BAD_ARGS", "invalid tool arguments", tool=name, origin=origin)
             return ToolResult(False, f"invalid arguments for {name}", code="TOOL_BAD_ARGS")
         key = (ROUTE.get(), name, json.dumps(args.model_dump(mode="json"), sort_keys=True, ensure_ascii=False,
                                             default=str))
@@ -424,7 +438,6 @@ class SkillRegistry:
         refused = await self._authorize(tool, args, origin)
         if refused is not None:
             return refused
-        t_run = time.monotonic()
         try:
             res = await self._run(tool, args)
         except TimeoutError:
@@ -440,9 +453,6 @@ class SkillRegistry:
             now = self.clock()
             self._recent_ok = {k: v for k, v in self._recent_ok.items() if now - v[0] < REPEAT_REPLAY_S}
             self._recent_ok[key] = (now, res, self.asks > asked0)    # approved by the owner this call
-        log = logs.info if res.ok else logs.warn
-        log("skills", "TOOL_RESULT", "tool finished", tool=name, ok=res.ok, result_code=res.code, origin=origin,
-            ms=round((time.monotonic() - t_run) * 1000))      # SW-V4 O: tool p50/p95 in the health monitor
         return self._hinted(skill, tool, res) if not res.ok else res
 
     def _hinted(self, skill: Skill, tool: Tool, res: ToolResult) -> ToolResult:

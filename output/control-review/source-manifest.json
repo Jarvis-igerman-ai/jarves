@@ -1,0 +1,31 @@
+{
+  "kind": "automatic actual project render; no Core, sensors, cloud or owner visual approval",
+  "base_commit": "a997b3d9935d38253c86f8e9642052d48b8d9f39",
+  "renderer": "Godot 4.7.2 OpenGL compatibility, dummy audio, offscreen window",
+  "source_sha256": {
+    "godot/main.gd": "0a95391170cc0e33601bec2507e3626b1e07c44f9a78380fe1587d6209664612",
+    "godot/face/assistant_ui.gd": "4919e74894f8d2b7f3a93c52517ab3ce979c6f7c073a2f85f7afb186ec9318d6",
+    "godot/face/appearance.gd": "7bd11503ee68e11303d70c44bb714f92c1c2688e0d17b138d924bf4088c08028",
+    "godot/face/avatar_2d.gd": "bcac1cfbecfc10e60742d6309fad8391dba4f7b0e97c0abaae1d30e6a879830f",
+    "godot/face/avatar_2d.gdshader": "f0a90dd964e34400b7e56e6094421821f2ca22c67aaabdf9262cdbb3f9d5538f",
+    "godot/face/avatar_3d.gd": "8da837eae56ce3ac22dc34e1dd70a12d73879bb1bf25bcc10b8de6aca33a59c0",
+    "godot/face/avatar_3d_head.gdshader": "48e90f59608299e57b584eb64e55ad7d3c85aa6b57dafed050a6f0db164bd2f0",
+    "godot/face/core_link.gd": "a4efdfb8b35ab1ff423cd34a935736ee129eb07169dff71725b00c6aa691c8ab"
+  },
+  "artifacts": {
+    "output/control-review/room-avatar2d.png": {
+      "bytes": 530105,
+      "sha256": "fdaa727b8aa2d24568b5ad165c16548518d5bf2b559b782e5ebfc8dd5ce6a9f3"
+    },
+    "output/control-review/room-avatar3d.png": {
+      "bytes": 532177,
+      "sha256": "a90bd368a80e83f577617d6bb6cfb7a84d95a7363eb75aba1b15117dc0e36caa"
+    },
+    "output/control-review/room-controls.png": {
+      "bytes": 504679,
+      "sha256": "eb491cfeaf2e1a35f830eac435209acee4b546011cbb327d0384edd10e314080"
+    }
+  },
+  "reproduce": "Godot --path godot --audio-driver Dummy --rendering-method gl_compatibility --position -2500,-2500 -- --shot=<absolute.png> --no-core --hide-ui --cam=closeup --appearance=avatar2d (or avatar3d); controls: omit --no-core/--hide-ui/--appearance and use --core-port=49159",
+  "source_hash_format": "Git-normalized LF bytes (CRLF -> LF); image hashes use raw bytes"
+}

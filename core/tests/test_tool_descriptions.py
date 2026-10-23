@@ -131,6 +131,7 @@ ROUTES = [
     ("show yourself", "show_yourself"), ("תופיע", "show_yourself"),
     ("hide yourself", "hide_yourself"), ("תיעלם", "hide_yourself"),
     ("end the conversation", "end_conversation"), ("תסגור את השיחה", "end_conversation"), ("תסגור", "end_conversation"),
+    ("stop hearing me", "mute_microphone"), ("אל תקשיב לי", "mute_microphone"),
     ("quit", "quit_jarves"), ("שט דאון", "quit_jarves"), ("תסגור את עצמך לגמרי", "quit_jarves"),
     ("change a setting for me", "set_setting"), ("תשנה הגדרה של הקול", "set_setting"),
     ("show me what you found", "conversation_show"), ("כן, תציג לי", "conversation_show"),
