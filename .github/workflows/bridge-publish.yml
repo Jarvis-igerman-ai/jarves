@@ -1,0 +1,107 @@
+# Manual, owner-triggered: build the pinned WhatsApp bridge reproducibly (Windows), then publish it signed to the
+# rolling release `whatsapp-bridge` of the public releases repo (docs/RELEASE_HOSTING.md). Never runs on push/PR/schedule.
+# Secrets (RELEASES_TOKEN, JARVES_UPDATE_SIGNING_KEY) exist ONLY in the one "Publish" step of the publish job.
+name: Publish WhatsApp bridge
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Bridge version; empty = the version in packaging/bridge_pin.json (a different value is refused)"
+        required: false
+        default: ""
+        type: string
+      dry_run:
+        description: "Dry run: build and verify, print what would be published, publish nothing (run this first)"
+        required: false
+        default: true
+        type: boolean
+permissions: {}
+concurrency:
+  group: bridge-publish
+  cancel-in-progress: false
+jobs:
+  build:
+    name: Build bridge (Windows, reproducible, no secrets)
+    runs-on: windows-2025
+    timeout-minutes: 25
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e  # v7.0.0
+        with:
+          go-version: "1.27.0"
+          cache-dependency-path: bridge/whatsapp/go.sum
+      - name: Resolve the version (must equal packaging/bridge_pin.json)
+        id: ver
+        shell: pwsh
+        env:
+          INPUT_VERSION: ${{ inputs.version }}
+        run: |
+          $pin = Get-Content packaging/bridge_pin.json -Raw | ConvertFrom-Json
+          $v = "$env:INPUT_VERSION".Trim()
+          if (-not $v) { $v = $pin.version }
+          if ($v -ne $pin.version) { throw "version $v differs from packaging/bridge_pin.json ($($pin.version)); change the pin in a reviewed commit first" }
+          if ($v -notmatch '^\d+\.\d+\.\d+$') { throw "bad bridge version" }
+          "version=$v" >> $env:GITHUB_OUTPUT
+      - name: Build (pinned go1.27.0, go mod verify, vet, test, reproducible build)
+        shell: pwsh
+        env:
+          BRIDGE_VERSION: ${{ steps.ver.outputs.version }}
+        run: |
+          ./scripts/build_whatsapp_bridge.ps1 -Version $env:BRIDGE_VERSION
+          if ($LASTEXITCODE -ne 0) { throw "Bridge build failed" }
+      - name: Rebuild and compare SHA-256 (reproducibility)
+        shell: pwsh
+        env:
+          BRIDGE_VERSION: ${{ steps.ver.outputs.version }}
+        run: |
+          ./scripts/build_whatsapp_bridge.ps1 -Version $env:BRIDGE_VERSION -Verify bridge/whatsapp/dist/whatsapp_bridge.exe.sha256
+          if ($LASTEXITCODE -ne 0) { throw "Bridge build is not reproducible" }
+      - name: Compare with packaging/bridge_pin.json
+        shell: pwsh
+        run: |
+          $pin = Get-Content packaging/bridge_pin.json -Raw | ConvertFrom-Json
+          $got = (Get-FileHash bridge/whatsapp/dist/whatsapp_bridge.exe -Algorithm SHA256).Hash.ToLower()
+          if ($got -ne $pin.sha256) { throw "bridge SHA256 $got differs from packaging/bridge_pin.json ($($pin.sha256))" }
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9  # v7.0.2
+        with:
+          name: bridge-dist
+          path: |
+            bridge/whatsapp/dist/whatsapp_bridge.exe
+            bridge/whatsapp/dist/whatsapp_bridge.exe.sha256
+            bridge/whatsapp/dist/build-info.json
+          retention-days: 1
+          if-no-files-found: error
+  publish:
+    name: Publish bridge (signed; secrets only in the Publish step)
+    needs: build
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    steps:
+      - name: Real publishing only from main
+        if: ${{ !inputs.dry_run && github.ref != 'refs/heads/main' }}
+        run: |
+          echo "::error::Publishing is only allowed from the main branch (this run is on ${GITHUB_REF}). Run it from main, or tick dry_run."
+          exit 1
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333  # v8.0.2
+        with:
+          name: bridge-dist
+          path: bridge-dist
+      - name: Dry run (nothing is published, no secrets, no network call)
+        if: ${{ inputs.dry_run }}
+        run: python3 packaging/release.py bridge-publish --dir bridge-dist --dry-run
+      - name: Publish (the only step that sees the secrets)
+        if: ${{ !inputs.dry_run && github.ref == 'refs/heads/main' }}
+        env:
+          RELEASES_REPO: ${{ vars.RELEASES_REPO }}
+          RELEASES_TOKEN: ${{ secrets.RELEASES_TOKEN }}
+          JARVES_UPDATE_SIGNING_KEY: ${{ secrets.JARVES_UPDATE_SIGNING_KEY }}
+        run: python3 packaging/release.py bridge-publish --dir bridge-dist

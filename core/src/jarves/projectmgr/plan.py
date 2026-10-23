@@ -12,6 +12,7 @@ from ..orchestrator.envelope import clean
 from .cards import ACCEPT_MAX, SPEC_MAX
 
 MAX_TASKS, MAX_SCOPE, TITLE_MAX = 12, 8, 100
+OWNER_MAX_TASKS, OWNER_MAX_SCOPE = 40, 20          # the owner's own lists: above the agent caps only a warning
 _SCOPE_OK = re.compile(r"^[A-Za-z0-9_./*\-\[\] ]{1,120}$")
 
 PLANNER_PROMPT = (
@@ -23,7 +24,9 @@ PLANNER_PROMPT = (
     '"acceptance":"how to tell it is done, max 250 characters","scope":["src/a.py","tests/test_a.py"],'
     '"deps":[],"size":"S"}]}\n'
     f"Rules: at most {MAX_TASKS} tasks; ids are 1..N; deps list ids of tasks that must finish first (no cycles); "
-    f"scope lists up to {MAX_SCOPE} files or globs the task may change; size is S or M (never L: split it).")
+    f"scope lists up to {MAX_SCOPE} files or globs the task may change; size is S or M (never L: split it). "
+    'Optional per task: "runner" (claude, codex, opencode) when one agent suits it better, and "mode": "team" when '
+    "one agent should do a larger part with its own sub-agents.")
 
 
 class PlanError(ValueError):
@@ -63,13 +66,44 @@ def extract_json(text: str) -> dict:
     raise PlanError("the planner did not return a JSON plan with a tasks list")
 
 
-def validate(raw: dict) -> list[dict]:
-    """-> normalized tasks [{id, title, spec, acceptance, scope, deps(list of plan ids)}] or PlanError."""
+DEFAULT_ACCEPT = "the request in the task is satisfied"
+
+
+def parse_spec(s: str) -> tuple[str, str]:
+    """'codex' -> ('codex', ''); 'opencode:openrouter/x/y:free' -> ('opencode', 'openrouter/x/y:free')."""
+    name, _, model = str(s or "").strip().partition(":")
+    return name.strip().lower(), model.strip()
+
+
+def planner_prompt(brief: str, goal: str, how: str = "", context: str = "") -> str:
+    """The planner request. `how` is the owner's own instruction for splitting (it wins over the defaults);
+    `context` is what already exists (finished work, open tasks, recent commits) so a started project is continued."""
+    out = PLANNER_PROMPT
+    if brief:
+        out += f"\n\nProject brief:\n{brief}"
+    if context:
+        out += ("\n\nWhat already exists (do not redo finished work; plan only what is missing):\n" + context)
+    if how:
+        out += ("\n\nThe owner's instruction for HOW to split the work (follow it; it overrides the defaults above "
+                "except the JSON format and the size rules):\n" + how)
+    return out + f"\n\nGoal (from the owner):\n{goal}"
+
+
+SYNTH_PROMPT = (
+    "Several agents each proposed a split of the same goal into tasks (below, as data). Produce ONE final plan: keep "
+    "what they agree on, resolve conflicts with your own judgement, drop duplicates, and keep tasks small and the "
+    "dependencies correct. Use exactly the same JSON format as the proposals, no prose.")
+
+
+def validate(raw: dict, lenient: bool = False) -> list[dict]:
+    """-> normalized tasks [{id, title, spec, acceptance, scope, deps(list of plan ids), warn}] or PlanError.
+    lenient (the owner's own list): a missing acceptance gets a default and size L is only a warning."""
     items = raw.get("tasks")
     if not isinstance(items, list) or not items:
         raise PlanError("the plan has no tasks")
-    if len(items) > MAX_TASKS:
-        raise PlanError(f"too many tasks ({len(items)}); at most {MAX_TASKS} per plan: plan the next phase later")
+    cap_t, cap_s = (OWNER_MAX_TASKS, OWNER_MAX_SCOPE) if lenient else (MAX_TASKS, MAX_SCOPE)
+    if len(items) > cap_t:
+        raise PlanError(f"too many tasks ({len(items)}); at most {cap_t} per plan: plan the next phase later")
     out, ids = [], set()
     for i, it in enumerate(items, 1):
         if not isinstance(it, dict):
@@ -85,19 +119,33 @@ def validate(raw: dict) -> list[dict]:
             raise PlanError(f"task {tid}: title and spec are required")
         if len(spec) > SPEC_MAX or len(str(it.get("spec", ""))) > SPEC_MAX + 200:
             raise PlanError(f"task {tid}: spec longer than {SPEC_MAX} characters: split the task")
+        warn = []
         if not acc:
-            raise PlanError(f"task {tid}: acceptance is required")
+            if not lenient:
+                raise PlanError(f"task {tid}: acceptance is required")
+            acc = DEFAULT_ACCEPT
         if str(it.get("size", "S")).upper() not in ("S", "M"):
-            raise PlanError(f"task {tid}: too big (size L): split it")
+            if not lenient:
+                raise PlanError(f"task {tid}: too big (size L): split it")
+            warn.append("marked large: consider splitting it")
         scope = it.get("scope") or []
-        if not isinstance(scope, list) or len(scope) > MAX_SCOPE or not all(
+        if not isinstance(scope, list) or len(scope) > cap_s or not all(
                 isinstance(x, str) and _SCOPE_OK.match(x) and ".." not in x.split("/") and not x.startswith(("/", "\\"))
                 for x in scope):
-            raise PlanError(f"task {tid}: scope must be at most {MAX_SCOPE} relative paths or globs inside the project")
+            raise PlanError(f"task {tid}: scope must be at most {cap_s} relative paths or globs inside the project")
+        if len(scope) > MAX_SCOPE:
+            warn.append(f"touches {len(scope)} paths: consider splitting it")
         deps = it.get("deps") or []
         if not isinstance(deps, list) or not all(isinstance(d, int) and not isinstance(d, bool) for d in deps):
             raise PlanError(f"task {tid}: deps must be a list of task ids")
-        out.append({"id": tid, "title": title, "spec": spec, "acceptance": acc, "scope": scope, "deps": list(deps)})
+        runner = str(it.get("runner") or "").strip()
+        if runner and not re.match(r"^[a-z]+(:[\w./:\-]{1,80})?$", runner):
+            raise PlanError(f"task {tid}: bad runner {runner[:40]}")
+        mode = str(it.get("mode") or "solo").lower()
+        if mode not in ("solo", "team"):
+            raise PlanError(f"task {tid}: mode is solo or team")
+        out.append({"id": tid, "title": title, "spec": spec, "acceptance": acc, "scope": scope, "deps": list(deps),
+                    "warn": warn, "runner": runner, "mode": mode})
     for t in out:
         for d in t["deps"]:
             if d not in ids or d == t["id"]:

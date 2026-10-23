@@ -5,6 +5,7 @@ Pure standard library (the `changes` job runs it before any dependency is instal
     python core/tools/ci_plan.py classify --event pull_request [--files-from -] [--durations FILE] [--reused]
     python core/tools/ci_plan.py shard-files --plan PLAN.json --os windows --shard 2/3
     python core/tools/ci_plan.py durations-merge --junit DIR_OR_FILE... --into core/tests/durations-windows.json
+    python core/tools/ci_plan.py summary --plan-line "plan={...}"   # one markdown line for the job summary
 
 `classify` prints key=value lines for $GITHUB_OUTPUT (code, full, perf, installer, cad, blender, godot, whatsapp, e2e,
 plan). The shard plan is balanced by MEASURED seconds per test file (durations file) and falls back to the number of
@@ -94,12 +95,27 @@ def split(weights: dict[str, float], n: int) -> list[list[str]]:
 def plan(tests_dir: Path = TESTS, durations: dict[str, float] | None = None, windows: int = 3, linux: int = 3,
          linux_durations: dict[str, float] | None = None) -> dict:
     """Balance each OS from its own measurements; a legacy single map still works for callers."""
+    lin_durations = durations if linux_durations is None else linux_durations
     win_weights = file_weights(tests_dir, durations)
-    lin_weights = file_weights(tests_dir, durations if linux_durations is None else linux_durations)
+    lin_weights = file_weights(tests_dir, lin_durations)
     win, lin = split(win_weights, windows), split(lin_weights, linux)
     return {"windows": win, "linux": lin,
             "expected_s": {"windows": [round(sum(win_weights[f] for f in s)) for s in win],
-                           "linux": [round(sum(lin_weights[f] for f in s)) for s in lin]}}
+                           "linux": [round(sum(lin_weights[f] for f in s)) for s in lin]},
+            # files planned from the test-count fallback: their real time is unknown, so a long one unbalances a shard
+            "unmeasured": {"windows": sorted(f for f in win_weights if f not in (durations or {})),
+                           "linux": sorted(f for f in lin_weights if f not in (lin_durations or {}))}}
+
+
+def summary(plan_doc: dict) -> str:
+    """One markdown line for the job summary: expected seconds per shard and how many files had no measurement."""
+    parts = []
+    for os_name in ("windows", "linux"):
+        loads = plan_doc.get("expected_s", {}).get(os_name, [])
+        missing = plan_doc.get("unmeasured", {}).get(os_name, [])
+        parts.append(f"{os_name} shards expected {loads} s, {len(missing)} unmeasured file(s)"
+                     + (f" ({', '.join(missing[:8])}{', ...' if len(missing) > 8 else ''})" if missing else ""))
+    return "shard plan: " + "; ".join(parts)
 
 
 def shard_files(plan_doc: dict, os_name: str, shard: str) -> list[str]:
@@ -165,7 +181,12 @@ def main(argv: list[str] | None = None) -> int:
     d = sub.add_parser("durations-merge")
     d.add_argument("--junit", nargs="+", type=Path, required=True)
     d.add_argument("--into", type=Path, required=True)
+    m = sub.add_parser("summary")
+    m.add_argument("--plan-line", required=True, help="the `plan=...` line printed by classify")
     a = ap.parse_args(argv)
+    if a.cmd == "summary":
+        print(summary(json.loads(a.plan_line.partition("=")[2] or "{}")))
+        return 0
     if a.cmd == "classify":
         if a.files_from:
             files = (sys.stdin.read() if a.files_from == "-" else Path(a.files_from).read_text(encoding="utf-8")).splitlines()

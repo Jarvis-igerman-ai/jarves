@@ -243,6 +243,9 @@ def test_hebrew_round_trip_streams_and_is_stored(rig):
     # a streamed answer is ONE replaceable event: the log never holds two deltas of one turn
     assert sum(1 for e in r.chat.events.since(0) if e["type"] == "delta" and e["turn"] == "t1") == 0
     assert any(m["role"] == "assistant" and m["text"] == reply["text"] for m in r.chat.state()["messages"])
+    # every stored message and every event carries its time (the page shows it under the message)
+    assert all(isinstance(m.get("ts"), float) and m["ts"] > 1e9 for m in r.chat.state()["messages"])
+    assert all(isinstance(e.get("ts"), float) for e in events)
     # the exchange is in the shared history (what jarvis chat /resume and the Windows session read)
     sess = chat_engine.recent_sessions(r.home)
     assert sess and sess[0]["first"] == HEBREW and sess[0]["turns"] == 1
@@ -304,6 +307,40 @@ def test_new_resets_the_model_and_starts_a_new_stored_conversation(rig):
     collect(owner_poll(r), "reply", "t3", after=0)
     sess = chat_engine.recent_sessions(r.home)
     assert len(sess) == 2 and {s["first"] for s in sess} == {"first topic here", "second topic here"}
+
+
+def test_a_client_that_saw_the_answer_may_send_at_once(rig):
+    """The reply (or a command's notice) and the end of the busy state are one step: a client that reacts to the
+    answer immediately must never be refused with CHAT_BUSY (CI hung on this race: /new right after a reply)."""
+    r = rig()
+    box = {}
+    real_add = r.chat.events.add
+
+    def add_then_react(type_, **kw):
+        n = real_add(type_, **kw)
+        if type_ == box.get("on") and not box.get("fired"):
+            box["fired"] = True
+
+            def react():
+                box["res"] = r.chat.submit(box["send"], client="owner")
+                box["done"].set()
+            threading.Thread(target=react, daemon=True).start()
+            time.sleep(0.05)                    # the reacting client runs while the old turn is still closing
+        return n
+    r.chat.events.add = add_then_react
+
+    box.update(on="reply", send="/new", done=threading.Event())      # a reply, then a client that sends /new at once
+    r.chat.submit("first topic here", client="owner")
+    collect(owner_poll(r), "reply", "t1")
+    assert box["done"].wait(5) and box["res"][0] == 200, box.get("res")
+    collect(owner_poll(r), "notice", None, after=0)       # that /new finished
+
+    box.clear()
+    box.update(on="notice", send="and one more", done=threading.Event())   # a command's notice, then a client at once
+    mark = r.chat.events.last
+    assert r.chat.submit("/new")[0] == 200
+    collect(owner_poll(r), "notice", None, after=mark)
+    assert box["done"].wait(5) and box["res"][0] == 200, box.get("res")
 
 
 def test_resume_across_surfaces(rig):

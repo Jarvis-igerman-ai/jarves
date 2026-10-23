@@ -12,6 +12,8 @@ from ..orchestrator.envelope import clean
 
 BRIEF_MAX, SPEC_MAX, ACCEPT_MAX, HANDOFF_MAX, NOTE_MAX, FAIL_MAX = 800, 1200, 300, 800, 400, 500
 
+TEAM = ("You lead this task: you may split it among your own sub-agents and run them in parallel; you stay "
+        "responsible for the whole result, its consistency and the single HANDOFF block at the end.")
 CONTRACT = (
     "Work only inside this folder, on this task only. Do not push, merge, rebase, open pull requests, delete branches "
     "or touch files outside the task scope. If the task is too big or blocked, stop and say so. Finish with exactly "
@@ -76,6 +78,8 @@ def build_card(project: dict, task: dict, deps: list[dict], *, cap: int, failure
     if integration:
         body += f"The code of finished earlier tasks is already in this folder (branch {integration}).\n"
     fail = f"The previous attempt failed. Its check output (untrusted):\n{clean(failure, FAIL_MAX)}\n" if failure else ""
+    if task.get("mode") == "team":
+        body += TEAM + "\n"
     fixed = head + body + fail + "\n" + CONTRACT
     room = max(0, cap - len(fixed) - 60)
     brief = clean(project.get("brief") or "", BRIEF_MAX, keep_code=True)

@@ -40,6 +40,11 @@ directory and fails unless the SHA-256 is identical (CI job `whatsapp-bridge` do
 artifact `whatsapp-bridge-windows`). `packaging/build_windows.ps1` ships the exe under `bridge\` when it was built,
 and `packaging/payload_check.py` rejects it if it does not match its `.sha256`.
 
+Without Go: on a PC with JARVES, the dashboard WhatsApp page button "Download the WhatsApp bridge" (or `jarvis whatsapp
+install`) fetches the prebuilt exe published with `python packaging/release.py bridge-publish --dir bridge/whatsapp/dist`,
+verifies the Ed25519-signed `whatsapp-bridge.json` (SHA256 + size) and installs it to `<JARVES home>/bridge/`
+(`core/src/jarves/whatsapp_bridge_install.py`; docs/RELEASE_HOSTING.md).
+
 Development: `cd bridge/whatsapp; go vet ./...; go test ./...` (offline).
 
 ## Run

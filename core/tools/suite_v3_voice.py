@@ -599,7 +599,7 @@ async def _transcribe(pcm24: bytes) -> str:
         w.setframerate(24000)
         w.writeframes(pcm24)
     key = os.environ.get("OPENAI_API_KEY", "")
-    for model in ("gpt-4o-transcribe", "whisper-1"):
+    for model in ("gpt-transcribe", "whisper-1"):
         try:
             async with httpx.AsyncClient(timeout=60) as c:
                 resp = await c.post("https://api.openai.com/v1/audio/transcriptions",

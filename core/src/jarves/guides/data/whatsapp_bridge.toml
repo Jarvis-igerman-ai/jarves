@@ -4,7 +4,7 @@ pages = ["whatsapp"]
 features = ["whatsapp_bridge", "whatsapp_send"]
 aliases = ["וואטסאפ אמיתי", "לקרוא וואטסאפ", "מה חדש בוואטסאפ", "הודעות בוואטסאפ", "whatsapp bridge", "read whatsapp", "whatsapp inbox", "link whatsapp", "קישור וואטסאפ"]
 links = ["whatsapp", "privacy", "helper"]
-error_codes = ["WA_BRIDGE_DOWN", "WA_NOT_INSTALLED", "WA_NOT_SET_UP", "WA_KILLED", "WA_MODE_OFF", "WA_MODE_READ", "WA_NOT_ALLOWED", "WA_NO_HISTORY", "WA_RATE_LIMITED", "WA_QUIET_HOURS", "WA_STORE_LOCKED", "WA_UNKNOWN_CONTACT", "WA_AMBIGUOUS", "WA_APPROVAL_MISSING"]
+error_codes = ["WA_BRIDGE_DOWN", "WA_NOT_INSTALLED", "BRIDGE_NOT_PUBLISHED", "BRIDGE_OFFLINE", "BRIDGE_BAD_SIGNATURE", "BRIDGE_CHECKSUM", "BRIDGE_TAMPERED", "WA_NOT_SET_UP", "WA_KILLED", "WA_MODE_OFF", "WA_MODE_READ", "WA_NOT_ALLOWED", "WA_NO_HISTORY", "WA_RATE_LIMITED", "WA_QUIET_HOURS", "WA_STORE_LOCKED", "WA_UNKNOWN_CONTACT", "WA_AMBIGUOUS", "WA_APPROVAL_MISSING"]
 title_he = "וואטסאפ אמיתי: לקרוא הודעות (ובהמשך לשלוח)"
 title_en = "Real WhatsApp: read messages (and later send)"
 what_he = "ג'ארביס מתחבר לוואטסאפ שלכם כמכשיר מקושר (כמו וואטסאפ ווב) דרך גשר נפרד במחשב, ויכול לספר מה חדש, להקריא מה מישהו כתב ולסכם. קודם קריאה בלבד. שליחה נפתחת רק אחרי 14 ימים שקטים ורק באישורכם, וכל הודעה מאושרת על המסך עם הנמען, המספר והטקסט המלא. עד אז שולחים כמו קודם: הוא פותח טיוטה ואתם לוחצים שלח."
@@ -23,6 +23,11 @@ cost_he = "חינם. טקסט של הודעה עובר למודל ה-AI רק כ�
 cost_en = "Free. A message's text goes to the AI model only when you ask about it."
 privacy_he = "זה לקוח לא רשמי: הוא עלול לסתור את תנאי השימוש של וואטסאפ ויש סיכון לחסימה זמנית או קבועה של המספר (אישרתם את זה למספר הראשי, קודם לקריאה בלבד). המפתחות של החיבור מוצפנים במחשב (DPAPI) ולא נכנסים לגיבויים, ליומנים או לאבחון. הודעות נשמרות 14 יום (ניתן לשנות או לא לשמור כלום), מדיה לא יורדת אף פעם. ביומנים יש רק קודים, מספרים ותמצית מוצפנת של הצ'אט, בלי טקסט, שמות או מספרי טלפון. ניתוק בטלפון (מכשירים מקושרים > JARVES bridge > התנתקות) עובד תמיד."
 privacy_en = "This is an unofficial client: it may go against WhatsApp's Terms and there is a risk of a temporary or permanent ban of the number (you accepted this for your main number, read-only first). The connection keys are encrypted on this computer (DPAPI) and never go into backups, logs or diagnostics. Messages are kept 14 days (changeable, or keep nothing); media is never downloaded. Logs hold only codes, counts and a chat hash, never text, names or phone numbers. Unlinking on the phone (Linked devices > JARVES bridge > Log out) always works."
+
+[[steps]]
+he = "אם רכיב הגשר לא מותקן: בלוח הבקרה, בעמוד וואטסאפ, לוחצים \"הורדת גשר הוואטסאפ\" (או jarvis whatsapp install). הקובץ מורד פעם אחת, רק כשלחצתם, מרשימה חתומה של JARVES; החתימה, ה-SHA256 והגודל נבדקים לפני ההתקנה, והקובץ נבדק שוב לפני כל הפעלה. אין צורך לבנות כלום. אם ההורדה עוד לא פורסמה תופיע הודעה ברורה ולא קורה כלום."
+en = "If the bridge program is not installed: on the dashboard WhatsApp page press \"Download the WhatsApp bridge\" (or jarvis whatsapp install). The file is downloaded once, only when you press it, from a signed JARVES manifest; the signature, SHA256 and size are checked before it is installed, and the file is checked again before every start. You build nothing. If the download is not published yet you get a clear message and nothing happens."
+action = "open:#/whatsapp"
 
 [[steps]]
 he = "הדרך הפשוטה: בלוח הבקרה, בעמוד וואטסאפ, לוחצים \"הגדרת וואטסאפ\" (או בעמוד החיבורים על השורה וואטסאפ, או jarvis connect whatsapp, או jarvis whatsapp setup). הגשר מופעל, מופיע קוד QR, ואתם סורקים אותו בטלפון. אחרי הקישור נשאלים אם להפעיל קריאה בלבד. הסריקה תמיד ידנית ושום הודעה לא נשלחת."
@@ -52,8 +57,8 @@ en = "After 14 days without a warning: jarvis whatsapp allow send <contact>, the
 [[problems]]
 he = "כתוב שרכיב הגשר לא מותקן"
 en = "It says the bridge program is not installed"
-fix_he = "הגשר הוא תוכנה נפרדת (whatsapp_bridge) שחייבת להיות במחשב. הצעד הבא: להתקין מחדש את JARVES (ההתקנה כוללת אותה), או מתוך קוד המקור להריץ scripts/build_whatsapp_bridge.ps1 (דורש Go 1.27.0). עד אז הכפתורים קישור והפעלה כבויים. jarvis whatsapp status מראה bridge_installed."
-fix_en = "The bridge is a separate program (whatsapp_bridge) that must be on this computer. Next step: reinstall JARVES (the installer includes it), or from a source checkout run scripts/build_whatsapp_bridge.ps1 (needs Go 1.27.0). Until then the Link and Start buttons stay off. jarvis whatsapp status shows bridge_installed."
+fix_he = "הגשר הוא תוכנה נפרדת (whatsapp_bridge) שחייבת להיות במחשב. הצעד הבא: ללחוץ בעמוד וואטסאפ על \"הורדת גשר הוואטסאפ\" (או jarvis whatsapp install), או להתקין מחדש את JARVES (ההתקנה כוללת אותה), או מתוך קוד המקור להריץ scripts/build_whatsapp_bridge.ps1 (דורש Go 1.27.0). עד אז הכפתורים קישור והפעלה כבויים. jarvis whatsapp status מראה bridge_installed."
+fix_en = "The bridge is a separate program (whatsapp_bridge) that must be on this computer. Next step: press \"Download the WhatsApp bridge\" on the WhatsApp page (or run jarvis whatsapp install), or reinstall JARVES (the installer includes it), or from a source checkout run scripts/build_whatsapp_bridge.ps1 (needs Go 1.27.0). Until then the Link and Start buttons stay off. jarvis whatsapp status shows bridge_installed."
 
 [[problems]]
 he = "הוא אומר שוואטסאפ עצור"
@@ -78,3 +83,15 @@ he = "העתקתי את התיקייה למחשב אחר והיא לא נפתח�
 en = "I copied the folder to another computer and it does not open"
 fix_he = "נכון: ההצפנה קשורה למשתמש ולמחשב. במחשב החדש מקשרים מחדש: jarvis whatsapp unlink ואז link."
 fix_en = "Correct: the encryption is tied to the user and the PC. On the new PC link again: jarvis whatsapp unlink, then link."
+
+[[problems]]
+he = "ההורדה של הגשר נכשלה או כתוב שהיא עוד לא פורסמה"
+en = "The bridge download failed, or it says it is not published yet"
+fix_he = "BRIDGE_NOT_PUBLISHED: הגשר החתום עוד לא פורסם, אין תקלה אצלכם; מתקינים מחדש את JARVES מהתקנה שכוללת את הגשר או מחכים לפרסום. BRIDGE_OFFLINE: בודקים אינטרנט ולוחצים שוב. BRIDGE_BAD_SIGNATURE או BRIDGE_CHECKSUM: הקובץ נדחה ולא הותקן כלום; לא מנסים לעקוף, אלא מדווחים (jarvis issues). BRIDGE_RUNNING: jarvis whatsapp stop ואז שוב. אפשר לראות את הכתובת והגרסה שהותקנה ב-jarvis whatsapp status."
+fix_en = "BRIDGE_NOT_PUBLISHED: the signed bridge is not published yet, nothing is wrong on your side; reinstall JARVES from an installer that includes the bridge, or wait for the publication. BRIDGE_OFFLINE: check the internet and press again. BRIDGE_BAD_SIGNATURE or BRIDGE_CHECKSUM: the file was refused and nothing was installed; do not work around it, report it (jarvis issues). BRIDGE_RUNNING: jarvis whatsapp stop, then again. jarvis whatsapp status shows the installed bridge."
+
+[[problems]]
+he = "כתוב שהגשר המותקן לא תואם לרשימה החתומה (BRIDGE_TAMPERED)"
+en = "It says the installed bridge no longer matches its signed manifest (BRIDGE_TAMPERED)"
+fix_he = "הקובץ שונה או ניזוק אחרי ההורדה (לפעמים בגלל אנטי-וירוס), ולכן הוא לא הופעל. לוחצים \"הורדת גשר הוואטסאפ\" (jarvis whatsapp install) כדי להחליף אותו בקובץ מאומת. אם זה חוזר, בודקים את האנטי-וירוס ומדווחים."
+fix_en = "The file was changed or damaged after the download (sometimes by an antivirus), so it was not started. Press \"Download the WhatsApp bridge\" (jarvis whatsapp install) to replace it with a verified file. If it repeats, check the antivirus and report it."

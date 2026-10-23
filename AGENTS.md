@@ -11,7 +11,7 @@
 - **Reasoning-first, execution-efficient:** use the strongest *actually available* model for bounded architecture, difficult mechanical/design decisions, and stubborn cross-layer failures. Use an appropriate faster/cheaper available model for routine edits, exports, focused tests and documentation. Do not assume Claude model names or subscription quotas apply to Codex; use equivalent roles, not fictional cross-provider model IDs.
 - Prefer **one implementing owner** and a compact approved plan. Avoid repeatedly switching models when reloading context would negate savings; a hard task may be cheaper end-to-end on a stronger model.
 - Escalate to stronger reasoning only when warranted by complexity or repeated failure (within the two-attempt debugging limit). No automatic premium-model chains or duplicated agent reviews.
-- Both Claude Code and Codex must use **the same GitHub Issues, commits, docs/NOW.md, docs/HANDOFF.md and source-of-truth pipeline**. Handoff between tools: stop current writer, commit a clean state, record tests/blockers and next action, then let the other tool pull and resume. Never have both agents editing the same files concurrently.
+- Both Claude Code and Codex must use **the same GitHub Issues, commits, docs/NOW.md, docs/handoff/ notes and source-of-truth pipeline**. Handoff between tools: stop current writer, commit a clean state, record tests/blockers and next action, then let the other tool pull and resume. Never have both agents editing the same files concurrently.
 - Neither agent can inspect the other's remaining quota without explicit available data. Do not invent token savings or model availability. Report model used when known; user decides whether to spend premium quota.
 
 ## Deliverable evidence and cost-aware delegation (mandatory)
@@ -73,7 +73,7 @@
 4. If work remains, keep the Issue **open** and state the exact blocker (who or what is needed).
 5. No duplicate Issues, and don't leave completed Issues open.
 6. Work deferred to another milestone: first create or link a narrowly scoped follow-up Issue, then close the original if everything else is done.
-7. Keep GitHub Issues, `docs/NOW.md`, `docs/HANDOFF.md` and `docs/ROADMAP.md` consistent with each other.
+7. Keep GitHub Issues, `docs/NOW.md`, the handoff notes (`docs/handoff/`, history in `docs/HANDOFF.md`) and `docs/ROADMAP.md` consistent with each other.
 8. Never close hardware or real-world integration items (real mic, live API, account sign-in, playback, Pi, prints) on mock or unit tests alone.
 
 ## Closeout housekeeping
@@ -93,4 +93,4 @@
 
 ## End-of-task response: 6 lines max
 Outcome; changed files; one command to reproduce; check actually run/result; blockers/UNVERIFIED; proposed next task (NOT started).
-Update `docs/HANDOFF.md` succinctly, then stop for user approval.
+Add a short handoff note as a new file `docs/handoff/<YYYY-MM-DD>-<topic>.md` (docs/handoff/README.md), then stop for user approval.

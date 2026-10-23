@@ -44,7 +44,7 @@ async def transcribe(wav: bytes, key: str) -> str:
     async with httpx.AsyncClient(timeout=90) as c:
         r = await c.post("https://api.openai.com/v1/audio/transcriptions",
                          headers={"Authorization": f"Bearer {key}"},
-                         data={"model": "gpt-4o-transcribe", "language": "he", "response_format": "text",
+                         data={"model": "gpt-transcribe", "language": "he", "response_format": "text",
                                "prompt": "תמלול בעברית. שמות: נועה, אביטל, צחי."},
                          files={"file": ("a.wav", wav, "audio/wav")})
     r.raise_for_status()
@@ -71,7 +71,7 @@ async def translit(wav: bytes, key: str) -> str:
     import httpx
     async with httpx.AsyncClient(timeout=90) as c:
         r = await c.post("https://api.openai.com/v1/audio/transcriptions", headers={"Authorization": f"Bearer {key}"},
-                         data={"model": "gpt-4o-transcribe", "response_format": "text",
+                         data={"model": "gpt-transcribe", "response_format": "text",
                                "prompt": "Transliterate the Hebrew speech into Latin letters exactly as it sounds, "
                                          "syllable by syllable, with hyphens. Do not use Hebrew letters."},
                          files={"file": ("a.wav", wav, "audio/wav")})
