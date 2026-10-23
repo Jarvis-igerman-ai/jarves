@@ -147,7 +147,7 @@ FIELD_CLASS: dict[str, str] = {
         omitted_keys on only_done op operation origin overruns owner_pid param path peak_level peak_rms peak_score
         percent permission phase photos_today pid plan plan_usage poll_s port previous processes purpose rc reason
         recognition removed requested response_id restart result_code retry retry_s returncode revoked risk risky
-        role run run_id said_chars samples saved scopes score seconds series session sessions setting sha256
+        role run run_id said_chars samples saved scopes score seconds series session sessions setting sha256 projects
         shown side silence_rms_max silenced size skill slept_s speaker_queue_s speaking speech speech_ms
         speech_no_match stage state status step task_id target_kind threshold timed_out timeout_s timer_id
         tool tools tray tried trigger turns typed url_host usage_cached usage_in usage_out usage_reasoning

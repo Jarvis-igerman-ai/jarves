@@ -1,6 +1,6 @@
 # Project Manager — JARVES manages a software project with many coding agents
 
-Owner request, 23 Oct 2026. Status: design for review, then built in this order (core, surfaces, dashboard).
+Owner request, 23 Oct 2026. Status: built (core, CLI, voice tools, dashboard page). Reviewed by an Opus subagent before coding; the review changed the design as noted in "Review changes" at the end.
 
 ## Idea in one paragraph
 
@@ -98,3 +98,16 @@ row honest status (`implemented_unverified`: real Claude/Codex/OpenCode/OpenRout
 Offline tests use fake runner executables speaking each tool's recorded output shape; real agent runs, OpenCode and
 OpenRouter behaviour, and paid calls are **unverified until the owner runs them**. No auto-push/PR/merge to shared
 branches. Planner quality depends on the model; the owner approves every plan.
+
+## Review changes (Opus review, 23 Oct 2026)
+- Worktrees live in `<home>/projects/<id>/` (`integration`, `wt/t<seq>-a<attempt>`), not inside the repository.
+- The integration branch has its own worktree; per-project merge lock; the task branch first merges the integration branch,
+  the check runs on that merged result, then the integration branch fast-forwards. The owner's checkout is never touched.
+- Scope is enforced after each run (`git diff --name-only`); protected paths (`.claude/`, `.codex/`, `.opencode/`,
+  `opencode.json`, `.mcp.json`, `.git*`) always block the task; blocked work stays on its branch, nothing merges.
+- Runs use `--permission-mode dontAsk --permission-prompts none --setting-sources user` with a narrow `--allowedTools` list;
+  the prompt goes on stdin; forbidden flags are checked on the flags only; the child env is an allow-list (no API keys).
+- DONE is decided by the check command run by JARVES (`shell=False`), not by the agent's claim; the project brief is a
+  snapshot taken when the project is opened.
+- Restart recovery kills a surviving child by pid and requeues once; a task interrupted `max_attempts` times fails.
+- Not in the first release: runner fallback beyond the configured order, size-L split round, voice open/archive.
