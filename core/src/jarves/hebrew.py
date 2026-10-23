@@ -20,6 +20,17 @@ TEXT: dict[str, str] = {
         "אשף אחד בלוח הבקרה (#/setup) להגדרה, בדיקה והיכרות עם כל נושא. התשובות שלכם מתעדות מה אומת על ידכם ומעדכנות את גיליון אישור הגרסה.",
     "core/tests/test_wizard.py (state, diff, secrets, bug report, sign-off sheet)":
         "core/tests/test_wizard.py (מצב, שינויים, סודות, דיווח באג, גיליון אישור)",
+    # --- automatic updates (issue #17)
+    "installs a newer signed JARVES by itself, only at a quiet moment (never in a conversation, an approval or a "
+    "coding-agent task), after a notice and a backup; same signed path as `jarvis update install`; stable users get "
+    "stable, beta users get beta; one command goes back to the previous version":
+        "מתקין לבד ג'רביס חדש וחתום, רק ברגע שקט (לא באמצע שיחה, אישור או משימת קוד), אחרי הודעה וגיבוי; אותו מסלול "
+        "חתום כמו `jarvis update install`; משתמשי יציב מקבלים יציב ומשתמשי בטא מקבלים בטא; פקודה אחת חוזרת לגרסה הקודמת",
+    "core/tests/test_auto_update.py (fake signed release server, fake installer: on/off, quiet moment, notices, signed "
+    "only, older refused, failure keeps the old version, back-off, channel); never run against a real installer or a "
+    "published release":
+        "core/tests/test_auto_update.py (שרת מהדורות חתום מדומה ומתקין מדומה: הפעלה/כיבוי, רגע שקט, הודעות, חתום בלבד, "
+        "גרסה ישנה נדחית, כישלון משאיר את הגרסה הקודמת, השהיה בין ניסיונות, ערוץ); לא הורץ מול מתקין אמיתי או גרסה שפורסמה",
     # --- beta channel and release sign-off (continuous release)
     "gets every green main build automatically as a signed beta (latest-beta.json) instead of waiting for a tested "
     "stable release; one command or button goes back to stable, and the previous version can always be restored":

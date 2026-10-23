@@ -1598,6 +1598,8 @@ def cmd_update(a, cfg, home) -> int:
             return 1
         print(clilang.fmt(f"ערוץ העדכונים: {'בטא (כל בנייה ירוקה של main)' if ch == 'beta' else 'יציב'}.",
                           f"Update channel: {'beta (every green main build)' if ch == 'beta' else 'stable'}."))
+    if a.action == "auto":
+        return _update_auto(a, cfg, home)
     u = UpdateChecker(home, cfg=cfg)
     print(version_line(home) + f"; update channel {u.channel}")
     if getattr(a, "rollback", False):
@@ -1643,6 +1645,43 @@ def cmd_update(a, cfg, home) -> int:
               "`jarvis update --rollback` goes back to the previous version.")
     else:
         print("Setup is open. Follow it; JARVES can start again at the end.")
+    return 0
+
+
+def _update_auto(a, cfg, home) -> int:
+    """jarvis update auto on|off|status|now|later: automatic installs of signed updates at a quiet moment."""
+    from . import auto_update
+    from .updates import UpdateChecker, UpdateError
+    state = a.state or "status"
+    au = auto_update.AutoUpdater(home, cfg=cfg, checker=lambda: UpdateChecker(home, cfg=cfg),
+                                 enabled=lambda: auto_update.is_enabled(cfg, home))
+    try:
+        if state in ("on", "off"):
+            auto_update.set_switch(cfg, home, state == "on", "cli")
+            print(clilang.fmt("עדכון אוטומטי " + ("פועל: מתקין גרסה חתומה חדשה ברגע שקט, אחרי הודעה וגיבוי."
+                                                  if state == "on" else "כבוי: שום דבר לא מותקן בלי שתבקש."),
+                              "Automatic updates are " + ("ON: a newer signed version is installed at a quiet moment, "
+                                                         "after a notice and a backup." if state == "on" else
+                                                         "OFF: nothing is installed unless you ask.")))
+        elif state in ("now", "later"):
+            au.answer(state)
+            print(clilang.fmt("נרשם. " + ("יתקין בבדיקה הבאה (תוך כמה דקות)." if state == "now" else "אשאל שוב מחר."),
+                              "Noted. " + ("It installs at the next look (within minutes)." if state == "now"
+                                           else "I will ask again tomorrow.")))
+    except UpdateError as e:
+        print(f"{e.code}: {e.message}")
+        return 1
+    s = au.status()
+    src = f" (default of the {s['default_from_channel']} channel; `jarvis update auto on|off` sets it for good)" \
+        if s["default_from_channel"] else ""
+    print(f"Automatic updates: {'on' if s['enabled'] else 'off'}{src}")
+    print(clilang.fmt(s["message_he"], s["message_en"]))
+    if s["target"]:
+        print(f"Waiting version: {s['target_display'] or s['target']}; channel {s['channel']}")
+    if s["busy"]:
+        print("Waiting because: " + ", ".join(s["busy"]))
+    if s["gave_up"]:
+        print(f"Stopped trying {s['gave_up']} after {s['failures']} failures; `jarvis update auto now` tries again.")
     return 0
 
 
@@ -1871,7 +1910,9 @@ def main(argv: list[str] | None = None) -> int:
     from .selfcheck import add_cli_args as add_selfcheck_args
     add_selfcheck_args(dg)                    # owner request 20 Oct: jarvis diagnose --now (self-check)
     up = sub.add_parser("update", help="check GitHub for a newer JARVES; install only after you approve")
-    up.add_argument("action", nargs="?", default="check", choices=["check", "install", "status"])
+    up.add_argument("action", nargs="?", default="check", choices=["check", "install", "status", "auto"])
+    up.add_argument("state", nargs="?", choices=["on", "off", "status", "now", "later"],
+                    help="with `auto`: on | off | status | now | later (the answer to the update notice)")
     up.add_argument("--channel", choices=["stable", "beta"], help="choose the update channel: stable (default, "
                     "tested releases) or beta (every green main build, early); then check on it")
     up.add_argument("--yes", action="store_true", help="install / rollback: you already approved (no question)")
