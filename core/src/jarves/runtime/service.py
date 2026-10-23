@@ -41,6 +41,20 @@ def read_state(home: Path) -> dict:
         return {}
 
 
+def save_prefs(home: Path, changes: dict) -> dict:
+    """Core stopped: store user intents (mic_muted, alerts_paused) straight in runtime.json; the next start loads them.
+    Keeps the last live view as it was. Returns the saved prefs."""
+    data = read_state(home)
+    prefs = {k: bool((data.get("prefs") or {}).get(k, False)) for k in PREFS}
+    prefs.update({k: bool(v) for k, v in changes.items() if k in PREFS})
+    data["prefs"] = prefs
+    path = home / STATE_FILE
+    tmp = path.with_suffix(".tmp")
+    tmp.write_text(json.dumps(data, ensure_ascii=False, indent=1, default=str), encoding="utf-8")
+    os.replace(tmp, path)
+    return prefs
+
+
 def alerts_paused(home: Path | None = None) -> bool:
     """For the proactive-alerts engine (WP-M3): True while the user paused proactive alerts (tray / dashboard)."""
     if _current is not None and (home is None or home == _current.home):

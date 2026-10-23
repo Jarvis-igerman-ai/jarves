@@ -1884,6 +1884,12 @@
   "Starts the bridge if needed and shows a QR code. You scan it on your phone, then you can switch on read-only. No message is sent.": "Starts the bridge if needed and shows a QR code. You scan it on your phone, then you can switch on read-only. No message is sent.",
   "Set up WhatsApp": "Set up WhatsApp",
   "Switch on read-only mode now? JARVES will read and never send.": "Switch on read-only mode now? JARVES will read and never send.",
+  "Release notes": "Release notes",
+  "What changed in each version.": "What changed in each version.",
+  "No release notes found in this install.": "No release notes found in this install.",
+  "Your version": "Your version",
+  "More details: connections, features and privacy": "More details: connections, features and privacy",
+  "More everyday tools": "More everyday tools",
   "Hi, I am JARVES. How can I help? Type a message, or / for commands.": "Hi, I am JARVES. How can I help? Type a message, or / for commands.",
   "Scroll to the latest message": "Scroll to the latest message",
   "Writing": "Writing"

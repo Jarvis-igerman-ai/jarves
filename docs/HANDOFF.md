@@ -1,3 +1,24 @@
+## Dashboard redesign: navigation tree — 23 Oct 2026
+
+- Owner report: the dashboard is a mess, too much info, hard to find anything. Python dashboard owner (static UI only, no API change). The sidebar's 54 flat links in 7 groups became a keyboard-navigable tree: Home, Chat, Approvals and Setup guide on top, then Planner, Automations, Talks & memory, Do things, Assistant, Connections, Fix problems, Usage & cost, Development, System & help (icons, guide line, the branch you are in opens by itself, open branches remembered). All 54 pages stay reachable; search still finds every page. Renamed confusing pages (Search conversations, Personality files, Skills / Skill ideas, Phone app, Coding agents: all / This project's agent).
+- Home: one hero with status, next step and a Go button; setup checklist, three tiles, last conversation; connections/features/privacy folded into "More details". Top bar: device and Pi chips moved into the Core chip tooltip, long chips truncated; the fixed bottom usage strip is hidden (the cost tile on Home shows it). New `tree.css`.
+- UX review (sub-agent, from screenshots): applied nav regrouping, ARIA (`aria-current`, levels, roving tabindex, no `aria-live` on main), top bar and strip cleanup, contrast tweaks. **Open, not done:** collapse the six-row setup checklist to the first open step with a progress bar; make tiles links; unify "Issues 0" in the top bar with "7 open issues" on Home (different sources); sticky save bar and Advanced toggle on Settings; fold "Health & speed", "Self-check" and "Health" into one tabbed page; a count badge on Approvals; verify RTL by eye (my Hebrew capture did not switch language, only the locale tests cover it).
+- Verification: all eight pre-push checks passed. Dashboard, guides, CLI-parity, locale and perf tests pass locally; the three browser a11y tests could not run in this sandbox (Playwright/Chromium version mismatch) and rely on CI. Eight screenshots are not committed.
+- Decision: **OPEN** — owner to review the look after the beta installs.
+
+## Release notes by version (dashboard, CLI, installer page) — 23 Oct 2026
+
+- Owner request: see release notes per version in the dashboard, and an HTML page with the notes when installing. New `jarves/release_notes.py` parses CHANGELOG.md: dashboard page `#/releasenotes` (version picker, EN/HE), `GET /api/release-notes[?version=]`, `jarvis release-notes [--version V] [--list] [--open] [--he]` (writes `<home>/release-notes/release-notes-<ver>.html`, all text escaped; a beta shows its stable version's notes).
+- Packaging: `build_windows.ps1` copies CHANGELOG.md into the stage (the installed app finds it in the program folder); `jarves.iss` adds a finish-page checkbox "Show what is new" (on by default, skipped for silent installs, so in-app silent updates do not pop it).
+- Guide: new step in `updates.toml` (EN+HE); CLI parity unchanged (covered by `update_check` -> `update`); Hebrew strings via `catalog_add.py`. Tests: `core/tests/test_release_notes.py`; guides, cli_parity and the local pre-push gate pass.
+- NOT verified: the real Inno Setup build, the finish-page checkbox and the page opening in a real browser on Windows (CI builds the installer; owner to confirm on the next beta install). Open question: also auto-open the page after a silent in-app update?
+
+## Admin-key prompt for personal OpenAI accounts — 23 Oct 2026
+
+- Owner report: on a personal OpenAI account the guided setup text ("as the organization owner") did not match what they see. Reworded the `jarvis connect openai-admin` steps, the "Real API bill" guide (he/en) and `OPENAI_ADMIN_KEY.md`: a personal account is its own organization and its owner; if the Admin keys page is missing, skip (`s`), everything works and cost shows as an estimate. No logic change; key handling unchanged.
+- Open question for owner: whether a personal account shows Settings > Organization > Admin keys is **unverified** (no real account tested, OD-05 unchanged).
+- Sandbox: `test_guides::test_help_walks_google_setup_one_step_at_a_time`, 7 `test_connect` and 2 `test_p_perf` cases fail identically without this change (environment); CI is the evidence.
+
 ## WhatsApp bridge: simple setup, missing-bridge message — 23 Oct 2026 / #17
 
 - Problem: with no bridge program (`bridge_command()` is None) neither the dashboard nor Connect said so; the owner only got a Windows PowerShell build hint. Now `bridge_installed` is in `/api/whatsapp`, `jarvis whatsapp status --json` and the Connect row. When missing, the WhatsApp page and the Connect row show a plain EN/HE message (reinstall JARVES, or build from a source checkout with `scripts/build_whatsapp_bridge.ps1`, Go 1.27.0); Link/Start are disabled; the API returns the new code `WA_NOT_INSTALLED` (503) instead of `WA_BRIDGE_DOWN`.
@@ -5,6 +26,13 @@
 - Guide `whatsapp_bridge.toml` (steps + problem "bridge not installed", EN+HE), 5 new Hebrew catalog strings via `catalog_add.py`, CLI parity unchanged (`whatsapp_bridge` -> `whatsapp`; `setup` is a new action of it).
 - Verification: targeted tests (`test_whatsapp_surfaces`, `test_connect_unset`, `test_connect`, guides, cli_parity, locales) pass with the fake bridge; see prepush result in the PR. NOT verified: a real bridge binary, a real QR scan or real WhatsApp linking, the new JS in a real browser (only source-level assertions; Playwright is not installed here), the Connect console QR rendering.
 - Open question for owner: auto-download a prebuilt, checksum-verified bridge from a release/CI artifact when it is missing? Not implemented; today the only fixes are reinstall or a source build. Also confirm the installer payload really ships `bridge/whatsapp_bridge(.exe)`.
+
+## Dashboard controls while JARVES is stopped — 23 Oct 2026
+
+- Report: with JARVES offline the dashboard could not manage things. Root cause: on the Controls page the mic-mute and alert-pause switches were disabled when the Core was stopped, and `POST /api/runtime` answered 409 for every change. Both are saved choices in `runtime.json` that the Core loads at start, so they now save directly while stopped (`runtime.service.save_prefs`) and the page shows and edits the saved values. Show/Hide window and Quit still need the running Core (409, as before); start-at-login already worked offline.
+- Verification: `core/tests/test_runtime.py` updated (offline mute/pause saved, display still 409): 26 passed; the one failure is `test_pystray_backend_builds_without_running`, which only needs the optional `pystray` package missing in this sandbox. Local pre-push gate passed (`--changed-only`). Other dashboard pages that need a live Core (chat, camera preview, voice) were not changed and still say so honestly.
+- Open question for the owner: if other pages felt blocked offline, name them and they will be triaged the same way.
+
 
 ## Camera on demand — 23 Oct 2026 / #74
 
@@ -1285,3 +1313,17 @@ Open: real phone/Wi-Fi/sleep run (owner); no calendar scheduler exists yet (`on_
 - Verified: test_chat + test_web_chat (62), prepush green, headless-Chromium screenshots of the web view (filled and empty). NOT verified: the phone e2e (needs a browser fixture), a real Windows console, RTL look of the new bubbles in a real browser.
 - Added (same day, owner approved): safe markdown in answers (headings, lists, quotes, bold/italic/inline code, fenced code with a Copy button, http(s) links only; DOM calls only, HTML in an answer stays text) and a keyboard slash-command pop-up fed by the server's command list. Test: `core/tests/test_chat_markdown_browser.py` (real headless browser, runs in the CI browser job via `BROWSER_FILES`).
 - Open: message timestamps (low value, only on request).
+
+## next-flow.yml parse failure - 23 Oct 2026
+
+- Root cause: `workflow_run.workflows` listed the workflow's own name (`jarves-next-flow`), for the old automerge job. GitHub rejects the file (every push showed a failed run named by file path, zero jobs); YAML and actionlint 1.7.12 accept it, so only GitHub's server-side check catches it. Confirmed by a probe push: with the self-reference removed no failing next-flow run appeared on that branch.
+- Fix (only this workflow): `workflow_run` now lists only `jarves-checks`; `automerge-into-next` runs inside the PR run after `ci-ok` and merges that one PR (open, not draft, no conflict, head unchanged). Still off unless `ENABLE_NEXT_FLOW`. `docs/NEXT_FLOW.md` line updated.
+- NOT verified: a real automerge on a PR into `next` (flow is off), the fast-forward job (unchanged, untested).
+
+## Viewer UI/UX simplification (23 Oct 2026) - branch `claude/keen-euler-ggmq14`
+
+- Owner feedback (screenshot): left/right panels too small, too much on screen. Changed `godot/face/assistant_ui.gd` and `godot/main.gd`: one shared theme (`AssistantUI.make_ui_theme`: 20 px text, dark rounded cards, roomy buttons); right panel now shows only title, status dot, big activity line and the conversation text; Options holds details, mic mute, dashboard and a new "Model inspector" switch. The left inspector (renamed from "R5b review", no longer opened by Options) shows only the part layers and view buttons; finish, LED ring and exploded view moved under "More"; the controls help is one line.
+- Signal `options_toggled` became `inspector_toggled` (only `main.gd` used it).
+- NOT verified: no Godot or pytest in this cloud container, so no screenshot or `test_face_protocol_godot` run and `prepush.py` could not pass locally. CI/the owner's PC must confirm layout (long Hebrew text, 1280x800 window) and re-export `godot/previews/`.
+- Follow-up (owner: "like Samsung/Apple, less text, options as a tree"): `assistant_ui.gd` Options is now a settings tree: root list (Status, Microphone, Dashboard, Help, Model inspector) and one small page per row with a Back row; the main view hides while Settings is open; the offline line is just "Not connected" (detail is under Status). Same caveat: not run in Godot here.
+- Mini dashboard (owner: "extend the tree, see the dashboard"): Options root is now Status, Microphone, Manage, Help, Model inspector, Open full dashboard. Manage has 6 groups (Talk & memory, Everyday, Assistant, Connections, Health & costs, System) with 30 leaves; each leaf sends the existing `ui.open_dashboard {page}` so the Core opens that dashboard page in the browser (no Core or protocol change). Status now also shows today's AI requests and voice minutes. Not run in Godot here; in-panel editing (e.g. pause alerts, feature switches) would need `runtime.set`/settings messages allowed for the face role and is NOT done.

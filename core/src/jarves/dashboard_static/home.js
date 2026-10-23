@@ -78,16 +78,9 @@ PAGES.home = async function () {
   const tiles = el("div", { class: "tiles" },
     tile(tx("מחובר", "Connected"), `${okConn} / ${d.connections.length}`,
       d.connections.filter((c) => c.state !== "ok").map((c) => `${two(c, "title").split(" (")[0]}: ${two(c, "detail")}`).join(" · ") || tx("הכל", "everything")),
-    tile(tx("יכולות פועלות", "Features on"), String(d.features.on.length), tx(`${d.features.off.length} כבויות או לא זמינות`, `${d.features.off.length} off or not available`)),
     tile(tx("עלות היום", "Today's cost"), usd(d.today.cost), tx(`${d.today.conversations} שיחות · ${d.today.voice_minutes} דק׳ קול`,
       `${d.today.conversations} conversations · ${d.today.voice_minutes} voice min`), true),
-    tile(tx("בעיות פתוחות", "Open issues"), String(d.issues.open), d.issues.high ? tx(`${d.issues.high} חשובות`, `${d.issues.high} important`) : tx("אין חשובות", "none important")),
-    tile(tx("שיחה אחרונה", "Last talk"), lc ? clock(lc.started).slice(0, 5) : "—",
-      lc ? `${day(lc.started)} · ${secs(lc.duration_s)} · ` + tx(`${lc.user_turns} דברים שאמרת${lc.typed ? " (בהקלדה)" : ""}`,
-        `${lc.user_turns} things you said${lc.typed ? " (typed)" : ""}`) : tx("עוד אין שיחות", "no conversations yet")));
-  const next = el("div", { class: "card next" }, el("span", { class: "label" }, tx("מה עכשיו:", "What to do next:")),
-    el("span", {}, tx(d.next.he, d.next.en)), el("span", { class: "spacer" }),
-    d.next.link ? el("a", { class: "button-link", href: d.next.link }, tx("קדימה ←", "Go →")) : null);
+    tile(tx("בעיות פתוחות", "Open issues"), String(d.issues.open), d.issues.high ? tx(`${d.issues.high} חשובות`, `${d.issues.high} important`) : tx("אין חשובות", "none important")));
   const conns = el("div", { class: "card" }, el("h2", {}, tx("חיבורים", "Connections")),
     d.connections.map((c) => el("div", { class: "conn" }, pillOf(c.state, c.state === "ok" ? tx("תקין", "OK") : c.state === "warn" ? tx("לבדוק", "check") : tx("כבוי", "off")),
       el("div", {}, el("b", {}, two(c, "title")),
@@ -107,8 +100,11 @@ PAGES.home = async function () {
   const strip = typeof window.privacyStripCard === "function" ? window.privacyStripCard() : null;     // strip.js
   render(el("div", { class: "big-status hero" }, el("span", { class: "lamp " + lampOf(d.status) }),
     el("div", {}, el("h1", { class: "title" }, tx(d.status_he, d.status_en)),
-      el("div", { class: "muted" }, d.live ? tx("מדבר עכשיו", "talking now") : tx("סקירה של JARVES במבט אחד", "JARVES at a glance")))),
-    strip, next, setup, tiles, el("div", { class: "grid-home" }, conns, feats), el("div", { class: "grid-home" }, privacyCard(d.privacy), last));
+      el("div", { class: "muted" }, d.live ? tx("מדבר עכשיו", "talking now") : tx(d.next.he, d.next.en))),
+    el("span", { class: "spacer" }), d.next.link ? el("a", { class: "button-link", href: d.next.link }, tx("קדימה ←", "Go →")) : null),
+    setup, tiles, lc ? last : null,
+    el("details", { class: "home-more card" }, el("summary", {}, tx("עוד פרטים: חיבורים, יכולות ופרטיות", "More details: connections, features and privacy")),
+      strip, el("div", { class: "grid-home" }, conns, feats), privacyCard(d.privacy)));
   timer = setInterval(() => route(true), 15000);
 };
 

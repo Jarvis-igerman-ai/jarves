@@ -8,6 +8,7 @@
 <link rel="stylesheet" href="/static/style.css">
 <link rel="stylesheet" href="/static/m4.css">
 <link rel="stylesheet" href="/static/shell.css">
+<link rel="stylesheet" href="/static/tree.css">
 <script src="/static/bugs_guard.js"></script>
 <script src="/static/locales/en.js" defer></script>
 <script src="/static/locales/he.js" defer></script>
@@ -37,6 +38,7 @@
 <script src="/static/browser.js" defer></script>
 <script src="/static/whatsapp.js" defer></script>
 <script src="/static/updates.js" defer></script>
+<script src="/static/releasenotes.js" defer></script>
 <script src="/static/profiles.js" defer></script>
 <script src="/static/selfmanage.js" defer></script>
 <script src="/static/selfcheck.js" defer></script>
@@ -53,84 +55,116 @@
 <body>
 <a class="skip" href="#main" data-he="דילוג לתוכן" data-en="Skip to content">Skip to content</a>
 <div class="shell">
-  <aside class="side" id="side" aria-label="Navigation">
+  <aside class="side" id="side">
     <div class="brand"><span class="dot" id="coreDot" title="Core state"></span><span>JARVES</span>
       <button type="button" class="ghost icon-btn side-close" id="sideClose" aria-label="Close menu">✕</button></div>
-    <nav id="nav">
-      <div class="nav-group" data-group="overview">
-        <div class="nav-h" data-he="סקירה" data-en="Overview">Overview</div>
-        <a href="#/home" data-page="home"><span data-he="בית" data-en="Home">Home</span></a>
-        <a href="#/runtime" data-page="runtime"><span data-he="שליטה ומצב ריצה" data-en="Controls &amp; runtime">Controls &amp; runtime</span></a>
-        <a href="#/connections" data-page="connections"><span data-he="חיבורים" data-en="Connections">Connections</span></a>
-        <a href="#/phone" data-page="phone"><span data-he="טלפון" data-en="Phone">Phone</span></a>
-        <a href="#/devices" data-page="devices"><span data-he="מכשירים וגישה" data-en="Devices &amp; access">Devices &amp; access</span></a>
-      </div>
-      <div class="nav-group" data-group="activity">
-        <div class="nav-h" data-he="פעילות" data-en="Activity">Activity</div>
-        <a href="#/chat" data-page="chat"><span data-he="שיחה" data-en="Chat">Chat</span></a>
-        <a href="#/approvals" data-page="approvals"><span data-he="אישורים" data-en="Approvals">Approvals</span></a>
-        <a href="#/conversations" data-page="conversations"><span data-he="שיחות" data-en="Conversations">Conversations</span></a>
-        <a href="#/recall" data-page="recall"><span data-he="חיפוש בשיחות" data-en="Recall">Recall</span></a>
-        <a href="#/agents" data-page="agents"><span data-he="סוכני קוד" data-en="Coding agents">Coding agents</span></a>
-        <a href="#/issues" data-page="issues"><span data-he="בעיות" data-en="Issues">Issues</span> <span class="count" id="issueCount"></span></a>
-        <a href="#/health" data-page="health"><span data-he="תקינות" data-en="Health">Health</span></a>
-        <a href="#/bugs" data-page="bugs"><span data-he="דיווחי תקלות" data-en="Bug reports">Bug reports</span></a>
-        <a href="#/speed" data-page="speed"><span data-he="תקינות ומהירות" data-en="Health &amp; speed">Health &amp; speed</span></a>
-        <a href="#/selfcheck" data-page="selfcheck"><span data-he="בדיקה עצמית" data-en="Self-check">Self-check</span></a>
-        <a href="#/tasks" data-page="tasks"><span data-he="משימות רקע" data-en="Background tasks">Background tasks</span></a>
-        <a href="#/logs" data-page="logs"><span data-he="יומן מערכת" data-en="System log">System log</span></a>
+    <nav id="nav" role="tree" aria-label="Navigation">
+      <div class="nav-group" data-group="top">
+        <a href="#/home" data-page="home" role="treeitem" tabindex="-1"><span data-he="בית" data-en="Home">Home</span></a>
+        <a href="#/chat" data-page="chat" role="treeitem" tabindex="-1"><span data-he="שיחה" data-en="Chat">Chat</span></a>
+        <a href="#/approvals" data-page="approvals" role="treeitem" tabindex="-1"><span data-he="אישורים" data-en="Approvals">Approvals</span></a>
+        <a href="#/setup" data-page="setup" role="treeitem" tabindex="-1"><span data-he="הגדרה וסיור" data-en="Setup guide">Setup guide</span></a>
       </div>
       <div class="nav-group" data-group="everyday">
-        <div class="nav-h" data-he="יום-יום" data-en="Everyday">Everyday</div>
-        <a href="#/calendar" data-page="calendar"><span data-he="יומן" data-en="Calendar">Calendar</span></a>
-        <a href="#/jobs" data-page="jobs"><span data-he="משימות קבועות" data-en="Scheduled jobs">Scheduled jobs</span></a>
-        <a href="#/timers" data-page="timers"><span data-he="טיימרים ושעונים" data-en="Timers &amp; alarms">Timers &amp; alarms</span></a>
-        <a href="#/lists" data-page="lists"><span data-he="רשימות" data-en="Lists">Lists</span></a>
-        <a href="#/goals" data-page="goals"><span data-he="יעדים" data-en="Goals">Goals</span></a>
-        <a href="#/goalplans" data-page="goalplans"><span data-he="תוכניות ליעדים" data-en="Goal plans">Goal plans</span></a>
-        <a href="#/preferences" data-page="preferences"><span data-he="העדפות נלמדות" data-en="Learned preferences">Learned preferences</span></a>
-        <a href="#/proactive" data-page="proactive"><span data-he="הצעות יזומות" data-en="Proactive offers">Proactive offers</span></a>
-        <a href="#/development" data-page="development"><span data-he="פיתוח" data-en="Development">Development</span></a>
-        <a href="#/devdrafts" data-page="devdrafts"><span data-he="טיוטות פיתוח" data-en="Development drafts">Development drafts</span></a>
-        <a href="#/calls" data-page="calls"><span data-he="שיחות טלפון" data-en="Phone calls">Phone calls</span></a>
-        <a href="#/reports" data-page="reports"><span data-he="דוחות" data-en="Reports">Reports</span></a>
-        <a href="#/alerts" data-page="alerts"><span data-he="התראות" data-en="Alerts">Alerts</span></a>
-        <a href="#/notes" data-page="notes"><span data-he="פתקים" data-en="Notes">Notes</span></a>
-        <a href="#/files" data-page="files"><span data-he="קבצים שלי" data-en="My files">My files</span></a>
-        <a href="#/browser" data-page="browser"><span data-he="דפדפן" data-en="Browser">Browser</span></a>
-        <a href="#/agent" data-page="agent"><span data-he="סוכני קוד" data-en="Coding agents">Coding agents</span></a>
-        <a href="#/whatsapp" data-page="whatsapp"><span data-he="וואטסאפ" data-en="WhatsApp">WhatsApp</span></a>
+        <div class="nav-h" data-he="תכנון" data-en="Planner">Planner</div>
+        <div class="nav-kids" role="group">
+        <a href="#/calendar" data-page="calendar" role="treeitem" tabindex="-1"><span data-he="יומן" data-en="Calendar">Calendar</span></a>
+        <a href="#/lists" data-page="lists" role="treeitem" tabindex="-1"><span data-he="רשימות" data-en="Lists">Lists</span></a>
+        <a href="#/timers" data-page="timers" role="treeitem" tabindex="-1"><span data-he="טיימרים ושעונים" data-en="Timers &amp; alarms">Timers &amp; alarms</span></a>
+        <a href="#/notes" data-page="notes" role="treeitem" tabindex="-1"><span data-he="פתקים" data-en="Notes">Notes</span></a>
+        <a href="#/goals" data-page="goals" role="treeitem" tabindex="-1"><span data-he="יעדים" data-en="Goals">Goals</span></a>
+        <a href="#/goalplans" data-page="goalplans" role="treeitem" tabindex="-1"><span data-he="תוכניות ליעדים" data-en="Goal plans">Goal plans</span></a>
+        </div>
+      </div>
+      <div class="nav-group" data-group="automate">
+        <div class="nav-h" data-he="אוטומציות" data-en="Automations">Automations</div>
+        <div class="nav-kids" role="group">
+        <a href="#/jobs" data-page="jobs" role="treeitem" tabindex="-1"><span data-he="משימות קבועות" data-en="Scheduled jobs">Scheduled jobs</span></a>
+        <a href="#/reports" data-page="reports" role="treeitem" tabindex="-1"><span data-he="דוחות" data-en="Reports">Reports</span></a>
+        <a href="#/alerts" data-page="alerts" role="treeitem" tabindex="-1"><span data-he="התראות" data-en="Alerts">Alerts</span></a>
+        <a href="#/proactive" data-page="proactive" role="treeitem" tabindex="-1"><span data-he="הצעות יזומות" data-en="Proactive offers">Proactive offers</span></a>
+        <a href="#/tasks" data-page="tasks" role="treeitem" tabindex="-1"><span data-he="משימות רקע" data-en="Background tasks">Background tasks</span></a>
+        </div>
+      </div>
+      <div class="nav-group" data-group="activity">
+        <div class="nav-h" data-he="שיחות וזיכרון" data-en="Talks &amp; memory">Talks &amp; memory</div>
+        <div class="nav-kids" role="group">
+        <a href="#/conversations" data-page="conversations" role="treeitem" tabindex="-1"><span data-he="שיחות" data-en="Conversations">Conversations</span></a>
+        <a href="#/recall" data-page="recall" role="treeitem" tabindex="-1"><span data-he="חיפוש בשיחות" data-en="Search conversations">Search conversations</span></a>
+        <a href="#/memory" data-page="memory" role="treeitem" tabindex="-1"><span data-he="זיכרון" data-en="Memory">Memory</span></a>
+        <a href="#/preferences" data-page="preferences" role="treeitem" tabindex="-1"><span data-he="העדפות נלמדות" data-en="Learned preferences">Learned preferences</span></a>
+        </div>
+      </div>
+      <div class="nav-group" data-group="actions">
+        <div class="nav-h" data-he="פעולות" data-en="Do things">Do things</div>
+        <div class="nav-kids" role="group">
+        <a href="#/browser" data-page="browser" role="treeitem" tabindex="-1"><span data-he="דפדפן" data-en="Browser">Browser</span></a>
+        <a href="#/whatsapp" data-page="whatsapp" role="treeitem" tabindex="-1"><span data-he="וואטסאפ" data-en="WhatsApp">WhatsApp</span></a>
+        <a href="#/calls" data-page="calls" role="treeitem" tabindex="-1"><span data-he="שיחות טלפון" data-en="Phone calls">Phone calls</span></a>
+        <a href="#/files" data-page="files" role="treeitem" tabindex="-1"><span data-he="קבצים שלי" data-en="My files">My files</span></a>
+        </div>
       </div>
       <div class="nav-group" data-group="assistant">
         <div class="nav-h" data-he="העוזר" data-en="Assistant">Assistant</div>
-        <a href="#/identity" data-page="identity"><span data-he="שם וקול" data-en="Identity &amp; voice">Identity &amp; voice</span></a>
-        <a href="#/appearance" data-page="appearance"><span data-he="מראה" data-en="Appearance">Appearance</span></a>
-        <a href="#/memory" data-page="memory"><span data-he="זיכרון" data-en="Memory">Memory</span></a>
-        <a href="#/workspace" data-page="workspace"><span data-he="קבצי אישיות" data-en="Persona files">Persona files</span></a>
+        <div class="nav-kids" role="group">
+        <a href="#/identity" data-page="identity" role="treeitem" tabindex="-1"><span data-he="שם וקול" data-en="Identity &amp; voice">Identity &amp; voice</span></a>
+        <a href="#/appearance" data-page="appearance" role="treeitem" tabindex="-1"><span data-he="מראה" data-en="Appearance">Appearance</span></a>
+        <a href="#/workspace" data-page="workspace" role="treeitem" tabindex="-1"><span data-he="קבצי אישיות" data-en="Personality files">Personality files</span></a>
+        <a href="#/features" data-page="features" role="treeitem" tabindex="-1"><span data-he="יכולות ומתגים" data-en="Features &amp; switches">Features &amp; switches</span></a>
+        <a href="#/skills" data-page="skills" role="treeitem" tabindex="-1"><span data-he="כלים" data-en="Skills">Skills</span></a>
+        <a href="#/newskills" data-page="newskills" role="treeitem" tabindex="-1"><span data-he="רעיונות לכלים" data-en="Skill ideas">Skill ideas</span></a>
+        <a href="#/autonomy" data-page="autonomy" role="treeitem" tabindex="-1"><span data-he="עצמאות" data-en="Autonomy">Autonomy</span></a>
+        </div>
       </div>
-      <div class="nav-group" data-group="capabilities">
-        <div class="nav-h" data-he="יכולות" data-en="Capabilities">Capabilities</div>
-        <a href="#/setup" data-page="setup"><span data-he="הגדרה וסיור" data-en="Setup and tour">Setup and tour</span></a>
-        <a href="#/addons" data-page="addons"><span data-he="הגדרה ותוספים" data-en="Setup &amp; add-ons">Setup &amp; add-ons</span></a>
-        <a href="#/features" data-page="features"><span data-he="יכולות ומתגים" data-en="Features &amp; switches">Features &amp; switches</span></a>
-        <a href="#/skills" data-page="skills"><span data-he="כלים ותקינות" data-en="Skills &amp; health">Skills &amp; health</span></a>
-        <a href="#/newskills" data-page="newskills"><span data-he="כלים חדשים" data-en="New Skills">New Skills</span></a>
-        <a href="#/autonomy" data-page="autonomy"><span data-he="עצמאות" data-en="Autonomy">Autonomy</span></a>
+      <div class="nav-group" data-group="connect">
+        <div class="nav-h" data-he="חיבורים" data-en="Connections">Connections</div>
+        <div class="nav-kids" role="group">
+        <a href="#/connections" data-page="connections" role="treeitem" tabindex="-1"><span data-he="חיבורים" data-en="Connections">Connections</span></a>
+        <a href="#/phone" data-page="phone" role="treeitem" tabindex="-1"><span data-he="אפליקציית טלפון" data-en="Phone app">Phone app</span></a>
+        <a href="#/addons" data-page="addons" role="treeitem" tabindex="-1"><span data-he="תוספים" data-en="Add-ons">Add-ons</span></a>
+        </div>
+      </div>
+      <div class="nav-group" data-group="health">
+        <div class="nav-h" data-he="פתרון בעיות" data-en="Fix problems">Fix problems</div>
+        <div class="nav-kids" role="group">
+        <a href="#/issues" data-page="issues" role="treeitem" tabindex="-1"><span data-he="בעיות" data-en="Issues">Issues</span> <span class="count" id="issueCount"></span></a>
+        <a href="#/health" data-page="health" role="treeitem" tabindex="-1"><span data-he="תקינות" data-en="Health">Health</span></a>
+        <a href="#/speed" data-page="speed" role="treeitem" tabindex="-1"><span data-he="תקינות ומהירות" data-en="Health &amp; speed">Health &amp; speed</span></a>
+        <a href="#/selfcheck" data-page="selfcheck" role="treeitem" tabindex="-1"><span data-he="בדיקה עצמית" data-en="Self-check">Self-check</span></a>
+        <a href="#/logs" data-page="logs" role="treeitem" tabindex="-1"><span data-he="יומן מערכת" data-en="System log">System log</span></a>
+        </div>
       </div>
       <div class="nav-group" data-group="usage">
         <div class="nav-h" data-he="שימוש ועלויות" data-en="Usage &amp; cost">Usage &amp; cost</div>
-        <a href="#/usage" data-page="usage"><span data-he="שימוש ומגבלות" data-en="Usage &amp; limits">Usage &amp; limits</span></a>
-        <a href="#/costs" data-page="costs"><span data-he="עלויות" data-en="Costs">Costs</span></a>
+        <div class="nav-kids" role="group">
+        <a href="#/usage" data-page="usage" role="treeitem" tabindex="-1"><span data-he="שימוש ומגבלות" data-en="Usage &amp; limits">Usage &amp; limits</span></a>
+        <a href="#/costs" data-page="costs" role="treeitem" tabindex="-1"><span data-he="עלויות" data-en="Costs">Costs</span></a>
+        </div>
+      </div>
+      <div class="nav-group" data-group="dev">
+        <div class="nav-h" data-he="פיתוח" data-en="Development">Development</div>
+        <div class="nav-kids" role="group">
+        <a href="#/development" data-page="development" role="treeitem" tabindex="-1"><span data-he="פיתוח" data-en="Development">Development</span></a>
+        <a href="#/devdrafts" data-page="devdrafts" role="treeitem" tabindex="-1"><span data-he="טיוטות פיתוח" data-en="Development drafts">Development drafts</span></a>
+        <a href="#/agents" data-page="agents" role="treeitem" tabindex="-1"><span data-he="סוכני קוד: הכל" data-en="Coding agents: all">Coding agents: all</span></a>
+        <a href="#/agent" data-page="agent" role="treeitem" tabindex="-1"><span data-he="סוכן הפרויקט" data-en="This project&#39;s agent">This project&#39;s agent</span></a>
+        <a href="#/bugs" data-page="bugs" role="treeitem" tabindex="-1"><span data-he="דיווחי תקלות" data-en="Bug reports">Bug reports</span></a>
+        <a href="#/signoff" data-page="signoff" role="treeitem" tabindex="-1"><span data-he="אישור גרסה" data-en="Release sign-off">Release sign-off</span></a>
+        </div>
       </div>
       <div class="nav-group" data-group="system">
         <div class="nav-h" data-he="מערכת ועזרה" data-en="System &amp; help">System &amp; help</div>
-        <a href="#/guides" data-page="guides"><span data-he="מדריכים" data-en="Guides">Guides</span></a>
-        <a href="#/settings" data-page="settings"><span data-he="הגדרות" data-en="Settings">Settings</span></a>
-        <a href="#/backup" data-page="backup"><span data-he="גיבוי" data-en="Backup">Backup</span></a>
-        <a href="#/updates" data-page="updates"><span data-he="עדכונים" data-en="Updates">Updates</span></a>
-        <a href="#/signoff" data-page="signoff"><span data-he="אישור גרסה" data-en="Release sign-off">Release sign-off</span></a>
-        <a href="#/selfmanage" data-page="selfmanage"><span data-he="ניהול עצמי" data-en="Self-management">Self-management</span></a>
-        <a href="#/profiles" data-page="profiles"><span data-he="פרופילים" data-en="Profiles">Profiles</span></a>
+        <div class="nav-kids" role="group">
+        <a href="#/guides" data-page="guides" role="treeitem" tabindex="-1"><span data-he="מדריכים" data-en="Guides">Guides</span></a>
+        <a href="#/settings" data-page="settings" role="treeitem" tabindex="-1"><span data-he="הגדרות" data-en="Settings">Settings</span></a>
+        <a href="#/devices" data-page="devices" role="treeitem" tabindex="-1"><span data-he="מכשירים וגישה" data-en="Devices &amp; access">Devices &amp; access</span></a>
+        <a href="#/runtime" data-page="runtime" role="treeitem" tabindex="-1"><span data-he="שליטה ומצב ריצה" data-en="Controls &amp; runtime">Controls &amp; runtime</span></a>
+        <a href="#/backup" data-page="backup" role="treeitem" tabindex="-1"><span data-he="גיבוי" data-en="Backup">Backup</span></a>
+        <a href="#/updates" data-page="updates" role="treeitem" tabindex="-1"><span data-he="עדכונים" data-en="Updates">Updates</span></a>
+        <a href="#/releasenotes" data-page="releasenotes" role="treeitem" tabindex="-1"><span data-he="הערות גרסה" data-en="Release notes">Release notes</span></a>
+        <a href="#/selfmanage" data-page="selfmanage" role="treeitem" tabindex="-1"><span data-he="ניהול עצמי" data-en="Self-management">Self-management</span></a>
+        <a href="#/profiles" data-page="profiles" role="treeitem" tabindex="-1"><span data-he="פרופילים" data-en="Profiles">Profiles</span></a>
+        </div>
       </div>
     </nav>
     <div class="side-foot">
@@ -153,7 +187,7 @@
       <span class="lang-slot" id="langSlot"></span>
       <button id="themeBtn" class="ghost icon-btn" type="button" aria-label="Theme">◐</button>
     </header>
-    <main id="main" aria-live="polite" tabindex="-1"><div class="muted">Loading…</div></main>
+    <main id="main" tabindex="-1"><div class="muted">Loading…</div></main>
   </div>
 </div>
 <div id="tip" class="tip" role="tooltip" hidden></div>

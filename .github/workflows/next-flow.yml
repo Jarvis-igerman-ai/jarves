@@ -14,7 +14,7 @@ on:
     branches: [next]
     types: [opened, synchronize, reopened, ready_for_review, labeled]
   workflow_run:
-    workflows: [jarves-checks, jarves-next-flow]
+    workflows: [jarves-checks]
     types: [completed]
   workflow_dispatch:
 permissions:
@@ -81,11 +81,13 @@ jobs:
           NEEDS: ${{ toJSON(needs) }}
         run: echo "$NEEDS" | jq -e '[.[] | select(.result == "failure" or .result == "cancelled")] | length == 0' > /dev/null
   automerge-into-next:
-    # Merges green PRs labelled `automerge` into next (no "up to date" requirement). Off unless ENABLE_NEXT_FLOW.
+    # Merges this PR into next once its light run is green and it is labelled `automerge` (no "up to date" requirement).
+    # Runs in the same pull_request run after `ci-ok`: a workflow must not list itself under `workflow_run` (GitHub then
+    # rejects the whole file, so every push showed a failed run with zero jobs). Off unless ENABLE_NEXT_FLOW.
+    needs: [ci-ok]
     if: >-
-      vars.ENABLE_NEXT_FLOW == 'true' && github.event_name == 'workflow_run' &&
-      github.event.workflow_run.name == 'jarves-next-flow' &&
-      github.event.workflow_run.event == 'pull_request' && github.event.workflow_run.conclusion == 'success'
+      vars.ENABLE_NEXT_FLOW == 'true' && github.event_name == 'pull_request' &&
+      github.event.pull_request.draft == false && contains(github.event.pull_request.labels.*.name, 'automerge')
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     concurrency:
@@ -94,20 +96,18 @@ jobs:
     env:
       GH_TOKEN: ${{ secrets.AUTOMERGE_TOKEN || github.token }}
       REPO: ${{ github.repository }}
+      PR: ${{ github.event.pull_request.number }}
+      HEAD_SHA: ${{ github.event.pull_request.head.sha }}
     steps:
-      - name: Merge the green PRs labelled automerge (oldest first, only if the light run of the exact head is green)
+      - name: Merge this PR if it is open, not a draft, has no conflict and its head is the commit that was tested
         run: |
           set -euo pipefail
-          for n in $(gh pr list -R "$REPO" --state open --base next --label automerge --json number --jq 'sort_by(.number)|.[].number'); do
-            info=$(gh pr view "$n" -R "$REPO" --json isDraft,mergeable,headRefOid)
-            [ "$(echo "$info" | jq -r .isDraft)" = "true" ] && continue
-            [ "$(echo "$info" | jq -r .mergeable)" = "CONFLICTING" ] && { echo "#$n conflicts: skipped"; continue; }
-            sha=$(echo "$info" | jq -r .headRefOid)
-            ok=$(gh api "repos/$REPO/commits/$sha/check-runs" --jq '[.check_runs[]|select(.name=="CI result (single required check)" and .conclusion=="success")]|length')
-            bad=$(gh api "repos/$REPO/commits/$sha/check-runs" --jq '[.check_runs[]|select(.status!="completed" or (.conclusion!="success" and .conclusion!="skipped" and .conclusion!="neutral"))]|length')
-            echo "#$n ${sha:0:7} ok=$ok not-green=$bad"
-            if [ "$ok" -ge 1 ] && [ "$bad" = "0" ]; then gh pr merge "$n" -R "$REPO" --merge --delete-branch; fi
-          done
+          info=$(gh pr view "$PR" -R "$REPO" --json state,isDraft,mergeable,headRefOid)
+          [ "$(echo "$info" | jq -r .state)" = "OPEN" ] || { echo "#$PR is not open: skipped"; exit 0; }
+          [ "$(echo "$info" | jq -r .isDraft)" = "true" ] && { echo "#$PR is a draft: skipped"; exit 0; }
+          [ "$(echo "$info" | jq -r .mergeable)" = "CONFLICTING" ] && { echo "#$PR conflicts: skipped"; exit 0; }
+          [ "$(echo "$info" | jq -r .headRefOid)" = "$HEAD_SHA" ] || { echo "#$PR head moved since this run: skipped"; exit 0; }
+          gh pr merge "$PR" -R "$REPO" --merge --delete-branch
   fast-forward-main:
     # Batch on `next` is green (jarves-checks, event push, branch next) => main moves to that exact commit, fast-forward
     # only (the script refuses anything else). main's own jarves-checks run then finds the proof and jarves-package

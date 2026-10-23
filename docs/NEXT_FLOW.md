@@ -25,8 +25,9 @@ feature PR -> next   light CI (jarves-next-flow): fast validation + only the aff
 * **Fast-forward** (`fast-forward-main`): after a green batch on `next`, `main` is pushed to the batch commit with a plain
   `git push` using `AUTOMERGE_TOKEN` (so the follow-up workflows start). It refuses non-fast-forward (for example a
   hotfix that landed on `main`: merge `main` into `next` first).
-* **Automerge into next** (`automerge-into-next`): PRs labelled `automerge` with a green light run on their exact head are
-  merged into `next`, oldest first. No "branch must be up to date" requirement, so a moving `next` does not re-run PRs.
+* **Automerge into next** (`automerge-into-next`): a PR labelled `automerge` is merged into `next` by the job that runs after
+  its own green light run (same workflow run, `needs: [ci-ok]`), only if its head is still the tested commit and it does
+  not conflict. No "branch must be up to date" requirement, so a moving `next` does not re-run PRs.
 * PRs into `next` do not run the full `jarves-checks` (it has `branches-ignore: [next]`).
 
 ## Switch on / off

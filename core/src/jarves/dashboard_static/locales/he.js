@@ -1884,6 +1884,12 @@
   "Starts the bridge if needed and shows a QR code. You scan it on your phone, then you can switch on read-only. No message is sent.": "מפעיל את הגשר במידת הצורך ומציג קוד QR. את הסריקה בטלפון עושים אתם, ואחריה אפשר להפעיל קריאה בלבד. לא נשלחת שום הודעה.",
   "Set up WhatsApp": "הגדרת וואטסאפ",
   "Switch on read-only mode now? JARVES will read and never send.": "להפעיל עכשיו מצב קריאה בלבד? ג'ארביס יקרא ולא ישלח.",
+  "Release notes": "הערות גרסה",
+  "What changed in each version.": "מה השתנה בכל גרסה.",
+  "No release notes found in this install.": "לא נמצאו הערות גרסה בהתקנה הזו.",
+  "Your version": "הגרסה שלך",
+  "More details: connections, features and privacy": "עוד פרטים: חיבורים, יכולות ופרטיות",
+  "More everyday tools": "עוד כלים ליום-יום",
   "Hi, I am JARVES. How can I help? Type a message, or / for commands.": "שלום, אני JARVES. במה אפשר לעזור? כתבו הודעה או / לפקודות.",
   "Scroll to the latest message": "לגלול להודעה האחרונה",
   "Writing": "כותב"
