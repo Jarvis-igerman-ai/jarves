@@ -114,7 +114,7 @@ TOPICS: list[Topic] = [
     Topic("update_backup", "עדכון, גיבוי וחזרה לאחור", "Update, backup and rollback",
           "בודק עדכונים חתומים, מגבה את הנתונים ומאפשר לחזור לגרסה הקודמת.",
           "Checks signed updates, backs up your data and can roll back to the previous version.",
-          ["updates", "backup", "beta_channel"], ["update_check", "backup"], "", "#/updates", "jarvis update --rollback"),
+          ["updates", "backup", "beta_channel", "auto_update"], ["update_check", "backup"], "", "#/updates", "jarvis update --rollback"),
     Topic("diagnostics", "אבחון ובדיקות עצמיות", "Diagnostics and self-tests",
           "בודק את עצמו ואומר מה לתקן, בלי לשלוח כלום החוצה.", "Checks itself and tells you what to fix, without sending anything out.",
           ["health", "diagnosis", "self_tests"], ["self_diagnostics_2", "self_tests"], "", "#/health", "jarvis selftest"),

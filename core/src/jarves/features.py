@@ -488,6 +488,8 @@ class Features:
     def default(self, fid: str) -> tuple[bool, str]:
         """(value, source) when the user never switched it: the legacy config.toml value, else the default.
         Cached on first use, i.e. before apply_to_config mirrors the switches back onto the same Config."""
+        if fid == "auto_update":                  # follows the update channel (beta -> on, stable -> off); never cached
+            return self.enabled("beta_channel"), "channel"
         if fid not in self._defaults:
             self._defaults[fid] = self._default(fid)
         return self._defaults[fid]

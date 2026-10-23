@@ -329,6 +329,11 @@ def set_channel(home: Path, cfg, channel: str) -> str:
     from .config import Config
     features.Features(cfg if cfg is not None else Config(), home).set("beta_channel", channel == "beta")
     logs.info("updates", "UPDATE_CHANNEL_SET", "update channel changed", channel=channel)
+    try:
+        from . import auto_update
+        auto_update.mark_channel_chosen(home)            # the first-run channel prompt is answered; installs nothing
+    except Exception:
+        pass
     return channel
 
 
@@ -953,3 +958,8 @@ def dashboard_routes(register_route) -> None:
     register_route("POST", r"/api/updates/check", api_updates_check)
     register_route("POST", r"/api/updates/install", api_updates_install)
     register_route("POST", r"/api/updates/rollback", api_updates_rollback)
+    from . import auto_update
+    auto_update.dashboard_routes(register_route)
+
+
+from . import auto_update  # noqa: E402,F401  (registers the auto_update switch; imports this module)
