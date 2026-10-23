@@ -364,7 +364,7 @@ func _build_face() -> void:
 		elif a.begins_with("--appearance="):
 			appearance.set_mode(a.substr(13))
 	face.snap()
-	if "--no-core" in OS.get_cmdline_user_args():
+	if "--no-core" in OS.get_cmdline_user_args() and not "--check" in OS.get_cmdline_user_args():
 		return
 	assistant = AssistantUI.new()
 	assistant.face = face

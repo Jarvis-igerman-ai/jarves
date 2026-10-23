@@ -72,6 +72,22 @@ async def test_cli_appearance_persists_and_reaches_connected_face(home, cfg):
         await core.stop()
 
 
+async def test_muted_microphone_blocks_every_voice_session_start(home, cfg):
+    core = make_core(home, cfg)
+    await core.start()
+    try:
+        await core.set_muted(True)
+
+        def must_not_connect(*args, **kwargs):
+            pytest.fail("muted input must not open a voice session")
+
+        core._live_factory = must_not_connect
+        await core._start_live(greeting="hello", hold_output=True)
+        assert core.live is None and not core._voice_connecting and core.dev.mic_muted
+    finally:
+        await core.stop()
+
+
 def test_cli_mic_disconnected_is_not_success(home, cfg, monkeypatch):
     monkeypatch.setattr(cli, "_ws_call", lambda *a, **k: None)
     assert cli.cmd_mic(SimpleNamespace(action="unmute"), cfg, home) == 1

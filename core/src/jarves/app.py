@@ -1040,7 +1040,7 @@ class Core:
                 logs.debug("tts", "CHIME_FAILED", "could not play the chime")
 
     async def _start_live(self, *, greeting: str | None = None, hold_output: bool = False, ack: bool = False) -> None:
-        if self.stopping:
+        if self.stopping or getattr(self.dev, "mic_muted", False):
             return
         if self.live is not None or self._voice_connecting:
             # QA 19 Oct (suite_voice): a face connecting after a failed startup started a SECOND live session while

@@ -173,7 +173,7 @@ def make_skill(rt: Runtime):
                                   "הדיבור.", {"ending": True})
 
             return [
-                Tool("mute_microphone", "Stop hearing me / mute your microphone (not music). Unmute using the visible mic button, tray, or jarvis mic unmute; voice cannot unmute a muted mic.",
+                Tool("mute_microphone", "Mute microphone: 'stop hearing me', 'אל תקשיב לי'. Not music. Unmute using the visible mic button, tray or jarvis mic unmute; voice cannot unmute.",
                      mute_, permission="action"),
                 Tool("end_conversation", "End only this voice conversation (JARVES keeps running): 'end the conversation', 'תסגור את השיחה', or a bare 'תסגור'. The safe choice when unclear. Not quitting.",
                      end_, permission="action", timeout_s=5),
