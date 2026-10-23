@@ -485,7 +485,7 @@ def bridge_publish(dist: Path, env: dict | None = None, gh: GitHub | None = None
     gh.upload(rel, asset, exe.read_bytes(), "application/vnd.microsoft.portable-executable")
     gh.upload(rel, asset + ".sha256", f"{sha256(exe)}  {asset}\n".encode(), "text/plain")
     gh.upload(rel, BRIDGE_MANIFEST, json.dumps(envelope, indent=1).encode(), "application/json")      # last: the switch
-    print(f"Bridge publish: published {info['version']} in {repo} (key {envelope['signature']['key_id']}) -> "
+    print(f"Bridge publish: published {info['version']} in {repo} (signed) -> "
           f"https://github.com/{repo}/releases/download/{BRIDGE_TAG}/{BRIDGE_MANIFEST}")
     return 0
 
