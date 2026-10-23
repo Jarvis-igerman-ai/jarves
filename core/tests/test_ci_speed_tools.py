@@ -495,3 +495,24 @@ def test_main_red_opens_one_issue_and_closes_it_when_green():
     assert not any("checkout" in s.get("uses", "") for s in job["steps"])            # never runs repository code
     run = job["steps"][0]["run"]
     assert "gh issue create" in run and "gh issue comment" in run and "gh issue close" in run
+
+
+def test_draft_prs_run_only_the_fast_checks_and_never_read_green():
+    """Owner decision 23 Oct 2026 (#89): five agents' PRs at once queued for runners (20 concurrent jobs on the free
+    plan), and pushes to unfinished PRs burned full runs. A draft gets classify + validation only; the full run starts
+    when it is marked ready. Skipped jobs would make the required `ci-ok` green, so a draft's run cancels itself."""
+    assert not any(ci_plan.classify(["core/src/jarves/cli.py"], "pull_request", draft=True).values())
+    assert ci_plan.classify(["core/src/jarves/cli.py"], "pull_request")["full"]
+    doc = _wf("jarves-checks.yml")
+    assert "ready_for_review" in doc[True]["pull_request"]["types"]                   # marking ready starts the full run
+    changes = doc["jobs"]["changes"]
+    assert changes["outputs"]["draft"] == "${{ steps.c.outputs.draft }}"
+    assert "github.event.pull_request.draft" in changes["env"]["DRAFT"]
+    script = next(s["run"] for s in changes["steps"] if s.get("id") == "c")
+    assert "args+=(--draft)" in script and 'echo "draft=$draft"' in script
+    ok = doc["jobs"]["ci-ok"]
+    assert ok["env"]["DRAFT"] == "${{ needs.changes.outputs.draft }}" and ok["permissions"]["actions"] == "write"
+    run = ok["steps"][0]["run"]
+    draft_branch = run[run.index('if [ "$DRAFT" = "true" ]'):run.index("fi")]
+    assert "gh run cancel" in draft_branch and "exit 1" in draft_branch                # never success on a draft
+    assert "github.event.pull_request.draft != true" in doc["jobs"]["failure-summary"]["if"]
