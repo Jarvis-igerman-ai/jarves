@@ -50,4 +50,5 @@
 - #90 and #93 merged by auto-merge (18:24, 18:41). Next PR (test execution): `test_mobile_phone_e2e.py` runs in the
   browser job (one retry; planner and conftest browser lists synced, a test keeps them equal); each Core shard passes
   only its planned files to pytest (cold collection 5.8-6.3 s instead of 9.8-10.4 s per Linux shard, same tests);
-  Windows shards use 3 xdist workers. Measure on that PR's run: Windows shard times and any new flake.
+  Windows shards were tried with 3 xdist workers and set back to 2 in the same PR (#96: no faster, and
+  test_projectmgr's parallel-worktree test failed under the load; that test is load-sensitive, a candidate for the next flake sweep).

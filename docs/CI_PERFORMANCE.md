@@ -73,7 +73,7 @@ PR head (pull_request, merge ref)                      merge (automerge)        
    `python core/tools/ci_plan.py durations-merge --junit <one OS artifact directory> --into core/tests/durations-windows.json`.
    Inside a shard, `pytest-xdist` (pinned `pytest-xdist==3.8.0` through `uv run --with`, not in the lock) runs files in
    parallel workers with `--dist loadfile`: one file never splits across workers, and the suite already uses temp homes and
-   `free_port()` per test. Workers: 1 (serial) on Linux (3 workers broke 20 process-limit/update-flow tests on ubuntu-24.04), 3 on Windows (2 until 23 Oct 2026); repository variable `CI_XDIST_WORKERS` overrides, `1` turns it off.
+   `free_port()` per test. Workers: 1 (serial) on Linux (3 workers broke 20 process-limit/update-flow tests on ubuntu-24.04), 2 on Windows; repository variable `CI_XDIST_WORKERS` overrides, `1` turns it off.
    This replaces the old "serial on purpose" rule; the safety net is item 7.
 6. **Caching.** uv (lock hash), the Go module and build cache (`setup-go`), Playwright browsers (Linux), the Godot and Inno
    Setup downloads (`jarves-test-tools`), the installer build tools (Python, Godot templates, Inno Setup:
@@ -230,8 +230,10 @@ moving `test_mobile_phone_e2e.py` (a real-browser file inside the Core shards, n
 
 ## Follow-up: Windows workers and own-file collection (23 Oct 2026, #89)
 
-- Windows shards use 3 pytest-xdist workers (was 2) on the 4-vCPU hosted runners: the Windows shards are the long pole
-  once the plan is balanced. Repository variable `CI_XDIST_WORKERS` still overrides (for example back to 2).
+- Windows workers stay 2. Measured on PR #96 with 3: Windows shards 413 / 359 / 453 s, no faster than 2 workers with a
+  balanced plan (PR #90's last run: 476 / 365 / 347 s), and `test_projectmgr::test_parallel_tasks_merge_and_dependent_gets_handoff`
+  (parallel git worktrees) failed under the extra load. The balanced plan is what made the shards even: the same run had
+  Linux shards of 339 / 348 / 354 s (before the timing fix: 254 / 552 / 296 s).
 - Each shard passes ONLY its planned files to pytest. Before, every shard collected all 177 test files and deselected two
   thirds. Measured locally, cold cache as on a fresh runner: 5.8-6.3 s instead of 9.8-10.4 s per Linux shard, the same
   879 tests selected (shard 3/3); Windows imports are slower, so the saving there is likely larger. `--shard-files`
