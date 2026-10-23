@@ -1,9 +1,11 @@
 name: jarves-automerge
-# Merge queue for a free, private, personal repo (GitHub's native queue needs Pro/an organization).
-# Label a PR `automerge`. This workflow then, one PR at a time in PR-number order:
-#   1. skips drafts, conflicting PRs and PRs not targeting main;
-#   2. if the PR is behind main, updates its branch (new CI starts) and stops - it is retried when that CI ends;
-#   3. if the head commit has ALL jarves-checks jobs green, merges it (merge commit) and the branch is deleted;
+# Merge queue for a personal repo (GitHub's native merge queue needs an organization). Label a PR `automerge`. This
+# workflow then, in PR-number order (owner decision 23 Oct 2026, #89: no update-and-re-run of green PRs):
+#   1. merges nothing while main is red (the latest finished jarves-checks run on main failed): fix main first;
+#   2. skips drafts and conflicting PRs; a PR that is only BEHIND main is NOT updated and re-tested: its run tested the
+#      merge with main as it was, and the run on main after the merge is the integration check (full matrix when the
+#      merged tree was not proven on the PR; queued main runs batch on their own);
+#   3. merges every PR whose head commit has ALL jarves-checks jobs green (merge commit, branch deleted);
 #   4. if any check failed it comments once and removes the label (a human or the merge agent fixes it).
 # It never merges with a pending/failed/missing check, never force-pushes, never bypasses anything.
 # Secret AUTOMERGE_TOKEN (fine-grained PAT, this repo: Contents RW, Pull requests RW) makes the merge push trigger
@@ -29,30 +31,25 @@ jobs:
       GH_TOKEN: ${{ secrets.AUTOMERGE_TOKEN || github.token }}
       REPO: ${{ github.repository }}
     steps:
-      - name: Merge the next green PR
+      - name: Merge the green PRs
         run: |
           set -euo pipefail
           if [ -z "${{ secrets.AUTOMERGE_TOKEN }}" ]; then
             echo "::warning::AUTOMERGE_TOKEN is not set: merging with GITHUB_TOKEN will NOT start CI/installer publish on main"
           fi
-          # a run of jarves-checks on main is in progress: wait (merging would queue behind it; the release run is never cancelled).
-          # This workflow runs again when that run completes (workflow_run trigger above).
-          busy=$(gh run list -R "$REPO" --branch main --workflow jarves-checks --json status --jq '[.[]|select(.status!="completed")]|length')
-          if [ "$busy" != "0" ]; then echo "main has $busy jarves-checks run(s) in progress: waiting"; exit 0; fi
+          # main must be green: the newest finished (not cancelled) jarves-checks run on main decides. Runs still queued
+          # or running do not block (they batch); this workflow runs again whenever a jarves-checks run completes.
+          last=$(gh run list -R "$REPO" --branch main --workflow jarves-checks --status completed --limit 10 --json conclusion --jq '[.[]|select(.conclusion!="cancelled")][0].conclusion // "none"')
+          if [ "$last" = "failure" ]; then echo "::warning::main is red (latest jarves-checks run on main failed): no merges until it is fixed"; exit 0; fi
           # labels needs-review / no-automerge block the merge (autolabel.yml, dependabot-automerge.yml, or a human)
           prs=$(gh pr list -R "$REPO" --state open --base main --label automerge --json number,labels --jq '[.[]|select([.labels[].name]|(index("needs-review") or index("no-automerge"))|not)]|sort_by(.number)|.[].number')
           for n in $prs; do
-            info=$(gh pr view "$n" -R "$REPO" --json isDraft,mergeable,headRefOid,headRefName,mergeStateStatus)
+            info=$(gh pr view "$n" -R "$REPO" --json isDraft,mergeable,headRefOid,mergeStateStatus)
             draft=$(echo "$info" | jq -r .isDraft); mer=$(echo "$info" | jq -r .mergeable)
             sha=$(echo "$info" | jq -r .headRefOid); st=$(echo "$info" | jq -r .mergeStateStatus)
             echo "PR #$n draft=$draft mergeable=$mer state=$st sha=${sha:0:7}"
             [ "$draft" = "true" ] && continue
             [ "$mer" = "CONFLICTING" ] && { echo "  conflicts: skipped"; continue; }
-            if [ "$st" = "BEHIND" ]; then
-              echo "  behind main: updating branch (CI restarts); queue waits"
-              gh api -X PUT "repos/$REPO/pulls/$n/update-branch" -f expected_head_sha="$sha" >/dev/null || true
-              exit 0
-            fi
             runs=$(gh api "repos/$REPO/actions/runs?head_sha=$sha&event=pull_request" --jq '[.workflow_runs[]|select(.name=="jarves-checks")]|sort_by(.created_at)|last')
             status=$(echo "$runs" | jq -r '.status // "none"'); concl=$(echo "$runs" | jq -r '.conclusion // ""')
             echo "  jarves-checks: $status $concl"
@@ -61,13 +58,12 @@ jobs:
               pend=$(gh api "repos/$REPO/commits/$sha/check-runs" --jq '[.check_runs[]|select(.status!="completed")]|length')
               if [ "$bad" = "0" ] && [ "$pend" = "0" ]; then
                 echo "  all green: merging #$n"
-                gh pr merge "$n" -R "$REPO" --merge --delete-branch
-                exit 0        # one merge per run; main moves, the next PR becomes BEHIND and is updated next run
+                gh pr merge "$n" -R "$REPO" --merge --delete-branch || echo "  merge refused (for example a conflict with the PR merged just before); the next run retries"
               fi
             elif [ "$status" = "completed" ]; then
               gh pr comment "$n" -R "$REPO" --body "automerge: jarves-checks ended '$concl' on ${sha:0:7}; removing the automerge label. Fix and re-add the label." >/dev/null
               gh pr edit "$n" -R "$REPO" --remove-label automerge >/dev/null
-              continue
+            else
+              echo "  checks still running: merged by a later run"
             fi
-            exit 0            # the first queued PR is still running its checks: keep order, wait
           done

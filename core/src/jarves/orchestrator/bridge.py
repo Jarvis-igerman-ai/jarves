@@ -33,6 +33,7 @@ STEP_S = 5.0
 MAX_FRAME = 1_000_000
 MAX_CONNS = 64
 MAGIC = b"JARVES-AGENTS-1"
+REPLACE_RETRY_S = 1.0                # Windows: how long a briefly held bridge.token may refuse the swap
 _IS_WIN = sys.platform == "win32"
 
 
@@ -57,6 +58,24 @@ def token_path(home: Path) -> Path:
     return Path(home) / "agents" / "bridge.token"
 
 
+def _replace(src: Path, dst: Path) -> None:
+    """os.replace that rides out a brief Windows sharing violation. While another process holds `dst` open (a CLI
+    or plugin reading the token, antivirus or the indexer scanning the file just written), MoveFileEx refuses the swap
+    with WinError 5/32 (PermissionError). Retry with short sleeps for up to REPLACE_RETRY_S, then raise the last error."""
+    deadline = time.monotonic() + REPLACE_RETRY_S
+    delay = 0.01
+    while True:
+        try:
+            os.replace(src, dst)
+            return
+        except PermissionError:
+            left = deadline - time.monotonic()
+            if left <= 0:
+                raise
+            time.sleep(min(delay, left))
+            delay = min(delay * 2, 0.1)
+
+
 def write_token(home: Path) -> bytes:
     p = token_path(home)
     p.parent.mkdir(parents=True, exist_ok=True)
@@ -67,9 +86,13 @@ def write_token(home: Path) -> bytes:
     tok = secrets.token_hex(32)
     tmp = p.with_name(f"bridge.token.{secrets.token_hex(3)}.tmp")
     fd = os.open(str(tmp), os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
-    with os.fdopen(fd, "w", encoding="ascii") as f:
-        f.write(tok)
-    os.replace(tmp, p)
+    try:
+        with os.fdopen(fd, "w", encoding="ascii") as f:
+            f.write(tok)
+        _replace(tmp, p)
+    except BaseException:
+        tmp.unlink(missing_ok=True)                      # never leave a stray copy of the token behind
+        raise
     return tok.encode("ascii")
 
 

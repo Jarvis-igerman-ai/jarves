@@ -233,9 +233,13 @@ async def test_allow_listed_site_full_control_with_confirmations(tmp_path, site)
         # a link to a host that is neither allow-listed nor approved is refused, the page stays
         await reg.call("browser_open", {"url": f"http://127.0.0.1:{site}/"})
         page = await reg.call("browser_read")
+        await svc._page.evaluate("() => { window.__jarvesKept = 1 }")
         off = await reg.call("browser_click", {"ref": _ref(page, "Other host")})
         assert off.ok and off.data["navigation_refused"] == ["localhost"] and svc.current_host() == "127.0.0.1"
-        page = await reg.call("browser_read")                          # back on the shop page (fresh numbers)
+        # the SAME document stayed: no error page was committed (it used to land after the click returned on a
+        # loaded runner and the next read saw its empty text: nightly 39740226891) and no reload was needed
+        assert await svc._page.evaluate("() => window.__jarvesKept") == 1
+        page = await reg.call("browser_read")                          # still on the shop page (fresh numbers)
         assert "Opening hours" in page.data["untrusted_page_text"]
         # credential entry: always asked, the value never appears in the prompt; declined = not typed
         pw = _ref(page, "Password")

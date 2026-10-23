@@ -25,6 +25,8 @@ from jarves import release_signoff as so  # noqa: E402
 STANDING = ("OI-02", "OV-01", "OV-02", "OV-03", "OV-07", "OP-01", "OP-02", "OP-03", "OL-I1", "OL-I2", "OL-I3",
             "OL-I4", "OO-02", "OR-01", "OR-02")
 MAX_CHANGELOG_ROWS = 20
+# entries the owner cannot try in the app: documentation, CI and repository tooling (CI tests those)
+NOT_IN_APP = re.compile(r"^(Docs|Internal|CI)\b|^\w+(\s*\([^)]*\))?:\s*(CI\b|SECURITY\.md)")
 
 
 def changelog_items(text: str, version: str) -> list[str]:
@@ -38,11 +40,16 @@ def changelog_items(text: str, version: str) -> list[str]:
         m = re.match(r"^\s*[-*]\s+(.*)$", line)
         if not m:
             continue
-        body = re.sub(r"\[([^\]]+)\]\([^)]*\)", r"\1", m.group(1))             # links -> text
-        for part in re.split(r"(?<=[.;])\s+(?=[A-Z])", body):                     # one row per sentence
-            part = part.strip()
-            if len(part) > 12:
-                items.append(part)
+        body = re.sub(r"\[([^\]]+)\]\([^)]*\)", r"\1", m.group(1)).strip()     # links -> text
+        if NOT_IN_APP.match(body):
+            continue
+        first = ""                                       # one row per entry (one row per sentence made rows like
+        for sentence in re.split(r"(?<=[.;])\s+(?=[A-Z])", body):   # "See docs/x.md."): its first sentence, plus the
+            first = f"{first} {sentence.strip()}".strip()             # next one while it is too short to act on
+            if len(first) >= 40:
+                break
+        if len(first) > 12:
+            items.append(first)
     return items[:MAX_CHANGELOG_ROWS]
 
 
@@ -64,14 +71,15 @@ def build_sheet(version: str, since: str | None, changelog: str, work_package: s
         rows.append(so.Row(f"C{n}", "Changed", f"Try it in the beta: {short}",
                            "Works as described; nothing next to it broke"))
     guides = sorted({Path(f).stem for f in changed_files if re.match(r"core/src/jarves/guides/data/[^/]+\.toml$", f)})
-    for n, g in enumerate(guides, 1):
-        rows.append(so.Row(f"G{n}", "Guide", f"Open the guide '{g}' (Guides page or `jarvis help {g}`) and do its steps",
-                           "Every step works as written, in English and in Hebrew"))
+    if guides:                         # one row, not one per guide: CI already runs every guide (test_guides, CLI parity)
+        rows.append(so.Row("G1", "Guide", f"Open the {len(guides)} changed guide(s) on the Guides page, in English and in "
+                           f"Hebrew, and skim each: {', '.join(guides)}",
+                           "Each reads correctly and its first steps work as written"))
     pages = sorted({Path(f).stem for f in changed_files if re.match(r"core/src/jarves/dashboard_static/[a-z_]+\.js$", f)}
                    - {"app", "i18n", "shell", "pages", "home"})
-    for n, pg in enumerate(pages, 1):
-        rows.append(so.Row(f"P{n}", "Dashboard", f"Open the dashboard page(s) of {pg}.js in English, then Hebrew",
-                           "Renders, no console error, no cut-off text, keyboard works"))
+    if pages:                          # one row; CI already loads every page in a real browser (test_browser, a11y)
+        rows.append(so.Row("P1", "Dashboard", f"Open the dashboard pages changed in this release, in English, then Hebrew: "
+                           f"{', '.join(pages)}", "Each renders, no cut-off text, keyboard works"))
     rows += standing_rows(work_package)
     intro = (f"Generated {date.today().isoformat()} from the changes since "
              f"{since or 'the beginning (no earlier stable tag)'}. Install the LATEST beta first "

@@ -8,7 +8,7 @@ Run `python core/tools/prepush.py` before every push and never push on a red loc
 | `guides` | `test_guides.py`, `test_cli_parity.py` | a feature has no guide or no CLI parity entry |
 | `locales` | `test_hebrew_texts.py`, `test_dashboard_locales.py` | a Hebrew text or locale key is missing or wrong |
 | `docs` | `test_docs_links.py` | a link breaks or a doc is missing from [DOC_MAP](DOC_MAP.md) |
-| `perf` | `test_p_perf.py` | the backend prompt plus tool text grows past its size budget |
+| `perf` | `test_p_perf.py`, `test_tool_descriptions.py` | the backend prompt plus tool text grows past its size budget, or a user tool loses its English or Hebrew trigger phrase (or its routing) |
 | `ci` | workflow, pipeline, speed-tool, comment and prepush tests | a workflow file or CI tool contract breaks |
 | `net` | `test_netguard.py` | the network guard for tests is broken |
 | `dash` | starts the dashboard in a temp home and times every GET endpoint | any endpoint is slower than `ci_max` of `dashboard_api_max_ms` in `core/perf_budgets.toml` |
