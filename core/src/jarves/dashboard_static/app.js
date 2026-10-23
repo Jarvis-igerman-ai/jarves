@@ -397,6 +397,8 @@ async function pageHome() {
   const r = d.runtime || {}, c = r.core || {}, disp = r.display || {}, mic = r.mic || {}, al = r.alerts || {},
     vo = r.voice || {}, tray = r.tray || {};
   const running = d.live && c.state === "running";
+  const pf = r.prefs || {};                                   // saved choices: what shows (and is edited) while the Core is stopped
+  const micMuted = running ? !!mic.muted : !!pf.mic_muted, alertsPaused = running ? !!al.paused : !!pf.alerts_paused;
   const msg = el("span", { class: "muted small", role: "status" });
   const send = async (body) => {
     try { await api("/api/runtime", { method: "POST", body: JSON.stringify(body) }); msg.textContent = tx("בוצע", "Done"); route(true); }
@@ -404,7 +406,7 @@ async function pageHome() {
   };
   const onOff = (on) => on ? tx("פועל", "On") : tx("כבוי", "Off");
   const toggle = (on, label, body) => el("button", { type: "button", class: "switch", "aria-pressed": on ? "true" : "false",
-    "aria-label": switchLabel(label, on), disabled: running ? null : true, onclick: () => send(body) }, onOff(on));
+    "aria-label": switchLabel(label, on), onclick: () => send(body) }, onOff(on));
   const voiceText = !running ? "—" : vo.live_session ? tx("בשיחה (הקול בענן פתוח)", "In a conversation (cloud voice open)")
     : vo.connecting ? tx("מתחבר…", "Connecting…") : vo.wake_listening ? tx("מאזין ל-“Hey Jarvis” במכשיר הזה (בלי חיבור לענן)", "Listening for “Hey Jarvis” on this device (no cloud connection)")
     : mic.muted ? tx("המיקרופון מושתק", "Microphone muted") : `${tx("קול", "Voice")} ${vo.mode || "?"}${vo.detail ? " · " + vo.detail : ""}`;
@@ -414,8 +416,8 @@ async function pageHome() {
       : (c.since ? tx("נראה לאחרונה ", "last seen ") + day(c.since) + " " + clock(r.ts || c.since) : tx("עוד לא הופעל", "not started yet"))),
     tile(tx("חלון", "Window"), running ? (WIN[disp.state] ? tx(...WIN[disp.state]) : disp.state) : "—",
       disp.available === false ? disp.reason : (disp.close_policy === "quit" ? tx("סגירה יוצאת מ-JARVES", "closing it quits JARVES") : tx("סגירה רק מסתירה את JARVES", "closing it only hides JARVES"))),
-    tile(tx("מיקרופון", "Microphone"), mic.muted ? tx("מושתק", "Muted") : tx("פועל", "On"), tx("השתקה בתוכנה", "software mute") + (mic.physical_mute === null || mic.physical_mute === undefined ? "" : tx(" · פיזית: ", " · physical: ") + mic.physical_mute)),
-    tile(tx("התראות יזומות", "Proactive alerts"), al.paused ? tx("מושהות", "Paused") : tx("פועלות", "On"), tx("תשובות שביקשת לא מתעכבות אף פעם", "answers you ask for are never held")));
+    tile(tx("מיקרופון", "Microphone"), micMuted ? tx("מושתק", "Muted") : tx("פועל", "On"), tx("השתקה בתוכנה", "software mute") + (mic.physical_mute === null || mic.physical_mute === undefined ? "" : tx(" · פיזית: ", " · physical: ") + mic.physical_mute)),
+    tile(tx("התראות יזומות", "Proactive alerts"), alertsPaused ? tx("מושהות", "Paused") : tx("פועלות", "On"), tx("תשובות שביקשת לא מתעכבות אף פעם", "answers you ask for are never held")));
   const auto = d.autostart || {};
   const controls = el("div", { class: "card" },
     el("div", { class: "row" }, el("h2", { style: "margin:0" }, tx("שליטה", "Controls")), el("span", { class: "spacer" }), msg),
@@ -423,8 +425,8 @@ async function pageHome() {
       el("tr", {}, el("td", {}, tx("חלון", "Window")), el("td", {}, el("div", { class: "row" },
         el("button", { type: "button", class: "primary", disabled: running && disp.state !== "shown" ? null : true, onclick: () => send({ display: "show" }) }, tx("הצגה", "Show")),
         el("button", { type: "button", disabled: running && disp.state !== "hidden" ? null : true, onclick: () => send({ display: "hide" }) }, tx("הסתרה", "Hide"))))),
-      el("tr", {}, el("td", {}, tx("השתקת המיקרופון (בתוכנה)", "Mute microphone (software)")), el("td", {}, toggle(mic.muted, tx("השתקה", "Mute"), { mic_muted: !mic.muted }))),
-      el("tr", {}, el("td", {}, tx("השהיית התראות יזומות", "Pause proactive alerts")), el("td", {}, toggle(al.paused, tx("השהיית התראות", "Pause alerts"), { alerts_paused: !al.paused }))),
+      el("tr", {}, el("td", {}, tx("השתקת המיקרופון (בתוכנה)", "Mute microphone (software)")), el("td", {}, toggle(micMuted, tx("השתקה", "Mute"), { mic_muted: !micMuted }))),
+      el("tr", {}, el("td", {}, tx("השהיית התראות יזומות", "Pause proactive alerts")), el("td", {}, toggle(alertsPaused, tx("השהיית התראות", "Pause alerts"), { alerts_paused: !alertsPaused }))),
       el("tr", {}, el("td", {}, tx("הפעלה בכניסה למחשב (בלי חלון)", "Start at login (invisible)")), el("td", {},
         el("button", { type: "button", class: "switch", "aria-pressed": auto.enabled ? "true" : "false", "aria-label": switchLabel(tx("הפעלה בכניסה", "Start at login"), auto.enabled),
           onclick: () => send({ autostart: !auto.enabled }) }, onOff(auto.enabled)),

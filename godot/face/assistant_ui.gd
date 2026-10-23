@@ -18,8 +18,13 @@ var who: Label                   # "JARVES" / "You" kept OUT of the caption so H
 var activity: Label              # big, plain-language "what is JARVES doing now"
 var level_bar: ProgressBar       # live microphone level while listening
 var _level_seen := 0.0
-signal options_toggled(on: bool)
+signal inspector_toggled(on: bool)   # "Model inspector" (3D twin review panel); the face display has none
+const UI_FONT := 20               # readable on a desk monitor; the default 16 px was too small
 var options_box: VBoxContainer
+var inspector_chk: CheckButton
+var legend_lbl: Label
+var pages := {}                   # settings "tree": page name -> VBoxContainer (root = the list)
+var main_view: Array = []         # hidden while Settings is open
 var connection: Label
 var _state := "idle"
 var _linked := false
@@ -45,10 +50,13 @@ func _ready() -> void:
 	add_child(link)
 	link.link_changed.connect(_on_link)
 	link.message.connect(_on_message)
+	theme = _make_theme()
 	var box := VBoxContainer.new()
+	box.add_theme_constant_override("separation", 10)
 	add_child(box)
 	var title := Label.new()
 	title.text = "JARVES assistant"
+	title.add_theme_font_size_override("font_size", UI_FONT + 4)
 	title_lbl = title
 	box.add_child(title)
 	connection = Label.new()
@@ -57,45 +65,45 @@ func _ready() -> void:
 	var toggle := Button.new()
 	toggle.text = "Options"
 	toggle.toggle_mode = true
-	toggle.toggled.connect(func(on):
-		options_box.visible = on
-		options_toggled.emit(on))
+	toggle.toggled.connect(_on_options)
 	box.add_child(toggle)
 	options_box = VBoxContainer.new()
+	options_box.add_theme_constant_override("separation", 8)
 	options_box.visible = false
 	box.add_child(options_box)
 	status_lbl = Label.new()
 	status_lbl.text = "Core: connecting..."
-	status_lbl.custom_minimum_size = Vector2(330, 0)
+	status_lbl.custom_minimum_size = Vector2(400, 0)
 	status_lbl.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	options_box.add_child(status_lbl)
 	var legend := Label.new()
+	legend_lbl = legend
 	legend.text = LINK_LEGEND
 	legend.modulate = Color(1, 1, 1, 0.6)
-	legend.custom_minimum_size = Vector2(330, 0)
+	legend.custom_minimum_size = Vector2(400, 0)
 	legend.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	options_box.add_child(legend)
 	activity = Label.new()
 	activity.text = "Connecting to JARVES..."
-	activity.add_theme_font_size_override("font_size", 22)
-	activity.custom_minimum_size = Vector2(330, 0)
+	activity.add_theme_font_size_override("font_size", UI_FONT + 6)
+	activity.custom_minimum_size = Vector2(400, 0)
 	activity.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	activity.text_direction = Control.TEXT_DIRECTION_AUTO
 	box.add_child(activity)
 	level_bar = ProgressBar.new()
 	level_bar.max_value = 1.0
 	level_bar.show_percentage = false
-	level_bar.custom_minimum_size = Vector2(330, 10)
+	level_bar.custom_minimum_size = Vector2(400, 12)
 	level_bar.tooltip_text = "Microphone level"
 	options_box.add_child(level_bar)
 	who = Label.new()
 	who.modulate = Color(1, 1, 1, 0.6)
-	options_box.add_child(who)
+	box.add_child(who)
 	caption = Label.new()
-	caption.custom_minimum_size = Vector2(330, 60)
+	caption.custom_minimum_size = Vector2(400, 0)
 	caption.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	caption.text_direction = Control.TEXT_DIRECTION_AUTO
-	options_box.add_child(caption)
+	box.add_child(caption)
 	mute_chk = CheckButton.new()
 	mute_chk.text = "Mic mute (software)"
 	mute_chk.toggled.connect(func(on): link.send("mic.set_mute", {"muted": on}))
@@ -106,6 +114,12 @@ func _ready() -> void:
 	dash_btn.tooltip_text = "Conversations, logs, costs, memory and settings in your browser"
 	dash_btn.pressed.connect(func(): link.send("ui.open_dashboard"))
 	options_box.add_child(dash_btn)
+	inspector_chk = CheckButton.new()
+	inspector_chk.text = "Model inspector"
+	inspector_chk.visible = false     # main.gd (3D twin) turns it on; the face display has no inspector
+	inspector_chk.toggled.connect(func(on): inspector_toggled.emit(on))
+	options_box.add_child(inspector_chk)
+	_build_menu()
 	confirm = ConfirmationDialog.new()
 	confirm.confirmed.connect(func(): _answer(true))
 	confirm.canceled.connect(func(): _answer(false))
@@ -139,6 +153,135 @@ func _ready() -> void:
 	profile_banner.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	layer.add_child(profile_banner)
 	_set_controls(false)
+
+
+## One calm look for the whole panel: bigger text, dark rounded card, roomy padding, large touch-friendly buttons.
+static func make_ui_theme(font := 20) -> Theme:
+	var t := Theme.new()
+	t.default_font_size = font
+	var card := StyleBoxFlat.new()
+	card.bg_color = Color(0.07, 0.08, 0.11, 0.88)
+	card.set_corner_radius_all(14)
+	card.set_content_margin_all(18)
+	t.set_stylebox("panel", "PanelContainer", card)
+	for kind in ["normal", "hover", "pressed"]:
+		var b := StyleBoxFlat.new()
+		b.bg_color = {"normal": Color(0.17, 0.19, 0.25), "hover": Color(0.23, 0.26, 0.34), "pressed": Color(0.18, 0.36, 0.62)}[kind]
+		b.set_corner_radius_all(10)
+		b.content_margin_left = 14
+		b.content_margin_right = 14
+		b.content_margin_top = 9
+		b.content_margin_bottom = 9
+		t.set_stylebox(kind, "Button", b)
+	return t
+
+
+func _make_theme() -> Theme:
+	return make_ui_theme(UI_FONT)
+
+
+## Manage tree: group -> [label, dashboard page]. Each leaf opens that page of the local dashboard in the browser
+## (the Core's `ui.open_dashboard`), so the panel stays small and the full controls stay in one place.
+const MANAGE := [
+	["Talk & memory", [["Chat", "#/chat"], ["Approvals", "#/approvals"], ["Conversations", "#/conversations"],
+		["Memory", "#/memory"], ["Search conversations", "#/recall"]]],
+	["Everyday", [["Calendar", "#/calendar"], ["Timers & alarms", "#/timers"], ["Lists", "#/lists"],
+		["Goals", "#/goals"], ["Notes", "#/notes"], ["Scheduled jobs", "#/jobs"]]],
+	["Assistant", [["Name & voice", "#/identity"], ["Appearance", "#/appearance"], ["Skills", "#/skills"],
+		["Features & switches", "#/features"], ["Guides", "#/guides"]]],
+	["Connections", [["Connections", "#/connections"], ["Phone", "#/phone"], ["Devices & access", "#/devices"],
+		["WhatsApp", "#/whatsapp"]]],
+	["Health & costs", [["Health & speed", "#/speed"], ["Issues", "#/issues"], ["Costs", "#/costs"],
+		["Usage & limits", "#/usage"], ["System log", "#/logs"]]],
+	["System", [["Settings", "#/settings"], ["Updates", "#/updates"], ["Backup", "#/backup"],
+		["Setup and tour", "#/setup"]]],
+]
+var leaf_btns: Array = []         # buttons that need the Core link
+var options_hint: Label
+
+
+## Settings as a tree (like phone settings): a short list of rows; each row opens one small page with a Back row.
+func _build_menu() -> void:
+	for w in [activity, who, caption]:
+		main_view.append(w)
+	var take := func(w: Control, page: VBoxContainer) -> void:
+		w.get_parent().remove_child(w)
+		page.add_child(w)
+	var root := _page("root", "")
+	_row(root, "Status", "status")
+	_row(root, "Microphone", "mic")
+	_row(root, "Manage", "manage")
+	_row(root, "Help", "help")
+	inspector_chk.get_parent().remove_child(inspector_chk)
+	root.add_child(inspector_chk)
+	dash_btn.get_parent().remove_child(dash_btn)
+	dash_btn.text = "Open full dashboard  ↗"
+	root.add_child(dash_btn)
+	take.call(status_lbl, _page("status", "Status"))
+	var mic := _page("mic", "Microphone")
+	take.call(mute_chk, mic)
+	take.call(level_bar, mic)
+	take.call(legend_lbl, _page("help", "What the dot means"))
+	var manage := _page("manage", "Manage")
+	for g in MANAGE:
+		var key := "m_" + String(g[0])
+		_row(manage, g[0], key)
+		var pg := _page(key, g[0], "manage")
+		for leaf in g[1]:
+			var b := Button.new()
+			b.text = "%s    ↗" % leaf[0]
+			b.alignment = HORIZONTAL_ALIGNMENT_LEFT
+			b.pressed.connect(func(): link.send("ui.open_dashboard", {"page": leaf[1]}))
+			leaf_btns.append(b)
+			pg.add_child(b)
+	options_hint = Label.new()
+	options_hint.modulate = Color(1, 1, 1, 0.6)
+	options_hint.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	options_hint.custom_minimum_size = Vector2(400, 0)
+	options_box.add_child(options_hint)
+	_open_page("root")
+
+
+func _row(parent: VBoxContainer, text: String, key: String) -> void:
+	var row := Button.new()
+	row.text = "%s    ›" % text
+	row.alignment = HORIZONTAL_ALIGNMENT_LEFT
+	row.pressed.connect(_open_page.bind(key))
+	parent.add_child(row)
+
+
+func _page(key: String, title: String, parent := "root") -> VBoxContainer:
+	var pg := VBoxContainer.new()
+	pg.add_theme_constant_override("separation", 8)
+	if key != "root":
+		var back := Button.new()
+		back.text = "‹    Back"
+		back.alignment = HORIZONTAL_ALIGNMENT_LEFT
+		back.pressed.connect(_open_page.bind(parent))
+		pg.add_child(back)
+		var t := Label.new()
+		t.text = title
+		t.add_theme_font_size_override("font_size", UI_FONT + 4)
+		pg.add_child(t)
+	pg.visible = false
+	options_box.add_child(pg)
+	pages[key] = pg
+	return pg
+
+
+func _open_page(key: String) -> void:
+	for k in pages:
+		pages[k].visible = k == key
+	if options_hint:
+		options_hint.text = ""
+
+
+func _on_options(on: bool) -> void:
+	options_box.visible = on
+	for w in main_view:
+		w.visible = not on
+	if on:
+		_open_page("root")
 
 
 func _process(delta: float) -> void:
@@ -209,6 +352,8 @@ func _close_desktop() -> void:
 func _set_controls(on: bool) -> void:
 	mute_chk.disabled = not on
 	dash_btn.disabled = not on
+	for b in leaf_btns:
+		b.disabled = not on
 
 
 func _answer(ok: bool) -> void:
@@ -225,7 +370,7 @@ func _on_link(connected: bool, detail: String) -> void:
 		preview.close_preview("offline")      # no frames without the Core; nothing kept
 		strip.set_preview_open(false)
 		status_lbl.text = "Core: " + detail
-		activity.text = "JARVES is not running: " + detail
+		activity.text = "Not connected"
 		if face:
 			face.set_state("idle")
 			face.set_link("offline")
@@ -351,6 +496,8 @@ func _on_message(t: String, p: Dictionary) -> void:
 			var where := _str(p.get("url")).substr(0, 200)
 			var opened: bool = typeof(p.get("browser")) == TYPE_BOOL and p.get("browser")
 			caption.text = "Dashboard opened in your browser" if opened else "Dashboard running at " + where
+			if options_hint:
+				options_hint.text = caption.text
 
 
 const TEST_BANNER := "TEST PROFILE · not your real data"
@@ -451,6 +598,7 @@ func _show_status(p: Dictionary) -> void:
 			# one short line per problem, with what to do; full detail stays in `jarvis status`
 			var act: String = str(c.get("action", ""))
 			lines.append("- %s: %s" % [FRIENDLY.get(k, k), act if act != "" else str(c.get("detail", "")).substr(0, 60)])
+	lines.append("Today: %d AI requests · %s voice min" % [int(_num(p.get("ai_requests_today"))), str(_num(p.get("voice_minutes_today")))])
 	status_lbl.text = "\n".join(lines)
 	mute_chk.set_pressed_no_signal(bool(p.get("mic_muted", false)))
 
