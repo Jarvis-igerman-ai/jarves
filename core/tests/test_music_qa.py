@@ -141,6 +141,8 @@ async def test_gibberish_query_is_not_found_instead_of_playing_a_random_video(tm
         if (a := _auth_ok(req)) is not None:
             return a
         import json as _j
+        if req.method == "GET":                     # the up-front "is the player there" probe
+            return httpx.Response(200, json={})
         return httpx.Response(200, json=answers[_j.loads(req.content)["query"]])
     p = _pear(tmp_path, h)
     assert await p.search("asdkjhqwe zzxxcc") == []

@@ -131,6 +131,7 @@ def _reg(cls: str, names: str) -> dict[str, str]:
 # anything a user said, a provider returned or an exception printed is content; a person's identifier is pii.
 FIELD_CLASS: dict[str, str] = {
     **_reg(SAFE, """
+        approval_ms ask_ms boot capture_ms encode_ms failed_steps launch limit_s waited_s
         amber automatic blocked cap_usd error_type est_usd failed item item_count part passed red remedy skipped_because
         ticket usd visibility within_budget
         action actions activation active after_s age_s ai_reviews alerts_paused answer_chars api_code applier

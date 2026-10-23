@@ -189,8 +189,8 @@ class BriefingSkill(Skill):
                      permission="read", timeout_s=40, untrusted_output=True)]
 
 
-def register_briefing(registry, db, transport=None) -> BriefingSkill:
-    skill = BriefingSkill(registry, db, transport=transport)
+def register_briefing(registry, db, transport=None, clock=None) -> BriefingSkill:
+    skill = BriefingSkill(registry, db, transport=transport, clock=clock)
     registry.register(skill)
     return skill
 

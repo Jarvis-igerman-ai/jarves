@@ -260,7 +260,7 @@ class Finder:
                 self.issue(sid, end, f"tool_no_result:{name}", "tool", "medium",
                            f"Tool {name} never returned ({len(lost)}x)", "LIVE_TOOL_CALL without a TOOL_RESULT.",
                            {"calls": [_clock(c["ts"]) for c in lost][:6]})
-            slow = [c for c in calls if (c.get("duration_s") or 0) > self.h.slow_tool_s]
+            slow = [c for c in calls if c.get("ok") is not None and (c.get("duration_s") or 0) > self.h.slow_tool_s]
             if slow:
                 worst = max(c["duration_s"] for c in slow)
                 self.issue(sid, end, f"slow_tool:{name}", "tool", "low", f"Slow tool {name}: {worst:.1f} s",

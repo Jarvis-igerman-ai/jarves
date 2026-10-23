@@ -20,6 +20,7 @@ Modules probed at start: jarves.workspace, jarves.curator, jarves.memory, jarves
 """
 from __future__ import annotations
 
+import asyncio
 import importlib
 import gzip
 import json
@@ -1060,8 +1061,9 @@ class DashboardSkill(Skill):
     name = "dashboard"
     description = "the local web dashboard (conversations, logs, costs, memory, settings)"
 
-    def __init__(self, opener) -> None:
+    def __init__(self, opener, browser_state=None) -> None:
         self.opener = opener                         # async (page "#/x") -> url (Core.open_dashboard)
+        self.browser_state = browser_state or (lambda: "")   # "pending" = the server runs, the browser is still opening
 
     def tools(self) -> list[Tool]:
         from pydantic import BaseModel, Field
@@ -1077,12 +1079,17 @@ class DashboardSkill(Skill):
                 return ToolResult(False, "אין לי דף כזה בלוח הבקרה.", {"pages": pages.ids()}, code="DASHBOARD_PAGE_UNKNOWN")
             try:
                 url = await self.opener(f"#/{pid}")
-            except Exception as e:
+            except (Exception, asyncio.TimeoutError) as e:      # Issue #17: a slow start is an answer, not a hang
+                logs.warn("dashboard", "DASHBOARD_FAILED", "open_dashboard failed", error_type=type(e).__name__)
                 return ToolResult(False, "לא הצלחתי לפתוח את לוח הבקרה.", {"error": type(e).__name__},
                                   code="DASHBOARD_FAILED")
             local = url.split("?", 1)[0]
             info = pages.describe(pid)
             if info["sensitive"]:
                 info["note"] = "Explain only: every change here is the user's own click or approval; never do it for them."
+            if self.browser_state() == "pending":
+                return ToolResult(True, f"{info['title_he']} בלוח הבקרה פועל, אבל הדפדפן עוד לא נפתח. אם לא יופיע בעוד רגע, "
+                                  "אפשר לפתוח את הכתובת ידנית.", {"url": local, "browser": "pending", **info}, code="ok")
             return ToolResult(True, f"פתחתי את {info['title_he']} בלוח הבקרה.", {"url": local, **info}, code="ok")
-        return [Tool("open_dashboard", "Open the dashboard, optionally on a page: 'open the dashboard', 'תפתח את הדשבורד', 'open costs'; then explain its controls from the result. Never a way to close anything.", open_, OpenArgs, permission="action")]
+        return [Tool("open_dashboard", "Open the dashboard, optionally on a page: 'open the dashboard', 'תפתח את הדשבורד', 'open costs'; then explain its controls from the result. Never a way to close anything.", open_, OpenArgs, permission="action",
+                     timeout_s=15)]
