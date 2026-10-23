@@ -31,7 +31,7 @@ import time
 from datetime import datetime
 from typing import TYPE_CHECKING, Any, Awaitable, Callable
 
-from .. import logs
+from .. import logs, phrases
 from ..budget import BudgetExceeded
 from ..skills import ROUTE, SkillRegistry, ToolResult, tool_schema
 
@@ -91,14 +91,25 @@ actual value or name it reports ("הגברתי לשלושים אחוז", "שמת
 האהוב עליך כחול"). Use exactly the numbers and names in the result, never your own estimate; for a question
 ("כמה הווליום?") just give the value. If the result says it failed or was not confirmed, say that plainly.
 Never answer with a bare acknowledgement word or phrase on its own (no one-word "ok"/"done" style replies, not
-before and not after the result): either say the real result or stay quiet. Confirm once, never twice.
+before and not after the result): either say the real result or stay quiet. Confirm once, never twice. Use only
+plain everyday words, never radio, military or slang jargon such as {jargon}: the user does not know what they mean.
+A waiting word ("רגע") is allowed only together with the delegation in the same response; if you will not delegate,
+say nothing like it.
 Deleting or forgetting needs the user's approval: ALWAYS delegate the request; the system itself then asks the user
 (a spoken "כן"/"לא" or the screen). Never ask for that approval yourself instead of delegating, and never say an
 approval is needed when you did not delegate. Even right after a "no", a new request is delegated again. Saying
 "רגע" is NOT doing it: say it only in the same moment you delegate, never instead of delegating, and never
 "deleting it now" or "done"; then say plainly whether it was deleted or not. The same for any action that may
 ask for approval (switching a feature or the camera off, sending, inviting): never "מכבה" / "שולח" before the
-result says it happened.
+result says it happened. This holds for the camera ("מכבה את המצלמה" only after the result says it is off; if the
+user has to approve, say that you are asking), for muting ("השתקתי" only after the mute result) and for notes.
+Notes: "delete / remove the note" ("תמחק את הפתק") ALWAYS means delete: delegate it, and NEVER create or add a note
+for a delete request. After the result say which note was deleted, using the title in the result.
+Stop requests: "שתוק", "תשתוק", "be quiet", "mute" or "stop" are normal requests: comply right away with one short
+polite word or phrase ("בסדר, שותק" / "Sure") or just go quiet, and delegate the real mute / stop if one exists. Never
+answer sharply, never lecture, never ask why. Never give advice on how to end the conversation or the session that you
+did not get from a tool result: to end it, delegate "end the conversation"; do not explain what the user can say or
+close.
 Never guess a result while waiting and never claim an action happened until the backend confirms it. "רשמתי",
 "זכרתי", "שמרתי", "הגברתי", "שמתי לך" are claims: say them only after you delegated in THIS turn and the result
 says it worked ("תזכור ש..." / "remember that..." ALWAYS goes to the backend; you have no memory of your own). When the
@@ -127,7 +138,7 @@ checking something unless you start that lookup in the same turn: announcing a c
 
 def front_instructions(name: str = "JARVES", spoken: str = "ג'ארוויס") -> str:
     """GPT-Live instructions with the written name and the Hebrew-written spoken name."""
-    return FRONT_INSTRUCTIONS.format(name=name, spoken=spoken or name)
+    return FRONT_INSTRUCTIONS.format(name=name, spoken=spoken or name, jargon=phrases.banned_list_for_prompt())
 
 # Errors after which the session cannot do useful work -> end it (others: log + degraded + continue).
 FATAL_ERROR_TYPES = {"authentication_error", "permission_error"}
@@ -213,24 +224,25 @@ DELIVERY_WINDOW_S = 7.0         # time after the backend answer for GPT-Live to 
 DELIVERY_MAX_WAIT_S = 20.0      # JARVES still talking at the window end: wait at most this long for quiet
 DELIVERY_QUIET_S = 4.0          # ... but complete silence this long after the answer ends the window early
 # backend "answers" that carry nothing to deliver (GPT-Live re-delegated a spoken approval word, live 20 Oct)
-_BARE_REPLIES = {"כן", "לא", "בסדר", "אוקיי", "אוקי", "ok", "okay", "yes", "no", "done"}
+_BARE_REPLIES = phrases.BARE_REPLIES
 DELIVERY_NOTE = ("The backend answer below finished several seconds ago but has not been said yet. Give the user "
                  "just this answer now, briefly, in natural Hebrew, without another acknowledgement, without "
                  "excuses and without delegating again.\nResult: {answer}")
 # False action claims (SW-V3 P0.1, lead's silent run 20 Oct): "remember that my favourite colour is blue" got
 # "רשמתי לי שהצבע האהוב עליך הוא כחול" with NO delegation and NO tool call; memory stayed empty.
 CLAIM_VERBS_HE = ("רשמתי", "זכרתי", "שמרתי", "הגברתי", "הנמכתי", "החלשתי", r"שמתי(?!\s+לב)", "הפעלתי", "פתחתי",
-                  "סגרתי", "הדלקתי", "כיביתי",
+                  "סגרתי", "הדלקתי", "כיביתי", "כיבתי", "ניתקתי",
                   "עצרתי", "הפסקתי", "דילגתי", "השהיתי", "השתקתי", "שיניתי", "עדכנתי", "קבעתי", "יצרתי", "שלחתי", "מחקתי", "הוספתי",
                   "ביטלתי", "הסרתי", "ניגנתי", "תזמנתי", "הגדרתי")
 CLAIM_SETTLE_MAX_S = 10.0       # wait this long for a running tool / backend before judging a claim
 CLAIM_TURN_SLACK_S = 5.0        # an action result this soon before the user turn's first word still belongs to it
 FALSE_CLAIM_NOTE = ("Correction needed: you just told the user that you did something ('{verb}'), but no tool did it "
                     "in this turn, so nothing was saved or changed. Do it now by delegating to the backend (it has "
-                    "the tool), then confirm with the real result; if you cannot, tell the user plainly in one short "
-                    "Hebrew sentence that it was NOT done. Do not apologise at length.")
-_FILLER_STEMS = ("בודק", "בודקת", "מחפש", "מחפשת", "רגע", "שנייה", "שניה", "כמעט", "לוקח", "ממתין", "מתעכב", "checking",
-                 "moment", "second", "almost")
+                    "the tool), then confirm with the real result; if you cannot, start with a self-correction: say "
+                    "in ONE short sentence in the user's language what really happened (for example 'סליחה, זה "
+                    "עדיין לא קרה' / 'Sorry, that has not been done yet') and that it was NOT done. Do not apologise "
+                    "at length.")
+_FILLER_STEMS = phrases.LEAD_IN_STEMS     # one reviewed list: jarves/phrases.py
 PROGRESS_MIN_RESPONSE_S = 1.5   # the CURRENT backend response must have run this long (fast continuations: none)
 CONFIRM_NOTE_AFTER_S = 2.5      # an on-screen approval still unanswered after this long gets ONE spoken hint
 CONFIRM_NOTE = ("A tool is waiting for the user's approval on the screen and will NOT run without it. In a few "
@@ -359,7 +371,7 @@ def answer_said(answer: str, said: str) -> bool:
     return False
 
 
-_WAIT_STEMS = _FILLER_STEMS + ("מחשב", "מחשבת", "מעביר", "מוחק", "מוחקת", "שומר", "פותח", "אממ")
+_WAIT_STEMS = _FILLER_STEMS + phrases.WAIT_ONLY_EXTRA
 
 
 def waiting_only(text: str) -> bool:
