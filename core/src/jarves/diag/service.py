@@ -62,7 +62,7 @@ def report(store, *, home: Path, cfg, dbs, components: dict | None = None, now: 
         sc_latest = run_view(store, now=now)
     except Exception:
         sc_latest = None
-    sc_open = [dict(f, source="selfcheck") for f in (sc_latest or {}).get("findings", [])
+    sc_open = [dict(f, source="selfcheck", observation_run=sc_latest["id"]) for f in (sc_latest or {}).get("findings", [])
                if f["state"] in ("open", "accepted")]
     allf = [dict(f) for f in found] + sc_open
     from ..selfcheck import CATEGORY_WEIGHT, SEV

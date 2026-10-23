@@ -185,23 +185,37 @@ class Registry:
 
     # ---- recording
     def record(self, area: str, code: str, severity: str = "P3", evidence: dict | None = None, *, title: str = "",
-               title_he: str = "", source: str = "", n: int = 1, now: float | None = None) -> dict | None:
+               title_he: str = "", source: str = "", n: int = 1, now: float | None = None,
+               observation: str = "") -> dict | None:
         area = area if _AREA.match(area or "") else "core"
         code = clean_code(code)
         severity = severity if severity in SEVERITIES else "P3"
         iid = issue_id(area, code)
         now = self.clock() if now is None else now
         ev, dropped = clean_evidence(evidence or {})
+        # Findings are snapshots, not a fresh failure every time the health timer
+        # reads them. Persist only a hash, never the source's private text.
+        observed = hashlib.sha256(observation.encode()).hexdigest() if observation else ""
         with self.lock:
             d = self.load()
             r = d["issues"].get(iid)
             new = r is None
+            if r is not None and observed:
+                if r.get("observation") == observed:
+                    return r
+                if "observation" not in r and r.get("evidence") == ev and r["severity"] <= severity:
+                    # Upgrade an existing aggregate without reporting it anew.
+                    r["observation"] = observed
+                    self._save(d)
+                    return r
             if new:
                 r = {"id": iid, "area": area, "code": code, "severity": severity, "status": "new", "first_seen": now,
                      "last_seen": now, "count": 0, "versions": [], "fixed_in": "", "evidence": {}, "dropped": 0,
                      "title": clean_title(title, code), "title_he": clean_title(title_he, ""), "sources": [],
                      "reported_url": "", "reported_at": 0, "bundle_saved": "", "fixed_notice": False}
                 d["issues"][iid] = r
+            if observed:
+                r["observation"] = observed
             r["count"] += n
             r["last_seen"] = now
             r["severity"] = min(r["severity"], severity)                  # "P1" < "P2": the worse one stays
@@ -383,8 +397,13 @@ def ingest_speedtest(reg: Registry, d: dict) -> int:
 
 
 def ingest_findings(reg: Registry, found: list) -> int:
-    """Self-Diagnostics 2.0 findings (anomaly.Finding objects or dicts), including the self-check crash finding."""
+    """A full snapshot of active findings, including the self-check crash finding.
+
+    Absence ends an observation, so an identical finding after recovery is a new
+    occurrence. Merely polling the same active snapshot is not.
+    """
     n = 0
+    seen = set()
     for f in found:
         g = (lambda k, dflt="": getattr(f, k, None) if not isinstance(f, dict) else f.get(k, dflt))
         fp = str(g("fingerprint") or "")
@@ -392,10 +411,23 @@ def ingest_findings(reg: Registry, found: list) -> int:
             continue
         sev = {"high": "P1", "medium": "P2"}.get(str(g("severity")), "P3")
         area = "crash" if g("category") == "crash" else "health"
-        reg.record(area, f"FINDING_{clean_code(fp)}", sev,
-                   {"category": g("category"), "count": g("count") or 1, "finding": fp},
-                   title=str(g("title") or ""), title_he=str(g("title_he") or ""), source="diag")
+        seen.add(issue_id(area, f"FINDING_{clean_code(fp)}"))
+        evidence = {"category": g("category"), "count": g("count") or 1, "finding": fp}
+        detail, _ = clean_evidence(g("evidence", {}))
+        observation = json.dumps({"summary": evidence, "severity": sev, "detail": detail,
+                                  "run": g("observation_run", None)}, sort_keys=True, default=str)
+        reg.record(area, f"FINDING_{clean_code(fp)}", sev, evidence,
+                   title=str(g("title") or ""), title_he=str(g("title_he") or ""), source="diag",
+                   observation=observation)
         n += 1
+    with reg.lock:
+        snapshot = reg.load()
+        ended = [r for iid, r in snapshot["issues"].items()
+                 if iid not in seen and "diag" in r.get("sources", []) and r.get("observation")]
+        for r in ended:
+            r["observation"] = ""
+        if ended:
+            reg._save(snapshot)
     return n
 
 
