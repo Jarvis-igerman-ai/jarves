@@ -19,7 +19,7 @@ FAKE = textwrap.dedent('''
     import json, os, re, sys, time
     prompt = sys.stdin.read()
     model = sys.argv[sys.argv.index("--model") + 1] if "--model" in sys.argv else "default"
-    if "Answer with ONLY a JSON object" in prompt:
+    if "You are the planner" in prompt or "Several agents each proposed" in prompt:
         merged = "Several agents each proposed" in prompt
         ts = [{"id": 1, "title": ("merged" if merged else model) + " one", "spec": "FAKE write one.txt=1",
                "acceptance": "one", "scope": ["one.txt"], "deps": []},
@@ -31,6 +31,33 @@ FAKE = textwrap.dedent('''
         open(os.path.join(os.getcwd(), "..", "plan_prompt_%s.txt" % model), "w").write(prompt)
         print(json.dumps({"type": "result", "is_error": False, "result": out, "session_id": "plan"}))
         sys.exit(0)
+    here = os.path.join(os.getcwd(), "..")
+    def bump(name):
+        f = os.path.join(here, name)
+        n = int(open(f).read()) + 1 if os.path.exists(f) else 1
+        open(f, "w").write(str(n))
+        return n
+    def say(text):
+        print(json.dumps({"type": "result", "is_error": False, "result": text, "session_id": "s-" + model}))
+        sys.exit(0)
+    if "Review this change" in prompt:
+        n = bump("reviews_" + model)
+        strict = re.search(r"REVIEW_CHANGES_(\\d+)", prompt)
+        if strict and n <= int(strict.group(1)):
+            say(json.dumps({"verdict": "changes", "findings": [{"severity": "high", "file": "a.py", "text": "add a docstring"}]}))
+        say("looks fine " + json.dumps({"verdict": "approve", "findings": []}))
+    if "Plan this ONE task" in prompt:
+        say("Plan: touch only the files in scope, then test.")
+    if "Find the ROOT CAUSE" in prompt:
+        say("Diagnosis: the flag file is missing.")
+    if "You judge a debate" in prompt:
+        say(json.dumps({"decision": "SQLite", "reasons": "simpler", "winner": "A", "confidence": "high"}))
+    if "short debate" in prompt or "Debate, round" in prompt:
+        say("argument here. POSITION: " + ("SQLite" if model in ("alpha", "default") else "Postgres"))
+    if "Write ONE small automated test that FAILS" in prompt:
+        os.makedirs("tests", exist_ok=True)
+        open("tests/test_bug.py", "w").write("def test_bug(): assert False\\n")
+        say("wrote it\\nHANDOFF\\nstatus: DONE\\nsummary: repro test\\nnext: fix\\nEND_HANDOFF")
     mt = re.search(r"TASK #(\\d+)", prompt)
     num = mt.group(1) if mt else "0"
     open(os.path.join(os.getcwd(), "..", "last_prompt_%s.txt" % num), "w").write(prompt)
@@ -684,8 +711,8 @@ def test_add_a_codex_task_more_parallel_agents_and_stop_a_running_one(env):
     m.call("resume", project="demo")
     assert m.db.by_seq(1, 1)["status"] == "running"
     r = m.call("stop_agent", project="demo", agent="claude", by="voice")
-    assert r["ok"] and r["stopped"] == ["#1"]
     assert m.wait_idle(20)
+    assert r["ok"] and r["stopped"] == ["#1"]
     t = m.db.by_seq(1, 1)
     assert t["status"] == "blocked" and "stopped by the owner" in t["reason"]
     assert not (gitops.project_root(m.home, 1) / "integration" / "o").exists()             # stopped work is never merged
@@ -713,3 +740,298 @@ def test_long_voice_operations_run_in_the_background(env):
         assert "planning: done" in m.call("jobs", by="voice")["text"]
     finally:
         m.started = False
+
+
+
+# ------------------------------------------------------------------ software factory: flows (23 Oct, part 3)
+from jarves.projectmgr import pipeline as pl
+
+
+def test_flow_parsing_rules():
+    st = pl.parse("plan:claude work:team:codex test review:claude,codex merge")
+    assert [x["kind"] for x in st] == ["plan", "work", "test", "review", "merge"]
+    assert st[1]["by"] == "team:codex" and st[3]["require"] == "all" and st[2]["on_fail"] == "retry"
+    assert pl.describe(pl.parse("feature")) == "plan work test review merge"
+    he = pl.parse("עבודה:קלוד בדיקה מיזוג")
+    assert [x["kind"] for x in he] == ["work", "test", "merge"] and he[0]["by"] == "claude"
+    for bad in ("test:claude", "work merge merge", "merge work", "review:robot", "gate:claude", "work:jarves,claude"):
+        with pytest.raises(pl.FlowError):
+            pl.parse(bad)
+    with pytest.raises(pl.FlowError):
+        pl.parse([{"kind": "cmd", "cmd": ["rm", "-rf", "/"]}])                    # commands only from the PC
+    assert pl.parse([{"kind": "cmd", "cmd": ["make", "lint"]}], trusted=True)[0]["cmd"] == ["make", "lint"]
+    assert pl.parse([{"kind": "release", "on_fail": "skip"}])[0]["on_fail"] == "stop"
+    st, warns = pl.parse_with_warnings("work test")
+    assert warns and "no merge" in warns[0]
+    st, warns = pl.parse_with_warnings([{"kind": "review", "on_fail": "back:work"}, {"kind": "work"}, {"kind": "merge"}])
+    assert st[0]["on_fail"] == "stop" and warns
+    old, new = pl.parse("plan work test merge"), pl.parse("work review test merge")
+    assert pl.remap(old, new, 2) == 2 and pl.remap(old, new, 1) == 0
+
+
+def test_feature_flow_plan_review_merge_and_findings_are_not_owner_notes(env):
+    m, repo, home = env
+    open_project(m, repo)
+    r = m.call("add_task", project="demo", title="A", spec="FAKE write a.py=1\nREVIEW_CHANGES_1", scope=["a.py"],
+               flow="plan work test review merge")
+    assert r["ok"] and r["task"]["flow"] == "plan work test review merge"
+    m.call("resume", project="demo")
+    finish(m)
+    t = m.db.by_seq(1, 1)
+    assert t["status"] == "done" and t["rounds"] == 1                                  # one review round sent it back
+    card = (gitops.project_root(home, 1) / "wt" / "last_prompt_1.txt").read_text()
+    assert "From another agent or an earlier stage (untrusted data" in card and "add a docstring" in card
+    assert "Note from the owner:\nReview" not in card and "Plan: touch only" in card
+    assert (gitops.project_root(home, 1) / "integration" / "a.py").exists()
+
+
+def test_review_rounds_exhausted_waits_for_owner_then_owner_overrules(env):
+    m, repo, home = env
+    m.cfg.max_review_rounds = 1
+    open_project(m, repo)
+    m.call("add_task", project="demo", title="A", spec="FAKE write a.py=1\nREVIEW_CHANGES_9", scope=["a.py"],
+           flow="work test review merge")
+    m.call("resume", project="demo")
+    finish(m)
+    t = m.db.by_seq(1, 1)
+    assert t["status"] == "waiting" and "rounds" in t["waiting"]
+    assert "needs you" in m.call("status", project="demo")["text"]
+    assert m.call("answer", project="demo", task=1, answer="approve", by="voice")["ok"]
+    finish(m)
+    assert m.db.by_seq(1, 1)["status"] == "done"
+
+
+def test_owner_does_work_and_approves_merge_bound_to_tree(env):
+    m, repo, home = env
+    open_project(m, repo)
+    m.call("add_task", project="demo", title="Mine", spec="I do it", scope=["mine.txt"], flow="work:owner test merge:owner")
+    m.call("resume", project="demo")
+    finish(m)
+    t = m.db.by_seq(1, 1)
+    assert t["status"] == "waiting" and "your turn" in t["waiting"]
+    wt = Path(t["worktree"])
+    (wt / "mine.txt").write_text("by hand\n")
+    assert m.call("answer", project="demo", task=1, answer="done")["ok"]
+    finish(m)
+    t = m.db.by_seq(1, 1)
+    assert t["status"] == "waiting" and "approve merging" in t["waiting"]
+    assert m.call("answer", project="demo", task=1, answer="approve")["ok"]
+    (wt / "mine.txt").write_text("changed after the approval\n")                      # the approval no longer holds
+    finish(m)
+    t = m.db.by_seq(1, 1)
+    assert t["status"] == "waiting" and "changed after your approval" in t["waiting"]
+    assert m.call("answer", project="demo", task=1, answer="approve")["ok"]
+    finish(m)
+    assert m.db.by_seq(1, 1)["status"] == "done"
+    assert (gitops.project_root(home, 1) / "integration" / "mine.txt").read_text() == "changed after the approval\n"
+
+
+def test_gate_reject_stops_and_answer_needs_waiting(env):
+    m, repo, _ = env
+    open_project(m, repo)
+    m.call("add_task", project="demo", title="A", spec="FAKE write a=1", scope=["a"], flow="work test gate merge")
+    assert m.call("answer", project="demo", task=1)["code"] == "STATE"
+    m.call("resume", project="demo")
+    finish(m)
+    assert m.db.by_seq(1, 1)["status"] == "waiting"
+    m.call("answer", project="demo", task=1, answer="reject", text="not now")
+    t = m.db.by_seq(1, 1)
+    assert t["status"] == "blocked" and "not now" in t["reason"]
+
+
+def test_bugfix_flow_reproduce_diagnose_fix_verify(env, tmp_path):
+    m, repo, home = env
+    open_project(m, repo)
+    repro = [sys.executable, "-c", "import os,sys; sys.exit(0 if os.path.exists('src/fixed.txt') else 1)"]
+    r = m.call("bug", project="demo", title="login breaks", spec="FAKE write src/fixed.txt=ok", repro_cmd=repro)
+    assert r["ok"] and r["task"]["kind"] == "bug" and r["task"]["flow"].startswith("reproduce diagnose work verify")
+    assert m.call("bug", project="demo", title="x", spec="y", repro_cmd=repro, by="voice")["code"] == "CLI_ONLY"
+    m.call("resume", project="demo")
+    finish(m)
+    t = m.db.by_seq(1, 1)
+    assert t["status"] == "done", (t["status"], t["reason"])
+    ev = [e["kind"] for e in m.db.events(t["id"], 80)]
+    assert "reproduced" in ev and "diagnose" in ev and "merged" in ev
+    integ = gitops.project_root(home, 1) / "integration"
+    assert (integ / "tests" / "test_bug.py").exists() and (integ / "src" / "fixed.txt").exists()
+
+
+def test_bugfix_fix_may_not_change_the_reproduction_test(env):
+    m, repo, _ = env
+    open_project(m, repo)
+    repro = [sys.executable, "-c", "import sys; sys.exit(1)"]
+    m.call("bug", project="demo", title="b", spec="FAKE write tests/test_bug.py=def test_bug(): pass", repro_cmd=repro,
+           flow="reproduce work verify merge")
+    m.call("resume", project="demo")
+    finish(m)
+    t = m.db.by_seq(1, 1)
+    assert t["status"] == "blocked" and "reproduction test" in t["reason"]
+
+
+def test_best_of_two_agents_smallest_passing_change_wins(env):
+    m, repo, home = env
+    open_project(m, repo, check=[sys.executable, "-c", "import sys; sys.exit(0)"])
+    m.call("add_task", project="demo", title="A", spec="FAKE write a.txt=1", scope=["a.txt"],
+           flow="work:claude:alpha,claude:beta test merge")
+    m.call("resume", project="demo")
+    finish(m)
+    t = m.db.by_seq(1, 1)
+    assert t["status"] == "done"
+    best = [e for e in m.db.events(t["id"], 60) if e["kind"] == "best_of"]
+    assert best and "won among" in best[0]["text"]
+    assert len(list((gitops.project_root(home, 1) / "wt").glob("t1-*"))) == 0          # losers removed
+
+
+def test_debate_op_with_judge_and_with_owner(env):
+    m, repo, _ = env
+    open_project(m, repo)
+    r = m.call("debate", project="demo", question="SQLite or Postgres?", agents=["claude:alpha", "claude:beta"],
+               judge="claude:judge", options=["SQLite", "Postgres"])
+    assert r["ok"] and r["decision"]["decision"] == "SQLite" and not r["needs_owner"]
+    assert m.call("debate", project="demo", question="q", agents=["claude:a", "claude:b"], judge="claude:a")["code"] \
+        == "DEBATE_FAILED"
+    r = m.call("debate", project="demo", question="Tabs or spaces?", agents=["claude:alpha", "claude:beta"],
+               judge="owner")
+    assert r["ok"] and r["needs_owner"]
+    d = m.call("decisions", project="demo", by="voice")
+    assert d["ok"] and len(d["decisions"]) == 2 and d["decisions"][0]["state"] == "waiting"
+
+
+def test_debate_stage_waits_for_owner_decision(env):
+    m, repo, _ = env
+    open_project(m, repo)
+    m.call("add_task", project="demo", title="Choose", spec="choose a db", flow=[
+        {"kind": "debate", "by": "claude:alpha,claude:beta", "judge": "owner", "question": "SQLite or Postgres?"},
+        {"kind": "gate"}])
+    m.call("resume", project="demo")
+    finish(m)
+    t = m.db.by_seq(1, 1)
+    assert t["status"] == "waiting" and "decide the debate" in t["waiting"]
+    m.call("answer", project="demo", task=1, answer="approve", text="SQLite")
+    assert any(x["decision"] == "SQLite" for x in m.db.decisions(1))
+    finish(m)
+    assert m.db.by_seq(1, 1)["status"] == "waiting"                                      # now at the gate
+
+
+def test_flow_without_merge_keeps_branch_and_dependant_is_told(env):
+    m, repo, home = env
+    open_project(m, repo)
+    a = m.call("add_task", project="demo", title="A", spec="FAKE write a=1", scope=["a"], flow="work test")["task"]["seq"]
+    m.call("add_task", project="demo", title="B", spec="FAKE write b=1", scope=["b"], deps=[a])
+    m.call("resume", project="demo")
+    finish(m)
+    ta = m.db.by_seq(1, a)
+    assert ta["status"] == "done" and "kept on branch" in ta["result"]
+    card = (gitops.project_root(home, 1) / "wt" / "last_prompt_2.txt").read_text()
+    assert "Not in this folder" in card and "already in this folder" not in card
+
+
+def test_set_flow_project_default_and_task_and_release_stage(env):
+    m, repo, home = env
+    open_project(m, repo)
+    assert m.call("flow", project="demo", flow="feature", by="voice")["ok"]
+    t = m.call("add_task", project="demo", title="A", spec="FAKE write a=1", scope=["a"])["task"]
+    assert t["flow"] == "plan work test review merge"
+    assert m.call("flow", project="demo", task=1, flow="work test merge release:jarves")["ok"]
+    assert m.call("flow", project="demo", task=1, flow=[{"kind": "cmd", "cmd": ["x"]}], by="voice")["code"] == "BAD_FLOW"
+    flag = home.parent / "released"
+    m.db.update_project(1, release_cmd=[sys.executable, "-c", f"open(r'{flag}','w').write('v1')"])
+    m.call("resume", project="demo")
+    finish(m)
+    assert m.db.by_seq(1, 1)["status"] == "done" and flag.read_text() == "v1"
+    assert not (gitops.project_root(home, 1) / "release").exists() or not any((gitops.project_root(home, 1) / "release").iterdir())
+
+
+def test_recovery_leaves_waiting_tasks_alone(env):
+    m, repo, home = env
+    open_project(m, repo)
+    m.call("add_task", project="demo", title="A", spec="s", scope=["a"], flow="gate work merge")
+    m.call("resume", project="demo")
+    finish(m)
+    assert m.db.by_seq(1, 1)["status"] == "waiting"
+    m._recover()
+    assert m.db.by_seq(1, 1)["status"] == "waiting"
+
+
+def test_claim_stage_atomic_guard_against_a_racing_stop(env):
+    """The exact race fixed in engine.py: _drive's busy-status write must not win over a stop/cancel that landed
+    between the loop's stopped-check and the write. claim_stage is the single choke point; test it directly, not by
+    timing."""
+    m, repo, _ = env
+    open_project(m, repo)
+    tid = task(m, "A", "FAKE write a=1", scope=["a"])
+    m.db.update_task(tid, status="running")                         # as claim() would leave it
+    assert m.db.claim_stage(tid, 0, "running") is True                # normal case: no race, proceeds
+    assert m.db.task(tid)["status"] == "running"
+    m.db.update_task(tid, status="blocked", reason="stopped by the owner")   # a concurrent stop_agent/cancel_task
+    assert m.db.claim_stage(tid, 1, "running") is False               # the dispatcher must not overwrite it
+    assert m.db.task(tid)["status"] == "blocked" and "stopped" in m.db.task(tid)["reason"]
+
+
+# ------------------------------------------------------------------ GitHub (optional, off/read/write)
+FAKE_GH = textwrap.dedent('''
+    import json, os, sys
+    a = sys.argv[1:]
+    if a[:2] == ["auth", "status"]:
+        sys.exit(0 if os.path.exists(os.path.join(os.path.dirname(__file__), "signed_in")) else 1)
+    if a[:2] == ["issue", "list"]:
+        print(json.dumps([{"number": 7, "title": "bug", "body": "it breaks", "labels": [{"name": "bug"}], "url": "https://x/7"}]))
+        sys.exit(0)
+    if a[:2] == ["pr", "create"]:
+        print("opened: https://github.com/o/r/pull/9")
+        sys.exit(0)
+    if a[:2] == ["pr", "checks"]:
+        print(json.dumps([{"name": "ci", "state": "SUCCESS", "bucket": "pass"}]))
+        sys.exit(0)
+    sys.exit(1)
+''')
+
+
+@pytest.fixture
+def fake_gh(tmp_path, monkeypatch):
+    sh_ = tmp_path / "fake_gh.py"
+    sh_.write_text(FAKE_GH)
+    wrapper = tmp_path / "gh"
+    wrapper.write_text(f"#!/bin/sh\nexec {sys.executable} {sh_} \"$@\"\n")
+    wrapper.chmod(0o755)
+    monkeypatch.setenv("PATH", str(tmp_path) + os.pathsep + os.environ.get("PATH", ""))
+    yield wrapper
+
+
+def test_forge_status_issues_pr_and_checks(fake_gh, tmp_path):
+    from jarves.projectmgr import forge
+    repo = tmp_path / "r"
+    repo.mkdir()
+    sh(repo, "git", "init", "-q", "-b", "main")
+    sh(repo, "git", "remote", "add", "origin", "https://github.com/o/r.git")
+    assert forge.repo_slug(str(repo)) == "o/r"
+    st = forge.status(str(repo))
+    assert st["gh"] and not st["signed_in"]
+    (tmp_path / "signed_in").write_text("1")
+    try:
+        st = forge.status(str(repo))
+        assert st["signed_in"] and st["repo"] == "o/r"
+        rows = forge.issues(str(repo))
+        assert rows and rows[0]["number"] == 7 and rows[0]["labels"] == ["bug"]
+        url = forge.create_pr(str(repo), "jarves/p1/t1-a1", "main", "title", "body")
+        assert url.endswith("/pull/9")
+        checks = forge.pr_checks(str(repo), "9")
+        assert checks and checks[0]["bucket"] == "pass"
+    finally:
+        (tmp_path / "signed_in").unlink(missing_ok=True)
+    with pytest.raises(forge.ForgeError):
+        forge.push_branch(str(repo), "main")                         # only jarves/p<N>/... branches
+    with pytest.raises(forge.ForgeError):
+        forge.push_branch(str(repo), "jarves/p1/../escape")
+
+
+def test_github_mode_config_and_status_op(env, fake_gh):
+    m, repo, _ = env
+    sh(repo, "git", "remote", "add", "origin", "https://github.com/o/r.git")
+    open_project(m, repo)
+    assert m.call("configure", project="demo", github="write", by="voice")["code"] == "CLI_ONLY"
+    r = m.call("configure", project="demo", github="write")
+    assert r["ok"] and r["project"]["github"] == "write"
+    assert m.call("configure", project="demo", github="nope")["code"] == "BAD_GITHUB"
+    g = m.call("github", project="demo", by="voice")
+    assert g["ok"] and g["mode"] == "write" and g["repo"] == "o/r"
