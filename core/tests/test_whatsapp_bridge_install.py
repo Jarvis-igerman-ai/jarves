@@ -216,12 +216,18 @@ def test_source_checkout_may_use_its_own_https_folder(monkeypatch):
 # ---- surfaces: dashboard button, CLI, setup flow
 def test_dashboard_install_route_is_local_only_and_answers_honestly(tmp_path, monkeypatch):
     monkeypatch.setattr(wab, "bridge_command", lambda h: None)
+
+    def no_network(url, headers):                      # the route uses the real downloader: never reach the network
+        raise OSError("offline in tests")
+
+    monkeypatch.setattr(updates, "_httpx_get", no_network)
     dash = dashboard.Dashboard(tmp_path, Config()).start()
     try:
         r, body = req(dash, "POST", "/api/whatsapp/install", headers={"X-Jarves": "1"}, body={})
         d = json.loads(body)
+        # which honest answer depends on the machine: not Windows / no built-in signing key / offline
         assert r.status == 200 and d["ok"] is False and d["message_he"] and d["code"] in (
-            "BRIDGE_UNSUPPORTED", "BRIDGE_NOT_PUBLISHED", "BRIDGE_OFFLINE")
+            "BRIDGE_UNSUPPORTED", "BRIDGE_NO_KEY", "BRIDGE_NOT_PUBLISHED", "BRIDGE_OFFLINE")
         r, body = req(dash, "GET", "/api/whatsapp")
         v = json.loads(body)
         assert v["bridge_download"]["downloaded"] is False and v["bridge_installed"] is False
