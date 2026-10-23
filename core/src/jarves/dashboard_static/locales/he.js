@@ -1861,7 +1861,24 @@
   "What the agents, pull requests and CI of JARVES are doing. This page only reads; any change on GitHub shows the exact command and asks on the screen.": "מה הסוכנים, בקשות המשיכה וה-CI של JARVES עושים. הדף רק קורא; כל שינוי ב-GitHub מציג את הפקודה המדויקת ומבקש אישור על המסך.",
   "dashboard Chat page, `jarvis web`, dashboard Phone page (pages per phone)": "עמוד שיחה בלוח הבקרה, `jarvis web`, עמוד טלפון בלוח הבקרה (דפים לכל טלפון)",
   "dashboard Bug reports page, jarvis issues, header badge": "עמוד דיווחי תקלות בלוח הבקרה, jarvis issues, תג בכותרת",
-  "one wizard in the dashboard (#/setup) that sets up, tests and teaches every topic; your 'works' answers become the per-feature 'verified by owner' record and the release sign-off sheet": "אשף אחד בלוח הבקרה (#/setup) להגדרה, בדיקה והיכרות עם כל נושא. התשובות שלכם מתעדות מה אומת על ידכם ומעדכנות את גיליון אישור הגרסה."
+  "one wizard in the dashboard (#/setup) that sets up, tests and teaches every topic; your 'works' answers become the per-feature 'verified by owner' record and the release sign-off sheet": "אשף אחד בלוח הבקרה (#/setup) להגדרה, בדיקה והיכרות עם כל נושא. התשובות שלכם מתעדות מה אומת על ידכם ומעדכנות את גיליון אישור הגרסה.",
+  "legacy setting; camera opens only on request": "הגדרה ישנה; המצלמה נפתחת רק לפי בקשה",
+  "JARVES looks through the camera only when you ask, e.g. \"what do you see?\". Off by default.": "ג'ארביס מסתכל דרך המצלמה רק כשמבקשים ממנו, למשל \"מה אתה רואה?\". כבויה מראש.",
+  "Enabling the switch only makes the skill available. The camera opens for a requested capture or a timed local preview, then closes.": "הפעלת המתג רק מאפשרת שימוש. המצלמה נפתחת לצילום לפי בקשה או לתצוגה מקומית מוגבלת בזמן, ונסגרת בסיום.",
+  "The check looks for a camera and takes no picture. With the switch off, the light must be off.": "הבדיקה מחפשת מצלמה ולא מצלמת כלום. כשהמתג כבוי, הנורית חייבת להיות כבויה.",
+  "One picture per question, a few cents.": "תמונה אחת לשאלה, כמה סנטים.",
+  "A picture is sent to OpenAI only when you asked. No picture is stored.": "תמונה נשלחת ל-OpenAI רק כשביקשתם. שום תמונה לא נשמרת במחשב.",
+  "Connect a camera (USB or built-in).": "חברו מצלמה (USB או המובנית).",
+  "Turn the Camera switch on (high risk: needs your approval on the screen).": "הדליקו את המתג \"מצלמה\" (סיכון גבוה: צריך אישור שלכם על המסך).",
+  "Press Test now, then say \"what do you see?\".": "לחצו \"בדוק עכשיו\" ואז אמרו \"מה אתה רואה?\".",
+  "Camera when nobody is home": "מצלמה כשאין אף אחד בבית",
+  "Legacy compatibility setting only. The camera opens on request; there is no automatic capture or home monitoring.": "הגדרה ישנה לתאימות בלבד. המצלמה נפתחת רק לפי בקשה; אין צילום אוטומטי או שמירה על הבית.",
+  "Enabling this switch does not open the camera. Ask JARVES to look when needed.": "הפעלת המתג לא פותחת את המצלמה. בקשו מג'ארביס להסתכל כשצריך.",
+  "An availability check takes no picture.": "בדיקת זמינות אינה מצלמת תמונה.",
+  "The switch itself takes no pictures and makes no cloud calls.": "המתג עצמו לא מצלם ולא מפעיל שירות ענן.",
+  "No pictures are sent or kept unless you ask.": "תמונות לא נשלחות ולא נשמרות בלי שתבקשו.",
+  "First turn the camera on (guide \"Camera\").": "קודם הפעילו את המצלמה (מדריך \"מצלמה\").",
+  "Leave the legacy switch off. Use the Camera guide for requested captures.": "השאירו את המתג הישן כבוי. השתמשו במדריך המצלמה לצילום לפי בקשה."
  },
  "rules": [
   [

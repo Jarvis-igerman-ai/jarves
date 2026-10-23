@@ -76,7 +76,7 @@ def test_unreadable_gate_counts_as_sending():
 
 
 # ------------------------------------------------------------------ camera states + preview (fake camera)
-async def test_camera_states_off_disabled_presence_unavailable(tmp_path):
+async def test_camera_states_off_disabled_preview_unavailable(tmp_path):
     svc, cam, sent, clock, mem = make(tmp_path, on=())
     assert svc.privacy_state() == "disabled"
     mem.set_setting("feature:camera", "on")
@@ -85,8 +85,10 @@ async def test_camera_states_off_disabled_presence_unavailable(tmp_path):
     assert svc.privacy_state() == "off" and cam.opened == 0
     svc.user_activity()
     await svc.tick()
-    assert svc.privacy_state() == "presence" and cam.is_open
-    assert derive(fake_core(camera=svc))["camera"]["state"] == "presence"
+    assert svc.privacy_state() == "off" and not cam.is_open
+    assert svc.preview_open(20)["open"]
+    await svc.tick()
+    assert derive(fake_core(camera=svc))["camera"]["state"] == "preview" and cam.is_open
     (tmp_path / "b").mkdir()
     svc2, *_, mem2 = make(tmp_path / "b", available=False, on=("camera",))
     assert svc2.privacy_state() == "unavailable" and svc2.preview_open(10)["reason"] == "CAMERA_UNAVAILABLE"
@@ -111,8 +113,8 @@ async def test_preview_refused_while_switches_off_sensor_never_opened(tmp_path):
 
 async def test_preview_streams_small_frames_rate_limited_ram_only_and_closes(tmp_path):
     before = {p.name for p in tmp_path.rglob("*")}
-    svc, cam, sent, clock, mem = make(tmp_path, frames=[room(size=(480, 640))], on=("camera",), detector=False)
-    assert svc.privacy_state() == "off"                                 # no detector: nothing opens by itself
+    svc, cam, sent, clock, mem = make(tmp_path, frames=[room(size=(480, 640))], on=("camera",))
+    assert svc.privacy_state() == "off"                                 # detector available, still no idle capture
     st = svc.preview_open(20)
     assert st["open"] and st["seconds_left"] == 20.0
     await svc.tick()
@@ -149,7 +151,7 @@ async def test_preview_streams_small_frames_rate_limited_ram_only_and_closes(tmp
 
 
 async def test_preview_hard_cap_lease_and_switch_off_mid_preview(tmp_path):
-    svc, cam, sent, clock, mem = make(tmp_path, on=("camera",), detector=False)
+    svc, cam, sent, clock, mem = make(tmp_path, on=("camera",))
     t0 = clock.t
     svc.preview_open(5, by="cli")                                       # dashboard lease
     for _ in range(int(PREVIEW_MAX_S) + 10):                            # keeps polling: still capped

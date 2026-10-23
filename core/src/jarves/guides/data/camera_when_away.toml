@@ -5,15 +5,15 @@ aliases = ["שמירה על הבית", "כשאין אף אחד", "away", "home w
 links = ["camera", "alerts", "privacy"]
 title_he = "מצלמה כשאין אף אחד בבית"
 title_en = "Camera when nobody is home"
-what_he = "כשאתם לא בבית ג'ארביס יכול לשים לב לתנועה בחדר ולהתריע. כבוי מראש."
-what_en = "When you are out, JARVES can notice movement in the room and alert you. Off by default."
-say = [["אני יוצא, תשמור על הבית", "I'm going out, watch the house"], ["חזרתי", "I'm back"]]
-expect_he = "רק כשאמרתם שאתם יוצאים. ההתראה מגיעה דרך מסלול ההתראות הרגיל."
-expect_en = "Only after you said you are going out. The alert comes through the normal alerts."
-test_he = "הבדיקה בודקת שהמצלמה פועלת."
-test_en = "The check sees the camera works."
-cost_he = "חינם: הזיהוי רץ במחשב."
-cost_en = "Free: detection runs on this computer."
+what_he = "הגדרה ישנה לתאימות בלבד. המצלמה נפתחת רק לפי בקשה; אין צילום אוטומטי או שמירה על הבית."
+what_en = "Legacy compatibility setting only. The camera opens on request; there is no automatic capture or home monitoring."
+say = [["תסתכל, מה אתה רואה?", "Look, what do you see?"]]
+expect_he = "הפעלת המתג לא פותחת את המצלמה. בקשו מג'ארביס להסתכל כשצריך."
+expect_en = "Enabling this switch does not open the camera. Ask JARVES to look when needed."
+test_he = "בדיקת זמינות אינה מצלמת תמונה."
+test_en = "An availability check takes no picture."
+cost_he = "המתג עצמו לא מצלם ולא מפעיל שירות ענן."
+cost_en = "The switch itself takes no pictures and makes no cloud calls."
 privacy_he = "תמונות לא נשלחות ולא נשמרות בלי שתבקשו."
 privacy_en = "No pictures are sent or kept unless you ask."
 
@@ -23,7 +23,5 @@ en = "First turn the camera on (guide \"Camera\")."
 check = "active:camera"
 
 [[steps]]
-he = "הדליקו את \"מצלמה כשאין אף אחד בבית\" (סיכון גבוה: צריך אישור)."
-en = "Turn on Camera when away (high risk: needs approval)."
-action = "feature_on:camera_when_away"
-check = "enabled:camera_when_away"
+he = "השאירו את המתג הישן כבוי. השתמשו במדריך המצלמה לצילום לפי בקשה."
+en = "Leave the legacy switch off. Use the Camera guide for requested captures."

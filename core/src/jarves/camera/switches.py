@@ -3,9 +3,9 @@
 
 """Camera feature switches (dashboard-switchable, ALL default OFF):
 
-- `camera`            - camera on at all (presence, gaze, "מה זה?", reading text)
+- `camera`            - make requested captures and explicit local previews available
 - `face_recognition`  - recognise enrolled people (each person still opts in by voice)
-- `camera_when_away`  - keep the camera on while nobody is home (default off: away = camera OFF)
+- `camera_when_away`  - legacy compatibility flag; never starts background capture
 - `camera_preview`    - "What does he see?" local preview while the user keeps it open (default ON, needs `camera`)
 
 They are registered with WP-I's `jarves.features` (interface: register(id, title_he, title_en, default_enabled,

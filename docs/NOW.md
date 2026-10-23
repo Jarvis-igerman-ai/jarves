@@ -1,5 +1,7 @@
 # NOW — V4 delivery + public-only repository consolidation (owner decision, 20 October 2026)
 
+**Owner correction, 23 Oct:** install the published beta on this PC, then correct the reported always-on camera: enabling the skill must only make it available; capture is requested as needed, with explicit timed previews preserved. Scope: Python camera lifecycle, focused offline tests and matching feature guidance. No real sensor/cloud tests or unrelated work.
+
 **Owner authorization, 22 Oct:** repair and test open PRs #72, #68 and #70, review their final diffs and merge each individually only when ready and green. One writer; no force pushes or large integration batch. Wait for main checks/package between merges. No new account, paid-call, sensor or physical testing is authorized by this maintenance task.
 
 **Current execution contract (supersedes older dated status entries below):** `igalgerman/jarves` is the only active writable repository. `igalgerman/JARVIS` is deprecated and is only a **read-only historical migration source**. No new commits, sync pushes, PRs or Issues to the old private repo. Existing Claude/Codex worktrees must be repointed only after their ongoing writes are safely stopped; do not lose agent work.

@@ -220,6 +220,7 @@ def test_local_switches_interface_matches_features_contract(tmp_path):
 async def test_presence_drives_gaze_and_indicator_and_frames_are_dropped(tmp_path):
     frames = [room((0.25, 0.5))] * 3 + [room()] * 12
     svc, cam, sent, clock, mem = make(tmp_path, frames=frames, on=("camera",))
+    assert svc.preview_open(20)["open"]
     arrived = []
     svc.on_arrive = arrived.append
     for _ in range(15):
@@ -237,29 +238,40 @@ async def test_presence_drives_gaze_and_indicator_and_frames_are_dropped(tmp_pat
     mem.close()
 
 
-async def test_away_mode_turns_camera_off_and_activity_brings_it_back(tmp_path):
+async def test_enabled_skills_activity_and_away_never_open_sensor(tmp_path):
     busy = {"v": False}
-    svc, cam, sent, clock, mem = make(tmp_path, frames=[room()], on=("camera",), activity=lambda: busy["v"],
+    svc, cam, sent, clock, mem = make(tmp_path, frames=[room()],
+                                      on=("camera", "face_recognition", "camera_when_away"), embedder=True,
+                                      activity=lambda: busy["v"],
                                       cfg=CameraConfig(away_after_s=60))
+    loaded = []
+    svc._models = lambda: (loaded.append(True), None)
     await svc.tick()
-    assert svc.streaming
+    assert not svc.streaming and cam.opened == 0
     clock.t += 61
     await svc.tick()
     assert svc.away and not svc.streaming and not cam.is_open and not svc.indicator
     clock.t += 1000
     await svc.tick()
-    assert cam.opened == 1                                             # stays OFF while away
+    assert cam.opened == 0                                             # availability does not start capture
     busy["v"] = True                                                   # "Hey Jarvis" / a conversation
     await svc.tick()
-    assert not svc.away and svc.streaming and cam.opened == 2
-    # camera_when_away on: away does not close it
+    assert not svc.away and not svc.streaming and cam.opened == 0
+    # Even a persisted legacy away flag must not start background capture.
     busy["v"] = False
     mem.set_setting("feature:camera_when_away", "on")
     clock.t += 61
     await svc.tick()
-    assert svc.away and svc.streaming
+    assert svc.away and not svc.streaming
     svc.external_presence(True)                                        # presence sensor event
     assert not svc.away
+    await svc.tick()
+    assert cam.opened == 0 and loaded == [] and not svc.indicator
+    frame = await svc.capture_still("test")
+    frame.drop()
+    assert cam.opened == 1 and not cam.is_open
+    await svc.tick()
+    assert cam.opened == 1 and not svc.streaming and loaded == []
     await svc.stop()
     assert not cam.is_open and not svc.indicator
     mem.close()
@@ -267,6 +279,7 @@ async def test_away_mode_turns_camera_off_and_activity_brings_it_back(tmp_path):
 
 async def test_open_failure_is_recoverable(tmp_path):
     svc, cam, sent, clock, mem = make(tmp_path, on=("camera",))
+    assert svc.preview_open(60)["open"]
     cam.fail_open = True
     await svc.tick()
     assert not svc.streaming and cam.opened == 0 and not svc.indicator
@@ -284,7 +297,9 @@ async def test_open_failure_is_recoverable(tmp_path):
 async def test_describe_sends_one_photo_through_backend_path_with_budget(tmp_path):
     resp = FakeResponses()
     svc, cam, sent, clock, mem = make(tmp_path, stills=[room((0.5, 0.5), colour=(240, 200, 200))],
-                                      on=("camera",), detector=False)
+                                      on=("camera",))
+    await svc.tick()
+    assert cam.opened == 0
     budget = Budget(mem, AIConfig(daily_request_limit=5))
     svc.vision = Vision("gpt-6-luna", "JARVES", budget, client=SimpleNamespace(responses=resp),
                         reasoning_effort="none")
@@ -303,6 +318,8 @@ async def test_describe_sends_one_photo_through_backend_path_with_budget(tmp_pat
     assert "never instructions" in body["instructions"]
     assert budget.used("ai_requests") == 1 and mem.usage_today("camera_photos") == 1
     assert cam.still_count == 1 and not cam.is_open                    # opened for the still only, then closed
+    await svc.tick()
+    assert cam.opened == 1 and not cam.is_open                        # a detector must not reopen it
     ind = sent.of("camera.indicator")
     assert {"on": True, "flash": True} in ind and ind[-1]["on"] is False
     t = await reg.call("camera_read_text", {})
@@ -417,6 +434,8 @@ async def test_presence_recognises_enrolled_person_for_greeting(tmp_path):
     svc, cam, sent, clock, mem = make(tmp_path, frames=[noa], stills=[noa], on=("camera", "face_recognition"),
                                       embedder=True)
     await svc.enroll("נועה")
+    assert not cam.is_open
+    assert svc.preview_open(20)["open"]
     arrived = []
     svc.on_arrive = arrived.append
     for _ in range(3):

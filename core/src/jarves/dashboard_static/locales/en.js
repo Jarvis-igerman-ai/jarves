@@ -1861,6 +1861,23 @@
   "What the agents, pull requests and CI of JARVES are doing. This page only reads; any change on GitHub shows the exact command and asks on the screen.": "What the agents, pull requests and CI of JARVES are doing. This page only reads; any change on GitHub shows the exact command and asks on the screen.",
   "dashboard Chat page, `jarvis web`, dashboard Phone page (pages per phone)": "dashboard Chat page, `jarvis web`, dashboard Phone page (pages per phone)",
   "dashboard Bug reports page, jarvis issues, header badge": "dashboard Bug reports page, jarvis issues, header badge",
-  "one wizard in the dashboard (#/setup) that sets up, tests and teaches every topic; your 'works' answers become the per-feature 'verified by owner' record and the release sign-off sheet": "one wizard in the dashboard (#/setup) that sets up, tests and teaches every topic; your 'works' answers become the per-feature 'verified by owner' record and the release sign-off sheet"
+  "one wizard in the dashboard (#/setup) that sets up, tests and teaches every topic; your 'works' answers become the per-feature 'verified by owner' record and the release sign-off sheet": "one wizard in the dashboard (#/setup) that sets up, tests and teaches every topic; your 'works' answers become the per-feature 'verified by owner' record and the release sign-off sheet",
+  "legacy setting; camera opens only on request": "legacy setting; camera opens only on request",
+  "JARVES looks through the camera only when you ask, e.g. \"what do you see?\". Off by default.": "JARVES looks through the camera only when you ask, e.g. \"what do you see?\". Off by default.",
+  "Enabling the switch only makes the skill available. The camera opens for a requested capture or a timed local preview, then closes.": "Enabling the switch only makes the skill available. The camera opens for a requested capture or a timed local preview, then closes.",
+  "The check looks for a camera and takes no picture. With the switch off, the light must be off.": "The check looks for a camera and takes no picture. With the switch off, the light must be off.",
+  "One picture per question, a few cents.": "One picture per question, a few cents.",
+  "A picture is sent to OpenAI only when you asked. No picture is stored.": "A picture is sent to OpenAI only when you asked. No picture is stored.",
+  "Connect a camera (USB or built-in).": "Connect a camera (USB or built-in).",
+  "Turn the Camera switch on (high risk: needs your approval on the screen).": "Turn the Camera switch on (high risk: needs your approval on the screen).",
+  "Press Test now, then say \"what do you see?\".": "Press Test now, then say \"what do you see?\".",
+  "Camera when nobody is home": "Camera when nobody is home",
+  "Legacy compatibility setting only. The camera opens on request; there is no automatic capture or home monitoring.": "Legacy compatibility setting only. The camera opens on request; there is no automatic capture or home monitoring.",
+  "Enabling this switch does not open the camera. Ask JARVES to look when needed.": "Enabling this switch does not open the camera. Ask JARVES to look when needed.",
+  "An availability check takes no picture.": "An availability check takes no picture.",
+  "The switch itself takes no pictures and makes no cloud calls.": "The switch itself takes no pictures and makes no cloud calls.",
+  "No pictures are sent or kept unless you ask.": "No pictures are sent or kept unless you ask.",
+  "First turn the camera on (guide \"Camera\").": "First turn the camera on (guide \"Camera\").",
+  "Leave the legacy switch off. Use the Camera guide for requested captures.": "Leave the legacy switch off. Use the Camera guide for requested captures."
  }
 };
