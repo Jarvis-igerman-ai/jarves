@@ -212,3 +212,16 @@ def test_every_bug_table_in_the_repo_has_a_status_the_gate_can_read():
     unreadable = [p for t in tables for p in gate.bug_table_open(t.read_text(encoding="utf-8"), t.name)
                   if "has no status column" in p]
     assert unreadable == []
+
+
+def test_a_later_version_needs_its_own_checklist_not_the_4_0_0_one(tmp_path):
+    """The 4.0.0 checklist (SWV4_RELEASE_CHECKLIST.md) answered for every later version, so a 4.0.1 tag inherited its
+    stale 'needs-owner' rows instead of being told its own checklist is missing (#89)."""
+    rev = tmp_path / "docs" / "reviews"
+    rev.mkdir(parents=True)
+    (rev / "SWV4_RELEASE_CHECKLIST.md").write_text("| 1 | thing | needs-owner |\n", encoding="utf-8")
+    assert gate.find_checklist(tmp_path, "4.0.0", None) == rev / "SWV4_RELEASE_CHECKLIST.md"
+    assert gate.find_checklist(tmp_path, "4.0.1", None) is None
+    (rev / "RELEASE_CHECKLIST_4.0.1.md").write_text("| 1 | thing | done |\n", encoding="utf-8")
+    assert gate.find_checklist(tmp_path, "4.0.1", None) == rev / "RELEASE_CHECKLIST_4.0.1.md"
+    assert any("RELEASE_CHECKLIST_4.1.0.md" in p for p in _gate(tmp_path, checklist_text=None))
