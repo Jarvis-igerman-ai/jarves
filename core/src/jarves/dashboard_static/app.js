@@ -124,9 +124,9 @@ async function pageConversations() {
       : el("div", { class: "empty" }, "No conversations recorded yet. They appear here as soon as you talk to JARVES.")));
   if (overview.live) timer = setInterval(() => route(true), 5000);
 }
-function tile(label, value, hint, estimate) {
-  return el("div", { class: "card tile" }, el("div", { class: "label" }, label, estimate ? est() : null),
-    el("div", { class: "value" }, value), el("div", { class: "hint" }, hint));
+function tile(label, value, hint, estimate, href) {
+  const inner = [el("div", { class: "label" }, label, estimate ? est() : null), el("div", { class: "value" }, value), el("div", { class: "hint" }, hint)];
+  return href ? el("a", { class: "card tile tile-link", href }, ...inner) : el("div", { class: "card tile" }, ...inner);
 }
 
 async function pageSession(id, keepScroll) {

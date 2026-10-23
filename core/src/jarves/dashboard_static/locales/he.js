@@ -1964,7 +1964,8 @@
   "Beta with automatic updates": "בטא, עם עדכון אוטומטי",
   "Beta, no automatic updates": "בטא, בלי עדכון אוטומטי",
   "Channel not chosen: ": "הערוץ לא נבחר: ",
-  "Stable: only tested releases (default, no automatic updates). Beta: every green build early, with automatic updates on by default. Until you choose you stay on stable and nothing installs by itself.": "יציב: רק גרסאות שנבדקו (ברירת מחדל, בלי עדכון אוטומטי). בטא: כל בנייה ירוקה מוקדם, עם עדכון אוטומטי כברירת מחדל. עד שתבחר נשאר יציב ושום דבר לא מותקן לבד."
+  "Stable: only tested releases (default, no automatic updates). Beta: every green build early, with automatic updates on by default. Until you choose you stay on stable and nothing installs by itself.": "יציב: רק גרסאות שנבדקו (ברירת מחדל, בלי עדכון אוטומטי). בטא: כל בנייה ירוקה מוקדם, עם עדכון אוטומטי כברירת מחדל. עד שתבחר נשאר יציב ושום דבר לא מותקן לבד.",
+  "Conversation issues": "בעיות בשיחות"
  },
  "rules": [
   [

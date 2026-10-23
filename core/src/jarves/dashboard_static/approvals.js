@@ -70,6 +70,8 @@
   async function refresh() {
     let d;
     try { d = await api("/api/approvals"); } catch (e) { return; }
+    const badge = document.getElementById("apCount");                 // sidebar: how many requests wait for you
+    if (badge) { const n = d.pending.length; badge.textContent = n ? String(n) : ""; badge.title = tx(`${n} ממתינים לאישור`, `${n} waiting for your approval`); }
     const key = JSON.stringify([d.pending.map((a) => [a.id, Math.round(a.seconds_left / 30)]), d.history.length, msg, busy,
       window.JL && JL.lang, location.hash, filt]);
     if (key === last) return;

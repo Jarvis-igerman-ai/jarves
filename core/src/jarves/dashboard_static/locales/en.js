@@ -1964,6 +1964,7 @@
   "Beta with automatic updates": "Beta with automatic updates",
   "Beta, no automatic updates": "Beta, no automatic updates",
   "Channel not chosen: ": "Channel not chosen: ",
-  "Stable: only tested releases (default, no automatic updates). Beta: every green build early, with automatic updates on by default. Until you choose you stay on stable and nothing installs by itself.": "Stable: only tested releases (default, no automatic updates). Beta: every green build early, with automatic updates on by default. Until you choose you stay on stable and nothing installs by itself."
+  "Stable: only tested releases (default, no automatic updates). Beta: every green build early, with automatic updates on by default. Until you choose you stay on stable and nothing installs by itself.": "Stable: only tested releases (default, no automatic updates). Beta: every green build early, with automatic updates on by default. Until you choose you stay on stable and nothing installs by itself.",
+  "Conversation issues": "Conversation issues"
  }
 };
