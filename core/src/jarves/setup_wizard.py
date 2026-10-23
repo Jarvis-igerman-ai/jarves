@@ -1158,6 +1158,8 @@ BUNDLE: dict[str, list[Callable[[], tuple[bool, str]]]] = {
     "proactive_intel": [_mod("jarves.proactive")],
     "proactive_signals": [_mod("jarves.continuity")],
     "dev_manager": [_mod("jarves.devmanager")],
+    "project_manager": [_mod("jarves.projectmgr.surfaces"), _data("jarves", "dashboard_static/projects.js"),
+                        _data("jarves.guides", "data/project_manager.toml")],
     "dev_status": [_mod("jarves.devstatus")],
     "notes": [_mod("jarves.notes")],
     "files": [_mod("jarves.sandbox")],
