@@ -2,53 +2,14 @@
 
 - Problem: with no bridge program the owner could only reinstall or build Go. Now the WhatsApp page (card "The bridge program is not installed"), `jarvis whatsapp install`, and the Connect flow (`jarvis connect whatsapp` asks; the dashboard Connect row opens the WhatsApp page) offer ONE step that downloads the prebuilt Windows bridge, verifies it and installs it to `<JARVES home>/bridge/whatsapp_bridge.exe` (the per-user location `bridge_command()` now also searches, after the shipped payload and the source-checkout `dist`). Backend: new `core/src/jarves/whatsapp_bridge_install.py`, shared by dashboard `POST /api/whatsapp/install` (local-only, like every WhatsApp change) and the CLI (`whatsapp_admin.install_bridge`).
 - Trust (nothing new): the app fetches `whatsapp-bridge.json`, an Ed25519 envelope verified with the SAME built-in `updates.UPDATE_PUBLIC_KEYS`, but under its own signing domain (`jarves-whatsapp-bridge-manifest-v1`) so a signed installer manifest is not valid as a bridge manifest and vice versa (`updates.canonical/verify_manifest` got an optional `domain`, default unchanged). The signed manifest carries product, platform, asset name, version, SHA256, exact size and an https URL. Bytes are checked in memory, again on the temporary file, then moved in atomically with the signed manifest beside them (`whatsapp_bridge.manifest.json`). Before EVERY start `start_bridge` re-verifies that stored signature and re-hashes the exe (`BRIDGE_TAMPERED`, not started). Installed builds ignore `JARVES_WHATSAPP_BRIDGE_BASE_URL` and any key parameter (source checkouts may use an https override for testing). Owner-initiated only (`approved=True`, no background/voice/startup path), never while the bridge runs, never an older version than installed, no token sent, no secret logged (version/size/SHA256 only, code `WA_BRIDGE_DOWNLOADED`). Not published yet = honest EN/HE `BRIDGE_NOT_PUBLISHED` message, nothing changes.
-- Publish side (small, no workflow edit): `python packaging/release.py bridge-publish --dir bridge/whatsapp/dist [--dry-run]` re-checks the exe against `.sha256` + `build-info.json`, uploads `whatsapp_bridge-<version>.exe`, its `.sha256` and then the signed `whatsapp-bridge.json` (last = the switch) to the rolling pre-release tag `whatsapp-bridge` of `igalgerman/jarvis-releases` (same `RELEASES_TOKEN` + `JARVES_UPDATE_SIGNING_KEY` secrets; skips cleanly without them). The app reads `https://github.com/igalgerman/jarvis-releases/releases/download/whatsapp-bridge/whatsapp-bridge.json`.
+- Publish side (script; the manual workflow below wraps it): `python packaging/release.py bridge-publish --dir bridge/whatsapp/dist [--dry-run]` re-checks the exe against `.sha256` + `build-info.json`, uploads `whatsapp_bridge-<version>.exe`, its `.sha256` and then the signed `whatsapp-bridge.json` (last = the switch) to the rolling pre-release tag `whatsapp-bridge` of `igalgerman/jarvis-releases` (same `RELEASES_TOKEN` + `JARVES_UPDATE_SIGNING_KEY` secrets; skips cleanly without them). The app reads `https://github.com/igalgerman/jarvis-releases/releases/download/whatsapp-bridge/whatsapp-bridge.json`.
 - Guide `whatsapp_bridge.toml` (new first step, 2 new problems, EN+HE, new error codes), 3 Hebrew catalog strings via `catalog_add.py`, CLI parity unchanged (`install` is a new action of `jarvis whatsapp`; `status` now shows `bridge_download`), `test_guides`/`test_cli_parity` pass.
 - Tests (targeted, no network): `core/tests/test_whatsapp_bridge_install.py` (26: happy path, atomic files, no token header, approval required, not published, 13 tamper/failure cases leave nothing behind, failed replacement keeps the old bridge, older/running/non-Windows refused, hash re-check before start, installed builds ignore overrides, dashboard/CLI surfaces, `release.py bridge-publish` -> local GitHub stub -> app install end to end). Plus `test_whatsapp_surfaces`, release, update and connect tests; `python core/tools/prepush.py` PASSED.
 - NOT verified: a real download from GitHub, the real Windows exe running after download, SmartScreen/antivirus behaviour on the downloaded unsigned exe, the new button in a real browser (source assertions only), `payload_check.py` is unchanged (it covers the shipped `bridge/` payload, not `<home>/bridge`).
 - MUST BE PUBLISHED for this to work end to end (owner/CI, one time per bridge version): (1) secrets `RELEASES_TOKEN` and `JARVES_UPDATE_SIGNING_KEY` set (docs/RELEASE_HOSTING.md); (2) run the reproducible build and `python packaging/release.py bridge-publish --dir bridge/whatsapp/dist` on a machine/runner with those secrets (the owner can run it locally after `./scripts/build_whatsapp_bridge.ps1 -Version 0.1.0`, with `RELEASES_TOKEN`/`JARVES_UPDATE_SIGNING_KEY` in the environment); until then the button answers "not published yet". The published exe should equal `packaging/bridge_pin.json` (0.1.0, sha256 15706e16...).
-- Follow-up workflow (NOT in this PR, another CI change is in flight). New file `.github/workflows/bridge-publish.yml`, manual, owner-triggered:
-
-```yaml
-name: Publish WhatsApp bridge
-on:
-  workflow_dispatch:
-    inputs:
-      version: {description: "bridge version (must equal packaging/bridge_pin.json)", required: true, default: "0.1.0"}
-permissions:
-  contents: read
-jobs:
-  build:
-    runs-on: windows-2025
-    timeout-minutes: 25
-    steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-go@v7
-        with: {go-version: "1.27.0", cache-dependency-path: bridge/whatsapp/go.sum}
-      - shell: pwsh
-        run: |
-          ./scripts/build_whatsapp_bridge.ps1 -Version "${{ inputs.version }}"
-          ./scripts/build_whatsapp_bridge.ps1 -Version "${{ inputs.version }}" -Verify bridge/whatsapp/dist/whatsapp_bridge.exe.sha256
-          $pin = Get-Content packaging/bridge_pin.json -Raw | ConvertFrom-Json
-          $got = (Get-FileHash bridge/whatsapp/dist/whatsapp_bridge.exe -Algorithm SHA256).Hash.ToLower()
-          if ($got -ne $pin.sha256) { throw "bridge SHA256 differs from packaging/bridge_pin.json" }
-      - uses: actions/upload-artifact@v7
-        with: {name: bridge-dist, path: bridge/whatsapp/dist/, retention-days: 1, if-no-files-found: error}
-  publish:
-    needs: build
-    runs-on: ubuntu-24.04
-    timeout-minutes: 10
-    steps:
-      - uses: actions/checkout@v7
-      - uses: actions/download-artifact@v8
-        with: {name: bridge-dist, path: bridge-dist}
-      - run: python3 packaging/release.py bridge-publish --dir bridge-dist
-        env:
-          RELEASES_REPO: ${{ vars.RELEASES_REPO }}
-          RELEASES_TOKEN: ${{ secrets.RELEASES_TOKEN }}
-          JARVES_UPDATE_SIGNING_KEY: ${{ secrets.JARVES_UPDATE_SIGNING_KEY }}
-```
-  (pin the action SHAs like the other workflows when adding it; `test_ci_pipeline` contracts may need a row for the new workflow.)
+- Workflow (branch ci/bridge-publish-workflow, #17): `.github/workflows/bridge-publish.yml`, manual (`workflow_dispatch` only). How the owner runs it: GitHub > Actions > "Publish WhatsApp bridge" > Run workflow, branch `main`. FIRST with `dry_run` ticked (the default): it builds the bridge on windows-2025 (pinned Go 1.27.0, rebuild with `-Verify`, SHA-256 compared with `packaging/bridge_pin.json`), uploads exe + `.sha256` + `build-info.json` as a 1-day artifact, and on ubuntu-24.04 runs `release.py bridge-publish --dry-run` (prints what would be published; no secrets, no network). Check the log, then run it again with `dry_run` unticked: the same build, then the real publish (signed `whatsapp-bridge.json` last). `version` may stay empty (= the pin; any other value is refused).
+- Secrets scope: `permissions: {}` at the top, `contents: read` per job, `persist-credentials: false`. `RELEASES_TOKEN`, `JARVES_UPDATE_SIGNING_KEY` (and var `RELEASES_REPO`) are set on ONE step only ("Publish", publish job); never in the build job, never in the artifact, no `set -x`. The Publish step runs only when `dry_run` is false AND the ref is `refs/heads/main`; a non-main real run fails early with a clear error. Concurrency group `bridge-publish` (no cancel). All `uses:` are full-SHA pinned (checkout and download-artifact SHAs copied from the other workflows; setup-go v7.0.0 and upload-artifact v7.0.2 resolved from the upstream tags with `git ls-remote`, because the other workflows still use `@v7` for those two). Contract: `test_ci_pipeline.py::test_bridge_publish_workflow_is_manual_least_privilege_and_scopes_secrets_to_one_step`; actionlint clean.
+- NOT verified for the workflow: it was never run on GitHub (needs the owner's secrets and a Windows runner): artifact download layout on the runner, empty `RELEASES_REPO` var falling back to the default repo, the real Go build matching the pin there.
 - Open questions for owner: (a) old versioned bridge assets are not pruned from the `whatsapp-bridge` release (a few MB each; prune keep-3 is a later change); (b) `JARVES_WHATSAPP_BRIDGE` (explicit command env) is still honoured by installed builds, unlike update sources; consider ignoring it there; (c) the downloaded exe is not Authenticode-signed, same as the installer.
 
 ## Dashboard redesign: navigation tree — 23 Oct 2026

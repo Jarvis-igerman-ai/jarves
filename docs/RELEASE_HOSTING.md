@@ -194,5 +194,11 @@ uploads `whatsapp_bridge-<version>.exe`, its `.sha256` and then the signed `what
 pre-release `whatsapp-bridge` of the releases repo. JARVES downloads it only when the owner presses "Download the
 WhatsApp bridge" (or runs `jarvis whatsapp install`), verifies signature, SHA256 and size, installs to
 `<home>/bridge/`, and re-verifies before every start. Details: HANDOFF "WhatsApp bridge: one signed ... step".
+
+Publishing from GitHub (no local build needed): Actions > "Publish WhatsApp bridge" > Run workflow on branch `main`.
+Run it first with `dry_run` ticked (default): it builds the pinned bridge on Windows (Go 1.27.0, reproducible check,
+SHA-256 equal to `packaging/bridge_pin.json`) and prints what would be published. Then run it again with `dry_run`
+unticked to publish for real. The secrets `RELEASES_TOKEN` and `JARVES_UPDATE_SIGNING_KEY` are visible only to the
+final publish step, which runs only from `main`; the build job never sees them.
 הגשר המוכן משתמש באותו אחסון, אותו מפתח חתימה ואותם כללי אמון, עם תחום חתימה נפרד. ההורדה קורית רק כשהבעלים לוחץ
 "הורדת גשר הוואטסאפ", והקובץ נבדק (חתימה, SHA256, גודל) לפני ההתקנה ושוב לפני כל הפעלה.

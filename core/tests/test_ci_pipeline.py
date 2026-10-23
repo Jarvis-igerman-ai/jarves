@@ -206,3 +206,41 @@ def test_fast_validation_blocks_expensive_jobs_and_reports_to_ci_ok():
     for jid in ("core", "browser", "installer", "whatsapp-bridge", "perf", "cad", "blender", "godot", "e2e"):
         assert "validate" in jobs[jid]["needs"], jid
     assert "validate" in jobs["ci-ok"]["needs"]
+
+
+def test_bridge_publish_workflow_is_manual_least_privilege_and_scopes_secrets_to_one_step():
+    """The manual WhatsApp bridge publish workflow: dispatch only, dry run by default, build job has no secrets,
+    the signing/upload secrets exist only on the single real-publish step, which runs only from main."""
+    import re
+    path = WF / "bridge-publish.yml"
+    doc = load("bridge-publish.yml")
+    t = triggers(doc)
+    assert set(t) == {"workflow_dispatch"}                                  # never push/PR/schedule
+    inputs = t["workflow_dispatch"]["inputs"]
+    assert inputs["dry_run"]["default"] is True and inputs["dry_run"]["type"] == "boolean"
+    assert inputs["version"]["required"] is False
+    assert doc["permissions"] == {} and doc["concurrency"]["group"] == "bridge-publish"
+    build, publish = doc["jobs"]["build"], doc["jobs"]["publish"]
+    assert build["runs-on"] == "windows-2025" and publish["runs-on"] == "ubuntu-24.04"
+    assert publish["needs"] == "build"
+    assert build["permissions"] == {"contents": "read"} and publish["permissions"] == {"contents": "read"}
+    for job in (build, publish):
+        assert 1 <= job["timeout-minutes"] <= 30
+        for step in job["steps"]:
+            if "uses" in step:
+                assert re.fullmatch(r"[\w.-]+/[\w./-]+@[0-9a-f]{40}", step["uses"]), step["uses"]   # full-SHA pins
+    # same reproducible build as the whatsapp-bridge CI job: pinned Go, -Verify, compared with the pin
+    btxt = steps_text(build)
+    assert "1.27.0" in str(build["steps"])
+    assert "-Verify bridge/whatsapp/dist/whatsapp_bridge.exe.sha256" in btxt and "bridge_pin.json" in btxt
+    # secrets: nowhere except the one real-publish step
+    raw = path.read_text(encoding="utf-8")
+    assert raw.count("secrets.") == 2 and "set -x" not in raw
+    holders = [(j, s) for j, job in doc["jobs"].items() for s in job["steps"] if "secrets." in str(s)]
+    assert len(holders) == 1 and holders[0][0] == "publish"
+    step = holders[0][1]
+    assert set(step["env"]) == {"RELEASES_REPO", "RELEASES_TOKEN", "JARVES_UPDATE_SIGNING_KEY"}
+    assert "bridge-publish --dir bridge-dist" in step["run"] and "--dry-run" not in step["run"]
+    assert "!inputs.dry_run" in step["if"] and "refs/heads/main" in step["if"]
+    dry = next(s for s in publish["steps"] if "--dry-run" in s.get("run", ""))
+    assert "env" not in dry and "inputs.dry_run" in dry["if"] and "!" not in dry["if"]
