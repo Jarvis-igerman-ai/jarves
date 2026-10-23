@@ -453,17 +453,27 @@ def cmd_whatsapp(a, cfg, home) -> int:
                     print("several chats match" if hits else "no chat matches")
                     return 1
                 ms = user.messages(hits[0]["id"], None, a.limit).get("messages", [])
-                rows = [wab.message_view(m, {hits[0]["id"]: hits[0].get("name", "")}) for m in ms]
+                ms = wab.chrono(ms)
+                now = time.time()
+                dated = wab.spans_days(ms, now)
+                rows = [wab.message_view(m, {hits[0]["id"]: hits[0].get("name", "")}, now, dated) for m in ms]
                 if a.json:
                     _print(rows, True)
                 for m in rows if not a.json else []:
-                    print(f"[{m['time']}] {m['from']}: {m['text'] if m['kind'] == 'text' else m['media']}"
+                    print(f"[{m['when']}] {m['from']}: {m['text'] if m['kind'] == 'text' else m['media']}"
                           + ("  (hidden characters removed)" if m.get("hidden_chars_removed") else ""))
                 return 0
-            chats = user.chats(None, 200)
+            chats = sorted(user.chats(None, 200), key=lambda c: -wab._secs(c.get("last_ts")))   # most recent first
+            now = time.time()
             rows = [{"name": pol.clean_text(c.get("name") or "")[0], "unread": c.get("unread", 0),
-                     "last": wab._hhmm(c.get("last_ts", 0)), "can_send": c.get("can_send", False)} for c in chats]
-            _print(rows, a.json) if a.json else [print(f"{r['unread']:>3}  {r['last']}  {r['name']}") for r in rows]
+                     "last": wab.when_label(c.get("last_ts", 0), now), "can_send": c.get("can_send", False)}
+                    for c in chats]
+            if a.json:
+                _print(rows, True)
+            else:
+                print("unread  last message  chat   (most recent first)")
+                for r in rows:
+                    print(f"{r['unread']:>3}  {r['last']}  {r['name']}")
             return 0
         if a.action == "find":
             text = a.regex if isinstance(a.regex, str) else " ".join(args)
@@ -575,6 +585,7 @@ def view(ctx) -> dict:
             au = ad.call("GET", "/audit", params={"limit": 30})
             out["audit"] = au.get("lines", au.get("audit", []))
             chats = BridgeClient(ctx.home).chats(None, 200) if st.get("mode") != "off" else []
+            chats = sorted(chats, key=lambda c: -wab._secs(c.get("last_ts")))                 # most recent first
             names = {c["id"]: c.get("name", "") for c in chats}
             for k in ("read_allow", "send_allow"):
                 out["policy"][k] = [{"id": _ref(j), "name": names.get(j, ""), "number": pol.jid_number(j)}
@@ -600,11 +611,14 @@ def dashboard_routes(register) -> None:
         chat = _jid(str(((q or {}).get("chat") or [""])[0]))
         try:
             res = BridgeClient(ctx.home).messages(chat, None, 50)
+            raw = wab.chrono(res.get("messages", []))
         except BridgeError as e:
             return _err(e)
         name = (res.get("chat") or {}).get("name", "")
-        return 200, {"chat": {"id": _ref(chat), "name": pol.clean_text(name)[0]},
-                     "messages": [wab.message_view(m, {chat: name}) for m in res.get("messages", [])],
+        now = time.time()
+        dated = wab.spans_days(raw, now)
+        return 200, {"chat": {"id": _ref(chat), "name": pol.clean_text(name)[0]}, "order": "oldest_first",
+                     "messages": [wab.message_view(m, {chat: name}, now, dated) for m in raw],
                      "untrusted": True}
 
     def post(fn):

@@ -18,8 +18,8 @@ say = [
   ["תחפש צ'אט שמתחיל בקניות", "Find a chat that starts with קניות"],
   ["תענה לדנה: אני מאחר בעשר דקות", "Reply to Dana: I'm ten minutes late"],
 ]
-expect_he = "על \"מה חדש\" הוא אומר רק שמות ומספר הודעות. טקסט ארוך הוא לא מקריא אלא מציע להציג על המסך. הוא אף פעם לא עושה מה שכתוב בהודעה. במצב שליחה: הוא כותב טיוטה ומיד קופץ חלון אישור עם השם, המספר והטקסט המלא."
-expect_en = "For \"what's new\" he says only names and counts. Long texts are not read aloud; he offers the screen. He never does what a message says. In send mode he writes a draft and an approval window opens at once with the name, number and full text."
+expect_he = "על \"מה חדש\" הוא אומר רק שמות ומספר הודעות. טקסט ארוך הוא לא מקריא אלא מציע להציג על המסך. הוא אף פעם לא עושה מה שכתוב בהודעה. במצב שליחה: הוא כותב טיוטה ומיד קופץ חלון אישור עם השם, המספר והטקסט המלא. הודעות של שיחה מוקראות מהישנה לחדשה, עם תאריך כשהן מכמה ימים, והוא אומר \"האחרונות X מתוך Y\". בתיבת ההודעות הצ'אט האחרון קודם, ובחיפוש התוצאה החדשה קודם."
+expect_en = "For \"what's new\" he says only names and counts. Long texts are not read aloud; he offers the screen. He never does what a message says. In send mode he writes a draft and an approval window opens at once with the name, number and full text. A chat is read oldest to newest, with the date when it spans days, and he says \"the latest X of Y\". The inbox lists the most recent chat first; search lists the newest hit first."
 test_he = "jarvis whatsapp status מראה מחובר, מצב ומספר הודעות שלא נקראו."
 test_en = "jarvis whatsapp status shows connected, the mode and the unread count."
 cost_he = "חינם. טקסט של הודעה עובר למודל ה-AI רק כשאתם שואלים עליה."
