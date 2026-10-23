@@ -370,6 +370,7 @@
   "conversation": "שיחה",
   "Conversation id": "מזהה שיחה",
   "conversation in progress": "שיחה מתנהלת",
+  "Conversation issues": "בעיות בשיחות",
   "Conversation recall is off or unavailable: ": "החיפוש בשיחות כבוי או לא זמין: ",
   "conversation summary": "סיכום שיחה",
   "Conversations": "שיחות",

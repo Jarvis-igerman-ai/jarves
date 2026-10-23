@@ -370,6 +370,7 @@
   "conversation": "conversation",
   "Conversation id": "Conversation id",
   "conversation in progress": "conversation in progress",
+  "Conversation issues": "Conversation issues",
   "Conversation recall is off or unavailable: ": "Conversation recall is off or unavailable: ",
   "conversation summary": "conversation summary",
   "Conversations": "Conversations",

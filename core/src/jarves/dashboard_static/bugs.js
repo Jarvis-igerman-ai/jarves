@@ -23,7 +23,7 @@
         if (bar && bar.parentNode) bar.parentNode.insertBefore(chip, bar.nextSibling);
       }
       chip.hidden = !c.open;
-      chip.firstChild.textContent = tx(`תקלות: ${c.open}`, `Issues: ${c.open}`);
+      chip.firstChild.textContent = tx(`דיווחי תקלות: ${c.open}`, `Bug reports: ${c.open}`);
       chip.className = "schip " + (c.p1 ? "bad" : c.open ? "warn" : "plain");
       chip.title = tx(`${c.open} תקלות פתוחות, ${c.p1} חמורות. לחצו לדיווח למפתח`, `${c.open} open, ${c.p1} serious. Open to report them to the developer`);
     } catch (e) { /* the page shows its own error */ }
