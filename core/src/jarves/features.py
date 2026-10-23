@@ -178,7 +178,7 @@ def _probe_music(c: ProbeCtx) -> tuple[bool, str]:
     # music.provider = "none" in config.toml only sets the switch's default; Pear is the only player.
     if _tcp_open(m.pear_url):
         return True, ""
-    return False, "Pear Desktop is not running (start it with the API Server plugin)"
+    return False, "Pear Desktop is not running (idle, not an error): start it with the API Server plugin when you want music"
 
 
 def _probe_wake(c: ProbeCtx) -> tuple[bool, str]:

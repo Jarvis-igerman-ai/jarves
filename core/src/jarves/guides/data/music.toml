@@ -43,8 +43,8 @@ check = "active:music"
 [[problems]]
 he = "הוא אומר ש-Pear לא פועל"
 en = "He says Pear is not running"
-fix_he = "פתחו את Pear Desktop ודאו שהתוסף API Server דולק."
-fix_en = "Open Pear Desktop and make sure the API Server plugin is on."
+fix_he = "פתחו את Pear Desktop (או הריצו jarvis music start) ודאו שהתוסף API Server דולק (127.0.0.1, פורט 26538), ובקשו שוב. כשלא ביקשתם מוזיקה, Pear סגור זה תקין: הסטטוס מראה \"לא פעיל\" ולא שגיאה."
+fix_en = "Open Pear Desktop (or run jarvis music start), make sure the API Server plugin is on (127.0.0.1, port 26538), then ask again. When you have not asked for music, Pear being closed is normal: status shows idle, not an error."
 
 [[problems]]
 he = "הוא אומר שאין הרשאה"

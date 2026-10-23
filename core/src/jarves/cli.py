@@ -634,7 +634,11 @@ def find_pear() -> Path | None:
 
 def cmd_music(a, cfg, home) -> int:
     from .skills.music import MusicError, PearDesktopPlayer
-    if a.action == "open":
+    if a.action in ("open", "start"):
+        from .features import _tcp_open
+        if _tcp_open(cfg.music.pear_url):
+            print("Pear Desktop is already running. If music fails: Plugins > API Server must be on, then `jarvis music pair`.")
+            return 0
         exe = find_pear()
         if exe is None:
             print(f"Pear Desktop not found. Download it from {PEAR_DOWNLOAD}")
@@ -1368,7 +1372,7 @@ def cmd_doctor(a, cfg, home) -> int:
             add("ok" if paired else "warn", "Pear Desktop is running" + ("" if paired else " but NOT paired"),
                 "" if paired else "run:  jarvis music pair  (and click Allow in Pear)")
         except httpx.HTTPError:
-            add("warn", "Pear Desktop is not running (music unavailable)", "run:  jarvis music open")
+            add("info", "Pear Desktop is not running (optional; it starts when you ask for music)", "run:  jarvis music start")
 
     # --- optional real (billable) GPT-Live smoke test
     if a.live:
@@ -1849,7 +1853,7 @@ def main(argv: list[str] | None = None) -> int:
     md.add_argument("--body", required=True)
     md.add_argument("--send", action="store_true", help="also offer read-back and sending in this session; asks confirmation")
     mu = sub.add_parser("music", help="Pear Desktop pairing and manual control")
-    mu.add_argument("action", choices=["open", "pair", "status", "play", "pause", "resume", "next"])
+    mu.add_argument("action", choices=["open", "start", "pair", "status", "play", "pause", "resume", "next"])
     mu.add_argument("query", nargs="?", default="")
     g = sub.add_parser("chatgpt", help="connect / disconnect your ChatGPT plan (Sign in with ChatGPT)")
     g.add_argument("action", choices=["login", "logout", "status", "models"])
