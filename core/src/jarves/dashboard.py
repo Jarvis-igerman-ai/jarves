@@ -107,6 +107,7 @@ class Ctx:
         self.mobile = None                 # mobile.MobileAccess (set by Dashboard; V5 phone access)
         self.chat = None                   # chat_engine.WebChat (set by Dashboard when a chat engine runs here)
         self.port = 0
+        self.ui_page: dict | None = None   # {page, at}: the page id the browser last reported (api_ui_page); never content
         self._tl = threading.local()       # per-request principal (the server is threaded)
 
     @property
@@ -280,6 +281,14 @@ def api_live(ctx: Ctx, m, body):
     if s is None:
         return 200, {"session": None}
     return api_session(ctx, re.match(r"(.*)", s["id"]), body)
+
+
+def api_ui_page(ctx: Ctx, m, body):
+    """The open dashboard tab tells which page it shows (a page id only), so the assistant can explain "this page"."""
+    from . import dashboard_pages as pages
+    pid = pages.resolve(str((body or {}).get("page") or ""))
+    ctx.ui_page = {"page": pid, "at": ctx.clock()} if pid else None
+    return 200, {"ok": True}
 
 
 def api_overview(ctx: Ctx, m, body):
@@ -739,7 +748,7 @@ for _m, _p, _h in [
         ("POST", r"/api/workspace/([^/]+)/undo", api_workspace_undo),
         ("GET", r"/api/workspace-note/([^/]+)", api_workspace_note),
         ("GET", r"/api/settings", api_settings), ("PUT", r"/api/settings", api_settings_write),
-        ("POST", r"/api/settings/undo", api_settings_undo), ("POST", r"/api/settings/runtime", api_runtime_set)]:
+        ("POST", r"/api/ui/page", api_ui_page), ("POST", r"/api/settings/undo", api_settings_undo), ("POST", r"/api/settings/runtime", api_runtime_set)]:
     _ROUTES.append((_m, re.compile(f"^{_p}$"), _h))
 
 
@@ -1051,7 +1060,8 @@ class DashboardSkill(Skill):
     name = "dashboard"
     description = "the local web dashboard (conversations, logs, costs, memory, settings)"
 
-    def __init__(self, opener) -> None:
+    def __init__(self, opener, current=None) -> None:
+        self.current = current                       # () -> {page, at} | None: what the open tab last reported
         self.opener = opener                         # async (page "#/x") -> url (Core.open_dashboard)
 
     def tools(self) -> list[Tool]:
@@ -1076,4 +1086,14 @@ class DashboardSkill(Skill):
             if info["sensitive"]:
                 info["note"] = "Explain only: every change here is the user's own click or approval; never do it for them."
             return ToolResult(True, f"פתחתי את {info['title_he']} בלוח הבקרה.", {"url": local, **info}, code="ok")
-        return [Tool("open_dashboard", "Open the dashboard, optionally on a page: 'open the dashboard', 'תפתח את הדשבורד', 'open costs'; then explain its controls from the result. Never a way to close anything.", open_, OpenArgs, permission="action")]
+        async def where(a):
+            seen = self.current() if self.current else None
+            if not seen:
+                return ToolResult(False, "אני לא רואה לוח בקרה פתוח.", {}, code="DASHBOARD_NOT_OPEN")
+            info = pages.describe(seen["page"])
+            age = max(0, int(time.time() - seen["at"]))
+            if info["sensitive"]:
+                info["note"] = "Explain only: every change here is the user's own click or approval; never do it for them."
+            return ToolResult(True, f"הדף הפתוח הוא {info['title_he']}.", {**info, "seen_s_ago": age}, code="ok")
+        return [Tool("dashboard_page", "Which dashboard page is open now ('what page is this', 'איפה אני בלוח'); then explain it.", where, permission="read"),
+                Tool("open_dashboard", "Open the dashboard, optionally on a page: 'open the dashboard', 'תפתח את הדשבורד', 'open costs'; then explain its controls from the result. Never a way to close anything.", open_, OpenArgs, permission="action")]

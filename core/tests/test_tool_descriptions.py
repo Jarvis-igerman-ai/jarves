@@ -75,6 +75,7 @@ ROUTES = [
     ("your name is Max", "assistant_rename"), ("קוראים לך מקס", "assistant_rename"),
     ("which voices do you have", "voice_catalog"), ("אילו קולות יש", "voice_catalog"),
     ("open the dashboard", "open_dashboard"), ("תפתח את הדשבורד", "open_dashboard"),
+    ("what page is this", "dashboard_page"), ("איפה אני בלוח", "dashboard_page"),
     ("what's on my calendar tomorrow", "google_connect_help"), ("יש לי פגישות מחר", "google_connect_help"),
     ("WhatsApp Dana I'm late", "whatsapp_draft"), ("תשלח לדנה בוואטסאפ שאני מאחר", "whatsapp_draft"),
     ("add milk to the list", "list_add"), ("תוסיף חלב לקניות", "list_add"),

@@ -479,6 +479,7 @@ async function route(refresh) {
   const navPage = { session: "conversations", raw: "conversations", context: "conversations", note: "workspace", guide: "guides", agent: "agents",
     "guide-for": "guides" }[page] || page || "home";  // WP-K Home = default
   for (const a of document.querySelectorAll("nav a")) a.classList.toggle("active", a.dataset.page === navPage);
+  api("/api/ui/page", { method: "POST", body: JSON.stringify({ page: navPage }) }).catch(() => {});   // page id only: lets JARVES explain "this page"
   try {
     if (page === "runtime") await pageHome();                    // M1 runtime controls (WP-K: "Controls" in the nav)
     else if (typeof PAGES !== "undefined" && PAGES[page || "home"]) await PAGES[page || "home"](arg, refresh);  // pages.js, home.js

@@ -282,7 +282,7 @@ class Core:
         self.registry.register(make_identity_skill(self.identity))     # "your name is X" (confirmed read-back)
         # WP-H: the dashboard on request ("תפתח את לוח הבקרה" / face button), inside this process
         self.registry.allowed_actions.add("open_dashboard")
-        self.registry.register(DashboardSkill(self.open_dashboard))
+        self.registry.register(DashboardSkill(self.open_dashboard, lambda: getattr(getattr(self._dashboard, "ctx", None), "ui_page", None)))
         from .skills.google import register_google      # WP-G: only when the user connected Google (no network)
         self.google = register_google(self.registry, self.home, self.health)
         from .homeassistant import register_home        # V3 P1 channels: tools stay hidden until their switch is on
