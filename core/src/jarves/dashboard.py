@@ -1052,15 +1052,28 @@ class DashboardSkill(Skill):
     description = "the local web dashboard (conversations, logs, costs, memory, settings)"
 
     def __init__(self, opener) -> None:
-        self.opener = opener                         # async () -> url (Core.open_dashboard)
+        self.opener = opener                         # async (page "#/x") -> url (Core.open_dashboard)
 
     def tools(self) -> list[Tool]:
-        async def open_(a):
+        from pydantic import BaseModel, Field
+
+        from . import dashboard_pages as pages
+
+        class OpenArgs(BaseModel):
+            page: str = Field("", description="page to open: its name ('costs', 'עלויות'); empty = home")
+
+        async def open_(a: OpenArgs):
+            pid = pages.resolve(a.page) if a.page.strip() else "home"
+            if pid is None:
+                return ToolResult(False, "אין לי דף כזה בלוח הבקרה.", {"pages": pages.ids()}, code="DASHBOARD_PAGE_UNKNOWN")
             try:
-                url = await self.opener()
+                url = await self.opener(f"#/{pid}")
             except Exception as e:
                 return ToolResult(False, "לא הצלחתי לפתוח את לוח הבקרה.", {"error": type(e).__name__},
                                   code="DASHBOARD_FAILED")
             local = url.split("?", 1)[0]
-            return ToolResult(True, "פתחתי את לוח הבקרה בדפדפן.", {"url": local}, code="ok")
-        return [Tool("open_dashboard", "Open the dashboard in the browser: 'open the dashboard', 'תפתח את הדשבורד'. Never a way to close anything.", open_, permission="action")]
+            info = pages.describe(pid)
+            if info["sensitive"]:
+                info["note"] = "Explain only: every change here is the user's own click or approval; never do it for them."
+            return ToolResult(True, f"פתחתי את {info['title_he']} בלוח הבקרה.", {"url": local, **info}, code="ok")
+        return [Tool("open_dashboard", "Open the dashboard, optionally on a page: 'open the dashboard', 'תפתח את הדשבורד', 'open costs'; then explain its controls from the result. Never a way to close anything.", open_, OpenArgs, permission="action")]
