@@ -778,7 +778,7 @@
   "not yet": "עוד לא",
   "(not in this version)": "(לא בגרסה הזאת)",
   "Open": "פתח",
-  "Copy": "העתק",
+  "Copy": "העתקה",
   "← all guides": "כל המדריכים ←",
   "What to say": "מה להגיד לו",
   "Privacy": "פרטיות",

@@ -56,3 +56,25 @@
 @keyframes jc-b { 0%, 60%, 100% { opacity: .25; } 30% { opacity: 1; } }
 @media (max-width: 480px) { .jchat { block-size: clamp(360px, calc(100dvh - 190px), 1000px); } .jc-log { padding: 10px; } .jc-msg { max-inline-size: 94%; } .jc-rows dl { grid-template-columns: 1fr; } }
 @media (prefers-reduced-motion: no-preference) { .jc-log { scroll-behavior: smooth; } }
+
+/* markdown in answers */
+.jc-assistant { white-space: normal; }
+.jc-assistant > * { margin: 0; } .jc-assistant > * + * { margin-block-start: 8px; }
+.jc-assistant p { white-space: pre-wrap; }
+.jc-assistant ul, .jc-assistant ol { padding-inline-start: 22px; } .jc-assistant li + li { margin-block-start: 3px; }
+.jc-assistant blockquote { padding-inline-start: 10px; border-inline-start: 3px solid var(--jc-line); color: var(--jc-muted); white-space: pre-wrap; }
+.jc-assistant a { color: var(--jc-acc); text-decoration: underline; }
+.jc-h { font-weight: 700; } .jc-h1 { font-size: 1.2em; } .jc-h2 { font-size: 1.1em; }
+.jc-ic { font: 0.9em ui-monospace, Consolas, monospace; padding: 1px 5px; border-radius: 5px; background: var(--jc-bg); border: 1px solid var(--jc-line); }
+.jc-code-block { border: 1px solid var(--jc-line); border-radius: 10px; background: var(--jc-bg); overflow: hidden; max-inline-size: 100%; }
+.jc-code-head { display: flex; justify-content: space-between; align-items: center; padding: 2px 8px; font-size: 12px; color: var(--jc-muted); border-block-end: 1px solid var(--jc-line); }
+.jchat .jc-copy { min-block-size: 28px; min-inline-size: 0; padding: 0 10px; font-size: 12px; border-radius: 8px; }
+.jc-code-block pre { margin: 0; padding: 10px 12px; overflow-x: auto; color: var(--jc-fg); font: 13px/1.5 ui-monospace, Consolas, monospace; white-space: pre; }
+/* slash pop-up */
+.jc-formwrap { position: relative; }
+.jc-pop { position: absolute; inset-inline: 0; inset-block-end: calc(100% + 6px); z-index: 5; max-block-size: 40vh; overflow-y: auto;
+  border: 1px solid var(--jc-line); border-radius: 12px; background: var(--jc-bg); box-shadow: 0 4px 16px rgba(0,0,0,.4); padding: 4px; }
+.jc-pop[hidden] { display: none; }
+.jc-opt { display: flex; gap: 12px; align-items: baseline; padding: 8px 10px; border-radius: 8px; cursor: pointer; }
+.jc-opt b { font: 14px ui-monospace, Consolas, monospace; min-inline-size: 7ch; }
+.jc-opt.sel, .jc-opt:hover { background: var(--jc-soft); }
