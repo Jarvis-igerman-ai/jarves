@@ -133,7 +133,7 @@ PAGES.connections = async function () {
           chk && chk.fix && chk.state !== "working" ? el("div", { class: "small mono" }, chk.fix) : null,
           el("div", { class: "actions" },
             i.status !== "connected" ? el("button", { type: "button", class: "primary", onclick: async () => {
-              try { const r = await post("/api/connect/run", { id: i.id }); cmsg.textContent = tx(r.message_he, r.message_en); }
+              try { const r = await post("/api/connect/run", { id: i.id }); cmsg.textContent = tx(r.message_he, r.message_en); if (r.open) location.hash = r.open + "?setup=1"; }
               catch (e) { cmsg.textContent = e.message; } } }, tx("חיבור", "Connect")) : null,
             i.status === "not_set" ? el("button", { type: "button", onclick: act2("/api/connect/skip", { id: i.id, skip: true }) }, tx("דילוג", "Skip")) : null,
             i.status === "skipped" ? el("button", { type: "button", onclick: act2("/api/connect/skip", { id: i.id, skip: false }) }, tx("ביטול דילוג", "Un-skip")) : null,

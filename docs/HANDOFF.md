@@ -6,6 +6,20 @@
 - Verification: all eight pre-push checks passed. Dashboard, guides, CLI-parity, locale and perf tests pass locally; the three browser a11y tests could not run in this sandbox (Playwright/Chromium version mismatch) and rely on CI. Eight screenshots are not committed.
 - Decision: **OPEN** — owner to review the look after the beta installs.
 
+## Admin-key prompt for personal OpenAI accounts — 23 Oct 2026
+
+- Owner report: on a personal OpenAI account the guided setup text ("as the organization owner") did not match what they see. Reworded the `jarvis connect openai-admin` steps, the "Real API bill" guide (he/en) and `OPENAI_ADMIN_KEY.md`: a personal account is its own organization and its owner; if the Admin keys page is missing, skip (`s`), everything works and cost shows as an estimate. No logic change; key handling unchanged.
+- Open question for owner: whether a personal account shows Settings > Organization > Admin keys is **unverified** (no real account tested, OD-05 unchanged).
+- Sandbox: `test_guides::test_help_walks_google_setup_one_step_at_a_time`, 7 `test_connect` and 2 `test_p_perf` cases fail identically without this change (environment); CI is the evidence.
+
+## WhatsApp bridge: simple setup, missing-bridge message — 23 Oct 2026 / #17
+
+- Problem: with no bridge program (`bridge_command()` is None) neither the dashboard nor Connect said so; the owner only got a Windows PowerShell build hint. Now `bridge_installed` is in `/api/whatsapp`, `jarvis whatsapp status --json` and the Connect row. When missing, the WhatsApp page and the Connect row show a plain EN/HE message (reinstall JARVES, or build from a source checkout with `scripts/build_whatsapp_bridge.ps1`, Go 1.27.0); Link/Start are disabled; the API returns the new code `WA_NOT_INSTALLED` (503) instead of `WA_BRIDGE_DOWN`.
+- One "Set up WhatsApp" flow, one backend (`whatsapp_admin.setup_begin` / `_link`): dashboard WhatsApp page button (`POST /api/whatsapp/setup`: start bridge, begin linking, QR on the page, on linked offers read-only mode); dashboard Connect row (`/api/connect/run` id whatsapp starts the bridge and opens `#/whatsapp?setup=1`, which begins linking); `jarvis connect whatsapp` and new `jarvis whatsapp setup` (start, QR in the terminal, offer read mode). The phone scan stays manual; nothing is linked silently; mode stays off unless the owner says yes to read-only; no send path touched. Bridge Go code and policy unchanged.
+- Guide `whatsapp_bridge.toml` (steps + problem "bridge not installed", EN+HE), 5 new Hebrew catalog strings via `catalog_add.py`, CLI parity unchanged (`whatsapp_bridge` -> `whatsapp`; `setup` is a new action of it).
+- Verification: targeted tests (`test_whatsapp_surfaces`, `test_connect_unset`, `test_connect`, guides, cli_parity, locales) pass with the fake bridge; see prepush result in the PR. NOT verified: a real bridge binary, a real QR scan or real WhatsApp linking, the new JS in a real browser (only source-level assertions; Playwright is not installed here), the Connect console QR rendering.
+- Open question for owner: auto-download a prebuilt, checksum-verified bridge from a release/CI artifact when it is missing? Not implemented; today the only fixes are reinstall or a source build. Also confirm the installer payload really ships `bridge/whatsapp_bridge(.exe)`.
+
 ## Camera on demand — 23 Oct 2026 / #74
 
 - Owner requested installation: published beta 4.0.1-beta.4 / build 212 installed using `jarvis update install --yes --silent`; installed CLI version and beta update status verified. Backup created by the updater. This build predates the camera correction below.

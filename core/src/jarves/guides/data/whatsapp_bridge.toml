@@ -4,7 +4,7 @@ pages = ["whatsapp"]
 features = ["whatsapp_bridge", "whatsapp_send"]
 aliases = ["וואטסאפ אמיתי", "לקרוא וואטסאפ", "מה חדש בוואטסאפ", "הודעות בוואטסאפ", "whatsapp bridge", "read whatsapp", "whatsapp inbox", "link whatsapp", "קישור וואטסאפ"]
 links = ["whatsapp", "privacy", "helper"]
-error_codes = ["WA_BRIDGE_DOWN", "WA_NOT_SET_UP", "WA_KILLED", "WA_MODE_OFF", "WA_MODE_READ", "WA_NOT_ALLOWED", "WA_NO_HISTORY", "WA_RATE_LIMITED", "WA_QUIET_HOURS", "WA_STORE_LOCKED", "WA_UNKNOWN_CONTACT", "WA_AMBIGUOUS", "WA_APPROVAL_MISSING"]
+error_codes = ["WA_BRIDGE_DOWN", "WA_NOT_INSTALLED", "WA_NOT_SET_UP", "WA_KILLED", "WA_MODE_OFF", "WA_MODE_READ", "WA_NOT_ALLOWED", "WA_NO_HISTORY", "WA_RATE_LIMITED", "WA_QUIET_HOURS", "WA_STORE_LOCKED", "WA_UNKNOWN_CONTACT", "WA_AMBIGUOUS", "WA_APPROVAL_MISSING"]
 title_he = "וואטסאפ אמיתי: לקרוא הודעות (ובהמשך לשלוח)"
 title_en = "Real WhatsApp: read messages (and later send)"
 what_he = "ג'ארביס מתחבר לוואטסאפ שלכם כמכשיר מקושר (כמו וואטסאפ ווב) דרך גשר נפרד במחשב, ויכול לספר מה חדש, להקריא מה מישהו כתב ולסכם. קודם קריאה בלבד. שליחה נפתחת רק אחרי 14 ימים שקטים ורק באישורכם, וכל הודעה מאושרת על המסך עם הנמען, המספר והטקסט המלא. עד אז שולחים כמו קודם: הוא פותח טיוטה ואתם לוחצים שלח."
@@ -25,6 +25,11 @@ privacy_he = "זה לקוח לא רשמי: הוא עלול לסתור את תנ�
 privacy_en = "This is an unofficial client: it may go against WhatsApp's Terms and there is a risk of a temporary or permanent ban of the number (you accepted this for your main number, read-only first). The connection keys are encrypted on this computer (DPAPI) and never go into backups, logs or diagnostics. Messages are kept 14 days (changeable, or keep nothing); media is never downloaded. Logs hold only codes, counts and a chat hash, never text, names or phone numbers. Unlinking on the phone (Linked devices > JARVES bridge > Log out) always works."
 
 [[steps]]
+he = "הדרך הפשוטה: בלוח הבקרה, בעמוד וואטסאפ, לוחצים \"הגדרת וואטסאפ\" (או בעמוד החיבורים על השורה וואטסאפ, או jarvis connect whatsapp, או jarvis whatsapp setup). הגשר מופעל, מופיע קוד QR, ואתם סורקים אותו בטלפון. אחרי הקישור נשאלים אם להפעיל קריאה בלבד. הסריקה תמיד ידנית ושום הודעה לא נשלחת."
+en = "The simple way: on the dashboard WhatsApp page press \"Set up WhatsApp\" (or the WhatsApp row on the Connections page, or jarvis connect whatsapp, or jarvis whatsapp setup). The bridge starts, a QR code appears and you scan it on your phone. After linking you are asked whether to switch on read-only. The scan is always manual and no message is sent."
+action = "open:#/whatsapp"
+
+[[steps]]
 he = "במחשב: jarvis whatsapp link. בטלפון: וואטסאפ > הגדרות > מכשירים מקושרים > קישור מכשיר, וסורקים את הקוד (או jarvis whatsapp link --window לחלון)."
 en = "On the computer: jarvis whatsapp link. On the phone: WhatsApp > Settings > Linked devices > Link a device, and scan the code (or jarvis whatsapp link --window for a window)."
 action = "command:jarvis whatsapp link"
@@ -43,6 +48,12 @@ action = "open:#/whatsapp"
 [[steps]]
 he = "אחרי 14 ימים בלי אזהרה: jarvis whatsapp allow send <איש קשר>, ואז jarvis whatsapp mode send והמתג \"שליחה בוואטסאפ דרך הגשר\"."
 en = "After 14 days without a warning: jarvis whatsapp allow send <contact>, then jarvis whatsapp mode send and the switch \"WhatsApp send through the bridge\"."
+
+[[problems]]
+he = "כתוב שרכיב הגשר לא מותקן"
+en = "It says the bridge program is not installed"
+fix_he = "הגשר הוא תוכנה נפרדת (whatsapp_bridge) שחייבת להיות במחשב. הצעד הבא: להתקין מחדש את JARVES (ההתקנה כוללת אותה), או מתוך קוד המקור להריץ scripts/build_whatsapp_bridge.ps1 (דורש Go 1.27.0). עד אז הכפתורים קישור והפעלה כבויים. jarvis whatsapp status מראה bridge_installed."
+fix_en = "The bridge is a separate program (whatsapp_bridge) that must be on this computer. Next step: reinstall JARVES (the installer includes it), or from a source checkout run scripts/build_whatsapp_bridge.ps1 (needs Go 1.27.0). Until then the Link and Start buttons stay off. jarvis whatsapp status shows bridge_installed."
 
 [[problems]]
 he = "הוא אומר שוואטסאפ עצור"
