@@ -15,7 +15,7 @@ Owner doc = the one document that wins on a conflict.
 | **V6** | Approved roadmap only (six pillars), gated on V5. No code. | [ROADMAP](ROADMAP.md) (V6 section), [PRODUCT_VISION](PRODUCT_VISION.md) stage 3 |
 | **V7** | Proposal, not authorized (issue #50). | [V7 proposal](plans/V7_PROPOSAL_2026-10-21.md) |
 
-Execution authority: [NOW](NOW.md) (the only active brief) with [AGENTS](../AGENTS.md). Status log: [HANDOFF](HANDOFF.md) (newest entry on top). Planning and status per version: [ROADMAP](ROADMAP.md).
+Execution authority: [NOW](NOW.md) (the only active brief) with [AGENTS](../AGENTS.md). Status log: one note per task in [handoff/](handoff/README.md) (newest by file name); [HANDOFF](HANDOFF.md) keeps the history up to 23 Oct 2026 and the decision queue. Planning and status per version: [ROADMAP](ROADMAP.md).
 
 ## 2. Testing and manual testing
 
@@ -47,6 +47,7 @@ Execution authority: [NOW](NOW.md) (the only active brief) with [AGENTS](../AGEN
 | [CI_DETERMINISM](CI_DETERMINISM.md) | Network guard, offline stub, flake retry and quarantine for deterministic CI | general | current | [CI_PERFORMANCE](CI_PERFORMANCE.md) |
 | [PREPUSH](PREPUSH.md) | The local gate `python core/tools/prepush.py` (same quick checks as CI), the optional pre-push hook, and the PR failure-summary comment | general | current | [CI_PERFORMANCE](CI_PERFORMANCE.md) |
 | [AGENT_HANDOFF_TEMPLATE](AGENT_HANDOFF_TEMPLATE.md) | Copy-paste resume prompt for a new agent | general | current | [AGENTS](../AGENTS.md) |
+| [handoff/README](handoff/README.md) | Handoff notes, one file per task (`docs/handoff/<date>-<topic>.md`, newest by file name); the notes are covered by this row | general | current | itself |
 | [MIGRATION_STATUS](MIGRATION_STATUS.md), [MIGRATION_HANDOFF](MIGRATION_HANDOFF.md) | Private-to-public repository migration ledger | general | current until the private repo is archived | MIGRATION_STATUS |
 
 ## 4. Product, plans, work packages
