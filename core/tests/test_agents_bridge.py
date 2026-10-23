@@ -125,6 +125,64 @@ def test_restart_rotates_the_token(tmp_path):
         s2.stop()
 
 
+class _FakeClock:
+    """bridge.time for the retry tests: sleep() advances monotonic() at once (no real waiting)."""
+
+    def __init__(self):
+        self.now, self.sleeps = 1000.0, []
+
+    def monotonic(self):
+        return self.now
+
+    def sleep(self, s):
+        self.sleeps.append(s)
+        self.now += s
+
+    def __getattr__(self, name):                                     # anything else: the real time module
+        return getattr(time, name)
+
+
+def _deny_token_swaps(monkeypatch, tmp_path, fails):
+    """os.replace onto bridge.token raises WinError 5 the first `fails` times (a reader / antivirus holding it)."""
+    real, calls = bridge.os.replace, []
+
+    def replace(src, dst):
+        if str(dst) == str(bridge.token_path(tmp_path)):
+            calls.append(src)
+            if len(calls) <= fails:
+                raise PermissionError(13, "[WinError 5] Access is denied", str(dst))
+        return real(src, dst)
+    monkeypatch.setattr(bridge.os, "replace", replace)
+    return calls
+
+
+def test_token_rewrite_rides_out_a_briefly_held_token_file(tmp_path, monkeypatch):
+    """#89: on Windows the restart's os.replace of bridge.token failed with WinError 5 while another handle held it."""
+    old = bridge.write_token(tmp_path)
+    clock = _FakeClock()
+    monkeypatch.setattr(bridge, "time", clock)
+    calls = _deny_token_swaps(monkeypatch, tmp_path, fails=2)
+    tok = bridge.write_token(tmp_path)
+    assert len(calls) == 3 and len(clock.sleeps) == 2                # two refusals, then the swap succeeds
+    assert tok != old and bridge.read_token(tmp_path) == tok
+    assert clock.now - 1000.0 < bridge.REPLACE_RETRY_S
+    assert not list(bridge.token_path(tmp_path).parent.glob("*.tmp"))
+
+
+def test_token_rewrite_gives_up_after_the_bounded_retry(tmp_path, monkeypatch):
+    old = bridge.write_token(tmp_path)
+    clock = _FakeClock()
+    monkeypatch.setattr(bridge, "time", clock)
+    calls = _deny_token_swaps(monkeypatch, tmp_path, fails=10_000)
+    with pytest.raises(PermissionError):
+        bridge.write_token(tmp_path)
+    waited = clock.now - 1000.0
+    assert bridge.REPLACE_RETRY_S <= waited <= bridge.REPLACE_RETRY_S + 0.001   # the whole budget, never more
+    assert len(calls) == len(clock.sleeps) + 1 and len(calls) > 2
+    assert bridge.read_token(tmp_path) == old                         # the old token is untouched
+    assert not list(bridge.token_path(tmp_path).parent.glob("*.tmp"))  # no stray copy of the new token
+
+
 @pytest.mark.windows_only
 def test_windows_pipe_rejects_remote_clients_flag(tmp_path):
     addr, fam = bridge.address(tmp_path)
