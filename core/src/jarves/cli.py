@@ -39,6 +39,20 @@ def _ws_call(home: Path, port: int, msg: dict, expect: str, timeout: float = 5) 
         return None
 
 
+def apply_wake_threshold(home: Path, cfg, config_path: Path, rec: float) -> str:
+    """`jarvis wake test --apply`: write the threshold where it is really read. A threshold saved with a custom
+    wake model (identity.json) beats config.toml at every start (Identity.apply_to_config), so it goes there."""
+    from .identity import Identity
+    ident = Identity(home, cfg)
+    w = ident.wake()
+    if w.get("threshold") is not None:
+        ident.set_wake(w["model"], w["phrase"], rec, by="cli")
+        return (f"Saved: wake_threshold {rec} for {Path(str(w['model'])).name} in identity.json (it overrides "
+                f"config.toml, so this is the value used). Restart JARVES to use it.")
+    set_toml_value(config_path, "voice", "wake_threshold", str(rec))
+    return f"Saved: wake_threshold {rec} in {config_path}, which is the value used. Restart JARVES to use it."
+
+
 def _apply_log_args(a, cfg) -> None:
     if getattr(a, "log_level", None):
         cfg.log.console_level = a.log_level.upper()
@@ -1072,8 +1086,7 @@ def cmd_wake(a, cfg, home) -> int:
             Identity(home, cfg).set_wake(a.model, threshold=rec, by="cli")
             print(f"Saved: {Path(a.model).name} is now the wake phrase (threshold {rec}). Restart JARVES to use it.")
         elif a.apply:
-            set_toml_value(Path(a.config) if a.config else home / "config.toml", "voice", "wake_threshold", str(rec))
-            print("Saved. Restart JARVES to use it.")
+            print(apply_wake_threshold(home, cfg, Path(a.config) if a.config else home / "config.toml", rec))
         else:
             print("Apply it with:  jarvis wake test --apply" + (f' --model "{a.model}"' if a.model else ""))
         return 0

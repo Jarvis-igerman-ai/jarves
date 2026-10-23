@@ -149,3 +149,22 @@ def test_config_wake_word_replaced_by_identity_is_warned_not_silent(home, mem, c
     with caplog.at_level(logging.WARNING):
         Identity(home, Config(), mem).apply_to_config()          # the default config: nothing to say
     assert not any("wake model chosen" in r.getMessage() for r in caplog.records)
+
+
+def test_wake_test_apply_writes_where_the_threshold_is_read(home, mem):
+    from jarves.cli import apply_wake_threshold
+    model = home / "wake" / "hey_max.npz"
+    tiny_head(model)
+    Identity(home, Config(), mem).set_wake(str(model))
+    cfgf = home / "config.toml"
+    cfgf.write_text("[voice]\nwake_threshold = 0.95\n", encoding="utf-8")
+    msg = apply_wake_threshold(home, Config(), cfgf, 0.5)
+    assert "identity.json" in msg
+    c = Config()
+    Identity(home, c).apply_to_config()
+    assert c.voice.wake_threshold == 0.5                       # the applied value really is the live one
+    home2 = home / "plain"
+    (home2 / "wake").mkdir(parents=True)
+    cf2 = home2 / "config.toml"
+    cf2.write_text("[voice]\n", encoding="utf-8")
+    assert "config.toml" in apply_wake_threshold(home2, Config(), cf2, 0.4) and "0.4" in cf2.read_text()
