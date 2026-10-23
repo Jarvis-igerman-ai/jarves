@@ -243,6 +243,9 @@ def test_hebrew_round_trip_streams_and_is_stored(rig):
     # a streamed answer is ONE replaceable event: the log never holds two deltas of one turn
     assert sum(1 for e in r.chat.events.since(0) if e["type"] == "delta" and e["turn"] == "t1") == 0
     assert any(m["role"] == "assistant" and m["text"] == reply["text"] for m in r.chat.state()["messages"])
+    # every stored message and every event carries its time (the page shows it under the message)
+    assert all(isinstance(m.get("ts"), float) and m["ts"] > 1e9 for m in r.chat.state()["messages"])
+    assert all(isinstance(e.get("ts"), float) for e in events)
     # the exchange is in the shared history (what jarvis chat /resume and the Windows session read)
     sess = chat_engine.recent_sessions(r.home)
     assert sess and sess[0]["first"] == HEBREW and sess[0]["turns"] == 1

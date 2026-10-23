@@ -78,3 +78,6 @@
 .jc-opt { display: flex; gap: 12px; align-items: baseline; padding: 8px 10px; border-radius: 8px; cursor: pointer; }
 .jc-opt b { font: 14px ui-monospace, Consolas, monospace; min-inline-size: 7ch; }
 .jc-opt.sel, .jc-opt:hover { background: var(--jc-soft); }
+/* time of a message (data-time, set by chatview.js); hidden while an answer is still streaming (the caret uses ::after) */
+.jc-msg[data-time]:not(.streaming)::after { content: attr(data-time); display: block; margin-block-start: 4px; font-size: 11px; line-height: 1.2; text-align: end; unicode-bidi: plaintext; }
+.jc-assistant[data-time]:not(.streaming)::after { margin-block-start: 6px; }

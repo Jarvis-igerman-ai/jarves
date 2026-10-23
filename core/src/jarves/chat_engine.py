@@ -400,6 +400,7 @@ class WebChat:
         self.events.add("state")
 
     def _add_message(self, m: dict) -> None:
+        m.setdefault("ts", round(time.time(), 3))       # the page shows the time of each message
         with self._lock:
             self.messages.append(m)
             if len(self.messages) > MESSAGES_KEEP:
