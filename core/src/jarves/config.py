@@ -133,7 +133,7 @@ class VoiceConfig(_Strict):
     wake_confirm: bool = True
     wake_gate: float = Field(0.02, ge=0, le=1)
     wake_accept: float = Field(0.5, ge=0, le=1)
-    wake_confirm_model: str = "small"
+    wake_confirm_model: str = "base.en"      # ~3x faster than "small" on CPU (QA 23 Oct: small took 10-20 s per check)
     # Digital AGC on the wake mic (quiet webcam/laptop mics); wake_gain_db = starting gain, set by calibration.
     wake_agc: bool = True
     wake_gain_db: float = Field(0.0, ge=0, le=30)

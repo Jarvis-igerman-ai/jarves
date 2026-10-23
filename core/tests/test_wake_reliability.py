@@ -35,13 +35,14 @@ def db(pcm):
 
 # ------------------------------------------------------------------------------------------------ name matching
 @pytest.mark.parametrize("text", ["Hey Jarvis.", "Hi, Jarvis!", "ok jarves", "Okay Jarvis, what time is it",
-                                  "היי ג'רוויס", "הי ג׳ארוויס", "Hello Jarvis", "heyjarvis", "Hey, Jervis."])
+                                  "היי ג'רוויס", "הי ג׳ארוויס", "Hello Jarvis", "heyjarvis", "Hey, Jervis.", "Hi, Javis.", "Hey Javis",
+                                  "hey Yarvis", "Hi Jarbis", "Hey Jarvish"])
 def test_name_match_accepts_natural_variants(text):
     assert name_match(text)
 
 
 @pytest.mark.parametrize("text", ["Hey Travis", "hey Charles", "Hey Jarvie", "Hey Harvey", "Jarvis", "",
-                                  "Thank you.", "service", "hey Marvin"])
+                                  "Thank you.", "service", "hey Marvin", "hey Davis", "hey Harvis", "hi Yarn", "hey Marvis"])
 def test_name_match_rejects_near_misses_and_the_bare_name(text):
     assert not name_match(text)
 

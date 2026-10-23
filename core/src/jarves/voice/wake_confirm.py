@@ -106,7 +106,8 @@ class GainDetector:
 # --------------------------------------------------------------------------------------------- name matching
 GREETINGS = {"hey", "hi", "hay", "hei", "heh", "hai", "ok", "okay", "oke", "okey", "hello", "hallo", "yo", "a",
              "היי", "הי", "הי", "אוקיי", "אוקי", "הלו", "שלום"}
-_NAME_LATIN = re.compile(r"^(j|g|dj|dzh|zh)[ae]+h?r?v[aeiyu]+s+$")
+# Hebrew/Arabic-accent variants too: y- for the ג'/J ("Yarvis"), b/w for the v ("Jarbis"), -sh/-z endings.
+_NAME_LATIN = re.compile(r"^(j|g|y|dj|dzh|zh)[ae]+h?r?[vwb][aeiyu]+(s+|z|sh)$")
 _NAME_HE = re.compile(r"^(ג'|ג׳|ג|דז'|ז')א?ר[וב]ו?י?ס$")
 _JOINED = re.compile(r"^(hey|hi|ok|okay|hello)(j[ae]rv[aeiy]s)$")
 
@@ -131,7 +132,7 @@ def is_name(w: str) -> bool:
 
 
 def name_match(text: str, require_greeting: bool = True) -> bool:
-    """'hey jarvis', 'Hi, Jarvis!', 'ok jarves', 'היי ג'רוויס' -> True; 'hey Travis', 'Jarvis' (bare) -> False."""
+    """'hey jarvis', 'Hi, Javis.', 'ok jarves', 'hey Yarvis', 'היי ג'רוויס' -> True; 'hey Travis', 'Jarvis' (bare) -> False."""
     toks = _tokens(text)
     for i, w in enumerate(toks):
         if is_name(w):
@@ -148,7 +149,7 @@ class WhisperConfirm:
     comes out as "Hey Jarvis"; Hebrew script is matched too). No prompt: an initial prompt with the name would bias
     the model towards hearing it."""
 
-    def __init__(self, model: str = "small", compute: str = "int8", language: str | None = "en",
+    def __init__(self, model: str = "base.en", compute: str = "int8", language: str | None = "en",
                  cpu_threads: int = 0) -> None:
         self.model_name, self.compute, self.language, self.cpu_threads = model, compute, language, cpu_threads
         self._m = None
