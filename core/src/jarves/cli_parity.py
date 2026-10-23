@@ -73,7 +73,7 @@ TOOL_GROUPS: dict[str, object] = {
     "status": "status", "tasks": (D, "the Background tasks page"), "telegram": "telegram", "timers": "timers",
     "usage": "usage", "whatsapp": (D, "WhatsApp opens a draft in the app"), "conversation_recall": "recall",
     "health": "health",
-    "whatsapp_bridge": "whatsapp",                                       # SW-V4 F: inbox / send / status
+    "whatsapp_bridge": "whatsapp",                                       # SW-V4 F: inbox / find / send / status
     "agents": "agents", "project": "project",
     "dialing": "dial", "self_manage": "manage",
     "selfspeed": "selftest",

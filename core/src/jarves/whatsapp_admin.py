@@ -117,10 +117,19 @@ def resolve_contact(home: Path, who: str) -> tuple[str | None, str]:
         chats = BridgeClient(home).chats(None, 500)
     except BridgeError:
         chats = []
-    hits = wab.resolve(chats, who, wab.contacts_book(home))
+    hits = wab.resolve(chats, who, wab.contacts_book(home), fuzzy=False)     # allow-lists: exact names only
     if len(hits) == 1:
         return hits[0]["id"], hits[0].get("name") or who
     return None, ("several chats match" if hits else "no chat matches")
+
+
+def find_chats(home: Path, text: str, limit: int = 10) -> list[dict]:
+    """`jarvis whatsapp find`: chat/contact DISPLAY NAMES that match part of a name (the same tiers as the assistant's
+    whatsapp_find_chat). Names and counts only, no message text, no model."""
+    hits = wab.resolve(BridgeClient(home).chats(None, 500), text, wab.contacts_book(home))
+    return [{"name": pol.clean_text(c.get("name") or "")[0][:40], "number_end": (c.get("number") or "")[-4:],
+             "unread": int(c.get("unread") or 0), "last_activity": wab._when(c.get("last_ts", 0)),
+             "group": bool(c.get("is_group"))} for c in hits[:max(1, min(int(limit), 10))]]
 
 
 def allow(home: Path, lst: str, op: str, who: str, *, by: str = "cli") -> dict:
@@ -157,7 +166,7 @@ def send(home: Path, who: str, text: str, *, test_invoke: str | None = None) -> 
         raise BridgeError("WA_KILLED", "", 423)
     if st.get("mode") != "send":
         raise BridgeError("WA_MODE_READ" if st.get("mode") == "read" else "WA_MODE_OFF", "", 409)
-    hits = wab.resolve(user.chats(None, 500), who, wab.contacts_book(home))
+    hits = wab.resolve(user.chats(None, 500), who, wab.contacts_book(home), fuzzy=False)   # send: exact names only
     if len(hits) != 1:
         raise BridgeError("WA_AMBIGUOUS" if hits else "WA_UNKNOWN_CONTACT", "", 404)
     c = hits[0]
@@ -175,14 +184,14 @@ def send(home: Path, who: str, text: str, *, test_invoke: str | None = None) -> 
 
 
 # ---------------------------------------------------------------------- CLI
-ACTIONS = ("status", "start", "stop", "install", "setup", "link", "unlink", "mode", "allow", "remove", "scope", "inbox", "send", "kill",
+ACTIONS = ("status", "start", "stop", "install", "setup", "link", "unlink", "mode", "allow", "remove", "scope", "inbox", "find", "send", "kill",
            "purge", "retention", "audit")
 
 
 def add_cli(sub) -> None:
     w = sub.add_parser("whatsapp", help="real WhatsApp access through the local bridge (PC only): status | start | "
                                         "stop | install | setup | link | unlink | mode off|read|send | allow read|send <contact> | "
-                                        "remove read|send <contact> | scope | inbox | send <contact> \"<text>\" | "
+                                        "remove read|send <contact> | scope | inbox | find <part of a name> | send <contact> \"<text>\" | "
                                         "kill | purge | retention <days> | audit")
     w.add_argument("action", choices=ACTIONS)
     w.add_argument("args", nargs="*", help="mode: off|read|send; allow/remove: read|send <contact>; send: <contact> "
@@ -443,6 +452,19 @@ def cmd_whatsapp(a, cfg, home) -> int:
                      "last": wab._hhmm(c.get("last_ts", 0)), "can_send": c.get("can_send", False)} for c in chats]
             _print(rows, a.json) if a.json else [print(f"{r['unread']:>3}  {r['last']}  {r['name']}") for r in rows]
             return 0
+        if a.action == "find":
+            if not args:
+                print('usage: jarvis whatsapp find "<part of a chat or contact name>"', file=sys.stderr)
+                return 2
+            rows = find_chats(home, " ".join(args), a.limit)
+            if a.json:
+                _print(rows, True)
+            elif not rows:
+                print(clilang.fmt("לא נמצא צ'אט עם שם כזה (חיפשתי בשמות בלבד, לא בטקסט ההודעות).",
+                                  "No chat name matches (this searches names only, not message text)."))
+            for r in rows if not a.json else []:
+                print(f"{r['unread']:>3}  {r['last_activity']:<16}  {r['name']}  ...{r['number_end']}")
+            return 0 if rows else 1
         if a.action == "send":
             if len(args) < 2:
                 print("usage: jarvis whatsapp send <contact> \"<text>\"", file=sys.stderr)

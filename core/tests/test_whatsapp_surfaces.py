@@ -267,3 +267,14 @@ def test_dashboard_yes_flag_and_off_hint(dash, bridge, home):
     r, body = req(dash, "POST", "/api/whatsapp/mode", headers=h, body={"mode": "read", "enable_reading": True})
     assert r.status == 200 and json.loads(body)["feature_on"] is True
     assert _feat(home, "whatsapp_bridge") and not _feat(home, "whatsapp_send")
+
+
+def test_cli_find_searches_names_only(bridge, home, capsys):
+    rc, out = run(capsys, "find", "Smith")
+    assert rc == 0 and "Bob Smith" in out and "Meeting moved" not in out
+    rc, out = run(capsys, "find", "כהן", "--json")
+    assert rc == 0 and json.loads(out)[0]["name"] == "דנה כהן" and "number_end" in json.loads(out)[0]
+    rc, out = run(capsys, "find", "zzzqqq")
+    assert rc == 1 and ("names" in out or "בשמות" in out)
+    rc, out = run(capsys, "allow", "send", "Smith")     # allow-lists stay exact-name only
+    assert rc == 1 and "WA_UNKNOWN_CONTACT" in out
