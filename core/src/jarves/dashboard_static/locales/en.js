@@ -1886,6 +1886,12 @@
   "Switch on read-only mode now? JARVES will read and never send.": "Switch on read-only mode now? JARVES will read and never send.",
   "The bridge is downloaded as a signed JARVES file, checked (signature, SHA256, size) before it is installed and again before every start. Nothing downloads unless you press the button.": "The bridge is downloaded as a signed JARVES file, checked (signature, SHA256, size) before it is installed and again before every start. Nothing downloads unless you press the button.",
   "Download the WhatsApp bridge": "Download the WhatsApp bridge",
-  "The bridge was downloaded and verified": "The bridge was downloaded and verified"
+  "The bridge was downloaded and verified": "The bridge was downloaded and verified",
+  "Release notes": "Release notes",
+  "What changed in each version.": "What changed in each version.",
+  "No release notes found in this install.": "No release notes found in this install.",
+  "Your version": "Your version",
+  "More details: connections, features and privacy": "More details: connections, features and privacy",
+  "More everyday tools": "More everyday tools"
  }
 };

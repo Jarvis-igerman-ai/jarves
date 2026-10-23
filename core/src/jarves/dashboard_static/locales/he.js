@@ -1886,7 +1886,13 @@
   "Switch on read-only mode now? JARVES will read and never send.": "להפעיל עכשיו מצב קריאה בלבד? ג'ארביס יקרא ולא ישלח.",
   "The bridge is downloaded as a signed JARVES file, checked (signature, SHA256, size) before it is installed and again before every start. Nothing downloads unless you press the button.": "הגשר מורד כקובץ חתום מ-JARVES, נבדק (חתימה, SHA256, גודל) לפני ההתקנה ושוב לפני כל הפעלה. שום דבר לא יורד בלי שתלחצו.",
   "Download the WhatsApp bridge": "הורדת גשר הוואטסאפ",
-  "The bridge was downloaded and verified": "הגשר הורד ואומת"
+  "The bridge was downloaded and verified": "הגשר הורד ואומת",
+  "Release notes": "הערות גרסה",
+  "What changed in each version.": "מה השתנה בכל גרסה.",
+  "No release notes found in this install.": "לא נמצאו הערות גרסה בהתקנה הזו.",
+  "Your version": "הגרסה שלך",
+  "More details: connections, features and privacy": "עוד פרטים: חיבורים, יכולות ופרטיות",
+  "More everyday tools": "עוד כלים ליום-יום"
  },
  "rules": [
   [
