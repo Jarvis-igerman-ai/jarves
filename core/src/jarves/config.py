@@ -284,6 +284,24 @@ class AgentsConfig(_Strict):
     allow_api_billing: bool = False                        # never: an API-key session is refused (AUTH_REQUIRED)
 
 
+class ProjectsConfig(_Strict):
+    """Project manager (jarves/projectmgr/): JARVES splits a software project into small tasks and runs short-lived
+    coding agents in parallel git worktrees. Subscription sign-ins only; OpenRouter (paid) is off unless allowed."""
+    max_parallel: int = Field(3, ge=1, le=8)               # tasks running at once, per project
+    task_timeout_s: float = Field(1800, ge=60, le=14400)   # one agent run
+    max_attempts: int = Field(2, ge=1, le=5)               # runs per task before it is marked failed
+    context_chars: int = Field(6000, ge=2000, le=20000)    # the whole task card an agent receives (~1.5k tokens)
+    max_runs_per_day: int = Field(40, ge=0, le=1000)       # agent runs JARVES starts, all projects
+    max_cost_usd_per_day: float = Field(5.0, ge=0, le=500) # runner-reported cost estimate, all projects
+    runners: list[str] = ["claude", "codex", "opencode"]   # order tried when a task names no runner
+    claude_command: list[str] = []                         # [] = `claude` on PATH
+    codex_command: list[str] = []
+    opencode_command: list[str] = []
+    allow_openrouter: bool = False                         # paid models through OpenCode; off by default
+    openrouter_model: str = "openrouter/anthropic/claude-sonnet-4.5"
+    tick_s: float = Field(5, ge=1, le=300)                 # dispatcher pass while a project is active
+
+
 class HelperConfig(_Strict):
     """OS limits for approved helper commands (R-01 defence, jarves/isolation.py): a Windows Job Object, POSIX
     rlimits + own session. The whole command tree shares them."""
@@ -312,6 +330,7 @@ class Config(_Strict):
     update: UpdateConfig = UpdateConfig()
     ui: UIConfig = UIConfig()
     agents: AgentsConfig = AgentsConfig()
+    projects: ProjectsConfig = ProjectsConfig()
     helper: HelperConfig = HelperConfig()
 
 

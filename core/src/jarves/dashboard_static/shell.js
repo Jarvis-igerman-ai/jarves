@@ -97,7 +97,7 @@
   const KEYWORDS = {        // extra words people search for (both languages)
     home: "status overview dashboard מצב סקירה ראשי", runtime: "mic mute window show hide autostart quit stop wake tray מיקרופון השתקה חלון הפעלה עצירה מגש",
     connections: "google gmail calendar sign in oauth גוגל ג׳ימייל התחברות", devices: "phone lan pair wifi audit טלפון הצמדה רשת ביקורת",
-    conversations: "transcript chat history talk תמליל היסטוריה צ׳אט", recall: "recall search what did i say remember find חיפוש מה אמרתי מה דיברנו שיחות קודמות", agents: "coding agents claude code codex sessions worktree approvals סוכני קוד קלוד קודקס סשנים פרויקט", issues: "problems errors diagnosis תקלות שגיאות אבחון",
+    conversations: "transcript chat history talk תמליל היסטוריה צ׳אט", recall: "recall search what did i say remember find חיפוש מה אמרתי מה דיברנו שיחות קודמות", projects: "projects tasks plan board ship runners פרויקטים משימות תוכנית לוח", agents: "coding agents claude code codex sessions worktree approvals סוכני קוד קלוד קודקס סשנים פרויקט", issues: "problems errors diagnosis תקלות שגיאות אבחון",
     selfcheck: "self check health suggestions improvements בדיקה עצמית הצעות שיפור",
     updates: "update upgrade rollback version previous installer עדכון שדרוג חזרה לגרסה קודמת מתקין",
     bugs: "bug reports issues problems errors crashes report developer fixed github דיווחי תקלות תקלות שגיאות קריסות דיווח למפתח תוקן",
