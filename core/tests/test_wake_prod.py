@@ -13,7 +13,7 @@ from jarves.identity import Identity
 from jarves.voice import wake_prod as wp
 from jarves.voice import wake_train as wt
 
-from test_wake_train import VOICES, fake_embedder, fake_synth
+from test_wake_train import VOICES, fake_embedder, fake_synth, fast_train, train_once
 
 
 def write_wav(path, audio, sr=16000):
@@ -69,24 +69,25 @@ def test_rejected_samples_are_left_out_of_training_not_deleted(tmp_path, rng):
 
 
 # ---------------------------------------------------------------------- reproducible training + calibration report
-def train(out, samples=None, seed=7, files=None):
-    return wt.train_phrase("hey max", out, say=["היי מקס"], samples=samples, voices=VOICES, synth=fake_synth,
-                           embedder=fake_embedder, rates=(1.0,), pitches=(0.9, 1.1), seed=seed, sample_files=files,
-                           progress=lambda s: None)
+def train(out, samples=None, seed=7, files=None, fresh=False):
+    """The test training (fakes, smallest grid). Shared: one training per distinct input, each caller gets its own
+    copy of the model file + report (test_wake_train.train_once). fresh=True always trains anew."""
+    return (wt.train_phrase if fresh else train_once)(
+        "hey max", out, say=["היי מקס"], samples=samples, voices=VOICES, synth=fake_synth, embedder=fake_embedder,
+        rates=(1.0,), pitches=(0.9, 1.1), seed=seed, sample_files=files, progress=lambda s: None)
 
 
-def own_folder(tmp_path, n=8):
-    d = tmp_path / "own"
-    d.mkdir()
+def own_folder(d, n=8):
+    d.mkdir(parents=True)
     for i in range(n):
         write_wav(d / f"s{i}.wav", phrase_audio(np.random.default_rng(100 + i), amp=0.4 + 0.05 * (i % 3)))
     return d
 
 
 def test_same_seed_and_samples_give_the_same_model(tmp_path):
-    d = own_folder(tmp_path)
-    r1 = train(tmp_path / "a.npz", d)
-    r2 = train(tmp_path / "b.npz", d)
+    d = own_folder(tmp_path / "own")
+    r1 = train(tmp_path / "a.npz", d)                      # may be the shared training of these samples (any folder)
+    r2 = train(tmp_path / "b.npz", d, fresh=True)          # always a second, real training
     h1, h2 = wt.load_head(tmp_path / "a.npz"), wt.load_head(tmp_path / "b.npz")
     assert all(np.array_equal(h1[k], h2[k]) for k in ("mu", "sd", "w1", "b1", "w2", "b2"))
     assert r1["threshold"] == r2["threshold"] and r1["curve"] == r2["curve"]
@@ -95,7 +96,7 @@ def test_same_seed_and_samples_give_the_same_model(tmp_path):
 
 
 def test_calibration_report_holds_the_curve_and_the_owner_scores(tmp_path):
-    d = own_folder(tmp_path)
+    d = own_folder(tmp_path / "own")
     rep = train(tmp_path / "m.npz", d)
     thresholds = [r["threshold"] for r in rep["curve"]]
     assert thresholds == sorted(thresholds) and rep["threshold"] in thresholds
@@ -161,12 +162,7 @@ def test_gate_blocks_a_model_that_misses_the_owner():
 @pytest.fixture
 def fast_cli(monkeypatch):
     monkeypatch.setattr(wt, "local_voices", lambda: VOICES)
-    real = wt.train_phrase
-
-    def fast(*a, **kw):
-        kw.update(synth=fake_synth, embedder=fake_embedder, rates=(1.0,), pitches=(0.9, 1.1))
-        return real(*a, **kw)
-    monkeypatch.setattr(wt, "train_phrase", fast)
+    monkeypatch.setattr(wt, "train_phrase", fast_train)             # one training per distinct input (#89)
 
 
 def test_train_without_apply_never_touches_the_active_model(home, fast_cli, capsys):
@@ -213,17 +209,14 @@ def test_apply_is_refused_when_a_near_miss_would_wake(home, fast_cli, monkeypatc
 
 
 def test_owner_samples_folder_is_used_by_default_and_checked(home, fast_cli, capsys):
-    d = home / "wake" / "samples"
-    d.mkdir(parents=True)
-    for i in range(5):
-        write_wav(d / f"r{i}.wav", phrase_audio(np.random.default_rng(i)))
+    d = own_folder(home / "wake" / "samples")          # the training tests' 8 recordings: their training is reused
     write_wav(d / "bad.wav", np.zeros(16000))
-    assert cli.main(["wake", "train", "--check-samples"]) == 0                    # 5 usable >= minimum
+    assert cli.main(["wake", "train", "--check-samples"]) == 0                    # 8 usable >= minimum
     out = capsys.readouterr().out
-    assert "5 usable of 6" in out and "REJECTED bad.wav" in out
+    assert "8 usable of 9" in out and "REJECTED bad.wav" in out
     assert cli.main(["wake", "train", "hey", "max", "--say", "היי מקס"]) == 0
     out = capsys.readouterr().out
-    assert "your recordings: 5 usable" in out and "Your recordings wake it" in out
+    assert "your recordings: 8 usable" in out and "Your recordings wake it" in out
 
 
 def test_check_samples_without_recordings_says_where_to_put_them(home, capsys):

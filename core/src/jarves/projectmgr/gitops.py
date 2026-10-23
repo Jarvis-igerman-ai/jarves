@@ -9,6 +9,8 @@ import os
 import re
 import shutil
 import subprocess
+import threading
+import time
 from pathlib import Path
 
 _NOWIN = getattr(subprocess, "CREATE_NO_WINDOW", 0) if os.name == "nt" else 0
@@ -25,6 +27,25 @@ class GitError(RuntimeError):
     pass
 
 
+# Tasks run in parallel threads on ONE repository. Worktree add/remove/prune and branch create/delete all touch the repo's
+# shared metadata (.git/worktrees, refs, packed-refs), so they take turns per repository; a lock file another process
+# still holds (git itself, an antivirus scan on Windows) is retried a few times instead of failing the whole task.
+_LOCKS: dict[str, threading.RLock] = {}
+_LOCKS_GUARD = threading.Lock()
+LOCK_RETRIES = 4
+
+
+def _repo_lock(repo: str | Path) -> threading.RLock:
+    key = os.path.normcase(os.path.realpath(str(repo)))
+    with _LOCKS_GUARD:
+        return _LOCKS.setdefault(key, threading.RLock())
+
+
+def _lock_contention(text: str) -> bool:
+    t = (text or "").lower()
+    return ".lock" in t and ("file exists" in t or "unable to create" in t or "another git process" in t)
+
+
 def child_env(extra: dict[str, str] | None = None) -> dict[str, str]:
     """An allow-listed environment for agents and check commands: no API keys or tokens unless named in `extra`."""
     env = {k: v for k, v in os.environ.items() if k.upper() in ENV_KEEP}
@@ -35,9 +56,13 @@ def child_env(extra: dict[str, str] | None = None) -> dict[str, str]:
 def git(cwd: str | Path, *args: str, check: bool = True, timeout: float = 120, ident: bool = True
         ) -> subprocess.CompletedProcess:
     """ident=False: the owner's own git identity and signing settings (a merge into the owner's branch)."""
-    p = subprocess.run(["git", *(IDENT if ident else []), *args], cwd=str(cwd), capture_output=True, text=True, timeout=timeout,
-                       creationflags=_NOWIN, env=child_env({"GIT_TERMINAL_PROMPT": "0"}), encoding="utf-8",
-                       errors="replace")
+    for attempt in range(LOCK_RETRIES + 1):
+        p = subprocess.run(["git", *(IDENT if ident else []), *args], cwd=str(cwd), capture_output=True, text=True,
+                           timeout=timeout, creationflags=_NOWIN, env=child_env({"GIT_TERMINAL_PROMPT": "0"}),
+                           encoding="utf-8", errors="replace")
+        if p.returncode == 0 or attempt == LOCK_RETRIES or not _lock_contention(p.stderr):
+            break
+        time.sleep(0.15 * (attempt + 1))
     if check and p.returncode != 0:
         raise GitError((p.stderr or p.stdout or "git failed").strip()[:300])
     return p
@@ -74,10 +99,11 @@ def ensure_integration(home: Path, repo: str, pid: int, base: str = "") -> Path:
         return wt
     wt.parent.mkdir(parents=True, exist_ok=True)
     start = base or "HEAD"
-    if git(repo, "rev-parse", "--verify", "--quiet", br, check=False).returncode == 0:
-        git(repo, "worktree", "add", str(wt), br)
-    else:
-        git(repo, "worktree", "add", "-b", br, str(wt), start)
+    with _repo_lock(repo):
+        if git(repo, "rev-parse", "--verify", "--quiet", br, check=False).returncode == 0:
+            git(repo, "worktree", "add", str(wt), br)
+        else:
+            git(repo, "worktree", "add", "-b", br, str(wt), start)
     return wt
 
 
@@ -85,22 +111,34 @@ def new_task_worktree(home: Path, repo: str, pid: int, seq: int, attempt: int) -
     """A fresh worktree on a fresh branch from the CURRENT integration branch (earlier tasks' code is in it)."""
     br = task_branch(pid, seq, attempt)
     wt = project_root(home, pid) / "wt" / f"t{seq}-a{attempt}"
-    remove_worktree(repo, wt, br)
-    wt.parent.mkdir(parents=True, exist_ok=True)
-    git(repo, "worktree", "add", "-b", br, str(wt), integration_branch(pid))
+    with _repo_lock(repo):
+        remove_worktree(repo, wt, br)
+        wt.parent.mkdir(parents=True, exist_ok=True)
+        git(repo, "worktree", "add", "-b", br, str(wt), integration_branch(pid))
     return wt, br
+
+
+def detached_worktree(home: Path, repo: str, pid: int, sha: str) -> Path:
+    """A throw-away worktree at one exact commit (a release runs there, never in your folder)."""
+    wt = project_root(home, pid) / "release" / sha[:12]
+    with _repo_lock(repo):
+        remove_worktree(repo, wt)
+        wt.parent.mkdir(parents=True, exist_ok=True)
+        git(repo, "worktree", "add", "--detach", str(wt), sha)
+    return wt
 
 
 def remove_worktree(repo: str, wt: Path, branch: str = "") -> None:
     """Only ever called for paths under <home>/projects (callers build them); a missing one is fine."""
     if "projects" not in Path(wt).parts:
         raise GitError("refusing to remove a folder outside the JARVES projects area")
-    git(repo, "worktree", "remove", "--force", str(wt), check=False)
-    if Path(wt).exists():
-        shutil.rmtree(wt, ignore_errors=True)
-    git(repo, "worktree", "prune", check=False)
-    if branch:
-        git(repo, "branch", "-D", branch, check=False)
+    with _repo_lock(repo):
+        git(repo, "worktree", "remove", "--force", str(wt), check=False)
+        if Path(wt).exists():
+            shutil.rmtree(wt, ignore_errors=True)
+        git(repo, "worktree", "prune", check=False)
+        if branch:
+            git(repo, "branch", "-D", branch, check=False)
 
 
 def commit_all(wt: Path, message: str) -> bool:
@@ -158,13 +196,15 @@ def fast_forward(integration_wt: Path, branch: str) -> None:
     git(integration_wt, "merge", "--ff-only", branch)
 
 
-def run_check(wt: Path, argv: list[str], timeout: float = 900) -> tuple[bool, str]:
-    """The project's check command, run by JARVES (never by the agent): shell=False, allow-listed env, in the worktree."""
+def run_check(wt: Path, argv: list[str], timeout: float = 900, env_keep: list[str] | None = None) -> tuple[bool, str]:
+    """The project's check command, run by JARVES (never by the agent): shell=False, allow-listed env, in the worktree.
+    env_keep: extra variable names the owner allowed for this command (a release may need a token)."""
     if not argv:
         return True, ""
+    extra = {k: os.environ[k] for k in (env_keep or []) if k in os.environ}
     try:
         p = subprocess.run(argv, cwd=str(wt), capture_output=True, text=True, timeout=timeout, creationflags=_NOWIN,
-                           env=child_env(), encoding="utf-8", errors="replace", stdin=subprocess.DEVNULL)
+                           env=child_env(extra), encoding="utf-8", errors="replace", stdin=subprocess.DEVNULL)
     except subprocess.TimeoutExpired:
         return False, "check timed out"
     except OSError as e:

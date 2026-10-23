@@ -629,7 +629,7 @@ def attach_brain(agent, *, home: Path, cfg=None, memory=None, registry=None, fea
         return False
     state: dict = {"trace": None, "last": 0.0}
 
-    async def reply(text):
+    async def reply(text, on_delta=None):        # the terminal chat streams: pass on_delta through (a TypeError broke it)
         try:
             rec = recorder(home, cfg) if _enabled(feats) else None
             if rec is not None:
@@ -637,7 +637,7 @@ def attach_brain(agent, *, home: Path, cfg=None, memory=None, registry=None, fea
         except Exception as e:
             logs.warn("context", "CONTEXT_CAPTURE_FAILED", "typed context not captured", stage="typed",
                       error_type=type(e).__name__)
-        return await orig(text)
+        return await (orig(text, on_delta=on_delta) if on_delta is not None else orig(text))
     agent.reply = reply
     return True
 

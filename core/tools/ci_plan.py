@@ -44,9 +44,10 @@ RULES = {
 }
 
 
-def classify(files: list[str], event: str = "pull_request", reused: bool = False) -> dict[str, bool]:
-    """Which jobs a change needs. Everything runs on main pushes, tags and manual runs, unless `reused`."""
-    if reused:
+def classify(files: list[str], event: str = "pull_request", reused: bool = False, draft: bool = False) -> dict[str, bool]:
+    """Which jobs a change needs. Everything runs on main pushes, tags and manual runs, unless `reused`. A DRAFT pull
+    request gets only the fast checks (classify + validation): the full run starts when it is marked ready (#89)."""
+    if reused or draft:
         return {k: False for k in FLAGS}
     if event != "pull_request":
         return {k: True for k in FLAGS}
@@ -175,6 +176,7 @@ def main(argv: list[str] | None = None) -> int:
     c.add_argument("--durations", type=Path, default=TESTS / "durations-windows.json")
     c.add_argument("--linux-durations", type=Path, default=TESTS / "durations-linux.json")
     c.add_argument("--reused", action="store_true", help="the tree was already proven on its PR: nothing to run")
+    c.add_argument("--draft", action="store_true", help="a draft pull request: only the fast checks run")
     s = sub.add_parser("shard-files")
     s.add_argument("--plan", type=Path, required=True)
     s.add_argument("--os", required=True)
@@ -193,7 +195,7 @@ def main(argv: list[str] | None = None) -> int:
             files = (sys.stdin.read() if a.files_from == "-" else Path(a.files_from).read_text(encoding="utf-8")).splitlines()
         else:
             files = _git_files() if a.event == "pull_request" else []
-        for k, v in classify(files, a.event, a.reused).items():
+        for k, v in classify(files, a.event, a.reused, a.draft).items():
             print(f"{k}={'true' if v else 'false'}")
         print("plan=" + json.dumps(plan(durations=load_durations(a.durations), linux_durations=load_durations(a.linux_durations)), separators=(",", ":")))
         return 0
