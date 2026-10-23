@@ -34,6 +34,40 @@ def _try(api: Callable[[str], object], path: str, default: object) -> object:
         return {"_error": str(e)} if isinstance(default, dict) else default
 
 
+def content_tree(repo: str, sha: str, git_tree_sha: str, api: Callable[[str], object]) -> str | None:
+    """The docs-free tree that names the installer artifact (ci_reuse). The commit's git tree sha is a different hash,
+    so looking the artifact up by it always reported a proven installer as MISSING."""
+    try:
+        tree = ci_reuse.api_tree(repo, git_tree_sha, api)      # type: ignore[arg-type]
+        if tree:
+            return tree
+    except (RuntimeError, KeyError, TypeError):
+        pass
+    try:
+        return ci_reuse.git_tree(sha)                           # local checkout that has the commit
+    except (OSError, subprocess.CalledProcessError):
+        return None
+
+
+def beta_publishing(repo: str, package: dict | None, api: Callable[[str], object]) -> bool | None:
+    """True/False from the ENABLE_BETA_PUBLISH variable; 404 = unset = off. Reading variables needs admin rights, so when
+    it is refused the last jarves-package run answers instead: its `beta` job ran (on) or was skipped (off). None = unknown."""
+    var = _try(api, f"repos/{repo}/actions/variables/ENABLE_BETA_PUBLISH", {})
+    err = str(var.get("_error", "")) if isinstance(var, dict) else ""
+    if isinstance(var, dict) and not err:
+        return str(var.get("value", "")).lower() == "true"
+    if "404" in err or "Not Found" in err:
+        return False
+    if package and package.get("id"):
+        jobs = _try(api, f"repos/{repo}/actions/runs/{package['id']}/jobs", {})
+        beta = next((j for j in (jobs or {}).get("jobs", []) if j.get("name") == "beta"), None) if isinstance(jobs, dict) else None
+        if beta and beta.get("conclusion") in ("success", "failure"):
+            return True
+        if beta and beta.get("conclusion") == "skipped":
+            return False
+    return None
+
+
 def _run_line(run: dict | None) -> str:
     if not run:
         return "none"
@@ -43,7 +77,8 @@ def _run_line(run: dict | None) -> str:
 def build_status(repo: str, releases_repo: str, api: Callable[[str], object] = gh_json) -> dict:
     blocking: list[str] = []
     head = api(f"repos/{repo}/commits/main")
-    sha, tree = head["sha"], head["commit"]["tree"]["sha"]
+    sha = head["sha"]
+    tree = content_tree(repo, sha, head["commit"]["tree"]["sha"], api)
     runs = api(f"repos/{repo}/actions/runs?branch=main&event=push&head_sha={sha}&per_page=20").get("workflow_runs", [])
     checks = next((r for r in runs if r.get("name") == "jarves-checks"), None)
     package = next((r for r in runs if r.get("name") == "jarves-package"), None)
@@ -56,11 +91,17 @@ def build_status(repo: str, releases_repo: str, api: Callable[[str], object] = g
         blocking.append(f"main CI is still {checks.get('status')}: {checks.get('html_url')}")
     elif checks.get("conclusion") != "success":
         blocking.append(f"main CI {checks.get('conclusion')}: {checks.get('html_url')}")
-    try:
-        installer = ci_reuse.resolve(repo, tree, api)
-    except RuntimeError:
-        installer = None
-    if installer is None:
+    installer, unreadable = None, ""
+    if tree is None:
+        unreadable = "could not compute the content tree of the head commit"
+    else:
+        try:
+            installer = ci_reuse.resolve(repo, tree, api)
+        except RuntimeError as e:
+            unreadable = f"could not read the Actions artifacts ({str(e)[:120]})"
+    if unreadable:
+        blocking.append(f"installer artifact UNKNOWN: {unreadable}; check the jarves-checks run on main instead")
+    elif installer is None:
         blocking.append(f"no proven installer artifact for the head tree {tree[:12]} (jarves-installer-<tree>): "
                         "no green run built it, or it expired (3-30 days); re-run jarves-checks")
     cand = None
@@ -69,22 +110,29 @@ def build_status(repo: str, releases_repo: str, api: Callable[[str], object] = g
     if cand is None:
         blocking.append("no signed release candidate for the head commit (jarves-package has not produced one): "
                         "gh workflow run package.yml -f ref=main")
-    rels = _try(api, f"repos/{releases_repo}/releases?per_page=30", [])
-    rels = rels if isinstance(rels, list) else []
+    notes = []
+    rels = _try(api, f"repos/{releases_repo}/releases?per_page=30", {})
+    releases_readable = isinstance(rels, list)
+    if not releases_readable:
+        notes.append(f"could not read {releases_repo} releases ({str((rels or {}).get('_error', ''))[:120]}): "
+                     "stable/beta below are UNKNOWN, not 'none'")
+        rels = []
     stable = next((r for r in rels if not r.get("prerelease") and not r.get("draft")), None)
     beta = next((r for r in rels if r.get("prerelease") and str(r.get("tag_name", "")).startswith("beta-v")), None)
     assets = {a["name"] for r in (stable, beta) if r for a in r.get("assets", [])}
-    variables = _try(api, f"repos/{repo}/actions/variables/ENABLE_BETA_PUBLISH", {})
-    beta_on = isinstance(variables, dict) and str(variables.get("value", "")).lower() == "true"
-    notes = []
-    if not beta_on:
+    beta_on = beta_publishing(repo, package, api)
+    if beta_on is None:
+        notes.append("could not read ENABLE_BETA_PUBLISH and no jarves-package run shows it: beta publishing UNKNOWN")
+    elif not beta_on:
         notes.append("ENABLE_BETA_PUBLISH is not 'true': green main makes a candidate but publishes no beta")
     if stable is not None and "latest.json" not in assets:
         notes.append("the newest stable release has no latest.json (signed manifest) asset")
-    return {"repo": repo, "head": sha, "tree": tree,
+    unknown = None if releases_readable else "UNKNOWN"
+    return {"repo": repo, "head": sha, "tree": tree or "",
             "main_ci": _run_line(checks), "package": _run_line(package),
-            "installer_artifact": installer, "candidate_artifact": (cand or {}).get("name"),
-            "stable": (stable or {}).get("tag_name"), "beta": (beta or {}).get("tag_name"),
+            "installer_artifact": installer, "installer_unknown": unreadable,
+            "candidate_artifact": (cand or {}).get("name"),
+            "stable": (stable or {}).get("tag_name", unknown), "beta": (beta or {}).get("tag_name", unknown),
             "beta_publishing": beta_on, "notes": notes, "blocking": blocking,
             "stable_gate": "manual: tag vX.Y.Z after docs/reviews/MANUAL_TEST_<X.Y.Z>.md is signed (core/tools/release_gate.py)"}
 
@@ -93,9 +141,10 @@ def render(s: dict) -> str:
     inst = s["installer_artifact"]
     lines = [f"JARVES release status  ({s['repo']}, main {s['head'][:12]}, tree {s['tree'][:12]})",
              f"  main CI            {s['main_ci']}",
-             f"  installer artifact {('run ' + str(inst['run_id']) + ' #' + str(inst['run_number']) + ' (' + str(inst['event']) + ')') if inst else 'MISSING'}",
+             f"  installer artifact {('run ' + str(inst['run_id']) + ' #' + str(inst['run_number']) + ' (' + str(inst['event']) + ')') if inst else ('UNKNOWN' if s.get('installer_unknown') else 'MISSING')}",
              f"  package/candidate  {s['package']}  artifact: {s['candidate_artifact'] or 'MISSING'}",
-             f"  beta channel       {s['beta'] or 'none'}   (publishing {'ON' if s['beta_publishing'] else 'off'})",
+             f"  beta channel       {s['beta'] or 'none'}   (publishing "
+             f"{ {True: 'ON', False: 'off'}.get(s['beta_publishing'], 'UNKNOWN') })",
              f"  stable channel     {s['stable'] or 'none'}",
              f"  stable gate        {s['stable_gate']}"]
     lines += [f"  note: {n}" for n in s["notes"]]

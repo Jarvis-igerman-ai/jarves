@@ -159,7 +159,56 @@ def test_gate_blocks_on_sha_mismatch_open_p0_p2_nightly_and_tag_shape(tmp_path):
     assert _gate(tmp_path, checklist_text="- zero open P0-P2\n") == []
     assert any("checklist row 2" in p for p in _gate(tmp_path, checklist_text="| 2 | thing | pending |\n"))
     assert any("bug B1" in p for p in _gate(tmp_path, bug_tables=["| B1 | P2 | open | x |\n"]))
+    named = _gate(tmp_path, bug_tables=[("X_BUG_TABLE.md", "| id | sev | status |\n|---|---|---|\n| B2 | P1 | open |\n")])
+    assert any(p.startswith("X_BUG_TABLE.md: bug B2 (P1)") for p in named)
     assert any("nightly not green" in p for p in _gate(tmp_path, nightly_runs=_nights(bad=2)))
     assert any("only 3" in p for p in _gate(tmp_path, nightly_runs=_nights(3)))
     assert any("not a stable tag" in p for p in _gate(tmp_path, tag="v4.1.0-beta.1"))
     assert any("no green jarves-checks" in p for p in _gate(tmp_path, checks_runs=[]))
+
+
+# The bug tables in docs/reviews use different column orders. A fixed `| id | sev | status |` position read the area,
+# the scenario or the symptom as the status, so the stable gate listed 41 "open" P0-P2 rows (6 real) and could never pass.
+COLUMNS_BY_HEADER = """\
+| id | sev | area | status | fix PR |
+|---|---|---|---|---|
+| A1 | P1 | self-check shutdown | fixed (main) | #9 |
+| A2 | P2 | repo names | open | - |
+
+| ID | Sev | Scenario | Finding | Status |
+|---|---|---|---|---|
+| C1 | P2 | 29 log_privacy | facts logged | FIXED (curator.py); test |
+| C2 | P2 (test harness) | 11-14 | tools shown as 'a tool' | fixed-awaiting-retest |
+| C3 | P1 | 30 | still wrong | prompt fixed; needs live verification |
+
+| ID | Sev | Where | Symptom | Fix | Retest |
+|---|---|---|---|---|---|
+| D1 | P1 | Home | says off | health loop | Home status follows. |
+| D2 | P2 | Jobs | English | m3.js | |
+| D3 | P2 | Undo | lost | pages.js | FAIL: undo still disabled |
+| D4 | P3 | icons | csp | svg | |
+
+| Class | Meaning here |
+|---|---|
+| P1 | not a bug row: this table has no severity column |
+"""
+
+
+def test_bug_tables_are_read_by_their_header_not_by_position():
+    found = gate.bug_table_open(COLUMNS_BY_HEADER, "T.md")
+    assert found == ["T.md: bug A2 (P2) is 'open'",
+                     "T.md: bug C3 (P1) is 'prompt fixed; needs live verification'",
+                     "T.md: bug D2 (P2) is ''",
+                     "T.md: bug D3 (P2) is 'FAIL: undo still disabled'"]
+    assert gate.bug_table_open("| B1 | P2 | open | x |\n") == ["bug B1 (P2) is 'open'"]     # header-less: old order
+    no_status = "| id | sev | area |\n|---|---|---|\n| E1 | P0 | crash |\n"
+    assert gate.bug_table_open(no_status) == ["bug E1 (P0) has no status column to show it is closed"]
+
+
+def test_every_bug_table_in_the_repo_has_a_status_the_gate_can_read():
+    """A new bug table must keep a Sev and a Status (or Retest) column, or the stable gate cannot see it is closed."""
+    tables = sorted((ROOT / "docs" / "reviews").glob("*BUG_TABLE*.md"))
+    assert tables
+    unreadable = [p for t in tables for p in gate.bug_table_open(t.read_text(encoding="utf-8"), t.name)
+                  if "has no status column" in p]
+    assert unreadable == []

@@ -450,7 +450,10 @@ class BrowserService:
                 # a policy decision, not a fault (O-04): INFO keeps the WARNING view for real problems
                 logs.info("browser", "BROWSER_NAV_BLOCKED", "navigation refused",
                           host=host)
-                await route.abort("blockedbyclient")
+                # "aborted" (net::ERR_ABORTED): Chromium cancels the navigation and keeps the current document.
+                # "blockedbyclient" made it commit an empty error page (chrome-error://) AFTER the click had
+                # returned on a loaded runner, so the page we promised to keep was gone (nightly 39740226891).
+                await route.abort("aborted")
                 return
         await route.continue_()
 
@@ -507,7 +510,8 @@ class BrowserService:
 
     async def _check_landed(self, refused: list[str] | None = None) -> str:
         """After a navigation: the page must be on a host this session may see (redirects bypass the route). A
-        navigation the route refused leaves Chromium's error page: go back to the page we were on."""
+        navigation the route refused is aborted and the current page stays; should an engine still show an error
+        page (no host), go back to the page we were on."""
         host = self.current_host()
         if refused and not host:
             try:
