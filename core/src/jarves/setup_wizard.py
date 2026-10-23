@@ -91,7 +91,7 @@ GROUPS: tuple[tuple[str, str, str, tuple[str, ...]], ...] = (
     ("updates", "עדכונים וגיבוי", "Updates & backup", ("update_check", "beta_channel", "release_signoff", "setup_tour", "backup")),
     ("profiles", "פרופילים", "Profiles", ("profiles",)),
     ("helper", "עזרה במחשב (פקודות והתקנות)", "Computer helper (commands & installs)", ("helper", "helper_readonly_auto")),
-    ("agents", "סוכני קוד", "Coding agents", ("agent_orchestrator",)),
+    ("agents", "סוכני קוד", "Coding agents", ("agent_orchestrator", "project_manager")),
 )
 ANSWER_KEYS = {"language", "connection", "api_key_from_env", "display_name", "spoken_name", "address_me",
                "wake_model", "voice", "approve_voice_cost", "features", "privacy_mode", "monthly_budget_usd",
@@ -1158,6 +1158,8 @@ BUNDLE: dict[str, list[Callable[[], tuple[bool, str]]]] = {
     "proactive_intel": [_mod("jarves.proactive")],
     "proactive_signals": [_mod("jarves.continuity")],
     "dev_manager": [_mod("jarves.devmanager")],
+    "project_manager": [_mod("jarves.projectmgr.surfaces"), _data("jarves", "dashboard_static/projects.js"),
+                        _data("jarves.guides", "data/project_manager.toml")],
     "dev_status": [_mod("jarves.devstatus")],
     "notes": [_mod("jarves.notes")],
     "files": [_mod("jarves.sandbox")],
