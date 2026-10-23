@@ -4,26 +4,28 @@ Software for the camera plan (`docs/plans/CAMERA_PLAN.md`, phases C1, C2, C3, C5
 (SW-V2 WP-J, Issue #17). **Everything is OFF by default.** No hardware was bought or connected; the Pi bring-up
 (C4) and the printed shutter (C0, CAD #8) are still open hardware gates.
 
+**Owner correction, 23 Oct 2026:** camera is an on-demand skill. Enabling it makes it available; it does not open the sensor. Wake words, conversations and presence events do not start capture. A requested still closes the sensor immediately afterward; an explicitly opened local preview closes on dismissal, lease expiry or its hard time limit.
+
 ## 1. What it does
 
 | Ability | How | Leaves the device? |
 |---|---|---|
-| Presence + "look at the person" | Low-res preview (320x240, 4 fps) -> local YuNet face detector -> eyes follow the person calmly | No |
+| Presence + "look at the person" | Only during an explicitly requested, time-limited local preview (320x240) -> local YuNet face detector -> eyes follow the person calmly | No |
 | Optional greeting when someone sits down | `camera.greet = true` (default false): "ערב טוב!" / "ערב טוב, נועה!" Speaking only, never listening | No |
 | "מה זה?" (`camera_describe`) | ONE still -> backend vision model (`gpt-6-luna`) -> spoken answer | **One photo, only on request** |
 | "תקרא לי את זה" (`camera_read_text`) | ONE sharp still -> transcript + one-sentence Hebrew summary | **One photo, only on request** |
 | "מי זה?" (`camera_who`) | Local SFace embedding vs. the people who opted in | No |
 | "תזכור את הפנים שלי" (`camera_enroll`) | Person alone in view + on-screen consent -> 3 samples -> embeddings saved | No (local `faces.db`) |
 | "תשכח את הפנים שלי" (`camera_forget`, `camera_forget_all`) | Deletes the person's embeddings (VACUUM) | - |
-| Away mode | Nobody seen and no conversation for `camera.away_after_s` (15 min) -> camera OFF | - |
+| Background monitoring | Not supported; the sensor remains closed between requests | - |
 
 ## 2. Turning it on (three switches, all default OFF)
 
 | Switch id | Meaning |
 |---|---|
-| `camera` | Camera at all (presence, gaze, "מה זה?", reading) |
+| `camera` | Make requested captures and explicit local previews available |
 | `face_recognition` | Recognise people who enrolled themselves |
-| `camera_when_away` | Keep the camera on while nobody is home (default off = camera OFF when away) |
+| `camera_when_away` | Legacy setting retained for compatibility; does not enable background capture |
 
 Use the dashboard feature switches or CLI. Activation checks prerequisites before reporting success;
 these commands do not open the camera:
@@ -64,8 +66,8 @@ Config (`config.toml` `[camera]`, all optional): `backend` (auto/picamera2/openc
 ## 4. Privacy rules (enforced in code, `camera/service.py`)
 
 1. **Default OFF**; nothing opens the sensor unless the `camera` switch is on AND a camera is found.
-2. **Streams only for local presence**, at low resolution, and only when a local detector exists; otherwise the
-   sensor opens just for a requested still and closes right after.
+2. **Capture only on request.** Enabling the skill keeps the sensor closed. A requested still closes right after;
+   streaming requires an explicitly opened local preview, with a lease and a hard time limit.
 3. **No recording, no saving.** Frames stay in RAM, detection keeps a box (never an image), every still is dropped
    right after use, also after a cloud request. There is no "save snapshot" code path at all. Logs record sizes and
    purposes, never pixels.
@@ -83,8 +85,7 @@ Config (`config.toml` `[camera]`, all optional): `backend` (auto/picamera2/openc
    confirms on screen ("נשמרים רק מספרים, לא תמונה..."). Stored: name, consent time/how, up to 8 embeddings. Never
    uploaded. Deletion always works (even with the switches off). Unknown face = guest (`current_person = None`),
    ready for guest mode in private skills. Used for greetings only, never for security or permissions.
-9. **Away mode:** camera OFF after `away_after_s` of nobody + no conversation; back on with the next wake word,
-   conversation, button or presence-sensor event. `camera_when_away` (default off) keeps it on.
+9. **No automatic capture:** wake words, conversations, presence events and the legacy `camera_when_away` flag never open the sensor. Presence/gaze can run only while an explicitly requested preview is open.
 
 ## 5. Why OpenCV YuNet + SFace (library choice, researched 2026-10-19)
 
@@ -120,7 +121,7 @@ Sources: OpenCV Zoo YuNet <https://github.com/opencv/opencv_zoo/tree/main/models
 |---|---|
 | Dashboard says camera unavailable | `uv run python -m jarves.camera status` (probe detail + action) |
 | "OpenCV is not installed" | Stop Core, then `jarvis features on camera`; installed release: repair/update |
-| Camera found but never on | the `camera` switch; away mode (`camera_status` tool / health `camera`) |
+| Camera found but never on | expected between requests; ask JARVES to look or explicitly open a local preview |
 | "התמונה שחורה" | shutter closed or lens covered |
 | Face recognition unavailable | Stop Core, then `jarvis features on face_recognition`; also check enrollment |
 | Manual webcam check (opens it once, saves nothing) | `JARVES_MANUAL_CAMERA=1 uv run pytest tests/test_camera.py -k manual -s` |

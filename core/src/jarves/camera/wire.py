@@ -1,6 +1,6 @@
 """Core integration of the camera, kept out of app.py: `attach(core)` builds the CameraService, registers the
 switches and the Camera Skill, installs the untrusted-image guard and starts the supervisor. app.py needs three
-one-line hooks (start, stop, inbound presence.changed). Nothing opens the sensor until the `camera` switch is on.
+one-line hooks (start, stop, inbound presence.changed). Enabling `camera` only makes the skill available; capture requires a request or an explicit timed preview.
 """
 from __future__ import annotations
 

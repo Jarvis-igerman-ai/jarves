@@ -303,7 +303,7 @@ register("face_recognition", "זיהוי פנים", "Face recognition", False, p
          slow=True, needs=["camera"], risk="high", skills=["faces"], about="recognise who is in the room")
 register("camera_when_away", "מצלמה כשאין אף אחד בבית", "Camera when away", False,
          probe=_all(_probe_camera, _skill_installed("camera")), slow=True, needs=["camera"], risk="high",
-         about="watch the room while nobody is home")
+         about="legacy setting; camera opens only on request")
 register("camera_preview", "מה הוא רואה? (תצוגת מצלמה)", "What does he see? (camera preview)", True,
          probe=_probe_camera, slow=True, needs=["camera"], risk="low",
          about="shows the camera picture on this screen while you keep it open; local only, nothing saved or sent")

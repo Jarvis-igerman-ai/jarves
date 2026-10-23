@@ -61,6 +61,7 @@ TEXT: dict[str, str] = {
     "read your e-mail": "קריאת המיילים שלך",
     "send e-mail in your name": "שליחת מייל בשמך",
     "look through the camera when asked": "מסתכל דרך המצלמה כשמבקשים",
+    "legacy setting; camera opens only on request": "הגדרה ישנה; המצלמה נפתחת רק לפי בקשה",
     "recognise who is in the room": "מזהה מי נמצא בחדר",
     "watch the room while nobody is home": "משגיח על החדר כשאף אחד לא בבית",
     "shows the camera picture on this screen while you keep it open; local only, nothing saved or sent":

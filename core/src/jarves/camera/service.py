@@ -1,14 +1,13 @@
 """CameraService: the one owner of the sensor. Privacy rules live HERE, in code (not in prompts):
 
 1. Everything is OFF by default: nothing opens the sensor unless the `camera` switch is on AND a camera exists.
-2. The sensor streams only for local presence detection (low resolution, a few fps) and only when a local
-   detector exists; otherwise it opens just for a requested still and closes again.
+2. Enabling the skill never opens the sensor. It opens for a requested still and closes again, or streams
+   only during an explicitly opened, time-limited local preview.
 3. Frames stay in RAM; detection keeps a box, never an image. Nothing is recorded or saved; a still is dropped
    right after use (also after a cloud request). There is no snapshot-to-disk path at all.
 4. Indicator: whenever the sensor is open the face gets `camera.indicator {on: true}` (Camera Module 3 has no LED);
    a still sent to the cloud also flashes it (`flash: true`) and the Skill tells the user what was sent.
-5. Away: nobody seen and no conversation for camera.away_after_s -> camera OFF, unless `camera_when_away` is on.
-   It comes back on with the next sign of the user (wake word, conversation, a presence sensor event).
+5. Wake words, conversation, presence events and the legacy `camera_when_away` setting never start capture.
 6. Face recognition only with the `face_recognition` switch AND per-person enrolment; deletion always works.
 7. "What does he see?" preview (switch `camera_preview`, needs `camera`): only while the user keeps it open, at most
    PREVIEW_MAX_S per opening; small low-fps images to the LOCAL face/dashboard link only (never the cloud, never
@@ -71,7 +70,7 @@ class CameraService:
         self.cfg, self.home, self.switches, self.memory, self.health = cfg, Path(home), switches, memory, health
         self.send, self.activity, self.vision = send, activity, vision
         self.detector, self.embedder = detector, embedder
-        self._models = models           # lazy loader (OpenCV + model files), run once when the camera is first on
+        self._models = models           # lazy loader: requested preview or face identification/enrolment only
         self._faces = faces
         self._probe_fn = probe_fn or (lambda: default_probe(cfg.backend))
         self._factory = camera_factory or (lambda p: make_camera(p, cfg))
@@ -156,14 +155,11 @@ class CameraService:
         return self._faces
 
     def wants_stream(self) -> bool:
+        if not (self.switches.active("camera") and self.preview_active()
+                and self.switches.active("camera_preview")):
+            return False
         self._load_models()
-        if not self.switches.active("camera"):
-            return False
-        if self.preview_active() and self.switches.active("camera_preview"):
-            return True
-        if self.detector is None:
-            return False
-        return not self.away or self.switches.active("camera_when_away")
+        return True
 
     # ------------------------------------------------------------------ lifecycle
     def start(self) -> None:
@@ -221,7 +217,7 @@ class CameraService:
                 await self._open()
                 self.streaming = self.cam is not None
                 if self.streaming:
-                    logs.info("camera", "CAMERA_STREAM_ON", "presence detection on (local, low resolution)",
+                    logs.info("camera", "CAMERA_STREAM_ON", "requested local camera preview on",
                               backend=self.cam.name, fps=self.cfg.presence_fps)
             elif not want and self.streaming:
                 await self._close()
