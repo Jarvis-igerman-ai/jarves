@@ -273,7 +273,8 @@ def test_agent_blocked_and_failed_runs(env):
     m.call("resume", project="demo")
     finish(m)
     ts = m.db.tasks(1)
-    assert ts[0]["status"] == "blocked" and ts[1]["status"] == "failed" and ts[1]["attempts"] == 2
+    shown = [(t["status"], t["attempts"], t["reason"]) for t in ts]                  # a Windows CI run once showed 1 attempt
+    assert ts[0]["status"] == "blocked" and ts[1]["status"] == "failed" and ts[1]["attempts"] == 2, shown
     assert m.call("retry_task", project="demo", task=2)["ok"]
     assert m.db.task(ts[1]["id"])["status"] in ("todo", "ready")
 
