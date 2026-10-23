@@ -72,6 +72,16 @@ def git_tree(rev: str = "HEAD") -> str:
     return content_tree(out.split("\0"))
 
 
+def api_tree(repo: str, git_tree_sha: str, api: Callable[[str], dict] = gh_json) -> str | None:
+    """The same content address from the GitHub git-trees API (no checkout needed), or None when GitHub truncates the
+    listing. NOT the commit's git tree sha: artifacts are named by this docs-free tree."""
+    doc = api(f"repos/{repo}/git/trees/{git_tree_sha}?recursive=1")
+    if doc.get("truncated"):
+        return None
+    return content_tree([f"{e['mode']} {e['type']} {e['sha']}\t{e['path']}"
+                         for e in doc.get("tree", []) if e.get("type") != "tree"])
+
+
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(prog="ci_reuse.py")
     sub = ap.add_subparsers(dest="cmd", required=True)

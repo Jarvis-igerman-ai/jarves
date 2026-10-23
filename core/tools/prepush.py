@@ -8,7 +8,7 @@
     python core/tools/prepush.py --uninstall-hook
 
 Checks: lint (log_lint), guides (guides + CLI parity), locales (Hebrew texts, dashboard locales), docs (links, DOC_MAP),
-perf (prompt+tools size budget), ci (workflow contract tests), net (network guard), dash (every dashboard GET endpoint
+perf (prompt+tools size budget, tool triggers), ci (workflow contract tests), net (network guard), dash (every dashboard GET endpoint
 timed against `ci_max` of dashboard_api_max_ms in core/perf_budgets.toml). The checks use the Python running this
 script (the project virtualenv). `git push --no-verify` always bypasses the hook. See docs/PREPUSH.md.
 """
@@ -48,7 +48,9 @@ CHECKS: tuple[Check, ...] = (
     Check("locales", "Hebrew texts + dashboard locales",
           tests=("tests/test_hebrew_texts.py", "tests/test_dashboard_locales.py"), slow=True),
     Check("docs", "docs links + DOC_MAP", tests=("tests/test_docs_links.py",)),
-    Check("perf", "prompt+tools size budget", tests=("tests/test_p_perf.py",), always_on_code=True),
+    # test_tool_descriptions: every user tool keeps its EN+HE triggers and routes; two PR runs went red on it in CI
+    Check("perf", "prompt+tools size budget + tool triggers",
+          tests=("tests/test_p_perf.py", "tests/test_tool_descriptions.py"), always_on_code=True),
     Check("ci", "CI workflow contracts",
           tests=("tests/test_ci_workflows.py", "tests/test_ci_pipeline.py", "tests/test_ci_speed_tools.py",
                  "tests/test_ci_comment.py", "tests/test_prepush.py"), slow=True),

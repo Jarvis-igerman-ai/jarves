@@ -248,7 +248,7 @@ async def test_o04_refused_navigation_is_logged_at_info_not_warning(home, caplog
     req = NS(url="https://not-allowed.example/x", is_navigation_request=lambda: True, frame=NS(parent_frame=None))
     with caplog.at_level(logging.DEBUG):
         await svc._route(NS(request=req, abort=abort, continue_=None))
-    assert aborted == ["blockedbyclient"]
+    assert aborted == ["aborted"]          # ERR_ABORTED keeps the current page (no error page to race against)
     rec = [r for r in caplog.records if "BROWSER_NAV_BLOCKED" in r.getMessage() or "refused" in r.getMessage()]
     assert rec and all(r.levelno == logging.INFO for r in rec)
 
