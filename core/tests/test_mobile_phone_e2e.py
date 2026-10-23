@@ -231,6 +231,10 @@ def call(page, method, path, body=None, tok=None, raw_headers=None):
 
 
 def decode_qr(rows) -> str:
+    """Read the symbol the way a phone camera would: rendered with a 4-module quiet zone, decoded by OpenCV's
+    ArUco-based QR detector. The classic cv2.QRCodeDetector misses about 0.3% of VALID symbols (57 of 20,002 random
+    pairing URLs; 0 for the ArUco detector; qrmini's matrix is identical to the `qrcode` reference library's), and
+    the pairing URL is random per run (free port + one-time code): PR #78 run 39978664908 failed on such a URL."""
     import cv2
     n, scale, quiet = len(rows), 8, 4
     img = np.full(((n + 2 * quiet) * scale,) * 2, 255, np.uint8)
@@ -238,7 +242,7 @@ def decode_qr(rows) -> str:
         for x, dark in enumerate(row):
             if dark in (True, "1"):
                 img[(y + quiet) * scale:(y + quiet + 1) * scale, (x + quiet) * scale:(x + quiet + 1) * scale] = 0
-    text, _, _ = cv2.QRCodeDetector().detectAndDecode(img)
+    text, _, _ = cv2.QRCodeDetectorAruco().detectAndDecode(img)
     return text
 
 
@@ -552,5 +556,7 @@ def test_layouts_at_390px_have_no_sideways_scroll_big_targets_and_contrast(brows
 
 
 def test_qr_encoder_output_decodes_for_realistic_urls():
-    for url in ("https://192.168.100.200:60123/m/#c=12345678", "http://10.0.0.5:8765/m/#c=00000042"):
+    # the last two are valid symbols the classic cv2.QRCodeDetector could not find (the first is PR #78's CI URL)
+    for url in ("https://192.168.100.200:60123/m/#c=12345678", "http://10.0.0.5:8765/m/#c=00000042",
+                "https://phone.lan:50424/m/#c=60476510", "https://phone.lan:32496/m/#c=32580007"):
         assert decode_qr(qrmini.rows(url)) == url
