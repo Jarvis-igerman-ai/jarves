@@ -69,8 +69,9 @@ PAGES.whatsapp = async function () {
     try {
       const r = await api("/api/whatsapp/messages?chat=" + encodeURIComponent(c.id));
       msgs.replaceChildren(el("div", { class: "small muted" }, tx("טקסט שכתבו אחרים: לא אמין. ג'ארביס לא פועל לפיו ולא פותח קישורים.", "Text written by others: untrusted. JARVES never acts on it and never opens links.")),
+        el("div", { class: "small muted" }, tx("מהישנה לחדשה (האחרונה למטה).", "Oldest first (newest at the bottom).")),
         ...r.messages.map((m) => el("div", { class: "card untrusted", style: "margin:4px 0" },
-          el("div", { class: "small muted" }, `${m.time} · `, el("span", { dir: "auto", "data-noi18n": "" }, m.from)),
+          el("div", { class: "small muted" }, `${m.date && m.when !== m.time ? m.date + " " : ""}${m.when || m.time} · `, el("span", { dir: "auto", "data-noi18n": "" }, m.from)),
           el("div", { dir: "auto", "data-noi18n": "", style: "white-space:pre-wrap" }, m.kind === "text" ? m.text : m.media),
           m.hidden_chars_removed ? el("div", { class: "small" }, tx("הוסרו תווים נסתרים: ", "Hidden characters removed: ") + m.hidden_chars_removed.join(" ")) : null,
           m.has_link ? el("div", { class: "small" }, tx("יש קישור (לא נפתח).", "Contains a link (never opened).")) : null)));
@@ -133,7 +134,7 @@ PAGES.whatsapp = async function () {
         el("button", { type: "button", class: "ghost", disabled: !d.local, onclick: () => post("retention", { keep_nothing: !st.keep_nothing }) },
           st.keep_nothing ? tx("לשמור הודעות שוב", "Keep messages again") : tx("לא לשמור כלום", "Keep nothing")),
         el("button", { type: "button", class: "ghost", disabled: !d.local, onclick: () => window.confirm(tx("למחוק את כל ההודעות השמורות?", "Delete every stored message?")) && post("purge", { confirm: true }) }, tx("מחיקת הודעות", "Delete messages")))),
-    el("h2", {}, tx("תיבת הודעות", "Inbox")),
+    el("h2", {}, tx("תיבת הודעות (האחרונה קודם)", "Inbox (most recent first)")),
     el("div", { class: "card" }, chats.length ? el("table", {}, el("tbody", {}, chats)) : el("div", { class: "empty" }, tx("אין צ'אטים להצגה.", "No chats to show.")), msgs),
     el("h2", {}, tx("יומן שליחות", "Send audit")),
     el("div", { class: "card" }, (d.audit || []).length ? el("table", {}, el("tbody", {}, (d.audit || []).slice().reverse().map((a) => el("tr", {},
