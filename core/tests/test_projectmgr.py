@@ -308,8 +308,10 @@ def test_owner_list_starts_directly_and_is_lenient(env):
     assert r["ok"], r
     assert [t["status"] for t in m.db.tasks(1)] == ["ready", "todo"]                    # the owner wrote it: no 2nd approval
     assert any("large" in n for n in r["notes"])
-    assert m.call("open", path=str(repo), name="x", by="voice")["code"] == "CLI_ONLY"
+    m._ask = lambda *a, **k: False
+    assert m.call("open", path=str(repo), name="x", by="voice")["code"] == "NOT_APPROVED"     # voice: asks first
     assert m.call("archive", project="demo", by="voice")["code"] == "CLI_ONLY"
+    assert m.call("ship_plan", project="demo", apply=True, by="voice")["code"] == "CLI_ONLY"
 
 
 def test_agent_plan_waits_for_approval_and_a_new_plan_replaces_it(env):
@@ -525,3 +527,189 @@ def test_cli_flexible_flow(env, capsys, monkeypatch):
         assert run("ship") == 0
     finally:
         svc_mod.detach(m)
+
+
+
+# ------------------------------------------------------------------ review findings (Opus review, 23 Oct)
+def test_split_keeps_goal_and_other_proposals_failed_plan_keeps_waiting_one(env):
+    m, repo, _ = env
+    open_project(m, repo)
+    m.call("plan", project="demo", goal="the real goal")                                  # 2 proposed tasks
+    assert m.call("plan", project="demo", goal="FAIL_PLAN_default")["code"] == "BAD_PLAN"
+    assert [t["status"] for t in m.db.tasks(1)] == ["proposed", "proposed"]               # the waiting plan survives
+    r = m.call("split_task", project="demo", task=1)
+    assert r["ok"], r
+    ts = [t["status"] for t in m.db.tasks(1)]
+    assert ts[0] == "cancelled" and ts[1] == "proposed" and ts[2:] == ["proposed", "proposed"]
+    assert m.db.project(1)["goal"] == "the real goal"
+    assert m.call("plan", project="demo", goal="more", replace=False)["ok"]
+    assert [t["status"] for t in m.db.tasks(1)].count("proposed") == 5
+
+
+def test_dependants_unblock_after_retry_and_reason_uses_task_numbers(env, tmp_path):
+    m, repo, _ = env
+    other = tmp_path / "other"
+    other.mkdir()
+    sh(other, "git", "init", "-q", "-b", "main")
+    (other / "f").write_text("x")
+    sh(other, "git", "-c", "user.name=t", "-c", "user.email=t@t", "add", "-A")
+    sh(other, "git", "-c", "user.name=t", "-c", "user.email=t@t", "commit", "-q", "-m", "i")
+    assert m.call("open", path=str(other), name="first")["ok"]                            # project 1 owns ids 1..2
+    m.call("add_task", project="first", title="x1")
+    m.call("add_task", project="first", title="x2")
+    assert m.call("open", path=str(repo), name="demo")["ok"]
+    a = m.call("add_task", project="demo", title="A", spec="FAKE fail", scope=["a"])["task"]["seq"]
+    b = m.call("add_task", project="demo", title="B", spec="FAKE write b=1", scope=["b"], deps=[a])["task"]["seq"]
+    m.call("pause", project="first")
+    m.call("resume", project="demo")
+    finish(m)
+    tb = m.db.by_seq(2, b)
+    assert tb["status"] == "blocked" and tb["reason"] == f"dependency #{a} failed"         # the task number, not the id
+    m.call("update_task", project="demo", task=a, spec="FAKE write a=1")
+    finish(m)
+    assert m.db.by_seq(2, a)["status"] == "done" and m.db.by_seq(2, b)["status"] == "done"
+
+
+def test_retry_of_a_replaced_proposal_needs_approval_again(env):
+    m, repo, _ = env
+    open_project(m, repo)
+    m.call("plan", project="demo", goal="one")
+    m.call("plan", project="demo", goal="two")
+    r = m.call("retry_task", project="demo", task=1)
+    assert r["ok"] and m.db.by_seq(1, 1)["status"] == "proposed"
+
+
+def test_open_refuses_empty_repo_and_dirty_with_other_base(env, tmp_path):
+    m, repo, _ = env
+    empty = tmp_path / "empty"
+    empty.mkdir()
+    sh(empty, "git", "init", "-q")
+    assert m.call("open", path=str(empty), name="empty")["code"] == "NO_COMMITS"
+    assert m.db.projects(True) == []
+    sh(repo, "git", "branch", "feature")
+    (repo / "README.md").write_text("wip\n")
+    assert m.call("open", path=str(repo), name="demo", base="feature", include_dirty=True)["code"] == "BAD_BASE"
+    r = m.call("open", path=str(repo), name="demo", include_dirty=True)
+    assert r["ok"] and "uncommitted work on main" in r["text"]
+
+
+def test_plan_tasks_can_name_runner_and_mode_and_voice_cannot_skip_approval(env):
+    m, repo, _ = env
+    open_project(m, repo)
+    r = m.call("plan", project="demo", tasks=[{"id": 1, "title": "A", "spec": "s", "runner": "codex:gpt-5", "mode": "team"}])
+    assert r["ok"]
+    t = m.db.by_seq(1, 1)
+    assert t["runner"] == "codex:gpt-5" and t["mode"] == "team"
+    assert m.call("plan", project="demo", tasks=[{"id": 1, "title": "A", "spec": "s", "mode": "crowd"}])["code"] == "BAD_PLAN"
+    r = m.call("plan", project="demo", goal="x", auto=True, by="voice")
+    assert r["ok"] and all(t["status"] == "proposed" for t in r["tasks"])
+
+
+def test_runner_deny_list_protects_agent_settings():
+    assert "Write(.claude/**)" in runners.DENY and "Edit(.codex/**)" in runners.DENY
+
+
+def test_short_lived_manager_never_dispatches(env):
+    from jarves.projectmgr import service as svc_mod
+    m, repo, home = env
+    open_project(m, repo)
+    task(m, "A", "FAKE write a=1", scope=["a"])
+    r = svc_mod.call(home, m.full_cfg, "resume", project="demo")                          # no Core: a transient manager
+    assert r["ok"] and "jarvis project run" in r["text"]
+    assert m.db.by_seq(1, 1)["status"] == "ready"
+
+
+# ------------------------------------------------------------------ talking about local projects and live agents
+class FakeOrch:
+    def __init__(self, sessions):
+        self.sessions, self.calls = sessions, []
+
+    def __call__(self, op, **kw):
+        self.calls.append((op, kw))
+        if op == "list":
+            return {"ok": True, "sessions": self.sessions}
+        return {"ok": True, "code": "ok", "text": f"{op} sent"}
+
+
+def test_find_project_folder_on_this_computer_and_open_by_voice(env, tmp_path):
+    from jarves.projectmgr import finder
+    m, repo, _ = env
+    work = tmp_path / "disk" / "work"
+    (work / "xy").mkdir(parents=True)
+    sh(work / "xy", "git", "init", "-q", "-b", "main")
+    (work / "xy" / "a").write_text("a")
+    sh(work / "xy", "git", "-c", "user.name=t", "-c", "user.email=t@t", "add", "-A")
+    sh(work / "xy", "git", "-c", "user.name=t", "-c", "user.email=t@t", "commit", "-q", "-m", "i")
+    (tmp_path / "disk" / "old" / "xy").mkdir(parents=True)
+    (tmp_path / "disk" / "old" / "xy" / ".git").mkdir()
+    roots = [str(tmp_path / "disk")]
+    assert len(finder.find("XY", "", roots)) == 2
+    assert finder.find("x-y", "work", roots)[0] == str(work / "xy")
+    m.cfg.search_roots = roots
+    assert m.call("open", folder="xy", by="voice")["code"] == "AMBIGUOUS"
+    r = m.call("open", folder="xy", where="work", by="voice")
+    assert r["ok"] and r["project"]["path"] == str((work / "xy").resolve())
+    assert m.call("open", folder="nothing", where="work", by="voice")["code"] == "NOT_FOUND"
+
+
+def test_status_includes_your_own_sessions_and_you_can_steer_them(env):
+    m, repo, home = env
+    open_project(m, repo)
+    live = {"id": "claude:abc", "provider": "claude", "cwd": str(repo), "project": "demo", "state": "RUNNING",
+            "state_text": "working", "age": "3 min", "untrusted_activity": "editing login.py"}
+    mine = dict(live, id="claude:jarves", cwd=str(gitops.project_root(home, 1) / "wt" / "t1-a1"))
+    m._orch = FakeOrch([live, mine, dict(live, id="codex:z", provider="codex", cwd="/elsewhere", project="other")])
+    st = m.call("status", project="demo")
+    assert "your claude session (working, 3 min): editing login.py" in st["text"] and len(st["sessions"]) == 1
+    ag = m.call("agents", project="demo", by="voice")
+    assert ag["ok"] and "your claude session" in ag["text"]
+    r = m.call("tell_agent", project="demo", agent="קלוד", text="add tests too", by="voice")
+    assert r["ok"] and ("tell", {"ref": "claude:abc", "text": "add tests too", "by": "voice"}) in m._orch.calls
+    r = m.call("more_agents", project="demo", agent="claude", by="voice")
+    assert r["ok"] and any(op == "tell" and "sub-agents" in kw["text"] for op, kw in m._orch.calls)
+    r = m.call("stop_agent", project="demo", agent="claude", by="voice")
+    assert r["ok"] and ("stop", {"ref": "claude:abc", "by": "voice"}) in m._orch.calls
+    assert m.call("stop_agent", project="demo", agent="codex")["code"] == "NOTHING"
+
+
+def test_add_a_codex_task_more_parallel_agents_and_stop_a_running_one(env):
+    m, repo, _ = env
+    m._orch = FakeOrch([])
+    open_project(m, repo)
+    r = m.call("add_task", project="demo", title="Other job", spec="FAKE sleep 5\nFAKE write o=1", scope=["o"],
+               runner="claude", by="voice")
+    assert r["ok"]
+    assert m.call("more_agents", project="demo", count=2, by="voice")["parallel"] == 5
+    assert m.call("more_agents", project="demo", fewer=True)["parallel"] == 4
+    m.call("resume", project="demo")
+    assert m.db.by_seq(1, 1)["status"] == "running"
+    r = m.call("stop_agent", project="demo", agent="claude", by="voice")
+    assert r["ok"] and r["stopped"] == ["#1"]
+    assert m.wait_idle(20)
+    t = m.db.by_seq(1, 1)
+    assert t["status"] == "blocked" and "stopped by the owner" in t["reason"]
+    assert not (gitops.project_root(m.home, 1) / "integration" / "o").exists()             # stopped work is never merged
+    m.call("update_task", project="demo", task=1, spec="FAKE write o=1")
+    finish(m)
+    assert m.db.by_seq(1, 1)["status"] == "done"
+
+
+def test_long_voice_operations_run_in_the_background(env):
+    m, repo, _ = env
+    said = []
+    m.notify = lambda p, t: said.append(t)
+    open_project(m, repo)
+    m.started = True
+    try:
+        r = m.call("plan", project="demo", goal="build it", consult=["claude:alpha", "claude:beta"], by="voice",
+                   background=True)
+        assert r["code"] == "started" and r["job"]
+        for _ in range(200):
+            if m.jobs[r["job"]]["state"] != "running":
+                break
+            import time as _t
+            _t.sleep(0.05)
+        assert m.jobs[r["job"]]["state"] == "done" and said and "planning" in said[-1]
+        assert "planning: done" in m.call("jobs", by="voice")["text"]
+    finally:
+        m.started = False

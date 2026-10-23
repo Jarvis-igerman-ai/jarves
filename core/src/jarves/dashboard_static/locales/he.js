@@ -1944,7 +1944,12 @@
   "One lead agent with its own sub-agents": "סוכן מוביל אחד עם תת-סוכנים משלו",
   "Strategy": "אסטרטגיה",
   "Agent with sub-agents": "סוכן עם תת-סוכנים",
-  "Already done (record it)": "כבר בוצע (לתיעוד)"
+  "Already done (record it)": "כבר בוצע (לתיעוד)",
+  "Working now: ": "עובדים עכשיו: ",
+  "yours": "שלך",
+  "More agents": "עוד סוכנים",
+  "Fewer agents": "פחות סוכנים",
+  "Stop the agent": "עצירת הסוכן"
  },
  "rules": [
   [

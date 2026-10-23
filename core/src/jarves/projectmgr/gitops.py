@@ -32,8 +32,10 @@ def child_env(extra: dict[str, str] | None = None) -> dict[str, str]:
     return env
 
 
-def git(cwd: str | Path, *args: str, check: bool = True, timeout: float = 120) -> subprocess.CompletedProcess:
-    p = subprocess.run(["git", *IDENT, *args], cwd=str(cwd), capture_output=True, text=True, timeout=timeout,
+def git(cwd: str | Path, *args: str, check: bool = True, timeout: float = 120, ident: bool = True
+        ) -> subprocess.CompletedProcess:
+    """ident=False: the owner's own git identity and signing settings (a merge into the owner's branch)."""
+    p = subprocess.run(["git", *(IDENT if ident else []), *args], cwd=str(cwd), capture_output=True, text=True, timeout=timeout,
                        creationflags=_NOWIN, env=child_env({"GIT_TERMINAL_PROMPT": "0"}), encoding="utf-8",
                        errors="replace")
     if check and p.returncode != 0:
@@ -138,14 +140,18 @@ def violations(files: list[str], scope: list[str]) -> tuple[list[str], list[str]
     return prot, out
 
 
-def merge_in(wt: Path, branch: str) -> list[str]:
-    """Bring `branch` into the worktree's branch. Returns conflicting files ([] = merged); a conflict is aborted."""
-    p = git(wt, "merge", "--no-edit", branch, check=False)
+def merge_in(wt: Path, branch: str, ident: bool = True) -> list[str]:
+    """Bring `branch` into the worktree's branch. Returns conflicting files ([] = merged); a conflict is aborted
+    (nothing changes). A refusal without conflicts (e.g. an untracked file in the way) returns git's own reason."""
+    p = git(wt, "merge", "--no-edit", branch, check=False, ident=ident)
     if p.returncode == 0:
         return []
     files = [x for x in git(wt, "diff", "--name-only", "--diff-filter=U", check=False).stdout.split() if x]
     git(wt, "merge", "--abort", check=False)
-    return files or ["(merge failed)"]
+    if files:
+        return files
+    why = " ".join((p.stderr or p.stdout or "merge failed").split())[:200]
+    return [f"(not merged: {why})"]
 
 
 def fast_forward(integration_wt: Path, branch: str) -> None:

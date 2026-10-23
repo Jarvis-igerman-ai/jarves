@@ -18,7 +18,8 @@ TASK_STATES = ("proposed", "todo", "ready", "running", "review", "done", "blocke
 OPEN_STATES = ("todo", "ready", "running", "review", "blocked")      # work that still needs doing
 FINAL_STATES = ("done", "failed", "cancelled")
 PROJECT_STATES = ("active", "paused", "done", "archived")
-EVENTS_KEEP = 400                                                     # timeline rows kept per task
+EVENTS_KEEP = 400
+DEP_BLOCK = "dependency "                                             # reason prefix of a dependency block                                                     # timeline rows kept per task
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS projects (
@@ -72,8 +73,12 @@ class ProjectDB:
         self._c.executescript(SCHEMA)
         cols = {r[1] for r in self._c.execute("PRAGMA table_info(tasks)")}
         if "mode" not in cols:                                   # databases from 4.0.1 before task modes
-            self._c.execute("ALTER TABLE tasks ADD COLUMN mode TEXT NOT NULL DEFAULT 'solo'")
-            self._c.commit()
+            try:
+                self._c.execute("ALTER TABLE tasks ADD COLUMN mode TEXT NOT NULL DEFAULT 'solo'")
+                self._c.commit()
+            except sqlite3.OperationalError as e:                # another process added it a moment ago
+                if "duplicate column" not in str(e).lower():
+                    raise
 
     def close(self) -> None:
         with self._lock:
@@ -97,6 +102,10 @@ class ProjectDB:
                        " VALUES (?,?,?,?,?,?,?,?,?)",
                        (name, path, goal, brief, json.dumps(check_cmd or []), json.dumps(runners or []),
                         base_branch, now, now))
+
+    def delete_project(self, pid: int) -> None:
+        """Only for a project whose opening failed half way (no tasks yet)."""
+        self._x("DELETE FROM projects WHERE id=? AND NOT EXISTS (SELECT 1 FROM tasks WHERE project_id=?)", (pid, pid))
 
     def project(self, pid: int) -> dict | None:
         r = self._q("SELECT * FROM projects WHERE id=?", (pid,))
@@ -164,20 +173,31 @@ class ProjectDB:
 
     def promote(self, pid: int) -> int:
         """todo -> ready for every task whose dependencies are all done; ready/todo with a failed or cancelled
-        dependency -> blocked (reason says which). Returns how many changed."""
+        dependency -> blocked (reason says which); a task blocked only BY a dependency goes back to todo when that
+        dependency is no longer failed/cancelled (retried, split, replaced). Returns how many changed."""
         n = 0
         rows = self.tasks(pid)
         state = {t["id"]: t["status"] for t in rows}
+        seq = {t["id"]: t["seq"] for t in rows}
         for t in rows:
+            ds = [state.get(d) for d in t["deps"]]
+            if t["status"] == "blocked" and t["reason"].startswith(DEP_BLOCK):
+                if not any(s in ("failed", "cancelled") for s in ds):
+                    self.update_task(t["id"], status="todo", reason="")
+                    state[t["id"]] = t["status"] = "todo"
+                    n += 1
+                else:
+                    continue
             if t["status"] not in ("todo", "ready"):
                 continue
-            ds = [state.get(d) for d in t["deps"]]
             if any(s in ("failed", "cancelled") for s in ds):
                 bad = next(d for d in t["deps"] if state.get(d) in ("failed", "cancelled"))
-                self.update_task(t["id"], status="blocked", reason=f"dependency #{bad} {state[bad]}")
+                self.update_task(t["id"], status="blocked", reason=f"{DEP_BLOCK}#{seq.get(bad, bad)} {state[bad]}")
+                state[t["id"]] = "blocked"
                 n += 1
             elif all(s == "done" for s in ds) and t["status"] == "todo":
                 self.update_task(t["id"], status="ready")
+                state[t["id"]] = "ready"
                 n += 1
             elif not all(s == "done" for s in ds) and t["status"] == "ready":
                 self.update_task(t["id"], status="todo")

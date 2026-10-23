@@ -301,6 +301,7 @@ class ProjectsConfig(_Strict):
     openrouter_model: str = "openrouter/anthropic/claude-sonnet-5.5"   # checked 23 Oct 2026 (openrouter.ai, models.dev)
     tick_s: float = Field(5, ge=1, le=300)                 # dispatcher pass while a project is active
     approve_plans: bool = True                             # a plan an agent proposes waits for your approval
+    search_roots: list[str] = []                           # where "my project xy in folder work" is looked for; [] = home, work, projects, src, code, Documents...
 
 
 class HelperConfig(_Strict):

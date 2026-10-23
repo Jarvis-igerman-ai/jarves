@@ -162,6 +162,20 @@ PAGES.projects = async function () {
     handoff: ndone.checked ? ns.value : "" }, refresh);
   const paused = cur.status === "paused";
   const deepBox = el("div", {});
+  // who works now: JARVES's task runs and your own Claude Code / Codex sessions in this folder
+  const sess = (st && st.sessions) || [];
+  const runningNow = tasks.filter((t) => t.status === "running");
+  const agentWho = input({ type: "text", dir: "ltr", class: "narrow", "aria-label": tx("סוכן", "Agent"), placeholder: "claude" });
+  const agentMsg = input({ type: "text", dir: "auto", style: "min-width:240px", "aria-label": tx("הודעה לסוכן", "Message to the agent") });
+  const agentOp = (op, extra) => () => projOp(box, Object.assign({ op, project: cur.id, agent: agentWho.value.trim() }, extra || {}), refresh);
+  const nowCard = el("div", { class: "card" }, el("b", {}, tx("עובדים עכשיו: ", "Working now: ")),
+    el("span", { dir: "auto", "data-noi18n": "" }, runningNow.map((t) => `#${t.seq} ${t.runner || ""}${t.mode === "team" ? " +" : ""}`)
+      .concat(sess.map((x) => `${x.provider} (${tx("שלך", "yours")}, ${x.state_text || x.state}, ${x.age || ""})`)).join(" · ") || "—"),
+    el("div", { class: "filters", style: "margin-top:8px" }, field(tx("סוכן", "Agent"), agentWho), field(tx("הודעה לסוכן", "Message to the agent"), agentMsg),
+      el("button", { type: "button", class: "ghost", onclick: () => projOp(box, { op: "tell_agent", project: cur.id, agent: agentWho.value.trim(), text: agentMsg.value }, refresh) }, tx("שליחה לסוכן", "Send to agent")),
+      el("button", { type: "button", class: "ghost", onclick: agentOp("more_agents") }, tx("עוד סוכנים", "More agents")),
+      el("button", { type: "button", class: "ghost", onclick: agentOp("more_agents", { fewer: true }) }, tx("פחות סוכנים", "Fewer agents")),
+      el("button", { type: "button", class: "ghost", onclick: agentOp("stop_agent") }, tx("עצירת הסוכן", "Stop the agent"))));
   render(head, lead,
     el("div", { class: "card filters" }, field(tx("פרויקט", "Project"), pick),
       el("div", { class: "row" },
@@ -171,6 +185,7 @@ PAGES.projects = async function () {
         el("button", { type: "button", class: "ghost", onclick: simple("ship_plan") }, tx("תוכנית שילוב (Ship plan)", "Ship plan")),
         el("button", { type: "button", class: "ghost", onclick: () => route(true) }, tx("רענון", "Refresh")))),
     el("div", { class: "card" }, el("b", {}, tx("תקציר: ", "Summary: ")), el("span", { dir: "auto", "data-noi18n": "" }, (st && st.text) || "—")),
+    nowCard,
     box,
     el("div", { class: "card" }, list),
     el("h3", {}, tx("לוח משימות", "Task board")),

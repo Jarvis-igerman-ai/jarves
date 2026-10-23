@@ -9,6 +9,11 @@ title_en = "Software project manager"
 what_he = "פותחים פרויקט תוכנה (תיקיית git) וג'ארביס מנהל אותו: מפרק את המטרה למשימות קטנות, נותן כל משימה לסוכן קוד נפרד (Claude Code, Codex, OpenCode) בשיחה קצרה משלו, מריץ משימות בלתי תלויות במקביל, ומעביר עבודה הלאה בהעברת מקל קצרה. אפשר לשאול על המצב, להוסיף או לשנות משימה, לבקש פירוט ולדבר עם הסוכן."
 what_en = "You open a software project (a git folder) and JARVES manages it: it splits the goal into small tasks, gives each task to a separate coding agent (Claude Code, Codex, OpenCode) in its own short session, runs independent tasks in parallel and passes work on with a short handoff. You can ask for the status, add or change a task, ask for details and talk to the agent."
 say = [
+  ["יש לי פרויקט xy בתיקייה work, תנהל אותו", "I have a project xy in the folder work, manage it"],
+  ["קלוד עובד עליו, מה המצב?", "Claude is working on it, what is the status?"],
+  ["תוסיף סוכן קודקס למשימה אחרת: לכתוב בדיקות", "Add a Codex agent for another task: write tests"],
+  ["תעצור את קלוד", "Stop Claude"],
+  ["תגיד לקלוד להוסיף עוד סוכנים", "Tell Claude to add more agents"],
   ["מה המצב בפרויקט?", "What is the status of the project?"],
   ["תתכנן את זה, ותתייעץ גם עם קודקס", "Plan it, and consult Codex too"],
   ["תן את כל העבודה לקלוד, שיעבוד עם תת-סוכנים", "Give the whole job to Claude, with its own sub-agents"],
@@ -37,7 +42,7 @@ en = "Check that at least one coding agent is installed and signed in: jarvis pr
 
 [[steps]]
 he = "פתחו פרויקט, חדש או כזה שכבר התחיל: jarvis project open התיקייה --name שם --goal \"מה לבנות\" --check \"python -m pytest -q\". ג'ארביס ממשיך מהענף שאתם עליו (או --base ענף), ועם --dirty גם מהשינויים שלא שמרתם ב-commit; התיקייה שלכם לא משתנה. פתיחה וארכוב רק מהמחשב או מהדף, לא בקול."
-en = "Open a project, new or already started: jarvis project open FOLDER --name NAME --goal \"what to build\" --check \"python -m pytest -q\". JARVES continues from the branch you are on (or --base BRANCH), and with --dirty also from your uncommitted changes; your folder is not changed. Opening and archiving are done only from the PC or the page, not by voice."
+en = "Open a project, new or already started: jarvis project open FOLDER --name NAME --goal \"what to build\" --check \"python -m pytest -q\". JARVES continues from the branch you are on (or --base BRANCH), and with --dirty also from your uncommitted changes; your folder is not changed. By voice: \"I have a project xy in the folder work, manage it\" - JARVES finds the folder on this computer and asks you on the screen before it takes it. Archiving only from the PC."
 
 [[steps]]
 he = "עבודה שכבר נעשתה: jarvis project add \"כותרת\" --done --spec \"מה קיים ואיפה\". המשימות הבאות מקבלות את זה כהעברת מקל."
@@ -56,8 +61,28 @@ he = "ניהול שוטף, בכל רגע: status, add \"כותרת\" --spec \"..
 en = "Day to day, at any time: status, add \"title\" --spec \"...\" --scope src/a.py --after 1 [--team], update 3 --spec \"...\" [--team|--solo], split 3 --how \"...\" [--consult codex], note 3 \"remark\", cancel 3, retry 3, deep 3 (details), talk 3 \"question\" (or --do to ask for a change), digest. Agent per task: --runner claude / codex:model / opencode / openrouter."
 
 [[steps]]
+he = "הסוכנים שעובדים עכשיו, גם סשן Claude Code או Codex שפתחתם בעצמכם בתיקייה הזאת: \"מי עובד על הפרויקט?\" או jarvis project agents. עצירה: \"תעצור את קלוד\" או jarvis project stop claude (משימה שנעצרה ממשיכה עם retry). הודעה לסוכן: \"תגיד לקלוד ...\" או jarvis project tell claude \"...\". עוד סוכנים: \"תגיד לקלוד להוסיף עוד סוכנים\" (קלוד עובד עם תת-סוכנים) או \"תוסיף עוד סוכנים\" (יותר משימות במקביל), jarvis project more [claude] / fewer."
+en = "The agents working now, also a Claude Code or Codex session you opened yourself in this folder: \"who works on the project?\" or jarvis project agents. Stop: \"stop Claude\" or jarvis project stop claude (a stopped task continues with retry). A message to an agent: \"tell Claude ...\" or jarvis project tell claude \"...\". More agents: \"tell Claude to add more agents\" (Claude works with sub-agents) or \"add more agents\" (more tasks in parallel), jarvis project more [claude] / fewer."
+
+[[steps]]
+he = "עבודה ארוכה (תכנון, התייעצות, שאלה לסוכן) רצה ברקע: ג'ארביס אומר שהתחיל ומודיע כשהיא מוכנה. \"מה עם התכנון?\" מראה מה רץ."
+en = "Long work (planning, consulting, asking an agent) runs in the background: JARVES says it started and tells you when it is ready. \"How is the planning going?\" shows what runs."
+
+[[steps]]
 he = "לקחת את התוצאה: jarvis project ship מראה מה נבנה ואת הפקודות; jarvis project ship --apply ממזג לענף שלכם אחרי אישור על המסך (רק כשהתיקייה נקייה). ג'ארביס אף פעם לא דוחף."
 en = "Take the result: jarvis project ship shows what was built and the commands; jarvis project ship --apply merges it into your branch after an on-screen approval (only when the folder is clean). JARVES never pushes."
+
+[[problems]]
+he = "ג'ארביס לא מוצא את התיקייה של הפרויקט"
+en = "JARVES does not find the project's folder"
+fix_he = "הוא מחפש תיקיות git בשם הזה בבית, work, projects, src, code, Documents ושולחן העבודה. אם יש כמה, אמרו מילה מהנתיב (\"בתיקייה work\"), את הנתיב המלא, או הוסיפו מקום ב-projects.search_roots בהגדרות."
+fix_en = "It looks for git folders with that name in your home, work, projects, src, code, Documents and Desktop. If there are several, say a word of the path (\"in the folder work\"), the full path, or add a place to projects.search_roots in the settings."
+
+[[problems]]
+he = "ג'ארביס לא רואה את הסשן של Claude Code שפתחתי בעצמי"
+en = "JARVES does not see the Claude Code session I opened myself"
+fix_he = "הסשנים שלכם מגיעים ממנהל סוכני הקוד: הדליקו גם את \"מנהל סוכני קוד\" (jarvis features on agent_orchestrator), ואם צריך jarvis agents install-plugin claude. הסשן צריך לרוץ בתוך תיקיית הפרויקט."
+fix_en = "Your own sessions come from the coding-agent orchestrator: switch on \"Coding-agent orchestrator\" too (jarvis features on agent_orchestrator) and if needed jarvis agents install-plugin claude. The session must run inside the project's folder."
 
 [[problems]]
 he = "משימה סומנה \"תקועה\" ויש הודעה על קבצים מחוץ להיקף"

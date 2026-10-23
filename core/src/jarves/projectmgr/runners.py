@@ -22,7 +22,10 @@ _NOWIN = getattr(subprocess, "CREATE_NO_WINDOW", 0) if os.name == "nt" else 0
 OUT_CAP = 200_000
 SAFE_BASH = ("Bash(git status:*)", "Bash(git diff:*)", "Bash(git log:*)", "Bash(git add:*)", "Bash(git commit:*)")
 DENY = ("Bash(git push:*)", "Bash(git rebase:*)", "Bash(git reset:*)", "Bash(git checkout:*)", "Bash(git branch:*)",
-        "Bash(rm:*)", "Bash(curl:*)", "Bash(wget:*)", "Bash(sudo:*)", "WebFetch")
+        "Bash(rm:*)", "Bash(curl:*)", "Bash(wget:*)", "Bash(sudo:*)", "WebFetch",
+        # agent and sub-agent definitions/settings: an agent must not widen its own (or its sub-agents') permissions
+        "Edit(.claude/**)", "Write(.claude/**)", "Edit(.codex/**)", "Write(.codex/**)", "Edit(.opencode/**)",
+        "Write(.opencode/**)", "Edit(opencode.json)", "Write(opencode.json)", "Edit(.mcp.json)", "Write(.mcp.json)")
 
 
 @dataclass
@@ -150,7 +153,9 @@ def _tools(read_only: bool, check_argv: list[str] | None, team: bool = False) ->
         return t + ["Bash(git status:*)", "Bash(git diff:*)", "Bash(git log:*)"]
     t += ["Edit", "Write", *SAFE_BASH]
     if team:
-        t += ["Task", "Agent"]                    # Claude Code's own sub-agents (they inherit these same limits)
+        t += ["Task", "Agent"]                    # Claude Code's own sub-agents; their definitions under .claude/ are
+                                                  # denied (DENY) and checked again after the run (PROTECTED); real
+                                                  # sub-agent limits are UNVERIFIED against a live Claude Code
     if check_argv:
         t.append(f"Bash({' '.join(check_argv[:3])}:*)")
     return t

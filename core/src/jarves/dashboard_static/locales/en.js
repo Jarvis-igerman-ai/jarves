@@ -1944,6 +1944,11 @@
   "One lead agent with its own sub-agents": "One lead agent with its own sub-agents",
   "Strategy": "Strategy",
   "Agent with sub-agents": "Agent with sub-agents",
-  "Already done (record it)": "Already done (record it)"
+  "Already done (record it)": "Already done (record it)",
+  "Working now: ": "Working now: ",
+  "yours": "yours",
+  "More agents": "More agents",
+  "Fewer agents": "Fewer agents",
+  "Stop the agent": "Stop the agent"
  }
 };
