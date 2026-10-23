@@ -67,8 +67,9 @@ PR head (pull_request, merge ref)                      merge (automerge)        
 5. **Test sharding by measured duration.** `ci_plan.py` plans 3 Windows shards and 3 Linux shards from
    `durations.json` (seconds per test file), falling back to test counts for unmeasured files. The plan is computed once
    in `changes` and handed to every shard (`--shard-files`, slowest file first), so shards cannot disagree. After every full
-   run on `main` the `durations` job merges the junit files of all shards into a cache entry (`jarves-durations-<run>`) that
-   the next `changes` job restores: **rebalancing is automatic, no commit, no token**. Seed or refresh by hand:
+   run, and after every `main` push that reused a PR proof (from THAT PR run's junit files), the `durations` job merges the
+   junit files of all shards into a cache entry (`jarves-durations-v2-<os>-<run>`) that the next `changes` job restores:
+   **rebalancing is automatic, no commit, no token** (see "Follow-up: timing refresh after reuse"). Seed or refresh by hand:
    `python core/tools/ci_plan.py durations-merge --junit <one OS artifact directory> --into core/tests/durations-windows.json`.
    Inside a shard, `pytest-xdist` (pinned `pytest-xdist==3.8.0` through `uv run --with`, not in the lock) runs files in
    parallel workers with `--dist loadfile`: one file never splits across workers, and the suite already uses temp homes and
@@ -198,3 +199,31 @@ This is not yet a hosted timing claim. PR #57 records the final commit's hosted 
 installer dependency-stage caching and remaining slow Core-start fixtures are deferred; no product behavior changed.
 
 Cache scope checked 22 Oct 2026 against [GitHub's dependency caching reference](https://docs.github.com/en/actions/reference/workflows-and-actions/dependency-caching#restrictions-for-accessing-a-cache).
+
+## Follow-up: timing refresh after reuse (23 Oct 2026)
+
+Measured on the 24 jarves-checks runs since 22 Oct 14:00 (job timings from the Actions API): a green PR run takes
+10.3-14.1 minutes and its critical path is always ONE Python shard that runs about twice as long as its siblings. Median
+job times (green runs): Linux shards 280 / 584 / 289 s, Windows shards 394 / 340 / 520 s. Run 39979947350 (PR #82):
+Linux shard 2/3 ran 515 s against a planned 269 s; Windows shard 3/3 606 s against the same plan as its 360 s and 398 s
+siblings.
+
+Root cause: the plan used the committed seed of 22 Oct for every PR. The `durations` job only ran when the Core shards ran
+in the same run, but since the reuse design (above) the push to `main` after a normal merge skips every job, so `main`'s
+cache was never written; PR caches are scoped to the PR's merge ref and never reach other PRs. 30 of 174 non-browser
+test files had no measurement and were weighted by test count, among them `test_wake_prod.py` (about 190 s on Linux,
+planned as about 2 s), `test_mobile_phone_e2e.py` (real browser), `test_web_chat.py` and `test_self_manage.py`.
+
+Fix: `changes` exports the proof run id (`proof_run`) when a `main` push reuses a PR proof, and `durations` downloads
+the junit artifacts of THAT run (`actions/download-artifact` with `run-id`, job permission `actions: read`) and saves
+`main`'s cache, which every new PR restores. `durations` is `continue-on-error` (a timing hiccup must never turn a run red:
+a red run blocks `jarves-package` and automerge) and stays outside `ci-ok`. The `changes` job summary now prints the
+expected seconds per shard and the unmeasured files (`ci_plan.py summary`), so a stale plan is visible in every run.
+
+Expected effect (not measured yet; record the first runs after the first merge in HANDOFF): the same work spread evenly is
+about 385 s per Linux shard and about 455 s per Windows shard, so a PR run of about 9-9.5 minutes instead of 11-13. The
+first merge after this change fills `main`'s cache; PRs opened before that still plan from the seed.
+
+Not changed here (next candidates, each measured on its own): Windows xdist workers (2 on a 4-vCPU runner), a fourth
+shard per OS (more concurrent jobs: two PRs at once already queue against the 20-job limit, 47-196 s queue measured), and
+moving `test_mobile_phone_e2e.py` (a real-browser file inside the Core shards, no browser-job retry) to the browser job.

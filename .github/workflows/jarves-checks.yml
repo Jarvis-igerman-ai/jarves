@@ -48,6 +48,7 @@ jobs:
       plan: ${{ steps.c.outputs.plan }}
       tree: ${{ steps.c.outputs.tree }}
       reused: ${{ steps.c.outputs.reused }}
+      proof_run: ${{ steps.c.outputs.proof_run }}
     steps:
       - uses: actions/checkout@v7
         with:
@@ -69,18 +70,21 @@ jobs:
         run: |
           set -euo pipefail
           tree=$(python3 core/tools/ci_reuse.py tree)
-          reused=false
+          reused=false; proof_run=""
           if [ "$GITHUB_EVENT_NAME" = "push" ] && [ "$GITHUB_REF" = "refs/heads/main" ]; then
             # same tree as a green PR run => nothing to test or build (docs/CI_PERFORMANCE.md "reuse")
             if python3 core/tools/ci_reuse.py resolve --repo "$GITHUB_REPOSITORY" --tree "$tree" > reuse.out; then reused=true; fi
             cat reuse.out || true
+            # the PR run that proved this tree: the `durations` job feeds its junit timings into main's cache
+            [ "$reused" = "true" ] && proof_run=$(sed -n 's/^run_id=//p' reuse.out | head -1)
           fi
           args=(--event "$GITHUB_EVENT_NAME")
           [ "$reused" = "true" ] && args+=(--reused)
           python3 core/tools/ci_plan.py classify "${args[@]}" | tee classify.out
           if [ "$GITHUB_EVENT_NAME" != "pull_request" ] && [ "$reused" != "true" ]; then echo "full matrix ($GITHUB_EVENT_NAME $GITHUB_REF)"; fi
-          { cat classify.out; echo "tree=$tree"; echo "reused=$reused"; } >> "$GITHUB_OUTPUT"
-          { echo "tree \`${tree:0:12}\` reused=$reused"; grep -E '^[a-z0-9]+=(true|false)$' classify.out | tr '\n' ' '; } >> "$GITHUB_STEP_SUMMARY"
+          { cat classify.out; echo "tree=$tree"; echo "reused=$reused"; echo "proof_run=$proof_run"; } >> "$GITHUB_OUTPUT"
+          { echo "tree \`${tree:0:12}\` reused=$reused"; grep -E '^[a-z0-9]+=(true|false)$' classify.out | tr '\n' ' '; echo
+            python3 core/tools/ci_plan.py summary --plan-line "$(grep '^plan=' classify.out || true)" || true; } >> "$GITHUB_STEP_SUMMARY"
   validate:
     # Quick stage: every heavy job `needs` it, so a cheap budget/guide/docs failure ends a PR run in about two minutes
     # and no heavy job starts (on main/next the same gate runs; those runs are never cancelled, see `concurrency`).
@@ -233,13 +237,23 @@ jobs:
           type status.txt
           findstr /C:"Core is NOT running" status.txt || exit /b 1
   durations:
-    # Refresh each OS after a green full Core matrix, including same-repository PRs.
-    # Actions PR caches are merge-ref scoped: they accelerate subsequent runs of that PR, not other branches.
+    # Refresh each OS's measured file times, which `changes` restores to plan balanced shards. Two sources:
+    #  * a green full Core matrix in THIS run (same-repository PRs; main runs that did not reuse a proof);
+    #  * a main push that reused a PR's proof (the normal merge): the junit files of THAT PR run. PR caches are merge-ref
+    #    scoped and never reach other PRs, so without this main's cache never learned new test files and every PR planned
+    #    from the committed seed (shards 2x apart: docs/CI_PERFORMANCE.md "Follow-up: timing refresh after reuse").
+    # Optional and never red: not in ci-ok, continue-on-error (a red run would block jarves-package and automerge).
     name: Update shard timing data (${{ matrix.platform }})
     needs: [changes, core]
-    if: ${{ always() && needs.core.result == 'success' && needs.changes.outputs.full == 'true' && needs.changes.outputs.reused != 'true' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) }}
+    if: >-
+      ${{ always() && ((needs.core.result == 'success' && needs.changes.outputs.full == 'true' && needs.changes.outputs.reused != 'true' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository))
+      || (needs.changes.outputs.reused == 'true' && needs.changes.outputs.proof_run != '' && github.event_name == 'push' && github.ref == 'refs/heads/main')) }}
     runs-on: ubuntu-24.04
     timeout-minutes: 5
+    continue-on-error: true
+    permissions:
+      contents: read
+      actions: read        # the proof run's junit artifacts (another run of this workflow)
     strategy:
       matrix:
         platform: [linux, windows]
@@ -251,9 +265,18 @@ jobs:
           key: jarves-durations-v2-${{ matrix.platform }}-none
           restore-keys: jarves-durations-v2-${{ matrix.platform }}-
       - uses: actions/download-artifact@v8
+        if: needs.changes.outputs.reused != 'true'
         with:
           pattern: junit-${{ matrix.platform }}-*
           path: junit
+      - name: Junit of the PR run that proved this tree (reused main push)
+        uses: actions/download-artifact@v8
+        if: needs.changes.outputs.reused == 'true'
+        with:
+          pattern: junit-${{ matrix.platform }}-*
+          path: junit
+          run-id: ${{ needs.changes.outputs.proof_run }}
+          github-token: ${{ github.token }}
       - run: python3 core/tools/ci_plan.py durations-merge --junit junit --into core/tests/durations-${{ matrix.platform }}.json
       - uses: actions/cache/save@v6
         with:

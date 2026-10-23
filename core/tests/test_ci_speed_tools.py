@@ -397,3 +397,36 @@ def test_timing_refresh_separates_platforms_and_includes_successful_same_repo_pr
     assert "v2-${{ matrix.platform }}-" in save["with"]["key"]
     restores = [s["with"]["path"] for s in jobs["changes"]["steps"] if "cache/restore" in s.get("uses", "")]
     assert restores == ["core/tests/durations-linux.json", "core/tests/durations-windows.json"]
+
+
+def test_reused_main_push_feeds_the_proof_runs_timings_into_mains_cache():
+    """The normal merge reuses the PR proof and runs no Core shards; main's cache (the only one every PR can restore)
+    must still learn the PR run's timings, else every PR plans from the committed seed and new files stay unmeasured."""
+    jobs = _wf("jarves-checks.yml")["jobs"]
+    assert jobs["changes"]["outputs"]["proof_run"] == "${{ steps.c.outputs.proof_run }}"
+    script = next(s["run"] for s in jobs["changes"]["steps"] if s.get("id") == "c")
+    assert "proof_run=$(sed -n 's/^run_id=//p' reuse.out" in script and 'echo "proof_run=$proof_run"' in script
+    refresh = jobs["durations"]
+    cond = " ".join(refresh["if"].split())
+    assert "needs.changes.outputs.reused == 'true' && needs.changes.outputs.proof_run != ''" in cond
+    assert "github.ref == 'refs/heads/main'" in cond
+    assert refresh["continue-on-error"] is True                      # timing data never turns a run red
+    assert refresh["permissions"] == {"contents": "read", "actions": "read"}
+    downloads = [s for s in refresh["steps"] if "download-artifact" in s.get("uses", "")]
+    assert [s["if"] for s in downloads] == ["needs.changes.outputs.reused != 'true'", "needs.changes.outputs.reused == 'true'"]
+    proof = downloads[1]["with"]
+    assert proof["run-id"] == "${{ needs.changes.outputs.proof_run }}" and proof["github-token"] == "${{ github.token }}"
+    assert proof["pattern"] == downloads[0]["with"]["pattern"] == "junit-${{ matrix.platform }}-*"
+    assert "durations" not in jobs["ci-ok"]["needs"]
+
+
+def test_plan_names_unmeasured_files_and_the_summary_shows_them(tmp_path, capsys):
+    d = _tests_dir(tmp_path, {"test_a.py": 2, "test_b.py": 1, "test_new.py": 3})
+    p = ci_plan.plan(d, {"test_a.py": 10, "test_b.py": 5}, windows=2, linux=2, linux_durations={"test_a.py": 4})
+    assert p["unmeasured"] == {"windows": ["test_new.py"], "linux": ["test_b.py", "test_new.py"]}
+    line = ci_plan.summary(p)
+    assert line.startswith("shard plan: windows shards expected ") and "1 unmeasured file(s) (test_new.py)" in line
+    assert "linux shards expected" in line and "2 unmeasured file(s) (test_b.py, test_new.py)" in line
+    assert ci_plan.main(["summary", "--plan-line", "plan=" + json.dumps(p)]) == 0
+    assert capsys.readouterr().out.strip() == line
+    assert ci_plan.main(["summary", "--plan-line", ""]) == 0      # no plan line: an empty summary, never an error
