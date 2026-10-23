@@ -161,7 +161,7 @@ EVENTS: dict[str, dict] = {
                           "en": "the conversation reached its maximum length ({detail}) and reconnects",
                           "he": "השיחה הגיעה לאורך המקסימלי ({detail}) ומתחברת מחדש"},
     "VOICE_IDLE_DISCONNECT": {"key": "voice.idle_disconnect_s", "set": "set voice.idle_disconnect_s in config.toml",
-                              "speak": True,
+                              "speak": False,         # the normal "quiet for a while, back to wake mode": logged + on screen, not spoken
                               "en": "the conversation was closed after silence ({detail})",
                               "he": "השיחה נסגרה בגלל שקט ({detail})"},
 }

@@ -95,13 +95,13 @@ async def test_core_shows_event_on_every_surface(home, cfg):
         await c.stop()
 
 
-async def test_session_max_and_idle_are_spoken_locally(home, cfg):
+async def test_session_max_is_spoken_idle_is_not(home, cfg):
     cfg.voice.language = "en"
     c = _core(home, cfg, [])
     await c.start()
     try:
         await c._voice_limit_notice("VOICE_IDLE_DISCONNECT", "30 s", 30)
-        assert any("closed after silence" in t and "voice.idle_disconnect_s" in t for t in c._local_tts.spoken)
+        assert not c._local_tts.spoken               # quiet for a while = back to wake mode: logged + on screen, not spoken
         await c._voice_limit_notice("VOICE_SESSION_MAX", "900 s", 900)
         assert any("maximum length" in t and "voice.session_max_s" in t for t in c._local_tts.spoken)
         assert {e["code"] for e in c.recent_limit_events()} == {"VOICE_IDLE_DISCONNECT", "VOICE_SESSION_MAX"}
