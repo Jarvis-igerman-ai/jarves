@@ -8,9 +8,11 @@ from ..capabilities import PI_ROADMAP
 
 FEATURE = "project_manager"
 SKILL = "project"
-ABOUT = ("manages a software project for you: splits the goal into small tasks, runs coding agents (Claude Code, Codex, "
-         "OpenCode) on them in parallel, each in its own short session, and tells you the status; you can add or change "
-         "tasks, ask for details and talk to an agent. Never pushes or merges your branches")
+ABOUT = ("orchestrates coding agents (Claude Code, Codex, OpenCode) on a new or already-started software project: "
+         "the work is split your way, by its suggestion, by consulting several agents, or given to one lead agent with "
+         "its own sub-agents; tasks run in parallel in short sessions and it tells you the status; add, change or split "
+         "tasks, ask for details and talk to an agent at any time. Never pushes; merges into your branch only when you "
+         "approve")
 EVIDENCE = ("core/tests/test_projectmgr.py (fake agent executables, real git worktrees) + docs/plans/PROJECT_MANAGER.md; "
             "real Claude Code / Codex / OpenCode runs are not verified yet")
 features.register(FEATURE, "מנהל פרויקט תוכנה", "Software project manager", False, risk="medium", skills=[SKILL], applies="live",
@@ -19,9 +21,10 @@ features.register(FEATURE, "מנהל פרויקט תוכנה", "Software project
                            "linux_arm64_pi": {"status": "implemented_unverified", "roadmap_issue": PI_ROADMAP,
                                               "blocker": "not tried on a Pi; coding agents run on the PC"}})
 hebrew.TEXT.update({
-    ABOUT: "מנהל בשבילך פרויקט תוכנה: מפרק את המטרה למשימות קטנות, מריץ עליהן סוכני קוד (Claude Code, Codex, OpenCode) "
-           "במקביל, כל אחד בשיחה קצרה משלו, ומדווח מצב; אפשר להוסיף או לשנות משימות, לבקש פירוט ולדבר עם סוכן. "
-           "אף פעם לא דוחף ולא ממזג את הענפים שלך",
+    ABOUT: "מתזמר סוכני קוד (Claude Code, Codex, OpenCode) על פרויקט תוכנה חדש או כזה שכבר התחיל: העבודה מתפצלת "
+           "כמו שתגיד, לפי הצעה שלו, בהתייעצות עם כמה סוכנים, או ניתנת לסוכן מוביל אחד עם תת-סוכנים משלו; משימות רצות "
+           "במקביל בשיחות קצרות והוא מדווח מצב; בכל רגע אפשר להוסיף, לשנות או לפצל משימות, לבקש פירוט ולדבר עם סוכן. "
+           "אף פעם לא דוחף; ממזג לענף שלך רק כשאתה מאשר",
     EVIDENCE: "core/tests/test_projectmgr.py (תוכניות סוכן מדומות, git worktrees אמיתיים) ו-docs/plans/PROJECT_MANAGER.md; "
               "הרצות אמיתיות של Claude Code / Codex / OpenCode עוד לא נבדקו",
     "not tried on a Pi; coding agents run on the PC": "לא נוסה על Pi; סוכני הקוד רצים על המחשב",

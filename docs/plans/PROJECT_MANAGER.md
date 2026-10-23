@@ -111,3 +111,23 @@ branches. Planner quality depends on the model; the owner approves every plan.
   snapshot taken when the project is opened.
 - Restart recovery kills a surviving child by pid and requeues once; a task interrupted `max_attempts` times fails.
 - Not in the first release: runner fallback beyond the configured order, size-L split round, voice open/archive.
+
+## Flexible orchestration (owner request, 23 Oct 2026, after the first merge)
+
+The owner asked for a generic orchestrator without a fixed flow. Every operation can be used at any time, in any order:
+
+- **Already-started projects:** `open` continues from the branch you are on (or `--base`), `--dirty` starts from your
+  uncommitted tracked changes (`git stash create`, your folder untouched); `add --done` records work that exists, with
+  its handoff, so later tasks know about it. A new task in a finished project continues it.
+- **How to split, owner's choice:** your own list (starts at once, lenient: acceptance optional, size L only warns),
+  your instruction (`--how`, wins over the defaults), JARVES's suggestion, or **consult** several agents
+  (`--consult claude,codex:model`): they propose in parallel, read-only, and a **chair** agent merges the proposals
+  (failures are noted, the rest still count). A new plan replaces an unapproved one. `projects.approve_plans = false`
+  starts agent plans without a separate approval.
+- **One lead agent with sub-agents:** `--delegate` gives the whole goal to one agent as a `team` task: its card says it
+  may use its own sub-agents, Claude Code gets its sub-agent tool (same limits), the time limit is three times longer.
+  Any task can be `team` or `solo`; `split N` breaks a task into smaller ones and rewires its dependants.
+- **Agents are specs:** `claude`, `codex:<model>`, `opencode:<provider/model>`, `openrouter` (paid, gated) for a task,
+  the project order, a planner, a consulted agent or the chair.
+- **Taking the result:** `ship` shows it; `ship --apply` (PC only, approval, clean folder) merges it into your branch.
+  Never a push.

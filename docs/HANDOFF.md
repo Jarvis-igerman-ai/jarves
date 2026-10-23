@@ -1,3 +1,10 @@
+## Project manager: flexible orchestration — 23 Oct 2026
+
+- Owner feedback after #88: the flow was too strict; JARVES must also take over already-started projects, the owner must be able to say how to split, ask for a suggestion or have JARVES consult other agents, and sometimes give the work to one agent with its own sub-agents. Generic, no forced order.
+- Implemented (see "Flexible orchestration" in [PROJECT_MANAGER](plans/PROJECT_MANAGER.md)): `open --base/--dirty`, `add --done`, `plan --how/--consult/--chair/--agent/--delegate/--auto`, `split N`, task modes `solo|team`, runner specs `agent:model`, `ship --apply` (approval, never push), `projects.approve_plans`; voice tools and the Projects page carry the same options; guide EN+HE updated.
+- Verification: `core/tests/test_projectmgr.py` (29 tests incl. consult+chair merge, delegate with sub-agent tool in argv, split rewiring, dirty start, recorded work handoff, ship apply, DB migration, CLI flow). NOT verified: real agents' sub-agent behaviour (Claude Code `Task`/`Agent` tool names, Codex/OpenCode sub-agents are only asked for in the prompt), real consult quality.
+- Review: independent Opus review of this diff; findings and fixes are listed in the PR.
+
 ## WhatsApp bridge: one signed "Download the WhatsApp bridge" step — 23 Oct 2026 / #17 (branch feat/whatsapp-bridge-download, no PR yet)
 
 - Problem: with no bridge program the owner could only reinstall or build Go. Now the WhatsApp page (card "The bridge program is not installed"), `jarvis whatsapp install`, and the Connect flow (`jarvis connect whatsapp` asks; the dashboard Connect row opens the WhatsApp page) offer ONE step that downloads the prebuilt Windows bridge, verifies it and installs it to `<JARVES home>/bridge/whatsapp_bridge.exe` (the per-user location `bridge_command()` now also searches, after the shipped payload and the source-checkout `dist`). Backend: new `core/src/jarves/whatsapp_bridge_install.py`, shared by dashboard `POST /api/whatsapp/install` (local-only, like every WhatsApp change) and the CLI (`whatsapp_admin.install_bridge`).
