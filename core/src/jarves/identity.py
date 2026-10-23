@@ -232,6 +232,10 @@ class Identity:
                       target=Path(str(w["model"])).name)
         cfg.voice.wake_word = w["model"]
         if w.get("threshold") is not None:
+            if abs(float(cfg.voice.wake_threshold) - float(w["threshold"])) > 1e-9:
+                logs.warn("identity", "WAKE_THRESHOLD_OVERRIDDEN", "voice.wake_threshold in config.toml is replaced by "
+                          "the threshold saved with the wake model (identity.json); change it with "
+                          "`jarvis wake test --apply`", config=cfg.voice.wake_threshold, used=w["threshold"])
             cfg.voice.wake_threshold = w["threshold"]
         cfg.voice.wake_phrase = w["phrase"]
         d = self._read()
