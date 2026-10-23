@@ -48,6 +48,9 @@ class AutoGain:
         self.floor_db = -70.0
         self.speech_db: float | None = None
         self.gain_db = float(initial_gain_db)
+        # the calibrated starting gain (jarvis wake test) is also the lowest the live tracker may go: its own
+        # estimate used to decay a freshly loaded +2.3 dB to 0.0 within seconds (floor tracker still near -70 dB).
+        self.min_gain_db = max(0.0, min(float(initial_gain_db), max_gain_db))
 
     def process(self, frame: bytes) -> bytes:
         a = np.frombuffer(frame, "<i2").astype(np.float32) / 32768.0
@@ -62,7 +65,7 @@ class AutoGain:
                 self.speech_db -= 0.02                               # ~4 s to forget a loud talker
         if self.speech_db is not None:
             want = min(self.target_db - self.speech_db, self.max_floor_db - self.floor_db, self.max_gain_db)
-            want = max(0.0, want)
+            want = max(self.min_gain_db, want)
             self.gain_db += (want - self.gain_db) * (0.3 if want < self.gain_db else 0.05)
         if self.gain_db < 0.1:
             return frame
