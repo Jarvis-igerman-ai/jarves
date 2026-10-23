@@ -449,12 +449,16 @@ PAGES.settings = async function () {
   const d = await api("/api/settings");
   const msg = note();
   const changed = {};
+  const dirty = el("span", { class: "muted small", "aria-live": "polite" });
+  const touched = () => { const n = Object.keys(changed).length; dirty.textContent = n ? tx(`${n} שינויים שלא נשמרו`, `${n} unsaved change(s)`) : ""; };
+  let showKeys = false;
+  try { showKeys = localStorage.getItem("jarves.settings.keys") === "1"; } catch (e) { /* no storage: keys stay hidden */ }
   const groups = {};
   for (const e of d.editable) (groups[e.group] = groups[e.group] || []).push(e);
   const control = (e) => {
     const cur = e.file !== null && e.file !== undefined ? e.file : e.running;
     const lab = { "aria-label": txh(e, "label") || e.key };       // K: a screen reader names the control by its row
-    const mark = (v) => { changed[e.key] = v; save.disabled = false; };
+    const mark = (v) => { changed[e.key] = v; save.disabled = false; touched(); };
     if (e.type === "bool") return input({ type: "checkbox", checked: !!cur, ...lab, onchange: (ev) => mark(ev.target.checked) });
     if (e.type === "choice") return select(e.choices.map((c) => [c, c === "" ? tx("(ברירת המחדל של החשבון)", "(account default)") : c]), cur, { ...lab, onchange: (ev) => mark(ev.target.value) });
     const a = { type: e.type === "str" ? "text" : "number", class: "narrow", ...lab, oninput: (ev) => mark(ev.target.value) };
@@ -463,7 +467,9 @@ PAGES.settings = async function () {
   };
   const save = el("button", { type: "button", class: "primary", disabled: true, onclick: async () => {
     try { const r = await api("/api/settings", { method: "PUT", body: JSON.stringify({ values: changed }) });
-      msg.textContent = `Saved ${Object.keys(r.changed).length} value(s) to config.toml${r.backup ? " (backup " + r.backup + ")" : ""}. They apply when JARVES starts next.`; save.disabled = true; undo.disabled = false; }
+      msg.textContent = `Saved ${Object.keys(r.changed).length} value(s) to config.toml${r.backup ? " (backup " + r.backup + ")" : ""}. They apply when JARVES starts next.`;
+      for (const k of Object.keys(changed)) delete changed[k];      // saved: the next save sends only what changes after this
+      touched(); save.disabled = true; undo.disabled = false; }
     catch (e) { msg.textContent = "Not saved: " + e.message; }
   } }, "Save changes");
   const undo = el("button", { type: "button", disabled: !d.backups.length, onclick: async () => {
@@ -471,7 +477,7 @@ PAGES.settings = async function () {
     catch (e) { msg.textContent = e.message; }
   } }, "Undo last save");
   const cards = Object.entries(groups).map(([g, list]) => el("div", { class: "card", style: "margin-bottom:12px" }, el("b", {}, txh(list[0], "group")),
-    el("table", { style: "margin-top:6px" }, el("tbody", {}, list.map((e) => el("tr", {}, el("td", {}, txh(e, "label"), el("div", { class: "muted small mono" }, e.key)),
+    el("table", { style: "margin-top:6px" }, el("tbody", {}, list.map((e) => el("tr", {}, el("td", {}, txh(e, "label"), el("div", { class: "muted small mono adv-key" }, e.key)),
       el("td", {}, control(e)), el("td", { class: "muted small" }, `${tx("ברירת מחדל", "default")} ${e.default === "" ? '""' : e.default}` + (e.min !== undefined ? ` · ${e.min}–${e.max ?? "∞"}` : "") +
         (e.file !== null && e.file !== undefined && e.file !== e.running ? tx(` · פועל עכשיו: ${e.running} (עד הפעלה מחדש)`, ` · running now: ${e.running} (until restart)`) : ""))))))));
   const rt = d.runtime || {};
@@ -485,14 +491,19 @@ PAGES.settings = async function () {
     el("div", { class: "kv", style: "margin-top:8px" }, Object.entries(d.config).flatMap(([sec, v]) => typeof v === "object" && v !== null
       ? Object.entries(v).flatMap(([k, x]) => [el("div", { class: "k" }, `${sec}.${k}`), el("div", { class: "v" }, typeof x === "object" ? JSON.stringify(x) : String(x))])
       : [el("div", { class: "k" }, sec), el("div", { class: "v" }, String(v))])));
-  render(header("Settings", "Change JARVES's non-secret settings. They are checked before saving, the old config.toml is backed up, and most apply when JARVES starts next.", undo, save),
-    msg, d.error ? el("div", { class: "card", style: "margin-bottom:12px" }, "config.toml cannot be edited here: " + d.error) : null,
-    el("div", { class: "card", style: "margin-bottom:12px" }, el("b", {}, tx("הגדרה וסיור", "Setup and tour")), el("div", { class: "small" },
-      tx("להגדיר, לבדוק וללמוד כל נושא, צעד אחר צעד: ", "Set up, test and learn every topic, step by step: "), el("a", { href: "#/setup" }, tx("פתיחת הגדרה וסיור", "Open Setup and tour")))),
-    el("div", { class: "card", style: "margin-bottom:12px" }, el("b", {}, "Switches"), el("div", { class: "small" },
-      "Turning features on or off (camera, music, web search, background tasks, AI review, learning from conversations, greeting, chimes…) is on the ",
-      el("a", { href: "#/features" }, "Features page"), ". They apply at once or at the next conversation.")),
+  const keyBox = input({ type: "checkbox", checked: showKeys, onchange: (ev) => {
+    body.classList.toggle("show-keys", ev.target.checked);
+    try { localStorage.setItem("jarves.settings.keys", ev.target.checked ? "1" : "0"); } catch (e) { /* ignore */ }
+  } });
+  const body = el("div", { id: "settingsBody", class: showKeys ? "show-keys" : "" }, cards);
+  const bar = el("div", { class: "save-bar", role: "region", "aria-label": tx("שמירת הגדרות", "Save settings") },
+    dirty, msg, el("span", { class: "spacer" }), undo, save);
+  render(header("Settings", "Change JARVES's non-secret settings. They are checked before saving, the old config.toml is backed up, and most apply when JARVES starts next."),
+    d.error ? el("div", { class: "card", style: "margin-bottom:12px" }, "config.toml cannot be edited here: " + d.error) : null,
+    el("div", { class: "muted small", style: "margin-bottom:12px" }, tx("מחפשים מתגים או הדרכה? ", "Looking for switches or a guided setup? "),
+      el("a", { href: "#/features" }, tx("יכולות ומתגים", "Features & switches")), " · ", el("a", { href: "#/setup" }, tx("הגדרה וסיור", "Setup and tour"))),
     voiceSel ? el("div", { class: "card", style: "margin-bottom:12px" }, el("div", { class: "row" }, el("b", {}, "Voice"), voiceSel, rtMsg),
       el("div", { class: "muted small" }, "GPT-Live voice; a new voice starts with the next conversation.")) : null,
-    cards, full, el("div", { class: "muted small", style: "margin-top:12px" }, tx(`קובץ: ${d.config_file} · תיקיית הנתונים: ${d.home} · מפתחות API נשמרים ב-secrets.env ואף פעם לא מוצגים או נערכים כאן.`, `File: ${d.config_file} · data folder: ${d.home} · API keys live in secrets.env and are never shown or edited here.`)));
+    el("label", { class: "small adv-toggle" }, keyBox, " ", tx("הצגת שמות טכניים", "Show technical names")),
+    body, full, el("div", { class: "muted small", style: "margin-top:12px" }, tx(`קובץ: ${d.config_file} · תיקיית הנתונים: ${d.home} · מפתחות API נשמרים ב-secrets.env ואף פעם לא מוצגים או נערכים כאן.`, `File: ${d.config_file} · data folder: ${d.home} · API keys live in secrets.env and are never shown or edited here.`)), bar);
 };
