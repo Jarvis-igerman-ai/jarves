@@ -664,7 +664,7 @@ class SelfCheck:
         th = float(self.cfg.voice.wake_threshold)
         metrics["wake"] = {"wakes": len(wakes), "false_wakes": len(false), "near_misses": len(near), "threshold": th}
         if len(false) >= 3 and (not wakes or len(false) / max(1, len(wakes)) >= 0.25):
-            new = round(min(0.8, th + 0.05), 2)
+            new = round(min(0.8, max(th + 0.05, 0.3)), 2)   # issue #17: from 0.15 a +0.05 step never stopped the false wakes
             out.append(Finding(
                 "wake:false", "wake", "medium", f"False wakes: {len(false)} of {len(wakes) or len(false)} wakes had no speech",
                 f"התעוררויות לשווא: ב-{len(false)} מתוך {len(wakes) or len(false)} התעוררויות אף אחד לא דיבר",

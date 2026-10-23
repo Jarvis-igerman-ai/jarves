@@ -28,6 +28,7 @@ import base64
 import inspect
 import json
 import time
+from collections import deque
 from datetime import datetime
 from typing import TYPE_CHECKING, Any, Awaitable, Callable
 
@@ -51,6 +52,11 @@ USER_TALKING_S = 0.5        # the user counts as "still talking" this long after
 ENERGY_EXTEND_S = 30.0      # loud mic input without any transcribed speech keeps a session open at most this long
 NO_SPEECH_TALKING_S = 1.5   # mic voice this recent postpones the false-wake cutoff (pauses between words included)
 DROP_CAPTION_TAIL_S = 1.0   # assistant text this soon after dropped early audio belongs to it: not captioned
+CUE_AFTER_S = 3.0           # issue #17: this long after the user stopped with no sound from JARVES: a soft local cue
+CUE_EVERY_S = 5.0           # ... and again this often (at most CUE_MAX per user turn)
+CUE_MAX = 4
+ECHO_BARGE_OPEN_S = 1.5     # after a barge-in through the echo gate the mic stays open this long
+EXTRA_DISABLE_AFTER = 3     # an optional note kind is switched off for the session after this many rejections
 BARGE_IN_MIN_S = 0.5       # assistant audio must have been playing this long before a new user utterance flushes it
 
 # Tuned 2026-10-19 against the Live prompting guide (developers.openai.com/api/docs/guides/live-prompting) and
@@ -285,6 +291,17 @@ LANG_NOTE = ("[language] The user is speaking {lang} now: answer in {lang} while
              "the user speaks Hebrew again, answer in Hebrew again.")
 LANG_BACK_NOTE = "[language] The user speaks Hebrew again now: answer this question in Hebrew."
 LANG_MIN_LETTERS = 8            # letters of a turn needed before its language is judged
+
+
+def cue_pcm() -> bytes:
+    """The soft local "working on it" cue: two short rising notes, quiet (PCM16 mono at RATE)."""
+    import numpy as np
+    parts = []
+    for hz, dur in ((523.0, 0.09), (659.0, 0.12)):
+        t = np.arange(int(RATE * dur)) / RATE
+        env = np.minimum(1.0, np.minimum(t / 0.012, (dur - t) / 0.05))
+        parts.append(np.sin(2 * np.pi * hz * t) * env * 0.12)
+    return (np.concatenate(parts) * 32767).astype("<i2").tobytes()
 
 
 def clock_note(now=None) -> str:
@@ -626,7 +643,9 @@ class LiveVoice(SessionLifecycle):
                  service_tier: str = "", max_output_tokens: int = 0, echo_tail_s: float = 0.4,
                  clock_context: bool = False, progress_after_s: float = 0.0, no_speech_timeout_s: float = 0.0,
                  backend_deadline_s: float = 0.0, retry_lookup: Callable[[str], Awaitable[str]] | None = None,
-                 reasoning_summary: str = "", delegation_mode: str = "server", delegation=None) -> None:
+                 reasoning_summary: str = "", delegation_mode: str = "server", delegation=None,
+                 cue_after_s: float = 0.0, cue_allowed: Callable[[], bool] | None = None) -> None:
+        self.cue_after_s, self.cue_allowed = cue_after_s, cue_allowed
         self.on_emotion, self.on_activity, self.on_level = on_emotion, on_activity, on_level
         # SW-V4 D (#14): "server" = Responses delegation (OpenAI runs the backend); "client" = JARVES runs every
         # backend request itself (voice/delegation_client.py, strict cap); "text_only" = no lookups (ladder fallback)
@@ -729,6 +748,14 @@ class LiveVoice(SessionLifecycle):
         self._lang_turn = -1            # the user turn whose language was judged
         self._voice_onset = 0.0         # first loud mic chunk of the current user utterance
         self._onset_over_speech = False # ... and whether JARVES was audibly speaking at that moment
+        from .echo_gate import EchoBargeIn
+        self._echo = EchoBargeIn()       # half-duplex: user talking over JARVES through the closed mic gate
+        self._barge_open_until = 0.0
+        self._cue_until = 0.0            # a local cue is playing: the mic gate stays shut for it
+        self._cue_turn, self._cue_n, self._cue_last = -1, 0, 0.0
+        self._lat: dict = {}             # stage timestamps of the current reply (LIVE_LATENCY)
+        self._extra_rejects: dict = {}   # optional-note kind -> times the server rejected it
+        self._reject_codes: dict = {}    # event id -> provider error code of a rejected note
         self._convo: list[dict] = []    # finished utterances (client delegation builds the backend input from them)
 
     def session_config(self) -> dict:
@@ -870,6 +897,8 @@ class LiveVoice(SessionLifecycle):
             self._spawn(self._player(), "player")
         self._spawn(self._watchdog(), "watchdog")
         self._spawn(self._idle_watchdog(), "idle")
+        if self.cue_after_s > 0 and self.audio_io is not None:
+            self._spawn(self._dead_air_cue(), "dead-air-cue")
         if self.clock_context:
             self._spawn(self._clock_loop(), "clock")
         self._t_ready = time.monotonic()
@@ -960,6 +989,70 @@ class LiveVoice(SessionLifecycle):
                 need, last_req = PROGRESS_AGAIN_S, time.monotonic()     # silence counts from the request
             await asyncio.sleep(0.3)
 
+    async def _dead_air_cue(self) -> None:
+        """Issue #17 (owner's PC: waits of 9-13 s of silence, replies 5.9 s late): when the user has finished and
+        JARVES makes no sound for cue_after_s, play a soft LOCAL two-note cue (no network, no model), again every
+        CUE_EVERY_S (at most CUE_MAX per user turn). Never over the user's speech or JARVES's own, never while an
+        approval waits on the screen, and only when the Core allows it (chime switch, not in quiet hours)."""
+        while self.running:
+            await asyncio.sleep(0.25)
+            now = time.monotonic()
+            heard = self._last_user_voice
+            if (not heard or not self._heard_user or self._user_turn_n < 1 or self._confirm_pending
+                    or self._input_closed or self._in_text.strip() or self._last_speech_t >= heard
+                    or now < self._speaking_until or now - heard < USER_TALKING_S):
+                continue
+            if self._cue_turn != self._user_turn_n:
+                self._cue_turn, self._cue_n, self._cue_last = self._user_turn_n, 0, 0.0
+            waited = now - heard
+            if (waited < self.cue_after_s or self._cue_n >= CUE_MAX
+                    or (self._cue_n and now - self._cue_last < CUE_EVERY_S)):
+                continue
+            if self.cue_allowed is not None and not self.cue_allowed():
+                continue
+            self._cue_n, self._cue_last = self._cue_n + 1, now
+            self._cue_until = now + 0.6
+            self._stats["working_cues"] = self._stats.get("working_cues", 0) + 1
+            logs.info("live", "LIVE_WORKING_CUE", "still no answer: soft local cue played", waited_s=round(waited, 1),
+                      n=self._cue_n, backend_busy=getattr(self, "_backend_busy", False), tools_running=self._tools_running,
+                      delegations_open=len(self._pending), stage=self._wait_stage())
+            self.audio_io.enqueue(cue_pcm())
+
+    def _wait_stage(self) -> str:
+        """Which stage a silent wait is in right now (for LIVE_WORKING_CUE / LIVE_LATENCY)."""
+        if self._tools_running:
+            return "tool"
+        if getattr(self, "_backend_busy", False):
+            return "backend"
+        if self._lat.get("deleg"):
+            return "after_delegation"
+        return "model_or_network"
+
+    def _log_latency(self, now: float, heard: float) -> None:
+        """Where did the time between the end of the user's speech and the first audio of the answer go?"""
+        lat = self._lat
+        d, bs, be = lat.get("deleg"), lat.get("backend_start"), lat.get("backend_end")
+        total = max(0.0, now - heard)
+        stages: dict[str, float] = {}
+        if d and d >= heard - 1.0:
+            stages["to_delegation"] = max(0.0, d - heard)
+            if bs:
+                stages["delegation_to_backend"] = max(0.0, bs - d)
+                if be:
+                    stages["backend"] = max(0.0, be - bs)
+                    stages["backend_to_audio"] = max(0.0, now - be)
+                else:
+                    stages["backend_to_audio"] = max(0.0, now - bs)
+            else:
+                stages["delegation_to_audio"] = max(0.0, now - d)
+        else:
+            stages["model_direct"] = total
+        slowest = max(stages, key=stages.get)
+        fields = {f"{k}_s": round(v, 2) for k, v in stages.items()}
+        (logs.warn if total >= 5.0 else logs.info)("live", "LIVE_LATENCY", "reply latency by stage", total_s=round(total, 2),
+                                                   slowest=slowest, cues=self._cue_n if self._cue_turn == self._user_turn_n else 0,
+                                                   **fields)
+
     async def _watchdog(self) -> None:          # cost guard
         await asyncio.sleep(self.max_session_s)
         logs.info("live", "LIVE_TIME_LIMIT", "session time limit reached")
@@ -977,11 +1070,32 @@ class LiveVoice(SessionLifecycle):
         peak = 0.0
         last_level = 0.0
         t_diag = time.monotonic()
+        preroll: deque = deque(maxlen=3)             # the last chunks while gated (sent if the user breaks in)
         async for chunk in self.audio_io.mic_chunks(RATE, CHUNK_BYTES):
             if not self.running:
                 return
             gated = self._gated()
             level = rms(chunk)
+            if gated and self.half_duplex and not self._input_closed:
+                preroll.append(chunk)
+                if self._echo.observe(level, len(chunk) / 2 / RATE, True):
+                    # issue #17: the mic level through the closed echo gate is well above the room echo for a
+                    # moment: the USER is talking over JARVES. Stop the speech now and open the mic.
+                    now_b = time.monotonic()
+                    self._stats["echo_barge_ins"] = self._stats.get("echo_barge_ins", 0) + 1
+                    self._barge_open_until = now_b + ECHO_BARGE_OPEN_S
+                    self._last_user_voice, self._drop_until = now_b, now_b + 0.6
+                    logs.info("live", "LIVE_ECHO_BARGE_IN", "user spoke over JARVES through the echo gate: "
+                              "speech stopped, microphone opened", mic_level=round(level, 3),
+                              echo_level=round(self._echo.echo, 3))
+                    await self.interrupt()
+                    for old in list(preroll)[:-1]:
+                        await self.conn.session.input_audio.append(audio=base64.b64encode(old).decode())
+                    preroll.clear()
+                    gated = False
+            else:
+                preroll.clear()
+                self._echo.observe(level, 0.1, False)
             if self.on_level is not None and time.monotonic() - last_level >= 0.2:
                 last_level = time.monotonic()
                 from .wakeword import level_meter
@@ -991,6 +1105,7 @@ class LiveVoice(SessionLifecycle):
             if not gated and level > 0.02:
                 now = time.monotonic()
                 if now - self._last_user_voice > USER_TALKING_S:     # a new utterance starts (barge-in stat)
+                    self._lat = {}
                     self._voice_onset, self._onset_over_speech = now, now < self._speaking_until
                 self._last_user_voice = now
             await self.conn.session.input_audio.append(audio=base64.b64encode(silence if gated else chunk).decode())
@@ -1013,7 +1128,12 @@ class LiveVoice(SessionLifecycle):
                 await self._state("listening")
 
     def _gated(self) -> bool:                   # half-duplex echo guard on speakers; budget input close (F1)
-        return self._input_closed or (self.half_duplex and time.monotonic() < self._speaking_until + self.echo_tail_s)
+        now = time.monotonic()
+        if self._input_closed:
+            return True
+        if now < self._barge_open_until:        # the user is talking over JARVES: the mic is open (issue #17)
+            return False
+        return self.half_duplex and (now < self._speaking_until + self.echo_tail_s or now < self._cue_until)
 
     async def _player(self) -> None:
         await self._presented.wait()
@@ -1082,6 +1202,7 @@ class LiveVoice(SessionLifecycle):
         heard = getattr(self, "_last_user_voice", 0.0)
         if heard and heard > getattr(self, "_wait_ref", 0.0):
             self._reply_wait_s = round(now - heard, 2)
+            self._log_latency(now, heard)
         self._wait_ref = now
 
     def _take_reply_wait(self) -> dict:
@@ -1224,6 +1345,7 @@ class LiveVoice(SessionLifecycle):
             logs.info("live", "LIVE_DELEGATION", "GPT-Live delegated work", target=str(_get(g("delegation"), "target")),
                       delegation=str(_get(g("delegation"), "id") or ""))
             did = str(_get(g("delegation"), "id") or "")
+            self._lat.setdefault("deleg", time.monotonic())
             if self._own_pending is not None and _get(g("delegation"), "target") == "responses":
                 # live probe 20 Oct: a Core response.create arrives as an ordinary delegation (GPT-Live then speaks
                 # its result itself); it is ours, not the model's own delegation for the user turn
@@ -1266,22 +1388,33 @@ class LiveVoice(SessionLifecycle):
                           detail=msg)
                 await self.delegation.on_rejected(cid, code, msg)
                 return
-            if cid.startswith("jarves_lang"):
+            if cid.startswith(("jarves_lang", "jarves_clock", "jarves_progress", "jarves_stall", "jarves_task")):
+                # Optional extras (language/clock/progress notes, stall/task announcements); the session stays healthy.
+                # Issue #17: the owner's PC logged 19 rejections and dead air with them. The documented provider
+                # code is `context_injection_incomplete` (a note arriving while the previous context event is still
+                # being applied, e.g. a progress note during a backend response): TRANSIENT. The old code switched
+                # the progress cue off for the whole session on the FIRST rejection, so the next slow lookup was
+                # silent. Now a kind is switched off only after EXTRA_DISABLE_AFTER rejections, only the first
+                # rejection of a kind is a WARNING (the rest are DEBUG + counted), and the local dead-air cue
+                # (_dead_air_cue) covers the user whether or not the note was accepted.
                 code, msg, _ = error_info(g("error"))
-                logs.warn("live", "LIVE_EXTRA_REJECTED", "optional context rejected", extra="lang", error_code=code,
-                          provider_error=msg)
-                self._lang_off = True
-                return
-            if cid.startswith(("jarves_clock", "jarves_progress", "jarves_stall", "jarves_task")):
-                # optional extras: clock/progress are switched off; stall/task notes are only logged; stay healthy
-                code, msg, _ = error_info(g("error"))
-                logs.warn("live", "LIVE_EXTRA_REJECTED", "optional context rejected", extra=cid.split("_")[1],
-                          error_code=code, provider_error=msg)
+                kind = cid.split("_")[1]
+                n = self._extra_rejects[kind] = self._extra_rejects.get(kind, 0) + 1
+                self._stats["extras_rejected"] = self._stats.get("extras_rejected", 0) + 1
+                (logs.warn if n == 1 else logs.debug)("live", "LIVE_EXTRA_REJECTED", "optional context rejected",
+                                                      extra=kind, error_code=code, provider_error=msg, times=n,
+                                                      event=cid[:48])
                 self._rejected = (getattr(self, "_rejected", set()) | {cid})
-                if cid.startswith("jarves_clock"):
-                    self.clock_context = False
-                elif cid.startswith("jarves_progress"):
-                    self.progress_after_s = 0.0
+                self._reject_codes[cid] = f"{code} {msg}".lower()
+                if n >= EXTRA_DISABLE_AFTER or "incomplete" not in self._reject_codes[cid]:
+                    if kind == "lang":
+                        self._lang_off = True
+                    elif kind == "clock":
+                        self.clock_context = False
+                    elif kind == "progress":
+                        self.progress_after_s = 0.0
+                        logs.info("live", "LIVE_PROGRESS_OFF", "spoken progress notes switched off for this session; "
+                                  "the local cue still plays", rejected=n)
                 return
             await self._on_error(g("error"))
         elif t == "info":
@@ -1561,7 +1694,11 @@ class LiveVoice(SessionLifecycle):
                           "note handed to GPT-Live", extra=tag, chars=len(content))
                 self.note_activity()
                 return True
-            content = content[: len(content) // 2]
+            if "incomplete" in self._reject_codes.get(eid, ""):
+                await asyncio.sleep(1.0)            # transient: the same note again, not a shorter one
+                self._rejected.discard(eid)
+            else:
+                content = content[: len(content) // 2]
         return False
 
     async def _backend_event(self, inner: dict, delegation_id: str | None) -> None:
@@ -1585,6 +1722,7 @@ class LiveVoice(SessionLifecycle):
             from ..brain import BackendTrace
             tr = self._trace = BackendTrace("live", "LIVE_BACKEND", delegation=delegation_id)
             self._backend_t0 = time.monotonic()
+            self._lat.setdefault("backend_start", self._backend_t0)
             if not getattr(self, "_backend_busy", False) or getattr(self, "_busy_delegation", None) != delegation_id:
                 self._busy_t0 = self._backend_t0    # elapsed on screen counts from the delegation's first response
             self._busy_delegation = delegation_id
@@ -1601,6 +1739,7 @@ class LiveVoice(SessionLifecycle):
             await self._show(*shown)
         if it in ("response.completed", "response.failed", "response.incomplete"):
             self._backend_busy = False
+            self._lat["backend_end"] = time.monotonic()
             self.note_activity()
             # One delegated backend response finished (billed whether or not it succeeded) -> count it.
             self._stats["backend_responses"] += 1

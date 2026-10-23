@@ -53,8 +53,14 @@ fix_en = "On Home, under What is on now, the detector shows what it heard (e.g. 
 [[problems]]
 he = "הוא נדלק לבד"
 en = "He wakes up by himself"
-fix_he = "בדיקת הדיבור המקומית (voice.wake_confirm) דוחה דמיונות כמו \"היי טרוויס\". אם זה עדיין קורה, הריצו jarvis wake test --false-wakes 30 והעלו את voice.wake_accept."
-fix_en = "The local speech check (voice.wake_confirm) rejects look-alikes such as \"hey Travis\". If it still happens, run jarvis wake test --false-wakes 30 and raise voice.wake_accept."
+fix_he = "בדיקת הדיבור המקומית (voice.wake_confirm) דוחה דמיונות כמו \"היי טרוויס\". אם שיחה נפתחת ואף אחד לא מדבר 3 פעמים ביממה, ג'ארביס מחמיר לבד (סף גבוה יותר, בדיקת דיבור גם לציון חזק, המתנה קצרה יותר למילה הראשונה) ואומר זאת ביומן (WAKE_AUTO_TUNED). jarvis wake test מציג כמה התעוררויות שווא נמדדו וממליץ על סף. הריצו jarvis wake test --apply כשהחדר כרגיל כדי לכייל לקול ולחדר שלכם, או jarvis wake test --false-wakes 30. בלי בדיקת הדיבור המקומית הסף לא יורד מתחת ל-0.25. אחרי סיום שיחה הוא לא מקשיב למילת ההפעלה כשנייה וחצי, כדי שזנב הדיבור שלו לא יפעיל אותו."
+fix_en = "The local speech check (voice.wake_confirm) rejects look-alikes such as \"hey Travis\". If a conversation opens and nobody speaks 3 times in 24 h, JARVES makes itself stricter on its own (higher threshold, the speech check also for strong scores, a shorter wait for the first word) and logs it (WAKE_AUTO_TUNED). jarvis wake test shows how many false wakes were measured and suggests a threshold. Run jarvis wake test --apply with the room as usual to calibrate to your voice and room, or jarvis wake test --false-wakes 30. Without the local speech check the threshold never goes below 0.25. After a conversation ends he ignores the wake word for about a second and a half so the tail of his own speech cannot wake him."
+
+[[problems]]
+he = "אין לי אוזניות והוא ממשיך לדבר כשאני מדבר"
+en = "No headset, and he keeps talking while I talk"
+fix_he = "עם רמקולים ובלי אוזניות המיקרופון מושתק בזמן שהוא מדבר כדי שלא ישמע את עצמו. אם אתם מדברים חזק יותר מההד, הוא עוצר תוך כשליש שנייה והמיקרופון נפתח (LIVE_ECHO_BARGE_IN ביומן). אם זה לא קורה, דברו קרוב יותר למיקרופון או הנמיכו את הרמקולים. עם אוזניות אפשר לכבות voice.half_duplex."
+fix_en = "With speakers and no headset the microphone is silenced while he speaks so he cannot hear himself. If you talk louder than the echo he stops within about a third of a second and the microphone opens (LIVE_ECHO_BARGE_IN in the log). If that does not happen, talk closer to the microphone or turn the speakers down. With a headset you can turn voice.half_duplex off."
 
 [[problems]]
 he = "הוא לא מתעורר כשאני אומר \"היי ג'ארביס\" פעמיים ברצף"

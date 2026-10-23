@@ -62,6 +62,7 @@ KEEP_INFO = {"LIVE_STARTED", "LIVE_FIRST_AUDIO", "LIVE_EARLY_RESPONSE", "LIVE_PR
 KEEP_INFO |= {"LIVE_BACKEND_STALL", "LIVE_BACKEND_RETRY", "LIVE_BACKEND_LATE", "LIVE_DELEGATION", "TASK_FINISHED"}
 # Legacy logs carry five-second speech counters rather than per-reply audio intervals.
 KEEP_INFO.add("LIVE_MIC")
+KEEP_INFO |= {"LIVE_ECHO_BARGE_IN", "LIVE_WORKING_CUE", "LIVE_LATENCY", "WAKE_AUTO_TUNED"}   # issue #17
 # Backend request traces (brain.BackendTrace, SW-V2 WP-C): prefix -> delegation kind. The DONE record carries the
 # exact model, service tier, usage_in/usage_out/usage_cached and web_searches (calls, billed $10/1k).
 # CHATGPT_BACKEND_* is not listed: plan requests cost $0 API and the typed reply is already counted by AI_REPLY.
