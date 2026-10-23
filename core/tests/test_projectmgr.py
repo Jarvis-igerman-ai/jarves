@@ -18,9 +18,23 @@ from jarves.projectmgr.service import Manager
 FAKE = textwrap.dedent('''
     import json, os, re, sys, time
     prompt = sys.stdin.read()
+    model = sys.argv[sys.argv.index("--model") + 1] if "--model" in sys.argv else "default"
+    if "Answer with ONLY a JSON object" in prompt:
+        merged = "Several agents each proposed" in prompt
+        ts = [{"id": 1, "title": ("merged" if merged else model) + " one", "spec": "FAKE write one.txt=1",
+               "acceptance": "one", "scope": ["one.txt"], "deps": []},
+              {"id": 2, "title": ("merged" if merged else model) + " two", "spec": "FAKE write two.txt=2",
+               "acceptance": "two", "scope": ["two.txt"], "deps": [1]}]
+        if "FAIL_PLAN_" + model in prompt:
+            ts = "nope"
+        out = "here:\\n```json\\n" + json.dumps({"tasks": ts}) + "\\n```"
+        open(os.path.join(os.getcwd(), "..", "plan_prompt_%s.txt" % model), "w").write(prompt)
+        print(json.dumps({"type": "result", "is_error": False, "result": out, "session_id": "plan"}))
+        sys.exit(0)
     mt = re.search(r"TASK #(\\d+)", prompt)
     num = mt.group(1) if mt else "0"
     open(os.path.join(os.getcwd(), "..", "last_prompt_%s.txt" % num), "w").write(prompt)
+    open(os.path.join(os.getcwd(), "..", "last_argv_%s.txt" % num), "w").write(json.dumps(sys.argv))
     sid = "sess-" + num
     for m in re.finditer(r"^FAKE (\\w+) ?(.*)$", prompt, re.M):
         op, arg = m.group(1), m.group(2)
@@ -285,29 +299,167 @@ def test_recover_requeues_running_tasks_once(env):
     m.db = m2.db
 
 
-def test_plan_from_owner_list_needs_approval_and_voice_cannot_open(env):
+def test_owner_list_starts_directly_and_is_lenient(env):
     m, repo, _ = env
     open_project(m, repo)
     r = m.call("plan", project="demo", tasks=[
-        {"id": 1, "title": "A", "spec": "FAKE write a=1", "acceptance": "a", "scope": ["a"], "deps": []},
-        {"id": 2, "title": "B", "spec": "FAKE write b=1", "acceptance": "b", "scope": ["b"], "deps": [1]}])
-    assert r["ok"] and all(t["status"] == "proposed" for t in r["tasks"])
-    assert m.call("plan", project="demo", tasks=[])["code"] == "PLAN_PENDING"
+        {"id": 1, "title": "A", "spec": "FAKE write a=1", "scope": ["a"], "size": "L"},     # no acceptance, size L
+        {"id": 2, "title": "B", "spec": "FAKE write b=1", "scope": ["b"], "deps": [1]}])
+    assert r["ok"], r
+    assert [t["status"] for t in m.db.tasks(1)] == ["ready", "todo"]                    # the owner wrote it: no 2nd approval
+    assert any("large" in n for n in r["notes"])
+    m._ask = lambda *a, **k: False
+    assert m.call("open", path=str(repo), name="x", by="voice")["code"] == "NOT_APPROVED"     # voice: asks first
+    assert m.call("archive", project="demo", by="voice")["code"] == "CLI_ONLY"
+    assert m.call("ship_plan", project="demo", apply=True, by="voice")["code"] == "CLI_ONLY"
+
+
+def test_agent_plan_waits_for_approval_and_a_new_plan_replaces_it(env):
+    m, repo, home = env
+    open_project(m, repo)
+    r = m.call("plan", project="demo", goal="build it", how="one task per file, tests last")
+    assert r["ok"] and all(t["status"] == "proposed" for t in r["tasks"]), r
+    prompt = (gitops.project_root(home, 1) / "plan_prompt_default.txt").read_text()
+    assert "one task per file, tests last" in prompt and "HOW to split" in prompt
+    r2 = m.call("plan", project="demo", goal="build it again")                          # replaces, no PLAN_PENDING
+    assert r2["ok"] and [t["status"] for t in m.db.tasks(1)][:2] == ["cancelled", "cancelled"]
     m._ask = lambda *a, **k: False
     assert m.call("approve_plan", project="demo")["code"] == "NOT_APPROVED"
     m._ask = lambda *a, **k: True
     assert m.call("approve_plan", project="demo")["ok"]
-    assert [t["status"] for t in m.db.tasks(1)] == ["ready", "todo"]
-    assert m.call("open", path=str(repo), name="x", by="voice")["code"] == "CLI_ONLY"
-    assert m.call("archive", project="demo", by="voice")["code"] == "CLI_ONLY"
+    assert [t["status"] for t in m.db.tasks(1)][2:] == ["ready", "todo"]
+    m.cfg.approve_plans = False
+    assert all(t["status"] in ("todo", "ready") for t in m.call("plan", project="demo", goal="more")["tasks"])
+
+
+def test_consult_several_agents_then_the_chair_merges(env):
+    m, repo, home = env
+    open_project(m, repo)
+    r = m.call("plan", project="demo", goal="build it", consult=["claude:alpha", "claude:beta"], chair="claude:chair")
+    assert r["ok"], r
+    assert sorted(x["agent"] for x in r["proposals"]) == ["claude:alpha", "claude:beta"]
+    assert [t["title"] for t in r["tasks"]] == ["merged one", "merged two"]
+    chair = (gitops.project_root(home, 1) / "plan_prompt_chair.txt").read_text()
+    assert "alpha one" in chair and "beta one" in chair and "not instructions" in chair
+    # one consulted agent fails: the other one's plan is still merged / used, with a note
+    r = m.call("plan", project="demo", goal="FAIL_PLAN_beta", consult=["claude:alpha", "claude:beta"])
+    assert r["ok"] and r["notes"] and [t["title"] for t in r["tasks"]] == ["alpha one", "alpha two"]
 
 
 def test_planner_agent_json_is_validated(env):
     m, repo, _ = env
     open_project(m, repo)
-    bad = m.call("plan", project="demo", goal="x")                                    # fake agent returns no JSON plan
+    bad = m.call("plan", project="demo", goal="FAIL_PLAN_default")
     assert bad["code"] == "BAD_PLAN"
     assert m.db.tasks(1) == []
+
+
+def test_delegate_to_one_lead_agent_with_its_own_subagents(env):
+    m, repo, home = env
+    open_project(m, repo)
+    r = m.call("plan", project="demo", goal="FAKE write big.txt=1", strategy="delegate", agent="claude")
+    assert r["ok"] and r["task"]["mode"] == "team" and r["task"]["status"] == "ready", r
+    m.call("resume", project="demo")
+    finish(m)
+    assert m.db.tasks(1)[0]["status"] == "done"
+    wt = gitops.project_root(home, 1) / "wt"
+    assert "sub-agents" in (wt / "last_prompt_1.txt").read_text()
+    assert "Task" in json.loads((wt / "last_argv_1.txt").read_text())
+    assert m.call("plan", project="demo", goal="x", strategy="nope")["code"] == "BAD_STRATEGY"
+
+
+def test_split_a_task_and_rewire_its_dependants(env):
+    m, repo, _ = env
+    open_project(m, repo)
+    big = task(m, "Big", "do everything", scope=["one.txt", "two.txt"])
+    after = task(m, "After", "FAKE write z=1", scope=["z"], deps=[big])
+    r = m.call("split_task", project="demo", task=big, how="split by file")
+    assert r["ok"], r
+    ts = {t["seq"]: t for t in m.db.tasks(1)}
+    assert ts[big]["status"] == "cancelled"
+    new = [t["id"] for t in r["tasks"]]
+    assert sorted(ts[after]["deps"]) == sorted(new) and ts[after]["status"] == "todo"
+
+
+def test_already_started_project_dirty_work_base_and_recorded_work(env, tmp_path):
+    m, repo, home = env
+    (repo / "README.md").write_text("changed by the owner\n")
+    r = m.call("open", path=str(repo), name="demo", include_dirty=True)
+    assert r["ok"] and r["repo"]["dirty"] == 1
+    integ = gitops.project_root(home, 1) / "integration"
+    assert (integ / "README.md").read_text() == "changed by the owner\n"
+    assert (repo / "README.md").read_text() == "changed by the owner\n"                # owner folder untouched
+    d = m.call("add_task", project="demo", title="Login exists", spec="login page and API", done=True,
+               handoff="login is in src/login.py, uses sessions")
+    assert d["ok"] and d["task"]["status"] == "done"
+    nxt = task(m, "Logout", "FAKE write src/logout.py=1", scope=["src/logout.py"], deps=[d["task"]["seq"]])
+    m.call("resume", project="demo")
+    finish(m)
+    assert m.db.by_seq(1, nxt)["status"] == "done"
+    card = (gitops.project_root(home, 1) / "wt" / f"last_prompt_{nxt}.txt").read_text()
+    assert "login is in src/login.py" in card
+    r2 = m.call("open", path=str(repo), name="other", base="no-such-branch")
+    assert r2["code"] == "BAD_BASE"
+    (repo / "x.txt").write_text("x")
+    r3 = m.call("open", path=str(repo), name="third")
+    assert r3["ok"] and "uncommitted" in r3["text"]
+
+
+def test_ship_apply_merges_into_owner_branch_after_approval(env):
+    m, repo, home = env
+    open_project(m, repo)
+    task(m, "A", "FAKE write a.txt=1", scope=["a.txt"])
+    m.call("resume", project="demo")
+    finish(m)
+    assert m.call("ship_plan", project="demo", apply=True, by="voice")["code"] == "CLI_ONLY"
+    (repo / "README.md").write_text("dirty\n")
+    assert m.call("ship_plan", project="demo", apply=True)["code"] == "DIRTY"
+    sh(repo, "git", "checkout", "--", "README.md")
+    m._ask = lambda *a, **k: False
+    assert m.call("ship_plan", project="demo", apply=True)["code"] == "NOT_APPROVED" and not (repo / "a.txt").exists()
+    m._ask = lambda *a, **k: True
+    assert m.call("ship_plan", project="demo", apply=True)["ok"] and (repo / "a.txt").exists()
+    assert sh(repo, "git", "rev-parse", "--abbrev-ref", "HEAD").strip() == "main"
+
+
+def test_new_task_on_a_done_project_continues_it(env):
+    m, repo, _ = env
+    open_project(m, repo)
+    task(m, "A", "FAKE write a=1", scope=["a"])
+    m.call("resume", project="demo")
+    finish(m)
+    assert m.db.project(1)["status"] == "done"
+    task(m, "B", "FAKE write b=1", scope=["b"])
+    assert m.db.project(1)["status"] == "active"
+
+
+def test_runner_specs_and_store_migration(env, tmp_path):
+    m, repo, _ = env
+    open_project(m, repo)
+    assert m.call("add_task", project="demo", title="x", runner="codex:gpt-5")["ok"]
+    assert m.call("add_task", project="demo", title="y", runner="openrouter")["ok"]
+    assert m.call("add_task", project="demo", title="z", runner="nope")["code"] == "BAD_RUNNER"
+    assert planmod.parse_spec("opencode:openrouter/x/y:free") == ("opencode", "openrouter/x/y:free")
+    import sqlite3
+    from jarves.projectmgr.store import ProjectDB
+    old = tmp_path / "old.db"
+    c = sqlite3.connect(old)
+    c.execute("CREATE TABLE tasks (id INTEGER PRIMARY KEY AUTOINCREMENT, project_id INTEGER NOT NULL, seq INTEGER NOT "
+              "NULL, title TEXT NOT NULL, spec TEXT NOT NULL DEFAULT '', acceptance TEXT NOT NULL DEFAULT '', scope "
+              "TEXT NOT NULL DEFAULT '[]', deps TEXT NOT NULL DEFAULT '[]', status TEXT NOT NULL DEFAULT 'todo', runner "
+              "TEXT NOT NULL DEFAULT '', model TEXT NOT NULL DEFAULT '', used_runner TEXT NOT NULL DEFAULT '', attempts "
+              "INTEGER NOT NULL DEFAULT 0, branch TEXT NOT NULL DEFAULT '', worktree TEXT NOT NULL DEFAULT '', "
+              "session_ref TEXT NOT NULL DEFAULT '', handoff TEXT NOT NULL DEFAULT '', handoff_kind TEXT NOT NULL "
+              "DEFAULT '', result TEXT NOT NULL DEFAULT '', reason TEXT NOT NULL DEFAULT '', notes TEXT NOT NULL "
+              "DEFAULT '[]', cost_usd REAL NOT NULL DEFAULT 0, tokens INTEGER NOT NULL DEFAULT 0, pid INTEGER NOT NULL "
+              "DEFAULT 0, created REAL NOT NULL, updated REAL NOT NULL, started REAL, finished REAL, UNIQUE "
+              "(project_id, seq))")
+    c.commit()
+    c.close()
+    db = ProjectDB(old)
+    tid = db.add_task(1, "t", mode="team")
+    assert db.task(tid)["mode"] == "team"
+    db.close()
 
 
 def test_update_note_talk_and_deep_dive(env):
@@ -348,3 +500,216 @@ def test_daily_run_cap_stops_dispatch(env):
     assert m.wait_idle(30)
     assert [t["status"] for t in m.db.tasks(1)].count("done") == 1
     assert "daily limit" in m.call("status", project="demo")["text"]
+
+
+def test_cli_flexible_flow(env, capsys, monkeypatch):
+    import argparse
+    from jarves.projectmgr import service as svc_mod, surfaces
+    m, repo, home = env
+    svc_mod.attach(m)
+    try:
+        ap = argparse.ArgumentParser()
+        surfaces.add_cli(ap.add_subparsers(dest="cmd"))
+
+        def run(*argv):
+            return surfaces.cmd_project(ap.parse_args(["project", *argv]), m.cfg, home)
+        (repo / "README.md").write_text("wip\n")
+        assert run("open", str(repo), "--name", "demo", "--dirty") == 0
+        assert run("add", "Old work", "--done", "--spec", "auth exists in src/auth.py") == 0
+        assert run("plan", "--goal", "add logout", "--how", "one task per file", "--consult", "claude:alpha,claude:beta") == 0
+        out = capsys.readouterr().out
+        assert "proposal from claude:alpha" in out and "consulted" in out
+        assert run("approve", "--yes") == 0
+        assert run("split", "2", "--how", "by file") == 0
+        assert run("plan", "--goal", "polish", "--delegate", "--agent", "claude") == 0
+        assert run("update", "5", "--solo") in (0, 1)
+        assert run("status") == 0
+        assert run("ship") == 0
+    finally:
+        svc_mod.detach(m)
+
+
+
+# ------------------------------------------------------------------ review findings (Opus review, 23 Oct)
+def test_split_keeps_goal_and_other_proposals_failed_plan_keeps_waiting_one(env):
+    m, repo, _ = env
+    open_project(m, repo)
+    m.call("plan", project="demo", goal="the real goal")                                  # 2 proposed tasks
+    assert m.call("plan", project="demo", goal="FAIL_PLAN_default")["code"] == "BAD_PLAN"
+    assert [t["status"] for t in m.db.tasks(1)] == ["proposed", "proposed"]               # the waiting plan survives
+    r = m.call("split_task", project="demo", task=1)
+    assert r["ok"], r
+    ts = [t["status"] for t in m.db.tasks(1)]
+    assert ts[0] == "cancelled" and ts[1] == "proposed" and ts[2:] == ["proposed", "proposed"]
+    assert m.db.project(1)["goal"] == "the real goal"
+    assert m.call("plan", project="demo", goal="more", replace=False)["ok"]
+    assert [t["status"] for t in m.db.tasks(1)].count("proposed") == 5
+
+
+def test_dependants_unblock_after_retry_and_reason_uses_task_numbers(env, tmp_path):
+    m, repo, _ = env
+    other = tmp_path / "other"
+    other.mkdir()
+    sh(other, "git", "init", "-q", "-b", "main")
+    (other / "f").write_text("x")
+    sh(other, "git", "-c", "user.name=t", "-c", "user.email=t@t", "add", "-A")
+    sh(other, "git", "-c", "user.name=t", "-c", "user.email=t@t", "commit", "-q", "-m", "i")
+    assert m.call("open", path=str(other), name="first")["ok"]                            # project 1 owns ids 1..2
+    m.call("add_task", project="first", title="x1")
+    m.call("add_task", project="first", title="x2")
+    assert m.call("open", path=str(repo), name="demo")["ok"]
+    a = m.call("add_task", project="demo", title="A", spec="FAKE fail", scope=["a"])["task"]["seq"]
+    b = m.call("add_task", project="demo", title="B", spec="FAKE write b=1", scope=["b"], deps=[a])["task"]["seq"]
+    m.call("pause", project="first")
+    m.call("resume", project="demo")
+    finish(m)
+    tb = m.db.by_seq(2, b)
+    assert tb["status"] == "blocked" and tb["reason"] == f"dependency #{a} failed"         # the task number, not the id
+    m.call("update_task", project="demo", task=a, spec="FAKE write a=1")
+    finish(m)
+    assert m.db.by_seq(2, a)["status"] == "done" and m.db.by_seq(2, b)["status"] == "done"
+
+
+def test_retry_of_a_replaced_proposal_needs_approval_again(env):
+    m, repo, _ = env
+    open_project(m, repo)
+    m.call("plan", project="demo", goal="one")
+    m.call("plan", project="demo", goal="two")
+    r = m.call("retry_task", project="demo", task=1)
+    assert r["ok"] and m.db.by_seq(1, 1)["status"] == "proposed"
+
+
+def test_open_refuses_empty_repo_and_dirty_with_other_base(env, tmp_path):
+    m, repo, _ = env
+    empty = tmp_path / "empty"
+    empty.mkdir()
+    sh(empty, "git", "init", "-q")
+    assert m.call("open", path=str(empty), name="empty")["code"] == "NO_COMMITS"
+    assert m.db.projects(True) == []
+    sh(repo, "git", "branch", "feature")
+    (repo / "README.md").write_text("wip\n")
+    assert m.call("open", path=str(repo), name="demo", base="feature", include_dirty=True)["code"] == "BAD_BASE"
+    r = m.call("open", path=str(repo), name="demo", include_dirty=True)
+    assert r["ok"] and "uncommitted work on main" in r["text"]
+
+
+def test_plan_tasks_can_name_runner_and_mode_and_voice_cannot_skip_approval(env):
+    m, repo, _ = env
+    open_project(m, repo)
+    r = m.call("plan", project="demo", tasks=[{"id": 1, "title": "A", "spec": "s", "runner": "codex:gpt-5", "mode": "team"}])
+    assert r["ok"]
+    t = m.db.by_seq(1, 1)
+    assert t["runner"] == "codex:gpt-5" and t["mode"] == "team"
+    assert m.call("plan", project="demo", tasks=[{"id": 1, "title": "A", "spec": "s", "mode": "crowd"}])["code"] == "BAD_PLAN"
+    r = m.call("plan", project="demo", goal="x", auto=True, by="voice")
+    assert r["ok"] and all(t["status"] == "proposed" for t in r["tasks"])
+
+
+def test_runner_deny_list_protects_agent_settings():
+    assert "Write(.claude/**)" in runners.DENY and "Edit(.codex/**)" in runners.DENY
+
+
+def test_short_lived_manager_never_dispatches(env):
+    from jarves.projectmgr import service as svc_mod
+    m, repo, home = env
+    open_project(m, repo)
+    task(m, "A", "FAKE write a=1", scope=["a"])
+    r = svc_mod.call(home, m.full_cfg, "resume", project="demo")                          # no Core: a transient manager
+    assert r["ok"] and "jarvis project run" in r["text"]
+    assert m.db.by_seq(1, 1)["status"] == "ready"
+
+
+# ------------------------------------------------------------------ talking about local projects and live agents
+class FakeOrch:
+    def __init__(self, sessions):
+        self.sessions, self.calls = sessions, []
+
+    def __call__(self, op, **kw):
+        self.calls.append((op, kw))
+        if op == "list":
+            return {"ok": True, "sessions": self.sessions}
+        return {"ok": True, "code": "ok", "text": f"{op} sent"}
+
+
+def test_find_project_folder_on_this_computer_and_open_by_voice(env, tmp_path):
+    from jarves.projectmgr import finder
+    m, repo, _ = env
+    work = tmp_path / "disk" / "work"
+    (work / "xy").mkdir(parents=True)
+    sh(work / "xy", "git", "init", "-q", "-b", "main")
+    (work / "xy" / "a").write_text("a")
+    sh(work / "xy", "git", "-c", "user.name=t", "-c", "user.email=t@t", "add", "-A")
+    sh(work / "xy", "git", "-c", "user.name=t", "-c", "user.email=t@t", "commit", "-q", "-m", "i")
+    (tmp_path / "disk" / "old" / "xy").mkdir(parents=True)
+    (tmp_path / "disk" / "old" / "xy" / ".git").mkdir()
+    roots = [str(tmp_path / "disk")]
+    assert len(finder.find("XY", "", roots)) == 2
+    assert finder.find("x-y", "work", roots)[0] == str(work / "xy")
+    m.cfg.search_roots = roots
+    assert m.call("open", folder="xy", by="voice")["code"] == "AMBIGUOUS"
+    r = m.call("open", folder="xy", where="work", by="voice")
+    assert r["ok"] and r["project"]["path"] == str((work / "xy").resolve())
+    assert m.call("open", folder="nothing", where="work", by="voice")["code"] == "NOT_FOUND"
+
+
+def test_status_includes_your_own_sessions_and_you_can_steer_them(env):
+    m, repo, home = env
+    open_project(m, repo)
+    live = {"id": "claude:abc", "provider": "claude", "cwd": str(repo), "project": "demo", "state": "RUNNING",
+            "state_text": "working", "age": "3 min", "untrusted_activity": "editing login.py"}
+    mine = dict(live, id="claude:jarves", cwd=str(gitops.project_root(home, 1) / "wt" / "t1-a1"))
+    m._orch = FakeOrch([live, mine, dict(live, id="codex:z", provider="codex", cwd="/elsewhere", project="other")])
+    st = m.call("status", project="demo")
+    assert "your claude session (working, 3 min): editing login.py" in st["text"] and len(st["sessions"]) == 1
+    ag = m.call("agents", project="demo", by="voice")
+    assert ag["ok"] and "your claude session" in ag["text"]
+    r = m.call("tell_agent", project="demo", agent="קלוד", text="add tests too", by="voice")
+    assert r["ok"] and ("tell", {"ref": "claude:abc", "text": "add tests too", "by": "voice"}) in m._orch.calls
+    r = m.call("more_agents", project="demo", agent="claude", by="voice")
+    assert r["ok"] and any(op == "tell" and "sub-agents" in kw["text"] for op, kw in m._orch.calls)
+    r = m.call("stop_agent", project="demo", agent="claude", by="voice")
+    assert r["ok"] and ("stop", {"ref": "claude:abc", "by": "voice"}) in m._orch.calls
+    assert m.call("stop_agent", project="demo", agent="codex")["code"] == "NOTHING"
+
+
+def test_add_a_codex_task_more_parallel_agents_and_stop_a_running_one(env):
+    m, repo, _ = env
+    m._orch = FakeOrch([])
+    open_project(m, repo)
+    r = m.call("add_task", project="demo", title="Other job", spec="FAKE sleep 5\nFAKE write o=1", scope=["o"],
+               runner="claude", by="voice")
+    assert r["ok"]
+    assert m.call("more_agents", project="demo", count=2, by="voice")["parallel"] == 5
+    assert m.call("more_agents", project="demo", fewer=True)["parallel"] == 4
+    m.call("resume", project="demo")
+    assert m.db.by_seq(1, 1)["status"] == "running"
+    r = m.call("stop_agent", project="demo", agent="claude", by="voice")
+    assert r["ok"] and r["stopped"] == ["#1"]
+    assert m.wait_idle(20)
+    t = m.db.by_seq(1, 1)
+    assert t["status"] == "blocked" and "stopped by the owner" in t["reason"]
+    assert not (gitops.project_root(m.home, 1) / "integration" / "o").exists()             # stopped work is never merged
+    m.call("update_task", project="demo", task=1, spec="FAKE write o=1")
+    finish(m)
+    assert m.db.by_seq(1, 1)["status"] == "done"
+
+
+def test_long_voice_operations_run_in_the_background(env):
+    m, repo, _ = env
+    said = []
+    m.notify = lambda p, t: said.append(t)
+    open_project(m, repo)
+    m.started = True
+    try:
+        r = m.call("plan", project="demo", goal="build it", consult=["claude:alpha", "claude:beta"], by="voice",
+                   background=True)
+        assert r["code"] == "started" and r["job"]
+        for _ in range(200):
+            if m.jobs[r["job"]]["state"] != "running":
+                break
+            import time as _t
+            _t.sleep(0.05)
+        assert m.jobs[r["job"]]["state"] == "done" and said and "planning" in said[-1]
+        assert "planning: done" in m.call("jobs", by="voice")["text"]
+    finally:
+        m.started = False

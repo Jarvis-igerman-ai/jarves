@@ -1,6 +1,8 @@
 // Projects page (Work group): the project manager. A project picker with status and done/total, the task board of
 // the chosen project grouped by status, a task detail panel with the timeline (deep dive) and the owner's actions
-// (plan, approve plan, pause / resume, add / update / cancel / retry task, note, ask / change, ship plan). Same
+// (plan: your own list or instruction, a suggestion, several agents consulted, or one lead agent with its own
+// sub-agents; approve plan, pause / resume, add / record done / update / split / cancel / retry task, note,
+// ask / change, ship plan). Same
 // operations as `jarvis projects` and the voice tools (/api/projects/...). Agent and task text is untrusted:
 // text nodes only (never innerHTML), never translated (data-noi18n), dir="auto". JARVES never pushes or merges.
 // Uses the helpers of app.js (el, api, render, header, pill, tile, route) and pages.js (input, select, field, note, when).
@@ -59,6 +61,8 @@ function projDetail(pid, seq, t, box, deep) {
   const mode = select([["ask", tx("שאלה (קריאה בלבד)", "Ask (read-only)")], ["do", tx("בקשת שינוי", "Ask to change")]], "ask", { "aria-label": tx("מצב", "Mode") });
   const base = { project: pid, task: seq };
   const go = (op, extra) => () => projOp(box, Object.assign({ op }, base, extra()), () => setTimeout(() => route(true), 400));
+  const splitHow = input({ type: "text", dir: "auto", style: "min-width:260px", "aria-label": tx("איך לפצל (לא חובה)", "How to split (optional)") });
+  const splitWho = input({ type: "text", dir: "ltr", "aria-label": tx("להתייעץ עם (סוכנים)", "Consult (agents)"), placeholder: "claude, codex" });
   const tl = (deep.timeline || []).slice().reverse().map((e) => el("tr", {}, el("td", { class: "small" }, when(e.ts)),
     el("td", { class: "small", "data-noi18n": "" }, e.who || ""), el("td", { class: "small", "data-noi18n": "" }, e.kind || ""),
     el("td", { dir: "auto", "data-noi18n": "", class: "small", style: "white-space:pre-wrap" }, e.text || "")));
@@ -76,6 +80,10 @@ function projDetail(pid, seq, t, box, deep) {
         if (spec.value.trim()) x.spec = spec.value; return x; }) }, tx("עדכון", "Update")),
       el("button", { type: "button", class: "ghost", onclick: go("retry_task", () => ({})) }, tx("ניסיון חוזר", "Retry")),
       el("button", { type: "button", class: "ghost", onclick: go("cancel_task", () => ({})) }, tx("ביטול משימה", "Cancel task"))),
+    el("div", { class: "filters" }, field(tx("איך לפצל (לא חובה)", "How to split (optional)"), splitHow),
+      field(tx("להתייעץ עם (סוכנים)", "Consult (agents)"), splitWho),
+      el("button", { type: "button", class: "ghost", onclick: go("split_task", () => ({ how: splitHow.value, consult: projCsv(splitWho.value) })) },
+        tx("פיצול למשימות קטנות", "Split into smaller tasks"))),
     el("div", { class: "filters" }, field(tx("הערה", "Note"), noteT),
       el("button", { type: "button", class: "ghost", onclick: go("note", () => ({ text: noteT.value })) }, tx("הוספת הערה", "Add note"))),
     el("div", { class: "filters" }, field(tx("הודעה לסוכן", "Message to the agent"), talkT), field(tx("מצב", "Mode"), mode),
@@ -129,8 +137,15 @@ PAGES.projects = async function () {
   });
   const goal = el("textarea", { dir: "auto", rows: "4", style: "width:100%", "aria-label": tx("יעד או רשימת משימות ב-JSON", "Goal or task list as JSON"),
     placeholder: tx("יעד בטקסט חופשי, או רשימת JSON: [{\"title\": \"...\", \"spec\": \"...\"}]", "A goal in plain words, or a JSON list: [{\"title\": \"...\", \"spec\": \"...\"}]") });
+  const how = input({ type: "text", dir: "auto", style: "min-width:280px", "aria-label": tx("איך לפצל (לא חובה)", "How to split (optional)"),
+    placeholder: tx("למשל: משימה לכל מודול, בדיקות בסוף", "e.g. one task per module, tests last") });
+  const strat = select([["split", tx("ג'ארביס מפצל למשימות קטנות", "JARVES splits into small tasks")],
+    ["delegate", tx("סוכן מוביל אחד עם תת-סוכנים משלו", "One lead agent with its own sub-agents")]], "split", { "aria-label": tx("אסטרטגיה", "Strategy") });
+  const consult = input({ type: "text", dir: "ltr", "aria-label": tx("להתייעץ עם (סוכנים)", "Consult (agents)"), placeholder: "claude, codex, opencode" });
+  const agentI = input({ type: "text", dir: "ltr", class: "narrow", "aria-label": tx("סוכן", "Agent"), placeholder: "claude" });
   const planGo = () => {
-    const v = goal.value.trim(); let body = { op: "plan", project: cur.id };
+    const v = goal.value.trim();
+    let body = { op: "plan", project: cur.id, how: how.value, strategy: strat.value, agent: agentI.value.trim(), consult: projCsv(consult.value) };
     if (v.startsWith("[")) { try { body.tasks = JSON.parse(v); } catch (e) { box.textContent = tx("JSON לא תקין: ", "Invalid JSON: ") + e.message; return; } } else body.goal = v;
     projOp(box, body, () => setTimeout(() => route(true), 400));
   };
@@ -140,10 +155,27 @@ PAGES.projects = async function () {
   const ns = el("textarea", { dir: "auto", rows: "2", style: "width:100%", "aria-label": tx("פירוט משימה", "Task spec") });
   const nsc = input({ type: "text", dir: "ltr", "aria-label": tx("היקף (נתיבים)", "Scope (paths)"), placeholder: "src/, tests/" });
   const nd = input({ type: "text", dir: "ltr", class: "narrow", "aria-label": tx("תלוי ב-", "Depends on"), placeholder: "1, 2" });
+  const nteam = el("input", { type: "checkbox", "aria-label": tx("סוכן עם תת-סוכנים", "Agent with sub-agents") });
+  const ndone = el("input", { type: "checkbox", "aria-label": tx("כבר בוצע (לתיעוד)", "Already done (record it)") });
   const addGo = () => projOp(box, { op: "add_task", project: cur.id, title: nt.value, spec: ns.value, scope: projCsv(nsc.value),
-    deps: projCsv(nd.value).map(Number).filter((n) => !isNaN(n)) }, refresh);
+    deps: projCsv(nd.value).map(Number).filter((n) => !isNaN(n)), mode: nteam.checked ? "team" : "solo", done: ndone.checked,
+    handoff: ndone.checked ? ns.value : "" }, refresh);
   const paused = cur.status === "paused";
   const deepBox = el("div", {});
+  // who works now: JARVES's task runs and your own Claude Code / Codex sessions in this folder
+  const sess = (st && st.sessions) || [];
+  const runningNow = tasks.filter((t) => t.status === "running");
+  const agentWho = input({ type: "text", dir: "ltr", class: "narrow", "aria-label": tx("סוכן", "Agent"), placeholder: "claude" });
+  const agentMsg = input({ type: "text", dir: "auto", style: "min-width:240px", "aria-label": tx("הודעה לסוכן", "Message to the agent") });
+  const agentOp = (op, extra) => () => projOp(box, Object.assign({ op, project: cur.id, agent: agentWho.value.trim() }, extra || {}), refresh);
+  const nowCard = el("div", { class: "card" }, el("b", {}, tx("עובדים עכשיו: ", "Working now: ")),
+    el("span", { dir: "auto", "data-noi18n": "" }, runningNow.map((t) => `#${t.seq} ${t.runner || ""}${t.mode === "team" ? " +" : ""}`)
+      .concat(sess.map((x) => `${x.provider} (${tx("שלך", "yours")}, ${x.state_text || x.state}, ${x.age || ""})`)).join(" · ") || "—"),
+    el("div", { class: "filters", style: "margin-top:8px" }, field(tx("סוכן", "Agent"), agentWho), field(tx("הודעה לסוכן", "Message to the agent"), agentMsg),
+      el("button", { type: "button", class: "ghost", onclick: () => projOp(box, { op: "tell_agent", project: cur.id, agent: agentWho.value.trim(), text: agentMsg.value }, refresh) }, tx("שליחה לסוכן", "Send to agent")),
+      el("button", { type: "button", class: "ghost", onclick: agentOp("more_agents") }, tx("עוד סוכנים", "More agents")),
+      el("button", { type: "button", class: "ghost", onclick: agentOp("more_agents", { fewer: true }) }, tx("פחות סוכנים", "Fewer agents")),
+      el("button", { type: "button", class: "ghost", onclick: agentOp("stop_agent") }, tx("עצירת הסוכן", "Stop the agent"))));
   render(head, lead,
     el("div", { class: "card filters" }, field(tx("פרויקט", "Project"), pick),
       el("div", { class: "row" },
@@ -153,17 +185,24 @@ PAGES.projects = async function () {
         el("button", { type: "button", class: "ghost", onclick: simple("ship_plan") }, tx("תוכנית שילוב (Ship plan)", "Ship plan")),
         el("button", { type: "button", class: "ghost", onclick: () => route(true) }, tx("רענון", "Refresh")))),
     el("div", { class: "card" }, el("b", {}, tx("תקציר: ", "Summary: ")), el("span", { dir: "auto", "data-noi18n": "" }, (st && st.text) || "—")),
+    nowCard,
     box,
     el("div", { class: "card" }, list),
     el("h3", {}, tx("לוח משימות", "Task board")),
     el("div", { style: "display:grid;grid-template-columns:repeat(auto-fit,minmax(210px,1fr));gap:12px;align-items:start" }, cols),
     deepBox,
     el("h3", {}, tx("תכנון", "Plan")),
-    el("div", { class: "card" }, goal, el("div", { class: "row", style: "margin-top:8px" },
+    el("div", { class: "card" }, goal, el("div", { class: "filters", style: "margin-top:8px" },
+      field(tx("אסטרטגיה", "Strategy"), strat), field(tx("איך לפצל (לא חובה)", "How to split (optional)"), how),
+      field(tx("להתייעץ עם (סוכנים)", "Consult (agents)"), consult), field(tx("סוכן", "Agent"), agentI)),
+      el("div", { class: "row", style: "margin-top:8px" },
       el("button", { type: "button", class: "primary", onclick: planGo }, tx("תכנון", "Plan")))),
     el("h3", {}, tx("הוספת משימה", "Add task")),
     el("div", { class: "card" }, el("div", { class: "filters" }, field(tx("כותרת משימה", "Task title"), nt), field(tx("היקף (נתיבים)", "Scope (paths)"), nsc), field(tx("תלוי ב-", "Depends on"), nd)),
-      field(tx("פירוט משימה", "Task spec"), ns), el("div", { class: "row", style: "margin-top:8px" },
+      field(tx("פירוט משימה", "Task spec"), ns),
+      el("div", { class: "row" }, field(tx("סוכן עם תת-סוכנים", "Agent with sub-agents"), nteam),
+        field(tx("כבר בוצע (לתיעוד)", "Already done (record it)"), ndone)),
+      el("div", { class: "row", style: "margin-top:8px" },
         el("button", { type: "button", class: "primary", onclick: addGo }, tx("הוספה", "Add")))));
   if (selTask) {
     try {

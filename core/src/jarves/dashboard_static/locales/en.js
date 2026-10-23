@@ -1935,6 +1935,20 @@
   "Add task": "Add task",
   "Hi, I am JARVES. How can I help? Type a message, or / for commands.": "Hi, I am JARVES. How can I help? Type a message, or / for commands.",
   "Scroll to the latest message": "Scroll to the latest message",
-  "Writing": "Writing"
+  "Writing": "Writing",
+  "How to split (optional)": "How to split (optional)",
+  "Consult (agents)": "Consult (agents)",
+  "Split into smaller tasks": "Split into smaller tasks",
+  "e.g. one task per module, tests last": "e.g. one task per module, tests last",
+  "JARVES splits into small tasks": "JARVES splits into small tasks",
+  "One lead agent with its own sub-agents": "One lead agent with its own sub-agents",
+  "Strategy": "Strategy",
+  "Agent with sub-agents": "Agent with sub-agents",
+  "Already done (record it)": "Already done (record it)",
+  "Working now: ": "Working now: ",
+  "yours": "yours",
+  "More agents": "More agents",
+  "Fewer agents": "Fewer agents",
+  "Stop the agent": "Stop the agent"
  }
 };

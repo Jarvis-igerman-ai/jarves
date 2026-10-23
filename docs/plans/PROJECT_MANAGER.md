@@ -111,3 +111,54 @@ branches. Planner quality depends on the model; the owner approves every plan.
   snapshot taken when the project is opened.
 - Restart recovery kills a surviving child by pid and requeues once; a task interrupted `max_attempts` times fails.
 - Not in the first release: runner fallback beyond the configured order, size-L split round, voice open/archive.
+
+## Flexible orchestration (owner request, 23 Oct 2026, after the first merge)
+
+The owner asked for a generic orchestrator without a fixed flow. Every operation can be used at any time, in any order:
+
+- **Already-started projects:** `open` continues from the branch you are on (or `--base`), `--dirty` starts from your
+  uncommitted tracked changes (`git stash create`, your folder untouched); `add --done` records work that exists, with
+  its handoff, so later tasks know about it. A new task in a finished project continues it.
+- **How to split, owner's choice:** your own list (starts at once, lenient: acceptance optional, size L only warns),
+  your instruction (`--how`, wins over the defaults), JARVES's suggestion, or **consult** several agents
+  (`--consult claude,codex:model`): they propose in parallel, read-only, and a **chair** agent merges the proposals
+  (failures are noted, the rest still count). A new plan replaces an unapproved one. `projects.approve_plans = false`
+  starts agent plans without a separate approval.
+- **One lead agent with sub-agents:** `--delegate` gives the whole goal to one agent as a `team` task: its card says it
+  may use its own sub-agents, Claude Code gets its sub-agent tool (same limits), the time limit is three times longer.
+  Any task can be `team` or `solo`; `split N` breaks a task into smaller ones and rewires its dependants.
+- **Agents are specs:** `claude`, `codex:<model>`, `opencode:<provider/model>`, `openrouter` (paid, gated) for a task,
+  the project order, a planner, a consulted agent or the chair.
+- **Taking the result:** `ship` shows it; `ship --apply` (PC only, approval, clean folder) merges it into your branch.
+  Never a push.
+
+## Talking about real projects on this computer (owner request, 23 Oct 2026)
+
+- **By voice, in plain Hebrew:** "יש לי פרויקט xy בתיקייה work, תנהל אותו" -> `open` finds the git folder on THIS
+  computer (`finder.py`: home, work, projects, src, code, Documents, Desktop, or `projects.search_roots`; bounded walk,
+  nothing leaves the PC), asks on the approval window, then registers it. Several matches -> JARVES asks which.
+  This relaxes the earlier PC-only rule for opening (OD-22 spirit kept: nothing is registered without the owner's yes
+  on the screen). Archiving, configuring the check command and `ship --apply` stay PC-only.
+- **Your own sessions count:** status and `agents` include Claude Code / Codex sessions you started yourself in that
+  folder (from the coding-agent orchestrator, when it is on). JARVES's own worktree runs are not double counted.
+- **Agent commands:** `agents` (who works now), `stop_agent` (its running tasks stop and are kept, `retry` continues;
+  your own session is stopped through the orchestrator, which asks where it must), `tell_agent` (a note for its tasks,
+  a message to your session), `more_agents` (named agent: work with its own sub-agents; no agent: more tasks in
+  parallel, up to 8), `fewer`.
+- **Long voice operations in the background:** planning, consulting, splitting and asking an agent answer "started"
+  and announce the result; `jobs` shows them.
+- Phone/car access is NOT part of this work; every operation is a Skill tool, so later remote surfaces can reuse it.
+
+## Review fixes (second Opus review, 23 Oct 2026)
+
+Split no longer overwrites the goal or cancels other proposals; a new plan replaces the waiting one only after it
+exists (`replace=False` keeps both); tasks are stored as proposed, wired, then released (no early dispatch); the task
+being split is held while planning and restored on failure; dependency blocks clear when the dependency is retried,
+split or replaced, and name task numbers; a retried replaced proposal needs approval again; split, voice and dashboard
+never skip an agent plan's approval; agent text in planner prompts is labelled untrusted; agent and sub-agent settings
+(`.claude/**`, `.codex/**`, `.opencode/**`, `opencode.json`, `.mcp.json`) are denied during the run and checked after;
+cancel/stop also stop a task in review and stopped work is never merged or re-queued; `open` refuses an empty repo
+(no half-open row), `--dirty` with another `--base`, and reports a failed snapshot; `ship --apply` merges with your own
+git identity and reports git's reason when not merged; the mode-column migration tolerates a second process; a
+short-lived CLI/dashboard manager never dispatches (the Core or `jarvis project run` does). Plan JSON may name a runner
+and mode per task; the owner's own lists allow up to 40 tasks / 20 paths with warnings.
