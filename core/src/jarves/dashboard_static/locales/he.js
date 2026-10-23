@@ -1878,7 +1878,9 @@
   "The switch itself takes no pictures and makes no cloud calls.": "המתג עצמו לא מצלם ולא מפעיל שירות ענן.",
   "No pictures are sent or kept unless you ask.": "תמונות לא נשלחות ולא נשמרות בלי שתבקשו.",
   "First turn the camera on (guide \"Camera\").": "קודם הפעילו את המצלמה (מדריך \"מצלמה\").",
-  "Leave the legacy switch off. Use the Camera guide for requested captures.": "השאירו את המתג הישן כבוי. השתמשו במדריך המצלמה לצילום לפי בקשה."
+  "Leave the legacy switch off. Use the Camera guide for requested captures.": "השאירו את המתג הישן כבוי. השתמשו במדריך המצלמה לצילום לפי בקשה.",
+  "More details: connections, features and privacy": "עוד פרטים: חיבורים, יכולות ופרטיות",
+  "More everyday tools": "עוד כלים ליום-יום"
  },
  "rules": [
   [

@@ -1,3 +1,11 @@
+## Dashboard redesign: navigation tree — 23 Oct 2026
+
+- Owner report: the dashboard is a mess, too much info, hard to find anything. Python dashboard owner (static UI only, no API change). The sidebar's 54 flat links in 7 groups became a keyboard-navigable tree: Home, Chat, Approvals and Setup guide on top, then Planner, Automations, Talks & memory, Do things, Assistant, Connections, Fix problems, Usage & cost, Development, System & help (icons, guide line, the branch you are in opens by itself, open branches remembered). All 54 pages stay reachable; search still finds every page. Renamed confusing pages (Search conversations, Personality files, Skills / Skill ideas, Phone app, Coding agents: all / This project's agent).
+- Home: one hero with status, next step and a Go button; setup checklist, three tiles, last conversation; connections/features/privacy folded into "More details". Top bar: device and Pi chips moved into the Core chip tooltip, long chips truncated; the fixed bottom usage strip is hidden (the cost tile on Home shows it). New `tree.css`.
+- UX review (sub-agent, from screenshots): applied nav regrouping, ARIA (`aria-current`, levels, roving tabindex, no `aria-live` on main), top bar and strip cleanup, contrast tweaks. **Open, not done:** collapse the six-row setup checklist to the first open step with a progress bar; make tiles links; unify "Issues 0" in the top bar with "7 open issues" on Home (different sources); sticky save bar and Advanced toggle on Settings; fold "Health & speed", "Self-check" and "Health" into one tabbed page; a count badge on Approvals; verify RTL by eye (my Hebrew capture did not switch language, only the locale tests cover it).
+- Verification: all eight pre-push checks passed. Dashboard, guides, CLI-parity, locale and perf tests pass locally; the three browser a11y tests could not run in this sandbox (Playwright/Chromium version mismatch) and rely on CI. Eight screenshots are not committed.
+- Decision: **OPEN** — owner to review the look after the beta installs.
+
 ## Camera on demand — 23 Oct 2026 / #74
 
 - Owner requested installation: published beta 4.0.1-beta.4 / build 212 installed using `jarvis update install --yes --silent`; installed CLI version and beta update status verified. Backup created by the updater. This build predates the camera correction below.

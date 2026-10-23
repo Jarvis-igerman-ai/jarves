@@ -1878,6 +1878,8 @@
   "The switch itself takes no pictures and makes no cloud calls.": "The switch itself takes no pictures and makes no cloud calls.",
   "No pictures are sent or kept unless you ask.": "No pictures are sent or kept unless you ask.",
   "First turn the camera on (guide \"Camera\").": "First turn the camera on (guide \"Camera\").",
-  "Leave the legacy switch off. Use the Camera guide for requested captures.": "Leave the legacy switch off. Use the Camera guide for requested captures."
+  "Leave the legacy switch off. Use the Camera guide for requested captures.": "Leave the legacy switch off. Use the Camera guide for requested captures.",
+  "More details: connections, features and privacy": "More details: connections, features and privacy",
+  "More everyday tools": "More everyday tools"
  }
 };
