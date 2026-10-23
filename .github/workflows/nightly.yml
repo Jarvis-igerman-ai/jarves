@@ -44,13 +44,30 @@ jobs:
         with:
           path: ${{ runner.temp }}/jarves-test-tools
           key: jarves-test-tools-${{ runner.os }}-${{ hashFiles('core/tests/_tools.py') }}
-      - name: pytest (any skip fails the run)
+      - name: pytest (any skip fails the run; the same single retries as a PR run)
+        # Same policy as jarves-checks (#89): known transient (socket/load) failures re-run only the failed files once
+        # (core/tools/ci_flake.py, written to flake-report.json); the real-browser files get one retry. A real
+        # assertion failure is never retried. The `flake` job below stays strict (3 runs, no retry): it is the
+        # flake detector, so the stable gate's 5 green nights are not reset by one known-transient hiccup here.
         shell: bash
         env:
           JARVES_BUILD_CACHE: ${{ runner.temp }}/jarves-test-tools
         run: |
-          uv run pytest -q -rs -p no:cacheprovider --durations=40 --junitxml=pytest-junit.xml | tee pytest.out
+          set +e
+          uv run pytest -q -rs -p no:cacheprovider --browser exclude --durations=40 --junitxml=pytest-junit.xml 2>&1 | tee pytest.out
+          rc=${PIPESTATUS[0]}
+          if [ "$rc" -ne 0 ] && RETRY=$(uv run python tools/ci_flake.py failed-files --junit pytest-junit.xml); then
+            echo "::warning::known transient (socket/load) failures; retrying ONLY these files once: $RETRY"
+            cp pytest-junit.xml first-junit.xml
+            uv run pytest -q -rs -p no:cacheprovider --junitxml=retry-junit.xml $RETRY 2>&1 | tee -a pytest.out
+            rc=${PIPESTATUS[0]}
+            uv run python tools/ci_flake.py report --first first-junit.xml --second retry-junit.xml --out flake-report.json
+          fi
+          browser() { uv run pytest -q -rs -p no:cacheprovider --browser only --junitxml=browser-junit.xml 2>&1 | tee -a pytest.out; return "${PIPESTATUS[0]}"; }
+          browser || { echo "::warning::real-browser tests failed once; retrying the browser files one time"; browser; }
+          brc=$?
           if grep -E "(^SKIPPED|[0-9]+ skipped|xfailed)" pytest.out; then echo "::error::tests were skipped"; exit 1; fi
+          [ "$rc" -eq 0 ] && [ "$brc" -eq 0 ]
       - name: Redacted diagnostics on failure
         if: failure()
         shell: bash
