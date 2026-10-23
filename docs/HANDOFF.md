@@ -9,6 +9,19 @@
   looks the installer up by the content tree (it always said MISSING) and says UNKNOWN instead of "none"/"off";
   (4) prepush `perf` also runs `test_tool_descriptions.py`; (5) `docs/GITHUB_FLOW.md` corrected: the repo is public, so
   branch protection and native auto-merge are free; `main` is unprotected today.
+- Flakes (40 failed-job logs read, 20-23 Oct): most failures were real PR bugs; older flakes were already fixed on main
+  (a11y updates-page network text, perf-gate cold first call, guides env leak, workspace undo, r01 kill_on_close). Fixed
+  in #90: the 22 Oct nightly failure was a product bug in `browser.py` (a refused navigation aborted with
+  `blockedbyclient` committed Chromium's empty error page after the click returned on a busy runner, so the "page stays"
+  promise broke; now `aborted` keeps the same document; same-document check fails 3/3 on the old code, passes 3/3 now);
+  PR #78's red Windows shard was the test's QR decoder (`cv2.QRCodeDetector` misses about 0.3% of valid symbols; the
+  pairing URL is random per run) -> `QRCodeDetectorAruco`, the failing URL pinned. Local Linux: test_browser,
+  test_review_c, test_mobile_phone_e2e 72 passed (Playwright 1.64 pointed at the preinstalled Chromium 1243 and
+  `phone.lan` kept off this sandbox's proxy; CI needs neither). Windows/Edge path not run locally.
+- Still open (not fixed, owner/next sweep): `orchestrator/bridge.py:72` `os.replace` of `bridge.token` can hit WinError 5
+  on Windows (a short retry on PermissionError is the likely fix); `test_canary` home page 8.8 s budget miss once on
+  Windows; `test_units::test_cli_setup_paths` takes 175-190 s on Windows, close to the 300 s per-test timeout. The nightly
+  runs browser files without a retry, so any browser flake resets the 5-green-nights count for a stable release.
 - NOT verified: the proof-run junit download on a real `main` push and the resulting shard times (first merge after #90:
   read the `changes` job summary line "shard plan: ..." of the next PR run; expect about 385 s Linux / 455 s Windows per
   shard and few unmeasured files).
