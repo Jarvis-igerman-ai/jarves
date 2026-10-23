@@ -20,10 +20,64 @@
 | Which dashboard issues should be cleared? | Only rechecked fixes or proven stale/benign findings; keep source history and genuine recurrences. | ANSWERED: owner explicitly requires clearing and rechecking, not deletion or blanket success. |
 | Tune quiet/false-wake microphone thresholds or spend on real latency replay? | Keep current settings until controlled real input/budget review; metadata cannot establish a safe tuning value. | USER DECISION REQUIRED at real microphone/paid-call gate; not a reason to block unrelated verified fixes. |
 | Player/account/camera/physical acceptance? | Keep actual integration gates open; fake tests do not prove them. | DEFERRED to owner-assisted real use; no new sign-in, capture or purchase. |
-| Auto-download a missing WhatsApp bridge? | Keep the maintained reinstall/source-build route; the current owner PC already has the bridge binary. | DEFERRED: separate WhatsApp setup/release decision; no automatic download or account linking added here. |
+| Auto-download a missing WhatsApp bridge? | Preserve upstream signed, owner-initiated installer and existing binary. | ANSWERED by upstream #86: maintained download path merged; not invoked and no account linked by this maintenance merge. |
 | Does the installer include the bridge? | The pinned build stages it and payload_check verifies its hash before recursive installer inclusion. | ANSWERED for packaging/current PC: build_windows.ps1 and payload_check.py enforce the pinned bridge; the installed build-217 bridge file exists. Real linking remains unverified. |
 | Is the optional Admin keys page available on the owner account? | Keep cost estimates and skip the optional key until the owner can check that account page. | DEFERRED: real account UI/OD-05 gate; no sign-in or key access needed for these controls. |
 | New upstream UI/project/release questions? | Keep OpenRouter off; use owner-selected project checks; defer live agent runs, dashboard visual approval and automatic release-page opening. | DEFERRED to their respective owner review gates; no paid runner or new release-page behavior enabled by this merge. |
+## WhatsApp bridge: one signed "Download the WhatsApp bridge" step — 23 Oct 2026 / #17 (branch feat/whatsapp-bridge-download, no PR yet)
+
+- Problem: with no bridge program the owner could only reinstall or build Go. Now the WhatsApp page (card "The bridge program is not installed"), `jarvis whatsapp install`, and the Connect flow (`jarvis connect whatsapp` asks; the dashboard Connect row opens the WhatsApp page) offer ONE step that downloads the prebuilt Windows bridge, verifies it and installs it to `<JARVES home>/bridge/whatsapp_bridge.exe` (the per-user location `bridge_command()` now also searches, after the shipped payload and the source-checkout `dist`). Backend: new `core/src/jarves/whatsapp_bridge_install.py`, shared by dashboard `POST /api/whatsapp/install` (local-only, like every WhatsApp change) and the CLI (`whatsapp_admin.install_bridge`).
+- Trust (nothing new): the app fetches `whatsapp-bridge.json`, an Ed25519 envelope verified with the SAME built-in `updates.UPDATE_PUBLIC_KEYS`, but under its own signing domain (`jarves-whatsapp-bridge-manifest-v1`) so a signed installer manifest is not valid as a bridge manifest and vice versa (`updates.canonical/verify_manifest` got an optional `domain`, default unchanged). The signed manifest carries product, platform, asset name, version, SHA256, exact size and an https URL. Bytes are checked in memory, again on the temporary file, then moved in atomically with the signed manifest beside them (`whatsapp_bridge.manifest.json`). Before EVERY start `start_bridge` re-verifies that stored signature and re-hashes the exe (`BRIDGE_TAMPERED`, not started). Installed builds ignore `JARVES_WHATSAPP_BRIDGE_BASE_URL` and any key parameter (source checkouts may use an https override for testing). Owner-initiated only (`approved=True`, no background/voice/startup path), never while the bridge runs, never an older version than installed, no token sent, no secret logged (version/size/SHA256 only, code `WA_BRIDGE_DOWNLOADED`). Not published yet = honest EN/HE `BRIDGE_NOT_PUBLISHED` message, nothing changes.
+- Publish side (small, no workflow edit): `python packaging/release.py bridge-publish --dir bridge/whatsapp/dist [--dry-run]` re-checks the exe against `.sha256` + `build-info.json`, uploads `whatsapp_bridge-<version>.exe`, its `.sha256` and then the signed `whatsapp-bridge.json` (last = the switch) to the rolling pre-release tag `whatsapp-bridge` of `igalgerman/jarvis-releases` (same `RELEASES_TOKEN` + `JARVES_UPDATE_SIGNING_KEY` secrets; skips cleanly without them). The app reads `https://github.com/igalgerman/jarvis-releases/releases/download/whatsapp-bridge/whatsapp-bridge.json`.
+- Guide `whatsapp_bridge.toml` (new first step, 2 new problems, EN+HE, new error codes), 3 Hebrew catalog strings via `catalog_add.py`, CLI parity unchanged (`install` is a new action of `jarvis whatsapp`; `status` now shows `bridge_download`), `test_guides`/`test_cli_parity` pass.
+- Tests (targeted, no network): `core/tests/test_whatsapp_bridge_install.py` (26: happy path, atomic files, no token header, approval required, not published, 13 tamper/failure cases leave nothing behind, failed replacement keeps the old bridge, older/running/non-Windows refused, hash re-check before start, installed builds ignore overrides, dashboard/CLI surfaces, `release.py bridge-publish` -> local GitHub stub -> app install end to end). Plus `test_whatsapp_surfaces`, release, update and connect tests; `python core/tools/prepush.py` PASSED.
+- NOT verified: a real download from GitHub, the real Windows exe running after download, SmartScreen/antivirus behaviour on the downloaded unsigned exe, the new button in a real browser (source assertions only), `payload_check.py` is unchanged (it covers the shipped `bridge/` payload, not `<home>/bridge`).
+- MUST BE PUBLISHED for this to work end to end (owner/CI, one time per bridge version): (1) secrets `RELEASES_TOKEN` and `JARVES_UPDATE_SIGNING_KEY` set (docs/RELEASE_HOSTING.md); (2) run the reproducible build and `python packaging/release.py bridge-publish --dir bridge/whatsapp/dist` on a machine/runner with those secrets (the owner can run it locally after `./scripts/build_whatsapp_bridge.ps1 -Version 0.1.0`, with `RELEASES_TOKEN`/`JARVES_UPDATE_SIGNING_KEY` in the environment); until then the button answers "not published yet". The published exe should equal `packaging/bridge_pin.json` (0.1.0, sha256 15706e16...).
+- Follow-up workflow (NOT in this PR, another CI change is in flight). New file `.github/workflows/bridge-publish.yml`, manual, owner-triggered:
+
+```yaml
+name: Publish WhatsApp bridge
+on:
+  workflow_dispatch:
+    inputs:
+      version: {description: "bridge version (must equal packaging/bridge_pin.json)", required: true, default: "0.1.0"}
+permissions:
+  contents: read
+jobs:
+  build:
+    runs-on: windows-2025
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with: {go-version: "1.27.0", cache-dependency-path: bridge/whatsapp/go.sum}
+      - shell: pwsh
+        run: |
+          ./scripts/build_whatsapp_bridge.ps1 -Version "${{ inputs.version }}"
+          ./scripts/build_whatsapp_bridge.ps1 -Version "${{ inputs.version }}" -Verify bridge/whatsapp/dist/whatsapp_bridge.exe.sha256
+          $pin = Get-Content packaging/bridge_pin.json -Raw | ConvertFrom-Json
+          $got = (Get-FileHash bridge/whatsapp/dist/whatsapp_bridge.exe -Algorithm SHA256).Hash.ToLower()
+          if ($got -ne $pin.sha256) { throw "bridge SHA256 differs from packaging/bridge_pin.json" }
+      - uses: actions/upload-artifact@v7
+        with: {name: bridge-dist, path: bridge/whatsapp/dist/, retention-days: 1, if-no-files-found: error}
+  publish:
+    needs: build
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/download-artifact@v8
+        with: {name: bridge-dist, path: bridge-dist}
+      - run: python3 packaging/release.py bridge-publish --dir bridge-dist
+        env:
+          RELEASES_REPO: ${{ vars.RELEASES_REPO }}
+          RELEASES_TOKEN: ${{ secrets.RELEASES_TOKEN }}
+          JARVES_UPDATE_SIGNING_KEY: ${{ secrets.JARVES_UPDATE_SIGNING_KEY }}
+```
+  (pin the action SHAs like the other workflows when adding it; `test_ci_pipeline` contracts may need a row for the new workflow.)
+- Open questions for owner: (a) old versioned bridge assets are not pruned from the `whatsapp-bridge` release (a few MB each; prune keep-3 is a later change); (b) `JARVES_WHATSAPP_BRIDGE` (explicit command env) is still honoured by installed builds, unlike update sources; consider ignoring it there; (c) the downloaded exe is not Authenticode-signed, same as the installer.
+
+
 ## Software project manager — 23 Oct 2026
 
 - Owner request: open a software project and let JARVES manage it with many coding agents (Claude Code, Codex, OpenCode, OpenRouter): small tasks, handoffs, parallel work, small contexts, status / new task / update / deep dive / talk to the agent. Design: [PROJECT_MANAGER](plans/PROJECT_MANAGER.md), reviewed by an Opus subagent before coding; its findings (integration worktree + merge lock, worktrees under the JARVES home, scope and protected-path enforcement, prompt on stdin, allow-listed child env, `dontAsk` permissions, check run by JARVES with `shell=False`, bounded restart recovery) are implemented.
@@ -1338,6 +1392,15 @@ V5 review pass (21 Oct 2026): `docs/reviews/SWV5_SECURITY_REVIEW.md` - 4 finding
 
 Built: `core/src/jarves/continuity.py` (SQLite `continuity.db`): command ledger (chat, approval answers, goal actions, signal snooze/stop; same client id runs once, also after a PC restart; a command the phone queued over 120 s is refused `STALE`), one shared conversation journal (phone + desktop turns, `/api/m/sync?since=`), presence and one-device routing (timers via `Operations._ring_once`, notices acknowledged per device, lost responses re-sent only to the same device), event-driven signal gate (off by default, quiet hours 22:00-07:00, snooze/stop, hourly/daily limits, cost cap 0, dedupe; no LLM calls). PWA: offline banner EN+HE, outbox with "not sent" and one auto-retry window (2 min), notes, goals list, snooze/stop; new device scope `tasks` (off until granted; phone cannot delete/edit goals). Feature `proactive_signals` (default OFF), guide `proactive_signals.toml` (+ mobile_access problems), CLI `jarvis proactive signals ...`, dashboard `/api/continuity`. Tests: `core/tests/test_v5_continuity.py` (fake clock, fake devices, restart/resend, no network, no browser).
 Open: real phone/Wi-Fi/sleep run (owner); no calendar scheduler exists yet (`on_calendar_event` is the hook, tested with fakes); GPT-Live voice turns are not journaled yet; the desktop only sees notices via dashboard/CLI (never spoken). `test_p_perf::test_backend_prompt_does_not_grow` fails (58998 vs 57310 chars) already after merging PR #36 (v5/pillars-followups), not from this branch: slim the goal/pref/proactive/dev tool texts there.
+
+## Chat UI polish: web Chat page + `jarvis chat` (23 Oct 2026)
+
+- Owner report (screenshot): the web chat looked low quality and showed a stray "null" after "Not silent". Cause: `status.replaceChildren(pill, null)` renders the text "null"; fixed in `chatview.js` (spreads an array instead).
+- `chatview.js/.css` (shared by the dashboard Chat page and the phone page): chat fills the window height (dvh), one toolbar row (status + options), welcome text in the empty state, bubbles with tails and a streaming caret, animated "Writing" indicator, composer as one box with an auto-growing field and a Send button that is off while empty, smart scroll (follows only when at the bottom) plus a jump-to-latest button, command chips scroll sideways. Class names the phone e2e tests use (`.jc-in .jc-send .jc-msg .jc-log`) are unchanged. Hebrew for the 3 new strings via `tools/catalog_add.py`.
+- `chat_cli.py`: colour (assistant prefix, tool lines, failures) and a separator after each turn only on a real terminal and never with `NO_COLOR`; version shown in the header. All pinned strings unchanged.
+- Verified: test_chat + test_web_chat (62), prepush green, headless-Chromium screenshots of the web view (filled and empty). NOT verified: the phone e2e (needs a browser fixture), a real Windows console, RTL look of the new bubbles in a real browser.
+- Added (same day, owner approved): safe markdown in answers (headings, lists, quotes, bold/italic/inline code, fenced code with a Copy button, http(s) links only; DOM calls only, HTML in an answer stays text) and a keyboard slash-command pop-up fed by the server's command list. Test: `core/tests/test_chat_markdown_browser.py` (real headless browser, runs in the CI browser job via `BROWSER_FILES`).
+- Open: message timestamps (low value, only on request).
 
 ## next-flow.yml parse failure - 23 Oct 2026
 

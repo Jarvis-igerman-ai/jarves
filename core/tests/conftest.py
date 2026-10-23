@@ -32,7 +32,7 @@ def pytest_configure(config):
 # ---------------------------------------------------------------- CI sharding (no plugin, no reruns of the whole suite)
 # The real-browser files run as their own CI job (own retry); the rest is split into N shards by file, balanced by
 # test count, the same on every shard because each shard collects the same tests. Deselected, never skipped.
-BROWSER_FILES = ("test_browser.py", "test_canary.py", "test_dashboard_a11y.py")
+BROWSER_FILES = ("test_browser.py", "test_canary.py", "test_dashboard_a11y.py", "test_chat_markdown_browser.py")
 
 
 def pytest_addoption(parser):

@@ -15,6 +15,7 @@ PAGES.whatsapp = async function () {
       msg.textContent = okText || tx("בוצע.", "Done.");
       if (path === "link" || (path === "setup" && r.step === "awaiting_scan")) showLink(r);
       else if (path === "setup" && r.ok === false) msg.textContent = tx(r.message_he, r.message);
+      else if (path === "install" && r.ok === false) msg.textContent = tx(r.message_he, r.message);      // honest answer, e.g. not published yet
       else route(true);
     } catch (e) { msg.textContent = tx("לא בוצע: ", "Not done: ") + e.message; }
   };
@@ -100,7 +101,9 @@ PAGES.whatsapp = async function () {
           killed ? tx("שחרור מתג החירום", "Release the kill switch") : tx("מתג חירום: לעצור הכול", "Kill switch: stop everything")),
         el("button", { type: "button", class: "ghost", disabled: cantRun, onclick: () => post("start", {}) }, tx("הפעלת הגשר", "Start the bridge")))),
     missing ? el("div", { class: "card", role: "alert" }, el("b", {}, tx("רכיב הגשר לא מותקן", "The bridge program is not installed")),
-      el("div", { class: "small" }, tx(d.not_installed.he, d.not_installed.en))) : null,
+      el("div", { class: "small" }, tx(d.not_installed.he, d.not_installed.en)),
+      el("div", { class: "small muted" }, tx("הגשר מורד כקובץ חתום מ-JARVES, נבדק (חתימה, SHA256, גודל) לפני ההתקנה ושוב לפני כל הפעלה. שום דבר לא יורד בלי שתלחצו.", "The bridge is downloaded as a signed JARVES file, checked (signature, SHA256, size) before it is installed and again before every start. Nothing downloads unless you press the button.")),
+      el("button", { type: "button", class: "primary", disabled: !d.local || (d.bridge_download && d.bridge_download.supported === false), onclick: () => post("install", {}, tx("הגשר הורד ואומת", "The bridge was downloaded and verified")) }, tx("הורדת גשר הוואטסאפ", "Download the WhatsApp bridge"))) : null,
     el("div", { class: "card" }, el("b", {}, tx("הגדרת וואטסאפ בלחיצה אחת", "Set up WhatsApp in one go")),
       el("div", { class: "small" }, tx("מפעיל את הגשר במידת הצורך ומציג קוד QR. את הסריקה בטלפון עושים אתם, ואחריה אפשר להפעיל קריאה בלבד. לא נשלחת שום הודעה.", "Starts the bridge if needed and shows a QR code. You scan it on your phone, then you can switch on read-only. No message is sent.")),
       el("button", { type: "button", class: "primary", disabled: cantRun || st.linked, onclick: () => post("setup", {}, tx("סרקו את הקוד", "Scan the code")) }, tx("הגדרת וואטסאפ", "Set up WhatsApp"))),

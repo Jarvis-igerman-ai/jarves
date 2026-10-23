@@ -778,7 +778,7 @@
     "not yet": "עוד לא",
     "(not in this version)": "(לא בגרסה הזאת)",
     "Open": "פתח",
-    "Copy": "העתק",
+    "Copy": "העתקה",
     "← all guides": "כל המדריכים ←",
     "What to say": "מה להגיד לו",
     "Privacy": "פרטיות",
@@ -1943,7 +1943,13 @@
     "Summary: ": "תקציר: ",
     "Task board": "לוח משימות",
     "Plan": "תכנון",
-    "Add task": "הוספת משימה"
+    "Add task": "הוספת משימה",
+    "The bridge is downloaded as a signed JARVES file, checked (signature, SHA256, size) before it is installed and again before every start. Nothing downloads unless you press the button.": "הגשר מורד כקובץ חתום מ-JARVES, נבדק (חתימה, SHA256, גודל) לפני ההתקנה ושוב לפני כל הפעלה. שום דבר לא יורד בלי שתלחצו.",
+    "Download the WhatsApp bridge": "הורדת גשר הוואטסאפ",
+    "The bridge was downloaded and verified": "הגשר הורד ואומת",
+    "Hi, I am JARVES. How can I help? Type a message, or / for commands.": "שלום, אני JARVES. במה אפשר לעזור? כתבו הודעה או / לפקודות.",
+    "Scroll to the latest message": "לגלול להודעה האחרונה",
+    "Writing": "כותב"
   },
   "rules": [
     [

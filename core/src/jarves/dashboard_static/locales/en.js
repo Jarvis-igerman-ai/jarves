@@ -1943,6 +1943,12 @@
     "Summary: ": "Summary: ",
     "Task board": "Task board",
     "Plan": "Plan",
-    "Add task": "Add task"
+    "Add task": "Add task",
+    "The bridge is downloaded as a signed JARVES file, checked (signature, SHA256, size) before it is installed and again before every start. Nothing downloads unless you press the button.": "The bridge is downloaded as a signed JARVES file, checked (signature, SHA256, size) before it is installed and again before every start. Nothing downloads unless you press the button.",
+    "Download the WhatsApp bridge": "Download the WhatsApp bridge",
+    "The bridge was downloaded and verified": "The bridge was downloaded and verified",
+    "Hi, I am JARVES. How can I help? Type a message, or / for commands.": "Hi, I am JARVES. How can I help? Type a message, or / for commands.",
+    "Scroll to the latest message": "Scroll to the latest message",
+    "Writing": "Writing"
   }
 };

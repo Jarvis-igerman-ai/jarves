@@ -18,6 +18,7 @@ from pathlib import Path
 
 from . import clilang, logs
 from . import whatsapp_bridge as wab
+from . import whatsapp_bridge_install as wbi
 from . import whatsapp_policy as pol
 from .whatsapp_bridge import BridgeClient, BridgeError
 
@@ -137,13 +138,13 @@ def send(home: Path, who: str, text: str, *, test_invoke: str | None = None) -> 
 
 
 # ---------------------------------------------------------------------- CLI
-ACTIONS = ("status", "start", "stop", "setup", "link", "unlink", "mode", "allow", "remove", "scope", "inbox", "send", "kill",
+ACTIONS = ("status", "start", "stop", "install", "setup", "link", "unlink", "mode", "allow", "remove", "scope", "inbox", "send", "kill",
            "purge", "retention", "audit")
 
 
 def add_cli(sub) -> None:
     w = sub.add_parser("whatsapp", help="real WhatsApp access through the local bridge (PC only): status | start | "
-                                        "stop | setup | link | unlink | mode off|read|send | allow read|send <contact> | "
+                                        "stop | install | setup | link | unlink | mode off|read|send | allow read|send <contact> | "
                                         "remove read|send <contact> | scope | inbox | send <contact> \"<text>\" | "
                                         "kill | purge | retention <days> | audit")
     w.add_argument("action", choices=ACTIONS)
@@ -171,7 +172,7 @@ def _print(d, as_json: bool) -> None:
 def _confirm(prompt: str, want: str = "y") -> bool:
     try:
         ans = input(prompt)
-    except EOFError:
+    except (EOFError, OSError):
         return False
     return ans.strip().lower() == want.lower() if want != "y" else ans.strip().lower() in ("y", "yes", "כן")
 
@@ -180,12 +181,22 @@ def _down_code(home: Path) -> str:
     return "WA_BRIDGE_DOWN" if wab.bridge_installed(home) else "WA_NOT_INSTALLED"
 
 
+def install_bridge(home: Path) -> dict:
+    """The ONE 'Download the WhatsApp bridge' backend (dashboard WhatsApp page, CLI `jarvis whatsapp install`, the
+    Connect flow). Owner-initiated only (callers are local-only); a signed manifest + SHA256 + size or nothing."""
+    try:
+        return wbi.install(home, approved=True)
+    except wbi.BridgeInstallError as e:
+        return wbi.failure(e)
+
+
 def setup_begin(home: Path, phone: str = "") -> dict:
     """The ONE 'Set up WhatsApp' backend (dashboard WhatsApp page, dashboard Connect row; the CLI/Connect console use
     the same start + link calls). Starts the bridge if needed and begins linking. It never scans for you: the phone
     scan stays manual. `step`: not_installed | bridge_down | already_linked | awaiting_scan."""
     if not wab.bridge_installed(home) and wab.status_or_none(home) is None:
-        return {"step": "not_installed", "ok": False, "message": wab.NOT_INSTALLED_EN, "message_he": wab.NOT_INSTALLED_HE}
+        return {"step": "not_installed", "ok": False, "can_download": True, "message": wab.NOT_INSTALLED_EN,
+                "message_he": wab.NOT_INSTALLED_HE}
     ok, why = wab.start_bridge(home)
     if not ok:
         return {"step": "bridge_down", "ok": False, "message": why, "message_he": BridgeError("WA_BRIDGE_DOWN").he}
@@ -196,12 +207,24 @@ def setup_begin(home: Path, phone: str = "") -> dict:
     return {**r, "step": "awaiting_scan", "ok": True}
 
 
+def _install_cli(home: Path) -> int:
+    r = install_bridge(home)
+    print(clilang.fmt(r.get("message_he", ""), r.get("message", "")))
+    if not r["ok"]:
+        print(f"{r['code']}")
+    return 0 if r["ok"] else 1
+
+
 def _setup(home: Path, a) -> int:
     """`jarvis whatsapp setup`: the guided path. Says plainly if the bridge program is missing; otherwise starts the
     bridge, links (the phone scan is always yours) and then offers read-only mode. Never links or sends silently."""
     if not wab.bridge_installed(home) and wab.status_or_none(home) is None:
         print(clilang.fmt(wab.NOT_INSTALLED_HE, wab.NOT_INSTALLED_EN))
-        return 1
+        if not _confirm(clilang.fmt("להוריד את גשר הוואטסאפ עכשיו (קובץ חתום, נבדק לפני ההתקנה)? [y/N] ",
+                                    "Download the WhatsApp bridge now (a signed file, verified before it is installed)? [y/N] ")):
+            return 1
+        if _install_cli(home) != 0:
+            return 1
     rc = _link(home, a)
     if rc != 0:
         return rc
@@ -298,7 +321,7 @@ def cmd_whatsapp(a, cfg, home) -> int:
             st = wab.status_or_none(home)
             s, detail, action = wab.health_view(st)
             out = {"status": s, "detail": detail, "action": action, "configured": wab.configured(home),
-                   "bridge_installed": wab.bridge_installed(home),
+                   "bridge_installed": wab.bridge_installed(home), "bridge_download": wbi.status(home),
                    "bridge": None if st is None else {k: st.get(k) for k in (
                        "engine", "version", "mode", "killed", "connection", "linked", "watch_days_left",
                        "retention_days", "keep_nothing", "counts", "rate", "warnings_total", "key_protection")}}
@@ -312,6 +335,8 @@ def cmd_whatsapp(a, cfg, home) -> int:
             admin(home).call("POST", "/shutdown")
             print("bridge stopping (store sealed)")
             return 0
+        if a.action == "install":
+            return _install_cli(home)
         if a.action == "link":
             return _link(home, a)
         if a.action == "setup":
@@ -445,6 +470,7 @@ def view(ctx) -> dict:
            "configured": wab.configured(ctx.home), "binary": wab.bridge_installed(ctx.home),
            "bridge_installed": wab.bridge_installed(ctx.home),
            "not_installed": {"en": wab.NOT_INSTALLED_EN, "he": wab.NOT_INSTALLED_HE},
+           "bridge_download": wbi.status(ctx.home),
            "tos": TOS_NOTE, "tos_he": TOS_NOTE_HE, "local": _local(ctx)}
     if st is not None and _local(ctx):
         try:
@@ -552,6 +578,9 @@ def dashboard_routes(register) -> None:
     def setup(ctx, b):
         return setup_begin(ctx.home, str(b.get("phone") or ""))
 
+    def install(ctx, _b):
+        return install_bridge(ctx.home)               # owner pressed the button; failures are answers, not crashes
+
     def start(ctx, _b):
         ok, why = wab.start_bridge(ctx.home)
         if not ok:
@@ -562,5 +591,6 @@ def dashboard_routes(register) -> None:
     register("GET", r"/api/whatsapp/messages", messages)
     register("GET", r"/api/whatsapp/link", link_state)
     for path, fn in (("mode", mode), ("allow", allow_), ("kill", kill_), ("link", link), ("unlink", unlink),
-                     ("retention", retention), ("purge", purge), ("scope", scope), ("start", start), ("setup", setup)):
+                     ("retention", retention), ("purge", purge), ("scope", scope), ("start", start), ("setup", setup),
+                     ("install", install)):
         register("POST", rf"/api/whatsapp/{path}", post(fn))

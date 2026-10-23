@@ -51,7 +51,7 @@ TAINT_LABEL = ("הודעת וואטסאפ", "a WhatsApp message")
 
 HE = {   # Hebrew answers for bridge codes (fixed strings)
     "WA_BRIDGE_DOWN": "גשר הוואטסאפ לא פועל. במחשב: jarvis whatsapp start.",
-    "WA_NOT_INSTALLED": "רכיב הגשר של וואטסאפ לא מותקן במחשב הזה. מתקינים מחדש את JARVES, או בונים אותו מהקוד (scripts/build_whatsapp_bridge.ps1).",
+    "WA_NOT_INSTALLED": "רכיב הגשר של וואטסאפ לא מותקן במחשב הזה. לוחצים על הכפתור \"הורדת גשר הוואטסאפ\" (jarvis whatsapp install), או מתקינים מחדש את JARVES, או בונים אותו מהקוד (scripts/build_whatsapp_bridge.ps1).",
     "WA_NOT_SET_UP": "וואטסאפ עוד לא מחובר. במחשב: jarvis whatsapp link.",
     "WA_UNAUTHORIZED": "הגשר לא מקבל את המפתח המקומי. במחשב: jarvis whatsapp start.",
     "WA_FORBIDDEN": "את זה משנים רק במחשב (jarvis whatsapp או לוח הבקרה).",
@@ -208,13 +208,18 @@ def bridge_command(home: Path) -> list[str] | None:
                  here.parents[3] / "bridge" / "whatsapp" / "dist" / exe):  # a source checkout after the build script
         if cand.is_file():
             return [str(cand)]
+    from . import whatsapp_bridge_install as wbi          # the owner-downloaded one (<home>/bridge), signed manifest beside it
+    if wbi.installed_exe(home).is_file() and wbi.sidecar(home).is_file():
+        return [str(wbi.installed_exe(home))]
     return None
 
 
 NOT_INSTALLED_EN = ("The WhatsApp bridge program is not installed on this computer, so WhatsApp cannot be linked yet. "
-                    "Next step: reinstall JARVES (the installer includes the bridge), or, from a source checkout, "
-                    "build it with scripts/build_whatsapp_bridge.ps1 (needs Go 1.27.0).")
-NOT_INSTALLED_HE = ("רכיב הגשר של וואטסאפ לא מותקן במחשב הזה, ולכן אי אפשר לקשר וואטסאפ עדיין. הצעד הבא: להתקין מחדש "
+                    "Next step: press \"Download the WhatsApp bridge\" (or run: jarvis whatsapp install), or reinstall "
+                    "JARVES (the installer includes the bridge), or, from a source checkout, build it with "
+                    "scripts/build_whatsapp_bridge.ps1 (needs Go 1.27.0).")
+NOT_INSTALLED_HE = ("רכיב הגשר של וואטסאפ לא מותקן במחשב הזה, ולכן אי אפשר לקשר וואטסאפ עדיין. הצעד הבא: ללחוץ על "
+                    "\"הורדת גשר הוואטסאפ\" (או להריץ: jarvis whatsapp install), או להתקין מחדש "
                     "את JARVES (ההתקנה כוללת את הגשר), או מתוך קוד המקור לבנות אותו עם scripts/build_whatsapp_bridge.ps1 "
                     "(דורש Go 1.27.0).")
 
@@ -232,6 +237,13 @@ def start_bridge(home: Path, *, wait_s: float = 20.0) -> tuple[bool, str]:
     cmd = bridge_command(home)
     if cmd is None:
         return False, NOT_INSTALLED_EN
+    from . import whatsapp_bridge_install as wbi
+    if cmd == [str(wbi.installed_exe(home))]:             # the downloaded one: hash + signed manifest again, right before the start
+        try:
+            wbi.verify_installed(home)
+        except wbi.BridgeInstallError as e:
+            logs.warn("whatsapp", "WA_BRIDGE_TAMPERED", "downloaded bridge failed its check before start", why=e.detail)
+            return False, e.message
     d = bridge_dir(home)
     d.mkdir(parents=True, exist_ok=True)
     (d / "endpoint.json").unlink(missing_ok=True)

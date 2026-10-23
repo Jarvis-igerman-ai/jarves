@@ -23,7 +23,9 @@ core/tools/release_gate.py), manifest latest.json on the newest non-pre-release.
 (`beta-publish`, .github/workflows/beta.yml; DISABLED unless ENABLE_BETA_PUBLISH=true): release `beta-v<build>` marked
 pre-release (never "latest") plus the manifest latest-beta.json on the one rolling pre-release `beta-channel`.
 `candidate` builds the signed manifest next to the tested installer as a workflow artifact and publishes nothing.
-`--dry-run` on public-publish / beta-publish prints what would be published and touches nothing.
+  bridge-publish --dir bridge/whatsapp/dist   the prebuilt WhatsApp bridge -> rolling release `whatsapp-bridge` (versioned exe +
+                                        .sha256 + signed whatsapp-bridge.json, own signing domain; same secrets)
+`--dry-run` on public-publish / beta-publish / bridge-publish prints what would be published and touches nothing.
 
 latest.json = {"format": 1, "manifest": {version, commit, built, sha256, size, installer, url, ...},
                "signature": {"alg": "ed25519", "key_id", "sig"}}; the signature covers SIGN_DOMAIN + the canonical
@@ -53,6 +55,10 @@ TAG_PREFIX = "win-v"
 ARTIFACT = "jarves-windows-installer-main"
 PIN = "[pinned]"
 SIGN_DOMAIN = b"jarves-update-manifest-v1\n"      # same constant in core/src/jarves/updates.py
+BRIDGE_SIGN_DOMAIN = b"jarves-whatsapp-bridge-manifest-v1\n"   # same constant in core/src/jarves/whatsapp_bridge_install.py
+BRIDGE_MANIFEST = "whatsapp-bridge.json"
+BRIDGE_TAG = "whatsapp-bridge"               # rolling release of the public repo that holds the prebuilt WhatsApp bridge
+BRIDGE_EXE = "whatsapp_bridge.exe"
 PUBLIC_SECRETS = ("RELEASES_TOKEN", "JARVES_UPDATE_SIGNING_KEY")
 DEFAULT_RELEASES_REPO = "igalgerman/jarvis-releases"   # same default in core/src/jarves/updates.py
 MANIFEST = "latest.json"
@@ -262,9 +268,9 @@ def public_notes(info: dict) -> str:
 
 
 # ---------------------------------------------------------------------- signed manifest (Ed25519)
-def canonical(manifest: dict) -> bytes:
+def canonical(manifest: dict, domain: bytes = SIGN_DOMAIN) -> bytes:
     """The exact bytes that are signed (same function in core/src/jarves/updates.py)."""
-    return SIGN_DOMAIN + json.dumps(manifest, sort_keys=True, separators=(",", ":"), ensure_ascii=True).encode("ascii")
+    return domain + json.dumps(manifest, sort_keys=True, separators=(",", ":"), ensure_ascii=True).encode("ascii")
 
 
 def key_id(public_raw: bytes) -> str:
@@ -311,8 +317,8 @@ def openssl_sign(message: bytes, private_pem: str) -> tuple[bytes, bytes]:
         return sf.read_bytes(), pub
 
 
-def sign_manifest(manifest: dict, private_pem: str) -> dict:
-    sig, pub = ed25519_sign(canonical(manifest), private_pem)
+def sign_manifest(manifest: dict, private_pem: str, domain: bytes = SIGN_DOMAIN) -> dict:
+    sig, pub = ed25519_sign(canonical(manifest, domain), private_pem)
     return {"format": 1, "manifest": manifest,
             "signature": {"alg": "ed25519", "key_id": key_id(pub), "sig": base64.b64encode(sig).decode()}}
 
@@ -422,6 +428,66 @@ def public_publish(dist: Path, keep: int = 3, env: dict | None = None, gh: GitHu
         gh.call("DELETE", f"/releases/{r['id']}")
         if gh.call("DELETE", f"/git/refs/tags/{r['tag_name']}", ok404=True) is None:
             print(f"  tag {r['tag_name']} was already gone")
+    return 0
+
+
+# ---------------------------------------------------------------------- prebuilt WhatsApp bridge (issue #17)
+def bridge_manifest(info: dict, exe: Path, url: str, now: _dt.datetime | None = None) -> dict:
+    """The manifest the app verifies before it installs the bridge (core/src/jarves/whatsapp_bridge_install.py)."""
+    return {"product": "jarves-whatsapp-bridge", "platform": "windows-x64", "asset": BRIDGE_EXE,
+            "version": str(info["version"]), "commit": info.get("commit"), "go": info.get("go"),
+            "whatsmeow": info.get("whatsmeow"), "sha256": sha256(exe), "size": exe.stat().st_size, "url": url,
+            "published": (now or _dt.datetime.now(_dt.timezone.utc)).isoformat(timespec="seconds")}
+
+
+def _read_bridge(dist: Path) -> tuple[dict, Path]:
+    """bridge/whatsapp/dist as left by scripts/build_whatsapp_bridge.ps1: the exe must equal its .sha256 and
+    build-info.json (the same reproducible-build evidence payload_check.py demands)."""
+    info = json.loads((dist / "build-info.json").read_text(encoding="utf-8-sig"))
+    exe = dist / BRIDGE_EXE
+    want = (dist / (BRIDGE_EXE + ".sha256")).read_text(encoding="utf-8-sig").split()[0].lower()
+    got = sha256(exe)
+    if got != want or got != str(info.get("sha256") or "").lower():
+        raise SystemExit("bridge exe SHA256 does not match its .sha256 / build-info.json; not publishing")
+    if not re.fullmatch(r"\d+\.\d+\.\d+(?:[-.][0-9A-Za-z.]+)?", str(info.get("version") or "")):
+        raise SystemExit("bridge build-info.json has no valid version; not publishing")
+    return info, exe
+
+
+def bridge_publish(dist: Path, env: dict | None = None, gh: GitHub | None = None, dry_run: bool = False) -> int:
+    """Publish the prebuilt bridge to the rolling release `whatsapp-bridge` of the public releases repo: the versioned
+    exe + .sha256 first, the Ed25519-signed whatsapp-bridge.json LAST (the switch; the app never sees a manifest whose
+    file is missing). Exit 0 with a clear log without the secrets. Never touches installer releases."""
+    env = os.environ if env is None else env
+    info, exe = _read_bridge(dist)
+    repo = str(env.get("RELEASES_REPO") or "").strip() or DEFAULT_RELEASES_REPO
+    if not re.fullmatch(r"[\w.-]+/[\w.-]+", repo):
+        raise SystemExit(f"Bridge publish: bad RELEASES_REPO {repo!r}")
+    asset = f"whatsapp_bridge-{info['version']}.exe"
+    url = f"https://github.com/{repo}/releases/download/{BRIDGE_TAG}/{asset}"
+    if dry_run:
+        print(f"DRY RUN (bridge): nothing is published, no network call is made.\n  repo     {repo}\n"
+              f"  release  {BRIDGE_TAG} (rolling pre-release)\n  files    {asset} ({exe.stat().st_size} bytes), {asset}.sha256, "
+              f"{BRIDGE_MANIFEST} (Ed25519-signed, domain {BRIDGE_SIGN_DOMAIN.decode().strip()})\n  version  {info['version']}")
+        return 0
+    missing = [k for k in PUBLIC_SECRETS if not str(env.get(k) or "").strip()]
+    if missing:
+        print("::warning::Bridge publish: SKIPPED - RELEASES_TOKEN and/or JARVES_UPDATE_SIGNING_KEY is not set "
+              "(docs/RELEASE_HOSTING.md)")
+        return 0
+    gh = gh or GitHub(repo, env["RELEASES_TOKEN"].strip())
+    envelope = sign_manifest(bridge_manifest(info, exe, url), env["JARVES_UPDATE_SIGNING_KEY"], BRIDGE_SIGN_DOMAIN)
+    rel = gh.call("GET", f"/releases/tags/{BRIDGE_TAG}", ok404=True)
+    if rel is None:
+        rel = gh.call("POST", "/releases", {"tag_name": BRIDGE_TAG, "name": "JARVES WhatsApp bridge (prebuilt, signed)",
+                                            "body": f"The prebuilt WhatsApp bridge. `{BRIDGE_MANIFEST}` is the Ed25519-signed "
+                                                    "manifest JARVES verifies (SHA256 + size) before installing it.",
+                                            "draft": False, "prerelease": True, "make_latest": "false"})
+    gh.upload(rel, asset, exe.read_bytes(), "application/vnd.microsoft.portable-executable")
+    gh.upload(rel, asset + ".sha256", f"{sha256(exe)}  {asset}\n".encode(), "text/plain")
+    gh.upload(rel, BRIDGE_MANIFEST, json.dumps(envelope, indent=1).encode(), "application/json")      # last: the switch
+    print(f"Bridge publish: published {info['version']} in {repo} (signed) -> "
+          f"https://github.com/{repo}/releases/download/{BRIDGE_TAG}/{BRIDGE_MANIFEST}")
     return 0
 
 
@@ -621,6 +687,9 @@ def main(argv: list[str] | None = None) -> int:
     bp = sub.add_parser("beta-publish")
     bp.add_argument("--dir", type=Path, required=True)
     bp.add_argument("--dry-run", action="store_true", help="print what would be published; touch nothing")
+    brp = sub.add_parser("bridge-publish", help="publish the prebuilt WhatsApp bridge (signed whatsapp-bridge.json)")
+    brp.add_argument("--dir", type=Path, required=True, help="bridge/whatsapp/dist")
+    brp.add_argument("--dry-run", action="store_true")
     cp = sub.add_parser("candidate")
     cp.add_argument("--dir", type=Path, required=True)
     cp.add_argument("--commit", required=True)
@@ -653,6 +722,8 @@ def main(argv: list[str] | None = None) -> int:
         return public_publish(a.dir, a.keep, dry_run=a.dry_run)
     if a.cmd == "beta-publish":
         return beta_publish(a.dir, dry_run=a.dry_run)
+    if a.cmd == "bridge-publish":
+        return bridge_publish(a.dir, dry_run=a.dry_run)
     if a.cmd == "candidate":
         candidate(a.dir, a.commit, a.out)
         return 0
