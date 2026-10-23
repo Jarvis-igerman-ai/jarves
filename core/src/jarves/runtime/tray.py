@@ -53,6 +53,8 @@ def status_line(view: dict) -> str:
     if core != "running":
         return f"Core {core}"
     parts = []
+    for lv in sorted(view.get("limits") or [], key=lambda v: v.get("level") != "exhausted"):    # no silent limits
+        parts.append(lv.get("text_en", "") + (" - raise " + lv["key"] if lv.get("level") == "exhausted" else ""))
     voice = view.get("voice", {})
     if view.get("mic", {}).get("muted"):
         parts.append("mic muted")

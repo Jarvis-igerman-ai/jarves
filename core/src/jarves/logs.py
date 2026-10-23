@@ -132,6 +132,7 @@ def _reg(cls: str, names: str) -> dict[str, str]:
 FIELD_CLASS: dict[str, str] = {
     **_reg(SAFE, """
         amber automatic blocked cap_usd error_type est_usd failed item item_count part passed red remedy skipped_because
+        limit_code resumes used
         ticket usd visibility within_budget
         action actions activation active after_s age_s ai_reviews alerts_paused answer_chars api_code applier
         asr_ms attempt attempts audio_ended audio_s audio_started autonomy available away backend backend_model

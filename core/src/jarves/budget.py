@@ -202,8 +202,18 @@ class Budget:
             self._tx(go)                      # an exception rolls the whole transaction back: nothing held
         except BudgetExceeded as e:
             logs.warn("budget", e.code, "budget limit reached", detail=str(e), action=e.action)
+            self._notify_exceeded(e)
             raise
         return rs
+
+    def _notify_exceeded(self, e: "BudgetExceeded") -> None:
+        """No silent limits: whoever owns this Budget (the Core) is told of EVERY refusal by a cap, so the user is."""
+        cb = getattr(self, "on_exceeded", None)
+        if cb is not None:
+            try:
+                cb(e)
+            except Exception:
+                logs.debug("budget", "EXCEEDED_HOOK_FAILED", "limit notice hook failed")
 
     def reservations(self, kind: str | None = None) -> list[dict]:
         """Live reservations of ALL processes (dashboard Costs page, `jarvis budget status`)."""
@@ -227,7 +237,9 @@ class Budget:
 
     def check(self, kind: str = "ai_requests", n: int = 1) -> None:
         if self.remaining(kind) < n:
-            raise BudgetExceeded(kind, self.limit(kind), self.used(kind))
+            e = BudgetExceeded(kind, self.limit(kind), self.used(kind))
+            self._notify_exceeded(e)
+            raise e
 
     def reserve(self, kind: str = "ai_requests", n: int = 1) -> Reservation:
         """Atomically (across processes): raise BudgetExceeded unless used + held + n <= limit, else hold n."""
@@ -246,6 +258,7 @@ class Budget:
             self._tx(go)
         except BudgetExceeded as e:
             logs.warn("budget", e.code, "budget limit reached", detail=str(e), action=e.action)
+            self._notify_exceeded(e)
             raise
         return r
 

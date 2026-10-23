@@ -223,6 +223,12 @@ def _probe_budget(cfg, home) -> tuple[bool, str]:
     return (True, f"${b:g} a month") if b else (False, "no monthly API budget set")
 
 
+def _probe_limits(cfg, home) -> tuple[bool, str]:
+    from .. import limits
+    bad = limits.worst(limits.views_from_home(home, cfg.ai)) if home is not None else []
+    return (False, "; ".join(v["text_en"] for v in bad)) if bad else (True, "daily limits have room left")
+
+
 def _probe_backup(cfg, home) -> tuple[bool, str]:
     if home is None:
         return False, "no data folder"
@@ -232,7 +238,7 @@ def _probe_backup(cfg, home) -> tuple[bool, str]:
 
 
 EXTRA_PROBES: dict[str, Callable] = {"ai": _probe_ai, "privacy": _probe_privacy, "admin_key": _probe_admin_key,
-                                     "budget": _probe_budget, "backup": _probe_backup}
+                                     "budget": _probe_budget, "limits": _probe_limits, "backup": _probe_backup}
 
 
 def _check(spec: str, f: feat.Features) -> tuple[bool, str]:

@@ -180,6 +180,12 @@ class Runtime:
             return "crashed"
         return "hidden"
 
+    def _limit_views(self) -> list[dict]:
+        try:
+            return self.core.limit_views()
+        except Exception:
+            return []
+
     def view(self) -> dict:
         core = self.core
         dev = getattr(core, "dev", None)
@@ -202,6 +208,7 @@ class Runtime:
                       # idle = no cloud voice connection: the wake word runs on this device only
                       "cloud_connection_open": live or bool(core._voice_connecting),
                       "detail": "wake word off" if core.wake is None else ""},
+            "limits": [v for v in self._limit_views() if v["level"] != "ok"],
             "tray": {"state": self.tray_state, "reason": self.tray_reason},
             "dashboard": {"enabled": core.features.enabled("dashboard"),
                           "running": getattr(core, "_dashboard", None) is not None},

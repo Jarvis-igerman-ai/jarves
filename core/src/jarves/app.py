@@ -11,6 +11,7 @@ from pathlib import Path
 
 from . import __version__, calm, logs, store
 from .brain import AgentBrain, Brain, billing_routes
+from . import limits as limits_mod
 from .budget import Budget, BudgetExceeded
 from .config import Config, api_billing_allowed, openai_key_present
 from .deviceport import INBOUND, DevicePort
@@ -195,6 +196,10 @@ class Core:
         # model passes was really said by the owner (dialing.py); never written to disk or logs
         self.owner_said: deque[str] = deque(maxlen=6)
         self._hold_wake_until = 0.0     # connected-on-open mode: wake word waits until the first live session ended
+        self._limit_warned: dict[str, str] = {}      # kind -> day the 80% notice was given
+        self._limit_announced: dict[str, float] = {}  # kind -> monotonic time of the last spoken/face limit notice
+        self._local_tts = None                       # tests inject a fake local speech engine for limit notices
+        self._loop = None
         self._rollovers: list[float] = []   # times of automatic session resumes (loop guard)
         self.startup = {"phase": "starting", "ready": False, "detail": "Loading JARVES..."}
         self._startup_t0 = time.monotonic()
@@ -212,6 +217,7 @@ class Core:
     # ------------------------------------------------------------------ lifecycle
     async def start(self) -> None:
         started_at = time.monotonic()
+        self._loop = asyncio.get_running_loop()
         c = self.cfg
         self.log_path = logs.setup(self.home / "logs", c.log.level, c.log.max_bytes, c.log.backups, self.console_logs,
                                   c.log.console_level, c.log.modules, c.log.hide, privacy=c.log.privacy)
@@ -295,7 +301,9 @@ class Core:
         register_home(self.registry, self.home, self.health)
         self.workspace.listeners.append(lambda name: self._spawn(wsp.note_live(self.live, self.workspace, name)))
 
-        self.budget = Budget(self.memory, c.ai)      # ONE shared budget: in-flight counts span brain, TTS and voice
+        self.budget = Budget(self.memory, c.ai)
+        self.budget.on_exceeded = self.on_budget_exceeded     # no silent limits: every refusal by a cap is announced
+        # ONE shared budget: in-flight counts span brain, TTS and voice
         self.curator = Curator(self.memory, self.workspace, enabled=lambda k: self.features.active(feat.SETTING_FEATURES[k])
                                if k in feat.SETTING_FEATURES else self.settings.get(k) == "on",
                                llm=openai_extractor(c.ai.text_model, self.budget) if api_billing_allowed(c.ai) else None)
@@ -337,6 +345,7 @@ class Core:
                                                 health=lambda s, d, a: self.health.set("delegation", s, d, a))
         self.health.set("delegation", "ok", self.delegation_state.describe())
         self._check_ai()
+        self.limits_refresh()
         try:                                            # SW-V4 O preflight (<= 1.5 s) while the ports are still free
             self.preflight = _preflight.run_core(self)
         except Exception:
@@ -544,7 +553,8 @@ class Core:
                  ai_requests_today=self.memory.usage_today("ai_requests"),
                  delegation=(self.delegation_state.snapshot(self.budget)
                              if getattr(self, "delegation_state", None) is not None else None),
-                 voice_minutes_today=round(self.memory.usage_today("voice_seconds") / 60, 1))
+                 voice_minutes_today=round(self.memory.usage_today("voice_seconds") / 60, 1),
+                 limits=self.limit_views(), limit_lines=limits_mod.status_lines(self.limit_views()))
         return s
 
     def _check_ai(self) -> None:
@@ -581,6 +591,88 @@ class Core:
     def _voice_budget_left_s(self) -> float:
         return self.budget.remaining("voice_seconds")
 
+    # ------------------------------------------------------------------ no silent limits (limits.py)
+    def limit_views(self) -> list[dict]:
+        return limits_mod.views_from(self.memory.usage_today, self.budget.limit)
+
+    def limits_refresh(self) -> None:
+        """Every daily cap becomes a health component (degraded while exhausted, an action text from 80%), and the
+        first time a cap crosses 80% today the user is told once (log WARNING + on-screen note)."""
+        try:
+            views = self.limit_views()
+        except Exception:
+            return
+        day = time.strftime("%Y-%m-%d")
+        for v in views:
+            st, detail, action = limits_mod.health_entry(v)
+            self.health.set(v["component"], st, detail, action)
+            if v["level"] == "warn" and self._limit_warned.get(v["kind"]) != day:
+                self._limit_warned[v["kind"]] = day
+                logs.warn("limits", "DAILY_LIMIT_80", "daily limit above 80%", limit_code=v["code"], used=v["used"],
+                          limit=v["max"], setting=v["key"])
+                self._spawn(self.link.send_face("assistant.activity", {
+                    "kind": "limit", "text": v["text_he"] if self.cfg.voice.language == "he" else v["text_en"],
+                    "detail": v["action_en"]}))
+
+    def on_budget_exceeded(self, e) -> None:
+        """Budget hook (any thread): a request was refused by a cap -> say so (debounced per kind)."""
+        if self.stopping or e.kind not in limits_mod.SPECS:
+            return
+        loop = getattr(self, "_loop", None)
+        try:
+            v = limits_mod.view(e.kind, e.used, e.limit)
+            v["level"] = "exhausted"
+            if loop is not None and loop.is_running():
+                loop.call_soon_threadsafe(lambda: self._spawn(self.announce_limit(v)))
+        except Exception:
+            logs.debug("limits", "LIMIT_HOOK_FAILED", "could not announce the limit")
+
+    async def announce_limit(self, v: dict, *, speak: bool = True) -> None:
+        """A limit was hit: log WARNING with code, face/dashboard error, health, and a short LOCAL spoken notice
+        (no cloud, Hebrew/English by voice.language). Debounced per kind so a retry loop cannot nag or spin."""
+        now = time.monotonic()
+        if now - self._limit_announced.get(v["kind"], -1e9) < 30:
+            return
+        self._limit_announced[v["kind"]] = now
+        logs.warn("limits", "DAILY_LIMIT_REACHED", "daily limit reached", limit_code=v["code"], used=v["used"],
+                  limit=v["max"], setting=v["key"], action=v["action_en"])
+        st, detail, action = limits_mod.health_entry(v)
+        self.health.set(v["component"], st, detail, action)
+        he = self.cfg.voice.language == "he"
+        await self.link.send_face("error", {"code": v["code"], "message": v["text_he"] if he else v["text_en"],
+                                            "action": v["action_he"] if he else v["action_en"],
+                                            "used": v["used"], "max": v["max"], "setting": v["key"]})
+        await self.link.broadcast("status", self.snapshot())
+        await self.set_face("error")
+        if speak:
+            await self._local_notice(limits_mod.spoken(v, self.cfg.voice.language))
+        await asyncio.sleep(1.0)
+        await self.set_face("idle")
+
+    async def _local_notice(self, text: str) -> None:
+        """A descending chime, then `text` spoken by a LOCAL engine only (never a cloud call: the limit may be
+        exactly the thing that forbids it)."""
+        if self.dev.audio is None:
+            return
+        try:
+            import numpy as _np
+            rate = 24000
+            parts = []
+            for hz, dur in ((660, 0.12), (440, 0.2)):
+                t = _np.arange(int(rate * dur)) / rate
+                env = _np.minimum(1.0, _np.minimum(t / 0.008, (dur - t) / 0.03))
+                parts.append((_np.sin(2 * _np.pi * hz * t) * env * 0.22).astype(_np.float32))
+            await self.dev.speaker_play(_np.concatenate(parts), rate)
+            tts = self._local_tts
+            if tts is None:
+                from .voice.tts import FallbackTTS, tts_chain
+                tts = FallbackTTS(tts_chain(self.cfg.voice, allow_cloud=False, budget=None))
+                tts.check()
+            samples, r = await tts.synth(text)
+            await self.dev.speaker_play(samples, r)
+        except Exception as ex:       # no local engine / audio: the on-screen error above still shows
+            logs.warn("limits", "LIMIT_NOTICE_NOT_SPOKEN", "could not speak the limit notice", error_type=type(ex).__name__)
+
     async def _health_loop(self) -> None:
         music_next, music_gap = 0.0, 10.0
         while True:
@@ -598,6 +690,7 @@ class Core:
                     self.dev.check_audio()
                 self.features.poll()            # a switch flipped on the dashboard / CLI reaches the Core here
                 self._check_ai()
+                self.limits_refresh()
                 self.health.heartbeat()         # the dashboard calls a snapshot older than 120 s "JARVES is off"
                 await self.link.broadcast("status", self.snapshot())
             except Exception:
@@ -1012,7 +1105,13 @@ class Core:
         now = time.monotonic()
         self._rollovers = [t for t in self._rollovers if now - t < 600]
         if len(self._rollovers) >= 3:
-            logs.warn("voice", "LIVE_RESUME_LIMIT", "conversation keeps being closed by the server; not resuming again")
+            logs.warn("voice", "LIVE_RESUME_LIMIT", "conversation keeps being closed by the server; not resuming again",
+                      resumes=len(self._rollovers), window_s=600, limit=3)
+            he_ = self.cfg.voice.language == "he"
+            self._spawn(self.link.send_face("error", {
+                "code": "LIVE_RESUME_LIMIT", "action": "say Hey Jarvis to start again" if not he_ else "אמור היי ג'ארביס כדי להתחיל שוב",
+                "message": ("השיחה נסגרה 3 פעמים ב-10 דקות; לא מתחבר שוב אוטומטית (3/3)" if he_
+                            else "the conversation was closed 3 times in 10 minutes; not reconnecting again (3/3)")}))
             return False
         self._rollovers.append(now)
         return True
@@ -1052,9 +1151,12 @@ class Core:
             return
         self._warm_probes()               # P0.3: ready before session_config() builds the tool list (after connect)
         await self.link.send_face("assistant.activity", {"text": "Loading voice connection..."})
-        if self._voice_budget_left_s() <= 0:
-            await self.notify_error("VOICE_BUDGET", "daily live-voice limit reached",
-                                    "raise ai.daily_realtime_minutes or use push-to-talk")
+        if self._voice_budget_left_s() < limits_mod.SPECS["voice_seconds"]["min_useful"]:
+            # No cloud session for a budget that cannot carry one (it would end ~1 s later and reconnect in a loop).
+            vv = limits_mod.view("voice_seconds", self.memory.usage_today("voice_seconds"), self.budget.limit("voice_seconds"))
+            vv["level"] = "exhausted"
+            await self.link.send_face("assistant.activity", {"kind": "done", "text": "", "detail": ""})
+            await self.announce_limit(vv)
             return
         v = self.cfg.voice
         async def output_level(level: float) -> None:
@@ -1079,12 +1181,28 @@ class Core:
             if self.live is live_ref[0]:
                 self.live = None                   # any end (user, remote close, error, budget) frees the slot
             logs.info("voice", "LIVE_ENDED", "live conversation ended", reason=reason)
+            self.limits_refresh()
+            he_ = self.cfg.voice.language == "he"
+            out_of_voice = (reason == "timeout"
+                            and self._voice_budget_left_s() < limits_mod.SPECS["voice_seconds"]["min_useful"])
+            if out_of_voice and not self.stopping:      # the budget ran out mid-session: say so, and do not reconnect
+                v2 = limits_mod.view("voice_seconds", self.memory.usage_today("voice_seconds"), self.budget.limit("voice_seconds"))
+                v2["level"] = "exhausted"
+                self._spawn(self.announce_limit(v2))
+            elif reason == "timeout" and not self.stopping:
+                self._spawn(self.link.send_face("assistant.activity", {"kind": "limit", "detail": "", "text": (
+                    "השיחה הגיעה לאורך המקסימלי (voice.session_max_s) ומתחברת מחדש" if he_
+                    else "conversation reached its maximum length (voice.session_max_s); reconnecting")}))
+            elif reason in ("idle", "no_speech") and not self.stopping:
+                self._spawn(self.link.send_face("assistant.activity", {"kind": "limit", "detail": "", "text": (
+                    "השיחה נסגרה בגלל שקט (voice.idle_disconnect_s)" if he_
+                    else "conversation closed after silence (voice.idle_disconnect_s)")}))
             if not self.stopping:
                 self._spawn(self.curator.run(f"live_{reason}"))   # learn durable facts from this conversation
             # Smooth conversation: the server closing a session (or a time limit) while the user is in the middle
             # of talking must not drop them out - reconnect at once. Idle / user / error / budget end for real.
             last = getattr(live_ref[0], "_last_activity", 0.0)
-            if (reason in ("remote_closed", "timeout") and not self.stopping and self.cfg.voice.activation == "conversation"
+            if (reason in ("remote_closed", "timeout") and not out_of_voice and not self.stopping and self.cfg.voice.activation == "conversation"
                     and time.monotonic() - last < 60 and self._rollover_allowed()):
                 self._spawn(self._resume_live())
             if self.startup["ready"] and not self.stopping:
@@ -1093,7 +1211,9 @@ class Core:
                 self.health.set("voice", "degraded", f"live conversation ended: {reason}", "check internet; say Hey Jarvis to retry")
                 self._spawn(self.notify_error("LIVE_ENDED", "השיחה החיה נותקה", "בדוק חיבור ואמור היי ג׳ארוויס כדי לנסות שוב"))
             elif reason == "budget":
-                self._spawn(self.notify_error("AI_BUDGET", "הגעתי למגבלת השימוש היומית", "ai.daily_request_limit"))
+                rq = limits_mod.view("ai_requests", self.memory.usage_today("ai_requests"), self.budget.limit("ai_requests"))
+                rq["level"] = "exhausted"
+                self._spawn(self.announce_limit(rq))
             await self.link.broadcast("status", self.snapshot())
 
         def on_health(status: str, detail: str, action: str = "") -> None:
@@ -1162,7 +1282,12 @@ class Core:
         try:
             await live.start()
         except BudgetExceeded as e:                 # F1: no unit can be reserved ahead -> no session at all
-            await self.notify_error(e.code, "הגעתי למגבלת השימוש היומית", e.action)
+            if e.kind in limits_mod.SPECS:
+                lv = limits_mod.view(e.kind, e.used, e.limit)
+                lv["level"] = "exhausted"
+                await self.announce_limit(lv)
+            else:
+                await self.notify_error(e.code, "הגעתי למגבלת השימוש היומית", e.action)
             return
         except Exception as e:
             logs.error("voice", "LIVE_START_FAILED", "live voice failed to start", **logs.error_fields(e))
