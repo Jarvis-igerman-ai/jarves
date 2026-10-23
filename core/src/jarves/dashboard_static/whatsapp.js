@@ -85,7 +85,29 @@ PAGES.whatsapp = async function () {
 
   const rate = st.rate || {};
   const lim = rate.limits || {};
-  const ret = el("input", { type: "number", min: "1", max: "90", value: String(st.retention_days || 14), style: "width:70px", "aria-label": "Retention days" });
+  const ar = d.archive || {};
+  const cur = ar.enabled && Number.isInteger(ar.keep_days) ? ar.keep_days : (st.retention_days || 14);
+  const opts = [[14, tx("14 ימים (ברירת מחדל)", "14 days (default)"), true], [90, tx("90 ימים", "90 days"), true],
+    [365, tx("שנה (דורש ארכיון)", "1 year (needs the archive)"), !!ar.enabled], [0, tx("לתמיד (דורש ארכיון)", "Forever (needs the archive)"), !!ar.enabled]];
+  if (!opts.some((o) => o[0] === cur)) opts.unshift([cur, tx(`${cur} ימים`, `${cur} days`), true]);
+  const ret = el("select", { "aria-label": "Days kept" }, opts.map((o) => el("option", { value: String(o[0]), disabled: !o[2], selected: o[0] === cur }, o[1])));
+  const mb = (ar.bytes || 0) / 1048576;
+  const sizeText = tx(`בארכיון: ${ar.messages || 0} הודעות, ${mb.toFixed(2)} MB בדיסק`, `Archive: ${ar.messages || 0} messages, ${mb.toFixed(2)} MB on disk`);
+  const bq = el("input", { type: "search", placeholder: tx("מילים לחיפוש", "Words to search"), style: "min-width:180px", "aria-label": "Search words" });
+  const bfrom = el("input", { type: "text", placeholder: tx("מאיש קשר", "Contact"), style: "width:120px", "aria-label": "Contact" });
+  const bsince = el("input", { type: "text", placeholder: tx("מתאריך 2026-09-01 או 30d", "Since 2026-09-01 or 30d"), style: "width:190px", dir: "ltr", "aria-label": "Since" });
+  const found = el("div", {});
+  const runSearch = async () => {
+    found.replaceChildren(el("div", { class: "muted small" }, tx("מחפש…", "Searching…")));
+    try {
+      const qs = new URLSearchParams({ q: bq.value, from: bfrom.value, since: bsince.value });
+      const r = await api("/api/whatsapp/search?" + qs.toString());
+      found.replaceChildren(el("div", { class: "small muted" }, r.archive ? tx("טקסט שכתבו אחרים: לא אמין.", "Text written by others: untrusted.") : tx("חיפוש רק בהודעות שהגשר שומר (הארכיון כבוי).", "Searching only what the bridge keeps (archive is off).")),
+        ...(r.messages.length ? r.messages.map((m) => el("div", { class: "card untrusted", style: "margin:4px 0" },
+          el("div", { class: "small muted" }, `${m.date} ${m.time} · `, el("span", { dir: "auto", "data-noi18n": "" }, `${m.chat} / ${m.from}`)),
+          el("div", { dir: "auto", "data-noi18n": "", style: "white-space:pre-wrap" }, m.kind === "text" ? m.text : (m.media || "")))) : [el("div", { class: "empty" }, tx("לא נמצאו הודעות.", "No messages found."))]));
+    } catch (e) { found.replaceChildren(el("div", { class: "small" }, e.message)); }
+  };
   if (!window.__waSetupAuto && /setup=1/.test(location.hash) && !cantRun && !st.linked) {   // from the Connect row
     window.__waSetupAuto = true;
     setTimeout(() => post("setup", {}, tx("סרקו את הקוד", "Scan the code")), 0);
@@ -137,6 +159,19 @@ PAGES.whatsapp = async function () {
         el("button", { type: "button", class: "ghost", disabled: !d.local, onclick: () => post("retention", { keep_nothing: !st.keep_nothing }) },
           st.keep_nothing ? tx("לשמור הודעות שוב", "Keep messages again") : tx("לא לשמור כלום", "Keep nothing")),
         el("button", { type: "button", class: "ghost", disabled: !d.local, onclick: () => window.confirm(tx("למחוק את כל ההודעות השמורות?", "Delete every stored message?")) && post("purge", { confirm: true }) }, tx("מחיקת הודעות", "Delete messages")))),
+    el("div", { class: "card" }, el("b", {}, tx("כמה הודעות נשמרות ובאיזה גודל", "How much is kept")),
+      el("div", { class: "small" }, tx(`בגשר: ${(st.counts || {}).messages ?? 0} הודעות. `, `Bridge: ${(st.counts || {}).messages ?? 0} messages. `) + (ar.enabled ? sizeText : tx("הארכיון הארוך כבוי.", "The long archive is off."))),
+      el("div", { class: "small muted" }, tx("וואטסאפ מסנכרן למכשיר מקושר רק היסטוריה מוגבלת, לכן \"לתמיד\" אומר מעכשיו ועוד מה שהגיע.", "WhatsApp only syncs limited history to a linked device, so 'forever' means from now on plus whatever history arrived."))),
+    el("h2", {}, tx("ארכיון מוצפן וחיפוש", "Encrypted archive and search")),
+    el("div", { class: "card" },
+      el("div", { class: "small" }, tx(d.archive.about_he, d.archive.about)),
+      el("div", { class: "row", style: "margin-top:8px" },
+        ar.enabled ? el("button", { type: "button", class: "ghost", disabled: !d.local, onclick: () => post("archive", { op: "off" }, tx("הארכיון כבוי. הקובץ נשאר עד שתמחקו אותו.", "Archive off. The file stays until you wipe it.")) }, tx("כיבוי הארכיון", "Turn the archive off"))
+          : el("button", { type: "button", class: "primary", disabled: !d.local || !st.linked, onclick: () => window.confirm(tx(d.archive.about_he, d.archive.about) + "\n\n" + tx("להפעיל את הארכיון?", "Turn the archive on?")) && post("archive", { op: "on" }, tx("הארכיון פועל. בחרו כמה זמן לשמור למעלה.", "Archive on. Choose how long to keep above.")) }, tx("הפעלת הארכיון", "Turn the archive on")),
+        el("button", { type: "button", class: "ghost", disabled: !d.local || !(ar.messages || ar.bytes), onclick: () => window.confirm(tx("למחוק את כל הארכיון ואת אינדקס החיפוש?", "Delete the whole archive and its search index?")) && post("archive", { op: "wipe", confirm: true }) }, tx("מחיקת הארכיון", "Wipe the archive"))),
+      el("div", { class: "small" }, sizeText),
+      el("div", { class: "row", style: "margin-top:8px" }, bq, bfrom, bsince, el("button", { type: "button", disabled: !d.local, onclick: runSearch }, tx("חיפוש", "Search"))),
+      found),
     el("h2", {}, tx("תיבת הודעות (האחרונה קודם)", "Inbox (most recent first)")),
     el("div", { class: "card" }, chats.length ? el("table", {}, el("tbody", {}, chats)) : el("div", { class: "empty" }, tx("אין צ'אטים להצגה.", "No chats to show.")), msgs),
     el("h2", {}, tx("יומן שליחות", "Send audit")),

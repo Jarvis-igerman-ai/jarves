@@ -148,6 +148,20 @@ TEXT: dict[str, str] = {
         "בדיקות יחידה: test_whatsapp_send.py (גשר מדומה: חלון אישור, אישור חתום חד-פעמי, מגבלות)",
     "BLOCKED: send mode needs the 14-day read-only watch and the owner's go":
         "חסום: מצב שליחה דורש 14 ימי קריאה בלבד ואישור של הבעלים",
+    # WhatsApp encrypted archive and search (Issue #17)
+    "keeps your WhatsApp messages on this computer for as long as you choose (90 days, a year or forever; 14 days is the default without it) in an encrypted file and finds them fast in Hebrew and English. Only chats you made readable are copied. Trade-off: it is a second copy of your private messages; anyone who is signed in to this Windows account can open it. WhatsApp only syncs limited history to a linked device, so 'forever' means from now on plus what arrived. Nothing goes to the AI except messages you ask about":
+        "שומר את הודעות הוואטסאפ שלך במחשב הזה כמה זמן שתבחר (90 יום, שנה או לתמיד; בלעדיו ברירת המחדל 14 ימים) "
+        "בקובץ מוצפן, ומוצא אותן מהר בעברית ובאנגלית. מועתקים רק צ'אטים שהגדרת כקריאים. המחיר: זה עותק שני של "
+        "ההודעות הפרטיות שלך; מי שמחובר למשתמש ה-Windows הזה יכול לפתוח אותו. וואטסאפ מסנכרן למכשיר מקושר רק "
+        "היסטוריה מוגבלת, לכן \"לתמיד\" אומר מעכשיו ועוד מה שהגיע. שום דבר לא נשלח ל-AI חוץ מהודעות שביקשת",
+    "UNIT test_whatsapp_archive.py against the local fake bridge (encrypted at rest, Hebrew+English search, retention, wipe on keep-nothing, delete and unlink)":
+        "בדיקות יחידה: test_whatsapp_archive.py מול גשר מדומה מקומי (הצפנה בדיסק, חיפוש עברית ואנגלית, שמירה, "
+        "מחיקה ב\"לא לשמור כלום\", במחיקת הודעות ובניתוק)",
+    "BLOCKED: never run against the real bridge, a real phone history or Windows DPAPI":
+        "חסום: מעולם לא הורץ מול הגשר האמיתי, היסטוריית טלפון אמיתית או DPAPI של Windows",
+    "this Python has no SQLite full-text search (FTS5) or no cryptography package":
+        "ל-Python הזה אין חיפוש טקסט מלא של SQLite (FTS5) או שחסרה חבילת cryptography",
+    "the WhatsApp archive cannot be opened": "אי אפשר לפתוח את ארכיון הוואטסאפ",
     "the bridge is not in send mode (read-only: the wa.me handoff sends)":
         "הגשר לא במצב שליחה (קריאה בלבד: שולחים דרך פתיחת הצ'אט ב-wa.me)",
     "the WhatsApp bridge is not running (jarvis whatsapp start)": "גשר הוואטסאפ לא פועל (jarvis whatsapp start)",
