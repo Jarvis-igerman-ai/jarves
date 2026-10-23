@@ -404,13 +404,15 @@ def _step_whatsapp(conn, it: Item) -> None:
         conn.notes["whatsapp"] = ("jarvis whatsapp setup", "jarvis whatsapp setup")
         return
     conn.results["whatsapp"] = "connected"
-    if conn._yn("להפעיל עכשיו מצב קריאה בלבד (קורא, אף פעם לא שולח)?",
-                "Switch on read-only mode now (it reads, it never sends)?", False):
+    if conn._yn("להפעיל עכשיו מצב קריאה בלבד ואת מתג הקריאה של וואטסאפ (קורא, אף פעם לא שולח)?",
+                "Switch on read-only mode and the WhatsApp reading switch now (it reads, it never sends)?", False):
         try:
-            wad.set_mode(conn.home, "read", by="connect")
-            conn.h("מצב קריאה בלבד פועל.", "Read-only mode is on.")
+            r = wad.enable_reading(conn.home, by="connect", cfg=conn.cfg)
+            conn.h(r["message_he"], r["message"])
         except wab.BridgeError as e:
             conn.h(e.he, e.message)
+    else:
+        conn.h(wad.READ_LATER_HE, wad.READ_LATER_EN)
 
 
 EXTRA_STATUS.update({"openai": _status_openai, "chatgpt": _status_chatgpt, "openai-admin": _status_admin})
