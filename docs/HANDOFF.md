@@ -1421,3 +1421,13 @@ Open: real phone/Wi-Fi/sleep run (owner); no calendar scheduler exists yet (`on_
   "up to date" requirement, drop the update-and-re-run habit; changes CLAUDE.md); stable release needs SWV3_P01 B13/B14
   and SWV3_P04 Q05 live-verified or accepted, and 5 consecutive green nightlies. #84 (next-flow parse failure, every push
   showed a red run) merged as a0c0762.
+
+- Follow-up (owner decisions 23 Oct 2026, same branch after #90 merged): owner set the `main` rule (required check
+  `CI result (single required check)`, no "up to date", admins may bypass) and Allow auto-merge; #90 merged by
+  auto-merge. `automerge.yml` merges green PRs without update-and-re-run and stops while `main` is red; CLAUDE.md merge
+  rule updated; `docs/GITHUB_FLOW.md` rewritten. Owner accepted B13, B14, Q05 (fixed in code, live check later): no
+  P0-P2 row stays open in `docs/reviews/*BUG_TABLE*.md`. `orchestrator/bridge.py` `write_token` retries the
+  `bridge.token` swap on PermissionError for up to 1 s (Windows WinError 5 race on every Core restart), temp file removed
+  on failure; fake-clock tests. NOT verified: the Windows race itself (Linux container); first label-queue merge of a
+  PR that is behind `main`. Found, not changed: a dashboard canary page-load timeout reports only `TimeoutError` and drops
+  the page errors it collected (`diag/canary.py` `j_dashboard`, run 39740077144).
