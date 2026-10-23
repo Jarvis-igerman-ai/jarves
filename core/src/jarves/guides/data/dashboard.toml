@@ -7,7 +7,7 @@ title_he = "לוח הבקרה"
 title_en = "Dashboard"
 what_he = "אתר קטן במחשב שלכם: שיחות, עלויות, יכולות, הגדרות והמדריכים האלה."
 what_en = "A small site on your computer: conversations, costs, features, settings and these guides."
-say = [["תפתח את לוח הבקרה", "Open the dashboard"], ["תראה לי את המדריך של המוזיקה", "Show me the music guide"]]
+say = [["תפתח את לוח הבקרה", "Open the dashboard"], ["תראה לי את המדריך של המוזיקה", "Show me the music guide"], ["תפתח את דף העלויות ותסביר לי מה יש בו", "Open the Costs page and explain it"]]
 expect_he = "הדפדפן נפתח על הכתובת המקומית. רק מהמחשב הזה, עם קוד חד-פעמי."
 expect_en = "The browser opens the local address. Only from this computer, with a one-time code."
 cost_he = "חינם."
@@ -19,4 +19,10 @@ privacy_en = "No keys are shown. E-mail addresses are masked."
 he = "אמרו \"תפתח את לוח הבקרה\", או הקלידו jarvis dashboard."
 en = "Say \"open the dashboard\", or type jarvis dashboard."
 action = "command:jarvis dashboard"
+check = "enabled:dashboard"
+
+[[steps]]
+he = "אפשר לבקש דף מסוים: \"תפתח את דף הזיכרון\". JARVES פותח אותו ומסביר מה אפשר לעשות שם ואיך. הוא לא לוחץ במקומכם: כל שינוי הוא הלחיצה שלכם, ופעולות רגישות (אישורים, מתגים, חיבורים, גיבוי) ממשיכות לבקש אישור."
+en = "Ask for a specific page: \"open the Memory page\". JARVES opens it and explains what you can do there and how. It never clicks for you: every change is your own click, and sensitive actions (approvals, switches, connections, backups) still ask for approval."
+action = "command:jarvis dashboard --page #/costs"
 check = "enabled:dashboard"
