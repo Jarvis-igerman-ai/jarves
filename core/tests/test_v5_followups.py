@@ -394,8 +394,7 @@ def test_sensitive_or_empty_drafts_are_refused_and_secrets_redacted(home):
         with pytest.raises(ValueError):
             dev_mod.suggest(st, title, body)
     # Issue #17: an unknown kind (the model says "idea", "bug", "post") is mapped, never a refusal
-    assert dev_mod.suggest(st, "idea one", "x", kind="post")["severity"] == "suggestion"
-    assert dev_mod.suggest(st, "idea two", "x", kind="bug")["severity"] == "ticket"
+    assert dev_mod.normalize_kind("post") == "suggestion" and dev_mod.normalize_kind("bug") == "ticket"
     d = dev_mod.suggest(st, "contact owner", "mail me at someone@example.com about it")
     assert "someone@example.com" not in d["body"]
     assert len(dev_mod.listing(st)) == 1

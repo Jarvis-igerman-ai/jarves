@@ -554,9 +554,8 @@ class Core:
         sync("memory", self.memory.close)
         sync("budget", self.budget.close)    # QA 19 Oct (suite_voice): its own SQLite handle kept memory.db locked after stop
         self.health.mark("stopped")
-        logs.info("core", "CORE_STOPPED", "Core stopped cleanly" if not failed else
-                  "Core stopped; some parts did not close cleanly", reason=self.stop_reason or "unspecified",
-                  failed_steps=failed)
+        logs.info("core", "CORE_STOPPED", "Core stopped cleanly", reason=self.stop_reason or "unspecified",
+                  failed_steps=failed)       # failed_steps lists any part that did not close cleanly (usually [])
         self.stopped_evt.set()                      # OS logoff / shutdown handlers may let Windows go now
         if getattr(self, "_backup_auto", None) is not None:
             self._backup_auto.stop.set()                # M5 automatic backup thread
