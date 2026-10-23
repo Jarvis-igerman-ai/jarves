@@ -49,7 +49,7 @@ async def test_unknown_page_opens_nothing_and_default_is_home():
 
 
 async def test_dashboard_page_reports_what_the_open_tab_last_sent():
-    from jarves.dashboard import Ctx, api_ui_page
+    from jarves.dashboard import note_ui_page
     seen = {}
     async def opener(page):
         return "http://127.0.0.1:1/"
@@ -61,9 +61,9 @@ async def test_dashboard_page_reports_what_the_open_tab_last_sent():
         ui_page = None
         clock = staticmethod(lambda: __import__("time").time())
     c = C()
-    assert api_ui_page(c, None, {"page": "settings"})[0] == 200
+    note_ui_page(c, "settings")
     seen["ui"] = c.ui_page
     res = await tools["dashboard_page"].handler(None)
     assert res.ok and res.data["page"] == "settings" and res.data["sensitive"] and res.data["seen_s_ago"] < 5
-    api_ui_page(c, None, {"page": "<script>"})              # only a known page id is ever stored
-    assert c.ui_page is None
+    note_ui_page(c, "<script>")                              # only a known page id is ever stored
+    assert c.ui_page["page"] == "settings"

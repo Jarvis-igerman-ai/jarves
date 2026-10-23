@@ -107,7 +107,7 @@ class Ctx:
         self.mobile = None                 # mobile.MobileAccess (set by Dashboard; V5 phone access)
         self.chat = None                   # chat_engine.WebChat (set by Dashboard when a chat engine runs here)
         self.port = 0
-        self.ui_page: dict | None = None   # {page, at}: the page id the browser last reported (api_ui_page); never content
+        self.ui_page: dict | None = None   # {page, at}: the page id the browser last reported (note_ui_page); never content
         self._tl = threading.local()       # per-request principal (the server is threaded)
 
     @property
@@ -283,15 +283,17 @@ def api_live(ctx: Ctx, m, body):
     return api_session(ctx, re.match(r"(.*)", s["id"]), body)
 
 
-def api_ui_page(ctx: Ctx, m, body):
-    """The open dashboard tab tells which page it shows (a page id only), so the assistant can explain "this page"."""
+def note_ui_page(ctx: Ctx, page: str) -> None:
+    """The open dashboard tab sends the page it shows (an id only, with its /api/overview poll: no extra request, the
+    server allows 240 a minute), so the assistant can explain "this page". Only a known page id is ever stored."""
     from . import dashboard_pages as pages
-    pid = pages.resolve(str((body or {}).get("page") or ""))
-    ctx.ui_page = {"page": pid, "at": ctx.clock()} if pid else None
-    return 200, {"ok": True}
+    pid = pages.resolve(page) if page else None
+    if pid:
+        ctx.ui_page = {"page": pid, "at": ctx.clock()}
 
 
-def api_overview(ctx: Ctx, m, body):
+def api_overview(ctx: Ctx, m, body, q=None):
+    note_ui_page(ctx, _q1(q, "page"))
     st = ctx.store
     today = datetime.now().date().isoformat()
     days = daily_costs(st, ctx.cfg.pricing, 7)
@@ -748,7 +750,7 @@ for _m, _p, _h in [
         ("POST", r"/api/workspace/([^/]+)/undo", api_workspace_undo),
         ("GET", r"/api/workspace-note/([^/]+)", api_workspace_note),
         ("GET", r"/api/settings", api_settings), ("PUT", r"/api/settings", api_settings_write),
-        ("POST", r"/api/ui/page", api_ui_page), ("POST", r"/api/settings/undo", api_settings_undo), ("POST", r"/api/settings/runtime", api_runtime_set)]:
+        ("POST", r"/api/settings/undo", api_settings_undo), ("POST", r"/api/settings/runtime", api_runtime_set)]:
     _ROUTES.append((_m, re.compile(f"^{_p}$"), _h))
 
 

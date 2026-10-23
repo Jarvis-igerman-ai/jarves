@@ -76,7 +76,7 @@ document.getElementById("themeBtn").addEventListener("click", () => {
 // ---------------------------------------------------------------- overview (side bar)
 async function refreshOverview() {
   try {
-    overview = await api("/api/overview");
+    overview = await api("/api/overview" + (window.JARVES_PAGE ? "?page=" + encodeURIComponent(window.JARVES_PAGE) : ""));
     const dot = document.getElementById("coreDot");
     dot.className = "dot " + (overview.live ? "live" : overview.core.state === "ready" ? "ok"
       : overview.core.state === "degraded" ? "bad" : "");
@@ -479,7 +479,6 @@ async function route(refresh) {
   const navPage = { session: "conversations", raw: "conversations", context: "conversations", note: "workspace", guide: "guides", agent: "agents",
     "guide-for": "guides" }[page] || page || "home";  // WP-K Home = default
   for (const a of document.querySelectorAll("nav a")) a.classList.toggle("active", a.dataset.page === navPage);
-  api("/api/ui/page", { method: "POST", body: JSON.stringify({ page: navPage }) }).catch(() => {});   // page id only: lets JARVES explain "this page"
   try {
     if (page === "runtime") await pageHome();                    // M1 runtime controls (WP-K: "Controls" in the nav)
     else if (typeof PAGES !== "undefined" && PAGES[page || "home"]) await PAGES[page || "home"](arg, refresh);  // pages.js, home.js
@@ -494,6 +493,7 @@ async function route(refresh) {
     else if (page === "settings") await pageSettings();
     else await pageConversations();
   } catch (e) { if (refresh !== true) fail(e); }
+  window.JARVES_PAGE = navPage;       // sent with the next /api/overview poll (page id only: lets JARVES explain "this page")
 }
 window.addEventListener("hashchange", () => route());
 // after every deferred script (pages.js) has run
