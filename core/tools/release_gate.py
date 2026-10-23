@@ -80,14 +80,58 @@ def open_p0_p2(text: str) -> list[str]:
     return problems
 
 
-def bug_table_open(text: str) -> list[str]:
-    """Rows of a `| id | sev | status | ...` bug table with sev P0-P2 whose status is not fixed/closed/accepted."""
-    out = []
-    for line in text.splitlines():
-        cells = [c.strip() for c in line.strip().strip("|").split("|")]
-        if line.lstrip().startswith("|") and len(cells) >= 3 and re.fullmatch(r"P[0-2]", cells[1]):
-            if not re.match(r"(?i)(fixed|closed|accepted|wontfix|duplicate|done)", cells[2]):
-                out.append(f"bug {cells[0]} ({cells[1]}) is {cells[2]!r}")
+_SEP_ROW = re.compile(r"^\|?(\s*:?-{3,}:?\s*\|)+\s*:?-{3,}:?\s*\|?$|^\|?\s*:?-{3,}:?\s*\|?$")
+_SEV_COL = re.compile(r"(?i)^(sev|severity|priority|prio)$")
+_STATUS_COL = re.compile(r"(?i)^(status|state)$")
+_RETEST_COL = re.compile(r"(?i)^(retest|re-test|result)$")       # tables that record the verification instead of a status
+_CLOSED = re.compile(r"(?i)^\W*(fixed|closed|accepted|wontfix|won't fix|duplicate|done|resolved|verified|passed?\b"
+                     r"|not a bug|obsolete|superseded)")
+_NOT_DONE = re.compile(r"(?i)\b(open|fail(ed|s)?|pending|todo|not yet|blocked|regress(ed|ion)?)\b")
+
+
+def _cells(line: str) -> list[str]:
+    return [c.strip() for c in line.strip().strip("|").split("|")]
+
+
+def bug_table_open(text: str, name: str = "") -> list[str]:
+    """Rows with severity P0-P2 that are not closed, in every markdown bug table of `text`.
+
+    Columns are found by the table's header row (`Sev`/`Severity`/`Priority` and `Status`/`State`; tables that record a
+    `Retest`/`Result` instead of a status count a non-empty, non-negative retest as closed). The bug tables in
+    docs/reviews use different column orders, so a fixed position read the area or the symptom as the status and
+    reported fixed bugs as open. Tables without a severity column (legends, result tables) are not bug tables.
+    Rows without any header keep the original `| id | sev | status |` order."""
+    out: list[str] = []
+    lines = text.splitlines()
+    sev_i: int | None = 1
+    st_i: int | None = 2
+    retest = False
+    where = f"{name}: " if name else ""
+    for n, line in enumerate(lines):
+        if not line.lstrip().startswith("|"):
+            sev_i, st_i, retest = 1, 2, False               # a new table starts with its own header
+            continue
+        if _SEP_ROW.match(line.strip()):
+            continue
+        cells = _cells(line)
+        if n + 1 < len(lines) and _SEP_ROW.match(lines[n + 1].strip()):        # header row
+            heads = [c.strip("*` ").lower() for c in cells]
+            sev_i = next((k for k, h in enumerate(heads) if _SEV_COL.match(h)), None)
+            st_i = next((k for k, h in enumerate(heads) if _STATUS_COL.match(h)), None)
+            retest = st_i is None
+            if retest:
+                st_i = next((k for k, h in enumerate(heads) if _RETEST_COL.match(h)), None)
+            continue
+        if sev_i is None or sev_i >= len(cells) or not re.match(r"P[0-2]\b", cells[sev_i]):
+            continue
+        bug = f"{where}bug {cells[0]} ({cells[sev_i]})"
+        if st_i is None or st_i >= len(cells):
+            out.append(f"{bug} has no status column to show it is closed")
+            continue
+        status = cells[st_i]
+        closed = (bool(status) and not _NOT_DONE.search(status)) if retest else bool(_CLOSED.match(status))
+        if not closed:
+            out.append(f"{bug} is {status[:80]!r}")
     return out
 
 
@@ -159,7 +203,7 @@ def find_checklist(root: Path, version: str, explicit: str | None) -> Path | Non
 
 # ---------------------------------------------------------------------- the gate
 def run_gate(*, tag: str, sha: str, verified_sha: str | None, build_version: str | None, root: Path,
-             checklist_text: str | None, bug_tables: list[str], nightly_runs: list[dict], checks_runs: list[dict],
+             checklist_text: str | None, bug_tables: list, nightly_runs: list[dict], checks_runs: list[dict],
              is_ancestor, changed_files, now: datetime | None = None) -> list[str]:
     version, problems = check_tag(tag, build_version)
     problems += check_sha(sha, verified_sha)
@@ -169,8 +213,8 @@ def run_gate(*, tag: str, sha: str, verified_sha: str | None, build_version: str
         problems.append("release checklist not found (docs/reviews/RELEASE_CHECKLIST_<version>.md)")
     else:
         problems += open_p0_p2(checklist_text)
-    for t in bug_tables:
-        problems += bug_table_open(t)
+    for t in bug_tables:                                   # table text, or (file name, table text)
+        problems += bug_table_open(t[1], t[0]) if isinstance(t, tuple) else bug_table_open(t)
     problems += nightly_problems(nightly_runs, now=now)
     if version:
         problems += signoff_problems(root, version, sha, is_ancestor, changed_files)
@@ -197,7 +241,8 @@ def main(argv: list[str] | None = None) -> int:
     root = a.repo_root.resolve()
     version = (TAG_RE.match(a.tag) or [None, "0.0.0"])[1]
     cl = find_checklist(root, version, a.checklist)
-    tables = [Path(p).read_text(encoding="utf-8") for p in sorted(glob.glob(str(root / a.bug_tables)))] if a.bug_tables else []
+    tables = [(Path(p).name, Path(p).read_text(encoding="utf-8"))
+              for p in sorted(glob.glob(str(root / a.bug_tables)))] if a.bug_tables else []
     load = lambda p, fn: json.loads(p.read_text(encoding="utf-8")) if p else fn()   # noqa: E731
     nightly = load(a.nightly_json, lambda: gh_runs(a.repo, "nightly.yml", "branch=main&status=completed"))
     checks = load(a.checks_json, lambda: gh_runs(a.repo, "jarves-checks.yml", "branch=main&event=push&status=completed"))

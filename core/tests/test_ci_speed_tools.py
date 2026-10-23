@@ -257,36 +257,77 @@ def test_dev_builds_are_never_published_even_with_a_tree(tmp_path):
 
 
 # ------------------------------------------------------------------------------------------------- release status
-def test_release_status_reports_state_and_blockers():
-    sha, tree = "c" * 40, TREE
+GIT_TREE = "0" * 40                       # the commit's git tree sha: NOT the name of the installer artifact
+TREE_ENTRIES = [{"path": "core", "mode": "040000", "type": "tree", "sha": "d" * 40},
+                {"path": "core/src/a.py", "mode": "100644", "type": "blob", "sha": "1" * 40},
+                {"path": "docs/x.md", "mode": "100644", "type": "blob", "sha": "2" * 40}]
+
+
+def _status_api(variables=None, releases=None, package_jobs=None):
+    sha = "c" * 40
+    content = ci_reuse.content_tree(["100644 blob " + "1" * 40 + "\tcore/src/a.py"])
 
     def api(path):
         if path.endswith("commits/main"):
-            return {"sha": sha, "commit": {"tree": {"sha": "0" * 40}}}
+            return {"sha": sha, "commit": {"tree": {"sha": GIT_TREE}}}
+        if path == f"repos/o/r/git/trees/{GIT_TREE}?recursive=1":
+            return {"tree": TREE_ENTRIES, "truncated": False}
         if "actions/runs?branch=main" in path:
             return {"workflow_runs": [{"name": "jarves-checks", "run_number": 9, "status": "completed", "conclusion": "success",
                                        "html_url": "u"}]}
         if "workflows/package.yml/runs" in path:
-            return {"workflow_runs": []}
+            return {"workflow_runs": [{"id": 77, "run_number": 3, "status": "completed", "conclusion": "success"}]}
+        if path == "repos/o/r/actions/runs/77/jobs":
+            return {"jobs": package_jobs or []}
         if "/actions/artifacts" in path and "release-candidate" in path:
             return {"artifacts": []}
-        if "/actions/artifacts" in path:
-            return {"artifacts": [{"id": 1, "name": "x", "created_at": "2026-10-01", "workflow_run": {"id": 5}}]}
+        if "/actions/artifacts" in path:      # only the content-addressed name exists, as in CI
+            hit = f"name={ci_reuse.artifact_name(content)}&" in path
+            return {"artifacts": [{"id": 1, "name": ci_reuse.artifact_name(content), "created_at": "2026-10-01",
+                                   "workflow_run": {"id": 5}}] if hit else []}
         if path.endswith("/actions/runs/5"):
             return _run(5, head_repository={"full_name": "o/r"})
         if "releases?per_page" in path:
-            return [{"tag_name": "win-v4.0.0.12", "prerelease": False, "assets": [{"name": "latest.json"}]},
-                    {"tag_name": "beta-v4.0.1.3", "prerelease": True, "assets": []}]
+            if isinstance(releases, Exception):
+                raise releases
+            return releases if releases is not None else [
+                {"tag_name": "win-v4.0.0.12", "prerelease": False, "assets": [{"name": "latest.json"}]},
+                {"tag_name": "beta-v4.0.1.3", "prerelease": True, "assets": []}]
         if "variables/ENABLE_BETA_PUBLISH" in path:
-            raise RuntimeError("404")
+            if isinstance(variables, Exception):
+                raise variables
+            return variables or {"value": "true"}
         raise AssertionError(path)
+    return api
 
-    s = release_status.build_status("o/r", "o/rel", api)
+
+def test_release_status_reports_state_and_blockers():
+    s = release_status.build_status("o/r", "o/rel", _status_api(variables=RuntimeError("HTTP 404: Not Found")))
     assert s["stable"] == "win-v4.0.0.12" and s["beta"] == "beta-v4.0.1.3" and s["beta_publishing"] is False
-    assert s["installer_artifact"]["run_id"] == 5
+    assert s["installer_artifact"]["run_id"] == 5          # found by the docs-free content tree, not the git tree sha
+    assert s["tree"] != GIT_TREE
     assert any("release candidate" in b for b in s["blocking"]) and not any("main CI" in b for b in s["blocking"])
+    assert not any("installer" in b for b in s["blocking"])
     text = release_status.render(s)
-    assert "BLOCKING" in text and "stable gate" in text
+    assert "BLOCKING" in text and "stable gate" in text and "publishing off" in text
+
+
+def test_release_status_says_unknown_when_github_refuses_instead_of_off_or_none():
+    refused = RuntimeError("HTTP 403: Resource not accessible by integration")
+    ran = [{"name": "candidate", "conclusion": "success"}, {"name": "beta", "conclusion": "success"}]
+    s = release_status.build_status("o/r", "o/rel", _status_api(variables=refused, releases=refused, package_jobs=ran))
+    assert s["beta_publishing"] is True                     # the last package run's beta job ran
+    assert s["stable"] == s["beta"] == "UNKNOWN" and any("could not read o/rel" in n for n in s["notes"])
+    skipped = [{"name": "beta", "conclusion": "skipped"}]
+    assert release_status.build_status("o/r", "o/rel", _status_api(variables=refused, package_jobs=skipped))["beta_publishing"] is False
+    s = release_status.build_status("o/r", "o/rel", _status_api(variables=refused))
+    assert s["beta_publishing"] is None and "publishing UNKNOWN" in release_status.render(s)
+
+
+def test_api_tree_matches_the_local_content_tree():
+    entries = [f"{e['mode']} {e['type']} {e['sha']}\t{e['path']}" for e in TREE_ENTRIES if e["type"] != "tree"]
+    assert ci_reuse.api_tree("o/r", GIT_TREE, lambda p: {"tree": TREE_ENTRIES}) == ci_reuse.content_tree(entries)
+    assert ci_reuse.api_tree("o/r", GIT_TREE, lambda p: {"tree": TREE_ENTRIES, "truncated": True}) is None
 
 
 # ------------------------------------------------------------------------------------------------- dependabot gate

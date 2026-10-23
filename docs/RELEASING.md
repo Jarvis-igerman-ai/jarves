@@ -25,7 +25,12 @@ All of these must hold, else the tag is refused:
 
 - the tag is `vX.Y.Z` and the installer is `X.Y.Z.<build>`;
 - the SHA being published is the verified SHA and its `jarves-checks` run on `main` is green;
-- the release checklist has no open P0-P2 (and optional bug tables list none);
+- the release checklist has no open P0-P2 (and optional bug tables list none). Bug tables (`release.yml` passes
+  `docs/reviews/*BUG_TABLE*.md`) are read by each table's header row: a `Sev`/`Severity`/`Priority` column and a
+  `Status`/`State` column (or `Retest`/`Result`, where a non-empty retest without "fail"/"open"/"pending" counts as closed);
+  a status starting with fixed, closed, accepted, wontfix, duplicate, done, resolved, verified or pass is closed. Tables
+  without a severity column are ignored, and every problem names its file. A new bug table must keep these columns
+  (`test_every_bug_table_in_the_repo_has_a_status_the_gate_can_read`);
 - the `nightly` workflow was green on the last 5 scheduled nights;
 - the owner's **manual test sign-off** `docs/reviews/MANUAL_TEST_<X.Y.Z>.md` is complete and signed, and the tested beta
   commit equals the tag commit, or is an ancestor with **only documentation changes** since.
@@ -63,6 +68,10 @@ python core/tools/release_status.py            # needs `gh auth login`; --json f
 Prints, for the head of `main`: the latest `jarves-checks` run, the installer artifact of the head tree (and which run
 proved it), the `jarves-package` run and the signed candidate artifact, the newest beta and stable releases, whether beta
 publishing is on, the stable gate, and a **BLOCKING** list (main CI red or running, no proven installer, no candidate, ...).
+The installer is looked up by the docs-free content tree (`ci_reuse.api_tree`, from the git-trees API, the same address
+CI uses), not by the commit's git tree sha. What the token cannot read is shown as **UNKNOWN**, never as "none"/"off": the
+releases repository, and `ENABLE_BETA_PUBLISH` (reading variables needs admin rights; the tool then takes the answer from
+whether the last `jarves-package` run's `beta` job ran or was skipped).
 
 ## Release candidate on demand
 
