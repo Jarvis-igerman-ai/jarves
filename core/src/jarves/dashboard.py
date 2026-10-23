@@ -288,7 +288,7 @@ def api_overview(ctx: Ctx, m, body):
     days = daily_costs(st, ctx.cfg.pricing, 7)
     live = st.live_session()
     snap = read_snapshot(ctx.home / "health.json") or {}
-    issues = st.issues("open")
+    issues = diagnose.by_cause(st.issues("open"))["problems"]       # one per cause; environment states are not counted
     from .updates import beta_label
     return 200, {"version": __version__, "beta": beta_label(ctx.home), "today": next((d for d in days if d["day"] == today), None), "week": days,
                  "live": _session_summary(ctx, live) if live else None,
@@ -361,7 +361,16 @@ def api_tasks(ctx: Ctx, m, body, q=None):
 
 def api_issues(ctx: Ctx, m, body, q=None):
     status = _q1(q, "status", "open")
-    return 200, [locales.issue(dict(i)) for i in ctx.store.issues(None if status == "all" else status)]
+    from . import issue_text as it
+    rows = []
+    for i in ctx.store.issues(None if status == "all" else status):
+        d = dict(i)
+        probe = {"code": d["fingerprint"], "evidence": {"finding": str(d["title"])}}
+        d["cause"] = diagnose.cause_key(str(d["fingerprint"]))
+        d["kind"] = it.classify(probe)                               # "info" = expected for how JARVES is run here
+        d["hint"] = it.describe(probe)["hint"]
+        rows.append(locales.issue(d))
+    return 200, rows
 
 
 def api_issue_set(ctx: Ctx, m, body):

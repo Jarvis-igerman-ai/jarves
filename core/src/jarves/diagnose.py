@@ -335,6 +335,58 @@ def run(store: Store, cfg, session_ids: list[str] | None = None, days: int = 30)
     return f.found
 
 
+# ---------------------------------------------------------------------- one line per cause (issue #17)
+def cause_key(fp: str) -> str:
+    """The cause a fingerprint belongs to: the two dead-air rules are one cause, and the failures of one tool
+    (failed / never returned / called again and again) are one cause."""
+    if fp in ("silent_wait", "dead_air"):
+        return "dead_air"
+    m = re.match(r"^(?:tool_fail|tool_no_result|tool_repeat):(.+)$", fp)
+    return f"tool:{m.group(1)}" if m else fp
+
+
+def by_cause(issues: list[dict]) -> dict:
+    """{'problems': [...], 'info': [...], 'findings': n}: the store's issues merged by cause. A merged row keeps the
+    WORST severity, the summed count and the title of its worst member; expected environment states (no Godot face,
+    no camera, Pear not running) are 'info' and are not problems."""
+    from . import issue_text as it
+    groups: dict[str, list[dict]] = {}
+    for i in issues:
+        groups.setdefault(cause_key(str(i["fingerprint"])), []).append(i)
+    rows = []
+    for key, members in groups.items():
+        worst = max(members, key=lambda m: (SEVERITY.get(m["severity"], 0), m["count"]))
+        probe = {"code": key, "evidence": {"finding": str(worst["title"])}}
+        env = it.env_key(probe)
+        rows.append({"cause": key, "severity": worst["severity"], "title": worst["title"],
+                     "count": sum(int(m["count"]) for m in members), "merged": len(members),
+                     "last_seen": max(m["last_seen"] for m in members), "kind": "info" if env else "problem",
+                     "hint": it.describe(probe)["hint"] if env else ""})
+    rows.sort(key=lambda r: (-SEVERITY.get(r["severity"], 0), -r["count"], -r["last_seen"]))
+    return {"problems": [r for r in rows if r["kind"] == "problem"], "info": [r for r in rows if r["kind"] == "info"],
+            "findings": len(issues)}
+
+
+def render_summary(found: list[dict], summary: dict) -> list[str]:
+    """The printable lines of `jarvis diagnose`: one line per cause; Hebrew words from the conversation on their own
+    indented lines so a right-to-left word cannot scramble the English line."""
+    from . import issue_text as it
+    probs, info = summary["problems"], summary["info"]
+    unique = len({f["fingerprint"] for f in found})
+    lines = [f"self-diagnosis: {unique} finding(s) checked, {len(probs)} problem(s) after merging duplicates"
+             + (f", {len(info)} information item(s) that are not problems" if info else "")]
+    for r in probs:
+        lines += it.format_mixed(f"  [{r['severity']:<6}] ", r["title"],
+                                 f"  (x{r['count']}" + (f", {r['merged']} findings merged" if r["merged"] > 1 else "") + ")")
+    if info:
+        lines.append("  not problems on this PC (ignore them from the dashboard Bug reports page):")
+        for r in info:
+            lines += it.format_mixed("    - ", r["title"], f"  (x{r['count']})")
+            if r["hint"]:
+                lines.append(f"        {r['hint']}")
+    return lines
+
+
 # ---------------------------------------------------------------------- optional AI review (one request)
 REVIEW_INSTRUCTIONS = """You review one conversation between a user and JARVES, a Hebrew-speaking home voice
 assistant (GPT-Live voice, a backend model for lookups/tools). Find PROBLEMS in how JARVES behaved that a user
