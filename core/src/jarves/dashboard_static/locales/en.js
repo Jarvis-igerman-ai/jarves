@@ -1878,6 +1878,11 @@
   "The switch itself takes no pictures and makes no cloud calls.": "The switch itself takes no pictures and makes no cloud calls.",
   "No pictures are sent or kept unless you ask.": "No pictures are sent or kept unless you ask.",
   "First turn the camera on (guide \"Camera\").": "First turn the camera on (guide \"Camera\").",
-  "Leave the legacy switch off. Use the Camera guide for requested captures.": "Leave the legacy switch off. Use the Camera guide for requested captures."
+  "Leave the legacy switch off. Use the Camera guide for requested captures.": "Leave the legacy switch off. Use the Camera guide for requested captures.",
+  "The bridge program is not installed": "The bridge program is not installed",
+  "Set up WhatsApp in one go": "Set up WhatsApp in one go",
+  "Starts the bridge if needed and shows a QR code. You scan it on your phone, then you can switch on read-only. No message is sent.": "Starts the bridge if needed and shows a QR code. You scan it on your phone, then you can switch on read-only. No message is sent.",
+  "Set up WhatsApp": "Set up WhatsApp",
+  "Switch on read-only mode now? JARVES will read and never send.": "Switch on read-only mode now? JARVES will read and never send."
  }
 };

@@ -13,13 +13,17 @@ PAGES.whatsapp = async function () {
     try {
       const r = await api("/api/whatsapp/" + path, { method: "POST", body: JSON.stringify(body || {}) });
       msg.textContent = okText || tx("בוצע.", "Done.");
-      if (path === "link") showLink(r); else route(true);
+      if (path === "link" || (path === "setup" && r.step === "awaiting_scan")) showLink(r);
+      else if (path === "setup" && r.ok === false) msg.textContent = tx(r.message_he, r.message);
+      else route(true);
     } catch (e) { msg.textContent = tx("לא בוצע: ", "Not done: ") + e.message; }
   };
   const h = d.health || {};
   const hp = h.status === "ok" ? pill("ok", tx("מחובר", "connected")) : h.status === "disabled" ? pill("plain", tx("כבוי", "off"))
     : h.status === "degraded" ? pill("medium", tx("חלקי", "partial")) : pill("fail", tx("לא זמין", "unavailable"));
   const killed = !!st.killed;
+  const missing = d.bridge_installed === false && !d.status;      // no bridge program and none running
+  const cantRun = !d.local || missing;
 
   // ---- link (QR text or pairing code, refreshed until linked)
   const linkBox = el("pre", { class: "small", dir: "ltr", "data-noi18n": "", style: "line-height:1;font-size:7px;background:#fff;color:#000;display:none;padding:8px" });
@@ -28,7 +32,12 @@ PAGES.whatsapp = async function () {
     const deadline = Date.now() + 180000;
     while (Date.now() < deadline) {
       linkBox.textContent = r.pairing_code ? r.pairing_code : (r.qr_text || "");
-      if (r.state === "linked") { msg.textContent = tx("מקושר. בטלפון יופיע JARVES bridge.", "Linked. The phone shows JARVES bridge."); route(true); return; }
+      if (r.state === "linked") {
+        msg.textContent = tx("מקושר. בטלפון יופיע JARVES bridge.", "Linked. The phone shows JARVES bridge.");
+        if (st.mode !== "read" && st.mode !== "send" && window.confirm(tx("להפעיל עכשיו מצב קריאה בלבד? ג'ארביס יקרא ולא ישלח.", "Switch on read-only mode now? JARVES will read and never send.")))
+          { try { await api("/api/whatsapp/mode", { method: "POST", body: JSON.stringify({ mode: "read" }) }); } catch (e) { msg.textContent = e.message; return; } }
+        route(true); return;
+      }
       if (r.state === "timeout" || r.state === "error") { msg.textContent = tx("הקישור לא הושלם. נסו שוב.", "Linking did not finish. Try again."); return; }
       await new Promise((res) => setTimeout(res, 1000));
       try { r = await api("/api/whatsapp/link"); } catch (e) { msg.textContent = e.message; return; }
@@ -74,6 +83,11 @@ PAGES.whatsapp = async function () {
   const rate = st.rate || {};
   const lim = rate.limits || {};
   const ret = el("input", { type: "number", min: "1", max: "90", value: String(st.retention_days || 14), style: "width:70px", "aria-label": "Retention days" });
+  if (!window.__waSetupAuto && /setup=1/.test(location.hash) && !cantRun && !st.linked) {   // from the Connect row
+    window.__waSetupAuto = true;
+    setTimeout(() => post("setup", {}, tx("סרקו את הקוד", "Scan the code")), 0);
+  }
+  if (!/setup=1/.test(location.hash)) window.__waSetupAuto = false;
   render(header(tx("וואטסאפ", "WhatsApp"), tx("גישה אמיתית דרך גשר נפרד במחשב. קודם קריאה בלבד; כל שליחה מאושרת על המסך.", "Real access through a separate bridge on this computer. Read-only first; every send is approved on the screen."),
       el("a", { href: "#/guide/whatsapp_bridge" }, tx("מדריך", "Guide"))),
     el("div", { class: "card" },
@@ -84,12 +98,17 @@ PAGES.whatsapp = async function () {
       el("div", { class: "row", style: "margin-top:8px" },
         el("button", { type: "button", class: killed ? "ghost" : "danger", disabled: !d.local, onclick: () => post("kill", { on: killed ? false : true }) },
           killed ? tx("שחרור מתג החירום", "Release the kill switch") : tx("מתג חירום: לעצור הכול", "Kill switch: stop everything")),
-        el("button", { type: "button", class: "ghost", disabled: !d.local, onclick: () => post("start", {}) }, tx("הפעלת הגשר", "Start the bridge")))),
+        el("button", { type: "button", class: "ghost", disabled: cantRun, onclick: () => post("start", {}) }, tx("הפעלת הגשר", "Start the bridge")))),
+    missing ? el("div", { class: "card", role: "alert" }, el("b", {}, tx("רכיב הגשר לא מותקן", "The bridge program is not installed")),
+      el("div", { class: "small" }, tx(d.not_installed.he, d.not_installed.en))) : null,
+    el("div", { class: "card" }, el("b", {}, tx("הגדרת וואטסאפ בלחיצה אחת", "Set up WhatsApp in one go")),
+      el("div", { class: "small" }, tx("מפעיל את הגשר במידת הצורך ומציג קוד QR. את הסריקה בטלפון עושים אתם, ואחריה אפשר להפעיל קריאה בלבד. לא נשלחת שום הודעה.", "Starts the bridge if needed and shows a QR code. You scan it on your phone, then you can switch on read-only. No message is sent.")),
+      el("button", { type: "button", class: "primary", disabled: cantRun || st.linked, onclick: () => post("setup", {}, tx("סרקו את הקוד", "Scan the code")) }, tx("הגדרת וואטסאפ", "Set up WhatsApp"))),
     el("h2", {}, tx("קישור", "Link")),
     el("div", { class: "card" },
       el("div", { class: "small" }, tx("בטלפון: וואטסאפ > הגדרות > מכשירים מקושרים > קישור מכשיר. ניתוק בטלפון עובד תמיד.", "On the phone: WhatsApp > Settings > Linked devices > Link a device. Unlinking on the phone always works.")),
       el("div", { class: "row" },
-        el("button", { type: "button", class: "primary", disabled: !d.local || st.linked, onclick: () => post("link", phone.value.trim() ? { phone: phone.value.trim() } : {}, tx("סרקו את הקוד", "Scan the code")) }, tx("קישור (קוד QR)", "Link (QR code)")),
+        el("button", { type: "button", class: "primary", disabled: cantRun || st.linked, onclick: () => post("link", phone.value.trim() ? { phone: phone.value.trim() } : {}, tx("סרקו את הקוד", "Scan the code")) }, tx("קישור (קוד QR)", "Link (QR code)")),
         phone, el("span", { class: "small muted" }, tx("או מספר לקוד צימוד", "or a number for a pairing code")),
         el("button", { type: "button", class: "ghost", disabled: !d.local || !st.linked, onclick: () => window.confirm(tx("לנתק ולמחוק את המידע של הגשר במחשב?", "Unlink and wipe the bridge store on this computer?")) && post("unlink", {}) }, tx("ניתוק", "Unlink"))),
       linkBox),

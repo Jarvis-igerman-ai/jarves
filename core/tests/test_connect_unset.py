@@ -327,6 +327,9 @@ def test_whatsapp_check_is_read_only_status_and_never_links(home, monkeypatch):
     down = cc.CheckCtx(home, cfg_for())
     r = cc.run_checks(down, ["whatsapp"], fresh=True)["whatsapp"]          # no bridge endpoint file: not running
     assert r.state == cc.UNREACHABLE and r.fix == "jarvis whatsapp start"
+    monkeypatch.setattr(wb, "bridge_command", lambda h: None)               # no bridge program: say so, never fail silently
     conn, out = make(home, [""], only="whatsapp", check_first=False)
     assert conn.run() == 0 and conn.results == {"whatsapp": "attention"}
-    assert any("jarvis whatsapp link" in line for line in out)
+    assert any("not installed" in line and "build_whatsapp_bridge" in line for line in out)
+    it = next(i for i in connect.status_items(home, cfg_for()) if i.id == "whatsapp")
+    assert it.state != "connected" and "not installed" in it.detail_en and "reinstall JARVES" in it.fix_en
