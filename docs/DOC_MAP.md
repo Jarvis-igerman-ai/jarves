@@ -1,6 +1,6 @@
 # DOC_MAP — the single index: where to find what
 
-Entry point for every document. Last aligned: 22 Oct 2026. [README](README.md) (user view) and [CONTEXT_MAP](CONTEXT_MAP.md) (agent view, open only what the task needs) point here instead of keeping their own full lists. A test (`core/tests/test_docs_links.py`) fails if a file under `docs/` is missing from this map or a relative link breaks: **add a row when you add a document**.
+Entry point for every document. Last aligned: 23 Oct 2026. [README](README.md) (user view) and [CONTEXT_MAP](CONTEXT_MAP.md) (agent view, open only what the task needs) point here instead of keeping their own full lists. **Browse by topic:** [README](README.md) (curated subject navigation). The exhaustive registry stays here; existing document paths remain stable to preserve agents and links. A test (`core/tests/test_docs_links.py`) fails if a file under `docs/` is missing from this map or a relative link breaks: **add a row when you add a document**.
 
 Status words: **current** (maintained), **historical** (kept as evidence/context, a banner at the top says what replaced it), **superseded** (replaced by the named doc), **proposal** (not authorized).
 Owner doc = the one document that wins on a conflict.
@@ -64,7 +64,9 @@ Execution authority: [NOW](NOW.md) (the only active brief) with [AGENTS](../AGEN
 | [JARVES_SW_V4_WORK_PACKAGE](JARVES_SW_V4_WORK_PACKAGE.md) | V4 packages A-O, test scripts (sections 6-9), release checklist, owner decisions | V4 | current for plan and test scripts; delivery state lives in ROADMAP and HANDOFF | ROADMAP for status |
 | [JARVES_SW_V5_WORK_PACKAGE](JARVES_SW_V5_WORK_PACKAGE.md) | V5 phone-access package (security model, PWA) | V5 | current; the other V5 pillars are in ROADMAP | ROADMAP |
 | [plans/V7_PROPOSAL_2026-10-21](plans/V7_PROPOSAL_2026-10-21.md) | V7 research proposal | V7 | proposal | ROADMAP |
-| [plans/WEBTOP_SCHOOL_SKILL_PROPOSAL](plans/WEBTOP_SCHOOL_SKILL_PROPOSAL.md) | Webtop parent and separate teacher-account School Skill research (unofficial API; no live account) | F11 / V7.x candidate | proposal, not authorized | ROADMAP / FUTURE_IDEAS |
+| [plans/WEBTOP_PARENT_STUDENT](plans/WEBTOP_PARENT_STUDENT.md) | Guardian/student Webtop — read-only homework, messages and possible timetable | F11 / V7.x candidate | proposal, not authorized | FUTURE_IDEAS |
+| [plans/WEBTOP_TEACHER_WORKSPACE](plans/WEBTOP_TEACHER_WORKSPACE.md) | Separate teacher/staff Webtop — reports, schedule, AI use and school privacy gates | separate future candidate | proposal, not authorized | FUTURE_IDEAS |
+| [plans/WEBTOP_SCHOOL_SKILL_PROPOSAL](plans/WEBTOP_SCHOOL_SKILL_PROPOSAL.md) | Compatibility stub for prior combined School Skill plan | historical | superseded by two above | two above |
 | [FUTURE_IDEAS](FUTURE_IDEAS.md) | Deferred backlog (F01-F11) | general | backlog | ROADMAP |
 | [plans/FEATURE_SUGGESTIONS](plans/FEATURE_SUGGESTIONS.md) | Ranked feature ideas | general | backlog | FUTURE_IDEAS |
 | [plans/SW_NEXT_STEPS](plans/SW_NEXT_STEPS.md) | Old "next steps" after V3 | V3 | superseded by ROADMAP and the V4 package | ROADMAP |
