@@ -425,6 +425,7 @@
   "dashboard Health page, jarvis health, health.* settings": "דף הבריאות בלוח הבקרה, jarvis health, הגדרות health.*",
   "dashboard Identity & voice page": "עמוד \"שם וקול\" בלוח הבקרה",
   "dashboard Identity & voice page (wake phrase)": "עמוד \"שם וקול\" בלוח הבקרה (מילת ההפעלה)",
+  "dashboard Identity & voice page (wake phrase); `jarvis talk` starts a live conversation without the wake word (implemented_unverified: UNIT test only, no real mic test)": "עמוד \"שם וקול\" בלוח הבקרה (מילת ההפעלה); הפקודה `jarvis talk` פותחת שיחה חיה בלי מילת הפעלה (implemented_unverified: בדיקת יחידה בלבד, בלי בדיקת מיקרופון אמיתי)",
   "dashboard Jobs page (time zone), briefing.* settings": "עמוד \"משימות קבועות\" (אזור זמן), הגדרות briefing.*",
   "dashboard Phone page / `jarvis dashboard --mobile`": "עמוד \"טלפון\" / `jarvis dashboard --mobile`",
   "dashboard Self-check page, Jobs page (weekly time), self_check.* settings": "עמוד \"בדיקה עצמית\", עמוד \"משימות קבועות\" (השעה השבועית), הגדרות self_check.*",

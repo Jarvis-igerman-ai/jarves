@@ -425,6 +425,7 @@
   "dashboard Health page, jarvis health, health.* settings": "dashboard Health page, jarvis health, health.* settings",
   "dashboard Identity & voice page": "dashboard Identity & voice page",
   "dashboard Identity & voice page (wake phrase)": "dashboard Identity & voice page (wake phrase)",
+  "dashboard Identity & voice page (wake phrase); `jarvis talk` starts a live conversation without the wake word (implemented_unverified: UNIT test only, no real mic test)": "dashboard Identity & voice page (wake phrase); `jarvis talk` starts a live conversation without the wake word (implemented_unverified: UNIT test only, no real mic test)",
   "dashboard Jobs page (time zone), briefing.* settings": "dashboard Jobs page (time zone), briefing.* settings",
   "dashboard Phone page / `jarvis dashboard --mobile`": "dashboard Phone page / `jarvis dashboard --mobile`",
   "dashboard Self-check page, Jobs page (weekly time), self_check.* settings": "dashboard Self-check page, Jobs page (weekly time), self_check.* settings",
