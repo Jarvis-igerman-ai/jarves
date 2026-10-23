@@ -12,6 +12,13 @@
 - Verification: targeted tests (`test_whatsapp_surfaces`, `test_connect_unset`, `test_connect`, guides, cli_parity, locales) pass with the fake bridge; see prepush result in the PR. NOT verified: a real bridge binary, a real QR scan or real WhatsApp linking, the new JS in a real browser (only source-level assertions; Playwright is not installed here), the Connect console QR rendering.
 - Open question for owner: auto-download a prebuilt, checksum-verified bridge from a release/CI artifact when it is missing? Not implemented; today the only fixes are reinstall or a source build. Also confirm the installer payload really ships `bridge/whatsapp_bridge(.exe)`.
 
+## Dashboard controls while JARVES is stopped — 23 Oct 2026
+
+- Report: with JARVES offline the dashboard could not manage things. Root cause: on the Controls page the mic-mute and alert-pause switches were disabled when the Core was stopped, and `POST /api/runtime` answered 409 for every change. Both are saved choices in `runtime.json` that the Core loads at start, so they now save directly while stopped (`runtime.service.save_prefs`) and the page shows and edits the saved values. Show/Hide window and Quit still need the running Core (409, as before); start-at-login already worked offline.
+- Verification: `core/tests/test_runtime.py` updated (offline mute/pause saved, display still 409): 26 passed; the one failure is `test_pystray_backend_builds_without_running`, which only needs the optional `pystray` package missing in this sandbox. Local pre-push gate passed (`--changed-only`). Other dashboard pages that need a live Core (chat, camera preview, voice) were not changed and still say so honestly.
+- Open question for the owner: if other pages felt blocked offline, name them and they will be triaged the same way.
+
+
 ## Camera on demand — 23 Oct 2026 / #74
 
 - Owner requested installation: published beta 4.0.1-beta.4 / build 212 installed using `jarvis update install --yes --silent`; installed CLI version and beta update status verified. Backup created by the updater. This build predates the camera correction below.
