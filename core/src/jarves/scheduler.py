@@ -486,6 +486,8 @@ class JobBudget:
         """shared=False: count against the job cap only (the ChatGPT plan, where ChatGPTBrain._stream reserves
         the shared daily budget per request itself; reserving it here too charged each request twice)."""
         if self.used + n > self.limit:
+            from . import limits                       # no silent limit: the job's own cap is announced like the daily ones
+            limits.report("JOB_REQUEST_LIMIT", f"{self.used} of {self.limit} requests in this run", self.limit)
             raise BudgetExceeded(f"job:{kind}", self.limit, self.used)
         res = self.inner.reserve(kind, n) if self.inner is not None and shared else _NoReservation()
         self.used += n

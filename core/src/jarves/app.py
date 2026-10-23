@@ -198,6 +198,7 @@ class Core:
         self._hold_wake_until = 0.0     # connected-on-open mode: wake word waits until the first live session ended
         self._limit_warned: dict[str, str] = {}      # kind -> day the 80% notice was given
         self._limit_announced: dict[str, float] = {}  # kind -> monotonic time of the last spoken/face limit notice
+        self.limit_events: dict[str, dict] = {}      # event-limit hits (limits.EVENTS) in the last hour, by code
         self._local_tts = None                       # tests inject a fake local speech engine for limit notices
         self._loop = None
         self._rollovers: list[float] = []   # times of automatic session resumes (loop guard)
@@ -348,6 +349,7 @@ class Core:
         self.health.set("delegation", "ok", self.delegation_state.describe())
         self._check_ai()
         self.limits_refresh()
+        limits_mod.set_sink(self.on_limit_event)        # delegation / tasks / scheduler report their caps here
         try:                                            # SW-V4 O preflight (<= 1.5 s) while the ports are still free
             self.preflight = _preflight.run_core(self)
         except Exception:
@@ -460,6 +462,7 @@ class Core:
         if self.stopping:
             return
         self.stopping = True
+        limits_mod.set_sink(None)
         self.dev.speaker_stop()
         self.health.mark("stopping")
         logs.info("core", "CORE_STOPPING", "Core stopping")
@@ -560,7 +563,8 @@ class Core:
                  delegation=(self.delegation_state.snapshot(self.budget)
                              if getattr(self, "delegation_state", None) is not None else None),
                  voice_minutes_today=round(self.memory.usage_today("voice_seconds") / 60, 1),
-                 limits=self.limit_views(), limit_lines=limits_mod.status_lines(self.limit_views()))
+                 limits=self.limit_views(), limit_lines=limits_mod.status_lines(self.limit_views()),
+                 limit_events=self.recent_limit_events())
         return s
 
     def _check_ai(self) -> None:
@@ -632,6 +636,55 @@ class Core:
                 loop.call_soon_threadsafe(lambda: self._spawn(self.announce_limit(v)))
         except Exception:
             logs.debug("limits", "LIMIT_HOOK_FAILED", "could not announce the limit")
+
+    def recent_limit_events(self) -> list[dict]:
+        cut = time.time() - limits_mod.EVENT_KEEP_S
+        for code in [c for c, e in self.limit_events.items() if e["ts"] < cut]:
+            del self.limit_events[code]
+        return sorted(self.limit_events.values(), key=lambda e: -e["ts"])
+
+    def _record_event(self, v: dict) -> None:
+        prev = self.limit_events.get(v["code"])
+        self.limit_events[v["code"]] = {"code": v["code"], "ts": time.time(), "count": (prev["count"] + 1) if prev else 1,
+                                        "line_en": v["line_en"], "text_en": v["text_en"], "text_he": v["text_he"],
+                                        "action_en": v["action_en"], "action_he": v["action_he"], "setting": v["key"]}
+
+    async def _voice_limit_notice(self, code: str, detail: str, value: float) -> None:
+        """Session max / idle disconnect are by design, but never silent: screen line (above), WARNING log, status
+        line, and a LOCAL spoken sentence. Awaited BEFORE an automatic reconnect so the notice and the next
+        conversation's audio never overlap."""
+        v = limits_mod.report(code, detail, value, notify=False)
+        self._record_event(v)
+        await self.announce_event(v)
+
+    def on_limit_event(self, v: dict) -> None:
+        """limits.report() sink (any thread): remember the hit (status/snapshot), then show it on every surface."""
+        if self.stopping:
+            return
+        self._record_event(v)
+        loop = getattr(self, "_loop", None)
+        try:
+            if loop is not None and loop.is_running():
+                loop.call_soon_threadsafe(lambda: self._spawn(self.announce_event(v)))
+        except Exception:
+            logs.debug("limits", "LIMIT_HOOK_FAILED", "could not announce the limit event")
+
+    async def announce_event(self, v: dict) -> None:
+        """An event-limit hit (see limits.EVENTS): face/dashboard error with the code, health detail, and a LOCAL
+        spoken notice where the event says so (never while a live conversation is open: it speaks the note itself).
+        Debounced per code like the daily limits. The WARNING log line is written by limits.report()."""
+        now = time.monotonic()
+        key = "event:" + v["code"]
+        if now - self._limit_announced.get(key, -1e9) < 30:
+            return
+        self._limit_announced[key] = now
+        he = self.cfg.voice.language == "he"
+        self.health.set(v["component"], "ok", v["text_en"], v["action_en"])
+        await self.link.send_face("error", {"code": v["code"], "message": v["text_he"] if he else v["text_en"],
+                                            "action": v["action_he"] if he else v["action_en"], "setting": v["key"]})
+        await self.link.broadcast("status", self.snapshot())
+        if v.get("speak") and self.live is None and not self.stopping:
+            await self._local_notice(limits_mod.event_spoken(v, self.cfg.voice.language))
 
     async def announce_limit(self, v: dict, *, speak: bool = True) -> None:
         """A limit was hit: log WARNING with code, face/dashboard error, health, and a short LOCAL spoken notice
@@ -1220,10 +1273,14 @@ class Core:
                 self._spawn(self.link.send_face("assistant.activity", {"kind": "limit", "detail": "", "text": (
                     "השיחה הגיעה לאורך המקסימלי (voice.session_max_s) ומתחברת מחדש" if he_
                     else "conversation reached its maximum length (voice.session_max_s); reconnecting")}))
+                await self._voice_limit_notice("VOICE_SESSION_MAX", f"{self.cfg.voice.session_max_s:g} s",
+                                               self.cfg.voice.session_max_s)
             elif reason in ("idle", "no_speech") and not self.stopping:
                 self._spawn(self.link.send_face("assistant.activity", {"kind": "limit", "detail": "", "text": (
                     "השיחה נסגרה בגלל שקט (voice.idle_disconnect_s)" if he_
                     else "conversation closed after silence (voice.idle_disconnect_s)")}))
+                await self._voice_limit_notice("VOICE_IDLE_DISCONNECT", f"{self.cfg.voice.idle_disconnect_s:g} s",
+                                               self.cfg.voice.idle_disconnect_s)
             if not self.stopping:
                 self._spawn(self.curator.run(f"live_{reason}"))   # learn durable facts from this conversation
             # Smooth conversation: the server closing a session (or a time limit) while the user is in the middle

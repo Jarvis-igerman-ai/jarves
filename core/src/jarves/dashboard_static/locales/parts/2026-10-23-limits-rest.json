@@ -1,0 +1,8 @@
+{
+ "dict": {
+  "A limit stopped something today": "מגבלה עצרה משהו היום",
+  "Background tasks running at once (5 more may wait in the queue)": "משימות רקע שרצות במקביל (עוד 5 יכולות לחכות בתור)",
+  "How to change it →": "איך משנים ←",
+  "Stop a background task after (s)": "לעצור משימת רקע אחרי (שניות)"
+ }
+}

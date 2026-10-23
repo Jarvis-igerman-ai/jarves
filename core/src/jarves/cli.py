@@ -319,8 +319,8 @@ def cmd_status(a, cfg, home) -> int:
     prof = live.get("profile") or {}
     from .updates import beta_label
     from . import limits as _limits
-    for line in _limits.status_lines(live.get("limits") or []):      # no silent limits: the FIRST lines of the status
-        print(line)
+    for line in _limits.status_lines(live.get("limits") or []) + _limits.event_lines(live.get("limit_events") or []):
+        print(line)                                                   # no silent limits: the FIRST lines of the status
     beta = beta_label(home)
     print(runtime_summary(live.get("runtime"))
           + (f" | profile {prof.get('name')}{' (TEST)' if prof.get('test') else ''}" if prof else "")
@@ -1306,6 +1306,9 @@ def cmd_doctor(a, cfg, home) -> int:
         _vs = _limits.views_from_home(home, cfg.ai)
         for _v in _limits.worst(_vs):
             add("fail" if _v["level"] == "exhausted" else "warn", _v["text_en"], "fix:  " + _v["action_en"])
+        _evs = list((live or {}).get("limit_events") or []) or _limits.events_from_log(home)
+        for _e in _evs:
+            add("warn", f"{_e.get('text_en', _e.get('code'))} (x{_e.get('count', 1)})", "fix:  " + str(_e.get("action_en", "")))
         if not _limits.worst(_vs):
             add("ok", "daily limits have room left (" + "; ".join(v["text_en"] for v in _vs) + ")")
     except Exception as e:
