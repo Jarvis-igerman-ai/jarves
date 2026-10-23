@@ -989,11 +989,15 @@ FAKE_GH = textwrap.dedent('''
 
 @pytest.fixture
 def fake_gh(tmp_path, monkeypatch):
+    """A fake `gh` on PATH, cross-platform: POSIX looks up the bare name "gh"; Windows's shutil.which("gh") tries
+    each PATHEXT extension on that same bare name, so a "gh.cmd" alongside it is what Windows actually runs (same
+    reason the FAKE agent above is invoked as [sys.executable, path] instead of relying on a shebang)."""
     sh_ = tmp_path / "fake_gh.py"
     sh_.write_text(FAKE_GH)
     wrapper = tmp_path / "gh"
     wrapper.write_text(f"#!/bin/sh\nexec {sys.executable} {sh_} \"$@\"\n")
     wrapper.chmod(0o755)
+    (tmp_path / "gh.cmd").write_text(f'@echo off\r\n"{sys.executable}" "{sh_}" %*\r\n')
     monkeypatch.setenv("PATH", str(tmp_path) + os.pathsep + os.environ.get("PATH", ""))
     yield wrapper
 
