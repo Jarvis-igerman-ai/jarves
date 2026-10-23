@@ -161,6 +161,8 @@ FIELD_CLASS: dict[str, str] = {
         chat_hash chats logout override unread killed text_sha256 retry_after_s days_left
         turn route history_items reserved_usd spent_usd actual_usd requests deleg_s scope err_code daily_usd turn_usd
         transport plugin provider handler tailnet tls_source hours bind_tailnet_only
+        tasks waited_s false_wakes good_wakes signal backend_busy tools_running delegations_open mic_level echo_level
+        rejected times accept always_confirm tune_level
         """),
     **_reg(SECRET, """
         token access_token refresh_token id_token id_token_hint api_key apikey secret secrets client_secret
