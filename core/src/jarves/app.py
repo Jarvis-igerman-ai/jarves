@@ -691,7 +691,7 @@ class Core:
                     st, d = await self.music.health()
                     music_gap = 20.0 if st == "ok" else min(300.0, music_gap * 2)
                     music_next = time.monotonic() + music_gap - 1.0
-                    self.health.set("music", st, d, "" if st == "ok" else "start Pear Desktop with the API Server plugin")
+                    self.health.set("music", st, d, "" if st in ("ok", "idle") else "start Pear Desktop with the API Server plugin")
                 if not self.listening and self.live is None:
                     self.dev.check_audio()
                 self.features.poll()            # a switch flipped on the dashboard / CLI reaches the Core here
