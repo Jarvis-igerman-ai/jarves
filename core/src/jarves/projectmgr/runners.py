@@ -202,7 +202,7 @@ class CodexRunner(Runner):
         argv = [*self.command(), "exec", "--json", "--sandbox", sandbox, "-C", cwd, "--skip-git-repo-check"]
         if model:
             argv += ["-m", model]
-        if resume:
+        if resume and not read_only:            # `exec resume` takes no --sandbox: a read-only question is a fresh run
             argv = [*self.command(), "exec", "resume", resume, "--json"] + (["-m", model] if model else [])
         argv.append("-")
         return Spec(argv, prompt, gitops.child_env())
