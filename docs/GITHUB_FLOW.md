@@ -9,6 +9,10 @@
    **`CI result (single required check)`** is green, and never before. Low-risk PRs (docs, tests, guides, Dependabot
    patch/minor) get the `automerge` label by themselves and the `jarves-automerge` queue merges them the same way.
 3. A PR that is only **behind** `main` is not updated and re-tested: merge `main` into it only to resolve a real conflict.
+   A conflict in the dashboard translation files (`locales/en.js`, `he.js`): run
+   `python core/tools/catalog_add.py --resolve` in the conflicted merge. It merges them text by text, keeps both
+   sides and stages them; it names any text that both sides changed differently. These files stay sorted in one
+   layout (`catalog_add.py --sort`, a test checks it), so PRs that add different texts rarely touch the same lines.
    Its run tested the merge with `main` as it was; the run on `main` after the merge is the integration check (the full
    matrix when the merged tree was not proven on the PR; queued `main` runs batch on their own). While the latest run on
    `main` is red nothing else is merged (the queue stops by itself); fix `main` first. A red run on `main` opens

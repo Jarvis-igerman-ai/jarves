@@ -253,3 +253,55 @@ def test_catalog_add_inserts_in_sorted_place_and_keeps_rule_order(tmp_path, monk
         assert keys == sorted(keys, key=catalog_add.sort_key)
     he = catalog_add.load("he")[1]
     assert he["rules"][:len(rules_before)] == rules_before and he["rules"][-1] == ["^x89$", "x"]   # rules: order kept
+
+
+def test_catalog_merge3_keeps_both_sides_and_reports_only_real_clashes():
+    import sys
+    sys.path.insert(0, str(LOCALES.parents[3] / "tools"))
+    import catalog_add
+    base = {"code": "he", "dict": {"a": "1", "b": "2", "c": "3", "d": "4"}, "rules": [["^x$", "x"], ["^y$", "y"]]}
+    ours = {"code": "he", "dict": {"a": "1", "b": "2 ours", "c": "3", "d": "4 ours", "n1": "new ours"},
+            "rules": [["^x$", "x"], ["^y$", "y"], ["^o$", "o"]]}
+    theirs = {"code": "he", "dict": {"a": "1", "b": "2", "d": "4 theirs", "n2": "new theirs"},
+              "rules": [["^x$", "x theirs"], ["^y$", "y"], ["^t$", "t"]]}
+    out, clashes = catalog_add.merge3(base, ours, theirs)
+    assert out["dict"] == {"a": "1", "b": "2 ours", "d": "4 ours", "n1": "new ours", "n2": "new theirs"}  # c: removed
+    assert clashes == ["d"]                                              # both changed d differently: ours kept, listed
+    assert out["rules"] == [["^x$", "x theirs"], ["^y$", "y"], ["^o$", "o"], ["^t$", "t"]]   # order kept, theirs last
+
+
+def test_catalog_resolve_merges_a_real_git_conflict(tmp_path, monkeypatch):
+    """#89: after the one-time re-sort, an open PR that adds texts conflicts with main once; `catalog_add.py --resolve`
+    merges en.js/he.js per text from git's three stages and stages the result."""
+    import shutil
+    import subprocess
+    import sys
+    sys.path.insert(0, str(LOCALES.parents[3] / "tools"))
+    import catalog_add
+
+    def git(*args):
+        return subprocess.run(["git", "-c", "user.email=t@t", "-c", "user.name=t", *args], cwd=tmp_path, check=False,
+                              capture_output=True, text=True)
+    git("init", "-q", "-b", "main")
+    for code in ("en", "he"):
+        shutil.copy(LOCALES / f"{code}.js", tmp_path / f"{code}.js")
+    monkeypatch.setattr(catalog_add, "LOCALES", tmp_path)
+    git("add", "."), git("commit", "-q", "-m", "base")
+    git("checkout", "-q", "-b", "pr")
+    catalog_add.add({"aaa pr text #89": "טקסט של ה-PR"})
+    git("commit", "-qam", "pr adds a text")
+    git("checkout", "-q", "main")
+    for code in ("en", "he"):                       # main re-formats the whole file (the layout a PR once used)
+        head, cat = catalog_add.load(code)
+        cat["dict"] = dict(reversed(cat["dict"].items()))
+        cat["dict"]["zzz main text #89"] = "טקסט של main" if code == "he" else "zzz main text #89"
+        (tmp_path / f"{code}.js").write_text(head + json.dumps(cat, ensure_ascii=False, indent=2) + ";\n", encoding="utf-8")
+    git("commit", "-qam", "main reorders and adds a text")
+    git("checkout", "-q", "pr")
+    assert git("merge", "main").returncode != 0                                   # a real conflict
+    assert catalog_add.resolve("en") == [] and catalog_add.resolve("he") == []
+    assert git("diff", "--name-only", "--diff-filter=U").stdout.strip() == ""    # resolved and staged
+    he = catalog_add.load("he")[1]["dict"]
+    assert he["aaa pr text #89"] == "טקסט של ה-PR" and he["zzz main text #89"] == "טקסט של main"
+    for code in ("en", "he"):
+        assert (tmp_path / f"{code}.js").read_text(encoding="utf-8") == catalog_add.render(*catalog_add.load(code))
