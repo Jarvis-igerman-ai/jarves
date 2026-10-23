@@ -211,3 +211,59 @@ def test_setup_flow_starts_links_and_never_scans_for_you(dash, bridge, home):
     c = json.loads(body)
     assert r.status == 200 and c["started"] is True and c["open"] == "#/whatsapp"
     assert bridge.policy["mode"] == mode_before                             # setup itself changes no mode
+
+
+# ---- #17: answering YES to read-only also turns the reading switch on (one backend), NO leaves it off
+def _feat(home, fid):
+    from jarves import features as feat
+    return feat.Features(Config(), home).enabled(fid)
+
+
+def test_enable_reading_yes_turns_switch_on_and_never_send(bridge, home):
+    from jarves import whatsapp_admin as wad
+    bridge.policy["mode"] = "off"
+    assert _feat(home, "whatsapp_bridge") is False
+    r = wad.enable_reading(home, by="test")
+    assert bridge.policy["mode"] == "read" and r["feature_on"] is True
+    assert _feat(home, "whatsapp_bridge") is True and _feat(home, "whatsapp_send") is False
+    assert "it never sends" in r["message"] and r["message_he"]
+
+
+def test_cli_setup_yes_and_no(bridge, home, monkeypatch, capsys):
+    from jarves import whatsapp_admin as wad
+    monkeypatch.setattr(wad, "_link", lambda h, a: 0)
+    args = SimpleNamespace()
+    bridge.policy["mode"] = "off"
+    monkeypatch.setattr(wad, "_confirm", lambda *a, **k: False)
+    assert wad._setup(home, args) == 0
+    out = capsys.readouterr().out
+    assert bridge.policy["mode"] == "off" and not _feat(home, "whatsapp_bridge")
+    assert "jarvis features on whatsapp_bridge" in out
+    monkeypatch.setattr(wad, "_confirm", lambda *a, **k: True)
+    assert wad._setup(home, args) == 0
+    assert "never sends" in capsys.readouterr().out
+    assert bridge.policy["mode"] == "read" and _feat(home, "whatsapp_bridge") and not _feat(home, "whatsapp_send")
+
+
+def test_status_and_mode_read_show_the_off_hint(bridge, home, capsys):
+    bridge.phone_last_seen = None
+    rc, out = run(capsys, "status")
+    assert "reading switch: off" in out or "מתג הקריאה כבוי" in out
+    assert json.loads(run(capsys, "status", "--json")[1])["reading_switch"] == "off"
+    rc, out = run(capsys, "mode", "read")
+    assert "jarvis features on whatsapp_bridge" in out
+    from jarves import features as feat
+    feat.Features(Config(), home).set("whatsapp_bridge", True, by="test")
+    rc, out = run(capsys, "mode", "read")
+    assert "features on" not in out
+
+
+def test_dashboard_yes_flag_and_off_hint(dash, bridge, home):
+    h = {"X-Jarves": "1"}
+    d = json.loads(req(dash, "GET", "/api/whatsapp")[1])
+    assert d["reading_switch"]["on"] is False and "features on whatsapp_bridge" in d["reading_switch"]["fix"]
+    req(dash, "POST", "/api/whatsapp/mode", headers=h, body={"mode": "read"})          # plain mode: switch untouched
+    assert not _feat(home, "whatsapp_bridge")
+    r, body = req(dash, "POST", "/api/whatsapp/mode", headers=h, body={"mode": "read", "enable_reading": True})
+    assert r.status == 200 and json.loads(body)["feature_on"] is True
+    assert _feat(home, "whatsapp_bridge") and not _feat(home, "whatsapp_send")

@@ -35,8 +35,9 @@ PAGES.whatsapp = async function () {
       linkBox.textContent = r.pairing_code ? r.pairing_code : (r.qr_text || "");
       if (r.state === "linked") {
         msg.textContent = tx("מקושר. בטלפון יופיע JARVES bridge.", "Linked. The phone shows JARVES bridge.");
-        if (st.mode !== "read" && st.mode !== "send" && window.confirm(tx("להפעיל עכשיו מצב קריאה בלבד? ג'ארביס יקרא ולא ישלח.", "Switch on read-only mode now? JARVES will read and never send.")))
-          { try { await api("/api/whatsapp/mode", { method: "POST", body: JSON.stringify({ mode: "read" }) }); } catch (e) { msg.textContent = e.message; return; } }
+        if (st.mode !== "read" && st.mode !== "send" && window.confirm(tx("להפעיל עכשיו מצב קריאה בלבד ואת מתג הקריאה של וואטסאפ? ג'ארביס יקרא ולא ישלח.", "Switch on read-only mode and the WhatsApp reading switch now? JARVES will read and never send.")))
+          { try { const m = await api("/api/whatsapp/mode", { method: "POST", body: JSON.stringify({ mode: "read", enable_reading: true }) }); msg.textContent = tx(m.message_he, m.message); } catch (e) { msg.textContent = e.message; return; } }
+        else msg.textContent = tx("מצב קריאה ומתג הקריאה נשארו כבויים. להדלקה: jarvis features on whatsapp_bridge", "Read-only mode and the reading switch stay off. To turn it on later: jarvis features on whatsapp_bridge");
         route(true); return;
       }
       if (r.state === "timeout" || r.state === "error") { msg.textContent = tx("הקישור לא הושלם. נסו שוב.", "Linking did not finish. Try again."); return; }
@@ -94,6 +95,8 @@ PAGES.whatsapp = async function () {
     el("div", { class: "card" },
       el("div", { class: "row" }, el("b", {}, tx("מצב הגשר: ", "Bridge: ")), hp, el("span", { class: "small" }, h.detail || ""),
         killed ? pill("fail", tx("עצור", "KILLED")) : null),
+      d.reading_switch && !d.reading_switch.on ? el("div", { class: "small" }, pill("medium", tx("מתג הקריאה: כבוי", "reading switch: off")), " ", tx(d.reading_switch.off_he, d.reading_switch.off_en),
+        " ", el("button", { type: "button", class: "ghost", disabled: !d.local, onclick: () => api("/api/features/whatsapp_bridge", { method: "POST", body: JSON.stringify({ enabled: true }) }).then(() => route(true)) }, tx("הדלקה", "Turn on"))) : null,
       el("div", { class: "small muted" }, tx(d.tos_he, d.tos)),
       !d.local ? el("div", { class: "small" }, tx("את זה משנים רק במחשב עצמו.", "Changes are made only on the computer itself.")) : null,
       el("div", { class: "row", style: "margin-top:8px" },
