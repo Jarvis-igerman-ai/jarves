@@ -1,3 +1,9 @@
+## Web chat: busy-flag race fixed — 23 Oct 2026
+
+- CI hung (pytest timeout, Ubuntu shard 3/3 on PR #92) in `test_web_chat.py::test_new_resets_the_model_and_starts_a_new_stored_conversation`. Root cause in Python Core `chat_engine.py`: the `reply` event (in `_finish`) and a command's `notice` (in `_notice`) were published BEFORE the busy flag was cleared, so a client that reacted to the answer at once (the test sends `/new` right after the reply) could be refused with `CHAT_BUSY`; no notice ever came and the long-poll waited out its timeouts. A real user with a second device, or a fast client, could hit the same 409.
+- Fix: clear the busy flag and publish the final event under the same lock, so a client that saw the answer can always send the next message. New regression test `test_a_client_that_saw_the_answer_may_send_at_once` (fails without the fix 3/3, passes 8/8 with it). No behavior change otherwise.
+- Verification: `test_web_chat.py`, `test_chat.py`, mobile and phone tests pass locally; browser-based tests cannot run in this sandbox and rely on CI.
+
 > **New handoff notes go in `docs/handoff/`, one file per task** ([README](handoff/README.md)); this file keeps the
 > history up to 23 Oct 2026. The CI/merge/release work of 23 Oct is in [handoff/2026-10-23-ci-merge-release.md](handoff/2026-10-23-ci-merge-release.md).
 

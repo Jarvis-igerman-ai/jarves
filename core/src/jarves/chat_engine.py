@@ -452,8 +452,11 @@ class WebChat:
     def _finish(self, tid: str, text: str, ok: bool, code: str, silent: bool, spoke: bool, **extra) -> None:
         if text:
             self._add_message({"role": "assistant", "text": text, "turn": tid, "ok": ok, "code": code})
-        self.events.add("reply", replace=("delta", tid), turn=tid, text=text, ok=ok, code=code, silent=silent,
-                        spoken=spoke, **{k: v for k, v in extra.items() if k == "source"})
+        with self._lock:                           # the busy flag clears WITH the reply: a client that saw the reply may send at once
+            if self._busy == tid:
+                self._busy = ""
+            self.events.add("reply", replace=("delta", tid), turn=tid, text=text, ok=ok, code=code, silent=silent,
+                            spoken=spoke, **{k: v for k, v in extra.items() if k == "source"})
         logs.info("core", "CHAT_TURN_DONE", "web chat turn finished", ok=ok, result_code=code,
                   ms=extra.get("ms", 0), count=len(text))
         self._release(tid)
@@ -461,7 +464,10 @@ class WebChat:
     # ------------------------------------------------------------------ slash commands (run on the loop)
     def _notice(self, tid: str, command: str, en: str, he: str, **data) -> None:
         self._add_message({"role": "notice", "turn": tid, "command": command, "en": en, "he": he})
-        self.events.add("notice", turn=tid, command=command, en=en, he=he, **data)
+        with self._lock:                           # the notice is the command's answer: the busy flag clears with it
+            if self._busy == tid:
+                self._busy = ""
+            self.events.add("notice", turn=tid, command=command, en=en, he=he, **data)
 
     async def _command(self, tid: str, name: str, arg: str, lang: str) -> None:
         try:
