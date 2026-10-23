@@ -237,10 +237,9 @@ def check_registry_and_guides(c: Ctx) -> tuple[str, str, str]:
 
 
 def _catalog(code: str) -> dict | None:
-    p = Path(__file__).with_name("dashboard_static") / "locales" / f"{code}.js"
+    from . import locale_parts
     try:
-        src = p.read_text(encoding="utf-8").replace("\r\n", "\n")
-        return json.loads(src.split("=\n", 1)[1].strip().rstrip(";"))
+        return locale_parts.catalog(code)             # the base catalog plus the per-PR parts
     except (OSError, IndexError, ValueError):
         return None
 

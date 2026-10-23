@@ -1992,6 +1992,10 @@ def main(argv: list[str] | None = None) -> int:
     issue_registry.add_cli(sub)               # owner request 21 Oct: jarvis issues [list|show|report|ignore|fixed|add]
     from . import web_cli
     web_cli.add_cli(sub)                      # owner request 21 Oct: jarvis web (the dashboard Chat page)
+    from . import plugin_registry
+    plugin_cli = plugin_registry.modules("cli")
+    for m in plugin_cli:                      # plugins.d/*.toml: a new command module needs no edit here
+        m.add_cli(sub)
     from . import whatsapp_admin
     whatsapp_admin.add_cli(sub)               # SW-V4 F: jarvis whatsapp status / link / mode / allow / kill ...
     from .orchestrator import surfaces as agents_cli
@@ -2035,7 +2039,8 @@ def main(argv: list[str] | None = None) -> int:
             "dial": dialing.cmd_dial, "release": release_cmd.cmd_release, "tour": wizard.cmd_tour,
             "manage": self_manage.cmd_manage, "undo": self_manage.cmd_manage,
             **cli_parity.COMMANDS, **budget_cli.COMMANDS, **privacy_cli.COMMANDS, **phone_cli.COMMANDS, **selfspeed.COMMANDS,
-            **issue_registry.COMMANDS, **web_cli.COMMANDS, **release_notes.COMMANDS}[a.cmd](a, cfg, home)
+            **issue_registry.COMMANDS, **web_cli.COMMANDS, **release_notes.COMMANDS,
+            **{k: v for m in plugin_cli for k, v in m.COMMANDS.items()}}[a.cmd](a, cfg, home)
 
 
 if __name__ == "__main__":

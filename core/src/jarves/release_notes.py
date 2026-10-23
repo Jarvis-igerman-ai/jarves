@@ -12,7 +12,7 @@ import re
 import webbrowser
 from pathlib import Path
 
-from . import __version__, clilang
+from . import __version__, changelog_parts, clilang
 
 HEAD = re.compile(r"^##\s+(\d+(?:\.\d+)+[^\s]*)\s*(?:\((.*?)\))?\s*$|^##\s+(.+?)\s*$")
 KIND = re.compile(r"^(Added|Changed|Fixed|Docs|Version|Security|Removed)(?:\s*\(([^)]*)\))?:\s*(.*)$", re.S)
@@ -28,7 +28,7 @@ def find_changelog() -> str:
     for d in (Path.cwd(), *Path(__file__).resolve().parents):
         f = d / "CHANGELOG.md"
         if f.is_file():
-            return f.read_text(encoding="utf-8", errors="replace")
+            return changelog_parts.read(f)               # plus the changelog.d fragments next to it
     return ""
 
 

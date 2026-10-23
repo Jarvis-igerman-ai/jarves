@@ -1,11 +1,18 @@
 """Add dashboard catalog texts in one step (SW-V4 K): every English source key goes to locales/en.js (identity) and
 its Hebrew to locales/he.js; patterns go to the "rules" of he.js. Keeps the strict-JSON format the locale tests parse.
 
-    python tools/catalog_add.py texts.json     # {"dict": {"English": "עברית", ...}, "rules": [["^re$", "עברית $1"]]}
+    python tools/catalog_add.py texts.json [--part NAME]
+                                               # {"dict": {"English": "עברית", ...}, "rules": [["^re$", "עברית $1"]]}
+                                               # -> locales/parts/<date>-<NAME or file name>.json (a NEW file per PR)
+    python tools/catalog_add.py --fold         # release time: move every part into en.js / he.js, delete the parts
     python tools/catalog_add.py --sort         # re-sort and re-format both catalogs (after a hand edit)
     python tools/catalog_add.py --resolve      # in a merge with conflicts in en.js/he.js: merge them text by text
 
-The "dict" entries are kept SORTED by key. Appending every new text at the end made any two PRs that add texts edit
+New texts go to a PART file (src/jarves/locale_parts.py reads the base catalogs plus all parts), so two PRs never edit
+the same file: even sorted, two texts with the same neighbours in en.js conflicted (59 of ~150 merges touched it).
+`--fold` keeps the base files current; a text already in the base or in another part is changed THERE.
+
+The "dict" entries of en.js / he.js are kept SORTED by key. Appending every new text at the end made any two PRs that add texts edit
 the same last lines of en.js and he.js, so they always conflicted (10 of 21 PRs on 22-23 Oct touched them, #89);
 sorted, a new text lands at its own place. The Hebrew "rules" keep their order (it matters: first match wins).
 When the two sides of a merge still clash in these files, `--resolve` merges them per text: both sides' additions,
@@ -14,11 +21,16 @@ changes and removals are kept, and only a text that both sides changed different
 from __future__ import annotations
 
 import json
+import re
 import subprocess
 import sys
+from datetime import datetime, timezone
 from pathlib import Path
 
-LOCALES = Path(__file__).resolve().parents[1] / "src" / "jarves" / "dashboard_static" / "locales"
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
+from jarves import locale_parts  # noqa: E402
+
+LOCALES = locale_parts.LOCALES
 
 
 def parse(src: str) -> tuple[str, dict]:
@@ -90,28 +102,79 @@ def resolve(code: str) -> list[str]:
     return clashes
 
 
-def add(texts: dict[str, str], rules: list | None = None) -> tuple[int, int]:
+def load_merged(code: str) -> tuple[str, dict]:
+    """Base catalog plus every part: what the dashboard shows."""
+    head, base = load(code)
+    return head, locale_parts.apply(code, base, locale_parts.load_parts(LOCALES))
+
+
+def part_file(parts: list[tuple[str, dict]], name: str) -> str:
+    """The part named `name`: the one a PR already started (any date), else a new `<date>-<name>`."""
+    stem = re.sub(r"[^a-z0-9]+", "-", name.lower()).strip("-") or "texts"
+    old = [p for p, _ in parts if p == stem or p.endswith("-" + stem)]
+    return old[-1] if old else f"{datetime.now(timezone.utc):%Y-%m-%d}-{stem}"
+
+
+def add(texts: dict[str, str], rules: list | None = None, part: str = "texts") -> tuple[int, int]:
+    """Add Hebrew texts / rules. A text that already lives in en.js / he.js or in another part is changed THERE
+    (one home per text); everything new goes to the part file `parts/<date>-<part>.json` (created once, then edited)."""
     he_head, he = load("he")
     en_head, en = load("en")
-    n = 0
+    parts = dict(locale_parts.load_parts(LOCALES))
+    mine_name = part_file(list(parts.items()), part)
+    parts.setdefault(mine_name, {"dict": {}})
+    touched, base_changed, n, r = {mine_name}, False, 0, 0
+    home = {k: p for p, c in parts.items() for k in c.get("dict", {})}
     for k, v in texts.items():
         if not v:
             raise SystemExit(f"empty Hebrew for {k!r}")
-        if he["dict"].get(k) != v or k not in en["dict"]:
-            n += 1
-        en["dict"][k] = k
-        he["dict"][k] = v
-    r = 0
-    have = {p for p, _ in he.get("rules", [])}
-    for p, to in rules or []:
-        if p in have:
-            he["rules"] = [[q, to if q == p else t] for q, t in he["rules"]]
+        if k in en["dict"] or k in he["dict"]:
+            n += he["dict"].get(k) != v or k not in en["dict"]
+            en["dict"][k], he["dict"][k], base_changed = k, v, True
         else:
-            he.setdefault("rules", []).append([p, to])
+            where = home.get(k, mine_name)
+            n += parts[where]["dict"].get(k) != v
+            parts[where]["dict"][k] = v
+            touched.add(where)
+    in_part = {p: name for name, c in parts.items() for p, _ in c.get("rules", [])}
+    in_base = {p for p, _ in he.get("rules", [])}
+    for p, to in rules or []:
+        if p in in_base:
+            he["rules"] = [[q, to if q == p else t] for q, t in he["rules"]]
+            base_changed = True
+        elif p in in_part:
+            c = parts[in_part[p]]
+            c["rules"] = [[q, to if q == p else t] for q, t in c["rules"]]
+            touched.add(in_part[p])
+        else:
+            parts[mine_name].setdefault("rules", []).append([p, to])
             r += 1
-    save("en", en_head, en)
-    save("he", he_head, he)
+    for name in touched:
+        c = parts[name]
+        if c["dict"] or c.get("rules"):
+            c["dict"] = dict(sorted(c["dict"].items(), key=lambda kv: sort_key(kv[0])))
+            _write_part(name + ".json", c)
+    if base_changed:
+        save("en", en_head, en)
+        save("he", he_head, he)
     return n, r
+
+
+def _write_part(name: str, content: dict) -> None:
+    d = locale_parts.parts_dir(LOCALES)
+    d.mkdir(parents=True, exist_ok=True)
+    (d / name).write_text(json.dumps(content, ensure_ascii=False, indent=1) + "\n", encoding="utf-8", newline="\n")
+
+
+def fold() -> int:
+    """Release time: move every part into the sorted base catalogs and delete the part files; returns the part count."""
+    parts = locale_parts.load_parts(LOCALES)
+    for code in ("en", "he"):
+        head, base = load(code)
+        save(code, head, locale_parts.apply(code, base, parts))
+    for p in locale_parts.parts_dir(LOCALES).glob("*.json"):
+        p.unlink()
+    return len(parts)
 
 
 if __name__ == "__main__":
@@ -127,5 +190,12 @@ if __name__ == "__main__":
                 print(f"{code}.js: both sides changed {k!r} differently; kept ours, check it, then git add")
         print("resolved en.js and he.js" if not any(bad.values()) else "resolved, with the clashes above")
         sys.exit(1 if any(bad.values()) else 0)
-    d = json.loads(Path(sys.argv[1]).read_text(encoding="utf-8"))
-    print("added/changed %d texts, %d rules" % add(d.get("dict", {}), d.get("rules", [])))
+    if sys.argv[1:] == ["--fold"]:
+        print("folded %d part file(s) into en.js and he.js" % fold())
+        sys.exit(0)
+    args = sys.argv[1:]
+    name = Path(args[0]).stem
+    if "--part" in args:
+        name = args[args.index("--part") + 1]
+    d = json.loads(Path(args[0]).read_text(encoding="utf-8"))
+    print("added/changed %d texts, %d rules" % add(d.get("dict", {}), d.get("rules", []), name))
