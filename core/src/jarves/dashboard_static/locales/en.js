@@ -1887,6 +1887,8 @@
   "Release notes": "Release notes",
   "What changed in each version.": "What changed in each version.",
   "No release notes found in this install.": "No release notes found in this install.",
-  "Your version": "Your version"
+  "Your version": "Your version",
+  "More details: connections, features and privacy": "More details: connections, features and privacy",
+  "More everyday tools": "More everyday tools"
  }
 };

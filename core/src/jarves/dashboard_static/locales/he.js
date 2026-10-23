@@ -1887,7 +1887,9 @@
   "Release notes": "הערות גרסה",
   "What changed in each version.": "מה השתנה בכל גרסה.",
   "No release notes found in this install.": "לא נמצאו הערות גרסה בהתקנה הזו.",
-  "Your version": "הגרסה שלך"
+  "Your version": "הגרסה שלך",
+  "More details: connections, features and privacy": "עוד פרטים: חיבורים, יכולות ופרטיות",
+  "More everyday tools": "עוד כלים ליום-יום"
  },
  "rules": [
   [
