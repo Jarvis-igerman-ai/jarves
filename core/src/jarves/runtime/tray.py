@@ -21,7 +21,7 @@ from typing import Callable
 from .. import logs
 
 # Menu (spec 4.1): Dashboard; Show/Hide; Software Mic Mute; Pause Proactive Alerts; Status; Diagnostics; Quit.
-ACTIONS = ("dashboard", "toggle_display", "toggle_mute", "toggle_alerts", "status", "diagnostics", "quit")
+ACTIONS = ("dashboard", "toggle_display", "toggle_mute", "toggle_alerts", "talk", "status", "diagnostics", "quit")
 
 
 @dataclass
@@ -42,6 +42,7 @@ def menu_entries(view: dict) -> list[MenuEntry]:
         MenuEntry("toggle_display", "Hide JARVES" if shown else "Show JARVES", enabled=shown or can_show),
         MenuEntry("toggle_mute", "Mute microphone (software)", checked=bool(view.get("mic", {}).get("muted"))),
         MenuEntry("toggle_alerts", "Pause proactive alerts", checked=bool(view.get("alerts", {}).get("paused"))),
+        MenuEntry("talk", "Talk (no wake word)"),
         MenuEntry("status", "Status: " + status_line(view)),
         MenuEntry("diagnostics", "Diagnostics (save support bundle)"),
         MenuEntry("quit", "Quit JARVES"),
@@ -157,7 +158,7 @@ class PystrayTray(TrayBackend):
                                enabled=enabled, default=e.default)
         n = len(ACTIONS)
         items = [item(i) for i in range(n)]
-        return ps.Menu(*items[:4], ps.Menu.SEPARATOR, *items[4:6], ps.Menu.SEPARATOR, items[6])
+        return ps.Menu(*items[:5], ps.Menu.SEPARATOR, *items[5:7], ps.Menu.SEPARATOR, items[7])
 
     def start(self) -> None:
         self._thread = threading.Thread(target=self._run, name="jarves-tray", daemon=True)

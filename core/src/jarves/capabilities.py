@@ -188,7 +188,7 @@ for _fid, _w, _p, _perm, _set in [
     ("wake_word", _win("verified_on_device", "HANDOFF 'Wake word through the air': speakers -> webcam mic, 4/4, "
                        "CPU 14-25 ms/frame (owner's own voice peaked ~0.17: threshold calibrated)"),
      _pi("implemented_unverified", "pyopen-wakeword linux-aarch64 wheel; Pi mic array/acoustics/CPU not measured"),
-     ["read"], "dashboard Identity & voice page (wake phrase)"),
+     ["read"], "dashboard Identity & voice page (wake phrase); `jarvis talk` starts a live conversation without the wake word (implemented_unverified: UNIT test only, no real mic test)"),
     ("greeting", _win("verified_on_device", "HANDOFF: owner's real runs 19 Oct heard the greeting"),
      _pi("implemented_unverified", "Pi audio output not tested"), ["read"], "config voice.greeting_delay_s"),
     ("chimes", _win("verified_on_device", "HANDOFF acoustic path: reconnect chime 0.5 s after 'Hey Jarvis'"),

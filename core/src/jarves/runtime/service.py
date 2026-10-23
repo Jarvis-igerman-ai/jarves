@@ -306,6 +306,8 @@ class Runtime:
         if isinstance(change.get("alerts_paused"), bool):
             await self.set_alerts_paused(change["alerts_paused"], by)
             out["alerts_paused"] = change["alerts_paused"]
+        if change.get("talk") in ("start", "stop"):         # live conversation without the wake word (Core.talk_cli)
+            out["talk"] = await self.core.talk_cli(change["talk"] == "start")
         return {"applied": out, "runtime": self.view()}
 
     # ------------------------------------------------------------------ tray actions (called from the tray thread)
@@ -323,6 +325,10 @@ class Runtime:
                 await self.core.set_muted(not v["mic"]["muted"])
             elif action == "toggle_alerts":
                 await self.set_alerts_paused(not v["alerts"]["paused"], "tray")
+            elif action == "talk":
+                r = await self.core.talk_cli(True)
+                if not r.get("ok"):
+                    self._notify(r.get("message", "could not start a conversation"))
             elif action == "dashboard":
                 await self.open_dashboard()
             elif action == "status":

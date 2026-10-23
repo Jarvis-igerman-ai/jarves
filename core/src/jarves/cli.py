@@ -402,6 +402,19 @@ def cmd_display(a, cfg, home) -> int:
     return 0 if res.get("ok", True) else 1
 
 
+def cmd_talk(a, cfg, home) -> int:
+    """jarvis talk [--stop]: start (or end) a live voice conversation without the wake word - tests the whole voice path."""
+    r = _ws_call(home, cfg.link.port, {"type": "talk.stop" if a.stop else "talk.start", "payload": {}}, "talk.state",
+                 timeout=20)
+    if r is None:
+        print("JARVES is not running. Start it with: jarvis start")
+        return 1
+    print(r.get("message", "?"))
+    if r.get("ok") and r.get("live"):
+        print("Speak now. End it with: jarvis talk --stop")
+    return 0 if r.get("ok") else 1
+
+
 def cmd_autostart(a, cfg, home) -> int:
     """jarvis autostart on | off | status: start JARVES invisibly at login (the user's choice; default off)."""
     from .features import Features
@@ -1702,6 +1715,8 @@ def main(argv: list[str] | None = None) -> int:
     sta.add_argument("--wait", type=int, default=90, help="seconds to wait for the Core to answer")
     sub.add_parser("show", help="open the JARVES window (the Core keeps running)")
     sub.add_parser("hide", help="close the JARVES window (the Core keeps running)")
+    tk = sub.add_parser("talk", help="start a live voice conversation now, without the wake word (tests voice)")
+    tk.add_argument("--stop", action="store_true", help="end the open conversation")
     au = sub.add_parser("autostart", help="start JARVES invisibly at login: on / off / status")
     au.add_argument("action", choices=["on", "off", "status"])
     lg = sub.add_parser("logs", help="show the log (filter by --log-level / --module; -f to follow)")
@@ -1939,7 +1954,7 @@ def main(argv: list[str] | None = None) -> int:
             "wake": cmd_wake, "doctor": cmd_doctor, "cost": cmd_cost, "dashboard": cmd_dashboard,
             "diagnose": cmd_diagnose, "features": cmd_features, "help": cmd_help, "google": cmd_google,
             "backup": cmd_backup, "restore": cmd_restore, "usage": cmd_usage, "start": cmd_start,
-            "show": cmd_display, "hide": cmd_display, "autostart": cmd_autostart,
+            "talk": cmd_talk, "show": cmd_display, "hide": cmd_display, "autostart": cmd_autostart,
             "update": cmd_update, "browser": cmd_browser, "connect": cmd_connect, "telegram": cmd_telegram, "instagram": cmd_instagram, "home": cmd_home,
             "profile": profiles.cmd_profile, "approvals": cmd_approvals, "recall": recall.cmd_recall,
             "health": health_cli.cmd_health,

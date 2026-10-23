@@ -680,6 +680,8 @@ class Core:
             await self.talk_down()
         elif t in ("talk.up",) or (t == "button.up" and p.get("id") == "action"):
             await self.talk_up()
+        elif t in ("talk.start", "talk.stop"):
+            await self.link.reply(ws, "talk.state", await self.talk_cli(t == "talk.start"))
         elif t == "user.text":
             text = str(p.get("text", "")).strip()[:1000]
             if text and self._owner_answer(text, "typed"):
@@ -865,6 +867,25 @@ class Core:
             return
         self.listening = True
         await self.set_face("listening")
+
+    async def talk_cli(self, start: bool) -> dict:
+        """`jarvis talk` / `jarvis talk --stop`: a live conversation WITHOUT the wake word (no face needed)."""
+        if not start:
+            live, self.live = self.live, None
+            if live is not None:
+                await live.stop()
+            return {"ok": True, "live": False, "message": "conversation ended" if live else "no conversation was open"}
+        if self.dev.mic_muted:
+            return {"ok": False, "live": False, "code": "MIC_MUTED",
+                    "message": "the microphone is muted; unmute it (tray or dashboard) and try again"}
+        if self.voice_mode not in ("live", "realtime"):
+            return {"ok": False, "live": False, "code": "NO_LIVE_VOICE",
+                    "message": f"voice mode is {self.voice_mode}, not live; check OPENAI_API_KEY (jarvis status)"}
+        if self.live is None:
+            await self._start_live()
+        ok = self.live is not None
+        return {"ok": ok, "live": ok, "message": "conversation open: just talk" if ok else
+                "could not open the voice connection; see: jarvis logs -n 50"}
 
     async def talk_up(self) -> None:
         if self.voice_mode != "push_to_talk" or not self.listening:

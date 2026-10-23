@@ -6,7 +6,7 @@ import pytest
 import websockets
 from websockets.asyncio.client import connect
 
-from conftest import FakeSTT, FakeTTS, open_face
+from conftest import Face, FakeSTT, FakeTTS, open_face
 from jarves.app import Core
 from jarves.skills.music import FakePlayer, Track
 from jarves.voice.audio import SimAudio
@@ -275,3 +275,41 @@ async def test_shutdown_during_pending_confirmation_denies(home, cfg):
     await c.stop()                                                  # nobody answered; shutdown must deny
     from jarves.memory import MemoryStore
     assert MemoryStore(home / "memory.db").count() == 2          # nothing deleted
+
+
+async def test_cli_talk_starts_live_without_wake_word(home, cfg, monkeypatch):
+    """`jarvis talk` (talk.start, role cli): live conversation with no face and no wake word; muted -> refused."""
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-test-not-real")
+    started = []
+
+    class FakeLive:
+        def __init__(self, core, on_state, on_transcript, on_usage, **kw):
+            self.on_state, self.on_usage = on_state, on_usage
+
+        async def start(self):
+            started.append(1)
+            await self.on_state("listening")
+
+        async def stop(self):
+            self.on_usage(1)
+            await self.on_state("idle")
+    c = Core(cfg, home, audio=SimAudio(), player=FakePlayer(), stt=FakeSTT(), tts=FakeTTS(), console_logs=False,
+             use_real_audio=False, live_factory=FakeLive)
+    await c.start()
+    try:
+        ws = await connect(f"ws://127.0.0.1:{c.cfg.link.port}")
+        await ws.send(json.dumps({"type": "hello", "payload": {"token": c.link.token, "client": "cli"}}))
+        cli = Face(ws)
+        await cli.wait("hello.ok")
+        await cli.send("talk.start")
+        r = await cli.wait("talk.state")
+        assert r["ok"] and r["live"] and c.live is not None and len(started) == 1
+        await cli.send("talk.stop")
+        r = await cli.wait("talk.state", lambda p: not p["live"])
+        assert r["ok"] and c.live is None
+        c.dev.set_mic_muted(True)
+        await cli.send("talk.start")
+        r = await cli.wait("talk.state", lambda p: p.get("code") == "MIC_MUTED")
+        assert not r["ok"] and len(started) == 1
+    finally:
+        await c.stop()
