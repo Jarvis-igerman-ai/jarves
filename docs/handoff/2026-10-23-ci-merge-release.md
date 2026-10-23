@@ -61,4 +61,11 @@
   them text by text (tried on #92 and #80: resolved, no clash, every text kept). #80 had re-indented both files, which
   rewrote ~3900 lines and clashed with every PR that added a text. The `test_web_chat` hang was a real busy-flag race in
   `chat_engine.py`, fixed by #95 (a helper agent found the same fix; dropped here). Declined: smoke jobs 4 -> 2
-  (isolation by design, a test asserts it). Not verified: the draft gating on a real draft PR (first one after merge).
+  (isolation by design, a test asserts it).
+- Draft gating verified live on #99 itself. The first two draft runs showed that GitHub never cancels an `always()`
+  job (neither the job nor a step in it): the check ran its 90 s sleep and ended red. `ci-ok` now runs
+  `if: !cancelled()`: it still runs after failed needs (red), and a cancelled run ends it cancelled, never skipped
+  (failure-summary in every earlier cancelled run). Run 40015162428: draft, 3 jobs, `CI result` cancelled after 21 s.
+  This also ends the red `CI result` on every superseded PR run (a false "CI failed" wake for agents). The
+  translation conflict with #92 on this PR was resolved with `catalog_add.py --resolve` (no clash). Not seen live: a
+  draft run cancelled before `ci-ok` starts (inferred from failure-summary: cancelled, not skipped).
