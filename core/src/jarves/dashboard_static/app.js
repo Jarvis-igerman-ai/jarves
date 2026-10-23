@@ -76,7 +76,7 @@ document.getElementById("themeBtn").addEventListener("click", () => {
 // ---------------------------------------------------------------- overview (side bar)
 async function refreshOverview() {
   try {
-    overview = await api("/api/overview");
+    overview = await api("/api/overview" + (window.JARVES_PAGE ? "?page=" + encodeURIComponent(window.JARVES_PAGE) : ""));
     const dot = document.getElementById("coreDot");
     dot.className = "dot " + (overview.live ? "live" : overview.core.state === "ready" ? "ok"
       : overview.core.state === "degraded" ? "bad" : "");
@@ -503,6 +503,7 @@ async function route(refresh) {
     else if (page === "settings") await pageSettings();
     else await pageConversations();
   } catch (e) { if (refresh !== true) fail(e); }
+  window.JARVES_PAGE = navPage;       // sent with the next /api/overview poll (page id only: lets JARVES explain "this page")
 }
 window.addEventListener("hashchange", () => route());
 // after every deferred script (pages.js) has run
