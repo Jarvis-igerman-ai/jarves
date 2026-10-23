@@ -28,8 +28,10 @@ def test_no_bare_ack_word_in_instructions_or_canned_phrases():
     spoken = [front_instructions(), live_mod.PROGRESS_NOTE, live_mod.PROGRESS_NOTE_AGAIN, live_mod.CONFIRM_NOTE]
     lv = LiveVoice(SkillRegistry(), lambda: "backend", greeting="שלום!")
     spoken.append(lv.session_config()["input"][0]["content"][0]["text"])
+    from jarves import phrases
+    banned = phrases.banned_list_for_prompt()         # the prompt lists the banned words on purpose (fix/voice-behaviour)
     for text in spoken:
-        assert not BARE_ACK.search(text), text
+        assert not BARE_ACK.search(text.replace(banned, "")), text
     # every Hebrew string the Core can say or hand to the model (skills results, notes, brain prompts)
     for rel in ("voice/live.py", "app.py", "brain.py", "chatgpt_brain.py", "skills/music.py", "skills/builtin.py"):
         for lit in _hebrew_literals(SRC / rel):
