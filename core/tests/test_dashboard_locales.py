@@ -21,10 +21,11 @@ COMPLETE = {"he"}                   # locales that must cover every key (others 
 
 
 def catalog(code: str) -> dict:
-    src = (LOCALES / f"{code}.js").read_text(encoding="utf-8").replace("\r\n", "\n")   # CRLF checkouts
-    head, body = src.split("=\n", 1)
+    """The catalog the dashboard gets: en.js / he.js plus the per-PR parts in locales/parts (locale_parts.py)."""
+    from jarves import locale_parts
+    head, _ = locale_parts.load_base(code)
     assert f"(window.JARVES_CATALOGS = window.JARVES_CATALOGS || {{}}).{code}" in head
-    return json.loads(body.strip().rstrip(";"))
+    return locale_parts.catalog(code)
 
 
 def codes() -> list[str]:
@@ -236,23 +237,90 @@ def test_catalog_texts_stay_sorted_so_parallel_prs_do_not_collide():
         assert text == catalog_add.render(*catalog_add.load(code)), f"{code}.js is not in the canonical layout: run catalog_add.py --sort"
 
 
-def test_catalog_add_inserts_in_sorted_place_and_keeps_rule_order(tmp_path, monkeypatch):
-    import shutil
+def _tools():
     import sys
     sys.path.insert(0, str(LOCALES.parents[3] / "tools"))
     import catalog_add
+    return catalog_add
+
+
+def _copy_catalogs(tmp_path, monkeypatch):
+    import shutil
+    catalog_add = _tools()
     for code in ("en", "he"):
         shutil.copy(LOCALES / f"{code}.js", tmp_path / f"{code}.js")
     monkeypatch.setattr(catalog_add, "LOCALES", tmp_path)
-    catalog_add.save("en", *catalog_add.load("en"))
-    catalog_add.save("he", *catalog_add.load("he"))
+    return catalog_add
+
+
+def test_catalog_add_writes_a_part_file_and_leaves_en_and_he_alone(tmp_path, monkeypatch):
+    """Parallel PRs: new texts go to their own parts/<date>-<topic>.json, so en.js / he.js are not edited."""
+    from jarves import locale_parts
+    catalog_add = _copy_catalogs(tmp_path, monkeypatch)
+    before = {c: (tmp_path / f"{c}.js").read_bytes() for c in ("en", "he")}
     rules_before = catalog_add.load("he")[1].get("rules", [])
-    catalog_add.add({"Aaa first text #89": "טקסט ראשון", "zzz last text #89": "טקסט אחרון"}, [["^x89$", "x"]])
-    for code in ("en", "he"):
-        keys = list(catalog_add.load(code)[1]["dict"])
-        assert keys == sorted(keys, key=catalog_add.sort_key)
-    he = catalog_add.load("he")[1]
+    assert catalog_add.add({"zzz last text #89": "טקסט אחרון", "Aaa first text #89": "טקסט ראשון"},
+                           [["^x89$", "x"]], part="my topic") == (2, 1)
+    assert {c: (tmp_path / f"{c}.js").read_bytes() for c in ("en", "he")} == before
+    (part,) = sorted((tmp_path / "parts").glob("*-my-topic.json"))
+    assert list(json.loads(part.read_text(encoding="utf-8"))["dict"]) == ["Aaa first text #89", "zzz last text #89"]
+    en, he = locale_parts.catalog("en", tmp_path), locale_parts.catalog("he", tmp_path)
+    assert en["dict"]["zzz last text #89"] == "zzz last text #89" and he["dict"]["Aaa first text #89"] == "טקסט ראשון"
     assert he["rules"][:len(rules_before)] == rules_before and he["rules"][-1] == ["^x89$", "x"]   # rules: order kept
+    assert catalog_add.add({"zzz last text #89": "טקסט אחרון"}, part="my topic") == (0, 0)           # same part, no change
+    assert len(list((tmp_path / "parts").glob("*.json"))) == 1
+
+
+def test_catalog_add_changes_a_text_where_it_lives(tmp_path, monkeypatch):
+    from jarves import locale_parts
+    catalog_add = _copy_catalogs(tmp_path, monkeypatch)
+    catalog_add.add({"part text one": "אחד"}, part="first")
+    base_key = next(k for k in catalog_add.load("he")[1]["dict"] if k.strip())
+    catalog_add.add({"part text one": "אחד חדש", base_key: "שונה #89"}, part="second")
+    assert list((tmp_path / "parts").glob("*-second.json")) == []              # nothing new: both changed in place
+    assert locale_parts.catalog("he", tmp_path)["dict"]["part text one"] == "אחד חדש"
+    assert catalog_add.load("he")[1]["dict"][base_key] == "שונה #89"
+
+
+def test_catalog_fold_moves_parts_into_the_sorted_base(tmp_path, monkeypatch):
+    from jarves import locale_parts
+    catalog_add = _copy_catalogs(tmp_path, monkeypatch)
+    catalog_add.add({"Aaa folded #89": "מקופל"}, [["^f89$", "f"]], part="a")
+    catalog_add.add({"Zzz folded #89": "מקופל ב"}, part="b")
+    merged = {c: locale_parts.catalog(c, tmp_path) for c in ("en", "he")}
+    assert catalog_add.fold() == 2 and not list((tmp_path / "parts").glob("*.json"))
+    for code in ("en", "he"):
+        assert catalog_add.load(code)[1] == {**merged[code], "dict": dict(sorted(
+            merged[code]["dict"].items(), key=lambda kv: catalog_add.sort_key(kv[0])))}
+        assert (tmp_path / f"{code}.js").read_text(encoding="utf-8") == catalog_add.render(*catalog_add.load(code))
+
+
+def test_parts_are_served_with_the_catalog(tmp_path, monkeypatch):
+    """The browser still loads locales/he.js: the server sends the base catalog with the parts merged in."""
+    from jarves import locale_parts
+    catalog_add = _copy_catalogs(tmp_path, monkeypatch)
+    catalog_add.add({"Served part text #89": "טקסט מוגש"}, part="served")
+    for code in ("en", "he"):
+        js = locale_parts.render_js(code, tmp_path).decode("utf-8")
+        head, body = js.split("=\n", 1)
+        assert f".{code}" in head and json.loads(body.strip().rstrip(";"))["dict"]["Served part text #89"]
+
+
+def test_part_files_are_well_formed_and_every_text_has_one_home():
+    """A part is {"dict": {English: Hebrew}, "rules": [...]}; a text lives in ONE place (base or one part)."""
+    from jarves import locale_parts
+    base = {c: locale_parts.load_base(c)[1] for c in ("en", "he")}
+    seen: dict[str, str] = {}
+    for name, part in locale_parts.load_parts():
+        assert set(part) <= {"dict", "rules"} and re.fullmatch(r"\d{4}-\d{2}-\d{2}-[a-z0-9-]+", name), name
+        for k, v in part.get("dict", {}).items():
+            assert isinstance(v, str) and v.strip(), (name, k)
+            assert k not in base["en"]["dict"] and k not in seen, f"{k!r} is in {name} and also in {seen.get(k, 'en.js')}"
+            seen[k] = name
+        for pat, to in part.get("rules", []):
+            groups = re.compile(pat).groups
+            assert all(int(n) <= groups for n in re.findall(r"\$(\d)", to)), (name, pat)
+            assert pat not in {p for p, _ in base["he"].get("rules", [])}, (name, pat)
 
 
 def test_catalog_merge3_keeps_both_sides_and_reports_only_real_clashes():
@@ -288,7 +356,10 @@ def test_catalog_resolve_merges_a_real_git_conflict(tmp_path, monkeypatch):
     monkeypatch.setattr(catalog_add, "LOCALES", tmp_path)
     git("add", "."), git("commit", "-q", "-m", "base")
     git("checkout", "-q", "-b", "pr")
-    catalog_add.add({"aaa pr text #89": "טקסט של ה-PR"})
+    for code in ("en", "he"):                       # a PR that still edits the base files (older PRs, hand edits)
+        head, cat = catalog_add.load(code)
+        cat["dict"]["aaa pr text #89"] = "טקסט של ה-PR" if code == "he" else "aaa pr text #89"
+        catalog_add.save(code, head, cat)
     git("commit", "-qam", "pr adds a text")
     git("checkout", "-q", "main")
     for code in ("en", "he"):                       # main re-formats the whole file (the layout a PR once used)

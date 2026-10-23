@@ -85,11 +85,12 @@ def test_every_doc_is_listed_in_doc_map():
     """docs/DOC_MAP.md is the single index: every Markdown file under docs/ must be linked from it."""
     doc_map = ROOT / "docs" / "DOC_MAP.md"
     listed = _resolved_links(doc_map)
-    handoff = ROOT / "docs" / "handoff"
-    notes_covered = (handoff / "README.md").resolve() in listed     # one note per task: covered by the folder's README row
+    # one dated file per task / report: covered by the folder's README row (so a PR adding one does not edit DOC_MAP)
+    covered = [d.resolve() for d in (ROOT / "docs" / "handoff", ROOT / "docs" / "reports")
+               if (d / "README.md").resolve() in listed]
     missing = [str(p.relative_to(ROOT)) for p in sorted((ROOT / "docs").rglob("*.md"))
                if p.resolve() != doc_map.resolve() and p.resolve() not in listed
-               and not (notes_covered and p.parent.resolve() == handoff.resolve())]
+               and p.parent.resolve() not in covered]
     assert not missing, f"add these to docs/DOC_MAP.md: {missing}"
 
 
@@ -99,6 +100,13 @@ def test_handoff_notes_are_one_dated_file_per_task():
     notes = [p.name for p in (ROOT / "docs" / "handoff").glob("*.md") if p.name != "README.md"]
     bad = [n for n in notes if not re.fullmatch(r"\d{4}-\d{2}-\d{2}-[a-z0-9][a-z0-9-]*\.md", n)]
     assert notes and not bad, f"name handoff notes docs/handoff/<YYYY-MM-DD>-<topic>.md: {bad}"
+
+
+def test_reports_are_one_dated_file_each():
+    import re
+    reports = [p.name for p in (ROOT / "docs" / "reports").glob("*.md") if p.name != "README.md"]
+    bad = [n for n in reports if not re.fullmatch(r"\d{4}-\d{2}-\d{2}-[a-z0-9][a-z0-9-]*\.md", n)]
+    assert not bad, f"name reports docs/reports/<YYYY-MM-DD>-<topic>.md: {bad}"
 
 
 def test_doc_map_is_the_entry_point():

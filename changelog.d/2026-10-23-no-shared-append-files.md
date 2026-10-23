@@ -1,0 +1,1 @@
+- Changed: developer workflow, nothing changes for users. New dashboard texts go to `locales/parts/*.json` and new CHANGELOG lines to `changelog.d/*.md` (one new file per change), so two pull requests no longer conflict in `en.js`, `he.js` or `CHANGELOG.md`.

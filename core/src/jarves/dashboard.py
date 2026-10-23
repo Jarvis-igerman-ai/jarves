@@ -27,12 +27,13 @@ import re
 import secrets
 import threading
 import time
+import zlib
 from datetime import datetime
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, unquote, urlsplit
 
-from . import __version__, config_edit, diagnose, locales, logs, logview, mobile
+from . import __version__, config_edit, diagnose, locale_parts, locales, logs, logview, mobile, plugin_registry
 from .dashboard_auth import (DEVICE_COOKIE, device_body_ok, DEVICE_IDLE_S, LAN_PORT, PUBLIC_PATHS, Access, client_allowed,
                              is_loopback, lan_ip, parse_cookies)
 from .health import read_snapshot
@@ -62,7 +63,7 @@ PLUGIN_MODULES = ("jarves.workspace", "jarves.curator", "jarves.memory", "jarves
                   "jarves.diag.service",                                           # SW-V4 O: Health page
                   "jarves.selfspeed", "jarves.wizard",
                   "jarves.chat_service", "jarves.chat_engine",                     # terminal chat + V5 web Chat page API
-                  "jarves.issue_registry")                                         # Bug reports page (issues registry)
+                  "jarves.issue_registry") + plugin_registry.names("dashboard")    # Bug reports page; then plugins.d/*.toml
 MEMORY_UNDO_KEEP = 30
 MEMORY_UNDO_TTL_S = 24 * 3600                        # the undo button works for 24 h, then the entry is purged
 UNDO_PURGE_EVERY_S = 3600
@@ -805,12 +806,13 @@ class Handler(BaseHTTPRequestHandler):
         # of JS/CSS, 30+ requests). `no-cache` = the browser keeps them but asks first, so an update shows at once.
         try:
             st = p.stat()
-            key = (st.st_mtime_ns, st.st_size)
+            code = p.stem if p.parent == STATIC / "locales" and p.suffix == ".js" else None   # base catalog + parts
+            key = (st.st_mtime_ns, st.st_size, locale_parts.parts_stamp() if code else ())
             hit = _STATIC_CACHE.get(str(p))
             if hit is None or hit[0] != key:
-                raw = p.read_bytes()
+                raw = locale_parts.render_js(code) if code else p.read_bytes()
                 gz = gzip.compress(raw, 6, mtime=0) if len(raw) > 600 and p.suffix in _TYPES else None
-                hit = _STATIC_CACHE[str(p)] = (key, '"%x-%x"' % key, raw, gz)
+                hit = _STATIC_CACHE[str(p)] = (key, '"%x-%x-%x"' % (key[0], key[1], zlib.crc32(repr(key[2]).encode())), raw, gz)
         except OSError:
             return self._send(404, b"not found", "text/plain")
         _, etag, raw, gz = hit

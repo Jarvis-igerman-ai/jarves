@@ -347,6 +347,29 @@ def test_every_feature_has_a_cli_surface_or_a_dashboard_only_marker():
         _check_marker("feature " + fid, ref)
 
 
+def test_a_guide_declares_its_own_parity_entries(tmp_path):
+    """A new feature puts its CLI / dashboard marker in its guide, not in the shared tables (they conflicted)."""
+    (tmp_path / "a.toml").write_text('[parity.features]\nfoo = "timers"\nbar = ["dashboard", "a page shows it"]\n'
+                                     '[parity.tool_groups]\nfoo = ["voice", "only inside a conversation"]\n', encoding="utf-8")
+    (tmp_path / "b.toml").write_text('title_en = "no parity here"\n', encoding="utf-8")
+    feats, groups = cli_parity._guide_parity(tmp_path)
+    assert feats == {"foo": "timers", "bar": ("dashboard", "a page shows it")}
+    assert groups == {"foo": ("voice", "only inside a conversation")}
+    for what, ref in [*feats.items(), *groups.items()]:
+        _check_marker(what, ref)
+
+
+def test_guide_parity_entries_do_not_repeat_the_shared_tables():
+    """One home per entry: a guide's [parity] must not also be listed (maybe differently) in the dicts of cli_parity."""
+    import inspect
+    src = inspect.getsource(cli_parity)
+    table = src[src.index("FEATURES: dict"):src.index("def _guide_parity")]
+    feats, groups = cli_parity._guide_parity()
+    for kind, found in (("features", feats), ("tool_groups", groups)):
+        both = [k for k in found if f'"{k}":' in table.split("TOOL_GROUPS")[0 if kind == "features" else 1]]
+        assert not both, f"[parity.{kind}] repeats the table in cli_parity.py: {both}"
+
+
 def _check_marker(what: str, ref) -> None:
     if isinstance(ref, tuple):
         kind, reason = ref
