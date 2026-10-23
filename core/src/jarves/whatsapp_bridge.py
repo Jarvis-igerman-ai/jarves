@@ -51,6 +51,7 @@ TAINT_LABEL = ("הודעת וואטסאפ", "a WhatsApp message")
 
 HE = {   # Hebrew answers for bridge codes (fixed strings)
     "WA_BRIDGE_DOWN": "גשר הוואטסאפ לא פועל. במחשב: jarvis whatsapp start.",
+    "WA_NOT_INSTALLED": "רכיב הגשר של וואטסאפ לא מותקן במחשב הזה. מתקינים מחדש את JARVES, או בונים אותו מהקוד (scripts/build_whatsapp_bridge.ps1).",
     "WA_NOT_SET_UP": "וואטסאפ עוד לא מחובר. במחשב: jarvis whatsapp link.",
     "WA_UNAUTHORIZED": "הגשר לא מקבל את המפתח המקומי. במחשב: jarvis whatsapp start.",
     "WA_FORBIDDEN": "את זה משנים רק במחשב (jarvis whatsapp או לוח הבקרה).",
@@ -210,6 +211,19 @@ def bridge_command(home: Path) -> list[str] | None:
     return None
 
 
+NOT_INSTALLED_EN = ("The WhatsApp bridge program is not installed on this computer, so WhatsApp cannot be linked yet. "
+                    "Next step: reinstall JARVES (the installer includes the bridge), or, from a source checkout, "
+                    "build it with scripts/build_whatsapp_bridge.ps1 (needs Go 1.27.0).")
+NOT_INSTALLED_HE = ("רכיב הגשר של וואטסאפ לא מותקן במחשב הזה, ולכן אי אפשר לקשר וואטסאפ עדיין. הצעד הבא: להתקין מחדש "
+                    "את JARVES (ההתקנה כוללת את הגשר), או מתוך קוד המקור לבנות אותו עם scripts/build_whatsapp_bridge.ps1 "
+                    "(דורש Go 1.27.0).")
+
+
+def bridge_installed(home: Path) -> bool:
+    """True when a bridge program exists to start (read-only file check; nothing is started)."""
+    return bridge_command(home) is not None
+
+
 def start_bridge(home: Path, *, wait_s: float = 20.0) -> tuple[bool, str]:
     """Start the bridge process if it is not answering (detached, no window, logs in its own dir). Waits until its
     /status answers (event: the endpoint file + a successful status call), at most wait_s."""
@@ -217,7 +231,7 @@ def start_bridge(home: Path, *, wait_s: float = 20.0) -> tuple[bool, str]:
         return True, "already running"
     cmd = bridge_command(home)
     if cmd is None:
-        return False, "no bridge binary: run scripts/build_whatsapp_bridge.ps1 (or reinstall JARVES)"
+        return False, NOT_INSTALLED_EN
     d = bridge_dir(home)
     d.mkdir(parents=True, exist_ok=True)
     (d / "endpoint.json").unlink(missing_ok=True)

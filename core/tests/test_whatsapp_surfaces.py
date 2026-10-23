@@ -168,3 +168,46 @@ def test_instruction_lines_follow_the_switch(home):
     live = SimpleNamespace(session_config=lambda: {"instructions": "live"})
     wab.attach_live(live, SimpleNamespace(active=lambda fid: True))
     assert "WhatsApp" in live.session_config()["instructions"]
+
+
+# ---- no bridge program: say so plainly, disable Link/Start, one shared setup flow (issue #17)
+def test_missing_bridge_program_is_reported_everywhere(home, capsys, monkeypatch):
+    monkeypatch.setattr(wab, "bridge_command", lambda h: None)
+    monkeypatch.setattr(wab, "status_or_none", lambda h: None)              # nothing running either
+    assert wab.bridge_installed(home) is False
+    dash = dashboard.Dashboard(home, Config()).start()
+    try:
+        r, body = req(dash, "GET", "/api/whatsapp")
+        d = json.loads(body)
+        assert d["bridge_installed"] is False and d["status"] is None
+        assert "reinstall JARVES" in d["not_installed"]["en"] and d["not_installed"]["he"]
+        h = {"X-Jarves": "1"}
+        r, body = req(dash, "POST", "/api/whatsapp/setup", headers=h, body={})
+        s = json.loads(body)
+        assert r.status == 200 and s["step"] == "not_installed" and s["ok"] is False and s["message_he"]
+        for path in ("start", "link"):
+            r, body = req(dash, "POST", f"/api/whatsapp/{path}", headers=h, body={})
+            assert r.status == 503 and json.loads(body)["code"] == "WA_NOT_INSTALLED"
+        r, body = req(dash, "POST", "/api/connect/run", headers=h, body={"id": "whatsapp"})
+        c = json.loads(body)
+        assert r.status == 200 and c["started"] is False and "reinstall JARVES" in c["message_en"]
+    finally:
+        dash.stop()
+    rc, out = run(capsys, "status", "--json")
+    assert json.loads(out)["bridge_installed"] is False
+    rc, out = run(capsys, "setup")
+    assert rc == 1 and "not installed" in out
+    js = (dashboard.STATIC / "whatsapp.js").read_text(encoding="utf-8")
+    assert "cantRun" in js and "bridge_installed" in js and '"setup"' in js
+
+
+def test_setup_flow_starts_links_and_never_scans_for_you(dash, bridge, home):
+    h = {"X-Jarves": "1"}
+    mode_before = bridge.policy["mode"]
+    r, body = req(dash, "POST", "/api/whatsapp/setup", headers=h, body={})
+    s = json.loads(body)
+    assert r.status == 200 and s["ok"] is True and s["step"] in ("awaiting_scan", "already_linked")
+    r, body = req(dash, "POST", "/api/connect/run", headers=h, body={"id": "whatsapp"})
+    c = json.loads(body)
+    assert r.status == 200 and c["started"] is True and c["open"] == "#/whatsapp"
+    assert bridge.policy["mode"] == mode_before                             # setup itself changes no mode

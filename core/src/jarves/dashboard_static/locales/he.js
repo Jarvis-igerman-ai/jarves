@@ -1878,7 +1878,12 @@
   "The switch itself takes no pictures and makes no cloud calls.": "המתג עצמו לא מצלם ולא מפעיל שירות ענן.",
   "No pictures are sent or kept unless you ask.": "תמונות לא נשלחות ולא נשמרות בלי שתבקשו.",
   "First turn the camera on (guide \"Camera\").": "קודם הפעילו את המצלמה (מדריך \"מצלמה\").",
-  "Leave the legacy switch off. Use the Camera guide for requested captures.": "השאירו את המתג הישן כבוי. השתמשו במדריך המצלמה לצילום לפי בקשה."
+  "Leave the legacy switch off. Use the Camera guide for requested captures.": "השאירו את המתג הישן כבוי. השתמשו במדריך המצלמה לצילום לפי בקשה.",
+  "The bridge program is not installed": "רכיב הגשר לא מותקן",
+  "Set up WhatsApp in one go": "הגדרת וואטסאפ בלחיצה אחת",
+  "Starts the bridge if needed and shows a QR code. You scan it on your phone, then you can switch on read-only. No message is sent.": "מפעיל את הגשר במידת הצורך ומציג קוד QR. את הסריקה בטלפון עושים אתם, ואחריה אפשר להפעיל קריאה בלבד. לא נשלחת שום הודעה.",
+  "Set up WhatsApp": "הגדרת וואטסאפ",
+  "Switch on read-only mode now? JARVES will read and never send.": "להפעיל עכשיו מצב קריאה בלבד? ג'ארביס יקרא ולא ישלח."
  },
  "rules": [
   [
