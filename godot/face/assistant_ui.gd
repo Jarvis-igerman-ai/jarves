@@ -180,6 +180,26 @@ func _make_theme() -> Theme:
 	return make_ui_theme(UI_FONT)
 
 
+## Manage tree: group -> [label, dashboard page]. Each leaf opens that page of the local dashboard in the browser
+## (the Core's `ui.open_dashboard`), so the panel stays small and the full controls stay in one place.
+const MANAGE := [
+	["Talk & memory", [["Chat", "#/chat"], ["Approvals", "#/approvals"], ["Conversations", "#/conversations"],
+		["Memory", "#/memory"], ["Search conversations", "#/recall"]]],
+	["Everyday", [["Calendar", "#/calendar"], ["Timers & alarms", "#/timers"], ["Lists", "#/lists"],
+		["Goals", "#/goals"], ["Notes", "#/notes"], ["Scheduled jobs", "#/jobs"]]],
+	["Assistant", [["Name & voice", "#/identity"], ["Appearance", "#/appearance"], ["Skills", "#/skills"],
+		["Features & switches", "#/features"], ["Guides", "#/guides"]]],
+	["Connections", [["Connections", "#/connections"], ["Phone", "#/phone"], ["Devices & access", "#/devices"],
+		["WhatsApp", "#/whatsapp"]]],
+	["Health & costs", [["Health & speed", "#/speed"], ["Issues", "#/issues"], ["Costs", "#/costs"],
+		["Usage & limits", "#/usage"], ["System log", "#/logs"]]],
+	["System", [["Settings", "#/settings"], ["Updates", "#/updates"], ["Backup", "#/backup"],
+		["Setup and tour", "#/setup"]]],
+]
+var leaf_btns: Array = []         # buttons that need the Core link
+var options_hint: Label
+
+
 ## Settings as a tree (like phone settings): a short list of rows; each row opens one small page with a Back row.
 func _build_menu() -> void:
 	for w in [activity, who, caption]:
@@ -188,31 +208,56 @@ func _build_menu() -> void:
 		w.get_parent().remove_child(w)
 		page.add_child(w)
 	var root := _page("root", "")
-	for spec in [["Status", "status"], ["Microphone", "mic"], ["Dashboard", "dashboard"], ["Help", "help"]]:
-		var row := Button.new()
-		row.text = "%s    ›" % spec[0]
-		row.alignment = HORIZONTAL_ALIGNMENT_LEFT
-		row.pressed.connect(_open_page.bind(spec[1]))
-		root.add_child(row)
+	_row(root, "Status", "status")
+	_row(root, "Microphone", "mic")
+	_row(root, "Manage", "manage")
+	_row(root, "Help", "help")
 	inspector_chk.get_parent().remove_child(inspector_chk)
 	root.add_child(inspector_chk)
+	dash_btn.get_parent().remove_child(dash_btn)
+	dash_btn.text = "Open full dashboard  ↗"
+	root.add_child(dash_btn)
 	take.call(status_lbl, _page("status", "Status"))
 	var mic := _page("mic", "Microphone")
 	take.call(mute_chk, mic)
 	take.call(level_bar, mic)
-	take.call(dash_btn, _page("dashboard", "Dashboard"))
 	take.call(legend_lbl, _page("help", "What the dot means"))
+	var manage := _page("manage", "Manage")
+	for g in MANAGE:
+		var key := "m_" + String(g[0])
+		_row(manage, g[0], key)
+		var pg := _page(key, g[0], "manage")
+		for leaf in g[1]:
+			var b := Button.new()
+			b.text = "%s    ↗" % leaf[0]
+			b.alignment = HORIZONTAL_ALIGNMENT_LEFT
+			b.pressed.connect(func(): link.send("ui.open_dashboard", {"page": leaf[1]}))
+			leaf_btns.append(b)
+			pg.add_child(b)
+	options_hint = Label.new()
+	options_hint.modulate = Color(1, 1, 1, 0.6)
+	options_hint.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	options_hint.custom_minimum_size = Vector2(400, 0)
+	options_box.add_child(options_hint)
 	_open_page("root")
 
 
-func _page(key: String, title: String) -> VBoxContainer:
+func _row(parent: VBoxContainer, text: String, key: String) -> void:
+	var row := Button.new()
+	row.text = "%s    ›" % text
+	row.alignment = HORIZONTAL_ALIGNMENT_LEFT
+	row.pressed.connect(_open_page.bind(key))
+	parent.add_child(row)
+
+
+func _page(key: String, title: String, parent := "root") -> VBoxContainer:
 	var pg := VBoxContainer.new()
 	pg.add_theme_constant_override("separation", 8)
 	if key != "root":
 		var back := Button.new()
 		back.text = "‹    Back"
 		back.alignment = HORIZONTAL_ALIGNMENT_LEFT
-		back.pressed.connect(_open_page.bind("root"))
+		back.pressed.connect(_open_page.bind(parent))
 		pg.add_child(back)
 		var t := Label.new()
 		t.text = title
@@ -227,6 +272,8 @@ func _page(key: String, title: String) -> VBoxContainer:
 func _open_page(key: String) -> void:
 	for k in pages:
 		pages[k].visible = k == key
+	if options_hint:
+		options_hint.text = ""
 
 
 func _on_options(on: bool) -> void:
@@ -305,6 +352,8 @@ func _close_desktop() -> void:
 func _set_controls(on: bool) -> void:
 	mute_chk.disabled = not on
 	dash_btn.disabled = not on
+	for b in leaf_btns:
+		b.disabled = not on
 
 
 func _answer(ok: bool) -> void:
@@ -447,6 +496,8 @@ func _on_message(t: String, p: Dictionary) -> void:
 			var where := _str(p.get("url")).substr(0, 200)
 			var opened: bool = typeof(p.get("browser")) == TYPE_BOOL and p.get("browser")
 			caption.text = "Dashboard opened in your browser" if opened else "Dashboard running at " + where
+			if options_hint:
+				options_hint.text = caption.text
 
 
 const TEST_BANNER := "TEST PROFILE · not your real data"
@@ -547,6 +598,7 @@ func _show_status(p: Dictionary) -> void:
 			# one short line per problem, with what to do; full detail stays in `jarvis status`
 			var act: String = str(c.get("action", ""))
 			lines.append("- %s: %s" % [FRIENDLY.get(k, k), act if act != "" else str(c.get("detail", "")).substr(0, 60)])
+	lines.append("Today: %d AI requests · %s voice min" % [int(_num(p.get("ai_requests_today"))), str(_num(p.get("voice_minutes_today")))])
 	status_lbl.text = "\n".join(lines)
 	mute_chk.set_pressed_no_signal(bool(p.get("mic_muted", false)))
 
