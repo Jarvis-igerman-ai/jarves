@@ -1949,6 +1949,7 @@
   "yours": "yours",
   "More agents": "More agents",
   "Fewer agents": "Fewer agents",
-  "Stop the agent": "Stop the agent"
+  "Stop the agent": "Stop the agent",
+  "Conversation issues": "Conversation issues"
  }
 };

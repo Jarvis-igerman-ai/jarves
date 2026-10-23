@@ -1949,7 +1949,8 @@
   "yours": "שלך",
   "More agents": "עוד סוכנים",
   "Fewer agents": "פחות סוכנים",
-  "Stop the agent": "עצירת הסוכן"
+  "Stop the agent": "עצירת הסוכן",
+  "Conversation issues": "בעיות בשיחות"
  },
  "rules": [
   [
