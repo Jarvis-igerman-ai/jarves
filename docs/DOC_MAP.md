@@ -28,7 +28,7 @@ Execution authority: [NOW](NOW.md) (the only active brief) with [AGENTS](../AGEN
 | Self-test and speed test | `jarvis selftest`, `jarvis speedtest`; findings are triaged for each release (see [CLAUDE.md](../CLAUDE.md)) | Agents and owner |
 | Emulated phone test (headless browser as the phone, V5) | PR "Phone e2e" (#51, open) adds it; until merged use the HTTP harness in `core/tests/test_mobile_*.py` | CI |
 | Manual sheets per version | V3: [FULL_TEST_PLAN](plans/FULL_TEST_PLAN.md) pass E. V4: [V4 package, owner script (section 7)](JARVES_SW_V4_WORK_PACKAGE.md#7-testing--manual-owner-script) and agent script (section 8), [INSTALL_TEST](INSTALL_TEST.md), `docs/reviews/MANUAL_TEST_4.0.0.md` (PR #46, not merged). V5: [SWV5_ACCEPTANCE](reviews/SWV5_ACCEPTANCE.md) (real Android phone) | Owner |
-| Release sign-off | `jarvis release signoff --version X --row ID --result pass\|fail\|blocked`, then `--finish`; described in `docs/RELEASING.md` (arrives with PR #44, open). Until then the checklist is [SWV4_RELEASE_CHECKLIST](reviews/SWV4_RELEASE_CHECKLIST.md) | Owner records rows, agents prepare the evidence |
+| Release sign-off | `jarvis release signoff --version X --row ID --result pass\|fail\|blocked`, then `--finish`; described in [RELEASING](RELEASING.md) ("Stable release, step by step"); per version a checklist `reviews/RELEASE_CHECKLIST_<version>.md` and a sheet `reviews/MANUAL_TEST_<version>.md` (4.0.0 used [SWV4_RELEASE_CHECKLIST](reviews/SWV4_RELEASE_CHECKLIST.md)) | Owner records rows, agents prepare the evidence |
 | Bug triage before a release (4.1 and 5.0 on) | `docs/reviews/*BUG_TABLE*.md`, open issues on igalgerman/jarves, selftest/speedtest findings; no open P0-P2 | Release agent; owner decides P3 |
 
 ## 3. Release and repository process
@@ -39,6 +39,7 @@ Execution authority: [NOW](NOW.md) (the only active brief) with [AGENTS](../AGEN
 | [GITHUB_FLOW](GITHUB_FLOW.md) | Branch, PR, `automerge` label, post-merge package | general | current | itself |
 | [RELEASE_NOTES_4.0](RELEASE_NOTES_4.0.md) | What V4 changed for users | V4 | current | itself; [CHANGELOG](../CHANGELOG.md) is the short per-version list |
 | [SWV4_RELEASE_CHECKLIST](reviews/SWV4_RELEASE_CHECKLIST.md) | 4.0.0 checklist state and evidence | V4 | current | [V4 package section 10](JARVES_SW_V4_WORK_PACKAGE.md#10-release-checklist) defines the rows |
+| [RELEASE_CHECKLIST_4.0.1](reviews/RELEASE_CHECKLIST_4.0.1.md) | 4.0.1 stable release checklist (read by the release gate) | 4.0.1 | current | [RELEASING](RELEASING.md) |
 | [ENGINEERING_REVIEW_GATES](ENGINEERING_REVIEW_GATES.md) | Standing review and challenge gates | general | current | itself |
 | [CI_PERFORMANCE](CI_PERFORMANCE.md) | CI speed, shards and the fast release path | general | current | [RELEASING](RELEASING.md) |
 | [RELEASING](RELEASING.md) | How a release is built, signed and published | general | current | [CI_PERFORMANCE](CI_PERFORMANCE.md) |
@@ -134,6 +135,7 @@ Reports and bug tables are evidence of a past run, not instructions. A package's
 | [plans/WHATSAPP_GREENAPI_FLOWAPI_EVAL](plans/WHATSAPP_GREENAPI_FLOWAPI_EVAL.md) | GREEN-API and Flow API evaluation for WhatsApp (research only) | V5+ | research | [plans/WHATSAPP_REAL_ACCESS](plans/WHATSAPP_REAL_ACCESS.md) |
 | [reviews/BUG_TABLE_4_1](reviews/BUG_TABLE_4_1.md) | Bug table 4.1, first sweep | 4.0.1 | current | [BUGFIX_LANE](BUGFIX_LANE.md) |
 | [reviews/MANUAL_TEST_4.0.0](reviews/MANUAL_TEST_4.0.0.md) | Manual test sheet for 4.0.0 (owner) | 4.0.0 | current | [RELEASING](RELEASING.md) |
+| [reviews/MANUAL_TEST_4.0.1](reviews/MANUAL_TEST_4.0.1.md) | Manual test sheet for 4.0.1 (owner sign-off on the beta) | 4.0.1 | current | [RELEASING](RELEASING.md) |
 | [reviews/SWV4_P01_VERIFY](reviews/SWV4_P01_VERIFY.md) | Owner-assisted verification, ported from the legacy branch | V4 | historical | [MIGRATION_AUDIT](MIGRATION_AUDIT.md) |
 
 | [Windows installer #58](INSTALLER_58.md) | Installer setup, backup, rollback and measured timings | V4 | current | itself |

@@ -225,3 +225,22 @@ def test_a_later_version_needs_its_own_checklist_not_the_4_0_0_one(tmp_path):
     (rev / "RELEASE_CHECKLIST_4.0.1.md").write_text("| 1 | thing | done |\n", encoding="utf-8")
     assert gate.find_checklist(tmp_path, "4.0.1", None) == rev / "RELEASE_CHECKLIST_4.0.1.md"
     assert any("RELEASE_CHECKLIST_4.1.0.md" in p for p in _gate(tmp_path, checklist_text=None))
+
+
+def test_manual_sheet_is_one_row_per_entry_and_skips_what_the_app_cannot_show():
+    """The 4.0.1 sheet had 84 rows: every sentence of a changelog entry became a row ("See docs/x.md."), and every
+    changed guide and dashboard file had its own row although CI runs all of them. Now about 30 rows (#89)."""
+    changelog = ("## 4.0.1 (unreleased)\n"
+                 "- Added: release notes. Dashboard page Release notes in English and Hebrew. Local only, no network.\n"
+                 "- Added: project manager for git projects. Real-agent runs unverified. See docs/plans/PM.md.\n"
+                 "- Changed: CI runs the Windows tests in 3 shards.\n- Added: SECURITY.md, Dependabot, CodeQL.\n"
+                 "- Docs: release and test system plan.\n")
+    files = [f"core/src/jarves/guides/data/{g}.toml" for g in ("a", "b", "c")] + \
+            [f"core/src/jarves/dashboard_static/{p}.js" for p in ("chat", "bugs", "app")]
+    sh = sheet_tool.build_sheet("4.0.1", "win-v4.0.0.153", changelog, "", files)
+    todo = {r.id: r.todo for r in sh.rows}
+    assert sorted(todo) == ["C1", "C2", "G1", "P1"]
+    assert todo["C1"].endswith("Added: release notes. Dashboard page Release notes in English and Hebrew.")
+    assert todo["C2"].endswith("Added: project manager for git projects.")
+    assert "3 changed guide(s)" in todo["G1"] and "a, b, c" in todo["G1"]
+    assert todo["P1"].endswith("bugs, chat")                                  # app.js is the shell, not a page
