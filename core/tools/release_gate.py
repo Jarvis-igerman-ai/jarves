@@ -196,8 +196,12 @@ def gh_runs(repo: str, workflow: str, query: str) -> list[dict]:
 
 
 def find_checklist(root: Path, version: str, explicit: str | None) -> Path | None:
-    cands = [Path(explicit)] if explicit else [root / "docs" / "reviews" / f"RELEASE_CHECKLIST_{version}.md",
-                                                root / "docs" / "reviews" / "SWV4_RELEASE_CHECKLIST.md"]
+    """The checklist of THIS version. SWV4_RELEASE_CHECKLIST.md is the 4.0.0 checklist: a later version used to fall
+    back to it and inherit its stale 'needs-owner' rows instead of being told its own checklist is missing."""
+    reviews = root / "docs" / "reviews"
+    cands = [Path(explicit)] if explicit else [reviews / f"RELEASE_CHECKLIST_{version}.md"]
+    if not explicit and version == "4.0.0":
+        cands.append(reviews / "SWV4_RELEASE_CHECKLIST.md")
     return next((c for c in cands if c.is_file()), None)
 
 
@@ -210,7 +214,7 @@ def run_gate(*, tag: str, sha: str, verified_sha: str | None, build_version: str
     if verified_sha:
         problems += checks_green(checks_runs, verified_sha)
     if checklist_text is None:
-        problems.append("release checklist not found (docs/reviews/RELEASE_CHECKLIST_<version>.md)")
+        problems.append(f"release checklist not found (docs/reviews/RELEASE_CHECKLIST_{version or '<version>'}.md)")
     else:
         problems += open_p0_p2(checklist_text)
     for t in bug_tables:                                   # table text, or (file name, table text)

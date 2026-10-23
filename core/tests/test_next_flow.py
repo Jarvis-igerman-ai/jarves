@@ -40,3 +40,14 @@ def test_automations_are_off_unless_enable_next_flow():
 def test_default_pr_base_is_not_switched():
     # automerge.yml (the queue for main) still targets main
     assert "--base main" in (WF / "automerge.yml").read_text(encoding="utf-8")
+
+
+def test_main_queue_merges_green_prs_without_update_and_rerun():
+    """Owner decision 23 Oct 2026 (#89): a green PR that is only behind main merges as it is (the run on main after the
+    merge is the integration check); updating every green PR with main re-ran the full CI once per other merge (about N
+    squared runs with N parallel agent PRs). Nothing merges while main is red; conflicts and red checks still block."""
+    step = load("automerge.yml")["jobs"]["queue"]["steps"][0]["run"]
+    assert "update-branch" not in step and '"$st" = "BEHIND"' not in step
+    assert '--status completed' in step and '"$last" = "failure"' in step and "exit 0" in step   # main red: no merges
+    assert '"CONFLICTING"' in step and '"$concl" = "success"' in step and '"$bad" = "0"' in step
+    assert "needs-review" in step and "no-automerge" in step
