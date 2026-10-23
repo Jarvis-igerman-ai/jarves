@@ -1,0 +1,1 @@
+- Changed: developer workflow, nothing changes for users. A new dashboard page is registered by `pages.d/<page>.toml` (navigation link and scripts) instead of edits to `index.html`.

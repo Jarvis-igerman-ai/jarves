@@ -16,10 +16,12 @@
 
 Existing entries were NOT moved (that would conflict with every open PR); only new ones use the new places. Open PRs keep working: an old-style edit still merges, `catalog_add.py --resolve` still resolves en.js/he.js.
 
+| nav links and `<script>` tags in `index.html` | `jarves/pages.d/<page>.toml` (`page_registry.py`); the server composes the page from marker comments in index.html |
+
 **Verified:** targeted tests pass (locales, changelog, docs links, hebrew texts, cli parity, guides, plugin registry, setup wizard, dashboard, release notes, manual test sheet, issue registry) and `python core/tools/prepush.py`. Full suite: CI.
 
 **Not done (decision for the owner):**
-- `dashboard_static/index.html` (nav entries, script tags) and `shell.js` stay shared: tests parse them and the page needs a loader change; a follow-up.
+- Existing nav entries stay written in `index.html` (about 20 tests parse it); only new pages use `pages.d`.
 - `.github/workflows/jarves-checks.yml` (40 merges) is not split here: a high-risk CI change goes alone (CLAUDE.md).
 - `CLAUDE.md`/`AGENTS.md` still say "a `guides/data/<feature>.toml` entry, a CLI parity entry, Hebrew via `catalog_add.py`": still true, but they should name `[parity.*]`, `changelog.d` and `docs/reports` (high-risk files, owner edits).
 - Run `catalog_add.py --fold` and `changelog_build.py --write` when a release is cut (add to docs/RELEASING.md checklist).
