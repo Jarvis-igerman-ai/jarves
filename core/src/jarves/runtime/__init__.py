@@ -15,7 +15,7 @@ from __future__ import annotations
 import asyncio
 
 from .. import features as feat, logs
-from .service import Runtime, alerts_paused, current, read_state
+from .service import Runtime, alerts_paused, current, read_state, save_prefs
 
 QUIT_DELAY_S = 4.0      # voice quit / end: first wait QUIT_DELAY_S / 4, then for the spoken goodbye (bounded)
 
@@ -343,8 +343,15 @@ def api_runtime_set(ctx, m, body):
             return 400, {"error": "display must be show or hide"}
         r = _ask_core(ctx, {"type": "runtime.set", "payload": change}, "runtime.state")
         if r is None:
-            return 409, {"error": "JARVES is not running; start it first (jarvis start)", **out}
-        out.update(r)
+            if "display" in change:                # showing / hiding the window needs the running Core
+                return 409, {"error": "JARVES is not running; start it first (jarvis start)", **out}
+            try:                                   # mute / pause are saved choices: they apply when the Core starts
+                out["saved"] = save_prefs(ctx.home, change)
+            except OSError as e:
+                return 500, {"error": f"could not save: {type(e).__name__}", **out}
+            out["applied"], out["live"] = dict(change), False
+        else:
+            out.update(r)
     if not out:
         return 400, {"error": "nothing to change (display, mic_muted, alerts_paused, autostart)"}
     return 200, out

@@ -261,12 +261,19 @@ func _build_ui() -> void:
 	inspection_panel = panel
 	panel.visible = false
 	panel.position = Vector2(12, 12)
+	panel.theme = AssistantUI.make_ui_theme(18)
 	layer.add_child(panel)
 	var box := VBoxContainer.new()
+	box.add_theme_constant_override("separation", 6)
 	panel.add_child(box)
 	var title := Label.new()
-	title.text = "JARVES Pebble A - R5b review (S1.T03R5)\nShapes from CAD; sizes & finishes PROVISIONAL"
+	title.text = "Model inspector"
+	title.add_theme_font_size_override("font_size", 22)
 	box.add_child(title)
+	var prov := Label.new()
+	prov.text = "Pebble A - R5b review. Sizes and finishes are provisional."
+	prov.modulate = Color(1, 1, 1, 0.6)
+	box.add_child(prov)
 	for c in LAYERS:
 		var chk := CheckButton.new()
 		chk.text = LAYERS[c]
@@ -274,36 +281,43 @@ func _build_ui() -> void:
 		chk.toggled.connect(_set_layer.bind(c))
 		box.add_child(chk)
 		checks[c] = chk
+	var more := VBoxContainer.new()
+	more.visible = false
 	finish_btn = OptionButton.new()
 	for k in fin.finishes:
 		finish_btn.add_item(fin.finishes[k].label)
 		finish_btn.set_item_metadata(finish_btn.item_count - 1, k)
 	finish_btn.item_selected.connect(func(i): _apply_finish(finish_btn.get_item_metadata(i)))
-	box.add_child(finish_btn)
+	more.add_child(finish_btn)
 	blank_chk = CheckButton.new()
 	blank_chk.text = "Optional LED ring fitted (default: blank ring)"
 	blank_chk.toggled.connect(_set_blank)
-	box.add_child(blank_chk)
+	more.add_child(blank_chk)
 	explode_chk = CheckButton.new()
 	explode_chk.text = "Exploded view"
 	explode_chk.toggled.connect(func(on): _set_explode(on, explode_slider.value if on else 0.0, true))
-	box.add_child(explode_chk)
+	more.add_child(explode_chk)
 	explode_slider = HSlider.new()
 	explode_slider.min_value = 0.0
 	explode_slider.max_value = 1.0
 	explode_slider.step = 0.01
 	explode_slider.value = 1.0
-	explode_slider.custom_minimum_size = Vector2(300, 20)
+	explode_slider.custom_minimum_size = Vector2(380, 24)
 	explode_slider.value_changed.connect(func(v): if exploded: _set_explode(true, v))
-	box.add_child(explode_slider)
-	var views := HBoxContainer.new()
+	more.add_child(explode_slider)
+	var more_btn := CheckButton.new()
+	more_btn.text = "More: finish, LED ring, exploded view"
+	more_btn.toggled.connect(func(on): more.visible = on)
+	box.add_child(more_btn)
+	box.add_child(more)
+	var views := HFlowContainer.new()
 	for v in VIEWS:
 		var b := Button.new()
 		b.text = v.replace("_", " ").capitalize()
 		b.pressed.connect(_set_view.bind(v))
 		views.add_child(b)
 	box.add_child(views)
-	var rbox := HBoxContainer.new()
+	var rbox := HFlowContainer.new()
 	room_chk = CheckButton.new()
 	room_chk.text = "Room (R)"
 	room_chk.toggled.connect(_set_room)
@@ -319,10 +333,11 @@ func _build_ui() -> void:
 	box.add_child(rbox)
 	info = Label.new()
 	info.text = "Click a part to identify it."
-	info.custom_minimum_size = Vector2(330, 60)
+	info.custom_minimum_size = Vector2(380, 0)
 	box.add_child(info)
 	var help := Label.new()
-	help.text = "Left-drag: orbit   Right-drag: pan   Wheel: zoom\nR room/studio   N day/evening   C desk/sofa/close-up   H UI"
+	help.text = "Drag: orbit · Right-drag: pan · Wheel: zoom · H: hide panels"
+	help.modulate = Color(1, 1, 1, 0.6)
 	box.add_child(help)
 
 
@@ -370,7 +385,8 @@ func _build_face() -> void:
 	assistant.face = face
 	assistant.appearance = appearance
 	ui_layer.add_child(assistant)
-	assistant.options_toggled.connect(func(on): inspection_panel.visible = on)
+	assistant.inspector_chk.visible = true
+	assistant.inspector_toggled.connect(func(on): inspection_panel.visible = on)
 	assistant.set_anchors_and_offsets_preset(Control.PRESET_TOP_RIGHT, Control.PRESET_MODE_MINSIZE, 12)
 
 
