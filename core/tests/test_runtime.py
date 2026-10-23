@@ -271,7 +271,7 @@ def test_tray_menu_has_the_spec_items_and_states():
             "mic": {"muted": True}, "alerts": {"paused": False}, "voice": {"wake_listening": True},
             "dashboard": {"enabled": True}, "health": "ready"}
     items = menu_entries(view)
-    assert [i.id for i in items] == ["dashboard", "toggle_display", "toggle_mute", "toggle_alerts", "status",
+    assert [i.id for i in items] == ["dashboard", "toggle_display", "toggle_mute", "toggle_alerts", "talk", "status",
                                      "diagnostics", "quit"]
     assert items[1].text == "Show JARVES" and items[2].checked is True and items[3].checked is False
     assert "mic muted" in status_line(view) and "window hidden" in status_line(view)

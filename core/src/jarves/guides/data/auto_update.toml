@@ -1,0 +1,66 @@
+order = 63
+category = "system"
+pages = ["updates"]
+features = ["auto_update"]
+aliases = ["עדכון אוטומטי", "עדכונים אוטומטיים", "תעדכן לבד", "auto update", "automatic updates", "update by itself"]
+links = ["updates", "beta_channel", "backup"]
+title_he = "עדכון אוטומטי"
+title_en = "Automatic updates"
+what_he = "ג'ארביס מתקין לבד גרסה חדשה וחתומה, רק ברגע שקט (לא באמצע שיחה, אישור או משימת קוד), אחרי הודעה וגיבוי. תמיד אפשר לחזור אחורה. בערוץ בטא זה פועל כברירת מחדל; בערוץ יציב זה כבוי עד שתפעיל."
+what_en = "JARVES installs a newer signed version by itself, only at a quiet moment (never in a conversation, an approval or a coding-agent task), after a notice and a backup. You can always go back. It is on by default on the beta channel; on the stable channel it is off until you turn it on."
+say = [["תפעיל עדכון אוטומטי", "Turn on automatic updates"], ["תכבה עדכון אוטומטי", "Turn off automatic updates"]]
+expect_he = "בעמוד Updates כתוב 'עדכונים אוטומטיים: פועלים' (או 'ברירת מחדל של בטא'). לפני כל התקנה מגיעה הודעה בעברית ובאנגלית עם: לעדכן עכשיו / אחר כך / לכבות. אחרי העדכון מגיעה הודעה על מה השתנה ואיך חוזרים."
+expect_en = "The Updates page says 'Automatic updates: on' (or 'beta default'). Before every install a notice in Hebrew and English offers: update now / later / turn off. After the update a notice says what changed and how to go back."
+cost_he = "חינם."
+cost_en = "Free."
+privacy_he = "הבדיקה היא אותה בדיקה רגילה: מורידה קובץ חתום אחד, בלי מידע אישי. ביומן נשמרים רק קודים ומספרי גרסה."
+privacy_en = "The check is the same ordinary one: it downloads one signed file, with no personal data. The log holds only codes and version numbers."
+
+[[steps]]
+he = "הפעלה: jarvis update auto on, או בעמוד Updates כפתור 'הפעלה' בכרטיס 'עדכונים אוטומטיים'. כיבוי: jarvis update auto off. מצב: jarvis update auto status."
+en = "Turn on: jarvis update auto on, or on the Updates page press Turn on in the Automatic updates card. Turn off: jarvis update auto off. State: jarvis update auto status."
+action = "command:jarvis update auto status"
+
+[[steps]]
+he = "כשיש גרסה חדשה (באותו ערוץ שבחרת, חתומה ועם SHA256 וגודל נכונים) מגיעה הודעה. אפשר 'לעדכן עכשיו', 'אחר כך' (שואל שוב מחר) או 'לכבות'. בלי תשובה ההתקנה מתחילה אחרי כרבע שעה ורק ברגע שקט."
+en = "When a newer version exists (on the channel you chose, signed, with the right SHA256 and size) a notice arrives. You can choose Update now, Later (asks again tomorrow) or Turn off. With no answer it installs after about a quarter of an hour and only at a quiet moment."
+action = "open:#/updates"
+
+[[steps]]
+he = "ברגע שקט = אין שיחה קולית או צ'אט פעילים, אף אחד לא מדבר, אין אישור ממתין, אין משימת קוד רצה, ולא בשעות שקט או כשההתראות מושהות."
+en = "A quiet moment = no voice or chat session, nobody speaking, no pending approval, no coding-agent task running, and not in quiet hours or while alerts are paused."
+
+[[steps]]
+he = "אם משהו לא עובד אחרי העדכון: jarvis update --rollback חוזר לגרסה הקודמת עם הנתונים מלפניה. לבחירה בין ערוץ יציב לבטא: jarvis update --channel stable|beta. החלפת ערוץ לא מתקינה כלום בעצמה."
+en = "If something is wrong after an update: jarvis update --rollback goes back to the previous version with the data from before it. To choose stable or beta: jarvis update --channel stable|beta. Switching channel never installs anything by itself."
+action = "command:jarvis update --rollback"
+
+[[problems]]
+he = "כתוב AUTO_UPDATE_NEEDS_CHECK כשמפעילים"
+en = "It says AUTO_UPDATE_NEEDS_CHECK when I turn it on"
+fix_he = "עדכון אוטומטי נשען על בדיקת העדכונים. הפעילו אותה: jarvis features on update_check."
+fix_en = "Automatic updates rely on the update check. Turn it on: jarvis features on update_check."
+
+[[problems]]
+he = "העדכון לא מותקן ואני רואה 'ממתין' או 'לא מתקין עכשיו'"
+en = "The update is not installing and I see 'waiting' or 'not installing now'"
+fix_he = "זה תקין: הוא מחכה לרגע שקט (או לרבע השעה אחרי ההודעה, או שדחית). jarvis update auto status מראה מה מונע. להתקנה מיידית: jarvis update auto now."
+fix_en = "That is normal: it waits for a quiet moment (or the quarter hour after the notice, or you postponed it). jarvis update auto status shows what holds it back. To install right away: jarvis update auto now."
+
+[[problems]]
+he = "ההודעה אומרת שהעדכון האוטומטי הפסיק לנסות"
+en = "The notice says automatic updates stopped trying"
+fix_he = "ההתקנה נכשלה כמה פעמים (קוד כמו UPDATE_CHECKSUM_MISMATCH או UPDATE_OFFLINE). שום דבר לא השתנה והגרסה הנוכחית עובדת. נסו שוב עם jarvis update auto now, או עדכנו ידנית: jarvis update install."
+fix_en = "The install failed several times (a code such as UPDATE_CHECKSUM_MISMATCH or UPDATE_OFFLINE). Nothing changed and the current version works. Try again with jarvis update auto now, or update by hand: jarvis update install."
+
+[[problems]]
+he = "עדכון בלי חתימה (UPDATE_UNSIGNED) לא מותקן"
+en = "An update without a signature (UPDATE_UNSIGNED) is not installed"
+fix_he = "עדכון אוטומטי מתקין רק גרסה שנחתמה במניפסט החתום של האפליקציה. אין עקיפה. אם צריך, הורידו ידנית ובדקו SHA256 לפי docs/RELEASE_HOSTING.md."
+fix_en = "Automatic updates install only a version named in the app's signed manifest. There is no override. If you need it, download by hand and check the SHA256 as in docs/RELEASE_HOSTING.md."
+
+[[problems]]
+he = "הגרסה החדשה לא עולה ואני מקבל הצעה לחזור אחורה"
+en = "The new version does not start and I am offered a rollback"
+fix_he = "אחרי שני ניסיונות כושלים ג'ארביס שואל באישור אם לחזור לגרסה הקודמת. הוא לא חוזר בלי ה'כן' שלך, כי החזרה משחזרת את הנתונים מלפני העדכון. אפשר גם: jarvis update --rollback."
+fix_en = "After two failed starts JARVES asks for your approval to go back. It never rolls back without your yes, because a rollback restores the data from before the update. You can also run jarvis update --rollback."

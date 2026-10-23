@@ -48,8 +48,10 @@ Current dashboard review: [23 Oct findings inventory and recheck gates](reviews/
 | [NEXT_FLOW](NEXT_FLOW.md) | The `next` integration branch: light PR CI, batch run, bot fast-forward of main, how to switch it on | general | built, off by default | [CI_PERFORMANCE](CI_PERFORMANCE.md) |
 | [CI_DETERMINISM](CI_DETERMINISM.md) | Network guard, offline stub, flake retry and quarantine for deterministic CI | general | current | [CI_PERFORMANCE](CI_PERFORMANCE.md) |
 | [PREPUSH](PREPUSH.md) | The local gate `python core/tools/prepush.py` (same quick checks as CI), the optional pre-push hook, and the PR failure-summary comment | general | current | [CI_PERFORMANCE](CI_PERFORMANCE.md) |
+| [handoff/2026-10-23-jarvis-talk](handoff/2026-10-23-jarvis-talk.md) | Handoff: `jarvis talk` live conversation without the wake word (CLI, dashboard, tray) | voice | current | [HANDOFF](HANDOFF.md) |
 | [AGENT_HANDOFF_TEMPLATE](AGENT_HANDOFF_TEMPLATE.md) | Copy-paste resume prompt for a new agent | general | current | [AGENTS](../AGENTS.md) |
 | [handoff/README](handoff/README.md) | Handoff notes, one file per task (`docs/handoff/<date>-<topic>.md`, newest by file name); the notes are covered by this row | general | current | itself |
+| [reports/README](reports/README.md) | New reports, reviews and audits, one dated file each (`docs/reports/<date>-<topic>.md`); the reports are covered by this row, so adding one does not edit this file | general | current | itself |
 | [MIGRATION_STATUS](MIGRATION_STATUS.md), [MIGRATION_HANDOFF](MIGRATION_HANDOFF.md) | Private-to-public repository migration ledger | general | current until the private repo is archived | MIGRATION_STATUS |
 
 ## 4. Product, plans, work packages

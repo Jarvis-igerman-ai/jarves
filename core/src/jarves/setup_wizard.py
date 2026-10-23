@@ -47,7 +47,7 @@ from types import SimpleNamespace
 from typing import Any, Callable
 
 from . import features as feat
-from . import hebrew, logs
+from . import hebrew, logs, plugin_registry
 
 STATE_FILE = "setup_state.json"
 PEAR_URL = "https://github.com/pear-devs/pear-desktop/releases"
@@ -59,7 +59,7 @@ ADDON_MODULES = ("jarves.telegram_channel", "jarves.instagram_channel", "jarves.
                  "jarves.appearance", "jarves.backup", "jarves.usage", "jarves.updates", "jarves.runtime",
                  "jarves.operations", "jarves.guides", "jarves.skills.generated", "jarves.browser", "jarves.profiles",
                  "jarves.selfcheck", "jarves.connect", "jarves.skills.helper", "jarves.context_trace",
-                 "jarves.recall", "jarves.diag.service", "jarves.whatsapp_bridge", "jarves.orchestrator", "jarves.dialing", "jarves.self_manage")
+                 "jarves.recall", "jarves.diag.service", "jarves.whatsapp_bridge", "jarves.orchestrator", "jarves.dialing", "jarves.self_manage") + plugin_registry.names("addons")
 # Privacy-sensitive or outward-acting: OFF on the first run whatever else says; ON only after an explicit yes.
 SAFE_OFF = frozenset({"camera", "face_recognition", "camera_when_away", "gmail_send", "calendar_write",
                       "dashboard_lan", "mobile_access", "browser", "telegram", "home_assistant", "instagram", "helper",
@@ -88,7 +88,7 @@ GROUPS: tuple[tuple[str, str, str, tuple[str, ...]], ...] = (
                                                                   "whatsapp_bridge", "whatsapp_send", "home_assistant")),
     ("phone", "שיחות טלפון", "Phone calls", ("assisted_dialing",)),
     ("dashboard", "לוח בקרה וטלפון", "Dashboard & phone", ("dashboard", "dashboard_lan", "mobile_access", "web_chat", "context_trace")),
-    ("updates", "עדכונים וגיבוי", "Updates & backup", ("update_check", "beta_channel", "release_signoff", "setup_tour", "backup")),
+    ("updates", "עדכונים וגיבוי", "Updates & backup", ("update_check", "beta_channel", "auto_update", "release_signoff", "setup_tour", "backup")),
     ("profiles", "פרופילים", "Profiles", ("profiles",)),
     ("helper", "עזרה במחשב (פקודות והתקנות)", "Computer helper (commands & installs)", ("helper", "helper_readonly_auto")),
     ("agents", "סוכני קוד", "Coding agents", ("agent_orchestrator", "project_manager")),
@@ -1167,6 +1167,7 @@ BUNDLE: dict[str, list[Callable[[], tuple[bool, str]]]] = {
     "autonomy": [_mod("jarves.autonomy")],
     "backup": [_mod("jarves.backup")],
     "beta_channel": [_mod("jarves.updates")],
+    "auto_update": [_mod("jarves.auto_update")],
     "release_signoff": [_mod("jarves.release_signoff")],
     "setup_tour": [_mod("jarves.wizard")],
     "update_check": [_mod("jarves.updates"), _mod("jarves.migrations"), _data("jarves", "dashboard_static/updates.js"),

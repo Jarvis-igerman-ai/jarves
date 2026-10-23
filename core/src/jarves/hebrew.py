@@ -13,6 +13,7 @@ content, quoted speech, logs, file names, commands and code are never translated
 from __future__ import annotations
 
 import re
+from pathlib import Path
 
 # ---------------------------------------------------------------------- exact texts (English -> Hebrew)
 TEXT: dict[str, str] = {
@@ -20,6 +21,17 @@ TEXT: dict[str, str] = {
         "אשף אחד בלוח הבקרה (#/setup) להגדרה, בדיקה והיכרות עם כל נושא. התשובות שלכם מתעדות מה אומת על ידכם ומעדכנות את גיליון אישור הגרסה.",
     "core/tests/test_wizard.py (state, diff, secrets, bug report, sign-off sheet)":
         "core/tests/test_wizard.py (מצב, שינויים, סודות, דיווח באג, גיליון אישור)",
+    # --- automatic updates (issue #17)
+    "installs a newer signed JARVES by itself, only at a quiet moment (never in a conversation, an approval or a "
+    "coding-agent task), after a notice and a backup; same signed path as `jarvis update install`; stable users get "
+    "stable, beta users get beta; one command goes back to the previous version":
+        "מתקין לבד ג'רביס חדש וחתום, רק ברגע שקט (לא באמצע שיחה, אישור או משימת קוד), אחרי הודעה וגיבוי; אותו מסלול "
+        "חתום כמו `jarvis update install`; משתמשי יציב מקבלים יציב ומשתמשי בטא מקבלים בטא; פקודה אחת חוזרת לגרסה הקודמת",
+    "core/tests/test_auto_update.py (fake signed release server, fake installer: on/off, quiet moment, notices, signed "
+    "only, older refused, failure keeps the old version, back-off, channel); never run against a real installer or a "
+    "published release":
+        "core/tests/test_auto_update.py (שרת מהדורות חתום מדומה ומתקין מדומה: הפעלה/כיבוי, רגע שקט, הודעות, חתום בלבד, "
+        "גרסה ישנה נדחית, כישלון משאיר את הגרסה הקודמת, השהיה בין ניסיונות, ערוץ); לא הורץ מול מתקין אמיתי או גרסה שפורסמה",
     # --- beta channel and release sign-off (continuous release)
     "gets every green main build automatically as a signed beta (latest-beta.json) instead of waiting for a tested "
     "stable release; one command or button goes back to stable, and the previous version can always be restored":
@@ -580,6 +592,20 @@ TEXT: dict[str, str] = {
     "If client delegation fails: local = honest \"can't look it up\"; server = allow server delegation":
         "אם התקציב הקשיח נכשל: local = תשובה כנה \"לא יכול לבדוק\"; server = לאפשר מעבר להעברה בצד השרת",
 }
+
+
+def _load_parts() -> dict[str, str]:
+    """New texts live in hebrew_parts/<date>-<topic>.json ({"English": "עברית"}), one file per PR, instead of lines
+    added to TEXT above (32 of ~150 merges touched this file and any two PRs adding texts conflicted). One home per
+    text: tests/test_hebrew_texts.py fails when a text is both in TEXT and in a part, or in two parts."""
+    import json
+    out: dict[str, str] = {}
+    for f in sorted(Path(__file__).with_name("hebrew_parts").glob("*.json")):
+        out.update(json.loads(f.read_text(encoding="utf-8")))
+    return out
+
+
+TEXT.update(_load_parts())
 
 _OUTCOME = {"answered late": "נענה באיחור", "the user gave up and asked something else": "המשתמש ויתר ושאל משהו אחר",
             "never answered: the conversation ended while waiting": "לא נענה: השיחה הסתיימה בהמתנה"}

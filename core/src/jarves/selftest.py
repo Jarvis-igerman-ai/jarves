@@ -237,10 +237,9 @@ def check_registry_and_guides(c: Ctx) -> tuple[str, str, str]:
 
 
 def _catalog(code: str) -> dict | None:
-    p = Path(__file__).with_name("dashboard_static") / "locales" / f"{code}.js"
+    from . import locale_parts
     try:
-        src = p.read_text(encoding="utf-8").replace("\r\n", "\n")
-        return json.loads(src.split("=\n", 1)[1].strip().rstrip(";"))
+        return locale_parts.catalog(code)             # the base catalog plus the per-PR parts
     except (OSError, IndexError, ValueError):
         return None
 
@@ -271,6 +270,16 @@ def check_log_privacy(c: Ctx) -> tuple[str, str, str]:
     if leaks:
         return WARN, f"{leaks} log line(s) hold something the redactor would mask", "Share logs only through `jarvis diag`."
     return PASS, f"{len(lines)} recent log lines clean", ""
+
+
+def check_limits(c: Ctx) -> tuple[str, str, str]:
+    """No silent limits: a daily cap that is used up (or above 80%) is a finding with the way to raise it."""
+    from . import limits
+    vs = limits.worst(limits.views_from_home(c.home, c.cfg.ai))
+    if not vs:
+        return PASS, "daily limits (voice minutes, AI requests, delegated spend) have room left", ""
+    status = FAIL if any(v["level"] == "exhausted" for v in vs) else WARN
+    return status, "; ".join(v["text_en"] for v in vs), "; ".join(v["action_en"] for v in vs)
 
 
 def check_disk(c: Ctx) -> tuple[str, str, str]:
@@ -421,6 +430,7 @@ CHECKS: tuple[tuple[str, str, str, bool, Callable[[Ctx], tuple[str, str, str]]],
      check_registry_and_guides),
     ("locales", "Dashboard languages EN + HE", "שפות הלוח: אנגלית ועברית", False, check_locales),
     ("log_privacy", "Log privacy", "פרטיות היומן", False, check_log_privacy),
+    ("limits", "Daily limits (voice, requests, spend)", "מגבלות יומיות (קול, בקשות, עלות)", False, check_limits),
     ("disk", "Disk space", "מקום בדיסק", False, check_disk),
     ("version", "Version and updates", "גרסה ועדכונים", False, check_version),
     ("core_smoke", "Core start and stop (temp home)", "הפעלה וכיבוי של הליבה (תיקייה זמנית)", True, check_core_smoke),

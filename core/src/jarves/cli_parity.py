@@ -6,6 +6,8 @@ every second) and shows on the dashboard Timers page. Printed text follows `clil
 
 PARITY: every feature switch and every user-facing tool group must name its command-line surface OR carry a
 documented 'dashboard only' marker. tests/test_cli_parity.py fails when a new feature or tool group has neither.
+A NEW feature declares it in its guide ([parity.features] / [parity.tool_groups] in guides/data/<feature>.toml, see
+_guide_parity), not in the shared tables below: those older entries are what every PR used to edit and conflict on.
 """
 from __future__ import annotations
 
@@ -43,7 +45,7 @@ FEATURES: dict[str, object] = {
     "proactive_alerts": (D, "alerts are read and answered on the Alerts page"),
     "autonomy": (D, "autonomy proposals are approved on the Autonomy page"),
     "background_core": "start", "display_control": "show", "tray_icon": "start", "autostart": "autostart",
-    "update_check": "update", "beta_channel": "update", "release_signoff": "release", "proactive_help": (D, "a pure switch; change it with `jarvis features`"),
+    "update_check": "update", "beta_channel": "update", "auto_update": "update","release_signoff": "release", "proactive_help": (D, "a pure switch; change it with `jarvis features`"),
     "profiles": "profile", "context_trace": (D, "the context trace is a dashboard view of one conversation"),
     "browser": "browser", "helper": "approvals", "helper_readonly_auto": (D, "a pure switch; `jarvis features`"),
     "whatsapp_handoff": (D, "WhatsApp opens a draft in the app; no CLI needed, switch via `jarvis features`"),
@@ -79,6 +81,37 @@ TOOL_GROUPS: dict[str, object] = {
     "selfspeed": "selftest",
     "issues": "issues",
 }
+
+
+def _guide_parity(data_dir=None) -> tuple[dict, dict]:
+    """Parity entries a feature's own guide declares (guides/data/<feature>.toml), so a new feature does not edit the
+    two shared tables above (every PR adding one conflicted there):
+
+        [parity.features]            # feature id -> the `jarvis` command, or ["dashboard", "reason"]
+        my_feature = "mycmd"
+        [parity.tool_groups]         # Skill (tool group) name -> the same
+        my_skill = ["voice", "only makes sense inside a conversation"]
+
+    Only guide files that contain a [parity table are parsed (startup cost). The tables above stay for the older entries."""
+    import tomllib
+    from pathlib import Path
+    out: tuple[dict, dict] = ({}, {})
+    for f in sorted((data_dir or Path(__file__).with_name("guides") / "data").glob("*.toml")):
+        try:
+            text = f.read_text(encoding="utf-8")
+            if "[parity." not in text:
+                continue
+            for table, dest in zip(("features", "tool_groups"), out):
+                for k, v in tomllib.loads(text).get("parity", {}).get(table, {}).items():
+                    dest[k] = tuple(v) if isinstance(v, list) else v
+        except (OSError, ValueError):
+            continue
+    return out
+
+
+_from_guides = _guide_parity()
+FEATURES.update({k: v for k, v in _from_guides[0].items() if k not in FEATURES})
+TOOL_GROUPS.update({k: v for k, v in _from_guides[1].items() if k not in TOOL_GROUPS})
 
 
 # ---------------------------------------------------------------------- helpers

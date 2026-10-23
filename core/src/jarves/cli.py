@@ -39,6 +39,20 @@ def _ws_call(home: Path, port: int, msg: dict, expect: str, timeout: float = 5) 
         return None
 
 
+def apply_wake_threshold(home: Path, cfg, config_path: Path, rec: float) -> str:
+    """`jarvis wake test --apply`: write the threshold where it is really read. A threshold saved with a custom
+    wake model (identity.json) beats config.toml at every start (Identity.apply_to_config), so it goes there."""
+    from .identity import Identity
+    ident = Identity(home, cfg)
+    w = ident.wake()
+    if w.get("threshold") is not None:
+        ident.set_wake(w["model"], w["phrase"], rec, by="cli")
+        return (f"Saved: wake_threshold {rec} for {Path(str(w['model'])).name} in identity.json (it overrides "
+                f"config.toml, so this is the value used). Restart JARVES to use it.")
+    set_toml_value(config_path, "voice", "wake_threshold", str(rec))
+    return f"Saved: wake_threshold {rec} in {config_path}, which is the value used. Restart JARVES to use it."
+
+
 def _apply_log_args(a, cfg) -> None:
     if getattr(a, "log_level", None):
         cfg.log.console_level = a.log_level.upper()
@@ -284,6 +298,12 @@ def cmd_status(a, cfg, home) -> int:
     if live is None:
         from .runtime import read_state
         snap = read_snapshot(home / "health.json")
+        try:
+            from . import limits as _limits
+            for line in _limits.status_lines(_limits.views_from_home(home, cfg.ai)):
+                print(line)
+        except Exception:
+            pass
         print("Core is NOT running (no answer on the local link).")
         from .updates import beta_label
         if beta_label(home):
@@ -298,6 +318,9 @@ def cmd_status(a, cfg, home) -> int:
         return 1
     prof = live.get("profile") or {}
     from .updates import beta_label
+    from . import limits as _limits
+    for line in _limits.status_lines(live.get("limits") or []):      # no silent limits: the FIRST lines of the status
+        print(line)
     beta = beta_label(home)
     print(runtime_summary(live.get("runtime"))
           + (f" | profile {prof.get('name')}{' (TEST)' if prof.get('test') else ''}" if prof else "")
@@ -445,6 +468,19 @@ def cmd_appearance(a, cfg, home) -> int:
     else:
         print(f"Appearance: {app.mode}")
     return 0
+
+
+def cmd_talk(a, cfg, home) -> int:
+    """jarvis talk [--stop]: start (or end) a live voice conversation without the wake word - tests the whole voice path."""
+    r = _ws_call(home, cfg.link.port, {"type": "talk.stop" if a.stop else "talk.start", "payload": {}}, "talk.state",
+                 timeout=20)
+    if r is None:
+        print("JARVES is not running. Start it with: jarvis start")
+        return 1
+    print(r.get("message", "?"))
+    if r.get("ok") and r.get("live"):
+        print("Speak now. End it with: jarvis talk --stop")
+    return 0 if r.get("ok") else 1
 
 
 def cmd_autostart(a, cfg, home) -> int:
@@ -1104,8 +1140,7 @@ def cmd_wake(a, cfg, home) -> int:
             Identity(home, cfg).set_wake(a.model, threshold=rec, by="cli")
             print(f"Saved: {Path(a.model).name} is now the wake phrase (threshold {rec}). Restart JARVES to use it.")
         elif a.apply:
-            set_toml_value(Path(a.config) if a.config else home / "config.toml", "voice", "wake_threshold", str(rec))
-            print("Saved. Restart JARVES to use it.")
+            print(apply_wake_threshold(home, cfg, Path(a.config) if a.config else home / "config.toml", rec))
         else:
             print("Apply it with:  jarvis wake test --apply" + (f' --model "{a.model}"' if a.model else ""))
         return 0
@@ -1311,6 +1346,15 @@ def cmd_doctor(a, cfg, home) -> int:
             "" if ok else "run:  jarvis chatgpt login")
     live = _ws_call(home, cfg.link.port, {"type": "status.request", "payload": {}}, "status")
     add("info", "Core is " + ("running" if live else "not running (start it with: jarvis)"))
+    try:                                     # no silent limits: a used-up or nearly used-up daily cap is a finding
+        from . import limits as _limits
+        _vs = _limits.views_from_home(home, cfg.ai)
+        for _v in _limits.worst(_vs):
+            add("fail" if _v["level"] == "exhausted" else "warn", _v["text_en"], "fix:  " + _v["action_en"])
+        if not _limits.worst(_vs):
+            add("ok", "daily limits have room left (" + "; ".join(v["text_en"] for v in _vs) + ")")
+    except Exception as e:
+        add("warn", f"could not read the daily limits ({type(e).__name__})")
 
     # --- R-01: OS limits around approved helper commands and generated-Skill children
     try:
@@ -1643,6 +1687,8 @@ def cmd_update(a, cfg, home) -> int:
             return 1
         print(clilang.fmt(f"ערוץ העדכונים: {'בטא (כל בנייה ירוקה של main)' if ch == 'beta' else 'יציב'}.",
                           f"Update channel: {'beta (every green main build)' if ch == 'beta' else 'stable'}."))
+    if a.action == "auto":
+        return _update_auto(a, cfg, home)
     u = UpdateChecker(home, cfg=cfg)
     print(version_line(home) + f"; update channel {u.channel}")
     if getattr(a, "rollback", False):
@@ -1688,6 +1734,43 @@ def cmd_update(a, cfg, home) -> int:
               "`jarvis update --rollback` goes back to the previous version.")
     else:
         print("Setup is open. Follow it; JARVES can start again at the end.")
+    return 0
+
+
+def _update_auto(a, cfg, home) -> int:
+    """jarvis update auto on|off|status|now|later: automatic installs of signed updates at a quiet moment."""
+    from . import auto_update
+    from .updates import UpdateChecker, UpdateError
+    state = a.state or "status"
+    au = auto_update.AutoUpdater(home, cfg=cfg, checker=lambda: UpdateChecker(home, cfg=cfg),
+                                 enabled=lambda: auto_update.is_enabled(cfg, home))
+    try:
+        if state in ("on", "off"):
+            auto_update.set_switch(cfg, home, state == "on", "cli")
+            print(clilang.fmt("עדכון אוטומטי " + ("פועל: מתקין גרסה חתומה חדשה ברגע שקט, אחרי הודעה וגיבוי."
+                                                  if state == "on" else "כבוי: שום דבר לא מותקן בלי שתבקש."),
+                              "Automatic updates are " + ("ON: a newer signed version is installed at a quiet moment, "
+                                                         "after a notice and a backup." if state == "on" else
+                                                         "OFF: nothing is installed unless you ask.")))
+        elif state in ("now", "later"):
+            au.answer(state)
+            print(clilang.fmt("נרשם. " + ("יתקין בבדיקה הבאה (תוך כמה דקות)." if state == "now" else "אשאל שוב מחר."),
+                              "Noted. " + ("It installs at the next look (within minutes)." if state == "now"
+                                           else "I will ask again tomorrow.")))
+    except UpdateError as e:
+        print(f"{e.code}: {e.message}")
+        return 1
+    s = au.status()
+    src = f" (default of the {s['default_from_channel']} channel; `jarvis update auto on|off` sets it for good)" \
+        if s["default_from_channel"] else ""
+    print(f"Automatic updates: {'on' if s['enabled'] else 'off'}{src}")
+    print(clilang.fmt(s["message_he"], s["message_en"]))
+    if s["target"]:
+        print(f"Waiting version: {s['target_display'] or s['target']}; channel {s['channel']}")
+    if s["busy"]:
+        print("Waiting because: " + ", ".join(s["busy"]))
+    if s["gave_up"]:
+        print(f"Stopped trying {s['gave_up']} after {s['failures']} failures; `jarvis update auto now` tries again.")
     return 0
 
 
@@ -1754,6 +1837,9 @@ def main(argv: list[str] | None = None) -> int:
     aps.add_parser("list")
     aps.add_parser("status")
     aps.add_parser("set").add_argument("mode", choices=["face", "avatar2d", "avatar3d", "hidden"])
+
+    tk = sub.add_parser("talk", help="start a live voice conversation now, without the wake word (tests voice)")
+    tk.add_argument("--stop", action="store_true", help="end the open conversation")
     au = sub.add_parser("autostart", help="start JARVES invisibly at login: on / off / status")
     au.add_argument("action", choices=["on", "off", "status"])
     lg = sub.add_parser("logs", help="show the log (filter by --log-level / --module; -f to follow)")
@@ -1923,7 +2009,9 @@ def main(argv: list[str] | None = None) -> int:
     from .selfcheck import add_cli_args as add_selfcheck_args
     add_selfcheck_args(dg)                    # owner request 20 Oct: jarvis diagnose --now (self-check)
     up = sub.add_parser("update", help="check GitHub for a newer JARVES; install only after you approve")
-    up.add_argument("action", nargs="?", default="check", choices=["check", "install", "status"])
+    up.add_argument("action", nargs="?", default="check", choices=["check", "install", "status", "auto"])
+    up.add_argument("state", nargs="?", choices=["on", "off", "status", "now", "later"],
+                    help="with `auto`: on | off | status | now | later (the answer to the update notice)")
     up.add_argument("--channel", choices=["stable", "beta"], help="choose the update channel: stable (default, "
                     "tested releases) or beta (every green main build, early); then check on it")
     up.add_argument("--yes", action="store_true", help="install / rollback: you already approved (no question)")
@@ -1957,6 +2045,10 @@ def main(argv: list[str] | None = None) -> int:
     issue_registry.add_cli(sub)               # owner request 21 Oct: jarvis issues [list|show|report|ignore|fixed|add]
     from . import web_cli
     web_cli.add_cli(sub)                      # owner request 21 Oct: jarvis web (the dashboard Chat page)
+    from . import plugin_registry
+    plugin_cli = plugin_registry.modules("cli")
+    for m in plugin_cli:                      # plugins.d/*.toml: a new command module needs no edit here
+        m.add_cli(sub)
     from . import whatsapp_admin
     whatsapp_admin.add_cli(sub)               # SW-V4 F: jarvis whatsapp status / link / mode / allow / kill ...
     from .orchestrator import surfaces as agents_cli
@@ -1992,7 +2084,7 @@ def main(argv: list[str] | None = None) -> int:
             "diagnose": cmd_diagnose, "features": cmd_features, "help": cmd_help, "google": cmd_google,
             "backup": cmd_backup, "restore": cmd_restore, "usage": cmd_usage, "start": cmd_start,
             "show": cmd_display, "hide": cmd_display, "autostart": cmd_autostart,
-            "mic": cmd_mic, "appearance": cmd_appearance,
+            "mic": cmd_mic, "appearance": cmd_appearance, "talk": cmd_talk,
             "update": cmd_update, "browser": cmd_browser, "connect": cmd_connect, "telegram": cmd_telegram, "instagram": cmd_instagram, "home": cmd_home,
             "profile": profiles.cmd_profile, "approvals": cmd_approvals, "recall": recall.cmd_recall,
             "health": health_cli.cmd_health,
@@ -2001,7 +2093,8 @@ def main(argv: list[str] | None = None) -> int:
             "dial": dialing.cmd_dial, "release": release_cmd.cmd_release, "tour": wizard.cmd_tour,
             "manage": self_manage.cmd_manage, "undo": self_manage.cmd_manage,
             **cli_parity.COMMANDS, **budget_cli.COMMANDS, **privacy_cli.COMMANDS, **phone_cli.COMMANDS, **selfspeed.COMMANDS,
-            **issue_registry.COMMANDS, **web_cli.COMMANDS, **release_notes.COMMANDS}[a.cmd](a, cfg, home)
+            **issue_registry.COMMANDS, **web_cli.COMMANDS, **release_notes.COMMANDS,
+            **{k: v for m in plugin_cli for k, v in m.COMMANDS.items()}}[a.cmd](a, cfg, home)
 
 
 if __name__ == "__main__":

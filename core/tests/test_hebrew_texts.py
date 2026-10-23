@@ -289,3 +289,27 @@ def test_p03_timers_and_lists_cli_notices_have_hebrew(home, monkeypatch, capsys)
     assert cli.main(["lists", "clear", "todo"]) == 1
     assert is_he(capsys.readouterr().err)
     assert cli.main(["jobs", "list"]) == 0 and is_he(capsys.readouterr().out)
+
+
+def test_hebrew_parts_are_one_file_per_change_and_one_home_per_text():
+    """New Hebrew texts go to hebrew_parts/<date>-<topic>.json (not to TEXT in hebrew.py): no merge conflicts."""
+    tree = ast.parse(Path(hebrew.__file__).read_text(encoding="utf-8"))
+    literal = next(n.value for n in tree.body if isinstance(n, ast.AnnAssign) and getattr(n.target, "id", "") == "TEXT")
+    base = {k.value for k in literal.keys}
+    seen: dict[str, str] = {}
+    for f in sorted(Path(hebrew.__file__).with_name("hebrew_parts").glob("*.json")):
+        assert re.fullmatch(r"\d{4}-\d{2}-\d{2}-[a-z0-9][a-z0-9-]*\.json", f.name), f.name
+        for k, v in json.loads(f.read_text(encoding="utf-8")).items():
+            assert is_he(v), (f.name, k)
+            assert k not in base, f"{k!r} is already in TEXT of hebrew.py ({f.name})"
+            assert k not in seen, f"{k!r} is in {f.name} and {seen[k]}"
+            assert hebrew.he(k) == v
+            seen[k] = f.name
+
+
+def test_hebrew_parts_are_loaded_into_text(tmp_path, monkeypatch):
+    (tmp_path / "hebrew_parts").mkdir()
+    (tmp_path / "hebrew_parts" / "2026-10-01-a.json").write_text('{"x1": "אחד"}', encoding="utf-8")
+    (tmp_path / "hebrew_parts" / "2026-10-02-b.json").write_text('{"x2": "שניים"}', encoding="utf-8")
+    monkeypatch.setattr(hebrew, "__file__", str(tmp_path / "hebrew.py"))
+    assert hebrew._load_parts() == {"x1": "אחד", "x2": "שניים"}

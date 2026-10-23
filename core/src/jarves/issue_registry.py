@@ -44,6 +44,7 @@ from typing import Callable
 
 from pydantic import BaseModel
 
+from . import changelog_parts
 from . import features as feat
 from . import logs
 from .skills import expected_tool_refusal
@@ -361,7 +362,7 @@ def changelog_text(extra: str = "") -> str:
     for p in (here.with_name("CHANGELOG.md"), *[a / "CHANGELOG.md" for a in here.parents[1:4]]):
         try:
             if p.is_file():
-                parts.append(p.read_text(encoding="utf-8", errors="replace"))
+                parts.append(changelog_parts.read(p))
                 break
         except OSError:
             continue

@@ -324,7 +324,7 @@ def _preview_call(ctx, msg: dict):
 
 def api_runtime_set(ctx, m, body):
     body = body or {}
-    change = {k: body[k] for k in ("display", "mic_muted", "alerts_paused") if k in body}
+    change = {k: body[k] for k in ("display", "mic_muted", "alerts_paused", "talk") if k in body}
     out: dict = {}
     if "autostart" in body:
         if not isinstance(body["autostart"], bool):
@@ -341,6 +341,8 @@ def api_runtime_set(ctx, m, body):
     if change:
         if change.get("display") not in (None, "show", "hide"):
             return 400, {"error": "display must be show or hide"}
+        if change.get("talk") not in (None, "start", "stop"):
+            return 400, {"error": "talk must be start or stop"}
         r = _ask_core(ctx, {"type": "runtime.set", "payload": change}, "runtime.state")
         if r is None:
             if "display" in change:                # showing / hiding the window needs the running Core
