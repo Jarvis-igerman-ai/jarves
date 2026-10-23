@@ -1,3 +1,22 @@
+## CI, merge and release friction — 23 Oct 2026 / #89, PR #90 (branch `claude/exciting-goodall-kllmnr`)
+
+- Measured (Actions API, 231 jarves-checks runs, 73 PRs): PR open->merged median 9.1 h (p90 20.6 h); 43% of completed PR
+  runs failed (median 24 min to fail); since the 22 Oct CI work a green PR run takes 10.3-14.1 min, critical path always
+  one shard about 2x its siblings. Details and the causes list: #89.
+- Fixed in PR #90: (1) shard timing refresh from the PR proof on reused `main` pushes (`main`'s cache was never written, so
+  every PR planned from the 22 Oct seed with 30 of 174 files unmeasured); (2) `release_gate` reads bug tables by header
+  (41 phantom open P0-P2 rows -> 6, 3 of them stale and synced in `SWV4_CAMPAIGN_BUG_TABLE.md`); (3) `release_status.py`
+  looks the installer up by the content tree (it always said MISSING) and says UNKNOWN instead of "none"/"off";
+  (4) prepush `perf` also runs `test_tool_descriptions.py`; (5) `docs/GITHUB_FLOW.md` corrected: the repo is public, so
+  branch protection and native auto-merge are free; `main` is unprotected today.
+- NOT verified: the proof-run junit download on a real `main` push and the resulting shard times (first merge after #90:
+  read the `changes` job summary line "shard plan: ..." of the next PR run; expect about 385 s Linux / 455 s Windows per
+  shard and few unmeasured files).
+- Owner decisions (#89): merge policy (required check `CI result (single required check)` + Allow auto-merge, no
+  "up to date" requirement, drop the update-and-re-run habit; changes CLAUDE.md); stable release needs SWV3_P01 B13/B14
+  and SWV3_P04 Q05 live-verified or accepted, and 5 consecutive green nightlies. Merge #84 (next-flow parse failure, every
+  push shows a red run) before anything else.
+
 ## Admin-key prompt for personal OpenAI accounts — 23 Oct 2026
 
 - Owner report: on a personal OpenAI account the guided setup text ("as the organization owner") did not match what they see. Reworded the `jarvis connect openai-admin` steps, the "Real API bill" guide (he/en) and `OPENAI_ADMIN_KEY.md`: a personal account is its own organization and its owner; if the Admin keys page is missing, skip (`s`), everything works and cost shows as an estimate. No logic change; key handling unchanged.
