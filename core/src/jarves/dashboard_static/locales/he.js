@@ -1619,7 +1619,7 @@
   "Keys and tokens are typed in the guided window only (hidden), never here.": "מפתחות ואסימונים מוקלדים בחלון ההנחיה בלבד (הקלדה מוסתרת), לא כאן.",
   "Permission and safety switches cannot be changed here (Features page).": "מתגי הרשאה ובטיחות אינם ניתנים לשינוי מכאן (עמוד התכונות).",
   "protected": "מוגן",
-  "Turn off": "כבה",
+  "Turn off": "כיבוי",
   "Skills": "כלים",
   "Built in: ": "מובנים: ",
   "No generated skills.": "אין כלים שנוצרו.",
@@ -1949,7 +1949,22 @@
   "yours": "שלך",
   "More agents": "עוד סוכנים",
   "Fewer agents": "פחות סוכנים",
-  "Stop the agent": "עצירת הסוכן"
+  "Stop the agent": "עצירת הסוכן",
+  "Automatic updates": "עדכונים אוטומטיים",
+  "Now": "כרגע",
+  "Automatic updates: on (beta default)": "עדכונים אוטומטיים: פועלים (ברירת מחדל של בטא)",
+  "Automatic updates: on": "עדכונים אוטומטיים: פועלים",
+  "Automatic updates: off": "עדכונים אוטומטיים: כבויים",
+  "Update now": "לעדכן עכשיו",
+  "Turn off automatic updates": "לכבות עדכונים אוטומטיים",
+  "Installs only a newer signed version of your channel, only at a quiet moment (not in a conversation, an approval or a coding-agent task), after a backup. It is on by default only on the beta channel. Command line: jarvis update auto on|off|status.": "מתקין רק גרסה חתומה חדשה יותר מהערוץ שלך, רק ברגע שקט (לא באמצע שיחה, אישור או משימת קוד), אחרי גיבוי. פועל כברירת מחדל רק בערוץ הבטא. שורת פקודה: jarvis update auto on|off|status.",
+  "Which update channel?": "איזה ערוץ עדכונים?",
+  "Stable, no automatic updates": "יציב, בלי עדכון אוטומטי",
+  "Stable with automatic updates": "יציב, עם עדכון אוטומטי",
+  "Beta with automatic updates": "בטא, עם עדכון אוטומטי",
+  "Beta, no automatic updates": "בטא, בלי עדכון אוטומטי",
+  "Channel not chosen: ": "הערוץ לא נבחר: ",
+  "Stable: only tested releases (default, no automatic updates). Beta: every green build early, with automatic updates on by default. Until you choose you stay on stable and nothing installs by itself.": "יציב: רק גרסאות שנבדקו (ברירת מחדל, בלי עדכון אוטומטי). בטא: כל בנייה ירוקה מוקדם, עם עדכון אוטומטי כברירת מחדל. עד שתבחר נשאר יציב ושום דבר לא מותקן לבד."
  },
  "rules": [
   [

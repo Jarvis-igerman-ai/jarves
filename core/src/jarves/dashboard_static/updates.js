@@ -69,6 +69,51 @@ PAGES.updates = async function () {
     catch (e) { out.textContent = tx("הערוץ לא הוחלף: ", "Channel not changed: ") + e.message; }
     busy(ev.currentTarget, false);
   } }, isBeta ? "Switch to the stable channel" : "Switch to the beta channel");
+  const au = await api("/api/updates/auto");
+  const setAuto = (on) => async (ev) => {
+    busy(ev.currentTarget, true);
+    try { await post("/api/updates/auto", { enabled: on }); route(true); }
+    catch (e) { out.textContent = tx("לא שונה: ", "Not changed: ") + e.message; }
+    busy(ev.currentTarget, false);
+  };
+  const answer = (choice) => async (ev) => {
+    busy(ev.currentTarget, true);
+    try { await post("/api/updates/auto/answer", { choice }); route(true); }
+    catch (e) { out.textContent = e.message; }
+    busy(ev.currentTarget, false);
+  };
+  const pick = (channel, auto) => async (ev) => {
+    busy(ev.currentTarget, true);
+    try { await post("/api/updates/auto/channel", { channel, auto }); route(true); }
+    catch (e) { out.textContent = tx("הערוץ לא נבחר: ", "Channel not chosen: ") + e.message; }
+    busy(ev.currentTarget, false);
+  };
+  const autoLine = au.enabled
+    ? (au.default_from_channel === "beta" ? "Automatic updates: on (beta default)" : "Automatic updates: on")
+    : "Automatic updates: off";
+  const note = au.notice && au.notice.kind !== "choose" ? el("div", { class: "small", style: "margin-top:8px" }, tx(au.notice.text_he, au.notice.text_en)) : null;
+  const autoCard = el("div", { class: "card" }, el("h2", {}, "Automatic updates"),
+    el("div", { class: "kv" },
+      el("div", { class: "k" }, "Status"), el("div", { class: "v" }, autoLine, " ", au.enabled
+        ? el("button", { type: "button", class: "ghost", onclick: setAuto(false) }, "Turn off")
+        : el("button", { type: "button", class: "ghost", onclick: setAuto(true) }, "Turn on")),
+      el("div", { class: "k" }, "Now"), el("div", { class: "v" }, tx(au.message_he, au.message_en),
+        au.busy && au.busy.length ? " (" + au.busy.join(", ") + ")" : "")),
+    au.enabled && au.target ? el("div", { class: "row", style: "margin-top:10px" },
+      el("button", { type: "button", class: "primary", onclick: answer("now") }, "Update now"),
+      el("button", { type: "button", class: "ghost", onclick: answer("later") }, "Later"),
+      el("button", { type: "button", class: "ghost", onclick: answer("off") }, "Turn off automatic updates")) : null,
+    note,
+    el("div", { class: "muted small", style: "margin-top:6px" },
+      "Installs only a newer signed version of your channel, only at a quiet moment (not in a conversation, an approval or a coding-agent task), after a backup. It is on by default only on the beta channel. Command line: jarvis update auto on|off|status."));
+  const choose = au.channel_chosen ? null : el("div", { class: "card" }, el("h2", {}, "Which update channel?"),
+    el("div", { class: "small" }, tx("יציב: רק גרסאות שנבדקו (ברירת מחדל, בלי עדכון אוטומטי). בטא: כל בנייה ירוקה מוקדם, עם עדכון אוטומטי כברירת מחדל. עד שתבחר נשאר יציב ושום דבר לא מותקן לבד.",
+      "Stable: only tested releases (default, no automatic updates). Beta: every green build early, with automatic updates on by default. Until you choose you stay on stable and nothing installs by itself.")),
+    el("div", { class: "row", style: "margin-top:10px" },
+      el("button", { type: "button", class: "primary", onclick: pick("stable", false) }, "Stable, no automatic updates"),
+      el("button", { type: "button", class: "ghost", onclick: pick("stable", true) }, "Stable with automatic updates"),
+      el("button", { type: "button", class: "ghost", onclick: pick("beta", true) }, "Beta with automatic updates"),
+      el("button", { type: "button", class: "ghost", onclick: pick("beta", false) }, "Beta, no automatic updates")));
   const latest = d.latest ? (d.latest.display || d.latest.version) : null;
   render(header("Updates", "Install, update and go back to the previous version. JARVES asks before it installs anything and keeps your data.",
       check),
@@ -85,6 +130,7 @@ PAGES.updates = async function () {
       el("div", { class: "v" }, latest ? el("code", {}, latest) : pill("ok", "Up to date")),
       el("div", { class: "k" }, "Last checked"), el("div", { class: "v" }, d.checked_at || "—")),
       install ? el("div", { class: "row", style: "margin-top:10px" }, install) : null),
+    choose, autoCard,
     el("h2", {}, "Go back"),
     el("div", { class: "card" },
       rb.possible

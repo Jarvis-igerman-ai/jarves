@@ -266,6 +266,8 @@ class Core:
         usage.attach(self.home)                          # M5: usage meters ("כמה נשאר לי?") + daily local backup
         self.registry.register(usage.make_skill(self.home, c))
         self._backup_auto = backup.start_auto(self.home, self.health)
+        from . import auto_update                        # issue #17: installs a signed update at a quiet moment (switch)
+        self._auto_update = auto_update.start(self)
         if c.music.provider != "none" or self.features.enabled("music") or self._player is not None:
             player = self._player or PearDesktopPlayer(c.music.pear_url, self.home / "pear_client_id", c.music.timeout_s)
             self.music = MusicSkill(player, c.music.max_volume, trim_queue=c.music.trim_queue,
@@ -438,6 +440,8 @@ class Core:
         from . import updates
         try:
             updates.mark_healthy(self.home)
+            from . import auto_update
+            auto_update.for_core(self).after_start()     # the "what changed / how to roll back" notice, once
         except Exception as e:
             logs.warn("core", "UPDATE_WATCH_FAILED", "update watch failed", error_type=type(e).__name__)
 
@@ -509,6 +513,8 @@ class Core:
         self.budget.close()          # QA 19 Oct (suite_voice): its own SQLite handle kept memory.db locked after stop
         self.health.mark("stopped")
         logs.info("core", "CORE_STOPPED", "Core stopped cleanly")
+        if getattr(self, "_auto_update", None) is not None:
+            self._auto_update.stop.set()
         if getattr(self, "_backup_auto", None) is not None:
             self._backup_auto.stop.set()                # M5 automatic backup thread
         store.detach(getattr(self, "history", None))

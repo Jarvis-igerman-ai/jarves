@@ -1949,6 +1949,21 @@
   "yours": "yours",
   "More agents": "More agents",
   "Fewer agents": "Fewer agents",
-  "Stop the agent": "Stop the agent"
+  "Stop the agent": "Stop the agent",
+  "Automatic updates": "Automatic updates",
+  "Now": "Now",
+  "Automatic updates: on (beta default)": "Automatic updates: on (beta default)",
+  "Automatic updates: on": "Automatic updates: on",
+  "Automatic updates: off": "Automatic updates: off",
+  "Update now": "Update now",
+  "Turn off automatic updates": "Turn off automatic updates",
+  "Installs only a newer signed version of your channel, only at a quiet moment (not in a conversation, an approval or a coding-agent task), after a backup. It is on by default only on the beta channel. Command line: jarvis update auto on|off|status.": "Installs only a newer signed version of your channel, only at a quiet moment (not in a conversation, an approval or a coding-agent task), after a backup. It is on by default only on the beta channel. Command line: jarvis update auto on|off|status.",
+  "Which update channel?": "Which update channel?",
+  "Stable, no automatic updates": "Stable, no automatic updates",
+  "Stable with automatic updates": "Stable with automatic updates",
+  "Beta with automatic updates": "Beta with automatic updates",
+  "Beta, no automatic updates": "Beta, no automatic updates",
+  "Channel not chosen: ": "Channel not chosen: ",
+  "Stable: only tested releases (default, no automatic updates). Beta: every green build early, with automatic updates on by default. Until you choose you stay on stable and nothing installs by itself.": "Stable: only tested releases (default, no automatic updates). Beta: every green build early, with automatic updates on by default. Until you choose you stay on stable and nothing installs by itself."
  }
 };
