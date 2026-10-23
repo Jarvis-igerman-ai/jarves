@@ -1878,6 +1878,19 @@
   "The switch itself takes no pictures and makes no cloud calls.": "The switch itself takes no pictures and makes no cloud calls.",
   "No pictures are sent or kept unless you ask.": "No pictures are sent or kept unless you ask.",
   "First turn the camera on (guide \"Camera\").": "First turn the camera on (guide \"Camera\").",
-  "Leave the legacy switch off. Use the Camera guide for requested captures.": "Leave the legacy switch off. Use the Camera guide for requested captures."
+  "Leave the legacy switch off. Use the Camera guide for requested captures.": "Leave the legacy switch off. Use the Camera guide for requested captures.",
+  "JARVES keeps hearing \"Hey Jarvis\" with the window closed, has an icon by the clock, and can start with the computer.": "JARVES keeps hearing \"Hey Jarvis\" with the window closed, has an icon by the clock, and can start with the computer.",
+  "Closing the window only hides him. The first time, a one-time notice says JARVES is still running in the tray. Quit in the tray icon's menu really stops him.": "Closing the window only hides him. The first time, a one-time notice says JARVES is still running in the tray. Quit in the tray icon's menu really stops him.",
+  "Free. Waiting for \"Hey Jarvis\" uses no cloud connection.": "Free. Waiting for \"Hey Jarvis\" uses no cloud connection.",
+  "Ask to mute the microphone to stop listening. Unmute using the visible microphone button in the window, the tray icon, or jarvis mic unmute. A muted microphone cannot hear an unmute command.": "Ask to mute the microphone to stop listening. Unmute using the visible microphone button in the window, the tray icon, or jarvis mic unmute. A muted microphone cannot hear an unmute command.",
+  "From the command line: jarvis mic status, jarvis mic mute, or jarvis mic unmute. The choice survives restart.": "From the command line: jarvis mic status, jarvis mic mute, or jarvis mic unmute. The choice survives restart.",
+  "Make sure Keep running in the background is on.": "Make sure Keep running in the background is on.",
+  "Look for JARVES's icon by the clock (maybe under the ^ arrow).": "Look for JARVES's icon by the clock (maybe under the ^ arrow).",
+  "Want him to start when you log in? Turn on Start at login on the Controls page.": "Want him to start when you log in? Turn on Start at login on the Controls page.",
+  "Choose how JARVES looks: face, 2D avatar, 3D avatar, or hidden (voice only).": "Choose how JARVES looks: face, 2D avatar, 3D avatar, or hidden (voice only).",
+  "The screen changes within a second. Hidden, he still hears \"Hey Jarvis\".": "The screen changes within a second. Hidden, he still hears \"Hey Jarvis\".",
+  "Free.": "Free.",
+  "From the command line: jarvis appearance list, jarvis appearance status, or jarvis appearance set avatar3d. Other modes: face, avatar2d, hidden.": "From the command line: jarvis appearance list, jarvis appearance status, or jarvis appearance set avatar3d. Other modes: face, avatar2d, hidden.",
+  "Open the Appearance page and pick a look, or ask him by voice.": "Open the Appearance page and pick a look, or ask him by voice."
  }
 };

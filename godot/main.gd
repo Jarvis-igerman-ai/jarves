@@ -25,6 +25,7 @@ const LED_RING := ["LED_Diffuser_Front", "LED_Diffuser_Back", "LED_Strip", "LED_
 const BLANKS := ["LED_Blank_Front", "LED_Blank_Back"]
 const STATIC_FACE := ["Face_Eye_L", "Face_Eye_R", "Face_Smile"]   # Blender placeholder, replaced by the live face
 const FaceScript := preload("res://face/face.gd")
+const Appearance := preload("res://face/appearance.gd")
 const AssistantUI := preload("res://face/assistant_ui.gd")
 const RoomScript := preload("res://room/room.gd")
 # room camera presets around the device (target = device middle): [yaw, pitch, dist, fov]
@@ -78,6 +79,7 @@ var studio: Node3D         # studio lights + grey ground
 var we: WorldEnvironment
 var env_studio: Environment
 var face_vp: SubViewport
+var appearance: Control
 var room_chk: CheckButton
 
 
@@ -333,7 +335,11 @@ func _build_face() -> void:
 	face_vp = vp
 	face = FaceScript.new()
 	face.size = Vector2(720, 720)
-	vp.add_child(face)
+	appearance = Appearance.new()
+	vp.add_child(appearance)
+	appearance.add_child(face)
+	appearance.setup(face)
+	appearance.layout(Rect2(Vector2.ZERO, Vector2(720, 720)))
 	add_child(vp)
 	if parts.has("Display_Panel"):
 		var bb := _cad_aabb("Display_Panel")
@@ -355,11 +361,14 @@ func _build_face() -> void:
 			face.set_state(a.substr(13))
 		elif a.begins_with("--face-link="):
 			face.set_link(a.substr(12))
+		elif a.begins_with("--appearance="):
+			appearance.set_mode(a.substr(13))
 	face.snap()
 	if "--no-core" in OS.get_cmdline_user_args():
 		return
 	assistant = AssistantUI.new()
 	assistant.face = face
+	assistant.appearance = appearance
 	ui_layer.add_child(assistant)
 	assistant.options_toggled.connect(func(on): inspection_panel.visible = on)
 	assistant.set_anchors_and_offsets_preset(Control.PRESET_TOP_RIGHT, Control.PRESET_MODE_MINSIZE, 12)
@@ -1040,6 +1049,23 @@ func _check_room(errs: Array[String]) -> void:
 	if face_quad == null or face_vp == null or face_vp.render_target_update_mode != SubViewport.UPDATE_ALWAYS \
 			or (face_quad.material_override as StandardMaterial3D).albedo_texture != face_vp.get_texture():
 		errs.append("live face SubViewport not wired to the display")
+	# The room must apply the same presentation messages as the standalone face window.
+	if assistant == null or assistant.appearance != appearance:
+		errs.append("room appearance receiver missing")
+	else:
+		for mode in appearance.MODES:
+			assistant._on_message("appearance.set", {"mode": mode})
+			if appearance.mode != mode or (mode in ["avatar2d", "avatar3d"] and appearance.avatar == null):
+				errs.append("room appearance not applied: " + mode)
+		assistant._on_message("appearance.set", {"mode": "face"})
+		assistant.strip.locale = "en"
+		assistant._on_message("status", {"mic_muted": true})
+		if assistant.options_box.visible or assistant.mute_chk.get_parent() == assistant.options_box \
+				or not assistant.mute_chk.visible or assistant.mute_chk.text != "Unmute microphone":
+			errs.append("room microphone recovery hidden or mislabeled")
+		assistant.mute_chk.toggled.emit(false)
+		if assistant.last_sent != ["mic.set_mute", {"muted": false}]:
+			errs.append("room unmute button did not request microphone recovery")
 	await get_tree().physics_frame
 	var vs := get_viewport().get_visible_rect().size
 	for k in ROOM_CAMS:

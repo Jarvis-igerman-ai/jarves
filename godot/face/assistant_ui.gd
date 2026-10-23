@@ -11,7 +11,7 @@ const PREVIEW_S := 20.0           # "What does he see?" closes by itself after t
 
 var link: Node
 var face: Control                 # face.gd instance to drive (set by the owner)
-var appearance: Control           # appearance.gd (face_app only; the 3D twin keeps the face on its glass)
+var appearance: Control           # shared presentation in both the standalone face and room display
 var status_lbl: Label
 var caption: Label
 var who: Label                   # "JARVES" / "You" kept OUT of the caption so Hebrew lays out right-to-left
@@ -98,8 +98,8 @@ func _ready() -> void:
 	options_box.add_child(caption)
 	mute_chk = CheckButton.new()
 	mute_chk.text = "Mic mute (software)"
-	mute_chk.toggled.connect(func(on): link.send("mic.set_mute", {"muted": on}))
-	options_box.add_child(mute_chk)
+	mute_chk.toggled.connect(func(on): _send("mic.set_mute", {"muted": on}))
+	box.add_child(mute_chk)           # recovery control remains visible while Options is collapsed
 	# opens the local web dashboard (conversations, logs, costs, memory, settings); the Core opens the browser
 	dash_btn = Button.new()
 	dash_btn.text = "Open dashboard"
@@ -453,5 +453,10 @@ func _show_status(p: Dictionary) -> void:
 			lines.append("- %s: %s" % [FRIENDLY.get(k, k), act if act != "" else str(c.get("detail", "")).substr(0, 60)])
 	status_lbl.text = "\n".join(lines)
 	mute_chk.set_pressed_no_signal(bool(p.get("mic_muted", false)))
+	var he: bool = strip.locale == "he"
+	if bool(p.get("mic_muted", false)):
+		mute_chk.text = "בטל השתקת מיקרופון" if he else "Unmute microphone"
+	else:
+		mute_chk.text = "השתק מיקרופון" if he else "Mute microphone"
 
 	_show_activity(_str(p.get("face_state"), _state))

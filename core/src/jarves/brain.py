@@ -37,6 +37,7 @@ class Intent:
 
 _FLAGS = re.IGNORECASE
 _RULES: list[tuple[str, re.Pattern, Callable[[re.Match], dict]]] = [
+    ("mute_microphone", re.compile(r"^(?:mute (?:yourself|(?:your |the )?microphone|mic)|stop (?:listening to|hearing) me|אל תקשיב לי|תפסיק להקשיב לי|תשתיק את המיקרופון|השתק מיקרופון|תעשה מיוט לעצמך)$", _FLAGS), lambda m: {}),
     ("forget_all", re.compile(r"^(?:תשכח|שכח|תמחק|מחק)\s+(?:את\s+)?(?:הכל|הכול|כל\s+הזיכרונות)$|^forget everything$", _FLAGS),
      lambda m: {}),
     ("recall", re.compile(r"^(?:מה\s+אתה\s+זוכר(?:\s+עליי|\s+עלי)?|what do you remember(?: about me)?)\??$", _FLAGS),
@@ -106,6 +107,7 @@ Web search is for current facts (news, weather, prices); one quick search is eno
 only when it matters. A CURRENT score/state ("מה התוצאה", "מה המצב") means the latest reported value with its time ("נכון
 לדקה 60: אחת-אפס"), not only a final result; if none is reliable, say so once. On a repeat, search for the one missing
 fact; never state a number, score or source you did not find in this turn's search.
+Microphone privacy: use mute_microphone when asked to stop hearing the user. Recovery is the visible microphone button, tray, or jarvis mic unmute; never redirect this request to the dashboard or promise voice unmute while muted.
 Window and app: hide_yourself only hides the window (still listening); quit_jarves quits the app completely ("תסגור את
 עצמך לגמרי", "שט דאון"); open_dashboard only opens the dashboard and is never a way to close anything; end_conversation
 ends only the voice conversation ("תסגור את הסשן", a bare "תסגור"); quit only on an explicit "the whole app / yourself

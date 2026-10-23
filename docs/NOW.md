@@ -1,5 +1,7 @@
 # NOW — V4 delivery + public-only repository consolidation (owner decision, 20 October 2026)
 
+**Owner corrections, 23 Oct (current):** review the latest private conversation; fix microphone voice mute with visible non-dashboard unmute and CLI recovery, room appearance changes and appearance CLI parity. User also explicitly requests a subagent to review and fix the local dashboard issues/diagnostic notes (not the GitHub backlog), recheck each fix and resolve only verified findings while preserving history. Private logs/data remain private; real sensor/account/paid checks require their existing gates. One integrating owner, non-overlapping subagent work only.
+
 **Owner correction, 23 Oct:** install the published beta on this PC, then correct the reported always-on camera: enabling the skill must only make it available; capture is requested as needed, with explicit timed previews preserved. Scope: Python camera lifecycle, focused offline tests and matching feature guidance. No real sensor/cloud tests or unrelated work.
 
 **Owner authorization, 22 Oct:** repair and test open PRs #72, #68 and #70, review their final diffs and merge each individually only when ready and green. One writer; no force pushes or large integration batch. Wait for main checks/package between merges. No new account, paid-call, sensor or physical testing is authorized by this maintenance task.

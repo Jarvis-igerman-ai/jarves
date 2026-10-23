@@ -1,3 +1,21 @@
+## Conversation controls and dashboard findings — 23 Oct 2026 / #77
+
+- Owner request: inspect the latest conversation, correct microphone mute/non-dashboard unmute, room appearance and CLI parity; explicitly delegated review/fixes of all local dashboard notes/issues with verified rechecks and history-preserving resolution. This is not permission to work the unrelated GitHub backlog.
+- Python Core owns the missing mute action/CLI surfaces and result/readiness bookkeeping; Godot owns the room's missing appearance renderer and visible recovery button. No CAD/material/source assets changed. CLI: `jarvis mic mute|unmute|status`; `jarvis appearance list|status|set avatar2d` (also face/avatar3d/hidden).
+- [Complete sanitized dashboard inventory](reviews/DASHBOARD_FINDINGS_23OCT2026.md): 25 conversation issues, 13 Bug reports, six monitor findings, 15 latest self-check findings, seven AI notes. Current timing classifier does not reproduce two old stall findings. Real input quality, camera/player/account acceptance and unexplained current latency remain open; no paid replay or capture.
+- Private status review: verified standard checkpoint and exact historical classifier recheck. Conversation entries 2/3 (stale timing) and 21 (recovered transport incident) resolved; 13/14/18 (expected refusals) and 22 (unconfirmed AI hypothesis) ignored. All records/history retained; audit stays private. Source-fix-dependent entries are not yet claimed cleared on the installed build.
+- Checks so far: 42 focused control/appearance tests passed; real Godot room self-check passed, including every appearance mode and the unmute message with Options collapsed. Independently tested startup ordering (15 tests) and exactly-one tool outcome logging (31 tests including existing Core contracts) integrated. Expected-refusal classification passed 72 focused history/registry tests, preserving model bad-argument and real failure detection; diagnostic snapshot dedup passed 20 registry and 12 Health API tests. All eight final pre-push checks passed after the classifier and separate-Live-stream privacy follow-ups. Final checks, commit/CI links and installed/rechecked dashboard statuses are recorded on [maintenance #77](https://github.com/igalgerman/jarves/issues/77).
+- Actual project renders: [room 2D](../output/control-review/room-avatar2d.png), [room 3D](../output/control-review/room-avatar3d.png), [visible mic control](../output/control-review/room-controls.png). Reproduction/source hashes in [manifest](../output/control-review/source-manifest.json). Automatic offscreen renders, not owner visual approval.
+
+### Current decision queue (carried queue below remains authoritative for unrelated work)
+
+| Question | Recommendation / rationale | Status / next gate |
+|---|---|---|
+| Microphone privacy and recovery? | Gate immediately; visible window mic button, tray and CLI unmute avoid needing speech while muted. | ANSWERED: owner requested this behavior. |
+| Which dashboard issues should be cleared? | Only rechecked fixes or proven stale/benign findings; keep source history and genuine recurrences. | ANSWERED: owner explicitly requires clearing and rechecking, not deletion or blanket success. |
+| Tune quiet/false-wake microphone thresholds or spend on real latency replay? | Keep current settings until controlled real input/budget review; metadata cannot establish a safe tuning value. | USER DECISION REQUIRED at real microphone/paid-call gate; not a reason to block unrelated verified fixes. |
+| Player/account/camera/physical acceptance? | Keep actual integration gates open; fake tests do not prove them. | DEFERRED to owner-assisted real use; no new sign-in, capture or purchase. |
+
 ## Camera on demand — 23 Oct 2026 / #74
 
 - Owner requested installation: published beta 4.0.1-beta.4 / build 212 installed using `jarvis update install --yes --silent`; installed CLI version and beta update status verified. Backup created by the updater. This build predates the camera correction below.

@@ -17,6 +17,8 @@ Owner doc = the one document that wins on a conflict.
 
 Execution authority: [NOW](NOW.md) (the only active brief) with [AGENTS](../AGENTS.md). Status log: [HANDOFF](HANDOFF.md) (newest entry on top). Planning and status per version: [ROADMAP](ROADMAP.md).
 
+Current dashboard review: [23 Oct findings inventory and recheck gates](reviews/DASHBOARD_FINDINGS_23OCT2026.md) (current; owner: Python Core/runtime diagnostics).
+
 ## 2. Testing and manual testing
 
 | What | Where | Who runs it |

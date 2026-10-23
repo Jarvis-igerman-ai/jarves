@@ -402,6 +402,38 @@ def cmd_display(a, cfg, home) -> int:
     return 0 if res.get("ok", True) else 1
 
 
+def cmd_mic(a, cfg, home) -> int:
+    """Explicit local recovery: never depend on speech to unmute a muted microphone."""
+    if a.action == "status":
+        r = _ws_call(home, cfg.link.port, {"type": "status.request", "payload": {}}, "status")
+        mic = ((r or {}).get("runtime") or {}).get("mic") or {}
+    else:
+        r = _ws_call(home, cfg.link.port, {"type": "runtime.set", "payload": {"mic_muted": a.action == "mute"}},
+                     "runtime.state", timeout=8)
+        mic = ((r or {}).get("runtime") or {}).get("mic") or {}
+    if r is None or not isinstance(mic.get("muted"), bool):
+        print("No live microphone status. Start JARVES with: jarvis start")
+        return 1
+    if a.action != "status" and mic["muted"] != (a.action == "mute"):
+        print("Microphone change was not confirmed. Check: jarvis mic status")
+        return 1
+    print("Microphone: " + ("MUTED" if mic["muted"] else "on"))
+    return 0
+
+
+def cmd_appearance(a, cfg, home) -> int:
+    from .appearance import Appearance, MODES
+    app = Appearance(home)
+    if a.action == "set":
+        app.set(a.mode, by="cli")
+        print(f"Saved appearance: {app.mode}. The running display updates within a second; otherwise at next connect.")
+    elif a.action == "list":
+        print("\n".join(MODES))
+    else:
+        print(f"Appearance: {app.mode}")
+    return 0
+
+
 def cmd_autostart(a, cfg, home) -> int:
     """jarvis autostart on | off | status: start JARVES invisibly at login (the user's choice; default off)."""
     from .features import Features
@@ -1702,6 +1734,13 @@ def main(argv: list[str] | None = None) -> int:
     sta.add_argument("--wait", type=int, default=90, help="seconds to wait for the Core to answer")
     sub.add_parser("show", help="open the JARVES window (the Core keeps running)")
     sub.add_parser("hide", help="close the JARVES window (the Core keeps running)")
+    mic = sub.add_parser("mic", help="microphone privacy and recovery: mute / unmute / status")
+    mic.add_argument("action", choices=["mute", "unmute", "status"])
+    appearance = sub.add_parser("appearance", help="display look: list / status / set face|avatar2d|avatar3d|hidden")
+    aps = appearance.add_subparsers(dest="action", required=True)
+    aps.add_parser("list")
+    aps.add_parser("status")
+    aps.add_parser("set").add_argument("mode", choices=["face", "avatar2d", "avatar3d", "hidden"])
     au = sub.add_parser("autostart", help="start JARVES invisibly at login: on / off / status")
     au.add_argument("action", choices=["on", "off", "status"])
     lg = sub.add_parser("logs", help="show the log (filter by --log-level / --module; -f to follow)")
@@ -1936,6 +1975,7 @@ def main(argv: list[str] | None = None) -> int:
             "diagnose": cmd_diagnose, "features": cmd_features, "help": cmd_help, "google": cmd_google,
             "backup": cmd_backup, "restore": cmd_restore, "usage": cmd_usage, "start": cmd_start,
             "show": cmd_display, "hide": cmd_display, "autostart": cmd_autostart,
+            "mic": cmd_mic, "appearance": cmd_appearance,
             "update": cmd_update, "browser": cmd_browser, "connect": cmd_connect, "telegram": cmd_telegram, "instagram": cmd_instagram, "home": cmd_home,
             "profile": profiles.cmd_profile, "approvals": cmd_approvals, "recall": recall.cmd_recall,
             "health": health_cli.cmd_health,

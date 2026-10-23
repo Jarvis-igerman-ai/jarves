@@ -34,7 +34,7 @@ FEATURES: dict[str, object] = {
     "workspace_agent_edit": (D, "persona-file edits are reviewed on the Persona files page"),
     "voice_change": "setup", "calendar_write": "calendar", "dashboard_lan": "dashboard", "mobile_access": "dashboard",
     "assistant_identity": "setup", "telegram": "telegram", "instagram": "instagram", "usage_monitor": "usage", "usage_admin_key": "connect",
-    "backup": "backup", "appearance": (D, "face theme and avatar are picked on the Appearance page"),
+    "backup": "backup", "appearance": "appearance",
     "skill_creation": (D, "proposed Skills are reviewed on the New Skills page (risky: approval on screen)"),
     "guided_setup": "setup", "self_check": "diagnose", "scheduler": "jobs", "reports": "reports", "notes": "notes",
     "timers": "timers", "lists": "lists", "goals": "goals", "goal_plans": "goals", "adaptive_memory": "prefs", "prefs_in_prompt": "prefs",
@@ -60,8 +60,8 @@ FEATURES: dict[str, object] = {
 # make sense inside a conversation.
 V = "voice"
 TOOL_GROUPS: dict[str, object] = {
-    "alerts": (D, "alerts are read and answered on the Alerts page"), "app": (V, "internal test skill"),
-    "appearance": (D, "the Appearance page"), "autonomy": (D, "the Autonomy page"), "briefing": "jobs",
+    "alerts": (D, "alerts are read and answered on the Alerts page"), "app": "mic",
+    "appearance": "appearance", "autonomy": (D, "the Autonomy page"), "briefing": "jobs",
     "browser": "browser", "calc": (V, "arithmetic inside a conversation"), "calendar": "calendar",
     "calendar_write": "calendar", "camera": (D, "see features camera"), "clock": (V, "the time inside a conversation"),
     "contacts": "contacts", "dashboard": "dashboard", "display": "show", "features": "features",
