@@ -398,6 +398,29 @@ def test_silent_turns_never_speak_ring_or_light_the_face(rig):
     assert chat_engine.COMMANDS and r.chat.state(device=True)["can_speak"] is False
 
 
+def test_published_reply_accepts_an_immediate_next_turn(rig, monkeypatch):
+    r = rig()
+    publish = r.chat.events.add
+    reacted = threading.Event()
+    outcomes = []
+
+    def on_event(kind, **fields):
+        result = publish(kind, **fields)
+        if kind == "reply" and fields.get("turn") == "t1":
+            # React synchronously at publication: no scheduler luck or sleep can hide the race.
+            outcomes.append(r.chat.submit("send the report", client="owner"))
+            reacted.set()
+        return result
+
+    monkeypatch.setattr(r.chat.events, "add", on_event)
+    assert r.chat.submit("first message", client="owner")[0] == 200
+    assert reacted.wait(30), "reply was not published"
+    assert outcomes[0][0] == 200, outcomes[0]
+    asked = _wait_pending(r)
+    assert r.core.approvals.answer(asked[0]["id"], True, channel="popup")[0]
+    collect(owner_poll(r), "reply", outcomes[0][1]["turn"])
+
+
 def test_quiet_hours_make_the_chat_silent(rig, home):
     from jarves.userdata import open_db
     r = rig()

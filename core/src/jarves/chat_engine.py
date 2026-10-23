@@ -451,11 +451,12 @@ class WebChat:
     def _finish(self, tid: str, text: str, ok: bool, code: str, silent: bool, spoke: bool, **extra) -> None:
         if text:
             self._add_message({"role": "assistant", "text": text, "turn": tid, "ok": ok, "code": code})
+        # A published reply promises that an immediate next turn can be accepted.
+        self._release(tid)
         self.events.add("reply", replace=("delta", tid), turn=tid, text=text, ok=ok, code=code, silent=silent,
                         spoken=spoke, **{k: v for k, v in extra.items() if k == "source"})
         logs.info("core", "CHAT_TURN_DONE", "web chat turn finished", ok=ok, result_code=code,
                   ms=extra.get("ms", 0), count=len(text))
-        self._release(tid)
 
     # ------------------------------------------------------------------ slash commands (run on the loop)
     def _notice(self, tid: str, command: str, en: str, he: str, **data) -> None:
