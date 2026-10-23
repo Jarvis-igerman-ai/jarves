@@ -1891,7 +1891,12 @@
   "The screen changes within a second. Hidden, he still hears \"Hey Jarvis\".": "המסך מתחלף תוך שנייה. במצב מוסתר הוא עדיין שומע \"היי ג'ארביס\".",
   "Free.": "חינם.",
   "From the command line: jarvis appearance list, jarvis appearance status, or jarvis appearance set avatar3d. Other modes: face, avatar2d, hidden.": "בשורת הפקודה: jarvis appearance list, jarvis appearance status או jarvis appearance set avatar3d. אפשר גם face, avatar2d או hidden.",
-  "Open the Appearance page and pick a look, or ask him by voice.": "פתחו את עמוד \"מראה\" ובחרו מראה, או בקשו ממנו בקול."
+  "Open the Appearance page and pick a look, or ask him by voice.": "פתחו את עמוד \"מראה\" ובחרו מראה, או בקשו ממנו בקול.",
+  "The bridge program is not installed": "רכיב הגשר לא מותקן",
+  "Set up WhatsApp in one go": "הגדרת וואטסאפ בלחיצה אחת",
+  "Starts the bridge if needed and shows a QR code. You scan it on your phone, then you can switch on read-only. No message is sent.": "מפעיל את הגשר במידת הצורך ומציג קוד QR. את הסריקה בטלפון עושים אתם, ואחריה אפשר להפעיל קריאה בלבד. לא נשלחת שום הודעה.",
+  "Set up WhatsApp": "הגדרת וואטסאפ",
+  "Switch on read-only mode now? JARVES will read and never send.": "להפעיל עכשיו מצב קריאה בלבד? ג'ארביס יקרא ולא ישלח."
  },
  "rules": [
   [

@@ -1891,6 +1891,11 @@
   "The screen changes within a second. Hidden, he still hears \"Hey Jarvis\".": "The screen changes within a second. Hidden, he still hears \"Hey Jarvis\".",
   "Free.": "Free.",
   "From the command line: jarvis appearance list, jarvis appearance status, or jarvis appearance set avatar3d. Other modes: face, avatar2d, hidden.": "From the command line: jarvis appearance list, jarvis appearance status, or jarvis appearance set avatar3d. Other modes: face, avatar2d, hidden.",
-  "Open the Appearance page and pick a look, or ask him by voice.": "Open the Appearance page and pick a look, or ask him by voice."
+  "Open the Appearance page and pick a look, or ask him by voice.": "Open the Appearance page and pick a look, or ask him by voice.",
+  "The bridge program is not installed": "The bridge program is not installed",
+  "Set up WhatsApp in one go": "Set up WhatsApp in one go",
+  "Starts the bridge if needed and shows a QR code. You scan it on your phone, then you can switch on read-only. No message is sent.": "Starts the bridge if needed and shows a QR code. You scan it on your phone, then you can switch on read-only. No message is sent.",
+  "Set up WhatsApp": "Set up WhatsApp",
+  "Switch on read-only mode now? JARVES will read and never send.": "Switch on read-only mode now? JARVES will read and never send."
  }
 };

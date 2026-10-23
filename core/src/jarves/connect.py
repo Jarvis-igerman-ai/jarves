@@ -361,20 +361,50 @@ def _wa_status_dict(home: Path):
 
 
 def _status_whatsapp(it: Item, home: Path, cfg) -> None:
+    from .whatsapp_bridge import NOT_INSTALLED_EN, NOT_INSTALLED_HE, bridge_installed
     st = _wa_status_dict(home)                                # one local read-only call; nothing is sent
-    if st and st.get("linked") and st.get("connection") not in ("logged_out", "not_linked", "linking"):
+    if st is None and not bridge_installed(home):
+        it.detail_he, it.detail_en = "רכיב הגשר לא מותקן", "bridge program not installed"
+        it.fix_he, it.fix_en = NOT_INSTALLED_HE, NOT_INSTALLED_EN
+    elif st and st.get("linked") and st.get("connection") not in ("logged_out", "not_linked", "linking"):
         it.state, it.detail_he, it.detail_en = "connected", "מחובר לטלפון", "linked to the phone"
     else:
         it.detail_he, it.detail_en = "לא מחובר", "not linked"
-        it.fix_he, it.fix_en = "jarvis whatsapp link", "jarvis whatsapp link"
+        it.fix_he, it.fix_en = "jarvis connect whatsapp, או בלוח הבקרה: Set up WhatsApp", "jarvis connect whatsapp, or on the dashboard: Set up WhatsApp"
 
 
 def _step_whatsapp(conn, it: Item) -> None:
-    """Linking needs the phone's QR scan, so connect never links by itself: it points to the command."""
-    conn.h("קישור וואטסאפ דורש סריקה בטלפון. מריצים: jarvis whatsapp link",
-           "Linking WhatsApp needs a scan on your phone. Run: jarvis whatsapp link")
-    conn.results["whatsapp"] = "attention"
-    conn.notes["whatsapp"] = ("jarvis whatsapp link", "jarvis whatsapp link")
+    """The whatsapp row runs the real setup: starts the bridge, shows the QR here, waits for the owner's phone scan
+    (never scanned or linked silently), then offers read-only mode. No bridge program: says so with the next step."""
+    from types import SimpleNamespace
+
+    from . import whatsapp_admin as wad
+    from . import whatsapp_bridge as wab
+    if not wab.bridge_installed(conn.home) and wab.status_or_none(conn.home) is None:
+        conn.h(wab.NOT_INSTALLED_HE, wab.NOT_INSTALLED_EN)
+        conn.results["whatsapp"] = "attention"
+        conn.notes["whatsapp"] = (wab.NOT_INSTALLED_HE, wab.NOT_INSTALLED_EN)
+        return
+    conn.h("מפעיל את גשר הוואטסאפ ומציג קוד QR. סורקים אותו בטלפון בעצמכם (וואטסאפ > הגדרות > מכשירים מקושרים).",
+           "Starting the WhatsApp bridge and showing a QR code. You scan it on your phone yourself "
+           "(WhatsApp > Settings > Linked devices).")
+    try:
+        rc = wad._link(conn.home, SimpleNamespace(phone="", window=False))
+    except wab.BridgeError as e:
+        conn.h(e.he, e.message)
+        rc = 1
+    if rc != 0:
+        conn.results["whatsapp"] = "attention"
+        conn.notes["whatsapp"] = ("jarvis whatsapp setup", "jarvis whatsapp setup")
+        return
+    conn.results["whatsapp"] = "connected"
+    if conn._yn("להפעיל עכשיו מצב קריאה בלבד (קורא, אף פעם לא שולח)?",
+                "Switch on read-only mode now (it reads, it never sends)?", False):
+        try:
+            wad.set_mode(conn.home, "read", by="connect")
+            conn.h("מצב קריאה בלבד פועל.", "Read-only mode is on.")
+        except wab.BridgeError as e:
+            conn.h(e.he, e.message)
 
 
 EXTRA_STATUS.update({"openai": _status_openai, "chatgpt": _status_chatgpt, "openai-admin": _status_admin})
@@ -1022,6 +1052,20 @@ def dashboard_routes(register) -> None:
         fid = str((body or {}).get("id") or "")
         if fid and fid not in ONLY:
             return 404, {"error": "no such integration"}
+        if fid == "whatsapp":                      # same backend as the WhatsApp page; the QR is shown there
+            from . import whatsapp_admin as wad
+            if not wad._local(ctx):
+                return 403, {"error": "this is changed only on the computer itself"}
+            set_never(ctx.home, [x for x in never_list(ctx.home) if x != fid])
+            try:
+                r = wad.setup_begin(ctx.home)
+            except wad.BridgeError as e:
+                return 200, {"started": False, "step": "bridge_down", "message_en": e.message, "message_he": e.he}
+            if r["step"] in ("not_installed", "bridge_down"):
+                return 200, {"started": False, "step": r["step"], "message_en": r["message"], "message_he": r["message_he"]}
+            return 200, {"started": True, "step": r["step"], "open": "#/whatsapp",
+                         "message_en": "The bridge is running. Scan the QR on the WhatsApp page with your phone.",
+                         "message_he": "הגשר פועל. סורקים את קוד ה-QR בעמוד וואטסאפ עם הטלפון."}
         if fid:
             set_never(ctx.home, [x for x in never_list(ctx.home) if x != fid])
         ok = bool(LAUNCH(fid) if fid else LAUNCH())
