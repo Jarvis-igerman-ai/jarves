@@ -37,3 +37,5 @@
 - Actual project previews and hashes remain current; no rerender needed for a handoff migration. Installed baseline stays build 217 until a separately verified release/install. Seven reviewed statuses cleared with history retained; hardware/account/voice acceptance remains open.
 
 - Final CI fixture correction: immediate-next-turn approval test now supplies FakePopup explicitly. With no active channel, the real service correctly resolves no_channel; that was a fixture defect. Integrated upstream #95 atomic reply/notice busy-state fix rather than keeping a competing implementation. Isolated this PR's added catalog entries from the shared append tail to avoid recurring append conflicts. Final commit/CI evidence is maintained on #77.
+
+- Implementation/integration head 04b9d03 passed every hosted job and security analysis; a newer main again touched the catalog boundary. Key-aware merge preserves all translations; the maintained catalog_add.py --sort formatter supplies the new required stable alphabetical order for parallel additions. No translation value or feature behavior changed by this resolution. Final CI/merge evidence remains on #77.

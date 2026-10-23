@@ -35,6 +35,8 @@ jobs:
       actions: read        # find the PR run's installer artifact for the merge commit
     env:
       GH_TOKEN: ${{ github.token }}
+      # a draft PR runs only the fast checks; marking it ready (ready_for_review) starts the full run (#89)
+      DRAFT: ${{ github.event_name == 'pull_request' && github.event.pull_request.draft }}
     outputs:
       code: ${{ steps.c.outputs.code }}
       full: ${{ steps.c.outputs.full }}
@@ -49,6 +51,7 @@ jobs:
       tree: ${{ steps.c.outputs.tree }}
       reused: ${{ steps.c.outputs.reused }}
       proof_run: ${{ steps.c.outputs.proof_run }}
+      draft: ${{ steps.c.outputs.draft }}
     steps:
       - uses: actions/checkout@v7
         with:
@@ -80,9 +83,10 @@ jobs:
           fi
           args=(--event "$GITHUB_EVENT_NAME")
           [ "$reused" = "true" ] && args+=(--reused)
+          draft=false; [ "$DRAFT" = "true" ] && { draft=true; args+=(--draft); echo "draft PR: fast checks only (mark it ready for the full run)"; }
           python3 core/tools/ci_plan.py classify "${args[@]}" | tee classify.out
           if [ "$GITHUB_EVENT_NAME" != "pull_request" ] && [ "$reused" != "true" ]; then echo "full matrix ($GITHUB_EVENT_NAME $GITHUB_REF)"; fi
-          { cat classify.out; echo "tree=$tree"; echo "reused=$reused"; echo "proof_run=$proof_run"; } >> "$GITHUB_OUTPUT"
+          { cat classify.out; echo "tree=$tree"; echo "reused=$reused"; echo "proof_run=$proof_run"; echo "draft=$draft"; } >> "$GITHUB_OUTPUT"
           { echo "tree \`${tree:0:12}\` reused=$reused"; grep -E '^[a-z0-9]+=(true|false)$' classify.out | tr '\n' ' '; echo
             python3 core/tools/ci_plan.py summary --plan-line "$(grep '^plan=' classify.out || true)" || true; } >> "$GITHUB_STEP_SUMMARY"
   validate:
@@ -702,23 +706,41 @@ jobs:
   ci-ok:
     # ONE stable required check for branch protection: green when every job above passed or was legitimately skipped
     # (docs-only, reused proof). Failed or cancelled needs make it red. Per-shard names stay valid required checks too.
+    # `!cancelled()`, not `always()`: GitHub never cancels an always() job, so a cancelled run (a newer push, marked
+    # ready, a draft's own run) ended this check RED and woke agents with a false failure. Now a cancelled run ends it
+    # cancelled (grey), never skipped: a job whose `if` turns false because the run was cancelled is cancelled
+    # (run 40004513490: failure-summary), so a cancelled run can never leave a green check behind.
     name: CI result (single required check)
-    if: always()
+    if: ${{ !cancelled() }}
     needs: [changes, validate, core, browser, installer, installer-smoke, installer-upgrade, whatsapp-bridge, perf, cad, blender, godot, e2e]
     runs-on: ubuntu-24.04
     timeout-minutes: 5
+    permissions:
+      contents: read
+      actions: write      # a draft PR's run cancels itself: this check must never read green on a draft
     env:
       NEEDS: ${{ toJSON(needs) }}
+      DRAFT: ${{ needs.changes.outputs.draft }}
+      GH_TOKEN: ${{ github.token }}
     steps:
       - shell: bash
         run: |
           echo "$NEEDS" | jq -r 'to_entries[] | "\(.key): \(.value.result)"'
+          if [ "$DRAFT" = "true" ]; then
+            # skipped heavy jobs would make this required check green, and a green check on the draft's head could let
+            # auto-merge through the moment the PR is marked ready. The run cancels itself, which cancels this job
+            # (grey); if the cancel does not land, it fails (red). Never green.
+            echo "::notice::Draft PR: only the fast checks ran. Mark it ready for review: the full CI runs then, and only that run can turn this check green."
+            gh run cancel "$GITHUB_RUN_ID" -R "$GITHUB_REPOSITORY" || true
+            sleep 90
+            exit 1
+          fi
           echo "$NEEDS" | jq -e '[.[] | select(.result == "failure" or .result == "cancelled")] | length == 0' > /dev/null
   failure-summary:
     # ONE comment per PR (updated in place): failed jobs, first failing test + its first error line, log links, known
     # flakes marked from the flake-report artifact. No secrets, no log content beyond one redacted line (core/tools/ci_comment.py).
     name: Failure summary comment (PR only)
-    if: failure() && github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository
+    if: failure() && github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository && github.event.pull_request.draft != true
     needs: [changes, validate, core, browser, installer, installer-smoke, installer-upgrade, whatsapp-bridge, perf, cad, blender, godot, e2e]
     runs-on: ubuntu-24.04
     timeout-minutes: 5

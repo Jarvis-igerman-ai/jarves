@@ -1,12 +1,15 @@
 """Custom wake phrase training (WP-M4, `jarvis wake train`): numpy head, window labelling, the whole pipeline with a
 fake synthesizer + fake front end (fast, silent, no TTS), and the runtime detector on the real openWakeWord front end."""
+import copy
 import json
+from pathlib import Path
 
 import numpy as np
 import pytest
 
 from jarves import cli
 from jarves.identity import Identity
+from jarves.voice import wake_prod as wp
 from jarves.voice import wake_train as wt
 from jarves.voice.wakeword import HeadWakeDetector, OpenWakeWordDetector, make_detector
 
@@ -34,6 +37,48 @@ def fake_embedder(audio):
 
 
 VOICES = [wt.Voice("en1", "en", "fake"), wt.Voice("en2", "en", "fake"), wt.Voice("he1", "he", "fake")]
+
+# One training per distinct input in this test process (#89): a training takes 16-32 s on CI and is deterministic
+# (test_wake_prod.test_same_seed_and_samples_give_the_same_model proves it), so tests with the same input share it.
+_TRAINED: dict = {}
+_train_phrase = wt.train_phrase           # the real one (the CLI tests monkeypatch wt.train_phrase)
+
+
+def _moved(x, old: str, new: str):
+    """A deep copy of a training report with the model path `old` replaced by `new`."""
+    if isinstance(x, dict):
+        return {k: _moved(v, old, new) for k, v in x.items()}
+    if isinstance(x, (list, tuple)):
+        return type(x)(_moved(v, old, new) for v in x)
+    return x.replace(old, new) if isinstance(x, str) else x
+
+
+def train_once(phrase, out, **kw):
+    """wt.train_phrase, trained ONCE per distinct input (phrase, options, recordings' content, seed). Every caller
+    gets its OWN copy of the model file + report at `out` (a test that changes its model cannot reach another test).
+    Any function of wake_train/wake_prod a test monkeypatched is part of the input, so a patched run never reuses an
+    unpatched result."""
+    patched = tuple((n, f) for m in (wt, wp) for n, f in sorted(vars(m).items())
+                    if callable(f) and n not in ("train_phrase", "local_voices"))
+    key = (phrase, repr(sorted((k, v) for k, v in kw.items() if k not in ("progress", "samples", "sample_files"))),
+           kw.get("samples") is not None, wp.samples_fingerprint(kw.get("samples"), kw.get("sample_files")), patched)
+    out = Path(out)
+    if key not in _TRAINED:
+        rep = _train_phrase(phrase, out, **kw)
+        _TRAINED[key] = (str(out), copy.deepcopy(rep), out.read_bytes())
+        return rep
+    first, rep, model = _TRAINED[key]
+    rep = _moved(rep, first, str(out))
+    out.parent.mkdir(parents=True, exist_ok=True)
+    out.write_bytes(model)
+    out.with_suffix(".json").write_text(json.dumps(rep, ensure_ascii=False, indent=1), encoding="utf-8")
+    return rep
+
+
+def fast_train(*a, **kw):
+    """What `jarvis wake train` runs in the CLI tests: the fakes, the smallest grid, one training per input."""
+    kw.update(synth=fake_synth, embedder=fake_embedder, rates=(1.0,), pitches=(0.9, 1.1))
+    return train_once(*a, **kw)
 
 
 def test_head_roundtrip_and_scores(tmp_path):
@@ -105,12 +150,7 @@ def test_head_detector_on_the_real_front_end(tmp_path):
 
 def test_cli_train_and_apply(home, monkeypatch, capsys):
     monkeypatch.setattr(wt, "local_voices", lambda: VOICES)
-    real = wt.train_phrase
-
-    def fast(*a, **kw):
-        kw.update(synth=fake_synth, embedder=fake_embedder, rates=(1.0,), pitches=(0.9, 1.1))
-        return real(*a, **kw)
-    monkeypatch.setattr(wt, "train_phrase", fast)
+    monkeypatch.setattr(wt, "train_phrase", fast_train)
     assert cli.main(["wake", "train", "hey", "max", "--say", "היי מקס", "--apply"]) == 0
     out = capsys.readouterr().out
     assert "recall" in out and "Applied" in out
@@ -121,13 +161,8 @@ def test_cli_train_and_apply(home, monkeypatch, capsys):
 
 def test_cli_train_revert(home, monkeypatch, capsys):
     monkeypatch.setattr(wt, "local_voices", lambda: VOICES)
-    real = wt.train_phrase
-
-    def fast(*a, **kw):
-        kw.update(synth=fake_synth, embedder=fake_embedder, rates=(1.0,), pitches=(0.9, 1.1))
-        return real(*a, **kw)
-    monkeypatch.setattr(wt, "train_phrase", fast)
-    assert cli.main(["wake", "train", "hey", "max", "--apply"]) == 0
+    monkeypatch.setattr(wt, "train_phrase", fast_train)
+    assert cli.main(["wake", "train", "hey", "max", "--say", "היי מקס", "--apply"]) == 0   # same model as above
     model = Identity(home).wake()["model"]
     assert model.endswith("hey_max.npz")
     assert cli.main(["wake", "train", "--revert"]) == 0
