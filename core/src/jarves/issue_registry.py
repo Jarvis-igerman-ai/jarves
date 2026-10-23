@@ -45,6 +45,7 @@ from typing import Callable
 from pydantic import BaseModel
 
 from . import features as feat
+from . import issue_text as it
 from . import logs
 
 FEATURE = "issue_reports"
@@ -57,6 +58,7 @@ STATUSES = ("new", "acknowledged", "fixed", "ignored")
 OPEN = ("new", "acknowledged")
 SEVERITIES = ("P1", "P2", "P3")
 MAX_RECORDS = 300
+QUIET_DAYS = 3.0                                 # an update this old with no new occurrence closes an open issue
 TOOL_FAIL_THRESHOLD = 5                          # failures of one tool + code ...
 TOOL_FAIL_WINDOW_S = 3600.0                      # ... within this window become an issue
 WRITE_EVERY_S = 30.0                             # count-only updates of a known issue are batched
@@ -114,9 +116,27 @@ def clean_evidence(ev: object) -> tuple[dict, int]:
     return kept, dropped
 
 
+def clean_text(t: object, limit: int = 100) -> str:
+    """A short readable text. A text that could carry a path, an address, markup or a secret is rejected whole (the caller
+    falls back to a generated title); a rate like 0.5/h is read as '0.5 per h'; long text is cut at a word boundary."""
+    s = re.sub(r"\s+", " ", logs.redact(str(t or ""))).strip()
+    s = re.sub(r"(\d)/(h|s|min|d)\b", r"\1 per \2", s).replace("->", "to")
+    if re.search(r"[\\/@<>`\x00-\x1f]", s):
+        return ""
+    if not s or logs.has_secret(s):
+        return ""
+    if len(s) > limit:
+        cut = s[:limit - 1]
+        s = (cut.rsplit(" ", 1)[0] if " " in cut else cut).rstrip(" ,;:-") + "\u2026"
+    return s
+
+
 def clean_title(t: object, fallback: str) -> str:
-    s = logs.redact(str(t or "")).strip()
-    return s if _TITLE.match(s) and not logs.has_secret(s) else fallback
+    return clean_text(t, 100) or fallback
+
+
+def looks_bad_title(r: dict, title: str) -> bool:
+    return it.looks_raw(clean_text(title, 100), str(r.get("code") or ""))
 
 
 def clean_code(c: object) -> str:
@@ -185,7 +205,8 @@ class Registry:
 
     # ---- recording
     def record(self, area: str, code: str, severity: str = "P3", evidence: dict | None = None, *, title: str = "",
-               title_he: str = "", source: str = "", n: int = 1, now: float | None = None) -> dict | None:
+               title_he: str = "", source: str = "", n: int = 1, now: float | None = None, meaning: str = "",
+               meaning_he: str = "", next_step: str = "", next_step_he: str = "") -> dict | None:
         area = area if _AREA.match(area or "") else "core"
         code = clean_code(code)
         severity = severity if severity in SEVERITIES else "P3"
@@ -204,6 +225,14 @@ class Registry:
                 d["issues"][iid] = r
             r["count"] += n
             r["last_seen"] = now
+            for k, v, lim in (("meaning", meaning, 300), ("meaning_he", meaning_he, 300), ("next_step", next_step, 300),
+                              ("next_step_he", next_step_he, 300)):
+                if v and clean_text(v, lim):
+                    r[k] = clean_text(v, lim)
+            if title and not looks_bad_title(r, title):
+                r["title"] = clean_title(title, r["title"])
+            if title_he and it._HEB.search(title_he):
+                r["title_he"] = clean_title(title_he, r.get("title_he", ""))
             r["severity"] = min(r["severity"], severity)                  # "P1" < "P2": the worse one stays
             if ev:
                 r["evidence"] = ev
@@ -225,30 +254,39 @@ class Registry:
         return r
 
     # ---- reading
-    def list(self, status: str | None = None, severity: str | None = None, area: str | None = None) -> list[dict]:
+    def list(self, status: str | None = None, severity: str | None = None, area: str | None = None, *,
+             since: float | None = None) -> list[dict]:
+        """status: None = everything, 'open' = open BUGS (information items are not counted), 'info' = open
+        information items (expected environment states), or one of the stored statuses."""
         rows = list(self.load()["issues"].values())
         if status == "open":
-            rows = [r for r in rows if r["status"] in OPEN]
+            rows = [r for r in rows if r["status"] in OPEN and it.classify(r) == "bug"]
+        elif status == "info":
+            rows = [r for r in rows if r["status"] in OPEN and it.classify(r) == "info"]
         elif status:
             rows = [r for r in rows if r["status"] == status]
         if severity:
             rows = [r for r in rows if r["severity"] == severity]
         if area:
             rows = [r for r in rows if r["area"] == area]
-        return sorted(rows, key=lambda r: (r["status"] not in OPEN, r["severity"], -r["count"], -r["last_seen"]))
+        if since is not None:
+            rows = [r for r in rows if r["last_seen"] >= since]
+        return sorted(rows, key=lambda r: (r["status"] not in OPEN, it.classify(r) == "info", r["severity"], -r["count"],
+                                           -r["last_seen"]))
 
     def get(self, iid: str) -> dict | None:
         return self.load()["issues"].get(iid)
 
     def counts(self) -> dict:
-        rows = self.load()["issues"].values()
-        op = [r for r in rows if r["status"] in OPEN]
+        """'open' = open bugs only; expected environment states are counted separately as 'info'."""
+        rows = list(self.load()["issues"].values())
+        op = [r for r in rows if r["status"] in OPEN and it.classify(r) == "bug"]
         return {"open": len(op), "p1": sum(r["severity"] == "P1" for r in op), "p2": sum(r["severity"] == "P2" for r in op),
                 "p3": sum(r["severity"] == "P3" for r in op), "new": sum(r["status"] == "new" for r in op),
-                "total": len(rows)}
+                "info": sum(r["status"] in OPEN and it.classify(r) == "info" for r in rows), "total": len(rows)}
 
     # ---- changes by the owner
-    def set_status(self, iid: str, status: str, *, version: str = "") -> dict | None:
+    def set_status(self, iid: str, status: str, *, version: str = "", note: str = "") -> dict | None:
         if status not in STATUSES:
             raise ValueError("status must be new, acknowledged, fixed or ignored")
         with self.lock:
@@ -260,8 +298,10 @@ class Registry:
             if status == "fixed":
                 r["fixed_in"] = version or self.version or r["fixed_in"]
                 r["fixed_notice"] = True            # the owner did it: nothing to announce
+                r["closed_reason"], r["fixed_note"] = "owner", clean_text(note, 100)
             elif status in ("new", "acknowledged"):
                 r["fixed_in"] = ""
+                r["closed_reason"], r["fixed_note"] = "", ""
             self._save(d)
         logs.info("issues", "ISSUE_STATUS", "issue status changed", item=iid, status=status)
         return r
@@ -280,10 +320,12 @@ class Registry:
                 r["status"] = "acknowledged"
             self._save(d)
 
-    # ---- fixed-in tracking
+    # ---- fixed-in tracking and auto-resolve
     def check_updated(self, notes: str, *, version: str | None = None) -> list[dict]:
-        """If the installed version changed since the last look, mark every open issue whose id or code is listed on a
-        Fixes line of `notes` as fixed in that version. Returns the records newly marked (to tell the owner ONCE)."""
+        """Mark open issues fixed when the CHANGELOG / release notes of the installed version list their id or code on a
+        Fixes line (the code inside a FINDING_ key counts) and the issue has not been seen in this version. Runs when the
+        installed version changed since the last look, and for every issue whose newest seen version is older than the
+        installed one. Returns the records newly marked (to tell the owner ONCE)."""
         ver = version if version is not None else self.version
         with self.lock:
             d = self.load()
@@ -291,18 +333,77 @@ class Registry:
                 return []
             changed = d.get("app_version", "") != ver
             d["app_version"] = ver
+            first = d.setdefault("version_first_seen", {})
+            fresh = ver not in first
+            if fresh:
+                first[ver] = self.clock()
             hit: list[dict] = []
-            if changed or any(r["status"] == "fixed" and not r["fixed_notice"] for r in d["issues"].values()):
-                ids, codes = fixes_in(notes)
-                for r in d["issues"].values():
-                    if r["status"] in OPEN and (r["id"] in ids or r["code"] in codes):
-                        r["status"], r["fixed_in"], r["fixed_notice"] = "fixed", ver, False
-                        hit.append(r)
-            if changed or hit:
+            ids, codes = fixes_in(notes)
+            for r in d["issues"].values():
+                if r["status"] not in OPEN or not (r["id"] in ids or (it.embedded_codes(r) & codes)):
+                    continue
+                if ver in (r.get("versions") or []):
+                    continue                                      # it happened in this very version: the fix is not in it
+                if changed or self._older_version(r, ver):
+                    r["status"], r["fixed_in"], r["fixed_notice"] = "fixed", ver, False
+                    r["closed_reason"], r["last_version"] = "fixes_line", (r.get("versions") or [""])[-1]
+                    hit.append(r)
+            if changed or hit or fresh:
                 self._save(d)
         for r in hit:
             logs.info("issues", "ISSUE_FIXED_IN", "an issue is fixed in this version", item=r["id"], version=ver)
         return hit
+
+    @staticmethod
+    def _older_version(r: dict, ver: str) -> bool:
+        seen = [_vt(v) for v in (r.get("versions") or [])]
+        cur = _vt(ver)
+        seen = [v for v in seen if v is not None]
+        return bool(seen and cur is not None and max(seen) < cur)
+
+    def tidy(self, notes: str | None = None, *, now: float | None = None) -> list[dict]:
+        """Housekeeping on read: merge the per-version FINDING_version:* records into one 'new version seen' info item,
+        apply the Fixes lines, and close issues that did not come back for QUIET_DAYS after an update ('not seen since
+        <version>', history kept). Returns the records closed in this call."""
+        now = self.clock() if now is None else now
+        closed = list(self.check_updated(notes if notes is not None else changelog_text()))
+        with self.lock:
+            d = self.load()
+            changed = False
+            old = [r for r in d["issues"].values() if str(r["code"]).startswith("FINDING_version:")]
+            if old:
+                iid = issue_id("health", "INFO_NEW_VERSION")
+                keep = d["issues"].get(iid)
+                vs = sorted({str(r["code"])[len("FINDING_version:"):] for r in old if _IDENT.match(str(r["code"])[len("FINDING_version:"):])},
+                            key=lambda v: _vt(v) or ())[-8:]
+                if keep is None:
+                    keep = {"id": iid, "area": "health", "code": "INFO_NEW_VERSION", "severity": "P3", "status": "new",
+                            "first_seen": min(r["first_seen"] for r in old), "last_seen": 0, "count": 0, "versions": [],
+                            "fixed_in": "", "evidence": {}, "dropped": 0, "title": "A new version was seen",
+                            "title_he": "זוהתה גרסה חדשה", "sources": ["diag"], "reported_url": "", "reported_at": 0,
+                            "bundle_saved": "", "fixed_notice": False}
+                    d["issues"][iid] = keep
+                keep["last_seen"] = max([keep["last_seen"]] + [r["last_seen"] for r in old])
+                keep["count"] = max(keep["count"], len(vs))
+                keep["evidence"] = {"versions": vs, "latest": vs[-1] if vs else None}
+                if all(r["status"] == "ignored" for r in old):
+                    keep["status"] = "ignored"
+                for r in old:
+                    del d["issues"][r["id"]]
+                changed = True
+            first = d.get("version_first_seen", {})
+            ver = self.version
+            t_up = first.get(ver)
+            if ver and t_up and now - t_up >= QUIET_DAYS * 86400:
+                for r in d["issues"].values():
+                    if r["status"] in OPEN and r["last_seen"] <= t_up and self._older_version(r, ver):
+                        r["status"], r["fixed_in"], r["fixed_notice"] = "fixed", ver, True
+                        r["closed_reason"], r["last_version"] = "quiet", (r.get("versions") or [""])[-1]
+                        closed.append(r)
+                        changed = True
+            if changed:
+                self._save(d)
+        return closed
 
     def take_unannounced(self) -> list[dict]:
         """Fixed-in records the owner has not been told about yet; marks them told."""
@@ -383,20 +484,39 @@ def ingest_speedtest(reg: Registry, d: dict) -> int:
 
 
 def ingest_findings(reg: Registry, found: list) -> int:
-    """Self-Diagnostics 2.0 findings (anomaly.Finding objects or dicts), including the self-check crash finding."""
+    """Self-Diagnostics 2.0 findings (anomaly.Finding objects or dicts), including the self-check crash finding.
+    The per-version `version:X` findings are merged into ONE information item 'a new version was seen'."""
     n = 0
     for f in found:
         g = (lambda k, dflt="": getattr(f, k, None) if not isinstance(f, dict) else f.get(k, dflt))
         fp = str(g("fingerprint") or "")
         if not fp:
             continue
+        if fp.startswith("version:"):
+            _ingest_version(reg, fp[len("version:"):])
+            n += 1
+            continue
         sev = {"high": "P1", "medium": "P2"}.get(str(g("severity")), "P3")
         area = "crash" if g("category") == "crash" else "health"
         reg.record(area, f"FINDING_{clean_code(fp)}", sev,
                    {"category": g("category"), "count": g("count") or 1, "finding": fp},
-                   title=str(g("title") or ""), title_he=str(g("title_he") or ""), source="diag")
+                   title=str(g("title") or ""), title_he=str(g("title_he") or ""), source="diag",
+                   meaning=str(g("cause") or ""), meaning_he=str(g("cause_he") or ""),
+                   next_step=str(g("fix") or ""), next_step_he=str(g("fix_he") or ""))
         n += 1
     return n
+
+
+def _ingest_version(reg: Registry, v: str) -> None:
+    v = clean_code(v)
+    iid = issue_id("health", "INFO_NEW_VERSION")
+    cur = reg.get(iid)
+    seen = list(((cur or {}).get("evidence") or {}).get("versions") or [])
+    if v in seen:
+        return                                              # the same version again is not a new occurrence
+    seen = (seen + [v])[-8:]
+    reg.record("health", "INFO_NEW_VERSION", "P3", {"versions": seen, "latest": v}, title="A new version was seen",
+               title_he="זוהתה גרסה חדשה", source="diag")
 
 
 _EXPECTED_FAIL = ("SELFTEST_", "SPEEDTEST_")
@@ -521,7 +641,7 @@ def bundle(r: dict, *, platform: str | None = None) -> dict:
     lines += ["", "No conversation text, names, addresses, paths or keys are included.",
               "Reported by JARVES Self-Diagnostics after the owner approved this exact text.",
               f"<!-- jarves-issue: {r['id']} -->"]
-    return {"id": r["id"], "title": f"[{r['severity']}] {r['title']}"[:120], "body": "\n".join(lines), "labels": [LABEL]}
+    return {"id": r["id"], "title": f"[{r['severity']}] {it.describe(r)['title']}"[:120], "body": "\n".join(lines), "labels": [LABEL]}
 
 
 GH_CLI = "gh"                                    # tests point this at nothing so a developer's own login is never used
@@ -613,13 +733,14 @@ async def report(reg: Registry, iid: str, *, ask, token_fn: Callable[[], str] | 
 def spoken(reg: Registry, lang: str) -> str:
     c = reg.counts()
     top = next(iter(reg.list("open")), None)
+    d = it.describe(top) if top else {}
     he = lang == "he"
     if not c["open"]:
         return "אין כרגע תקלות פתוחות. פרטים בעמוד דיווחי תקלות." if he else "I have no open issues right now. Details on the Bug reports page."
     if he:
-        return (f"יש {c['open']} תקלות פתוחות, {c['p1']} בחומרה גבוהה; הראשונה: {top['title_he'] or top['title']}. "
+        return (f"יש {c['open']} תקלות פתוחות, {c['p1']} בחומרה גבוהה; הראשונה: {d['title_he']}. "
                 "פרטים בעמוד דיווחי תקלות.")
-    return (f"I have {c['open']} open issue{'s' if c['open'] != 1 else ''}, {c['p1']} serious; first: {top['title']}. "
+    return (f"I have {c['open']} open issue{'s' if c['open'] != 1 else ''}, {c['p1']} serious; first: {d['title']}. "
             "Details on the Bug reports page.")
 
 
@@ -653,7 +774,7 @@ def tell_fixed(ops, fixed: list[dict], lang: str = "he") -> None:
         return
     v = fixed[0]["fixed_in"]
     try:
-        alerts.raise_("issues", f"הגרסה {v} תיקנה {len(fixed)} תקלות שזוהו אצלך", "; ".join(f["title_he"] or f["title"] for f in fixed[:3])[:300],
+        alerts.raise_("issues", f"הגרסה {v} תיקנה {len(fixed)} תקלות שזוהו אצלך", "; ".join(it.describe(f)["title_he"] for f in fixed[:3])[:300],
                       priority="normal", kind="health", channel="popup", dedupe_key=f"issues-fixed:{v}", ref="#/bugs")
     except Exception:
         logs.warn("issues", "ISSUES_FIXED_ALERT_FAILED", "fixed-in alert not raised")
@@ -682,7 +803,7 @@ def attach(core, ops) -> Registry:
             return f"{base()}\n\n{INSTRUCTION}" if on else base()
         agent.instructions = instructions
     try:
-        reg.check_updated(changelog_text())
+        reg.tidy()
         tell_fixed(ops, reg.take_unannounced(), lang())
     except Exception:
         logs.error("issues", "ISSUES_FIXED_CHECK_FAILED", "fixed-in check failed", exc=True)
@@ -722,7 +843,7 @@ def _reg(ctx) -> Registry:
 
 
 def _view(r: dict) -> dict:
-    return {**r, "area_label": AREAS.get(r["area"], (r["area"], r["area"]))[0],
+    return {**r, **it.describe(r), "area_label": AREAS.get(r["area"], (r["area"], r["area"]))[0],
             "area_label_he": AREAS.get(r["area"], (r["area"], r["area"]))[1]}
 
 
@@ -731,12 +852,15 @@ def api_list(ctx, m, body, q=None):
         v = (q or {}).get(k)
         return (v[0] if isinstance(v, list) else v) or None
     reg = _reg(ctx)
+    reg.tidy()
     return 200, {"issues": [_view(r) for r in reg.list(one("status"), one("severity"), one("area"))], "counts": reg.counts(),
                  "repo": REPO, "label": LABEL, "areas": sorted(AREAS)}
 
 
 def api_count(ctx, m, body, q=None):
-    return 200, _reg(ctx).counts()
+    reg = _reg(ctx)
+    reg.tidy()
+    return 200, reg.counts()
 
 
 def api_get(ctx, m, body, q=None):
@@ -750,7 +874,7 @@ def api_get(ctx, m, body, q=None):
 def api_set(ctx, m, body):
     st = str((body or {}).get("status") or "")
     try:
-        r = _reg(ctx).set_status(m.group(1), st)
+        r = _reg(ctx).set_status(m.group(1), st, note=str((body or {}).get("note") or ""))
     except ValueError as e:
         return 400, {"error": str(e)}
     return (200, {"issue": _view(r)}) if r else (404, {"error": "no such issue"})
@@ -783,35 +907,132 @@ def dashboard_routes(register) -> None:
     register("POST", r"/api/bugs/(JI-[0-9a-f]{8})/report", api_report)
 
 
-# ---------------------------------------------------------------------- CLI: jarvis issues [list|show|report|ignore|fixed|ack|add]
+# ---------------------------------------------------------------------- CLI: jarvis issues [list|show|report|ignore|fixed|ack|add|export]
 def add_cli(sub) -> None:
     p = sub.add_parser("issues", aliases=["issue"], help="the problems JARVES found in himself: list | show ID | report ID "
-                                                          "(asks first, then files on the developer's repo) | ignore ID | fixed ID | add CODE")
-    p.add_argument("action", nargs="?", default="list", choices=["list", "show", "report", "ignore", "ack", "fixed", "add"])
+                                                          "(asks first, then files on the developer's repo) | ignore ID | "
+                                                          "fixed ID [--in V] [--note T] | add CODE | export --out FILE")
+    p.add_argument("action", nargs="?", default="list", choices=["list", "show", "report", "ignore", "ack", "fixed", "add", "export"])
     p.add_argument("target", nargs="?", default="", help="the issue id (JI-...) or, for add, a CODE like MY_PROBLEM")
-    p.add_argument("--all", action="store_true", help="list: include fixed and ignored")
+    p.add_argument("--open", action="store_true", help="list/export: only open bugs (the default for list)")
+    p.add_argument("--all", action="store_true", help="list/export: include fixed, ignored and information items")
+    p.add_argument("--info", action="store_true", help="list/export: only information items (expected states of this PC)")
+    p.add_argument("--since", default=None, metavar="WHEN", help="list/export: seen since 7d | 12h | 2026-10-20")
     p.add_argument("--severity", choices=list(SEVERITIES), default=None, help="add: P1 | P2 | P3 (default P3)")
+    p.add_argument("--in", dest="fixed_in", default="", metavar="VERSION", help="fixed: the version that fixed it")
+    p.add_argument("--note", default="", help="fixed: a short note (no private text)")
+    p.add_argument("--out", default="", metavar="FILE", help="export: write UTF-8 (no BOM) to this file")
+    p.add_argument("--format", choices=["json", "text"], default="json", help="export: json (default) or text")
     p.add_argument("--yes", action="store_true", help="report: approve without the typed confirmation")
     p.add_argument("--json", action="store_true")
 
 
+def parse_since(v: str | None, now: float | None = None) -> float | None:
+    """'7d' / '12h' / '2w' / '3' (days) / '2026-10-20' -> a unix time, or None. ValueError for anything else."""
+    if v is None or str(v).strip() == "":
+        return None
+    t = str(v).strip().lower()
+    now = time.time() if now is None else now
+    m = re.fullmatch(r"(\d+(?:\.\d+)?)\s*([dhw]?)", t)
+    if m:
+        return now - float(m.group(1)) * {"": 86400, "d": 86400, "h": 3600, "w": 604800}[m.group(2)]
+    m = re.fullmatch(r"(\d{4})-(\d{2})-(\d{2})", t)
+    if m:
+        import calendar
+        return float(calendar.timegm((int(m.group(1)), int(m.group(2)), int(m.group(3)), 0, 0, 0)))
+    raise ValueError("--since takes 7d, 12h, 2w or a date like 2026-10-20")
+
+
+def export_row(r: dict) -> dict:
+    """One record for the export: the readable texts first, the content-free evidence last. No internal key is a title."""
+    d = it.describe(r)
+    return {"id": r["id"], "severity": r["severity"], "kind": d["kind"], "status": r["status"], "area": r["area"],
+            "title": d["title"], "title_he": d["title_he"], "meaning": d["meaning"], "meaning_he": d["meaning_he"],
+            "next_step": d["next_step"], "next_step_he": d["next_step_he"], "hint": d["hint"], "hint_he": d["hint_he"],
+            "evidence_count": d["evidence_count"], "count": r["count"], "first_seen": _day(r["first_seen"]),
+            "last_seen": _day(r["last_seen"]), "versions": r.get("versions") or [], "fixed_in": r.get("fixed_in") or "",
+            "closed": d["closed"], "closed_he": d["closed_he"], "code": r["code"], "evidence": r.get("evidence") or {}}
+
+
 def _line(r: dict) -> str:
+    d = it.describe(r)
     fx = f" in {r['fixed_in']}" if r["status"] == "fixed" and r["fixed_in"] else ""
     rep = " reported" if r.get("reported_url") else (" saved" if r.get("bundle_saved") else "")
-    return f"{r['id']}  {r['severity']}  {r['status'] + fx:<16} x{r['count']:<4} {r['area']:<9} {r['title']}{rep}"
+    line, _ = it.split_mixed(d["title"])
+    return f"{r['id']}  {r['severity']}  {r['status'] + fx:<16} x{d['evidence_count']:<4} {r['area']:<9} {line}{rep}"
+
+
+def _rows_for(reg: Registry, a) -> list[dict]:
+    since = parse_since(getattr(a, "since", None))
+    if getattr(a, "all", False):
+        status = None
+    elif getattr(a, "info", False):
+        status = "info"
+    else:
+        status = "open"
+    return reg.list(status, since=since)
+
+
+def _text_export(rows: list[dict]) -> str:
+    lines: list[str] = []
+    for r in rows:
+        e = export_row(r)
+        lines += [f"{e['id']}  {e['severity']}  {e['kind']}  {e['status']}  x{e['evidence_count']}  {e['area']}",
+                  f"  {e['title']}", f"  {e['title_he']}", f"  meaning: {e['meaning']}", f"  next: {e['next_step']}"]
+        if e["closed"]:
+            lines.append(f"  {e['closed']}")
+        lines.append("")
+    return "\n".join(lines)
+
+
+def write_export(path: Path, rows: list[dict], counts: dict, fmt: str = "json") -> Path:
+    """UTF-8 without a BOM and with LF line ends, whatever the console code page of the PC is."""
+    text = (json.dumps({"app_version": app_version()[0], "counts": counts, "issues": [export_row(r) for r in rows]},
+                       ensure_ascii=False, indent=1) + "\n") if fmt == "json" else _text_export(rows)
+    path = Path(path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_bytes(text.encode("utf-8"))
+    return path
+
+
+def _json_out(obj, out) -> None:
+    out(json.dumps(obj, ensure_ascii=True))              # ASCII escapes: safe on any console code page; `export` writes real UTF-8
 
 
 def cmd_issues(a, cfg, home: Path, *, out=print, ask=input) -> int:
     reg = Registry(home)
     act, tgt = a.action, (a.target or "").strip()
-    if act == "list":
-        rows = reg.list(None if a.all else "open")
+    if act in ("list", "export", "show"):
+        try:
+            reg.tidy()
+        except Exception:
+            logs.warn("issues", "ISSUES_TIDY_FAILED", "issues housekeeping failed")
+    if act in ("list", "export"):
+        try:
+            rows = _rows_for(reg, a)
+        except ValueError as e:
+            out(str(e))
+            return 2
+        if act == "export":
+            if a.out:
+                p = write_export(Path(a.out), rows, reg.counts(), a.format)
+                out(f"wrote {len(rows)} issue(s) to {p} (UTF-8)")
+            elif a.format == "text":
+                out(_text_export(rows))
+            else:
+                _json_out({"counts": reg.counts(), "issues": [export_row(r) for r in rows]}, out)
+            return 0
         if a.json:
-            out(json.dumps({"issues": rows, "counts": reg.counts()}, ensure_ascii=False))
-        else:
-            out(f"{reg.counts()['open']} open issue(s)" + ("" if rows else " - nothing to show"))
-            for r in rows:
-                out("  " + _line(r))
+            _json_out({"issues": [export_row(r) for r in rows], "counts": reg.counts()}, out)
+            return 0
+        c = reg.counts()
+        out(f"{c['open']} open issue(s)" + (f", {c['info']} information item(s) not counted (jarvis issues list --info)" if c["info"] and not a.info else "")
+            + ("" if rows else " - nothing to show"))
+        for r in rows:
+            out("  " + _line(r))
+            d = it.describe(r)
+            if d["kind"] == "info" and d["hint"]:
+                out(f"      {d['hint']}")
         return 0
     if act == "add":
         if not re.fullmatch(r"[A-Za-z][A-Za-z0-9_]{2,40}", tgt):
@@ -819,19 +1040,36 @@ def cmd_issues(a, cfg, home: Path, *, out=print, ask=input) -> int:
             return 2
         r = reg.record("manual", tgt.upper(), a.severity or "P3", {"entered": "cli"}, title=f"Manual report: {tgt.upper()}",
                        title_he=f"דיווח ידני: {tgt.upper()}", source="manual")
-        out(json.dumps(r, ensure_ascii=False) if a.json else f"recorded {r['id']} ({r['code']}); jarvis issues report {r['id']} sends it after you approve")
+        out(json.dumps(r, ensure_ascii=True) if a.json else f"recorded {r['id']} ({r['code']}); jarvis issues report {r['id']} sends it after you approve")
         return 0
     r = reg.get(tgt) if _ID.match(tgt) else None
     if r is None:
         out("no such issue; list them with: jarvis issues list --all")
         return 1
     if act == "show":
-        out(json.dumps({"issue": r, "bundle": bundle(r)}, ensure_ascii=False) if a.json else
-            f"{_line(r)}\n\nThis is exactly what a report would contain:\n\n# {bundle(r)['title']}\n\n{bundle(r)['body']}")
+        d = it.describe(r)
+        if a.json:
+            _json_out({"issue": export_row(r), "bundle": bundle(r)}, out)
+        else:
+            out(f"{_line(r)}\n")
+            out(f"  {d['title_he']}")
+            out(f"  What it means: {d['meaning']}")
+            out(f"  Next step:     {d['next_step']}")
+            if d["hint"]:
+                out(f"  Note:          {d['hint']}")
+            if d["closed"]:
+                out(f"  {d['closed']}")
+            out(f"  Seen {d['evidence_count']}x, first {_day(r['first_seen'])}, last {_day(r['last_seen'])}")
+            out(f"\nThis is exactly what a report would contain:\n\n# {bundle(r)['title']}\n\n{bundle(r)['body']}")
         return 0
     if act in ("ignore", "ack", "fixed"):
-        reg.set_status(tgt, {"ignore": "ignored", "ack": "acknowledged", "fixed": "fixed"}[act])
-        out(f"{tgt}: {reg.get(tgt)['status']}")
+        if act == "fixed" and a.note and not clean_text(a.note, 100):
+            out("the note is empty after removing paths, addresses and secrets; use a short plain note")
+            return 2
+        reg.set_status(tgt, {"ignore": "ignored", "ack": "acknowledged", "fixed": "fixed"}[act],
+                       version=(a.fixed_in or "") if act == "fixed" else "", note=a.note if act == "fixed" else "")
+        got = reg.get(tgt)
+        out(f"{tgt}: {got['status']}" + (f" in {got['fixed_in']}" if got["status"] == "fixed" and got["fixed_in"] else ""))
         return 0
 
     async def confirm(prompt: str, **kw) -> bool:

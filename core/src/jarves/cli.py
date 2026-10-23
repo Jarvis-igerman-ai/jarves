@@ -1492,9 +1492,8 @@ def cmd_diagnose(a, cfg, home) -> int:
             print(f"imported {n} conversation(s) from {len(files)} log file(s)")
         found = diagnose.run(st, cfg, days=a.days)
         issues = st.issues("open")
-        print(f"self-diagnosis: {len(found)} finding(s); {len(issues)} open issue(s)")
-        for i in issues:
-            print(f"  [{i['severity']:<6}] {i['title']}  (x{i['count']})")
+        for line in diagnose.render_summary(found, diagnose.by_cause(issues)):
+            print(line)
         if issues:
             print("details: `jarvis dashboard` -> Issues")
     finally:
