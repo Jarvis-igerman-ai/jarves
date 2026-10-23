@@ -1883,6 +1883,9 @@
   "Set up WhatsApp in one go": "Set up WhatsApp in one go",
   "Starts the bridge if needed and shows a QR code. You scan it on your phone, then you can switch on read-only. No message is sent.": "Starts the bridge if needed and shows a QR code. You scan it on your phone, then you can switch on read-only. No message is sent.",
   "Set up WhatsApp": "Set up WhatsApp",
-  "Switch on read-only mode now? JARVES will read and never send.": "Switch on read-only mode now? JARVES will read and never send."
+  "Switch on read-only mode now? JARVES will read and never send.": "Switch on read-only mode now? JARVES will read and never send.",
+  "Hi, I am JARVES. How can I help? Type a message, or / for commands.": "Hi, I am JARVES. How can I help? Type a message, or / for commands.",
+  "Scroll to the latest message": "Scroll to the latest message",
+  "Writing": "Writing"
  }
 };

@@ -46,10 +46,13 @@
     const uidp = "jc" + Math.random().toString(36).slice(2, 7);
 
     const log = h("div", { class: "jc-log", role: "log", "aria-live": "polite", "aria-relevant": "additions text",
-      "aria-label": tx("השיחה", "Conversation"), tabindex: "0" });
+      "aria-label": tx("השיחה", "Conversation"), tabindex: "0",
+      "data-empty": tx("שלום, אני JARVES. במה אפשר לעזור? כתבו הודעה או / לפקודות.", "Hi, I am JARVES. How can I help? Type a message, or / for commands.") });
+    const jump = h("button", { type: "button", class: "jc-jump", hidden: true, "aria-label": tx("לגלול להודעה האחרונה", "Scroll to the latest message"),
+      onclick: () => scroll(true) }, "\u2193");
     const apprBox = h("div", { class: "jc-appr", "aria-live": "assertive" });
     const status = h("div", { class: "jc-status", role: "status" });
-    const input = h("textarea", { id: uidp + "in", class: "jc-in", rows: "2", dir: "auto", maxlength: "4000", enterkeyhint: "send",
+    const input = h("textarea", { id: uidp + "in", class: "jc-in", rows: "1", dir: "auto", maxlength: "4000", enterkeyhint: "send",
       placeholder: tx("כתבו הודעה או / לפקודות", "Type a message, or / for commands"), autocomplete: "off" });
     const sendBtn = h("button", { type: "submit", class: "primary jc-send" }, tx("שליחה", "Send"));
     const speakBox = device ? null : h("input", { type: "checkbox", id: uidp + "sp" });
@@ -58,24 +61,29 @@
       ["/new", "/resume", "/undo", "/status", "/help"].map((c) => h("button", { type: "button", class: "jc-cmd", onclick: () => submit(c) }, c)));
     const form = h("form", { class: "jc-form", onsubmit: (ev) => { ev.preventDefault(); submit(input.value); } },
       h("label", { for: uidp + "in", class: "jc-sr" }, tx("הודעה ל-JARVES", "Message to JARVES")), input, sendBtn);
+    sendBtn.disabled = true;
     const opts2 = device ? null : h("div", { class: "jc-opts" },
       h("label", { class: "jc-chk" }, silentBox, " ", tx("שקט (בלי קול, בלי צלצולים)", "Silent (no speech, no chimes)")),
       h("label", { class: "jc-chk", id: uidp + "spl" }, speakBox, " ", tx("להקריא את התשובה במחשב (רק כשלא שקט)", "Read the answer aloud on this computer (only when not silent)")));
-    root.replaceChildren(h("div", { class: "jchat" }, status, opts2, log, apprBox, cmds, form));
+    root.replaceChildren(h("div", { class: "jchat" }, h("div", { class: "jc-bar" }, status, opts2), h("div", { class: "jc-wrap" }, log, jump), apprBox, cmds, form));
     if (silentBox) silentBox.addEventListener("change", async () => {
       try { const r = await api.silent(silentBox.checked); paintSilent(r.silent); } catch (e) { note(e.message); }
     });
+    const grow = () => { input.style.height = "auto"; input.style.height = Math.min(input.scrollHeight + 2, 180) + "px"; sendBtn.disabled = !input.value.trim(); };
+    input.addEventListener("input", grow);
+    log.addEventListener("scroll", () => { jump.hidden = nearEnd(); });
     input.addEventListener("keydown", (ev) => {
       if (ev.key === "Enter" && !ev.shiftKey && !ev.isComposing) { ev.preventDefault(); submit(input.value); }
     });
 
     function note(text, cls) { const d = h("div", { class: "jc-msg jc-notice " + (cls || ""), dir: "auto" }, text); log.append(d); scroll(); return d; }
-    function scroll() { log.scrollTop = log.scrollHeight; }
+    function nearEnd() { return log.scrollHeight - log.scrollTop - log.clientHeight < 80; }
+    function scroll(force) { if (force === true || nearEnd()) { log.scrollTop = log.scrollHeight; jump.hidden = true; } else jump.hidden = false; }
     function paintSilent(s) {
       if (!s) return;
       const why = s.quiet_hours ? tx("שעות שקט", "quiet hours") : s.setting ? tx("מתג השקט", "silent switch") : "";
       status.replaceChildren(h("span", { class: "jc-pill " + (s.on ? "on" : "") }, s.on ? tx("שקט: ", "Silent: ") + why : tx("לא שקט", "Not silent")),
-        busy ? h("span", { class: "jc-pill" }, tx("כותב…", "Writing…")) : null);
+        ...(busy ? [h("span", { class: "jc-pill jc-writing" }, tx("כותב", "Writing"), h("span", { class: "jc-dots", "aria-hidden": "true" }, h("i"), h("i"), h("i")))] : []));
       if (silentBox) silentBox.checked = !!s.setting;
       if (speakBox) { speakBox.disabled = !!s.on || !(state && state.can_speak); if (s.on) speakBox.checked = false; }
     }
@@ -98,12 +106,12 @@
     }
     function load(s) {
       state = s; log.replaceChildren(); turns.clear();
-      (s.messages || []).forEach(renderMessage);
+      (s.messages || []).forEach(renderMessage); scroll(true);
       after = s.cursor || 0; busy = s.busy || ""; phoneAp = s.phone_approvals !== false;
       paintSilent(s.silent); paintAppr(s.approvals || []);
     }
     function onEvent(e) {
-      if (e.type === "user") bubble("user", e.text, e.turn);
+      if (e.type === "user") { bubble("user", e.text, e.turn); scroll(true); }
       else if (e.type === "delta") {
         let b = turns.get(e.turn);
         if (!b) { b = bubble("assistant", "", e.turn); b.classList.add("streaming"); b.setAttribute("aria-busy", "true"); turns.set(e.turn, b); }
@@ -157,9 +165,9 @@
           try { await api.send(body); break; }       // the same id on every resend: answered once
           catch (e) { if (e.status === undefined && i < 3) { await sleep(1200 * (i + 1)); continue; } throw e; }
         }
-        input.value = "";
+        input.value = ""; grow();
       } catch (e) { note(word(e.code, e.message), "err"); }
-      sendBtn.disabled = false; input.focus();
+      grow(); input.focus();
     }
 
     async function loop() {

@@ -1883,7 +1883,10 @@
   "Set up WhatsApp in one go": "הגדרת וואטסאפ בלחיצה אחת",
   "Starts the bridge if needed and shows a QR code. You scan it on your phone, then you can switch on read-only. No message is sent.": "מפעיל את הגשר במידת הצורך ומציג קוד QR. את הסריקה בטלפון עושים אתם, ואחריה אפשר להפעיל קריאה בלבד. לא נשלחת שום הודעה.",
   "Set up WhatsApp": "הגדרת וואטסאפ",
-  "Switch on read-only mode now? JARVES will read and never send.": "להפעיל עכשיו מצב קריאה בלבד? ג'ארביס יקרא ולא ישלח."
+  "Switch on read-only mode now? JARVES will read and never send.": "להפעיל עכשיו מצב קריאה בלבד? ג'ארביס יקרא ולא ישלח.",
+  "Hi, I am JARVES. How can I help? Type a message, or / for commands.": "שלום, אני JARVES. במה אפשר לעזור? כתבו הודעה או / לפקודות.",
+  "Scroll to the latest message": "לגלול להודעה האחרונה",
+  "Writing": "כותב"
  },
  "rules": [
   [
