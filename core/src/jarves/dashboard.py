@@ -33,7 +33,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, unquote, urlsplit
 
-from . import __version__, config_edit, diagnose, locale_parts, locales, logs, logview, mobile, plugin_registry
+from . import __version__, config_edit, diagnose, locale_parts, locales, logs, logview, mobile, page_registry, plugin_registry
 from .dashboard_auth import (DEVICE_COOKIE, device_body_ok, DEVICE_IDLE_S, LAN_PORT, PUBLIC_PATHS, Access, client_allowed,
                              is_loopback, lan_ip, parse_cookies)
 from .health import read_snapshot
@@ -807,10 +807,13 @@ class Handler(BaseHTTPRequestHandler):
         try:
             st = p.stat()
             code = p.stem if p.parent == STATIC / "locales" and p.suffix == ".js" else None   # base catalog + parts
-            key = (st.st_mtime_ns, st.st_size, locale_parts.parts_stamp() if code else ())
+            composed = name == "index.html"                                  # + the nav links / scripts of pages.d
+            key = (st.st_mtime_ns, st.st_size, locale_parts.parts_stamp() if code else
+                   tuple((q.name, q.stat().st_mtime_ns) for q in sorted(page_registry.DIR.glob("*.toml"))) if composed else ())
             hit = _STATIC_CACHE.get(str(p))
             if hit is None or hit[0] != key:
-                raw = locale_parts.render_js(code) if code else p.read_bytes()
+                raw = (locale_parts.render_js(code) if code else
+                       page_registry.compose(p.read_text(encoding="utf-8")).encode("utf-8") if composed else p.read_bytes())
                 gz = gzip.compress(raw, 6, mtime=0) if len(raw) > 600 and p.suffix in _TYPES else None
                 hit = _STATIC_CACHE[str(p)] = (key, '"%x-%x-%x"' % (key[0], key[1], zlib.crc32(repr(key[2]).encode())), raw, gz)
         except OSError:
