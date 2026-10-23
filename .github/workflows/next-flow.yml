@@ -14,7 +14,7 @@ on:
     branches: [next]
     types: [opened, synchronize, reopened, ready_for_review, labeled]
   workflow_run:
-    workflows: [jarves-checks, jarves-next-flow]
+    workflows: [jarves-checks]
     types: [completed]
   workflow_dispatch:
 permissions:
