@@ -336,3 +336,24 @@ def test_identical_monitor_finding_after_recovery_is_a_new_occurrence(reg):
     ir.ingest_findings(reg, [finding])  # same count, genuinely back after recovery
     current = reg.get(issue["id"])
     assert current["status"] == "new" and current["count"] == 2
+
+
+@pytest.mark.parametrize("code,origin,defect", [
+    ("FEATURE_NEEDS_APPROVAL", "model", False),
+    ("TOOL_UNTRUSTED_TURN", "model", False),
+    ("TOOL_DECLINED", "model", False),
+    ("FEATURE_OFF", "model", False),
+    ("SKILL_DISABLED", "model", False),
+    ("TOOL_FORBIDDEN", "model", False),
+    ("TOOL_BAD_ARGS", "user", False),
+    ("TOOL_BAD_ARGS", "model", True),
+    ("TOOL_CRASH", "model", True),
+    ("TOOL_TIMEOUT", "model", True),
+    ("PEAR_DOWN", "model", True),
+])
+def test_expected_tool_refusals_do_not_create_failure_bug_reports(reg, code, origin, defect):
+    sink = ir.IssueSink(reg, threshold=3)
+    for _ in range(5):
+        sink.emit(_rec("TOOL_RESULT", tool="test", ok=False, result_code=code, origin=origin))
+    sink.flush()
+    assert bool(reg.list()) == defect

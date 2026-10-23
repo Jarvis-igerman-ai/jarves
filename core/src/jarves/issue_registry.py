@@ -46,6 +46,7 @@ from pydantic import BaseModel
 
 from . import features as feat
 from . import logs
+from .skills import expected_tool_refusal
 
 FEATURE = "issue_reports"
 FILE = "issues_registry.json"
@@ -483,7 +484,7 @@ class IssueSink(logging.Handler):
             return
         tool = clean_code(f.get("tool") or "unknown")[:40]
         rc = clean_code(f.get("result_code") or "TOOL_FAILED")
-        if rc.startswith(_EXPECTED_FAIL) or rc.endswith("_SKIPPED"):
+        if expected_tool_refusal(rc, f.get("origin")) or rc.startswith(_EXPECTED_FAIL) or rc.endswith("_SKIPPED"):
             return
         now = self.reg.clock()
         q = self._fails.setdefault((tool, rc), deque())
