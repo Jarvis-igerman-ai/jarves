@@ -18,8 +18,10 @@ var who: Label                   # "JARVES" / "You" kept OUT of the caption so H
 var activity: Label              # big, plain-language "what is JARVES doing now"
 var level_bar: ProgressBar       # live microphone level while listening
 var _level_seen := 0.0
-signal options_toggled(on: bool)
+signal inspector_toggled(on: bool)   # "Model inspector" (3D twin review panel); the face display has none
+const UI_FONT := 20               # readable on a desk monitor; the default 16 px was too small
 var options_box: VBoxContainer
+var inspector_chk: CheckButton
 var connection: Label
 var _state := "idle"
 var _linked := false
@@ -45,10 +47,13 @@ func _ready() -> void:
 	add_child(link)
 	link.link_changed.connect(_on_link)
 	link.message.connect(_on_message)
+	theme = _make_theme()
 	var box := VBoxContainer.new()
+	box.add_theme_constant_override("separation", 10)
 	add_child(box)
 	var title := Label.new()
 	title.text = "JARVES assistant"
+	title.add_theme_font_size_override("font_size", UI_FONT + 4)
 	title_lbl = title
 	box.add_child(title)
 	connection = Label.new()
@@ -57,45 +62,44 @@ func _ready() -> void:
 	var toggle := Button.new()
 	toggle.text = "Options"
 	toggle.toggle_mode = true
-	toggle.toggled.connect(func(on):
-		options_box.visible = on
-		options_toggled.emit(on))
+	toggle.toggled.connect(func(on): options_box.visible = on)
 	box.add_child(toggle)
 	options_box = VBoxContainer.new()
+	options_box.add_theme_constant_override("separation", 8)
 	options_box.visible = false
 	box.add_child(options_box)
 	status_lbl = Label.new()
 	status_lbl.text = "Core: connecting..."
-	status_lbl.custom_minimum_size = Vector2(330, 0)
+	status_lbl.custom_minimum_size = Vector2(400, 0)
 	status_lbl.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	options_box.add_child(status_lbl)
 	var legend := Label.new()
 	legend.text = LINK_LEGEND
 	legend.modulate = Color(1, 1, 1, 0.6)
-	legend.custom_minimum_size = Vector2(330, 0)
+	legend.custom_minimum_size = Vector2(400, 0)
 	legend.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	options_box.add_child(legend)
 	activity = Label.new()
 	activity.text = "Connecting to JARVES..."
-	activity.add_theme_font_size_override("font_size", 22)
-	activity.custom_minimum_size = Vector2(330, 0)
+	activity.add_theme_font_size_override("font_size", UI_FONT + 6)
+	activity.custom_minimum_size = Vector2(400, 0)
 	activity.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	activity.text_direction = Control.TEXT_DIRECTION_AUTO
 	box.add_child(activity)
 	level_bar = ProgressBar.new()
 	level_bar.max_value = 1.0
 	level_bar.show_percentage = false
-	level_bar.custom_minimum_size = Vector2(330, 10)
+	level_bar.custom_minimum_size = Vector2(400, 12)
 	level_bar.tooltip_text = "Microphone level"
 	options_box.add_child(level_bar)
 	who = Label.new()
 	who.modulate = Color(1, 1, 1, 0.6)
-	options_box.add_child(who)
+	box.add_child(who)
 	caption = Label.new()
-	caption.custom_minimum_size = Vector2(330, 60)
+	caption.custom_minimum_size = Vector2(400, 0)
 	caption.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	caption.text_direction = Control.TEXT_DIRECTION_AUTO
-	options_box.add_child(caption)
+	box.add_child(caption)
 	mute_chk = CheckButton.new()
 	mute_chk.text = "Mic mute (software)"
 	mute_chk.toggled.connect(func(on): link.send("mic.set_mute", {"muted": on}))
@@ -106,6 +110,11 @@ func _ready() -> void:
 	dash_btn.tooltip_text = "Conversations, logs, costs, memory and settings in your browser"
 	dash_btn.pressed.connect(func(): link.send("ui.open_dashboard"))
 	options_box.add_child(dash_btn)
+	inspector_chk = CheckButton.new()
+	inspector_chk.text = "Model inspector"
+	inspector_chk.visible = false     # main.gd (3D twin) turns it on; the face display has no inspector
+	inspector_chk.toggled.connect(func(on): inspector_toggled.emit(on))
+	options_box.add_child(inspector_chk)
 	confirm = ConfirmationDialog.new()
 	confirm.confirmed.connect(func(): _answer(true))
 	confirm.canceled.connect(func(): _answer(false))
@@ -139,6 +148,31 @@ func _ready() -> void:
 	profile_banner.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	layer.add_child(profile_banner)
 	_set_controls(false)
+
+
+## One calm look for the whole panel: bigger text, dark rounded card, roomy padding, large touch-friendly buttons.
+static func make_ui_theme(font := 20) -> Theme:
+	var t := Theme.new()
+	t.default_font_size = font
+	var card := StyleBoxFlat.new()
+	card.bg_color = Color(0.07, 0.08, 0.11, 0.88)
+	card.set_corner_radius_all(14)
+	card.set_content_margin_all(18)
+	t.set_stylebox("panel", "PanelContainer", card)
+	for kind in ["normal", "hover", "pressed"]:
+		var b := StyleBoxFlat.new()
+		b.bg_color = {"normal": Color(0.17, 0.19, 0.25), "hover": Color(0.23, 0.26, 0.34), "pressed": Color(0.18, 0.36, 0.62)}[kind]
+		b.set_corner_radius_all(10)
+		b.content_margin_left = 14
+		b.content_margin_right = 14
+		b.content_margin_top = 9
+		b.content_margin_bottom = 9
+		t.set_stylebox(kind, "Button", b)
+	return t
+
+
+func _make_theme() -> Theme:
+	return make_ui_theme(UI_FONT)
 
 
 func _process(delta: float) -> void:
