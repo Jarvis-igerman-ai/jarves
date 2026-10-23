@@ -17,6 +17,7 @@ import time
 from pathlib import Path
 
 from . import clilang, logs
+from . import wa_namesearch as wns
 from . import whatsapp_bridge as wab
 from . import whatsapp_bridge_install as wbi
 from . import whatsapp_policy as pol
@@ -123,13 +124,23 @@ def resolve_contact(home: Path, who: str) -> tuple[str | None, str]:
     return None, ("several chats match" if hits else "no chat matches")
 
 
-def find_chats(home: Path, text: str, limit: int = 10) -> list[dict]:
-    """`jarvis whatsapp find`: chat/contact DISPLAY NAMES that match part of a name (the same tiers as the assistant's
-    whatsapp_find_chat). Names and counts only, no message text, no model."""
-    hits = wab.resolve(BridgeClient(home).chats(None, 500), text, wab.contacts_book(home))
-    return [{"name": pol.clean_text(c.get("name") or "")[0][:40], "number_end": (c.get("number") or "")[-4:],
-             "unread": int(c.get("unread") or 0), "last_activity": wab._when(c.get("last_ts", 0)),
-             "group": bool(c.get("is_group"))} for c in hits[:max(1, min(int(limit), 10))]]
+def find_chats(home: Path, text: str, limit: int = 10, *, regex: bool = False) -> list[dict]:
+    """`jarvis whatsapp find`: chat/contact DISPLAY NAMES ranked by how well they match (the same search as the assistant's
+    whatsapp_find_chat: typos, spelling variants, wrong keyboard, patterns). Names and counts only, no message text, no
+    model. Raises wa_namesearch.QueryError for an invalid or over-long pattern."""
+    hits = wab.find_ranked(BridgeClient(home).chats(None, 500), text, wab.contacts_book(home), regex=regex,
+                           limit=max(1, min(int(limit), 10)))
+    return [{"name": pol.clean_text(h.chat.get("name") or "")[0][:40], "reason": h.reason,
+             "number_end": (h.chat.get("number") or "")[-4:], "unread": int(h.chat.get("unread") or 0),
+             "last_activity": wab._when(h.chat.get("last_ts", 0)), "group": bool(h.chat.get("is_group"))} for h in hits]
+
+
+PATTERN_HELP_EN = ("Search patterns: *  any text | ?  one letter | \"exact words\" | a|b  either | ^start | end$ | "
+                   "/regex/ or --regex (linear-time, max 80 characters). Typos, spelling variants (רשימת/רשימה), "
+                   "dana~דנה and a wrong keyboard layout are found too.")
+PATTERN_HELP_HE = ("תבניות חיפוש: *  כל טקסט | ?  אות אחת | \"מילים מדויקות\" | א|ב  או | ^תחילת | סוף$ | "
+                   "/ביטוי רגולרי/ או --regex (זמן ליניארי, עד 80 תווים). גם טעויות כתיב, כתיב חלופי (רשימת/רשימה), "
+                   "dana~דנה ושפת מקלדת שגויה נמצאים.")
 
 
 def allow(home: Path, lst: str, op: str, who: str, *, by: str = "cli") -> dict:
@@ -191,7 +202,7 @@ ACTIONS = ("status", "start", "stop", "install", "setup", "link", "unlink", "mod
 def add_cli(sub) -> None:
     w = sub.add_parser("whatsapp", help="real WhatsApp access through the local bridge (PC only): status | start | "
                                         "stop | install | setup | link | unlink | mode off|read|send | allow read|send <contact> | "
-                                        "remove read|send <contact> | scope | inbox | find <part of a name> | send <contact> \"<text>\" | "
+                                        "remove read|send <contact> | scope | inbox | find <part of a name, typos/patterns ok> | send <contact> \"<text>\" | "
                                         "kill | purge | retention <days> | audit")
     w.add_argument("action", choices=ACTIONS)
     w.add_argument("args", nargs="*", help="mode: off|read|send; allow/remove: read|send <contact>; send: <contact> "
@@ -207,6 +218,8 @@ def add_cli(sub) -> None:
     w.add_argument("--groups", choices=["on", "off"], default=None, help="scope: show groups on the read list")
     w.add_argument("--all-direct", choices=["on", "off"], default=None, help="scope: read every 1:1 chat")
     w.add_argument("--limit", type=int, default=10)
+    w.add_argument("--regex", nargs="?", const=True, default=False, metavar="PATTERN",
+                   help="find: treat the text as a regular expression (safe linear-time engine): --regex PATTERN or find TEXT --regex")
     w.add_argument("--json", action="store_true")
     w.add_argument("--yes", action="store_true", help="unlink/purge: do not ask again")
 
@@ -453,17 +466,28 @@ def cmd_whatsapp(a, cfg, home) -> int:
             _print(rows, a.json) if a.json else [print(f"{r['unread']:>3}  {r['last']}  {r['name']}") for r in rows]
             return 0
         if a.action == "find":
-            if not args:
-                print('usage: jarvis whatsapp find "<part of a chat or contact name>"', file=sys.stderr)
+            text = a.regex if isinstance(a.regex, str) else " ".join(args)
+            if not text:
+                print('usage: jarvis whatsapp find [--regex] "<part of a chat or contact name>"', file=sys.stderr)
+                print(clilang.fmt(PATTERN_HELP_HE, PATTERN_HELP_EN), file=sys.stderr)
                 return 2
-            rows = find_chats(home, " ".join(args), a.limit)
+            try:
+                rows = find_chats(home, text, a.limit, regex=bool(a.regex))
+            except wns.QueryError as e:
+                print(clilang.fmt(e.he, e.en), file=sys.stderr)
+                print(clilang.fmt(PATTERN_HELP_HE, PATTERN_HELP_EN), file=sys.stderr)
+                return 2
             if a.json:
                 _print(rows, True)
             elif not rows:
-                print(clilang.fmt("לא נמצא צ'אט עם שם כזה (חיפשתי בשמות בלבד, לא בטקסט ההודעות).",
-                                  "No chat name matches (this searches names only, not message text)."))
+                print(clilang.fmt("לא נמצא צ'אט עם שם כזה (חיפשתי בשמות בלבד, לא בטקסט ההודעות; ניסיתי גם טעויות כתיב ושפת מקלדת).",
+                                  "No chat name matches (names only, not message text; typos and keyboard layout were tried)."))
+                print(clilang.fmt(PATTERN_HELP_HE, PATTERN_HELP_EN))
             for r in rows if not a.json else []:
-                print(f"{r['unread']:>3}  {r['last_activity']:<16}  {r['name']}  ...{r['number_end']}")
+                print(f"{r['unread']:>3}  {r['last_activity']:<16}  {r['name']}  ...{r['number_end']}  [{r['reason']}]")
+            if rows and not a.json and len({r["reason"] for r in rows[:2]}) == 1 and len(rows) > 1 and rows[0]["reason"] == rows[1]["reason"]:
+                print(clilang.fmt("כמה התאמות באותה רמה: אין בחירה אוטומטית, צריך לבחור.",
+                                  "Several matches at the same rank: none is picked for you."))
             return 0 if rows else 1
         if a.action == "send":
             if len(args) < 2:

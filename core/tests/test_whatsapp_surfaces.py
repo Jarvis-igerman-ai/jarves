@@ -278,3 +278,23 @@ def test_cli_find_searches_names_only(bridge, home, capsys):
     assert rc == 1 and ("names" in out or "בשמות" in out)
     rc, out = run(capsys, "allow", "send", "Smith")     # allow-lists stay exact-name only
     assert rc == 1 and "WA_UNKNOWN_CONTACT" in out
+
+
+def test_cli_find_is_forgiving_ranked_and_has_a_regex_mode(bridge, home, capsys):
+    rc, out = run(capsys, "find", "Smyth")                                  # typo
+    assert rc == 0 and "Bob Smith" in out and "[similar (typo)]" in out
+    rc, out = run(capsys, "find", "--regex", "^דנה (כהן|לוי)$", "--json")
+    rows = json.loads(out)
+    assert rc == 0 and {r["name"] for r in rows} == {"דנה כהן", "דנה לוי"} and rows[0]["reason"] == "pattern"
+    rc, out = run(capsys, "find", "Bob*|דנה", "--json")
+    assert rc == 0 and {r["name"] for r in json.loads(out)} == {"Bob Smith", "דנה כהן", "דנה לוי"}
+    rc, out = run(capsys, "find", "דנה")                                     # same rank: none picked for you
+    assert rc == 0 and "none is picked" in out
+
+
+def test_cli_find_invalid_and_overlong_patterns_give_a_clear_message(bridge, home, capsys):
+    rc = cli.main(["whatsapp", "find", "--regex", "[abc"])
+    err = capsys.readouterr().err
+    assert rc == 2 and "Invalid pattern" in err and "any text" in err
+    rc = cli.main(["whatsapp", "find", "--regex", "a" * 200])
+    assert rc == 2 and "too long" in capsys.readouterr().err
