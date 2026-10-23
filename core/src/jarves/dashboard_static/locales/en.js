@@ -1950,6 +1950,9 @@
   "More agents": "More agents",
   "Fewer agents": "Fewer agents",
   "Stop the agent": "Stop the agent",
-  "Conversation issues": "Conversation issues"
+  "Conversation issues": "Conversation issues",
+  "Switch on read-only mode and the WhatsApp reading switch now? JARVES will read and never send.": "Switch on read-only mode and the WhatsApp reading switch now? JARVES will read and never send.",
+  "Read-only mode and the reading switch stay off. To turn it on later: jarvis features on whatsapp_bridge": "Read-only mode and the reading switch stay off. To turn it on later: jarvis features on whatsapp_bridge",
+  "reading switch: off": "reading switch: off"
  }
 };

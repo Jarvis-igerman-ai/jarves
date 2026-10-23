@@ -30,8 +30,8 @@ en = "If the bridge program is not installed: on the dashboard WhatsApp page pre
 action = "open:#/whatsapp"
 
 [[steps]]
-he = "הדרך הפשוטה: בלוח הבקרה, בעמוד וואטסאפ, לוחצים \"הגדרת וואטסאפ\" (או בעמוד החיבורים על השורה וואטסאפ, או jarvis connect whatsapp, או jarvis whatsapp setup). הגשר מופעל, מופיע קוד QR, ואתם סורקים אותו בטלפון. אחרי הקישור נשאלים אם להפעיל קריאה בלבד. הסריקה תמיד ידנית ושום הודעה לא נשלחת."
-en = "The simple way: on the dashboard WhatsApp page press \"Set up WhatsApp\" (or the WhatsApp row on the Connections page, or jarvis connect whatsapp, or jarvis whatsapp setup). The bridge starts, a QR code appears and you scan it on your phone. After linking you are asked whether to switch on read-only. The scan is always manual and no message is sent."
+he = "הדרך הפשוטה: בלוח הבקרה, בעמוד וואטסאפ, לוחצים \"הגדרת וואטסאפ\" (או בעמוד החיבורים על השורה וואטסאפ, או jarvis connect whatsapp, או jarvis whatsapp setup). הגשר מופעל, מופיע קוד QR, ואתם סורקים אותו בטלפון. אחרי הקישור נשאלים אם להפעיל קריאה בלבד; אם עונים כן, גם מתג \"וואטסאפ אמיתי (קריאה)\" נדלק (אותו דבר כמו jarvis features on whatsapp_bridge) ואין צורך בצעד נוסף. השליחה נשארת כבויה. אם עונים לא, שניהם נשארים כבויים. הסריקה תמיד ידנית ושום הודעה לא נשלחת."
+en = "The simple way: on the dashboard WhatsApp page press \"Set up WhatsApp\" (or the WhatsApp row on the Connections page, or jarvis connect whatsapp, or jarvis whatsapp setup). The bridge starts, a QR code appears and you scan it on your phone. After linking you are asked whether to switch on read-only; if you say yes, the \"WhatsApp real access (read)\" switch is turned on too (the same as jarvis features on whatsapp_bridge) and no further step is needed. Sending stays off. If you say no, both stay off. The scan is always manual and no message is sent."
 action = "open:#/whatsapp"
 
 [[steps]]
@@ -40,8 +40,8 @@ en = "On the computer: jarvis whatsapp link. On the phone: WhatsApp > Settings >
 action = "command:jarvis whatsapp link"
 
 [[steps]]
-he = "מצב קריאה בלבד: jarvis whatsapp mode read, ואז הדליקו את המתג \"וואטסאפ אמיתי (קריאה)\"."
-en = "Read-only mode: jarvis whatsapp mode read, then switch on \"WhatsApp real access (read)\"."
+he = "מצב קריאה בלבד ומתג הקריאה הם שני דברים נפרדים: jarvis whatsapp mode read קובע את מצב הגשר, ו-jarvis features on whatsapp_bridge מדליק את המתג שבלעדיו ג'ארביס לא קורא כלום. jarvis whatsapp status מראה \"מתג הקריאה: כבוי\" כשהוא כבוי."
+en = "Read-only mode and the reading switch are two separate things: jarvis whatsapp mode read sets the bridge mode, and jarvis features on whatsapp_bridge turns on the switch without which JARVES reads nothing. jarvis whatsapp status shows \"reading switch: off\" when it is off."
 action = "feature_on:whatsapp_bridge"
 check = "active:whatsapp_bridge"
 
@@ -95,3 +95,9 @@ he = "כתוב שהגשר המותקן לא תואם לרשימה החתומה (
 en = "It says the installed bridge no longer matches its signed manifest (BRIDGE_TAMPERED)"
 fix_he = "הקובץ שונה או ניזוק אחרי ההורדה (לפעמים בגלל אנטי-וירוס), ולכן הוא לא הופעל. לוחצים \"הורדת גשר הוואטסאפ\" (jarvis whatsapp install) כדי להחליף אותו בקובץ מאומת. אם זה חוזר, בודקים את האנטי-וירוס ומדווחים."
 fix_en = "The file was changed or damaged after the download (sometimes by an antivirus), so it was not started. Press \"Download the WhatsApp bridge\" (jarvis whatsapp install) to replace it with a verified file. If it repeats, check the antivirus and report it."
+
+[[problems]]
+he = "הוא עונה שאין לו גישה להודעות הוואטסאפ, אף שהגשר מקושר ובמצב קריאה"
+en = "He says he has no access to my WhatsApp messages although the bridge is linked and in read mode"
+fix_he = "מתג הקריאה כבוי (מצב הגשר והמתג נפרדים). הריצו jarvis features on whatsapp_bridge, או לחצו \"הדלקה\" בעמוד וואטסאפ. jarvis whatsapp status מראה \"מתג הקריאה: כבוי\". הגדרה חדשה מדליקה אותו כשעונים כן על קריאה בלבד."
+fix_en = "The reading switch is off (the bridge mode and the switch are separate). Run jarvis features on whatsapp_bridge, or press \"Turn on\" on the WhatsApp page. jarvis whatsapp status shows \"reading switch: off\". A new setup turns it on when you answer yes to read-only."

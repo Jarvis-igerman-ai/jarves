@@ -72,6 +72,43 @@ def set_mode(home: Path, mode: str, *, override_watch: bool = False, by: str = "
     return r
 
 
+READ_ON_EN = "Read-only mode and the WhatsApp reading switch are on. JARVES reads, it never sends."
+READ_ON_HE = "מצב קריאה בלבד ומתג הקריאה של וואטסאפ פועלים. ג'ארביס קורא ואף פעם לא שולח."
+SWITCH_CMD = f"jarvis features on {wab.FEATURE}"
+SWITCH_OFF_EN = f"reading switch: off. JARVES cannot read your WhatsApp until you turn it on: {SWITCH_CMD}"
+SWITCH_OFF_HE = f"מתג הקריאה כבוי. ג'ארביס לא יכול לקרוא את הוואטסאפ עד שתדליקו אותו: {SWITCH_CMD}"
+READ_LATER_EN = f"Mode is read, but the reading switch stays off. To turn it on later: {SWITCH_CMD}"
+READ_LATER_HE = f"המצב הוא קריאה, אבל מתג הקריאה נשאר כבוי. להדלקה אחר כך: {SWITCH_CMD}"
+
+
+def _features(home: Path, cfg=None):
+    """The same Features object `jarvis features on ...` uses (writes features.json; a running Core picks it up)."""
+    from .cli import _cli_features
+    if cfg is None:
+        from .config import load_config
+        cfg = load_config()[0]
+    return _cli_features(cfg, home)
+
+
+def reading_switch_on(home: Path, features=None) -> bool:
+    try:
+        return bool((features or _features(home)).enabled(wab.FEATURE))
+    except Exception:
+        return False
+
+
+def enable_reading(home: Path, *, by: str, features=None, cfg=None) -> dict:
+    """The ONE 'yes, switch on read-only' backend (dashboard page, Connect row, `jarvis whatsapp setup`): bridge mode
+    read AND the `whatsapp_bridge` feature switch, through the same `switch()` as `jarvis features on`. Only called
+    after the owner's explicit yes. Never touches `whatsapp_send`; sending stays off."""
+    from .features import switch
+    r = set_mode(home, "read", by=by)
+    s = switch(features or _features(home, cfg), wab.FEATURE, True, by=by)
+    logs.info("whatsapp", "WA_READING_SWITCH_ON", "WhatsApp reading switch turned on with read-only mode", by=by)
+    return {**r, "mode": r.get("mode", "read"), "feature": wab.FEATURE, "feature_on": bool(s.get("enabled")),
+            "message": READ_ON_EN, "message_he": READ_ON_HE}
+
+
 def resolve_contact(home: Path, who: str) -> tuple[str | None, str]:
     """(JID, label) for a name or number the owner typed; a number never needs an existing chat for READ lists."""
     if any(ch.isdigit() for ch in who) and pol.number_to_jid(who):
@@ -228,10 +265,14 @@ def _setup(home: Path, a) -> int:
     rc = _link(home, a)
     if rc != 0:
         return rc
-    if _confirm("Switch WhatsApp to read-only mode now (it reads, it never sends)? [y/N] "):
-        print(f"mode: {set_mode(home, 'read').get('mode')}")
+    if _confirm("Switch WhatsApp to read-only mode now, and turn on the WhatsApp reading switch "
+                "(it reads, it never sends)? [y/N] "):
+        r = enable_reading(home, by="cli")
+        print(f"mode: {r.get('mode')}")
+        print(clilang.fmt(r["message_he"], r["message"]))
     else:
-        print("Mode left as it is. Later: jarvis whatsapp mode read")
+        print("Mode and the reading switch left as they are. Later: jarvis whatsapp mode read, "
+              f"then {SWITCH_CMD}")
     return 0
 
 
@@ -321,11 +362,16 @@ def cmd_whatsapp(a, cfg, home) -> int:
             st = wab.status_or_none(home)
             s, detail, action = wab.health_view(st)
             out = {"status": s, "detail": detail, "action": action, "configured": wab.configured(home),
+                   "reading_switch": "on" if reading_switch_on(home) else "off",
                    "bridge_installed": wab.bridge_installed(home), "bridge_download": wbi.status(home),
                    "bridge": None if st is None else {k: st.get(k) for k in (
                        "engine", "version", "mode", "killed", "connection", "linked", "watch_days_left",
                        "retention_days", "keep_nothing", "counts", "rate", "warnings_total", "key_protection")}}
+            if out["reading_switch"] == "off":
+                out["reading_switch_fix"] = SWITCH_CMD
             _print(out, a.json)
+            if out["reading_switch"] == "off" and not a.json:
+                print(clilang.fmt(SWITCH_OFF_HE, SWITCH_OFF_EN))
             return 0 if s == "ok" else 1
         if a.action == "start":
             ok, why = wab.start_bridge(home)
@@ -362,6 +408,8 @@ def cmd_whatsapp(a, cfg, home) -> int:
                     return 1
             r = set_mode(home, args[0], override_watch=bool(a.override_watch))
             print(f"mode: {r.get('mode')}")
+            if args[0] != "off" and not reading_switch_on(home):
+                print(clilang.fmt(SWITCH_OFF_HE, SWITCH_OFF_EN))
             return 0
         if a.action in ("allow", "remove"):
             if len(args) < 2 or args[0] not in ("read", "send"):
@@ -466,6 +514,8 @@ def view(ctx) -> dict:
     st = wab.status_or_none(ctx.home)
     s, detail, action = wab.health_view(st)
     out = {"health": {"status": s, "detail": detail, "action": action}, "status": st,
+           "reading_switch": {"on": bool(f.enabled(wab.FEATURE)), "fix": SWITCH_CMD, "off_en": SWITCH_OFF_EN,
+                              "off_he": SWITCH_OFF_HE},
            "feature": f.status(wab.FEATURE), "send_feature": f.status(wab.SEND_FEATURE),
            "configured": wab.configured(ctx.home), "binary": wab.bridge_installed(ctx.home),
            "bridge_installed": wab.bridge_installed(ctx.home),
@@ -530,6 +580,9 @@ def dashboard_routes(register) -> None:
                                         kind="feature", why="you pressed Send mode on the dashboard WhatsApp page")
             if not ok:
                 raise BridgeError("WA_APPROVAL_MISSING", "not approved on the screen", 403)
+        if m == "read" and b.get("enable_reading") is True:          # the page's explicit yes after linking
+            from .features import _ctx_features
+            return enable_reading(ctx.home, by="dashboard", features=_ctx_features(ctx))
         return set_mode(ctx.home, str(m), override_watch=b.get("override_watch") is True, by="dashboard")
 
     def allow_(ctx, b):

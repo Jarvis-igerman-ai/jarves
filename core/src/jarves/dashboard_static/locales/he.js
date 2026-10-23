@@ -154,7 +154,7 @@
   "Roll back to previous version": "חזרה לגרסה הקודמת",
   "Run now": "הרצה עכשיו",
   "Test now": "בדוק עכשיו",
-  "Turn on": "הפעלה",
+  "Turn on": "הדלקה",
   "Read aloud": "הקראה",
   "Export .md": "ייצוא ‎.md",
   "Export all": "ייצוא הכל",
@@ -1950,7 +1950,10 @@
   "More agents": "עוד סוכנים",
   "Fewer agents": "פחות סוכנים",
   "Stop the agent": "עצירת הסוכן",
-  "Conversation issues": "בעיות בשיחות"
+  "Conversation issues": "בעיות בשיחות",
+  "Switch on read-only mode and the WhatsApp reading switch now? JARVES will read and never send.": "להפעיל עכשיו מצב קריאה בלבד ואת מתג הקריאה של וואטסאפ? ג'ארביס יקרא ולא ישלח.",
+  "Read-only mode and the reading switch stay off. To turn it on later: jarvis features on whatsapp_bridge": "מצב קריאה ומתג הקריאה נשארו כבויים. להדלקה: jarvis features on whatsapp_bridge",
+  "reading switch: off": "מתג הקריאה: כבוי"
  },
  "rules": [
   [
