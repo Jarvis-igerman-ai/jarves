@@ -49,12 +49,16 @@
 
   function checklistCard(items) {
     const done = items.filter((c) => c.done).length;
+    const next = items.find((c) => !c.done);                       // only the next step is spelled out; the rest stay one line
+    const row = (c) => el("li", { class: c.done ? "done" : "" },
+      el("a", { href: "#/guide/" + c.id }, T(c, "title")), " ", c.done ? pill("ok", L("בוצע", "done")) : statePill(c.state),
+      c === next ? el("div", { class: "small muted", dir: dirOf() }, T(c, "first_step")) : null);
+    const bar = el("progress", { class: "check-bar", max: String(items.length), value: String(done),
+      "aria-label": L(`${done} מתוך ${items.length} בוצעו`, `${done} of ${items.length} done`) });
     return el("div", { class: "card checklist" }, el("div", { class: "row" },
       el("b", { dir: dirOf() }, L("מה לעשות קודם?", "What should I do first?")), el("span", { class: "spacer" }),
-      el("span", { class: "muted small" }, L(`${done} מתוך ${items.length} בוצעו`, `${done} of ${items.length} done`))),
-      el("ol", { dir: dirOf() }, items.map((c) => el("li", { class: c.done ? "done" : "" },
-        el("a", { href: "#/guide/" + c.id }, T(c, "title")), " ", c.done ? pill("ok", L("בוצע", "done")) : statePill(c.state),
-        !c.done ? el("div", { class: "small muted", dir: dirOf() }, T(c, "first_step")) : null))));
+      el("span", { class: "muted small" }, L(`${done} מתוך ${items.length} בוצעו`, `${done} of ${items.length} done`))), bar,
+      el("ol", { dir: dirOf() }, items.map(row)));
   }
 
   // ------------------------------------------------------------- one guide

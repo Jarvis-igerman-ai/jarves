@@ -1889,7 +1889,8 @@
   "No release notes found in this install.": "לא נמצאו הערות גרסה בהתקנה הזו.",
   "Your version": "הגרסה שלך",
   "More details: connections, features and privacy": "עוד פרטים: חיבורים, יכולות ופרטיות",
-  "More everyday tools": "עוד כלים ליום-יום"
+  "More everyday tools": "עוד כלים ליום-יום",
+  "Conversation issues": "בעיות בשיחות"
  },
  "rules": [
   [
