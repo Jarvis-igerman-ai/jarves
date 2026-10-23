@@ -595,3 +595,85 @@ def test_every_m1_feature_has_truthful_platform_status():
         assert pi["status"] != "verified_on_device"                 # no Pi exists yet
         if pi["status"] in ("implemented_unverified", "planned", "blocked"):
             assert pi["blocker"] and pi["roadmap_issue"].startswith("https://github.com/igalgerman/jarves/issues/")
+
+
+# ---------------------------------------------------------------------- quiet face link (hidden = idle, asked = loud)
+async def test_background_core_without_a_window_is_ready_with_an_idle_face_link(home, cfg):
+    core = make_core(home, cfg, runtime_mode="background")
+    await core.start()
+    try:
+        fl = core.health.components["face_link"]
+        assert fl.status == "disabled" and fl.detail == "face hidden: shown on request" and fl.action == "jarvis show"
+        assert fl.status not in ("unavailable", "degraded")
+    finally:
+        await core.stop()
+
+
+async def test_hide_turns_the_face_link_idle_and_show_connects_it_again(home, cfg):
+    launcher = Launcher()
+    core = make_core(home, cfg, viewer_launcher=launcher, runtime_mode="background")
+    await core.start()
+    try:
+        ok, _ = await core.runtime.show("test")
+        assert ok and len(launcher.procs) == 1
+        face = await open_face(core)
+        assert core.health.components["face_link"].status == "ok"
+        hide = asyncio.create_task(core.runtime.hide("test"))
+        await face.wait("display.close")
+        await face.ws.close()
+        launcher.procs[0].exit(0)
+        await hide
+        await until(lambda: core.health.components["face_link"].status == "disabled")
+    finally:
+        await core.stop()
+
+
+async def test_show_with_godot_missing_is_a_loud_error_with_what_to_do(home, cfg):
+    async def no_godot(port):
+        raise RuntimeError("Godot was not found; set GODOT_EXE or runtime.viewer_exe, or install the Godot build")
+    core = make_core(home, cfg, viewer_launcher=no_godot, runtime_mode="background")
+    await core.start()
+    try:
+        ok, detail = await core.runtime.show("test")
+        assert not ok and "Godot is not installed" in detail and "run_face.cmd" in detail and "jarvis diag" in detail
+        fl = core.health.components["face_link"]
+        assert fl.status == "unavailable" and "Godot is not installed" in fl.detail and "jarvis diag" in fl.action
+        assert core.health.components["display"].status == "degraded"
+    finally:
+        await core.stop()
+
+
+async def test_show_and_the_face_never_connects_is_reported_loudly(home, cfg, monkeypatch):
+    from jarves.runtime import service
+    monkeypatch.setattr(service, "FACE_CONNECT_WAIT_S", 0.6)
+    core = make_core(home, cfg, runtime_mode="background")
+    await core.start()
+    try:
+        ok, _ = await core.runtime.show("test")
+        assert ok
+        await until(lambda: core.health.components["face_link"].status == "unavailable")
+        fl = core.health.components["face_link"]
+        assert "did not connect" in fl.detail and "run_face.cmd" in fl.action and "jarvis diag" in fl.action
+    finally:
+        await core.stop()
+
+
+async def test_a_crashing_face_after_show_is_a_loud_error(home, cfg):
+    launcher = Launcher()
+    core = make_core(home, cfg, viewer_launcher=launcher, runtime_mode="background")
+    await core.start()
+    try:
+        await core.runtime.show("test")
+        launcher.procs[0].exit(3)
+        await until(lambda: core.health.components["face_link"].status == "unavailable")
+        assert "exit 3" in core.health.components["face_link"].detail
+    finally:
+        await core.stop()
+
+
+def test_jarvis_show_reports_a_failure_on_stderr_with_exit_1(monkeypatch, capsys, home, cfg):
+    fake = {"applied": {"display": {"ok": False, "detail": "Godot is not installed"}}}
+    monkeypatch.setattr(cli, "_ws_call", lambda *a, **k: fake)
+    assert cli.cmd_display(SimpleNamespace(cmd="show"), cfg, home) == 1
+    err = capsys.readouterr().err
+    assert "ERROR" in err and "run_face.cmd" in err and "jarvis diag" in err

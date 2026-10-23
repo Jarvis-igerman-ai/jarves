@@ -421,8 +421,12 @@ def cmd_display(a, cfg, home) -> int:
         print("JARVES is not running. Start it with: jarvis start" + (" --show" if what == "show" else ""))
         return 1
     res = (r.get("applied") or {}).get("display") or {}
-    print(f"{what}: {res.get('detail', '?')}" + ("" if res.get("ok", True) else "  (failed)"))
-    return 0 if res.get("ok", True) else 1
+    if not res.get("ok", True):
+        print(f"ERROR: {what} failed: {res.get('detail', '?')}", file=sys.stderr)
+        print("The face launcher is godot\\run_face.cmd; collect details with: jarvis diag", file=sys.stderr)
+        return 1
+    print(f"{what}: {res.get('detail', '?')}")
+    return 0
 
 
 def cmd_talk(a, cfg, home) -> int:

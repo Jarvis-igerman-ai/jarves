@@ -325,7 +325,7 @@ async def test_b07_requested_face_close_is_info_unexpected_loss_stays_a_warning(
     await core.link.send_face("display.close", {"reason": "hide"})       # what runtime.hide / stop send
     await f.ws.close()
     for _ in range(900):
-        if core.health.components["face_link"].status == "unavailable":
+        if core.health.components["face_link"].status == "disabled":
             break
         await asyncio.sleep(0.05)
     assert core.health.components["face_link"].detail == "display window closed"

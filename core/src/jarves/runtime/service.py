@@ -28,6 +28,7 @@ from .viewer import Viewer, find_godot
 STATE_FILE = "runtime.json"
 TRAY_NOTICE = ("ג'ארביס עדיין פועל במגש המערכת (ליד השעון). לחצו על הסמל כדי לפתוח אותו, או Quit כדי לעצור. / "
                "JARVES is still running in the tray. Click the icon to open it, or Quit to stop.")
+FACE_CONNECT_WAIT_S = 30.0   # a window we started must reach the link within this time, or it is a loud error
 PREFS = ("display_hidden", "alerts_paused", "mic_muted", "tray_notice_shown")
 HEARTBEAT_S = 60.0          # runtime.json is rewritten on every change, and at least this often while idle
 _current: "Runtime | None" = None
@@ -92,10 +93,45 @@ class Runtime:
         self.resumes = 0
         self.recovering = False           # True while audio is being re-opened: the wake loop stays closed
         self._display_crashed = False
+        # background mode shows no window until asked (`jarvis show`, tray, dashboard, voice): no face is expected then
+        self._face_requested = mode != "background"
+        self._face_watch: asyncio.Task | None = None
+        core.link.face_expected = self.face_expected
         self._custom_launcher = launcher is not None
         self._godot: bool | None = True if launcher is not None else None   # a test launcher needs no Godot
         self.loop: asyncio.AbstractEventLoop | None = None
         self.watcher = ResumeWatcher(self._on_resume, gap_s=rc.resume_gap_s)
+
+    def face_expected(self) -> bool:
+        """True when a missing face is a fault. False = hidden by the user or never asked for (background mode)."""
+        return not self.prefs["display_hidden"] and (self._face_requested or self.viewer.running)
+
+    def _face_failed(self, detail: str, action: str) -> None:
+        """A window the user asked for did not come up: a loud, specific error (never hidden as "idle")."""
+        self.core.health.set("face_link", "unavailable", detail, action)
+        self.core.health.set("display", "degraded", detail, action)
+        logs.error("runtime", "FACE_START_FAILED", "the face window did not come up", detail=detail, action=action)
+
+    def _face_problem_action(self) -> str:
+        from .viewer import PROJECT
+        return f"start {PROJECT / 'run_face.cmd'} by hand, or run: jarvis diag"
+
+    def _watch_face(self) -> None:
+        if self._face_watch is not None and not self._face_watch.done():
+            return
+        self._face_watch = asyncio.create_task(self._face_connect_guard())
+
+    async def _face_connect_guard(self) -> None:
+        deadline = time.monotonic() + FACE_CONNECT_WAIT_S
+        while time.monotonic() < deadline:
+            if self.core.link.face is not None or self.prefs["display_hidden"] or self.state != "running":
+                return
+            if not self.viewer.running:
+                return                       # it ended: _viewer_exited reports a crash
+            await asyncio.sleep(0.5)
+        if self.core.link.face is None and self.viewer.running and not self.prefs["display_hidden"]:
+            self._face_failed(f"the face window started but did not connect within {int(FACE_CONNECT_WAIT_S)} s",
+                              self._face_problem_action())
 
     # ------------------------------------------------------------------ lifecycle
     def start(self) -> None:
@@ -240,6 +276,7 @@ class Runtime:
         async with self._display_lock:
             self._set_pref("display_hidden", False)
             self._display_crashed = False
+            self._face_requested = True
             if self.viewer.closing:
                 await self.viewer.settle(5.0)           # the old process is gone before a new one starts
             if self.core.link.face is not None:
@@ -252,7 +289,18 @@ class Runtime:
                 await self.viewer.open()
             except Exception as e:
                 logs.warn("runtime", "VIEWER_START_FAILED", "display window could not start", by=by, **logs.error_fields(e))
-                return False, str(e)[:160]
+                if isinstance(e, RuntimeError) and "Godot was not found" in str(e):
+                    msg = ("Godot is not installed (or not found): the face window cannot open. Install Godot 4 "
+                           "or set GODOT_EXE / runtime.viewer_exe, then run: jarvis show")
+                else:
+                    msg = f"the face window could not start: {str(e)[:160]}"
+                self._face_failed(msg, self._face_problem_action())
+                return False, f"{msg}. {self._face_problem_action()}"
+            cur = self.core.health.components.get("display")
+            if cur is not None and cur.status in ("degraded", "unavailable", "disabled"):
+                self.core.health.set("display", "ok", "display starting")
+            self.core.link.refresh_face_health()
+            self._watch_face()
             logs.info("runtime", "DISPLAY_SHOWN", "display window opened", by=by)
             return True, "opening"
 
@@ -260,10 +308,13 @@ class Runtime:
         async with self._display_lock:
             self._set_pref("display_hidden", True)
             self._display_crashed = False
+            self._face_requested = False
             had = self.core.link.face is not None or self.viewer.running
             if self.core.link.face is not None:
                 await self.core.link.send_face("display.close", {"reason": "hide"})
             await self.viewer.close()
+            self.core.health.set("display", "disabled", "display hidden")
+            self.core.link.refresh_face_health()
             logs.info("runtime", "DISPLAY_HIDDEN", "display window closed; the Core keeps running", by=by)
             return True, "hidden" if had else "already hidden"
 
@@ -272,6 +323,7 @@ class Runtime:
         if not self.keep_running:
             return False
         self._set_pref("display_hidden", True)
+        self._face_requested = False
         self.viewer.expect_exit()
         self._tray_notice()
         logs.info("runtime", "DISPLAY_CLOSED_BY_USER", "window closed; JARVES keeps running in the background "
@@ -292,9 +344,13 @@ class Runtime:
             self._display_crashed = True
             self.core.health.set("display", "degraded", f"display window crashed (exit {rc}); the Core keeps running",
                                  "say \"show yourself\" or use the tray to open it again")
+            if not self.prefs["display_hidden"]:
+                self.core.health.set("face_link", "unavailable", f"the face window ended (exit {rc})",
+                                     self._face_problem_action())
         else:
             self.core.health.set("display", "disabled" if self.prefs["display_hidden"] else "ok",
                                  "display hidden" if self.prefs["display_hidden"] else "display closed")
+            self.core.link.refresh_face_health()
 
     async def set_alerts_paused(self, paused: bool, by: str = "user") -> None:
         self._set_pref("alerts_paused", bool(paused))
