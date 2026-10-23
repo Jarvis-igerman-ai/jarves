@@ -73,7 +73,7 @@ PR head (pull_request, merge ref)                      merge (automerge)        
    `python core/tools/ci_plan.py durations-merge --junit <one OS artifact directory> --into core/tests/durations-windows.json`.
    Inside a shard, `pytest-xdist` (pinned `pytest-xdist==3.8.0` through `uv run --with`, not in the lock) runs files in
    parallel workers with `--dist loadfile`: one file never splits across workers, and the suite already uses temp homes and
-   `free_port()` per test. Workers: 1 (serial) on Linux (3 workers broke 20 process-limit/update-flow tests on ubuntu-24.04), 2 on Windows; repository variable `CI_XDIST_WORKERS` overrides, `1` turns it off.
+   `free_port()` per test. Workers: 1 (serial) on Linux (3 workers broke 20 process-limit/update-flow tests on ubuntu-24.04), 3 on Windows (2 until 23 Oct 2026); repository variable `CI_XDIST_WORKERS` overrides, `1` turns it off.
    This replaces the old "serial on purpose" rule; the safety net is item 7.
 6. **Caching.** uv (lock hash), the Go module and build cache (`setup-go`), Playwright browsers (Linux), the Godot and Inno
    Setup downloads (`jarves-test-tools`), the installer build tools (Python, Godot templates, Inno Setup:
@@ -227,3 +227,14 @@ first merge after this change fills `main`'s cache; PRs opened before that still
 Not changed here (next candidates, each measured on its own): Windows xdist workers (2 on a 4-vCPU runner), a fourth
 shard per OS (more concurrent jobs: two PRs at once already queue against the 20-job limit, 47-196 s queue measured), and
 moving `test_mobile_phone_e2e.py` (a real-browser file inside the Core shards, no browser-job retry) to the browser job.
+
+## Follow-up: Windows workers and own-file collection (23 Oct 2026, #89)
+
+- Windows shards use 3 pytest-xdist workers (was 2) on the 4-vCPU hosted runners: the Windows shards are the long pole
+  once the plan is balanced. Repository variable `CI_XDIST_WORKERS` still overrides (for example back to 2).
+- Each shard passes ONLY its planned files to pytest. Before, every shard collected all 177 test files and deselected two
+  thirds. Measured locally, cold cache as on a fresh runner: 5.8-6.3 s instead of 9.8-10.4 s per Linux shard, the same
+  879 tests selected (shard 3/3); Windows imports are slower, so the saving there is likely larger. `--shard-files`
+  still orders the files slowest first, and an empty plan for a shard now fails the job instead of running everything.
+- Not done: merging the 4 installer smoke jobs into 2 (`smoke_windows.ps1 -Scenario full` would run both scenarios in one
+  job): it frees 2 runner slots but ends close to the 9-minute critical path, so it could make every PR slower.
