@@ -335,11 +335,6 @@ class Core:
                                                 health=lambda s, d, a: self.health.set("delegation", s, d, a))
         self.health.set("delegation", "ok", self.delegation_state.describe())
         self._check_ai()
-        try:                                            # SW-V4 O preflight (<= 1.5 s) while the ports are still free
-            self.preflight = _preflight.run_core(self)
-        except Exception:
-            self.preflight = None
-            logs.error("health", "PREFLIGHT_FAILED", "preflight did not run", exc=True)
 
         self.link = GodotLink(c.link.host, c.link.port, load_token(self.home / "link_token"), self.health,
                               self.on_message, self._face_connected)
@@ -395,6 +390,12 @@ class Core:
                         detail, "" if quality == "cloud" else
                         ("ChatGPT plan has no voice; use ai.connection = \"combined\" + OPENAI_API_KEY for the premium voice"
                          if c.ai.connection == "chatgpt" else "run `jarvis key` for the high-quality voice"))
+
+        try:                                            # Preflight after every Skill is attached, while the link port is still free
+            self.preflight = _preflight.run_core(self)
+        except Exception:
+            self.preflight = None
+            logs.error("health", "PREFLIGHT_FAILED", "preflight did not run", exc=True)
 
         # Accept the room/face connection only after audio and speech are initialized.
         await self.link.start()
