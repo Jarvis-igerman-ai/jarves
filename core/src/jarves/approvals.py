@@ -252,6 +252,7 @@ class ApprovalService:
         self.listeners: list[Callable[[Approval], None]] = []    # after every decision (tests, runtime)
         self.on_ask: list[Callable[[Approval], None]] = []       # when a request starts waiting (tests, runtime)
         self.closed = False
+        self.last_resolution = ""        # how the newest request ended: approved/denied/timeout/no_channel/cancelled/...
         self.loop: asyncio.AbstractEventLoop | None = None       # the Core's loop (set by Core.start): see ask_owner
         # SW-V4 F: details["grant"] of requests the OWNER approved -> decision time. A caller (the WhatsApp send) may
         # spend a grant once to get a signed, single-use approval id the bridge checks (take_grant).
@@ -315,7 +316,9 @@ class ApprovalService:
                                         default=str).encode()).hexdigest()[:24]
         loop = asyncio.get_running_loop()
         now = self.clock()
+        self.last_resolution = ""
         if self.closed:
+            self.last_resolution = "shutdown"
             self._audit_simple(title, prompt, kind, risk, source, details, "denied", "shutdown")
             return False
         with self._lock:
@@ -329,12 +332,14 @@ class ApprovalService:
         if shared is not None:
             return bool(await asyncio.shield(shared))
         if source == "model" and now - self._denied.get(key, -1e9) < DENY_COOLDOWN_S:   # a button press is a new ask
+            self.last_resolution = "cooldown"
             self._audit_simple(title, prompt, kind, risk, source, details, "denied", "cooldown")
             logs.info("approvals", "APPROVAL_COOLDOWN", "identical request was just denied; not asking again", kind=kind)
             return False
         limit, window = self.rate_limit
         self._recent = [t for t in self._recent if now - t < window]
         if len(self._recent) >= limit:
+            self.last_resolution = "rate_limited"
             self._audit_simple(title, prompt, kind, risk, source, details, "denied", "rate_limited")
             logs.warn("approvals", "APPROVAL_RATE_LIMITED", "too many approval requests; denied", limit=limit,
                       window_s=window, kind=kind)
@@ -465,6 +470,7 @@ class ApprovalService:
         # approved | denied (an owner said no) | timeout | cancelled | no_channel (nobody could be asked)
         a.state = "approved" if approved else ("denied" if channel in CHANNELS else channel)
         a.channel, a.decided_at = channel, self.clock()
+        self.last_resolution = a.state              # the registry words a "no" honestly: timeout / no_channel / denied
         if not approved and channel in CHANNELS:
             self._denied[a.key] = a.decided_at
         if approved and channel in CHANNELS and isinstance(a.details.get("grant"), str):

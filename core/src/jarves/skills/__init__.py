@@ -54,6 +54,7 @@ def expected_tool_refusal(code: str | None, origin: str | None = None) -> bool:
 
 
 UNTRUSTED_GRACE_S = 3.0    # see SkillRegistry.new_turn
+ASK_HARD_CAP_S = 660.0     # Issue #17: no approval wait is endless (the approvals service itself stops at 600 s)
 REPEAT_REPLAY_S = 30.0     # V4-VC-3: an identical successful action repeated in a tainted turn gets its result back
 # Which conversation a tool call belongs to ("voice", "text", default "default": scheduler / other callers). The
 # untrusted-content taint is kept per route. A contextvar: tasks spawned by a route inherit it.
@@ -141,6 +142,9 @@ class Tool:
     # (validated args) -> a refusal, or None: runs BEFORE the owner is asked, so an impossible call is never put to
     # the owner as a question (V4-WA-2: unknown/used WhatsApp draft id)
     precheck: Callable[[Any], "ToolResult | None"] | None = None
+    # read tools only: an identical successful call within this many seconds returns the earlier result (issue #17:
+    # workspace_read ran 4x in 30 s). Any successful side effect or a new user turn drops the cache.
+    cache_s: float = 0.0
 
     @property
     def side_effect(self) -> bool:     # read-only view of the old flag
@@ -220,6 +224,11 @@ class SkillRegistry:
         self.confirm_wait_s = 0.0
         self._confirming_since: float | None = None
         self.asks = 0                              # approvals asked through this registry (V4-VC-3)
+        self._read_cache: dict[tuple, tuple] = {}   # issue #17: (route, tool, args) -> (t, result) for cache_s tools
+        self.ask_cap_s = ASK_HARD_CAP_S            # hard stop for ONE approval wait (tests shorten it)
+        # how the newest approval ended: approved | denied | timeout | no_channel | cancelled (Issue #17: a "no" that
+        # is really "nobody answered" or "nowhere to ask" must be told that way, never as "you declined")
+        self.last_ask_outcome = ""
         self._recent_ok: dict[tuple, tuple] = {}   # V4-VC-3: (route, tool, args) -> (t, result, owner approved it)
 
     @property
@@ -238,6 +247,7 @@ class SkillRegistry:
         there. A taint younger than UNTRUSTED_GRACE_S is kept: a voice transcript can complete just after the tool
         of that same turn returned."""
         key = route or ROUTE.get()
+        self._read_cache = {k: v for k, v in self._read_cache.items() if k[0] != key}
         at = self._untrusted.get(key)
         if at is not None and self.clock() - at >= UNTRUSTED_GRACE_S:
             self._untrusted.pop(key, None)
@@ -252,14 +262,37 @@ class SkillRegistry:
     async def _ask(self, prompt: str, **meta) -> bool:
         """registry.confirm, with the human's thinking time recorded (it must never count as an AI timeout).
         `meta` (title, why, risk, kind, details, typed, timeout) reaches a confirm that declares `accepts_meta`
-        (the Core's approvals service); a plain confirm(prompt) gets the prompt only."""
+        (the Core's approvals service); a plain confirm(prompt) gets the prompt only. Issue #17: the wait is bounded
+        (`ask_cap_s`) and its outcome is kept in `last_ask_outcome`."""
+        from .. import approvals as appr
         t0 = time.monotonic()
         self._confirming_since = t0
         self.asks += 1
+        self.last_ask_outcome = ""
+        svc = appr.current()
+        if svc is not None:
+            svc.last_resolution = ""
         try:
             if meta and getattr(self.confirm, "accepts_meta", False):
-                return bool(await self.confirm(prompt, **meta))
-            return bool(await self.confirm(prompt))
+                pending = self.confirm(prompt, **meta)
+            else:
+                pending = self.confirm(prompt)
+            try:
+                ok = bool(await asyncio.wait_for(pending, self.ask_cap_s))
+            except TimeoutError:
+                logs.warn("skills", "APPROVAL_HARD_TIMEOUT", "no answer to an approval within the hard limit; denied",
+                          limit_s=self.ask_cap_s)
+                self.last_ask_outcome = "timeout"
+                return False
+            except asyncio.CancelledError:
+                self.last_ask_outcome = "cancelled"
+                raise
+            if ok:
+                self.last_ask_outcome = "approved"
+            else:
+                why = str(getattr(svc, "last_resolution", "") or "")
+                self.last_ask_outcome = why if why in ("timeout", "no_channel", "cancelled") else "denied"
+            return ok
         finally:
             self._confirming_since = None
             self.confirm_wait_s += time.monotonic() - t0
@@ -362,9 +395,25 @@ class SkillRegistry:
                 if k in extra:
                     meta[k] = extra[k]
         if prompt and not await self._ask(prompt, **meta):
-            logs.info("skills", "TOOL_DECLINED", "tool not confirmed by the user", tool=tool.name, origin=origin)
-            return ToolResult(False, "cancelled: the user did not confirm", code="TOOL_DECLINED")
+            return self._not_approved(tool.name, origin)
         return None
+
+    def _not_approved(self, name: str, origin: str) -> ToolResult:
+        """The honest result of an approval that did not come: a decline, silence, or nowhere to show the question."""
+        why = self.last_ask_outcome
+        if why == "timeout":
+            logs.warn("skills", "TOOL_APPROVAL_TIMEOUT", "nobody answered the on-screen approval; nothing was done",
+                      tool=name, origin=origin)
+            return ToolResult(False, "I asked for your approval on the screen but no answer came in time, so I "
+                              "did nothing. Say it again when you can answer.", {"approval": "timeout"},
+                              "TOOL_APPROVAL_TIMEOUT")
+        if why == "no_channel":
+            logs.warn("skills", "TOOL_APPROVAL_UNAVAILABLE", "there was nowhere to show the approval; nothing was done",
+                      tool=name, origin=origin)
+            return ToolResult(False, "I could not show you the approval question (no screen or app is open for it), "
+                              "so I did nothing.", {"approval": "no_channel"}, "TOOL_APPROVAL_UNAVAILABLE")
+        logs.info("skills", "TOOL_DECLINED", "tool not confirmed by the user", tool=name, origin=origin)
+        return ToolResult(False, "cancelled: the user did not confirm", code="TOOL_DECLINED")
 
     async def _run(self, tool: Tool, args: BaseModel) -> ToolResult:
         mark = IN_TOOL.set(tool.name)          # tasks created below copy the context: the handler runs "in a tool"
@@ -375,28 +424,63 @@ class SkillRegistry:
 
     async def _run_marked(self, tool: Tool, args: BaseModel) -> ToolResult:
         if tool.permission == "read":
-            return await asyncio.wait_for(tool.handler(args), tool.timeout_s)
+            task = asyncio.ensure_future(tool.handler(args))
+            try:
+                return await self._bounded(task, tool.timeout_s)
+            except BaseException:
+                if not task.done():
+                    task.cancel()
+                raise
         # side effect: survives cancellation of the calling turn, but still honours the tool timeout
         task = asyncio.ensure_future(tool.handler(args))
         self._inflight.add(task)
         task.add_done_callback(self._inflight.discard)
         try:
-            return await asyncio.wait_for(asyncio.shield(task), tool.timeout_s)
+            return await self._bounded(task, tool.timeout_s)
         except TimeoutError:
             task.cancel()
             raise
 
+    async def _bounded(self, task: asyncio.Future, timeout_s: float):
+        """Wait for `task` at most `timeout_s` of NON-human time: the minutes a person spends on an approval that the
+        handler itself asked for (feature_set, helper) do not count (Issue #17: feature_set's 30 s limit cut the
+        60 s approval short and the call ended as "timed out"). Never cancels the task; the caller decides."""
+        loop = asyncio.get_running_loop()
+        base = self.confirm_elapsed()
+        deadline = loop.time() + timeout_s
+        while True:
+            done, _ = await asyncio.wait({task}, timeout=max(0.0, deadline - loop.time()))
+            if task in done:
+                return task.result()
+            human = self.confirm_elapsed() - base
+            if human > 0 or self._confirming_since is not None:
+                deadline += human
+                base += human
+                if deadline - loop.time() <= 0:      # still waiting on the person (bounded by ask_cap_s)
+                    deadline = loop.time() + 0.25
+                continue
+            raise TimeoutError
+
     async def call(self, name: str, raw_args: dict | str | None = None, *, origin: Origin = "model") -> ToolResult:
+        """Issue #17: EVERY call ends in exactly one log record: TOOL_RESULT (it ran or was refused before running; `ms`
+        leaves out the person's approval time) or TOOL_CANCELLED (the turn / session ended under it), so the diagnosis
+        never sees a LIVE_TOOL_CALL "that never returned"."""
         t_run = time.monotonic()
         approval_wait = self.confirm_elapsed()
-        res = await self._call(name, raw_args, origin=origin)
+        try:
+            res = await self._call(name, raw_args, origin=origin)
+        except asyncio.CancelledError:
+            logs.info("skills", "TOOL_CANCELLED", "tool call cancelled before it finished (turn or session ended)",
+                      tool=name, origin=origin, ms=round((time.monotonic() - t_run) * 1000))
+            raise
         log = logs.info if res.ok else logs.warn
         log("skills", "TOOL_RESULT", "tool finished", tool=name, ok=res.ok, result_code=res.code, origin=origin,
             ms=round(max(0.0, time.monotonic() - t_run - (self.confirm_elapsed() - approval_wait)) * 1000))
         _tool_seen(name, res.ok, res.code, res.message)   # terminal + web chat: one line per call (TOOL_SINK)
         return res
 
-    async def _call(self, name: str, raw_args: dict | str | None = None, *, origin: Origin = "model") -> ToolResult:
+    async def _call(self, name: str, raw_args: dict | str | None = None, *, origin: Origin = "model",
+                    ) -> ToolResult:
         """Run a tool under the permission policy. origin="user" only when the deterministic command parser matched
         the user's own words; everything from a model (text agent, voice agent, ChatGPT plan) is "model"."""
         st = self._tools.get(name)
@@ -434,6 +518,13 @@ class SkillRegistry:
             prev = last[1]
             return ToolResult(prev.ok, prev.message, {**prev.data, "already_done": "this exact action already ran a "
                               "moment ago (approved); do NOT run it again: report this result"}, code=prev.code)
+        if tool.cache_s and tool.permission == "read":
+            hit = self._read_cache.get(key)
+            if hit is not None and self.clock() - hit[0] < tool.cache_s:
+                logs.info("skills", "TOOL_CACHED", "identical read repeated; earlier result returned", tool=name)
+                prev = hit[1]
+                return ToolResult(prev.ok, prev.message, {**prev.data, "cached": "same result as a moment ago; "
+                                  "do not call this tool again with the same arguments"}, code=prev.code)
         asked0 = self.asks
         refused = await self._authorize(tool, args, origin)
         if refused is not None:
@@ -441,7 +532,10 @@ class SkillRegistry:
         try:
             res = await self._run(tool, args)
         except TimeoutError:
-            res = ToolResult(False, f"{name} timed out", code="TOOL_TIMEOUT")
+            logs.warn("skills", "TOOL_TIMEOUT", "tool did not finish in time", tool=name, limit_s=tool.timeout_s)
+            res = ToolResult(False, f"{name} timed out; nothing was changed" if tool.permission == "read" else
+                             f"{name} timed out and was stopped; I cannot confirm whether it changed anything, so "
+                             "check before repeating it", code="TOOL_TIMEOUT")
         except Exception as e:  # a broken Skill must never take down the Core
             logs.error("skills", "TOOL_CRASH", "tool raised an exception", tool=name, exc=True)
             res = ToolResult(False, f"{name} failed: {type(e).__name__}", code="TOOL_CRASH")
@@ -449,7 +543,10 @@ class SkillRegistry:
             # review C (SWV4): a FAILED run still returns third-party text (a helper command exiting 1 prints
             # whatever it likes into output_tail): that taints the turn exactly like a successful one
             self._untrusted_at = self.clock()
+        if res.ok and tool.cache_s and tool.permission == "read":
+            self._read_cache[key] = (self.clock(), res)
         if res.ok and tool.permission != "read":
+            self._read_cache.clear()           # a side effect may change what a read returns
             now = self.clock()
             self._recent_ok = {k: v for k, v in self._recent_ok.items() if now - v[0] < REPEAT_REPLAY_S}
             self._recent_ok[key] = (now, res, self.asks > asked0)    # approved by the owner this call

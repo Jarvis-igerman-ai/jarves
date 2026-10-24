@@ -201,7 +201,7 @@ async def _quit_after_goodbye(core) -> None:
         await _after_goodbye(core, live)
     else:
         await asyncio.sleep(QUIT_DELAY_S / 4)
-    core.stop_event.set()
+    getattr(core, "request_stop", lambda _r: core.stop_event.set())("voice_quit")
 
 
 async def _end_after_goodbye(core, live) -> None:

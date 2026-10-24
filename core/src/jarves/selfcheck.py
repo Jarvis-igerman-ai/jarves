@@ -166,18 +166,36 @@ def processes(recs: list[dict]) -> list[dict]:
         if not sid:
             continue
         p = by.setdefault(sid, {"session": sid, "first": r["_t"], "last": r["_t"], "started": False,
-                                "stopped": False, "stopping": False, "errors": 0, "last_rec": r})
+                                "stopped": False, "stopping": False, "errors": 0, "last_rec": r, "boot": None,
+                                "reason": ""})
         p["last"], p["last_rec"] = r["_t"], r
         code = r.get("code")
         if code == "CORE_STARTING":
             p["started"] = True
+            b = r.get("boot")
+            p["boot"] = b if isinstance(b, (int, float)) and not isinstance(b, bool) else None
         elif code == "CORE_STOPPED":
             p["stopped"] = True
         elif code == "CORE_STOPPING":
             p["stopping"] = True
+            p["reason"] = str(r.get("reason") or "")
         if r.get("level") == "ERROR":
             p["errors"] += 1
     return sorted(by.values(), key=lambda p: p["first"])
+
+
+def end_kind(p: dict, procs: list[dict]) -> str:
+    """How a process that wrote CORE_STARTING ended: "clean" (CORE_STOPPED), "restart" (the computer rebooted before the
+    next JARVES start: power cut, logoff or Windows shutdown without a stop, which JARVES cannot prove was its own
+    fault), "stop_hung" (it began an orderly stop that never finished) or "crash" (anything else)."""
+    if p["stopped"]:
+        return "clean"
+    nxt = next((q for q in procs if q["started"] and q["first"] > p["first"]), None)
+    if nxt is not None:
+        from .runtime.shutdown import same_boot
+        if same_boot(p.get("boot"), nxt.get("boot")) is False:
+            return "restart"
+    return "stop_hung" if p["stopping"] else "crash"
 
 
 def previous_process(home: Path, current_session: str, lookback_s: float = 30 * 86400,
@@ -249,6 +267,10 @@ KNOWN_CODES = {
                             "בקשות הבדיקה בעזרת המודל נכשלות (רשת, מפתח או תקציב)",
                             "Check `jarvis key` and the Usage page; the rule-based checks still run.",
                             "בדקו את jarvis key ואת עמוד השימוש. הבדיקות לפי כללים ממשיכות לרוץ.", "minutes"),
+    "CORE_STOP_STEP_FAILED": ("one part of the orderly shutdown failed or hung (the rest still closed)",
+                              "חלק אחד מהכיבוי המסודר נכשל או נתקע (השאר נסגר כרגיל)",
+                              "Attach `jarvis diag` to the ticket draft: the line names the part (step=...).",
+                              "צרפו jarvis diag לטיוטת הכרטיס: השורה מציינת את החלק (step=...).", "hour"),
     "LIVE_STOP_FAILED": ("the voice session did not close cleanly", "שיחת הקול לא נסגרה כראוי",
                          "Usually a network drop; if it repeats attach `jarvis diag` to the ticket draft.",
                          "בדרך כלל ניתוק רשת. אם זה חוזר צרפו jarvis diag לטיוטת הכרטיס.", "hour"),
@@ -497,26 +519,67 @@ class SelfCheck:
     def _logs(self, recs: list[dict], out: list[Finding], metrics: dict) -> None:
         procs = processes(recs)
         later_start = {p["session"]: any(q["first"] > p["first"] and q["started"] for q in procs) for p in procs}
-        crashed = [p for p in procs if p["started"] and not p["stopped"] and p["session"] != self.current_session
-                   and later_start.get(p["session"])]
+        ended = [p for p in procs if p["started"] and not p["stopped"] and p["session"] != self.current_session
+                 and later_start.get(p["session"])]
+        kinds = {p["session"]: end_kind(p, procs) for p in ended}
+        crashed = [p for p in ended if kinds[p["session"]] == "crash"]
+        restarted = [p for p in ended if kinds[p["session"]] == "restart"]
+        hung = [p for p in ended if kinds[p["session"]] == "stop_hung"]
         metrics["starts"] = sum(p["started"] for p in procs)
         metrics["crashes"] = len(crashed)
+        metrics["system_restarts"] = len(restarted)
+        metrics["stop_hung"] = len(hung)
         if crashed:
             out.append(Finding(
                 "crash", "logs", "high" if len(crashed) >= 2 else "medium",
                 f"JARVES stopped without a clean shutdown {len(crashed)}x",
                 f"ג'ארביס נעצר בלי כיבוי מסודר {len(crashed)} פעמים",
-                detail="A Core process wrote CORE_STARTING but never CORE_STOPPED before the next start.",
-                detail_he="תהליך של ה-Core התחיל ולא נסגר כראוי לפני ההפעלה הבאה.",
+                detail="A Core process wrote CORE_STARTING but never CORE_STOPPED before the next start, and the "
+                       "computer did not restart in between.",
+                detail_he="תהליך של ה-Core התחיל ולא נסגר כראוי לפני ההפעלה הבאה, והמחשב לא הופעל מחדש באמצע.",
                 evidence=[f"process {p['session']}: started {_when(p['first'])}, last line {_line(p['last_rec'])}"
                           for p in crashed[-MAX_EVIDENCE:]],
-                cause="a crash, a forced kill (Task Manager), a power cut or Windows shutting down with JARVES open",
-                cause_he="קריסה, סגירה בכוח (מנהל המשימות), הפסקת חשמל או כיבוי של Windows כשג'ארביס פתוח",
-                fix="Look at the last log lines before each stop (System log page); if it was not a power cut or a "
-                    "forced close, attach `jarvis diag` to the ticket draft.",
-                fix_he="בדקו את השורות האחרונות ביומן המערכת לפני כל עצירה. אם זו לא הייתה הפסקת חשמל או סגירה "
-                       "בכוח, צרפו jarvis diag לטיוטת הכרטיס.",
+                cause="a crash or a forced kill (Task Manager, taskkill /F). A closed terminal window, a logoff and "
+                      "Windows shutting down now stop JARVES cleanly, so those are no longer the likely cause",
+                cause_he="קריסה או סגירה בכוח (מנהל המשימות, taskkill /F). סגירת חלון הטרמינל, התנתקות וכיבוי של "
+                         "Windows כבר עוצרים את ג'ארביס בצורה מסודרת, ולכן הם כבר לא הסיבה הסבירה",
+                fix="Look at the last log lines before each stop (System log page); if it was not a forced close, "
+                    "attach `jarvis diag` to the ticket draft.",
+                fix_he="בדקו את השורות האחרונות ביומן המערכת לפני כל עצירה. אם זו לא הייתה סגירה בכוח, "
+                       "צרפו jarvis diag לטיוטת הכרטיס.",
                 effort="hour", action={"type": "open", "page": "#/logs"}, count=len(crashed)))
+        if restarted:
+            out.append(Finding(
+                "system_restart", "logs", "low",
+                f"The computer restarted or lost power while JARVES was open {len(restarted)}x",
+                f"המחשב הופעל מחדש או איבד חשמל כשג'ארביס היה פתוח {len(restarted)} פעמים",
+                detail="A Core process had no CORE_STOPPED and the computer's boot time changed before JARVES started "
+                       "again. That is the computer ending JARVES (power cut, crash of Windows, or a shutdown that did "
+                       "not wait), not proof of a JARVES bug.",
+                detail_he="לתהליך של ה-Core לא היה CORE_STOPPED וזמן ההפעלה של המחשב השתנה לפני שג'ארביס עלה שוב. "
+                          "זה המחשב שסיים את ג'ארביס (הפסקת חשמל, קריסת Windows או כיבוי שלא המתין) ולא הוכחה לתקלה בג'ארביס.",
+                evidence=[f"process {p['session']}: started {_when(p['first'])}, last line {_line(p['last_rec'])}"
+                          for p in restarted[-MAX_EVIDENCE:]],
+                cause="power loss, a Windows crash or update restart, or an abrupt shutdown",
+                cause_he="הפסקת חשמל, קריסת Windows או הפעלה מחדש של עדכון, או כיבוי פתאומי",
+                fix="Nothing to fix in JARVES. If it keeps happening, check the PC's power and Windows updates.",
+                fix_he="אין מה לתקן בג'ארביס. אם זה חוזר, בדקו את החשמל של המחשב ואת עדכוני Windows.",
+                effort="minutes", count=len(restarted)))
+        if hung:
+            out.append(Finding(
+                "stop_hung", "logs", "medium",
+                f"JARVES began a clean stop but did not finish it {len(hung)}x",
+                f"ג'ארביס התחיל כיבוי מסודר ולא סיים אותו {len(hung)} פעמים",
+                detail="CORE_STOPPING was logged but CORE_STOPPED never came: one part of the shutdown hung and the "
+                       "process was killed (by the installer, Windows or the user).",
+                detail_he="נרשם CORE_STOPPING אבל CORE_STOPPED לא הגיע: חלק מהכיבוי נתקע והתהליך הופסק בכוח.",
+                evidence=[f"process {p['session']}: stop reason {p.get('reason') or '?'}, last line "
+                          f"{_line(p['last_rec'])}" for p in hung[-MAX_EVIDENCE:]],
+                cause="a part of the shutdown that never finished (see CORE_STOP_STEP_FAILED lines)",
+                cause_he="חלק מהכיבוי שלא הסתיים (חפשו שורות CORE_STOP_STEP_FAILED)",
+                fix="Attach `jarvis diag` to the ticket draft: the last log lines name the part that hung.",
+                fix_he="צרפו jarvis diag לטיוטת הכרטיס: השורות האחרונות ביומן מציינות את החלק שנתקע.",
+                effort="hour", action={"type": "open", "page": "#/logs"}, count=len(hung)))
         # ERROR / WARNING clusters and failures that come back after restarts
         groups: dict[tuple[str, str], list[dict]] = {}
         avail_hits: dict[str, list[dict]] = {k: [] for k in AVAIL}
@@ -667,7 +730,7 @@ class SelfCheck:
         th = float(self.cfg.voice.wake_threshold)
         metrics["wake"] = {"wakes": len(wakes), "false_wakes": len(false), "near_misses": len(near), "threshold": th}
         if len(false) >= 3 and (not wakes or len(false) / max(1, len(wakes)) >= 0.25):
-            new = round(min(0.8, th + 0.05), 2)
+            new = round(min(0.8, max(th + 0.05, 0.3)), 2)   # issue #17: from 0.15 a +0.05 step never stopped the false wakes
             out.append(Finding(
                 "wake:false", "wake", "medium", f"False wakes: {len(false)} of {len(wakes) or len(false)} wakes had no speech",
                 f"התעוררויות לשווא: ב-{len(false)} מתוך {len(wakes) or len(false)} התעוררויות אף אחד לא דיבר",
@@ -1451,6 +1514,13 @@ class SelfCheckService:
         if prev is None:
             return
         if not prev["stopped"]:
+            from .runtime.shutdown import boot_time, same_boot
+            if same_boot(prev.get("boot"), boot_time()) is False:
+                logs.info("selfcheck", "SELFCHECK_SKIPPED", "the computer restarted since the last run; not a crash",
+                          previous=prev.get("session"))
+                if mode == "always":
+                    await self.auto("restart")
+                return
             await self.auto("crash", prev=prev)
         elif mode == "always":
             await self.auto("restart")

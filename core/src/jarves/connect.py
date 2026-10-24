@@ -413,6 +413,7 @@ def _step_whatsapp(conn, it: Item) -> None:
             conn.h(e.he, e.message)
     else:
         conn.h(wad.READ_LATER_HE, wad.READ_LATER_EN)
+    conn.h(wad.KEEP_NOTE_HE, wad.KEEP_NOTE_EN)
 
 
 EXTRA_STATUS.update({"openai": _status_openai, "chatgpt": _status_chatgpt, "openai-admin": _status_admin})

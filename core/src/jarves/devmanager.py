@@ -9,9 +9,12 @@ Sensitive text (passwords, long numbers, health and money words) is refused and 
 """
 from __future__ import annotations
 
+import asyncio
 import hashlib
+import sqlite3
+from typing import Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 from . import calm, features as feat, logs
 from .diag import db as diag_db, tickets
@@ -23,6 +26,17 @@ feat.register(FEATURE, "מנהל פיתוח (טיוטות מקומיות)", "Dev
                     "GitHub unless you approve it on the screen",
               targets=calm.TARGETS)
 KINDS = ("suggestion", "ticket")
+# Issue #17 (dev_suggest failed on the owner's PC): the model's tool schema loses length/enum hints, so it passed the
+# words it naturally uses ("idea", "feature", "bug"). Those are the two kinds, not a refusal.
+KIND_ALIASES = {"idea": "suggestion", "feature": "suggestion", "improvement": "suggestion", "request": "suggestion",
+                "enhancement": "suggestion", "proposal": "suggestion", "רעיון": "suggestion", "הצעה": "suggestion",
+                "bug": "ticket", "issue": "ticket", "problem": "ticket", "defect": "ticket", "באג": "ticket",
+                "תקלה": "ticket"}
+
+
+def normalize_kind(kind: str) -> str:
+    k = " ".join(str(kind or "").lower().split())
+    return k if k in KINDS else KIND_ALIASES.get(k, "suggestion")
 MAX_TITLE, MAX_BODY = 100, 1500
 ORIGIN = "JARVES Development Manager (local draft)"
 
@@ -32,8 +46,7 @@ def suggest(store, title: str, body: str = "", kind: str = "suggestion", *, by: 
     t, b = " ".join(str(title or "").split())[:MAX_TITLE], str(body or "").strip()[:MAX_BODY]
     if not t:
         raise ValueError("a draft needs a title")
-    if kind not in KINDS:
-        raise ValueError("kind must be one of: " + ", ".join(KINDS))
+    kind = normalize_kind(kind)
     if looks_sensitive(t) or looks_sensitive(b):
         logs.info("devmgr", "DEV_DRAFT_REFUSED", "sensitive draft not stored", by=by)
         raise ValueError("this looks sensitive (secret, number, health or money detail): not stored")
@@ -70,7 +83,12 @@ def discard(store, tid: int, *, by: str = "user") -> bool:
 class SuggestArgs(BaseModel):
     title: str = Field(..., min_length=3, max_length=MAX_TITLE)
     body: str = Field("", max_length=MAX_BODY)
-    kind: str = Field("suggestion", max_length=10)
+    kind: Literal["suggestion", "ticket"] = Field("suggestion", description="suggestion = an idea; ticket = a problem")
+
+    @field_validator("kind", mode="before")
+    @classmethod
+    def _kind(cls, v):
+        return normalize_kind(v)
 
 
 class IdArgs(BaseModel):
@@ -99,9 +117,15 @@ def make_skill(open_store):
         def tools(self) -> list:
             async def add(a: SuggestArgs):
                 try:
-                    d = with_store(lambda s: suggest(s, a.title, a.body, a.kind, by="voice"))
+                    # the store is a SQLite file: off the event loop, so a locked database never freezes the voice
+                    d = await asyncio.to_thread(with_store, lambda s: suggest(s, a.title, a.body, a.kind, by="voice"))
                 except ValueError as e:
                     return ToolResult(False, str(e), code="DEV_REFUSED")
+                except sqlite3.Error as e:
+                    logs.warn("devmgr", "DEV_STORE_FAILED", "could not save the development draft", error_type=type(e).__name__)
+                    return ToolResult(False, "I could not save the draft right now (the diagnostics database is busy "
+                                      "or unreadable); nothing was stored. Try again in a moment.",
+                                      code="DEV_STORE_FAILED")
                 return ToolResult(True, "saved as a local draft, nothing was posted", {"draft": d})
 
             async def show(_a: NoArgs):

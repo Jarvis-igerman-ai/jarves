@@ -197,7 +197,7 @@ class FakeBridge:
                 self.add_chat(chat, sender_name or pol.jid_number(chat) or chat)
             c = self.chats[chat]
             mid = "3EB0" + secrets.token_hex(8).upper()
-            t = self.now() if ts is None else float(ts)
+            t = max(self.now(), c["last_ts"] + 0.001) if ts is None else float(ts)   # arrival order, like real ns stamps
             m = {"id": mid, "chat": chat, "from_me": bool(from_me), "sender_name": sender_name or c["name"],
                  "ts": t, "kind": kind, "text": text if kind == "text" else "",
                  "media": (media or {"mime": "application/octet-stream", "size": 0, "caption": ""})
@@ -344,7 +344,8 @@ class FakeBridge:
             if not self._readable(chat):
                 raise ApiError(404, "WA_CHAT_NOT_FOUND", "no such readable chat")
             since, limit = float(q.get("since") or 0), max(1, min(int(q.get("limit") or 50), 500))
-            ms = [dict(m) for m in self.messages.get(chat, []) if m["ts"] > since]
+            ms = sorted((dict(m) for m in self.messages.get(chat, []) if m["ts"] > since),
+                        key=lambda m: (m["ts"], m["id"]))                    # like the Go store: ts, id; newest `limit`
             return {"chat": self._chat_view(self.chats[chat]), "messages": ms[-limit:]}
 
     def h_search(self, q: dict) -> dict:
@@ -358,7 +359,7 @@ class FakeBridge:
             hits = [dict(m) for j, ms in self.messages.items() if self._readable(j) for m in ms
                     if needle in (m.get("text") or "").casefold()
                     or needle in ((m.get("media") or {}).get("caption") or "").casefold()]
-        hits.sort(key=lambda m: -m["ts"])
+        hits.sort(key=lambda m: (m["ts"], m["id"]), reverse=True)
         return {"messages": hits[:limit]}
 
     def h_seen(self, b: dict) -> dict:

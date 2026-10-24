@@ -11,7 +11,7 @@ Owner doc = the one document that wins on a conflict.
 |---|---|---|
 | **V3** | Released (3.0.0.x installers). Historical. | [V3 package](JARVES_SW_V3_WORK_PACKAGE.md), [integration report](reviews/SWV3_INTEGRATION_REPORT.md) |
 | **V4** | **Feature development CLOSED (owner decision 24 Oct).** 4.0.0 delivered and subsequent 4.0.1 changes exist; the remaining real-device, security, release and acceptance gaps are tracked in V4.5. Do **not** infer stable sign-off or close outstanding Issue acceptance. | [ROADMAP](ROADMAP.md) (V4 section), [release notes](RELEASE_NOTES_4.0.md), [V4 package](JARVES_SW_V4_WORK_PACKAGE.md) (plan and test scripts), [checklist](reviews/SWV4_RELEASE_CHECKLIST.md), [owner decisions](plans/PRIORITIES.md), [user guide](USER_GUIDE.md) |
-| **V4.5** | **Documented plan only (24 Oct)**: close V4 quality/acceptance gaps, security, recurring scans, camera UX, **early fast PR/merge/conflict reduction alongside security**, guided QA + voice Skill. No code/release authorized. | [V4.5 work package](plans/V4_5_STABILIZATION_SECURITY_QA.md), [ROADMAP](ROADMAP.md), [NOW](NOW.md). Canonical interactive QA issue: [#60](https://github.com/igalgerman/jarves/issues/60) |
+| **V4.5** | **Owner-approved 24 Oct; bounded implementation authorized in NOW**: close V4 quality/acceptance gaps, security, recurring scans, camera UX, **early fast PR/merge/conflict reduction alongside security**, guided QA + voice Skill. No release authorized. | [V4.5 work package](plans/V4_5_STABILIZATION_SECURITY_QA.md), [ROADMAP](ROADMAP.md), [NOW](NOW.md). Canonical interactive QA issue: [#60](https://github.com/igalgerman/jarves/issues/60) |
 | **V5** | **Partially developed**: phone access and multiple AI/project-manager components have merged; exact inventory must be refreshed from current `main`. Real Android and other user/device acceptance remains open; older open-PR listings in ROADMAP are historical. | [ROADMAP](ROADMAP.md) (V5 section), [V5 package](JARVES_SW_V5_WORK_PACKAGE.md), [acceptance sheet](reviews/SWV5_ACCEPTANCE.md), [security review](reviews/SWV5_SECURITY_REVIEW.md) |
 | **V6** | Approved roadmap only (six pillars), gated on V5. No code. | [ROADMAP](ROADMAP.md) (V6 section), [PRODUCT_VISION](PRODUCT_VISION.md) stage 3 |
 | **V7** | Proposal, not authorized (issue #50). | [V7 proposal](plans/V7_PROPOSAL_2026-10-21.md) |
@@ -61,7 +61,7 @@ Current dashboard review: [23 Oct findings inventory and recheck gates](reviews/
 
 | Document | Purpose | Version | Status | Owner doc |
 |---|---|---|---|---|
-| [NOW](NOW.md) | The one active brief (the top block is current, older blocks are history) | general | current | itself |
+| [NOW](NOW.md) | The one active brief (V4.5 bounded authorization, 24 Oct 2026; the previous text is in reviews/NOW_SWV1_18OCT2026) | general | current | itself |
 | [ROADMAP](ROADMAP.md) | V4 to V7 status, definitions of done, dependencies | V4-V7 | current | itself |
 | [PRODUCT_VISION](PRODUCT_VISION.md) | Six product stages (north star) | general | current | itself |
 | [PROJECT_PRINCIPLES](PROJECT_PRINCIPLES.md) | Durable principles, printability, Israel sourcing, owner decisions | general | current | itself |
@@ -131,6 +131,7 @@ Reports and bug tables are evidence of a past run, not instructions. A package's
 | V4 campaign | [bug table](reviews/SWV4_CAMPAIGN_BUG_TABLE.md), [voice bug table](reviews/SWV4_CAMPAIGN_BUG_TABLE_VOICE.md), [features](reviews/SWV4_CAMPAIGN_FEATURES.md), [voice](reviews/SWV4_CAMPAIGN_VOICE.md) |
 | V5 | [acceptance sheet](reviews/SWV5_ACCEPTANCE.md), [security review](reviews/SWV5_SECURITY_REVIEW.md) |
 | Raw suite output | [V3 voice suite raw](reviews/swv3_campaign_voice/SUITE_RAW_REPORT.md), [V4 voice suite raw](reviews/swv4_campaign_voice/SUITE_RAW_REPORT.md) |
+| Previous NOW brief (SW-V1 era, 18-24 Oct 2026, unchanged) | [NOW_SWV1_18OCT2026](reviews/NOW_SWV1_18OCT2026.md) |
 | Screenshots | `docs/reviews/swv2_*`, `swv3_*` image folders (evidence only) |
 
 ## 8. Added by the 4.0.1 integration batch

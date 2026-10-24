@@ -62,6 +62,7 @@ KEEP_INFO = {"LIVE_STARTED", "LIVE_FIRST_AUDIO", "LIVE_EARLY_RESPONSE", "LIVE_PR
 KEEP_INFO |= {"LIVE_BACKEND_STALL", "LIVE_BACKEND_RETRY", "LIVE_BACKEND_LATE", "LIVE_DELEGATION", "TASK_FINISHED"}
 # Legacy logs carry five-second speech counters rather than per-reply audio intervals.
 KEEP_INFO.add("LIVE_MIC")
+KEEP_INFO |= {"LIVE_ECHO_BARGE_IN", "LIVE_WORKING_CUE", "LIVE_LATENCY", "WAKE_AUTO_TUNED"}   # issue #17
 # Backend request traces (brain.BackendTrace, SW-V2 WP-C): prefix -> delegation kind. The DONE record carries the
 # exact model, service tier, usage_in/usage_out/usage_cached and web_searches (calls, billed $10/1k).
 # CHATGPT_BACKEND_* is not listed: plan requests cost $0 API and the typed reply is already counted by AI_REPLY.
@@ -209,12 +210,25 @@ class Store:
                 if pend:
                     rid = pend.pop(0)
                     t0 = self._db.execute("SELECT ts FROM tool_calls WHERE id = ?", (rid,)).fetchone()[0]
+                    # Issue #17: the tool's own run time (the log's ms, which leaves out the minutes a person spent on
+                    # an approval); older lines without it fall back to the call-to-result interval
+                    dur = d["ms"] / 1000 if isinstance(d.get("ms"), (int, float)) and not isinstance(d.get("ms"), bool) \
+                        else ts - t0
                     self._db.execute("UPDATE tool_calls SET ok=?, code=?, origin=?, done_ts=?, duration_s=? WHERE id=?",
-                                     (int(bool(d.get("ok"))), rc, d.get("origin"), ts, round(ts - t0, 3), rid))
+                                     (int(bool(d.get("ok"))), rc, d.get("origin"), ts, round(dur, 3), rid))
                 else:                              # typed chat / local command: no matching LIVE_TOOL_CALL
                     self._db.execute("INSERT INTO tool_calls (session_id, ts, name, ok, code, origin, done_ts) "
                                      "VALUES (?,?,?,?,?,?,?)", (sid, ts, name, int(bool(d.get("ok"))), rc,
                                                                 d.get("origin"), ts))
+            elif code in ("TOOL_REFUSED", "TOOL_CANCELLED", "TOOL_REPLAYED"):
+                # Issue #17: a call that ended without running (refused, cancelled, answered from a replay) is CLOSED,
+                # not "never returned"; ok stays unknown so it is neither a success nor a tool failure
+                pend = self._pending_tools.get(str(d.get("tool") or "")) or []
+                if pend:
+                    rid = pend.pop(0)
+                    t0 = self._db.execute("SELECT ts FROM tool_calls WHERE id = ?", (rid,)).fetchone()[0]
+                    self._db.execute("UPDATE tool_calls SET code=?, origin=?, done_ts=?, duration_s=? WHERE id=?",
+                                     (str(d.get("result_code") or code), d.get("origin"), ts, round(ts - t0, 3), rid))
             elif code in BACKEND_START:
                 rid = d.get("response_id")
                 if rid:                            # open row: a request that never finishes still shows (stall)

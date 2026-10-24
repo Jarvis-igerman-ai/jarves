@@ -31,9 +31,19 @@ en = "On an issue press Report: the exact text that would be sent is shown, and 
 action = "open:#/bugs"
 
 [[steps]]
-he = "מהטרמינל: רשימה, פרטים, דיווח והתעלמות."
-en = "From the terminal: list, details, report and ignore."
+he = "מהטרמינל: רשימה, פרטים, דיווח והתעלמות. jarvis issues list מציג רק תקלות פתוחות; אפשר להוסיף --all, --info (מצבים צפויים של המחשב הזה), --since 7d ו---json."
+en = "From the terminal: list, details, report and ignore. jarvis issues list shows open bugs only; add --all, --info (expected states of this PC), --since 7d and --json."
 action = "command:jarvis issues list"
+
+[[steps]]
+he = "מצב שצפוי בהפעלה הזאת (אין פנים של Godot, אין מצלמה, Pear Desktop לא פועל, גוגל לא מחובר) מופיע בלשונית 'מידע' ולא נספר בכותרת. לחצו 'התעלם מזה במחשב הזה' כדי להסתיר אותו. אפשר לסמן גם תקלה כתוקנה: jarvis issues fixed ID --in 4.0.1.300 --note 'הערה קצרה'."
+en = "A state that is expected for how JARVES is run here (no Godot face, no camera, Pear Desktop not running, Google not connected) shows under Information and is not counted in the header. Press Ignore this on this PC to hide it. You can also mark a bug fixed: jarvis issues fixed ID --in 4.0.1.300 --note 'short note'."
+action = "open:#/bugs"
+
+[[steps]]
+he = "לשמירה בקובץ: jarvis issues export --all --out issues.json כותב UTF-8 תקין (בלי BOM, גם כשהמסוף בקידוד של Windows). --format text נותן גרסה לקריאה."
+en = "To save them to a file: jarvis issues export --all --out issues.json writes real UTF-8 (no BOM, whatever the Windows console code page). --format text gives a readable version."
+action = "command:jarvis issues export --all --out issues.json"
 
 [[problems]]
 he = "הדיווח נשמר בקובץ ולא נשלח"
@@ -46,3 +56,15 @@ he = "תקלה סומנה כתוקנה בגרסה חדשה"
 en = "An issue was marked fixed in a new version"
 fix_he = "הגרסה שעודכנה מציינת את התקלה בשורת Fixes ביומן השינויים. אם היא חוזרת בגרסה הזאת או מאוחרת יותר, היא נפתחת מחדש אוטומטית."
 fix_en = "The version you updated to lists the issue on a Fixes line of its changelog. If it comes back in that version or a later one, it is reopened automatically."
+
+[[problems]]
+he = "תקלה נסגרה לבד: 'לא נראתה מאז גרסה ...'"
+en = "An issue closed by itself: 'not seen since version ...'"
+fix_he = "אחרי עדכון, תקלה שלא חזרה במשך שלושה ימים (או שיומן השינויים מציין אותה בשורת Fixes) נסגרת עם ההיסטוריה שלה. אם היא חוזרת, היא נפתחת מחדש."
+fix_en = "After an update, an issue that did not come back for three days (or that the changelog lists on a Fixes line) is closed and keeps its history. If it comes back it reopens."
+
+[[problems]]
+he = "הרשימה מלאה בשורות כמו 'גרסה חדשה' או 'המצלמה לא זמינה'"
+en = "The list is full of lines like 'a new version was seen' or 'the camera was not available'"
+fix_he = "אלה מצבים צפויים ולא תקלות. הם מופיעים תחת 'מידע', לא נספרים בכותרת, ואפשר להתעלם מהם במחשב הזה בלחיצה אחת."
+fix_en = "These are expected states, not bugs. They appear under Information, are not counted in the header and can be ignored on this PC with one click."

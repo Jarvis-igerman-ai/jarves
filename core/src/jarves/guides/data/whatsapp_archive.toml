@@ -1,0 +1,77 @@
+order = 27
+category = "everyday"
+pages = ["whatsapp"]
+features = ["whatsapp_archive"]
+aliases = ["ארכיון וואטסאפ", "לשמור הודעות וואטסאפ", "לחפש בוואטסאפ", "חיפוש בהודעות וואטסאפ", "whatsapp archive", "search whatsapp", "keep whatsapp messages", "whatsapp retention"]
+links = ["whatsapp_bridge", "privacy", "whatsapp"]
+error_codes = ["WA_ARCHIVE_OFF", "WA_BAD_DATE", "WA_STORE_LOCKED", "WA_MODE_OFF", "WA_AMBIGUOUS", "WA_UNKNOWN_CONTACT"]
+title_he = "ארכיון וואטסאפ מוצפן וחיפוש מהיר"
+title_en = "Encrypted WhatsApp archive and fast search"
+what_he = "בלי הארכיון הגשר של וואטסאפ שומר הודעות 14 ימים (אפשר עד 90). עם הארכיון ג'ארביס שומר עותק מוצפן במחשב הזה כמה זמן שתבחרו (90 יום, שנה או לתמיד) ומאפשר לחפש בו מהר, בעברית ובאנגלית, גם לפי איש קשר ותאריך. למשל: \"תמצא את ההודעה על האינסטלטור\". האות הראשונה ו/ה/ב/ל/מ/ש/כ לא מפריעה לחיפוש (\"בכספת\" מוצא \"כספת\"), וגם ניקוד, אותיות גדולות וסימני פיסוק לא משנים. הארכיון כבוי כברירת מחדל ועובד רק אחרי שהפעלתם אותו."
+what_en = "Without the archive the WhatsApp bridge keeps messages for 14 days (up to 90 if you choose). With the archive JARVES keeps an encrypted copy on this computer for as long as you choose (90 days, a year or forever) and finds messages fast in Hebrew and English, also by contact and date. For example: \"find the message about the plumber\". A Hebrew prefix letter (the one-letter \"the\", \"in\", \"to\" or \"and\" glued to a word) does not break a search: the glued form of \"safe\" still finds \"safe\", and niqqud, capital letters and punctuation do not matter. The archive is off by default and works only after you turn it on."
+say = [
+  ["תחפש בוואטסאפ את ההודעה על האינסטלטור", "Search WhatsApp for the message about the plumber"],
+  ["מה דנה כתבה על הכספת בחודשיים האחרונים?", "What did Dana write about the safe in the last two months?"],
+  ["תמצא מה כתבו לי על הפגישה ב-1 בספטמבר", "Find what was written to me about the meeting on 1 September"],
+]
+expect_he = "הוא מחפש בארכיון ומציג עד עשר הודעות מתאימות עם תאריך ושם הצ'אט. הטקסט נחשב לא אמין והוא לא פועל לפיו. אם הארכיון כבוי הוא מחפש רק בהודעות שהגשר שומר (14 ימים כברירת מחדל)."
+expect_en = "He searches the archive and shows up to ten matching messages with the date and chat name. The text is untrusted and he never acts on it. If the archive is off he searches only what the bridge keeps (14 days by default)."
+test_he = "jarvis whatsapp archive status מראה כמה הודעות ומה הגודל בדיסק, ו-jarvis whatsapp search \"מילה\" מחזיר הודעות."
+test_en = "jarvis whatsapp archive status shows the message count and the size on disk, and jarvis whatsapp search \"word\" returns messages."
+cost_he = "חינם. כל החיפוש מקומי במחשב ולא משתמש ב-AI. טקסט של הודעה עובר למודל רק כשאתם שואלים עליה."
+cost_en = "Free. The search is entirely local and uses no AI. A message's text goes to the model only when you ask about it."
+privacy_he = "זה עותק שני של ההודעות הפרטיות שלכם. הוא נשמר רק במחשב הזה, מוצפן (AES-256-GCM, מפתח מוגן ב-DPAPI של Windows) ולא נכנס לגיבויים, ליומנים או לחבילת האבחון. מועתקים רק צ'אטים שהגדרתם כקריאים (קבוצות רק אם הגדרתם). מי שמחובר למשתמש ה-Windows שלכם יכול לפתוח את הארכיון דרך JARVES, לכן כדאי נעילת מסך. \"לא לשמור כלום\" ו\"מחיקת הודעות\" מוחקים גם את הארכיון והאינדקס, וניתוק וואטסאפ מוחק אותו. וואטסאפ מסנכרן למכשיר מקושר רק היסטוריה מוגבלת, לכן \"לתמיד\" אומר מעכשיו ועוד מה שהגיע. לא נבנה חיפוש לפי משמעות (AI) כי הוא דורש מודל; החיפוש הוא לפי מילים ושורשי מילים."
+privacy_en = "This is a second copy of your private messages. It is stored only on this computer, encrypted (AES-256-GCM, key protected by Windows DPAPI) and never goes into backups, logs or the diagnostic bundle. Only chats you made readable are copied (groups only if you allowed them). Anyone signed in to your Windows account can open the archive through JARVES, so lock your screen. \"Keep nothing\" and \"Delete messages\" also delete the archive and its index, and unlinking WhatsApp wipes it. WhatsApp only syncs limited history to a linked device, so \"forever\" means from now on plus whatever history arrived. No meaning-based (AI) search is built because it needs a model; search is by words and word stems."
+
+[[steps]]
+he = "קודם צריך שוואטסאפ יהיה מקושר ובמצב קריאה (המדריך \"וואטסאפ אמיתי\"): jarvis whatsapp status."
+en = "WhatsApp must first be linked and in read mode (the \"Real WhatsApp\" guide): jarvis whatsapp status."
+action = "command:jarvis whatsapp status"
+
+[[steps]]
+he = "קראו את ההסבר על הפרטיות: jarvis whatsapp archive on מציג אותו ושואל אישור. בלוח הבקרה, בעמוד וואטסאפ, הכפתור \"הפעלת הארכיון\" מציג את אותו טקסט ושואל."
+en = "Read the privacy explanation: jarvis whatsapp archive on shows it and asks to confirm. On the dashboard WhatsApp page the \"Turn the archive on\" button shows the same text and asks."
+action = "open:#/whatsapp"
+
+[[steps]]
+he = "בחרו כמה זמן לשמור: jarvis whatsapp retention 90, או year, או forever (בלוח הבקרה: \"ימי שמירה\"). 14 ימים הוא ברירת המחדל. בלי הארכיון אפשר עד 90 ימים בלבד."
+en = "Choose how long to keep: jarvis whatsapp retention 90, or year, or forever (on the dashboard: \"Days kept\"). 14 days is the default. Without the archive the limit is 90 days."
+action = "command:jarvis whatsapp retention 90"
+
+[[steps]]
+he = "חיפוש: jarvis whatsapp search \"אינסטלטור\" --from דנה --since 2026-09-01 (אפשר גם 30d, 2w, 3m, 1y), או בקשה בקול. בעמוד וואטסאפ יש גם תיבת חיפוש."
+en = "Search: jarvis whatsapp search \"plumber\" --from Dana --since 2026-09-01 (or 30d, 2w, 3m, 1y), or just ask by voice. The WhatsApp page also has a search box."
+action = "command:jarvis whatsapp search \"plumber\""
+
+[[steps]]
+he = "כמה מקום תופס: jarvis whatsapp archive status (מספר הודעות ו-MB בדיסק), וגם בעמוד וואטסאפ."
+en = "How much room it takes: jarvis whatsapp archive status (message count and MB on disk), also on the WhatsApp page."
+action = "command:jarvis whatsapp archive status"
+
+[[steps]]
+he = "לכיבוי: jarvis whatsapp archive off (מפסיק להעתיק ולחפש בארכיון; הקובץ נשאר). למחיקה מלאה של הארכיון והאינדקס: jarvis whatsapp archive wipe."
+en = "To turn it off: jarvis whatsapp archive off (stops copying and archive search; the file stays). To delete the archive and its index completely: jarvis whatsapp archive wipe."
+
+[[problems]]
+he = "כתוב שיותר מ-90 ימים דורש את הארכיון"
+en = "It says more than 90 days needs the archive"
+fix_he = "שנה או \"לתמיד\" אפשריים רק עם הארכיון המוצפן. הפעילו אותו: jarvis whatsapp archive on, ואז jarvis whatsapp retention year."
+fix_en = "A year or \"forever\" is possible only with the encrypted archive. Turn it on: jarvis whatsapp archive on, then jarvis whatsapp retention year."
+
+[[problems]]
+he = "החיפוש לא מוצא הודעה ישנה"
+en = "Search does not find an old message"
+fix_he = "הארכיון מתחיל לשמור מרגע שהפעלתם אותו, ועוד מה שוואטסאפ סנכרן לגשר (היסטוריה מוגבלת). הודעה שלא הגיעה לגשר לא תהיה בארכיון. בדקו גם שהצ'אט ברשימת הקריאה, שהמצב הוא קריאה (jarvis whatsapp mode read) ושהתאריך בטווח השמירה. אפשר לאלץ עדכון: jarvis whatsapp archive sync."
+fix_en = "The archive starts keeping from the moment you turn it on, plus whatever history WhatsApp synced to the bridge (limited). A message that never reached the bridge is not in the archive. Also check that the chat is readable, the mode is read (jarvis whatsapp mode read) and the date is within the retention. Force an update: jarvis whatsapp archive sync."
+
+[[problems]]
+he = "כתוב שהמידע לא נפתח במשתמש או במחשב הזה"
+en = "It says the data does not open for this user or PC"
+fix_he = "הארכיון הועתק למחשב או למשתמש אחר, או שהמפתח נמחק. אי אפשר לפתוח אותו כאן (זה נועד לכך). מוחקים ומתחילים מחדש: jarvis whatsapp archive wipe."
+fix_en = "The archive was copied to another PC or Windows user, or its key is gone. It cannot be opened here (by design). Delete it and start again: jarvis whatsapp archive wipe."
+
+[[problems]]
+he = "החיפוש מחזיר גם הודעות שלא קשורות"
+en = "Search returns unrelated messages"
+fix_he = "החיפוש מתאים תחילית של מילה (\"אינסטל\" מוצא \"אינסטלטור\"). כתבו מילה שלמה או כמה מילים (כולן חייבות להופיע), או הוסיפו --from ו---since כדי לצמצם."
+fix_en = "Search matches the start of a word (\"plumb\" finds \"plumber\"). Type the whole word or several words (all must appear), or add --from and --since to narrow it."

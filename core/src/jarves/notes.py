@@ -148,8 +148,9 @@ class EditArgs(BaseModel):
     tags: list[str] | None = Field(None, max_length=MAX_TAGS)
 
 
-class IdArgs(BaseModel):
-    note_id: int = Field(..., ge=1)
+class DeleteArgs(BaseModel):
+    note_id: int = Field(0, ge=0, description="id from note_find; 0 = use query")
+    query: str = Field("", max_length=120, description="words of the title/text when no id is known")
 
 
 class ExportArgs(BaseModel):
@@ -193,14 +194,35 @@ def make_skill(notes: Notes, sandbox=None):
                     return ToolResult(False, str(e), code="NOTE_BAD")
                 return ToolResult(True, f"note updated: {n['title']}", brief(n))
 
-            async def delete(a: IdArgs):
-                ok = notes.delete(a.note_id, by="voice")
-                return ToolResult(True, "note deleted") if ok else ToolResult(False, "no such note",
-                                                                              code="NOTE_NOT_FOUND")
+            def pick(a: DeleteArgs) -> tuple[dict | None, ToolResult | None]:
+                """The one note a delete request means: by id, else by words; never a guess among several."""
+                if a.note_id:
+                    n = notes.get(a.note_id)
+                    return (n, None) if n else (None, ToolResult(False, "no such note", code="NOTE_NOT_FOUND"))
+                if not a.query.strip():
+                    return None, ToolResult(False, "which note? call note_find, then note_delete with its id",
+                                            code="NOTE_BAD")
+                hits = notes.search(a.query.strip(), "", 5)
+                if not hits:
+                    return None, ToolResult(False, "no matching note; nothing was deleted", code="NOTE_NOT_FOUND")
+                if len(hits) > 1:
+                    return None, ToolResult(False, "several notes match; ask which one, nothing was deleted",
+                                            {"notes": [{"id": h["id"], "title": h["title"]} for h in hits]},
+                                            "NOTE_AMBIGUOUS")
+                return hits[0], None
 
-            async def delete_impact(a: IdArgs):
-                n = notes.get(a.note_id)
-                return 1, f"למחוק את הפתק \"{n['title'] if n else a.note_id}\"? / Delete this note?"
+            async def delete(a: DeleteArgs):
+                n, refusal = pick(a)
+                if refusal is not None:
+                    return refusal
+                title = n["title"]
+                if not notes.delete(n["id"], by="voice"):
+                    return ToolResult(False, "no such note", code="NOTE_NOT_FOUND")
+                return ToolResult(True, f"deleted the note \"{title}\"", {"deleted": {"id": n["id"], "title": title}})
+
+            async def delete_impact(a: DeleteArgs):
+                n, _ = pick(a)
+                return 1, f"למחוק את הפתק \"{n['title'] if n else (a.query or a.note_id)}\"? / Delete this note?"
 
             async def export(a: ExportArgs):
                 if sandbox is None:
@@ -215,12 +237,12 @@ def make_skill(notes: Notes, sandbox=None):
                 return ToolResult(True, f"exported to {r['path']} in my workspace", r)
 
             return [
-                Tool("note_add", "Save a note (title, text, tags): 'write a note', 'תרשום פתק'.", add, AddArgs, permission="action"),
+                Tool("note_add", "New note: 'write a note', 'תרשום פתק'. Never for delete.", add, AddArgs, permission="action"),
                 Tool("note_find", "Find notes by words/tag or read one by id: 'find my note about', 'תמצא פתק על'.", find, FindArgs,
                      permission="read"),
                 Tool("note_edit", "Change a note: new title/text/tags or append: 'add to the note', 'תוסיף לפתק'.", edit, EditArgs,
                      permission="action"),
-                Tool("note_delete", "Delete a note (asks first): 'delete the note', 'תמחק את הפתק'.", delete, IdArgs, permission="destructive",
+                Tool("note_delete", "Delete (never create) a note by id/title; asks first: 'delete the note', 'תמחק את הפתק'.", delete, DeleteArgs, permission="destructive",
                      impact=delete_impact),
                 Tool("note_export", "Export one or all notes as Markdown to my workspace: 'export my notes', 'תייצא את הפתקים'.", export,
                      ExportArgs, permission="action"),

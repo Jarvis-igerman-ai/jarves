@@ -51,12 +51,15 @@ FEATURES: dict[str, object] = {
     "whatsapp_handoff": (D, "WhatsApp opens a draft in the app; no CLI needed, switch via `jarvis features`"),
     "morning_briefing": "jobs", "home_assistant": "home", "conversation_recall": "recall",
     "self_diagnostics_2": "health", "client_delegation": "budget",
-    "whatsapp_bridge": "whatsapp", "whatsapp_send": "whatsapp",          # SW-V4 F: jarvis whatsapp ...
+    "whatsapp_bridge": "whatsapp", "whatsapp_send": "whatsapp", "whatsapp_archive": "whatsapp",   # SW-V4 F: jarvis whatsapp ...
     "agent_orchestrator": "agents", "project_manager": "project",
     "assisted_dialing": "dial", "self_manage": "manage",
     "self_tests": "selftest", "text_chat": "chat", "setup_tour": "tour",
     "issue_reports": "issues", "web_chat": "web",
 }
+
+# Extra command-line surfaces of a feature (one-shot variants of the same Core path): feature id -> commands.
+ALSO: dict[str, tuple[str, ...]] = {"text_chat": ("ask --full", "tell")}     # `jarvis ask --full "..."` = one chat message
 
 # Skill (tool group) name -> "jarvis <command>" or ("dashboard", reason) or ("voice", reason) for groups that only
 # make sense inside a conversation.
@@ -75,7 +78,7 @@ TOOL_GROUPS: dict[str, object] = {
     "status": "status", "tasks": (D, "the Background tasks page"), "telegram": "telegram", "timers": "timers",
     "usage": "usage", "whatsapp": (D, "WhatsApp opens a draft in the app"), "conversation_recall": "recall",
     "health": "health",
-    "whatsapp_bridge": "whatsapp",                                       # SW-V4 F: inbox / send / status
+    "whatsapp_bridge": "whatsapp",                                       # SW-V4 F: inbox / find / send / status
     "agents": "agents", "project": "project",
     "dialing": "dial", "self_manage": "manage",
     "selfspeed": "selftest",

@@ -117,11 +117,11 @@ def cmd_run(a, cfg, home) -> int:
     _fault = logs.enable_faulthandler(home / "logs")    # SW-V4 B: native crashes -> logs/crash.txt (frames only)
     try:
         if mode == "desktop":
-            asyncio.run(_run_desktop(core))
+            asyncio.run(_with_stop_handlers(core, _run_desktop(core)))
         elif mode == "background":
-            asyncio.run(_run_background(core, show=getattr(a, "show", False)))
+            asyncio.run(_with_stop_handlers(core, _run_background(core, show=getattr(a, "show", False))))
         else:
-            asyncio.run(core.run())
+            asyncio.run(_with_stop_handlers(core, core.run()))
     except KeyboardInterrupt:
         pass
     except OSError as e:
@@ -135,9 +135,21 @@ def cmd_run(a, cfg, home) -> int:
     return 0
 
 
+async def _with_stop_handlers(core, coro) -> None:
+    """Issue #17: a closed terminal window, a Windows logoff / shutdown, SIGTERM and Ctrl+C all end in the same orderly
+    Core.stop() (which writes the CORE_STOPPED clean-stop marker) instead of the OS killing the process mid-run."""
+    from .runtime import shutdown
+    uninstall = shutdown.install(asyncio.get_running_loop(), core.request_stop, core.stopped_evt)
+    try:
+        await coro
+    finally:
+        uninstall()
+
+
 async def _run_background(core, show: bool = False) -> None:
     """No console, no window: the tray (when available), the local wake word and the link stay up until Quit /
     `jarvis stop`. Nothing billable opens while idle: a voice session only starts after "Hey Jarvis"."""
+    core._install_stop_signals()                 # issue #17: SIGTERM / SIGBREAK = an orderly stop, not a kill
     await core.start()
     try:
         core._startup_stage("ready", "Ready (running in the background)")   # a window opened later shows at once
@@ -164,6 +176,7 @@ def _keeps_running(core) -> bool:
 
 async def _run_desktop(core, launcher=None) -> None:
     print("Loading JARVES... the room opens after voice is ready.", flush=True)
+    core._install_stop_signals()                 # issue #17
     viewer = await (launcher or _launch_viewer)(core.cfg.link.port)
     viewer_done = asyncio.create_task(viewer.wait())
     core.preopened_viewer = viewer             # the Runtime owns this window from the start: no second one on `show`
@@ -726,8 +739,44 @@ def cmd_music(a, cfg, home) -> int:
     return asyncio.run(go())
 
 
+CANT_RE = re.compile(r"can.?t|cannot|don.?t have access|no access|unable to|אין לי גישה|לא יכול", re.I)
+
+
+def _add_full_args(p) -> None:
+    p.add_argument("--json", action="store_true", help="print one JSON object {ok, text, tools:[{name,ok,code}], code}")
+    p.add_argument("--speak", action="store_true", help="also speak the answer (default: silent; never in quiet hours)")
+    p.add_argument("--timeout", type=float, default=300.0, help="seconds to wait for the answer (default 300)")
+    p.add_argument("--wait", type=float, default=60.0, help="seconds to wait for the Core to start")
+
+
+def cmd_ask_full(a, cfg, home) -> int:
+    """jarvis ask --full / jarvis tell: ONE message to the running Core, exactly like `jarvis chat` (every Skill)."""
+    from . import chat_cli
+    text = chat_cli.read_ask_text(a.text)
+    if not text:
+        print('Provide a question: jarvis ask --full "do I have new WhatsApp messages?" (or pipe it on stdin)',
+              file=sys.stderr)
+        return 2
+    if not ensure_core(home, cfg, wait=a.wait):
+        print(f"JARVES did not answer within {a.wait} s. See: jarvis logs -n 80", file=sys.stderr)
+        return 1
+    try:
+        return asyncio.run(chat_cli.run_ask(home, cfg.link.port, text, as_json=a.json, speak=a.speak,
+                                            verbose=True, timeout=a.timeout))
+    except KeyboardInterrupt:
+        return 1
+    except OSError:
+        print("Could not connect to the Core on the local link. See: jarvis status", file=sys.stderr)
+        return 1
+
+
 def cmd_ask(a, cfg, home) -> int:
     """One-shot question through the full brain + Skills, without Godot."""
+    if getattr(a, "full", False) or a.cmd == "tell":
+        return cmd_ask_full(a, cfg, home)
+    if not a.text:
+        print('Provide a question: jarvis ask "what time is it?"', file=sys.stderr)
+        return 2
     from .app import make_agent
     from .brain import Brain
     from .memory import MemoryStore
@@ -746,6 +795,9 @@ def cmd_ask(a, cfg, home) -> int:
     agent = make_agent(cfg, reg, mem, home)
     r = asyncio.run(Brain(reg, agent).respond(" ".join(a.text)))
     print(f"[{r.source}{'/' + r.tool if r.tool else ''} {r.code}] {r.text}")
+    if not r.ok or CANT_RE.search(r.text or ""):
+        print('(limited tool set: for WhatsApp, calendar, mail, browser and every other Skill use: '
+              'jarvis ask --full "..."  or  jarvis chat)', file=sys.stderr)
     return 0 if r.ok else 1
 
 
@@ -1086,6 +1138,15 @@ async def _wake_listen_test(det, *, mic_factory, seconds: float, phrase: str, th
             "attempts": attempts, "peaks": peaks, "near_misses": near}
 
 
+def _print_false_wake_advice(home, threshold: float) -> None:
+    """`jarvis wake test`: what the Core measured about false wakes in the last 24 h (voice/wake_guard.py)."""
+    from .voice.wake_guard import WakeOutcomeLog, advice_text
+    try:
+        print(advice_text(WakeOutcomeLog(home).summary(threshold), threshold))
+    except Exception:
+        pass                                            # advice only; never blocks the test
+
+
 def cmd_wake(a, cfg, home) -> int:
     """Calibrate "Hey Jarvis" to YOUR voice and mic: live score bar, then a recommended threshold."""
     import time as _time
@@ -1122,6 +1183,7 @@ def cmd_wake(a, cfg, home) -> int:
             threshold = det.head["meta"].get("threshold") or threshold
         from .app import _mic_name
         print(f"Microphone: {_mic_name(v.input_device)}   wake model: {Path(model).name}   threshold: {threshold}")
+        _print_false_wake_advice(home, threshold)
         if a.false_wakes:
             return await false_wakes(det, threshold)
         confirm = None if a.model else _confirm_or_none(v)
@@ -1141,9 +1203,12 @@ def cmd_wake(a, cfg, home) -> int:
         peaks = res["peaks"]
         if res["verdict"] not in ("OK", "NEAR_MISS") or not peaks:
             return 1
-        rec = round(min(0.5, max(0.15, 0.6 * min(peaks))), 2)
+        from .voice.wake_guard import SINGLE_STAGE_MIN, WakeOutcomeLog
+        rec = round(min(0.5, max(SINGLE_STAGE_MIN, 0.6 * min(peaks))), 2)     # issue #17: 0.15 woke on room noise
         print(f"Heard {len(peaks)} attempt(s), scores {', '.join(f'{x:.2f}' for x in peaks)}.")
         print(f"Recommended wake_threshold = {rec}   (now {v.wake_threshold}).  Lower = easier to trigger, but more false wakes.")
+        if a.apply:
+            WakeOutcomeLog(home).reset()               # a new calibration starts the false-wake count from zero
         if a.apply and a.model:
             Identity(home, cfg).set_wake(a.model, threshold=rec, by="cli")
             print(f"Saved: {Path(a.model).name} is now the wake phrase (threshold {rec}). Restart JARVES to use it.")
@@ -1553,9 +1618,8 @@ def cmd_diagnose(a, cfg, home) -> int:
             print(f"imported {n} conversation(s) from {len(files)} log file(s)")
         found = diagnose.run(st, cfg, days=a.days)
         issues = st.issues("open")
-        print(f"self-diagnosis: {len(found)} finding(s); {len(issues)} open issue(s)")
-        for i in issues:
-            print(f"  [{i['severity']:<6}] {i['title']}  (x{i['count']})")
+        for line in diagnose.render_summary(found, diagnose.by_cause(issues)):
+            print(line)
         if issues:
             print("details: `jarvis dashboard` -> Issues")
     finally:
@@ -1984,11 +2048,19 @@ def main(argv: list[str] | None = None) -> int:
                     "(automatic during quiet hours)")
     ch.add_argument("--verbose", "-v", action="store_true", help="show codes and details on tool and approval lines")
     ch.add_argument("--wait", type=float, default=60.0, help="seconds to wait for the Core to start")
-    q = sub.add_parser("ask", help="ask one question (brain + Skills, no Godot)")
+    q = sub.add_parser("ask", help="ask one question; limited tool set: use --full for every Skill (WhatsApp, "
+                       "calendar, mail, browser...) through the running JARVES")
     ex = sub.add_parser("execute", help="run a text request with JARVES stopped; Google/memory/tools, terminal confirmations")
     ex.add_argument("text", nargs="+", help='request, e.g. "add a calendar event tomorrow at 10"')
     ex.add_argument("--interactive", "-i", action="store_true", help="keep this text session for follow-up answers; Enter exits")
-    q.add_argument("text", nargs="+")
+    q.add_argument("text", nargs="*", help="the question (with --full: or pipe it on stdin)")
+    q.add_argument("--full", action="store_true", help="full access: send ONE message to the running JARVES like "
+                   "`jarvis chat` does (every Skill; starts the Core if needed; silent; risky actions ask y/N, "
+                   "denied when stdin is not a terminal)")
+    _add_full_args(q)
+    tl = sub.add_parser("tell", help="same as `jarvis ask --full`: one message to the running JARVES, every Skill")
+    tl.add_argument("text", nargs="*", help="the message (or pipe it on stdin)")
+    _add_full_args(tl)
     s = sub.add_parser("say", help="speak a sentence with the configured voice")
     s.add_argument("text", nargs="+")
     s.add_argument("--verbose", "-v", action="store_true", help="show every speech engine and its state")
@@ -2090,7 +2162,7 @@ def main(argv: list[str] | None = None) -> int:
     return {"run": cmd_run, "stop": cmd_stop, "status": cmd_status, "diag": cmd_diag, "memory": cmd_memory, "music": cmd_music,
             "contacts": cmd_personal, "calendar": cmd_personal, "mail": cmd_personal,
             "execute": cmd_execute, "chat": cmd_chat, "text": cmd_chat,
-            "ask": cmd_ask, "say": cmd_say, "chatgpt": cmd_chatgpt, "setup": cmd_setup, "logs": cmd_logs, "key": cmd_key,
+            "ask": cmd_ask, "tell": cmd_ask, "say": cmd_say, "chatgpt": cmd_chatgpt, "setup": cmd_setup, "logs": cmd_logs, "key": cmd_key,
             "wake": cmd_wake, "doctor": cmd_doctor, "cost": cmd_cost, "dashboard": cmd_dashboard,
             "diagnose": cmd_diagnose, "features": cmd_features, "help": cmd_help, "google": cmd_google,
             "backup": cmd_backup, "restore": cmd_restore, "usage": cmd_usage, "start": cmd_start,

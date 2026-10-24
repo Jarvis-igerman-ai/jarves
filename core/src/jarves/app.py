@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import asyncio
+import threading
 import time
 from collections import deque
 import hashlib
@@ -60,6 +61,8 @@ def _delegation_kwargs(core) -> dict:
         return {"delegation_mode": "text_only"} if core.delegation_state.session_step() == "text_only" else {}
 
 
+STOP_TASKS_TIMEOUT_S = 6.0         # issue #17: bound on waiting for cancelled background tasks in Core.stop
+WAKE_GRACE_AFTER_LIVE_S = 1.5   # issue #17: after a conversation ends the wake word stays deaf this long (own speech tail)
 NEAR_MISS_MIN = 0.12         # a wake score at/above this but below the threshold is logged (WAKE_NEAR_MISS)
 
 
@@ -138,6 +141,11 @@ class _VoiceApproval:
             live.confirm_done()
 
 
+STOP_STEP_S = 10.0            # Issue #17: one part of the orderly shutdown may take this long, then the rest goes on
+DASHBOARD_START_S = 8.0       # Issue #17: the in-Core dashboard server must be up within this, or the tool says so
+DASHBOARD_BROWSER_S = 3.0     # ...and the browser launch is only waited for this long
+
+
 async def _later(delay_s: float, fn, *args) -> None:
     """Start-up work that must not compete with CORE_READY: run `fn(*args)` (a coroutine function) after a delay."""
     await asyncio.sleep(delay_s)
@@ -179,7 +187,10 @@ class Core:
         import webbrowser
         self.open_url = webbrowser.open if use_real_audio else None
         self._dashboard = None
+        self.dashboard_browser = "off"             # last open_dashboard: off | opened | pending | failed
         self.stop_event = asyncio.Event()
+        self.stop_reason = ""                      # why the Core was asked to stop (first request wins): see request_stop
+        self.stopped_evt = threading.Event()       # set when stop() ended: holds Windows back at logoff / shutdown
         self.live = None
         self.listening = False
         self._busy: asyncio.Task | None = None
@@ -195,6 +206,8 @@ class Core:
         # the last things the OWNER said (typed or heard), in memory only: assisted dialing checks that a number the
         # model passes was really said by the owner (dialing.py); never written to disk or logs
         self.owner_said: deque[str] = deque(maxlen=6)
+        self._wake_grace_until = 0.0    # issue #17: the wake word ignores the tail of JARVES's own speech after a session
+        self.wake_log = None            # voice/wake_guard.WakeOutcomeLog (false-wake self-tuning)
         self._hold_wake_until = 0.0     # connected-on-open mode: wake word waits until the first live session ended
         self._limit_warned: dict[str, str] = {}      # kind -> day the 80% notice was given
         self._limit_announced: dict[str, float] = {}  # kind -> monotonic time of the last spoken/face limit notice
@@ -216,6 +229,40 @@ class Core:
             pass
 
     # ------------------------------------------------------------------ lifecycle
+    def _install_stop_signals(self) -> None:
+        """Issue #17: SIGTERM (service stop, `taskkill` without /F, logoff) and SIGBREAK (Windows console close /
+        Ctrl+Break) used to kill the process with no CORE_STOPPED line: they are counted as an unclean shutdown. Now
+        they request the same orderly stop as the tray Quit. Ctrl+C keeps its KeyboardInterrupt path."""
+        import signal
+        loop = asyncio.get_running_loop()
+
+        def request(name: str):
+            def handler(*_):
+                def go():
+                    if not self.stop_event.is_set():
+                        logs.info("core", "SHUTDOWN_REQUESTED", "stop requested by the operating system", signal=name)
+                        self.stop_event.set()
+                loop.call_soon_threadsafe(go)
+            return handler
+        self._old_signals = {}
+        for name in ("SIGTERM", "SIGBREAK"):
+            sig = getattr(signal, name, None)
+            if sig is None:
+                continue
+            try:
+                self._old_signals[sig] = signal.signal(sig, request(name))
+            except (ValueError, OSError):      # not the main thread (tests, embedded use)
+                pass
+
+    def _restore_stop_signals(self) -> None:
+        import signal
+        for sig, old in getattr(self, "_old_signals", {}).items():
+            try:
+                signal.signal(sig, old)
+            except (ValueError, OSError, TypeError):
+                pass
+        self._old_signals = {}
+
     async def start(self) -> None:
         started_at = time.monotonic()
         self._loop = asyncio.get_running_loop()
@@ -229,7 +276,11 @@ class Core:
         self._update_guard()                            # SW-V4 L: data migrations (backup first) + failed-update watch
         self.history = store.attach(self.home, c)       # conversation history + self-diagnosis (log sink)
         logs.new_cid()
-        logs.info("core", "CORE_STARTING", "JARVES Core starting", version=__version__, home=str(self.home))
+        from .runtime import shutdown as _shutdown
+        # boot: the machine's boot time. A process whose successor started after a REBOOT was ended by the computer
+        # (power cut, logoff, Windows shutdown), which selfcheck must not report as a JARVES crash (Issue #17)
+        logs.info("core", "CORE_STARTING", "JARVES Core starting", version=__version__, home=str(self.home),
+                  boot=_shutdown.boot_time())
         from .diag import preflight as _preflight       # SW-V4 O: read the last run's state before it is overwritten
         self._preflight_prev = _preflight.previous_state(self.home)
         self.health = Health(self.home / "health.json")
@@ -291,7 +342,9 @@ class Core:
         self.registry.register(make_identity_skill(self.identity))     # "your name is X" (confirmed read-back)
         # WP-H: the dashboard on request ("תפתח את לוח הבקרה" / face button), inside this process
         self.registry.allowed_actions.add("open_dashboard")
-        self.registry.register(DashboardSkill(self.open_dashboard, lambda: getattr(getattr(self._dashboard, "ctx", None), "ui_page", None)))
+        self.registry.register(DashboardSkill(
+            self.open_dashboard, lambda: getattr(getattr(self._dashboard, "ctx", None), "ui_page", None),
+            browser_state=lambda: self.dashboard_browser))
         from .skills.google import register_google      # WP-G: only when the user connected Google (no network)
         self.google = register_google(self.registry, self.home, self.health)
         from .homeassistant import register_home        # V3 P1 channels: tools stay hidden until their switch is on
@@ -341,7 +394,6 @@ class Core:
         dialing.attach(self)
         from . import guides                            # WP-L: help Skill, setup hints, briefing, suggestions
         self.guides = guides.attach(self)
-        self._write_tools_md()                          # after every Skill is registered
         self._retry_lookup = make_retry_lookup(c, self.budget)
         from .voice.delegation_client import DelegationState    # SW-V4 D (#14): mode, fallback ladder, in-flight
         self.delegation_state = DelegationState(self.home, c.ai,
@@ -381,7 +433,7 @@ class Core:
         from . import isolation                          # R-01: OS limits around every approved command
         isolation.set_restricted_token(c.helper.restricted_token)       # V4 J: opt-in, off by default
         register_helper(self.registry, self.home, self.health, isolation.Limits.from_config(c.helper))
-        self._write_tools_md()                          # again: camera + display + profile + helper Skills registered after the first
+        self._write_tools_md()                          # once, after every Skill (camera, display, profile, helper last; was written twice)
 
         self.stt = self._stt or WhisperSTT(c.voice.stt_model, c.voice.stt_fallback_model, c.voice.stt_compute,
                                            c.voice.language)
@@ -422,7 +474,10 @@ class Core:
             self._bg.append(asyncio.create_task(_later(5.0, asyncio.to_thread, _warm_http_stack)))
         self._setup_wake()
         self._bg.append(asyncio.create_task(self.start_mobile()))   # V5-I: phone server with the Core (switch OFF = no-op)
-        self._log_summary()
+        # Issue #17 (core_start_ms): the configuration summary asks the audio stack for device names (sounddevice import +
+        # a PortAudio enumeration, 100-400 ms on a laptop) and reads the ChatGPT sign-in file; it only writes one log
+        # line, so it runs beside the start instead of before CORE_READY.
+        self._bg.append(asyncio.create_task(asyncio.to_thread(self._log_summary)))
         _preflight.finish_core(self)                    # red/amber preflight items degrade only their component
         self.health.mark("ready")
         logs.info("core", "CORE_READY", "Core ready", voice_mode=self.voice_mode, log=str(self.log_path),
@@ -457,31 +512,62 @@ class Core:
         except Exception as e:
             logs.warn("core", "UPDATE_WATCH_FAILED", "update watch failed", error_type=type(e).__name__)
 
+    def request_stop(self, reason: str = "requested") -> None:
+        """The one way to ask for an orderly shutdown (tray Quit, `jarvis stop`, voice quit, OS signals, Windows
+        logoff). The first reason wins and is logged with CORE_STOPPING / CORE_STOPPED. Safe from the event loop."""
+        if not self.stop_reason:
+            self.stop_reason = str(reason)[:40]
+            logs.info("core", "SHUTDOWN_REQUESTED", "shutdown requested", reason=self.stop_reason)
+        self.stop_event.set()
+
     async def stop(self, grace_s: float = 3.0) -> None:
         """Orderly shutdown (CR-11): refuse new work, end voice, deny pending confirmations, let an in-flight
-        request finish briefly (tool side effects are not cut mid-way), cancel and AWAIT every task, then close IO."""
+        request finish briefly (tool side effects are not cut mid-way), cancel and AWAIT every task, then close IO.
+        Issue #17: every step is isolated and bounded. One part that fails or hangs is logged (CORE_STOP_STEP_FAILED)
+        and the rest still closes, and CORE_STOPPED is ALWAYS written when the stop ran to its end: it is the clean-stop
+        marker the self-check trusts, so an exception in the middle must never leave a stopped Core looking crashed."""
         if self.stopping:
             return
         self.stopping = True
-        limits_mod.set_sink(None)
-        self.dev.speaker_stop()
+        failed: list[str] = []
+
+        async def step(label: str, fn, timeout_s: float = STOP_STEP_S) -> None:
+            try:
+                r = fn()
+                if asyncio.iscoroutine(r) or isinstance(r, asyncio.Future):
+                    await asyncio.wait_for(r, timeout_s)
+            except asyncio.CancelledError:
+                raise
+            except BaseException as e:
+                failed.append(label)
+                logs.error("core", "CORE_STOP_STEP_FAILED", "a part did not close cleanly; stopping the rest",
+                           step=label, error_type=type(e).__name__, exc=not isinstance(e, TimeoutError))
+
+        def sync(label: str, fn) -> None:
+            try:
+                fn()
+            except Exception as e:
+                failed.append(label)
+                logs.error("core", "CORE_STOP_STEP_FAILED", "a part did not close cleanly; stopping the rest",
+                           step=label, error_type=type(e).__name__, exc=True)
+
+        sync("limits_sink", lambda: limits_mod.set_sink(None))
+        sync("speaker", self.dev.speaker_stop)
         self.health.mark("stopping")
-        logs.info("core", "CORE_STOPPING", "Core stopping")
+        logs.info("core", "CORE_STOPPING", "Core stopping", reason=self.stop_reason or "unspecified")
         if getattr(self, "history", None) is not None:
             self.history.ai_reviews = False         # P0.4 Q06: no AI review starts during shutdown (rules still run)
         if getattr(self, "approvals", None) is not None:
-            self.approvals.close()                 # pending approvals = denied, never approved by shutdown
-            from . import approvals as appr
-            appr.detach(self.approvals)
+            def close_approvals():
+                self.approvals.close()                 # pending approvals = denied, never approved by shutdown
+                appr.detach(self.approvals)
+            sync("approvals", close_approvals)
         self._confirm.clear()
         if getattr(self, "chat", None) is not None:
-            await self.chat.close()                 # open terminal answers end; their waiting approvals are denied
+            await step("chat", self.chat.close)      # open terminal answers end; their waiting approvals are denied
         if self.live is not None:
             live, self.live = self.live, None
-            try:
-                await asyncio.wait_for(live.stop(), 5)
-            except Exception:
-                logs.error("voice", "LIVE_STOP_FAILED", "live voice did not stop cleanly", exc=True)
+            await step("voice", live.stop, 5)
         busy = self._busy
         if busy is not None and not busy.done():
             done, _ = await asyncio.wait({busy}, timeout=grace_s)
@@ -491,41 +577,53 @@ class Core:
             await asyncio.gather(busy, return_exceptions=True)
         if getattr(self, "whatsapp", None) is not None:
             from . import whatsapp_bridge as wab
-            await wab.stop(self)                    # watcher ends; a bridge this run started seals its store
+            await step("whatsapp", lambda: wab.stop(self))   # watcher ends; a bridge this run started seals its store
         tasks = [t for t in self._bg + list(self._tasks) if not t.done()]
         for t in tasks:
             t.cancel()
-        await asyncio.gather(*tasks, return_exceptions=True)
+        # Issue #17 (5 unclean shutdowns on the owner's PC): a task stuck in a blocking audio-device close (the wake
+        # loop's PortAudio stream) kept stop() waiting until Windows/the user killed the process, so CORE_STOPPED
+        # was never written. Wait a bounded time, name what is stuck, and carry on closing the rest.
+        async def end_tasks():
+            done, stuck = await asyncio.wait(tasks, timeout=STOP_TASKS_TIMEOUT_S) if tasks else (set(), set())
+            if stuck:
+                logs.warn("core", "CORE_STOP_TASKS_STUCK", "background tasks did not end in time at shutdown; continuing",
+                          tasks=[t.get_name() for t in stuck][:8], waited_s=STOP_TASKS_TIMEOUT_S)
+            await asyncio.gather(*done, return_exceptions=True)
+        await step("tasks", end_tasks, STOP_TASKS_TIMEOUT_S + 2)
         if getattr(self, "tasks", None) is not None:
-            await self.tasks.shutdown()             # running background tasks end as "cancelled" (stored)
+            await step("background_tasks", self.tasks.shutdown)    # running background tasks end as "cancelled" (stored)
         if getattr(self, "ops", None) is not None:
-            await self.ops.stop()                   # running jobs stop; the next start resumes or marks them
+            await step("operations", self.ops.stop)    # running jobs stop; the next start resumes or marks them
         if getattr(self, "project_stop", None) is not None:
-            await asyncio.to_thread(self.project_stop)  # dispatcher stopped, running agent processes cancelled
+            await step("projects", lambda: asyncio.to_thread(self.project_stop))   # dispatcher + agent processes
         if getattr(self, "agents_stop", None) is not None:
-            await asyncio.to_thread(self.agents_stop)   # SW-V4 E: managed sessions closed, bridge down, last known kept
-        await self.registry.drain()                 # shielded side effects finish before the store closes
+            await step("agents", lambda: asyncio.to_thread(self.agents_stop))      # managed sessions, bridge down
+        await step("skills", self.registry.drain)    # shielded side effects finish before the store closes
         if getattr(self, "camera", None) is not None:
-            await self.camera.stop()                # sensor closed, indicator off, faces.db closed
+            await step("camera", self.camera.stop)    # sensor closed, indicator off, faces.db closed
         if getattr(self, "browser", None) is not None:
-            await self.browser.close("core stopping")   # headless browser + its private session gone
-        self.curator.cancel()
-        try:                                        # what this run learned is kept (rules only: no network now)
+            await step("browser", lambda: self.browser.close("core stopping"))   # headless browser + its session gone
+        sync("curator_cancel", self.curator.cancel)
+
+        async def last_learning():                   # what this run learned is kept (rules only: no network now)
             self.curator.llm = None
-            await asyncio.wait_for(self.curator.run("shutdown"), 3)
-        except Exception:
-            logs.warn("memory", "CURATOR_SHUTDOWN_FAILED", "memory curator did not finish at shutdown")
+            await self.curator.run("shutdown")
+        await step("memory_curator", last_learning, 3)
         if self.runtime is not None:
-            await self.runtime.stop()               # closes the window it opened; tray/dashboard off; state saved
-        await self.link.stop()
+            await step("runtime", self.runtime.stop)    # closes the window it opened; tray/dashboard off; state saved
+        await step("link", self.link.stop)
         if self._dashboard is not None:              # WP-H: the in-Core dashboard shares memory.db
-            await asyncio.to_thread(self._dashboard.stop)
+            await step("dashboard", lambda: asyncio.to_thread(self._dashboard.stop))
         if self.music is not None:
-            await self.music.close()                # cancels a background queue trim, then closes the client
-        self.memory.close()
-        self.budget.close()          # QA 19 Oct (suite_voice): its own SQLite handle kept memory.db locked after stop
+            await step("music", self.music.close)    # cancels a background queue trim, then closes the client
+        sync("memory", self.memory.close)
+        sync("budget", self.budget.close)    # QA 19 Oct (suite_voice): its own SQLite handle kept memory.db locked after stop
         self.health.mark("stopped")
-        logs.info("core", "CORE_STOPPED", "Core stopped cleanly")
+        logs.info("core", "CORE_STOPPED", "Core stopped cleanly", reason=self.stop_reason or "unspecified",
+                  failed_steps=failed)       # failed_steps lists any part that did not close cleanly (usually [])
+        self._restore_stop_signals()
+        self.stopped_evt.set()                      # OS logoff / shutdown handlers may let Windows go now
         if getattr(self, "_auto_update", None) is not None:
             self._auto_update.stop.set()
         if getattr(self, "_backup_auto", None) is not None:
@@ -535,6 +633,7 @@ class Core:
         context_trace.close_home(self.home)             # its own store.db handle (conversation context)
 
     async def run(self) -> None:
+        self._install_stop_signals()
         await self.start()
         try:
             await self.stop_event.wait()
@@ -863,8 +962,7 @@ class Core:
                 await self.link.reply(ws, "desktop.closed", {})
                 if self.runtime is not None and self.runtime.window_closed():
                     return                         # M1: the window is only a display; the Core keeps running
-            logs.info("core", "SHUTDOWN_REQUESTED", "shutdown requested by an authenticated client")
-            self.stop_event.set()
+            self.request_stop("tray_or_cli_quit" if t == "core.shutdown" else "window_closed")
         elif t == "runtime.set":
             await self.link.reply(ws, "runtime.state", await self.runtime.apply(p, by=client.role))
         elif t in ("camera.preview", "camera.set_enabled"):   # privacy strip buttons (camera/wire.py)
@@ -940,13 +1038,29 @@ class Core:
         """Start the dashboard inside the Core (once; it shares the Core's workspace, memory and settings) and open
         it in the browser on this computer, on `page` (e.g. "#/guide/music"; kept across the token redirect).
         Returns the full URL with the private access key (without the page)."""
-        await self.ensure_dashboard()
+        # Issue #17: neither step may hang the tool call. Starting the server is bounded; the browser launch (on
+        # Windows webbrowser.open can wait on the shell) runs on its own and is only waited for briefly.
+        try:
+            await asyncio.wait_for(self.ensure_dashboard(), DASHBOARD_START_S)
+        except TimeoutError:
+            logs.error("core", "DASHBOARD_START_TIMEOUT", "the dashboard server did not start in time",
+                       limit_s=DASHBOARD_START_S)
+            raise
         url = self._dashboard.url
-        logs.info("core", "DASHBOARD_OPENED", "dashboard opened", port=self._dashboard.port,
-                  browser=self.open_url is not None)
+        self.dashboard_browser = "off"
         if self.open_url is not None and open_browser:
             page = page if page.startswith("#/") and len(page) < 80 else ""
-            await asyncio.to_thread(self.open_url, url + page)
+            launch = asyncio.ensure_future(asyncio.to_thread(self.open_url, url + page))
+            done, _ = await asyncio.wait({launch}, timeout=DASHBOARD_BROWSER_S)
+            if launch in done:
+                self.dashboard_browser = "opened" if launch.exception() is None else "failed"
+            else:                                      # still launching: the dashboard is up, the page will appear
+                self.dashboard_browser = "pending"
+                logs.warn("core", "DASHBOARD_BROWSER_SLOW", "the browser is slow to open; the dashboard is running",
+                          waited_s=DASHBOARD_BROWSER_S)
+                launch.add_done_callback(lambda t: t.cancelled() or t.exception())   # never an unhandled error
+        logs.info("core", "DASHBOARD_OPENED", "dashboard opened", port=self._dashboard.port,
+                  browser=self.open_url is not None, launch=self.dashboard_browser)
         return url
 
     def _run_busy(self, coro) -> None:
@@ -1259,6 +1373,16 @@ class Core:
         async def on_end(reason: str) -> None:
             ended[0] = True
             self._hold_wake_until = 0.0
+            self._wake_grace_until = time.monotonic() + WAKE_GRACE_AFTER_LIVE_S    # speaker tail is not "Hey Jarvis"
+            if ack and self.wake_log is not None and not self.stopping:
+                if reason == "no_speech":
+                    self.wake_log.record(True)
+                    if self.wake is not None:
+                        self.wake.note_false_trigger()
+                    self._wake_tune()
+                elif reason in ("user", "idle", "timeout", "remote_closed", "budget"):
+                    self.wake_log.record(False)
+                    self._wake_tune()
             if self.live is live_ref[0]:
                 self.live = None                   # any end (user, remote close, error, budget) frees the slot
             logs.info("voice", "LIVE_ENDED", "live conversation ended", reason=reason)
@@ -1335,8 +1459,10 @@ class Core:
                              service_tier=self.cfg.ai.voice_service_tier,
                              max_output_tokens=self.cfg.ai.voice_max_output_tokens, echo_tail_s=v.echo_tail_s,
                              clock_context=v.clock_context, progress_after_s=v.progress_after_s,
-                             no_speech_timeout_s=(v.wake_no_speech_s if ack else 0),
+                             no_speech_timeout_s=((self.wake_log.no_speech_s(v.wake_no_speech_s) if self.wake_log is not None
+                                                   else v.wake_no_speech_s) if ack else 0),
                              backend_deadline_s=v.backend_deadline_s, retry_lookup=self._retry_lookup,
+                             cue_after_s=(3.0 if v.chime else 0.0), cue_allowed=self._cue_allowed,
                              reasoning_summary=self.cfg.ai.reasoning_summary, **common, **extra,
                              **_delegation_kwargs(self))
         else:
@@ -1566,10 +1692,44 @@ class Core:
             return
         self.wake = WakeListener(det, self._on_wake, v.wake_cooldown_s)
         self._woke = False
+        from .voice.wake_guard import WakeOutcomeLog
+        self.wake_log = WakeOutcomeLog(self.home)
+        self._wake_tune()
         if v.activation == "conversation" and self.voice_mode == "live":
             self._hold_wake_until = time.monotonic() + 45     # the session opens now; "Hey Jarvis" is for AFTER it ends
         self.health.set("wake_word", "ok", f"say \"{v.wake_phrase}\" (detected on this device, {Path(v.wake_word).name})")
         self._bg.append(asyncio.create_task(self._wake_loop()))
+
+    def _quiet_now(self) -> bool:
+        """Quiet hours (alerts.quiet_start/end in the user DB, calm.py): no unprompted sound."""
+        try:
+            ops = getattr(self, "ops", None)
+            return bool(ops is not None and calm.quiet_hours_now(ops.db, time.time()))
+        except Exception:
+            return False
+
+    def _cue_allowed(self) -> bool:
+        """The soft "working on it" cue (voice/live.py _dead_air_cue): the chime switch is on, not quiet hours."""
+        return bool(self.cfg.voice.chime) and not self._quiet_now()
+
+    def _wake_tune(self) -> None:
+        """Issue #17: apply the measured false-wake level (voice/wake_guard.py) to the running wake pipeline and say
+        so once when it changes. Never loosens below what the user configured; the single-stage floor protects a
+        pipeline without the local speech check from a 0.15 threshold."""
+        from .voice.wake_guard import advice_text, apply_to_detector
+        if self.wake is None or self.wake_log is None:
+            return
+        level = self.wake_log.level()
+        used = apply_to_detector(self.wake.detector, self.wake_log.bump(), self.wake_log.always_confirm())
+        if level != getattr(self, "_wake_level_logged", 0):
+            self._wake_level_logged = level
+            summary = self.wake_log.summary(self.cfg.voice.wake_threshold)
+            logs.info("wake", "WAKE_AUTO_TUNED", "false wakes changed how strict the wake word is", tune_level=level,
+                      false_wakes=summary["false_wakes"], good_wakes=summary["good_wakes"],
+                      threshold=used.get("threshold", used.get("accept")), accept=used.get("accept"),
+                      always_confirm=used.get("always_confirm", False),
+                      hint="jarvis wake test --apply calibrates it to your voice and room")
+            self._wake_note("false_wakes", advice_text(summary, self.cfg.voice.wake_threshold), level=level)
 
     def _wake_cfg(self):
         """voice config for the wake pipeline, with this mic's saved starting gain (voice/wake_calib.py)."""
@@ -1606,7 +1766,7 @@ class Core:
 
     def _wake_should_listen(self) -> bool:
         return not (not self.cfg.voice.wake_enabled or self.dev.mic_muted or self.live is not None or self.listening or self.stopping
-                    or self._voice_connecting or time.monotonic() < self._hold_wake_until
+                    or self._voice_connecting or time.monotonic() < self._hold_wake_until or time.monotonic() < self._wake_grace_until
                     or (self.runtime is not None and self.runtime.recovering)
                     or (self._busy is not None and not self._busy.done()))
 

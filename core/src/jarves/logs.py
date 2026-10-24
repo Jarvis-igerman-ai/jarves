@@ -131,6 +131,7 @@ def _reg(cls: str, names: str) -> dict[str, str]:
 # anything a user said, a provider returned or an exception printed is content; a person's identifier is pii.
 FIELD_CLASS: dict[str, str] = {
     **_reg(SAFE, """
+        approval_ms ask_ms boot capture_ms encode_ms failed_steps launch limit_s waited_s
         amber automatic blocked cap_usd error_type est_usd failed item item_count part passed red remedy skipped_because
         limit_code resumes used
         ticket usd visibility within_budget
@@ -162,6 +163,8 @@ FIELD_CLASS: dict[str, str] = {
         chat_hash chats logout override unread killed text_sha256 retry_after_s days_left
         turn route history_items reserved_usd spent_usd actual_usd requests deleg_s scope err_code daily_usd turn_usd
         transport plugin provider handler tailnet tls_source hours bind_tailnet_only
+        tasks waited_s false_wakes good_wakes signal backend_busy tools_running delegations_open mic_level echo_level
+        rejected times accept always_confirm tune_level
         """),
     **_reg(SECRET, """
         token access_token refresh_token id_token id_token_hint api_key apikey secret secrets client_secret
