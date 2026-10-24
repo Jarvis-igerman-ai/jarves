@@ -66,7 +66,7 @@ def test_quick_selftest_covers_every_area_and_is_read_only(home):
     before = {p.name: p.stat().st_mtime_ns for p in home.rglob("*") if p.is_file()}
     res = selftest.run(home=home, cfg=Config(), record=False)
     assert [c.id for c in res.checks] == ["config", "databases", "permissions", "connections", "registry_guides",
-                                          "locales", "log_privacy", "disk", "version"]
+                                          "locales", "log_privacy", "limits", "disk", "version"]
     assert not res.deep and res.status in ("pass", "warn")
     assert {c.id: c.status for c in res.checks}["locales"] == "pass"
     assert {c.id: c.status for c in res.checks}["registry_guides"] == "pass"

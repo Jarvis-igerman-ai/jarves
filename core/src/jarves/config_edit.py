@@ -40,6 +40,8 @@ EDITABLE: dict[str, tuple[str, str]] = {
     "ai.delegation_turn_requests": ("Cost limits", "Model requests for one spoken question"),
     "ai.delegation_max_searches": ("Cost limits", "Web searches per request"),
     "ai.delegation_timeout_s": ("Conversation", "Stop a spoken lookup after (s)"),
+    "ai.task_max_running": ("Cost limits", "Background tasks running at once (5 more may wait in the queue)"),
+    "ai.task_timeout_s": ("Cost limits", "Stop a background task after (s)"),
     "ai.delegation_fallback": ("Cost limits", "If client delegation fails: local = honest \"can't look it up\"; "
                                               "server = allow server delegation"),
     "ai.voice_service_tier": ("AI", "Backend speed tier for spoken lookups (priority = Fast, 2x price)"),

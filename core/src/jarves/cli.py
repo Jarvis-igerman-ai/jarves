@@ -39,6 +39,20 @@ def _ws_call(home: Path, port: int, msg: dict, expect: str, timeout: float = 5) 
         return None
 
 
+def apply_wake_threshold(home: Path, cfg, config_path: Path, rec: float) -> str:
+    """`jarvis wake test --apply`: write the threshold where it is really read. A threshold saved with a custom
+    wake model (identity.json) beats config.toml at every start (Identity.apply_to_config), so it goes there."""
+    from .identity import Identity
+    ident = Identity(home, cfg)
+    w = ident.wake()
+    if w.get("threshold") is not None:
+        ident.set_wake(w["model"], w["phrase"], rec, by="cli")
+        return (f"Saved: wake_threshold {rec} for {Path(str(w['model'])).name} in identity.json (it overrides "
+                f"config.toml, so this is the value used). Restart JARVES to use it.")
+    set_toml_value(config_path, "voice", "wake_threshold", str(rec))
+    return f"Saved: wake_threshold {rec} in {config_path}, which is the value used. Restart JARVES to use it."
+
+
 def _apply_log_args(a, cfg) -> None:
     if getattr(a, "log_level", None):
         cfg.log.console_level = a.log_level.upper()
@@ -297,6 +311,12 @@ def cmd_status(a, cfg, home) -> int:
     if live is None:
         from .runtime import read_state
         snap = read_snapshot(home / "health.json")
+        try:
+            from . import limits as _limits
+            for line in _limits.status_lines(_limits.views_from_home(home, cfg.ai)):
+                print(line)
+        except Exception:
+            pass
         print("Core is NOT running (no answer on the local link).")
         from .updates import beta_label
         if beta_label(home):
@@ -311,6 +331,9 @@ def cmd_status(a, cfg, home) -> int:
         return 1
     prof = live.get("profile") or {}
     from .updates import beta_label
+    from . import limits as _limits
+    for line in _limits.status_lines(live.get("limits") or []) + _limits.event_lines(live.get("limit_events") or []):
+        print(line)                                                   # no silent limits: the FIRST lines of the status
     beta = beta_label(home)
     print(runtime_summary(live.get("runtime"))
           + (f" | profile {prof.get('name')}{' (TEST)' if prof.get('test') else ''}" if prof else "")
@@ -411,8 +434,70 @@ def cmd_display(a, cfg, home) -> int:
         print("JARVES is not running. Start it with: jarvis start" + (" --show" if what == "show" else ""))
         return 1
     res = (r.get("applied") or {}).get("display") or {}
-    print(f"{what}: {res.get('detail', '?')}" + ("" if res.get("ok", True) else "  (failed)"))
-    return 0 if res.get("ok", True) else 1
+    if not res.get("ok", True):
+        print(f"ERROR: {what} failed: {res.get('detail', '?')}", file=sys.stderr)
+        print("The face launcher is godot\\run_face.cmd; collect details with: jarvis diag", file=sys.stderr)
+        return 1
+    print(f"{what}: {res.get('detail', '?')}")
+    return 0
+
+
+def cmd_mic(a, cfg, home) -> int:
+    """Explicit local recovery: never depend on speech to unmute a muted microphone."""
+    if a.action == "status":
+        r = _ws_call(home, cfg.link.port, {"type": "status.request", "payload": {}}, "status")
+        mic = ((r or {}).get("runtime") or {}).get("mic") or {}
+    else:
+        r = _ws_call(home, cfg.link.port, {"type": "runtime.set", "payload": {"mic_muted": a.action == "mute"}},
+                     "runtime.state", timeout=8)
+        mic = ((r or {}).get("runtime") or {}).get("mic") or {}
+    if r is None:
+        from .runtime.lock import held
+        from .runtime.service import read_state, save_prefs
+        if not held(home):
+            try:
+                prefs = ((read_state(home).get("prefs") or {}) if a.action == "status"
+                         else save_prefs(home, {"mic_muted": a.action == "mute"}))
+            except OSError:
+                prefs = {}
+            if isinstance(prefs.get("mic_muted"), bool):
+                state = "MUTED" if prefs["mic_muted"] else "on"
+                print(f"Saved microphone preference: {state}. Core stopped; applies at next start (not live-verified).")
+                return 0
+    if r is None or not isinstance(mic.get("muted"), bool):
+        print("No live microphone status. Start JARVES with: jarvis start")
+        return 1
+    if a.action != "status" and mic["muted"] != (a.action == "mute"):
+        print("Microphone change was not confirmed. Check: jarvis mic status")
+        return 1
+    print("Microphone: " + ("MUTED" if mic["muted"] else "on"))
+    return 0
+
+
+def cmd_appearance(a, cfg, home) -> int:
+    from .appearance import Appearance, MODES
+    app = Appearance(home)
+    if a.action == "set":
+        app.set(a.mode, by="cli")
+        print(f"Saved appearance: {app.mode}. The running display updates within a second; otherwise at next connect.")
+    elif a.action == "list":
+        print("\n".join(MODES))
+    else:
+        print(f"Appearance: {app.mode}")
+    return 0
+
+
+def cmd_talk(a, cfg, home) -> int:
+    """jarvis talk [--stop]: start (or end) a live voice conversation without the wake word - tests the whole voice path."""
+    r = _ws_call(home, cfg.link.port, {"type": "talk.stop" if a.stop else "talk.start", "payload": {}}, "talk.state",
+                 timeout=20)
+    if r is None:
+        print("JARVES is not running. Start it with: jarvis start")
+        return 1
+    print(r.get("message", "?"))
+    if r.get("ok") and r.get("live"):
+        print("Speak now. End it with: jarvis talk --stop")
+    return 0 if r.get("ok") else 1
 
 
 def cmd_autostart(a, cfg, home) -> int:
@@ -611,7 +696,11 @@ def find_pear() -> Path | None:
 
 def cmd_music(a, cfg, home) -> int:
     from .skills.music import MusicError, PearDesktopPlayer
-    if a.action == "open":
+    if a.action in ("open", "start"):
+        from .features import _tcp_open
+        if _tcp_open(cfg.music.pear_url):
+            print("Pear Desktop is already running. If music fails: Plugins > API Server must be on, then `jarvis music pair`.")
+            return 0
         exe = find_pear()
         if exe is None:
             print(f"Pear Desktop not found. Download it from {PEAR_DOWNLOAD}")
@@ -1124,8 +1213,7 @@ def cmd_wake(a, cfg, home) -> int:
             Identity(home, cfg).set_wake(a.model, threshold=rec, by="cli")
             print(f"Saved: {Path(a.model).name} is now the wake phrase (threshold {rec}). Restart JARVES to use it.")
         elif a.apply:
-            set_toml_value(Path(a.config) if a.config else home / "config.toml", "voice", "wake_threshold", str(rec))
-            print("Saved. Restart JARVES to use it.")
+            print(apply_wake_threshold(home, cfg, Path(a.config) if a.config else home / "config.toml", rec))
         else:
             print("Apply it with:  jarvis wake test --apply" + (f' --model "{a.model}"' if a.model else ""))
         return 0
@@ -1331,6 +1419,18 @@ def cmd_doctor(a, cfg, home) -> int:
             "" if ok else "run:  jarvis chatgpt login")
     live = _ws_call(home, cfg.link.port, {"type": "status.request", "payload": {}}, "status")
     add("info", "Core is " + ("running" if live else "not running (start it with: jarvis)"))
+    try:                                     # no silent limits: a used-up or nearly used-up daily cap is a finding
+        from . import limits as _limits
+        _vs = _limits.views_from_home(home, cfg.ai)
+        for _v in _limits.worst(_vs):
+            add("fail" if _v["level"] == "exhausted" else "warn", _v["text_en"], "fix:  " + _v["action_en"])
+        _evs = list((live or {}).get("limit_events") or []) or _limits.events_from_log(home)
+        for _e in _evs:
+            add("warn", f"{_e.get('text_en', _e.get('code'))} (x{_e.get('count', 1)})", "fix:  " + str(_e.get("action_en", "")))
+        if not _limits.worst(_vs):
+            add("ok", "daily limits have room left (" + "; ".join(v["text_en"] for v in _vs) + ")")
+    except Exception as e:
+        add("warn", f"could not read the daily limits ({type(e).__name__})")
 
     # --- R-01: OS limits around approved helper commands and generated-Skill children
     try:
@@ -1386,7 +1486,7 @@ def cmd_doctor(a, cfg, home) -> int:
             add("ok" if paired else "warn", "Pear Desktop is running" + ("" if paired else " but NOT paired"),
                 "" if paired else "run:  jarvis music pair  (and click Allow in Pear)")
         except httpx.HTTPError:
-            add("warn", "Pear Desktop is not running (music unavailable)", "run:  jarvis music open")
+            add("info", "Pear Desktop is not running (optional; it starts when you ask for music)", "run:  jarvis music start")
 
     # --- optional real (billable) GPT-Live smoke test
     if a.live:
@@ -1805,6 +1905,16 @@ def main(argv: list[str] | None = None) -> int:
     sta.add_argument("--wait", type=int, default=90, help="seconds to wait for the Core to answer")
     sub.add_parser("show", help="open the JARVES window (the Core keeps running)")
     sub.add_parser("hide", help="close the JARVES window (the Core keeps running)")
+    mic = sub.add_parser("mic", help="microphone privacy and recovery: mute / unmute / status")
+    mic.add_argument("action", choices=["mute", "unmute", "status"])
+    appearance = sub.add_parser("appearance", help="display look: list / status / set face|avatar2d|avatar3d|hidden")
+    aps = appearance.add_subparsers(dest="action", required=True)
+    aps.add_parser("list")
+    aps.add_parser("status")
+    aps.add_parser("set").add_argument("mode", choices=["face", "avatar2d", "avatar3d", "hidden"])
+
+    tk = sub.add_parser("talk", help="start a live voice conversation now, without the wake word (tests voice)")
+    tk.add_argument("--stop", action="store_true", help="end the open conversation")
     au = sub.add_parser("autostart", help="start JARVES invisibly at login: on / off / status")
     au.add_argument("action", choices=["on", "off", "status"])
     lg = sub.add_parser("logs", help="show the log (filter by --log-level / --module; -f to follow)")
@@ -1864,7 +1974,7 @@ def main(argv: list[str] | None = None) -> int:
     md.add_argument("--body", required=True)
     md.add_argument("--send", action="store_true", help="also offer read-back and sending in this session; asks confirmation")
     mu = sub.add_parser("music", help="Pear Desktop pairing and manual control")
-    mu.add_argument("action", choices=["open", "pair", "status", "play", "pause", "resume", "next"])
+    mu.add_argument("action", choices=["open", "start", "pair", "status", "play", "pause", "resume", "next"])
     mu.add_argument("query", nargs="?", default="")
     g = sub.add_parser("chatgpt", help="connect / disconnect your ChatGPT plan (Sign in with ChatGPT)")
     g.add_argument("action", choices=["login", "logout", "status", "models"])
@@ -2018,6 +2128,10 @@ def main(argv: list[str] | None = None) -> int:
     issue_registry.add_cli(sub)               # owner request 21 Oct: jarvis issues [list|show|report|ignore|fixed|add]
     from . import web_cli
     web_cli.add_cli(sub)                      # owner request 21 Oct: jarvis web (the dashboard Chat page)
+    from . import plugin_registry
+    plugin_cli = plugin_registry.modules("cli")
+    for m in plugin_cli:                      # plugins.d/*.toml: a new command module needs no edit here
+        m.add_cli(sub)
     from . import whatsapp_admin
     whatsapp_admin.add_cli(sub)               # SW-V4 F: jarvis whatsapp status / link / mode / allow / kill ...
     from .orchestrator import surfaces as agents_cli
@@ -2053,6 +2167,7 @@ def main(argv: list[str] | None = None) -> int:
             "diagnose": cmd_diagnose, "features": cmd_features, "help": cmd_help, "google": cmd_google,
             "backup": cmd_backup, "restore": cmd_restore, "usage": cmd_usage, "start": cmd_start,
             "show": cmd_display, "hide": cmd_display, "autostart": cmd_autostart,
+            "mic": cmd_mic, "appearance": cmd_appearance, "talk": cmd_talk,
             "update": cmd_update, "browser": cmd_browser, "connect": cmd_connect, "telegram": cmd_telegram, "instagram": cmd_instagram, "home": cmd_home,
             "profile": profiles.cmd_profile, "approvals": cmd_approvals, "recall": recall.cmd_recall,
             "health": health_cli.cmd_health,
@@ -2061,7 +2176,8 @@ def main(argv: list[str] | None = None) -> int:
             "dial": dialing.cmd_dial, "release": release_cmd.cmd_release, "tour": wizard.cmd_tour,
             "manage": self_manage.cmd_manage, "undo": self_manage.cmd_manage,
             **cli_parity.COMMANDS, **budget_cli.COMMANDS, **privacy_cli.COMMANDS, **phone_cli.COMMANDS, **selfspeed.COMMANDS,
-            **issue_registry.COMMANDS, **web_cli.COMMANDS, **release_notes.COMMANDS}[a.cmd](a, cfg, home)
+            **issue_registry.COMMANDS, **web_cli.COMMANDS, **release_notes.COMMANDS,
+            **{k: v for m in plugin_cli for k, v in m.COMMANDS.items()}}[a.cmd](a, cfg, home)
 
 
 if __name__ == "__main__":

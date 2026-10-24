@@ -44,6 +44,15 @@ DEFAULT_ALLOWED_ACTIONS = frozenset({"remember", "music_play", "music_pause", "m
                                      "music_stop", "music_volume", "music_mute", "music_unmute",
                                      # settings Skill: one appended line (backed up, undoable) / allowlisted keys
                                      "workspace_note", "set_voice", "set_setting"})
+# Expected policy/configuration outcomes remain in the timeline, but are not runtime defects.
+EXPECTED_TOOL_REFUSALS = frozenset({"FEATURE_NEEDS_APPROVAL", "TOOL_UNTRUSTED_TURN", "TOOL_DECLINED",
+                                    "FEATURE_OFF", "SKILL_DISABLED", "TOOL_FORBIDDEN"})
+
+
+def expected_tool_refusal(code: str | None, origin: str | None = None) -> bool:
+    return code in EXPECTED_TOOL_REFUSALS or (code == "TOOL_BAD_ARGS" and origin == "user")
+
+
 UNTRUSTED_GRACE_S = 3.0    # see SkillRegistry.new_turn
 ASK_HARD_CAP_S = 660.0     # Issue #17: no approval wait is endless (the approvals service itself stops at 600 s)
 REPEAT_REPLAY_S = 30.0     # V4-VC-3: an identical successful action repeated in a tainted turn gets its result back
@@ -453,26 +462,25 @@ class SkillRegistry:
             raise TimeoutError
 
     async def call(self, name: str, raw_args: dict | str | None = None, *, origin: Origin = "model") -> ToolResult:
-        """Issue #17: EVERY call ends in exactly one log record (TOOL_RESULT when it ran, TOOL_REFUSED when it was
-        refused before running, TOOL_CANCELLED when the turn / session ended under it), so the diagnosis never sees a
-        LIVE_TOOL_CALL "that never returned" for a call that was simply refused or cancelled."""
-        t0, state = time.monotonic(), {"logged": False}
+        """Issue #17: EVERY call ends in exactly one log record: TOOL_RESULT (it ran or was refused before running; `ms`
+        leaves out the person's approval time) or TOOL_CANCELLED (the turn / session ended under it), so the diagnosis
+        never sees a LIVE_TOOL_CALL "that never returned"."""
+        t_run = time.monotonic()
+        approval_wait = self.confirm_elapsed()
         try:
-            res = await self._call(name, raw_args, origin=origin, _state=state)
+            res = await self._call(name, raw_args, origin=origin)
         except asyncio.CancelledError:
-            if not state["logged"]:
-                state["logged"] = True
-                logs.info("skills", "TOOL_CANCELLED", "tool call cancelled before it finished (turn or session ended)",
-                          tool=name, origin=origin, ms=round((time.monotonic() - t0) * 1000))
+            logs.info("skills", "TOOL_CANCELLED", "tool call cancelled before it finished (turn or session ended)",
+                      tool=name, origin=origin, ms=round((time.monotonic() - t_run) * 1000))
             raise
-        if not state["logged"]:
-            logs.info("skills", "TOOL_REFUSED", "tool call refused before it ran", tool=name, result_code=res.code,
-                      origin=origin, ms=round((time.monotonic() - t0) * 1000))
+        log = logs.info if res.ok else logs.warn
+        log("skills", "TOOL_RESULT", "tool finished", tool=name, ok=res.ok, result_code=res.code, origin=origin,
+            ms=round(max(0.0, time.monotonic() - t_run - (self.confirm_elapsed() - approval_wait)) * 1000))
         _tool_seen(name, res.ok, res.code, res.message)   # terminal + web chat: one line per call (TOOL_SINK)
         return res
 
     async def _call(self, name: str, raw_args: dict | str | None = None, *, origin: Origin = "model",
-                    _state: dict | None = None) -> ToolResult:
+                    ) -> ToolResult:
         """Run a tool under the permission policy. origin="user" only when the deterministic command parser matched
         the user's own words; everything from a model (text agent, voice agent, ChatGPT plan) is "model"."""
         st = self._tools.get(name)
@@ -491,10 +499,10 @@ class SkillRegistry:
             args = tool.args.model_validate(raw_args or {})
         except ValidationError as e:        # never log the input values (may be private)
             bad = [".".join(map(str, err.get("loc", ()))) for err in e.errors(include_input=False)]
-            logs.warn("skills", "TOOL_BAD_ARGS", "invalid tool arguments", tool=name, bad_fields=bad)
+            logs.warn("skills", "TOOL_BAD_ARGS", "invalid tool arguments", tool=name, origin=origin, bad_fields=bad)
             return ToolResult(False, f"invalid arguments for {name}", code="TOOL_BAD_ARGS")
         except ValueError:
-            logs.warn("skills", "TOOL_BAD_ARGS", "invalid tool arguments", tool=name)
+            logs.warn("skills", "TOOL_BAD_ARGS", "invalid tool arguments", tool=name, origin=origin)
             return ToolResult(False, f"invalid arguments for {name}", code="TOOL_BAD_ARGS")
         key = (ROUTE.get(), name, json.dumps(args.model_dump(mode="json"), sort_keys=True, ensure_ascii=False,
                                             default=str))
@@ -507,8 +515,6 @@ class SkillRegistry:
             # The identical approved action is never run or asked again: its result is handed back as done.
             logs.info("skills", "TOOL_REPLAYED", "identical action already done this turn; result returned again",
                       tool=name)
-            if _state is not None:
-                _state["logged"] = True
             prev = last[1]
             return ToolResult(prev.ok, prev.message, {**prev.data, "already_done": "this exact action already ran a "
                               "moment ago (approved); do NOT run it again: report this result"}, code=prev.code)
@@ -520,11 +526,9 @@ class SkillRegistry:
                 return ToolResult(prev.ok, prev.message, {**prev.data, "cached": "same result as a moment ago; "
                                   "do not call this tool again with the same arguments"}, code=prev.code)
         asked0 = self.asks
-        c0 = self.confirm_elapsed()
         refused = await self._authorize(tool, args, origin)
         if refused is not None:
             return refused
-        t_run, c1 = time.monotonic(), self.confirm_elapsed()
         try:
             res = await self._run(tool, args)
         except TimeoutError:
@@ -546,13 +550,6 @@ class SkillRegistry:
             now = self.clock()
             self._recent_ok = {k: v for k, v in self._recent_ok.items() if now - v[0] < REPEAT_REPLAY_S}
             self._recent_ok[key] = (now, res, self.asks > asked0)    # approved by the owner this call
-        log = logs.info if res.ok else logs.warn
-        if _state is not None:
-            _state["logged"] = True
-        log("skills", "TOOL_RESULT", "tool finished", tool=name, ok=res.ok, result_code=res.code, origin=origin,
-            # SW-V4 O: tool p50/p95 in the health monitor; Issue #17: without the person's approval time
-            ms=max(0, round(((time.monotonic() - t_run) - (self.confirm_elapsed() - c1)) * 1000)),
-            approval_ms=round((self.confirm_elapsed() - c0) * 1000))   # human approval time, never tool slowness
         return self._hinted(skill, tool, res) if not res.ok else res
 
     def _hinted(self, skill: Skill, tool: Tool, res: ToolResult) -> ToolResult:

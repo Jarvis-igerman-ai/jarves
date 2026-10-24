@@ -41,6 +41,11 @@ en = "Press Test now, then say \"Hey Jarvis\"."
 action = "test"
 
 [[steps]]
+he = "לבדוק אם הקול בכלל עובד, בלי מילת הפעלה: jarvis talk פותח שיחה חיה מיד (jarvis talk --stop מסיים). אם הוא עונה, המיקרופון והקול תקינים והבעיה היא רק זיהוי המילה."
+en = "To test whether voice works at all, without the wake word: jarvis talk opens a live conversation at once (jarvis talk --stop ends it). If he answers, mic and voice are fine and only wake detection is the problem."
+action = "command:jarvis talk"
+
+[[steps]]
 he = "ב-V4 אפשר לאמן שכבת זיהוי קטנה על ההקלטות שלכם: jarvis wake train. אם הוא לא משפר, jarvis wake train --revert מחזיר למודל הרגיל."
 en = "In V4 you can train a head on your own recordings: jarvis wake train. If it does not help, jarvis wake train --revert goes back to the standard model."
 
@@ -67,3 +72,9 @@ he = "הוא לא מתעורר כשאני אומר \"היי ג'ארביס\" פע
 en = "He misses a second \"Hey Jarvis\" said right after the first"
 fix_he = "התעוררות שנייה בתוך כ-4 שניות מההתעוררות הקודמת עלולה להיפספס. חכו כמה שניות ונסו שוב. הוא גם מתעורר על \"Jarvis\" לבד."
 fix_en = "A second wake within about 4 seconds of the previous one can be missed. Wait a few seconds and try again. He also wakes on a bare \"Jarvis\"."
+
+[[problems]]
+he = "jarvis talk לא פותח שיחה"
+en = "jarvis talk does not open a conversation"
+fix_he = "הוא כותב מה חסר: \"jarvis start\" אם ג'ארביס לא רץ, ביטול השתקה אם המיקרופון מושתק, או בדיקת מפתח OPENAI_API_KEY אם אין קול חי. פרטים: jarvis logs -n 50."
+fix_en = "It says what is missing: jarvis start if JARVES is not running, unmute if the mic is muted, or check OPENAI_API_KEY if there is no live voice. Details: jarvis logs -n 50."

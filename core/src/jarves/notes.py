@@ -237,12 +237,12 @@ def make_skill(notes: Notes, sandbox=None):
                 return ToolResult(True, f"exported to {r['path']} in my workspace", r)
 
             return [
-                Tool("note_add", "Create a NEW note: 'write a note', 'תרשום פתק'. Never for delete/remove requests.", add, AddArgs, permission="action"),
+                Tool("note_add", "New note: 'write a note', 'תרשום פתק'. Never for delete.", add, AddArgs, permission="action"),
                 Tool("note_find", "Find notes by words/tag or read one by id: 'find my note about', 'תמצא פתק על'.", find, FindArgs,
                      permission="read"),
                 Tool("note_edit", "Change a note: new title/text/tags or append: 'add to the note', 'תוסיף לפתק'.", edit, EditArgs,
                      permission="action"),
-                Tool("note_delete", "Delete (never create) a note by id or title words; asks first: 'delete the note', 'תמחק את הפתק'.", delete, DeleteArgs, permission="destructive",
+                Tool("note_delete", "Delete (never create) a note by id/title; asks first: 'delete the note', 'תמחק את הפתק'.", delete, DeleteArgs, permission="destructive",
                      impact=delete_impact),
                 Tool("note_export", "Export one or all notes as Markdown to my workspace: 'export my notes', 'תייצא את הפתקים'.", export,
                      ExportArgs, permission="action"),

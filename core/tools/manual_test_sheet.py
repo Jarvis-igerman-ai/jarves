@@ -19,6 +19,7 @@ from datetime import date
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
+from jarves import changelog_parts  # noqa: E402
 from jarves import release_signoff as so  # noqa: E402
 
 # Section 7 rows that must pass on every stable release (ids exist in JARVES_SW_V4_WORK_PACKAGE.md)
@@ -114,7 +115,8 @@ def main(argv: list[str] | None = None) -> int:
     since = a.since or last_stable_tag(root)
     files = _git(root, "diff", "--name-only", f"{since}..HEAD").splitlines() if since else []
     read = lambda p: (root / p).read_text(encoding="utf-8") if (root / p).is_file() else ""   # noqa: E731
-    sheet = build_sheet(version, since, read("CHANGELOG.md"), read("docs/JARVES_SW_V4_WORK_PACKAGE.md"), files)
+    changelog = changelog_parts.read(root / "CHANGELOG.md") if (root / "CHANGELOG.md").is_file() else ""   # + fragments
+    sheet = build_sheet(version, since, changelog, read("docs/JARVES_SW_V4_WORK_PACKAGE.md"), files)
     so.save(root, sheet)
     print(f"wrote {out} with {len(sheet.rows)} rows (since {since or 'the beginning'})")
     return 0

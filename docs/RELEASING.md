@@ -26,6 +26,8 @@ Every green `main` is already a beta (layer 2). A stable release promotes a beta
 1. Pick the version: `version` in `core/pyproject.toml` (for example `4.0.1`); the tag will be `v4.0.1`.
 2. Add `docs/reviews/RELEASE_CHECKLIST_<version>.md` (rows `| # | item | status |`, every row `done`, `n/a` or
    `accepted`); it records the bug-table state. Only 4.0.0 used the old `SWV4_RELEASE_CHECKLIST.md`.
+   Fold the one-file-per-change entries into their base files in the release PR: `python core/tools/catalog_add.py --fold`
+   (dashboard texts, `locales/parts`) and `python core/tools/changelog_build.py --write` (`changelog.d` into CHANGELOG.md).
 3. Make the sign-off sheet (`manual_test_sheet.py`, below), install the newest beta, test it and sign it off
    (`jarvis release signoff ... --finish`); commit the signed sheet.
 4. Wait for 5 green nightly runs in a row on `main`.

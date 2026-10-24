@@ -445,3 +445,42 @@ async def test_pause_is_verified_pressed_again_and_never_claimed_falsely():
     never = ScriptedPlayer(playable={"A"}, pause_ignored=99)
     res = await _tool(MusicSkill(never, verify_tries=3), "music_pause").handler(type("A", (), {})())
     assert not res.ok and res.code == "MUSIC_NOT_CONFIRMED"                # it must NOT say "paused"
+
+
+async def test_pear_closed_is_idle_until_the_user_asks():
+    """Optional music: a closed Pear is "idle" (never degrades the Core); a failed REQUEST makes it unavailable."""
+    from jarves.health import Health
+    p = FakePlayer()
+    p.offline = True
+    s = MusicSkill(p)
+    st, d = await s.health()
+    assert st == "idle" and "ask for music" in d
+    h = Health()
+    h.mark("ready")
+    h.set("music", st, d)
+    assert h.core == "ready" and h.last_error is None
+    r = await {t.name: t for t in s.tools()}["music_next"].handler(None)
+    assert not r.ok and r.code == "MUSIC_PLAYER_OFFLINE"
+    assert "jarvis music start" in r.message and "26538" in r.message
+    st, d = await s.health()
+    assert st == "unavailable"
+    h.set("music", st, d)
+    assert h.core == "degraded"
+    p.offline = False
+    assert (await s.health())[0] == "ok"
+    p.offline = True
+    assert (await s.health())[0] == "idle"          # asked-and-failed state is cleared once Pear answered
+
+
+def test_music_start_alias_when_pear_missing(monkeypatch, tmp_path, capsys):
+    from types import SimpleNamespace
+    from jarves import cli
+    from jarves import features
+    monkeypatch.setattr(features, "_tcp_open", lambda *a, **k: False)    # nothing listens: Pear is closed
+    monkeypatch.setattr(cli, "find_pear", lambda: None)
+    cfg = SimpleNamespace(music=SimpleNamespace(pear_url="http://127.0.0.1:1", timeout_s=1.0))
+    assert cli.cmd_music(SimpleNamespace(action="start", query=""), cfg, tmp_path) == 1
+    assert "Pear Desktop not found" in capsys.readouterr().out
+    monkeypatch.setattr(features, "_tcp_open", lambda *a, **k: True)
+    assert cli.cmd_music(SimpleNamespace(action="start", query=""), cfg, tmp_path) == 0
+    assert "already running" in capsys.readouterr().out

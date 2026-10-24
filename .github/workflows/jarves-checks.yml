@@ -51,6 +51,7 @@ jobs:
       tree: ${{ steps.c.outputs.tree }}
       reused: ${{ steps.c.outputs.reused }}
       proof_run: ${{ steps.c.outputs.proof_run }}
+      reuse_tests_only: ${{ steps.c.outputs.reuse_tests_only }}
       draft: ${{ steps.c.outputs.draft }}
     steps:
       - uses: actions/checkout@v7
@@ -73,21 +74,31 @@ jobs:
         run: |
           set -euo pipefail
           tree=$(python3 core/tools/ci_reuse.py tree)
-          reused=false; proof_run=""
+          reused=false; reuse_tests_only=false; proof_run=""
           if [ "$GITHUB_EVENT_NAME" = "push" ] && [ "$GITHUB_REF" = "refs/heads/main" ]; then
             # same tree as a green PR run => nothing to test or build (docs/CI_PERFORMANCE.md "reuse")
             if python3 core/tools/ci_reuse.py resolve --repo "$GITHUB_REPOSITORY" --tree "$tree" > reuse.out; then reused=true; fi
+            if [ "$reused" != "true" ]; then
+              # A test-only PR cannot contain an installer artifact. Reuse its *green tests* only
+              # when the exact content tree matches, but BUILD and smoke-test the installer here.
+              if python3 core/tools/ci_reuse.py resolve-tests --repo "$GITHUB_REPOSITORY" --tree "$tree" > tests.out; then
+                reuse_tests_only=true
+                proof_run=$(sed -n 's/^run_id=//p' tests.out | head -1)
+              fi
+              cat tests.out 2>/dev/null || true
+            fi
             cat reuse.out || true
-            # the PR run that proved this tree: the `durations` job feeds its junit timings into main's cache
+            # the PR run that proved this tree: `durations` feeds its junit timings into main's cache
             [ "$reused" = "true" ] && proof_run=$(sed -n 's/^run_id=//p' reuse.out | head -1)
           fi
           args=(--event "$GITHUB_EVENT_NAME")
           [ "$reused" = "true" ] && args+=(--reused)
+          [ "$reuse_tests_only" = "true" ] && args+=(--reuse-tests-only)
           draft=false; [ "$DRAFT" = "true" ] && { draft=true; args+=(--draft); echo "draft PR: fast checks only (mark it ready for the full run)"; }
           python3 core/tools/ci_plan.py classify "${args[@]}" | tee classify.out
           if [ "$GITHUB_EVENT_NAME" != "pull_request" ] && [ "$reused" != "true" ]; then echo "full matrix ($GITHUB_EVENT_NAME $GITHUB_REF)"; fi
-          { cat classify.out; echo "tree=$tree"; echo "reused=$reused"; echo "proof_run=$proof_run"; echo "draft=$draft"; } >> "$GITHUB_OUTPUT"
-          { echo "tree \`${tree:0:12}\` reused=$reused"; grep -E '^[a-z0-9]+=(true|false)$' classify.out | tr '\n' ' '; echo
+          { cat classify.out; echo "tree=$tree"; echo "reused=$reused"; echo "reuse_tests_only=$reuse_tests_only"; echo "proof_run=$proof_run"; echo "draft=$draft"; } >> "$GITHUB_OUTPUT"
+          { echo "tree \`${tree:0:12}\` reused=$reused reuse_tests_only=$reuse_tests_only"; grep -E '^[a-z0-9]+=(true|false)$' classify.out | tr '\n' ' '; echo
             python3 core/tools/ci_plan.py summary --plan-line "$(grep '^plan=' classify.out || true)" || true; } >> "$GITHUB_STEP_SUMMARY"
   validate:
     # Quick stage: every heavy job `needs` it, so a cheap budget/guide/docs failure ends a PR run in about two minutes
@@ -256,7 +267,8 @@ jobs:
     needs: [changes, core]
     if: >-
       ${{ always() && ((needs.core.result == 'success' && needs.changes.outputs.full == 'true' && needs.changes.outputs.reused != 'true' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository))
-      || (needs.changes.outputs.reused == 'true' && needs.changes.outputs.proof_run != '' && github.event_name == 'push' && github.ref == 'refs/heads/main')) }}
+      || (needs.changes.outputs.reused == 'true' && needs.changes.outputs.proof_run != '' && github.event_name == 'push' && github.ref == 'refs/heads/main')
+      || (needs.changes.outputs.reuse_tests_only == 'true' && needs.changes.outputs.proof_run != '' && github.event_name == 'push' && github.ref == 'refs/heads/main')) }}
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     continue-on-error: true
@@ -274,19 +286,23 @@ jobs:
           key: jarves-durations-v2-${{ matrix.platform }}-none
           restore-keys: jarves-durations-v2-${{ matrix.platform }}-
       - uses: actions/download-artifact@v8
-        if: needs.changes.outputs.reused != 'true'
+        if: needs.changes.outputs.reused != 'true' && needs.changes.outputs.reuse_tests_only != 'true'
         with:
           pattern: junit-${{ matrix.platform }}-*
           path: junit
       - name: Junit of the PR run that proved this tree (reused main push)
         uses: actions/download-artifact@v8
-        if: needs.changes.outputs.reused == 'true'
+        if: needs.changes.outputs.reused == 'true' || needs.changes.outputs.reuse_tests_only == 'true'
         with:
           pattern: junit-${{ matrix.platform }}-*
           path: junit
           run-id: ${{ needs.changes.outputs.proof_run }}
           github-token: ${{ github.token }}
-      - run: python3 core/tools/ci_plan.py durations-merge --junit junit --into core/tests/durations-${{ matrix.platform }}.json
+      - name: Merge measured timings and show shard skew
+        shell: bash
+        run: |
+          python3 core/tools/ci_plan.py durations-merge --junit junit --into core/tests/durations-${{ matrix.platform }}.json | tee shard-timings.txt
+          { echo "### ${{ matrix.platform }} shard timing"; cat shard-timings.txt; } >> "$GITHUB_STEP_SUMMARY"
       - uses: actions/cache/save@v6
         with:
           path: core/tests/durations-${{ matrix.platform }}.json
@@ -736,6 +752,21 @@ jobs:
             exit 1
           fi
           echo "$NEEDS" | jq -e '[.[] | select(.result == "failure" or .result == "cancelled")] | length == 0' > /dev/null
+      # Publish the proof *inside* ci-ok so that it exists before the required check
+      # turns green. Only for non-draft full-test PRs which did not build an installer.
+      - name: Record proven PR tests (no installer)
+        if: ${{ github.event_name == 'pull_request' && github.event.pull_request.draft != true && needs.changes.outputs.code == 'true' && needs.changes.outputs.full == 'true' && needs.changes.outputs.installer != 'true' }}
+        shell: bash
+        run: |
+          printf 'tree=%s\npr_head=%s\nrun_id=%s\nkind=green-tests-no-installer\n'             "${{ needs.changes.outputs.tree }}" "${{ github.event.pull_request.head.sha }}" "$GITHUB_RUN_ID" > pr-tests-proof.txt
+      - name: Save proven PR tests (no installer)
+        if: ${{ github.event_name == 'pull_request' && github.event.pull_request.draft != true && needs.changes.outputs.code == 'true' && needs.changes.outputs.full == 'true' && needs.changes.outputs.installer != 'true' }}
+        uses: actions/upload-artifact@v7
+        with:
+          name: jarves-no-installer-proof-${{ needs.changes.outputs.tree }}
+          path: pr-tests-proof.txt
+          retention-days: 7
+          if-no-files-found: error
   failure-summary:
     # ONE comment per PR (updated in place): failed jobs, first failing test + its first error line, log links, known
     # flakes marked from the flake-report artifact. No secrets, no log content beyond one redacted line (core/tools/ci_comment.py).

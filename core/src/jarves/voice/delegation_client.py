@@ -35,7 +35,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Callable
 
-from .. import logs
+from .. import limits, logs
 from ..budget import MICRO, USD_KIND, BudgetExceeded
 
 if TYPE_CHECKING:
@@ -65,12 +65,14 @@ CAP_NOTE = {
 }
 TURN_CAP_NOTE = ("This request needed more lookups than one answer is allowed (per-question cost limit), so it was "
                  "stopped. Tell the user honestly in one short sentence in the user's language that it was too big to "
-                 "finish now and ask them to ask a narrower question. Do not guess.{partial}")
+                 "finish now (name the limit: the per-question limit, ai.delegation_turn_usd) and ask them to ask a narrower "
+                 "question. Do not guess.{partial}")
 PLAN_LIMIT_NOTE = ("The ChatGPT plan's usage limit is reached, so AI lookups are paused (JARVES never switches to the "
                    "paid API by itself). Tell the user that honestly in one short sentence in the user's language; "
                    "you can still talk and answer from what you already know.")
 TIMEOUT_NOTE = ("The lookup took too long and was stopped; nothing more will come for it. Tell the user honestly, in "
-                "one short sentence in the user's language, that you could not get it in time and ask whether to try "
+                "one short sentence in the user's language, that you could not get it in time (the time limit, "
+                "ai.delegation_timeout_s) and ask whether to try "
                 "again (Hebrew: 'לא הצלחתי להביא את זה בזמן, לנסות שוב?'). Do not guess.")
 ERROR_NOTE = ("The lookup failed ({why}). Tell the user honestly, in one short sentence in the user's language, that "
               "you could not get it right now. Do not guess and do not say it was done.")
@@ -179,6 +181,7 @@ class DelegationState:
         nxt = "server" if getattr(self.ai, "delegation_fallback", "local") == "server" else "text_only"
         self.step, self.reason, self.changed = nxt, f"{why}: {detail}"[:200], time.time()
         self.counters["fallbacks"] += 1
+        limits.report("DELEGATION_FALLBACK", f"to {nxt}: {why}")
         self.history = (self.history + [{"ts": self.changed, "to": nxt, "reason": self.reason}])[-10:]
         logs.warn("delegation", "DELEG_FALLBACK", "client delegation failed; the next conversation uses the fallback",
                   to=nxt, why=why, detail=detail[:160])
@@ -454,6 +457,11 @@ class ClientDelegation:
             logs.warn("delegation", "DELEG_CAP", "a delegated request was refused before sending (cap)",
                       delegation=job.did, scope=e.scope, detail=e.detail)
             if e.scope == "turn":
+                if "requests per question" in e.detail:
+                    limits.report("DELEGATION_TURN_REQUESTS", f"{job.requests} requests, cap {self.ai.delegation_turn_requests}",
+                                  self.ai.delegation_turn_requests)
+                else:
+                    limits.report("DELEGATION_TURN_USD", f"{e.detail}", self.ai.delegation_turn_usd)
                 partial = f"\nWhat was found so far: {job.tools_done[-1][:300]}" if job.tools_done else ""
                 note = TURN_CAP_NOTE.format(partial=partial)
             else:
@@ -465,6 +473,7 @@ class ClientDelegation:
             self.state.count("timeouts")
             logs.warn("delegation", "DELEG_TIMEOUT", "a delegated turn hit its time limit and was cancelled",
                       delegation=job.did, timeout_s=self.ai.delegation_timeout_s, stage=job.stage)
+            limits.report("DELEGATION_TIMEOUT", f"{self.ai.delegation_timeout_s:g} s", self.ai.delegation_timeout_s)
         except asyncio.CancelledError:
             outcome = "cancelled"
             self.state.count("cancelled")
@@ -667,6 +676,9 @@ class ClientDelegation:
                 raise
             status = final.get("status") or ("completed" if final else "failed")
             searches = trace.search_calls or sum(1 for i in out_items if i.get("type") == "web_search_call")
+            if self.ai.delegation_max_searches > 0 and searches >= self.ai.delegation_max_searches:
+                limits.report("DELEGATION_SEARCHES", f"{searches} of {self.ai.delegation_max_searches} searches",
+                              self.ai.delegation_max_searches)       # no silent limit: the answer may be partial
             u = trace.usage or {}
             job.spent += held.settle(self.costs.actual(u, searches, final.get("model", ""), final.get("service_tier", ""))
                                      if u else self._unknown_cost(trace, body, held))

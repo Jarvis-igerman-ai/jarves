@@ -1,0 +1,67 @@
+order = 53
+category = "costs"
+probe = "limits"
+optional = true
+aliases = ["מגבלה יומית", "הגעתי למגבלה", "מגבלת קול", "daily limit", "voice limit", "limit reached", "daily_realtime_minutes", "daily_request_limit"]
+links = ["usage", "api_budget", "voice_ai"]
+title_he = "מגבלות יומיות (קול ובקשות)"
+title_en = "Daily limits (voice and requests)"
+what_he = "ג'ארביס מגביל כמה דקות קול חי, כמה בקשות AI וכמה עלות חיפושים בקול מותר ליום. כשמגבלה נגמרת (או מגיעה ל-80%) הוא אומר את זה בקול ובמסך, ואומר איך מעלים אותה."
+what_en = "JARVES caps the live-voice minutes, AI requests and spoken-lookup spend per day. When a cap is used up (or passes 80%) he says so aloud and on screen, and how to raise it."
+say = [["כמה נשאר לי להיום?", "How much do I have left today?"]]
+expect_he = "כשהמגבלה נגמרה: צליל יורד והודעה קולית קצרה (מקומית, בלי ענן), שגיאה בפנים ובלוח, שורה אזהרה ראשונה ב-jarvis status, ורכיב voice_budget מסומן כבעייתי. הוא לא מנסה להתחבר מחדש שוב ושוב."
+expect_en = "(Other caps: a per-question, task, job or conversation cap that stops something is logged as LIMIT_EVENT, shown as an error code on the face and dashboard, and listed as LIMIT HIT in jarvis status; conversation endings are spoken.) When a daily cap is used up: a falling chime and a short spoken notice (local, no cloud), an error on the face and dashboard, a warning as the first line of jarvis status, and the voice_budget component marked degraded. He does not reconnect in a loop."
+cost_he = "חינם. העלאת המגבלה מאפשרת יותר שימוש בתשלום (כ-5 סנט לדקת קול)."
+cost_en = "Free. Raising a cap allows more paid use (voice is about 5 cents a minute)."
+privacy_he = "אין."
+privacy_en = "None."
+
+[[steps]]
+he = "בדקו מה נוצל: jarvis status (השורה הראשונה), jarvis doctor, או עמוד הבית בלוח."
+en = "See what is used: jarvis status (first lines), jarvis doctor, or the dashboard Home page."
+action = "command:jarvis status"
+check = "probe:limits"
+
+[[steps]]
+he = "להעלות את דקות הקול ליום: jarvis budget set --voice-minutes 60 (או בקובץ config.toml: [ai] daily_realtime_minutes = 60)."
+en = "Raise the voice minutes per day: jarvis budget set --voice-minutes 60 (or in config.toml: [ai] daily_realtime_minutes = 60)."
+action = "command:jarvis budget set --voice-minutes 60"
+
+[[steps]]
+he = "להעלות את בקשות ה-AI ליום: jarvis budget set --requests 400. עלות חיפושים בקול: jarvis budget set --daily-usd 2."
+en = "Raise the AI requests per day: jarvis budget set --requests 400. Spoken-lookup spend: jarvis budget set --daily-usd 2."
+action = "command:jarvis budget set --requests 400"
+
+[[steps]]
+he = "מגבלות לכל שאלה/משימה: שאלה בקול נעצרת לפי jarvis budget set --turn-usd / --turn-requests / --searches / --timeout; משימות רקע לפי --task-running ו---task-timeout. כל עצירה כזו מופיעה כשורת LIMIT HIT ב-jarvis status."
+en = "Per-question and per-task caps: a spoken question is stopped by jarvis budget set --turn-usd / --turn-requests / --searches / --timeout; background tasks by --task-running and --task-timeout. Every such stop shows as a LIMIT HIT line in jarvis status."
+action = "command:jarvis budget status"
+
+[[steps]]
+he = "הפעילו מחדש כדי שהמגבלה החדשה תחול: jarvis stop ואז jarvis. עד אז אפשר לדבר בלחיצה (push-to-talk). המונים מתאפסים בחצות."
+en = "Restart so the new limit applies: jarvis stop, then jarvis. Meanwhile push-to-talk works. Counters reset at local midnight."
+action = "command:jarvis stop"
+
+[[problems]]
+he = "ג'ארביס אמר שהשיחה נסגרה בגלל שקט או אורך"
+en = "JARVES said the conversation closed because of silence or length"
+fix_he = "זה מוגדר: voice.idle_disconnect_s (שקט) ו-voice.session_max_s (אורך שיחה). שנו אותם ב-config.toml אם זה קצר מדי. השיחה מתחברת מחדש מעצמה כשאורך מקסימלי."
+fix_en = "This is by design: voice.idle_disconnect_s (silence) and voice.session_max_s (length). Change them in config.toml if too short. A maximum length reconnects by itself."
+
+[[problems]]
+he = "חיפוש בקול נעצר או נגמר לו הזמן"
+en = "A spoken lookup was stopped or timed out"
+fix_he = "בדקו jarvis status: שורת LIMIT HIT אומרת איזו תקרה (ai.delegation_turn_usd, delegation_turn_requests, delegation_timeout_s...). להעלות עם jarvis budget set."
+fix_en = "Check jarvis status: a LIMIT HIT line names the cap (ai.delegation_turn_usd, delegation_turn_requests, delegation_timeout_s...). Raise it with jarvis budget set."
+
+[[problems]]
+he = "שמעתי צליל ואז שקט"
+en = "I heard the chime and then nothing"
+fix_he = "בדקו jarvis status: אם מופיעה שורת LIMIT REACHED, המגבלה היומית נגמרה. העלו אותה לפי השלבים."
+fix_en = "Check jarvis status: a LIMIT REACHED line means the daily cap is used up. Raise it with the steps above."
+
+[platform]
+windows = "implemented_unverified"
+windows_note_en = "core/tests/test_limits.py (fake budget, fake audio); no real limit hit on a real microphone yet"
+pi = "implemented_unverified"
+pi_note_en = "pure Python; not run on a Pi yet"

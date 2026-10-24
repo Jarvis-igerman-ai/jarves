@@ -44,9 +44,11 @@ from typing import Callable
 
 from pydantic import BaseModel
 
+from . import changelog_parts
 from . import features as feat
 from . import issue_text as it
 from . import logs
+from .skills import expected_tool_refusal
 
 FEATURE = "issue_reports"
 FILE = "issues_registry.json"
@@ -206,23 +208,37 @@ class Registry:
     # ---- recording
     def record(self, area: str, code: str, severity: str = "P3", evidence: dict | None = None, *, title: str = "",
                title_he: str = "", source: str = "", n: int = 1, now: float | None = None, meaning: str = "",
-               meaning_he: str = "", next_step: str = "", next_step_he: str = "") -> dict | None:
+               meaning_he: str = "", next_step: str = "", next_step_he: str = "",
+               observation: str = "") -> dict | None:
         area = area if _AREA.match(area or "") else "core"
         code = clean_code(code)
         severity = severity if severity in SEVERITIES else "P3"
         iid = issue_id(area, code)
         now = self.clock() if now is None else now
         ev, dropped = clean_evidence(evidence or {})
+        # Findings are snapshots, not a fresh failure every time the health timer
+        # reads them. Persist only a hash, never the source's private text.
+        observed = hashlib.sha256(observation.encode()).hexdigest() if observation else ""
         with self.lock:
             d = self.load()
             r = d["issues"].get(iid)
             new = r is None
+            if r is not None and observed:
+                if r.get("observation") == observed:
+                    return r
+                if "observation" not in r and r.get("evidence") == ev and r["severity"] <= severity:
+                    # Upgrade an existing aggregate without reporting it anew.
+                    r["observation"] = observed
+                    self._save(d)
+                    return r
             if new:
                 r = {"id": iid, "area": area, "code": code, "severity": severity, "status": "new", "first_seen": now,
                      "last_seen": now, "count": 0, "versions": [], "fixed_in": "", "evidence": {}, "dropped": 0,
                      "title": clean_title(title, code), "title_he": clean_title(title_he, ""), "sources": [],
                      "reported_url": "", "reported_at": 0, "bundle_saved": "", "fixed_notice": False}
                 d["issues"][iid] = r
+            if observed:
+                r["observation"] = observed
             r["count"] += n
             r["last_seen"] = now
             for k, v, lim in (("meaning", meaning, 300), ("meaning_he", meaning_he, 300), ("next_step", next_step, 300),
@@ -447,7 +463,7 @@ def changelog_text(extra: str = "") -> str:
     for p in (here.with_name("CHANGELOG.md"), *[a / "CHANGELOG.md" for a in here.parents[1:4]]):
         try:
             if p.is_file():
-                parts.append(p.read_text(encoding="utf-8", errors="replace"))
+                parts.append(changelog_parts.read(p))
                 break
         except OSError:
             continue
@@ -484,9 +500,14 @@ def ingest_speedtest(reg: Registry, d: dict) -> int:
 
 
 def ingest_findings(reg: Registry, found: list) -> int:
-    """Self-Diagnostics 2.0 findings (anomaly.Finding objects or dicts), including the self-check crash finding.
-    The per-version `version:X` findings are merged into ONE information item 'a new version was seen'."""
+    """A full snapshot of active findings, including the self-check crash finding.
+    The per-version `version:X` findings are merged into ONE information item 'a new version was seen'.
+
+    Absence ends an observation, so an identical finding after recovery is a new
+    occurrence. Merely polling the same active snapshot is not.
+    """
     n = 0
+    seen = set()
     for f in found:
         g = (lambda k, dflt="": getattr(f, k, None) if not isinstance(f, dict) else f.get(k, dflt))
         fp = str(g("fingerprint") or "")
@@ -498,12 +519,25 @@ def ingest_findings(reg: Registry, found: list) -> int:
             continue
         sev = {"high": "P1", "medium": "P2"}.get(str(g("severity")), "P3")
         area = "crash" if g("category") == "crash" else "health"
-        reg.record(area, f"FINDING_{clean_code(fp)}", sev,
-                   {"category": g("category"), "count": g("count") or 1, "finding": fp},
+        seen.add(issue_id(area, f"FINDING_{clean_code(fp)}"))
+        evidence = {"category": g("category"), "count": g("count") or 1, "finding": fp}
+        detail, _ = clean_evidence(g("evidence", {}))
+        observation = json.dumps({"summary": evidence, "severity": sev, "detail": detail,
+                                  "run": g("observation_run", None)}, sort_keys=True, default=str)
+        reg.record(area, f"FINDING_{clean_code(fp)}", sev, evidence,
                    title=str(g("title") or ""), title_he=str(g("title_he") or ""), source="diag",
                    meaning=str(g("cause") or ""), meaning_he=str(g("cause_he") or ""),
-                   next_step=str(g("fix") or ""), next_step_he=str(g("fix_he") or ""))
+                   next_step=str(g("fix") or ""), next_step_he=str(g("fix_he") or ""),
+                   observation=observation)
         n += 1
+    with reg.lock:
+        snapshot = reg.load()
+        ended = [r for iid, r in snapshot["issues"].items()
+                 if iid not in seen and "diag" in r.get("sources", []) and r.get("observation")]
+        for r in ended:
+            r["observation"] = ""
+        if ended:
+            reg._save(snapshot)
     return n
 
 
@@ -571,7 +605,7 @@ class IssueSink(logging.Handler):
             return
         tool = clean_code(f.get("tool") or "unknown")[:40]
         rc = clean_code(f.get("result_code") or "TOOL_FAILED")
-        if rc.startswith(_EXPECTED_FAIL) or rc.endswith("_SKIPPED"):
+        if expected_tool_refusal(rc, f.get("origin")) or rc.startswith(_EXPECTED_FAIL) or rc.endswith("_SKIPPED"):
             return
         now = self.reg.clock()
         q = self._fails.setdefault((tool, rc), deque())

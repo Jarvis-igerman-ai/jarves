@@ -131,7 +131,7 @@ def make_skill(rt: Runtime):
     class AppSkill(Skill):
         # separate from "display" (its feature gate): quitting must work without a display / Godot
         name = "app"
-        description = "Quit the JARVES app completely when the user asks"
+        description = "Mute my microphone, end the conversation, or quit the app when asked"
 
         def tools(self) -> list[Tool]:
             async def quit_(_):
@@ -142,6 +142,22 @@ def make_skill(rt: Runtime):
                 asyncio.get_running_loop().create_task(_quit_after_goodbye(rt.core))
                 return ToolResult(True, "אני נסגר עכשיו לגמרי ומפסיק להקשיב. כדי להפעיל אותי שוב, פתח את "
                                   "ג'ארוויס במחשב.", {"stopping": True})
+
+            async def mute_(_):
+                # Gate input immediately; finish transport shutdown outside the calling voice tool task.
+                # Stopping Live inside its own tool can cancel that task before it returns its result.
+                core = rt.core
+                core.dev.set_mic_muted(True)
+                rt.note_muted(True)
+                if core.wake is not None:
+                    core.wake.mute()
+                live = core.live
+                audio = getattr(live, "audio_io", None)
+                if audio is not None:
+                    audio.close()            # Live uses its own stream: close it now, not just DevicePort capture
+                core._spawn(_finish_microphone_mute(core, live))
+                return ToolResult(True, "המיקרופון מושתק. כדי לבטל השתקה, לחץ על כפתור המיקרופון בחלון "
+                                  "או הרץ jarvis mic unmute.", {"muted": True})
 
             async def end_(_):
                 # SW-V3 P0.1 (real session 19 Oct 23:21): "תסגור את הסשן" got "I can't close the conversation from
@@ -157,6 +173,8 @@ def make_skill(rt: Runtime):
                                   "הדיבור.", {"ending": True})
 
             return [
+                Tool("mute_microphone", "Mute microphone: 'stop hearing me', 'אל תקשיב לי'. Not music. Unmute using the visible mic button, tray or jarvis mic unmute; voice cannot unmute.",
+                     mute_, permission="action"),
                 Tool("end_conversation", "End only this voice conversation (JARVES keeps running): 'end the conversation', 'תסגור את השיחה', or a bare 'תסגור'. The safe choice when unclear. Not quitting.",
                      end_, permission="action", timeout_s=5),
                 Tool("quit_jarves", "Quit the whole JARVES app (mic closes) ONLY on an explicit quit/shut down ('quit', 'שט דאון', 'תסגור את עצמך לגמרי'). A bare close is end_conversation. Never the computer. Unclear: ask once. Never open the dashboard instead.", quit_,
@@ -164,6 +182,17 @@ def make_skill(rt: Runtime):
             ]
 
     return DisplaySkill(), AppSkill()
+
+
+async def _finish_microphone_mute(core, live) -> None:
+    """Input is already closed. Let this tool finish its result before tearing down its caller, bounded to 1 s."""
+    loop = asyncio.get_running_loop()
+    deadline = loop.time() + 1.0
+    await asyncio.sleep(0.01)
+    while core.live is live and getattr(live, "_tools_running", 0) and loop.time() < deadline:
+        await asyncio.sleep(0.01)
+    if core.dev.mic_muted:                    # a user's explicit unmute during cleanup wins
+        await core.set_muted(True)
 
 
 async def _quit_after_goodbye(core) -> None:
@@ -201,7 +230,7 @@ async def _after_goodbye(core, live, max_wait_s: float = 15.0) -> None:
 def attach(core, *, mode: str = "foreground", launcher=None, tray_factory=None, autostart=None) -> Runtime:
     """Called from Core.start once DevicePort exists (before the wake word is set up)."""
     rt = Runtime(core, mode=mode, launcher=launcher, tray_factory=tray_factory, autostart=autostart)
-    core.registry.allowed_actions |= {"show_yourself", "hide_yourself", "quit_jarves", "end_conversation"}
+    core.registry.allowed_actions |= {"show_yourself", "hide_yourself", "quit_jarves", "end_conversation", "mute_microphone"}
     for skill in make_skill(rt):
         core.registry.register(skill)
     core.features.listeners.append(lambda fid, on: _feature_changed(rt, fid, on))
@@ -295,7 +324,7 @@ def _preview_call(ctx, msg: dict):
 
 def api_runtime_set(ctx, m, body):
     body = body or {}
-    change = {k: body[k] for k in ("display", "mic_muted", "alerts_paused") if k in body}
+    change = {k: body[k] for k in ("display", "mic_muted", "alerts_paused", "talk") if k in body}
     out: dict = {}
     if "autostart" in body:
         if not isinstance(body["autostart"], bool):
@@ -312,6 +341,8 @@ def api_runtime_set(ctx, m, body):
     if change:
         if change.get("display") not in (None, "show", "hide"):
             return 400, {"error": "display must be show or hide"}
+        if change.get("talk") not in (None, "start", "stop"):
+            return 400, {"error": "talk must be start or stop"}
         r = _ask_core(ctx, {"type": "runtime.set", "payload": change}, "runtime.state")
         if r is None:
             if "display" in change:                # showing / hiding the window needs the running Core

@@ -6,6 +6,8 @@ every second) and shows on the dashboard Timers page. Printed text follows `clil
 
 PARITY: every feature switch and every user-facing tool group must name its command-line surface OR carry a
 documented 'dashboard only' marker. tests/test_cli_parity.py fails when a new feature or tool group has neither.
+A NEW feature declares it in its guide ([parity.features] / [parity.tool_groups] in guides/data/<feature>.toml, see
+_guide_parity), not in the shared tables below: those older entries are what every PR used to edit and conflict on.
 """
 from __future__ import annotations
 
@@ -34,7 +36,7 @@ FEATURES: dict[str, object] = {
     "workspace_agent_edit": (D, "persona-file edits are reviewed on the Persona files page"),
     "voice_change": "setup", "calendar_write": "calendar", "dashboard_lan": "dashboard", "mobile_access": "dashboard",
     "assistant_identity": "setup", "telegram": "telegram", "instagram": "instagram", "usage_monitor": "usage", "usage_admin_key": "connect",
-    "backup": "backup", "appearance": (D, "face theme and avatar are picked on the Appearance page"),
+    "backup": "backup", "appearance": "appearance",
     "skill_creation": (D, "proposed Skills are reviewed on the New Skills page (risky: approval on screen)"),
     "guided_setup": "setup", "self_check": "diagnose", "scheduler": "jobs", "reports": "reports", "notes": "notes",
     "timers": "timers", "lists": "lists", "goals": "goals", "goal_plans": "goals", "adaptive_memory": "prefs", "prefs_in_prompt": "prefs",
@@ -63,8 +65,8 @@ ALSO: dict[str, tuple[str, ...]] = {"text_chat": ("ask --full", "tell")}     # `
 # make sense inside a conversation.
 V = "voice"
 TOOL_GROUPS: dict[str, object] = {
-    "alerts": (D, "alerts are read and answered on the Alerts page"), "app": (V, "internal test skill"),
-    "appearance": (D, "the Appearance page"), "autonomy": (D, "the Autonomy page"), "briefing": "jobs",
+    "alerts": (D, "alerts are read and answered on the Alerts page"), "app": "mic",
+    "appearance": "appearance", "autonomy": (D, "the Autonomy page"), "briefing": "jobs",
     "browser": "browser", "calc": (V, "arithmetic inside a conversation"), "calendar": "calendar",
     "calendar_write": "calendar", "camera": (D, "see features camera"), "clock": (V, "the time inside a conversation"),
     "contacts": "contacts", "dashboard": "dashboard", "display": "show", "features": "features",
@@ -82,6 +84,37 @@ TOOL_GROUPS: dict[str, object] = {
     "selfspeed": "selftest",
     "issues": "issues",
 }
+
+
+def _guide_parity(data_dir=None) -> tuple[dict, dict]:
+    """Parity entries a feature's own guide declares (guides/data/<feature>.toml), so a new feature does not edit the
+    two shared tables above (every PR adding one conflicted there):
+
+        [parity.features]            # feature id -> the `jarvis` command, or ["dashboard", "reason"]
+        my_feature = "mycmd"
+        [parity.tool_groups]         # Skill (tool group) name -> the same
+        my_skill = ["voice", "only makes sense inside a conversation"]
+
+    Only guide files that contain a [parity table are parsed (startup cost). The tables above stay for the older entries."""
+    import tomllib
+    from pathlib import Path
+    out: tuple[dict, dict] = ({}, {})
+    for f in sorted((data_dir or Path(__file__).with_name("guides") / "data").glob("*.toml")):
+        try:
+            text = f.read_text(encoding="utf-8")
+            if "[parity." not in text:
+                continue
+            for table, dest in zip(("features", "tool_groups"), out):
+                for k, v in tomllib.loads(text).get("parity", {}).get(table, {}).items():
+                    dest[k] = tuple(v) if isinstance(v, list) else v
+        except (OSError, ValueError):
+            continue
+    return out
+
+
+_from_guides = _guide_parity()
+FEATURES.update({k: v for k, v in _from_guides[0].items() if k not in FEATURES})
+TOOL_GROUPS.update({k: v for k, v in _from_guides[1].items() if k not in TOOL_GROUPS})
 
 
 # ---------------------------------------------------------------------- helpers

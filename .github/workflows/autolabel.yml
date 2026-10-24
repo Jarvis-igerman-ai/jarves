@@ -5,6 +5,8 @@ name: jarves-autolabel
 # Switch: repository variable ENABLE_AUTOLABEL = "true" or unset (docs, tests, guides/locales), "all" (also PRs labelled
 # `bugfix` with < 150 changed lines), "false" (off). Labels `needs-review` / `no-automerge` always block.
 # This workflow never checks out or runs the PR's code: the base branch is checked out and only file NAMES are read.
+# Use only the scoped GITHUB_TOKEN for label management: the separate AUTOMERGE_TOKEN is for merging and
+# may intentionally lack Issues write. An unavailable label must fail visibly, not be masked by `|| true`.
 on:
   pull_request_target:
     branches: [main, next]
@@ -12,17 +14,20 @@ on:
 permissions:
   contents: read
   pull-requests: write
+  issues: write           # creating repository labels / attaching labels to PR issue records
 concurrency:
   group: autolabel-${{ github.event.pull_request.number }}
   cancel-in-progress: true
 jobs:
   label:
+    name: Auto-label policy
     if: vars.ENABLE_AUTOLABEL != 'false' && github.event.pull_request.draft == false
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     env:
-      # AUTOMERGE_TOKEN (when set) lets the label event start the queue; with GITHUB_TOKEN the queue runs when the checks end.
-      GH_TOKEN: ${{ secrets.AUTOMERGE_TOKEN || github.token }}
+      # The merge queue is triggered by jarves-checks completion even for GITHUB_TOKEN label events.
+      # An AUTOMERGE_TOKEN with only Contents/Pull requests cannot create repository labels.
+      GH_TOKEN: ${{ github.token }}
       PR: ${{ github.event.pull_request.number }}
       AUTHOR: ${{ github.event.pull_request.user.login }}
       MODE: ${{ vars.ENABLE_AUTOLABEL }}
@@ -36,7 +41,20 @@ jobs:
           gh api --paginate "repos/$GITHUB_REPOSITORY/pulls/$PR/files" --jq '.[].filename' > files.txt
           lines=$(gh api "repos/$GITHUB_REPOSITORY/pulls/$PR" --jq '.additions + .deletions')
           labels=$(gh api "repos/$GITHUB_REPOSITORY/issues/$PR/labels" --jq '[.[].name]|join(",")')
-          for l in automerge automerge-auto; do gh label create "$l" -R "$GITHUB_REPOSITORY" --color 0e8a16 2>/dev/null || true; done
+          # Ensure both labels exist. Suppressing a creation error caused 3 red jobs and missing
+          # automerge-auto on PRs #112/#113/#115. Fail clearly if token/repo settings prevent creation.
+          for l in automerge automerge-auto; do
+            if gh api "repos/$GITHUB_REPOSITORY/labels/$l" >/dev/null 2>/dev/null; then
+              continue
+            fi
+            if ! gh label create "$l" -R "$GITHUB_REPOSITORY" --color 0e8a16; then
+              # Concurrent PR jobs may have created the label during our request.
+              if ! gh api "repos/$GITHUB_REPOSITORY/labels/$l" >/dev/null; then
+                echo "::error::Cannot create label $l. Check Actions permissions (Issues: write) and repository label settings."
+                exit 1
+              fi
+            fi
+          done
           if out=$(python3 core/tools/risk_class.py --files-from files.txt --lines "$lines" --labels "$labels" --author "$AUTHOR" --mode "${MODE:-true}"); then
             echo "$out"
             case ",$labels," in

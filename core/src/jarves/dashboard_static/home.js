@@ -96,13 +96,23 @@ PAGES.home = async function () {
     el("div", { dir: "auto" }, lc.first_user || tx("(לא נאמר כלום)", "(nothing said)")),
     el("div", { class: "muted small" }, `${day(lc.started)} ${clock(lc.started)} · ${secs(lc.duration_s)} · ${usd(lc.cost)}` + (lc.issues ? tx(` · ${lc.issues} בעיות`, ` · ${lc.issues} issue(s)`) : "")),
     el("div", { class: "actions" }, el("a", { class: "button-link", href: "#/session/" + encodeURIComponent(lc.id) }, tx("פתיחה", "Open")))) : null;
+  const limitCards = (d.limits || []).map((v) => el("div", { class: "card fix", role: "alert" },
+    el("b", {}, v.level === "exhausted" ? tx("מגבלה יומית הושגה", "Daily limit reached") : tx("מגבלה יומית כמעט נוצלה", "Daily limit nearly used")),
+    el("div", { dir: "auto" }, tx(v.text_he, v.text_en)),
+    el("div", { class: "small mono", dir: "ltr" }, tx(v.action_he, v.action_en)),
+    el("div", { class: "actions" }, el("a", { class: "button-link", href: "#/guide/daily_limits" }, tx("איך מעלים ←", "How to raise it →")))));
+  limitCards.push(...(d.limit_events || []).map((v) => el("div", { class: "card fix", role: "alert" },
+    el("b", {}, tx("מגבלה הגבילה משהו היום", "A limit stopped something today") + (v.count > 1 ? " (x" + v.count + ")" : "")),
+    el("div", { dir: "auto" }, tx(v.text_he, v.text_en)),
+    el("div", { class: "small mono", dir: "ltr" }, tx(v.action_he, v.action_en)),
+    el("div", { class: "actions" }, el("a", { class: "button-link", href: "#/guide/daily_limits" }, tx("איך משנים ←", "How to change it →"))))));
   const setup = typeof window.guidesSetupCard === "function" ? await window.guidesSetupCard() : null;   // WP-L checklist
   const strip = typeof window.privacyStripCard === "function" ? window.privacyStripCard() : null;     // strip.js
   render(el("div", { class: "big-status hero" }, el("span", { class: "lamp " + lampOf(d.status) }),
     el("div", {}, el("h1", { class: "title" }, tx(d.status_he, d.status_en)),
       el("div", { class: "muted" }, d.live ? tx("מדבר עכשיו", "talking now") : tx(d.next.he, d.next.en))),
     el("span", { class: "spacer" }), d.next.link ? el("a", { class: "button-link", href: d.next.link }, tx("קדימה ←", "Go →")) : null),
-    setup, tiles, lc ? last : null,
+    limitCards, setup, tiles, lc ? last : null,
     el("details", { class: "home-more card" }, el("summary", {}, tx("עוד פרטים: חיבורים, יכולות ופרטיות", "More details: connections, features and privacy")),
       strip, el("div", { class: "grid-home" }, conns, feats), privacyCard(d.privacy)));
   timer = setInterval(() => route(true), 15000);

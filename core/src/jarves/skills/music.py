@@ -21,6 +21,10 @@ from .. import logs
 from . import Skill, Tool, ToolResult
 
 
+OFFLINE_ACTION = ("start Pear Desktop (run `jarvis music start`) and enable Plugins > API Server "
+                  "(host 127.0.0.1, port 26538), then ask again")
+
+
 class MusicError(Exception):
     def __init__(self, code: str, message: str, action: str = "") -> None:
         super().__init__(message)
@@ -326,7 +330,7 @@ class PearDesktopPlayer:
             r = await self._client.post(f"/auth/{self.client_id()}", timeout=wait_s)
         except httpx.TransportError as e:
             raise MusicError("MUSIC_PLAYER_OFFLINE", "Pear Desktop is not reachable",
-                             "start Pear Desktop and enable Plugins > API Server (host 127.0.0.1, port 26538)") from e
+                             OFFLINE_ACTION) from e
         if r.status_code == 403:
             self._paired_marker.unlink(missing_ok=True)
             raise MusicError("MUSIC_PAIR_DENIED", "pairing was denied in Pear Desktop", "run `jarves music pair` and click Allow")
@@ -343,7 +347,7 @@ class PearDesktopPlayer:
             # never pop Pear's approval dialog from background/automatic calls
             if not await self.reachable():
                 raise MusicError("MUSIC_PLAYER_OFFLINE", "Pear Desktop is not reachable",
-                                 "start Pear Desktop and enable Plugins > API Server (host 127.0.0.1, port 26538)")
+                                 OFFLINE_ACTION)
             raise MusicError("MUSIC_NOT_PAIRED", "JARVES is not paired with Pear Desktop yet",
                              "run `jarves music pair` once and click Allow in Pear Desktop")
         await self.pair(wait_s=self.timeout)    # already-approved id: Pear returns a token without a dialog
@@ -372,7 +376,7 @@ class PearDesktopPlayer:
         except httpx.TransportError as e:
             self._token = None
             raise MusicError("MUSIC_PLAYER_OFFLINE", "Pear Desktop is not reachable",
-                             "start Pear Desktop (API Server plugin enabled)") from e
+                             OFFLINE_ACTION) from e
         if r.status_code in (401, 403) and retry:
             self._token = None      # app restarted with a new secret: re-pair (already-authorized id: no dialog)
             return await self._req(method, path, json, retry=False)
@@ -630,6 +634,7 @@ class MusicSkill(Skill):
         self.play_budget_s = min(play_budget_s, PLAY_TIMEOUT_S - 2)
         self.max_volume = max_volume
         self.last_error: MusicError | None = None
+        self._asked_failed = False     # True only after a REQUESTED music action failed because the player is down
 
     async def _require_player(self, *, late: bool = False) -> None:
         """Issue #17: look at the player ONCE before any search or candidate. Not running / frozen is the answer right
@@ -654,11 +659,15 @@ class MusicSkill(Skill):
         try:
             res = await coro
             self.last_error = None
+            self._asked_failed = False
             return res
         except MusicError as e:
             self.last_error = e
+            if e.code in ("MUSIC_PLAYER_OFFLINE", "MUSIC_NOT_PAIRED", "MUSIC_TIMEOUT"):
+                self._asked_failed = True       # the user really asked and it failed: health may now say so
             logs.warn("music", e.code, "music player problem", detail=e.message, action=e.action)
-            msg = {"MUSIC_PLAYER_OFFLINE": "נגן המוזיקה (Pear Desktop) לא פועל. אפשר להפעיל אותו בפקודה jarvis music open.",
+            msg = {"MUSIC_PLAYER_OFFLINE": "נגן המוזיקה לא פועל. פתחו את Pear Desktop (אפשר להריץ jarvis music start או jarvis music open), "
+                                    "ודאו ב-Plugins שהתוסף API Server דולק בכתובת 127.0.0.1 פורט 26538, ובקשו שוב.",
                    "MUSIC_PAIR_DENIED": "החיבור לנגן נדחה. צריך לאשר אותו ב-Pear Desktop.",
                    "MUSIC_NOT_PAIRED": "עוד לא חיברו אותי לנגן המוזיקה. צריך להריץ jarves music pair ולאשר.",
                    "MUSIC_TIMEOUT": "נגן המוזיקה לא עונה."}.get(e.code, "יש בעיה בנגן המוזיקה.")
@@ -1020,10 +1029,18 @@ class MusicSkill(Skill):
         return v
 
     async def health(self) -> tuple[str, str]:
+        """ok / degraded / unavailable only for what the user actually asked for. Music is optional: with the player
+        not running and no failed request it is "idle" (starts when you ask), which never degrades the Core."""
         try:
             await self.player.now_playing()
+            self._asked_failed = False
             return "ok", f"{self.player.name} reachable and paired"
         except MusicError as e:
-            if e.code == "MUSIC_NOT_PAIRED" and await getattr(self.player, "reachable", _false)():
+            paired_missing = e.code == "MUSIC_NOT_PAIRED" and await getattr(self.player, "reachable", _false)()
+            if not self._asked_failed:
+                if paired_missing:
+                    return "idle", f"{self.player.name} running, not paired yet; `jarvis music pair` when you want music"
+                return "idle", "Pear Desktop is not running; it starts when you ask for music (`jarvis music start`)"
+            if paired_missing:
                 return "degraded", f"{self.player.name} running but not paired; {e.action}"
             return "unavailable", f"{e.message}; {e.action}"

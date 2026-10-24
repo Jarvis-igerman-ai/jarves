@@ -13,8 +13,12 @@ expect_he = "סגירת החלון רק מסתירה אותו. בפעם הראש
 expect_en = "Closing the window only hides him. The first time, a one-time notice says JARVES is still running in the tray. Quit in the tray icon's menu really stops him."
 cost_he = "חינם. מחכה ל\"היי ג'ארביס\" בלי חיבור לענן."
 cost_en = "Free. Waiting for \"Hey Jarvis\" uses no cloud connection."
-privacy_he = "אין."
-privacy_en = "None."
+privacy_he = "בקשו להשתיק את המיקרופון כדי להפסיק להקשיב. לביטול השתקה השתמשו בכפתור המיקרופון הגלוי בחלון, בסמל במגש או בפקודה jarvis mic unmute. מיקרופון מושתק לא יכול לשמוע פקודת ביטול השתקה."
+privacy_en = "Ask to mute the microphone to stop listening. Unmute using the visible microphone button in the window, the tray icon, or jarvis mic unmute. A muted microphone cannot hear an unmute command."
+
+[[steps]]
+he = "בשורת הפקודה: jarvis mic status, jarvis mic mute או jarvis mic unmute. המצב נשמר גם אחרי הפעלה מחדש. כשהליבה עצורה נשמרת בחירה להפעלה הבאה, בלי לטעון שהמיקרופון פעיל כרגע."
+en = "From the command line: jarvis mic status, jarvis mic mute, or jarvis mic unmute. The choice survives restart. With Core stopped, the preference is saved for next start and is not live-verified."
 
 [[steps]]
 he = "ודאו שהמתג \"ממשיך לפעול ברקע\" דולק."
@@ -37,3 +41,15 @@ he = "אין סמל במגש"
 en = "No tray icon"
 fix_he = "הסמל צריך את החבילה tray (uv sync --extra tray). אחרי התקנה הפעילו מחדש."
 fix_en = "The icon needs the tray extra (uv sync --extra tray). Restart after installing."
+
+[[problems]]
+he = "הסטטוס אומר \"הפנים מוסתרות: מוצגות לפי בקשה\""
+en = "Status says \"face hidden: shown on request\""
+fix_he = "זה תקין: כשהחלון מוסתר (jarvis start ברקע) אין שגיאה והליבה נשארת ready. כדי לפתוח אותו הריצו jarvis show, או השתמשו בסמל במגש / בלוח הבקרה."
+fix_en = "That is normal: while the window is hidden (jarvis start in the background) it is not an error and the Core stays ready. Open it with jarvis show, the tray icon or the dashboard."
+
+[[problems]]
+he = "jarvis show נכשל, או שהחלון נפתח ולא מתחבר"
+en = "jarvis show fails, or the window opens but never connects"
+fix_he = "זו שגיאה אמיתית והיא מוצגת במפורש. אם כתוב ש-Godot לא מותקן, התקינו Godot 4 או הגדירו GODOT_EXE. אפשר גם להפעיל ידנית את godot\\run_face.cmd. להסבר מפורט: jarvis diag."
+fix_en = "This is a real error and is shown loudly. If it says Godot is not installed, install Godot 4 or set GODOT_EXE. You can also start godot\\run_face.cmd by hand. For details run: jarvis diag."

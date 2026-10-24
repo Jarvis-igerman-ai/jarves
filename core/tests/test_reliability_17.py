@@ -47,7 +47,7 @@ async def test_declined_and_forbidden_calls_are_closed_with_a_log_record(caplog)
     reg = reg_with(Tool("danger", "d", h, Args, permission="destructive", confirm="sure?"))
     res = await reg.call("danger", {})
     assert res.code == "TOOL_DECLINED"                      # default confirm denies
-    assert "TOOL_REFUSED" in codes(caplog)
+    assert "TOOL_RESULT" in codes(caplog)                   # a refused call is closed by its TOOL_RESULT (ok=false)
     caplog.clear()
     assert (await reg.call("nope", {})).code == "TOOL_UNKNOWN"
 

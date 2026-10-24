@@ -2,7 +2,29 @@
 
 > Planning and status per version. **Only [docs/NOW.md](NOW.md) authorizes work.** Future Issues are NOT permission to start them. Every document is indexed in [DOC_MAP](DOC_MAP.md).
 
-## Status as of 22 October 2026 (current; the sections below keep the owner's decision records)
+## Current milestone classification (owner decision, 24 October 2026)
+
+| Milestone | Development status | Validation / remaining work |
+| --- | --- | --- |
+| **V4** | **CLOSED as an active feature-development milestone.** V4 baseline delivered in 4.0.0 and subsequent 4.0.1 code; no further V4 feature scope planned. | **Not fully accepted or security-cleared:** real Windows voice/camera/install and agent sessions, release sign-off and any remaining bugs/alerts go into V4.5. Keep [#1](https://github.com/igalgerman/jarves/issues/1), [#2](https://github.com/igalgerman/jarves/issues/2), [#58](https://github.com/igalgerman/jarves/issues/58) and [#77](https://github.com/igalgerman/jarves/issues/77) open until evidence satisfies their criteria; do not close issues simply because the development phase ended. |
+| **V4.5** | **Planned**, implementation and release not yet started. | Explicit stabilization closure of V4's verified gaps plus security, camera, manual QA/Skill and faster PR/merge flow. [Plan](plans/V4_5_STABILIZATION_SECURITY_QA.md). |
+| **V5** | **Partially implemented**, with already-merged code. | Real Android-device acceptance, integration and release gates still open. |
+
+Older "V4 open PR" and "V5 in open PR" statements later in this document are **dated historical snapshots**, not current development status. The repository and actual PR/CI states are authoritative for completed code.
+
+## V4.5 — Stabilization, Security, Camera & Guided QA (plan recorded 24 October 2026)
+
+**Status: owner-requested planning, documented but NOT implemented or released.** [V4.5 work package](plans/V4_5_STABILIZATION_SECURITY_QA.md) is the canonical scope/acceptance definition; [NOW](NOW.md) is the sole implementation authorization. V4.5 is a stabilization/quality milestone after the V4/4.0.1 cycle, not a replacement for built V5 phone access, V5's real-device acceptance, V6 car, V7 Android or future hardware. No release tag or schedule is implied.
+
+**Early V4.5 priority:** the initial PR-conflict-reduction and fast, safe patch-delivery slice will be implemented alongside early security remediation, not at the end; proposed measurement targets are median under 15 minutes for comparable small ready-to-merge PRs, 70% fewer avoidable conflicts and 3–5 scoped parallel agents, subject to the real CI baseline. See the [V4.5 plan](plans/V4_5_STABILIZATION_SECURITY_QA.md#early-v45-priority--make-patches-faster-while-security-remediation-is-underway-owner-decision-24-oct).
+
+**Owner UX clarification, 24 Oct:** the V4.5 QA milestone is a **very fast interactive HTML Dashboard site with prefilled checklists**, also usable through a guided in-app popup and JARVES voice Skill, all sharing progress. A failed test should be reportable with one tap/short spoken description; **after explicit preview and approval**, JARVES/Dashboard must create or update a **real GitHub Issue**, display its URL and link it to retesting. Reuse existing #60 sign-off and `issue_registry.py` instead of building duplicates; keep local offline reporting functional. [Detailed acceptance](plans/V4_5_STABILIZATION_SECURITY_QA.md#owner-requirement-frictionless-interactive-testing-not-a-document-checklist-24-oct).
+
+**Seven connected streams:** (1) audit all open Issues and close only evidence-verified ones; (2) triage and fix actionable CodeQL/dependency/secret-scanning issues, preserving justified exclusions; (3) owner-configurable daily / selected weekdays / weekly and on-demand security/quality review, reusing nightly + issue registry; (4) on-demand camera usability, image quality and bilingual UX with real camera acceptance; (5) measured product reliability/UX improvements; (6) safe and fast code integration/CI/PR/release gates; (7) dynamic HTML Dashboard guided human QA + voice Skill, **reusing canonical issue #60 and release_signoff.py**, with new-feature test definitions appearing automatically. #58 remains installer, #61 remains self-knowledge, #1 and #77 remain real-world acceptance gates; no duplicate engine or issue tracker.
+
+Security screenshot alert numbers **are not GitHub Issue numbers**; prior CodeQL success does not prove the alert backlog is zero. Full alert inventory requires approved GitHub Security access; test findings, CodeQL dismissals and real hardware gates need evidence. Execution must be approved separately via NOW before any work starts.
+
+## Status snapshot as of 22 October 2026 (historical checkpoint; newer V4.5 planning above takes precedence only for future scope)
 
 Repository: `igalgerman/jarves` (public) is the only active repo; the private `igalgerman/JARVIS` is a read-only migration source ([MIGRATION_STATUS](MIGRATION_STATUS.md)). Dashboard languages are English and Hebrew only (Arabic and Russian were dropped in V4).
 
@@ -10,7 +32,9 @@ Repository: `igalgerman/jarves` (public) is the only active repo; the private `i
 
 **23 Oct camera correction:** owner requests on-demand capture instead of background presence streaming. Build 212 is installed on the owner PC; this correction requires a subsequent release. Evidence and remaining verification are in [HANDOFF](HANDOFF.md).
 
-### V4 — released as 4.0.0, 4.0.1 in open PRs
+**23 Oct maintenance:** conversation mute/recovery and room appearance CLI fixes, plus local dashboard finding reconciliation, are scoped in NOW and the [dashboard review](reviews/DASHBOARD_FINDINGS_23OCT2026.md). Real input/player/account gates remain open.
+
+### V4 — development CLOSED by owner on 24 Oct; 4.0.0 baseline delivered; 4.0.1 acceptance gaps now tracked in V4.5 (historical PR inventory below)
 
 - **4.0.0** = `main` after the V4 release PR #41 (21 Oct 2026; version 4.0.0 in `core/pyproject.toml`; scope decision: only what was merged in `main`). The signed installer is built and published by the package workflow (`package.yml`) to `igalgerman/jarvis-releases` after `jarves-checks` is green on `main`. At the time of writing the newest published installer there was still 3.0.0.130; check `gh release list -R igalgerman/jarvis-releases`. What it contains and its limits: [RELEASE_NOTES_4.0](RELEASE_NOTES_4.0.md), checklist [SWV4_RELEASE_CHECKLIST](reviews/SWV4_RELEASE_CHECKLIST.md), plan [V4 package](JARVES_SW_V4_WORK_PACKAGE.md). Owner live gates still open: real Telegram/Instagram/Home Assistant, WhatsApp real account, Phone Link, real installer round trip, live Claude/Codex sessions.
 - **4.0.1 content (open PRs, not in 4.0.0):** `jarvis connect` (unset only, remembered skips, read-only checks, #34); wake-model production training and the restricted-token isolation flag (#32); self-management by voice, text, CLI and dashboard (#37); chat/web: `jarvis chat` text mode (#42) and `jarvis web` shared chat engine with a dashboard Chat page (#49); CI speed-up, continuous (beta) release, gated stable release, security files (#44); issues pipeline: registry, Bug reports page, `jarvis issues`, triage, bugfix lane (#48); bug sweep 4.1 part 1 (#40); tool-description trim; docs quality review (#47) and the 4.0.0 manual test sheet (#46).

@@ -27,6 +27,7 @@ from pathlib import Path
 
 from . import logs, phrases
 from .store import Store, daily_costs, session_cost
+from .skills import expected_tool_refusal
 
 SEVERITY = {"low": 0, "medium": 1, "high": 2}
 _PUNCT = re.compile(r"[.,!?…:;\"'“”״׳()\-–—]+")
@@ -248,6 +249,8 @@ class Finder:
     def _tools(self, sid, tools, end) -> None:
         by_name: dict[str, list[dict]] = {}
         for t in tools:
+            if expected_tool_refusal(t.get("code"), t.get("origin")):
+                continue
             by_name.setdefault(t["name"], []).append(t)
         for name, calls in by_name.items():
             failed = [c for c in calls if c.get("ok") == 0]
@@ -300,6 +303,12 @@ class Finder:
                        "Raise voice.wake_threshold (`jarvis wake test --apply`) if this repeats.",
                        {"at": [_clock(e["ts"]) for e in nospeech]})
         for e in events:
+            fields = json.loads(e.get("fields") or "{}")
+            result_code = e["code"]
+            if result_code == "TOOL_RESULT":
+                result_code = fields.get("result_code") or str(e.get("msg", "")).rpartition("-> ")[2]
+            if expected_tool_refusal(result_code, fields.get("origin")):
+                continue  # a truthful refusal is not a broken tool; the log still retains it
             if e["code"] == "CALENDAR_DELETE_FORBIDDEN":
                 continue                          # a correct guard refusal (older logs wrote it at ERROR)
             if e["level"] == "WARNING" and end - e["ts"] < 5 and s.get("end_reason") == "user":

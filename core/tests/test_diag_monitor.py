@@ -138,3 +138,39 @@ async def test_monitor_runs_inside_the_core(core):
     hs.monitor.metrics.flush(all_=True)
     assert sum(code_counts(hs.store, 0, res="m").get("MONITOR_PROBE", {}).values()) == 1
     assert {"health_summary", "health_ai_review_summary", "health_remediate"} <= set(core.registry._tools)
+
+
+@pytest.mark.parametrize("code,origin,defect", [
+    ("FEATURE_NEEDS_APPROVAL", "model", False),
+    ("TOOL_UNTRUSTED_TURN", "model", False),
+    ("TOOL_DECLINED", "model", False),
+    ("FEATURE_OFF", "model", False),
+    ("SKILL_DISABLED", "model", False),
+    ("TOOL_FORBIDDEN", "model", False),
+    ("TOOL_BAD_ARGS", "user", False),
+    ("TOOL_BAD_ARGS", "model", True),
+    ("TOOL_TIMEOUT", "model", True),
+    ("TOOL_CRASH", "model", True),
+    ("PEAR_DOWN", "model", True),
+])
+def test_expected_refusals_do_not_become_health_anomalies(mon, store, code, origin, defect):
+    from jarves.diag.anomaly import Detector
+
+    for i in range(5):
+        ts = T0 + 10 + i
+        mon.on_record("LIVE_STARTED", "INFO", "live", {}, ts)
+        mon.on_record(code, "WARNING", "skills", {"origin": origin}, ts)
+        mon.on_record("TOOL_RESULT", "WARNING", "skills",
+                      {"tool": "test", "ok": False, "result_code": code, "origin": origin, "ms": 1000}, ts)
+    mon.clock_box["t"] = T0 + 3605  # finish the minute/hour rollup
+    mon.metrics.flush(all_=True)
+    counts = code_counts(store, T0 - 1)
+    assert bool(counts.get("TOOL_RESULT")) == defect
+    assert bool(counts.get(code)) == defect
+    assert bool(events(store, "tool_fail", T0 - 1)) == defect
+    assert bool(series(store, "tool_ms", T0 - 1)) == defect
+    findings = []
+    detector = Detector(store, clock=mon.clock)
+    detector._codes(findings, T0 - 86400, T0 - 15 * 86400, mon.clock())
+    detector._tools(findings, T0 - 86400, T0 - 15 * 86400, mon.clock())
+    assert bool(findings) == defect

@@ -1,5 +1,9 @@
 # Appearance — face, 2D avatar, 3D avatar, hidden (SW-V2 M2, D08)
 
+## CLI and room display
+
+`jarvis appearance list`, `jarvis appearance status`, and `jarvis appearance set face|avatar2d|avatar3d|hidden` use the same persisted choice as voice and the dashboard. A running display follows within a second; a stopped display applies it at next connection. The room now renders the same selected presentation on its display glass as the standalone face window.
+
 ## What the user can choose
 | Mode | What shows | Windows | Raspberry Pi 5 |
 |---|---|---|---|

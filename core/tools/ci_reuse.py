@@ -23,6 +23,7 @@ from typing import Callable
 
 WORKFLOW_NAME = "jarves-checks"
 PREFIX = "jarves-installer-"
+PROOF_PREFIX = "jarves-no-installer-proof-"  # test-only PRs, no binary; main must still build installer
 
 
 def artifact_name(tree: str) -> str:
@@ -53,6 +54,34 @@ def resolve(repo: str, tree: str, api: Callable[[str], dict] = gh_json) -> dict 
                 and head_repo == repo):
             return {"run_id": run_id, "artifact_id": art["id"], "name": art["name"], "event": run.get("event"),
                     "head_sha": run.get("head_sha"), "run_number": run.get("run_number"), "size": art.get("size_in_bytes")}
+    return None
+
+
+
+def resolve_tests(repo: str, tree: str, api: Callable[[str], dict] = gh_json) -> dict | None:
+    """Green, same-repo PR test proof for *no-installer* changes; main still builds an installer.
+
+    This artifact is uploaded only by a non-draft PR classified code=true, installer=false.
+    The exact docs-free content tree must match, and the ENTIRE jarves-checks run must be
+    green. A failed/cancelled PR, fork, expired artifact or missing proof never skips tests.
+    It is NOT an installer and must never be passed to packaging/release.py.
+    """
+    if not re.fullmatch(r"[0-9a-f]{40}", tree):
+        return None
+    name = PROOF_PREFIX + tree
+    arts = api(f"repos/{repo}/actions/artifacts?name={name}&per_page=30").get("artifacts", [])
+    for art in sorted(arts, key=lambda a: a.get("created_at", ""), reverse=True):
+        if art.get("expired") or art.get("name") != name:
+            continue
+        run_id = (art.get("workflow_run") or {}).get("id")
+        if not run_id:
+            continue
+        run = api(f"repos/{repo}/actions/runs/{run_id}")
+        if (run.get("name") == WORKFLOW_NAME and run.get("event") == "pull_request"
+                and run.get("status") == "completed" and run.get("conclusion") == "success"
+                and (run.get("head_repository") or {}).get("full_name") == repo):
+            return {"run_id": run_id, "artifact_id": art["id"], "name": name,
+                    "head_sha": run.get("head_sha")}
     return None
 
 
@@ -90,20 +119,24 @@ def main(argv: list[str] | None = None) -> int:
     r = sub.add_parser("resolve")
     r.add_argument("--repo", required=True)
     r.add_argument("--tree", required=True)
+    v = sub.add_parser("resolve-tests", help="Reuse green PR tests only; main still needs installer build")
+    v.add_argument("--repo", required=True)
+    v.add_argument("--tree", required=True)
     a = ap.parse_args(argv)
     if a.cmd == "tree":
         print(git_tree(a.rev))
         return 0
     try:
-        hit = resolve(a.repo, a.tree)
+        hit = resolve_tests(a.repo, a.tree) if a.cmd == "resolve-tests" else resolve(a.repo, a.tree)
     except RuntimeError as e:
         print(f"::warning::{e}", file=sys.stderr)
         hit = None
     if not hit:
-        print("reused=false")
-        print(f"No proven installer for tree {a.tree[:12]}: a normal build is needed.", file=sys.stderr)
+        print("reused-tests=false" if a.cmd == "resolve-tests" else "reused=false")
+        kind = "green PR test proof" if a.cmd == "resolve-tests" else "installer"
+        print(f"No proven {kind} for tree {a.tree[:12]}: normal checks/build needed.", file=sys.stderr)
         return 4
-    print("reused=true")
+    print("reused-tests=true" if a.cmd == "resolve-tests" else "reused=true")
     for k, v in hit.items():
         print(f"{k}={v}")
     return 0

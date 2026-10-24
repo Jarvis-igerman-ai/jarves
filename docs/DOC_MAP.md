@@ -1,21 +1,24 @@
 # DOC_MAP — the single index: where to find what
 
-Entry point for every document. Last aligned: 23 Oct 2026. [README](README.md) (user view) and [CONTEXT_MAP](CONTEXT_MAP.md) (agent view, open only what the task needs) point here instead of keeping their own full lists. **Browse by topic:** [README](README.md) (curated subject navigation). The exhaustive registry stays here; existing document paths remain stable to preserve agents and links. A test (`core/tests/test_docs_links.py`) fails if a file under `docs/` is missing from this map or a relative link breaks: **add a row when you add a document**.
+Entry point for every document. Last aligned: 24 Oct 2026 for V4.5 planning (older version-status snapshots below remain historical until implementation). [README](README.md) (user view) and [CONTEXT_MAP](CONTEXT_MAP.md) (agent view, open only what the task needs) point here instead of keeping their own full lists. **Browse by topic:** [README](README.md) (curated subject navigation). The exhaustive registry stays here; existing document paths remain stable to preserve agents and links. A test (`core/tests/test_docs_links.py`) fails if a file under `docs/` is missing from this map or a relative link breaks: **add a row when you add a document**.
 
 Status words: **current** (maintained), **historical** (kept as evidence/context, a banner at the top says what replaced it), **superseded** (replaced by the named doc), **proposal** (not authorized).
 Owner doc = the one document that wins on a conflict.
 
 ## 1. Where am I? Per version
 
-| Version | State (22 Oct 2026) | Read in this order |
+| Version | Status (updated 24 Oct 2026 for V4/V4.5; other rows may be earlier snapshots) | Read in this order |
 |---|---|---|
 | **V3** | Released (3.0.0.x installers). Historical. | [V3 package](JARVES_SW_V3_WORK_PACKAGE.md), [integration report](reviews/SWV3_INTEGRATION_REPORT.md) |
-| **V4** | 4.0.0 = `main` at the V4 release PR (version 4.0.0; the package workflow publishes the installer, check `gh release list -R igalgerman/jarvis-releases`). 4.0.1 content is in open PRs (see ROADMAP). | [ROADMAP](ROADMAP.md) (V4 section), [release notes](RELEASE_NOTES_4.0.md), [V4 package](JARVES_SW_V4_WORK_PACKAGE.md) (plan and test scripts), [checklist](reviews/SWV4_RELEASE_CHECKLIST.md), [owner decisions](plans/PRIORITIES.md), [user guide](USER_GUIDE.md) |
-| **V5** | Partly built: mobile access merged; goals, adaptive memory, proactive offers, Tailscale and phone approvals, dev manager, continuity are in open PRs. The real Android phone gates are open. | [ROADMAP](ROADMAP.md) (V5 section), [V5 package](JARVES_SW_V5_WORK_PACKAGE.md), [acceptance sheet](reviews/SWV5_ACCEPTANCE.md), [security review](reviews/SWV5_SECURITY_REVIEW.md) |
+| **V4** | **Feature development CLOSED (owner decision 24 Oct).** 4.0.0 delivered and subsequent 4.0.1 changes exist; the remaining real-device, security, release and acceptance gaps are tracked in V4.5. Do **not** infer stable sign-off or close outstanding Issue acceptance. | [ROADMAP](ROADMAP.md) (V4 section), [release notes](RELEASE_NOTES_4.0.md), [V4 package](JARVES_SW_V4_WORK_PACKAGE.md) (plan and test scripts), [checklist](reviews/SWV4_RELEASE_CHECKLIST.md), [owner decisions](plans/PRIORITIES.md), [user guide](USER_GUIDE.md) |
+| **V4.5** | **Documented plan only (24 Oct)**: close V4 quality/acceptance gaps, security, recurring scans, camera UX, **early fast PR/merge/conflict reduction alongside security**, guided QA + voice Skill. No code/release authorized. | [V4.5 work package](plans/V4_5_STABILIZATION_SECURITY_QA.md), [ROADMAP](ROADMAP.md), [NOW](NOW.md). Canonical interactive QA issue: [#60](https://github.com/igalgerman/jarves/issues/60) |
+| **V5** | **Partially developed**: phone access and multiple AI/project-manager components have merged; exact inventory must be refreshed from current `main`. Real Android and other user/device acceptance remains open; older open-PR listings in ROADMAP are historical. | [ROADMAP](ROADMAP.md) (V5 section), [V5 package](JARVES_SW_V5_WORK_PACKAGE.md), [acceptance sheet](reviews/SWV5_ACCEPTANCE.md), [security review](reviews/SWV5_SECURITY_REVIEW.md) |
 | **V6** | Approved roadmap only (six pillars), gated on V5. No code. | [ROADMAP](ROADMAP.md) (V6 section), [PRODUCT_VISION](PRODUCT_VISION.md) stage 3 |
 | **V7** | Proposal, not authorized (issue #50). | [V7 proposal](plans/V7_PROPOSAL_2026-10-21.md) |
 
 Execution authority: [NOW](NOW.md) (the only active brief) with [AGENTS](../AGENTS.md). Status log: one note per task in [handoff/](handoff/README.md) (newest by file name); [HANDOFF](HANDOFF.md) keeps the history up to 23 Oct 2026 and the decision queue. Planning and status per version: [ROADMAP](ROADMAP.md).
+
+Current dashboard review: [23 Oct findings inventory and recheck gates](reviews/DASHBOARD_FINDINGS_23OCT2026.md) (current; owner: Python Core/runtime diagnostics).
 
 ## 2. Testing and manual testing
 
@@ -28,6 +31,7 @@ Execution authority: [NOW](NOW.md) (the only active brief) with [AGENTS](../AGEN
 | Self-test and speed test | `jarvis selftest`, `jarvis speedtest`; findings are triaged for each release (see [CLAUDE.md](../CLAUDE.md)) | Agents and owner |
 | Emulated phone test (headless browser as the phone, V5) | PR "Phone e2e" (#51, open) adds it; until merged use the HTTP harness in `core/tests/test_mobile_*.py` | CI |
 | Manual sheets per version | V3: [FULL_TEST_PLAN](plans/FULL_TEST_PLAN.md) pass E. V4: [V4 package, owner script (section 7)](JARVES_SW_V4_WORK_PACKAGE.md#7-testing--manual-owner-script) and agent script (section 8), [INSTALL_TEST](INSTALL_TEST.md), `docs/reviews/MANUAL_TEST_4.0.0.md` (PR #46, not merged). V5: [SWV5_ACCEPTANCE](reviews/SWV5_ACCEPTANCE.md) (real Android phone) | Owner |
+| Future dynamic manual QA / spoken guidance | [V4.5 work package](plans/V4_5_STABILIZATION_SECURITY_QA.md#workstream-f--living-html-manual-qa-workspace--conversational-qa-skill-p1-60-canonical) reuses #60, `release_signoff.py` and one test registry; **planned**, not a second current sign-off route | Owner + JARVES after explicit implementation authorization |
 | Release sign-off | `jarvis release signoff --version X --row ID --result pass\|fail\|blocked`, then `--finish`; described in [RELEASING](RELEASING.md) ("Stable release, step by step"); per version a checklist `reviews/RELEASE_CHECKLIST_<version>.md` and a sheet `reviews/MANUAL_TEST_<version>.md` (4.0.0 used [SWV4_RELEASE_CHECKLIST](reviews/SWV4_RELEASE_CHECKLIST.md)) | Owner records rows, agents prepare the evidence |
 | Bug triage before a release (4.1 and 5.0 on) | `docs/reviews/*BUG_TABLE*.md`, open issues on igalgerman/jarves, selftest/speedtest findings; no open P0-P2 | Release agent; owner decides P3 |
 
@@ -46,8 +50,10 @@ Execution authority: [NOW](NOW.md) (the only active brief) with [AGENTS](../AGEN
 | [NEXT_FLOW](NEXT_FLOW.md) | The `next` integration branch: light PR CI, batch run, bot fast-forward of main, how to switch it on | general | built, off by default | [CI_PERFORMANCE](CI_PERFORMANCE.md) |
 | [CI_DETERMINISM](CI_DETERMINISM.md) | Network guard, offline stub, flake retry and quarantine for deterministic CI | general | current | [CI_PERFORMANCE](CI_PERFORMANCE.md) |
 | [PREPUSH](PREPUSH.md) | The local gate `python core/tools/prepush.py` (same quick checks as CI), the optional pre-push hook, and the PR failure-summary comment | general | current | [CI_PERFORMANCE](CI_PERFORMANCE.md) |
+| [handoff/2026-10-23-jarvis-talk](handoff/2026-10-23-jarvis-talk.md) | Handoff: `jarvis talk` live conversation without the wake word (CLI, dashboard, tray) | voice | current | [HANDOFF](HANDOFF.md) |
 | [AGENT_HANDOFF_TEMPLATE](AGENT_HANDOFF_TEMPLATE.md) | Copy-paste resume prompt for a new agent | general | current | [AGENTS](../AGENTS.md) |
 | [handoff/README](handoff/README.md) | Handoff notes, one file per task (`docs/handoff/<date>-<topic>.md`, newest by file name); the notes are covered by this row | general | current | itself |
+| [reports/README](reports/README.md) | New reports, reviews and audits, one dated file each (`docs/reports/<date>-<topic>.md`); the reports are covered by this row, so adding one does not edit this file | general | current | itself |
 | [MIGRATION_STATUS](MIGRATION_STATUS.md), [MIGRATION_HANDOFF](MIGRATION_HANDOFF.md) | Private-to-public repository migration ledger | general | current until the private repo is archived | MIGRATION_STATUS |
 
 ## 4. Product, plans, work packages
@@ -58,6 +64,7 @@ Execution authority: [NOW](NOW.md) (the only active brief) with [AGENTS](../AGEN
 | [ROADMAP](ROADMAP.md) | V4 to V7 status, definitions of done, dependencies | V4-V7 | current | itself |
 | [PRODUCT_VISION](PRODUCT_VISION.md) | Six product stages (north star) | general | current | itself |
 | [PROJECT_PRINCIPLES](PROJECT_PRINCIPLES.md) | Durable principles, printability, Israel sourcing, owner decisions | general | current | itself |
+| [plans/V4_5_STABILIZATION_SECURITY_QA](plans/V4_5_STABILIZATION_SECURITY_QA.md) | V4.5 single plan: issues/evidence closure, CodeQL/security cadence, camera UX, code integration and dynamic HTML manual QA + voice Skill. Reuse #60/#58/#61 and existing release gate. | V4.5 | **proposal only**, no implementation authorized | itself for scope; NOW for execution; ROADMAP for status |
 | [plans/PROJECT_MANAGER](plans/PROJECT_MANAGER.md) | Software project manager: JARVES splits a project into small tasks run by short-lived coding agents (Claude Code, Codex, OpenCode) in parallel worktrees; design after Opus review | V5 (4.0.1 beta) | built, real-agent runs unverified | `core/tests/test_projectmgr.py` |
 | [plans/SW_FACTORY](plans/SW_FACTORY.md) | Software factory: flexible per-task stages (plan/work/test/review/merge/release, bug-fix), any actor (JARVES/owner/agent/list/sub-agents), debate between agents, GitHub optional off/read/write | V5 (4.0.1 beta) | built, cloud agents deferred, real-agent runs unverified | `core/tests/test_projectmgr.py` |
 | [plans/PRIORITIES](plans/PRIORITIES.md) | Owner decisions log (V4 approval, WhatsApp, 21 Oct decisions) | V4-V5 | current, append-only | itself |

@@ -20,8 +20,8 @@ AX = re.compile(r'\[\s*(?:"[a-z_]+"\s*,\s*)?"([^"]*[֐-׿][^"]*)"\s*,\s*"([^"]*[
 
 
 def main() -> int:
-    _, en = catalog_add.load("en")
-    _, he = catalog_add.load("he")
+    _, en = catalog_add.load_merged("en")
+    _, he = catalog_add.load_merged("he")
     new: dict[str, str] = {}
     for js in sorted(STATIC.glob("*.js")):
         if js.name == "i18n.js":
@@ -32,7 +32,7 @@ def main() -> int:
             if e and h and (e not in en["dict"] or e not in he["dict"]):
                 new.setdefault(e, he["dict"].get(e) or h)
     if new:
-        catalog_add.add(new)
+        catalog_add.add(new, part="catalog-sync")
     for k, v in new.items():
         print(f"+ {k!r} -> {v!r}")
     print(f"{len(new)} keys added")
