@@ -158,7 +158,9 @@ def test_perf_gate_inprocess_with_every_v4_module_registered(home, monkeypatch):
     # This regression measures feature-probe latency, not dashboard HTTP startup under xdist contention.
     # test_perf_gate.py and the real CI perf job still exercise the dashboard measurement and its budgets.
     monkeypatch.setattr(speedtest, "measure_dashboard", lambda home: {})
-    m = pg.measure_inproc(repeats=1, settle_s=0.4)
+    # median of 3 (the real gate's statistic): one scheduler hiccup on a loaded Windows runner (178 ms vs the 150 ms
+    # budget, once) must not fail it, while a real regression (357 ms before) moves the median and still does.
+    m = pg.measure_inproc(repeats=3, settle_s=0.4)
     assert m["features_list_ms"] < BUDGET_MS, m
     assert m["live_tools_probe_ms"] < pg.load_budgets()["metrics"]["live_tools_probe_ms"]["ci_max"], m
 
