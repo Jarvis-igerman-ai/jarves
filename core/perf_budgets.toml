@@ -191,21 +191,6 @@ owner_max = 1500
 ci_max = 4000
 note = "one HEAD https://api.openai.com/v1/models with no key (connection + TLS + response); nothing billed. Placeholder baseline"
 
-[metrics.greeting_ok]
-unit = "count"
-source = "history"
-note = "live starts whose greeting audio arrived without a retry (LIVE_GREETING_OK, last 14 days). Counter, no ceiling (#179)"
-
-[metrics.greeting_retry_ok]
-unit = "count"
-source = "history"
-note = "live starts recovered by the one greeting retry (LIVE_GREETING_RETRY_OK). Counter, no ceiling (#179)"
-
-[metrics.greeting_missed]
-unit = "count"
-source = "history"
-note = "live starts that continued without a greeting after nudge and retry (LIVE_GREETING_MISSED). Counter, no ceiling (#179)"
-
 [metrics.greeting_missed_pct]
 baseline = 0
 unit = "pct"
@@ -279,4 +264,4 @@ change = "self/speed test (owner request 21 Oct): added tool_p50_ms, tool_p95_ms
 
 [[history]]
 date = "2026-10-25"
-change = "#179: added greeting_ok, greeting_retry_ok, greeting_missed counters and greeting_missed_pct (owner_max 20 = the 1-of-5 measured before the greeting retry)"
+change = "#179: added greeting_missed_pct (the counters live in the speedtest output, not in the gate) (owner_max 20 = the 1-of-5 measured before the greeting retry)"
