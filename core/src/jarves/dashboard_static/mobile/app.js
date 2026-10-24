@@ -146,15 +146,23 @@
   }
   async function startRec() {
     if (rec) return;
+    let stream = null, ctx = null;
+    const closeAll = () => { try { if (stream) stream.getTracks().forEach((x) => x.stop()); } catch (e) { /* ignore */ } try { if (ctx) ctx.close(); } catch (e) { /* ignore */ } };
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true } });
-      const ctx = new (window.AudioContext || window.webkitAudioContext)(); const src = ctx.createMediaStreamSource(stream);
+      stream = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true } });
+      // the strip follows the real track state from the moment the stream is open, even if the setup below fails
+      const live = () => !!stream && stream.getTracks().some((x) => x.readyState === "live");
+      if (window.JarvesAudio) window.JarvesAudio.phoneMic(true, { stop: stopRec, discard: discardRec, live });
+      ctx = new (window.AudioContext || window.webkitAudioContext)(); const src = ctx.createMediaStreamSource(stream);
       const proc = ctx.createScriptProcessor(4096, 1, 1); const chunks = [];
       proc.onaudioprocess = (e) => chunks.push(new Float32Array(e.inputBuffer.getChannelData(0)));
       src.connect(proc); proc.connect(ctx.destination); rec = { stream, ctx, proc, src, chunks };
       $("ptt").classList.add("rec"); $("ptt").textContent = t("release");
-      if (window.JarvesAudio) window.JarvesAudio.phoneMic(true, { stop: stopRec, discard: discardRec });     // the strip says the mic is ON
-    } catch (e) { $("voiceOut").textContent = t("voice_nomic"); }
+    } catch (e) {
+      rec = null; closeAll(); $("ptt").classList.remove("rec"); $("ptt").textContent = t("hold");
+      if (window.JarvesAudio) window.JarvesAudio.phoneMic(false);
+      $("voiceOut").textContent = t("voice_nomic");
+    }
   }
   function discardRec() {                                                    // close the microphone and send nothing
     if (!rec) return; const r = rec; rec = null;
@@ -255,7 +263,8 @@
   }
   $("unpair").addEventListener("click", async () => { try { await post("/api/m/unpair"); } catch (e) { /* already gone */ } forget(); });
   $("lang").addEventListener("click", () => { lang = lang === "he" ? "en" : "he"; try { localStorage.setItem(LANG, lang); } catch (e) { /* ignore */ } applyLang(); if (window.JarvesAudio) window.JarvesAudio.repaint(); voiceNote(); info(); unmountChat(); if (tab === "chat") mountChat(); tick(); });
-  document.addEventListener("visibilitychange", () => { if (document.hidden) discardRec(); tick(); });      // never keep the mic open in the background window.addEventListener("online", tick);
+  document.addEventListener("visibilitychange", () => { if (document.hidden) discardRec(); tick(); });      // never keep the mic open in the background
+  window.addEventListener("online", tick);
   if ("serviceWorker" in navigator && window.isSecureContext) navigator.serviceWorker.register("/m/sw.js", { scope: "/m/" }).catch(() => {});
   applyLang(); show();
 })();

@@ -8,9 +8,11 @@ What the phone shows is TRUE state, never a request:
 - audio recorded on the phone goes to the computer only and is transcribed there by the local speech model (push to
   talk); it is never sent to the cloud by the phone path and never stored. This is a fixed fact of the V5 phone path,
   stated so the owner can see it (`phone.cloud` is always False).
-When the computer's state cannot be read the answer is `unknown`, and the page says so (never a calm "off").
+When the computer's state cannot be read the answer is `unknown`, and the page says so (never a calm "off"). The reply carries `ts` (server time); the page also shows `unknown` after ~8 s without a fresh reading.
 """
 from __future__ import annotations
+
+import time
 
 from . import logs
 
@@ -29,7 +31,7 @@ def view(mob) -> dict:
     if comp is None:
         comp = {"known": False, "mic": "unknown", "cloud": "unknown", "cloud_on": None}
     return {"phone": dict(PHONE, voice=bool(mob.bridge and mob.bridge.voice_available() and mob.scheme == "https")),
-            "computer": comp}
+            "computer": comp, "ts": time.time()}
 
 
 def from_privacy_state(st: dict) -> dict:

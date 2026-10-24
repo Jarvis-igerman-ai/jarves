@@ -21,7 +21,10 @@
       failed: "לא ניתן לבצע", strip: "מיקרופון ושמע לענן" },
   };
   const newId = () => "sig-" + Date.now().toString(36) + Math.random().toString(36).slice(2, 10);
-  let box = null, nbox = null, cx = null, phone = null, comp = null, sig = null, note = "", seen = new Set();
+  const TIMEOUT_MS = 5000, STALE_MS = 8000;      // status request timeout; a reading older than this is shown as "unknown"
+  let box = null, nbox = null, cx = null, phone = null, comp = null, compAt = 0, lastTs = 0, sig = null, note = "", seen = new Set(), ticker = 0;
+  const now = () => Date.now();
+  const phoneOn = () => { if (!phone) return false; try { return phone.live ? !!phone.live() : true; } catch (e) { return true; } };   // track state, not a flag
   const t = (k) => ((T[cx.lang()] || T.en)[k]) || T.en[k] || k;
   const el = (tag, cls, text) => { const e = document.createElement(tag); if (cls) e.className = cls; if (text != null) e.textContent = text; return e; };
   const btn = (label, fn, primary) => { const b = el("button", primary ? "primary" : "", label); b.type = "button"; b.addEventListener("click", fn); return b; };
@@ -34,17 +37,17 @@
   function paintStrip() {
     if (!box) return;
     box.replaceChildren();
-    const c = comp || { known: false };
+    const c = comp && comp.known !== false && now() - compAt <= STALE_MS ? comp : { known: false };
     const mic = c.known === false ? "unknown" : c.mic, cloud = c.known === false ? "unknown" : c.cloud;
-    const hot = !!phone || cloud === "sending" || mic === "listening";
+    const pOn = phoneOn(), hot = pOn || cloud === "sending" || mic === "listening";
     box.className = "audio" + (hot ? " hot" : "");
     box.setAttribute("aria-label", t("strip"));
-    box.appendChild(line(t("phone_mic"), phone ? t("on") : t("off"), !!phone));
+    box.appendChild(line(t("phone_mic"), pOn ? t("on") : t("off"), pOn));
     box.appendChild(line(t("comp_mic"), t(mic), mic === "listening"));
     box.appendChild(line(t("cloud"), cloud === "unknown" ? t("unknown") : t("c_" + cloud), cloud === "sending"));
     if (sig && sig.stopped) box.appendChild(el("div", "muted", t("sig_state_stopped")));
     else if (sig && sig.snoozed_until) box.appendChild(el("div", "muted", t("sig_state_snoozed")));
-    if (phone) {
+    if (phone && pOn) {
       const row = el("div", "row wrap");
       row.append(btn(t("stop_send"), () => phone.stop(), true), btn(t("discard"), () => phone.discard()));
       box.appendChild(row);
@@ -70,17 +73,24 @@
   }
   async function refresh() {
     if (!cx) return;
-    try { const d = await cx.api("/api/m/audio"); comp = d.computer; } catch (e) { comp = { known: false }; }
+    let timer = 0;
+    try {
+      const d = await Promise.race([cx.api("/api/m/audio"), new Promise((_, rej) => { timer = setTimeout(() => rej(new Error("timeout")), TIMEOUT_MS); })]);
+      const ts = Number(d && d.ts) || 0;
+      if (ts && ts < lastTs) return;                                   // an older answer arriving late: ignore it
+      lastTs = ts || lastTs; comp = d.computer; compAt = now();
+    } catch (e) { comp = { known: false }; compAt = now(); }
+    finally { clearTimeout(timer); }
     paintStrip();
   }
   window.JarvesAudio = {
-    mount(nodes, ctx) { box = nodes.audio; nbox = nodes.notices; cx = ctx; box.hidden = false; paintStrip(); refresh(); },
+    mount(nodes, ctx) { box = nodes.audio; nbox = nodes.notices; cx = ctx; box.hidden = false; paintStrip(); refresh(); clearInterval(ticker); ticker = setInterval(paintStrip, 1000); },
     phoneMic(on, handlers) { phone = on ? handlers : null; paintStrip(); },
     notice: addNotice,
     signals(s) { sig = s || null; paintStrip(); },
     refresh,
     repaint() { paintStrip(); },
-    unmount() { if (box) { box.replaceChildren(); box.hidden = true; } if (nbox) nbox.replaceChildren(); box = nbox = cx = null; phone = comp = sig = null; seen = new Set(); },
+    unmount() { clearInterval(ticker); ticker = 0; if (box) { box.replaceChildren(); box.hidden = true; } if (nbox) nbox.replaceChildren(); box = nbox = cx = null; phone = comp = sig = null; compAt = lastTs = 0; seen = new Set(); },
     catalogs: T,
   };
 })();

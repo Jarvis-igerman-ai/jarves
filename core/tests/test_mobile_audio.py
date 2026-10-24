@@ -146,3 +146,13 @@ def test_indicator_js_is_served_csp_safe_and_translated():
     assert "/m/indicator.js" in html and 'id="audioBar"' in html and 'id="noticeBox"' in html
     app = (MOBILE_DIR / "app.js").read_text(encoding="utf-8")
     assert re.search(r"const newId = ", app)                                              # the helper the goal / snooze buttons call
+
+
+def test_the_audio_reply_carries_a_server_timestamp_and_the_page_has_timeout_and_staleness(srv):
+    import time
+    tok, _ = pair(srv)
+    t0 = time.time()
+    v = call(srv, "GET", "/api/m/audio", tok)[1]
+    assert t0 - 1 <= v["ts"] <= time.time() + 1
+    js = (MOBILE_DIR / "indicator.js").read_text(encoding="utf-8")
+    assert re.search(r"TIMEOUT_MS = 5000", js) and re.search(r"STALE_MS = 8000", js) and "phone.live" in js

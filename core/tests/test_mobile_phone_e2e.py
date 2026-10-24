@@ -606,6 +606,50 @@ def test_computer_microphone_and_cloud_audio_state_is_shown_truthfully(browser, 
     assert page.errors == []
 
 
+def test_a_stale_or_hanging_reading_becomes_unknown_never_a_calm_off(browser, phone):
+    p = phone()
+    page = new_page(browser)
+    page.add_init_script("window.__skew = 0; const n = Date.now.bind(Date); Date.now = () => n() + window.__skew;")      # fake clock
+    ui_pair(page, p)
+    p.fake.audio = {"known": True, "mic": "listening", "cloud": "sending", "cloud_on": True}
+    until(page, "document.getElementById('audioBar').textContent.includes('SENDING audio to the cloud')", 12000)
+    page.evaluate("window.__skew = 20000")                              # no fresh reading for 20 s: shown as unknown at the next repaint
+    until(page, "document.getElementById('audioBar').textContent.includes('Cloud audio: unknown')", 3000)
+    assert page.locator("#audioBar.hot").count() == 0
+    until(page, "document.getElementById('audioBar').textContent.includes('SENDING audio to the cloud')", 12000)      # a fresh reading restores it
+    page.route("**/api/m/audio", lambda route: None)                    # the computer stops answering: the request hangs
+    until(page, "document.getElementById('audioBar').textContent.includes('Cloud audio: unknown')", 20000)
+    assert "Computer microphone: unknown" in page.text_content("#audioBar")
+    assert page.errors == []
+
+
+def test_mic_setup_failure_closes_the_microphone_and_the_strip_never_says_off_while_live(browser, phone):
+    p = phone(tls=True)
+    page = new_page(browser)
+    page.add_init_script(TRACKS)
+    page.add_init_script("window.AudioContext = function () { throw new Error('no audio context'); }; window.webkitAudioContext = window.AudioContext;")
+    ui_pair(page, p)
+    assert page.evaluate("typeof window.JarvesAudio === 'object'")
+    page.tap("[data-tab=voice]")
+    until(page, "!document.getElementById('ptt').disabled")
+    page.dispatch_event("#ptt", "pointerdown")
+    until(page, "document.getElementById('voiceOut').textContent.includes('Microphone permission')")
+    assert page.evaluate("window.__tracks.length > 0 && window.__tracks.every(t => t.readyState === 'ended')")     # the stream was closed
+    assert "Phone microphone: off" in page.text_content("#audioBar") and p.fake.wavs == []
+    # the strip follows the track state: a live track never reads as off
+    page.evaluate("""() => { window.__fake = { getTracks: () => [{ readyState: 'live' }] }; window.JarvesAudio.phoneMic(true, { stop() {}, discard() {}, live: () => window.__fake.getTracks().some(t => t.readyState === 'live') }); }""")
+    assert "Phone microphone: ON" in page.text_content("#audioBar")
+    page.evaluate("window.__fake.getTracks = () => [{ readyState: 'ended' }]; window.JarvesAudio.repaint()")
+    assert "Phone microphone: off" in page.text_content("#audioBar")
+    assert page.errors == []
+
+
+def test_online_listener_is_present_in_the_phone_app():
+    import re
+    app = (Path(mobile.__file__).parent / "dashboard_static" / "mobile" / "app.js").read_text(encoding="utf-8")
+    assert re.search(r'^\s*window\.addEventListener\("online", tick\);', app, re.M)                    # on its own line, not inside a comment
+
+
 def _signal(p: Phone, ref: str):
     c = p.d.mobile.cont
     if not c.signals_state()["on"]:
