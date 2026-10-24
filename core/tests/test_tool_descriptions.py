@@ -41,6 +41,7 @@ ROUTES = [
     ("discard the draft", "dev_discard"), ("תמחק את הטיוטה", "dev_discard"),
     ("how is development going", "dev_status"), ("מה מצב הפיתוח", "dev_status"),
     ("what issues do you have", "list_issues"), ("אילו תקלות יש לך", "list_issues"),
+    ("how can you become faster", "performance_advice"), ("איך אפשר לשפר ביצועים", "performance_advice"),
     ("give me your self status", "self_status"), ("תן לי סטטוס עצמי", "self_status"),
     ("change yourself so you are shorter", "self_change"), ("תשנה את עצמך", "self_change"),
     ("connect my account", "self_connect"), ("תחבר את החשבון", "self_connect"),
