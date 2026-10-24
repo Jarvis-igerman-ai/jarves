@@ -134,7 +134,7 @@ def recommendations(rows: list[dict], *, max_results: int | None = None) -> list
 def detect(home: Path, *, rows: list[dict] | None = None, registry=None) -> list[dict]:
     from . import issue_registry, selfspeed
     series = rows if rows is not None else selfspeed.History(home).rows("speedtest", 30)
-    findings = recommendations(series, max_results=len(SUGGESTIONS))
+    findings = recommendations(series)
     reg = registry or issue_registry.Registry(home)
     for f in findings:
         record = reg.record("speed", f"PERF_{f['metric'].upper()}", f["severity"],
