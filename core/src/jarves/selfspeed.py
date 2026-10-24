@@ -107,7 +107,7 @@ class History:
         return {"latest": d["latest"], "selftest": d["selftest"][-20:], "speedtest": d["speedtest"][-20:],
                 "recommendations": perf_advisor.recommendations(d["speedtest"]),
                 "auto_github": perf_advisor.options(self.path.parent)["auto_github"],
-                "performance_issue_url": perf_advisor.options(self.path.parent)["issue_url"],
+                "performance_issue_url": perf_advisor.options(self.path.parent)["tracker_url"],
                 "spark": {n: self.spark(n) for n in names},
                 "selftest_spark": [{"ts": r["ts"], "status": r["status"]} for r in d["selftest"][-30:]]}
 
