@@ -151,6 +151,24 @@ def junit_file_times(xml_path: Path) -> dict[str, float]:
     return out
 
 
+def report_shard_timings(xml_files: list[Path]) -> str:
+    """Surface measured shard skew for tuning, without weakening any CI gate."""
+    measured = [(p, junit_file_times(p)) for p in xml_files]
+    shard_seconds = [round(sum(times.values())) for _, times in measured if times]
+    if len(shard_seconds) < 2 or min(shard_seconds) == 0:
+        return "shard timings: insufficient measurements to compare"
+    high, low = max(shard_seconds), min(shard_seconds)
+    imbalance = high / low
+    heaviest: dict[str, float] = {}
+    for _, times in measured:
+        for name, seconds in times.items():
+            heaviest[name] = max(heaviest.get(name, 0), seconds)
+    top = ", ".join(f"{f} {s:.0f}s" for f, s in sorted(heaviest.items(), key=lambda t: -t[1])[:4])
+    status = "REBALANCE CANDIDATE" if imbalance > 1.30 and high - low > 60 else "balanced"
+    return (f"shard timing {status}: {len(shard_seconds)} shards, measured test seconds "
+            f"{sorted(shard_seconds)}, skew {imbalance:.2f}x; slow files: {top}")
+
+
 def merge_durations(old: dict[str, float], new: dict[str, float], keep: float = 0.5) -> dict[str, float]:
     """Blend so one slow run does not whip the shards around: keep*old + (1-keep)*new."""
     out = dict(old)
@@ -222,6 +240,7 @@ def main(argv: list[str] | None = None) -> int:
     a.into.parent.mkdir(parents=True, exist_ok=True)
     a.into.write_text(json.dumps(dict(sorted(merged.items())), indent=1) + "\n", encoding="utf-8")
     print(f"durations: {len(fresh)} files measured from {len(paths)} junit file(s) -> {a.into}")
+    print(report_shard_timings(paths))
     return 0
 
 
