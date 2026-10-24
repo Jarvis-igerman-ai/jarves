@@ -393,6 +393,30 @@ async def test_phone_can_deny_and_typed_code_approvals_are_pc_only(srv, home):
     assert st == 200 and await asyncio.wait_for(task, 30) is False
 
 
+async def test_goal_plan_approvals_are_pc_only_even_when_phone_approvals_are_on(srv, home):
+    # V5 security review F1 (issue #200): plan-level and per-step goal-plan approvals must be answered on the
+    # PC; the phone sees the title only. Typed-code requests are already PC-only, plan approvals are too.
+    tok, dev, _ = pair(srv)
+    admin(srv, "POST", "/api/mobile/settings", {"phone_approvals": True})
+    svc = appr.ApprovalService(home)
+    dashboard_open(home)
+    task = asyncio.create_task(svc.ask("Run this plan?\nstep one", title="goal_plan_step", pc_only=True))
+    a = await next_request(svc)
+    assert a.pc_only is True
+    st, view, _ = await asyncio.to_thread(req, srv, "GET", "/api/m/approvals", token=tok)
+    assert view["phone_approvals"] is True
+    row = next(p for p in view["pending"] if p["id"] == a.id)
+    assert row.get("pc_only") is True                                 # the phone learns it must stay put
+    st, body, _ = await asyncio.to_thread(req, srv, "POST", f"/api/m/approvals/{a.id}", token=tok, body={"approved": True})
+    assert st == 403 and body["code"] == "PC_ONLY" and not task.done() and svc.has_pending()
+    ok, _why = svc.answer(a.id, True, channel="phone")                 # same refusal through the in-process service
+    assert not ok and not task.done()
+    st, body, _ = await asyncio.to_thread(req, srv, "POST", f"/api/m/approvals/{a.id}", token=tok, body={"approved": False})
+    assert st == 200                                                  # a phone may still deny
+    assert await asyncio.wait_for(task, 30) is False
+    assert appr.read_history(home, 5)[0]["channel"] == "phone"
+
+
 async def test_bad_approval_requests(srv, home):
     tok, _, _ = pair(srv)
     admin(srv, "POST", "/api/mobile/settings", {"phone_approvals": True})

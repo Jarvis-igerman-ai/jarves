@@ -224,6 +224,7 @@
       const mk = (label, ok, primary) => { const b = document.createElement("button"); b.type = "button"; b.textContent = label; if (primary) b.className = "primary";
         b.addEventListener("click", async () => { b.disabled = true; try { await post("/api/m/approvals/" + p.id, { approved: ok, id: "appr-" + p.id + (ok ? "-yes" : "-no") }); } catch (e) { row.firstChild.textContent = e.message; } tick(); }); row.appendChild(b); };
       if (p.typed) { const s = document.createElement("span"); s.className = "muted"; s.textContent = t("typed_pc"); row.appendChild(s); mk(t("deny"), false, false); }
+      else if (p.pc_only) { const s = document.createElement("span"); s.className = "muted"; s.textContent = t("pc_only"); row.appendChild(s); mk(t("deny"), false, false); }
       else { mk(t("approve"), true, true); mk(t("deny"), false, false); }
     });
   }

@@ -90,6 +90,7 @@ HE = {   # Hebrew texts of this module (fixed strings; user content is never tra
     "cooldown": "בדיוק סירבת לבקשה הזאת: לא שואל שוב עכשיו.",
     "typed": "צריך להקליד את הקוד שמוצג בחלון האישור או בלוח הבקרה.",
     "voice_typed": "את זה אפשר לאשר רק בהקלדת הקוד על המסך, לא בקול.",
+    "pc_only": "את זה מאשרים רק במחשב: הטלפון רואה את הכותרת בלבד.",
 }
 
 
@@ -171,6 +172,7 @@ class Approval:
     shown: list = field(default_factory=list)
     typed_salt: str = ""              # R-01: pending.json keeps salt + keyed hash + sealed code, never the code
     typed_hash: str = ""
+    pc_only: bool = False             # F1: answered on the PC only (the phone sees the title, never the details)
 
     @property
     def spoken(self) -> str:
@@ -304,9 +306,10 @@ class ApprovalService:
     # ------------------------------------------------------------------ asking
     async def ask(self, prompt: str, *, title: str = "", why: str = "", risk: str = "medium", kind: str = "tool",
                   details: dict | None = None, typed: bool = False, timeout: float | None = None,
-                  source: str = "model", voice: bool | None = None) -> bool:
+                  source: str = "model", voice: bool | None = None, pc_only: bool = False) -> bool:
         """Ask the owner; True only on an explicit approval. Everything else (timeout, no channel, shutdown,
-        cancellation, rate limit) is False."""
+        cancellation, rate limit) is False. pc_only (F1): a paired phone may still see the title but may not
+        answer; only the PC channels (popup, tray, face, dashboard, voice, typed, cli) can approve it."""
         risk = risk if risk in RISKS else "high"
         kind = kind if kind in KINDS else "other"
         details = {str(k): v for k, v in (details or {}).items()}
@@ -349,6 +352,7 @@ class ApprovalService:
         a = Approval(uuid.uuid4().hex[:16], title, prompt, str(why or "")[:600], risk, kind, source, details,
                      f"{secrets.randbelow(9000) + 1000}" if typed else "",
                      (not typed) if voice is None else (bool(voice) and not typed), now, now + t, key)
+        a.pc_only = bool(pc_only)
         if a.typed_code:
             a.typed_salt = secrets.token_hex(8)
             a.typed_hash = akeys.code_hash(self._key, a.typed_salt, a.typed_code) if self._key else ""
@@ -420,6 +424,8 @@ class ApprovalService:
         if approved is True:
             if a.typed_code and not a.code_ok(self._key, typed):
                 return False, HE["typed"] + " / Type the code shown to approve."
+            if a.pc_only and channel == "phone":                       # F1: a phone sees the title, never the plan
+                return False, HE["pc_only"] + " / Answer this on the computer."
             if channel == "voice" and not a.voice_ok:
                 return False, HE["voice_typed"]
             if channel == "face" and a.typed_code:
@@ -735,6 +741,8 @@ def submit_answer(home: Path, aid: str, approved: bool, *, channel: str, typed: 
     if approved and r.get("typed") and not akeys.code_matches(key, str(r.get("typed_salt") or ""),
                                                               str(r.get("typed_hash") or ""), typed):
         return False, HE["typed"] + " / Type the code shown to approve."
+    if approved and r.get("pc_only") and channel == "phone":            # F1: plan approvals are answered on the PC
+        return False, HE["pc_only"] + " / Answer this on the computer."
     body = akeys.sign(key, {"id": aid, "approved": bool(approved), "typed": str(typed or "").strip(),
                             "channel": channel, "ts": round(time.time(), 3), "nonce": secrets.token_hex(12)})
     _write_json(Path(home) / "approvals" / "answers" / f"{aid}.json", body)
@@ -782,14 +790,15 @@ def detach(svc: ApprovalService | None = None) -> None:
 
 
 def ask_owner(home: Path, prompt: str, *, title: str, why: str = "", kind: str = "tool", risk: str = "high",
-              details: dict | None = None, timeout: float | None = None) -> tuple[bool, str]:
+              details: dict | None = None, timeout: float | None = None, pc_only: bool = False) -> tuple[bool, str]:
     """For a destructive DASHBOARD action (called from the HTTP handler thread, which blocks until the owner
     answers): the same ApprovalService the model tools use shows the popup / tray / face / dashboard banner; the
     request waits up to the popup timeout. (ok, reason): ok only on an explicit approval; a denial, timeout or
     nobody to ask is a refusal and the caller must not act. Without a running Core the request is asked by a
     service of its own (answerable from the dashboard banner or `jarvis approvals approve`)."""
     home = Path(home)
-    kw = dict(title=title, why=why, kind=kind, risk=risk, details=details, source="dashboard", timeout=timeout)
+    kw = dict(title=title, why=why, kind=kind, risk=risk, details=details, source="dashboard", timeout=timeout,
+              pc_only=pc_only)
     svc = _current
     try:
         if svc is not None and svc.loop is not None and svc.loop.is_running() and svc.home.resolve() == home.resolve():
