@@ -29,3 +29,24 @@ jobs:
       - uses: github/codeql-action/analyze@v4
         with:
           category: "/language:python"
+  prune-caches:
+    # CodeQL saves an overlay base database (~85 MB) to the Actions cache on every push to main and never removes the
+    # old ones: 53 copies = 4.5 GB of the 10 GB repo cap on 24 Oct (#160), so uv, Playwright and build-tool caches were
+    # evicted and jobs re-downloaded them. Keep the newest 2; touches only caches with that key prefix on main.
+    name: Prune old CodeQL cache entries
+    needs: analyze
+    if: github.event_name != 'pull_request'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      actions: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+      REPO: ${{ github.repository }}
+    steps:
+      - name: Delete all but the newest 2 overlay base databases
+        run: |
+          set -euo pipefail
+          ids=$(gh cache list -R "$REPO" --key codeql-overlay-base-database- --ref refs/heads/main --sort created_at --order desc --limit 100 --json id --jq '.[2:][].id')
+          for id in $ids; do gh cache delete "$id" -R "$REPO" || echo "could not delete cache $id"; done
+          echo "deleted: $(echo $ids | wc -w)"
