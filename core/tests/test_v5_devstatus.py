@@ -11,7 +11,7 @@ from jarves.orchestrator.db import AgentDB
 from jarves.skills import SkillRegistry
 
 NOW = 1_800_000_000.0
-REPO = "igalgerman/jarves"
+REPO = "Jarvis-igerman-ai/jarves"
 
 
 def run(name, status, conclusion, run_id):
