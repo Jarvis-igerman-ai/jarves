@@ -313,3 +313,16 @@ def test_core_starts_the_phone_server_at_boot_only_when_the_switch_is_on(tmp_pat
         raise OSError("no network")
     fake_self = SimpleNamespace(features=SimpleNamespace(enabled=lambda name: True), ensure_dashboard=boom, _dashboard=None)
     asyncio.run(core_app.Core.start_mobile(fake_self))
+
+
+@pytest.mark.parametrize("exc,status", [(FileNotFoundError, 404), (PermissionError, 500), (OSError, 500)])
+def test_a_read_error_gives_a_clean_error_without_a_path(srv, monkeypatch, exc, status):
+    """The file can vanish or be unreadable between the check and the read: no traceback, no server path in the reply."""
+    secret_path = "C:/very/private/install/dir/index.html"
+
+    def boom(self, *a, **k):
+        raise exc(5 if exc is OSError else 2, "boom", secret_path)
+    monkeypatch.setattr(Path, "read_bytes", boom)
+    r, body = get(srv, "/m/index.html")
+    assert r.status == status
+    assert b"private" not in body and b"install" not in body and b"index.html" not in body and b"boom" not in body
