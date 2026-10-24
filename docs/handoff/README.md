@@ -13,3 +13,7 @@ run), what is NOT verified, and the open questions for the owner ("Decisions nee
 
 Newest first = sort by file name. `docs/HANDOFF.md` keeps the history up to 23 Oct 2026; the owner-wide decision
 queue stays at its top. Notes here are covered by `docs/DOC_MAP.md` through this README (no per-note DOC_MAP row).
+
+**Open questions for the owner** go in the same note under a `## Decisions needed` heading (status ANSWERED / USER DECISION
+REQUIRED / DEFERRED / BLOCKED, as in AGENTS). Do not edit `docs/HANDOFF.md` in a task PR: it is frozen history, so
+nothing in it can conflict. To list every open question: `git grep -n -A3 "Decisions needed" docs/handoff`.
