@@ -1,7 +1,7 @@
 """Find flaky tests in the jarves-checks run history and open ONE `showstopper` issue per test (owner rule 24 Oct 2026,
 CLAUDE.md "A flaky test is a show-stopper", issue #160).
 
-    python core/tools/flake_scan.py [--days 7] [--repo igalgerman/jarves]            # print flakes (read-only)
+    python core/tools/flake_scan.py [--days 7] [--repo Jarvis-igerman-ai/jarves]            # print flakes (read-only)
     python core/tools/flake_scan.py --issues                                         # also open/update the issues
 
 A failure counts as a flake when the SAME commit later passed: either a re-run attempt of the run turned green, or
@@ -142,7 +142,7 @@ def report(repo: str, found: dict[str, list[dict]], issues: bool) -> int:
 
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    ap.add_argument("--repo", default="igalgerman/jarves")
+    ap.add_argument("--repo", default="Jarvis-igerman-ai/jarves")
     ap.add_argument("--days", type=int, default=7)
     ap.add_argument("--issues", action="store_true", help="open or update one showstopper issue per flaky test")
     ap.add_argument("--ledger-files", action="store_true",
