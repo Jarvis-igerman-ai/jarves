@@ -410,6 +410,9 @@ def add_cli(sub) -> None:
     sp.add_argument("--idle-window", type=float, default=10.0, help="seconds to watch the running Core (default 10)")
     sp.add_argument("--json", action="store_true")
     sp.add_argument("--trigger", default="cli", help=argparse.SUPPRESS)
+    pa = sub.add_parser("performance", help="measured performance recommendations and optional owner-controlled GitHub issues")
+    pa.add_argument("--auto-github", choices=["on", "off"], help="explicit owner opt-in or disable (no network call here)")
+    pa.add_argument("--json", action="store_true")
 
 
 _MARK = {"pass": "ok  ", "warn": "WARN", "fail": "FAIL", "skip": "skip", "n/a": "n/a "}
@@ -449,4 +452,22 @@ def cmd_speedtest(a, cfg, home: Path, *, out=print) -> int:
     return 1 if (a.gate and res.status == "fail") else 0
 
 
-COMMANDS = {"selftest": cmd_selftest, "speedtest": cmd_speedtest}
+def cmd_performance(a, cfg, home: Path, *, out=print) -> int:
+    from . import perf_advisor
+    if a.auto_github is not None:
+        perf_advisor.configure(home, a.auto_github == "on")
+    state = perf_advisor.options(home)
+    advice = perf_advisor.recommendations(History(home).rows("speedtest", 30))
+    if a.json:
+        out(json.dumps({"auto_github": state["auto_github"], "recommendations": advice}, ensure_ascii=False))
+        return 0
+    out("GitHub auto-issues: " + ("enabled" if state["auto_github"] else "disabled") +
+        " (needs a local token; at most one performance issue per 7 days)")
+    if not advice:
+        out("No repeated measured regression yet; scheduled speed tests build the baseline.")
+    for finding in advice:
+        out(f"[{finding['severity']}] {finding['metric']}: {finding['advice']}")
+    return 0
+
+
+COMMANDS = {"selftest": cmd_selftest, "speedtest": cmd_speedtest, "performance": cmd_performance}
