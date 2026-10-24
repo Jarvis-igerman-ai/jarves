@@ -261,3 +261,31 @@ def test_autolabel_has_label_write_permission_and_never_masks_creation_failure()
     assert "Cannot create label" in step and "exit 1" in step
     assert "2>/dev/null || true" not in step
     assert "gh pr edit" in step   # the original safe risk classifier / relabel flow remains
+
+
+def test_codeql_prunes_its_own_overlay_caches_only():
+    jobs = load("codeql.yml")["jobs"]
+    prune = jobs["prune-caches"]
+    assert prune["permissions"] == {"actions": "write"}
+    run = steps_text(prune)
+    assert "--key codeql-overlay-base-database-" in run and "--ref refs/heads/main" in run and "'.[2:][].id'" in run
+    assert prune["if"] == "github.event_name != 'pull_request'"
+
+
+def test_both_required_checks_report_in_the_merge_queue():
+    """#161: with a ruleset that requires the merge queue, BOTH required checks must run on `merge_group`, or the queue
+    waits until its timeout. jarves-checks runs the full matrix there (event != pull_request) and builds the installer as
+    the main channel, so the push run on main reuses it by tree hash. Autolabel reports a pass under the same name."""
+    checks = load("jarves-checks.yml")
+    assert checks[True]["merge_group"] == {"types": ["checks_requested"]}
+    assert "github.event_name == 'merge_group'" in checks["jobs"]["installer"]["env"]["CHANNEL"]
+    sys.path.insert(0, str(ROOT / "core" / "tools"))
+    import ci_plan
+    assert all(ci_plan.classify(["docs/x.md"], "merge_group").values())          # always the full matrix in the queue
+    auto = load("autolabel.yml")
+    assert auto[True]["merge_group"] == {"types": ["checks_requested"]}
+    names = {j["name"]: j for j in auto["jobs"].values()}
+    assert list(names) == ["Auto-label policy"] and len(auto["jobs"]) == 2
+    assert auto["jobs"]["queue-pass"]["if"] == "github.event_name == 'merge_group'"
+    assert "github.event_name == 'pull_request_target'" in auto["jobs"]["label"]["if"]
+    assert "|| github.ref" in auto["concurrency"]["group"]       # merge groups must not cancel each other's check

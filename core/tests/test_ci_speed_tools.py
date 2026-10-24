@@ -449,7 +449,7 @@ def test_installer_runs_in_parallel_with_tests_and_publishing_waits_for_the_whol
 
 def test_no_duplicate_runs_per_commit():
     t = _wf("jarves-checks.yml")[True]
-    assert t["push"]["branches"] == ["main", "next"] and "pull_request" in t           # branch pushes have no push trigger
+    assert t["push"]["branches"] == ["main"] and "pull_request" in t           # branch pushes have no push trigger
     conc = _wf("jarves-checks.yml")["concurrency"]
     assert "pull_request.number" in conc["group"] and conc["cancel-in-progress"] == "${{ github.event_name == 'pull_request' }}"
 
@@ -602,3 +602,15 @@ def test_draft_prs_run_only_the_fast_checks_and_never_read_green():
     draft_branch = run[run.index('if [ "$DRAFT" = "true" ]'):run.index("fi")]
     assert "gh run cancel" in draft_branch and "exit 1" in draft_branch                # never success on a draft
     assert "github.event.pull_request.draft != true" in doc["jobs"]["failure-summary"]["if"]
+
+
+def test_red_main_reruns_failed_jobs_once_before_the_issue():
+    """E3 (#160): half of the red main runs were flakes. Attempt 1 red -> re-run only the failed jobs, once; the issue
+    opens only when attempt 2+ is red. The re-run job needs actions: write and nothing else; no repository code runs."""
+    doc = _wf("main-health.yml")
+    rerun = doc["jobs"]["rerun-once"]
+    assert "run_attempt == 1" in rerun["if"] and "conclusion == 'failure'" in rerun["if"]
+    assert rerun["permissions"] == {"actions": "write"}
+    assert rerun["steps"][0]["run"].endswith("--failed") and "gh run rerun" in rerun["steps"][0]["run"]
+    assert not any("checkout" in s.get("uses", "") for s in rerun["steps"])
+    assert "run_attempt > 1" in doc["jobs"]["alert"]["if"]

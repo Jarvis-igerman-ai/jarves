@@ -114,7 +114,7 @@ def _register_feature() -> None:
     kw = {"targets": {"windows": {"status": "implemented_unverified",
                                   "evidence": "core/tests/test_release_signoff.py (sheet round trip, sign-off, gate)"},
                       "linux_arm64_pi": {"status": "planned", "blocker": "release tooling runs on the owner's PC",
-                                         "roadmap_issue": "https://github.com/igalgerman/jarves/issues/3"}}} \
+                                         "roadmap_issue": "https://github.com/Jarvis-igerman-ai/jarves/issues/3"}}} \
         if "targets" in inspect.signature(features.register).parameters else {}
     features.register("release_signoff", "אישור גרסה (בדיקה ידנית)", "Release sign-off (manual test)", True, risk="low",
                       about="the owner's checklist for a stable release: test the latest beta by hand, record the "

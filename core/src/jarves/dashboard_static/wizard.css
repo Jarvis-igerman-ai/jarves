@@ -1,25 +1,44 @@
-/* Setup and tour (#/setup): topic list + one topic at a time; phone-first (works at 390px). Uses the tokens of style.css. */
-.tour { display: grid; grid-template-columns: 250px 1fr; gap: 14px; align-items: start; }
-.tour-list { position: sticky; top: 8px; margin: 0; padding: 0; list-style: none; }
-.tour-list li { margin: 0 0 4px; }
-.tour-list button { width: 100%; text-align: start; display: flex; gap: 8px; align-items: center; min-height: 40px; }
-.tour-list button[aria-current="true"] { border-color: var(--accent); font-weight: 600; }
-.tour-mark { display: inline-block; min-width: 1.4em; text-align: center; }
-.tour-bar { height: 10px; background: var(--surface-2); border-radius: 6px; overflow: hidden; margin: 8px 0 12px; }
-.tour-bar > div { height: 100%; background: var(--accent); }
-.tour-stage { margin-bottom: 12px; }
-.tour-stage h2 { margin: 0 0 6px; font-size: 1.05em; }
+/* Setup and tour (#/setup, #152): one card, three short lines, three big answers; phone-first (390 px). style.css tokens. */
+.tour-bar { height: 8px; background: var(--surface-2); border-radius: 6px; overflow: hidden; margin: 6px 0 10px; max-width: 720px; }
+.tour-bar > div { height: 100%; background: var(--accent); transition: width .2s; }
+.tour-msg:empty { display: none; }
+.tour-msg { margin: 0 0 8px; max-width: 720px; }
+.tour-card { max-width: 720px; padding: 18px; }
+.tour-card h2 { margin: 2px 0 10px; font-size: 1.35em; }
+.tour-meta { min-height: 1em; }
+.tour-lines { list-style: none; margin: 0 0 14px; padding: 0; display: grid; gap: 8px; }
+.tour-lines li { display: grid; grid-template-columns: 11em 1fr; gap: 10px; font-size: var(--fs-l); line-height: 1.4; }
+.tour-k { color: var(--text-2); font-size: var(--fs-m); padding-top: 1px; }
+.tour-answers { display: flex; gap: 10px; flex-wrap: wrap; margin: 6px 0 8px; }
+.tour-big { flex: 1 1 0; min-width: 104px; min-height: 56px; font-size: var(--fs-l); font-weight: 600; display: inline-flex;
+  align-items: center; justify-content: center; gap: 8px; }
+.tour-big kbd { font: 11px/1 ui-monospace, monospace; padding: 2px 5px; border: 1px solid currentColor; border-radius: 4px; opacity: .75; }
+.tour-fail { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; margin: 4px 0 8px; }
+.tour-fail[hidden] { display: none; }
+.tour-fail input { flex: 1; min-width: 180px; min-height: 44px; }
+.tour-fail button { min-height: 44px; }
+.tour-fail .small { flex-basis: 100%; }
+.tour-skip { min-height: 44px; }
+.tour-more { margin-top: 10px; }
+.tour-more summary, .tour-done summary, .tour-tools summary, .tour-left summary { cursor: pointer; padding: 12px 0; }
+.tour-more-body { padding: 6px 0 0; }
 .tour-actions { display: flex; gap: 8px; flex-wrap: wrap; margin: 8px 0; align-items: center; }
 .tour-actions button, .tour-secret button { min-height: 44px; }
 .tour-secret { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; margin: 6px 0; }
 .tour-secret input { flex: 1; min-width: 180px; min-height: 44px; }
-.tour-out { margin-top: 6px; }
-.tour-card dt { font-weight: 600; margin-top: 8px; }
-.tour-card dd { margin: 2px 0 0; }
-.tour-list-toggle { display: none; }
+.tour-learn { margin: 8px 0; padding-inline-start: 18px; }
+.tour-chips { display: flex; flex-wrap: wrap; gap: 6px; }
+.tour-chip { min-height: 44px; }
+.tour-left, .tour-done, .tour-tools { max-width: 720px; margin: 4px 0; }
+.tour-done ul { list-style: none; margin: 4px 0; padding: 0; }
+.tour-done li { display: flex; gap: 8px; align-items: center; margin: 2px 0; }
+.tour-done li button { min-height: 44px; }
+.tour-open { text-align: start; }
+.tour-mark { display: inline-block; min-width: 1.4em; text-align: center; }
 @media (max-width: 700px) {
-  .tour { grid-template-columns: 1fr; }
-  .tour-list { position: static; }
-  .tour-list.closed { display: none; }
-  .tour-list-toggle { display: inline-block; margin-bottom: 8px; min-height: 44px; }
+  .tour-card { padding: 14px; }
+  .tour-lines li { grid-template-columns: 1fr; gap: 0; }
+  .tour-big { min-width: 0; }
+  .tour-big kbd { display: none; }
 }
+@media (prefers-reduced-motion: reduce) { .tour-bar > div { transition: none; } }

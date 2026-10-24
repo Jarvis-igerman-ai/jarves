@@ -1,6 +1,6 @@
 name: jarves-autolabel
-# Adds the `automerge` label to LOW-RISK PRs (docs/RELEASING.md "Automatic labelling of low-risk PRs"), so the queue
-# (automerge.yml) merges them once `CI result (single required check)` is green. It never merges, never bypasses a check.
+# Adds the `automerge` label to LOW-RISK PRs (docs/RELEASING.md "Automatic labelling of low-risk PRs"), so
+# automerge.yml puts them in the merge queue once `CI result (single required check)` is green. It never merges, never bypasses a check.
 # Classification: core/tools/risk_class.py (standard library, no network). Dependabot: dependabot-automerge.yml.
 # Switch: repository variable ENABLE_AUTOLABEL = "true" or unset (docs, tests, guides/locales), "all" (also PRs labelled
 # `bugfix` with < 150 changed lines), "false" (off). Labels `needs-review` / `no-automerge` always block.
@@ -9,19 +9,21 @@ name: jarves-autolabel
 # may intentionally lack Issues write. An unavailable label must fail visibly, not be masked by `|| true`.
 on:
   pull_request_target:
-    branches: [main, next]
+    branches: [main]
     types: [opened, reopened, synchronize, ready_for_review, labeled, unlabeled]
+  merge_group:              # the required check must also report in the merge queue (#161); labels were judged on the PR
+    types: [checks_requested]
 permissions:
   contents: read
   pull-requests: write
   issues: write           # creating repository labels / attaching labels to PR issue records
 concurrency:
-  group: autolabel-${{ github.event.pull_request.number }}
+  group: autolabel-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
 jobs:
   label:
     name: Auto-label policy
-    if: vars.ENABLE_AUTOLABEL != 'false' && github.event.pull_request.draft == false
+    if: github.event_name == 'pull_request_target' && vars.ENABLE_AUTOLABEL != 'false' && github.event.pull_request.draft == false
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     env:
@@ -68,3 +70,12 @@ jobs:
               *,automerge-auto,*) gh pr edit "$PR" -R "$GITHUB_REPOSITORY" --remove-label automerge --remove-label automerge-auto ;;
             esac
           fi
+  queue-pass:
+    # Same check name as the job above, for merge_group events: each PR's labels were judged on the PR itself and a
+    # merge group has no PR labels to read. Runs no repository code, reads nothing.
+    name: Auto-label policy
+    if: github.event_name == 'merge_group'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 2
+    steps:
+      - run: echo "merge group, the label policy was checked on each PR"
