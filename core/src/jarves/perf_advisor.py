@@ -19,8 +19,8 @@ CONFIG = "perf_advisor.json"
 MIN_RECENT = 3
 MAX_OPEN_PAGE = 100
 AUTO_COOLDOWN_S = 24 * 3600  # at most one aggregate issue update per day; normal measurement remains weekly
-PERF_MARKER = "jarves-performance-health:v1"
-PERF_TITLE = "[Performance] JARVES performance health"
+TRACKER_MARKER = "<!-- jarves-performance-health:v1 -->"
+TRACKER_TITLE = "[Performance] JARVES performance health"
 
 # Advice is deliberately a diagnostic hypothesis, not a claim that the cause is known.
 SUGGESTIONS = {
@@ -237,7 +237,7 @@ def _recovered(home: Path, names: list[str]) -> bool:
     rows = selfspeed.History(home).rows("speedtest", 30)
     for metric in names:
         samples = [r.get("statuses", {}).get(metric) for r in rows
-                   if metric in r.get("values", {}) and r.get("class") == "owner"]
+                   if metric in r.get("values", {}) and (r.get("class") or r.get("cls")) == "owner"]
         if len(samples) < 3 or samples[-3:] != ["pass", "pass", "pass"]:
             return False
     return bool(names)
