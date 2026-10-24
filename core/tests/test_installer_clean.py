@@ -237,7 +237,7 @@ def test_silent_updates_stop_the_core_first_and_restart_it_only_when_asked():
     assert '" stop' in prepare
     assert prepare.index('" stop') < prepare.index("ExtractTemporaryFile")
     assert "CloseApplications=yes" in iss
-    assert "Check: RestartRequested" in iss and "/RESTARTJARVES=1" in iss
+    assert "Check: RestartCoreNow" in iss and "/RESTARTJARVES=1" in iss
     assert "if WizardSilent() then exit;" in iss.split("procedure OpenSetup", 1)[1].split("procedure InitializeWizard", 1)[0]
     assert updates.installer_args("x.exe", silent=True, restart=True)[1:] == [
         "/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART", "/CLOSEAPPLICATIONS", "/RESTARTJARVES=1"]
@@ -289,7 +289,7 @@ def test_a_failed_retain_is_a_clean_refusal_that_keeps_the_old_version():
     assert "Retained := Retained + Name + '|';" in retain
     deinit = iss.split("procedure DeinitializeSetup", 1)[1].split("procedure CurStepChanged", 1)[0]
     assert "RestoreProgram();" in deinit
-    assert "CoreStopped and not SetupComplete and RestartRequested()" in deinit and "run --background" in deinit
+    assert "CoreStopped and not SetupComplete then StartWhatRan();" in deinit
     smoke = (PKG / "smoke_windows.ps1").read_text(encoding="utf-8-sig")
     for case in ("leftover rollback folder", "file locked by a process outside the program folder",
                  "windowed process under the program folder"):
@@ -331,14 +331,14 @@ def test_health_check_after_update_rolls_back_the_program_only():
     done = iss.split("procedure CurStepChanged", 1)[1].split("#include", 1)[0]
     assert "ssDone" in done and "HealthCheckAfterUpdate();" in done
     check = iss.split("procedure HealthCheckAfterUpdate", 1)[1].split("procedure CurStepChanged", 1)[0]
-    assert "RestartRequested()" in check and "/ROLLBACK=1" in check and "SnapshotMade" in check
+    assert "RestartCoreNow()" in check and "/ROLLBACK=1" in check and "SnapshotMade" in check
     assert "{param:HEALTHTIMEOUT|90}" in check and "if Code = 3 then HealthRollback();" in check
     swap = iss.split("function SwapBackPart", 1)[1].split("procedure HealthRollback", 1)[0]
     assert swap.index("Pos('|' + Name + '|', Retained) = 0") < swap.index("RenameFile(Target, Kept)")
     assert "DelTree" not in swap and "DeleteFile" not in swap          # nothing is deleted, the new part is kept aside
     roll = iss.split("procedure HealthRollback", 1)[1].split("procedure HealthCheckAfterUpdate", 1)[0]
     assert roll.index("StopProcessesUnderApp();") < roll.index("SwapBackPart('python'")
-    assert roll.index("note-rollback") < roll.index("run --background")
+    assert roll.index("note-rollback") < roll.index("StartWhatRan();")
     assert "restore-data" not in roll and "DataDir()" in roll and "failed-upgrade-health-" in roll
     assert 'Name: "{app}\\failed-upgrade-*"' in iss                    # the uninstaller removes the kept-aside copy
     smoke = (PKG / "smoke_windows.ps1").read_text(encoding="utf-8-sig")
@@ -359,3 +359,26 @@ def test_low_disk_is_refused_before_the_backup_with_the_amount_needed():
     assert "diskcheck" in check and "{param:DISKRESERVEMB|0}" in check and "Code = 4" in check
     smoke = (PKG / "smoke_windows.ps1").read_text(encoding="utf-8-sig")
     assert "/DISKRESERVEMB=" in smoke and "Disk space check result code: 4" in smoke
+
+
+def test_update_restarts_only_what_was_running_before():
+    """#166: detected before anything is stopped; the Core only if it ran, the window with --show only if it was open,
+    the dashboard only with the safe flags from its own marker; unknown keeps the old behaviour (restart the Core)."""
+    iss = (PKG / "windows" / "jarves.iss").read_text(encoding="utf-8-sig")
+    prepare = iss.split("function PrepareToInstall", 1)[1].split("procedure DeinitializeSetup", 1)[0]
+    assert prepare.index("RecordWhatRuns();") < prepare.index('" stop')
+    script = iss.split("function StopScript", 1)[1].split("procedure StopProcessesUnderApp", 1)[0]
+    assert "core.lock" in script and "dashboard.run.json" in script and "DetectOnly" in script
+    assert script.index("$DetectOnly") < script.index("CloseMainWindow()") < script.index("Stop-Process")
+    for flag in ("--lan", "--mobile", "--tls-selfsigned", "--tailnet-only"):
+        assert flag in script
+    assert "CommandLine" not in script
+    run = [x for x in iss.splitlines() if x.startswith("Filename:")]
+    assert any("{code:CoreRunArgs}" in x and "Check: RestartCoreNow" in x for x in run)
+    assert any("{code:DashboardRunArgs}" in x and "Check: RestartDashboardNow" in x for x in run)
+    assert "Parameters: \"-m jarves run --background\"" not in iss
+    assert "Result := Result + ' --show';" in iss.split("function CoreRunArgs", 1)[1].split("function DashboardRunArgs", 1)[0]
+    assert "Result := WasCore or not WasRecorded or CoreStopCode0;" in iss
+    assert "RestartRequested() and WasRecorded and WasDash" in iss
+    # a Core that was not running is never judged by the health check
+    assert "RestartCoreNow()" in iss.split("procedure HealthCheckAfterUpdate", 1)[1].split("procedure CurStepChanged", 1)[0]

@@ -183,6 +183,10 @@ if ($UpgradeFrom) {
     # is recorded, nothing is deleted. The data folder is restored afterwards so the later cases see the seeded data.
     $homeCopy = Join-Path $Work "home-before-health-case"
     Copy-Item -LiteralPath $Home_ -Destination $homeCopy -Recurse -Force
+    # #166: the old Core is RUNNING when setup starts, so setup restarts it and runs the health check (a Core that was not
+    # running is neither restarted nor judged).
+    $oldCore = Start-Process "cmd.exe" -ArgumentList "/c `"`"$App\jarvis.cmd`" run > `"$Work\core-health.out`" 2>&1`"" -NoNewWindow -PassThru
+    Check (Wait-Log "CORE_READY" 90) "the old Core is running before the candidate is installed"
     $pendingFile = Join-Path $Home_ "updates\pending.json"
     New-Item -ItemType Directory -Force (Split-Path $pendingFile) | Out-Null
     (@{ state = "installing"; from = $oldVer; to = "9.9.9"; attempts = 0 } | ConvertTo-Json) | Set-Content $pendingFile

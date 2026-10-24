@@ -90,3 +90,7 @@ en = "Health check after an automatic update: setup waits up to 90 seconds for t
 [[steps]]
 he = "בדיקת מקום בדיסק: לפני הגיבוי וההתקנה ההתקנה בודקת שיש מקום לגיבוי ולגרסה החדשה, בכונן הנתונים ובכונן התוכנה. אם חסר מקום היא עוצרת מיד, בלי לשנות כלום, ואומרת כמה מגה-בייט חסרים. פנו מקום (למשל מחקו קבצים או נקו את סל המיחזור) והפעילו את העדכון שוב."
 en = "Free disk space check: before the backup and the install, setup checks there is room for the backup and the new version on the data drive and the program drive. If not, it stops at once, changes nothing and says how many megabytes are missing. Free some space (delete files, empty the recycle bin) and run the update again."
+
+[[steps]]
+he = "אחרי עדכון אוטומטי מופעל מחדש רק מה שרץ לפני כן: הליבה (רק אם רצה), החלון (רק אם היה פתוח) ולוח הבקרה (רק אם היה פתוח, עם אותן אפשרויות). לא שרץ שום דבר? לא מופעל שום דבר. להפעלה ידנית: jarvis start, jarvis show, jarvis dashboard."
+en = "After an automatic update only what was running before starts again: the Core (only if it ran), the window (only if it was open) and the dashboard (only if it was open, with the same options). Nothing was running? Nothing is started. To start by hand: jarvis start, jarvis show, jarvis dashboard."
