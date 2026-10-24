@@ -292,6 +292,28 @@ def test_setup_page_is_the_wizard_and_addons_moved():
     assert re.search(r'wizard\.js', html)
 
 
+def test_wizard_api_is_fast_and_probes_connections_once(ctx, monkeypatch):
+    """#148: the tour must not re-probe connections on every call (the Pear TCP connect made each call ~0.4 s+)."""
+    import time
+    from jarves import connect
+    wizard._CONN_CACHE.clear()
+    calls = []
+    real = connect.items_json
+    monkeypatch.setattr(connect, "items_json", lambda *a, **k: (calls.append(1), real(*a, **k, pear_probe=lambda u: False))[1])
+    call(ctx, "GET", "/api/wizard")                          # warm (guides load once)
+    t0 = time.perf_counter()
+    for _ in range(5):
+        call(ctx, "GET", "/api/wizard")
+        call(ctx, "GET", "/api/wizard/topic/voice")
+    assert time.perf_counter() - t0 < 1.5
+    assert len(calls) == 1
+    call(ctx, "POST", "/api/wizard/topic/voice/choice", {"choice": "done"})     # a change drops the cache
+    call(ctx, "GET", "/api/wizard")                          # #152: the overview never probes at all
+    assert len(calls) == 1
+    call(ctx, "GET", "/api/wizard/topic/voice")              # only "More" (the topic detail) probes
+    assert len(calls) == 2
+
+
 def test_next_marks_the_topic_done_and_progress_advances(ctx):
     """#147 (semantics of #152 + owner decision 24 Oct): 'Got it, next' (learned) or a test result finishes the topic;
     Later is not done; Did not work goes to Failed (out of the to-do list, not done)."""
