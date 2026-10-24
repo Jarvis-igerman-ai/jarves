@@ -50,6 +50,9 @@ dev = ["pytest>=8", "pytest-asyncio>=1.0", "pyyaml>=6.0.2"]   # pyyaml: test_ci_
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
 testpaths = ["tests"]
+# core/ on sys.path for every test file, so `from tools import ...` never depends on which test file ran first in the
+# shard (ModuleNotFoundError: tools on a shard where no earlier file had put core/ on sys.path; PR #150 run 40119205483).
+pythonpath = ["."]
 
 [build-system]
 requires = ["uv_build>=0.9.4,<0.14.0"]
