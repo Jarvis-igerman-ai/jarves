@@ -92,6 +92,9 @@ class History:
             (issue_registry.ingest_selftest if kind == "selftest" else issue_registry.ingest_speedtest)(reg, full)
         except Exception:
             logs.warn("selfspeed", "SELFSPEED_ISSUES_FAILED", "issues registry not updated from the run")
+        if kind == "speedtest":
+            from . import perf_advisor
+            perf_advisor.on_speedtest(self.path.parent)
 
     def spark(self, metric: str, n: int = 20) -> list[float]:
         """Values of one speed metric over the last runs, oldest first (the dashboard sparkline)."""
@@ -100,7 +103,10 @@ class History:
     def view(self) -> dict:
         d = self.load()
         names = sorted({n for r in d["speedtest"] for n in r.get("values", {})})
+        from . import perf_advisor
         return {"latest": d["latest"], "selftest": d["selftest"][-20:], "speedtest": d["speedtest"][-20:],
+                "recommendations": perf_advisor.recommendations(d["speedtest"]),
+                "auto_github": perf_advisor.options(self.path.parent)["auto_github"],
                 "spark": {n: self.spark(n) for n in names},
                 "selftest_spark": [{"ts": r["ts"], "status": r["status"]} for r in d["selftest"][-30:]]}
 
@@ -353,7 +359,16 @@ def api_run(ctx, m, body):
     return 200, d
 
 
+def api_autoreport(ctx, m, body):
+    from . import perf_advisor
+    if not isinstance(body, dict) or type(body.get("enabled")) is not bool:
+        return 400, {"error": "enabled must be a boolean"}
+    state = perf_advisor.configure(ctx.home, body["enabled"])
+    return 200, {"auto_github": state["auto_github"], "notice": "Only future sustained numeric findings are eligible; at most one new issue per seven days"}
+
+
 def dashboard_routes(register) -> None:
+    register("POST", r"/api/selfspeed/auto-github", api_autoreport)
     register("GET", r"/api/selfspeed", api_get)
     register("POST", r"/api/selfspeed/run", api_run)
 
