@@ -253,7 +253,7 @@ def make_skill(svc: SelfSpeed, lang: Callable[[], str]):
                                   {"recommendations": findings, "dashboard": "#/speed"}, code="PERF_ADVICE_READY")
 
             return [Tool("performance_advice",
-                         "'how can you become faster', 'איך אפשר לשפר ביצועים'.",
+                         "'be faster', 'שפר ביצועים'.",
                          advice_, NoArgs, permission="read"),
                     Tool("run_selftest", "'is anything broken', 'בדיקת תקינות'.", selftest_, SelfTestArgs, permission="read",
                          timeout_s=300),
