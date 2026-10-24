@@ -174,3 +174,22 @@ def test_setup_page_is_the_wizard_and_addons_moved():
     html = (root / "index.html").read_text(encoding="utf-8")
     assert 'href="#/setup" data-page="setup"' in html and 'href="#/addons"' in html
     assert re.search(r'wizard\.js', html)
+
+
+def test_next_marks_the_topic_done_and_progress_advances(ctx):
+    """#147: 'Got it, next' (learned) or a test result without an explicit 'Set up' still finishes the topic."""
+    assert call(ctx, "GET", "/api/wizard")[1]["finished"] == 0
+    call(ctx, "POST", "/api/wizard/topic/productivity/learned")
+    t = call(ctx, "GET", "/api/wizard/topic/productivity")[1]
+    assert t["status"] == "done"
+    d = call(ctx, "GET", "/api/wizard")[1]
+    assert d["finished"] == 1 and d["percent"] > 0
+    call(ctx, "POST", "/api/wizard/topic/voice/result", {"result": "works"})
+    assert call(ctx, "GET", "/api/wizard/topic/voice")[1]["status"] == "done"
+    call(ctx, "POST", "/api/wizard/topic/music/result", {"result": "skip"})
+    assert call(ctx, "GET", "/api/wizard/topic/music")[1]["status"] == "done"
+    call(ctx, "POST", "/api/wizard/topic/phone/choice", {"choice": "later"})
+    call(ctx, "POST", "/api/wizard/topic/phone/learned")
+    assert call(ctx, "GET", "/api/wizard/topic/phone")[1]["status"] == "later"      # Next never overrides Later / Skip
+    call(ctx, "POST", "/api/wizard/topic/cli/result", {"result": "fails"})
+    assert call(ctx, "GET", "/api/wizard/topic/cli")[1]["status"] == "todo"          # a failed test is not done
