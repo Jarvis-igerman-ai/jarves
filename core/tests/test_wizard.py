@@ -174,3 +174,23 @@ def test_setup_page_is_the_wizard_and_addons_moved():
     html = (root / "index.html").read_text(encoding="utf-8")
     assert 'href="#/setup" data-page="setup"' in html and 'href="#/addons"' in html
     assert re.search(r'wizard\.js', html)
+
+
+def test_wizard_api_is_fast_and_probes_connections_once(ctx, monkeypatch):
+    """#148: the tour must not re-probe connections on every call (the Pear TCP connect made each call ~0.4 s+)."""
+    import time
+    from jarves import connect
+    wizard._CONN_CACHE.clear()
+    calls = []
+    real = connect.items_json
+    monkeypatch.setattr(connect, "items_json", lambda *a, **k: (calls.append(1), real(*a, **k, pear_probe=lambda u: False))[1])
+    call(ctx, "GET", "/api/wizard")                          # warm (guides load once)
+    t0 = time.perf_counter()
+    for _ in range(5):
+        call(ctx, "GET", "/api/wizard")
+        call(ctx, "GET", "/api/wizard/topic/voice")
+    assert time.perf_counter() - t0 < 1.5
+    assert len(calls) == 1
+    call(ctx, "POST", "/api/wizard/topic/voice/choice", {"choice": "done"})     # a change drops the cache
+    call(ctx, "GET", "/api/wizard")
+    assert len(calls) == 2

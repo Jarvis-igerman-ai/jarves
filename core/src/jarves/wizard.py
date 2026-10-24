@@ -217,7 +217,23 @@ def topic_list(st: dict, version: str = __version__, changelog: str | None = Non
 
 
 # ---------------------------------------------------------------------- views
+_CONN_TTL = 30.0                                               # seconds; the status probes (a localhost TCP connect, files) are slow
+_CONN_CACHE: dict[str, tuple[float, dict]] = {}
+
+
 def _connect_states(home: Path, cfg) -> dict:
+    """Connection states for the tour. Cached for a short time so a page load and every Next do not re-probe (#148)."""
+    key = str(home)
+    hit = _CONN_CACHE.get(key)
+    if hit and time.monotonic() - hit[0] < _CONN_TTL:
+        return hit[1]
+    out = _connect_states_uncached(home, cfg)
+    if out:
+        _CONN_CACHE[key] = (time.monotonic(), out)
+    return out
+
+
+def _connect_states_uncached(home: Path, cfg) -> dict:
     from . import connect
     try:
         return {i["id"]: i for i in connect.items_json(home, cfg)["items"]}
@@ -294,6 +310,7 @@ def overview(home: Path, cfg, f: feat.Features) -> dict:
 
 # ---------------------------------------------------------------------- actions
 def set_choice(home: Path, tid: str, choice: str) -> dict:
+    _CONN_CACHE.pop(str(home), None)
     if choice not in SETUP_CHOICES:
         raise ValueError("choice must be done, skipped or later")
     t = _topic(tid)
@@ -309,6 +326,7 @@ def set_choice(home: Path, tid: str, choice: str) -> dict:
 
 def switch_on(home: Path, f: feat.Features, tid: str, confirmed: bool = False) -> dict:
     """SET UP for a topic with switches: turns its features on (through the same Features.set as everywhere)."""
+    _CONN_CACHE.pop(str(home), None)
     t = _topic(tid)
     if t.high and not confirmed:
         raise PermissionError("this topic is sensitive; confirm in the page first")
@@ -320,6 +338,7 @@ def switch_on(home: Path, f: feat.Features, tid: str, confirmed: bool = False) -
 
 def save_secret(home: Path, field_name: str, value: str) -> dict:
     """The only place a secret enters the wizard: straight to secrets.env, never to wizard.json or the logs."""
+    _CONN_CACHE.pop(str(home), None)
     s = SECRET_FIELDS.get(field_name)
     if s is None:
         raise KeyError(field_name)

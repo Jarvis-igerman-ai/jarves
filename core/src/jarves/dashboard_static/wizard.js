@@ -110,6 +110,8 @@
   }
 
   async function pageTour(arg) {
+    // the overview and the topic card load in parallel when the topic is already known (#148)
+    const pre = arg ? api("/api/wizard/topic/" + encodeURIComponent(arg)).catch(() => null) : null;
     const d = await api("/api/wizard");
     const all = d.topics.concat(d.collapsed);
     const cur = (arg && all.some((t) => t.id === arg)) ? arg : (d.next || (d.topics[0] && d.topics[0].id));
@@ -127,7 +129,7 @@
     const auto = d.automated ? L(`בדיקות אוטומטיות: ${d.automated.passed} עברו, ${d.automated.failed.length} נכשלו`, `Automated checks: ${d.automated.passed} passed, ${d.automated.failed.length} failed`) : L("בדיקות אוטומטיות עוד לא רצו", "Automated checks have not run yet");
     const left = el("div", {}, el("button", { type: "button", class: "ghost tour-list-toggle", "aria-controls": "tour-list", "aria-expanded": listOpen ? "true" : "false",
       onclick: () => { listOpen = !listOpen; document.getElementById("tour-list").classList.toggle("closed", !listOpen); } }, L("רשימת נושאים", "Topic list")), topicList(d, cur));
-    const t = cur ? await api("/api/wizard/topic/" + cur) : null;
+    const t = cur ? ((cur === arg && pre && await pre) || await api("/api/wizard/topic/" + cur)) : null;
     const right = el("div", {}, t ? [el("h2", {}, L(t.he, t.en) + (t.optional ? L(" (לא חובה)", " (optional)") : "")),
       setupStage(t, refresh), testStage(t, refresh), learnStage(t, refresh)] : el("div", { class: "card" }, L("אין נושאים.", "No topics.")));
     const bar = el("div", {}, el("div", { class: "small" }, L(`${d.finished} מתוך ${d.total} נושאים (${d.percent}%)`, `${d.finished} of ${d.total} topics (${d.percent}%)`)),
