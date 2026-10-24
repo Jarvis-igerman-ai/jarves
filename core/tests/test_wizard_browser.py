@@ -122,12 +122,13 @@ def test_keys_later_and_failed_with_a_note(site):
         p.wait_for_selector("#tour-note", state="visible")
         p.fill("#tour-note", "no sound at all")
         p.keyboard.press("Enter")
-        st = _until(p, f"d.done.includes('{b}')")
+        st = _until(p, f"d.failed.includes('{b}')")                      # Failed (n): out of the to-do, not done
         row = next(t for t in st["topics"] if t["id"] == b)
-        assert row["status"] == "fails"
+        assert row["status"] == "fails" and b not in st["done"] and b not in st["left"]
+        assert "(1)" in p.inner_text(".tour-failed summary")
         assert "#/issues" in p.get_attribute("#tour-msg a", "href")      # GitHub only through the review page
         p.keyboard.press("1")
-        _until(p, "d.done.length === 2")
+        _until(p, "d.done.length === 1")
         assert errs == []
     finally:
         ctx.close()

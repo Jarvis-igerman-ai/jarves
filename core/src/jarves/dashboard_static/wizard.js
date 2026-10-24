@@ -22,8 +22,8 @@
   // ------------------------------------------------------------------ local state (mirrors wizard.py)
   function counts() {
     const d = S.d;
-    const finished = d.topics.filter((t) => !t.left && t.done && t.done.version === d.release).length;
-    const total = d.left.length + finished;
+    const finished = d.topics.filter((t) => !t.left && t.done && t.done.how !== "fails" && t.done.version === d.release).length;
+    const total = d.left.length + finished + d.failed.length;          // a failure is not done (owner, 24 Oct)
     return { left: d.left.length, finished, total, percent: total ? Math.round(100 * finished / total) : 100 };
   }
   // Save in the background, strictly in order; a failure shows "Not saved" with Retry (the page never lies about it).
@@ -55,9 +55,10 @@
       t.left = false;
       t.status = how;
       t.done = { how, version: d.release };
-      if (!d.done.includes(id)) d.done.push(id);
+      const list = how === "fails" ? d.failed : d.done;               // Did not work -> Failed (n), not Done
+      if (!list.includes(id)) list.push(id);
       save(`/api/wizard/topic/${id}/done`, { how, note: note || "" }, L(t.he, t.en));
-      if (how === "fails") setMsg(el("span", {}, L("נשמר כ\"לא עבד\" ודיווח באג מקומי נוצר. ", "Saved as \"did not work\" and a local bug entry was made. "),
+      if (how === "fails") setMsg(el("span", {}, L("עבר לרשימה \"נכשלו\" ונוצר דיווח באג מקומי; יחזור לבדיקה כשיתוקן. ", "Moved to \"Failed\" with a local bug entry; it comes back for a retest when fixed. "),
         el("a", { href: "#/issues" }, L("לדווח ב-GitHub (תראו הכול לפני שליחה)", "Report it on GitHub (you review it first)"))));
     }
     const nx = d.left.length ? (d.left[i >= 0 && i < d.left.length ? i : 0]) : "";
@@ -185,10 +186,27 @@
       el("span", { class: "tour-mark", "aria-hidden": "true" }, MARK[t.done.how] || "✓"),
       el("button", { type: "button", class: "ghost tour-open", onclick: () => show(t.id) }, L(t.he, t.en)),
       el("span", { class: "small muted" }, L(...(HOW[t.done.how] || HOW.seen))),
-      el("button", { type: "button", class: "small", "aria-label": L(`שוב: ${t.he}`, `Again: ${t.en}`), onclick: async () => {
-        try { await S.chain; await post(`/api/wizard/topic/${t.id}/again`); S.d = await api("/api/wizard"); show(t.id); } catch (e) { setMsg(document.createTextNode(e.message)); } } },
+      el("button", { type: "button", class: "small", "aria-label": L(`שוב: ${t.he}`, `Again: ${t.en}`), onclick: () => reopen(t.id) },
         L("שוב", "Again"))));
     return el("details", { class: "tour-done" }, el("summary", {}, L(`הושלמו (${d.done.length})`, `Done (${d.done.length})`)), el("ul", {}, rows));
+  }
+
+  function failedList() {
+    const d = S.d;
+    if (!d.failed.length) return null;
+    const rows = d.failed.map(byId).filter(Boolean).map((t) => el("li", {},
+      el("span", { class: "tour-mark", "aria-hidden": "true" }, "✗"),
+      el("button", { type: "button", class: "ghost tour-open", onclick: () => show(t.id) }, L(t.he, t.en)),
+      el("button", { type: "button", class: "small", "aria-label": L(`לבדוק שוב: ${t.he}`, `Retest: ${t.en}`), onclick: () => reopen(t.id) },
+        L("לבדוק שוב", "Retest"))));
+    return el("details", { class: "tour-done tour-failed", open: true }, el("summary", {}, L(`נכשלו (${d.failed.length})`, `Failed (${d.failed.length})`)),
+      el("div", { class: "small muted" }, L("חוזר לבד כשהתקלה נסגרת או כשגרסה חדשה מתקנת אותו.", "Comes back by itself when its bug is closed or a new version fixes it.")),
+      el("ul", {}, rows));
+  }
+
+  async function reopen(id) {
+    try { await S.chain; await post(`/api/wizard/topic/${id}/again`); S.d = await api("/api/wizard"); show(id); }
+    catch (e) { setMsg(document.createTextNode(e.message)); }
   }
 
   function tools() {
@@ -196,9 +214,13 @@
     const out = el("div", { class: "small", role: "status", "aria-live": "polite" });
     const auto = d.automated ? L(`בדיקות אוטומטיות: ${d.automated.passed} עברו, ${d.automated.failed.length} נכשלו`, `Automated checks: ${d.automated.passed} passed, ${d.automated.failed.length} failed`)
       : L("הבדיקות האוטומטיות עוד לא רצו", "The automated checks have not run yet");
-    return el("details", { class: "tour-tools" }, el("summary", {}, L("כלים: בדיקות אוטומטיות וגיליון אישור", "Tools: automated checks and sign-off sheet")),
+    return el("details", { class: "tour-tools" }, el("summary", {}, L("כלים: בדיקה מהירה, בדיקות אוטומטיות וגיליון אישור", "Tools: quick check, automated checks and sign-off sheet")),
       el("div", { class: "small" }, auto), out,
       el("div", { class: "tour-actions" },
+        el("button", { type: "button", onclick: async () => {
+          try { await S.chain; const r = await post("/api/wizard/control", { op: "quick" }); S.d = await api("/api/wizard"); show(S.d.next);
+            setMsg(document.createTextNode(L(`בדיקה מהירה: ${r.back.length} נושאים בסיסיים חזרו לרשימה.`, `Quick check: ${r.back.length} basic topics are back in the list.`))); }
+          catch (e) { out.textContent = e.message; } } }, L("בדיקה מהירה של הבסיס", "Quick check of the basics")),
         el("button", { type: "button", onclick: async () => { out.textContent = L("בודק הכול…", "Checking everything…"); try { d.automated = await post("/api/wizard/automated"); paint(); } catch (e) { out.textContent = e.message; } } }, L("להריץ את הבדיקות האוטומטיות", "Run the automated checks")),
         el("button", { type: "button", onclick: async () => { try { await S.chain; const r = await post("/api/wizard/signoff", {}); out.textContent = L(`נכתב ${r.file}: ${r.open.length} שורות פתוחות`, `Written ${r.file}: ${r.open.length} rows open`); } catch (e) { out.textContent = e.message; } } }, L("לכתוב את גיליון האישור", "Write the sign-off sheet")),
         d.mode === "baseline" && !c.left ? el("button", { type: "button", onclick: async () => { await S.chain; await post("/api/wizard/control", { op: "finish_baseline" }); S.d = await api("/api/wizard"); paint(); } }, L("לסיים את הבדיקה הראשונה", "Finish the first full check")) : null,
@@ -220,7 +242,7 @@
       el("div", {}, L("כל הנושאים של הגרסה הזו הושלמו. נושא שישתנה בגרסה הבאה יחזור לכאן לבד.", "Every topic of this version is done. A topic that changes in a later version comes back here by itself.")));
     render(header(L("הגדרה וסיור", "Setup and tour"), sub), bar,
       el("div", { id: "tour-msg", class: "small tour-msg", role: "status", "aria-live": "polite" }, S.msg),
-      main, leftList(), doneList(), tools());
+      main, leftList(), failedList(), doneList(), tools());
   }
 
   // Enter = Works, 1/2/3 = Works / Did not work / Later; never while typing, never with a modifier key.

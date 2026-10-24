@@ -317,40 +317,46 @@ def done_of(e: dict) -> dict | None:
     return d if isinstance(d, dict) and d.get("how") in DONE_HOW else None
 
 
-def again_reason(t: Topic, d: dict | None, version: str = __version__, changelog: str | None = None) -> str:
-    """Why a FINISHED topic is asked again in this release ('' = it stays hidden in Done).
-    Same release (any build): never. Skipped ("not for me"): only by the owner's own "Again"."""
+def again_reason(t: Topic, d: dict | None, version: str = __version__, changelog: str | None = None,
+                 resolved: frozenset | set = frozenset()) -> str:
+    """Why an ANSWERED topic is asked again ('' = it stays in Done / Failed).
+    Same release (any build): never, except a failure whose linked bug entry was resolved (owner decision 24 Oct).
+    Skipped ("not for me"): only by the owner's own "Again"."""
     if not d:
         return ""
+    if d["how"] == "fails" and d.get("bug") and d["bug"] in resolved:
+        return "retest"                                        # its bug entry was closed: check the fix
     if int(d.get("rev") or 1) < t.rev and d["how"] != "skipped":
         return "changed"
     if version_key(d.get("version", "")) >= version_key(version) or d["how"] == "skipped":
         return ""
-    if d["how"] == "fails":
-        return "retest"
-    return "changed" if t.id in changed_since(d.get("version", ""), version, changelog) else ""
+    if t.id in changed_since(d.get("version", ""), version, changelog):
+        return "retest" if d["how"] == "fails" else "changed"
+    return ""
 
 
 def mode(st: dict) -> str:
     return "diff" if st.get("baseline") else "baseline"
 
 
-def queue(st: dict, version: str = __version__, changelog: str | None = None) -> list[str]:
+def queue(st: dict, version: str = __version__, changelog: str | None = None,
+          resolved: frozenset | set = frozenset()) -> list[str]:
     """Topic ids still LEFT, in the order they are asked: TOPICS order, Later ones at the end (oldest Later first)."""
     now, later = [], []
     for t in TOPICS:
         e = st["topics"].get(t.id, {})
         d = done_of(e)
-        if d and not again_reason(t, d, version, changelog):
+        if d and not again_reason(t, d, version, changelog, resolved):
             continue
         (later if e.get("later") else now).append(t.id)
     later.sort(key=lambda i: st["topics"][i]["later"])
     return now + later
 
 
-def topic_list(st: dict, version: str = __version__, changelog: str | None = None) -> list[str]:
+def topic_list(st: dict, version: str = __version__, changelog: str | None = None,
+               resolved: frozenset | set = frozenset()) -> list[str]:
     """Topic ids that belong to THIS release's sign-off: everything left plus everything answered in this release."""
-    left = set(queue(st, version, changelog))
+    left = set(queue(st, version, changelog, resolved))
     rel = version_key(version)
     return [t.id for t in TOPICS if t.id in left
             or version_key((done_of(st["topics"].get(t.id, {})) or {}).get("version", "")) == rel]
@@ -406,10 +412,11 @@ def topic_view(t: Topic, st: dict, f: feat.Features, conns: dict) -> dict:
             "status": status_of(e, t), "lines": card_lines(t)}
 
 
-def status_of(e: dict, t: Topic | None = None, version: str = __version__, changelog: str | None = None) -> str:
-    """'todo' / 'later' while the topic is left, else how it was finished: works / fails / skipped / seen."""
+def status_of(e: dict, t: Topic | None = None, version: str = __version__, changelog: str | None = None,
+              resolved: frozenset | set = frozenset()) -> str:
+    """'todo' / 'later' while the topic is left, else its answer: works / fails / skipped / seen."""
     d = done_of(e)
-    if d and not (t and again_reason(t, d, version, changelog)):
+    if d and not (t and again_reason(t, d, version, changelog, resolved)):
         return d["how"]
     return "later" if (e or {}).get("later") else "todo"
 
@@ -420,31 +427,44 @@ def card_lines(t: Topic) -> dict:
             "expect_he": exp_he, "expect_en": exp_en}
 
 
+def resolved_bugs(store) -> frozenset:
+    """Fingerprints of tour bug entries the owner (or a fix) resolved: their failed topics come back for a retest."""
+    try:
+        return frozenset(r["fingerprint"] for r in store.issues("resolved") if r.get("kind") == "setup_tour")
+    except Exception as e:                                     # the Issues table is optional for the tour
+        logs.warn("wizard", "WIZARD_ISSUES_UNREADABLE", "issue states unavailable", error_type=type(e).__name__)
+        return frozenset()
+
+
 def overview(home: Path, cfg=None, f: feat.Features | None = None, version: str = __version__,
-             changelog: str | None = None) -> dict:
+             changelog: str | None = None, resolved: frozenset | set = frozenset()) -> dict:
     """Everything the page needs for EVERY card, from local state only: no connection probe, no switch probe, no
-    network (#148/#152 speed budget). The slow parts load per topic, only when the owner opens More."""
+    network (#148/#152 speed budget). The slow parts load per topic, only when the owner opens More.
+    Lists: left (to do, in order), done (answered, not failed), failed (Did not work: out of the to-do list, NOT done,
+    back by itself when its bug entry is resolved or a later release names it; owner decision 24 Oct)."""
     st = read_state(home)
-    left = queue(st, version, changelog)
+    left = queue(st, version, changelog, resolved)
     rel = version_key(version)
-    rows, done = [], []
+    rows, done, failed = [], [], []
     for t in TOPICS:
         e = st["topics"].get(t.id, {})
         d = done_of(e)
-        reason = again_reason(t, d, version, changelog)
+        reason = again_reason(t, d, version, changelog, resolved)
         is_left = t.id in left
         row = {"id": t.id, "he": t.he, "en": t.en, "optional": t.optional, "page": t.page, "cli": t.cli,
-               **card_lines(t), "status": status_of(e, t, version, changelog), "left": is_left, "again": reason,
-               "done": d, "note": e.get("note", "") if d and d["how"] == "fails" else ""}
+               **card_lines(t), "status": status_of(e, t, version, changelog, resolved), "left": is_left,
+               "again": reason, "done": d, "smoke": t.id in SMOKE,
+               "note": e.get("note", "") if d and d["how"] == "fails" else ""}
         rows.append(row)
         if not is_left and d:
-            done.append(t.id)
+            (failed if d["how"] == "fails" else done).append(t.id)
     this_rel = [i for i in done if version_key(st["topics"][i]["done"].get("version", "")) == rel]
-    total = len(left) + len(this_rel)
+    total = len(left) + len(this_rel) + len(failed)
     return {"version": __version__, "release": stable_version(version), "mode": mode(st), "topics": rows,
-            "left": left, "done": done, "total": total, "finished": len(this_rel),
+            "left": left, "done": done, "failed": failed, "total": total, "finished": len(this_rel),
             "percent": int(100 * len(this_rel) / total) if total else 100, "next": left[0] if left else "",
-            "automated": st.get("automated"), "baseline": st.get("baseline"), "signoff": signoff_state(home)}
+            "smoke": list(SMOKE), "automated": st.get("automated"), "baseline": st.get("baseline"),
+            "signoff": signoff_state(home)}
 
 
 # ---------------------------------------------------------------------- actions
@@ -491,6 +511,19 @@ def mark_done(ctx, tid: str, how: str, note: str = "", f: feat.Features | None =
         _save(ctx.home, st)
     logs.info("wizard", "WIZARD_DONE", "tour topic finished", item=t.id, decision=how)
     return {"done": "seen"}
+
+
+def quick_check(home: Path) -> dict:
+    """Opt-in 'Quick check' (owner decision 24 Oct): the basic SMOKE topics go back into the to-do list; a topic
+    the owner skipped ("not for me") stays skipped. Never automatic."""
+    back = []
+    for tid in SMOKE:
+        d = done_of(read_state(home)["topics"].get(tid, {}))
+        if d and d["how"] != "skipped":
+            again(home, tid)
+            back.append(tid)
+    logs.info("wizard", "WIZARD_QUICK_CHECK", "tour quick check started", count=len(back))
+    return {"back": back}
 
 
 def again(home: Path, tid: str) -> dict:
@@ -626,6 +659,8 @@ def record_result(ctx, f: feat.Features, tid: str, result: str, note: str = "") 
                     st["features"].pop(fid, None)
             e["bug"] = out["bug"]
         _finish(e, {"works": "works", "fails": "fails", "skip": "skipped"}[result], t.rev)
+        if result == "fails":
+            e["done"]["bug"] = out["bug"]                       # resolving that bug entry brings the topic back
         _save(home, st)
     logs.info("wizard", "WIZARD_DONE", "tour topic finished", item=t.id, decision=result)
     return out
@@ -744,7 +779,7 @@ def _fx(ctx) -> feat.Features:
 
 def dashboard_routes(register) -> None:
     def get(ctx, _m, _b):
-        return 200, overview(ctx.home, ctx.cfg, _fx(ctx))
+        return 200, overview(ctx.home, ctx.cfg, resolved=resolved_bugs(ctx.store))
 
     def get_topic(ctx, m, _b):
         if m.group(1) not in BY_ID:
@@ -829,8 +864,10 @@ def dashboard_routes(register) -> None:
             finish_baseline(ctx.home)
         elif op == "reset":
             reset(ctx.home)
+        elif op == "quick":
+            return 200, quick_check(ctx.home)
         else:
-            return 400, {"error": "op must be finish_baseline or reset"}
+            return 400, {"error": "op must be finish_baseline, reset or quick"}
         return 200, {"ok": True}
 
     register("GET", r"/api/wizard", get)
@@ -861,6 +898,7 @@ def add_cli(sub) -> None:
                    help="with --done: works, fails (writes a local bug entry), skip (not for me) or seen (default)")
     p.add_argument("--note", default="", help="with --done --how fails: a short note (stays on this PC)")
     p.add_argument("--again", metavar="TOPIC", help="put a finished topic back into the list")
+    p.add_argument("--quick", action="store_true", help="Quick check: put the basic topics back into the list")
     p.add_argument("--reset", action="store_true", help="put every topic back into the list (needs --yes)")
     p.add_argument("--yes", action="store_true", help="confirm --reset")
     p.add_argument("--signoff", action="store_true", help="write docs/reviews/MANUAL_TEST_<version>.md from your results")
@@ -874,8 +912,10 @@ def _print_rows(o: dict, rows: list[dict], as_json: bool) -> None:
         print(json.dumps({**{k: v for k, v in o.items() if k != "topics"}, "topics": safe},
                          ensure_ascii=False, indent=1, default=str))
         return
-    print(clilang.fmt(f"הגדרה וסיור {o['release']}: נשארו {len(o['left'])}, הושלמו {len(o['done'])}",
-                      f"Setup and tour {o['release']}: {len(o['left'])} left, {len(o['done'])} done"))
+    print(clilang.fmt(f"הגדרה וסיור {o['release']}: נשארו {len(o['left'])}, הושלמו {len(o['done'])}, "
+                      f"נכשלו {len(o['failed'])}",
+                      f"Setup and tour {o['release']}: {len(o['left'])} left, {len(o['done'])} done, "
+                      f"{len(o['failed'])} failed"))
     for v in rows:
         print(f"  [{v['status']:^7}] {v['id']:<15} {clilang.fmt(v['he'], v['en'])}")
 
@@ -912,6 +952,11 @@ def cmd_tour(a, cfg, home) -> int:
         again(home, a.again)
         print(clilang.fmt(f"חזר לרשימה: {BY_ID[a.again].he}.", f"Back in the list: {BY_ID[a.again].en}."))
         return 0
+    if getattr(a, "quick", False):
+        r = quick_check(home)
+        print(clilang.fmt(f"בדיקה מהירה: {len(r['back'])} נושאים בסיסיים חזרו לרשימה.",
+                          f"Quick check: {len(r['back'])} basic topics are back in the list."))
+        return 0
     if getattr(a, "reset", False):
         if not getattr(a, "yes", False):
             print(clilang.fmt("TOUR_RESET: להחזיר את כל הנושאים לרשימה? הוסיפו --yes.",
@@ -921,7 +966,12 @@ def cmd_tour(a, cfg, home) -> int:
         print(clilang.fmt("כל הנושאים חזרו לרשימה.", "Every topic is back in the list."))
         return 0
     if getattr(a, "status", False) or getattr(a, "left", False):
-        o = overview(home, cfg)
+        from .dashboard import Ctx
+        ctx = Ctx(home, cfg)
+        try:
+            o = overview(home, cfg, resolved=resolved_bugs(ctx.store))
+        finally:
+            ctx.close()
         rows = [r for r in o["topics"] if r["left"]] if a.left else o["topics"]
         if a.left:
             rows.sort(key=lambda r: o["left"].index(r["id"]))

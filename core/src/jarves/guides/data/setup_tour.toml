@@ -35,13 +35,13 @@ en = "Need to set something up (a switch, a key, a connection) or an automatic c
 action = ""
 
 [[steps]]
-he = "\"לא עבד\" שומר דיווח באג מקומי עם הערה קצרה (לא חובה). שליחה ל-GitHub רק מעמוד דיווחי התקלות, אחרי שראיתם ואישרתם."
-en = "\"Did not work\" saves a local bug entry with a short optional note. Sending it to GitHub happens only from the Bug reports page, after you review and confirm."
+he = "\"לא עבד\" מעביר את הנושא לרשימה \"נכשלו\" ושומר דיווח באג מקומי עם הערה קצרה (לא חובה). הנושא חוזר לבד כשהתקלה נסגרת, או בלחיצה על \"לבדוק שוב\". שליחה ל-GitHub רק מעמוד דיווחי התקלות, אחרי שראיתם ואישרתם."
+en = "\"Did not work\" moves the topic to the \"Failed\" list and saves a local bug entry with a short optional note. It comes back by itself when the bug is closed, or with \"Retest\". Sending it to GitHub happens only from the Bug reports page, after you review and confirm."
 action = ""
 
 [[steps]]
-he = "נושא שהושלם נמצא ברשימה \"הושלמו\". \"שוב\" מחזיר אותו. בטרמינל: jarvis tour --left, ‏jarvis tour --done <נושא>, ‏jarvis tour --again <נושא>, ‏jarvis tour --reset --yes."
-en = "A finished topic waits in the \"Done\" list; \"Again\" brings it back. In a terminal: jarvis tour --left, jarvis tour --done <topic>, jarvis tour --again <topic>, jarvis tour --reset --yes."
+he = "נושא שהושלם נמצא ברשימה \"הושלמו\". \"שוב\" מחזיר אותו. בכלים, \"בדיקה מהירה של הבסיס\" מחזיר את הנושאים הבסיסיים (jarvis tour --quick). בטרמינל: jarvis tour --left, ‏jarvis tour --done <נושא>, ‏jarvis tour --again <נושא>, ‏jarvis tour --reset --yes."
+en = "A finished topic waits in the \"Done\" list; \"Again\" brings it back. In Tools, \"Quick check of the basics\" brings back the basic topics (jarvis tour --quick). In a terminal: jarvis tour --left, jarvis tour --done <topic>, jarvis tour --again <topic>, jarvis tour --reset --yes."
 action = "command:jarvis tour --left"
 
 [[steps]]
@@ -58,8 +58,8 @@ fix_en = "The dashboard is off. Turn it on: jarvis features on dashboard, then j
 [[problems]]
 he = "נושא שסיימתי חזר לרשימה"
 en = "A topic I finished came back"
-fix_he = "זה קורה רק בגרסה חדשה, כשהנושא השתנה או נכשל קודם (כתוב בכרטיס: \"השתנה בגרסה הזו\" או \"בדיקה חוזרת\"). ענו פעם אחת והוא ייעלם שוב."
-fix_en = "This happens only in a new version, when the topic changed or failed before (the card says \"Changed in this version\" or \"Retest after a fix\"). Answer once and it goes away again."
+fix_he = "זה קורה כשהתקלה שדיווחתם נסגרה, או בגרסה חדשה שהנושא השתנה בה (כתוב בכרטיס: \"השתנה בגרסה הזו\" או \"בדיקה חוזרת\"). ענו פעם אחת והוא ייעלם שוב."
+fix_en = "This happens when the bug you reported was closed, or in a new version that changed the topic (the card says \"Changed in this version\" or \"Retest after a fix\"). Answer once and it goes away again."
 
 [[problems]]
 he = "התשובה לא נשמרה"

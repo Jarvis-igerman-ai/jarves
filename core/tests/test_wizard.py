@@ -115,8 +115,10 @@ def test_diff_since_version_asks_only_changed_and_failed(home):
     st["topics"]["voice"]["done"]["how"] = "fails"
     st["topics"]["telegram"]["done"]["how"] = "skipped"
     assert wizard.queue(st, "4.0.1.360", log) == []                    # another build of the same release: nothing
-    assert wizard.queue(st, "4.0.2", log) == ["voice", "whatsapp"]      # failed -> retest; WhatsApp changed
-    assert wizard.again_reason(wizard.BY_ID["voice"], st["topics"]["voice"]["done"], "4.0.2", log) == "retest"
+    assert wizard.queue(st, "4.0.2", log) == ["whatsapp"]               # WhatsApp changed; voice's failure waits
+    log2 = log.replace("WhatsApp bridge", "WhatsApp bridge and wake word")
+    assert wizard.queue(st, "4.0.2", log2) == ["voice", "whatsapp"]     # a release that names the failed topic
+    assert wizard.again_reason(wizard.BY_ID["voice"], st["topics"]["voice"]["done"], "4.0.2", log2) == "retest"
     assert "music" not in wizard.changed_since("4.0.1", "4.0.2", log)  # 4.0.1's own section is not "since"
     assert wizard.changed_since("4.0.0", "4.0.2", log) >= {"music", "whatsapp"}
     assert "telegram" not in wizard.queue(st, "4.0.3", log + "## 4.0.3\n- Telegram fixes\n")   # skipped stays skipped
@@ -143,6 +145,30 @@ def test_every_answer_but_later_finishes_and_persists(ctx):
     assert by["cli"]["done"]["version"] == wizard.stable_version()
     assert call(ctx, "POST", "/api/wizard/topic/cli/done", {"how": "bogus"})[0] == 400
     assert call(ctx, "POST", "/api/wizard/topic/nope/done", {"how": "seen"})[0] == 404
+
+
+def test_did_not_work_goes_to_failed_and_returns_when_its_bug_is_resolved(ctx):
+    """Owner decision 24 Oct: Did not work leaves the to-do list for Failed (n), is NOT done, and comes back by
+    itself when its linked bug entry is closed."""
+    call(ctx, "POST", "/api/wizard/topic/music/done", {"how": "fails", "note": "no sound"})
+    d = call(ctx, "GET", "/api/wizard")[1]
+    assert d["failed"] == ["music"] and "music" not in d["left"] and "music" not in d["done"]
+    assert d["finished"] == 0 and d["total"] == 16
+    bug = next(i for i in ctx.store.issues("open") if i["kind"] == "setup_tour")
+    ctx.store.set_issue_status(bug["id"], "resolved")
+    d = call(ctx, "GET", "/api/wizard")[1]
+    assert "music" in d["left"] and not d["failed"]
+    assert next(t for t in d["topics"] if t["id"] == "music")["again"] == "retest"
+
+
+def test_quick_check_is_opt_in_and_keeps_skipped(ctx):
+    for tid in wizard.SMOKE:
+        call(ctx, "POST", f"/api/wizard/topic/{tid}/done", {"how": "seen"})
+    call(ctx, "POST", "/api/wizard/topic/music/done", {"how": "skipped"})
+    assert not set(wizard.SMOKE) & set(call(ctx, "GET", "/api/wizard")[1]["left"])     # never re-asked by itself
+    r = call(ctx, "POST", "/api/wizard/control", {"op": "quick"})[1]
+    assert "music" not in r["back"] and set(r["back"]) == set(wizard.SMOKE) - {"music"}
+    assert set(r["back"]) <= set(call(ctx, "GET", "/api/wizard")[1]["left"])
 
 
 def test_later_moves_to_the_end_and_again_reopens(ctx):
