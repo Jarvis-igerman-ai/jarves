@@ -7,14 +7,14 @@
 | Milestone | Development status | Validation / remaining work |
 | --- | --- | --- |
 | **V4** | **CLOSED as an active feature-development milestone.** V4 baseline delivered in 4.0.0 and subsequent 4.0.1 code; no further V4 feature scope planned. | **Not fully accepted or security-cleared:** real Windows voice/camera/install and agent sessions, release sign-off and any remaining bugs/alerts go into V4.5. Keep [#1](https://github.com/igalgerman/jarves/issues/1), [#2](https://github.com/igalgerman/jarves/issues/2), [#58](https://github.com/igalgerman/jarves/issues/58) and [#77](https://github.com/igalgerman/jarves/issues/77) open until evidence satisfies their criteria; do not close issues simply because the development phase ended. |
-| **V4.5** | **Planned**, implementation and release not yet started. | Explicit stabilization closure of V4's verified gaps plus security, camera, manual QA/Skill and faster PR/merge flow. [Plan](plans/V4_5_STABILIZATION_SECURITY_QA.md). |
+| **V4.5** | **Approved by the owner 24 Oct 2026; implementation authorized in bounded rows, see [NOW](NOW.md).** No 4.5.0 release or tag yet. | Explicit stabilization closure of V4's verified gaps plus security, camera, manual QA/Skill and faster PR/merge flow. [Plan](plans/V4_5_STABILIZATION_SECURITY_QA.md). |
 | **V5** | **Partially implemented**, with already-merged code. | Real Android-device acceptance, integration and release gates still open. |
 
 Older "V4 open PR" and "V5 in open PR" statements later in this document are **dated historical snapshots**, not current development status. The repository and actual PR/CI states are authoritative for completed code.
 
 ## V4.5 — Stabilization, Security, Camera & Guided QA (plan recorded 24 October 2026)
 
-**Status: owner-requested planning, documented but NOT implemented or released.** [V4.5 work package](plans/V4_5_STABILIZATION_SECURITY_QA.md) is the canonical scope/acceptance definition; [NOW](NOW.md) is the sole implementation authorization. V4.5 is a stabilization/quality milestone after the V4/4.0.1 cycle, not a replacement for built V5 phone access, V5's real-device acceptance, V6 car, V7 Android or future hardware. No release tag or schedule is implied.
+**Status: owner-approved 24 Oct 2026; bounded implementation authorized in [NOW](NOW.md), not yet released.** [V4.5 work package](plans/V4_5_STABILIZATION_SECURITY_QA.md) is the canonical scope/acceptance definition; [NOW](NOW.md) is the sole implementation authorization. V4.5 is a stabilization/quality milestone after the V4/4.0.1 cycle, not a replacement for built V5 phone access, V5's real-device acceptance, V6 car, V7 Android or future hardware. No release tag or schedule is implied.
 
 **Early V4.5 priority:** the initial PR-conflict-reduction and fast, safe patch-delivery slice will be implemented alongside early security remediation, not at the end; proposed measurement targets are median under 15 minutes for comparable small ready-to-merge PRs, 70% fewer avoidable conflicts and 3–5 scoped parallel agents, subject to the real CI baseline. See the [V4.5 plan](plans/V4_5_STABILIZATION_SECURITY_QA.md#early-v45-priority--make-patches-faster-while-security-remediation-is-underway-owner-decision-24-oct).
 

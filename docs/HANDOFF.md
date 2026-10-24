@@ -1,3 +1,5 @@
+V4.5 approved by the owner 24 Oct 2026: [NOW](NOW.md) is now the bounded V4.5 authorization (the old NOW text is kept in [reviews/NOW_SWV1_18OCT2026](reviews/NOW_SWV1_18OCT2026.md)). Open questions for the owner are listed at the end of NOW. Docs only; nothing implemented yet.
+
 PR #110 conflict-resolution evidence and carried decision gates: [handoff](handoff/2026-10-24-pr110-merge.md).
 
 ## Web chat: busy-flag race fixed — 23 Oct 2026
