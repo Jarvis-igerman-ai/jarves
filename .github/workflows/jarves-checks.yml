@@ -14,10 +14,9 @@ name: jarves-checks
 # (core/tools/ci_flake.py, flake-report artifact). Zero skips stay enforced. Nightly: nightly.yml.
 on:
   push:
-    branches: [main, next]   # `next` = the batch run of the integration-branch flow (docs/NEXT_FLOW.md)
+    branches: [main]
     tags: ["v*", "win-v*"]
   pull_request:
-    branches-ignore: [next]   # PRs into `next` get the light run of next-flow.yml
     types: [opened, synchronize, reopened, ready_for_review]
   # GitHub merge queue (org ruleset, #161): the full matrix runs once on the queue's merge group, the exact commit that
   # lands on main; the push run on main then reuses its installer artifact by tree hash (ci_reuse.py), ~1 min.

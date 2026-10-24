@@ -1,6 +1,6 @@
 name: jarves-autolabel
-# Adds the `automerge` label to LOW-RISK PRs (docs/RELEASING.md "Automatic labelling of low-risk PRs"), so the queue
-# (automerge.yml) merges them once `CI result (single required check)` is green. It never merges, never bypasses a check.
+# Adds the `automerge` label to LOW-RISK PRs (docs/RELEASING.md "Automatic labelling of low-risk PRs"), so
+# automerge.yml puts them in the merge queue once `CI result (single required check)` is green. It never merges, never bypasses a check.
 # Classification: core/tools/risk_class.py (standard library, no network). Dependabot: dependabot-automerge.yml.
 # Switch: repository variable ENABLE_AUTOLABEL = "true" or unset (docs, tests, guides/locales), "all" (also PRs labelled
 # `bugfix` with < 150 changed lines), "false" (off). Labels `needs-review` / `no-automerge` always block.
@@ -9,7 +9,7 @@ name: jarves-autolabel
 # may intentionally lack Issues write. An unavailable label must fail visibly, not be masked by `|| true`.
 on:
   pull_request_target:
-    branches: [main, next]
+    branches: [main]
     types: [opened, reopened, synchronize, ready_for_review, labeled, unlabeled]
   merge_group:              # the required check must also report in the merge queue (#161); labels were judged on the PR
     types: [checks_requested]

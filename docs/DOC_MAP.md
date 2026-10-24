@@ -48,7 +48,6 @@ Current dashboard review: [23 Oct findings inventory and recheck gates](reviews/
 | [CI_PERFORMANCE](CI_PERFORMANCE.md) | CI speed, shards and the fast release path | general | current | [RELEASING](RELEASING.md) |
 | [Performance Advisor](performance_advisor.md) | Local evidence-based JARVES speed recommendations and one opt-in rolling GitHub issue (all confirmed metrics) | quality/operations | under validation | [CI_PERFORMANCE](CI_PERFORMANCE.md) |
 | [RELEASING](RELEASING.md) | How a release is built, signed and published | general | current | [CI_PERFORMANCE](CI_PERFORMANCE.md) |
-| [NEXT_FLOW](NEXT_FLOW.md) | The `next` integration branch: light PR CI, batch run, bot fast-forward of main, how to switch it on | general | built, off by default | [CI_PERFORMANCE](CI_PERFORMANCE.md) |
 | [CI_DETERMINISM](CI_DETERMINISM.md) | Network guard, offline stub, flake retry and quarantine for deterministic CI | general | current | [CI_PERFORMANCE](CI_PERFORMANCE.md) |
 | [PREPUSH](PREPUSH.md) | The local gate `python core/tools/prepush.py` (same quick checks as CI), the optional pre-push hook, and the PR failure-summary comment | general | current | [CI_PERFORMANCE](CI_PERFORMANCE.md) |
 | [handoff/2026-10-23-jarvis-talk](handoff/2026-10-23-jarvis-talk.md) | Handoff: `jarvis talk` live conversation without the wake word (CLI, dashboard, tray) | voice | current | [HANDOFF](HANDOFF.md) |
