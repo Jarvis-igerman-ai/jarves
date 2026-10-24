@@ -2,7 +2,7 @@
 
     python core/tools/dependabot_gate.py --title "Bump x from 1.2.3 to 1.2.4" [--body TEXT]    # prints patch|minor|major|unknown|group
 
-Exit code 0 = eligible for the `automerge` label (the existing queue, .github/workflows/automerge.yml, then merges it
+Exit code 0 = eligible for the `automerge` label (.github/workflows/automerge.yml then puts it in the merge queue
 only when ALL checks are green), 1 = not eligible. Pure text parsing: no network, no checkout of the PR's code. A grouped
 update ("Bump the pip group ... with 3 updates") is eligible only when the body lists no major bump. Standard library only.
 """

@@ -67,4 +67,17 @@ def test_workflow_contract():
     text = (WF / "autolabel.yml").read_text(encoding="utf-8")
     assert "risk_class.py" in text
     am = (WF / "automerge.yml").read_text(encoding="utf-8")
-    assert "needs-review" in am and "no-automerge" in am and "--workflow jarves-checks" in am   # blocks + waits for main runs
+    assert "needs-review" in am and "no-automerge" in am and "--auto" in am     # blocks; enters the native merge queue
+
+
+def test_automerge_only_turns_on_auto_merge_for_the_native_queue():
+    """#161: the custom queue (direct merges, could not test PRs together) is retired. Labelled PRs get auto-merge, the
+    ruleset's merge queue tests them with the latest main and the PRs ahead (merge_group) and merges. No direct merge,
+    no checkout of PR code, drafts and blocking labels are skipped, labels set with GITHUB_TOKEN are swept after CI."""
+    doc = yaml.safe_load((WF / "automerge.yml").read_text(encoding="utf-8"))
+    run = doc["jobs"]["enqueue"]["steps"][0]["run"]
+    assert 'gh pr merge "$n" -R "$REPO" --auto --merge' in run and run.count("gh pr merge") == 1
+    assert "isDraft" in run and all(lbl in run for lbl in ("needs-review", "no-automerge", "do-not-merge", "wip"))
+    assert not any("checkout" in s.get("uses", "") for s in doc["jobs"]["enqueue"]["steps"])
+    assert doc[True]["workflow_run"]["workflows"] == ["jarves-checks"] and "labeled" in doc[True]["pull_request_target"]["types"]
+    assert not (WF / "next-flow.yml").exists()                                   # the `next` flow is retired with it
