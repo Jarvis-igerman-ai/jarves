@@ -163,7 +163,7 @@ async def test_missing_greeting_with_ended_session_still_fails(home, cfg, monkey
                 live_factory=Live, console_logs=False, use_real_audio=False)
     await core.start()
     try:
-        with pytest.raises(RuntimeError, match="audio was not received"):
+        with pytest.raises(RuntimeError, match="did not become ready"):
             await core.prepare_desktop()
     finally:
         await core.stop()

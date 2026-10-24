@@ -290,7 +290,7 @@ async def test_second_start_while_a_session_is_open_is_ignored(home, cfg, monkey
 
 
 async def test_failed_startup_stops_the_half_started_session(home, cfg, monkeypatch):
-    """prepare_desktop failed (no greeting audio) but its session stayed open; the face then opened a second one."""
+    """prepare_desktop failed (startup error other than a missing greeting, #122) but its session stayed open; the face then opened a second one."""
     monkeypatch.setenv("OPENAI_API_KEY", "sk-test-not-real")
     cfg.voice.activation = "conversation"
     cfg.voice.greeting = True
@@ -307,7 +307,7 @@ async def test_failed_startup_stops_the_half_started_session(home, cfg, monkeypa
             pass
 
         async def wait_ready(self):
-            raise RuntimeError("live greeting audio was not received")
+            raise RuntimeError("live session closed during startup")
 
         def present(self):
             pass
