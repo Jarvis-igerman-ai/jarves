@@ -263,9 +263,8 @@ def make_skill(svc: SelfSpeed, lang: Callable[[], str]):
     return SelfSpeedSkill()
 
 
-INSTRUCTION = ("To check yourself or your speed, call run_selftest ('בדיקה עצמית', 'is anything broken?') or run_speedtest "
-               "('בדיקת מהירות', 'how fast are you?'). For 'איך לשפר ביצועים' or 'what is slow?' call performance_advice. "
-               "Report only measured recommendations, never invent findings or promise a GitHub issue without a URL.")
+INSTRUCTION = ("For checks use run_selftest; for speed use run_speedtest; for measured suggestions "
+               "use performance_advice. Never invent measurements, findings or GitHub issue URLs.")
 
 
 # ---------------------------------------------------------------------- scheduler jobs
