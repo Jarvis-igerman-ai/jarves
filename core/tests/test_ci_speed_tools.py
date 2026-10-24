@@ -220,6 +220,8 @@ def test_green_test_only_proof_is_exact_tree_same_repo_pr_only():
     hit = ci_reuse.resolve_tests("o/r", TREE, _api(proof, {101: _run(101)}))
     assert hit == {"run_id": 101, "artifact_id": 7, "name": name, "head_sha": "s" * 40}
     assert ci_reuse.resolve_tests("o/r", "bad-tree", _api(proof, {})) is None
+    # a green merge-queue run (merge_group) is the same proof: it tested exactly the commit that lands on main
+    assert ci_reuse.resolve_tests("o/r", TREE, _api(proof, {101: _run(101, event="merge_group")}))["run_id"] == 101
 
 
 @pytest.mark.parametrize("bad", [
