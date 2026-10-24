@@ -1570,8 +1570,17 @@ class Core:
                 if self.live is None or not hasattr(self.live, "wait_ready"):
                     raise RuntimeError("live voice did not become ready; check logs and API limits")
                 self._startup_stage("waiting_audio", "Loading greeting audio...")
-                await self.live.wait_ready()
-                self._greeted = True                 # greeting comes from this same live session, never a second TTS call
+                try:
+                    await self.live.wait_ready()
+                except RuntimeError as e:
+                    # #122: a live session that is still open but sent no greeting audio (even after the nudge)
+                    # must not take the Core down: continue without a greeting, truthfully. An ended session fails.
+                    if not getattr(self.live, "running", False) or "greeting audio" not in str(e):
+                        raise
+                    logs.warn("voice", "LIVE_GREETING_MISSED", "no greeting audio; continuing without a greeting",
+                              error_type=type(e).__name__)
+                    self._startup_stage("waiting_audio", "No greeting audio arrived; continuing without a greeting.")
+                self._greeted = True                # greeting comes from this same live session, never a second TTS call
             elif self.use_real_audio and self.voice_mode != "off":
                 self._startup_stage("loading", "Preparing local wake microphone...")
                 deadline = time.monotonic() + 20

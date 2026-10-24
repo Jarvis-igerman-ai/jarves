@@ -108,6 +108,67 @@ async def test_prepare_waits_for_audio_and_reuses_session_without_tts(home, cfg,
         await core.stop()
 
 
+class _NoGreetingLive:
+    running = True
+    calls: list = []
+
+    def __init__(self, core, **kwargs):
+        pass
+
+    async def start(self):
+        pass
+
+    async def wait_ready(self):
+        raise RuntimeError("live greeting audio was not received; check voice/network logs")
+
+    def present(self):
+        pass
+
+    async def stop(self):
+        type(self).calls.append("stop")
+
+
+async def test_missing_greeting_with_open_session_degrades_instead_of_failing(home, cfg, monkeypatch):
+    """#122: 1 of 5 GPT-Live starts got no greeting audio; the Core crashed at the 15 s limit. A live session that is
+    still open continues WITHOUT a greeting (truthful log + startup detail), no second TTS greeting, no crash."""
+    monkeypatch.setenv("OPENAI_API_KEY", "test-not-real")
+    cfg.voice.activation = "conversation"
+    cfg.voice.greeting = True
+
+    class Live(_NoGreetingLive):
+        calls = []
+
+    speech = FakeTTS()
+    core = Core(cfg, home, audio=SimAudio(), stt=FakeSTT(), tts=speech, player=FakePlayer(),
+                live_factory=Live, console_logs=False, use_real_audio=False)
+    await core.start()
+    try:
+        await core.prepare_desktop()
+        st = core.snapshot()["startup"]
+        assert st["ready"] and core.live is not None and not speech.spoken and "stop" not in Live.calls
+    finally:
+        await core.stop()
+
+
+async def test_missing_greeting_with_ended_session_still_fails(home, cfg, monkeypatch):
+    monkeypatch.setenv("OPENAI_API_KEY", "test-not-real")
+    cfg.voice.activation = "conversation"
+    cfg.voice.greeting = True
+
+    class Live(_NoGreetingLive):
+        running = False
+        calls = []
+
+    core = Core(cfg, home, audio=SimAudio(), stt=FakeSTT(), tts=FakeTTS(), player=FakePlayer(),
+                live_factory=Live, console_logs=False, use_real_audio=False)
+    await core.start()
+    try:
+        with pytest.raises(RuntimeError, match="did not become ready"):
+            await core.prepare_desktop()
+    finally:
+        await core.stop()
+
+
 async def test_close_loading_window_cancels_boot_and_stops_core():
     closing = asyncio.Event()
     events = []

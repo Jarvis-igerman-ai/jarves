@@ -677,3 +677,76 @@ def test_jarvis_show_reports_a_failure_on_stderr_with_exit_1(monkeypatch, capsys
     assert cli.cmd_display(SimpleNamespace(cmd="show"), cfg, home) == 1
     err = capsys.readouterr().err
     assert "ERROR" in err and "run_face.cmd" in err and "jarvis diag" in err
+
+
+# ---------------------------------------------------------------------- dashboard "Start JARVES" (stopped Core had no button)
+def test_dashboard_start_button_launches_core_like_cli_and_reports_state(home, cfg, monkeypatch):
+    from jarves import cli
+    from jarves.dashboard import Ctx
+    spawned = []
+    monkeypatch.setattr(cli, "_background_spawn", lambda h, show: spawned.append((h, show)))
+    monkeypatch.setattr(rt_mod, "_ask_core", lambda ctx, msg, expect: None)        # Core is stopped
+    monkeypatch.setitem(rt_mod._START, "at", -1e9)
+    monkeypatch.setitem(rt_mod._START, "error", None)
+    ctx = Ctx(home, cfg)
+    try:
+        st, body = rt_mod.api_core_start(ctx, None, {})
+        assert st == 200 and body["starting"] and spawned == [(home, False)]       # same launcher as `jarvis start`
+        st, body = rt_mod.api_runtime(ctx, None, None)
+        assert body["live"] is False and body["starting"] is True and body["start_error"] is None
+        st, body = rt_mod.api_core_start(ctx, None, {})                              # double click: no second spawn
+        assert st == 200 and len(spawned) == 1
+        monkeypatch.setitem(rt_mod._START, "at", -1e9)                              # the start window has passed
+        assert rt_mod.api_runtime(ctx, None, None)[1]["starting"] is False
+    finally:
+        ctx.close()
+
+
+def test_dashboard_start_failure_is_reported_truthfully(home, cfg, monkeypatch):
+    from jarves import cli
+    from jarves.dashboard import Ctx
+
+    def boom(h, show):
+        raise OSError("no pythonw")
+    monkeypatch.setattr(cli, "_background_spawn", boom)
+    monkeypatch.setattr(rt_mod, "_ask_core", lambda ctx, msg, expect: None)
+    monkeypatch.setitem(rt_mod._START, "at", -1e9)
+    ctx = Ctx(home, cfg)
+    try:
+        st, body = rt_mod.api_core_start(ctx, None, {})
+        assert st == 500 and "OSError" in body["error"] and "jarvis start" in body["error"]
+        assert rt_mod.api_runtime(ctx, None, None)[1]["start_error"].startswith("OSError")
+    finally:
+        ctx.close()
+
+
+def test_dashboard_start_when_running_spawns_nothing_and_refuses_a_remote_principal(home, cfg, monkeypatch):
+    from jarves import cli
+    from jarves.dashboard import Ctx
+    spawned = []
+    monkeypatch.setattr(cli, "_background_spawn", lambda h, show: spawned.append(1))
+    ctx = Ctx(home, cfg)
+    try:
+        monkeypatch.setattr(rt_mod, "_ask_core", lambda ctx, msg, expect: {"runtime": {}})
+        st, body = rt_mod.api_core_start(ctx, None, {})
+        assert st == 200 and body["already_running"] and not spawned
+        ctx._tl.who = {"kind": "device", "id": "d1"}                                # a paired phone
+        monkeypatch.setattr(rt_mod, "_ask_core", lambda ctx, msg, expect: None)
+        st, body = rt_mod.api_core_start(ctx, None, {})
+        assert st == 403 and not spawned
+    finally:
+        ctx.close()
+
+
+def test_dashboard_scripts_have_the_start_button_for_a_stopped_core():
+    from pathlib import Path
+    root = Path(rt_mod.__file__).resolve().parents[1] / "dashboard_static"
+    shell, app = (root / "shell.js").read_text("utf-8"), (root / "app.js").read_text("utf-8")
+    assert "/api/runtime/start" in shell and "Start JARVES" in shell and "window.startJarves" in shell
+    assert "Start JARVES" in app and "start-btn" in app and "Starting…" in app
+
+
+def test_dashboard_start_route_is_registered():
+    routes = []
+    rt_mod.dashboard_routes(lambda method, rx, fn: routes.append((method, rx, fn)))
+    assert ("POST", r"/api/runtime/start", rt_mod.api_core_start) in routes

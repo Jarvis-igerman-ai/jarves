@@ -308,13 +308,42 @@ begin
   end;
 end;
 
+// A running python.exe/face/bridge from {app} locks the folder and the rename fails (issue #141): the dashboard or
+// any extra process is not stopped by `jarvis stop`. End every process whose executable lies under {app}
+// (matched by path, never by command line).
+procedure StopProcessesUnderApp();
+var
+  Code: Integer;
+  Dir: String;
+begin
+  Dir := AddBackslash(ExpandConstant('{app}'));
+  StringChangeEx(Dir, '''', '''''', True);
+  Exec(ExpandConstant('{sys}\WindowsPowerShell\v1.0\powershell.exe'),
+    '-NoProfile -NonInteractive -ExecutionPolicy Bypass -Command "Get-Process | Where-Object { $_.Path -and ' +
+    '$_.Path.StartsWith(''' + Dir + ''', [StringComparison]::OrdinalIgnoreCase) } | Stop-Process -Force -ErrorAction SilentlyContinue"',
+    '', SW_HIDE, ewWaitUntilTerminated, Code);
+end;
+
 procedure MoveProgramPart(const Name: String);
-var Source, Target: String;
+var
+  Source, Target: String;
+  Attempt: Integer;
+  Moved: Boolean;
 begin
   Source := ExpandConstant('{app}\') + Name;
   Target := ExpandConstant('{app}\rollback\') + Name;
-  if (FileExists(Source) or DirExists(Source)) and not RenameFile(Source, Target) then
-    RaiseException('Cannot retain previous program: ' + Name);
+  if not (FileExists(Source) or DirExists(Source)) then exit;
+  Moved := False;
+  // retry: antivirus / indexer / a just-stopped process can hold a handle for a moment
+  for Attempt := 1 to 10 do begin
+    Moved := RenameFile(Source, Target);
+    if Moved then break;
+    Log('Retaining previous program ' + Name + ' failed (attempt ' + IntToStr(Attempt) + '), retrying');
+    StopProcessesUnderApp();
+    Sleep(1000);
+  end;
+  if not Moved then
+    RaiseException('Cannot retain previous program: ' + Name + '. Close JARVES (dashboard, face) and run Setup again.');
 end;
 
 function PrepareToInstall(var NeedsRestart: Boolean): String;
@@ -331,6 +360,7 @@ begin
   Old := ExpandConstant('{app}\jarvis.cmd');
   if FileExists(Old) then
     Exec(ExpandConstant('{cmd}'), '/c ""' + Old + '" stop"', '', SW_HIDE, ewWaitUntilTerminated, Code);
+  StopProcessesUnderApp();
   BackupState := ExpandConstant('{tmp}\jarves-preupgrade.json');
   OldPython := ExpandConstant('{app}\python\python.exe');
   if FileExists(OldPython) then begin
