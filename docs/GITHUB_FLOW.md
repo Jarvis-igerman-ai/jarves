@@ -1,5 +1,6 @@
 # GitHub flow (simple + automatic)
 
+0. **Prevent avoidable conflicts before coding:** when 2+ agents may touch shared files, run `python core/tools/pr_overlap.py --files core/src/jarves/dashboard.py core/src/jarves/app.py` after `gh auth login`, or run it without `--files` after editing to compare your current branch and worktree against open `main` PRs. Exit 1 means overlap (coordinate one writer), exit 2 means the preflight was incomplete (do not claim no conflicts). Unlike updating/rebasing every stale PR, this costs **no CI run**. Inspect current `origin/main` before using the branch-diff mode. It warns only about exact same-file edits, not semantic conflicts across files; no claim it eliminates every conflict.
 1. Work on a branch and open a **draft** PR to `main`: a draft runs only the fast checks (classify + validation), so
    unfinished pushes do not hold the 20 CI runners all PRs share (free plan). When it is done, run
    `python core/tools/prepush.py`, push, and mark it **ready for review**: the full CI starts. A draft's `CI result` check
