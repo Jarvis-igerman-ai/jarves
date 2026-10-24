@@ -72,5 +72,5 @@ only the combined numbers above exist.
 5. Wake word: stay silent 3 minutes (or `jarvis stop` conversation as usual), then say "Hey Jarvis" from normal
    distance 5 times. Note how many woke him, and the seconds until he speaks.
 6. Repeat step 3 once with the laptop speaker instead of the Bluetooth headphones, volume normal.
-7. Run `jarvis speedtest --class owner` and `jarvis logs` is not needed; reply on #122 with your 10 numbers and
+7. Run `jarvis speedtest --class owner`, then reply on #122 with your 10 numbers and
    "worked / failed" for steps 4 and 5. Never paste private text.
