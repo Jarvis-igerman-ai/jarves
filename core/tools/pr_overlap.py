@@ -28,7 +28,7 @@ class PreflightError(Exception):
 def paths(items: list[str]) -> set[str]:
     """Normalize ordinary repo-relative Git paths, preserving exact names."""
     return {
-        p.replace("\\", "/").removeprefix("./").strip()
+        p.strip().replace("\\", "/").removeprefix("./")
         for p in items
         if p.strip()
     }
