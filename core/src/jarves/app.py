@@ -355,6 +355,8 @@ class Core:
         register_instagram(self.registry, self.home, self.health)
         register_whatsapp(self.registry, self.home)
         register_home(self.registry, self.home, self.health)
+        from .anydo import register_anydo           # #140: tools stay hidden until the switch is on
+        register_anydo(self.registry, self.home, self.health)
         self.workspace.listeners.append(lambda name: self._spawn(wsp.note_live(self.live, self.workspace, name)))
 
         self.budget = Budget(self.memory, c.ai)

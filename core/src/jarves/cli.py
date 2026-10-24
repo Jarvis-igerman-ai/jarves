@@ -1993,6 +1993,8 @@ def main(argv: list[str] | None = None) -> int:
     add_instagram_cli(sub)                    # V3 P1: jarvis instagram start / status / test / logout (+ serve, refresh)
     add_telegram_cli(sub)                     # V3 P1: jarvis telegram start / status / test / logout
     add_home_cli(sub)                         # V3 P1: jarvis home start / status / test / logout
+    from .anydo import add_cli as add_anydo_cli, cmd_anydo
+    add_anydo_cli(sub)                        # #140: jarvis anydo start / status / off
     from .connect import add_cli as add_connect_cli, cmd_connect
     add_connect_cli(sub)                      # owner request 20 Oct: jarvis connect (guided setup of every account)
     from .approvals import add_cli as add_approvals_cli, cmd_approvals
@@ -2168,7 +2170,7 @@ def main(argv: list[str] | None = None) -> int:
             "backup": cmd_backup, "restore": cmd_restore, "usage": cmd_usage, "start": cmd_start,
             "show": cmd_display, "hide": cmd_display, "autostart": cmd_autostart,
             "mic": cmd_mic, "appearance": cmd_appearance, "talk": cmd_talk,
-            "update": cmd_update, "browser": cmd_browser, "connect": cmd_connect, "telegram": cmd_telegram, "instagram": cmd_instagram, "home": cmd_home,
+            "update": cmd_update, "browser": cmd_browser, "connect": cmd_connect, "telegram": cmd_telegram, "instagram": cmd_instagram, "home": cmd_home, "anydo": cmd_anydo,
             "profile": profiles.cmd_profile, "approvals": cmd_approvals, "recall": recall.cmd_recall,
             "health": health_cli.cmd_health,
             "whatsapp": whatsapp_admin.cmd_whatsapp,
