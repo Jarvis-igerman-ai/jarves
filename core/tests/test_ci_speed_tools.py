@@ -274,6 +274,25 @@ def test_exact_proof_workflow_is_non_draft_full_pr_and_ci_ok_must_be_green():
     assert "ci-ok" not in jobs["installer"]["needs"]  # installer stays parallel with the checks
 
 
+def test_timing_summary_exposes_imbalanced_shards_and_slowest_files(tmp_path):
+    for name, secs in (("one.xml", 400), ("two.xml", 200), ("three.xml", 205)):
+        (tmp_path / name).write_text(
+            f'<testsuites><testsuite><testcase classname="tests.test_{name[0]}" name="test_one" time="{secs}"/>'
+            '</testsuite></testsuites>', encoding="utf-8")
+    result = ci_plan.report_shard_timings(sorted(tmp_path.glob("*.xml")))
+    assert "REBALANCE CANDIDATE" in result and "2.00x" in result
+    assert "test_o.py 400s" in result
+    assert "insufficient measurements" in ci_plan.report_shard_timings([tmp_path / "one.xml"])
+
+
+def test_timing_summary_does_not_flag_a_small_difference(tmp_path):
+    for name, secs in (("one.xml", 201), ("two.xml", 202)):
+        (tmp_path / name).write_text(
+            f'<testsuite><testcase classname="tests.test_{name[0]}" name="x" time="{secs}"/></testsuite>',
+            encoding="utf-8")
+    assert "balanced" in ci_plan.report_shard_timings(sorted(tmp_path.glob("*.xml")))
+
+
 def test_content_tree_ignores_documentation_only():
     code = ["100644 blob 1111\tcore/src/a.py", "100644 blob 2222\tpackaging/build_windows.ps1"]
     base = ci_reuse.content_tree(code + ["100644 blob 3333\tdocs/x.md", "100644 blob 4444\tREADME.md"])
