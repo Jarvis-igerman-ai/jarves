@@ -233,7 +233,7 @@ def test_uninstall_without_the_purge_switch_never_deletes_the_data_folder():
 
 def test_silent_updates_stop_the_core_first_and_restart_it_only_when_asked():
     iss = (PKG / "windows" / "jarves.iss").read_text(encoding="utf-8-sig")
-    prepare = iss.split("function PrepareToInstall", 1)[1].split("procedure RestoreProgramPart", 1)[0]
+    prepare = iss.split("function PrepareToInstall", 1)[1].split("procedure DeinitializeSetup", 1)[0]
     assert '" stop' in prepare
     assert prepare.index('" stop') < prepare.index("ExtractTemporaryFile")
     assert "CloseApplications=yes" in iss
@@ -246,15 +246,47 @@ def test_silent_updates_stop_the_core_first_and_restart_it_only_when_asked():
 def test_upgrade_stops_every_process_running_from_the_program_folder_and_retries_the_rename():
     """Issue #141: a running dashboard python.exe made RenameFile(python) fail with 'Cannot retain previous program'."""
     iss = (PKG / "windows" / "jarves.iss").read_text(encoding="utf-8-sig")
-    prepare = iss.split("function PrepareToInstall", 1)[1].split("procedure RestoreProgramPart", 1)[0]
+    prepare = iss.split("function PrepareToInstall", 1)[1].split("procedure DeinitializeSetup", 1)[0]
     assert "StopProcessesUnderApp();" in prepare
     assert prepare.index("StopProcessesUnderApp();") < prepare.index("ExtractTemporaryFile")
-    stop = iss.split("procedure StopProcessesUnderApp", 1)[1].split("procedure MoveProgramPart", 1)[0]
-    assert "$_.Path.StartsWith(" in stop and "Stop-Process" in stop and "CommandLine" not in stop
-    move = iss.split("procedure MoveProgramPart", 1)[1].split("function PrepareToInstall", 1)[0]
+    script = iss.split("function StopScript", 1)[1].split("procedure StopProcessesUnderApp", 1)[0]
+    assert "$_.Path.StartsWith(" in script and "Stop-Process" in script and "CommandLine" not in script
+    move = iss.split("function RetainProgramPart", 1)[1].split("procedure RestoreProgramPart", 1)[0]
     assert "for Attempt := 1 to" in move and "Sleep(" in move
     smoke = (PKG / "smoke_windows.ps1").read_text(encoding="utf-8-sig")
     assert "process running from the old program folder" in smoke
+
+
+def test_upgrade_closes_gracefully_first_and_never_sweeps_a_drive():
+    """#153: windowed processes under {app} are asked to close and get a grace time; only the rest is hard-stopped,
+    each one logged by name. A program folder that is a drive root is never swept."""
+    iss = (PKG / "windows" / "jarves.iss").read_text(encoding="utf-8-sig")
+    script = iss.split("function StopScript", 1)[1].split("procedure StopProcessesUnderApp", 1)[0]
+    assert script.index("CloseMainWindow()") < script.index("Stop-Process")
+    assert "GraceS" in script and "hard-stopped:" in script and "$d.Length -le 3" in script
+    stop = iss.split("procedure StopProcessesUnderApp", 1)[1].split("function RetainProgramPart", 1)[0]
+    assert "if Length(Dir) <= 3 then exit;" in stop and "Log('Stopping JARVES before the upgrade: '" in stop
+
+
+def test_a_failed_retain_is_a_clean_refusal_that_keeps_the_old_version():
+    """#153: no runtime error; setup ends with a plain EN+HE message, puts back what was moved and restarts the old
+    Core when the updater asked for a restart. A leftover rollback folder never blocks the upgrade."""
+    iss = (PKG / "windows" / "jarves.iss").read_text(encoding="utf-8-sig")
+    assert "english.RetainFailed=" in iss and "hebrew.RetainFailed=" in iss
+    prepare = iss.split("function PrepareToInstall", 1)[1].split("procedure DeinitializeSetup", 1)[0]
+    assert "RaiseException" not in prepare and "CustomMessage('RetainFailed')" in prepare
+    fail = prepare.split("if Result <> '' then begin", 1)[1]
+    assert fail.index("RestoreProgram();") < fail.index("SnapshotMade := False;")
+    assert prepare.index("ClearOldRollback();") < prepare.index("RetainProgramPart('python')")
+    clear = iss.split("procedure ClearOldRollback", 1)[1].split("function PrepareToInstall", 1)[0]
+    assert "failed-upgrade-rollback-" in clear and 'Name: "{app}\\failed-upgrade-*"' in iss
+    deinit = iss.split("procedure DeinitializeSetup", 1)[1].split("procedure CurStepChanged", 1)[0]
+    assert "RestoreProgram();" in deinit
+    assert "CoreStopped and not SetupComplete and RestartRequested()" in deinit and "run --background" in deinit
+    smoke = (PKG / "smoke_windows.ps1").read_text(encoding="utf-8-sig")
+    for case in ("leftover rollback folder", "file locked by a process outside the program folder",
+                 "windowed process under the program folder"):
+        assert case in smoke
 
 
 def test_ci_runs_the_clean_install_upgrade_and_budget_steps():

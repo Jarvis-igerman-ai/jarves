@@ -86,6 +86,8 @@ english.KeepData=Keep my settings and data from the old version
 hebrew.KeepData=שמור את ההגדרות והנתונים שלי מהגרסה הישנה
 english.KeepHelp=Setup checks the existing installation and data folder. It verifies a backup before migration and retains the previous program for rollback. Clearing this box moves the old data aside; it is not deleted.
 hebrew.KeepHelp=ההתקנה בודקת התקנה ותיקיית נתונים קיימות. גיבוי מאומת נוצר לפני הסבה והגרסה הקודמת נשמרת לחזרה. ביטול הסימון מעביר את הנתונים הישנים לתיקייה נפרדת ואינו מוחק אותם.
+english.RetainFailed=JARVES could not be updated because a file in the program folder is in use (%1). Nothing was changed: the current version and your data are as before. Close programs that may use JARVES files (an open folder or editor, a backup or antivirus scan) and run the update again.
+hebrew.RetainFailed=לא ניתן היה לעדכן את JARVES כי קובץ בתיקיית התוכנה בשימוש (%1). שום דבר לא השתנה: הגרסה הנוכחית והנתונים שלך כמו קודם. סגור תוכנות שעשויות להשתמש בקבצים של JARVES (תיקייה או עורך פתוחים, גיבוי או סריקת אנטי-וירוס) והפעל את העדכון שוב.
 english.BackupFailed=The backup or migration failed. Your old data was kept. Check free disk space and retry. See the installer log for the failed stage.
 hebrew.BackupFailed=הגיבוי או ההסבה נכשלו. הנתונים הישנים נשמרו. בדוק מקום פנוי ונסה שוב. השלב שנכשל מופיע ביומן ההתקנה.
 
@@ -149,7 +151,7 @@ var
   Detection: TNewStaticText;
   SetupButton: TNewButton;
   BackupState: String;
-  SnapshotMade, SetupComplete: Boolean;
+  SnapshotMade, SetupComplete, CoreStopped: Boolean;
 
 function DataDir(): String;
 begin
@@ -309,78 +311,74 @@ begin
 end;
 
 // A running python.exe/face/bridge from {app} locks the folder and the rename fails (issue #141): the dashboard or
-// any extra process is not stopped by `jarvis stop`. End every process whose executable lies under {app}
-// (matched by path, never by command line).
-procedure StopProcessesUnderApp();
-var
-  Code: Integer;
-  Dir: String;
+// any extra process is not stopped by `jarvis stop`. Every process whose executable lies under {app} (matched by path,
+// never by command line) is first asked to close (windowed ones: face, music player), given a short grace, and only
+// then hard-stopped. Each step is written to the setup log by name (#153).
+function StopScript(): String;
 begin
-  Dir := AddBackslash(ExpandConstant('{app}'));
-  StringChangeEx(Dir, '''', '''''', True);
-  Exec(ExpandConstant('{sys}\WindowsPowerShell\v1.0\powershell.exe'),
-    '-NoProfile -NonInteractive -ExecutionPolicy Bypass -Command "Get-Process | Where-Object { $_.Path -and ' +
-    '$_.Path.StartsWith(''' + Dir + ''', [StringComparison]::OrdinalIgnoreCase) } | Stop-Process -Force -ErrorAction SilentlyContinue"',
-    '', SW_HIDE, ewWaitUntilTerminated, Code);
+  Result :=
+    'param([string]$Dir, [string]$Log, [int]$GraceS = 8)' + #13#10 +
+    '$d = $Dir.TrimEnd([char]92) + [char]92' + #13#10 +
+    '$out = @()' + #13#10 +
+    'if ($d.Length -le 3) { "refused: the program folder is a drive root" | Set-Content -LiteralPath $Log -Encoding ASCII; exit 0 }' + #13#10 +
+    '$p = @(Get-Process | Where-Object { $_.Path -and $_.Path.StartsWith($d, [StringComparison]::OrdinalIgnoreCase) })' + #13#10 +
+    '$asked = @($p | Where-Object { $_.MainWindowHandle -ne 0 })' + #13#10 +
+    'foreach ($x in $asked) { try { [void]$x.CloseMainWindow(); $out += "asked to close: $($x.ProcessName) (pid $($x.Id))" } catch {} }' + #13#10 +
+    'function Alive($list) { @($list | Where-Object { try { -not $_.HasExited } catch { $false } }) }' + #13#10 +
+    '$end = [DateTime]::UtcNow.AddSeconds($GraceS)' + #13#10 +
+    'while ($asked.Count -and (Alive $asked).Count -and [DateTime]::UtcNow -lt $end) { Start-Sleep -Milliseconds 250 }' + #13#10 +
+    '$end = [DateTime]::UtcNow.AddSeconds(2)' + #13#10 +
+    'while ($p.Count -and (Alive $p).Count -and [DateTime]::UtcNow -lt $end) { Start-Sleep -Milliseconds 250 }' + #13#10 +
+    'foreach ($x in $p) {' + #13#10 +
+    '  if ((Alive @($x)).Count) { $out += "hard-stopped: $($x.ProcessName) (pid $($x.Id))"; Stop-Process -Id $x.Id -Force -ErrorAction SilentlyContinue }' + #13#10 +
+    '  else { $out += "ended by itself: $($x.ProcessName) (pid $($x.Id))" }' + #13#10 +
+    '}' + #13#10 +
+    'foreach ($x in $p) { try { [void]$x.WaitForExit(5000) } catch {} }' + #13#10 +
+    'if (-not $p.Count) { $out += "no process was running from the program folder" }' + #13#10 +
+    '$out | Set-Content -LiteralPath $Log -Encoding ASCII' + #13#10;
 end;
 
-procedure MoveProgramPart(const Name: String);
+procedure StopProcessesUnderApp();
+var
+  Code, I: Integer;
+  Dir, Script, LogFile: String;
+  Lines: TArrayOfString;
+begin
+  Dir := RemoveBackslashUnlessRoot(ExpandConstant('{app}'));
+  if Length(Dir) <= 3 then exit;                     // never sweep a whole drive
+  Script := ExpandConstant('{tmp}\jarves-stop-app.ps1');
+  LogFile := ExpandConstant('{tmp}\jarves-stop-app.log');
+  if not FileExists(Script) then SaveStringToFile(Script, StopScript(), False);
+  DeleteFile(LogFile);
+  Exec(ExpandConstant('{sys}\WindowsPowerShell\v1.0\powershell.exe'),
+    '-NoProfile -NonInteractive -ExecutionPolicy Bypass -File "' + Script + '" -Dir "' + Dir + '" -Log "' + LogFile + '"',
+    '', SW_HIDE, ewWaitUntilTerminated, Code);
+  if LoadStringsFromFile(LogFile, Lines) then
+    for I := 0 to GetArrayLength(Lines) - 1 do
+      Log('Stopping JARVES before the upgrade: ' + Lines[I]);
+end;
+
+// Keep the previous program for rollback: rename {app}\<Name> to {app}\rollback\<Name> (same volume, no copy).
+function RetainProgramPart(const Name: String): Boolean;
 var
   Source, Target: String;
   Attempt: Integer;
-  Moved: Boolean;
 begin
   Source := ExpandConstant('{app}\') + Name;
   Target := ExpandConstant('{app}\rollback\') + Name;
+  Result := True;
   if not (FileExists(Source) or DirExists(Source)) then exit;
-  Moved := False;
+  Result := False;
   // retry: antivirus / indexer / a just-stopped process can hold a handle for a moment
   for Attempt := 1 to 10 do begin
-    Moved := RenameFile(Source, Target);
-    if Moved then break;
+    Result := RenameFile(Source, Target);
+    if Result then break;
     Log('Retaining previous program ' + Name + ' failed (attempt ' + IntToStr(Attempt) + '), retrying');
     StopProcessesUnderApp();
     Sleep(1000);
   end;
-  if not Moved then
-    RaiseException('Cannot retain previous program: ' + Name + '. Close JARVES (dashboard, face) and run Setup again.');
-end;
-
-function PrepareToInstall(var NeedsRestart: Boolean): String;
-var
-  Code: Integer;
-  Old, OldPython: String;
-begin
-  Result := '';
-  if (Pos(Lowercase(AddBackslash(ExpandFileName(DataDir()))), Lowercase(AddBackslash(ExpandConstant('{app}')))) = 1) or
-     (Pos(Lowercase(AddBackslash(ExpandConstant('{app}'))), Lowercase(AddBackslash(ExpandFileName(DataDir())))) = 1) then begin
-    Result := 'The program and data folders must be separate.';
-    exit;
-  end;
-  Old := ExpandConstant('{app}\jarvis.cmd');
-  if FileExists(Old) then
-    Exec(ExpandConstant('{cmd}'), '/c ""' + Old + '" stop"', '', SW_HIDE, ewWaitUntilTerminated, Code);
-  StopProcessesUnderApp();
-  BackupState := ExpandConstant('{tmp}\jarves-preupgrade.json');
-  OldPython := ExpandConstant('{app}\python\python.exe');
-  if FileExists(OldPython) then begin
-    ExtractTemporaryFile('installer_state.py');
-    if not Exec(OldPython, '-I "' + ExpandConstant('{tmp}\installer_state.py') +
-      '" prepare --home "' + DataDir() + '" --state "' + BackupState + '"',
-      '', SW_HIDE, ewWaitUntilTerminated, Code) or (Code <> 0) then begin
-      Result := CustomMessage('BackupFailed');
-      exit;
-    end;
-    // Rename within the same volume: retain a usable prior runtime without copying 16,500 files.
-    if DirExists(ExpandConstant('{app}\rollback')) then
-      DelTree(ExpandConstant('{app}\rollback'), True, True, True);
-    ForceDirectories(ExpandConstant('{app}\rollback'));
-    SnapshotMade := True;
-    MoveProgramPart('python');
-    MoveProgramPart('face');
-    MoveProgramPart('bridge');
-    MoveProgramPart('jarvis.cmd');
-  end;
+  if not Result then
+    Log('Cannot retain previous program: ' + Name + ' (a file in it stays in use)');
 end;
 
 procedure RestoreProgramPart(const Name: String);
@@ -395,14 +393,81 @@ begin
   end;
 end;
 
-procedure DeinitializeSetup();
+procedure RestoreProgram();
 begin
-  if SnapshotMade and not SetupComplete then begin
-    RestoreProgramPart('python');
-    RestoreProgramPart('face');
-    RestoreProgramPart('bridge');
-    RestoreProgramPart('jarvis.cmd');
+  RestoreProgramPart('python');
+  RestoreProgramPart('face');
+  RestoreProgramPart('bridge');
+  RestoreProgramPart('jarvis.cmd');
+end;
+
+// A rollback folder left by an older run is replaced. If it cannot be deleted (a read-only or locked file), it is moved
+// aside to failed-upgrade-* (removed by the uninstaller) so it does not block this upgrade (#153).
+procedure ClearOldRollback();
+var Old, Aside: String;
+begin
+  Old := ExpandConstant('{app}\rollback');
+  if not DirExists(Old) then exit;
+  DelTree(Old, True, True, True);
+  if DirExists(Old) then begin
+    Aside := ExpandConstant('{app}\failed-upgrade-rollback-') + GetDateTimeString('yyyymmddhhnnss', #0, #0);
+    if RenameFile(Old, Aside) then Log('Old rollback folder could not be deleted; moved aside to ' + Aside)
+    else Log('Old rollback folder could not be deleted or moved: ' + Old);
   end;
+end;
+
+function PrepareToInstall(var NeedsRestart: Boolean): String;
+var
+  Code: Integer;
+  Old, OldPython: String;
+begin
+  Result := '';
+  if (Pos(Lowercase(AddBackslash(ExpandFileName(DataDir()))), Lowercase(AddBackslash(ExpandConstant('{app}')))) = 1) or
+     (Pos(Lowercase(AddBackslash(ExpandConstant('{app}'))), Lowercase(AddBackslash(ExpandFileName(DataDir())))) = 1) then begin
+    Result := 'The program and data folders must be separate.';
+    exit;
+  end;
+  Old := ExpandConstant('{app}\jarvis.cmd');
+  if FileExists(Old) then begin
+    Exec(ExpandConstant('{cmd}'), '/c ""' + Old + '" stop"', '', SW_HIDE, ewWaitUntilTerminated, Code);
+    CoreStopped := True;
+  end;
+  StopProcessesUnderApp();
+  BackupState := ExpandConstant('{tmp}\jarves-preupgrade.json');
+  OldPython := ExpandConstant('{app}\python\python.exe');
+  if FileExists(OldPython) then begin
+    ExtractTemporaryFile('installer_state.py');
+    if not Exec(OldPython, '-I "' + ExpandConstant('{tmp}\installer_state.py') +
+      '" prepare --home "' + DataDir() + '" --state "' + BackupState + '"',
+      '', SW_HIDE, ewWaitUntilTerminated, Code) or (Code <> 0) then begin
+      Result := CustomMessage('BackupFailed');
+      exit;
+    end;
+    // Rename within the same volume: retain a usable prior runtime without copying 16,500 files.
+    ClearOldRollback();
+    ForceDirectories(ExpandConstant('{app}\rollback'));
+    SnapshotMade := True;
+    if not RetainProgramPart('python') then Result := FmtMessage(CustomMessage('RetainFailed'), ['python'])
+    else if not RetainProgramPart('face') then Result := FmtMessage(CustomMessage('RetainFailed'), ['face'])
+    else if not RetainProgramPart('bridge') then Result := FmtMessage(CustomMessage('RetainFailed'), ['bridge'])
+    else if not RetainProgramPart('jarvis.cmd') then Result := FmtMessage(CustomMessage('RetainFailed'), ['jarvis.cmd']);
+    if Result <> '' then begin
+      // put back what was already moved, now: the old version stays complete even if the wizard is retried
+      RestoreProgram();
+      SnapshotMade := False;
+    end;
+  end;
+end;
+
+procedure DeinitializeSetup();
+var Code: Integer;
+begin
+  if SnapshotMade and not SetupComplete then
+    RestoreProgram();
+  // The update stopped JARVES and did not finish: start the old version again, as the finished update would have.
+  if CoreStopped and not SetupComplete and RestartRequested() and FileExists(ExpandConstant('{app}\python\pythonw.exe')) then
+    Exec(ExpandConstant('{app}\python\pythonw.exe'), '-m jarves run --background', ExpandConstant('{app}'), SW_HIDE,
+      ewNoWait, Code);
 end;
 
 procedure CurStepChanged(CurStep: TSetupStep);
