@@ -36,6 +36,7 @@
       sig_snoozed: "ההודעות הושתקו לשעה.", sig_stopped: "ההודעות נעצרו. מדליקים שוב במחשב.", from_pc: "מחשב", no_goals: "אין יעדים פעילים." },
   };
   const $ = (id) => document.getElementById(id);
+  const newId = () => "c-" + Date.now().toString(36) + Math.random().toString(36).slice(2, 10);      // 8-64 chars: the server's command id
   let lang = "en";
   try { lang = localStorage.getItem(LANG) || ((navigator.language || "en").startsWith("he") ? "he" : "en"); } catch (e) { /* storage blocked */ }
   const t = (k) => (T[lang] && T[lang][k]) || T.en[k] || k;
@@ -69,7 +70,7 @@
   }
   const post = (p, obj) => api(p, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(obj || {}) });
 
-  function forget() { unmountChat(); token = ""; me = null; try { localStorage.removeItem(KEY); } catch (e) { /* ignore */ } show(); }
+  function forget() { unmountChat(); if (window.JarvesAudio) window.JarvesAudio.unmount(); token = ""; me = null; try { localStorage.removeItem(KEY); } catch (e) { /* ignore */ } show(); }
 
   function show() {
     $("pairView").hidden = !!token; $("appView").hidden = !token;
@@ -77,7 +78,8 @@
     if (token) { load(); timer = setInterval(tick, 4000); }
     else { const m = /(?:^|[#&])c=(\d{6,9})/.exec(location.hash); if (m) { $("code").value = m[1]; history.replaceState(null, "", location.pathname); } }
   }
-  async function load() { try { me = await api("/api/m/me"); } catch (e) { return; } info(); allowTabs(); tick(); voiceNote(); }
+  async function load() { try { me = await api("/api/m/me"); } catch (e) { return; } info(); allowTabs(); mountIndicator(); tick(); voiceNote(); }
+  function mountIndicator() { if (window.JarvesAudio && $("audioBar")) window.JarvesAudio.mount({ audio: $("audioBar"), notices: $("noticeBox") }, { api, post, lang: () => lang }); }
   function info() { if (me) $("meInfo").textContent = `${me.name} · ${me.phone_approvals ? t("phone_ap_on") : t("phone_ap_off")}`; }
 
   // ---- pairing
@@ -151,12 +153,20 @@
       proc.onaudioprocess = (e) => chunks.push(new Float32Array(e.inputBuffer.getChannelData(0)));
       src.connect(proc); proc.connect(ctx.destination); rec = { stream, ctx, proc, src, chunks };
       $("ptt").classList.add("rec"); $("ptt").textContent = t("release");
+      if (window.JarvesAudio) window.JarvesAudio.phoneMic(true, { stop: stopRec, discard: discardRec });     // the strip says the mic is ON
     } catch (e) { $("voiceOut").textContent = t("voice_nomic"); }
+  }
+  function discardRec() {                                                    // close the microphone and send nothing
+    if (!rec) return; const r = rec; rec = null;
+    r.proc.disconnect(); r.src.disconnect(); r.stream.getTracks().forEach((x) => x.stop()); r.ctx.close();
+    $("ptt").classList.remove("rec"); $("ptt").textContent = t("hold"); $("voiceOut").textContent = "";
+    if (window.JarvesAudio) window.JarvesAudio.phoneMic(false);
   }
   async function stopRec() {
     if (!rec) return; const r = rec; rec = null;
     r.proc.disconnect(); r.src.disconnect(); r.stream.getTracks().forEach((x) => x.stop()); const rate = r.ctx.sampleRate; r.ctx.close();
     $("ptt").classList.remove("rec"); $("ptt").textContent = t("hold");
+    if (window.JarvesAudio) window.JarvesAudio.phoneMic(false);
     if (!r.chunks.length) return;
     $("voiceOut").textContent = t("sending");
     try {
@@ -179,9 +189,10 @@
     const first = seq === 0;
     (s.turns || []).forEach((x) => { seq = Math.max(seq, x.seq); });          // the chat itself is drawn by the shared chat view
     (s.notices || []).forEach(async (n) => {
-      if (!shown.has(n.id)) { shown.add(n.id); const b = bubble(t("note") + ": " + n.text, "note"); b.setAttribute("role", "status"); }
+      if (!shown.has(n.id)) { shown.add(n.id); if (window.JarvesAudio) window.JarvesAudio.notice(n); else { const b = bubble(t("note") + ": " + n.text, "note"); b.setAttribute("role", "status"); } }
       try { await post("/api/m/notices/" + n.id + "/ack"); } catch (e) { /* shown again next sync, never twice on screen */ }
     });
+    if (window.JarvesAudio) window.JarvesAudio.signals(s.signals);
     renderGoals(s);
   }
   function renderGoals(s) {
@@ -203,6 +214,7 @@
     if (!token || document.hidden) return;
     if (!me) { load(); return; }                      // opened while the computer was unreachable: try again
     syncNow();
+    if (window.JarvesAudio) window.JarvesAudio.refresh();
     try {
       if (me.pages.includes("approvals")) {
         const a = await api("/api/m/approvals"); const n = a.pending.length, badge = $("apprCount");
@@ -242,8 +254,8 @@
     li(ul, `${t("pages_you_have")}: ${s.pages.map((x) => ({ home: tx("בית", "Home"), chat: tx("שיחה", "Chat"), approvals: tx("אישורים", "Approvals"), health: tx("תקינות ומהירות", "Health & speed") }[x] || x)).join(", ")}`);
   }
   $("unpair").addEventListener("click", async () => { try { await post("/api/m/unpair"); } catch (e) { /* already gone */ } forget(); });
-  $("lang").addEventListener("click", () => { lang = lang === "he" ? "en" : "he"; try { localStorage.setItem(LANG, lang); } catch (e) { /* ignore */ } applyLang(); voiceNote(); info(); unmountChat(); if (tab === "chat") mountChat(); tick(); });
-  document.addEventListener("visibilitychange", tick); window.addEventListener("online", tick);
+  $("lang").addEventListener("click", () => { lang = lang === "he" ? "en" : "he"; try { localStorage.setItem(LANG, lang); } catch (e) { /* ignore */ } applyLang(); if (window.JarvesAudio) window.JarvesAudio.repaint(); voiceNote(); info(); unmountChat(); if (tab === "chat") mountChat(); tick(); });
+  document.addEventListener("visibilitychange", () => { if (document.hidden) discardRec(); tick(); });      // never keep the mic open in the background window.addEventListener("online", tick);
   if ("serviceWorker" in navigator && window.isSecureContext) navigator.serviceWorker.register("/m/sw.js", { scope: "/m/" }).catch(() => {});
   applyLang(); show();
 })();

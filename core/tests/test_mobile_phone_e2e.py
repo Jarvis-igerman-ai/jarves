@@ -44,6 +44,7 @@ class FakeCore:
 
     def __init__(self):
         self.chats, self.wavs = [], []
+        self.audio = {"known": True, "mic": "idle", "cloud": "off", "cloud_on": False}      # the computer's real mic / cloud state
 
     def bridge(self) -> Bridge:
         def chat(text, dev):
@@ -54,7 +55,7 @@ class FakeCore:
             self.wavs.append(wav)
             return {"transcript": "what time is it", "reply": "It is noon.", "ok": True}
         return Bridge(chat=chat, voice=voice, status=lambda: {"core": "running", "components": {"audio": "ok"}},
-                      voice_available=lambda: True)
+                      voice_available=lambda: True, audio=lambda: self.audio)
 
 
 class _Mem:
@@ -522,7 +523,7 @@ def audit(page, lang):
     assert metrics["small"] == [], metrics["small"]                                          # tap targets >= 44 px
     r = page.evaluate(apc.RULES, {"lang": lang, "width": 390, "reduced": False})
     issues = [i for i in r["issues"] if i["rule"] in RULES_THAT_APPLY and i["where"] != "button#lang"
-              and not i["where"].startswith(("div#log>", "div.jc-log", "ul#apprList>li>span.grow"))]     # chat text and request titles are user DATA     # the language button names its language by design
+              and not i["where"].startswith(("div#log>", "div.jc-log", "ul#apprList>li>span.grow", "div#noticeBox>div.notice>div.notice-text"))]     # chat text and request titles are user DATA     # the language button names its language by design
     assert issues == [], issues
 
 
@@ -552,6 +553,102 @@ def test_layouts_at_390px_have_no_sideways_scroll_big_targets_and_contrast(brows
         audit(page, lang)
     page.tap("#lang")                                                   # the language button flips direction
     assert page.evaluate("document.documentElement.dir") == ("ltr" if lang == "he" else "rtl")
+    assert page.errors == []
+
+
+# ------------------------------------------------------------------ V5 G5 (#185): mic / cloud-audio indicator, notice stop / snooze
+TRACKS = """(() => { const g = navigator.mediaDevices.getUserMedia.bind(navigator.mediaDevices); window.__tracks = [];
+  navigator.mediaDevices.getUserMedia = async (c) => { const s = await g(c); s.getTracks().forEach((t) => window.__tracks.push(t)); return s; }; })()"""
+
+
+def test_phone_microphone_indicator_follows_the_real_microphone_and_can_stop_it(browser, phone):
+    p = phone(tls=True)
+    page = new_page(browser)
+    page.add_init_script(TRACKS)
+    ui_pair(page, p)
+    page.wait_for_selector("#audioBar:not([hidden])")
+    until(page, "document.getElementById('audioBar').textContent.includes('Phone microphone: off')")
+    assert "not sent to the cloud" in page.text_content("#audioBar") and page.locator("#audioBar.hot").count() == 0
+    page.tap("[data-tab=voice]")
+    until(page, "!document.getElementById('ptt').disabled")
+    page.dispatch_event("#ptt", "pointerdown")
+    until(page, "document.getElementById('audioBar').textContent.includes('Phone microphone: ON')")
+    assert page.locator("#audioBar.hot").count() == 1 and page.evaluate("window.__tracks.some(t => t.readyState === 'live')")
+    page.wait_for_selector("#audioBar button:has-text('Discard')")
+    page.tap("#audioBar button:has-text('Discard')")                    # the mic closes and nothing is sent
+    until(page, "document.getElementById('audioBar').textContent.includes('Phone microphone: off')")
+    assert page.evaluate("window.__tracks.every(t => t.readyState === 'ended')") and p.fake.wavs == []
+    page.dispatch_event("#ptt", "pointerdown")
+    until(page, "document.getElementById('audioBar').textContent.includes('Phone microphone: ON')")
+    page.wait_for_timeout(1200)
+    page.tap("#audioBar button:has-text('Stop and send')")
+    until(page, "document.getElementById('voiceOut').textContent.includes('what time is it')")
+    assert len(p.fake.wavs) == 1 and page.evaluate("window.__tracks.every(t => t.readyState === 'ended')")
+    page.dispatch_event("#ptt", "pointerdown")                          # a hidden page never keeps the microphone open
+    until(page, "document.getElementById('audioBar').textContent.includes('Phone microphone: ON')")
+    page.evaluate("Object.defineProperty(document, 'hidden', {value: true, configurable: true}); document.dispatchEvent(new Event('visibilitychange'))")
+    until(page, "document.getElementById('audioBar').textContent.includes('Phone microphone: off')")
+    assert page.evaluate("window.__tracks.every(t => t.readyState === 'ended')")
+    assert page.errors == []
+
+
+def test_computer_microphone_and_cloud_audio_state_is_shown_truthfully(browser, phone):
+    p = phone()
+    page = new_page(browser)
+    ui_pair(page, p)
+    until(page, "document.getElementById('audioBar').textContent.includes('Cloud audio: off')")
+    p.fake.audio = {"known": True, "mic": "listening", "cloud": "sending", "cloud_on": True}
+    until(page, "document.getElementById('audioBar').textContent.includes('SENDING audio to the cloud')", 12000)
+    assert page.locator("#audioBar.hot").count() == 1 and "Computer microphone: listening" in page.text_content("#audioBar")
+    p.fake.audio = {"known": False, "mic": "unknown", "cloud": "unknown", "cloud_on": None}      # unreadable: never a calm "off"
+    until(page, "document.getElementById('audioBar').textContent.includes('Cloud audio: unknown')", 12000)
+    assert page.locator("#audioBar.hot").count() == 0
+    assert page.errors == []
+
+
+def _signal(p: Phone, ref: str):
+    c = p.d.mobile.cont
+    if not c.signals_state()["on"]:
+        c.configure_signals(on=True)              # (switching on also clears a stop: only the first call may do it)
+    return c.emit("goal", ref, f"Goal {ref} looks stalled")
+
+
+def test_a_proactive_note_can_be_snoozed_and_stopped_from_the_phone(browser, phone):
+    p = phone()
+    page = new_page(browser)
+    ui_pair(page, p)
+    assert _signal(p, "7") == "queued"
+    page.wait_for_selector(".notice", timeout=12000)                    # visible on whatever tab is open (here: Home)
+    assert "Goal 7 looks stalled" in page.inner_text(".notice")
+    page.tap(".notice button:has-text('Snooze notes 1 h')")
+    until(page, "document.querySelector('.notice-status').textContent.includes('snoozed for one hour')")
+    assert p.d.mobile.cont.signals_state()["snoozed_until"] > 0
+    assert _signal(p, "8") == "snoozed"                                 # nothing more arrives while snoozed
+    page.tap(".notice button:has-text('Stop notes')")
+    until(page, "document.querySelector('.notice-status').textContent.includes('Notes stopped')")
+    assert p.d.mobile.cont.signals_state()["stopped"] is True and page.locator(".notice").count() == 0
+    until(page, "document.getElementById('audioBar').textContent.includes('Notes are stopped')", 12000)
+    assert _signal(p, "9") == "stopped"
+    assert page.errors == []
+
+
+@pytest.mark.parametrize("lang,locale", [("en", "en-US"), ("he", "he-IL")])
+def test_indicator_and_note_layout_at_390px_in_english_and_hebrew(browser, phone, lang, locale):
+    p = phone(tls=True)
+    page = new_page(browser, locale=locale)
+    ui_pair(page, p)
+    audit(page, lang)                                                   # idle strip
+    p.fake.audio = {"known": True, "mic": "listening", "cloud": "sending", "cloud_on": True}
+    _signal(p, "7")
+    page.wait_for_selector(".notice", timeout=12000)
+    until(page, "document.querySelector('#audioBar.hot')", 12000)
+    audit(page, lang)                                                   # hot strip + a note card
+    page.tap("[data-tab=voice]")
+    until(page, "!document.getElementById('ptt').disabled")
+    page.dispatch_event("#ptt", "pointerdown")
+    page.wait_for_selector("#audioBar button")
+    audit(page, lang)                                                   # phone mic on: Stop and Discard buttons
+    page.tap("#audioBar button:last-of-type")
     assert page.errors == []
 
 

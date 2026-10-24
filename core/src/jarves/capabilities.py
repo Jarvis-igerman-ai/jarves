@@ -201,7 +201,7 @@ for _fid, _w, _p, _perm, _set in [
      _pi("implemented_unverified", "never paired with a real phone on the Pi"), ["action"],
      "dashboard Devices page / `jarvis dashboard --lan`"),
     ("mobile_access", _win("implemented_unverified", "UNIT test_mobile_*.py + test_tailnet.py (pairing, tokens, scopes, rate limits, "
-                           "audit, PWA files, TLS, Tailscale with fake interfaces); QR decoded once with OpenCV", "never paired with a real phone"),
+                           "audit, PWA files, TLS, Tailscale with fake interfaces); QR decoded once with OpenCV; mic/cloud-audio strip and notice stop/snooze (test_mobile_audio.py, emulated phone with a fake microphone)", "never paired with a real phone"),
      _pi("planned", "V5 is PC-hosted; the Pi is out of scope"), ["read", "action"],
      "dashboard Phone page / `jarvis dashboard --mobile`"),
     ("workspace_agent_edit", _win("implemented_unverified", "UNIT test_workspace_memory.py",
