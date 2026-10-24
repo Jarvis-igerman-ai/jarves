@@ -48,9 +48,35 @@ HISTORY_ITEMS = 16              # transcript items sent with each delegated requ
 SEARCH_INPUT_TOKENS = 8000      # worst-case search-content tokens one hosted web search adds to the input
 TOOL_SCHEMA_SLACK = 1.15        # JSON framing on top of the request body bytes
 # A short utterance that only cancels ("עזוב", "never mind") while a lookup runs stops it.
-_CANCEL_RE = re.compile(r"^\W*(?:(?:ו?(?:תעזוב|עזוב|תבטל|בטל|לא\s+משנה|תפסיק|הפסק|תעצור|עצור|די|שכח\s+מזה|תשכח\s+מזה)|"
-                        r"never\s*mind|cancel(?:\s+that|\s+it)?|stop(?:\s+that|\s+it)?|forget\s+it)"
-                        r"(?:\s+(?:את\s+)?(?:זה|הבדיקה|החיפוש)|\s+please|\s+thanks)?\W*)+$", re.I)
+# One cancel phrase (+ optional suffix). The utterance is one or more of them separated by punctuation/space; the loop is
+# in `is_cancel` (a regex with the repetition and `\W*` inside it was exponential: CodeQL py/redos).
+_CANCEL_ONE = re.compile(r"(?:ו?(?:תעזוב|עזוב|תבטל|בטל|לא\s+משנה|תפסיק|הפסק|תעצור|עצור|די|שכח\s+מזה|תשכח\s+מזה)|"
+                         r"never\s*mind|cancel(?:\s+that|\s+it)?|stop(?:\s+that|\s+it)?|forget\s+it)"
+                         r"(?:\s+(?:את\s+)?(?:זה|הבדיקה|החיפוש)|\s+please|\s+thanks)?", re.I)
+CANCEL_MAX_CHARS = 120          # a spoken cancel is a few words; longer text is never one
+
+
+def _is_word(c: str) -> bool:
+    return c.isalnum() or c == "_"
+
+
+def is_cancel(text: str) -> bool:
+    """True when the whole utterance is only cancel phrases ("עזוב", "never mind", "לא משנה.", "cancel that please").
+    Linear: greedy phrase by phrase, bounded input."""
+    t = text or ""
+    n = len(t)
+    if n > CANCEL_MAX_CHARS:
+        return False
+    pos, found = 0, False
+    while True:
+        while pos < n and not _is_word(t[pos]):
+            pos += 1
+        if pos >= n:
+            return found
+        m = _CANCEL_ONE.match(t, pos)
+        if m is None:
+            return False
+        found, pos = True, m.end()
 
 # ------------------------------------------------------------------------------------------------ spoken notes
 CAP_NOTE = {
@@ -378,7 +404,7 @@ class ClientDelegation:
 
     def on_user_text(self, text: str) -> None:
         """A finished user utterance: a bare "never mind" / "עזוב" while lookups run cancels them."""
-        if not self.jobs or not _CANCEL_RE.match((text or "").strip()) or len((text or "").split()) > 4:
+        if not self.jobs or not is_cancel((text or "").strip()) or len((text or "").split()) > 4:
             return
         for did, job in list(self.jobs.items()):
             if job.task is not None and not job.task.done():
@@ -388,7 +414,7 @@ class ClientDelegation:
     def may_hand_over(self, text: str) -> bool:
         """CV-15 hand-over in client mode: never for a bare cancel phrase, nor right after the user cancelled a lookup
         (live 20 Oct: the "רגע, אני בודק" before "עזוב" was judged undelegated and the cancelled lookup ran again)."""
-        if _CANCEL_RE.match((text or "").strip()):
+        if is_cancel((text or "").strip()):
             return False
         return time.monotonic() - getattr(self, "_user_cancel_t", -1e9) > 10.0
 

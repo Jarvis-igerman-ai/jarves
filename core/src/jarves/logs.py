@@ -113,6 +113,43 @@ _EMAIL = re.compile(r"(?<![\w.+-])[\w.+-]+@[\w-]+\.[\w.-]+")
 _PHONE = re.compile(r"(?<![\w+.:/])(?:\+|00)?\d(?:[\s\-()]?\d){8,14}(?![\w.:])")
 
 
+def mask_emails(s: str) -> str:
+    r"""Same result as `_EMAIL.sub("<email>", s)`, as a linear scan (the regex is polynomial on long runs: CodeQL
+    py/polynomial-redos). Local part = the whole run of [\w.+-] before an "@"; domain = [\w-]+ "." [\w.-]+."""
+    if "@" not in s:
+        return s
+    n, out, pos, i = len(s), [], 0, 0
+
+    def local(c: str) -> bool:
+        return c.isalnum() or c in "_.+-"
+
+    while True:
+        at = s.find("@", i)
+        if at < 0:
+            break
+        i = at + 1
+        a = at
+        while a > pos and local(s[a - 1]):
+            a -= 1
+        if a == at or (a == pos and pos > 0):
+            continue                          # empty local part, or the run began inside the previous match
+        d = i
+        while d < n and (s[d].isalnum() or s[d] in "_-"):
+            d += 1
+        if d == i or d >= n or s[d] != ".":
+            continue
+        e = d + 1
+        while e < n and (s[e].isalnum() or s[e] in "_.-"):
+            e += 1
+        if e == d + 1:
+            continue
+        out.append(s[pos:a])
+        out.append("<email>")
+        pos = i = e
+    out.append(s[pos:])
+    return "".join(out)
+
+
 def redact_pii(s: str) -> str:
     s = _EMAIL.sub("<email>", s)
     return _PHONE.sub(lambda m: "<phone>" if sum(c.isdigit() for c in m.group(0)) >= 9 else m.group(0), s)
