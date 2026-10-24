@@ -67,6 +67,22 @@ Run it yourself: `python core/tools/release_gate.py --tag v4.1.0 --sha <tag sha>
 
 Any later change to a row voids the signature.
 
+## Hotfix: backport a merged fix to a released minor (`hotfix.py`)
+
+A fix always lands in `main` first (normal PR, green checks), so the next version never loses it. To ship it as a patch of an
+already released minor (branch `release/x.y`, created when `x.y.0` went stable):
+
+`python core/tools/hotfix.py --pr 123 --to release/4.0 --dry-run` prints the checks and the exact commands and runs nothing.
+Without `--dry-run` it verifies the PR is merged into `main` and has a merge commit; verifies the remote URL is the public
+`igalgerman/jarves` repo (default remote `jarves`, never the private repo); picks the next patch version (highest `vX.Y.N` tag
++ 1); creates `hotfix/<pr>-to-<x.y>` from `release/<x.y>`; cherry-picks the merge commit (`git cherry-pick -x -m 1`, so the
+origin is recorded); pushes the branch; and opens a PR into the release branch labelled `backport` (the label must exist in the
+repo; full CI runs there).
+
+After that PR is merged: make and sign the short sign-off sheet for the new version (`manual_test_sheet.py`, above), then tag
+`vX.Y.Z` and push the tag; `release.yml` runs the stable gate and publishes. A cherry-pick conflict stops the tool: resolve it on
+the `hotfix/...` branch by hand. This is a developer tool (no `jarvis` command, no dashboard page), so it has no guide entry.
+
 ## Rollback
 
 `python core/tools/release_rollback.py --to win-v4.0.0.12` prints the plan (**dry run is the default**). Add `--execute`
