@@ -146,6 +146,12 @@ The primary interaction must be a **ready-to-use, fast, clean interactive HTML t
 4. **UX declutter:** merge duplicate Health/Self-check surfaces in presentation (not backend), less technical Setup, useful top-bar alert counts with correct provenance, no 54-item flat navigation recurrence.
 5. **Spend/security honesty:** no surprise paid calls or new subscriptions; tests must show fake/live and local/cloud; retain privacy decisions and minimize notifications.
 
+## Optional V4.5 integration proposal — Any.do MCP (#140; NOT authorized for implementation)
+
+**Owner request recorded 24 Oct 2026.** Add [the standalone Any.do MCP plan](V4_5_ANYDO_MCP_INTEGRATION.md) as a **P2 optional candidate** for the V4.5 planning backlog, after priority security/CI/QA stabilization. **No change to NOW authorization, release gate, existing seven streams, or already-running agent scope.** This is deliberately not a new V4 feature bucket or an excuse to broaden V5/V7.
+
+Use the official Any.do beta MCP endpoint with OAuth 2.0, not scraping or reuse of ChatGPT connector credentials. Proposed first cut: read tasks/list → explicitly confirmed task/shop-item creation and reminders; completion/clear/edit requires provider-supported human **Execute all** preview and is blocked until verified live. No shadow task store, autonomous polling, credential exposure or task deletion. Track work and feasibility gates in [Issue #140](https://github.com/igalgerman/jarves/issues/140) and the dedicated plan. Only a **separate owner decision reflected in NOW** can start development.
+
 ## Delivery sequence and tracked dependencies
 
 | Package | Priority | Depends on | Delivery gate |
