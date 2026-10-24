@@ -263,8 +263,8 @@ def make_skill(svc: SelfSpeed, lang: Callable[[], str]):
     return SelfSpeedSkill()
 
 
-INSTRUCTION = ("Health: run_selftest; speed: run_speedtest; measured advice: performance_advice. "
-               "Never invent results or issue URLs.")
+INSTRUCTION = ("Health: run_selftest; speed: run_speedtest; advice: performance_advice. "
+               "Never invent results.")
 
 
 # ---------------------------------------------------------------------- scheduler jobs
