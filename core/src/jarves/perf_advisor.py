@@ -82,14 +82,15 @@ def recommendations(rows: list[dict], *, max_results: int = 4) -> list[dict]:
     if not rows:
         return out
     recent = rows[-1]
-    machine_class = recent.get("class")
+    # Compact selfspeed history uses `cls`; full SpeedResult uses `class`.
+    machine_class = recent.get("class") or recent.get("cls")
     if machine_class not in ("owner", "ci"):
         return out
     for metric in sorted((recent.get("values") or {})):
         if not isinstance(metric, str) or metric not in SUGGESTIONS:
             continue
         samples = [(r.get("values", {}).get(metric), r.get("statuses", {}).get(metric, "pass"))
-                   for r in rows if r.get("class") == machine_class
+                   for r in rows if (r.get("class") or r.get("cls")) == machine_class
                    and _numeric(r.get("values", {}).get(metric)) is not None]
         if len(samples) < MIN_RECENT:
             continue
@@ -150,7 +151,7 @@ def auto_report(home: Path, findings: list[dict], *, token_fn: Callable[[], str]
     if not findings:
         return {"status": "no_finding"}
     now = clock()
-    if now - state["last_sent"] < AUTO_COOLDOWN_S:
+    if state["last_sent"] > 0 and now - state["last_sent"] < AUTO_COOLDOWN_S:
         return {"status": "cooldown"}
     token = (token_fn or ir.find_token)()
     if not token:
