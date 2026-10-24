@@ -7,6 +7,7 @@ name: jarves-automerge
 #      merged tree was not proven on the PR; queued main runs batch on their own);
 #   3. merges every PR whose head commit has ALL jarves-checks jobs green (merge commit, branch deleted);
 #   4. if any check failed it comments once and removes the label (a human or the merge agent fixes it).
+# Per check name only the newest run counts: a duplicate run cancelled by a concurrency group (#125) must not block a green PR.
 # It never merges with a pending/failed/missing check, never force-pushes, never bypasses anything.
 # Secret AUTOMERGE_TOKEN (fine-grained PAT, this repo: Contents RW, Pull requests RW) makes the merge push trigger
 # jarves-checks + the installer publish on main (merges done with GITHUB_TOKEN do not trigger workflows).
@@ -54,7 +55,7 @@ jobs:
             status=$(echo "$runs" | jq -r '.status // "none"'); concl=$(echo "$runs" | jq -r '.conclusion // ""')
             echo "  jarves-checks: $status $concl"
             if [ "$status" = "completed" ] && [ "$concl" = "success" ]; then
-              bad=$(gh api "repos/$REPO/commits/$sha/check-runs" --jq '[.check_runs[]|select(.conclusion!="success" and .conclusion!="skipped" and .conclusion!="neutral")]|length')
+              bad=$(gh api "repos/$REPO/commits/$sha/check-runs" --jq '[.check_runs|group_by(.name)[]|max_by(.started_at)|select(.status=="completed" and .conclusion!="success" and .conclusion!="skipped" and .conclusion!="neutral")]|length')
               pend=$(gh api "repos/$REPO/commits/$sha/check-runs" --jq '[.check_runs[]|select(.status!="completed")]|length')
               if [ "$bad" = "0" ] && [ "$pend" = "0" ]; then
                 echo "  all green: merging #$n"
