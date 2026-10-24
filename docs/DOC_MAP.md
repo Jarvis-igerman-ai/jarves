@@ -66,6 +66,8 @@ Current dashboard review: [23 Oct findings inventory and recheck gates](reviews/
 | [PRODUCT_VISION](PRODUCT_VISION.md) | Six product stages (north star) | general | current | itself |
 | [PROJECT_PRINCIPLES](PROJECT_PRINCIPLES.md) | Durable principles, printability, Israel sourcing, owner decisions | general | current | itself |
 | [plans/V4_5_STABILIZATION_SECURITY_QA](plans/V4_5_STABILIZATION_SECURITY_QA.md) | V4.5 single plan: issues/evidence closure, CodeQL/security cadence, camera UX, code integration and dynamic HTML manual QA + voice Skill. Reuse #60/#58/#61 and existing release gate. | V4.5 | **proposal only**, no implementation authorized | itself for scope; NOW for execution; ROADMAP for status |
+| [plans/V4_5_ANYDO_MCP_INTEGRATION](plans/V4_5_ANYDO_MCP_INTEGRATION.md) | V4.5 P2 optional Any.do official MCP Skill: OAuth, read/create/reminders, human-approved update feasibility (#140) | V4.5 | proposal, NOT implementation-authorized | [V4.5 work package](plans/V4_5_STABILIZATION_SECURITY_QA.md) + NOW |
+| [plans/ORG_MIGRATION_MERGE_QUEUE](plans/ORG_MIGRATION_MERGE_QUEUE.md) | Move the source repo into a free GitHub org for the native merge queue: inventory (URLs, tokens, secrets, ruleset, merge_group), steps, rollback | V4.5 (E3, #160) | **plan only**, awaits owner approval and org name | itself; #160 |
 | [plans/PROJECT_MANAGER](plans/PROJECT_MANAGER.md) | Software project manager: JARVES splits a project into small tasks run by short-lived coding agents (Claude Code, Codex, OpenCode) in parallel worktrees; design after Opus review | V5 (4.0.1 beta) | built, real-agent runs unverified | `core/tests/test_projectmgr.py` |
 | [plans/SW_FACTORY](plans/SW_FACTORY.md) | Software factory: flexible per-task stages (plan/work/test/review/merge/release, bug-fix), any actor (JARVES/owner/agent/list/sub-agents), debate between agents, GitHub optional off/read/write | V5 (4.0.1 beta) | built, cloud agents deferred, real-agent runs unverified | `core/tests/test_projectmgr.py` |
 | [plans/PRIORITIES](plans/PRIORITIES.md) | Owner decisions log (V4 approval, WhatsApp, 21 Oct decisions) | V4-V5 | current, append-only | itself |
@@ -148,5 +150,6 @@ Reports and bug tables are evidence of a past run, not instructions. A package's
 | [reviews/MANUAL_TEST_4.0.0](reviews/MANUAL_TEST_4.0.0.md) | Manual test sheet for 4.0.0 (owner) | 4.0.0 | current | [RELEASING](RELEASING.md) |
 | [reviews/MANUAL_TEST_4.0.1](reviews/MANUAL_TEST_4.0.1.md) | Manual test sheet for 4.0.1 (owner sign-off on the beta) | 4.0.1 | current | [RELEASING](RELEASING.md) |
 | [reviews/SWV4_P01_VERIFY](reviews/SWV4_P01_VERIFY.md) | Owner-assisted verification, ported from the legacy branch | V4 | historical | [MIGRATION_AUDIT](MIGRATION_AUDIT.md) |
+| [reviews/V45_VOICE_LATENCY_2026-10-24](reviews/V45_VOICE_LATENCY_2026-10-24.md) | V4.5 voice latency baseline (issue #122, automatic measurement) | V4.5 | current | [BUGFIX_LANE](BUGFIX_LANE.md) |
 
 | [Windows installer #58](INSTALLER_58.md) | Installer setup, backup, rollback and measured timings | V4 | current | itself |

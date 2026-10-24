@@ -19,7 +19,8 @@ from jarves import whatsapp_policy as pol
 from jarves.skills import SkillRegistry
 from jarves.whatsapp_bridge import WhatsAppBridgeSkill
 from jarves.whatsapp_store import SecureStore, StoreLocked, protect, seal, unprotect, unseal
-from tools import redaction_audit as ra
+sys.path.insert(0, str(__import__("pathlib").Path(__file__).resolve().parents[1]))  # `tools` is a namespace package under core/; never rely on shard order
+from tools import redaction_audit as ra  # noqa: E402
 from whatsapp_fixtures import bridge, clock, home, set_send_mode  # noqa: F401
 
 PLANT_JID = "972547654321@s.whatsapp.net"

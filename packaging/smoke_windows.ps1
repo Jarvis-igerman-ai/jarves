@@ -155,9 +155,13 @@ if ($UpgradeFrom) {
     $desktop = Join-Path ([Environment]::GetFolderPath("Desktop")) "JARVES.lnk"
     Check (Test-Path $desktop) "old desktop shortcut created for preservation test"
     $mid = Collect "old-installed"                     # Run key / PATH with the old version installed
+    # issue #141: a process running from the old program folder (like `jarves dashboard`) must not block the upgrade
+    $stray = Start-Process (Join-Path $App "python\python.exe") -ArgumentList @("-I", "-c", "import time; time.sleep(900)") -WindowStyle Hidden -PassThru
+    Check (-not $stray.HasExited) "process running from the old program folder (dashboard stand-in) is alive before the upgrade"
     # silent upgrade over it: no /TASKS (the installer keeps its defaults), same AppId, data folder untouched
     Check ((Install "DEFAULT" @("/KEEPDATA=0") $Installer "silent_upgrade_s") -eq 0) "silent upgrade $oldVer -> $Version"
     Check (Test-Path (Join-Path $App "rollback\python\python.exe")) "previous program retained for offline rollback"
+    Check ($stray.WaitForExit(5000)) "the stray old-folder process was ended by the installer"
     $state = Get-Content (Join-Path $App "install-state.json") -Raw | ConvertFrom-Json
     Check ($state.complete -and $state.backups.Count -ge 1) "installer verified backup and completed migration"
     $newVer = Version-Of
