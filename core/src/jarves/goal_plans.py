@@ -375,7 +375,7 @@ class PlanRunner:
                 ok = await self.registry.ask(
                     f"Plan '{p['title']}', step {step['idx'] + 1}/{len(st.steps(pid))}: {step['tool']} "
                     f"{_short(json.dumps(step['args'], ensure_ascii=False), 160)}\nRun this step?",
-                    title="goal_plan_step", risk="medium", kind="tool",
+                    title="goal_plan_step", risk="medium", kind="tool", pc_only=True,
                     why=step["why"] or "A step of a plan you approved.")
                 if not ok:
                     self._block(pid, step, "the owner did not approve this step")
@@ -492,7 +492,7 @@ def make_skill(store: PlanStore, registry=None):
                 if p["state"] != "draft":
                     return ToolResult(False, f"plan is {p['state']}, not a draft", code="PLAN_BAD")
                 if registry is None or not await registry.ask("Run this plan?\n" + describe(p), title="goal_plan",
-                                                              risk="medium", kind="tool",
+                                                              risk="medium", kind="tool", pc_only=True,
                                                               why="You asked JARVES to carry out a plan."):
                     return ToolResult(False, "not started: the owner did not approve the plan", code="NOT_APPROVED")
                 store.approve(a.id, by="voice")
@@ -554,7 +554,7 @@ def api_plan_op(ctx, m, body):
                 return 400, {"error": "only a draft plan can be approved"}
             from . import approvals
             ok, _why = approvals.ask_owner(ctx.home, "Run this plan?\n" + describe(p), title="dashboard_goal_plan",
-                                           risk="medium", kind="tool",
+                                           risk="medium", kind="tool", pc_only=True,
                                            why="You pressed Approve on the dashboard Goal plans page.",
                                            details={"plan": pid})
             if not ok:

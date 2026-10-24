@@ -47,7 +47,7 @@ class Env:
     def __init__(self, tmp_path, answer=True, clock=None):
         self.clock = clock or Clock()
         self.db = open_db(tmp_path)
-        self.ran, self.asked = [], []
+        self.ran, self.asked, self.metas = [], [], []
         self.answer = answer
         self.budget = FakeBudget()
         self.hang = asyncio.Event()
@@ -57,6 +57,7 @@ class Env:
 
         async def confirm(prompt, **meta):
             self.asked.append(meta.get("title", prompt))
+            self.metas.append(meta)
             return self.answer() if callable(self.answer) else bool(self.answer)
         confirm.accepts_meta = True
         self.reg.confirm = confirm
@@ -348,3 +349,15 @@ def test_dashboard_and_cli_manage_plans(home, capsys):
     assert cli.main(["goals", "plan", "delete", "2", "--yes"]) == 0
     assert cli.main(["goals", "plan", "show", "2"]) == 1
     capsys.readouterr()
+
+
+async def test_plan_and_step_approvals_are_asked_pc_only(env):
+    """V5 sec F1: neither the plan approval nor a step popup may be answered from a phone."""
+    env.reg.register(gp.make_skill(env.store, env.reg))
+    env.reg.allowed_actions |= gp.ALLOWED_ACTIONS
+    r = await env.reg.call("goal_plan_propose", {"title": "demo", "steps": [{"tool": "fake_act", "args": {"text": "q"}}]})
+    pid = r.data["plan"]
+    assert (await env.reg.call("goal_plan_run", {"id": pid})).ok
+    await env.runner.tick()
+    titles = {m["title"]: m for m in env.metas}
+    assert titles["goal_plan"]["pc_only"] is True and titles["goal_plan_step"]["pc_only"] is True
