@@ -20,7 +20,8 @@ on:
   workflow_dispatch:
 permissions:
   contents: read
-  pull-requests: read
+  pull-requests: write   # only used by the github.token fallback for the failure comment and label removal
+  issues: write
 concurrency:
   group: jarves-automerge
   cancel-in-progress: false
@@ -62,8 +63,13 @@ jobs:
                 gh pr merge "$n" -R "$REPO" --merge --delete-branch || echo "  merge refused (for example a conflict with the PR merged just before); the next run retries"
               fi
             elif [ "$status" = "completed" ]; then
-              gh pr comment "$n" -R "$REPO" --body "automerge: jarves-checks ended '$concl' on ${sha:0:7}; removing the automerge label. Fix and re-add the label." >/dev/null
-              gh pr edit "$n" -R "$REPO" --remove-label automerge >/dev/null
+              msg="automerge: jarves-checks ended '$concl' on ${sha:0:7}; removing the automerge label. Fix and re-add the label."
+              gh pr comment "$n" -R "$REPO" --body "$msg" >/dev/null 2>&1 \
+                || GH_TOKEN="${{ github.token }}" gh pr comment "$n" -R "$REPO" --body "$msg" >/dev/null 2>&1 \
+                || echo "could not comment (token scope)"
+              gh pr edit "$n" -R "$REPO" --remove-label automerge >/dev/null 2>&1 \
+                || GH_TOKEN="${{ github.token }}" gh pr edit "$n" -R "$REPO" --remove-label automerge >/dev/null 2>&1 \
+                || echo "could not remove label (token scope)"
             else
               echo "  checks still running: merged by a later run"
             fi
