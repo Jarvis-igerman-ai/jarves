@@ -2,6 +2,10 @@
 
 > Planning and status per version. **Only [docs/NOW.md](NOW.md) authorizes work.** Future Issues are NOT permission to start them. Every document is indexed in [DOC_MAP](DOC_MAP.md).
 
+## V4 — baseline development CLOSED (owner decision, 24 October 2026)
+
+The original V4 software baseline was delivered as **4.0.0**. The owner now considers **V4 feature development complete/closed**. The continuing 4.0.1 work and real-world test/sign-off gaps do **not** justify calling V4 fully accepted or bug-free: outstanding tasks are explicitly carried into [V4.5](plans/V4_5_STABILIZATION_SECURITY_QA.md) and existing tracking Issues #1 and #2, together with #58/#60/#61/#77 as applicable. Re-scope #1/#2 to V4.5 without deleting their legacy criteria. V4 must not receive new feature work; update the acceptance tracking rather than re-opening V4 development. **V4.5 remains planned, not implemented.** The dated status snapshots further down are retained only as history.
+
 ## V4.5 — Stabilization, Security, Camera & Guided QA (plan recorded 24 October 2026)
 
 **Status: owner-requested planning, documented but NOT implemented or released.** [V4.5 work package](plans/V4_5_STABILIZATION_SECURITY_QA.md) is the canonical scope/acceptance definition; [NOW](NOW.md) is the sole implementation authorization. V4.5 is a stabilization/quality milestone after the V4/4.0.1 cycle, not a replacement for built V5 phone access, V5's real-device acceptance, V6 car, V7 Android or future hardware. No release tag or schedule is implied.
@@ -20,7 +24,7 @@ Repository: `igalgerman/jarves` (public) is the only active repo; the private `i
 
 **23 Oct maintenance:** conversation mute/recovery and room appearance CLI fixes, plus local dashboard finding reconciliation, are scoped in NOW and the [dashboard review](reviews/DASHBOARD_FINDINGS_23OCT2026.md). Real input/player/account gates remain open.
 
-### V4 — released as 4.0.0, 4.0.1 in open PRs
+### V4 — historical release snapshot (baseline development closed; remaining sign-off transferred to V4.5)
 
 - **4.0.0** = `main` after the V4 release PR #41 (21 Oct 2026; version 4.0.0 in `core/pyproject.toml`; scope decision: only what was merged in `main`). The signed installer is built and published by the package workflow (`package.yml`) to `igalgerman/jarvis-releases` after `jarves-checks` is green on `main`. At the time of writing the newest published installer there was still 3.0.0.130; check `gh release list -R igalgerman/jarvis-releases`. What it contains and its limits: [RELEASE_NOTES_4.0](RELEASE_NOTES_4.0.md), checklist [SWV4_RELEASE_CHECKLIST](reviews/SWV4_RELEASE_CHECKLIST.md), plan [V4 package](JARVES_SW_V4_WORK_PACKAGE.md). Owner live gates still open: real Telegram/Instagram/Home Assistant, WhatsApp real account, Phone Link, real installer round trip, live Claude/Codex sessions.
 - **4.0.1 content (open PRs, not in 4.0.0):** `jarvis connect` (unset only, remembered skips, read-only checks, #34); wake-model production training and the restricted-token isolation flag (#32); self-management by voice, text, CLI and dashboard (#37); chat/web: `jarvis chat` text mode (#42) and `jarvis web` shared chat engine with a dashboard Chat page (#49); CI speed-up, continuous (beta) release, gated stable release, security files (#44); issues pipeline: registry, Bug reports page, `jarvis issues`, triage, bugfix lane (#48); bug sweep 4.1 part 1 (#40); tool-description trim; docs quality review (#47) and the 4.0.0 manual test sheet (#46).
