@@ -506,20 +506,28 @@ def audit(private: bool, workdir: Path) -> dict:
 
 
 _LEAK_CATEGORIES = ("SECRET", "CONTENT", "PII")
+_STRUCTURAL = ("sink was not produced by the drive",
+               "planted content never reached it in development mode (the drive is broken, the audit proves nothing)")
+_MUST_SINKS = ("logs/jarves.log", "logs/jarves.log.1", "store.db", "store.db-wal", "health.json", "approvals/audit.jsonl",
+               "tasks.jsonl", "logs/crash.txt", "<console>", "<status_json>", "<dashboard/api/logs>",
+               "<dashboard/export/logs.jsonl>", "<diag_zip>", "<ticket_draft>")
 
 
 def mask_violation(v: str, sinks: object = ()) -> str:
-    """A violation line safe to print: a leaked value must never be echoed (CI logs are public). Leak lines are
+    """A violation line safe to print: a leaked value must never be echoed (CI logs are public). The printed line is
     rebuilt from fixed labels only: the sink name (looked up among the known sink names, never sliced out of the
-    line), the category and the length. Not one character of the leaked part is kept."""
-    for cat in _LEAK_CATEGORIES:
-        for sink in sinks:
+    line), the category and the length. Not one character of the original text is copied."""
+    for sink in (*_MUST_SINKS, *sinks):
+        for cat in _LEAK_CATEGORIES:
             head = f"{sink}: {cat} "
             if v.startswith(head):
                 return f"{sink}: {cat} leak, {len(v) - len(head)} chars masked"
-    if any(f": {cat} " in v for cat in _LEAK_CATEGORIES):
-        return f"leak line masked ({len(v)} chars)"
-    return v                                         # structural messages carry no planted value
+        for text in _STRUCTURAL:
+            if v == f"{sink}: {text}":
+                return f"{sink}: {text}"
+    if v.startswith("<ticket_draft>: could not be produced"):
+        return "<ticket_draft>: could not be produced (details withheld)"
+    return f"violation line masked ({len(v)} chars)"
 
 
 def main(argv: list[str]) -> int:
