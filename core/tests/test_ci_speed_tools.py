@@ -575,8 +575,9 @@ def test_main_red_opens_one_issue_and_closes_it_when_green():
     assert doc["permissions"] == {"contents": "read", "issues": "write"}
     job = doc["jobs"]["alert"]
     assert "workflow_run.event == 'push'" in job["if"]
-    assert not any("checkout" in s.get("uses", "") for s in job["steps"])            # never runs repository code
-    run = job["steps"][0]["run"]
+    # only the default branch's own core/tools (red_main.py, fix-forward #160); never PR code
+    assert [s["with"] for s in job["steps"] if "checkout" in s.get("uses", "")] == [{"sparse-checkout": "core/tools"}]
+    run = next(s["run"] for s in job["steps"] if "run" in s)
     assert "gh issue create" in run and "gh issue comment" in run and "gh issue close" in run
 
 
