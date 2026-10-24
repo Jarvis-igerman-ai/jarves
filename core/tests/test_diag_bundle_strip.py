@@ -36,6 +36,7 @@ def write_dev_log(home: Path) -> Path:
             h.flush()
     finally:
         logs.set_privacy(True)
+    # FAKE test fixture: ra.MIXED holds synthetic planted values (no real credential); the test proves the bundle strips them.
     with open(path, "a", encoding="utf-8") as f:
         f.write(json.dumps({"ts": "2026-10-19T10:00:00", "level": "ERROR", "component": "voice", "code": "OLD",
                             "msg": f"Live error: {ra.MIXED}", "exc": f"KeyError: {ra.MIXED}",

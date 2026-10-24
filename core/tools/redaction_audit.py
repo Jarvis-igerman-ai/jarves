@@ -32,6 +32,7 @@ import io
 import json
 import logging
 import os
+import re
 import socket
 import sys
 import tempfile
@@ -372,8 +373,10 @@ async def drive(home: Path, private: bool) -> dict[str, bytes]:
         await lv.handle_event({"type": "info", "message": MIXED})
         await lv.handle_event({"type": "error", "error": {"code": "x", "message": MIXED,
                                                           "client_event_id": "jarves_lang_1"}})
+        # FAKE test fixture: SECRETS/MIXED are synthetic planted values (not credentials); this audit proves they never leak.
         logging.getLogger("httpx").warning(f"HTTP Request: GET https://api.example/?access_token="
                                            f"{SECRETS['google_access']}&q={PII['email']} {MIXED}")
+        # FAKE test fixture: MIXED holds synthetic planted values only.
         logging.getLogger("openai").error(f"Error code: 400 - {{'message': '{MIXED}'}}")
         core.health.set("ai", "degraded", f"ChatGPT plan ({PII['email']}) {SECRETS['openai_key']}",
                         f"sign in again as {PII['email']}")
@@ -502,6 +505,19 @@ def audit(private: bool, workdir: Path) -> dict:
             "violations": violations}
 
 
+_LEAK_LINE = re.compile(r"^(.*?): (SECRET|CONTENT|PII) (.*)$", re.S)
+
+
+def mask_violation(v: str) -> str:
+    """A violation line safe to print: a leaked value must never be echoed (CI logs are public). Leak lines keep the
+    sink and the category; the leaked part shows only its first 4 characters and its length."""
+    m = _LEAK_LINE.match(v)
+    if not m:
+        return v                                     # structural messages carry no planted value
+    sink, cat, rest = m.groups()
+    return f"{sink}: {cat} {rest[:4]}... ({len(rest)} chars masked)"
+
+
 def main(argv: list[str]) -> int:
     modes = [True, False] if "--both-modes" in argv or not any(a in argv for a in ("--on", "--off")) else \
         [True] if "--on" in argv else [False]
@@ -509,7 +525,8 @@ def main(argv: list[str]) -> int:
     work = Path(keep) if keep else Path(tempfile.mkdtemp(prefix="jarves-redaction-"))
     reports = [audit(m, work) for m in modes]
     if "--json" in argv:
-        print(json.dumps(reports, indent=1, ensure_ascii=False))
+        print(json.dumps([{**r, "violations": [mask_violation(v) for v in r["violations"]]} for r in reports],
+                         indent=1, ensure_ascii=False))
     else:
         for r in reports:
             print(f"== {r['mode']}: {len(r['sinks'])} sinks, {r['synthetic_call_sites']} call sites driven")
@@ -520,7 +537,7 @@ def main(argv: list[str]) -> int:
                 print(f"  {name:<44} {tag:<11} {counts}")
             print(f"  violations: {len(r['violations'])}")
             for v in r["violations"]:
-                print("   ", v)
+                print("   ", mask_violation(v))
     return 1 if any(r["violations"] for r in reports) else 0
 
 

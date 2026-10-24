@@ -385,6 +385,8 @@ def public_publish(dist: Path, keep: int = 3, env: dict | None = None, gh: GitHu
     env = os.environ if env is None else env
     if dry_run:
         return _dry_run_plan(dist, env, "stable")
+    # `missing` holds only the NAMES from PUBLIC_SECRETS (env var names, public in docs/RELEASE_HOSTING.md), never an
+    # env value: the values are read only by the `.strip()` emptiness test and are not printed.
     missing = [k for k in PUBLIC_SECRETS if not str(env.get(k) or "").strip()]
     if len(missing) == len(PUBLIC_SECRETS):
         print("Public releases: SKIPPED - secrets RELEASES_TOKEN and JARVES_UPDATE_SIGNING_KEY are not set, so the "

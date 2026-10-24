@@ -20,6 +20,11 @@ from jarves.skills.google import register_google
 from test_dashboard import req
 from test_google import CLIENT, FakeGoogle, seed
 
+
+def _api_id(url: str) -> str:
+    """The API the opened console URL enables (exact apiid query value, not a substring of the URL)."""
+    return (parse_qs(urlparse(url).query).get("apiid") or [""])[0]
+
 W = {"X-Jarves": "1"}
 
 
@@ -132,7 +137,7 @@ def test_quit_is_resumable_and_done_steps_are_skipped(home, dl):
     b2 = Browser(dl)
     wz2, out2, _ = make(home, g, b2, answers=[""] * 10)
     assert wz2.run() == 0
-    assert "/projectcreate" not in " ".join(b2.opened) and any("gmail.googleapis.com" in u for u in b2.opened)
+    assert "/projectcreate" not in " ".join(b2.opened) and any(_api_id(u) == "gmail.googleapis.com" for u in b2.opened)
     assert sum("Done earlier:" in line for line in out2) == 2
 
 
@@ -185,7 +190,7 @@ def test_disabled_api_found_by_the_self_check(home, dl):
     wz, out, _ = make(home, g, b)
     assert wz.run() == 1
     assert any("Calendar API" in line for line in out)
-    assert any("calendar-json.googleapis.com" in u for u in b.opened)
+    assert any(_api_id(u) == "calendar-json.googleapis.com" for u in b.opened)
     assert google_setup.load_state(home)["last_error"] == "API_DISABLED_CALENDAR"
 
 
@@ -218,7 +223,7 @@ def test_gcloud_used_only_when_installed_and_the_user_agrees(home, dl):
     wz.run_cmd = lambda args, **kw: ran.append(args) or R()
     assert wz.run() == 0
     assert [r[1:3] for r in ran] == [["projects", "list"], ["projects", "create"], ["services", "enable"]]
-    assert "calendar-json.googleapis.com" in ran[2] and "gmail.googleapis.com" in ran[2]
+    assert {"calendar-json.googleapis.com", "gmail.googleapis.com"} <= set(ran[2])   # exact argv entries
     assert not any("/projectcreate" in u or "enableapi" in u for u in b.opened)   # those steps were done by gcloud
     pid = google_setup.load_state(home)["project_id"]
     assert pid.startswith("jarves-home-") and any(f"project={pid}" in u for u in b.opened)
@@ -250,7 +255,7 @@ def test_gcloud_resume_selects_accessible_project_and_resets_old_checkmarks(home
     assert st["project_id"] == "jarves-home-123456"
     assert set(st["steps"]) == {"project", "calendar_api"} | (set() if calendar_only else {"gmail_api"})
     assert len(ran) == 2 and ran[1][1:3] == ["services", "enable"]
-    assert ("gmail.googleapis.com" in ran[1]) is not calendar_only
+    assert ("gmail.googleapis.com" in set(ran[1])) is not calendar_only   # exact argv entry
     assert wz.open_url.__self__.opened == [google_setup.step_url("branding", st["project_id"])]
     assert any("not accessible" in line for line in out)
 

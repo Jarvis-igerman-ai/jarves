@@ -124,6 +124,7 @@ def test_every_registered_field_class_in_the_file_and_console(logdir, private):
 @pytest.mark.parametrize("private", MODES)
 def test_third_party_loggers_and_crash_hooks(logdir, private, monkeypatch):
     path = logs.setup(logdir, privacy=private, console=False)
+    # FAKE test fixture: ra.SECRETS / ra.MIXED are synthetic planted values (no real credential); the test proves they never leak.
     logging.getLogger("httpx").warning(f"HTTP Request: GET https://x/?access_token={ra.SECRETS['google_access']}"
                                        f"&t={ra.SECRETS['dashboard_link']} {ra.MIXED}")
     logging.getLogger("websockets.client").error(ra.MIXED)

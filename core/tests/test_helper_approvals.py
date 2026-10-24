@@ -444,7 +444,7 @@ async def test_install_shows_exact_package_source_version_and_denial_runs_nothin
     a = await done
     assert a.kind == "install" and a.risk == "high" and not a.typed_code
     assert a.details["package"] == "requests" and a.details["version"] == "2.32.3"
-    assert "pypi.org" in a.details["source"] and "requests==2.32.3" in a.details["command"]
+    assert a.details["source"] == "PyPI (https://pypi.org/simple)" and "requests==2.32.3" in a.details["command"]
     assert "--user" in a.details["command"]
     e.svc.answer(a.id, False, channel="dashboard")                       # never actually installed by the tests
     assert (await call).code == "HELPER_NOT_APPROVED"

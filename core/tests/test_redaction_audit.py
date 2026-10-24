@@ -30,4 +30,12 @@ def test_planted_data_audit_of_a_real_core(tmp_path, private):
                  "<dashboard/export/logs.jsonl>", "<diag_zip>", "<ticket_draft>"):
         assert must in sinks, must
     assert any(n.startswith("backups/") and n.endswith(".zip") for n in sinks)
-    assert not report["violations"], "\n".join(report["violations"])
+    assert not report["violations"], "\n".join(ra.mask_violation(v) for v in report["violations"])
+
+
+def test_violation_lines_are_masked():
+    leaked = "ya29.PLANTEDg00gl3acc3ssT0k3n@plain"       # FAKE test fixture, synthetic
+    line = ra.mask_violation(f"logs/jarves.log: SECRET ['google_access:{leaked}']")
+    assert "PLANTED" not in line and leaked not in line and line.startswith("logs/jarves.log: SECRET ['go")
+    msg = "store.db: sink was not produced by the drive"
+    assert ra.mask_violation(msg) == msg
