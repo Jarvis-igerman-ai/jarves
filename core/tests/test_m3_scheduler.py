@@ -666,7 +666,7 @@ async def test_week_off_catch_up_runs_once_late_without_stalling_the_tick(db):
     assert s2.job(jid)["next_run"] == ts(JLM, 2026, 10, 8, 9, 15)
 
 
-# ---------------------------------------------------------------- one-offs inside the repeated DST hour (#issue, 24 Oct 2026)
+# ---------------------------------------------------------------- one-offs inside the repeated DST hour (#231, 24 Oct 2026)
 # Jerusalem falls back at 02:00 local: 25 Oct 2026 02:00 IDT = 24 Oct 23:00Z (01:00-02:00 happens twice) and
 # 31 Oct 2027 02:00 IDT = 30 Oct 23:00Z. "In 5 minutes" during the SECOND 01:xx must be the coming 01:xx, not the one an
 # hour ago (CI was red for every PR in that hour: SCHEDULE_PAST).
