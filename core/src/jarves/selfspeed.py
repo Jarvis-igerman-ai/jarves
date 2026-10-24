@@ -201,7 +201,7 @@ class SpeedTestArgs(BaseModel):
 
 
 def make_skill(svc: SelfSpeed, lang: Callable[[], str]):
-    from .skills import Skill, Tool, ToolResult
+    from .skills import Skill, Tool, ToolResult, NoArgs
 
     def spoken(sentence: str) -> str:
         return sentence + (" פרטים בלוח הבקרה." if lang() == "he" else " Details on the dashboard.")
@@ -239,7 +239,7 @@ def make_skill(svc: SelfSpeed, lang: Callable[[], str]):
                                   {"status": d["status"], "counts": d["counts"], "dashboard": "#/speed"},
                                   code="SPEEDTEST_" + d["status"].upper())
 
-            async def advice_(_: SpeedTestArgs) -> ToolResult:
+            async def advice_(_: NoArgs) -> ToolResult:
                 from . import perf_advisor
                 findings = perf_advisor.recommendations(svc.history.rows("speedtest", 30))
                 if not findings:
@@ -254,7 +254,7 @@ def make_skill(svc: SelfSpeed, lang: Callable[[], str]):
 
             return [Tool("performance_advice",
                          "'how can you become faster', 'איך אפשר לשפר ביצועים'.",
-                         advice_, SpeedTestArgs, permission="read"),
+                         advice_, NoArgs, permission="read"),
                     Tool("run_selftest", "'is anything broken', 'בדיקת תקינות'.", selftest_, SelfTestArgs, permission="read",
                          timeout_s=300),
                     Tool("run_speedtest", "'how fast are you', 'בדיקת מהירות'.", speedtest_, SpeedTestArgs,
@@ -263,8 +263,8 @@ def make_skill(svc: SelfSpeed, lang: Callable[[], str]):
     return SelfSpeedSkill()
 
 
-INSTRUCTION = ("For checks use run_selftest; for speed use run_speedtest; for measured suggestions "
-               "use performance_advice. Never invent measurements, findings or GitHub issue URLs.")
+INSTRUCTION = ("Health: run_selftest; speed: run_speedtest; measured advice: performance_advice. "
+               "Never invent results or issue URLs.")
 
 
 # ---------------------------------------------------------------------- scheduler jobs
