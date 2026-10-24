@@ -784,9 +784,15 @@ _TYPES = {".webmanifest": "application/manifest+json", ".html": "text/html; char
           ".css": "text/css; charset=utf-8", ".svg": "image/svg+xml"}
 
 
+_READY = threading.Event()
+_READY.set()
+PLUGIN_WAIT_S = 60.0
+
+
 class Handler(BaseHTTPRequestHandler):
     server_version = "JarvesDashboard"
     sys_version = ""
+    plugins_ready: threading.Event = _READY     # set = every page module's routes are registered
     ctx: Ctx
     token: str
 
@@ -923,6 +929,9 @@ class Handler(BaseHTTPRequestHandler):
             if self.command not in ("GET", "HEAD"):
                 return self._send(405, b"", "text/plain")
             return self._static("index.html" if url.path == "/" else url.path.removeprefix("/static/"))
+        if not self.plugins_ready.is_set():
+            # #159 `jarvis dashboard`: the page modules load beside the browser start; an API call made meanwhile waits
+            self.plugins_ready.wait(PLUGIN_WAIT_S)
         if url.path == "/export/logs.jsonl" and self.command == "GET":
             try:
                 data = export_logs(self.ctx, q)
@@ -983,9 +992,18 @@ class Dashboard:
     def __init__(self, home: Path, cfg, port: int = 0, *, workspace=None, memory=None, settings=None,
                  config_path=None, lan: bool = False, lan_host: str | None = None, mobile_on: bool = False,
                  mobile_bridge=None, tls: tuple | None = None, tailnet: dict | None = None,
-                 tls_source: str | None = None, bind_tailnet_only: bool = False, chat=None) -> None:
+                 tls_source: str | None = None, bind_tailnet_only: bool = False, chat=None,
+                 defer_plugins: bool = False) -> None:
         self.ctx = Ctx(home, cfg, workspace=workspace, memory=memory, settings=settings, config_path=config_path)
-        self.plugins = load_plugins()
+        # defer_plugins (`jarvis dashboard`, #159): importing the ~40 page modules took 2-4 s on the owner's PC before
+        # the server even listened. Deferred, they load in a worker while the URL is printed and the browser starts;
+        # the page shell and app files are served at once and an API request waits for plugins_ready.
+        self.plugins: list[str] = []
+        self.plugins_ready = threading.Event()
+        if defer_plugins:
+            threading.Thread(target=self._load_plugins, name="jarves-dashboard-plugins", daemon=True).start()
+        else:
+            self._load_plugins()
         token = secrets.token_urlsafe(24)
         tail = dict(tailnet or {})
         tail_ip = tail.get("ip") if tail.get("present") else None
@@ -1003,7 +1021,8 @@ class Dashboard:
         self.ctx.access = self.access
         self.access.mobile = bool(mobile_on)
         self.mobile = self.ctx.mobile = mobile.MobileAccess(home)
-        handler = type("H", (Handler,), {"ctx": self.ctx, "token": token, "access": self.access})
+        handler = type("H", (Handler,), {"ctx": self.ctx, "token": token, "access": self.access,
+                                         "plugins_ready": self.plugins_ready})
         wide = lan or mobile_on
         bind = tail_ip if only_tail else "0.0.0.0" if wide else "127.0.0.1"
         self.httpd = _Server((bind, port or (LAN_PORT if wide else 0)), handler)
@@ -1035,6 +1054,14 @@ class Dashboard:
         if lan:
             self.access.audit("lan_mode_started", host=lan_host, port=self.port)
         self._thread: threading.Thread | None = None
+
+    def _load_plugins(self) -> None:
+        try:
+            self.plugins = load_plugins()
+        except Exception:                            # one broken page module must not leave every API call waiting
+            logs.error("dashboard", "PLUGINS_FAILED", "dashboard page modules did not load", exc=True)
+        finally:
+            self.plugins_ready.set()
 
     def _housekeeping(self) -> None:
         try:
