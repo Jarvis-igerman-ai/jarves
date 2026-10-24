@@ -170,6 +170,14 @@ if ($UpgradeFrom) {
     Stop-Process -Id $locker.Id -Force -ErrorAction SilentlyContinue
     $locker.WaitForExit(10000) | Out-Null
     Remove-Item -LiteralPath $lockFile -Force -ErrorAction SilentlyContinue
+    # #165: low disk. /DISKRESERVEMB= demands a huge amount of extra free space (stricter only), so the pre-check refuses
+    # BEFORE the backup and before anything is moved: plain message, exit code not 0, old version and data untouched.
+    $backupsBefore = @(Get-ChildItem (Join-Path $Home_ "backups") -ErrorAction SilentlyContinue).Count
+    Check ((Install "DEFAULT" @("/DISKRESERVEMB=900000000") $Installer "") -ne 0) "low disk: the upgrade is refused up front (setup exit code is not 0)"
+    Check (@(Select-String -Path (Join-Path $Work "install-*.log") -Pattern "Disk space check result code: 4" -ErrorAction SilentlyContinue).Count -ge 1) "the low-disk refusal is logged"
+    Check ((Version-Of) -eq $oldVer -and (Test-Path (Join-Path $App "python\python.exe"))) "low disk: the old version $oldVer is untouched"
+    Check (-not (Test-Path (Join-Path $App "rollback\python"))) "low disk: nothing was moved into the rollback folder"
+    Check (@(Get-ChildItem (Join-Path $Home_ "backups") -ErrorAction SilentlyContinue).Count -eq $backupsBefore) "low disk: no backup was started"
     # #164: a candidate whose Core never becomes ready (the update record names a version that never starts, so the
     # Core never marks it healthy) is undone by setup: the previous program is back, data untouched, the owner notice
     # is recorded, nothing is deleted. The data folder is restored afterwards so the later cases see the seeded data.

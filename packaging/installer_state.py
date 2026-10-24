@@ -231,20 +231,82 @@ def note_rollback(home: Path, ok: bool) -> dict:
     return rec
 
 
+MB = 1024 * 1024
+# What the verified backup leaves out (backup.EXCLUDE_DIRS, a superset kept here so this runs under ANY old python).
+_NOT_BACKED_UP = {"backups", "logs", "chatgpt", "google", "cache", "caches", "models", "tmp", "temp", "__pycache__", "voice_cache", "whatsapp_bridge"}
+
+
+def tree_size(root: Path, skip: frozenset = frozenset()) -> int:
+    """Bytes of the regular files under root (links are not followed; unreadable entries count as zero)."""
+    total, stack = 0, [root]
+    while stack:
+        try:
+            with os.scandir(stack.pop()) as it:
+                for e in it:
+                    try:
+                        if e.is_symlink():
+                            continue
+                        if e.is_dir(follow_symlinks=False):
+                            if e.name.lower() not in skip:
+                                stack.append(e.path)
+                        else:
+                            total += e.stat(follow_symlinks=False).st_size
+                    except OSError:
+                        pass
+        except OSError:
+            pass
+    return total
+
+
+def disk_check(home: Path, app: Path, *, reserve_mb: int = 0, usage=None) -> dict:
+    """#165: before the backup, is there room for it and for the new program? The backup copy is at most the size of the
+    backed-up data (+15 % and 64 MB headroom for the migration); the new program needs about the size of the current one
+    (+25 %; the old one is only renamed to rollback, not copied). Same volume: the two needs are added.
+    `reserve_mb` (setup /DISKRESERVEMB=) is extra free space that must remain (stricter only; CI uses a huge value for
+    its low-disk case). Returns {ok, drive, short_mb, need_mb} - numbers only, never a path or a name."""
+    usage = usage or shutil.disk_usage
+    home, app = safe_home(home), Path(app)
+    data = tree_size(home, frozenset(_NOT_BACKED_UP))
+    need_data = int(data * 1.15) + 64 * MB + max(0, int(reserve_mb)) * MB
+    need_app = int(sum(tree_size(app / n) for n in ("python", "face", "bridge")) * 1.25) + 64 * MB if app.is_dir() else 0
+    d_anchor, a_anchor = Path(home.anchor), Path(app.resolve().anchor)
+    same = d_anchor == a_anchor
+    checks = [(d_anchor, need_data + (need_app if same else 0))] + ([] if same else [(a_anchor, need_app)])
+    worst = None
+    for anchor, need in checks:
+        try:
+            short = need - usage(str(anchor)).free
+        except OSError:
+            continue                                  # cannot tell: never block an update on a failed probe
+        if short > 0 and (worst is None or short > worst["short"]):
+            worst = {"short": short, "need": need, "drive": str(anchor).rstrip("/" + chr(92))}
+    if worst is None:
+        return {"ok": True, "drive": "", "short_mb": 0, "need_mb": 0}
+    return {"ok": False, "drive": worst["drive"], "short_mb": -(-worst["short"] // MB), "need_mb": -(-worst["need"] // MB)}
+
+
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser()
-    ap.add_argument("action", choices=("prepare", "complete", "open-setup", "restore-shims", "restore-data", "health", "note-rollback"))
+    ap.add_argument("action", choices=("prepare", "complete", "open-setup", "restore-shims", "restore-data", "health", "note-rollback", "diskcheck"))
     ap.add_argument("--home", type=Path, required=True)
     ap.add_argument("--state", type=Path)
     ap.add_argument("--fresh", action="store_true")
     ap.add_argument("--timeout", type=float, default=90.0)
     ap.add_argument("--ok", type=int, default=0)
+    ap.add_argument("--app", type=Path)
+    ap.add_argument("--reserve-mb", type=int, default=0)
+    ap.add_argument("--out", type=Path)
     ap.add_argument("--language", choices=("en", "he"), default="en")
     args = ap.parse_args(argv)
     try:
         if args.action == "health":
             # exit code: 0 = ready, 3 = never became ready (the installer puts the old program back), 1 = no update record
             return {"ok": 0, "failed": 3}.get(health(args.home, args.timeout), 1)
+        if args.action == "diskcheck":
+            r = disk_check(args.home, args.app, reserve_mb=args.reserve_mb)
+            if args.out:                                   # key=value lines for the installer (no JSON parser there)
+                args.out.write_text("".join(f"{k}={r[k]}"+chr(10) for k in ("drive", "short_mb", "need_mb")), encoding="ascii")
+            return 0 if r["ok"] else 4
         if args.action == "note-rollback":
             note_rollback(args.home, bool(args.ok))
             return 0
