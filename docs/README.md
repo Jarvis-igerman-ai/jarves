@@ -7,7 +7,7 @@
 | Need | Source |
 |---|---|
 | What work is authorized now? | [NOW](NOW.md) |
-| Current agent handoff | [HANDOFF](HANDOFF.md) |
+| Current agent handoff (newest note by file name; HANDOFF.md is frozen history) | [handoff/](handoff/README.md), [HANDOFF](HANDOFF.md) |
 | V4 / V5 / V6 / V7 status and gates | [ROADMAP](ROADMAP.md) |
 | Long-term goals | [PRODUCT_VISION](PRODUCT_VISION.md) |
 | Owner decisions | [PRIORITIES](plans/PRIORITIES.md), [PROJECT_PRINCIPLES](PROJECT_PRINCIPLES.md) |

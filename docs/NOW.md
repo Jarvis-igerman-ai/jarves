@@ -39,7 +39,7 @@ Still needs the owner (do not do without it):
 - Sub-agents execute (Haiku for status/CI/audits, Sonnet for code, Opus only for plans and security reviews); the coordinator manages, reviews diffs and merges.
 - Remove the worktree and local branch after the merge.
 - Never close an issue, dismiss an alert or mark a test PASS without linked evidence. Passing CI is not installed-app acceptance.
-- Record results in `docs/handoff/` (one file per task) and the questions in [HANDOFF](HANDOFF.md); reference the GitHub issue in every commit.
+- Record results in `docs/handoff/` (one file per task) and the questions in the same note under `; reference the GitHub issue in every commit.
 
 ## Open questions for the owner
 
