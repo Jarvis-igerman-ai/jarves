@@ -1,0 +1,15 @@
+{
+ "dict": {
+  "Allow JARVES to file up to one performance issue per week? Only numeric metrics and recommendations are sent: no conversation, names or logs. A local GitHub login is required.": "לאפשר לג'ארביס לפרסם בעצמו עד Issue אחד בשבוע? יישלחו רק מדדים מספריים והמלצות, בלי תוכן שיחות, שמות או יומנים. נדרש חיבור GitHub במחשב.",
+  "Disable auto reporting": "כבה דיווח אוטומטי",
+  "Enable GitHub auto reporting": "הפעל דיווח אוטומטי ל-GitHub",
+  "JARVES finds repeated slowdown in comparable tests and suggests focused investigations. One slow measurement is not enough. Automatic reporting is opt-in and limited to one issue per week.": "ג'ארביס מחפש האטות חוזרות במדידות דומות, ומציע בדיקה ממוקדת. מדידה בודדת אינה מספיקה. דיווח אוטומטי מוגבל לאחד בשבוע ורק לאחר הסכמה.",
+  "Samples": "דגימות",
+  "GitHub issue": "Issue ב-GitHub",
+  "Local finding": "מעקב מקומי",
+  "Performance advisor": "המלצות ביצועים חכמות",
+  "Auto-report enabled": "דיווח אוטומטי מופעל",
+  "Local only": "מקומי בלבד",
+  "No repeated regression confirmed yet. Weekly speed tests build the baseline.": "אין עדיין מספיק ראיות להאטה חוזרת. בדיקות המהירות השבועיות בונות את ההיסטוריה."
+ }
+}
