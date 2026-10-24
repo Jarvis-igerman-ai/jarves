@@ -227,7 +227,7 @@ class SettingsSkill(Skill):
 
         return [
             Tool("workspace_read", "Read a workspace file (SOUL, IDENTITY, USER, MEMORY, AGENTS, TOOLS, SETUP, FEATURES): 'read SETUP', 'תקרא את מדריך ההתקנה'; long ones: follow next_offset until null.",
-                 read_file, ReadFileArgs, permission="read"),
+                 read_file, ReadFileArgs, permission="read", cache_s=30.0),
             Tool("workspace_note", "Add ONE short line to USER.md or MEMORY.md: 'note that I like tea', 'תרשום שאני אוהב תה'. Never passwords or codes.", note, NoteArgs,
                  permission="action"),
             Tool("workspace_edit", "Change SOUL/IDENTITY/USER/MEMORY on request ('be funnier', 'תשנה את האופי שלך'). Asks the user to approve first.",

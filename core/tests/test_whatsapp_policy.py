@@ -133,7 +133,8 @@ def test_no_tool_changes_mode_allow_lists_or_kill(home):
     reg.register(skill)
     names = {t.name for t in skill.tools()}
     assert names == {"whatsapp_status", "whatsapp_inbox", "whatsapp_chat", "whatsapp_summarize_asked",
-                     "whatsapp_search", "whatsapp_show", "whatsapp_compose", "whatsapp_send"}
+                     "whatsapp_search", "whatsapp_find_chat", "whatsapp_show", "whatsapp_compose",
+                     "whatsapp_send"}
     for t in skill.tools():
         props = set(t.args.model_json_schema().get("properties", {}))
         assert not props & {"mode", "list", "op", "allow", "on", "logout", "override_watch", "days"}, t.name

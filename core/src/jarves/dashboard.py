@@ -20,6 +20,7 @@ Modules probed at start: jarves.workspace, jarves.curator, jarves.memory, jarves
 """
 from __future__ import annotations
 
+import asyncio
 import importlib
 import gzip
 import json
@@ -300,7 +301,7 @@ def api_overview(ctx: Ctx, m, body, q=None):
     days = daily_costs(st, ctx.cfg.pricing, 7)
     live = st.live_session()
     snap = read_snapshot(ctx.home / "health.json") or {}
-    issues = st.issues("open")
+    issues = diagnose.by_cause(st.issues("open"))["problems"]       # one per cause; environment states are not counted
     from .updates import beta_label
     return 200, {"version": __version__, "beta": beta_label(ctx.home), "today": next((d for d in days if d["day"] == today), None), "week": days,
                  "live": _session_summary(ctx, live) if live else None,
@@ -373,7 +374,16 @@ def api_tasks(ctx: Ctx, m, body, q=None):
 
 def api_issues(ctx: Ctx, m, body, q=None):
     status = _q1(q, "status", "open")
-    return 200, [locales.issue(dict(i)) for i in ctx.store.issues(None if status == "all" else status)]
+    from . import issue_text as it
+    rows = []
+    for i in ctx.store.issues(None if status == "all" else status):
+        d = dict(i)
+        probe = {"code": d["fingerprint"], "evidence": {"finding": str(d["title"])}}
+        d["cause"] = diagnose.cause_key(str(d["fingerprint"]))
+        d["kind"] = it.classify(probe)                               # "info" = expected for how JARVES is run here
+        d["hint"] = it.describe(probe)["hint"]
+        rows.append(locales.issue(d))
+    return 200, rows
 
 
 def api_issue_set(ctx: Ctx, m, body):
@@ -1067,9 +1077,10 @@ class DashboardSkill(Skill):
     name = "dashboard"
     description = "the local web dashboard (conversations, logs, costs, memory, settings)"
 
-    def __init__(self, opener, current=None) -> None:
+    def __init__(self, opener, current=None, browser_state=None) -> None:
         self.current = current                       # () -> {page, at} | None: what the open tab last reported
         self.opener = opener                         # async (page "#/x") -> url (Core.open_dashboard)
+        self.browser_state = browser_state or (lambda: "")   # "pending" = the server runs, the browser is still opening
 
     def tools(self) -> list[Tool]:
         from pydantic import BaseModel, Field
@@ -1085,13 +1096,17 @@ class DashboardSkill(Skill):
                 return ToolResult(False, "אין לי דף כזה בלוח הבקרה.", {"pages": pages.ids()}, code="DASHBOARD_PAGE_UNKNOWN")
             try:
                 url = await self.opener(f"#/{pid}")
-            except Exception as e:
+            except (Exception, asyncio.TimeoutError) as e:      # Issue #17: a slow start is an answer, not a hang
+                logs.warn("dashboard", "DASHBOARD_FAILED", "open_dashboard failed", error_type=type(e).__name__)
                 return ToolResult(False, "לא הצלחתי לפתוח את לוח הבקרה.", {"error": type(e).__name__},
                                   code="DASHBOARD_FAILED")
             local = url.split("?", 1)[0]
             info = pages.describe(pid)
             if info["sensitive"]:
                 info["note"] = "Explain only: every change here is the user's own click or approval; never do it for them."
+            if self.browser_state() == "pending":
+                return ToolResult(True, f"{info['title_he']} בלוח הבקרה פועל, אבל הדפדפן עוד לא נפתח. אם לא יופיע בעוד רגע, "
+                                  "אפשר לפתוח את הכתובת ידנית.", {"url": local, "browser": "pending", **info}, code="ok")
             return ToolResult(True, f"פתחתי את {info['title_he']} בלוח הבקרה.", {"url": local, **info}, code="ok")
         async def where(a):
             seen = self.current() if self.current else None

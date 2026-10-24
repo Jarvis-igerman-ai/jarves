@@ -309,18 +309,41 @@ def add_reminder(db, name, when):
                                            time.time(), time.time(), when))
 
 
+import datetime as _dt
+from zoneinfo import ZoneInfo
+
+_IL = ZoneInfo("Asia/Jerusalem")
+FIXED_NOON = _dt.datetime(2026, 10, 20, 12, 0, 0, tzinfo=_IL)
+
+
+@pytest.mark.parametrize("hh,mm,ss", [(23, 59, 30), (0, 0, 30)])
+async def test_briefing_reminders_today_window_is_clock_independent(home, hh, mm, ss):
+    """Issue #17: a reminder 20 s after 'now' is due today whether now is just before or just after local midnight."""
+    now = _dt.datetime(2026, 10, 20, hh, mm, ss, tzinfo=_IL)
+    db = open_db(home)
+    add_reminder(db, "עוד רגע", now.timestamp() + 20)
+    add_reminder(db, "מחר", now.timestamp() + 86400)
+    reg = SkillRegistry()
+    briefing.register_briefing(reg, db, clock=lambda: now)
+    r = await reg.call("briefing_get", {"sections": ["reminders"]}, origin="user")
+    secs = {s["id"]: s for s in r.data["sections"]}
+    assert secs["reminders"]["reminders"] == ["עוד רגע"]
+    db.close()
+
+
 async def test_briefing_full_with_google_weather_reminders_and_lists(home):
     srv = weather_server()
     try:
         os.environ[briefing.WEATHER_BASE_ENV] = srv.url
         db = open_db(home)
-        add_reminder(db, "לקחת כדורים", time.time() + 60)
-        add_reminder(db, "בעוד שבוע", time.time() + 7 * 86400)
+        now = FIXED_NOON                          # never the wall clock: now+60 s crossed local midnight every night
+        add_reminder(db, "לקחת כדורים", now.timestamp() + 60)
+        add_reminder(db, "בעוד שבוע", now.timestamp() + 7 * 86400)
         db.x("INSERT INTO notes (title, text, tags, created, updated) VALUES (?,?,?,?,?)",
              ("קניות", "חלב, לחם", "רשימה", time.time(), time.time()))
         reg = SkillRegistry()
         reg.register(FakeGoogle())
-        briefing.register_briefing(reg, db)
+        briefing.register_briefing(reg, db, clock=lambda: FIXED_NOON)
         r = await reg.call("briefing_get", {}, origin="user")
         assert r.ok and r.code == "BRIEFING_OK" and not r.data["partial"]
         secs = {s["id"]: s for s in r.data["sections"]}

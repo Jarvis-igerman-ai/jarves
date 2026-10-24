@@ -455,7 +455,9 @@ class CameraService:
         used = self.memory.usage_today("camera_photos") if self.memory is not None else 0
         if used >= limit:
             raise Refusal("CAMERA_CLOUD_LIMIT", "הגעתי למכסת התמונות היומית לבדיקה בענן.")
+        t_look = time.monotonic()
         frame = await self.capture_still(mode, flash=True)
+        t_captured = time.monotonic()
         try:
             mime, data = encode_still(frame, self.cfg.still_max_side)
             w, h = frame.width, frame.height
@@ -469,10 +471,16 @@ class CameraService:
         logs.info("camera", "CAMERA_CLOUD_SEND", "one photo sent to the backend vision model", purpose=mode,
                   bytes=n, mime=mime, width=w, height=h, model=getattr(self.vision, "model", ""),
                   photos_today=used + 1, limit=limit)
+        t_sent = time.monotonic()
         try:
             text = await self.vision.ask(mode, question, url)
         finally:
             del url
+            # Issue #17 (camera_describe 5.5 s): where the time goes, so a slow look is diagnosed from the log
+            # instead of guessed. capture = open the sensor + one still; encode = downscale + JPEG; ask = the cloud model.
+            logs.info("camera", "CAMERA_LOOK_TIMING", "camera look timing", purpose=mode,
+                      capture_ms=round((t_captured - t_look) * 1000), encode_ms=round((t_sent - t_captured) * 1000),
+                      ask_ms=round((time.monotonic() - t_sent) * 1000))
         # shown on the screen under "What he last described" (RAM only; the words he said anyway)
         self.last_seen = {"text": str(text)[:400], "mode": mode, "ts": round(time.time(), 1)}
         return text, {"sent_bytes": n, "photos_today": used + 1}

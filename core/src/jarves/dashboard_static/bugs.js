@@ -9,7 +9,8 @@
   const stTx = { new: ["חדש", "New"], acknowledged: ["בטיפול", "Acknowledged"], fixed: ["תוקן", "Fixed"], ignored: ["מתעלמים", "Ignored"] };
   const filt = { status: "open", severity: "", area: "" };
   const t2 = (pair) => tx(pair[0], pair[1]);
-  const statusText = (r) => t2(stTx[r.status]) + (r.status === "fixed" && r.fixed_in ? tx(` בגרסה ${r.fixed_in}`, ` in version ${r.fixed_in}`) : "");
+  const statusText = (r) => r.status === "fixed" && r.closed ? tx(r.closed_he, r.closed)
+    : t2(stTx[r.status]) + (r.status === "fixed" && r.fixed_in ? tx(` בגרסה ${r.fixed_in}`, ` in version ${r.fixed_in}`) : "");
 
   // ---------------------------------------------------------------- header badge (every page)
   let chip = null;
@@ -41,7 +42,7 @@
     const set = (k, v) => () => { filt[k] = v; route(true); };
     return el("div", { class: "card" },
       el("div", { class: "row", style: "flex-wrap:wrap" }, el("span", { class: "muted small" }, tx("מצב", "Status")),
-        ...[["open", tx("פתוחות", "Open")], ["all", tx("הכל", "All")], ["fixed", tx("תוקנו", "Fixed")], ["ignored", tx("מתעלמים", "Ignored")]]
+        ...[["open", tx("פתוחות", "Open")], ["info", tx("מידע (לא תקלות)", "Information (not bugs)")], ["all", tx("הכל", "All")], ["fixed", tx("תוקנו", "Fixed")], ["ignored", tx("מתעלמים", "Ignored")]]
           .map(([v, l]) => chipBtn(l, filt.status === v, set("status", v)))),
       el("div", { class: "row", style: "flex-wrap:wrap" }, el("span", { class: "muted small" }, tx("חומרה", "Severity")),
         ...[["", tx("הכל", "All")], ["P1", "P1"], ["P2", "P2"], ["P3", "P3"]].map(([v, l]) => chipBtn(l, filt.severity === v, set("severity", v)))),
@@ -53,7 +54,8 @@
     return el("a", { class: "card", href: "#/bugs/" + r.id, style: "display:block;text-decoration:none;color:inherit" },
       el("div", { class: "row", style: "flex-wrap:wrap" }, pill(sevCls[r.severity], r.severity), el("strong", { dir: "auto" }, tx(r.title_he || r.title, r.title)),
         pill("plain", statusText(r))),
-      el("div", { class: "muted small", dir: "auto" }, `${r.id} · ${tx(r.area_label_he, r.area_label)} · ×${r.count} · ${when(r.last_seen)}`
+      r.meaning ? el("div", { class: "small", dir: "auto" }, tx(r.meaning_he || r.meaning, r.meaning)) : null,
+      el("div", { class: "muted small", dir: "auto" }, `${r.id} · ${tx(r.area_label_he, r.area_label)} · ×${r.evidence_count} · ${when(r.last_seen)}`
         + (r.reported_url ? tx(" · דווח", " · reported") : r.bundle_saved ? tx(" · נשמר לצירוף", " · saved to attach") : "")));
   }
   async function pageList() {
@@ -102,15 +104,19 @@
     render(header(tx("תקלה ", "Issue ") + r.id, tx(r.title_he || r.title, r.title), el("a", { href: "#/bugs" }, tx("כל הדיווחים", "All reports"))),
       el("div", { class: "card" },
         el("div", { class: "row", style: "flex-wrap:wrap" }, pill(sevCls[r.severity], r.severity), pill("plain", statusText(r)),
-          el("span", { class: "muted small" }, `${tx(r.area_label_he, r.area_label)} · ${r.code} · ×${r.count}`)),
+          el("span", { class: "muted small" }, `${tx(r.area_label_he, r.area_label)} · ×${r.evidence_count}`)),
+        r.meaning ? el("div", {}, el("strong", {}, tx("מה זה אומר: ", "What it means: ")), tx(r.meaning_he || r.meaning, r.meaning)) : null,
+        r.next_step ? el("div", {}, el("strong", {}, tx("הצעד הבא: ", "Next step: ")), tx(r.next_step_he || r.next_step, r.next_step)) : null,
+        r.kind === "info" && r.hint ? el("div", { class: "muted small" }, tx(r.hint_he || r.hint, r.hint)) : null,
         el("div", { class: "small muted" }, tx("נראה לראשונה: ", "First seen: ") + when(r.first_seen) + tx(" · לאחרונה: ", " · last: ") + when(r.last_seen)
           + (r.versions.length ? tx(" · גרסאות: ", " · versions: ") + r.versions.join(", ") : "")),
         r.reported_url ? el("div", { class: "small" }, tx("דווח: ", "Reported: "), el("a", { href: r.reported_url, target: "_blank", rel: "noopener noreferrer" }, r.reported_url)) : null,
         r.bundle_saved ? el("div", { class: "small muted" }, tx("נשמר לצירוף: ", "Saved to attach: ") + r.bundle_saved) : null,
         el("div", { class: "row", style: "flex-wrap:wrap" },
-          el("button", { type: "button", class: "primary", onclick: show }, tx("דווחו למפתח", "Report")),
-          r.status === "new" ? el("button", { type: "button", class: "ghost", onclick: () => act(id, "acknowledged", msg) }, tx("ראיתי", "Acknowledge")) : null,
-          r.status !== "ignored" ? el("button", { type: "button", class: "ghost", onclick: () => act(id, "ignored", msg) }, tx("התעלם", "Ignore")) : null,
+          r.kind === "info" ? null : el("button", { type: "button", class: "primary", onclick: show }, tx("דווחו למפתח", "Report")),
+          r.status === "new" && r.kind !== "info" ? el("button", { type: "button", class: "ghost", onclick: () => act(id, "acknowledged", msg) }, tx("ראיתי", "Acknowledge")) : null,
+          r.status !== "ignored" ? el("button", { type: "button", class: r.kind === "info" ? "primary" : "ghost", onclick: () => act(id, "ignored", msg) },
+            r.kind === "info" ? tx("התעלם מזה במחשב הזה", "Ignore this on this PC") : tx("התעלם", "Ignore")) : null,
           r.status !== "fixed" ? el("button", { type: "button", class: "ghost", onclick: () => act(id, "fixed", msg) }, tx("סמן כתוקן", "Mark fixed")) : null,
           r.status === "fixed" || r.status === "ignored" ? el("button", { type: "button", class: "ghost", onclick: () => act(id, "new", msg) }, tx("פתח מחדש", "Reopen")) : null),
         msg),

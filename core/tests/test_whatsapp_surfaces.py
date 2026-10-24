@@ -267,3 +267,34 @@ def test_dashboard_yes_flag_and_off_hint(dash, bridge, home):
     r, body = req(dash, "POST", "/api/whatsapp/mode", headers=h, body={"mode": "read", "enable_reading": True})
     assert r.status == 200 and json.loads(body)["feature_on"] is True
     assert _feat(home, "whatsapp_bridge") and not _feat(home, "whatsapp_send")
+
+
+def test_cli_find_searches_names_only(bridge, home, capsys):
+    rc, out = run(capsys, "find", "Smith")
+    assert rc == 0 and "Bob Smith" in out and "Meeting moved" not in out
+    rc, out = run(capsys, "find", "כהן", "--json")
+    assert rc == 0 and json.loads(out)[0]["name"] == "דנה כהן" and "number_end" in json.loads(out)[0]
+    rc, out = run(capsys, "find", "zzzqqq")
+    assert rc == 1 and ("names" in out or "בשמות" in out)
+    rc, out = run(capsys, "allow", "send", "Smith")     # allow-lists stay exact-name only
+    assert rc == 1 and "WA_UNKNOWN_CONTACT" in out
+
+
+def test_cli_find_is_forgiving_ranked_and_has_a_regex_mode(bridge, home, capsys):
+    rc, out = run(capsys, "find", "Smyth")                                  # typo
+    assert rc == 0 and "Bob Smith" in out and "[similar (typo)]" in out
+    rc, out = run(capsys, "find", "--regex", "^דנה (כהן|לוי)$", "--json")
+    rows = json.loads(out)
+    assert rc == 0 and {r["name"] for r in rows} == {"דנה כהן", "דנה לוי"} and rows[0]["reason"] == "pattern"
+    rc, out = run(capsys, "find", "Bob*|דנה", "--json")
+    assert rc == 0 and {r["name"] for r in json.loads(out)} == {"Bob Smith", "דנה כהן", "דנה לוי"}
+    rc, out = run(capsys, "find", "דנה")                                     # same rank: none picked for you
+    assert rc == 0 and "none is picked" in out
+
+
+def test_cli_find_invalid_and_overlong_patterns_give_a_clear_message(bridge, home, capsys):
+    rc = cli.main(["whatsapp", "find", "--regex", "[abc"])
+    err = capsys.readouterr().err
+    assert rc == 2 and "Invalid pattern" in err and "any text" in err
+    rc = cli.main(["whatsapp", "find", "--regex", "a" * 200])
+    assert rc == 2 and "too long" in capsys.readouterr().err

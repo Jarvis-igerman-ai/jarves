@@ -1,0 +1,47 @@
+order = 73
+category = "everyday"
+features = []
+aliases = ["שאלה אחת מהטרמינל", "ask full", "ask --full", "jarvis ask --full", "jarvis tell", "tell", "one-shot", "script jarvis", "הודעה אחת לג'ארביס", "בדיקת ג'ארביס מהטרמינל"]
+links = ["text_chat", "privacy"]
+title_he = "שאלה אחת עם גישה מלאה (jarvis ask --full)"
+title_en = "One question with full access (jarvis ask --full)"
+what_he = "שולח הודעה אחת לג'ארביס שרץ, בדיוק כמו jarvis chat, ומדפיס את התשובה ויוצא. לג'ארביס יש כל הכישורים: וואטסאפ, יומן, דואר, דפדפן ועוד. מתאים לסקריפטים ולבדיקה מהירה. jarvis ask רגיל נשאר קצר ובלי חיבור לליבה, עם מעט כלים. הפקודה jarvis tell זהה ל-jarvis ask --full."
+what_en = "Sends ONE message to the running JARVES, exactly like jarvis chat, prints the answer and exits. JARVES has every Skill: WhatsApp, calendar, mail, browser and more. Good for scripts and quick tests. Plain jarvis ask stays small and offline-simple, with a limited tool set. jarvis tell is the same as jarvis ask --full."
+say = []
+expect_he = "התשובה מודפסת, ושורות כמו \"> שם_כלי ok\" מראות אילו כלים הופעלו. קוד יציאה 0 בתשובה רגילה, ושונה מ-0 בכשל (CORE_INTERNAL, הליבה לא זמינה, פסק זמן, ביטול). ברירת המחדל שקטה: בלי קול, צליל או אור בפנים."
+expect_en = "The answer is printed, and lines like \"> tool_name ok\" show which tools ran. The exit code is 0 for a normal answer and non-zero on failure (CORE_INTERNAL, Core not reachable, timeout, cancelled). Silent by default: no speech, chime or face light."
+cost_he = "כמו כל הודעה בשיחה: על חשבון תוכנית ChatGPT או מפתח ה-API, באותו תקציב יומי. הקראה בקול רק עם --speak ולעולם לא בשעות שקט."
+cost_en = "Like any chat message: on your ChatGPT plan or API key, within the same daily budget. Speaking the answer needs --speak and never happens in quiet hours."
+privacy_he = "זה אותו מסלול כמו jarvis chat: ההודעה והתשובה נשמרות כמו כל שיחה (ובמצב פרטיות הטקסט לא נשמר), ואותם כישורים ואותן הרשאות. פעולה מסוכנת מבקשת אישור y/N בטרמינל. כשהקלט אינו טרמינל (צינור, CI) כל אישור נדחה אוטומטית ולא מאושר בשקט. קודים ומפתחות לא מוצגים ולא נרשמים."
+privacy_en = "It is the same path as jarvis chat: the message and the answer are stored like any conversation (in privacy mode the text is not stored), with the same Skills and permissions. A risky action asks y/N in the terminal. When input is not a terminal (pipe, CI) every approval is denied automatically and never approved silently. Codes and keys are not shown or logged."
+
+[[steps]]
+he = "הריצו: jarvis ask --full \"יש לי הודעות חדשות בוואטסאפ?\" (אם ג'ארביס לא רץ הוא יותנע ברקע; --wait קובע כמה שניות לחכות). אותו דבר: jarvis tell \"...\"."
+en = "Run: jarvis ask --full \"do I have new WhatsApp messages?\" (JARVES is started in the background if it is not running; --wait sets how many seconds to wait). Same thing: jarvis tell \"...\"."
+action = "command:jarvis ask --full"
+
+[[steps]]
+he = "אפשר גם בצינור: echo \"מה ביומן מחר?\" | jarvis ask --full. לפלט למכונה: --json מדפיס {ok, text, tools, code}. --timeout קובע כמה שניות לחכות לתשובה (ברירת מחדל 300)."
+en = "Or from a pipe: echo \"what is on my calendar tomorrow?\" | jarvis ask --full. For machines: --json prints {ok, text, tools, code}. --timeout sets how many seconds to wait for the answer (default 300)."
+
+[[steps]]
+he = "כשפעולה צריכה אישור בטרמינל אינטראקטיבי: הקלידו y או n. בצינור או ב-CI האישור נדחה. כדי שג'ארביס גם יקריא את התשובה הוסיפו --speak."
+en = "When an action needs approval in an interactive terminal: type y or n. In a pipe or CI the approval is denied. To have JARVES also speak the answer add --speak."
+
+[[problems]]
+he = "הטרמינל כותב \"JARVES did not answer\""
+en = "The terminal says \"JARVES did not answer\""
+fix_he = "ג'ארביס לא עלה בזמן. הריצו jarvis logs -n 80 וגם jarvis doctor, ונסו שוב עם --wait 120."
+fix_en = "JARVES did not start in time. Run jarvis logs -n 80 and jarvis doctor, then try again with --wait 120."
+
+[[problems]]
+he = "קוד היציאה שונה מ-0 והתשובה ריקה"
+en = "The exit code is non-zero and the answer is empty"
+fix_he = "הקוד מודפס בסוגריים מרובעים (או בשדה code עם --json): CORE_INTERNAL פירושו תקלה בליבה (ראו jarvis logs), TIMEOUT פירושו שהתשובה לקחה יותר מ---timeout, CANCELLED פירושו שבוטלה."
+fix_en = "The code is printed in square brackets (or in the code field with --json): CORE_INTERNAL means a Core fault (see jarvis logs), TIMEOUT means the answer took longer than --timeout, CANCELLED means it was cancelled."
+
+[[problems]]
+he = "jarvis ask רגיל אומר שאין לו גישה לוואטסאפ או ליומן"
+en = "Plain jarvis ask says it has no access to WhatsApp or the calendar"
+fix_he = "ל-jarvis ask רגיל יש רק כמה כלים. השתמשו ב-jarvis ask --full (או jarvis chat) כדי לקבל את כל הכישורים."
+fix_en = "Plain jarvis ask has only a few tools. Use jarvis ask --full (or jarvis chat) to get every Skill."

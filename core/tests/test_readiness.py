@@ -127,6 +127,9 @@ async def test_close_loading_window_cancels_boot_and_stops_core():
         stop_event = asyncio.Event()
         dev = object()
 
+        def _install_stop_signals(self):             # issue #17 (fix/reliability): cli._run_desktop calls it
+            pass
+
         async def start(self):
             events.append("starting")
 

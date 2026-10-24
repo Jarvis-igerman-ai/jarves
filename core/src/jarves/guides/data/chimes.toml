@@ -5,8 +5,8 @@ aliases = ["צלילים", "צליל", "chime", "beep"]
 links = ["wake_word"]
 title_he = "צלילי התראה"
 title_en = "Chimes"
-what_he = "צליל עדין כשהוא שמע \"היי ג'ארביס\" וכשאפשר להתחיל לדבר."
-what_en = "A soft sound when he heard \"Hey Jarvis\" and when you can start talking."
+what_he = "צליל עדין כשהוא שמע \"היי ג'ארביס\" וכשאפשר להתחיל לדבר, וצליל \"אני על זה\" קטן אם התשובה מתעכבת יותר מ-3 שניות."
+what_en = "A soft sound when he heard \"Hey Jarvis\" and when you can start talking, and a small \"working on it\" sound if the answer takes longer than 3 seconds."
 say = [["תכבה את הצלילים", "Turn the chimes off"]]
 expect_he = "שני צלילים קצרים בתחילת כל שיחה."
 expect_en = "Two short sounds at the start of each conversation."
@@ -26,3 +26,9 @@ he = "לא שומעים צליל"
 en = "No sound"
 fix_he = "בדקו את עוצמת הקול של Windows ואת הרמקול שנבחר."
 fix_en = "Check the Windows volume and the selected speaker."
+
+[[problems]]
+he = "שקט ארוך לפני התשובה"
+en = "A long silence before the answer"
+fix_he = "אם אין תשובה 3 שניות אחרי שסיימתם לדבר, נשמע צליל קצר ורך (עד 4 פעמים), לא בשעות השקט ורק כשהמתג דולק. ביומן, LIVE_LATENCY מראה איזה שלב איטי (עד ההעברה, החיפוש או הקול) ו-LIVE_WORKING_CUE מראה מתי הצליל נשמע. אם התשובה לא מגיעה אחרי כ-25 שניות הוא אומר שלא הצליח."
+fix_en = "If there is no answer 3 seconds after you finish, a short soft sound plays (up to 4 times), never in quiet hours and only while the switch is on. In the log, LIVE_LATENCY shows which stage is slow (up to the hand-over, the lookup, or the voice) and LIVE_WORKING_CUE shows when the sound played. If no answer comes after about 25 seconds he says he did not manage."

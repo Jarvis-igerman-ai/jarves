@@ -225,6 +225,8 @@ class ConfirmingDetector:
         self.last_score = 0.0
         self.st = ConfirmStats()
         self.last_confirm: dict | None = None
+        # wake_guard (issue #17): after repeated false wakes even a strong score must pass the local speech check
+        self.always_confirm = False
 
     async def load(self) -> None:
         import asyncio
@@ -274,7 +276,7 @@ class ConfirmingDetector:
         self.base.feed(pcm)
         s = float(getattr(self.base, "last_score", 0.0))
         self.last_score = s
-        if s >= self.accept:
+        if s >= self.accept and not self.always_confirm:
             self._pending = 0
             self.st.fast_accepts += 1
             return s
