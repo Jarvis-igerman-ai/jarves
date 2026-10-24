@@ -38,6 +38,7 @@ SUGGESTIONS = {
     "private_mb": ("Profile retained objects and cache limits; do not change cache behavior without a baseline", "בדוק עצמים שנשמרים בזיכרון וגבולות מטמון"),
     "steady_rss_mb": ("Compare process memory after warm-up and under a similar workload", "השווה זיכרון תהליך לאחר חימום ובעומס דומה"),
     "threads": ("Review background thread lifecycle and unnecessary service workers", "בדוק חיי threads ועובדי רקע מיותרים"),
+    "greeting_missed_pct": ("Greeting audio is missing after nudge and retry; check the live session logs and provider status before changing timeouts", "שמע הברכה חסר גם אחרי תזכורת וניסיון חוזר; בדוק יומני שיחה חיה ומצב הספק לפני שינוי זמנים"),
     "openai_roundtrip_ms": ("Measure network availability and region; do not attribute transport latency to the model", "מדוד השהיית רשת בנפרד מזמן תגובת המודל"),
 }
 FALLBACK = ("Repeat the metric on the same device and profile the owning operation before optimizing",
