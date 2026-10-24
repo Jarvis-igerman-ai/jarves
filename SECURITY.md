@@ -3,7 +3,7 @@
 ## Reporting a vulnerability
 
 Please do **not** open a public issue for a vulnerability. Use GitHub private vulnerability reporting:
-https://github.com/igalgerman/jarves/security/advisories/new
+https://github.com/Jarvis-igerman-ai/jarves/security/advisories/new
 
 Include what you found, the version (`jarvis --version`), and steps to reproduce. Never include real keys, tokens,
 conversation content or personal data; a content-free description is enough. You will get an answer within a few days.
