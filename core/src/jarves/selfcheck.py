@@ -49,6 +49,7 @@ from pydantic import BaseModel, Field
 
 from . import features as feat
 from . import logs
+from .skills import expected_tool_refusal
 
 FEATURE = "self_check"
 SEV = {"high": 3, "medium": 2, "low": 1}
@@ -521,6 +522,8 @@ class SelfCheck:
         avail_hits: dict[str, list[dict]] = {k: [] for k in AVAIL}
         for r in recs:
             code = str(r.get("code") or "-")
+            if expected_tool_refusal(code, r.get("origin")):
+                continue
             for gid, g in AVAIL.items():
                 if code in g["codes"]:
                     avail_hits[gid].append(r)
@@ -698,6 +701,8 @@ class SelfCheck:
             name = str(r.get("tool") or str(r.get("msg") or "").split(" -> ")[0] or "?")
             code = (str(r.get("result_code") or "?") if "result_code" in r
                     else str(r.get("msg") or "").rsplit(" -> ", 1)[-1] if " -> " in str(r.get("msg") or "") else "?")
+            if expected_tool_refusal(code, r.get("origin")):
+                continue
             s = stats.setdefault(name, {"calls": 0, "fails": 0, "codes": {}, "lines": []})
             s["calls"] += 1
             if r.get("ok") is False:

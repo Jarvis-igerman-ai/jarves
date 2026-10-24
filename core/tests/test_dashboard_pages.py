@@ -12,7 +12,7 @@ def _tool(opened):
     async def opener(page):
         opened.append(page)
         return "http://127.0.0.1:1234/?t=secret"
-    return DashboardSkill(opener).tools()[0]
+    return next(t for t in DashboardSkill(opener).tools() if t.name == "open_dashboard")
 
 
 def test_every_sidebar_page_has_a_directory_entry():
@@ -46,3 +46,24 @@ async def test_unknown_page_opens_nothing_and_default_is_home():
     assert not bad.ok and bad.code == "DASHBOARD_PAGE_UNKNOWN" and opened == []
     ok = await t.handler(t.args())
     assert ok.ok and opened == ["#/home"]
+
+
+async def test_dashboard_page_reports_what_the_open_tab_last_sent():
+    from jarves.dashboard import note_ui_page
+    seen = {}
+    async def opener(page):
+        return "http://127.0.0.1:1/"
+    tools = {t.name: t for t in DashboardSkill(opener, lambda: seen.get("ui")).tools()}
+    none = await tools["dashboard_page"].handler(None)
+    assert not none.ok and none.code == "DASHBOARD_NOT_OPEN"
+
+    class C:
+        ui_page = None
+        clock = staticmethod(lambda: __import__("time").time())
+    c = C()
+    note_ui_page(c, "settings")
+    seen["ui"] = c.ui_page
+    res = await tools["dashboard_page"].handler(None)
+    assert res.ok and res.data["page"] == "settings" and res.data["sensitive"] and res.data["seen_s_ago"] < 5
+    note_ui_page(c, "<script>")                              # only a known page id is ever stored
+    assert c.ui_page["page"] == "settings"

@@ -291,7 +291,7 @@ class Core:
         self.registry.register(make_identity_skill(self.identity))     # "your name is X" (confirmed read-back)
         # WP-H: the dashboard on request ("תפתח את לוח הבקרה" / face button), inside this process
         self.registry.allowed_actions.add("open_dashboard")
-        self.registry.register(DashboardSkill(self.open_dashboard))
+        self.registry.register(DashboardSkill(self.open_dashboard, lambda: getattr(getattr(self._dashboard, "ctx", None), "ui_page", None)))
         from .skills.google import register_google      # WP-G: only when the user connected Google (no network)
         self.google = register_google(self.registry, self.home, self.health)
         from .homeassistant import register_home        # V3 P1 channels: tools stay hidden until their switch is on
@@ -350,11 +350,6 @@ class Core:
         self._check_ai()
         self.limits_refresh()
         limits_mod.set_sink(self.on_limit_event)        # delegation / tasks / scheduler report their caps here
-        try:                                            # SW-V4 O preflight (<= 1.5 s) while the ports are still free
-            self.preflight = _preflight.run_core(self)
-        except Exception:
-            self.preflight = None
-            logs.error("health", "PREFLIGHT_FAILED", "preflight did not run", exc=True)
 
         self.link = GodotLink(c.link.host, c.link.port, load_token(self.home / "link_token"), self.health,
                               self.on_message, self._face_connected)
@@ -410,6 +405,12 @@ class Core:
                         detail, "" if quality == "cloud" else
                         ("ChatGPT plan has no voice; use ai.connection = \"combined\" + OPENAI_API_KEY for the premium voice"
                          if c.ai.connection == "chatgpt" else "run `jarvis key` for the high-quality voice"))
+
+        try:                                            # Preflight after every Skill is attached, while the link port is still free
+            self.preflight = _preflight.run_core(self)
+        except Exception:
+            self.preflight = None
+            logs.error("health", "PREFLIGHT_FAILED", "preflight did not run", exc=True)
 
         # Accept the room/face connection only after audio and speech are initialized.
         await self.link.start()
@@ -1222,7 +1223,7 @@ class Core:
                 logs.debug("tts", "CHIME_FAILED", "could not play the chime")
 
     async def _start_live(self, *, greeting: str | None = None, hold_output: bool = False, ack: bool = False) -> None:
-        if self.stopping:
+        if self.stopping or getattr(self.dev, "mic_muted", False):
             return
         if self.live is not None or self._voice_connecting:
             # QA 19 Oct (suite_voice): a face connecting after a failed startup started a SECOND live session while

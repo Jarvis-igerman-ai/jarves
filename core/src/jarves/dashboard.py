@@ -33,7 +33,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, unquote, urlsplit
 
-from . import __version__, config_edit, diagnose, locale_parts, locales, logs, logview, mobile, plugin_registry
+from . import __version__, config_edit, diagnose, locale_parts, locales, logs, logview, mobile, page_registry, plugin_registry
 from .dashboard_auth import (DEVICE_COOKIE, device_body_ok, DEVICE_IDLE_S, LAN_PORT, PUBLIC_PATHS, Access, client_allowed,
                              is_loopback, lan_ip, parse_cookies)
 from .health import read_snapshot
@@ -108,6 +108,7 @@ class Ctx:
         self.mobile = None                 # mobile.MobileAccess (set by Dashboard; V5 phone access)
         self.chat = None                   # chat_engine.WebChat (set by Dashboard when a chat engine runs here)
         self.port = 0
+        self.ui_page: dict | None = None   # {page, at}: the page id the browser last reported (note_ui_page); never content
         self._tl = threading.local()       # per-request principal (the server is threaded)
 
     @property
@@ -283,7 +284,17 @@ def api_live(ctx: Ctx, m, body):
     return api_session(ctx, re.match(r"(.*)", s["id"]), body)
 
 
-def api_overview(ctx: Ctx, m, body):
+def note_ui_page(ctx: Ctx, page: str) -> None:
+    """The open dashboard tab sends the page it shows (an id only, with its /api/overview poll: no extra request, the
+    server allows 240 a minute), so the assistant can explain "this page". Only a known page id is ever stored."""
+    from . import dashboard_pages as pages
+    pid = pages.resolve(page) if page else None
+    if pid:
+        ctx.ui_page = {"page": pid, "at": ctx.clock()}
+
+
+def api_overview(ctx: Ctx, m, body, q=None):
+    note_ui_page(ctx, _q1(q, "page"))
     st = ctx.store
     today = datetime.now().date().isoformat()
     days = daily_costs(st, ctx.cfg.pricing, 7)
@@ -807,10 +818,13 @@ class Handler(BaseHTTPRequestHandler):
         try:
             st = p.stat()
             code = p.stem if p.parent == STATIC / "locales" and p.suffix == ".js" else None   # base catalog + parts
-            key = (st.st_mtime_ns, st.st_size, locale_parts.parts_stamp() if code else ())
+            composed = name == "index.html"                                  # + the nav links / scripts of pages.d
+            key = (st.st_mtime_ns, st.st_size, locale_parts.parts_stamp() if code else
+                   tuple((q.name, q.stat().st_mtime_ns) for q in sorted(page_registry.DIR.glob("*.toml"))) if composed else ())
             hit = _STATIC_CACHE.get(str(p))
             if hit is None or hit[0] != key:
-                raw = locale_parts.render_js(code) if code else p.read_bytes()
+                raw = (locale_parts.render_js(code) if code else
+                       page_registry.compose(p.read_text(encoding="utf-8")).encode("utf-8") if composed else p.read_bytes())
                 gz = gzip.compress(raw, 6, mtime=0) if len(raw) > 600 and p.suffix in _TYPES else None
                 hit = _STATIC_CACHE[str(p)] = (key, '"%x-%x-%x"' % (key[0], key[1], zlib.crc32(repr(key[2]).encode())), raw, gz)
         except OSError:
@@ -1053,7 +1067,8 @@ class DashboardSkill(Skill):
     name = "dashboard"
     description = "the local web dashboard (conversations, logs, costs, memory, settings)"
 
-    def __init__(self, opener) -> None:
+    def __init__(self, opener, current=None) -> None:
+        self.current = current                       # () -> {page, at} | None: what the open tab last reported
         self.opener = opener                         # async (page "#/x") -> url (Core.open_dashboard)
 
     def tools(self) -> list[Tool]:
@@ -1078,4 +1093,14 @@ class DashboardSkill(Skill):
             if info["sensitive"]:
                 info["note"] = "Explain only: every change here is the user's own click or approval; never do it for them."
             return ToolResult(True, f"פתחתי את {info['title_he']} בלוח הבקרה.", {"url": local, **info}, code="ok")
-        return [Tool("open_dashboard", "Open the dashboard, optionally on a page: 'open the dashboard', 'תפתח את הדשבורד', 'open costs'; then explain its controls from the result. Never a way to close anything.", open_, OpenArgs, permission="action")]
+        async def where(a):
+            seen = self.current() if self.current else None
+            if not seen:
+                return ToolResult(False, "אני לא רואה לוח בקרה פתוח.", {}, code="DASHBOARD_NOT_OPEN")
+            info = pages.describe(seen["page"])
+            age = max(0, int(time.time() - seen["at"]))
+            if info["sensitive"]:
+                info["note"] = "Explain only: every change here is the user's own click or approval; never do it for them."
+            return ToolResult(True, f"הדף הפתוח הוא {info['title_he']}.", {**info, "seen_s_ago": age}, code="ok")
+        return [Tool("dashboard_page", "Current page: 'what page is this', 'איפה אני בלוח'; explain it.", where, permission="read"),
+                Tool("open_dashboard", "'open the dashboard', 'תפתח את הדשבורד', 'open costs': open requested page; explain returned controls. Never a way to close anything.", open_, OpenArgs, permission="action")]

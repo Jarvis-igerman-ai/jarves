@@ -28,6 +28,7 @@ from pathlib import Path
 from typing import Callable
 
 from .. import logs
+from ..skills import expected_tool_refusal
 from . import db
 from .metrics import MetricStore
 
@@ -155,6 +156,9 @@ class Monitor:
 
     def on_record(self, code: str, level: str, component: str, f: dict, ts: float) -> None:
         t0 = time.thread_time()
+        result_code = f.get("result_code") if code == "TOOL_RESULT" else code
+        if expected_tool_refusal(result_code, f.get("origin")):
+            return  # retained in the raw log, not a failure-rate/latency sample
         m = self.metrics
         m.count(code, level, component, ts)
         if code in LIVE_OPEN:

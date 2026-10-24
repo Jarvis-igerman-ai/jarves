@@ -17,6 +17,10 @@ privacy_he = "אין."
 privacy_en = "None."
 
 [[steps]]
+he = "בשורת הפקודה: jarvis appearance list, jarvis appearance status או jarvis appearance set avatar3d. אפשר גם face, avatar2d או hidden."
+en = "From the command line: jarvis appearance list, jarvis appearance status, or jarvis appearance set avatar3d. Other modes: face, avatar2d, hidden."
+
+[[steps]]
 he = "פתחו את עמוד \"מראה\" ובחרו מראה, או בקשו ממנו בקול."
 en = "Open the Appearance page and pick a look, or ask him by voice."
 action = "open:#/appearance"

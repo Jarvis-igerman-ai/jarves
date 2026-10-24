@@ -251,3 +251,36 @@ def test_cli_cost_and_diagnose_import(home, capsys):
     assert cli.main(["cost", "--days", "3650"]) == 0
     out = capsys.readouterr().out
     assert "ESTIMATE" in out and "2026-10-19" in out and "0.172" in out
+
+
+@pytest.mark.parametrize("code,origin,defect", [
+    ("FEATURE_NEEDS_APPROVAL", "model", False),
+    ("TOOL_UNTRUSTED_TURN", "model", False),
+    ("TOOL_DECLINED", "model", False),
+    ("FEATURE_OFF", "model", False),
+    ("SKILL_DISABLED", "model", False),
+    ("TOOL_FORBIDDEN", "model", False),
+    ("TOOL_BAD_ARGS", "user", False),
+    ("TOOL_BAD_ARGS", "model", True),
+    ("TOOL_CRASH", "model", True),
+    ("TOOL_TIMEOUT", "model", True),
+    ("PEAR_DOWN", "model", True),
+])
+def test_expected_refusals_stay_in_history_without_runtime_defect_issues(st, code, origin, defect):
+    finder = diagnose.Finder(st, Config())
+    issues = []
+    finder.issue = lambda sid, end, fp, *args: issues.append(fp)
+    # Several refusals (including a long approval wait) must not become failure,
+    # repeat or slow-handler issues. Genuine failures retain all diagnostics.
+    calls = [{"name": "test", "ok": 0, "code": code, "origin": origin,
+              "ts": t, "done_ts": t + 10, "duration_s": 10} for t in (10, 11, 12)]
+    finder._tools("test", calls, 100)
+    assert ("tool_fail:test" in issues) == defect
+    assert ("tool_repeat:test" in issues) == defect
+    assert ("slow_tool:test" in issues) == defect
+    for event_code in (code, "TOOL_RESULT"):
+        issues.clear()
+        finder._events("test", {"stats": "{}"}, [
+            {"ts": 10, "code": event_code, "level": "WARNING", "component": "skills",
+             "msg": "test -> " + code, "fields": json.dumps({"result_code": code, "origin": origin})}], 100)
+        assert bool(issues) == defect

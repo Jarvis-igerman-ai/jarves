@@ -13,8 +13,12 @@ expect_he = "סגירת החלון רק מסתירה אותו. בפעם הראש
 expect_en = "Closing the window only hides him. The first time, a one-time notice says JARVES is still running in the tray. Quit in the tray icon's menu really stops him."
 cost_he = "חינם. מחכה ל\"היי ג'ארביס\" בלי חיבור לענן."
 cost_en = "Free. Waiting for \"Hey Jarvis\" uses no cloud connection."
-privacy_he = "אין."
-privacy_en = "None."
+privacy_he = "בקשו להשתיק את המיקרופון כדי להפסיק להקשיב. לביטול השתקה השתמשו בכפתור המיקרופון הגלוי בחלון, בסמל במגש או בפקודה jarvis mic unmute. מיקרופון מושתק לא יכול לשמוע פקודת ביטול השתקה."
+privacy_en = "Ask to mute the microphone to stop listening. Unmute using the visible microphone button in the window, the tray icon, or jarvis mic unmute. A muted microphone cannot hear an unmute command."
+
+[[steps]]
+he = "בשורת הפקודה: jarvis mic status, jarvis mic mute או jarvis mic unmute. המצב נשמר גם אחרי הפעלה מחדש. כשהליבה עצורה נשמרת בחירה להפעלה הבאה, בלי לטעון שהמיקרופון פעיל כרגע."
+en = "From the command line: jarvis mic status, jarvis mic mute, or jarvis mic unmute. The choice survives restart. With Core stopped, the preference is saved for next start and is not live-verified."
 
 [[steps]]
 he = "ודאו שהמתג \"ממשיך לפעול ברקע\" דולק."
