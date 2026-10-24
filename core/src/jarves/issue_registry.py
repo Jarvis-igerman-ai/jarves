@@ -793,7 +793,7 @@ def make_skill(home: Path, lang: Callable[[], str]):
             async def list_(_: _NoArgs) -> ToolResult:
                 reg = Registry(home)
                 return ToolResult(True, spoken(reg, lang()), {"counts": reg.counts(), "dashboard": "#/bugs"}, code="ISSUES_LISTED")
-            return [Tool("list_issues", "Known problems: 'what issues do you have', 'אילו תקלות יש לך'.", list_, _NoArgs, permission="read")]
+            return [Tool("list_issues", "'what issues do you have', 'אילו תקלות יש לך'.", list_, _NoArgs, permission="read")]
 
     return IssuesSkill()
 

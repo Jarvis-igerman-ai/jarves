@@ -92,6 +92,9 @@ class History:
             (issue_registry.ingest_selftest if kind == "selftest" else issue_registry.ingest_speedtest)(reg, full)
         except Exception:
             logs.warn("selfspeed", "SELFSPEED_ISSUES_FAILED", "issues registry not updated from the run")
+        if kind == "speedtest":
+            from . import perf_advisor
+            perf_advisor.on_speedtest(self.path.parent)
 
     def spark(self, metric: str, n: int = 20) -> list[float]:
         """Values of one speed metric over the last runs, oldest first (the dashboard sparkline)."""
@@ -100,7 +103,11 @@ class History:
     def view(self) -> dict:
         d = self.load()
         names = sorted({n for r in d["speedtest"] for n in r.get("values", {})})
+        from . import perf_advisor
         return {"latest": d["latest"], "selftest": d["selftest"][-20:], "speedtest": d["speedtest"][-20:],
+                "recommendations": perf_advisor.recommendations(d["speedtest"]),
+                "auto_github": perf_advisor.options(self.path.parent)["auto_github"],
+                "performance_issue_url": perf_advisor.options(self.path.parent)["tracker_url"],
                 "spark": {n: self.spark(n) for n in names},
                 "selftest_spark": [{"ts": r["ts"], "status": r["status"]} for r in d["selftest"][-30:]]}
 
@@ -194,7 +201,7 @@ class SpeedTestArgs(BaseModel):
 
 
 def make_skill(svc: SelfSpeed, lang: Callable[[], str]):
-    from .skills import Skill, Tool, ToolResult
+    from .skills import Skill, Tool, ToolResult, NoArgs
 
     def spoken(sentence: str) -> str:
         return sentence + (" פרטים בלוח הבקרה." if lang() == "he" else " Details on the dashboard.")
@@ -232,16 +239,32 @@ def make_skill(svc: SelfSpeed, lang: Callable[[], str]):
                                   {"status": d["status"], "counts": d["counts"], "dashboard": "#/speed"},
                                   code="SPEEDTEST_" + d["status"].upper())
 
-            return [Tool("run_selftest", "Read-only self-test: 'is anything broken', 'בדיקת תקינות'.", selftest_, SelfTestArgs, permission="read",
+            async def advice_(_: NoArgs) -> ToolResult:
+                from . import perf_advisor
+                findings = perf_advisor.recommendations(svc.history.rows("speedtest", 30))
+                if not findings:
+                    sentence = ("אין כרגע המלצות שיפור מבוססות מדידה." if lang() == "he"
+                                else "No measured performance recommendations yet.")
+                else:
+                    top = findings[0]
+                    sentence = (f"מדד {top['metric']}: {top['advice_he']}" if lang() == "he"
+                                else f"Metric {top['metric']}: {top['advice']}")
+                return ToolResult(True, spoken(sentence),
+                                  {"recommendations": findings, "dashboard": "#/speed"}, code="PERF_ADVICE_READY")
+
+            return [Tool("performance_advice",
+                         "'be faster', 'שפר ביצועים'.",
+                         advice_, NoArgs, permission="read"),
+                    Tool("run_selftest", "'is anything broken', 'בדיקת תקינות'.", selftest_, SelfTestArgs, permission="read",
                          timeout_s=300),
-                    Tool("run_speedtest", "Read-only free speed test: 'how fast are you', 'בדיקת מהירות'.", speedtest_, SpeedTestArgs,
+                    Tool("run_speedtest", "'how fast are you', 'בדיקת מהירות'.", speedtest_, SpeedTestArgs,
                          permission="read", timeout_s=SPEED_TIMEOUT_S + 30)]
 
     return SelfSpeedSkill()
 
 
-INSTRUCTION = ("To check yourself or your speed, call run_selftest ('בדיקה עצמית', 'is anything broken?') or run_speedtest "
-               "('בדיקת מהירות', 'how fast are you?') and say its one sentence. Never invent results.")
+INSTRUCTION = ("Health: run_selftest; speed: run_speedtest; advice: performance_advice. "
+               "Never invent results.")
 
 
 # ---------------------------------------------------------------------- scheduler jobs
@@ -353,7 +376,16 @@ def api_run(ctx, m, body):
     return 200, d
 
 
+def api_autoreport(ctx, m, body):
+    from . import perf_advisor
+    if not isinstance(body, dict) or type(body.get("enabled")) is not bool:
+        return 400, {"error": "enabled must be a boolean"}
+    state = perf_advisor.configure(ctx.home, body["enabled"])
+    return 200, {"auto_github": state["auto_github"], "notice": "One shared performance issue receives material updates no more than once per day"}
+
+
 def dashboard_routes(register) -> None:
+    register("POST", r"/api/selfspeed/auto-github", api_autoreport)
     register("GET", r"/api/selfspeed", api_get)
     register("POST", r"/api/selfspeed/run", api_run)
 
@@ -378,6 +410,9 @@ def add_cli(sub) -> None:
     sp.add_argument("--idle-window", type=float, default=10.0, help="seconds to watch the running Core (default 10)")
     sp.add_argument("--json", action="store_true")
     sp.add_argument("--trigger", default="cli", help=argparse.SUPPRESS)
+    pa = sub.add_parser("performance", help="measured performance recommendations and optional owner-controlled GitHub issues")
+    pa.add_argument("--auto-github", choices=["on", "off"], help="explicit owner opt-in or disable (no network call here)")
+    pa.add_argument("--json", action="store_true")
 
 
 _MARK = {"pass": "ok  ", "warn": "WARN", "fail": "FAIL", "skip": "skip", "n/a": "n/a "}
@@ -417,4 +452,22 @@ def cmd_speedtest(a, cfg, home: Path, *, out=print) -> int:
     return 1 if (a.gate and res.status == "fail") else 0
 
 
-COMMANDS = {"selftest": cmd_selftest, "speedtest": cmd_speedtest}
+def cmd_performance(a, cfg, home: Path, *, out=print) -> int:
+    from . import perf_advisor
+    if a.auto_github is not None:
+        perf_advisor.configure(home, a.auto_github == "on")
+    state = perf_advisor.options(home)
+    advice = perf_advisor.recommendations(History(home).rows("speedtest", 30))
+    if a.json:
+        out(json.dumps({"auto_github": state["auto_github"], "recommendations": advice}, ensure_ascii=False))
+        return 0
+    out("GitHub auto-issues: " + ("enabled" if state["auto_github"] else "disabled") +
+        " (needs a local token; one performance tracker with changes at most daily)")
+    if not advice:
+        out("No repeated measured regression yet; scheduled speed tests build the baseline.")
+    for finding in advice:
+        out(f"[{finding['severity']}] {finding['metric']}: {finding['advice']}")
+    return 0
+
+
+COMMANDS = {"selftest": cmd_selftest, "speedtest": cmd_speedtest, "performance": cmd_performance}

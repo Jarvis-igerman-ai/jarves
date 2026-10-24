@@ -46,6 +46,7 @@ Current dashboard review: [23 Oct findings inventory and recheck gates](reviews/
 | [RELEASE_CHECKLIST_4.0.1](reviews/RELEASE_CHECKLIST_4.0.1.md) | 4.0.1 stable release checklist (read by the release gate) | 4.0.1 | current | [RELEASING](RELEASING.md) |
 | [ENGINEERING_REVIEW_GATES](ENGINEERING_REVIEW_GATES.md) | Standing review and challenge gates | general | current | itself |
 | [CI_PERFORMANCE](CI_PERFORMANCE.md) | CI speed, shards and the fast release path | general | current | [RELEASING](RELEASING.md) |
+| [Performance Advisor](performance_advisor.md) | Local evidence-based JARVES speed recommendations and one opt-in rolling GitHub issue (all confirmed metrics) | quality/operations | under validation | [CI_PERFORMANCE](CI_PERFORMANCE.md) |
 | [RELEASING](RELEASING.md) | How a release is built, signed and published | general | current | [CI_PERFORMANCE](CI_PERFORMANCE.md) |
 | [NEXT_FLOW](NEXT_FLOW.md) | The `next` integration branch: light PR CI, batch run, bot fast-forward of main, how to switch it on | general | built, off by default | [CI_PERFORMANCE](CI_PERFORMANCE.md) |
 | [CI_DETERMINISM](CI_DETERMINISM.md) | Network guard, offline stub, flake retry and quarantine for deterministic CI | general | current | [CI_PERFORMANCE](CI_PERFORMANCE.md) |

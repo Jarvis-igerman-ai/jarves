@@ -1,0 +1,15 @@
+{
+  "dict": {
+    "Allow JARVES to maintain one performance issue with measured metrics and recommendations? Meaningful updates only, at most daily, after existing speed tests. No conversations, names or logs are sent; local GitHub login is required.": "לאפשר לג'ארביס לעדכן Issue מרכזי אחד על ביצועים? יישלחו רק מדדים מאומתים והמלצות, בלי תוכן שיחות, שמות או יומנים. עדכון משמעותי לכל היותר פעם ביום, לפי בדיקת המהירות הקיימת.",
+    "Disable auto reporting": "כבה דיווח אוטומטי",
+    "Enable GitHub auto reporting": "הפעל דיווח אוטומטי ל-GitHub",
+    "JARVES finds repeated slowdowns and suggests focused investigations. Opt-in GitHub reporting keeps one performance issue current, with meaningful changes at most daily and no extra polling.": "ג'ארביס מזהה האטות חוזרות וממליץ איך לבדוק אותן. אחרי הפעלה מפורשת הוא מעדכן Issue ביצועים אחד רק כשיש שינוי משמעותי, לכל היותר פעם ביום, בלי סריקות נוספות.",
+    "Samples": "דגימות",
+    "GitHub performance issue": "Issue מרכזי ב-GitHub",
+    "Local finding": "מעקב מקומי",
+    "No repeated regression confirmed yet. Weekly speed tests build the baseline.": "אין עדיין מספיק ראיות להאטה חוזרת. בדיקות המהירות השבועיות בונות את ההיסטוריה.",
+    "Performance advisor": "המלצות ביצועים חכמות",
+    "Auto-report enabled": "דיווח אוטומטי מופעל",
+    "Local only": "מקומי בלבד"
+  }
+}

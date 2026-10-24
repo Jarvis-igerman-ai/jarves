@@ -481,7 +481,7 @@ async def test_tools_answer_in_one_sentence_plus_dashboard(home, db):
     lang = ["en"]
     reg.register(selfspeed.make_skill(make_svc(home, db, Clock(12)), lambda: lang[0]))
     names = {t.name: t for t in reg.skills["selfspeed"].tools()}
-    assert set(names) == {"run_selftest", "run_speedtest"}
+    assert set(names) == {"run_selftest", "run_speedtest", "performance_advice"}
     assert all(t.permission == "read" and len(t.description) <= 80 for t in names.values()), "tiny, read-only, no approval"
     r = await call(reg, "run_selftest")
     assert r.ok and r.message == "The self-test passed with 1 warning(s); first: B. Details on the dashboard."
