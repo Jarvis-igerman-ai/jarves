@@ -92,7 +92,7 @@ def test_cli_allow_and_remove(tmp_path, monkeypatch, capsys):
     monkeypatch.setenv("JARVES_HOME", str(tmp_path))
     assert main(["browser", "allow", "https://www.example.com"]) == 0
     assert br.Sites(tmp_path).list() == ["example.com"]
-    assert main(["browser", "sites"]) == 0 and "example.com" in capsys.readouterr().out
+    assert main(["browser", "sites"]) == 0 and "allow-list (1): example.com" in capsys.readouterr().out.splitlines()
     assert main(["browser", "allow", "claude.ai"]) == 2
     assert main(["browser", "remove", "example.com"]) == 0 and br.Sites(tmp_path).list() == []
 

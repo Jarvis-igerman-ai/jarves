@@ -25,10 +25,12 @@ PROFILE = os.environ.get("CAMPAIGN_PROFILE", "test")
 os.environ["JARVES_PROFILE"] = PROFILE
 os.environ.pop("OPENAI_API_KEY", None)
 RESULTS = Path(os.environ.get("CAMPAIGN_RESULTS") or (BASE / "campaign_results.jsonl"))
+from jarves import logs  # noqa: E402  (the app redactor)
 EXE = CORE / ".venv" / "Scripts" / "jarves.exe"
 
 
 def rec(area: str, name: str, verdict: str, evidence: str = "") -> None:
+    evidence = logs.redact(evidence)                 # a check must never write or print a secret it happened to see
     row = {"area": area, "name": name, "verdict": verdict, "evidence": evidence[:900]}
     with RESULTS.open("a", encoding="utf-8") as f:
         f.write(json.dumps(row, ensure_ascii=False) + "\n")

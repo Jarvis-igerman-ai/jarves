@@ -32,6 +32,7 @@ import io
 import json
 import logging
 import os
+import re
 import socket
 import sys
 import tempfile
@@ -372,8 +373,10 @@ async def drive(home: Path, private: bool) -> dict[str, bytes]:
         await lv.handle_event({"type": "info", "message": MIXED})
         await lv.handle_event({"type": "error", "error": {"code": "x", "message": MIXED,
                                                           "client_event_id": "jarves_lang_1"}})
+        # FAKE test fixture: SECRETS/MIXED are synthetic planted values (not credentials); this audit proves they never leak.
         logging.getLogger("httpx").warning(f"HTTP Request: GET https://api.example/?access_token="
                                            f"{SECRETS['google_access']}&q={PII['email']} {MIXED}")
+        # FAKE test fixture: MIXED holds synthetic planted values only.
         logging.getLogger("openai").error(f"Error code: 400 - {{'message': '{MIXED}'}}")
         core.health.set("ai", "degraded", f"ChatGPT plan ({PII['email']}) {SECRETS['openai_key']}",
                         f"sign in again as {PII['email']}")
@@ -502,6 +505,31 @@ def audit(private: bool, workdir: Path) -> dict:
             "violations": violations}
 
 
+_LEAK_CATEGORIES = ("SECRET", "CONTENT", "PII")
+_STRUCTURAL = ("sink was not produced by the drive",
+               "planted content never reached it in development mode (the drive is broken, the audit proves nothing)")
+_MUST_SINKS = ("logs/jarves.log", "logs/jarves.log.1", "store.db", "store.db-wal", "health.json", "approvals/audit.jsonl",
+               "tasks.jsonl", "logs/crash.txt", "<console>", "<status_json>", "<dashboard/api/logs>",
+               "<dashboard/export/logs.jsonl>", "<diag_zip>", "<ticket_draft>")
+
+
+def mask_violation(v: str, sinks: object = ()) -> str:
+    """A violation line safe to print: a leaked value must never be echoed (CI logs are public). The printed line is
+    rebuilt from fixed labels only: the sink name (looked up among the known sink names, never sliced out of the
+    line), the category and the length. Not one character of the original text is copied."""
+    for sink in (*_MUST_SINKS, *sinks):
+        for cat in _LEAK_CATEGORIES:
+            head = f"{sink}: {cat} "
+            if v.startswith(head):
+                return f"{sink}: {cat} leak, {len(v) - len(head)} chars masked"
+        for text in _STRUCTURAL:
+            if v == f"{sink}: {text}":
+                return f"{sink}: {text}"
+    if v.startswith("<ticket_draft>: could not be produced"):
+        return "<ticket_draft>: could not be produced (details withheld)"
+    return f"violation line masked ({len(v)} chars)"
+
+
 def main(argv: list[str]) -> int:
     modes = [True, False] if "--both-modes" in argv or not any(a in argv for a in ("--on", "--off")) else \
         [True] if "--on" in argv else [False]
@@ -509,7 +537,8 @@ def main(argv: list[str]) -> int:
     work = Path(keep) if keep else Path(tempfile.mkdtemp(prefix="jarves-redaction-"))
     reports = [audit(m, work) for m in modes]
     if "--json" in argv:
-        print(json.dumps(reports, indent=1, ensure_ascii=False))
+        print(json.dumps([{**r, "violations": [mask_violation(v, r["sinks"]) for v in r["violations"]]} for r in reports],
+                         indent=1, ensure_ascii=False))
     else:
         for r in reports:
             print(f"== {r['mode']}: {len(r['sinks'])} sinks, {r['synthetic_call_sites']} call sites driven")
@@ -520,7 +549,7 @@ def main(argv: list[str]) -> int:
                 print(f"  {name:<44} {tag:<11} {counts}")
             print(f"  violations: {len(r['violations'])}")
             for v in r["violations"]:
-                print("   ", v)
+                print("   ", mask_violation(v, r["sinks"]))
     return 1 if any(r["violations"] for r in reports) else 0
 
 

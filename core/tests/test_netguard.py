@@ -8,7 +8,7 @@ import netguard
 def test_outbound_connection_is_blocked_with_a_clear_message():
     with pytest.raises(netguard.NetworkBlocked) as e:
         socket.create_connection(("api.github.com", 443), timeout=1)
-    assert "api.github.com" in str(e.value) and "network guard" in str(e.value)
+    assert str(e.value).startswith("network guard: outbound connection to 'api.github.com' blocked")
     with pytest.raises(netguard.NetworkBlocked):
         socket.socket().connect(("8.8.8.8", 53))
 
