@@ -505,17 +505,21 @@ def audit(private: bool, workdir: Path) -> dict:
             "violations": violations}
 
 
-_LEAK_LINE = re.compile(r"^(.*?): (SECRET|CONTENT|PII) (.*)$", re.S)
+_LEAK_CATEGORIES = ("SECRET", "CONTENT", "PII")
 
 
-def mask_violation(v: str) -> str:
-    """A violation line safe to print: a leaked value must never be echoed (CI logs are public). Leak lines keep the
-    sink and the category; the leaked part shows only its first 4 characters and its length."""
-    m = _LEAK_LINE.match(v)
-    if not m:
-        return v                                     # structural messages carry no planted value
-    sink, cat, rest = m.groups()
-    return f"{sink}: {cat} {rest[:4]}... ({len(rest)} chars masked)"
+def mask_violation(v: str, sinks: object = ()) -> str:
+    """A violation line safe to print: a leaked value must never be echoed (CI logs are public). Leak lines are
+    rebuilt from fixed labels only: the sink name (looked up among the known sink names, never sliced out of the
+    line), the category and the length. Not one character of the leaked part is kept."""
+    for cat in _LEAK_CATEGORIES:
+        for sink in sinks:
+            head = f"{sink}: {cat} "
+            if v.startswith(head):
+                return f"{sink}: {cat} leak, {len(v) - len(head)} chars masked"
+    if any(f": {cat} " in v for cat in _LEAK_CATEGORIES):
+        return f"leak line masked ({len(v)} chars)"
+    return v                                         # structural messages carry no planted value
 
 
 def main(argv: list[str]) -> int:
@@ -525,7 +529,7 @@ def main(argv: list[str]) -> int:
     work = Path(keep) if keep else Path(tempfile.mkdtemp(prefix="jarves-redaction-"))
     reports = [audit(m, work) for m in modes]
     if "--json" in argv:
-        print(json.dumps([{**r, "violations": [mask_violation(v) for v in r["violations"]]} for r in reports],
+        print(json.dumps([{**r, "violations": [mask_violation(v, r["sinks"]) for v in r["violations"]]} for r in reports],
                          indent=1, ensure_ascii=False))
     else:
         for r in reports:
@@ -537,7 +541,7 @@ def main(argv: list[str]) -> int:
                 print(f"  {name:<44} {tag:<11} {counts}")
             print(f"  violations: {len(r['violations'])}")
             for v in r["violations"]:
-                print("   ", mask_violation(v))
+                print("   ", mask_violation(v, r["sinks"]))
     return 1 if any(r["violations"] for r in reports) else 0
 
 

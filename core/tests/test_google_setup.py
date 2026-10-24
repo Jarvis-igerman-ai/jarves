@@ -255,7 +255,7 @@ def test_gcloud_resume_selects_accessible_project_and_resets_old_checkmarks(home
     assert st["project_id"] == "jarves-home-123456"
     assert set(st["steps"]) == {"project", "calendar_api"} | (set() if calendar_only else {"gmail_api"})
     assert len(ran) == 2 and ran[1][1:3] == ["services", "enable"]
-    assert ("gmail.googleapis.com" in set(ran[1])) is not calendar_only   # exact argv entry
+    assert ran[1][3:-3] == ["calendar-json.googleapis.com"] + ([] if calendar_only else ["gmail.googleapis.com"])   # exact APIs argv
     assert wz.open_url.__self__.opened == [google_setup.step_url("branding", st["project_id"])]
     assert any("not accessible" in line for line in out)
 
