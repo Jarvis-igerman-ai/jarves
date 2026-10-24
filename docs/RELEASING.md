@@ -138,11 +138,10 @@ Branch protection: require **`CI result (single required check)`**. The individu
 
 ## Automatic labelling of low-risk PRs (`autolabel.yml`, `core/tools/risk_class.py`)
 
-Low-risk PRs get the `automerge` label by themselves; the queue (`automerge.yml`) then merges them when
-`CI result (single required check)` is green. Nothing is bypassed: no label ever skips a check, a conflicting PR waits, and
-nothing merges while the latest finished `jarves-checks` run on `main` is red. A PR that is only behind `main` is not
-updated and re-tested (owner decision 23 Oct 2026, #89): the run on `main` after the merge is the integration check (runs
-on `main` queue, batch and are never cancelled while running).
+Low-risk PRs get the `automerge` label by themselves; `automerge.yml` then turns on auto-merge, so GitHub's merge queue
+takes them once their required checks are green, tests them with the latest `main` and the PRs ahead (`merge_group`)
+and merges them only when that run is green (#161, docs/GITHUB_FLOW.md). Nothing is bypassed: no label ever skips a
+check and a conflicting PR waits.
 
 | Class | Rule |
 | --- | --- |
