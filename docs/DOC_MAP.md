@@ -147,5 +147,6 @@ Reports and bug tables are evidence of a past run, not instructions. A package's
 | [reviews/MANUAL_TEST_4.0.0](reviews/MANUAL_TEST_4.0.0.md) | Manual test sheet for 4.0.0 (owner) | 4.0.0 | current | [RELEASING](RELEASING.md) |
 | [reviews/MANUAL_TEST_4.0.1](reviews/MANUAL_TEST_4.0.1.md) | Manual test sheet for 4.0.1 (owner sign-off on the beta) | 4.0.1 | current | [RELEASING](RELEASING.md) |
 | [reviews/SWV4_P01_VERIFY](reviews/SWV4_P01_VERIFY.md) | Owner-assisted verification, ported from the legacy branch | V4 | historical | [MIGRATION_AUDIT](MIGRATION_AUDIT.md) |
+| [reviews/V45_VOICE_LATENCY_2026-10-24](reviews/V45_VOICE_LATENCY_2026-10-24.md) | V4.5 voice latency baseline (issue #122, automatic measurement) | V4.5 | current | [BUGFIX_LANE](BUGFIX_LANE.md) |
 
 | [Windows installer #58](INSTALLER_58.md) | Installer setup, backup, rollback and measured timings | V4 | current | itself |
