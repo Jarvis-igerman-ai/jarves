@@ -2,14 +2,14 @@ order = 39
 category = "system"
 pages = ["speed"]
 features = ["self_tests"]
-aliases = ["בדיקת מהירות", "בדיקה עצמית טכנית", "מהירות", "self test", "selftest", "speed test", "speedtest", "health and speed", "is anything broken", "how fast are you"]
+aliases = ["בדיקת מהירות", "בדיקה עצמית טכנית", "מהירות", "self test", "selftest", "speed test", "speedtest", "health and speed", "is anything broken", "how fast are you", "performance advisor", "recommend performance", "איך לשפר ביצועים", "המלצות ביצועים"]
 links = ["health", "self_check", "scheduler"]
 error_codes = ["SELFTEST_FAIL", "SELFTEST_WARN", "SPEEDTEST_FAIL", "SPEEDTEST_WARN", "SPEEDTEST_FAILED", "SELFSPEED_SKIPPED"]
 title_he = "בדיקה עצמית ובדיקת מהירות"
 title_en = "Self-test & speed test"
 what_he = "ג'ארביס בודק את ההתקנה שלו (הגדרות, מסדי נתונים, הרשאות, חיבורים, מדריכים, שפות, פרטיות היומן, דיסק, עדכונים) ומודד כמה הוא מהיר וקל (הפעלה, מעבד, זיכרון, דיסק, לוח הבקרה, כלים, זמן עד קול ראשון). הוא אומר מה איטי או שבור ואם זה החמיר לעומת הפעמים הקודמות."
 what_en = "JARVES checks his own installation (config, databases, permissions, connections, guides, languages, log privacy, disk, updates) and measures how fast and light he is (start-up, CPU, memory, disk, dashboard, tools, time to first sound). He says what is slow or broken and whether it got worse than before."
-say = [["תבדוק את עצמך מבחינה טכנית", "Run a self-test"], ["תריץ בדיקת מהירות", "Run a speed test"]]
+say = [["תבדוק את עצמך מבחינה טכנית", "Run a self-test"], ["תריץ בדיקת מהירות", "Run a speed test"], ["מה כדאי לשפר בביצועים", "What should you improve about your speed?"]]
 expect_he = "משפט אחד עם התוצאה, והפרטים בעמוד 'תקינות ומהירות'. הבדיקה העצמית רצה כל יום ב-08:15, בדיקת המהירות פעם בשבוע (ראשון 13:00), אף פעם לא בשעות השקט ולא באמצע שיחה."
 expect_en = "One sentence with the result, the details on the Health & speed page. The self-test runs daily at 08:15, the speed test weekly (Sunday 13:00), never in quiet hours and never during a conversation."
 test = "feature"
@@ -17,8 +17,8 @@ test_he = "הבדיקה רק מוודאת שהרכיב מותקן. הבדיקו�
 test_en = "The check only sees that the component is installed. The tests themselves run from the Health & speed page or jarvis selftest."
 cost_he = "חינם. הבדיקות מקומיות ורק קוראות. מול OpenAI נשלחת בקשת HEAD אחת בלי מפתח: אין עלות ואין אסימונים."
 cost_en = "Free. The tests are local and read-only. Against OpenAI only one HEAD request without a key is sent: no cost, no tokens."
-privacy_he = "הכול נשאר במחשב. התוצאות נשמרות בקובץ קטן מקומי (selfspeed.json). בדיקת הפרטיות של היומן לא מציגה את התוכן שמצאה. בדיקה מעמיקה לא מקליטה ולא מדברת אלא אם ביקשתם --audio."
-privacy_en = "Everything stays on this computer. Results are kept in one small local file (selfspeed.json). The log privacy check never shows what it found. The deep test neither records nor speaks unless you ask for --audio."
+privacy_he = "כברירת מחדל כל המדידות וההמלצות נשארות במחשב. אם בעל החשבון מפעיל במפורש דיווח Performance אוטומטי ב-Dashboard, ג׳ארביס רשאי לשלוח ל-GitHub מדדים מספריים בלבד, בלי תוכן שיחות, קבצים או פרטים אישיים; לכל היותר Issue אחד בשבוע. אפשר לכבות בכל עת. בדיקה מעמיקה לא מקליטה אלא אם ביקשתם --audio."
+privacy_en = "Measurements and recommendations stay on this computer by default. With explicit owner opt-in on the Dashboard, JARVES can file at most one performance-only GitHub issue per week, containing sanitized numeric metric evidence and a diagnostic suggestion, never conversations, local logs or personal details. Disable at any time. Deep tests do not record unless requested with --audio."
 
 [[steps]]
 he = "פתחו את העמוד 'תקינות ומהירות' ולחצו 'הרץ עכשיו' ליד הבדיקה העצמית או בדיקת המהירות."
@@ -34,6 +34,16 @@ action = "command:jarvis selftest --deep"
 he = "בדיקת מהירות מול התקציב ומול חמש ההרצות האחרונות. החמרה של יותר מ-20 אחוז מסומנת באזהרה."
 en = "The speed test against the budget and the last five runs. Getting more than 20 percent worse is a warning."
 action = "command:jarvis speedtest"
+
+[[steps]]
+he = "ראו בעמוד 'תקינות ומהירות' את המלצות הביצועים: נדרשות לפחות שלוש מדידות דומות והוכחה להאטה חוזרת. ג'ארביס גם יודע להסביר אותן בקול."
+en = "On Health & speed, see measured recommendations: at least three comparable runs and repeated slowdowns are required. JARVES can explain them by voice."
+action = "open:#/speed"
+
+[[steps]]
+he = "אם ברצונכם שג'ארביס יפתח Issues אוטומטיים, לחצו 'הפעל דיווח אוטומטי ל-GitHub', אשרו את ההסבר ודאגו לחיבור GitHub (token או gh auth login). אפשר לכבות באותו מקום; בלי הרשאה ממשיכים במעקב מקומי בלבד."
+en = "To allow autonomous GitHub performance issues, click Enable GitHub auto reporting, confirm once, and ensure the local GitHub token/gh CLI is configured. You can turn it off here; without a token findings remain local."
+action = "open:#/speed"
 
 [[problems]]
 he = "הבדיקה המתוזמנת לא רצה"
