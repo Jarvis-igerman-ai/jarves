@@ -1640,6 +1640,16 @@ class Core:
             mods += ["agents"]
         return mods
 
+    def _warm_tool_schemas(self) -> None:
+        """#159: build every tool's JSON schema once in this background worker, so the first live session / typed
+        request does not pay pydantic's schema generation (0.5-1 s for ~120 tools on the owner's PC)."""
+        from .skills import tool_schema
+        try:
+            for t in list(self.registry._tools.values()):
+                tool_schema(t[1])
+        except Exception:                                # a warm-up never fails the start; first use builds it
+            logs.debug("core", "SCHEMA_WARM_FAILED", "tool schema warm-up skipped", exc=True)
+
     def _prewarm(self) -> None:
         """Import the heavy cloud-voice libraries in a worker thread right at start-up. QA 18 Oct: importing
         agents.realtime on first use took 6 s (13 s on a busy PC) and delayed the first spoken word."""
@@ -1655,6 +1665,7 @@ class Core:
                         raise
                     # an optional submodule moved in another SDK version: first use imports what it needs
             _warm_http_stack()
+            self._warm_tool_schemas()
             logs.info("core", "PREWARM_DONE", "cloud voice libraries loaded", ms=round((time.monotonic() - t0) * 1000),
                       modules=mods)
         except Exception as e:
