@@ -192,3 +192,21 @@ jobs:
           path: core/canaries.json
           retention-days: 14
           if-no-files-found: ignore
+  flake-scan:
+    # Owner rule 24 Oct 2026 (#160): a flaky test is a show-stopper. Finds failures whose SAME commit later passed (a
+    # re-run, or another run on that head SHA) in the last 7 days of jarves-checks and opens/updates ONE issue per test
+    # (labels showstopper, P1, ci) with the ledger line for core/tests/quarantine.toml. Reads run metadata and failed-job
+    # logs only; runs no repository test code. Standard library + gh.
+    name: Flake scan (run history -> showstopper issues)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      actions: read
+      issues: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v7
+      - name: Scan the last 7 days and open/update the issues
+        run: python3 core/tools/flake_scan.py --repo "${{ github.repository }}" --days 7 --issues | tee -a "$GITHUB_STEP_SUMMARY"
