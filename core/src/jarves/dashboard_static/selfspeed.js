@@ -73,6 +73,38 @@
           el("td", {}, pill(cls[m.status], t2(stTx[m.status])), m.detail ? el("span", { class: "small muted", dir: "auto" }, " " + m.detail) : null))))));
   }
 
+  function advisorCard(d, msg) {
+    const findings = d.recommendations || [];
+    const enabled = d.auto_github === true;
+    const toggle = el("button", { type: "button", class: "ghost", onclick: async () => {
+      if (!enabled && !window.confirm(tx(
+        "לאפשר לג'ארביס לפרסם בעצמו עד Issue אחד בשבוע? יישלחו רק מדדים מספריים והמלצות, בלי תוכן שיחות, שמות או יומנים. נדרש חיבור GitHub במחשב.",
+        "Allow JARVES to file up to one performance issue per week? Only numeric metrics and recommendations are sent: no conversation, names or logs. A local GitHub login is required."
+      ))) return;
+      try {
+        await api("/api/selfspeed/auto-github", { method: "POST", body: JSON.stringify({ enabled: !enabled }) });
+        route(true);
+      } catch (err) { msg.textContent = String(err.message); }
+    } }, enabled ? tx("כבה דיווח אוטומטי", "Disable auto reporting") : tx("הפעל דיווח אוטומטי ל-GitHub", "Enable GitHub auto reporting"));
+    const desc = el("p", { class: "muted small" },
+      tx("ג'ארביס מחפש האטות חוזרות במדידות דומות, ומציע בדיקה ממוקדת. מדידה בודדת אינה מספיקה. דיווח אוטומטי מוגבל לאחד בשבוע ורק לאחר הסכמה.",
+        "JARVES finds repeated slowdown in comparable tests and suggests focused investigations. One slow measurement is not enough. Automatic reporting is opt-in and limited to one issue per week."));
+    const body = findings.length
+      ? el("div", {}, findings.map((f) => el("div", { class: "card" },
+          el("div", { class: "row" }, pill(f.severity === "P2" ? "degraded" : "plain", f.severity),
+            el("strong", { dir: "ltr" }, f.metric),
+            el("span", { class: "muted small" }, tx("דגימות", "Samples") + ": " + f.samples)),
+          el("div", { class: "small" }, tx(f.advice_he, f.advice)),
+          el("div", { class: "small muted", dir: "ltr" }, "median " + f.median + (f.change_pct === null ? "" : " · +" + f.change_pct + "%")),
+          f.reported_url ? el("a", { href: f.reported_url, target: "_blank", rel: "noopener noreferrer" }, tx("Issue ב-GitHub", "GitHub issue"))
+                         : el("span", { class: "muted small" }, tx("מעקב מקומי", "Local finding")))))
+      : el("p", { class: "muted small" }, tx("אין עדיין מספיק ראיות להאטה חוזרת. בדיקות המהירות השבועיות בונות את ההיסטוריה.",
+                                           "No repeated regression confirmed yet. Weekly speed tests build the baseline."));
+    return card(tx("המלצות ביצועים חכמות", "Performance advisor"),
+      desc, el("div", { class: "row" }, toggle, pill(enabled ? "ok" : "plain", enabled
+        ? tx("דיווח אוטומטי מופעל", "Auto-report enabled") : tx("מקומי בלבד", "Local only"))), body);
+  }
+
   async function pageSpeed() {
     const d = await api("/api/selfspeed");
     const msg = el("span", { class: "muted small", role: "status" });
@@ -80,7 +112,7 @@
       tx("ג'ארביס בודק את ההתקנה שלו ואת המהירות שלו, בחינם ובלי לשנות כלום. אפשר גם לבקש בקול.",
         "JARVES checks his own installation and his speed, for free and without changing anything. You can also ask by voice."),
       el("a", { href: "#/health" }, tx("תקינות", "Health"))), msg,
-      selfCard(d, msg), speedCard(d, msg),
+      selfCard(d, msg), speedCard(d, msg), advisorCard(d, msg),
       card(tx("לוח זמנים", "Schedule"), el("div", { class: "small" },
         tx("בדיקה עצמית כל יום ב-08:15, בדיקת מהירות פעם בשבוע (ראשון 13:00). לא בשעות השקט ולא באמצע שיחה: ריצה שדולגה נרשמת ביומן ולא נדחית.",
           "Self-test daily at 08:15, speed test weekly (Sunday 13:00). Never in quiet hours or in the middle of a conversation: a skipped run is logged, not queued."),
