@@ -382,7 +382,7 @@ def api_autoreport(ctx, m, body):
     if not isinstance(body, dict) or type(body.get("enabled")) is not bool:
         return 400, {"error": "enabled must be a boolean"}
     state = perf_advisor.configure(ctx.home, body["enabled"])
-    return 200, {"auto_github": state["auto_github"], "notice": "Only future sustained numeric findings are eligible; at most one new issue per seven days"}
+    return 200, {"auto_github": state["auto_github"], "notice": "One shared performance issue receives material updates no more than once per day"}
 
 
 def dashboard_routes(register) -> None:
@@ -463,7 +463,7 @@ def cmd_performance(a, cfg, home: Path, *, out=print) -> int:
         out(json.dumps({"auto_github": state["auto_github"], "recommendations": advice}, ensure_ascii=False))
         return 0
     out("GitHub auto-issues: " + ("enabled" if state["auto_github"] else "disabled") +
-        " (needs a local token; at most one performance issue per 7 days)")
+        " (needs a local token; one performance tracker with changes at most daily)")
     if not advice:
         out("No repeated measured regression yet; scheduled speed tests build the baseline.")
     for finding in advice:
