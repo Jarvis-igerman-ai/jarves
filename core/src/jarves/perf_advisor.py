@@ -359,7 +359,7 @@ def on_speedtest(home: Path, *, registry=None) -> list[dict]:
         result = auto_report(home, findings)
         if findings or result["status"] in ("updated", "filed"):
             logs.info("perf_advisor", "PERF_ADVICE", "performance recommendations ready",
-                      count=len(findings), reporting=result["status"])
+                      count=len(findings), status=result["status"])
         return findings
     except Exception as exc:
         # Advisors must never turn a successful measured test into a failed run.
