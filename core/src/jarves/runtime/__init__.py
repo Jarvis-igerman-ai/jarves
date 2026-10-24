@@ -361,9 +361,11 @@ def api_runtime_set(ctx, m, body):
     return 200, out
 
 
+import threading as _threading
 import time as _time
 START_WINDOW_S = 90.0
 _START = {"at": -1e9, "error": None}        # dashboard-side memory of the last start request (state "starting")
+_START_LOCK = _threading.Lock()             # threaded server: two concurrent clicks must not both pass the guard
 
 
 def api_core_start(ctx, m, body):
@@ -375,13 +377,15 @@ def api_core_start(ctx, m, body):
         return 403, {"error": "JARVES can be started only from this computer"}
     if _ask_core(ctx, {"type": "status.request", "payload": {}}, "status") is not None:
         return 200, {"ok": True, "already_running": True}
-    if _time.monotonic() - _START["at"] < 10:
-        return 200, {"ok": True, "starting": True}          # a start was just requested: do not spawn twice
+    with _START_LOCK:
+        if _time.monotonic() - _START["at"] < 10:
+            return 200, {"ok": True, "starting": True}      # a start was just requested: do not spawn twice
+        _START["at"] = _time.monotonic()                    # claim the slot before spawning (no race window)
     from ..cli import _background_spawn
     try:
         _background_spawn(ctx.home, bool((body or {}).get("show")))
     except Exception as e:
-        _START["error"] = f"{type(e).__name__}: {str(e)[:160]}"
+        _START.update(at=-1e9, error=f"{type(e).__name__}: {str(e)[:160]}")    # a failed start may be retried at once
         logs.warn("runtime", "DASHBOARD_START_FAILED", "could not start JARVES from the dashboard", error_type=type(e).__name__)
         return 500, {"error": "JARVES could not be started: " + _START["error"] + ". Try jarvis start in a terminal, then jarvis logs -n 80"}
     _START.update(at=_time.monotonic(), error=None)
@@ -400,6 +404,7 @@ def dashboard_routes(register_route) -> None:
     register_route("GET", r"/api/runtime", api_runtime)
     register_route("POST", r"/api/runtime", api_runtime_set)
     register_route("POST", r"/api/runtime/stop", api_core_stop)
+    register_route("POST", r"/api/runtime/start", api_core_start)
     register_route("GET", r"/api/camera/preview", api_camera_preview_poll)
     register_route("POST", r"/api/camera/preview", api_camera_preview_set)
 

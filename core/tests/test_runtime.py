@@ -744,3 +744,9 @@ def test_dashboard_scripts_have_the_start_button_for_a_stopped_core():
     shell, app = (root / "shell.js").read_text("utf-8"), (root / "app.js").read_text("utf-8")
     assert "/api/runtime/start" in shell and "Start JARVES" in shell and "window.startJarves" in shell
     assert "Start JARVES" in app and "start-btn" in app and "Starting…" in app
+
+
+def test_dashboard_start_route_is_registered():
+    routes = []
+    rt_mod.dashboard_routes(lambda method, rx, fn: routes.append((method, rx, fn)))
+    assert ("POST", r"/api/runtime/start", rt_mod.api_core_start) in routes
