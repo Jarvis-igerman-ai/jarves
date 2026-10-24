@@ -78,8 +78,8 @@
     const enabled = d.auto_github === true;
     const toggle = el("button", { type: "button", class: "ghost", onclick: async () => {
       if (!enabled && !window.confirm(tx(
-        "לאפשר לג'ארביס לפרסם בעצמו עד Issue אחד בשבוע? יישלחו רק מדדים מספריים והמלצות, בלי תוכן שיחות, שמות או יומנים. נדרש חיבור GitHub במחשב.",
-        "Allow JARVES to file up to one performance issue per week? Only numeric metrics and recommendations are sent: no conversation, names or logs. A local GitHub login is required."
+        "לאפשר לג'ארביס לעדכן Issue מרכזי אחד על ביצועים? יישלחו רק מדדים מאומתים והמלצות, בלי תוכן שיחות, שמות או יומנים. עדכון משמעותי לכל היותר פעם ביום, לפי בדיקת המהירות הקיימת.",
+        "Allow JARVES to maintain one performance issue with measured metrics and recommendations? Meaningful updates only, at most daily, after existing speed tests. No conversations, names or logs are sent; local GitHub login is required."
       ))) return;
       try {
         await api("/api/selfspeed/auto-github", { method: "POST", body: JSON.stringify({ enabled: !enabled }) });
@@ -87,8 +87,8 @@
       } catch (err) { msg.textContent = String(err.message); }
     } }, enabled ? tx("כבה דיווח אוטומטי", "Disable auto reporting") : tx("הפעל דיווח אוטומטי ל-GitHub", "Enable GitHub auto reporting"));
     const desc = el("p", { class: "muted small" },
-      tx("ג'ארביס מחפש האטות חוזרות במדידות דומות, ומציע בדיקה ממוקדת. מדידה בודדת אינה מספיקה. דיווח אוטומטי מוגבל לאחד בשבוע ורק לאחר הסכמה.",
-        "JARVES finds repeated slowdown in comparable tests and suggests focused investigations. One slow measurement is not enough. Automatic reporting is opt-in and limited to one issue per week."));
+      tx("ג'ארביס מזהה האטות חוזרות וממליץ איך לבדוק אותן. אחרי הפעלה מפורשת הוא מעדכן Issue ביצועים אחד רק כשיש שינוי משמעותי, לכל היותר פעם ביום, בלי סריקות נוספות.",
+        "JARVES finds repeated slowdowns and suggests focused investigations. Opt-in GitHub reporting keeps one performance issue current, with meaningful changes at most daily and no extra polling."));
     const body = findings.length
       ? el("div", {}, findings.map((f) => el("div", { class: "card" },
           el("div", { class: "row" }, pill(f.severity === "P2" ? "degraded" : "plain", f.severity),
@@ -96,7 +96,7 @@
             el("span", { class: "muted small" }, tx("דגימות", "Samples") + ": " + f.samples)),
           el("div", { class: "small" }, tx(f.advice_he, f.advice)),
           el("div", { class: "small muted", dir: "ltr" }, "median " + f.median + (f.change_pct === null ? "" : " · +" + f.change_pct + "%")),
-          f.reported_url ? el("a", { href: f.reported_url, target: "_blank", rel: "noopener noreferrer" }, tx("Issue ב-GitHub", "GitHub issue"))
+          (d.performance_issue_url || f.reported_url) ? el("a", { href: d.performance_issue_url || f.reported_url, target: "_blank", rel: "noopener noreferrer" }, tx("Issue מרכזי ב-GitHub", "GitHub performance issue"))
                          : el("span", { class: "muted small" }, tx("מעקב מקומי", "Local finding")))))
       : el("p", { class: "muted small" }, tx("אין עדיין מספיק ראיות להאטה חוזרת. בדיקות המהירות השבועיות בונות את ההיסטוריה.",
                                            "No repeated regression confirmed yet. Weekly speed tests build the baseline."));
