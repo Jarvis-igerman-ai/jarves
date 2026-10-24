@@ -19,6 +19,10 @@ on:
   pull_request:
     branches-ignore: [next]   # PRs into `next` get the light run of next-flow.yml
     types: [opened, synchronize, reopened, ready_for_review]
+  # GitHub merge queue (org ruleset, #161): the full matrix runs once on the queue's merge group, the exact commit that
+  # lands on main; the push run on main then reuses its installer artifact by tree hash (ci_reuse.py), ~1 min.
+  merge_group:
+    types: [checks_requested]
   workflow_dispatch:
 permissions:
   contents: read
@@ -381,7 +385,7 @@ jobs:
     outputs:
       version: ${{ steps.build.outputs.version }}
     env:
-      CHANNEL: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' && 'main' || 'pr' }}
+      CHANNEL: ${{ (github.event_name == 'merge_group' || (github.event_name == 'push' && github.ref == 'refs/heads/main')) && 'main' || 'pr' }}
       TREE: ${{ needs.changes.outputs.tree }}
       # WP-O: optional custom update folder baked in as the default (docs/RELEASE_HOSTING.md); unset = the public
       # releases repo (once a signing key is built in), else the private repo's releases
