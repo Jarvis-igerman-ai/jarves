@@ -289,7 +289,9 @@ def api_runtime(ctx, m, body):
     from .. import locales                                     # SW-V4 K: blocker / evidence texts in Hebrew too
     platform = {k: {t: locales.attach(dict(x), "blocker", "evidence", "equivalent") for t, x in v.items()}
                 for k, v in PLATFORM_STATUS.items()}
+    starting = (not live) and (_time.monotonic() - _START["at"] < START_WINDOW_S)
     return 200, {"runtime": view, "live": live, "autostart": auto, "platform_status": platform, "host": host,
+                 "starting": starting, "start_error": None if live else _START["error"],
                  # privacy strip on Home (privacy_state.py); None while the Core is down = shown as "unknown"
                  "privacy": snap.get("privacy") if snap else None,
                  "snapshot": {k: snap.get(k) for k in ("core", "voice_mode", "wake_listening", "live_session",
@@ -357,6 +359,34 @@ def api_runtime_set(ctx, m, body):
     if not out:
         return 400, {"error": "nothing to change (display, mic_muted, alerts_paused, autostart)"}
     return 200, out
+
+
+import time as _time
+START_WINDOW_S = 90.0
+_START = {"at": -1e9, "error": None}        # dashboard-side memory of the last start request (state "starting")
+
+
+def api_core_start(ctx, m, body):
+    """Start the Core from the dashboard exactly like `jarvis start` (same detached launcher). This POST is local-only:
+    the dashboard allowlist already refuses it for a paired phone, and it is re-checked here. The Core keeps its own
+    single-instance lock, so a double click never starts two. Returns at once; the page polls GET /api/runtime."""
+    who = getattr(ctx, "principal", None)
+    if who is not None and who.get("kind") != "local":
+        return 403, {"error": "JARVES can be started only from this computer"}
+    if _ask_core(ctx, {"type": "status.request", "payload": {}}, "status") is not None:
+        return 200, {"ok": True, "already_running": True}
+    if _time.monotonic() - _START["at"] < 10:
+        return 200, {"ok": True, "starting": True}          # a start was just requested: do not spawn twice
+    from ..cli import _background_spawn
+    try:
+        _background_spawn(ctx.home, bool((body or {}).get("show")))
+    except Exception as e:
+        _START["error"] = f"{type(e).__name__}: {str(e)[:160]}"
+        logs.warn("runtime", "DASHBOARD_START_FAILED", "could not start JARVES from the dashboard", error_type=type(e).__name__)
+        return 500, {"error": "JARVES could not be started: " + _START["error"] + ". Try jarvis start in a terminal, then jarvis logs -n 80"}
+    _START.update(at=_time.monotonic(), error=None)
+    logs.info("runtime", "DASHBOARD_START", "JARVES start requested from the dashboard")
+    return 200, {"ok": True, "starting": True}
 
 
 def api_core_stop(ctx, m, body):
