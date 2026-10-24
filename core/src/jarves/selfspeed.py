@@ -252,11 +252,11 @@ def make_skill(svc: SelfSpeed, lang: Callable[[], str]):
                                   {"recommendations": findings, "dashboard": "#/speed"}, code="PERF_ADVICE_READY")
 
             return [Tool("performance_advice",
-                         "Read-only measured performance recommendations: 'how can you become faster', 'איך אפשר לשפר ביצועים'.",
+                         "'how can you become faster', 'איך אפשר לשפר ביצועים'.",
                          advice_, SpeedTestArgs, permission="read"),
-                    Tool("run_selftest", "Read-only self-test: 'is anything broken', 'בדיקת תקינות'.", selftest_, SelfTestArgs, permission="read",
+                    Tool("run_selftest", "'is anything broken', 'בדיקת תקינות'.", selftest_, SelfTestArgs, permission="read",
                          timeout_s=300),
-                    Tool("run_speedtest", "Read-only free speed test: 'how fast are you', 'בדיקת מהירות'.", speedtest_, SpeedTestArgs,
+                    Tool("run_speedtest", "'how fast are you', 'בדיקת מהירות'.", speedtest_, SpeedTestArgs,
                          permission="read", timeout_s=SPEED_TIMEOUT_S + 30)]
 
     return SelfSpeedSkill()
