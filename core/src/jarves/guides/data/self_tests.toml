@@ -41,6 +41,11 @@ en = "On Health & speed, see measured recommendations: at least three comparable
 action = "open:#/speed"
 
 [[steps]]
+he = "בטרמינל: הציגו המלצות עם jarvis performance; הפעילו דיווח אוטומטי פעם אחת עם jarvis performance --auto-github on (או כבו עם off)."
+en = "From the terminal: jarvis performance lists recommendations; one-time opt-in via jarvis performance --auto-github on (disable with off)."
+action = "command:jarvis performance"
+
+[[steps]]
 he = "אם ברצונכם שג'ארביס יפתח Issues אוטומטיים, לחצו 'הפעל דיווח אוטומטי ל-GitHub', אשרו את ההסבר ודאגו לחיבור GitHub (token או gh auth login). אפשר לכבות באותו מקום; בלי הרשאה ממשיכים במעקב מקומי בלבד."
 en = "To allow autonomous GitHub performance issues, click Enable GitHub auto reporting, confirm once, and ensure the local GitHub token/gh CLI is configured. You can turn it off here; without a token findings remain local."
 action = "open:#/speed"
