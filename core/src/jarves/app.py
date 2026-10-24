@@ -965,7 +965,7 @@ class Core:
             self.request_stop("tray_or_cli_quit" if t == "core.shutdown" else "window_closed")
         elif t == "runtime.set":
             await self.link.reply(ws, "runtime.state", await self.runtime.apply(p, by=client.role))
-        elif t in ("camera.preview", "camera.set_enabled"):   # privacy strip buttons (camera/wire.py)
+        elif t in ("camera.preview", "camera.set_enabled", "camera.status", "camera.test"):   # privacy strip buttons (camera/wire.py)
             from .camera import wire as camera_wire
             await camera_wire.on_link(self, t, p, client)
         elif t == "ui.open_dashboard":               # WP-H: the face's Dashboard button

@@ -69,6 +69,19 @@ async def on_link(core, t: str, p: dict, client) -> None:
     if svc is None:
         await core.link.reply(client, "error", {"code": "CAMERA_UNAVAILABLE", "message": "no camera service"})
         return
+    if t in ("camera.status", "camera.test"):         # Camera section + `jarvis camera` (cli role only)
+        from . import ux
+        if t == "camera.status":
+            out = ux.view(svc)
+        elif p.get("mode") == "probe":
+            out = await ux.probe_test(svc)
+        elif p.get("mode") == "frame":
+            out = await ux.frame_test(svc)
+        else:
+            await core.link.reply(client, "error", {"code": "LINK_BAD_MESSAGE", "message": "mode must be probe or frame"})
+            return
+        await core.link.reply(client, "camera.view", out)
+        return
     if t == "camera.preview":
         if p.get("open") is True and client.role == "cli" and p.get("start") is not True and not svc.preview_active():
             st = {"open": False, "reason": "timeout"}       # a poll never re-opens a preview that ended (the cap)
