@@ -100,6 +100,7 @@ class Guide:
 
 
 _cache: dict[str, Any] = {"key": None, "guides": {}}
+RECHECK_S = 2.0                # shipped guide folder: re-list / re-stat at most this often (#159)
 _lock = threading.RLock()
 
 
@@ -114,9 +115,18 @@ def _parse(path: Path) -> Guide:
 def load(data_dir: Path | None = None) -> dict[str, Guide]:
     """All guides by id (sorted by order), re-read when a file changed (hot reload while editing)."""
     d = data_dir or DATA
+    if data_dir is None:
+        # Perf overhaul 4.5 (#159): every live session, typed request and dashboard poll reads the guides several times;
+        # listing + stat-ing ~80 shipped files each time cost 50-100 ms on the owner's PC (antivirus). The shipped
+        # folder is re-checked at most every RECHECK_S (hot reload while editing still works, a moment later).
+        with _lock:
+            if _cache["key"] is not None and _cache.get("dir") == str(d) and \
+                    time.monotonic() - _cache.get("checked", 0.0) < RECHECK_S:
+                return _cache["guides"]
     files = sorted(d.glob("*.toml"))
     key = (str(d), tuple((p.name, p.stat().st_mtime_ns) for p in files))
     with _lock:
+        _cache.update(dir=str(d), checked=time.monotonic() if data_dir is None else 0.0)
         if _cache["key"] == key:
             return _cache["guides"]
         out = {}
