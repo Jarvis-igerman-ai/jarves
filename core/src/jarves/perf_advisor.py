@@ -236,7 +236,7 @@ def _recovered(home: Path, names: list[str]) -> bool:
     from . import selfspeed
     rows = selfspeed.History(home).rows("speedtest", 30)
     for metric in names:
-        samples = [r.get("statuses", {}).get(metric) for r in rows
+        samples = [r.get("statuses", {}).get(metric, "pass") for r in rows
                    if metric in r.get("values", {}) and (r.get("class") or r.get("cls")) == "owner"]
         if len(samples) < 3 or samples[-3:] != ["pass", "pass", "pass"]:
             return False
