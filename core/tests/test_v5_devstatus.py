@@ -11,7 +11,7 @@ from jarves.orchestrator.db import AgentDB
 from jarves.skills import SkillRegistry
 
 NOW = 1_800_000_000.0
-REPO = "igalgerman/jarves"
+REPO = "Jarvis-igerman-ai/jarves"   # = devstatus.DEFAULT_REPO (the repo moved)
 
 
 def run(name, status, conclusion, run_id):
@@ -38,7 +38,7 @@ class FakeGitHub:
         self.routes = {f"/repos/{REPO}/pulls?state=open&per_page=30": pulls,
                        f"/repos/{REPO}/issues?state=open&per_page=30": issues}
         for sha, c in checks.items():
-            self.routes[f"/repos/{REPO}/commits/{sha}/check-runs?per_page=50"] = {"check_runs": c}
+            self.routes[f"/repos/{REPO}/commits/{sha}/check-runs?per_page=100"] = {"total_count": len(c), "check_runs": c}
 
     def __call__(self, path):
         self.calls.append(path)
