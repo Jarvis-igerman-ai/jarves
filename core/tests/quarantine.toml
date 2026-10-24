@@ -8,9 +8,3 @@
 # issue  = the showstopper issue number
 # since  = date quarantined (UTC)
 # reason = one line: what flakes and where
-
-[[test]]
-id = "test_perf_probes.py::test_slow_cli_probe_never_blocks_features_list_and_its_result_lands"
-issue = 163
-since = "2026-10-24"
-reason = "stale-path features list took 168 ms on windows-2025 (budget) after #137; main run 40120483389"
