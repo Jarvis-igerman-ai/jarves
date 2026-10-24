@@ -91,6 +91,17 @@ PAGES.updates = async function () {
   const autoLine = au.enabled
     ? (au.default_from_channel === "beta" ? "Automatic updates: on (beta default)" : "Automatic updates: on")
     : "Automatic updates: off";
+  const when = (ts) => el("code", {}, new Date(ts * 1000).toLocaleString([], { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" }));
+  const NEXT = { check: "Next update check", install: "Install at a quiet moment, not before",
+    quiet_moment: "Waiting for a quiet moment (never in a conversation)" };
+  const nextRow = au.enabled && au.next_kind && NEXT[au.next_kind]
+    ? [el("div", { class: "k" }, "Next"), el("div", { class: "v" }, NEXT[au.next_kind],
+        au.next_kind === "quiet_moment" ? "" : " ", au.next_kind === "quiet_moment" ? "" : when(au.next_at))] : [];
+  const lr = au.last_result || null;
+  const lastRow = lr && lr.version
+    ? [el("div", { class: "k" }, "Last result"), el("div", { class: "v" },
+        lr.ok ? "Updated to" : "Not installed, nothing changed:", " ", el("code", {}, lr.version), " ",
+        lr.ok ? "" : el("code", {}, lr.code || ""), " ", when(lr.ts))] : [];
   const note = au.notice && au.notice.kind !== "choose" ? el("div", { class: "small", style: "margin-top:8px" }, tx(au.notice.text_he, au.notice.text_en)) : null;
   const autoCard = el("div", { class: "card" }, el("h2", {}, "Automatic updates"),
     el("div", { class: "kv" },
@@ -98,7 +109,7 @@ PAGES.updates = async function () {
         ? el("button", { type: "button", class: "ghost", onclick: setAuto(false) }, "Turn off")
         : el("button", { type: "button", class: "ghost", onclick: setAuto(true) }, "Turn on")),
       el("div", { class: "k" }, "Now"), el("div", { class: "v" }, tx(au.message_he, au.message_en),
-        au.busy && au.busy.length ? " (" + au.busy.join(", ") + ")" : "")),
+        au.busy && au.busy.length ? " (" + au.busy.join(", ") + ")" : ""), ...nextRow, ...lastRow),
     au.enabled && au.target ? el("div", { class: "row", style: "margin-top:10px" },
       el("button", { type: "button", class: "primary", onclick: answer("now") }, "Update now"),
       el("button", { type: "button", class: "ghost", onclick: answer("later") }, "Later"),

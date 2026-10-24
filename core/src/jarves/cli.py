@@ -1846,6 +1846,8 @@ def _update_auto(a, cfg, home) -> int:
         print("Waiting because: " + ", ".join(s["busy"]))
     if s["gave_up"]:
         print(f"Stopped trying {s['gave_up']} after {s['failures']} failures; `jarvis update auto now` tries again.")
+    for line in auto_update.status_lines(s):
+        print(line)
     return 0
 
 
