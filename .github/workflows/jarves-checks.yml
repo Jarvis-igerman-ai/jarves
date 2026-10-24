@@ -298,7 +298,11 @@ jobs:
           path: junit
           run-id: ${{ needs.changes.outputs.proof_run }}
           github-token: ${{ github.token }}
-      - run: python3 core/tools/ci_plan.py durations-merge --junit junit --into core/tests/durations-${{ matrix.platform }}.json
+      - name: Merge measured timings and show shard skew
+        shell: bash
+        run: |
+          python3 core/tools/ci_plan.py durations-merge --junit junit --into core/tests/durations-${{ matrix.platform }}.json | tee shard-timings.txt
+          { echo "### ${{ matrix.platform }} shard timing"; cat shard-timings.txt; } >> "$GITHUB_STEP_SUMMARY"
       - uses: actions/cache/save@v6
         with:
           path: core/tests/durations-${{ matrix.platform }}.json
