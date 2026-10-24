@@ -77,6 +77,20 @@ Improve existing [GITHUB_FLOW](../GITHUB_FLOW.md), [PREPUSH](../PREPUSH.md), [PR
 - Fix high-friction conflicts, flaky tests, resource contention and CI queue duration by measurement, not unconditional retries or bypass. Pre-merge summary should show changed features, test coverage, new security alerts relative to baseline, release/rollback impact, outstanding user acceptance.
 - Post-merge auto-generate concise release notes, evidence-linked bug closure and changelog mapping. Explicit rollback if smoke/security regresses. New security rules apply to source and automation itself.
 
+### Measurable fast-merge goals — owner confirmation, 24 Oct
+
+**Early priority, parallel to security remediation:** improve code integration before implementing the later camera and QA work. Keep existing protection, review and CI checks; speed must not come from skipping them.
+
+| Metric | Goal (target, not current measured result) |
+| --- | --- |
+| Small non-conflicting patch, ready PR to merge | median under **15 minutes**, CI and reviews included |
+| Real manual merge conflicts | at least **70% reduction**, normalized per 100 comparable PRs |
+| Parallel agents | **3–5** independent scoped worktrees, one protected integration point |
+| Patch workflow | Issue → Fix → Tests → independent Review → protected Merge → main CI → evidence-based Close |
+| CI expense | fewer redundant CI reruns, without an increased failure or regression rate |
+
+Measure a **fresh baseline first**. Historical 9.1-hour PR median in #89 was before the 23 Oct CI improvements and is not the current baseline. Compare similar code/PR sizes, track p90 and unexpected conflicts, and show a real multi-agent demonstration. These figures are design targets, not guaranteed results.
+
 **Acceptance:** demo two conflicting PRs plus a safe non-conflicting auto-merge; no lost changes, forced pushes or missing source review; trace commit↔issue↔CI↔release. Compare median PR cycle time and late regressions before/after.
 
 ## Workstream F — living HTML manual QA workspace + conversational QA Skill (P1, #60 canonical)
@@ -117,7 +131,8 @@ Improve existing [GITHUB_FLOW](../GITHUB_FLOW.md), [PREPUSH](../PREPUSH.md), [PR
 | 3. Recurring security/quality scan | P0/P1 | 0–1, current CI nightly | opt-in configuration, scheduled/dry-run evidence, dedupe, budget |
 | 4. Guided QA + Skill | P1 | existing #60 signoff backend + #58 entry | shared state, real-user acceptance, updated release gate |
 | 5. Camera improvements | P1 | camera current contract + QA test framework | real webcam consent, UX and latency tests |
-| 6. Merge/CI polish | P1 | #89 learnings, security gates | integrated main green, no surprise delivery/regressions |
+| 1b. Early conflict and patch-speed improvement | P0 with security | baseline inventory, #89 | measured speed/conflict targets, preserved safety gates |
+| 6. Remaining Merge/CI polish | P1 | #89 learnings, security gates | integrated main green, no surprise delivery/regressions |
 | 7. Reliability extras + sign-off | P2 | earlier packages | installed beta, manual sign-off, rollback, report |
 
 **Parallelism:** security remediation, camera research/design and QA architecture may proceed in independent worktrees **only after an implementation package is explicitly authorized**; PR integration remains serialized when shared files overlap. Ship in small reviewable slices; do not wait to fix urgent security defects for all V4.5 features to finish.
