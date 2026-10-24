@@ -37,6 +37,16 @@ en = "Away from home? Install Tailscale on the computer and the phone and sign i
 he = "אישורים מהטלפון (כבוי מראש): טלפון מצומד יכול לאשר כל רמת סיכון, חוץ מבקשות עם קוד מוקלד. טלפון אבוד: \"ניתוק כל הטלפונים\" בלחיצה אחת, או jarvis phone revoke-all."
 en = "Phone approvals (off by default): a paired phone can approve any risk level except typed-code requests. A lost phone: one click on Revoke all phones, or jarvis phone revoke-all."
 
+[[steps]]
+he = "תוכניות ליעדים בטלפון (דורש את ההרשאה \"משימות\", כבויה מראש): בלשונית \"תוכניות\" רואים כל תוכנית, את התקדמותה ואת השלבים (שם הכלי, הסיבה, המצב). מהטלפון אפשר רק להשהות תוכנית שרצה ולבטל תוכנית פתוחה. אישור תוכנית, המשך, ניסיון חוזר, דילוג ומחיקה נעשים במחשב בלבד, שם חלון האישור מראה את השלבים. פרטי הכלים ותוצאותיהם לא נשלחים לטלפון."
+en = "Goal plans on the phone (needs the \"tasks\" permission, off by default): the Plans tab shows each plan, its progress and its steps (tool name, reason, status). From the phone you can only pause a running plan and cancel an open one. Approving a plan, resuming, retrying, skipping and deleting are done on the computer only, where the approval popup shows the steps. Tool arguments and results are never sent to the phone."
+
+[[problems]]
+he = "אין לשונית \"תוכניות\" בטלפון"
+en = "The Plans tab is missing on the phone"
+fix_he = "ההרשאה \"משימות\" כבויה מראש. הרשו אותה לטלפון בעמוד \"טלפון\" במחשב ופתחו את האפליקציה מחדש. תוכנית שממתינה לאישור מאושרת במחשב בלבד."
+fix_en = "The \"tasks\" permission is off by default. Allow it for the phone on the Phone page on the computer and reopen the app. A plan that waits for approval is approved on the computer only."
+
 [[problems]]
 he = "Tailscale לא מזוהה"
 en = "Tailscale is not detected"
