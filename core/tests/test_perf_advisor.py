@@ -171,7 +171,8 @@ def test_tracker_recovery_needs_three_green_measurements(tmp_path):
         "last_sent": 100, "last_signature": perf_advisor._signature([
             {"metric": "tool_p95_ms", "class": "owner", "severity": "P2", "change_pct": 100}]),
         "last_active": ["tool_p95_ms"], "tracker_url": url})
-    rows = [row(i, 90, "pass") for i in range(3)]
+    # Real compact selfspeed history only persists bad statuses; absent means pass.
+    rows = [{**row(i, 90, "pass"), "statuses": {}} for i in range(3)]
     (tmp_path / selfspeed.HISTORY_FILE).write_text(json.dumps({
         "latest": {}, "speedtest": rows[:2], "selftest": []}), encoding="utf-8")
     assert perf_advisor.auto_report(tmp_path, [], clock=lambda: 90000)["status"] == "awaiting_confirmation"
