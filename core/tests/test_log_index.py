@@ -63,7 +63,7 @@ def test_index_links_ten_planted_errors_to_file_line_commit(repo, tmp_path):
     for code, (file, line, fn, commit) in want.items():
         h = li.hint(code)
         assert (h["file"], h["line"], h["function"], h["commit"]) == (file, line, fn, commit), (code, h)
-        assert h["url"] == f"https://github.com/igalgerman/jarves/blob/{commit}/core/src/{file}#L{line}"
+        assert h["url"] == f"https://github.com/Jarvis-igerman-ai/jarves/blob/{commit}/core/src/{file}#L{line}"
     assert li.template(CODES[0]) == "step 0 failed" and li.template(CODES[6]) == "retry {} of 1"
     # the detector attaches the hints to new-code findings
     st = Store(tmp_path / "s.db")

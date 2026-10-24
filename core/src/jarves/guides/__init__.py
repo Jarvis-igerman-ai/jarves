@@ -52,7 +52,7 @@ feat.register("proactive_help", "הצעות עזרה בהגדרה", "Setup sugge
               targets={"windows": {"status": "implemented_unverified",
                                    "evidence": "core/tests/test_guides.py (scripted conversations, offline)"},
                        "linux_arm64_pi": {"status": "implemented_unverified",
-                                          "roadmap_issue": "https://github.com/igalgerman/jarves/issues/1",
+                                          "roadmap_issue": "https://github.com/Jarvis-igerman-ai/jarves/issues/1",
                                           "blocker": "pure Python, no platform code; not run on a Pi yet"}})
 
 
