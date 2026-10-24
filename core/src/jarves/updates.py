@@ -159,21 +159,49 @@ def version_line(home: Path | None = None) -> str:
     return f"JARVES {shown or b['version']} (" + ", ".join(x for x in extra if x) + ")"
 
 
-def installed_record(home: Path | None) -> dict:
-    """What the updater recorded when it installed this copy: {version, display, channel}. {} when unknown."""
+KNOWN_BUILDS_KEEP = 10                   # versions whose display/channel stay remembered (rollback targets included)
+
+
+def installed_record(home: Path | None, version: str | None = None) -> dict:
+    """What the updater recorded when it installed a copy: {version, display, channel}. {} when unknown.
+
+    `installed` is the LAST install the updater started; it is written before setup runs, so after a failed or
+    cancelled setup (#141) or a rollback it names a version that is not the one running. `builds` keeps the record per
+    version, so the copy that really runs is still found."""
     if home is None:
         return {}
     try:
-        d = json.loads((Path(home) / STATE_FILE).read_text(encoding="utf-8")).get("installed")
-        return d if isinstance(d, dict) else {}
-    except (OSError, ValueError, AttributeError):
+        d = json.loads((Path(home) / STATE_FILE).read_text(encoding="utf-8"))
+    except (OSError, ValueError):
         return {}
+    if not isinstance(d, dict):
+        return {}
+    last = d.get("installed")
+    last = last if isinstance(last, dict) else {}
+    if version is None or last.get("version") == version:
+        return last
+    builds = d.get("builds")
+    rec = builds.get(version) if isinstance(builds, dict) else None
+    return {**rec, "version": version} if isinstance(rec, dict) else {}
+
+
+def remember_build(d: dict, rec: dict) -> None:
+    """Record {version, display, channel, commit} as the last install and in the per-version list (bounded)."""
+    builds = d.get("builds") if isinstance(d.get("builds"), dict) else {}
+    old = d.get("installed")
+    if isinstance(old, dict) and old.get("version") and old["version"] not in builds:
+        builds[old["version"]] = {k: v for k, v in old.items() if k != "version"}     # the record from before builds
+    builds.pop(rec["version"], None)
+    builds[rec["version"]] = {k: v for k, v in rec.items() if k != "version"}
+    while len(builds) > KNOWN_BUILDS_KEEP:
+        builds.pop(next(iter(builds)))
+    d["builds"], d["installed"] = builds, rec
 
 
 def beta_label(home: Path | None, version: str | None = None) -> str | None:
     """'4.1.0-beta.7' when this copy was installed from the beta channel, else None (status/dashboard show it)."""
-    rec = installed_record(home)
     v = version or build_info()["version"]
+    rec = installed_record(home, v)
     if rec.get("channel") == "beta" and rec.get("version") == v and BETA_DISPLAY_RE.match(str(rec.get("display") or "")):
         return rec["display"]
     return None
@@ -565,8 +593,8 @@ class UpdateChecker:
         bak = backup_before_update(self.home, f"pre-update-{self.current}-to-{rel['version']}")
         keep_previous(self.home, self.current, rel["version"], bak, rel.get("previous"), signed, keep=exe.name)
         d = self._load()                     # remembered so status/dashboard can say "beta" after the restart
-        d["installed"] = {"version": rel["version"], "display": rel.get("display") or rel["version"],
-                          "channel": rel.get("channel") or "main", "commit": rel.get("commit")}
+        remember_build(d, {"version": rel["version"], "display": rel.get("display") or rel["version"],
+                           "channel": rel.get("channel") or "main", "commit": rel.get("commit")})
         self._save(d)
         return {"installer": str(exe), "backup": str(bak), "version": rel["version"], "signed": signed,
                 "sha256": hashlib.sha256(exe.read_bytes()).hexdigest()}   # = the verified value (download checked)
