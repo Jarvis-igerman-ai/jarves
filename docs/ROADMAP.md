@@ -2,7 +2,15 @@
 
 > Planning and status per version. **Only [docs/NOW.md](NOW.md) authorizes work.** Future Issues are NOT permission to start them. Every document is indexed in [DOC_MAP](DOC_MAP.md).
 
-## Status as of 22 October 2026 (current; the sections below keep the owner's decision records)
+## V4.5 — Stabilization, Security, Camera & Guided QA (plan recorded 24 October 2026)
+
+**Status: owner-requested planning, documented but NOT implemented or released.** [V4.5 work package](plans/V4_5_STABILIZATION_SECURITY_QA.md) is the canonical scope/acceptance definition; [NOW](NOW.md) is the sole implementation authorization. V4.5 is a stabilization/quality milestone after the V4/4.0.1 cycle, not a replacement for built V5 phone access, V5's real-device acceptance, V6 car, V7 Android or future hardware. No release tag or schedule is implied.
+
+**Seven connected streams:** (1) audit all open Issues and close only evidence-verified ones; (2) triage and fix actionable CodeQL/dependency/secret-scanning issues, preserving justified exclusions; (3) owner-configurable daily / selected weekdays / weekly and on-demand security/quality review, reusing nightly + issue registry; (4) on-demand camera usability, image quality and bilingual UX with real camera acceptance; (5) measured product reliability/UX improvements; (6) safe and fast code integration/CI/PR/release gates; (7) dynamic HTML Dashboard guided human QA + voice Skill, **reusing canonical issue #60 and release_signoff.py**, with new-feature test definitions appearing automatically. #58 remains installer, #61 remains self-knowledge, #1 and #77 remain real-world acceptance gates; no duplicate engine or issue tracker.
+
+Security screenshot alert numbers **are not GitHub Issue numbers**; prior CodeQL success does not prove the alert backlog is zero. Full alert inventory requires approved GitHub Security access; test findings, CodeQL dismissals and real hardware gates need evidence. Execution must be approved separately via NOW before any work starts.
+
+## Status snapshot as of 22 October 2026 (historical checkpoint; newer V4.5 planning above takes precedence only for future scope)
 
 Repository: `igalgerman/jarves` (public) is the only active repo; the private `igalgerman/JARVIS` is a read-only migration source ([MIGRATION_STATUS](MIGRATION_STATUS.md)). Dashboard languages are English and Hebrew only (Arabic and Russian were dropped in V4).
 
