@@ -18,19 +18,20 @@
    matrix when the merged tree was not proven on the PR; queued `main` runs batch on their own). While the latest run on
    `main` is red nothing else is merged (the queue stops by itself); fix `main` first. A red run on `main` opens
    one issue "main is red: jarves-checks failed" by itself (`main-health.yml`), closed again by the next green run.
+3a. **Merge agent's quick CI/perf check (every PR, no extra pipeline):** On the exact PR head, confirm the two required checks `CI result (single required check)` and `Auto-label policy` are green. Check the existing `Performance gate (Windows)` result **if relevant**; “skipped” means **not measured**, not a pass. Glance at the job summary/slowest shard and compare like-for-like with a recent green run only if readily available. Investigate clear regressions or broken installer/release logic, but do not chase small timing noise. Merge via the protected path, then check the resulting `main` CI and packaging status before reporting success. Do at most a small safe improvement within the approved scope; anything larger goes to the backlog, not another heavy rerun or speculative refactor. An agent should never use admin bypass to circumvent a red/pending required check.
 4. After the merge, `jarves-checks` runs on `main` and, when green, `jarves-package` makes the signed candidate and the
    beta.
 
-Repository settings (owner, 23 Oct 2026, #89): `main` is protected with the required check
-`CI result (single required check)` (job `ci-ok`; docs-only PRs report it too), "Require branches to be up to date" is
+Repository settings (verified 24 Oct 2026): `main` is protected with **two** required checks,
+`CI result (single required check)` (job `ci-ok`; docs-only PRs report it too) and `Auto-label policy`, "Require branches to be up to date" is
 **off**, administrators may bypass in an emergency; **Allow auto-merge** is on; branches are deleted on merge.
 The repository is public, so these are free; GitHub's merge queue would need an organization-owned repository.
 
 ## CI gate and auto-label reliability (24 Oct incident)
 
-The **required** branch check is `CI result (single required check)`. A separate `jarves-autolabel / Auto-label policy` check may fail even when required CI is green: **GitHub native auto-merge can still merge if that separate check is not configured as required**. The repo's own `jarves-automerge` queue additionally checks all completed head check-runs, but native auto-merge and owner/admin merges are separate paths. A failed unrelated check is not proof that the required code checks failed.
+**Incident history:** Previously only `CI result (single required check)` was required, so a red `Auto-label policy` check did not block native auto-merge. **Both are now required** (verified via GitHub's public `main` branch metadata on 24 Oct); keep both. The repo's own `jarves-automerge` queue additionally checks all completed head check-runs, but native auto-merge and owner/admin merges are separate paths. A failed unrelated check is not proof that the required code checks failed.
 
-**Owner repository-settings action for strict fail-closed behaviour:** In Settings → Branches → `main` branch protection (or Rulesets), add the exact unique check **`Auto-label policy`** to required status checks alongside **`CI result (single required check)`**, then verify a deliberately failing non-production PR cannot merge (and one green docs-only PR can). The GitHub integration used to edit these source files lacks repository-administration access, so only the owner can confirm or update the branch-rule setting. Do not mark that policy as installed until GitHub's settings are verified. A repo admin bypass remains a deliberate exception until separately disabled by the owner.
+**Branch-rule state:** `main` metadata reports both checks as required. The connector cannot edit the branch rule, and `enforcement_level=non_admins` means repository administrators may deliberately bypass it; the agent policy forbids using that escape route for routine merges. A passing workflow is not by itself evidence of local-device sign-off.
 
 `autolabel.yml` now uses the scoped `GITHUB_TOKEN` (Actions permission `Issues: write`, `Pull requests: write`) to ensure the two labels exist. The separate `AUTOMERGE_TOKEN` continues to be used **only by the merge queue** for the push-triggered main CI/package; it need not acquire extra Issues access. Failed label creation is a visible error, never silently swallowed. Documentation, tests and label-only changes do not skip required validation unless the risk classifier explicitly allows it.
 
