@@ -27,7 +27,7 @@ FEATURE = "dev_status"
 feat.register(FEATURE, "סטטוס פיתוח (קריאה בלבד)", "Development status (read-only)", True, skills=["devstatus"],
               about="shows what the coding agents, pull requests and CI of JARVES are doing and suggests the next step; "
                     "it only reads, and any change on GitHub asks on the screen first",
-              targets=calm.TARGETS)
+              targets=calm.targets('test_v5_devstatus.py'))
 
 DEFAULT_REPO = "igalgerman/jarves"
 REPO_RE = re.compile(r"^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$")

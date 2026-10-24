@@ -17,6 +17,16 @@ TARGETS = {"windows": {"status": "implemented_unverified",
                        "evidence": "core/tests/test_v5_followups.py (unit tests: real SQLite, fake clock, no network)"},
            "linux_arm64_pi": {"status": "implemented_unverified", "roadmap_issue": "https://github.com/igalgerman/jarves/issues/3",
                               "blocker": "pure Python + SQLite, no platform code; not run on a Raspberry Pi yet"}}
+
+
+def targets(*test_files: str) -> dict:
+    """The capability row of one V5 pillar: like TARGETS, but its evidence names that pillar's own test files."""
+    out = {k: dict(v) for k, v in TARGETS.items()}
+    out["windows"]["evidence"] = (", ".join("core/tests/" + f for f in test_files)
+                                  + " (unit tests: real SQLite, fake clock, no network)")
+    return out
+
+
 _HEBREW = re.compile(r"[א-ת]")
 
 

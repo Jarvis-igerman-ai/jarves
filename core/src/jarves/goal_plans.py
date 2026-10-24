@@ -38,7 +38,7 @@ FEATURE = "goal_plans"
 feat.register(FEATURE, "תוכניות ליעדים", "Goal plans", True, skills=["goal_plans"],
               about="turns a goal into a short plan of existing tools; runs only after you approve it, asks before "
                     "every step that changes something, and can be paused, cancelled or resumed",
-              targets=calm.TARGETS)
+              targets=calm.targets('test_v5_goal_plans.py'))
 
 MAX_TITLE = 120
 MAX_STEPS = 12

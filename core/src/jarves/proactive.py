@@ -22,7 +22,7 @@ FEATURE = "proactive_intel"
 feat.register(FEATURE, "הצעות יזומות", "Proactive offers", True, applies="next_session", skills=["proactive"],
               about="by default JARVES answers only when asked; you can let it offer one item inside a conversation "
                     "you already started, never outside one and never between 22:00 and 07:00",
-              targets=calm.TARGETS)
+              targets=calm.targets('test_v5_followups.py', 'test_v5_continuity.py'))
 MODES = ("on_request", "in_conversation")
 OFFER_NOTE = ("Optional offer (the user is already talking to you): at a natural pause, once, ask it as a short "
               "question in the same mode. Never while they speak. If they decline or ignore it, call "
