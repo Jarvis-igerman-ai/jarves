@@ -5,6 +5,8 @@
 >
 > **Single development repo:** `igalgerman/jarves`. Canonical V4.5 scope/acceptance: **this document**. Delivery status: [ROADMAP](../ROADMAP.md); what may be executed now: [NOW](../NOW.md). The current release/CI mechanics remain owned by [GITHUB_FLOW](../GITHUB_FLOW.md), [RELEASING](../RELEASING.md), [PREPUSH](../PREPUSH.md). Do not create a second sign-off engine or tracker.
 
+**Owner milestone classification (24 Oct 2026): V4 feature-development phase = CLOSED / delivered baseline.** This is a *scope/status decision*, not a claim that all V4 issue acceptance checkboxes, real-device tests, security findings or the 4.0.1 stable promotion are complete. Outstanding defects, integration verification and user/installed-device sign-off are carried forward as explicit V4.5 stabilization acceptance, while the original evidence trackers (notably #1, #2, #58, #77) stay open until their actual criteria are satisfied. No new feature development is scheduled under V4; fixes and release validation are tracked under V4.5. V5 components already delivered may continue to exist independently; V5 is partially implemented and not owner-accepted.
+
 ## Outcome and release contract
 
 Make JARVES reliable enough for daily use: eliminate actionable security alerts, prune evidence-closed GitHub issues, prevent recurring security/quality regressions, make the camera valuable and understandable, simplify safe code integration, and provide a live **HTML Dashboard QA workspace with an accompanying conversational Skill** that guides the owner and records verifiable results. This is quality work, not expansion into V6/V7.
@@ -73,6 +75,22 @@ Improve existing [GITHUB_FLOW](../GITHUB_FLOW.md), [PREPUSH](../PREPUSH.md), [PR
 - Fix high-friction conflicts, flaky tests, resource contention and CI queue duration by measurement, not unconditional retries or bypass. Pre-merge summary should show changed features, test coverage, new security alerts relative to baseline, release/rollback impact, outstanding user acceptance.
 - Post-merge auto-generate concise release notes, evidence-linked bug closure and changelog mapping. Explicit rollback if smoke/security regresses. New security rules apply to source and automation itself.
 
+### EARLY V4.5 PRIORITY — make patches faster while security remediation is underway (owner decision 24 Oct)
+
+Ship the first safe PR/merge improvements **in parallel with workstreams A/B (issues and security)**, not at the end of V4.5. Reduce avoidable merge conflicts and owner intervention for concurrent Claude Code/Codex/OpenCode tasks, **without weakening required CI, code review, security approval or installed-app gates**. Reuse existing protected main/auto-merge and lessons from #89; don't build a parallel orchestration layer.
+
+Before touching CI, record baseline from the last 20–50 comparable PRs (or the available honest sample): ready-to-merge elapsed time, PR-open-to-merge time, CI queue and runtime, genuine conflict incidence by touched file, forced branch synchronization/retest frequency, main regressions. Split docs-only, small patches, security-sensitive PRs and large features. Measure again after the first enabling changes.
+
+| Candidate KPI (aspirational, not guaranteed) | Target for comparable small patches | Evidence / safeguard |
+| --- | --- | --- |
+| PR ready-for-review → merged | **Median under 15 min**, only where required CI is fast enough | GitHub timestamps and CI proof; no bypass; separately report PR-open→merge |
+| Avoidable true merge conflicts | **At least 70% fewer** vs a comparable baseline | Conflicting PRs / parallel PRs, file hotspots, denominator and date range |
+| Parallel agent development | **3–5 independent agents** in non-overlapping worktrees with one integration owner | Reproducible concurrent-work smoke and resource/cost/permissions limits |
+| End-to-end bug fix | Issue → scoped patch → focused tests → independent review → green CI → merge → evidence-backed close | One traceable real case, with no premature sign-off |
+| Repeated full CI | Reduce unnecessary full reruns from branches merely behind `main` | CI runs and queued minutes per merged patch; keep main integration verification |
+
+**Early slices:** E0 establish baseline and the shared-file collision map; E1 enforce scoped worktrees, one writer and bounded merge queue; E2 reduce locales/page/changelog conflict hotspots and optimize required-check latency; E3 apply the flow to the first security fixes and compare before/after. Large/sensitive code still gets independent review. If the targets are unattainable due to irreducible CI runtime or insufficient sample, say so explicitly rather than redefining metrics or weakening safeguards.
+
 **Acceptance:** demo two conflicting PRs plus a safe non-conflicting auto-merge; no lost changes, forced pushes or missing source review; trace commit↔issue↔CI↔release. Compare median PR cycle time and late regressions before/after.
 
 ## Workstream F — living HTML manual QA workspace + conversational QA Skill (P1, #60 canonical)
@@ -113,7 +131,7 @@ Improve existing [GITHUB_FLOW](../GITHUB_FLOW.md), [PREPUSH](../PREPUSH.md), [PR
 | 3. Recurring security/quality scan | P0/P1 | 0–1, current CI nightly | opt-in configuration, scheduled/dry-run evidence, dedupe, budget |
 | 4. Guided QA + Skill | P1 | existing #60 signoff backend + #58 entry | shared state, real-user acceptance, updated release gate |
 | 5. Camera improvements | P1 | camera current contract + QA test framework | real webcam consent, UX and latency tests |
-| 6. Merge/CI polish | P1 | #89 learnings, security gates | integrated main green, no surprise delivery/regressions |
+| 6. Merge/CI polish | **Early P0 enabling slice**, then P1 polish | #89 learnings, baseline and security gates; starts alongside packages 0–1 | integrated main green, fewer measured conflicts and faster small PRs without bypass |
 | 7. Reliability extras + sign-off | P2 | earlier packages | installed beta, manual sign-off, rollback, report |
 
 **Parallelism:** security remediation, camera research/design and QA architecture may proceed in independent worktrees **only after an implementation package is explicitly authorized**; PR integration remains serialized when shared files overlap. Ship in small reviewable slices; do not wait to fix urgent security defects for all V4.5 features to finish.
