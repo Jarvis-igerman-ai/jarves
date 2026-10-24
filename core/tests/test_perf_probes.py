@@ -7,6 +7,7 @@ The slow probe here runs a fake `claude` CLI that sleeps 2 s, found on PATH (the
 import importlib
 import os
 import shutil
+import statistics
 import subprocess
 import sys
 import threading
@@ -92,8 +93,21 @@ def _expire(f):
         f._probe_cache[k] = (t - feat.PROBE_TTL_S - 1, ok, why)
 
 
+def _prime_process(cfg, home) -> None:
+    """Run every probe except the slow CLI one once, on a throwaway Features. The FIRST-EVER call of some probes does
+    one-off work in line (lazy imports, an archive open: measured whatsapp_archive 293 ms, tray_icon 146 ms), and the
+    list budget is only checked BETWEEN probes, so one such probe overshoots it. Whether it is first-ever depends on
+    which tests ran before it in the shard, which is what made this test flaky (#163). This test is about the steady
+    state; that one-off cost belongs to the process, not to the stale-while-revalidate logic."""
+    warm = feat.Features(cfg, home, components=lambda: {}, skills=lambda: set())
+    for fid in list(feat.CATALOG):
+        if fid != FID:
+            warm._run_probe(fid)
+
+
 def test_slow_cli_probe_never_blocks_features_list_and_its_result_lands(home, cfg, fake_claude, slow_cli_feature):
     _import_all()
+    _prime_process(cfg, home)
     calls = slow_cli_feature
     f = feat.Features(cfg, home, components=lambda: {}, skills=lambda: set())
     ms, rows = _timed_list(f)                                  # cold: nothing checked yet
@@ -109,17 +123,25 @@ def test_slow_cli_probe_never_blocks_features_list_and_its_result_lands(home, cf
     assert _wait(lambda: "agent_orchestrator" in f._probe_cache)
     assert f.available("agent_orchestrator") == (True, "")     # the fake claude on PATH is found
 
+    # stale-path timing: median of 4 (3 while claude still works, then the one after it breaks), the gate's own
+    # statistic; one scheduler stall on a shared runner (168 ms once) must not fail it, a real regression moves all
+    samples = []
+    for _ in range(3):
+        _expire(f)
+        samples.append(_timed_list(f)[0])
+        assert _wait(lambda: not f._pending)                   # let the background re-check land before the next
     (fake_claude / "ok").unlink()                              # claude breaks; 15 s pass
     _expire(f)
     ms, rows = _timed_list(f)
-    assert ms < BUDGET_MS, ms                                  # answered from the last result...
+    samples.append(ms)
+    assert statistics.median(samples) < BUDGET_MS, samples     # answered from the last result...
     r = rows[FID]
     assert r["available"] is True and r["check"] == "stale" and r["checked_s_ago"] >= feat.PROBE_TTL_S
     assert _wait(lambda: f._probe_cache[FID][1] is False)      # ...and the re-check lands
     ms, rows = _timed_list(f)
     assert (rows[FID]["available"], rows[FID]["check"], rows[FID]["reason"]) == (False, "fresh",
                                                                                "claude agents failed")
-    assert threading.get_ident() not in calls and len(calls) == 2
+    assert threading.get_ident() not in calls and len(calls) == 5   # cold, 3 stale samples, broken-claude
 
 
 def test_an_undeclared_probe_measured_slow_is_rechecked_in_the_background(home, cfg):
