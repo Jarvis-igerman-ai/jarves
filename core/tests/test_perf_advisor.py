@@ -110,8 +110,8 @@ def test_autonomous_reporting_one_numeric_issue_then_cooldown_and_dedup(tmp_path
     assert "jarves-issue:" in body and "420" in body
     assert not any(word in body for word in ["password", "email@", "C:\\Users\\", "conversation text"])
     assert reg.get(item["id"])["reported_url"] == "https://github.com/igalgerman/jarves/issues/321"
-    assert perf_advisor.auto_report(tmp_path, [finding], token_fn=forbidden,
-                                    clock=lambda: 1001)["status"] == "cooldown"
+    assert perf_advisor.auto_report(tmp_path, [finding], token_fn=lambda: "dummy",
+                                    request=fake_api, clock=lambda: 1001)["status"] == "cooldown"
 
 
 def test_duplicate_existing_issue_no_new_issue(tmp_path):
