@@ -5,6 +5,10 @@
 >
 > **Single development repo:** `igalgerman/jarves`. Canonical V4.5 scope/acceptance: **this document**. Delivery status: [ROADMAP](../ROADMAP.md); what may be executed now: [NOW](../NOW.md). The current release/CI mechanics remain owned by [GITHUB_FLOW](../GITHUB_FLOW.md), [RELEASING](../RELEASING.md), [PREPUSH](../PREPUSH.md). Do not create a second sign-off engine or tracker.
 
+## V4 development status — owner decision, 24 October 2026
+
+V4 baseline feature development is CLOSED. V4.5 inherits unverified acceptance, integration, real-device and release-quality work from the V4 tracker. This is not a claim that V4 passed every manual test. Existing issues #1 and #2 preserve the original acceptance details and are tracked as V4.5 carryovers, alongside #58, #60, #61 and #77. No new V4 feature development; V4.5 implementation still requires authorization in NOW.
+
 ## Outcome and release contract
 
 Make JARVES reliable enough for daily use: eliminate actionable security alerts, prune evidence-closed GitHub issues, prevent recurring security/quality regressions, make the camera valuable and understandable, simplify safe code integration, and provide a live **HTML Dashboard QA workspace with an accompanying conversational Skill** that guides the owner and records verifiable results. This is quality work, not expansion into V6/V7.
