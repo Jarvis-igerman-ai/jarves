@@ -210,3 +210,5 @@ jobs:
       - uses: actions/checkout@v7
       - name: Scan the last 7 days and open/update the issues
         run: python3 core/tools/flake_scan.py --repo "${{ github.repository }}" --days 7 --issues | tee -a "$GITHUB_STEP_SUMMARY"
+      - name: Daily CI health number on the CI reliability issue (#160)
+        run: python3 core/tools/ci_health.py --repo "${{ github.repository }}" --days 7 --comment 160 | tee -a "$GITHUB_STEP_SUMMARY"
