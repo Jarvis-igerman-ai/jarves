@@ -107,6 +107,7 @@ _lock = threading.RLock()
 def _parse(path: Path) -> Guide:
     raw = tomllib.loads(path.read_text(encoding="utf-8"))
     raw["id"] = raw.get("id") or path.stem
+    raw.pop("parity", None)      # read by cli_parity._guide_parity, not part of the Guide
     raw["steps"] = [Step(**s) for s in raw.get("steps", [])]
     raw["say"] = [tuple(x) for x in raw.get("say", [])]
     return Guide(**raw)

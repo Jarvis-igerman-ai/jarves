@@ -1,0 +1,47 @@
+order = 60
+category = "everyday"
+features = ["drive_mode"]
+suggest = false
+aliases = ["נהיגה", "מצב נהיגה", "ברכב", "drive mode", "driving", "car", "when stopped"]
+title_he = "מצב נהיגה"
+title_en = "Drive mode"
+what_he = "מדיניות בטיחות לנהיגה: תשובות קצרות, שיחות והודעות רק לאנשי קשר מוכרים עם אישור קולי קצר, וכל מה שדורש מסך ממתין ברשימה \"כשתעצרו\". חירום וניתוק אף פעם לא נחסמים. כבוי כברירת מחדל."
+what_en = "A safety policy for driving: short answers, calls and messages only to known contacts with one short spoken confirmation, and anything that needs a screen waits in a \"when you stop\" list. Emergencies and hang-up are never blocked. Off by default."
+say = [["מצב נהיגה", "Drive mode"], ["עצרתי", "I have stopped"]]
+expect_he = "כשהמצב דלוק, פעולות לא בטוחות נשמרות ברשימה ולא מבוצעות. כשאתם עוצרים, jarvis drive stopped מציג מה חיכה. שום דבר לא מבוצע אוטומטית אחרי העצירה, ואישורים נשארים כמו תמיד."
+expect_en = "While it is on, unsafe actions are saved to a list and not run. When you stop, jarvis drive stopped shows what waited. Nothing runs by itself after you stop, and approvals stay as always."
+test_he = "הריצו  jarvis drive status  ובדקו שכתוב \"drive mode: off\", ואז jarvis drive on ו-jarvis drive off."
+test_en = "Run  jarvis drive status  and check it says \"drive mode: off\", then jarvis drive on and jarvis drive off."
+cost_he = "חינם. הכול מקומי."
+cost_en = "Free. All local."
+privacy_he = "אין גישה למיקום ואין שליטה ברכב. הרשימה נשמרת רק במחשב הזה, עד 20 פריטים, ונמחקת אחרי יום. רק אתם מפעילים ומכבים."
+privacy_en = "No location access and no vehicle control. The list stays on this PC, up to 20 items, and expires after a day. Only you switch it on or off."
+
+[parity.features]
+drive_mode = "drive"
+
+[[steps]]
+he = "הפעילו את \"מצב נהיגה\". הוא כבוי כברירת מחדל. בשורת הפקודה: jarvis drive on."
+en = "Turn on \"Drive mode\". It is off by default. From the command line: jarvis drive on."
+action = "feature_on:drive_mode"
+check = "enabled:drive_mode"
+
+[[steps]]
+he = "בנהיגה: שאלות קצרות, שעה, מזג אוויר, טיימר, מוזיקה וקישור ניווט מותרים. שיחה או הודעה רק לאיש קשר מוכר ועם אישור קולי אחד."
+en = "While driving: short questions, time, weather, timers, music and a navigation link are allowed. A call or message only to a known contact with one spoken confirmation."
+
+[[steps]]
+he = "כשעצרתם: jarvis drive stopped מציג את הרשימה. כדי לכבות: jarvis drive off. למחיקה: jarvis drive clear."
+en = "When you have stopped: jarvis drive stopped shows the list. To turn off: jarvis drive off. To empty it: jarvis drive clear."
+
+[[problems]]
+he = "ביקשתי משהו והוא אמר שזה נשמר לאחר העצירה"
+en = "I asked for something and it said it is saved for when I stop"
+fix_he = "זה בכוונה בזמן נהיגה. אחרי שעצרתם הריצו jarvis drive stopped, או כבו את המצב עם jarvis drive off."
+fix_en = "That is on purpose while driving. After you stop run jarvis drive stopped, or turn the mode off with jarvis drive off."
+
+[[problems]]
+he = "הוא לא מתקשר לשם שאמרתי"
+en = "It will not call the name I said"
+fix_he = "בנהיגה מתקשרים רק לאיש קשר מוכר. הוסיפו אותו קודם כשאתם עומדים."
+fix_en = "While driving it only calls a known contact. Add the contact first while parked."

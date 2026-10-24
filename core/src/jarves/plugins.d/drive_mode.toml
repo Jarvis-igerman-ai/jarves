@@ -1,0 +1,3 @@
+dashboard = ["jarves.drive_mode"]
+addons = ["jarves.drive_mode"]
+cli = ["jarves.drive_mode"]
