@@ -2126,6 +2126,8 @@ def main(argv: list[str] | None = None) -> int:
     selfspeed.add_cli(sub)                    # owner request 21 Oct: jarvis selftest [--deep] / jarvis speedtest
     from . import issue_registry
     issue_registry.add_cli(sub)               # owner request 21 Oct: jarvis issues [list|show|report|ignore|fixed|add]
+    from . import self_aware
+    self_aware.add_cli(sub)                   # issue #61: jarvis about | whatsnew | roadmap | ticket
     from . import web_cli
     web_cli.add_cli(sub)                      # owner request 21 Oct: jarvis web (the dashboard Chat page)
     from . import plugin_registry
@@ -2176,7 +2178,7 @@ def main(argv: list[str] | None = None) -> int:
             "dial": dialing.cmd_dial, "release": release_cmd.cmd_release, "tour": wizard.cmd_tour,
             "manage": self_manage.cmd_manage, "undo": self_manage.cmd_manage,
             **cli_parity.COMMANDS, **budget_cli.COMMANDS, **privacy_cli.COMMANDS, **phone_cli.COMMANDS, **selfspeed.COMMANDS,
-            **issue_registry.COMMANDS, **web_cli.COMMANDS, **release_notes.COMMANDS,
+            **issue_registry.COMMANDS, **web_cli.COMMANDS, **release_notes.COMMANDS, **self_aware.COMMANDS,
             **{k: v for m in plugin_cli for k, v in m.COMMANDS.items()}}[a.cmd](a, cfg, home)
 
 
