@@ -17,7 +17,9 @@ from typing import Callable
 CONFIG = "perf_advisor.json"
 MIN_RECENT = 3
 MAX_OPEN_PAGE = 100
-AUTO_COOLDOWN_S = 7 * 86400
+AUTO_COOLDOWN_S = 24 * 3600  # at most one aggregate issue update per day; normal measurement remains weekly
+PERF_MARKER = "jarves-performance-health:v1"
+PERF_TITLE = "[Performance] JARVES performance health"
 
 # Advice is deliberately a diagnostic hypothesis, not a claim that the cause is known.
 SUGGESTIONS = {
@@ -42,26 +44,37 @@ FALLBACK = ("Repeat the metric on the same device and profile the owning operati
 
 
 def options(home: Path) -> dict:
-    """Owner consent is local and durable; do not store credentials here."""
+    """Local, opt-in owner policy and last successfully published snapshot; never credentials."""
+    defaults = {"auto_github": False, "last_sent": 0.0, "issue_url": "", "last_synced": {},
+                "active": {}, "recovered": []}
     try:
         data = json.loads((Path(home) / CONFIG).read_text(encoding="utf-8"))
         if isinstance(data, dict):
-            return {"auto_github": data.get("auto_github") is True,
-                    "last_sent": float(data.get("last_sent") or 0)}
+            return {**defaults, "auto_github": data.get("auto_github") is True,
+                    "last_sent": float(data.get("last_sent") or 0),
+                    "issue_url": str(data.get("issue_url") or "")[:256],
+                    "last_synced": data.get("last_synced") if isinstance(data.get("last_synced"), dict) else {},
+                    "active": data.get("active") if isinstance(data.get("active"), dict) else {},
+                    "recovered": data.get("recovered") if isinstance(data.get("recovered"), list) else []}
     except (OSError, ValueError, TypeError, OverflowError):
         pass
-    return {"auto_github": False, "last_sent": 0.0}
+    return defaults
+
+
+def _store(home: Path, state: dict) -> None:
+    """One atomic write on configuration, verified finding or published update; never idle polling."""
+    path = Path(home) / CONFIG
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_suffix(".tmp")
+    tmp.write_text(json.dumps(state, ensure_ascii=False, separators=(",", ":")), encoding="utf-8")
+    os.replace(tmp, path)
 
 
 def configure(home: Path, enabled: bool) -> dict:
     """Explicit opt-in from an authenticated owner Dashboard POST. No token or private data persisted."""
     state = options(home)
     state["auto_github"] = enabled is True
-    p = Path(home) / CONFIG
-    p.parent.mkdir(parents=True, exist_ok=True)
-    temp = p.with_suffix(".tmp")
-    temp.write_text(json.dumps(state), encoding="utf-8")
-    os.replace(temp, p)
+    _store(home, state)
     return state
 
 
@@ -71,7 +84,7 @@ def _numeric(value) -> float | None:
     return float(value)
 
 
-def recommendations(rows: list[dict], *, max_results: int = 4) -> list[dict]:
+def recommendations(rows: list[dict], *, max_results: int | None = None) -> list[dict]:
     """Sustained like-for-like regressions, not one noisy reading or an unmeasured metric.
 
     Last three comparable samples must include 2+ genuine warnings/failures, including the latest.
@@ -112,7 +125,8 @@ def recommendations(rows: list[dict], *, max_results: int = 4) -> list[dict]:
                     "baseline": round(baseline, 3) if baseline is not None else None,
                     "change_pct": change, "advice": advice_en, "advice_he": advice_he,
                     "confidence": "repeated"})
-    return sorted(out, key=lambda a: (a["severity"], -a["recent_bad"], a["metric"]))[:max_results]
+    sorted_findings = sorted(out, key=lambda a: (a["severity"], -a["recent_bad"], a["metric"]))
+    return sorted_findings[:max_results] if max_results is not None else sorted_findings
 
 
 def detect(home: Path, *, rows: list[dict] | None = None, registry=None) -> list[dict]:
