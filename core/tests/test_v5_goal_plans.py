@@ -348,3 +348,26 @@ def test_dashboard_and_cli_manage_plans(home, capsys):
     assert cli.main(["goals", "plan", "delete", "2", "--yes"]) == 0
     assert cli.main(["goals", "plan", "show", "2"]) == 1
     capsys.readouterr()
+
+
+async def test_owner_no_to_a_destructive_step_is_blocked_not_a_failure(env):
+    """V5 sec F8: the registry answers TOOL_DECLINED; the step must be 'blocked' (retryable), not 'failed'."""
+    async def wipe(a: Say):
+        env.ran.append(("wipe", a.text))
+        return ToolResult(True, "wiped")
+
+    class Wiper(Skill):
+        name = "wiper"
+        description = "destructive fake"
+
+        def tools(self):
+            return [Tool("fake_wipe", "w", wipe, Say, permission="destructive", confirm="Wipe it?")]
+    env.reg.register(Wiper())
+    env.reg.allowed_actions |= {"fake_wipe"}
+    p = env.store.propose("wipe", steps(("fake_wipe", {"text": "x"})))
+    env.store.approve(p["id"])
+    env.answer = False
+    await env.runner.tick()
+    d = env.store.get(p["id"])
+    assert d["state"] == "blocked" and d["steps"][0]["status"] == "blocked" and ("wipe", "x") not in env.ran
+    assert "did not approve" in d["steps"][0]["error"]
