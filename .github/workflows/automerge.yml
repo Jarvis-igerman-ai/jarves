@@ -9,7 +9,7 @@ name: jarves-automerge
 #   4. if any check failed it comments once and removes the label (a human or the merge agent fixes it).
 # Per check name only the newest run counts: a duplicate run cancelled by a concurrency group (#125) must not block a green PR.
 # It never merges with a pending/failed/missing check, never force-pushes, never bypasses anything.
-# Secret AUTOMERGE_TOKEN (fine-grained PAT, this repo: Contents RW, Pull requests RW) makes the merge push trigger
+# Secret AUTOMERGE_TOKEN (fine-grained PAT, this repo: Contents RW, Pull requests RW, Issues RW for the failure comment) makes the merge push trigger
 # jarves-checks + the installer publish on main (merges done with GITHUB_TOKEN do not trigger workflows).
 on:
   workflow_run:
@@ -34,7 +34,7 @@ jobs:
     steps:
       - name: Merge the green PRs
         run: |
-          set -euo pipefail
+          set -uo pipefail   # no -e: one PR error must never stop the loop; every merge decision is checked explicitly
           if [ -z "${{ secrets.AUTOMERGE_TOKEN }}" ]; then
             echo "::warning::AUTOMERGE_TOKEN is not set: merging with GITHUB_TOKEN will NOT start CI/installer publish on main"
           fi
