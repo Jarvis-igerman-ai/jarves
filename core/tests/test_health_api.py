@@ -100,8 +100,8 @@ class FakeGh:
         if argv[:2] == ["issue", "list"]:
             return 0, json.dumps(self.existing)
         if argv[:2] == ["issue", "create"]:
-            self.existing = [{"number": 7, "url": "https://github.com/igalgerman/jarves/issues/7"}]
-            return 0, "https://github.com/igalgerman/jarves/issues/7\n"
+            self.existing = [{"number": 7, "url": "https://github.com/Jarvis-igerman-ai/jarves/issues/7"}]
+            return 0, "https://github.com/Jarvis-igerman-ai/jarves/issues/7\n"
         if argv[:2] == ["issue", "comment"]:
             return 0, "commented"
         return 1, "unexpected"
@@ -151,7 +151,7 @@ async def test_a_public_repo_is_refused(home):
         async def ask(*a, **k):
             asked.append(1)
             return True
-        r = await tickets.file(st, tid, ask=ask, repo="igalgerman/jarves", by="test", run=FakeGh("PUBLIC"))
+        r = await tickets.file(st, tid, ask=ask, repo="Jarvis-igerman-ai/jarves", by="test", run=FakeGh("PUBLIC"))
         assert r["status"] == "refused" and not asked
     finally:
         st.close()

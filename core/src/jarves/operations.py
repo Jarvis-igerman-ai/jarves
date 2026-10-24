@@ -38,7 +38,7 @@ from .userdata import open_db
 
 SIGNAL_SCAN_S = 3600                              # how often the proactive-signal scan may run
 AUTONOMY_SYNC_S = 600.0
-ROADMAP_ISSUE = "https://github.com/igalgerman/jarves/issues/3"     # M3 Raspberry Pi verification (real issue)
+ROADMAP_ISSUE = "https://github.com/Jarvis-igerman-ai/jarves/issues/3"     # M3 Raspberry Pi verification (real issue)
 _UNVERIFIED_PI = ("pure Python + SQLite + tzdata, no Windows-only code; not run on a Raspberry Pi yet "
                   "(no device in the test setup)")
 _WIN_EVIDENCE = "core/tests/test_m3_*.py (unit + fault injection on Windows); no real-restart run yet"
