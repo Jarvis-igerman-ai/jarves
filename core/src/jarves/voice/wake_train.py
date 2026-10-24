@@ -352,8 +352,11 @@ def pick_threshold(head, embs, last, events, n, target_fph: float = 0.5) -> tupl
 def train_phrase(phrase: str, out: Path, *, say: list[str] | None = None, samples: Path | None = None,
                  voices: list[Voice] | None = None, synth: Synth | None = None,
                  embedder: Callable | None = None, seed: int = 7, rates=(0.8, 0.95, 1.1, 1.3),
-                 pitches=(0.8, 1.0, 1.2), copies: int = 2, progress: Callable[[str], None] = print) -> dict:
-    """Generate, train, evaluate and save `out` (.npz) + `out`.json (report). Returns the report."""
+                 pitches=(0.8, 1.0, 1.2), copies: int = 2, own_test_every: int = 4,
+                 progress: Callable[[str], None] = print) -> dict:
+    """Generate, train, evaluate and save `out` (.npz) + `out`.json (report). Returns the report.
+    own_test_every: every Nth own recording goes to the internal test stream; 0 = all of them train (when the
+    caller keeps its own hold-out split, as tools/wake_owner_eval.py does)."""
     t0 = time.monotonic()
     rng = np.random.default_rng(seed)
     texts = list(dict.fromkeys([phrase, *(say or [])]))
@@ -400,9 +403,9 @@ def train_phrase(phrase: str, out: Path, *, say: list[str] | None = None, sample
                     # the held-out stream gets 3 augmented copies: more negative minutes for the false-wake rate
                     sets[part] += [(augment(a, rng), False) for _ in range(3 if part == "test" else 1)]
     own = read_samples(samples) if samples else []
-    for i, a in enumerate(own):                      # every 4th own recording is kept for the test
+    for i, a in enumerate(own):                      # every 4th own recording is kept for the test (default)
         a = trim(a)
-        part = "test" if i % 4 == 3 else "train"
+        part = "test" if own_test_every and i % own_test_every == own_test_every - 1 else "train"
         sets[part] += [(augment(a, rng), True) for _ in range(copies * 3)]
     for part in sets:                                # noise-only stretches
         sets[part] += [(background(int(SR * rng.uniform(1, 3)), rng, rng.uniform(0.01, 0.2)), False)
