@@ -25,6 +25,14 @@ Repository settings (owner, 23 Oct 2026, #89): `main` is protected with the requ
 **off**, administrators may bypass in an emergency; **Allow auto-merge** is on; branches are deleted on merge.
 The repository is public, so these are free; GitHub's merge queue would need an organization-owned repository.
 
+## CI gate and auto-label reliability (24 Oct incident)
+
+The **required** branch check is `CI result (single required check)`. A separate `jarves-autolabel / Auto-label policy` check may fail even when required CI is green: **GitHub native auto-merge can still merge if that separate check is not configured as required**. The repo's own `jarves-automerge` queue additionally checks all completed head check-runs, but native auto-merge and owner/admin merges are separate paths. A failed unrelated check is not proof that the required code checks failed.
+
+**Owner repository-settings action for strict fail-closed behaviour:** In Settings → Branches → `main` branch protection (or Rulesets), add the exact unique check **`Auto-label policy`** to required status checks alongside **`CI result (single required check)`**, then verify a deliberately failing non-production PR cannot merge (and one green docs-only PR can). The GitHub integration used to edit these source files lacks repository-administration access, so only the owner can confirm or update the branch-rule setting. Do not mark that policy as installed until GitHub's settings are verified. A repo admin bypass remains a deliberate exception until separately disabled by the owner.
+
+`autolabel.yml` now uses the scoped `GITHUB_TOKEN` (Actions permission `Issues: write`, `Pull requests: write`) to ensure the two labels exist. The separate `AUTOMERGE_TOKEN` continues to be used **only by the merge queue** for the push-triggered main CI/package; it need not acquire extra Issues access. Failed label creation is a visible error, never silently swallowed. Documentation, tests and label-only changes do not skip required validation unless the risk classifier explicitly allows it.
+
 Setup once (owner): the repository secret `AUTOMERGE_TOKEN` (fine-grained token for this repo: Contents and Pull requests
 read & write). Merges made with `GITHUB_TOKEN` do not start the `main` run or the installer publish.
 
