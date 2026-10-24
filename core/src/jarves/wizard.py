@@ -140,6 +140,7 @@ def read_state(home: Path) -> dict:
 
 
 def _save(home: Path, st: dict) -> None:
+    _CONN_CACHE.pop(str(home), None)   # any state change (incl. Next marks done) drops the connection cache
     write_private_json(Path(home) / STATE_FILE, st)
 
 
@@ -286,7 +287,9 @@ def status_of(e: dict) -> str:
         return "skipped"
     if e.get("setup") == "later":
         return "later"
-    if e.get("test") in RESULTS and e.get("setup") == "done":
+    if e.get("setup") in (None, "done") and (e.get("test") in ("works", "skip") or e.get("learned")):
+        return "done"                                          # Next / a test result finishes the topic (#147)
+    if e.get("setup") == "done" and e.get("test") in RESULTS:
         return "done"
     if e.get("setup") == "done":
         return "setup"
