@@ -276,10 +276,12 @@ def check_limits(c: Ctx) -> tuple[str, str, str]:
     """No silent limits: a daily cap that is used up (or above 80%) is a finding with the way to raise it."""
     from . import limits
     vs = limits.worst(limits.views_from_home(c.home, c.cfg.ai))
-    if not vs:
-        return PASS, "daily limits (voice minutes, AI requests, delegated spend) have room left", ""
+    evs = limits.events_from_log(c.home)           # per-question / task / job / conversation caps hit in the last day
+    if not vs and not evs:
+        return PASS, "daily limits (voice minutes, AI requests, delegated spend) have room left; no other cap hit today", ""
     status = FAIL if any(v["level"] == "exhausted" for v in vs) else WARN
-    return status, "; ".join(v["text_en"] for v in vs), "; ".join(v["action_en"] for v in vs)
+    texts = [v["text_en"] for v in vs] + [f"{e['text_en']} (x{e['count']})" for e in evs]
+    return status, "; ".join(texts), "; ".join([v["action_en"] for v in vs] + [e["action_en"] for e in evs])
 
 
 def check_disk(c: Ctx) -> tuple[str, str, str]:

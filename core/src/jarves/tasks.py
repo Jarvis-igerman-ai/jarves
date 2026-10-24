@@ -299,6 +299,9 @@ class TaskManager:
         if not description:
             raise TaskRefused("TASK_EMPTY", "the task needs a description")
         if len(self.active()) >= self.max_running + self.max_queued:
+            from . import limits
+            limits.report("TASK_LIMIT", f"{len(self.active())} active, max {self.max_running} running + {self.max_queued} queued",
+                          self.max_running)
             raise TaskRefused("TASK_LIMIT", f"already {len(self.active())} background tasks; wait for one to finish "
                                             "or cancel one")
         res = None
@@ -360,6 +363,8 @@ class TaskManager:
             task.status, task.error = "cancelled", "cancelled"
         except asyncio.TimeoutError:
             task.status, task.error = "timeout", f"no result within {self.timeout_s:g} s"
+            from . import limits
+            limits.report("TASK_TIMEOUT", f"{self.timeout_s:g} s", self.timeout_s)
         except LookupFailed as e:
             task.status, task.error = "failed", e.code
         except Exception as e:

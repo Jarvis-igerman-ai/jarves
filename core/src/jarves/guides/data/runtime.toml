@@ -41,3 +41,15 @@ he = "אין סמל במגש"
 en = "No tray icon"
 fix_he = "הסמל צריך את החבילה tray (uv sync --extra tray). אחרי התקנה הפעילו מחדש."
 fix_en = "The icon needs the tray extra (uv sync --extra tray). Restart after installing."
+
+[[problems]]
+he = "הסטטוס אומר \"הפנים מוסתרות: מוצגות לפי בקשה\""
+en = "Status says \"face hidden: shown on request\""
+fix_he = "זה תקין: כשהחלון מוסתר (jarvis start ברקע) אין שגיאה והליבה נשארת ready. כדי לפתוח אותו הריצו jarvis show, או השתמשו בסמל במגש / בלוח הבקרה."
+fix_en = "That is normal: while the window is hidden (jarvis start in the background) it is not an error and the Core stays ready. Open it with jarvis show, the tray icon or the dashboard."
+
+[[problems]]
+he = "jarvis show נכשל, או שהחלון נפתח ולא מתחבר"
+en = "jarvis show fails, or the window opens but never connects"
+fix_he = "זו שגיאה אמיתית והיא מוצגת במפורש. אם כתוב ש-Godot לא מותקן, התקינו Godot 4 או הגדירו GODOT_EXE. אפשר גם להפעיל ידנית את godot\\run_face.cmd. להסבר מפורט: jarvis diag."
+fix_en = "This is a real error and is shown loudly. If it says Godot is not installed, install Godot 4 or set GODOT_EXE. You can also start godot\\run_face.cmd by hand. For details run: jarvis diag."

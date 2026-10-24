@@ -1,3 +1,5 @@
+PR #110 conflict-resolution evidence and carried decision gates: [handoff](handoff/2026-10-24-pr110-merge.md).
+
 ## Web chat: busy-flag race fixed — 23 Oct 2026
 
 - CI hung (pytest timeout, Ubuntu shard 3/3 on PR #92) in `test_web_chat.py::test_new_resets_the_model_and_starts_a_new_stored_conversation`. Root cause in Python Core `chat_engine.py`: the `reply` event (in `_finish`) and a command's `notice` (in `_notice`) were published BEFORE the busy flag was cleared, so a client that reacted to the answer at once (the test sends `/new` right after the reply) could be refused with `CHAT_BUSY`; no notice ever came and the long-poll waited out its timeouts. A real user with a second device, or a fast client, could hit the same 409.

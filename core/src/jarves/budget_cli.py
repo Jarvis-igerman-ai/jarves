@@ -45,7 +45,9 @@ def status_view(cfg, home) -> dict:
                counters=st.get("counters") or {}, fallback=cfg.ai.delegation_fallback,
                caps={"daily_usd": cfg.ai.delegation_daily_usd, "turn_usd": cfg.ai.delegation_turn_usd,
                      "turn_requests": cfg.ai.delegation_turn_requests, "max_searches": cfg.ai.delegation_max_searches,
-                     "timeout_s": cfg.ai.delegation_timeout_s})
+                     "timeout_s": cfg.ai.delegation_timeout_s, "task_running": cfg.ai.task_max_running,
+                     "task_timeout_s": cfg.ai.task_timeout_s})
+    out["session_caps"] = {"session_max_s": cfg.voice.session_max_s, "idle_disconnect_s": cfg.voice.idle_disconnect_s}
     return out
 
 
@@ -71,6 +73,11 @@ def cmd_budget(a, cfg, home) -> int:
                           f"{c['timeout_s']:g} שנ׳; גיבוי: {v['fallback']}",
                           f"per question: up to ${c['turn_usd']:.2f}, {c['turn_requests']} requests, {c['max_searches']} "
                           f"searches per request, {c['timeout_s']:g} s; fallback: {v['fallback']}"))
+        print(clilang.fmt(f"משימות רקע: עד {c['task_running']} במקביל (ועוד 5 בתור), {c['task_timeout_s']:g} שנ׳ למשימה; שיחה: "
+                          f"עד {v['session_caps']['session_max_s']:g} שנ׳, שקט {v['session_caps']['idle_disconnect_s']:g} שנ׳",
+                          f"background tasks: up to {c['task_running']} at once (+5 queued), {c['task_timeout_s']:g} s each; "
+                          f"conversation: max {v['session_caps']['session_max_s']:g} s, silence "
+                          f"{v['session_caps']['idle_disconnect_s']:g} s"))
         for r in v["reservations"]:
             n = f"${r['n'] / 1e6:.4f}" if r["kind"] == "delegation_usd_micros" else str(r["n"])
             print(f"  reservation {r['id']} {r['kind']:<22} {n:>10}  pid {r['pid']}  {r['age_s']:.0f} s")
@@ -95,7 +102,8 @@ def cmd_budget(a, cfg, home) -> int:
                                  ("ai.delegation_daily_usd", a.daily_usd), ("ai.delegation_turn_usd", a.turn_usd),
                                  ("ai.delegation_turn_requests", a.turn_requests),
                                  ("ai.delegation_max_searches", a.searches), ("ai.delegation_timeout_s", a.timeout),
-                                 ("ai.delegation_fallback", a.fallback)) if v is not None}
+                                 ("ai.delegation_fallback", a.fallback), ("ai.task_max_running", a.task_running),
+                                 ("ai.task_timeout_s", a.task_timeout)) if v is not None}
         if upd:
             try:
                 config_edit.apply(getattr(a, "config", None) or home / "config.toml", upd)
@@ -143,6 +151,8 @@ def add_cli(sub) -> None:
     se.add_argument("--turn-requests", type=int, help="model requests for one spoken question")
     se.add_argument("--searches", type=int, help="web searches per request")
     se.add_argument("--timeout", type=float, help="stop a spoken lookup after this many seconds")
+    se.add_argument("--task-running", type=int, help="background tasks running at once (ai.task_max_running)")
+    se.add_argument("--task-timeout", type=float, help="stop a background task after this many seconds (ai.task_timeout_s)")
     se.add_argument("--fallback", choices=["local", "server"], help="if client delegation fails")
     se.add_argument("--mode", choices=["client", "server"], help="client = strict cap (feature client_delegation)")
     bs.add_parser("reset-ladder", help="after a client-delegation failure: try client mode again")

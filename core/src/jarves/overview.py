@@ -30,6 +30,15 @@ def _last_conversation(ctx) -> dict | None:
             "cost": s["cost"]["total"]}
 
 
+def events_view(ctx) -> list[dict]:
+    """No silent limits: per-question / task / job / conversation caps that stopped something in the last day."""
+    try:
+        from . import limits
+        return limits.events_from_log(ctx.home)
+    except Exception:
+        return []
+
+
 def limits_view(ctx) -> list[dict]:
     """No silent limits: every daily cap that is above 80% or used up (exhausted first), with used/max + the fix."""
     try:
@@ -106,6 +115,7 @@ def api_home(ctx, _m, _body):
                   "voice_minutes": (day or {}).get("voice_minutes", 0.0)},
         "issues": {"open": len(issues), "high": high},
         "limits": limits_view(ctx),
+        "limit_events": events_view(ctx),
         "last_conversation": _last_conversation(ctx),
         "privacy": privacy_state(ctx),
         "at": time.time()}

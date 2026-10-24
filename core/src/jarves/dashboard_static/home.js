@@ -101,6 +101,11 @@ PAGES.home = async function () {
     el("div", { dir: "auto" }, tx(v.text_he, v.text_en)),
     el("div", { class: "small mono", dir: "ltr" }, tx(v.action_he, v.action_en)),
     el("div", { class: "actions" }, el("a", { class: "button-link", href: "#/guide/daily_limits" }, tx("איך מעלים ←", "How to raise it →")))));
+  limitCards.push(...(d.limit_events || []).map((v) => el("div", { class: "card fix", role: "alert" },
+    el("b", {}, tx("מגבלה הגבילה משהו היום", "A limit stopped something today") + (v.count > 1 ? " (x" + v.count + ")" : "")),
+    el("div", { dir: "auto" }, tx(v.text_he, v.text_en)),
+    el("div", { class: "small mono", dir: "ltr" }, tx(v.action_he, v.action_en)),
+    el("div", { class: "actions" }, el("a", { class: "button-link", href: "#/guide/daily_limits" }, tx("איך משנים ←", "How to change it →"))))));
   const setup = typeof window.guidesSetupCard === "function" ? await window.guidesSetupCard() : null;   // WP-L checklist
   const strip = typeof window.privacyStripCard === "function" ? window.privacyStripCard() : null;     // strip.js
   render(el("div", { class: "big-status hero" }, el("span", { class: "lamp " + lampOf(d.status) }),

@@ -1102,5 +1102,5 @@ class DashboardSkill(Skill):
             if info["sensitive"]:
                 info["note"] = "Explain only: every change here is the user's own click or approval; never do it for them."
             return ToolResult(True, f"הדף הפתוח הוא {info['title_he']}.", {**info, "seen_s_ago": age}, code="ok")
-        return [Tool("dashboard_page", "Which dashboard page is open now ('what page is this', 'איפה אני בלוח'); then explain it.", where, permission="read"),
-                Tool("open_dashboard", "Open the dashboard, optionally on a page: 'open the dashboard', 'תפתח את הדשבורד', 'open costs'; then explain its controls from the result. Never a way to close anything.", open_, OpenArgs, permission="action")]
+        return [Tool("dashboard_page", "Current page: 'what page is this', 'איפה אני בלוח'; explain it.", where, permission="read"),
+                Tool("open_dashboard", "'open the dashboard', 'תפתח את הדשבורד', 'open costs': open requested page; explain returned controls. Never a way to close anything.", open_, OpenArgs, permission="action")]

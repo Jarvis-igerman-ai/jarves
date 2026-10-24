@@ -11,7 +11,7 @@ from typing import Literal
 from . import logs
 
 HEARTBEAT_MIN_S = 70.0    # health.json is rewritten on a change, and otherwise at most this often (loop runs every 20 s)
-Status = Literal["ok", "degraded", "unavailable", "disabled", "unknown"]
+Status = Literal["ok", "degraded", "unavailable", "disabled", "idle", "unknown"]   # idle: optional, not running, starts on demand
 
 
 @dataclass

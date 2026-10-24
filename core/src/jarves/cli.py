@@ -319,8 +319,8 @@ def cmd_status(a, cfg, home) -> int:
     prof = live.get("profile") or {}
     from .updates import beta_label
     from . import limits as _limits
-    for line in _limits.status_lines(live.get("limits") or []):      # no silent limits: the FIRST lines of the status
-        print(line)
+    for line in _limits.status_lines(live.get("limits") or []) + _limits.event_lines(live.get("limit_events") or []):
+        print(line)                                                   # no silent limits: the FIRST lines of the status
     beta = beta_label(home)
     print(runtime_summary(live.get("runtime"))
           + (f" | profile {prof.get('name')}{' (TEST)' if prof.get('test') else ''}" if prof else "")
@@ -421,8 +421,12 @@ def cmd_display(a, cfg, home) -> int:
         print("JARVES is not running. Start it with: jarvis start" + (" --show" if what == "show" else ""))
         return 1
     res = (r.get("applied") or {}).get("display") or {}
-    print(f"{what}: {res.get('detail', '?')}" + ("" if res.get("ok", True) else "  (failed)"))
-    return 0 if res.get("ok", True) else 1
+    if not res.get("ok", True):
+        print(f"ERROR: {what} failed: {res.get('detail', '?')}", file=sys.stderr)
+        print("The face launcher is godot\\run_face.cmd; collect details with: jarvis diag", file=sys.stderr)
+        return 1
+    print(f"{what}: {res.get('detail', '?')}")
+    return 0
 
 
 def cmd_mic(a, cfg, home) -> int:
@@ -679,7 +683,11 @@ def find_pear() -> Path | None:
 
 def cmd_music(a, cfg, home) -> int:
     from .skills.music import MusicError, PearDesktopPlayer
-    if a.action == "open":
+    if a.action in ("open", "start"):
+        from .features import _tcp_open
+        if _tcp_open(cfg.music.pear_url):
+            print("Pear Desktop is already running. If music fails: Plugins > API Server must be on, then `jarvis music pair`.")
+            return 0
         exe = find_pear()
         if exe is None:
             print(f"Pear Desktop not found. Download it from {PEAR_DOWNLOAD}")
@@ -1351,6 +1359,9 @@ def cmd_doctor(a, cfg, home) -> int:
         _vs = _limits.views_from_home(home, cfg.ai)
         for _v in _limits.worst(_vs):
             add("fail" if _v["level"] == "exhausted" else "warn", _v["text_en"], "fix:  " + _v["action_en"])
+        _evs = list((live or {}).get("limit_events") or []) or _limits.events_from_log(home)
+        for _e in _evs:
+            add("warn", f"{_e.get('text_en', _e.get('code'))} (x{_e.get('count', 1)})", "fix:  " + str(_e.get("action_en", "")))
         if not _limits.worst(_vs):
             add("ok", "daily limits have room left (" + "; ".join(v["text_en"] for v in _vs) + ")")
     except Exception as e:
@@ -1410,7 +1421,7 @@ def cmd_doctor(a, cfg, home) -> int:
             add("ok" if paired else "warn", "Pear Desktop is running" + ("" if paired else " but NOT paired"),
                 "" if paired else "run:  jarvis music pair  (and click Allow in Pear)")
         except httpx.HTTPError:
-            add("warn", "Pear Desktop is not running (music unavailable)", "run:  jarvis music open")
+            add("info", "Pear Desktop is not running (optional; it starts when you ask for music)", "run:  jarvis music start")
 
     # --- optional real (billable) GPT-Live smoke test
     if a.live:
@@ -1899,7 +1910,7 @@ def main(argv: list[str] | None = None) -> int:
     md.add_argument("--body", required=True)
     md.add_argument("--send", action="store_true", help="also offer read-back and sending in this session; asks confirmation")
     mu = sub.add_parser("music", help="Pear Desktop pairing and manual control")
-    mu.add_argument("action", choices=["open", "pair", "status", "play", "pause", "resume", "next"])
+    mu.add_argument("action", choices=["open", "start", "pair", "status", "play", "pause", "resume", "next"])
     mu.add_argument("query", nargs="?", default="")
     g = sub.add_parser("chatgpt", help="connect / disconnect your ChatGPT plan (Sign in with ChatGPT)")
     g.add_argument("action", choices=["login", "logout", "status", "models"])
