@@ -9,7 +9,7 @@ The fix always lands in `main` FIRST (so the next version never loses it). This 
      (full CI runs there);
   3. prints the version rule: the release branch carries x.y.<patch+1>; after the PR is merged, complete the short
      sign-off sheet, tag vX.Y.Z on the merge commit and release.yml publishes the stable hotfix.
-It pushes only to a remote whose URL is the public igalgerman/jarves repo (never the private one). --dry-run prints the
+It pushes only to a remote whose URL is the public Jarvis-igerman-ai/jarves repo (never the private one). --dry-run prints the
 exact commands and runs none. The pure helpers are unit-tested without git or network.
 """
 from __future__ import annotations
@@ -21,7 +21,7 @@ import subprocess
 import sys
 from typing import Callable
 
-PUBLIC_REPO = "igalgerman/jarves"
+PUBLIC_REPO = "Jarvis-igerman-ai/jarves"
 BRANCH_RE = re.compile(r"^release/(\d+)\.(\d+)$")
 
 
@@ -50,7 +50,7 @@ def check_pr(info: dict) -> list[str]:
 
 
 def check_remote(url: str) -> list[str]:
-    ok = re.search(r"github\.com[:/]igalgerman/jarves(\.git)?/?$", url.strip(), re.I)
+    ok = re.search(r"github\.com[:/](?:Jarvis-igerman-ai|igalgerman)/jarves(\.git)?/?$", url.strip(), re.I)
     return [] if ok else [f"remote URL {url!r} is not the public {PUBLIC_REPO} repo; refusing to push"]
 
 

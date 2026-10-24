@@ -1011,7 +1011,7 @@ def _register_feature() -> None:
                   targets={"windows": {"status": "implemented_unverified",
                                        "evidence": "core/tests/test_wizard.py, test_wizard_browser.py (done per release, diff, secrets, bug report, sign-off, real browser)"},
                            "linux_arm64_pi": {"status": "planned", "blocker": "pure Python; not run on a Pi yet",
-                                              "roadmap_issue": "https://github.com/igalgerman/jarves/issues/1"}})
+                                              "roadmap_issue": "https://github.com/Jarvis-igerman-ai/jarves/issues/1"}})
 
 
 _register_feature()
