@@ -322,3 +322,24 @@ def test_every_packaging_powershell_script_parses():
                f"'{PKG / name}',[ref]$t,[ref]$e); if ($e.Count) {{ $e | % {{ $_.Message }}; exit 1 }}")
         r = subprocess.run([pwsh, "-NoProfile", "-Command", cmd], capture_output=True, text=True, timeout=120)
         assert r.returncode == 0, (name, r.stdout[-400:])
+
+
+def test_health_check_after_update_rolls_back_the_program_only():
+    """#164: after /RESTARTJARVES=1 setup waits for CORE_READY; a candidate that never gets ready is undone, program
+    parts only (the ones THIS run moved), kept aside not deleted, data untouched, the old Core restarted."""
+    iss = (PKG / "windows" / "jarves.iss").read_text(encoding="utf-8-sig")
+    done = iss.split("procedure CurStepChanged", 1)[1].split("#include", 1)[0]
+    assert "ssDone" in done and "HealthCheckAfterUpdate();" in done
+    check = iss.split("procedure HealthCheckAfterUpdate", 1)[1].split("procedure CurStepChanged", 1)[0]
+    assert "RestartRequested()" in check and "/ROLLBACK=1" in check and "SnapshotMade" in check
+    assert "{param:HEALTHTIMEOUT|90}" in check and "if Code = 3 then HealthRollback();" in check
+    swap = iss.split("function SwapBackPart", 1)[1].split("procedure HealthRollback", 1)[0]
+    assert swap.index("Pos('|' + Name + '|', Retained) = 0") < swap.index("RenameFile(Target, Kept)")
+    assert "DelTree" not in swap and "DeleteFile" not in swap          # nothing is deleted, the new part is kept aside
+    roll = iss.split("procedure HealthRollback", 1)[1].split("procedure HealthCheckAfterUpdate", 1)[0]
+    assert roll.index("StopProcessesUnderApp();") < roll.index("SwapBackPart('python'")
+    assert roll.index("note-rollback") < roll.index("run --background")
+    assert "restore-data" not in roll and "DataDir()" in roll and "failed-upgrade-health-" in roll
+    assert 'Name: "{app}\\failed-upgrade-*"' in iss                    # the uninstaller removes the kept-aside copy
+    smoke = (PKG / "smoke_windows.ps1").read_text(encoding="utf-8-sig")
+    assert "candidate that never becomes ready" in smoke and "/HEALTHTIMEOUT=5" in smoke

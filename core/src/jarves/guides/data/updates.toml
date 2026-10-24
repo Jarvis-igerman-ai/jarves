@@ -82,3 +82,7 @@ en = "The update says a file in the program folder is in use"
 fix_he = "ההתקנה סוגרת לבד את כל חלקי ג'ארביס (Core, לוח הבקרה, הפנים, נגן המוזיקה): קודם בבקשה, ורק אם צריך בכוח, וכותבת ביומן ההתקנה מה נסגר. אם תוכנה אחרת מחזיקה קובץ (תיקייה או עורך פתוחים, גיבוי או סריקת אנטי-וירוס) העדכון מוותר בלי לשנות כלום: הגרסה הקודמת והנתונים נשארים. סגרו את התוכנה ההיא והריצו שוב jarvis update install."
 fix_en = "Setup closes every part of JARVES by itself (Core, dashboard, face, music player): politely first, by force only if needed, and the setup log says what it closed. If another program holds a file (an open folder or editor, a backup or antivirus scan) the update gives up without changing anything: the previous version and your data stay. Close that program and run jarvis update install again."
 action = "command:jarvis update install"
+
+[[steps]]
+he = "בדיקת בריאות אחרי עדכון אוטומטי: ההתקנה מחכה עד 90 שניות שהגרסה החדשה תעלה. אם היא לא עלתה, התוכנה הקודמת חוזרת לבד (הנתונים לא נוגעים) ותקבלו הודעה אחת בעברית ובאנגלית. אפשר לשנות את זמן ההמתנה עם /HEALTHTIMEOUT=שניות בהתקנה שקטה. אם ההחזרה האוטומטית נכשלה: jarvis update --rollback."
+en = "Health check after an automatic update: setup waits up to 90 seconds for the new version to become ready. If it does not, the previous program is put back by itself (your data is not touched) and you get one notice in Hebrew and English. Change the wait with /HEALTHTIMEOUT=seconds on a silent install. If the automatic undo failed: jarvis update --rollback."

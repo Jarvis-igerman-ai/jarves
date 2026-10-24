@@ -415,3 +415,26 @@ def test_cli_update_auto(home, monkeypatch, capsys):
     assert "Automatic updates: on" in capsys.readouterr().out
     assert cli.main(["update", "auto", "off"]) == 0
     assert "Automatic updates: off" in capsys.readouterr().out
+
+
+def test_a_health_rollback_by_setup_tells_the_owner_once_in_both_languages(home, server, keys):
+    """#164: setup put the previous program back after the new Core never became ready; the old Core says so once."""
+    r = Rig(home, server, keys)
+    (home / "updates").mkdir(exist_ok=True)
+    (home / "updates" / "health.json").write_text(json.dumps(
+        {"status": "rolled_back", "from": OLD, "to": NEW, "at": 1, "notified": False}), "utf-8")
+    assert r.au.after_start() == "rolled_back"
+    n = [x for x in r.notices if x["kind"] == "rolled_back"]
+    assert len(n) == 1 and OLD in n[0]["text_en"] and "data" in n[0]["text_en"] and n[0]["text_he"] and n[0]["title_he"]
+    r.au.after_start()
+    assert len([x for x in r.notices if x["kind"] == "rolled_back"]) == 1
+    assert updates.take_health_notice(home) is None
+
+
+def test_a_failed_health_rollback_says_how_to_go_back_by_hand(home, server, keys):
+    r = Rig(home, server, keys)
+    (home / "updates").mkdir(exist_ok=True)
+    (home / "updates" / "health.json").write_text(json.dumps({"status": "rollback_failed", "to": NEW}), "utf-8")
+    assert r.au.after_start() == "rollback_failed"
+    n = r.notices[-1]
+    assert "jarvis update --rollback" in n["text_en"] and "jarvis update --rollback" in n["text_he"]

@@ -333,6 +333,11 @@ class AutoUpdater:
         with self._lock:
             st = self.state()
             self._after_restart(st)
+            h = updates.take_health_notice(self.home)
+            if h:                                         # the installer's health check put the old program back (#164)
+                st = self.state()
+                self._emit(st, h["status"], h.get("to") or "", h.get("to") or "", prev=h.get("from") or "")
+                _save(self.home, st)
             return (self.state().get("notice") or {}).get("kind", "")
 
 
@@ -361,6 +366,21 @@ def _notice_text(kind: str, display: str, **x) -> tuple[tuple[str, str], tuple[s
                 ("JARVES was updated", f"Updated to version {display}. Your data was kept and backed up before the update. "
                  "What changed: jarvis release-notes. If something is wrong: jarvis update --rollback (or the Roll back "
                  "button on the Updates page)."))
+    if kind in ("rolled_back", "rollback_failed"):
+        prev = x.get("prev") or ""
+        if kind == "rolled_back":
+            return (("העדכון בוטל והגרסה הקודמת חזרה", f"גרסה {display} לא עלתה כמו שצריך אחרי ההתקנה, אז החזרתי את התוכנה "
+                     f"הקודמת{' ' + prev if prev else ''}. הנתונים שלך לא נגעו ושמורים. אפשר לנסות שוב מאוחר יותר "
+                     "בעמוד Updates; אם זה חוזר, דווח עם jarvis report."),
+                    ("The update was undone, the previous version is back", f"Version {display} did not start properly "
+                     f"after setup, so I put the previous program back{' (' + prev + ')' if prev else ''}. Your data was "
+                     "not touched and is safe. You can try again later on the Updates page; if it repeats, report it "
+                     "with jarvis report."))
+        return (("העדכון לא עלה וההחזרה האוטומטית לא הצליחה", f"גרסה {display} לא עלתה, ולא הצלחתי להחזיר את התוכנה "
+                 "הקודמת לבד. הנתונים שלך לא נגעו. הרץ jarvis update --rollback או התקן מחדש את הגרסה הקודמת."),
+                ("The update failed and the automatic undo did not work", f"Version {display} did not start and I could "
+                 "not put the previous program back by myself. Your data was not touched. Run jarvis update --rollback "
+                 "or reinstall the previous version."))
     return (("העדכון האוטומטי הפסיק לנסות", f"לא הצלחתי להתקין את גרסה {display} ({x.get('code', '')}) אחרי כמה ניסיונות. "
              "הגרסה הנוכחית ממשיכה לעבוד ושום דבר לא השתנה. אפשר ללחוץ עכשיו לעדכן ידנית בעמוד Updates."),
             ("Auto-update stopped trying", f"I could not install version {display} ({x.get('code', '')}) after several "

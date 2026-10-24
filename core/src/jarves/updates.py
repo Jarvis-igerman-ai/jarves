@@ -818,6 +818,21 @@ def mark_healthy(home: Path, version: str | None = None) -> None:
         _write_json(path, d)
 
 
+HEALTH_FILE = "health.json"
+
+
+def take_health_notice(home: Path) -> dict | None:
+    """The installer's health check put the previous program back (program only, data untouched): returns that record
+    ONCE ({"status": "rolled_back"|"rollback_failed", "from", "to"}) so the owner is told a single time."""
+    path = _updates_dir(home) / HEALTH_FILE
+    d = _read_json(path)
+    if d.get("status") not in ("rolled_back", "rollback_failed") or d.get("notified"):
+        return None
+    d["notified"] = True
+    _write_json(path, d)
+    return d
+
+
 def start_rollback_process(home: Path, popen: Callable | None = None) -> None:
     """Run `jarvis update --rollback --yes` as a separate process (it stops the Core, restores the data and starts
     setup), after the owner's approval was recorded. The Core cannot roll itself back while it is running."""

@@ -184,15 +184,70 @@ def open_setup(home: Path) -> None:
         dashboard.stop()
 
 
+HEALTH_FILE = "health.json"
+
+
+def _read_json(path: Path) -> dict:
+    try:
+        d = json.loads(path.read_text(encoding="utf-8"))
+        return d if isinstance(d, dict) else {}
+    except (OSError, ValueError):
+        return {}
+
+
+def health(home: Path, timeout_s: float = 90.0, poll_s: float = 1.0, *, sleep=time.sleep, clock=time.monotonic) -> str:
+    """After an in-app update (setup started with /RESTARTJARVES=1): wait for the new Core to reach CORE_READY, which
+    updates.mark_healthy records as pending.json state "ok". Returns "ok", "failed" (an update was installing and
+    never became ready in time) or "unknown" (no update record: a manual install, never rolled back by this check).
+    Standard library only: it runs under the old or the new python."""
+    home = safe_home(home)
+    path = home / "updates" / "pending.json"
+    if _read_json(path).get("state") not in ("installing", "ok"):
+        return "unknown"
+    deadline = clock() + max(1.0, min(float(timeout_s), 600.0))
+    while True:
+        state = _read_json(path).get("state")
+        if state == "ok":
+            return "ok"
+        if state != "installing":
+            return "unknown"
+        if clock() >= deadline:
+            return "failed"
+        sleep(poll_s)
+
+
+def note_rollback(home: Path, ok: bool) -> dict:
+    """Record, once, that the program was put back after a failed health check (the Core tells the owner at its next
+    start, updates.take_health_notice). Data is never touched here."""
+    home = safe_home(home)
+    pend = _read_json(home / "updates" / "pending.json")
+    rec = {"status": "rolled_back" if ok else "rollback_failed", "from": pend.get("from"), "to": pend.get("to"),
+           "at": time.time(), "notified": False}
+    target = home / "updates" / HEALTH_FILE
+    target.parent.mkdir(parents=True, exist_ok=True)
+    tmp = target.with_name(target.name + ".tmp")
+    tmp.write_text(json.dumps(rec, indent=1), encoding="utf-8")
+    os.replace(tmp, target)
+    return rec
+
+
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser()
-    ap.add_argument("action", choices=("prepare", "complete", "open-setup", "restore-shims", "restore-data"))
+    ap.add_argument("action", choices=("prepare", "complete", "open-setup", "restore-shims", "restore-data", "health", "note-rollback"))
     ap.add_argument("--home", type=Path, required=True)
     ap.add_argument("--state", type=Path)
     ap.add_argument("--fresh", action="store_true")
+    ap.add_argument("--timeout", type=float, default=90.0)
+    ap.add_argument("--ok", type=int, default=0)
     ap.add_argument("--language", choices=("en", "he"), default="en")
     args = ap.parse_args(argv)
     try:
+        if args.action == "health":
+            # exit code: 0 = ready, 3 = never became ready (the installer puts the old program back), 1 = no update record
+            return {"ok": 0, "failed": 3}.get(health(args.home, args.timeout), 1)
+        if args.action == "note-rollback":
+            note_rollback(args.home, bool(args.ok))
+            return 0
         if args.action == "open-setup":
             open_setup(args.home)
         elif args.action == "restore-data":

@@ -131,3 +131,46 @@ exit 0
                     "-MetricsDir", str(metrics), "-SkipDoctor"], check=True, capture_output=True, text=True)
     report = json.loads((metrics / "upgrade-4.0.0.153-metrics.json").read_text(encoding="utf-8-sig"))
     assert report["old"] == str(fixture) and report["version"] == "4.0.1.1"
+
+
+def _pending(home, state):
+    (home / "updates").mkdir(parents=True, exist_ok=True)
+    (home / "updates" / "pending.json").write_text(json.dumps({"state": state, "from": "4.0.0", "to": "4.0.1"}))
+
+
+def test_health_check_is_ok_when_the_core_marks_the_update_healthy(tmp_path):
+    home = tmp_path / "home"
+    _pending(home, "installing")
+    ticks = []
+    def sleep(_):
+        ticks.append(1)
+        _pending(home, "ok")                      # the new Core reached CORE_READY meanwhile
+    assert installer.health(home, 30, 0, sleep=sleep) == "ok" and ticks == [1]
+
+
+def test_health_check_fails_only_for_an_installing_update_that_never_becomes_ready(tmp_path):
+    home = tmp_path / "home"
+    _pending(home, "installing")
+    now = [0.0]
+    def sleep(s): now[0] += 10
+    assert installer.health(home, 30, 1, sleep=sleep, clock=lambda: now[0]) == "failed"
+
+
+def test_health_check_never_judges_a_manual_install_or_a_not_applied_update(tmp_path):
+    home = tmp_path / "home"
+    assert installer.health(home, 1) == "unknown"                 # no update record at all
+    _pending(home, "not_applied")
+    assert installer.health(home, 1) == "unknown"
+
+
+def test_note_rollback_records_once_and_never_touches_data(tmp_path):
+    home = tmp_path / "home"
+    seed.seed(home)
+    before = {p: p.read_bytes() for p in home.rglob("*") if p.is_file()}
+    _pending(home, "installing")
+    before[home / "updates" / "pending.json"] = (home / "updates" / "pending.json").read_bytes()
+    rec = installer.note_rollback(home, True)
+    assert rec["status"] == "rolled_back" and rec["from"] == "4.0.0" and rec["to"] == "4.0.1"
+    after = {p: p.read_bytes() for p in home.rglob("*") if p.is_file() and p.name != "health.json"}
+    assert after == before
+    assert installer.note_rollback(home, False)["status"] == "rollback_failed"

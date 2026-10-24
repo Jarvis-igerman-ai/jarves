@@ -170,6 +170,27 @@ if ($UpgradeFrom) {
     Stop-Process -Id $locker.Id -Force -ErrorAction SilentlyContinue
     $locker.WaitForExit(10000) | Out-Null
     Remove-Item -LiteralPath $lockFile -Force -ErrorAction SilentlyContinue
+    # #164: a candidate whose Core never becomes ready (the update record names a version that never starts, so the
+    # Core never marks it healthy) is undone by setup: the previous program is back, data untouched, the owner notice
+    # is recorded, nothing is deleted. The data folder is restored afterwards so the later cases see the seeded data.
+    $homeCopy = Join-Path $Work "home-before-health-case"
+    Copy-Item -LiteralPath $Home_ -Destination $homeCopy -Recurse -Force
+    $pendingFile = Join-Path $Home_ "updates\pending.json"
+    New-Item -ItemType Directory -Force (Split-Path $pendingFile) | Out-Null
+    (@{ state = "installing"; from = $oldVer; to = "9.9.9"; attempts = 0 } | ConvertTo-Json) | Set-Content $pendingFile
+    Check ((Install "DEFAULT" @("/RESTARTJARVES=1", "/HEALTHTIMEOUT=5") $Installer "") -eq 0) "candidate that never becomes ready: setup finishes (it undoes itself)"
+    Check ((Version-Of) -eq $oldVer -and (Test-Path (Join-Path $App "python\python.exe")) -and (Test-Path (Join-Path $App "jarvis.cmd"))) "health check failed: the previous program $oldVer is back"
+    Check (@(Get-ChildItem $App -Directory -Filter "failed-upgrade-health-*" -ErrorAction SilentlyContinue).Count -ge 1) "the candidate's program was kept aside, not deleted"
+    $healthRec = Get-Content (Join-Path $Home_ "updates\health.json") -Raw -ErrorAction SilentlyContinue | ConvertFrom-Json
+    Check ($healthRec.status -eq "rolled_back" -and -not $healthRec.notified) "the automatic rollback is recorded for the one-time owner notice"
+    Check (@(Select-String -Path (Join-Path $Work "install-*.log") -Pattern "Health rollback done" -ErrorAction SilentlyContinue).Count -ge 1) "the health rollback is logged"
+    Check ((Jarvis @("--version")).text -match [regex]::Escape($oldVer)) "the previous version runs after the automatic rollback"
+    Jarvis @("stop") | Out-Null
+    Get-Process | Where-Object { $_.Path -and $_.Path.StartsWith($App, [StringComparison]::OrdinalIgnoreCase) } | Stop-Process -Force -ErrorAction SilentlyContinue
+    Start-Sleep 2
+    Remove-Item -LiteralPath $Home_ -Recurse -Force
+    Move-Item -LiteralPath $homeCopy -Destination $Home_
+    Get-ChildItem $App -Directory -Filter "failed-upgrade-health-*" | Remove-Item -Recurse -Force -ErrorAction SilentlyContinue
     # #153: a leftover rollback folder from an older run must not block the upgrade
     New-Item -ItemType Directory -Force (Join-Path $App "rollback\python") | Out-Null
     $stale = Join-Path $App "rollback\python\stale-from-older-run.txt"
