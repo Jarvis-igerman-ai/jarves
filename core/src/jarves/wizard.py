@@ -270,7 +270,9 @@ def status_of(e: dict) -> str:
         return "skipped"
     if e.get("setup") == "later":
         return "later"
-    if e.get("test") in RESULTS and e.get("setup") == "done":
+    if e.get("setup") in (None, "done") and (e.get("test") in ("works", "skip") or e.get("learned")):
+        return "done"                                          # Next / a test result finishes the topic (#147)
+    if e.get("setup") == "done" and e.get("test") in RESULTS:
         return "done"
     if e.get("setup") == "done":
         return "setup"
