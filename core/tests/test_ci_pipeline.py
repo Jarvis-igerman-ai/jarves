@@ -244,3 +244,20 @@ def test_bridge_publish_workflow_is_manual_least_privilege_and_scopes_secrets_to
     assert "!inputs.dry_run" in step["if"] and "refs/heads/main" in step["if"]
     dry = next(s for s in publish["steps"] if "--dry-run" in s.get("run", ""))
     assert "env" not in dry and "inputs.dry_run" in dry["if"] and "!" not in dry["if"]
+
+
+def test_autolabel_has_label_write_permission_and_never_masks_creation_failure():
+    """Regression: PRs #112/#113/#115 had green CI but autolabel failed with a missing label."""
+    doc = load("autolabel.yml")
+    assert doc["permissions"]["issues"] == "write"
+    assert doc["permissions"]["pull-requests"] == "write"
+    assert doc["permissions"]["contents"] == "read"
+    assert doc["jobs"]["label"]["name"] == "Auto-label policy"
+    assert doc["jobs"]["label"]["env"]["GH_TOKEN"] == "${{ github.token }}"
+    assert "pull_request_target" in triggers(doc)
+    step = steps_text(doc["jobs"]["label"])
+    assert "gh label create" in step
+    assert "gh api" in step and "labels/$l" in step
+    assert "Cannot create label" in step and "exit 1" in step
+    assert "2>/dev/null || true" not in step
+    assert "gh pr edit" in step   # the original safe risk classifier / relabel flow remains
