@@ -32,3 +32,5 @@ button.ghost { border:none; min-height:44px; min-width:44px; padding:6px 10px; }
 .msg.note { background:transparent; border:1px dashed var(--accent); }
 .msg.unsent { border:1px dashed var(--bad); }
 .msg .small { display:block; font-size:.8rem; opacity:.85; margin-top:4px; }
+.row.wrap { flex-wrap:wrap; } .pref-text { overflow-wrap:anywhere; font-weight:600; }
+h2 { font-size:1.05rem; margin:14px 0 8px; }
