@@ -638,7 +638,7 @@ def mark_learned(home: Path, tid: str) -> None:
         st = read_state(home)
         e = _topic_entry(st, t.id)
         e["learned"] = True
-        if not done_of(e):
+        if not done_of(e) and not e.get("later"):          # "Got it" never overrides Later (#147)
             _finish(e, "seen", t.rev)
         _save(home, st)
 
