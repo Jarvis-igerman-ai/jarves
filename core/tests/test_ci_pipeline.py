@@ -261,3 +261,12 @@ def test_autolabel_has_label_write_permission_and_never_masks_creation_failure()
     assert "Cannot create label" in step and "exit 1" in step
     assert "2>/dev/null || true" not in step
     assert "gh pr edit" in step   # the original safe risk classifier / relabel flow remains
+
+
+def test_codeql_prunes_its_own_overlay_caches_only():
+    jobs = load("codeql.yml")["jobs"]
+    prune = jobs["prune-caches"]
+    assert prune["permissions"] == {"actions": "write"}
+    run = steps_text(prune)
+    assert "--key codeql-overlay-base-database-" in run and "--ref refs/heads/main" in run and "'.[2:][].id'" in run
+    assert prune["if"] == "github.event_name != 'pull_request'"
