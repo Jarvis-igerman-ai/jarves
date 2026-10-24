@@ -66,12 +66,25 @@ _RULES = _CONTACT_RULES + _RULES
 _RULES += _GOOGLE_RULES
 from .appearance import INTENT_RULES as _APPEARANCE_RULES   # WP-M2: "תחליף לאווטאר תלת מימד"
 _RULES += _APPEARANCE_RULES
-_STRIP =re.compile(r"^(?:jarves|jarvis|ג'?ארב(?:י|ו)ס)[,\s]+|[.!?,\s]+$", _FLAGS)
+_WAKE = re.compile(r"^(?:jarves|jarvis|ג'?ארב(?:י|ו)ס)[,\s]+", _FLAGS)
+
+
+def _strip_utterance(text: str) -> str:
+    r"""Drop a leading "jarvis," and trailing punctuation/space. Linear (str methods, an anchored prefix); the old
+    `^prefix|[.!?,\s]+$` regex was quadratic on long punctuation/space runs (CodeQL py/polynomial-redos)."""
+    t = text.strip()
+    for _ in range(2):                         # twice, as before: "jarvis, jarvis, x" loses both
+        t = _WAKE.sub("", t, count=1)
+        while True:
+            u = t.rstrip(".!?,").rstrip()
+            if u == t:
+                break
+            t = u
+    return t
 
 
 def match_intent(text: str) -> Intent | None:
-    t = _STRIP.sub("", text.strip())
-    t = _STRIP.sub("", t)
+    t = _strip_utterance(text)
     for tool, pat, args in _RULES:
         m = pat.search(t) if tool == "music_volume" else pat.match(t)
         if m:
@@ -524,16 +537,100 @@ class AgentBrain:
         return str(res.final_output or "").strip()
 
 
-_CITE = re.compile(r"\s*\(\s*\[[^\]]*\]\(https?://[^)]*\)\s*\)")      # ([gov.uk](https://...))
-_LINK = re.compile(r"\[([^\]]+)\]\(https?://[^)]*\)")                      # [text](https://...)
+class _Find:
+    """str.find that remembers its last answer, so repeated searches from nearby positions stay linear."""
+
+    def __init__(self, text: str, ch: str) -> None:
+        self.t, self.ch, self.at, self.res = text, ch, 0, -2
+
+    def __call__(self, pos: int) -> int:
+        if self.res != -2 and self.at <= pos and (self.res == -1 or self.res >= pos):
+            return self.res
+        self.at, self.res = pos, self.t.find(self.ch, pos)
+        return self.res
+
+
+def _md_link(text: str, q: int, close: _Find, paren: _Find) -> tuple[int, int]:
+    """`[` at q starts "[...](http(s)://...)"? Returns (index of the first `]`, index after the `)`); end is -1 when it
+    is no link, and j is -1 when no `]` follows at all (then no later link can match either)."""
+    j = close(q + 1)
+    if j < 0:
+        return -1, -1
+    if text.startswith("](https://", j):
+        s = j + 10
+    elif text.startswith("](http://", j):
+        s = j + 9
+    else:
+        return j, -1
+    k = paren(s)
+    return j, (k + 1 if k >= 0 else -1)
+
+
+def _drop_citations(text: str) -> str:
+    r"""Remove "([gov.uk](https://...))" (with the space before it). Hand-written linear scan of what the regex
+    `\s*\(\s*\[[^\]]*\]\(https?://[^)]*\)\s*\)` did (that one is polynomial: CodeQL py/polynomial-redos)."""
+    n, out, pos, i = len(text), [], 0, 0
+    close, paren = _Find(text, "]"), _Find(text, ")")
+    last_e, last_t = -1, -1
+    while True:
+        p = text.find("(", i)
+        if p < 0:
+            break
+        q = p + 1
+        while q < n and text[q].isspace():
+            q += 1
+        i = p + 1
+        if q >= n or text[q] != "[":
+            continue
+        j, e = _md_link(text, q, close, paren)
+        if j < 0:
+            break
+        if e < 0:
+            continue
+        if e != last_e:
+            t = e
+            while t < n and text[t].isspace():
+                t += 1
+            last_e, last_t = e, t
+        t = last_t
+        if t < n and text[t] == ")":
+            s = p
+            while s > pos and text[s - 1].isspace():
+                s -= 1
+            out.append(text[pos:s])
+            pos = i = t + 1
+    out.append(text[pos:])
+    return "".join(out)
+
+
+def _unlink(text: str) -> str:
+    r""""[text](https://...)" -> "text" (linear; replaces regex `\[([^\]]+)\]\(https?://[^)]*\)`)."""
+    out, pos, i = [], 0, 0
+    close, paren = _Find(text, "]"), _Find(text, ")")
+    while True:
+        q = text.find("[", i)
+        if q < 0:
+            break
+        j, e = _md_link(text, q, close, paren)
+        if j < 0:
+            break
+        if e < 0 or j == q + 1:
+            i = j + 1                    # every `[` before this `]` shares its fate
+            continue
+        out.append(text[pos:q])
+        out.append(text[q + 1:j])
+        pos = i = e
+    out.append(text[pos:])
+    return "".join(out)
+
+
 _URL = re.compile(r"https?://\S+")
 
 
 def speakable(text: str) -> str:
     """Spoken/captioned replies must not contain links or markdown. The ChatGPT-plan route (web search) returns
     citations like ([gov.uk](https://...)): drop them (found 19 Oct), keep the words."""
-    t = _CITE.sub("", text or "")
-    t = _LINK.sub(lambda m: m.group(1), t)
+    t = _unlink(_drop_citations(text or ""))
     t = _URL.sub("", t)
     t = re.sub(r"[*_`#]{1,3}", "", t)
     return re.sub(r"[ ]{2,}", " ", t).strip()

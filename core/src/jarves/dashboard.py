@@ -43,7 +43,6 @@ from .store import TYPED_KINDS, Store, daily_costs, session_cost
 
 STATIC = Path(__file__).with_name("dashboard_static")
 COOKIE = "jarves_dash"
-_EMAIL = re.compile(r"(?<![\w.+-])[\w.+-]+@[\w-]+\.[\w.-]+")
 _ROUTES: list[tuple[str, re.Pattern, object]] = []
 PLUGIN_MODULES = ("jarves.workspace", "jarves.curator", "jarves.memory", "jarves.features", "jarves.google_auth",
                   "jarves.google_setup", "jarves.telegram_channel", "jarves.instagram_channel", "jarves.privacy", "jarves.overview",
@@ -88,7 +87,7 @@ def clean(obj, depth: int = 0):
     if isinstance(obj, (list, tuple)):
         return [clean(v, depth + 1) for v in obj]
     if isinstance(obj, str):
-        return _EMAIL.sub("<email>", logs.redact(obj))
+        return logs.mask_emails(logs.redact(obj))
     return obj
 
 

@@ -625,7 +625,7 @@ async def test_real_core_client_delegation_end_to_end(home, cfg, monkeypatch):
                                           ("תעצור את המוזיקה", False), ("stop the music", False),
                                           ("עזוב, תבדוק משהו אחר", False)])
 def test_cancel_phrases(text, cancels):
-    assert bool(dc._CANCEL_RE.match(text)) is cancels
+    assert dc.is_cancel(text) is cancels
 
 
 async def test_a_question_asked_while_the_lookup_ran_is_handed_back(tmp_path):
