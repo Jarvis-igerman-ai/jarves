@@ -7,6 +7,25 @@ Written by the coordinator session so the next agent can start without the chat 
 - Owner PC: updated to 4.0.1.349 (beta.33) on 24 Oct with the in-app updater (`jarvis update install --yes --silent`). Backup before it: `%LOCALAPPDATA%\jarves\backups\jarves-backup-20261024-180217-pre-migration.zip`. `jarvis doctor`: all checks passed. Core was not started on the owner's data. Rollback: `jarvis update --rollback --yes`. The installed command is `%LOCALAPPDATA%\Programs\JARVES\jarvis.cmd` (the `jarvis` on PATH in a terminal can still be the V3 checkout `C:\work\jarvis`).
 - Owner rule: install the newest beta on the owner PC automatically and report; the owner reverts if there is a problem.
 
+## Status per task and where it belongs (24 Oct 2026)
+
+| Task | Version | Status | Who / where | Next step |
+|---|---|---|---|---|
+| #121 performance advisor + Performance Health tracker | V4.5 | PR open, BLOCKED: `validate` job failed (run 40110880934), not reviewed | other agent, branch `feat/perf45-advisor-autonomous-issues-20261024` | read the log, fix, review, merge alone |
+| #122 real voice latency + device acceptance | V4.5 | not started | none | needs the owner PC and OpenAI credit; plan in `docs/plans/V4_5_STABILIZATION_SECURITY_QA.md` |
+| V4.5 stabilization/security/guided QA package (CodeQL, scans, camera, QA workspace) | V4.5 | plan merged (docs only), no implementation authorized | docs | owner must approve a bounded amendment in `docs/NOW.md` first |
+| #89 CI/merge/release friction | tooling | partly done (shards, no cancel on main, tree-hash reuse); issue open | other agents | measure the current PR critical path, close with numbers |
+| #71 lazy tool exposure | 4.0.2 | not started (prompt ceiling raised to 48.4k as a stopgap) | none | design + implement, re-run the live voice test |
+| #77 mic mute / appearance / CLI parity | 4.0.1 | merged work exists (conversation controls note 23 Oct); issue still open | other agent | verify on the real PC, then close with evidence |
+| #58 installer config + setup wizard, #60 sign-off wizard | 4.0.1 / V5 | installer merged (#68), wizard pieces partly in; first baseline run not done | Codex + me | owner runs `#/setup`; finish missing topics |
+| #61 self-awareness + tickets | V5 | not started | none | after the wizard |
+| #50 V7 proposal | V7 | proposal only | docs | none now |
+| #1-#5 legacy gates | V4 / later | open, need real-device evidence | none | close one by one with evidence |
+
+## Branching recommendation (owner asked about a v4.5 branch)
+- Do NOT make a long-lived `v4.5` branch: `main` is what publishes betas, and the owner rule is small PRs merged alone, no big integration batches. Instead use GitHub milestones/labels `v4.5`, `v5`, `4.0.2` on issues and PRs, and branch each task from `jarves/main` (`C:\work\wt\<branch>`). Cut a `release/4.5` branch only when a stable needs a freeze.
+- Part of the work is V5 (#61, wizard topics, mobile real-device tests); V4.5 is quality work on what V4 already has. They can run in parallel on main.
+
 ## Open pull requests
 - **#121** "JARVES advisor with central Performance Health GitHub tracker" (branch `feat/perf45-advisor-autonomous-issues-20261024`, 13 files): BLOCKED. The `validate` job of "Fast CI and documentation validation" failed (run 40110880934), so the core, browser, installer and other jobs were skipped. Not reviewed yet. Next: read the failing `validate` log, fix, then check the diff (risk, tests, guide/docs rules, no secrets) and merge on its own (CLAUDE.md pull request flow). It touches V4.5 scope, so check it against `docs/plans/V4_5_STABILIZATION_SECURITY_QA.md`.
 
