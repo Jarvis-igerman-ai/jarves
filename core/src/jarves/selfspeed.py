@@ -238,7 +238,23 @@ def make_skill(svc: SelfSpeed, lang: Callable[[], str]):
                                   {"status": d["status"], "counts": d["counts"], "dashboard": "#/speed"},
                                   code="SPEEDTEST_" + d["status"].upper())
 
-            return [Tool("run_selftest", "Read-only self-test: 'is anything broken', 'בדיקת תקינות'.", selftest_, SelfTestArgs, permission="read",
+            async def advice_(_: SpeedTestArgs) -> ToolResult:
+                from . import perf_advisor
+                findings = perf_advisor.recommendations(svc.history.rows("speedtest", 30))
+                if not findings:
+                    sentence = ("אין כרגע המלצות שיפור מבוססות מדידה." if lang() == "he"
+                                else "No measured performance recommendations yet.")
+                else:
+                    top = findings[0]
+                    sentence = (f"מדד {top['metric']}: {top['advice_he']}" if lang() == "he"
+                                else f"Metric {top['metric']}: {top['advice']}")
+                return ToolResult(True, spoken(sentence),
+                                  {"recommendations": findings, "dashboard": "#/speed"}, code="PERF_ADVICE_READY")
+
+            return [Tool("performance_advice",
+                         "Read-only measured performance recommendations: 'how can you become faster', 'איך אפשר לשפר ביצועים'.",
+                         advice_, SpeedTestArgs, permission="read"),
+                    Tool("run_selftest", "Read-only self-test: 'is anything broken', 'בדיקת תקינות'.", selftest_, SelfTestArgs, permission="read",
                          timeout_s=300),
                     Tool("run_speedtest", "Read-only free speed test: 'how fast are you', 'בדיקת מהירות'.", speedtest_, SpeedTestArgs,
                          permission="read", timeout_s=SPEED_TIMEOUT_S + 30)]
@@ -247,7 +263,8 @@ def make_skill(svc: SelfSpeed, lang: Callable[[], str]):
 
 
 INSTRUCTION = ("To check yourself or your speed, call run_selftest ('בדיקה עצמית', 'is anything broken?') or run_speedtest "
-               "('בדיקת מהירות', 'how fast are you?') and say its one sentence. Never invent results.")
+               "('בדיקת מהירות', 'how fast are you?'). For 'איך לשפר ביצועים' or 'what is slow?' call performance_advice. "
+               "Report only measured recommendations, never invent findings or promise a GitHub issue without a URL.")
 
 
 # ---------------------------------------------------------------------- scheduler jobs
