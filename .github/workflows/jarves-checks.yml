@@ -83,11 +83,12 @@ jobs:
               # when the exact content tree matches, but BUILD and smoke-test the installer here.
               if python3 core/tools/ci_reuse.py resolve-tests --repo "$GITHUB_REPOSITORY" --tree "$tree" > tests.out; then
                 reuse_tests_only=true
+                proof_run=$(sed -n 's/^run_id=//p' tests.out | head -1)
               fi
               cat tests.out 2>/dev/null || true
             fi
             cat reuse.out || true
-            # the PR run that proved this tree: the `durations` job feeds its junit timings into main's cache
+            # the PR run that proved this tree: `durations` feeds its junit timings into main's cache
             [ "$reused" = "true" ] && proof_run=$(sed -n 's/^run_id=//p' reuse.out | head -1)
           fi
           args=(--event "$GITHUB_EVENT_NAME")
@@ -266,7 +267,8 @@ jobs:
     needs: [changes, core]
     if: >-
       ${{ always() && ((needs.core.result == 'success' && needs.changes.outputs.full == 'true' && needs.changes.outputs.reused != 'true' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository))
-      || (needs.changes.outputs.reused == 'true' && needs.changes.outputs.proof_run != '' && github.event_name == 'push' && github.ref == 'refs/heads/main')) }}
+      || (needs.changes.outputs.reused == 'true' && needs.changes.outputs.proof_run != '' && github.event_name == 'push' && github.ref == 'refs/heads/main')
+      || (needs.changes.outputs.reuse_tests_only == 'true' && needs.changes.outputs.proof_run != '' && github.event_name == 'push' && github.ref == 'refs/heads/main')) }}
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     continue-on-error: true
@@ -284,13 +286,13 @@ jobs:
           key: jarves-durations-v2-${{ matrix.platform }}-none
           restore-keys: jarves-durations-v2-${{ matrix.platform }}-
       - uses: actions/download-artifact@v8
-        if: needs.changes.outputs.reused != 'true'
+        if: needs.changes.outputs.reused != 'true' && needs.changes.outputs.reuse_tests_only != 'true'
         with:
           pattern: junit-${{ matrix.platform }}-*
           path: junit
       - name: Junit of the PR run that proved this tree (reused main push)
         uses: actions/download-artifact@v8
-        if: needs.changes.outputs.reused == 'true'
+        if: needs.changes.outputs.reused == 'true' || needs.changes.outputs.reuse_tests_only == 'true'
         with:
           pattern: junit-${{ matrix.platform }}-*
           path: junit
