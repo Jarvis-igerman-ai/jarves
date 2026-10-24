@@ -66,7 +66,7 @@ For **each** alert: GH alert URL/number, query/rule, code-flow source→sink, re
 
 ## Workstream E — integration of code / software factory (P1)
 
-Improve existing [GITHUB_FLOW](../GITHUB_FLOW.md), [PREPUSH](../PREPUSH.md), [PROJECT_MANAGER](plans/PROJECT_MANAGER.md), [SW_FACTORY](plans/SW_FACTORY.md), and CI; **do not build a second orchestrator**.
+Improve existing [GITHUB_FLOW](../GITHUB_FLOW.md), [PREPUSH](../PREPUSH.md), [PROJECT_MANAGER](PROJECT_MANAGER.md), [SW_FACTORY](SW_FACTORY.md), and CI; **do not build a second orchestrator**.
 
 - Enforce one task = scoped branch/worktree; small reviewed PR; one integration writer/lock per repo; preserve task cards, handoffs and independent reviewer. Avoid shared-file hotspots via `pages.d`, `changelog.d`, locales `parts/`, guides; no forced pushes or `git add -A`.
 - Flow: quick local checks → impacted PR CI → risk-based security/reviewer gates → green exact-head PR → protected merge/auto-merge → full integration/main CI → signed candidate → beta installed smoke → owner sign-off → stable. Never treat passing a PR check as proof installed app works. Mark "main red" as blocking subsequent merges until repaired.
