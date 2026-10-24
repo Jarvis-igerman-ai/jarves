@@ -110,7 +110,7 @@ def test_one_issue_for_multiple_metric_findings_and_no_update_if_unchanged(tmp_p
         if method == "GET":
             return 200, []
         assert method == "POST"
-        return 201, {"number": 321, "html_url": "https://github.com/igalgerman/jarves/issues/321"}
+        return 201, {"number": 321, "html_url": "https://github.com/Jarvis-igerman-ai/jarves/issues/321"}
     result = perf_advisor.auto_report(tmp_path, [a, b], token_fn=lambda: "token", request=fake,
                                       clock=lambda: 1000)
     assert result["status"] == "filed" and result["metrics"] == sorted(["tool_p95_ms", "dashboard_api_max_ms"])
@@ -134,7 +134,7 @@ def test_meaningful_change_updates_existing_tracker_after_24_hours(tmp_path):
     fresh = {"issue_id": "JI-12345678", "metric": "tool_p95_ms", "class": "owner",
              "severity": "P2", "median": 500, "baseline": 200,
              "change_pct": 155, "samples": 6, "recent_bad": 3}
-    url = "https://github.com/igalgerman/jarves/issues/321"
+    url = "https://github.com/Jarvis-igerman-ai/jarves/issues/321"
     perf_advisor._save_options(tmp_path, {**perf_advisor.options(tmp_path),
         "last_sent": 1000, "last_signature": perf_advisor._signature([old]),
         "last_active": ["tool_p95_ms"], "tracker_url": url})
@@ -167,7 +167,7 @@ def test_small_numeric_noise_does_not_cause_a_new_update():
 
 def test_tracker_recovery_needs_three_green_measurements(tmp_path):
     perf_advisor.configure(tmp_path, True)
-    url = "https://github.com/igalgerman/jarves/issues/7"
+    url = "https://github.com/Jarvis-igerman-ai/jarves/issues/7"
     perf_advisor._save_options(tmp_path, {**perf_advisor.options(tmp_path),
         "last_sent": 100, "last_signature": perf_advisor._signature([
             {"metric": "tool_p95_ms", "class": "owner", "severity": "P2", "change_pct": 100}]),
@@ -200,7 +200,7 @@ def test_owner_closed_tracker_is_not_reopened_and_multiple_matches_fail_closed(t
     reg = issue_registry.Registry(tmp_path)
     finding = issue_finding(reg, "tool_p95_ms")
     tracker = {"number": 7, "state": "closed",
-               "html_url": "https://github.com/igalgerman/jarves/issues/7",
+               "html_url": "https://github.com/Jarvis-igerman-ai/jarves/issues/7",
                "body": perf_advisor.TRACKER_MARKER}
     def closed(method, url, token, data=None):
         assert method == "GET"

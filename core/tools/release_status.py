@@ -1,6 +1,6 @@
 """One screen that answers "can we release, and what is in the way?".
 
-    python core/tools/release_status.py [--repo igalgerman/jarves] [--releases-repo igalgerman/jarvis-releases] [--json]
+    python core/tools/release_status.py [--repo Jarvis-igerman-ai/jarves] [--releases-repo igalgerman/jarvis-releases] [--json]
 
 Prints, for the head of `main`: the latest jarves-checks run (and whether it reused the PR proof), the installer artifact
 for the head tree (content-addressed, core/tools/ci_reuse.py), the jarves-package run and its signed release candidate,
@@ -155,7 +155,7 @@ def render(s: dict) -> str:
 
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(prog="release_status.py")
-    ap.add_argument("--repo", default="igalgerman/jarves")
+    ap.add_argument("--repo", default="Jarvis-igerman-ai/jarves")
     ap.add_argument("--releases-repo", default="igalgerman/jarvis-releases")
     ap.add_argument("--json", action="store_true")
     a = ap.parse_args(argv)

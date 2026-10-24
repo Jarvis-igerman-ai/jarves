@@ -15,7 +15,7 @@ from .alerts import in_quiet
 # the capability row of the V5 follow-up features (Windows / Pi), one shared declaration
 TARGETS = {"windows": {"status": "implemented_unverified",
                        "evidence": "core/tests/test_v5_followups.py (unit tests: real SQLite, fake clock, no network)"},
-           "linux_arm64_pi": {"status": "implemented_unverified", "roadmap_issue": "https://github.com/igalgerman/jarves/issues/3",
+           "linux_arm64_pi": {"status": "implemented_unverified", "roadmap_issue": "https://github.com/Jarvis-igerman-ai/jarves/issues/3",
                               "blocker": "pure Python + SQLite, no platform code; not run on a Raspberry Pi yet"}}
 _HEBREW = re.compile(r"[א-ת]")
 

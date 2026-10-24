@@ -44,7 +44,7 @@ feat.register("text_chat", "שיחת טקסט בטרמינל", "Terminal text ch
                        "linux_arm64_pi": {"status": "implemented_unverified",
                                           "blocker": "pure Python over the local link; not run on a Raspberry Pi "
                                                      "yet (no device in the test setup)",
-                                          "roadmap_issue": "https://github.com/igalgerman/jarves/issues/3"}})
+                                          "roadmap_issue": "https://github.com/Jarvis-igerman-ai/jarves/issues/3"}})
 
 
 class TerminalApprovalChannel:

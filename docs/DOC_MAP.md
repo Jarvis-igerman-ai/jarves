@@ -48,7 +48,6 @@ Current dashboard review: [23 Oct findings inventory and recheck gates](reviews/
 | [CI_PERFORMANCE](CI_PERFORMANCE.md) | CI speed, shards and the fast release path | general | current | [RELEASING](RELEASING.md) |
 | [Performance Advisor](performance_advisor.md) | Local evidence-based JARVES speed recommendations and one opt-in rolling GitHub issue (all confirmed metrics) | quality/operations | under validation | [CI_PERFORMANCE](CI_PERFORMANCE.md) |
 | [RELEASING](RELEASING.md) | How a release is built, signed and published | general | current | [CI_PERFORMANCE](CI_PERFORMANCE.md) |
-| [NEXT_FLOW](NEXT_FLOW.md) | The `next` integration branch: light PR CI, batch run, bot fast-forward of main, how to switch it on | general | built, off by default | [CI_PERFORMANCE](CI_PERFORMANCE.md) |
 | [CI_DETERMINISM](CI_DETERMINISM.md) | Network guard, offline stub, flake retry and quarantine for deterministic CI | general | current | [CI_PERFORMANCE](CI_PERFORMANCE.md) |
 | [PREPUSH](PREPUSH.md) | The local gate `python core/tools/prepush.py` (same quick checks as CI), the optional pre-push hook, and the PR failure-summary comment | general | current | [CI_PERFORMANCE](CI_PERFORMANCE.md) |
 | [handoff/2026-10-23-jarvis-talk](handoff/2026-10-23-jarvis-talk.md) | Handoff: `jarvis talk` live conversation without the wake word (CLI, dashboard, tray) | voice | current | [HANDOFF](HANDOFF.md) |
@@ -147,6 +146,7 @@ Reports and bug tables are evidence of a past run, not instructions. A package's
 | [plans/V5_PILLARS](plans/V5_PILLARS.md) | V5 pillars 2 and 3: Goals and Adaptive Memory (software slice) | V5 | current | [ROADMAP](ROADMAP.md) |
 | [plans/WHATSAPP_GREENAPI_FLOWAPI_EVAL](plans/WHATSAPP_GREENAPI_FLOWAPI_EVAL.md) | GREEN-API and Flow API evaluation for WhatsApp (research only) | V5+ | research | [plans/WHATSAPP_REAL_ACCESS](plans/WHATSAPP_REAL_ACCESS.md) |
 | [reviews/BUG_TABLE_4_1](reviews/BUG_TABLE_4_1.md) | Bug table 4.1, first sweep | 4.0.1 | current | [BUGFIX_LANE](BUGFIX_LANE.md) |
+| [reviews/BUG_TABLE_V45_2026-10-24](reviews/BUG_TABLE_V45_2026-10-24.md) | Bug table V4.5 stabilization, triage of 24 Oct (read by release_gate.py) | 4.0.1 | current | [RELEASE_CHECKLIST_4.0.1](reviews/RELEASE_CHECKLIST_4.0.1.md) |
 | [reviews/MANUAL_TEST_4.0.0](reviews/MANUAL_TEST_4.0.0.md) | Manual test sheet for 4.0.0 (owner) | 4.0.0 | current | [RELEASING](RELEASING.md) |
 | [reviews/MANUAL_TEST_4.0.1](reviews/MANUAL_TEST_4.0.1.md) | Manual test sheet for 4.0.1 (owner sign-off on the beta) | 4.0.1 | current | [RELEASING](RELEASING.md) |
 | [reviews/SWV4_P01_VERIFY](reviews/SWV4_P01_VERIFY.md) | Owner-assisted verification, ported from the legacy branch | V4 | historical | [MIGRATION_AUDIT](MIGRATION_AUDIT.md) |
