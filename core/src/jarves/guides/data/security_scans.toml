@@ -1,0 +1,70 @@
+order = 74
+category = "system"
+pages = ["bugs"]
+features = ["security_scans"]
+aliases = ["סריקות אבטחה", "סריקת אבטחה", "בדיקת אבטחה יומית", "security scan", "security scans", "recurring scan", "weekly security check"]
+links = ["issue_reports", "self_tests", "health"]
+error_codes = []
+title_he = "סריקות אבטחה חוזרות"
+title_en = "Recurring security scans"
+what_he = "סריקה קלה כל יום וסריקה מלאה פעם בשבוע של התראות האבטחה של המאגר (CodeQL, תלויות, סודות), של בריאות הענף הראשי ושל תקלות שחוזרות. הסריקה רק קוראת. היא לא ממזגת, לא סוגרת התראה, לא מפרסמת גרסה ולא שולחת כלום: לכל היותר היא פותחת או מעדכנת Issue אחד ללא מידע רגיש. תיקון אוטומטי כבוי ואי אפשר להדליק אותו. אין קריאות למודל ואין עלות. כבוי עד שתפעיל."
+what_en = "A light scan every day and a full scan once a week of the repository's security alerts (CodeQL, dependencies, secrets), the health of the main branch and recurring problems. A scan only reads. It never merges, dismisses an alert, deploys or sends anything: at most it creates or updates ONE issue with no sensitive data. Auto-fix is off and cannot be turned on. No model calls, no cost. Off until you turn it on."
+say = [["תפעיל סריקות אבטחה", "Turn on security scans"], ["מתי הסריקה הבאה?", "When is the next security scan?"]]
+expect_he = "jarvis scans status מראה: פועל או כבוי, הסריקה הקלה והמלאה האחרונות שהצליחו, הכשל האחרון, מתי הריצה הבאה (בשעון שלך) והיסטוריה קצרה. אם מצאו משהו יש Issue אחד במאגר עם הכותרת [Security] JARVES recurring scan summary."
+expect_en = "jarvis scans status shows: on or off, the last successful light and full scan, the last failure, the next run (in your time) and a short history. If something was found there is ONE issue in the repository titled [Security] JARVES recurring scan summary."
+cost_he = "חינם. הסריקה לא קוראת למודל ולא לשום API בתשלום; היא משתמשת בהתחברות ל-GitHub שכבר קיימת."
+cost_en = "Free. A scan calls no model and no paid API; it uses the GitHub login that already exists."
+privacy_he = "ב-Issue ובהיסטוריה יש רק מזהים, מספרים וחומרה: מזהה כלל, מזהה פגיעות, שם חבילה, שם קובץ במאגר, ספירות. אף פעם לא ערך של סוד, הודעה או נתיב פרטי."
+privacy_en = "The issue and the history hold only identifiers, numbers and severities: a rule id, an advisory id, a package name, a repository file name, counts. Never a secret value, a message or a private path."
+
+[parity.features]
+security_scans = "scans"
+
+[[steps]]
+he = "הפעלה: jarvis scans on. כיבוי: jarvis scans off. מצב, הריצה הבאה והיסטוריה: jarvis scans status או jarvis scans history."
+en = "Turn on: jarvis scans on. Turn off: jarvis scans off. State, the next run and the history: jarvis scans status or jarvis scans history."
+action = "command:jarvis scans status"
+
+[[steps]]
+he = "ברירת המחדל: סריקה קלה כל יום ב-07:30 וסריקה מלאה בימי ראשון ב-08:00 (Asia/Jerusalem), לא בשעות שקט 22:00-07:00, לכל היותר 2 הרצות אוטומטיות ביום. לשינוי: jarvis scans set --light-days mon,wed,fri --light-time 07:30 --full-days sun --full-time 08:00 --tz Asia/Jerusalem --quiet 22:00-07:00 --budget 2. השעה היא שעת הקיר שלך, גם בכניסה ויציאה משעון קיץ."
+en = "Defaults: a light scan every day at 07:30 and a full scan on Sundays at 08:00 (Asia/Jerusalem), never in quiet hours 22:00-07:00, at most 2 automatic runs a day. To change: jarvis scans set --light-days mon,wed,fri --light-time 07:30 --full-days sun --full-time 08:00 --tz Asia/Jerusalem --quiet 22:00-07:00 --budget 2. Times are your wall-clock time, also across daylight saving changes."
+action = "command:jarvis scans set"
+
+[[steps]]
+he = "הרצה ידנית: jarvis scans run (קלה) או jarvis scans run --kind full. בלי כתיבה ל-GitHub: הוסף --dry-run on. לפתוח או לעדכן את ה-Issue האחד: jarvis scans set --report on (או --report on בהרצה בודדת). בלי זה הסריקה רק מציגה ושומרת היסטוריה אצלך."
+en = "Run by hand: jarvis scans run (light) or jarvis scans run --kind full. To never write to GitHub add --dry-run on. To let it create or update the ONE issue: jarvis scans set --report on (or --report on for one run). Without it a scan only shows the result and keeps a history on your PC."
+action = "command:jarvis scans run"
+
+[[steps]]
+he = "שני מקומות ריצה, אותו קוד. מתוזמן ב-GitHub (.github/workflows/security-scans.yml, שעון UTC, רץ גם כשהמחשב כבוי, בלי מצב, ההתראות שהטוקן שלו לא רואה מסומנות 'כיסוי חלקי', אף פעם לא 'אפס'): הגדרות הלוח נקבעות בקובץ ה-workflow ולא משתנות מהמחשב. מקומי במחשב: jarvis scans run --if-due מ-Task Scheduler או כל טיימר; הוא שומר היסטוריה, מכבד אזור זמן, שעות שקט ותקציב, ומנסה שוב אחרי כשל."
+en = "Two places run it, same code. Hosted on GitHub (.github/workflows/security-scans.yml, UTC cron, runs even when your PC is off, keeps no state, alerts its token cannot read are marked 'incomplete coverage', never 'zero'): its schedule lives in the workflow file and is not changed from your PC. Local on your PC: jarvis scans run --if-due from Task Scheduler or any timer; it keeps a history, honours timezone, quiet hours and the budget, and retries after a failure."
+
+[[problems]]
+he = "הסריקה אומרת 'כיסוי חלקי' או INCOMPLETE"
+en = "The scan says 'incomplete coverage' or INCOMPLETE"
+fix_he = "אין לה הרשאה לקרוא מקור אחד (למשל התראות Dependabot או סודות). זה לא אומר שאין ממצאים. הריצו מקומית עם ההתחברות שלכם (gh auth login עם הרשאת security_events) או תנו לטוקן הרשאת security-events: read."
+fix_en = "It is not allowed to read one source (for example Dependabot or secret alerts). That does not mean there are no findings. Run locally with your own login (gh auth login with the security_events scope) or give the token security-events: read."
+
+[[problems]]
+he = "הסריקה אומרת offline או failed ולא רצה"
+en = "The scan says offline or failed"
+fix_he = "אין רשת או ש-GitHub לא ענה. שום דבר לא נכתב. היא תנסה שוב לבד אחרי חצי שעה, ואז אחרי שעתיים ואז אחרי שש שעות. לניסיון מיידי: jarvis scans run."
+fix_en = "There is no network or GitHub did not answer. Nothing was written. It retries by itself after half an hour, then two hours, then six hours. To try right now: jarvis scans run."
+
+[[problems]]
+he = "הסריקה לא רצה בזמן"
+en = "The scan did not run on time"
+fix_he = "jarvis scans status אומר למה: בשעות שקט, מגבלת הריצות ליום, המתנה אחרי כשל, או שהיא כבויה. מחשב כבוי מפספס ריצה מקומית, ואז רצה ריצה אחת בלבד כשהוא חוזר (לא כל מה שהוחמץ)."
+fix_en = "jarvis scans status says why: quiet hours, the runs-per-day limit, a back-off after a failure, or it is off. A PC that was off misses a local run; then ONE catch-up run happens when it is back (not everything missed)."
+
+[[problems]]
+he = "יש יותר מ-Issue אחד של הסריקה, או שהוא סגור"
+en = "There is more than one scan issue, or it is closed"
+fix_he = "היא לא פותחת Issue חדש ליד Issue סגור או כפול, כדי לא להציף. סגרו את הכפילות, או פתחו מחדש את האחד שרוצים שיתעדכן."
+fix_en = "It never opens a new issue next to a closed or duplicate one, so it cannot spam. Close the duplicate, or reopen the one you want updated."
+
+[[problems]]
+he = "ניסיתי להדליק תיקון אוטומטי"
+en = "I tried to turn on auto-fix"
+fix_he = "תיקון אוטומטי כבוי בכוונה ואי אפשר להדליק אותו כאן: סריקה רק מציעה, תיקון הוא שינוי נפרד שעובר בדיקה ומיזוג על ידי בן אדם."
+fix_en = "Auto-fix is off on purpose and cannot be turned on here: a scan only suggests, a fix is a separate change reviewed and merged by a person."

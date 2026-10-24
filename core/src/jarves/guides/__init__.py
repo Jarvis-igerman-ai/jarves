@@ -96,6 +96,7 @@ class Guide:
     error_codes: list[str] = field(default_factory=list)
     links: list[str] = field(default_factory=list)       # related guide ids
     pages: list[str] = field(default_factory=list)       # dashboard pages that show a "Guide" link to this one
+    parity: dict = field(default_factory=dict)          # [parity.features] / [parity.tool_groups] (cli_parity._guide_parity)
     platform: dict = field(default_factory=dict)        # fallback {windows, pi, pi_note_en} when no feature targets
 
 
