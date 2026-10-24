@@ -320,3 +320,12 @@ async def test_core_says_heard_speech_no_wake_match_and_shows_it(home, cfg):
         assert entry["by"] == "core" and entry["speech_db"] > -20     # first-run level calibration, levels only
     finally:
         await c.stop()
+
+
+def test_score_sweep_and_gate_count_follow_the_listener_rules():
+    from jarves.voice.wake_eval import gate_openings, sweep
+    s = np.zeros(200, np.float32)
+    s[[10, 11, 20, 100]] = [0.6, 0.7, 0.6, 0.3]
+    assert sweep(s, 0.5) == [11 * 1280]                   # 11 and 20 fall inside the 2 s cooldown
+    assert sweep(s, 0.25) == [11 * 1280, 101 * 1280]
+    assert gate_openings(s, 0.02, 0.5) == 1               # only the 0.3 frame is "unsure" -> one ASR call

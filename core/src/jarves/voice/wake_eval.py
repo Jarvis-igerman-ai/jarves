@@ -328,8 +328,13 @@ def score_negatives(wakes: list[int], events: list[dict], n_samples: int) -> dic
             bare += 1
             continue
         texts.append(e["text"] if e else "(noise/music)")
+    near = set(NEAR_MISS)
+    n_near = sum(t in near for t in texts)
     return {"false_wakes": len(texts), "minutes": round(hours * 60, 1),
             "per_hour": round(len(texts) / max(1e-9, hours), 2), "texts": texts, "bare_name_wakes": bare,
+            "near_miss_false": n_near, "everyday_false": len(texts) - n_near,
+            "everyday_per_hour": round((len(texts) - n_near) / max(1e-9, hours), 2),
+            "near_miss_clips": sum(e["text"] in near and e["text"] not in BARE for e in events),
             "bare_name_clips": sum(e["text"] in BARE for e in events)}
 
 
@@ -393,6 +398,72 @@ async def evaluate_pipeline(name: str, make: Callable[[], object], corpus: Corpu
              f"{n['false_wakes']} in {n['minutes']} min = {n['per_hour']}/h {n['texts'][:8]}"
              + (f"; bare 'Jarvis' woke {n['bare_name_wakes']}/{n['bare_name_clips']}" if n["bare_name_clips"] else ""))
     return row
+
+
+class ScoreRecorder:
+    """Wraps a detector that never triggers (threshold > 1) and records its score for every 80 ms frame, so one
+    real-listener pass gives the scores for a threshold sweep (`sweep`)."""
+
+    blocking = True
+
+    def __init__(self, base) -> None:
+        self.base, self.name, self.threshold = base, getattr(base, "name", "x"), 1.01
+        self.scores: list[float] = []
+        self.last_score = 0.0
+        self.agc = getattr(base, "agc", None)
+
+    async def load(self) -> None:
+        if hasattr(self.base, "load"):
+            await self.base.load()
+
+    def feed(self, pcm: bytes):
+        self.base.feed(pcm)
+        self.last_score = float(getattr(self.base, "last_score", 0.0))
+        self.scores.append(self.last_score)
+        return None
+
+    def reset(self) -> None:
+        self.base.reset()
+
+
+def sweep(scores: np.ndarray, threshold: float, cooldown_s: float = 2.0) -> list[int]:
+    """Wake positions (samples) a WakeListener at `threshold` would give for these per-frame scores (cooldown in
+    audio time; the model reset after a wake is not modelled, so this is a close approximation)."""
+    out, cool = [], -1.0
+    frame = CHUNK_BYTES // 2
+    for i, s in enumerate(scores):
+        t = (i + 1) * frame
+        if s >= threshold and t / SR >= cool:
+            out.append(t)
+            cool = t / SR + cooldown_s
+    return out
+
+
+async def record_scores(make: Callable[[], object], corpus: Corpus) -> dict:
+    """One real-listener pass over positives and negatives with a ScoreRecorder."""
+    res = {}
+    for part, stream in (("pos", corpus.positives()), ("neg", corpus.negatives())):
+        rec = ScoreRecorder(make())
+        wakes, events, st = await run_listener(rec, stream)
+        res[part] = {"scores": np.asarray(rec.scores, np.float32), "events": events, "stats": st}
+    return res
+
+
+def sweep_report(name: str, rec: dict, threshold: float) -> dict:
+    p = score_positives(sweep(rec["pos"]["scores"], threshold), rec["pos"]["events"])
+    n = score_negatives(sweep(rec["neg"]["scores"], threshold), rec["neg"]["events"], rec["neg"]["stats"]["samples"])
+    return {"pipeline": f"{name}@{threshold}", "method": "score sweep (one real-listener pass)", "detection": p,
+            "negatives": n}
+
+
+def gate_openings(scores: np.ndarray, gate: float, accept: float, quiet_frames: int = 16) -> int:
+    """How many times a two-stage detector would ask the ASR (score in [gate, accept), one per utterance)."""
+    n, quiet = 0, -1
+    for i, s in enumerate(scores):
+        if gate <= s < accept and i >= quiet:
+            n += 1
+            quiet = i + quiet_frames
+    return n
 
 
 def save_report(path: Path, rows: list[dict], info: dict) -> None:
