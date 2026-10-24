@@ -47,9 +47,9 @@ def command(argv: list[str], timeout: int = 20) -> str:
 def changed_files(base: str) -> set[str]:
     """Committed changes plus unstaged, staged and untracked worktree files."""
     refs = [
-        ["git", "diff", "--name-only", "-z", "--diff-filter=ACMRT", f"origin/{base}...HEAD"],
-        ["git", "diff", "--name-only", "-z", "--diff-filter=ACMRT"],
-        ["git", "diff", "--cached", "--name-only", "-z", "--diff-filter=ACMRT"],
+        ["git", "diff", "--name-only", "-z", "--diff-filter=ACDMRT", f"origin/{base}...HEAD"],
+        ["git", "diff", "--name-only", "-z", "--diff-filter=ACDMRT"],
+        ["git", "diff", "--cached", "--name-only", "-z", "--diff-filter=ACDMRT"],
         ["git", "ls-files", "--others", "--exclude-standard", "-z"],
     ]
     result: set[str] = set()
