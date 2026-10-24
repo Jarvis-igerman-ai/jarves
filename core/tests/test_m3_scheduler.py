@@ -664,3 +664,37 @@ async def test_week_off_catch_up_runs_once_late_without_stalling_the_tick(db):
     assert runs[0]["missed"] == _walk_latest_due("cron", "*/15 * * * *", JLM, ts(JLM, 2026, 10, 1, 7, 15),
                                                  clock.t)[1]
     assert s2.job(jid)["next_run"] == ts(JLM, 2026, 10, 8, 9, 15)
+
+
+# ---------------------------------------------------------------- one-offs inside the repeated DST hour (#issue, 24 Oct 2026)
+# Jerusalem falls back at 02:00 local: 25 Oct 2026 02:00 IDT = 24 Oct 23:00Z (01:00-02:00 happens twice) and
+# 31 Oct 2027 02:00 IDT = 30 Oct 23:00Z. "In 5 minutes" during the SECOND 01:xx must be the coming 01:xx, not the one an
+# hour ago (CI was red for every PR in that hour: SCHEDULE_PAST).
+@pytest.mark.parametrize("utc", [datetime(2026, 10, 24, 23, 10, tzinfo=ZoneInfo("UTC")),
+                                 datetime(2027, 10, 30, 23, 10, tzinfo=ZoneInfo("UTC"))])
+def test_relative_one_off_in_the_repeated_hour_is_in_the_future(utc):
+    now = utc.astimezone(JLM)                                     # 01:10 local, the second (standard-time) 01:10
+    assert now.fold == 1 or now.utcoffset() == timedelta(hours=2)
+    s = S.parse_when("בעוד 5 דקות", now)
+    assert s.kind == "once" and s.spec.endswith("T01:15")
+    due = S.next_after(s.kind, s.spec, JLM, now.timestamp())
+    assert due == now.timestamp() + 5 * 60                        # 23:15Z, five real minutes later
+    assert S.local_instant(datetime.fromisoformat(s.spec), JLM, now.timestamp()) == due
+
+
+def test_ambiguous_time_without_after_and_plain_times_are_unchanged():
+    first = datetime(2026, 10, 24, 22, 30, tzinfo=ZoneInfo("UTC")).timestamp()       # 01:30 IDT (first)
+    assert S.local_instant(datetime(2026, 10, 25, 1, 30), JLM) == first               # default: first occurrence
+    before = datetime(2026, 10, 24, 22, 0, tzinfo=ZoneInfo("UTC")).timestamp()       # 01:00 IDT
+    assert S.local_instant(datetime(2026, 10, 25, 1, 30), JLM, before) == first      # first still ahead: first
+    noon = datetime(2026, 10, 25, 12, 0)
+    assert S.local_instant(noon, JLM, before) == S.local_instant(noon, JLM)            # not ambiguous: unchanged
+    # spring-forward gap (27 Mar 2026 02:00 -> 03:00): the first valid minute after the gap, with or without `after`
+    gap = datetime(2026, 3, 27, 2, 30)
+    assert S.local_instant(gap, JLM) == S.local_instant(gap, JLM, 0.0) == datetime(2026, 3, 27, 3, 0, tzinfo=JLM).timestamp()
+
+
+def test_absolute_one_off_in_the_repeated_hour():
+    now = datetime(2026, 10, 24, 23, 10, tzinfo=ZoneInfo("UTC")).astimezone(JLM)    # second 01:10
+    s = S.parse_when("היום ב-1:30", now)
+    assert S.next_after(s.kind, s.spec, JLM, now.timestamp()) == now.timestamp() + 20 * 60
