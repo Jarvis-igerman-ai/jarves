@@ -232,6 +232,7 @@ def test_reply_wait_hook_measures_silence_before_reply():
     from jarves.voice.live import LiveVoice
     lv = LiveVoice.__new__(LiveVoice)
     lv._last_user_voice = 100.0
+    lv._lat, lv._cue_n, lv._cue_turn, lv._user_turn_n = {}, 0, 0, 0      # set by LiveVoice.__init__ (latency log)
     lv._note_reply_wait(101.4)
     assert lv._take_reply_wait() == {"wait_s": 1.4}
     assert lv._take_reply_wait() == {}               # consumed: the next transcript without a new reply gets none
