@@ -9,6 +9,7 @@ from __future__ import annotations
 import json
 import math
 import os
+import re
 import statistics
 import time
 from pathlib import Path
@@ -44,34 +45,38 @@ FALLBACK = ("Repeat the metric on the same device and profile the owning operati
 
 
 def options(home: Path) -> dict:
-    """Local, opt-in owner policy and last successfully published snapshot; never credentials."""
-    defaults = {"auto_github": False, "last_sent": 0.0, "issue_url": "", "last_synced": {},
-                "active": {}, "recovered": []}
+    """Explicit opt-in with a small local reporting cursor; no credentials or personal data."""
+    base = {"auto_github": False, "last_sent": 0.0, "issue_number": 0, "issue_url": "", "published": []}
     try:
         data = json.loads((Path(home) / CONFIG).read_text(encoding="utf-8"))
-        if isinstance(data, dict):
-            return {**defaults, "auto_github": data.get("auto_github") is True,
-                    "last_sent": float(data.get("last_sent") or 0),
-                    "issue_url": str(data.get("issue_url") or "")[:256],
-                    "last_synced": data.get("last_synced") if isinstance(data.get("last_synced"), dict) else {},
-                    "active": data.get("active") if isinstance(data.get("active"), dict) else {},
-                    "recovered": data.get("recovered") if isinstance(data.get("recovered"), list) else []}
+        if not isinstance(data, dict):
+            return base
+        ts = float(data.get("last_sent") or 0)
+        num = data.get("issue_number")
+        published = data.get("published")
+        return {
+            "auto_github": data.get("auto_github") is True,
+            "last_sent": ts if math.isfinite(ts) and ts >= 0 else 0.0,
+            "issue_number": num if type(num) is int and num > 0 else 0,
+            "issue_url": data.get("issue_url") if isinstance(data.get("issue_url"), str) and
+                         data.get("issue_url", "").startswith("https://github.com/igalgerman/jarves/issues/") else "",
+            "published": [x for x in published if isinstance(x, dict)][:len(SUGGESTIONS)]
+                         if isinstance(published, list) else [],
+        }
     except (OSError, ValueError, TypeError, OverflowError):
-        pass
-    return defaults
+        return base
 
 
 def _store(home: Path, state: dict) -> None:
-    """One atomic write on configuration, verified finding or published update; never idle polling."""
-    path = Path(home) / CONFIG
-    path.parent.mkdir(parents=True, exist_ok=True)
-    tmp = path.with_suffix(".tmp")
-    tmp.write_text(json.dumps(state, ensure_ascii=False, separators=(",", ":")), encoding="utf-8")
-    os.replace(tmp, path)
+    p = Path(home) / CONFIG
+    p.parent.mkdir(parents=True, exist_ok=True)
+    temp = p.with_suffix(".tmp")
+    temp.write_text(json.dumps(state, separators=(",", ":")), encoding="utf-8")
+    os.replace(temp, p)
 
 
 def configure(home: Path, enabled: bool) -> dict:
-    """Explicit opt-in from an authenticated owner Dashboard POST. No token or private data persisted."""
+    """The authenticated owner enables/disables GitHub reporting; local recommendations always work."""
     state = options(home)
     state["auto_github"] = enabled is True
     _store(home, state)
@@ -132,7 +137,7 @@ def recommendations(rows: list[dict], *, max_results: int | None = None) -> list
 def detect(home: Path, *, rows: list[dict] | None = None, registry=None) -> list[dict]:
     from . import issue_registry, selfspeed
     series = rows if rows is not None else selfspeed.History(home).rows("speedtest", 30)
-    findings = recommendations(series)
+    findings = recommendations(series, max_results=len(SUGGESTIONS))
     reg = registry or issue_registry.Registry(home)
     for f in findings:
         record = reg.record("speed", f"PERF_{f['metric'].upper()}", f["severity"],
@@ -150,65 +155,135 @@ def detect(home: Path, *, rows: list[dict] | None = None, registry=None) -> list
     return findings
 
 
+def _snapshot(findings: list[dict]) -> list[dict]:
+    """Bounded, allowlisted metric summaries only; external strings never enter issue text."""
+    result = []
+    keys = set()
+    for f in findings:
+        metric, cls = f.get("metric"), f.get("class")
+        if metric not in SUGGESTIONS or cls not in ("ci", "owner"):
+            continue
+        key = (metric, cls)
+        if key in keys:
+            continue
+        val = _numeric(f.get("median"))
+        if val is None:
+            continue
+        keys.add(key)
+        result.append({"metric": metric, "class": cls,
+                       "severity": "P2" if f.get("severity") == "P2" else "P3",
+                       "median": round(val, 3),
+                       "samples": min(max(int(f.get("samples") or 0), 0), 10000)})
+    return sorted(result, key=lambda x: (x["class"], x["metric"]))
+
+
+def _meaningful(previous: list[dict], current: list[dict]) -> bool:
+    a = {(r.get("metric"), r.get("class")): r for r in previous}
+    b = {(r["metric"], r["class"]): r for r in current}
+    if a.keys() != b.keys():
+        return True  # new regression, or one has recovered
+    for key, item in b.items():
+        prior = a[key]
+        if item["severity"] != prior.get("severity"):
+            return True
+        old = _numeric(prior.get("median"))
+        if old is None or abs(item["median"] - old) > max(old, 1e-6) * MEANINGFUL_SHIFT:
+            return True
+    return False
+
+
+def _body(snapshot: list[dict]) -> str:
+    """Consolidated current-state body: no raw text, identifiers, locations or logs."""
+    lines = [
+        "## JARVES Performance — measured findings",
+        "",
+        "Automatically maintained **only after owner opt-in** and a completed speed test.",
+        "Data contains allowlisted metric names and numeric summaries only. "
+        "It is an investigation queue, **not a diagnosed root cause**.",
+        "",
+    ]
+    if snapshot:
+        lines.extend(["| Metric | Class | Severity | Recent median | Samples |",
+                      "| --- | --- | --- | ---: | ---: |"])
+        for f in snapshot:
+            lines.append(f"| \`{f['metric']}\` | {f['class']} | {f['severity']} | {f['median']} | {f['samples']} |")
+        lines.extend(["", "## Suggested investigations"])
+        for f in snapshot:
+            advice = SUGGESTIONS[f["metric"]][0]
+            lines.append(f"- **{f['metric']}**: {advice}")
+    else:
+        lines.append("No persistent slowdown currently detected in the latest comparable measurements.")
+    lines.extend(["", "Updated only when a metric appears, recovers, changes severity, or shifts >20%.",
+                  "The existing scheduled weekly speed test supplies measurements; there is no added poller.",
+                  "Never attach conversation text, prompts, transcripts, file paths or tokens.", "",
+                  SUMMARY_MARKER])
+    return "\n".join(lines)
+
+
 def auto_report(home: Path, findings: list[dict], *, token_fn: Callable[[], str] | None = None,
                 request=None, clock: Callable[[], float] = time.time) -> dict:
-    """Autonomous *performance-only* issue reporting, once owner enabled the durable setting.
+    """Upsert ONE tracked performance issue; update its body only for meaningful new evidence.
 
-    One new issue at most every seven days. Check all existing labeled issues first (fail closed
-    on errors, 100+ results, or a missing auth token). Report only sanitized, fixed-key numbers.
-    Never send logs, paths, transcripts, prompts, or a full local diagnostic bundle.
+    A single issue contains ALL proven metrics. No comment per sample, no issue per metric,
+    no new background schedule. At most one GitHub write per 24 h, and no write at all
+    when no relevant trend has changed. GitHub lookup failure never creates duplicates.
     """
     from . import issue_registry as ir
     state = options(home)
     if not state["auto_github"]:
         return {"status": "disabled"}
-    if not findings:
+    snapshot = _snapshot(findings)
+    if not snapshot and not state["published"]:
         return {"status": "no_finding"}
+    if not _meaningful(state["published"], snapshot):
+        return {"status": "unchanged", "url": state["issue_url"]}
     now = clock()
     if state["last_sent"] > 0 and now - state["last_sent"] < AUTO_COOLDOWN_S:
-        return {"status": "cooldown"}
+        return {"status": "cooldown", "url": state["issue_url"]}
     token = (token_fn or ir.find_token)()
     if not token:
         return {"status": "no_token"}
     call = request or ir._http
-    code, existing = call("GET", f"{ir.API_BASE}/repos/{ir.REPO}/issues?labels={ir.LABEL}&state=all&per_page=100", token)
-    if code != 200 or not isinstance(existing, list) or len(existing) >= MAX_OPEN_PAGE:
-        return {"status": "lookup_unavailable"}
-    for candidate in findings:
-        iid = candidate.get("issue_id", "")
-        if not iid or candidate.get("reported_url"):
-            continue
-        marker = f"jarves-issue: {iid}"
-        duplicate = next((x for x in existing if marker in str(x.get("body") or "")), None)
-        if duplicate:
-            url = str(duplicate.get("html_url") or "")
-            if url:
-                ir.Registry(home).mark_reported(iid, url=url)
-            continue
-        ev, _ = ir.clean_evidence({k: candidate.get(k) for k in
-                                   ("metric", "class", "median", "baseline", "change_pct", "samples", "recent_bad")})
-        body = (f"**Automated JARVES Performance Advisor (owner opt-in).**\n\n"
-                f"**Metric:** {candidate['metric']} · **Class:** {candidate['class']}\n"
-                f"**Repeated evidence (numeric only):**\n"
-                + "\n".join(f"- {k}: {v}" for k, v in sorted(ev.items()))
-                + f"\n\n**Suggested investigation:** {candidate['advice']}\n\n"
-                  "This is a measured investigation candidate, not a proven root cause. "
-                  "No personal text, local file paths, or private logs were uploaded.\n"
-                  f"<!-- {marker} -->")
-        payload = {"title": f"[Performance] {candidate['metric']} repeatedly slow",
-                   "body": body, "labels": [ir.LABEL]}
-        status, outcome = call("POST", f"{ir.API_BASE}/repos/{ir.REPO}/issues", token, payload)
-        if status != 201 or not isinstance(outcome, dict) or not outcome.get("html_url"):
-            return {"status": "send_failed", "http_status": status}
-        url = str(outcome["html_url"])
-        ir.Registry(home).mark_reported(iid, url=url)
-        state["last_sent"] = now
-        dest = Path(home) / CONFIG
-        temp = dest.with_suffix(".tmp")
-        temp.write_text(json.dumps(state), encoding="utf-8")
-        os.replace(temp, dest)
-        return {"status": "filed", "issue_id": iid, "url": url}
-    return {"status": "already_reported"}
+    issue = None
+    if state["issue_number"]:
+        code, found = call("GET", f"{ir.API_BASE}/repos/{ir.REPO}/issues/{state['issue_number']}", token)
+        if code != 200 or not isinstance(found, dict) or SUMMARY_MARKER not in str(found.get("body") or ""):
+            return {"status": "lookup_unavailable"}  # never replace or fork a possibly existing issue
+        issue = found
+    else:
+        code, existing = call("GET", f"{ir.API_BASE}/repos/{ir.REPO}/issues?labels={ir.LABEL}&state=all&per_page=100", token)
+        if code != 200 or not isinstance(existing, list) or len(existing) >= MAX_OPEN_PAGE:
+            return {"status": "lookup_unavailable"}
+        matches = [x for x in existing if isinstance(x, dict) and SUMMARY_MARKER in str(x.get("body") or "")]
+        if len(matches) > 1:
+            return {"status": "ambiguous_existing"}
+        issue = matches[0] if matches else None
+    body = _body(snapshot)
+    if issue:
+        if issue.get("state") == "closed":
+            return {"status": "closed_issue"}  # owner closed it; do not reopen automatically
+        n = issue.get("number")
+        if type(n) is not int or n <= 0:
+            return {"status": "lookup_unavailable"}
+        status, output = call("PATCH", f"{ir.API_BASE}/repos/{ir.REPO}/issues/{n}", token,
+                              {"body": body})
+        outcome = "updated"
+    else:
+        status, output = call("POST", f"{ir.API_BASE}/repos/{ir.REPO}/issues", token,
+                              {"title": REPORT_TITLE, "body": body, "labels": [ir.LABEL]})
+        outcome = "filed"
+    if status not in (200, 201) or not isinstance(output, dict) or not output.get("html_url") or type(output.get("number")) is not int:
+        return {"status": "send_failed", "http_status": status}
+    url = str(output["html_url"])
+    state.update(last_sent=now, issue_number=output["number"], issue_url=url, published=snapshot)
+    _store(home, state)
+    # Reflect one shared public issue URL on ALL locally tracked performance metrics.
+    reg = ir.Registry(home)
+    for f in findings:
+        iid = f.get("issue_id")
+        if iid:
+            reg.mark_reported(iid, url=url)
+    return {"status": outcome, "issue_url": url, "metrics": len(snapshot)}
 
 
 def on_speedtest(home: Path, *, registry=None) -> list[dict]:
@@ -216,9 +291,10 @@ def on_speedtest(home: Path, *, registry=None) -> list[dict]:
     from . import logs
     try:
         findings = detect(home, registry=registry)
-        if findings:
-            result = auto_report(home, findings)
-            logs.info("perf_advisor", "PERF_ADVICE", "performance recommendations ready")
+        result = auto_report(home, findings)
+        if findings or result["status"] in ("updated", "filed"):
+            logs.info("perf_advisor", "PERF_ADVICE", "performance recommendations ready",
+                      count=len(findings), reporting=result["status"])
         return findings
     except Exception as exc:
         # Advisors must never turn a successful measured test into a failed run.
