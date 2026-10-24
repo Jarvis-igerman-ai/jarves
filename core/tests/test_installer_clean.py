@@ -277,9 +277,16 @@ def test_a_failed_retain_is_a_clean_refusal_that_keeps_the_old_version():
     assert "RaiseException" not in prepare and "CustomMessage('RetainFailed')" in prepare
     fail = prepare.split("if Result <> '' then begin", 1)[1]
     assert fail.index("RestoreProgram();") < fail.index("SnapshotMade := False;")
-    assert prepare.index("ClearOldRollback();") < prepare.index("RetainProgramPart('python')")
-    clear = iss.split("procedure ClearOldRollback", 1)[1].split("function PrepareToInstall", 1)[0]
+    assert prepare.index("ClearOldRollback()") < prepare.index("RetainProgramPart('python')")
+    clear = iss.split("function ClearOldRollback", 1)[1].split("function PrepareToInstall", 1)[0]
     assert "failed-upgrade-rollback-" in clear and 'Name: "{app}\\failed-upgrade-*"' in iss
+    assert "if not ClearOldRollback() then begin" in prepare
+    assert prepare.index("ClearOldRollback()") < prepare.index("SnapshotMade := True;")
+    # a restore only puts back parts THIS run moved: a stale leftover must never replace (DelTree) the working program
+    restore = iss.split("procedure RestoreProgramPart", 1)[1].split("procedure RestoreProgram()", 1)[0]
+    assert restore.index("if Pos('|' + Name + '|', Retained) = 0 then exit;") < restore.index("DelTree(Target")
+    retain = iss.split("function RetainProgramPart", 1)[1].split("procedure RestoreProgramPart", 1)[0]
+    assert "Retained := Retained + Name + '|';" in retain
     deinit = iss.split("procedure DeinitializeSetup", 1)[1].split("procedure CurStepChanged", 1)[0]
     assert "RestoreProgram();" in deinit
     assert "CoreStopped and not SetupComplete and RestartRequested()" in deinit and "run --background" in deinit

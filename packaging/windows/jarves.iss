@@ -152,6 +152,7 @@ var
   SetupButton: TNewButton;
   BackupState: String;
   SnapshotMade, SetupComplete, CoreStopped: Boolean;
+  Retained: String;                                  // '|python|face|': the parts THIS run moved into rollback
 
 function DataDir(): String;
 begin
@@ -372,7 +373,10 @@ begin
   // retry: antivirus / indexer / a just-stopped process can hold a handle for a moment
   for Attempt := 1 to 10 do begin
     Result := RenameFile(Source, Target);
-    if Result then break;
+    if Result then begin
+      Retained := Retained + Name + '|';
+      break;
+    end;
     Log('Retaining previous program ' + Name + ' failed (attempt ' + IntToStr(Attempt) + '), retrying');
     StopProcessesUnderApp();
     Sleep(1000);
@@ -384,6 +388,8 @@ end;
 procedure RestoreProgramPart(const Name: String);
 var Source, Target: String;
 begin
+  // only a part this run moved: a stale leftover from an older run never replaces the working program
+  if Pos('|' + Name + '|', Retained) = 0 then exit;
   Source := ExpandConstant('{app}\rollback\') + Name;
   Target := ExpandConstant('{app}\') + Name;
   if DirExists(Source) or FileExists(Source) then begin
@@ -399,14 +405,17 @@ begin
   RestoreProgramPart('face');
   RestoreProgramPart('bridge');
   RestoreProgramPart('jarvis.cmd');
+  Retained := '|';
 end;
 
 // A rollback folder left by an older run is replaced. If it cannot be deleted (a read-only or locked file), it is moved
-// aside to failed-upgrade-* (removed by the uninstaller) so it does not block this upgrade (#153).
-procedure ClearOldRollback();
+// aside to failed-upgrade-* (removed by the uninstaller) so it does not block this upgrade (#153). False = it is still
+// there: the upgrade stops before anything is moved.
+function ClearOldRollback(): Boolean;
 var Old, Aside: String;
 begin
   Old := ExpandConstant('{app}\rollback');
+  Result := True;
   if not DirExists(Old) then exit;
   DelTree(Old, True, True, True);
   if DirExists(Old) then begin
@@ -414,6 +423,7 @@ begin
     if RenameFile(Old, Aside) then Log('Old rollback folder could not be deleted; moved aside to ' + Aside)
     else Log('Old rollback folder could not be deleted or moved: ' + Old);
   end;
+  Result := not DirExists(Old);
 end;
 
 function PrepareToInstall(var NeedsRestart: Boolean): String;
@@ -444,8 +454,12 @@ begin
       exit;
     end;
     // Rename within the same volume: retain a usable prior runtime without copying 16,500 files.
-    ClearOldRollback();
+    if not ClearOldRollback() then begin
+      Result := FmtMessage(CustomMessage('RetainFailed'), ['rollback']);
+      exit;
+    end;
     ForceDirectories(ExpandConstant('{app}\rollback'));
+    Retained := '|';
     SnapshotMade := True;
     if not RetainProgramPart('python') then Result := FmtMessage(CustomMessage('RetainFailed'), ['python'])
     else if not RetainProgramPart('face') then Result := FmtMessage(CustomMessage('RetainFailed'), ['face'])
