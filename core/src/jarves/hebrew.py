@@ -19,8 +19,8 @@ from pathlib import Path
 TEXT: dict[str, str] = {
     "one wizard in the dashboard (#/setup) that sets up, tests and teaches every topic; your 'works' answers become the per-feature 'verified by owner' record and the release sign-off sheet":
         "אשף אחד בלוח הבקרה (#/setup) להגדרה, בדיקה והיכרות עם כל נושא. התשובות שלכם מתעדות מה אומת על ידכם ומעדכנות את גיליון אישור הגרסה.",
-    "core/tests/test_wizard.py (state, diff, secrets, bug report, sign-off sheet)":
-        "core/tests/test_wizard.py (מצב, שינויים, סודות, דיווח באג, גיליון אישור)",
+    "core/tests/test_wizard.py, test_wizard_browser.py (done per release, diff, secrets, bug report, sign-off, real browser)":
+        "core/tests/test_wizard.py, test_wizard_browser.py (סיום לפי גרסה, שינויים, סודות, דיווח באג, אישור, דפדפן אמיתי)",
     # --- automatic updates (issue #17)
     "installs a newer signed JARVES by itself, only at a quiet moment (never in a conversation, an approval or a "
     "coding-agent task), after a notice and a backup; same signed path as `jarvis update install`; stable users get "
