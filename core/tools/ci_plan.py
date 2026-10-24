@@ -44,11 +44,19 @@ RULES = {
 }
 
 
-def classify(files: list[str], event: str = "pull_request", reused: bool = False, draft: bool = False) -> dict[str, bool]:
+def classify(files: list[str], event: str = "pull_request", reused: bool = False, draft: bool = False,
+             reuse_tests_only: bool = False) -> dict[str, bool]:
     """Which jobs a change needs. Everything runs on main pushes, tags and manual runs, unless `reused`. A DRAFT pull
     request gets only the fast checks (classify + validation): the full run starts when it is marked ready (#89)."""
     if reused or draft:
         return {k: False for k in FLAGS}
+    if reuse_tests_only:
+        # Same exact content tree already passed *all PR tests*, but PR did not build
+        # an installer. The main run must still produce+smoke one for release/package.
+        # Never skip an installer on the strength of a test-only artifact.
+        if event != "push":
+            raise ValueError("reuse_tests_only requires a main push")
+        return {k: k == "installer" for k in FLAGS}
     if event != "pull_request":
         return {k: True for k in FLAGS}
     files = [f.strip() for f in files if f.strip()]
@@ -143,6 +151,24 @@ def junit_file_times(xml_path: Path) -> dict[str, float]:
     return out
 
 
+def report_shard_timings(xml_files: list[Path]) -> str:
+    """Surface measured shard skew for tuning, without weakening any CI gate."""
+    measured = [(p, junit_file_times(p)) for p in xml_files]
+    shard_seconds = [round(sum(times.values())) for _, times in measured if times]
+    if len(shard_seconds) < 2 or min(shard_seconds) == 0:
+        return "shard timings: insufficient measurements to compare"
+    high, low = max(shard_seconds), min(shard_seconds)
+    imbalance = high / low
+    heaviest: dict[str, float] = {}
+    for _, times in measured:
+        for name, seconds in times.items():
+            heaviest[name] = max(heaviest.get(name, 0), seconds)
+    top = ", ".join(f"{f} {s:.0f}s" for f, s in sorted(heaviest.items(), key=lambda t: -t[1])[:4])
+    status = "REBALANCE CANDIDATE" if imbalance > 1.30 and high - low > 60 else "balanced"
+    return (f"shard timing {status}: {len(shard_seconds)} shards, measured test seconds "
+            f"{sorted(shard_seconds)}, skew {imbalance:.2f}x; slow files: {top}")
+
+
 def merge_durations(old: dict[str, float], new: dict[str, float], keep: float = 0.5) -> dict[str, float]:
     """Blend so one slow run does not whip the shards around: keep*old + (1-keep)*new."""
     out = dict(old)
@@ -176,6 +202,7 @@ def main(argv: list[str] | None = None) -> int:
     c.add_argument("--durations", type=Path, default=TESTS / "durations-windows.json")
     c.add_argument("--linux-durations", type=Path, default=TESTS / "durations-linux.json")
     c.add_argument("--reused", action="store_true", help="the tree was already proven on its PR: nothing to run")
+    c.add_argument("--reuse-tests-only", action="store_true", help="exact green PR tests exist; main still builds installer")
     c.add_argument("--draft", action="store_true", help="a draft pull request: only the fast checks run")
     s = sub.add_parser("shard-files")
     s.add_argument("--plan", type=Path, required=True)
@@ -195,7 +222,7 @@ def main(argv: list[str] | None = None) -> int:
             files = (sys.stdin.read() if a.files_from == "-" else Path(a.files_from).read_text(encoding="utf-8")).splitlines()
         else:
             files = _git_files() if a.event == "pull_request" else []
-        for k, v in classify(files, a.event, a.reused, a.draft).items():
+        for k, v in classify(files, a.event, a.reused, a.draft, a.reuse_tests_only).items():
             print(f"{k}={'true' if v else 'false'}")
         print("plan=" + json.dumps(plan(durations=load_durations(a.durations), linux_durations=load_durations(a.linux_durations)), separators=(",", ":")))
         return 0
@@ -213,6 +240,7 @@ def main(argv: list[str] | None = None) -> int:
     a.into.parent.mkdir(parents=True, exist_ok=True)
     a.into.write_text(json.dumps(dict(sorted(merged.items())), indent=1) + "\n", encoding="utf-8")
     print(f"durations: {len(fresh)} files measured from {len(paths)} junit file(s) -> {a.into}")
+    print(report_shard_timings(paths))
     return 0
 
 

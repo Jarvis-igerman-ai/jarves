@@ -213,6 +213,86 @@ def test_resolve_skips_expired_and_short_trees():
     assert ci_reuse.resolve("o/r", "abc", _api(arts, {})) is None
 
 
+def test_green_test_only_proof_is_exact_tree_same_repo_pr_only():
+    name = ci_reuse.PROOF_PREFIX + TREE
+    proof = [{"id": 7, "name": name, "created_at": "2026-10-24",
+              "workflow_run": {"id": 101}}]
+    hit = ci_reuse.resolve_tests("o/r", TREE, _api(proof, {101: _run(101)}))
+    assert hit == {"run_id": 101, "artifact_id": 7, "name": name, "head_sha": "s" * 40}
+    assert ci_reuse.resolve_tests("o/r", "bad-tree", _api(proof, {})) is None
+
+
+@pytest.mark.parametrize("bad", [
+    {"conclusion": "failure"}, {"status": "in_progress"},
+    {"event": "push"}, {"name": "untrusted-workflow"},
+    {"head_repository": {"full_name": "foreign/repo"}},
+])
+def test_green_test_only_proof_fail_closed_on_unverified_runs(bad):
+    proof = [{"id": 7, "name": ci_reuse.PROOF_PREFIX + TREE,
+              "workflow_run": {"id": 101}}]
+    assert ci_reuse.resolve_tests("o/r", TREE, _api(proof, {101: _run(101, **bad)})) is None
+
+
+def test_green_test_only_proof_rejects_expired_or_wrong_artifact():
+    proof = [{"id": 7, "name": ci_reuse.PROOF_PREFIX + TREE, "expired": True,
+              "workflow_run": {"id": 101}},
+             {"id": 8, "name": ci_reuse.PROOF_PREFIX + "b" * 40,
+              "workflow_run": {"id": 101}}]
+    assert ci_reuse.resolve_tests("o/r", TREE, _api(proof, {101: _run(101)})) is None
+
+
+def test_main_reuses_proven_tests_but_must_build_installer():
+    flags = ci_plan.classify([], event="push", reuse_tests_only=True)
+    assert flags["installer"] and sum(flags.values()) == 1
+    assert all(ci_plan.classify([], event="push").values())  # absent proof => full matrix
+    with pytest.raises(ValueError):
+        ci_plan.classify([], event="pull_request", reuse_tests_only=True)
+
+
+def test_exact_proof_workflow_is_non_draft_full_pr_and_ci_ok_must_be_green():
+    jobs = _wf("jarves-checks.yml")["jobs"]
+    changes = jobs["changes"]
+    assert changes["outputs"]["reuse_tests_only"] == "${{ steps.c.outputs.reuse_tests_only }}"
+    script = next(s["run"] for s in changes["steps"] if s.get("id") == "c")
+    assert "resolve-tests" in script and 'echo "reuse_tests_only=$reuse_tests_only"' in script
+    assert "--reuse-tests-only" in script
+    gate = jobs["ci-ok"]
+    proof_steps = [step for step in gate["steps"] if "proven PR tests" in step.get("name", "")]
+    assert len(proof_steps) == 2
+    assert "jq -e" in gate["steps"][0]["run"]
+    for step in proof_steps:
+        clause = step["if"]
+        assert "github.event_name == 'pull_request'" in clause
+        assert "github.event.pull_request.draft != true" in clause
+        assert "needs.changes.outputs.code == 'true'" in clause
+        assert "needs.changes.outputs.full == 'true'" in clause
+        assert "needs.changes.outputs.installer != 'true'" in clause
+    upload = proof_steps[-1]
+    assert "upload-artifact" in upload["uses"]
+    assert upload["with"]["name"] == "jarves-no-installer-proof-${{ needs.changes.outputs.tree }}"
+    assert upload["with"]["if-no-files-found"] == "error"
+    assert "ci-ok" not in jobs["installer"]["needs"]  # installer stays parallel with the checks
+
+
+def test_timing_summary_exposes_imbalanced_shards_and_slowest_files(tmp_path):
+    for name, secs in (("one.xml", 400), ("two.xml", 200), ("three.xml", 205)):
+        (tmp_path / name).write_text(
+            f'<testsuites><testsuite><testcase classname="tests.test_{name[0]}" name="test_one" time="{secs}"/>'
+            '</testsuite></testsuites>', encoding="utf-8")
+    result = ci_plan.report_shard_timings(sorted(tmp_path.glob("*.xml")))
+    assert "REBALANCE CANDIDATE" in result and "2.00x" in result
+    assert "test_o.py 400s" in result
+    assert "insufficient measurements" in ci_plan.report_shard_timings([tmp_path / "one.xml"])
+
+
+def test_timing_summary_does_not_flag_a_small_difference(tmp_path):
+    for name, secs in (("one.xml", 201), ("two.xml", 202)):
+        (tmp_path / name).write_text(
+            f'<testsuite><testcase classname="tests.test_{name[0]}" name="x" time="{secs}"/></testsuite>',
+            encoding="utf-8")
+    assert "balanced" in ci_plan.report_shard_timings(sorted(tmp_path.glob("*.xml")))
+
+
 def test_content_tree_ignores_documentation_only():
     code = ["100644 blob 1111\tcore/src/a.py", "100644 blob 2222\tpackaging/build_windows.ps1"]
     base = ci_reuse.content_tree(code + ["100644 blob 3333\tdocs/x.md", "100644 blob 4444\tREADME.md"])
@@ -451,10 +531,13 @@ def test_reused_main_push_feeds_the_proof_runs_timings_into_mains_cache():
     cond = " ".join(refresh["if"].split())
     assert "needs.changes.outputs.reused == 'true' && needs.changes.outputs.proof_run != ''" in cond
     assert "github.ref == 'refs/heads/main'" in cond
+    assert "needs.changes.outputs.reuse_tests_only == 'true'" in cond
+    assert "proof_run=$(sed -n 's/^run_id=//p' tests.out" in script
     assert refresh["continue-on-error"] is True                      # timing data never turns a run red
     assert refresh["permissions"] == {"contents": "read", "actions": "read"}
     downloads = [s for s in refresh["steps"] if "download-artifact" in s.get("uses", "")]
-    assert [s["if"] for s in downloads] == ["needs.changes.outputs.reused != 'true'", "needs.changes.outputs.reused == 'true'"]
+    assert [s["if"] for s in downloads] == ["needs.changes.outputs.reused != 'true' && needs.changes.outputs.reuse_tests_only != 'true'",
+                                         "needs.changes.outputs.reused == 'true' || needs.changes.outputs.reuse_tests_only == 'true'"]
     proof = downloads[1]["with"]
     assert proof["run-id"] == "${{ needs.changes.outputs.proof_run }}" and proof["github-token"] == "${{ github.token }}"
     assert proof["pattern"] == downloads[0]["with"]["pattern"] == "junit-${{ matrix.platform }}-*"
