@@ -625,8 +625,11 @@ class ClientDelegation:
         return await self._api_turn(job)
 
     def _api_body(self, job: Job, inp: list) -> dict:
-        from .live import live_tools
-        tools: list[dict] = live_tools(self.live.registry)
+        from .lazy_tools import groups_for, lazy_tools
+        recent = " ".join(h.get("text", "") for h in job.history[-3:] if h.get("role") == "user") + " " + job.pending
+        opened = self.__dict__.setdefault("_open_groups", set())
+        opened |= groups_for(recent)                     # issue #71: the user's words open a tool group for the session
+        tools: list[dict] = lazy_tools(self.live.registry, opened)
         if self.live.web_search and self.ai.delegation_max_searches > 0:
             tools.append({"type": "web_search"})
         body: dict[str, Any] = {"model": self.model, "instructions": self.live.backend_instructions(), "input": inp,
@@ -692,7 +695,15 @@ class ClientDelegation:
                 return speakable(text or trace.text)
             inp = inp + [_clean_item(i) for i in out_items if i.get("type") in ("function_call", "reasoning")]
             for fc in calls:
-                res = await self._tool(job, fc.get("name", ""), fc.get("arguments") or "{}")
+                if fc.get("name") == "tools_more":      # issue #71: the model opens a hidden tool group
+                    from .lazy_tools import open_group
+                    try:
+                        grp = str(json.loads(fc.get("arguments") or "{}").get("group", ""))
+                    except (ValueError, AttributeError):
+                        grp = ""
+                    res = open_group(self.live.registry, grp, self.__dict__.setdefault("_open_groups", set()))
+                else:
+                    res = await self._tool(job, fc.get("name", ""), fc.get("arguments") or "{}")
                 inp.append({"type": "function_call_output", "call_id": fc.get("call_id", ""), "output": res})
 
     def _unknown_cost(self, trace, body: dict, held: _Held) -> int:
