@@ -56,6 +56,7 @@ FEATURES: dict[str, object] = {
     "assisted_dialing": "dial", "self_manage": "manage",
     "self_tests": "selftest", "text_chat": "chat", "setup_tour": "tour",
     "issue_reports": "issues", "web_chat": "web",
+    "drive_briefing": (D, "a spoken pre-drive briefing; switch it with `jarvis features`"),   # V6 P5
 }
 
 # Extra command-line surfaces of a feature (one-shot variants of the same Core path): feature id -> commands.
@@ -83,6 +84,7 @@ TOOL_GROUPS: dict[str, object] = {
     "dialing": "dial", "self_manage": "manage",
     "selfspeed": "selftest",
     "issues": "issues",
+    "drive_briefing": (V, "a spoken briefing inside a conversation"),
 }
 
 
