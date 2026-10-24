@@ -49,6 +49,7 @@ def test_history_creates_only_one_deduplicated_local_candidate(tmp_path):
     history = selfspeed.History(tmp_path, clock=lambda: 1000)
     def measured(ts):
         return {"ts": ts, "class": "owner", "status": "fail", "trigger": "schedule", "ms": 10,
+                "values": {"tool_p95_ms": 500},  # real SpeedResult.as_dict() always includes values
                 "metrics": [{"name": "tool_p95_ms", "status": "fail", "value": 500,
                              "max": 200, "unit": "ms", "trend_pct": None}]}
     for i in range(3):
