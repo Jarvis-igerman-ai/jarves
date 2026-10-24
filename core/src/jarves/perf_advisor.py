@@ -45,29 +45,25 @@ FALLBACK = ("Repeat the metric on the same device and profile the owning operati
 
 
 def options(home: Path) -> dict:
-    """Explicit opt-in with a small local reporting cursor; no credentials or personal data."""
-    base = {"auto_github": False, "last_sent": 0.0, "issue_number": 0, "issue_url": "", "published": []}
+    """Local, explicit opt-in and tiny stable tracker state. No tokens are stored."""
+    defaults = {"auto_github": False, "last_sent": 0.0, "last_signature": "",
+                "last_active": [], "tracker_url": ""}
     try:
         data = json.loads((Path(home) / CONFIG).read_text(encoding="utf-8"))
-        if not isinstance(data, dict):
-            return base
-        ts = float(data.get("last_sent") or 0)
-        num = data.get("issue_number")
-        published = data.get("published")
-        return {
-            "auto_github": data.get("auto_github") is True,
-            "last_sent": ts if math.isfinite(ts) and ts >= 0 else 0.0,
-            "issue_number": num if type(num) is int and num > 0 else 0,
-            "issue_url": data.get("issue_url") if isinstance(data.get("issue_url"), str) and
-                         data.get("issue_url", "").startswith("https://github.com/igalgerman/jarves/issues/") else "",
-            "published": [x for x in published if isinstance(x, dict)][:len(SUGGESTIONS)]
-                         if isinstance(published, list) else [],
-        }
+        if isinstance(data, dict):
+            sent = _numeric(data.get("last_sent"))
+            return {**defaults, "auto_github": data.get("auto_github") is True,
+                    "last_sent": sent or 0.0,
+                    "last_signature": str(data.get("last_signature") or "")[:2000],
+                    "last_active": [x for x in data.get("last_active", [])[:40]
+                                    if isinstance(x, str) and x.isidentifier()],
+                    "tracker_url": str(data.get("tracker_url") or "")[:256]}
     except (OSError, ValueError, TypeError, OverflowError):
-        return base
+        pass
+    return defaults
 
 
-def _store(home: Path, state: dict) -> None:
+def _save_options(home: Path, state: dict) -> None:
     p = Path(home) / CONFIG
     p.parent.mkdir(parents=True, exist_ok=True)
     temp = p.with_suffix(".tmp")
@@ -76,12 +72,11 @@ def _store(home: Path, state: dict) -> None:
 
 
 def configure(home: Path, enabled: bool) -> dict:
-    """The authenticated owner enables/disables GitHub reporting; local recommendations always work."""
+    """Only an authenticated owner action can enable public GitHub reporting."""
     state = options(home)
     state["auto_github"] = enabled is True
-    _store(home, state)
+    _save_options(home, state)
     return state
-
 
 def _numeric(value) -> float | None:
     if isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(value) or value < 0:
@@ -96,6 +91,8 @@ def recommendations(rows: list[dict], *, max_results: int | None = None) -> list
     An over-budget failure is enough only when repeated; a warning requires a >=25% increase
     against >=3 older comparable runs. No baseline -> warn-only findings are NOT escalated.
     """
+    from . import speedtest
+    allowed = set(speedtest.load_budgets()) | set(SUGGESTIONS)
     out = []
     if not rows:
         return out
@@ -105,7 +102,7 @@ def recommendations(rows: list[dict], *, max_results: int | None = None) -> list
     if machine_class not in ("owner", "ci"):
         return out
     for metric in sorted((recent.get("values") or {})):
-        if not isinstance(metric, str) or metric not in SUGGESTIONS:
+        if not isinstance(metric, str) or metric not in allowed:
             continue
         samples = [(r.get("values", {}).get(metric), r.get("statuses", {}).get(metric, "pass"))
                    for r in rows if (r.get("class") or r.get("cls")) == machine_class
@@ -148,8 +145,9 @@ def detect(home: Path, *, rows: list[dict] | None = None, registry=None) -> list
                             title_he=f"ביצועים: האטה חוזרת במדד {f['metric']}",
                             source="perf_advisor",
                             # repeated identical observations must not count as new incidents
-                            observation=json.dumps({"metric": f["metric"], "median": f["median"],
-                                                    "class": f["class"], "samples": f["samples"]}, sort_keys=True))
+                            observation=json.dumps({"metric": f["metric"], "severity": f["severity"],
+                                                    "class": f["class"], "change_band":
+                                                    round((f["change_pct"] or 0) / 25)}, sort_keys=True))
         f["issue_id"] = record["id"] if record else ""
         f["reported_url"] = record.get("reported_url", "") if record else ""
     return findings
@@ -220,70 +218,137 @@ def _body(snapshot: list[dict]) -> str:
     return "\n".join(lines)
 
 
+def _signature(findings: list[dict]) -> str:
+    """Stable enough not to churn over tiny numeric variance, but reacts to severity changes."""
+    return json.dumps(sorted((f["metric"], f["class"], f["severity"],
+                              round((f.get("change_pct") or 0) / 25))
+                             for f in findings if f.get("metric") in _known_metrics()),
+                      separators=(",", ":"))
+
+
+def _known_metrics() -> set[str]:
+    from . import speedtest
+    return set(speedtest.load_budgets()) | set(SUGGESTIONS)
+
+
+def _recovered(home: Path, names: list[str]) -> bool:
+    """Never announce recovery based on one good or missing measurement."""
+    from . import selfspeed
+    rows = selfspeed.History(home).rows("speedtest", 30)
+    for metric in names:
+        samples = [r.get("statuses", {}).get(metric) for r in rows
+                   if metric in r.get("values", {}) and r.get("class") == "owner"]
+        if len(samples) < 3 or samples[-3:] != ["pass", "pass", "pass"]:
+            return False
+    return bool(names)
+
+
+def _tracker_body(findings: list[dict], *, recovered: bool) -> str:
+    """An intentionally bounded, numeric-only public issue, no device identity or free-text logs."""
+    lines = [
+        "## JARVES Performance Tracker",
+        "Automatically updated from repeated *local* measurements after owner opt-in.",
+        "Each metric is a measured investigation candidate, **not a proven root cause**.",
+        "This is a single tracker; routine unchanged measurements do not trigger edits.",
+        "",
+    ]
+    if recovered:
+        lines += ["**Status: recovered** — at least three comparable successful measurements",
+                  "were observed for every previously tracked metric.", ""]
+    else:
+        lines += [f"**Repeated regressions currently tracked: {len(findings)}**", ""]
+        for f in findings:
+            metric = f["metric"]
+            if metric not in _known_metrics():
+                continue
+            numbers = {k: _numeric(f.get(k)) for k in ("median", "baseline", "change_pct")}
+            measured = ", ".join(f"{k}: {v:g}" for k, v in numbers.items() if v is not None)
+            advice = SUGGESTIONS.get(metric, FALLBACK)[0]
+            lines += [f"### {metric} ({f['severity']}, {f['class']})",
+                      f"Samples: {int(f['samples'])}; repeated warnings: {int(f['recent_bad'])}; {measured}",
+                      f"Suggested investigation: {advice}", ""]
+    lines += ["Only static metric identifiers, aggregated numeric evidence and canned suggestions are published.",
+              "No speech, prompts, user content, file paths, IPs, credentials or private logs are included.",
+              TRACKER_MARKER]
+    return "\n".join(lines)
+
+
 def auto_report(home: Path, findings: list[dict], *, token_fn: Callable[[], str] | None = None,
                 request=None, clock: Callable[[], float] = time.time) -> dict:
-    """Upsert ONE tracked performance issue; update its body only for meaningful new evidence.
+    """Update ONE stable GitHub performance tracker after sustained material changes.
 
-    A single issue contains ALL proven metrics. No comment per sample, no issue per metric,
-    no new background schedule. At most one GitHub write per 24 h, and no write at all
-    when no relevant trend has changed. GitHub lookup failure never creates duplicates.
+    No new scheduled runner. One GitHub write per >=24h, only if a meaningful status or
+    trend bucket changed; confirmed recovery is written only after three green readings.
+    Fail closed if pagination/auth/permission leaves duplicate lookup uncertain.
     """
     from . import issue_registry as ir
     state = options(home)
     if not state["auto_github"]:
         return {"status": "disabled"}
-    snapshot = _snapshot(findings)
-    if not snapshot and not state["published"]:
-        return {"status": "no_finding"}
-    if not _meaningful(state["published"], snapshot):
-        return {"status": "unchanged", "url": state["issue_url"]}
+
+    # Caller-visible advice can never insert arbitrary strings into a public GitHub body.
+    clean = [f for f in findings if f.get("metric") in _known_metrics()
+             and f.get("class") in ("owner", "ci")
+             and f.get("severity") in ("P2", "P3")
+             and _numeric(f.get("median")) is not None]
+    clean = sorted(clean, key=lambda f: (f["severity"], f["metric"]))[:32]
+    active = sorted({f["metric"] for f in clean})
+    recovered = not clean and bool(state["last_active"]) and _recovered(home, state["last_active"])
+    if not clean and not recovered:
+        return {"status": "awaiting_confirmation" if state["last_active"] else "no_finding"}
+    signature = "recovered" if recovered else _signature(clean)
+    if signature == state["last_signature"]:
+        return {"status": "unchanged"}
     now = clock()
     if state["last_sent"] > 0 and now - state["last_sent"] < AUTO_COOLDOWN_S:
-        return {"status": "cooldown", "url": state["issue_url"]}
+        return {"status": "cooldown"}
+
     token = (token_fn or ir.find_token)()
     if not token:
         return {"status": "no_token"}
     call = request or ir._http
-    issue = None
-    if state["issue_number"]:
-        code, found = call("GET", f"{ir.API_BASE}/repos/{ir.REPO}/issues/{state['issue_number']}", token)
-        if code != 200 or not isinstance(found, dict) or SUMMARY_MARKER not in str(found.get("body") or ""):
-            return {"status": "lookup_unavailable"}  # never replace or fork a possibly existing issue
-        issue = found
+    code, listing = call("GET", f"{ir.API_BASE}/repos/{ir.REPO}/issues?labels={ir.LABEL}&state=all&per_page=100", token)
+    if code != 200 or not isinstance(listing, list) or len(listing) >= MAX_OPEN_PAGE:
+        return {"status": "lookup_unavailable"}
+    trackers = [x for x in listing if TRACKER_MARKER in str(x.get("body") or "")
+                and not x.get("pull_request")]
+    if len(trackers) > 1:
+        return {"status": "duplicate_trackers"}
+    body = _tracker_body(clean, recovered=recovered)
+    if trackers:
+        tracker = trackers[0]
+        if tracker.get("state") == "closed":
+            return {"status": "tracker_closed"}  # respect owner's decision; no silent reopen
+        number = tracker.get("number")
+        if not isinstance(number, int) or number < 1:
+            return {"status": "invalid_tracker"}
+        rc, out = call("PATCH", f"{ir.API_BASE}/repos/{ir.REPO}/issues/{number}", token, {"body": body})
+        operation = "updated"
+        url = str(tracker.get("html_url") or "")
     else:
-        code, existing = call("GET", f"{ir.API_BASE}/repos/{ir.REPO}/issues?labels={ir.LABEL}&state=all&per_page=100", token)
-        if code != 200 or not isinstance(existing, list) or len(existing) >= MAX_OPEN_PAGE:
-            return {"status": "lookup_unavailable"}
-        matches = [x for x in existing if isinstance(x, dict) and SUMMARY_MARKER in str(x.get("body") or "")]
-        if len(matches) > 1:
-            return {"status": "ambiguous_existing"}
-        issue = matches[0] if matches else None
-    body = _body(snapshot)
-    if issue:
-        if issue.get("state") == "closed":
-            return {"status": "closed_issue"}  # owner closed it; do not reopen automatically
-        n = issue.get("number")
-        if type(n) is not int or n <= 0:
-            return {"status": "lookup_unavailable"}
-        status, output = call("PATCH", f"{ir.API_BASE}/repos/{ir.REPO}/issues/{n}", token,
-                              {"body": body})
-        outcome = "updated"
-    else:
-        status, output = call("POST", f"{ir.API_BASE}/repos/{ir.REPO}/issues", token,
-                              {"title": REPORT_TITLE, "body": body, "labels": [ir.LABEL]})
-        outcome = "filed"
-    if status not in (200, 201) or not isinstance(output, dict) or not output.get("html_url") or type(output.get("number")) is not int:
-        return {"status": "send_failed", "http_status": status}
-    url = str(output["html_url"])
-    state.update(last_sent=now, issue_number=output["number"], issue_url=url, published=snapshot)
-    _store(home, state)
-    # Reflect one shared public issue URL on ALL locally tracked performance metrics.
-    reg = ir.Registry(home)
-    for f in findings:
-        iid = f.get("issue_id")
-        if iid:
-            reg.mark_reported(iid, url=url)
-    return {"status": outcome, "issue_url": url, "metrics": len(snapshot)}
+        if recovered:
+            return {"status": "no_tracker"}
+        rc, out = call("POST", f"{ir.API_BASE}/repos/{ir.REPO}/issues", token,
+                       {"title": TRACKER_TITLE, "body": body, "labels": [ir.LABEL]})
+        operation = "filed"
+        url = ""
+    if rc not in (200, 201) or not isinstance(out, dict):
+        return {"status": "send_failed", "http_status": rc}
+    url = str(out.get("html_url") or url)
+    if not url.startswith(f"https://github.com/{ir.REPO}/issues/"):
+        return {"status": "invalid_response"}
+
+    state.update(last_sent=now, last_signature=signature,
+                 last_active=[] if recovered else active, tracker_url=url)
+    _save_options(home, state)
+    registry = ir.Registry(home)
+    for f in clean:
+        if f.get("issue_id"):
+            registry.mark_reported(f["issue_id"], url=url)
+    return {"status": operation, "issue_url": url, "metrics": active,
+            "recovered": recovered}
+
+
 
 
 def on_speedtest(home: Path, *, registry=None) -> list[dict]:
