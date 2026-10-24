@@ -3,6 +3,22 @@
 Goal: the next release is cheap. Owner stretch goal: **merge to published installer in about 5 minutes**, and a PR green in
 under 10 minutes. This page has the measurements, the design, what is implemented, and what honestly blocks 5 minutes.
 
+## 24 Oct follow-up — two independent proof levels, no double tests
+
+**Observed speed baseline (not a prediction):**
+- PR #118 ready to merged in about 8.3 minutes (CI `40094987355` succeeded in 8.0 minutes).
+- After #118 merged, `main` CI run `40095556503` executed a **second full test matrix** for about 9.8 minutes. Its slowest Windows Core shard took **528 seconds**, compared with roughly 360 seconds for the other Windows shards.
+- Why: the #118 PR modified Core tests and tools but **did not trigger the installer job**. Therefore it could not upload `jarves-installer-<content tree>`. The existing `main` resolver (correctly) found no verified installer and ran the full matrix.
+
+**Improvement bundled here:**
+1. **Full installer PR (unchanged path):** a successful content-addressed installer artifact proves tests+installer; matching `main` skips both.
+2. **Full-test, no-installer PR (new path):** the required `ci-ok` job, **only after checking all dependent PR jobs**, uploads `jarves-no-installer-proof-<content tree>`. For a `main` push with exactly that content tree, a separate resolver verifies a completed successful same-repo pull-request run, then skips duplicate Python/browser/performance/E2E/etc tests. **The real Windows installer build, smoke, upgrade and rollback tests still run on `main`**; release packaging still requires the actual green installer artifact. CodeQL continues to run independently.
+3. **No proof, changed content, partial guide-only PR, failed/cancelled or foreign PR:** full `main` test + installer matrix as before. The green PR proof is never accepted as a Windows installer.
+4. **Keep shard timing data fresh:** `main` downloads the proven PR's JUnit artifacts for either reuse mode and updates the per-platform timing cache. The timing-summary job reports the per-shard measured seconds, imbalance ratio, and the slowest test files. Imbalance over 1.30× and >60 seconds is flagged for targeted replanning, but does not weaken CI.
+5. **Release and protected merge gates unchanged:** `CI result (single required check)` plus `Auto-label policy` remain required, no blanket reruns, no build reuse across differing content, no new backend or premium services.
+
+**Expected result, *not yet a measured result*:** for non-installer Core-test/tool edits, the second `main` test matrix should disappear; the installer and its downstream functional/rollback checks remain the critical path. The exact end-to-end gain requires an eligible test-only PR plus a post-merge `main` run verified from GitHub Actions; do not claim a green matrix was executed if the run used proven PR tests.
+
 ## Before / after
 
 Measured = taken from `gh api .../actions/runs/<id>/jobs` for the runs named. Estimated = derived from measured parts; the
