@@ -291,3 +291,15 @@ def test_both_required_checks_report_in_the_merge_queue():
     assert auto["jobs"]["queue-pass"]["if"] == "github.event_name == 'merge_group'"
     assert "github.event_name == 'pull_request_target'" in auto["jobs"]["label"]["if"]
     assert "|| github.ref" in auto["concurrency"]["group"]       # merge groups must not cancel each other's check
+
+
+def test_merge_queue_cancels_only_superseded_runs_of_the_same_pr():
+    """#160: a rebuilt merge group left the old merge_group run of the same PR running (two full matrices per PR).
+    The supersede job cancels only OLDER merge_group runs whose temp branch has the same pr-<N>- prefix."""
+    job = load("jarves-checks.yml")["jobs"]["supersede"]
+    assert job["if"] == "github.event_name == 'merge_group'" and job["permissions"] == {"actions": "write"}
+    run = steps_text(job)
+    assert "event=merge_group" in run and ".id < $GITHUB_RUN_ID" in run and 'startswith(\\"$prefix\\")' in run
+    assert "gh-readonly-queue/*/pr-*-" in run and "gh run cancel" in run
+    assert not any("checkout" in s.get("uses", "") for s in job["steps"])
+    assert "supersede" not in load("jarves-checks.yml")["jobs"]["ci-ok"]["needs"]   # never part of the required check
