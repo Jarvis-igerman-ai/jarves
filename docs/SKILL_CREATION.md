@@ -45,3 +45,19 @@ Residual risk (truthful): AST + restricted builtins are not a complete sandbox; 
 The approval gate, process isolation and key-less environment are the main controls. OS-level sandboxing on Linux
 (bubblewrap/seccomp) is tracked in #21. Tests: `core/tests/test_skill_creation.py` (29 malicious drafts, runtime
 containment, tampered install, network grants, rollback, every route refused while disabled).
+
+## Manifest v2, update and rollback (V6 #220, switch `skills_manifest2`, OFF by default)
+With the switch on, `skills/platform2.py` adds manifest v2 checks to the same flow (nothing else changes):
+- propose / approve: the trust state (`unsigned`, `owner_signed`, `tampered`) and the semver are computed and shown in
+  the summary. A tampered signature or an invalid manifest 2 (undeclared action tools, unknown permission, too-new
+  `min_core`, a missing dependency) fails validation, so it can never be approved, installed or updated. Unsigned and
+  owner-signed Skills need the same sha256 approval and install DISABLED with no grants.
+- load / run: a stored version whose files no longer match the sha256 the owner approved (or whose signature is
+  tampered) is not registered and does not run (`SKILL_TAMPERED`).
+- `jarvis skills update <id>` shows the plan for the waiting draft (added / removed permissions, trust, sha256);
+  `--approve <sha256>` installs it through `approve(by="cli")`. `jarvis skills rollback <id> [--yes]` goes back one
+  version after checking the stored copy against its approved sha256; grants are cleared and the Skill is off.
+- The optional owner key is a file the owner creates at `<home>/skills/owner.key` (16+ bytes); no code creates it.
+- There is no model tool for update, rollback, approve, grant or enable. Logs carry ids and versions, never file text.
+- A v2 Skill may list `storage` / `network:<host>` under `permissions`; they are requested exactly like `capabilities`.
+Tests: `core/tests/test_v6_skills_platform2.py`.

@@ -1,7 +1,7 @@
 """Skills manifest v2 (V6 P6, issue #212): a parser, validator and planner. PURE: it reads text and local files only.
 
-What it is not: it never installs, enables, grants, runs or fetches anything, and it does not change
-`skills/generated.py` (that keeps its sha256 approval, grants, sandbox and rollback; wiring it is issue #220). No network
+What it is not: it never installs, enables, grants, runs or fetches anything. `skills/generated.py` keeps its sha256
+approval, grants, sandbox and rollback; `skills/platform2.py` wires this module into them (issue #220). No network
 code exists here, and a manifest can never raise a Skill's own permissions: `plan_update` only reports them so the
 owner approves the difference (a new permission always needs a new approval).
 
@@ -235,19 +235,16 @@ def discover(root: Path, limit: int = 200) -> list[Manifest]:
     return out
 
 
+ABOUT = ("reads and checks Skill manifests (version, permissions, dependencies, local trust); refuses a tampered or "
+         "invalid manifest on install and update, and adds jarvis skills update / rollback")
+EVIDENCE = "UNIT test_v6_manifest2.py + test_v6_skills_platform2.py (local files only, no network)"
+BLOCKER = "V6 beta: wired into generated-Skill approve, load, update and rollback; not owner-tested yet"
 hebrew.TEXT.update({
-    "reads and checks Skill manifests (version, permissions, dependencies, local trust) and plans updates and rollbacks; "
-    "never installs or fetches anything by itself":
-        "קורא ובודק מניפסטים של כישורים (גרסה, הרשאות, תלויות, אמון מקומי) ומתכנן עדכונים וחזרה לאחור; "
-        "אף פעם לא מתקין ולא מוריד שום דבר בעצמו",
-    "UNIT test_v6_manifest2.py (local files only, no network)": "בדיקות יחידה test_v6_manifest2.py (קבצים מקומיים בלבד, בלי רשת)",
-    "V6 beta: parser and planner only; not yet wired into install/update (issue #220)":
-        "בטא V6: מנתח ומתכנן בלבד; עדיין לא מחובר להתקנה ולעדכון (נושא #220)",
+    ABOUT: "קורא ובודק מניפסטים של כישורים (גרסה, הרשאות, תלויות, אמון מקומי); דוחה מניפסט פגום או לא תקין בהתקנה "
+           "ובעדכון, ומוסיף jarvis skills update / rollback",
+    EVIDENCE: "בדיקות יחידה test_v6_manifest2.py ו-test_v6_skills_platform2.py (קבצים מקומיים בלבד, בלי רשת)",
+    BLOCKER: "בטא V6: מחובר לאישור, טעינה, עדכון וחזרה לאחור של כישורים שנוצרו; עוד לא נבדק על ידי הבעלים",
 })
 
 features.register("skills_manifest2", "מניפסט כישורים גרסה 2", "Skills manifest v2", False,
-                  about="reads and checks Skill manifests (version, permissions, dependencies, local trust) and plans "
-                        "updates and rollbacks; never installs or fetches anything by itself",
-                  targets=targets("UNIT test_v6_manifest2.py (local files only, no network)",
-                                  "V6 beta: parser and planner only; not yet wired into install/update (issue #220)"),
-                  permissions=["read"], settings="")
+                  about=ABOUT, targets=targets(EVIDENCE, BLOCKER), permissions=["read"], settings="")

@@ -1,0 +1,10 @@
+{
+ "dict": {
+  "owner_signed": "חתום במפתח שלכם",
+  "reads and checks Skill manifests (version, permissions, dependencies, local trust); refuses a tampered or invalid manifest on install and update, and adds jarvis skills update / rollback": "קורא ובודק מניפסטים של כישורים (גרסה, הרשאות, תלויות, אמון מקומי); דוחה מניפסט פגום או לא תקין בהתקנה ובעדכון, ומוסיף jarvis skills update / rollback",
+  "tampered": "חתימה פגומה",
+  "UNIT test_v6_manifest2.py + test_v6_skills_platform2.py (local files only, no network)": "בדיקות יחידה test_v6_manifest2.py ו-test_v6_skills_platform2.py (קבצים מקומיים בלבד, בלי רשת)",
+  "unsigned": "לא חתום",
+  "V6 beta: wired into generated-Skill approve, load, update and rollback; not owner-tested yet": "בטא V6: מחובר לאישור, טעינה, עדכון וחזרה לאחור של כישורים שנוצרו; עוד לא נבדק על ידי הבעלים"
+ }
+}

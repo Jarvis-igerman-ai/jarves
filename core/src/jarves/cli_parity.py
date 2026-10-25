@@ -57,7 +57,6 @@ FEATURES: dict[str, object] = {
     "self_tests": "selftest", "text_chat": "chat", "setup_tour": "tour",
     "issue_reports": "issues", "web_chat": "web", "anydo": "anydo", "anydo_update": "anydo",
     "drive_briefing": (D, "a spoken pre-drive briefing; switch it with `jarvis features`"),   # V6 P5
-    "skills_manifest2": (D, "manifests are reviewed on the New Skills page; no command yet (#220)"),   # V6 P6
 }
 
 # Extra command-line surfaces of a feature (one-shot variants of the same Core path): feature id -> commands.
