@@ -30,6 +30,8 @@ TIMEOUT_FRAME = re.compile(r"tests[\\/]+(test_\w+\.py)\", line \d+ in (test_\w+)
 PREPUSH_FAIL = re.compile(r"^\s*\w+\s+FAIL\s+[\d.]+s\s+tests[\\/]+(test_\w+\.py)::(test_\w+)")
 STAMP = re.compile(r"^[^\t]*\t[^\t]*\t\S+Z ")   # "<job name with spaces>\t<step>\t<timestamp> "
 TITLE = "Flaky test: "
+# The repeated DST hour (Israel clocks went back 25 Oct 2026): clock-dependent tests failed for every PR, not as flakes.
+IGNORE_WINDOWS = [("2026-10-24T23:00:00Z", "2026-10-25T00:00:00Z")]
 
 
 def gh(*args: str) -> str:
@@ -82,7 +84,7 @@ def ledger_ids(path: Path = LEDGER) -> set[str]:
 def _runs(repo: str, days: int) -> list[dict]:
     since = (dt.datetime.now(dt.timezone.utc) - dt.timedelta(days=days)).strftime("%Y-%m-%d")
     raw = gh("api", "--paginate", f"repos/{repo}/actions/workflows/jarves-checks.yml/runs?created=>={since}&per_page=100",
-             "--jq", ".workflow_runs[]|{id,head_sha,head_branch,event,conclusion,run_attempt,html_url,"
+             "--jq", ".workflow_runs[]|{id,head_sha,head_branch,event,conclusion,run_attempt,html_url,run_started_at,"
                      "pull_requests:[.pull_requests[].number]}")
     return [json.loads(x) for x in raw.splitlines() if x.strip()]
 
@@ -97,14 +99,41 @@ def _log(repo: str, run: dict) -> str:
         return ""                                     # logs expired or not accessible: nothing to report
 
 
+def in_ignored_window(started: str) -> bool:
+    return any(a <= started <= b for a, b in IGNORE_WINDOWS)
+
+
+def last_fix_time(repo: str, test: str) -> str:
+    """ISO time of the newest commit on main touching the test's file ('' if unknown). A failure that started BEFORE it
+    cannot be told apart from the bug that commit fixed, so it is not reported again (false positives of 25 Oct 2026)."""
+    path = "core/tests/" + test.split("::")[0]
+    try:
+        out = gh("api", f"repos/{repo}/commits?path={path}&per_page=1", "--jq", ".[0].commit.committer.date")
+    except subprocess.CalledProcessError:
+        return ""
+    return out.strip()
+
+
+def drop_stale(found: dict[str, list[dict]], fix_time) -> dict[str, list[dict]]:
+    """Keep only failures that started after the last commit touching the test file and outside ignored windows."""
+    out: dict[str, list[dict]] = {}
+    for test, hits in found.items():
+        fix = fix_time(test)
+        keep = [h for h in hits if not in_ignored_window(h.get("started", "")) and (not fix or h.get("started", "") > fix)]
+        if keep:
+            out[test] = keep
+    return out
+
+
 def scan(repo: str, days: int) -> dict[str, list[dict]]:
     found: dict[str, list[dict]] = {}
     for run, why in flaky_runs(_runs(repo, days)):
         for test, line in failed_tests(_log(repo, run)).items():
             found.setdefault(test, []).append({"run": run["id"], "url": run.get("html_url", ""), "why": why,
-                                               "branch": run.get("head_branch", ""), "prs": run.get("pull_requests", []),
+                                               "branch": run.get("head_branch", ""), "started": run.get("run_started_at") or "", "prs": run.get("pull_requests", []),
                                                "line": line})
-    return found
+    cache: dict[str, str] = {}
+    return drop_stale(found, lambda t: cache.setdefault(t.split("::")[0], last_fix_time(repo, t)))
 
 
 def issue_body(test: str, hits: list[dict]) -> str:
