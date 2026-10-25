@@ -22,12 +22,17 @@ from . import logs
 SCOPE = "drive"
 FEATURE = "phone_drive"
 JOURNEY_RATE_PER_MIN = 6
+JOURNEY_ALL_PHONES_PER_MIN = 10     # one shared bucket: several paired phones cannot multiply the load on the free providers
+
 BRIEFING_RATE_PER_MIN = 6           # each tap calls Google and the weather service and can hold a dashboard thread up to 60 s
 RATE_LIMITED = {"error": "too many requests: wait a minute", "error_he": "יותר מדי בקשות: חכו דקה", "code": "DRIVE_RATE_LIMITED"}
 LINK_PREFIXES = ("https://www.google.com/maps/dir/?", "https://waze.com/ul?")
 _TOOL = re.compile(r"[a-z][a-z0-9_]{0,39}")
 MODES = ("ask", "present", "alone")
 PRIVATE_ORDER = {"ask": 0, "alone": 1, "present": 2}     # higher = more private (a passenger can hear)
+
+
+JOURNEY_BUSY = {"error": "the trip service is busy: wait a minute", "error_he": "שירות הנסיעות עמוס: חכו דקה", "code": "JOURNEY_BUSY"}
 
 
 def tool_name(text: str) -> str:
@@ -120,6 +125,8 @@ def journey(mob, d: dict) -> tuple[int, dict]:
         return 409, {"error": "the Drive screen is switched off on the computer", "code": "DRIVE_SCREEN_OFF"}
     if not v["journey_on"]:
         return 409, {"error": "journey planning is switched off on the computer", "code": "JOURNEY_OFF"}
+    if not mob.rate_ok("drive-journey:*", JOURNEY_ALL_PHONES_PER_MIN):          # shared by all phones (free providers)
+        return 429, dict(JOURNEY_BUSY)
     try:
         tp = jn.plan(str(d.get("origin", "")), str(d.get("destination", "")))
     except jn.JourneyError as e:
