@@ -180,15 +180,22 @@
       if (turn) d.dataset.turn = turn;
       log.append(d); scroll(); return d;
     }
+    function displayBlock(m) {      // #363: read-only owner text from a tool result; text nodes only, one RTL-safe line each
+      const d = h("div", { class: "jc-msg jc-display", dir: "auto" });
+      String(m.text || "").split(String.fromCharCode(10)).forEach((ln) => d.append(h("div", { dir: "auto", style: "white-space:pre-wrap" }, ln)));
+      log.append(d); scroll(true);
+    }
     function toolLine(m) {
-      const label = `${m.name} · ${m.ok ? tx("הצליח", "ok") : tx("נכשל", "failed")}${m.code && m.code !== "ok" ? " · " + m.code : ""}`;
-      const d = h("details", { class: "jc-tool " + (m.ok ? "ok" : "bad") }, h("summary", { dir: "ltr" }, label),
+      const safety = !m.ok && m.code === "TOOL_UNTRUSTED_TURN";
+      const label = `${m.name} · ${m.ok ? tx("הצליח", "ok") : safety ? tx("דולג (כלל בטיחות)", "skipped (safety rule)") : tx("נכשל", "failed")}${m.code && m.code !== "ok" ? " · " + m.code : ""}`;
+      const d = h("details", { class: "jc-tool " + (m.ok || safety ? "ok" : "bad") }, h("summary", { dir: "ltr" }, label),
         h("pre", { dir: "auto", class: "jc-detail" }, m.detail || tx("(אין פרטים)", "(no details)")));
       log.append(d); scroll();
     }
     function noticeText(m) { return lang() === "he" ? m.he : m.en; }
     function renderMessage(m) {
       if (m.role === "tool") return toolLine(m);
+      if (m.role === "display") return displayBlock(m);
       if (m.role === "notice") return bubble("notice", noticeText(m));
       return bubble(m.role === "user" ? "user" : "assistant", m.text, m.turn, m.ts);
     }
@@ -211,6 +218,7 @@
         if (b) { setText(b, text); b.classList.remove("streaming"); b.removeAttribute("aria-busy"); if (!e.ok) b.classList.add("err"); }
         turns.delete(e.turn);
       } else if (e.type === "tool") toolLine(e);
+      else if (e.type === "display") displayBlock(e);
       else if (e.type === "notice") bubble("notice", noticeText(e));
       else if (e.type === "reset") api.state(lang()).then(load).catch(() => {});
       else if (e.type === "error") note(word(e.code, e.message || e.code), "err");
