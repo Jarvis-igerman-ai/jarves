@@ -174,8 +174,11 @@ for _fid, _w, _p, _perm, _set in [
      ["read"], ""),
     ("gmail_send", _win("implemented_unverified", "UNIT test_google.py", _NO_GOOGLE), _pi("planned", _PI_OAUTH),
      ["action", "destructive"], ""),
-    ("camera", _win("implemented_unverified", "UNIT test_camera.py", "no hands-on camera check recorded"),
-     _pi("implemented_unverified", "picamera2 backend never run on Pi Camera hardware"), ["read"], "config [camera]"),
+    ("camera", _win("implemented_unverified", "UNIT test_camera.py + test_camera_ux.py (fake camera): Camera page, device "
+                   "probe vs frame test, timed preview, `jarvis camera`",
+                   "no hands-on webcam check of the Camera page, preview, frame test or unplug/replug recorded"),
+     _pi("implemented_unverified", "picamera2 backend never run on Pi Camera hardware"), ["read"],
+     "Camera page; jarvis camera; config [camera]"),
     ("face_recognition", _win("planned", blocker="no faces Skill yet"), _pi("planned", "no faces Skill yet"),
      ["read"], ""),
     ("camera_when_away", _win("planned", blocker="no away-watch Skill yet"), _pi("planned", "no away-watch Skill yet"),
