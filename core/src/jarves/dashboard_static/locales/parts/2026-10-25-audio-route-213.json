@@ -1,0 +1,8 @@
+{
+ "dict": {
+  "Headset, Bluetooth or microphone lost mid-conversation": "ניתוק אוזניות, בלוטות' או מיקרופון באמצע שיחה",
+  "Reconnect the headset or microphone, then press push-to-talk or say the wake word. JARVES never reopens the microphone by itself.": "חברו מחדש את האוזניות או המיקרופון, ואז לחצו לדבר או אמרו את מילת ההערה. ג'ארביס אף פעם לא פותח את המיקרופון מחדש בעצמו.",
+  "The microphone stopped sending audio (unplugged, Bluetooth dropped or the audio route changed).": "המיקרופון הפסיק לשלוח שמע (נותק, הבלוטות' נפל או שנתיב השמע השתנה).",
+  "The speaker stopped accepting audio (unplugged, Bluetooth dropped or the audio route changed).": "הרמקול הפסיק לקבל שמע (נותק, הבלוטות' נפל או שנתיב השמע השתנה)."
+ }
+}

@@ -1411,6 +1411,11 @@ class Core:
                     else "conversation closed after silence (voice.idle_disconnect_s)")}))
                 await self._voice_limit_notice("VOICE_IDLE_DISCONNECT", f"{self.cfg.voice.idle_disconnect_s:g} s",
                                                self.cfg.voice.idle_disconnect_s)
+            elif reason == "audio_route_lost" and not self.stopping:      # V6 #213: say so, do not reopen the mic
+                self._spawn(self.link.send_face("assistant.activity", {"kind": "limit", "detail": "", "text": (
+                    "המיקרופון או הרמקול התנתקו (למשל בלוטות'), השיחה נסגרה. חברו מחדש ולחצו לדבר, או אמרו את מילת ההערה"
+                    if he_ else "The microphone or speaker disconnected (for example Bluetooth), so the conversation "
+                    "ended. Reconnect it, then use push-to-talk or the wake word.")}))
             if not self.stopping:
                 self._spawn(self.curator.run(f"live_{reason}"))   # learn durable facts from this conversation
             # Smooth conversation: the server closing a session (or a time limit) while the user is in the middle

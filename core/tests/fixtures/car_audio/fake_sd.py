@@ -26,6 +26,7 @@ class FakeDevice:
     max_out: int = 0
     kind: str = "builtin"           # builtin | hfp | a2dp | usb
     present: bool = True
+    gen: int = 0                    # bumped on every unplug: a stream opened before it stays dead after a replug
 
 
 def default_devices() -> list[FakeDevice]:
@@ -38,10 +39,11 @@ def default_devices() -> list[FakeDevice]:
 class _Stream:
     def __init__(self, owner: "FakeSoundDevice", device: FakeDevice) -> None:
         self.owner, self.device, self.closed, self.started = owner, device, False, False
+        self._gen = device.gen
 
     @property
     def active(self) -> bool:
-        return self.started and not self.closed and self.device.present
+        return self.started and not self.closed and self.device.present and self._gen == self.device.gen
 
     def __enter__(self):
         self.started = True
@@ -73,7 +75,7 @@ class _InputStream(_Stream):
 
 class _OutputStream(_Stream):
     def write(self, data) -> None:
-        if self.closed or not self.device.present:
+        if self.closed or not self.device.present or self._gen != self.device.gen:
             raise PortAudioError(f"Unanticipated host error: {self.device.name} is gone")
         self.owner.played[self.device.name] = self.owner.played.get(self.device.name, 0) + len(bytes(data))
 
@@ -148,6 +150,7 @@ class FakeSoundDevice:
     def unplug(self, name: str) -> None:
         """The device disappears: open streams on it die; a default pointing at it falls back to the built-ins."""
         self.dev(name).present = False
+        self.dev(name).gen += 1
         self.events.append(("unplug", name))
         if self.default_in == name:
             self.default_in = BUILTIN_MIC

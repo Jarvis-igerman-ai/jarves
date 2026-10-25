@@ -1,0 +1,49 @@
+order = 62
+category = "everyday"
+features = []
+suggest = false
+aliases = ["בלוטות'", "בלוטוס", "אוזניות", "התנתקו האוזניות", "מיקרופון התנתק", "ברכב", "bluetooth", "headset unplugged", "audio route", "microphone disconnected", "speaker disconnected", "car audio"]
+links = ["drive_mode", "wake_word"]
+title_he = "ניתוק אוזניות, בלוטות' או מיקרופון באמצע שיחה"
+title_en = "Headset, Bluetooth or microphone lost mid-conversation"
+what_he = "אם המיקרופון או הרמקול נעלמים באמצע שיחה (חוטי אוזניות, בלוטות' של הרכב נופל, התקן אחר תפס את השמע), ג'ארביס לא קורס ולא ממשיך להקשיב בשקט: השיחה נסגרת, הוא אומר שהמכשיר התנתק ומה לעשות, והמצב בעמוד הבריאות נהיה \"פגום\". הוא לעולם לא פותח את המיקרופון מחדש בעצמו אחרי חיבור מחדש."
+what_en = "If the microphone or speaker disappears in the middle of a conversation (a headset is unplugged, the car Bluetooth drops, another app takes the audio), JARVES does not crash and does not keep listening in silence: the conversation closes, he says the device disconnected and what to do, and the voice health shows \"degraded\". He never reopens the microphone by himself after you reconnect."
+say = [["היי ג'ארביס", "Hey Jarvis"]]
+expect_he = "אחרי חיבור מחדש של האוזניות או הבלוטות', אמרו את מילת ההערה או לחצו לדבר כדי להתחיל שיחה חדשה. עד אז המיקרופון של השיחה סגור. הפעולה פעילה תמיד ואין לה מתג."
+expect_en = "After you reconnect the headset or Bluetooth, say the wake word or press push-to-talk to start a new conversation. Until then the conversation microphone stays closed. This is always on; there is no switch."
+test_he = "הריצו  jarvis mic status  וראו שהמיקרופון פעיל, נתקו את האוזניות באמצע שיחה, והמתינו כחמש שניות: השיחה נסגרת וההודעה מופיעה בלוח הבקרה."
+test_en = "Run  jarvis mic status  and see the microphone is on, unplug the headset in the middle of a conversation and wait about five seconds: the conversation closes and the notice appears on the dashboard."
+cost_he = "חינם. הכול מקומי."
+cost_en = "Free. All local."
+privacy_he = "אין הקלטה ואין שמירת שמע. אחרי ניתוק המיקרופון נשאר סגור עד שתתחילו שיחה בעצמכם."
+privacy_en = "Nothing is recorded or saved. After a disconnect the microphone stays closed until you start a conversation yourself."
+
+[[steps]]
+he = "חברו את האוזניות או את הבלוטות' של הרכב לפני שמתחילים שיחה."
+en = "Connect the headset or the car Bluetooth before you start a conversation."
+
+[[steps]]
+he = "אם משהו מתנתק באמצע, ג'ארביס סוגר את השיחה (אחרי כחמש שניות של שקט מהמיקרופון, או מיד אם הרמקול נעלם) ומציג הודעה."
+en = "If something disconnects in the middle, JARVES closes the conversation (after about five seconds of silence from the microphone, or at once if the speaker disappears) and shows a notice."
+
+[[steps]]
+he = "חברו מחדש, ואז אמרו את מילת ההערה או לחצו לדבר. שיחה חדשה לא נפתחת בעצמה."
+en = "Reconnect, then say the wake word or press push-to-talk. A new conversation never starts by itself."
+
+[[problems]]
+he = "השיחה נסגרה לבד באמצע"
+en = "The conversation closed by itself in the middle"
+fix_he = "בדקו אם האוזניות, הבלוטות' או המיקרופון התנתקו או שיישום אחר תפס את השמע. חברו מחדש והריצו jarvis mic status."
+fix_en = "Check whether the headset, Bluetooth or microphone disconnected or another app took the audio. Reconnect and run jarvis mic status."
+
+[[problems]]
+he = "חיברתי מחדש והוא עדיין לא מקשיב"
+en = "I reconnected and he still does not listen"
+fix_he = "בכוונה: המיקרופון לא נפתח מחדש בעצמו. אמרו את מילת ההערה או לחצו לדבר. אם עדיין שקט, הריצו jarvis doctor ובחרו את ההתקן הנכון."
+fix_en = "On purpose: the microphone is not reopened by itself. Say the wake word or press push-to-talk. If still silent, run jarvis doctor and pick the right device."
+
+[platform]
+windows = "implemented_unverified"
+windows_note_en = "tested with simulated devices only; no real Bluetooth or car kit has been tried"
+pi = "implemented_unverified"
+pi_note_en = "same code; not run on a Raspberry Pi"

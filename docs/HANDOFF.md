@@ -4,6 +4,13 @@ V4.5 approved by the owner 24 Oct 2026: [NOW](NOW.md) is now the bounded V4.5 au
 
 PR #110 conflict-resolution evidence and carried decision gates: [handoff](handoff/2026-10-24-pr110-merge.md).
 
+## V6 items 6 + 7: audio route handling (#213) and car-audio fixtures (#214) - 25 Oct 2026 (branches v6/audio-route-213, v6/audio-fixtures-214)
+
+- Done: `StreamingAudio` (voice/audio.py) detects a mic that sends nothing for `mic_stall_s` (5 s) and a speaker write failure; both raise `AudioUnavailable` (`AUDIO_MIC_STALLED` / `AUDIO_SPEAKER_UNAVAILABLE`). `SessionLifecycle._task_done` (live + realtime) ends the conversation with reason `audio_route_lost`, health `degraded` with a truthful detail and the action 'push-to-talk or wake word'; `app.py` on_end tells the owner (EN/HE). Nothing reopens the mic: only wake word or push-to-talk start a new conversation. Mic-open failure at start keeps its old `error:AUDIO_MIC_UNAVAILABLE` result.
+- Fixtures: `core/tests/fixtures/car_audio` (FakeSoundDevice with built-in, car HFP, A2DP, USB devices; unplug/replug, route switch, Bluetooth drop, audio focus loss; scenarios). Simulation only, no real-car claim.
+- Tests: `test_audio_route_213.py` (no-change tests parametrized over FakeAudio and StreamingAudio+fake device), `test_car_audio_fixtures.py`. Guide `audio_route.toml` EN+HE, capability row `audio_route` (implemented_unverified), Hebrew via catalog_add part. No feature switch, so no `[parity.features]` entry; CLI surface is `jarvis mic status` / `jarvis status`.
+- Not done / open: Android side (setCommunicationDevice on Android 13+, mic foreground-service limits on Android 14+, audio focus) belongs to the phone PWA/native app and is untested; the PWA has no route-change handling yet. A play() started on a device that vanishes mid-clip (push-to-talk SoundDeviceAudio) is not detected. No real Bluetooth or car kit tried. Real-device evidence is still NOT-RUN.
+
 ## V6 item 9: drive mode wired into SkillRegistry - 25 Oct 2026 / #216 (branch v6/drive-wire-216, label no-automerge)
 
 - Done: `SkillRegistry.drive` (None = not wired) is consulted in `_authorize` after the TOOL_FORBIDDEN policy and BEFORE the untrusted-turn guard, precheck and approval prompt. `drive_mode.Gate.check`: switch off -> None (no change); allow -> None (normal approvals unchanged; drive mode never approves); defer -> queued (`DRIVE_DEFERRED`, label = tool name + recipient first name, never text); emergency from untrusted text -> `DRIVE_REFUSED` (not queued); model `feature_set drive_mode` -> `DRIVE_OWNER_ONLY`. Policy exception -> `DRIVE_ERROR` for action/destructive tools (fail closed); reads and hang-up/stop/cancel go on.
