@@ -88,3 +88,10 @@ def test_expiry_semantics_untouched(reg):
     assert reg.get(ir.issue_id("tools", "TOOL_A_FAIL"))["closed_reason"] == "expired"
     reg.record("tools", "TOOL_A_FAIL", "P2")
     assert reg.counts()["open"] == 1
+
+
+def test_p1_or_error_level_record_with_a_hint_code_is_never_hidden(reg):
+    reg.record("live", "LIVE_EXTRA_REJECTED", "P1")
+    reg.record("health", "FINDING_log:ERROR:WAKE_MIC_QUIET", "P2", {"finding": "log:ERROR:WAKE_MIC_QUIET"})
+    c = reg.counts()
+    assert c["open"] == 2 and c["info"] == 0 and c["p1"] == 1

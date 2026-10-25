@@ -162,6 +162,7 @@ def env_key(r: dict) -> str | None:
     return None
 
 
+SEVERITY_GUARDED = frozenset({"live_extra", "wake_mic"})   # warning-level hints only
 SPEED_RUNS_TO_FLAG = 3        # a speed item is information until this many runs exceeded the budget
 
 
@@ -176,9 +177,13 @@ def speed_pending(r: dict) -> bool:
 def classify(r: dict) -> str:
     """'info' for an expected environment state, an INFO_ record or a speed item below 3 runs, else 'bug'.
     Only the code decides (never the area), so a real failure in the same area still counts."""
-    if str(r.get("code") or "").startswith("INFO_") or fingerprint_of(str(r.get("code") or "")).startswith("version:")             or env_key(r) or speed_pending(r):
+    code = str(r.get("code") or "")
+    if code.startswith("INFO_") or fingerprint_of(code).startswith("version:") or speed_pending(r):
         return "info"
-    return "bug"
+    ek = env_key(r)
+    if ek in SEVERITY_GUARDED and (r.get("severity") == "P1" or "log:ERROR:" in code):
+        return "bug"          # a P1 or an ERROR-level record is a real failure, whatever its code (#433)
+    return "info" if ek else "bug"
 
 
 def looks_raw(title: str, code: str) -> bool:
