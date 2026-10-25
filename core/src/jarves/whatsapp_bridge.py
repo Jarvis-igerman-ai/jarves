@@ -637,7 +637,8 @@ class SearchArgs(_Tolerant):
         "who": ("chat", "name", "contact", "jid", "chat_id", "from_chat"),
         "since": ("date", "from", "after", "start", "from_date", "start_date", "date_from"),
         "until": ("to", "before", "end", "to_date", "end_date", "date_to")}
-    query: str = Field(..., min_length=2, max_length=80)
+    query: str = Field("", max_length=80, description="words to find; may be empty when who is given (then: that chat's "
+                       "latest messages, optionally within since/until)")
     who: str = Field("", max_length=60, description="only this chat")
     since: str = Field("", max_length=12, description="today, 2026-09-01 or 30d / 2w ago")
     until: str = Field("", max_length=12)
@@ -645,9 +646,15 @@ class SearchArgs(_Tolerant):
     @field_validator("query", mode="before")
     @classmethod
     def _q(cls, v):
+        if v is None or isinstance(v, bool):
+            return ""
         if isinstance(v, (list, tuple)):
             v = " ".join(str(x) for x in v)
-        return v.strip()[:80] if isinstance(v, str) else v
+        elif isinstance(v, dict):
+            v = _name_of(v) or ""
+        elif isinstance(v, (int, float)):
+            v = str(v)
+        return v.strip()[:80] if isinstance(v, str) else ""
 
     @field_validator("who", mode="before")
     @classmethod
@@ -879,7 +886,12 @@ class WhatsAppBridgeSkill(Skill):
                               code="WA_SUMMARY" if out else "WA_UNKNOWN_CONTACT")
 
         async def search(a: SearchArgs) -> ToolResult:
-            arch = self.archive() if self.archive is not None else None
+            empty_q = len(a.query.strip()) < 2
+            if empty_q and not a.who.strip():
+                return ToolResult(False, "חסרות מילים לחיפוש. אפשר לתת מילה לחפש, או שם צ'אט (who) כדי לקבל את ההודעות האחרונות שלו.",
+                                  {"hint": "pass query (2+ characters) or who (a chat name from whatsapp_find_chat); to read "
+                                           "a chat use whatsapp_chat"}, code="WA_NEED_QUERY")
+            arch = self.archive() if self.archive is not None and not empty_q else None
             if arch is not None:
                 return await search_archive(arch, a)
             try:
@@ -889,7 +901,7 @@ class WhatsAppBridgeSkill(Skill):
                 return ToolResult(False, "התאריך לא ברור. אפשר today, yesterday, 2026-09-01 או 30d (ימים), 2w, 3m, 1y.",
                                   code="WA_BAD_DATE")
             only = None
-            if a.who.strip() and (since is not None or until is not None):
+            if a.who.strip() and (empty_q or since is not None or until is not None):
                 one, err = await self._resolve_one(a.who)      # "all of her messages today": that chat, that range
                 if err is not None:
                     return err
