@@ -251,3 +251,14 @@ def test_drive_js_is_served_csp_safe_translated_and_never_opens_a_link_itself():
     assert re.search(r'id="tabbtn-drive"[^>]*\bhidden\b', html)                                      # hidden by default
     app = (MOBILE_DIR / "app.js").read_text(encoding="utf-8")
     assert 'drive: "scope:drive"' in app and "tab_drive" in app
+
+
+def test_trip_limit_is_shared_across_all_phones(rig):
+    toks = [rig.pair()[0] for _ in range(3)]
+    sts = []
+    for i in range(mobile_drive.JOURNEY_ALL_PHONES_PER_MIN + 2):          # 3 phones x 4 taps stays under each phone's own 6/min
+        sts.append(call(rig.d, "POST", "/api/m/drive/journey", toks[i % 3], {"origin": "A1", "destination": "B1"}))
+    ok = [s for s, _ in sts if s == 200]
+    assert len(ok) == mobile_drive.JOURNEY_ALL_PHONES_PER_MIN
+    st, j = sts[-1]
+    assert st == 429 and j["error"] and j["error_he"] and j["code"] == "JOURNEY_BUSY"

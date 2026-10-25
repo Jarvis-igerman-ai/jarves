@@ -16,6 +16,8 @@ from __future__ import annotations
 import json
 import os
 import re
+import threading
+import time
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 from urllib.parse import quote, urlencode
@@ -35,6 +37,47 @@ NOMINATIM_ENV = "JARVES_GEOCODE_API_BASE"
 OSRM_ENV = "JARVES_ROUTE_API_BASE"
 USER_AGENT = "JARVES-journey/1.0 (personal assistant; contact via GitHub igalgerman/jarves)"
 CURRENT_LOCATION = re.compile(r"^(here|my location|current location|where i am|me|כאן|פה|המיקום שלי|המיקום הנוכחי|איפה שאני)$", re.I)
+
+
+GEOCODE_MIN_INTERVAL_S = 1.0         # Nominatim usage policy: at most 1 request per second, one User-Agent that identifies us
+GEOCODE_CACHE_TTL_S = 600.0          # identical queries are answered from memory for ~10 minutes (the policy expects caching)
+GEOCODE_CACHE_MAX = 256
+_clock = time.monotonic              # tests replace these two with a fake clock
+_sleep = time.sleep
+
+
+class _Geocoder:
+    """Process-wide, shared by every phone and the PC: a short geocode cache and the 1 request/s spacing."""
+
+    def __init__(self) -> None:
+        self.lock = threading.Lock()
+        self.cache: dict[str, tuple[float, tuple[float, float]]] = {}
+        self.last = -1e9
+
+    def get(self, key: str):
+        with self.lock:
+            hit = self.cache.get(key)
+            if hit and _clock() - hit[0] < GEOCODE_CACHE_TTL_S:
+                return hit[1]
+            self.cache.pop(key, None)
+            return None
+
+    def put(self, key: str, value: tuple[float, float]) -> None:
+        with self.lock:
+            if len(self.cache) >= GEOCODE_CACHE_MAX:
+                self.cache.pop(next(iter(self.cache)))
+            self.cache[key] = (_clock(), value)
+
+    def wait_turn(self) -> None:
+        """Block until at least GEOCODE_MIN_INTERVAL_S has passed since the previous request (the lock serialises phones)."""
+        with self.lock:
+            gap = GEOCODE_MIN_INTERVAL_S - (_clock() - self.last)
+            if gap > 0:
+                _sleep(gap)
+            self.last = _clock()
+
+
+GEOCODER = _Geocoder()
 
 
 class JourneyError(Exception):
@@ -139,13 +182,20 @@ class OsrmProvider:
     name = "OpenStreetMap (Nominatim + OSRM)"
 
     def _geocode(self, place: str, client: httpx.Client) -> tuple[float, float]:
+        key = place.casefold()
+        cached = GEOCODER.get(key)
+        if cached is not None:
+            return cached
+        GEOCODER.wait_turn()
         base = os.environ.get(NOMINATIM_ENV, "https://nominatim.openstreetmap.org")
         r = client.get(f"{base}/search", params={"q": place, "format": "json", "limit": 1}, headers={"User-Agent": USER_AGENT})
         r.raise_for_status()
         rows = r.json()
         if not rows:
             raise JourneyError("JOURNEY_NOT_FOUND", place=place)
-        return float(rows[0]["lon"]), float(rows[0]["lat"])
+        got = (float(rows[0]["lon"]), float(rows[0]["lat"]))
+        GEOCODER.put(key, got)
+        return got
 
     def estimate(self, origin: str, destination: str, client: httpx.Client, now: datetime) -> RouteEstimate:
         a, b = self._geocode(origin, client), self._geocode(destination, client)
