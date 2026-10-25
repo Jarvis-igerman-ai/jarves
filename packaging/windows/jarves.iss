@@ -125,8 +125,11 @@ Name: "{userdesktop}\JARVES"; Filename: "{app}\jarvis.cmd"; WorkingDir: "{app}";
 ; Autostart is OFF by default; use the app's own mechanism when explicitly selected.
 Filename: "{cmd}"; Parameters: "/c """"{app}\jarvis.cmd"" autostart on"""; Tasks: autostart; Flags: runhidden waituntilterminated
 Filename: "{cmd}"; Parameters: "/c """"{app}\jarvis.cmd"" autostart off"""; Check: DisableAutostart; Flags: runhidden waituntilterminated
-; In-app update / rollback (setup started with /RESTARTJARVES=1 by jarves.updates): start the Core again, windowless.
-Filename: "{app}\python\pythonw.exe"; Parameters: "-m jarves run --background"; WorkingDir: "{app}"; Check: RestartRequested; Flags: nowait runhidden
+; In-app update / rollback (setup started with /RESTARTJARVES=1 by jarves.updates): start the Core again, windowless,
+; only when it was running before (#166; unknown = it was), with its window when the window was open.
+Filename: "{app}\python\pythonw.exe"; Parameters: "{code:CoreRunArgs}"; WorkingDir: "{app}"; Check: RestartCoreNow; Flags: nowait runhidden
+; #166: a dashboard that was open is opened again with the same safe flags (never one that was not running).
+Filename: "{app}\python\pythonw.exe"; Parameters: "{code:DashboardRunArgs}"; WorkingDir: "{app}"; Check: RestartDashboardNow; Flags: nowait runhidden
 ; The finish-page button below opens the dashboard without a console.
 ; Silent installs: JARVES-Setup.exe /VERYSILENT /SETUPANSWERS=C:\path\answers.json applies a setup answers file (no
 ; secrets in it; see docs/INSTALL_TEST.md). Without /SETUPANSWERS= the command does nothing (exit 0).
@@ -160,6 +163,8 @@ var
   BackupState: String;
   SnapshotMade, SetupComplete, CoreStopped: Boolean;
   Retained: String;                                  // '|python|face|': the parts THIS run moved into rollback
+  WasRecorded, WasCore, WasFace, WasDash: Boolean;   // what ran before the update (#166)
+  DashArgs: String;
 
 function DataDir(): String;
 begin
@@ -370,13 +375,18 @@ end;
 // \face, \bridge or \rollback (matched by path, never by command line; never the whole {app}, which a first install
 // may have put in a shared folder) is first asked to close (windowed ones: face, music player), given a short grace,
 // and only then hard-stopped. Each step is written to the setup log by name (#153).
-function StopScript(const Dir, LogFile, LockRoot: String; WaitS: Integer): String;
+function StopScript(const Dir, LogFile, LockRoot: String; WaitS: Integer; const WasFile: String; DetectOnly: Boolean): String;
+var Detect: String;
 begin
+  Detect := '$false';
+  if DetectOnly then Detect := '$true';
   Result :=
     '$Dir = ' + PSQuote(Dir) + #13#10 +
     '$Log = ' + PSQuote(LogFile) + #13#10 +
     '$LockRoot = ' + PSQuote(LockRoot) + #13#10 +
     '$WaitS = ' + IntToStr(WaitS) + #13#10 +
+    '$Was = ' + PSQuote(WasFile) + #13#10 +
+    '$DetectOnly = ' + Detect + #13#10 +
     '$GraceS = 8' + #13#10 +
     '$d = $Dir.TrimEnd([char]92) + [char]92' + #13#10 +
     '$out = @()' + #13#10 +
@@ -396,6 +406,26 @@ begin
     '}' + #13#10 +
     '$parts = @(@("python", "face", "bridge", "rollback") | ForEach-Object { $d + $_ + [char]92 })' + #13#10 +
     '$p = @(Get-Process | Where-Object { $q = $_.Path; $q -and @($parts | Where-Object { $q.StartsWith($_, [StringComparison]::OrdinalIgnoreCase) }).Count })' + #13#10 +
+    // #166: what runs now: the Core by its lock holder pid, the window by a {app}\face process, the dashboard by its
+    // own marker (pid must be a program process; only the four safe flags are kept). Never by command line.
+    'if ($Was) {' + #13#10 +
+    '  $ran = @()' + #13#10 +
+    '  try {' + #13#10 +
+    '    $fs = [IO.File]::Open((Join-Path $LockRoot "core.lock"), "Open", "Read", "ReadWrite")' + #13#10 +
+    '    try { [void]$fs.Seek(1, "Begin"); $b = New-Object byte[] 4096; $n = $fs.Read($b, 0, 4096); $cp = [int]([Text.Encoding]::UTF8.GetString($b, 0, $n).Trim([char]0, [char]32, [char]10, [char]13) | ConvertFrom-Json).pid } finally { $fs.Dispose() }' + #13#10 +
+    '    if ($cp -and @($p | Where-Object { $_.Id -eq $cp }).Count) { $ran += "core" }' + #13#10 +
+    '  } catch {}' + #13#10 +
+    '  if (@($p | Where-Object { $_.Path.StartsWith($d + "face" + [char]92, [StringComparison]::OrdinalIgnoreCase) }).Count) { $ran += "face" }' + #13#10 +
+    '  try {' + #13#10 +
+    '    $m = Get-Content -LiteralPath (Join-Path $LockRoot "dashboard.run.json") -Raw -ErrorAction Stop | ConvertFrom-Json' + #13#10 +
+    '    if (@($p | Where-Object { $_.Id -eq [int]$m.pid }).Count) {' + #13#10 +
+    '      $f = @($m.flags | Where-Object { $_ -in "--lan", "--mobile", "--tls-selfsigned", "--tailnet-only" })' + #13#10 +
+    '      $ran += ("dashboard " + ($f -join " ")).Trim()' + #13#10 +
+    '    }' + #13#10 +
+    '  } catch {}' + #13#10 +
+    '  [IO.File]::WriteAllText($Was, ($ran -join [Environment]::NewLine))' + #13#10 +
+    '  if ($DetectOnly) { exit 0 }' + #13#10 +
+    '}' + #13#10 +
     '$asked = @($p | Where-Object { $_.MainWindowHandle -ne 0 })' + #13#10 +
     'foreach ($x in $asked) { try { [void]$x.CloseMainWindow(); $out += "asked to close: $($x.ProcessName) (pid $($x.Id))" } catch {} }' + #13#10 +
     'function Alive($list) { @($list | Where-Object { try { -not $_.HasExited } catch { $false } }) }' + #13#10 +
@@ -441,11 +471,83 @@ begin
   DeleteFile(LogFile);
   if not Exec(ExpandConstant('{sys}\WindowsPowerShell\v1.0\powershell.exe'),
     '-NoProfile -NonInteractive -ExecutionPolicy Bypass -EncodedCommand ' +
-    EncodedCommand(StopScript(Dir, LogFile, DataDir(), WaitS)), '', SW_HIDE, ewWaitUntilTerminated, Code) then
+    EncodedCommand(StopScript(Dir, LogFile, DataDir(), WaitS, '', False)), '', SW_HIDE, ewWaitUntilTerminated, Code) then
     Log('Stopping JARVES before the upgrade: PowerShell could not be started (' + SysErrorMessage(Code) + ')');
   if LoadStringsFromFile(LogFile, Lines) then
     for I := 0 to GetArrayLength(Lines) - 1 do
       Log('Stopping JARVES before the upgrade: ' + Lines[I]);
+end;
+
+// #166: what was running before setup stopped it (the Core, its window, a standalone dashboard) is what is started
+// again. Detected BEFORE anything is stopped (the same encoded script, detect-only). Unknown (no old program, the
+// check failed) counts as "the Core was running": the behaviour before this change.
+procedure RecordWhatRuns();
+var
+  Code, I: Integer;
+  Dir, LogFile, WasFile, Line: String;
+  Lines: TArrayOfString;
+begin
+  Dir := RemoveBackslashUnlessRoot(LongPath(ExpandConstant('{app}')));
+  if Length(Dir) <= 3 then exit;
+  LogFile := ExpandConstant('{tmp}\jarves-detect-app.log');
+  WasFile := ExpandConstant('{tmp}\jarves-was-running.txt');
+  DeleteFile(WasFile);
+  if not Exec(ExpandConstant('{sys}\WindowsPowerShell\v1.0\powershell.exe'),
+    '-NoProfile -NonInteractive -ExecutionPolicy Bypass -EncodedCommand ' +
+    EncodedCommand(StopScript(Dir, LogFile, DataDir(), 0, WasFile, True)), '', SW_HIDE, ewWaitUntilTerminated, Code) or
+    (Code <> 0) or not FileExists(WasFile) then begin
+    Log('Could not tell what was running before the update; the Core is restarted if setup was asked to');
+    exit;
+  end;
+  WasRecorded := True;
+  LoadStringsFromFile(WasFile, Lines);
+  for I := 0 to GetArrayLength(Lines) - 1 do begin
+    Line := Trim(Lines[I]);
+    if Line = 'core' then WasCore := True
+    else if Line = 'face' then WasFace := True
+    else if Pos('dashboard', Line) = 1 then begin WasDash := True; DashArgs := Trim(Copy(Line, 10, 200)); end;
+    if Line <> '' then Log('Running before the update: ' + Line);
+  end;
+  if not (WasCore or WasFace or WasDash) then Log('Running before the update: nothing');
+end;
+
+function CoreWasRunning(): Boolean;
+begin
+  // only the detection decides; unknown = the Core was running. (`cmd /c jarvis.cmd stop` exits 0 even when no Core
+  // runs, so its exit code is no witness: CI showed a Core restarted after nothing ran.)
+  Result := WasCore or not WasRecorded;
+end;
+
+function CoreRunArgs(Param: String): String;
+begin
+  Result := '-m jarves run --background';
+  if WasFace then Result := Result + ' --show';
+end;
+
+function DashboardRunArgs(Param: String): String;
+begin
+  Result := '-m jarves dashboard ' + DashArgs;
+end;
+
+function RestartCoreNow(): Boolean;
+begin
+  Result := RestartRequested() and CoreWasRunning();
+end;
+
+function RestartDashboardNow(): Boolean;
+begin
+  Result := RestartRequested() and WasRecorded and WasDash;
+end;
+
+// Start again exactly what was running (setup ended early, or the health check undid / kept the update).
+procedure StartWhatRan();
+var Code: Integer;
+begin
+  if not RestartRequested() or not FileExists(ExpandConstant('{app}\python\pythonw.exe')) then exit;
+  if CoreWasRunning() then
+    Exec(ExpandConstant('{app}\python\pythonw.exe'), CoreRunArgs(''), ExpandConstant('{app}'), SW_HIDE, ewNoWait, Code);
+  if WasRecorded and WasDash then
+    Exec(ExpandConstant('{app}\python\pythonw.exe'), DashboardRunArgs(''), ExpandConstant('{app}'), SW_HIDE, ewNoWait, Code);
 end;
 
 // Keep the previous program for rollback: rename {app}\<Name> to {app}\rollback\<Name> (same volume, no copy).
@@ -641,8 +743,10 @@ begin
   if Result <> '' then exit;
   Old := ExpandConstant('{app}\jarvis.cmd');
   WaitS := 0;
+  RecordWhatRuns();                                  // #166: before anything is stopped
   if FileExists(Old) then begin
-    Exec(ExpandConstant('{cmd}'), '/c ""' + Old + '" stop"', '', SW_HIDE, ewWaitUntilTerminated, Code);
+    if Exec(ExpandConstant('{cmd}'), '/c ""' + Old + '" stop"', '', SW_HIDE, ewWaitUntilTerminated, Code) then
+      Log('jarvis stop exit code: ' + IntToStr(Code));
     CoreStopped := True;
     WaitS := 15;                                     // `jarvis stop` only asks: wait for the Core to let go of core.lock
   end;
@@ -691,9 +795,7 @@ begin
   if SnapshotMade and not SetupComplete then
     RestoreProgram();
   // The update stopped JARVES and did not finish: start the old version again, as the finished update would have.
-  if CoreStopped and not SetupComplete and RestartRequested() and FileExists(ExpandConstant('{app}\python\pythonw.exe')) then
-    Exec(ExpandConstant('{app}\python\pythonw.exe'), '-m jarves run --background', ExpandConstant('{app}'), SW_HIDE,
-      ewNoWait, Code);
+  if CoreStopped and not SetupComplete then StartWhatRan();
 end;
 
 // Health check after an in-app update (/RESTARTJARVES=1, #164): the new Core must reach CORE_READY (recorded in
@@ -777,9 +879,8 @@ begin
   StopProcessesUnderApp(15);
   // review #260 F6: a slow but good version may have become ready while the stop ran: never swap it out then
   if RunHealth(1, Code) and (Code = 0) then begin
-    Log('Health check: the new version became ready after all; it stays, and its Core is started again');
-    Exec(ExpandConstant('{app}\python\pythonw.exe'), '-m jarves run --background', ExpandConstant('{app}'), SW_HIDE,
-      ewNoWait, Code);
+    Log('Health check: the new version became ready after all; it stays, and what ran is started again');
+    StartWhatRan();
     exit;
   end;
   Aside := AsideName('health', 'program');
@@ -791,8 +892,7 @@ begin
   if Ok then NoteHealth('rolled_back') else NoteHealth('rollback_failed');
   if Ok then begin
     Log('Health rollback done: the previous program is back');
-    Exec(ExpandConstant('{app}\python\pythonw.exe'), '-m jarves run --background', ExpandConstant('{app}'), SW_HIDE,
-      ewNoWait, Code);
+    StartWhatRan();
   end else
     Log('Health rollback incomplete; see the lines above. Run: jarvis update --rollback');
 end;
@@ -801,6 +901,10 @@ procedure HealthCheckAfterUpdate();
 var Code: Integer;
 begin
   if not (SetupComplete and SnapshotMade and RestartRequested()) or ParamPresent('/ROLLBACK=1') then exit;
+  if not RestartCoreNow() then begin                 // #166: a Core that was not running is not started, so not judged
+    Log('Health check skipped: the Core was not running before the update, so it was not started');
+    exit;
+  end;
   if Pos('|python|', Retained) = 0 then exit;          // no old runtime kept: nothing to judge or put back with
   // review #260 F4: a mistyped /HEALTHTIMEOUT= falls back to 180 s; it must never make a healthy update look broken
   if not RunHealth(StrToIntDef(ExpandConstant('{param:HEALTHTIMEOUT|180}'), 180), Code) then begin

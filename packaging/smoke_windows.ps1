@@ -209,6 +209,10 @@ if ($UpgradeFrom) {
     # is recorded, nothing is deleted. The data folder is restored afterwards so the later cases see the seeded data.
     $homeCopy = Join-Path $Work "home-before-health-case"
     Copy-Item -LiteralPath $Home_ -Destination $homeCopy -Recurse -Force
+    # #166: the old Core is RUNNING when setup starts, so setup restarts it and runs the health check (a Core that was not
+    # running is neither restarted nor judged).
+    $oldCore = Start-Process "cmd.exe" -ArgumentList "/c `"`"$App\jarvis.cmd`" run > `"$Work\core-health.out`" 2>&1`"" -NoNewWindow -PassThru
+    Check (Wait-Log "CORE_READY" 90) "the old Core is running before the candidate is installed"
     $pendingFile = Join-Path $Home_ "updates\pending.json"
     New-Item -ItemType Directory -Force (Split-Path $pendingFile) | Out-Null
     (@{ state = "installing"; from = $oldVer; to = "9.9.9"; attempts = 0 } | ConvertTo-Json) | Set-Content $pendingFile
@@ -324,6 +328,18 @@ if ($UpgradeFrom) {
         $r = Jarvis @("doctor") 180
         Check ($r.text -match "JARVES doctor" -and $r.text -match "(problem\(s\) found|All checks passed)") "jarvis doctor completes after the upgrade"
     }
+    # #166 (review P2-9): nothing runs, setup is started like the in-app updater (/RESTARTJARVES=1): after it, nothing
+    # runs from the program folder, and the health check is skipped (nothing was started to judge)
+    Jarvis @("stop") | Out-Null
+    Get-Process | Where-Object { $_.Path -and $_.Path.StartsWith($App, [StringComparison]::OrdinalIgnoreCase) } | Stop-Process -Force -ErrorAction SilentlyContinue
+    Start-Sleep 2
+    Check ((Install "DEFAULT" @("/RESTARTJARVES=1") $Installer "") -eq 0) "nothing running: an updater-style setup (/RESTARTJARVES=1) finishes"
+    $nrLog = Get-ChildItem (Join-Path $Work "install-*.log") | Sort-Object LastWriteTime | Select-Object -Last 1
+    Check (@(Select-String -Path $nrLog.FullName -Pattern "Running before the update: nothing" -ErrorAction SilentlyContinue).Count -ge 1) "nothing running: setup detected that nothing ran"
+    Check (@(Select-String -Path $nrLog.FullName -Pattern "Health check skipped: the Core was not running" -ErrorAction SilentlyContinue).Count -ge 1) "nothing running: the health check is skipped and logged"
+    Start-Sleep 5
+    $running = @(Get-Process | Where-Object { $_.Path -and $_.Path.StartsWith($App, [StringComparison]::OrdinalIgnoreCase) })
+    Check ($running.Count -eq 0) "nothing was running before the update: nothing is started after it ($($running.Count) process(es) under the program folder)"
     if ($Rollback) {
         # the in-app updater records the previous version before it starts setup; record the same thing for the test
         Check (Seed "previous" @("--installer", $UpgradeFrom, "--old-version", $oldVer, "--new-version", $newVer)) "previous version recorded like the updater does"

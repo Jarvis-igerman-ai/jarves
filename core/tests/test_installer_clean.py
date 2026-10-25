@@ -237,7 +237,7 @@ def test_silent_updates_stop_the_core_first_and_restart_it_only_when_asked():
     assert '" stop' in prepare
     assert prepare.index('" stop') < prepare.index("ExtractTemporaryFile")
     assert "CloseApplications=yes" in iss
-    assert "Check: RestartRequested" in iss and "/RESTARTJARVES=1" in iss
+    assert "Check: RestartCoreNow" in iss and "/RESTARTJARVES=1" in iss
     assert "if WizardSilent() then exit;" in iss.split("procedure OpenSetup", 1)[1].split("procedure InitializeWizard", 1)[0]
     assert updates.installer_args("x.exe", silent=True, restart=True)[1:] == [
         "/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART", "/CLOSEAPPLICATIONS", "/RESTARTJARVES=1"]
@@ -279,7 +279,7 @@ def test_the_stop_script_is_immune_to_execution_policy_and_sweeps_only_the_progr
     assert "LongPath(ExpandConstant('{app}'))" in stop and "GetLongPathNameW@kernel32.dll stdcall" in iss
     script = iss.split("function StopScript", 1)[1].split("procedure StopProcessesUnderApp", 1)[0]
     assert '@("python", "face", "bridge", "rollback")' in script
-    assert "$_.Path.StartsWith($d" not in script            # never the whole program folder
+    assert "$_.Path.StartsWith($d, [" not in script         # never the whole program folder
     # every value goes in as a PowerShell single-quoted literal (doubled quotes, typographic ones too)
     quote = iss.split("function PSQuote", 1)[1].split("function Utf16LeByte", 1)[0]
     for ch in ("'" * 4, "#$2018", "#$2019", "#$201A", "#$201B"):
@@ -348,7 +348,7 @@ def test_a_failed_retain_is_a_clean_refusal_that_keeps_the_old_version():
     assert "Retained := Retained + Name + '|';" in retain
     deinit = iss.split("procedure DeinitializeSetup", 1)[1].split("procedure CurStepChanged", 1)[0]
     assert "RestoreProgram();" in deinit
-    assert "CoreStopped and not SetupComplete and RestartRequested()" in deinit and "run --background" in deinit
+    assert "CoreStopped and not SetupComplete then StartWhatRan();" in deinit
     smoke = (PKG / "smoke_windows.ps1").read_text(encoding="utf-8-sig")
     for case in ("leftover rollback folder", "file locked by a process outside the program folder",
                  "windowed process under the program folder", "undeletable leftover rollback folder"):
@@ -413,7 +413,7 @@ def test_health_check_after_update_rolls_back_the_program_only():
     assert roll.index("can-program-rollback") < roll.index("NoteHealth('health_failed');") < roll.index("SwapBackPart('python'")
     # review P2-2: ask the new Core to stop and wait for core.lock before any hard stop
     assert roll.index('" stop"') < roll.index("StopProcessesUnderApp(15);") < roll.index("SwapBackPart('python'")
-    assert roll.index("NoteHealth('rolled_back')") < roll.index("Health rollback done")
+    assert roll.index("NoteHealth('rolled_back')") < roll.index("Health rollback done") < roll.rindex("StartWhatRan();")
     # review #260 F6: a version that became ready while the stop ran is never swapped out
     assert roll.index("StopProcessesUnderApp(15);") < roll.index("RunHealth(1, Code) and (Code = 0)") < roll.index("SwapBackPart('python'")
     assert "restore-data" not in roll and "DataDir()" in roll and "AsideName('health', 'program')" in roll
@@ -466,3 +466,33 @@ def test_low_disk_is_refused_before_the_backup_with_the_amount_needed():
     assert "OutFile: String;" in check and "Out :=" not in check and "Out:" not in check
     smoke = (PKG / "smoke_windows.ps1").read_text(encoding="utf-8-sig")
     assert "/DISKRESERVEMB=" in smoke and "Disk space check result code: 4" in smoke
+
+
+def test_update_restarts_only_what_was_running_before():
+    """#166: detected before anything is stopped (detect-only pass of the same encoded script); the Core only if it ran,
+    the window with --show only if it was open, the dashboard only with the safe flags from its own marker; unknown keeps
+    the old behaviour (restart the Core). A Core that was not running is not started, so not health-checked."""
+    iss = (PKG / "windows" / "jarves.iss").read_text(encoding="utf-8-sig")
+    prepare = iss.split("function PrepareToInstall", 1)[1].split("procedure DeinitializeSetup", 1)[0]
+    assert prepare.index("RecordWhatRuns();") < prepare.index('" stop')
+    script = iss.split("function StopScript", 1)[1].split("procedure StopProcessesUnderApp", 1)[0]
+    assert "core.lock" in script and "dashboard.run.json" in script and "$DetectOnly" in script
+    assert script.index("if ($DetectOnly) { exit 0 }") < script.index("CloseMainWindow()") < script.index("Stop-Process")
+    for flag in ("--lan", "--mobile", "--tls-selfsigned", "--tailnet-only"):
+        assert flag in script
+    assert "CommandLine" not in script
+    record = iss.split("procedure RecordWhatRuns", 1)[1].split("function CoreWasRunning", 1)[0]
+    assert "-EncodedCommand" in record and "-File" not in record and "StopScript(Dir, LogFile, DataDir(), 0, WasFile, True)" in record
+    run = [x for x in iss.splitlines() if x.startswith("Filename:")]
+    assert any("{code:CoreRunArgs}" in x and "Check: RestartCoreNow" in x for x in run)
+    assert any("{code:DashboardRunArgs}" in x and "Check: RestartDashboardNow" in x for x in run)
+    assert "Parameters: \"-m jarves run --background\"" not in iss
+    assert "'-m jarves run --background', ExpandConstant" not in iss          # every restart goes through StartWhatRan
+    assert "Result := Result + ' --show';" in iss.split("function CoreRunArgs", 1)[1].split("function DashboardRunArgs", 1)[0]
+    assert "Result := WasCore or not WasRecorded;" in iss and "CoreStopCode0" not in iss   # stop's exit code is no witness
+    assert "RestartRequested() and WasRecorded and WasDash" in iss
+    check = iss.split("procedure HealthCheckAfterUpdate", 1)[1].split("procedure CurStepChanged", 1)[0]
+    assert check.index("if not RestartCoreNow() then begin") < check.index("RunHealth(")
+    smoke = (PKG / "smoke_windows.ps1").read_text(encoding="utf-8-sig")
+    assert "the old Core is running before the candidate is installed" in smoke
+    assert "nothing was running before the update: nothing is started after it" in smoke

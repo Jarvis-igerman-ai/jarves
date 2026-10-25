@@ -1737,6 +1737,8 @@ def cmd_dashboard(a, cfg, home) -> int:
     elif mobile_on:
         print("Tailscale was not found on this computer (optional). Setup guide: docs/PHONE_ACCESS_TAILSCALE.md", flush=True)
     print("Ctrl+C to stop.", flush=True)
+    from . import runmarks
+    runmarks.write_dashboard(home, runmarks.dashboard_flags(a))          # so an update can reopen what was running
     if not a.no_open:
         import webbrowser
         page = str(getattr(a, "page", "") or "")
@@ -1746,6 +1748,7 @@ def cmd_dashboard(a, cfg, home) -> int:
     except KeyboardInterrupt:
         pass
     finally:
+        runmarks.clear_dashboard(home)
         dash.stop()
     return 0
 
