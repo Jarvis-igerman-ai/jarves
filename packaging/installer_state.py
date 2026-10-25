@@ -340,7 +340,7 @@ def disk_check(home: Path, app: Path, *, reserve_mb: int = 0, usage=None) -> dic
         except OSError:
             continue                                  # cannot tell: never block an update on a failed probe
         if short > 0 and (worst is None or short > worst["short"]):
-            worst = {"short": short, "need": need, "drive": str(anchor).rstrip("/" + chr(92))}
+            worst = {"short": short, "need": need, "drive": str(anchor).rstrip("/" + chr(92)) or str(anchor)}
     if worst is None:
         return {"ok": True, "drive": "", "short_mb": 0, "need_mb": 0}
     return {"ok": False, "drive": worst["drive"], "short_mb": -(-worst["short"] // MB), "need_mb": -(-worst["need"] // MB)}
