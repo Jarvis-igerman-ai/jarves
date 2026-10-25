@@ -310,7 +310,8 @@ class Gate:
             return None                                   # drive mode off: zero behaviour change
         source = turn_source(origin, route, tainted)
         by_voice = route == "voice"                       # set by the voice code path (skills.ROUTE), not the model
-        if tool.name == "feature_set" and str(getattr(args, "id", "")) == FEATURE:
+        # same normalisation as feature_set itself (a.id.strip().lower()), so "Drive_Mode " is caught here too
+        if tool.name == "feature_set" and str(getattr(args, "id", "") or "").strip().lower() == FEATURE:
             if origin == "user" and not tainted:
                 return None            # the owner's own words (deterministic parser): the normal flow decides
             # the model can never switch drive mode off (or "declare stopped") on its own authority
