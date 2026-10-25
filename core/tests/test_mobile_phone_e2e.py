@@ -522,7 +522,7 @@ def audit(page, lang):
     assert metrics["small"] == [], metrics["small"]                                          # tap targets >= 44 px
     r = page.evaluate(apc.RULES, {"lang": lang, "width": 390, "reduced": False})
     issues = [i for i in r["issues"] if i["rule"] in RULES_THAT_APPLY and i["where"] != "button#lang"
-              and not i["where"].startswith(("div#log>", "div.jc-log", "ul#apprList>li>span.grow", "ul.list>li.pref>div.grow>div.pref-text", "ul.list>li.pref>div.grow>div.muted"))]     # chat text and request titles are user DATA     # the language button names its language by design
+              and not i["where"].startswith(("div#log>", "div.jc-log", "ul#apprList>li>span.grow", "ul.list>li.pref>div.grow>div.pref-text", "ul.list>li.pref>div.grow>div.muted", "li.plan>div.grow>div.plan-head>s", "details>ol.plan-steps>"))]     # chat text and request titles are user DATA     # the language button names its language by design
     assert issues == [], issues
 
 
@@ -555,6 +555,25 @@ def test_layouts_at_390px_have_no_sideways_scroll_big_targets_and_contrast(brows
     assert page.errors == []
 
 
+# ------------------------------------------------------------------ V5 G4 (#184): Goal plans on the phone
+def _seed_plan(p: Phone, title="Tidy the notes folder"):
+    from jarves.goal_plans import PlanStore
+    from jarves.userdata import open_db
+    st = PlanStore(open_db(p.home))
+    pl = st.propose(title, [{"tool": "list_notes", "args": {}, "why": "see what is there"},
+                            {"tool": "send_message", "args": {"body": "SECRET-ARG"}, "why": "tell Dana"}])
+    st.approve(pl["id"])
+    st.db.x("UPDATE goal_plan_steps SET status='done', evidence='SECRET-OUT' WHERE plan_id=? AND idx=0", (pl["id"],))
+    return st, pl["id"]
+
+
+def _grant_tasks(p: Phone, page):
+    dev = call(page, "GET", "/api/m/me", None, token(page))["json"]["device"]
+    assert p.owner("POST", f"/api/mobile/devices/{dev}/scopes", {"scopes": ["chat", "voice", "status", "approvals", "tasks"]})[0] == 200
+    page.reload()
+    page.wait_for_selector("#appView:not([hidden])")
+
+
 # ------------------------------------------------------------------ V5 G3 (#183): Learned preferences on the phone
 def _seed_prefs(p: Phone):
     from jarves.preferences import Preferences
@@ -570,6 +589,42 @@ def _grant(p: Phone, page, *scopes):
     assert p.owner("POST", f"/api/mobile/devices/{dev}/scopes", {"scopes": ["chat", "voice", "status", "approvals", *scopes]})[0] == 200
     page.reload()
     page.wait_for_selector("#appView:not([hidden])")
+
+
+def test_goal_plan_view_pause_and_cancel_from_the_phone_and_nothing_that_starts_a_step(browser, phone):
+    p = phone()
+    st, pid = _seed_plan(p)
+    page = new_page(browser)
+    ui_pair(page, p)
+    page.wait_for_timeout(600)
+    assert page.locator("#tabbtn-plans").is_hidden()                    # least privilege: no tasks scope, no tab
+    assert call(page, "GET", "/api/m/plans", None, token(page))["status"] == 403
+    _grant_tasks(p, page)
+    page.wait_for_selector("#tabbtn-plans:not([hidden])")
+    page.tap("[data-tab=plans]")
+    page.wait_for_selector("#plansRoot .plan-title")
+    body = page.inner_text("#plansRoot")
+    assert "Tidy the notes folder" in body and "50%" in body and "1/2" in body and "ready" in body
+    page.tap("#plansRoot summary")                                      # the steps: tools, reasons, statuses
+    page.wait_for_selector("#plansRoot .plan-steps")
+    steps = page.inner_text("#plansRoot .plan-steps")
+    assert "list_notes" in steps and "send_message" in steps and "tell Dana" in steps and "changes something" not in steps
+    assert "SECRET" not in page.inner_text("body")                      # arguments and results never reach the phone
+    assert page.locator("#plansRoot button:has-text('Approve'), #plansRoot button:has-text('Retry'), #plansRoot button:has-text('Resume')").count() == 0
+    page.tap("#plansRoot button:has-text('Pause')")
+    until(page, "document.querySelector('#plansRoot').textContent.includes('Plan paused')")
+    assert st.get(pid)["state"] == "paused"                             # the PC sees the same state
+    assert p.owner("GET", "/api/goal-plans")[1]["plans"][0]["state"] == "paused"
+    page.wait_for_selector("#plansRoot :text('on the computer')")       # resuming is the computer's job
+    assert page.locator("#plansRoot button:has-text('Pause')").count() == 0
+    page.tap("#plansRoot button:has-text('Cancel plan')")               # cancelling asks first
+    assert st.get(pid)["state"] == "paused"
+    page.tap("#plansRoot button:has-text('Yes, cancel')")
+    until(page, "document.querySelector('#plansRoot').textContent.includes('Plan cancelled')")
+    assert st.get(pid)["state"] == "cancelled"
+    r = call(page, "POST", "/api/m/plans/op", {"id": "plan-e2e-00000001", "op": "retry", "plan": pid}, token(page))
+    assert r["status"] == 403 and r["json"]["code"] == "PLAN_PC_ONLY"
+    assert page.errors == []
 
 
 def test_learned_preferences_view_confirm_correct_and_forget_from_the_phone(browser, phone):
@@ -607,6 +662,25 @@ def test_learned_preferences_view_confirm_correct_and_forget_from_the_phone(brow
     page.tap("#prefsRoot button:has-text('Save')")
     until(page, "document.querySelector('#prefsRoot').textContent.includes('sensitive')")
     assert pr.get(b)["text"] == "Play jazz while cooking"
+    assert page.errors == []
+
+
+@pytest.mark.parametrize("lang,locale", [("en", "en-US"), ("he", "he-IL")])
+def test_goal_plans_layout_at_390px_in_english_and_hebrew(browser, phone, lang, locale):
+    p = phone()
+    _seed_plan(p)
+    page = new_page(browser, locale=locale)
+    ui_pair(page, p)
+    _grant_tasks(p, page)
+    page.tap("[data-tab=plans]")
+    page.wait_for_selector("#plansRoot .plan-title")
+    audit(page, lang)
+    page.tap("#plansRoot summary")
+    page.wait_for_selector("#plansRoot .plan-steps")
+    audit(page, lang)
+    page.tap("#plansRoot button >> nth=1")                              # the cancel question
+    page.wait_for_selector("#plansRoot button.primary")
+    audit(page, lang)
     assert page.errors == []
 
 

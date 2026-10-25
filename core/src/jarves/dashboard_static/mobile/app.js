@@ -6,7 +6,7 @@
   const T = {
     en: { pair_title: "Pair this phone", pair_help: "On the computer open the JARVES dashboard, go to Phone and press Pair a phone. Scan the QR code, or type the 8-digit code here.",
       code: "Pairing code", name: "Name for this phone", pair: "Pair", pair_net: "Works on your home network only. Nothing here is reachable from the internet.",
-      tab_home: "Home", tab_chat: "Chat", tab_voice: "Voice", tab_approvals: "Approvals", tab_prefs: "Learned", tab_health: "Health & speed", send: "Send", type_here: "Type a message",
+      tab_home: "Home", tab_chat: "Chat", tab_voice: "Voice", tab_approvals: "Approvals", tab_plans: "Plans", tab_prefs: "Learned", tab_health: "Health & speed", send: "Send", type_here: "Type a message",
       waiting: "Waiting for approval", pages_you_have: "Pages on this device", no_tests: "No self-test or speed test has run yet.", chat_off: "Chat is not running on the computer.",
       hold: "Hold to talk", release: "Release to send", unpair: "Un-pair this phone", online: "connected", offline: "computer unreachable",
       pairing: "Pairing…", bad_code: "Wrong or expired code. Make a new one on the computer.", unpaired: "This phone is no longer paired. Pair again.",
@@ -21,7 +21,7 @@
       sig_snoozed: "Notes snoozed for one hour.", sig_stopped: "Notes stopped. Turn them on again on the computer.", from_pc: "computer", no_goals: "No active goals." },
     he: { pair_title: "צימוד הטלפון", pair_help: "במחשב פתחו את לוח הבקרה של JARVES, עברו אל טלפון ולחצו על צימוד טלפון. סרקו את קוד ה-QR או הקלידו כאן את הקוד בן 8 הספרות.",
       code: "קוד צימוד", name: "שם לטלפון", pair: "לצמד", pair_net: "עובד ברשת הביתית בלבד. שום דבר כאן לא נגיש מהאינטרנט.",
-      tab_home: "בית", tab_chat: "שיחה", tab_voice: "קול", tab_approvals: "אישורים", tab_prefs: "למדתי", tab_health: "תקינות ומהירות", send: "שליחה", type_here: "כתבו הודעה",
+      tab_home: "בית", tab_chat: "שיחה", tab_voice: "קול", tab_approvals: "אישורים", tab_plans: "תוכניות", tab_prefs: "למדתי", tab_health: "תקינות ומהירות", send: "שליחה", type_here: "כתבו הודעה",
       waiting: "ממתינים לאישור", pages_you_have: "דפים במכשיר הזה", no_tests: "עוד לא רצה בדיקה עצמית או בדיקת מהירות.", chat_off: "השיחה לא פועלת במחשב.",
       hold: "לחצו והחזיקו לדיבור", release: "שחררו לשליחה", unpair: "ניתוק הטלפון", online: "מחובר", offline: "המחשב לא זמין",
       pairing: "מצמיד…", bad_code: "קוד שגוי או שפג תוקפו. הפיקו קוד חדש במחשב.", unpaired: "הטלפון כבר לא מצומד. צמדו מחדש.",
@@ -69,7 +69,7 @@
   }
   const post = (p, obj) => api(p, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(obj || {}) });
 
-  function forget() { unmountChat(); if (window.JarvesPrefs) window.JarvesPrefs.unmount(); token = ""; me = null; try { localStorage.removeItem(KEY); } catch (e) { /* ignore */ } show(); }
+  function forget() { unmountChat(); if (window.JarvesPlans) window.JarvesPlans.unmount(); if (window.JarvesPrefs) window.JarvesPrefs.unmount(); token = ""; me = null; try { localStorage.removeItem(KEY); } catch (e) { /* ignore */ } show(); }
 
   function show() {
     $("pairView").hidden = !!token; $("appView").hidden = !token;
@@ -93,13 +93,14 @@
 
   // ---- tabs: only the pages the owner gave this device (the server refuses the others anyway: PAGE_NOT_ALLOWED)
   let tab = "home", chatView = null;
-  const TABS = { home: "home", chat: "chat", voice: "chat", approvals: "approvals", prefs: "scope:prefs", health: "health" };
+  const TABS = { home: "home", chat: "chat", voice: "chat", approvals: "approvals", plans: "scope:tasks", prefs: "scope:prefs", health: "health" };
   const allowed = (n) => (TABS[n].startsWith("scope:") ? ((me && me.scopes) || []).includes(TABS[n].slice(6)) : ((me && me.pages) || []).includes(TABS[n]));
   function setTab(name) {
     tab = name;
     document.querySelectorAll("[data-tab]").forEach((x) => x.setAttribute("aria-selected", String(x.dataset.tab === tab)));
     Object.keys(TABS).forEach((n) => { $("tab-" + n).hidden = n !== tab; });
     if (tab === "chat") mountChat();
+    if (tab === "plans") mountPlans();
     if (tab === "prefs") mountPrefs();
     tick();
   }
@@ -123,6 +124,7 @@
     if (chatView || !window.JarvesChat) return;
     chatView = window.JarvesChat.mount($("chatRoot"), { api: chatApi, tx, device: true });
   }
+  function mountPlans() { if (window.JarvesPlans) window.JarvesPlans.mount($("plansRoot"), { api, post, lang: () => lang }); }
   function mountPrefs() { if (window.JarvesPrefs) window.JarvesPrefs.mount($("prefsRoot"), { api, post, lang: () => lang }); }
   function unmountChat() { if (chatView) { chatView.destroy(); chatView = null; } }
 
@@ -212,6 +214,7 @@
         badge.hidden = !n; badge.textContent = String(n);
         if (tab === "approvals") renderApprovals(a);
       }
+      if (tab === "plans" && window.JarvesPlans) window.JarvesPlans.refresh();
       if (tab === "prefs" && window.JarvesPrefs) window.JarvesPrefs.refresh();
       if (tab === "home") renderHome(await api("/api/m/home"));
       if (tab === "health") renderHealth(await api("/api/m/health"));
@@ -247,7 +250,7 @@
     li(ul, `${t("pages_you_have")}: ${s.pages.map((x) => ({ home: tx("בית", "Home"), chat: tx("שיחה", "Chat"), approvals: tx("אישורים", "Approvals"), health: tx("תקינות ומהירות", "Health & speed") }[x] || x)).join(", ")}`);
   }
   $("unpair").addEventListener("click", async () => { try { await post("/api/m/unpair"); } catch (e) { /* already gone */ } forget(); });
-  $("lang").addEventListener("click", () => { lang = lang === "he" ? "en" : "he"; try { localStorage.setItem(LANG, lang); } catch (e) { /* ignore */ } applyLang(); voiceNote(); info(); unmountChat(); if (tab === "chat") mountChat(); if (tab === "prefs") mountPrefs(); tick(); });
+  $("lang").addEventListener("click", () => { lang = lang === "he" ? "en" : "he"; try { localStorage.setItem(LANG, lang); } catch (e) { /* ignore */ } applyLang(); voiceNote(); info(); unmountChat(); if (tab === "chat") mountChat(); if (tab === "plans") mountPlans(); if (tab === "prefs") mountPrefs(); tick(); });
   document.addEventListener("visibilitychange", tick); window.addEventListener("online", tick);
   if ("serviceWorker" in navigator && window.isSecureContext) navigator.serviceWorker.register("/m/sw.js", { scope: "/m/" }).catch(() => {});
   applyLang(); show();
