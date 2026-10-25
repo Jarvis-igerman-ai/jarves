@@ -171,6 +171,41 @@ async def test_stall_detection_can_be_switched_off(fake):
     assert len(got) == 1
 
 
+async def test_stall_detection_is_off_by_default_so_the_wake_listener_keeps_its_own_guard(fake):
+    # the wake listener builds StreamingAudio() and wraps it in runtime.stall_guard (configurable, 0 = off, it
+    # re-opens the mic): the conversation-only 5 s window must not pre-empt it or override the owner's 0
+    audio = StreamingAudio()
+    assert audio.mic_stall_s == 0
+    t = asyncio.create_task(audio.mic_chunks(24000, 4800).__anext__())
+    await asyncio.sleep(STALL * 3)
+    assert not t.done()
+    audio.close()
+    with pytest.raises(StopAsyncIteration):
+        await asyncio.wait_for(t, 1)
+
+
+async def test_slow_first_frame_gets_double_grace(fake):
+    # Bluetooth HFP/SCO set-up can delay the first frame: 1.5x the window before any frame is not a loss
+    audio = StreamingAudio(mic_stall_s=STALL)
+    t = asyncio.create_task(audio.mic_chunks(24000, 4800).__anext__())
+    await asyncio.sleep(STALL * 1.5)
+    assert not t.done()
+    fake.pump(1)
+    assert len(await asyncio.wait_for(t, 1)) == 4800
+    audio.close()
+
+
+async def test_a_level_callback_failure_is_not_reported_as_a_lost_speaker(fake):
+    async def broken(level):
+        raise ValueError("ui link down")
+
+    audio = StreamingAudio(on_output_level=broken, mic_stall_s=STALL)
+    audio.enqueue(loud(4800))
+    with pytest.raises(ValueError):
+        await asyncio.wait_for(audio.run_player(24000), 1)
+    assert audio.stats()["route_losses"] == 0
+
+
 def test_scenarios_leave_no_stream_open(fake):
     for name in ("car_connect", "bluetooth_drop_mid_conversation"):
         run_scenario(fake, name)
