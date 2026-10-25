@@ -7,7 +7,7 @@ import (
 	"context"
 	"errors"
 
-	"github.com/igalgerman/jarves/bridge/whatsapp/internal/msgstore"
+	"github.com/Jarvis-igerman-ai/jarves/bridge/whatsapp/internal/msgstore"
 )
 
 // Connection states reported by GET /status.
