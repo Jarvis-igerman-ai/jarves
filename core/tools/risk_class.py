@@ -1,6 +1,6 @@
 """Risk classification of a pull request for the auto-label workflow (.github/workflows/autolabel.yml).
 
-Standard library only, no network. LOW-RISK PRs get the `automerge` label, so the queue (automerge.yml) merges them as soon
+Standard library only, no network. LOW-RISK PRs get the `automerge` label, so automerge.yml puts them in the merge queue as soon
 as `CI result (single required check)` is green; this tool never merges and never bypasses a check.
 
     python tools/risk_class.py --files-from files.txt --lines 42 --labels bugfix,foo --author octocat --mode true

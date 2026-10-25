@@ -29,7 +29,7 @@ feat.register(FEATURE, "סטטוס פיתוח (קריאה בלבד)", "Developme
                     "it only reads, and any change on GitHub asks on the screen first",
               targets=calm.TARGETS)
 
-DEFAULT_REPO = "igalgerman/jarves"
+DEFAULT_REPO = "Jarvis-igerman-ai/jarves"
 REPO_RE = re.compile(r"^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$")
 TTL_S = 120.0
 STUCK_S = 1800.0                 # an agent RUNNING without progress this long is stuck
