@@ -144,6 +144,8 @@ class AutoUpdater:
     def status(self) -> dict:
         """For `jarvis update auto status` and the dashboard: switch, what it is waiting for, the notice."""
         st, now = self.state(), self.now()
+        if self._reconcile(st):
+            _save(self.home, st)
         on = bool(self.enabled())
         code = st.get("last") or ("off" if not on else "no_update")
         if not on:
@@ -157,6 +159,24 @@ class AutoUpdater:
                 "default_from_channel": self._default_note(), "channel_chosen": bool(st.get("channel_chosen")),
                 **self._next(st, on, now), "last_result": st.get("last_result"),
                 "rollback_possible": bool(updates.rollback_info(self.home)["possible"])}
+
+    def _reconcile(self, st: dict) -> bool:
+        """#294: the installed version is (at least) the announced one, e.g. the owner installed it by hand: the
+        announcement is done. Clear the pending target and notice, and record 'installed <version> at <time>' unless
+        an automatic install already recorded that version. True when the state changed."""
+        target = st.get("target")
+        if not target or (target != self.current() and (updates.version_tuple(target) is None or updates.is_newer(target, self.current()))):
+            return False
+        for k in ("target", "target_display", "announced_ts", "snooze_until", "next_try", "now_requested", "busy",
+                  "last", "gave_up"):
+            st.pop(k, None)
+        if (st.get("notice") or {}).get("kind") == "announced":
+            st.pop("notice", None)
+        r = st.get("last_result") or {}
+        if not (r.get("version") == target and r.get("ok")):
+            self._result(st, target, True, None)
+            st["last_result"]["manual"] = True
+        return True
 
     def _next(self, st: dict, on: bool, now: float) -> dict:
         """When the next automatic step is planned: {next_at: epoch seconds | None, next_kind: what happens then}.
@@ -258,6 +278,8 @@ class AutoUpdater:
         now = self.now()
         st = self.state()
         self._after_restart(st)
+        if self._reconcile(st):
+            _save(self.home, st)
         chk = self.checker()
         s = chk.check()                                            # cached for a day; no personal data
         if s.get("error"):

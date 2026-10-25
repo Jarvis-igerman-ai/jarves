@@ -535,3 +535,33 @@ def test_a_version_that_became_ready_late_gets_no_false_alarm_and_is_not_blocked
     assert not [x for x in r.notices if x["kind"] == "health_failed"]
     assert r.au.state().get("gave_up") != NEW
     assert updates.take_health_notice(home) is None
+
+
+# ---------------------------------------------------------------------- #294: a manual install clears the announcement
+def test_manual_install_clears_announcement_and_records_result(home):
+    clock, ver = Clock(), ["4.0.1.597"]
+    au = AutoUpdater(home, checker=lambda: None, enabled=lambda: True, now=clock, current=lambda: ver[0])
+    auto_update._save(home, {"target": "4.0.1.721", "target_display": "beta.95", "announced_ts": clock.t - 5,
+                             "channel": "beta", "last": "announced",
+                             "notice": {"kind": "announced", "version": "4.0.1.721"}})
+    s = au.status()
+    assert s["target"] == "4.0.1.721" and s["last_result"] is None          # still older: nothing changes
+    ver[0] = "4.0.1.721"                                                     # the owner installed it by hand
+    clock.t += 3600
+    s = au.status()
+    assert s["target"] is None and s["notice"] is None and s["next_kind"] == "check"
+    assert s["last_result"]["ok"] is True and s["last_result"]["version"] == "4.0.1.721"
+    assert s["last_result"]["ts"] == clock.t
+    assert "4.0.1.721" in " ".join(auto_update.status_lines(s))
+    assert au.state().get("target") is None                                          # persisted
+    clock.t += 60
+    assert au.status()["last_result"]["ts"] == clock.t - 60                      # recorded once, not rewritten
+
+
+def test_automatic_install_result_is_kept(home):
+    clock = Clock()
+    au = AutoUpdater(home, checker=lambda: None, enabled=lambda: True, now=clock, current=lambda: "2.0.0")
+    r = {"ts": 5.0, "version": "2.0.0", "ok": True, "code": None}
+    auto_update._save(home, {"target": "2.0.0", "last_result": r})
+    s = au.status()
+    assert s["target"] is None and s["last_result"]["ts"] == 5.0
