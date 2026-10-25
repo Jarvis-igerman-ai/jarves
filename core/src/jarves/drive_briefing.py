@@ -105,7 +105,9 @@ class DriveBriefingSkill(Skill):
             if mode == "present":                    # a passenger can hear: no event title, place, mail or messages
                 shown = [s for s in shown if s["ok"]]
             if not any(s["ok"] for s in shown):
-                return ToolResult(False, " ".join(s["text"] for s in secs) or "אין תדריך זמין.", {"sections": [],
+                # only the failure notes: a section that succeeded but was filtered out (an event title in
+                # "present" mode) must not come back through the failure text (issue #223 review)
+                return ToolResult(False, " ".join(s["text"] for s in secs if not s["ok"]) or "אין תדריך זמין.", {"sections": [],
                                   "mode": mode}, code="DRIVE_BRIEFING_EMPTY")
             return ToolResult(True, " ".join(s["text"] for s in shown), {
                 "sections": shown, "mode": mode, "location_used": False, "partial": not all(s["ok"] for s in shown) or len(shown) < len(secs),

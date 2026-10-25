@@ -255,6 +255,15 @@ def tool_kind(name: str, permission: str | None, args=None, *, untrusted_output:
     return name                     # unknown kind: decide() defers it
 
 
+def fallback_allows(name: str, permission: str | None, route: str) -> bool:
+    """What may still run when the Gate itself raised (SkillRegistry._drive_check fails closed): a plain read, and
+    hang-up / stop / cancel. On the read-only phone screen route only a plain read (issue #318): no phone path may
+    cause a side effect, not even when the policy is broken."""
+    if permission == "read":
+        return True
+    return route != PHONE_SCREEN and name in ALWAYS_TOOLS
+
+
 def turn_source(origin: str, route: str, tainted: bool) -> str:
     """Who the request really comes from, from Core state only (never a model-written field): text written by
     others was read in this turn -> "untrusted"; the owner's own words (the deterministic parser, or the live voice /
