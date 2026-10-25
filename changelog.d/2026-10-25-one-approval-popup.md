@@ -1,0 +1,1 @@
+- Fixed: an approval request now shows ONE popup, the JARVES approval window. The tray notification (which Windows titled "Python") is only used when the window cannot open or the PC is locked, and the process now has its own JARVES app identity so any notification is titled JARVES. (#352)
