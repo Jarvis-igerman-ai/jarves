@@ -28,7 +28,7 @@ class LogIndex:
                 data = {}
         self.data = data if isinstance(data, dict) else {}
         self.codes: dict[str, list[dict]] = self.data.get("codes") or {}
-        self.repo = self.data.get("repo") or "igalgerman/jarves"
+        self.repo = self.data.get("repo") or "Jarvis-igerman-ai/jarves"
         self.prefix = self.data.get("src_prefix") or "core/src"
 
     @property

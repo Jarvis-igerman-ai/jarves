@@ -1718,7 +1718,7 @@ def cmd_dashboard(a, cfg, home) -> int:
         only_tail = bool(getattr(a, "tailnet_only", False)) or _mobile.MobileAccess(home).settings()["bind_tailnet_only"]
     try:
         dash = Dashboard(home, cfg, a.port, lan=a.lan, mobile_on=mobile_on, tls=tls, tailnet=tail, tls_source=tls_src,
-                         bind_tailnet_only=only_tail)
+                         bind_tailnet_only=only_tail, defer_plugins=True)
     except OSError as e:
         print(f"cannot start the dashboard: {e}", file=sys.stderr)
         return 1

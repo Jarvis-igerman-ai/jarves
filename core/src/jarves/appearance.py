@@ -31,7 +31,7 @@ from . import features, logs
 MODES = ("face", "avatar2d", "avatar3d", "hidden")
 DEFAULT = "face"
 STATE_FILE = "appearance.json"
-PI_ISSUE = "https://github.com/igalgerman/jarves/issues/3"     # real roadmap issue: Pi gaps of this package
+PI_ISSUE = "https://github.com/Jarvis-igerman-ai/jarves/issues/3"     # real roadmap issue: Pi gaps of this package
 TITLES = {"face": ("פנים", "Face"), "avatar2d": ("אווטאר דו-מימדי", "2D avatar"),
           "avatar3d": ("אווטאר תלת-מימדי", "3D avatar"), "hidden": ("מוסתר", "Hidden")}
 _PI_BLOCKER = "not run on a Raspberry Pi 5 yet: Godot ARM64 fps/RAM on the round display unmeasured"
