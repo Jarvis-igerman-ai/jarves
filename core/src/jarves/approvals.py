@@ -930,7 +930,17 @@ class TrayChannel:
         self.runtime = runtime
 
     def available(self, a: Approval) -> bool:
-        return getattr(self.runtime, "tray", None) is not None
+        if getattr(self.runtime, "tray", None) is None:
+            return False
+        # #352: ONE popup. The approval window is the place to answer; a toast only when no window is open
+        # (it could not start) or the PC is locked / away and the window cannot be seen.
+        if "popup" in a.shown:
+            try:
+                from .runtime.tray import pc_locked
+                return bool(pc_locked())
+            except Exception:
+                return False
+        return True
 
     def open(self, a: Approval) -> None:
         self.runtime._notify(f"JARVES מבקש אישור / needs your approval: {a.title}"[:240])
