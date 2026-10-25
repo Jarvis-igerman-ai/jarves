@@ -4,15 +4,6 @@ V4.5 approved by the owner 24 Oct 2026: [NOW](NOW.md) is now the bounded V4.5 au
 
 PR #110 conflict-resolution evidence and carried decision gates: [handoff](handoff/2026-10-24-pr110-merge.md).
 
-## V6 item 9: drive mode wired into SkillRegistry - 25 Oct 2026 / #216 (branch v6/drive-wire-216, label no-automerge)
-
-- Done: `SkillRegistry.drive` (None = not wired) is consulted in `_authorize` after the TOOL_FORBIDDEN policy and BEFORE the untrusted-turn guard, precheck and approval prompt. `drive_mode.Gate.check`: switch off -> None (no change); allow -> None (normal approvals unchanged; drive mode never approves); defer -> queued (`DRIVE_DEFERRED`, label = tool name + recipient first name, never text); emergency from untrusted text -> `DRIVE_REFUSED` (not queued); model `feature_set drive_mode` -> `DRIVE_OWNER_ONLY`. Policy exception -> `DRIVE_ERROR` for action/destructive tools (fail closed); reads and hang-up/stop/cancel go on.
-- Trust: `turn_source(origin, ROUTE, taint)` only; `by_voice = ROUTE == "voice"` (set by voice/live.py and delegation_client.py code). Model-written fields such as `number_source` never count.
-- Wired in `app.py` (Core) and `text_session.py`. Guide `drive_mode.toml` EN+HE updated; catalog row evidence/blocker updated (still `implemented_unverified`).
-- Tests: `core/tests/test_v6_drive_wire.py` (off = identical results on 10 scenarios + 6 existing registry test files rerun with an off gate via `_drive_off_plugin.py`; on: deferral, allowed answer, approvals still asked, emergency refused, hang-up always, model cannot switch off, fail closed, queue never run, no text in logs).
-- Local gate: prepush `perf` (`test_backend_prompt_does_not_grow` 48780 > 48400) fails the same with this change stashed: pre-existing, not from this branch.
-- Questions for the user: (1) `dial_open` has no recipient name, so every non-emergency call waits while driving; add a recipient to the dial draft? (dialing.py was left alone.) (2) Voice "I have stopped" phrase: today only `jarvis drive stopped` / `off` (and the dashboard switch) end it; a deterministic owner-phrase handler is a follow-up. (3) Read tools that return third-party text (mail) wait while driving; OK?
-
 ## Any.do MCP integration (gated Skill, off by default) - 24 Oct 2026 / #140 (branch feat/anydo-mcp, no PR yet)
 
 - Done: `core/src/jarves/anydo.py` (OAuth discovery + dynamic registration + PKCE loopback, token store, allow-listed Streamable-HTTP MCP client, Skill with `anydo_status/lists/tasks/task/create/remind/update`), `jarvis anydo start|status|off`, features `anydo` and `anydo_update` (both OFF, `implemented_unverified`), guide `guides/data/anydo.toml` (EN+HE, parity table), Hebrew in `hebrew_parts/2026-10-24-anydo.json`, tests `core/tests/test_anydo.py` (stub MCP+OAuth server, no network).

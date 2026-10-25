@@ -219,6 +219,9 @@ async def test_model_cannot_turn_drive_mode_off_or_release_the_queue(tmp_path):
     for route in ("voice", "text", "default"):
         res = await on_route(route, lambda: reg.call("feature_set", {"id": "drive_mode", "on": False}))
         assert res.code == "DRIVE_OWNER_ONLY" and "feature_set" not in skill.ran
+    for fid in ("Drive_Mode", " drive_mode ", "DRIVE_MODE"):          # feature_set normalises the id the same way
+        res = await on_route("voice", lambda: reg.call("feature_set", {"id": fid, "on": False}))
+        assert res.code == "DRIVE_OWNER_ONLY" and "feature_set" not in skill.ran
     assert len(gate.queue.items()) == 1 and state["on"]
     # no registered tool can release / run the queue
     assert not [t for t in reg._tools if "drive" in t]
