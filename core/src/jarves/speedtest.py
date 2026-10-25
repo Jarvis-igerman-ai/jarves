@@ -219,6 +219,10 @@ def measure_inproc(home: Path | None = None, *, repeats: int = 3, settle_s: floa
     try:
         f = feat.Features(Config(), home, components=lambda: {}, skills=lambda: set())
         f.warm("music")                                                    # first probe (synchronous), then expire
+        f.prewarm()                                                        # as Core start does: every cold probe (imports, PATH
+        end = time.monotonic() + 15                                        # scans) is paid once, off the measured path (#243)
+        while f._worker and time.monotonic() < end:
+            time.sleep(0.02)
         lists, probes = [], []
         for _ in range(repeats):
             t, ok, why = f._probe_cache["music"]

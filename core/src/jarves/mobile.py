@@ -289,7 +289,7 @@ class MobileAccess:
                     if now - (d.get("last_seen") or 0) > 60:
                         d["last_seen"] = now
                         self._write(self.path, {"version": 1, "devices": devs})
-                    return {"id": d["id"], "name": d.get("name", ""), "scopes": list(d.get("scopes") or DEFAULT_SCOPES),
+                    return {"id": d["id"], "name": d.get("name", ""), "scopes": list(DEFAULT_SCOPES if d.get("scopes") is None else d["scopes"]),
                             "pages": _pages_of(d)}
         return None
 

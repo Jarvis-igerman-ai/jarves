@@ -761,12 +761,12 @@ jobs:
       # Publish the proof *inside* ci-ok so that it exists before the required check
       # turns green. Only for non-draft full-test PRs which did not build an installer.
       - name: Record proven PR tests (no installer)
-        if: ${{ github.event_name == 'pull_request' && github.event.pull_request.draft != true && needs.changes.outputs.code == 'true' && needs.changes.outputs.full == 'true' && needs.changes.outputs.installer != 'true' }}
+        if: ${{ (github.event_name == 'merge_group' || (github.event_name == 'pull_request' && github.event.pull_request.draft != true)) && needs.changes.outputs.code == 'true' && needs.changes.outputs.full == 'true' && needs.changes.outputs.installer != 'true' }}
         shell: bash
         run: |
-          printf 'tree=%s\npr_head=%s\nrun_id=%s\nkind=green-tests-no-installer\n'             "${{ needs.changes.outputs.tree }}" "${{ github.event.pull_request.head.sha }}" "$GITHUB_RUN_ID" > pr-tests-proof.txt
+          printf 'tree=%s\npr_head=%s\nrun_id=%s\nkind=green-tests-no-installer\n'             "${{ needs.changes.outputs.tree }}" "${{ github.event.pull_request.head.sha || github.sha }}" "$GITHUB_RUN_ID" > pr-tests-proof.txt
       - name: Save proven PR tests (no installer)
-        if: ${{ github.event_name == 'pull_request' && github.event.pull_request.draft != true && needs.changes.outputs.code == 'true' && needs.changes.outputs.full == 'true' && needs.changes.outputs.installer != 'true' }}
+        if: ${{ (github.event_name == 'merge_group' || (github.event_name == 'pull_request' && github.event.pull_request.draft != true)) && needs.changes.outputs.code == 'true' && needs.changes.outputs.full == 'true' && needs.changes.outputs.installer != 'true' }}
         uses: actions/upload-artifact@v7
         with:
           name: jarves-no-installer-proof-${{ needs.changes.outputs.tree }}

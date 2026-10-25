@@ -574,6 +574,15 @@ def test_chat_message_ids_are_per_phone_and_expire(home):
     assert len(a._replies) <= mobile.REPLY_KEEP
 
 
+def test_removing_every_scope_does_not_restore_the_defaults(srv, home):
+    """V5 sec F7: an empty scope list means no scopes (fail closed), not chat/voice/status/approvals again."""
+    tok, dev, _ = pair(srv)
+    assert admin(srv, "POST", f"/api/mobile/devices/{dev}/scopes", {"scopes": []})[0] == 200
+    assert MobileAccess(home).authenticate(tok)["scopes"] == []
+    assert req(srv, "GET", "/api/m/status", token=tok)[0] == 403
+    assert req(srv, "POST", "/api/m/chat", token=tok, body={"text": "hi"})[0] == 403
+    assert req(srv, "GET", "/api/m/approvals", token=tok)[0] == 403
+
 async def test_phone_cannot_approve_a_pc_only_plan_approval(srv, home):
     """V5 sec F1: with phone approvals ON a paired phone can neither approve a goal plan nor a plan step."""
     tok, dev, _ = pair(srv)
