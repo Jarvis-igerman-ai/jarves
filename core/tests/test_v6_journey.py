@@ -157,3 +157,59 @@ def test_cli_needs_the_switch_then_links_only_makes_no_network_call(home, capsys
 def test_catalog_row_is_honest():
     f = feat.CATALOG["journey"]
     assert f.targets["windows"]["status"] == "implemented_unverified" and f.risk == "low" and not f.skills and not f.tools
+
+
+class FakeClock:
+    def __init__(self):
+        self.t, self.sleeps = 1000.0, []
+
+    def now(self):
+        return self.t
+
+    def sleep(self, s):
+        self.sleeps.append(s)
+        self.t += s
+
+
+@pytest.fixture(autouse=True)
+def fake_clock(monkeypatch):
+    c = FakeClock()
+    monkeypatch.setattr(jn, "_clock", c.now)
+    monkeypatch.setattr(jn, "_sleep", c.sleep)
+    monkeypatch.setattr(jn, "GEOCODER", jn._Geocoder())
+    return c
+
+
+def _count_transport(seen):
+    def handler(req):
+        seen.append((req.url.path, req.headers["user-agent"]))
+        if req.url.path == "/search":
+            return httpx.Response(200, json=[{"lon": "34.78", "lat": "32.08"}])
+        return httpx.Response(200, json={"routes": [{"distance": 1000.0, "duration": 60.0}]})
+    return httpx.MockTransport(handler)
+
+
+def test_geocode_is_cached_for_ten_minutes_and_spaced_one_second(monkeypatch, fake_clock):
+    monkeypatch.setenv(jn.NOMINATIM_ENV, "http://geo.test")
+    monkeypatch.setenv(jn.OSRM_ENV, "http://osrm.test")
+    seen: list = []
+    with httpx.Client(transport=_count_transport(seen)) as c:
+        jn.plan("Haifa", "Tel Aviv", client=c, now=NOW)
+        searches = [p for p, _ in seen if p == "/search"]
+        assert len(searches) == 2 and fake_clock.sleeps and fake_clock.sleeps[0] >= 0.999   # 1 request/s between the two
+        jn.plan("haifa", "TEL AVIV", client=c, now=NOW)                  # identical queries (case-insensitive): from the cache
+        assert len([p for p, _ in seen if p == "/search"]) == 2
+        fake_clock.t += jn.GEOCODE_CACHE_TTL_S + 1                       # expired: asked again
+        jn.plan("Haifa", "Tel Aviv", client=c, now=NOW)
+        assert len([p for p, _ in seen if p == "/search"]) == 4
+    assert all(ua.startswith("JARVES") for _, ua in seen)               # a proper User-Agent on every request
+
+
+def test_misses_are_not_cached(monkeypatch):
+    monkeypatch.setenv(jn.NOMINATIM_ENV, "http://geo.test")
+    n = []
+    with httpx.Client(transport=httpx.MockTransport(lambda r: (n.append(1), httpx.Response(200, json=[]))[1])) as c:
+        for _ in range(2):
+            with pytest.raises(jn.JourneyError):
+                jn.plan("A", "B", client=c, now=NOW)
+    assert len(n) == 2
