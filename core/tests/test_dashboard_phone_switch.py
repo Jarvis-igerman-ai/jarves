@@ -69,7 +69,7 @@ def test_cli_dashboard_reuses_the_running_one(home, opened, monkeypatch, capsys)
                                tls_selfsigned=False)
         assert cli.cmd_dashboard(a, Config(), home) == 0
         assert opened == [d.url]
-        assert d.url in capsys.readouterr().out
+        assert d.token not in capsys.readouterr().out                    # the key is never printed
     finally:
         monkeypatch.undo()
         d.stop()
@@ -122,5 +122,98 @@ def test_phone_switch_says_the_next_step_when_it_cannot(home, monkeypatch):
         d.ctx.dashboard = None
         st, err = _pc(d, "POST", "/api/mobile/enable", {"confirm": True})
         assert st == 409 and "jarvis dashboard --mobile --tls-selfsigned" in err["next"]
+    finally:
+        d.stop()
+
+
+def test_live_file_holds_no_key(home):
+    d = dashboard.Dashboard(home, Config(), free_port()).start()
+    try:
+        raw = (home / runmarks.LIVE_FILE).read_text(encoding="utf-8")
+        assert d.token not in raw and "token" not in raw
+        assert set(json.loads(raw)) == {"pid", "port", "scheme", "mobile"}
+    finally:
+        d.stop()
+
+
+def test_reopen_has_a_cooldown(home, opened):
+    d = dashboard.Dashboard(home, Config(), free_port()).start()
+    try:
+        h = {"Sec-Fetch-Site": "same-origin"}
+        assert _get(d.port, "/?t=x&reopen=1", headers=h)[0].status == 200
+        assert _get(d.port, "/?t=x&reopen=1", headers=h)[0].status == 429
+        assert len(opened) == 1
+    finally:
+        d.stop()
+
+
+def test_https_post_is_not_cross_origin(home):
+    cert, key = mobile.make_selfsigned(home, "127.0.0.1")
+    d = dashboard.Dashboard(home, Config(), free_port(), tls=(cert, key)).start()
+    try:
+        c = http.client.HTTPSConnection("127.0.0.1", d.port, timeout=5, context=ssl._create_unverified_context())
+        host = f"127.0.0.1:{d.port}"
+        hdr = {"Host": host, "Cookie": f"{dashboard.COOKIE}={d.token}", "X-Jarves": "1", "Content-Type": "application/json",
+               "Origin": f"https://{host}", "Sec-Fetch-Site": "same-origin"}
+        c.request("POST", "/api/mobile/settings", body=json.dumps({"phone_approvals": False}), headers=hdr)
+        assert c.getresponse().status == 200
+        c.request("POST", "/api/mobile/settings", body=json.dumps({"phone_approvals": False}),
+                  headers={**hdr, "Origin": "https://evil.example"})
+        r = c.getresponse()
+        assert r.status == 403
+        c.close()
+    finally:
+        d.stop()
+
+
+def test_enable_without_tls_fails_closed_and_opens_nothing(home, monkeypatch):
+    monkeypatch.setattr(tailnet, "detect", lambda *a, **k: {})
+    monkeypatch.setattr(dashboard, "lan_ip", lambda: "127.0.0.1")
+    monkeypatch.setattr(tailnet, "choose_tls", lambda *a, **k: (None, "none"))
+    d = dashboard.Dashboard(home, Config(), free_port()).start()
+    try:
+        st, err = _pc(d, "POST", "/api/mobile/enable", {"confirm": True})
+        assert st == 409 and "TLS" in err["error"]
+        assert d.phone_httpd is None and not d.mobile.enabled and not d.access.mobile
+        assert not feat.Features(Config(), home).enabled("mobile_access")
+    finally:
+        d.stop()
+
+
+def test_enable_cert_load_failure_closes_the_socket(home, monkeypatch):
+    monkeypatch.setattr(tailnet, "detect", lambda *a, **k: {})
+    monkeypatch.setattr(dashboard, "lan_ip", lambda: "127.0.0.1")
+    bad = home / "bad.pem"
+    bad.write_text("not a certificate")
+    monkeypatch.setattr(tailnet, "choose_tls", lambda *a, **k: ((bad, bad), "selfsigned"))
+    made = []
+    orig = dashboard._Server.__init__
+
+    def spy(self, *a, **k):
+        orig(self, *a, **k)
+        made.append(self)
+    monkeypatch.setattr(dashboard._Server, "__init__", spy)
+    d = dashboard.Dashboard(home, Config(), free_port()).start()
+    try:
+        st, _ = _pc(d, "POST", "/api/mobile/enable", {"confirm": True})
+        assert st == 409 and d.phone_httpd is None and not d.access.mobile
+        assert any(s.socket.fileno() == -1 for s in made[1:])                # the bound listener was closed
+        assert not feat.Features(Config(), home).enabled("mobile_access")
+    finally:
+        d.stop()
+
+
+def test_concurrent_enable_makes_one_listener(home, monkeypatch):
+    import threading
+    monkeypatch.setattr(tailnet, "detect", lambda *a, **k: {})
+    monkeypatch.setattr(dashboard, "lan_ip", lambda: "127.0.0.1")
+    d = dashboard.Dashboard(home, Config(), free_port()).start()
+    try:
+        fe = feat.Features(Config(), home)
+        out = []
+        ts = [threading.Thread(target=lambda: out.append(d.enable_phone(fe))) for _ in range(4)]
+        [t.start() for t in ts]
+        [t.join(30) for t in ts]
+        assert len(out) == 4 and len({o["port"] for o in out}) == 1
     finally:
         d.stop()

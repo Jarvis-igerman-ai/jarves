@@ -292,7 +292,8 @@ class Access:
         origin = headers.get("Origin")
         if origin is None:
             return True                               # non-browser client; X-Jarves/CSRF still required
-        return origin.lower() == f"http://{(headers.get('Host') or '').lower()}"
+        host = (headers.get("Host") or "").lower()
+        return origin.lower() in (f"http://{host}", f"https://{host}")       # the same Host only, either scheme (TLS link)
 
     def principal(self, cookies: dict, ip: str) -> dict | None:
         """{"kind": "local"} for the owner's loopback session, {"kind": "device", ...} for a paired device."""

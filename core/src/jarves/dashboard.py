@@ -884,14 +884,21 @@ class Handler(BaseHTTPRequestHandler):
         """'Open the current dashboard': THIS computer opens the running dashboard's link in its own browser. The key
         never travels over HTTP, so a wrong-token visitor learns nothing."""
         from . import runmarks
+        now = time.monotonic()
+        with _REOPEN_LOCK:
+            if now - getattr(self.ctx, "_reopen_at", -1e9) < REOPEN_COOLDOWN_S:
+                return self._send(429, b"wait a few seconds", "text/plain", {"Retry-After": "5"})
+            self.ctx._reopen_at = now
         live = runmarks.read_live(self.ctx.home)
         opened = False
-        if live is not None:
+        if live is not None and live["port"] == self.ctx.port:              # this one is the current dashboard
             try:
                 import webbrowser
-                opened = bool(webbrowser.open(live["url"]))
+                opened = bool(webbrowser.open(f"{self.ctx.dashboard.scheme}://127.0.0.1:{self.ctx.port}/?t={self.token}"))
             except Exception:
                 opened = False
+        elif live is not None:                                              # an older tab: ask the current one
+            opened = runmarks.ask_reopen(live)
         page = (REOPEN_OK if opened else REOPEN_FAIL).encode()
         return self._send(200 if opened else 404, page, "text/html; charset=utf-8")
 
@@ -993,6 +1000,10 @@ class Handler(BaseHTTPRequestHandler):
     do_GET = do_POST = do_PUT = do_DELETE = do_HEAD = _handle
 
 
+_REOPEN_LOCK = threading.Lock()
+REOPEN_COOLDOWN_S = 5.0
+
+
 def _plain_page(title_he: str, title_en: str, body_he: str, body_en: str, button: str = "") -> str:
     return ('<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">'
             f'<title>JARVES</title><body style="font:16px system-ui;max-width:42em;margin:2em auto;padding:0 1em">'
@@ -1090,6 +1101,7 @@ class Dashboard:
                       tailnet=bool(tail_ip), tls_source=self.mobile.tls_source, bind_tailnet_only=only_tail)
         self.lan_url = f"{self.scheme}://{lan_host}:{self.port}/pair" if lan else None
         self.phone_httpd = None
+        self._phone_lock = threading.Lock()
         self.ctx.dashboard = self
         self._handler = handler
         if lan:
@@ -1117,7 +1129,7 @@ class Dashboard:
 
     def _publish_live(self) -> None:
         from . import runmarks
-        runmarks.write_live(self.ctx.home, self.port, self.scheme, self.token, mobile=self.mobile.enabled)
+        runmarks.write_live(self.ctx.home, self.port, self.scheme, mobile=self.mobile.enabled)
 
     def start(self) -> "Dashboard":
         self._publish_live()
@@ -1141,6 +1153,10 @@ class Dashboard:
         ONE more listener (home network, TLS, same handler and same rules) and turn the mobile_access switch on. The
         desktop listener stays on 127.0.0.1 and keeps its key. Raises OSError with a plain sentence when it cannot."""
         from . import mobile as _m, tailnet as _tn
+        with self._phone_lock:
+            return self._enable_phone(features, tailnet_only, _m, _tn)
+
+    def _enable_phone(self, features, tailnet_only, _m, _tn) -> dict:
         if self.phone_httpd is not None:
             return self.phone_info()
         tail = _tn.detect()
@@ -1153,6 +1169,8 @@ class Dashboard:
         if not cert.is_file():
             _m.make_selfsigned(self.ctx.home, host)
         tls, src = _tn.choose_tls(self.ctx.home, tail)
+        if not tls:
+            raise OSError("no TLS certificate for the phone could be made: phone access needs TLS, nothing was opened")
         bind = tail_ip if only_tail else "0.0.0.0"
         httpd = None
         for p in (LAN_PORT, 0):
@@ -1163,26 +1181,30 @@ class Dashboard:
                 continue
         if httpd is None:
             raise OSError("no free network port for the phone: close the other program that uses it and try again")
-        if tls:
+        mob = self.mobile
+        try:
             import ssl
             sctx = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
             sctx.minimum_version = ssl.TLSVersion.TLSv1_2
             sctx.load_cert_chain(str(tls[0]), str(tls[1]))
             httpd.socket = sctx.wrap_socket(httpd.socket, server_side=True)
             httpd.tls = True
-        httpd.daemon_threads = True
+            httpd.daemon_threads = True
+            features.set("mobile_access", True, by="dashboard")
+        except BaseException:                                           # fail closed: no listener, nothing half-enabled
+            httpd.server_close()
+            raise
+        # everything above worked: only now does the rest of the dashboard learn about the phone listener
         self.access.extra_hosts = {h for h in (tail_ip, tail.get("name")) if h}
         self.access.lan_host = host or self.access.lan_host
         self.access.mobile = True
-        mob = self.mobile
         mob.tailnet, mob.tls_source, mob.bind = tail, src, bind
-        mob.port, mob.host, mob.scheme = httpd.server_address[1], host or mob.tailnet_host(), "https" if tls else "http"
-        features.set("mobile_access", True, by="dashboard")
+        mob.port, mob.host, mob.scheme = httpd.server_address[1], host or mob.tailnet_host(), "https"
         mob.gate = lambda: features.enabled("mobile_access")           # switching it off stops serving at once
         mob.enabled = True
         self.phone_httpd = httpd
         threading.Thread(target=httpd.serve_forever, name="jarves-dashboard-phone", daemon=True).start()
-        mob.audit("mobile_mode_started", host=host, port=mob.port, tls=bool(tls), bind=bind, tailnet=bool(tail_ip),
+        mob.audit("mobile_mode_started", host=host, port=mob.port, tls=True, bind=bind, tailnet=bool(tail_ip),
                   tls_source=src, live=True)
         self._publish_live()
         return self.phone_info()

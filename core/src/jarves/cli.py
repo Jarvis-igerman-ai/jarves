@@ -1703,8 +1703,8 @@ def cmd_dashboard(a, cfg, home) -> int:
     from . import runmarks
     live = runmarks.read_live(home)
     if live is not None:                                  # #357: never a second dashboard; reopen the running one
-        print(f"JARVES dashboard is already running (the link holds a private key for THIS computer; do not share it):\n"
-              f"  {live['url']}", flush=True)
+        print(f"JARVES dashboard is already running on {live['scheme']}://127.0.0.1:{live['port']}/ "
+              "(no second one is started).", flush=True)
         if (getattr(a, "mobile", False) or getattr(a, "lan", False)) and not live["mobile"]:
             print("It has phone access OFF. Open its Phone page and press 'Turn on phone access' "
                   "(no second dashboard, no restart).", flush=True)
@@ -1712,10 +1712,12 @@ def cmd_dashboard(a, cfg, home) -> int:
             print(f"(It listens on port {live['port']}; --port {a.port} was not used.)", flush=True)
         if live["scheme"] == "https":
             print("The browser may warn about the self-signed certificate once: that is expected on this computer.", flush=True)
-        if not a.no_open:
-            import webbrowser
-            page = str(getattr(a, "page", "") or "")
-            webbrowser.open(live["url"] + (page if re.fullmatch(r"#/[a-z0-9_/-]{1,40}", page) else ""))
+        if a.no_open:
+            print("Run `jarvis dashboard` without --no-open to reopen it in the browser.", flush=True)
+        elif runmarks.ask_reopen(live):
+            print("Opened it in your browser (the private key stays inside the dashboard).", flush=True)
+        else:
+            print("Could not reopen it (asked too soon? wait 5 seconds and run the command again).", flush=True)
         return 0
     mobile_on, tls, bridge = bool(getattr(a, "mobile", False)), None, None
     tail, tls_src, only_tail = {}, "none", False

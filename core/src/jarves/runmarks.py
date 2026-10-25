@@ -83,14 +83,14 @@ def _face_running() -> bool:
 LIVE_FILE = "dashboard.live.json"
 
 
-def write_live(home: Path, port: int, scheme: str, token: str, mobile: bool = False) -> None:
-    """Leave where THIS dashboard listens and its private key, so `jarvis dashboard` can reopen it instead of starting
-    a second one. Owner-only file (0600) in the data folder; removed on a normal stop; never sent over HTTP."""
+def write_live(home: Path, port: int, scheme: str, mobile: bool = False) -> None:
+    """Leave where THIS dashboard listens (pid, port, scheme: NO key), so `jarvis dashboard` can ask it to reopen
+    itself instead of starting a second one. Removed on a normal stop."""
     try:
         from .mobile import write_private
         path = Path(home) / LIVE_FILE
         tmp = path.with_name(path.name + ".tmp")
-        write_private(tmp, json.dumps({"pid": os.getpid(), "port": int(port), "scheme": scheme, "token": token,
+        write_private(tmp, json.dumps({"pid": os.getpid(), "port": int(port), "scheme": scheme,
                                        "mobile": bool(mobile)}).encode())
         os.replace(tmp, path)
     except OSError:
@@ -112,8 +112,8 @@ def read_live(home: Path, probe=None) -> dict | None:
     from .budget import pid_alive
     try:
         d = json.loads((Path(home) / LIVE_FILE).read_text(encoding="utf-8"))
-        port, scheme, token = int(d["port"]), str(d["scheme"]), str(d["token"])
-        if scheme not in ("http", "https") or not token or not pid_alive(int(d["pid"])):
+        port, scheme = int(d["port"]), str(d["scheme"])
+        if scheme not in ("http", "https") or not pid_alive(int(d["pid"])):
             return None
     except (OSError, ValueError, KeyError, TypeError):
         return None
@@ -126,5 +126,21 @@ def read_live(home: Path, probe=None) -> dict | None:
             return None
     elif not probe(port):
         return None
-    return {"port": port, "scheme": scheme, "token": token, "mobile": bool(d.get("mobile")),
-            "url": f"{scheme}://127.0.0.1:{port}/?t={token}"}
+    return {"port": port, "scheme": scheme, "mobile": bool(d.get("mobile"))}
+
+
+def ask_reopen(live: dict) -> bool:
+    """Ask the running dashboard (loopback) to open its own link in this computer's browser. The key never leaves it."""
+    import http.client
+    import ssl
+    try:
+        if live["scheme"] == "https":
+            c = http.client.HTTPSConnection("127.0.0.1", live["port"], timeout=5, context=ssl._create_unverified_context())
+        else:
+            c = http.client.HTTPConnection("127.0.0.1", live["port"], timeout=5)
+        c.request("GET", "/?t=x&reopen=1", headers={"Host": f"127.0.0.1:{live['port']}", "Sec-Fetch-Site": "same-origin"})
+        ok = c.getresponse().status == 200
+        c.close()
+        return ok
+    except OSError:
+        return False
