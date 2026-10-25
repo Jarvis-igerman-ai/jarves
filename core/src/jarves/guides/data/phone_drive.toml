@@ -1,0 +1,62 @@
+order = 65
+category = "system"
+features = ["phone_drive"]
+suggest = false
+aliases = ["מסך נהיגה", "לשונית נהיגה", "נהיגה בטלפון", "drive tab", "drive screen", "phone drive", "driving screen", "scopes drive"]
+links = ["mobile_access", "drive_mode", "drive_briefing", "journey"]
+title_he = "מסך נהיגה בטלפון"
+title_en = "Drive screen on the phone"
+what_he = "לשונית \"נהיגה\" באפליקציית הטלפון, עם כפתורים גדולים: מצב הנהיגה (לקריאה בלבד) ומה ממתין לשתעצרו, התדריך לפני נסיעה (הטלפון עונה על השאלה \"יש מישהו ברכב?\"), ותכנון נסיעה שמקלידים עם כפתורי Google Maps ו-Waze. היא מופיעה רק בטלפון שנתתם לו הרשאת נהיגה. כבויה כברירת מחדל לכל טלפון."
+what_en = "A \"Drive\" tab in the phone app with big buttons: drive mode (read-only) and what waits for when you stop, the pre-drive briefing (the phone answers \"is anyone in the car?\"), and a typed trip plan with Google Maps and Waze buttons. It appears only on a phone you gave the drive permission. Off by default for every phone."
+say = [["איך מפעילים את מסך הנהיגה בטלפון?", "How do I turn on the Drive screen on my phone?"]]
+expect_he = "אחרי שנתתם הרשאה, בטלפון מופיעה לשונית \"נהיגה\". הטלפון לא יכול להדליק או לכבות את מצב הנהיגה, לאשר פעולה, להתקשר או לשלוח הודעה מהמסך הזה. קישור למפות נפתח רק כשאתם לוחצים עליו."
+expect_en = "After you give the permission, a \"Drive\" tab appears on the phone. From this screen the phone cannot turn drive mode on or off, approve anything, call or message. A maps link opens only when you tap it."
+test_he = "הריצו  jarvis phone scopes  וודאו שהטלפון ברשימה, ואז  jarvis phone scopes <מזהה> --grant drive  ובדקו שהמילה drive מופיעה."
+test_en = "Run  jarvis phone scopes  and check the phone is listed, then  jarvis phone scopes <id> --grant drive  and check the word drive appears."
+cost_he = "חינם. תכנון נסיעה פונה לשירותי מפות חינמיים רק כשאתם לוחצים \"תכננו נסיעה\" (בלי תנועה בזמן אמת)."
+cost_en = "Free. Trip planning calls free map services only when you press \"Plan trip\" (no live traffic)."
+privacy_he = "בלי גישה למיקום: מקלידים את המקומות. המקומות והטקסט של התדריך לא נשמרים ולא נרשמים ביומן. ברשימת \"כשתעצרו\" מוצג רק שם הכלי, אף פעם לא הטקסט או שם איש קשר. תשובת \"יש מישהו ברכב?\" חלה על התדריך הזה בלבד ואינה משנה את ההגדרה הקבועה."
+privacy_en = "No location access: you type the places. The places and the briefing text are not stored or logged. The \"when you stop\" list shows only the tool name, never the text or a contact name. The \"is anyone in the car?\" answer applies to that briefing only and never changes the saved setting."
+
+[parity.features]
+phone_drive = "phone"
+
+[[steps]]
+he = "ודאו שהגישה מהטלפון דלוקה ושהטלפון מצומד (ראו את המדריך \"דיבור עם JARVES מהטלפון\")."
+en = "Make sure phone access is on and the phone is paired (see the guide \"Talk to JARVES from your phone\")."
+
+[[steps]]
+he = "במחשב: jarvis phone scopes (רשימת הטלפונים), ואז jarvis phone scopes <מזהה> --grant drive."
+en = "On the computer: jarvis phone scopes (lists the phones), then jarvis phone scopes <id> --grant drive."
+
+[[steps]]
+he = "בטלפון פתחו את האפליקציה: מופיעה לשונית \"נהיגה\". לכיבוי: jarvis phone scopes <מזהה> --revoke drive, והלשונית נעלמת."
+en = "Open the app on the phone: a \"Drive\" tab appears. To turn it off: jarvis phone scopes <id> --revoke drive, and the tab disappears."
+
+[[steps]]
+he = "בלשונית: למעלה מצב הנהיגה (הדלקה וכיבוי רק במחשב: jarvis drive on / off). בתדריך לפני נסיעה לוחצים \"אני לבד\" או \"יש מישהו איתי\". בתכנון נסיעה מקלידים מאיפה ולאן ולוחצים \"תכננו נסיעה\"; כפתורי Maps ו-Waze נפתחים רק בלחיצה שלכם."
+en = "In the tab: drive mode at the top (switch it only on the computer: jarvis drive on / off). For the pre-drive briefing press \"I am alone\" or \"Someone is with me\". For a trip, type from and to and press \"Plan trip\"; the Maps and Waze buttons open only when you tap them."
+
+[[problems]]
+he = "אין לשונית נהיגה בטלפון"
+en = "There is no Drive tab on the phone"
+fix_he = "לא נתתם לטלפון הזה הרשאת נהיגה. הריצו jarvis phone scopes <מזהה> --grant drive ופתחו מחדש את האפליקציה."
+fix_en = "This phone has no drive permission. Run jarvis phone scopes <id> --grant drive and reopen the app."
+
+[[problems]]
+he = "הלשונית אומרת שמסך הנהיגה כבוי במחשב"
+en = "The tab says the Drive screen is switched off on the computer"
+fix_he = "הדליקו את \"מסך נהיגה בטלפון\" בעמוד \"יכולות ומתגים\" או עם jarvis features on phone_drive. תכנון נסיעה ותדריך צריכים גם את המתגים שלהם: jarvis features on journey / drive_briefing."
+fix_en = "Turn on \"Phone Drive screen\" on the Features page or run jarvis features on phone_drive. Trip planning and the briefing also need their own switches: jarvis features on journey / drive_briefing."
+
+[[problems]]
+he = "אי אפשר להדליק מצב נהיגה מהטלפון"
+en = "I cannot turn drive mode on from the phone"
+fix_he = "בכוונה: רק במחשב, jarvis drive on / off. הטלפון מציג את המצב בלבד."
+fix_en = "On purpose: only on the computer, jarvis drive on / off. The phone only shows the state."
+
+[[problems]]
+he = "התדריך לא מופיע ואומר רק לענות על השאלה"
+en = "The briefing does not show and just asks the question"
+fix_he = "לחצו \"אני לבד\" או \"יש מישהו איתי\". אם ההגדרה במחשב היא \"תמיד נוסע\" לא ניתן לבחור \"אני לבד\" מהטלפון."
+fix_en = "Press \"I am alone\" or \"Someone is with me\". If the computer is set to always assume a passenger, \"I am alone\" is not offered on the phone."

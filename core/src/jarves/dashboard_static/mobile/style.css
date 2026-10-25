@@ -45,3 +45,6 @@ button.ghost { border:none; min-height:44px; min-width:44px; padding:6px 10px; }
 .plan .pill { margin-inline-start:0; } .plan .row { margin-top:8px; } .row.wrap { flex-wrap:wrap; }
 .row.wrap { flex-wrap:wrap; } .pref-text { overflow-wrap:anywhere; font-weight:600; }
 h2 { font-size:1.05rem; margin:14px 0 8px; }
+.col { display:grid; gap:10px; margin:10px 0; } button.big, a.big { min-height:56px; font-size:1.1rem; display:flex; align-items:center; justify-content:center; text-align:center; text-decoration:none; }
+a.btn { border:1px solid var(--accent); border-radius:10px; padding:12px 16px; color:var(--fg); background:transparent; }
+.drive-card { margin-bottom:12px; } .drive-state { font-size:1.6rem; font-weight:700; margin:4px 0; overflow-wrap:anywhere; } .drive-card li { overflow-wrap:anywhere; }

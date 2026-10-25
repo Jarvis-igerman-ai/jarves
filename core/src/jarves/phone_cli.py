@@ -86,10 +86,10 @@ def add_cli(sub) -> None:
     ap = ps.add_parser("approvals", help="let paired phones approve actions (typed-code requests stay on the PC)")
     ap.add_argument("state", choices=["on", "off"])
     ps.add_parser("revoke-all", help="revoke every paired phone at once (a lost phone)")
-    sc = ps.add_parser("scopes", help="what each paired phone may use; --grant/--revoke tasks (goals, notice snooze) or prefs (learned preferences)")
+    sc = ps.add_parser("scopes", help="what each paired phone may use; --grant/--revoke tasks (goals, notice snooze), prefs (learned preferences) or drive (the read-mostly Drive tab)")
     sc.add_argument("device", nargs="?", default="")
-    sc.add_argument("--grant", action="append", choices=["tasks", "prefs"])
-    sc.add_argument("--revoke", action="append", choices=["tasks", "prefs"])
+    sc.add_argument("--grant", action="append", choices=["tasks", "prefs", "drive"])
+    sc.add_argument("--revoke", action="append", choices=["tasks", "prefs", "drive"])
     b = ps.add_parser("bind", help="listen on the home network (lan) or on the Tailscale address only (tailnet)")
     b.add_argument("where", choices=["lan", "tailnet"])
 

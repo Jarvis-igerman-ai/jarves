@@ -1,0 +1,119 @@
+// JARVES phone: Drive tab (V6, issue #218). Read-mostly: drive mode state and the "when you stop" list (tool names and
+// a count, never text), the pre-drive briefing (the phone only ANSWERS "is anyone in the car?"), and a typed trip plan with
+// Maps / Waze links. The phone cannot switch drive mode, approve, call or message anything here, and no location is read.
+// Links are plain anchors the owner taps; this file never opens one. Text via textContent only; the token stays in app.js.
+"use strict";
+(function () {
+  const T = {
+    en: { intro: "Driving view. Big buttons, nothing starts by itself.", off: "The Drive screen is switched off on the computer.",
+      mode: "Drive mode", on: "On", offm: "Off", readonly: "Shown here only. Switch it on the computer: jarvis drive on / off.",
+      waiting: "Waiting for when you stop", none: "Nothing is waiting.", nolist: "Only the tool is shown, never the text.",
+      brief: "Pre-drive briefing", ask: "Is anyone in the car with you?", alone: "I am alone", present: "Someone is with me",
+      briefoff: "The pre-drive briefing is switched off on the computer.", held: "Your computer is set to keep passengers in mind, so the short version was used.",
+      setting_present: "The computer is set to always assume a passenger.", empty: "Nothing to say right now.",
+      trip: "Plan a trip", from: "From", to: "To", plan: "Plan trip", places: "Type both places. JARVES never reads your location.",
+      maps: "Open in Google Maps", waze: "Open in Waze", tap: "Opens in your Maps app only when you tap.",
+      tripoff: "Trip planning is switched off on the computer.", failed: "Could not do that", loading: "Loading…", working: "Working…",
+      mode_alone: "Full briefing", mode_present: "Short briefing (a passenger can hear)" },
+    he: { intro: "תצוגת נהיגה. כפתורים גדולים, שום דבר לא מתחיל מעצמו.", off: "מסך הנהיגה כבוי במחשב.",
+      mode: "מצב נהיגה", on: "דלוק", offm: "כבוי", readonly: "מוצג כאן בלבד. מדליקים ומכבים במחשב: jarvis drive on / off.",
+      waiting: "ממתין לשתעצרו", none: "שום דבר לא ממתין.", nolist: "מוצג רק הכלי, אף פעם לא הטקסט.",
+      brief: "תדריך לפני נסיעה", ask: "יש מישהו ברכב איתכם?", alone: "אני לבד", present: "יש מישהו איתי",
+      briefoff: "התדריך לפני נסיעה כבוי במחשב.", held: "המחשב מוגדר להתחשב בנוסעים, ולכן נעשה שימוש בגרסה הקצרה.",
+      setting_present: "המחשב מוגדר להניח תמיד שיש נוסע.", empty: "אין מה לומר כרגע.",
+      trip: "תכנון נסיעה", from: "מאיפה", to: "לאן", plan: "תכננו נסיעה", places: "מקלידים את שני המקומות. JARVES אף פעם לא קורא את המיקום שלכם.",
+      maps: "פתיחה ב-Google Maps", waze: "פתיחה ב-Waze", tap: "נפתח באפליקציית המפות רק כשאתם לוחצים.",
+      tripoff: "תכנון נסיעה כבוי במחשב.", failed: "לא ניתן לבצע", loading: "טוען…", working: "עובד…",
+      mode_alone: "תדריך מלא", mode_present: "תדריך קצר (נוסע יכול לשמוע)" },
+  };
+  const LINKS = ["https://www.google.com/maps/dir/?", "https://waze.com/ul?"];
+  let root = null, cx = null, busy = false, state = null, brief = null, trip = null, note = "", from = "", to = "";
+  const t = (k) => ((T[cx.lang()] || T.en)[k]) || T.en[k] || k;
+  const el = (tag, cls, text) => { const e = document.createElement(tag); if (cls) e.className = cls; if (text != null) e.textContent = text; return e; };
+  const safe = (u) => typeof u === "string" && LINKS.some((p) => u.startsWith(p));
+
+  async function load() {
+    try { state = await cx.api("/api/m/drive"); note = ""; } catch (e) { note = e.message; state = null; }
+    paint();
+  }
+  async function getBrief(answer) {
+    if (busy) return; busy = true; note = t("working"); paint();
+    try { brief = await cx.api("/api/m/drive/briefing" + (answer ? "?passenger=" + answer : "")); note = ""; }
+    catch (e) { note = t("failed") + ": " + e.message; }
+    busy = false; paint();
+  }
+  async function plan() {
+    if (busy) return; busy = true; note = t("working"); paint();
+    try { trip = await cx.post("/api/m/drive/journey", { origin: from, destination: to }); note = ""; }
+    catch (e) { trip = null; note = t("failed") + ": " + e.message; }
+    busy = false; paint();
+  }
+  function btn(label, fn, primary) { const b = el("button", "big" + (primary ? " primary" : ""), label); b.type = "button"; b.addEventListener("click", fn); return b; }
+  function card(title) { const c = el("section", "card drive-card"); c.appendChild(el("h2", "", title)); root.appendChild(c); return c; }
+  function modeCard() {
+    const c = card(t("mode")); const on = !!state.drive_mode;
+    c.appendChild(el("p", "drive-state " + (on ? "ok" : "muted"), on ? t("on") : t("offm")));
+    c.appendChild(el("p", "muted", t("readonly")));
+    c.appendChild(el("h2", "", t("waiting") + ": " + state.waiting));
+    if (!state.waiting) c.appendChild(el("p", "muted", t("none")));
+    else {
+      const ul = el("ul", "list"); (state.queue || []).forEach((q) => ul.appendChild(el("li", "", q.tool)));
+      c.appendChild(ul); c.appendChild(el("p", "muted", t("nolist")));
+    }
+  }
+  function briefCard() {
+    const c = card(t("brief"));
+    if (!state.briefing_on) { c.appendChild(el("p", "muted", t("briefoff"))); return; }
+    const set = state.passenger_setting;
+    c.appendChild(el("p", set === "present" ? "muted" : "", set === "present" ? t("setting_present") : t("ask")));
+    const row = el("div", "col");
+    if (set !== "present") row.appendChild(btn(t("alone"), () => getBrief("alone"), true));
+    row.appendChild(btn(t("present"), () => getBrief("present"), set === "present"));
+    c.appendChild(row);
+    if (brief && !brief.ask) {
+      c.appendChild(el("p", "muted", brief.mode === "alone" ? t("mode_alone") : t("mode_present")));
+      if (brief.held_by_setting) c.appendChild(el("p", "muted", t("held")));
+      const ul = el("ul", "list");
+      (brief.sections || []).forEach((s) => { const li = el("li", "", s.text); li.setAttribute("dir", "auto"); ul.appendChild(li); });
+      if (!(brief.sections || []).length) ul.appendChild(el("li", "", brief.text || t("empty")));
+      c.appendChild(ul);
+    }
+  }
+  function tripCard() {
+    const c = card(t("trip"));
+    if (!state.journey_on) { c.appendChild(el("p", "muted", t("tripoff"))); return; }
+    c.appendChild(el("p", "muted", t("places")));
+    [["from", from, (v) => { from = v; }], ["to", to, (v) => { to = v; }]].forEach(([k, val, set]) => {
+      const lab = el("label"); lab.appendChild(el("span", "", t(k)));
+      const inp = el("input"); inp.maxLength = 120; inp.value = val; inp.setAttribute("dir", "auto"); inp.setAttribute("autocomplete", "off");
+      inp.setAttribute("aria-label", t(k)); inp.addEventListener("input", () => set(inp.value)); lab.appendChild(inp); c.appendChild(lab);
+    });
+    c.appendChild(btn(t("plan"), plan, true));
+    if (trip) {
+      const lines = (trip.lines && (trip.lines[cx.lang()] || trip.lines.en)) || [];
+      const ul = el("ul", "list"); lines.forEach((l) => { const li = el("li", "", l); li.setAttribute("dir", "auto"); ul.appendChild(li); }); c.appendChild(ul);
+      const row = el("div", "col");
+      [["maps_url", "maps"], ["waze_url", "waze"]].forEach(([k, lab]) => {
+        if (!safe(trip[k])) return;
+        const a = el("a", "big btn", t(lab)); a.href = trip[k]; a.target = "_blank"; a.rel = "noopener noreferrer"; row.appendChild(a);
+      });
+      c.appendChild(row); c.appendChild(el("p", "muted", t("tap")));
+    }
+  }
+  function paint() {
+    if (!root) return;
+    root.replaceChildren();
+    root.appendChild(el("p", "muted", t("intro")));
+    if (note) { const n = el("p", "muted", note); n.setAttribute("role", "status"); root.appendChild(n); }
+    if (!state) return;
+    if (!state.enabled) { root.appendChild(el("p", "", t("off"))); return; }
+    modeCard(); briefCard(); tripCard();
+  }
+  const typing = () => document.activeElement && root.contains(document.activeElement) && document.activeElement.tagName === "INPUT";
+  window.JarvesDrive = {
+    mount(node, ctx) { root = node; cx = ctx; note = ""; brief = trip = null; from = to = ""; root.replaceChildren(el("p", "muted", t("loading"))); load(); },
+    refresh() { if (root && !busy && !typing()) load(); },
+    unmount() { root = null; },
+    catalogs: T,
+  };
+})();

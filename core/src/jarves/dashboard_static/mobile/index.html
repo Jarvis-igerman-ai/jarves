@@ -13,6 +13,7 @@
 <script src="/m/indicator.js" defer></script>
 <script src="/m/plans.js" defer></script>
 <script src="/m/prefs.js" defer></script>
+<script src="/m/drive.js" defer></script>
 <script src="/m/app.js" defer></script>
 </head>
 <body>
@@ -48,6 +49,7 @@
     <button type="button" role="tab" id="tabbtn-approvals" data-tab="approvals" aria-selected="false"><span data-t="tab_approvals">Approvals</span> <span id="apprCount" class="badge" hidden></span></button>
     <button type="button" role="tab" id="tabbtn-plans" data-tab="plans" data-t="tab_plans" aria-selected="false" hidden>Plans</button>
     <button type="button" role="tab" id="tabbtn-prefs" data-tab="prefs" data-t="tab_prefs" aria-selected="false" hidden>Learned</button>
+    <button type="button" role="tab" id="tabbtn-drive" data-tab="drive" data-t="tab_drive" aria-selected="false" hidden>Drive</button>
     <button type="button" role="tab" id="tabbtn-health" data-tab="health" data-t="tab_health" aria-selected="false">Health &amp; speed</button>
   </nav>
 
@@ -78,6 +80,10 @@
 
   <section id="tab-prefs" class="panel" hidden>
     <div id="prefsRoot"></div>
+  </section>
+
+  <section id="tab-drive" class="panel" hidden>
+    <div id="driveRoot"></div>
   </section>
 
   <section id="tab-health" class="panel" hidden>
