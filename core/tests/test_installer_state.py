@@ -249,3 +249,41 @@ def test_schema_of_follows_the_migrations_rule(tmp_path):
     assert installer.schema_of(home) == migrations.current(home) == 3
     (home / "schema.json").write_text("{", encoding="utf-8")
     assert installer.schema_of(home) is None
+
+
+def test_disk_check_counts_only_backed_up_data_and_adds_both_needs_on_one_volume(tmp_path):
+    home, app = tmp_path / "home", tmp_path / "app"
+    (home / "models").mkdir(parents=True)
+    (home / "models" / "big.bin").write_bytes(b"x" * 50_000_000)          # not backed up: must not count
+    (home / "memory.db").write_bytes(b"y" * 2_000_000)
+    (app / "python").mkdir(parents=True)
+    (app / "python" / "python.exe").write_bytes(b"z" * 4_000_000)
+    MB = 1024 * 1024
+    need_data = int(2_000_000 * 1.15) + 64 * MB
+    need_app = int(4_000_000 * 1.25) + 64 * MB
+    class U:
+        free = need_data + need_app + 10 * MB
+        def __call__(self, _):
+            return type("D", (), {"free": self.free})()
+    u = U()
+    assert installer.disk_check(home, app, usage=u) == {"ok": True, "drive": "", "short_mb": 0, "need_mb": 0}
+    u.free = need_data + need_app - 5 * MB                                    # same volume: needs are added
+    r = installer.disk_check(home, app, usage=u)
+    assert r["ok"] is False and r["short_mb"] == 5 and r["need_mb"] >= 130 and r["drive"]
+    assert "\\" not in str(r.get("drive", "x")[-1:]) and set(r) == {"ok", "drive", "short_mb", "need_mb"}
+    u.free = need_data + need_app + 10 * MB
+    assert installer.disk_check(home, app, reserve_mb=100, usage=u)["ok"] is False   # /DISKRESERVEMB= is stricter only
+
+
+def test_disk_check_never_blocks_on_a_failed_probe_and_cli_writes_numbers_only(tmp_path, monkeypatch):
+    home, app = tmp_path / "home", tmp_path / "app"
+    home.mkdir()
+    def boom(_):
+        raise OSError("no")
+    assert installer.disk_check(home, app, usage=boom)["ok"] is True
+    monkeypatch.setattr(installer.shutil, "disk_usage", lambda _: type("D", (), {"free": 0})())
+    out = tmp_path / "disk.txt"
+    code = installer.main(["diskcheck", "--home", str(home), "--app", str(app), "--out", str(out)])
+    lines = out.read_text("ascii").splitlines()
+    assert code == 4 and [x.split("=")[0] for x in lines] == ["drive", "short_mb", "need_mb"]
+    assert all(str(tmp_path) not in x for x in lines)
