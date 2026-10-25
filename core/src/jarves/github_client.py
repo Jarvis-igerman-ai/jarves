@@ -29,7 +29,7 @@ TIMEOUT = 15.0
 PER_PAGE, MAX_PAGES = 30, 3
 _NAME = re.compile(r"^(?!\.)[A-Za-z0-9_.-]{1,100}$")
 _REF = re.compile(r"^(?!/)(?!.*\.\.)(?!.*//)(?!.*/$)[A-Za-z0-9_./-]{1,200}$")
-_TOKEN = re.compile(r"(github_pat_[A-Za-z0-9_]+|gh[pousr]_[A-Za-z0-9]+|(?i:bearer|token|basic)\s+[A-Za-z0-9._~+/=-]{8,}|b[0-9a-f]{40}b)")
+_TOKEN = re.compile(r"(github_pat_[A-Za-z0-9_]+|gh[pousr]_[A-Za-z0-9]+|(?i:bearer|token|basic)\s+[A-Za-z0-9._~+/=-]{8,}|\b[0-9a-f]{40}\b)")
 READ_SCOPES = ["Metadata", "Issues", "Pull requests", "Actions", "Checks", "Commit statuses"]   # all read-only
 
 
