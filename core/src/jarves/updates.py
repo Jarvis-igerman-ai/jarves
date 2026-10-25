@@ -11,7 +11,7 @@
                  (jarves.backup.checkpoint, WP-M5) -> stop the Core -> start the normal installer window (the user sees it).
                  The installer keeps user data (it lives in <state_dir>, not in the program folder).
 
-Repositories: REPO (igalgerman/jarves, public) is the source repo; signed installers and latest.json live in
+Repositories: REPO (Jarvis-igerman-ai/jarves, public) is the source repo; signed installers and latest.json live in
 DEFAULT_RELEASES_REPO (igalgerman/jarvis-releases). If a repo answers 404/403 the check reports "unavailable"
 truthfully instead of "up to date" (an optional read-only JARVES_UPDATE_TOKEN in secrets.env is only used for the
 GitHub REST fallback, never for hosted sources).
@@ -48,7 +48,7 @@ from typing import Callable
 
 from . import __version__, logs
 
-REPO = "igalgerman/jarves"   # the PUBLIC source repo (V4-RP-1); signed installers live in DEFAULT_RELEASES_REPO
+REPO = "Jarvis-igerman-ai/jarves"   # the PUBLIC source repo (V4-RP-1); signed installers live in DEFAULT_RELEASES_REPO
 TAG_PREFIX = "win-v"
 ASSET_RE = re.compile(r"^JARVES-Setup-(\d+(?:\.\d+){1,3})\.exe$")
 CHECK_INTERVAL_S = 24 * 3600
@@ -82,7 +82,7 @@ def manifest_name(channel: str) -> str:
 
 # Windows / Pi status of the M6 features (spec section 5). jarves.features has no targets field yet, so this is
 # the record the capability matrix (WP-M4) reads; the issue is real (created with `gh issue create`).
-PI_ISSUE = "https://github.com/igalgerman/jarves/issues/3"
+PI_ISSUE = "https://github.com/Jarvis-igerman-ai/jarves/issues/3"
 PLATFORMS = {
     "windows_installer": {
         "windows": {"status": "implemented_unverified",
