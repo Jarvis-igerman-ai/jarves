@@ -22,6 +22,10 @@ en = "JARVES stopped? Open the dashboard (jarvis dashboard) and press Start JARV
 action = "open:#/runtime"
 
 [[steps]]
+he = "מצב המיקרופון: לחצו על כפתור המיקרופון בשורה העליונה ובחרו מושתק (כבוי), רק מילת הפעלה (רק \"Hey Jarvis\" נשמע, במכשיר הזה) או חי (שיחה פתוחה בלי מילת הפעלה). השינוי חל מיד והמצב הנוכחי מסומן. לעצירה לחצו \"עצירת JARVES\" ליד \"הפעלת JARVES\" ואשרו; זה כמו jarvis stop, בלי קול, והכפתור \"הפעלת JARVES\" חוזר. רק מהמחשב הזה, לא מטלפון."
+en = "Microphone mode: click the microphone button in the top bar and pick Muted (off), Wake word only (only \"Hey Jarvis\" is heard, on this device) or Live (a conversation stays open, no wake word needed). The change applies at once and the current mode is ticked; use the arrow keys and Esc from the keyboard. To stop JARVES press Stop JARVES next to Start JARVES and confirm; it is the same as jarvis stop, silent, and Start JARVES comes back. Only from this computer, never from a phone."
+
+[[steps]]
 he = "בשורת הפקודה: jarvis mic status, jarvis mic mute או jarvis mic unmute. המצב נשמר גם אחרי הפעלה מחדש. כשהליבה עצורה נשמרת בחירה להפעלה הבאה, בלי לטעון שהמיקרופון פעיל כרגע."
 en = "From the command line: jarvis mic status, jarvis mic mute, or jarvis mic unmute. The choice survives restart. With Core stopped, the preference is saved for next start and is not live-verified."
 

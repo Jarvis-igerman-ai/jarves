@@ -41,13 +41,97 @@
   }
   let st = null, linked = false, view = null;
   // the same states, compact, for the header on every page (shell.js)
-  window.privacyChips = (privacy, live) => ["mic", "camera", "cloud_audio"].map((k) => {
-    const v = live && privacy && privacy[k] && privacy[k].state;
-    const e = (STATES[k] && STATES[k][v]) || UNKNOWN, t = tx(e[0], e[1]);
-    const name = tx(NAMES[k][0], NAMES[k][1]);
-    return el("a", { href: "#/home", class: `ps-chip ps-mini ps-${e[2]}`, title: `${name}: ${t}`, "aria-label": `${name}: ${t}`, "data-k": k },
-      icon(k, e[2] === "off" || e[2] === "none"), el("span", { class: "ps-mini-t" }, t));
-  });
+  // The mic chip is a button that opens the mic mode menu (below); the others link to Home.
+  let hdr = { privacy: null, live: false };
+  window.privacyChips = (privacy, live) => {
+    hdr = { privacy, live };
+    if (mm.menu) mmFill();                         // an open menu follows the live state
+    return ["mic", "camera", "cloud_audio"].map((k) => {
+      const v = live && privacy && privacy[k] && privacy[k].state;
+      const e = (STATES[k] && STATES[k][v]) || UNKNOWN, t = tx(e[0], e[1]);
+      const name = tx(NAMES[k][0], NAMES[k][1]);
+      const kids = [icon(k, e[2] === "off" || e[2] === "none"), el("span", { class: "ps-mini-t" }, t)];
+      const common = { class: `ps-chip ps-mini ps-${e[2]}`, "data-k": k };
+      if (k !== "mic") return el("a", { href: "#/home", ...common, title: `${name}: ${t}`, "aria-label": `${name}: ${t}` }, ...kids);
+      const hint = `${name}: ${t}. ${tx("לחצו לשינוי מצב", "Click to change the mode")}`;
+      return el("button", { type: "button", ...common, id: "micPill", title: hint, "aria-label": hint, "aria-haspopup": "menu",
+        "aria-expanded": mm.menu ? "true" : "false", onclick: mmToggle, onkeydown: mmPillKey }, ...kids);
+    });
+  };
+  // ---- mic mode menu: Muted / Wake word only / Live, applied at once through POST /api/runtime (same as the tray, `jarvis mic`, `jarvis talk`)
+  const MODES = [
+    { id: "muted", t: ["מושתק", "Muted"], d: ["המיקרופון כבוי בתוכנה", "The microphone is off (software mute)"], body: { mic_muted: true } },
+    { id: "wake_only", t: ["רק מילת הפעלה", "Wake word only"], d: ["רק \"Hey Jarvis\" נשמע, במכשיר הזה", "Only \"Hey Jarvis\" is heard, on this device"], body: { mic_muted: false, talk: "stop" } },
+    { id: "live", t: ["חי", "Live"], d: ["שיחה פתוחה, בלי מילת הפעלה", "A conversation is open, no wake word needed"], body: { mic_muted: false, talk: "start" } },
+  ];
+  const mm = { menu: null, busy: false, msg: "", err: false };
+  function modeNow() {
+    const s = hdr.live && hdr.privacy && hdr.privacy.mic && hdr.privacy.mic.state;
+    if (s === "muted") return "muted";
+    if (s === "listening" || s === "gated") return "live";
+    if (s === "wake_only" || s === "idle") return "wake_only";
+    return "";
+  }
+  function mmFill() {
+    const m = mm.menu; if (!m) return;
+    const now = modeNow(), focusId = document.activeElement && document.activeElement.dataset && document.activeElement.dataset.mode;
+    const items = MODES.map((x) => el("button", { type: "button", role: "menuitemradio", class: "mm-item", "data-mode": x.id,
+      "aria-checked": now === x.id ? "true" : "false", disabled: !hdr.live ? true : null, onclick: () => mmApply(x) },
+    el("span", { class: "mm-mark", "aria-hidden": "true" }, now === x.id ? "✓" : ""),
+    el("span", { class: "mm-txt" }, el("b", {}, tx(x.t[0], x.t[1])), el("small", {}, tx(x.d[0], x.d[1])))));
+    const note = !hdr.live ? tx("JARVES עצור: הפעילו אותו כדי לשנות את מצב המיקרופון.", "JARVES is stopped: start it to change the microphone mode.") : mm.msg;
+    m.replaceChildren(...items, el("div", { class: "mm-msg" + (mm.err ? " err" : ""), role: mm.err ? "alert" : "status", "aria-live": "polite" }, note));
+    if (focusId) { const f = m.querySelector(`[data-mode="${focusId}"]`); if (f && !f.disabled) f.focus(); }
+  }
+  async function mmApply(x) {
+    if (mm.busy || !hdr.live) return;
+    mm.busy = true; mm.err = false; mm.msg = tx("מחליף…", "Switching…"); mmFill();
+    try {
+      const r = await api("/api/runtime", { method: "POST", body: JSON.stringify(x.body) });
+      const talk = r && r.applied && r.applied.talk;
+      if (x.id === "live" && talk && talk.ok === false) { mm.err = true; mm.msg = talk.message || tx("לא ניתן לפתוח שיחה", "Could not open a conversation"); }
+      else mm.msg = tx("המיקרופון: ", "Microphone: ") + tx(x.t[0], x.t[1]);
+    } catch (e) { mm.err = true; mm.msg = tx("לא שונה: ", "Not changed: ") + e.message; }
+    mm.busy = false;
+    if (typeof window.shellPoll === "function") await window.shellPoll();
+    mmFill();
+  }
+  function mmPos() {
+    const b = document.getElementById("micPill"), m = mm.menu; if (!b || !m) return;
+    const r = b.getBoundingClientRect(), w = m.offsetWidth, rtl = document.documentElement.dir === "rtl";
+    let left = rtl ? r.right - w : r.left;
+    left = Math.max(8, Math.min(left, window.innerWidth - w - 8));
+    m.style.left = left + "px"; m.style.top = Math.max(8, Math.min(r.bottom + 6, window.innerHeight - 8 - m.offsetHeight)) + "px";
+  }
+  function mmClose(refocus) {
+    if (!mm.menu) return;
+    mm.menu.remove(); mm.menu = null; mm.msg = ""; mm.err = false;
+    document.removeEventListener("mousedown", mmOutside, true); window.removeEventListener("resize", mmPos);
+    const b = document.getElementById("micPill");
+    if (b) { b.setAttribute("aria-expanded", "false"); if (refocus) b.focus(); }
+  }
+  function mmOutside(ev) { if (mm.menu && !mm.menu.contains(ev.target) && !ev.target.closest("#micPill")) mmClose(false); }
+  function mmToggle() {
+    if (mm.menu) return mmClose(true);
+    mm.menu = el("div", { class: "mm-menu", id: "micMenu", role: "menu", "aria-label": tx("מצב מיקרופון", "Microphone mode"), onkeydown: mmKey });
+    document.body.append(mm.menu);
+    mmFill(); mmPos();
+    document.getElementById("micPill").setAttribute("aria-expanded", "true");
+    document.addEventListener("mousedown", mmOutside, true); window.addEventListener("resize", mmPos);
+    const f = mm.menu.querySelector('[aria-checked="true"]:not([disabled])') || mm.menu.querySelector(".mm-item:not([disabled])");
+    if (f) f.focus();
+  }
+  function mmPillKey(ev) { if (ev.key === "ArrowDown" && !mm.menu) { ev.preventDefault(); mmToggle(); } }
+  function mmKey(ev) {
+    const items = [...mm.menu.querySelectorAll(".mm-item:not([disabled])")], i = items.indexOf(document.activeElement);
+    if (ev.key === "Escape") { ev.preventDefault(); mmClose(true); }
+    else if (ev.key === "Tab") mmClose(false);
+    else if (items.length && ["ArrowDown", "ArrowUp", "Home", "End"].includes(ev.key)) {
+      ev.preventDefault();
+      const n = ev.key === "Home" ? 0 : ev.key === "End" ? items.length - 1 : (i + (ev.key === "ArrowDown" ? 1 : -1) + items.length) % items.length;
+      items[n].focus();
+    }
+  }
   const pv = { open: false, left: 0, poll: null, tick: null, msg: "", last: "" };
 
   function entry(k) { const v = linked && st && st[k] && st[k].state; return (STATES[k] && STATES[k][v]) || UNKNOWN; }

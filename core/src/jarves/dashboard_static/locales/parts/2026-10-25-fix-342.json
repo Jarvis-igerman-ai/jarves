@@ -1,0 +1,17 @@
+{
+  "dict": {
+    "A conversation is open, no wake word needed": "שיחה פתוחה, בלי מילת הפעלה",
+    "Click to change the mode": "לחצו לשינוי מצב",
+    "Could not open a conversation": "לא ניתן לפתוח שיחה",
+    "JARVES did not stop. See: jarvis logs -n 80": "JARVES לא נעצר. ראו: jarvis logs -n 80",
+    "JARVES is stopped: start it to change the microphone mode.": "JARVES עצור: הפעילו אותו כדי לשנות את מצב המיקרופון.",
+    "Live": "חי",
+    "Microphone mode": "מצב מיקרופון",
+    "Microphone: ": "המיקרופון: ",
+    "Only \"Hey Jarvis\" is heard, on this device": "רק \"Hey Jarvis\" נשמע, במכשיר הזה",
+    "Stop JARVES? “Hey Jarvis” will not work until you start it again.": "לעצור את JARVES? “Hey Jarvis” לא יעבוד עד שתפעילו אותו שוב.",
+    "Stops JARVES, like jarvis stop": "עוצר את JARVES, כמו jarvis stop",
+    "Switching…": "מחליף…",
+    "The microphone is off (software mute)": "המיקרופון כבוי בתוכנה"
+  }
+}

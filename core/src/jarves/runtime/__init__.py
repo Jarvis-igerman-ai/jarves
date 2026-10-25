@@ -395,6 +395,9 @@ def api_core_start(ctx, m, body):
 
 def api_core_stop(ctx, m, body):
     """Quit from the dashboard (the same orderly shutdown as `jarvis stop`); the Core sends no reply to it."""
+    who = getattr(ctx, "principal", None)
+    if who is not None and who.get("kind") != "local":      # owner only: a paired phone never stops JARVES
+        return 403, {"error": "JARVES can be stopped only from this computer"}
     from ..cli import _ws_call
     _ws_call(ctx.home, ctx.cfg.link.port, {"type": "core.shutdown", "payload": {}}, "never", timeout=1.5)
     return 200, {"ok": True, "note": "shutdown requested"}

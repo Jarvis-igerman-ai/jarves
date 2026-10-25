@@ -157,3 +157,23 @@ table.log td:last-child { overflow-wrap: anywhere; min-width: 220px; }
 .profile-banner { background: var(--critical); color: #fff; padding: 6px 16px; font-size: 14px; text-align: center; }
 tr.click:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
 .schip-start { font-size: 12px; padding: 3px 12px; border-radius: 999px; }
+
+.schip-stop { cursor: pointer; border: 1px solid var(--critical); background: transparent; color: var(--critical); font-weight: 600; }
+.schip-stop:disabled { opacity: .6; cursor: progress; }
+button.ps-chip.ps-mini { font-family: inherit; color: var(--text); }
+/* mic mode menu (strip.js): fixed to the page so the sideways-scrolling chip bar never clips it */
+.mm-menu { position: fixed; z-index: 60; min-width: 250px; max-width: calc(100vw - 16px); background: var(--surface); color: var(--text);
+  border: 1px solid var(--line); border-radius: var(--radius); box-shadow: 0 8px 28px rgba(0,0,0,.25); padding: 6px; }
+.mm-item { display: flex; align-items: flex-start; gap: 8px; width: 100%; text-align: start; background: transparent; border: 0; border-radius: 8px;
+  padding: 8px 10px; color: var(--text); font: inherit; cursor: pointer; }
+.mm-item:hover:not(:disabled), .mm-item:focus-visible { background: var(--surface-2); outline: 2px solid var(--accent); outline-offset: -2px; }
+.mm-item:disabled { opacity: .55; cursor: not-allowed; }
+.mm-item[aria-checked="true"] { background: var(--surface-2); }
+.mm-mark { width: 1.1em; flex: none; font-weight: 700; }
+.mm-txt { display: flex; flex-direction: column; gap: 2px; } .mm-txt small { color: var(--muted); font-size: 12px; }
+.mm-msg { padding: 6px 10px 4px; font-size: 12px; color: var(--muted); min-height: 1.2em; } .mm-msg.err { color: var(--critical); }
+/* narrow screens: the chip bar stays hidden (tree.css) except the controls (mic mode pill, Start / Stop JARVES) */
+@media (max-width: 900px) {
+  .appbar .status-chips { display: flex; order: 10; flex: 1 0 100%; }
+  .appbar .status-chips > :not(#micPill):not(.schip-start) { display: none; }
+}

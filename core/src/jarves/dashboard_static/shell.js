@@ -212,7 +212,26 @@
     } catch (e) { start.error = e.message; }
     start.busy = false; chips(); window.dispatchEvent(new Event("jarves-start"));
   }
+  // Stop JARVES (owner only): the same orderly shutdown as `jarvis stop` (POST /api/runtime/stop), after a confirm; silent.
+  let stopping = false;
+  async function stopCore() {
+    if (start.busy || stopping) return;
+    if (!confirm(tx("לעצור את JARVES? “Hey Jarvis” לא יעבוד עד שתפעילו אותו שוב.", "Stop JARVES? “Hey Jarvis” will not work until you start it again."))) return;
+    stopping = true; start.error = ""; chips();
+    try {
+      await api("/api/runtime/stop", { method: "POST", body: "{}" });
+      const t0 = Date.now();
+      while (Date.now() - t0 < 20000) {
+        await new Promise((r) => setTimeout(r, 800));
+        try { rt = await api("/api/runtime"); } catch (e) { rt = null; }
+        if (!(rt && rt.live)) break;
+      }
+      if (rt && rt.live) start.error = tx("JARVES לא נעצר. ראו: jarvis logs -n 80", "JARVES did not stop. See: jarvis logs -n 80");
+    } catch (e) { start.error = tx("לא נעצר: ", "Not stopped: ") + e.message; }
+    stopping = false; chips(); window.dispatchEvent(new Event("jarves-start"));
+  }
   window.startJarves = startCore;
+  window.shellPoll = () => poll();
   window.startJarvesState = () => ({ busy: start.busy || !!(rt && rt.starting && !rt.live), error: start.error });
   function chips() {
     const bar = $("statusChips");
@@ -236,7 +255,10 @@
     const startBtn = (rt && !running) ? el("button", { type: "button", class: "primary schip-start", disabled: start.busy ? true : null, onclick: startCore,
       title: start.error || tx("מפעיל את JARVES ברקע, כמו jarvis start", "Starts JARVES in the background, like jarvis start") },
       start.busy ? tx("מתחיל…", "Starting…") : tx("הפעלת JARVES", "Start JARVES")) : null;
-    bar.replaceChildren(core, ...(startBtn ? [startBtn] : []), ...priv);
+    const stopBtn = (running || stopping) ? el("button", { type: "button", class: "schip-start schip-stop", disabled: stopping ? true : null, onclick: stopCore,
+      title: start.error || tx("עוצר את JARVES, כמו jarvis stop", "Stops JARVES, like jarvis stop") },
+    stopping ? tx("עוצר…", "Stopping…") : tx("עצירת JARVES", "Stop JARVES")) : null;
+    bar.replaceChildren(core, ...(startBtn ? [startBtn] : []), ...(stopBtn ? [stopBtn] : []), ...priv);
     fadeCue(bar);
   }
   // a sideways scroller shows a fade at the edge where more chips are hidden (D-17); RTL scrollLeft is negative
