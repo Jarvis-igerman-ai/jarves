@@ -1,0 +1,45 @@
+order = 27
+category = "everyday"
+features = ["drive_briefing"]
+suggest = false
+aliases = ["תדריך לפני נסיעה", "תדריך נסיעה", "brief me before I drive", "pre-drive briefing", "drive briefing"]
+error_codes = ["DRIVE_BRIEFING_ASK", "DRIVE_BRIEFING_EMPTY"]
+title_he = "תדריך לפני נסיעה"
+title_en = "Pre-drive briefing"
+what_he = "לפני שאתם נוסעים ג'ארביס אומר בקצרה: האירוע הבא ביומן, מזג האוויר וכמה הודעות חשובות לא נקראו. הוא קודם שואל אם יש מישהו ברכב."
+what_en = "Before you drive JARVES says briefly: your next calendar event, the weather and how many important messages are unread. He asks first if anyone is in the car."
+say = [["תדריך לפני נסיעה", "Brief me before I drive"], ["אני לבד ברכב", "I am alone in the car"]]
+expect_he = "הוא שואל \"יש מישהו ברכב איתך?\". אם אתם לבד הוא מקריא את האירוע הבא, מזג האוויר וכמות ההודעות (בלי שמות שולחים ובלי נושאים). אם יש נוסע הוא אומר רק כמה דקות עד האירוע ואת מזג האוויר, בלי כותרות ובלי מקומות."
+expect_en = "He asks \"is anyone in the car with you?\". If you are alone he reads the next event, the weather and the message count (no senders, no subjects). With a passenger he says only the minutes to the event and the weather, no titles and no places."
+test_he = "הפעילו את התדריך ואמרו \"תדריך לפני נסיעה\". הוא צריך לשאול קודם. אמרו \"אני לבד\" וודאו שאין שמות שולחים."
+test_en = "Turn it on and say \"brief me before I drive\". He must ask first. Say \"I am alone\" and check that no sender names are read."
+cost_he = "חינם (מזג האוויר משירות חינמי)."
+cost_en = "Free (weather comes from a free service)."
+privacy_he = "אין שימוש במיקום. מזג האוויר לפי העיר שהגדרתם (briefing.city). מיילים והודעות: רק מספר, לעולם לא שולח, נושא או תוכן. כבוי כברירת מחדל."
+privacy_en = "Your location is never used. The weather uses the city you set (briefing.city). Mail and messages: a count only, never sender, subject or text. Off by default."
+
+[[steps]]
+he = "הפעילו את \"תדריך לפני נסיעה\". הוא כבוי כברירת מחדל."
+en = "Turn on \"Pre-drive briefing\". It is off by default."
+action = "feature_on:drive_briefing"
+check = "enabled:drive_briefing"
+
+[[steps]]
+he = "אופציונלי: חברו יומן וג'ימייל (jarvis google start). בלי גוגל תקבלו רק את מזג האוויר ותשמעו שהיומן לא מחובר."
+en = "Optional: connect Calendar and Gmail (jarvis google start). Without Google you get the weather only and hear that the calendar is not connected."
+
+[[steps]]
+he = "ברירת המחדל \"לשאול קודם\" (drive_briefing.passenger = ask). אפשר להגדיר alone (תמיד לבד) או present (תמיד יש נוסע) בהגדרות. עדיף להשאיר ask."
+en = "The default is ask-first (drive_briefing.passenger = ask). You may set alone (always alone) or present (always a passenger) in Settings. Leaving it on ask is safest."
+
+[[problems]]
+he = "הוא לא מקריא כלום ושואל אם יש מישהו ברכב"
+en = "He reads nothing and asks if someone is in the car"
+fix_he = "זה בכוונה. אמרו \"אני לבד\" או \"יש נוסע\"."
+fix_en = "That is on purpose. Say \"I am alone\" or \"there is a passenger\"."
+
+[[problems]]
+he = "חסר היומן או ההודעות"
+en = "The calendar or messages are missing"
+fix_he = "גוגל לא מחובר: jarvis google start. החלקים האחרים ממשיכים לעבוד."
+fix_en = "Google is not connected: jarvis google start. The other parts still work."

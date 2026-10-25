@@ -13,8 +13,8 @@ expect_en = "A short sentence by voice. The full details are in the terminal: ja
 test = "feature"
 test_he = "הבדיקה רק מוודאת שהרכיב מותקן. אפשר להריץ jarvis about."
 test_en = "The check only sees that the component is installed. You can run jarvis about."
-cost_he = "חינם ומקומי. רק שליחת הצעת שיפור (אחרי אישור) פונה לאינטרנט, לפרויקט igalgerman/jarves ב-GitHub."
-cost_en = "Free and local. Only sending an improvement ticket (after your approval) uses the internet, to the igalgerman/jarves project on GitHub."
+cost_he = "חינם ומקומי. רק שליחת הצעת שיפור (אחרי אישור) פונה לאינטרנט, לפרויקט Jarvis-igerman-ai/jarves ב-GitHub."
+cost_en = "Free and local. Only sending an improvement ticket (after your approval) uses the internet, to the Jarvis-igerman-ai/jarves project on GitHub."
 privacy_he = "אין שליחה אוטומטית. הצעה נשמרת קודם במחשב, מוצג הטקסט המדויק, ורק jarvis ticket send אחרי אישור שולח אותו. כותרת עם נתיב, כתובת או סוד נדחית."
 privacy_en = "Nothing is sent automatically. A ticket is saved on this computer first, the exact text is shown, and only jarvis ticket send, after your approval, sends it. A title holding a path, address or secret is refused."
 
@@ -52,8 +52,8 @@ action = "command:jarvis features on self_awareness"
 [[problems]]
 he = "jarvis roadmap אומר שאין קובץ תוכנית"
 en = "jarvis roadmap says there is no roadmap file"
-fix_he = "ההתקנה לא כוללת את ROADMAP.md. עדכנו לגרסה חדשה (jarvis update), או קראו אותו ב-github.com/igalgerman/jarves/blob/main/docs/ROADMAP.md."
-fix_en = "This install does not include ROADMAP.md. Update to a newer version (jarvis update), or read it at github.com/igalgerman/jarves/blob/main/docs/ROADMAP.md."
+fix_he = "ההתקנה לא כוללת את ROADMAP.md. עדכנו לגרסה חדשה (jarvis update), או קראו אותו ב-github.com/Jarvis-igerman-ai/jarves/blob/main/docs/ROADMAP.md."
+fix_en = "This install does not include ROADMAP.md. Update to a newer version (jarvis update), or read it at github.com/Jarvis-igerman-ai/jarves/blob/main/docs/ROADMAP.md."
 
 [[problems]]
 he = "ההצעה נשמרה בקובץ ולא נשלחה"

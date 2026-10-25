@@ -447,3 +447,22 @@ def test_a_restore_never_deletes_first_and_an_unfinished_restore_is_finished_bef
     assert prepare.index("RecoverPendingRestore()") < prepare.index("ClearOldRollback()")
     assert "CustomMessage('ProgramIncomplete')" in prepare
     assert "english.ProgramIncomplete=" in iss and "hebrew.ProgramIncomplete=" in iss
+
+
+def test_low_disk_is_refused_before_the_backup_with_the_amount_needed():
+    """#165: the free-space check runs before the backup and before anything is moved, in English and Hebrew."""
+    iss = (PKG / "windows" / "jarves.iss").read_text(encoding="utf-8-sig")
+    assert "english.LowDisk=" in iss and "hebrew.LowDisk=" in iss
+    for lang in ("english", "hebrew"):
+        line = [x for x in iss.splitlines() if x.startswith(lang + ".LowDisk=")][0]
+        assert "%1" in line and "%2" in line and "%3" in line
+    prepare = iss.split("function PrepareToInstall", 1)[1].split("procedure DeinitializeSetup", 1)[0]
+    assert prepare.index("LowDiskMessage()") < prepare.index("prepare --home") < prepare.index("ClearOldRollback()")
+    # review P3-1: before JARVES is stopped; review P0-2: no variable named Out (a Pascal Script keyword)
+    assert prepare.index("LowDiskMessage()") < prepare.index('" stop')
+    assert "if Result <> '' then exit;" in prepare.split("LowDiskMessage()", 1)[1][:80]
+    check = iss.split("function LowDiskMessage", 1)[1].split("function PrepareToInstall", 1)[0]
+    assert "diskcheck" in check and "StrToIntDef(ExpandConstant('{param:DISKRESERVEMB|0}'), 0)" in check and "Code = 4" in check
+    assert "OutFile: String;" in check and "Out :=" not in check and "Out:" not in check
+    smoke = (PKG / "smoke_windows.ps1").read_text(encoding="utf-8-sig")
+    assert "/DISKRESERVEMB=" in smoke and "Disk space check result code: 4" in smoke

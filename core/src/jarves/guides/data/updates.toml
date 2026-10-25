@@ -93,3 +93,7 @@ en = "The update says the previous program could not be put back completely"
 fix_he = "זה קורה רק אם קובץ נשאר נעול גם אחרי שההתקנה ויתרה. שום דבר לא נמחק: החלק שלא חזר מחכה בתיקייה rollback שבתיקיית התוכנה, והנתונים שלכם בטוחים. הפעילו מחדש את Windows והריצו שוב את העדכון: ההתקנה מחזירה קודם את התוכנה הקודמת, ורק אחר כך מגבה ומעדכנת."
 fix_en = "This happens only when a file stays locked even after setup gave up. Nothing is deleted: the part that did not go back waits in the rollback folder inside the program folder, and your data is safe. Restart Windows and run the update again: setup first puts the previous program back, and only then backs up and updates."
 action = "command:jarvis update install"
+
+[[steps]]
+he = "בדיקת מקום בדיסק: לפני הכול (עוד לפני שג'ארביס נעצר) ההתקנה בודקת שיש מקום לגיבוי ולגרסה החדשה, בכונן הנתונים ובכונן התוכנה. אם חסר מקום היא עוצרת מיד, בלי לשנות כלום, ואומרת כמה מגה-בייט חסרים. פנו מקום (למשל מחקו קבצים או נקו את סל המיחזור) והפעילו את העדכון שוב."
+en = "Free disk space check: first of all (even before JARVES is stopped), setup checks there is room for the backup and the new version on the data drive and the program drive. If not, it stops at once, changes nothing and says how many megabytes are missing. Free some space (delete files, empty the recycle bin) and run the update again."

@@ -229,6 +229,8 @@ class Operations:
             reg.register(skill)
         from .briefing import register_briefing
         register_briefing(reg, self.db)                # V3 P1: morning briefing (calls the Calendar/Gmail tools)
+        from .drive_briefing import register_drive_briefing
+        register_drive_briefing(reg, self.db)          # V6 P5: pre-drive briefing (feature off by default)
         reg.allowed_actions |= (sched_mod.ALLOWED_ACTIONS | notes_mod.ALLOWED_ACTIONS | sandbox_mod.ALLOWED_ACTIONS
                                 | alerts_mod.ALLOWED_ACTIONS | autonomy_mod.ALLOWED_ACTIONS
                                 | lists_mod.ALLOWED_ACTIONS | timers_mod.ALLOWED_ACTIONS

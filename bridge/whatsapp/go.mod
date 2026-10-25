@@ -1,4 +1,4 @@
-module github.com/igalgerman/jarves/bridge/whatsapp
+module github.com/Jarvis-igerman-ai/jarves/bridge/whatsapp
 
 go 1.26.0
 

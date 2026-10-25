@@ -93,6 +93,8 @@ english.RetainFailed=JARVES could not be updated because a file in the program f
 hebrew.RetainFailed=לא ניתן היה לעדכן את JARVES כי קובץ בתיקיית התוכנה בשימוש (%1). שום דבר לא השתנה: הגרסה הנוכחית והנתונים שלך כמו קודם. סגור תוכנות שעשויות להשתמש בקבצים של JARVES (תיקייה או עורך פתוחים, גיבוי או סריקת אנטי-וירוס) והפעל את העדכון שוב.
 english.ProgramIncomplete=Setup stopped: the previous JARVES program could not be put back completely (%1 is still in %2). Nothing else was changed and your data is safe. Restart Windows and run the update again; setup puts the previous program back first.
 hebrew.ProgramIncomplete=ההתקנה נעצרה: לא ניתן היה להחזיר את התוכנה הקודמת של JARVES במלואה (%1 עדיין נמצא ב-%2). שום דבר אחר לא השתנה והנתונים שלך בטוחים. הפעל מחדש את Windows והפעל את העדכון שוב; ההתקנה תחזיר קודם את התוכנה הקודמת.
+english.LowDisk=Not enough free disk space on %1. The backup and the new version need about %2 MB; %3 MB more is needed. Nothing was changed: the current version and your data are as before. Free some space and run the update again.
+hebrew.LowDisk=אין מספיק מקום פנוי בכונן %1. הגיבוי והגרסה החדשה צריכים בערך %2 MB; חסרים עוד %3 MB. שום דבר לא השתנה: הגרסה הנוכחית והנתונים שלך כמו קודם. פנה מקום והפעל את העדכון שוב.
 english.BackupFailed=The backup or migration failed. Your old data was kept. Check free disk space and retry. See the installer log for the failed stage.
 hebrew.BackupFailed=הגיבוי או ההסבה נכשלו. הנתונים הישנים נשמרו. בדוק מקום פנוי ונסה שוב. השלב שנכשל מופיע ביומן ההתקנה.
 
@@ -592,6 +594,37 @@ begin
   Result := not DirExists(Old);
 end;
 
+// #165: free-space check on the data and program volumes BEFORE anything else (before JARVES is stopped, before the
+// backup), so a nearly full disk is refused up front with the amount needed and the running Core is not bounced.
+// Exit code 4 = too little; an unreadable probe (or a bad /DISKRESERVEMB=) never blocks.
+function DiskKey(const Lines: TArrayOfString; const Key: String): String;
+var I: Integer;
+begin
+  Result := '';
+  for I := 0 to GetArrayLength(Lines) - 1 do
+    if Pos(Key + '=', Lines[I]) = 1 then Result := Copy(Lines[I], Length(Key) + 2, 100);
+end;
+
+function LowDiskMessage(): String;
+var
+  Code: Integer;
+  OutFile: String;
+  Lines: TArrayOfString;
+begin
+  Result := '';
+  if not FileExists(ExpandConstant('{app}\python\python.exe')) then exit;      // first install: nothing to back up
+  ExtractTemporaryFile('installer_state.py');
+  OutFile := ExpandConstant('{tmp}\jarves-disk.txt');
+  DeleteFile(OutFile);
+  if not Exec(ExpandConstant('{app}\python\python.exe'), '-I "' + ExpandConstant('{tmp}\installer_state.py') +
+      '" diskcheck --home "' + DataDir() + '" --app "' + ExpandConstant('{app}') + '" --out "' + OutFile +
+      '" --reserve-mb ' + IntToStr(StrToIntDef(ExpandConstant('{param:DISKRESERVEMB|0}'), 0)),
+      '', SW_HIDE, ewWaitUntilTerminated, Code) then exit;
+  Log('Disk space check result code: ' + IntToStr(Code));
+  if (Code = 4) and LoadStringsFromFile(OutFile, Lines) then
+    Result := FmtMessage(CustomMessage('LowDisk'), [DiskKey(Lines, 'drive'), DiskKey(Lines, 'need_mb'), DiskKey(Lines, 'short_mb')]);
+end;
+
 function PrepareToInstall(var NeedsRestart: Boolean): String;
 var
   Code, WaitS: Integer;
@@ -603,6 +636,9 @@ begin
     Result := 'The program and data folders must be separate.';
     exit;
   end;
+  // review P3-1: the disk check needs only the old python, so it runs before JARVES is stopped
+  Result := LowDiskMessage();
+  if Result <> '' then exit;
   Old := ExpandConstant('{app}\jarvis.cmd');
   WaitS := 0;
   if FileExists(Old) then begin
