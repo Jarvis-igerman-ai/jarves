@@ -66,7 +66,7 @@ def approved_sha(state: dict, version: int) -> str:
     return ""
 
 
-def plan_update(mgr, sid: str) -> dict:
+def plan_update(mgr, sid: str, *, quiet: bool = False) -> dict:
     """What `jarvis skills update <sid>` would do with the waiting draft: never changes anything."""
     from .generated import SkillError, _sha
     sid = mgr._id(sid)
@@ -90,8 +90,9 @@ def plan_update(mgr, sid: str) -> dict:
     out = {"id": sid, "installed_version": old_version, "from": old.version if old else None,
            "to": new_info["version"], "trust": new_info["trust"], "plan": plan, "sha256": _sha(md, py),
            "errors": errors, "refused": bool(errors), "needs_approval": True}
-    logs.info("skills", "SKILL_UPDATE_PLANNED", "Skill update planned", skill=sid, action=plan["action"],
-              trust=new_info["trust"], added=len(plan["added_permissions"]), refused=bool(errors))
+    if not quiet:                       # viewing a draft is not an event (#314): only an explicit plan is logged
+        logs.info("skills", "SKILL_UPDATE_PLANNED", "Skill update planned", skill=sid, action=plan["action"],
+                  trust=new_info["trust"], added=len(plan["added_permissions"]), refused=bool(errors))
     return out
 
 
