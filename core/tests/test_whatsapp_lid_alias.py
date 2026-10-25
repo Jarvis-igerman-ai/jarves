@@ -27,6 +27,17 @@ def test_merge_aliases_one_chat_newest_id_best_name():
     assert wab.merge_aliases([OTHER]) == [OTHER]
 
 
+def test_merge_never_joins_different_people():
+    a = {"id": "1@s.whatsapp.net", "lid": "", "name": "A", "number": "1"}
+    b = {"id": "2@s.whatsapp.net", "lid": None, "name": "B", "number": "2"}
+    g1 = {"id": "1@g.us", "lid": "9@lid", "is_group": True, "name": "G1"}
+    g2 = {"id": "2@g.us", "lid": "9@lid", "is_group": True, "name": "G2"}
+    x = {"id": "3@s.whatsapp.net", "lid": "7@lid", "name": "X", "number": "3"}
+    y = {"id": "4@s.whatsapp.net", "lid": "7@lid", "name": "Y", "number": "4"}
+    out = wab.merge_aliases([a, b, g1, g2, x, y])
+    assert len(out) == 6 and not any(c.get("alias_ids") for c in out)
+
+
 def test_find_chat_name_resolves_to_the_chat_with_todays_messages():
     hits = wab.resolve(wab.merge_aliases([OLD, NEW, OTHER]), "wife")
     assert [c["id"] for c in hits] == [NEW["id"]]

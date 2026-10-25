@@ -368,14 +368,21 @@ def merge_aliases(chats: list[dict]) -> list[dict]:
     for c in chats:
         cid = str(c.get("id") or "")
         key = str(c.get("lid") or "") or (cid if cid.endswith("@lid") else "")
+        if c.get("is_group") or cid.endswith(("@g.us", "@broadcast")) or cid.startswith("status@"):
+            key = ""                                          # groups, broadcasts, status are never merged
         groups.setdefault(key or cid, []).append(c)
     out = []
     for g in groups.values():
         if len(g) == 1:
             out.append(g[0])
             continue
+        if len({str(c["number"]) for c in g if c.get("number")}) > 1:
+            out.extend(g)                                     # same lid but different numbers: never merge people
+            continue
         g = sorted(g, key=lambda c: -_secs(c.get("last_ts")))
         m = dict(g[0])
+        if "can_send" in m:
+            m["can_send"] = all(c.get("can_send") for c in g)   # sending stays as strict as the strictest id
         m["name"] = max((str(c.get("name") or "") for c in g), key=len)
         m["number"] = next((c["number"] for c in g if c.get("number")), m.get("number"))
         m["unread"] = sum(int(c.get("unread") or 0) for c in g)
