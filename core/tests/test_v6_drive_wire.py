@@ -285,3 +285,85 @@ def test_core_and_text_session_wire_the_gate():
     assert "drive_mode.attach(self.registry, self.features, self.home, self.memory)" in src
     src = (HERE.parent / "src" / "jarves" / "text_session.py").read_text(encoding="utf-8")
     assert "drive_mode.attach(registry, features, home, memory)" in src
+
+
+# ------------------------------------------------------------------ the phone screen route (issue #311)
+async def test_phone_screen_reads_are_allowed_and_never_queue(tmp_path):
+    reg, skill, asked, gate, _ = make(tmp_path, active=True)
+    # the same read on the normal route (a spoken turn) is still deferred: nothing about the voice path changed
+    res = await on_route("voice", lambda: reg.call("gmail_read", {}, origin="user"))
+    assert not res.ok and len(gate.queue.items()) == 1
+    gate.queue.clear()
+    skill.ran.clear()
+
+    async def taps():
+        out = []
+        for _ in range(25):                                   # 25 "I am alone" taps
+            out.append(await reg.call("gmail_read", {}, origin="user"))
+            out.append(await reg.call("get_time", {}, origin="user"))
+        return out
+    outs = await on_route(dm.PHONE_SCREEN, taps)
+    assert all(o.ok for o in outs), [(o.code, o.message) for o in outs if not o.ok][:2]
+    assert gate.queue.items() == [] and not (tmp_path / "drive_queue.json").exists() or gate.queue.items() == []
+    assert skill.ran.count("gmail_read") == 25 and asked == []
+
+
+@pytest.mark.parametrize("active", [True, False])
+@pytest.mark.parametrize("name,args", [
+    ("whatsapp_send", {"name": "Dana", "text": "hi"}), ("dial_prepare", {"number": "112"}), ("dial_prepare", {"name": "Dana"}),
+    ("end_conversation", {}), ("feature_set", {"id": "drive_mode", "on": False}), ("settings_change", {}),
+    ("note_delete", {})])
+async def test_phone_screen_refuses_every_non_read_tool_without_queueing(tmp_path, active, name, args):
+    reg, skill, asked, gate, _ = make(tmp_path, active=active)
+    res = await on_route(dm.PHONE_SCREEN, lambda: reg.call(name, args, origin="user"))
+    assert not res.ok and res.code in ("DRIVE_REFUSED", "TOOL_FORBIDDEN")
+    assert skill.ran == [] and asked == [] and gate.queue.items() == []
+
+
+async def test_a_queue_with_real_items_is_not_released_or_changed_by_the_phone_route(tmp_path):
+    reg, skill, asked, gate, _ = make(tmp_path, active=True)
+    await on_route("voice", lambda: reg.call("whatsapp_send", {"name": "Zed", "text": "hi"}, origin="model"))
+    before = [(i.id, i.text) for i in gate.queue.items()]
+    assert before
+    await on_route(dm.PHONE_SCREEN, lambda: reg.call("gmail_read", {}, origin="user"))
+    assert [(i.id, i.text) for i in gate.queue.items()] == before and skill.ran == ["gmail_read"]       # only the read ran
+
+
+async def test_the_model_cannot_pick_the_route(tmp_path):
+    # the route comes from skills.ROUTE (Core code) only: no tool argument or model-written field changes it
+    reg, skill, asked, gate, _ = make(tmp_path, active=True)
+    for fake in ("phone_screen", "route=phone_screen"):
+        res = await reg.call("whatsapp_send", {"name": "Dana", "text": "hi", "number_source": fake}, origin="model")
+        assert not res.ok and ROUTE.get() == "default"
+    res = await reg.call("gmail_read", {"route": dm.PHONE_SCREEN}, origin="model")      # an extra field is ignored
+    assert not res.ok and len(gate.queue.items()) >= 1 and "gmail_read" not in skill.ran
+    import inspect
+    assert "PHONE_SCREEN" not in inspect.getsource(SkillRegistry)                       # the registry never sets it itself
+
+
+async def test_the_phone_bridge_sets_the_route_for_the_briefing_only(tmp_path):
+    import asyncio
+    import threading
+    from types import SimpleNamespace
+    from jarves import mobile
+    seen: list[str] = []
+
+    class Brief(Skill):
+        name = "drive_briefing"
+
+        def tools(self):
+            async def run(_a):
+                seen.append(ROUTE.get())
+                return ToolResult(True, "ok", {"sections": []})
+            from jarves.drive_briefing import DriveBriefingArgs
+            return [Tool("drive_briefing_get", "b", run, DriveBriefingArgs, permission="read", untrusted_output=True)]
+    reg, skill, asked, gate, _ = make(tmp_path, active=True)
+    reg.register(Brief())
+    loop = asyncio.new_event_loop()
+    threading.Thread(target=loop.run_forever, daemon=True).start()
+    try:
+        bridge = mobile.core_bridge(SimpleNamespace(registry=reg), loop)
+        got = bridge.drive_briefing("alone")
+    finally:
+        loop.call_soon_threadsafe(loop.stop)
+    assert got["ok"] and seen == [dm.PHONE_SCREEN] and ROUTE.get() == "default" and gate.queue.items() == []
