@@ -36,10 +36,11 @@ def test_check_pr():
 
 
 def test_check_remote_only_public_repo():
-    assert hotfix.check_remote("https://github.com/igalgerman/jarves.git") == []
-    assert hotfix.check_remote("git@github.com:igalgerman/jarves.git") == []
+    assert hotfix.check_remote("https://github.com/Jarvis-igerman-ai/jarves.git") == []
+    assert hotfix.check_remote("git@github.com:Jarvis-igerman-ai/jarves.git") == []
+    assert hotfix.check_remote("git@github.com:igalgerman/jarves.git") == []      # the old address still redirects
     assert hotfix.check_remote("https://github.com/igalgerman/JARVIS.git")
-    assert hotfix.check_remote("https://example.com/igalgerman/jarves.git")
+    assert hotfix.check_remote("https://example.com/Jarvis-igerman-ai/jarves.git")
 
 
 def test_commands_cherry_pick_and_pr():
@@ -65,7 +66,7 @@ def _runner(info, url, tags, calls):
 
 def test_dry_run_runs_nothing_mutating():
     calls, lines = [], []
-    rc = hotfix.backport(7, "release/4.0", "jarves", True, _runner(MERGED, "https://github.com/igalgerman/jarves.git", "v4.0.0\nv4.0.1", calls), lines.append)
+    rc = hotfix.backport(7, "release/4.0", "jarves", True, _runner(MERGED, "https://github.com/Jarvis-igerman-ai/jarves.git", "v4.0.0\nv4.0.1", calls), lines.append)
     assert rc == 0
     assert not any(c[:2] in (["git", "push"], ["git", "cherry-pick"], ["git", "switch"]) or c[:3] == ["gh", "pr", "create"] for c in calls)
     assert "v4.0.2" in lines[0]
@@ -73,7 +74,7 @@ def test_dry_run_runs_nothing_mutating():
 
 def test_real_run_executes_commands_and_refuses_wrong_remote():
     calls, lines = [], []
-    assert hotfix.backport(7, "release/4.0", "jarves", False, _runner(MERGED, "https://github.com/igalgerman/jarves.git", "", calls), lines.append) == 0
+    assert hotfix.backport(7, "release/4.0", "jarves", False, _runner(MERGED, "https://github.com/Jarvis-igerman-ai/jarves.git", "", calls), lines.append) == 0
     assert any(c[:2] == ["git", "push"] for c in calls)
     calls.clear()
     assert hotfix.backport(7, "release/4.0", "origin", False, _runner(MERGED, "https://github.com/igalgerman/JARVIS.git", "", calls), lines.append) == 1

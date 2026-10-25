@@ -93,7 +93,7 @@
     const show = () => {
       bundleBox.hidden = false;
       bundleBox.replaceChildren(el("h2", {}, tx("זה הטקסט המדויק שיישלח", "This is the exact text that would be sent")),
-        el("div", { class: "muted small" }, tx("אין בו תוכן שיחות, שמות, כתובות, נתיבים או מפתחות. ליעד: ", "No conversation text, names, addresses, paths or keys. To: ") + `github.com/${"igalgerman/jarves"} · label ${"from-diagnostics"}`
+        el("div", { class: "muted small" }, tx("אין בו תוכן שיחות, שמות, כתובות, נתיבים או מפתחות. ליעד: ", "No conversation text, names, addresses, paths or keys. To: ") + `github.com/${"Jarvis-igerman-ai/jarves"} · label ${"from-diagnostics"}`
           + (d.token ? "" : tx(" · אין אסימון GitHub במחשב: הדיווח יישמר בקובץ לצירוף ידני", " · no GitHub token here: the report is saved for you to attach"))),
         el("pre", { dir: "ltr", style: "white-space:pre-wrap;overflow-wrap:anywhere" }, d.bundle.title + "\n\n" + d.bundle.body),
         el("div", { class: "row" },

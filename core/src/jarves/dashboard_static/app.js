@@ -418,14 +418,27 @@ async function pageHome() {
     : vo.connecting ? tx("מתחבר…", "Connecting…") : vo.wake_listening ? tx("מאזין ל-“Hey Jarvis” במכשיר הזה (בלי חיבור לענן)", "Listening for “Hey Jarvis” on this device (no cloud connection)")
     : mic.muted ? tx("המיקרופון מושתק", "Microphone muted") : `${tx("קול", "Voice")} ${vo.mode || "?"}${vo.detail ? " · " + vo.detail : ""}`;
   const WIN = { shown: ["מוצג", "Shown"], hidden: ["מוסתר", "Hidden"], starting: ["נפתח…", "Opening…"], crashed: ["קרס", "Crashed"] };
+  const ss = (window.startJarvesState && window.startJarvesState()) || { busy: !!d.starting, error: "" };
   const tiles = el("div", { class: "tiles" },
-    tile(tx("ליבה", "Core"), running ? tx("פועל", "Running") : tx("עצור", "Stopped"), running ? `${c.mode} · pid ${c.pid} · v${c.version}`
+    tile(tx("ליבה", "Core"), running ? tx("פועל", "Running") : ss.busy ? tx("מתחיל…", "Starting…") : tx("עצור", "Stopped"), running ? `${c.mode} · pid ${c.pid} · v${c.version}`
       : (c.since ? tx("נראה לאחרונה ", "last seen ") + day(c.since) + " " + clock(r.ts || c.since) : tx("עוד לא הופעל", "not started yet"))),
     tile(tx("חלון", "Window"), running ? (WIN[disp.state] ? tx(...WIN[disp.state]) : disp.state) : "—",
       disp.available === false ? disp.reason : (disp.close_policy === "quit" ? tx("סגירה יוצאת מ-JARVES", "closing it quits JARVES") : tx("סגירה רק מסתירה את JARVES", "closing it only hides JARVES"))),
     tile(tx("מיקרופון", "Microphone"), micMuted ? tx("מושתק", "Muted") : tx("פועל", "On"), tx("השתקה בתוכנה", "software mute") + (mic.physical_mute === null || mic.physical_mute === undefined ? "" : tx(" · פיזית: ", " · physical: ") + mic.physical_mute)),
     tile(tx("התראות יזומות", "Proactive alerts"), alertsPaused ? tx("מושהות", "Paused") : tx("פועלות", "On"), tx("תשובות שביקשת לא מתעכבות אף פעם", "answers you ask for are never held")));
   const auto = d.autostart || {};
+  // Core stopped / starting: one clear Start button and a truthful state (same launcher as `jarvis start`)
+  const startErr = ss.error || d.start_error || "";
+  const startCard = running ? null : el("div", { class: "card start-card", role: "region", "aria-label": tx("הפעלת JARVES", "Start JARVES") },
+    el("div", { class: "row" }, el("h2", { style: "margin:0" }, ss.busy ? tx("JARVES מתחיל…", "JARVES is starting…") : tx("JARVES עצור", "JARVES is stopped")), el("span", { class: "spacer" }),
+      el("button", { type: "button", class: "primary start-btn", disabled: ss.busy ? true : null, onclick: () => window.startJarves && window.startJarves() },
+        ss.busy ? tx("מתחיל…", "Starting…") : tx("הפעלת JARVES", "Start JARVES"))),
+    el("div", { class: "muted small", style: "margin-top:6px" }, tx("אחרי ההפעלה אפשר להשתיק את המיקרופון, לפתוח שיחה ולהציג את החלון כאן.", "Once started you can mute the microphone, open a conversation and show the window here.")),
+    startErr ? el("div", { class: "small start-error", role: "alert", style: "margin-top:6px;color:var(--bad)" }, tx("ההפעלה נכשלה: ", "Start failed: ") + startErr) : null);
+  if (!window._startHomeHook) {
+    window._startHomeHook = true;
+    window.addEventListener("jarves-start", () => { const p = (location.hash || "").replace("#", "").replace("/", ""); if (!p || p === "home" || p === "runtime") route(true); });
+  }
   const controls = el("div", { class: "card" },
     el("div", { class: "row" }, el("h2", { style: "margin:0" }, tx("שליטה", "Controls")), el("span", { class: "spacer" }), msg),
     el("table", { style: "margin-top:8px" }, el("tbody", {},
@@ -467,7 +480,7 @@ async function pageHome() {
       el("tbody", {}, Object.entries(ps).map(([k, v]) => el("tr", {}, el("td", {}, el("b", {}, CAP[k] ? tx(...CAP[k]) : k.replace(/_/g, " "))), prow("Windows", v.windows), prow("Pi", v.linux_arm64_pi)))))));
   render(header(tx("שליטה ומצב ריצה", "Controls & runtime"), running ? tx("JARVES רץ ברקע; החלון לא חובה.", "JARVES runs in the background; the window is optional.")
     : tx("JARVES עצור (מוצג המצב השמור האחרון).", "JARVES is stopped (last saved state shown).")),
-    tiles, el("div", { class: "grid2 home" }, controls, voice), platform);
+    startCard, tiles, el("div", { class: "grid2 home" }, controls, voice), platform);
   if (running) timer = setInterval(() => route(true), 4000);
 }
 async function pageSettings() {
@@ -508,4 +521,6 @@ async function route(refresh) {
 window.addEventListener("hashchange", () => route());
 // after every deferred script (pages.js) has run
 document.addEventListener("DOMContentLoaded", () => refreshOverview().then(() => route()));
-setInterval(refreshOverview, 15000);
+// #159: a hidden tab does not poll (each call is work inside the Core); refresh as soon as it is visible again
+setInterval(() => { if (!document.hidden) refreshOverview(); }, 15000);
+document.addEventListener("visibilitychange", () => { if (!document.hidden) refreshOverview(); });

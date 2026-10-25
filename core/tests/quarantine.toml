@@ -1,0 +1,10 @@
+# Quarantined (flaky) tests: owner rule 24 Oct 2026 (CLAUDE.md "A flaky test is a show-stopper", issue #160).
+# A test listed here gets the `quarantine` marker (tests/conftest.py). The blocking CI jobs run `-m "not quarantine"`
+# (deselected, never skipped); the non-blocking step "Quarantined tests" in jarves-checks.yml still runs it on every
+# PR and main run, so it stays visible. Every entry has an open `showstopper` (P1) issue; fix the test, delete the entry
+# and close the issue in the same PR. `core/tools/flake_scan.py` finds flakes in the run history and opens the issues.
+#
+# id     = "<test file>::<test name>" (no parameters: every parametrization is quarantined)
+# issue  = the showstopper issue number
+# since  = date quarantined (UTC)
+# reason = one line: what flakes and where

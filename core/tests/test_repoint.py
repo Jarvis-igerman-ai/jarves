@@ -42,7 +42,7 @@ class ReleaseServer:
 
 
 def test_default_sources_public_source_repo_and_releases_repo():
-    assert updates.REPO == "igalgerman/jarves" and updates.DEFAULT_RELEASES_REPO == "igalgerman/jarvis-releases"
+    assert updates.REPO == "Jarvis-igerman-ai/jarves" and updates.DEFAULT_RELEASES_REPO == "igalgerman/jarvis-releases"
     assert updates.public_releases_url() == "https://github.com/igalgerman/jarvis-releases/releases/latest/download"
 
 
@@ -73,7 +73,7 @@ def test_missing_release_message_names_the_public_repos_not_the_old_one(tmp_path
     monkeypatch.delenv("JARVES_UPDATE_REPO", raising=False)
     s = UpdateChecker(tmp_path, http=lambda url, h: (404, None), current="3.0.0.5", public_keys=[],
                       base_url="").check(force=True)
-    assert not s["available"] and "igalgerman/jarves" in s["error"] and "igalgerman/jarvis-releases" in s["error"]
+    assert not s["available"] and "Jarvis-igerman-ai/jarves" in s["error"] and "igalgerman/jarvis-releases" in s["error"]
     assert OLD not in s["error"]
 
 

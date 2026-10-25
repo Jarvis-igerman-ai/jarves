@@ -16,7 +16,7 @@ import subprocess
 import sys
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
-DEFAULT_REPO = "igalgerman/jarves"
+DEFAULT_REPO = "Jarvis-igerman-ai/jarves"
 MAX_OPEN_PRS = 30
 MAX_WORKERS = 4
 

@@ -102,7 +102,7 @@ def test_phone_calendar_create_update_only(lan, phone):
 
 
 def test_other_phone_writes_stay_denied(lan, phone):
-    for path in ("/api/jobs/zz", "/api/runtime/stop", "/api/backup", "/api/updates/install", "/api/reports/1"):
+    for path in ("/api/jobs/zz", "/api/runtime/stop", "/api/runtime/start", "/api/backup", "/api/updates/install", "/api/reports/1"):
         assert phone("POST", path, {"op": "approve"})[0] == 403, path
     assert device_body_ok(None, "GET", "/api/jobs", None)
 
