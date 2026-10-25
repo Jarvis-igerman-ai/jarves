@@ -1,0 +1,12 @@
+{
+ "dict": {
+  "JARVES did not answer within 60 s. See: jarvis logs -n 80": "JARVES לא ענה תוך 60 שניות. ראו: jarvis logs -n 80",
+  "JARVES is starting…": "JARVES מתחיל…",
+  "JARVES is stopped": "JARVES עצור",
+  "Once started you can mute the microphone, open a conversation and show the window here.": "אחרי ההפעלה אפשר להשתיק את המיקרופון, לפתוח שיחה ולהציג את החלון כאן.",
+  "Start failed: ": "ההפעלה נכשלה: ",
+  "Start JARVES": "הפעלת JARVES",
+  "Starting…": "מתחיל…",
+  "Starts JARVES in the background, like jarvis start": "מפעיל את JARVES ברקע, כמו jarvis start"
+ }
+}

@@ -19,8 +19,8 @@ from pathlib import Path
 TEXT: dict[str, str] = {
     "one wizard in the dashboard (#/setup) that sets up, tests and teaches every topic; your 'works' answers become the per-feature 'verified by owner' record and the release sign-off sheet":
         "אשף אחד בלוח הבקרה (#/setup) להגדרה, בדיקה והיכרות עם כל נושא. התשובות שלכם מתעדות מה אומת על ידכם ומעדכנות את גיליון אישור הגרסה.",
-    "core/tests/test_wizard.py (state, diff, secrets, bug report, sign-off sheet)":
-        "core/tests/test_wizard.py (מצב, שינויים, סודות, דיווח באג, גיליון אישור)",
+    "core/tests/test_wizard.py, test_wizard_browser.py (done per release, diff, secrets, bug report, sign-off, real browser)":
+        "core/tests/test_wizard.py, test_wizard_browser.py (סיום לפי גרסה, שינויים, סודות, דיווח באג, אישור, דפדפן אמיתי)",
     # --- automatic updates (issue #17)
     "installs a newer signed JARVES by itself, only at a quiet moment (never in a conversation, an approval or a "
     "coding-agent task), after a notice and a backup; same signed path as `jarvis update install`; stable users get "
@@ -359,6 +359,8 @@ TEXT: dict[str, str] = {
     "dashboard Phone page / `jarvis dashboard --mobile`": "עמוד טלפון בלוח הבקרה / `jarvis dashboard --mobile`",
     "UNIT test_mobile_*.py + test_tailnet.py (pairing, tokens, scopes, rate limits, audit, PWA files, TLS, Tailscale with fake interfaces); QR decoded once with OpenCV":
         "בדיקות יחידה: test_mobile_*.py ו-test_tailnet.py (צימוד, אסימונים, הרשאות, הגבלת קצב, ביקורת, קבצי PWA, TLS, Tailscale עם ממשקים מדומים); קוד QR פוענח פעם אחת עם OpenCV",
+    "UNIT test_mobile_*.py + test_tailnet.py (pairing, tokens, scopes, rate limits, audit, PWA files, TLS, Tailscale with fake interfaces); QR decoded once with OpenCV; Learned-preferences page (view/confirm/correct/forget, scope prefs) in the emulated phone (test_mobile_prefs.py)":
+        "בדיקות יחידה: test_mobile_*.py ו-test_tailnet.py (צימוד, אסימונים, הרשאות, הגבלת קצב, ביקורת, קבצי PWA, TLS, Tailscale עם ממשקים מדומים); קוד QR פוענח פעם אחת עם OpenCV; עמוד ההעדפות הנלמדות (צפייה, אישור, תיקון, שכחה, הרשאת prefs) בטלפון מדומה (test_mobile_prefs.py)",
     "UNIT test_mobile_*.py (pairing, tokens, scopes, rate limits, audit, PWA files, TLS); QR decoded once with OpenCV":
         "בדיקות יחידה: test_mobile_*.py (צימוד, אסימונים, הרשאות, הגבלת קצב, ביקורת, קבצי PWA, TLS); קוד QR פוענח פעם אחת עם OpenCV",
     "V5 is PC-hosted; the Pi is out of scope": "V5 רץ על המחשב; ה-Pi מחוץ להיקף",

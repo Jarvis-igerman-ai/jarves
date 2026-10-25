@@ -11,6 +11,7 @@ import time
 from pathlib import Path
 
 from .. import logs
+from ..swr import SwrCache
 from . import FEATURE, SKILL
 from . import service as svc
 from .envelope import say
@@ -430,8 +431,11 @@ def dashboard_routes(register) -> None:
     def api_log(ctx, _m, _body, q=None):
         return 200, call(ctx, "log", ref=_q(q, "ref"), limit=int(_q(q, "limit", "100") or 100))
 
+    doctor_cache = SwrCache(ttl_s=30.0, wait_s=3.0)   # #159 perf2: runs CLI subprocesses, took 15 s+
+
     def api_doctor(ctx, _m, _body, q=None):
-        return 200, call(ctx, "doctor")
+        return doctor_cache.get(str(ctx.home), lambda: (200, call(ctx, "doctor")),
+                                lambda: (200, {"ok": False, "checks": [], "pending": True}))
 
     def api_projects(ctx, _m, _body, q=None):
         return 200, call(ctx, "projects", action="list")

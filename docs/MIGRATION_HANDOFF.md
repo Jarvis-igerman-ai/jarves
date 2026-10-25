@@ -4,7 +4,7 @@
 
 ## Source of truth and owner decision
 
-- **ONLY active writable repository:** [`igalgerman/jarves`](https://github.com/igalgerman/jarves), public, branch `main`.
+- **ONLY active writable repository:** [`Jarvis-igerman-ai/jarves`](https://github.com/Jarvis-igerman-ai/jarves), public, branch `main`.
 - Legacy [`igalgerman/JARVIS`](https://github.com/igalgerman/JARVIS) is **DEPRECATED / READ-ONLY** as a development source; it is **not yet GitHub-archived**. Do not push/commit/create issues there. Never synchronize public changes *back* to private.
 - This migration is approved **for transferring repository-owned code, tests, documentation and issue tracking only**. It is not approval to develop unrelated features or merge incomplete V4 functionality. Keep credentials, personal logs, live agent-session traces and account/user data out of the public repository. A draft PR is a preservation step, not feature acceptance.
 
@@ -14,11 +14,11 @@ These are **open DRAFT PRs**, based on public main. Counts were compared against
 
 | PR | Public branch | Files | Content preserved | Must still integrate/verify |
 | --- | --- | ---: | --- | --- |
-| [#6](https://github.com/igalgerman/jarves/pull/6) | `migration/v4-whatsapp-go-review` | 23 | V4 Go bridge protocol, policy, encrypted storage, fake engine and tests | Real WhatsApp engine, Core bridge connection, production auth, tests, approval and linked-device risk |
-| [#7](https://github.com/igalgerman/jarves/pull/7) | `migration/v4-orchestrator-review` | 26 | E Orchestrator modules, Claude/Codex adapters, fixtures, fakes, dashboard JS and guide | Existing Core/CLI/dashboard/config integration, supported session controls, real CLI validation and security |
-| [#8](https://github.com/igalgerman/jarves/pull/8) | `migration/v4-selfdiag2-review` | 28 | O diagnostics modules, selective AI review, health UI, canaries, replay and tests | Existing Core/CLI/dashboard/config/CI hooks, privacy controls, thresholds, cost caps and real operation |
-| [#9](https://github.com/igalgerman/jarves/pull/9) | `migration/v4-delegation-isolation-review` | 12 | D strict-budget delegation and R01 helper isolation new code/tests | Existing voice/budget/helper/approval integration, OS enforcement, security, CLI/UX, live test with budget |
-| [#10](https://github.com/igalgerman/jarves/pull/10) | `migration/v4-dashboard-review` | 3 | K dashboard all-pages and locale helper tools | Complete modified EN/HE Dashboard files, removal of obsolete locales, accessibility and real browser QA |
+| [#6](https://github.com/Jarvis-igerman-ai/jarves/pull/6) | `migration/v4-whatsapp-go-review` | 23 | V4 Go bridge protocol, policy, encrypted storage, fake engine and tests | Real WhatsApp engine, Core bridge connection, production auth, tests, approval and linked-device risk |
+| [#7](https://github.com/Jarvis-igerman-ai/jarves/pull/7) | `migration/v4-orchestrator-review` | 26 | E Orchestrator modules, Claude/Codex adapters, fixtures, fakes, dashboard JS and guide | Existing Core/CLI/dashboard/config integration, supported session controls, real CLI validation and security |
+| [#8](https://github.com/Jarvis-igerman-ai/jarves/pull/8) | `migration/v4-selfdiag2-review` | 28 | O diagnostics modules, selective AI review, health UI, canaries, replay and tests | Existing Core/CLI/dashboard/config/CI hooks, privacy controls, thresholds, cost caps and real operation |
+| [#9](https://github.com/Jarvis-igerman-ai/jarves/pull/9) | `migration/v4-delegation-isolation-review` | 12 | D strict-budget delegation and R01 helper isolation new code/tests | Existing voice/budget/helper/approval integration, OS enforcement, security, CLI/UX, live test with budget |
+| [#10](https://github.com/Jarvis-igerman-ai/jarves/pull/10) | `migration/v4-dashboard-review` | 3 | K dashboard all-pages and locale helper tools | Complete modified EN/HE Dashboard files, removal of obsolete locales, accessibility and real browser QA |
 
 **Total: 92 added files.** All 5 PRs remain Draft and **none is merged**; no CI/run-on-owner-PC success is being claimed. The private V4 sources are not themselves ready to merge: divergent history and partially overlapping dashboard/CLI/CI files require review.
 
@@ -35,11 +35,11 @@ These are **open DRAFT PRs**, based on public main. Counts were compared against
 ## Issue migration
 
 - Original private repository has **17 open issues** at inventory time; the public repository initially had none. Their outstanding work has been summarized into the following 5 public issues:
-  - [#1 V4 release / live acceptance](https://github.com/igalgerman/jarves/issues/1): historical #14, #15, #16, #17, #24, #25, #28.
-  - [#2 Orchestrator](https://github.com/igalgerman/jarves/issues/2): historical #49.
-  - [#3 Pi parity](https://github.com/igalgerman/jarves/issues/3): historical #18–23.
-  - [#4 Physical design](https://github.com/igalgerman/jarves/issues/4): historical #3, #4, #8.
-  - [#5 Repository consolidation](https://github.com/igalgerman/jarves/issues/5): migration ledger; tracks any missed historic requirements.
+  - [#1 V4 release / live acceptance](https://github.com/Jarvis-igerman-ai/jarves/issues/1): historical #14, #15, #16, #17, #24, #25, #28.
+  - [#2 Orchestrator](https://github.com/Jarvis-igerman-ai/jarves/issues/2): historical #49.
+  - [#3 Pi parity](https://github.com/Jarvis-igerman-ai/jarves/issues/3): historical #18–23.
+  - [#4 Physical design](https://github.com/Jarvis-igerman-ai/jarves/issues/4): historical #3, #4, #8.
+  - [#5 Repository consolidation](https://github.com/Jarvis-igerman-ai/jarves/issues/5): migration ledger; tracks any missed historic requirements.
 - Issue **numbers do not retain their old meaning** across repos. Always use canonical `owner/repo#number` or the full URL. Do not close the old private issues or destroy history merely to tidy.
 
 ## Required work: priority & handoff to next coding agent

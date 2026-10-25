@@ -123,7 +123,9 @@
     await refresh();
   }
   if (typeof PAGES !== "undefined") Object.assign(PAGES, { approvals: pageApprovals });
-  setInterval(refresh, 2000);
+  // #159: no polling while the tab is hidden (the popup / tray still ask); catch up the moment it is shown
+  setInterval(() => { if (!document.hidden) refresh(); }, 2000);
+  document.addEventListener("visibilitychange", () => { if (!document.hidden) refresh(); });
   window.addEventListener("hashchange", () => { last = ""; refresh(); });
   document.addEventListener("DOMContentLoaded", refresh);
 })();

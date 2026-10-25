@@ -1,0 +1,11 @@
+{
+ "dict": {
+  "JARVES can be started only from this computer": "אפשר להפעיל את JARVES רק מהמחשב הזה"
+ },
+ "rules": [
+  [
+   "^JARVES could not be started: (.*)\\. Try jarvis start in a terminal, then jarvis logs -n 80$",
+   "לא ניתן היה להפעיל את JARVES: $1. נסו jarvis start בטרמינל ואז jarvis logs -n 80"
+  ]
+ ]
+}

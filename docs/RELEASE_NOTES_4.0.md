@@ -40,7 +40,7 @@ Owner scope decision 21 Oct 2026: 4.0.0 contains only what is merged in `main`. 
 - Pear history trimming is off by default (a switch in Settings).
 - Spoken approvals name only the kind of action; the popup and dashboard still show details.
 - The popup language defaults to English (`[ui] popup_language`).
-- Update source repository is `igalgerman/jarves`; signed installers stay in `igalgerman/jarvis-releases`.
+- Update source repository is `Jarvis-igerman-ai/jarves`; signed installers stay in `igalgerman/jarvis-releases`.
 - `health.ticket_repo` is empty by default: ticket drafts stay local until you set a repository and approve.
 - Approval answer files must be signed; unsigned files from older versions are deleted on start.
 - Slow feature probes answer from the last result; a never-checked feature shows "checking" for about a second after a start.
