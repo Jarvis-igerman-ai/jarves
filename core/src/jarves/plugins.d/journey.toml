@@ -1,3 +1,2 @@
 dashboard = ["jarves.journey"]
 addons = ["jarves.journey"]
-cli = ["jarves.journey"]

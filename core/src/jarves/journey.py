@@ -262,6 +262,7 @@ hebrew.TEXT.update({
            "וקישורים ל-Google Maps ול-Waze. הוא אף פעם לא קורא את המיקום שלכם ולא פותח קישור מעצמו",
     EVIDENCE: "בדיקות יחידה test_v6_journey.py (ספקים מזויפים ו-httpx MockTransport; בלי רשת, בלי מיקום)",
     BLOCKER: "לא תועדה הרצה אמיתית של Nominatim/OSRM; הבעלים עוד לא פתח אפליקציית Maps/Waze בטלפון",
+    "network to free map services only when you ask; no location": "רשת לשירותי מפות חינמיים רק כשמבקשים; בלי מיקום",
     PI: "אין נתיב רכב על ה-Raspberry Pi ב-V6 (נושא #210 עוקב אחר מודול ה-PC)",
 })
 
