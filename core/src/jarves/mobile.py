@@ -937,7 +937,7 @@ def approvals_view(mob: MobileAccess) -> dict:
     for r in read_pending_file(mob.home, reveal=False):
         rows.append({"id": r.get("id"), "title": str(r.get("title") or "")[:120], "kind": r.get("kind"),
                      "risk": r.get("risk"), "seconds_left": max(0, int(float(r.get("expires") or 0) - now)),
-                     "typed": bool(r.get("typed"))})
+                     "typed": bool(r.get("typed")), "pc_only": bool(r.get("pc_only"))})
     on = mob.settings()["phone_approvals"]
     if on:                                   # a phone that may answer counts as a place to answer (no auto-deny)
         try:
@@ -946,7 +946,7 @@ def approvals_view(mob: MobileAccess) -> dict:
         except OSError:
             pass
     return {"pending": rows, "phone_approvals": on,
-            "note": "Answer on the computer." if not on else "Typed-code requests are answered on the computer only."}
+            "note": "Answer on the computer." if not on else "Typed-code and plan approvals are answered on the computer only."}
 
 
 def answer_approval(mob: MobileAccess, aid: str, approved: bool, device: str) -> tuple[int, dict]:
@@ -956,6 +956,8 @@ def answer_approval(mob: MobileAccess, aid: str, approved: bool, device: str) ->
     row = next((r for r in read_pending_file(mob.home, reveal=False) if r.get("id") == aid), None)
     if row is not None and row.get("typed") and approved:
         return 403, {"error": "this request needs the code shown on the computer", "code": "TYPED_PC_ONLY"}
+    if row is not None and row.get("pc_only") and approved:
+        return 403, {"error": "this approval can only be answered on the computer", "code": "PC_ONLY"}
     ok, why = submit_answer(mob.home, aid, approved, channel="phone")
     if ok:
         mob.audit("phone_approval", device=device, decision="approve" if approved else "deny",
