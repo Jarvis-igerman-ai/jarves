@@ -136,8 +136,8 @@ def test_ci_minutes_summary():
 def test_windows_core_tests_run_in_three_shards_and_browser_tests_are_their_own_job():
     jobs = load("jarves-checks.yml")["jobs"]
     inc = jobs["core"]["strategy"]["matrix"]["include"]
-    for os_name in ("ubuntu-24.04", "windows-2025"):
-        assert sorted(i["shard"] for i in inc if i["os"] == os_name) == ["1/3", "2/3", "3/3"]
+    assert sorted(i["shard"] for i in inc if i["os"] == "ubuntu-24.04") == ["1/3", "2/3", "3/3"]
+    assert sorted(i["shard"] for i in inc if i["os"] == "windows-2025") == ["1/4", "2/4", "3/4", "4/4"]   # S3, #160
     run = "\n".join(s.get("run", "") for s in jobs["core"]["steps"])
     assert "--browser exclude --shard-files" in run and "--shard ${{ matrix.shard }}" in run and "skipped" in run
     b = jobs["browser"]

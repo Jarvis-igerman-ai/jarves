@@ -3,7 +3,7 @@
 Pure standard library (the `changes` job runs it before any dependency is installed) and offline, so it is unit-tested.
 
     python core/tools/ci_plan.py classify --event pull_request [--files-from -] [--durations FILE] [--reused]
-    python core/tools/ci_plan.py shard-files --plan PLAN.json --os windows --shard 2/3
+    python core/tools/ci_plan.py shard-files --plan PLAN.json --os windows --shard 2/4
     python core/tools/ci_plan.py durations-merge --junit DIR_OR_FILE... --into core/tests/durations-windows.json
     python core/tools/ci_plan.py summary --plan-line "plan={...}"   # one markdown line for the job summary
 
@@ -112,7 +112,7 @@ def split(weights: dict[str, float], n: int) -> list[list[str]]:
     return shards
 
 
-def plan(tests_dir: Path = TESTS, durations: dict[str, float] | None = None, windows: int = 3, linux: int = 3,
+def plan(tests_dir: Path = TESTS, durations: dict[str, float] | None = None, windows: int = 4, linux: int = 3,
          linux_durations: dict[str, float] | None = None) -> dict:
     """Balance each OS from its own measurements; a legacy single map still works for callers."""
     lin_durations = durations if linux_durations is None else linux_durations

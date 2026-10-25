@@ -112,7 +112,7 @@ def test_classify_cli_prints_outputs_and_a_plan(tmp_path, capsys):
     kv = dict(line.split("=", 1) for line in out)
     assert kv["code"] == "true" and kv["cad"] == "false"
     plan = json.loads(kv["plan"])
-    assert len(plan["windows"]) == 3 and len(plan["linux"]) == 3
+    assert len(plan["windows"]) == 4 and len(plan["linux"]) == 3       # S3: 4 Windows shards (#160)
 
 
 def test_conftest_runs_exactly_the_planned_files_slowest_first():
