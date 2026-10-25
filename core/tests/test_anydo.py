@@ -324,3 +324,18 @@ async def test_create_approval_shows_the_list_actually_written(tmp_path):
     assert "Shared" in prompts[0] and "[L2]" in prompts[0] and "Groceries" not in prompts[0]
     await reg.call("anydo_create", {"tasks": [{"title": "b"}], "list_name": "Shared"}, origin="user")
     assert "Groceries" in prompts[1] and writes(stub)[1][1]["tasks"][0]["list_id"] == "L1"
+
+
+async def test_update_refusals_come_before_the_approval_popup_and_task_type_is_validated(tmp_path):
+    # #346: a due-date change is refused BEFORE the owner is asked; nothing to change too
+    stub, sk, reg, prompts = make(tmp_path)
+    r = await reg.call("anydo_update", {"task_id": "t1", "due": "2026-10-25T09:00"}, origin="user")
+    assert r.code == "ANYDO_UNSUPPORTED" and not prompts and not writes(stub)
+    r = await reg.call("anydo_update", {"task_id": "t1"}, origin="user")
+    assert r.code == "ANYDO_NOTHING_TO_DO" and not prompts
+    # task_type is personal_task / workspace_task only
+    for tool, extra in (("anydo_update", {"done": True}), ("anydo_remind", {"when": "2026-10-25T09:00"}), ("anydo_task", {})):
+        r = await reg.call(tool, {"task_id": "t1", "task_type": "evil_type", **extra}, origin="user")
+        assert not r.ok and not prompts and not writes(stub)
+    r = await reg.call("anydo_update", {"task_id": "t1", "task_type": "workspace_task", "done": True}, origin="user")
+    assert r.ok and prompts

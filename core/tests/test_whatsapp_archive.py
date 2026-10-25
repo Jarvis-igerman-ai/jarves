@@ -514,3 +514,14 @@ def test_feature_is_off_by_default_high_risk_and_needs_the_bridge():
     f = features.CATALOG[arc.FEATURE]
     assert f.default_enabled is False and f.risk == "high" and f.needs == ["whatsapp_bridge"]
     assert "second copy" in f.about and "limited history" in f.about
+
+
+async def test_bridge_search_with_who_and_words_honours_who_without_dates(bridge, home, clock):
+    # #353: archive unavailable, query + who, no dates: who used to be ignored (all chats were searched)
+    reg = make_reg(home, clock, False)
+    r = await reg.call("whatsapp_search", {"query": "Meeting", "who": "Bob"})
+    assert r.ok and len(r.data["untrusted_messages"]) == 1
+    r = await reg.call("whatsapp_search", {"query": "Meeting", "who": "דנה כהן"})     # Dana never wrote it
+    assert r.ok and r.data["untrusted_messages"] == []
+    r = await reg.call("whatsapp_search", {"query": "Meeting", "who": "nobody-here-xyz"})
+    assert not r.ok

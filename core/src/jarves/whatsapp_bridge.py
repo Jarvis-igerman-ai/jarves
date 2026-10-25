@@ -964,7 +964,7 @@ class WhatsAppBridgeSkill(Skill):
                 return ToolResult(False, "התאריך לא ברור. אפשר today, yesterday, 2026-09-01 או 30d (ימים), 2w, 3m, 1y.",
                                   code="WA_BAD_DATE")
             only = None
-            if a.who.strip() and (empty_q or since is not None or until is not None):
+            if a.who.strip():                                  # #353: who is always honoured, never dropped to all chats
                 one, err = await self._resolve_one(a.who)      # "all of her messages today": that chat, that range
                 if err is not None:
                     return err
@@ -980,6 +980,9 @@ class WhatsAppBridgeSkill(Skill):
                 chats = await self._chats()
             except BridgeError as e:
                 return self._fail(e)
+            if only is not None and not empty_q:       # who + words: that chat's messages that contain the words
+                words = a.query.strip().casefold()
+                hits = [m for m in hits if words in pol.clean_text(m.get("text") or "")[0].casefold()]
             if since is not None:
                 hits = [m for m in hits if _secs(m.get("ts")) >= since]
             if until is not None:
