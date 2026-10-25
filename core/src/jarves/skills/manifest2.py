@@ -179,7 +179,8 @@ def check_install(m: Manifest, *, core_version: str, present: set[str]) -> list[
     need, have = parse_version(m.min_core), parse_version(core_version)
     if need and have and have < need:
         out.append(f"needs Core {m.min_core} or newer (this is {core_version})")
-    out += [f"needs the Skill {d}, which is not installed" for d in m.dependencies if d not in present]
+    # repr: a dependency name is model-written text that `jarvis skills update` prints (no raw control characters)
+    out += [f"needs the Skill {d!r}, which is not installed" for d in m.dependencies if d not in present]
     return out
 
 

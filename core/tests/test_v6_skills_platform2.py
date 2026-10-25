@@ -247,6 +247,29 @@ async def test_changed_installed_copy_is_not_loaded_when_on(tmp_path, v2):
         assert "shopping" in reg.skills and r.ok and r.message == "hacked"
 
 
+async def test_signed_install_whose_signature_no_longer_verifies_is_not_loaded(tmp_path):
+    """The stored copy still matches its approved sha256, but its signature no longer verifies (the owner key was
+    removed or replaced): with the switch on it is neither registered nor run (fail closed)."""
+    reg, mgr = setup(tmp_path)
+    put_key(tmp_path)
+    install(mgr, signed(v2_md(), V1_PY))
+    mgr.grant("shopping", ["storage"], False, by="dashboard")
+    mgr.set_enabled("shopping", True, by="dashboard")
+    gen.sync(mgr, reg)
+    assert "shopping" in reg.skills
+    put_key(tmp_path, b"a-different-owner-key-0123456789")
+    gen.sync(mgr, reg)
+    r = await mgr.run("shopping", "shopping_list", {})
+    assert "shopping" not in reg.skills and r.code == "SKILL_TAMPERED" and "tampered signature" in r.message
+
+
+def test_cli_output_escapes_model_written_dependency_names(tmp_path):
+    _, mgr = setup(tmp_path)
+    mgr.propose(v2_md(extra="dependencies: [notes\x1b[2Kpro]\n"), V1_PY)
+    plan = p2.plan_update(mgr, "shopping")
+    assert plan["refused"] and not any("\x1b" in e for e in plan["errors"])
+
+
 # ---------------------------------------------------------------------- owner only, logs
 async def test_model_cannot_update_or_rollback(tmp_path):
     reg, mgr = setup(tmp_path)
