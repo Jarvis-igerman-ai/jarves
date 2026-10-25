@@ -340,6 +340,15 @@ if ($UpgradeFrom) {
     Start-Sleep 5
     $running = @(Get-Process | Where-Object { $_.Path -and $_.Path.StartsWith($App, [StringComparison]::OrdinalIgnoreCase) })
     Check ($running.Count -eq 0) "nothing was running before the update: nothing is started after it ($($running.Count) process(es) under the program folder)"
+    # #293: the in-app path stops the Core itself, so setup detects nothing; it tells setup with /WASRUNNING=core. The Core
+    # that "ran before" is started and health-checked even though nothing runs at setup start.
+    Check ((Install "DEFAULT" @("/RESTARTJARVES=1", "/WASRUNNING=core") $Installer "") -eq 0) "told the Core ran (/WASRUNNING=core): setup finishes"
+    $wrLog = Get-ChildItem (Join-Path $Work "install-*.log") | Sort-Object LastWriteTime | Select-Object -Last 1
+    Check (@(Select-String -Path $wrLog.FullName -Pattern "Told by the caller what ran before the update" -ErrorAction SilentlyContinue).Count -ge 1) "told the Core ran: setup logged the caller's record"
+    Check (@(Select-String -Path $wrLog.FullName -Pattern "Health check skipped" -ErrorAction SilentlyContinue).Count -eq 0) "told the Core ran: the health check is not skipped"
+    Jarvis @("stop") | Out-Null
+    Get-Process | Where-Object { $_.Path -and $_.Path.StartsWith($App, [StringComparison]::OrdinalIgnoreCase) } | Stop-Process -Force -ErrorAction SilentlyContinue
+    Start-Sleep 2
     if ($Rollback) {
         # the in-app updater records the previous version before it starts setup; record the same thing for the test
         Check (Seed "previous" @("--installer", $UpgradeFrom, "--old-version", $oldVer, "--new-version", $newVer)) "previous version recorded like the updater does"

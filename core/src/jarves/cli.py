@@ -1800,10 +1800,18 @@ def cmd_update(a, cfg, home) -> int:
         print(f"{e.code}: {e.message}")
         return 1
     print(f"Verified {Path(r['installer']).name}; backup in {r['backup']}")
-    if _ws_call(home, cfg.link.port, {"type": "status.request", "payload": {}}, "status") is not None:
+    from . import runmarks
+    from .updates import record_was_running
+    core_up = _ws_call(home, cfg.link.port, {"type": "status.request", "payload": {}}, "status") is not None
+    was = runmarks.detect_running(home, core_up=core_up)           # #293: read BEFORE anything is stopped
+    try:
+        record_was_running(home, was)
+    except OSError:
+        pass
+    if core_up:
         cmd_stop(a, cfg, home)
     try:
-        launch_installer(r["installer"], verified=r, silent=a.silent, restart=a.silent)
+        launch_installer(r["installer"], verified=r, silent=a.silent, restart=a.silent, was_running=was)
     except UpdateError as e:
         print(f"{e.code}: {e.message}")
         return 1

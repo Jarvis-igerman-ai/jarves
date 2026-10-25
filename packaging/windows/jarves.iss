@@ -478,6 +478,42 @@ begin
       Log('Stopping JARVES before the upgrade: ' + Lines[I]);
 end;
 
+// #293: the in-app path (`jarvis update install`) stops the Core itself before setup starts, so the detection below sees
+// nothing. It passes what ran as /WASRUNNING=core,face,dashboard:lan:mobile (or "none"); that is OR-ed into the
+// detection. Dashboard flags are taken only from the four safe ones.
+procedure ApplyWasRunningParam();
+var
+  P, Tok, Flag, Args: String;
+  K, J: Integer;
+begin
+  P := ExpandConstant('{param:WASRUNNING|}');
+  if P = '' then exit;
+  WasRecorded := True;
+  P := P + ',';
+  while P <> '' do begin
+    K := Pos(',', P);
+    Tok := Copy(P, 1, K - 1);
+    Delete(P, 1, K);
+    if Tok = 'core' then WasCore := True
+    else if Tok = 'face' then WasFace := True
+    else if Pos('dashboard', Tok) = 1 then begin
+      WasDash := True;
+      Args := '';
+      Tok := Tok + ':';
+      Delete(Tok, 1, 10);                              // up to and including "dashboard:"
+      while Tok <> '' do begin
+        J := Pos(':', Tok);
+        Flag := Copy(Tok, 1, J - 1);
+        Delete(Tok, 1, J);
+        if (Flag = 'lan') or (Flag = 'mobile') or (Flag = 'tls-selfsigned') or (Flag = 'tailnet-only') then
+          Args := Args + ' --' + Flag;
+      end;
+      DashArgs := Trim(Args);
+    end;
+  end;
+  Log('Told by the caller what ran before the update (/WASRUNNING=): ' + ExpandConstant('{param:WASRUNNING|}'));
+end;
+
 // #166: what was running before setup stopped it (the Core, its window, a standalone dashboard) is what is started
 // again. Detected BEFORE anything is stopped (the same encoded script, detect-only). Unknown (no old program, the
 // check failed) counts as "the Core was running": the behaviour before this change.
@@ -497,6 +533,7 @@ begin
     EncodedCommand(StopScript(Dir, LogFile, DataDir(), 0, WasFile, True)), '', SW_HIDE, ewWaitUntilTerminated, Code) or
     (Code <> 0) or not FileExists(WasFile) then begin
     Log('Could not tell what was running before the update; the Core is restarted if setup was asked to');
+    ApplyWasRunningParam();
     exit;
   end;
   WasRecorded := True;
@@ -508,6 +545,7 @@ begin
     else if Pos('dashboard', Line) = 1 then begin WasDash := True; DashArgs := Trim(Copy(Line, 10, 200)); end;
     if Line <> '' then Log('Running before the update: ' + Line);
   end;
+  ApplyWasRunningParam();
   if not (WasCore or WasFace or WasDash) then Log('Running before the update: nothing');
 end;
 
