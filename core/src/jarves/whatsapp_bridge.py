@@ -611,8 +611,8 @@ class SummArgs(_Tolerant):
     ALIASES: ClassVar[dict[str, tuple[str, ...]]] = {
         "who": ("chat", "chats", "name", "names", "people", "contact", "jid", "chat_id"),
         "since_hours": ("hours", "since", "window_hours")}
-    who: list[str] = Field(..., min_length=1, max_length=5, description="chat NAMES (or the rows from whatsapp_find_chat)")
-    since_hours: int = Field(24, ge=1, le=336, description="hours back, 1-336 (larger values are capped)")
+    who: list[str] = Field(..., min_length=1, max_length=5)
+    since_hours: int = Field(24, ge=1, le=336)
 
     @field_validator("who", mode="before")
     @classmethod
@@ -637,10 +637,10 @@ class SearchArgs(_Tolerant):
         "who": ("chat", "name", "contact", "jid", "chat_id", "from_chat"),
         "since": ("date", "from", "after", "start", "from_date", "start_date", "date_from"),
         "until": ("to", "before", "end", "to_date", "end_date", "date_to")}
-    query: str = Field(..., min_length=2, max_length=80, description="words to look for in message TEXT")
-    who: str = Field("", max_length=60, description="only the chat with this person (name or the row from whatsapp_find_chat)")
-    since: str = Field("", max_length=12, description="today, yesterday, 2026-09-01 (a datetime is fine) or 30d / 2w / 3m / 1y ago")
-    until: str = Field("", max_length=12, description="same forms as since")
+    query: str = Field(..., min_length=2, max_length=80)
+    who: str = Field("", max_length=60, description="only this chat")
+    since: str = Field("", max_length=12, description="today, 2026-09-01 or 30d / 2w ago")
+    until: str = Field("", max_length=12)
 
     @field_validator("query", mode="before")
     @classmethod
@@ -666,7 +666,7 @@ class FindChatArgs(_Tolerant):
     text: str = Field(..., min_length=1, max_length=ns.MAX_QUERY, description="part of a chat / contact DISPLAY NAME; "
                       "typos, wrong keyboard and * ? \"phrase\" a|b ^ $ patterns are fine")
     regex: bool = Field(False, description="only if the owner asked for a regular expression")
-    limit: int = Field(10, ge=1, le=10, description="1-10 (larger values are capped)")
+    limit: int = Field(10, ge=1, le=10)
 
     @field_validator("text", mode="before")
     @classmethod
