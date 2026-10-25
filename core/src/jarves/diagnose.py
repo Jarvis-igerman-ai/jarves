@@ -343,6 +343,27 @@ def run(store: Store, cfg, session_ids: list[str] | None = None, days: int = 30)
     return f.found
 
 
+EXPIRE_DAYS = 14.0
+
+
+def expire(store: Store, days: float = EXPIRE_DAYS, now: float | None = None) -> int:
+    """Auto-expire: an open issue not seen again for `days` is marked resolved (history kept; a new conversation with
+    the same pattern reopens it). Returns how many were closed."""
+    cut = (time.time() if now is None else now) - days * 86400
+    with store._lock:
+        n = store._db.execute("UPDATE issues SET status = 'resolved' WHERE status = 'open' AND last_seen < ?", (cut,)).rowcount
+        store._db.commit()
+    return n
+
+
+def mark_all_seen(store: Store) -> int:
+    """'Mark all as seen': every open issue becomes resolved until the same pattern shows up in a new conversation."""
+    with store._lock:
+        n = store._db.execute("UPDATE issues SET status = 'resolved' WHERE status = 'open'").rowcount
+        store._db.commit()
+    return n
+
+
 # ---------------------------------------------------------------------- one line per cause (issue #17)
 def cause_key(fp: str) -> str:
     """The cause a fingerprint belongs to: the two dead-air rules are one cause, and the failures of one tool

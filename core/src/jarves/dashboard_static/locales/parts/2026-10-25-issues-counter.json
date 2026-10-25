@@ -1,0 +1,6 @@
+{
+ "dict": {
+  "Mark all as seen": "סמן הכל כנראה",
+  "Patterns the self-check found in past conversations (for example a long silent wait or a tool that failed). Counts and codes only; nothing is sent anywhere. Each one closes by itself after 14 days without recurring, or press Mark all as seen.": "דפוסים שהבדיקה העצמית מצאה בשיחות קודמות (למשל המתנה שקטה ארוכה או כלי שנכשל). רק ספירות וקודים; שום דבר לא נשלח. כל אחד נסגר לבד אחרי 14 יום בלי הישנות, או לוחצים על סמן הכל כנראה."
+ }
+}
