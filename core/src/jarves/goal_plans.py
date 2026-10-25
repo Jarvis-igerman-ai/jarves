@@ -502,7 +502,7 @@ def make_skill(store: PlanStore, registry=None):
                 Tool("goal_plan_propose", "Draft a plan, does not run it: 'plan how to', 'תתכנן איך'.",
                      propose, ProposeArgs, permission="action"),
                 Tool("goal_plan_show", "Plan status: 'how is the plan', 'מה מצב התוכנית'.", show, ShowArgs,
-                     permission="read"),
+                     permission="read", untrusted_output=True),     # V5 sec F3: notes / results can quote a tool's third-party text
                 Tool("goal_plan_run", "Run an approved plan: 'run the plan', 'תריץ את התוכנית'.", run, PlanIdArgs,
                      permission="action", timeout_s=300.0),
             ]
