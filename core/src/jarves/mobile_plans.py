@@ -2,19 +2,23 @@
 
 A paired phone with the `tasks` scope (the scope that already covers goal actions) sees each plan's title, state,
 progress and the steps (tool name, the plan's own one-line reason, status, a short error). It can PAUSE a plan that is
-ready or running and CANCEL an open plan: both only stop work. Approving, resuming, retrying, skipping and deleting
-(everything that starts or repeats a step) stay on the computer, where the approval popup shows the steps, and the
-phone says so. Tool arguments, step results and evidence are never sent to the phone.
+ready or running and CANCEL an open plan (both only stop work), RESUME a plan the owner paused and RETRY a failed one
+(#340, owner decision 25 Oct). Those two only continue a plan the owner ALREADY approved on the computer, through the
+same guards (every step that changes something still asks in the approval popup, which stays computer-only, #200).
+They are refused for a plan the untrusted-content guard tainted, for blocked or unknown steps (the step may already
+have run) and for retries past the attempt limit: those stay on the computer. Approving, skipping and deleting stay on
+the computer. Tool arguments, step results and evidence are never sent to the phone.
 Same store as the dashboard Goal plans page (`goal_plans.PlanStore`), so both clients always show one state.
 The audit log holds the device, the action and the plan number only.
 """
 from __future__ import annotations
 
 from . import logs
+from .goal_plans import MAX_ATTEMPTS
 
 SCOPE = "tasks"
-PHONE_OPS = ("pause", "cancel")
-PC_ONLY_OPS = ("approve", "resume", "retry", "skip", "delete")
+PHONE_OPS = ("pause", "cancel", "resume", "retry")
+PC_ONLY_OPS = ("approve", "skip", "delete")
 SHOWN = 30                                       # newest plans listed
 SHORT = 160
 
@@ -42,10 +46,20 @@ def _short(s: object) -> str:
     return " ".join(str(s or "").split())[:SHORT]
 
 
-def _can(state: str) -> list[str]:
-    out = []
+def _clean(p: dict) -> bool:
+    """Only an untainted plan with no blocked or unknown step may be continued from the phone."""
+    return not p.get("tainted") and not any(s["status"] in ("blocked", "unknown", "running") for s in p.get("steps", []))
+
+
+def _can(p: dict) -> list[str]:
+    state, out = p["state"], []
     if state in ("ready", "running"):
         out.append("pause")
+    if state == "paused" and _clean(p):
+        out.append("resume")
+    if state == "failed" and _clean(p) and any(s["status"] == "failed" and s.get("attempts", 0) < MAX_ATTEMPTS
+                                                for s in p.get("steps", [])):
+        out.append("retry")
     if state not in ("done", "cancelled"):
         out.append("cancel")
     return out
@@ -54,9 +68,10 @@ def _can(state: str) -> list[str]:
 def brief(p: dict) -> dict:
     steps = [{"n": int(s["idx"]) + 1, "tool": str(s["tool"])[:64], "why": _short(s.get("why")), "status": s["status"],
               "consequential": bool(s.get("consequential")), "error": _short(s.get("error"))} for s in p.get("steps", [])]
+    can = _can(p)
     return {"id": p["id"], "title": _short(p["title"]), "state": p["state"], "progress": p.get("progress", 0),
-            "goal": p.get("goal_id") or None, "note": _short(p.get("note")), "steps": steps, "can": _can(p["state"]),
-            "needs_pc": p["state"] in ("draft", "paused", "blocked", "failed")}
+            "goal": p.get("goal_id") or None, "note": _short(p.get("note")), "steps": steps, "can": can,
+            "needs_pc": p["state"] in ("draft", "paused", "blocked", "failed") and not ({"resume", "retry"} & set(can))}
 
 
 def view(mob) -> dict:
@@ -77,10 +92,17 @@ def action(mob, d: dict, device: str) -> tuple[int, dict]:
         return 400, {"error": "plan must be a number"}
     st = store(mob)
     try:
-        p = st.pause(pid, by="phone") if op == "pause" else st.cancel(pid, by="phone")
+        if op in ("resume", "retry"):                  # continue an approved plan: re-check on the stored plan, not on the client
+            cur = st.get(pid)
+            if cur is None:
+                raise KeyError(pid)
+            if op not in _can(cur):
+                return 403, {"error": "this plan needs the computer (blocked, unknown or too many attempts, or not in a state "
+                                      "that can " + op + ")", "code": "PLAN_PC_ONLY"}
+        p = {"pause": st.pause, "cancel": st.cancel, "resume": st.resume, "retry": st.retry}[op](pid, by="phone")
     except KeyError:
         return 404, {"error": "no such plan"}
     except ValueError as e:
         return 409, {"error": str(e), "code": "PLAN_STATE"}
-    logs.info("mobile", "MOBILE_PLAN_" + op.upper(), "a plan was stopped from a phone", plan=pid, device=device)
+    logs.info("mobile", "MOBILE_PLAN_" + op.upper(), "a plan was changed from a phone", plan=pid, device=device)
     return 200, {"ok": True, "plan": pid, "state": p["state"]}

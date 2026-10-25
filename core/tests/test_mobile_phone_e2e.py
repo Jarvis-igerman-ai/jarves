@@ -738,20 +738,48 @@ def test_goal_plan_view_pause_and_cancel_from_the_phone_and_nothing_that_starts_
     steps = page.inner_text("#plansRoot .plan-steps")
     assert "list_notes" in steps and "send_message" in steps and "tell Dana" in steps and "changes something" not in steps
     assert "SECRET" not in page.inner_text("body")                      # arguments and results never reach the phone
-    assert page.locator("#plansRoot button:has-text('Approve'), #plansRoot button:has-text('Retry'), #plansRoot button:has-text('Resume')").count() == 0
+    assert page.locator("#plansRoot button:has-text('Approve'), #plansRoot button:has-text('Skip'), #plansRoot button:has-text('Delete')").count() == 0
     page.tap("#plansRoot button:has-text('Pause')")
     until(page, "document.querySelector('#plansRoot').textContent.includes('Plan paused')")
     assert st.get(pid)["state"] == "paused"                             # the PC sees the same state
     assert p.owner("GET", "/api/goal-plans")[1]["plans"][0]["state"] == "paused"
-    page.wait_for_selector("#plansRoot :text('on the computer')")       # resuming is the computer's job
+    page.wait_for_selector("#plansRoot button:has-text('Resume')")      # #340: resume is on the phone now
     assert page.locator("#plansRoot button:has-text('Pause')").count() == 0
+    page.tap("#plansRoot button:has-text('Resume')")
+    until(page, "document.querySelector('#plansRoot').textContent.includes('Plan resumed')")
+    assert st.get(pid)["state"] == "ready"
+    page.tap("#plansRoot button:has-text('Pause')")
+    until(page, "document.querySelector('#plansRoot').textContent.includes('Plan paused')")
     page.tap("#plansRoot button:has-text('Cancel plan')")               # cancelling asks first
     assert st.get(pid)["state"] == "paused"
     page.tap("#plansRoot button:has-text('Yes, cancel')")
     until(page, "document.querySelector('#plansRoot').textContent.includes('Plan cancelled')")
     assert st.get(pid)["state"] == "cancelled"
     r = call(page, "POST", "/api/m/plans/op", {"id": "plan-e2e-00000001", "op": "retry", "plan": pid}, token(page))
-    assert r["status"] == 403 and r["json"]["code"] == "PLAN_PC_ONLY"
+    assert r["status"] == 403 and r["json"]["code"] == "PLAN_PC_ONLY"       # a cancelled plan cannot be retried
+    assert call(page, "POST", "/api/m/plans/op", {"id": "plan-e2e-00000002", "op": "approve", "plan": pid}, token(page))["status"] == 403
+    assert page.errors == []
+
+
+def test_goal_plan_retry_from_the_phone_asks_first(browser, phone):
+    p = phone()
+    st, pid = _seed_plan(p)
+    st.db.x("UPDATE goal_plan_steps SET status='failed', attempts=1, error='boom' WHERE plan_id=? AND idx=1", (pid,))
+    st.db.x("UPDATE goal_plans SET state='failed' WHERE id=?", (pid,))
+    page = new_page(browser)
+    ui_pair(page, p)
+    _grant_tasks(p, page)
+    page.tap("[data-tab=plans]")
+    page.wait_for_selector("#plansRoot button:has-text('Retry')")
+    page.tap("#plansRoot button:has-text('Retry')")                     # asks first, nothing changed yet
+    page.wait_for_selector("#plansRoot button:has-text('Yes, retry')")
+    assert st.get(pid)["state"] == "failed"
+    page.tap("#plansRoot button:has-text('Keep')")
+    assert st.get(pid)["state"] == "failed"
+    page.tap("#plansRoot button:has-text('Retry')")
+    page.tap("#plansRoot button:has-text('Yes, retry')")
+    until(page, "document.querySelector('#plansRoot').textContent.includes('try again')")
+    assert st.get(pid)["state"] == "ready" and st.get(pid)["steps"][1]["status"] == "pending"
     assert page.errors == []
 
 
