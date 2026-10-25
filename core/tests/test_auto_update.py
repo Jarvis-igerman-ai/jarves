@@ -504,3 +504,19 @@ def test_gave_up_has_no_next_step(home, server, keys):
         r.clock.t += 13 * 3600
     s = r.au.status()
     assert s["gave_up"] == NEW and s["next_at"] is None and s["last_result"]["ok"] is False
+
+
+def test_a_health_rollback_has_its_own_last_result(home, server, keys):
+    """Review P3-8: after setup's health check the last result never says "not installed, nothing changed"."""
+    from jarves import auto_update
+    for status, needle in (("rolled_back", "previous program was put back"), ("health_failed", "waits for your OK"),
+                           ("rollback_failed", "automatic undo did not work")):
+        r = Rig(home, server, keys)
+        (home / "updates").mkdir(exist_ok=True)
+        (home / "updates" / "health.json").write_text(json.dumps(
+            {"status": status, "from": OLD, "to": NEW, "at": 1, "notified": False}), "utf-8")
+        r.au.after_start()
+        last = r.au.status()["last_result"]
+        assert last["ok"] is False and last["health"] == status and last["version"] == NEW
+        lines = " ".join(auto_update.status_lines(r.au.status()))
+        assert needle in lines and "Nothing changed" not in lines

@@ -370,6 +370,10 @@ class AutoUpdater:
                     # failed-upgrade-health-* folder); the owner's own "Update now" lifts this
                     st.pop("installing", None)
                     st["gave_up"], st["last_error"] = bad, "UPDATE_HEALTH_" + str(h["status"]).upper()
+                    # review P3-8: its own last result, never "not installed, nothing changed" (it WAS installed and
+                    # may have migrated the data)
+                    self._result(st, bad, False, st["last_error"])
+                    st["last_result"]["health"] = h["status"]
                 self._emit(st, h["status"], bad, bad, prev=h.get("from") or "")
                 _save(self.home, st)
             return (self.state().get("notice") or {}).get("kind", "")
@@ -438,6 +442,20 @@ NEXT_TEXT = {   # next_kind -> (he, en); {t} is the local time
 }
 
 
+HEALTH_RESULT = {   # last_result["health"] -> (he, en): setup's health check acted after the install (#164)
+    "rolled_back": ("תוצאה אחרונה: גרסה {v} הותקנה אבל לא עלתה ({t}), אז התוכנה הקודמת הוחזרה. הנתונים לא נוגעו.",
+                    "Last result: {v} was installed but did not start ({t}), so the previous program was put back. "
+                    "Your data was not touched."),
+    "rollback_failed": ("תוצאה אחרונה: גרסה {v} לא עלתה ({t}) וההחזרה האוטומטית לא הצליחה. הרץ jarvis update --rollback.",
+                        "Last result: {v} did not start ({t}) and the automatic undo did not work. Run: "
+                        "jarvis update --rollback."),
+    "health_failed": ("תוצאה אחרונה: גרסה {v} לא עלתה ({t}). הנתונים כבר הותאמו לה, אז חזרה מלאה (נתונים ותוכנה) "
+                      "מחכה לאישור שלך: jarvis update --rollback.",
+                      "Last result: {v} did not start ({t}). Your data had already been upgraded for it, so a full "
+                      "undo (data and program) waits for your OK: jarvis update --rollback."),
+}
+
+
 def _local(ts: float) -> str:
     return time.strftime("%d %b %H:%M", time.localtime(ts))
 
@@ -456,6 +474,9 @@ def status_lines(s: dict) -> list[str]:
         if r.get("ok"):
             out.append(clilang.fmt(f"תוצאה אחרונה: עודכן לגרסה {r['version']} ({t}). אפשר לחזור: jarvis update --rollback",
                                    f"Last result: updated to {r['version']} ({t}). To go back: jarvis update --rollback"))
+        elif r.get("health") in HEALTH_RESULT:
+            he, en = HEALTH_RESULT[r["health"]]
+            out.append(clilang.fmt(he.format(v=r["version"], t=t), en.format(v=r["version"], t=t)))
         else:
             out.append(clilang.fmt(f"תוצאה אחרונה: גרסה {r['version']} לא הותקנה ({r.get('code') or ''}, {t}). "
                                    "שום דבר לא השתנה והגרסה הנוכחית עובדת.",
