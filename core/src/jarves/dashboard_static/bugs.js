@@ -19,16 +19,45 @@
     try {
       const c = await api("/api/bugs/count");
       if (!chip) {
-        chip = el("a", { href: "#/bugs", class: "schip plain", id: "bugChip" }, el("span", { class: "schip-t" }));
+        chip = el("a", { href: "#/bugs", class: "schip plain", id: "bugChip", role: "button", "aria-haspopup": "dialog",
+          onclick: (e) => { e.preventDefault(); togglePop(); } }, el("span", { class: "schip-t" }));
         const bar = document.getElementById("statusChips");
         if (bar && bar.parentNode) bar.parentNode.insertBefore(chip, bar.nextSibling);
       }
       chip.hidden = !c.open;
       chip.firstChild.textContent = tx(`דיווחי תקלות: ${c.open}`, `Bug reports: ${c.open}`);
-      chip.className = "schip " + (c.p1 ? "bad" : c.open ? "warn" : "plain");
-      chip.title = tx(`${c.open} תקלות פתוחות, ${c.p1} חמורות. לחצו לדיווח למפתח`, `${c.open} open, ${c.p1} serious. Open to report them to the developer`);
+      chip.className = "schip " + (c.urgent ? "bad" : c.open ? "warn" : "plain");     // red only for NEW unresolved P1/P2
+      chip.title = tx(`${c.open} תקלות פתוחות, ${c.urgent || 0} חדשות וחמורות. לחצו להסבר`, `${c.open} open, ${c.urgent || 0} new and serious. Click for what this is`);
+      if (pop && !pop.hidden) fillPop();
     } catch (e) { /* the page shows its own error */ }
   }
+  // the popover: what the number is, in plain words (counts and titles only, never conversation text)
+  let pop = null;
+  async function fillPop() {
+    const [c, d] = await Promise.all([api("/api/bugs/count"), api("/api/bugs?status=open")]);
+    const seen = el("button", { type: "button", class: "ghost", id: "bugSeenAll", disabled: !c.new, onclick: async () => {
+      await api("/api/bugs/seen", { method: "POST", body: "{}" }); await badge(); route(true); } }, tx("סמן הכל כנראה", "Mark all as seen"));
+    pop.replaceChildren(
+      el("strong", {}, tx("מה זה המספר?", "What is this number?")),
+      el("p", { class: "small", dir: "auto" }, tx(
+        "אלה כרטיסי אבחון מקומיים ש-JARVES פתח לעצמו במחשב הזה (בדיקה עצמית, כלים שנכשלים, קריסות). הם לא נשלחים לאף אחד. הכתום או האדום מציינים רק תקלות חדשות וחמורות שעוד לא ראיתם; ישנות נסגרות לבד אחרי 14 יום בלי הישנות.",
+        "These are local self-diagnostic tickets JARVES opened for itself on this PC (self-test, failing tools, crashes). They are not sent to anyone. Red means only NEW serious (P1/P2) tickets you have not seen yet; old ones close by themselves after 14 days without recurring.")),
+      el("div", { class: "small muted" }, tx(`${c.open} פתוחות · ${c.new} חדשות · ${c.urgent || 0} חדשות וחמורות · ${c.info || 0} מידע בלבד`,
+        `${c.open} open · ${c.new} new · ${c.urgent || 0} new and serious · ${c.info || 0} information only`)),
+      el("ul", { class: "small" }, d.issues.slice(0, 5).map((r) => el("li", { dir: "auto" }, `${r.severity} · ${tx(r.title_he || r.title, r.title)} · ×${r.evidence_count}`))),
+      el("div", { class: "row" }, seen, el("a", { href: "#/bugs", onclick: () => { pop.hidden = true; } }, tx("לרשימה המלאה", "Open the full list"))));
+  }
+  function togglePop() {
+    if (!pop) {
+      pop = el("div", { class: "card", id: "bugPop", role: "dialog", "aria-label": tx("על דיווחי התקלות", "About bug reports"),
+        style: "position:fixed;top:56px;inset-inline-end:16px;z-index:50;max-width:380px;box-shadow:0 8px 28px rgba(0,0,0,.35)", hidden: true });
+      document.body.appendChild(pop);
+      document.addEventListener("keydown", (e) => { if (e.key === "Escape") pop.hidden = true; });
+    }
+    pop.hidden = !pop.hidden;
+    if (!pop.hidden) fillPop().catch(() => { pop.textContent = tx("נכשל לטעון", "Could not load"); });
+  }
+  window.addEventListener("hashchange", () => { if (pop) pop.hidden = true; });
   window.addEventListener("hashchange", badge);
   if (window.JL && JL.onChange) JL.onChange(badge);
   setInterval(badge, 60000);

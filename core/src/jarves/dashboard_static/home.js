@@ -80,7 +80,8 @@ PAGES.home = async function () {
       d.connections.filter((c) => c.state !== "ok").map((c) => `${two(c, "title").split(" (")[0]}: ${two(c, "detail")}`).join(" · ") || tx("הכל", "everything"), false, "#/connections"),
     tile(tx("עלות היום", "Today's cost"), usd(d.today.cost), tx(`${d.today.conversations} שיחות · ${d.today.voice_minutes} דק׳ קול`,
       `${d.today.conversations} conversations · ${d.today.voice_minutes} voice min`), true, "#/costs"),
-    tile(tx("בעיות בשיחות", "Conversation issues"), String(d.issues.open), d.issues.high ? tx(`${d.issues.high} חשובות`, `${d.issues.high} important`) : tx("אין חשובות", "none important"), false, "#/issues"));
+    tile(tx("בעיות בשיחות", "Conversation issues"), String(d.issues.open), (d.issues.high ? tx(`${d.issues.high} חשובות`, `${d.issues.high} important`) : tx("אין חשובות", "none important"))
+      + tx(" · דפוסים שנמצאו בשיחות קודמות (בלי תוכן)", " · patterns found in past conversations (no content)"), false, "#/issues"));
   const conns = el("div", { class: "card" }, el("h2", {}, tx("חיבורים", "Connections")),
     d.connections.map((c) => el("div", { class: "conn" }, pillOf(c.state, c.state === "ok" ? tx("תקין", "OK") : c.state === "warn" ? tx("לבדוק", "check") : tx("כבוי", "off")),
       el("div", {}, el("b", {}, two(c, "title")),

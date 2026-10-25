@@ -68,3 +68,9 @@ he = "הרשימה מלאה בשורות כמו 'גרסה חדשה' או 'המצ
 en = "The list is full of lines like 'a new version was seen' or 'the camera was not available'"
 fix_he = "אלה מצבים צפויים ולא תקלות. הם מופיעים תחת 'מידע', לא נספרים בכותרת, ואפשר להתעלם מהם במחשב הזה בלחיצה אחת."
 fix_en = "These are expected states, not bugs. They appear under Information, are not counted in the header and can be ignored on this PC with one click."
+
+[[problems]]
+he = "בכותרת כתוב 'דיווחי תקלות: 26' במסגרת אדומה ולא ברור מה זה"
+en = "The top bar says 'Bug reports: 26' with a red outline and it is not clear what it is"
+fix_he = "לוחצים על המונה: נפתח הסבר במילים פשוטות (אלה כרטיסי אבחון מקומיים, שום דבר לא נשלח) עם 'סמן הכל כנראה'. אדום רק לכרטיסים חדשים וחמורים (P1/P2) שעוד לא נראו. כרטיס שלא חזר 14 יום נסגר לבד, וחוזר אם התקלה חוזרת. ניתוק שיחה קולית אחרי זמן שקט ו-'Pear Desktop לא פועל' הם מידע, לא תקלות."
+fix_en = "Click the counter: a plain-words explanation opens (these are local self-diagnostic tickets, nothing is sent) with 'Mark all as seen'. It is red only for NEW serious (P1/P2) tickets you have not seen. A ticket that did not recur for 14 days closes by itself and reopens if the problem comes back. A voice idle disconnect and 'Pear Desktop is not running' are information, not bugs."
