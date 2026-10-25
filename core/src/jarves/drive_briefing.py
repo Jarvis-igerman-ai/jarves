@@ -29,6 +29,9 @@ MODES = ("ask", "present", "alone")
 SECTION_TIMEOUT_S = 14.0
 
 
+_PRIVATE = {"ask": 0, "alone": 1, "present": 2}      # higher = more private (a passenger can hear)
+
+
 class DriveBriefingArgs(BaseModel):
     passenger: Literal["ask", "present", "alone"] | None = None   # None = use the setting (default ask)
 
@@ -57,8 +60,15 @@ class DriveBriefingSkill(Skill):
         self.base = base or BriefingSkill(registry, db, transport=transport, clock=clock)
 
     def mode(self, override: str | None = None) -> str:
-        m = override or self.db.setting("drive_briefing.passenger")
-        return m if m in MODES else "ask"
+        """The model's `passenger` argument can only make the briefing MORE private than the saved setting (issue #323):
+        a saved "present" is never relaxed to "alone" by a tool call; only the owner (settings, CLI, phone) changes it."""
+        setting = self.db.setting("drive_briefing.passenger")
+        setting = setting if setting in MODES else "ask"
+        if override not in ("alone", "present"):
+            return setting
+        if setting == "ask":
+            return override
+        return override if _PRIVATE[override] >= _PRIVATE[setting] else setting
 
     async def _calendar(self) -> dict:
         r = await self.base._tool("calendar_next_event", {})

@@ -217,6 +217,30 @@ async def test_rollback_clears_grants_and_checks_the_stored_copy(tmp_path):
     assert mgr.approve("shopping", rep3["sha256"], by="cli")["version"] == 3
 
 
+def test_rollback_never_returns_to_a_version_that_was_rolled_away_from(tmp_path):
+    """#314 item 5: v1, v2, rollback to v1, new v3: a second rollback goes to v1, not back to the bad v2."""
+    _, mgr = setup(tmp_path)
+    install(mgr, v2_md("1.0.0"))
+    mgr.approve("shopping", mgr.propose(v2_md("1.1.0"), V1_PY)["sha256"], by="dashboard")
+    assert mgr.rollback("shopping", by="cli")["version"] == 1
+    assert mgr.approve("shopping", mgr.propose(v2_md("1.2.0"), V1_PY)["sha256"], by="cli")["version"] == 3
+    assert mgr.rollback("shopping", by="cli")["version"] == 1
+    with pytest.raises(gen.SkillError, match="no earlier version"):
+        mgr.rollback("shopping", by="cli")
+
+
+def test_viewing_a_draft_writes_no_log_line(tmp_path, captured):
+    """#314 item 6: draft() is a read; only an explicit plan is logged."""
+    _, mgr = setup(tmp_path)
+    install(mgr, v2_md("1.0.0"))
+    mgr.propose(v2_md("1.1.0"), V1_PY)
+    captured.clear()
+    mgr.draft("shopping")
+    assert not [x for x in captured if "SKILL_UPDATE_PLANNED" in x]
+    p2.plan_update(mgr, "shopping")
+    assert [x for x in captured if "SKILL_UPDATE_PLANNED" in x]
+
+
 def test_rollback_refuses_a_changed_stored_copy(tmp_path):
     _, mgr = setup(tmp_path)
     install(mgr, v2_md("1.0.0"))

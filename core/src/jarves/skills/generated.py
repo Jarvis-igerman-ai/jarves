@@ -463,7 +463,7 @@ class GeneratedSkills:
                "skill_md": md, "skill_py": py}
         if self.v2():
             from . import platform2
-            out["update_plan"] = platform2.plan_update(self, sid)     # added permissions, trust, refused or not
+            out["update_plan"] = platform2.plan_update(self, sid, quiet=True)     # added permissions, trust, refused or not
         return out
 
     # --- owner decisions (user routes only)
@@ -554,8 +554,9 @@ class GeneratedSkills:
         self._user(by)
         st = self._installed(sid)
         cur = int(st.get("version", 0))
-        older = sorted(int(p.name) for p in (self.installed / sid / "versions").iterdir()
-                       if p.name.isdigit() and int(p.name) < cur)
+        away = {int(h["rollback_from"]) for h in st.get("history", []) if isinstance(h, dict) and str(h.get("rollback_from", "")).isdigit()}
+        older = sorted(int(p.name) for p in (self.installed / sid / "versions").iterdir()      # a version the owner already
+                       if p.name.isdigit() and int(p.name) < cur and int(p.name) not in away)   # rolled away from is never a target (#314)
         if not older:
             raise SkillError("no earlier version to roll back to")
         if self.v2() and (why := self._integrity(sid, older[-1])):
@@ -792,6 +793,7 @@ def _args_model(sid: str, spec: dict) -> type[BaseModel]:
 
 class InstalledSkill(Skill):
     """An approved generated Skill as a registry Skill (one version)."""
+    origin = "generated"
 
     def __init__(self, mgr: GeneratedSkills, sid: str) -> None:
         self.mgr, self.name = mgr, sid

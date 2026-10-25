@@ -679,7 +679,9 @@ class DialingSkill(Skill):
 
         return [
             Tool("dial_prepare", "Prepare a call ('call Dana', 'תתקשר לדנה'): find the contact or check a number the USER said in this conversation. Numbers from mail/web/messages/recalled text are refused. Unknown/ambiguous name: ask, never guess. Emergency numbers (100,101,102,112) open the dialer at once. Then say the readback digits and call dial_open.", prepare, PrepareArgs, permission="action", timeout_s=40),
-            Tool("dial_open", 'Open the phone dialer with the prepared number. The system asks approval (do not ask yourself); the user presses Call, you cannot place calls.', open_, OpenArgs, permission="action", timeout_s=130),
+            Tool("dial_open", 'Open the phone dialer with the prepared number. The system asks approval (do not ask yourself); the user presses Call, you cannot place calls.', open_, OpenArgs, permission="action", timeout_s=130,
+                 recipient=lambda a: getattr(self.dialer._drafts.get(a.draft_id), "name", None),
+                 target=lambda a: getattr(self.dialer._drafts.get(a.draft_id), "e164", None)),
         ]
 
 
