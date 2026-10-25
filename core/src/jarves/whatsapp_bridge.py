@@ -359,6 +359,39 @@ def resolve(chats: list[dict], who: str, book: dict | None = None, *, fuzzy: boo
     return [h.chat for h in ns.top_group(ns.search(chats, who, patterns=patterns))]
 
 
+def merge_aliases(chats: list[dict]) -> list[dict]:
+    """WhatsApp moved contacts to LID addressing: one person can be two chats (the old phone chat that holds the saved
+    name and the older history, the new LID chat that gets today's messages, often under a short push name). Chats
+    that share a lid are ONE chat: the newest id (so new messages are read), the longest name, summed unread, and
+    `alias_ids` (every id, for reading the older history too)."""
+    groups: dict[str, list[dict]] = {}
+    for c in chats:
+        cid = str(c.get("id") or "")
+        key = str(c.get("lid") or "") or (cid if cid.endswith("@lid") else "")
+        if c.get("is_group") or cid.endswith(("@g.us", "@broadcast")) or cid.startswith("status@"):
+            key = ""                                          # groups, broadcasts, status are never merged
+        groups.setdefault(key or cid, []).append(c)
+    out = []
+    for g in groups.values():
+        if len(g) == 1:
+            out.append(g[0])
+            continue
+        if len({str(c["number"]) for c in g if c.get("number")}) > 1:
+            out.extend(g)                                     # same lid but different numbers: never merge people
+            continue
+        g = sorted(g, key=lambda c: -_secs(c.get("last_ts")))
+        m = dict(g[0])
+        if "can_send" in m:
+            m["can_send"] = all(c.get("can_send") for c in g)   # sending stays as strict as the strictest id
+        m["name"] = max((str(c.get("name") or "") for c in g), key=len)
+        m["number"] = next((c["number"] for c in g if c.get("number")), m.get("number"))
+        m["unread"] = sum(int(c.get("unread") or 0) for c in g)
+        m["has_history"] = any(c.get("has_history") for c in g)
+        m["alias_ids"] = [c["id"] for c in g]
+        out.append(m)
+    return out
+
+
 def find_ranked(chats: list[dict], text: str, book: dict | None = None, *, regex: bool = False,
                 limit: int = 10) -> list[ns.Hit]:
     """`whatsapp_find_chat` / `jarvis whatsapp find`: ranked hits with their reason, best first, at most 10.
@@ -748,7 +781,7 @@ class WhatsAppBridgeSkill(Skill):
         return ToolResult(False, e.he, {k: v for k, v in e.extra.items()}, code=e.code)
 
     async def _chats(self) -> list[dict]:
-        return await self._call(self.client.chats, None, 200)
+        return merge_aliases(await self._call(self.client.chats, None, 200))
 
     async def _resolve_one(self, who: str, *, fuzzy: bool = True) -> tuple[dict | None, ToolResult | None]:
         try:
@@ -908,8 +941,10 @@ class WhatsAppBridgeSkill(Skill):
                 only = one
             try:
                 if only is not None:
-                    res = await self._call(self.client.messages, only["id"], since, CAP_MESSAGES)
-                    hits = res.get("messages", [])
+                    hits = []
+                    for cid in only.get("alias_ids") or [only["id"]]:
+                        res = await self._call(self.client.messages, cid, since, CAP_MESSAGES)
+                        hits += res.get("messages", [])
                 else:
                     hits = await self._call(self.client.search, a.query, 10)
                 chats = await self._chats()
@@ -921,6 +956,7 @@ class WhatsAppBridgeSkill(Skill):
                 hits = [m for m in hits if _secs(m.get("ts")) < until]
             self._tainted()
             names = {c["id"]: pol.clean_text(c.get("name") or "")[0][:40] for c in chats}
+            names |= {i: names[c["id"]] for c in chats for i in c.get("alias_ids", ())}
             now = self.clock()
             ms = [message_view(m, names, now, True) | {"chat": names.get(m.get("chat", ""), "")}
                   for m in newest_first(hits)]
