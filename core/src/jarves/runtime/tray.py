@@ -171,7 +171,7 @@ def pc_locked() -> bool:
             return True
         ctypes.windll.user32.CloseDesktop(h)
     except Exception:
-        return False
+        return True   # fail open: unknown state -> also send the toast
     return False
 
 

@@ -45,3 +45,23 @@ def test_identity_is_jarves_not_python(monkeypatch):
     if not __import__("sys").platform == "win32":
         assert tray.set_app_identity() is False
         assert tray.pc_locked() is False
+
+
+def test_lock_detection_fails_open(monkeypatch):
+    monkeypatch.setattr(tray, "pc_locked", lambda: (_ for _ in ()).throw(RuntimeError("x")))
+    assert appr.TrayChannel(_Runtime()).available(_a(["popup"])) is True
+
+
+def test_toast_fires_if_the_popup_process_crashes():
+    import threading
+    rt = _Runtime()
+    rt.tray = object()
+    tc = appr.TrayChannel(rt)
+    a = SimpleNamespace(shown=["popup"], title="t")
+    svc = SimpleNamespace(_lock=threading.Lock(), _pending={"i": (a, None, None)}, channels=[tc])
+    appr.PopupChannel._fallback_toast(SimpleNamespace(svc=svc), "i")
+    assert rt.said and "t" in rt.said[0]
+    rt.said.clear()
+    svc._pending.clear()                       # already answered elsewhere: no toast
+    appr.PopupChannel._fallback_toast(SimpleNamespace(svc=svc), "i")
+    assert rt.said == []

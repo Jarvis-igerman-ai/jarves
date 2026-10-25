@@ -908,9 +908,24 @@ class PopupChannel:
             if not ok and "no such" not in why:
                 logs.warn("approvals", "APPROVAL_POPUP_REJECTED", "popup answer rejected", why=why[:120], id=aid)
         elif p.returncode not in (0, None, -15, 1):
+            self._fallback_toast(aid)      # a crash, not a close/terminate: do not leave the request unseen
             self.last_error = (err or b"").decode("utf-8", "replace")[-300:]
             logs.warn("approvals", "APPROVAL_POPUP_FAILED", "approval window failed", returncode=p.returncode,
                       detail=self.last_error[-160:])
+
+    def _fallback_toast(self, aid: str) -> None:
+        """#352: the window closed without an answer while the request is still pending (it crashed / was killed):
+        send the toast after all so the request is not left unseen until it times out."""
+        try:
+            with self.svc._lock:
+                ent = self.svc._pending.get(aid)
+            if ent is None:
+                return
+            for ch in list(self.svc.channels):
+                if getattr(ch, "name", "") == "tray" and getattr(getattr(ch, "runtime", None), "tray", None) is not None:
+                    ch.open(ent[0])
+        except Exception:
+            logs.debug("approvals", "APPROVAL_FALLBACK_TOAST_FAILED", "fallback toast failed")
 
     def close(self, a: Approval) -> None:
         p = self.procs.pop(a.id, None)
@@ -939,7 +954,7 @@ class TrayChannel:
                 from .runtime.tray import pc_locked
                 return bool(pc_locked())
             except Exception:
-                return False
+                return True          # fail open: when unsure, also send the toast
         return True
 
     def open(self, a: Approval) -> None:
