@@ -248,7 +248,13 @@ begin
 end;
 
 // #343: a Git Bash (MSYS) shell rewrites "/VERYSILENT" into "C:/Program Files/Git/VERYSILENT"; setup then ignores the
-// flag and shows the wizard. Setup cannot undo that, but it says so loudly in the log.
+// flag and shows the wizard. Setup cannot undo that, but it says so loudly in the log. Only a bare token (no '=', so
+// never /DIR= or /LOG= with a folder named SILENT) whose LAST path part is VERYSILENT/SILENT counts.
+function EndsWithText(const S, Tail: String): Boolean;
+begin
+  Result := (Length(S) > Length(Tail)) and (Copy(S, Length(S) - Length(Tail) + 1, Length(Tail)) = Tail);
+end;
+
 procedure DetectMangledFlags();
 var
   I: Integer;
@@ -256,7 +262,8 @@ var
 begin
   for I := 1 to ParamCount do begin
     P := Uppercase(ParamStr(I));
-    if (Pos('/VERYSILENT', P) > 1) or (Pos('\VERYSILENT', P) > 1) or (Pos('/SILENT', P) > 1) or (Pos('\SILENT', P) > 1) then
+    if (Pos('=', P) = 0) and (EndsWithText(P, '/VERYSILENT') or EndsWithText(P, '\VERYSILENT') or
+        EndsWithText(P, '/SILENT') or EndsWithText(P, '\SILENT')) then
       Log('WARNING: the command line contains a path-like silent flag (' + ParamStr(I) + '). A shell (Git Bash/MSYS) ' +
           'rewrote /VERYSILENT into a path, so setup ignores it and shows the wizard. Run it from cmd or PowerShell, ' +
           'or set MSYS_NO_PATHCONV=1 (or write //VERYSILENT).');

@@ -505,7 +505,10 @@ def test_setup_restores_the_pre_install_state_without_a_flag_and_flags_mangled_s
     assert "RestartRequested() or (WasRecorded and (WasCore or WasFace or WasDash))" in want
     assert "restart: Core was running -> restarted" in iss and "restart: Core was not running -> left stopped" in iss
     assert iss.index("RecordWhatRuns();  ") < iss.index("restart: Core was running -> restarted")
-    assert "procedure DetectMangledFlags" in iss and "Pos('/VERYSILENT', P) > 1" in iss
+    mangled = iss.split("procedure DetectMangledFlags", 1)[1].split("\nend;", 1)[0]
+    assert "EndsWithText(P, '/VERYSILENT')" in mangled and "Pos('=', P) = 0" in mangled   # never /DIR=..\SILENT..
+    smoke_all = (PKG / "smoke_windows.ps1").read_text(encoding="utf-8-sig")
+    assert "silent upgrade over a stray program-folder process starts no Core" in smoke_all
     assert "Result := ParamPresent('/RESTARTJARVES=1');" in iss                      # the health check gate is unchanged
     smoke = (PKG / "smoke_windows.ps1").read_text(encoding="utf-8-sig")
     assert "no-flag restart" in smoke and "left stopped" in smoke
