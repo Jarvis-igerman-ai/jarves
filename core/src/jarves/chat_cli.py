@@ -270,6 +270,11 @@ class ChatSession:
                     self.say(p.get("text", ""), end="")
                 elif t == "chat.tool" and p.get("id") == tid:
                     self._tool_line(p, streamed)
+                elif t == "chat.display" and p.get("id") == tid:
+                    if streamed:
+                        self.say()
+                        streamed = False
+                    self.say(str(p.get("text", "")))                    # read-only owner display (#363)
                 elif t == "chat.approval_request":
                     if streamed:
                         self.say()
@@ -318,6 +323,9 @@ class ChatSession:
             self.say()
         name = logs.redact(str(p.get("name", "?")))[:60]
         ok = bool(p.get("ok"))
+        if not ok and p.get("code") == "TOOL_UNTRUSTED_TURN":      # a safety rule, not an error (#363)
+            self.say(self.paint("2", f"  > {name}  skipped (safety rule)"))
+            return
         extra = f" [{logs.redact(str(p.get('code', '')))}]" if (self.verbose or not ok) else ""
         self.say(self.paint("2" if ok else "31", f"  > {name}  {'ok' if ok else 'FAILED'}{extra}"))
 

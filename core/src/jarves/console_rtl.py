@@ -84,6 +84,21 @@ def wrap_logical(text: str, width: int) -> list[str]:
                          drop_whitespace=True, replace_whitespace=False) or [text]
 
 
+_ANSI = re.compile(chr(27) + r"\[[0-9;]*m")
+
+
+def _render_line(line: str, width: int) -> list[str]:
+    """#329: colour codes (jarvis> prefix) must not be reversed with the Hebrew: strip them, convert the plain
+    text, and put the leading colour (if any) back around the whole visual line."""
+    if chr(27) not in line:
+        return [to_visual(p) for p in wrap_logical(line, width)]
+    m = _ANSI.match(line)
+    lead = m.group() if m else ""
+    plain = _ANSI.sub("", line)
+    out = [to_visual(p) for p in wrap_logical(plain, width)]
+    return [lead + o + chr(27) + "[0m" for o in out] if lead else out
+
+
 def render(text: str, width: int = 0, mode: str = "visual") -> str:
     """Convert text (may hold several lines) for `mode`. 'logical' returns it unchanged."""
     if mode != "visual" or not has_hebrew(text):
@@ -91,7 +106,7 @@ def render(text: str, width: int = 0, mode: str = "visual") -> str:
     lines: list[str] = []
     for line in text.split("\n"):
         if has_hebrew(line):
-            lines.extend(to_visual(p) for p in wrap_logical(line, width))
+            lines.extend(_render_line(line, width))
         else:
             lines.append(line)
     return "\n".join(lines)

@@ -83,6 +83,15 @@ def _tool_seen(name: str, ok: bool, code: str, message: str = "") -> None:
             pass                                       # a display problem never changes a tool result
 
 
+def _display_seen(text: str) -> None:
+    fn = getattr(TOOL_SINK.get(), "display", None)
+    if text and callable(fn):
+        try:
+            fn(text)
+        except Exception:
+            pass
+
+
 async def bounded_ai(aw, timeout_s: float, registry: "SkillRegistry | None"):
     """asyncio.wait_for for an AI turn whose deadline excludes the time a human spent on registry.confirm
     (real typed session 19 Oct: an approval answered after minutes became "the AI did not answer in time")."""
@@ -120,6 +129,9 @@ class ToolResult:
     message: str                       # short, user-presentable (may be spoken)
     data: dict = field(default_factory=dict)
     code: str = "ok"                   # stable error code for logs/diagnostics
+    # Owner-facing DISPLAY text (#363): printed by the chat UIs straight from the result, read-only. It is never put
+    # in to_model(), so it cannot reach the model as instructions and never lifts the untrusted-turn rule.
+    display: str = ""
 
     def to_model(self) -> str:
         out = {"ok": self.ok, "message": self.message, "code": self.code, **self.data}
@@ -556,6 +568,7 @@ class SkillRegistry:
         log("skills", "TOOL_RESULT", "tool finished", tool=name, ok=res.ok, result_code=res.code, origin=origin,
             ms=round(max(0.0, time.monotonic() - t_run - (self.confirm_elapsed() - approval_wait)) * 1000))
         _tool_seen(name, res.ok, res.code, res.message)   # terminal + web chat: one line per call (TOOL_SINK)
+        _display_seen(res.display)                        # #363: read-only owner text (e.g. WhatsApp messages)
         return res
 
     async def _call(self, name: str, raw_args: dict | str | None = None, *, origin: Origin = "model",

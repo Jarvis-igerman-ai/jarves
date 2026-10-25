@@ -253,6 +253,9 @@ class _ToolSink:
     def __call__(self, name: str, ok: bool, code: str, message: str = "") -> None:
         self.chat._tool(self.turn, str(name)[:60], bool(ok), str(code or "")[:40], message)
 
+    def display(self, text: str) -> None:       # #363: read-only owner text from a tool result
+        self.chat._display(self.turn, str(text))
+
 
 class WebChat:
     """One shared conversation for every web client. Thread-safe: the HTTP threads call submit / state / poll, the turns
@@ -421,6 +424,11 @@ class WebChat:
                 "detail": scrub(message, DETAIL_CHARS)}
         self._add_message(line)
         self.events.add("tool", **line)
+
+    def _display(self, tid: str, text: str) -> None:
+        line = {"role": "display", "turn": tid, "text": text}
+        self._add_message(line)
+        self.events.add("display", **line)
 
     async def _run(self, tid: str, text: str, speak: bool, device: bool) -> None:
         silent = self.silent_state()["on"]

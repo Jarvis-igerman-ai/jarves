@@ -202,8 +202,16 @@ class ChatService:
     async def _turn(self, client, tid: str, text: str, voice: bool, silent: bool) -> None:
         core = self.core
         appr.CHAT_TURN.set({"client": client.id, "silent": silent})
-        TOOL_SINK.set(lambda name, ok, code: asyncio.get_running_loop().create_task(
-            self.send(client, "chat.tool", {"id": tid, "name": name, "ok": ok, "code": code})))
+        svc = self
+
+        class _Sink:
+            def __call__(_s, name, ok, code):
+                asyncio.get_running_loop().create_task(
+                    svc.send(client, "chat.tool", {"id": tid, "name": name, "ok": ok, "code": code}))
+
+            def display(_s, text):          # #363: read-only owner text from a tool result (e.g. WhatsApp messages)
+                asyncio.get_running_loop().create_task(svc.send(client, "chat.display", {"id": tid, "text": text}))
+        TOOL_SINK.set(_Sink())
         sent = [False]
 
         def on_delta(piece: str) -> None:
