@@ -15,6 +15,12 @@ import numpy as np
 from .. import logs
 
 SR = 16000
+MIC_LOST_DETAIL = "The microphone stopped sending audio (unplugged, Bluetooth dropped or the audio route changed)."
+SPEAKER_LOST_DETAIL = "The speaker stopped accepting audio (unplugged, Bluetooth dropped or the audio route changed)."
+ROUTE_LOST_ACTION = ("Reconnect the headset or microphone, then press push-to-talk or say the wake word. "
+                     "JARVES never reopens the microphone by itself.")
+ROUTE_LOST_CODES = ("AUDIO_MIC_STALLED", "AUDIO_SPEAKER_UNAVAILABLE")
+MIC_STALL_S = 5.0       # a live mic delivers a chunk every ~100 ms; 5 s of nothing means unplugged / Bluetooth dropped
 
 
 class AudioUnavailable(Exception):
@@ -156,8 +162,14 @@ class StreamingAudio:
     """
 
     def __init__(self, input_device=None, output_device=None, *, rate: int = 24000, mic_max_s: float = 2.0,
-                 speaker_max_s: float = 12.0, on_output_level=None) -> None:
+                 speaker_max_s: float = 12.0, on_output_level=None, mic_stall_s: float = 0.0,
+                 backend=None) -> None:
         self.inp, self.out = input_device, output_device
+        # no mic chunk for this long = the route is gone. 0 = off (default: the wake listener has its own
+        # configurable stall_guard that re-opens the mic; only the conversation passes MIC_STALL_S).
+        self.mic_stall_s = mic_stall_s
+        self._mic_seen = False                          # first chunk arrived (Bluetooth HFP/SCO can take seconds)
+        self._backend = backend                         # sounddevice-compatible module; None = the real one
         self.rate, self.mic_max_s, self.speaker_max_s = rate, mic_max_s, speaker_max_s
         self.on_output_level = on_output_level
         self._open = True
@@ -180,6 +192,7 @@ class StreamingAudio:
             self._mic_q.popleft()
             self._m["mic_drops"] += 1
         self._mic_q.append(data)
+        self._mic_seen = True
         self._m["mic_max_depth"] = max(self._m["mic_max_depth"], len(self._mic_q))
         self._mic_ready.set()
 
@@ -188,11 +201,27 @@ class StreamingAudio:
             if not self._open:
                 return None
             self._mic_ready.clear()
-            await self._mic_ready.wait()
+            try:
+                if self.mic_stall_s > 0:
+                    # double grace before the first chunk: a Bluetooth profile switch / slow driver start is not a loss
+                    await asyncio.wait_for(self._mic_ready.wait(), self.mic_stall_s * (1 if self._mic_seen else 2))
+                else:
+                    await self._mic_ready.wait()
+            except asyncio.TimeoutError:
+                if not self._open or self._mic_q:
+                    continue
+                self._m["route_losses"] = self._m.get("route_losses", 0) + 1
+                raise AudioUnavailable("AUDIO_MIC_STALLED", MIC_LOST_DETAIL, ROUTE_LOST_ACTION) from None
         return self._mic_q.popleft()
 
-    async def mic_chunks(self, rate: int, chunk_bytes: int):
+    def _sd(self):
+        if self._backend is not None:
+            return self._backend
         import sounddevice as sd
+        return sd
+
+    async def mic_chunks(self, rate: int, chunk_bytes: int):
+        sd = self._sd()
         loop = asyncio.get_running_loop()
         self._mic_max_chunks = max(1, int(self.mic_max_s * rate * 2 / chunk_bytes))
 
@@ -259,19 +288,45 @@ class StreamingAudio:
         return piece
 
     async def run_player(self, rate: int) -> None:
-        import sounddevice as sd
+        sd = self._sd()
         self.rate = rate
         piece = max(2, (rate // 10) * 2)            # 100 ms of PCM16 mono
-        with sd.RawOutputStream(samplerate=rate, channels=1, dtype="int16", device=self.out) as out:
+        out = None
+        try:                                        # open + start: a missing/vanished device is a lost speaker
+            out = sd.RawOutputStream(samplerate=rate, channels=1, dtype="int16", device=self.out)
+            out.__enter__()                         # sounddevice: start(); fakes may only be context managers
+        except Exception as e:
+            if out is not None:
+                try:
+                    out.__exit__(None, None, None)
+                except Exception:
+                    pass
+            raise self._speaker_lost(e) from e
+        try:
             while True:
                 data = await self._spk_get(piece)
                 if data is None:
                     return
-                if self.on_output_level is not None:
+                if self.on_output_level is not None:   # a UI callback failure is a crash, not a lost speaker
                     samples = np.frombuffer(data, dtype="<i2").astype(np.float32) / 32768
                     level = min(1.0, float(np.sqrt(np.mean(samples ** 2))) * 5) if len(samples) else 0.0
                     await self.on_output_level(level)
-                await asyncio.to_thread(out.write, data)
+                try:
+                    await asyncio.to_thread(out.write, data)
+                except Exception as e:              # only the device write means "the speaker went away"
+                    if not self._open:              # closing the session while the device went away: not an error
+                        return
+                    raise self._speaker_lost(e) from e
+        finally:
+            try:
+                out.__exit__(None, None, None)         # closing a vanished device can raise: never mask the real cause
+            except Exception:
+                pass
+
+    def _speaker_lost(self, e: Exception) -> AudioUnavailable:
+        self._m["route_losses"] = self._m.get("route_losses", 0) + 1
+        logs.warn("audio", "SPEAKER_LOST", "the speaker stopped accepting audio", error_type=type(e).__name__)
+        return AudioUnavailable("AUDIO_SPEAKER_UNAVAILABLE", SPEAKER_LOST_DETAIL, ROUTE_LOST_ACTION)
 
     # ------------------------------------------------------------------ lifecycle / health
     def stats(self) -> dict:
@@ -283,6 +338,7 @@ class StreamingAudio:
                 "speaker_dropped_s": round(m["speaker_dropped_bytes"] / 2 / self.rate, 2),
                 "speaker_max_depth_s": round(m["speaker_max_bytes"] / 2 / self.rate, 2),
                 "speaker_depth_s": round(self.queued_s(), 2),
+                "route_losses": m.get("route_losses", 0),
                 "speaker_flushes": m["speaker_flushes"],
                 "speaker_flushed_s": round(m["speaker_flushed_bytes"] / 2 / self.rate, 2)}
 

@@ -212,6 +212,9 @@ for _fid, _w, _p, _perm, _set in [
      _pi("implemented_unverified"), ["action", "destructive"], "dashboard Workspace page"),
     ("voice_change", _win("implemented_unverified", "UNIT test_identity.py", "owner has not compared voices by ear"),
      _pi("implemented_unverified", "Pi audio output not tested"), ["action"], "dashboard Identity & voice page"),
+    ("audio_route", _win("implemented_unverified", "UNIT test_audio_route_213.py with simulated Bluetooth/headset/focus fixtures "
+                         "(tests/fixtures/car_audio)", "no real Bluetooth, headset or car kit tried; always on, no switch"),
+     _pi("implemented_unverified", "Pi audio devices not tested"), ["read"], "voice health on the dashboard Home page; `jarvis mic status`"),
     ("assistant_identity", _win("implemented_unverified", "UNIT test_identity.py",
                                 "rename not yet tried in a real spoken conversation"),
      _pi("implemented_unverified", "Pi audio output not tested"), ["destructive (always confirmed)"],

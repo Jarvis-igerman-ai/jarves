@@ -31,7 +31,7 @@ from . import chat_engine
 from . import chat_service
 from .curator import _SENSITIVE as SENSITIVE_TEXT, Curator, openai_extractor
 from .dashboard import DashboardSkill
-from .voice.audio import AudioUnavailable, SoundDeviceAudio, StreamingAudio
+from .voice.audio import MIC_STALL_S, AudioUnavailable, SoundDeviceAudio, StreamingAudio
 from .voice.speechcache import SpeechCache
 from .voice.stt import STTUnavailable, WhisperSTT
 from .voice.tts import TTSUnavailable, make_tts
@@ -1362,7 +1362,8 @@ class Core:
         async def output_level(level: float) -> None:
             await self.link.send_face("speaker.level", {"level": round(level, 3)})
 
-        audio_io = StreamingAudio(v.input_device, v.output_device, on_output_level=output_level) if self.use_real_audio else None
+        audio_io = (StreamingAudio(v.input_device, v.output_device, on_output_level=output_level, mic_stall_s=MIC_STALL_S)
+                    if self.use_real_audio else None)   # #213: only the conversation mic ends on a stall
         max_s = min(v.session_max_s, self._voice_budget_left_s())
 
         def usage(seconds: float) -> None:
@@ -1411,6 +1412,11 @@ class Core:
                     else "conversation closed after silence (voice.idle_disconnect_s)")}))
                 await self._voice_limit_notice("VOICE_IDLE_DISCONNECT", f"{self.cfg.voice.idle_disconnect_s:g} s",
                                                self.cfg.voice.idle_disconnect_s)
+            elif reason == "audio_route_lost" and not self.stopping:      # V6 #213: say so, do not reopen the mic
+                self._spawn(self.link.send_face("assistant.activity", {"kind": "limit", "detail": "", "text": (
+                    "המיקרופון או הרמקול התנתקו (למשל בלוטות'), השיחה נסגרה. חברו מחדש ולחצו לדבר, או אמרו את מילת ההפעלה"
+                    if he_ else "The microphone or speaker disconnected (for example Bluetooth), so the conversation "
+                    "ended. Reconnect it, then use push-to-talk or the wake word.")}))
             if not self.stopping:
                 self._spawn(self.curator.run(f"live_{reason}"))   # learn durable facts from this conversation
             # Smooth conversation: the server closing a session (or a time limit) while the user is in the middle

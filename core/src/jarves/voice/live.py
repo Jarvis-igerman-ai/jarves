@@ -165,6 +165,7 @@ ERROR_ACTIONS = {
     "function_call_outputs_required": "a tool result was not returned; report this bug (see core logs)",
 }
 GENERIC_ACTION = "see core logs; if it repeats, end and restart the live conversation"
+_ROUTE_LOST_CODES = ("AUDIO_MIC_STALLED", "AUDIO_SPEAKER_UNAVAILABLE")   # = voice.audio.ROUTE_LOST_CODES
 
 # session.closed reason (docs) -> our end reason
 CLOSE_REASONS = {"expired": "timeout", "close_requested": "remote_closed", "remote_hangup": "remote_closed",
@@ -530,6 +531,15 @@ class SessionLifecycle:
         if e is None:
             return
         code = getattr(e, "code", None) or type(e).__name__
+        if code in _ROUTE_LOST_CODES:
+            # V6 #213: the microphone or speaker went away mid-conversation (unplugged, Bluetooth dropped). Not a
+            # crash: end the conversation, say what happened and what to do. Nothing reopens the microphone here;
+            # the owner restarts by push-to-talk or the wake word.
+            logs.warn(self._log_area, "AUDIO_ROUTE_LOST", "audio device lost mid-conversation: ending it, "
+                      "falling back to push-to-talk", task_name=t.get_name(), error_code=code)
+            self._health_soon("degraded", getattr(e, "message", "") or str(e), getattr(e, "action", "") or GENERIC_ACTION)
+            self._request_end("audio_route_lost")
+            return
         logs.error(self._log_area, "VOICE_TASK_CRASHED", "a voice task crashed", task_name=t.get_name(),
                    **logs.error_fields(e))
         self._health_soon("degraded", f"live voice stopped: {t.get_name()} failed ({type(e).__name__})",
