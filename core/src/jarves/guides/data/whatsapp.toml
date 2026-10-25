@@ -37,5 +37,6 @@ fix_en = "Say the full number once, e.g. 054-123-4567."
 [[problems]]
 he = "וואטסאפ לא נפתח"
 en = "WhatsApp does not open"
+codes = ["WHATSAPP_OPEN_FAILED"]
 fix_he = "ודאו שיש דפדפן ברירת מחדל או וואטסאפ דסקטופ מותקן."
 fix_en = "Make sure a default browser or WhatsApp Desktop is installed."

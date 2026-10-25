@@ -76,12 +76,14 @@ fix_en = "A WhatsApp name can be long or hold hearts and emoji, so you can give 
 [[problems]]
 he = "כתוב שרכיב הגשר לא מותקן"
 en = "It says the bridge program is not installed"
+codes = ["WA_NOT_INSTALLED"]
 fix_he = "הגשר הוא תוכנה נפרדת (whatsapp_bridge) שחייבת להיות במחשב. הצעד הבא: ללחוץ בעמוד וואטסאפ על \"הורדת גשר הוואטסאפ\" (או jarvis whatsapp install), או להתקין מחדש את JARVES (ההתקנה כוללת אותה), או מתוך קוד המקור להריץ scripts/build_whatsapp_bridge.ps1 (דורש Go 1.27.0). עד אז הכפתורים קישור והפעלה כבויים. jarvis whatsapp status מראה bridge_installed."
 fix_en = "The bridge is a separate program (whatsapp_bridge) that must be on this computer. Next step: press \"Download the WhatsApp bridge\" on the WhatsApp page (or run jarvis whatsapp install), or reinstall JARVES (the installer includes it), or from a source checkout run scripts/build_whatsapp_bridge.ps1 (needs Go 1.27.0). Until then the Link and Start buttons stay off. jarvis whatsapp status shows bridge_installed."
 
 [[problems]]
 he = "הוא אומר שוואטסאפ עצור"
 en = "He says WhatsApp is killed"
+codes = ["WA_KILLED"]
 fix_he = "מישהו לחץ על מתג החירום, או שוואטסאפ שלח אזהרה והגשר עצר את עצמו. בדקו את הטלפון, ואז jarvis whatsapp kill --release."
 fix_en = "Someone pressed the kill switch, or WhatsApp sent a warning and the bridge stopped itself. Check the phone, then jarvis whatsapp kill --release."
 
@@ -94,6 +96,7 @@ fix_en = "That is right until send mode is on (after 14 quiet read-only days). S
 [[problems]]
 he = "הגשר לא פועל או לא מחובר"
 en = "The bridge is not running or not connected"
+codes = ["WA_BRIDGE_DOWN", "BRIDGE_OFFLINE", "WA_NOT_SET_UP"]
 fix_he = "הריצו jarvis whatsapp start ואז jarvis whatsapp status. אם כתוב \"logged out\", קשרו שוב: jarvis whatsapp link."
 fix_en = "Run jarvis whatsapp start, then jarvis whatsapp status. If it says \"logged out\", link again: jarvis whatsapp link."
 

@@ -1,0 +1,8 @@
+{
+ "after a failed tool JARVES asks once whether to run a quick read-only self-check (never more than 3 times an hour, 10 minutes per problem)": "אחרי כשל בכלי ג'ארביס שואל פעם אחת אם להריץ בדיקה עצמית מהירה (קריאה בלבד), לא יותר מ-3 פעמים בשעה ולא על אותה בעיה תוך 10 דקות",
+ "the online model may reword the self-check result; it only sees the redacted report": "המודל המקוון יכול לנסח מחדש את תוצאת הבדיקה העצמית; הוא רואה רק דוח מצונזר",
+ "UNIT test_self_diagnosis.py (fakes: gate, cooldown, runners)": "בדיקות יחידה test_self_diagnosis.py (דמויות: שער, המתנה, בודקים)",
+ "no real failure answered on the owner PC yet; coding-agent and ticket steps not built": "עוד לא נענה כשל אמיתי במחשב של הבעלים; שלבי סוכן הקוד והכרטיס עוד לא נבנו",
+ "UNIT test_self_diagnosis.py (fake model, redaction)": "בדיקות יחידה test_self_diagnosis.py (מודל מדומה, צנזור)",
+ "no real paid wording checked": "לא נבדק ניסוח אמיתי בתשלום"
+}

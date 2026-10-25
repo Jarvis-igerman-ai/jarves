@@ -1,0 +1,14 @@
+{
+ "dict": {
+  "A self-check reads local state only; nothing is sent anywhere.": "הבדיקה העצמית קוראת מצב מקומי בלבד; שום דבר לא נשלח החוצה.",
+  "Diagnose the failure?": "לבדוק את הכשל?",
+  "I could not run the self-check.": "לא הצלחתי להריץ את הבדיקה העצמית.",
+  "That failed. Do you want me to diagnose it?\nYes = quick self-check (read-only). No = skip.": "זה נכשל. רוצה שאבדוק?\nכן = בדיקה עצמית מהירה (קריאה בלבד). לא = לדלג."
+ },
+ "rules": [
+  [
+   "^Self-check: (.+)$",
+   "בדיקה עצמית: $1"
+  ]
+ ]
+}

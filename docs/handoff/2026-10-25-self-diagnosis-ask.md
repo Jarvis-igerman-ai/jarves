@@ -1,0 +1,8 @@
+# Self-diagnosis on failure, slices 1+2 (issue #336)
+
+- Done: `diag/failure_gate.py` (ask once on a user-visible failure: switch `self_diagnosis_ask` default ON, 10 min cooldown per area+code, max 3 questions per hour, one open at a time, never in background routes, only codes a guide problem explains, aloud only on the voice route, otherwise a card through `ApprovalService`) and `diag/areas.py` (read-only runner for anydo, whatsapp, google, voice: redacted evidence, guide `[[problems]] codes = [...]` match, EN+HE cause and next step; optional model wording behind `self_diagnosis_ai_wording`, default ON, redacted report only, off in privacy mode).
+- Wiring: `SkillRegistry.on_failure` hook, `Core.start` attaches the gate, `jarvis diagnose <area> [--code C] [--json]`, guide `diagnosis.toml` (2 steps, 1 problem), problems with `codes` in the anydo, google_calendar, whatsapp, whatsapp_bridge and voice_ai guides, features/capabilities/parity rows, Hebrew via `catalog_add.py` and `hebrew_parts`.
+- Deviation: the approval path is yes/no, so the question offers "self-check / skip"; the third option (coding agent) comes with slice C. Slices B (ticket) and C (coding-agent hand-off) are NOT built.
+- Evidence rule: only key names and type names of responses, booleans of connection state, version, OS, and log CODES (no messages, no free text); `test_self_diagnosis.py` seeds fake secrets, phone and e-mail.
+- Known: `test_p_perf.py::test_backend_prompt_does_not_grow` already fails on `jarves/main` in this checkout (48807 > 48400, identical without this change); this PR adds nothing to the prompt.
+- Questions for the user: none blocking.
