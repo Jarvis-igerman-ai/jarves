@@ -78,6 +78,7 @@ BANNED_RX = re.compile(r"calendar[_ ]?delete|delete[_ ]?(?:calendar[_ ]?)?event|
 INJECTION_RX = re.compile(r"ignore (?:all |the )?(?:previous|above|prior) instructions|system prompt|"
                           r"התעלם מ(?:כל )?ההוראות", re.IGNORECASE)
 FRONT_KEYS = {"name", "title", "description", "version", "capabilities"}
+V2_KEYS = {"manifest", "min_core", "permissions", "dependencies", "surfaces", "signed_by", "signature"}
 
 
 class SkillError(ValueError):
@@ -219,8 +220,9 @@ def _sha(md: str, py: str | None) -> str:
 
 
 def validate(md: str, py: str | None, *, taken_skills: set[str] = frozenset(), taken_tools: set[str] = frozenset(),
-             upgrading: bool = False) -> dict:
-    """Static validation report of one Skill draft (never executes anything)."""
+             upgrading: bool = False, v2: bool = False) -> dict:
+    """Static validation report of one Skill draft (never executes anything). `v2` (the skills_manifest2 switch):
+    a `manifest: 2` Skill may request storage / network:<host> under `permissions` too (still granted by the owner)."""
     errs: list[str] = []
     warns: list[str] = []
     if len(md.encode("utf-8")) > MAX_MD:
@@ -239,10 +241,15 @@ def validate(md: str, py: str | None, *, taken_skills: set[str] = frozenset(), t
         errs.append(f"a Skill named {sid} already exists")
     if not str(meta.get("description", "")).strip():
         errs.append("description is required")
-    for k in set(meta) - FRONT_KEYS:
+    is_v2 = v2 and str(meta.get("manifest", "")).strip() == "2"
+    for k in set(meta) - FRONT_KEYS - (V2_KEYS if is_v2 else set()):
         warns.append(f"unknown frontmatter key {k!r} ignored")
     caps_raw = meta.get("capabilities", [])
     caps_raw = caps_raw if isinstance(caps_raw, list) else [caps_raw] if caps_raw else []
+    if is_v2:                  # read/action are tool levels, not capabilities; anything else is checked below
+        extra = meta.get("permissions", [])
+        extra = extra if isinstance(extra, list) else [extra] if extra else []
+        caps_raw = list(dict.fromkeys([*caps_raw, *(c for c in extra if str(c).strip().lower() not in ("read", "action"))]))
     caps: list[str] = []
     for c in caps_raw:
         c = str(c).strip().lower()
@@ -281,6 +288,7 @@ def validate(md: str, py: str | None, *, taken_skills: set[str] = frozenset(), t
 
 
 _CAP_HE = {"storage": "אחסון מקומי קטן משלו"}
+_TRUST_HE = {"unsigned": "לא חתום", "owner_signed": "חתום במפתח שלכם", "tampered": "חתימה פגומה"}
 
 
 def _summaries(r: dict) -> tuple[str, str]:
@@ -293,10 +301,13 @@ def _summaries(r: dict) -> tuple[str, str]:
     state_en = "validation passed" if r["ok"] else f"validation FAILED ({len(r['errors'])} problems)"
     code_he = "כולל קוד פייתון" if r["has_code"] else "הוראות בלבד"
     code_en = "includes Python code" if r["has_code"] else "instructions only"
-    return (f"כישור חדש: {r['title']} - {r['description']}. {code_he}. מבקש: {caps_he}. כלים: {tools_he}. {state_he}. "
-            f"יותקן כבוי; צריך לאשר, לתת הרשאות ולהפעיל בלוח הבקרה.",
+    m2 = r.get("manifest2") or {}
+    trust_he = f" גרסה {m2['version']}, {_TRUST_HE.get(m2['trust'], m2['trust'])}." if m2 else ""
+    trust_en = f" Version {m2['version']}, trust: {m2['trust']}." if m2 else ""
+    return (f"כישור חדש: {r['title']} - {r['description']}. {code_he}. מבקש: {caps_he}. כלים: {tools_he}. {state_he}."
+            f"{trust_he} יותקן כבוי; צריך לאשר, לתת הרשאות ולהפעיל בלוח הבקרה.",
             f"New Skill: {r['title']} - {r['description']}. {code_en}. Requests: {caps_en}. Tools: {tools_en}. "
-            f"{state_en}. Installs DISABLED; approve, grant and enable it on the dashboard.")
+            f"{state_en}.{trust_en} Installs DISABLED; approve, grant and enable it on the dashboard.")
 
 
 # ---------------------------------------------------------------------- storage of drafts / installs
@@ -316,11 +327,50 @@ def _read_json(path: Path, default):
 class GeneratedSkills:
     """Drafts, installs, grants and the runner for one data dir (Core and dashboard processes share the files)."""
 
-    def __init__(self, home: Path, *, taken: callable | None = None, http=None) -> None:
-        self.root = home / ROOT
+    def __init__(self, home: Path, *, taken: callable | None = None, http=None, v2: callable | None = None) -> None:
+        self.home = Path(home)
+        self.root = self.home / ROOT
         self.drafts, self.installed, self.removed = self.root / "drafts", self.root / "installed", self.root / "removed"
         self.taken = taken or (lambda: (set(), set()))     # () -> (built-in skill names, built-in tool names)
         self.http = http                                   # httpx.AsyncClient-like (tests inject a fake)
+        self.v2 = v2 or (lambda: False)                    # the skills_manifest2 switch (platform2.py); OFF = as before
+
+    # --- manifest v2 (issue #220; only consulted while the switch is on)
+    def _apply_v2(self, rep: dict, md: str, py: str | None, upgrading: bool) -> dict:
+        """Add trust + manifest facts to a validation report; a tampered / invalid manifest fails it (fail closed)."""
+        from . import platform2
+        info = platform2.check(md, py, key=platform2.owner_key(self.home), upgrading=upgrading,
+                               present=set(self.installed_ids()) | set(self.taken()[0]))
+        rep["manifest2"] = info
+        if info["errors"]:
+            rep["errors"] = list(rep["errors"]) + info["errors"]
+            rep["ok"] = False
+            logs.warn("skills", "SKILL_V2_REFUSED", "Skill manifest refused", skill=rep.get("id"),
+                      trust=info["trust"], errors=len(info["errors"]))
+        rep["summary_he"], rep["summary_en"] = _summaries(rep)
+        return rep
+
+    def _integrity(self, sid: str, version: int | None = None, files: tuple | None = None) -> str:
+        """'' when the stored copy of a version matches the sha256 the owner approved and its signature is not
+        tampered; otherwise a short reason (no file content)."""
+        from . import platform2
+        st = self.state(sid)
+        v = int(st.get("version", 0)) if version is None else version
+        try:
+            md, py = files if files is not None else self._files_of(sid, v)
+        except (OSError, UnicodeDecodeError):
+            return f"the stored files of version {v} cannot be read"
+        want = platform2.approved_sha(st, v)
+        if not want or _sha(md, py) != want:
+            return f"the stored copy of version {v} does not match the sha256 you approved"
+        if platform2.check(md, py, key=platform2.owner_key(self.home))["trust"] == "tampered":
+            return f"version {v} has a tampered signature"
+        return ""
+
+    def _files_of(self, sid: str, version: int) -> tuple[str, str | None]:
+        d = self._version_dir(sid, version)
+        py = d / "skill.py"
+        return (d / "SKILL.md").read_text(encoding="utf-8"), (py.read_text(encoding="utf-8") if py.is_file() else None)
 
     # --- helpers
     def _id(self, sid: str) -> str:
@@ -385,7 +435,10 @@ class GeneratedSkills:
             return {"ok": False, "errors": [str(e)], "warnings": [], "id": None}
         upgrading = (self.installed / sid).is_dir()
         skills, tools = self._taken(exclude=sid if upgrading else None)
-        rep = validate(md, py, taken_skills=skills, taken_tools=tools, upgrading=upgrading)
+        v2 = self.v2()
+        rep = validate(md, py, taken_skills=skills, taken_tools=tools, upgrading=upgrading, v2=v2)
+        if v2:
+            self._apply_v2(rep, md, py, upgrading)
         d = self.drafts / sid
         if d.exists():
             shutil.rmtree(d)
@@ -406,8 +459,12 @@ class GeneratedSkills:
         if not d.is_dir():
             raise SkillError("no such draft")
         md, py = self.files(sid, draft=True)
-        return {"id": sid, "report": _read_json(d / "report.json", {}), "meta": _read_json(d / "meta.json", {}),
-                "skill_md": md, "skill_py": py}
+        out = {"id": sid, "report": _read_json(d / "report.json", {}), "meta": _read_json(d / "meta.json", {}),
+               "skill_md": md, "skill_py": py}
+        if self.v2():
+            from . import platform2
+            out["update_plan"] = platform2.plan_update(self, sid)     # added permissions, trust, refused or not
+        return out
 
     # --- owner decisions (user routes only)
     @staticmethod
@@ -424,14 +481,19 @@ class GeneratedSkills:
         md, py = self.files(sid, draft=True)
         upgrading = (self.installed / sid).is_dir()
         skills, tools = self._taken(exclude=sid if upgrading else None)
-        rep = validate(md, py, taken_skills=skills, taken_tools=tools, upgrading=upgrading)   # re-check now
+        v2 = self.v2()
+        rep = validate(md, py, taken_skills=skills, taken_tools=tools, upgrading=upgrading, v2=v2)   # re-check now
+        if v2:
+            self._apply_v2(rep, md, py, upgrading)          # a tampered / invalid manifest is never installed
         if not rep["ok"]:
             raise SkillError("the draft does not pass validation: " + "; ".join(rep["errors"][:5]))
         if not isinstance(sha256, str) or sha256 != rep["sha256"]:
             raise SkillError("the draft changed since you reviewed it; review it again")
         st = self.state(sid) if upgrading else {"history": []}
-        version = int(st.get("version", 0)) + 1
-        vd = self.installed / sid / "versions" / str(version)
+        vroot = self.installed / sid / "versions"
+        kept = [int(p.name) for p in vroot.iterdir() if p.name.isdigit()] if vroot.is_dir() else []
+        version = max([int(st.get("version", 0)), *kept]) + 1     # after a rollback, never reuse a kept folder
+        vd = vroot / str(version)
         vd.mkdir(parents=True, exist_ok=False)
         # Write the EXACT bytes we just validated and whose sha256 the owner confirmed - never re-read the draft
         # files from disk (a concurrent propose() could swap them between the check and the copy: TOCTOU).
@@ -496,6 +558,9 @@ class GeneratedSkills:
                        if p.name.isdigit() and int(p.name) < cur)
         if not older:
             raise SkillError("no earlier version to roll back to")
+        if self.v2() and (why := self._integrity(sid, older[-1])):
+            logs.warn("skills", "SKILL_ROLLBACK_REFUSED", "Skill rollback refused", skill=sid, version=older[-1])
+            raise SkillError(f"rollback refused: {why}")
         st.update(version=older[-1], enabled=False, grants={"capabilities": [], "actions": False})
         st.setdefault("history", []).append({"rollback_from": cur, "to": older[-1], "by": by, "ts": time.time()})
         self._set_state(sid, st)
@@ -522,7 +587,19 @@ class GeneratedSkills:
                 "summary_en": rep.get("summary_en", ""), "last_error": st.get("last_error"),
                 "versions": sorted(int(p.name) for p in (self.installed / sid / "versions").iterdir() if p.name.isdigit())
                 if (self.installed / sid / "versions").is_dir() else [],
-                "history": (st.get("history") or [])[-10:], "targets": TARGETS}
+                "history": (st.get("history") or [])[-10:], "targets": TARGETS,
+                "manifest2": self._v2_view(sid) if self.v2() else None}
+
+    def _v2_view(self, sid: str) -> dict | None:
+        from . import platform2
+        try:
+            md, py = self.files(sid)
+        except (OSError, UnicodeDecodeError):
+            return None
+        info = platform2.check(md, py, key=platform2.owner_key(self.home), upgrading=True,
+                               present=set(self.installed_ids()) | set(self.taken()[0]))
+        info["integrity"] = self._integrity(sid, files=(md, py)) or "ok"
+        return info
 
     def overview(self) -> dict:
         drafts = []
@@ -550,6 +627,9 @@ class GeneratedSkills:
         if spec["permission"] == "action" and not grants.get("actions"):
             return ToolResult(False, f"{tool} needs the owner's 'actions' grant (dashboard)", code="SKILL_NOT_GRANTED")
         md, py = self.files(sid)
+        if self.v2() and (why := self._integrity(sid, files=(md, py))):
+            logs.warn("skills", "SKILL_TAMPERED", "Skill not run: stored copy changed", skill=sid, tool=tool)
+            return ToolResult(False, f"skill {sid} not run: {why}", code="SKILL_TAMPERED")
         if tool == f"{sid}_guide":
             return ToolResult(True, parse_skill_md(md)[1][:6000], {"skill": sid})
         broker = _Broker(self, sid, set(grants.get("capabilities") or []))
@@ -739,11 +819,21 @@ class InstalledSkill(Skill):
         return ("degraded", str(err.get("error", ""))) if err else ("ok", "")
 
 
+_REFUSED_LOGGED: set[str] = set()       # a refused load is logged once, not every 2 s
+
+
 def sync(mgr: GeneratedSkills, registry) -> list[str]:
     """Make the registry match the installed Skills on disk: register / re-register (new version) / unregister,
     disabled set and action pre-authorisation per the owner's switches and grants. Returns what changed."""
     changed = []
     ids = set(mgr.installed_ids())
+    if mgr.v2():               # manifest v2 on: a changed / tampered stored copy is never loaded (fail closed)
+        bad = {sid for sid in ids if mgr._integrity(sid)}
+        for sid in sorted(bad - _REFUSED_LOGGED):
+            logs.warn("skills", "SKILL_LOAD_REFUSED", "generated Skill not loaded: stored copy changed", skill=sid)
+        _REFUSED_LOGGED.clear()
+        _REFUSED_LOGGED.update(bad)
+        ids -= bad
     for name, skill in list(registry.skills.items()):
         if isinstance(skill, InstalledSkill) and (name not in ids or skill.version != int(mgr.state(name).get("version", 0))):
             registry.allowed_actions -= skill.action_tools()
@@ -834,7 +924,7 @@ def attach(core) -> GeneratedSkills:
         tools = {t for t, (s, _) in reg._tools.items() if not isinstance(s, InstalledSkill)}
         return skills, tools
 
-    mgr = GeneratedSkills(core.home, taken=taken)
+    mgr = GeneratedSkills(core.home, taken=taken, v2=lambda: features.active("skills_manifest2"))
     core.registry.allowed_actions |= {"skill_propose"}     # writes only an inert draft
     core.registry.register(make_builder_skill(mgr))
     sync(mgr, core.registry)
@@ -863,7 +953,12 @@ def _refresh_tools_md(core) -> None:
 
 # ---------------------------------------------------------------------- dashboard (the owner)
 def _mgr(ctx) -> GeneratedSkills:
-    return GeneratedSkills(ctx.home)
+    def v2() -> bool:
+        try:
+            return features._ctx_features(ctx).active("skills_manifest2")
+        except Exception:                  # no config in this context: the switch counts as off
+            return False
+    return GeneratedSkills(ctx.home, v2=v2)
 
 
 def api_list(ctx, m, body):

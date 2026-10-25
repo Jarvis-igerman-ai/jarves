@@ -2,31 +2,42 @@ order = 61
 category = "system"
 features = ["skills_manifest2"]
 suggest = false
-aliases = ["מניפסט כישורים", "גרסת כישור", "חתימת כישור", "skills manifest", "skill version", "skill signature", "skill rollback"]
+aliases = ["מניפסט כישורים", "גרסת כישור", "חתימת כישור", "עדכון כישור", "החזרת כישור", "skills manifest", "skill version", "skill signature", "skill update", "skill rollback"]
 title_he = "מניפסט כישורים גרסה 2"
 title_en = "Skills manifest v2"
-what_he = "כל כישור מצהיר על גרסה, הרשאות, תלויות ומשטחים (קול, לוח בקרה, שורת פקודה, טלפון), ואפשר לסמן אותו כחתום במפתח שלכם. הבדיקה רק קוראת ומתכננת: היא לא מתקינה ולא מורידה כלום."
-what_en = "Each Skill declares its version, permissions, dependencies and surfaces (voice, dashboard, CLI, phone), and may be marked as signed with your own key. The check only reads and plans: it never installs or downloads anything."
+what_he = "כל כישור שנוצר מצהיר על גרסה, הרשאות, תלויות ומשטחים (קול, לוח בקרה, שורת פקודה, טלפון), ואפשר לסמן אותו כחתום במפתח שלכם. כשהמתג פועל, כישור עם חתימה פגומה או מניפסט לא תקין לא נטען, לא מאושר ולא מתעדכן. עדכון מראה אילו הרשאות נוספו ותמיד דורש את האישור שלכם; חזרה לגרסה קודמת מכבה את הכישור ומוחקת את ההרשאות."
+what_en = "Each generated Skill declares its version, permissions, dependencies and surfaces (voice, dashboard, CLI, phone), and may be marked as signed with your own key. With the switch on, a Skill with a tampered signature or an invalid manifest is never loaded, approved or updated. An update shows which permissions were added and always needs your approval; a rollback turns the Skill off and clears its grants."
 say = [["אילו הרשאות יש לכישור הזה?", "What permissions does this Skill have?"]]
-expect_he = "כישורים קיימים ממשיכים לעבוד בלי שינוי (נקראים כגרסה 0.0.0). כישור חדש שמבקש הרשאה נוספת תמיד דורש אישור חדש שלכם."
-expect_en = "Existing Skills keep working unchanged (read as version 0.0.0). A new version that asks for an extra permission always needs your new approval."
-test_he = "הריצו את בדיקות היחידה test_v6_manifest2.py. אין בדיקה חיה: הפיצ'ר לא מחובר עדיין להתקנה ולעדכון (#220)."
-test_en = "Run the unit tests test_v6_manifest2.py. There is no live check: the feature is not wired into install and update yet (#220)."
+expect_he = "כישורים קיימים ממשיכים לעבוד בלי שינוי (נקראים כגרסה 0.0.0). כישור לא חתום וכישור חתום צריכים בדיוק אותו אישור שלכם, ומותקנים כבויים ובלי הרשאות. ג'רוויס לא יכול לעדכן או להחזיר כישור בעצמו: רק אתם, מלוח הבקרה או משורת הפקודה."
+expect_en = "Existing Skills keep working unchanged (read as version 0.0.0). Unsigned and signed Skills need exactly the same approval from you, and install turned off with no grants. JARVIS cannot update or roll back a Skill by itself: only you can, from the dashboard or the command line."
+test_he = "הריצו jarvis skills list: לכל כישור תראו גרסה ומצב אמון. בדיקות היחידה: test_v6_manifest2.py ו-test_v6_skills_platform2.py."
+test_en = "Run jarvis skills list: each Skill shows its version and trust state. Unit tests: test_v6_manifest2.py and test_v6_skills_platform2.py."
 cost_he = "חינם."
 cost_en = "Free."
-privacy_he = "אין רשת ואין שליחת מידע. המפתח נשאר במחשב הזה. אין התקנה אוטומטית של קוד של אחרים."
-privacy_en = "No network and nothing is sent. The key stays on this PC. Nothing from third parties is installed automatically."
+privacy_he = "אין רשת ואין שליחת מידע. המפתח, אם יצרתם אחד, נשאר במחשב הזה. אין התקנה אוטומטית של קוד של אחרים. ביומן נרשמים רק שם הכישור והגרסה, אף פעם לא תוכן הקבצים."
+privacy_en = "No network and nothing is sent. The key, if you made one, stays on this PC. Nothing from third parties is installed automatically. The log holds only the Skill name and version, never the file contents."
+
+[parity.features]
+skills_manifest2 = "skills"
 
 [[steps]]
-he = "הפעילו את \"מניפסט כישורים גרסה 2\" (כבוי כברירת מחדל). בשלב זה הוא כלי קריאה ותכנון בלבד."
-en = "Turn on \"Skills manifest v2\" (off by default). For now it is a read-and-plan tool only."
+he = "הפעילו את \"מניפסט כישורים גרסה 2\" (כבוי כברירת מחדל). בשורת הפקודה: jarvis features on skills_manifest2. לכיבוי: jarvis features off skills_manifest2, והכול חוזר לפעול כמו קודם."
+en = "Turn on \"Skills manifest v2\" (off by default). From the command line: jarvis features on skills_manifest2. To turn it off: jarvis features off skills_manifest2, and everything works as before."
 action = "feature_on:skills_manifest2"
 check = "enabled:skills_manifest2"
 
 [[steps]]
-he = "בעמוד \"כישורים חדשים\" בדקו כל כישור מוצע: הרשאות, גרסה ותלויות. אשרו רק מה שהבנתם."
-en = "On the New Skills page, review each proposed Skill: permissions, version and dependencies. Approve only what you understood."
+he = "בעמוד \"כישורים חדשים\" בדקו כל כישור מוצע: גרסה, מצב אמון (לא חתום, חתום במפתח שלכם, חתימה פגומה), הרשאות ותלויות. אשרו רק מה שהבנתם."
+en = "On the New Skills page, review each proposed Skill: version, trust state (unsigned, signed with your key, tampered), permissions and dependencies. Approve only what you understood."
 action = "open:#/newskills"
+
+[[steps]]
+he = "לעדכון כישור קיים: אחרי שגרסה חדשה הוצעה, הריצו jarvis skills update <שם>. תראו אילו הרשאות נוספו והוסרו ואת קוד האישור (sha256). אחרי שבדקתם: jarvis skills update <שם> --approve <הקוד>. הגרסה החדשה מותקנת כבויה ובלי הרשאות."
+en = "To update a Skill: after a new version is proposed, run jarvis skills update <name>. You see the added and removed permissions and the approval code (sha256). After review: jarvis skills update <name> --approve <code>. The new version installs turned off with no grants."
+
+[[steps]]
+he = "לחזרה לגרסה הקודמת: jarvis skills rollback <שם> מראה מה יקרה, ו-jarvis skills rollback <שם> --yes מבצע. הכישור נכבה וההרשאות נמחקות; תנו אותן מחדש בלוח הבקרה."
+en = "To go back to the previous version: jarvis skills rollback <name> shows what will happen, and jarvis skills rollback <name> --yes does it. The Skill turns off and its grants are cleared; grant them again on the dashboard."
 
 [[problems]]
 he = "כישור ישן מראה גרסה 0.0.0"
@@ -35,7 +46,19 @@ fix_he = "זה תקין: כישורים בלי גרסה בפורמט major.minor
 fix_en = "That is normal: Skills without a major.minor.patch version are read that way. It keeps working."
 
 [[problems]]
-he = "החתימה מסומנת כ\"פגומה\""
-en = "The signature shows as tampered"
-fix_he = "התוכן השתנה אחרי החתימה או שהחתימה מהמפתח של מחשב אחר. אל תאשרו עד שבדקתם את התוכן."
-fix_en = "The content changed after signing, or the signature is from another PC key. Do not approve until you have reviewed the content."
+he = "החתימה מסומנת כ\"פגומה\" והעדכון נדחה"
+en = "The signature shows as tampered and the update is refused"
+fix_he = "התוכן השתנה אחרי החתימה, או שהחתימה מהמפתח של מחשב אחר, או שאין קובץ מפתח (skills/owner.key). אל תאשרו: בקשו גרסה חדשה ובדקו את התוכן."
+fix_en = "The content changed after signing, the signature is from another PC's key, or there is no key file (skills/owner.key). Do not approve: ask for a new version and review its content."
+
+[[problems]]
+he = "כישור מותקן לא נטען ומופיע SKILL_TAMPERED"
+en = "An installed Skill does not load and shows SKILL_TAMPERED"
+fix_he = "הקבצים השמורים שלו כבר לא תואמים למה שאישרתם. החזירו לגרסה קודמת (jarvis skills rollback <שם> --yes) או הסירו אותו והציעו אותו מחדש."
+fix_en = "Its stored files no longer match what you approved. Roll back (jarvis skills rollback <name> --yes) or uninstall it and propose it again."
+
+[[problems]]
+he = "jarvis skills update אומר שהמתג כבוי"
+en = "jarvis skills update says the switch is off"
+fix_he = "הפעילו אותו: jarvis features on skills_manifest2."
+fix_en = "Turn it on: jarvis features on skills_manifest2."
