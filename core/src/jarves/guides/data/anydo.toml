@@ -1,0 +1,59 @@
+order = 28
+category = "system"
+features = ["anydo", "anydo_update"]
+aliases = ["אניידו", "any.do", "anydo", "משימות", "רשימת קניות", "תזכורות", "my tasks", "shopping list"]
+error_codes = ["ANYDO_NOT_CONNECTED", "ANYDO_AUTH_EXPIRED", "ANYDO_PERMISSION_DENIED", "ANYDO_RATE_LIMITED", "ANYDO_OFFLINE", "ANYDO_PREVIEW_REQUIRED", "ANYDO_UNSUPPORTED", "ANYDO_PROVIDER_ERROR", "ANYDO_UNCERTAIN"]
+title_he = "Any.do (משימות ותזכורות)"
+title_en = "Any.do (tasks and reminders)"
+what_he = "ג'ארביס קורא את המשימות והרשימות שלכם ב-Any.do, ומוסיף משימות ותזכורות רק אחרי שאישרתם על המסך את הפריטים המדויקים. אין מחיקה."
+what_en = "JARVES reads your Any.do tasks and lists, and adds tasks and reminders only after you approve the exact items on the screen. There is no delete."
+say = [["מה יש לי ברשימה היום?", "What is on my list today?"], ["תוסיף ביצים וחלב לרשימת הקניות", "Add eggs and milk to my shopping list"], ["תזכיר לי מחר ב-9 להתקשר למקס", "Remind me tomorrow at 9 to call Max"]]
+expect_he = "קריאה מיידית. כל כתיבה קודם מציגה לכם מה בדיוק ייכתב וממתינה לאישור שלכם. שינוי של משימה קיימת הוא מתג נפרד, והוא נחשב כבוצע רק אחרי ש-Any.do מראה אותו."
+expect_en = "Reading is immediate. Every write first shows exactly what will be written and waits for your approval. Changing an existing task is a separate switch, and counts as done only after Any.do shows it."
+test = "feature"
+test_he = "הבדיקה רק בודקת שיש התחברות שמורה. היא לא פונה ל-Any.do ולא משנה כלום."
+test_en = "The check only sees that a saved sign-in exists. It does not contact Any.do and changes nothing."
+cost_he = "חינם. החיבור הרשמי של Any.do (בטא) חינמי בכל התוכניות."
+cost_en = "Free. The official Any.do connection (beta) is free on every Any.do plan."
+privacy_he = "ההתחברות נעשית בדפדפן מול Any.do. האסימון נשמר רק במחשב הזה, לא ביומנים ולא בדוחות. ניתוק מוחק אותו."
+privacy_en = "You sign in in the browser with Any.do. The token stays on this computer only, never in logs or reports. Disconnecting deletes it."
+
+[[steps]]
+he = "בטרמינל הקלידו jarvis anydo start. ייפתח דפדפן: התחברו ל-Any.do ואשרו את כל ההרשאות (קריאה ועדכון)."
+en = "In a terminal type jarvis anydo start. A browser opens: sign in to Any.do and allow every permission (read and update)."
+action = "command:jarvis anydo start"
+check = "available:anydo"
+
+[[steps]]
+he = "הדליקו את המתג \"Any.do\" (כבוי כברירת מחדל)."
+en = "Switch on \"Any.do\" (off by default)."
+action = "feature_on:anydo"
+check = "active:anydo"
+
+[[steps]]
+he = "לא חובה: להחלת שינויים במשימות קיימות (סימון כהושלמה), הדליקו גם \"Any.do: שינוי משימות\". כל שינוי מבקש אישור."
+en = "Optional: to change existing tasks (mark done), also switch on \"Any.do: change tasks\". Every change asks first."
+action = "feature_on:anydo_update"
+check = "active:anydo_update"
+
+[[steps]]
+he = "לכיבוי: jarvis features off anydo. לניתוק מלא (מחיקת ההתחברות): jarvis anydo off."
+en = "To turn off: jarvis features off anydo. To disconnect fully (delete the sign-in): jarvis anydo off."
+
+[[problems]]
+he = "הוא אומר ש-Any.do לא מחובר או שההתחברות פגה"
+en = "He says Any.do is not connected or the sign-in expired"
+fix_he = "הריצו jarvis anydo start והתחברו שוב (jarvis anydo status מראה את המצב)."
+fix_en = "Run jarvis anydo start and sign in again (jarvis anydo status shows the state)."
+
+[[problems]]
+he = "הוא אומר ש-Any.do עדיין לא החיל שינוי"
+en = "He says Any.do has not applied a change yet"
+fix_he = "Any.do מבקש אישור משלו לשינויים. פתחו את אפליקציית Any.do ואשרו, או השאירו את שינוי המשימות כבוי. הוספה ותזכורות לא מושפעות."
+fix_en = "Any.do asks for its own approval for changes. Open the Any.do app and approve, or leave task changes off. Adding and reminders are not affected."
+
+[[problems]]
+he = "יותר מדי בקשות, או שאין חיבור"
+en = "Too many requests, or no connection"
+fix_he = "חכו דקה ונסו שוב; בדקו שיש אינטרנט. החיבור של Any.do הוא בטא ועלול להשתנות."
+fix_en = "Wait a minute and try again; check the internet. The Any.do connection is beta and may change."

@@ -572,3 +572,40 @@ def test_chat_message_ids_are_per_phone_and_expire(home):
     for i in range(mobile.REPLY_KEEP + 20):
         a.remember("dev-a", f"msg-id-{i:06d}", {"reply": "x", "ok": True})
     assert len(a._replies) <= mobile.REPLY_KEEP
+
+
+def test_removing_every_scope_does_not_restore_the_defaults(srv, home):
+    """V5 sec F7: an empty scope list means no scopes (fail closed), not chat/voice/status/approvals again."""
+    tok, dev, _ = pair(srv)
+    assert admin(srv, "POST", f"/api/mobile/devices/{dev}/scopes", {"scopes": []})[0] == 200
+    assert MobileAccess(home).authenticate(tok)["scopes"] == []
+    assert req(srv, "GET", "/api/m/status", token=tok)[0] == 403
+    assert req(srv, "POST", "/api/m/chat", token=tok, body={"text": "hi"})[0] == 403
+    assert req(srv, "GET", "/api/m/approvals", token=tok)[0] == 403
+
+async def test_phone_cannot_approve_a_pc_only_plan_approval(srv, home):
+    """V5 sec F1: with phone approvals ON a paired phone can neither approve a goal plan nor a plan step."""
+    tok, dev, _ = pair(srv)
+    admin(srv, "POST", "/api/mobile/settings", {"phone_approvals": True})
+    svc = appr.ApprovalService(home)
+    dashboard_open(home)
+    for title in ("goal_plan", "goal_plan_step"):
+        task = asyncio.create_task(svc.ask(f"Run? ({title})", title=title, risk="medium", pc_only=True, timeout=60))
+        a = await next_request(svc)
+        st, view, _ = await asyncio.to_thread(req, srv, "GET", "/api/m/approvals", token=tok)
+        assert view["pending"][0]["pc_only"] is True
+        st, body, _ = await asyncio.to_thread(req, srv, "POST", f"/api/m/approvals/{a.id}", token=tok, body={"approved": True})
+        assert st == 403 and body["code"] == "PC_ONLY" and not task.done()
+        ok, why = svc.answer(a.id, True, channel="phone")           # also refused inside the service itself
+        assert not ok and "computer" in why and not task.done()
+        st, body, _ = await asyncio.to_thread(req, srv, "POST", f"/api/m/approvals/{a.id}", token=tok, body={"approved": False})
+        assert st == 200 and await asyncio.wait_for(task, 30) is False     # a phone may still say no
+
+
+async def test_pc_only_approval_is_still_approvable_on_the_computer(home):
+    svc = appr.ApprovalService(home)
+    dashboard_open(home)
+    task = asyncio.create_task(svc.ask("Run this plan?", title="goal_plan", pc_only=True, timeout=60))
+    a = await next_request(svc)
+    assert svc.answer(a.id, True, channel="dashboard") == (True, "")
+    assert await asyncio.wait_for(task, 30) is True

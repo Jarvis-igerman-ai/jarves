@@ -228,4 +228,5 @@ PAGES.connections = async function () {
 };
 
 renderTopbar();
-setInterval(renderTopbar, 15000);
+setInterval(() => { if (!document.hidden) renderTopbar(); }, 15000);   // #159: not while hidden
+document.addEventListener("visibilitychange", () => { if (!document.hidden) renderTopbar(); });

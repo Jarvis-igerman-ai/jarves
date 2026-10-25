@@ -4,6 +4,15 @@ V4.5 approved by the owner 24 Oct 2026: [NOW](NOW.md) is now the bounded V4.5 au
 
 PR #110 conflict-resolution evidence and carried decision gates: [handoff](handoff/2026-10-24-pr110-merge.md).
 
+## Any.do MCP integration (gated Skill, off by default) - 24 Oct 2026 / #140 (branch feat/anydo-mcp, no PR yet)
+
+- Done: `core/src/jarves/anydo.py` (OAuth discovery + dynamic registration + PKCE loopback, token store, allow-listed Streamable-HTTP MCP client, Skill with `anydo_status/lists/tasks/task/create/remind/update`), `jarvis anydo start|status|off`, features `anydo` and `anydo_update` (both OFF, `implemented_unverified`), guide `guides/data/anydo.toml` (EN+HE, parity table), Hebrew in `hebrew_parts/2026-10-24-anydo.json`, tests `core/tests/test_anydo.py` (stub MCP+OAuth server, no network).
+- Safety: every write (create, reminder, update) shows the exact items/time/change and needs the owner's approval from every origin; no delete; writes never retried (`ANYDO_UNCERTAIN`); update is reported done only after read-back (`ANYDO_PREVIEW_REQUIRED` otherwise); task text is untrusted (no model write in the same turn); tokens in `<state_dir>/anydo/token.json` (owner-only), never in logs.
+- Verified 24 Oct (Any.do support page): endpoint `https://mcp.any.do/mcp`, OAuth 2.0, tool names get_lists/get_tasks/get_task/create_personal_tasks/set_reminder/apply_bulk_task_updates. NOT verified: scope names (`access_anydo_data`/`update_anydo_data` come from the plan only), argument names of each tool (`list_id`, `cursor`, `limit`, `tasks[]`, `reminder_time`, `updates[]`), DCR/revocation support, the `update_task_preview` + "Execute all" behaviour (support page lists `apply_bulk_task_updates` and says nothing about preview), the `/sse` vs `/mcp` difference.
+- Not done: no `jarvis connect` wizard step (the CLI command covers sign-in), no dashboard page.
+- OWNER ACTION (later, feature stays off until then): run `jarvis anydo start`, sign in with your Any.do account in the browser, allow both permissions, then `jarvis features on anydo`. Try one harmless task + reminder. Only if "complete a task" really applies for you, also `jarvis features on anydo_update`; otherwise leave it off. Report any argument/scope mismatch (fix is a small change in `anydo.py`).
+- Questions for the user: none blocking.
+
 ## Web chat: busy-flag race fixed — 23 Oct 2026
 
 - CI hung (pytest timeout, Ubuntu shard 3/3 on PR #92) in `test_web_chat.py::test_new_resets_the_model_and_starts_a_new_stored_conversation`. Root cause in Python Core `chat_engine.py`: the `reply` event (in `_finish`) and a command's `notice` (in `_notice`) were published BEFORE the busy flag was cleared, so a client that reacted to the answer at once (the test sends `/new` right after the reply) could be refused with `CHAT_BUSY`; no notice ever came and the long-poll waited out its timeouts. A real user with a second device, or a fast client, could hit the same 409.

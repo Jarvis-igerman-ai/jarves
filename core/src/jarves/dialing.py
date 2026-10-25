@@ -857,6 +857,6 @@ feat.register(FEATURE, "חיוג מסייע (Phone Link)", "Assisted dialing (Ph
               targets={"windows": {"status": "implemented_unverified", "evidence": EVIDENCE, "blocker": BLOCKER},
                        "linux_arm64_pi": {"status": "planned",
                                           "blocker": "Phone Link is Windows only; the Raspberry Pi has no Phone Link",
-                                          "roadmap_issue": "https://github.com/igalgerman/jarves/issues/3"}},
+                                          "roadmap_issue": "https://github.com/Jarvis-igerman-ai/jarves/issues/3"}},
               permissions=["action", "approval on every call (on screen for a new number)"],
               settings="jarvis dial <name|number>, dashboard Calls page (#/calls)")

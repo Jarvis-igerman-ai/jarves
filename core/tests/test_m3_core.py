@@ -139,7 +139,7 @@ async def test_dashboard_m3_apis_over_http(home):
         plat = get(d, "/api/m3/platforms")["features"]
         assert {p["linux_arm64_pi"]["status"] for p in plat} <= {"implemented_unverified", "planned"}
         assert all(p["linux_arm64_pi"]["blocker"] and p["linux_arm64_pi"]["roadmap_issue"].startswith(
-            "https://github.com/igalgerman/jarves/issues/") for p in plat)
+            "https://github.com/Jarvis-igerman-ai/jarves/issues/") for p in plat)
         feats = {f["id"] for f in get(d, "/api/features")["features"]}
         assert "scheduler" in feats
     finally:

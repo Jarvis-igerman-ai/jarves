@@ -76,7 +76,7 @@ def test_check_is_cached_for_a_day_and_notifies_once(tmp_path):
 
 def test_private_repo_and_offline_are_unavailable_not_up_to_date(tmp_path, monkeypatch):
     s = UpdateChecker(tmp_path, http=FakeGitHub([], status=404), current="0.1.0.1").check(force=True)
-    assert not s["available"] and "jarvis-releases" in s["error"] and "igalgerman/jarves" in s["error"]
+    assert not s["available"] and "jarvis-releases" in s["error"] and "Jarvis-igerman-ai/jarves" in s["error"]
 
     def offline(url, headers):
         raise OSError("no network")
@@ -159,7 +159,7 @@ def test_feature_registered_with_platform_status():
     from jarves import features
     assert features.CATALOG["update_check"].risk == "low"
     pi = updates.PLATFORMS["windows_installer"]["linux_arm64_pi"]
-    assert pi["status"] == "planned" and pi["roadmap_issue"].startswith("https://github.com/igalgerman/jarves/issues/")
+    assert pi["status"] == "planned" and pi["roadmap_issue"].startswith("https://github.com/Jarvis-igerman-ai/jarves/issues/")
 
 
 def test_dashboard_install_route_requires_approve(tmp_path, monkeypatch):
