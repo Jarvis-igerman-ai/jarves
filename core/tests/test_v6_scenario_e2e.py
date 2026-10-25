@@ -60,7 +60,15 @@ async def _speak_then_drop(fake, text: str) -> int:
     return len(text)
 
 
-async def test_stop_silences_the_car_speaker_and_closes_the_mic_within_one_second(fake):
+async def test_stop_silences_the_car_speaker_and_closes_the_mic_within_one_second(fake, monkeypatch):
+    from fixtures.car_audio import fake_sd
+    real_write = fake_sd._OutputStream.write
+
+    def paced_write(self, data):                                # real hardware plays in real time; the fake is instant
+        time.sleep(0.1)
+        real_write(self, data)
+
+    monkeypatch.setattr(fake_sd._OutputStream, "write", paced_write)
     fake.connect_car()
     audio = StreamingAudio()
     player = asyncio.create_task(audio.run_player(24000))
