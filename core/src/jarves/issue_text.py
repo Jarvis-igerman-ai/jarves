@@ -53,8 +53,31 @@ ENV: tuple[tuple, ...] = (
      "Calendar and Gmail are switched on but no Google account was connected on this PC.",
      "היומן וג'ימייל דולקים אבל לא חובר חשבון גוגל במחשב הזה.",
      "Not a bug if you do not use Google here.", "אין כאן באג אם לא משתמשים בגוגל כאן."),
+    ("live_extra", r"(?<![A-Za-z0-9])LIVE_EXTRA_REJECTED(?![A-Za-z0-9_])",
+     "An optional live-voice extra was declined", "תוספת אופציונלית של הקול החי נדחתה",
+     "The live voice service refused an optional extra setting; JARVES switched the extra off and the session stayed healthy.",
+     "שירות הקול החי דחה הגדרת תוספת אופציונלית; ג'ארביס כיבה את התוספת והשיחה נשארה תקינה.",
+     "Information, not a bug: the code already handles it and the conversation works without the extra.",
+     "מידע, לא באג: הקוד כבר מטפל בזה והשיחה עובדת גם בלי התוספת."),
+    ("wake_mic", r"(?<![A-Za-z0-9])WAKE_MIC_QUIET(?![A-Za-z0-9_])",
+     "The microphone level is quiet", "עוצמת המיקרופון נמוכה",
+     "The microphone signal is weak, so the wake word may be missed.",
+     "אות המיקרופון חלש, ולכן מילת ההפעלה עלולה לא להישמע.",
+     "A hint about the room or the microphone gain, not a JARVES bug.",
+     "רמז על החדר או על עוצמת המיקרופון, לא באג בג'ארביס."),
+    ("stop_update", r"FINDING_(?:stop_update|system_restart)",
+     "JARVES was closed by an update or a restart", "ג'ארביס נסגר בגלל עדכון או הפעלה מחדש",
+     "A JARVES process ended without its stop record right before a newer version (or a rebooted PC) started it again.",
+     "תהליך של ג'ארביס הסתיים בלי רישום עצירה רגע לפני שגרסה חדשה (או מחשב שהופעל מחדש) הפעילה אותו שוב.",
+     "Expected after an update or a restart; a stop without such a reason still counts as a problem.",
+     "צפוי אחרי עדכון או הפעלה מחדש; עצירה בלי סיבה כזו עדיין נחשבת לבעיה."),
 )
 ENV_NEXT = {
+    "live_extra": ("Nothing to do.", "אין מה לעשות."),
+    "wake_mic": ("Speak closer or raise the microphone level in Windows; `jarvis wake test` shows the level.",
+                 "לדבר קרוב יותר או להגביר את המיקרופון ב-Windows; jarvis wake test מציג את הרמה."),
+    "stop_update": ("Nothing to do unless it keeps happening without an update.",
+                    "אין מה לעשות אלא אם זה חוזר בלי עדכון."),
     "face_link": ("Start the face with godot\\run_face.cmd, or ignore this on this PC.",
                   "להפעיל את הפנים עם godot\\run_face.cmd, או להתעלם מזה במחשב הזה."),
     "camera": ("Connect a webcam (guide: Camera) or switch the camera feature off: `jarvis features off camera`.",
@@ -139,10 +162,21 @@ def env_key(r: dict) -> str | None:
     return None
 
 
+SPEED_RUNS_TO_FLAG = 3        # a speed item is information until this many runs exceeded the budget
+
+
+def speed_pending(r: dict) -> bool:
+    """A SPEED_* record seen in fewer than SPEED_RUNS_TO_FLAG runs (one record() call per run that exceeded its budget).
+    Decided by the code only, never by the area name: other speed-area codes keep their own severity."""
+    n = r.get("count", 1)
+    n = n if isinstance(n, int) and not isinstance(n, bool) else 1
+    return str(r.get("code") or "").startswith("SPEED_") and n < SPEED_RUNS_TO_FLAG
+
+
 def classify(r: dict) -> str:
-    """'info' for an expected environment state or an INFO_ record, else 'bug'."""
-    if str(r.get("code") or "").startswith("INFO_") or fingerprint_of(str(r.get("code") or "")).startswith("version:") \
-            or env_key(r):
+    """'info' for an expected environment state, an INFO_ record or a speed item below 3 runs, else 'bug'.
+    Only the code decides (never the area), so a real failure in the same area still counts."""
+    if str(r.get("code") or "").startswith("INFO_") or fingerprint_of(str(r.get("code") or "")).startswith("version:")             or env_key(r) or speed_pending(r):
         return "info"
     return "bug"
 
@@ -235,6 +269,9 @@ def describe(r: dict) -> dict:
         nxt, nxt_he = ("Nothing to do unless something feels worse; the Health page has the version report.",
                        "אין מה לעשות אלא אם משהו הרגיש גרוע יותר; דוח הגרסה בעמוד התקינות.")
         hint, hint_he = "A new version is not a problem.", "גרסה חדשה היא לא בעיה."
+    if speed_pending(r) and not ek:
+        hint = f"Seen in {r.get('count', 1)} run(s). It counts as a problem only after {SPEED_RUNS_TO_FLAG} runs exceed the budget."
+        hint_he = f"נראה ב-{r.get('count', 1)} הרצות. נחשב לבעיה רק אחרי {SPEED_RUNS_TO_FLAG} הרצות מעל התקציב."
     ev = r.get("evidence") or {}
     ec = ev.get("count") if isinstance(ev.get("count"), int) and not isinstance(ev.get("count"), bool) else r.get("count", 1)
     closed = ""
