@@ -189,9 +189,9 @@
   async function pageDevelopment() {
     const d = await api("/api/dev/status");
     const msg = msgSpan();
-    const STATE = { ci_failed: tx("CI נכשל", "CI failed"), ci_running: tx("CI רץ", "CI running"), green: tx("ירוק וממתין", "Green, waiting"),
+    const STATE = { ci_failed: tx("CI נכשל", "CI failed"), ci_running: tx("CI רץ", "CI running"), ci_cancelled: tx("CI בוטל", "CI cancelled"), green: tx("ירוק וממתין", "Green, waiting"),
       draft: tx("טיוטה", "Draft"), no_ci: tx("אין CI", "No CI yet"), open: tx("פתוח", "Open"), in_progress: tx("בעבודה", "In progress"), stuck: tx("תקוע", "Stuck") };
-    const BAD = { ci_failed: 1, stuck: 1 };
+    const BAD = { ci_failed: 1, ci_cancelled: 1, stuck: 1 };
     const ask = (p) => async () => {
       msg.textContent = WAITING();
       try { const r = await post("/api/dev/status/apply", { id: p.id }); msg.textContent = r.status === "done" ? tx("בוצע", "Done") : tx("לא בוצע (לא אושר)", "Not done (not approved)"); route(true); }
@@ -207,7 +207,8 @@
     render(header(tx("פיתוח", "Development"), tx("מה הסוכנים, בקשות המשיכה וה-CI של JARVES עושים. הדף קורא בלבד; כל שינוי ב-GitHub מציג את הפקודה המדויקת ומבקש אישור על המסך.",
         "What the agents, pull requests and CI of JARVES are doing. This page only reads; any change on GitHub shows the exact command and asks on the screen.")),
       el("div", { class: "card" }, el("b", { dir: "auto" }, tx(d.sentence_he, d.sentence_en)), " ", msg,
-        d.notes.length ? el("p", { class: "muted small" }, tx("הערות: ", "Notes: ") + d.notes.join(", ")) : null),
+        d.notes.length ? el("p", { class: "muted small" }, tx("הערות: ", "Notes: ") + d.notes.join(", ")) : null,
+        (d.unsupported || []).map((u) => el("p", { class: "muted small", dir: "auto" }, "[" + u.label + "] " + tx(u.text_he, u.text_en)))),
       d.items.length ? el("div", { class: "card", style: "overflow-x:auto" }, el("table", { class: "table" },
         el("thead", {}, el("tr", {}, ["", tx("כותרת", "Title"), tx("מצב", "State"), tx("חסם", "Blocker"), tx("הצעה לצעד הבא", "Suggested next step")].map((h) => el("th", {}, h)))),
         el("tbody", {}, d.items.map(row)))) : el("div", { class: "empty" }, tx("אין בקשות משיכה או נושאים פתוחים (או ש-GitHub לא נקרא).", "No open pull requests or issues (or GitHub could not be read).")),

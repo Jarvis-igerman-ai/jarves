@@ -71,6 +71,8 @@ STATIC_FILES = {"index.html": "text/html; charset=utf-8", "app.js": "text/javasc
                 "style.css": "text/css; charset=utf-8", "sw.js": "text/javascript; charset=utf-8",
                 "manifest.webmanifest": "application/manifest+json", "icon.svg": "image/svg+xml",
                 "chatview.js": "text/javascript; charset=utf-8", "chatview.css": "text/css; charset=utf-8",
+                "indicator.js": "text/javascript; charset=utf-8",
+                "plans.js": "text/javascript; charset=utf-8",
                 "prefs.js": "text/javascript; charset=utf-8"}
 SHARED_FILES = ("chatview.js", "chatview.css")      # one chat view for the dashboard and the phone page (dashboard_static/)
 
@@ -132,6 +134,9 @@ class Bridge:
     voice_available: Callable[[], bool] = field(default=lambda: True)
     goals: Callable[[], object] = field(default=lambda: None)              # -> goals.Goals (the one goal store) or None
     desktop_present: Callable[[], bool] = field(default=lambda: False)     # the owner is at the PC right now
+    audio: Callable[[], dict] = field(default=lambda: {})                  # the computer's mic / cloud-audio state (privacy.state)
+    plans: Callable[[], object] = field(default=lambda: None)              # -> goal_plans.PlanStore (None: open memory.db here)
+    plans_on: Callable[[], bool] = field(default=lambda: True)             # the "goal plans" feature switch
     prefs: Callable[[], object] = field(default=lambda: None)              # -> preferences.Preferences (None: open memory.db here)
     prefs_in_prompt: Callable[[], bool] = field(default=lambda: True)      # the "use learned preferences" switch
 
@@ -526,6 +531,17 @@ def core_bridge(core, loop) -> Bridge:
             return bool(owner_at_pc(core))
         except Exception:
             return False
+    def audio() -> dict:
+        from . import mobile_audio
+        from .runtime.privacy_state import derive
+        return mobile_audio.from_privacy_state(derive(core))
+    def plans():
+        return getattr(getattr(core, "ops", None), "plans", None)
+
+    def plans_on() -> bool:
+        from .goal_plans import FEATURE
+        f = getattr(core, "features", None)
+        return bool(f.enabled(FEATURE)) if f is not None else True
     def prefs():
         return getattr(getattr(core, "ops", None), "prefs", None)
 
@@ -534,7 +550,7 @@ def core_bridge(core, loop) -> Bridge:
         f = getattr(core, "features", None)
         return bool(f.enabled(FEATURE)) if f is not None else True
     return Bridge(chat=chat, voice=voice, status=status, voice_available=lambda: getattr(core, "stt", None) is not None,
-                  goals=goals, desktop_present=desktop_present, prefs=prefs, prefs_in_prompt=prefs_in_prompt)
+                  goals=goals, desktop_present=desktop_present, audio=audio, plans=plans, plans_on=plans_on, prefs=prefs, prefs_in_prompt=prefs_in_prompt)
 
 
 # ---------------------------------------------------------------------- HTTP (called by dashboard.Handler)
@@ -799,7 +815,7 @@ def serve(h, mob: MobileAccess, ip: str) -> None:
                              "notices": c.fetch_notices(dev["id"]), "desktop_here": bool(mob.bridge and mob.bridge.desktop_present()),
                              "goals": [_goal_brief(g) for g in goals.list("active")] if want_goals else [],
                              "approvals_waiting": len(approvals_view(mob)["pending"]) if "approvals" in dev["scopes"] else 0,
-                             "signals": c.signals_state() if "tasks" in dev["scopes"] else None})
+                             "signals": c.signals_state() if ("tasks" in dev["scopes"] or "status" in dev["scopes"]) else None})
     m = re.fullmatch(r"/api/m/notices/([0-9]{1,9})/ack", path)
     if m and method == "POST":
         if not need("status"):
@@ -817,6 +833,33 @@ def serve(h, mob: MobileAccess, ip: str) -> None:
         mob.cont.beat(dev["id"], used=True)
         status, obj, again = mob.cont.execute(dev["id"], cid, "goal", lambda: goal_action(mob, d), age_s=d.get("age_s"))
         return done(status, {**obj, "replay": True} if again else obj, op=str(d.get("op", ""))[:20])
+    if path == "/api/m/audio" and method == "GET":        # mic / cloud-audio indicator (V5 G5): true state, read-only
+        if not need("status"):
+            return
+        from . import mobile_audio
+        return h._json(200, mobile_audio.view(mob))
+    if path == "/api/m/plans" and method == "GET":        # Goal plans (V5 G4): read-only steps and status
+        if not need("tasks"):
+            return
+        from . import mobile_plans
+        try:
+            return h._json(200, mobile_plans.view(mob))
+        except Exception as e:
+            logs.warn("mobile", "MOBILE_PLANS_FAILED", "plans could not be read", error_type=type(e).__name__)
+            return h._json(503, {"error": "plans are not available right now"})
+    if path == "/api/m/plans/op" and method == "POST":
+        if not need("tasks"):
+            return
+        from . import mobile_plans
+        d = _json_body(h)
+        if d is None:
+            return
+        cid = d.get("id")
+        if not (isinstance(cid, str) and MSG_ID_RE.match(cid)):
+            return h._json(400, {"error": "command id (8-64 letters, digits or _ . : -) is required"})
+        status, obj, again = mob.cont.execute(dev["id"], cid, "plan", lambda: mobile_plans.action(mob, d, dev["id"]),
+                                              age_s=d.get("age_s"))
+        return done(status, {**obj, "replay": True} if again else obj, op=str(d.get("op", ""))[:20], plan=str(d.get("plan", ""))[:9])
     if path == "/api/m/prefs" and method == "GET":        # Learned preferences (V5 G3): the same store as the dashboard page
         if not need("prefs"):
             return
@@ -840,7 +883,7 @@ def serve(h, mob: MobileAccess, ip: str) -> None:
                                               age_s=d.get("age_s"))
         return done(status, {**obj, "replay": True} if again else obj, op=str(d.get("op", ""))[:20], pref=str(d.get("pref", ""))[:9])
     if path == "/api/m/signals" and method == "POST":
-        if not need("tasks"):
+        if "tasks" not in dev["scopes"] and not need("status"):     # stop / snooze only reduce activity: status is enough
             return
         d = _json_body(h)
         if d is None:
