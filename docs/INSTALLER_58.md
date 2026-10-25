@@ -4,8 +4,8 @@ Status: implementation and measurement in PR #68; owner-PC timing and guided das
 
 ## Measurements
 
-Baseline: [green run 39737015500](https://github.com/igalgerman/jarves/actions/runs/39737015500), installer job 119685890222.
-First speed checkpoint: [run 39741458836](https://github.com/igalgerman/jarves/actions/runs/39741458836), head 84742a9. Both installer smoke profiles passed; the overall run failed an unrelated workspace-memory test.
+Baseline: [green run 39737015500](https://github.com/Jarvis-igerman-ai/jarves/actions/runs/39737015500), installer job 119685890222.
+First speed checkpoint: [run 39741458836](https://github.com/Jarvis-igerman-ai/jarves/actions/runs/39741458836), head 84742a9. Both installer smoke profiles passed; the overall run failed an unrelated workspace-memory test.
 
 | Stage | Baseline | Green installer checkpoint (76983c5) |
 |---|---:|---:|
@@ -25,7 +25,7 @@ First speed checkpoint: [run 39741458836](https://github.com/igalgerman/jarves/a
 | Release same-version upgrade | about 67.7 s | 39.7 s |
 | Release uninstall | 19.5 s | 12.1 s |
 
-The green checkpoint is [run 39747590940](https://github.com/igalgerman/jarves/actions/runs/39747590940), head 76983c5. All jobs passed, including both smoke profiles and the real old-version matrix. Old-version upgrade took 36.7s; rollback, including waiting for Setup, took 69.8s. A following one-directive change makes the issue's English fresh-install default explicit; the exact final-head result is recorded in PR #68.
+The green checkpoint is [run 39747590940](https://github.com/Jarvis-igerman-ai/jarves/actions/runs/39747590940), head 76983c5. All jobs passed, including both smoke profiles and the real old-version matrix. Old-version upgrade took 36.7s; rollback, including waiting for Setup, took 69.8s. A following one-directive change makes the issue's English fresh-install default explicit; the exact final-head result is recorded in PR #68.
 
 The build job was 3m43s, including Go/tool setup and both compiler profiles. The old 7m42s job also included sequential smoke checks; those are now separate concurrent jobs. This is **not** evidence that all installer checks finish within five minutes: release smoke finished at 08:34:30Z after the build began at 08:27:33Z, about 6m57s. All installer jobs completed by 08:35:19Z, about 7m46s; the under-five-minute complete-validation target is not met. The old-version fixture adds real coverage which the empty baseline matrix never ran. Build, clean install, upgrade, rollback and all-checks elapsed time must be reported separately.
 

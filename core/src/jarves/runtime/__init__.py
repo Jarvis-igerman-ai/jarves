@@ -19,7 +19,7 @@ from .service import Runtime, alerts_paused, current, read_state, save_prefs
 
 QUIT_DELAY_S = 4.0      # voice quit / end: first wait QUIT_DELAY_S / 4, then for the spoken goodbye (bounded)
 
-ISSUE_PI = "https://github.com/igalgerman/jarves/issues/3"
+ISSUE_PI = "https://github.com/Jarvis-igerman-ai/jarves/issues/3"
 EVIDENCE = "docs/reviews/SWV2_WP-M1.md"
 
 # Truthful status per target (spec 5). "verified_on_device" only with a real run on that device.
@@ -289,7 +289,9 @@ def api_runtime(ctx, m, body):
     from .. import locales                                     # SW-V4 K: blocker / evidence texts in Hebrew too
     platform = {k: {t: locales.attach(dict(x), "blocker", "evidence", "equivalent") for t, x in v.items()}
                 for k, v in PLATFORM_STATUS.items()}
+    starting = (not live) and (_time.monotonic() - _START["at"] < START_WINDOW_S)
     return 200, {"runtime": view, "live": live, "autostart": auto, "platform_status": platform, "host": host,
+                 "starting": starting, "start_error": None if live else _START["error"],
                  # privacy strip on Home (privacy_state.py); None while the Core is down = shown as "unknown"
                  "privacy": snap.get("privacy") if snap else None,
                  "snapshot": {k: snap.get(k) for k in ("core", "voice_mode", "wake_listening", "live_session",
@@ -359,6 +361,38 @@ def api_runtime_set(ctx, m, body):
     return 200, out
 
 
+import threading as _threading
+import time as _time
+START_WINDOW_S = 90.0
+_START = {"at": -1e9, "error": None}        # dashboard-side memory of the last start request (state "starting")
+_START_LOCK = _threading.Lock()             # threaded server: two concurrent clicks must not both pass the guard
+
+
+def api_core_start(ctx, m, body):
+    """Start the Core from the dashboard exactly like `jarvis start` (same detached launcher). This POST is local-only:
+    the dashboard allowlist already refuses it for a paired phone, and it is re-checked here. The Core keeps its own
+    single-instance lock, so a double click never starts two. Returns at once; the page polls GET /api/runtime."""
+    who = getattr(ctx, "principal", None)
+    if who is not None and who.get("kind") != "local":
+        return 403, {"error": "JARVES can be started only from this computer"}
+    if _ask_core(ctx, {"type": "status.request", "payload": {}}, "status") is not None:
+        return 200, {"ok": True, "already_running": True}
+    with _START_LOCK:
+        if _time.monotonic() - _START["at"] < 10:
+            return 200, {"ok": True, "starting": True}      # a start was just requested: do not spawn twice
+        _START["at"] = _time.monotonic()                    # claim the slot before spawning (no race window)
+    from ..cli import _background_spawn
+    try:
+        _background_spawn(ctx.home, bool((body or {}).get("show")))
+    except Exception as e:
+        _START.update(at=-1e9, error=f"{type(e).__name__}: {str(e)[:160]}")    # a failed start may be retried at once
+        logs.warn("runtime", "DASHBOARD_START_FAILED", "could not start JARVES from the dashboard", error_type=type(e).__name__)
+        return 500, {"error": "JARVES could not be started: " + _START["error"] + ". Try jarvis start in a terminal, then jarvis logs -n 80"}
+    _START.update(at=_time.monotonic(), error=None)
+    logs.info("runtime", "DASHBOARD_START", "JARVES start requested from the dashboard")
+    return 200, {"ok": True, "starting": True}
+
+
 def api_core_stop(ctx, m, body):
     """Quit from the dashboard (the same orderly shutdown as `jarvis stop`); the Core sends no reply to it."""
     from ..cli import _ws_call
@@ -370,6 +404,7 @@ def dashboard_routes(register_route) -> None:
     register_route("GET", r"/api/runtime", api_runtime)
     register_route("POST", r"/api/runtime", api_runtime_set)
     register_route("POST", r"/api/runtime/stop", api_core_stop)
+    register_route("POST", r"/api/runtime/start", api_core_start)
     register_route("GET", r"/api/camera/preview", api_camera_preview_poll)
     register_route("POST", r"/api/camera/preview", api_camera_preview_set)
 

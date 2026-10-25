@@ -57,6 +57,38 @@ def shard_files(counts: dict, n: int) -> list:
     return shards
 
 
+QUARANTINE_LEDGER = Path(__file__).with_name("quarantine.toml")
+
+
+def quarantined_ids(path: Path = QUARANTINE_LEDGER) -> dict[str, int]:
+    """'<file>::<test>' -> showstopper issue, from tests/quarantine.toml (owner rule 24 Oct: a flaky test is paused at
+    once into the non-blocking job). Each entry needs an id and an issue, so nothing is quarantined without an owner."""
+    import tomllib
+    if not path.exists():
+        return {}
+    out = {}
+    for e in tomllib.loads(path.read_text(encoding="utf-8")).get("test", []):
+        tid, issue = str(e.get("id", "")).strip(), int(e.get("issue") or 0)
+        if "::" not in tid or issue <= 0:
+            raise pytest.UsageError(f"tests/quarantine.toml: entry {e!r} needs id '<file>::<test>' and an issue number")
+        out[tid] = issue
+    return out
+
+
+_QUARANTINE: dict[str, int] | None = None
+
+
+def pytest_itemcollected(item):
+    # runs per item during collection, so the marker exists before `-m "not quarantine"` deselects (never a skip)
+    global _QUARANTINE
+    if _QUARANTINE is None:
+        _QUARANTINE = quarantined_ids()
+    if _QUARANTINE:
+        key = f"{os.path.basename(str(item.fspath))}::{getattr(item, 'originalname', None) or item.name}"
+        if key in _QUARANTINE:
+            item.add_marker(pytest.mark.quarantine(issue=_QUARANTINE[key]))
+
+
 def pytest_collection_modifyitems(config, items):
     import sys
     mode = config.getoption("--browser")

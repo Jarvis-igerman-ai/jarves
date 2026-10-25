@@ -113,6 +113,33 @@ def test_channel_setting_and_beta_label(tmp_path):
     assert updates.beta_label(tmp_path) is None
 
 
+def test_beta_label_survives_a_failed_install_and_a_rollback(tmp_path):
+    """Issue #141 side effect: prepare_install records the NEW version before setup runs. When setup then failed, the
+    running 4.0.1.349 lost its '4.0.1-beta.33' label and showed '4.0.1.349 (..., channel main)'."""
+    d: dict = {}
+    updates.remember_build(d, {"version": "4.0.1.349", "display": "4.0.1-beta.33", "channel": "beta", "commit": "a"})
+    (tmp_path / updates.STATE_FILE).write_text(json.dumps(d), encoding="utf-8")
+    assert updates.beta_label(tmp_path, "4.0.1.349") == "4.0.1-beta.33"
+    updates.remember_build(d, {"version": "4.0.1.406", "display": "4.0.1-beta.40", "channel": "beta", "commit": "b"})
+    (tmp_path / updates.STATE_FILE).write_text(json.dumps(d), encoding="utf-8")
+    assert updates.beta_label(tmp_path, "4.0.1.349") == "4.0.1-beta.33"       # setup failed: the old copy still runs
+    assert updates.beta_label(tmp_path, "4.0.1.406") == "4.0.1-beta.40"       # setup worked
+    assert updates.beta_label(tmp_path, "4.0.1.999") is None                  # never installed by the updater
+    for n in range(20):                                                        # bounded
+        updates.remember_build(d, {"version": f"4.0.2.{n}", "display": f"4.0.2-beta.{n}", "channel": "beta"})
+    assert len(d["builds"]) == updates.KNOWN_BUILDS_KEEP and d["installed"]["version"] == "4.0.2.19"
+
+
+def test_a_record_from_before_builds_is_kept_when_the_next_install_starts(tmp_path):
+    d = {"installed": {"version": "4.0.1.349", "display": "4.0.1-beta.33", "channel": "beta"}}
+    updates.remember_build(d, {"version": "4.0.1.406", "display": "4.0.1-beta.40", "channel": "beta"})
+    (tmp_path / updates.STATE_FILE).write_text(json.dumps(d), encoding="utf-8")
+    assert updates.beta_label(tmp_path, "4.0.1.349") == "4.0.1-beta.33"
+    stable = {"installed": {"version": "4.0.1.349", "display": "4.0.1.349", "channel": "main"}}
+    (tmp_path / updates.STATE_FILE).write_text(json.dumps(stable), encoding="utf-8")
+    assert updates.beta_label(tmp_path, "4.0.1.349") is None
+
+
 def _rb():
     spec = importlib.util.spec_from_file_location("release_rollback", ROOT / "core" / "tools" / "release_rollback.py")
     rb = importlib.util.module_from_spec(spec)

@@ -193,6 +193,27 @@
     if (h.os === "Linux" && arm) return "Linux ARM64 (Pi)";
     return h.os;
   }
+  // Start JARVES: the dashboard is a separate process, so POST /api/runtime/start runs the same detached launcher as
+  // `jarvis start` (local-only, owner session); then poll /api/runtime until the Core answers or a truthful error shows.
+  const start = { busy: false, error: "" };
+  async function startCore() {
+    if (start.busy) return;
+    start.busy = true; start.error = ""; chips(); window.dispatchEvent(new Event("jarves-start"));
+    try {
+      await api("/api/runtime/start", { method: "POST", body: "{}" });
+      const t0 = Date.now();
+      while (Date.now() - t0 < 60000) {
+        await new Promise((r) => setTimeout(r, 1500));
+        try { rt = await api("/api/runtime"); } catch (e) { rt = null; }
+        if (rt && rt.live) break;
+        if (rt && rt.start_error) { start.error = rt.start_error; break; }
+      }
+      if (!(rt && rt.live) && !start.error) start.error = tx("JARVES לא ענה תוך 60 שניות. ראו: jarvis logs -n 80", "JARVES did not answer within 60 s. See: jarvis logs -n 80");
+    } catch (e) { start.error = e.message; }
+    start.busy = false; chips(); window.dispatchEvent(new Event("jarves-start"));
+  }
+  window.startJarves = startCore;
+  window.startJarvesState = () => ({ busy: start.busy || !!(rt && rt.starting && !rt.live), error: start.error });
   function chips() {
     const bar = $("statusChips");
     const r = rt && rt.runtime, live = !!(rt && rt.live), state = r && r.core && r.core.state;
@@ -200,7 +221,7 @@
     const core = el("a", { href: "#/runtime", class: "schip " + (running ? "ok" : rt ? "bad" : "unk"),
       title: tx("הליבה של JARVES (התהליך שרץ ברקע)", "The JARVES Core (the background process)") },
     el("span", { class: "dot " + (running ? "ok" : rt ? "bad" : "") }),
-    el("span", { class: "schip-t" }, running ? tx("פועל", "Running") : rt ? tx("עצור", "Stopped") : tx("לא ידוע", "Unknown")));
+    el("span", { class: "schip-t" }, running ? tx("פועל", "Running") : rt ? (start.busy || rt.starting ? tx("מתחיל…", "Starting…") : tx("עצור", "Stopped")) : tx("לא ידוע", "Unknown")));
     const host = rt && rt.host;
     const dev = el("a", { href: "#/devices", class: "schip plain", title: tx("המחשב שעליו JARVES רץ", "The computer JARVES runs on")
         + (host && host.os ? `: ${host.os} ${host.machine || ""}` : "") },
@@ -212,7 +233,10 @@
       : piNotReady ? tx(`${piTotal - piNotReady}/${piTotal} מוכנות`, `${piTotal - piNotReady}/${piTotal} ready`) : tx("הכל מוכן", "all ready"))));
     const priv = typeof window.privacyChips === "function" ? window.privacyChips(rt && rt.privacy, live) : [];
     core.title += " · " + dev.title + " · " + pi.title;       // device and Pi readiness live on System pages, not on every screen
-    bar.replaceChildren(core, ...priv);
+    const startBtn = (rt && !running) ? el("button", { type: "button", class: "primary schip-start", disabled: start.busy ? true : null, onclick: startCore,
+      title: start.error || tx("מפעיל את JARVES ברקע, כמו jarvis start", "Starts JARVES in the background, like jarvis start") },
+      start.busy ? tx("מתחיל…", "Starting…") : tx("הפעלת JARVES", "Start JARVES")) : null;
+    bar.replaceChildren(core, ...(startBtn ? [startBtn] : []), ...priv);
     fadeCue(bar);
   }
   // a sideways scroller shows a fade at the edge where more chips are hidden (D-17); RTL scrollLeft is negative

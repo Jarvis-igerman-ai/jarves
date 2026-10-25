@@ -17,8 +17,8 @@ test_he = "הבדיקה רק מוודאת שהרכיב מותקן. הבדיקו�
 test_en = "The check only sees that the component is installed. The tests themselves run from the Health & speed page or jarvis selftest."
 cost_he = "חינם. הבדיקות מקומיות ורק קוראות. מול OpenAI נשלחת בקשת HEAD אחת בלי מפתח: אין עלות ואין אסימונים."
 cost_en = "Free. The tests are local and read-only. Against OpenAI only one HEAD request without a key is sent: no cost, no tokens."
-privacy_he = "כברירת מחדל כל המדידות וההמלצות נשארות במחשב. אם בעל החשבון מפעיל במפורש דיווח Performance אוטומטי ב-Dashboard, ג׳ארביס רשאי לשלוח ל-GitHub מדדים מספריים בלבד, בלי תוכן שיחות, קבצים או פרטים אישיים; לכל היותר Issue אחד בשבוע. אפשר לכבות בכל עת. בדיקה מעמיקה לא מקליטה אלא אם ביקשתם --audio."
-privacy_en = "Measurements and recommendations stay on this computer by default. With explicit owner opt-in on the Dashboard, JARVES can file at most one performance-only GitHub issue per week, containing sanitized numeric metric evidence and a diagnostic suggestion, never conversations, local logs or personal details. Disable at any time. Deep tests do not record unless requested with --audio."
+privacy_he = "כברירת מחדל כל המדידות וההמלצות נשארות במחשב. אם בעל החשבון מפעיל במפורש דיווח Performance אוטומטי ב-Dashboard, ג׳ארביס רשאי לשלוח ל-GitHub מדדים מספריים בלבד, בלי תוכן שיחות, קבצים או פרטים אישיים; לכל היותר Issue אחד ביום. אפשר לכבות בכל עת. בדיקה מעמיקה לא מקליטה אלא אם ביקשתם --audio."
+privacy_en = "Measurements and recommendations stay on this computer by default. With explicit owner opt-in on the Dashboard, JARVES can file at most one performance-only GitHub issue per day, containing sanitized numeric metric evidence and a diagnostic suggestion, never conversations, local logs or personal details. Disable at any time. Deep tests do not record unless requested with --audio."
 
 [[steps]]
 he = "פתחו את העמוד 'תקינות ומהירות' ולחצו 'הרץ עכשיו' ליד הבדיקה העצמית או בדיקת המהירות."
