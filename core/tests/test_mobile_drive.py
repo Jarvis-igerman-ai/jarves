@@ -275,6 +275,17 @@ def test_briefing_has_its_own_rate_limit_per_phone_with_en_he_message(rig):
     assert call(rig.d, "GET", "/api/m/drive/briefing?passenger=alone", tok2)[0] == 200
 
 
+def test_briefing_limit_is_shared_across_all_phones(rig):
+    """#326: several paired phones cannot multiply the load on Google and the weather service."""
+    toks = [rig.pair()[0] for _ in range(3)]
+    sts = [call(rig.d, "GET", "/api/m/drive/briefing?passenger=alone", toks[i % 3])
+           for i in range(mobile_drive.BRIEFING_ALL_PHONES_PER_MIN + 2)]
+    assert len([s for s, _ in sts if s == 200]) == mobile_drive.BRIEFING_ALL_PHONES_PER_MIN
+    st, j = sts[-1]
+    assert st == 429 and j["error"] and j["error_he"] and j["code"] == "DRIVE_RATE_LIMITED"
+    assert len(rig.calls) == mobile_drive.BRIEFING_ALL_PHONES_PER_MIN
+
+
 def test_journey_limit_message_is_in_both_languages(rig):
     tok, _ = rig.pair()
     last = None

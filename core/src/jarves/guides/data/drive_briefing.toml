@@ -29,8 +29,8 @@ he = "אופציונלי: חברו יומן וג'ימייל (jarvis google start
 en = "Optional: connect Calendar and Gmail (jarvis google start). Without Google you get the weather only and hear that the calendar is not connected."
 
 [[steps]]
-he = "ברירת המחדל \"לשאול קודם\" (drive_briefing.passenger = ask). אפשר להגדיר alone (תמיד לבד) או present (תמיד יש נוסע) בהגדרות. עדיף להשאיר ask."
-en = "The default is ask-first (drive_briefing.passenger = ask). You may set alone (always alone) or present (always a passenger) in Settings. Leaving it on ask is safest."
+he = "ברירת המחדל \"לשאול קודם\" (drive_briefing.passenger = ask). אפשר להגדיר alone (תמיד לבד) או present (תמיד יש נוסע) בהגדרות. עדיף להשאיר ask. אם שמרתם present, שיחה עם 'אני לבד' לא תבטל אותו: רק אתם משנים את ההגדרה."
+en = "The default is ask-first (drive_briefing.passenger = ask). You may set alone (always alone) or present (always a passenger) in Settings. Leaving it on ask is safest. A saved present is never relaxed by a conversation: only you change the setting."
 
 [[problems]]
 he = "הוא לא מקריא כלום ושואל אם יש מישהו ברכב"
