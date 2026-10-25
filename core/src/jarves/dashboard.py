@@ -880,6 +880,21 @@ class Handler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(body)
 
+    def _reopen_current(self) -> None:
+        """'Open the current dashboard': THIS computer opens the running dashboard's link in its own browser. The key
+        never travels over HTTP, so a wrong-token visitor learns nothing."""
+        from . import runmarks
+        live = runmarks.read_live(self.ctx.home)
+        opened = False
+        if live is not None:
+            try:
+                import webbrowser
+                opened = bool(webbrowser.open(live["url"]))
+            except Exception:
+                opened = False
+        page = (REOPEN_OK if opened else REOPEN_FAIL).encode()
+        return self._send(200 if opened else 404, page, "text/html; charset=utf-8")
+
     def _handle(self) -> None:
         a, ip = self.access, self.client_address[0]
         mob = self.ctx.mobile
@@ -903,7 +918,9 @@ class Handler(BaseHTTPRequestHandler):
             if is_loopback(ip) and secrets.compare_digest(q["t"][0], self.token):
                 return self._send(302, b"", "text/plain", {
                     "Location": "/", "Set-Cookie": f"{a.cookie}={self.token}; HttpOnly; SameSite=Strict; Path=/"})
-            return self._send(403, b"wrong token: open the link printed by `jarvis dashboard`", "text/plain")
+            if is_loopback(ip) and q.get("reopen") == ["1"] and self.headers.get("Sec-Fetch-Site") == "same-origin":
+                return self._reopen_current()
+            return self._send(403, WRONG_TOKEN_PAGE.encode(), "text/html; charset=utf-8")
         if a.lan and (self.command, url.path) in PUBLIC_PATHS:
             if url.path == "/pair":
                 return self._static("pair.html")
@@ -914,9 +931,9 @@ class Handler(BaseHTTPRequestHandler):
             return self._static(url.path.removeprefix("/static/"))
         who = a.principal(parse_cookies(self.headers.get("Cookie") or ""), ip)
         if who is None:
-            msg = ("Open /pair on this device to pair it (code from the computer)." if a.lan and not is_loopback(ip)
-                   else "Open the link printed by `jarvis dashboard` (it holds this computer's private access key).")
-            return self._send(403, msg.encode(), "text/plain; charset=utf-8")
+            if not (a.lan and not is_loopback(ip)):
+                return self._send(403, WRONG_TOKEN_PAGE.encode(), "text/html; charset=utf-8")
+            return self._send(403, b"Open /pair on this device to pair it (code from the computer).", "text/plain; charset=utf-8")
         if not a.allowed(who, self.command, url.path):
             a.audit("refused_privilege", principal=who["id"], method=self.command, path=url.path)
             return self._json(403, {"error": "only the computer itself can do this"})
@@ -974,6 +991,25 @@ class Handler(BaseHTTPRequestHandler):
         return self._json(404, {"error": "not found"})
 
     do_GET = do_POST = do_PUT = do_DELETE = do_HEAD = _handle
+
+
+def _plain_page(title_he: str, title_en: str, body_he: str, body_en: str, button: str = "") -> str:
+    return ('<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">'
+            f'<title>JARVES</title><body style="font:16px system-ui;max-width:42em;margin:2em auto;padding:0 1em">'
+            f'<h1>{title_en}</h1><p>{body_en}</p>{button}<hr dir="rtl" style="margin-top:2em">'
+            f'<div dir="rtl" lang="he"><h1>{title_he}</h1><p>{body_he}</p></div></body></html>')
+
+
+_REOPEN_BTN = '<p><a href="/?t=x&reopen=1" id="reopen" style="padding:.6em 1em;border:1px solid;border-radius:6px">Open the current dashboard / פתח את לוח הבקרה הנוכחי</a></p>'
+WRONG_TOKEN_PAGE = _plain_page(
+    "מפתח הגישה אינו נכון", "This link has the wrong access key",
+    "הקישור הזה ישן או שייך ללוח בקרה אחר. כל הפעלה של לוח הבקרה יוצרת מפתח פרטי חדש. לחצו על הכפתור כדי לפתוח את לוח הבקרה שרץ עכשיו, או הריצו שוב jarvis dashboard. את המפתח לא מציגים לאף אחד.",
+    "The link is old or belongs to another dashboard. Each run of the dashboard makes a new private key. Press the button to open the dashboard that is running now, or run <code>jarvis dashboard</code> again. The key is never shown to anyone.",
+    _REOPEN_BTN)
+REOPEN_OK = _plain_page("נפתח", "Opened", "לוח הבקרה הנוכחי נפתח בדפדפן במחשב הזה. אפשר לסגור את הלשונית הזו.",
+                        "The current dashboard was opened in the browser on this computer. You can close this tab.")
+REOPEN_FAIL = _plain_page("לא נמצא לוח בקרה פעיל", "No running dashboard found",
+                          "הריצו בחלון פקודות: jarvis dashboard", "In a command window run: <code>jarvis dashboard</code>")
 
 
 class _Server(ThreadingHTTPServer):
@@ -1035,7 +1071,9 @@ class Dashboard:
             self.httpd.tls = True
         self.httpd.daemon_threads = True
         self.port = self.ctx.port = self.httpd.server_address[1]
-        self.url = f"http://127.0.0.1:{self.port}/?t={token}"
+        self.token = token
+        self.scheme = "https" if tls else "http"       # #356: the printed and opened link must match what the port speaks
+        self.url = f"{self.scheme}://127.0.0.1:{self.port}/?t={token}"
         self.mobile.tailnet = tail if mobile_on else {}
         self.mobile.tls_source = tls_source or ("selfsigned" if tls else "none")
         self.mobile.bind = bind
@@ -1050,7 +1088,10 @@ class Dashboard:
                               tailnet=bool(tail_ip), tls_source=self.mobile.tls_source)
             logs.info("dashboard", "MOBILE_MODE_STARTED", "phone access is on", port=self.port, transport="https" if tls else "http",
                       tailnet=bool(tail_ip), tls_source=self.mobile.tls_source, bind_tailnet_only=only_tail)
-        self.lan_url = f"http://{lan_host}:{self.port}/pair" if lan else None
+        self.lan_url = f"{self.scheme}://{lan_host}:{self.port}/pair" if lan else None
+        self.phone_httpd = None
+        self.ctx.dashboard = self
+        self._handler = handler
         if lan:
             self.access.audit("lan_mode_started", host=lan_host, port=self.port)
         self._thread: threading.Thread | None = None
@@ -1074,7 +1115,12 @@ class Dashboard:
         while not self._stop_evt.wait(UNDO_PURGE_EVERY_S):
             self._housekeeping()
 
+    def _publish_live(self) -> None:
+        from . import runmarks
+        runmarks.write_live(self.ctx.home, self.port, self.scheme, self.token, mobile=self.mobile.enabled)
+
     def start(self) -> "Dashboard":
+        self._publish_live()
         self._housekeeping()                         # on every dashboard start
         self._stop_evt = threading.Event()
         threading.Thread(target=self._housekeeping_loop, name="jarves-dashboard-housekeeping", daemon=True).start()
@@ -1087,10 +1133,71 @@ class Dashboard:
         return self._thread is not None and self._thread.is_alive()
 
     def serve_forever(self) -> None:
+        self._publish_live()
         self.httpd.serve_forever()
+
+    def enable_phone(self, features, tailnet_only: bool = False) -> dict:
+        """Phone access from the dashboard itself (#357), without a restart: make the self-signed certificate, open
+        ONE more listener (home network, TLS, same handler and same rules) and turn the mobile_access switch on. The
+        desktop listener stays on 127.0.0.1 and keeps its key. Raises OSError with a plain sentence when it cannot."""
+        from . import mobile as _m, tailnet as _tn
+        if self.phone_httpd is not None:
+            return self.phone_info()
+        tail = _tn.detect()
+        tail_ip = tail.get("ip") if tail.get("present") else None
+        only_tail = bool(tailnet_only or self.mobile.settings()["bind_tailnet_only"]) and bool(tail_ip)
+        host = None if only_tail else lan_ip()
+        if host is None and not tail_ip:
+            raise OSError("no private home-network address found: connect this computer to your Wi-Fi or cable and try again")
+        cert, key = _m.tls_paths(self.ctx.home)
+        if not cert.is_file():
+            _m.make_selfsigned(self.ctx.home, host)
+        tls, src = _tn.choose_tls(self.ctx.home, tail)
+        bind = tail_ip if only_tail else "0.0.0.0"
+        httpd = None
+        for p in (LAN_PORT, 0):
+            try:
+                httpd = _Server((bind, p), self._handler)
+                break
+            except OSError:
+                continue
+        if httpd is None:
+            raise OSError("no free network port for the phone: close the other program that uses it and try again")
+        if tls:
+            import ssl
+            sctx = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+            sctx.minimum_version = ssl.TLSVersion.TLSv1_2
+            sctx.load_cert_chain(str(tls[0]), str(tls[1]))
+            httpd.socket = sctx.wrap_socket(httpd.socket, server_side=True)
+            httpd.tls = True
+        httpd.daemon_threads = True
+        self.access.extra_hosts = {h for h in (tail_ip, tail.get("name")) if h}
+        self.access.lan_host = host or self.access.lan_host
+        self.access.mobile = True
+        mob = self.mobile
+        mob.tailnet, mob.tls_source, mob.bind = tail, src, bind
+        mob.port, mob.host, mob.scheme = httpd.server_address[1], host or mob.tailnet_host(), "https" if tls else "http"
+        features.set("mobile_access", True, by="dashboard")
+        mob.gate = lambda: features.enabled("mobile_access")           # switching it off stops serving at once
+        mob.enabled = True
+        self.phone_httpd = httpd
+        threading.Thread(target=httpd.serve_forever, name="jarves-dashboard-phone", daemon=True).start()
+        mob.audit("mobile_mode_started", host=host, port=mob.port, tls=bool(tls), bind=bind, tailnet=bool(tail_ip),
+                  tls_source=src, live=True)
+        self._publish_live()
+        return self.phone_info()
+
+    def phone_info(self) -> dict:
+        m = self.mobile
+        return {"enabled": m.enabled, "host": m.host, "port": m.port, "tls": m.scheme == "https"}
 
     def stop(self) -> None:
         getattr(self, "_stop_evt", threading.Event()).set()
+        from . import runmarks
+        runmarks.clear_live(self.ctx.home, self.port)
+        if self.phone_httpd is not None:
+            self.phone_httpd.shutdown()
+            self.phone_httpd.server_close()
         self.httpd.shutdown()
         self.httpd.server_close()
         self.ctx.close()

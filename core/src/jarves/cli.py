@@ -1700,6 +1700,23 @@ def cmd_dashboard(a, cfg, home) -> int:
         print("Home-network access is switched off. Turn it on with: jarvis features on dashboard_lan "
               "(then phones on your Wi-Fi can pair with a code; never reachable from the internet)", file=sys.stderr)
         return 1
+    from . import runmarks
+    live = runmarks.read_live(home)
+    if live is not None:                                  # #357: never a second dashboard; reopen the running one
+        print(f"JARVES dashboard is already running (the link holds a private key for THIS computer; do not share it):\n"
+              f"  {live['url']}", flush=True)
+        if (getattr(a, "mobile", False) or getattr(a, "lan", False)) and not live["mobile"]:
+            print("It has phone access OFF. Open its Phone page and press 'Turn on phone access' "
+                  "(no second dashboard, no restart).", flush=True)
+        elif getattr(a, "port", 0) and a.port != live["port"]:
+            print(f"(It listens on port {live['port']}; --port {a.port} was not used.)", flush=True)
+        if live["scheme"] == "https":
+            print("The browser may warn about the self-signed certificate once: that is expected on this computer.", flush=True)
+        if not a.no_open:
+            import webbrowser
+            page = str(getattr(a, "page", "") or "")
+            webbrowser.open(live["url"] + (page if re.fullmatch(r"#/[a-z0-9_/-]{1,40}", page) else ""))
+        return 0
     mobile_on, tls, bridge = bool(getattr(a, "mobile", False)), None, None
     tail, tls_src, only_tail = {}, "none", False
     if mobile_on:
@@ -1724,6 +1741,9 @@ def cmd_dashboard(a, cfg, home) -> int:
         return 1
     print(f"JARVES dashboard (the link holds a private key for THIS computer, valid until the dashboard stops; do not share it):\n  {dash.url}",
           flush=True)
+    if tls:
+        print("This link is https (self-signed certificate): if the browser warns, choose Advanced, then continue to "
+              "127.0.0.1. The warning is expected on this computer.", flush=True)
     if dash.lan_url:
         print(f"Home network: on your phone open {dash.lan_url} and enter the pairing code from the Devices page "
               "(on this computer). If Windows asks, allow PRIVATE networks only.", flush=True)
@@ -1737,7 +1757,6 @@ def cmd_dashboard(a, cfg, home) -> int:
     elif mobile_on:
         print("Tailscale was not found on this computer (optional). Setup guide: docs/PHONE_ACCESS_TAILSCALE.md", flush=True)
     print("Ctrl+C to stop.", flush=True)
-    from . import runmarks
     runmarks.write_dashboard(home, runmarks.dashboard_flags(a))          # so an update can reopen what was running
     if not a.no_open:
         import webbrowser

@@ -77,3 +77,54 @@ def _face_running() -> bool:
     out = subprocess.run(["tasklist", "/FI", "IMAGENAME eq JARVES Face.exe", "/NH"], capture_output=True, text=True,
                          timeout=10).stdout
     return "JARVES Face.exe" in out
+
+
+# ---------------------------------------------------------------------- the running dashboard (#357)
+LIVE_FILE = "dashboard.live.json"
+
+
+def write_live(home: Path, port: int, scheme: str, token: str, mobile: bool = False) -> None:
+    """Leave where THIS dashboard listens and its private key, so `jarvis dashboard` can reopen it instead of starting
+    a second one. Owner-only file (0600) in the data folder; removed on a normal stop; never sent over HTTP."""
+    try:
+        from .mobile import write_private
+        path = Path(home) / LIVE_FILE
+        tmp = path.with_name(path.name + ".tmp")
+        write_private(tmp, json.dumps({"pid": os.getpid(), "port": int(port), "scheme": scheme, "token": token,
+                                       "mobile": bool(mobile)}).encode())
+        os.replace(tmp, path)
+    except OSError:
+        pass
+
+
+def clear_live(home: Path, port: int | None = None) -> None:
+    path = Path(home) / LIVE_FILE
+    try:
+        d = json.loads(path.read_text(encoding="utf-8"))
+        if d.get("pid") == os.getpid() and (port is None or d.get("port") == port):
+            path.unlink()
+    except (OSError, ValueError, AttributeError):
+        pass
+
+
+def read_live(home: Path, probe=None) -> dict | None:
+    """The dashboard that runs now: {port, scheme, token, mobile, url} or None (no file, dead pid, nothing answering)."""
+    from .budget import pid_alive
+    try:
+        d = json.loads((Path(home) / LIVE_FILE).read_text(encoding="utf-8"))
+        port, scheme, token = int(d["port"]), str(d["scheme"]), str(d["token"])
+        if scheme not in ("http", "https") or not token or not pid_alive(int(d["pid"])):
+            return None
+    except (OSError, ValueError, KeyError, TypeError):
+        return None
+    if probe is None:
+        import socket
+        try:
+            with socket.create_connection(("127.0.0.1", port), timeout=1.5):
+                pass
+        except OSError:
+            return None
+    elif not probe(port):
+        return None
+    return {"port": port, "scheme": scheme, "token": token, "mobile": bool(d.get("mobile")),
+            "url": f"{scheme}://127.0.0.1:{port}/?t={token}"}
