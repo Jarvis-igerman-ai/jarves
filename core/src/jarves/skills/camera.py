@@ -119,7 +119,7 @@ class CameraSkill(Skill):
 
     def tools(self) -> list[Tool]:
         return [
-            Tool("camera_describe", "Look through the camera and answer ('what is this', 'מה זה'): ONE photo to the vision model, only when the user asks you to look.",
+            Tool("camera_describe", "Look through the camera and answer ('what do you see', 'מה אתה רואה', 'what is this', 'מה זה', 'what am I holding', 'מה אני מחזיק'): ONE photo to the vision model, only when the user asks you to look. Never call it on your own. If it fails, tell the user the one next step from the result (no camera, blocked, busy, too dark).",
                  self._describe, LookArgs, permission="read", timeout_s=45),
             Tool("camera_read_text", "Read aloud a label/document the user holds up ('read this', 'תקרא לי את זה'): one sharp photo, transcript + short summary.", self._read_text, NoArgs, permission="read",
                  timeout_s=45),

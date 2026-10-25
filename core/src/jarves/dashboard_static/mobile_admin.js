@@ -86,8 +86,16 @@
           route(true);
         } }), " ", tx(PG[p][0], PG[p][1]))),
       el("div", { class: "muted small" }, tx("הגדרות, סודות, קבצים וניהול מכשירים תמיד רק במחשב.", "Settings, secrets, files and device management are always computer-only.")));
+    const SC = { tasks: ["יעדים והשתקת התראות", "Goals and notice snooze/stop"], prefs: ["העדפות שנלמדו (צפייה, תיקון, מחיקה)", "Learned preferences (view, correct, forget)"] };
+    const scopesOf = (x) => el("fieldset", { class: "m4-pages" }, el("legend", { class: "small" }, tx("הרשאות נוספות (כבויות כברירת מחדל)", "Extra permissions (off by default)")),
+      Object.keys(SC).map((k) => el("label", { class: "small" }, el("input", { type: "checkbox", "data-scope": k, checked: (x.scopes || []).includes(k) ? true : null,
+        disabled: x.revoked ? true : null, onchange: async (ev) => {
+          const now = (x.scopes || []).filter((q) => q !== k).concat(ev.target.checked ? [k] : []);
+          try { await api(`/api/mobile/devices/${x.id}/scopes`, { method: "POST", body: JSON.stringify({ scopes: now }) }); } catch (e) { ev.target.checked = !ev.target.checked; }
+          route(true);
+        } }), " ", tx(SC[k][0], SC[k][1]))));
     const devs = d.devices.map((x) => el("tr", {}, el("td", {}, x.name), el("td", { class: "small" }, x.id),
-      el("td", {}, pagesOf(x)),
+      el("td", {}, pagesOf(x), scopesOf(x)),
       el("td", { class: "small" }, x.last_seen ? `${day(x.last_seen)} ${clock(x.last_seen)}` : "—"), el("td", { class: "small" }, x.last_ip || ""),
       el("td", {}, x.revoked ? pill("plain", tx("בוטל", "revoked")) : el("button", { type: "button", onclick: async () => {
         await api(`/api/mobile/devices/${x.id}/revoke`, { method: "POST", body: "{}" }); route(true);

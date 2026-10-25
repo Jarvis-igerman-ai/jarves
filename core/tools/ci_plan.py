@@ -42,6 +42,11 @@ RULES = {
     "whatsapp": r"^(bridge/|packaging/bridge_pin\.json|scripts/build_whatsapp_bridge\.ps1)",
     "e2e": r"^(godot/|core/(src/|pyproject|uv\.lock)|core/tests/test_face_protocol_godot\.py)",
 }
+# S2 (#160, owner standing decision 25 Oct 2026 via the coordinator): on a PULL REQUEST the installer chain (build, 4
+# smoke profiles, upgrade/rollback: 6 Windows jobs, ~3-4 min of wall time) runs only when packaging itself changes. The
+# merge-queue group (merge_group) keeps the full RULES["installer"] rule, so any group touching core/src, packaging/,
+# pyproject/uv.lock, godot/ or jarvis.cmd builds and smoke-tests the installer BEFORE it merges; main reuses that proof.
+PR_INSTALLER = r"^(packaging/|core/(pyproject\.toml|uv\.lock)|godot/|jarvis\.cmd|scripts/build_)"
 
 
 def classify(files: list[str], event: str = "pull_request", reused: bool = False, draft: bool = False,
@@ -67,6 +72,8 @@ def classify(files: list[str], event: str = "pull_request", reused: bool = False
         return {k: True for k in FLAGS}
     rest = [f for f in files if not DOCS.match(f)]
     out = {k: any(re.match(p, f) for f in files) for k, p in RULES.items()}
+    if event == "pull_request":
+        out["installer"] = any(re.match(PR_INSTALLER, f) for f in files)
     out["code"] = bool(rest)
     out["full"] = any(not GUIDES.match(f) for f in rest)      # guides-only: just the Linux shard
     if not out["full"]:

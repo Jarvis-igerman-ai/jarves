@@ -43,7 +43,11 @@ def test_job_specific_paths():
     assert g["godot"] and g["blender"] and g["installer"] and not g["cad"] and not g["whatsapp"]
     assert ci_plan.classify(["cad/build_pebble.py"])["cad"] and not ci_plan.classify(["core/src/jarves/cli.py"])["cad"]
     c = ci_plan.classify(["core/src/jarves/cli.py"])
-    assert c["code"] and c["full"] and c["installer"] and c["perf"] and not c["cad"] and not c["blender"] and not c["godot"]
+    assert c["code"] and c["full"] and c["perf"] and not c["cad"] and not c["blender"] and not c["godot"]
+    # S2 (owner standing decision 25 Oct 2026, #160): a core/src PR skips the installer chain; its merge-queue group
+    # builds and smoke-tests the installer before it merges; packaging changes still build it on the PR
+    assert not c["installer"] and ci_plan.classify(["core/src/jarves/cli.py"], "merge_group")["installer"]
+    assert ci_plan.classify(["packaging/windows/jarves.iss"])["installer"] and ci_plan.classify(["core/uv.lock"])["installer"]
 
 
 def test_main_push_and_workflow_changes_run_everything_and_a_proven_tree_runs_nothing():

@@ -174,8 +174,11 @@ for _fid, _w, _p, _perm, _set in [
      ["read"], ""),
     ("gmail_send", _win("implemented_unverified", "UNIT test_google.py", _NO_GOOGLE), _pi("planned", _PI_OAUTH),
      ["action", "destructive"], ""),
-    ("camera", _win("implemented_unverified", "UNIT test_camera.py", "no hands-on camera check recorded"),
-     _pi("implemented_unverified", "picamera2 backend never run on Pi Camera hardware"), ["read"], "config [camera]"),
+    ("camera", _win("implemented_unverified", "UNIT test_camera.py + test_camera_ux.py (fake camera): Camera page, device "
+                   "probe vs frame test, timed preview, `jarvis camera`",
+                   "no hands-on webcam check of the Camera page, preview, frame test or unplug/replug recorded"),
+     _pi("implemented_unverified", "picamera2 backend never run on Pi Camera hardware"), ["read"],
+     "Camera page; jarvis camera; config [camera]"),
     ("face_recognition", _win("planned", blocker="no faces Skill yet"), _pi("planned", "no faces Skill yet"),
      ["read"], ""),
     ("camera_when_away", _win("planned", blocker="no away-watch Skill yet"), _pi("planned", "no away-watch Skill yet"),
@@ -201,7 +204,7 @@ for _fid, _w, _p, _perm, _set in [
      _pi("implemented_unverified", "never paired with a real phone on the Pi"), ["action"],
      "dashboard Devices page / `jarvis dashboard --lan`"),
     ("mobile_access", _win("implemented_unverified", "UNIT test_mobile_*.py + test_tailnet.py (pairing, tokens, scopes, rate limits, "
-                           "audit, PWA files, TLS, Tailscale with fake interfaces); QR decoded once with OpenCV", "never paired with a real phone"),
+                           "audit, PWA files, TLS, Tailscale with fake interfaces); QR decoded once with OpenCV; Learned-preferences page (view/confirm/correct/forget, scope prefs) in the emulated phone (test_mobile_prefs.py)", "never paired with a real phone"),
      _pi("planned", "V5 is PC-hosted; the Pi is out of scope"), ["read", "action"],
      "dashboard Phone page / `jarvis dashboard --mobile`"),
     ("workspace_agent_edit", _win("implemented_unverified", "UNIT test_workspace_memory.py",
