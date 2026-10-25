@@ -684,12 +684,16 @@ class AnyDoSkill(Skill):
 
     async def _create_impact(self, a: CreateArgs) -> tuple[int | None, str]:
         lines = "\n".join(f"- {_clip(t.title, 80)}" + (f" ({t.due})" if t.due else "") for t in a.tasks)
-        where = a.list_name or a.list_id
-        if not where:
-            try:
-                where = (await self._default_list())[1]
-            except AnyDoError:
-                where = "הרשימה הראשית / the default list"
+        # show the list the write will really use, named by Any.do itself: never the model-supplied list_name
+        try:
+            lid, lname = (_id_ok(a.list_id), "") if a.list_id else await self._default_list()
+            if a.list_id:
+                items, _ = _items(await self.mcp.call("get_lists", {}), ("result", "lists", "items"))
+                lname = next((_clip(x.get("title") or x.get("name"), 80) for x in items or []
+                              if isinstance(x, dict) and str(x.get("list_id") or x.get("id")) == lid), "")
+            where = f"{lname} [{lid}]" if lname else f"[{lid}] (unverified list id)"
+        except AnyDoError:
+            where = "הרשימה הראשית / the default list"
         return None, (f"להוסיף ל-Any.do ({where}) {len(a.tasks)} משימות? / Add {len(a.tasks)} task(s) to Any.do ({where})?\n{lines}")
 
     async def _create(self, a: CreateArgs) -> ToolResult:

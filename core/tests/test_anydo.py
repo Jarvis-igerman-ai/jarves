@@ -58,9 +58,9 @@ class Stub:
         self.mcp_auth.append(req.headers.get("authorization"))
         if self.fail == "429":
             return httpx.Response(429)
-        if self.fail == "drop":
-            raise httpx.ReadTimeout("x")
         m = json.loads(req.content)
+        if self.fail == "drop" and (m.get("params") or {}).get("name") in WRITE_TOOLS:      # only the write is dropped
+            raise httpx.ReadTimeout("x")
         meth, mid = m.get("method"), m.get("id")
         if meth == "notifications/initialized":
             return httpx.Response(202)
@@ -245,7 +245,7 @@ async def test_errors_not_connected_rate_limit_and_uncertain_write(tmp_path):
     stub.fail = "drop"
     n = len(stub.mcp_auth)
     r = await reg.call("anydo_create", {"tasks": [{"title": "x"}], "list_id": "L1"}, origin="user")
-    assert r.code == "ANYDO_UNCERTAIN" and len(stub.mcp_auth) == n + 1    # sent once, never retried
+    assert r.code == "ANYDO_UNCERTAIN" and len(stub.mcp_auth) == n + 2    # 1 read for the approval text + the write sent once, never retried
 
 
 async def test_expired_token_refreshes_and_dead_refresh_asks_to_reconnect(tmp_path):
@@ -315,3 +315,12 @@ async def test_create_without_list_uses_first_list_and_provider_error_text_is_su
 def test_redact_removes_tokens():
     assert "abcdefghijklmnopqrstuvwxyz0123456789" not in anydo._redact("x Bearer abcdefghijklmnopqrstuvwxyz0123456789 y")
     assert anydo._redact("a" * 40) == "[redacted]"
+
+
+async def test_create_approval_shows_the_list_actually_written(tmp_path):
+    """The popup names the list from Any.do for the id that will be written, not the model's list_name."""
+    stub, sk, reg, prompts = make(tmp_path)
+    await reg.call("anydo_create", {"tasks": [{"title": "a"}], "list_id": "L2", "list_name": "Groceries"}, origin="user")
+    assert "Shared" in prompts[0] and "[L2]" in prompts[0] and "Groceries" not in prompts[0]
+    await reg.call("anydo_create", {"tasks": [{"title": "b"}], "list_name": "Shared"}, origin="user")
+    assert "Groceries" in prompts[1] and writes(stub)[1][1]["tasks"][0]["list_id"] == "L1"
