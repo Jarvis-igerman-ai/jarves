@@ -46,6 +46,7 @@ from pydantic import BaseModel, Field
 from . import clilang, locales, logs
 from . import features as feat
 from .skills import Skill, Tool, ToolResult
+from .swr import SwrCache
 from .workspace import SPECS, WorkspaceError, _SECRET
 
 FEATURE = "self_manage"
@@ -1005,7 +1006,14 @@ def _ask_dashboard(ctx) -> Callable[[Plan], bool]:
     return approve
 
 
+_STATE_CACHE = SwrCache(ttl_s=3.0, wait_s=10.0)     # #159 perf2: /api/selfmanage cost ~1 s per poll
+
+
 def api_state(ctx, m, body):
+    return _STATE_CACHE.get(str(ctx.home), lambda: _api_state(ctx))
+
+
+def _api_state(ctx):
     mgr = _mgr(ctx)
     st = mgr.status("all")
     st.pop("connections", None)                  # the page asks for the checks separately (they probe localhost)
@@ -1031,29 +1039,38 @@ def api_preview(ctx, m, body):
 
 
 def api_change(ctx, m, body):
+    _STATE_CACHE.invalidate()
     mgr = _mgr(ctx)
     try:
         res = mgr.run(_plan_from(mgr, body or {}), _ask_dashboard(ctx), by="dashboard")
     except Refused as r:
         return 400, {"error": r.message, "code": r.code}
+    finally:
+        _STATE_CACHE.invalidate()                # again after the approval: a poll meanwhile saw the old state
     return (200 if res["ok"] else 403), res
 
 
 def api_connect(ctx, m, body):
+    _STATE_CACHE.invalidate()
     mgr = _mgr(ctx)
     try:
         res = mgr.run(mgr.plan_connect((body or {}).get("which")), _ask_dashboard(ctx), by="dashboard")
     except Refused as r:
         return 400, {"error": r.message, "code": r.code}
+    finally:
+        _STATE_CACHE.invalidate()
     return (200 if res["ok"] else 403), res
 
 
 def api_undo(ctx, m, body):
+    _STATE_CACHE.invalidate()
     mgr = _mgr(ctx)
     try:
         res = mgr.run(mgr.plan_undo(str((body or {}).get("id", ""))), _ask_dashboard(ctx), by="dashboard")
     except Refused as r:
         return 400, {"error": r.message, "code": r.code}
+    finally:
+        _STATE_CACHE.invalidate()
     return (200 if res["ok"] else 403), res
 
 
