@@ -839,7 +839,7 @@ feat.register(FEATURE, "ניהול עצמי בקול", "Self-management", True, 
               targets={"windows": {"status": "implemented_unverified",
                                    "evidence": "core/tests/test_self_manage.py (fake approvals, no network, no browser)"},
                        "linux_arm64_pi": {"status": "implemented_unverified",
-                                          "roadmap_issue": "https://github.com/igalgerman/jarves/issues/1",
+                                          "roadmap_issue": "https://github.com/Jarvis-igerman-ai/jarves/issues/1",
                                           "blocker": "pure Python; the guided connection window is Windows only so far"}},
               permissions=["read", "destructive (every change asks the owner on screen)"],
               settings="jarvis manage status|file|memory|feature|skill|setting|connect|history|undo, jarvis undo, "

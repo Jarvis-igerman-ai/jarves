@@ -521,4 +521,6 @@ async function route(refresh) {
 window.addEventListener("hashchange", () => route());
 // after every deferred script (pages.js) has run
 document.addEventListener("DOMContentLoaded", () => refreshOverview().then(() => route()));
-setInterval(refreshOverview, 15000);
+// #159: a hidden tab does not poll (each call is work inside the Core); refresh as soon as it is visible again
+setInterval(() => { if (!document.hidden) refreshOverview(); }, 15000);
+document.addEventListener("visibilitychange", () => { if (!document.hidden) refreshOverview(); });

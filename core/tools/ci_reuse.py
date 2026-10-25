@@ -77,7 +77,7 @@ def resolve_tests(repo: str, tree: str, api: Callable[[str], dict] = gh_json) ->
         if not run_id:
             continue
         run = api(f"repos/{repo}/actions/runs/{run_id}")
-        if (run.get("name") == WORKFLOW_NAME and run.get("event") == "pull_request"
+        if (run.get("name") == WORKFLOW_NAME and run.get("event") in ("pull_request", "merge_group")
                 and run.get("status") == "completed" and run.get("conclusion") == "success"
                 and (run.get("head_repository") or {}).get("full_name") == repo):
             return {"run_id": run_id, "artifact_id": art["id"], "name": name,
