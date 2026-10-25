@@ -191,6 +191,14 @@ owner_max = 1500
 ci_max = 4000
 note = "one HEAD https://api.openai.com/v1/models with no key (connection + TLS + response); nothing billed. Placeholder baseline"
 
+[metrics.greeting_missed_pct]
+baseline = 0
+unit = "pct"
+source = "history"
+owner_max = 20
+ci_max = 40
+note = "share of live starts with no greeting audio after nudge and retry; needs 5 starts in 14 days. Measured 1 of 5 = 20 % before the retry (V45_VOICE_LATENCY, #179)"
+
 # Installer budgets (SW-V4 L). Measured by packaging/installer_metrics.py from dist/build-info.json and the timings of
 # packaging/smoke_windows.ps1; checked by `python packaging/installer_metrics.py check` and by
 # `perf_gate.py --installer-json FILE`. A metric with `baseline_pending = true` has only a loose ceiling until the first
@@ -253,3 +261,7 @@ change = "package L: added the [installer.*] size and time budgets (installer 19
 [[history]]
 date = "2026-10-21"
 change = "self/speed test (owner request 21 Oct): added tool_p50_ms, tool_p95_ms, wake_to_first_audio_s, dead_air_p95_s (sources: history) and openai_roundtrip_ms (net) with placeholder baselines; the first owner runs of `jarvis speedtest` replace them"
+
+[[history]]
+date = "2026-10-25"
+change = "#179: added greeting_missed_pct (the counters live in the speedtest output, not in the gate) (owner_max 20 = the 1-of-5 measured before the greeting retry)"

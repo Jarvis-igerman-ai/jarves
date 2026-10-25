@@ -16,7 +16,7 @@ import subprocess
 import sys
 from datetime import datetime, timedelta, timezone
 
-REPO = "igalgerman/jarves"
+REPO = "Jarvis-igerman-ai/jarves"
 STALE_DAYS = 7
 KEEP = "keep"
 AREAS = [("core", r"^core/"), ("godot", r"^godot/"), ("packaging", r"^packaging/"), ("ci", r"^\.github/|^core/tools/(ci_|release|hotfix|bisect|pr_)"),
