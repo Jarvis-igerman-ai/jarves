@@ -81,3 +81,21 @@ def test_registry_returns_actionable_error():
     assert not res.ok and res.code == "TOOL_BAD_ARGS" and "query" in res.message and "Accepted fields" in res.message
     good = asyncio.run(reg.call("whatsapp_search", {"q": "hi", "since": "2026-10-25T10:00:00"}, origin="model"))
     assert good.ok
+
+
+async def test_search_today_includes_today_and_excludes_yesterday(tmp_path):
+    from datetime import datetime
+    from test_whatsapp_order import Stub, msg, run, skill
+    now = datetime(2026, 9, 22, 12, 0).timestamp()
+    ms = [msg(1, datetime(2026, 9, 21, 22, 0).timestamp(), "yesterday late"),
+          msg(2, datetime(2026, 9, 22, 8, 0).timestamp(), "today morning"),
+          msg(3, datetime(2026, 9, 22, 11, 0).timestamp(), "today noon")]
+    # a person plus a day range returns that chat's messages in range
+    r = await run(skill(tmp_path, Stub(ms), now), "whatsapp_search", query="messages", who="דנה כהן", since="today")
+    assert r.ok and [m["text"] for m in r.data["untrusted_messages"]] == ["today noon", "today morning"]
+    # search hits are filtered by the range too, and yesterday works with until
+    r = await run(skill(tmp_path, Stub([], hits=ms), now), "whatsapp_search", query="today", since="today")
+    assert sorted(m["text"] for m in r.data["untrusted_messages"]) == ["today morning", "today noon"]
+    r = await run(skill(tmp_path, Stub([], hits=ms), now), "whatsapp_search", query="late", since="yesterday",
+                  until="yesterday")
+    assert [m["text"] for m in r.data["untrusted_messages"]] == ["yesterday late"]

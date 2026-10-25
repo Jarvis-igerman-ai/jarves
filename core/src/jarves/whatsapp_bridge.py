@@ -883,10 +883,30 @@ class WhatsAppBridgeSkill(Skill):
             if arch is not None:
                 return await search_archive(arch, a)
             try:
-                hits = await self._call(self.client.search, a.query, 10)
+                since = whatsapp_archive.parse_when(a.since, self.clock())
+                until = whatsapp_archive.parse_when(a.until, self.clock(), end=True)
+            except whatsapp_archive.DateError:
+                return ToolResult(False, "התאריך לא ברור. אפשר today, yesterday, 2026-09-01 או 30d (ימים), 2w, 3m, 1y.",
+                                  code="WA_BAD_DATE")
+            only = None
+            if a.who.strip() and (since is not None or until is not None):
+                one, err = await self._resolve_one(a.who)      # "all of her messages today": that chat, that range
+                if err is not None:
+                    return err
+                only = one
+            try:
+                if only is not None:
+                    res = await self._call(self.client.messages, only["id"], since, CAP_MESSAGES)
+                    hits = res.get("messages", [])
+                else:
+                    hits = await self._call(self.client.search, a.query, 10)
                 chats = await self._chats()
             except BridgeError as e:
                 return self._fail(e)
+            if since is not None:
+                hits = [m for m in hits if _secs(m.get("ts")) >= since]
+            if until is not None:
+                hits = [m for m in hits if _secs(m.get("ts")) < until]
             self._tainted()
             names = {c["id"]: pol.clean_text(c.get("name") or "")[0][:40] for c in chats}
             now = self.clock()
