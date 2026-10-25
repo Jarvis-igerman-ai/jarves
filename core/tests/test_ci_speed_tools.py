@@ -43,7 +43,11 @@ def test_job_specific_paths():
     assert g["godot"] and g["blender"] and g["installer"] and not g["cad"] and not g["whatsapp"]
     assert ci_plan.classify(["cad/build_pebble.py"])["cad"] and not ci_plan.classify(["core/src/jarves/cli.py"])["cad"]
     c = ci_plan.classify(["core/src/jarves/cli.py"])
-    assert c["code"] and c["full"] and c["installer"] and c["perf"] and not c["cad"] and not c["blender"] and not c["godot"]
+    assert c["code"] and c["full"] and c["perf"] and not c["cad"] and not c["blender"] and not c["godot"]
+    # S2 (owner standing decision 25 Oct 2026, #160): a core/src PR skips the installer chain; its merge-queue group
+    # builds and smoke-tests the installer before it merges; packaging changes still build it on the PR
+    assert not c["installer"] and ci_plan.classify(["core/src/jarves/cli.py"], "merge_group")["installer"]
+    assert ci_plan.classify(["packaging/windows/jarves.iss"])["installer"] and ci_plan.classify(["core/uv.lock"])["installer"]
 
 
 def test_main_push_and_workflow_changes_run_everything_and_a_proven_tree_runs_nothing():
@@ -220,6 +224,8 @@ def test_green_test_only_proof_is_exact_tree_same_repo_pr_only():
     hit = ci_reuse.resolve_tests("o/r", TREE, _api(proof, {101: _run(101)}))
     assert hit == {"run_id": 101, "artifact_id": 7, "name": name, "head_sha": "s" * 40}
     assert ci_reuse.resolve_tests("o/r", "bad-tree", _api(proof, {})) is None
+    # a green merge-queue run (merge_group) is the same proof: it tested exactly the commit that lands on main
+    assert ci_reuse.resolve_tests("o/r", TREE, _api(proof, {101: _run(101, event="merge_group")}))["run_id"] == 101
 
 
 @pytest.mark.parametrize("bad", [
@@ -449,7 +455,7 @@ def test_installer_runs_in_parallel_with_tests_and_publishing_waits_for_the_whol
 
 def test_no_duplicate_runs_per_commit():
     t = _wf("jarves-checks.yml")[True]
-    assert t["push"]["branches"] == ["main", "next"] and "pull_request" in t           # branch pushes have no push trigger
+    assert t["push"]["branches"] == ["main"] and "pull_request" in t           # branch pushes have no push trigger
     conc = _wf("jarves-checks.yml")["concurrency"]
     assert "pull_request.number" in conc["group"] and conc["cancel-in-progress"] == "${{ github.event_name == 'pull_request' }}"
 
@@ -575,8 +581,9 @@ def test_main_red_opens_one_issue_and_closes_it_when_green():
     assert doc["permissions"] == {"contents": "read", "issues": "write"}
     job = doc["jobs"]["alert"]
     assert "workflow_run.event == 'push'" in job["if"]
-    assert not any("checkout" in s.get("uses", "") for s in job["steps"])            # never runs repository code
-    run = job["steps"][0]["run"]
+    # only the default branch's own core/tools (red_main.py, fix-forward #160); never PR code
+    assert [s["with"] for s in job["steps"] if "checkout" in s.get("uses", "")] == [{"sparse-checkout": "core/tools"}]
+    run = next(s["run"] for s in job["steps"] if "run" in s)
     assert "gh issue create" in run and "gh issue comment" in run and "gh issue close" in run
 
 
@@ -602,3 +609,15 @@ def test_draft_prs_run_only_the_fast_checks_and_never_read_green():
     draft_branch = run[run.index('if [ "$DRAFT" = "true" ]'):run.index("fi")]
     assert "gh run cancel" in draft_branch and "exit 1" in draft_branch                # never success on a draft
     assert "github.event.pull_request.draft != true" in doc["jobs"]["failure-summary"]["if"]
+
+
+def test_red_main_reruns_failed_jobs_once_before_the_issue():
+    """E3 (#160): half of the red main runs were flakes. Attempt 1 red -> re-run only the failed jobs, once; the issue
+    opens only when attempt 2+ is red. The re-run job needs actions: write and nothing else; no repository code runs."""
+    doc = _wf("main-health.yml")
+    rerun = doc["jobs"]["rerun-once"]
+    assert "run_attempt == 1" in rerun["if"] and "conclusion == 'failure'" in rerun["if"]
+    assert rerun["permissions"] == {"actions": "write"}
+    assert rerun["steps"][0]["run"].endswith("--failed") and "gh run rerun" in rerun["steps"][0]["run"]
+    assert not any("checkout" in s.get("uses", "") for s in rerun["steps"])
+    assert "run_attempt > 1" in doc["jobs"]["alert"]["if"]

@@ -129,14 +129,20 @@ class Cron:
         return dom or dow
 
 
-def local_instant(naive: datetime, tz: ZoneInfo) -> float:
-    """UTC epoch of a local wall-clock time. Ambiguous (fall back): the FIRST occurrence. Non-existent (spring
-    forward): the first valid minute after the gap."""
+def local_instant(naive: datetime, tz: ZoneInfo, after: float | None = None) -> float:
+    """UTC epoch of a local wall-clock time. Ambiguous (fall back): the FIRST occurrence, unless `after` is given and
+    only the SECOND occurrence lies after it (a one-off set inside the repeated hour, e.g. "in 5 minutes" at 01:14 on
+    the fall-back night, is the coming 01:19, not the one an hour ago). Non-existent (spring forward): the first valid
+    minute after the gap."""
     t = naive.replace(second=0, microsecond=0)
     for _ in range(24 * 60):
         cand = t.replace(tzinfo=tz, fold=0)
         ts = cand.timestamp()
         if datetime.fromtimestamp(ts, tz).replace(tzinfo=None) == t:
+            if after is not None and ts <= after:
+                second = t.replace(tzinfo=tz, fold=1).timestamp()
+                if second > after:
+                    return second
             return ts
         t += timedelta(minutes=1)
     raise ScheduleError("BAD_TIME", "no valid local time")
@@ -145,7 +151,7 @@ def local_instant(naive: datetime, tz: ZoneInfo) -> float:
 def next_after(kind: str, spec: str, tz: ZoneInfo, after: float) -> float | None:
     """The first occurrence strictly after `after` (UTC epoch), or None (a past one-off / impossible cron)."""
     if kind == "once":
-        t = local_instant(datetime.fromisoformat(spec), tz)
+        t = local_instant(datetime.fromisoformat(spec), tz, after)
         return t if t > after else None
     cron = Cron(spec)
     start = datetime.fromtimestamp(after, tz).replace(tzinfo=None, second=0, microsecond=0)
@@ -344,7 +350,7 @@ def parse_when(text: str, now: datetime, workweek: str = "0-4") -> Schedule:
 
     def once(d: datetime) -> Schedule:
         d = d.replace(second=0, microsecond=0, tzinfo=None)
-        if local_instant(d, tz) <= now.timestamp():
+        if local_instant(d, tz, now.timestamp()) <= now.timestamp():
             raise ScheduleError("SCHEDULE_PAST", "הזמן הזה כבר עבר")
         spec = d.isoformat(timespec="minutes")
         return Schedule("once", spec, describe("once", spec))
@@ -438,7 +444,7 @@ def parse_when(text: str, now: datetime, workweek: str = "0-4") -> Schedule:
             d = datetime(y, int(dm.group(2)), int(dm.group(1)), h, mi)
         except ValueError as e:
             raise ScheduleError("BAD_DATE", "התאריך לא תקין") from e
-        if not dm.group(3) and local_instant(d, tz) <= now.timestamp():
+        if not dm.group(3) and local_instant(d, tz, now.timestamp()) <= now.timestamp():
             d = d.replace(year=y + 1)
         return once(d)
     if re.search(r"מחרתיים|day after tomorrow", t):
@@ -450,12 +456,12 @@ def parse_when(text: str, now: datetime, workweek: str = "0-4") -> Schedule:
         target = days[0]
         for i in range(0, 8):
             d = datetime.combine(base.date() + timedelta(days=i), datetime.min.time()).replace(hour=h, minute=mi)
-            if d.isoweekday() % 7 == target and local_instant(d, tz) > now.timestamp():
+            if d.isoweekday() % 7 == target and local_instant(d, tz, now.timestamp()) > now.timestamp():
                 return once(d)
     d = base.replace(hour=h, minute=mi, second=0, microsecond=0)
     if re.search(r"היום|today|tonight|הערב", t):
         return once(d)
-    if local_instant(d, tz) <= now.timestamp():
+    if local_instant(d, tz, now.timestamp()) <= now.timestamp():
         d += timedelta(days=1)
     return once(d)
 

@@ -522,7 +522,7 @@ def audit(page, lang):
     assert metrics["small"] == [], metrics["small"]                                          # tap targets >= 44 px
     r = page.evaluate(apc.RULES, {"lang": lang, "width": 390, "reduced": False})
     issues = [i for i in r["issues"] if i["rule"] in RULES_THAT_APPLY and i["where"] != "button#lang"
-              and not i["where"].startswith(("div#log>", "div.jc-log", "ul#apprList>li>span.grow"))]     # chat text and request titles are user DATA     # the language button names its language by design
+              and not i["where"].startswith(("div#log>", "div.jc-log", "ul#apprList>li>span.grow", "ul.list>li.pref>div.grow>div.pref-text", "ul.list>li.pref>div.grow>div.muted"))]     # chat text and request titles are user DATA     # the language button names its language by design
     assert issues == [], issues
 
 
@@ -552,6 +552,77 @@ def test_layouts_at_390px_have_no_sideways_scroll_big_targets_and_contrast(brows
         audit(page, lang)
     page.tap("#lang")                                                   # the language button flips direction
     assert page.evaluate("document.documentElement.dir") == ("ltr" if lang == "he" else "rtl")
+    assert page.errors == []
+
+
+# ------------------------------------------------------------------ V5 G3 (#183): Learned preferences on the phone
+def _seed_prefs(p: Phone):
+    from jarves.preferences import Preferences
+    from jarves.userdata import open_db
+    pr = Preferences(open_db(p.home))
+    a = pr.add_confirmed("I like short answers in the morning", "communication")["item"]["id"]
+    b = pr.suggest("Play jazz while cooking", "I love jazz when I cook", "music")["item"]["id"]
+    return pr, a, b
+
+
+def _grant(p: Phone, page, *scopes):
+    dev = call(page, "GET", "/api/m/me", None, token(page))["json"]["device"]
+    assert p.owner("POST", f"/api/mobile/devices/{dev}/scopes", {"scopes": ["chat", "voice", "status", "approvals", *scopes]})[0] == 200
+    page.reload()
+    page.wait_for_selector("#appView:not([hidden])")
+
+
+def test_learned_preferences_view_confirm_correct_and_forget_from_the_phone(browser, phone):
+    p = phone()
+    pr, a, b = _seed_prefs(p)
+    page = new_page(browser)
+    ui_pair(page, p)
+    page.wait_for_timeout(600)
+    assert page.locator("#tabbtn-prefs").is_hidden()                    # least privilege: no scope, no tab
+    assert call(page, "GET", "/api/m/prefs", None, token(page))["status"] == 403
+    _grant(p, page, "prefs")
+    page.wait_for_selector("#tabbtn-prefs:not([hidden])")
+    page.tap("[data-tab=prefs]")
+    page.wait_for_selector("#prefsRoot .pref-text")
+    body = page.inner_text("#prefsRoot")
+    assert "I like short answers in the morning" in body and "Play jazz while cooking" in body and "I love jazz when I cook" in body
+    page.tap("#prefsRoot li:has-text('Play jazz') button:has-text('Confirm')")           # confirm the proposal
+    until(page, "!document.querySelector('#prefsRoot li') || ![...document.querySelectorAll('#prefsRoot h2')].some(h => h.textContent.includes('Waiting'))")
+    assert pr.get(b)["state"] == "confirmed"
+    page.tap("#prefsRoot li:has-text('short answers') button:has-text('Correct')")      # correct a text
+    page.fill("#prefsRoot input", "I like long answers in the evening")
+    page.tap("#prefsRoot button:has-text('Save')")
+    until(page, "document.querySelector('#prefsRoot').textContent.includes('long answers in the evening')")
+    assert pr.get(a)["text"] == "I like long answers in the evening"
+    page.tap("#prefsRoot li:has-text('long answers') button:has-text('Forget')")        # forgetting asks first
+    assert pr.get(a) is not None
+    page.tap("#prefsRoot button:has-text('Yes, forget')")
+    until(page, "!document.querySelector('#prefsRoot').textContent.includes('long answers')")
+    assert pr.get(a) is None
+    _, pc = p.owner("GET", "/api/prefs")                                                # the PC page shows the same state
+    assert [x["text"] for x in pc["items"]] == ["Play jazz while cooking"]
+    # a sensitive correction is refused with the dashboard's own rule and nothing changes
+    page.tap("#prefsRoot li:has-text('jazz') button:has-text('Correct')")
+    page.fill("#prefsRoot input", "my password is hunter2")
+    page.tap("#prefsRoot button:has-text('Save')")
+    until(page, "document.querySelector('#prefsRoot').textContent.includes('sensitive')")
+    assert pr.get(b)["text"] == "Play jazz while cooking"
+    assert page.errors == []
+
+
+@pytest.mark.parametrize("lang,locale", [("en", "en-US"), ("he", "he-IL")])
+def test_learned_preferences_layout_at_390px_in_english_and_hebrew(browser, phone, lang, locale):
+    p = phone()
+    _seed_prefs(p)
+    page = new_page(browser, locale=locale)
+    ui_pair(page, p)
+    _grant(p, page, "prefs")
+    page.tap("[data-tab=prefs]")
+    page.wait_for_selector("#prefsRoot .pref-text")
+    audit(page, lang)
+    page.tap("#prefsRoot li:has-text('short') button >> nth=0")                        # open the edit form: input + buttons
+    page.wait_for_selector("#prefsRoot input")
+    audit(page, lang)
     assert page.errors == []
 
 

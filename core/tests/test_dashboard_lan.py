@@ -160,6 +160,7 @@ def test_device_role_is_an_allowlist_not_a_denylist(lan):
     for feat in ("camera", "camera_when_away", "gmail_send"):
         assert post("/api/features/" + feat, {"enabled": True}) == 403
     assert post("/api/runtime/stop") == 403
+    assert post("/api/runtime/start") == 403                      # no remote start from a paired phone
     assert post("/api/privacy/delete-conversations", {"confirm": True}) == 403
     assert post("/api/privacy/mask-history", {"confirm": True}) == 403
     assert put("/api/settings", {"values": {"log.privacy": True}}) == 403
@@ -232,3 +233,19 @@ def test_static_pages_and_phone_layout(lan):
     assert "@media (max-width: 760px)" in css and "data-label" in css
     html = req(lan, "GET", "/", admin=True, host=f"127.0.0.1:{lan.port}")[1]
     assert b"/static/m4.js" in html and b'name="viewport"' in html
+
+
+def test_device_cannot_read_conversation_or_plan_details_f4(lan):
+    """F4 (#203): a LAN-paired device must not read the conversation (/api/continuity), goal-plan args/results,
+    agents or projects; the local owner still gets the full data and the denied GET has no side effects."""
+    _, cookie, _ = pair(lan, new_code(lan), "Galaxy")
+    own = {"admin": True, "host": f"127.0.0.1:{lan.port}"}
+    for path in ("/api/continuity", "/api/goal-plans", "/api/agents", "/api/agents/session/x",
+                 "/api/projects", "/api/projects/status", "/api/projects/agents", "/api/chat"):
+        assert jget(lan, path, cookie=cookie)[0] == 403, path
+    st, data = jget(lan, "/api/continuity", **own)
+    assert st == 200 and "turns" in data and "notices" in data
+    st, data = jget(lan, "/api/goal-plans", **own)
+    assert st == 200 and "plans" in data
+    assert jget(lan, "/api/agents", **own)[0] != 403
+    assert jget(lan, "/api/prefs", cookie=cookie)[0] == 200           # prefs scope stays readable

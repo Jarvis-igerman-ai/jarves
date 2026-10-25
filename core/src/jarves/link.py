@@ -41,6 +41,7 @@ ALLOWED: dict[str, frozenset[str]] = {
     # runtime.set (M1): show/hide the window, software mute, pause alerts - the CLI, dashboard and tray route;
     # camera.preview: the dashboard Home preview (each poll keeps it open a few seconds and returns the last frame)
     "cli": frozenset({"status.request", "core.shutdown", "debug.enable", "runtime.set", "camera.preview",
+                      "camera.status", "camera.test",       # dashboard Camera section / `jarvis camera`
                       "ui.open_dashboard",                 # `jarvis web`: open the Chat page of the running Core
                       # terminal text chat (chat_service.py): `jarvis chat`
                       "talk.start", "talk.stop",           # `jarvis talk`: live conversation without the wake word
