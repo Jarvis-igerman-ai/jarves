@@ -16,7 +16,6 @@ from jarves.voice.live import live_tools
 
 # (utterance, expected tool). Each utterance contains a phrase quoted in the expected tool's description (EN or HE).
 ROUTES = [
-    ("what version are you", "about_jarves"), ("מה הגרסה שלך", "about_jarves"),
     # V5 tools (goals, plans, preferences, proactive, development, issues, self-management)
     ("please set a goal to run a 10k by March", "goal_add"), ("אני רוצה לרוץ 10 ק\"מ עד מרץ", "goal_add"),
     ("what are my goals this week", "goal_show"), ("מה היעדים שלי", "goal_show"),

@@ -233,7 +233,7 @@ def attach(core) -> None:
 
 
 # ---------------------------------------------------------------------- feature
-feat.register(FEATURE, "מודעות עצמית", "Self-awareness", True, skills=["self_awareness"],
+feat.register(FEATURE, "מודעות עצמית", "Self-awareness", False, skills=["self_awareness"],
               about="tells you his version, what changed, the roadmap, and takes improvement tickets you approve",
               targets={"windows": {"status": "implemented_unverified", "evidence": "UNIT test_self_aware.py",
                                    "blocker": "not yet tried by the owner on a real install"},

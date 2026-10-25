@@ -45,9 +45,9 @@ en = "Got an idea? jarvis ticket \"a short sentence\" saves it on this computer 
 action = "command:jarvis ticket list"
 
 [[steps]]
-he = "לכיבוי: jarvis features off self_awareness (הכלים הקוליים נעלמים; הפקודות בטרמינל נשארות)."
-en = "To turn it off: jarvis features off self_awareness (the voice tools go away; the terminal commands stay)."
-action = "command:jarvis features off self_awareness"
+he = "הכלי הקולי כבוי כברירת מחדל (כדי לא להגדיל את ההנחיה של המודל). להפעלה: jarvis features on self_awareness; לכיבוי: jarvis features off self_awareness. הפקודות בטרמינל פועלות תמיד."
+en = "The voice tool is off by default (it keeps the model prompt small). To turn it on: jarvis features on self_awareness; to turn it off: jarvis features off self_awareness. The terminal commands always work."
+action = "command:jarvis features on self_awareness"
 
 [[problems]]
 he = "jarvis roadmap אומר שאין קובץ תוכנית"
