@@ -30,12 +30,12 @@ TARGETS = ("windows", "linux_arm64_pi")
 STATUSES = ("verified_on_device", "implemented_unverified", "planned", "blocked", "not_applicable")
 READY = ("verified_on_device", "not_applicable")
 # Real issues (created 2026-10-19 by WP-M4). Add new ones here only after `gh issue create` returned the URL.
-TRACKING = "https://github.com/igalgerman/jarves/issues/1"
-PI_ROADMAP = "https://github.com/igalgerman/jarves/issues/3"
+TRACKING = "https://github.com/Jarvis-igerman-ai/jarves/issues/1"
+PI_ROADMAP = "https://github.com/Jarvis-igerman-ai/jarves/issues/3"
 # Every roadmap issue a feature may link: checked to exist with `gh issue list` on LAST_CHECKED (#19-#23 were
 # created by the other SW-V2 packages for their own Pi gaps). Add a number only after the issue exists.
-KNOWN_ISSUES = {TRACKING, PI_ROADMAP, *(f"https://github.com/igalgerman/jarves/issues/{n}" for n in (1, 2, 3, 4, 5))}   # public issues: #1 V4 release/acceptance, #2 orchestrator, #3 Pi parity, #4 physical design, #5 consolidation
-_ISSUE_URL = re.compile(r"^https://github\.com/igalgerman/jarves/issues/\d+$")
+KNOWN_ISSUES = {TRACKING, PI_ROADMAP, *(f"https://github.com/{org}/jarves/issues/{n}" for org in ("Jarvis-igerman-ai", "igalgerman") for n in (1, 2, 3, 4, 5))}   # public issues: #1 V4 release/acceptance, #2 orchestrator, #3 Pi parity, #4 physical design, #5 consolidation
+_ISSUE_URL = re.compile(r"^https://github\.com/(Jarvis-igerman-ai|igalgerman)/jarves/issues/\d+$")
 LAST_CHECKED = "2026-10-21"
 
 
@@ -50,7 +50,7 @@ class Target:
         if self.status not in STATUSES:
             raise ValueError(f"status must be one of {STATUSES}, not {self.status!r}")
         if self.roadmap_issue and not _ISSUE_URL.match(self.roadmap_issue):
-            raise ValueError(f"roadmap_issue must be a github.com/igalgerman/jarves issue URL: {self.roadmap_issue}")
+            raise ValueError(f"roadmap_issue must be a github.com/Jarvis-igerman-ai/jarves issue URL: {self.roadmap_issue}")
 
 
 @dataclass
@@ -174,8 +174,11 @@ for _fid, _w, _p, _perm, _set in [
      ["read"], ""),
     ("gmail_send", _win("implemented_unverified", "UNIT test_google.py", _NO_GOOGLE), _pi("planned", _PI_OAUTH),
      ["action", "destructive"], ""),
-    ("camera", _win("implemented_unverified", "UNIT test_camera.py", "no hands-on camera check recorded"),
-     _pi("implemented_unverified", "picamera2 backend never run on Pi Camera hardware"), ["read"], "config [camera]"),
+    ("camera", _win("implemented_unverified", "UNIT test_camera.py + test_camera_ux.py (fake camera): Camera page, device "
+                   "probe vs frame test, timed preview, `jarvis camera`",
+                   "no hands-on webcam check of the Camera page, preview, frame test or unplug/replug recorded"),
+     _pi("implemented_unverified", "picamera2 backend never run on Pi Camera hardware"), ["read"],
+     "Camera page; jarvis camera; config [camera]"),
     ("face_recognition", _win("planned", blocker="no faces Skill yet"), _pi("planned", "no faces Skill yet"),
      ["read"], ""),
     ("camera_when_away", _win("planned", blocker="no away-watch Skill yet"), _pi("planned", "no away-watch Skill yet"),
@@ -183,7 +186,7 @@ for _fid, _w, _p, _perm, _set in [
     ("camera_preview", _win("implemented_unverified", "UNIT test_privacy_state.py (fake camera) + headless face "
                             "screenshots docs/reviews/swv2_privacy/", "never shown with a real webcam yet"),
      {"status": "implemented_unverified", "blocker": "picamera2 preview frames and the round-screen strip layout "
-      "never run on Pi hardware", "roadmap_issue": "https://github.com/igalgerman/jarves/issues/1"}, ["read"],
+      "never run on Pi hardware", "roadmap_issue": "https://github.com/Jarvis-igerman-ai/jarves/issues/1"}, ["read"],
      "Home page / the face's camera buttons"),
     ("wake_word", _win("verified_on_device", "HANDOFF 'Wake word through the air': speakers -> webcam mic, 4/4, "
                        "CPU 14-25 ms/frame (owner's own voice peaked ~0.17: threshold calibrated)"),
@@ -201,7 +204,7 @@ for _fid, _w, _p, _perm, _set in [
      _pi("implemented_unverified", "never paired with a real phone on the Pi"), ["action"],
      "dashboard Devices page / `jarvis dashboard --lan`"),
     ("mobile_access", _win("implemented_unverified", "UNIT test_mobile_*.py + test_tailnet.py (pairing, tokens, scopes, rate limits, "
-                           "audit, PWA files, TLS, Tailscale with fake interfaces); QR decoded once with OpenCV", "never paired with a real phone"),
+                           "audit, PWA files, TLS, Tailscale with fake interfaces); QR decoded once with OpenCV; goal-plan view with pause/cancel only (test_mobile_plans.py, emulated phone); Learned-preferences page (view/confirm/correct/forget, scope prefs) in the emulated phone (test_mobile_prefs.py)", "never paired with a real phone"),
      _pi("planned", "V5 is PC-hosted; the Pi is out of scope"), ["read", "action"],
      "dashboard Phone page / `jarvis dashboard --mobile`"),
     ("workspace_agent_edit", _win("implemented_unverified", "UNIT test_workspace_memory.py",

@@ -15,7 +15,6 @@ import time
 from typing import AsyncIterator, Awaitable, Callable
 
 from .. import logs
-from ..voice.audio import AudioUnavailable
 
 
 class ResumeWatcher:
@@ -53,6 +52,7 @@ async def stall_guard(chunks: AsyncIterator[bytes], timeout_s: float) -> AsyncIt
             except StopAsyncIteration:
                 return
             except asyncio.TimeoutError:
+                from ..voice.audio import AudioUnavailable   # #159: not at import (numpy: +0.4 s for `jarvis status`)
                 raise AudioUnavailable("AUDIO_MIC_STALLED", f"the microphone sent nothing for {timeout_s:g} s "
                                        "(unplugged, or the computer woke up)",
                                        "reconnect the microphone; JARVES re-opens it automatically") from None

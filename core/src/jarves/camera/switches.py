@@ -91,6 +91,15 @@ class Switches:
             # jarves.features already registers camera / face_recognition / camera_when_away (its probe reads the
             # `camera` health component CameraService sets), so they are not registered there a second time.
 
+    def enabled(self, id: str) -> bool:
+        """The saved switch alone (on even when the device is missing). Failure counts as OFF."""
+        try:
+            if self._f is not None:
+                return bool(self._f.current().enabled(id))
+            return self.local.enabled(id)
+        except Exception:
+            return False
+
     def active(self, id: str) -> bool:
         """Switched on AND available. Any failure of the switch backend counts as OFF (privacy default)."""
         try:

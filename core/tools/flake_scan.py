@@ -1,7 +1,7 @@
 """Find flaky tests in the jarves-checks run history and open ONE `showstopper` issue per test (owner rule 24 Oct 2026,
 CLAUDE.md "A flaky test is a show-stopper", issue #160).
 
-    python core/tools/flake_scan.py [--days 7] [--repo igalgerman/jarves]            # print flakes (read-only)
+    python core/tools/flake_scan.py [--days 7] [--repo Jarvis-igerman-ai/jarves]            # print flakes (read-only)
     python core/tools/flake_scan.py --issues                                         # also open/update the issues
 
 A failure counts as a flake when the SAME commit later passed: either a re-run attempt of the run turned green, or
@@ -27,7 +27,8 @@ LEDGER = Path(__file__).resolve().parents[1] / "tests" / "quarantine.toml"
 HEADER = re.compile(r"_{3,} (?:[\w.]+\.)?(test_\w+)(?:\[[^\]]*\])? _{3,}")
 LOCATION = re.compile(r"tests[\\/]+(test_\w+\.py):\d+: (\w+)")
 TIMEOUT_FRAME = re.compile(r"tests[\\/]+(test_\w+\.py)\", line \d+ in (test_\w+)")
-STAMP = re.compile(r"^\S+\t[^\t]*\t\S+Z ")
+PREPUSH_FAIL = re.compile(r"^\s*\w+\s+FAIL\s+[\d.]+s\s+tests[\\/]+(test_\w+\.py)::(test_\w+)")
+STAMP = re.compile(r"^[^\t]*\t[^\t]*\t\S+Z ")   # "<job name with spaces>\t<step>\t<timestamp> "
 TITLE = "Flaky test: "
 
 
@@ -49,6 +50,9 @@ def failed_tests(log: str) -> dict[str, str]:
         if loc and current:
             out.setdefault(f"{loc.group(1)}::{current}", ln.strip()[:200])
             current = None
+        gate = PREPUSH_FAIL.search(ln)            # the quick gate's table: "perf  FAIL  3.2s  tests/x.py::test_y: ..."
+        if gate:
+            out.setdefault(f"{gate.group(1)}::{gate.group(2)}", ln.strip()[:200])
     if not out:                                   # a hang: pytest-timeout dumps the stack, the test frame names it
         for ln in lines:
             t = TIMEOUT_FRAME.search(ln)
@@ -142,7 +146,7 @@ def report(repo: str, found: dict[str, list[dict]], issues: bool) -> int:
 
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    ap.add_argument("--repo", default="igalgerman/jarves")
+    ap.add_argument("--repo", default="Jarvis-igerman-ai/jarves")
     ap.add_argument("--days", type=int, default=7)
     ap.add_argument("--issues", action="store_true", help="open or update one showstopper issue per flaky test")
     ap.add_argument("--ledger-files", action="store_true",

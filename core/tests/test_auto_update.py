@@ -415,3 +415,123 @@ def test_cli_update_auto(home, monkeypatch, capsys):
     assert "Automatic updates: on" in capsys.readouterr().out
     assert cli.main(["update", "auto", "off"]) == 0
     assert "Automatic updates: off" in capsys.readouterr().out
+
+
+def test_a_health_rollback_by_setup_tells_the_owner_once_in_both_languages(home, server, keys):
+    """#164: setup put the previous program back after the new Core never became ready; the old Core says so once."""
+    r = Rig(home, server, keys)
+    (home / "updates").mkdir(exist_ok=True)
+    (home / "updates" / "health.json").write_text(json.dumps(
+        {"status": "rolled_back", "from": OLD, "to": NEW, "at": 1, "notified": False}), "utf-8")
+    assert r.au.after_start() == "rolled_back"
+    n = [x for x in r.notices if x["kind"] == "rolled_back"]
+    assert len(n) == 1 and OLD in n[0]["text_en"] and "data" in n[0]["text_en"] and n[0]["text_he"] and n[0]["title_he"]
+    r.au.after_start()
+    assert len([x for x in r.notices if x["kind"] == "rolled_back"]) == 1
+    assert updates.take_health_notice(home) is None
+
+
+def test_a_failed_health_rollback_says_how_to_go_back_by_hand(home, server, keys):
+    r = Rig(home, server, keys)
+    (home / "updates").mkdir(exist_ok=True)
+    (home / "updates" / "health.json").write_text(json.dumps({"status": "rollback_failed", "to": NEW}), "utf-8")
+    assert r.au.after_start() == "rollback_failed"
+    n = r.notices[-1]
+    assert "jarvis update --rollback" in n["text_en"] and "jarvis update --rollback" in n["text_he"]
+
+
+def test_a_schema_changed_health_failure_offers_the_full_rollback_and_is_not_retried(home, server, keys):
+    """Review P1-1 / P3-3: the data schema had changed, so setup did not swap the program (health_failed); the owner is
+    told how to undo it with approval, and auto-update never retries that version by itself."""
+    r = Rig(home, server, keys)
+    (home / "updates").mkdir(exist_ok=True)
+    (home / "updates" / "health.json").write_text(json.dumps(
+        {"status": "health_failed", "from": OLD, "to": NEW, "at": 1, "notified": False}), "utf-8")
+    assert r.au.after_start() == "health_failed"
+    n = r.notices[-1]
+    assert "jarvis update --rollback" in n["text_en"] and "jarvis update --rollback" in n["text_he"] and n["title_he"]
+    st = r.au.state()
+    assert st.get("gave_up") == NEW and st.get("last_error") == "UPDATE_HEALTH_HEALTH_FAILED"
+    assert "installing" not in st
+
+# ---------------------------------------------------------------------- next planned time + last result (#153)
+def test_status_shows_the_next_planned_step_and_the_last_result(home, server, keys):
+    server.publish(keys, NEW)
+    r = Rig(home, server, keys)
+    assert r.au.status()["next_kind"] == "check"                                      # nothing checked yet: due now
+    assert r.tick() == "announced"
+    s = r.au.status()
+    assert s["next_kind"] == "install" and s["next_at"] == r.clock.t + NOTICE_GRACE_S
+    r.au.answer("later")
+    assert r.au.status()["next_at"] == r.clock.t + auto_update.LATER_S
+    r.au.answer("now")
+    assert r.au.status()["next_kind"] == "install" and r.au.status()["next_at"] == r.clock.t
+    r.busy.append("voice_session")
+    r.clock.t += NOTICE_GRACE_S + 1
+    r.au.answer("later")
+    r.clock.t += auto_update.LATER_S + 1
+    assert r.tick() == "busy" and r.au.status()["next_kind"] == "quiet_moment"
+    assert r.au.status()["last_result"] is None
+    server.status[f"/JARVES-Setup-{NEW}.exe"] = 500                                   # a failure: reported with its code
+    r.busy.clear()
+    assert r.tick() == "failed"
+    last = r.au.status()["last_result"]
+    assert last["ok"] is False and last["version"] == NEW and last["code"] and last["rollback_possible"] is False
+    assert r.au.status()["next_at"] == r.clock.t + auto_update.BACKOFF_S[0]
+    lines = auto_update.status_lines(r.au.status())
+    assert any("Nothing changed" in x or "שום דבר לא השתנה" in x for x in lines)
+    server.status.clear()                                                             # then it works
+    assert r.tick(auto_update.BACKOFF_S[0] + 1) == "installing"
+    r.au.current = lambda: NEW
+    updates.note_start(home, NEW)
+    updates.mark_healthy(home, NEW)
+    r.au.after_start()
+    last = r.au.status()["last_result"]
+    assert last["ok"] is True and last["version"] == NEW and last["code"] is None
+    assert last["rollback_possible"] == updates.rollback_info(home)["possible"]
+    assert any("--rollback" in x for x in auto_update.status_lines(r.au.status()))
+    r.on = False
+    assert r.au.status()["next_at"] is None
+
+
+def test_gave_up_has_no_next_step(home, server, keys):
+    server.publish(keys, NEW)
+    server.status[f"/JARVES-Setup-{NEW}.exe"] = 500
+    r = Rig(home, server, keys)
+    r.ready()
+    for _ in range(GIVE_UP_AFTER):
+        r.tick()
+        r.clock.t += 13 * 3600
+    s = r.au.status()
+    assert s["gave_up"] == NEW and s["next_at"] is None and s["last_result"]["ok"] is False
+
+
+def test_a_health_rollback_has_its_own_last_result(home, server, keys):
+    """Review P3-8: after setup's health check the last result never says "not installed, nothing changed"."""
+    from jarves import auto_update
+    for status, needle in (("rolled_back", "previous program was put back"), ("health_failed", "waits for your OK"),
+                           ("rollback_failed", "automatic undo did not work")):
+        r = Rig(home, server, keys)
+        (home / "updates").mkdir(exist_ok=True)
+        (home / "updates" / "health.json").write_text(json.dumps(
+            {"status": status, "from": OLD, "to": NEW, "at": 1, "notified": False}), "utf-8")
+        r.au.after_start()
+        last = r.au.status()["last_result"]
+        assert last["ok"] is False and last["health"] == status and last["version"] == NEW
+        lines = " ".join(auto_update.status_lines(r.au.status()))
+        assert needle in lines and "Nothing changed" not in lines
+
+
+def test_a_version_that_became_ready_late_gets_no_false_alarm_and_is_not_blocked(home, server, keys, monkeypatch):
+    """Review #260 F6: health_failed was recorded, but the new version started fine later (marked itself healthy): no
+    "did not start" notice, no give-up for the version that works, and the record is consumed."""
+    r = Rig(home, server, keys)
+    (home / "updates").mkdir(exist_ok=True)
+    (home / "updates" / "health.json").write_text(json.dumps(
+        {"status": "health_failed", "from": OLD, "to": NEW, "at": 1, "notified": False}), "utf-8")
+    (home / "updates" / "pending.json").write_text(json.dumps({"from": OLD, "to": NEW, "state": "ok"}), "utf-8")
+    monkeypatch.setattr(r.au, "current", lambda: NEW)
+    r.au.after_start()
+    assert not [x for x in r.notices if x["kind"] == "health_failed"]
+    assert r.au.state().get("gave_up") != NEW
+    assert updates.take_health_notice(home) is None
