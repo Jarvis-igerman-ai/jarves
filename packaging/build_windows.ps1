@@ -301,6 +301,8 @@ Copy-Item (Join-Path $PSScriptRoot "installer_state.py") $Stage
 Copy-Item (Join-Path $PSScriptRoot "rollback_windows.ps1") $Stage
 Copy-Item (Join-Path $PSScriptRoot "windows\THIRD_PARTY_NOTICES.txt") $Stage
 Copy-Item (Join-Path $PSScriptRoot "..\CHANGELOG.md") $Stage          # release notes (jarves.release_notes reads it)
+$RoadmapSrc = Join-Path $PSScriptRoot "..\docs\ROADMAP.md"          # jarvis roadmap (jarves.self_aware reads it)
+if (Test-Path $RoadmapSrc) { Copy-Item $RoadmapSrc $Stage }
 $ClFragments = Join-Path $PSScriptRoot "..\changelog.d"            # unreleased entries, merged in by changelog_parts.py
 if (Test-Path $ClFragments) { Copy-Item $ClFragments (Join-Path $Stage "changelog.d") -Recurse }
 # SW-V4 F: the WhatsApp bridge binary (built by scripts/build_whatsapp_bridge.ps1) ships next to the Core when it was

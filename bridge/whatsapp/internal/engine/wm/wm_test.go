@@ -14,9 +14,9 @@ import (
 	"go.mau.fi/whatsmeow/types/events"
 	"google.golang.org/protobuf/proto"
 
-	"github.com/igalgerman/jarves/bridge/whatsapp/internal/engine"
-	"github.com/igalgerman/jarves/bridge/whatsapp/internal/memdb"
-	"github.com/igalgerman/jarves/bridge/whatsapp/internal/securestore"
+	"github.com/Jarvis-igerman-ai/jarves/bridge/whatsapp/internal/engine"
+	"github.com/Jarvis-igerman-ai/jarves/bridge/whatsapp/internal/memdb"
+	"github.com/Jarvis-igerman-ai/jarves/bridge/whatsapp/internal/securestore"
 )
 
 // No test here contacts WhatsApp: linking/connecting is BLOCKED until the owner links a device.

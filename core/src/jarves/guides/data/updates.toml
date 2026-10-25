@@ -75,3 +75,25 @@ he = "אחרי העדכון ג'ארביס לא עולה"
 en = "JARVES does not start after the update"
 fix_he = "בהפעלה השנייה ג'ארביס שואל (באישור על המסך) אם לחזור לגרסה הקודמת. אפשר גם ידנית: jarvis update --rollback."
 fix_en = "On the second start JARVES asks (an approval on the screen) whether to go back to the previous version. You can also do it by hand: jarvis update --rollback."
+
+[[problems]]
+he = "העדכון אומר שקובץ בתיקיית התוכנה בשימוש"
+en = "The update says a file in the program folder is in use"
+fix_he = "ההתקנה סוגרת לבד את כל חלקי ג'ארביס (Core, לוח הבקרה, הפנים, נגן המוזיקה): קודם בבקשה, ורק אם צריך בכוח, וכותבת ביומן ההתקנה מה נסגר. אם תוכנה אחרת מחזיקה קובץ (תיקייה או עורך פתוחים, גיבוי או סריקת אנטי-וירוס) העדכון מוותר בלי לשנות כלום: הגרסה הקודמת והנתונים נשארים. סגרו את התוכנה ההיא והריצו שוב jarvis update install."
+fix_en = "Setup closes every part of JARVES by itself (Core, dashboard, face, music player): politely first, by force only if needed, and the setup log says what it closed. If another program holds a file (an open folder or editor, a backup or antivirus scan) the update gives up without changing anything: the previous version and your data stay. Close that program and run jarvis update install again."
+action = "command:jarvis update install"
+
+[[steps]]
+he = "בדיקת בריאות אחרי עדכון אוטומטי: ההתקנה מחכה עד 180 שניות שהגרסה החדשה תעלה (הבדיקה רצה עם הגרסה הקודמת, כך שגם גרסה חדשה שבורה לגמרי נתפסת). אם היא לא עלתה והנתונים לא שונו בעדכון, התוכנה הקודמת חוזרת לבד, הנתונים לא נוגעים, ותקבלו הודעה אחת בעברית ובאנגלית. אם העדכון כבר התאים את הנתונים לגרסה החדשה, ההתקנה לא מחזירה רק את התוכנה (הגרסה הקודמת לא הייתה עולה עליהם): תקבלו הודעה, ו-jarvis update --rollback מחזיר נתונים ותוכנה יחד, רק באישור שלכם. גרסה שלא עלתה לא מנוסה שוב אוטומטית; עדכון ידני מעמוד Updates מנסה שוב. זמן ההמתנה: /HEALTHTIMEOUT=שניות בהתקנה שקטה."
+en = "Health check after an automatic update: setup waits up to 180 seconds for the new version to become ready (the check runs with the previous version, so even a completely broken new version is caught). If it does not and the update did not change your data, the previous program is put back by itself, your data is not touched, and you get one notice in Hebrew and English. If the update had already upgraded your data, setup does not put back the program alone (the previous version would not start on that data): you get a notice, and jarvis update --rollback restores data and program together, only with your OK. A version that did not become ready is not retried automatically; a manual update on the Updates page tries again. Change the wait with /HEALTHTIMEOUT=seconds on a silent install."
+
+[[problems]]
+he = "העדכון אומר שהתוכנה הקודמת לא הוחזרה במלואה"
+en = "The update says the previous program could not be put back completely"
+fix_he = "זה קורה רק אם קובץ נשאר נעול גם אחרי שההתקנה ויתרה. שום דבר לא נמחק: החלק שלא חזר מחכה בתיקייה rollback שבתיקיית התוכנה, והנתונים שלכם בטוחים. הפעילו מחדש את Windows והריצו שוב את העדכון: ההתקנה מחזירה קודם את התוכנה הקודמת, ורק אחר כך מגבה ומעדכנת."
+fix_en = "This happens only when a file stays locked even after setup gave up. Nothing is deleted: the part that did not go back waits in the rollback folder inside the program folder, and your data is safe. Restart Windows and run the update again: setup first puts the previous program back, and only then backs up and updates."
+action = "command:jarvis update install"
+
+[[steps]]
+he = "בדיקת מקום בדיסק: לפני הכול (עוד לפני שג'ארביס נעצר) ההתקנה בודקת שיש מקום לגיבוי ולגרסה החדשה, בכונן הנתונים ובכונן התוכנה. אם חסר מקום היא עוצרת מיד, בלי לשנות כלום, ואומרת כמה מגה-בייט חסרים. פנו מקום (למשל מחקו קבצים או נקו את סל המיחזור) והפעילו את העדכון שוב."
+en = "Free disk space check: first of all (even before JARVES is stopped), setup checks there is room for the backup and the new version on the data drive and the program drive. If not, it stops at once, changes nothing and says how many megabytes are missing. Free some space (delete files, empty the recycle bin) and run the update again."

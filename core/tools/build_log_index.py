@@ -24,7 +24,7 @@ CORE = Path(__file__).resolve().parents[1]
 CODE_RX = re.compile(r"^[A-Z][A-Z0-9_]{2,63}$")
 LEVELS = {"info": "INFO", "warn": "WARNING", "warning": "WARNING", "error": "ERROR", "debug": "DEBUG",
           "verbose": "VERBOSE", "log": "?"}
-REPO = "igalgerman/jarves"           # the public repo (permalinks); private notes live elsewhere
+REPO = "Jarvis-igerman-ai/jarves"           # the public repo (permalinks); private notes live elsewhere
 
 
 def _template(node: ast.AST) -> str:

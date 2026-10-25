@@ -33,7 +33,8 @@ def test_shell_is_english_first_and_serves_the_new_scripts(dash):
 
 
 def test_grouped_navigation_keeps_every_page():
-    html = (STATIC / "index.html").read_text(encoding="utf-8")
+    from jarves import page_registry
+    html = page_registry.compose((STATIC / "index.html").read_text(encoding="utf-8"))   # pages.d pages too
     nav = set(re.findall(r'data-page="([a-z]+)"', html))
     # pages reached from other pages, not from the side bar
     sub = {"session", "raw", "note", "guide", "context"}

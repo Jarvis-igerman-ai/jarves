@@ -54,6 +54,82 @@ def test_only_the_whitelisted_files_are_served(srv):
         assert get(srv, bad)[0].status in (404, 403), bad
 
 
+def raw_get(d, target: bytes) -> int:
+    """Send a raw request line (http.client refuses NUL/backslash/odd targets) and return the status code."""
+    import socket
+    with socket.create_connection(("127.0.0.1", d.port), timeout=10) as s:
+        s.sendall(b"GET " + target + b" HTTP/1.1\r\nHost: " + f"{HOST}:{d.port}".encode() + b"\r\nConnection: close\r\n\r\n")
+        data = b""
+        while chunk := s.recv(65536):
+            data += chunk
+    first = data.split(b"\r\n", 1)[0].split()
+    return int(first[1]) if len(first) > 1 else 0
+
+
+TRAVERSAL = [b"/m/../dashboard.py", b"/m/..%2fdashboard.py", b"/m/%2e%2e/mobile.py", b"/m/%2e%2e%2fmobile.py",
+             b"/m/%252e%252e%252fmobile.py", b"/m/..%5cmobile.py", b"/m/..\\mobile.py", b"/m/%5c..%5cmobile.py",
+             b"/m//etc/passwd", b"/m/C:/Windows/win.ini", b"/m/C:%5cWindows%5cwin.ini", b"/m/%00index.html",
+             b"/m/index.html%00", b"/m/index.html%00.js", b"/m/./index.html", b"/m/mobile/index.html",
+             b"/m/../mobile/index.html", b"/m/INDEX.HTML", b"/m/index.html/", b"/m/app.js?x=../../a",
+             b"/m/unknown.js", b"/m/.git/config", b"/m/~/.ssh/id_rsa", b"/m/" + b"a" * 4000]
+
+
+def test_traversal_and_unknown_names_never_reach_the_filesystem(srv, monkeypatch):
+    """CodeQL #6/#7: whatever the phone sends after /m/, only a fixed STATIC_FILES key is ever opened; every encoded,
+    absolute, backslash, NUL, case-variant or unknown name is a 404 and never touches the disk."""
+    touched, rec = [], [True]
+    for meth in ("is_file", "read_bytes", "exists", "stat", "resolve", "open"):
+        real = getattr(Path, meth)
+        monkeypatch.setattr(Path, meth, lambda self, *a, _r=real, **k: (rec[0] and touched.append(str(self)),
+                                                                          _r(self, *a, **k))[1])
+    try:
+        for target in TRAVERSAL:
+            st = raw_get(srv, target)
+            if target == b"/m/app.js?x=../../a":
+                assert st == 200, target                     # the query string is not part of the file name
+            else:
+                assert st in (400, 404), (target, st)
+    finally:
+        rec[0] = False
+    bad = ("..", "passwd", "win.ini", "unknown.js", ".git", "INDEX.HTML", ".ssh", "\x00", "%", "aaaa", "mobile.py",
+           "dashboard.py")
+    assert not [p for p in touched if any(b in p for b in bad)], touched   # no attacker-chosen name reaches the disk
+
+
+def test_static_file_returns_a_path_built_from_the_whitelist_key_only():
+    for name in mobile.STATIC_FILES:
+        f = mobile._static_file(name)
+        assert f is not None and f.name == name and f.is_file()
+    for bad in ("../mobile.py", "..\\mobile.py", "/etc/passwd", "C:\\Windows\\win.ini", "index.html\x00", "",
+                "INDEX.HTML", "mobile/index.html", "%2e%2e/mobile.py", "index.html/"):
+        assert mobile._static_file(bad) is None, bad
+
+
+def test_a_symlinked_static_file_pointing_outside_is_refused(tmp_path, monkeypatch):
+    """Containment: even a whitelisted name is refused when the file on disk resolves outside the static folders."""
+    import os
+    static = tmp_path / "dashboard_static" / "mobile"
+    static.mkdir(parents=True)
+    outside = tmp_path / "secret.txt"
+    outside.write_text("FAKE-SECRET-not-a-real-credential", encoding="utf-8")
+    links = (static / "index.html", tmp_path / "dashboard_static" / "chatview.js")
+    try:
+        for link in links:
+            os.symlink(outside, link)
+    except (OSError, NotImplementedError):
+        # Windows without symlink rights: simulate the link by making resolve() of those paths land outside
+        for link in links:
+            link.write_text("placeholder", encoding="utf-8")
+        real_resolve = Path.resolve
+        monkeypatch.setattr(Path, "resolve", lambda self, *a, **k: (real_resolve(outside) if self.name in
+                                                                      ("index.html", "chatview.js") else
+                                                                      real_resolve(self, *a, **k)))
+    (static / "app.js").write_text("ok", encoding="utf-8")
+    monkeypatch.setattr(mobile, "STATIC_DIR", static)
+    assert mobile._static_file("index.html") is None and mobile._static_file("chatview.js") is None
+    assert mobile._static_file("app.js") == (static / "app.js").resolve()
+
+
 def test_index_has_no_inline_script_or_style():
     html = (MOBILE_DIR / "index.html").read_text(encoding="utf-8")
     assert not re.search(r"<script(?![^>]*\bsrc=)", html) and "style=" not in html and "onclick=" not in html
@@ -237,3 +313,16 @@ def test_core_starts_the_phone_server_at_boot_only_when_the_switch_is_on(tmp_pat
         raise OSError("no network")
     fake_self = SimpleNamespace(features=SimpleNamespace(enabled=lambda name: True), ensure_dashboard=boom, _dashboard=None)
     asyncio.run(core_app.Core.start_mobile(fake_self))
+
+
+@pytest.mark.parametrize("exc,status", [(FileNotFoundError, 404), (PermissionError, 500), (OSError, 500)])
+def test_a_read_error_gives_a_clean_error_without_a_path(srv, monkeypatch, exc, status):
+    """The file can vanish or be unreadable between the check and the read: no traceback, no server path in the reply."""
+    secret_path = "C:/very/private/install/dir/index.html"
+
+    def boom(self, *a, **k):
+        raise exc(5 if exc is OSError else 2, "boom", secret_path)
+    monkeypatch.setattr(Path, "read_bytes", boom)
+    r, body = get(srv, "/m/index.html")
+    assert r.status == status
+    assert b"private" not in body and b"install" not in body and b"index.html" not in body and b"boom" not in body

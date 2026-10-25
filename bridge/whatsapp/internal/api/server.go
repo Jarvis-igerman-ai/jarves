@@ -18,10 +18,10 @@ import (
 	"sync"
 	"time"
 
-	"github.com/igalgerman/jarves/bridge/whatsapp/internal/engine"
-	"github.com/igalgerman/jarves/bridge/whatsapp/internal/msgstore"
-	"github.com/igalgerman/jarves/bridge/whatsapp/internal/policy"
-	"github.com/igalgerman/jarves/bridge/whatsapp/internal/securestore"
+	"github.com/Jarvis-igerman-ai/jarves/bridge/whatsapp/internal/engine"
+	"github.com/Jarvis-igerman-ai/jarves/bridge/whatsapp/internal/msgstore"
+	"github.com/Jarvis-igerman-ai/jarves/bridge/whatsapp/internal/policy"
+	"github.com/Jarvis-igerman-ai/jarves/bridge/whatsapp/internal/securestore"
 )
 
 // Config wires a Server.

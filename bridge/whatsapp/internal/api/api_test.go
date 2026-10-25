@@ -20,10 +20,10 @@ import (
 
 	"github.com/coder/websocket"
 
-	"github.com/igalgerman/jarves/bridge/whatsapp/internal/engine"
-	"github.com/igalgerman/jarves/bridge/whatsapp/internal/memdb"
-	"github.com/igalgerman/jarves/bridge/whatsapp/internal/msgstore"
-	"github.com/igalgerman/jarves/bridge/whatsapp/internal/policy"
+	"github.com/Jarvis-igerman-ai/jarves/bridge/whatsapp/internal/engine"
+	"github.com/Jarvis-igerman-ai/jarves/bridge/whatsapp/internal/memdb"
+	"github.com/Jarvis-igerman-ai/jarves/bridge/whatsapp/internal/msgstore"
+	"github.com/Jarvis-igerman-ai/jarves/bridge/whatsapp/internal/policy"
 )
 
 const (

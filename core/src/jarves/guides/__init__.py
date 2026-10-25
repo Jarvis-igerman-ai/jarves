@@ -52,7 +52,7 @@ feat.register("proactive_help", "הצעות עזרה בהגדרה", "Setup sugge
               targets={"windows": {"status": "implemented_unverified",
                                    "evidence": "core/tests/test_guides.py (scripted conversations, offline)"},
                        "linux_arm64_pi": {"status": "implemented_unverified",
-                                          "roadmap_issue": "https://github.com/igalgerman/jarves/issues/1",
+                                          "roadmap_issue": "https://github.com/Jarvis-igerman-ai/jarves/issues/1",
                                           "blocker": "pure Python, no platform code; not run on a Pi yet"}})
 
 
@@ -107,6 +107,7 @@ _lock = threading.RLock()
 def _parse(path: Path) -> Guide:
     raw = tomllib.loads(path.read_text(encoding="utf-8"))
     raw["id"] = raw.get("id") or path.stem
+    raw.pop("parity", None)                    # read by cli_parity._guide_parity, not part of the guide
     raw["steps"] = [Step(**s) for s in raw.get("steps", [])]
     raw["say"] = [tuple(x) for x in raw.get("say", [])]
     return Guide(**raw)
