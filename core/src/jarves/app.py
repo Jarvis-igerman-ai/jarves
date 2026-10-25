@@ -313,6 +313,8 @@ class Core:
         self.registry = SkillRegistry()
         self.registry.confirm = self.ask_confirm
         self.registry.gate = self.features.gate          # inactive features: tools not offered, calls refused
+        from . import drive_mode                         # V6 #216: off by default; never approves, only defers
+        drive_mode.attach(self.registry, self.features, self.home, self.memory)
         self.registry.register(ClockSkill())
         self.registry.register(CalcSkill())
         self.registry.register(MemorySkill(self.memory))

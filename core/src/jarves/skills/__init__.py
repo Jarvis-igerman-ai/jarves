@@ -48,7 +48,9 @@ DEFAULT_ALLOWED_ACTIONS = frozenset({"remember", "music_play", "music_pause", "m
                                      "workspace_note", "set_voice", "set_setting"})
 # Expected policy/configuration outcomes remain in the timeline, but are not runtime defects.
 EXPECTED_TOOL_REFUSALS = frozenset({"FEATURE_NEEDS_APPROVAL", "TOOL_UNTRUSTED_TURN", "TOOL_DECLINED",
-                                    "FEATURE_OFF", "SKILL_DISABLED", "TOOL_FORBIDDEN"})
+                                    "FEATURE_OFF", "SKILL_DISABLED", "TOOL_FORBIDDEN",
+                                    # drive mode (V6 #216): deferred / refused while the owner drives
+                                    "DRIVE_DEFERRED", "DRIVE_QUEUE_FULL", "DRIVE_REFUSED", "DRIVE_OWNER_ONLY"})
 
 
 def expected_tool_refusal(code: str | None, origin: str | None = None) -> bool:
@@ -257,6 +259,8 @@ class SkillRegistry:
         # is really "nobody answered" or "nowhere to ask" must be told that way, never as "you declined")
         self.last_ask_outcome = ""
         self._recent_ok: dict[tuple, tuple] = {}   # V4-VC-3: (route, tool, args) -> (t, result, owner approved it)
+        # drive mode (V6 #216, drive_mode.Gate): consulted before the approval prompt; None = not wired (no change)
+        self.drive = None
 
     @property
     def _untrusted_at(self) -> float | None:
@@ -386,6 +390,10 @@ class SkillRegistry:
             logs.warn("skills", "TOOL_FORBIDDEN", "tool not authorized by policy; denied",
                       tool=tool.name, permission=str(perm), origin=str(origin))
             return ToolResult(False, f"{tool.name} is not allowed", code="TOOL_FORBIDDEN")
+        if self.drive is not None:
+            refused = self._drive_check(tool, args, origin)
+            if refused is not None:
+                return refused
         if perm != "read" and origin == "model" and self._untrusted_at is not None:
             logs.warn("skills", "TOOL_UNTRUSTED_TURN", "tool refused: untrusted text was read this turn",
                       tool=tool.name)
@@ -424,6 +432,22 @@ class SkillRegistry:
         if prompt and not await self._ask(prompt, **meta):
             return self._not_approved(tool.name, origin)
         return None
+
+    def _drive_check(self, tool: Tool, args: BaseModel, origin: str) -> ToolResult | None:
+        """Drive mode (V6 #216). It only ever ADDS a refusal or a deferral; an "allow" continues into the normal
+        policy and approval below unchanged (drive mode never approves). Trust comes from Core state only: the
+        caller's origin, the route a code path set (voice/text/scheduler) and this route's untrusted-text taint.
+        A broken policy fails CLOSED for side effects; hang-up / stop / cancel and plain reads still go on."""
+        try:
+            return self.drive.check(tool, args, origin=origin, route=ROUTE.get(),
+                                    tainted=self._untrusted_at is not None)
+        except Exception:
+            from ..drive_mode import ALWAYS_TOOLS
+            logs.error("skills", "DRIVE_CHECK_FAILED", "drive-mode check failed", tool=tool.name, exc=True)
+            if tool.permission == "read" or tool.name in ALWAYS_TOOLS:
+                return None
+            return ToolResult(False, "The drive-mode check failed, so I did not do that.", {"drive": "error"},
+                              code="DRIVE_ERROR")
 
     def _not_approved(self, name: str, origin: str) -> ToolResult:
         """The honest result of an approval that did not come: a decline, silence, or nowhere to show the question."""

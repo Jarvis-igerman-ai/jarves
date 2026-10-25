@@ -22,10 +22,12 @@ import threading
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import Callable
 
 from . import clilang
 from . import features as feat
 from . import hebrew
+from . import logs
 
 FEATURE = "drive_mode"
 MAX_QUEUE = 20
@@ -196,6 +198,156 @@ def handle(action: str, text: str, queue: DriveQueue, *, active: bool, known_con
     return v, item
 
 
+# ---------------------------------------------------------------------- the SkillRegistry gate (V6 item 9, issue #216)
+# Which policy kind a registered tool is. Anything not listed: a read tool is a short "answer" (a read tool that
+# returns text written by others, like mail, is a "long_read" and waits), every other tool is its own unknown kind
+# and is DEFERRED. The kind comes from the tool NAME (code), never from a model-written argument, except that
+# dial_prepare with an emergency number/word is an emergency (which only the owner's own words may place).
+ALWAYS_TOOLS: dict[str, str] = {
+    "end_conversation": "hang_up", "mute_microphone": "stop", "music_stop": "stop", "music_pause": "stop",
+    "music_mute": "stop", "timer_cancel": "cancel", "task_cancel": "cancel",
+}
+TOOL_KINDS: dict[str, str] = {
+    **ALWAYS_TOOLS,
+    "get_time": "time", "calendar_list_events": "calendar_read", "calendar_next_event": "calendar_read",
+    "calendar_find_events": "calendar_read", "timer_start": "timer", "alarm_set": "timer", "anydo_remind": "reminder",
+    "music_play": "music", "music_next": "music", "music_resume": "music", "music_volume": "music",
+    "music_unmute": "music", "music_status": "music",
+    "dial_prepare": "call", "dial_open": "call",
+    "whatsapp_send": "message_send", "telegram_send": "message_send", "instagram_send": "message_send",
+    "gmail_send_draft": "message_send", "whatsapp_draft": "message_send", "whatsapp_compose": "message_send",
+    "telegram_draft": "message_send", "instagram_draft": "message_send", "gmail_create_draft": "message_send",
+}
+_RECIPIENT_FIELDS = ("name", "to", "contact", "chat", "recipient")
+
+T.update({
+    "DRIVE_OWNER_ONLY": ("רק אתם מכבים את מצב הנהיגה: jarvis drive off.",
+                         "Only you can turn drive mode off: jarvis drive off."),
+    "DRIVE_ERROR": ("בדיקת מצב הנהיגה נכשלה, אז לא ביצעתי את זה.",
+                    "The drive-mode check failed, so I did not do that."),
+    "DRIVE_REFUSED": ("שיחת חירום רק מהמילים שלכם, לא מטקסט שהגיע מבחוץ.",
+                      "An emergency call only comes from your own words, never from outside text."),
+})
+
+
+def tool_kind(name: str, permission: str | None, args=None, *, untrusted_output: bool = False) -> str:
+    if name == "dial_prepare" and args is not None:
+        from .dialing import is_emergency
+        if is_emergency(str(getattr(args, "number", "") or "")) or is_emergency(str(getattr(args, "name", "") or "")):
+            return "emergency_call"
+    if name in TOOL_KINDS:
+        return TOOL_KINDS[name]
+    if permission == "read":
+        return "long_read" if untrusted_output else "answer"
+    return name                     # unknown kind: decide() defers it
+
+
+def turn_source(origin: str, route: str, tainted: bool) -> str:
+    """Who the request really comes from, from Core state only (never a model-written field): text written by
+    others was read in this turn -> "untrusted"; the owner's own words (the deterministic parser, or the live voice /
+    text conversation with no third-party text this turn) -> "owner"; a scheduled job / goal plan -> "scheduled"."""
+    if tainted:
+        return "untrusted"
+    if origin == "user" or route in ("voice", "text"):
+        return "owner"
+    return "scheduled"
+
+
+def contacts_from_memory(memory) -> list[dict]:
+    """The owner's explicitly saved contacts (memory kind "contact"): label, name, email."""
+    out: list[dict] = []
+    for row in memory.by_kind("contact"):
+        try:
+            d = json.loads(row["text"])
+        except (TypeError, ValueError):
+            continue
+        if isinstance(d, dict):
+            out.append(d)
+    return out
+
+
+def _no_contacts() -> list[dict]:
+    return []
+
+
+@dataclass
+class Gate:
+    """Consulted by SkillRegistry._authorize BEFORE the approval prompt. Returns None (continue into the normal flow,
+    unchanged) or a refusal ToolResult. It never approves anything and never runs a queued item."""
+    active: Callable[[], bool]               # the drive_mode switch (only the owner flips it)
+    queue: DriveQueue
+    contacts: Callable[[], list] = _no_contacts
+
+    def known(self, who: str) -> bool:
+        w = " ".join(str(who or "").casefold().split())
+        if not w:
+            return False
+        for c in self.contacts() or []:
+            names = {" ".join(str(c.get(k) or "").casefold().split()) for k in ("label", "name", "email")} - {""}
+            first = (str(c.get("name") or "").casefold().split() or [""])[0]
+            if w in names or (first and w == first):
+                return True
+        return False
+
+    @staticmethod
+    def recipient(tool, args) -> str:
+        if getattr(tool, "recipient", None) is not None:
+            try:
+                who = tool.recipient(args)
+            except Exception:
+                who = None
+            if who:
+                return str(who)
+        for k in _RECIPIENT_FIELDS:
+            v = getattr(args, k, None)
+            if isinstance(v, str) and v.strip():
+                return v
+        return ""
+
+    def check(self, tool, args, *, origin: str, route: str, tainted: bool):
+        from .skills import ToolResult
+        if not self.active():
+            return None                                   # drive mode off: zero behaviour change
+        source = turn_source(origin, route, tainted)
+        by_voice = route == "voice"                       # set by the voice code path (skills.ROUTE), not the model
+        if tool.name == "feature_set" and str(getattr(args, "id", "")) == FEATURE:
+            if origin == "user" and not tainted:
+                return None            # the owner's own words (deterministic parser): the normal flow decides
+            # the model can never switch drive mode off (or "declare stopped") on its own authority
+            logs.warn("drive", "DRIVE_OWNER_ONLY", "model tried to change drive mode; refused", tool=tool.name,
+                      source=source)
+            return ToolResult(False, say("DRIVE_OWNER_ONLY"), {"drive": "refused"}, code="DRIVE_OWNER_ONLY")
+        kind = tool_kind(tool.name, tool.permission, args, untrusted_output=bool(tool.untrusted_output))
+        who = self.recipient(tool, args) if kind in VOICE_CONFIRMED else ""
+        v = decide(kind, active=True, known_contact=self.known(who), source=source, by_voice=by_voice)
+        if v.allowed:
+            if v.code != "DRIVE_OK" or tool.permission != "read":
+                logs.info("drive", "DRIVE_ALLOWED", "drive mode allows this; normal approvals still apply",
+                          tool=tool.name, kind=kind, reason=v.code, source=source, voice=by_voice)
+            return None
+        if kind == "emergency_call":
+            logs.warn("drive", "DRIVE_REFUSED", "emergency call from untrusted text refused", tool=tool.name,
+                      source=source)
+            return ToolResult(False, say("DRIVE_REFUSED"), {"drive": "refused"}, code="DRIVE_REFUSED")
+        label = tool.name + (f" -> {(who.split() or [''])[0]}" if who else "")     # never message text or arguments
+        item = self.queue.add(kind, label, source=source)
+        code = v.code if item is not None else "DRIVE_QUEUE_FULL"
+        logs.info("drive", "DRIVE_DEFERRED", "deferred until the owner has stopped", tool=tool.name, kind=kind,
+                  reason=code, source=source, voice=by_voice, item=item.id if item else 0)
+        return ToolResult(False, say(code) + " Queued until stopped: tell the user in one short sentence; do not "
+                          "retry it and do not use another tool for it.",
+                          {"drive": "deferred" if item else "queue_full", "queued_id": item.id if item else 0},
+                          code="DRIVE_DEFERRED" if item else "DRIVE_QUEUE_FULL")
+
+
+def attach(registry, features, home, memory=None) -> Gate:
+    """Wire drive mode into a SkillRegistry (Core and text session). With the switch off it does nothing."""
+    contacts = (lambda: contacts_from_memory(memory)) if memory is not None else _no_contacts
+    gate = Gate(active=lambda: features.active(FEATURE), queue=queue_for(home), contacts=contacts)
+    registry.drive = gate
+    return gate
+
+
 # ---------------------------------------------------------------------- CLI: jarvis drive status|on|off|queue|stopped|clear
 def queue_for(home) -> DriveQueue:
     return DriveQueue(Path(home) / "drive_queue.json")
@@ -241,16 +393,18 @@ COMMANDS = {"drive": cmd_drive}
 
 
 # ---------------------------------------------------------------------- catalog (default OFF, never wired by itself)
-EVIDENCE = "UNIT test_v6_drive_mode.py (pure policy and queue; not wired into approvals or a car yet)"
-BLOCKER = "not wired into approvals/SkillRegistry yet (V6 item 9) and no parked-car session"
+EVIDENCE = ("UNIT test_v6_drive_mode.py + test_v6_drive_wire.py (policy, queue, and the SkillRegistry gate before "
+            "the approval prompt; no car session yet)")
+BLOCKER = "no parked-car session with a real voice conversation yet; dial_open has no known-contact name, so calls wait"
 ABOUT = ("a driving policy: short answers, calls and messages only to known contacts with one spoken confirmation, "
          "everything else waits in a 'when you stop' list; emergencies and hang-up are never blocked")
 PI = "no vehicle path on the Raspberry Pi in V6 (GitHub issue #209 tracks the PC module)"
 hebrew.TEXT.update({
     ABOUT: "מדיניות נהיגה: תשובות קצרות, שיחות והודעות רק לאנשי קשר מוכרים עם אישור קולי אחד, וכל השאר ממתין ברשימה "
            "\"כשתעצרו\"; חירום וניתוק אף פעם לא נחסמים",
-    EVIDENCE: "בדיקות יחידה test_v6_drive_mode.py (מדיניות ותור טהורים; עדיין לא מחוברים לאישורים או לרכב)",
-    BLOCKER: "עוד לא מחובר לאישורים/SkillRegistry (V6 פריט 9) ואין בדיקה ברכב חונה",
+    EVIDENCE: "בדיקות יחידה test_v6_drive_mode.py ו-test_v6_drive_wire.py (מדיניות, תור, ובדיקה ב-SkillRegistry לפני "
+              "שאלת האישור; עדיין אין בדיקה ברכב)",
+    BLOCKER: "עוד אין בדיקה ברכב חונה עם שיחה קולית אמיתית; ל-dial_open אין שם איש קשר, ולכן שיחות ממתינות",
     PI: "אין נתיב רכב על ה-Raspberry Pi ב-V6 (נושא #209 עוקב אחר מודול ה-PC)",
 })
 
