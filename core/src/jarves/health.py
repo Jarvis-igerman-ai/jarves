@@ -83,7 +83,7 @@ class Health:
         if self._path:
             self._saved_at = time.monotonic()
             try:
-                self._path.write_text(json.dumps(self.snapshot(self._path.parent), indent=1), encoding="utf-8")
+                self._path.write_text(json.dumps(self.snapshot(self._path.parent), separators=(",", ":")), encoding="utf-8")
             except OSError:
                 pass
 
