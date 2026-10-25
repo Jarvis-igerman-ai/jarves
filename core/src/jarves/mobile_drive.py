@@ -24,6 +24,7 @@ FEATURE = "phone_drive"
 JOURNEY_RATE_PER_MIN = 6
 JOURNEY_ALL_PHONES_PER_MIN = 10     # one shared bucket: several paired phones cannot multiply the load on the free providers
 
+BRIEFING_ALL_PHONES_PER_MIN = 10   # one shared bucket across all paired phones (#326)
 BRIEFING_RATE_PER_MIN = 6           # each tap calls Google and the weather service and can hold a dashboard thread up to 60 s
 RATE_LIMITED = {"error": "too many requests: wait a minute", "error_he": "יותר מדי בקשות: חכו דקה", "code": "DRIVE_RATE_LIMITED"}
 LINK_PREFIXES = ("https://www.google.com/maps/dir/?", "https://waze.com/ul?")
