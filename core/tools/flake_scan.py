@@ -27,7 +27,8 @@ LEDGER = Path(__file__).resolve().parents[1] / "tests" / "quarantine.toml"
 HEADER = re.compile(r"_{3,} (?:[\w.]+\.)?(test_\w+)(?:\[[^\]]*\])? _{3,}")
 LOCATION = re.compile(r"tests[\\/]+(test_\w+\.py):\d+: (\w+)")
 TIMEOUT_FRAME = re.compile(r"tests[\\/]+(test_\w+\.py)\", line \d+ in (test_\w+)")
-STAMP = re.compile(r"^\S+\t[^\t]*\t\S+Z ")
+PREPUSH_FAIL = re.compile(r"^\s*\w+\s+FAIL\s+[\d.]+s\s+tests[\\/]+(test_\w+\.py)::(test_\w+)")
+STAMP = re.compile(r"^[^\t]*\t[^\t]*\t\S+Z ")   # "<job name with spaces>\t<step>\t<timestamp> "
 TITLE = "Flaky test: "
 
 
@@ -49,6 +50,9 @@ def failed_tests(log: str) -> dict[str, str]:
         if loc and current:
             out.setdefault(f"{loc.group(1)}::{current}", ln.strip()[:200])
             current = None
+        gate = PREPUSH_FAIL.search(ln)            # the quick gate's table: "perf  FAIL  3.2s  tests/x.py::test_y: ..."
+        if gate:
+            out.setdefault(f"{gate.group(1)}::{gate.group(2)}", ln.strip()[:200])
     if not out:                                   # a hang: pytest-timeout dumps the stack, the test frame names it
         for ln in lines:
             t = TIMEOUT_FRAME.search(ln)

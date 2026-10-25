@@ -73,6 +73,7 @@ AUDIT_MAX_BYTES = 1_000_000
 RISKS = ("low", "medium", "high")
 KINDS = ("tool", "feature", "camera", "message", "shell", "install", "schedule", "call", "other")
 HASHED_DETAILS = ("number",)       # SW-V4 H: a phone number is never written to the audit file, only a keyed hash
+PC_ONLY_MSG = "this approval can only be answered on the computer"
 CHANNELS = ("popup", "tray", "face", "dashboard", "voice", "typed", "cli", "terminal", "phone")
 FILE_CHANNELS = ("dashboard", "cli", "phone")          # what an answers/<id>.json file may claim to be
 
@@ -171,6 +172,7 @@ class Approval:
     shown: list = field(default_factory=list)
     typed_salt: str = ""              # R-01: pending.json keeps salt + keyed hash + sealed code, never the code
     typed_hash: str = ""
+    pc_only: bool = False             # V5 sec F1: a plan approval can be answered on the computer only (not from a phone)
 
     @property
     def spoken(self) -> str:
@@ -304,7 +306,7 @@ class ApprovalService:
     # ------------------------------------------------------------------ asking
     async def ask(self, prompt: str, *, title: str = "", why: str = "", risk: str = "medium", kind: str = "tool",
                   details: dict | None = None, typed: bool = False, timeout: float | None = None,
-                  source: str = "model", voice: bool | None = None) -> bool:
+                  source: str = "model", voice: bool | None = None, pc_only: bool = False) -> bool:
         """Ask the owner; True only on an explicit approval. Everything else (timeout, no channel, shutdown,
         cancellation, rate limit) is False."""
         risk = risk if risk in RISKS else "high"
@@ -349,6 +351,7 @@ class ApprovalService:
         a = Approval(uuid.uuid4().hex[:16], title, prompt, str(why or "")[:600], risk, kind, source, details,
                      f"{secrets.randbelow(9000) + 1000}" if typed else "",
                      (not typed) if voice is None else (bool(voice) and not typed), now, now + t, key)
+        a.pc_only = bool(pc_only)
         if a.typed_code:
             a.typed_salt = secrets.token_hex(8)
             a.typed_hash = akeys.code_hash(self._key, a.typed_salt, a.typed_code) if self._key else ""
@@ -424,6 +427,8 @@ class ApprovalService:
                 return False, HE["voice_typed"]
             if channel == "face" and a.typed_code:
                 return False, HE["typed"]
+            if channel == "phone" and a.pc_only:
+                return False, PC_ONLY_MSG
         try:
             running = asyncio.get_running_loop()
         except RuntimeError:
@@ -732,6 +737,8 @@ def submit_answer(home: Path, aid: str, approved: bool, *, channel: str, typed: 
     key = akeys.load(home)
     if key is None:
         return False, "the approval key of the running JARVES is missing (restart JARVES)"
+    if approved and channel == "phone" and r.get("pc_only"):
+        return False, PC_ONLY_MSG
     if approved and r.get("typed") and not akeys.code_matches(key, str(r.get("typed_salt") or ""),
                                                               str(r.get("typed_hash") or ""), typed):
         return False, HE["typed"] + " / Type the code shown to approve."
@@ -782,14 +789,14 @@ def detach(svc: ApprovalService | None = None) -> None:
 
 
 def ask_owner(home: Path, prompt: str, *, title: str, why: str = "", kind: str = "tool", risk: str = "high",
-              details: dict | None = None, timeout: float | None = None) -> tuple[bool, str]:
+              details: dict | None = None, timeout: float | None = None, pc_only: bool = False) -> tuple[bool, str]:
     """For a destructive DASHBOARD action (called from the HTTP handler thread, which blocks until the owner
     answers): the same ApprovalService the model tools use shows the popup / tray / face / dashboard banner; the
     request waits up to the popup timeout. (ok, reason): ok only on an explicit approval; a denial, timeout or
     nobody to ask is a refusal and the caller must not act. Without a running Core the request is asked by a
     service of its own (answerable from the dashboard banner or `jarvis approvals approve`)."""
     home = Path(home)
-    kw = dict(title=title, why=why, kind=kind, risk=risk, details=details, source="dashboard", timeout=timeout)
+    kw = dict(title=title, why=why, kind=kind, risk=risk, details=details, source="dashboard", timeout=timeout, pc_only=pc_only)
     svc = _current
     try:
         if svc is not None and svc.loop is not None and svc.loop.is_running() and svc.home.resolve() == home.resolve():
