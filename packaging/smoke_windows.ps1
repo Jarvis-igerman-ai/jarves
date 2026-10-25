@@ -64,8 +64,12 @@ function Install([string]$tasks = "", [string[]]$extra = @(), [string]$exe = "",
     if (-not $exe) { $exe = $Installer }
     $taskArg = if ($tasks -eq "DEFAULT") { @() } else { @("/TASKS=`"$tasks`"") }
     $sw = [Diagnostics.Stopwatch]::StartNew()
-    $p = Start-Process $exe -WindowStyle Hidden -Wait -PassThru -ArgumentList (@("/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART",
+    # Wait for SETUP only: `Start-Process -Wait` waits for the whole process tree, and a setup started with
+    # /RESTARTJARVES=1 starts the Core (nowait) as its child, so -Wait never returned (the job hit its timeout)
+    $p = Start-Process $exe -WindowStyle Hidden -PassThru -ArgumentList (@("/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART",
         "/SP-") + $taskArg + @("/DIR=`"$App`"", "/LOG=`"$(Join-Path $Work "install-$(Get-Random).log")`"") + $extra)
+    $null = $p.Handle                                   # keep the handle so ExitCode is readable after the exit
+    if (-not $p.WaitForExit(600000)) { Write-Host "       setup did not finish within 10 minutes"; $p.Kill($true); return -1 }
     if ($time) {
         $Times[$time] = [math]::Round($sw.Elapsed.TotalSeconds, 1)
         $stateFile = Join-Path $App "install-state.json"
