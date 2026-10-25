@@ -89,14 +89,14 @@ class Health:
 
 
 def _clean(d: dict | None) -> dict | None:
-    """SW-V4 B: health text (health.json, `jarvis status`, dashboard) never carries a secret, and in privacy mode no
-    e-mail address or phone number (e.g. the signed-in ChatGPT account in the ai detail).
+    """SW-V4 B: health text (health.json, `jarvis status`, dashboard) never carries a secret, and (owner decision, CodeQL #15) never an
+    e-mail address in either privacy mode; in privacy mode also no phone number (e.g. the signed-in ChatGPT account in the ai detail).
 
     CodeQL #15: EVERY string (any key, nested dicts/lists, and the keys themselves) is cleaned, not only
     `detail`/`action`, so a future field cannot carry a secret into health.json. Numbers and structure are kept."""
     if not d:
         return d
-    fix = (lambda s: logs.redact_pii(logs.redact(s))) if logs.privacy() else logs.redact
+    fix = (lambda s: logs.redact_pii(logs.redact(s))) if logs.privacy() else (lambda s: logs.mask_emails(logs.redact(s)))
     return _clean_value(d, fix, 0)
 
 
