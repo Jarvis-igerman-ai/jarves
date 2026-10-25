@@ -27,6 +27,11 @@ en = "When a newer version exists (on the channel you chose, signed, with the ri
 action = "open:#/updates"
 
 [[steps]]
+he = "מתי ומה קרה: jarvis update auto status (וכרטיס 'עדכונים אוטומטיים' בעמוד Updates) מראה את הצעד הבא המתוכנן (הבדיקה הבאה, או 'התקנה ברגע שקט, לא לפני' שעה מסוימת) ואת התוצאה האחרונה: עודכן לגרסה X, או 'לא הותקן, שום דבר לא השתנה' עם הקוד. אם הגרסה הותקנה אבל לא עלתה, כתוב מה בדיקת הבריאות עשתה: התוכנה הקודמת הוחזרה, או שחזרה מלאה (נתונים ותוכנה) מחכה לאישור שלכם עם jarvis update --rollback."
+en = "When and what happened: jarvis update auto status (and the Automatic updates card on the Updates page) shows the next planned step (the next check, or 'install at a quiet moment, not before' a time) and the last result: updated to version X, or 'not installed, nothing changed' with the code. When the version was installed but did not start, it says what the health check did: the previous program was put back, or a full undo (data and program) waits for your OK with jarvis update --rollback."
+action = "command:jarvis update auto status"
+
+[[steps]]
 he = "ברגע שקט = אין שיחה קולית או צ'אט פעילים, אף אחד לא מדבר, אין אישור ממתין, אין משימת קוד רצה, ולא בשעות שקט או כשההתראות מושהות."
 en = "A quiet moment = no voice or chat session, nobody speaking, no pending approval, no coding-agent task running, and not in quiet hours or while alerts are paused."
 

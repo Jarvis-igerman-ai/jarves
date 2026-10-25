@@ -3,6 +3,7 @@ go through the real ApprovalService popup (no browser confirm)."""
 from __future__ import annotations
 
 import asyncio
+import time
 from types import SimpleNamespace
 
 import pytest
@@ -158,12 +159,12 @@ async def test_dashboard_request_waits_on_the_running_core_service(home):
     try:
         call =asyncio.create_task(asyncio.to_thread(
             lists_mod.api_list_op, ctx, None, {"op": "clear", "list_name": "shopping", "only_done": False}))
-        for _ in range(100):
-            if svc.pending():
-                break
-            await asyncio.sleep(0.05)
+        deadline = time.monotonic() + 60                 # a loaded Windows runner needs seconds to start the thread (#242)
+        while not svc.pending() and not call.done() and time.monotonic() < deadline:
+            await asyncio.sleep(0.02)
         waiting = svc.pending()
-        assert len(waiting) == 1 and not call.done()                       # the request is blocked, waiting for the owner
+        assert len(waiting) == 1 and not call.done(), call.result() if call.done() else "request never reached the service"
+                           # the request is blocked, waiting for the owner
         assert "Clear every item" in waiting[0]["prompt"] and waiting[0]["details"] == {"list": "shopping"}
         ok, why = svc.answer(waiting[0]["id"], True, channel="dashboard")
         assert ok, why

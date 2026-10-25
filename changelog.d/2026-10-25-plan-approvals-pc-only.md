@@ -1,0 +1,1 @@
+- Changed: Goal-plan and plan-step approvals can only be answered on the computer, even with phone approvals on: the phone shows the title and a Deny button only (#200; thanks to XRafik for the matching phone-app change in #228).

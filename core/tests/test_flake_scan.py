@@ -76,7 +76,8 @@ def test_ci_deselects_quarantined_tests_and_still_runs_them_non_blocking():
     q = next(s for n, s in steps.items() if n.startswith("Quarantined tests"))
     assert q.get("continue-on-error") is True and "-m quarantine" in q["run"]
     shards = {m["shard"] for m in jobs["core"]["strategy"]["matrix"]["include"]}
-    cond = re.search(r"matrix\.shard == '([^']+)'", q["if"])
-    assert cond and cond.group(1) in shards, "the quarantine step must match a real shard name, or it never runs"
+    cond = re.search(r"startsWith\(matrix\.shard, '([^']+)'\)", q["if"])
+    assert cond and all(any(s.startswith(cond.group(1)) for s in shards if s.endswith(n)) for n in ("/3", "/4")), \
+        "the quarantine step must match shard 1 of each OS, or it never runs"
     browser = next(s for s in jobs["browser"]["steps"] if s.get("name", "").startswith("pytest real-browser"))
     assert '-m "not quarantine"' in browser["run"]

@@ -30,7 +30,7 @@ FEATURE = "goal_done_line"
 feat.register(FEATURE, "משפט קצר כשיעד הושלם", "One calm line when a goal is finished", True,
               about="when you finish a goal JARVES says one short calm line, only while you are at the PC and never "
                     "between 22:00 and 07:00; switch off for silence",
-              targets=calm.TARGETS)
+              targets=calm.targets('test_v5_pillars.py', 'test_v5_followups.py'))
 CHEER = {"en": "Done, nice work.", "he": "סיימת, כל הכבוד."}      # fixed lines, nothing else is ever said
 CHEER_MAX_AGE_S = 600                                              # a finished goal older than this is not announced
 STALE_DAYS = 7                      # "no progress for a week" in a check-in

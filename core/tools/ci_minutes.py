@@ -1,6 +1,6 @@
 """Monthly CI minutes report for docs/HANDOFF.md (SW-V4 M item 6).
 
-    python tools/ci_minutes.py [--repo igalgerman/jarves] [--month 2026-10]
+    python tools/ci_minutes.py [--repo Jarvis-igerman-ai/jarves] [--month 2026-10]
 
 Sums job run time per workflow and runner OS from the GitHub Actions API through the `gh` CLI (needs `gh auth`).
 Public repos are not billed; the report exists to see which jobs are slow and to check that a docs-only PR costs
@@ -51,7 +51,7 @@ def _gh(path: str, key: str) -> list:
 
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    ap.add_argument("--repo", default="igalgerman/jarves")
+    ap.add_argument("--repo", default="Jarvis-igerman-ai/jarves")
     ap.add_argument("--month", default=datetime.now().strftime("%Y-%m"))
     a = ap.parse_args(argv)
     runs = {r["id"]: r for r in _gh(f"repos/{a.repo}/actions/runs?created=%3E%3D{a.month}-01&per_page=100", "workflow_runs")}

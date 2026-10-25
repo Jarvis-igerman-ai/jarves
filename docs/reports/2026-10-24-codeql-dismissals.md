@@ -1,6 +1,6 @@
 # CodeQL dismissals, 24 Oct 2026
 
-Owner approved dismissing 10 alerts on igalgerman/jarves, each individually with its own written reason (no blanket rule, no path exclusion). Each was re-read on main before dismissal.
+Owner approved dismissing 10 alerts on Jarvis-igerman-ai/jarves, each individually with its own written reason (no blanket rule, no path exclusion). Each was re-read on main before dismissal.
 
 | Alert | File | Reason | Evidence |
 |---|---|---|---|

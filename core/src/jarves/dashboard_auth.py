@@ -58,7 +58,10 @@ ADMIN_ONLY = ("/api/devices", "/api/audit", "/api/mobile", "/api/features/dashbo
 # installing an update, adding a folder grant or reading a file, switching a risky feature (camera, gmail_send...)
 # on, stopping the Core, deleting/restoring data, editing config.toml, running a backup/restore - is now refused
 # by default because it is not on the list. These stay the computer's own job (loopback session).
-DEVICE_READ_DENY = ADMIN_ONLY + ("/api/files", "/api/backup", "/api/chat")       # not even readable from a phone
+# F4 (#203): conversation text, goal-plan step args/results, agent and project reads are the owner's (loopback) only;
+# a paired phone gets conversation text only through the scoped /api/m/* routes, never via the dashboard session.
+DEVICE_READ_DENY = ADMIN_ONLY + ("/api/files", "/api/backup", "/api/chat", "/api/continuity", "/api/goal-plans",
+                                 "/api/agents", "/api/projects")                   # not even readable from a phone
 _DEVICE_WRITE_OK = re.compile(
     r"/api/diagnose"                                               # run self-diagnosis
     r"|/api/issues/\d+"                                            # change an issue's status

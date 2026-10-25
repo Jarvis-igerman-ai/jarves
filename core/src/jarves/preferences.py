@@ -25,7 +25,7 @@ FEATURE = "prefs_in_prompt"
 feat.register(FEATURE, "שימוש בהעדפות בכל שיחה", "Use learned preferences in conversations", True, applies="next_session",
               about="your confirmed preferences (only those you said yes to) are added to the instructions of every "
                     "conversation within a small size limit; switch off to stop",
-              targets=calm.TARGETS)
+              targets=calm.targets('test_v5_pillars.py', 'test_v5_followups.py'))
 PROMPT_TOKENS = 120               # estimated-token budget of the preference block in the instructions
 PROMPT_HEAD = "Preferences the owner confirmed (follow them quietly, never recite this list):"
 
@@ -125,7 +125,9 @@ class Preferences:
         logs.info("prefs", "PREF_REAFFIRMED", "preference reaffirmed", id=pid, by=by)
         return bool(n)
 
-    def edit(self, pid: int, text: str, *, by: str = "user") -> dict:
+    def edit(self, pid: int, text: str, *, by: str = "user", repropose: bool = False) -> dict:
+        """Reword an item. `repropose` (the model's edit, V5 sec F2): a confirmed item goes back to 'proposed' so the
+        new wording needs a fresh confirm before it can reach the instructions."""
         t = _clean(text, MAX_TEXT)
         if not t or looks_sensitive(t):
             raise ValueError("empty or sensitive text: not stored")
@@ -133,8 +135,14 @@ class Preferences:
         other = self.db.row("SELECT id FROM learned_prefs WHERE norm=? AND id<>?", (norm, pid))
         if other:
             raise ValueError("the same preference already exists")
-        if not self.get(pid):
+        cur = self.get(pid)
+        if not cur:
             raise KeyError(pid)
+        if repropose and cur["state"] == "confirmed":
+            self.db.x("UPDATE learned_prefs SET text=?, norm=?, state='proposed', confirmed_at=0, updated=? WHERE id=?",
+                      (t, norm, self.clock(), pid))
+            logs.info("prefs", "PREF_REPROPOSED", "a confirmed preference was reworded: it needs a new confirm", id=pid, by=by)
+            return self._view(self.get(pid))
         self.db.x("UPDATE learned_prefs SET text=?, norm=?, updated=? WHERE id=?", (t, norm, self.clock(), pid))
         logs.info("prefs", "PREF_EDITED", "preference edited", id=pid, by=by)
         return self._view(self.get(pid))
@@ -283,7 +291,7 @@ def make_skill(prefs: Preferences):
 
             async def edit(a: EditArgs):
                 try:
-                    return ToolResult(True, "updated", {"item": prefs.edit(a.id, a.text, by="voice")})
+                    return ToolResult(True, "updated; it needs the owner's confirmation again before it is remembered", {"item": prefs.edit(a.id, a.text, by="voice", repropose=True)})
                 except KeyError:
                     return ToolResult(False, "no such preference", code="PREF_NOT_FOUND")
                 except ValueError as e:
@@ -296,11 +304,16 @@ def make_skill(prefs: Preferences):
             async def forget_impact(_a: IdArgs):
                 return 1, "לשכוח את ההעדפה? / Forget this preference?"
 
+            def confirm_meta(a: IdArgs) -> dict:
+                r = prefs.get(a.id)           # the popup shows WHAT would be remembered, not just "a preference"
+                return {"details": {"preference": str(r["text"])[:MAX_TEXT]}} if r else {}
+
             return [
                 Tool("pref_suggest", "Owner STATED a lasting preference: propose it, then ask. 'I always prefer', 'אני תמיד מעדיף'. Never secrets, health or money.",
                      suggest, SuggestArgs, permission="action"),
                 Tool("pref_confirm", "Owner said yes: 'yes keep that preference', 'כן תשמור את ההעדפה'.", confirm, IdArgs,
-                     permission="action", confirm="לזכור את ההעדפה הזאת? / Remember this preference?"),
+                     permission="action", confirm="לזכור את ההעדפה הזאת? / Remember this preference?",
+                     approval_meta=confirm_meta),
                 Tool("pref_decline", "Owner said no: 'no do not keep that preference', 'לא תשמור את ההעדפה'.", decline, IdArgs, permission="action"),
                 Tool("pref_show", "Read learned preferences: 'what preferences did you learn', 'אילו העדפות למדת'.", show, NoArgs,
                      permission="read"),

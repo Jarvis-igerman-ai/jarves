@@ -7,7 +7,7 @@ title_he = "מצלמה"
 title_en = "Camera"
 what_he = "ג'ארביס מסתכל דרך המצלמה רק כשמבקשים ממנו, למשל \"מה אתה רואה?\". כבויה מראש."
 what_en = "JARVES looks through the camera only when you ask, e.g. \"what do you see?\". Off by default."
-say = [["תסתכל, מה אתה רואה?", "Look, what do you see?"], ["מה אני מחזיק ביד?", "What am I holding?"]]
+say = [["מה אתה רואה?", "What do you see?"], ["מה אני מחזיק ביד?", "What am I holding?"], ["תקרא את זה", "Read this"]]
 expect_he = "הפעלת המתג רק מאפשרת שימוש. המצלמה נפתחת לצילום לפי בקשה או לתצוגה מקומית מוגבלת בזמן, ונסגרת בסיום."
 expect_en = "Enabling the switch only makes the skill available. The camera opens for a requested capture or a timed local preview, then closes."
 test = "camera"
@@ -15,8 +15,8 @@ test_he = "הבדיקה מחפשת מצלמה ולא מצלמת כלום. כשה
 test_en = "The check looks for a camera and takes no picture. With the switch off, the light must be off."
 cost_he = "תמונה אחת לשאלה, כמה סנטים."
 cost_en = "One picture per question, a few cents."
-privacy_he = "תמונה נשלחת ל-OpenAI רק כשביקשתם. שום תמונה לא נשמרת במחשב."
-privacy_en = "A picture is sent to OpenAI only when you asked. No picture is stored."
+privacy_he = "תמונה נשלחת ל-OpenAI רק כשביקשתם מג'ארביס להסתכל. בדיקות, תצוגה מקומית וכפתור \"בדיקת תמונה\" נשארים במחשב ולא נשלחים לשום ספק. שום תמונה לא נשמרת."
+privacy_en = "A picture is sent to OpenAI only when you ask JARVES to look. Tests, the local preview and Test a frame stay on this computer and are never sent to any provider. No picture is stored."
 
 [[steps]]
 he = "חברו מצלמה (USB או המובנית)."
@@ -30,12 +30,36 @@ action = "feature_on:camera"
 check = "enabled:camera"
 
 [[steps]]
-he = "לחצו \"בדוק עכשיו\" ואז אמרו \"מה אתה רואה?\"."
-en = "Press Test now, then say \"what do you see?\"."
+he = "פתחו את הדף \"מצלמה\" בלוח הבקרה (או הריצו jarvis camera). המצב מראה: כבויה, זמינה, תצוגה, מצלמת, שולח ל-AI, עסוקה או שגיאה. \"זמינה\" אומר שהחיישן סגור."
+en = "Open the Camera page in the dashboard (or run jarvis camera). The state shows Off, Available, Previewing, Capturing, Sending to AI, Busy or Error. Available means the sensor is closed."
+
+[[steps]]
+he = "לחצו \"בדיקת מכשיר\": זה רק מחפש מצלמה ולא פותח אותה. אחר כך \"בדיקת תמונה\": תמונה אחת נקלטת, נמדדת ונמחקת (נשארת במחשב)."
+en = "Press Check device: it only looks for a camera and does not open it. Then Test a frame: one picture is read, measured and dropped (it stays on this computer)."
 action = "test"
+
+[[steps]]
+he = "לחצו \"הצג תצוגה מקומית\" כדי לכוון את המצלמה. יש ספירה לאחור של 20 שניות וכפתור \"עצור\". התמונה לא נשמרת ולא נשלחת."
+en = "Press Start local preview to aim the camera. It has a 20 second countdown and a Stop button. The picture is not saved or sent."
+
+[[steps]]
+he = "אמרו \"מה אתה רואה?\". רק עכשיו תמונה אחת נשלחת לספק ה-AI, וזה כתוב בדף."
+en = "Say \"what do you see?\". Only now one picture is sent to the AI provider, and the page says so."
 
 [[problems]]
 he = "הוא אומר שאין מצלמה"
 en = "He says there is no camera"
 fix_he = "חברו מחדש את המצלמה וסגרו תוכנות אחרות שמשתמשות בה (זום, Teams)."
 fix_en = "Reconnect the camera and close other apps using it (Zoom, Teams)."
+
+[[problems]]
+he = "בדיקת תמונה נכשלת או שחורה"
+en = "Test a frame fails or is black"
+fix_he = "סגרו תוכנות שמשתמשות במצלמה, פתחו את התריס או כיסוי העדשה, וחברו מחדש. הדף אומר מה לעשות בכל שגיאה."
+fix_en = "Close apps that use the camera, open the shutter or lens cover, and reconnect. The page names the next step for each error."
+
+[[problems]]
+he = "לכבות את המצלמה"
+en = "Turn the camera off"
+fix_he = "כבו את המתג \"מצלמה\" בדף היכולות או הריצו jarvis features off camera. החיישן נסגר והתצוגה נעצרת."
+fix_en = "Turn the Camera switch off in Features or run jarvis features off camera. The sensor closes and any preview stops."

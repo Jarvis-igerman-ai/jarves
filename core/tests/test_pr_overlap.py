@@ -39,7 +39,7 @@ def test_preflight_excludes_self_and_only_reads_other_prs(monkeypatch):
         queried.append(n)
         return {f"f{n}.py", "common.py" if n == 2 else "none.py"}
     monkeypatch.setattr(po, "pr_files", fake_files)
-    assert po.check("igalgerman/jarves", "main", {"common.py"}, exclude_pr=1) == [(2, ["common.py"])]
+    assert po.check("Jarvis-igerman-ai/jarves", "main", {"common.py"}, exclude_pr=1) == [(2, ["common.py"])]
     assert sorted(queried) == [2, 3]
 
 
@@ -48,7 +48,7 @@ def test_paginated_files_and_true_nonempty_checks(monkeypatch):
         assert "--paginate" in args and "--slurp" in args and "per_page=100" in args[-1]
         return json.dumps([[{"filename": "a.py"}], [{"filename": "b.py"}]])
     monkeypatch.setattr(po, "command", fake_command)
-    assert po.pr_files("igalgerman/jarves", 25) == {"a.py", "b.py"}
+    assert po.pr_files("Jarvis-igerman-ai/jarves", 25) == {"a.py", "b.py"}
 
 
 def test_fail_closed_on_partial_or_unavailable_inventory(monkeypatch, capsys):
@@ -77,7 +77,7 @@ def test_open_pr_limit_fails_instead_of_lying(monkeypatch):
         [{"number": n, "url": "", "title": ""} for n in range(31)]
     ))
     try:
-        po.list_open_prs("igalgerman/jarves", "main")
+        po.list_open_prs("Jarvis-igerman-ai/jarves", "main")
     except po.PreflightError as exc:
         assert "More than 30" in str(exc)
     else:
