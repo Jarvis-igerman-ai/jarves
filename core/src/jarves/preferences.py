@@ -25,7 +25,7 @@ FEATURE = "prefs_in_prompt"
 feat.register(FEATURE, "שימוש בהעדפות בכל שיחה", "Use learned preferences in conversations", True, applies="next_session",
               about="your confirmed preferences (only those you said yes to) are added to the instructions of every "
                     "conversation within a small size limit; switch off to stop",
-              targets=calm.TARGETS)
+              targets=calm.targets('test_v5_pillars.py', 'test_v5_followups.py'))
 PROMPT_TOKENS = 120               # estimated-token budget of the preference block in the instructions
 PROMPT_HEAD = "Preferences the owner confirmed (follow them quietly, never recite this list):"
 
