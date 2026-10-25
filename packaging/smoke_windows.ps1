@@ -155,13 +155,69 @@ if ($UpgradeFrom) {
     $desktop = Join-Path ([Environment]::GetFolderPath("Desktop")) "JARVES.lnk"
     Check (Test-Path $desktop) "old desktop shortcut created for preservation test"
     $mid = Collect "old-installed"                     # Run key / PATH with the old version installed
+    # #153: a file locked by a process outside the program folder (an editor, a backup or AV scan) cannot be ended by
+    # setup: the upgrade must be refused cleanly (no runtime error) and leave the old version complete and working.
+    $lockFile = Join-Path $App "python\smoke-lock.txt"
+    $locker = Start-Process "pwsh" -WindowStyle Hidden -PassThru -ArgumentList @("-NoProfile", "-Command",
+        "`$f = [IO.File]::Open('$lockFile', 'OpenOrCreate', 'ReadWrite', 'None'); Start-Sleep 900")
+    for ($i = 0; $i -lt 40 -and -not (Test-Path $lockFile); $i++) { Start-Sleep -Milliseconds 250 }
+    Start-Sleep 1
+    Check ((Install "DEFAULT" @() $Installer "") -ne 0) "file locked by a process outside the program folder: the upgrade is refused (setup exit code is not 0)"
+    Check (@(Select-String -Path (Join-Path $Work "install-*.log") -Pattern "Cannot retain previous program: python" -ErrorAction SilentlyContinue).Count -ge 1) "the refusal is logged with the part that was in use"
+    Check ((Version-Of) -eq $oldVer -and (Test-Path (Join-Path $App "python\python.exe")) -and (Test-Path (Join-Path $App "jarvis.cmd"))) "the refused upgrade left the old version $oldVer complete"
+    Check (-not (Test-Path (Join-Path $App "rollback\python"))) "nothing was left half-moved into the rollback folder"
+    Check ((Jarvis @("--version")).text -match [regex]::Escape($oldVer)) "the old version still runs after the refused upgrade"
+    Stop-Process -Id $locker.Id -Force -ErrorAction SilentlyContinue
+    $locker.WaitForExit(10000) | Out-Null
+    Remove-Item -LiteralPath $lockFile -Force -ErrorAction SilentlyContinue
+    # #153 review P2-7: an undeletable leftover rollback folder (a file in it held open by a process outside the program
+    # folder) must stop the upgrade BEFORE anything moves. The old code deleted what it could, moved python, failed on
+    # face and then "restored" the stale rollback\face over the good face. Discriminating: {app}\face must be untouched.
+    $part = if (Test-Path (Join-Path $App "face")) { "face" } else { "python" }
+    $goodFiles = @(Get-ChildItem -LiteralPath (Join-Path $App $part) -Recurse -File).Count
+    New-Item -ItemType Directory -Force (Join-Path $App "rollback\$part") | Out-Null
+    $staleLocked = Join-Path $App "rollback\$part\stale-locked-from-older-run.txt"
+    $locker = Start-Process "pwsh" -WindowStyle Hidden -PassThru -ArgumentList @("-NoProfile", "-Command",
+        "`$f = [IO.File]::Open('$staleLocked', 'OpenOrCreate', 'ReadWrite', 'None'); Start-Sleep 900")
+    for ($i = 0; $i -lt 40 -and -not (Test-Path $staleLocked); $i++) { Start-Sleep -Milliseconds 250 }
+    Start-Sleep 1
+    Check ((Install "DEFAULT" @() $Installer "") -ne 0) "undeletable leftover rollback folder: the upgrade is refused (setup exit code is not 0)"
+    Check (@(Select-String -Path (Join-Path $Work "install-*.log") -Pattern "Old rollback folder could not be deleted or moved" -ErrorAction SilentlyContinue).Count -ge 1) "undeletable leftover rollback folder: the refusal is logged"
+    Check ((Test-Path (Join-Path $App "python\python.exe")) -and (Test-Path (Join-Path $App "jarvis.cmd")) -and (Version-Of) -eq $oldVer) "undeletable leftover rollback folder: the old version $oldVer is complete"
+    Check (@(Get-ChildItem -LiteralPath (Join-Path $App $part) -Recurse -File -ErrorAction SilentlyContinue).Count -eq $goodFiles -and -not (Test-Path (Join-Path $App "$part\stale-locked-from-older-run.txt"))) "undeletable leftover rollback folder: the working $part was not replaced by the stale one"
+    Check ((Jarvis @("--version")).text -match [regex]::Escape($oldVer)) "undeletable leftover rollback folder: the old version still runs"
+    Stop-Process -Id $locker.Id -Force -ErrorAction SilentlyContinue
+    $locker.WaitForExit(10000) | Out-Null
+    Remove-Item -LiteralPath (Join-Path $App "rollback") -Recurse -Force -ErrorAction SilentlyContinue
+    # #153: a leftover rollback folder from an older run must not block the upgrade
+    New-Item -ItemType Directory -Force (Join-Path $App "rollback\python") | Out-Null
+    $stale = Join-Path $App "rollback\python\stale-from-older-run.txt"
+    "old" | Set-Content $stale
+    # #153: a windowed process under the program folder (face / music player stand-in) is asked to close first
+    # ONE pre-quoted argument string: Start-Process joins an array WITHOUT quoting, so `-c "import ..."` arrived as
+    # `-c import` and python exited at once (the stand-ins never ran during setup, so nothing proved the stop step)
+    $windowed = Start-Process (Join-Path $App "python\pythonw.exe") -PassThru -ArgumentList (
+        '-I -c "import tkinter as t; r = t.Tk(); r.title(''JARVES smoke window''); r.mainloop()"')
+    for ($i = 0; $i -lt 40 -and $windowed.MainWindowHandle -eq 0 -and -not $windowed.HasExited; $i++) { Start-Sleep -Milliseconds 250; $windowed.Refresh() }
+    $hasWindow = (-not $windowed.HasExited) -and $windowed.MainWindowHandle -ne 0
     # issue #141: a process running from the old program folder (like `jarves dashboard`) must not block the upgrade
-    $stray = Start-Process (Join-Path $App "python\python.exe") -ArgumentList @("-I", "-c", "import time; time.sleep(900)") -WindowStyle Hidden -PassThru
-    Check (-not $stray.HasExited) "process running from the old program folder (dashboard stand-in) is alive before the upgrade"
+    $stray = Start-Process (Join-Path $App "python\python.exe") -ArgumentList '-I -c "import time; time.sleep(900)"' -WindowStyle Hidden -PassThru
+    Start-Sleep 2
+    Check (-not $stray.HasExited) "process running from the old program folder (dashboard stand-in) is alive before the upgrade (2 s after start)"
     # silent upgrade over it: no /TASKS (the installer keeps its defaults), same AppId, data folder untouched
     Check ((Install "DEFAULT" @("/KEEPDATA=0") $Installer "silent_upgrade_s") -eq 0) "silent upgrade $oldVer -> $Version"
     Check (Test-Path (Join-Path $App "rollback\python\python.exe")) "previous program retained for offline rollback"
     Check ($stray.WaitForExit(5000)) "the stray old-folder process was ended by the installer"
+    # evidence for the CI log: what the installer's stop step did (stray pid $($stray.Id), windowed pid $($windowed.Id))
+    $upLog = Get-ChildItem (Join-Path $Work "install-*.log") | Sort-Object LastWriteTime | Select-Object -Last 1
+    Write-Host "       stray pid $($stray.Id), windowed pid $($windowed.Id); setup log $($upLog.Name):"
+    Select-String -Path $upLog.FullName -Pattern "Stopping JARVES|Retaining|retain|Restart Manager|RestartManager|close" -ErrorAction SilentlyContinue | ForEach-Object { Write-Host "       $($_.Line)" }
+    Check (@(Select-String -Path (Join-Path $Work "install-*.log") -Pattern "Stopping JARVES before the upgrade: hard-stopped: python \(pid $($stray.Id)\)" -ErrorAction SilentlyContinue).Count -ge 1) "the installer logged the process it had to hard-stop, by name"
+    Check (-not (Test-Path (Join-Path $App "rollback\python\stale-from-older-run.txt"))) "leftover rollback folder from an older run was replaced"
+    Check ($windowed.WaitForExit(5000)) "windowed process under the program folder ended"
+    if ($hasWindow) {
+        Check (@(Select-String -Path (Join-Path $Work "install-*.log") -Pattern "asked to close: pythonw \(pid $($windowed.Id)\)" -ErrorAction SilentlyContinue).Count -ge 1) "windowed process under the program folder was asked to close before any hard stop"
+    } else { Write-Host "[SKIP] windowed process under the program folder had no window on this runner (no desktop); graceful close not checked" }
     $state = Get-Content (Join-Path $App "install-state.json") -Raw | ConvertFrom-Json
     Check ($state.complete -and $state.backups.Count -ge 1) "installer verified backup and completed migration"
     $newVer = Version-Of

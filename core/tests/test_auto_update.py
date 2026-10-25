@@ -415,3 +415,55 @@ def test_cli_update_auto(home, monkeypatch, capsys):
     assert "Automatic updates: on" in capsys.readouterr().out
     assert cli.main(["update", "auto", "off"]) == 0
     assert "Automatic updates: off" in capsys.readouterr().out
+
+
+# ---------------------------------------------------------------------- next planned time + last result (#153)
+def test_status_shows_the_next_planned_step_and_the_last_result(home, server, keys):
+    server.publish(keys, NEW)
+    r = Rig(home, server, keys)
+    assert r.au.status()["next_kind"] == "check"                                      # nothing checked yet: due now
+    assert r.tick() == "announced"
+    s = r.au.status()
+    assert s["next_kind"] == "install" and s["next_at"] == r.clock.t + NOTICE_GRACE_S
+    r.au.answer("later")
+    assert r.au.status()["next_at"] == r.clock.t + auto_update.LATER_S
+    r.au.answer("now")
+    assert r.au.status()["next_kind"] == "install" and r.au.status()["next_at"] == r.clock.t
+    r.busy.append("voice_session")
+    r.clock.t += NOTICE_GRACE_S + 1
+    r.au.answer("later")
+    r.clock.t += auto_update.LATER_S + 1
+    assert r.tick() == "busy" and r.au.status()["next_kind"] == "quiet_moment"
+    assert r.au.status()["last_result"] is None
+    server.status[f"/JARVES-Setup-{NEW}.exe"] = 500                                   # a failure: reported with its code
+    r.busy.clear()
+    assert r.tick() == "failed"
+    last = r.au.status()["last_result"]
+    assert last["ok"] is False and last["version"] == NEW and last["code"] and last["rollback_possible"] is False
+    assert r.au.status()["next_at"] == r.clock.t + auto_update.BACKOFF_S[0]
+    lines = auto_update.status_lines(r.au.status())
+    assert any("Nothing changed" in x or "שום דבר לא השתנה" in x for x in lines)
+    server.status.clear()                                                             # then it works
+    assert r.tick(auto_update.BACKOFF_S[0] + 1) == "installing"
+    r.au.current = lambda: NEW
+    updates.note_start(home, NEW)
+    updates.mark_healthy(home, NEW)
+    r.au.after_start()
+    last = r.au.status()["last_result"]
+    assert last["ok"] is True and last["version"] == NEW and last["code"] is None
+    assert last["rollback_possible"] == updates.rollback_info(home)["possible"]
+    assert any("--rollback" in x for x in auto_update.status_lines(r.au.status()))
+    r.on = False
+    assert r.au.status()["next_at"] is None
+
+
+def test_gave_up_has_no_next_step(home, server, keys):
+    server.publish(keys, NEW)
+    server.status[f"/JARVES-Setup-{NEW}.exe"] = 500
+    r = Rig(home, server, keys)
+    r.ready()
+    for _ in range(GIVE_UP_AFTER):
+        r.tick()
+        r.clock.t += 13 * 3600
+    s = r.au.status()
+    assert s["gave_up"] == NEW and s["next_at"] is None and s["last_result"]["ok"] is False

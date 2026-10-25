@@ -42,6 +42,7 @@ from urllib.parse import urlsplit
 from . import features as feat
 from . import logs
 from . import clilang
+from .swr import SwrCache
 from .channels_common import StepSkipped, is_skip_word, read_json, read_secret, targets, write_private_json
 
 FEATURE = "guided_setup"
@@ -1058,10 +1059,13 @@ feat.register(FEATURE, "חיבור חשבונות מודרך", "Guided account s
 
 
 def dashboard_routes(register) -> None:
+    cache = SwrCache(ttl_s=5.0, wait_s=10.0)         # #159 perf2: the status probes cost ~0.45 s per poll
+
     def get(ctx, _m, _b):
-        return 200, items_json(ctx.home, ctx.cfg)
+        return cache.get(str(ctx.home), lambda: (200, items_json(ctx.home, ctx.cfg)))
 
     def run(ctx, _m, body):
+        cache.invalidate()
         fid = str((body or {}).get("id") or "")
         if fid and fid not in ONLY:
             return 404, {"error": "no such integration"}
@@ -1091,6 +1095,7 @@ def dashboard_routes(register) -> None:
                      "message_en": f"A window with {cmd} opened." if ok else f"Open a terminal and run: {cmd}"}
 
     def skip(ctx, m, body):
+        cache.invalidate()
         fid, skipped = str((body or {}).get("id") or ""), bool((body or {}).get("skip", True))
         if fid not in ONLY:
             return 404, {"error": "no such integration"}
@@ -1099,6 +1104,7 @@ def dashboard_routes(register) -> None:
         return 200, items_json(ctx.home, ctx.cfg)
 
     def check(ctx, _m, body):
+        cache.invalidate()
         from .connect_checks import CheckCtx, run_checks
         fid = str((body or {}).get("id") or "")
         if fid and fid not in ONLY:
