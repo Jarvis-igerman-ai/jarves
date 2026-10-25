@@ -60,6 +60,7 @@ STATUSES = ("new", "acknowledged", "fixed", "ignored")
 OPEN = ("new", "acknowledged")
 SEVERITIES = ("P1", "P2", "P3")
 MAX_RECORDS = 300
+EXPIRE_DAYS = 14.0                               # an open issue not seen again for this long expires (history kept)
 QUIET_DAYS = 3.0                                 # an update this old with no new occurrence closes an open issue
 TOOL_FAIL_THRESHOLD = 5                          # failures of one tool + code ...
 TOOL_FAIL_WINDOW_S = 3600.0                      # ... within this window become an issue
@@ -249,6 +250,8 @@ class Registry:
                 r["title"] = clean_title(title, r["title"])
             if title_he and it._HEB.search(title_he):
                 r["title_he"] = clean_title(title_he, r.get("title_he", ""))
+            if r["status"] == "ignored" and r.get("closed_reason") == "expired":
+                r["status"], r["closed_reason"] = "new", ""              # it happened again after it expired
             r["severity"] = min(r["severity"], severity)                  # "P1" < "P2": the worse one stays
             if ev:
                 r["evidence"] = ev
@@ -299,7 +302,9 @@ class Registry:
         op = [r for r in rows if r["status"] in OPEN and it.classify(r) == "bug"]
         return {"open": len(op), "p1": sum(r["severity"] == "P1" for r in op), "p2": sum(r["severity"] == "P2" for r in op),
                 "p3": sum(r["severity"] == "P3" for r in op), "new": sum(r["status"] == "new" for r in op),
-                "info": sum(r["status"] in OPEN and it.classify(r) == "info" for r in rows), "total": len(rows)}
+                "info": sum(r["status"] in OPEN and it.classify(r) == "info" for r in rows), "total": len(rows),
+                # the header chip is red only for these: NEW (not yet seen by the owner) P1/P2 bugs
+                "urgent": sum(r["status"] == "new" and r["severity"] in ("P1", "P2") for r in op)}
 
     # ---- changes by the owner
     def set_status(self, iid: str, status: str, *, version: str = "", note: str = "") -> dict | None:
@@ -321,6 +326,19 @@ class Registry:
             self._save(d)
         logs.info("issues", "ISSUE_STATUS", "issue status changed", item=iid, status=status)
         return r
+
+    def mark_all_seen(self) -> int:
+        """'Mark all as seen': every new bug becomes acknowledged (it stays listed, it is no longer red)."""
+        with self.lock:
+            d = self.load()
+            n = 0
+            for r in d["issues"].values():
+                if r["status"] == "new":
+                    r["status"] = "acknowledged"
+                    n += 1
+            if n:
+                self._save(d)
+        return n
 
     def mark_reported(self, iid: str, url: str = "", saved: str = "") -> None:
         with self.lock:
@@ -417,6 +435,11 @@ class Registry:
                         r["closed_reason"], r["last_version"] = "quiet", (r.get("versions") or [""])[-1]
                         closed.append(r)
                         changed = True
+            for r in d["issues"].values():              # auto-expire: not seen again for EXPIRE_DAYS
+                if r["status"] in OPEN and now - r["last_seen"] >= EXPIRE_DAYS * 86400:
+                    r["status"], r["closed_reason"], r["fixed_notice"] = "ignored", "expired", True
+                    closed.append(r)
+                    changed = True
             if changed:
                 self._save(d)
         return closed
@@ -897,6 +920,10 @@ def api_count(ctx, m, body, q=None):
     return 200, reg.counts()
 
 
+def api_seen(ctx, m, body):
+    return 200, {"seen": _reg(ctx).mark_all_seen()}
+
+
 def api_get(ctx, m, body, q=None):
     reg = _reg(ctx)
     r = reg.get(m.group(1))
@@ -936,6 +963,7 @@ def dashboard_routes(register) -> None:
     register("GET", r"/api/bugs", api_list)
     register("GET", r"/api/bugs/count", api_count)
     register("POST", r"/api/bugs/client-error", api_client_error)
+    register("POST", r"/api/bugs/seen", api_seen)
     register("GET", r"/api/bugs/(JI-[0-9a-f]{8})", api_get)
     register("POST", r"/api/bugs/(JI-[0-9a-f]{8})/status", api_set)
     register("POST", r"/api/bugs/(JI-[0-9a-f]{8})/report", api_report)

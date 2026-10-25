@@ -7,6 +7,7 @@ from __future__ import annotations
 import time
 from datetime import datetime
 
+from . import diagnose
 from .health import read_snapshot
 from .store import daily_costs
 
@@ -59,7 +60,8 @@ def api_home(ctx, _m, _body):
     feats = _features(ctx)
     today = datetime.now().date().isoformat()
     day = next((d for d in daily_costs(ctx.store, ctx.cfg.pricing, 1) if d["day"] == today), None)
-    issues = ctx.store.issues("open")
+    diagnose.expire(ctx.store)
+    issues = diagnose.by_cause(ctx.store.issues("open"))["problems"]   # one per cause, expected states not counted
     high = sum(i["severity"] == "high" for i in issues)
     ai = comp.get("ai") or {}
     music = next((f for f in feats if f["id"] == "music"), None)

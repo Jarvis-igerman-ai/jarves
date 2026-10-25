@@ -300,6 +300,7 @@ def api_overview(ctx: Ctx, m, body, q=None):
     days = daily_costs(st, ctx.cfg.pricing, 7)
     live = st.live_session()
     snap = read_snapshot(ctx.home / "health.json") or {}
+    diagnose.expire(st)
     issues = diagnose.by_cause(st.issues("open"))["problems"]       # one per cause; environment states are not counted
     from .updates import beta_label
     return 200, {"version": __version__, "beta": beta_label(ctx.home), "today": next((d for d in days if d["day"] == today), None), "week": days,
@@ -391,6 +392,10 @@ def api_issue_set(ctx: Ctx, m, body):
     except ValueError as e:
         return 400, {"error": str(e)}
     return (200, {"ok": True}) if ok else (404, {"error": "no such issue"})
+
+
+def api_issues_seen(ctx: Ctx, m, body):
+    return 200, {"seen": diagnose.mark_all_seen(ctx.store)}
 
 
 def api_diagnose(ctx: Ctx, m, body):
@@ -752,6 +757,7 @@ for _m, _p, _h in [
         ("POST", r"/api/memory/undo", api_memory_undo),
         ("GET", r"/api/skills", api_skills), ("GET", r"/api/issues", api_issues),
         ("POST", r"/api/issues/(\d+)", api_issue_set), ("POST", r"/api/diagnose", api_diagnose),
+        ("POST", r"/api/issues/seen-all", api_issues_seen),
         ("GET", r"/api/workspace", api_workspace), ("GET", r"/api/workspace/([^/]+)", api_workspace_file),
         ("PUT", r"/api/workspace/([^/]+)", api_workspace_write),
         ("POST", r"/api/workspace/([^/]+)/preview", api_workspace_preview),

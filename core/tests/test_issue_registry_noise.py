@@ -134,7 +134,8 @@ def test_fixed_with_version_and_note(tmp_path):
     assert _cli(tmp_path, "fixed", iid, "--note", "C:\\Users\\me\\x.txt")[0] == 2     # private text is refused
 
 
-def test_cli_list_options_json_and_utf8_export(tmp_path):
+def test_cli_list_options_json_and_utf8_export(tmp_path, monkeypatch):
+    monkeypatch.setattr(ir, "EXPIRE_DAYS", 1e9)       # the fake clock is in 1970 and the CLI reads with the real one
     clock = Clock()
     reg = ir.Registry(tmp_path, clock=clock, version="4.0.1.278")
     ir.ingest_findings(reg, [_finding("anomaly:newcode:REAL_BUG", "New error code REAL_BUG", title_he="קוד שגיאה חדש REAL_BUG"),
