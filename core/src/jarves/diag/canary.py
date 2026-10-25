@@ -24,6 +24,7 @@ from __future__ import annotations
 import asyncio
 import json
 import os
+import re
 import shutil
 import statistics
 import tempfile
@@ -214,16 +215,35 @@ async def j_calendar(env: Env) -> str:
     return f"{len(r.json().get('items', []))} calendar(s) listed (read-only)"
 
 
+TRANSIENT_NET = re.compile(r"net::ERR_(NO_BUFFER_SPACE|INSUFFICIENT_RESOURCES|NETWORK_IO_SUSPENDED)")
+
+
 async def j_dashboard(env: Env) -> str:
+    """One retry, only when EVERY error is a host socket-exhaustion error (Windows ERR_NO_BUFFER_SPACE on a loaded
+    runner, flake #278): a real page or script error never matches, so it is never retried away."""
+    for attempt in (1, 2):
+        try:
+            return await _dashboard_attempt(env)
+        except AssertionError as e:
+            parts = str(e).split("; ")
+            if attempt == 2 or not all(TRANSIENT_NET.search(x) for x in parts):
+                raise
+    raise AssertionError("unreachable")
+
+
+async def _dashboard_attempt(env: Env) -> str:
     try:
         from playwright.async_api import async_playwright
     except ImportError:
         raise Blocked("playwright is not installed (extra 'browser')")
     from ..config import Config
     from ..dashboard import Dashboard
+    from .. import dashboard_auth
     d = await asyncio.to_thread(lambda: Dashboard(env.home, Config()).start())
     errs: list[str] = []
     times = {}
+    rate = dashboard_auth.RATE_PER_MIN
+    dashboard_auth.RATE_PER_MIN = 10 ** 6        # 16 page loads x ~15 API calls in seconds is not abuse; the journey measures render, not the limiter
     try:
         async with async_playwright() as pw:
             kw = {"channel": env.browser_channel} if env.browser_channel else {}
@@ -241,9 +261,20 @@ async def j_dashboard(env: Env) -> str:
                     t = time.perf_counter()
                     await page.goto(d.url + "#/" + name)
                     await page.wait_for_load_state("networkidle", timeout=30000)
-                    await page.wait_for_function("document.querySelector('#main') && "
-                                                 "document.querySelector('#main').innerText.trim().length > 20",
-                                                 timeout=30000)
+                    # Poll through a locator, not wait_for_function: a string function is eval'd in the page and a CSP
+                    # without 'unsafe-eval' turns a page that broke into an EvalError instead of its real pageerror (#277).
+                    deadline = time.monotonic() + 30
+                    while True:
+                        try:
+                            if len((await page.locator("#main").inner_text(timeout=2000)).strip()) > 20:
+                                break
+                        except Exception:
+                            pass
+                        if errs:                                     # a recorded page error is the answer: stop waiting
+                            break
+                        if time.monotonic() > deadline:
+                            raise AssertionError(f"{name}: #main stayed empty for 30 s")
+                        await asyncio.sleep(0.1)
                     return round((time.perf_counter() - t) * 1000)
 
                 # Measurement hygiene (a loaded runner made the first "home" 8.8 s): one unmeasured warm-up pass pays the
@@ -256,6 +287,7 @@ async def j_dashboard(env: Env) -> str:
             finally:
                 await browser.close()
     finally:
+        dashboard_auth.RATE_PER_MIN = rate
         await asyncio.to_thread(d.stop)
     slow = {k: v for k, v in times.items() if v > DASHBOARD_BUDGET_MS}
     if errs or slow:
