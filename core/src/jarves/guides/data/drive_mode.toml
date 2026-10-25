@@ -35,6 +35,10 @@ he = "מצב נהיגה אף פעם לא מאשר בעצמו: כל שאלת אי
 en = "Drive mode never approves anything itself: every normal approval question is still asked. A message is sent only when you said it out loud, to a contact you saved. A request that came from a mail, a web page or a message, and anything that needs a screen, is saved to the list and not run. Only you turn the mode off: JARVES cannot turn it off by itself."
 
 [[steps]]
+he = "הטלפון: קריאה בלבד שביקשתם על טלפון שקיבל את הרשאת הנהיגה (למשל התדריך לפני נסיעה) מותרת ולא נכנסת לרשימה \"כשתעצרו\". כלל הנוסע תמיד חל. שום פעולה בטלפון לא יכולה לגרום לדיבור, לפעולה עם תוצאה בעולם או לשחרור הרשימה."
+en = "The phone: a read-only display requested on a phone that holds the drive scope is allowed and does not add to the \"when you stop\" list; the passenger rule always applies; no phone path may cause speech, a side effect or a queue release."
+
+[[steps]]
 he = "כשעצרתם: jarvis drive stopped מציג את הרשימה. כדי לכבות: jarvis drive off. למחיקה: jarvis drive clear."
 en = "When you have stopped: jarvis drive stopped shows the list. To turn off: jarvis drive off. To empty it: jarvis drive clear."
 

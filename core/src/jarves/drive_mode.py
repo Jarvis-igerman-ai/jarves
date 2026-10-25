@@ -227,11 +227,15 @@ TOOL_KINDS: dict[str, str] = {
     "gmail_send_draft": "message_send", "whatsapp_draft": "message_send", "whatsapp_compose": "message_send",
     "telegram_draft": "message_send", "instagram_draft": "message_send", "gmail_create_draft": "message_send",
 }
+PHONE_SCREEN = "phone_screen"                        # skills.ROUTE value of the phone Drive tab's briefing (Core code only)
+PHONE_SCREEN_KINDS = ("answer", "long_read", "time", "calendar_read")        # the only tool kinds a phone screen request may run (reads)
 _RECIPIENT_FIELDS = ("name", "to", "contact", "chat", "recipient")
 
 T.update({
     "DRIVE_OWNER_ONLY": ("רק אתם מכבים את מצב הנהיגה: jarvis drive off.",
                          "Only you can turn drive mode off: jarvis drive off."),
+    "DRIVE_PHONE_READ_ONLY": ("מסך הנהיגה בטלפון מציג מידע בלבד, אז לא ביצעתי את זה.",
+                              "The phone Drive screen only shows information, so I did not do that."),
     "DRIVE_ERROR": ("בדיקת מצב הנהיגה נכשלה, אז לא ביצעתי את זה.",
                     "The drive-mode check failed, so I did not do that."),
     "DRIVE_REFUSED": ("שיחת חירום רק מהמילים שלכם, לא מטקסט שהגיע מבחוץ.",
@@ -282,7 +286,15 @@ def _no_contacts() -> list[dict]:
 @dataclass
 class Gate:
     """Consulted by SkillRegistry._authorize BEFORE the approval prompt. Returns None (continue into the normal flow,
-    unchanged) or a refusal ToolResult. It never approves anything and never runs a queued item."""
+    unchanged) or a refusal ToolResult. It never approves anything and never runs a queued item.
+
+    The phone screen rule (issue #311): drive mode governs what JARVES says and does. A read-only display requested on
+    a phone that holds the drive scope is allowed; the passenger rule always applies; no phone path may cause speech,
+    a side effect or a queue release. In code: the phone's briefing runs under the route PHONE_SCREEN, which only Core
+    code sets (skills.ROUTE; never a tool argument, never the model). On that route a plain READ tool (kind "answer",
+    "long_read", "time" or "calendar_read", e.g. the briefing's mail/calendar/weather reads) is allowed and NOT queued, so repeated taps leave
+    no junk in the "when you stop" list. Every other tool on that route is refused at once, drive mode on or off,
+    and is never queued: nothing on the phone path can speak, send, call, or release the queue."""
     active: Callable[[], bool]               # the drive_mode switch (only the owner flips it)
     queue: DriveQueue
     contacts: Callable[[], list] = _no_contacts
@@ -315,6 +327,12 @@ class Gate:
 
     def check(self, tool, args, *, origin: str, route: str, tainted: bool):
         from .skills import ToolResult
+        if route == PHONE_SCREEN:                         # a read-only display on the owner's phone (see the class docstring)
+            if tool.permission == "read" and tool_kind(tool.name, tool.permission, args,
+                                                       untrusted_output=bool(tool.untrusted_output)) in PHONE_SCREEN_KINDS:
+                return None
+            logs.warn("drive", "DRIVE_PHONE_REFUSED", "a phone screen request may only read; refused", tool=tool.name)
+            return ToolResult(False, say("DRIVE_PHONE_READ_ONLY"), {"drive": "refused"}, code="DRIVE_REFUSED")
         if not self.active():
             return None                                   # drive mode off: zero behaviour change
         source = turn_source(origin, route, tainted)

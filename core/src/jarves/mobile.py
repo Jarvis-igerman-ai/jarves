@@ -563,8 +563,16 @@ def core_bridge(core, loop) -> Bridge:
         tool = skill.tools()[0]
 
         async def go() -> dict:
-            r = await tool.handler(DriveBriefingArgs(passenger=mode))
-            return {"ok": bool(r.ok), "text": r.message, "sections": (r.data or {}).get("sections") or []}
+            from .drive_mode import PHONE_SCREEN
+            from .skills import ROUTE
+            token = ROUTE.set(PHONE_SCREEN)        # Core code sets the route: the Gate allows plain reads here, nothing else
+            try:
+                core.registry.new_turn(PHONE_SCREEN)
+                r = await tool.handler(DriveBriefingArgs(passenger=mode))
+                return {"ok": bool(r.ok), "text": r.message, "sections": (r.data or {}).get("sections") or []}
+            finally:
+                core.registry.clear_taint(PHONE_SCREEN)
+                ROUTE.reset(token)
         return run(go(), 60)
     return Bridge(chat=chat, voice=voice, status=status, voice_available=lambda: getattr(core, "stt", None) is not None,
                   goals=goals, desktop_present=desktop_present, audio=audio, plans=plans, plans_on=plans_on, prefs=prefs, prefs_in_prompt=prefs_in_prompt,
