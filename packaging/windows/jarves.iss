@@ -163,7 +163,7 @@ var
   BackupState: String;
   SnapshotMade, SetupComplete, CoreStopped: Boolean;
   Retained: String;                                  // '|python|face|': the parts THIS run moved into rollback
-  WasRecorded, WasCore, WasFace, WasDash, CoreStopCode0: Boolean;   // what ran before the update (#166)
+  WasRecorded, WasCore, WasFace, WasDash: Boolean;   // what ran before the update (#166)
   DashArgs: String;
 
 function DataDir(): String;
@@ -513,7 +513,9 @@ end;
 
 function CoreWasRunning(): Boolean;
 begin
-  Result := WasCore or not WasRecorded or CoreStopCode0;
+  // only the detection decides; unknown = the Core was running. (`cmd /c jarvis.cmd stop` exits 0 even when no Core
+  // runs, so its exit code is no witness: CI showed a Core restarted after nothing ran.)
+  Result := WasCore or not WasRecorded;
 end;
 
 function CoreRunArgs(Param: String): String;
@@ -743,9 +745,8 @@ begin
   WaitS := 0;
   RecordWhatRuns();                                  // #166: before anything is stopped
   if FileExists(Old) then begin
-    // `jarvis stop` exits 0 only when it reached a running Core: a second witness that the Core was running
-    if Exec(ExpandConstant('{cmd}'), '/c ""' + Old + '" stop"', '', SW_HIDE, ewWaitUntilTerminated, Code) and (Code = 0) then
-      CoreStopCode0 := True;
+    if Exec(ExpandConstant('{cmd}'), '/c ""' + Old + '" stop"', '', SW_HIDE, ewWaitUntilTerminated, Code) then
+      Log('jarvis stop exit code: ' + IntToStr(Code));
     CoreStopped := True;
     WaitS := 15;                                     // `jarvis stop` only asks: wait for the Core to let go of core.lock
   end;

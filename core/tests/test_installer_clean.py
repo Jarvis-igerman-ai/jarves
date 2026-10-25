@@ -489,7 +489,7 @@ def test_update_restarts_only_what_was_running_before():
     assert "Parameters: \"-m jarves run --background\"" not in iss
     assert "'-m jarves run --background', ExpandConstant" not in iss          # every restart goes through StartWhatRan
     assert "Result := Result + ' --show';" in iss.split("function CoreRunArgs", 1)[1].split("function DashboardRunArgs", 1)[0]
-    assert "Result := WasCore or not WasRecorded or CoreStopCode0;" in iss
+    assert "Result := WasCore or not WasRecorded;" in iss and "CoreStopCode0" not in iss   # stop's exit code is no witness
     assert "RestartRequested() and WasRecorded and WasDash" in iss
     check = iss.split("procedure HealthCheckAfterUpdate", 1)[1].split("procedure CurStepChanged", 1)[0]
     assert check.index("if not RestartCoreNow() then begin") < check.index("RunHealth(")
