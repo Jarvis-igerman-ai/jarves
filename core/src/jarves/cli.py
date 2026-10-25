@@ -1923,6 +1923,7 @@ _EXT_LATE = (
     ("camera.cli", ("camera",), "COMMANDS"),                          # V4.5 D: jarvis camera status | test | preview
     ("journey", ("journey",), "COMMANDS"),                            # V6: jarvis journey plan
     ("drive_mode", ("drive",), "COMMANDS"),                            # V6: jarvis drive status / mode
+    ("skills.platform2", ("skills",), "COMMANDS"),                     # V6 #220: jarvis skills list|update|rollback
     ("self_aware", ("about", "whatsnew", "roadmap", "ticket"), "COMMANDS"),   # issue #61: jarvis about | whatsnew | roadmap | ticket
     None,                                                             # plugins.d/*.toml command modules go here
     ("whatsapp_admin", ("whatsapp",), {"whatsapp": "cmd_whatsapp"}),  # SW-V4 F: jarvis whatsapp status / link / ...
