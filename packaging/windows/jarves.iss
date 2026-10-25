@@ -247,6 +247,22 @@ begin
   Result := ParamPresent('/RESTARTJARVES=1');
 end;
 
+// #343: a Git Bash (MSYS) shell rewrites "/VERYSILENT" into "C:/Program Files/Git/VERYSILENT"; setup then ignores the
+// flag and shows the wizard. Setup cannot undo that, but it says so loudly in the log.
+procedure DetectMangledFlags();
+var
+  I: Integer;
+  P: String;
+begin
+  for I := 1 to ParamCount do begin
+    P := Uppercase(ParamStr(I));
+    if (Pos('/VERYSILENT', P) > 1) or (Pos('\VERYSILENT', P) > 1) or (Pos('/SILENT', P) > 1) or (Pos('\SILENT', P) > 1) then
+      Log('WARNING: the command line contains a path-like silent flag (' + ParamStr(I) + '). A shell (Git Bash/MSYS) ' +
+          'rewrote /VERYSILENT into a path, so setup ignores it and shows the wizard. Run it from cmd or PowerShell, ' +
+          'or set MSYS_NO_PATHCONV=1 (or write //VERYSILENT).');
+  end;
+end;
+
 #include "downgrade_guard.iss"
 
 function InitializeSetup(): Boolean;
@@ -549,6 +565,13 @@ begin
   if not (WasCore or WasFace or WasDash) then Log('Running before the update: nothing');
 end;
 
+// #343: what ran before setup stopped it is started again in ANY mode (silent or wizard), no flag needed;
+// /RESTARTJARVES=1 stays as the explicit override (restart even when detection is unsure: unknown = ran).
+function RestartWanted(): Boolean;
+begin
+  Result := RestartRequested() or (WasRecorded and (WasCore or WasFace or WasDash));
+end;
+
 function CoreWasRunning(): Boolean;
 begin
   // only the detection decides; unknown = the Core was running. (`cmd /c jarvis.cmd stop` exits 0 even when no Core
@@ -569,19 +592,19 @@ end;
 
 function RestartCoreNow(): Boolean;
 begin
-  Result := RestartRequested() and CoreWasRunning();
+  Result := RestartWanted() and CoreWasRunning();
 end;
 
 function RestartDashboardNow(): Boolean;
 begin
-  Result := RestartRequested() and WasRecorded and WasDash;
+  Result := RestartWanted() and WasRecorded and WasDash;
 end;
 
 // Start again exactly what was running (setup ended early, or the health check undid / kept the update).
 procedure StartWhatRan();
 var Code: Integer;
 begin
-  if not RestartRequested() or not FileExists(ExpandConstant('{app}\python\pythonw.exe')) then exit;
+  if not RestartWanted() or not FileExists(ExpandConstant('{app}\python\pythonw.exe')) then exit;
   if CoreWasRunning() then
     Exec(ExpandConstant('{app}\python\pythonw.exe'), CoreRunArgs(''), ExpandConstant('{app}'), SW_HIDE, ewNoWait, Code);
   if WasRecorded and WasDash then
@@ -781,7 +804,10 @@ begin
   if Result <> '' then exit;
   Old := ExpandConstant('{app}\jarvis.cmd');
   WaitS := 0;
+  DetectMangledFlags();
   RecordWhatRuns();                                  // #166: before anything is stopped
+  if RestartWanted() and CoreWasRunning() then Log('restart: Core was running -> restarted')
+  else Log('restart: Core was not running -> left stopped');
   if FileExists(Old) then begin
     if Exec(ExpandConstant('{cmd}'), '/c ""' + Old + '" stop"', '', SW_HIDE, ewWaitUntilTerminated, Code) then
       Log('jarvis stop exit code: ' + IntToStr(Code));
