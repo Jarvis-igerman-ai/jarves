@@ -1,0 +1,15 @@
+{
+ "Maps/Waze links as buttons on the phone are the Drive tab (issue #218)": "קישורי Maps/Waze ככפתורים בטלפון הם לשונית הנהיגה (נושא #218)",
+ "NOT-RUN: never paired with a real phone": "לא הורץ: מעולם לא צומד לטלפון אמיתי",
+ "NOT-RUN: no parked-car session with a real phone and Bluetooth yet (owner-gated, V6 plan G11)": "לא הורץ: עוד אין בדיקה ברכב חונה עם טלפון אמיתי ו-Bluetooth (בידי הבעלים, V6 G11)",
+ "NOT-RUN: simulated Bluetooth/headset fixtures only, no real car kit": "לא הורץ: רק התקני Bluetooth/אוזניות מדומים, בלי דיבורית רכב אמיתית",
+ "UNIT test_audio_route_213.py with tests/fixtures/car_audio": "בדיקות יחידה test_audio_route_213.py עם tests/fixtures/car_audio",
+ "UNIT test_mobile_access.py, test_mobile_pwa.py, test_mobile_plans.py, test_mobile_prefs.py, test_mobile_audio.py + emulated phone test_mobile_phone_e2e.py": "בדיקות יחידה test_mobile_access.py, test_mobile_pwa.py, test_mobile_plans.py, test_mobile_prefs.py ו-test_mobile_audio.py, וטלפון מדומה ב-test_mobile_phone_e2e.py",
+ "UNIT test_v6_drive_briefing.py (fake tools; passenger rules)": "בדיקות יחידה test_v6_drive_briefing.py (כלים מזויפים; כללי נוסעים)",
+ "UNIT test_v6_drive_mode.py + test_v6_drive_wire.py (policy and gate; no car session)": "בדיקות יחידה test_v6_drive_mode.py ו-test_v6_drive_wire.py (מדיניות ושער; בלי בדיקה ברכב)",
+ "UNIT test_v6_journey.py (fake providers; links are never opened by JARVES)": "בדיקות יחידה test_v6_journey.py (ספקים מזויפים; JARVES אף פעם לא פותח קישורים)",
+ "hands-free phone voice is V6 plan item 12 and is not built": "דיבור חופשי בטלפון הוא סעיף 12 בתוכנית V6 וטרם נבנה",
+ "the car path is the phone on the mount plus car Bluetooth audio; this feature has no car part": "נתיב הרכב הוא הטלפון על המעמד ואודיו Bluetooth של הרכב; לתכונה הזו אין חלק ברכב",
+ "the phone answers the passenger question in the Drive tab (issue #218)": "הטלפון עונה על שאלת הנוסע בלשונית הנהיגה (נושא #218)",
+ "the phone only shows drive mode read-only in the Drive tab (issue #218); it cannot switch it": "הטלפון רק מציג את מצב הנהיגה לקריאה בלבד בלשונית הנהיגה (נושא #218); הוא לא יכול להפעיל או לכבות אותו"
+}

@@ -27,6 +27,9 @@ import re
 from dataclasses import asdict, dataclass, field
 
 TARGETS = ("windows", "linux_arm64_pi")
+# V6 (issue #215): the phone (PWA, paired) and the car (phone on the mount + Bluetooth audio) are OPTIONAL extra targets,
+# declared only for the features that have a phone or car path (`declare_extra`). Every other feature keeps two columns.
+EXTRA_TARGETS = ("phone", "car")
 STATUSES = ("verified_on_device", "implemented_unverified", "planned", "blocked", "not_applicable")
 READY = ("verified_on_device", "not_applicable")
 # Real issues (created 2026-10-19 by WP-M4). Add new ones here only after `gh issue create` returned the URL.
@@ -77,6 +80,19 @@ def declare(fid: str, *, windows, linux_arm64_pi, permissions: list[str] | None 
     return c
 
 
+EXTRA: dict[str, dict[str, Target]] = {}
+
+
+def declare_extra(fid: str, *, phone=None, car=None) -> None:
+    """The phone / car row of one feature (V6). Honest rule (see `problems`): on a device nobody has tried, the
+    status is `implemented_unverified` (or `planned`) with a blocker that says NOT-RUN; never `verified_on_device`
+    without evidence."""
+    row = EXTRA.setdefault(fid, {})
+    for name, v in (("phone", phone), ("car", car)):
+        if v is not None:
+            row[name] = _t(v)
+
+
 def _from_feature(fid: str) -> Capability | None:
     """Other packages also set `features.register(..., targets=...)` / `feature.targets = {...}` directly: that
     dict is read here, so there is one matrix whichever way a package declared it."""
@@ -100,6 +116,9 @@ def _from_feature(fid: str) -> Capability | None:
 def get(fid: str) -> Capability:
     c = _from_feature(fid) or MATRIX.get(fid)
     if c is not None:
+        extra = EXTRA.get(fid)
+        if extra:
+            c = Capability({**c.targets, **extra}, c.permissions, c.settings, c.last_checked, c.declared)
         return c
     missing = Target("planned", blocker="platform status not declared yet (spec section 5)",
                      roadmap_issue=PI_ROADMAP)
@@ -126,6 +145,8 @@ def problems(fid: str) -> list[str]:
         if not t.blocker and (t.status in ("planned", "blocked") or
                               (name == "linux_arm64_pi" and t.status not in READY)):
             out.append(f"{name}: {t.status} without a blocker")
+        if name in EXTRA_TARGETS and t.status == "implemented_unverified" and not t.blocker:
+            out.append(f"{name}: not run on a real device without a NOT-RUN blocker")
         if name == "linux_arm64_pi" and t.status not in READY and t.roadmap_issue not in KNOWN_ISSUES:
             out.append(f"{name}: no real roadmap issue linked")
     return out
@@ -240,3 +261,41 @@ WAKE_PHRASE = {
                                         "trained or run on a Pi", roadmap_issue=PI_ROADMAP)),
     },
 }
+
+
+# ---------------------------------------------------------------------- V6 phone / car rows (issue #215, checked 2026-10-25)
+# Evidence names the feature's own test files (test_v6_capability_rows.py checks they exist). "NOT-RUN" = no real phone /
+# parked car session yet (V6 plan section 6: those rows stay implemented_unverified until the owner's signed sheet).
+_ISSUE = "https://github.com/Jarvis-igerman-ai/jarves/issues/"
+_NO_CAR = "NOT-RUN: no parked-car session with a real phone and Bluetooth yet (owner-gated, V6 plan G11)"
+_NO_PHONE = "NOT-RUN: never paired with a real phone"
+_NOT_A_CAR = "the car path is the phone on the mount plus car Bluetooth audio; this feature has no car part"
+V6_ROWS = {
+    "drive_mode": (
+        {"status": "planned", "blocker": "the phone only shows drive mode read-only in the Drive tab (issue #218); it cannot switch it",
+         "roadmap_issue": _ISSUE + "218"},
+        {"status": "implemented_unverified", "blocker": _NO_CAR,
+         "evidence": "UNIT test_v6_drive_mode.py + test_v6_drive_wire.py (policy and gate; no car session)"}),
+    "journey": (
+        {"status": "planned", "blocker": "Maps/Waze links as buttons on the phone are the Drive tab (issue #218)",
+         "roadmap_issue": _ISSUE + "218"},
+        {"status": "implemented_unverified", "blocker": _NO_CAR,
+         "evidence": "UNIT test_v6_journey.py (fake providers; links are never opened by JARVES)"}),
+    "drive_briefing": (
+        {"status": "planned", "blocker": "the phone answers the passenger question in the Drive tab (issue #218)",
+         "roadmap_issue": _ISSUE + "218"},
+        {"status": "implemented_unverified", "blocker": _NO_CAR,
+         "evidence": "UNIT test_v6_drive_briefing.py (fake tools; passenger rules)"}),
+    "audio_route": (
+        {"status": "planned", "blocker": "hands-free phone voice is V6 plan item 12 and is not built",
+         "roadmap_issue": _ISSUE + "219"},
+        {"status": "implemented_unverified", "blocker": "NOT-RUN: simulated Bluetooth/headset fixtures only, no real car kit",
+         "evidence": "UNIT test_audio_route_213.py with tests/fixtures/car_audio"}),
+    "mobile_access": (
+        {"status": "implemented_unverified", "blocker": _NO_PHONE,
+         "evidence": "UNIT test_mobile_access.py, test_mobile_pwa.py, test_mobile_plans.py, test_mobile_prefs.py, "
+                     "test_mobile_audio.py + emulated phone test_mobile_phone_e2e.py"},
+        {"status": "not_applicable", "blocker": _NOT_A_CAR}),
+}
+for _fid, (_ph, _car) in V6_ROWS.items():
+    declare_extra(_fid, phone=_ph, car=_car)
