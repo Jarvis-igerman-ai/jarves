@@ -98,10 +98,15 @@ PAGES.updates = async function () {
     ? [el("div", { class: "k" }, "Next"), el("div", { class: "v" }, NEXT[au.next_kind],
         au.next_kind === "quiet_moment" ? "" : " ", au.next_kind === "quiet_moment" ? "" : when(au.next_at))] : [];
   const lr = au.last_result || null;
+  // #164: setup's health check acted after the install: it WAS installed (and may have migrated the data)
+  const HEALTH = { rolled_back: "Installed but did not start; the previous program was put back (data not touched):",
+    rollback_failed: "Did not start, and the automatic undo did not work (run jarvis update --rollback):",
+    health_failed: "Did not start; a full undo (data and program) waits for your OK (jarvis update --rollback):" };
+  const lastText = lr && (lr.ok ? "Updated to" : (HEALTH[lr.health] || "Not installed, nothing changed:"));
   const lastRow = lr && lr.version
     ? [el("div", { class: "k" }, "Last result"), el("div", { class: "v" },
-        lr.ok ? "Updated to" : "Not installed, nothing changed:", " ", el("code", {}, lr.version), " ",
-        lr.ok ? "" : el("code", {}, lr.code || ""), " ", when(lr.ts))] : [];
+        lastText, " ", el("code", {}, lr.version), " ",
+        lr.ok || HEALTH[lr.health] ? "" : el("code", {}, lr.code || ""), " ", when(lr.ts))] : [];
   const note = au.notice && au.notice.kind !== "choose" ? el("div", { class: "small", style: "margin-top:8px" }, tx(au.notice.text_he, au.notice.text_en)) : null;
   const autoCard = el("div", { class: "card" }, el("h2", {}, "Automatic updates"),
     el("div", { class: "kv" },

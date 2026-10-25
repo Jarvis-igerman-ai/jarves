@@ -709,6 +709,16 @@ begin
     Log('Health check: could not record "' + Status + '" for the owner notice');
 end;
 
+// health --expect <this version> with the given timeout; /HEALTHEXPECT= exists for the smoke test only (it fakes an
+// update record for a version that never starts)
+function RunHealth(const TimeoutS: Integer; var Code: Integer): Boolean;
+begin
+  Log('Health check runs with ' + HealthPython() + ' (timeout ' + IntToStr(TimeoutS) + ' s)');
+  Result := Exec(HealthPython(), '-I "' + HelperScript() + '" health --home "' + DataDir() + '" --timeout ' +
+    IntToStr(TimeoutS) + ' --expect ' + ExpandConstant('{param:HEALTHEXPECT|{#AppVersion}}'), '', SW_HIDE,
+    ewWaitUntilTerminated, Code);
+end;
+
 procedure HealthRollback();
 var
   Code: Integer;
@@ -729,6 +739,13 @@ begin
     Exec(ExpandConstant('{cmd}'), '/c ""' + ExpandConstant('{app}\jarvis.cmd') + '" stop"', '', SW_HIDE,
       ewWaitUntilTerminated, Code);
   StopProcessesUnderApp(15);
+  // review #260 F6: a slow but good version may have become ready while the stop ran: never swap it out then
+  if RunHealth(1, Code) and (Code = 0) then begin
+    Log('Health check: the new version became ready after all; it stays, and its Core is started again');
+    Exec(ExpandConstant('{app}\python\pythonw.exe'), '-m jarves run --background', ExpandConstant('{app}'), SW_HIDE,
+      ewNoWait, Code);
+    exit;
+  end;
   Aside := AsideName('health', 'program');
   ForceDirectories(Aside);
   Ok := SwapBackPart('python', Aside);
@@ -749,10 +766,8 @@ var Code: Integer;
 begin
   if not (SetupComplete and SnapshotMade and RestartRequested()) or ParamPresent('/ROLLBACK=1') then exit;
   if Pos('|python|', Retained) = 0 then exit;          // no old runtime kept: nothing to judge or put back with
-  // /HEALTHEXPECT= exists for the smoke test only (it fakes an update record for a version that never starts)
-  if not Exec(HealthPython(), '-I "' + HelperScript() + '" health --home "' + DataDir() + '" --timeout ' +
-      ExpandConstant('{param:HEALTHTIMEOUT|180}') + ' --expect ' + ExpandConstant('{param:HEALTHEXPECT|{#AppVersion}}'),
-      '', SW_HIDE, ewWaitUntilTerminated, Code) then begin
+  // review #260 F4: a mistyped /HEALTHTIMEOUT= falls back to 180 s; it must never make a healthy update look broken
+  if not RunHealth(StrToIntDef(ExpandConstant('{param:HEALTHTIMEOUT|180}'), 180), Code) then begin
     Log('Health check could not run (the previous python did not start): ' + SysErrorMessage(Code));
     exit;
   end;

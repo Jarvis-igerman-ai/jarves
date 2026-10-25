@@ -362,6 +362,13 @@ class AutoUpdater:
             st = self.state()
             self._after_restart(st)
             h = updates.take_health_notice(self.home)
+            pend = updates._read_json(updates._updates_dir(self.home) / updates.PENDING_FILE) if h else {}
+            if h and h.get("to") and self.current() == h.get("to") and pend.get("state") == "ok":
+                # review #260 F6: the version was only slow; it is running now and marked itself healthy. No alarming
+                # "did not start" notice and no give-up for the version that works.
+                logs.info("updates", "UPDATE_HEALTH_LATE_READY", "the update became ready after the health check gave up",
+                          version=h.get("to"), alert_kind=h.get("status"))
+                h = None
             if h:                                         # the installer's health check acted on the update (#164)
                 st = self.state()
                 bad = h.get("to") or ""

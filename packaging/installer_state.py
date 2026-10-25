@@ -62,7 +62,9 @@ def prepare(home: Path, state: Path) -> dict:
             raise ValueError("backup verification failed; data was not migrated")
         records.append({"home": str(profile), "backup": str(archive), "schema_marker": (profile / migrations.MARKER).is_file(),
                         "schema_before": schema_of(profile)})
-    record = {"format": 1, "home": str(home), "backups": records, "created": time.time(),
+    # old_latest: the newest data schema the OLD program (this python's jarves) can open; a program-only rollback is
+    # safe exactly while every profile's schema stays <= it (the old Core refuses only newer data)
+    record = {"format": 1, "home": str(home), "backups": records, "created": time.time(), "old_latest": migrations.LATEST,
               "stage_timings_s": {"backup_and_verify": round(time.monotonic() - started, 3)}}
     state.write_text(json.dumps(record, indent=2), encoding="utf-8")
     return record
@@ -244,19 +246,27 @@ def health(home: Path, timeout_s: float = 180.0, poll_s: float = 1.0, *, expect:
 
 
 def can_program_rollback(state: Path) -> bool:
-    """True only when putting back the PREVIOUS PROGRAM alone is safe: every profile still has the schema it had before
-    this upgrade. After a schema migration the old Core refuses newer data (MIGRATION_DATA_NEWER), so the installer must
-    not swap the program; the owner gets the approval-gated `jarvis update --rollback`, which restores the data too.
-    A missing or unreadable record, or a fresh-data install, counts as "not safe"."""
+    """True only when putting back the PREVIOUS PROGRAM alone is safe: every profile's data schema NOW is one the old
+    program can open (<= old_latest, recorded by `prepare` under the old python). The old Core refuses only newer data
+    (MIGRATION_DATA_NEWER); a legacy 1 -> 3 or an empty 0 -> 3 stamp is fine when the old program knows 3. When it is not
+    safe the installer must not swap the program; the owner gets the approval-gated `jarvis update --rollback`, which
+    restores the data too. A missing or unreadable record or marker, or a fresh-data install, counts as "not safe"."""
     try:
         record = json.loads(Path(state).read_text(encoding="utf-8"))
     except (OSError, ValueError):
         return False
     if not isinstance(record, dict) or record.get("previous_data"):
         return False
-    for item in record.get("backups") or []:
-        before = item.get("schema_before")
-        if before is None or schema_of(Path(item["home"])) != before:
+    old_latest = record.get("old_latest")
+    if not isinstance(old_latest, int) or isinstance(old_latest, bool) or not record.get("home"):
+        return False
+    try:
+        homes = profiles(Path(record["home"]))
+    except (OSError, ValueError):
+        return False
+    for profile in homes:
+        now = schema_of(profile)
+        if now is None or now > old_latest:
             return False
     return True
 

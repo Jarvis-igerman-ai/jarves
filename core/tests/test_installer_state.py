@@ -192,24 +192,50 @@ def test_health_check_ignores_a_stale_record_for_another_version(tmp_path):
     assert installer.main(["health", "--home", str(home), "--timeout", "1", "--expect", "9.9.9"]) == 1
 
 
-def test_a_program_only_rollback_is_allowed_only_when_no_schema_changed(tmp_path):
-    """Review P1-1: after a schema migration the old Core refuses the newer data, so the installer must not put back
-    the program alone (exit 5); with the schema unchanged it may (exit 0). Unknown = not safe."""
-    home = tmp_path / "home"
-    seed.seed(home)
+def _rollback_state(tmp_path, home, old_latest=3, **extra):
     state = tmp_path / "install-state.json"
-    profiles = installer.profiles(home)
-    rec = {"home": str(home), "backups": [{"home": str(p), "schema_before": installer.schema_of(p)} for p in profiles]}
+    rec = {"home": str(home), "backups": [], **({"old_latest": old_latest} if old_latest is not None else {}), **extra}
     state.write_text(json.dumps(rec), encoding="utf-8")
+    return state
+
+
+def _stamp(profile, n):
+    profile.mkdir(parents=True, exist_ok=True)
+    (profile / "schema.json").write_text(json.dumps({"schema": n}), encoding="utf-8")
+
+
+def test_a_program_only_rollback_is_allowed_while_every_schema_is_one_the_old_program_knows(tmp_path):
+    """Review #260 F1: the rule is "schema now <= the OLD program's LATEST", not "unchanged": a legacy 1 -> 3 or an
+    empty 0 -> 3 stamp is safe when the old program knows 3; 3 -> 4 is not; unknown is never safe."""
+    home = tmp_path / "home"
+    seed.seed(home)                                     # legacy layout: no schema.json, databases present (1)
+    assert installer.schema_of(home) == 1
+    state = _rollback_state(tmp_path, home)
+    assert installer.can_program_rollback(state) is True
+    for p in installer.profiles(home):
+        _stamp(p, 3)                                    # what `complete` does: legacy 1 -> 3, empty 0 -> 3
     assert installer.can_program_rollback(state) is True
     assert installer.main(["can-program-rollback", "--home", str(home), "--state", str(state)]) == 0
-    (home / "schema.json").write_text(json.dumps({"schema": (installer.schema_of(home) or 0) + 1}), encoding="utf-8")
+    _stamp(home / "profiles" / "never-started", 3)      # a profile created later, also checked
+    assert installer.can_program_rollback(state) is True
+    _stamp(home / "profiles" / "never-started", 4)      # newer than the old program knows
     assert installer.can_program_rollback(state) is False
     assert installer.main(["can-program-rollback", "--home", str(home), "--state", str(state)]) == 5
-    assert installer.can_program_rollback(tmp_path / "missing.json") is False
-    rec["backups"][0].pop("schema_before")
-    state.write_text(json.dumps(rec), encoding="utf-8")
+    _stamp(home / "profiles" / "never-started", 3)
+    (home / "schema.json").write_text("{", encoding="utf-8")           # unreadable marker
     assert installer.can_program_rollback(state) is False
+    _stamp(home, 3)
+    assert installer.can_program_rollback(_rollback_state(tmp_path, home, old_latest=None)) is False
+    assert installer.can_program_rollback(_rollback_state(tmp_path, home, old_latest="3")) is False
+    assert installer.can_program_rollback(_rollback_state(tmp_path, home, previous_data="x")) is False
+    assert installer.can_program_rollback(tmp_path / "missing.json") is False
+
+
+def test_prepare_records_the_old_programs_latest_schema(tmp_path):
+    home = tmp_path / "home"
+    seed.seed(home)
+    rec = installer.prepare(home, tmp_path / "state.json")
+    assert rec["old_latest"] == migrations.LATEST and all("schema_before" in b for b in rec["backups"])
 
 
 def test_schema_of_follows_the_migrations_rule(tmp_path):

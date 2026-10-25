@@ -59,3 +59,14 @@ For each start set, run it, then trigger the in-app update (`jarvis update insta
 | 5d | dashboard with LAN: `jarvis dashboard --lan` | dashboard comes back with `--lan` (check `$Data\dashboard.run.json` and the URL); note: a non-default `--port` is not kept (documented) |
 
 Report each case as PASS/FAIL with the setup log and `$Data\logs\jarves.log` attached to the PR.
+
+## Known limits of the #164 health check (documented, not bugs)
+
+- **Profiles:** the check reads the default profile's `updates\pending.json` (`DataDir()`). A Core started with
+  `--profile` keeps its record in that profile's home, so the check returns "unknown" and does nothing (safe:
+  never a false rollback). `[Run]` restarts only the default Core.
+- **Dead new program after a real schema bump** (follow-up issue): `health_failed` is recorded, but the notice needs
+  a Core that reaches CORE_READY, and `jarvis update --rollback` would run under the broken new python. A recovery
+  entry that uses `{app}\rollback\python` is planned.
+- **Exit code 1** means both "no record for this version" and "the check itself crashed"; both are treated as unknown
+  (no rollback).

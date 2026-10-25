@@ -520,3 +520,18 @@ def test_a_health_rollback_has_its_own_last_result(home, server, keys):
         assert last["ok"] is False and last["health"] == status and last["version"] == NEW
         lines = " ".join(auto_update.status_lines(r.au.status()))
         assert needle in lines and "Nothing changed" not in lines
+
+
+def test_a_version_that_became_ready_late_gets_no_false_alarm_and_is_not_blocked(home, server, keys, monkeypatch):
+    """Review #260 F6: health_failed was recorded, but the new version started fine later (marked itself healthy): no
+    "did not start" notice, no give-up for the version that works, and the record is consumed."""
+    r = Rig(home, server, keys)
+    (home / "updates").mkdir(exist_ok=True)
+    (home / "updates" / "health.json").write_text(json.dumps(
+        {"status": "health_failed", "from": OLD, "to": NEW, "at": 1, "notified": False}), "utf-8")
+    (home / "updates" / "pending.json").write_text(json.dumps({"from": OLD, "to": NEW, "state": "ok"}), "utf-8")
+    monkeypatch.setattr(r.au, "current", lambda: NEW)
+    r.au.after_start()
+    assert not [x for x in r.notices if x["kind"] == "health_failed"]
+    assert r.au.state().get("gave_up") != NEW
+    assert updates.take_health_notice(home) is None
