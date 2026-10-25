@@ -63,7 +63,7 @@ class Fake(Skill):
 ALLOWED = {"whatsapp_send", "end_conversation", "dial_prepare", "feature_set", "settings_change"}
 
 
-def make(tmp_path, *, active, approve=True, contacts=({"label": "my wife", "name": "Dana Levi"},)):
+def make(tmp_path, *, active, approve=True, contacts=({"label": "my wife", "name": "Dana Levi", "phone": "0541234567"},)):
     reg = SkillRegistry(allowed_actions=ALLOWED)
     skill = Fake()
     reg.register(skill)
