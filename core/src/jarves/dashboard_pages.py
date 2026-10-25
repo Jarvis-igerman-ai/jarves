@@ -66,6 +66,10 @@ _P = {
     "phone": ("Phone app", "אפליקציית טלפון", "pair your phone", "חיבור הטלפון", "scan the pairing code on the phone", "סורקים את קוד החיבור בטלפון"),
     "addons": ("Add-ons", "תוספים", "optional extras", "תוספים אופציונליים", "", ""),
     "issues": ("Issues", "בעיות", "problems JARVES found", "בעיות ש-JARVES מצא", "mark an issue handled", "מסמנים בעיה כמטופלת"),
+    "camera": ("Camera", "מצלמה", "the real camera state, device checks and a timed local preview",
+               "המצב האמיתי של המצלמה, בדיקות מכשיר ותצוגה מקומית מוגבלת בזמן",
+               "Check device (opens nothing), Test a frame (one local picture), Start local preview with a countdown and Stop",
+               "בדיקת מכשיר (לא פותח כלום), בדיקת תמונה (תמונה אחת מקומית), תצוגה מקומית עם ספירה לאחור וכפתור עצור"),
     "health": ("Health", "תקינות", "status of each component", "מצב כל רכיב", "", ""),
     "speed": ("Health & speed", "תקינות ומהירות", "speed measurements", "מדידות מהירות", "run a check", "מריצים בדיקה"),
     "selfcheck": ("Self-check", "בדיקה עצמית", "JARVES tests itself", "JARVES בודק את עצמו", "run the self-check", "מריצים בדיקה עצמית"),
@@ -90,7 +94,7 @@ _P = {
 }
 # pages where a click changes or sends something outside the page: the assistant only opens and explains them
 SENSITIVE = frozenset({"approvals", "features", "settings", "connections", "whatsapp", "backup", "updates", "autonomy",
-                       "devices", "workspace", "calls", "phone", "identity", "memory", "files"})
+                       "devices", "workspace", "calls", "phone", "identity", "memory", "files", "camera"})
 _WORDS = {"dashboard": "home", "main": "home", "chat with you": "chat", "approval": "approvals", "timer": "timers",
           "alarm": "timers", "alarms": "timers", "list": "lists", "cost": "costs", "spending": "costs", "log": "logs",
           "feature": "features", "switches": "features", "guide": "guides", "help": "guides", "setting": "settings",

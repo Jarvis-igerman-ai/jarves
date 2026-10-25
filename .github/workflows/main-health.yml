@@ -39,6 +39,11 @@ jobs:
        github.event.workflow_run.conclusion == 'success')
     runs-on: ubuntu-24.04
     timeout-minutes: 5
+    permissions:
+      contents: read
+      actions: read          # the red run's failed-job logs (failing test names)
+      issues: write
+      pull-requests: write   # the hand-off comment on each suspect PR
     env:
       GH_TOKEN: ${{ github.token }}
       REPO: ${{ github.repository }}
@@ -46,18 +51,31 @@ jobs:
       URL: ${{ github.event.workflow_run.html_url }}
       SHA: ${{ github.event.workflow_run.head_sha }}
     steps:
+      # Fix-forward (owner decision 24 Oct 2026, #160): the issue names the failing tests and the suspect PRs (merges
+      # since the last green main run), and each suspect PR gets a comment handing the fix to its agent; the fix PR
+      # (label main-fix) goes to the front of the merge queue, because every merge group contains the failure. Only the
+      # default branch's own core/tools are checked out (trusted code); no PR code runs. No auto-revert.
+      - uses: actions/checkout@v7
+        if: github.event.workflow_run.conclusion == 'failure'
+        with:
+          sparse-checkout: core/tools
       - name: Open, update or close the "main is red" issue
+        env:
+          RUN_ID: ${{ github.event.workflow_run.id }}
         run: |
           set -euo pipefail
           title="main is red: jarves-checks failed"
           n=$(gh issue list -R "$REPO" --state open --search "\"$title\" in:title" --json number,title --jq "[.[]|select(.title==\"$title\")][0].number // empty")
           if [ "$CONCL" = "failure" ]; then
+            python3 core/tools/red_main.py report --repo "$REPO" --run "$RUN_ID" --out body.md > /dev/null
             if [ -n "$n" ]; then
+              gh issue edit "$n" -R "$REPO" --body-file body.md          # markers follow the newest red run
               gh issue comment "$n" -R "$REPO" --body "Still red at ${SHA:0:7}: $URL"
             else
-              gh issue create -R "$REPO" --title "$title" --body "jarves-checks failed on \`main\` at ${SHA:0:7}, also after one automatic re-run of the failed jobs: $URL
-
-          Fix \`main\` first: nothing else merges while it is red (CLAUDE.md, automerge.yml). This issue closes itself when \`main\` is green again."
+              n=$(gh issue create -R "$REPO" --title "$title" --label P1 --body-file body.md | sed -n 's#.*/issues/\([0-9]*\)$#\1#p')
+              for pr in $(sed -n 's/^<!-- red-main-suspects: \(.*\) -->$/\1/p' body.md | tr ',' ' '); do
+                gh pr comment "$pr" -R "$REPO" --body "main turned red after this PR was merged (suspect, #$n). Its agent: please fix forward in a new PR labelled \`main-fix\` (it goes to the front of the merge queue). Nothing is reverted automatically." || echo "could not comment on #$pr"
+              done
             fi
           elif [ -n "$n" ]; then
             gh issue close "$n" -R "$REPO" --comment "main is green again at ${SHA:0:7}: $URL"

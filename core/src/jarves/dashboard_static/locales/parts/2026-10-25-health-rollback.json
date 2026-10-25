@@ -1,0 +1,7 @@
+{
+ "dict": {
+  "Did not start, and the automatic undo did not work (run jarvis update --rollback):": "לא עלה, וההחזרה האוטומטית לא הצליחה (הרץ jarvis update --rollback):",
+  "Did not start; a full undo (data and program) waits for your OK (jarvis update --rollback):": "לא עלה; חזרה מלאה (נתונים ותוכנה) מחכה לאישור שלך (jarvis update --rollback):",
+  "Installed but did not start; the previous program was put back (data not touched):": "הותקן אבל לא עלה; התוכנה הקודמת הוחזרה (הנתונים לא נוגעו):"
+ }
+}

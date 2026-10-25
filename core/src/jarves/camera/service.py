@@ -98,6 +98,9 @@ class CameraService:
         self.preview_seq = 0
         self.preview_frame: dict | None = None    # the latest preview image (RAM only, dropped at close)
         self.last_seen: dict | None = None        # {text, mode, ts}: what JARVES last said about a photo
+        self.sending = False                      # one still is being sent to the vision provider right now
+        self.last_result: dict | None = None      # camera/ux.py: {kind, ok, code, ts, ...} of the last request (no pixels)
+        self.last_error: dict | None = None       # {code, detail, action, ts} of the last failed sensor open
         self._kick = asyncio.Event()              # wakes the supervisor at once (preview opened)
         switches.register_all({"camera": self.available, "face_recognition": self.face_available,
                                "camera_when_away": self.available, "camera_preview": self.available})
@@ -358,12 +361,14 @@ class CameraService:
             await asyncio.to_thread(cam.open)
         except CameraUnavailable as e:
             self._open_failed_t = self._clock()
+            self.last_error = {"code": e.code, "detail": e.message, "action": e.action, "ts": round(time.time(), 1)}
             self._probe_t = -1e9                    # re-probe (in a worker thread) on the next tick
             logs.warn("camera", e.code, "camera unavailable", detail=e.message, action=e.action)
             self._set_health("unavailable", e.message, e.action)
             self.cam = None
             return
         self.cam = cam
+        self.last_error = None
         await self._set_indicator(True)
 
     async def _close(self) -> None:
@@ -446,8 +451,24 @@ class CameraService:
             raise Refusal("CAMERA_SHUTTER_CLOSED", "התמונה שחורה לגמרי. אולי התריס של המצלמה סגור?")
         return frame
 
+    def record_result(self, kind: str, ok: bool, code: str = "", **extra: Any) -> None:
+        """Remember the outcome of the last request for the Camera section (kind, ok, code, time: never pixels)."""
+        self.last_result = {"kind": kind, "ok": ok, "code": code, "ts": round(time.time(), 1), **extra}
+
     async def look(self, mode: str, question: str) -> tuple[str, dict]:
-        """"מה זה?" / read text: one still -> backend vision. Returns (answer, facts for the Skill)."""
+        """"מה זה?" / read text: one still -> backend vision. Records the outcome for the Camera section."""
+        try:
+            text, facts = await self._look(mode, question)
+        except Refusal as e:
+            self.record_result(mode, False, e.code, sent_to_provider=False)
+            raise
+        except Exception as e:
+            self.record_result(mode, False, getattr(e, "code", "") or type(e).__name__, sent_to_provider=True)
+            raise
+        self.record_result(mode, True, sent_to_provider=True, bytes=facts.get("sent_bytes", 0))
+        return text, facts
+
+    async def _look(self, mode: str, question: str) -> tuple[str, dict]:
         self._require()
         if self.vision is None:
             raise Refusal("VISION_UNAVAILABLE", "זיהוי תמונה דורש חיבור למפתח OpenAI.")
@@ -472,9 +493,11 @@ class CameraService:
                   bytes=n, mime=mime, width=w, height=h, model=getattr(self.vision, "model", ""),
                   photos_today=used + 1, limit=limit)
         t_sent = time.monotonic()
+        self.sending = True
         try:
             text = await self.vision.ask(mode, question, url)
         finally:
+            self.sending = False
             del url
             # Issue #17 (camera_describe 5.5 s): where the time goes, so a slow look is diagnosed from the log
             # instead of guessed. capture = open the sensor + one still; encode = downscale + JPEG; ask = the cloud model.

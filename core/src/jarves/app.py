@@ -271,6 +271,7 @@ class Core:
                                   c.log.console_level, c.log.modules, c.log.hide, privacy=c.log.privacy)
         # SW-V4 B crash output: an exception nobody awaited is logged as CRASH (frames; its text is content)
         asyncio.get_running_loop().set_exception_handler(logs.asyncio_handler)
+        self._start_early_voice_import()                # #159 perf2: `import openai` (8-12 s) overlaps the whole start
         from . import backup, usage                     # SW-V2 M5: checkpoint BEFORE the stores open/migrate
         backup.startup_checkpoint(self.home)
         self._update_guard()                            # SW-V4 L: data migrations (backup first) + failed-update watch
@@ -355,6 +356,8 @@ class Core:
         register_instagram(self.registry, self.home, self.health)
         register_whatsapp(self.registry, self.home)
         register_home(self.registry, self.home, self.health)
+        from .anydo import register_anydo           # #140: tools stay hidden until the switch is on
+        register_anydo(self.registry, self.home, self.health)
         self.workspace.listeners.append(lambda name: self._spawn(wsp.note_live(self.live, self.workspace, name)))
 
         self.budget = Budget(self.memory, c.ai)
@@ -469,7 +472,7 @@ class Core:
         self._bg.append(asyncio.create_task(self._health_loop()))
         self._bg.append(asyncio.create_task(wab.run(self)))   # SW-V4 F: bridge + events (switch on only)
         if self.use_real_audio and openai_key_present() and self.cfg.ai.provider == "openai":
-            self._bg.append(asyncio.create_task(asyncio.to_thread(self._prewarm)))
+            self._spawn_daemon(self._prewarm, "voice-prewarm")
         elif self.use_real_audio:
             self._bg.append(asyncio.create_task(_later(5.0, asyncio.to_thread, _warm_http_stack)))
         self._setup_wake()
@@ -965,7 +968,7 @@ class Core:
             self.request_stop("tray_or_cli_quit" if t == "core.shutdown" else "window_closed")
         elif t == "runtime.set":
             await self.link.reply(ws, "runtime.state", await self.runtime.apply(p, by=client.role))
-        elif t in ("camera.preview", "camera.set_enabled"):   # privacy strip buttons (camera/wire.py)
+        elif t in ("camera.preview", "camera.set_enabled", "camera.status", "camera.test"):   # privacy strip buttons (camera/wire.py)
             from .camera import wire as camera_wire
             await camera_wire.on_link(self, t, p, client)
         elif t == "ui.open_dashboard":               # WP-H: the face's Dashboard button
@@ -1640,6 +1643,43 @@ class Core:
             mods += ["agents"]
         return mods
 
+    def _warm_tool_schemas(self) -> None:
+        """#159: build every tool's JSON schema once in this background worker, so the first live session / typed
+        request does not pay pydantic's schema generation (0.5-1 s for ~120 tools on the owner's PC)."""
+        from .skills import tool_schema
+        try:
+            for t in list(self.registry._tools.values()):
+                tool_schema(t[1])
+        except Exception:                                # a warm-up never fails the start; first use builds it
+            logs.debug("core", "SCHEMA_WARM_FAILED", "tool schema warm-up skipped", exc=True)
+
+    @staticmethod
+    def _spawn_daemon(fn, name: str):
+        """Run `fn` in a DAEMON thread. A library import cannot be cancelled, and asyncio.to_thread would make the
+        process wait for it at exit (`jarvis stop` took 29 s on the perf gate); a daemon thread never delays exit."""
+        import threading
+        t = threading.Thread(target=fn, name=name, daemon=True)
+        t.start()
+        return t
+
+    def _start_early_voice_import(self) -> None:
+        """#159 perf2: in cloud-voice mode start importing `openai` as the very first thing in Core start (the
+        voice mode is read from the config, before the stores open), so the import runs beside the rest of the start
+        instead of after it. Safe to repeat: Python's import lock makes the later prewarm a no-op for it."""
+        c = self.cfg
+        if not (self.use_real_audio and c.voice.mode in ("live", "realtime") and c.ai.provider == "openai"):
+            return
+        if not openai_key_present():
+            return
+
+        def early() -> None:
+            import importlib
+            try:
+                importlib.import_module("openai")
+            except Exception:                         # first use reports it; never fails the start
+                logs.debug("core", "EARLY_IMPORT_FAILED", "early openai import skipped", exc=True)
+        self._early_import = self._spawn_daemon(early, "voice-early-import")
+
     def _prewarm(self) -> None:
         """Import the heavy cloud-voice libraries in a worker thread right at start-up. QA 18 Oct: importing
         agents.realtime on first use took 6 s (13 s on a busy PC) and delayed the first spoken word."""
@@ -1655,6 +1695,7 @@ class Core:
                         raise
                     # an optional submodule moved in another SDK version: first use imports what it needs
             _warm_http_stack()
+            self._warm_tool_schemas()
             logs.info("core", "PREWARM_DONE", "cloud voice libraries loaded", ms=round((time.monotonic() - t0) * 1000),
                       modules=mods)
         except Exception as e:

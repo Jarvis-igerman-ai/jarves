@@ -1,6 +1,6 @@
 """Triage of the issues JARVES files about itself (label `from-diagnostics`, docs/BUGFIX_LANE.md).
 
-    python tools/triage_issues.py [--json issues.json] [--repo igalgerman/jarves] [--changelog CHANGELOG.md] [--close-fixed]
+    python tools/triage_issues.py [--json issues.json] [--repo Jarvis-igerman-ai/jarves] [--changelog CHANGELOG.md] [--close-fixed]
 
 Reads the open `from-diagnostics` issues (GitHub API through `gh`, or a saved JSON list for offline use and tests),
 groups them by the registry id in their body (`<!-- jarves-issue: JI-xxxxxxxx -->`), ranks them (P1 first, then how often

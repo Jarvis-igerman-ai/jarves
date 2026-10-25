@@ -22,6 +22,7 @@ from typing import Callable
 from pydantic import BaseModel
 
 from . import calm, features as feat, logs
+from .swr import SwrCache
 
 FEATURE = "dev_status"
 feat.register(FEATURE, "סטטוס פיתוח (קריאה בלבד)", "Development status (read-only)", True, skills=["devstatus"],
@@ -29,7 +30,7 @@ feat.register(FEATURE, "סטטוס פיתוח (קריאה בלבד)", "Developme
                     "it only reads, and any change on GitHub asks on the screen first",
               targets=calm.targets('test_v5_devstatus.py'))
 
-DEFAULT_REPO = "igalgerman/jarves"
+DEFAULT_REPO = "Jarvis-igerman-ai/jarves"
 REPO_RE = re.compile(r"^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$")
 TTL_S = 120.0
 STUCK_S = 1800.0                 # an agent RUNNING without progress this long is stuck
@@ -400,15 +401,28 @@ def make_skill(home: Path, fetch: Fetch | None = None):
 
 
 # ---------------------------------------------------------------------- dashboard
+_STATUS_CACHE = SwrCache(ttl_s=30.0, wait_s=8.0)    # #159 perf2: GitHub reads took 5-15+ s and timed the request out
+
+
+def _status_pending():
+    note = "still reading GitHub; reload in a few seconds"
+    return 200, {"repo": "", "at": time.time(), "items": [], "agents": [], "summary": {}, "notes": [note],
+                 "read_only": True, "pending": True,
+                 "sentence_en": "Reading the development status...", "sentence_he": "קורא את מצב הפיתוח..."}
+
+
 def api_status(ctx, m, body, q=None):
-    try:
-        st = build(ctx.home, repo_of(ctx.home))
-    except ValueError as e:
-        return 400, {"error": str(e)}
-    return 200, {**st, "sentence_en": sentence(st, "en"), "sentence_he": sentence(st, "he")}
+    def compute():
+        try:
+            st = build(ctx.home, repo_of(ctx.home))
+        except ValueError as e:
+            return 400, {"error": str(e)}
+        return 200, {**st, "sentence_en": sentence(st, "en"), "sentence_he": sentence(st, "he")}
+    return _STATUS_CACHE.get(str(ctx.home), compute, _status_pending)
 
 
 def api_apply(ctx, m, body):
+    _STATUS_CACHE.invalidate()
     pid = str((body or {}).get("id", ""))
     if not re.fullmatch(r"(pr|issue)\d+-[a-z]+", pid):
         return 400, {"error": "bad proposal id"}
