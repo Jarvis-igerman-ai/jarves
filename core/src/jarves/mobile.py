@@ -56,7 +56,7 @@ REPLY_TTL_S = 600                  # how long a chat answer is kept for a resend
 REPLY_KEEP = 200
 MSG_ID_RE = re.compile(r"^[A-Za-z0-9_.:-]{8,64}$")
 DEFAULT_SCOPES = ("chat", "voice", "status", "approvals")
-ALL_SCOPES = DEFAULT_SCOPES + ("tasks",)     # tasks: goal actions + proactive snooze/stop (off until granted)
+ALL_SCOPES = DEFAULT_SCOPES + ("tasks", "prefs")   # tasks: goal actions + proactive snooze/stop; prefs: Learned preferences (both off until granted)
 # Pages a paired device may be given (the owner picks per device; default all four). Everything else is PC-only and is
 # refused by the server with a fixed code, whatever the page shows: PAGE_PC_ONLY (never grantable) and
 # PAGE_NOT_ALLOWED (a remote page this device was not given).
@@ -70,7 +70,8 @@ EVENTS_PER_MIN = 600           # chat long-poll: one request per streamed burst,
 STATIC_FILES = {"index.html": "text/html; charset=utf-8", "app.js": "text/javascript; charset=utf-8",
                 "style.css": "text/css; charset=utf-8", "sw.js": "text/javascript; charset=utf-8",
                 "manifest.webmanifest": "application/manifest+json", "icon.svg": "image/svg+xml",
-                "chatview.js": "text/javascript; charset=utf-8", "chatview.css": "text/css; charset=utf-8"}
+                "chatview.js": "text/javascript; charset=utf-8", "chatview.css": "text/css; charset=utf-8",
+                "prefs.js": "text/javascript; charset=utf-8"}
 SHARED_FILES = ("chatview.js", "chatview.css")      # one chat view for the dashboard and the phone page (dashboard_static/)
 
 
@@ -131,6 +132,8 @@ class Bridge:
     voice_available: Callable[[], bool] = field(default=lambda: True)
     goals: Callable[[], object] = field(default=lambda: None)              # -> goals.Goals (the one goal store) or None
     desktop_present: Callable[[], bool] = field(default=lambda: False)     # the owner is at the PC right now
+    prefs: Callable[[], object] = field(default=lambda: None)              # -> preferences.Preferences (None: open memory.db here)
+    prefs_in_prompt: Callable[[], bool] = field(default=lambda: True)      # the "use learned preferences" switch
 
 
 class MobileAccess:
@@ -523,8 +526,15 @@ def core_bridge(core, loop) -> Bridge:
             return bool(owner_at_pc(core))
         except Exception:
             return False
+    def prefs():
+        return getattr(getattr(core, "ops", None), "prefs", None)
+
+    def prefs_in_prompt() -> bool:
+        from .preferences import FEATURE
+        f = getattr(core, "features", None)
+        return bool(f.enabled(FEATURE)) if f is not None else True
     return Bridge(chat=chat, voice=voice, status=status, voice_available=lambda: getattr(core, "stt", None) is not None,
-                  goals=goals, desktop_present=desktop_present)
+                  goals=goals, desktop_present=desktop_present, prefs=prefs, prefs_in_prompt=prefs_in_prompt)
 
 
 # ---------------------------------------------------------------------- HTTP (called by dashboard.Handler)
@@ -807,6 +817,28 @@ def serve(h, mob: MobileAccess, ip: str) -> None:
         mob.cont.beat(dev["id"], used=True)
         status, obj, again = mob.cont.execute(dev["id"], cid, "goal", lambda: goal_action(mob, d), age_s=d.get("age_s"))
         return done(status, {**obj, "replay": True} if again else obj, op=str(d.get("op", ""))[:20])
+    if path == "/api/m/prefs" and method == "GET":        # Learned preferences (V5 G3): the same store as the dashboard page
+        if not need("prefs"):
+            return
+        from . import mobile_prefs
+        try:
+            return h._json(200, mobile_prefs.view(mob))
+        except Exception as e:
+            logs.warn("mobile", "MOBILE_PREFS_FAILED", "preferences could not be read", error_type=type(e).__name__)
+            return h._json(503, {"error": "preferences are not available right now"})
+    if path == "/api/m/prefs/op" and method == "POST":
+        if not need("prefs"):
+            return
+        from . import mobile_prefs
+        d = _json_body(h)
+        if d is None:
+            return
+        cid = d.get("id")
+        if not (isinstance(cid, str) and MSG_ID_RE.match(cid)):
+            return h._json(400, {"error": "command id (8-64 letters, digits or _ . : -) is required"})
+        status, obj, again = mob.cont.execute(dev["id"], cid, "pref", lambda: mobile_prefs.action(mob, d, dev["id"]),
+                                              age_s=d.get("age_s"))
+        return done(status, {**obj, "replay": True} if again else obj, op=str(d.get("op", ""))[:20], pref=str(d.get("pref", ""))[:9])
     if path == "/api/m/signals" and method == "POST":
         if not need("tasks"):
             return
