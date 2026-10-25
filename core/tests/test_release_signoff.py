@@ -244,3 +244,72 @@ def test_manual_sheet_is_one_row_per_entry_and_skips_what_the_app_cannot_show():
     assert todo["C2"].endswith("Added: project manager for git projects.")
     assert "3 changed guide(s)" in todo["G1"] and "a, b, c" in todo["G1"]
     assert todo["P1"].endswith("bugs, chat")                                  # app.js is the shell, not a page
+
+
+# ---------------------------------------------------------------- manual_test_sheet: --since, --extra-rows, fallback
+CL_REL = ("## 4.0.1 (unreleased)\n- Added: the project manager for git projects, off by default.\n\n"
+          "## 4.0.0 (release candidate, not yet released)\n- Added: privacy hardening and the redaction audit.\n\n"
+          "## 3.x\n- Added: something very old and long enough to be a row.\n")
+
+
+def test_unknown_version_falls_back_to_previous_sections_with_a_note():
+    items, note = sheet_tool.changelog_items_note(CL_REL, "5.0.0")
+    assert items == ["Added: the project manager for git projects, off by default."]   # newest section below 5.0.0, not all
+    assert "5.0.0" in note and "4.0.1" in note
+    assert sheet_tool.changelog_items_note(CL_REL, "4.0.0")[1] == ""                    # exact match: no note
+    sh = sheet_tool.build_sheet("5.0.0", None, CL_REL, "", [])
+    assert "no CHANGELOG section" in sh.intro and sh.rows[0].id == "C1" and len(sh.rows) == 1
+
+
+def test_since_version_takes_every_section_after_it():
+    items, note = sheet_tool.changelog_items_note(CL_REL, "5.0.0", since="v3.0.0")
+    assert len(items) == 2 and "privacy hardening" in items[1]
+    assert len(sheet_tool.changelog_items_note(CL_REL, "5.0.0", since="4.0.0")[0]) == 1
+
+
+def test_resolve_since_uses_nearest_tag_at_or_below():
+    tags = ["v3.0.0", "v4.0.0", "win-v4.0.0.153"]
+    assert sheet_tool.resolve_since(tags, "4.0.0") == ("v4.0.0", "")
+    assert sheet_tool.resolve_since(tags, "v3.0.0")[0] == "v3.0.0"
+    ref, note = sheet_tool.resolve_since(tags, "5.0.0")
+    assert ref == "v4.0.0" and "5.0.0" in note
+    ref, note = sheet_tool.resolve_since(tags, "1.0.0")
+    assert ref is None and "baseline" in note
+    assert sheet_tool.resolve_since(tags, "win-v4.0.0.153") == ("win-v4.0.0.153", "")
+
+
+def test_extra_rows_numbered_and_table_are_marked_owner_only(tmp_path):
+    f = tmp_path / "phone.md"
+    f.write_text("# Phone\n\n1. On the PC run the thing.\n2. Optional: add to Home screen.\n\n"
+                 "| Step | Emulated | Real |\n|---|---|---|\n| 1 | ok | camera |\n\n"
+                 "| ID | Area | Do | Expected |\n|---|---|---|---|\n| Z9 | Phone | Scan | Pairs |\n", encoding="utf-8")
+    rows = sheet_tool.extra_rows(f.read_text(encoding="utf-8"))
+    assert [r.id for r in rows] == ["X01", "X02", "Z9"]
+    assert all("real device" in r.todo.lower() or r.id == "Z9" for r in rows) and rows[0].area == "Owner-only"
+    assert rows[2].area == "Owner-only" and rows[2].todo.endswith("Scan")
+    with pytest.raises(ValueError):
+        sheet_tool.extra_rows("1. a thing\n| X01 | A | b | c |\n")                    # duplicate id
+
+
+def test_extra_rows_survive_the_sheet_round_trip_and_the_gate_reads_them(tmp_path):
+    sh = sheet_tool.build_sheet("5.0.0", None, CL_REL, "", [],
+                                extra=sheet_tool.extra_rows("1. Scan the QR code with the phone camera.\n"))
+    assert sh.rows[-1].id == "X01"
+    so.save(tmp_path, sh)
+    again = so.load(tmp_path, "5.0.0")
+    assert [r.id for r in again.rows] == ["C1", "X01"] and any("X01" in p for p in again.problems())
+
+
+def test_main_baseline_without_resolvable_since_lists_tree_and_since_adds_rows(tmp_path):
+    g = tmp_path / "core" / "src" / "jarves" / "guides" / "data"
+    g.mkdir(parents=True)
+    for n in ("a", "b"):
+        (g / f"{n}.toml").write_text("x = 1\n", encoding="utf-8")
+    (tmp_path / "CHANGELOG.md").write_text(CL_REL, encoding="utf-8")
+    (tmp_path / "ph.md").write_text("1. Scan the QR code.\n", encoding="utf-8")
+    assert sheet_tool.main(["--version", "5.0.0", "--since", "1.0.0", "--extra-rows", str(tmp_path / "ph.md"),
+                            "--repo-root", str(tmp_path)]) == 0
+    sh = so.load(tmp_path, "5.0.0")
+    ids = [r.id for r in sh.rows]
+    assert "G1" in ids and "X01" in ids and "baseline run" in so.sheet_path(tmp_path, "5.0.0").read_text(encoding="utf-8")
+    assert "2 changed guide(s)" in next(r.todo for r in sh.rows if r.id == "G1")
