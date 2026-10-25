@@ -1,0 +1,404 @@
+[
+ {
+  "number": 198,
+  "title": "ci: retire the custom queue and the next flow; labelled PRs enter the native merge queue (#161)",
+  "state": "open",
+  "updated_at": "2026-10-24T21:20:19Z",
+  "labels": [],
+  "pull_request": {
+   "url": "https://api.github.com/repos/Jarvis-igerman-ai/jarves/pulls/198"
+  }
+ },
+ {
+  "number": 197,
+  "title": "perf: cache tool JSON schemas; re-check guides at most every 2 s (#159)",
+  "state": "open",
+  "updated_at": "2026-10-24T21:16:43Z",
+  "labels": [],
+  "pull_request": {
+   "url": "https://api.github.com/repos/Jarvis-igerman-ai/jarves/pulls/197"
+  }
+ },
+ {
+  "number": 196,
+  "title": "tests: de-flake slow-CLI probe test, lift quarantine (#163)",
+  "state": "open",
+  "updated_at": "2026-10-24T21:16:34Z",
+  "labels": [],
+  "pull_request": {
+   "url": "https://api.github.com/repos/Jarvis-igerman-ai/jarves/pulls/196"
+  }
+ },
+ {
+  "number": 195,
+  "title": "tests: sanitizer proofs for CodeQL #13, #19, #20, #21",
+  "state": "open",
+  "updated_at": "2026-10-24T21:16:08Z",
+  "labels": [
+   {
+    "name": "automerge"
+   },
+   {
+    "name": "automerge-auto"
+   }
+  ],
+  "pull_request": {
+   "url": "https://api.github.com/repos/Jarvis-igerman-ai/jarves/pulls/195"
+  }
+ },
+ {
+  "number": 194,
+  "title": "V5: trusted certificate for the phone (owner)",
+  "state": "open",
+  "updated_at": "2026-10-24T21:06:24Z",
+  "labels": [
+   {
+    "name": "v5"
+   },
+   {
+    "name": "owner-gated"
+   }
+  ]
+ },
+ {
+  "number": 193,
+  "title": "V5: real Android acceptance sheet (owner)",
+  "state": "open",
+  "updated_at": "2026-10-24T21:06:22Z",
+  "labels": [
+   {
+    "name": "v5"
+   },
+   {
+    "name": "owner-gated"
+   }
+  ]
+ },
+ {
+  "number": 192,
+  "title": "V5: 5.0.0 release prep (version, CHANGELOG, checklist, gate dry run)",
+  "state": "open",
+  "updated_at": "2026-10-24T21:06:19Z",
+  "labels": [
+   {
+    "name": "v5"
+   },
+   {
+    "name": "agent-doable"
+   }
+  ]
+ },
+ {
+  "number": 191,
+  "title": "V5: 5.0 bug table skeleton and triage",
+  "state": "open",
+  "updated_at": "2026-10-24T21:06:17Z",
+  "labels": [
+   {
+    "name": "v5"
+   },
+   {
+    "name": "agent-doable"
+   }
+  ]
+ },
+ {
+  "number": 190,
+  "title": "V5: dev status never run on real GitHub data",
+  "state": "open",
+  "updated_at": "2026-10-24T21:06:14Z",
+  "labels": [
+   {
+    "name": "v5"
+   },
+   {
+    "name": "agent-doable"
+   }
+  ]
+ },
+ {
+  "number": 189,
+  "title": "V5: security review covers phone access only",
+  "state": "open",
+  "updated_at": "2026-10-24T21:06:11Z",
+  "labels": [
+   {
+    "name": "v5"
+   },
+   {
+    "name": "agent-doable"
+   }
+  ]
+ },
+ {
+  "number": 188,
+  "title": "V5: capability evidence per pillar (calm.TARGETS shared)",
+  "state": "open",
+  "updated_at": "2026-10-24T21:06:09Z",
+  "labels": [
+   {
+    "name": "v5"
+   },
+   {
+    "name": "agent-doable"
+   }
+  ]
+ },
+ {
+  "number": 187,
+  "title": "V5: cross-pillar scenario test (phone and desktop)",
+  "state": "open",
+  "updated_at": "2026-10-24T21:06:07Z",
+  "labels": [
+   {
+    "name": "v5"
+   },
+   {
+    "name": "agent-doable"
+   }
+  ]
+ },
+ {
+  "number": 186,
+  "title": "V5: resume a phone conversation on Windows is not proven",
+  "state": "open",
+  "updated_at": "2026-10-24T21:06:05Z",
+  "labels": [
+   {
+    "name": "v5"
+   },
+   {
+    "name": "agent-doable"
+   }
+  ]
+ },
+ {
+  "number": 185,
+  "title": "V5: phone mic/cloud-audio indicator and notice stop/snooze",
+  "state": "open",
+  "updated_at": "2026-10-24T21:06:03Z",
+  "labels": [
+   {
+    "name": "v5"
+   },
+   {
+    "name": "agent-doable"
+   }
+  ]
+ },
+ {
+  "number": 184,
+  "title": "V5: phone shows goals but not goal plans",
+  "state": "open",
+  "updated_at": "2026-10-24T21:06:01Z",
+  "labels": [
+   {
+    "name": "v5"
+   },
+   {
+    "name": "agent-doable"
+   }
+  ]
+ },
+ {
+  "number": 183,
+  "title": "V5: phone has no Learned-preferences page",
+  "state": "open",
+  "updated_at": "2026-10-24T21:05:59Z",
+  "labels": [
+   {
+    "name": "v5"
+   },
+   {
+    "name": "agent-doable"
+   }
+  ]
+ },
+ {
+  "number": 182,
+  "title": "V5: repo move constants still name igalgerman/jarves",
+  "state": "open",
+  "updated_at": "2026-10-24T21:05:57Z",
+  "labels": [
+   {
+    "name": "v5"
+   },
+   {
+    "name": "agent-doable"
+   }
+  ]
+ },
+ {
+  "number": 181,
+  "title": "V5: status docs are stale (ROADMAP V5 block, V5 package rows, DOC_MAP)",
+  "state": "open",
+  "updated_at": "2026-10-24T21:05:54Z",
+  "labels": [
+   {
+    "name": "v5"
+   },
+   {
+    "name": "agent-doable"
+   }
+  ]
+ },
+ {
+  "number": 179,
+  "title": "P2: voice start: greeting audio sometimes never arrives (1 of 5 live starts); Core now continues without a greeting",
+  "state": "open",
+  "updated_at": "2026-10-24T20:46:02Z",
+  "labels": [
+   {
+    "name": "bug"
+   },
+   {
+    "name": "P2"
+   }
+  ]
+ },
+ {
+  "number": 168,
+  "title": "Upgrade: show progress during a silent install (dashboard + CLI)",
+  "state": "open",
+  "updated_at": "2026-10-24T18:49:27Z",
+  "labels": [
+   {
+    "name": "enhancement"
+   }
+  ]
+ },
+ {
+  "number": 167,
+  "title": "Upgrade: 'what changed since your version' card in the dashboard; wizard re-asks only changed topics",
+  "state": "open",
+  "updated_at": "2026-10-24T18:49:25Z",
+  "labels": [
+   {
+    "name": "enhancement"
+   }
+  ]
+ },
+ {
+  "number": 166,
+  "title": "Upgrade: restart only what was running (Core, dashboard, face) after setup",
+  "state": "open",
+  "updated_at": "2026-10-24T18:49:23Z",
+  "labels": [
+   {
+    "name": "enhancement"
+   }
+  ]
+ },
+ {
+  "number": 165,
+  "title": "Upgrade: free-disk pre-check before backup + install, and a low-disk CI case",
+  "state": "open",
+  "updated_at": "2026-10-24T18:49:04Z",
+  "labels": [
+   {
+    "name": "enhancement"
+   },
+   {
+    "name": "P2"
+   }
+  ]
+ },
+ {
+  "number": 164,
+  "title": "Upgrade: automatic health check after install + program-only automatic rollback",
+  "state": "open",
+  "updated_at": "2026-10-24T18:49:00Z",
+  "labels": [
+   {
+    "name": "enhancement"
+   },
+   {
+    "name": "P2"
+   }
+  ]
+ },
+ {
+  "number": 163,
+  "title": "Flaky test: test_perf_probes.py::test_slow_cli_probe_never_blocks_features_list_and_its_result_lands",
+  "state": "open",
+  "updated_at": "2026-10-24T18:42:17Z",
+  "labels": [
+   {
+    "name": "P1"
+   },
+   {
+    "name": "showstopper"
+   },
+   {
+    "name": "ci"
+   }
+  ]
+ },
+ {
+  "number": 161,
+  "title": "Move jarves into a free GitHub organization for the native merge queue (plan, owner approval)",
+  "state": "open",
+  "updated_at": "2026-10-24T19:33:38Z",
+  "labels": [
+   {
+    "name": "P1"
+   },
+   {
+    "name": "ci"
+   }
+  ]
+ },
+ {
+  "number": 160,
+  "title": "CI reliability E3: root causes, speed table and plan",
+  "state": "open",
+  "updated_at": "2026-10-24T19:15:30Z",
+  "labels": [
+   {
+    "name": "P1"
+   },
+   {
+    "name": "ci"
+   }
+  ]
+ },
+ {
+  "number": 159,
+  "title": "Performance overhaul 4.5: baseline + plan",
+  "state": "open",
+  "updated_at": "2026-10-24T19:14:18Z",
+  "labels": [
+   {
+    "name": "enhancement"
+   },
+   {
+    "name": "P2"
+   }
+  ]
+ },
+ {
+  "number": 153,
+  "title": "Upgrade experience audit + plan: BEFORE/DURING/AFTER/auto-update/CI (#141 follow-up)",
+  "state": "open",
+  "updated_at": "2026-10-24T18:50:02Z",
+  "labels": [
+   {
+    "name": "enhancement"
+   },
+   {
+    "name": "P2"
+   }
+  ]
+ },
+ {
+  "number": 149,
+  "title": "P3: setup wizard has too much text per step (#58 #60)",
+  "state": "open",
+  "updated_at": "2026-10-24T18:05:58Z",
+  "labels": [
+   {
+    "name": "bug"
+   }
+  ]
+ }
+]
