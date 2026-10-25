@@ -383,6 +383,51 @@ def test_every_packaging_powershell_script_parses():
         assert r.returncode == 0, (name, r.stdout[-400:])
 
 
+def test_health_check_after_update_rolls_back_the_program_only():
+    """#164: after /RESTARTJARVES=1 setup waits for CORE_READY; a candidate that never gets ready is undone, program
+    parts only (the ones THIS run moved), kept aside not deleted, data untouched, the old Core restarted."""
+    iss = (PKG / "windows" / "jarves.iss").read_text(encoding="utf-8-sig")
+    done = iss.split("procedure CurStepChanged", 1)[1].split("#include", 1)[0]
+    assert "ssDone" in done and "HealthCheckAfterUpdate();" in done
+    check = iss.split("procedure HealthCheckAfterUpdate", 1)[1].split("procedure CurStepChanged", 1)[0]
+    assert "RestartRequested()" in check and "/ROLLBACK=1" in check and "SnapshotMade" in check
+    assert "if (Code <> 0) and (Code <> 1) then HealthRollback();" in check
+    # review #260 F4: a mistyped /HEALTHTIMEOUT= falls back to 180 s instead of failing the check (= a false rollback)
+    assert "RunHealth(StrToIntDef(ExpandConstant('{param:HEALTHTIMEOUT|180}'), 180), Code)" in check
+    run = iss.split("function RunHealth", 1)[1].split("procedure HealthRollback", 1)[0]
+    # review P2-1: only a record for the version this setup installs is judged
+    assert "--expect ' + ExpandConstant('{param:HEALTHEXPECT|{#AppVersion}}')" in run
+    # review P1-2: the check runs under the OLD python and the stdlib-only helper in {tmp}, never the new runtime;
+    # the log names the python (the smoke checks it)
+    assert "Exec(HealthPython()" in run and "HelperScript()" in run and "Log('Health check runs with ' + HealthPython()" in run
+    hp = iss.split("function HealthPython", 1)[1].split("function HelperScript", 1)[0]
+    assert hp.index("{app}\\rollback\\python\\python.exe") < hp.index("{app}\\python\\python.exe")
+    assert "{tmp}\\installer_state.py" in iss.split("function HelperScript", 1)[1].split("procedure NoteHealth", 1)[0]
+    swap = iss.split("function SwapBackPart", 1)[1].split("function HealthPython", 1)[0]
+    assert swap.index("Pos('|' + Name + '|', Retained) = 0") < swap.index("RenameFile(Target, Kept)")
+    assert "DelTree" not in swap and "DeleteFile" not in swap          # nothing is deleted, the new part is kept aside
+    # review P0-1: StringChange returns an Integer (ISCC "Type mismatch"); StringChangeEx changes its var argument
+    assert "StringChangeEx(Retained, '|' + Name + '|', '|', True);" in swap and "StringChange(" not in swap
+    roll = iss.split("procedure HealthRollback", 1)[1].split("procedure HealthCheckAfterUpdate", 1)[0]
+    # review P1-1: a program-only rollback only when no data schema changed; otherwise health_failed, no swap
+    assert roll.index("can-program-rollback") < roll.index("NoteHealth('health_failed');") < roll.index("SwapBackPart('python'")
+    # review P2-2: ask the new Core to stop and wait for core.lock before any hard stop
+    assert roll.index('" stop"') < roll.index("StopProcessesUnderApp(15);") < roll.index("SwapBackPart('python'")
+    assert roll.index("NoteHealth('rolled_back')") < roll.index("Health rollback done")
+    # review #260 F6: a version that became ready while the stop ran is never swapped out
+    assert roll.index("StopProcessesUnderApp(15);") < roll.index("RunHealth(1, Code) and (Code = 0)") < roll.index("SwapBackPart('python'")
+    assert "restore-data" not in roll and "DataDir()" in roll and "AsideName('health', 'program')" in roll
+    assert 'Name: "{app}\\failed-upgrade-*"' in iss                    # the uninstaller removes the kept-aside copy
+    smoke = (PKG / "smoke_windows.ps1").read_text(encoding="utf-8-sig")
+    assert "candidate that never becomes ready" in smoke and "/HEALTHTIMEOUT=5" in smoke and "/HEALTHEXPECT=9.9.9" in smoke
+    assert "the OLD Core starts and reaches CORE_READY" in smoke
+    # review #260 F2: the fixture must take the swap branch (asserted, not an if), the python is checked, and the later
+    # upgrade cases always start from the old version (never new -> new)
+    assert "the fixture takes the swap branch" in smoke and "if ((Schema-Of) -ne $schemaBefore)" not in smoke
+    assert "Health check runs with .*\\\\rollback\\\\python\\\\python\\.exe" in smoke
+    assert "the following upgrade cases start from the old version" in smoke
+
+
 def test_a_restore_never_deletes_first_and_an_unfinished_restore_is_finished_before_the_backup():
     """Review P2-6/P3-7: RestoreProgramPart DelTree'd the target before the rename; a failed rename then left a hole,
     and the next run (no {app}\\python\\python.exe) skipped the verified data backup. Now the target is renamed

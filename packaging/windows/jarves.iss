@@ -660,11 +660,127 @@ begin
       ewNoWait, Code);
 end;
 
+// Health check after an in-app update (/RESTARTJARVES=1, #164): the new Core must reach CORE_READY (recorded in
+// updates\pending.json by the Core itself) within /HEALTHTIMEOUT= seconds (default 180). If it never does:
+// - the data schema did not change: the PROGRAM parts this run moved are put back from {app}\rollback (the new ones are
+//   kept aside in failed-upgrade-health-*, nothing is deleted) and the old Core is started;
+// - the data schema changed (`complete` migrated it): the old Core would refuse the newer data, so the program is NOT
+//   swapped; health.json says health_failed and the owner is offered the approval-gated `jarvis update --rollback`,
+//   which restores the data backup and the program together.
+// Data is never touched here. The check and every helper run with the OLD python ({app}\rollback\python, or {app}\python
+// once it is back) and the stdlib-only {tmp}\installer_state.py: a broken new runtime cannot hide its own failure.
+function SwapBackPart(const Name, Aside: String): Boolean;
+var Source, Target, Kept: String;
+begin
+  Result := True;
+  if Pos('|' + Name + '|', Retained) = 0 then exit;
+  Source := ExpandConstant('{app}\rollback\') + Name;
+  Target := ExpandConstant('{app}\') + Name;
+  Kept := Aside + '\' + Name;
+  if not (FileExists(Source) or DirExists(Source)) then begin Result := False; exit; end;
+  if FileExists(Target) or DirExists(Target) then
+    if not RenameFile(Target, Kept) then begin Result := False; exit; end;
+  Result := RenameFile(Source, Target);
+  if not Result then begin
+    if FileExists(Kept) or DirExists(Kept) then RenameFile(Kept, Target);   // put the new part back: never leave a hole
+    Log('Health rollback: cannot put back ' + Name);
+  end else
+    StringChangeEx(Retained, '|' + Name + '|', '|', True);
+end;
+
+// The old runtime: still in rollback\ before the swap, back in {app}\python after it.
+function HealthPython(): String;
+begin
+  Result := ExpandConstant('{app}\rollback\python\python.exe');
+  if not FileExists(Result) then Result := ExpandConstant('{app}\python\python.exe');
+end;
+
+function HelperScript(): String;
+begin
+  Result := ExpandConstant('{tmp}\installer_state.py');
+  if not FileExists(Result) then ExtractTemporaryFile('installer_state.py');
+end;
+
+procedure NoteHealth(const Status: String);
+var Code: Integer;
+begin
+  if not Exec(HealthPython(), '-I "' + HelperScript() + '" note-rollback --home "' + DataDir() + '" --status ' + Status,
+      '', SW_HIDE, ewWaitUntilTerminated, Code) or (Code <> 0) then
+    Log('Health check: could not record "' + Status + '" for the owner notice');
+end;
+
+// health --expect <this version> with the given timeout; /HEALTHEXPECT= exists for the smoke test only (it fakes an
+// update record for a version that never starts)
+function RunHealth(const TimeoutS: Integer; var Code: Integer): Boolean;
+begin
+  Log('Health check runs with ' + HealthPython() + ' (timeout ' + IntToStr(TimeoutS) + ' s)');
+  Result := Exec(HealthPython(), '-I "' + HelperScript() + '" health --home "' + DataDir() + '" --timeout ' +
+    IntToStr(TimeoutS) + ' --expect ' + ExpandConstant('{param:HEALTHEXPECT|{#AppVersion}}'), '', SW_HIDE,
+    ewWaitUntilTerminated, Code);
+end;
+
+procedure HealthRollback();
+var
+  Code: Integer;
+  Aside: String;
+  Ok: Boolean;
+begin
+  if not Exec(HealthPython(), '-I "' + HelperScript() + '" can-program-rollback --home "' + DataDir() + '" --state "' +
+      ExpandConstant('{app}\install-state.json') + '"', '', SW_HIDE, ewWaitUntilTerminated, Code) or (Code <> 0) then begin
+    Log('Health check failed, and the data schema changed in this update (or could not be compared): the previous ' +
+        'program is NOT put back (it would not start on the upgraded data). The owner is offered the approval-gated ' +
+        'jarvis update --rollback, which restores data and program together.');
+    NoteHealth('health_failed');
+    exit;
+  end;
+  Log('Health check failed: the new version did not become ready; putting the previous program back (data untouched)');
+  // ask the new Core to close and wait for its core.lock before anything is hard-stopped (review P2-2)
+  if FileExists(ExpandConstant('{app}\jarvis.cmd')) then
+    Exec(ExpandConstant('{cmd}'), '/c ""' + ExpandConstant('{app}\jarvis.cmd') + '" stop"', '', SW_HIDE,
+      ewWaitUntilTerminated, Code);
+  StopProcessesUnderApp(15);
+  // review #260 F6: a slow but good version may have become ready while the stop ran: never swap it out then
+  if RunHealth(1, Code) and (Code = 0) then begin
+    Log('Health check: the new version became ready after all; it stays, and its Core is started again');
+    Exec(ExpandConstant('{app}\python\pythonw.exe'), '-m jarves run --background', ExpandConstant('{app}'), SW_HIDE,
+      ewNoWait, Code);
+    exit;
+  end;
+  Aside := AsideName('health', 'program');
+  ForceDirectories(Aside);
+  Ok := SwapBackPart('python', Aside);
+  if Ok then Ok := SwapBackPart('face', Aside);
+  if Ok then Ok := SwapBackPart('bridge', Aside);
+  if Ok then Ok := SwapBackPart('jarvis.cmd', Aside);
+  if Ok then NoteHealth('rolled_back') else NoteHealth('rollback_failed');
+  if Ok then begin
+    Log('Health rollback done: the previous program is back');
+    Exec(ExpandConstant('{app}\python\pythonw.exe'), '-m jarves run --background', ExpandConstant('{app}'), SW_HIDE,
+      ewNoWait, Code);
+  end else
+    Log('Health rollback incomplete; see the lines above. Run: jarvis update --rollback');
+end;
+
+procedure HealthCheckAfterUpdate();
+var Code: Integer;
+begin
+  if not (SetupComplete and SnapshotMade and RestartRequested()) or ParamPresent('/ROLLBACK=1') then exit;
+  if Pos('|python|', Retained) = 0 then exit;          // no old runtime kept: nothing to judge or put back with
+  // review #260 F4: a mistyped /HEALTHTIMEOUT= falls back to 180 s; it must never make a healthy update look broken
+  if not RunHealth(StrToIntDef(ExpandConstant('{param:HEALTHTIMEOUT|180}'), 180), Code) then begin
+    Log('Health check could not run (the previous python did not start): ' + SysErrorMessage(Code));
+    exit;
+  end;
+  Log('Health check result code: ' + IntToStr(Code) + ' (0 ready, 1 no update record for this version, anything else not ready)');
+  if (Code <> 0) and (Code <> 1) then HealthRollback();
+end;
+
 procedure CurStepChanged(CurStep: TSetupStep);
 var
   Code: Integer;
   Args, State: String;
 begin
+  if CurStep = ssDone then HealthCheckAfterUpdate();
   if CurStep = ssPostInstall then begin
     State := ExpandConstant('{app}\install-state.json');
     if FileExists(BackupState) and not FileCopy(BackupState, State, False) then

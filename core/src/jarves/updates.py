@@ -846,6 +846,23 @@ def mark_healthy(home: Path, version: str | None = None) -> None:
         _write_json(path, d)
 
 
+HEALTH_FILE = "health.json"
+
+
+def take_health_notice(home: Path) -> dict | None:
+    """What the installer's health check did after an update that never became ready, returned ONCE so the owner is
+    told a single time: {"status": "rolled_back" (previous program back, data untouched) | "rollback_failed" |
+    "health_failed" (the data schema had changed, so the program was NOT swapped: the owner is offered the
+    approval-gated `jarvis update --rollback`, which restores data and program), "from", "to"}."""
+    path = _updates_dir(home) / HEALTH_FILE
+    d = _read_json(path)
+    if d.get("status") not in ("rolled_back", "rollback_failed", "health_failed") or d.get("notified"):
+        return None
+    d["notified"] = True
+    _write_json(path, d)
+    return d
+
+
 def start_rollback_process(home: Path, popen: Callable | None = None) -> None:
     """Run `jarvis update --rollback --yes` as a separate process (it stops the Core, restores the data and starts
     setup), after the owner's approval was recorded. The Core cannot roll itself back while it is running."""

@@ -361,6 +361,28 @@ class AutoUpdater:
         with self._lock:
             st = self.state()
             self._after_restart(st)
+            h = updates.take_health_notice(self.home)
+            pend = updates._read_json(updates._updates_dir(self.home) / updates.PENDING_FILE) if h else {}
+            if h and h.get("to") and self.current() == h.get("to") and pend.get("state") == "ok":
+                # review #260 F6: the version was only slow; it is running now and marked itself healthy. No alarming
+                # "did not start" notice and no give-up for the version that works.
+                logs.info("updates", "UPDATE_HEALTH_LATE_READY", "the update became ready after the health check gave up",
+                          version=h.get("to"), alert_kind=h.get("status"))
+                h = None
+            if h:                                         # the installer's health check acted on the update (#164)
+                st = self.state()
+                bad = h.get("to") or ""
+                if bad:
+                    # never auto-retry a version that did not become ready (each try would leave another
+                    # failed-upgrade-health-* folder); the owner's own "Update now" lifts this
+                    st.pop("installing", None)
+                    st["gave_up"], st["last_error"] = bad, "UPDATE_HEALTH_" + str(h["status"]).upper()
+                    # review P3-8: its own last result, never "not installed, nothing changed" (it WAS installed and
+                    # may have migrated the data)
+                    self._result(st, bad, False, st["last_error"])
+                    st["last_result"]["health"] = h["status"]
+                self._emit(st, h["status"], bad, bad, prev=h.get("from") or "")
+                _save(self.home, st)
             return (self.state().get("notice") or {}).get("kind", "")
 
 
@@ -389,6 +411,31 @@ def _notice_text(kind: str, display: str, **x) -> tuple[tuple[str, str], tuple[s
                 ("JARVES was updated", f"Updated to version {display}. Your data was kept and backed up before the update. "
                  "What changed: jarvis release-notes. If something is wrong: jarvis update --rollback (or the Roll back "
                  "button on the Updates page)."))
+    if kind == "health_failed":
+        return (("העדכון לא עלה; החזרה מלאה מחכה לאישור שלך", f"גרסה {display} לא עלתה כמו שצריך אחרי ההתקנה. הנתונים כבר "
+                 "הותאמו לגרסה החדשה, אז לא החזרתי לבד רק את התוכנה (הגרסה הקודמת לא הייתה עולה עליהם). כדי לחזור: "
+                 "jarvis update --rollback (או הכפתור Roll back בעמוד Updates); זה מחזיר גם את הגיבוי של הנתונים "
+                 "שנעשה לפני העדכון, ורק אחרי אישור שלך."),
+                ("The update did not start; a full undo waits for your OK", f"Version {display} did not start properly "
+                 "after setup. Your data had already been upgraded for it, so I did not put back the previous program "
+                 "alone (it would not start on that data). To go back: jarvis update --rollback (or the Roll back "
+                 "button on the Updates page); it also restores the data backup made before the update, and only "
+                 "after your OK."))
+    if kind in ("rolled_back", "rollback_failed"):
+        prev = x.get("prev") or ""
+        if kind == "rolled_back":
+            return (("העדכון בוטל והגרסה הקודמת חזרה", f"גרסה {display} לא עלתה כמו שצריך אחרי ההתקנה, אז החזרתי את התוכנה "
+                     f"הקודמת{' ' + prev if prev else ''}. הנתונים שלך לא נגעו ושמורים. אפשר לנסות שוב מאוחר יותר "
+                     "בעמוד Updates; אם זה חוזר, דווח עם jarvis report."),
+                    ("The update was undone, the previous version is back", f"Version {display} did not start properly "
+                     f"after setup, so I put the previous program back{' (' + prev + ')' if prev else ''}. Your data was "
+                     "not touched and is safe. You can try again later on the Updates page; if it repeats, report it "
+                     "with jarvis report."))
+        return (("העדכון לא עלה וההחזרה האוטומטית לא הצליחה", f"גרסה {display} לא עלתה, ולא הצלחתי להחזיר את התוכנה "
+                 "הקודמת לבד. הנתונים שלך לא נגעו. הרץ jarvis update --rollback או התקן מחדש את הגרסה הקודמת."),
+                ("The update failed and the automatic undo did not work", f"Version {display} did not start and I could "
+                 "not put the previous program back by myself. Your data was not touched. Run jarvis update --rollback "
+                 "or reinstall the previous version."))
     return (("העדכון האוטומטי הפסיק לנסות", f"לא הצלחתי להתקין את גרסה {display} ({x.get('code', '')}) אחרי כמה ניסיונות. "
              "הגרסה הנוכחית ממשיכה לעבוד ושום דבר לא השתנה. אפשר ללחוץ עכשיו לעדכן ידנית בעמוד Updates."),
             ("Auto-update stopped trying", f"I could not install version {display} ({x.get('code', '')}) after several "
@@ -399,6 +446,20 @@ NEXT_TEXT = {   # next_kind -> (he, en); {t} is the local time
     "check": ("הבדיקה הבאה לעדכון: {t}", "Next update check: {t}"),
     "install": ("התקנה מתוכננת: לא לפני {t}, ברגע שקט", "Planned install: not before {t}, at a quiet moment"),
     "quiet_moment": ("ההתקנה ממתינה לרגע שקט (לא באמצע שיחה)", "The install is waiting for a quiet moment (never in a conversation)"),
+}
+
+
+HEALTH_RESULT = {   # last_result["health"] -> (he, en): setup's health check acted after the install (#164)
+    "rolled_back": ("תוצאה אחרונה: גרסה {v} הותקנה אבל לא עלתה ({t}), אז התוכנה הקודמת הוחזרה. הנתונים לא נוגעו.",
+                    "Last result: {v} was installed but did not start ({t}), so the previous program was put back. "
+                    "Your data was not touched."),
+    "rollback_failed": ("תוצאה אחרונה: גרסה {v} לא עלתה ({t}) וההחזרה האוטומטית לא הצליחה. הרץ jarvis update --rollback.",
+                        "Last result: {v} did not start ({t}) and the automatic undo did not work. Run: "
+                        "jarvis update --rollback."),
+    "health_failed": ("תוצאה אחרונה: גרסה {v} לא עלתה ({t}). הנתונים כבר הותאמו לה, אז חזרה מלאה (נתונים ותוכנה) "
+                      "מחכה לאישור שלך: jarvis update --rollback.",
+                      "Last result: {v} did not start ({t}). Your data had already been upgraded for it, so a full "
+                      "undo (data and program) waits for your OK: jarvis update --rollback."),
 }
 
 
@@ -420,6 +481,9 @@ def status_lines(s: dict) -> list[str]:
         if r.get("ok"):
             out.append(clilang.fmt(f"תוצאה אחרונה: עודכן לגרסה {r['version']} ({t}). אפשר לחזור: jarvis update --rollback",
                                    f"Last result: updated to {r['version']} ({t}). To go back: jarvis update --rollback"))
+        elif r.get("health") in HEALTH_RESULT:
+            he, en = HEALTH_RESULT[r["health"]]
+            out.append(clilang.fmt(he.format(v=r["version"], t=t), en.format(v=r["version"], t=t)))
         else:
             out.append(clilang.fmt(f"תוצאה אחרונה: גרסה {r['version']} לא הותקנה ({r.get('code') or ''}, {t}). "
                                    "שום דבר לא השתנה והגרסה הנוכחית עובדת.",
