@@ -1,2 +1,1 @@
 dashboard = ["jarves.camera.surface"]
-cli       = ["jarves.camera.cli"]

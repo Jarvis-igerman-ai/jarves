@@ -1905,6 +1905,7 @@ _EXT_LATE = (
     ("selfspeed", ("selftest", "speedtest", "performance"), "COMMANDS"),   # owner request 21 Oct
     ("issue_registry", ("issues", "issue"), "COMMANDS"),              # owner request 21 Oct: jarvis issues ...
     ("web_cli", ("web",), "COMMANDS"),                                # owner request 21 Oct: jarvis web
+    ("camera.cli", ("camera",), "COMMANDS"),                          # V4.5 D: jarvis camera status | test | preview
     ("self_aware", ("about", "whatsnew", "roadmap", "ticket"), "COMMANDS"),   # issue #61: jarvis about | whatsnew | roadmap | ticket
     None,                                                             # plugins.d/*.toml command modules go here
     ("whatsapp_admin", ("whatsapp",), {"whatsapp": "cmd_whatsapp"}),  # SW-V4 F: jarvis whatsapp status / link / ...
