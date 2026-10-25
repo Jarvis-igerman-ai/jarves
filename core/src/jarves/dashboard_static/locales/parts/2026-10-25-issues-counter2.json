@@ -3,7 +3,7 @@
   " · patterns found in past conversations (no content)": " · דפוסים שנמצאו בשיחות קודמות (בלי תוכן)",
   "About bug reports": "על דיווחי התקלות",
   "Open the full list": "לרשימה המלאה",
-  "These are local self-diagnostic tickets JARVES opened for itself on this PC (self-test, failing tools, crashes). They are not sent to anyone. Red means only NEW serious (P1/P2) tickets you have not seen yet; old ones close by themselves after 14 days without recurring.": "אלה כרטיסי אבחון מקומיים ש-JARVES פתח לעצמו במחשב הזה (בדיקה עצמית, כלים שנכשלים, קריסות). הם לא נשלחים לאף אחד. אדום מציין רק כרטיסים חדשים וחמורים (P1/P2) שעוד לא ראיתם; ישנים נסגרים לבד אחרי 14 יום בלי הישנות.",
+  "These are local self-diagnostic tickets JARVES opened for itself on this PC (self-test, failing tools, crashes). They are not sent to anyone. Red means only NEW serious (P1/P2) tickets you have not seen yet; old minor (P3) ones close by themselves after 14 days without recurring; P1/P2 stay until fixed or you close them.": "אלה כרטיסי אבחון מקומיים ש-JARVES פתח לעצמו במחשב הזה (בדיקה עצמית, כלים שנכשלים, קריסות). הם לא נשלחים לאף אחד. אדום מציין רק כרטיסים חדשים וחמורים (P1/P2) שעוד לא ראיתם; ישנים קלים (P3) נסגרים לבד אחרי 14 יום בלי הישנות; P1/P2 נשארים עד תיקון או סגירה על ידיכם.",
   "What is this number?": "מה זה המספר?"
  }
 }
