@@ -78,6 +78,20 @@ def test_text_is_not_stored_or_audited(rig, home):
             assert "541234567" not in raw, p
 
 
+def test_audit_kind_is_whitelisted_and_feature_errors_fail_closed(rig, home, monkeypatch):
+    tok, _ = rig.pair()
+    call(rig.d, "POST", "/api/m/drive/action", tok, {"kind": "0541234567", "text": "x"})
+    raw = "\n".join(p.read_text("utf-8", "ignore") for p in Path(home).rglob("*.jsonl"))
+    assert "05412345" not in raw and '"kind": "other"' in raw
+    from jarves import mobile_drive
+
+    def boom(_mob):
+        raise RuntimeError("no features")
+    monkeypatch.setattr(mobile_drive, "_features", boom)
+    st, v = call(rig.d, "POST", "/api/m/drive/action", tok, {"kind": "call", "text": "0541234567"})
+    assert st == 503 and "links" not in v
+
+
 def test_module_has_no_side_effect_imports():
     src = Path(drive_actions.__file__).read_text("utf-8")
     imports = " ".join(x for x in src.splitlines() if re.match(r"\s*(from|import) ", x))
