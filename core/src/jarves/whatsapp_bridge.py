@@ -34,7 +34,7 @@ from datetime import datetime
 from pathlib import Path
 
 import httpx
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 from . import features as feat
 from . import logs
@@ -523,8 +523,28 @@ def note_sent(home: Path, to: str) -> None:
 
 # ---------------------------------------------------------------------- the Skill
 class ChatArgs(BaseModel):
-    who: str = Field(..., min_length=1, max_length=60)
-    limit: int = Field(5, ge=1, le=20)
+    who: str = Field(..., min_length=1, max_length=60, description="the chat NAME as returned by whatsapp_find_chat")
+    limit: int = Field(5, ge=1, le=20, description="how many latest messages, 1-20 (larger values are capped at 20)")
+
+    @field_validator("who", mode="before")
+    @classmethod
+    def _who(cls, v):
+        """#329: the model passes the find_chat row (dict), a list, or a long label: take the name, cap the length."""
+        if isinstance(v, dict):
+            v = v.get("name") or ""
+        elif isinstance(v, (list, tuple)):
+            v = v[0] if v else ""
+            v = v.get("name", "") if isinstance(v, dict) else v
+        return v.strip()[:60] if isinstance(v, str) else v
+
+    @field_validator("limit", mode="before")
+    @classmethod
+    def _limit(cls, v):
+        """#329: "all of today's messages" made the model ask for 50+: cap to 20 instead of failing."""
+        try:
+            return max(1, min(20, int(v)))
+        except (TypeError, ValueError):
+            return v
 
 
 class SummArgs(BaseModel):
