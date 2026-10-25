@@ -50,7 +50,7 @@ def test_find_chat_result_shapes():
 
 def test_bad_args_message_names_fields_and_shape():
     with pytest.raises(ValidationError) as ei:
-        wab.SearchArgs.model_validate({"since": "today"})
+        wab.SearchArgs.model_validate({"query": "hi", "since": ["a", "b"]})
     text = _bad_args_text("whatsapp_search", wab.SearchArgs, ei.value)
     assert "query" in text and "Accepted fields" in text and "since" in text and "TOOL_BAD_ARGS" in text
 
@@ -77,8 +77,8 @@ def test_registry_returns_actionable_error():
             return [Tool("whatsapp_search", "d", run, wab.SearchArgs, permission="read")]
     reg = SkillRegistry()
     reg.register(S())
-    res = asyncio.run(reg.call("whatsapp_search", {"since": "today"}, origin="model"))
-    assert not res.ok and res.code == "TOOL_BAD_ARGS" and "query" in res.message and "Accepted fields" in res.message
+    res = asyncio.run(reg.call("whatsapp_search", {"query": "hi", "since": ["a", "b"]}, origin="model"))
+    assert not res.ok and res.code == "TOOL_BAD_ARGS" and "since" in res.message and "Accepted fields" in res.message
     good = asyncio.run(reg.call("whatsapp_search", {"q": "hi", "since": "2026-10-25T10:00:00"}, origin="model"))
     assert good.ok
 
@@ -99,3 +99,35 @@ async def test_search_today_includes_today_and_excludes_yesterday(tmp_path):
     r = await run(skill(tmp_path, Stub([], hits=ms), now), "whatsapp_search", query="late", since="yesterday",
                   until="yesterday")
     assert [m["text"] for m in r.data["untrusted_messages"]] == ["yesterday late"]
+
+
+# ---- #335: the owner's whatsapp_search failed on `query` (logged bad_fields=["query"]) ----
+@pytest.mark.parametrize("raw", [
+    {"who": "Dana", "since": "today"},                       # no query at all: "her messages today"
+    {"query": "", "who": "Dana", "since": "today"},
+    {"query": None, "who": "Dana"},
+    {"query": "a", "who": "Dana"},                           # one character
+    {"query": ROW, "who": "Dana"},                           # a find_chat row instead of words
+    {"query": 5, "who": "Dana", "limit": 10, "chat_id": ROW["id"], "extra_unknown": 1},
+])
+def test_search_validates_without_real_words(raw):
+    a = wab.SearchArgs.model_validate(raw)
+    assert isinstance(a.query, str)
+
+
+async def test_search_tool_empty_query_with_chat_lists_that_chat_and_without_chat_names_the_fix(tmp_path):
+    from datetime import datetime
+    from test_whatsapp_order import Stub, msg, run, skill
+    now = datetime(2026, 9, 22, 12, 0).timestamp()
+    ms = [msg(2, datetime(2026, 9, 22, 8, 0).timestamp(), "today morning")]
+    r = await run(skill(tmp_path, Stub(ms), now), "whatsapp_search", who="דנה כהן", since="today")
+    assert r.ok and [m["text"] for m in r.data["untrusted_messages"]] == ["today morning"]
+    r = await run(skill(tmp_path, Stub(ms), now), "whatsapp_search", since="today")
+    assert not r.ok and r.code == "WA_NEED_QUERY"
+
+
+def test_untrusted_turn_refusal_is_a_plain_safety_rule_not_a_failure():
+    r = ToolResult(False, "x", {"safety_rule": True, "user_next_step_en": "Say 'show them' to open it."},
+                   code="TOOL_UNTRUSTED_TURN")
+    out = json.loads(r.to_model())
+    assert "tool_failed" not in out and out["user_next_step_en"].startswith("Say 'show them'")
