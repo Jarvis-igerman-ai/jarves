@@ -134,9 +134,51 @@ class TrayBackend:
     def stop(self) -> None: ...
 
 
+APP_ID = "JARVES.Core"
+
+
+def set_app_identity(name: str = "JARVES", app_id: str = APP_ID, icon_path: str = "") -> bool:
+    """Windows: give the process its own AppUserModelID (+ display name / icon in HKCU) so a notification is
+    titled JARVES, never 'Python' (#352). No-op elsewhere. True when the identity was set."""
+    if sys.platform != "win32":
+        return False
+    ok = False
+    try:
+        import ctypes
+        ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID(app_id)
+        ok = True
+    except Exception:
+        logs.debug("runtime", "APPID_FAILED", "could not set the app identity")
+    try:
+        import winreg
+        with winreg.CreateKey(winreg.HKEY_CURRENT_USER, rf"Software\Classes\AppUserModelId\{app_id}") as k:
+            winreg.SetValueEx(k, "DisplayName", 0, winreg.REG_SZ, name)
+            if icon_path:
+                winreg.SetValueEx(k, "IconUri", 0, winreg.REG_SZ, icon_path)
+    except Exception:
+        logs.debug("runtime", "APPID_REG_FAILED", "could not register the app name")
+    return ok
+
+
+def pc_locked() -> bool:
+    """Windows: True while the lock screen / secure desktop has the input (a window cannot be seen then)."""
+    if sys.platform != "win32":
+        return False
+    try:
+        import ctypes
+        h = ctypes.windll.user32.OpenInputDesktop(0, False, 0x0100)
+        if not h:
+            return True
+        ctypes.windll.user32.CloseDesktop(h)
+    except Exception:
+        return True   # fail open: unknown state -> also send the toast
+    return False
+
+
 class PystrayTray(TrayBackend):
     def __init__(self, ctl: Controller) -> None:
         import pystray
+        set_app_identity()
         self._pystray = pystray
         self.ctl = ctl
         self._last = None
