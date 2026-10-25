@@ -320,6 +320,11 @@ class Access:
         return bool(_DEVICE_WRITE_OK.fullmatch(path))  # only the explicitly safe writes; everything else refused
 
 
+# switches a paired dashboard device may never change (#325): drive mode is switched only on the PC / by the owner
+# (CLI, the PC dashboard, the owner's own words).
+DEVICE_NO_SWITCH = frozenset({"dashboard_lan", "drive_mode"})
+
+
 def device_body_ok(ctx, method: str, path: str, body) -> bool:
     """Body-dependent limits for a paired phone, checked after the allowlist (the owner on loopback is exempt).
     - scheduler job ops: only pause/resume/approve/delete; a TOOL job (side effects) is never activated from a phone,
@@ -345,7 +350,7 @@ def device_body_ok(ctx, method: str, path: str, body) -> bool:
     if method == "POST" and m:
         from .features import CATALOG
         f = CATALOG.get(m.group(1))
-        return f is not None and f.risk == "low" and f.id != "dashboard_lan"
+        return f is not None and f.risk == "low" and f.id not in DEVICE_NO_SWITCH
     if method == "POST" and path == "/api/calendar/preview":
         return b.get("op", "create") in ("create", "update")
     return True

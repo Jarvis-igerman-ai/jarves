@@ -97,7 +97,12 @@ async def test_setting_drives_default_and_argument_overrides_it(tmp_path):
     sk = reg.skills["drive_briefing"]
     assert sk.mode() == "ask"
     d.set_setting("drive_briefing.passenger", "present")
-    assert sk.mode() == "present" and sk.mode("alone") == "alone" and sk.mode("bogus") == "ask"
+    assert sk.mode() == "present" and sk.mode("alone") == "present" and sk.mode("bogus") == "present"   # #323: never relaxed
+    d.set_setting("drive_briefing.passenger", "alone")
+    assert sk.mode() == "alone" and sk.mode("present") == "present" and sk.mode("bogus") == "alone"
+    d.set_setting("drive_briefing.passenger", "ask")
+    assert sk.mode("alone") == "alone" and sk.mode("present") == "present"          # answering the question is fine
+    d.set_setting("drive_briefing.passenger", "present")
     d.set_setting("drive_briefing.passenger", "garbage")
     assert sk.mode() == "ask"
     d.close()
@@ -163,3 +168,20 @@ async def test_present_failure_text_never_carries_a_filtered_event_title(tmp_pat
     assert not r.ok and r.code == "DRIVE_BRIEFING_EMPTY"
     assert SECRET_TITLE not in r.message and "לא זמין" in r.message
     d.close()
+
+
+async def test_model_cannot_relax_a_saved_present_to_alone(tmp_path):
+    """#323: with passenger=present saved, a tool call with passenger=alone still gets the passenger-safe briefing."""
+    srv = weather_server()
+    try:
+        os.environ[briefing.WEATHER_BASE_ENV] = srv.url
+        reg, d = make(tmp_path)
+        d.set_setting("drive_briefing.passenger", "present")
+        r = await reg.call("drive_briefing_get", {"passenger": "alone"}, origin="user")
+        assert r.ok and r.data["mode"] == "present"
+        blob = repr(r.data) + r.message
+        for secret in (SECRET_TITLE, "הסוד", "דנה", "הבנק", "הודעות", "untrusted_title"):
+            assert secret not in blob
+        d.close()
+    finally:
+        srv.close()

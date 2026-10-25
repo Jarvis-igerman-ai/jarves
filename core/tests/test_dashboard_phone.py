@@ -73,7 +73,7 @@ def test_phone_cannot_approve_a_tool_job(lan, phone, home, owner_approves):
 
 def test_phone_flips_only_low_risk_switches(lan, phone):
     from jarves.features import CATALOG
-    low = [f for f in CATALOG.values() if f.risk == "low" and f.id != "dashboard_lan"]
+    low = [f for f in CATALOG.values() if f.risk == "low" and f.id not in dashboard_auth.DEVICE_NO_SWITCH]
     assert low, "expected at least one low-risk feature"
     assert phone("POST", f"/api/features/{low[0].id}", {"enabled": not low[0].default_enabled})[0] == 200
     for fid in [f.id for f in CATALOG.values() if f.risk in ("medium", "high")] + ["dashboard_lan", "no_such"]:
@@ -83,6 +83,17 @@ def test_phone_flips_only_low_risk_switches(lan, phone):
         assert CATALOG[fid].risk != "low"
     # the computer is unchanged: medium/high switches work from loopback
     assert pc(lan, "POST", "/api/features/workspace_agent_edit", {"enabled": False})[0] == 200
+
+
+def test_paired_device_cannot_switch_drive_mode(lan, phone):
+    """#325: drive mode is switched only on the PC / by the owner, not by a LAN-paired dashboard device."""
+    from jarves.features import CATALOG
+    assert CATALOG["drive_mode"].risk == "low"                    # so only the explicit block stops it
+    assert phone("POST", "/api/features/drive_mode", {"enabled": False})[0] == 403
+    assert phone("POST", "/api/features/drive_mode", {"enabled": True})[0] == 403
+    assert phone("POST", "/api/features/drive_mode", {"reset": True})[0] == 403
+    assert not device_body_ok(None, "POST", "/api/features/drive_mode", {"enabled": False})
+    assert pc(lan, "POST", "/api/features/drive_mode", {"enabled": False})[0] == 200      # the PC is unchanged
 
 
 def test_phone_calendar_create_update_only(lan, phone):
