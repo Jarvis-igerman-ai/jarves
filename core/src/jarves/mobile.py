@@ -925,6 +925,9 @@ def serve(h, mob: MobileAccess, ip: str) -> None:
         if not mob.rate_ok("drive-briefing:" + dev["id"], mobile_drive.BRIEFING_RATE_PER_MIN):     # own limit, per phone
             mob.audit("rate_limited", device=dev["id"], path=path, scope="briefing")
             return h._json_extra(429, dict(mobile_drive.RATE_LIMITED), {"Retry-After": "60"})
+        if not mob.rate_ok("drive-briefing:*", mobile_drive.BRIEFING_ALL_PHONES_PER_MIN):     # shared by all phones (#326)
+            mob.audit("rate_limited", device=dev["id"], path=path, scope="briefing_all")
+            return h._json_extra(429, dict(mobile_drive.RATE_LIMITED), {"Retry-After": "60"})
         ans = (parse_qs(url.query).get("passenger") or [""])[0]
         st, obj = mobile_drive.briefing(mob, ans)
         return done(st, obj) if st != 200 else h._json(st, obj)
