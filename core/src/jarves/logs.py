@@ -151,7 +151,7 @@ def mask_emails(s: str) -> str:
 
 
 def redact_pii(s: str) -> str:
-    s = _EMAIL.sub("<email>", s)
+    s = mask_emails(s)
     return _PHONE.sub(lambda m: "<phone>" if sum(c.isdigit() for c in m.group(0)) >= 9 else m.group(0), s)
 
 
