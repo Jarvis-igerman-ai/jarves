@@ -2,7 +2,7 @@
 
 **Date:** 22 October 2026 · **Separate proposal:** 23 October 2026  
 **Status:** RESEARCH / PROPOSAL ONLY — no implementation or live-account permission.  
-**Target:** the active public repository igalgerman/jarves. The legacy private JARVIS repository is read-only.  
+**Target:** the active public repository Jarvis-igerman-ai/jarves. The legacy private JARVIS repository is read-only.  
 **Strict boundary:** guardian/student account only. Teacher/staff features are independently specified in [Webtop Teacher Workspace](WEBTOP_TEACHER_WORKSPACE.md). Never share staff and guardian tokens, local datasets, role permissions or approval grants.
 
 **Potential milestone:** Family Intelligence (deferred F11), possibly V7.x **only if separately approved**. V7 is currently a proposal centered on a native everyday Android assistant. This document does not move Family Intelligence into V5/V6/V7 automatically.
@@ -126,7 +126,7 @@ Expose setup, status, disconnect, manual sync and read queries through the proje
 
 ## 8. Copy-ready instruction for Codex / Claude Code
 
-> Read AGENTS.md and docs/NOW.md first in igalgerman/jarves. Review docs/plans/WEBTOP_PARENT_STUDENT.md as a **proposal only**. Compare Shanksg/smartschool-webtop and t0mer/pywebtop, verify licensing/auth/endpoints and inspect only the relevant existing JARVES Skills, secret store, approvals and scheduler. Prepare a brief ADR and test/design plan with the exact compatibility questions. Do NOT implement an unapproved V7 feature, access a real Webtop account, collect child data, bypass CAPTCHA, commit credentials or change the V5/V6 roadmap. Stop at the approval gate; report findings/risks and update the normal agent handoff when the research task is authorized.
+> Read AGENTS.md and docs/NOW.md first in Jarvis-igerman-ai/jarves. Review docs/plans/WEBTOP_PARENT_STUDENT.md as a **proposal only**. Compare Shanksg/smartschool-webtop and t0mer/pywebtop, verify licensing/auth/endpoints and inspect only the relevant existing JARVES Skills, secret store, approvals and scheduler. Prepare a brief ADR and test/design plan with the exact compatibility questions. Do NOT implement an unapproved V7 feature, access a real Webtop account, collect child data, bypass CAPTCHA, commit credentials or change the V5/V6 roadmap. Stop at the approval gate; report findings/risks and update the normal agent handoff when the research task is authorized.
 
 ## 9. Sources and evidence level
 

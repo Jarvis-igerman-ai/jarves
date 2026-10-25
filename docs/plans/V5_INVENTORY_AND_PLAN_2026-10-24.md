@@ -39,7 +39,7 @@ Counts: 11 V5 features merged (plus 3 supporting ones), about 300 targeted tests
 | # | Gap | DoD | Tag | Safe default if the owner is away |
 |---|---|---|---|---|
 | G1 | Status docs are stale: the ROADMAP V5 block says "open PRs", V5 package rows V5-G and V5-J..M say "open/not started", DOC_MAP says #51 is open | - | AGENT-DOABLE | - |
-| G2 | Repo move: `devstatus.DEFAULT_REPO`, `issue_registry.REPO`, `updates.REPO` and issue links still name `igalgerman/jarves` | 6 | AGENT-DOABLE (updater part: `no-automerge`) | rely on GitHub redirects until merged |
+| G2 | Repo move: `devstatus.DEFAULT_REPO`, `issue_registry.REPO`, `updates.REPO` and issue links still name `Jarvis-igerman-ai/jarves` | 6 | AGENT-DOABLE (updater part: `no-automerge`) | rely on GitHub redirects until merged |
 | G3 | The phone has no Learned-preferences page (list/confirm/edit/forget), so DoD 4 "from both clients" fails | 4 | AGENT-DOABLE | - |
 | G4 | The phone shows goals but not goal plans (progress, pause/cancel/retry) | 1, 3 | AGENT-DOABLE | approving a plan stays PC-only |
 | G5 | The phone has no clear microphone/cloud-audio indicator, and no stop/snooze for proactive notices | 2, 5 | AGENT-DOABLE | - |
