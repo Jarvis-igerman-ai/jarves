@@ -141,3 +141,25 @@ def test_feature_is_off_by_default_and_unverified():
     f = feat.CATALOG["drive_briefing"]
     assert f.default_enabled is False
     assert f.targets["windows"]["status"] == "implemented_unverified"
+
+
+async def test_present_failure_text_never_carries_a_filtered_event_title(tmp_path):
+    """Issue #223 review: in "present" mode a calendar section that succeeded but was filtered out (no minutes) must
+    not come back through the failure message when every shown section failed (weather down)."""
+    class NoMinutes(Skill):
+        name = "calendar"
+
+        def tools(self):
+            async def nxt(_):
+                return ToolResult(True, "x", {"minutes_from_now": None, "untrusted_events": [
+                    {"when": "Sun 25.10 09:00", "title": SECRET_TITLE, "calendar": "c"}]})
+            return [Tool("calendar_next_event", "n", nxt, NoArgs, permission="read", untrusted_output=True)]
+    os.environ[briefing.WEATHER_BASE_ENV] = "http://127.0.0.1:1"
+    d = open_db(tmp_path)
+    reg = SkillRegistry()
+    reg.register(NoMinutes())
+    db_mod.register_drive_briefing(reg, d)
+    r = await reg.call("drive_briefing_get", {"passenger": "present"}, origin="user")
+    assert not r.ok and r.code == "DRIVE_BRIEFING_EMPTY"
+    assert SECRET_TITLE not in r.message and "לא זמין" in r.message
+    d.close()

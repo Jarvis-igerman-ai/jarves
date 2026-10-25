@@ -367,3 +367,25 @@ async def test_the_phone_bridge_sets_the_route_for_the_briefing_only(tmp_path):
     finally:
         loop.call_soon_threadsafe(loop.stop)
     assert got["ok"] and seen == [dm.PHONE_SCREEN] and ROUTE.get() == "default" and gate.queue.items() == []
+
+
+async def test_policy_exception_on_the_phone_screen_route_allows_reads_only(tmp_path, monkeypatch):
+    """Issue #318: when the Gate itself raises on the read-only phone route, hang-up / stop / cancel do not slip
+    through the fail-closed fallback: only a plain read may run there."""
+    reg, skill, asked, gate, _ = make(tmp_path, active=True)
+
+    def boom(*a, **k):
+        raise RuntimeError("policy broke")
+    monkeypatch.setattr(gate, "check", boom)
+    res = await on_route(dm.PHONE_SCREEN, lambda: reg.call("end_conversation", {}, origin="user"))
+    assert not res.ok and res.code == "DRIVE_ERROR" and skill.ran == []
+    assert (await on_route(dm.PHONE_SCREEN, lambda: reg.call("get_time", {}, origin="user"))).ok
+    assert (await on_route("voice", lambda: reg.call("end_conversation", {}))).ok      # elsewhere hang-up still works
+    assert skill.ran == ["get_time", "end_conversation"] and asked == [] and gate.queue.items() == []
+
+
+def test_fallback_allows_is_read_only_on_the_phone_screen():
+    assert dm.fallback_allows("get_time", "read", dm.PHONE_SCREEN)
+    assert not dm.fallback_allows("end_conversation", "action", dm.PHONE_SCREEN)
+    assert dm.fallback_allows("end_conversation", "action", "voice")
+    assert not dm.fallback_allows("whatsapp_send", "action", "voice")

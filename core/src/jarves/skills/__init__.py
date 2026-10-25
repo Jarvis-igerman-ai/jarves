@@ -437,14 +437,15 @@ class SkillRegistry:
         """Drive mode (V6 #216). It only ever ADDS a refusal or a deferral; an "allow" continues into the normal
         policy and approval below unchanged (drive mode never approves). Trust comes from Core state only: the
         caller's origin, the route a code path set (voice/text/scheduler) and this route's untrusted-text taint.
-        A broken policy fails CLOSED for side effects; hang-up / stop / cancel and plain reads still go on."""
+        A broken policy fails CLOSED for side effects; hang-up / stop / cancel and plain reads still go on (on the
+        read-only phone screen route only plain reads, issue #318)."""
         try:
             return self.drive.check(tool, args, origin=origin, route=ROUTE.get(),
                                     tainted=self._untrusted_at is not None)
         except Exception:
-            from ..drive_mode import ALWAYS_TOOLS
+            from ..drive_mode import fallback_allows
             logs.error("skills", "DRIVE_CHECK_FAILED", "drive-mode check failed", tool=tool.name, exc=True)
-            if tool.permission == "read" or tool.name in ALWAYS_TOOLS:
+            if fallback_allows(tool.name, tool.permission, ROUTE.get()):
                 return None
             return ToolResult(False, "The drive-mode check failed, so I did not do that.", {"drive": "error"},
                               code="DRIVE_ERROR")
