@@ -350,7 +350,7 @@ register("client_delegation", "תקציב קשיח לחיפושים בשיחה",
          targets={"windows": {"status": "implemented_unverified",
                               "evidence": "core/tests/test_delegation_client.py (strict cap property test, fake Live "
                                           "and Responses servers); live scenarios 51-62 in docs/reviews/SWV4_D_DELEGATION.md"},
-                  "linux_arm64_pi": {"status": "planned", "blocker": "Pi voice is out of V4 scope", "roadmap_issue": "https://github.com/igalgerman/jarves/issues/1"}},
+                  "linux_arm64_pi": {"status": "planned", "blocker": "Pi voice is out of V4 scope", "roadmap_issue": "https://github.com/Jarvis-igerman-ai/jarves/issues/1"}},
          permissions=["sends the question to OpenAI (API key or your ChatGPT plan)"],
          settings="ai.delegation_daily_usd, ai.delegation_turn_usd, ai.delegation_fallback, ai.delegation_timeout_s")
 register("assistant_identity", "שם העוזר", "Assistant name", True, tools=["assistant_rename"],
