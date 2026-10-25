@@ -29,6 +29,33 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}   # main runs queue, never cancelled by a newer push
 jobs:
+  supersede:
+    # When the merge queue rebuilds a group (an entry ahead failed or left), it starts new merge_group runs for the PRs
+    # behind it but never cancels their old ones: two full matrices per PR held the 20 shared runners (#225 and #207 on
+    # 24 Oct, #160). This run cancels OLDER jarves-checks merge_group runs of the same PR (temp branch
+    # gh-readonly-queue/<base>/pr-<N>-<sha>), whose group the queue already discarded. Never touches PR or push runs.
+    name: Cancel superseded merge-queue runs of this PR
+    if: github.event_name == 'merge_group'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 3
+    permissions:
+      actions: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+      REF: ${{ github.event.merge_group.head_ref }}
+    steps:
+      - name: Cancel older merge_group runs of the same PR
+        run: |
+          set -uo pipefail
+          prefix=$(echo "${REF#refs/heads/}" | sed -E 's#^(gh-readonly-queue/[^/]+/pr-[0-9]+-).*#\1#')
+          case "$prefix" in gh-readonly-queue/*/pr-*-) ;; *) echo "not a merge-queue ref: $REF"; exit 0;; esac
+          for st in queued in_progress; do
+            gh api "repos/$GITHUB_REPOSITORY/actions/workflows/jarves-checks.yml/runs?event=merge_group&status=$st&per_page=100" \
+              --jq ".workflow_runs[]|select(.id < $GITHUB_RUN_ID and (.head_branch|startswith(\"$prefix\")))|.id"
+          done | sort -u | while read -r id; do
+            echo "cancelling superseded run $id ($prefix*)"
+            gh run cancel "$id" -R "$GITHUB_REPOSITORY" || echo "could not cancel $id"
+          done
   changes:
     name: Classify the change (docs-only skips heavy jobs; reuse of the PR proof)
     runs-on: ubuntu-24.04
