@@ -914,6 +914,9 @@ def serve(h, mob: MobileAccess, ip: str) -> None:
             return
         from . import mobile_drive
         from urllib.parse import parse_qs
+        if not mob.rate_ok("drive-briefing:" + dev["id"], mobile_drive.BRIEFING_RATE_PER_MIN):     # own limit, per phone
+            mob.audit("rate_limited", device=dev["id"], path=path, scope="briefing")
+            return h._json_extra(429, dict(mobile_drive.RATE_LIMITED), {"Retry-After": "60"})
         ans = (parse_qs(url.query).get("passenger") or [""])[0]
         st, obj = mobile_drive.briefing(mob, ans)
         return done(st, obj) if st != 200 else h._json(st, obj)
@@ -923,7 +926,7 @@ def serve(h, mob: MobileAccess, ip: str) -> None:
         from . import mobile_drive
         if not mob.rate_ok("drive-journey:" + dev["id"], mobile_drive.JOURNEY_RATE_PER_MIN):
             mob.audit("rate_limited", device=dev["id"], path=path, scope="journey")
-            return h._json_extra(429, {"error": "too many trip requests: wait a minute"}, {"Retry-After": "60"})
+            return h._json_extra(429, dict(mobile_drive.RATE_LIMITED), {"Retry-After": "60"})
         d = _json_body(h)
         if d is None:
             return
