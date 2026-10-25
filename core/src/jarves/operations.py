@@ -291,7 +291,7 @@ class Operations:
         except Exception:
             self.selfspeed = None
             logs.error("selfspeed", "SELFSPEED_ATTACH_FAILED", "self-test tools not started", exc=True)
-        from . import self_aware                     # issue #61: about_jarves / whats_new / roadmap_status voice tools
+        from . import self_aware                     # issue #61: about_jarves voice tool
         try:
             self_aware.attach(self.core)
         except Exception:

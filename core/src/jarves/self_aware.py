@@ -201,8 +201,8 @@ def make_skill(home: Path, cfg_fn: Callable[[], object], lang: Callable[[], str]
 
     from .skills import Skill, Tool, ToolResult
 
-    class _NoArgs(BaseModel):
-        pass
+    class _Args(BaseModel):
+        topic: str = "version"          # version | new | roadmap
 
     def spoken(lines: list[str], n: int = 4) -> str:
         return ". ".join(re.sub(r"^- ", "", x) for x in lines[:n])
@@ -212,42 +212,24 @@ def make_skill(home: Path, cfg_fn: Callable[[], object], lang: Callable[[], str]
         description = "what JARVES is, what is new, the roadmap"
 
         def tools(self) -> list:
-            async def about(_: _NoArgs) -> ToolResult:
+            async def about(a: _Args) -> ToolResult:
+                t = (a.topic or "version").lower()
+                if t.startswith("new"):
+                    ok, lines = whatsnew_lines(limit=3)
+                    return ToolResult(ok, spoken(lines), {"dashboard": "#/release-notes"}, code="WHATSNEW_SAID" if ok else "WHATSNEW_NONE")
+                if t.startswith("road"):
+                    ok, lines = roadmap_lines()
+                    return ToolResult(ok, spoken(lines[:4]), {}, code="ROADMAP_SAID" if ok else "ROADMAP_NONE")
                 f = about_facts(cfg_fn(), home)
                 return ToolResult(True, f"{f['version']}. Data folder {f['data_dir']}.", {"channel": f["channel"]}, code="ABOUT_SAID")
-
-            async def whatsnew(_: _NoArgs) -> ToolResult:
-                ok, lines = whatsnew_lines(limit=3)
-                return ToolResult(ok, spoken(lines), {"dashboard": "#/release-notes"}, code="WHATSNEW_SAID" if ok else "WHATSNEW_NONE")
-
-            async def roadmap(_: _NoArgs) -> ToolResult:
-                ok, lines = roadmap_lines()
-                return ToolResult(ok, spoken(lines[:4]), {}, code="ROADMAP_SAID" if ok else "ROADMAP_NONE")
-            return [Tool("about_jarves", "'what version are you', 'מה הגרסה שלך'.", about, _NoArgs, permission="read"),
-                    Tool("whats_new", "'what is new', 'מה חדש'.", whatsnew, _NoArgs, permission="read"),
-                    Tool("roadmap_status", "'what is on the roadmap', 'מה בתוכנית'.", roadmap, _NoArgs, permission="read")]
+            return [Tool("about_jarves", "'what version are you', 'מה הגרסה שלך'; topic new or road for the changes or plan.",
+                         about, _Args, permission="read")]
 
     return SelfAwareSkill()
 
 
-INSTRUCTION = ("About yourself: for 'what version are you / מה הגרסה' call about_jarves, for 'what is new / מה חדש' call whats_new, "
-               "for 'what is the plan / roadmap' call roadmap_status; say the result briefly. A new improvement ticket is "
-               "made only with `jarvis ticket` on the terminal, never silently.")
-
-
 def attach(core) -> None:
     core.registry.register(make_skill(core.home, lambda: core.cfg, lambda: getattr(core.cfg.voice, "language", "he")))
-    agent = getattr(core, "agent", None)
-    if agent is not None and hasattr(agent, "instructions"):
-        base = agent.instructions
-
-        def instructions() -> str:
-            try:
-                on = core.features.active(FEATURE)
-            except Exception:
-                on = False
-            return f"{base()}\n\n{INSTRUCTION}" if on else base()
-        agent.instructions = instructions
 
 
 # ---------------------------------------------------------------------- feature
