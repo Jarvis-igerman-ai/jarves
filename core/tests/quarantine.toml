@@ -8,3 +8,9 @@
 # issue  = the showstopper issue number
 # since  = date quarantined (UTC)
 # reason = one line: what flakes and where
+
+[[test]]
+id = "test_perf_gate.py::test_inprocess_timings_pass_and_a_slowed_build_fails"
+issue = 243
+since = "2026-10-25"
+reason = "single wall-clock features_list sample over budget on loaded runners (runs 40140990175, 40147871223)"
