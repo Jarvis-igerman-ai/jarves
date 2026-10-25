@@ -34,7 +34,9 @@ from datetime import datetime
 from pathlib import Path
 
 import httpx
-from pydantic import BaseModel, Field, field_validator
+from typing import ClassVar
+
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 from . import features as feat
 from . import logs
@@ -522,7 +524,69 @@ def note_sent(home: Path, to: str) -> None:
 
 
 # ---------------------------------------------------------------------- the Skill
-class ChatArgs(BaseModel):
+def _first(d: dict, names: tuple[str, ...]):
+    for n in names:
+        if d.get(n) not in (None, ""):
+            return d[n]
+    return None
+
+
+def _name_of(v):
+    """A chat the model names: a plain name, a find_chat row (dict with name/jid/id) or a list of rows."""
+    if isinstance(v, dict):
+        if isinstance(v.get("chats"), list) and v["chats"]:
+            return _name_of(v["chats"][0])
+        return _name_of(_first(v, ("name", "chat", "who", "display_name", "jid", "id")) or "")
+    if isinstance(v, (list, tuple)):
+        return _name_of(v[0]) if v else ""
+    return v.strip() if isinstance(v, str) else v
+
+
+def _int_clamped(v, lo: int, hi: int):
+    try:
+        return max(lo, min(hi, int(float(str(v).strip()))))
+    except (TypeError, ValueError):
+        return v
+
+
+def _day(v):
+    """since/until: 'today', 'yesterday', an ISO date or datetime, a unix time, or 30d / 2w ago -> what parse_when takes."""
+    if isinstance(v, bool) or v is None:
+        return ""
+    if isinstance(v, (int, float)):
+        try:
+            return datetime.fromtimestamp(_secs(v)).strftime("%Y-%m-%d")
+        except (OSError, ValueError, OverflowError):
+            return ""
+    if isinstance(v, str):
+        t = v.strip()
+        if re.match(r"^\d{4}-\d{2}-\d{2}[T ]", t):
+            return t[:10]
+        return t[:12]
+    return v
+
+
+class _Tolerant(BaseModel):
+    """Args the model fills naturally: aliases, strings for numbers, rows instead of names (#332)."""
+    ALIASES: ClassVar[dict[str, tuple[str, ...]]] = {}
+
+    @model_validator(mode="before")
+    @classmethod
+    def _aliases(cls, data):
+        if not isinstance(data, dict):
+            return data
+        data = dict(data)
+        for field, names in cls.ALIASES.items():
+            if data.get(field) in (None, ""):
+                v = _first(data, names)
+                if v is not None:
+                    data[field] = v
+        return data
+
+
+class ChatArgs(_Tolerant):
+    ALIASES: ClassVar[dict[str, tuple[str, ...]]] = {
+        "who": ("chat", "name", "contact", "jid", "chat_id", "person"), "limit": ("count", "n", "max", "messages")}
     who: str = Field(..., min_length=1, max_length=60, description="the chat NAME as returned by whatsapp_find_chat")
     limit: int = Field(5, ge=1, le=20, description="how many latest messages, 1-20 (larger values are capped at 20)")
 
@@ -530,11 +594,7 @@ class ChatArgs(BaseModel):
     @classmethod
     def _who(cls, v):
         """#329: the model passes the find_chat row (dict), a list, or a long label: take the name, cap the length."""
-        if isinstance(v, dict):
-            v = v.get("name") or ""
-        elif isinstance(v, (list, tuple)):
-            v = v[0] if v else ""
-            v = v.get("name", "") if isinstance(v, dict) else v
+        v = _name_of(v)
         return v.strip()[:60] if isinstance(v, str) else v
 
     @field_validator("limit", mode="before")
@@ -547,31 +607,94 @@ class ChatArgs(BaseModel):
             return v
 
 
-class SummArgs(BaseModel):
-    who: list[str] = Field(..., min_length=1, max_length=5)
-    since_hours: int = Field(24, ge=1, le=336)
+class SummArgs(_Tolerant):
+    ALIASES: ClassVar[dict[str, tuple[str, ...]]] = {
+        "who": ("chat", "chats", "name", "names", "people", "contact", "jid", "chat_id"),
+        "since_hours": ("hours", "since", "window_hours")}
+    who: list[str] = Field(..., min_length=1, max_length=5, description="chat NAMES (or the rows from whatsapp_find_chat)")
+    since_hours: int = Field(24, ge=1, le=336, description="hours back, 1-336 (larger values are capped)")
+
+    @field_validator("who", mode="before")
+    @classmethod
+    def _who(cls, v):
+        items = list(v) if isinstance(v, (list, tuple)) else [v]
+        names = [_name_of(x) for x in items]
+        return [x[:60] for x in names if isinstance(x, str) and x][:5]
+
+    @field_validator("since_hours", mode="before")
+    @classmethod
+    def _hrs(cls, v):
+        if isinstance(v, str) and v.strip().lower() in ("today", "היום"):
+            return 24
+        if isinstance(v, str) and v.strip().lower() in ("yesterday", "אתמול"):
+            return 48
+        return _int_clamped(v, 1, 336)
 
 
-class SearchArgs(BaseModel):
-    query: str = Field(..., min_length=2, max_length=80)
-    who: str = Field("", max_length=60, description="only the chat with this person")
-    since: str = Field("", max_length=12, description="2026-09-01 or 30d / 2w / 3m / 1y ago")
-    until: str = Field("", max_length=12)
+class SearchArgs(_Tolerant):
+    ALIASES: ClassVar[dict[str, tuple[str, ...]]] = {
+        "query": ("q", "text", "keyword", "keywords", "search", "term", "words"),
+        "who": ("chat", "name", "contact", "jid", "chat_id", "from_chat"),
+        "since": ("date", "from", "after", "start", "from_date", "start_date", "date_from"),
+        "until": ("to", "before", "end", "to_date", "end_date", "date_to")}
+    query: str = Field(..., min_length=2, max_length=80, description="words to look for in message TEXT")
+    who: str = Field("", max_length=60, description="only the chat with this person (name or the row from whatsapp_find_chat)")
+    since: str = Field("", max_length=12, description="today, yesterday, 2026-09-01 (a datetime is fine) or 30d / 2w / 3m / 1y ago")
+    until: str = Field("", max_length=12, description="same forms as since")
+
+    @field_validator("query", mode="before")
+    @classmethod
+    def _q(cls, v):
+        if isinstance(v, (list, tuple)):
+            v = " ".join(str(x) for x in v)
+        return v.strip()[:80] if isinstance(v, str) else v
+
+    @field_validator("who", mode="before")
+    @classmethod
+    def _w(cls, v):
+        v = _name_of(v)
+        return v[:60] if isinstance(v, str) else ("" if v is None else v)
+
+    @field_validator("since", "until", mode="before")
+    @classmethod
+    def _d(cls, v):
+        return _day(v)
 
 
-class FindChatArgs(BaseModel):
+class FindChatArgs(_Tolerant):
+    ALIASES: ClassVar[dict[str, tuple[str, ...]]] = {"text": ("query", "q", "name", "who", "chat", "search")}
     text: str = Field(..., min_length=1, max_length=ns.MAX_QUERY, description="part of a chat / contact DISPLAY NAME; "
                       "typos, wrong keyboard and * ? \"phrase\" a|b ^ $ patterns are fine")
     regex: bool = Field(False, description="only if the owner asked for a regular expression")
-    limit: int = Field(10, ge=1, le=10)
+    limit: int = Field(10, ge=1, le=10, description="1-10 (larger values are capped)")
+
+    @field_validator("text", mode="before")
+    @classmethod
+    def _t(cls, v):
+        v = _name_of(v)
+        return v[:ns.MAX_QUERY] if isinstance(v, str) else v
+
+    @field_validator("limit", mode="before")
+    @classmethod
+    def _l(cls, v):
+        return _int_clamped(v, 1, 10)
 
 
-class ComposeArgs(BaseModel):
+class ComposeArgs(_Tolerant):
+    ALIASES: ClassVar[dict[str, tuple[str, ...]]] = {
+        "who": ("chat", "name", "to", "contact", "jid", "chat_id", "person"), "text": ("message", "body", "content")}
     who: str = Field(..., min_length=1, max_length=60)
     text: str = Field(..., min_length=1, max_length=pol.MAX_TEXT, description='the exact text the user dictated')
 
+    @field_validator("who", mode="before")
+    @classmethod
+    def _who(cls, v):
+        v = _name_of(v)
+        return v[:60] if isinstance(v, str) else v
 
-class SendArgs(BaseModel):
+
+class SendArgs(_Tolerant):
+    ALIASES: ClassVar[dict[str, tuple[str, ...]]] = {"draft_id": ("draft", "id")}
     draft_id: str = Field(..., min_length=1, max_length=40)
 
 
