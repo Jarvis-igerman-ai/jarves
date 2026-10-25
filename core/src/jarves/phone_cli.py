@@ -38,6 +38,24 @@ def cmd_phone(a, cfg, home) -> int:
         n = m.revoke_all(by="cli")
         print(clilang.fmt(f"בוטלה הגישה של {n} טלפונים", f"revoked {n} phone(s)"))
         return 0
+    if a.action == "scopes":
+        from .mobile import ALL_SCOPES, DEFAULT_SCOPES
+        devs = [d for d in m.devices() if not d.get("revoked")]
+        if a.device:
+            hit = next((d for d in devs if d["id"] == a.device), None)
+            if hit is None:
+                print(clilang.fmt("אין טלפון כזה (או שבוטל)", "no such paired phone (or it was revoked)"))
+                return 1
+            cur = list(hit.get("scopes") or DEFAULT_SCOPES)
+            for sc in a.grant or []:
+                cur = cur if sc in cur else cur + [sc]
+            cur = [x for x in cur if x not in (a.revoke or [])]
+            if a.grant or a.revoke:
+                m.set_scopes(a.device, cur, by="cli")
+            devs = [dict(hit, scopes=[x for x in ALL_SCOPES if x in cur])]
+        for d in devs:
+            print(f"{d['id']}  {d['name']}: " + ", ".join(d.get("scopes") or DEFAULT_SCOPES))
+        return 0
     if a.action == "bind":
         m.set_bind_tailnet_only(a.where == "tailnet", by="cli")
         print(clilang.fmt("נשמר. ייכנס לתוקף בהפעלה הבאה של שרת הטלפון.", "Saved. It applies when the phone server starts next."))
@@ -68,6 +86,10 @@ def add_cli(sub) -> None:
     ap = ps.add_parser("approvals", help="let paired phones approve actions (typed-code requests stay on the PC)")
     ap.add_argument("state", choices=["on", "off"])
     ps.add_parser("revoke-all", help="revoke every paired phone at once (a lost phone)")
+    sc = ps.add_parser("scopes", help="what each paired phone may use; --grant/--revoke tasks (goals, notice snooze) or prefs (learned preferences)")
+    sc.add_argument("device", nargs="?", default="")
+    sc.add_argument("--grant", action="append", choices=["tasks", "prefs"])
+    sc.add_argument("--revoke", action="append", choices=["tasks", "prefs"])
     b = ps.add_parser("bind", help="listen on the home network (lan) or on the Tailscale address only (tailnet)")
     b.add_argument("where", choices=["lan", "tailnet"])
 

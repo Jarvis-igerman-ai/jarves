@@ -6,7 +6,7 @@
   const T = {
     en: { pair_title: "Pair this phone", pair_help: "On the computer open the JARVES dashboard, go to Phone and press Pair a phone. Scan the QR code, or type the 8-digit code here.",
       code: "Pairing code", name: "Name for this phone", pair: "Pair", pair_net: "Works on your home network only. Nothing here is reachable from the internet.",
-      tab_home: "Home", tab_chat: "Chat", tab_voice: "Voice", tab_approvals: "Approvals", tab_health: "Health & speed", send: "Send", type_here: "Type a message",
+      tab_home: "Home", tab_chat: "Chat", tab_voice: "Voice", tab_approvals: "Approvals", tab_plans: "Plans", tab_prefs: "Learned", tab_health: "Health & speed", send: "Send", type_here: "Type a message",
       waiting: "Waiting for approval", pages_you_have: "Pages on this device", no_tests: "No self-test or speed test has run yet.", chat_off: "Chat is not running on the computer.",
       hold: "Hold to talk", release: "Release to send", unpair: "Un-pair this phone", online: "connected", offline: "computer unreachable",
       pairing: "Pairing…", bad_code: "Wrong or expired code. Make a new one on the computer.", unpaired: "This phone is no longer paired. Pair again.",
@@ -21,7 +21,7 @@
       sig_snoozed: "Notes snoozed for one hour.", sig_stopped: "Notes stopped. Turn them on again on the computer.", from_pc: "computer", no_goals: "No active goals." },
     he: { pair_title: "צימוד הטלפון", pair_help: "במחשב פתחו את לוח הבקרה של JARVES, עברו אל טלפון ולחצו על צימוד טלפון. סרקו את קוד ה-QR או הקלידו כאן את הקוד בן 8 הספרות.",
       code: "קוד צימוד", name: "שם לטלפון", pair: "לצמד", pair_net: "עובד ברשת הביתית בלבד. שום דבר כאן לא נגיש מהאינטרנט.",
-      tab_home: "בית", tab_chat: "שיחה", tab_voice: "קול", tab_approvals: "אישורים", tab_health: "תקינות ומהירות", send: "שליחה", type_here: "כתבו הודעה",
+      tab_home: "בית", tab_chat: "שיחה", tab_voice: "קול", tab_approvals: "אישורים", tab_plans: "תוכניות", tab_prefs: "למדתי", tab_health: "תקינות ומהירות", send: "שליחה", type_here: "כתבו הודעה",
       waiting: "ממתינים לאישור", pages_you_have: "דפים במכשיר הזה", no_tests: "עוד לא רצה בדיקה עצמית או בדיקת מהירות.", chat_off: "השיחה לא פועלת במחשב.",
       hold: "לחצו והחזיקו לדיבור", release: "שחררו לשליחה", unpair: "ניתוק הטלפון", online: "מחובר", offline: "המחשב לא זמין",
       pairing: "מצמיד…", bad_code: "קוד שגוי או שפג תוקפו. הפיקו קוד חדש במחשב.", unpaired: "הטלפון כבר לא מצומד. צמדו מחדש.",
@@ -36,6 +36,7 @@
       sig_snoozed: "ההודעות הושתקו לשעה.", sig_stopped: "ההודעות נעצרו. מדליקים שוב במחשב.", from_pc: "מחשב", no_goals: "אין יעדים פעילים." },
   };
   const $ = (id) => document.getElementById(id);
+  const newId = () => "c-" + Date.now().toString(36) + Math.random().toString(36).slice(2, 10);      // 8-64 chars: the server's command id
   let lang = "en";
   try { lang = localStorage.getItem(LANG) || ((navigator.language || "en").startsWith("he") ? "he" : "en"); } catch (e) { /* storage blocked */ }
   const t = (k) => (T[lang] && T[lang][k]) || T.en[k] || k;
@@ -69,7 +70,7 @@
   }
   const post = (p, obj) => api(p, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(obj || {}) });
 
-  function forget() { unmountChat(); token = ""; me = null; try { localStorage.removeItem(KEY); } catch (e) { /* ignore */ } show(); }
+  function forget() { unmountChat(); if (window.JarvesAudio) window.JarvesAudio.unmount(); if (window.JarvesPlans) window.JarvesPlans.unmount(); if (window.JarvesPrefs) window.JarvesPrefs.unmount(); token = ""; me = null; try { localStorage.removeItem(KEY); } catch (e) { /* ignore */ } show(); }
 
   function show() {
     $("pairView").hidden = !!token; $("appView").hidden = !token;
@@ -77,7 +78,8 @@
     if (token) { load(); timer = setInterval(tick, 4000); }
     else { const m = /(?:^|[#&])c=(\d{6,9})/.exec(location.hash); if (m) { $("code").value = m[1]; history.replaceState(null, "", location.pathname); } }
   }
-  async function load() { try { me = await api("/api/m/me"); } catch (e) { return; } info(); allowTabs(); tick(); voiceNote(); }
+  async function load() { try { me = await api("/api/m/me"); } catch (e) { return; } info(); allowTabs(); mountIndicator(); tick(); voiceNote(); }
+  function mountIndicator() { if (window.JarvesAudio && $("audioBar")) window.JarvesAudio.mount({ audio: $("audioBar"), notices: $("noticeBox") }, { api, post, lang: () => lang }); }
   function info() { if (me) $("meInfo").textContent = `${me.name} · ${me.phone_approvals ? t("phone_ap_on") : t("phone_ap_off")}`; }
 
   // ---- pairing
@@ -93,18 +95,21 @@
 
   // ---- tabs: only the pages the owner gave this device (the server refuses the others anyway: PAGE_NOT_ALLOWED)
   let tab = "home", chatView = null;
-  const TABS = { home: "home", chat: "chat", voice: "chat", approvals: "approvals", health: "health" };
+  const TABS = { home: "home", chat: "chat", voice: "chat", approvals: "approvals", plans: "scope:tasks", prefs: "scope:prefs", health: "health" };
+  const allowed = (n) => (TABS[n].startsWith("scope:") ? ((me && me.scopes) || []).includes(TABS[n].slice(6)) : ((me && me.pages) || []).includes(TABS[n]));
   function setTab(name) {
     tab = name;
     document.querySelectorAll("[data-tab]").forEach((x) => x.setAttribute("aria-selected", String(x.dataset.tab === tab)));
     Object.keys(TABS).forEach((n) => { $("tab-" + n).hidden = n !== tab; });
     if (tab === "chat") mountChat();
+    if (tab === "plans") mountPlans();
+    if (tab === "prefs") mountPrefs();
     tick();
   }
   function allowTabs() {
     const pages = (me && me.pages) || [];
-    Object.keys(TABS).forEach((n) => { $("tabbtn-" + n).hidden = !pages.includes(TABS[n]); });
-    if (!pages.includes(TABS[tab])) setTab(pages.includes("home") ? "home" : (pages[0] ? Object.keys(TABS).find((n) => TABS[n] === pages[0]) : "home"));
+    Object.keys(TABS).forEach((n) => { $("tabbtn-" + n).hidden = !allowed(n); });
+    if (!allowed(tab)) setTab(pages.includes("home") ? "home" : (pages[0] ? Object.keys(TABS).find((n) => TABS[n] === pages[0]) : "home"));
   }
   document.querySelectorAll("[data-tab]").forEach((b) => b.addEventListener("click", () => setTab(b.dataset.tab)));
 
@@ -121,6 +126,8 @@
     if (chatView || !window.JarvesChat) return;
     chatView = window.JarvesChat.mount($("chatRoot"), { api: chatApi, tx, device: true });
   }
+  function mountPlans() { if (window.JarvesPlans) window.JarvesPlans.mount($("plansRoot"), { api, post, lang: () => lang }); }
+  function mountPrefs() { if (window.JarvesPrefs) window.JarvesPrefs.mount($("prefsRoot"), { api, post, lang: () => lang }); }
   function unmountChat() { if (chatView) { chatView.destroy(); chatView = null; } }
 
   // ---- voice (push to talk): record, encode 16 kHz mono WAV, send
@@ -144,19 +151,35 @@
   }
   async function startRec() {
     if (rec) return;
+    let stream = null, ctx = null;
+    const closeAll = () => { try { if (stream) stream.getTracks().forEach((x) => x.stop()); } catch (e) { /* ignore */ } try { if (ctx) ctx.close(); } catch (e) { /* ignore */ } };
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true } });
-      const ctx = new (window.AudioContext || window.webkitAudioContext)(); const src = ctx.createMediaStreamSource(stream);
+      stream = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true } });
+      // the strip follows the real track state from the moment the stream is open, even if the setup below fails
+      const live = () => !!stream && stream.getTracks().some((x) => x.readyState === "live");
+      if (window.JarvesAudio) window.JarvesAudio.phoneMic(true, { stop: stopRec, discard: discardRec, live });
+      ctx = new (window.AudioContext || window.webkitAudioContext)(); const src = ctx.createMediaStreamSource(stream);
       const proc = ctx.createScriptProcessor(4096, 1, 1); const chunks = [];
       proc.onaudioprocess = (e) => chunks.push(new Float32Array(e.inputBuffer.getChannelData(0)));
       src.connect(proc); proc.connect(ctx.destination); rec = { stream, ctx, proc, src, chunks };
       $("ptt").classList.add("rec"); $("ptt").textContent = t("release");
-    } catch (e) { $("voiceOut").textContent = t("voice_nomic"); }
+    } catch (e) {
+      rec = null; closeAll(); $("ptt").classList.remove("rec"); $("ptt").textContent = t("hold");
+      if (window.JarvesAudio) window.JarvesAudio.phoneMic(false);
+      $("voiceOut").textContent = t("voice_nomic");
+    }
+  }
+  function discardRec() {                                                    // close the microphone and send nothing
+    if (!rec) return; const r = rec; rec = null;
+    r.proc.disconnect(); r.src.disconnect(); r.stream.getTracks().forEach((x) => x.stop()); r.ctx.close();
+    $("ptt").classList.remove("rec"); $("ptt").textContent = t("hold"); $("voiceOut").textContent = "";
+    if (window.JarvesAudio) window.JarvesAudio.phoneMic(false);
   }
   async function stopRec() {
     if (!rec) return; const r = rec; rec = null;
     r.proc.disconnect(); r.src.disconnect(); r.stream.getTracks().forEach((x) => x.stop()); const rate = r.ctx.sampleRate; r.ctx.close();
     $("ptt").classList.remove("rec"); $("ptt").textContent = t("hold");
+    if (window.JarvesAudio) window.JarvesAudio.phoneMic(false);
     if (!r.chunks.length) return;
     $("voiceOut").textContent = t("sending");
     try {
@@ -179,9 +202,10 @@
     const first = seq === 0;
     (s.turns || []).forEach((x) => { seq = Math.max(seq, x.seq); });          // the chat itself is drawn by the shared chat view
     (s.notices || []).forEach(async (n) => {
-      if (!shown.has(n.id)) { shown.add(n.id); const b = bubble(t("note") + ": " + n.text, "note"); b.setAttribute("role", "status"); }
+      if (!shown.has(n.id)) { shown.add(n.id); if (window.JarvesAudio) window.JarvesAudio.notice(n); else { const b = bubble(t("note") + ": " + n.text, "note"); b.setAttribute("role", "status"); } }
       try { await post("/api/m/notices/" + n.id + "/ack"); } catch (e) { /* shown again next sync, never twice on screen */ }
     });
+    if (window.JarvesAudio) window.JarvesAudio.signals(s.signals);
     renderGoals(s);
   }
   function renderGoals(s) {
@@ -203,12 +227,15 @@
     if (!token || document.hidden) return;
     if (!me) { load(); return; }                      // opened while the computer was unreachable: try again
     syncNow();
+    if (window.JarvesAudio) window.JarvesAudio.refresh();
     try {
       if (me.pages.includes("approvals")) {
         const a = await api("/api/m/approvals"); const n = a.pending.length, badge = $("apprCount");
         badge.hidden = !n; badge.textContent = String(n);
         if (tab === "approvals") renderApprovals(a);
       }
+      if (tab === "plans" && window.JarvesPlans) window.JarvesPlans.refresh();
+      if (tab === "prefs" && window.JarvesPrefs) window.JarvesPrefs.refresh();
       if (tab === "home") renderHome(await api("/api/m/home"));
       if (tab === "health") renderHealth(await api("/api/m/health"));
     } catch (e) { /* the connection pill already says why */ }
@@ -224,6 +251,7 @@
       const mk = (label, ok, primary) => { const b = document.createElement("button"); b.type = "button"; b.textContent = label; if (primary) b.className = "primary";
         b.addEventListener("click", async () => { b.disabled = true; try { await post("/api/m/approvals/" + p.id, { approved: ok, id: "appr-" + p.id + (ok ? "-yes" : "-no") }); } catch (e) { row.firstChild.textContent = e.message; } tick(); }); row.appendChild(b); };
       if (p.typed) { const s = document.createElement("span"); s.className = "muted"; s.textContent = t("typed_pc"); row.appendChild(s); mk(t("deny"), false, false); }
+      else if (p.pc_only) { const s = document.createElement("span"); s.className = "muted"; s.textContent = t("pc_only"); row.appendChild(s); mk(t("deny"), false, false); }
       else { mk(t("approve"), true, true); mk(t("deny"), false, false); }
     });
   }
@@ -242,8 +270,9 @@
     li(ul, `${t("pages_you_have")}: ${s.pages.map((x) => ({ home: tx("בית", "Home"), chat: tx("שיחה", "Chat"), approvals: tx("אישורים", "Approvals"), health: tx("תקינות ומהירות", "Health & speed") }[x] || x)).join(", ")}`);
   }
   $("unpair").addEventListener("click", async () => { try { await post("/api/m/unpair"); } catch (e) { /* already gone */ } forget(); });
-  $("lang").addEventListener("click", () => { lang = lang === "he" ? "en" : "he"; try { localStorage.setItem(LANG, lang); } catch (e) { /* ignore */ } applyLang(); voiceNote(); info(); unmountChat(); if (tab === "chat") mountChat(); tick(); });
-  document.addEventListener("visibilitychange", tick); window.addEventListener("online", tick);
+  $("lang").addEventListener("click", () => { lang = lang === "he" ? "en" : "he"; try { localStorage.setItem(LANG, lang); } catch (e) { /* ignore */ } applyLang(); if (window.JarvesAudio) window.JarvesAudio.repaint(); voiceNote(); info(); unmountChat(); if (tab === "chat") mountChat(); if (tab === "plans") mountPlans(); if (tab === "prefs") mountPrefs(); tick(); });
+  document.addEventListener("visibilitychange", () => { if (document.hidden) discardRec(); tick(); });      // never keep the mic open in the background
+  window.addEventListener("online", tick);
   if ("serviceWorker" in navigator && window.isSecureContext) navigator.serviceWorker.register("/m/sw.js", { scope: "/m/" }).catch(() => {});
   applyLang(); show();
 })();

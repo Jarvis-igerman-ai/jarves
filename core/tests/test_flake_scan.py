@@ -76,7 +76,16 @@ def test_ci_deselects_quarantined_tests_and_still_runs_them_non_blocking():
     q = next(s for n, s in steps.items() if n.startswith("Quarantined tests"))
     assert q.get("continue-on-error") is True and "-m quarantine" in q["run"]
     shards = {m["shard"] for m in jobs["core"]["strategy"]["matrix"]["include"]}
-    cond = re.search(r"matrix\.shard == '([^']+)'", q["if"])
-    assert cond and cond.group(1) in shards, "the quarantine step must match a real shard name, or it never runs"
+    cond = re.search(r"startsWith\(matrix\.shard, '([^']+)'\)", q["if"])
+    assert cond and all(any(s.startswith(cond.group(1)) for s in shards if s.endswith(n)) for n in ("/3", "/4")), \
+        "the quarantine step must match shard 1 of each OS, or it never runs"
     browser = next(s for s in jobs["browser"]["steps"] if s.get("name", "").startswith("pytest real-browser"))
     assert '-m "not quarantine"' in browser["run"]
+
+
+def test_failures_before_the_last_fix_or_in_the_dst_hour_are_not_reported():
+    hit = lambda t: {"run": 1, "started": t}                                   # noqa: E731
+    found = {"a.py::test_old": [hit("2026-10-22T13:45:00Z")], "a.py::test_new": [hit("2026-10-25T10:00:00Z")],
+             "b.py::test_dst": [hit("2026-10-24T23:30:00Z")]}
+    kept = fs.drop_stale(found, lambda t: "2026-10-23T00:00:00Z")
+    assert list(kept) == ["a.py::test_new"]

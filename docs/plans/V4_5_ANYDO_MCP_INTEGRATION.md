@@ -1,6 +1,6 @@
 # V4.5 proposal — Any.do official MCP integration for JARVES
 
-> **Status: OWNER-REQUESTED PLAN ONLY (24 October 2026). Not implementation authorization.** Tracker: [#140](https://github.com/igalgerman/jarves/issues/140). The active development permission remains exclusively [NOW](../NOW.md), whose V4.5 implementation rows do **not** include an Any.do integration. This is an optional, isolated addition to the V4.5 planning backlog, **not** a release blocker or permission to link an account, modify tasks, run recurring jobs or expand V5/V7 scope. Existing V4.5 security, CI and release-acceptance priorities win.
+> **Status: OWNER-REQUESTED PLAN ONLY (24 October 2026). Not implementation authorization.** Tracker: [#140](https://github.com/Jarvis-igerman-ai/jarves/issues/140). The active development permission remains exclusively [NOW](../NOW.md), whose V4.5 implementation rows do **not** include an Any.do integration. This is an optional, isolated addition to the V4.5 planning backlog, **not** a release blocker or permission to link an account, modify tasks, run recurring jobs or expand V5/V7 scope. Existing V4.5 security, CI and release-acceptance priorities win.
 
 ## Goal, user value and smallest viable scope
 
@@ -79,4 +79,4 @@ Voice / Text / Dashboard / CLI
 
 The beta MCP server may change and the provider's **interactive edit-preview** is not necessarily embeddable in JARVES. The fastest low-risk option is **read + create + reminder** first. If the end-to-end provider approval surface cannot be implemented without unsupported APIs, retain that cut and postpone completion/clear to a later milestone. Better to report an honest limitation than silently mutate user tasks.
 
-**Related source docs:** [V4.5 stabilization package](V4_5_STABILIZATION_SECURITY_QA.md), [NOW](../NOW.md), [Skill creation and approvals](../SKILL_CREATION.md), [GitHub flow](../GITHUB_FLOW.md), [#60 release QA](https://github.com/igalgerman/jarves/issues/60).
+**Related source docs:** [V4.5 stabilization package](V4_5_STABILIZATION_SECURITY_QA.md), [NOW](../NOW.md), [Skill creation and approvals](../SKILL_CREATION.md), [GitHub flow](../GITHUB_FLOW.md), [#60 release QA](https://github.com/Jarvis-igerman-ai/jarves/issues/60).

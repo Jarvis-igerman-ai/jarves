@@ -1,0 +1,7 @@
+{
+ "complete or edit one Any.do task after you approve the exact change; reported as done only after Any.do shows it (no delete)": "משלים או עורך משימה אחת ב-Any.do אחרי שאישרת את השינוי המדויק; נחשב כבוצע רק אחרי ש-Any.do מראה אותו (אין מחיקה)",
+ "never connected to a real Any.do account (beta MCP server; OAuth login is an owner step)": "מעולם לא חובר לחשבון Any.do אמיתי (שרת MCP בטא; ההתחברות עצמה היא צעד של הבעלים)",
+ "provider preview/apply behaviour of apply_bulk_task_updates not yet seen on a real account": "התנהגות התצוגה המקדימה והביצוע של apply_bulk_task_updates עדיין לא נראתה בחשבון אמיתי",
+ "read your Any.do tasks and lists; add tasks and reminders after you approve the exact items (official Any.do connection, sign-in on this computer, tokens never leave it)": "קורא את המשימות והרשימות שלך ב-Any.do ומוסיף משימות ותזכורות אחרי שאישרת את הפריטים המדויקים (החיבור הרשמי של Any.do, ההתחברות במחשב הזה, האסימונים לא יוצאים ממנו)",
+ "UNIT test_anydo.py (stub MCP server, no network)": "בדיקות יחידה test_anydo.py (שרת MCP מדומה, בלי רשת)"
+}

@@ -734,7 +734,7 @@ def register_feature() -> None:
                              "evidence": "core/tests/test_usage.py (unit + dashboard HTTP); no live plan-limit event "
                                          "observed yet"},
                  "linux_arm64_pi": {"status": "implemented_unverified",
-                                    "roadmap_issue": "https://github.com/igalgerman/jarves/issues/3",
+                                    "roadmap_issue": "https://github.com/Jarvis-igerman-ai/jarves/issues/3",
                                     "blocker": "pure Python + SQLite, no platform code; not yet run on a Pi"}}
 
 
@@ -752,7 +752,7 @@ def register_admin_key_feature() -> None:
                              "evidence": "core/tests/test_usage_admin_key.py with a fake costs endpoint; no real "
                                          "admin key tested yet (owner decision OD-05)"},
                  "linux_arm64_pi": {"status": "implemented_unverified",
-                                    "roadmap_issue": "https://github.com/igalgerman/jarves/issues/3",
+                                    "roadmap_issue": "https://github.com/Jarvis-igerman-ai/jarves/issues/3",
                                     "blocker": "pure Python HTTPS GET; not run on a Pi yet"}}
 
 

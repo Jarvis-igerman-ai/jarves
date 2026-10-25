@@ -74,7 +74,7 @@ already released minor (branch `release/x.y`, created when `x.y.0` went stable):
 
 `python core/tools/hotfix.py --pr 123 --to release/4.0 --dry-run` prints the checks and the exact commands and runs nothing.
 Without `--dry-run` it verifies the PR is merged into `main` and has a merge commit; verifies the remote URL is the public
-`igalgerman/jarves` repo (default remote `jarves`, never the private repo); picks the next patch version (highest `vX.Y.N` tag
+`Jarvis-igerman-ai/jarves` repo (default remote `jarves`, never the private repo); picks the next patch version (highest `vX.Y.N` tag
 + 1); creates `hotfix/<pr>-to-<x.y>` from `release/<x.y>`; cherry-picks the merge commit (`git cherry-pick -x -m 1`, so the
 origin is recorded); pushes the branch; and opens a PR into the release branch labelled `backport` (the label must exist in the
 repo; full CI runs there).
@@ -138,11 +138,10 @@ Branch protection: require **`CI result (single required check)`**. The individu
 
 ## Automatic labelling of low-risk PRs (`autolabel.yml`, `core/tools/risk_class.py`)
 
-Low-risk PRs get the `automerge` label by themselves; the queue (`automerge.yml`) then merges them when
-`CI result (single required check)` is green. Nothing is bypassed: no label ever skips a check, a conflicting PR waits, and
-nothing merges while the latest finished `jarves-checks` run on `main` is red. A PR that is only behind `main` is not
-updated and re-tested (owner decision 23 Oct 2026, #89): the run on `main` after the merge is the integration check (runs
-on `main` queue, batch and are never cancelled while running).
+Low-risk PRs get the `automerge` label by themselves; `automerge.yml` then turns on auto-merge, so GitHub's merge queue
+takes them once their required checks are green, tests them with the latest `main` and the PRs ahead (`merge_group`)
+and merges them only when that run is green (#161, docs/GITHUB_FLOW.md). Nothing is bypassed: no label ever skips a
+check and a conflicting PR waits.
 
 | Class | Rule |
 | --- | --- |

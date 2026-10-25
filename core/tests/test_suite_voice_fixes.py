@@ -146,11 +146,12 @@ async def test_slow_tool_does_not_freeze_events_and_continuation_follows():
             return [Tool("slow_tool", "slow", run, permission="read")]
     reg.register(Slow())
     lv = make(reg)
-    t0 = time.monotonic()
-    await lv.handle_event({"type": "response.event", "delegation_id": "d1", "event": {
+    # The proof is structural, not a stopwatch (#284: 0.44 s on a loaded runner): the tool is gated, so a handler that
+    # waited for it would hang until the timeout; it returns with the tool still running and the gate still closed.
+    await asyncio.wait_for(lv.handle_event({"type": "response.event", "delegation_id": "d1", "event": {
         "type": "response.output_item.done",
-        "item": {"type": "function_call", "name": "slow_tool", "call_id": "c1", "arguments": "{}"}}})
-    assert time.monotonic() - t0 < 0.2 and lv._tools_running == 1      # handler returned at once
+        "item": {"type": "function_call", "name": "slow_tool", "call_id": "c1", "arguments": "{}"}}}), 5)
+    assert not gate.is_set() and lv._tools_running == 1                # handler returned at once
     await lv.handle_event({"type": "session.usage.updated", "usage": {"seconds": 3}})
     assert lv.usage_s == 3                                             # events keep flowing meanwhile
     gate.set()

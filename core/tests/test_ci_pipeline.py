@@ -136,8 +136,8 @@ def test_ci_minutes_summary():
 def test_windows_core_tests_run_in_three_shards_and_browser_tests_are_their_own_job():
     jobs = load("jarves-checks.yml")["jobs"]
     inc = jobs["core"]["strategy"]["matrix"]["include"]
-    for os_name in ("ubuntu-24.04", "windows-2025"):
-        assert sorted(i["shard"] for i in inc if i["os"] == os_name) == ["1/3", "2/3", "3/3"]
+    assert sorted(i["shard"] for i in inc if i["os"] == "ubuntu-24.04") == ["1/3", "2/3", "3/3"]
+    assert sorted(i["shard"] for i in inc if i["os"] == "windows-2025") == ["1/4", "2/4", "3/4", "4/4"]   # S3, #160
     run = "\n".join(s.get("run", "") for s in jobs["core"]["steps"])
     assert "--browser exclude --shard-files" in run and "--shard ${{ matrix.shard }}" in run and "skipped" in run
     b = jobs["browser"]
@@ -270,3 +270,36 @@ def test_codeql_prunes_its_own_overlay_caches_only():
     run = steps_text(prune)
     assert "--key codeql-overlay-base-database-" in run and "--ref refs/heads/main" in run and "'.[2:][].id'" in run
     assert prune["if"] == "github.event_name != 'pull_request'"
+
+
+def test_both_required_checks_report_in_the_merge_queue():
+    """#161: with a ruleset that requires the merge queue, BOTH required checks must run on `merge_group`, or the queue
+    waits until its timeout. jarves-checks runs the full matrix there (event != pull_request) and builds the installer as
+    the main channel, so the push run on main reuses it by tree hash. Autolabel reports a pass under the same name."""
+    checks = load("jarves-checks.yml")
+    assert checks[True]["merge_group"] == {"types": ["checks_requested"]}
+    assert "github.event_name == 'merge_group'" in checks["jobs"]["installer"]["env"]["CHANNEL"]
+    sys.path.insert(0, str(ROOT / "core" / "tools"))
+    import ci_plan
+    assert not any(ci_plan.classify(["docs/x.md"], "merge_group").values())       # docs-only group: no heavy job
+    assert all(ci_plan.classify([".github/workflows/jarves-checks.yml"], "merge_group").values())   # CI change: everything
+    assert ci_plan.classify(["core/src/jarves/cli.py"], "merge_group")["full"]          # code: the full matrix
+    auto = load("autolabel.yml")
+    assert auto[True]["merge_group"] == {"types": ["checks_requested"]}
+    names = {j["name"]: j for j in auto["jobs"].values()}
+    assert list(names) == ["Auto-label policy"] and len(auto["jobs"]) == 2
+    assert auto["jobs"]["queue-pass"]["if"] == "github.event_name == 'merge_group'"
+    assert "github.event_name == 'pull_request_target'" in auto["jobs"]["label"]["if"]
+    assert "|| github.ref" in auto["concurrency"]["group"]       # merge groups must not cancel each other's check
+
+
+def test_merge_queue_cancels_only_superseded_runs_of_the_same_pr():
+    """#160: a rebuilt merge group left the old merge_group run of the same PR running (two full matrices per PR).
+    The supersede job cancels only OLDER merge_group runs whose temp branch has the same pr-<N>- prefix."""
+    job = load("jarves-checks.yml")["jobs"]["supersede"]
+    assert job["if"] == "github.event_name == 'merge_group'" and job["permissions"] == {"actions": "write"}
+    run = steps_text(job)
+    assert "event=merge_group" in run and ".id < $GITHUB_RUN_ID" in run and 'startswith(\\"$prefix\\")' in run
+    assert "gh-readonly-queue/*/pr-*-" in run and "gh run cancel" in run
+    assert not any("checkout" in s.get("uses", "") for s in job["steps"])
+    assert "supersede" not in load("jarves-checks.yml")["jobs"]["ci-ok"]["needs"]   # never part of the required check

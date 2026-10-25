@@ -32,7 +32,7 @@ feat.register(FEATURE, "אותות יזומים", "Proactive signals", False, ap
               about="off by default: when ON, an event (a goal stalling, a calendar event, a reminder) may queue ONE short "
                     "note for the device you are using; never 22:00-07:00, with snooze, stop, hourly and daily limits; "
                     "it only tells you, it never does anything and never calls the AI on its own",
-              targets=calm.TARGETS)
+              targets=calm.targets('test_v5_continuity.py'))
 
 DB_FILE = "continuity.db"
 REPLAY_WINDOW_S = 120          # a queued command older than this is refused (the user must send it again on purpose)

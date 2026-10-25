@@ -1,0 +1,41 @@
+order = 61
+category = "system"
+features = ["skills_manifest2"]
+suggest = false
+aliases = ["מניפסט כישורים", "גרסת כישור", "חתימת כישור", "skills manifest", "skill version", "skill signature", "skill rollback"]
+title_he = "מניפסט כישורים גרסה 2"
+title_en = "Skills manifest v2"
+what_he = "כל כישור מצהיר על גרסה, הרשאות, תלויות ומשטחים (קול, לוח בקרה, שורת פקודה, טלפון), ואפשר לסמן אותו כחתום במפתח שלכם. הבדיקה רק קוראת ומתכננת: היא לא מתקינה ולא מורידה כלום."
+what_en = "Each Skill declares its version, permissions, dependencies and surfaces (voice, dashboard, CLI, phone), and may be marked as signed with your own key. The check only reads and plans: it never installs or downloads anything."
+say = [["אילו הרשאות יש לכישור הזה?", "What permissions does this Skill have?"]]
+expect_he = "כישורים קיימים ממשיכים לעבוד בלי שינוי (נקראים כגרסה 0.0.0). כישור חדש שמבקש הרשאה נוספת תמיד דורש אישור חדש שלכם."
+expect_en = "Existing Skills keep working unchanged (read as version 0.0.0). A new version that asks for an extra permission always needs your new approval."
+test_he = "הריצו את בדיקות היחידה test_v6_manifest2.py. אין בדיקה חיה: הפיצ'ר לא מחובר עדיין להתקנה ולעדכון (#220)."
+test_en = "Run the unit tests test_v6_manifest2.py. There is no live check: the feature is not wired into install and update yet (#220)."
+cost_he = "חינם."
+cost_en = "Free."
+privacy_he = "אין רשת ואין שליחת מידע. המפתח נשאר במחשב הזה. אין התקנה אוטומטית של קוד של אחרים."
+privacy_en = "No network and nothing is sent. The key stays on this PC. Nothing from third parties is installed automatically."
+
+[[steps]]
+he = "הפעילו את \"מניפסט כישורים גרסה 2\" (כבוי כברירת מחדל). בשלב זה הוא כלי קריאה ותכנון בלבד."
+en = "Turn on \"Skills manifest v2\" (off by default). For now it is a read-and-plan tool only."
+action = "feature_on:skills_manifest2"
+check = "enabled:skills_manifest2"
+
+[[steps]]
+he = "בעמוד \"כישורים חדשים\" בדקו כל כישור מוצע: הרשאות, גרסה ותלויות. אשרו רק מה שהבנתם."
+en = "On the New Skills page, review each proposed Skill: permissions, version and dependencies. Approve only what you understood."
+action = "open:#/newskills"
+
+[[problems]]
+he = "כישור ישן מראה גרסה 0.0.0"
+en = "An older Skill shows version 0.0.0"
+fix_he = "זה תקין: כישורים בלי גרסה בפורמט major.minor.patch נקראים כך. הוא ממשיך לעבוד."
+fix_en = "That is normal: Skills without a major.minor.patch version are read that way. It keeps working."
+
+[[problems]]
+he = "החתימה מסומנת כ\"פגומה\""
+en = "The signature shows as tampered"
+fix_he = "התוכן השתנה אחרי החתימה או שהחתימה מהמפתח של מחשב אחר. אל תאשרו עד שבדקתם את התוכן."
+fix_en = "The content changed after signing, or the signature is from another PC key. Do not approve until you have reviewed the content."

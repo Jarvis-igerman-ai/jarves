@@ -126,6 +126,7 @@ DEFAULTS: dict[str, Any] = {
     "briefing.city": "Tel Aviv",                # morning briefing weather place (Open-Meteo, no key)
     "briefing.lat": 32.0853,
     "briefing.lon": 34.7818,
+    "drive_briefing.passenger": "ask",         # V6 pre-drive briefing: ask | present | alone (ask first by default)
     # self-check (selfcheck.py, owner request 20 Oct 2026)
     "self_check.on_start": "crash",             # crash = after an unclean stop | always = every start | never
     "self_check.error_burst": 10,               # this many ERROR records in one run of the Core start a check (0 = off)

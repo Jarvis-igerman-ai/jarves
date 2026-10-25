@@ -27,7 +27,9 @@ from __future__ import annotations
 import asyncio
 import contextvars
 import json
+import threading
 import time
+import weakref
 from dataclasses import dataclass, field
 from typing import Any, Awaitable, Callable, Literal
 
@@ -199,8 +201,33 @@ def slim_schema(node: Any, _in_props: bool = False) -> Any:
     return node
 
 
+_SCHEMA_CACHE: "weakref.WeakKeyDictionary[type, dict]" = weakref.WeakKeyDictionary()
+_SCHEMA_LOCK = threading.Lock()
+
+
+def _fresh(node: Any) -> Any:
+    """A private copy of a cached schema (plain dicts / lists / scalars), so a caller that edits its tool list never
+    changes the cache. Much cheaper than copy.deepcopy."""
+    if isinstance(node, dict):
+        return {k: _fresh(v) for k, v in node.items()}
+    if isinstance(node, list):
+        return [_fresh(v) for v in node]
+    return node
+
+
 def tool_schema(tool: "Tool") -> dict:
-    return slim_schema(tool.args.model_json_schema())
+    """The slim JSON schema of a tool's arguments. Perf overhaul 4.5 (#159): pydantic regenerated every schema on
+    every GPT-Live session start and every ChatGPT-plan request (121 tools: 0.3-0.9 s on the owner's PC). An args
+    model's schema never changes, so it is built once per model class (weak keys: a class made at run time goes
+    away with it) and every call gets its own copy."""
+    model = tool.args
+    with _SCHEMA_LOCK:
+        cached = _SCHEMA_CACHE.get(model)
+    if cached is None:
+        cached = slim_schema(model.model_json_schema())
+        with _SCHEMA_LOCK:
+            _SCHEMA_CACHE[model] = cached
+    return _fresh(cached)
 
 
 class SkillRegistry:

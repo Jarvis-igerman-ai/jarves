@@ -24,7 +24,7 @@ FEATURE = "dev_manager"
 feat.register(FEATURE, "מנהל פיתוח (טיוטות מקומיות)", "Development manager (local drafts)", True, skills=["dev"],
               about="ideas and tickets for JARVES's own development are kept as local drafts; nothing is posted to "
                     "GitHub unless you approve it on the screen",
-              targets=calm.TARGETS)
+              targets=calm.targets('test_v5_followups.py'))
 KINDS = ("suggestion", "ticket")
 # Issue #17 (dev_suggest failed on the owner's PC): the model's tool schema loses length/enum hints, so it passed the
 # words it naturally uses ("idea", "feature", "bug"). Those are the two kinds, not a refusal.

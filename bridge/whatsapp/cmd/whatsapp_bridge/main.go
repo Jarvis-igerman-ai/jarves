@@ -18,11 +18,11 @@ import (
 	"path/filepath"
 	"syscall"
 
-	"github.com/igalgerman/jarves/bridge/whatsapp/internal/api"
-	"github.com/igalgerman/jarves/bridge/whatsapp/internal/engine/wm"
-	"github.com/igalgerman/jarves/bridge/whatsapp/internal/memdb"
-	"github.com/igalgerman/jarves/bridge/whatsapp/internal/msgstore"
-	"github.com/igalgerman/jarves/bridge/whatsapp/internal/securestore"
+	"github.com/Jarvis-igerman-ai/jarves/bridge/whatsapp/internal/api"
+	"github.com/Jarvis-igerman-ai/jarves/bridge/whatsapp/internal/engine/wm"
+	"github.com/Jarvis-igerman-ai/jarves/bridge/whatsapp/internal/memdb"
+	"github.com/Jarvis-igerman-ai/jarves/bridge/whatsapp/internal/msgstore"
+	"github.com/Jarvis-igerman-ai/jarves/bridge/whatsapp/internal/securestore"
 )
 
 // version is set at build time: -ldflags "-X main.version=<v>".

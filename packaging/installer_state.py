@@ -36,6 +36,17 @@ def profiles(home: Path) -> list[Path]:
     return homes
 
 
+def schema_of(profile: Path) -> int | None:
+    """The data schema of one profile folder, read with the standard library only (the same rule as
+    jarves.migrations.current: schema.json {"schema": n}; no marker = 1 with databases, 0 without). None = unreadable."""
+    try:
+        return int(json.loads((profile / "schema.json").read_text(encoding="utf-8"))["schema"])
+    except FileNotFoundError:
+        return 1 if any((profile / n).is_file() for n in ("store.db", "memory.db")) else 0
+    except (OSError, ValueError, KeyError, TypeError):
+        return None
+
+
 def prepare(home: Path, state: Path) -> dict:
     from jarves import backup, migrations
     home = safe_home(home)
@@ -49,8 +60,11 @@ def prepare(home: Path, state: Path) -> dict:
         checked = backup.verify(archive)
         if not checked["ok"] or any("unreadable" in item["reason"] for item in checked["manifest"].get("excluded", [])):
             raise ValueError("backup verification failed; data was not migrated")
-        records.append({"home": str(profile), "backup": str(archive), "schema_marker": (profile / migrations.MARKER).is_file()})
-    record = {"format": 1, "home": str(home), "backups": records, "created": time.time(),
+        records.append({"home": str(profile), "backup": str(archive), "schema_marker": (profile / migrations.MARKER).is_file(),
+                        "schema_before": schema_of(profile)})
+    # old_latest: the newest data schema the OLD program (this python's jarves) can open; a program-only rollback is
+    # safe exactly while every profile's schema stays <= it (the old Core refuses only newer data)
+    record = {"format": 1, "home": str(home), "backups": records, "created": time.time(), "old_latest": migrations.LATEST,
               "stage_timings_s": {"backup_and_verify": round(time.monotonic() - started, 3)}}
     state.write_text(json.dumps(record, indent=2), encoding="utf-8")
     return record
@@ -184,15 +198,185 @@ def open_setup(home: Path) -> None:
         dashboard.stop()
 
 
+HEALTH_FILE = "health.json"
+
+
+def _read_json(path: Path) -> dict:
+    try:
+        d = json.loads(path.read_text(encoding="utf-8"))
+        return d if isinstance(d, dict) else {}
+    except (OSError, ValueError):
+        return {}
+
+
+def _same_version(a, b) -> bool:
+    """4.0.1 == 4.0.1.0: trailing zero parts do not matter."""
+    def norm(v) -> str:
+        parts = str(v or "").strip().split(".")
+        while len(parts) > 1 and parts[-1] == "0":
+            parts.pop()
+        return ".".join(parts)
+    return bool(a) and bool(b) and norm(a) == norm(b)
+
+
+def health(home: Path, timeout_s: float = 180.0, poll_s: float = 1.0, *, expect: str = "", sleep=time.sleep,
+           clock=time.monotonic) -> str:
+    """After an in-app update (setup started with /RESTARTJARVES=1): wait for the new Core to reach CORE_READY, which
+    updates.mark_healthy records as pending.json state "ok". Returns "ok", "failed" (an update was installing and
+    never became ready in time) or "unknown" (no update record, or a record for another version than the one this
+    setup installs (`expect`): a manual install or a stale record, never rolled back by this check).
+    Standard library only: it runs under the old or the new python."""
+    home = safe_home(home)
+    path = home / "updates" / "pending.json"
+    first = _read_json(path)
+    if first.get("state") not in ("installing", "ok"):
+        return "unknown"
+    if expect and not _same_version(first.get("to"), expect):
+        return "unknown"                    # a stale or mismatched record: the healthy new version never marks it ok
+    deadline = clock() + max(1.0, min(float(timeout_s), 600.0))
+    while True:
+        state = _read_json(path).get("state")
+        if state == "ok":
+            return "ok"
+        if state != "installing":
+            return "unknown"
+        if clock() >= deadline:
+            return "failed"
+        sleep(poll_s)
+
+
+def can_program_rollback(state: Path) -> bool:
+    """True only when putting back the PREVIOUS PROGRAM alone is safe: every profile's data schema NOW is one the old
+    program can open (<= old_latest, recorded by `prepare` under the old python). The old Core refuses only newer data
+    (MIGRATION_DATA_NEWER); a legacy 1 -> 3 or an empty 0 -> 3 stamp is fine when the old program knows 3. When it is not
+    safe the installer must not swap the program; the owner gets the approval-gated `jarvis update --rollback`, which
+    restores the data too. A missing or unreadable record or marker, or a fresh-data install, counts as "not safe"."""
+    try:
+        record = json.loads(Path(state).read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return False
+    if not isinstance(record, dict) or record.get("previous_data"):
+        return False
+    old_latest = record.get("old_latest")
+    if not isinstance(old_latest, int) or isinstance(old_latest, bool) or not record.get("home"):
+        return False
+    try:
+        homes = profiles(Path(record["home"]))
+    except (OSError, ValueError):
+        return False
+    for profile in homes:
+        now = schema_of(profile)
+        if now is None or now > old_latest:
+            return False
+    return True
+
+
+HEALTH_STATUSES = ("rolled_back", "rollback_failed", "health_failed")
+
+
+def note_rollback(home: Path, status: str) -> dict:
+    """Record, once, what the health check did (the Core tells the owner at its next start, updates.take_health_notice):
+    rolled_back = previous program back; rollback_failed = it could not be put back; health_failed = the data schema
+    changed, so the program was NOT swapped and the owner is offered the approval-gated data+program rollback.
+    Data is never touched here."""
+    if status not in HEALTH_STATUSES:
+        raise ValueError("unknown health status")
+    home = safe_home(home)
+    pend = _read_json(home / "updates" / "pending.json")
+    rec = {"status": status, "from": pend.get("from"), "to": pend.get("to"), "at": time.time(), "notified": False}
+    target = home / "updates" / HEALTH_FILE
+    target.parent.mkdir(parents=True, exist_ok=True)
+    tmp = target.with_name(target.name + ".tmp")
+    tmp.write_text(json.dumps(rec, indent=1), encoding="utf-8")
+    os.replace(tmp, target)
+    return rec
+
+
+MB = 1024 * 1024
+# What the verified backup leaves out (backup.EXCLUDE_DIRS, a superset kept here so this runs under ANY old python).
+_NOT_BACKED_UP = {"backups", "logs", "chatgpt", "google", "cache", "caches", "models", "tmp", "temp", "__pycache__", "voice_cache", "whatsapp_bridge"}
+
+
+def tree_size(root: Path, skip: frozenset = frozenset()) -> int:
+    """Bytes of the regular files under root (links are not followed; unreadable entries count as zero)."""
+    total, stack = 0, [root]
+    while stack:
+        try:
+            with os.scandir(stack.pop()) as it:
+                for e in it:
+                    try:
+                        if e.is_symlink():
+                            continue
+                        if e.is_dir(follow_symlinks=False):
+                            if e.name.lower() not in skip:
+                                stack.append(e.path)
+                        else:
+                            total += e.stat(follow_symlinks=False).st_size
+                    except OSError:
+                        pass
+        except OSError:
+            pass
+    return total
+
+
+def disk_check(home: Path, app: Path, *, reserve_mb: int = 0, usage=None) -> dict:
+    """#165: before the backup, is there room for it and for the new program? The backup copy is at most the size of the
+    backed-up data (+15 % and 64 MB headroom for the migration); the new program needs about the size of the current one
+    (+25 %; the old one is only renamed to rollback, not copied). Same volume: the two needs are added.
+    `reserve_mb` (setup /DISKRESERVEMB=) is extra free space that must remain (stricter only; CI uses a huge value for
+    its low-disk case). Returns {ok, drive, short_mb, need_mb} - numbers only, never a path or a name."""
+    usage = usage or shutil.disk_usage
+    home, app = safe_home(home), Path(app)
+    data = tree_size(home, frozenset(_NOT_BACKED_UP))
+    need_data = int(data * 1.15) + 64 * MB + max(0, int(reserve_mb)) * MB
+    need_app = int(sum(tree_size(app / n) for n in ("python", "face", "bridge")) * 1.25) + 64 * MB if app.is_dir() else 0
+    d_anchor, a_anchor = Path(home.anchor), Path(app.resolve().anchor)
+    same = d_anchor == a_anchor
+    checks = [(d_anchor, need_data + (need_app if same else 0))] + ([] if same else [(a_anchor, need_app)])
+    worst = None
+    for anchor, need in checks:
+        try:
+            short = need - usage(str(anchor)).free
+        except OSError:
+            continue                                  # cannot tell: never block an update on a failed probe
+        if short > 0 and (worst is None or short > worst["short"]):
+            worst = {"short": short, "need": need, "drive": str(anchor).rstrip("/" + chr(92)) or str(anchor)}
+    if worst is None:
+        return {"ok": True, "drive": "", "short_mb": 0, "need_mb": 0}
+    return {"ok": False, "drive": worst["drive"], "short_mb": -(-worst["short"] // MB), "need_mb": -(-worst["need"] // MB)}
+
+
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser()
-    ap.add_argument("action", choices=("prepare", "complete", "open-setup", "restore-shims", "restore-data"))
+    ap.add_argument("action", choices=("prepare", "complete", "open-setup", "restore-shims", "restore-data", "health",
+                                       "note-rollback", "can-program-rollback", "diskcheck"))
     ap.add_argument("--home", type=Path, required=True)
     ap.add_argument("--state", type=Path)
     ap.add_argument("--fresh", action="store_true")
+    ap.add_argument("--timeout", type=float, default=180.0)
+    ap.add_argument("--expect", default="")
+    ap.add_argument("--status", choices=HEALTH_STATUSES, default="rolled_back")
+    ap.add_argument("--app", type=Path)
+    ap.add_argument("--reserve-mb", type=int, default=0)
+    ap.add_argument("--out", type=Path)
     ap.add_argument("--language", choices=("en", "he"), default="en")
     args = ap.parse_args(argv)
     try:
+        if args.action == "health":
+            # exit code: 0 = ready, 3 = never became ready (the installer puts the old program back), 1 = no update record
+            # (the installer treats every other exit code, e.g. a python that crashes, as "failed" too)
+            return {"ok": 0, "failed": 3}.get(health(args.home, args.timeout, expect=args.expect), 1)
+        if args.action == "diskcheck":
+            r = disk_check(args.home, args.app, reserve_mb=args.reserve_mb)
+            if args.out:                                   # key=value lines for the installer (no JSON parser there)
+                args.out.write_text("".join(f"{k}={r[k]}" + chr(10) for k in ("drive", "short_mb", "need_mb")), encoding="ascii")
+            return 0 if r["ok"] else 4
+        if args.action == "can-program-rollback":
+            # exit code: 0 = the program alone may be put back, 5 = the data schema changed (or unknown): do not swap
+            return 0 if can_program_rollback(args.state) else 5
+        if args.action == "note-rollback":
+            note_rollback(args.home, args.status)
+            return 0
         if args.action == "open-setup":
             open_setup(args.home)
         elif args.action == "restore-data":

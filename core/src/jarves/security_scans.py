@@ -3,7 +3,7 @@
 Cadence: a daily LIGHT scan and a weekly FULL scan (a full scan day replaces that day's light scan, because it
 covers it). The owner can pick other weekdays and times (`jarvis scans set`). `auto_fix` is OFF and cannot be turned
 on here: a scan only READS (alert inventories, workflow run status, the local issues registry) and may at most
-create or update ONE tracker issue on igalgerman/jarves. It never merges, dismisses an alert, deploys, changes a
+create or update ONE tracker issue on Jarvis-igerman-ai/jarves. It never merges, dismisses an alert, deploys, changes a
 secret or sends anything anywhere else. It makes no model (LLM) calls at all and no paid API calls.
 
 Two places run it, with the SAME code (this module, called by `jarvis scans run` and by core/tools/security_scans.py):
@@ -42,7 +42,7 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 FEATURE = "security_scans"
 CONFIG_FILE = "security_scans.json"
 STATE_FILE = "security_scans_state.json"
-REPO = "igalgerman/jarves"
+REPO = "Jarvis-igerman-ai/jarves"
 LABEL = "from-diagnostics"
 API_BASE = "https://api.github.com"                     # tests inject a fake client instead
 TRACKER_MARKER = "<!-- jarves-security-scans:v1 -->"
@@ -794,7 +794,7 @@ def _register() -> None:
                                        "evidence": "UNIT core/tests/test_security_scans.py (stub GitHub client, fake clock, DST, "
                                                    "offline, retry); never run against the real repository alerts yet"},
                            "linux_arm64_pi": {"status": "implemented_unverified",
-                                              "roadmap_issue": "https://github.com/igalgerman/jarves/issues/3",
+                                              "roadmap_issue": "https://github.com/Jarvis-igerman-ai/jarves/issues/3",
                                               "blocker": "pure Python with an optional timer; not run on a Pi"}},
                   permissions=["network"],
                   settings="jarvis scans status|run|on|off|set; hosted: .github/workflows/security-scans.yml")

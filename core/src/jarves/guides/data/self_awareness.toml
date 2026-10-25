@@ -1,0 +1,62 @@
+order = 41
+category = "system"
+features = ["self_awareness"]
+aliases = ["מודעות עצמית", "מה הגרסה", "מה חדש", "מפת דרכים", "הצעת שיפור", "about", "what's new", "whatsnew", "roadmap", "ticket", "improvement ticket", "what version are you"]
+links = ["updates", "issue_reports", "setup_tour"]
+title_he = "מודעות עצמית: גרסה, מה חדש, תוכנית, הצעות שיפור"
+title_en = "Self-awareness: version, what's new, roadmap, improvement tickets"
+what_he = "ג'ארביס יודע לומר מי הוא: איזו גרסה, מאיזה ערוץ, איפה מותקן ואילו יכולות פועלות; מה השתנה בגרסה הזאת; מה מצב התוכנית (מפת הדרכים); ואפשר להשאיר לו הצעת שיפור שנשלחת למפתח רק אחרי שאישרתם את הטקסט המדויק."
+what_en = "JARVES can tell you what he is: which version and channel, where he is installed and which features are on; what changed in this version; where the plan stands (the roadmap); and you can leave him an improvement idea that is sent to the developer only after you approve the exact text."
+say = [["איזו גרסה אתה?", "What version are you?"], ["מה חדש?", "What's new?"], ["מה יש במפת הדרכים?", "What is on the roadmap?"]]
+expect_he = "משפט קצר בקול. הפרטים המלאים בטרמינל: jarvis about, jarvis whatsnew, jarvis roadmap."
+expect_en = "A short sentence by voice. The full details are in the terminal: jarvis about, jarvis whatsnew, jarvis roadmap."
+test = "feature"
+test_he = "הבדיקה רק מוודאת שהרכיב מותקן. אפשר להריץ jarvis about."
+test_en = "The check only sees that the component is installed. You can run jarvis about."
+cost_he = "חינם ומקומי. רק שליחת הצעת שיפור (אחרי אישור) פונה לאינטרנט, לפרויקט Jarvis-igerman-ai/jarves ב-GitHub."
+cost_en = "Free and local. Only sending an improvement ticket (after your approval) uses the internet, to the Jarvis-igerman-ai/jarves project on GitHub."
+privacy_he = "אין שליחה אוטומטית. הצעה נשמרת קודם במחשב, מוצג הטקסט המדויק, ורק jarvis ticket send אחרי אישור שולח אותו. כותרת עם נתיב, כתובת או סוד נדחית."
+privacy_en = "Nothing is sent automatically. A ticket is saved on this computer first, the exact text is shown, and only jarvis ticket send, after your approval, sends it. A title holding a path, address or secret is refused."
+
+[parity.features]
+self_awareness = "about"
+
+[parity.tool_groups]
+self_awareness = ["voice", "the same facts are the terminal commands jarvis about, whatsnew and roadmap"]
+
+[[steps]]
+he = "הריצו jarvis about: גרסה, ערוץ, תיקיית ההתקנה, תיקיית הנתונים ומה פועל ומה כבוי."
+en = "Run jarvis about: version, channel, install folder, data folder and what is on and off."
+action = "command:jarvis about"
+
+[[steps]]
+he = "הריצו jarvis whatsnew לשינויים בגרסה הזאת (jarvis whatsnew --version 4.0.0 לגרסה אחרת; jarvis release-notes --open לעמוד מלא)."
+en = "Run jarvis whatsnew for the changes in this version (jarvis whatsnew --version 4.0.0 for another; jarvis release-notes --open for the full page)."
+action = "command:jarvis whatsnew"
+
+[[steps]]
+he = "הריצו jarvis roadmap למצב כל אבן דרך בקצרה."
+en = "Run jarvis roadmap for the status of each milestone in short."
+action = "command:jarvis roadmap"
+
+[[steps]]
+he = "יש רעיון? jarvis ticket \"משפט קצר\" שומר אותו במחשב ומציג את הטקסט המדויק; שום דבר לא נשלח. לשליחה: jarvis ticket send JI-... (שואל אתכם קודם)."
+en = "Got an idea? jarvis ticket \"a short sentence\" saves it on this computer and shows the exact text; nothing is sent. To send: jarvis ticket send JI-... (asks you first)."
+action = "command:jarvis ticket list"
+
+[[steps]]
+he = "הכלי הקולי כבוי כברירת מחדל (כדי לא להגדיל את ההנחיה של המודל). להפעלה: jarvis features on self_awareness; לכיבוי: jarvis features off self_awareness. הפקודות בטרמינל פועלות תמיד."
+en = "The voice tool is off by default (it keeps the model prompt small). To turn it on: jarvis features on self_awareness; to turn it off: jarvis features off self_awareness. The terminal commands always work."
+action = "command:jarvis features on self_awareness"
+
+[[problems]]
+he = "jarvis roadmap אומר שאין קובץ תוכנית"
+en = "jarvis roadmap says there is no roadmap file"
+fix_he = "ההתקנה לא כוללת את ROADMAP.md. עדכנו לגרסה חדשה (jarvis update), או קראו אותו ב-github.com/Jarvis-igerman-ai/jarves/blob/main/docs/ROADMAP.md."
+fix_en = "This install does not include ROADMAP.md. Update to a newer version (jarvis update), or read it at github.com/Jarvis-igerman-ai/jarves/blob/main/docs/ROADMAP.md."
+
+[[problems]]
+he = "ההצעה נשמרה בקובץ ולא נשלחה"
+en = "The ticket was saved to a file, not sent"
+fix_he = "אין במחשב אסימון GitHub. ראו את המדריך \"דיווחי תקלות\": צרפו את הקובץ מהתיקייה issue_reports לתקלה חדשה."
+fix_en = "There is no GitHub token on this computer. See the Bug reports guide: attach the file from the issue_reports folder to a new issue."
