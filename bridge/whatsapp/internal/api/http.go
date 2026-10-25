@@ -17,8 +17,8 @@ import (
 
 	"github.com/mdp/qrterminal/v3"
 
-	"github.com/igalgerman/jarves/bridge/whatsapp/internal/engine"
-	"github.com/igalgerman/jarves/bridge/whatsapp/internal/policy"
+	"github.com/Jarvis-igerman-ai/jarves/bridge/whatsapp/internal/engine"
+	"github.com/Jarvis-igerman-ai/jarves/bridge/whatsapp/internal/policy"
 )
 
 // MaxBody is the request body limit (section 2).

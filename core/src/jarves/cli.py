@@ -1893,6 +1893,7 @@ _EXT_EARLY = (
     ("instagram_channel", ("instagram",), {"instagram": "cmd_instagram"}),   # V3 P1
     ("telegram_channel", ("telegram",), {"telegram": "cmd_telegram"}),       # V3 P1
     ("homeassistant", ("home",), {"home": "cmd_home"}),               # V3 P1: jarvis home start / status / ...
+    ("anydo", ("anydo",), {"anydo": "cmd_anydo"}),                    # #140: jarvis anydo start / status / off
     ("connect", ("connect",), {"connect": "cmd_connect"}),            # owner request 20 Oct: guided account setup
     ("approvals", ("approvals",), {"approvals": "cmd_approvals"}),    # V3: jarvis approvals list / approve / deny
 )
@@ -1911,6 +1912,7 @@ _EXT_LATE = (
     ("issue_registry", ("issues", "issue"), "COMMANDS"),              # owner request 21 Oct: jarvis issues ...
     ("web_cli", ("web",), "COMMANDS"),                                # owner request 21 Oct: jarvis web
     ("camera.cli", ("camera",), "COMMANDS"),                          # V4.5 D: jarvis camera status | test | preview
+    ("journey", ("journey",), "COMMANDS"),                            # V6: jarvis journey plan
     ("self_aware", ("about", "whatsnew", "roadmap", "ticket"), "COMMANDS"),   # issue #61: jarvis about | whatsnew | roadmap | ticket
     None,                                                             # plugins.d/*.toml command modules go here
     ("whatsapp_admin", ("whatsapp",), {"whatsapp": "cmd_whatsapp"}),  # SW-V4 F: jarvis whatsapp status / link / ...

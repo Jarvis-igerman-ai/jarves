@@ -55,7 +55,7 @@ FEATURES: dict[str, object] = {
     "agent_orchestrator": "agents", "project_manager": "project",
     "assisted_dialing": "dial", "self_manage": "manage",
     "self_tests": "selftest", "text_chat": "chat", "setup_tour": "tour",
-    "issue_reports": "issues", "web_chat": "web",
+    "issue_reports": "issues", "web_chat": "web", "anydo": "anydo", "anydo_update": "anydo",
 }
 
 # Extra command-line surfaces of a feature (one-shot variants of the same Core path): feature id -> commands.
@@ -71,7 +71,7 @@ TOOL_GROUPS: dict[str, object] = {
     "calendar_write": "calendar", "camera": "camera", "clock": (V, "the time inside a conversation"),
     "contacts": "contacts", "dashboard": "dashboard", "display": "show", "features": "features",
     "files": (D, "the My files page"), "gmail": "mail", "google_connect": "google",
-    "google_contacts": "contacts", "help": "help", "helper": "approvals", "home": "home",
+    "google_contacts": "contacts", "help": "help", "helper": "approvals", "home": "home", "anydo": "anydo",
     "goals": "goals", "goal_plans": "goals", "preferences": "prefs", "proactive": "proactive", "dev": "dev", "devstatus": "dev", "identity": "setup", "instagram": "instagram", "lists": "lists", "memory": "memory", "music": "music",
     "notes": "notes", "profiles": "profile", "reports": "reports", "scheduler": "jobs", "self_check": "diagnose",
     "settings": (D, "settings are edited on the Settings page"), "skill_builder": (D, "the New Skills page"),

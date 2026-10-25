@@ -29,6 +29,33 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}   # main runs queue, never cancelled by a newer push
 jobs:
+  supersede:
+    # When the merge queue rebuilds a group (an entry ahead failed or left), it starts new merge_group runs for the PRs
+    # behind it but never cancels their old ones: two full matrices per PR held the 20 shared runners (#225 and #207 on
+    # 24 Oct, #160). This run cancels OLDER jarves-checks merge_group runs of the same PR (temp branch
+    # gh-readonly-queue/<base>/pr-<N>-<sha>), whose group the queue already discarded. Never touches PR or push runs.
+    name: Cancel superseded merge-queue runs of this PR
+    if: github.event_name == 'merge_group'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 3
+    permissions:
+      actions: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+      REF: ${{ github.event.merge_group.head_ref }}
+    steps:
+      - name: Cancel older merge_group runs of the same PR
+        run: |
+          set -uo pipefail
+          prefix=$(echo "${REF#refs/heads/}" | sed -E 's#^(gh-readonly-queue/[^/]+/pr-[0-9]+-).*#\1#')
+          case "$prefix" in gh-readonly-queue/*/pr-*-) ;; *) echo "not a merge-queue ref: $REF"; exit 0;; esac
+          for st in queued in_progress; do
+            gh api "repos/$GITHUB_REPOSITORY/actions/workflows/jarves-checks.yml/runs?event=merge_group&status=$st&per_page=100" \
+              --jq ".workflow_runs[]|select(.id < $GITHUB_RUN_ID and (.head_branch|startswith(\"$prefix\")))|.id"
+          done | sort -u | while read -r id; do
+            echo "cancelling superseded run $id ($prefix*)"
+            gh run cancel "$id" -R "$GITHUB_REPOSITORY" || echo "could not cancel $id"
+          done
   changes:
     name: Classify the change (docs-only skips heavy jobs; reuse of the PR proof)
     runs-on: ubuntu-24.04
@@ -150,9 +177,11 @@ jobs:
           - {os: ubuntu-24.04, platform: linux, shard: "1/3"}
           - {os: ubuntu-24.04, platform: linux, shard: "2/3"}
           - {os: ubuntu-24.04, platform: linux, shard: "3/3"}
-          - {os: windows-2025, platform: windows, shard: "1/3"}
-          - {os: windows-2025, platform: windows, shard: "2/3"}
-          - {os: windows-2025, platform: windows, shard: "3/3"}
+          # Windows: 4 shards (S3, #160): the slowest Windows shard set the PR wall time once the installer chain left PRs
+          - {os: windows-2025, platform: windows, shard: "1/4"}
+          - {os: windows-2025, platform: windows, shard: "2/4"}
+          - {os: windows-2025, platform: windows, shard: "3/4"}
+          - {os: windows-2025, platform: windows, shard: "4/4"}
     runs-on: ${{ matrix.os }}
     timeout-minutes: 40
     defaults:
@@ -232,7 +261,7 @@ jobs:
           retention-days: 7
           if-no-files-found: ignore
       - name: Quarantined tests (non-blocking; still run, never skipped; docs/CI_DETERMINISM.md)
-        if: steps.gate.outputs.run == 'true' && matrix.shard == '1/3'   # shard names are '1/3'..; 'shard == 1' never ran (#160)
+        if: steps.gate.outputs.run == 'true' && startsWith(matrix.shard, '1/')   # shard 1 of each OS ('1/3', '1/4'; #160)
         continue-on-error: true
         shell: bash
         run: |
@@ -255,7 +284,7 @@ jobs:
           retention-days: 7
           if-no-files-found: ignore
       - name: jarvis.cmd launcher smoke (Windows, shard 1 only)
-        if: steps.gate.outputs.run == 'true' && runner.os == 'Windows' && matrix.shard == '1/3'
+        if: steps.gate.outputs.run == 'true' && runner.os == 'Windows' && startsWith(matrix.shard, '1/')
         shell: cmd
         run: |
           call ..\jarvis.cmd setup --help || exit /b 1
