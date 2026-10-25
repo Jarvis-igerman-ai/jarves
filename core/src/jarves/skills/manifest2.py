@@ -26,7 +26,7 @@ import re
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from .. import features
+from .. import features, hebrew
 from ..channels_common import targets
 from .generated import HOST_RX, ID_RX, SkillError, _sha, parse_skill_md
 
@@ -205,6 +205,16 @@ def discover(root: Path, limit: int = 200) -> list[Manifest]:
             continue
     return out
 
+
+hebrew.TEXT.update({
+    "reads and checks Skill manifests (version, permissions, dependencies, local trust) and plans updates and rollbacks; "
+    "never installs or fetches anything by itself":
+        "קורא ובודק מניפסטים של כישורים (גרסה, הרשאות, תלויות, אמון מקומי) ומתכנן עדכונים וחזרה לאחור; "
+        "אף פעם לא מתקין ולא מוריד שום דבר בעצמו",
+    "UNIT test_v6_manifest2.py (local files only, no network)": "בדיקות יחידה test_v6_manifest2.py (קבצים מקומיים בלבד, בלי רשת)",
+    "V6 beta: parser and planner only; not yet wired into install/update (issue #220)":
+        "בטא V6: מנתח ומתכנן בלבד; עדיין לא מחובר להתקנה ולעדכון (נושא #220)",
+})
 
 features.register("skills_manifest2", "מניפסט כישורים גרסה 2", "Skills manifest v2", False,
                   about="reads and checks Skill manifests (version, permissions, dependencies, local trust) and plans "
