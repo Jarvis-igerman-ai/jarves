@@ -84,7 +84,7 @@ def test_inprocess_timings_pass_and_a_slowed_build_fails(home, monkeypatch):
     import time
 
     from jarves import features as feat
-    m = pg.measure_inproc(repeats=1, settle_s=0.4)
+    m = pg.measure_inproc(repeats=3, settle_s=0.4)
     assert pg.failures(pg.check(m, BUDGETS, "ci")) == [], m
     assert m["dashboard_first_load_ms"] > 0
     real = feat.Features.list
@@ -93,7 +93,7 @@ def test_inprocess_timings_pass_and_a_slowed_build_fails(home, monkeypatch):
         time.sleep(0.4)
         return real(self)
     monkeypatch.setattr(feat.Features, "list", slowed)
-    slow = pg.measure_inproc(repeats=1, settle_s=0.4)
+    slow = pg.measure_inproc(repeats=3, settle_s=0.4)
     assert "features_list_ms" in [r["metric"] for r in pg.failures(pg.check(slow, BUDGETS, "owner"))]
     assert "features_list_ms" in [r["metric"] for r in pg.failures(pg.check(slow, BUDGETS, "ci"))]
 

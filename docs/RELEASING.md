@@ -74,7 +74,7 @@ already released minor (branch `release/x.y`, created when `x.y.0` went stable):
 
 `python core/tools/hotfix.py --pr 123 --to release/4.0 --dry-run` prints the checks and the exact commands and runs nothing.
 Without `--dry-run` it verifies the PR is merged into `main` and has a merge commit; verifies the remote URL is the public
-`igalgerman/jarves` repo (default remote `jarves`, never the private repo); picks the next patch version (highest `vX.Y.N` tag
+`Jarvis-igerman-ai/jarves` repo (default remote `jarves`, never the private repo); picks the next patch version (highest `vX.Y.N` tag
 + 1); creates `hotfix/<pr>-to-<x.y>` from `release/<x.y>`; cherry-picks the merge commit (`git cherry-pick -x -m 1`, so the
 origin is recorded); pushes the branch; and opens a PR into the release branch labelled `backport` (the label must exist in the
 repo; full CI runs there).

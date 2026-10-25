@@ -1,0 +1,62 @@
+[
+ {
+  "number": 198,
+  "title": "ci: retire the custom queue and the next flow; labelled PRs enter the native merge queue (#161)",
+  "state": "open",
+  "draft": false,
+  "updated_at": "2026-10-24T21:20:19Z",
+  "html_url": "https://github.com/Jarvis-igerman-ai/jarves/pull/198",
+  "head": {
+   "ref": "ci/retire-custom-queue",
+   "sha": "a3b9589c0a7a3aca8d0eb2cb650ddbd751be98a4"
+  },
+  "base": {
+   "ref": "main"
+  }
+ },
+ {
+  "number": 197,
+  "title": "perf: cache tool JSON schemas; re-check guides at most every 2 s (#159)",
+  "state": "open",
+  "draft": false,
+  "updated_at": "2026-10-24T21:16:43Z",
+  "html_url": "https://github.com/Jarvis-igerman-ai/jarves/pull/197",
+  "head": {
+   "ref": "perf/schema-cache-159",
+   "sha": "0d4035d1a1437b65b9189c90698b9055a8cd111b"
+  },
+  "base": {
+   "ref": "main"
+  }
+ },
+ {
+  "number": 196,
+  "title": "tests: de-flake slow-CLI probe test, lift quarantine (#163)",
+  "state": "open",
+  "draft": false,
+  "updated_at": "2026-10-24T21:16:34Z",
+  "html_url": "https://github.com/Jarvis-igerman-ai/jarves/pull/196",
+  "head": {
+   "ref": "fix/flaky-163",
+   "sha": "a746227b3eeb0b518588c234a7c490229b73dbe1"
+  },
+  "base": {
+   "ref": "main"
+  }
+ },
+ {
+  "number": 195,
+  "title": "tests: sanitizer proofs for CodeQL #13, #19, #20, #21",
+  "state": "open",
+  "draft": false,
+  "updated_at": "2026-10-24T21:16:08Z",
+  "html_url": "https://github.com/Jarvis-igerman-ai/jarves/pull/195",
+  "head": {
+   "ref": "sec/codeql-proofs",
+   "sha": "f37dac88dc9990a724cb4f535bcd04d9a06a9377"
+  },
+  "base": {
+   "ref": "main"
+  }
+ }
+]

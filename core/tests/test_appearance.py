@@ -62,7 +62,7 @@ def test_status_has_truthful_platform_targets(tmp_path):
     for m in st["modes"]:
         pi = m["targets"]["linux_arm64_pi"]
         assert pi["status"] == "planned" and pi["blocker"] and pi["roadmap_issue"].startswith(
-            "https://github.com/igalgerman/jarves/issues/")
+            "https://github.com/Jarvis-igerman-ai/jarves/issues/")
         assert m["targets"]["windows"]["status"] in ("verified_on_device", "implemented_unverified")
     f = features.CATALOG["appearance"]
     assert f.targets["linux_arm64_pi"]["status"] == "planned" and "set_appearance" in f.tools

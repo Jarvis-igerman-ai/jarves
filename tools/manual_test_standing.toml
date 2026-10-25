@@ -247,7 +247,7 @@ src = "standing"
 order = 110
 group = "11. Update flow and rollback (last)"
 do = "Dashboard > Updates > Check, and `jarvis update check`"
-expect = "Says you are on the newest version; the source is igalgerman/jarves"
+expect = "Says you are on the newest version; the source is Jarvis-igerman-ai/jarves"
 match = []
 src = "standing"
 

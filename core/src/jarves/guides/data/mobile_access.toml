@@ -37,6 +37,40 @@ en = "Away from home? Install Tailscale on the computer and the phone and sign i
 he = "אישורים מהטלפון (כבוי מראש): טלפון מצומד יכול לאשר כל רמת סיכון, חוץ מבקשות עם קוד מוקלד. טלפון אבוד: \"ניתוק כל הטלפונים\" בלחיצה אחת, או jarvis phone revoke-all."
 en = "Phone approvals (off by default): a paired phone can approve any risk level except typed-code requests. A lost phone: one click on Revoke all phones, or jarvis phone revoke-all."
 
+[[steps]]
+he = "פס המיקרופון בראש האפליקציה (תמיד פועל): כותב במילים אם מיקרופון הטלפון פועל, מה מצב המיקרופון במחשב ואם שמע נשלח לענן ברגע זה. בזמן הקלטה מהטלפון הפס מתאדם ויש בו \"עצירה ושליחה\" ו\"ביטול ההקלטה\" (ביטול סוגר את המיקרופון ולא שולח כלום). כשהאפליקציה יוצאת מהמסך המיקרופון נסגר לבד. שמע מהטלפון עובר רק למחשב, מובן שם על המכשיר, לא נשלח לענן ולא נשמר. אם המחשב לא עונה, הפס כותב \"לא ידוע\" ולא \"כבוי\"."
+en = "The microphone strip at the top of the app (always on): it says in words whether the phone microphone is on, what the computer's microphone is doing and whether audio is going to the cloud right now. While the phone records, the strip turns red and offers Stop and send and Discard (discard closes the microphone and sends nothing). The microphone closes by itself when the app leaves the screen. Audio from the phone goes to the computer only, is understood there on the device, is not sent to the cloud and is not stored. If the computer does not answer, the strip says unknown, never off."
+
+[[steps]]
+he = "הודעות יזומות בטלפון: כל הודעה נשארת על המסך עם \"השתקת הודעות לשעה\", \"עצירת הודעות\" ו\"סגירה\", בכל לשונית. אלה עובדות עם ההרשאות הרגילות של הטלפון. הודעות שנעצרו נשארות כבויות עד שמדליקים אותן שוב במחשב; הדלקה מהטלפון לא אפשרית."
+en = "Proactive notes on the phone: each note stays on screen with Snooze notes 1 h, Stop notes and Dismiss, on every tab. They work with the phone's normal permissions. Stopped notes stay off until you switch them on again on the computer; switching on from the phone is not possible."
+
+[[problems]]
+he = "הפס אומר \"לא ידוע\" על המיקרופון או הענן"
+en = "The strip says unknown for the microphone or cloud"
+fix_he = "המחשב לא עונה לטלפון או שמצב השמע שלו לא נקרא. בדקו שהמחשב דולק ו-JARVES פועל (העמוד \"תקינות ומהירות\"). הפס לא ממציא מצב רגוע."
+fix_en = "The computer is not answering the phone or its audio state could not be read. Check that the computer is on and JARVES is running (the Health and speed page). The strip never invents a calm state."
+
+[[steps]]
+he = "תוכניות ליעדים בטלפון (דורש את ההרשאה \"משימות\", כבויה מראש): בלשונית \"תוכניות\" רואים כל תוכנית, את התקדמותה ואת השלבים (שם הכלי, הסיבה, המצב). מהטלפון אפשר רק להשהות תוכנית שרצה ולבטל תוכנית פתוחה. אישור תוכנית, המשך, ניסיון חוזר, דילוג ומחיקה נעשים במחשב בלבד, שם חלון האישור מראה את השלבים. פרטי הכלים ותוצאותיהם לא נשלחים לטלפון."
+en = "Goal plans on the phone (needs the \"tasks\" permission, off by default): the Plans tab shows each plan, its progress and its steps (tool name, reason, status). From the phone you can only pause a running plan and cancel an open one. Approving a plan, resuming, retrying, skipping and deleting are done on the computer only, where the approval popup shows the steps. Tool arguments and results are never sent to the phone."
+
+[[problems]]
+he = "אין לשונית \"תוכניות\" בטלפון"
+en = "The Plans tab is missing on the phone"
+fix_he = "ההרשאה \"משימות\" כבויה מראש. הרשו אותה לטלפון בעמוד \"טלפון\" במחשב ופתחו את האפליקציה מחדש. תוכנית שממתינה לאישור מאושרת במחשב בלבד."
+fix_en = "The \"tasks\" permission is off by default. Allow it for the phone on the Phone page on the computer and reopen the app. A plan that waits for approval is approved on the computer only."
+
+[[steps]]
+he = "העדפות שנלמדו בטלפון (כבוי מראש): בעמוד \"טלפון\" במחשב סמנו \"העדפות שנלמדו\" ליד הטלפון, או הריצו jarvis phone scopes <מזהה> --grant prefs. בטלפון תופיע לשונית \"למדתי\": אפשר לאשר הצעה, לדחות, לתקן טקסט ולשכוח. אי אפשר להוסיף העדפה חדשה או למחוק הכול מהטלפון. טקסט רגיש נדחה כמו במחשב, והשינוי מופיע מיד גם בעמוד ההעדפות במחשב. כדי לבטל: הסירו את הסימון או jarvis phone scopes <מזהה> --revoke prefs."
+en = "Learned preferences on the phone (off by default): on the Phone page on the computer tick Learned preferences next to the phone, or run jarvis phone scopes <id> --grant prefs. The phone then shows a Learned tab: confirm a suggestion, decline, correct the text and forget. You cannot add a new preference or clear everything from the phone. Sensitive text is refused like on the computer, and the change shows at once on the computer's preferences page too. To turn it off: untick it, or jarvis phone scopes <id> --revoke prefs."
+
+[[problems]]
+he = "אין לשונית \"למדתי\" בטלפון"
+en = "The Learned tab is missing on the phone"
+fix_he = "ההרשאה כבויה מראש. סמנו \"העדפות שנלמדו\" ליד הטלפון בעמוד \"טלפון\" במחשב (או jarvis phone scopes <מזהה> --grant prefs) ופתחו את האפליקציה מחדש."
+fix_en = "The permission is off by default. Tick Learned preferences next to the phone on the Phone page on the computer (or jarvis phone scopes <id> --grant prefs) and reopen the app."
+
 [[problems]]
 he = "Tailscale לא מזוהה"
 en = "Tailscale is not detected"

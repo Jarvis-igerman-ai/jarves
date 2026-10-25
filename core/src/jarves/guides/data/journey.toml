@@ -1,0 +1,47 @@
+order = 61
+category = "everyday"
+features = ["journey"]
+suggest = false
+aliases = ["נסיעה", "תכנון נסיעה", "מסלול", "כמה זמן לוקחת הדרך", "journey", "route", "trip", "how long to drive", "waze", "google maps"]
+title_he = "תכנון נסיעה"
+title_en = "Journey planning"
+what_he = "אומרים מאיפה ולאן, ומקבלים הערכת זמן וק\"מ, כמה ישנים הנתונים, וקישורים ל-Google Maps ול-Waze. השירותים החינמיים אינם יודעים תנועה בזמן אמת, ולכן כתוב תמיד \"בלי תנועה בזמן אמת\". כבוי כברירת מחדל."
+what_en = "Say where from and where to, and get a time and distance estimate, how old the data is, and Google Maps / Waze links. The free services have no live traffic, so it always says \"no live traffic\". Off by default."
+say = [["כמה זמן לוקחת הדרך מתל אביב לחיפה?", "How long is the drive from Tel Aviv to Haifa?"], ["תכין לי קישור לוויז לחיפה", "Make me a Waze link to Haifa"]]
+expect_he = "מתקבלת שורה כמו \"תל אביב אל חיפה: כ-70 דקות, 95 ק\"מ (OpenStreetMap, בלי תנועה בזמן אמת, עכשיו)\" ושני קישורים. אם שירות המסלולים לא זמין, הקישורים עדיין עובדים. קישור נפתח או נשלח רק באישור שלכם."
+expect_en = "You get a line like \"Tel Aviv to Haifa: about 70 min, 95 km (OpenStreetMap, no live traffic, just now)\" and two links. If the route service is down the links still work. A link is opened or sent only with your approval."
+test_he = "הריצו  jarvis journey plan --from \"Tel Aviv\" --to \"Haifa\"  או עם --links-only כדי לא להשתמש ברשת בכלל."
+test_en = "Run  jarvis journey plan --from \"Tel Aviv\" --to \"Haifa\"  or add --links-only to use no network at all."
+cost_he = "חינם. שירותי OpenStreetMap הציבוריים, בלי מפתח."
+cost_en = "Free. Public OpenStreetMap services, no key."
+privacy_he = "אין גישה למיקום של הטלפון או המחשב. רק שני המקומות שהקלדתם נשלחים לשירות המפות, ורק כשאתם מבקשים. עם --links-only שום דבר לא יוצא מהמחשב."
+privacy_en = "No access to the phone or PC location. Only the two places you typed go to the map service, and only when you ask. With --links-only nothing leaves this PC."
+
+[parity.features]
+journey = "journey"
+
+[[steps]]
+he = "הפעילו את \"תכנון נסיעה\". הוא כבוי כברירת מחדל. בשורת הפקודה: jarvis features on journey."
+en = "Turn on \"Journey planning\". It is off by default. From the command line: jarvis features on journey."
+action = "feature_on:journey"
+check = "enabled:journey"
+
+[[steps]]
+he = "הקלידו מאיפה ולאן: jarvis journey plan --from \"תל אביב\" --to \"חיפה\". אפשר להוסיף --depart 08:30 כדי לקבל שעת הגעה."
+en = "Type where from and where to: jarvis journey plan --from \"Tel Aviv\" --to \"Haifa\". Add --depart 08:30 to get an arrival time."
+
+[[steps]]
+he = "בלי רשת: הוסיפו --links-only וקבלו רק את הקישורים. הנתיב נפתח באפליקציה רק כשאתם לוחצים עליו."
+en = "No network: add --links-only to get only the links. The route opens in the app only when you tap it."
+
+[[problems]]
+he = "כתוב שלא מצאתי את המקום"
+en = "It says it could not find the place"
+fix_he = "כתבו כתובת מלאה יותר, עם עיר. \"כאן\" או \"המיקום שלי\" לא נתמכים בכוונה: אין גישה למיקום."
+fix_en = "Type a fuller address with the city. \"Here\" or \"my location\" are not supported on purpose: there is no location access."
+
+[[problems]]
+he = "שירות המסלולים לא זמין"
+en = "The route service is not available"
+fix_he = "השירות החינמי עמוס לפעמים. הקישורים ל-Maps ול-Waze עדיין עובדים; נסו שוב בעוד דקה."
+fix_en = "The free service is sometimes busy. The Maps and Waze links still work; try again in a minute."

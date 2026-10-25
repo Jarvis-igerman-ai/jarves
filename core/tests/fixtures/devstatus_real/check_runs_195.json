@@ -1,0 +1,475 @@
+{
+ "total_count": 47,
+ "check_runs": [
+  {
+   "id": 120992450946,
+   "name": "Failure summary comment (PR only)",
+   "status": "completed",
+   "conclusion": "skipped",
+   "started_at": "2026-10-24T21:27:41Z",
+   "completed_at": "2026-10-24T21:27:41Z",
+   "details_url": "https://github.com/Jarvis-igerman-ai/jarves/actions/runs/40133449578/job/120992450946",
+   "html_url": "https://github.com/Jarvis-igerman-ai/jarves/actions/runs/40133449578/job/120992450946"
+  },
+  {
+   "id": 120992449844,
+   "name": "Update shard timing data (linux)",
+   "status": "completed",
+   "conclusion": "success",
+   "started_at": "2026-10-24T21:29:35Z",
+   "completed_at": "2026-10-24T21:29:47Z",
+   "details_url": "https://github.com/Jarvis-igerman-ai/jarves/actions/runs/40133449578/job/120992449844",
+   "html_url": "https://github.com/Jarvis-igerman-ai/jarves/actions/runs/40133449578/job/120992449844"
+  },
+  {
+   "id": 120992449628,
+   "name": "Update shard timing data (windows)",
+   "status": "completed",
+   "conclusion": "success",
+   "started_at": "2026-10-24T21:29:22Z",
+   "completed_at": "2026-10-24T21:29:34Z",
+   "details_url": "https://github.com/Jarvis-igerman-ai/jarves/actions/runs/40133449578/job/120992449628",
+   "html_url": "https://github.com/Jarvis-igerman-ai/jarves/actions/runs/40133449578/job/120992449628"
+  },
+  {
+   "id": 120992449578,
+   "name": "CI result (single required check)",
+   "status": "completed",
+   "conclusion": "success",
+   "started_at": "2026-10-24T21:29:21Z",
+   "completed_at": "2026-10-24T21:29:26Z",
+   "details_url": "https://github.com/Jarvis-igerman-ai/jarves/actions/runs/40133449578/job/120992449578",
+   "html_url": "https://github.com/Jarvis-igerman-ai/jarves/actions/runs/40133449578/job/120992449578"
+  },
+  {
+   "id": 120990054609,
+   "name": "Prune old CodeQL cache entries",
+   "status": "completed",
+   "conclusion": "skipped",
+   "started_at": "2026-10-24T21:16:46Z",
+   "completed_at": "2026-10-24T21:16:46Z",
+   "details_url": "https://github.com/Jarvis-igerman-ai/jarves/actions/runs/40133439721/job/120990054609",
+   "html_url": "https://github.com/Jarvis-igerman-ai/jarves/actions/runs/40133439721/job/120990054609"
+  },
+  {
+   "id": 120990045059,
+   "name": "Installer upgrade and rollback",
+   "status": "completed",
+   "conclusion": "skipped",
+   "started_at": "2026-10-24T21:16:43Z",
+   "completed_at": "2026-10-24T21:16:43Z",
+   "details_url": "https://github.com/Jarvis-igerman-ai/jarves/actions/runs/40133449578/job/120990045059",
+   "html_url": "https://github.com/Jarvis-igerman-ai/jarves/actions/runs/40133449578/job/120990045059"
+  },
+  {
+   "id": 120990044961,
+   "name": "Installer smoke (${{ matrix.profile }}, ${{ matrix.scenario }})",
+   "status": "completed",
+   "conclusion": "skipped",
+   "started_at": "2026-10-24T21:16:43Z",
+   "completed_at": "2026-10-24T21:16:43Z",
+   "details_url": "https://github.com/Jarvis-igerman-ai/jarves/actions/runs/40133449578/job/120990044961",
+   "html_url": "https://github.com/Jarvis-igerman-ai/jarves/actions/runs/40133449578/job/120990044961"
+  },
+  {
+   "id": 120990044863,
+   "name": "godot",
+   "status": "completed",
+   "conclusion": "skipped",
+   "started_at": "2026-10-24T21:16:43Z",
+   "completed_at": "2026-10-24T21:16:43Z",
+   "details_url": "https://github.com/Jarvis-igerman-ai/jarves/actions/runs/40133449578/job/120990044863",
+   "html_url": "https://github.com/Jarvis-igerman-ai/jarves/actions/runs/40133449578/job/120990044863"
+  },
+  {
+   "id": 120990044746,
+   "name": "blender",
+   "status": "completed",
+   "conclusion": "skipped",
+   "started_at": "2026-10-24T21:16:43Z",
+   "completed_at": "2026-10-24T21:16:43Z",
+   "details_url": "https://github.com/Jarvis-igerman-ai/jarves/actions/runs/40133449578/job/120990044746",
+   "html_url": "https://github.com/Jarvis-igerman-ai/jarves/actions/runs/40133449578/job/120990044746"
+  },
+  {
+   "id": 120990044682,
+   "name": "Core-Godot E2E (real processes)",
+   "status": "completed",
+   "conclusion": "skipped",
+   "started_at": "2026-10-24T21:16:43Z",
+   "completed_at": "2026-10-24T21:16:43Z",
+   "details_url": "https://github.com/Jarvis-igerman-ai/jarves/actions/runs/40133449578/job/120990044682",
+   "html_url": "https://github.com/Jarvis-igerman-ai/jarves/actions/runs/40133449578/job/120990044682"
+  },
+  {
+   "id": 120990044599,
+   "name": "Windows installer (build + silent install smoke)",
+   "status": "completed",
+   "conclusion": "skipped",
+   "started_at": "2026-10-24T21:16:43Z",
+   "completed_at": "2026-10-24T21:16:43Z",
+   "details_url": "https://github.com/Jarvis-igerman-ai/jarves/actions/runs/40133449578/job/120990044599",
+   "html_url": "https://github.com/Jarvis-igerman-ai/jarves/actions/runs/40133449578/job/120990044599"
+  },
+  {
+   "id": 120990044470,
+   "name": "cad",
+   "status": "completed",
+   "conclusion": "skipped",
+   "started_at": "2026-10-24T21:16:43Z",
+   "completed_at": "2026-10-24T21:16:43Z",
+   "details_url": "https://github.com/Jarvis-igerman-ai/jarves/actions/runs/40133449578/job/120990044470",
+   "html_url": "https://github.com/Jarvis-igerman-ai/jarves/actions/runs/40133449578/job/120990044470"
+  },
+  {
+   "id": 120990044426,
+   "name": "Performance gate (Windows)",
+   "status": "completed",
+   "conclusion": "skipped",
+   "started_at": "2026-10-24T21:16:43Z",
+   "completed_at": "2026-10-24T21:16:43Z",
+   "details_url": "https://github.com/Jarvis-igerman-ai/jarves/actions/runs/40133449578/job/120990044426",
+   "html_url": "https://github.com/Jarvis-igerman-ai/jarves/actions/runs/40133449578/job/120990044426"
+  },
+  {
+   "id": 120990044350,
+   "name": "WhatsApp bridge (Go vet/test + reproducible build)",
+   "status": "completed",
+   "conclusion": "skipped",
+   "started_at": "2026-10-24T21:16:43Z",
+   "completed_at": "2026-10-24T21:16:43Z",
+   "details_url": "https://github.com/Jarvis-igerman-ai/jarves/actions/runs/40133449578/job/120990044350",
+   "html_url": "https://github.com/Jarvis-igerman-ai/jarves/actions/runs/40133449578/job/120990044350"
+  },
+  {
+   "id": 120990043722,
+   "name": "Python Core tests (windows-2025 shard 2/3)",
+   "status": "completed",
+   "conclusion": "success",
+   "started_at": "2026-10-24T21:17:23Z",
+   "completed_at": "2026-10-24T21:27:40Z",
+   "details_url": "https://github.com/Jarvis-igerman-ai/jarves/actions/runs/40133449578/job/120990043722",
+   "html_url": "https://github.com/Jarvis-igerman-ai/jarves/actions/runs/40133449578/job/120990043722"
+  },
+  {
+   "id": 120990043706,
+   "name": "Python Core tests (windows-2025 shard 1/3)",
+   "status": "completed",
+   "conclusion": "success",
+   "started_at": "2026-10-24T21:18:42Z",
+   "completed_at": "2026-10-24T21:25:05Z",
+   "details_url": "https://github.com/Jarvis-igerman-ai/jarves/actions/runs/40133449578/job/120990043706",
+   "html_url": "https://github.com/Jarvis-igerman-ai/jarves/actions/runs/40133449578/job/120990043706"
+  },
+  {
+   "id": 120990043660,
+   "name": "Python Core tests (ubuntu-24.04 shard 2/3)",
+   "status": "completed",
+   "conclusion": "success",
+   "started_at": "2026-10-24T21:16:47Z",
+   "completed_at": "2026-10-24T21:22:17Z",
+   "details_url": "https://github.com/Jarvis-igerman-ai/jarves/actions/runs/40133449578/job/120990043660",
+   "html_url": "https://github.com/Jarvis-igerman-ai/jarves/actions/runs/40133449578/job/120990043660"
+  },
+  {
+   "id": 120990043656,
+   "name": "Python Core tests (ubuntu-24.04 shard 3/3)",
+   "status": "completed",
+   "conclusion": "success",
+   "started_at": "2026-10-24T21:16:49Z",
+   "completed_at": "2026-10-24T21:23:00Z",
+   "details_url": "https://github.com/Jarvis-igerman-ai/jarves/actions/runs/40133449578/job/120990043656",
+   "html_url": "https://github.com/Jarvis-igerman-ai/jarves/actions/runs/40133449578/job/120990043656"
+  },
+  {
+   "id": 120990043651,
+   "name": "Python Core tests (ubuntu-24.04 shard 1/3)",
+   "status": "completed",
+   "conclusion": "success",
+   "started_at": "2026-10-24T21:16:52Z",
+   "completed_at": "2026-10-24T21:22:40Z",
+   "details_url": "https://github.com/Jarvis-igerman-ai/jarves/actions/runs/40133449578/job/120990043651",
+   "html_url": "https://github.com/Jarvis-igerman-ai/jarves/actions/runs/40133449578/job/120990043651"
+  },
+  {
+   "id": 120990043648,
+   "name": "Real-browser tests (ubuntu-24.04)",
+   "status": "completed",
+   "conclusion": "success",
+   "started_at": "2026-10-24T21:16:59Z",
+   "completed_at": "2026-10-24T21:21:32Z",
+   "details_url": "https://github.com/Jarvis-igerman-ai/jarves/actions/runs/40133449578/job/120990043648",
+   "html_url": "https://github.com/Jarvis-igerman-ai/jarves/actions/runs/40133449578/job/120990043648"
+  },
+  {
+   "id": 120990043634,
+   "name": "Python Core tests (windows-2025 shard 3/3)",
+   "status": "completed",
+   "conclusion": "success",
+   "started_at": "2026-10-24T21:16:45Z",
+   "completed_at": "2026-10-24T21:24:47Z",
+   "details_url": "https://github.com/Jarvis-igerman-ai/jarves/actions/runs/40133449578/job/120990043634",
+   "html_url": "https://github.com/Jarvis-igerman-ai/jarves/actions/runs/40133449578/job/120990043634"
+  },
+  {
+   "id": 120990043587,
+   "name": "Real-browser tests (windows-2025)",
+   "status": "completed",
+   "conclusion": "success",
+   "started_at": "2026-10-24T21:16:52Z",
+   "completed_at": "2026-10-24T21:23:01Z",
+   "details_url": "https://github.com/Jarvis-igerman-ai/jarves/actions/runs/40133449578/job/120990043587",
+   "html_url": "https://github.com/Jarvis-igerman-ai/jarves/actions/runs/40133449578/job/120990043587"
+  },
+  {
+   "id": 120990022274,
+   "name": "CodeQL",
+   "status": "completed",
+   "conclusion": "failure",
+   "started_at": "2026-10-24T21:16:36Z",
+   "completed_at": "2026-10-24T21:16:39Z",
+   "details_url": "https://github.com/Jarvis-igerman-ai/jarves/runs/120990022274",
+   "html_url": "https://github.com/Jarvis-igerman-ai/jarves/runs/120990022274"
+  },
+  {
+   "id": 120989899306,
+   "name": "Classify the change (docs-only skips heavy jobs; reuse of the PR proof)",
+   "status": "completed",
+   "conclusion": "success",
+   "started_at": "2026-10-24T21:16:04Z",
+   "completed_at": "2026-10-24T21:16:12Z",
+   "details_url": "https://github.com/Jarvis-igerman-ai/jarves/actions/runs/40133449578/job/120989899306",
+   "html_url": "https://github.com/Jarvis-igerman-ai/jarves/actions/runs/40133449578/job/120989899306"
+  },
+  {
+   "id": 120989899003,
+   "name": "Fast CI and documentation validation",
+   "status": "completed",
+   "conclusion": "success",
+   "started_at": "2026-10-24T21:16:05Z",
+   "completed_at": "2026-10-24T21:16:43Z",
+   "details_url": "https://github.com/Jarvis-igerman-ai/jarves/actions/runs/40133449578/job/120989899003",
+   "html_url": "https://github.com/Jarvis-igerman-ai/jarves/actions/runs/40133449578/job/120989899003"
+  },
+  {
+   "id": 120989898782,
+   "name": "Failure summary comment (PR only)",
+   "status": "completed",
+   "conclusion": "cancelled",
+   "started_at": "2026-10-24T21:16:03Z",
+   "completed_at": "2026-10-24T21:16:02Z",
+   "details_url": "https://github.com/Jarvis-igerman-ai/jarves/actions/runs/40133439716/job/120989898782",
+   "html_url": "https://github.com/Jarvis-igerman-ai/jarves/actions/runs/40133439716/job/120989898782"
+  },
+  {
+   "id": 120989898587,
+   "name": "CI result (single required check)",
+   "status": "completed",
+   "conclusion": "cancelled",
+   "started_at": "2026-10-24T21:16:03Z",
+   "completed_at": "2026-10-24T21:16:02Z",
+   "details_url": "https://github.com/Jarvis-igerman-ai/jarves/actions/runs/40133439716/job/120989898587",
+   "html_url": "https://github.com/Jarvis-igerman-ai/jarves/actions/runs/40133439716/job/120989898587"
+  },
+  {
+   "id": 120989898278,
+   "name": "Installer smoke (${{ matrix.profile }}, ${{ matrix.scenario }})",
+   "status": "completed",
+   "conclusion": "cancelled",
+   "started_at": "2026-10-24T21:16:03Z",
+   "completed_at": "2026-10-24T21:16:02Z",
+   "details_url": "https://github.com/Jarvis-igerman-ai/jarves/actions/runs/40133439716/job/120989898278",
+   "html_url": "https://github.com/Jarvis-igerman-ai/jarves/actions/runs/40133439716/job/120989898278"
+  },
+  {
+   "id": 120989898200,
+   "name": "Installer upgrade and rollback",
+   "status": "completed",
+   "conclusion": "cancelled",
+   "started_at": "2026-10-24T21:16:03Z",
+   "completed_at": "2026-10-24T21:16:02Z",
+   "details_url": "https://github.com/Jarvis-igerman-ai/jarves/actions/runs/40133439716/job/120989898200",
+   "html_url": "https://github.com/Jarvis-igerman-ai/jarves/actions/runs/40133439716/job/120989898200"
+  },
+  {
+   "id": 120989898184,
+   "name": "WhatsApp bridge (Go vet/test + reproducible build)",
+   "status": "completed",
+   "conclusion": "cancelled",
+   "started_at": "2026-10-24T21:16:03Z",
+   "completed_at": "2026-10-24T21:16:02Z",
+   "details_url": "https://github.com/Jarvis-igerman-ai/jarves/actions/runs/40133439716/job/120989898184",
+   "html_url": "https://github.com/Jarvis-igerman-ai/jarves/actions/runs/40133439716/job/120989898184"
+  },
+  {
+   "id": 120989898109,
+   "name": "Performance gate (Windows)",
+   "status": "completed",
+   "conclusion": "cancelled",
+   "started_at": "2026-10-24T21:16:03Z",
+   "completed_at": "2026-10-24T21:16:02Z",
+   "details_url": "https://github.com/Jarvis-igerman-ai/jarves/actions/runs/40133439716/job/120989898109",
+   "html_url": "https://github.com/Jarvis-igerman-ai/jarves/actions/runs/40133439716/job/120989898109"
+  },
+  {
+   "id": 120989898098,
+   "name": "Python Core tests (${{ matrix.os }} shard ${{ matrix.shard }})",
+   "status": "completed",
+   "conclusion": "cancelled",
+   "started_at": "2026-10-24T21:16:03Z",
+   "completed_at": "2026-10-24T21:16:02Z",
+   "details_url": "https://github.com/Jarvis-igerman-ai/jarves/actions/runs/40133439716/job/120989898098",
+   "html_url": "https://github.com/Jarvis-igerman-ai/jarves/actions/runs/40133439716/job/120989898098"
+  },
+  {
+   "id": 120989898092,
+   "name": "godot",
+   "status": "completed",
+   "conclusion": "cancelled",
+   "started_at": "2026-10-24T21:16:03Z",
+   "completed_at": "2026-10-24T21:16:02Z",
+   "details_url": "https://github.com/Jarvis-igerman-ai/jarves/actions/runs/40133439716/job/120989898092",
+   "html_url": "https://github.com/Jarvis-igerman-ai/jarves/actions/runs/40133439716/job/120989898092"
+  },
+  {
+   "id": 120989898068,
+   "name": "Core-Godot E2E (real processes)",
+   "status": "completed",
+   "conclusion": "cancelled",
+   "started_at": "2026-10-24T21:16:03Z",
+   "completed_at": "2026-10-24T21:16:02Z",
+   "details_url": "https://github.com/Jarvis-igerman-ai/jarves/actions/runs/40133439716/job/120989898068",
+   "html_url": "https://github.com/Jarvis-igerman-ai/jarves/actions/runs/40133439716/job/120989898068"
+  },
+  {
+   "id": 120989898055,
+   "name": "Update shard timing data (${{ matrix.platform }})",
+   "status": "completed",
+   "conclusion": "cancelled",
+   "started_at": "2026-10-24T21:16:03Z",
+   "completed_at": "2026-10-24T21:16:02Z",
+   "details_url": "https://github.com/Jarvis-igerman-ai/jarves/actions/runs/40133439716/job/120989898055",
+   "html_url": "https://github.com/Jarvis-igerman-ai/jarves/actions/runs/40133439716/job/120989898055"
+  },
+  {
+   "id": 120989897982,
+   "name": "Windows installer (build + silent install smoke)",
+   "status": "completed",
+   "conclusion": "cancelled",
+   "started_at": "2026-10-24T21:16:03Z",
+   "completed_at": "2026-10-24T21:16:02Z",
+   "details_url": "https://github.com/Jarvis-igerman-ai/jarves/actions/runs/40133439716/job/120989897982",
+   "html_url": "https://github.com/Jarvis-igerman-ai/jarves/actions/runs/40133439716/job/120989897982"
+  },
+  {
+   "id": 120989897966,
+   "name": "blender",
+   "status": "completed",
+   "conclusion": "cancelled",
+   "started_at": "2026-10-24T21:16:03Z",
+   "completed_at": "2026-10-24T21:16:02Z",
+   "details_url": "https://github.com/Jarvis-igerman-ai/jarves/actions/runs/40133439716/job/120989897966",
+   "html_url": "https://github.com/Jarvis-igerman-ai/jarves/actions/runs/40133439716/job/120989897966"
+  },
+  {
+   "id": 120989897949,
+   "name": "Real-browser tests (${{ matrix.os }})",
+   "status": "completed",
+   "conclusion": "cancelled",
+   "started_at": "2026-10-24T21:16:03Z",
+   "completed_at": "2026-10-24T21:16:02Z",
+   "details_url": "https://github.com/Jarvis-igerman-ai/jarves/actions/runs/40133439716/job/120989897949",
+   "html_url": "https://github.com/Jarvis-igerman-ai/jarves/actions/runs/40133439716/job/120989897949"
+  },
+  {
+   "id": 120989897668,
+   "name": "cad",
+   "status": "completed",
+   "conclusion": "cancelled",
+   "started_at": "2026-10-24T21:16:02Z",
+   "completed_at": "2026-10-24T21:16:02Z",
+   "details_url": "https://github.com/Jarvis-igerman-ai/jarves/actions/runs/40133439716/job/120989897668",
+   "html_url": "https://github.com/Jarvis-igerman-ai/jarves/actions/runs/40133439716/job/120989897668"
+  },
+  {
+   "id": 120989887637,
+   "name": "Auto-label policy",
+   "status": "completed",
+   "conclusion": "skipped",
+   "started_at": "2026-10-24T21:16:00Z",
+   "completed_at": "2026-10-24T21:15:59Z",
+   "details_url": "https://github.com/Jarvis-igerman-ai/jarves/actions/runs/40133449857/job/120989887637",
+   "html_url": "https://github.com/Jarvis-igerman-ai/jarves/actions/runs/40133449857/job/120989887637"
+  },
+  {
+   "id": 120989886945,
+   "name": "Auto-label policy",
+   "status": "completed",
+   "conclusion": "success",
+   "started_at": "2026-10-24T21:16:01Z",
+   "completed_at": "2026-10-24T21:16:11Z",
+   "details_url": "https://github.com/Jarvis-igerman-ai/jarves/actions/runs/40133449857/job/120989886945",
+   "html_url": "https://github.com/Jarvis-igerman-ai/jarves/actions/runs/40133449857/job/120989886945"
+  },
+  {
+   "id": 120989857798,
+   "name": "Auto-label policy",
+   "status": "completed",
+   "conclusion": "skipped",
+   "started_at": "2026-10-24T21:15:52Z",
+   "completed_at": "2026-10-24T21:15:51Z",
+   "details_url": "https://github.com/Jarvis-igerman-ai/jarves/actions/runs/40133439830/job/120989857798",
+   "html_url": "https://github.com/Jarvis-igerman-ai/jarves/actions/runs/40133439830/job/120989857798"
+  },
+  {
+   "id": 120989857452,
+   "name": "Auto-label policy",
+   "status": "completed",
+   "conclusion": "skipped",
+   "started_at": "2026-10-24T21:15:52Z",
+   "completed_at": "2026-10-24T21:15:51Z",
+   "details_url": "https://github.com/Jarvis-igerman-ai/jarves/actions/runs/40133439830/job/120989857452",
+   "html_url": "https://github.com/Jarvis-igerman-ai/jarves/actions/runs/40133439830/job/120989857452"
+  },
+  {
+   "id": 120989856942,
+   "name": "label",
+   "status": "completed",
+   "conclusion": "skipped",
+   "started_at": "2026-10-24T21:15:52Z",
+   "completed_at": "2026-10-24T21:15:51Z",
+   "details_url": "https://github.com/Jarvis-igerman-ai/jarves/actions/runs/40133439823/job/120989856942",
+   "html_url": "https://github.com/Jarvis-igerman-ai/jarves/actions/runs/40133439823/job/120989856942"
+  },
+  {
+   "id": 120989854910,
+   "name": "Classify the change (docs-only skips heavy jobs; reuse of the PR proof)",
+   "status": "completed",
+   "conclusion": "cancelled",
+   "started_at": "2026-10-24T21:15:53Z",
+   "completed_at": "2026-10-24T21:16:01Z",
+   "details_url": "https://github.com/Jarvis-igerman-ai/jarves/actions/runs/40133439716/job/120989854910",
+   "html_url": "https://github.com/Jarvis-igerman-ai/jarves/actions/runs/40133439716/job/120989854910"
+  },
+  {
+   "id": 120989854675,
+   "name": "Fast CI and documentation validation",
+   "status": "completed",
+   "conclusion": "cancelled",
+   "started_at": "2026-10-24T21:15:53Z",
+   "completed_at": "2026-10-24T21:16:02Z",
+   "details_url": "https://github.com/Jarvis-igerman-ai/jarves/actions/runs/40133439716/job/120989854675",
+   "html_url": "https://github.com/Jarvis-igerman-ai/jarves/actions/runs/40133439716/job/120989854675"
+  },
+  {
+   "id": 120989854343,
+   "name": "CodeQL (Python)",
+   "status": "completed",
+   "conclusion": "success",
+   "started_at": "2026-10-24T21:15:53Z",
+   "completed_at": "2026-10-24T21:16:45Z",
+   "details_url": "https://github.com/Jarvis-igerman-ai/jarves/actions/runs/40133439721/job/120989854343",
+   "html_url": "https://github.com/Jarvis-igerman-ai/jarves/actions/runs/40133439721/job/120989854343"
+  }
+ ]
+}

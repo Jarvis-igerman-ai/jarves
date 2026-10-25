@@ -44,6 +44,7 @@ class FakeCore:
 
     def __init__(self):
         self.chats, self.wavs = [], []
+        self.audio = {"known": True, "mic": "idle", "cloud": "off", "cloud_on": False}      # the computer's real mic / cloud state
 
     def bridge(self) -> Bridge:
         def chat(text, dev):
@@ -54,7 +55,7 @@ class FakeCore:
             self.wavs.append(wav)
             return {"transcript": "what time is it", "reply": "It is noon.", "ok": True}
         return Bridge(chat=chat, voice=voice, status=lambda: {"core": "running", "components": {"audio": "ok"}},
-                      voice_available=lambda: True)
+                      voice_available=lambda: True, audio=lambda: self.audio)
 
 
 class _Mem:
@@ -522,7 +523,7 @@ def audit(page, lang):
     assert metrics["small"] == [], metrics["small"]                                          # tap targets >= 44 px
     r = page.evaluate(apc.RULES, {"lang": lang, "width": 390, "reduced": False})
     issues = [i for i in r["issues"] if i["rule"] in RULES_THAT_APPLY and i["where"] != "button#lang"
-              and not i["where"].startswith(("div#log>", "div.jc-log", "ul#apprList>li>span.grow"))]     # chat text and request titles are user DATA     # the language button names its language by design
+              and not i["where"].startswith(("div#log>", "div.jc-log", "ul#apprList>li>span.grow", "div#noticeBox>div.notice>div.notice-text", "ul.list>li.pref>div.grow>div.pref-text", "ul.list>li.pref>div.grow>div.muted", "li.plan>div.grow>div.plan-head>s", "details>ol.plan-steps>"))]     # chat text and request titles are user DATA     # the language button names its language by design
     assert issues == [], issues
 
 
@@ -552,6 +553,292 @@ def test_layouts_at_390px_have_no_sideways_scroll_big_targets_and_contrast(brows
         audit(page, lang)
     page.tap("#lang")                                                   # the language button flips direction
     assert page.evaluate("document.documentElement.dir") == ("ltr" if lang == "he" else "rtl")
+    assert page.errors == []
+
+
+# ------------------------------------------------------------------ V5 G5 (#185): mic / cloud-audio indicator, notice stop / snooze
+TRACKS = """(() => { const g = navigator.mediaDevices.getUserMedia.bind(navigator.mediaDevices); window.__tracks = [];
+  navigator.mediaDevices.getUserMedia = async (c) => { const s = await g(c); s.getTracks().forEach((t) => window.__tracks.push(t)); return s; }; })()"""
+
+
+def test_phone_microphone_indicator_follows_the_real_microphone_and_can_stop_it(browser, phone):
+    p = phone(tls=True)
+    page = new_page(browser)
+    page.add_init_script(TRACKS)
+    ui_pair(page, p)
+    page.wait_for_selector("#audioBar:not([hidden])")
+    until(page, "document.getElementById('audioBar').textContent.includes('Phone microphone: off')")
+    assert "not sent to the cloud" in page.text_content("#audioBar") and page.locator("#audioBar.hot").count() == 0
+    page.tap("[data-tab=voice]")
+    until(page, "!document.getElementById('ptt').disabled")
+    page.dispatch_event("#ptt", "pointerdown")
+    until(page, "document.getElementById('audioBar').textContent.includes('Phone microphone: ON')")
+    assert page.locator("#audioBar.hot").count() == 1 and page.evaluate("window.__tracks.some(t => t.readyState === 'live')")
+    page.wait_for_selector("#audioBar button:has-text('Discard')")
+    page.tap("#audioBar button:has-text('Discard')")                    # the mic closes and nothing is sent
+    until(page, "document.getElementById('audioBar').textContent.includes('Phone microphone: off')")
+    assert page.evaluate("window.__tracks.every(t => t.readyState === 'ended')") and p.fake.wavs == []
+    page.dispatch_event("#ptt", "pointerdown")
+    until(page, "document.getElementById('audioBar').textContent.includes('Phone microphone: ON')")
+    page.wait_for_timeout(1200)
+    page.tap("#audioBar button:has-text('Stop and send')")
+    until(page, "document.getElementById('voiceOut').textContent.includes('what time is it')")
+    assert len(p.fake.wavs) == 1 and page.evaluate("window.__tracks.every(t => t.readyState === 'ended')")
+    page.dispatch_event("#ptt", "pointerdown")                          # a hidden page never keeps the microphone open
+    until(page, "document.getElementById('audioBar').textContent.includes('Phone microphone: ON')")
+    page.evaluate("Object.defineProperty(document, 'hidden', {value: true, configurable: true}); document.dispatchEvent(new Event('visibilitychange'))")
+    until(page, "document.getElementById('audioBar').textContent.includes('Phone microphone: off')")
+    assert page.evaluate("window.__tracks.every(t => t.readyState === 'ended')")
+    assert page.errors == []
+
+
+def test_computer_microphone_and_cloud_audio_state_is_shown_truthfully(browser, phone):
+    p = phone()
+    page = new_page(browser)
+    ui_pair(page, p)
+    until(page, "document.getElementById('audioBar').textContent.includes('Cloud audio: off')")
+    p.fake.audio = {"known": True, "mic": "listening", "cloud": "sending", "cloud_on": True}
+    until(page, "document.getElementById('audioBar').textContent.includes('SENDING audio to the cloud')", 12000)
+    assert page.locator("#audioBar.hot").count() == 1 and "Computer microphone: listening" in page.text_content("#audioBar")
+    p.fake.audio = {"known": False, "mic": "unknown", "cloud": "unknown", "cloud_on": None}      # unreadable: never a calm "off"
+    until(page, "document.getElementById('audioBar').textContent.includes('Cloud audio: unknown')", 12000)
+    assert page.locator("#audioBar.hot").count() == 0
+    assert page.errors == []
+
+
+def test_a_stale_or_hanging_reading_becomes_unknown_never_a_calm_off(browser, phone):
+    p = phone()
+    page = new_page(browser)
+    page.add_init_script("window.__skew = 0; const n = Date.now.bind(Date); Date.now = () => n() + window.__skew;")      # fake clock
+    ui_pair(page, p)
+    p.fake.audio = {"known": True, "mic": "listening", "cloud": "sending", "cloud_on": True}
+    until(page, "document.getElementById('audioBar').textContent.includes('SENDING audio to the cloud')", 12000)
+    page.evaluate("window.__skew = 20000")                              # no fresh reading for 20 s: shown as unknown at the next repaint
+    until(page, "document.getElementById('audioBar').textContent.includes('Cloud audio: unknown')", 3000)
+    assert page.locator("#audioBar.hot").count() == 0
+    until(page, "document.getElementById('audioBar').textContent.includes('SENDING audio to the cloud')", 12000)      # a fresh reading restores it
+    page.route("**/api/m/audio", lambda route: None)                    # the computer stops answering: the request hangs
+    until(page, "document.getElementById('audioBar').textContent.includes('Cloud audio: unknown')", 20000)
+    assert "Computer microphone: unknown" in page.text_content("#audioBar")
+    assert page.errors == []
+
+
+def test_mic_setup_failure_closes_the_microphone_and_the_strip_never_says_off_while_live(browser, phone):
+    p = phone(tls=True)
+    page = new_page(browser)
+    page.add_init_script(TRACKS)
+    page.add_init_script("window.AudioContext = function () { throw new Error('no audio context'); }; window.webkitAudioContext = window.AudioContext;")
+    ui_pair(page, p)
+    assert page.evaluate("typeof window.JarvesAudio === 'object'")
+    page.tap("[data-tab=voice]")
+    until(page, "!document.getElementById('ptt').disabled")
+    page.dispatch_event("#ptt", "pointerdown")
+    until(page, "document.getElementById('voiceOut').textContent.includes('Microphone permission')")
+    assert page.evaluate("window.__tracks.length > 0 && window.__tracks.every(t => t.readyState === 'ended')")     # the stream was closed
+    assert "Phone microphone: off" in page.text_content("#audioBar") and p.fake.wavs == []
+    # the strip follows the track state: a live track never reads as off
+    page.evaluate("""() => { window.__fake = { getTracks: () => [{ readyState: 'live' }] }; window.JarvesAudio.phoneMic(true, { stop() {}, discard() {}, live: () => window.__fake.getTracks().some(t => t.readyState === 'live') }); }""")
+    assert "Phone microphone: ON" in page.text_content("#audioBar")
+    page.evaluate("window.__fake.getTracks = () => [{ readyState: 'ended' }]; window.JarvesAudio.repaint()")
+    assert "Phone microphone: off" in page.text_content("#audioBar")
+    assert page.errors == []
+
+
+def test_online_listener_is_present_in_the_phone_app():
+    import re
+    app = (Path(mobile.__file__).parent / "dashboard_static" / "mobile" / "app.js").read_text(encoding="utf-8")
+    assert re.search(r'^\s*window\.addEventListener\("online", tick\);', app, re.M)                    # on its own line, not inside a comment
+
+
+def _signal(p: Phone, ref: str):
+    c = p.d.mobile.cont
+    if not c.signals_state()["on"]:
+        c.configure_signals(on=True)              # (switching on also clears a stop: only the first call may do it)
+    return c.emit("goal", ref, f"Goal {ref} looks stalled")
+
+
+def test_a_proactive_note_can_be_snoozed_and_stopped_from_the_phone(browser, phone):
+    p = phone()
+    page = new_page(browser)
+    ui_pair(page, p)
+    assert _signal(p, "7") == "queued"
+    page.wait_for_selector(".notice", timeout=12000)                    # visible on whatever tab is open (here: Home)
+    assert "Goal 7 looks stalled" in page.inner_text(".notice")
+    page.tap(".notice button:has-text('Snooze notes 1 h')")
+    until(page, "document.querySelector('.notice-status').textContent.includes('snoozed for one hour')")
+    assert p.d.mobile.cont.signals_state()["snoozed_until"] > 0
+    assert _signal(p, "8") == "snoozed"                                 # nothing more arrives while snoozed
+    page.tap(".notice button:has-text('Stop notes')")
+    until(page, "document.querySelector('.notice-status').textContent.includes('Notes stopped')")
+    assert p.d.mobile.cont.signals_state()["stopped"] is True and page.locator(".notice").count() == 0
+    until(page, "document.getElementById('audioBar').textContent.includes('Notes are stopped')", 12000)
+    assert _signal(p, "9") == "stopped"
+    assert page.errors == []
+
+
+# ------------------------------------------------------------------ V5 G4 (#184): Goal plans on the phone
+def _seed_plan(p: Phone, title="Tidy the notes folder"):
+    from jarves.goal_plans import PlanStore
+    from jarves.userdata import open_db
+    st = PlanStore(open_db(p.home))
+    pl = st.propose(title, [{"tool": "list_notes", "args": {}, "why": "see what is there"},
+                            {"tool": "send_message", "args": {"body": "SECRET-ARG"}, "why": "tell Dana"}])
+    st.approve(pl["id"])
+    st.db.x("UPDATE goal_plan_steps SET status='done', evidence='SECRET-OUT' WHERE plan_id=? AND idx=0", (pl["id"],))
+    return st, pl["id"]
+
+
+def _grant_tasks(p: Phone, page):
+    dev = call(page, "GET", "/api/m/me", None, token(page))["json"]["device"]
+    assert p.owner("POST", f"/api/mobile/devices/{dev}/scopes", {"scopes": ["chat", "voice", "status", "approvals", "tasks"]})[0] == 200
+    page.reload()
+    page.wait_for_selector("#appView:not([hidden])")
+
+
+# ------------------------------------------------------------------ V5 G3 (#183): Learned preferences on the phone
+def _seed_prefs(p: Phone):
+    from jarves.preferences import Preferences
+    from jarves.userdata import open_db
+    pr = Preferences(open_db(p.home))
+    a = pr.add_confirmed("I like short answers in the morning", "communication")["item"]["id"]
+    b = pr.suggest("Play jazz while cooking", "I love jazz when I cook", "music")["item"]["id"]
+    return pr, a, b
+
+
+def _grant(p: Phone, page, *scopes):
+    dev = call(page, "GET", "/api/m/me", None, token(page))["json"]["device"]
+    assert p.owner("POST", f"/api/mobile/devices/{dev}/scopes", {"scopes": ["chat", "voice", "status", "approvals", *scopes]})[0] == 200
+    page.reload()
+    page.wait_for_selector("#appView:not([hidden])")
+
+
+def test_goal_plan_view_pause_and_cancel_from_the_phone_and_nothing_that_starts_a_step(browser, phone):
+    p = phone()
+    st, pid = _seed_plan(p)
+    page = new_page(browser)
+    ui_pair(page, p)
+    page.wait_for_timeout(600)
+    assert page.locator("#tabbtn-plans").is_hidden()                    # least privilege: no tasks scope, no tab
+    assert call(page, "GET", "/api/m/plans", None, token(page))["status"] == 403
+    _grant_tasks(p, page)
+    page.wait_for_selector("#tabbtn-plans:not([hidden])")
+    page.tap("[data-tab=plans]")
+    page.wait_for_selector("#plansRoot .plan-title")
+    body = page.inner_text("#plansRoot")
+    assert "Tidy the notes folder" in body and "50%" in body and "1/2" in body and "ready" in body
+    page.tap("#plansRoot summary")                                      # the steps: tools, reasons, statuses
+    page.wait_for_selector("#plansRoot .plan-steps")
+    steps = page.inner_text("#plansRoot .plan-steps")
+    assert "list_notes" in steps and "send_message" in steps and "tell Dana" in steps and "changes something" not in steps
+    assert "SECRET" not in page.inner_text("body")                      # arguments and results never reach the phone
+    assert page.locator("#plansRoot button:has-text('Approve'), #plansRoot button:has-text('Retry'), #plansRoot button:has-text('Resume')").count() == 0
+    page.tap("#plansRoot button:has-text('Pause')")
+    until(page, "document.querySelector('#plansRoot').textContent.includes('Plan paused')")
+    assert st.get(pid)["state"] == "paused"                             # the PC sees the same state
+    assert p.owner("GET", "/api/goal-plans")[1]["plans"][0]["state"] == "paused"
+    page.wait_for_selector("#plansRoot :text('on the computer')")       # resuming is the computer's job
+    assert page.locator("#plansRoot button:has-text('Pause')").count() == 0
+    page.tap("#plansRoot button:has-text('Cancel plan')")               # cancelling asks first
+    assert st.get(pid)["state"] == "paused"
+    page.tap("#plansRoot button:has-text('Yes, cancel')")
+    until(page, "document.querySelector('#plansRoot').textContent.includes('Plan cancelled')")
+    assert st.get(pid)["state"] == "cancelled"
+    r = call(page, "POST", "/api/m/plans/op", {"id": "plan-e2e-00000001", "op": "retry", "plan": pid}, token(page))
+    assert r["status"] == 403 and r["json"]["code"] == "PLAN_PC_ONLY"
+    assert page.errors == []
+
+
+def test_learned_preferences_view_confirm_correct_and_forget_from_the_phone(browser, phone):
+    p = phone()
+    pr, a, b = _seed_prefs(p)
+    page = new_page(browser)
+    ui_pair(page, p)
+    page.wait_for_timeout(600)
+    assert page.locator("#tabbtn-prefs").is_hidden()                    # least privilege: no scope, no tab
+    assert call(page, "GET", "/api/m/prefs", None, token(page))["status"] == 403
+    _grant(p, page, "prefs")
+    page.wait_for_selector("#tabbtn-prefs:not([hidden])")
+    page.tap("[data-tab=prefs]")
+    page.wait_for_selector("#prefsRoot .pref-text")
+    body = page.inner_text("#prefsRoot")
+    assert "I like short answers in the morning" in body and "Play jazz while cooking" in body and "I love jazz when I cook" in body
+    page.tap("#prefsRoot li:has-text('Play jazz') button:has-text('Confirm')")           # confirm the proposal
+    until(page, "!document.querySelector('#prefsRoot li') || ![...document.querySelectorAll('#prefsRoot h2')].some(h => h.textContent.includes('Waiting'))")
+    assert pr.get(b)["state"] == "confirmed"
+    page.tap("#prefsRoot li:has-text('short answers') button:has-text('Correct')")      # correct a text
+    page.fill("#prefsRoot input", "I like long answers in the evening")
+    page.tap("#prefsRoot button:has-text('Save')")
+    until(page, "document.querySelector('#prefsRoot').textContent.includes('long answers in the evening')")
+    assert pr.get(a)["text"] == "I like long answers in the evening"
+    page.tap("#prefsRoot li:has-text('long answers') button:has-text('Forget')")        # forgetting asks first
+    assert pr.get(a) is not None
+    page.tap("#prefsRoot button:has-text('Yes, forget')")
+    until(page, "!document.querySelector('#prefsRoot').textContent.includes('long answers')")
+    assert pr.get(a) is None
+    _, pc = p.owner("GET", "/api/prefs")                                                # the PC page shows the same state
+    assert [x["text"] for x in pc["items"]] == ["Play jazz while cooking"]
+    # a sensitive correction is refused with the dashboard's own rule and nothing changes
+    page.tap("#prefsRoot li:has-text('jazz') button:has-text('Correct')")
+    page.fill("#prefsRoot input", "my password is hunter2")
+    page.tap("#prefsRoot button:has-text('Save')")
+    until(page, "document.querySelector('#prefsRoot').textContent.includes('sensitive')")
+    assert pr.get(b)["text"] == "Play jazz while cooking"
+    assert page.errors == []
+
+
+@pytest.mark.parametrize("lang,locale", [("en", "en-US"), ("he", "he-IL")])
+def test_indicator_and_note_layout_at_390px_in_english_and_hebrew(browser, phone, lang, locale):
+    p = phone(tls=True)
+    page = new_page(browser, locale=locale)
+    ui_pair(page, p)
+    audit(page, lang)                                                   # idle strip
+    p.fake.audio = {"known": True, "mic": "listening", "cloud": "sending", "cloud_on": True}
+    _signal(p, "7")
+    page.wait_for_selector(".notice", timeout=12000)
+    until(page, "document.querySelector('#audioBar.hot')", 12000)
+    audit(page, lang)                                                   # hot strip + a note card
+    page.tap("[data-tab=voice]")
+    until(page, "!document.getElementById('ptt').disabled")
+    page.dispatch_event("#ptt", "pointerdown")
+    page.wait_for_selector("#audioBar button")
+    audit(page, lang)                                                   # phone mic on: Stop and Discard buttons
+    page.tap("#audioBar button:last-of-type")
+    audit(page, lang)
+    assert page.errors == []
+
+
+@pytest.mark.parametrize("lang,locale", [("en", "en-US"), ("he", "he-IL")])
+def test_goal_plans_layout_at_390px_in_english_and_hebrew(browser, phone, lang, locale):
+    p = phone()
+    _seed_plan(p)
+    page = new_page(browser, locale=locale)
+    ui_pair(page, p)
+    _grant_tasks(p, page)
+    page.tap("[data-tab=plans]")
+    page.wait_for_selector("#plansRoot .plan-title")
+    audit(page, lang)
+    page.tap("#plansRoot summary")
+    page.wait_for_selector("#plansRoot .plan-steps")
+    audit(page, lang)
+    page.tap("#plansRoot button >> nth=1")                              # the cancel question
+    page.wait_for_selector("#plansRoot button.primary")
+    audit(page, lang)
+    assert page.errors == []
+
+
+@pytest.mark.parametrize("lang,locale", [("en", "en-US"), ("he", "he-IL")])
+def test_learned_preferences_layout_at_390px_in_english_and_hebrew(browser, phone, lang, locale):
+    p = phone()
+    _seed_prefs(p)
+    page = new_page(browser, locale=locale)
+    ui_pair(page, p)
+    _grant(p, page, "prefs")
+    page.tap("[data-tab=prefs]")
+    page.wait_for_selector("#prefsRoot .pref-text")
+    audit(page, lang)
+    page.tap("#prefsRoot li:has-text('short') button >> nth=0")                        # open the edit form: input + buttons
+    page.wait_for_selector("#prefsRoot input")
+    audit(page, lang)
     assert page.errors == []
 
 

@@ -234,10 +234,10 @@ machine.** The Core and the whole pytest suite already run on Linux, so most sce
 
 * `packaging/sandbox/Dockerfile`: `python:3.12-slim`, `uv sync --locked --extra test`, Playwright Chromium, a non-root
   user, `HOME=/home/qa`, no secrets. Entry: `uv run python core/tools/scenario_run.py run "$@"`.
-* Job `sandbox-image` builds and pushes `ghcr.io/igalgerman/jarves-sandbox:<hash>` only when the hash of
+* Job `sandbox-image` builds and pushes `ghcr.io/Jarvis-igerman-ai/jarves-sandbox:<hash>` only when the hash of
   `Dockerfile + core/uv.lock` changes (about 3 min, rare); other jobs pull it (about 20 s) or run the same steps without
   Docker on the runner (the runner is already clean; Docker adds sameness with the owner PC).
-* Local: `docker run --rm --network none -v %cd%:/src:ro ghcr.io/igalgerman/jarves-sandbox:<hash> --tag smoke`.
+* Local: `docker run --rm --network none -v %cd%:/src:ro ghcr.io/Jarvis-igerman-ai/jarves-sandbox:<hash> --tag smoke`.
   `--network none` is the strongest network guard: the container has only loopback.
 
 ### 3.4 AI QA agent (optional, outside CI)
