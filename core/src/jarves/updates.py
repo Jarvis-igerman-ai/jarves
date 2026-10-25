@@ -135,7 +135,7 @@ def build_info() -> dict:
     try:
         raw = json.loads(BUILD_INFO.read_text(encoding="utf-8"))
         if isinstance(raw, dict):
-            info.update({k: raw[k] for k in ("version", "commit", "built", "channel", "platform", "update_base_url")
+            info.update({k: raw[k] for k in ("version", "commit", "built", "channel", "platform", "update_base_url", "hotfix")
                          if k in raw})
     except (OSError, ValueError):
         pass
@@ -156,7 +156,9 @@ def version_line(home: Path | None = None) -> str:
     shown = beta_label(home, b["version"]) if home is not None else None
     if shown:
         extra.append("BETA")
-    return f"JARVES {shown or b['version']} (" + ", ".join(x for x in extra if x) + ")"
+    hf = b.get("hotfix")                      # #348: `jarvis hotfix apply` marks the build; the numeric version is unchanged
+    tag = f"+hotfix.{hf.get('n', 1)}" if isinstance(hf, dict) else ""
+    return f"JARVES {shown or b['version']}{tag} (" + ", ".join(x for x in extra if x) + ")"
 
 
 KNOWN_BUILDS_KEEP = 10                   # versions whose display/channel stay remembered (rollback targets included)

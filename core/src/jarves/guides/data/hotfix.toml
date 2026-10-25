@@ -1,0 +1,48 @@
+order = 54
+category = "system"
+features = ["hotfix"]
+suggest = false
+aliases = ["תיקון מהיר", "הוטפיקס", "תיקון קוד מהיר", "hotfix", "hot patch", "hot-patch", "quick fix"]
+links = ["backup", "updates"]
+title_he = "תיקון מהיר (hotfix)"
+title_en = "Hot-patch (hotfix)"
+what_he = "מכניס תיקון קוד בלבד לגרסה המותקנת תוך כדקה, בלי מתקין של רבע שעה. מגבה קודם, מעתיק רק קבצים ששונו, מפעיל מחדש את הליבה רק אם רצה, בודק עם doctor, ופקודה אחת מבטלת. שינוי במתקין, בגשר או בתלויות נדחה ואז צריך את המתקין המלא."
+what_en = "Puts a code-only fix into the installed build in about a minute instead of a 15 minute installer. It backs up first, copies only the changed files, restarts the Core only if it was running, checks with doctor, and one command undoes it. A change to the installer, the bridge or dependencies is refused: use the full installer then."
+say = [["יש תיקון קוד מהיר?", "Is there a quick code fix to install?"]]
+expect_he = "מוצגת רשימת הקבצים ששונו, ואחרי ההתקנה הגרסה מסומנת \"+hotfix.N\" ב-jarvis version. עדכון רגיל מחליף את התיקון המהיר."
+expect_en = "You see the list of changed files, and afterwards jarvis version shows \"+hotfix.N\". A normal update replaces the hotfix."
+test_he = "הריצו  jarvis hotfix apply --dry-run  כדי לראות מה היה משתנה, בלי לשנות כלום."
+test_en = "Run  jarvis hotfix apply --dry-run  to see what would change without touching anything."
+cost_he = "חינם. בלי רשת."
+cost_en = "Free. No network."
+privacy_he = "הכול מקומי. הגיבוי לא כולל מפתחות. אין שליחה החוצה."
+privacy_en = "Everything is local. The backup holds no keys. Nothing is sent out."
+
+[parity.features]
+hotfix = "hotfix"
+
+[[steps]]
+he = "הריצו  jarvis hotfix apply --from <ענף או תיקייה> --dry-run  וראו אילו קבצים ישתנו. אם כתוב REFUSED, צריך את המתקין המלא."
+en = "Run  jarvis hotfix apply --from <branch or folder> --dry-run  and see which files would change. If it says REFUSED, use the full installer."
+action = "command:jarvis hotfix apply --dry-run"
+
+[[steps]]
+he = "הריצו  jarvis hotfix apply --from <ענף או תיקייה>. נעשה גיבוי, הקבצים מועתקים, הליבה מופעלת מחדש רק אם רצה, ו-doctor רץ. כל כשל מחזיר הכול אוטומטית."
+en = "Run  jarvis hotfix apply --from <branch or folder>. It backs up, copies the files, restarts the Core only if it ran, and runs doctor. Any failure restores everything automatically."
+action = "command:jarvis hotfix apply"
+
+[[steps]]
+he = "לביטול: jarvis hotfix revert. הקבצים המקוריים חוזרים ממה ששמור בתיקיית hotfix בנתונים."
+en = "To undo: jarvis hotfix revert. The original files come back from the hotfix folder in your data folder."
+action = "command:jarvis hotfix revert"
+
+[[problems]]
+he = "כתוב REFUSED: צריך את המתקין המלא"
+en = "It says REFUSED: use the full installer"
+fix_he = "השינוי נוגע במתקין, בגשר, בתלויות או בקובץ שאינו קוד. זה בכוונה: התקינו גרסה מלאה."
+fix_en = "The change touches the installer, the bridge, dependencies or a non-source file. On purpose: install a full build."
+[[problems]]
+he = "כתוב \"הוחזר אוטומטית\""
+en = "It says it was reverted automatically"
+fix_he = "משהו נכשל (העתקה, הפעלה מחדש או doctor). הקבצים המקוריים כבר חזרו. ראו את ההודעה ואת hotfix/last-doctor.txt בתיקיית הנתונים."
+fix_en = "Something failed (copy, restart or doctor). The originals are already back. Read the message and hotfix/last-doctor.txt in your data folder."
