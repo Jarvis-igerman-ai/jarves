@@ -239,4 +239,4 @@ feat.register(FEATURE, "מודעות עצמית", "Self-awareness", False, skill
                                    "blocker": "not yet tried by the owner on a real install"},
                        "linux_arm64_pi": {"status": "implemented_unverified", "roadmap_issue": PI_ROADMAP,
                                           "blocker": "pure Python; never run on a Raspberry Pi (no device in the test setup)"}},
-              permissions=["read"], settings="jarvis about, whatsnew, roadmap, ticket")
+              permissions=["read"], settings="jarvis about|whatsnew|roadmap|ticket")
