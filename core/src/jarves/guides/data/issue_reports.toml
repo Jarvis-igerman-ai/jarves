@@ -15,8 +15,8 @@ expect_en = "One sentence: how many issues are open, how many are serious and th
 test = "feature"
 test_he = "הבדיקה רק מוודאת שהרכיב מותקן. אפשר לבדוק את הרשימה עם jarvis issues list."
 test_en = "The check only sees that the component is installed. You can look at the list with jarvis issues list."
-cost_he = "חינם. הרשימה מקומית. רק שליחת דיווח (אחרי אישור) פונה לאינטרנט, לפרויקט igalgerman/jarves ב-GitHub."
-cost_en = "Free. The list is local. Only sending a report (after your approval) uses the internet, to the igalgerman/jarves project on GitHub."
+cost_he = "חינם. הרשימה מקומית. רק שליחת דיווח (אחרי אישור) פונה לאינטרנט, לפרויקט Jarvis-igerman-ai/jarves ב-GitHub."
+cost_en = "Free. The list is local. Only sending a report (after your approval) uses the internet, to the Jarvis-igerman-ai/jarves project on GitHub."
 privacy_he = "הרשימה נשמרת בקובץ מקומי (issues_registry.json) ומכילה רק קודים, מספרים, זמנים, גרסאות ושמות פונקציות. בלי שיחות, שמות, כתובות, נתיבים או מפתחות. שום דבר לא נשלח בלי שאישרתם את הטקסט המדויק שמוצג לכם. בלי אסימון GitHub הדיווח נשמר בקובץ לצירוף ידני."
 privacy_en = "The list is kept in one local file (issues_registry.json) and holds only codes, numbers, times, versions and function names. No conversations, names, addresses, paths or keys. Nothing is sent unless you approve the exact text shown to you. Without a GitHub token the report is saved to a file you can attach yourself."
 
@@ -48,8 +48,8 @@ action = "command:jarvis issues export --all --out issues.json"
 [[problems]]
 he = "הדיווח נשמר בקובץ ולא נשלח"
 en = "The report was saved to a file, not sent"
-fix_he = "אין במחשב אסימון GitHub (משתנה הסביבה GH_TOKEN או כניסה ב-gh). צרפו את הקובץ מהתיקייה issue_reports לתקלה חדשה ב-github.com/igalgerman/jarves עם התווית from-diagnostics."
-fix_en = "There is no GitHub token on this computer (the GH_TOKEN environment variable or a gh login). Attach the file from the issue_reports folder to a new issue at github.com/igalgerman/jarves with the label from-diagnostics."
+fix_he = "אין במחשב אסימון GitHub (משתנה הסביבה GH_TOKEN או כניסה ב-gh). צרפו את הקובץ מהתיקייה issue_reports לתקלה חדשה ב-github.com/Jarvis-igerman-ai/jarves עם התווית from-diagnostics."
+fix_en = "There is no GitHub token on this computer (the GH_TOKEN environment variable or a gh login). Attach the file from the issue_reports folder to a new issue at github.com/Jarvis-igerman-ai/jarves with the label from-diagnostics."
 
 [[problems]]
 he = "תקלה סומנה כתוקנה בגרסה חדשה"

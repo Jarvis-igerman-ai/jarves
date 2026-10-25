@@ -32,7 +32,7 @@ from jarves import release_signoff as so  # noqa: E402
 
 TAG_RE = re.compile(r"^v(\d+\.\d+\.\d+)$")
 NIGHTS = 5
-REPO = "igalgerman/jarves"
+REPO = "Jarvis-igerman-ai/jarves"
 _NEG = re.compile(r"(?i)\b(?:no|zero|0)\s+open\s+P0(?:\s*(?:-|–|to)\s*P2)?\b")
 _OPEN = re.compile(r"(?i)\bopen\b[^|\n]{0,80}?\bP[0-2]\b|\bP[0-2]\b[^|\n]{0,40}?\bopen\b")
 _DONE = ("done", "n/a", "accepted", "pass", "passed", "fixed", "closed")

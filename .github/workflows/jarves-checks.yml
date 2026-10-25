@@ -14,11 +14,14 @@ name: jarves-checks
 # (core/tools/ci_flake.py, flake-report artifact). Zero skips stay enforced. Nightly: nightly.yml.
 on:
   push:
-    branches: [main, next]   # `next` = the batch run of the integration-branch flow (docs/NEXT_FLOW.md)
+    branches: [main]
     tags: ["v*", "win-v*"]
   pull_request:
-    branches-ignore: [next]   # PRs into `next` get the light run of next-flow.yml
     types: [opened, synchronize, reopened, ready_for_review]
+  # GitHub merge queue (org ruleset, #161): the full matrix runs once on the queue's merge group, the exact commit that
+  # lands on main; the push run on main then reuses its installer artifact by tree hash (ci_reuse.py), ~1 min.
+  merge_group:
+    types: [checks_requested]
   workflow_dispatch:
 permissions:
   contents: read
@@ -381,7 +384,7 @@ jobs:
     outputs:
       version: ${{ steps.build.outputs.version }}
     env:
-      CHANNEL: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' && 'main' || 'pr' }}
+      CHANNEL: ${{ (github.event_name == 'merge_group' || (github.event_name == 'push' && github.ref == 'refs/heads/main')) && 'main' || 'pr' }}
       TREE: ${{ needs.changes.outputs.tree }}
       # WP-O: optional custom update folder baked in as the default (docs/RELEASE_HOSTING.md); unset = the public
       # releases repo (once a signing key is built in), else the private repo's releases
@@ -758,12 +761,12 @@ jobs:
       # Publish the proof *inside* ci-ok so that it exists before the required check
       # turns green. Only for non-draft full-test PRs which did not build an installer.
       - name: Record proven PR tests (no installer)
-        if: ${{ github.event_name == 'pull_request' && github.event.pull_request.draft != true && needs.changes.outputs.code == 'true' && needs.changes.outputs.full == 'true' && needs.changes.outputs.installer != 'true' }}
+        if: ${{ (github.event_name == 'merge_group' || (github.event_name == 'pull_request' && github.event.pull_request.draft != true)) && needs.changes.outputs.code == 'true' && needs.changes.outputs.full == 'true' && needs.changes.outputs.installer != 'true' }}
         shell: bash
         run: |
-          printf 'tree=%s\npr_head=%s\nrun_id=%s\nkind=green-tests-no-installer\n'             "${{ needs.changes.outputs.tree }}" "${{ github.event.pull_request.head.sha }}" "$GITHUB_RUN_ID" > pr-tests-proof.txt
+          printf 'tree=%s\npr_head=%s\nrun_id=%s\nkind=green-tests-no-installer\n'             "${{ needs.changes.outputs.tree }}" "${{ github.event.pull_request.head.sha || github.sha }}" "$GITHUB_RUN_ID" > pr-tests-proof.txt
       - name: Save proven PR tests (no installer)
-        if: ${{ github.event_name == 'pull_request' && github.event.pull_request.draft != true && needs.changes.outputs.code == 'true' && needs.changes.outputs.full == 'true' && needs.changes.outputs.installer != 'true' }}
+        if: ${{ (github.event_name == 'merge_group' || (github.event_name == 'pull_request' && github.event.pull_request.draft != true)) && needs.changes.outputs.code == 'true' && needs.changes.outputs.full == 'true' && needs.changes.outputs.installer != 'true' }}
         uses: actions/upload-artifact@v7
         with:
           name: jarves-no-installer-proof-${{ needs.changes.outputs.tree }}

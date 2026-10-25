@@ -64,7 +64,7 @@
   }
   refreshStrip();
   setTimeout(refreshStrip, 1500);                 // once /api/overview has answered (today's cost)
-  setInterval(refreshStrip, 60000);
+  setInterval(() => { if (!document.hidden) refreshStrip(); }, 60000);   // #159: not while hidden
   JL.onChange(refreshStrip);
 
   // ---------------------------------------------------------------- Usage page
