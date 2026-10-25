@@ -114,8 +114,9 @@ def say(code: str, lang: str = "en", **kw) -> str:
 
 # ---------------------------------------------------------------------- input
 def clean_place(text: str) -> str:
-    """One typed place: whitespace folded, no control characters, at most MAX_PLACE. Raises JourneyError."""
-    s = " ".join(str(text or "").split())
+    """One typed place: whitespace folded, bidi/invisible format characters removed, no control characters, at most MAX_PLACE. Raises JourneyError."""
+    from .drive_mode import strip_invisible          # one sanitiser with the drive-mode queue (bidi / zero-width removed)
+    s = " ".join(strip_invisible(text or "").split())
     if not s or len(s) > MAX_PLACE or any(ord(c) < 32 for c in s):
         raise JourneyError("JOURNEY_BAD_PLACE")
     if CURRENT_LOCATION.match(s):

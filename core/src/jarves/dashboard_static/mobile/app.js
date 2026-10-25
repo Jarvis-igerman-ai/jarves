@@ -65,7 +65,7 @@
     setConn(true);
     const d = await r.json().catch(() => ({}));
     if (r.status === 401) { forget(); const u = new Error(t("unpaired")); u.status = 401; throw u; }
-    if (!r.ok) { const e = new Error(d.error || ("HTTP " + r.status)); e.status = r.status; e.code = d.code; throw e; }
+    if (!r.ok) { const e = new Error((lang === "he" && d.error_he) || d.error || ("HTTP " + r.status)); e.status = r.status; e.code = d.code; throw e; }
     return d;
   }
   const post = (p, obj) => api(p, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(obj || {}) });
