@@ -334,9 +334,15 @@ class AutoUpdater:
             st = self.state()
             self._after_restart(st)
             h = updates.take_health_notice(self.home)
-            if h:                                         # the installer's health check put the old program back (#164)
+            if h:                                         # the installer's health check acted on the update (#164)
                 st = self.state()
-                self._emit(st, h["status"], h.get("to") or "", h.get("to") or "", prev=h.get("from") or "")
+                bad = h.get("to") or ""
+                if bad:
+                    # never auto-retry a version that did not become ready (each try would leave another
+                    # failed-upgrade-health-* folder); the owner's own "Update now" lifts this
+                    st.pop("installing", None)
+                    st["gave_up"], st["last_error"] = bad, "UPDATE_HEALTH_" + str(h["status"]).upper()
+                self._emit(st, h["status"], bad, bad, prev=h.get("from") or "")
                 _save(self.home, st)
             return (self.state().get("notice") or {}).get("kind", "")
 
@@ -366,6 +372,16 @@ def _notice_text(kind: str, display: str, **x) -> tuple[tuple[str, str], tuple[s
                 ("JARVES was updated", f"Updated to version {display}. Your data was kept and backed up before the update. "
                  "What changed: jarvis release-notes. If something is wrong: jarvis update --rollback (or the Roll back "
                  "button on the Updates page)."))
+    if kind == "health_failed":
+        return (("העדכון לא עלה; החזרה מלאה מחכה לאישור שלך", f"גרסה {display} לא עלתה כמו שצריך אחרי ההתקנה. הנתונים כבר "
+                 "הותאמו לגרסה החדשה, אז לא החזרתי לבד רק את התוכנה (הגרסה הקודמת לא הייתה עולה עליהם). כדי לחזור: "
+                 "jarvis update --rollback (או הכפתור Roll back בעמוד Updates); זה מחזיר גם את הגיבוי של הנתונים "
+                 "שנעשה לפני העדכון, ורק אחרי אישור שלך."),
+                ("The update did not start; a full undo waits for your OK", f"Version {display} did not start properly "
+                 "after setup. Your data had already been upgraded for it, so I did not put back the previous program "
+                 "alone (it would not start on that data). To go back: jarvis update --rollback (or the Roll back "
+                 "button on the Updates page); it also restores the data backup made before the update, and only "
+                 "after your OK."))
     if kind in ("rolled_back", "rollback_failed"):
         prev = x.get("prev") or ""
         if kind == "rolled_back":

@@ -60,7 +60,7 @@ class Health:
 
     def components_view(self) -> dict:
         """{name: {status, detail}} for features / self-check: the same cleaning as the snapshot."""
-        return {k: _clean({"status": v.status, "detail": v.detail}) for k, v in self.components.items()}
+        return _clean({k: {"status": v.status, "detail": v.detail} for k, v in self.components.items()}) or {}
 
     def snapshot(self, root: Path | None = None) -> dict:
         disk = None
@@ -70,7 +70,7 @@ class Health:
             pass
         return {"ts": time.time(), "core": self.core, "uptime_s": round(time.time() - self.started),
                 "storage_free_gb": disk, "last_error": _clean(self.last_error),
-                "components": {k: _clean(asdict(v)) for k, v in sorted(self.components.items())}}
+                "components": _clean({k: asdict(v) for k, v in sorted(self.components.items())}) or {}}
 
     def heartbeat(self, min_age_s: float = HEARTBEAT_MIN_S) -> bool:
         """Re-save only when the file is older than min_age_s (readers call a snapshot older than 120 s "off")."""
@@ -83,19 +83,33 @@ class Health:
         if self._path:
             self._saved_at = time.monotonic()
             try:
-                self._path.write_text(json.dumps(self.snapshot(self._path.parent), indent=1), encoding="utf-8")
+                self._path.write_text(json.dumps(self.snapshot(self._path.parent), separators=(",", ":")), encoding="utf-8")
             except OSError:
                 pass
 
 
 def _clean(d: dict | None) -> dict | None:
-    """SW-V4 B: health text (health.json, `jarvis status`, dashboard) never carries a secret, and in privacy mode no
-    e-mail address or phone number (e.g. the signed-in ChatGPT account in the ai detail)."""
+    """SW-V4 B: health text (health.json, `jarvis status`, dashboard) never carries a secret, and (owner decision, CodeQL #15) never an
+    e-mail address in either privacy mode; in privacy mode also no phone number (e.g. the signed-in ChatGPT account in the ai detail).
+
+    CodeQL #15: EVERY string (any key, nested dicts/lists, and the keys themselves) is cleaned, not only
+    `detail`/`action`, so a future field cannot carry a secret into health.json. Numbers and structure are kept."""
     if not d:
         return d
-    priv = logs.privacy()
-    fix = (lambda s: logs.redact_pii(logs.redact(s))) if priv else logs.redact
-    return {k: fix(v) if isinstance(v, str) and k in ("detail", "action") else v for k, v in d.items()}
+    fix = (lambda s: logs.redact_pii(logs.redact(s))) if logs.privacy() else (lambda s: logs.mask_emails(logs.redact(s)))
+    return _clean_value(d, fix, 0)
+
+
+def _clean_value(v: object, fix, depth: int) -> object:
+    if isinstance(v, str):
+        return fix(v)
+    if depth > 8:                        # health data is shallow; anything deeper is dropped, never written raw
+        return None
+    if isinstance(v, dict):
+        return {fix(k) if isinstance(k, str) else k: _clean_value(x, fix, depth + 1) for k, x in v.items()}
+    if isinstance(v, (list, tuple)):
+        return [_clean_value(x, fix, depth + 1) for x in v]
+    return v
 
 
 def read_snapshot(path: Path) -> dict | None:

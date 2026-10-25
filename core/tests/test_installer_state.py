@@ -169,8 +169,57 @@ def test_note_rollback_records_once_and_never_touches_data(tmp_path):
     before = {p: p.read_bytes() for p in home.rglob("*") if p.is_file()}
     _pending(home, "installing")
     before[home / "updates" / "pending.json"] = (home / "updates" / "pending.json").read_bytes()
-    rec = installer.note_rollback(home, True)
+    rec = installer.note_rollback(home, "rolled_back")
     assert rec["status"] == "rolled_back" and rec["from"] == "4.0.0" and rec["to"] == "4.0.1"
     after = {p: p.read_bytes() for p in home.rglob("*") if p.is_file() and p.name != "health.json"}
     assert after == before
-    assert installer.note_rollback(home, False)["status"] == "rollback_failed"
+    assert installer.note_rollback(home, "rollback_failed")["status"] == "rollback_failed"
+    assert installer.note_rollback(home, "health_failed")["status"] == "health_failed"
+    import pytest
+    with pytest.raises(ValueError):
+        installer.note_rollback(home, "anything")
+
+
+def test_health_check_ignores_a_stale_record_for_another_version(tmp_path):
+    """Review P2-1: pending.json says to=4.0.1 but this setup installs 4.0.2 (a stale record from an aborted attempt):
+    the healthy 4.0.2 never marks that record ok, so judging it would roll back a good version. It is "unknown"."""
+    home = tmp_path / "home"
+    _pending(home, "installing")
+    assert installer.health(home, 1, 0, expect="4.0.2", sleep=lambda _: None, clock=lambda: 99.0) == "unknown"
+    now = [0.0]
+    def sleep(s): now[0] += 10
+    assert installer.health(home, 30, 1, expect="4.0.1.0", sleep=sleep, clock=lambda: now[0]) == "failed"
+    assert installer.main(["health", "--home", str(home), "--timeout", "1", "--expect", "9.9.9"]) == 1
+
+
+def test_a_program_only_rollback_is_allowed_only_when_no_schema_changed(tmp_path):
+    """Review P1-1: after a schema migration the old Core refuses the newer data, so the installer must not put back
+    the program alone (exit 5); with the schema unchanged it may (exit 0). Unknown = not safe."""
+    home = tmp_path / "home"
+    seed.seed(home)
+    state = tmp_path / "install-state.json"
+    profiles = installer.profiles(home)
+    rec = {"home": str(home), "backups": [{"home": str(p), "schema_before": installer.schema_of(p)} for p in profiles]}
+    state.write_text(json.dumps(rec), encoding="utf-8")
+    assert installer.can_program_rollback(state) is True
+    assert installer.main(["can-program-rollback", "--home", str(home), "--state", str(state)]) == 0
+    (home / "schema.json").write_text(json.dumps({"schema": (installer.schema_of(home) or 0) + 1}), encoding="utf-8")
+    assert installer.can_program_rollback(state) is False
+    assert installer.main(["can-program-rollback", "--home", str(home), "--state", str(state)]) == 5
+    assert installer.can_program_rollback(tmp_path / "missing.json") is False
+    rec["backups"][0].pop("schema_before")
+    state.write_text(json.dumps(rec), encoding="utf-8")
+    assert installer.can_program_rollback(state) is False
+
+
+def test_schema_of_follows_the_migrations_rule(tmp_path):
+    from jarves import migrations
+    home = tmp_path / "p"
+    home.mkdir()
+    assert installer.schema_of(home) == migrations.current(home) == 0
+    (home / "store.db").write_bytes(b"")
+    assert installer.schema_of(home) == migrations.current(home) == migrations.LEGACY
+    (home / "schema.json").write_text(json.dumps({"schema": 3}), encoding="utf-8")
+    assert installer.schema_of(home) == migrations.current(home) == 3
+    (home / "schema.json").write_text("{", encoding="utf-8")
+    assert installer.schema_of(home) is None

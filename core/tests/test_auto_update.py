@@ -438,3 +438,18 @@ def test_a_failed_health_rollback_says_how_to_go_back_by_hand(home, server, keys
     assert r.au.after_start() == "rollback_failed"
     n = r.notices[-1]
     assert "jarvis update --rollback" in n["text_en"] and "jarvis update --rollback" in n["text_he"]
+
+
+def test_a_schema_changed_health_failure_offers_the_full_rollback_and_is_not_retried(home, server, keys):
+    """Review P1-1 / P3-3: the data schema had changed, so setup did not swap the program (health_failed); the owner is
+    told how to undo it with approval, and auto-update never retries that version by itself."""
+    r = Rig(home, server, keys)
+    (home / "updates").mkdir(exist_ok=True)
+    (home / "updates" / "health.json").write_text(json.dumps(
+        {"status": "health_failed", "from": OLD, "to": NEW, "at": 1, "notified": False}), "utf-8")
+    assert r.au.after_start() == "health_failed"
+    n = r.notices[-1]
+    assert "jarvis update --rollback" in n["text_en"] and "jarvis update --rollback" in n["text_he"] and n["title_he"]
+    st = r.au.state()
+    assert st.get("gave_up") == NEW and st.get("last_error") == "UPDATE_HEALTH_HEALTH_FAILED"
+    assert "installing" not in st

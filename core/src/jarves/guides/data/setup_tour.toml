@@ -6,11 +6,11 @@ aliases = ["הגדרה וסיור", "סיור", "תראה לי מה אפשר", "
 links = ["guided_setup", "help", "release_signoff"]
 title_he = "הגדרה וסיור (אשף אחד לכל הנושאים)"
 title_en = "Setup and tour (one wizard for every topic)"
-what_he = "עמוד אחד בלוח הבקרה שעובר נושא אחרי נושא: מגדירים (או מדלגים), בודקים שזה עובד, ולומדים בכרטיס של 30 שניות מה אפשר להגיד ואיפה הכול נמצא."
-what_en = "One dashboard page that goes topic by topic: set it up (or skip it), test that it works, and learn in a 30-second card what to say and where everything lives."
+what_he = "עמוד אחד בלוח הבקרה שמראה כרטיס אחד בכל פעם: מה זה עושה, מה לנסות ומה אמור לקרות. עונים עובד / לא עבד / אחר כך, והנושא נשמר כהושלם ולא חוזר. גרסה חדשה שואלת רק על מה שהשתנה."
+what_en = "One dashboard page that shows one card at a time: what it does, what to try and what should happen. Answer Works / Did not work / Later; the topic is saved as done and does not come back. A new version asks only about what changed."
 say = [["תראה לי מה אפשר", "Show me around"], ["תגדיר איתי את המוזיקה", "Set up music with me"], ["תבדוק את הוואטסאפ", "Test WhatsApp"]]
-expect_he = "נפתח עמוד הגדרה וסיור בדפדפן. כל נושא: הגדרה, בדיקה, היכרות. אפשר לעצור ולהמשיך; ההתקדמות נשמרת."
-expect_en = "The Setup and tour page opens in the browser. Each topic has Set up, Test and Learn. You can stop and resume; progress is saved."
+expect_he = "נפתח עמוד הגדרה וסיור עם הכרטיס הבא תוך שתי שניות. נושאים שהושלמו מוסתרים ברשימה \"הושלמו\"; ההתקדמות נשמרת גם אחרי רענון."
+expect_en = "The Setup and tour page opens with the next card within two seconds. Finished topics are hidden in the \"Done\" list; progress is kept after a reload."
 cost_he = "חינם. הבדיקות מקומיות בלבד ולא קוראות לשירות בתשלום."
 cost_en = "Free. The checks are local only and never call a paid service."
 privacy_he = "מפתחות וטוקנים נשמרים רק במאגר הסודות. דיווח כשל כולל אבחון בלי תוכן שיחות או שמות."
@@ -25,18 +25,28 @@ en = "Open Setup and tour: the dashboard page #/setup, or jarvis tour in a termi
 action = "open:#/setup"
 
 [[steps]]
-he = "בכל נושא בוחרים להגדיר, לדלג או אחר כך. מפתחות מקלידים רק בשדה הסמוי."
-en = "In each topic choose Set up, Skip or Later. Type keys only into the hidden field."
+he = "קוראים את שלוש השורות בכרטיס ומנסים. עובד = Enter או 1, לא עבד = 2, אחר כך = 3. נושא לא חובה אפשר לדלג עליו ב\"לא בשבילי\"."
+en = "Read the card's three lines and try it. Works = Enter or 1, Did not work = 2, Later = 3. An optional topic can be skipped with \"Not for me\"."
 action = ""
 
 [[steps]]
-he = "לוחצים \"תעשה את זה בשבילי\" לבדיקה בטוחה, ואז עובד / לא עובד / לדלג. \"לא עובד\" פותח דיווח באג עם אבחון בלי תוכן."
-en = "Press \"Do it for me\" for a safe check, then Works / Does not work / Skip. \"Does not work\" opens a bug report with content-free diagnostics."
+he = "צריך להגדיר משהו (מתג, מפתח, חיבור) או בדיקה אוטומטית? פותחים \"עוד\" בכרטיס. מפתחות מקלידים רק בשדה הסמוי."
+en = "Need to set something up (a switch, a key, a connection) or an automatic check? Open \"More\" on the card. Type keys only into the hidden field."
 action = ""
 
 [[steps]]
-he = "בסוף: \"לכתוב את גיליון האישור\" (או jarvis tour --signoff) יוצר את docs/reviews/MANUAL_TEST_<גרסה>.md לשער הגרסה היציבה."
-en = "At the end: \"Write the sign-off sheet\" (or jarvis tour --signoff) creates docs/reviews/MANUAL_TEST_<version>.md for the stable release gate."
+he = "\"לא עבד\" מעביר את הנושא לרשימה \"נכשלו\" ושומר דיווח באג מקומי עם הערה קצרה (לא חובה). הנושא חוזר לבד כשהתקלה נסגרת, או בלחיצה על \"לבדוק שוב\". שליחה ל-GitHub רק מעמוד דיווחי התקלות, אחרי שראיתם ואישרתם."
+en = "\"Did not work\" moves the topic to the \"Failed\" list and saves a local bug entry with a short optional note. It comes back by itself when the bug is closed, or with \"Retest\". Sending it to GitHub happens only from the Bug reports page, after you review and confirm."
+action = ""
+
+[[steps]]
+he = "נושא שהושלם נמצא ברשימה \"הושלמו\". \"שוב\" מחזיר אותו. בכלים, \"בדיקה מהירה של הבסיס\" מחזיר את הנושאים הבסיסיים (jarvis tour --quick). בטרמינל: jarvis tour --left, ‏jarvis tour --done <נושא>, ‏jarvis tour --again <נושא>, ‏jarvis tour --reset --yes."
+en = "A finished topic waits in the \"Done\" list; \"Again\" brings it back. In Tools, \"Quick check of the basics\" brings back the basic topics (jarvis tour --quick). In a terminal: jarvis tour --left, jarvis tour --done <topic>, jarvis tour --again <topic>, jarvis tour --reset --yes."
+action = "command:jarvis tour --left"
+
+[[steps]]
+he = "בסוף: בכלים \"לכתוב את גיליון האישור\" (או jarvis tour --signoff) יוצר את docs/reviews/MANUAL_TEST_<גרסה>.md לשער הגרסה היציבה."
+en = "At the end: in Tools, \"Write the sign-off sheet\" (or jarvis tour --signoff) creates docs/reviews/MANUAL_TEST_<version>.md for the stable release gate."
 action = "command:jarvis tour --signoff"
 
 [[problems]]
@@ -46,7 +56,19 @@ fix_he = "לוח הבקרה כבוי. הפעילו: jarvis features on dashboard
 fix_en = "The dashboard is off. Turn it on: jarvis features on dashboard, then jarvis tour."
 
 [[problems]]
-he = "נושא נשאר \"הוגדר, צריך בדיקה\""
-en = "A topic stays \"set up, needs a test\""
-fix_he = "לחצו \"תעשה את זה בשבילי\" ואז \"עובד\" או \"לדלג\". רק תשובה שלכם סוגרת את הנושא."
-fix_en = "Press \"Do it for me\" and then Works or Skip. Only your answer closes the topic."
+he = "נושא שסיימתי חזר לרשימה"
+en = "A topic I finished came back"
+fix_he = "זה קורה כשהתקלה שדיווחתם נסגרה, או בגרסה חדשה שהנושא השתנה בה (כתוב בכרטיס: \"השתנה בגרסה הזו\" או \"בדיקה חוזרת\"). ענו פעם אחת והוא ייעלם שוב."
+fix_en = "This happens when the bug you reported was closed, or in a new version that changed the topic (the card says \"Changed in this version\" or \"Retest after a fix\"). Answer once and it goes away again."
+
+[[problems]]
+he = "התשובה לא נשמרה"
+en = "My answer was not saved"
+fix_he = "מופיע \"לא נשמר\" עם \"לנסות שוב\": JARVES כבוי או שלוח הבקרה נסגר. הפעילו את JARVES ולחצו \"לנסות שוב\", או בטרמינל jarvis tour --done <נושא>."
+fix_en = "\"Not saved\" with \"Retry\" appears: JARVES is stopped or the dashboard closed. Start JARVES and press Retry, or in a terminal: jarvis tour --done <topic>."
+
+[[problems]]
+he = "רוצים להתחיל מההתחלה"
+en = "I want to start over"
+fix_he = "בכלים: \"להתחיל מחדש\", או בטרמינל jarvis tour --reset --yes. מה שאומת על ידכם לכל יכולת נשמר."
+fix_en = "In Tools: \"Start over\", or in a terminal: jarvis tour --reset --yes. The per-feature \"verified by you\" record is kept."

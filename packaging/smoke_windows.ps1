@@ -170,6 +170,26 @@ if ($UpgradeFrom) {
     Stop-Process -Id $locker.Id -Force -ErrorAction SilentlyContinue
     $locker.WaitForExit(10000) | Out-Null
     Remove-Item -LiteralPath $lockFile -Force -ErrorAction SilentlyContinue
+    # #153 review P2-7: an undeletable leftover rollback folder (a file in it held open by a process outside the program
+    # folder) must stop the upgrade BEFORE anything moves. The old code deleted what it could, moved python, failed on
+    # face and then "restored" the stale rollback\face over the good face. Discriminating: {app}\face must be untouched.
+    $part = if (Test-Path (Join-Path $App "face")) { "face" } else { "python" }
+    $goodFiles = @(Get-ChildItem -LiteralPath (Join-Path $App $part) -Recurse -File).Count
+    New-Item -ItemType Directory -Force (Join-Path $App "rollback\$part") | Out-Null
+    $staleLocked = Join-Path $App "rollback\$part\stale-locked-from-older-run.txt"
+    $locker = Start-Process "pwsh" -WindowStyle Hidden -PassThru -ArgumentList @("-NoProfile", "-Command",
+        "`$f = [IO.File]::Open('$staleLocked', 'OpenOrCreate', 'ReadWrite', 'None'); Start-Sleep 900")
+    for ($i = 0; $i -lt 40 -and -not (Test-Path $staleLocked); $i++) { Start-Sleep -Milliseconds 250 }
+    Start-Sleep 1
+    Check ((Install "DEFAULT" @() $Installer "") -ne 0) "undeletable leftover rollback folder: the upgrade is refused (setup exit code is not 0)"
+    Check (@(Select-String -Path (Join-Path $Work "install-*.log") -Pattern "Old rollback folder could not be deleted or moved" -ErrorAction SilentlyContinue).Count -ge 1) "undeletable leftover rollback folder: the refusal is logged"
+    Check ((Test-Path (Join-Path $App "python\python.exe")) -and (Test-Path (Join-Path $App "jarvis.cmd")) -and (Version-Of) -eq $oldVer) "undeletable leftover rollback folder: the old version $oldVer is complete"
+    Check (@(Get-ChildItem -LiteralPath (Join-Path $App $part) -Recurse -File -ErrorAction SilentlyContinue).Count -eq $goodFiles -and -not (Test-Path (Join-Path $App "$part\stale-locked-from-older-run.txt"))) "undeletable leftover rollback folder: the working $part was not replaced by the stale one"
+    Check ((Jarvis @("--version")).text -match [regex]::Escape($oldVer)) "undeletable leftover rollback folder: the old version still runs"
+    Stop-Process -Id $locker.Id -Force -ErrorAction SilentlyContinue
+    $locker.WaitForExit(10000) | Out-Null
+    Remove-Item -LiteralPath (Join-Path $App "rollback") -Recurse -Force -ErrorAction SilentlyContinue
+
     # #164: a candidate whose Core never becomes ready (the update record names a version that never starts, so the
     # Core never marks it healthy) is undone by setup: the previous program is back, data untouched, the owner notice
     # is recorded, nothing is deleted. The data folder is restored afterwards so the later cases see the seeded data.
@@ -178,13 +198,52 @@ if ($UpgradeFrom) {
     $pendingFile = Join-Path $Home_ "updates\pending.json"
     New-Item -ItemType Directory -Force (Split-Path $pendingFile) | Out-Null
     (@{ state = "installing"; from = $oldVer; to = "9.9.9"; attempts = 0 } | ConvertTo-Json) | Set-Content $pendingFile
-    Check ((Install "DEFAULT" @("/RESTARTJARVES=1", "/HEALTHTIMEOUT=5") $Installer "") -eq 0) "candidate that never becomes ready: setup finishes (it undoes itself)"
-    Check ((Version-Of) -eq $oldVer -and (Test-Path (Join-Path $App "python\python.exe")) -and (Test-Path (Join-Path $App "jarvis.cmd"))) "health check failed: the previous program $oldVer is back"
-    Check (@(Get-ChildItem $App -Directory -Filter "failed-upgrade-health-*" -ErrorAction SilentlyContinue).Count -ge 1) "the candidate's program was kept aside, not deleted"
+    function Schema-Of() {
+        $m = Join-Path $Home_ "schema.json"
+        if (Test-Path $m) { return [int]((Get-Content $m -Raw | ConvertFrom-Json).schema) }
+        return -1
+    }
+    $schemaBefore = Schema-Of
+    # /HEALTHEXPECT=9.9.9: the health check judges only an update record for the version being installed (review P2-1);
+    # the smoke fakes a record for 9.9.9, so it tells setup that this is the version to expect
+    Check ((Install "DEFAULT" @("/RESTARTJARVES=1", "/HEALTHTIMEOUT=5", "/HEALTHEXPECT=9.9.9") $Installer "") -eq 0) "candidate that never becomes ready: setup finishes (it undoes itself)"
     $healthRec = Get-Content (Join-Path $Home_ "updates\health.json") -Raw -ErrorAction SilentlyContinue | ConvertFrom-Json
-    Check ($healthRec.status -eq "rolled_back" -and -not $healthRec.notified) "the automatic rollback is recorded for the one-time owner notice"
-    Check (@(Select-String -Path (Join-Path $Work "install-*.log") -Pattern "Health rollback done" -ErrorAction SilentlyContinue).Count -ge 1) "the health rollback is logged"
-    Check ((Jarvis @("--version")).text -match [regex]::Escape($oldVer)) "the previous version runs after the automatic rollback"
+    Check (@(Select-String -Path (Join-Path $Work "install-*.log") -Pattern "Health check result code: 3" -ErrorAction SilentlyContinue).Count -ge 1) "the health check ran with the previous python and reported 'not ready' (code 3)"
+    if ((Schema-Of) -ne $schemaBefore) {
+        # review P1-1: the candidate migrated the data, so the old program would not start on it: NOT swapped
+        Write-Host "       data schema $schemaBefore -> $(Schema-Of): the program-only rollback must be skipped"
+        Check ($healthRec.status -eq "health_failed" -and -not $healthRec.notified) "schema changed: health_failed is recorded (the owner is offered the approval-gated full rollback)"
+        Check ((Version-Of) -ne $oldVer -and -not @(Get-ChildItem $App -Directory -Filter "failed-upgrade-health-*" -ErrorAction SilentlyContinue).Count) "schema changed: the program was not swapped"
+    } else {
+        Check ((Version-Of) -eq $oldVer -and (Test-Path (Join-Path $App "python\python.exe")) -and (Test-Path (Join-Path $App "jarvis.cmd"))) "health check failed: the previous program $oldVer is back"
+        Check (@(Get-ChildItem $App -Directory -Filter "failed-upgrade-health-*" -ErrorAction SilentlyContinue).Count -ge 1) "the candidate's program was kept aside, not deleted"
+        Check ($healthRec.status -eq "rolled_back" -and -not $healthRec.notified) "the automatic rollback is recorded for the one-time owner notice"
+        Check (@(Select-String -Path (Join-Path $Work "install-*.log") -Pattern "Health rollback done" -ErrorAction SilentlyContinue).Count -ge 1) "the health rollback is logged"
+        Check ((Jarvis @("--version")).text -match [regex]::Escape($oldVer)) "the previous version runs after the automatic rollback"
+        # review P2-8: prove the OLD Core really starts on the migrated data: the process holding core.lock runs from
+        # {app}\python (the old program) and logged CORE_READY after it took the lock
+        $readyOld = $false
+        $pyDir = (Join-Path $App "python") + "\"
+        for ($i = 0; $i -lt 180 -and -not $readyOld; $i++) {
+            Start-Sleep -Milliseconds 500
+            try {
+                $fs = [IO.File]::Open((Join-Path $Home_ "core.lock"), "Open", "Read", "ReadWrite")
+                try { [void]$fs.Seek(1, "Begin"); $buf = New-Object byte[] 4096; $n = $fs.Read($buf, 0, 4096) } finally { $fs.Dispose() }
+                $holder = [Text.Encoding]::UTF8.GetString($buf, 0, $n).Trim() | ConvertFrom-Json
+                $proc = Get-Process -Id ([int]$holder.pid) -ErrorAction Stop
+                if ($proc.Path -and $proc.Path.StartsWith($pyDir, [StringComparison]::OrdinalIgnoreCase)) {
+                    $since = [double]$holder.started - 1
+                    foreach ($line in @(Get-Content (Join-Path $Home_ "logs\jarves.log") -ErrorAction Stop | Where-Object { $_ -match '"CORE_READY"' })) {
+                        if ($line -match '"ts":\s*"([^"]+)"') {
+                            $t = [DateTimeOffset]::Parse($Matches[1], [Globalization.CultureInfo]::InvariantCulture).ToUnixTimeMilliseconds() / 1000.0
+                            if ($t -ge $since) { $readyOld = $true }
+                        }
+                    }
+                }
+            } catch {}
+        }
+        Check $readyOld "after the automatic rollback the OLD Core starts and reaches CORE_READY (lock holder runs from {app}\python)"
+    }
     Jarvis @("stop") | Out-Null
     Get-Process | Where-Object { $_.Path -and $_.Path.StartsWith($App, [StringComparison]::OrdinalIgnoreCase) } | Stop-Process -Force -ErrorAction SilentlyContinue
     Start-Sleep 2
@@ -196,17 +255,24 @@ if ($UpgradeFrom) {
     $stale = Join-Path $App "rollback\python\stale-from-older-run.txt"
     "old" | Set-Content $stale
     # #153: a windowed process under the program folder (face / music player stand-in) is asked to close first
-    $windowed = Start-Process (Join-Path $App "python\pythonw.exe") -PassThru -ArgumentList @("-I", "-c",
-        "import tkinter as t; r = t.Tk(); r.title('JARVES smoke window'); r.mainloop()")
+    # ONE pre-quoted argument string: Start-Process joins an array WITHOUT quoting, so `-c "import ..."` arrived as
+    # `-c import` and python exited at once (the stand-ins never ran during setup, so nothing proved the stop step)
+    $windowed = Start-Process (Join-Path $App "python\pythonw.exe") -PassThru -ArgumentList (
+        '-I -c "import tkinter as t; r = t.Tk(); r.title(''JARVES smoke window''); r.mainloop()"')
     for ($i = 0; $i -lt 40 -and $windowed.MainWindowHandle -eq 0 -and -not $windowed.HasExited; $i++) { Start-Sleep -Milliseconds 250; $windowed.Refresh() }
     $hasWindow = (-not $windowed.HasExited) -and $windowed.MainWindowHandle -ne 0
     # issue #141: a process running from the old program folder (like `jarves dashboard`) must not block the upgrade
-    $stray = Start-Process (Join-Path $App "python\python.exe") -ArgumentList @("-I", "-c", "import time; time.sleep(900)") -WindowStyle Hidden -PassThru
-    Check (-not $stray.HasExited) "process running from the old program folder (dashboard stand-in) is alive before the upgrade"
+    $stray = Start-Process (Join-Path $App "python\python.exe") -ArgumentList '-I -c "import time; time.sleep(900)"' -WindowStyle Hidden -PassThru
+    Start-Sleep 2
+    Check (-not $stray.HasExited) "process running from the old program folder (dashboard stand-in) is alive before the upgrade (2 s after start)"
     # silent upgrade over it: no /TASKS (the installer keeps its defaults), same AppId, data folder untouched
     Check ((Install "DEFAULT" @("/KEEPDATA=0") $Installer "silent_upgrade_s") -eq 0) "silent upgrade $oldVer -> $Version"
     Check (Test-Path (Join-Path $App "rollback\python\python.exe")) "previous program retained for offline rollback"
     Check ($stray.WaitForExit(5000)) "the stray old-folder process was ended by the installer"
+    # evidence for the CI log: what the installer's stop step did (stray pid $($stray.Id), windowed pid $($windowed.Id))
+    $upLog = Get-ChildItem (Join-Path $Work "install-*.log") | Sort-Object LastWriteTime | Select-Object -Last 1
+    Write-Host "       stray pid $($stray.Id), windowed pid $($windowed.Id); setup log $($upLog.Name):"
+    Select-String -Path $upLog.FullName -Pattern "Stopping JARVES|Retaining|retain|Restart Manager|RestartManager|close" -ErrorAction SilentlyContinue | ForEach-Object { Write-Host "       $($_.Line)" }
     Check (@(Select-String -Path (Join-Path $Work "install-*.log") -Pattern "Stopping JARVES before the upgrade: hard-stopped: python \(pid $($stray.Id)\)" -ErrorAction SilentlyContinue).Count -ge 1) "the installer logged the process it had to hard-stop, by name"
     Check (-not (Test-Path (Join-Path $App "rollback\python\stale-from-older-run.txt"))) "leftover rollback folder from an older run was replaced"
     Check ($windowed.WaitForExit(5000)) "windowed process under the program folder ended"

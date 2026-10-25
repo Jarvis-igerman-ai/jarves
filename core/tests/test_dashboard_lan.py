@@ -160,6 +160,7 @@ def test_device_role_is_an_allowlist_not_a_denylist(lan):
     for feat in ("camera", "camera_when_away", "gmail_send"):
         assert post("/api/features/" + feat, {"enabled": True}) == 403
     assert post("/api/runtime/stop") == 403
+    assert post("/api/runtime/start") == 403                      # no remote start from a paired phone
     assert post("/api/privacy/delete-conversations", {"confirm": True}) == 403
     assert post("/api/privacy/mask-history", {"confirm": True}) == 403
     assert put("/api/settings", {"values": {"log.privacy": True}}) == 403

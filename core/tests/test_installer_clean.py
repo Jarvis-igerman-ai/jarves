@@ -247,10 +247,10 @@ def test_upgrade_stops_every_process_running_from_the_program_folder_and_retries
     """Issue #141: a running dashboard python.exe made RenameFile(python) fail with 'Cannot retain previous program'."""
     iss = (PKG / "windows" / "jarves.iss").read_text(encoding="utf-8-sig")
     prepare = iss.split("function PrepareToInstall", 1)[1].split("procedure DeinitializeSetup", 1)[0]
-    assert "StopProcessesUnderApp();" in prepare
-    assert prepare.index("StopProcessesUnderApp();") < prepare.index("ExtractTemporaryFile")
+    assert "StopProcessesUnderApp(WaitS);" in prepare
+    assert prepare.index("StopProcessesUnderApp(WaitS);") < prepare.index("ExtractTemporaryFile")
     script = iss.split("function StopScript", 1)[1].split("procedure StopProcessesUnderApp", 1)[0]
-    assert "$_.Path.StartsWith(" in script and "Stop-Process" in script and "CommandLine" not in script
+    assert "$q.StartsWith(" in script and "Stop-Process" in script and "CommandLine" not in script
     move = iss.split("function RetainProgramPart", 1)[1].split("procedure RestoreProgramPart", 1)[0]
     assert "for Attempt := 1 to" in move and "Sleep(" in move
     smoke = (PKG / "smoke_windows.ps1").read_text(encoding="utf-8-sig")
@@ -268,6 +268,65 @@ def test_upgrade_closes_gracefully_first_and_never_sweeps_a_drive():
     assert "if Length(Dir) <= 3 then exit;" in stop and "Log('Stopping JARVES before the upgrade: '" in stop
 
 
+def test_the_stop_script_is_immune_to_execution_policy_and_sweeps_only_the_program_parts():
+    """Review P2-3/P2-4: -File is refused under a Group Policy execution policy (nothing was stopped, every upgrade was
+    refused); -EncodedCommand is not subject to it. The sweep covers only {app}\\python, face, bridge and rollback,
+    never every program in a shared {app} folder."""
+    iss = (PKG / "windows" / "jarves.iss").read_text(encoding="utf-8-sig")
+    stop = iss.split("procedure StopProcessesUnderApp", 1)[1].split("function RetainProgramPart", 1)[0]
+    assert "-EncodedCommand " in stop and "-File" not in stop and ".ps1" not in stop
+    # CI passes /DIR as an 8.3 path (C:\Users\RUNNER~1\...): process paths are long, so {app} is made long first
+    assert "LongPath(ExpandConstant('{app}'))" in stop and "GetLongPathNameW@kernel32.dll stdcall" in iss
+    script = iss.split("function StopScript", 1)[1].split("procedure StopProcessesUnderApp", 1)[0]
+    assert '@("python", "face", "bridge", "rollback")' in script
+    assert "$_.Path.StartsWith($d" not in script            # never the whole program folder
+    # every value goes in as a PowerShell single-quoted literal (doubled quotes, typographic ones too)
+    quote = iss.split("function PSQuote", 1)[1].split("function Utf16LeByte", 1)[0]
+    for ch in ("'" * 4, "#$2018", "#$2019", "#$201A", "#$201B"):
+        assert ch in quote
+
+
+def _encoded_command(s: str) -> str:
+    """A Python port of the iss EncodedCommand / Utf16LeByte functions (same byte walk), checked against base64."""
+    alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/"
+
+    def byte(i: int) -> int:
+        c = ord(s[i // 2])
+        return c & 255 if i % 2 == 0 else (c >> 8) & 255
+    out, n, i = "", 2 * len(s), 0
+    while i < n:
+        b0, b1, b2 = byte(i), byte(i + 1) if i + 1 < n else 0, byte(i + 2) if i + 2 < n else 0
+        out += alphabet[b0 >> 2] + alphabet[((b0 & 3) << 4) | (b1 >> 4)]
+        out += alphabet[((b1 & 15) << 2) | (b2 >> 6)] if i + 1 < n else "="
+        out += alphabet[b2 & 63] if i + 2 < n else "="
+        i += 3
+    return out
+
+
+def test_the_encoded_command_algorithm_is_base64_of_utf16le():
+    import base64
+    iss = (PKG / "windows" / "jarves.iss").read_text(encoding="utf-8-sig")
+    enc = iss.split("function EncodedCommand", 1)[1].split("// A running python.exe", 1)[0]
+    assert "(B0 shr 2) + 1" in enc and "(((B0 and 3) shl 4) or (B1 shr 4)) + 1" in enc
+    assert "(((B1 and 15) shl 2) or (B2 shr 6)) + 1" in enc and "(B2 and 63) + 1" in enc
+    for text in ("", "a", "ab", "abc", "$Dir = 'C:\\Users\\\u05e9\u05dc\u05d5\u05dd\u2019x'", "x" * 1001):
+        assert _encoded_command(text) == base64.b64encode(text.encode("utf-16-le")).decode("ascii")
+
+
+def test_setup_waits_for_the_core_lock_and_never_runs_twice_at_once():
+    """Review P2-2/P2-5: `jarvis stop` only asks; setup waits up to 15 s for every Core lock (default and profiles)
+    before the sweep. A SetupMutex stops two setups racing on the rollback folder and the data backup/migration."""
+    iss = (PKG / "windows" / "jarves.iss").read_text(encoding="utf-8-sig")
+    assert "SetupMutex=JARVESSetupMutex_24F7B79A" in iss
+    prepare = iss.split("function PrepareToInstall", 1)[1].split("procedure DeinitializeSetup", 1)[0]
+    assert prepare.index('" stop') < prepare.index("WaitS := 15;") < prepare.index("StopProcessesUnderApp(WaitS);")
+    script = iss.split("function StopScript", 1)[1].split("procedure StopProcessesUnderApp", 1)[0]
+    assert "$s.Lock(0, 1)" in script and '"profiles"' in script and '"core.lock"' in script
+    assert script.index("$WaitS -gt 0") < script.index("Get-Process")
+    retain = iss.split("function RetainProgramPart", 1)[1].split("function AsideName", 1)[0]
+    assert "StopProcessesUnderApp(0);" in retain               # retries do not wait for the lock again
+
+
 def test_a_failed_retain_is_a_clean_refusal_that_keeps_the_old_version():
     """#153: no runtime error; setup ends with a plain EN+HE message, puts back what was moved and restarts the old
     Core when the updater asked for a restart. A leftover rollback folder never blocks the upgrade."""
@@ -276,23 +335,23 @@ def test_a_failed_retain_is_a_clean_refusal_that_keeps_the_old_version():
     prepare = iss.split("function PrepareToInstall", 1)[1].split("procedure DeinitializeSetup", 1)[0]
     assert "RaiseException" not in prepare and "CustomMessage('RetainFailed')" in prepare
     fail = prepare.split("if Result <> '' then begin", 1)[1]
-    assert fail.index("RestoreProgram();") < fail.index("SnapshotMade := False;")
+    assert fail.index("RestoreProgram();") < fail.index("SnapshotMade := PartsPending();")
     assert prepare.index("ClearOldRollback()") < prepare.index("RetainProgramPart('python')")
     clear = iss.split("function ClearOldRollback", 1)[1].split("function PrepareToInstall", 1)[0]
     assert "failed-upgrade-rollback-" in clear and 'Name: "{app}\\failed-upgrade-*"' in iss
     assert "if not ClearOldRollback() then begin" in prepare
     assert prepare.index("ClearOldRollback()") < prepare.index("SnapshotMade := True;")
     # a restore only puts back parts THIS run moved: a stale leftover must never replace (DelTree) the working program
-    restore = iss.split("procedure RestoreProgramPart", 1)[1].split("procedure RestoreProgram()", 1)[0]
-    assert restore.index("if Pos('|' + Name + '|', Retained) = 0 then exit;") < restore.index("DelTree(Target")
-    retain = iss.split("function RetainProgramPart", 1)[1].split("procedure RestoreProgramPart", 1)[0]
+    restore = iss.split("function RestoreProgramPart", 1)[1].split("function PendingMarker", 1)[0]
+    assert restore.index("if Pos('|' + Name + '|', Retained) = 0 then exit;") < restore.index("RenameFile(Source, Target)")
+    retain = iss.split("function RetainProgramPart", 1)[1].split("function AsideName", 1)[0]
     assert "Retained := Retained + Name + '|';" in retain
     deinit = iss.split("procedure DeinitializeSetup", 1)[1].split("procedure CurStepChanged", 1)[0]
     assert "RestoreProgram();" in deinit
     assert "CoreStopped and not SetupComplete and RestartRequested()" in deinit and "run --background" in deinit
     smoke = (PKG / "smoke_windows.ps1").read_text(encoding="utf-8-sig")
     for case in ("leftover rollback folder", "file locked by a process outside the program folder",
-                 "windowed process under the program folder"):
+                 "windowed process under the program folder", "undeletable leftover rollback folder"):
         assert case in smoke
 
 
@@ -332,14 +391,48 @@ def test_health_check_after_update_rolls_back_the_program_only():
     assert "ssDone" in done and "HealthCheckAfterUpdate();" in done
     check = iss.split("procedure HealthCheckAfterUpdate", 1)[1].split("procedure CurStepChanged", 1)[0]
     assert "RestartRequested()" in check and "/ROLLBACK=1" in check and "SnapshotMade" in check
-    assert "{param:HEALTHTIMEOUT|90}" in check and "if Code = 3 then HealthRollback();" in check
-    swap = iss.split("function SwapBackPart", 1)[1].split("procedure HealthRollback", 1)[0]
+    assert "{param:HEALTHTIMEOUT|180}" in check and "if (Code <> 0) and (Code <> 1) then HealthRollback();" in check
+    # review P2-1: only a record for the version this setup installs is judged
+    assert "--expect ' + ExpandConstant('{param:HEALTHEXPECT|{#AppVersion}}')" in check
+    # review P1-2: the check runs under the OLD python and the stdlib-only helper in {tmp}, never the new runtime
+    assert "HealthPython()" in check and "HelperScript()" in check and "{app}\\python\\python.exe'), '-I" not in check
+    hp = iss.split("function HealthPython", 1)[1].split("function HelperScript", 1)[0]
+    assert hp.index("{app}\\rollback\\python\\python.exe") < hp.index("{app}\\python\\python.exe")
+    assert "{tmp}\\installer_state.py" in iss.split("function HelperScript", 1)[1].split("procedure NoteHealth", 1)[0]
+    swap = iss.split("function SwapBackPart", 1)[1].split("function HealthPython", 1)[0]
     assert swap.index("Pos('|' + Name + '|', Retained) = 0") < swap.index("RenameFile(Target, Kept)")
     assert "DelTree" not in swap and "DeleteFile" not in swap          # nothing is deleted, the new part is kept aside
+    # review P0-1: StringChange returns an Integer (ISCC "Type mismatch"); StringChangeEx changes its var argument
+    assert "StringChangeEx(Retained, '|' + Name + '|', '|', True);" in swap and "StringChange(" not in swap
     roll = iss.split("procedure HealthRollback", 1)[1].split("procedure HealthCheckAfterUpdate", 1)[0]
-    assert roll.index("StopProcessesUnderApp();") < roll.index("SwapBackPart('python'")
-    assert roll.index("note-rollback") < roll.index("run --background")
-    assert "restore-data" not in roll and "DataDir()" in roll and "failed-upgrade-health-" in roll
+    # review P1-1: a program-only rollback only when no data schema changed; otherwise health_failed, no swap
+    assert roll.index("can-program-rollback") < roll.index("NoteHealth('health_failed');") < roll.index("SwapBackPart('python'")
+    # review P2-2: ask the new Core to stop and wait for core.lock before any hard stop
+    assert roll.index('" stop"') < roll.index("StopProcessesUnderApp(15);") < roll.index("SwapBackPart('python'")
+    assert roll.index("NoteHealth('rolled_back')") < roll.index("run --background")
+    assert "restore-data" not in roll and "DataDir()" in roll and "AsideName('health', 'program')" in roll
     assert 'Name: "{app}\\failed-upgrade-*"' in iss                    # the uninstaller removes the kept-aside copy
     smoke = (PKG / "smoke_windows.ps1").read_text(encoding="utf-8-sig")
-    assert "candidate that never becomes ready" in smoke and "/HEALTHTIMEOUT=5" in smoke
+    assert "candidate that never becomes ready" in smoke and "/HEALTHTIMEOUT=5" in smoke and "/HEALTHEXPECT=9.9.9" in smoke
+    assert "the OLD Core starts and reaches CORE_READY" in smoke and "health_failed" in smoke
+
+
+def test_a_restore_never_deletes_first_and_an_unfinished_restore_is_finished_before_the_backup():
+    """Review P2-6/P3-7: RestoreProgramPart DelTree'd the target before the rename; a failed rename then left a hole,
+    and the next run (no {app}\\python\\python.exe) skipped the verified data backup. Now the target is renamed
+    aside, parts not put back stay pending (restore-pending.txt) and the next setup puts them back first."""
+    iss = (PKG / "windows" / "jarves.iss").read_text(encoding="utf-8-sig")
+    restore = iss.split("function RestoreProgramPart", 1)[1].split("function PendingMarker", 1)[0]
+    assert "DelTree" not in restore and "DeleteFile" not in restore
+    assert restore.index("AsideName('restore', Name)") < restore.index("RenameFile(Source, Target)")
+    assert "RenameFile(Aside, Target)" in restore           # the moved-aside part goes back if the old one cannot
+    program = iss.split("procedure RestoreProgram()", 1)[1].split("function FirstPending", 1)[0]
+    assert "SaveStringToFile(PendingMarker(), Retained, False);" in program
+    recover = iss.split("function RecoverPendingRestore", 1)[1].split("function ClearOldRollback", 1)[0]
+    assert "LoadStringFromFile(PendingMarker(), Pending)" in recover
+    assert "rollback\\python\\python.exe" in recover and "Retained := Retained + 'python|';" in recover
+    prepare = iss.split("function PrepareToInstall", 1)[1].split("procedure DeinitializeSetup", 1)[0]
+    assert prepare.index("RecoverPendingRestore()") < prepare.index("OldPython := ")
+    assert prepare.index("RecoverPendingRestore()") < prepare.index("ClearOldRollback()")
+    assert "CustomMessage('ProgramIncomplete')" in prepare
+    assert "english.ProgramIncomplete=" in iss and "hebrew.ProgramIncomplete=" in iss

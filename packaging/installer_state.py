@@ -36,6 +36,17 @@ def profiles(home: Path) -> list[Path]:
     return homes
 
 
+def schema_of(profile: Path) -> int | None:
+    """The data schema of one profile folder, read with the standard library only (the same rule as
+    jarves.migrations.current: schema.json {"schema": n}; no marker = 1 with databases, 0 without). None = unreadable."""
+    try:
+        return int(json.loads((profile / "schema.json").read_text(encoding="utf-8"))["schema"])
+    except FileNotFoundError:
+        return 1 if any((profile / n).is_file() for n in ("store.db", "memory.db")) else 0
+    except (OSError, ValueError, KeyError, TypeError):
+        return None
+
+
 def prepare(home: Path, state: Path) -> dict:
     from jarves import backup, migrations
     home = safe_home(home)
@@ -49,7 +60,8 @@ def prepare(home: Path, state: Path) -> dict:
         checked = backup.verify(archive)
         if not checked["ok"] or any("unreadable" in item["reason"] for item in checked["manifest"].get("excluded", [])):
             raise ValueError("backup verification failed; data was not migrated")
-        records.append({"home": str(profile), "backup": str(archive), "schema_marker": (profile / migrations.MARKER).is_file()})
+        records.append({"home": str(profile), "backup": str(archive), "schema_marker": (profile / migrations.MARKER).is_file(),
+                        "schema_before": schema_of(profile)})
     record = {"format": 1, "home": str(home), "backups": records, "created": time.time(),
               "stage_timings_s": {"backup_and_verify": round(time.monotonic() - started, 3)}}
     state.write_text(json.dumps(record, indent=2), encoding="utf-8")
@@ -195,15 +207,30 @@ def _read_json(path: Path) -> dict:
         return {}
 
 
-def health(home: Path, timeout_s: float = 90.0, poll_s: float = 1.0, *, sleep=time.sleep, clock=time.monotonic) -> str:
+def _same_version(a, b) -> bool:
+    """4.0.1 == 4.0.1.0: trailing zero parts do not matter."""
+    def norm(v) -> str:
+        parts = str(v or "").strip().split(".")
+        while len(parts) > 1 and parts[-1] == "0":
+            parts.pop()
+        return ".".join(parts)
+    return bool(a) and bool(b) and norm(a) == norm(b)
+
+
+def health(home: Path, timeout_s: float = 180.0, poll_s: float = 1.0, *, expect: str = "", sleep=time.sleep,
+           clock=time.monotonic) -> str:
     """After an in-app update (setup started with /RESTARTJARVES=1): wait for the new Core to reach CORE_READY, which
     updates.mark_healthy records as pending.json state "ok". Returns "ok", "failed" (an update was installing and
-    never became ready in time) or "unknown" (no update record: a manual install, never rolled back by this check).
+    never became ready in time) or "unknown" (no update record, or a record for another version than the one this
+    setup installs (`expect`): a manual install or a stale record, never rolled back by this check).
     Standard library only: it runs under the old or the new python."""
     home = safe_home(home)
     path = home / "updates" / "pending.json"
-    if _read_json(path).get("state") not in ("installing", "ok"):
+    first = _read_json(path)
+    if first.get("state") not in ("installing", "ok"):
         return "unknown"
+    if expect and not _same_version(first.get("to"), expect):
+        return "unknown"                    # a stale or mismatched record: the healthy new version never marks it ok
     deadline = clock() + max(1.0, min(float(timeout_s), 600.0))
     while True:
         state = _read_json(path).get("state")
@@ -216,13 +243,37 @@ def health(home: Path, timeout_s: float = 90.0, poll_s: float = 1.0, *, sleep=ti
         sleep(poll_s)
 
 
-def note_rollback(home: Path, ok: bool) -> dict:
-    """Record, once, that the program was put back after a failed health check (the Core tells the owner at its next
-    start, updates.take_health_notice). Data is never touched here."""
+def can_program_rollback(state: Path) -> bool:
+    """True only when putting back the PREVIOUS PROGRAM alone is safe: every profile still has the schema it had before
+    this upgrade. After a schema migration the old Core refuses newer data (MIGRATION_DATA_NEWER), so the installer must
+    not swap the program; the owner gets the approval-gated `jarvis update --rollback`, which restores the data too.
+    A missing or unreadable record, or a fresh-data install, counts as "not safe"."""
+    try:
+        record = json.loads(Path(state).read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return False
+    if not isinstance(record, dict) or record.get("previous_data"):
+        return False
+    for item in record.get("backups") or []:
+        before = item.get("schema_before")
+        if before is None or schema_of(Path(item["home"])) != before:
+            return False
+    return True
+
+
+HEALTH_STATUSES = ("rolled_back", "rollback_failed", "health_failed")
+
+
+def note_rollback(home: Path, status: str) -> dict:
+    """Record, once, what the health check did (the Core tells the owner at its next start, updates.take_health_notice):
+    rolled_back = previous program back; rollback_failed = it could not be put back; health_failed = the data schema
+    changed, so the program was NOT swapped and the owner is offered the approval-gated data+program rollback.
+    Data is never touched here."""
+    if status not in HEALTH_STATUSES:
+        raise ValueError("unknown health status")
     home = safe_home(home)
     pend = _read_json(home / "updates" / "pending.json")
-    rec = {"status": "rolled_back" if ok else "rollback_failed", "from": pend.get("from"), "to": pend.get("to"),
-           "at": time.time(), "notified": False}
+    rec = {"status": status, "from": pend.get("from"), "to": pend.get("to"), "at": time.time(), "notified": False}
     target = home / "updates" / HEALTH_FILE
     target.parent.mkdir(parents=True, exist_ok=True)
     tmp = target.with_name(target.name + ".tmp")
@@ -233,20 +284,26 @@ def note_rollback(home: Path, ok: bool) -> dict:
 
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser()
-    ap.add_argument("action", choices=("prepare", "complete", "open-setup", "restore-shims", "restore-data", "health", "note-rollback"))
+    ap.add_argument("action", choices=("prepare", "complete", "open-setup", "restore-shims", "restore-data", "health",
+                                       "note-rollback", "can-program-rollback"))
     ap.add_argument("--home", type=Path, required=True)
     ap.add_argument("--state", type=Path)
     ap.add_argument("--fresh", action="store_true")
-    ap.add_argument("--timeout", type=float, default=90.0)
-    ap.add_argument("--ok", type=int, default=0)
+    ap.add_argument("--timeout", type=float, default=180.0)
+    ap.add_argument("--expect", default="")
+    ap.add_argument("--status", choices=HEALTH_STATUSES, default="rolled_back")
     ap.add_argument("--language", choices=("en", "he"), default="en")
     args = ap.parse_args(argv)
     try:
         if args.action == "health":
             # exit code: 0 = ready, 3 = never became ready (the installer puts the old program back), 1 = no update record
-            return {"ok": 0, "failed": 3}.get(health(args.home, args.timeout), 1)
+            # (the installer treats every other exit code, e.g. a python that crashes, as "failed" too)
+            return {"ok": 0, "failed": 3}.get(health(args.home, args.timeout, expect=args.expect), 1)
+        if args.action == "can-program-rollback":
+            # exit code: 0 = the program alone may be put back, 5 = the data schema changed (or unknown): do not swap
+            return 0 if can_program_rollback(args.state) else 5
         if args.action == "note-rollback":
-            note_rollback(args.home, bool(args.ok))
+            note_rollback(args.home, args.status)
             return 0
         if args.action == "open-setup":
             open_setup(args.home)
