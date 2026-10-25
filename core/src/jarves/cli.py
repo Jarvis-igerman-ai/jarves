@@ -1890,6 +1890,7 @@ _EXT_EARLY = (
     ("instagram_channel", ("instagram",), {"instagram": "cmd_instagram"}),   # V3 P1
     ("telegram_channel", ("telegram",), {"telegram": "cmd_telegram"}),       # V3 P1
     ("homeassistant", ("home",), {"home": "cmd_home"}),               # V3 P1: jarvis home start / status / ...
+    ("anydo", ("anydo",), {"anydo": "cmd_anydo"}),                    # #140: jarvis anydo start / status / off
     ("connect", ("connect",), {"connect": "cmd_connect"}),            # owner request 20 Oct: guided account setup
     ("approvals", ("approvals",), {"approvals": "cmd_approvals"}),    # V3: jarvis approvals list / approve / deny
 )

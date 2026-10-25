@@ -652,6 +652,7 @@ RULES: list[tuple[re.Pattern, object]] = [(re.compile(p, re.S), f) for p, f in [
                "לא בוצעה התחברות ולא שונתה הרשאה."),
     (r"^UNIT (\S+\.py)$", _s("בדיקות יחידה: {1}")),
     (r"^no Telegram bot token; tell the user: .*$", lambda m: "אין טוקן לבוט טלגרם; מריצים במחשב jarvis telegram start"),
+    (r"^Any\.do not connected; tell the user: .*$", lambda m: "Any.do לא מחובר; מריצים במחשב jarvis anydo start"),
     (r"^no Instagram token; tell the user: .*$", lambda m: "אין טוקן לאינסטגרם; מריצים במחשב jarvis instagram start"),
     (r"^Home Assistant not set up; tell the user: .*$", lambda m: "Home Assistant עוד לא הוגדר; מריצים במחשב jarvis home start"),
     (r"^needs (.+) \((\w+)\) on$", lambda m: f"צריך להפעיל קודם את \"{_feature_he(m.group(2), m.group(1))}\""),
