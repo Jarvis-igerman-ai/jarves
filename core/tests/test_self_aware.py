@@ -31,6 +31,19 @@ def test_whatsnew(monkeypatch, capsys):
     assert not self_aware.whatsnew_lines("1.2.3")[0]
 
 
+def test_whatsnew_users_only_short_and_capped(monkeypatch):
+    items = "".join(f"- Fixed: bug {n}. Second sentence.\n" for n in range(10))
+    notes = ("## 9.9.9\n\n- Added: infra change, developer workflow, nothing changes for users.\n- Changed: tweak\n"
+             + items + "- Added: a new thing " + "word " * 40 + "\n")
+    monkeypatch.setattr(release_notes, "find_changelog", lambda: notes)
+    ok, lines = self_aware.whatsnew_lines("9.9.9")
+    assert ok and len(lines) == 1 + 8 + 1 and lines[1].startswith("- Added: a new thing")
+    assert not any("developer" in x for x in lines) and "Second sentence" not in "".join(lines)
+    assert all(len(x) < 140 for x in lines) and lines[-1] == "The rest: jarvis release-notes"
+    ok, he = self_aware.whatsnew_lines("9.9.9", he=True)
+    assert he[0] == "גרסה 9.9.9" and he[1].startswith("- נוסף") and "release-notes" in he[-1]
+
+
 def test_about_cli(tmp_path, monkeypatch, capsys):
     monkeypatch.setenv("JARVES_HOME", str(tmp_path))
     assert cli.main(["about"]) == 0

@@ -1,0 +1,1 @@
+- Changed: `jarvis whatsnew` is for users now: developer-workflow entries are hidden, at most 8 one-sentence lines (newest and most useful first), and a last line points to `jarvis release-notes` for the rest; `--he` gives Hebrew labels (#341).

@@ -52,18 +52,38 @@ def about_text(facts: dict) -> list[str]:
     return lines
 
 
-def whatsnew_lines(version: str | None = None, limit: int = MAX_LINES) -> tuple[bool, list[str]]:
-    """(found, lines): the items of one version, 'Kind: text'. Not found -> (False, [reason])."""
+WHATSNEW_LINES = 8
+_DEV = re.compile(r"developer[- ]workflow|nothing changes for users", re.I)
+_KIND_RANK = {"Security": 0, "Added": 1, "Fixed": 2, "Changed": 3}
+
+
+def whatsnew_lines(version: str | None = None, limit: int = WHATSNEW_LINES, he: bool = False) -> tuple[bool, list[str]]:
+    """(found, lines): the user-facing items of one version, 'Kind: one short sentence', at most `limit`
+    (most useful kinds first, file order within a kind), then a pointer to the full notes. Developer-workflow
+    entries are hidden. Not found -> (False, [reason])."""
     secs = release_notes.sections()
     if not secs:
-        return False, ["No release notes found in this install."]
+        return False, ["לא נמצאו הערות גרסה בהתקנה הזאת." if he else "No release notes found in this install."]
     sec = release_notes.pick(secs, version or release_notes.stable_of(__version__))
     if sec is None:
-        return False, [f"No release notes for {version}."]
-    head = f"Version {sec['version']}" + (f" ({sec['status']})" if sec["status"] else "")
-    items = [f"- {i['kind']}{' (' + i['scope'] + ')' if i['scope'] else ''}: {_short(i['text'])}" for i in sec["items"][:limit]]
-    more = len(sec["items"]) - limit
-    return True, [head, *items] + ([f"... and {more} more: jarvis release-notes --open"] if more > 0 else [])
+        return False, [f"אין הערות גרסה ל-{version}." if he else f"No release notes for {version}."]
+    head = (f"גרסה {sec['version']}" if he else f"Version {sec['version']}") + (f" ({sec['status']})" if sec["status"] else "")
+    users = [i for i in sec["items"] if not _DEV.search(i["text"]) and not _DEV.search(i["scope"])]
+    users.sort(key=lambda i: _KIND_RANK.get(i["kind"], 9))
+    kinds = release_notes.KIND_HE if he else {}
+    items = [f"- {kinds.get(i['kind'], i['kind'])}{' (' + i['scope'] + ')' if i['scope'] else ''}: {_sentence(i['text'])}"
+             for i in users[:limit]]
+    tail = "לשאר: jarvis release-notes" if he else "The rest: jarvis release-notes"
+    return True, [head, *items, tail]
+
+
+def _sentence(t: str, n: int = 110) -> str:
+    """The first sentence, cut at a word boundary to at most n characters."""
+    t = re.sub(r"\s+", " ", t).strip()
+    m = re.search(r"[.!?](?:\s|$)", t)
+    if m:
+        t = t[:m.start()]
+    return t if len(t) <= n else t[:n - 1].rsplit(" ", 1)[0] + "…"
 
 
 def _short(t: str, n: int = 160) -> str:
@@ -168,7 +188,7 @@ def cmd_about(a, cfg, home, *, out=print) -> int:
 
 
 def cmd_whatsnew(a, cfg, home, *, out=print) -> int:
-    ok, lines = whatsnew_lines(getattr(a, "version", None))
+    ok, lines = whatsnew_lines(getattr(a, "version", None), he=bool(getattr(a, "he", False)))
     for line in lines:
         out(line)
     return 0 if ok else 1
@@ -185,6 +205,7 @@ def add_cli(sub) -> None:
     sub.add_parser("about", help="what this JARVES is: version, channel, build, install and data folders, what is on/off")
     w = sub.add_parser("whatsnew", help="what changed in this version (release notes; --version V for another)")
     w.add_argument("--version", default=None)
+    w.add_argument("--he", action="store_true", help="Hebrew labels")
     sub.add_parser("roadmap", help="short milestone status from ROADMAP.md")
     t = sub.add_parser("ticket", help="improvement ticket: jarvis ticket \"idea\" (saved locally, nothing sent) | list | "
                                       "send ID (shows the exact text, asks first)")
