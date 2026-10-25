@@ -111,6 +111,12 @@ def parse_when(text: str | None, now: float, *, end: bool = False) -> float | No
     t = (text or "").strip().lower()
     if not t:
         return None
+    words = {"today": 0, "היום": 0, "now": 0, "yesterday": 1, "אתמול": 1}
+    if t in words:
+        d = datetime.fromtimestamp(now).replace(hour=0, minute=0, second=0, microsecond=0) - timedelta(days=words[t])
+        if end:
+            d += timedelta(days=1)
+        return d.timestamp()
     m = re.fullmatch(r"(\d{1,4})\s*([dwmy])", t)
     if m:
         n, u = int(m.group(1)), m.group(2)
