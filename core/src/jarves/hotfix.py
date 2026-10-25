@@ -521,6 +521,7 @@ hebrew.TEXT.update({
     EVIDENCE: "בדיקות יחידה test_hotfix.py (עץ התקנה מזויף וקרסים מזויפים); הבדיקות אף פעם לא רצות על התקנה אמיתית",
     BLOCKER: "עוד לא תועד תיקון מהיר אמיתי בגרסה מותקנת (הרצה במחשב הבעלים ממתינה)",
     "rewrites the installed program files": "משכתב את קבצי התוכנה המותקנים",
+    "the Pi runs from a git checkout, not an installed build": "ה-Pi רץ מ-git checkout ולא מגרסה מותקנת",
 })
 
 feat.register(FEATURE, "תיקון מהיר", "Hot-patch", True, risk="high", about=ABOUT,
