@@ -1163,7 +1163,22 @@ def dashboard_routes(register) -> None:
                                  "url": f"{a.scheme}://{a.tailnet_host()}:{a.port}/m/" if a.tailnet_host() else None,
                                  "tls_source": a.tls_source},
                      "reachable_from_phone": bool(a.enabled and a.host), **a.settings(), "devices": a.devices(),
-                     "how": "jarvis features on mobile_access, then jarvis dashboard --mobile"}
+                     "can_enable_here": getattr(ctx, "dashboard", None) is not None,
+                     "how": "jarvis features on mobile_access, then jarvis dashboard --mobile --tls-selfsigned"}
+
+    def enable(ctx, _m, body):
+        """The ONE switch on the Phone page (#357): high risk, so the page asks first and the call needs confirm=true."""
+        if (body or {}).get("confirm") is not True:
+            return 400, {"error": "phone access is a high-risk switch: the request must say {\"confirm\": true}", "code": "CONFIRM"}
+        dash = getattr(ctx, "dashboard", None)
+        nxt = "Close this dashboard, then run: jarvis features on mobile_access  and  jarvis dashboard --mobile --tls-selfsigned"
+        if dash is None:
+            return 409, {"error": "this dashboard cannot turn phone access on by itself", "next": nxt, "code": "NEEDS_RESTART"}
+        from .features import _ctx_features
+        try:
+            return 200, dash.enable_phone(_ctx_features(ctx))
+        except (OSError, ImportError) as e:
+            return 409, {"error": str(e) or "phone access could not start", "next": nxt, "code": "NEEDS_RESTART"}
 
     def code(ctx, _m, _b):
         a = mob(ctx)
@@ -1210,6 +1225,7 @@ def dashboard_routes(register) -> None:
         return 200, {"entries": mob(ctx).audit_tail()}
     register("GET", r"/api/mobile", info)
     register("POST", r"/api/mobile/code", code)
+    register("POST", r"/api/mobile/enable", enable)
     register("POST", r"/api/mobile/settings", setting)
     register("POST", r"/api/mobile/revoke-all", revoke_all)
     register("POST", r"/api/mobile/devices/([0-9a-f]{12})/revoke", revoke)

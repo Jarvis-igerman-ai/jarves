@@ -48,7 +48,7 @@
   }
   async function pagePhone() {
     const d = await api("/api/mobile"), a = await api("/api/mobile/audit");
-    const box = el("div", { class: "m4-code", "aria-live": "polite" });
+    const box = el("div", { class: "m4-code", "aria-live": "polite", id: "phoneCodeBox" });
     const status = el("div", { class: "card" }, el("h2", {}, tx("גישה מהטלפון", "Phone access")),
       d.enabled ? [
         el("div", {}, tx("פעיל: טלפונים ברשת הביתית יכולים להצטמד. ", "On: phones on your home network can pair. "),
@@ -63,7 +63,25 @@
               el("div", { class: "m4-big" }, c.code.replace(/(\d{4})(\d{4})/, "$1 $2")), qrSvg(c.qr), el("div", { class: "muted small" }, c.url.split("#")[0]));
           } catch (e) { box.textContent = e.message; }
         } }, tx("צימוד טלפון", "Pair a phone"))), box]
-        : el("div", {}, tx("כבוי: המחשב הזה בלבד. להפעלה: ", "Off: this computer only. To use your phone: "), el("code", {}, d.how)));
+        : [el("div", {}, tx("כבוי: המחשב הזה בלבד.", "Off: this computer only.")),
+          el("div", { class: "warn small", id: "phoneEnableWarning" }, tx("אזהרה (סיכון גבוה): ההפעלה פותחת את JARVES לטלפונים ברשת הביתית שלכם, מוגן בקוד צימוד וב-TLS עם תעודה עצמית. לא נגיש מהאינטרנט. אפשר לכבות בכל רגע.",
+            "Warning (high risk): this opens JARVES to phones on your home network, protected by a pairing code and TLS with a self-signed certificate. Never reachable from the internet. You can turn it off at any time.")),
+          el("div", { class: "row", style: "margin-top:10px" }, el("button", { type: "button", class: "switch", id: "phoneEnableSwitch", "aria-pressed": "false", onclick: async (ev) => {
+            if (!confirm(tx("להפעיל גישה מהטלפון? טלפון עם קוד הצימוד יוכל לדבר עם JARVES מהרשת הביתית.", "Turn on phone access? A phone with the pairing code will be able to talk to JARVES from your home network."))) return;
+            ev.target.disabled = true;
+            try {
+              await api("/api/mobile/enable", { method: "POST", body: JSON.stringify({ confirm: true }) });
+              const c = await api("/api/mobile/code", { method: "POST", body: "{}" });
+              await route(true);
+              const b2 = document.getElementById("phoneCodeBox");
+              if (b2) b2.replaceChildren(el("div", { class: "muted small" }, tx("קוד צימוד (5 דקות, שימוש אחד):", "Pairing code (5 minutes, one use):")),
+                el("div", { class: "m4-big" }, c.code.replace(/(\d{4})(\d{4})/, "$1 $2")), qrSvg(c.qr), el("div", { class: "muted small" }, c.url.split("#")[0]));
+            } catch (e) {
+              ev.target.disabled = false;
+              box.replaceChildren(el("div", { class: "warn", id: "phoneEnableError" }, e.message),
+                el("div", { class: "muted small", id: "phoneEnableNext" }, tx("הצעד הבא: ", "The one next step: "), el("code", {}, e.next || d.how)));
+            }
+          } }, tx("הפעלת גישה מהטלפון", "Turn on phone access"))), box]);
     const sw = el("button", { type: "button", class: "switch", id: "phoneApprovalsSwitch", "aria-pressed": d.phone_approvals ? "true" : "false", onclick: async () => {
       if (!d.phone_approvals && !confirm(tx("אזהרה: טלפון אבוד או גנוב עם גישה מצומדת יוכל לאשר פעולות בכל רמת סיכון, חוץ מבקשות שדורשות קוד מוקלד (אלה נשארות במחשב בלבד). אפשר לנתק את כל הטלפונים בלחיצה אחת. להפעיל?",
         "Warning: a lost or stolen phone that is still paired could approve actions of ANY risk level, except requests that need a typed code (those stay on the computer only). You can revoke every phone with one click. Turn it on?"))) return;

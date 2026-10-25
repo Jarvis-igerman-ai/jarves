@@ -24,7 +24,7 @@ async function api(path, opts = {}) {
     headers: { "Content-Type": "application/json", ...(opts.method && opts.method !== "GET"
       ? { "X-Jarves": "1", "X-CSRF-Token": window.JARVES_CSRF || "" } : {}) } });   // CSRF: paired phones (m4.js)
   const data = await r.json().catch(() => ({ error: r.statusText }));
-  if (!r.ok) throw new Error(data.error || r.statusText);
+  if (!r.ok) { const err = new Error(data.error || r.statusText); err.next = data.next; throw err; }
   return data;
 }
 const usd = (v, d = 3) => v === null || v === undefined ? "—" : "$" + Number(v).toFixed(v >= 1 ? 2 : d);

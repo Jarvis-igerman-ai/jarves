@@ -1,0 +1,9 @@
+{
+ "dict": {
+  "Off: this computer only.": "כבוי: המחשב הזה בלבד.",
+  "The one next step: ": "הצעד הבא: ",
+  "Turn on phone access": "הפעלת גישה מהטלפון",
+  "Turn on phone access? A phone with the pairing code will be able to talk to JARVES from your home network.": "להפעיל גישה מהטלפון? טלפון עם קוד הצימוד יוכל לדבר עם JARVES מהרשת הביתית.",
+  "Warning (high risk): this opens JARVES to phones on your home network, protected by a pairing code and TLS with a self-signed certificate. Never reachable from the internet. You can turn it off at any time.": "אזהרה (סיכון גבוה): ההפעלה פותחת את JARVES לטלפונים ברשת הביתית שלכם, מוגן בקוד צימוד וב-TLS עם תעודה עצמית. לא נגיש מהאינטרנט. אפשר לכבות בכל רגע."
+ }
+}
