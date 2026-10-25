@@ -31,9 +31,13 @@ BACKGROUND_ROUTES = ("default", "")
 TEXT = {
     "en": {"ask": "That failed. Do you want me to diagnose it?\nYes = quick self-check (read-only). No = skip.",
            "title": "Diagnose the failure?", "why": "A self-check reads local state only; nothing is sent anywhere.",
+           "why_ai": "A self-check reads local state only. Only a redacted summary (codes, no conversation text) goes to the AI "
+                     "to word the answer; switch it off in Features.",
            "head": "Self-check", "none": "I could not run the self-check."},
     "he": {"ask": "זה נכשל. רוצה שאבדוק?\nכן = בדיקה עצמית מהירה (קריאה בלבד). לא = לדלג.",
            "title": "לבדוק את הכשל?", "why": "הבדיקה העצמית קוראת מצב מקומי בלבד; שום דבר לא נשלח החוצה.",
+           "why_ai": "הבדיקה העצמית קוראת מצב מקומי בלבד. רק סיכום מוסתר (קודים, בלי טקסט שיחה) נשלח ל-AI כדי לנסח את "
+                     "התשובה; אפשר לכבות במסך היכולות.",
            "head": "בדיקה עצמית", "none": "לא הצלחתי להריץ את הבדיקה העצמית."},
 }
 
@@ -121,7 +125,9 @@ class FailureGate:
             s = TEXT[lang]
             logs.info("diag", "DIAG_ASKED", "asked the owner whether to diagnose a failure", area=area, error_code=code,
                       route=route)
-            yes = await self._ask(s["ask"], title=s["title"], why=s["why"], risk="low", kind="other",
+            # #374: only claim "nothing is sent" when the AI wording is off; with it on, say what goes to the model
+            why = s["why_ai"] if self.ask_model is not None and self.wording_enabled() else s["why"]
+            yes = await self._ask(s["ask"], title=s["title"], why=why, risk="low", kind="other",
                                   details={"area": area, "code": code}, timeout=self.timeout_s, source="diag",
                                   voice=(route == "voice"))
             if not yes:

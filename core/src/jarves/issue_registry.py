@@ -60,7 +60,7 @@ STATUSES = ("new", "acknowledged", "fixed", "ignored")
 OPEN = ("new", "acknowledged")
 SEVERITIES = ("P1", "P2", "P3")
 MAX_RECORDS = 300
-EXPIRE_DAYS = 14.0                               # an open issue not seen again for this long expires (history kept)
+EXPIRE_DAYS = 14.0                               # an open P3 issue not seen again for this long expires (P1/P2 never, #372)
 QUIET_DAYS = 3.0                                 # an update this old with no new occurrence closes an open issue
 TOOL_FAIL_THRESHOLD = 5                          # failures of one tool + code ...
 TOOL_FAIL_WINDOW_S = 3600.0                      # ... within this window become an issue
@@ -436,7 +436,9 @@ class Registry:
                         closed.append(r)
                         changed = True
             for r in d["issues"].values():              # auto-expire: not seen again for EXPIRE_DAYS
-                if r["status"] in OPEN and now - r["last_seen"] >= EXPIRE_DAYS * 86400:
+                # calendar days also pass while the PC is off, so a quiet P1/P2 never expires by the clock (#372): it
+                # closes only by a fix / new version (above) or by the owner; P3 noise still expires
+                if r["status"] in OPEN and r.get("severity") not in ("P1", "P2") and now - r["last_seen"] >= EXPIRE_DAYS * 86400:
                     r["status"], r["closed_reason"], r["fixed_notice"] = "ignored", "expired", True
                     closed.append(r)
                     changed = True
