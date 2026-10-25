@@ -102,7 +102,7 @@ def test_each_planted_fault_is_reported_on_its_item_only(home, tmp_path, fault):
     others = {k: v for k, v in st.items() if k != fault and v not in ("green", "skipped")}
     assert not others, (fault, others)
     assert res["fatal"] == (fault == "state_dir")
-    assert res["ms"] <= pf.BUDGET_S * 1000
+    assert res["ms"] <= pf.BUDGET_S * 1000 * 4         # the strict budget is test_healthy_start_is_green_and_fast; here only "no hang" (#283: 1587 ms on a loaded runner)
     item = next(i for i in res["items"] if i["id"] == fault)
     assert item["detail"] and (item["fix"] or expect == "amber")
     if fault == "secrets":

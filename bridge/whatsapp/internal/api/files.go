@@ -12,7 +12,7 @@ import (
 	"regexp"
 	"strings"
 
-	"github.com/igalgerman/jarves/bridge/whatsapp/internal/securestore"
+	"github.com/Jarvis-igerman-ai/jarves/bridge/whatsapp/internal/securestore"
 )
 
 // File names inside <state_dir>/whatsapp_bridge (PROTOCOL.md section 1).

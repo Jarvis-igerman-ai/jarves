@@ -30,7 +30,8 @@ feat.register(FEATURE, "סטטוס פיתוח (קריאה בלבד)", "Developme
                     "it only reads, and any change on GitHub asks on the screen first",
               targets=calm.targets('test_v5_devstatus.py'))
 
-DEFAULT_REPO = "Jarvis-igerman-ai/jarves"
+DEFAULT_REPO = "Jarvis-igerman-ai/jarves"      # the repo moved from igalgerman/jarves; override: setting dev.repo or env JARVES_DEV_REPO
+REPO_ENV = "JARVES_DEV_REPO"
 REPO_RE = re.compile(r"^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$")
 TTL_S = 120.0
 STUCK_S = 1800.0                 # an agent RUNNING without progress this long is stuck
@@ -38,6 +39,15 @@ IDLE_LONG_S = 7200.0             # an agent waiting for a prompt this long is id
 FINISHED_S = 86400.0             # a stopped agent counts as "finished" for a day
 MAX_PRS, MAX_ISSUES, MAX_CHECKED = 30, 30, 12
 FAIL = ("failure", "timed_out", "action_required", "startup_failure")
+CANCELLED = ("cancelled", "stale")   # seen on real data: a superseded/cancelled run is NOT a green run
+# routes this layer does not offer (shown, never silently missing): see issues #161 / #190 and the V6 backlog
+UNSUPPORTED = [{"route": "live_push", "label": "unsupported", "issue": 161,
+                "text_en": "Live push of status changes is not supported yet: the status is read when you ask.",
+                "text_he": "דחיפה חיה של שינויי סטטוס עדיין לא נתמכת: הסטטוס נקרא כשמבקשים."},
+               {"route": "attach_session", "label": "unsupported", "issue": 161,
+                "text_en": "Attaching to a running agent session from here is not supported yet.",
+                "text_he": "התחברות לסשן של סוכן רץ מכאן עדיין לא נתמכת."}]
+MAX_CHECK_PAGES = 3
 OK = ("success", "neutral", "skipped")
 Fetch = Callable[[str], "tuple[int, object, dict]"]          # path -> (http status, parsed json, lower-case headers)
 Runner = Callable[[list], "tuple[int, str]"]                 # gh argv (without "gh") -> (returncode, output)
@@ -57,7 +67,7 @@ def default_fetch(path: str) -> tuple[int, object, dict]:
     if tok:
         import httpx
         try:
-            r = httpx.get("https://api.github.com" + path, timeout=20, headers={
+            r = httpx.get("https://api.github.com" + path, timeout=20, follow_redirects=True, headers={   # a moved repo answers 301
                 "Accept": "application/vnd.github+json", "User-Agent": "jarves-dev-status",
                 "Authorization": f"Bearer {tok}"})
             body = r.json() if r.content else {}
@@ -115,6 +125,8 @@ class GitHub:
             logs.warn("devstatus", "DEV_RATE_LIMITED", "GitHub rate limit reached, serving the cache", status=code)
             if code in (403, 429):
                 return (hit[1], "rate_limited") if hit else (None, "rate_limited")
+        if code in (301, 308):                      # a moved repository that the client did not follow: say so
+            return (hit[1], "stale") if hit else (None, "moved")
         if code != 200:
             return (hit[1], "stale") if hit else (None, "unavailable")
         self.cache[path] = [now, body]
@@ -146,11 +158,18 @@ def _issues(gh: GitHub, repo: str, notes: list) -> list[dict]:
 
 
 def _checks(gh: GitHub, repo: str, sha: str, notes: list) -> list[dict]:
-    body, note = gh.get(f"/repos/{repo}/commits/{sha}/check-runs?per_page=50")
-    if note:
-        notes.append(note)
+    runs: list = []
+    for page in range(1, MAX_CHECK_PAGES + 1):      # real PRs carry 50+ checks: one page of 50 hid failures on the next
+        body, note = gh.get(f"/repos/{repo}/commits/{sha}/check-runs?per_page=100" + (f"&page={page}" if page > 1 else ""))
+        if note:
+            notes.append(note)
+        got = (body or {}).get("check_runs", []) if isinstance(body, dict) else []
+        runs += got
+        total = int((body or {}).get("total_count") or 0) if isinstance(body, dict) else 0
+        if not got or len(runs) >= total:
+            break
     out = []
-    for c in (body or {}).get("check_runs", []) if isinstance(body, dict) else []:
+    for c in runs:
         m = re.search(r"/actions/runs/(\d+)", str(c.get("details_url") or ""))
         out.append({"name": _title(c.get("name"))[:60], "status": c.get("status") or "", "conclusion": c.get("conclusion") or "",
                     "run_id": int(m.group(1)) if m else 0})
@@ -210,6 +229,7 @@ def _sug(kind: str, en: str, he: str) -> dict:
 def classify_pr(repo: str, pr: dict, checks: list[dict], agents: list[dict]) -> dict:
     n = pr["number"]
     failed = [c for c in checks if c["conclusion"] in FAIL]
+    cancelled = [c for c in checks if c["conclusion"] in CANCELLED]
     running = [c for c in checks if c["status"] != "completed"]
     names = ", ".join(sorted({c["name"] for c in failed}))
     props: list[dict] = []
@@ -228,6 +248,13 @@ def classify_pr(repo: str, pr: dict, checks: list[dict], agents: list[dict]) -> 
     elif running:
         state, blocker = "ci_running", "waiting for CI"
         sug = _sug("wait", "CI is still running: wait.", "ה-CI עדיין רץ: להמתין.")
+    elif cancelled:
+        rid = next((c["run_id"] for c in cancelled if c["run_id"]), 0)
+        state, blocker = "ci_cancelled", f"{len(cancelled)} checks were cancelled"
+        sug = _sug("rerun", "CI was cancelled (not green): rerun it.", "ה-CI בוטל (לא ירוק): להריץ אותו שוב.")
+        if rid:
+            props.append(_prop(f"pr{n}-rerun", "rerun", ["run", "rerun", str(rid), "--failed", "-R", repo],
+                               "Rerun the cancelled CI run", "להריץ שוב את ריצת ה-CI שבוטלה"))
     elif not checks:
         state, blocker = "no_ci", "no CI result yet"
         sug = _sug("review", "No CI result yet: review the change.", "אין עדיין תוצאת CI: לבדוק את השינוי.")
@@ -288,20 +315,20 @@ def build(home: Path, repo: str = DEFAULT_REPO, *, fetch: Fetch | None = None, n
     count = lambda k, v: sum(1 for x in items if x["type"] == "pr" and x[k] == v)       # noqa: E731
     summary = {"prs": sum(1 for x in items if x["type"] == "pr"), "issues": sum(1 for x in items if x["type"] == "issue"),
                "ci_failed": count("state", "ci_failed"), "green": count("state", "green"),
-               "ci_running": count("state", "ci_running"),
+               "ci_running": count("state", "ci_running"), "ci_cancelled": count("state", "ci_cancelled"),
                "agents_working": sum(1 for a in agents if a["health"] == "working"),
                "agents_stuck": sum(1 for a in agents if a["health"] in ("stuck", "idle_long")),
                "agents_blocked": sum(1 for a in agents if a["health"] == "blocked"),
                "agents_finished": sum(1 for a in agents if a["health"] == "finished")}
     logs.info("devstatus", "DEV_STATUS_BUILT", "development status built", n=len(items), count=len(agents))
     return {"repo": repo, "at": now, "items": items, "agents": agents, "summary": summary,
-            "notes": sorted(set(notes)), "read_only": True}
+            "notes": sorted(set(notes)), "read_only": True, "unsupported": UNSUPPORTED}
 
 
 # ---------------------------------------------------------------------- the one-sentence answer and the digest
 def sentence(st: dict, lang: str = "en") -> str:
     s, notes = st["summary"], st["notes"]
-    if "unavailable" in notes and not st["items"]:
+    if ("unavailable" in notes or "moved" in notes) and not st["items"]:
         return ("אי אפשר לקרוא עכשיו את GitHub, אז אין לי סטטוס פיתוח." if lang == "he"
                 else "I cannot read GitHub right now, so I have no development status.")
     if lang == "he":
@@ -381,6 +408,8 @@ def repo_of(home: Path) -> str:
             db.close()
     except Exception:                                           # a missing setting store must not break the status
         v = ""
+    if not REPO_RE.match(v):
+        v = os.environ.get(REPO_ENV, "").strip()
     return v if REPO_RE.match(v) else DEFAULT_REPO
 
 

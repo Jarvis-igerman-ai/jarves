@@ -4,7 +4,7 @@ import (
 	"context"
 	"testing"
 
-	"github.com/igalgerman/jarves/bridge/whatsapp/internal/memdb"
+	"github.com/Jarvis-igerman-ai/jarves/bridge/whatsapp/internal/memdb"
 )
 
 func TestStore(t *testing.T) {
