@@ -30,8 +30,8 @@ import (
 	waLog "go.mau.fi/whatsmeow/util/log"
 	"google.golang.org/protobuf/proto"
 
-	"github.com/igalgerman/jarves/bridge/whatsapp/internal/engine"
-	"github.com/igalgerman/jarves/bridge/whatsapp/internal/msgstore"
+	"github.com/Jarvis-igerman-ai/jarves/bridge/whatsapp/internal/engine"
+	"github.com/Jarvis-igerman-ai/jarves/bridge/whatsapp/internal/msgstore"
 )
 
 // Version is the pinned whatsmeow pseudo-version (keep equal to go.mod; build-info.json reports it).
