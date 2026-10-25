@@ -205,6 +205,10 @@ if ($UpgradeFrom) {
     Check ((Install "DEFAULT" @("/KEEPDATA=0") $Installer "silent_upgrade_s") -eq 0) "silent upgrade $oldVer -> $Version"
     Check (Test-Path (Join-Path $App "rollback\python\python.exe")) "previous program retained for offline rollback"
     Check ($stray.WaitForExit(5000)) "the stray old-folder process was ended by the installer"
+    # evidence for the CI log: what the installer's stop step did (stray pid $($stray.Id), windowed pid $($windowed.Id))
+    $upLog = Get-ChildItem (Join-Path $Work "install-*.log") | Sort-Object LastWriteTime | Select-Object -Last 1
+    Write-Host "       stray pid $($stray.Id), windowed pid $($windowed.Id); setup log $($upLog.Name):"
+    Select-String -Path $upLog.FullName -Pattern "Stopping JARVES|Retaining|retain|Restart Manager|RestartManager|close" -ErrorAction SilentlyContinue | ForEach-Object { Write-Host "       $($_.Line)" }
     Check (@(Select-String -Path (Join-Path $Work "install-*.log") -Pattern "Stopping JARVES before the upgrade: hard-stopped: python \(pid $($stray.Id)\)" -ErrorAction SilentlyContinue).Count -ge 1) "the installer logged the process it had to hard-stop, by name"
     Check (-not (Test-Path (Join-Path $App "rollback\python\stale-from-older-run.txt"))) "leftover rollback folder from an older run was replaced"
     Check ($windowed.WaitForExit(5000)) "windowed process under the program folder ended"
