@@ -5,7 +5,7 @@ and permission state, version, the last log codes of the area) and matches code 
 entries (`codes = [...]`). The cause and the next step come from the guide (English + Hebrew, deterministic, no model
 call). Optional wording by the online model (`self_diagnosis_ai_wording`) gets the redacted report only.
 
-Contract (tested): nothing is written, no network call is made, no token / address / phone number / message text ever
+Contract (tested): nothing is written, no outside network call is made (the WhatsApp collector only reads the local bridge on 127.0.0.1), no token / address / phone number / message text ever
 enters the evidence: values are never copied from a response, only key names and type names; log lines are reduced to
 level + component + code.
 """
@@ -80,7 +80,7 @@ def shape_of(v: Any, depth: int = 0) -> Any:
 
 
 def _line(key: str, value: Any) -> str:
-    return logs.redact(f"{key}: {value}")[:200]
+    return logs.redact_pii(logs.redact(f"{key}: {value}"))[:200]
 
 
 def _safe_code(v: Any) -> str:
@@ -231,7 +231,7 @@ def run(area: str, code: str = "", *, home: Path | None = None, cfg=None, failur
     else:
         c_en, c_he, f_en, f_he = _unknown(area)
         rep = DiagReport(area, code, [], c_en, c_he, f_en, f_he, "", "low")
-    rep.evidence = [logs.redact(x) for x in ev][:MAX_EVIDENCE]
+    rep.evidence = [logs.redact_pii(logs.redact(x)) for x in ev][:MAX_EVIDENCE]
     return rep
 
 

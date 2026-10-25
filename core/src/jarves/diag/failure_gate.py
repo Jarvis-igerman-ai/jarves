@@ -24,6 +24,8 @@ from . import areas
 COOLDOWN_S = 600.0
 MAX_PER_HOUR = 3
 ASK_TIMEOUT_S = 60.0
+DECLINED_COOLDOWN_S = 86400.0     # after an explicit No / no answer: the same problem is not asked again for a day
+COLLECT_TIMEOUT_S = 20.0
 BACKGROUND_ROUTES = ("default", "")
 
 TEXT = {
@@ -42,11 +44,15 @@ class FailureGate:
                  lang: Callable[[], str] = lambda: "en", ask_model: Callable[[str], Awaitable[str]] | None = None,
                  wording_enabled: Callable[[], bool] = lambda: False,
                  clock: Callable[[], float] = time.monotonic, cooldown_s: float = COOLDOWN_S,
-                 max_per_hour: int = MAX_PER_HOUR, timeout_s: float = ASK_TIMEOUT_S) -> None:
+                 max_per_hour: int = MAX_PER_HOUR, timeout_s: float = ASK_TIMEOUT_S,
+                 pending: Callable[[], bool] = lambda: False, declined_cooldown_s: float = DECLINED_COOLDOWN_S,
+                 collect_timeout_s: float = COLLECT_TIMEOUT_S) -> None:
+        self.pending, self.declined_cooldown_s, self.collect_timeout_s = pending, declined_cooldown_s, collect_timeout_s
         self.enabled, self._ask, self.deliver, self.collect = enabled, ask, deliver, collect
         self.lang, self.ask_model, self.wording_enabled = lang, ask_model, wording_enabled
         self.clock, self.cooldown_s, self.max_per_hour, self.timeout_s = clock, cooldown_s, max_per_hour, timeout_s
         self._seen: dict[tuple[str, str], float] = {}
+        self._cool: dict[tuple[str, str], float] = {}
         self._asked: list[float] = []
         self._busy = False
         self._tasks: set[asyncio.Task] = set()
@@ -72,8 +78,13 @@ class FailureGate:
             return None
         if self._busy:
             return None
+        try:
+            if self.pending():                             # never next to a real approval: one "yes" must mean one thing
+                return None
+        except Exception:
+            return None
         now = self.clock()
-        if now - self._seen.get((area, code), -1e12) < self.cooldown_s:
+        if now - self._seen.get((area, code), -1e12) < self._cool.get((area, code), self.cooldown_s):
             return None
         self._asked = [t for t in self._asked if now - t < 3600]
         if len(self._asked) >= self.max_per_hour:
@@ -86,9 +97,13 @@ class FailureGate:
             key = self.should_ask(tool, res, route)
             if key is None:
                 return
-            loop = asyncio.get_running_loop()
+            try:
+                loop = asyncio.get_running_loop()
+            except RuntimeError:
+                return
             now = self.clock()
             self._seen[key] = now                         # claimed at once: a second failure cannot ask again
+            self._cool[key] = self.cooldown_s
             self._asked.append(now)
             self._busy = True
             t = loop.create_task(self._flow(key[0], key[1], dict(getattr(res, "data", None) or {}), route))
@@ -99,19 +114,23 @@ class FailureGate:
             logs.error("diag", "DIAG_GATE_FAILED", "failure gate failed", exc=True)
 
     async def _flow(self, area: str, code: str, data: dict, route: str) -> None:
-        lang = self.lang() if self.lang() in TEXT else "en"
+        lang = "en"
         s = TEXT[lang]
         try:
+            lang = self.lang() if self.lang() in TEXT else "en"
+            s = TEXT[lang]
             logs.info("diag", "DIAG_ASKED", "asked the owner whether to diagnose a failure", area=area, error_code=code,
                       route=route)
             yes = await self._ask(s["ask"], title=s["title"], why=s["why"], risk="low", kind="other",
                                   details={"area": area, "code": code}, timeout=self.timeout_s, source="diag",
                                   voice=(route == "voice"))
             if not yes:
+                self._cool[(area, code)] = self.declined_cooldown_s
                 logs.info("diag", "DIAG_SKIPPED", "owner skipped the diagnosis (no, no answer or timeout)", area=area,
                           error_code=code)
                 return
-            rep = await asyncio.get_running_loop().run_in_executor(None, self.collect, area, code, data)
+            rep = await asyncio.wait_for(asyncio.get_running_loop().run_in_executor(None, self.collect, area, code, data),
+                                         self.collect_timeout_s)
             text = rep.text(lang)
             if self.wording_enabled() and self.ask_model is not None:
                 text = await areas.word(rep, lang, self.ask_model)
@@ -166,7 +185,7 @@ def attach(core) -> FailureGate:
 
     gate = FailureGate(
         enabled=lambda: core.features.enabled("self_diagnosis_ask"),
-        ask=core.ask_confirm, deliver=deliver,
+        ask=core.ask_confirm, deliver=deliver, pending=lambda: bool(core.approvals and core.approvals.has_pending()),
         collect=lambda area, code, data: areas.run(area, code, home=core.home, cfg=core.cfg, failure_data=data),
         lang=lambda: "he" if getattr(core.cfg.voice, "language", "he") == "he" else "en",
         ask_model=_model_wording(core), wording_enabled=lambda: core.features.enabled("self_diagnosis_ai_wording"))

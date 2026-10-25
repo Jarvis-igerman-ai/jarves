@@ -100,7 +100,7 @@ def test_voice_failure_is_asked_aloud_other_routes_only_a_card():
 
 def test_same_problem_not_asked_again_inside_the_cooldown_but_after_it():
     async def go():
-        r = Rig(answer=False)
+        r = Rig(answer=True)
         await r.fail()
         await r.fail()
         assert len(r.asked) == 1
@@ -115,7 +115,7 @@ def test_same_problem_not_asked_again_inside_the_cooldown_but_after_it():
 
 def test_at_most_three_questions_an_hour_then_again_after_it():
     async def go():
-        r = Rig(answer=False)
+        r = Rig(answer=True)
         for code in ("ANYDO_AUTH_EXPIRED", "ANYDO_RATE_LIMITED", "GOOGLE_AUTH_EXPIRED", "GOOGLE_OFFLINE"):
             await r.fail(code=code, tool="")
         assert len(r.asked) == 3
@@ -351,3 +351,25 @@ def test_cli_diagnose_area_json(home, capsys):
     assert cli.main(["diagnose", "google", "--code", "GOOGLE_AUTH_EXPIRED", "--json"]) == 0
     d = json.loads(capsys.readouterr().out)
     assert d["area"] == "google" and d["confidence"] == "high" and d["guide_id"] == "google_calendar"
+
+
+def test_no_answer_silences_the_same_problem_for_a_day_and_a_pending_approval_blocks_asking():
+    async def go():
+        r = Rig(answer=False)
+        await r.fail()
+        r.clock.t += 700
+        await r.fail()
+        assert len(r.asked) == 1                 # declined: not again after the 10 min cooldown
+        r.clock.t += 86_400
+        await r.fail()
+        assert len(r.asked) == 2
+        r2 = Rig()
+        r2.gate.pending = lambda: True
+        await r2.fail()
+        assert not r2.asked
+    run(go())
+
+
+def test_phone_like_response_keys_are_masked_in_evidence():
+    rep = areas.run("anydo", "ANYDO_AUTH_EXPIRED", failure_data={PHONE: 1, MAIL: 2})
+    assert PHONE not in "\n".join(rep.evidence) and MAIL not in "\n".join(rep.evidence)
