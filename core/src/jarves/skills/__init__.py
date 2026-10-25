@@ -552,7 +552,8 @@ class SkillRegistry:
         except ValidationError as e:        # never log the input values (may be private)
             bad = [".".join(map(str, err.get("loc", ()))) for err in e.errors(include_input=False)]
             logs.warn("skills", "TOOL_BAD_ARGS", "invalid tool arguments", tool=name, origin=origin, bad_fields=bad)
-            return ToolResult(False, f"invalid arguments for {name}", code="TOOL_BAD_ARGS")
+            return ToolResult(False, f"invalid arguments for {name}: wrong or missing field(s) {', '.join(bad) or '?'}",
+                              code="TOOL_BAD_ARGS")
         except ValueError:
             logs.warn("skills", "TOOL_BAD_ARGS", "invalid tool arguments", tool=name, origin=origin)
             return ToolResult(False, f"invalid arguments for {name}", code="TOOL_BAD_ARGS")
