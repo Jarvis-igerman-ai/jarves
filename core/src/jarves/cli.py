@@ -1604,8 +1604,24 @@ def cmd_cost(a, cfg, home) -> int:
     return 0
 
 
+def _diagnose_area(a, cfg, home) -> int:
+    from . import clilang
+    from .diag import areas
+    rep = areas.run(a.area, a.code, home=home, cfg=cfg)
+    if getattr(a, "json", False):
+        print(json.dumps(rep.to_dict(), ensure_ascii=False, indent=2))
+        return 0
+    print(rep.text("he" if clilang.current() == "he" else "en"))
+    print("evidence (redacted, no values from responses):")
+    for line in rep.evidence:
+        print("  " + line)
+    return 0
+
+
 def cmd_diagnose(a, cfg, home) -> int:
     from . import diagnose, selfcheck
+    if getattr(a, "area", None):                     # #336 slice A: read-only self-check of one area
+        return _diagnose_area(a, cfg, home)
     if selfcheck.wants_selfcheck(a):                 # --now / --history / --schedule / --suggestion
         return selfcheck.cli_main(a, cfg, home)
     a.days = a.days or 30
@@ -2205,6 +2221,9 @@ def main(argv: list[str] | None = None) -> int:
     hp = sub.add_parser("help", help="explain a topic: jarvis help timers / google / music (no topic = the list)")
     hp.add_argument("topic", nargs="*", help="a topic id or a word in Hebrew or English")
     dg = sub.add_parser("diagnose", help="self-diagnosis: find problems in recent conversations")
+    dg.add_argument("area", nargs="?", choices=["anydo", "whatsapp", "google", "voice"],
+                    help="read-only self-check of one area: plain cause + next step (add --code CODE for a failure; --json)")
+    dg.add_argument("--code", default="", help="with an area: the error code of the failure (e.g. ANYDO_AUTH_EXPIRED)")
     dg.add_argument("--days", type=int, default=None, help="look back N days (conversations: 30, self-check: 7)")
     dg.add_argument("--import-log", nargs="?", const="", default=None, metavar="PATH",
                     help="first read conversations from jarves.log (default: the current log and its rotations)")

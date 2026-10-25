@@ -44,6 +44,7 @@ action = "test"
 [[problems]]
 he = "הוא אומר שאין מפתח"
 en = "He says there is no key"
+codes = ["AI_NO_KEY", "AI_AUTH"]
 fix_he = "הריצו שוב jarvis key. המפתח חייב להתחיל ב-sk-."
 fix_en = "Run jarvis key again. The key must start with sk-."
 
@@ -52,6 +53,13 @@ he = "יש לי מנוי ChatGPT ולא מפתח"
 en = "I have a ChatGPT plan, not a key"
 fix_he = "הריצו jarvis setup ובחרו ChatGPT. משימות ברקע עדיין צריכות מפתח API."
 fix_en = "Run jarvis setup and choose ChatGPT. Background tasks still need an API key."
+
+[[problems]]
+he = "השיחה הקולית נקטעה או שהחיבור אבד"
+en = "The voice conversation dropped or the connection was lost"
+codes = ["LIVE_CONNECTION_LOST", "VOICE_TASK_CRASHED", "VOICE_TASK_STUCK"]
+fix_he = "בדקו שיש אינטרנט ואמרו את מילת ההפעלה שוב. אם זה חוזר, הריצו jarvis diagnose voice."
+fix_en = "Check the internet and say the wake word again. If it keeps happening, run jarvis diagnose voice."
 
 [platform]
 windows = "verified_on_device"

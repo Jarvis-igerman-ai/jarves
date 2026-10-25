@@ -386,6 +386,8 @@ class Core:
             self.registry.register(TaskSkill(self.tasks))
         from .operations import attach as ops_attach    # WP-M3: scheduler, reports, notes, files, alerts, autonomy
         self.ops = ops_attach(self)
+        from .diag import failure_gate                  # #336: ask once when a tool fails visibly (switch, cooldown)
+        failure_gate.attach(self)
         if self.agent is not None:                      # V5: confirmed preferences in every typed/delegated request
             from . import preferences as prefs_mod
             prefs_mod.augment_instructions(self.agent, self.ops.prefs, self.features)

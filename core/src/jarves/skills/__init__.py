@@ -296,6 +296,8 @@ class SkillRegistry:
         self._recent_ok: dict[tuple, tuple] = {}   # V4-VC-3: (route, tool, args) -> (t, result, owner approved it)
         # drive mode (V6 #216, drive_mode.Gate): consulted before the approval prompt; None = not wired (no change)
         self.drive = None
+        # self-diagnosis (#336): (tool, failed result, route) after every failed call; asks the owner, never raises
+        self.on_failure: Callable[[str, "ToolResult", str], None] | None = None
 
     @property
     def _untrusted_at(self) -> float | None:
@@ -569,6 +571,11 @@ class SkillRegistry:
             ms=round(max(0.0, time.monotonic() - t_run - (self.confirm_elapsed() - approval_wait)) * 1000))
         _tool_seen(name, res.ok, res.code, res.message)   # terminal + web chat: one line per call (TOOL_SINK)
         _display_seen(res.display)                        # #363: read-only owner text (e.g. WhatsApp messages)
+        if not res.ok and self.on_failure is not None:
+            try:
+                self.on_failure(name, res, ROUTE.get())
+            except Exception:
+                logs.error("skills", "FAILURE_HOOK_FAILED", "failure hook failed", exc=True)
         return res
 
     async def _call(self, name: str, raw_args: dict | str | None = None, *, origin: Origin = "model",

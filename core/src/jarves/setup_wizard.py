@@ -74,7 +74,7 @@ GOOGLE_FEATURES = ("google_calendar", "calendar_write", "gmail_read", "gmail_sen
 # that every registered feature is listed.
 GROUPS: tuple[tuple[str, str, str, tuple[str, ...]], ...] = (
     ("core", "בסיס", "Core", ("web_search", "background_tasks", "memory_curator", "memory_llm_pass",
-                             "diagnosis_llm_pass", "conversation_recall", "self_check", "self_diagnostics_2", "self_tests", "issue_reports", "guided_setup", "workspace_agent_edit", "assistant_identity", "skill_creation", "skills_manifest2",
+                             "diagnosis_llm_pass", "self_diagnosis_ask", "self_diagnosis_ai_wording", "conversation_recall", "self_check", "self_diagnostics_2", "self_tests", "issue_reports", "guided_setup", "workspace_agent_edit", "assistant_identity", "skill_creation", "skills_manifest2",
                              "proactive_help", "self_manage", "usage_monitor", "usage_admin_key", "appearance", "background_core", "display_control",
                              "tray_icon", "autostart")),
     ("voice", "קול", "Voice", ("wake_word", "greeting", "chimes", "voice_change", "client_delegation")),
@@ -1099,6 +1099,8 @@ BUNDLE: dict[str, list[Callable[[], tuple[bool, str]]]] = {
     "memory_curator": [_mod("jarves.curator")],
     "memory_llm_pass": [_mod("jarves.curator")],
     "diagnosis_llm_pass": [_mod("jarves.diagnose")],
+    "self_diagnosis_ask": [_mod("jarves.diag.failure_gate"), _mod("jarves.diag.areas")],
+    "self_diagnosis_ai_wording": [_mod("jarves.diag.areas")],
     "self_check": [_mod("jarves.selfcheck"), _data("jarves", "dashboard_static/selfcheck.js"),
                    _data("jarves.guides", "data/self_check.toml")],
     # SW-V4 O; diag/log_codes.json is built at packaging time (root-cause hints) and optional in a dev checkout

@@ -40,11 +40,27 @@ check = "active:google_calendar"
 [[problems]]
 he = "אחרי שבוע הוא מבקש להתחבר שוב"
 en = "After a week he asks to sign in again"
+codes = ["GOOGLE_AUTH_EXPIRED"]
 fix_he = "זה רגיל לאפליקציה במצב בדיקה של גוגל. הריצו שוב jarvis google start (רק התחברות)."
 fix_en = "That is normal for a Google app in testing mode. Run jarvis google start again (sign-in only)."
 
 [[problems]]
 he = "הוא אומר שגוגל לא מחובר"
 en = "He says Google is not connected"
+codes = ["GOOGLE_NOT_CONNECTED", "GOOGLE_NO_CLIENT", "GOOGLE_NO_REFRESH_TOKEN"]
 fix_he = "הריצו jarvis google start. הוא ממשיך מאיפה שעצרתם."
 fix_en = "Run jarvis google start. It continues where you stopped."
+
+[[problems]]
+he = "גוגל מחובר, אבל חסרה לו הרשאה לפעולה הזאת"
+en = "Google is connected, but a permission for this action is missing"
+codes = ["GOOGLE_SCOPE_MISSING"]
+fix_he = "הריצו jarvis google start והסכימו גם להרשאה החסרה (יומן, מייל או אנשי קשר)."
+fix_en = "Run jarvis google start and also agree to the missing permission (calendar, mail or contacts)."
+
+[[problems]]
+he = "אין לי חיבור לגוגל כרגע"
+en = "I cannot reach Google right now"
+codes = ["GOOGLE_OFFLINE"]
+fix_he = "בדקו שיש אינטרנט ונסו שוב בעוד רגע. ההתחברות עצמה תקינה."
+fix_en = "Check the internet and try again in a moment. The sign-in itself is fine."
