@@ -3,7 +3,7 @@
 
 > **STATUS: PLANNED — DOCUMENTATION ONLY. No implementation, release, scheduled jobs, account changes, external sends, device activation or automatic issue/alert dismissal is authorized by merging this document.** Execution starts only under an explicit bounded implementation authorization in [NOW](../NOW.md). This is a stabilization milestone after V4/4.0.1, **not** a claim that version 4.5.0 exists. Already merged V5 components remain in place; V4.5 does not replace the separate V5 phone acceptance, V6 driving, V7 Android or physical-product stages.
 >
-> **Single development repo:** `igalgerman/jarves`. Canonical V4.5 scope/acceptance: **this document**. Delivery status: [ROADMAP](../ROADMAP.md); what may be executed now: [NOW](../NOW.md). The current release/CI mechanics remain owned by [GITHUB_FLOW](../GITHUB_FLOW.md), [RELEASING](../RELEASING.md), [PREPUSH](../PREPUSH.md). Do not create a second sign-off engine or tracker.
+> **Single development repo:** `Jarvis-igerman-ai/jarves`. Canonical V4.5 scope/acceptance: **this document**. Delivery status: [ROADMAP](../ROADMAP.md); what may be executed now: [NOW](../NOW.md). The current release/CI mechanics remain owned by [GITHUB_FLOW](../GITHUB_FLOW.md), [RELEASING](../RELEASING.md), [PREPUSH](../PREPUSH.md). Do not create a second sign-off engine or tracker.
 
 **Owner milestone classification (24 Oct 2026): V4 feature-development phase = CLOSED / delivered baseline.** This is a *scope/status decision*, not a claim that all V4 issue acceptance checkboxes, real-device tests, security findings or the 4.0.1 stable promotion are complete. Outstanding defects, integration verification and user/installed-device sign-off are carried forward as explicit V4.5 stabilization acceptance, while the original evidence trackers (notably #1, #2, #58, #77) stay open until their actual criteria are satisfied. No new feature development is scheduled under V4; fixes and release validation are tracked under V4.5. V5 components already delivered may continue to exist independently; V5 is partially implemented and not owner-accepted.
 
@@ -95,7 +95,7 @@ Before touching CI, record baseline from the last 20–50 comparable PRs (or the
 
 ## Workstream F — living HTML manual QA workspace + conversational QA Skill (P1, #60 canonical)
 
-**This fulfills the existing [issue #60](https://github.com/igalgerman/jarves/issues/60)** and reuses `release_signoff.py`, `jarvis release signoff`, `manual_test_sheet.py`, setup/tour, guides, feature registry and scenarios. #58 remains installer-entry integration, #61 remains self-knowledge/help. **Only one result store, one set of test IDs, one release gate and one owner sign-off authority.** HTML is rendered as a dynamic Dashboard **view**, not authored/executed untrusted HTML.
+**This fulfills the existing [issue #60](https://github.com/Jarvis-igerman-ai/jarves/issues/60)** and reuses `release_signoff.py`, `jarvis release signoff`, `manual_test_sheet.py`, setup/tour, guides, feature registry and scenarios. #58 remains installer-entry integration, #61 remains self-knowledge/help. **Only one result store, one set of test IDs, one release gate and one owner sign-off authority.** HTML is rendered as a dynamic Dashboard **view**, not authored/executed untrusted HTML.
 
 ### Owner requirement: frictionless interactive testing, not a document checklist (24 Oct)
 
@@ -112,7 +112,7 @@ The primary interaction must be a **ready-to-use, fast, clean interactive HTML t
 
 ### Direct GitHub Issue reporting — Dashboard, guided popup, and voice
 
-**Not merely create a local draft**: after explicit owner review/approval, the Dashboard or JARVES Skill must actually **create or update a GitHub Issue in `igalgerman/jarves`** through the existing `issue_registry.py` report-to-GitHub integration. Reuse existing Bug Reports/diagnostics/dedup flows; do not create a competing registry, hard-code tokens or ask the user to manually paste JSON.
+**Not merely create a local draft**: after explicit owner review/approval, the Dashboard or JARVES Skill must actually **create or update a GitHub Issue in `Jarvis-igerman-ai/jarves`** through the existing `issue_registry.py` report-to-GitHub integration. Reuse existing Bug Reports/diagnostics/dedup flows; do not create a competing registry, hard-code tokens or ask the user to manually paste JSON.
 
 **Required workflow:** `Failed` → local bug record immediately with `test_id`, feature, sanitized expected/observed outcome, build/SHA, platform, relevant safe error codes and reproduction steps → **Preview GitHub report** (editable title/description, privacy-redacted diagnostics and labels) → **Submit to GitHub** with a clear owner confirmation → authenticated create or append to an existing matching Issue → show clickable issue number/URL, save link in the test card and local record → after fix, offer **Retest** and synchronize verified status. A simple, standalone **Report a problem** button must also exist without completing a formal test.
 
@@ -150,7 +150,7 @@ The primary interaction must be a **ready-to-use, fast, clean interactive HTML t
 
 **Owner request recorded 24 Oct 2026.** Add [the standalone Any.do MCP plan](V4_5_ANYDO_MCP_INTEGRATION.md) as a **P2 optional candidate** for the V4.5 planning backlog, after priority security/CI/QA stabilization. **No change to NOW authorization, release gate, existing seven streams, or already-running agent scope.** This is deliberately not a new V4 feature bucket or an excuse to broaden V5/V7.
 
-Use the official Any.do beta MCP endpoint with OAuth 2.0, not scraping or reuse of ChatGPT connector credentials. Proposed first cut: read tasks/list → explicitly confirmed task/shop-item creation and reminders; completion/clear/edit requires provider-supported human **Execute all** preview and is blocked until verified live. No shadow task store, autonomous polling, credential exposure or task deletion. Track work and feasibility gates in [Issue #140](https://github.com/igalgerman/jarves/issues/140) and the dedicated plan. Only a **separate owner decision reflected in NOW** can start development.
+Use the official Any.do beta MCP endpoint with OAuth 2.0, not scraping or reuse of ChatGPT connector credentials. Proposed first cut: read tasks/list → explicitly confirmed task/shop-item creation and reminders; completion/clear/edit requires provider-supported human **Execute all** preview and is blocked until verified live. No shadow task store, autonomous polling, credential exposure or task deletion. Track work and feasibility gates in [Issue #140](https://github.com/Jarvis-igerman-ai/jarves/issues/140) and the dedicated plan. Only a **separate owner decision reflected in NOW** can start development.
 
 ## Delivery sequence and tracked dependencies
 

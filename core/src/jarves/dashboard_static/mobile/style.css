@@ -37,4 +37,5 @@ button.ghost { border:none; min-height:44px; min-width:44px; padding:6px 10px; }
 .plan-steps { margin:8px 0 0; padding-inline-start:22px; display:grid; gap:8px; } .plan-why, .plan-err { overflow-wrap:anywhere; } .plan-err { color:var(--bad); font-size:.9rem; }
 .plan summary { min-height:44px; display:flex; align-items:center; cursor:pointer; }
 .plan .pill { margin-inline-start:0; } .plan .row { margin-top:8px; } .row.wrap { flex-wrap:wrap; }
+.row.wrap { flex-wrap:wrap; } .pref-text { overflow-wrap:anywhere; font-weight:600; }
 h2 { font-size:1.05rem; margin:14px 0 8px; }

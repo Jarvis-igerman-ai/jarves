@@ -56,7 +56,7 @@ REPLY_TTL_S = 600                  # how long a chat answer is kept for a resend
 REPLY_KEEP = 200
 MSG_ID_RE = re.compile(r"^[A-Za-z0-9_.:-]{8,64}$")
 DEFAULT_SCOPES = ("chat", "voice", "status", "approvals")
-ALL_SCOPES = DEFAULT_SCOPES + ("tasks",)     # tasks: goal actions + proactive snooze/stop (off until granted)
+ALL_SCOPES = DEFAULT_SCOPES + ("tasks", "prefs")   # tasks: goal actions + proactive snooze/stop; prefs: Learned preferences (both off until granted)
 # Pages a paired device may be given (the owner picks per device; default all four). Everything else is PC-only and is
 # refused by the server with a fixed code, whatever the page shows: PAGE_PC_ONLY (never grantable) and
 # PAGE_NOT_ALLOWED (a remote page this device was not given).
@@ -71,7 +71,8 @@ STATIC_FILES = {"index.html": "text/html; charset=utf-8", "app.js": "text/javasc
                 "style.css": "text/css; charset=utf-8", "sw.js": "text/javascript; charset=utf-8",
                 "manifest.webmanifest": "application/manifest+json", "icon.svg": "image/svg+xml",
                 "chatview.js": "text/javascript; charset=utf-8", "chatview.css": "text/css; charset=utf-8",
-                "plans.js": "text/javascript; charset=utf-8"}
+                "plans.js": "text/javascript; charset=utf-8",
+                "prefs.js": "text/javascript; charset=utf-8"}
 SHARED_FILES = ("chatview.js", "chatview.css")      # one chat view for the dashboard and the phone page (dashboard_static/)
 
 
@@ -134,6 +135,8 @@ class Bridge:
     desktop_present: Callable[[], bool] = field(default=lambda: False)     # the owner is at the PC right now
     plans: Callable[[], object] = field(default=lambda: None)              # -> goal_plans.PlanStore (None: open memory.db here)
     plans_on: Callable[[], bool] = field(default=lambda: True)             # the "goal plans" feature switch
+    prefs: Callable[[], object] = field(default=lambda: None)              # -> preferences.Preferences (None: open memory.db here)
+    prefs_in_prompt: Callable[[], bool] = field(default=lambda: True)      # the "use learned preferences" switch
 
 
 class MobileAccess:
@@ -292,7 +295,7 @@ class MobileAccess:
                     if now - (d.get("last_seen") or 0) > 60:
                         d["last_seen"] = now
                         self._write(self.path, {"version": 1, "devices": devs})
-                    return {"id": d["id"], "name": d.get("name", ""), "scopes": list(d.get("scopes") or DEFAULT_SCOPES),
+                    return {"id": d["id"], "name": d.get("name", ""), "scopes": list(DEFAULT_SCOPES if d.get("scopes") is None else d["scopes"]),
                             "pages": _pages_of(d)}
         return None
 
@@ -533,8 +536,15 @@ def core_bridge(core, loop) -> Bridge:
         from .goal_plans import FEATURE
         f = getattr(core, "features", None)
         return bool(f.enabled(FEATURE)) if f is not None else True
+    def prefs():
+        return getattr(getattr(core, "ops", None), "prefs", None)
+
+    def prefs_in_prompt() -> bool:
+        from .preferences import FEATURE
+        f = getattr(core, "features", None)
+        return bool(f.enabled(FEATURE)) if f is not None else True
     return Bridge(chat=chat, voice=voice, status=status, voice_available=lambda: getattr(core, "stt", None) is not None,
-                  goals=goals, desktop_present=desktop_present, plans=plans, plans_on=plans_on)
+                  goals=goals, desktop_present=desktop_present, plans=plans, plans_on=plans_on, prefs=prefs, prefs_in_prompt=prefs_in_prompt)
 
 
 # ---------------------------------------------------------------------- HTTP (called by dashboard.Handler)
@@ -578,6 +588,20 @@ def _origin_ok(h) -> bool:
     return origin.lower() == f"{scheme}://{(h.headers.get('Host') or '').lower()}"
 
 
+def _static_file(name: str) -> Path | None:
+    """CodeQL #6/#7: the phone-supplied name is only COMPARED with the fixed STATIC_FILES keys; the path is built from
+    the matching constant key, never from the request, so encoded `..`, backslashes, absolute or unknown names cannot
+    reach the filesystem. The resolved file must also stay inside its static folder (a symlink pointing out is refused)."""
+    key = next((k for k in STATIC_FILES if k == name), None)
+    if key is None:
+        return None
+    base = (STATIC_DIR.parent if key in SHARED_FILES else STATIC_DIR).resolve()
+    f = (base / key).resolve()
+    if f.parent != base or f.name != key or not f.is_file():
+        return None
+    return f
+
+
 def serve(h, mob: MobileAccess, ip: str) -> None:
     """Handle one phone request. `h` is the dashboard Handler (already past the network and Host checks)."""
     url = urlsplit(h.path)
@@ -590,12 +614,17 @@ def serve(h, mob: MobileAccess, ip: str) -> None:
     if path == "/m/" or path.startswith("/m/"):
         if method not in ("GET", "HEAD"):
             return h._send(405, b"", "text/plain")
-        name = path[3:] or "index.html"
-        ctype = STATIC_FILES.get(name)
-        f = (STATIC_DIR.parent if name in SHARED_FILES else STATIC_DIR) / name
-        if ctype is None or not f.is_file():
+        f = _static_file(path[3:] or "index.html")
+        if f is None:
             return h._send(404, b"not found", "text/plain")
-        return h._send(200, f.read_bytes(), ctype, {"Service-Worker-Allowed": "/m/"} if name == "sw.js" else None)
+        try:
+            data = f.read_bytes()
+        except FileNotFoundError:                     # vanished after the check: a plain 404, never a path
+            return h._send(404, b"not found", "text/plain")
+        except OSError:
+            return h._send(500, b"error", "text/plain")
+        return h._send(200, data, STATIC_FILES[f.name],
+                       {"Service-Worker-Allowed": "/m/"} if f.name == "sw.js" else None)
     # ---- the API
     events = path == "/api/m/chat/events"            # the chat long-poll has its own, larger bucket
     if not mob.rate_ok(("ipev:" if events else "ip:") + ip, EVENTS_PER_MIN if events else IP_RATE_PER_MIN):
@@ -820,6 +849,28 @@ def serve(h, mob: MobileAccess, ip: str) -> None:
         status, obj, again = mob.cont.execute(dev["id"], cid, "plan", lambda: mobile_plans.action(mob, d, dev["id"]),
                                               age_s=d.get("age_s"))
         return done(status, {**obj, "replay": True} if again else obj, op=str(d.get("op", ""))[:20], plan=str(d.get("plan", ""))[:9])
+    if path == "/api/m/prefs" and method == "GET":        # Learned preferences (V5 G3): the same store as the dashboard page
+        if not need("prefs"):
+            return
+        from . import mobile_prefs
+        try:
+            return h._json(200, mobile_prefs.view(mob))
+        except Exception as e:
+            logs.warn("mobile", "MOBILE_PREFS_FAILED", "preferences could not be read", error_type=type(e).__name__)
+            return h._json(503, {"error": "preferences are not available right now"})
+    if path == "/api/m/prefs/op" and method == "POST":
+        if not need("prefs"):
+            return
+        from . import mobile_prefs
+        d = _json_body(h)
+        if d is None:
+            return
+        cid = d.get("id")
+        if not (isinstance(cid, str) and MSG_ID_RE.match(cid)):
+            return h._json(400, {"error": "command id (8-64 letters, digits or _ . : -) is required"})
+        status, obj, again = mob.cont.execute(dev["id"], cid, "pref", lambda: mobile_prefs.action(mob, d, dev["id"]),
+                                              age_s=d.get("age_s"))
+        return done(status, {**obj, "replay": True} if again else obj, op=str(d.get("op", ""))[:20], pref=str(d.get("pref", ""))[:9])
     if path == "/api/m/signals" and method == "POST":
         if not need("tasks"):
             return
@@ -950,7 +1001,7 @@ def approvals_view(mob: MobileAccess) -> dict:
     for r in read_pending_file(mob.home, reveal=False):
         rows.append({"id": r.get("id"), "title": str(r.get("title") or "")[:120], "kind": r.get("kind"),
                      "risk": r.get("risk"), "seconds_left": max(0, int(float(r.get("expires") or 0) - now)),
-                     "typed": bool(r.get("typed"))})
+                     "typed": bool(r.get("typed")), "pc_only": bool(r.get("pc_only"))})
     on = mob.settings()["phone_approvals"]
     if on:                                   # a phone that may answer counts as a place to answer (no auto-deny)
         try:
@@ -959,7 +1010,7 @@ def approvals_view(mob: MobileAccess) -> dict:
         except OSError:
             pass
     return {"pending": rows, "phone_approvals": on,
-            "note": "Answer on the computer." if not on else "Typed-code requests are answered on the computer only."}
+            "note": "Answer on the computer." if not on else "Typed-code and plan approvals are answered on the computer only."}
 
 
 def answer_approval(mob: MobileAccess, aid: str, approved: bool, device: str) -> tuple[int, dict]:
@@ -969,6 +1020,8 @@ def answer_approval(mob: MobileAccess, aid: str, approved: bool, device: str) ->
     row = next((r for r in read_pending_file(mob.home, reveal=False) if r.get("id") == aid), None)
     if row is not None and row.get("typed") and approved:
         return 403, {"error": "this request needs the code shown on the computer", "code": "TYPED_PC_ONLY"}
+    if row is not None and row.get("pc_only") and approved:
+        return 403, {"error": "this approval can only be answered on the computer", "code": "PC_ONLY"}
     ok, why = submit_answer(mob.home, aid, approved, channel="phone")
     if ok:
         mob.audit("phone_approval", device=device, decision="approve" if approved else "deny",

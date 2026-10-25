@@ -45,10 +45,14 @@ GROUPS: dict[str, tuple[str, ...]] = {
     "idle": ("idle_cpu_pct", "steady_rss_mb", "private_mb", "threads", "idle_disk_write_kb_per_min",
              "idle_disk_read_kb_per_min"),
     "inproc": ("features_list_ms", "live_tools_probe_ms", "dashboard_first_load_ms", "dashboard_api_max_ms"),
-    "history": ("tool_p50_ms", "tool_p95_ms", "wake_to_first_audio_s", "dead_air_p95_s"),
+    "history": ("tool_p50_ms", "tool_p95_ms", "wake_to_first_audio_s", "dead_air_p95_s",
+                "greeting_ok", "greeting_retry_ok", "greeting_missed", "greeting_missed_pct"),
     "net": ("openai_roundtrip_ms",),
     "installer": ("installer_size_mb",),
 }
+GREETING_CODES = {"LIVE_GREETING_OK": "greeting_ok", "LIVE_GREETING_RETRY_OK": "greeting_retry_ok",
+                  "LIVE_GREETING_MISSED": "greeting_missed"}     # #179 counters, from the log
+COUNTERS = tuple(GREETING_CODES.values())                        # counts only: no trend verdict (they grow by nature)
 BENCH_ONLY = ("child_processes", "rss_growth_mb", "stop_s")
 UNITS = {"ms": "ms", "s": "s", "mb": "MB", "pct": "%", "kb_per_min": "KB/min", "threads": "count"}
 
@@ -142,7 +146,7 @@ def judge(name: str, value: float | None, budgets: dict, cls: str, previous: lis
         elif value > WARN_FRACTION * mx:
             m.status, m.detail = WARN, f"within {100 - WARN_FRACTION * 100:.0f} % of the {cls} budget of {mx:g}"
     prev = [p for p in previous[-HISTORY_N:] if p is not None]
-    if prev:
+    if prev and name not in COUNTERS:
         med = statistics.median(prev)
         m.prev_median = round(med, 2)
         if med > 0:
@@ -215,6 +219,10 @@ def measure_inproc(home: Path | None = None, *, repeats: int = 3, settle_s: floa
     try:
         f = feat.Features(Config(), home, components=lambda: {}, skills=lambda: set())
         f.warm("music")                                                    # first probe (synchronous), then expire
+        f.prewarm()                                                        # as Core start does: every cold probe (imports, PATH
+        end = time.monotonic() + 15                                        # scans) is paid once, off the measured path (#243)
+        while f._worker and time.monotonic() < end:
+            time.sleep(0.02)
         lists, probes = [], []
         for _ in range(repeats):
             t, ok, why = f._probe_cache["music"]
@@ -284,6 +292,16 @@ def measure_history(home: Path, *, now: float | None = None, **_) -> dict:
           and not str(r.get("tool", "")).startswith(("run_selftest", "run_speedtest"))]
     if len(ms) >= MIN_SAMPLES:
         out["tool_p50_ms"], out["tool_p95_ms"] = percentile(ms, 50), percentile(ms, 95)
+    counts = {k: 0 for k in COUNTERS}
+    for r in LogReader(home).records():
+        k = GREETING_CODES.get(r.get("code"))
+        if k and parse_ts(r.get("ts")) >= since:
+            counts[k] += 1
+    starts = sum(counts.values())
+    if starts:
+        out.update(counts)
+        if starts >= MIN_SAMPLES:
+            out["greeting_missed_pct"] = round(100.0 * counts["greeting_missed"] / starts, 1)
     p = home / "store.db"
     if p.is_file():
         try:
