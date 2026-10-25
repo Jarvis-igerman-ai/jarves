@@ -1,0 +1,5 @@
+{
+ "a daily light and a weekly full read-only scan of security alerts, main health and recurring diagnostics; at most ONE tracker issue; auto-fix is off; off until you turn it on": "סריקה קלה יומית וסריקה מלאה שבועית, לקריאה בלבד, של התראות אבטחה, בריאות הענף הראשי ותקלות חוזרות; לכל היותר Issue אחד; תיקון אוטומטי כבוי; כבוי עד שתפעיל",
+ "pure Python with an optional timer; not run on a Pi": "Python בלבד עם טיימר אופציונלי; לא הורץ על Pi",
+ "UNIT core/tests/test_security_scans.py (stub GitHub client, fake clock, DST, offline, retry); never run against the real repository alerts yet": "בדיקות יחידה core/tests/test_security_scans.py (לקוח GitHub מדומה, שעון מדומה, שעון קיץ, ללא רשת, ניסיון חוזר); עדיין לא הורצה מול התראות המאגר האמיתי"
+}

@@ -1,0 +1,58 @@
+name: jarves-security-scans
+# V4.5 workstream C (owner decision 24 Oct 2026): a daily LIGHT scan and a weekly FULL scan (Sunday). READ-ONLY
+# inventory of code-scanning / Dependabot / secret-scanning alerts, main health and (full) CodeQL run status plus the
+# boundary tests; at most it creates or updates ONE tracker issue. It never merges, dismisses an alert, deploys or sends
+# anything, makes no model calls and no paid API calls. The logic is core/tools/security_scans.py (the same code as
+# `jarvis scans`). The cron is in UTC (03:20 UTC = 06:20 or 05:20 Israel time); the PC-local variant honours the owner's
+# timezone. Never triggered by push or pull_request. To change the schedule edit this file in a reviewed PR; a dashboard
+# setting never rewrites it.
+on:
+  schedule:
+    - cron: "20 3 * * 1-6"      # light: Monday to Saturday
+    - cron: "20 3 * * 0"        # full: Sunday
+  workflow_dispatch:
+    inputs:
+      kind:
+        description: "Scan kind"
+        type: choice
+        options: [light, full]
+        default: light
+      report:
+        description: "Create/update the one tracker issue (off = scan only)"
+        type: boolean
+        default: false
+permissions:
+  contents: read
+  issues: write
+  security-events: read
+  actions: read
+concurrency:
+  group: jarves-security-scans
+  cancel-in-progress: false
+jobs:
+  scan:
+    name: Security scan
+    if: github.event.repository.fork == false     # never on forks; the tool also refuses any repo but the org one
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GITHUB_REPOSITORY: ${{ github.repository }}
+      KIND: ${{ github.event_name == 'workflow_dispatch' && inputs.kind || (github.event.schedule == '20 3 * * 0' && 'full' || 'light') }}
+      REPORT: ${{ github.event_name != 'workflow_dispatch' || inputs.report }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884  # v10.3.0
+        with:
+          enable-cache: true
+      - name: Install the Core
+        working-directory: core
+        run: uv sync --frozen
+      - name: Scan
+        working-directory: core
+        run: |
+          set -euo pipefail
+          flag=""; [ "$REPORT" = "true" ] || flag="--no-report"
+          uv run python tools/security_scans.py --kind "$KIND" $flag

@@ -1918,6 +1918,7 @@ _EXT_LATE = (
     ("diag.service", ("health",), {"health": "cmd_health"}),          # SW-V4 O: jarvis health [report|...]
     ("selfspeed", ("selftest", "speedtest", "performance"), "COMMANDS"),   # owner request 21 Oct
     ("issue_registry", ("issues", "issue"), "COMMANDS"),              # owner request 21 Oct: jarvis issues ...
+    ("security_scans", ("scans",), "COMMANDS"),                       # V4.5 C: jarvis scans status|run|on|off|set|history
     ("web_cli", ("web",), "COMMANDS"),                                # owner request 21 Oct: jarvis web
     ("camera.cli", ("camera",), "COMMANDS"),                          # V4.5 D: jarvis camera status | test | preview
     ("journey", ("journey",), "COMMANDS"),                            # V6: jarvis journey plan

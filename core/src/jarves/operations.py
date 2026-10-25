@@ -32,6 +32,7 @@ from . import preferences as prefs_mod
 from . import calm, continuity as continuity_mod, devmanager as dev_mod, devstatus as devstatus_mod, proactive as proactive_mod
 from . import sandbox as sandbox_mod
 from . import scheduler as sched_mod
+from . import security_scans as security_scans_mod   # noqa: F401  (registers the security_scans feature)
 from . import selfcheck as selfcheck_mod
 from . import timers as timers_mod
 from .userdata import open_db
