@@ -285,3 +285,22 @@ def test_git_ref_on_a_throwaway_repo(tmp_path):
     with pytest.raises(hf.Refused) as e:                          # no base commit known: fail closed
         hf.resolve_source("HEAD", None, repo=repo)
     assert e.value.code == "HOTFIX_NO_BASE"
+
+
+def test_symlink_in_source_is_ignored_and_case_clash_refused(tree, tmp_path):
+    inst, src, home = tree
+    secret = tmp_path / "secret.py"
+    secret.write_text("S=1\n", encoding="utf-8")
+    try:
+        (src / "link.py").symlink_to(secret)
+    except (OSError, NotImplementedError):
+        link_ok = False
+    else:
+        link_ok = True
+    plan = hf.build_plan(src, inst)
+    if link_ok:
+        assert "link.py" not in plan.files
+    (src / "guides/data/x.toml").unlink()
+    (src / "guides/data/X.toml").write_text("k=2", encoding="utf-8")  # case-only difference
+    with pytest.raises(hf.Refused):
+        hf.build_plan(src, inst)

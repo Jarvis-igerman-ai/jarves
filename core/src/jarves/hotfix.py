@@ -105,6 +105,8 @@ def _rel(p: Path, root: Path) -> str:
 def tree_files(root: Path) -> dict[str, Path]:
     out: dict[str, Path] = {}
     for p in sorted(root.rglob("*")):
+        if p.is_symlink():                       # never follow a link out of the source tree
+            continue
         if p.is_file() and not (set(p.relative_to(root).parts[:-1]) & SKIP_DIRS) and not p.name.endswith((".pyc", ".hotfix-tmp")):
             out[_rel(p, root)] = p
     return out
@@ -127,9 +129,14 @@ def build_plan(src_pkg: Path, installed_pkg: Path) -> Plan:
     files are ignored."""
     src, inst = tree_files(src_pkg), tree_files(installed_pkg)
     plan = Plan()
+    inst_lower = {k.lower() for k in inst}
     for rel, p in src.items():
         if rel in INSTALLED_ONLY or rel.startswith("tests/"):
             continue
+        if rel.startswith(("/", "\\")) or ".." in Path(rel).parts or ":" in rel:
+            raise Refused("HOTFIX_BAD_PATH", f"unsafe path in the source: {rel}")
+        if rel not in inst and rel.lower() in inst_lower:       # Windows is case-insensitive: would overwrite unsaved
+            raise Refused("HOTFIX_CASE_CLASH", f"{rel} differs from an installed file only by letter case")
         if rel not in inst:
             plan.add.append(rel)
         elif sha256(p) != sha256(inst[rel]):
@@ -161,7 +168,9 @@ def check_policy(plan: Plan, repo_changes: list[str] | None = None) -> None:
 
 # ---------------------------------------------------------------------- source resolution
 def _git(repo: Path, *args: str, check: bool = True) -> str:
-    r = subprocess.run(["git", "-C", str(repo), *args], capture_output=True, text=True, timeout=120)
+    # local only, and no code from the (possibly untrusted) repo config: no fsmonitor, no hooks
+    r = subprocess.run(["git", "-c", "core.fsmonitor=false", "-c", "core.hooksPath=" + os.devnull, "-C", str(repo), *args],
+                       capture_output=True, text=True, timeout=120)
     if check and r.returncode != 0:
         raise HotfixError("HOTFIX_GIT", f"git {' '.join(args[:2])} failed: {r.stderr.strip()[:200]}")
     return r.stdout
