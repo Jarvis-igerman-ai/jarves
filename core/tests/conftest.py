@@ -298,6 +298,18 @@ async def open_face(core, token=None):
 
 
 @pytest.fixture
+def hermetic_features(monkeypatch):
+    """Fixed feature set for size measurements. Environment probes (Godot viewer on PATH/GODOT_EXE, desktop session +
+    pystray, wake-word package, speaker) decide whether their tools are offered, so a dev PC with Godot installed
+    measured 461 chars more than CI (#307). Pin them to "not available": the measured set is the same everywhere."""
+    from jarves import features as feat
+    import jarves.runtime  # noqa: F401  (registers display_control / tray_icon)
+    monkeypatch.delenv("GODOT_EXE", raising=False)
+    for fid in ("display_control", "tray_icon", "wake_word", "chimes"):
+        monkeypatch.setattr(feat.CATALOG[fid], "probe", lambda c: (False, "pinned off (hermetic test)"))
+
+
+@pytest.fixture
 async def core(home, cfg):
     from jarves.app import Core
     c = Core(cfg, home, audio=SimAudio(), player=FakePlayer(), stt=FakeSTT(), tts=FakeTTS(), console_logs=False,
