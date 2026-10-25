@@ -62,6 +62,8 @@ def build(cfg, home: Path, confirm, *, agent_factory=None, transport=None, note:
     Identity(home, cfg, memory).apply_to_config(cfg)
     registry.gate = features.gate
     registry.confirm = confirm
+    from . import drive_mode                     # V6 #216: off by default; never approves, only defers
+    drive_mode.attach(registry, features, home, memory)
     registry.register(ClockSkill())
     registry.register(MemorySkill(memory))
     registry.register(LocalContactsSkill(memory))

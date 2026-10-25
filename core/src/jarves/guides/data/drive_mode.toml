@@ -31,6 +31,10 @@ he = "בנהיגה: שאלות קצרות, שעה, מזג אוויר, טיימר
 en = "While driving: short questions, time, weather, timers, music and a navigation link are allowed. A call or message only to a known contact with one spoken confirmation."
 
 [[steps]]
+he = "מצב נהיגה אף פעם לא מאשר בעצמו: כל שאלת אישור רגילה עדיין נשאלת. הודעה מוכנה מראש נשלחת רק כשאמרתם אותה בקול, לאיש קשר ששמרתם. בקשה שבאה מתוך מייל, אתר או הודעה, וכל דבר שדורש מסך, נשמרת ברשימה ולא מבוצעת. רק אתם מכבים את המצב: JARVES לא יכול לכבות אותו בעצמו."
+en = "Drive mode never approves anything itself: every normal approval question is still asked. A message is sent only when you said it out loud, to a contact you saved. A request that came from a mail, a web page or a message, and anything that needs a screen, is saved to the list and not run. Only you turn the mode off: JARVES cannot turn it off by itself."
+
+[[steps]]
 he = "כשעצרתם: jarvis drive stopped מציג את הרשימה. כדי לכבות: jarvis drive off. למחיקה: jarvis drive clear."
 en = "When you have stopped: jarvis drive stopped shows the list. To turn off: jarvis drive off. To empty it: jarvis drive clear."
 
@@ -45,3 +49,15 @@ he = "הוא לא מתקשר לשם שאמרתי"
 en = "It will not call the name I said"
 fix_he = "בנהיגה מתקשרים רק לאיש קשר מוכר. הוסיפו אותו קודם כשאתם עומדים."
 fix_en = "While driving it only calls a known contact. Add the contact first while parked."
+
+[[problems]]
+he = "אמרתי לו לכבות את מצב הנהיגה והוא סירב"
+en = "I told it to turn drive mode off and it refused"
+fix_he = "בכוונה: הבינה המלאכותית לא יכולה לכבות את מצב הנהיגה בעצמה. הריצו jarvis drive off, או כבו את \"מצב נהיגה\" בלוח הבקרה."
+fix_en = "On purpose: the AI cannot turn drive mode off by itself. Run jarvis drive off, or switch \"Drive mode\" off on the dashboard."
+
+[[problems]]
+he = "הוא אמר שבדיקת מצב הנהיגה נכשלה"
+en = "It said the drive-mode check failed"
+fix_he = "כשהבדיקה נכשלת הוא לא מבצע פעולות בכלל, ליתר ביטחון (ניתוק ועצירה עדיין עובדים). הריצו jarvis drive status, ואם זה חוזר הריצו jarvis selftest ושלחו את התוצאה."
+fix_en = "When the check fails it does no actions at all, to stay safe (hang-up and stop still work). Run jarvis drive status, and if it happens again run jarvis selftest and send the result."
