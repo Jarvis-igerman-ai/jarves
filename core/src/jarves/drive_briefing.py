@@ -19,6 +19,7 @@ from typing import Literal
 from pydantic import BaseModel
 
 from . import features as feat
+from . import hebrew
 from . import logs
 from .briefing import BriefingSkill, _sec
 from .channels_common import targets
@@ -120,6 +121,18 @@ def register_drive_briefing(registry, db, transport=None, clock=None) -> DriveBr
     registry.register(skill)
     return skill
 
+
+hebrew.TEXT.update({
+    "next calendar event, weather and an unread message count before you drive; asks first if a passenger can hear, "
+    "never reads senders or subjects, never uses your location":
+        "האירוע הבא ביומן, מזג האוויר וכמות ההודעות שלא נקראו לפני נסיעה; שואל קודם אם נוסע יכול לשמוע, "
+        "אף פעם לא מקריא שולחים או נושאים, ואף פעם לא משתמש במיקום שלכם",
+    "UNIT test_v6_drive_briefing.py (fake registry tools, local fake weather server)":
+        "בדיקות יחידה test_v6_drive_briefing.py (כלי רישום מזויפים, שרת מזג אוויר מקומי מזויף)",
+    "V6 beta: not run in a real car or against a real Google account":
+        "בטא V6: לא הורץ ברכב אמיתי או מול חשבון Google אמיתי",
+    "drive_briefing.passenger (ask | present | alone), briefing.city": "drive_briefing.passenger (ask | present | alone), briefing.city",
+})
 
 feat.register("drive_briefing", "תדריך לפני נסיעה", "Pre-drive briefing", False, skills=["drive_briefing"],
               about="next calendar event, weather and an unread message count before you drive; asks first if a "
