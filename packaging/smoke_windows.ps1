@@ -194,13 +194,16 @@ if ($UpgradeFrom) {
     $stale = Join-Path $App "rollback\python\stale-from-older-run.txt"
     "old" | Set-Content $stale
     # #153: a windowed process under the program folder (face / music player stand-in) is asked to close first
-    $windowed = Start-Process (Join-Path $App "python\pythonw.exe") -PassThru -ArgumentList @("-I", "-c",
-        "import tkinter as t; r = t.Tk(); r.title('JARVES smoke window'); r.mainloop()")
+    # ONE pre-quoted argument string: Start-Process joins an array WITHOUT quoting, so `-c "import ..."` arrived as
+    # `-c import` and python exited at once (the stand-ins never ran during setup, so nothing proved the stop step)
+    $windowed = Start-Process (Join-Path $App "python\pythonw.exe") -PassThru -ArgumentList (
+        '-I -c "import tkinter as t; r = t.Tk(); r.title(''JARVES smoke window''); r.mainloop()"')
     for ($i = 0; $i -lt 40 -and $windowed.MainWindowHandle -eq 0 -and -not $windowed.HasExited; $i++) { Start-Sleep -Milliseconds 250; $windowed.Refresh() }
     $hasWindow = (-not $windowed.HasExited) -and $windowed.MainWindowHandle -ne 0
     # issue #141: a process running from the old program folder (like `jarves dashboard`) must not block the upgrade
-    $stray = Start-Process (Join-Path $App "python\python.exe") -ArgumentList @("-I", "-c", "import time; time.sleep(900)") -WindowStyle Hidden -PassThru
-    Check (-not $stray.HasExited) "process running from the old program folder (dashboard stand-in) is alive before the upgrade"
+    $stray = Start-Process (Join-Path $App "python\python.exe") -ArgumentList '-I -c "import time; time.sleep(900)"' -WindowStyle Hidden -PassThru
+    Start-Sleep 2
+    Check (-not $stray.HasExited) "process running from the old program folder (dashboard stand-in) is alive before the upgrade (2 s after start)"
     # silent upgrade over it: no /TASKS (the installer keeps its defaults), same AppId, data folder untouched
     Check ((Install "DEFAULT" @("/KEEPDATA=0") $Installer "silent_upgrade_s") -eq 0) "silent upgrade $oldVer -> $Version"
     Check (Test-Path (Join-Path $App "rollback\python\python.exe")) "previous program retained for offline rollback"
