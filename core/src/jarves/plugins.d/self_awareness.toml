@@ -1,0 +1,2 @@
+cli = ["jarves.self_aware"]
+addons = ["jarves.self_aware"]
