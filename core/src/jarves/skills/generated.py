@@ -792,6 +792,7 @@ def _args_model(sid: str, spec: dict) -> type[BaseModel]:
 
 class InstalledSkill(Skill):
     """An approved generated Skill as a registry Skill (one version)."""
+    origin = "generated"
 
     def __init__(self, mgr: GeneratedSkills, sid: str) -> None:
         self.mgr, self.name = mgr, sid

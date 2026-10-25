@@ -184,6 +184,11 @@ class Tool:
     # read tools only: an identical successful call within this many seconds returns the earlier result (issue #17:
     # workspace_read ran 4x in 30 s). Any successful side effect or a new user turn drops the cache.
     cache_s: float = 0.0
+    # send / call tools: the REAL number or address the call will use (drive mode checks it against saved contacts)
+    target: Callable[[Any], str | None] | None = None
+    # stamped by SkillRegistry.register from the owning Skill (a tool never sets it): "builtin" | "generated"
+    origin: str = "unknown"
+    skill_id: str = ""
 
     @property
     def side_effect(self) -> bool:     # read-only view of the old flag
@@ -191,6 +196,7 @@ class Tool:
 
 
 class Skill:
+    origin: str = "builtin"            # InstalledSkill (generated, owner-approved) says "generated"
     name: str = "skill"
     description: str = ""
 
@@ -384,8 +390,15 @@ class SkillRegistry:
                 raise ValueError(why)
             if t.name in self._tools:
                 raise ValueError(f"tool {t.name!r} already registered by {self._tools[t.name][0].name}")
+            if getattr(skill, "origin", "builtin") != "builtin":
+                from ..drive_mode import TOOL_KINDS      # a non-built-in Skill may not take a drive-mode allow-listed name (#301)
+                if t.name in TOOL_KINDS:
+                    logs.error("skills", "TOOL_NAME_RESERVED", "non-built-in skill used a reserved tool name",
+                               skill=skill.name, tool=t.name)
+                    raise ValueError(f"tool name {t.name!r} is reserved for built-in skills")
         self.skills[skill.name] = skill
         for t in tools:
+            t.origin, t.skill_id = str(getattr(skill, "origin", "builtin")), skill.name
             self._tools[t.name] = (skill, t)
         logs.info("skills", "SKILL_REGISTERED", "skill registered", skill=skill.name, tools=[t.name for t in tools])
 
