@@ -73,10 +73,13 @@ def build(kind: str, text: str) -> dict:
 def phone_action(mob, d: dict) -> tuple[int, dict]:
     """The /api/m/drive/action handler body: both switches must be on; the answer is always a link or a refusal."""
     from . import mobile_drive
-    v = mobile_drive.view(mob)
-    if not v["enabled"]:
+    try:
+        f = mobile_drive._features(mob)
+    except Exception:                                            # fail closed: no switch state, no link
+        return 503, {"error": "drive state is not available right now", "code": "DRIVE_STATE_UNAVAILABLE"}
+    if not mobile_drive._on(f, mobile_drive.FEATURE):
         return 409, {"error": "the Drive screen is switched off on the computer", "code": "DRIVE_SCREEN_OFF"}
-    if not mobile_drive._on(mobile_drive._features(mob), FEATURE):
+    if not mobile_drive._on(f, FEATURE):
         return 409, {"error": "Drive Actions are switched off on the computer", "code": "ACTIONS_OFF"}
     got = build(str(d.get("kind", "")), str(d.get("text", "")))
     return (200 if got["ok"] else 400), got

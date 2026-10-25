@@ -939,7 +939,8 @@ def serve(h, mob: MobileAccess, ip: str) -> None:
         if d is None:
             return
         st, obj = drive_actions.phone_action(mob, d)
-        return done(st, obj, op="action", kind=str(d.get("kind", ""))[:8])
+        kind = d.get("kind")
+        return done(st, obj, op="action", kind=kind if kind in drive_actions.KINDS else "other")    # never echo typed text into the audit
     if path == "/api/m/signals" and method == "POST":
         if "tasks" not in dev["scopes"] and not need("status"):     # stop / snooze only reduce activity: status is enough
             return
