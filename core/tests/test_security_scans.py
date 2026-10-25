@@ -397,3 +397,17 @@ def test_the_hosted_tool_refuses_another_repository_and_needs_a_token(monkeypatc
     monkeypatch.setattr(ss, "http_client", lambda token, repo=ss.REPO: gh)
     assert mod.main(["--kind", "light", "--dry-run", "--json"]) == 0
     assert json.loads(capsys.readouterr().out)["findings"] == 1 and gh.writes() == []
+
+
+def test_codeql_44_state_and_settings_files_never_store_a_planted_secret(tmp_path):
+    """CodeQL #44 (py/clear-text-storage-sensitive-data, security_scans._write): the sink redacts. Fails if _scrub is removed."""
+    st = ss.load_state(tmp_path)
+    st["tracker_url"] = f"https://x.test/?t={SECRET}"
+    st["last_failure"] = {"reason": SECRET, SECRET: 1}
+    st["history"].append({"nested": [f"Bearer {SECRET}"]})
+    ss.save_state(tmp_path, st)
+    ss.save_config(tmp_path, tz="Asia/Jerusalem")
+    for name in (ss.STATE_FILE, ss.CONFIG_FILE):
+        blob = (tmp_path / name).read_text(encoding="utf-8")
+        assert SECRET not in blob and "A1b2C3d4E5f6G7h8" not in blob
+    assert "tracker_url" in (tmp_path / ss.STATE_FILE).read_text(encoding="utf-8")
