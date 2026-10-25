@@ -156,3 +156,17 @@ def test_instructions_forbid_claiming_a_search():
     agent = SimpleNamespace(instructions=lambda: "base")
     wab.augment_instructions(agent, SimpleNamespace(active=lambda fid: True))
     assert "Never say you are" in agent.instructions()
+
+
+@pytest.mark.parametrize("args", [{"who": "Bob", "limit": 50}, {"who": "Bob", "limit": "50"}, {"who": ["Bob"]},
+                                  {"who": {"name": "Bob", "reason": "exact"}}, {"who": "Bob " + "x" * 80}])
+def test_chat_args_are_tolerant_329(args):
+    a = wab.ChatArgs.model_validate(args)
+    assert a.limit <= 20 and a.who.startswith("Bob") and len(a.who) <= 60
+
+
+def test_bad_args_message_names_the_field_329():
+    from pydantic import ValidationError
+    with pytest.raises(ValidationError) as e:
+        wab.ChatArgs.model_validate({"limit": 3})
+    assert e.value.errors()[0]["loc"] == ("who",)

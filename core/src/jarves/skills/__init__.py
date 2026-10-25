@@ -109,6 +109,11 @@ async def bounded_ai(aw, timeout_s: float, registry: "SkillRegistry | None"):
             await asyncio.gather(task, return_exceptions=True)
 
 
+FAILURE_RULE = ("This tool call FAILED, so nothing was searched or read. Never say 'no messages / nothing found' "
+                "because of it. Fix the arguments named in the message and call again, or tell the owner plainly "
+                "that the lookup failed.")
+
+
 @dataclass
 class ToolResult:
     ok: bool
@@ -117,7 +122,25 @@ class ToolResult:
     code: str = "ok"                   # stable error code for logs/diagnostics
 
     def to_model(self) -> str:
-        return json.dumps({"ok": self.ok, "message": self.message, "code": self.code, **self.data}, ensure_ascii=False)
+        out = {"ok": self.ok, "message": self.message, "code": self.code, **self.data}
+        if not self.ok:     # #332: a failed call is not an empty result
+            out.setdefault("tool_failed", True)
+            out.setdefault("failure_rule", FAILURE_RULE)
+        return json.dumps(out, ensure_ascii=False)
+
+
+def _bad_args_text(name: str, model, e: ValidationError) -> str:
+    """#332: tell the model WHICH fields failed, why, and the accepted shape, so it can retry. Never echoes values."""
+    why = "; ".join(f"{'.'.join(map(str, err.get('loc', ()))) or '?'}: {err.get('msg', 'invalid')}"
+                    for err in e.errors(include_input=False))
+    try:
+        props = model.model_json_schema().get("properties", {})
+        req = set(model.model_json_schema().get("required", []))
+        shape = ", ".join(f"{k}{'*' if k in req else ''} ({v.get('type', 'any')}"
+                          + (f": {v['description']}" if v.get("description") else "") + ")" for k, v in props.items())
+    except Exception:
+        shape = "?"
+    return f"TOOL_BAD_ARGS: invalid arguments for {name}: {why}. Accepted fields (* = required): {shape}. Fix and call again."
 
 
 class NoArgs(BaseModel):
@@ -552,7 +575,7 @@ class SkillRegistry:
         except ValidationError as e:        # never log the input values (may be private)
             bad = [".".join(map(str, err.get("loc", ()))) for err in e.errors(include_input=False)]
             logs.warn("skills", "TOOL_BAD_ARGS", "invalid tool arguments", tool=name, origin=origin, bad_fields=bad)
-            return ToolResult(False, f"invalid arguments for {name}", code="TOOL_BAD_ARGS")
+            return ToolResult(False, _bad_args_text(name, tool.args, e), code="TOOL_BAD_ARGS")
         except ValueError:
             logs.warn("skills", "TOOL_BAD_ARGS", "invalid tool arguments", tool=name, origin=origin)
             return ToolResult(False, f"invalid arguments for {name}", code="TOOL_BAD_ARGS")
