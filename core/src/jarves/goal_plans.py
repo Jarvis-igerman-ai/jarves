@@ -412,8 +412,11 @@ class PlanRunner:
                 st.db.x("UPDATE goal_plans SET tainted=1 WHERE id=?", (pid,))
                 self._block(pid, step, "text written by others was read earlier in this plan: resume to continue")
                 return st.get(pid)
-            if res.code in ("NOT_APPROVED", "APPROVAL_REFUSED", "TOOL_NOT_CONFIRMED"):
+            if res.code in ("NOT_APPROVED", "APPROVAL_REFUSED", "TOOL_NOT_CONFIRMED", "TOOL_DECLINED"):
                 self._block(pid, step, "the owner did not approve this step")
+                return st.get(pid)
+            if res.code in ("TOOL_APPROVAL_TIMEOUT", "TOOL_APPROVAL_UNAVAILABLE"):     # V5 sec F8: nothing ran; retry after resume
+                self._block(pid, step, "no approval was given for this step (no answer in time or nowhere to ask)")
                 return st.get(pid)
             self._fail(pid, step, f"{res.code}: {_short(res.message, 120)}", t0, evidence=res.message)
             return st.get(pid)
