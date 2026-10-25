@@ -133,3 +133,24 @@ def test_queue_fails_closed_when_the_lock_is_held(tmp_path, monkeypatch):
             with dm._file_lock(path, 0.2):
                 pass
     assert q.add("k", "x") is not None
+
+
+def test_known_address_is_exact_ascii_never_a_lookalike(tmp_path):
+    g = _gate(tmp_path, [{"label": "a", "name": "Strasse", "email": "dassa@kx.com"}])
+    assert g.known("", "DASSA@KX.COM")
+    assert not g.known("", "da\u00dfa@kx.com")                     # casefold would make this 'dassa@kx.com'
+    assert not g.known("", "dassa@\u212ax.com")                    # Kelvin sign
+    assert not g.known("", "Strasse <dassa@kx.com>")               # display-name form
+    assert not g.known("", "dassa@kx.com, evil@x.com")
+
+
+def test_lock_wait_is_read_at_call_time(tmp_path, monkeypatch):
+    import time as _t
+    path = tmp_path / "q.json"
+    monkeypatch.setattr(dm, "LOCK_WAIT_S", 0.1)
+    with dm._file_lock(path):
+        t0 = _t.monotonic()
+        with pytest.raises(TimeoutError):
+            dm.DriveQueue(path).add("k", "x")                       # fails closed, nothing written
+        assert _t.monotonic() - t0 < 2
+    assert dm.DriveQueue(path).items() == []

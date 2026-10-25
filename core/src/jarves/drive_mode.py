@@ -128,13 +128,14 @@ LOCK_WAIT_S = 5.0
 
 
 @contextlib.contextmanager
-def _file_lock(path: Path, wait_s: float = LOCK_WAIT_S):
+def _file_lock(path: Path, wait_s: float | None = None):
     """An exclusive cross-process lock on `<path>.lock` (msvcrt on Windows, flock elsewhere). Fails closed: if it
-    cannot be taken within `wait_s` a TimeoutError is raised and nothing is written (issue #300)."""
+    cannot be taken within `wait_s` (default LOCK_WAIT_S, read at call time) a TimeoutError is raised and nothing is
+    written (issue #300)."""
     path.parent.mkdir(parents=True, exist_ok=True)
     fh = open(path.with_name(path.name + ".lock"), "a+b")
     try:
-        deadline = time.monotonic() + wait_s
+        deadline = time.monotonic() + (LOCK_WAIT_S if wait_s is None else wait_s)
         while True:
             try:
                 fh.seek(0)
@@ -197,9 +198,22 @@ class DriveQueue:
     def _write(self, rows: list[dict]) -> None:
         self.path.parent.mkdir(parents=True, exist_ok=True)
         fd, tmp = tempfile.mkstemp(dir=str(self.path.parent), suffix=".tmp")
-        with os.fdopen(fd, "w", encoding="utf-8") as fh:
-            json.dump(rows, fh, ensure_ascii=False)
-        os.replace(tmp, self.path)
+        try:
+            with os.fdopen(fd, "w", encoding="utf-8") as fh:
+                json.dump(rows, fh, ensure_ascii=False)
+            # Windows: os.replace fails while another process is reading the file (items() takes no lock); retry
+            # briefly, then raise (the caller fails closed and the old file stays intact)
+            for attempt in range(50):
+                try:
+                    os.replace(tmp, self.path)
+                    return
+                except PermissionError:
+                    if attempt == 49:
+                        raise
+                    time.sleep(0.02)
+        finally:
+            with contextlib.suppress(OSError):
+                os.unlink(tmp)                         # only left over when the replace did not happen
 
     @staticmethod
     def _item(r: dict) -> QueueItem:
@@ -362,12 +376,15 @@ class Gate:
 
     @staticmethod
     def _addr(value) -> str:
-        """A phone number as E.164 or an e-mail address lower-cased; "" when it is neither."""
+        """A phone number as E.164 or a plain ASCII e-mail address lower-cased; "" when it is neither. No casefold
+        (it maps 'ß'->'ss' and the Kelvin sign->'k', so two different addresses could compare equal); a non-ASCII
+        address, a display-name form ('Dana <d@x.com>') or anything with inner spaces is "" (never known)."""
         v = str(value or "").strip()
         if not v:
             return ""
         if "@" in v:
-            return " ".join(v.casefold().split())
+            return v.lower() if v.isascii() and v.count("@") == 1 and not any(c.isspace() or c in "<>\",;"
+                                                                                for c in v) else ""
         from .dialing import normalize
         return normalize(v) or ""
 
