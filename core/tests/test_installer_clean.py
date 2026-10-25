@@ -275,6 +275,8 @@ def test_the_stop_script_is_immune_to_execution_policy_and_sweeps_only_the_progr
     iss = (PKG / "windows" / "jarves.iss").read_text(encoding="utf-8-sig")
     stop = iss.split("procedure StopProcessesUnderApp", 1)[1].split("function RetainProgramPart", 1)[0]
     assert "-EncodedCommand " in stop and "-File" not in stop and ".ps1" not in stop
+    # CI passes /DIR as an 8.3 path (C:\Users\RUNNER~1\...): process paths are long, so {app} is made long first
+    assert "LongPath(ExpandConstant('{app}'))" in stop and "GetLongPathNameW@kernel32.dll stdcall" in iss
     script = iss.split("function StopScript", 1)[1].split("procedure StopProcessesUnderApp", 1)[0]
     assert '@("python", "face", "bridge", "rollback")' in script
     assert "$_.Path.StartsWith($d" not in script            # never the whole program folder

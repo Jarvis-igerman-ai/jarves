@@ -410,13 +410,29 @@ begin
     '$out | Set-Content -LiteralPath $Log -Encoding ASCII' + #13#10;
 end;
 
+function GetLongPathNameW(ShortPath: String; LongPath: String; Size: Cardinal): Cardinal;
+  external 'GetLongPathNameW@kernel32.dll stdcall';
+
+// {app} can arrive as an 8.3 short path (/DIR=C:\Users\RUNNER~1\...); a process path is always the long one, so match
+// against the long spelling or nothing is ever found.
+function LongPath(const Path: String): String;
+var
+  N: Cardinal;
+  Buf: String;
+begin
+  Result := Path;
+  Buf := StringOfChar(' ', 1024);
+  N := GetLongPathNameW(Path, Buf, 1024);
+  if (N > 0) and (N < 1024) then Result := Copy(Buf, 1, N);
+end;
+
 procedure StopProcessesUnderApp(const WaitS: Integer);
 var
   Code, I: Integer;
   Dir, LogFile: String;
   Lines: TArrayOfString;
 begin
-  Dir := RemoveBackslashUnlessRoot(ExpandConstant('{app}'));
+  Dir := RemoveBackslashUnlessRoot(LongPath(ExpandConstant('{app}')));
   if Length(Dir) <= 3 then exit;                     // never sweep a whole drive
   LogFile := ExpandConstant('{tmp}\jarves-stop-app.log');
   DeleteFile(LogFile);
