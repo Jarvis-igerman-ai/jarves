@@ -27,9 +27,9 @@ START_COMMAND = "jarvis github token"
 API_VERSION = "2022-11-28"
 TIMEOUT = 15.0
 PER_PAGE, MAX_PAGES = 30, 3
-_NAME = re.compile(r"^[A-Za-z0-9_.-]{1,100}$")
-_REF = re.compile(r"^[A-Za-z0-9_./-]{1,200}$")
-_TOKEN = re.compile(r"(github_pat_[A-Za-z0-9_]+|gh[pousr]_[A-Za-z0-9]+|(?i:bearer)\s+[A-Za-z0-9._~+/=-]{8,})")
+_NAME = re.compile(r"^(?!\.)[A-Za-z0-9_.-]{1,100}$")
+_REF = re.compile(r"^(?!/)(?!.*\.\.)(?!.*//)(?!.*/$)[A-Za-z0-9_./-]{1,200}$")
+_TOKEN = re.compile(r"(github_pat_[A-Za-z0-9_]+|gh[pousr]_[A-Za-z0-9]+|(?i:bearer|token|basic)\s+[A-Za-z0-9._~+/=-]{8,}|b[0-9a-f]{40}b)")
 READ_SCOPES = ["Metadata", "Issues", "Pull requests", "Actions", "Checks", "Commit statuses"]   # all read-only
 
 
@@ -87,6 +87,8 @@ class GitHubClient:
     def __init__(self, home: Path | None = None, *, token: str = "", transport: httpx.BaseTransport | None = None,
                  base: str = API) -> None:
         self._token = token or (TokenStore(home).token() if home is not None else "")
+        if transport is None and base.rstrip("/") != API:        # never send the token to another host
+            raise GitHubError("GITHUB_BAD_ARGUMENT", "only api.github.com is allowed")
         self.transport, self.base = transport, base.rstrip("/")
         self.rate: dict = {"remaining": None, "reset": None}
 
@@ -96,7 +98,7 @@ class GitHubClient:
         headers = {"Authorization": f"Bearer {self._token}", "Accept": "application/vnd.github+json",
                    "X-GitHub-Api-Version": API_VERSION, "User-Agent": "JARVES"}
         try:
-            with httpx.Client(timeout=TIMEOUT, transport=self.transport) as c:
+            with httpx.Client(timeout=TIMEOUT, transport=self.transport, follow_redirects=False) as c:
                 r = c.request(method, self.base + path, headers=headers, **kw)
         except httpx.HTTPError as e:
             raise GitHubError("GITHUB_OFFLINE", f"cannot reach GitHub ({type(e).__name__})") from None
@@ -111,9 +113,12 @@ class GitHubClient:
             raise GitHubError("GITHUB_FORBIDDEN", "the token lacks a read permission for this")
         if r.status_code == 404:
             raise GitHubError("GITHUB_NOT_FOUND", "not found (or the token cannot see it)")
-        if r.status_code >= 400:
+        if r.status_code >= 300:
             raise GitHubError("GITHUB_PROVIDER_ERROR", f"GitHub answered {r.status_code}")
         return r
+
+    def __repr__(self) -> str:
+        return "GitHubClient(token=[REDACTED])"
 
     def _json(self, method: str, path: str, **kw):
         try:
@@ -260,6 +265,9 @@ def cmd_github(a, cfg, home) -> int:
         store.save(getpass.getpass("GitHub read-only token (hidden): "))
     except GitHubError as e:
         print(f"{e.code}: {e.message}")
+        return 1
+    except (EOFError, KeyboardInterrupt):
+        print("GITHUB_BAD_ARGUMENT: no token entered")
         return 1
     print(clilang.bi("האסימון נשמר במחשב הזה בלבד. הפעלה: jarvis features on github. / Token saved on this computer only. "
                      "Switch on: jarvis features on github."))

@@ -110,3 +110,23 @@ def test_cli_status(tmp_path, capsys):
     out = capsys.readouterr().out
     assert TOKEN not in out and '"read_only": true' in out
     assert gh.cmd_github(NS(action="off"), None, tmp_path) == 0 and not gh.connected(tmp_path)
+
+
+def test_security_hardening():
+    c = client(gh.FakeGitHub())
+    for bad in ("..", ".", ".x"):
+        with pytest.raises(gh.GitHubError):
+            c.issues(bad, "r")
+    for ref in ("../../x", "/a", "a//b", "a/"):
+        with pytest.raises(gh.GitHubError):
+            c.check_runs("a", "r", ref)
+    with pytest.raises(gh.GitHubError):
+        gh.GitHubClient(token=TOKEN, base="https://evil.example")
+    assert TOKEN not in repr(c)
+    f = gh.FakeGitHub()
+    f.fail = (302, {"location": "https://evil.example"})
+    with pytest.raises(gh.GitHubError) as e:
+        client(f).me()
+    assert e.value.code == "GITHUB_PROVIDER_ERROR"
+    assert "mutation" not in inspect.getsource(gh.GitHubClient.merge_queue)
+    assert gh.redact("a " + "0123456789abcdef" * 2 + "01234567 b") == "a [REDACTED] b"
