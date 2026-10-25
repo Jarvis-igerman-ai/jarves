@@ -568,6 +568,20 @@ def _origin_ok(h) -> bool:
     return origin.lower() == f"{scheme}://{(h.headers.get('Host') or '').lower()}"
 
 
+def _static_file(name: str) -> Path | None:
+    """CodeQL #6/#7: the phone-supplied name is only COMPARED with the fixed STATIC_FILES keys; the path is built from
+    the matching constant key, never from the request, so encoded `..`, backslashes, absolute or unknown names cannot
+    reach the filesystem. The resolved file must also stay inside its static folder (a symlink pointing out is refused)."""
+    key = next((k for k in STATIC_FILES if k == name), None)
+    if key is None:
+        return None
+    base = (STATIC_DIR.parent if key in SHARED_FILES else STATIC_DIR).resolve()
+    f = (base / key).resolve()
+    if f.parent != base or f.name != key or not f.is_file():
+        return None
+    return f
+
+
 def serve(h, mob: MobileAccess, ip: str) -> None:
     """Handle one phone request. `h` is the dashboard Handler (already past the network and Host checks)."""
     url = urlsplit(h.path)
@@ -580,12 +594,17 @@ def serve(h, mob: MobileAccess, ip: str) -> None:
     if path == "/m/" or path.startswith("/m/"):
         if method not in ("GET", "HEAD"):
             return h._send(405, b"", "text/plain")
-        name = path[3:] or "index.html"
-        ctype = STATIC_FILES.get(name)
-        f = (STATIC_DIR.parent if name in SHARED_FILES else STATIC_DIR) / name
-        if ctype is None or not f.is_file():
+        f = _static_file(path[3:] or "index.html")
+        if f is None:
             return h._send(404, b"not found", "text/plain")
-        return h._send(200, f.read_bytes(), ctype, {"Service-Worker-Allowed": "/m/"} if name == "sw.js" else None)
+        try:
+            data = f.read_bytes()
+        except FileNotFoundError:                     # vanished after the check: a plain 404, never a path
+            return h._send(404, b"not found", "text/plain")
+        except OSError:
+            return h._send(500, b"error", "text/plain")
+        return h._send(200, data, STATIC_FILES[f.name],
+                       {"Service-Worker-Allowed": "/m/"} if f.name == "sw.js" else None)
     # ---- the API
     events = path == "/api/m/chat/events"            # the chat long-poll has its own, larger bucket
     if not mob.rate_ok(("ipev:" if events else "ip:") + ip, EVENTS_PER_MIN if events else IP_RATE_PER_MIN):

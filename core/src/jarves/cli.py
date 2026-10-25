@@ -1718,7 +1718,7 @@ def cmd_dashboard(a, cfg, home) -> int:
         only_tail = bool(getattr(a, "tailnet_only", False)) or _mobile.MobileAccess(home).settings()["bind_tailnet_only"]
     try:
         dash = Dashboard(home, cfg, a.port, lan=a.lan, mobile_on=mobile_on, tls=tls, tailnet=tail, tls_source=tls_src,
-                         bind_tailnet_only=only_tail)
+                         bind_tailnet_only=only_tail, defer_plugins=True)
     except OSError as e:
         print(f"cannot start the dashboard: {e}", file=sys.stderr)
         return 1
@@ -1875,6 +1875,95 @@ def _update_rollback(a, cfg, home) -> int:
     return 0
 
 
+# Perf overhaul 4.5 (#159): the command modules below cost 2-4 s of imports on the owner's PC when ALL of them were
+# imported to build the parser for every command. main() now registers only the module that owns the requested command
+# (help, no command, an unknown one or any unusual global option -> every module, exactly as before).
+# (module, commands it registers, handler attribute per command or "COMMANDS"); tests/test_cli_lazy.py proves this
+# table matches what each add_cli() registers. ORDER = the order of the commands in `jarvis --help`.
+_EXT_EARLY = (
+    ("google_auth", ("google",), {"google": "cmd_google"}),           # WP-G: jarvis google login / status / logout
+    ("backup", ("backup", "restore"), {"backup": "cmd_backup", "restore": "cmd_restore"}),   # SW-V2 M5
+    ("usage", ("usage",), {"usage": "cmd_usage"}),                    # SW-V2 M5: jarvis usage
+    ("browser", ("browser",), {"browser": "cmd_browser"}),            # SW-V3 P1.2: jarvis browser status / sites / ...
+    ("instagram_channel", ("instagram",), {"instagram": "cmd_instagram"}),   # V3 P1
+    ("telegram_channel", ("telegram",), {"telegram": "cmd_telegram"}),       # V3 P1
+    ("homeassistant", ("home",), {"home": "cmd_home"}),               # V3 P1: jarvis home start / status / ...
+    ("connect", ("connect",), {"connect": "cmd_connect"}),            # owner request 20 Oct: guided account setup
+    ("approvals", ("approvals",), {"approvals": "cmd_approvals"}),    # V3: jarvis approvals list / approve / deny
+)
+_EXT_LATE = (
+    ("profiles", ("profile",), {"profile": "cmd_profile"}),           # Issue #17: jarvis profile list / create / use
+    ("wizard", ("tour",), {"tour": "cmd_tour"}),                      # owner issues #58/#60/#61: jarvis tour
+    ("release_cmd", ("release",), {"release": "cmd_release"}),        # jarvis release signoff
+    ("release_notes", ("release-notes",), "COMMANDS"),                # what changed per version, HTML page
+    ("cli_parity", ("timers", "lists", "goals", "prefs", "proactive", "dev", "notes", "jobs", "reports"), "COMMANDS"),
+    ("budget_cli", ("budget",), "COMMANDS"),                          # SW-V4 D (#14)
+    ("privacy", ("privacy",), "COMMANDS"),                            # OD-12: jarvis privacy status | full-text on|off
+    ("phone_cli", ("phone",), "COMMANDS"),                            # V5: jarvis phone status | approvals | ...
+    ("recall", ("recall",), {"recall": "cmd_recall"}),                # SW-V4 G: jarvis recall "query"
+    ("diag.service", ("health",), {"health": "cmd_health"}),          # SW-V4 O: jarvis health [report|...]
+    ("selfspeed", ("selftest", "speedtest", "performance"), "COMMANDS"),   # owner request 21 Oct
+    ("issue_registry", ("issues", "issue"), "COMMANDS"),              # owner request 21 Oct: jarvis issues ...
+    ("web_cli", ("web",), "COMMANDS"),                                # owner request 21 Oct: jarvis web
+    None,                                                             # plugins.d/*.toml command modules go here
+    ("whatsapp_admin", ("whatsapp",), {"whatsapp": "cmd_whatsapp"}),  # SW-V4 F: jarvis whatsapp status / link / ...
+    ("orchestrator.surfaces", ("agents",), {"agents": "cmd_agents"}),  # SW-V4 E: jarvis agents list | ask | ...
+    ("projectmgr.surfaces", ("project",), {"project": "cmd_project"}),  # project manager: jarvis project ...
+    ("dialing", ("dial",), {"dial": "cmd_dial"}),                     # SW-V4 H: jarvis dial <name|number>
+    ("self_manage", ("manage", "undo"), {"manage": "cmd_manage", "undo": "cmd_manage"}),   # manage myself
+)
+_INLINE_COMMANDS = frozenset({"run", "start", "show", "hide", "mic", "appearance", "talk", "autostart", "logs", "stop",
+                              "status", "diag", "memory", "contacts", "calendar", "mail", "music", "chatgpt", "wake",
+                              "doctor", "setup", "key", "chat", "text", "ask", "execute", "tell", "say", "cost",
+                              "dashboard", "features", "help", "diagnose", "update"})
+_GLOBAL_VALUE_OPTS = ("--config", "--profile")
+
+
+def _requested_command(argv: list[str]) -> str | None:
+    """The sub-command a command line asks for, or None when the full parser is needed: no command, --help /
+    --version, a command not in the tables (plugins, typos), or any global option other than the exact
+    --no-rtl-fix / --config X / --profile X forms (argparse also accepts abbreviations; those take the full path)."""
+    it = iter(argv)
+    for tok in it:
+        if tok == "--no-rtl-fix":
+            continue
+        if tok in _GLOBAL_VALUE_OPTS:
+            if next(it, None) is None:
+                return None
+            continue
+        if tok.startswith(tuple(o + "=" for o in _GLOBAL_VALUE_OPTS)):
+            continue
+        if tok.startswith("-"):
+            return None
+        known = tok in _INLINE_COMMANDS or any(tok in r[1] for r in (*_EXT_EARLY, *_EXT_LATE) if r)
+        return tok if known else None
+    return None
+
+
+def _ext_modules(want: str | None) -> list[tuple]:
+    """(group, module, commands, handlers) to register for `want` (None = every module, in --help order). An inline
+    command (run, status, dashboard...) imports none of them."""
+    from importlib import import_module
+
+    from . import plugin_registry
+    out = []
+    for group, table in (("early", _EXT_EARLY), ("late", _EXT_LATE)):
+        for row in table:
+            if row is None:                                   # plugins: their commands are known only after import
+                if want is None:
+                    out += [(group, m, tuple(m.COMMANDS), "COMMANDS") for m in plugin_registry.modules("cli")]
+                continue
+            mod, cmds, handlers = row
+            if want is None or want in cmds:
+                out.append((group, import_module(f".{mod}", __package__), cmds, handlers))
+    return out
+
+
+def _handler(entry: tuple, cmd: str):
+    _group, mod, _cmds, handlers = entry
+    return mod.COMMANDS[cmd] if handlers == "COMMANDS" else getattr(mod, handlers[cmd])
+
+
 def main(argv: list[str] | None = None) -> int:
     for stream in (sys.stdout, sys.stderr):      # Hebrew output on Windows consoles
         try:
@@ -1883,6 +1972,9 @@ def main(argv: list[str] | None = None) -> int:
             pass
     from . import console_rtl
     console_rtl.install(sys.argv[1:] if argv is None else list(argv))   # Hebrew in consoles without bidi (--no-rtl-fix / JARVES_CONSOLE_RTL)
+    args = sys.argv[1:] if argv is None else list(argv)
+    # `jarvis --version` prints and exits while parsing, before any sub-command is looked at: no command module needed
+    ext = [] if args[:1] == ["--version"] else _ext_modules(_requested_command(args))
     ap = argparse.ArgumentParser(prog="jarves", description="JARVES assistant Core")
     ap.add_argument("--no-rtl-fix", action="store_true", help="print Hebrew in logical order (consoles that do their own bidi)")
     ap.add_argument("--config", type=Path, help="config.toml (default: <JARVES_HOME>/config.toml)")
@@ -1979,24 +2071,9 @@ def main(argv: list[str] | None = None) -> int:
     g = sub.add_parser("chatgpt", help="connect / disconnect your ChatGPT plan (Sign in with ChatGPT)")
     g.add_argument("action", choices=["login", "logout", "status", "models"])
     g.add_argument("--forget", action="store_true", help="logout: also forget this app registration")
-    from .google_auth import add_cli as add_google_cli, cmd_google
-    add_google_cli(sub)                       # WP-G: jarvis google login / status / logout
-    from .backup import add_cli as add_backup_cli, cmd_backup, cmd_restore
-    from .usage import add_cli as add_usage_cli, cmd_usage
-    add_backup_cli(sub)                       # SW-V2 M5: jarvis backup / restore
-    add_usage_cli(sub)                        # SW-V2 M5: jarvis usage
-    from .browser import add_cli as add_browser_cli, cmd_browser
-    add_browser_cli(sub)                      # SW-V3 P1.2: jarvis browser status / sites / allow / remove
-    from .telegram_channel import add_cli as add_telegram_cli, cmd_telegram
-    from .homeassistant import add_cli as add_home_cli, cmd_home
-    from .instagram_channel import add_cli as add_instagram_cli, cmd_instagram
-    add_instagram_cli(sub)                    # V3 P1: jarvis instagram start / status / test / logout (+ serve, refresh)
-    add_telegram_cli(sub)                     # V3 P1: jarvis telegram start / status / test / logout
-    add_home_cli(sub)                         # V3 P1: jarvis home start / status / test / logout
-    from .connect import add_cli as add_connect_cli, cmd_connect
-    add_connect_cli(sub)                      # owner request 20 Oct: jarvis connect (guided setup of every account)
-    from .approvals import add_cli as add_approvals_cli, cmd_approvals
-    add_approvals_cli(sub)                    # V3: jarvis approvals list / approve / deny / history
+    for entry in ext:
+        if entry[0] == "early":
+            entry[1].add_cli(sub)
     wk = sub.add_parser("wake", help="calibrate the wake word to your voice and mic, or train a new wake phrase")
     wk.add_argument("action", choices=["test", "train", "eval"],
                     help="test = live check of your voice + mic with an exact fix; train = new phrase (candidate; --apply to use, --revert to undo); "
@@ -2103,46 +2180,11 @@ def main(argv: list[str] | None = None) -> int:
                                                               "from before the update")
     up.add_argument("--keep-data", action="store_true", help="rollback: reinstall the program only, keep current data")
     up.add_argument("--window", action="store_true", help="rollback: show the setup window instead of running silently")
-    from . import profiles
-    profiles.add_cli(sub)                     # Issue #17: jarvis profile list / create / use / delete / export
-    from . import wizard
-    wizard.add_cli(sub)                       # owner issues #58/#60/#61: jarvis tour (Setup and tour wizard)
-    from . import release_cmd
-    release_cmd.add_cli(sub)                  # jarvis release signoff (stable release manual test sign-off)
-    from . import release_notes
-    release_notes.add_cli(sub)                # jarvis release-notes: what changed per version, HTML page
-    from . import cli_parity
-    cli_parity.add_cli(sub)                   # V4 P0.3: jarvis timers / lists / notes / jobs / reports
-    from . import budget_cli
-    budget_cli.add_cli(sub)                   # SW-V4 D (#14): jarvis budget status / test-cap / set / reset-ladder
-    from . import recall
-    from . import privacy as privacy_cli, phone_cli
-    privacy_cli.add_cli(sub)                  # OD-12: jarvis privacy status | full-text on|off
-    phone_cli.add_cli(sub)                    # V5: jarvis phone status | approvals | revoke-all | bind
-    recall.add_cli(sub)                       # SW-V4 G: jarvis recall "query" [--since] [--json]
-    from .diag import service as health_cli
-    health_cli.add_cli(sub)                   # SW-V4 O: jarvis health [report|remediate|ticket|ai-review|canary|...]
-    from . import selfspeed
-    selfspeed.add_cli(sub)                    # owner request 21 Oct: jarvis selftest [--deep] / jarvis speedtest
-    from . import issue_registry
-    issue_registry.add_cli(sub)               # owner request 21 Oct: jarvis issues [list|show|report|ignore|fixed|add]
-    from . import web_cli
-    web_cli.add_cli(sub)                      # owner request 21 Oct: jarvis web (the dashboard Chat page)
-    from . import plugin_registry
-    plugin_cli = plugin_registry.modules("cli")
-    for m in plugin_cli:                      # plugins.d/*.toml: a new command module needs no edit here
-        m.add_cli(sub)
-    from . import whatsapp_admin
-    whatsapp_admin.add_cli(sub)               # SW-V4 F: jarvis whatsapp status / link / mode / allow / kill ...
-    from .orchestrator import surfaces as agents_cli
-    agents_cli.add_cli(sub)                   # SW-V4 E: jarvis agents list | status | ask | tell | start | ...
-    from .projectmgr import surfaces as project_cli
-    project_cli.add_cli(sub)                  # project manager: jarvis project open | plan | status | add | talk | run ...
-    from . import dialing
-    dialing.add_cli(sub)                      # SW-V4 H: jarvis dial <name|number> [--yes-on-screen]
-    from . import self_manage
-    self_manage.add_cli(sub)                  # jarvis manage status|file|memory|feature|skill|setting|connect|history|undo
+    for entry in ext:
+        if entry[0] == "late":
+            entry[1].add_cli(sub)
     a = ap.parse_args(argv)
+    from . import profiles
     try:
         if a.profile:
             profiles.select(a.profile)        # this process and every child it starts use that profile
@@ -2159,25 +2201,17 @@ def main(argv: list[str] | None = None) -> int:
     except ConfigError as e:
         print(f"CONFIG ERROR: {e}", file=sys.stderr)
         return 2
-    return {"run": cmd_run, "stop": cmd_stop, "status": cmd_status, "diag": cmd_diag, "memory": cmd_memory, "music": cmd_music,
-            "contacts": cmd_personal, "calendar": cmd_personal, "mail": cmd_personal,
-            "execute": cmd_execute, "chat": cmd_chat, "text": cmd_chat,
-            "ask": cmd_ask, "tell": cmd_ask, "say": cmd_say, "chatgpt": cmd_chatgpt, "setup": cmd_setup, "logs": cmd_logs, "key": cmd_key,
-            "wake": cmd_wake, "doctor": cmd_doctor, "cost": cmd_cost, "dashboard": cmd_dashboard,
-            "diagnose": cmd_diagnose, "features": cmd_features, "help": cmd_help, "google": cmd_google,
-            "backup": cmd_backup, "restore": cmd_restore, "usage": cmd_usage, "start": cmd_start,
-            "show": cmd_display, "hide": cmd_display, "autostart": cmd_autostart,
-            "mic": cmd_mic, "appearance": cmd_appearance, "talk": cmd_talk,
-            "update": cmd_update, "browser": cmd_browser, "connect": cmd_connect, "telegram": cmd_telegram, "instagram": cmd_instagram, "home": cmd_home,
-            "profile": profiles.cmd_profile, "approvals": cmd_approvals, "recall": recall.cmd_recall,
-            "health": health_cli.cmd_health,
-            "whatsapp": whatsapp_admin.cmd_whatsapp,
-            "agents": agents_cli.cmd_agents, "project": project_cli.cmd_project,
-            "dial": dialing.cmd_dial, "release": release_cmd.cmd_release, "tour": wizard.cmd_tour,
-            "manage": self_manage.cmd_manage, "undo": self_manage.cmd_manage,
-            **cli_parity.COMMANDS, **budget_cli.COMMANDS, **privacy_cli.COMMANDS, **phone_cli.COMMANDS, **selfspeed.COMMANDS,
-            **issue_registry.COMMANDS, **web_cli.COMMANDS, **release_notes.COMMANDS,
-            **{k: v for m in plugin_cli for k, v in m.COMMANDS.items()}}[a.cmd](a, cfg, home)
+    inline = {"run": cmd_run, "stop": cmd_stop, "status": cmd_status, "diag": cmd_diag, "memory": cmd_memory,
+              "music": cmd_music, "contacts": cmd_personal, "calendar": cmd_personal, "mail": cmd_personal,
+              "execute": cmd_execute, "chat": cmd_chat, "text": cmd_chat, "ask": cmd_ask, "tell": cmd_ask, "say": cmd_say,
+              "chatgpt": cmd_chatgpt, "setup": cmd_setup, "logs": cmd_logs, "key": cmd_key, "wake": cmd_wake,
+              "doctor": cmd_doctor, "cost": cmd_cost, "dashboard": cmd_dashboard, "diagnose": cmd_diagnose,
+              "features": cmd_features, "help": cmd_help, "start": cmd_start, "show": cmd_display, "hide": cmd_display,
+              "autostart": cmd_autostart, "mic": cmd_mic, "appearance": cmd_appearance, "talk": cmd_talk,
+              "update": cmd_update}
+    if a.cmd in inline:
+        return inline[a.cmd](a, cfg, home)
+    return _handler(next(e for e in ext if a.cmd in e[2]), a.cmd)(a, cfg, home)
 
 
 if __name__ == "__main__":

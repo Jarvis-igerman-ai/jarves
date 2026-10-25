@@ -1,5 +1,5 @@
 name: jarves-dependabot
-# Dependabot PRs: patch and minor bumps get the `automerge` label, so the queue (automerge.yml) merges them as soon as ALL
+# Dependabot PRs: patch and minor bumps get the `automerge` label, so automerge.yml puts them in the merge queue once ALL
 # jarves-checks are green. Major bumps (and anything the parser cannot classify) never get the label: a human decides.
 # Kill switch: repository variable DEPENDABOT_AUTOMERGE = "false". This workflow never checks out or runs the PR's code:
 # it only reads the PR title/body through the event payload (core/tools/dependabot_gate.py, standard library).
