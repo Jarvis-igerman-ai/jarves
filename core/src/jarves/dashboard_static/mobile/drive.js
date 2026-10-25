@@ -14,7 +14,10 @@
       trip: "Plan a trip", from: "From", to: "To", plan: "Plan trip", places: "Type both places. JARVES never reads your location.",
       maps: "Open in Google Maps", waze: "Open in Waze", tap: "Opens in your Maps app only when you tap.",
       tripoff: "Trip planning is switched off on the computer.", failed: "Could not do that", loading: "Loading…", working: "Working…",
-      mode_alone: "Full briefing", mode_present: "Short briefing (a passenger can hear)" },
+      mode_alone: "Full briefing", mode_present: "Short briefing (a passenger can hear)",
+      acts: "Quick actions", actoff: "Drive Actions are switched off on the computer.", acthint: "These make a link. Nothing is dialed, sent or played until you tap it.",
+      call: "Phone number", callgo: "Prepare call", navi: "Destination", navgo: "Prepare navigation", mus: "Song, artist or playlist", musgo: "Prepare music",
+      tel: "Call", play: "Open in YouTube Music", tapact: "Opens in your phone's own app only when you tap." },
     he: { intro: "תצוגת נהיגה. כפתורים גדולים, שום דבר לא מתחיל מעצמו.", off: "מסך הנהיגה כבוי במחשב.",
       mode: "מצב נהיגה", on: "דלוק", offm: "כבוי", readonly: "מוצג כאן בלבד. מדליקים ומכבים במחשב: jarvis drive on / off.",
       waiting: "ממתין לשתעצרו", none: "שום דבר לא ממתין.", nolist: "מוצג רק הכלי, אף פעם לא הטקסט.",
@@ -24,9 +27,15 @@
       trip: "תכנון נסיעה", from: "מאיפה", to: "לאן", plan: "תכננו נסיעה", places: "מקלידים את שני המקומות. JARVES אף פעם לא קורא את המיקום שלכם.",
       maps: "פתיחה ב-Google Maps", waze: "פתיחה ב-Waze", tap: "נפתח באפליקציית המפות רק כשאתם לוחצים.",
       tripoff: "תכנון נסיעה כבוי במחשב.", failed: "לא ניתן לבצע", loading: "טוען…", working: "עובד…",
-      mode_alone: "תדריך מלא", mode_present: "תדריך קצר (נוסע יכול לשמוע)" },
+      mode_alone: "תדריך מלא", mode_present: "תדריך קצר (נוסע יכול לשמוע)",
+      acts: "פעולות מהירות", actoff: "פעולות נהיגה כבויות במחשב.", acthint: "אלה יוצרים קישור. שום דבר לא מחויג, נשלח או מתנגן עד שתלחצו עליו.",
+      call: "מספר טלפון", callgo: "הכינו שיחה", navi: "יעד", navgo: "הכינו ניווט", mus: "שיר, אמן או רשימה", musgo: "הכינו מוזיקה",
+      tel: "התקשרו", play: "פתיחה ב-YouTube Music", tapact: "נפתח באפליקציה של הטלפון רק כשאתם לוחצים." },
   };
   const LINKS = ["https://www.google.com/maps/dir/?", "https://waze.com/ul?"];
+  const ACT_LINKS = ["tel:+", "https://www.google.com/maps/dir/?", "https://waze.com/ul?", "https://music.youtube.com/search?q="];
+  const ACTS = [["call", "call", "callgo"], ["navigate", "navi", "navgo"], ["music", "mus", "musgo"]];
+  let act = {}, actRes = null;
   let root = null, cx = null, busy = false, state = null, brief = null, trip = null, note = "", from = "", to = "";
   const t = (k) => ((T[cx.lang()] || T.en)[k]) || T.en[k] || k;
   const el = (tag, cls, text) => { const e = document.createElement(tag); if (cls) e.className = cls; if (text != null) e.textContent = text; return e; };
@@ -46,6 +55,12 @@
     if (busy) return; busy = true; note = t("working"); paint();
     try { trip = await cx.post("/api/m/drive/journey", { origin: from, destination: to }); note = ""; }
     catch (e) { trip = null; note = t("failed") + ": " + e.message; }
+    busy = false; paint();
+  }
+  async function doAct(kind) {
+    if (busy) return; busy = true; note = t("working"); actRes = null; paint();
+    try { actRes = { kind, ...(await cx.post("/api/m/drive/action", { kind, text: act[kind] || "" })) }; note = ""; }
+    catch (e) { note = t("failed") + ": " + e.message; }
     busy = false; paint();
   }
   function btn(label, fn, primary) { const b = el("button", "big" + (primary ? " primary" : ""), label); b.type = "button"; b.addEventListener("click", fn); return b; }
@@ -100,6 +115,28 @@
       c.appendChild(row); c.appendChild(el("p", "muted", t("tap")));
     }
   }
+  function actCard() {
+    const c = card(t("acts"));
+    if (!state.actions_on) { c.appendChild(el("p", "muted", t("actoff"))); return; }
+    c.appendChild(el("p", "muted", t("acthint")));
+    ACTS.forEach(([kind, lk, gk]) => {
+      const lab = el("label"); lab.appendChild(el("span", "", t(lk)));
+      const inp = el("input"); inp.maxLength = 120; inp.value = act[kind] || ""; inp.setAttribute("dir", "auto"); inp.setAttribute("autocomplete", "off");
+      if (kind === "call") inp.setAttribute("inputmode", "tel");
+      inp.setAttribute("aria-label", t(lk)); inp.addEventListener("input", () => { act[kind] = inp.value; }); lab.appendChild(inp); c.appendChild(lab);
+      c.appendChild(btn(t(gk), () => doAct(kind), false));
+      if (actRes && actRes.kind === kind) {
+        if (!actRes.ok) { const p = el("p", "muted", (cx.lang() === "he" ? actRes.error_he : actRes.error) || t("failed")); p.setAttribute("role", "status"); c.appendChild(p); return; }
+        const row = el("div", "col");
+        (actRes.links || []).forEach((l) => {
+          if (!(typeof l.url === "string" && ACT_LINKS.some((p) => l.url.startsWith(p)))) return;
+          const a = el("a", "big btn", l.id === "tel" ? t("tel") : l.id === "maps" ? t("maps") : l.id === "waze" ? t("waze") : t("play"));
+          a.href = l.url; a.rel = "noopener noreferrer"; if (l.id !== "tel") a.target = "_blank"; row.appendChild(a);
+        });
+        c.appendChild(row); c.appendChild(el("p", "muted", t("tapact")));
+      }
+    });
+  }
   function paint() {
     if (!root) return;
     root.replaceChildren();
@@ -107,11 +144,11 @@
     if (note) { const n = el("p", "muted", note); n.setAttribute("role", "status"); root.appendChild(n); }
     if (!state) return;
     if (!state.enabled) { root.appendChild(el("p", "", t("off"))); return; }
-    modeCard(); briefCard(); tripCard();
+    modeCard(); briefCard(); tripCard(); actCard();
   }
   const typing = () => document.activeElement && root.contains(document.activeElement) && document.activeElement.tagName === "INPUT";
   window.JarvesDrive = {
-    mount(node, ctx) { root = node; cx = ctx; note = ""; brief = trip = null; from = to = ""; root.replaceChildren(el("p", "muted", t("loading"))); load(); },
+    mount(node, ctx) { root = node; cx = ctx; note = ""; brief = trip = actRes = null; act = {}; from = to = ""; root.replaceChildren(el("p", "muted", t("loading"))); load(); },
     refresh() { if (root && !busy && !typing()) load(); },
     unmount() { root = null; },
     catalogs: T,

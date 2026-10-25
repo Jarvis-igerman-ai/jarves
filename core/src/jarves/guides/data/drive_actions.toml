@@ -1,0 +1,52 @@
+order = 66
+category = "system"
+features = ["drive_actions"]
+suggest = false
+aliases = ["פעולות נהיגה", "חיוג מהטלפון", "ניווט מהטלפון", "drive actions", "tap to call", "phone deep links", "call from the drive tab"]
+links = ["phone_drive", "drive_mode", "journey", "assisted_dialing"]
+title_he = "פעולות נהיגה בטלפון"
+title_en = "Drive Actions on the phone"
+what_he = "בלשונית \"נהיגה\" בטלפון, כפתורים גדולים שמכינים קישור: שיחה (tel:), ניווט ב-Google Maps או Waze, וחיפוש ב-YouTube Music. מקלידים מספר, יעד או שיר, ו-JARVES מחזיר קישור. שום דבר לא מחויג, נשלח או מתנגן עד שאתם לוחצים על הקישור, והוא נפתח באפליקציה של הטלפון עצמו. כבוי כברירת מחדל."
+what_en = "In the phone's \"Drive\" tab, big buttons that prepare a link: a call (tel:), navigation in Google Maps or Waze, and a YouTube Music search. You type a number, a place or a song and JARVES returns a link. Nothing is dialed, sent or played until you tap the link, and it opens in the phone's own app. Off by default."
+say = [["איך מכינים שיחה מלשונית הנהיגה?", "How do I prepare a call from the Drive tab?"]]
+expect_he = "מקלידים מספר ולוחצים \"הכינו שיחה\": מופיע כפתור \"התקשרו\". השיחה מתחילה רק כשאתם לוחצים עליו, ושם עוד לוחצים חיוג בעצמכם. מספרי חירום לא נפתחים מכאן. אם הפעולה נדחתה, מוצגת הסיבה ואין קישור: אף פעם לא מוצגת הצלחה שלא קרתה."
+expect_en = "Type a number and press \"Prepare call\": a \"Call\" button appears. The call starts only when you tap it, and you still press Call yourself in the dialer. Emergency numbers are not opened from here. If an action is refused, the reason is shown and there is no link: a refusal never looks like success."
+test_he = "הריצו  jarvis features on drive_actions  ואז  jarvis features  וודאו ש-drive_actions דלוק. בטלפון עם הרשאת נהיגה, הקלידו 054-1234567 ובדקו שמופיע כפתור \"התקשרו\" ושהשיחה לא התחילה."
+test_en = "Run  jarvis features on drive_actions  then  jarvis features  and check drive_actions is on. On a phone with the drive permission, type 054-1234567 and check a \"Call\" button appears and no call has started."
+cost_he = "חינם. אין שום פנייה לשירות חיצוני מהמחשב; הקישורים נפתחים באפליקציות של הטלפון רק בלחיצה שלכם."
+cost_en = "Free. The PC calls no outside service; the links open in the phone's own apps only when you tap."
+privacy_he = "המספר, היעד וטקסט המוזיקה לא נשמרים ולא נרשמים ביומן; נרשם רק סוג הפעולה והסטטוס. אין גישה למיקום. הפעולה לא עוברת דרך הכלים של JARVES ולא משנה אישורים או את מצב הנהיגה."
+privacy_en = "The number, place and music text are not stored or logged; only the kind of action and the status are recorded. No location access. The action does not go through JARVES tools and changes no approvals and not drive mode."
+
+[parity.features]
+drive_actions = "phone"
+
+[[steps]]
+he = "ודאו שמסך הנהיגה בטלפון עובד (ראו את המדריך \"מסך נהיגה בטלפון\") ושלטלפון יש הרשאת drive."
+en = "Make sure the phone Drive screen works (see the guide \"Drive screen on the phone\") and the phone has the drive permission."
+
+[[steps]]
+he = "במחשב: jarvis features on drive_actions. לכיבוי: jarvis features off drive_actions."
+en = "On the computer: jarvis features on drive_actions. To turn it off: jarvis features off drive_actions."
+
+[[steps]]
+he = "בטלפון, בלשונית \"נהיגה\" תחת \"פעולות מהירות\": מקלידים מספר, יעד או שיר, לוחצים \"הכינו ...\", ואז לוחצים על הכפתור שמופיע. רק הלחיצה הזו מפעילה משהו."
+en = "On the phone, in the \"Drive\" tab under \"Quick actions\": type a number, place or song, press \"Prepare ...\", then tap the button that appears. Only that tap starts anything."
+
+[[problems]]
+he = "הפעולות המהירות כבויות"
+en = "Quick actions say they are switched off"
+fix_he = "הריצו jarvis features on drive_actions במחשב. הן צריכות גם את jarvis features on phone_drive."
+fix_en = "Run jarvis features on drive_actions on the computer. They also need jarvis features on phone_drive."
+
+[[problems]]
+he = "הוזן מספר חירום או מספר לא תקין והפעולה נדחתה"
+en = "An emergency or invalid number was refused"
+fix_he = "בכוונה. מספרי חירום מחייגים ישירות בחייגן של הטלפון. מספר רגיל מקלידים עם קידומת, למשל 054-1234567."
+fix_en = "On purpose. Dial emergency numbers directly on the phone's dialer. Type a normal number with the area code, for example 054-1234567."
+
+[[problems]]
+he = "הלחיצה על \"התקשרו\" לא פתחה חייגן"
+en = "Tapping \"Call\" did not open a dialer"
+fix_he = "הטלפון שלכם אחראי לפתוח tel: (למשל מכשיר בלי שיחות או דפדפן שחוסם). חייגו את המספר ידנית; JARVES לא מחייג בעצמו."
+fix_en = "Opening tel: is up to your phone (for example a device without calls or a browser that blocks it). Dial the number by hand; JARVES never dials by itself."

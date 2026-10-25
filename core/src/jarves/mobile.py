@@ -31,7 +31,7 @@ from pathlib import Path
 from typing import Callable
 from urllib.parse import urlsplit
 
-from . import logs, mobile_drive, qrmini  # noqa: F401  (mobile_drive registers the phone_drive row)
+from . import logs, mobile_drive, drive_actions, qrmini  # noqa: F401  (mobile_drive / drive_actions register their catalog rows)
 from .continuity import Continuity
 
 FEATURE = "mobile_access"
@@ -929,6 +929,17 @@ def serve(h, mob: MobileAccess, ip: str) -> None:
             return
         st, obj = mobile_drive.journey(mob, d)
         return done(st, obj, op="journey")
+    if path == "/api/m/drive/action" and method == "POST":       # Drive Actions (V6 #217): text in, a tap-only tel:/Maps/Waze/Music LINK out; nothing is done here
+        if not need("drive"):
+            return
+        if not mob.rate_ok("drive-action:" + dev["id"], drive_actions.RATE_PER_MIN):
+            mob.audit("rate_limited", device=dev["id"], path=path, scope="drive-action")
+            return h._json_extra(429, {"error": "too many requests: wait a minute"}, {"Retry-After": "60"})
+        d = _json_body(h)
+        if d is None:
+            return
+        st, obj = drive_actions.phone_action(mob, d)
+        return done(st, obj, op="action", kind=str(d.get("kind", ""))[:8])
     if path == "/api/m/signals" and method == "POST":
         if "tasks" not in dev["scopes"] and not need("status"):     # stop / snooze only reduce activity: status is enough
             return

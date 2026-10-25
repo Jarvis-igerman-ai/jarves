@@ -83,7 +83,7 @@ def view(mob) -> dict:
     return {"enabled": _on(f, FEATURE), "drive_mode": _on(f, drive_mode.FEATURE), "waiting": len(items),
             "queue": [{"tool": tool_name(i.text)} for i in items],
             "briefing_on": _on(f, "drive_briefing"), "passenger_setting": setting if setting in MODES else "ask",
-            "journey_on": _on(f, "journey"), "privacy": bool(logs.privacy())}
+            "journey_on": _on(f, "journey"), "actions_on": _on(f, "drive_actions"), "privacy": bool(logs.privacy())}
 
 
 def briefing(mob, answer: str | None) -> tuple[int, dict]:
