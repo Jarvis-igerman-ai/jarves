@@ -1,0 +1,60 @@
+order = 29
+category = "system"
+features = ["github"]
+aliases = ["גיטהאב", "github", "גיט", "pull request", "בקשות מיזוג", "issues"]
+error_codes = ["GITHUB_NOT_CONNECTED", "GITHUB_AUTH", "GITHUB_FORBIDDEN", "GITHUB_RATE_LIMIT", "GITHUB_NOT_FOUND", "GITHUB_OFFLINE", "GITHUB_PROVIDER_ERROR", "GITHUB_BAD_ARGUMENT"]
+title_he = "GitHub (קריאה בלבד)"
+title_en = "GitHub (read only)"
+what_he = "ג'ארביס קורא מ-GitHub את המאגרים, ה-issues, ה-pull requests, תוצאות הבדיקות ותור המיזוג שלכם. הוא לא כותב ולא משנה כלום."
+what_en = "JARVES reads your GitHub repositories, issues, pull requests, check results and merge queue. It does not write or change anything."
+say = [["מה מצב ה-pull requests שלי?", "What is the state of my pull requests?"], ["האם הבדיקות עברו?", "Did the checks pass?"]]
+expect_he = "קריאה בלבד עם אסימון שיצרתם. הקריאות מוגבלות במספר ובזמן, ואם GitHub מגביל אותי אני אומר זאת."
+expect_en = "Read only, with a token you create. Calls are limited in number and time, and if GitHub limits me I say so."
+test = "feature"
+test_he = "הבדיקה רק בודקת שיש אסימון שמור. היא לא פונה ל-GitHub ולא משנה כלום."
+test_en = "The check only sees that a saved token exists. It does not contact GitHub and changes nothing."
+cost_he = "חינם."
+cost_en = "Free."
+privacy_he = "האסימון נשמר רק במחשב הזה, לא ביומנים ולא בדוחות. jarvis github off מוחק אותו."
+privacy_en = "The token stays on this computer only, never in logs or reports. jarvis github off deletes it."
+
+[[steps]]
+he = "ב-GitHub: Settings, Developer settings, Fine-grained tokens, צרו אסימון. בחרו רק את המאגרים הדרושים, והרשאות קריאה בלבד (Read-only): Metadata, Issues, Pull requests, Actions, Checks, Commit statuses. בלי Contents ובלי הרשאת כתיבה."
+en = "On GitHub: Settings, Developer settings, Fine-grained tokens, create a token. Pick only the repositories you need and Read-only permissions: Metadata, Issues, Pull requests, Actions, Checks, Commit statuses. No Contents and no write permission."
+
+[[steps]]
+he = "בטרמינל הקלידו jarvis github token והדביקו את האסימון (הוא לא מוצג)."
+en = "In a terminal type jarvis github token and paste the token (it is not shown)."
+action = "command:jarvis github token"
+check = "available:github"
+
+[[steps]]
+he = "הדליקו את המתג \"GitHub\" (כבוי כברירת מחדל)."
+en = "Switch on \"GitHub\" (off by default)."
+action = "feature_on:github"
+check = "active:github"
+
+[[steps]]
+he = "לכיבוי: jarvis features off github. למחיקת האסימון: jarvis github off. למצב: jarvis github status."
+en = "To turn off: jarvis features off github. To delete the token: jarvis github off. For the state: jarvis github status."
+
+[[problems]]
+he = "הוא אומר ש-GitHub לא מחובר או שהאסימון נדחה"
+en = "He says GitHub is not connected or the token was rejected"
+codes = ["GITHUB_NOT_CONNECTED", "GITHUB_AUTH"]
+fix_he = "הריצו jarvis github token והדביקו אסימון חדש (ייתכן שפג תוקפו)."
+fix_en = "Run jarvis github token and paste a new token (it may have expired)."
+
+[[problems]]
+he = "חסרה הרשאה, או שהמאגר לא נראה"
+en = "A permission is missing, or the repository is not visible"
+codes = ["GITHUB_FORBIDDEN", "GITHUB_NOT_FOUND", "GITHUB_BAD_ARGUMENT"]
+fix_he = "ודאו שהאסימון כולל את המאגר ואת הרשאות הקריאה שברשימה."
+fix_en = "Make sure the token includes the repository and the read permissions listed above."
+
+[[problems]]
+he = "יותר מדי בקשות, או שאין חיבור"
+en = "Too many requests, or no connection"
+codes = ["GITHUB_RATE_LIMIT", "GITHUB_OFFLINE", "GITHUB_PROVIDER_ERROR"]
+fix_he = "חכו מעט ונסו שוב; בדקו שיש אינטרנט."
+fix_en = "Wait a little and try again; check the internet."
