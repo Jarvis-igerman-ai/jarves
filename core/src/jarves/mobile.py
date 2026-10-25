@@ -597,7 +597,13 @@ def serve(h, mob: MobileAccess, ip: str) -> None:
         f = _static_file(path[3:] or "index.html")
         if f is None:
             return h._send(404, b"not found", "text/plain")
-        return h._send(200, f.read_bytes(), STATIC_FILES[f.name],
+        try:
+            data = f.read_bytes()
+        except FileNotFoundError:                     # vanished after the check: a plain 404, never a path
+            return h._send(404, b"not found", "text/plain")
+        except OSError:
+            return h._send(500, b"error", "text/plain")
+        return h._send(200, data, STATIC_FILES[f.name],
                        {"Service-Worker-Allowed": "/m/"} if f.name == "sw.js" else None)
     # ---- the API
     events = path == "/api/m/chat/events"            # the chat long-poll has its own, larger bucket
