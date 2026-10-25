@@ -18,7 +18,7 @@ sink, dashboard JS errors reported by the page (rate-limited; error class + scri
 `jarvis issues add`.
 
 Reporting to the developer is ONLY ever done after the owner approved the exact bundle shown (`bundle`); with a GitHub
-token it files (or comments on) an issue labelled `from-diagnostics` on igalgerman/jarves, without one it saves the
+token it files (or comments on) an issue labelled `from-diagnostics` on Jarvis-igerman-ai/jarves, without one it saves the
 bundle in issue_reports/ for the owner to attach. Nothing leaves the computer before the approval.
 
 Fixed-in tracking: when the installed version changes and the CHANGELOG / release notes of that version list the id or
@@ -53,7 +53,7 @@ from .skills import expected_tool_refusal
 FEATURE = "issue_reports"
 FILE = "issues_registry.json"
 REPORT_DIR = "issue_reports"
-REPO = "igalgerman/jarves"
+REPO = "Jarvis-igerman-ai/jarves"
 LABEL = "from-diagnostics"
 API_BASE = "https://api.github.com"              # tests point this at a local fake endpoint
 STATUSES = ("new", "acknowledged", "fixed", "ignored")

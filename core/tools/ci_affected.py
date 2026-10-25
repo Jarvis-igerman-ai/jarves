@@ -1,4 +1,4 @@
-"""Which test files does a change affect? (light PR CI on the `next` flow; docs/NEXT_FLOW.md)
+"""Which test files does a change affect? (fix-forward on a red main: core/tools/red_main.py; speed item S1 in #160)
 
 The PR run executes only the affected files; the batch run on `next` always runs everything, so a wrong guess can only
 delay a failure by one batch, never ship it. Files are deselected, never skipped (the zero-skips rule is unchanged).

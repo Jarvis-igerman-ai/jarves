@@ -174,7 +174,7 @@
     try { const d = await api("/api/guides"); badge.textContent = d.setup_needed || ""; } catch (e) { /* page shows errors */ }
   }
   refreshBadge();
-  setInterval(refreshBadge, 30000);
+  setInterval(() => { if (!document.hidden) refreshBadge(); }, 30000);   // #159: not while hidden
 
   PAGES.guides = pageGuides;
   PAGES.guide = pageGuide;

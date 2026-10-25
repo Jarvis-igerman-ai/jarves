@@ -359,6 +359,10 @@ TEXT: dict[str, str] = {
     "dashboard Phone page / `jarvis dashboard --mobile`": "עמוד טלפון בלוח הבקרה / `jarvis dashboard --mobile`",
     "UNIT test_mobile_*.py + test_tailnet.py (pairing, tokens, scopes, rate limits, audit, PWA files, TLS, Tailscale with fake interfaces); QR decoded once with OpenCV":
         "בדיקות יחידה: test_mobile_*.py ו-test_tailnet.py (צימוד, אסימונים, הרשאות, הגבלת קצב, ביקורת, קבצי PWA, TLS, Tailscale עם ממשקים מדומים); קוד QR פוענח פעם אחת עם OpenCV",
+    "UNIT test_mobile_*.py + test_tailnet.py (pairing, tokens, scopes, rate limits, audit, PWA files, TLS, Tailscale with fake interfaces); QR decoded once with OpenCV; goal-plan view with pause/cancel only (test_mobile_plans.py, emulated phone); Learned-preferences page (view/confirm/correct/forget, scope prefs) in the emulated phone (test_mobile_prefs.py)":
+        "בדיקות יחידה: test_mobile_*.py ו-test_tailnet.py (צימוד, אסימונים, הרשאות, הגבלת קצב, ביקורת, קבצי PWA, TLS, Tailscale עם ממשקים מדומים); קוד QR פוענח פעם אחת עם OpenCV; תצוגת תוכניות יעד עם השהיה וביטול בלבד (test_mobile_plans.py, טלפון מדומה); עמוד ההעדפות הנלמדות (צפייה, אישור, תיקון, שכחה, הרשאת prefs) בטלפון מדומה (test_mobile_prefs.py)",
+    "UNIT test_mobile_*.py + test_tailnet.py (pairing, tokens, scopes, rate limits, audit, PWA files, TLS, Tailscale with fake interfaces); QR decoded once with OpenCV; Learned-preferences page (view/confirm/correct/forget, scope prefs) in the emulated phone (test_mobile_prefs.py)":
+        "בדיקות יחידה: test_mobile_*.py ו-test_tailnet.py (צימוד, אסימונים, הרשאות, הגבלת קצב, ביקורת, קבצי PWA, TLS, Tailscale עם ממשקים מדומים); קוד QR פוענח פעם אחת עם OpenCV; עמוד ההעדפות הנלמדות (צפייה, אישור, תיקון, שכחה, הרשאת prefs) בטלפון מדומה (test_mobile_prefs.py)",
     "UNIT test_mobile_*.py (pairing, tokens, scopes, rate limits, audit, PWA files, TLS); QR decoded once with OpenCV":
         "בדיקות יחידה: test_mobile_*.py (צימוד, אסימונים, הרשאות, הגבלת קצב, ביקורת, קבצי PWA, TLS); קוד QR פוענח פעם אחת עם OpenCV",
     "V5 is PC-hosted; the Pi is out of scope": "V5 רץ על המחשב; ה-Pi מחוץ להיקף",
@@ -650,6 +654,7 @@ RULES: list[tuple[re.Pattern, object]] = [(re.compile(p, re.S), f) for p, f in [
                "לא בוצעה התחברות ולא שונתה הרשאה."),
     (r"^UNIT (\S+\.py)$", _s("בדיקות יחידה: {1}")),
     (r"^no Telegram bot token; tell the user: .*$", lambda m: "אין טוקן לבוט טלגרם; מריצים במחשב jarvis telegram start"),
+    (r"^Any\.do not connected; tell the user: .*$", lambda m: "Any.do לא מחובר; מריצים במחשב jarvis anydo start"),
     (r"^no Instagram token; tell the user: .*$", lambda m: "אין טוקן לאינסטגרם; מריצים במחשב jarvis instagram start"),
     (r"^Home Assistant not set up; tell the user: .*$", lambda m: "Home Assistant עוד לא הוגדר; מריצים במחשב jarvis home start"),
     (r"^needs (.+) \((\w+)\) on$", lambda m: f"צריך להפעיל קודם את \"{_feature_he(m.group(2), m.group(1))}\""),

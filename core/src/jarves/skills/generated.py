@@ -814,7 +814,7 @@ def make_builder_skill(mgr: GeneratedSkills) -> Skill:
     return BuilderSkill()
 
 
-_PI = "https://github.com/igalgerman/jarves/issues/3"
+_PI = "https://github.com/Jarvis-igerman-ai/jarves/issues/3"
 TARGETS = {"windows": {"status": "implemented_unverified",
                        "evidence": "pytest test_skill_creation (incl. malicious drafts incl. the string.Formatter "
                                    "getattr escape); child runs in a Job Object (memory + 1-process cap, kill-on-"

@@ -1,6 +1,6 @@
 """Daily CI health numbers (E3, #160): red-main rate, red-main minutes, PR wait, flakes. Read-only except --comment.
 
-    python core/tools/ci_health.py [--days 7] [--repo igalgerman/jarves]          # print the Markdown table
+    python core/tools/ci_health.py [--days 7] [--repo Jarvis-igerman-ai/jarves]          # print the Markdown table
     python core/tools/ci_health.py --comment 160                                  # also post it on that issue
 
 Numbers (jarves-checks runs of the last N days, from `gh`):
@@ -90,7 +90,7 @@ def render(days: int, runs: list[dict], prs: list[dict], flaky_issues: int, quar
 
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    ap.add_argument("--repo", default="igalgerman/jarves")
+    ap.add_argument("--repo", default="Jarvis-igerman-ai/jarves")
     ap.add_argument("--days", type=int, default=7)
     ap.add_argument("--comment", type=int, help="post the table as a comment on this issue")
     a = ap.parse_args(argv)
