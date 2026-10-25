@@ -406,7 +406,8 @@ begin
     '  else { $out += "ended by itself: $($x.ProcessName) (pid $($x.Id))" }' + #13#10 +
     '}' + #13#10 +
     'foreach ($x in $p) { try { [void]$x.WaitForExit(5000) } catch {} }' + #13#10 +
-    'if (-not $p.Count) { $out += "no process was running from the program folder" }' + #13#10 +
+    'if (-not $p.Count) { $out += "no process was running from the program folder (looked under $d; elevated: $(([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole(544)))"' + #13#10 +
+    '  foreach ($x in @(Get-Process -Name python, pythonw, "JARVES Face" -ErrorAction SilentlyContinue)) { $out += "  seen elsewhere: $($x.ProcessName) (pid $($x.Id)) $($x.Path)" } }' + #13#10 +
     '$out | Set-Content -LiteralPath $Log -Encoding ASCII' + #13#10;
 end;
 
