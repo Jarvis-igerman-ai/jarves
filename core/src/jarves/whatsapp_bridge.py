@@ -980,7 +980,7 @@ class WhatsAppBridgeSkill(Skill):
                 chats = await self._chats()
             except BridgeError as e:
                 return self._fail(e)
-            if only is not None and not empty_q:       # who + words: that chat's messages that contain the words
+            if only is not None and not empty_q and since is None and until is None:       # who + words: that chat's messages that contain the words
                 words = a.query.strip().casefold()
                 hits = [m for m in hits if words in pol.clean_text(m.get("text") or "")[0].casefold()]
             if since is not None:
