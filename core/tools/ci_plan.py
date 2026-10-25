@@ -57,7 +57,10 @@ def classify(files: list[str], event: str = "pull_request", reused: bool = False
         if event != "push":
             raise ValueError("reuse_tests_only requires a main push")
         return {k: k == "installer" for k in FLAGS}
-    if event != "pull_request":
+    # a merge-queue group (merge_group) is classified like its PR: its commit is the merge of the queue base and the PR,
+    # so `git diff HEAD^1 HEAD` is the PR's own change. A docs-only group skips the heavy jobs; the push run on main
+    # then reuses the previous proof by the docs-free tree hash (ci_reuse.py). Code always gets the full matrix.
+    if event not in ("pull_request", "merge_group"):
         return {k: True for k in FLAGS}
     files = [f.strip() for f in files if f.strip()]
     if any(SELF.match(f) for f in files):
@@ -221,7 +224,7 @@ def main(argv: list[str] | None = None) -> int:
         if a.files_from:
             files = (sys.stdin.read() if a.files_from == "-" else Path(a.files_from).read_text(encoding="utf-8")).splitlines()
         else:
-            files = _git_files() if a.event == "pull_request" else []
+            files = _git_files() if a.event in ("pull_request", "merge_group") else []
         for k, v in classify(files, a.event, a.reused, a.draft, a.reuse_tests_only).items():
             print(f"{k}={'true' if v else 'false'}")
         print("plan=" + json.dumps(plan(durations=load_durations(a.durations), linux_durations=load_durations(a.linux_durations)), separators=(",", ":")))

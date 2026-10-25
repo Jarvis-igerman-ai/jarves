@@ -220,6 +220,8 @@ def test_green_test_only_proof_is_exact_tree_same_repo_pr_only():
     hit = ci_reuse.resolve_tests("o/r", TREE, _api(proof, {101: _run(101)}))
     assert hit == {"run_id": 101, "artifact_id": 7, "name": name, "head_sha": "s" * 40}
     assert ci_reuse.resolve_tests("o/r", "bad-tree", _api(proof, {})) is None
+    # a green merge-queue run (merge_group) is the same proof: it tested exactly the commit that lands on main
+    assert ci_reuse.resolve_tests("o/r", TREE, _api(proof, {101: _run(101, event="merge_group")}))["run_id"] == 101
 
 
 @pytest.mark.parametrize("bad", [
@@ -575,8 +577,9 @@ def test_main_red_opens_one_issue_and_closes_it_when_green():
     assert doc["permissions"] == {"contents": "read", "issues": "write"}
     job = doc["jobs"]["alert"]
     assert "workflow_run.event == 'push'" in job["if"]
-    assert not any("checkout" in s.get("uses", "") for s in job["steps"])            # never runs repository code
-    run = job["steps"][0]["run"]
+    # only the default branch's own core/tools (red_main.py, fix-forward #160); never PR code
+    assert [s["with"] for s in job["steps"] if "checkout" in s.get("uses", "")] == [{"sparse-checkout": "core/tools"}]
+    run = next(s["run"] for s in job["steps"] if "run" in s)
     assert "gh issue create" in run and "gh issue comment" in run and "gh issue close" in run
 
 

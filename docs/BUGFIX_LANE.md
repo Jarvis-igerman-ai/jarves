@@ -9,7 +9,7 @@ Owner rule (CLAUDE.md): every release from 4.1/5.0 fixes all known bugs and issu
    versions seen and **content-free evidence only** (codes, numbers, timings, function names; never text, paths, addresses
    or keys).
 2. **Report.** The owner presses **Report** (or `jarvis issues report ID`). The exact text is shown, the approvals popup asks,
-   and only then a GitHub issue labelled `from-diagnostics` is filed on `igalgerman/jarves` (a repeat comments on the
+   and only then a GitHub issue labelled `from-diagnostics` is filed on `Jarvis-igerman-ai/jarves` (a repeat comments on the
    existing issue). No token: the text is saved in `issue_reports/` to attach by hand. No network before the approval.
 3. **Triage.** `python core/tools/triage_issues.py` lists the open `from-diagnostics` issues grouped by registry id, worst
    first, and says FIX, CLOSE (the CHANGELOG already lists it) or DUPLICATE. It changes nothing unless `--close-fixed`.
