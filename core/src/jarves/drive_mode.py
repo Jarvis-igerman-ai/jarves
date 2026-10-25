@@ -15,6 +15,7 @@ Rules while ON:
 """
 from __future__ import annotations
 
+import contextlib
 import json
 import os
 import tempfile
@@ -123,6 +124,47 @@ def shorten(text: str, limit: int = MAX_SPOKEN_CHARS) -> str:
     return cut + "..."
 
 
+LOCK_WAIT_S = 5.0
+
+
+@contextlib.contextmanager
+def _file_lock(path: Path, wait_s: float | None = None):
+    """An exclusive cross-process lock on `<path>.lock` (msvcrt on Windows, flock elsewhere). Fails closed: if it
+    cannot be taken within `wait_s` (default LOCK_WAIT_S, read at call time) a TimeoutError is raised and nothing is
+    written (issue #300)."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    fh = open(path.with_name(path.name + ".lock"), "a+b")
+    try:
+        deadline = time.monotonic() + (LOCK_WAIT_S if wait_s is None else wait_s)
+        while True:
+            try:
+                fh.seek(0)
+                if os.name == "nt":
+                    import msvcrt
+                    msvcrt.locking(fh.fileno(), msvcrt.LK_NBLCK, 1)
+                else:
+                    import fcntl
+                    fcntl.flock(fh.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+                break
+            except OSError:
+                if time.monotonic() >= deadline:
+                    raise TimeoutError("drive queue is locked by another process") from None
+                time.sleep(0.02)
+        try:
+            yield
+        finally:
+            with contextlib.suppress(OSError):
+                fh.seek(0)
+                if os.name == "nt":
+                    import msvcrt
+                    msvcrt.locking(fh.fileno(), msvcrt.LK_UNLCK, 1)
+                else:
+                    import fcntl
+                    fcntl.flock(fh.fileno(), fcntl.LOCK_UN)
+    finally:
+        fh.close()
+
+
 @dataclass
 class QueueItem:
     id: int
@@ -156,9 +198,22 @@ class DriveQueue:
     def _write(self, rows: list[dict]) -> None:
         self.path.parent.mkdir(parents=True, exist_ok=True)
         fd, tmp = tempfile.mkstemp(dir=str(self.path.parent), suffix=".tmp")
-        with os.fdopen(fd, "w", encoding="utf-8") as fh:
-            json.dump(rows, fh, ensure_ascii=False)
-        os.replace(tmp, self.path)
+        try:
+            with os.fdopen(fd, "w", encoding="utf-8") as fh:
+                json.dump(rows, fh, ensure_ascii=False)
+            # Windows: os.replace fails while another process is reading the file (items() takes no lock); retry
+            # briefly, then raise (the caller fails closed and the old file stays intact)
+            for attempt in range(50):
+                try:
+                    os.replace(tmp, self.path)
+                    return
+                except PermissionError:
+                    if attempt == 49:
+                        raise
+                    time.sleep(0.02)
+        finally:
+            with contextlib.suppress(OSError):
+                os.unlink(tmp)                         # only left over when the replace did not happen
 
     @staticmethod
     def _item(r: dict) -> QueueItem:
@@ -172,7 +227,7 @@ class DriveQueue:
     def add(self, action: str, text: str, *, source: str = "owner", now: float | None = None) -> QueueItem | None:
         """Save an action for later; None when the list is full."""
         now = time.time() if now is None else now
-        with self._lock:
+        with self._lock, _file_lock(self.path):       # read-modify-write under one lock (issue #300)
             rows = self._read(now)
             if len(rows) >= MAX_QUEUE:
                 return None
@@ -183,13 +238,13 @@ class DriveQueue:
 
     def release(self, now: float | None = None) -> list[QueueItem]:
         """The owner has stopped: return everything waiting and empty the list. Items are shown, never auto-run."""
-        with self._lock:
+        with self._lock, _file_lock(self.path):
             out = [self._item(r) for r in self._read(time.time() if now is None else now)]
             self._write([])
         return out
 
     def clear(self) -> int:
-        with self._lock:
+        with self._lock, _file_lock(self.path):
             n = len(self._read(time.time()))
             self._write([])
         return n
@@ -243,7 +298,18 @@ T.update({
 })
 
 
-def tool_kind(name: str, permission: str | None, args=None, *, untrusted_output: bool = False) -> str:
+def trusted_origin(tool) -> bool:
+    """Is this tool really the built-in one? The registry stamps `origin` on every tool it registers (issue #301).
+    Anything else (generated / third-party, or a tool built outside a registry) is NOT built-in: fail closed."""
+    return getattr(tool, "origin", None) == "builtin"
+
+
+def tool_kind(name: str, permission: str | None, args=None, *, untrusted_output: bool = False,
+              builtin: bool = True) -> str:
+    """`builtin=False`: a tool with an allow-listed NAME but a non-built-in origin gets no allow-list kind (it is an
+    unknown action and is deferred); a plain read is still only a read."""
+    if not builtin:
+        return ("long_read" if untrusted_output else "answer") if permission == "read" else name
     if name == "dial_prepare" and args is not None:
         from .dialing import is_emergency
         if is_emergency(str(getattr(args, "number", "") or "")) or is_emergency(str(getattr(args, "name", "") or "")):
@@ -308,16 +374,54 @@ class Gate:
     queue: DriveQueue
     contacts: Callable[[], list] = _no_contacts
 
-    def known(self, who: str) -> bool:
+    @staticmethod
+    def _addr(value) -> str:
+        """A phone number as E.164 or a plain ASCII e-mail address lower-cased; "" when it is neither. No casefold
+        (it maps 'ß'->'ss' and the Kelvin sign->'k', so two different addresses could compare equal); a non-ASCII
+        address, a display-name form ('Dana <d@x.com>') or anything with inner spaces is "" (never known)."""
+        v = str(value or "").strip()
+        if not v:
+            return ""
+        if "@" in v:
+            return v.lower() if v.isascii() and v.count("@") == 1 and not any(c.isspace() or c in "<>\",;"
+                                                                                for c in v) else ""
+        from .dialing import normalize
+        return normalize(v) or ""
+
+    def known(self, who: str, target: str | None = None) -> bool:
+        """Is the REAL destination a saved contact (issue #302)? With a `target` (the number / address the tool will
+        really use) it must equal a saved contact's normalised number or address; the name is not enough. Without a
+        target the name must match exactly ONE saved contact that has a number or address (an ambiguous or number-less
+        name is not known). Fail closed."""
+        contacts = [c for c in (self.contacts() or []) if isinstance(c, dict)]
+
+        def addrs(c) -> set[str]:
+            return {a for a in (self._addr(c.get(k)) for k in ("phone", "email", "address", "number")) if a}
+        if target is not None:
+            t = self._addr(target)
+            return bool(t) and any(t in addrs(c) for c in contacts)
         w = " ".join(str(who or "").casefold().split())
         if not w:
             return False
-        for c in self.contacts() or []:
+        hits = []
+        for c in contacts:
             names = {" ".join(str(c.get(k) or "").casefold().split()) for k in ("label", "name", "email")} - {""}
             first = (str(c.get("name") or "").casefold().split() or [""])[0]
-            if w in names or (first and w == first):
-                return True
-        return False
+            if (w in names or (first and w == first)) and addrs(c):
+                hits.append(c)
+        return len(hits) == 1
+
+    @staticmethod
+    def target(tool, args) -> str | None:
+        """The real number / address a send or call tool will use (Tool.target), or None when it declares none.
+        A tool that declares one but cannot name it gets "" (never known)."""
+        fn = getattr(tool, "target", None)
+        if fn is None:
+            return None
+        try:
+            return str(fn(args) or "")
+        except Exception:
+            return ""
 
     @staticmethod
     def recipient(tool, args) -> str:
@@ -338,7 +442,8 @@ class Gate:
         from .skills import ToolResult
         if route == PHONE_SCREEN:                         # a read-only display on the owner's phone (see the class docstring)
             if tool.permission == "read" and tool_kind(tool.name, tool.permission, args,
-                                                       untrusted_output=bool(tool.untrusted_output)) in PHONE_SCREEN_KINDS:
+                                                       untrusted_output=bool(tool.untrusted_output),
+                                                       builtin=trusted_origin(tool)) in PHONE_SCREEN_KINDS:
                 return None
             logs.warn("drive", "DRIVE_PHONE_REFUSED", "a phone screen request may only read; refused", tool=tool.name)
             return ToolResult(False, say("DRIVE_PHONE_READ_ONLY"), {"drive": "refused"}, code="DRIVE_REFUSED")
@@ -354,9 +459,10 @@ class Gate:
             logs.warn("drive", "DRIVE_OWNER_ONLY", "model tried to change drive mode; refused", tool=tool.name,
                       source=source)
             return ToolResult(False, say("DRIVE_OWNER_ONLY"), {"drive": "refused"}, code="DRIVE_OWNER_ONLY")
-        kind = tool_kind(tool.name, tool.permission, args, untrusted_output=bool(tool.untrusted_output))
+        kind = tool_kind(tool.name, tool.permission, args, untrusted_output=bool(tool.untrusted_output),
+                         builtin=trusted_origin(tool))
         who = self.recipient(tool, args) if kind in VOICE_CONFIRMED else ""
-        v = decide(kind, active=True, known_contact=self.known(who), source=source, by_voice=by_voice)
+        v = decide(kind, active=True, known_contact=self.known(who, self.target(tool, args)), source=source, by_voice=by_voice)
         if v.allowed:
             if v.code != "DRIVE_OK" or tool.permission != "read":
                 logs.info("drive", "DRIVE_ALLOWED", "drive mode allows this; normal approvals still apply",
