@@ -21,7 +21,25 @@ def test_off_by_default_and_allows_everything():
 @pytest.mark.parametrize("source", ["owner", "email", "web"])
 def test_emergency_and_hangup_are_never_blocked(action, active, source):
     v = dm.decide(action, active=active, known_contact=False, source=source, by_voice=False)
-    assert v.allowed and v.always
+    if action == "emergency_call" and source != "owner":
+        assert not v.allowed and v.code == "DRIVE_UNTRUSTED"      # untrusted text can never dial an emergency number
+    else:
+        assert v.allowed and v.always
+
+
+@pytest.mark.parametrize("source", ["tool", "skill", "calendar", "telegram", "model", "", "OWNER"])
+def test_any_source_but_the_owner_is_untrusted(source):
+    for action in ("call", "message_send", "emergency_call"):
+        assert dm.decide(action, active=True, known_contact=True, source=source).code == "DRIVE_UNTRUSTED"
+
+
+def test_queue_text_has_no_control_characters_and_bad_rows_are_skipped(tmp_path):
+    q = dm.DriveQueue(tmp_path / "q.json")
+    item = q.add("open\x1b]0;x\x07", "hi \x1b[2J\u202eevil\x00 there", source="email\r\n")
+    assert item.text == "hi [2Jevil there" and "\x1b" not in item.action and item.source == "email"
+    (tmp_path / "q.json").write_text('[{"id": "x", "action": "a", "text": "b", "ts": 1}, '
+                                     '{"id": 1, "action": "a", "text": "b", "ts": "soon"}]', encoding="utf-8")
+    assert q.items() == []
 
 
 def test_emergency_works_with_a_full_queue(tmp_path):

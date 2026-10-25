@@ -36,7 +36,14 @@ QUEUE_TTL_S = 24 * 3600         # a deferred item older than a day is dropped, n
 ALWAYS = frozenset({"emergency_call", "hang_up", "stop", "cancel"})
 ALLOWED = frozenset({"answer", "time", "weather", "calendar_read", "timer", "reminder", "music", "navigate_link"})
 VOICE_CONFIRMED = frozenset({"call", "message_send"})      # allowed only for a known contact, from the owner's own words
-UNTRUSTED = ("email", "web", "message", "recalled", "other")
+UNTRUSTED = ("email", "web", "message", "recalled", "other")   # examples; ANY source but the owner's is untrusted
+TRUSTED = frozenset({"owner"})
+_CTRL = dict.fromkeys([*range(0, 32), *range(0x7F, 0xA0), 0x202A, 0x202B, 0x202C, 0x202D, 0x202E])
+
+
+def _clean(text, limit: int) -> str:
+    """One line of plain text: whitespace collapsed, control characters (terminal escapes, bidi overrides) removed."""
+    return " ".join(str(text if text is not None else "").translate(_CTRL).split())[:limit]
 
 
 @dataclass(frozen=True)
@@ -76,6 +83,10 @@ def say(code: str, lang: str = "en", **kw) -> str:
 def decide(action: str, *, active: bool, known_contact: bool = False, source: str = "owner",
            by_voice: bool = True) -> Verdict:
     """The policy. `action` is a short kind (see ALWAYS / ALLOWED / VOICE_CONFIRMED); anything else is deferred."""
+    trusted = source in TRUSTED
+    if action == "emergency_call" and not trusted:
+        # untrusted text (an e-mail, a web page, a message) can never place an emergency call; the owner's own words can
+        return Verdict("defer", "DRIVE_UNTRUSTED")
     if action in ALWAYS:
         return Verdict("allow", "DRIVE_ALWAYS", always=True)          # even with drive mode off or the queue full
     if not active:
@@ -84,7 +95,7 @@ def decide(action: str, *, active: bool, known_contact: bool = False, source: st
         # a navigation link is opened by the owner's tap or approval, never by this module
         return Verdict("allow", "DRIVE_OK", needs_approval=(action == "navigate_link"))
     if action in VOICE_CONFIRMED:
-        if source in UNTRUSTED:
+        if not trusted:
             return Verdict("defer", "DRIVE_UNTRUSTED")
         if not known_contact or not by_voice:
             return Verdict("defer", "DRIVE_UNKNOWN_CONTACT")
@@ -121,9 +132,15 @@ class DriveQueue:
             data = json.loads(self.path.read_text(encoding="utf-8"))
         except (OSError, ValueError):
             return []
-        rows = [d for d in data if isinstance(d, dict) and {"id", "action", "text", "ts"} <= set(d)] \
-            if isinstance(data, list) else []
-        return [r for r in rows if now - float(r["ts"]) <= QUEUE_TTL_S]
+        out: list[dict] = []
+        for d in data if isinstance(data, list) else []:
+            try:
+                if isinstance(d, dict) and {"id", "action", "text", "ts"} <= set(d) and int(d["id"]) >= 0 \
+                        and now - float(d["ts"]) <= QUEUE_TTL_S:
+                    out.append(d)
+            except (TypeError, ValueError, OverflowError):
+                continue
+        return out[-MAX_QUEUE:]
 
     def _write(self, rows: list[dict]) -> None:
         self.path.parent.mkdir(parents=True, exist_ok=True)
@@ -134,7 +151,8 @@ class DriveQueue:
 
     @staticmethod
     def _item(r: dict) -> QueueItem:
-        return QueueItem(int(r["id"]), str(r["action"]), str(r["text"]), float(r["ts"]), str(r.get("source", "owner")))
+        return QueueItem(int(r["id"]), _clean(r["action"], 40), _clean(r["text"], MAX_TEXT), float(r["ts"]),
+                         _clean(r.get("source", "owner"), 20))
 
     def items(self, now: float | None = None) -> list[QueueItem]:
         with self._lock:
@@ -147,8 +165,8 @@ class DriveQueue:
             rows = self._read(now)
             if len(rows) >= MAX_QUEUE:
                 return None
-            row = {"id": max([int(r["id"]) for r in rows] + [0]) + 1, "action": str(action)[:40],
-                   "text": " ".join(str(text).split())[:MAX_TEXT], "ts": now, "source": str(source)[:20]}
+            row = {"id": max([int(r["id"]) for r in rows] + [0]) + 1, "action": _clean(action, 40),
+                   "text": _clean(text, MAX_TEXT), "ts": now, "source": _clean(source, 20)}
             self._write(rows + [row])
         return self._item(row)
 
