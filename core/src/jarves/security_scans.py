@@ -39,6 +39,8 @@ from pathlib import Path
 from typing import Callable
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
+from . import logs
+
 FEATURE = "security_scans"
 CONFIG_FILE = "security_scans.json"
 STATE_FILE = "security_scans_state.json"
@@ -71,10 +73,24 @@ class Offline(Exception):
 
 
 # ---------------------------------------------------------------------- settings and state
+def _scrub(v, depth: int = 0):
+    """CodeQL #44: every string written to the settings / state files passes logs.redact (keys too), so a token-shaped
+    value from an old or hand-edited file can never be written back in clear. Numbers and structure are kept."""
+    if isinstance(v, str):
+        return logs.redact(v)
+    if depth > 8:
+        return None
+    if isinstance(v, dict):
+        return {(logs.redact(k) if isinstance(k, str) else k): _scrub(x, depth + 1) for k, x in v.items()}
+    if isinstance(v, (list, tuple)):
+        return [_scrub(x, depth + 1) for x in v]
+    return v
+
+
 def _write(path: Path, data: dict) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     tmp = path.with_suffix(".tmp")
-    tmp.write_text(json.dumps(data, ensure_ascii=False, separators=(",", ":")), encoding="utf-8")
+    tmp.write_text(json.dumps(_scrub(data), ensure_ascii=False, separators=(",", ":")), encoding="utf-8")
     os.replace(tmp, path)
 
 
