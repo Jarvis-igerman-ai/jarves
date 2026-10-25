@@ -43,17 +43,20 @@ en = "To turn off: jarvis features off anydo. To disconnect fully (delete the si
 [[problems]]
 he = "הוא אומר ש-Any.do לא מחובר או שההתחברות פגה"
 en = "He says Any.do is not connected or the sign-in expired"
+codes = ["ANYDO_NOT_CONNECTED", "ANYDO_AUTH_EXPIRED", "ANYDO_SESSION_LOST", "ANYDO_SIGNED_OUT"]
 fix_he = "הריצו jarvis anydo start והתחברו שוב (jarvis anydo status מראה את המצב)."
 fix_en = "Run jarvis anydo start and sign in again (jarvis anydo status shows the state)."
 
 [[problems]]
 he = "הוא אומר ש-Any.do עדיין לא החיל שינוי"
 en = "He says Any.do has not applied a change yet"
+codes = ["ANYDO_UNCERTAIN", "ANYDO_PERMISSION_DENIED"]
 fix_he = "Any.do מבקש אישור משלו לשינויים. פתחו את אפליקציית Any.do ואשרו, או השאירו את שינוי המשימות כבוי. הוספה ותזכורות לא מושפעות."
 fix_en = "Any.do asks for its own approval for changes. Open the Any.do app and approve, or leave task changes off. Adding and reminders are not affected."
 
 [[problems]]
 he = "יותר מדי בקשות, או שאין חיבור"
 en = "Too many requests, or no connection"
+codes = ["ANYDO_RATE_LIMITED", "ANYDO_OFFLINE", "ANYDO_PROVIDER_ERROR", "ANYDO_UNEXPECTED_SHAPE"]
 fix_he = "חכו דקה ונסו שוב; בדקו שיש אינטרנט. החיבור של Any.do הוא בטא ועלול להשתנות."
 fix_en = "Wait a minute and try again; check the internet. The Any.do connection is beta and may change."

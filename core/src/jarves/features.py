@@ -286,6 +286,12 @@ register("memory_llm_pass", "למידה בעזרת המודל", "Memory LLM pass
 register("diagnosis_llm_pass", "אבחון עצמי בעזרת המודל", "Self-diagnosis LLM pass", True, probe=_api_billing,
          needs=["openai_api"], risk="medium", config="history.llm_review",
          about="after each conversation one small model request looks for problems the rules miss")
+register("self_diagnosis_ask", "שאלה אחרי כשל: לבדוק?", "Ask to diagnose a failure", True,
+         config=None, about="after a failed tool JARVES asks once whether to run a quick read-only self-check "
+                            "(never more than 3 times an hour, 10 minutes per problem)")
+register("self_diagnosis_ai_wording", "ניסוח האבחון בעזרת המודל", "Model wording of the diagnosis", True,
+         probe=_api_billing, needs=["openai_api", "self_diagnosis_ask"], risk="medium",
+         about="the online model may reword the self-check result; it only sees the redacted report")
 register("google_calendar", "יומן גוגל", "Google Calendar", True, probe=_google("calendar", "calendar"), slow=True,
          needs=["google_account"], risk="medium", skills=["calendar"], about="read and add calendar events")
 register("google_contacts", "אנשי קשר בגוגל", "Google Contacts", False,

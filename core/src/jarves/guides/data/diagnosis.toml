@@ -1,7 +1,7 @@
 order = 36
 category = "system"
 pages = ["issues"]
-features = ["diagnosis_llm_pass"]
+features = ["diagnosis_llm_pass", "self_diagnosis_ask", "self_diagnosis_ai_wording"]
 aliases = ["אבחון", "בעיות", "diagnosis", "issues", "תקלות"]
 links = ["autonomy", "usage", "self_check"]
 title_he = "אבחון עצמי"
@@ -26,3 +26,21 @@ he = "ודאו שהמתג \"אבחון עצמי בעזרת המודל\" דולק
 en = "Keep the Self-diagnosis LLM pass switch on (needs an API key)."
 action = "feature_on:diagnosis_llm_pass"
 check = "active:diagnosis_llm_pass"
+
+[[steps]]
+he = "כשכלי נכשל ג'ארביס שואל פעם אחת: לבדוק? \"כן\" מריץ בדיקה עצמית מהירה (קריאה בלבד) ומסביר סיבה וצעד הבא. \"לא\" מדלג. לא ישאל יותר מ-3 פעמים בשעה, ולא על אותה בעיה תוך 10 דקות."
+en = "When a tool fails JARVES asks once: diagnose it? Yes runs a quick read-only self-check and explains the cause and next step. No skips. It never asks more than 3 times an hour, or about the same problem within 10 minutes."
+action = "feature_on:self_diagnosis_ask"
+check = "enabled:self_diagnosis_ask"
+
+[[steps]]
+he = "בדיקה ידנית של תחום: jarvis diagnose anydo, whatsapp, google או voice (אפשר --code וקוד השגיאה, ו---json). המתג \"ניסוח האבחון בעזרת המודל\" מאפשר למודל המקוון לנסח מחדש את התוצאה, והוא רואה רק דוח מצונזר, בלי הודעות ובלי מפתחות."
+en = "Check one area by hand: jarvis diagnose anydo, whatsapp, google or voice (add --code and the error code, and --json). The Model wording switch lets the online model reword the result; it sees only a redacted report: no messages, no keys."
+action = "feature_on:self_diagnosis_ai_wording"
+check = "enabled:self_diagnosis_ai_wording"
+
+[[problems]]
+he = "הוא שואל אחרי כל כשל ואני לא רוצה"
+en = "He asks after a failure and I do not want that"
+fix_he = "כבו את המתג \"שאלה אחרי כשל: לבדוק?\" (jarvis features off self_diagnosis_ask). בלי המתג הוא לא שואל בכלל."
+fix_en = "Turn off the Ask to diagnose a failure switch (jarvis features off self_diagnosis_ask). Without it he never asks."
