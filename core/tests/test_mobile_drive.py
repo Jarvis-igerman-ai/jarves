@@ -251,3 +251,32 @@ def test_drive_js_is_served_csp_safe_translated_and_never_opens_a_link_itself():
     assert re.search(r'id="tabbtn-drive"[^>]*\bhidden\b', html)                                      # hidden by default
     app = (MOBILE_DIR / "app.js").read_text(encoding="utf-8")
     assert 'drive: "scope:drive"' in app and "tab_drive" in app
+
+
+def test_briefing_has_its_own_rate_limit_per_phone_with_en_he_message(rig):
+    tok, _ = rig.pair()
+    sts = [call(rig.d, "GET", "/api/m/drive/briefing?passenger=alone", tok) for _ in range(mobile_drive.BRIEFING_RATE_PER_MIN + 2)]
+    assert [s for s, _ in sts[:mobile_drive.BRIEFING_RATE_PER_MIN]] == [200] * mobile_drive.BRIEFING_RATE_PER_MIN
+    st, j = sts[-1]
+    assert st == 429 and j["error"] and j["error_he"] and j["code"] == "DRIVE_RATE_LIMITED"
+    assert len(rig.calls) == mobile_drive.BRIEFING_RATE_PER_MIN                    # the limited taps never reached the tool
+    tok2, _ = rig.pair()                                                           # another phone has its own bucket
+    assert call(rig.d, "GET", "/api/m/drive/briefing?passenger=alone", tok2)[0] == 200
+
+
+def test_journey_limit_message_is_in_both_languages(rig):
+    tok, _ = rig.pair()
+    last = None
+    for _ in range(mobile_drive.JOURNEY_RATE_PER_MIN + 1):
+        last = call(rig.d, "POST", "/api/m/drive/journey", tok, {"origin": "A1", "destination": "B1"})
+    assert last[0] == 429 and last[1]["error_he"] and last[1]["error"]
+
+
+def test_clean_place_strips_bidi_and_invisible_format_characters_like_the_queue():
+    assert journey.clean_place("Tel\u202e Aviv\u200b\u2066") == "Tel Aviv"
+    assert journey.clean_place("\ufeffHai\u00adfa") == "Haifa"
+    assert drive_mode.strip_invisible("a\u202eb\u2069c\u200d") == "abc"
+    with pytest.raises(journey.JourneyError):
+        journey.clean_place("\u202e\u200b")                                       # nothing left once invisibles are gone
+    with pytest.raises(journey.JourneyError):
+        journey.clean_place("Haifa\x07")                                          # control characters are still refused

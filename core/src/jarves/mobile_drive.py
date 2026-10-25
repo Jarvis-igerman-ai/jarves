@@ -22,6 +22,8 @@ from . import logs
 SCOPE = "drive"
 FEATURE = "phone_drive"
 JOURNEY_RATE_PER_MIN = 6
+BRIEFING_RATE_PER_MIN = 6           # each tap calls Google and the weather service and can hold a dashboard thread up to 60 s
+RATE_LIMITED = {"error": "too many requests: wait a minute", "error_he": "יותר מדי בקשות: חכו דקה", "code": "DRIVE_RATE_LIMITED"}
 LINK_PREFIXES = ("https://www.google.com/maps/dir/?", "https://waze.com/ul?")
 _TOOL = re.compile(r"[a-z][a-z0-9_]{0,39}")
 MODES = ("ask", "present", "alone")

@@ -20,6 +20,7 @@ import os
 import tempfile
 import threading
 import time
+import unicodedata
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Callable
@@ -43,9 +44,17 @@ TRUSTED = frozenset({"owner"})
 _CTRL = dict.fromkeys([*range(0, 32), *range(0x7F, 0xA0), 0x202A, 0x202B, 0x202C, 0x202D, 0x202E])
 
 
+def strip_invisible(text) -> str:
+    """Remove invisible format characters (Unicode category Cf: bidi overrides/isolates, zero-width, BOM, soft hyphen)
+    and the C1 controls. ONE helper for every sanitiser (the queue labels here, journey.clean_place). Keeps C0 controls
+    and whitespace for the caller to fold or refuse."""
+    return "".join(c for c in str(text if text is not None else "")
+                   if unicodedata.category(c) != "Cf" and not 0x7F <= ord(c) < 0xA0)
+
+
 def _clean(text, limit: int) -> str:
     """One line of plain text: whitespace collapsed, control characters (terminal escapes, bidi overrides) removed."""
-    return " ".join(str(text if text is not None else "").translate(_CTRL).split())[:limit]
+    return " ".join(strip_invisible(str(text if text is not None else "").translate(_CTRL)).split())[:limit]
 
 
 @dataclass(frozen=True)
