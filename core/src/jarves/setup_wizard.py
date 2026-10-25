@@ -59,12 +59,12 @@ ADDON_MODULES = ("jarves.telegram_channel", "jarves.instagram_channel", "jarves.
                  "jarves.appearance", "jarves.backup", "jarves.usage", "jarves.updates", "jarves.runtime",
                  "jarves.operations", "jarves.guides", "jarves.skills.generated", "jarves.browser", "jarves.profiles",
                  "jarves.selfcheck", "jarves.connect", "jarves.skills.helper", "jarves.context_trace",
-                 "jarves.recall", "jarves.diag.service", "jarves.whatsapp_bridge", "jarves.orchestrator", "jarves.dialing", "jarves.self_manage") + plugin_registry.names("addons")
+                 "jarves.recall", "jarves.diag.service", "jarves.whatsapp_bridge", "jarves.orchestrator", "jarves.dialing", "jarves.self_manage", "jarves.drive_briefing") + plugin_registry.names("addons")
 # Privacy-sensitive or outward-acting: OFF on the first run whatever else says; ON only after an explicit yes.
 SAFE_OFF = frozenset({"camera", "face_recognition", "camera_when_away", "gmail_send", "calendar_write",
                       "dashboard_lan", "mobile_access", "browser", "telegram", "home_assistant", "instagram", "helper",
                       "helper_readonly_auto", "whatsapp_bridge", "whatsapp_send", "whatsapp_archive", "agent_orchestrator",
-                      "assisted_dialing", "anydo", "anydo_update"})
+                      "assisted_dialing", "drive_briefing", "anydo", "anydo_update"})
 # Registered and grouped (so coverage checks see them) but never offered by the wizard: the owner decided (20 Oct)
 # that the Helper asks for EVERY command; the read-only allow-list exists only as `jarvis features on ...`.
 WIZARD_HIDDEN = frozenset({"helper_readonly_auto", "whatsapp_archive",     # archive: explained and confirmed on its own
@@ -83,7 +83,7 @@ GROUPS: tuple[tuple[str, str, str, tuple[str, ...]], ...] = (
     ("camera", "מצלמה ופרטיות", "Camera & privacy", ("camera", "camera_preview", "face_recognition", "camera_when_away")),
     ("browser", "דפדפן", "Browser", ("browser",)),
     ("automation", "אוטומציה", "Automation", ("scheduler", "reports", "timers", "lists", "notes", "files", "proactive_alerts",
-                                              "autonomy", "morning_briefing", "text_chat", "goals", "goal_plans", "goal_done_line", "adaptive_memory", "prefs_in_prompt",
+                                              "autonomy", "morning_briefing", "drive_briefing", "text_chat", "goals", "goal_plans", "goal_done_line", "adaptive_memory", "prefs_in_prompt",
                                               "proactive_intel", "proactive_signals", "dev_manager", "dev_status")),
     ("channels", "ערוצים ובית חכם", "Channels & smart home", ("telegram", "instagram", "whatsapp_handoff",
                                                                   "whatsapp_bridge", "whatsapp_send", "whatsapp_archive", "home_assistant", "anydo", "anydo_update")),
@@ -1200,6 +1200,7 @@ BUNDLE: dict[str, list[Callable[[], tuple[bool, str]]]] = {
     "assisted_dialing": [_mod("jarves.dialing"), _win(_mod("winreg")), _data("jarves", "dashboard_static/dialing.js"),
                          _data("jarves.guides", "data/assisted_dialing.toml")],
     "morning_briefing": [_mod("jarves.briefing"), _mod("httpx"), _data("jarves.guides", "data/morning_briefing.toml")],
+    "drive_briefing": [_mod("jarves.drive_briefing"), _mod("jarves.briefing"), _data("jarves.guides", "data/drive_briefing.toml")],
     "journey": [_mod("jarves.journey"), _mod("httpx"), _data("jarves.guides", "data/journey.toml")],
     "home_assistant": [_mod("jarves.homeassistant"), _mod("httpx"), _data("jarves.guides", "data/home_assistant.toml")],
     "anydo": [_mod("jarves.anydo"), _mod("httpx"), _data("jarves.guides", "data/anydo.toml")],
