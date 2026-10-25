@@ -170,6 +170,25 @@ if ($UpgradeFrom) {
     Stop-Process -Id $locker.Id -Force -ErrorAction SilentlyContinue
     $locker.WaitForExit(10000) | Out-Null
     Remove-Item -LiteralPath $lockFile -Force -ErrorAction SilentlyContinue
+    # #153 review P2-7: an undeletable leftover rollback folder (a file in it held open by a process outside the program
+    # folder) must stop the upgrade BEFORE anything moves. The old code deleted what it could, moved python, failed on
+    # face and then "restored" the stale rollback\face over the good face. Discriminating: {app}\face must be untouched.
+    $part = if (Test-Path (Join-Path $App "face")) { "face" } else { "python" }
+    $goodFiles = @(Get-ChildItem -LiteralPath (Join-Path $App $part) -Recurse -File).Count
+    New-Item -ItemType Directory -Force (Join-Path $App "rollback\$part") | Out-Null
+    $staleLocked = Join-Path $App "rollback\$part\stale-locked-from-older-run.txt"
+    $locker = Start-Process "pwsh" -WindowStyle Hidden -PassThru -ArgumentList @("-NoProfile", "-Command",
+        "`$f = [IO.File]::Open('$staleLocked', 'OpenOrCreate', 'ReadWrite', 'None'); Start-Sleep 900")
+    for ($i = 0; $i -lt 40 -and -not (Test-Path $staleLocked); $i++) { Start-Sleep -Milliseconds 250 }
+    Start-Sleep 1
+    Check ((Install "DEFAULT" @() $Installer "") -ne 0) "undeletable leftover rollback folder: the upgrade is refused (setup exit code is not 0)"
+    Check (@(Select-String -Path (Join-Path $Work "install-*.log") -Pattern "Old rollback folder could not be deleted or moved" -ErrorAction SilentlyContinue).Count -ge 1) "undeletable leftover rollback folder: the refusal is logged"
+    Check ((Test-Path (Join-Path $App "python\python.exe")) -and (Test-Path (Join-Path $App "jarvis.cmd")) -and (Version-Of) -eq $oldVer) "undeletable leftover rollback folder: the old version $oldVer is complete"
+    Check (@(Get-ChildItem -LiteralPath (Join-Path $App $part) -Recurse -File -ErrorAction SilentlyContinue).Count -eq $goodFiles -and -not (Test-Path (Join-Path $App "$part\stale-locked-from-older-run.txt"))) "undeletable leftover rollback folder: the working $part was not replaced by the stale one"
+    Check ((Jarvis @("--version")).text -match [regex]::Escape($oldVer)) "undeletable leftover rollback folder: the old version still runs"
+    Stop-Process -Id $locker.Id -Force -ErrorAction SilentlyContinue
+    $locker.WaitForExit(10000) | Out-Null
+    Remove-Item -LiteralPath (Join-Path $App "rollback") -Recurse -Force -ErrorAction SilentlyContinue
     # #153: a leftover rollback folder from an older run must not block the upgrade
     New-Item -ItemType Directory -Force (Join-Path $App "rollback\python") | Out-Null
     $stale = Join-Path $App "rollback\python\stale-from-older-run.txt"

@@ -47,6 +47,9 @@ UninstallDisplayName=JARVES
 UninstallDisplayIcon={app}\face\JARVES Face.exe
 CloseApplications=yes
 RestartApplications=no
+; Two setups at once (an auto-update and a manual "Update now", a double click) would race on the rollback folder and
+; on the data backup/migration: the second one waits/refuses while the first holds this mutex.
+SetupMutex=JARVESSetupMutex_24F7B79A
 ChangesEnvironment=yes
 SetupLogging=yes
 UsePreviousTasks=no
@@ -88,6 +91,8 @@ english.KeepHelp=Setup checks the existing installation and data folder. It veri
 hebrew.KeepHelp=ההתקנה בודקת התקנה ותיקיית נתונים קיימות. גיבוי מאומת נוצר לפני הסבה והגרסה הקודמת נשמרת לחזרה. ביטול הסימון מעביר את הנתונים הישנים לתיקייה נפרדת ואינו מוחק אותם.
 english.RetainFailed=JARVES could not be updated because a file in the program folder is in use (%1). Nothing was changed: the current version and your data are as before. Close programs that may use JARVES files (an open folder or editor, a backup or antivirus scan) and run the update again.
 hebrew.RetainFailed=לא ניתן היה לעדכן את JARVES כי קובץ בתיקיית התוכנה בשימוש (%1). שום דבר לא השתנה: הגרסה הנוכחית והנתונים שלך כמו קודם. סגור תוכנות שעשויות להשתמש בקבצים של JARVES (תיקייה או עורך פתוחים, גיבוי או סריקת אנטי-וירוס) והפעל את העדכון שוב.
+english.ProgramIncomplete=Setup stopped: the previous JARVES program could not be put back completely (%1 is still in %2). Nothing else was changed and your data is safe. Restart Windows and run the update again; setup puts the previous program back first.
+hebrew.ProgramIncomplete=ההתקנה נעצרה: לא ניתן היה להחזיר את התוכנה הקודמת של JARVES במלואה (%1 עדיין נמצא ב-%2). שום דבר אחר לא השתנה והנתונים שלך בטוחים. הפעל מחדש את Windows והפעל את העדכון שוב; ההתקנה תחזיר קודם את התוכנה הקודמת.
 english.BackupFailed=The backup or migration failed. Your old data was kept. Check free disk space and retry. See the installer log for the failed stage.
 hebrew.BackupFailed=הגיבוי או ההסבה נכשלו. הנתונים הישנים נשמרו. בדוק מקום פנוי ונסה שוב. השלב שנכשל מופיע ביומן ההתקנה.
 
@@ -311,18 +316,84 @@ begin
   end;
 end;
 
+// A Pascal string as a PowerShell single-quoted literal (PowerShell also ends a literal at the typographic quotes).
+function PSQuote(const S: String): String;
+begin
+  Result := S;
+  StringChangeEx(Result, '''', '''''', True);
+  StringChangeEx(Result, #$2018, #$2018#$2018, True);
+  StringChangeEx(Result, #$2019, #$2019#$2019, True);
+  StringChangeEx(Result, #$201A, #$201A#$201A, True);
+  StringChangeEx(Result, #$201B, #$201B#$201B, True);
+  Result := '''' + Result + '''';
+end;
+
+function Utf16LeByte(const S: String; I: Integer): Integer;
+begin
+  if I mod 2 = 0 then Result := Ord(S[I div 2 + 1]) and 255
+  else Result := (Ord(S[I div 2 + 1]) shr 8) and 255;
+end;
+
+// powershell.exe -EncodedCommand takes the script as base64 of its UTF-16LE text. Execution policy (also one set by
+// Group Policy: AllSigned / Restricted) applies to script FILES only, never to -EncodedCommand, so the stop below
+// always runs (with -File a locked-down machine stopped nothing and every upgrade was refused).
+function EncodedCommand(const S: String): String;
+var
+  N, I, B0, B1, B2: Integer;
+  Alphabet: String;
+begin
+  Alphabet := 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/';
+  Result := '';
+  N := 2 * Length(S);
+  I := 0;
+  while I < N do begin
+    B0 := Utf16LeByte(S, I);
+    B1 := 0;
+    B2 := 0;
+    if I + 1 < N then B1 := Utf16LeByte(S, I + 1);
+    if I + 2 < N then B2 := Utf16LeByte(S, I + 2);
+    Result := Result + Alphabet[(B0 shr 2) + 1] + Alphabet[(((B0 and 3) shl 4) or (B1 shr 4)) + 1];
+    if I + 1 < N then Result := Result + Alphabet[(((B1 and 15) shl 2) or (B2 shr 6)) + 1]
+    else Result := Result + '=';
+    if I + 2 < N then Result := Result + Alphabet[(B2 and 63) + 1]
+    else Result := Result + '=';
+    I := I + 3;
+  end;
+end;
+
 // A running python.exe/face/bridge from {app} locks the folder and the rename fails (issue #141): the dashboard or
-// any extra process is not stopped by `jarvis stop`. Every process whose executable lies under {app} (matched by path,
-// never by command line) is first asked to close (windowed ones: face, music player), given a short grace, and only
-// then hard-stopped. Each step is written to the setup log by name (#153).
-function StopScript(): String;
+// any extra process is not stopped by `jarvis stop`. First (WaitS > 0, right after `jarvis stop`) the script waits up
+// to WaitS seconds until every Core lock (<data>\core.lock, <data>\profiles\*\core.lock) is free, so the Core closes
+// its databases by itself instead of being hard-killed. Then every process whose executable lies under {app}\python,
+// \face, \bridge or \rollback (matched by path, never by command line; never the whole {app}, which a first install
+// may have put in a shared folder) is first asked to close (windowed ones: face, music player), given a short grace,
+// and only then hard-stopped. Each step is written to the setup log by name (#153).
+function StopScript(const Dir, LogFile, LockRoot: String; WaitS: Integer): String;
 begin
   Result :=
-    'param([string]$Dir, [string]$Log, [int]$GraceS = 8)' + #13#10 +
+    '$Dir = ' + PSQuote(Dir) + #13#10 +
+    '$Log = ' + PSQuote(LogFile) + #13#10 +
+    '$LockRoot = ' + PSQuote(LockRoot) + #13#10 +
+    '$WaitS = ' + IntToStr(WaitS) + #13#10 +
+    '$GraceS = 8' + #13#10 +
     '$d = $Dir.TrimEnd([char]92) + [char]92' + #13#10 +
     '$out = @()' + #13#10 +
     'if ($d.Length -le 3) { "refused: the program folder is a drive root" | Set-Content -LiteralPath $Log -Encoding ASCII; exit 0 }' + #13#10 +
-    '$p = @(Get-Process | Where-Object { $_.Path -and $_.Path.StartsWith($d, [StringComparison]::OrdinalIgnoreCase) })' + #13#10 +
+    'function Held($f) { $s = $null; try { $s = [IO.File]::Open($f, "Open", "ReadWrite", "ReadWrite") } catch { return $false }' + #13#10 +
+    '  try { $s.Lock(0, 1); $s.Unlock(0, 1); return $false } catch { return $true } finally { $s.Dispose() } }' + #13#10 +
+    'if ($WaitS -gt 0 -and $LockRoot) {' + #13#10 +
+    '  $locks = @(Join-Path $LockRoot "core.lock")' + #13#10 +
+    '  $pd = Join-Path $LockRoot "profiles"' + #13#10 +
+    '  if (Test-Path -LiteralPath $pd) { $locks += @(Get-ChildItem -LiteralPath $pd -Directory -ErrorAction SilentlyContinue | ForEach-Object { Join-Path $_.FullName "core.lock" }) }' + #13#10 +
+    '  $locks = @($locks | Where-Object { Test-Path -LiteralPath $_ })' + #13#10 +
+    '  $sw = [Diagnostics.Stopwatch]::StartNew()' + #13#10 +
+    '  while (@($locks | Where-Object { Held $_ }).Count -and $sw.Elapsed.TotalSeconds -lt $WaitS) { Start-Sleep -Milliseconds 250 }' + #13#10 +
+    '  $still = @($locks | Where-Object { Held $_ })' + #13#10 +
+    '  if ($still.Count) { $out += "the Core did not close within $WaitS s (still locked: $($still -join ", ")); it is stopped below" }' + #13#10 +
+    '  elseif ($locks.Count) { $out += "the Core has closed (lock free after $([math]::Round($sw.Elapsed.TotalSeconds, 1)) s)" }' + #13#10 +
+    '}' + #13#10 +
+    '$parts = @(@("python", "face", "bridge", "rollback") | ForEach-Object { $d + $_ + [char]92 })' + #13#10 +
+    '$p = @(Get-Process | Where-Object { $q = $_.Path; $q -and @($parts | Where-Object { $q.StartsWith($_, [StringComparison]::OrdinalIgnoreCase) }).Count })' + #13#10 +
     '$asked = @($p | Where-Object { $_.MainWindowHandle -ne 0 })' + #13#10 +
     'foreach ($x in $asked) { try { [void]$x.CloseMainWindow(); $out += "asked to close: $($x.ProcessName) (pid $($x.Id))" } catch {} }' + #13#10 +
     'function Alive($list) { @($list | Where-Object { try { -not $_.HasExited } catch { $false } }) }' + #13#10 +
@@ -339,21 +410,20 @@ begin
     '$out | Set-Content -LiteralPath $Log -Encoding ASCII' + #13#10;
 end;
 
-procedure StopProcessesUnderApp();
+procedure StopProcessesUnderApp(const WaitS: Integer);
 var
   Code, I: Integer;
-  Dir, Script, LogFile: String;
+  Dir, LogFile: String;
   Lines: TArrayOfString;
 begin
   Dir := RemoveBackslashUnlessRoot(ExpandConstant('{app}'));
   if Length(Dir) <= 3 then exit;                     // never sweep a whole drive
-  Script := ExpandConstant('{tmp}\jarves-stop-app.ps1');
   LogFile := ExpandConstant('{tmp}\jarves-stop-app.log');
-  if not FileExists(Script) then SaveStringToFile(Script, StopScript(), False);
   DeleteFile(LogFile);
-  Exec(ExpandConstant('{sys}\WindowsPowerShell\v1.0\powershell.exe'),
-    '-NoProfile -NonInteractive -ExecutionPolicy Bypass -File "' + Script + '" -Dir "' + Dir + '" -Log "' + LogFile + '"',
-    '', SW_HIDE, ewWaitUntilTerminated, Code);
+  if not Exec(ExpandConstant('{sys}\WindowsPowerShell\v1.0\powershell.exe'),
+    '-NoProfile -NonInteractive -ExecutionPolicy Bypass -EncodedCommand ' +
+    EncodedCommand(StopScript(Dir, LogFile, DataDir(), WaitS)), '', SW_HIDE, ewWaitUntilTerminated, Code) then
+    Log('Stopping JARVES before the upgrade: PowerShell could not be started (' + SysErrorMessage(Code) + ')');
   if LoadStringsFromFile(LogFile, Lines) then
     for I := 0 to GetArrayLength(Lines) - 1 do
       Log('Stopping JARVES before the upgrade: ' + Lines[I]);
@@ -378,34 +448,113 @@ begin
       break;
     end;
     Log('Retaining previous program ' + Name + ' failed (attempt ' + IntToStr(Attempt) + '), retrying');
-    StopProcessesUnderApp();
+    StopProcessesUnderApp(0);
     Sleep(1000);
   end;
   if not Result then
     Log('Cannot retain previous program: ' + Name + ' (a file in it stays in use)');
 end;
 
-procedure RestoreProgramPart(const Name: String);
-var Source, Target: String;
+// A free {app}\failed-upgrade-<Tag>-<time>-<Name> path (removed by the uninstaller).
+function AsideName(const Tag, Name: String): String;
+var I: Integer;
 begin
-  // only a part this run moved: a stale leftover from an older run never replaces the working program
-  if Pos('|' + Name + '|', Retained) = 0 then exit;
-  Source := ExpandConstant('{app}\rollback\') + Name;
-  Target := ExpandConstant('{app}\') + Name;
-  if DirExists(Source) or FileExists(Source) then begin
-    if DirExists(Target) then DelTree(Target, True, True, True)
-    else if FileExists(Target) then DeleteFile(Target);
-    if not RenameFile(Source, Target) then Log('Previous program retained at ' + Source);
+  Result := ExpandConstant('{app}\failed-upgrade-') + Tag + '-' + GetDateTimeString('yyyymmddhhnnss', #0, #0) + '-' + Name;
+  I := 1;
+  while (DirExists(Result) or FileExists(Result)) and (I < 100) do begin
+    Result := ExpandConstant('{app}\failed-upgrade-') + Tag + '-' + GetDateTimeString('yyyymmddhhnnss', #0, #0) + '-' +
+              IntToStr(I) + '-' + Name;
+    I := I + 1;
   end;
 end;
 
+function PartsPending(): Boolean;
+begin
+  Result := (Retained <> '') and (Retained <> '|');
+end;
+
+// Put back one part THIS run moved (a stale leftover from an older run never replaces the working program). Nothing is
+// deleted: whatever is at the target (a half-installed new part) is first renamed aside to failed-upgrade-*, and put
+// back again if the old part cannot go in, so the program folder never has a hole. A part that is back is removed
+// from Retained; one that is not stays there (and in the restore-pending marker) for the next try.
+function RestoreProgramPart(const Name: String): Boolean;
+var Source, Target, Aside: String;
+begin
+  Result := True;
+  if Pos('|' + Name + '|', Retained) = 0 then exit;
+  Source := ExpandConstant('{app}\rollback\') + Name;
+  Target := ExpandConstant('{app}\') + Name;
+  if not (DirExists(Source) or FileExists(Source)) then begin
+    Log('Previous program part ' + Name + ' is no longer in the rollback folder; nothing to put back');
+    StringChangeEx(Retained, '|' + Name + '|', '|', True);
+    exit;
+  end;
+  Aside := '';
+  if DirExists(Target) or FileExists(Target) then begin
+    Aside := AsideName('restore', Name);
+    if not RenameFile(Target, Aside) then begin
+      Log('Previous program part ' + Name + ' kept at ' + Source + ': the part at ' + Target + ' could not be moved aside');
+      Result := False;
+      exit;
+    end;
+    Log('Moved ' + Target + ' aside to ' + Aside + ' to put the previous program back');
+  end;
+  if RenameFile(Source, Target) then
+    StringChangeEx(Retained, '|' + Name + '|', '|', True)
+  else begin
+    Log('Previous program part ' + Name + ' kept at ' + Source + ': it could not be put back');
+    if (Aside <> '') and not RenameFile(Aside, Target) then
+      Log('The part moved aside stays at ' + Aside);
+    Result := False;
+  end;
+end;
+
+function PendingMarker(): String;
+begin
+  Result := ExpandConstant('{app}\rollback\restore-pending.txt');
+end;
+
+// Parts that could not be put back are written to rollback\restore-pending.txt: the next setup puts them back FIRST
+// (before its data backup and before it clears the rollback folder), so they are never deleted.
 procedure RestoreProgram();
 begin
   RestoreProgramPart('python');
   RestoreProgramPart('face');
   RestoreProgramPart('bridge');
   RestoreProgramPart('jarvis.cmd');
+  if PartsPending() then begin
+    Log('Not every part of the previous program could be put back; still in the rollback folder: ' + Retained);
+    SaveStringToFile(PendingMarker(), Retained, False);
+  end else begin
+    DeleteFile(PendingMarker());
+    Retained := '|';
+  end;
+end;
+
+// The first pending part, for the message.
+function FirstPending(): String;
+begin
+  Result := Copy(Retained, 2, Length(Retained));
+  if Pos('|', Result) > 0 then Result := Copy(Result, 1, Pos('|', Result) - 1);
+end;
+
+// An earlier setup could not put the previous program back (restore-pending.txt), or an older installer left
+// {app}\python missing while rollback\python is there (it deleted before it renamed). Put those parts back now:
+// otherwise the old python is missing and the verified data backup below would be skipped. False = still missing.
+function RecoverPendingRestore(): Boolean;
+var Pending: AnsiString;
+begin
   Retained := '|';
+  if LoadStringFromFile(PendingMarker(), Pending) then Retained := Trim(String(Pending));
+  if (Retained = '') or (Copy(Retained, 1, 1) <> '|') then Retained := '|';
+  if FileExists(ExpandConstant('{app}\jarvis.cmd')) and not FileExists(ExpandConstant('{app}\python\python.exe')) and
+     FileExists(ExpandConstant('{app}\rollback\python\python.exe')) and (Pos('|python|', Retained) = 0) then
+    Retained := Retained + 'python|';
+  Result := True;
+  if not PartsPending() then exit;
+  Log('Putting back the previous program first (left by an earlier setup): ' + Retained);
+  RestoreProgram();
+  Result := not PartsPending();
 end;
 
 // A rollback folder left by an older run is replaced. If it cannot be deleted (a read-only or locked file), it is moved
@@ -428,7 +577,7 @@ end;
 
 function PrepareToInstall(var NeedsRestart: Boolean): String;
 var
-  Code: Integer;
+  Code, WaitS: Integer;
   Old, OldPython: String;
 begin
   Result := '';
@@ -438,11 +587,17 @@ begin
     exit;
   end;
   Old := ExpandConstant('{app}\jarvis.cmd');
+  WaitS := 0;
   if FileExists(Old) then begin
     Exec(ExpandConstant('{cmd}'), '/c ""' + Old + '" stop"', '', SW_HIDE, ewWaitUntilTerminated, Code);
     CoreStopped := True;
+    WaitS := 15;                                     // `jarvis stop` only asks: wait for the Core to let go of core.lock
   end;
-  StopProcessesUnderApp();
+  StopProcessesUnderApp(WaitS);
+  if not RecoverPendingRestore() then begin
+    Result := FmtMessage(CustomMessage('ProgramIncomplete'), [FirstPending(), ExpandConstant('{app}\rollback')]);
+    exit;
+  end;
   BackupState := ExpandConstant('{tmp}\jarves-preupgrade.json');
   OldPython := ExpandConstant('{app}\python\python.exe');
   if FileExists(OldPython) then begin
@@ -468,7 +623,11 @@ begin
     if Result <> '' then begin
       // put back what was already moved, now: the old version stays complete even if the wizard is retried
       RestoreProgram();
-      SnapshotMade := False;
+      // a part that could not be put back keeps SnapshotMade set, so DeinitializeSetup tries again; never say
+      // "nothing was changed" then
+      SnapshotMade := PartsPending();
+      if SnapshotMade then
+        Result := FmtMessage(CustomMessage('ProgramIncomplete'), [FirstPending(), ExpandConstant('{app}\rollback')]);
     end;
   end;
 end;
