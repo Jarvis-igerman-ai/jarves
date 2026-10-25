@@ -28,7 +28,7 @@ from pathlib import Path
 
 from .. import features, hebrew
 from ..channels_common import targets
-from .generated import HOST_RX, ID_RX, SkillError, _sha, parse_skill_md
+from .generated import HOST_RX, ID_RX, MAX_MD, MAX_PY, SkillError, _sha, parse_skill_md, validate
 
 SURFACES = ("voice", "dashboard", "cli", "phone")
 BASE_PERMS = ("read", "action", "storage")
@@ -80,11 +80,14 @@ def _perm_ok(p: str) -> bool:
 
 def parse_manifest(md: str, py: str | None = None) -> Manifest:
     """Parse + validate one SKILL.md (v1 or v2). Never raises for bad content: errors are listed on the result."""
+    md = md if isinstance(md, str) else ""
+    if len(md) > MAX_MD or (py is not None and len(py) > MAX_PY):       # same caps as generated.validate
+        return Manifest(id="", errors=[f"SKILL.md larger than {MAX_MD} or skill.py larger than {MAX_PY} characters"])
     try:
         meta, _ = parse_skill_md(md)
     except SkillError as e:
         return Manifest(id="", errors=[str(e)])
-    m = Manifest(id=str(meta.get("name", "")), title=str(meta.get("title") or meta.get("name") or ""),
+    m = Manifest(id=str(meta.get("name", "")), title=str(meta.get("title") or meta.get("name") or "")[:120],
                  description=str(meta.get("description", ""))[:500], sha256=_sha(md, py))
     if not ID_RX.match(m.id):
         m.errors.append("name must be 3-32 chars: lower-case letters, digits, '_'")
@@ -107,8 +110,16 @@ def parse_manifest(md: str, py: str | None = None) -> Manifest:
     m.min_core = str(meta.get("min_core", "")).strip()
     if m.min_core and not parse_version(m.min_core):
         m.errors.append("min_core must be major.minor.patch")
-    # v1 used `capabilities` for storage / network:host; v2 uses `permissions` (it wins when both are given)
-    perms = _list(meta["permissions"] if "permissions" in meta else meta.get("capabilities", []))
+    # v1 used `capabilities` for storage / network:host; v2 uses `permissions`. Both are counted: generated.py grants
+    # from `capabilities`, so a manifest may never hide one behind a smaller `permissions` list.
+    perms = _list(meta.get("permissions", [])) + _list(meta.get("capabilities", []))
+    if py is not None:
+        # the real read/action level comes from skill.py's TOOLS (generated.validate); never trust the label alone
+        code_perms = set(validate(md, py)["permissions"]) - {"read"}
+        missing = sorted(code_perms - set(perms))
+        if m.manifest == 2:
+            m.errors += [f"skill.py has {p} tools but the manifest does not declare {p!r}" for p in missing]
+        perms += missing
     for p in perms:
         if not _perm_ok(p):
             m.errors.append(f"unknown or unsafe permission {p!r} (allowed: read, action, storage, network:<public host>)")
@@ -131,7 +142,12 @@ def parse_manifest(md: str, py: str | None = None) -> Manifest:
 
 # ---------------------------------------------------------------------- trust (local owner key only)
 def strip_signature(md: str) -> str:
-    return "\n".join(line for line in md.split("\n") if not SIG_LINE_RX.match(line))
+    """Drop the signature lines of the FRONTMATTER only: a body line that starts with 'Signature:' stays covered."""
+    end = md.find("\n---", 3) if md.startswith("---") else -1
+    if end < 0:
+        return md
+    head = "\n".join(line for line in md[:end].split("\n") if not SIG_LINE_RX.match(line))
+    return head + md[end:]
 
 
 def _payload(md: str, py: str | None) -> bytes:
@@ -190,17 +206,30 @@ def plan_rollback(history: list[str], current: str) -> str | None:
 
 def discover(root: Path, limit: int = 200) -> list[Manifest]:
     """Manifests of Skill folders directly under a LOCAL directory (<root>/<id>/SKILL.md). No network, nothing is run,
-    unreadable folders are skipped."""
+    unreadable folders are skipped. Symbolic links (folders or files) are never followed, and an over-size file
+    (or a device) is never read, so a planted link cannot point the scan outside `root`."""
     out: list[Manifest] = []
+
+    def _read(f: Path, cap: int) -> str | None:
+        if f.is_symlink() or (f.exists() and not f.is_file()):
+            raise OSError("not a plain file")                # the whole Skill folder is skipped, never half-read
+        if not f.exists():
+            return None
+        if f.stat().st_size > cap * 4:                       # utf-8: at most 4 bytes per character
+            raise OSError("too large")
+        with f.open("rb") as fh:
+            return fh.read(cap * 4 + 1).decode("utf-8")
+
     try:
-        dirs = sorted(p for p in Path(root).iterdir() if p.is_dir())[:limit]
+        dirs = sorted(p for p in Path(root).iterdir() if not p.is_symlink() and p.is_dir())[:limit]
     except OSError:
         return out
     for d in dirs:
         try:
-            md = (d / "SKILL.md").read_text(encoding="utf-8")
-            py = d / "skill.py"
-            out.append(parse_manifest(md, py.read_text(encoding="utf-8") if py.is_file() else None))
+            md = _read(d / "SKILL.md", MAX_MD)
+            if md is None:
+                continue
+            out.append(parse_manifest(md, _read(d / "skill.py", MAX_PY)))
         except (OSError, UnicodeDecodeError):
             continue
     return out
