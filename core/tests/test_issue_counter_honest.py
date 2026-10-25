@@ -20,14 +20,15 @@ def test_urgent_is_new_p1_p2_only_and_seen_clears_it(reg):
 
 def test_open_issue_expires_and_comes_back_on_recurrence(reg):
     clock = reg.clock
-    reg.record("tools", "TOOL_A_FAIL", "P2")
+    reg.record("tools", "TOOL_A_FAIL", "P3")
+    reg.record("tools", "TOOL_P2_FAIL", "P2")
     clock.t += (ir.EXPIRE_DAYS + 1) * 86400
     reg.tidy("")
-    assert reg.counts()["open"] == 0
+    assert reg.counts()["open"] == 1                                 # P2 never expires by calendar (#372)
     r = reg.get(ir.issue_id("tools", "TOOL_A_FAIL"))
     assert r["status"] == "ignored" and r["closed_reason"] == "expired"
-    reg.record("tools", "TOOL_A_FAIL", "P2")                         # happened again
-    assert reg.counts()["open"] == 1
+    reg.record("tools", "TOOL_A_FAIL", "P3")                         # happened again
+    assert reg.counts()["open"] == 2
 
 
 def test_voice_idle_disconnect_and_pear_are_information(reg):
