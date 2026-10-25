@@ -1,0 +1,1 @@
+- Added: `jarvis about` (version, channel, install and data folders, what is on/off), `jarvis whatsnew` (this version's changes), `jarvis roadmap` (milestone status; the installer now ships ROADMAP.md) and `jarvis ticket` (improvement idea saved locally, exact text shown, sent only after approval through the issue reports), plus matching voice tools. (guide: self_awareness)

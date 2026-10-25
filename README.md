@@ -16,7 +16,7 @@ A cute, friendly, premium-looking stationary home companion. **Simulation first,
 
 ## Current project state and agent handoff — 20 October 2026
 
-**The old private `igalgerman/JARVIS` repository is OBSOLETE for all development.** This PUBLIC `igalgerman/jarves` repository is the **sole active source of truth**. Legacy V4 code/Issues have been **partially migrated**, not merged or fully tested; do **not** send pushes or syncs back to private. GitHub Archive of the old repository is pending final verification.
+**The old private `igalgerman/JARVIS` repository is OBSOLETE for all development.** This PUBLIC `Jarvis-igerman-ai/jarves` repository is the **sole active source of truth**. Legacy V4 code/Issues have been **partially migrated**, not merged or fully tested; do **not** send pushes or syncs back to private. GitHub Archive of the old repository is pending final verification.
 
 - **[Current handoff](docs/HANDOFF.md)** — start at the top for public-only status and pending gates.
 - **[V4 migration handoff](docs/MIGRATION_HANDOFF.md)** — public PRs #6–#10, migrated Issues and remaining integration.
@@ -29,8 +29,8 @@ A cute, friendly, premium-looking stationary home companion. **Simulation first,
 |---|---|
 | **Permanent decisions and non-negotiable buildability principles** | [PROJECT_PRINCIPLES](docs/PROJECT_PRINCIPLES.md) |
 | Current authorized work | [NOW](docs/NOW.md) |
-| Latest code/CI and issues | [Public issues](https://github.com/igalgerman/jarves/issues), [migration status](docs/MIGRATION_STATUS.md) and [HANDOFF](docs/HANDOFF.md) (older entries may be historical) |
-| Current physical design backlog | [Public hardware/design issue #4](https://github.com/igalgerman/jarves/issues/4) and [design review](docs/reviews/S1_DESIGN_REVIEW.md) |
+| Latest code/CI and issues | [Public issues](https://github.com/Jarvis-igerman-ai/jarves/issues), [migration status](docs/MIGRATION_STATUS.md) and [HANDOFF](docs/HANDOFF.md) (older entries may be historical) |
+| Current physical design backlog | [Public hardware/design issue #4](https://github.com/Jarvis-igerman-ai/jarves/issues/4) and [design review](docs/reviews/S1_DESIGN_REVIEW.md) |
 | Milestones, V5 and V6 vision stages | [ROADMAP](docs/ROADMAP.md) |
 | **Engineering challenges, simulations and staged safety/quality reviews** | [ENGINEERING_REVIEW_GATES](docs/ENGINEERING_REVIEW_GATES.md) |
 | **Active software / CI implementation package** | [SW-V1 approved plan](docs/SW_V1_WORK_PACKAGE.md) |
@@ -46,7 +46,7 @@ A cute, friendly, premium-looking stationary home companion. **Simulation first,
 - A working Python Core (`core/`) runs the face (Godot) end to end.
 - Everything is ready for OpenAI GPT-Live voice + GPT-6 agent + web search, but those need your `OPENAI_API_KEY`.
 - Or connect your **ChatGPT plan** (`jarves chatgpt login`): text on the plan, with voice local or on the API key ("combined").
-- CI is active: [jarves-checks](https://github.com/igalgerman/jarves/actions/workflows/jarves-checks.yml), with Core tests, CAD, Blender and Godot on every push.
+- CI is active: [jarves-checks](https://github.com/Jarvis-igerman-ai/jarves/actions/workflows/jarves-checks.yml), with Core tests, CAD, Blender and Godot on every push.
 - Offline it handles Hebrew commands, memory, diagnostics and the YouTube Music skill via Pear Desktop (needs a one-time "Allow").
 - **Quick start: type `jarvis`.** The first time, it asks how to connect: (1) ChatGPT plan, (2) plan + API-key voice, or (3) API key. Then it starts the Core and the face. Other commands: `jarvis setup`, `jarvis stop`, `jarvis status`. Details: [core/README](core/README.md).
 

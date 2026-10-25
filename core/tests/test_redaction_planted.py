@@ -223,6 +223,27 @@ def test_health_text(tmp_path, private, monkeypatch):
         check(blob, private)
 
 
+@pytest.mark.parametrize("private", MODES)
+def test_health_text_every_field_is_cleaned(tmp_path, private, monkeypatch):
+    """CodeQL #15: _clean used to redact only `detail`/`action`. A planted secret (and, in privacy mode, PII) in ANY
+    string field (status, component name, last_error extras) must not reach health.json, the snapshot or the view."""
+    monkeypatch.setattr(logs, "_privacy", private)
+    # FAKE test fixture: ra.SECRETS / ra.PII are synthetic planted values (no real credential).
+    planted = f"{ra.SECRETS['openai_key']} {ra.PII['email']} {ra.PII['phone_intl']}"
+    h = Health(tmp_path / "health.json")
+    h.set(f"ai {ra.SECRETS['telegram_bot']} {ra.PII['email']}", f"degraded {planted}", f"d {planted}", f"a {planted}")
+    h.last_error = {**(h.last_error or {}), "component": f"c {planted}", "extra": f"x {planted}",
+                    "nested": {"why": f"n {planted}"}}
+    h.save()
+    for blob in ((tmp_path / "health.json").read_text(encoding="utf-8"), json.dumps(h.snapshot()),
+                 json.dumps(h.components_view())):
+        c = classes(blob)
+        assert not c.get("secret"), c
+        if private:
+            assert not c.get("pii"), c
+    assert "degraded" in (tmp_path / "health.json").read_text(encoding="utf-8")     # structure stays readable
+
+
 def test_task_history_never_keeps_a_secret(tmp_path, monkeypatch):
     from jarves.tasks import LookupResult, TaskManager
 

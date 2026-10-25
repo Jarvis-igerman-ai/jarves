@@ -47,7 +47,7 @@ class Env:
     def __init__(self, tmp_path, answer=True, clock=None):
         self.clock = clock or Clock()
         self.db = open_db(tmp_path)
-        self.ran, self.asked = [], []
+        self.ran, self.asked, self.metas = [], [], []
         self.answer = answer
         self.budget = FakeBudget()
         self.hang = asyncio.Event()
@@ -57,6 +57,7 @@ class Env:
 
         async def confirm(prompt, **meta):
             self.asked.append(meta.get("title", prompt))
+            self.metas.append(meta)
             return self.answer() if callable(self.answer) else bool(self.answer)
         confirm.accepts_meta = True
         self.reg.confirm = confirm
@@ -296,6 +297,8 @@ async def test_voice_tools_propose_show_run_and_disallowed_action(env):
     r = await env.reg.call("goal_plan_show", {"id": pid})
     assert r.ok and "[draft]" in r.message
     assert (await env.reg.call("goal_plan_show", {})).ok
+    env.clock.t += 60
+    env.reg.new_turn()                                   # showing a plan is an untrusted read (F3): the owner speaks again
     env.answer = False
     r = await env.reg.call("goal_plan_run", {"id": pid})
     assert not r.ok and r.code == "NOT_APPROVED" and env.store.get(pid)["state"] == "draft"
@@ -371,3 +374,28 @@ async def test_owner_no_to_a_destructive_step_is_blocked_not_a_failure(env):
     d = env.store.get(p["id"])
     assert d["state"] == "blocked" and d["steps"][0]["status"] == "blocked" and ("wipe", "x") not in env.ran
     assert "did not approve" in d["steps"][0]["error"]
+
+async def test_goal_plan_show_taints_the_turn_so_no_action_follows_in_it(env):
+    """V5 sec F3: plan results can quote third-party text (a mail step), so showing them is an untrusted read."""
+    env.reg.register(gp.make_skill(env.store, env.reg))
+    env.reg.allowed_actions |= gp.ALLOWED_ACTIONS
+    assert env.reg.get("goal_plan_show").untrusted_output is True
+    p = env.store.propose("mail", steps(("fake_mail", {}), ("fake_read", {"text": "end"})))
+    env.store.approve(p["id"])
+    await env.runner.tick()
+    r = await env.reg.call("goal_plan_show", {"id": p["id"]}, origin="model")
+    assert r.ok
+    r = await env.reg.call("goal_plan_propose", {"title": "x", "steps": [{"tool": "fake_act", "args": {"text": "z"}}]},
+                           origin="model")
+    assert not r.ok and r.code == "TOOL_UNTRUSTED_TURN"          # an action in the same turn is refused
+
+async def test_plan_and_step_approvals_are_asked_pc_only(env):
+    """V5 sec F1: neither the plan approval nor a step popup may be answered from a phone."""
+    env.reg.register(gp.make_skill(env.store, env.reg))
+    env.reg.allowed_actions |= gp.ALLOWED_ACTIONS
+    r = await env.reg.call("goal_plan_propose", {"title": "demo", "steps": [{"tool": "fake_act", "args": {"text": "q"}}]})
+    pid = r.data["plan"]
+    assert (await env.reg.call("goal_plan_run", {"id": pid})).ok
+    await env.runner.tick()
+    titles = {m["title"]: m for m in env.metas}
+    assert titles["goal_plan"]["pc_only"] is True and titles["goal_plan_step"]["pc_only"] is True

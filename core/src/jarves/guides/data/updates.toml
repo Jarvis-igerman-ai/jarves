@@ -75,3 +75,17 @@ he = "אחרי העדכון ג'ארביס לא עולה"
 en = "JARVES does not start after the update"
 fix_he = "בהפעלה השנייה ג'ארביס שואל (באישור על המסך) אם לחזור לגרסה הקודמת. אפשר גם ידנית: jarvis update --rollback."
 fix_en = "On the second start JARVES asks (an approval on the screen) whether to go back to the previous version. You can also do it by hand: jarvis update --rollback."
+
+[[problems]]
+he = "העדכון אומר שקובץ בתיקיית התוכנה בשימוש"
+en = "The update says a file in the program folder is in use"
+fix_he = "ההתקנה סוגרת לבד את כל חלקי ג'ארביס (Core, לוח הבקרה, הפנים, נגן המוזיקה): קודם בבקשה, ורק אם צריך בכוח, וכותבת ביומן ההתקנה מה נסגר. אם תוכנה אחרת מחזיקה קובץ (תיקייה או עורך פתוחים, גיבוי או סריקת אנטי-וירוס) העדכון מוותר בלי לשנות כלום: הגרסה הקודמת והנתונים נשארים. סגרו את התוכנה ההיא והריצו שוב jarvis update install."
+fix_en = "Setup closes every part of JARVES by itself (Core, dashboard, face, music player): politely first, by force only if needed, and the setup log says what it closed. If another program holds a file (an open folder or editor, a backup or antivirus scan) the update gives up without changing anything: the previous version and your data stay. Close that program and run jarvis update install again."
+action = "command:jarvis update install"
+
+[[problems]]
+he = "העדכון אומר שהתוכנה הקודמת לא הוחזרה במלואה"
+en = "The update says the previous program could not be put back completely"
+fix_he = "זה קורה רק אם קובץ נשאר נעול גם אחרי שההתקנה ויתרה. שום דבר לא נמחק: החלק שלא חזר מחכה בתיקייה rollback שבתיקיית התוכנה, והנתונים שלכם בטוחים. הפעילו מחדש את Windows והריצו שוב את העדכון: ההתקנה מחזירה קודם את התוכנה הקודמת, ורק אחר כך מגבה ומעדכנת."
+fix_en = "This happens only when a file stays locked even after setup gave up. Nothing is deleted: the part that did not go back waits in the rollback folder inside the program folder, and your data is safe. Restart Windows and run the update again: setup first puts the previous program back, and only then backs up and updates."
+action = "command:jarvis update install"
