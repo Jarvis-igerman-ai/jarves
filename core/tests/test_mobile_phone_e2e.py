@@ -46,7 +46,7 @@ class FakeCore:
         self.chats, self.wavs = [], []
         self.audio = {"known": True, "mic": "idle", "cloud": "off", "cloud_on": False}      # the computer's real mic / cloud state
 
-    def bridge(self) -> Bridge:
+    def bridge(self, **extra) -> Bridge:
         def chat(text, dev):
             self.chats.append(text)
             return {"reply": "echo: " + text, "ok": True}
@@ -55,7 +55,7 @@ class FakeCore:
             self.wavs.append(wav)
             return {"transcript": "what time is it", "reply": "It is noon.", "ok": True}
         return Bridge(chat=chat, voice=voice, status=lambda: {"core": "running", "components": {"audio": "ok"}},
-                      voice_available=lambda: True, audio=lambda: self.audio)
+                      voice_available=lambda: True, audio=lambda: self.audio, **extra)
 
 
 class _Mem:
@@ -87,6 +87,7 @@ class Phone:
     def __init__(self, home: Path, tls: bool):
         from conftest import free_port
         self.home, self.tls, self.fake = home, tls, FakeCore()
+        self.passenger, self.briefings = "ask", []
         kw = {}
         if tls:
             kw["tls"] = mobile.make_selfsigned(home, HOST)
@@ -97,12 +98,18 @@ class Phone:
         from jarves import chat_engine
         self.chat = chat_engine.WebChat(_ChatCore(home, self.fake), self.loop)
         self.d = dashboard.Dashboard(home, Config(), free_port(), mobile_on=True, lan_host=HOST,
-                                     mobile_bridge=self.fake.bridge(), chat=self.chat, **kw).start()
+                                     mobile_bridge=self.fake.bridge(drive_features=lambda: self.features,
+                                                                    drive_passenger=lambda: self.passenger,
+                                                                    drive_briefing=self._briefing), chat=self.chat, **kw).start()
         self.d.mobile.gate = lambda: self.features.enabled("mobile_access")      # as app.py wires it
         self.features.set("mobile_access", True)
         self.base = f"{'https' if tls else 'http'}://{HOST}:{self.d.port}"
         self.svc = self.run(self._mk())
         self.asks: list = []
+
+    def _briefing(self, mode):
+        self.briefings.append(mode)
+        return {"ok": True, "text": "x", "sections": [{"id": "weather", "ok": True, "text": f"Sunny and 24 degrees ({mode})."}]}
 
     async def _mk(self):
         return appr.ApprovalService(self.home)
@@ -847,3 +854,86 @@ def test_qr_encoder_output_decodes_for_realistic_urls():
     for url in ("https://192.168.100.200:60123/m/#c=12345678", "http://10.0.0.5:8765/m/#c=00000042",
                 "https://phone.lan:50424/m/#c=60476510", "https://phone.lan:32496/m/#c=32580007"):
         assert decode_qr(qrmini.rows(url)) == url
+
+
+# ------------------------------------------------------------------ V6 item 11 (#218): the Drive tab on the phone
+def _drive_setup(p: Phone):
+    from jarves import drive_briefing, drive_mode, journey  # noqa: F401  (register the features)
+    for fid in ("journey", "drive_briefing", "drive_mode"):
+        p.features.set(fid, True, by="cli")
+    drive_mode.queue_for(p.home).add("message_send", "whatsapp_send -> Dana", source="owner")
+
+
+@pytest.fixture
+def fake_route(monkeypatch):
+    from jarves import journey
+
+    class Prov:
+        name = "fake-osrm"
+
+        def estimate(self, o, d, client, now):
+            return journey.RouteEstimate(o, d, 12_300, 1_260, self.name, now, False)
+    real = journey.plan
+    monkeypatch.setattr(journey, "plan", lambda o, d, **kw: real(o, d, providers=[Prov()], **kw))
+
+
+def test_drive_tab_is_hidden_and_refused_until_the_owner_grants_the_scope(browser, phone):
+    p = phone()
+    _drive_setup(p)
+    page = new_page(browser)
+    ui_pair(page, p)
+    page.wait_for_timeout(600)
+    assert page.locator("#tabbtn-drive").is_hidden()                    # least privilege: no scope, no tab
+    assert call(page, "GET", "/api/m/drive", None, token(page))["status"] == 403
+    _grant(p, page, "drive")
+    page.wait_for_selector("#tabbtn-drive:not([hidden])")
+    page.tap("[data-tab=drive]")
+    page.wait_for_selector("#driveRoot .drive-state")
+    body = page.inner_text("#driveRoot")
+    assert "Drive mode" in body and "On" in body and "Waiting for when you stop: 1" in body and "whatsapp_send" in body
+    assert "Dana" not in body and "->" not in body                    # the tool name only, never the text or the contact
+    assert page.locator("#driveRoot button:has-text('Turn')").count() == 0     # no switch for drive mode on the phone
+    assert page.errors == []
+
+
+def test_drive_briefing_answer_and_trip_links_are_buttons_the_owner_taps(browser, phone, fake_route):
+    p = phone()
+    _drive_setup(p)
+    page = new_page(browser)
+    ui_pair(page, p)
+    _grant(p, page, "drive")
+    page.tap("[data-tab=drive]")
+    page.wait_for_selector("#driveRoot button:has-text('I am alone')")
+    page.tap("#driveRoot button:has-text('Someone is with me')")        # the phone answers the passenger question
+    page.wait_for_selector("#driveRoot li:has-text('Sunny')")
+    assert p.briefings == ["present"] and p.passenger == "ask"          # the saved setting is untouched
+    page.fill("#driveRoot input[aria-label=From]", "Tel Aviv")
+    page.fill("#driveRoot input[aria-label=To]", "Haifa")
+    page.tap("#driveRoot button:has-text('Plan trip')")
+    page.wait_for_selector("#driveRoot a.btn")
+    hrefs = page.eval_on_selector_all("#driveRoot a.btn", "els => els.map(e => [e.href, e.target, e.rel])")
+    assert [h[0].split("?")[0] for h in hrefs] == ["https://www.google.com/maps/dir/", "https://waze.com/ul"]
+    assert all(h[1] == "_blank" and "noopener" in h[2] for h in hrefs)
+    assert len(page.context.pages) == 1                                 # nothing opened by itself: only a tap would
+    assert "no live traffic" in page.inner_text("#driveRoot")
+    assert page.errors == []
+
+
+@pytest.mark.parametrize("lang,locale", [("en", "en-US"), ("he", "he-IL")])
+def test_drive_tab_layout_at_390px_in_english_and_hebrew(browser, phone, fake_route, lang, locale):
+    p = phone()
+    _drive_setup(p)
+    page = new_page(browser, locale=locale)
+    ui_pair(page, p)
+    _grant(p, page, "drive")
+    page.tap("[data-tab=drive]")
+    page.wait_for_selector("#driveRoot .drive-state")
+    audit(page, lang)
+    page.tap("#driveRoot button.big >> nth=0")                          # the briefing answer
+    page.wait_for_selector("#driveRoot ul li >> nth=1")
+    page.fill("#driveRoot input >> nth=0", "Tel Aviv")
+    page.fill("#driveRoot input >> nth=1", "Haifa")
+    page.tap("#driveRoot button.primary >> nth=-1")
+    page.wait_for_selector("#driveRoot a.btn")
+    audit(page, lang)                                                   # state, answers, trip result and two link buttons
+    assert page.errors == []

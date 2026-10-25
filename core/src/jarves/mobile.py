@@ -31,7 +31,7 @@ from pathlib import Path
 from typing import Callable
 from urllib.parse import urlsplit
 
-from . import logs, qrmini
+from . import logs, mobile_drive, qrmini  # noqa: F401  (mobile_drive registers the phone_drive row)
 from .continuity import Continuity
 
 FEATURE = "mobile_access"
@@ -56,7 +56,7 @@ REPLY_TTL_S = 600                  # how long a chat answer is kept for a resend
 REPLY_KEEP = 200
 MSG_ID_RE = re.compile(r"^[A-Za-z0-9_.:-]{8,64}$")
 DEFAULT_SCOPES = ("chat", "voice", "status", "approvals")
-ALL_SCOPES = DEFAULT_SCOPES + ("tasks", "prefs")   # tasks: goal actions + proactive snooze/stop; prefs: Learned preferences (both off until granted)
+ALL_SCOPES = DEFAULT_SCOPES + ("tasks", "prefs", "drive")   # tasks: goal actions + proactive snooze/stop; prefs: Learned preferences; drive: the read-mostly Drive tab (all off until granted)
 # Pages a paired device may be given (the owner picks per device; default all four). Everything else is PC-only and is
 # refused by the server with a fixed code, whatever the page shows: PAGE_PC_ONLY (never grantable) and
 # PAGE_NOT_ALLOWED (a remote page this device was not given).
@@ -73,7 +73,8 @@ STATIC_FILES = {"index.html": "text/html; charset=utf-8", "app.js": "text/javasc
                 "chatview.js": "text/javascript; charset=utf-8", "chatview.css": "text/css; charset=utf-8",
                 "indicator.js": "text/javascript; charset=utf-8",
                 "plans.js": "text/javascript; charset=utf-8",
-                "prefs.js": "text/javascript; charset=utf-8"}
+                "prefs.js": "text/javascript; charset=utf-8",
+                "drive.js": "text/javascript; charset=utf-8"}
 SHARED_FILES = ("chatview.js", "chatview.css")      # one chat view for the dashboard and the phone page (dashboard_static/)
 
 
@@ -139,6 +140,9 @@ class Bridge:
     plans_on: Callable[[], bool] = field(default=lambda: True)             # the "goal plans" feature switch
     prefs: Callable[[], object] = field(default=lambda: None)              # -> preferences.Preferences (None: open memory.db here)
     prefs_in_prompt: Callable[[], bool] = field(default=lambda: True)      # the "use learned preferences" switch
+    drive_features: Callable[[], object] = field(default=lambda: None)     # -> features.Features (None: open the one in the home folder)
+    drive_passenger: Callable[[], str] = field(default=lambda: "ask")      # the PERSISTENT drive_briefing.passenger setting (read-only here)
+    drive_briefing: Callable[[str], dict] | None = None                    # (alone | present) -> {"ok", "sections": [...]} (None: not available)
 
 
 class MobileAccess:
@@ -549,8 +553,22 @@ def core_bridge(core, loop) -> Bridge:
         from .preferences import FEATURE
         f = getattr(core, "features", None)
         return bool(f.enabled(FEATURE)) if f is not None else True
+    def drive_passenger() -> str:
+        return str(core.ops.db.setting("drive_briefing.passenger") or "ask")
+
+    def drive_briefing(mode: str) -> dict:
+        """The Core's own pre-drive briefing tool, called directly (read-only; the passenger filter lives in the skill)."""
+        from .drive_briefing import DriveBriefingArgs
+        skill = core.registry.skills["drive_briefing"]
+        tool = skill.tools()[0]
+
+        async def go() -> dict:
+            r = await tool.handler(DriveBriefingArgs(passenger=mode))
+            return {"ok": bool(r.ok), "text": r.message, "sections": (r.data or {}).get("sections") or []}
+        return run(go(), 60)
     return Bridge(chat=chat, voice=voice, status=status, voice_available=lambda: getattr(core, "stt", None) is not None,
-                  goals=goals, desktop_present=desktop_present, audio=audio, plans=plans, plans_on=plans_on, prefs=prefs, prefs_in_prompt=prefs_in_prompt)
+                  goals=goals, desktop_present=desktop_present, audio=audio, plans=plans, plans_on=plans_on, prefs=prefs, prefs_in_prompt=prefs_in_prompt,
+                  drive_features=lambda: getattr(core, "features", None), drive_passenger=drive_passenger, drive_briefing=drive_briefing)
 
 
 # ---------------------------------------------------------------------- HTTP (called by dashboard.Handler)
@@ -882,6 +900,35 @@ def serve(h, mob: MobileAccess, ip: str) -> None:
         status, obj, again = mob.cont.execute(dev["id"], cid, "pref", lambda: mobile_prefs.action(mob, d, dev["id"]),
                                               age_s=d.get("age_s"))
         return done(status, {**obj, "replay": True} if again else obj, op=str(d.get("op", ""))[:20], pref=str(d.get("pref", ""))[:9])
+    if path == "/api/m/drive" and method == "GET":        # Drive tab (V6 #218): drive mode read-only, queue COUNT + tool names
+        if not need("drive"):
+            return
+        from . import mobile_drive
+        try:
+            return h._json(200, mobile_drive.view(mob))
+        except Exception as e:
+            logs.warn("mobile", "MOBILE_DRIVE_FAILED", "drive state could not be read", error_type=type(e).__name__)
+            return h._json(503, {"error": "drive state is not available right now"})
+    if path == "/api/m/drive/briefing" and method == "GET":       # the phone ANSWERS the passenger question; nothing is stored
+        if not need("drive"):
+            return
+        from . import mobile_drive
+        from urllib.parse import parse_qs
+        ans = (parse_qs(url.query).get("passenger") or [""])[0]
+        st, obj = mobile_drive.briefing(mob, ans)
+        return done(st, obj) if st != 200 else h._json(st, obj)
+    if path == "/api/m/drive/journey" and method == "POST":       # typed places in, estimate + Maps/Waze links out (no location, no auto-open)
+        if not need("drive"):
+            return
+        from . import mobile_drive
+        if not mob.rate_ok("drive-journey:" + dev["id"], mobile_drive.JOURNEY_RATE_PER_MIN):
+            mob.audit("rate_limited", device=dev["id"], path=path, scope="journey")
+            return h._json_extra(429, {"error": "too many trip requests: wait a minute"}, {"Retry-After": "60"})
+        d = _json_body(h)
+        if d is None:
+            return
+        st, obj = mobile_drive.journey(mob, d)
+        return done(st, obj, op="journey")
     if path == "/api/m/signals" and method == "POST":
         if "tasks" not in dev["scopes"] and not need("status"):     # stop / snooze only reduce activity: status is enough
             return
