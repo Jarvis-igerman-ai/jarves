@@ -1,11 +1,11 @@
 # JARVES — agent handoff template / copy-paste resume
 
-**Owner direction, 20 October 2026:** The former private repository `igalgerman/JARVIS` is **OBSOLETE / DEPRECATED FOR ALL DEVELOPMENT**. It is a **read-only legacy source** for migration only and must receive **NO pushes, syncs, commits, issues, PRs or updates**. The **only active repository is `igalgerman/jarves` (public)**. Do not confuse repository deprecation with completed data migration: legacy V4 modified files and historical issues are not all reconciled; the old GitHub repository has not yet been archived.
+**Owner direction, 20 October 2026:** The former private repository `igalgerman/JARVIS` is **OBSOLETE / DEPRECATED FOR ALL DEVELOPMENT**. It is a **read-only legacy source** for migration only and must receive **NO pushes, syncs, commits, issues, PRs or updates**. The **only active repository is `Jarvis-igerman-ai/jarves` (public)**. Do not confuse repository deprecation with completed data migration: legacy V4 modified files and historical issues are not all reconciled; the old GitHub repository has not yet been archived.
 
 ## Copy/paste to Claude Code or Codex
 
 ```text
-Continue ONLY the JARVES repository migration. Do not begin unrelated feature development or a general product/V4 stabilization campaign. IMPORTANT: the old PRIVATE igalgerman/JARVIS repo is DEPRECATED and NOT relevant for further development. igalgerman/jarves (PUBLIC) is now the ONLY writable repository/source of truth. The required PUBLIC migration has STARTED, but is NOT fully integrated. NEVER push/sync/code/change issues on the old private repo. Read old branches read-only only to recover missing source after privacy/secret review.
+Continue ONLY the JARVES repository migration. Do not begin unrelated feature development or a general product/V4 stabilization campaign. IMPORTANT: the old PRIVATE igalgerman/JARVIS repo is DEPRECATED and NOT relevant for further development. Jarvis-igerman-ai/jarves (PUBLIC) is now the ONLY writable repository/source of truth. The required PUBLIC migration has STARTED, but is NOT fully integrated. NEVER push/sync/code/change issues on the old private repo. Read old branches read-only only to recover missing source after privacy/secret review.
 
 First read AGENTS.md and docs/NOW.md, then ONLY docs/MIGRATION_HANDOFF.md, the top of docs/HANDOFF.md and the one public Issue/PR directly relevant to your next scoped task. Inspect local git remote -v, git status, active worktrees and any running Claude/Codex writer; don't clobber dirty state or work on the same files concurrently.
 
@@ -22,7 +22,7 @@ Return at most 6 concise lines: outcome; files; tests + context; CI final-SHA li
 ## Compact end-of-task handoff format
 
 ```text
-REPO: igalgerman/jarves (only public; private repo obsolete)
+REPO: Jarvis-igerman-ai/jarves (only public; private repo obsolete)
 SCOPE / PUBLIC ISSUE / PR:
 BRANCH / COMMIT URL:
 IMPLEMENTED: [exact changed files; old source ref if any]

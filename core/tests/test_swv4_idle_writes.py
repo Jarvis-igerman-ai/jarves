@@ -78,3 +78,16 @@ def test_store_uses_wal_normal_with_large_autocheckpoint(tmp_path):
     assert s._db.execute("PRAGMA journal_mode").fetchone()[0] == "wal"
     assert s._db.execute("PRAGMA synchronous").fetchone()[0] == 1          # NORMAL
     assert s._db.execute("PRAGMA wal_autocheckpoint").fetchone()[0] >= 4000
+
+
+def test_health_snapshot_is_written_compact(tmp_path):
+    """#159 perf2: health.json is rewritten about every 70 s while idle; no indentation whitespace (fewer bytes
+    per write). Same content: it parses to exactly the snapshot."""
+    import json
+    h = Health(tmp_path / "health.json")
+    for i in range(12):
+        h.set(f"c{i}", "ok", "detail text " * 4)
+    raw = (tmp_path / "health.json").read_text(encoding="utf-8")
+    d = json.loads(raw)
+    assert d["core"] == "starting" and len(d["components"]) == 12
+    assert "\n" not in raw and len(raw) < len(json.dumps(d, indent=1)) * 0.9

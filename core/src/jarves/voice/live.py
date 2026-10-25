@@ -43,6 +43,8 @@ if TYPE_CHECKING:
 
 RATE = 24000
 GREETING_NUDGE_S = 6.0      # no greeting audio this long after start: one silent clock note (P0.4 Q05)
+GREETING_RETRY_AFTER_S = 4.0    # #179: still no audio this long after the nudge: re-send the greeting request once
+GREETING_BUDGET_S = 15.0    # whole wait (nudge at 6 s, retry at 10 s, give up at 15 s): the retry does NOT extend startup
 # GPT-Live streams audio CONTINUOUSLY in real time, silence included (QA 18 Oct 2026: 5.0 s of audio per 5 s, all
 # session long). Only chunks LOUDER than this (rms, 0..1; speech is ~0.03-0.3) count as JARVES speaking.
 SPEECH_RMS = 0.004
@@ -699,6 +701,8 @@ class LiveVoice(SessionLifecycle):
 
     def _reset_session(self) -> None:
         self._first_audio = asyncio.Event()
+        self._greeting_nudged = self._greeting_retried = False
+        self.greeting_outcome = ""       # "ok" | "retry_ok" | "missed" after wait_ready (#179)
         self._audio_in_s = 0.0
         self._speech_in_s = 0.0
         self._silence_rms_max = 0.0
@@ -813,7 +817,7 @@ class LiveVoice(SessionLifecycle):
                                                f"{clock}"}]}]
         return config
 
-    async def wait_ready(self, timeout: float = 15) -> None:
+    async def wait_ready(self, timeout: float = GREETING_BUDGET_S) -> None:
         """A requested greeting is ready only after actual output audio, not merely session.started."""
         if not self.greeting:
             return
@@ -821,14 +825,30 @@ class LiveVoice(SessionLifecycle):
         ended = asyncio.create_task(self._ended.wait())
         try:
             first = min(GREETING_NUDGE_S, timeout)
+            self.greeting_outcome = ""
             await asyncio.wait({audio, ended}, timeout=first, return_when=asyncio.FIRST_COMPLETED)
             if not self._first_audio.is_set() and self.running and timeout > first:
                 # SW-V3 P0.4 Q05: in 2 of 14 silent-QA starts (20 Oct) the server sent NOTHING after session.started
                 # and the startup failed at 15 s ("room remains closed"). A silent clock note is what un-stuck a
                 # pending greeting on 19 Oct (see session_config), so send one once, then keep waiting.
                 await self._nudge_greeting()
-                await asyncio.wait({audio, ended}, timeout=timeout - first, return_when=asyncio.FIRST_COMPLETED)
-            if not self._first_audio.is_set() or not self.running:
+                gap = min(GREETING_RETRY_AFTER_S, timeout - first)
+                await asyncio.wait({audio, ended}, timeout=gap, return_when=asyncio.FIRST_COMPLETED)
+                if not self._first_audio.is_set() and self.running and timeout > first + gap:
+                    # #179: the nudge alone did not recover 1 of 5 live starts. Re-send the greeting request once;
+                    # the rest of the same overall budget is spent waiting for it (startup is never extended).
+                    await self._retry_greeting()
+                    await asyncio.wait({audio, ended}, timeout=timeout - first - gap,
+                                       return_when=asyncio.FIRST_COMPLETED)
+            if self._first_audio.is_set() and self.running:
+                self.greeting_outcome = "retry_ok" if self._greeting_retried else "ok"
+                if self._greeting_retried:
+                    logs.info("live", "LIVE_GREETING_RETRY_OK", "greeting audio arrived after the retry",
+                              nudged=self._greeting_nudged)
+                else:
+                    logs.info("live", "LIVE_GREETING_OK", "greeting audio arrived", nudged=self._greeting_nudged)
+            else:
+                self.greeting_outcome = "missed"
                 raise RuntimeError("live greeting audio was not received; check voice/network logs")
         finally:
             audio.cancel()
@@ -858,7 +878,20 @@ class LiveVoice(SessionLifecycle):
         return max(self.usage_s, elapsed)
 
     # ------------------------------------------------------------------ lifecycle
+    async def _retry_greeting(self) -> None:
+        """#179: second and last recovery step: the greeting request again as a commentary note (no TTS, no new session)."""
+        self._greeting_retried = True
+        logs.warn("live", "LIVE_GREETING_RETRY", "still no greeting audio: re-sending the greeting request once",
+                  after_s=GREETING_NUDGE_S + GREETING_RETRY_AFTER_S)
+        try:
+            await self.conn.session.commentary.append(
+                content=f"Greet now, once, in natural Israeli Hebrew. Say: {self.greeting}", delegation_id=None,
+                event_id="jarves_greeting_retry")
+        except Exception as e:                       # never let the retry itself fail the start
+            logs.warn("live", "LIVE_GREETING_RETRY_FAILED", "retry not sent", error_type=type(e).__name__)
+
     async def _nudge_greeting(self) -> None:
+        self._greeting_nudged = True
         logs.warn("live", "LIVE_GREETING_NUDGE", "no greeting audio after start: sending one silent clock note",
                           after_s=GREETING_NUDGE_S)
         try:

@@ -27,7 +27,7 @@ FEATURES: dict[str, object] = {
     "music": "music", "web_search": "ask", "background_tasks": (D, "the Background tasks page shows live research runs"),
     "memory_curator": "memory", "memory_llm_pass": "memory", "diagnosis_llm_pass": "diagnose",
     "google_calendar": "calendar", "google_contacts": "contacts", "gmail_read": "mail", "gmail_send": "mail",
-    "camera": (D, "camera status lives in `python -m jarves.camera`; enabling it is `jarvis features on camera`"),
+    "camera": "camera",
     "face_recognition": (D, "enrolment needs the camera preview; switch via `jarvis features`"),
     "camera_when_away": (D, "a pure switch; change it with `jarvis features`"),
     "camera_preview": (D, "the preview is a window of the face app; switch via `jarvis features`"),
@@ -55,7 +55,7 @@ FEATURES: dict[str, object] = {
     "agent_orchestrator": "agents", "project_manager": "project",
     "assisted_dialing": "dial", "self_manage": "manage",
     "self_tests": "selftest", "text_chat": "chat", "setup_tour": "tour",
-    "issue_reports": "issues", "web_chat": "web",
+    "issue_reports": "issues", "web_chat": "web", "anydo": "anydo", "anydo_update": "anydo",
     "drive_briefing": (D, "a spoken pre-drive briefing; switch it with `jarvis features`"),   # V6 P5
 }
 
@@ -69,10 +69,10 @@ TOOL_GROUPS: dict[str, object] = {
     "alerts": (D, "alerts are read and answered on the Alerts page"), "app": "mic",
     "appearance": "appearance", "autonomy": (D, "the Autonomy page"), "briefing": "jobs",
     "browser": "browser", "calc": (V, "arithmetic inside a conversation"), "calendar": "calendar",
-    "calendar_write": "calendar", "camera": (D, "see features camera"), "clock": (V, "the time inside a conversation"),
+    "calendar_write": "calendar", "camera": "camera", "clock": (V, "the time inside a conversation"),
     "contacts": "contacts", "dashboard": "dashboard", "display": "show", "features": "features",
     "files": (D, "the My files page"), "gmail": "mail", "google_connect": "google",
-    "google_contacts": "contacts", "help": "help", "helper": "approvals", "home": "home",
+    "google_contacts": "contacts", "help": "help", "helper": "approvals", "home": "home", "anydo": "anydo",
     "goals": "goals", "goal_plans": "goals", "preferences": "prefs", "proactive": "proactive", "dev": "dev", "devstatus": "dev", "identity": "setup", "instagram": "instagram", "lists": "lists", "memory": "memory", "music": "music",
     "notes": "notes", "profiles": "profile", "reports": "reports", "scheduler": "jobs", "self_check": "diagnose",
     "settings": (D, "settings are edited on the Settings page"), "skill_builder": (D, "the New Skills page"),

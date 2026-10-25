@@ -38,7 +38,7 @@ from .userdata import open_db
 
 SIGNAL_SCAN_S = 3600                              # how often the proactive-signal scan may run
 AUTONOMY_SYNC_S = 600.0
-ROADMAP_ISSUE = "https://github.com/igalgerman/jarves/issues/3"     # M3 Raspberry Pi verification (real issue)
+ROADMAP_ISSUE = "https://github.com/Jarvis-igerman-ai/jarves/issues/3"     # M3 Raspberry Pi verification (real issue)
 _UNVERIFIED_PI = ("pure Python + SQLite + tzdata, no Windows-only code; not run on a Raspberry Pi yet "
                   "(no device in the test setup)")
 _WIN_EVIDENCE = "core/tests/test_m3_*.py (unit + fault injection on Windows); no real-restart run yet"
@@ -293,6 +293,11 @@ class Operations:
         except Exception:
             self.selfspeed = None
             logs.error("selfspeed", "SELFSPEED_ATTACH_FAILED", "self-test tools not started", exc=True)
+        from . import self_aware                     # issue #61: about_jarves voice tool
+        try:
+            self_aware.attach(self.core)
+        except Exception:
+            logs.error("self_aware", "SELF_AWARE_ATTACH_FAILED", "self-awareness tools not started", exc=True)
         from . import issue_registry                 # owner request 21 Oct: issues registry, log sink, list_issues, fixed-in check
         try:
             self.issues = issue_registry.attach(self.core, self)
