@@ -37,3 +37,43 @@ def clear_dashboard(home: Path, pid: int | None = None) -> None:
             path.unlink()
     except (OSError, ValueError, AttributeError):
         pass
+
+
+def was_running_arg(was: dict | None) -> str | None:
+    """The /WASRUNNING= value for setup: 'core,face,dashboard:lan:mobile' or 'none'; None = unknown (setup detects)."""
+    if was is None:
+        return None
+    parts = [n for n in ("core", "face") if was.get(n)]
+    if was.get("dashboard") is not None:
+        flags = [f[2:] for f in was["dashboard"] if f in SAFE_FLAGS]
+        parts.append(":".join(["dashboard"] + flags))
+    return ",".join(parts) or "none"
+
+
+def detect_running(home: Path, *, core_up: bool, face_up=None) -> dict:
+    """What runs now, read BEFORE anything is stopped (same semantics as the installer's detect-only script): the Core
+    (the caller's live status answer), the face window (a process check), the dashboard (its marker, only when that pid
+    is alive; only the safe flags). Nothing is started or stopped here."""
+    from .budget import pid_alive
+    dash = None
+    try:
+        m = json.loads((Path(home) / DASHBOARD_FILE).read_text(encoding="utf-8"))
+        if pid_alive(int(m["pid"])):
+            dash = [f for f in m.get("flags") or [] if f in SAFE_FLAGS]
+    except (OSError, ValueError, KeyError, TypeError):
+        pass
+    try:
+        face = bool((face_up or _face_running)())
+    except Exception:
+        face = False
+    return {"core": bool(core_up), "face": face, "dashboard": dash}
+
+
+def _face_running() -> bool:
+    import subprocess
+    import sys
+    if sys.platform != "win32":
+        return False
+    out = subprocess.run(["tasklist", "/FI", "IMAGENAME eq JARVES Face.exe", "/NH"], capture_output=True, text=True,
+                         timeout=10).stdout
+    return "JARVES Face.exe" in out

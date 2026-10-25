@@ -611,7 +611,8 @@ def refuse_downgrade(candidate: str, current: str) -> None:
                                               "is only possible with `jarvis update --rollback`")
 
 
-def installer_args(path: str | Path, *, silent: bool = False, rollback: bool = False, restart: bool = False) -> list[str]:
+def installer_args(path: str | Path, *, silent: bool = False, rollback: bool = False, restart: bool = False,
+                   was_running: dict | None = None) -> list[str]:
     """The setup command line. `silent` is the in-app updater path (no wizard, no message boxes; setup closes the
     running app itself); `restart` asks setup to start the Core again at the end."""
     args = [str(path)]
@@ -621,11 +622,24 @@ def installer_args(path: str | Path, *, silent: bool = False, rollback: bool = F
         args.append("/ROLLBACK=1")
     if restart:
         args.append("/RESTARTJARVES=1")
+    from .runmarks import was_running_arg
+    wr = was_running_arg(was_running)
+    if wr:                                  # #293: what ran before the caller stopped it; setup restarts exactly that
+        args.append("/WASRUNNING=" + wr)
     return args
 
 
+def record_was_running(home: Path, was: dict) -> None:
+    """Remember in updates/pending.json what ran before the update (audit; setup gets it as /WASRUNNING=)."""
+    p = _updates_dir(home) / PENDING_FILE
+    d = _read_json(p)
+    d["was_running"] = was
+    _write_json(p, d)
+
+
 def launch_installer(path: str | Path, verified: dict | None = None, *, silent: bool = False, rollback: bool = False,
-                     restart: bool = False, popen: Callable | None = None) -> None:
+                     restart: bool = False, was_running: dict | None = None,
+                     popen: Callable | None = None) -> None:
     """Start setup, detached. By default the normal (visible) window, so the user sees and confirms every step;
     `silent` runs /VERYSILENT /SUPPRESSMSGBOXES (the in-app updater after the user said yes). `verified` is
     prepare_install()'s result; an installed build refuses to start anything without a signed, verified result
@@ -640,7 +654,8 @@ def launch_installer(path: str | Path, verified: dict | None = None, *, silent: 
     if not rollback and verified and verified.get("version"):
         refuse_downgrade(str(verified["version"]), build_info()["version"])
     flags = getattr(subprocess, "DETACHED_PROCESS", 0) | getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0)
-    (popen or subprocess.Popen)(installer_args(path, silent=silent, rollback=rollback, restart=restart),
+    (popen or subprocess.Popen)(installer_args(path, silent=silent, rollback=rollback, restart=restart,
+                                               was_running=was_running),
                                 creationflags=flags, close_fds=True)
     logs.info("updates", "UPDATE_INSTALLER_STARTED", "installer started after user approval", installer=Path(path).name,
               mode="silent" if silent else "window")
