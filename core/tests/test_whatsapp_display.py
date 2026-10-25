@@ -85,3 +85,20 @@ def test_description_and_hint_tell_not_to_open_the_dashboard():
     d = {t.name: t.description for t in wab.WhatsAppBridgeSkill(__import__("pathlib").Path("."), client=Stub([])).tools()}
     assert "not after reading" in d["whatsapp_show"]
     assert "shown_to_owner" in wab.BACKEND_RULE
+
+
+def test_display_reaches_the_owner_chat_but_never_a_phone(tmp_path):
+    """#363 review: the owner dashboard gets the display line; the paired-phone (device) state and events never do."""
+    from jarves import chat_engine
+    from test_web_chat import Rig
+    r = Rig(tmp_path)
+    try:
+        r.chat._display("t1", "[09:01] Dana: secret wa text")
+        assert any(m.get("role") == "display" for m in r.chat.state()["messages"])
+        assert not any(m.get("role") == "display" for m in r.chat.state(device=True)["messages"])
+        ap = lambda: []                                                       # noqa: E731
+        assert any(e["type"] == "display" for e in r.chat.poll(0, 0, "", ap)["events"])
+        dev = r.chat.poll(0, 0, "", ap, True)
+        assert not any(e["type"] == "display" for e in dev["events"]) and "secret wa text" not in str(dev)
+    finally:
+        r.stop()

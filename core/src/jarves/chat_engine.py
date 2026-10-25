@@ -329,13 +329,13 @@ class WebChat:
     # ------------------------------------------------------------------ views
     def state(self, *, device: bool = False) -> dict:
         with self._lock:
-            msgs = [dict(m) for m in self.messages]
+            msgs = [dict(m) for m in self.messages if not (device and m.get("role") == "display")]   # #363: owner only
             busy = self._busy
         return {"available": True, "cursor": self.events.last, "busy": busy, "messages": msgs,
                 "silent": self.silent_state(), "can_speak": (not device) and self.can_speak(),
                 "commands": [{"name": c[0], "en": c[1], "he": c[2]} for c in COMMANDS]}
 
-    def poll(self, after: int, wait_s: float, sig: str, approvals) -> dict:
+    def poll(self, after: int, wait_s: float, sig: str, approvals, device: bool = False) -> dict:
         """Events after `after`; waits up to wait_s for one (or for the set of waiting approvals to differ from `sig`)."""
         end = time.monotonic() + max(0.0, min(float(wait_s), LONGPOLL_MAX_S))
         while True:
@@ -344,6 +344,11 @@ class WebChat:
                 evs, resync = [], True               # the server restarted or the client fell far behind
             else:
                 evs, resync = self.events.since(after), False
+            if device and any(e.get("type") == "display" for e in evs):     # #363: a phone never gets WhatsApp text
+                kept = [e for e in evs if e.get("type") != "display"]
+                if not kept:
+                    after = evs[-1]["id"]
+                evs = kept
             view = approvals()
             cur = ",".join(a["id"] for a in view)
             if evs or resync or cur != sig or time.monotonic() >= end or self.closed:
@@ -641,7 +646,7 @@ def handle_events(chat: "WebChat | None", q: dict, *, device: bool, home: Path) 
         return 503, {"error": "chat is not running here", "code": "CHAT_UNAVAILABLE"}
     lang = _lang(q)
     fn = device_approvals if device else owner_approvals
-    return 200, chat.poll(_int(q, "after"), float(_int(q, "wait", 0)), _str(q, "sig"), lambda: fn(home, lang))
+    return 200, chat.poll(_int(q, "after"), float(_int(q, "wait", 0)), _str(q, "sig"), lambda: fn(home, lang), device)
 
 
 # ---------------------------------------------------------------------- owner dashboard routes

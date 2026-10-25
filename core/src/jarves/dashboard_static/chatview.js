@@ -182,8 +182,7 @@
     }
     function displayBlock(m) {      // #363: read-only owner text from a tool result; text nodes only, one RTL-safe line each
       const d = h("div", { class: "jc-msg jc-display", dir: "auto" });
-      String(m.text || "").split("
-").forEach((ln) => d.append(h("div", { dir: "auto", style: "white-space:pre-wrap" }, ln)));
+      String(m.text || "").split(String.fromCharCode(10)).forEach((ln) => d.append(h("div", { dir: "auto", style: "white-space:pre-wrap" }, ln)));
       log.append(d); scroll(true);
     }
     function toolLine(m) {
