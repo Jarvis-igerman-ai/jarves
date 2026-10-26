@@ -107,7 +107,7 @@ class Continuity:
                 logs.info("continuity", "COMMAND_REPLAYED", "a resent command was answered from the ledger",
                           kind=kind, device=device)
                 return hit[0]["status"], json.loads(hit[0]["body"]), True
-            if age_s is not None and float(age_s) > REPLAY_WINDOW_S:
+            if self.stale(age_s):
                 logs.warn("continuity", "COMMAND_STALE", "a queued command was too old to run", kind=kind, device=device)
                 return 410, {"error": "this message waited too long while offline: send it again if you still want it",
                              "code": "STALE"}, False

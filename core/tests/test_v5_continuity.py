@@ -437,3 +437,9 @@ async def test_a_due_timer_rings_on_the_phone_or_the_desktop_never_both(core):
     assert await ops._ring_once(ring, {"id": 41}, "pasta") is True      # a retry never rings or notifies again
     assert rang == [] and ops.cont.fetch_notices("phone1")[0]["text"] == "pasta"   # same single, unacknowledged note
     assert len(ops.cont.notice_states()) == 1
+
+
+def test_a_non_numeric_age_never_crashes_the_ledger(cont):
+    ran = []
+    st, _, _ = cont.execute("p1", "cmd-00000009", "goal", lambda: ran.append(1) or (200, {}), age_s="soon")
+    assert st == 200 and ran
