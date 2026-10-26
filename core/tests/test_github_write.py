@@ -231,3 +231,29 @@ def test_cli_write_status(tmp_path, capsys):
     j = json.loads(capsys.readouterr().out.strip().splitlines()[-1])
     assert j["switch_on"] is False and j["allowed_repos"] == [REPO] and j["implemented_kinds"] == []
     assert "Issues: write" in j["token_permissions_per_class"]
+
+
+def test_unknown_kind_and_oversized_payload_refused_before_asking(tmp_path):
+    w, ap, fake = mk(tmp_path)
+    assert run(w.execute(act(kind="repo.create"), origin="user")).code == "GITHUB_WRITE_FORBIDDEN"
+    big = act(payload={"body": "x" * 5000})
+    assert run(w.execute(big, origin="user")).code == "GITHUB_WRITE_BAD_ARGUMENT" and not ap.asked and not fake.calls
+
+
+def test_classic_scope_without_push_on_this_repo_is_refused(tmp_path):
+    fake = gc.FakeGitHub()
+    fake.scopes, fake.push = "repo", False
+    w, ap, _ = mk(tmp_path, fake=fake)
+    assert run(w.execute(act(), origin="user")).code == "GITHUB_WRITE_SCOPE" and not ap.asked
+
+
+def test_payload_changed_during_approval_is_refused(tmp_path):
+    w, ap, _ = mk(tmp_path)
+    a = act(payload={"title": "t"})
+    orig = ap.ask
+
+    async def mutate(prompt, **kw):
+        a.payload["title"] = "evil"
+        return await orig(prompt, **kw)
+    ap.ask = mutate
+    assert run(w.execute(a, origin="user")).code == "GITHUB_WRITE_DENIED"

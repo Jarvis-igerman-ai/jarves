@@ -78,6 +78,9 @@ class WriteResult(BaseModel):
     data: dict = Field(default_factory=dict)
 
 
+MAX_PAYLOAD_CHARS = 1200      # the approval shows the WHOLE payload; a bigger one is refused, never truncated on screen
+
+
 def forbidden(kind: str) -> bool:
     k = re.sub(r"\s+", "", str(kind or "")).lower()
     toks = set(re.split(r"[._:/-]+", k))
@@ -117,12 +120,18 @@ class GitHubWriter:
             return f"could not verify the token's write permission ({e.code})"
         perm = KIND_PERMS.get(a.kind.strip().lower(), "write access")
         if p["scopes"] is not None:                                    # classic token: X-OAuth-Scopes
+            if p["push"] is False:                                    # a scope does not give write on THIS repo
+                return f"the token has no write permission on the repo ({perm})"
             return "" if {"repo", "public_repo"} & set(p["scopes"]) else f"the token lacks the 'repo' scope ({perm})"
         return "" if p["push"] is True else f"the token has no write permission on the repo ({perm})"
 
     async def _gates(self, a: WriteAction, origin: str, untrusted: bool, rate: bool = True) -> WriteResult | None:
         if forbidden(a.kind):
             return self._refuse(a, "GITHUB_WRITE_FORBIDDEN", "this kind of change is never allowed", origin)
+        if a.kind.strip().lower() not in KIND_PERMS:          # fail closed: an unknown kind is refused, not allowed
+            return self._refuse(a, "GITHUB_WRITE_FORBIDDEN", "unknown kind of change", origin)
+        if len(json.dumps(a.payload, ensure_ascii=False, sort_keys=True, default=str)) > MAX_PAYLOAD_CHARS:
+            return self._refuse(a, "GITHUB_WRITE_BAD_ARGUMENT", "payload too large to show in full to the owner", origin)
         if not self.feats.active(FEATURE):
             return self._refuse(a, "GITHUB_WRITE_OFF", "GitHub writes are off (owner: jarvis github write on)", origin)
         if untrusted or origin not in ("user", "model"):
@@ -183,6 +192,8 @@ class GitHubWriter:
             if why:
                 return self._refuse(a, "GITHUB_WRITE_TIMEOUT" if why == "timeout" else "GITHUB_WRITE_DENIED",
                                     "the owner did not approve this exact action", origin)
+        if a.hash() != h:                              # the payload changed while the owner was asked (TOCTOU)
+            return self._refuse(a, "GITHUB_WRITE_DENIED", "the action changed after approval", origin)
         handler = HANDLERS.get(a.kind.strip().lower())
         if handler is None:
             return self._refuse(a, "GITHUB_WRITE_NOT_IMPLEMENTED", "this kind of write is not implemented yet", origin)
