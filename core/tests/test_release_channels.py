@@ -175,3 +175,18 @@ def test_rollback_defaults_to_dry_run(capsys, monkeypatch):
     import inspect
     assert "execute" in inspect.signature(rb.rollback).parameters
     assert inspect.signature(rb.rollback).parameters["execute"].default is False
+
+
+def test_jarvis_version_shows_the_beta_label_of_this_home(tmp_path, monkeypatch, capsys):
+    """#257: `jarvis --version` read no home, so it said 'channel main' while status showed the BETA badge."""
+    from jarves import cli
+    ver = updates.build_info()["version"]
+    d: dict = {}
+    updates.remember_build(d, {"version": ver, "display": "4.0.1-beta.77", "channel": "beta"})
+    (tmp_path / updates.STATE_FILE).write_text(json.dumps(d), encoding="utf-8")
+    monkeypatch.setattr(cli, "state_dir", lambda: tmp_path)
+    with pytest.raises(SystemExit) as e:
+        cli.main(["--version"])
+    assert e.value.code == 0
+    out = capsys.readouterr().out
+    assert "4.0.1-beta.77" in out and "BETA" in out

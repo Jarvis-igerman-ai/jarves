@@ -231,3 +231,14 @@ def test_two_providers_three_projects_digest_and_no_collisions(world):
         assert o.tell("claude", "x")["code"] == "AMBIGUOUS_SESSION"            # two claude: asks which
     finally:
         h.end()
+
+
+def test_claude_launch_carries_the_remaining_daily_cap_as_max_budget(world):
+    """#362: the daily cost cap was checked only when a turn started; a single long turn could pass it."""
+    from jarves.orchestrator import claude
+    m = claude.ManagedClaude(["claude"], ".", plugin_dir=None, on_event=lambda k, d: None, max_budget_usd=2.5)
+    assert m.argv[m.argv.index("--max-budget-usd") + 1] == "2.50"
+    assert "--max-budget-usd" not in claude.ManagedClaude(["claude"], ".", plugin_dir=None, on_event=lambda k, d: None).argv
+    o = world["o"]
+    cap = o.acfg.max_cost_usd_per_day
+    assert cap > 0 and abs(o._budget_left() - cap) < 0.01

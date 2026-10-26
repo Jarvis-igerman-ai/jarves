@@ -89,18 +89,35 @@ def _clean(url) -> str:
     return url if isinstance(url, str) and url.startswith("https://github.com/") and len(url) < 300 else ""
 
 
-def _check_labels(c: gc.GitHubClient, o: str, r: str, labels: list[str]) -> None:
-    have = {x.lower() for x in c.repo_labels(o, r)}
+def _check_labels(c: gc.GitHubClient, o: str, r: str, labels: list[str]) -> list[str]:
+    """A FRESH listing right before the write (never cached). Returns the repo's own spelling of each name. GitHub creates a
+    label that does not exist when it is named in an issue-create / edit / labels POST (there is no flag to forbid it), so
+    the only defence is this re-check; the window left is the few milliseconds between this read and the POST."""
+    have = {x.lower(): x for x in c.repo_labels(o, r)}
     missing = [x for x in labels if x.lower() not in have]
     if missing:                                     # POST would silently CREATE them: refuse instead
         raise gc.GitHubError("GITHUB_WRITE_BAD_ARGUMENT", f"label not on the repo (labels are never created): {missing[0][:50]}")
+    return [have[x.lower()] for x in labels]
+
+
+def _extra(a: gw.WriteAction, c: gc.GitHubClient) -> str:
+    """issue.edit: what the edit REPLACES (a PATCH swaps whole label / assignee sets) and whether it is a pull request."""
+    o, _, r = a.repo.partition("/")
+    cur, p, out = c.issue(o, r, a.target), a.payload, []
+    if "labels" in p:
+        out.append(f"REPLACES labels: {', '.join(cur['labels']) or '(none)'} -> {', '.join(p['labels'])}")
+    if "assignees" in p:
+        out.append(f"REPLACES assignees: {', '.join(cur['assignees']) or '(none)'} -> {', '.join(p['assignees'])}")
+    if cur["is_pr"]:
+        out.append("WARNING: this is a pull request: closing it closes the PR")
+    return "\n".join(out)
 
 
 def _do(a: gw.WriteAction, c: gc.GitHubClient) -> dict:
     o, _, r = a.repo.partition("/")
     base, kind, p = f"/repos/{o}/{r}/issues", a.kind.strip().lower(), dict(a.payload)
     if "labels" in p:
-        _check_labels(c, o, r, p["labels"])
+        p["labels"] = _check_labels(c, o, r, p["labels"])
     if kind == "issue.create":
         j = c.write("POST", base, p)
     elif kind == "issue.edit":
@@ -126,13 +143,14 @@ async def handle(a: gw.WriteAction, client: gc.GitHubClient) -> dict:
 for _k in FIELDS:
     gw.HANDLERS[_k] = handle
     gw.VALIDATORS[_k] = validate
+gw.EXTRAS["issue.edit"] = _extra
 
 
 # ------------------------------------------------------------------------------------------ CLI
 def cmd_github_issue(a, cfg, home) -> int:
     """jarvis github issue create|edit|comment|labels-add|labels-remove [number] --repo owner/repo ...: the SAME execute()
     path and approval as any write; the approval window shows the exact text."""
-    from .approvals import ApprovalService
+    from .approvals import ApprovalService, PopupChannel
     from .cli import _cli_features
     mode, repos = a.write_action or "", list(getattr(cfg, "github_repos", []) or [])
     kind = {"create": "issue.create", "edit": "issue.edit", "comment": "issue.comment",
@@ -144,7 +162,15 @@ def cmd_github_issue(a, cfg, home) -> int:
         return 2
     p = {k: v for k, v in {"title": a.title, "body": a.body, "state": a.state, "labels": a.label or None,
                            "assignees": a.assignee or None}.items() if v is not None}
-    w = gw.GitHubWriter(home, _cli_features(cfg, home), ApprovalService(home), repos=repos)
+    why = gw.agent_session_reason()
+    if why:      # the typed hash was no secret (a pty can fake a terminal): the owner approves in the POPUP, never here
+        print(json.dumps({"ok": False, "code": "GITHUB_WRITE_AGENT_SESSION", "message":
+                          f"refused: {why}. Run this command yourself in your own terminal; the approval opens as a popup "
+                          "window on this computer."}, ensure_ascii=False))
+        return 1
+    svc = ApprovalService(home)
+    svc.channels.append(PopupChannel(svc, enabled=True, lang=getattr(getattr(cfg, "ui", None), "popup_language", "en")))
+    w = gw.GitHubWriter(home, _cli_features(cfg, home), svc, repos=repos)       # local_only: only the popup approves
     r = asyncio.run(w.execute(action(kind, repo, a.number or "", **p), origin="user"))
     print(json.dumps({"ok": r.ok, "code": r.code, "message": r.message, **r.data}, ensure_ascii=False))
     return 0 if r.ok else 1

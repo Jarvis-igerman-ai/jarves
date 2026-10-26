@@ -11,6 +11,7 @@ rem -I: isolated (no PYTHONPATH / user site-packages from this PC can change the
 set J="%~dp0python\python.exe" -I -X utf8 -m jarves
 set "FIRST=%~1"
 set "SELF=%~f0"
+if /i "%FIRST%"=="recover-hotfix" goto recover
 if /i "%FIRST%"=="--profile" goto profile
 if "%FIRST%"=="" goto launch
 if not "%FIRST:~0,1%"=="-" ( %J% %* & exit /b )
@@ -27,6 +28,18 @@ if not "%ERRORLEVEL%"=="1" (
 )
 %J% setup --if-needed || ( pause & exit /b 1 )
 %J% run --desktop %*
+exit /b
+:recover
+rem jarvis recover-hotfix [--list ^| --id ID ^| --dry-run]: restore the originals of a hotfix WITHOUT loading the Core (standard library only)
+shift
+set "REST="
+:rcollect
+if "%~1"=="" goto rrun
+set REST=%REST% %1
+shift
+goto rcollect
+:rrun
+"%~dp0python\python.exe" -I -X utf8 -m jarves.hotfix_recover %REST%
 exit /b
 :profile
 rem jarvis --profile NAME [command]: the same launcher for another profile (own memory, settings, keys, port)

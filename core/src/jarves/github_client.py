@@ -212,6 +212,17 @@ class GitHubClient:
         _name(owner, "owner"), _name(repo, "repo")
         return [str(x.get("name")) for x in self._pages(f"/repos/{owner}/{repo}/labels") if isinstance(x, dict)]
 
+    def issue(self, owner: str, repo: str, number: str) -> dict:
+        """One issue (a READ): its labels, assignees, state and whether it is really a pull request."""
+        _name(owner, "owner"), _name(repo, "repo")
+        if not str(number).isdigit():
+            raise GitHubError("GITHUB_BAD_ARGUMENT", "bad issue number")
+        j = self._json("GET", f"/repos/{owner}/{repo}/issues/{int(number)}")
+        j = j if isinstance(j, dict) else {}
+        return {"state": j.get("state"), "is_pr": "pull_request" in j,
+                "labels": [str(x.get("name")) for x in j.get("labels") or [] if isinstance(x, dict)],
+                "assignees": [str(x.get("login")) for x in j.get("assignees") or [] if isinstance(x, dict)]}
+
     def write(self, method: str, path: str, body: dict | None = None):
         """THE write door (G3): POST/PATCH/DELETE on the issues family of ONE repo, api.github.com only, no redirects.
         Callers pass a repo already checked against the owner's allow-list by github_write.execute()."""
@@ -283,6 +294,8 @@ class FakeGitHub:
         self.write_fail: tuple[int, dict] | None = None   # forces this answer for POST/PATCH/DELETE only (reads still pass)
         self.bodies: list = []                  # JSON bodies of the writes, in order
         self.labels = ["bug", "P1"]             # labels that exist on the repo
+        self.issue_labels, self.issue_assignees = ["bug"], ["octocat"]   # what issue N has now (GET /issues/N)
+        self.pr_numbers: set[str] = {"2"}       # issue numbers that are really pull requests
         self.transport = httpx.MockTransport(self._handle)
 
     def _handle(self, req: httpx.Request) -> httpx.Response:
@@ -296,6 +309,13 @@ class FakeGitHub:
             return self._write(req, p, hdr)
         if p.endswith("/labels"):
             return httpx.Response(200, headers=hdr, json=[{"name": n} for n in self.labels])
+        m = re.fullmatch(r"/repos/[^/]+/[^/]+/issues/(\d+)", p)
+        if m:
+            j = {"number": int(m.group(1)), "state": "open", "labels": [{"name": n} for n in self.issue_labels],
+                 "assignees": [{"login": n} for n in self.issue_assignees]}
+            if m.group(1) in self.pr_numbers:
+                j["pull_request"] = {}
+            return httpx.Response(200, headers=hdr, json=j)
         if p == "/user":
             return httpx.Response(200, headers=hdr, json={"login": "octo"})
         if re.fullmatch(r"/repos/[^/]+/[^/]+", p):        # the repo itself: scopes header + permissions (write_probe)
@@ -362,8 +382,8 @@ def add_cli(sub) -> None:
                                        "token (asked privately); `off` deletes it. Switch on: `jarvis features on github`")
     h.add_argument("action", choices=["status", "token", "off", "write", "issue"])
     h.add_argument("write_action", nargs="?", default=None,
-                   choices=["status", "on", "off", "create", "edit", "comment", "labels-add", "labels-remove"],
-                   help="with `write`: status|on|off (the GitHub write switch); with `issue`: create|edit|comment|"
+                   choices=["status", "on", "off", "reset-audit", "create", "edit", "comment", "labels-add", "labels-remove"],
+                   help="with `write`: status|on|off (the GitHub write switch)|reset-audit (owner: after a tamper alarm); with `issue`: create|edit|comment|"
                         "labels-add|labels-remove (each asks your approval, shows the exact text)")
     h.add_argument("number", nargs="?", default=None, help="with `issue`: the issue or pull request number")
     h.add_argument("--repo", default="", help="owner/repo from github_repos (default: the only one listed)")

@@ -47,9 +47,19 @@ en = "Dependency change (pyproject or uv.lock): jarvis hotfix apply --dry-run li
 action = "command:jarvis hotfix apply --dry-run"
 
 [[steps]]
+he = "אחרי תיקון מהיר, תהליך הגשר שכבר רץ ממשיך להשתמש בקובץ הישן עד שהגשר עצמו מופעל מחדש. jarvis hotfix status (והדוח של apply) משווה את הקובץ שהתהליך הרץ באמת עם קובץ הגשר הנעוץ, ואומר במפורש \"bridge restart needed\" כשהם שונים. כדי להפעיל מחדש בבטחה: jarvis hotfix apply --restart-bridge. רק תהליך הגשר שהליבה מנהלת מופעל מחדש (לפי ה-pid ונתיב הקובץ המדויק שלו, עצירה מסודרת, בלי הריגה לפי שורת פקודה), ורק אחרי שהקובץ החדש אומת. אם ההפעלה נכשלת, הכול מבוטל אוטומטית והגשר חוזר."
+en = "After a hotfix, a bridge process that was already running keeps using the old exe until the bridge itself restarts. jarvis hotfix status (and the apply report) compares the exe the running process really uses with the pinned bridge exe and says plainly \"bridge restart needed\" when they differ. To restart it safely: jarvis hotfix apply --restart-bridge. Only the bridge process Core owns is restarted (by its pid and exact image path, graceful stop, never killed by command-line pattern), and only after the new exe is verified. If the restart fails, everything is reverted automatically and the bridge comes back."
+action = "command:jarvis hotfix status"
+
+[[steps]]
 he = "לביטול: jarvis hotfix revert. הקבצים המקוריים חוזרים ממה ששמור בתיקיית hotfix בנתונים."
 en = "To undo: jarvis hotfix revert. The original files come back from the hotfix folder in your data folder."
 action = "command:jarvis hotfix revert"
+
+[[steps]]
+he = "אם התיקון נקטע ו-jarvis לא עולה (חבילה שבורה): סגרו את JARVES מהמגש והריצו  jarvis recover-hotfix  (או  python -I -m jarves.hotfix_recover --latest  עם הפייתון המותקן). זה לא טוען את הליבה, בודק כל מקור שמור לפי sha256 לפני שינוי, ומשחזר קבצים, גשר ותלויות. --list מציג גיבויים, --dry-run רק בודק."
+en = "If a hotfix was interrupted and jarvis cannot start (a damaged package): quit JARVES from the tray and run  jarvis recover-hotfix  (or  python -I -m jarves.hotfix_recover --latest  with the installed Python). It does not load the Core, checks every saved original by sha256 before changing anything, and restores files, the bridge and dependencies. --list shows the backups, --dry-run only checks."
+action = "command:jarvis recover-hotfix --dry-run"
 
 [[problems]]
 he = "כתוב REFUSED"
@@ -61,3 +71,9 @@ he = "כתוב \"הוחזר אוטומטית\""
 en = "It says it was reverted automatically"
 fix_he = "משהו נכשל (העתקה, הפעלה מחדש או doctor). הקבצים המקוריים כבר חזרו. ראו את ההודעה ואת hotfix/last-doctor.txt בתיקיית הנתונים."
 fix_en = "Something failed (copy, restart or doctor). The originals are already back. Read the message and hotfix/last-doctor.txt in your data folder."
+
+[[problems]]
+he = "jarvis hotfix revert לא עולה אחרי תיקון מהיר שנקטע"
+en = "jarvis hotfix revert cannot start after an interrupted hotfix"
+fix_he = "הריצו  jarvis recover-hotfix  (פייתון בלבד, בלי הליבה). אם jarvis.cmd עצמו לא עובד: python -I -m jarves.hotfix_recover --latest עם python.exe שבתיקיית ההתקנה. RECOVER_ORIGINAL_BAD: הגיבוי פגום, התקינו גרסה מלאה."
+fix_en = "Run  jarvis recover-hotfix  (standard library only, no Core). If jarvis.cmd itself does not work: python -I -m jarves.hotfix_recover --latest with the python.exe in the install folder. RECOVER_ORIGINAL_BAD: the backup itself is damaged, use the full installer."

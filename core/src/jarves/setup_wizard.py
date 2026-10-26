@@ -55,16 +55,16 @@ CONTINUE_IN_TERMINAL = -1          # a browser action returns this when it could
 KEEP_SKIPPED = ("names", "wake", "voice", "beta", "addons", "privacy", "budget")      # "keep my settings": never asked
 STEPS = ("language", "connection", "names", "wake", "voice", "beta", "addons", "privacy", "budget", "google", "connect")
 # Modules that register add-ons in jarves.features at import (the dashboard imports the same ones).
-ADDON_MODULES = ("jarves.telegram_channel", "jarves.instagram_channel", "jarves.whatsapp", "jarves.briefing", "jarves.homeassistant", "jarves.anydo", "jarves.github_client", "jarves.github_write", "jarves.github_issues",
+ADDON_MODULES = ("jarves.telegram_channel", "jarves.instagram_channel", "jarves.whatsapp", "jarves.briefing", "jarves.homeassistant", "jarves.anydo", "jarves.github_client", "jarves.openrouter", "jarves.github_write", "jarves.github_issues",
                  "jarves.appearance", "jarves.backup", "jarves.usage", "jarves.updates", "jarves.runtime",
                  "jarves.operations", "jarves.guides", "jarves.skills.generated", "jarves.browser", "jarves.profiles",
                  "jarves.selfcheck", "jarves.connect", "jarves.skills.helper", "jarves.context_trace",
-                 "jarves.recall", "jarves.diag.service", "jarves.whatsapp_bridge", "jarves.orchestrator", "jarves.dialing", "jarves.self_manage", "jarves.drive_briefing", "jarves.skills.manifest2", "jarves.hotfix") + plugin_registry.names("addons")
+                 "jarves.recall", "jarves.diag.service", "jarves.whatsapp_bridge", "jarves.orchestrator", "jarves.dialing", "jarves.self_manage", "jarves.drive_briefing", "jarves.skills.manifest2", "jarves.hotfix", "jarves.triage") + plugin_registry.names("addons")
 # Privacy-sensitive or outward-acting: OFF on the first run whatever else says; ON only after an explicit yes.
 SAFE_OFF = frozenset({"camera", "face_recognition", "camera_when_away", "gmail_send", "calendar_write",
                       "dashboard_lan", "mobile_access", "browser", "telegram", "home_assistant", "instagram", "helper",
                       "helper_readonly_auto", "whatsapp_bridge", "whatsapp_send", "whatsapp_archive", "agent_orchestrator", "agent_opencode",
-                      "assisted_dialing", "drive_briefing", "anydo", "anydo_update", "github", "github_write", "skills_manifest2"})
+                      "assisted_dialing", "drive_briefing", "anydo", "anydo_update", "github", "provider_openrouter", "github_write", "skills_manifest2"})
 # Registered and grouped (so coverage checks see them) but never offered by the wizard: the owner decided (20 Oct)
 # that the Helper asks for EVERY command; the read-only allow-list exists only as `jarvis features on ...`.
 WIZARD_HIDDEN = frozenset({"helper_readonly_auto", "whatsapp_archive",     # archive: explained and confirmed on its own
@@ -93,7 +93,7 @@ GROUPS: tuple[tuple[str, str, str, tuple[str, ...]], ...] = (
     ("updates", "עדכונים וגיבוי", "Updates & backup", ("update_check", "beta_channel", "auto_update", "release_signoff", "setup_tour", "backup", "self_awareness", "security_scans", "hotfix")),
     ("profiles", "פרופילים", "Profiles", ("profiles",)),
     ("helper", "עזרה במחשב (פקודות והתקנות)", "Computer helper (commands & installs)", ("helper", "helper_readonly_auto")),
-    ("agents", "סוכני קוד", "Coding agents", ("agent_orchestrator", "agent_opencode", "project_manager")),
+    ("agents", "סוכני קוד", "Coding agents", ("agent_orchestrator", "agent_opencode", "project_manager", "provider_openrouter")),
 )
 ANSWER_KEYS = {"beta_features", "language", "connection", "api_key_from_env", "display_name", "spoken_name", "address_me",
                "wake_model", "voice", "approve_voice_cost", "features", "privacy_mode", "monthly_budget_usd",
@@ -1247,6 +1247,7 @@ BUNDLE: dict[str, list[Callable[[], tuple[bool, str]]]] = {
     "anydo_update": [_mod("jarves.anydo")],
     "task_triage": [_mod("jarves.triage"), _data("jarves.guides", "data/task_triage.toml")],
     "github": [_mod("jarves.github_client"), _mod("httpx"), _data("jarves.guides", "data/github.toml")],
+    "provider_openrouter": [_mod("jarves.openrouter"), _mod("httpx"), _data("jarves.guides", "data/provider_openrouter.toml")],
     "github_write": [_mod("jarves.github_write"), _mod("jarves.github_issues"), _mod("jarves.github_client"), _mod("httpx"), _data("jarves.guides", "data/github_write.toml")],
     "profiles": [_mod("jarves.profiles"), _data("jarves", "dashboard_static/profiles.js"),
                  _data("jarves.guides", "data/profiles.toml")],

@@ -115,6 +115,9 @@ def _nights(n=5, bad=None):
              "created_at": (NOW - timedelta(days=i, hours=10)).isoformat()} for i in range(n)]
 
 
+SIGNED = "owner: Igal\ndate: 2026-10-21\ncommit: " + SHA + "\n"
+
+
 def _signed_root(tmp_path, sha=SHA):
     s = _sheet()
     s.set_result("C1", "pass")
@@ -126,7 +129,7 @@ def _signed_root(tmp_path, sha=SHA):
 
 def _gate(tmp_path, **over):
     kw = dict(tag="v4.1.0", sha=SHA, verified_sha=SHA, build_version="4.1.0.77", root=_signed_root(tmp_path),
-              checklist_text="| 1 | thing | done |\n", bug_tables=[], nightly_runs=_nights(),
+              checklist_text="| 1 | thing | done |\n", bug_tables=[],
               checks_runs=[{"head_sha": SHA, "conclusion": "success", "event": "push"}],
               is_ancestor=lambda a, b: True, changed_files=lambda a, b: [], now=NOW)
     kw.update(over)
@@ -153,7 +156,7 @@ def test_gate_requires_tested_beta_sha_equals_tag_or_docs_only(tmp_path):
                  changed_files=lambda a, b: ["docs/x.md"]) == []
 
 
-def test_gate_blocks_on_sha_mismatch_open_p0_p2_nightly_and_tag_shape(tmp_path):
+def test_gate_blocks_on_sha_mismatch_open_p0_p2_and_tag_shape(tmp_path):
     assert any("differs from the verified" in p for p in _gate(tmp_path, verified_sha="c" * 40))
     assert any("open P0-P2" in p for p in _gate(tmp_path, checklist_text="- P1 bug still open\n"))
     assert _gate(tmp_path, checklist_text="- zero open P0-P2\n") == []
@@ -161,10 +164,58 @@ def test_gate_blocks_on_sha_mismatch_open_p0_p2_nightly_and_tag_shape(tmp_path):
     assert any("bug B1" in p for p in _gate(tmp_path, bug_tables=["| B1 | P2 | open | x |\n"]))
     named = _gate(tmp_path, bug_tables=[("X_BUG_TABLE.md", "| id | sev | status |\n|---|---|---|\n| B2 | P1 | open |\n")])
     assert any(p.startswith("X_BUG_TABLE.md: bug B2 (P1)") for p in named)
-    assert any("nightly not green" in p for p in _gate(tmp_path, nightly_runs=_nights(bad=2)))
-    assert any("only 3" in p for p in _gate(tmp_path, nightly_runs=_nights(3)))
     assert any("not a stable tag" in p for p in _gate(tmp_path, tag="v4.1.0-beta.1"))
     assert any("no green jarves-checks" in p for p in _gate(tmp_path, checks_runs=[]))
+
+
+def test_the_gate_has_no_nightly_requirement(tmp_path):
+    """Owner 26 Oct: no nightly check at all, not even a stale one."""
+    assert not hasattr(gate, "nightly_problems")
+    assert _gate(tmp_path) == []
+
+
+def _issue(n, *labels, **kw):
+    return {"number": n, "title": f"t{n}", "state": "open", "labels": [{"name": x} for x in labels], **kw}
+
+
+def test_gate_blocks_on_open_p0_p2_github_issues_but_not_planned_work(tmp_path):
+    assert _gate(tmp_path, issues=[_issue(1, "P3", "bug"), _issue(2, "P1", "v7"), _issue(3, "P2", "enhancement"),
+                                   _issue(4, "P1", "bug", pull_request={}), _issue(7, "P1", "4.5.1")]) == []
+    # #499: a real defect that also carries a planned-work label is NOT skipped
+    both = _gate(tmp_path, issues=[_issue(8, "P1", "bug", "v7"), _issue(9, "P2", "bug", "4.5.1"), _issue(10, "P0", "bug", "enhancement")])
+    assert [p for p in both if "open P" in p] == ["open P1 issue #8: t8", "open P2 issue #9: t9", "open P0 issue #10: t10"]
+    probs = _gate(tmp_path, issues=[_issue(5, "P0", "bug"), _issue(6, "P2", "ci")])
+    assert [p for p in probs if "open P" in p] == ["open P0 issue #5: t5", "open P2 issue #6: t6"]
+
+
+def test_known_issue_label_skips_only_with_exact_label_and_is_listed(tmp_path, capsys):
+    acc = [_issue(1, "P2", "bug", "known-issue-4.5"), _issue(2, "P1", "bug", " Known-Issue-4.5 ")]
+    assert [p for p in _gate(tmp_path, issues=acc) if "open P" in p] == []
+    assert gate.accepted_issues(acc) == ["#1 (P2): t1", "#2 (P1): t2"]
+    # a bug without it counts; planned-work labels alone never skip a bug; near-miss labels do not skip
+    rest = [_issue(3, "P1", "bug"), _issue(4, "P1", "bug", "v5"), _issue(5, "P2", "bug", "4.5.1"),
+            _issue(6, "P2", "bug", "known-issue-4.5.1"), _issue(7, "P2", "bug", "known-issue")]
+    assert [p for p in _gate(tmp_path, issues=acc + rest) if "open P" in p] == [
+        f"open {s} issue #{n}: t{n}" for n, s in ((3, "P1"), (4, "P1"), (5, "P2"), (6, "P2"), (7, "P2"))]
+    assert gate.accepted_issues(rest) == []
+    gate._print_accepted(gate.accepted_issues(acc))
+    assert "accepted known issues (2" in capsys.readouterr().out
+
+
+def test_gate_refuses_when_gh_issues_cannot_be_read(tmp_path, monkeypatch, capsys):
+    def boom(repo):
+        raise OSError("gh down")
+    monkeypatch.setattr(gate, "gh_issues", boom)
+    monkeypatch.setattr(gate, "gh_runs", lambda *a: [])
+    rc = gate.main(["--tag", "v4.5.0", "--sha", SHA, "--repo-root", str(tmp_path)])
+    assert rc == 1 and "cannot read open issues" in capsys.readouterr().out
+
+
+def test_one_signature_the_signed_sheet_is_enough_and_unsigned_is_refused(tmp_path):
+    """Owner 26 Oct: ONE signature. There is no SIGNED_<version> file any more; the signed manual sheet is the signature."""
+    assert not hasattr(gate, "signed_problems")
+    assert _gate(tmp_path) == []
+    assert any("sign-off" in p for p in gate.signoff_problems(tmp_path / "none", "4.1.0", SHA, lambda a, b: True, lambda a, b: []))
 
 
 # The bug tables in docs/reviews use different column orders. A fixed `| id | sev | status |` position read the area,

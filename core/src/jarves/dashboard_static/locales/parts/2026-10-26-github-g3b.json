@@ -1,0 +1,8 @@
+{
+ "dict": {
+  "this approval can only be answered in the JARVES popup on the computer": "את האישור הזה אפשר לאשר רק בחלון של JARVES במחשב",
+  "could not read the issue on GitHub to show what the edit replaces; try again": "לא הצלחתי לקרוא את ה-issue ב-GitHub כדי להראות מה העריכה מחליפה; נסו שוב",
+  "WARNING: the text refers to an issue in a repo (owner/repo#N): GitHub links it and notes it on that issue": "אזהרה: הטקסט מפנה ל-issue במאגר (בעלים/מאגר#N): GitHub יוצר קישור ומציין זאת באותו issue",
+  "WARNING: this is a pull request: closing it closes the PR": "אזהרה: זו בקשת מיזוג (pull request): סגירה שלה סוגרת את הבקשה"
+ }
+}
