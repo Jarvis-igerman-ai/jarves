@@ -23,6 +23,8 @@ Current dashboard review: [23 Oct findings inventory and recheck gates](reviews/
 Phone acceptance result (25 Oct): [phone sheet result](reviews/PHONE_SHEET_RESULT_2026-10-25.md).
 Self-diagnosis plan (25 Oct): [self-diagnosis plan](plans/SELF_DIAGNOSIS_PLAN_2026-10-25.md).
 
+Smart chat blocks and task triage design (26 Oct, #364 #365): [design](plans/SMART_CHAT_AND_TASK_TRIAGE_DESIGN_2026-10-26.md). Dashboard issues triage (26 Oct): [triage](handoff/2026-10-26-dashboard-issues-triage.md).
+
 ## 2. Testing and manual testing
 
 | What | Where | Who runs it |
