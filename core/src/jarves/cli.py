@@ -1094,6 +1094,7 @@ async def _wake_listen_test(det, *, mic_factory, seconds: float, phrase: str, th
             if clip.clipping() and not clip_said:        # live, before the verdict: say the exact fix once
                 clip_said = True
                 out("\n WARNING: " + clip.advice() + "\n")
+            raw = np.frombuffer(chunk, "<i2")
             nonzero = nonzero or bool(np.abs(raw).max() > 2) if raw.size else nonzero
             fed = agc.process(chunk) if agc is not None else chunk
             a = np.frombuffer(fed, "<i2")
