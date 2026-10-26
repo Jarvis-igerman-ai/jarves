@@ -1,0 +1,52 @@
+order = 68
+category = "system"
+features = ["phone_hands_free"]
+suggest = false
+aliases = ["קול נהיגה ללא ידיים", "שיחה ללא ידיים בנהיגה", "hands-free drive voice", "drive voice", "hands free phone"]
+links = ["phone_drive", "drive_mode", "phone_location", "drive_actions"]
+title_he = "קול נהיגה ללא ידיים בטלפון"
+title_en = "Hands-free Drive voice on the phone"
+what_he = "שיחה בקול עם JARVES מלשונית הנהיגה בטלפון בלי ללחוץ על כפתור בכל משפט. הלחיצה היחידה היא \"התחילו קול נהיגה\"; אחריה העמוד ממשיך להקשיב, מחליף תורות לבד וקורא את התשובה בקול. \"עצור\" תמיד עוצר את הדיבור. כבוי כברירת מחדל, בשלב בטא, ולחצן הדיבור נשאר ברירת המחדל. חשוב: דפדפן בטלפון יכול להשתמש במיקרופון רק כשהעמוד פתוח והמסך דלוק, ולכן זו שיחה בחזית. אין הקשבה ברקע ואין מילת הפעלה."
+what_en = "Talk to JARVES from the phone's Drive tab without pressing a button for every sentence. The only tap is \"Start Drive voice\"; after it the page keeps listening, takes turns by itself and reads the answer aloud. \"Stop\" always stops the speech. Off by default, in beta, and push-to-talk stays the default. Important: a phone browser can use the microphone only while the page is open and the screen is on, so this is a foreground session. There is no background listening and no wake word."
+say = [["התחילו קול נהיגה", "Start Drive voice"]]
+expect_he = "מסך גדול מראה מצב (מקשיב, שומע, חושב, מדבר). אומרים משפט והתשובה נקראת. תשובות לקריאה בלבד מותרות; כל פעולה בעלת השלכות (הודעה, שיחה) ממתינה לשתעצרו, כמו תמיד במצב נהיגה. חירום, ניתוק ו\"עצור\" תמיד פועלים."
+expect_en = "A big screen shows the state (listening, hearing, thinking, speaking). Say a sentence and the answer is read aloud. Read-only answers are allowed; anything with consequences (a message, a call) waits until you stop, as always in drive mode. Emergency, hang-up and \"stop\" always work."
+test_he = "הריצו  jarvis features on beta_features  jarvis features on phone_hands_free  ו-jarvis drive on. בטלפון (חיבור https), בלשונית נהיגה לחצו \"התחילו קול נהיגה\", שאלו שאלה ואמרו \"עצור\" באמצע התשובה. נעלו את המסך ובדקו שהשיחה הסתיימה ושההודעה אומרת שהמיקרופון סגור."
+test_en = "Run  jarvis features on beta_features  jarvis features on phone_hands_free  and  jarvis drive on. On the phone (https), in the Drive tab tap \"Start Drive voice\", ask a question and say \"stop\" in the middle of the answer. Lock the screen and check the session ended and the message says the microphone is closed."
+cost_he = "משתמש בזיהוי הדיבור ובמודל כמו שיחת טלפון רגילה, לכל משפט. יש הגבלות: 30 דקות לכל היותר, 90 שניות בלי דיבור מסיימות את השיחה, ועד 80 משפטים."
+cost_en = "It uses speech recognition and the model like an ordinary phone chat, for each sentence. There are limits: 30 minutes at most, 90 seconds without speech ends the session, and up to 80 sentences."
+privacy_he = "המיקרופון פתוח רק בזמן שהשיחה פעילה והעמוד על המסך, וסמל המיקרופון בטלפון מראה זאת. הקטעים נשלחים לכתיבה ולא נשמרים; היומן הביטחוני מכיל רק את סוג הפעולה והגודל, לא את המילים. תשובות מהאינטרנט או מהודעות הן טקסט לא מהימן ולא מבצעות פעולות. אין מיקום, והתכונה לא משנה את כללי מצב הנהיגה או האישורים. מה שנאמר והתשובה נכנסים להיסטוריית השיחה כמו הודעה מוקלדת מהטלפון. התשובות מוקראות במנוע הדיבור של הטלפון עצמו (באנדרואיד הוא עשוי להשתמש בקולות אונליין של Google, שמקבלים את הטקסט). כל מי שברכב שומע את התשובות ויכול לדבר אל JARVES. דיבור בזמן שהתשובה מוקראת רק עוצר אותה (\"עצור\" או \"נתק\"); אחר כך אומרים שוב את הבקשה."
+privacy_en = "The microphone is open only while the session is running and the page is on screen, and the phone's microphone indicator shows it. Clips are sent for transcription and not kept; the audit holds only the kind of action and the size, never the words. Text from the web or from messages is untrusted and never acts. No location is used, and this changes no drive-mode or approval rule. What you say and the answer join the conversation history like a typed phone message. Answers are read by the phone's own speech engine (on Android it may use Google's online voices, which receive the text). Anyone in the car hears the answers and can speak to JARVES. Talking while an answer is read only stops it (\"stop\" or \"hang up\"); then say your request again."
+
+[parity.features]
+phone_hands_free = "phone"
+
+[[steps]]
+he = "ודאו שמסך הנהיגה בטלפון עובד, שלטלפון יש הרשאות drive ו-voice, ושהטלפון מחובר דרך https (jarvis dashboard --mobile --tls-selfsigned)."
+en = "Make sure the phone Drive screen works, the phone has the drive and voice permissions, and the phone is connected over https (jarvis dashboard --mobile --tls-selfsigned)."
+
+[[steps]]
+he = "במחשב: jarvis features on phone_hands_free (בטא: קודם jarvis features on beta_features), ו-jarvis drive on. לכיבוי: jarvis features off phone_hands_free."
+en = "On the computer: jarvis features on phone_hands_free (beta: first jarvis features on beta_features), and jarvis drive on. To turn it off: jarvis features off phone_hands_free."
+
+[[steps]]
+he = "בטלפון, בלשונית \"נהיגה\": לחצו \"התחילו קול נהיגה\", אשרו את המיקרופון, ודברו. לסיום: אמרו \"נתק\" או לחצו \"סיום\"."
+en = "On the phone, in the \"Drive\" tab: tap \"Start Drive voice\", allow the microphone and talk. To finish: say \"hang up\" or tap \"End\"."
+
+[[problems]]
+he = "הכפתור כבוי או כתוב שהתכונה כבויה"
+en = "The button is off or says the feature is off"
+fix_he = "הריצו jarvis features on phone_hands_free ו-jarvis drive on במחשב. התכונה דורשת מצב נהיגה דלוק ולשונית נהיגה."
+fix_en = "Run jarvis features on phone_hands_free and jarvis drive on on the computer. It needs drive mode on and the Drive tab."
+
+[[problems]]
+he = "השיחה הסתיימה מעצמה"
+en = "The session ended by itself"
+fix_he = "זה מכוון: היא מסתיימת כשהמסך ננעל, כשהעמוד עוזב את המסך, כשהשמע ברכב מתנתק, כשמצב הנהיגה נגמר, אחרי 90 שניות בלי דיבור או אחרי 30 דקות. ההודעה אומרת מה קרה והמיקרופון סגור. התחילו שוב בלחיצה או השתמשו בלחצן הדיבור."
+fix_en = "That is on purpose: it ends when the screen locks, the page leaves the screen, the car audio disconnects, drive mode ends, after 90 seconds without speech or after 30 minutes. The message says what happened and the microphone is closed. Start again with a tap or use push-to-talk."
+
+[[problems]]
+he = "הטלפון לא מקשיב כשהמסך כבוי"
+en = "The phone does not listen with the screen off"
+fix_he = "נכון, ובכוונה: אנדרואיד לא נותן לעמוד אינטרנט להקליט ברקע. השאירו את המסך דלוק (העמוד מבקש מהטלפון לא לכבות אותו) או השתמשו בלחצן הדיבור."
+fix_en = "Right, and on purpose: Android does not let a web page record in the background. Keep the screen on (the page asks the phone not to turn it off) or use push-to-talk."
