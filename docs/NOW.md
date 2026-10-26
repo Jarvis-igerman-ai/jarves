@@ -50,3 +50,9 @@ Still needs the owner (do not do without it):
 3. May scans draft repair PRs when you turn that on (default stays OFF, never auto-merge)?
 4. Camera: which device is authoritative, and may an explicit still be sent to a provider?
 5. #60 baseline: full first run or smoke only? When can you test on the PC (webcam, voice, OpenAI credit for #122)?
+
+## V7 work package (owner approved 25 Oct 2026; plan: [V7 work package](plans/V7_WORK_PACKAGE_2026-10-26.md))
+
+Execution authority for V7 slices. Priority: V4.5, V5 and V6 gate items keep the PR slots; V7 runs in free slots and on free agents, one small PR (about 400 changed lines) per slice, from fresh `jarves/main`, issue per slice (label `v7`, umbrella #50). Tracks: G GitHub (full read+write, every write approval-gated with the exact action, merges only through the merge queue), M Model Lab and spend policy, D OpenCode third harness, A Android daily companion (PC-hosted Core first, then offline basics), B Browser Studio (read-only live view, then takeover, then opt-in recording), R research (OpenClaw and alternatives, Buzz), X extras backlog.
+
+First three slices: G1 (read-only GitHub client), D1 (OpenCode read-only adapter), M1 (ModelRegistry and SpendPolicy). Docs filler: A0, R1, R2. Fakes first; no live login, no paid call beyond the caps in the plan (D4 1 USD, M5 2 USD, only with the owner's go), no private code to another provider, no new device permission, no recording of secrets, no direct merge/force push/bypass, no stable release. Opus-only review for approvals, write framework, token/key storage, spend policy, mic permission, live-view and takeover surfaces, orchestrator gate and installer; Sonnet otherwise. Owner needs and safe defaults: plan section 8.

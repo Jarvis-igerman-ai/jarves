@@ -165,6 +165,7 @@ def _env() -> dict[str, str]:
     env = dict(os.environ)
     env["PYTHONPATH"] = str(CORE / "src") + os.pathsep + env.get("PYTHONPATH", "")
     env["PYTHONIOENCODING"] = "utf-8"
+    env.pop("GODOT_EXE", None)      # hermetic like CI: a dev PC's Godot must not change the measured prompt size (#307)
     return env
 
 

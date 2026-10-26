@@ -299,6 +299,8 @@ if ($UpgradeFrom) {
     Write-Host "       stray pid $($stray.Id), windowed pid $($windowed.Id); setup log $($upLog.Name):"
     Select-String -Path $upLog.FullName -Pattern "Stopping JARVES|Retaining|retain|Restart Manager|RestartManager|close" -ErrorAction SilentlyContinue | ForEach-Object { Write-Host "       $($_.Line)" }
     Check (@(Select-String -Path (Join-Path $Work "install-*.log") -Pattern "Stopping JARVES before the upgrade: hard-stopped: python \(pid $($stray.Id)\)" -ErrorAction SilentlyContinue).Count -ge 1) "the installer logged the process it had to hard-stop, by name"
+    # #343: the stray/windowed processes run from {app}\python but are not the Core (not the core.lock holder): no Core is started
+    Check (@(Select-String -Path $upLog.FullName -Pattern "restart: Core was not running -> left stopped" -SimpleMatch -ErrorAction SilentlyContinue).Count -ge 1) "silent upgrade over a stray program-folder process starts no Core (setup logged 'left stopped')"
     Check (-not (Test-Path (Join-Path $App "rollback\python\stale-from-older-run.txt"))) "leftover rollback folder from an older run was replaced"
     Check ($windowed.WaitForExit(5000)) "windowed process under the program folder ended"
     if ($hasWindow) {
@@ -346,6 +348,33 @@ if ($UpgradeFrom) {
     $wrLog = Get-ChildItem (Join-Path $Work "install-*.log") | Sort-Object LastWriteTime | Select-Object -Last 1
     Check (@(Select-String -Path $wrLog.FullName -Pattern "Told by the caller what ran before the update" -ErrorAction SilentlyContinue).Count -ge 1) "told the Core ran: setup logged the caller's record"
     Check (@(Select-String -Path $wrLog.FullName -Pattern "Health check skipped" -ErrorAction SilentlyContinue).Count -eq 0) "told the Core ran: the health check is not skipped"
+    # #343: with NO flag at all a silent install restores the pre-install state by itself. The Core runs now (restarted above).
+    $procsUnderApp = { @(Get-Process | Where-Object { $_.Path -and $_.Path.StartsWith($App, [StringComparison]::OrdinalIgnoreCase) }) }
+    # setup detects the Core by its core.lock holder pid (a process under {app}): wait for exactly that, not just any process
+    $coreHoldsLock = {
+        try {
+            $fs = [IO.File]::Open((Join-Path $Home_ "core.lock"), "Open", "Read", "ReadWrite")
+            try { [void]$fs.Seek(1, "Begin"); $b = New-Object byte[] 4096; $n = $fs.Read($b, 0, 4096) } finally { $fs.Dispose() }
+            $h = [Text.Encoding]::UTF8.GetString($b, 0, $n).Trim([char]0, [char]32, [char]10, [char]13) | ConvertFrom-Json
+            $q = Get-Process -Id ([int]$h.pid) -ErrorAction Stop
+            [bool]($q.Path -and $q.Path.StartsWith($App, [StringComparison]::OrdinalIgnoreCase))
+        } catch { $false }
+    }
+    for ($i = 0; $i -lt 90 -and -not (& $coreHoldsLock); $i++) { Start-Sleep 1 }
+    Check ((& $coreHoldsLock) -and (& $procsUnderApp).Count -gt 0) "no-flag restart: the Core runs (holds core.lock) before the install"
+    Check ((Install "DEFAULT" @() $Installer "") -eq 0) "no-flag restart: a silent install over a running Core finishes"
+    $nfLog = Get-ChildItem (Join-Path $Work "install-*.log") | Sort-Object LastWriteTime | Select-Object -Last 1
+    Check (@(Select-String -Path $nfLog.FullName -Pattern "restart: Core was running -> restarted" -SimpleMatch -ErrorAction SilentlyContinue).Count -ge 1) "no-flag restart: setup logged 'Core was running -> restarted'"
+    for ($i = 0; $i -lt 60 -and (& $procsUnderApp).Count -eq 0; $i++) { Start-Sleep 1 }
+    Check ((& $procsUnderApp).Count -gt 0) "no-flag restart: the Core runs again after the silent install, with no /RESTARTJARVES flag"
+    Jarvis @("stop") | Out-Null
+    Get-Process | Where-Object { $_.Path -and $_.Path.StartsWith($App, [StringComparison]::OrdinalIgnoreCase) } | Stop-Process -Force -ErrorAction SilentlyContinue
+    Start-Sleep 2
+    Check ((Install "DEFAULT" @() $Installer "") -eq 0) "no-flag restart: a silent install with the Core stopped finishes"
+    $nsLog = Get-ChildItem (Join-Path $Work "install-*.log") | Sort-Object LastWriteTime | Select-Object -Last 1
+    Check (@(Select-String -Path $nsLog.FullName -Pattern "restart: Core was not running -> left stopped" -SimpleMatch -ErrorAction SilentlyContinue).Count -ge 1) "no-flag restart: setup logged 'Core was not running -> left stopped'"
+    Start-Sleep 5
+    Check ((& $procsUnderApp).Count -eq 0) "no-flag restart: nothing is started after the silent install when nothing ran before"
     Jarvis @("stop") | Out-Null
     Get-Process | Where-Object { $_.Path -and $_.Path.StartsWith($App, [StringComparison]::OrdinalIgnoreCase) } | Stop-Process -Force -ErrorAction SilentlyContinue
     Start-Sleep 2

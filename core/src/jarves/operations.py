@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import asyncio
 import inspect
+import sqlite3
 import time
 
 from . import alerts as alerts_mod
@@ -361,14 +362,21 @@ class Operations:
         now = time.time()
         if now - self._synced >= AUTONOMY_SYNC_S:
             self._synced = now
+            st = getattr(getattr(self.core, "history", None), "store", None)
             try:
-                st = getattr(getattr(self.core, "history", None), "store", None)
+                if st is not None and getattr(st, "closed", False):
+                    return                     # history detached/closing (shutdown, restart): nothing to sync, not an error
                 issues = st.issues("open") if st is not None else autonomy_mod.open_issues(self.core.home)
                 self.autonomy.sync(issues)
+            except sqlite3.ProgrammingError:
+                if st is not None and getattr(st, "closed", False):
+                    return                     # closed between the check and the query (shutdown race)
+                logs.error("autonomy", "AUTONOMY_SYNC_FAILED", "diagnostic proposals not updated", exc=True)
             except Exception:
                 logs.error("autonomy", "AUTONOMY_SYNC_FAILED", "diagnostic proposals not updated", exc=True)
 
     async def stop(self) -> None:
+        await self.scheduler.stop()            # no tick may run after the history store is closed below
         if getattr(self, "issues", None) is not None:
             from . import issue_registry
             issue_registry.detach(self.issues)
@@ -376,7 +384,6 @@ class Operations:
             await self.health_diag.stop()
         if getattr(self, "selfcheck", None) is not None:
             await self.selfcheck.stop()
-        await self.scheduler.stop()
         self.timers.stop()
         self.plan_runner.stop()
         if self._plan_task is not None and not self._plan_task.done():

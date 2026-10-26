@@ -490,9 +490,25 @@ def test_update_restarts_only_what_was_running_before():
     assert "'-m jarves run --background', ExpandConstant" not in iss          # every restart goes through StartWhatRan
     assert "Result := Result + ' --show';" in iss.split("function CoreRunArgs", 1)[1].split("function DashboardRunArgs", 1)[0]
     assert "Result := WasCore or not WasRecorded;" in iss and "CoreStopCode0" not in iss   # stop's exit code is no witness
-    assert "RestartRequested() and WasRecorded and WasDash" in iss
+    assert "RestartWanted() and WasRecorded and WasDash" in iss
     check = iss.split("procedure HealthCheckAfterUpdate", 1)[1].split("procedure CurStepChanged", 1)[0]
     assert check.index("if not RestartCoreNow() then begin") < check.index("RunHealth(")
     smoke = (PKG / "smoke_windows.ps1").read_text(encoding="utf-8-sig")
     assert "the old Core is running before the candidate is installed" in smoke
     assert "nothing was running before the update: nothing is started after it" in smoke
+
+
+def test_setup_restores_the_pre_install_state_without_a_flag_and_flags_mangled_switches():
+    """#343: what ran before setup is restarted in any mode (no /RESTARTJARVES needed); the flag stays an override."""
+    iss = (PKG / "windows" / "jarves.iss").read_text(encoding="utf-8")
+    want = iss.split("function RestartWanted", 1)[1].split("end;", 1)[0]
+    assert "RestartRequested() or (WasRecorded and (WasCore or WasFace or WasDash))" in want
+    assert "restart: Core was running -> restarted" in iss and "restart: Core was not running -> left stopped" in iss
+    assert iss.index("RecordWhatRuns();  ") < iss.index("restart: Core was running -> restarted")
+    mangled = iss.split("procedure DetectMangledFlags", 1)[1].split("\nend;", 1)[0]
+    assert "EndsWithText(P, '/VERYSILENT')" in mangled and "Pos('=', P) = 0" in mangled   # never /DIR=..\SILENT..
+    smoke_all = (PKG / "smoke_windows.ps1").read_text(encoding="utf-8-sig")
+    assert "silent upgrade over a stray program-folder process starts no Core" in smoke_all
+    assert "Result := ParamPresent('/RESTARTJARVES=1');" in iss                      # the health check gate is unchanged
+    smoke = (PKG / "smoke_windows.ps1").read_text(encoding="utf-8-sig")
+    assert "no-flag restart" in smoke and "left stopped" in smoke

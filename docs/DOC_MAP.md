@@ -14,7 +14,7 @@ Owner doc = the one document that wins on a conflict.
 | **V4.5** | **Owner-approved 24 Oct; bounded implementation authorized in NOW**: close V4 quality/acceptance gaps, security, recurring scans, camera UX, **early fast PR/merge/conflict reduction alongside security**, guided QA + voice Skill. No release authorized. | [V4.5 work package](plans/V4_5_STABILIZATION_SECURITY_QA.md), [ROADMAP](ROADMAP.md), [NOW](NOW.md). Canonical interactive QA issue: [#60](https://github.com/Jarvis-igerman-ai/jarves/issues/60) |
 | **V5** | **Partially developed**: phone access, goals, memory, proactive, continuity, dev manager and project manager have merged (`implemented_unverified`); inventory in [V5 plan](plans/V5_INVENTORY_AND_PLAN_2026-10-24.md). Real Android and other user/device acceptance remains open; older open-PR listings in ROADMAP are historical. | [ROADMAP](ROADMAP.md) (V5 section), [V5 package](JARVES_SW_V5_WORK_PACKAGE.md), [acceptance sheet](reviews/SWV5_ACCEPTANCE.md), [security review](reviews/SWV5_SECURITY_REVIEW.md) |
 | **V6** | Approved roadmap only (six pillars), gated on V5. No code. | [ROADMAP](ROADMAP.md) (V6 section), [PRODUCT_VISION](PRODUCT_VISION.md) stage 3, [V6 inventory and plan](plans/V6_INVENTORY_AND_PLAN_2026-10-25.md), [Android Auto feasibility](plans/V6_ANDROID_AUTO_FEASIBILITY_2026-10-25.md) |
-| **V7** | Proposal, not authorized (issue #50). | [V7 proposal](plans/V7_PROPOSAL_2026-10-21.md) |
+| **V7** | Owner-approved 25 Oct 2026 for planning and execution; work package written, slices queued behind V4.5/V5/V6 gates (issue #50). | [V7 work package](plans/V7_WORK_PACKAGE_2026-10-26.md), [V7 proposal](plans/V7_PROPOSAL_2026-10-21.md) |
 
 Execution authority: [NOW](NOW.md) (the only active brief) with [AGENTS](../AGENTS.md). Status log: one note per task in [handoff/](handoff/README.md) (newest by file name); [HANDOFF](HANDOFF.md) keeps the history up to 23 Oct 2026 and the decision queue. Planning and status per version: [ROADMAP](ROADMAP.md).
 
@@ -22,6 +22,8 @@ Current dashboard review: [23 Oct findings inventory and recheck gates](reviews/
 
 Phone acceptance result (25 Oct): [phone sheet result](reviews/PHONE_SHEET_RESULT_2026-10-25.md).
 Self-diagnosis plan (25 Oct): [self-diagnosis plan](plans/SELF_DIAGNOSIS_PLAN_2026-10-25.md).
+
+Smart chat blocks and task triage design (26 Oct, #364 #365): [design](plans/SMART_CHAT_AND_TASK_TRIAGE_DESIGN_2026-10-26.md). Dashboard issues triage (26 Oct): [triage](handoff/2026-10-26-dashboard-issues-triage.md).
 
 ## 2. Testing and manual testing
 
@@ -68,6 +70,7 @@ Self-diagnosis plan (25 Oct): [self-diagnosis plan](plans/SELF_DIAGNOSIS_PLAN_20
 | [ROADMAP](ROADMAP.md) | V4 to V7 status, definitions of done, dependencies | V4-V7 | current | itself |
 | [PRODUCT_VISION](PRODUCT_VISION.md) | Six product stages (north star) | general | current | itself |
 | [PROJECT_PRINCIPLES](PROJECT_PRINCIPLES.md) | Durable principles, printability, Israel sourcing, owner decisions | general | current | itself |
+| [plans/TESTING_PLAN_2026-10-26](plans/TESTING_PLAN_2026-10-26.md) | Testing plan: automatic tests with local commands and CI jobs, owner-only tests, flake policy, release gates per version, test gaps | all | current (26 Oct 2026) | itself |
 | [plans/V4_5_STABILIZATION_SECURITY_QA](plans/V4_5_STABILIZATION_SECURITY_QA.md) | V4.5 single plan: issues/evidence closure, CodeQL/security cadence, camera UX, code integration and dynamic HTML manual QA + voice Skill. Reuse #60/#58/#61 and existing release gate. | V4.5 | **proposal only**, no implementation authorized | itself for scope; NOW for execution; ROADMAP for status |
 | [plans/V4_5_ANYDO_MCP_INTEGRATION](plans/V4_5_ANYDO_MCP_INTEGRATION.md) | V4.5 P2 optional Any.do official MCP Skill: OAuth, read/create/reminders, human-approved update feasibility (#140) | V4.5 | proposal, NOT implementation-authorized | [V4.5 work package](plans/V4_5_STABILIZATION_SECURITY_QA.md) + NOW |
 | [plans/ORG_MIGRATION_MERGE_QUEUE](plans/ORG_MIGRATION_MERGE_QUEUE.md) | Move the source repo into a free GitHub org for the native merge queue: inventory (URLs, tokens, secrets, ruleset, merge_group), steps, rollback | V4.5 (E3, #160) | **plan only**, awaits owner approval and org name | itself; #160 |
@@ -81,6 +84,7 @@ Self-diagnosis plan (25 Oct): [self-diagnosis plan](plans/SELF_DIAGNOSIS_PLAN_20
 | [JARVES_SW_V4_WORK_PACKAGE](JARVES_SW_V4_WORK_PACKAGE.md) | V4 packages A-O, test scripts (sections 6-9), release checklist, owner decisions | V4 | current for plan and test scripts; delivery state lives in ROADMAP and HANDOFF | ROADMAP for status |
 | [JARVES_SW_V5_WORK_PACKAGE](JARVES_SW_V5_WORK_PACKAGE.md) | V5 phone-access package (security model, PWA) | V5 | current; the other V5 pillars are in ROADMAP | ROADMAP |
 | [plans/V7_PROPOSAL_2026-10-21](plans/V7_PROPOSAL_2026-10-21.md) | V7 research proposal | V7 | proposal | ROADMAP |
+| [plans/V7_WORK_PACKAGE_2026-10-26](plans/V7_WORK_PACKAGE_2026-10-26.md) | V7 work package: tracks, slices and issues, gates, caps, owner needs, hard stops | V7 | approved plan, execution gated | NOW |
 | [plans/WEBTOP_PARENT_STUDENT](plans/WEBTOP_PARENT_STUDENT.md) | Guardian/student Webtop — read-only homework, messages and possible timetable | F11 / V7.x candidate | proposal, not authorized | FUTURE_IDEAS |
 | [plans/WEBTOP_TEACHER_WORKSPACE](plans/WEBTOP_TEACHER_WORKSPACE.md) | Separate teacher/staff Webtop — reports, schedule, AI use and school privacy gates | separate future candidate | proposal, not authorized | FUTURE_IDEAS |
 | [plans/WEBTOP_SCHOOL_SKILL_PROPOSAL](plans/WEBTOP_SCHOOL_SKILL_PROPOSAL.md) | Compatibility stub for prior combined School Skill plan | historical | superseded by two above | two above |
