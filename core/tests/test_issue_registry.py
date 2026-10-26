@@ -357,3 +357,17 @@ def test_expected_tool_refusals_do_not_create_failure_bug_reports(reg, code, ori
         sink.emit(_rec("TOOL_RESULT", tool="test", ok=False, result_code=code, origin=origin))
     sink.flush()
     assert bool(reg.list()) == defect
+
+
+def test_quiet_p1_and_p2_never_expire_by_calendar_days_but_p3_does(tmp_path):
+    # #372: 14 calendar days pass while the PC is off; a serious issue must not close itself because of that
+    clock = Clock()
+    reg = ir.Registry(tmp_path, clock=clock, version="4.0.1")
+    reg.record("voice", "VOICE_CRASH_A", "P1")
+    reg.record("tools", "TOOL_FAIL_B", "P2")
+    reg.record("misc", "NOISE_C", "P3")
+    clock.t += (ir.EXPIRE_DAYS + 30) * 86400
+    reg.tidy()
+    by = {r["code"]: r for r in reg.list()}
+    assert by["VOICE_CRASH_A"]["status"] == "new" and by["TOOL_FAIL_B"]["status"] == "new"
+    assert by["NOISE_C"]["status"] == "ignored" and by["NOISE_C"]["closed_reason"] == "expired"

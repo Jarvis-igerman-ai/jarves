@@ -311,7 +311,7 @@ async function pageIssues(status) {
   } }, "Run self-diagnosis now");
   const seenAll = el("button", { type: "button", class: "ghost", onclick: async () => {
     await api("/api/issues/seen-all", { method: "POST", body: "{}" }); route(true); } }, "Mark all as seen");
-  render(header("Issues", "Patterns the self-check found in past conversations (for example a long silent wait or a tool that failed). Counts and codes only; nothing is sent anywhere. Each one closes by itself after 14 days without recurring, or press Mark all as seen.", el("span", { class: "row" }, run, seenAll)),
+  render(header("Issues", "Patterns the self-check found in past conversations (for example a long silent wait or a tool that failed). Counts and codes only; nothing is sent anywhere. Minor (P3) ones close by themselves after 14 days without recurring; serious (P1/P2) ones stay until fixed or you close them. Or press Mark all as seen.", el("span", { class: "row" }, run, seenAll)),
     tabs, el("div", { style: "height:12px" }),
     list.length ? list.map(issueRow) : el("div", { class: "card empty" }, status === "open" ? "No open issues." : "Nothing here."));
   refreshOverview();

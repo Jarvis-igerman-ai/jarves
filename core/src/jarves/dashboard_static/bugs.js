@@ -40,8 +40,8 @@
     pop.replaceChildren(
       el("strong", {}, tx("מה זה המספר?", "What is this number?")),
       el("p", { class: "small", dir: "auto" }, tx(
-        "אלה כרטיסי אבחון מקומיים ש-JARVES פתח לעצמו במחשב הזה (בדיקה עצמית, כלים שנכשלים, קריסות). הם לא נשלחים לאף אחד. הכתום או האדום מציינים רק תקלות חדשות וחמורות שעוד לא ראיתם; ישנות נסגרות לבד אחרי 14 יום בלי הישנות.",
-        "These are local self-diagnostic tickets JARVES opened for itself on this PC (self-test, failing tools, crashes). They are not sent to anyone. Red means only NEW serious (P1/P2) tickets you have not seen yet; old ones close by themselves after 14 days without recurring.")),
+        "אלה כרטיסי אבחון מקומיים ש-JARVES פתח לעצמו במחשב הזה (בדיקה עצמית, כלים שנכשלים, קריסות). הם לא נשלחים לאף אחד. הכתום או האדום מציינים רק תקלות חדשות וחמורות שעוד לא ראיתם; ישנות קלות (P3) נסגרות לבד אחרי 14 יום בלי הישנות; P1/P2 נשארות עד תיקון או סגירה על ידיכם.",
+        "These are local self-diagnostic tickets JARVES opened for itself on this PC (self-test, failing tools, crashes). They are not sent to anyone. Red means only NEW serious (P1/P2) tickets you have not seen yet; old minor (P3) ones close by themselves after 14 days without recurring; P1/P2 stay until fixed or you close them.")),
       el("div", { class: "small muted" }, tx(`${c.open} פתוחות · ${c.new} חדשות · ${c.urgent || 0} חדשות וחמורות · ${c.info || 0} מידע בלבד`,
         `${c.open} open · ${c.new} new · ${c.urgent || 0} new and serious · ${c.info || 0} information only`)),
       el("ul", { class: "small" }, d.issues.slice(0, 5).map((r) => el("li", { dir: "auto" }, `${r.severity} · ${tx(r.title_he || r.title, r.title)} · ×${r.evidence_count}`))),

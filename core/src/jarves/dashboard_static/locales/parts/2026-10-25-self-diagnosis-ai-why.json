@@ -1,0 +1,5 @@
+{
+ "dict": {
+  "A self-check reads local state only. Only a redacted summary (codes, no conversation text) goes to the AI to word the answer; switch it off in Features.": "הבדיקה העצמית קוראת מצב מקומי בלבד. רק סיכום מוסתר (קודים, בלי טקסט שיחה) נשלח ל-AI כדי לנסח את התשובה; אפשר לכבות במסך היכולות."
+ }
+}

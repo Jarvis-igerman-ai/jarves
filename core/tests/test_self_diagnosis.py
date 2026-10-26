@@ -373,3 +373,22 @@ def test_no_answer_silences_the_same_problem_for_a_day_and_a_pending_approval_bl
 def test_phone_like_response_keys_are_masked_in_evidence():
     rep = areas.run("anydo", "ANYDO_AUTH_EXPIRED", failure_data={PHONE: 1, MAIL: 2})
     assert PHONE not in "\n".join(rep.evidence) and MAIL not in "\n".join(rep.evidence)
+
+
+@pytest.mark.parametrize("lang", ["en", "he"])
+def test_ask_text_claims_nothing_is_sent_only_when_ai_wording_is_off(lang):
+    # #374: with AI wording on, the redacted summary goes to the model: the question must say so, never "nothing is sent"
+    async def model(prompt):
+        return "ok"
+
+    async def go():
+        off, on = Rig(lang=lang, model=model, wording=False), Rig(lang=lang, model=model, wording=True)
+        await off.fail()
+        await on.fail()
+        why_off, why_on = off.asked[0][1]["why"], on.asked[0][1]["why"]
+        assert why_off == fg.TEXT[lang]["why"] and why_on == fg.TEXT[lang]["why_ai"] and why_on != why_off
+        assert "AI" in why_on and ("nothing is sent anywhere" not in why_on) and ("לא נשלח החוצה" not in why_on)
+        no_model = Rig(lang=lang, wording=True)              # wording switch on but no model route: nothing is sent
+        await no_model.fail()
+        assert no_model.asked[0][1]["why"] == fg.TEXT[lang]["why"]
+    run(go())
