@@ -331,9 +331,29 @@ class GeneratedSkills:
         self.home = Path(home)
         self.root = self.home / ROOT
         self.drafts, self.installed, self.removed = self.root / "drafts", self.root / "installed", self.root / "removed"
-        self.taken = taken or (lambda: (set(), set()))     # () -> (built-in skill names, built-in tool names)
+        # () -> (built-in skill names, built-in tool names). The Core passes the live registry; the CLI and the dashboard
+        # read the snapshot the Core writes on start (#314 item 3), so they refuse a clashing name too.
+        self.taken = taken or self._snapshot_taken
         self.http = http                                   # httpx.AsyncClient-like (tests inject a fake)
         self.v2 = v2 or (lambda: False)                    # the skills_manifest2 switch (platform2.py); OFF = as before
+
+    @property
+    def _names_file(self) -> Path:
+        return self.root / "builtin_names.json"
+
+    def _snapshot_taken(self) -> tuple[set[str], set[str]]:
+        d = _read_json(self._names_file, {})
+        d = d if isinstance(d, dict) else {}
+        return ({x for x in d.get("skills", []) if isinstance(x, str)}, {x for x in d.get("tools", []) if isinstance(x, str)})
+
+    def save_taken_snapshot(self) -> None:
+        """Core only: record the built-in Skill and tool names for the other processes (best effort)."""
+        try:
+            skills, tools = self.taken()
+            self.root.mkdir(parents=True, exist_ok=True)
+            _write_json(self._names_file, {"skills": sorted(skills), "tools": sorted(tools)})
+        except OSError:
+            logs.warn("skills", "SKILL_NAMES_SNAPSHOT_FAILED", "could not save the built-in names snapshot")
 
     # --- manifest v2 (issue #220; only consulted while the switch is on)
     def _apply_v2(self, rep: dict, md: str, py: str | None, upgrading: bool) -> dict:
@@ -627,8 +647,15 @@ class GeneratedSkills:
         grants = st.get("grants") or {}
         if spec["permission"] == "action" and not grants.get("actions"):
             return ToolResult(False, f"{tool} needs the owner's 'actions' grant (dashboard)", code="SKILL_NOT_GRANTED")
-        md, py = self.files(sid)
-        if self.v2() and (why := self._integrity(sid, files=(md, py))):
+        ver = int(st.get("version", 0))
+        try:
+            md, py = self._files_of(sid, ver)               # the version the grants above belong to (#314 item 2)
+        except (OSError, UnicodeDecodeError):
+            return ToolResult(False, f"skill {sid} changed; try again", code="SKILL_STALE")
+        now = self.state(sid)
+        if int(now.get("version", 0)) != ver or now.get("grants") != st.get("grants") or not now.get("enabled"):
+            return ToolResult(False, f"skill {sid} changed version or grants; try again", code="SKILL_STALE")
+        if self.v2() and (why := self._integrity(sid, version=ver, files=(md, py))):
             logs.warn("skills", "SKILL_TAMPERED", "Skill not run: stored copy changed", skill=sid, tool=tool)
             return ToolResult(False, f"skill {sid} not run: {why}", code="SKILL_TAMPERED")
         if tool == f"{sid}_guide":
@@ -927,6 +954,7 @@ def attach(core) -> GeneratedSkills:
         return skills, tools
 
     mgr = GeneratedSkills(core.home, taken=taken, v2=lambda: features.active("skills_manifest2"))
+    mgr.save_taken_snapshot()
     core.registry.allowed_actions |= {"skill_propose"}     # writes only an inert draft
     core.registry.register(make_builder_skill(mgr))
     sync(mgr, core.registry)

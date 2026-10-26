@@ -436,3 +436,35 @@ def test_feature_registered_with_platform_status():
     assert f.tools == ["skill_propose"] and f.risk == "medium"
     assert f.targets["windows"]["status"] == "implemented_unverified"
     assert f.targets["linux_arm64_pi"]["status"] == "planned" and f.targets["linux_arm64_pi"]["blocker"]
+
+
+async def test_run_never_mixes_old_grants_with_a_newer_version(tmp_path, monkeypatch):
+    """#314 item 2: a version approved while a call is starting must not run once with the previous version's grants."""
+    reg, mgr = setup(tmp_path)
+    rep = mgr.propose(MD_SHOP, py_shop(), by="voice")
+    mgr.approve("shopping", rep["sha256"], by="dashboard")
+    mgr.set_enabled("shopping", True, by="dashboard")
+    mgr.grant("shopping", ["storage"], True, by="dashboard")
+    assert (await mgr.run("shopping", "shopping_list", {})).ok
+    real = mgr._files_of
+
+    def swap(sid, version):
+        out = real(sid, version)
+        st = mgr.state(sid)                                  # a new version is approved right now: grants are cleared
+        mgr._set_state(sid, {**st, "version": st["version"] + 1, "enabled": False, "grants": {"capabilities": [], "actions": False}})
+        return out
+
+    monkeypatch.setattr(mgr, "_files_of", swap)
+    r = await mgr.run("shopping", "shopping_list", {})
+    assert not r.ok and r.code == "SKILL_STALE"
+
+
+def test_cli_and_dashboard_managers_know_the_builtin_names(tmp_path):
+    """#314 item 3: the Core saves the built-in names; a manager made without the registry refuses a clashing draft."""
+    reg, core_mgr = setup(tmp_path)
+    core_mgr.save_taken_snapshot()
+    other = gen.GeneratedSkills(tmp_path)                    # what the CLI and the dashboard build
+    assert "music" in other.taken()[0] and "music_play" in other.taken()[1]
+    rep = other.propose(_md(name="music"), None, by="dashboard")
+    assert not rep["ok"]
+    assert gen.GeneratedSkills(tmp_path / "fresh").taken() == (set(), set())     # no snapshot yet: as before
