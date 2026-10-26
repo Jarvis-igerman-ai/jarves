@@ -150,7 +150,7 @@ gw.EXTRAS["issue.edit"] = _extra
 def cmd_github_issue(a, cfg, home) -> int:
     """jarvis github issue create|edit|comment|labels-add|labels-remove [number] --repo owner/repo ...: the SAME execute()
     path and approval as any write; the approval window shows the exact text."""
-    from .approvals import ApprovalService
+    from .approvals import ApprovalService, PopupChannel
     from .cli import _cli_features
     mode, repos = a.write_action or "", list(getattr(cfg, "github_repos", []) or [])
     kind = {"create": "issue.create", "edit": "issue.edit", "comment": "issue.comment",
@@ -162,8 +162,15 @@ def cmd_github_issue(a, cfg, home) -> int:
         return 2
     p = {k: v for k, v in {"title": a.title, "body": a.body, "state": a.state, "labels": a.label or None,
                            "assignees": a.assignee or None}.items() if v is not None}
-    # the owner's confirmation is typed HERE (interactive terminal); `jarvis approvals approve` cannot answer a GitHub approval
-    w = gw.GitHubWriter(home, _cli_features(cfg, home), ApprovalService(home), repos=repos, terminal_confirm=gw.terminal_confirm)
+    why = gw.agent_session_reason()
+    if why:      # the typed hash was no secret (a pty can fake a terminal): the owner approves in the POPUP, never here
+        print(json.dumps({"ok": False, "code": "GITHUB_WRITE_AGENT_SESSION", "message":
+                          f"refused: {why}. Run this command yourself in your own terminal; the approval opens as a popup "
+                          "window on this computer."}, ensure_ascii=False))
+        return 1
+    svc = ApprovalService(home)
+    svc.channels.append(PopupChannel(svc, enabled=True, lang=getattr(getattr(cfg, "ui", None), "popup_language", "en")))
+    w = gw.GitHubWriter(home, _cli_features(cfg, home), svc, repos=repos)       # local_only: only the popup approves
     r = asyncio.run(w.execute(action(kind, repo, a.number or "", **p), origin="user"))
     print(json.dumps({"ok": r.ok, "code": r.code, "message": r.message, **r.data}, ensure_ascii=False))
     return 0 if r.ok else 1

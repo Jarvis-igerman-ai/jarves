@@ -2076,8 +2076,20 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--config", type=Path, help="config.toml (default: <JARVES_HOME>/config.toml)")
     ap.add_argument("--profile", metavar="NAME", help="use this profile (its own memory, conversations, costs, "
                                                       "settings, keys); also JARVES_PROFILE. See: jarvis profile list")
-    from .updates import version_line
-    ap.add_argument("--version", action="version", version=version_line())
+    class _Version(argparse.Action):
+        """Prints the version line with the BETA badge of this home (#257); nothing is read unless --version is used."""
+        def __init__(self, option_strings, dest=argparse.SUPPRESS, default=argparse.SUPPRESS, help=None):
+            super().__init__(option_strings, dest, nargs=0, default=default, help=help)
+
+        def __call__(self, parser, namespace, values, option_string=None):
+            from .updates import version_line
+            try:
+                home = state_dir()
+            except Exception:                 # an unreadable home still prints the plain line
+                home = None
+            print(version_line(home))
+            parser.exit()
+    ap.add_argument("--version", action=_Version, help="show the version and exit")
     sub = ap.add_subparsers(dest="cmd", required=True)
     def log_opts(p):
         p.add_argument("--log-level", type=str.upper, choices=logs.LEVELS, help="terminal log level")
