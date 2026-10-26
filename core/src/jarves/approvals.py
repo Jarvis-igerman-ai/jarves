@@ -75,6 +75,9 @@ KINDS = ("tool", "feature", "camera", "message", "shell", "install", "schedule",
 HASHED_DETAILS = ("number",)       # SW-V4 H: a phone number is never written to the audit file, only a keyed hash
 PC_ONLY_MSG = "this approval can only be answered on the computer"
 CHANNELS = ("popup", "tray", "face", "dashboard", "voice", "typed", "cli", "terminal", "phone")
+LOCAL_CHANNELS = ("popup",)    # V7 G3b: a `local_only` approval is approved ONLY in the popup window. Not "terminal": that is
+#                                 chat.approval_answer on the link, which any process holding the link token can send.
+LOCAL_ONLY_MSG = "this approval can only be answered in the JARVES popup on the computer"
 FILE_CHANNELS = ("dashboard", "cli", "phone")          # what an answers/<id>.json file may claim to be
 
 # Owner words (whole utterance; punctuation ignored). Mixed yes+no or anything else = not an answer.
@@ -173,6 +176,7 @@ class Approval:
     typed_salt: str = ""              # R-01: pending.json keeps salt + keyed hash + sealed code, never the code
     typed_hash: str = ""
     pc_only: bool = False             # V5 sec F1: a plan approval can be answered on the computer only (not from a phone)
+    local_only: bool = False          # V7 G3b: only the popup (LOCAL_CHANNELS) may approve: not `jarvis approvals approve`, phone, dashboard
 
     @property
     def spoken(self) -> str:
@@ -306,7 +310,8 @@ class ApprovalService:
     # ------------------------------------------------------------------ asking
     async def ask(self, prompt: str, *, title: str = "", why: str = "", risk: str = "medium", kind: str = "tool",
                   details: dict | None = None, typed: bool = False, timeout: float | None = None,
-                  source: str = "model", voice: bool | None = None, pc_only: bool = False) -> bool:
+                  source: str = "model", voice: bool | None = None, pc_only: bool = False,
+                  local_only: bool = False) -> bool:
         """Ask the owner; True only on an explicit approval. Everything else (timeout, no channel, shutdown,
         cancellation, rate limit) is False."""
         risk = risk if risk in RISKS else "high"
@@ -352,6 +357,7 @@ class ApprovalService:
                      f"{secrets.randbelow(9000) + 1000}" if typed else "",
                      (not typed) if voice is None else (bool(voice) and not typed), now, now + t, key)
         a.pc_only = bool(pc_only)
+        a.local_only = bool(local_only)
         if a.typed_code:
             a.typed_salt = secrets.token_hex(8)
             a.typed_hash = akeys.code_hash(self._key, a.typed_salt, a.typed_code) if self._key else ""
@@ -429,6 +435,8 @@ class ApprovalService:
                 return False, HE["typed"]
             if channel == "phone" and a.pc_only:
                 return False, PC_ONLY_MSG
+            if a.local_only and channel not in LOCAL_CHANNELS:
+                return False, LOCAL_ONLY_MSG
         try:
             running = asyncio.get_running_loop()
         except RuntimeError:
@@ -723,11 +731,11 @@ def submit_answer(home: Path, aid: str, approved: bool, *, channel: str, typed: 
     with the profile key (the Core ignores unsigned or wrongly signed files)."""
     if _in_tool():
         return False, "approvals cannot be answered from a tool"
+    if channel not in FILE_CHANNELS:          # also in-process: a caller (the orchestrator bridge) cannot claim "popup"
+        return False, f"channel {channel} cannot answer through a file"
     svc = _current
     if svc is not None and svc.home.resolve() == Path(home).resolve():
         return svc.answer(aid, approved, channel=channel, typed=typed)
-    if channel not in FILE_CHANNELS:
-        return False, f"channel {channel} cannot answer through a file"
     if not re.fullmatch(r"[0-9a-f]{16}", str(aid)):
         return False, "bad id"
     rows = {r["id"]: r for r in read_pending_file(home, reveal=False)}
@@ -739,6 +747,8 @@ def submit_answer(home: Path, aid: str, approved: bool, *, channel: str, typed: 
         return False, "the approval key of the running JARVES is missing (restart JARVES)"
     if approved and channel == "phone" and r.get("pc_only"):
         return False, PC_ONLY_MSG
+    if approved and r.get("local_only"):                 # a file answer is never a popup answer
+        return False, LOCAL_ONLY_MSG
     if approved and r.get("typed") and not akeys.code_matches(key, str(r.get("typed_salt") or ""),
                                                               str(r.get("typed_hash") or ""), typed):
         return False, HE["typed"] + " / Type the code shown to approve."
