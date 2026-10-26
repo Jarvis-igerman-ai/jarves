@@ -90,3 +90,29 @@ def test_leaving_the_drive_tab_ends_the_session(browser, phone):
     page.tap("[data-tab=home]")
     until(page, "true")
     _gone(page)
+
+
+
+@pytest.mark.parametrize("when", ["start_call", "mic_prompt"])
+def test_leaving_while_starting_never_keeps_the_mic(browser, phone, when):
+    """The session ends while start() still awaits the computer or the microphone permission prompt (the owner switches
+    tab): no microphone stays open afterwards and no wake lock is taken."""
+    p = phone(tls=True)
+    _setup(p, [])
+    page = _open(browser, p)
+    page.evaluate("""() => { const real = navigator.mediaDevices.getUserMedia.bind(navigator.mediaDevices);
+        navigator.mediaDevices.getUserMedia = (c) => { window.__gum = true;
+            return new Promise((ok) => setTimeout(() => real(c).then((st) => { window.__hfStream = st; ok(st); }), 1500)); };
+        window.__locks = 0; Object.defineProperty(navigator, 'wakeLock', { configurable: true,
+            value: { request: async () => { window.__locks++; return { release: async () => {}, onrelease: null }; } } }); }""")
+    if when == "start_call":
+        page.evaluate("() => { document.getElementById('hfBtn').click(); document.querySelector('[data-tab=home]').click(); }")
+    else:
+        page.tap("#hfBtn")
+        until(page, "window.__gum === true")
+        page.tap("[data-tab=home]")
+    page.wait_for_timeout(2500)
+    assert page.evaluate("() => !window.__hfStream || window.__hfStream.getTracks().every((x) => x.readyState === 'ended')")
+    assert page.evaluate("() => window.__locks") == 0
+    _gone(page)
+    assert page.errors == []

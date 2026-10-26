@@ -27,6 +27,7 @@
       e_time: "הגעתם לזמן המרבי, ולכן השיחה הסתיימה. המיקרופון סגור.", e_user: "השיחה הסתיימה. המיקרופון סגור.",
       e_drive_off: "מצב הנהיגה כבוי, ולכן השיחה הסתיימה. המיקרופון סגור.", e_error: "משהו השתבש, ולכן השיחה הסתיימה. המיקרופון סגור.", busy: "עסוק: חכו רגע." },
   };
+  const ECHO_MS = 1500;                                  // speech that starts this soon after the phone spoke may be its own echo
   const START_CHUNKS = 2, BARGE_CHUNKS = 3, MAX_UTTER_MS = 20000, MIN_UTTER_MS = 350, MAX_ERRORS = 3;
   const cfg = { threshold: 0.02, silenceMs: 900 };                    // voice-activity tuning (tests shorten the silence window)
   let root = null, cx = null, S = null, shown = null;
@@ -62,8 +63,16 @@
     const b = el("button", "big", live ? t("end") : t("start")); b.type = "button"; b.id = "hfBtn"; b.addEventListener("click", () => (live ? finish("user", "e_user") : start())); c.appendChild(b);
   }
   function set(state) { if (S && !S.over) { S.state = state; paint(); } }
-  async function finish(reason, key) {                // closes EVERYTHING first, then tells the computer why
-    if (!S || S.over) return; const s = S; s.over = true; s.msg = t(key || "e_user");
+  async function finish(reason, key, text) {          // closes EVERYTHING first, then tells the computer why
+    if (!S || S.over) return; const s = S; s.over = true; s.msg = text || t(key || "e_user");
+    release(s);
+    paint();
+    tell(reason);
+  }
+  function tell(reason) {
+    return cx.api("/api/m/drive/voice/end", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ reason }) }).catch(() => { /* the page is already closed */ });
+  }
+  function release(s) {                               // mic, audio graph, wake lock, listeners: idempotent, safe on a half-started session
     try { clearInterval(s.timer); } catch (e) { /* ignore */ }
     try { if (window.speechSynthesis) window.speechSynthesis.cancel(); } catch (e) { /* ignore */ }
     try { s.proc && (s.proc.onaudioprocess = null, s.proc.disconnect()); s.src && s.src.disconnect(); } catch (e) { /* ignore */ }
@@ -73,8 +82,6 @@
     document.removeEventListener("visibilitychange", s.onvis);
     try { navigator.mediaDevices.removeEventListener("devicechange", s.ondev); } catch (e) { /* ignore */ }
     if (window.JarvesAudio) window.JarvesAudio.phoneMic(false);
-    paint();
-    try { await cx.api("/api/m/drive/voice/end", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ reason }) }); } catch (e) { /* the page is already closed */ }
   }
   async function start() {
     if (S && !S.over) return;
@@ -84,11 +91,14 @@
       const d = await cx.api("/api/m/drive/voice/start", { method: "POST", headers: { "Content-Type": "application/json" }, body: "{}" });
       s.maxMs = (d.max_s || 1800) * 1000; s.idleMs = (d.idle_s || 90) * 1000; s.t0 = s.last = Date.now();
     } catch (e) { s.over = true; s.msg = t("failed") + ": " + e.message; paint(); return; }
+    if (s.over) { tell("user"); return; }               // ended (tab left, page hidden) while the computer answered
     try {
       s.stream = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true } });
       const tr = s.stream.getAudioTracks()[0]; s.used = tr && tr.getSettings ? tr.getSettings().deviceId : "";
+      if (s.over) { release(s); tell("user"); return; }  // ended during the permission prompt: close the mic at once
       s.before = await navigator.mediaDevices.enumerateDevices().catch(() => []);
-      tr.onended = () => finish("route_lost", "e_route_lost");
+      if (s.over) { release(s); tell("user"); return; }
+      tr.onended = () => finish("mic_lost", "e_mic_lost");
       s.ondev = async () => { const after = await navigator.mediaDevices.enumerateDevices().catch(() => []); if (routeLost(s.before, after, s.used)) finish("route_lost", "e_route_lost"); else s.before = after; };
       navigator.mediaDevices.addEventListener("devicechange", s.ondev);
       s.ctx = new (window.AudioContext || window.webkitAudioContext)(); s.src = s.ctx.createMediaStreamSource(s.stream);
@@ -99,7 +109,9 @@
     try {                                              // keep the screen on; a lost lock while visible ends the session
       if (navigator.wakeLock) { s.lock = await navigator.wakeLock.request("screen"); s.lock.onrelease = () => { if (!document.hidden) finish("wake_lock_lost", "e_wake_lock_lost"); }; } else s.say = t("nowake");
     } catch (e) { s.say = t("nowake"); }
+    if (s.over) { release(s); tell("user"); return; }
     s.onvis = () => { if (document.hidden) finish("hidden", "e_hidden"); }; document.addEventListener("visibilitychange", s.onvis);
+    if (document.hidden) return finish("hidden", "e_hidden");          // hidden before the listener existed
     s.timer = setInterval(() => { const n = Date.now(); if (n - s.t0 > s.maxMs) finish("user", "e_time"); else if (n - s.last > s.idleMs && s.state !== "thinking" && s.state !== "speaking") finish("user", "e_idle"); }, 1000);
     paint();
   }
@@ -107,17 +119,17 @@
     if (s.over) return; let sum = 0; for (let i = 0; i < f.length; i++) sum += f[i] * f[i]; const loud = Math.sqrt(sum / f.length) > cfg.threshold, now = Date.now();
     if (s.state === "thinking") return;
     if (s.state === "speaking") {                      // barge-in: the owner talking over the answer stops it and is heard
-      s.loud = loud ? (s.loud || 0) + 1 : 0; if (s.loud < BARGE_CHUNKS) return; stopSpeech(); s.loud = 0; s.cap = null;
+      s.loud = loud ? (s.loud || 0) + 1 : 0; if (s.loud < BARGE_CHUNKS) return; stopSpeech(); s.loud = 0; s.cap = null; s.spokeAt = now; set("listening");
     }
-    if (!s.cap) { s.pre = (s.pre || []).concat([f]).slice(-3); s.loud = loud ? (s.loud || 0) + 1 : 0; if (s.loud >= START_CHUNKS) { s.cap = { chunks: s.pre.slice(), t0: now, quiet: now }; s.last = now; set("hearing"); } return; }
+    if (!s.cap) { s.pre = (s.pre || []).concat([f]).slice(-3); s.loud = loud ? (s.loud || 0) + 1 : 0; if (s.loud >= START_CHUNKS) { s.cap = { chunks: s.pre.slice(), t0: now, quiet: now, barge: now - (s.spokeAt || 0) < ECHO_MS }; s.last = now; set("hearing"); } return; }
     s.cap.chunks.push(f); if (loud) s.cap.quiet = now;
-    if (now - s.cap.quiet > cfg.silenceMs || now - s.cap.t0 > MAX_UTTER_MS) { const c = s.cap; s.cap = null; s.loud = 0; if (now - c.t0 < MIN_UTTER_MS) { set("listening"); return; } turn(s, c.chunks); }
+    if (now - s.cap.quiet > cfg.silenceMs || now - s.cap.t0 > MAX_UTTER_MS) { const c = s.cap; s.cap = null; s.loud = 0; if (now - c.t0 < MIN_UTTER_MS) { set("listening"); return; } turn(s, c.chunks, c.barge); }
   }
   function stopSpeech() { try { if (window.speechSynthesis) window.speechSynthesis.cancel(); } catch (e) { /* ignore */ } }
-  async function turn(s, chunks) {
+  async function turn(s, chunks, barge) {
     set("thinking");
     try {
-      const d = await cx.api("/api/m/drive/voice/turn", { method: "POST", headers: { "Content-Type": "audio/wav" }, body: wavOf(chunks, s.ctx.sampleRate) });
+      const d = await cx.api("/api/m/drive/voice/turn" + (barge ? "?barge=1" : ""), { method: "POST", headers: { "Content-Type": "audio/wav" }, body: wavOf(chunks, s.ctx.sampleRate) });
       if (s.over) return; s.errors = 0; s.waiting = d.waiting != null ? d.waiting : s.waiting;
       if (d.action === "end") return finish("user", "e_user");
       if (d.action === "speak" && d.reply) { s.last = Date.now(); s.say = d.reply; set("speaking"); return speak(s, d.reply); }
@@ -125,8 +137,8 @@
       s.last = Date.now(); set("listening");
     } catch (e) {
       if (s.over) return; s.errors++;
-      if (e.status === 409) return finish("user", "e_drive_off");                    // the computer ended it (drive mode off, time, idle)
-      if (e.status === 429) { s.say = t("busy"); return set("listening"); }
+      if (e.status === 409 && e.code !== "BUSY") return finish("user", "e_error", e.message);   // the computer ended it: show ITS reason (drive off, time, restart)
+      if (e.status === 429 || e.status === 409) { s.say = t("busy"); return set("listening"); }
       if (s.errors >= MAX_ERRORS) return finish("user", "e_error");
       s.say = e.message; set("listening");
     }
@@ -134,7 +146,7 @@
   function speak(s, text) {
     if (!window.speechSynthesis || !window.SpeechSynthesisUtterance) return set("listening");
     const u = new SpeechSynthesisUtterance(text); u.lang = cx.lang() === "he" ? "he-IL" : "en-US";
-    u.onend = u.onerror = () => { if (!s.over && s.state === "speaking") { s.last = Date.now(); set("listening"); } };
+    u.onend = u.onerror = () => { s.spokeAt = Date.now(); if (!s.over && s.state === "speaking") { s.last = Date.now(); set("listening"); } };
     window.speechSynthesis.cancel(); window.speechSynthesis.speak(u);
   }
   window.JarvesHandsFree = {
