@@ -663,6 +663,21 @@ def revert_deps(entries: list[dict], sp: Path, backup_dir: Path) -> None:
             os.replace(tmp, dst)
 
 
+def verify_backups(manifest: dict, d: Path) -> None:
+    """#524: read-only check of the saved bridge exe and dependency backups of a hotfix (the same checks the real
+    revert makes in bridge_revert and revert_deps); touches nothing."""
+    b = manifest.get("bridge")
+    if b and b.get("sha256_original"):
+        saved = d / "bridge_original" / "exe"
+        if not saved.is_file() or sha256(saved) != b["sha256_original"]:
+            raise HotfixError("HOTFIX_ORIGINAL_BAD", "the saved original bridge exe is missing or changed")
+    for e in manifest.get("deps") or []:
+        for item in e["backed_up"]:
+            saved = d / "deps_originals" / norm(e["name"]) / item["path"]
+            if not saved.is_file() or sha256(saved) != item["sha256"]:
+                raise HotfixError("HOTFIX_ORIGINAL_BAD", f"saved original of {item['path']} ({e['name']}) is missing or changed")
+
+
 # ---------------------------------------------------------------------- bridge
 @dataclass
 class BridgeAction:

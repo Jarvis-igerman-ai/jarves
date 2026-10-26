@@ -845,15 +845,28 @@ def revert(installed_pkg: Path, home: Path, hooks: Hooks, *, restart: bool = Tru
             saved = d / "originals" / item["path"]
             if not saved.is_file() or sha256(saved) != item["sha256_original"]:
                 raise HotfixError("HOTFIX_ORIGINAL_BAD", f"saved original of {item['path']} is missing or changed")
+        from . import hotfix_slice2 as s2
+        s2.verify_backups(man, d)                      # #524: bridge exe and dependency backups too
         files = ([i["path"] for i in man.get("replaced", [])] + [i["path"] for i in man.get("added", [])]
                  + (["bridge"] if man.get("bridge") else [])
                  + [f"{e['name']}=={e['old_version'] or '(removed)'}" for e in man.get("deps") or []])
         return {"status": "dry-run", "id": man["id"], "files": files, "backup": str(d)}
     was_running = bool(hooks.core_running())
-    if man.get("deps") and was_running:
-        hooks.stop_core()                              # locked files; restarted below
-    bridge_was_running = bool(man.get("bridge") and hooks.bridge_running and hooks.bridge_running())
-    done = _revert_dir(installed_pkg, d, man, hooks, bridge_was_running=bridge_was_running)
+    try:
+        if man.get("deps") and was_running:
+            hooks.stop_core()                          # locked files; restarted below
+        bridge_was_running = bool(man.get("bridge") and hooks.bridge_running and hooks.bridge_running())
+        done = _revert_dir(installed_pkg, d, man, hooks, bridge_was_running=bridge_was_running)
+    except Exception as e:                             # #525: show the half-done state, bring the Core back, re-raise
+        man["status"] = "revert-failed"
+        man["error"] = str(e)
+        _write_json(d / "manifest.json", man)
+        if restart and was_running:
+            try:
+                _restart(hooks, was_running)
+            except Exception:
+                pass
+        raise
     if restart:
         _restart(hooks, was_running)
     man["status"] = "reverted"

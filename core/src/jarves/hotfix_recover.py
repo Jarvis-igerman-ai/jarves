@@ -152,6 +152,25 @@ def _restore_deps(d: Path, entries: list[dict], sp: Path) -> list[str]:
     return done
 
 
+def _check_unlocked(man: dict, install: Path) -> None:
+    """#501: a running Core locks its exe/.pyd/.dll files on Windows; probe every file we are about to replace and
+    refuse with one clear message before anything is changed."""
+    paths = [install / i["path"] for i in man.get("replaced", [])] + [install / i["path"] for i in man.get("added", [])]
+    if man.get("bridge"):
+        paths.append(Path(man["bridge"]["dest"]))
+    sp = install.parent
+    for e in man.get("deps") or []:
+        paths += [sp / i["path"] for i in e["backed_up"]] + [sp / r for r in e["new_paths"]]
+    for p in paths:
+        if p.is_file():
+            try:
+                with open(p, "r+b"):
+                    pass
+            except PermissionError:
+                raise Recover("RECOVER_CORE_RUNNING", f"{p.name} is locked: JARVES (Core or the bridge) is still running. "
+                              "Quit it from the tray and run this again. Nothing was changed.", True) from None
+
+
 def recover(install: Path, home: Path, which: str | None = None, *, dry_run: bool = False) -> dict:
     install, home = Path(install), Path(home)
     found = list_manifests(home)
@@ -162,33 +181,42 @@ def recover(install: Path, home: Path, which: str | None = None, *, dry_run: boo
         if not pick:
             raise Recover("RECOVER_UNKNOWN_ID", f"no hotfix backup with id {which} (use --list)", True)
         d, man = pick[0]
-    else:
-        d, man = found[0]
+    else:                                              # #501: the newest backup that is still applied, not a reverted one
+        d, man = next((x for x in found if x[1].get("status") in RESTORABLE), found[0])
     if man.get("status") not in RESTORABLE:
         raise Recover("RECOVER_NOT_NEEDED", f"hotfix {man.get('id')} is already {man.get('status')}: nothing to restore", True)
     _verify(d, man, install)
+    if not dry_run:
+        _check_unlocked(man, install)
     files = [i["path"] for i in man.get("replaced", [])] + [i["path"] for i in man.get("added", [])]
     result = {"status": "dry-run" if dry_run else "restored", "id": man.get("id"), "files": files,
               "deps": [e["name"] for e in man.get("deps") or []], "bridge": bool(man.get("bridge"))}
     if dry_run:
         return result
-    done = []
-    if man.get("bridge"):
-        _restore_bridge(d, man["bridge"])
-        done.append("bridge")
-    if man.get("deps"):
-        done += _restore_deps(d, man["deps"], install.parent)
-    for item in man.get("replaced", []):
-        _atomic_copy(d / "originals" / item["path"], install / item["path"])
-        done.append(item["path"])
-    for item in man.get("added", []):
-        (install / item["path"]).unlink(missing_ok=True)
-        done.append(item["path"])
-    saved_bi = d / "originals" / BUILD_INFO_NAME
-    if saved_bi.is_file():
-        _atomic_copy(saved_bi, install / BUILD_INFO_NAME)
-    else:
-        (install / BUILD_INFO_NAME).unlink(missing_ok=True)
+    done: list[str] = []
+    try:
+        if man.get("bridge"):
+            _restore_bridge(d, man["bridge"])
+            done.append("bridge")
+        if man.get("deps"):
+            done += _restore_deps(d, man["deps"], install.parent)
+        for item in man.get("replaced", []):
+            _atomic_copy(d / "originals" / item["path"], install / item["path"])
+            done.append(item["path"])
+        for item in man.get("added", []):
+            (install / item["path"]).unlink(missing_ok=True)
+            done.append(item["path"])
+        saved_bi = d / "originals" / BUILD_INFO_NAME
+        if saved_bi.is_file():
+            _atomic_copy(saved_bi, install / BUILD_INFO_NAME)
+        else:
+            (install / BUILD_INFO_NAME).unlink(missing_ok=True)
+    except OSError as e:                               # #501: report the exact partial state; a rerun finishes it
+        man["status"] = "revert-failed"
+        man["partial"] = list(done)
+        (d / "manifest.json").write_text(json.dumps(man, indent=2), encoding="utf-8")
+        raise Recover("RECOVER_PARTIAL", f"stopped part way ({e}). Already restored: {', '.join(done) or 'nothing'}. "
+                      f"Run {COMMAND} again to finish; nothing is lost.") from e
     man["status"] = "reverted"
     (d / "manifest.json").write_text(json.dumps(man, indent=2), encoding="utf-8")
     result["restored"] = done

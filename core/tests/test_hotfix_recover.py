@@ -141,3 +141,58 @@ def test_bridge_dest_outside_install_is_refused(tree, tmp_path):
     with pytest.raises(rec.Recover) as e:
         rec.recover(inst, home)
     assert e.value.code == "RECOVER_UNSAFE_PATH" and not victim.exists() and (inst / "a.py").read_text() == "A=2\n"
+
+
+def test_recover_skips_an_already_reverted_backup(tree, monkeypatch):
+    """#501: the newest backup that is still applied is picked, not a reverted one."""
+    inst, src, home = tree
+    ids = iter(["20261026-100000", "20261026-110000"])
+    monkeypatch.setattr(hf, "_now_id", lambda: next(ids))
+    write(src, "a.py", "A=2\n")
+    first = hf.apply(inst, source(src), home, FakeHooks().hooks())["id"]
+    write(src, "a.py", "A=3\n")
+    second = hf.apply(inst, source(src), home, FakeHooks().hooks())["id"]
+    man = home / "hotfix" / second / "manifest.json"
+    m = json.loads(man.read_text())
+    m["status"] = "reverted"
+    man.write_text(json.dumps(m))
+    r = rec.recover(inst, home)
+    assert r["id"] == first
+
+
+def test_recover_reports_the_partial_state_when_a_restore_fails_midway(tree, monkeypatch):
+    inst, home, hid = applied(tree)
+    real = rec._atomic_copy
+    calls = []
+
+    def flaky(src, dst):
+        calls.append(dst)
+        if len(calls) == 2:
+            raise OSError("disk full")
+        real(src, dst)
+
+    monkeypatch.setattr(rec, "_atomic_copy", flaky)
+    with pytest.raises(rec.Recover) as e:
+        rec.recover(inst, home)
+    assert e.value.code == "RECOVER_PARTIAL" and "disk full" in e.value.message
+    assert json.loads((home / "hotfix" / hid / "manifest.json").read_text())["status"] == "revert-failed"
+    monkeypatch.setattr(rec, "_atomic_copy", real)                       # a rerun finishes the job
+    assert rec.recover(inst, home)["status"] == "restored"
+    assert (inst / "a.py").read_text() == "A=1\n"
+
+
+def test_recover_refuses_clearly_when_a_file_is_locked(tree, monkeypatch):
+    inst, home, hid = applied(tree)
+    real_open = open
+
+    def locked(p, mode="r", *a, **k):
+        if mode == "r+b" and str(p).endswith("a.py"):
+            raise PermissionError("locked")
+        return real_open(p, mode, *a, **k)
+
+    monkeypatch.setattr("builtins.open", locked)
+    with pytest.raises(rec.Recover) as e:
+        rec.recover(inst, home)
+    assert e.value.code == "RECOVER_CORE_RUNNING" and e.value.refused
+    monkeypatch.undo()
+    assert (inst / "a.py").read_text() == "A=2\n"                        # nothing was changed
