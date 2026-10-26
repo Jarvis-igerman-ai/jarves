@@ -152,6 +152,26 @@ def _restore_deps(d: Path, entries: list[dict], sp: Path) -> list[str]:
     return done
 
 
+def _check_not_replaced(d: Path, man: dict, install: Path, *, newest: bool) -> None:
+    """A full installer update leaves old backups marked "applied": never restore one over a newer build. An older
+    backup (the newest one is already reverted) is restored only when the installed build info proves it is current."""
+    try:
+        info = json.loads((install / BUILD_INFO_NAME).read_text(encoding="utf-8"))
+        info = info if isinstance(info, dict) else {}
+    except (OSError, ValueError):
+        info = {}
+    cur = info.get("hotfix") if isinstance(info.get("hotfix"), dict) else {}
+    replaced = bool(info.get("version") and man.get("base_version") and info["version"] != man["base_version"])
+    if man.get("status") == "applied" and info and cur.get("id") != man.get("id"):
+        replaced = True
+    if not newest and not info:
+        replaced = True                                # cannot prove an older backup is current: refuse
+    if replaced:
+        raise Recover("RECOVER_REPLACED", f"hotfix {man.get('id')} is not the one installed now (a normal update or a "
+                      f"newer hotfix replaced it): restoring it would downgrade JARVES. Nothing was changed. "
+                      f"Use --list and --id only if you are sure.", True)
+
+
 def _check_unlocked(man: dict, install: Path) -> None:
     """#501: a running Core locks its exe/.pyd/.dll files on Windows; probe every file we are about to replace and
     refuse with one clear message before anything is changed."""
@@ -185,6 +205,8 @@ def recover(install: Path, home: Path, which: str | None = None, *, dry_run: boo
         d, man = next((x for x in found if x[1].get("status") in RESTORABLE), found[0])
     if man.get("status") not in RESTORABLE:
         raise Recover("RECOVER_NOT_NEEDED", f"hotfix {man.get('id')} is already {man.get('status')}: nothing to restore", True)
+    if not which:
+        _check_not_replaced(d, man, install, newest=d == found[0][0])
     _verify(d, man, install)
     if not dry_run:
         _check_unlocked(man, install)

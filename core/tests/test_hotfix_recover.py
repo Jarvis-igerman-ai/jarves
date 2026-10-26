@@ -152,12 +152,9 @@ def test_recover_skips_an_already_reverted_backup(tree, monkeypatch):
     first = hf.apply(inst, source(src), home, FakeHooks().hooks())["id"]
     write(src, "a.py", "A=3\n")
     second = hf.apply(inst, source(src), home, FakeHooks().hooks())["id"]
-    man = home / "hotfix" / second / "manifest.json"
-    m = json.loads(man.read_text())
-    m["status"] = "reverted"
-    man.write_text(json.dumps(m))
+    assert hf.revert(inst, home, FakeHooks().hooks())["id"] == second            # really reverted: hotfix 1 is current
     r = rec.recover(inst, home)
-    assert r["id"] == first
+    assert r["id"] == first and (inst / "a.py").read_text() == "A=1\n"
 
 
 def test_recover_reports_the_partial_state_when_a_restore_fails_midway(tree, monkeypatch):
@@ -196,3 +193,54 @@ def test_recover_refuses_clearly_when_a_file_is_locked(tree, monkeypatch):
     assert e.value.code == "RECOVER_CORE_RUNNING" and e.value.refused
     monkeypatch.undo()
     assert (inst / "a.py").read_text() == "A=2\n"                        # nothing was changed
+
+
+def _full_update(inst):
+    (inst / "a.py").write_text("A=NEWVERSION\n")
+    (inst / hf.BUILD_INFO_NAME).write_text(json.dumps({"version": "9.9.9"}))
+
+
+def test_recover_never_restores_an_old_backup_over_a_full_update(tree):
+    """Review of #501: a full installer update leaves old backups 'applied'; skipping a reverted newest one must not
+    restore the old originals over the new build."""
+    inst, src, home = tree
+    write(src, "a.py", "A=2\n")
+    old = hf.apply(inst, source(src), home, FakeHooks().hooks())["id"]
+    _full_update(inst)
+    with pytest.raises(rec.Recover) as e:
+        rec.recover(inst, home)
+    assert e.value.code == "RECOVER_REPLACED" and (inst / "a.py").read_text() == "A=NEWVERSION\n"
+    man = home / "hotfix" / old / "manifest.json"
+    assert json.loads(man.read_text())["status"] == "applied"           # backup kept, untouched
+
+
+def test_revert_refuses_after_a_full_update_even_when_revert_failed(tree, monkeypatch):
+    """Review of #525: a failed revert marks 'revert-failed'; that must not switch off the downgrade guard."""
+    inst, src, home = tree
+    write(src, "a.py", "A=2\n")
+    hid = hf.apply(inst, source(src), home, FakeHooks().hooks())["id"]
+    real = hf._atomic_copy
+
+    def locked(*a):
+        raise PermissionError("locked")
+
+    monkeypatch.setattr(hf, "_atomic_copy", locked)
+    with pytest.raises(PermissionError):
+        hf.revert(inst, home, FakeHooks().hooks())
+    monkeypatch.setattr(hf, "_atomic_copy", real)
+    assert json.loads((home / "hotfix" / hid / "manifest.json").read_text())["status"] == "revert-failed"
+    _full_update(inst)
+    with pytest.raises(hf.Refused) as e:
+        hf.revert(inst, home, FakeHooks().hooks())
+    assert e.value.code == "HOTFIX_REPLACED" and (inst / "a.py").read_text() == "A=NEWVERSION\n"
+
+
+def test_revert_with_a_bad_backup_changes_nothing_and_keeps_applied(tree):
+    inst, src, home = tree
+    write(src, "a.py", "A=2\n")
+    hid = hf.apply(inst, source(src), home, FakeHooks().hooks())["id"]
+    (home / "hotfix" / hid / "originals" / "a.py").write_text("tampered")
+    with pytest.raises(hf.HotfixError):
+        hf.revert(inst, home, FakeHooks().hooks())
+    assert json.loads((home / "hotfix" / hid / "manifest.json").read_text())["status"] == "applied"
+    assert (inst / "a.py").read_text() == "A=2\n"
