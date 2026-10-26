@@ -30,7 +30,8 @@ Every green `main` is already a beta (layer 2). A stable release promotes a beta
    (dashboard texts, `locales/parts`) and `python core/tools/changelog_build.py --write` (`changelog.d` into CHANGELOG.md).
 3. Make the sign-off sheet (`manual_test_sheet.py`, below), install the newest beta, test it and sign it off
    (`jarvis release signoff ... --finish`); commit the signed sheet.
-4. Wait for 5 green nightly runs in a row on `main`.
+4. Check that `main` is green and the latest `nightly` run is green (no five-nights rule, owner 26 Oct 2026). Fill and sign
+   `docs/release/SIGN_OFF_<version>.md`, then create the `docs/release/SIGNED_<version>` file (owner, date, commit lines).
 5. Dry run: Actions > `jarves-release` > Run workflow with the tag and `dry_run` ticked (or
    `python core/tools/release_gate.py --tag v<version> --sha <commit>`); it lists everything still missing.
 6. Tag the signed-off commit and push the tag (`git tag v<version> <sha> && git push origin v<version>`):
@@ -48,7 +49,11 @@ All of these must hold, else the tag is refused:
   a status starting with fixed, closed, accepted, wontfix, duplicate, done, resolved, verified or pass is closed. Tables
   without a severity column are ignored, and every problem names its file. A new bug table must keep these columns
   (`test_every_bug_table_in_the_repo_has_a_status_the_gate_can_read`);
-- the `nightly` workflow was green on the last 5 scheduled nights;
+- the latest completed `nightly` run on `main` is green and at most 2 days old (one run is enough; the nightly report stays as
+  information);
+- no open GitHub issue labelled P0-P2 (planned work labelled `enhancement` or `v5` to `v9` is not a defect);
+- the owner's `docs/release/SIGNED_<X.Y.Z>` file exists (`owner:`, `date:` and `commit:` lines; the commit is the tested one and
+  follows the same "tag commit or docs-only ancestor" rule). Without it the gate refuses the tag;
 - the owner's **manual test sign-off** `docs/reviews/MANUAL_TEST_<X.Y.Z>.md` is complete and signed, and the tested beta
   commit equals the tag commit, or is an ancestor with **only documentation changes** since.
 

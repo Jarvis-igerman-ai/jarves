@@ -267,7 +267,7 @@ One build, three channels. **No rebuild**: promotion re-signs a channel manifest
 | --- | --- | --- | --- | --- |
 | **alpha** | owner's test PCs, opt-in | automatic, every green batch fast-forwarded to `main` | full batch CI green (tests, installer smoke, scenarios) | `latest-alpha.json` on rolling pre-release `alpha-channel` |
 | **beta** | early users, opt-in | `gh workflow run promote.yml -f build=4.1.0.212 -f to=beta` (or automatic once a day, owner choice) | alpha at least 12 h old with no new P0-P2 issue; Windows installed-app pack green on that exact artifact; nightly perf + failure injection green; release scenario pack (`--tag release:4.1.0`) 100% | `latest-beta.json` (exists, #44) |
-| **stable** | everyone | tag `v4.1.0` pointing at the beta commit | `release_gate.py` (#44): no open P0-P2, 5 green nights, signed sheet, tested commit = tag commit | `latest.json` |
+| **stable** | everyone | tag `v4.1.0` pointing at the beta commit | `release_gate.py` (#44): no open P0-P2, latest nightly green, signed sheet (owner 26 Oct: no five-nights rule), tested commit = tag commit | `latest.json` |
 
 What exists: candidate + beta publishing with the switch `ENABLE_BETA_PUBLISH` (#44, `package.yml` jobs `candidate`,
 `beta`); stable gate (`release.yml` job `stable`, `release_gate.py`); rollback (`release_rollback.py`); status

@@ -3,13 +3,19 @@
   1. the tag is vX.Y.Z and the candidate installer being published is that version (X.Y.Z.<build>)
   2. the SHA being published is exactly the SHA that was verified (candidate commit; its jarves-checks run is green)
   3. the release checklist has no open P0-P2 (and every row done), and optional bug tables list none
-  4. the nightly workflow was green on the last 5 scheduled nights
-  5. the owner's manual test sign-off exists for this version (docs/reviews/MANUAL_TEST_<version>.md): every row pass
+  4. the LATEST completed nightly run on main is green and not older than 2 days (the old "5 green nights in a row"
+     rule is gone, owner 26 Oct 2026; the nightly report stays as information)
+  5. no open GitHub issue labelled P0-P2 (planned work labelled enhancement or v5-v9 is not a defect and is skipped)
+  6. the owner's manual test sign-off exists for this version (docs/reviews/MANUAL_TEST_<version>.md): every row pass
      or accepted-blocked with a note, signed, and the tested beta commit is the tag commit or an ancestor with only
      documentation changes since
+  7. the owner's `signed` file docs/release/SIGNED_<version> exists (owner, date, commit lines; see
+     docs/release/SIGN_OFF_<version>.md); without it the gate refuses the tag
+
+Main green is item 2 (the jarves-checks run of the tagged SHA); the dry run is this tool without a tag push.
 
     python tools/release_gate.py --tag v4.1.0 --sha <tag sha> --candidate-dir dist [--repo-root ..]
-        [--checklist FILE] [--bug-tables 'docs/reviews/*BUG_TABLE*.md'] [--nightly-json F] [--checks-json F]
+        [--checklist FILE] [--bug-tables 'docs/reviews/*BUG_TABLE*.md'] [--nightly-json F] [--checks-json F] [--issues-json F]
 
 No GitHub token is needed to read a public repo's runs; GITHUB_TOKEN is used when set. The pure functions below take
 plain data, so the tests need no network and no git.
@@ -31,7 +37,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 from jarves import release_signoff as so  # noqa: E402
 
 TAG_RE = re.compile(r"^v(\d+\.\d+\.\d+)$")
-NIGHTS = 5
+NIGHT_MAX_AGE = timedelta(days=2)
+SIGNED_RE = {k: re.compile(rf"(?im)^[ \t]*{k}[ \t]*:[ \t]*(\S.*)$") for k in ("owner", "date", "commit")}
 REPO = "Jarvis-igerman-ai/jarves"
 _NEG = re.compile(r"(?i)\b(?:no|zero|0)\s+open\s+P0(?:\s*(?:-|–|to)\s*P2)?\b")
 _OPEN = re.compile(r"(?i)\bopen\b[^|\n]{0,80}?\bP[0-2]\b|\bP[0-2]\b[^|\n]{0,40}?\bopen\b")
@@ -139,24 +146,59 @@ def _when(s: str) -> datetime:
     return datetime.fromisoformat(str(s).replace("Z", "+00:00"))
 
 
-def nightly_problems(runs: list[dict], nights: int = NIGHTS, now: datetime | None = None) -> list[str]:
-    """The last `nights` completed scheduled nightly runs must all be green, on consecutive UTC days, the newest not
-    older than two days. Manual (workflow_dispatch) runs do not count as nights."""
+def nightly_problems(runs: list[dict], now: datetime | None = None) -> list[str]:
+    """The newest completed nightly run must be green and not older than two days. One run is enough: a red night
+    earlier is history, a fresh green one proves main is healthy now. In-progress runs are ignored."""
     now = now or datetime.now(timezone.utc)
-    sched = sorted((r for r in runs if r.get("event", "schedule") == "schedule" and r.get("status", "completed") == "completed"),
-                   key=lambda r: _when(r["created_at"]), reverse=True)
-    if len(sched) < nights:
-        return [f"only {len(sched)} scheduled nightly run(s) found, {nights} green nights are required"]
-    last = sched[:nights]
-    bad = [f"{_when(r['created_at']).date()} {r.get('conclusion')}" for r in last if r.get("conclusion") != "success"]
-    if bad:
-        return [f"nightly not green: {', '.join(bad)}"]
-    days = [_when(r["created_at"]).date() for r in last]
-    if len(set(days)) != nights or any((days[i] - days[i + 1]) != timedelta(days=1) for i in range(nights - 1)):
-        return [f"the last {nights} nightly runs are not {nights} consecutive nights ({', '.join(map(str, days))})"]
-    if now - _when(last[0]["created_at"]) > timedelta(days=2):
-        return [f"the newest green nightly is from {days[0]}; wait for a fresh one"]
+    done = sorted((r for r in runs if r.get("status", "completed") == "completed"),
+                  key=lambda r: _when(r["created_at"]), reverse=True)
+    if not done:
+        return ["no completed nightly run found; run the nightly workflow on main"]
+    last = done[0]
+    day = _when(last["created_at"]).date()
+    if last.get("conclusion") != "success":
+        return [f"the latest nightly is not green: {day} {last.get('conclusion')}"]
+    if now - _when(last["created_at"]) > NIGHT_MAX_AGE:
+        return [f"the latest green nightly is from {day}; run a fresh one"]
     return []
+
+
+_LATER = re.compile(r"(?i)^(enhancement|v[5-9])$")
+
+
+def issue_problems(issues: list[dict]) -> list[str]:
+    """Open GitHub issues labelled P0-P2 (API shape). Planned work (label enhancement or v5..v9) is not a defect."""
+    out = []
+    for i in issues:
+        if "pull_request" in i or str(i.get("state", "open")) != "open":
+            continue
+        labels = [str(l.get("name", "")) if isinstance(l, dict) else str(l) for l in i.get("labels", [])]
+        sev = next((l.upper() for l in labels if re.fullmatch(r"(?i)P[0-2]", l)), None)
+        if sev and not any(_LATER.match(l) for l in labels):
+            out.append(f"open {sev} issue #{i.get('number')}: {str(i.get('title', ''))[:70]}")
+    return out
+
+
+def signed_problems(root: Path, version: str, tag_sha: str, is_ancestor, changed_files) -> list[str]:
+    """docs/release/SIGNED_<version>: three lines `owner:`, `date:`, `commit:` (the tested commit). The owner creates it
+    after ticking docs/release/SIGN_OFF_<version>.md. Any change to the sheet later needs a new signature."""
+    f = root / "docs" / "release" / f"SIGNED_{version}"
+    if not f.is_file():
+        return [f"owner signature missing: docs/release/SIGNED_{version} (owner:, date:, commit: lines)"]
+    text = f.read_text(encoding="utf-8-sig")
+    got = {}
+    for k, rx in SIGNED_RE.items():
+        m = rx.search(text)
+        got[k] = m.group(1).strip() if m else ""
+    probs = [f"signed file: '{k}:' line is missing" for k, v in got.items() if not v]
+    if got["commit"]:
+        if not so.SHA_RE.match(got["commit"]):
+            probs.append("signed file: 'commit:' is not a full SHA")
+        else:
+            why = so.tested_sha_ok(got["commit"], tag_sha, is_ancestor, changed_files)
+            if why:
+                probs.append(f"signed file: {why}")
+    return probs
 
 
 def signoff_problems(root: Path, version: str, tag_sha: str, is_ancestor, changed_files) -> list[str]:
@@ -195,6 +237,22 @@ def gh_runs(repo: str, workflow: str, query: str) -> list[dict]:
         return json.loads(r.read())["workflow_runs"]
 
 
+def gh_issues(repo: str) -> list[dict]:
+    h = {"Accept": "application/vnd.github+json", "User-Agent": "jarves-release-gate"}
+    if os.environ.get("GITHUB_TOKEN"):
+        h["Authorization"] = f"Bearer {os.environ['GITHUB_TOKEN']}"
+    out: list[dict] = []
+    for label in ("P0", "P1", "P2"):
+        for page in range(1, 11):
+            url = f"https://api.github.com/repos/{repo}/issues?state=open&labels={label}&per_page=100&page={page}"
+            with urllib.request.urlopen(urllib.request.Request(url, headers=h), timeout=30) as r:
+                chunk = json.loads(r.read())
+            out += chunk
+            if len(chunk) < 100:
+                break
+    return out
+
+
 def find_checklist(root: Path, version: str, explicit: str | None) -> Path | None:
     """The checklist of THIS version. SWV4_RELEASE_CHECKLIST.md is the 4.0.0 checklist: a later version used to fall
     back to it and inherit its stale 'needs-owner' rows instead of being told its own checklist is missing."""
@@ -208,7 +266,7 @@ def find_checklist(root: Path, version: str, explicit: str | None) -> Path | Non
 # ---------------------------------------------------------------------- the gate
 def run_gate(*, tag: str, sha: str, verified_sha: str | None, build_version: str | None, root: Path,
              checklist_text: str | None, bug_tables: list, nightly_runs: list[dict], checks_runs: list[dict],
-             is_ancestor, changed_files, now: datetime | None = None) -> list[str]:
+             is_ancestor, changed_files, now: datetime | None = None, issues: list[dict] | None = None) -> list[str]:
     version, problems = check_tag(tag, build_version)
     problems += check_sha(sha, verified_sha)
     if verified_sha:
@@ -220,8 +278,10 @@ def run_gate(*, tag: str, sha: str, verified_sha: str | None, build_version: str
     for t in bug_tables:                                   # table text, or (file name, table text)
         problems += bug_table_open(t[1], t[0]) if isinstance(t, tuple) else bug_table_open(t)
     problems += nightly_problems(nightly_runs, now=now)
+    problems += issue_problems(issues or [])
     if version:
         problems += signoff_problems(root, version, sha, is_ancestor, changed_files)
+        problems += signed_problems(root, version, sha, is_ancestor, changed_files)
     return problems
 
 
@@ -236,6 +296,7 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--bug-tables", default="", help="glob of bug tables whose open P0-P2 rows also block")
     ap.add_argument("--nightly-json", type=Path)
     ap.add_argument("--checks-json", type=Path)
+    ap.add_argument("--issues-json", type=Path, help="open issues (API shape) instead of asking GitHub")
     ap.add_argument("--repo", default=REPO)
     a = ap.parse_args(argv)
     verified, build_version = a.verified_sha, None
@@ -250,17 +311,18 @@ def main(argv: list[str] | None = None) -> int:
     load = lambda p, fn: json.loads(p.read_text(encoding="utf-8")) if p else fn()   # noqa: E731
     nightly = load(a.nightly_json, lambda: gh_runs(a.repo, "nightly.yml", "branch=main&status=completed"))
     checks = load(a.checks_json, lambda: gh_runs(a.repo, "jarves-checks.yml", "branch=main&event=push&status=completed"))
+    issues = load(a.issues_json, lambda: gh_issues(a.repo))
     problems = run_gate(tag=a.tag, sha=a.sha, verified_sha=verified, build_version=build_version, root=root,
                         checklist_text=cl.read_text(encoding="utf-8") if cl else None, bug_tables=tables,
                         nightly_runs=nightly, checks_runs=checks, is_ancestor=git_is_ancestor(root),
-                        changed_files=git_changed(root))
+                        changed_files=git_changed(root), issues=issues)
     if problems:
         print(f"RELEASE GATE FAILED for {a.tag} ({len(problems)} problem(s)):")
         for p in problems:
             print(f"  - {p}")
         return 1
-    print(f"RELEASE GATE PASSED for {a.tag} at {a.sha[:12]}: SHA verified, checklist clear, {NIGHTS} green nights, "
-          "manual sign-off complete")
+    print(f"RELEASE GATE PASSED for {a.tag} at {a.sha[:12]}: SHA verified, checklist clear, latest nightly green, "
+          "no open P0-P2, manual sign-off complete and signed")
     return 0
 
 

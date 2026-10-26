@@ -10,7 +10,7 @@ Safe default (plan G12 and G13): 5.0.0 goes out as a beta only; the stable tag w
 | # | Item | Status | Evidence / what is left |
 |---|---|---|---|
 | 1 | `jarves-checks` green on the release commit | n/a (checked by the gate at tag time) | The gate needs a green push run on `main` for the tagged commit. |
-| 2 | Nightly green 5 nights in a row | n/a (checked by the gate at tag time) | Count again after the last V5 merge; a red night restarts it. |
+| 2 | Latest nightly run green | n/a (checked by the gate at tag time) | Owner 26 Oct: no five-nights rule; the newest nightly on `main` must be green and at most 2 days old. |
 | 3 | The 4.5 stable gate has passed first | open | Owner pipeline is 4.5, then 5, then 6. The 4.5 bug table (`BUG_TABLE_V45_2026-10-24.md`) and its checklist must be closed before this tag. |
 | 4 | Bug tables: no open P0-P2 | open | `docs/reviews/BUG_TABLE_V50_2026-10-25.md`: the open P2 rows are F6 (#205, no fix), #189 (until F6), #191 and #192 (this prep), #193 (owner-gated). F1 to F5 and #181 to #188, #190 are fixed with merged PRs. Re-triage on the release day. |
 | 5 | Open GitHub issues triaged | done | All V5 issues (#181 to #194, #200 to #206) are classified in the 5.0 table with owner, plan and merged PR; P3 reasons are listed. Repeat for any new issue before the tag. |
