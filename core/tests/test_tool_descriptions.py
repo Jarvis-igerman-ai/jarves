@@ -254,4 +254,4 @@ async def test_backend_prompt_ceiling_and_per_tool_cap(hermetic_features, core, 
     assert total <= ORIGINAL_BASELINE * 0.82                       # -18% against the pre-package-P baseline (the -30% target is deferred, see above)
     long = {n: len(d) for n, d in descs.items() if len(d) > 330}
     assert not long, f"descriptions over 330 chars (move the detail to the guides): {long}"
-    assert sum(len(d) for n, d in descs.items() if n != "ui_show") <= 11_300           # was 11.0k; 9.3k before the V5 tools (every tool now also carries an EN and an HE trigger)
+    assert sum(len(d) for n, d in descs.items() if not core.registry._tools[n][1].lazy) <= 11_300   # lazy tools (Tool.lazy) are not always-on           # was 11.0k; 9.3k before the V5 tools (every tool now also carries an EN and an HE trigger)

@@ -687,3 +687,4 @@ class Brain:
             return Reply(msg, "offline", ok=False, code=e.code)
         finally:
             ROUTE.reset(token)
+            self.registry.open_lazy("")     # the on-demand tools close with the turn (voice sessions never inherit them)
