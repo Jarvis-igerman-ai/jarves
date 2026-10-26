@@ -60,3 +60,10 @@ en = "Too many requests, or no connection"
 codes = ["ANYDO_RATE_LIMITED", "ANYDO_OFFLINE", "ANYDO_PROVIDER_ERROR", "ANYDO_UNEXPECTED_SHAPE"]
 fix_he = "חכו דקה ונסו שוב; בדקו שיש אינטרנט. החיבור של Any.do הוא בטא ועלול להשתנות."
 fix_en = "Wait a minute and try again; check the internet. The Any.do connection is beta and may change."
+
+[[problems]]
+he = "ביקשתי למחוק משימה והוא אומר שאי אפשר"
+en = "I asked to delete a task and he says it cannot be done"
+codes = ["ANYDO_UNSUPPORTED"]
+fix_he = "נכון לעכשיו לחיבור הרשמי של Any.do אין כלי מחיקה, ולכן ג'ארביס לא מוחק משימות (מתג מחיקה לא נבנה עד שיהיה כלי כזה). מחקו את המשימה באפליקציית Any.do."
+fix_en = "Right now the official Any.do connection has no delete tool, so JARVES cannot delete tasks (the delete switch stays unbuilt until such a tool exists). Delete the task in the Any.do app."

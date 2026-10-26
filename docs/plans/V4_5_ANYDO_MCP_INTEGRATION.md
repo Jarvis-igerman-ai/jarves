@@ -80,3 +80,12 @@ Voice / Text / Dashboard / CLI
 The beta MCP server may change and the provider's **interactive edit-preview** is not necessarily embeddable in JARVES. The fastest low-risk option is **read + create + reminder** first. If the end-to-end provider approval surface cannot be implemented without unsupported APIs, retain that cut and postpone completion/clear to a later milestone. Better to report an honest limitation than silently mutate user tasks.
 
 **Related source docs:** [V4.5 stabilization package](V4_5_STABILIZATION_SECURITY_QA.md), [NOW](../NOW.md), [Skill creation and approvals](../SKILL_CREATION.md), [GitHub flow](../GITHUB_FLOW.md), [#60 release QA](https://github.com/Jarvis-igerman-ai/jarves/issues/60).
+
+## Delete task (issue #359) - status: UNAVAILABLE (26 Oct 2026)
+
+| Item | State |
+|---|---|
+| Owner decision | YES, human approval only, own switch `anydo_delete` (off, high risk, needs `anydo` + `anydo_update`) |
+| Provider delete tool | NONE documented: Any.do lists get_user_info, get_lists, get_tasks, get_task, create_personal_tasks, set_reminder, apply_bulk_task_updates; its site only claims create, due dates and reminders, update and complete, read. No source lists a delete tool. |
+| JARVES | Nothing destructive implemented; `anydo.ALLOWED_TOOLS` unchanged; a delete request gets the honest ANYDO_UNSUPPORTED answer (guide problem entry EN+HE) |
+| Unblock | When a live `tools/list` (after the owner signs in) shows a delete tool, build `anydo_delete` as specified in #359 (read-back of title+list for the id, one task per call, untrusted turn refused, success only after read-back shows it gone, lazy tool, independent security review) |
