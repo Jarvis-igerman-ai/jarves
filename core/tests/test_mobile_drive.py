@@ -235,7 +235,7 @@ def test_the_row_is_registered_and_honest():
 def test_drive_js_is_served_csp_safe_translated_and_never_opens_a_link_itself():
     js = (MOBILE_DIR / "drive.js").read_text(encoding="utf-8")
     assert "drive.js" in mobile.STATIC_FILES and "innerHTML" not in js and "eval(" not in js and "Authorization" not in js
-    assert not re.search(r"window\.open|location\.(href|assign|replace)|\.click\(\)|navigator\.geolocation", js)    # a link is the owner's tap
+    assert not re.search(r"window\.open|location\.(href|assign|replace)|\.click\(\)", js)    # a link is the owner's tap
     assert "rel = \"noopener noreferrer\"" in js
 
     def body(lang):

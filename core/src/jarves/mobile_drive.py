@@ -10,7 +10,8 @@ like every other `/api/m/` route: there is no new unauthenticated route. What it
     LESS private than that setting (a setting of "present" cannot be overridden by "alone" from the phone).
   * journey: the owner types two places; JARVES returns the estimate (free providers, no live traffic, labelled) and
     the Google Maps / Waze links. The links are plain buttons on the phone: opening one is the owner's tap, never automatic.
-  * no location is read or sent, ever. Places are not stored, logged or audited (the audit holds the route and status).
+  * no location is read unless the owner switched `phone_location` on (#339, phone_location.py): then only the rounded, in-memory
+    position of the current trip, while drive mode is on. Places are not stored, logged or audited (the audit holds the route and status).
 """
 from __future__ import annotations
 
@@ -88,10 +89,13 @@ def view(mob) -> dict:
     f = _features(mob)
     setting = _setting(mob)
     items = drive_mode.queue_for(mob.home).items()
+    from . import phone_location
+    if not phone_location.allowed(f):
+        phone_location.clear()                                  # drive mode off or the switch off: nothing is kept
     return {"enabled": _on(f, FEATURE), "drive_mode": _on(f, drive_mode.FEATURE), "waiting": len(items),
             "queue": [{"tool": tool_name(i.text)} for i in items],
             "briefing_on": _on(f, "drive_briefing"), "passenger_setting": setting if setting in MODES else "ask",
-            "journey_on": _on(f, "journey"), "actions_on": _on(f, "drive_actions"), "privacy": bool(logs.privacy())}
+            "journey_on": _on(f, "journey"), "location_on": _on(f, "phone_location"), "actions_on": _on(f, "drive_actions"), "privacy": bool(logs.privacy())}
 
 
 def briefing(mob, answer: str | None) -> tuple[int, dict]:
@@ -119,8 +123,8 @@ def briefing(mob, answer: str | None) -> tuple[int, dict]:
                  "held_by_setting": bool(answer) and answer != mode, "text": str(got.get("text", ""))[:600] if not secs else ""}
 
 
-def journey(mob, d: dict) -> tuple[int, dict]:
-    from . import journey as jn
+def journey(mob, d: dict, dev: str = "") -> tuple[int, dict]:
+    from . import journey as jn, phone_location
     v = view(mob)
     if not v["enabled"]:
         return 409, {"error": "the Drive screen is switched off on the computer", "code": "DRIVE_SCREEN_OFF"}
@@ -128,8 +132,11 @@ def journey(mob, d: dict) -> tuple[int, dict]:
         return 409, {"error": "journey planning is switched off on the computer", "code": "JOURNEY_OFF"}
     if not mob.rate_ok("drive-journey:*", JOURNEY_ALL_PHONES_PER_MIN):          # shared by all phones (free providers)
         return 429, dict(JOURNEY_BUSY)
+    fix = None
+    if jn.CURRENT_LOCATION.match(str(d.get("origin", "")).strip()):       # "here": only with the opt-in, drive mode on and a fresh fix
+        fix = phone_location.get(_features(mob), dev)
     try:
-        tp = jn.plan(str(d.get("origin", "")), str(d.get("destination", "")))
+        tp = jn.plan(str(d.get("origin", "")), str(d.get("destination", "")), **({"origin_fix": fix} if fix else {}))
     except jn.JourneyError as e:
         return 400, {"error": jn.say(e.code, "en", **e.kw), "error_he": jn.say(e.code, "he", **e.kw), "code": e.code}
     except Exception as e:                                       # never echo a place or a URL from a provider error
