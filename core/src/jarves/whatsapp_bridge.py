@@ -1443,7 +1443,7 @@ def _probe_send(c: feat.ProbeCtx) -> tuple[bool, str]:
     return True, ""
 
 
-feat.register(FEATURE, "וואטסאפ אמיתי (קריאה)", "WhatsApp real access (read)", False, probe=_probe, slow=True,
+feat.register(FEATURE, "וואטסאפ אמיתי (קריאה)", "WhatsApp real access (read)", False, stage="stable", probe=_probe, slow=True,
               risk="high", tools=list(READ_TOOLS),
               about="reads your WhatsApp through a separate linked-device bridge on this computer (unofficial; "
                     "breaks WhatsApp's terms; ban risk you accepted). Read-only first; message text is treated as "

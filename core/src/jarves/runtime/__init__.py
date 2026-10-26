@@ -90,12 +90,12 @@ def _register(fid: str, *args, **kw) -> None:
     f.targets = PLATFORM_STATUS.get(fid, {})    # read by the capability matrix / dashboard (see PLATFORM_STATUS)
 
 
-_register("background_core", "ממשיך לפעול ברקע", "Keep running in the background", True,
+_register("background_core", "ממשיך לפעול ברקע", "Keep running in the background", True, stage="beta",
           config="runtime.keep_running",
           about="closing the window only hides JARVES; \"Hey Jarvis\" keeps working (Quit in the tray stops him)")
-_register("display_control", "להופיע / להיעלם בפקודה", "Show / hide on command", True, probe=_probe_display, slow=True,
+_register("display_control", "להופיע / להיעלם בפקודה", "Show / hide on command", True, stage="beta", probe=_probe_display, slow=True,
           tools=["show_yourself", "hide_yourself"], about="\"show yourself\" / \"hide yourself\" open or close the window")
-_register("tray_icon", "סמל במגש המערכת", "Tray icon", True, probe=_probe_tray, slow=True, config="runtime.tray",
+_register("tray_icon", "סמל במגש המערכת", "Tray icon", True, stage="beta", probe=_probe_tray, slow=True, config="runtime.tray",
           applies="restart", about="notification-area icon: dashboard, show/hide, mute, pause alerts, status, quit")
 _register("autostart", "הפעלה עם הכניסה למחשב", "Start at login", False, probe=_probe_autostart,
           about="starts JARVES invisibly when you log in (Windows: Startup apps; Pi: systemd user service)")

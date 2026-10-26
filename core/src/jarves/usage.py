@@ -728,7 +728,7 @@ def _http_get(url: str, headers: dict, params: dict) -> tuple[int, dict | None]:
 # ---------------------------------------------------------------------- feature + voice Skill
 def register_feature() -> None:
     from . import features
-    f = features.register("usage_monitor", "מעקב שימוש", "Usage monitor", True, skills=["usage"],
+    f = features.register("usage_monitor", "מעקב שימוש", "Usage monitor", True, stage="stable", skills=["usage"],
                           about="ChatGPT plan and OpenAI API meters; 75/90/100% alerts; Unknown when not reported")
     f.targets = {"windows": {"status": "implemented_unverified",
                              "evidence": "core/tests/test_usage.py (unit + dashboard HTTP); no live plan-limit event "

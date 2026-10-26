@@ -617,7 +617,7 @@ GUIDANCE = [
 # ---------------------------------------------------------------------- feature
 def register_feature() -> None:
     from . import features
-    f = features.register("backup", "גיבוי אוטומטי", "Automatic backup", True,
+    f = features.register("backup", "גיבוי אוטומטי", "Automatic backup", True, stage="stable",
                           about="daily local backup of settings, memory, notes and history (no keys); restore drill")
     f.targets = {"windows": {"status": "implemented_unverified",
                              "evidence": "core/tests/test_backup.py (fault injection, isolated restore); real-profile "

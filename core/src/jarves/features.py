@@ -304,7 +304,7 @@ def _all(*probes: Probe) -> Probe:
 
 
 # ---------------------------------------------------------------------- built-in catalog
-register("music", "מוזיקה", "Music", True, probe=_probe_music, needs=["pear_desktop"], skills=["music"],
+register("music", "מוזיקה", "Music", True, stage="beta", probe=_probe_music, needs=["pear_desktop"], skills=["music"],
          config="music.provider", about="play / pause / volume in Pear Desktop (YouTube Music)")
 register("web_search", "חיפוש באינטרנט", "Web search", True, probe=_ai_online, needs=["openai"],
          config="ai.web_search", applies="next_session", about="answers with fresh facts from the web")
@@ -325,7 +325,7 @@ register("self_diagnosis_ask", "שאלה אחרי כשל: לבדוק?", "Ask to 
 register("self_diagnosis_ai_wording", "ניסוח האבחון בעזרת המודל", "Model wording of the diagnosis", True,
          probe=_api_billing, needs=["openai_api", "self_diagnosis_ask"], risk="medium",
          about="the online model may reword the self-check result; it only sees the redacted report")
-register("google_calendar", "יומן גוגל", "Google Calendar", True, probe=_google("calendar", "calendar"), slow=True,
+register("google_calendar", "יומן גוגל", "Google Calendar", True, stage="stable", probe=_google("calendar", "calendar"), slow=True,
          needs=["google_account"], risk="medium", skills=["calendar"], about="read and add calendar events")
 register("google_contacts", "אנשי קשר בגוגל", "Google Contacts", False,
          probe=_google("contacts", "google_contacts"), slow=True, needs=["google_account"], risk="medium",
@@ -346,10 +346,10 @@ register("camera_when_away", "מצלמה כשאין אף אחד בבית", "Came
 register("camera_preview", "מה הוא רואה? (תצוגת מצלמה)", "What does he see? (camera preview)", True,
          probe=_probe_camera, slow=True, needs=["camera"], risk="low",
          about="shows the camera picture on this screen while you keep it open; local only, nothing saved or sent")
-register("wake_word", "מילת הפעלה", "Wake word \"Hey Jarvis\"", True, probe=_probe_wake, slow=True, needs=["microphone"],
+register("wake_word", "מילת הפעלה", "Wake word \"Hey Jarvis\"", True, stage="stable", probe=_probe_wake, slow=True, needs=["microphone"],
          config="voice.wake_enabled", about="listens on this device for \"Hey Jarvis\"; no audio leaves before it")
-register("greeting", "ברכת פתיחה", "Greeting", True, config="voice.greeting", about="says hello when the face starts")
-register("chimes", "צלילי התראה", "Chimes", True, probe=_probe_speaker, needs=["speaker"], config="voice.chime",
+register("greeting", "ברכת פתיחה", "Greeting", True, stage="stable", config="voice.greeting", about="says hello when the face starts")
+register("chimes", "צלילי התראה", "Chimes", True, stage="stable", probe=_probe_speaker, needs=["speaker"], config="voice.chime",
          about="soft sound when \"Hey Jarvis\" is heard and when the conversation is ready")
 register("dashboard", "לוח בקרה", "Dashboard", True, applies="restart", stage="stable",
          about="local web dashboard (`jarvis dashboard`)")

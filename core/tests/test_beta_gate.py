@@ -257,3 +257,30 @@ def test_update_channel_is_separate(home):
     assert feat.stage_of("beta_channel") == "stable"
     f.set("beta_channel", True)                   # the build channel switches without the beta-features opt-in
     assert f.enabled("beta_channel") and not f.beta_on()
+
+
+# ------------------------------------------------------------------ the exact stable set (owner decision 26 Oct, #468/#469)
+STABLE_SET = frozenset({
+    "dashboard", "text_chat", "update_check", "beta_channel",          # core surface and the update channel
+    "wake_word", "greeting", "chimes",                                  # voice basics
+    "backup", "usage_monitor",                                          # safety and cost
+    "google_calendar", "anydo", "whatsapp_bridge",                      # Google Calendar, Any.do, WhatsApp read
+})
+
+
+def test_the_stable_set_is_exactly_the_owner_list():
+    """Pinned on purpose: moving a feature to or from stable must change this list in the same PR."""
+    import jarves.chat_service  # noqa: F401  (text_chat registers lazily)
+    sw.load_addons()
+    assert {fid for fid in CATALOG if feat.stage_of(fid) == "stable"} == STABLE_SET
+
+
+def test_fresh_install_shows_only_stable_features_and_writes_nothing(home):
+    sw.load_addons()
+    f = make(home)
+    assert not f.beta_on()
+    shown = {i for _g, _h, _e, ids in sw.groups(False) for i in ids}
+    assert shown <= STABLE_SET
+    for fid in CATALOG:
+        assert f.locked(fid) == (fid not in STABLE_SET)
+    assert not (home / "features.json").exists()

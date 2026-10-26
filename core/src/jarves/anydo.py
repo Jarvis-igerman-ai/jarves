@@ -858,7 +858,7 @@ def _probe_update(c: feat.ProbeCtx) -> tuple[bool, str]:
 
 
 _UNVERIFIED = "never connected to a real Any.do account (beta MCP server; OAuth login is an owner step)"
-feat.register("anydo", "Any.do (משימות ותזכורות)", "Any.do (tasks and reminders)", False, probe=_probe,
+feat.register("anydo", "Any.do (משימות ותזכורות)", "Any.do (tasks and reminders)", False, stage="stable", probe=_probe,
               needs=["anydo_account"], risk="medium", skills=["anydo"],
               about="read your Any.do tasks and lists; add tasks and reminders after you approve the exact items "
                     "(official Any.do connection, sign-in on this computer, tokens never leave it)",
