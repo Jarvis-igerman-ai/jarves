@@ -97,64 +97,75 @@ def _link(prev: str, rec: dict) -> str:
     return hashlib.sha256((prev + json.dumps(rec, sort_keys=True, ensure_ascii=False)).encode()).hexdigest()
 
 
-def read_chain(path: Path) -> tuple[list[dict], str]:
-    """(rows, problem). Every row after a legacy (un-chained) prefix carries `p` (the previous hash) and `h` =
-    sha256(p + the row without h). A wrong link, an un-chained or torn line, or fewer rows than the head file recorded
-    (truncation) = a problem text; the caller refuses writes. HONEST LIMIT: a program running as the same user that
-    rewrites BOTH the audit and its head file consistently is not detected."""
+def _lines(path: Path) -> list[str]:
+    """Audit lines split on "\n" ONLY: str.splitlines() also splits on U+2028/U+0085, which a model-chosen kind or
+    target could carry into a row and so fake a tamper alarm that stops every write."""
+    return [x for x in path.read_text(encoding="utf-8").split("\n") if x.strip()] if path.exists() else []
+
+
+def _scan(path: Path) -> tuple[list[dict], str, list[str]]:
     head_p = path.with_suffix(".head")
     try:
-        lines = path.read_text(encoding="utf-8").splitlines() if path.exists() else []
+        lines = _lines(path)
     except (OSError, ValueError):
-        return [], "the audit file cannot be read"
+        return [], "the audit file cannot be read", []
     rows: list[dict] = []
-    prev, chained = "", 0
+    hashes: list[str] = []
     for i, x in enumerate(lines, 1):
         try:
             r = json.loads(x)
             if not isinstance(r, dict):
                 raise ValueError
         except (ValueError, TypeError):
-            return [], f"audit line {i} is not valid"
+            return [], f"audit line {i} is not valid", []
+        prev = hashes[-1] if hashes else ""
         if "h" in r:
             h = r.pop("h")
             if r.get("p") != prev or _link(prev, r) != h:
-                return [], f"the audit chain is broken at line {i}"
-            prev, chained = h, chained + 1
-        elif chained:
-            return [], f"audit line {i} is not chained"
+                return [], f"the audit chain is broken at line {i}", []
+            hashes.append(h)
+        elif hashes:
+            return [], f"audit line {i} is not chained", []
         r["ts"] = float(r["ts"]) if isinstance(r.get("ts"), (int, float)) else 0.0
         rows.append(r)
     try:
         head = json.loads(head_p.read_text(encoding="utf-8")) if head_p.exists() else None
     except (OSError, ValueError):
-        return [], "the audit head file is not valid"
+        return [], "the audit head file is not valid", []
+    n = len(hashes)
+    # the head may LAG by exactly one row (a crash, or on Windows a reader holding the head open, between the fsynced
+    # append and the head replace): appending a row is never hidden by this, a removed row still is detected
+    lag_ok = (head is None and n == 1) or (isinstance(head, dict) and n >= 2 and head.get("n") == n - 1
+                                           and head.get("h") == hashes[-2])
     if head is None:
-        return (rows, "") if not chained else ([], "the audit head file is missing")
-    if not isinstance(head, dict) or head.get("n") != chained or head.get("h") != prev:
-        return [], "the audit file was shortened or replaced"
-    return rows, ""
+        return (rows, "", hashes) if not n or lag_ok else ([], "the audit head file is missing", [])
+    if lag_ok:
+        return rows, "", hashes
+    if not isinstance(head, dict) or head.get("n") != n or head.get("h") != (hashes[-1] if hashes else ""):
+        return [], "the audit file was shortened or replaced", []
+    return rows, "", hashes
+
+
+def read_chain(path: Path) -> tuple[list[dict], str]:
+    """(rows, problem). Every row after a legacy (un-chained) prefix carries `p` (the previous hash) and `h` =
+    sha256(p + the row without h). A wrong link, an un-chained or torn line, or fewer rows than the head file recorded
+    (truncation) = a problem text; the caller refuses writes. HONEST LIMIT: a program running as the same user that
+    rewrites BOTH the audit and its head file consistently (or deletes both) is not detected."""
+    rows, bad, _ = _scan(path)
+    return rows, bad
 
 
 def _append_chained(path: Path, rec: dict) -> None:
     """Caller holds the lock. Verifies the chain first: a tampered file is never extended."""
-    bad = read_chain(path)[1]
+    _, bad, hashes = _scan(path)
     if bad:
         logs.warn("github", "GITHUB_AUDIT_TAMPERED", "audit chain broken; not appended", why=bad[:80])
         return
-    prev, n = "", 0
-    for line in reversed(path.read_text(encoding="utf-8").splitlines() if path.exists() else []):
-        with contextlib.suppress(ValueError):
-            j = json.loads(line)
-            if isinstance(j, dict) and "h" in j:
-                prev = j["h"]
-                break
-    if prev:
-        n = int(json.loads(path.with_suffix(".head").read_text(encoding="utf-8")).get("n", 0))
+    prev, n = (hashes[-1] if hashes else ""), len(hashes)
     rec = {**logs.redact_deep(rec), "p": prev}
     h = _link(prev, rec)
     with open(path, "a", encoding="utf-8") as f:
-        f.write(json.dumps({**rec, "h": h}, ensure_ascii=False) + "\n")
+        f.write(json.dumps({**rec, "h": h}, ensure_ascii=True) + "\n")     # ASCII: no character can split the line
         f.flush()
         os.fsync(f.fileno())
     tmp = path.with_suffix(".head.tmp")

@@ -667,3 +667,23 @@ def test_edit_is_refused_when_the_current_state_cannot_be_read(tmp_path, monkeyp
     monkeypatch.setattr(gc.GitHubClient, "issue", boom)
     r = go(w, "issue.edit", "2", state="closed")
     assert not r.ok and r.code == "GITHUB_WRITE_UNREADABLE" and not ap.asked and not writes(fake)
+
+
+def test_a_line_separator_in_a_model_chosen_kind_does_not_fake_a_tamper_alarm(tmp_path):
+    w = mk(tmp_path, clock=lambda: 1000.0)[0]
+    for k in ("x y", "x\u0085y", "x y"):         # str.splitlines() would split the row: a fake tamper alarm
+        r = run(w.execute(gw.WriteAction(kind=k, repo=REPO, target="7", payload={}, preview="p"), origin="model"))
+        assert not r.ok
+    assert w.status()["audit"] == "ok" and go(w, "issue.comment", "7", body="legit").ok
+
+
+def test_head_lagging_one_row_after_a_crash_is_not_a_tamper_alarm(tmp_path):
+    w, fake = _two_writes(tmp_path)
+    f = tmp_path / "github" / "write_audit.jsonl"
+    rows = [json.loads(x) for x in _audit_lines(tmp_path)]
+    f.with_suffix(".head").write_text(json.dumps({"n": len(rows) - 1, "h": rows[-2]["h"]}), encoding="utf-8")
+    assert w.status()["audit"] == "ok" and go(w, "issue.comment", "7", body="c").ok    # crash between append and head
+    head = json.loads(f.with_suffix(".head").read_text(encoding="utf-8"))
+    assert head["n"] == len(_audit_lines(tmp_path))                                      # and it heals on the next row
+    _tamper_then_write_is_refused(                                                       # a removed row is still caught
+        tmp_path, lambda p: p.write_text("\n".join(_audit_lines(tmp_path)[:-1]) + "\n", encoding="utf-8"), w, fake)
