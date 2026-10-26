@@ -50,6 +50,7 @@ def slug(title: str) -> str:
 class Notes:
     def __init__(self, db: UserDB, *, clock=time.time) -> None:
         self.db, self.clock = db, clock
+        self._gone: dict[str, float] = {}       # title -> when it was deleted (recreate guard, #432)
 
     def add(self, title: str, text: str = "", tags=None, *, by: str = "user") -> dict:
         title, text = " ".join(str(title or "").split())[:MAX_TITLE], str(text or "").strip()
@@ -98,11 +99,19 @@ class Notes:
         logs.info("notes", "NOTE_EDITED", "note edited", note_id=n["id"], by=by)
         return self.get(n["id"])
 
+    def just_deleted(self, title: str, window_s: float = 120.0) -> bool:
+        """True ONCE when a note with this title was deleted a moment ago: the assistant must not re-create what
+        the user asked to delete (owner PC 23 Oct: note_delete, then note_add). A repeated call goes through."""
+        key = " ".join(str(title or "").split()).lower()
+        t = self._gone.pop(key, None)
+        return t is not None and self.clock() - t <= window_s
+
     def delete(self, nid: int, *, by: str) -> bool:
         n = self.get(nid)
         if n is None:
             return False
         self.db.x("DELETE FROM notes WHERE id=?", (n["id"],))
+        self._gone[" ".join(n["title"].split()).lower()] = self.clock()
         self.db.audit(by, "note_delete", n["id"], {"title": n["title"]})
         logs.info("notes", "NOTE_DELETED", "note deleted", note_id=n["id"], by=by)
         return True
@@ -170,6 +179,10 @@ def make_skill(notes: Notes, sandbox=None):
 
         def tools(self) -> list:
             async def add(a: AddArgs):
+                if notes.just_deleted(a.title):
+                    return ToolResult(False, "that note was just deleted at the user's request; it was NOT created. "
+                                      "Tell the user it is deleted; create it again only if they ask",
+                                      code="NOTE_JUST_DELETED")
                 try:
                     n = notes.add(a.title, a.text, a.tags, by="voice")
                 except ValueError as e:

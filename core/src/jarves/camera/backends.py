@@ -116,6 +116,9 @@ class OpenCVCamera(Camera):
             cap.release()
             raise CameraUnavailable("CAMERA_OPEN_FAILED", f"webcam {self.device} could not be opened",
                                     "close other apps using the camera; check the device index")
+        if sys.platform == "win32" and isinstance(self.device, int):
+            # MJPG first: DirectShow's default raw format negotiates slowly and delays the first frame (#355)
+            cap.set(cv2.CAP_PROP_FOURCC, cv2.VideoWriter_fourcc(*"MJPG"))
         cap.set(cv2.CAP_PROP_FRAME_WIDTH, self.width)
         cap.set(cv2.CAP_PROP_FRAME_HEIGHT, self.height)
         self._cap, self.is_open = cap, True

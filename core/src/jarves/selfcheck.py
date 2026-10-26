@@ -167,13 +167,14 @@ def processes(recs: list[dict]) -> list[dict]:
             continue
         p = by.setdefault(sid, {"session": sid, "first": r["_t"], "last": r["_t"], "started": False,
                                 "stopped": False, "stopping": False, "errors": 0, "last_rec": r, "boot": None,
-                                "reason": ""})
+                                "reason": "", "version": ""})
         p["last"], p["last_rec"] = r["_t"], r
         code = r.get("code")
         if code == "CORE_STARTING":
             p["started"] = True
             b = r.get("boot")
             p["boot"] = b if isinstance(b, (int, float)) and not isinstance(b, bool) else None
+            p["version"] = str(r.get("version") or "")[:40]
         elif code == "CORE_STOPPED":
             p["stopped"] = True
         elif code == "CORE_STOPPING":
@@ -187,7 +188,7 @@ def processes(recs: list[dict]) -> list[dict]:
 def end_kind(p: dict, procs: list[dict]) -> str:
     """How a process that wrote CORE_STARTING ended: "clean" (CORE_STOPPED), "restart" (the computer rebooted before the
     next JARVES start: power cut, logoff or Windows shutdown without a stop, which JARVES cannot prove was its own
-    fault), "stop_hung" (it began an orderly stop that never finished) or "crash" (anything else)."""
+    fault), "update" (the next start is a different version: the update closed it, #433), "stop_hung" (it began an orderly stop that never finished) or "crash" (anything else)."""
     if p["stopped"]:
         return "clean"
     nxt = next((q for q in procs if q["started"] and q["first"] > p["first"]), None)
@@ -195,6 +196,8 @@ def end_kind(p: dict, procs: list[dict]) -> str:
         from .runtime.shutdown import same_boot
         if same_boot(p.get("boot"), nxt.get("boot")) is False:
             return "restart"
+        if p.get("version") and nxt.get("version") and p["version"] != nxt["version"]:
+            return "update"
     return "stop_hung" if p["stopping"] else "crash"
 
 
@@ -525,10 +528,25 @@ class SelfCheck:
         crashed = [p for p in ended if kinds[p["session"]] == "crash"]
         restarted = [p for p in ended if kinds[p["session"]] == "restart"]
         hung = [p for p in ended if kinds[p["session"]] == "stop_hung"]
+        updated = [p for p in ended if kinds[p["session"]] == "update"]
         metrics["starts"] = sum(p["started"] for p in procs)
         metrics["crashes"] = len(crashed)
         metrics["system_restarts"] = len(restarted)
         metrics["stop_hung"] = len(hung)
+        metrics["update_stops"] = len(updated)
+        if updated:
+            out.append(Finding(
+                "stop_update", "logs", "low",
+                f"JARVES was closed for an update {len(updated)}x",
+                f"ג'ארביס נסגר בגלל עדכון {len(updated)} פעמים",
+                detail="A Core process had no CORE_STOPPED and the next start was a different version: the update "
+                       "closed it. Information, not a crash.",
+                detail_he="לתהליך של ה-Core לא היה CORE_STOPPED וההפעלה הבאה הייתה בגרסה אחרת: העדכון סגר אותו. "
+                          "מידע, לא קריסה.",
+                evidence=[f"process {p['session']}: started {_when(p['first'])}, last line {_line(p['last_rec'])}"
+                          for p in updated[-MAX_EVIDENCE:]],
+                cause="the installer replaced the running version", cause_he="המתקין החליף את הגרסה שרצה",
+                fix="Nothing to fix.", fix_he="אין מה לתקן.", effort="minutes", count=len(updated)))
         if crashed:
             out.append(Finding(
                 "crash", "logs", "high" if len(crashed) >= 2 else "medium",

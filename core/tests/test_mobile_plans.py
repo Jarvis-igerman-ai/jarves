@@ -1,5 +1,5 @@
-"""Phone view of Goal plans (V5 gap G4, issue #184): scope, read-only steps and status, pause / cancel only, everything
-that starts or repeats a step refused (computer only), idempotent commands, no arguments / results / evidence on the
+"""Phone view of Goal plans (V5 gap G4, issue #184; #340): scope, read-only steps and status, pause / cancel / resume /
+retry (only for an untainted plan, never blocked or unknown steps), approve / skip / delete refused (computer only), idempotent commands, no arguments / results / evidence on the
 phone, no text in the audit log, one state with the dashboard page, static files."""
 import http.client
 import json
@@ -115,8 +115,11 @@ def test_pause_and_cancel_work_and_match_the_pc(srv, store):
     _, pc = call(srv, "GET", "/api/goal-plans", owner=True)                           # the PC page: same store, same state
     assert pc["plans"][0]["state"] == "paused"
     _, v = call(srv, "GET", "/api/m/plans", tok)
-    assert v["plans"][0]["can"] == ["cancel"] and v["plans"][0]["needs_pc"] is True   # resuming is the computer's
+    assert v["plans"][0]["can"] == ["resume", "cancel"] and v["plans"][0]["needs_pc"] is False
     assert op(srv, tok, op="pause", plan=pid)[0] == 409                               # not running any more
+    assert op(srv, tok, op="resume", plan=pid)[1]["state"] == "ready"                  # #340
+    assert op(srv, tok, op="resume", plan=pid)[0] == 403                              # ready: nothing to resume
+    s.pause(pid)
     assert op(srv, tok, op="cancel", plan=pid)[1]["state"] == "cancelled"
     assert [x["status"] for x in s.get(pid)["steps"]] == ["done", "skipped"]
     st, out = op(srv, tok, op="cancel", plan=pid)
@@ -125,16 +128,66 @@ def test_pause_and_cancel_work_and_match_the_pc(srv, store):
     assert op(srv, tok, op="pause", plan="x")[0] == 400
 
 
-def test_everything_that_starts_or_repeats_a_step_stays_on_the_computer(srv, store):
+def test_approve_skip_and_delete_stay_on_the_computer(srv, store):
     s, pid = store
     tok, _ = pair(srv)
     s.pause(pid)
-    for name in ("approve", "resume", "retry", "skip", "delete"):
+    for name in ("approve", "skip", "delete"):
         st, out = op(srv, tok, op=name, plan=pid, step=1)
         assert st == 403 and out["code"] == "PLAN_PC_ONLY", name
     assert s.get(pid)["state"] == "paused" and s.get(pid) is not None               # nothing started, nothing deleted
     assert op(srv, tok, op="explode", plan=pid)[0] == 400
     assert call(srv, "POST", "/api/m/plans/op", tok, {"op": "cancel", "plan": pid})[0] == 400      # command id required
+
+
+def _fail(s, pid, attempts=1):
+    s.db.x("UPDATE goal_plan_steps SET status='failed', attempts=?, error='boom' WHERE plan_id=? AND idx=1", (attempts, pid))
+    s.db.x("UPDATE goal_plans SET state='failed' WHERE id=?", (pid,))
+
+
+def test_retry_a_failed_plan_from_the_phone(srv, store):
+    s, pid = store
+    tok, _ = pair(srv)
+    assert op(srv, tok, op="retry", plan=pid)[0] == 403                               # not failed: nothing to retry
+    _fail(s, pid)
+    _, v = call(srv, "GET", "/api/m/plans", tok)
+    assert v["plans"][0]["can"] == ["retry", "cancel"] and v["plans"][0]["needs_pc"] is False
+    st, out = op(srv, tok, op="retry", plan=pid)
+    assert st == 200 and out["state"] == "ready"
+    assert [x["status"] for x in s.get(pid)["steps"]] == ["done", "pending"]
+    assert op(srv, tok, op="retry", plan=pid)[0] == 403                               # idempotent: no longer failed
+
+
+def test_resume_and_retry_are_refused_for_tainted_blocked_unknown_or_exhausted_plans(srv, store):
+    s, pid = store
+    tok, _ = pair(srv)
+    s.pause(pid)
+    s.db.x("UPDATE goal_plans SET tainted=1 WHERE id=?", (pid,))                      # untrusted text was read
+    assert op(srv, tok, op="resume", plan=pid)[0] == 403 and s.get(pid)["state"] == "paused" and s.get(pid)["tainted"] == 1
+    s.db.x("UPDATE goal_plans SET tainted=0 WHERE id=?", (pid,))
+    s.db.x("UPDATE goal_plan_steps SET status='unknown' WHERE plan_id=? AND idx=1", (pid,))   # may already have run
+    assert op(srv, tok, op="resume", plan=pid)[0] == 403 and s.get(pid)["state"] == "paused"
+    s.db.x("UPDATE goal_plans SET state='failed' WHERE id=?", (pid,))
+    s.db.x("UPDATE goal_plan_steps SET error='x' WHERE plan_id=? AND idx=0", (pid,))
+    assert op(srv, tok, op="retry", plan=pid)[0] == 403                               # unknown step: PC only
+    _fail(s, pid)
+    s.db.x("UPDATE goal_plan_steps SET status='failed', attempts=3 WHERE plan_id=? AND idx=1", (pid,))
+    assert op(srv, tok, op="retry", plan=pid)[0] == 403                               # attempt limit
+    s.db.x("UPDATE goal_plan_steps SET attempts=1 WHERE plan_id=? AND idx=1", (pid,))
+    s.db.x("UPDATE goal_plans SET tainted=1 WHERE id=?", (pid,))
+    assert op(srv, tok, op="retry", plan=pid)[0] == 403 and s.get(pid)["state"] == "failed"
+    assert op(srv, tok, op="resume", plan=9999)[0] == 404
+
+
+def test_resume_needs_the_tasks_scope_and_is_audited_without_text(srv, store, home):
+    s, pid = store
+    s.pause(pid)
+    weak, _ = pair(srv, scopes=("chat", "status", "approvals"))
+    assert op(srv, weak, op="resume", plan=pid)[0] == 403 and s.get(pid)["state"] == "paused"
+    tok, _ = pair(srv)
+    assert op(srv, tok, op="resume", plan=pid)[0] == 200
+    audit = (home / mobile.AUDIT_FILE).read_text(encoding="utf-8")
+    assert "Tidy the notes" not in audit and "tell Dana" not in audit and '"resume"' in audit
 
 
 def test_a_resent_command_runs_once(srv, store):
@@ -189,3 +242,18 @@ def test_plans_js_is_served_csp_safe_and_translated():
     assert re.search(r"[֐-׿]", js)
     html = (MOBILE_DIR / "index.html").read_text(encoding="utf-8")
     assert "/m/plans.js" in html and 'id="plansRoot"' in html and 'id="tabbtn-plans"' in html
+
+
+def test_a_phone_never_lifts_the_taint_guard_and_waits_for_a_running_step(srv, store):
+    s, pid = store
+    tok, _ = pair(srv)
+    s.pause(pid)
+    s.db.x("UPDATE goal_plan_steps SET status='running' WHERE plan_id=? AND idx=1", (pid,))   # a step still in flight
+    assert op(srv, tok, op="resume", plan=pid)[0] == 403
+    s.db.x("UPDATE goal_plan_steps SET status='pending' WHERE plan_id=? AND idx=1", (pid,))
+    s.db.x("UPDATE goal_plans SET tainted=1 WHERE id=?", (pid,))
+    s.resume(pid, by="phone")                                                          # even if it slipped past the check
+    assert s.get(pid)["tainted"] == 1
+    s.pause(pid)
+    s.resume(pid)                                                                      # the computer's resume still lifts it
+    assert s.get(pid)["tainted"] == 0

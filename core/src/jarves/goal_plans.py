@@ -183,7 +183,7 @@ class PlanStore:
             if s["status"] == "unknown":
                 raise ValueError(f"step {s['idx'] + 1} may already have run before the stop: retry or skip it first")
         self.db.x("UPDATE goal_plan_steps SET status='pending', error='' WHERE plan_id=? AND status='blocked'", (int(pid),))
-        self._set(pid, "ready", note="", tainted=0)          # the owner's resume is a new turn: the guard is lifted
+        self._set(pid, "ready", note="", **({} if by == "phone" else {"tainted": 0}))   # the owner's resume on the PC is a new turn: the guard is lifted; a phone never lifts it (#340)
         logs.info("goals", "PLAN_RESUMED", "plan resumed", id=pid, by=by)
         return self.get(pid)
 
@@ -211,7 +211,7 @@ class PlanStore:
                 n += 1
         if not n:
             raise ValueError("no failed or blocked step to retry")
-        self._set(pid, "ready", note="", tainted=0, finished=None)
+        self._set(pid, "ready", note="", finished=None, **({} if by == "phone" else {"tainted": 0}))   # a phone never lifts the guard (#340)
         logs.info("goals", "PLAN_RETRIED", "plan step retried", id=pid, count=n, by=by)
         return self.get(pid)
 

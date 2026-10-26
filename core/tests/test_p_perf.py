@@ -17,7 +17,7 @@ from test_dashboard import dash, req  # noqa: F401  (fixture + helper)
 BACKEND_CHARS_BUDGET = 52_100 * 1.10
 
 
-async def test_backend_prompt_does_not_grow(core):
+async def test_backend_prompt_does_not_grow(hermetic_features, core):
     tools = json.dumps(live_tools(core.registry), ensure_ascii=False)
     total = len(tools) + len(core.agent.instructions())
     assert total <= BACKEND_CHARS_BUDGET, f"backend prompt+tools is {total} chars (budget {BACKEND_CHARS_BUDGET:.0f})"

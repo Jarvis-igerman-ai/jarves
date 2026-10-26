@@ -762,6 +762,7 @@ class LiveVoice(SessionLifecycle):
         self._delegations = 0           # delegations created (a new one = the user moved on)
         self._answers = 0               # substantive backend answers completed (answer-delivery check)
         self._user_turn_n = 0           # user utterances started
+        self._prev_turn_t0 = 0.0                  # start of the user turn before the current one (recap check, #432)
         self._turn_t0 = self._out_turn_t0 = 0.0   # start of the current user turn / of the turn being answered
         self._action_times: list[float] = []      # successful action/destructive tool results (monotonic)
         self._claim_flagged_turn = -1
@@ -1351,7 +1352,7 @@ class LiveVoice(SessionLifecycle):
                 # flush let "louder" after a mail read reach its tool call first and be refused as untrusted.
                 self._new_turn()
                 self._user_turn_n += 1
-                self._turn_t0 = now
+                self._prev_turn_t0, self._turn_t0 = self._turn_t0, now
                 self._turn_deleg0 = self._delegations
             if (not self._in_text and not self._gated() and now < self._speaking_until
                     and now - self._turn_audio_t0 >= BARGE_IN_MIN_S):
@@ -1860,6 +1861,17 @@ class LiveVoice(SessionLifecycle):
         except RuntimeError:                       # no running loop (sync test paths)
             pass
 
+    def _is_recap(self, verb: str, turn_n: int) -> bool:
+        """#432 (owner PC 23 Oct, 2 of 3 detections): the tool DID run, in the user turn just before; a short
+        follow-up ("ok", "and?") started a new turn and the recap "עדכנתי"/"מחקתי" counted as a claim of that new
+        turn. Not a claim when this turn asked for no action, the verb is not a memory one (an unasked "רשמתי" stays
+        flagged, CV-06) and a real action succeeded since the previous turn began."""
+        if turn_n != self._user_turn_n or not self._prev_turn_t0 or verb in MEMORY_CLAIM_VERBS:
+            return False
+        if user_asked_action(self._user_turns[-1] if self._user_turns else ""):
+            return False
+        return any(t >= self._prev_turn_t0 - CLAIM_TURN_SLACK_S for t in self._action_times)
+
     async def _verify_claim(self, verb: str, turn_t0: float, turn_n: int) -> None:
         t_end = time.monotonic() + CLAIM_SETTLE_MAX_S   # a tool still running / a result on its way: wait for it
         while self.running and time.monotonic() < t_end and (self._tools_running or self._backend_busy):
@@ -1867,6 +1879,8 @@ class LiveVoice(SessionLifecycle):
         if any(t >= turn_t0 - CLAIM_TURN_SLACK_S for t in self._action_times):
             return
         if self._claim_flagged_turn == turn_n or not self.running:
+            return
+        if self._is_recap(verb, turn_n):
             return
         self._claim_flagged_turn = turn_n
         self._stats["false_action_claims"] = self._stats.get("false_action_claims", 0) + 1

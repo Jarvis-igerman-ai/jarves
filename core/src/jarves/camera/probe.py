@@ -55,8 +55,39 @@ def _windows_cameras() -> list[str]:
         items = [x for x in ctypes.wstring_at(buf, size.value).split("\0") if x]
     except (OSError, AttributeError, ValueError):
         return []
-    # "\\?\USB#VID_30C9&PID_0030&MI_00#..." -> "USB VID_30C9&PID_0030" (no serial numbers in logs)
-    return [" ".join(x.lstrip("\\?").split("#")[:2]) for x in items]
+    # the friendly name from the registry; a raw hardware id (VID_xxxx&PID_xxxx) is never shown as the name (#355)
+    return [friendly_camera_name(x) for x in items]
+
+
+def _registry_name(hw: str, instance: str) -> str:
+    """FriendlyName / DeviceDesc of one USB device instance (read-only registry lookup, opens no camera)."""
+    import winreg
+    try:
+        bs = "\x5c"
+        with winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, bs.join(("SYSTEM", "CurrentControlSet", "Enum", "USB", hw, instance))) as k:
+            for value in ("FriendlyName", "DeviceDesc"):
+                try:
+                    return str(winreg.QueryValueEx(k, value)[0])
+                except OSError:
+                    continue
+    except OSError:
+        pass
+    return ""
+
+
+def friendly_camera_name(interface: str, lookup: Callable[[str, str], str] = _registry_name) -> str:
+    """A device-interface path (USB#VID_30C9&PID_0030&MI_00#instance#guid) -> the camera's own name, else "USB camera"."""
+    parts = interface.lstrip("\x5c?").split("#")
+    name = ""
+    if len(parts) >= 3:
+        try:
+            name = lookup(parts[1], parts[2])
+        except Exception:
+            name = ""
+    name = name.rsplit(";", 1)[-1].strip()      # "@oem12.inf,%cam%;Integrated Camera" -> "Integrated Camera"
+    if not name or name.startswith("@") or "VID_" in name.upper():
+        return "USB camera"
+    return name
 
 
 def _video_devices() -> list[str]:

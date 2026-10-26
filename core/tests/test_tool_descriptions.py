@@ -246,7 +246,7 @@ async def test_safety_notes_survive(descs):
     assert not bad, bad
 
 
-async def test_backend_prompt_ceiling_and_per_tool_cap(core, descs):
+async def test_backend_prompt_ceiling_and_per_tool_cap(hermetic_features, core, descs):
     tools = live_tools(core.registry)
     total = len(json.dumps(tools, ensure_ascii=False)) + len(core.agent.instructions())
     assert total <= BACKEND_CEILING, f"backend tools+rules are {total} chars (ceiling {BACKEND_CEILING})"

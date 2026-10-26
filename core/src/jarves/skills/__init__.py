@@ -49,6 +49,9 @@ DEFAULT_ALLOWED_ACTIONS = frozenset({"remember", "music_play", "music_pause", "m
 # Expected policy/configuration outcomes remain in the timeline, but are not runtime defects.
 EXPECTED_TOOL_REFUSALS = frozenset({"FEATURE_NEEDS_APPROVAL", "TOOL_UNTRUSTED_TURN", "TOOL_DECLINED",
                                     "FEATURE_OFF", "SKILL_DISABLED", "TOOL_FORBIDDEN",
+                                    # a contact that was not found is the user's input, not a tool failure (#433);
+                                    # WA_AMBIGUOUS and every other WA_* error still count
+                                    "WA_UNKNOWN_CONTACT",
                                     # drive mode (V6 #216): deferred / refused while the owner drives
                                     "DRIVE_DEFERRED", "DRIVE_QUEUE_FULL", "DRIVE_REFUSED", "DRIVE_OWNER_ONLY"})
 

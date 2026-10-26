@@ -256,3 +256,43 @@ def test_voice_phrases_are_on_the_describe_tool_and_it_stays_a_read_tool_with_no
     t = {x.name: x for x in CameraSkill(SimpleNamespace(status=lambda: {})).tools()}["camera_describe"]
     assert "מה אתה רואה" in t.description and "what do you see" in t.description
     assert t.permission == "read" and "Never call it on your own" in t.description
+
+
+# ---------------------------------------------------------------- #355 camera page polish (no real capture, fakes only)
+def test_friendly_camera_name_never_shows_the_raw_usb_id():
+    from jarves.camera.probe import friendly_camera_name
+    iface = r"\\?\USB#VID_30C9&PID_0030&MI_00#7&2a&0&0000#{e5323777-f976-4f5b-9b55-b94699c46e44}"
+    assert friendly_camera_name(iface, lambda hw, inst: "@oem12.inf,%cam%;Integrated Camera") == "Integrated Camera"
+    assert friendly_camera_name(iface, lambda hw, inst: "Logitech BRIO") == "Logitech BRIO"
+    for bad in ("", "@oem12.inf,%cam%", "USB VID_30C9&PID_0030"):
+        assert friendly_camera_name(iface, lambda hw, inst, b=bad: b) == "USB camera"
+
+    def boom(hw, inst):
+        raise OSError("no registry")
+    assert friendly_camera_name(iface, boom) == "USB camera"
+
+
+def test_camera_page_never_passes_a_bare_null_to_replaceChildren():
+    # replaceChildren(null) renders the text "null": two empty slots printed "nullnull" on the page
+    js = (Path(__file__).parent.parent / "src" / "jarves" / "dashboard_static" / "camera.js").read_text(encoding="utf-8")
+    call = js[js.index("$m.replaceChildren("):]
+    assert call.startswith("$m.replaceChildren(...[")
+    assert ".filter((n) => n)" in call[:call.index("async function refresh")]
+
+
+def test_windows_webcam_asks_for_mjpg_before_the_size(monkeypatch):
+    import sys
+    import types
+    from jarves.camera.backends import OpenCVCamera
+    sets = []
+
+    class Cap:
+        def isOpened(self): return True
+        def set(self, prop, val): sets.append(prop)
+        def release(self): pass
+    cv2 = types.SimpleNamespace(CAP_DSHOW=700, CAP_ANY=0, CAP_PROP_FOURCC=6, CAP_PROP_FRAME_WIDTH=3, CAP_PROP_FRAME_HEIGHT=4,
+                                VideoCapture=lambda d, api: Cap(), VideoWriter_fourcc=lambda *a: 1)
+    monkeypatch.setitem(sys.modules, "cv2", cv2)
+    monkeypatch.setattr(sys, "platform", "win32")
+    OpenCVCamera(0).open()
+    assert sets[:3] == [6, 3, 4]
