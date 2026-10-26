@@ -197,7 +197,7 @@ FIELD_CLASS: dict[str, str] = {
         task_name tier where crash_kind note_id code args_chars ok_count
         index_rows docs cap took_ms term_count ranged build_s fts_ok orphan_fts docs_without_fts masked_or_gone
         deleted_sessions added area route confidence guide ai_worded
-        chat_hash chats logout override unread killed text_sha256 retry_after_s days_left
+        chat_hash chats logout override unread killed text_sha256 retry_after_s days_left idle_s
         turn route history_items reserved_usd spent_usd actual_usd requests deleg_s scope err_code daily_usd turn_usd
         transport plugin provider handler tailnet tls_source hours bind_tailnet_only
         tasks waited_s false_wakes good_wakes signal backend_busy tools_running delegations_open mic_level echo_level
