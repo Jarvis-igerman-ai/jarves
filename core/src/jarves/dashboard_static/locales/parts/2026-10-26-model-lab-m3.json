@@ -1,6 +1,6 @@
 {
  "dict": {
-  "compare models on a small fixed public task set (Hebrew, tool calls, coding): quality, speed and cost per model, only when you start it, free models first, hard spend caps": "להשוות מודלים על קבוצה קטנה וקבועה של משימות ציבוריות (עברית, קריאה לכלים, קוד): איכות, מהירות ועלות לכל מודל, רק כשאתה מפעיל, קודם מודלים חינמיים, עם תקרות הוצאה קשיחות",
+  "compare models on a small fixed public task set (Hebrew, tool calls, coding): quality, speed and cost per model, only when you start it, free models first, hard spend caps": "השוואת מודלים על מערך משימות ציבורי קטן וקבוע (עברית, קריאות לכלים, קוד): איכות, מהירות ועלות לכל מודל, רק כשמפעילים, קודם מודלים חינמיים, תקרות הוצאה קשיחות",
   "Model Lab": "מעבדת מודלים",
   "runs only when you start it": "רץ רק כשאתה מפעיל אותו"
  }

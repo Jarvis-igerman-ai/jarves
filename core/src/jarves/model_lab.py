@@ -198,6 +198,11 @@ def _probe(c: feat.ProbeCtx) -> tuple[bool, str]:
 
 feat.register(FEATURE, "מעבדת מודלים", "Model Lab", False, probe=_probe, risk="medium", stage="beta",
               about="compare models on a small fixed public task set (Hebrew, tool calls, coding): quality, speed and cost per model, only when you start it, free models first, hard spend caps",
+              targets={"windows": {"status": "implemented_unverified",
+                                   "blocker": "tested with fake providers only; no real model run yet"},
+                       "linux_arm64_pi": {"status": "implemented_unverified",
+                                          "blocker": "tested with fake providers only; not run on a Pi",
+                                          "roadmap_issue": "https://github.com/Jarvis-igerman-ai/jarves/issues/3"}},
               permissions=["runs only when you start it"], settings="jarvis modellab status")
 
 
