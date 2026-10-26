@@ -75,7 +75,8 @@ STATIC_FILES = {"index.html": "text/html; charset=utf-8", "app.js": "text/javasc
                 "plans.js": "text/javascript; charset=utf-8",
                 "prefs.js": "text/javascript; charset=utf-8",
                 "drive.js": "text/javascript; charset=utf-8",
-                "hands_free.js": "text/javascript; charset=utf-8"}
+                "hands_free.js": "text/javascript; charset=utf-8",
+                "m_shell.js": "text/javascript; charset=utf-8", "m_theme.css": "text/css; charset=utf-8"}   # redesign #511
 SHARED_FILES = ("chatview.js", "chatview.css")      # one chat view for the dashboard and the phone page (dashboard_static/)
 
 

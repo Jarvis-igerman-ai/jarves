@@ -5,6 +5,9 @@
 // JarvesChat.mount(root, { api, tx, device }) -> { destroy() }
 //   api.state(lang) / api.events(after, sig, lang) / api.send(body) / api.answer(id, approved, typed) / api.silent(on)
 //   tx(he, en): the text in the page language;  device: true on a paired phone / PC (no speech, no typed codes)
+//   phone (optional, the phone app only): { icon(name) -> svg node, start: [nodes], end: [nodes], onEvent(e) }: icon send
+//     button, extra composer controls (attach, mic), a thinking row, Copy under each answer and the raw events (history).
+//   returns { destroy(), submit(text), local(role, text) }
 // Messages are rendered from server events only (the server echoes a sent message), so a second device or the terminal
 // chat shows the same conversation. Message ids are reused on a resend: the computer answers once.
 "use strict";
@@ -97,6 +100,7 @@
 
   function mount(root, opts) {
     const { api, tx, device } = opts;
+    const phone = opts.phone || null;
     const lang = () => ((document.documentElement.lang || "en").startsWith("he") ? "he" : "en");
     const word = (code, fallback) => (WORDS[code] ? tx(WORDS[code][0], WORDS[code][1]) : fallback);
     let alive = true, after = 0, sig = "", busy = "", state = null, phoneAp = true;
@@ -111,14 +115,17 @@
     const apprBox = h("div", { class: "jc-appr", "aria-live": "assertive" });
     const status = h("div", { class: "jc-status", role: "status" });
     const input = h("textarea", { id: uidp + "in", class: "jc-in", rows: "1", dir: "auto", maxlength: "4000", enterkeyhint: "send",
-      placeholder: tx("כתבו הודעה או / לפקודות", "Type a message, or / for commands"), autocomplete: "off" });
-    const sendBtn = h("button", { type: "submit", class: "primary jc-send" }, tx("שליחה", "Send"));
+      placeholder: opts.phone ? tx("כתבו הודעה", "Message JARVES") : tx("כתבו הודעה או / לפקודות", "Type a message, or / for commands"), autocomplete: "off" });
+    const sendBtn = phone && phone.icon
+      ? h("button", { type: "submit", class: "primary jc-send jc-icon", "aria-label": tx("שליחה", "Send"), title: tx("שליחה", "Send") }, phone.icon("send"))
+      : h("button", { type: "submit", class: "primary jc-send" }, tx("שליחה", "Send"));
     const speakBox = device ? null : h("input", { type: "checkbox", id: uidp + "sp" });
     const silentBox = device ? null : h("input", { type: "checkbox", id: uidp + "si" });
     const cmds = h("div", { class: "jc-cmds", role: "group", "aria-label": tx("פקודות", "Commands") },
       ["/new", "/resume", "/undo", "/status", "/help"].map((c) => h("button", { type: "button", class: "jc-cmd", onclick: () => submit(c) }, c)));
     const form = h("form", { class: "jc-form", onsubmit: (ev) => { ev.preventDefault(); submit(input.value); } },
-      h("label", { for: uidp + "in", class: "jc-sr" }, tx("הודעה ל-JARVES", "Message to JARVES")), input, sendBtn);
+      h("label", { for: uidp + "in", class: "jc-sr" }, tx("הודעה ל-JARVES", "Message to JARVES")),
+      ...((phone && phone.start) || []), input, ...((phone && phone.end) || []), sendBtn);
     sendBtn.disabled = true;
     const opts2 = device ? null : h("div", { class: "jc-opts" },
       h("label", { class: "jc-chk" }, silentBox, " ", tx("שקט (בלי קול, בלי צלצולים)", "Silent (no speech, no chimes)")),
@@ -156,6 +163,26 @@
       if (ev.key === "Enter" && !ev.shiftKey && !ev.isComposing) { ev.preventDefault(); submit(input.value); }
     });
 
+    // phone: a "thinking" row from the send until the first streamed text, the answer or a notice (client only)
+    let pending = false;
+    const think = phone ? h("div", { class: "jc-think", role: "status" }, h("span", { class: "jc-dots", "aria-hidden": "true" }, h("i"), h("i"), h("i")),
+      h("span", {}, tx("JARVES חושב", "JARVES is thinking"))) : null;
+    function paintThink() {
+      if (!think) return;
+      const on = (pending || !!busy) && turns.size === 0;
+      if (on) { if (think.parentNode !== log || log.lastChild !== think) { log.append(think); scroll(); } } else think.remove();
+    }
+    function addCopy(d, text) {         // phone: a Copy button under a finished answer (the clipboard of this phone only)
+      if (!phone || !text || d.nextSibling && d.nextSibling.classList && d.nextSibling.classList.contains("jc-acts")) return;
+      const label = tx("העתקה", "Copy");
+      const b = h("button", { type: "button", class: "jc-act", "aria-label": label, title: label }, phone.icon ? phone.icon("copy") : label);
+      b.addEventListener("click", async () => {
+        let ok = true; try { await navigator.clipboard.writeText(text); } catch (e) { ok = false; }
+        b.setAttribute("aria-label", ok ? tx("הועתק", "Copied") : tx("ההעתקה נכשלה", "Copy failed")); b.classList.toggle("done", ok);
+        setTimeout(() => { b.setAttribute("aria-label", label); b.classList.remove("done"); }, 1500);
+      });
+      d.after(h("div", { class: "jc-acts" }, b));
+    }
     function note(text, cls) { const d = h("div", { class: "jc-msg jc-notice " + (cls || ""), dir: "auto" }, text); log.append(d); scroll(); return d; }
     function nearEnd() { return log.scrollHeight - log.scrollTop - log.clientHeight < 80; }
     function scroll(force) { if (force === true || nearEnd()) { log.scrollTop = log.scrollHeight; jump.hidden = true; } else jump.hidden = false; }
@@ -185,7 +212,9 @@
       const d = h("div", { class: "jc-msg jc-" + role, dir: "auto" });
       setText(d, text); stamp(d, ts);
       if (turn) d.dataset.turn = turn;
-      log.append(d); scroll(); return d;
+      log.append(d);
+      if (think && think.parentNode === log) log.append(think);
+      scroll(); return d;
     }
     function displayBlock(m) {      // #363: read-only owner text from a tool result; text nodes only, one RTL-safe line each
       const d = h("div", { class: "jc-msg jc-display", dir: "auto" });
@@ -316,15 +345,19 @@
       if (m.role === "display") return displayBlock(m);
       if (m.role === "ui_block") return blockView(m);
       if (m.role === "notice") return bubble("notice", noticeText(m));
-      return bubble(m.role === "user" ? "user" : "assistant", m.text, m.turn, m.ts);
+      const d = bubble(m.role === "user" ? "user" : "assistant", m.text, m.turn, m.ts);
+      if (m.role !== "user") addCopy(d, m.text);
+      return d;
     }
     function load(s) {
       state = s; log.replaceChildren(); turns.clear(); blockUis.clear();
       (s.messages || []).forEach(renderMessage); scroll(true);
       after = s.cursor || 0; busy = s.busy || ""; phoneAp = s.phone_approvals !== false;
-      paintSilent(s.silent); paintAppr(s.approvals || []);
+      paintSilent(s.silent); paintAppr(s.approvals || []); paintThink();
     }
     function onEvent(e) {
+      if (phone && typeof phone.onEvent === "function") { try { phone.onEvent(e); } catch (x) { /* the page's own hook */ } }
+      if (["delta", "reply", "notice", "error", "reset"].includes(e.type)) pending = false;
       if (e.type === "user") { bubble("user", e.text, e.turn, e.ts); scroll(true); }
       else if (e.type === "delta") {
         let b = turns.get(e.turn);
@@ -334,7 +367,7 @@
         let b = turns.get(e.turn);
         const text = e.text || (e.ok ? "" : word(e.code, tx("משהו השתבש. ראו את היומן.", "Something went wrong. See the log.")));
         if (!b && text) b = bubble("assistant", "", e.turn, e.ts);
-        if (b) { setText(b, text); b.classList.remove("streaming"); b.removeAttribute("aria-busy"); if (!e.ok) b.classList.add("err"); }
+        if (b) { setText(b, text); b.classList.remove("streaming"); b.removeAttribute("aria-busy"); if (!e.ok) b.classList.add("err"); else addCopy(b, text); }
         turns.delete(e.turn);
       } else if (e.type === "tool") toolLine(e);
       else if (e.type === "display") displayBlock(e);
@@ -372,19 +405,27 @@
           device && !phoneAp ? null : h("button", { type: "button", onclick: () => answer(false) }, tx("דחייה", "Deny"))), msg);
     }
 
-    async function submit(text) {
+    async function submit(text, again) {
       text = String(text || "").trim();
       if (!text) return;
-      const body = { text, id: uid(), lang: lang(), speak: !!(speakBox && speakBox.checked) };
+      const body = { text, id: again || uid(), lang: lang(), speak: !!(speakBox && speakBox.checked) };
       sendBtn.disabled = true;
       try {
         for (let i = 0; ; i++) {
           try { await api.send(body); break; }       // the same id on every resend: answered once
           catch (e) { if (e.status === undefined && i < 3) { await sleep(1200 * (i + 1)); continue; } throw e; }
         }
-        input.value = ""; grow();
-      } catch (e) { note(word(e.code, e.message), "err"); }
-      grow(); input.focus();
+        if (!again || input.value.trim() === text) input.value = "";
+        grow(); pending = true; paintThink();
+      } catch (e) {
+        const n = note(word(e.code, e.message), "err");
+        if (phone) {                         // per-message Retry: the same id, so the computer answers once
+          n.append(h("div", { class: "jc-row" }, h("span", { class: "jc-small", dir: "auto" }, "“" + (text.length > 60 ? text.slice(0, 60) + "…" : text) + "”"),
+            h("button", { type: "button", class: "jc-retry", onclick: () => { n.remove(); submit(text, body.id); } }, tx("לנסות שוב", "Retry"))));
+          if (input.value.trim() === text) { input.value = ""; grow(); }
+        }
+      }
+      grow(); if (!phone || !again) input.focus();
     }
 
     async function loop() {
@@ -395,7 +436,7 @@
           phoneAp = r.phone_approvals !== false;
           if (r.resync) { load(await api.state(lang())); continue; }
           (r.events || []).forEach(onEvent);
-          after = r.cursor; busy = r.busy || ""; paintSilent(r.silent);
+          after = r.cursor; busy = r.busy || ""; paintSilent(r.silent); paintThink();
           const ids = r.approvals.map((a) => a.id).join(",");
           if (ids !== sig) paintAppr(r.approvals);            // not while the same cards stay: a typed code is not lost
           sig = ids;
@@ -416,7 +457,12 @@
         root.replaceChildren(h("div", { class: "jchat" }, h("p", { class: "jc-notice err", role: "alert", dir: "auto" }, word(e.code, e.message))));
       }
     })();
-    return { destroy() { alive = false; } };
+    function local(role, text) {         // phone voice: the push-to-talk exchange (it is not a chat event), drawn like a message
+      const d = bubble(role === "user" ? "user" : "assistant", text); d.classList.add("jc-local");
+      if (role !== "user") addCopy(d, text);
+      return d;
+    }
+    return { destroy() { alive = false; }, submit: (t) => submit(t), local };
   }
 
   window.JarvesChat = { mount, WORDS };

@@ -4,7 +4,7 @@ import subprocess
 from pathlib import Path
 
 import pytest
-from test_mobile_phone_e2e import _drive_setup, _grant, browser, new_page, phone, ui_pair, until  # noqa: F401
+from test_mobile_phone_e2e import _drive_setup, _grant, browser, go, new_page, phone, ui_pair, until  # noqa: F401
 
 from jarves import mobile, phone_hands_free as hf
 
@@ -42,7 +42,7 @@ def _open(browser, p):
     page = new_page(browser)
     ui_pair(page, p)
     _grant(p, page, "drive")
-    page.tap("[data-tab=drive]")
+    go(page, "drive")
     page.wait_for_selector("#hfBtn")
     return page
 
@@ -87,7 +87,7 @@ def test_leaving_the_drive_tab_ends_the_session(browser, phone):
     page.tap("#hfBtn")
     until(page, "document.querySelector('.hf-state') && document.querySelector('.hf-state').dataset.state === 'listening'")
     assert len(hf._sessions) == 1
-    page.tap("[data-tab=home]")
+    go(page, "home")
     until(page, "true")
     _gone(page)
 
@@ -110,7 +110,7 @@ def test_leaving_while_starting_never_keeps_the_mic(browser, phone, when):
     else:
         page.tap("#hfBtn")
         until(page, "window.__gum === true")
-        page.tap("[data-tab=home]")
+        go(page, "home")
     page.wait_for_timeout(2500)
     assert page.evaluate("() => !window.__hfStream || window.__hfStream.getTracks().every((x) => x.readyState === 'ended')")
     assert page.evaluate("() => window.__locks") == 0

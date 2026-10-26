@@ -207,9 +207,17 @@ def ui_pair(page, p: Phone, name="Pixel test"):
     return c
 
 
+def go(page, tab):
+    """Open a page from the side drawer (redesign #511): the menu button first when the drawer is closed."""
+    if not page.is_visible(f"[data-tab={tab}]"):
+        page.tap("#menuBtn")
+        page.wait_for_selector("#drawer:not([hidden])")
+    page.tap(f"[data-tab={tab}]")
+
+
 def say(page, text):
     """Type into the shared chat view (chatview.js) on the Chat tab and send."""
-    page.tap("[data-tab=chat]")
+    go(page, "chat")
     page.fill(".jc-in", text)
     page.tap(".jc-send")
 
@@ -314,7 +322,7 @@ def test_approvals_list_answer_typed_refused_and_switch_off(browser, phone):
     p = phone()
     page = new_page(browser)
     ui_pair(page, p)
-    page.tap("[data-tab=approvals]")
+    go(page, "approvals")
     fut = p.ask("Send test message")
     until(page, "document.querySelector('#apprList li') && document.querySelector('#apprList').textContent.includes('Send test message')")
     assert "off" in page.inner_text("#apprNote")                       # step 14 state first: disabled, no buttons
@@ -355,7 +363,7 @@ def test_push_to_talk_is_refused_without_tls(browser, phone):
     page = new_page(browser)
     ui_pair(page, p)
     assert page.evaluate("window.isSecureContext") is False             # a LAN http address, like a real phone
-    page.tap("[data-tab=voice]")
+    go(page, "voice")
     assert page.is_disabled("#ptt") and "secure (https)" in page.inner_text("#voiceNote")
     wav = b"RIFF" + b"\0" * 60
     r = page.evaluate("""async ([tok, n]) => { const r = await fetch("/api/m/voice", {method: "POST",
@@ -370,7 +378,7 @@ def test_push_to_talk_with_tls_and_a_fake_microphone(browser, phone):
     page = new_page(browser)
     ui_pair(page, p)
     assert page.evaluate("window.isSecureContext") is True
-    page.tap("[data-tab=voice]")
+    go(page, "voice")
     until(page, "!document.getElementById('ptt').disabled")
     assert "Press and hold" in page.inner_text("#voiceNote")
     page.dispatch_event("#ptt", "pointerdown")
@@ -391,7 +399,7 @@ def test_microphone_denied_explains_itself(browser, phone):
     page = new_page(browser)
     page.add_init_script("navigator.mediaDevices.getUserMedia = () => Promise.reject(new DOMException('no', 'NotAllowedError'))")
     ui_pair(page, p)
-    page.tap("[data-tab=voice]")
+    go(page, "voice")
     page.dispatch_event("#ptt", "pointerdown")
     until(page, "document.getElementById('voiceOut').textContent.includes('Microphone permission')")
     assert p.fake.wavs == []
@@ -408,7 +416,7 @@ def test_revoke_is_immediate_and_returns_to_pairing(browser, phone):
     assert p.owner("POST", f"/api/mobile/devices/{dev}/revoke", {})[0] == 200
     assert call(page, "GET", "/api/m/me", None, tok)["status"] == 401                # the very next request
     assert call(page, "POST", "/api/m/chat", {"text": "x"}, tok)["status"] == 401
-    page.tap("[data-tab=health]")                                                    # the app's next request
+    page.evaluate("document.querySelector('[data-tab=health]').click()")            # the app's next request (the chat poll may already have)
     page.wait_for_selector("#pairView:not([hidden])")
     assert token(page) is None
     page.fill("#code", p.code()["code"])                                             # a fresh pairing works again
@@ -551,8 +559,12 @@ def test_layouts_at_390px_have_no_sideways_scroll_big_targets_and_contrast(brows
     say(page, "שלום hello")
     until(page, "[...document.querySelectorAll('.jc-msg')].some(m => m.textContent.includes('echo: '))")
     audit(page, lang)
+    page.tap("#menuBtn")                                                # the side drawer (redesign #511): pages + history
+    page.wait_for_selector("#drawer:not([hidden])")
+    audit(page, lang)
+    page.tap("#drawerClose")
     for tab in ("voice", "approvals", "health"):
-        page.tap(f"[data-tab={tab}]")
+        go(page, tab)
         if tab == "approvals":
             page.wait_for_selector("#apprList button", timeout=12000)
         if tab == "health":
@@ -576,7 +588,7 @@ def test_phone_microphone_indicator_follows_the_real_microphone_and_can_stop_it(
     page.wait_for_selector("#audioBar:not([hidden])")
     until(page, "document.getElementById('audioBar').textContent.includes('Phone microphone: off')")
     assert "not sent to the cloud" in page.text_content("#audioBar") and page.locator("#audioBar.hot").count() == 0
-    page.tap("[data-tab=voice]")
+    go(page, "voice")
     until(page, "!document.getElementById('ptt').disabled")
     page.dispatch_event("#ptt", "pointerdown")
     until(page, "document.getElementById('audioBar').textContent.includes('Phone microphone: ON')")
@@ -637,7 +649,7 @@ def test_mic_setup_failure_closes_the_microphone_and_the_strip_never_says_off_wh
     page.add_init_script("window.AudioContext = function () { throw new Error('no audio context'); }; window.webkitAudioContext = window.AudioContext;")
     ui_pair(page, p)
     assert page.evaluate("typeof window.JarvesAudio === 'object'")
-    page.tap("[data-tab=voice]")
+    go(page, "voice")
     until(page, "!document.getElementById('ptt').disabled")
     page.dispatch_event("#ptt", "pointerdown")
     until(page, "document.getElementById('voiceOut').textContent.includes('Microphone permission')")
@@ -728,8 +740,8 @@ def test_goal_plan_view_pause_and_cancel_from_the_phone_and_nothing_that_starts_
     assert page.locator("#tabbtn-plans").is_hidden()                    # least privilege: no tasks scope, no tab
     assert call(page, "GET", "/api/m/plans", None, token(page))["status"] == 403
     _grant_tasks(p, page)
-    page.wait_for_selector("#tabbtn-plans:not([hidden])")
-    page.tap("[data-tab=plans]")
+    page.wait_for_selector("#tabbtn-plans:not([hidden])", state="attached")
+    go(page, "plans")
     page.wait_for_selector("#plansRoot .plan-title")
     body = page.inner_text("#plansRoot")
     assert "Tidy the notes folder" in body and "50%" in body and "1/2" in body and "ready" in body
@@ -769,7 +781,7 @@ def test_goal_plan_retry_from_the_phone_asks_first(browser, phone):
     page = new_page(browser)
     ui_pair(page, p)
     _grant_tasks(p, page)
-    page.tap("[data-tab=plans]")
+    go(page, "plans")
     page.wait_for_selector("#plansRoot button:has-text('Retry')")
     page.tap("#plansRoot button:has-text('Retry')")                     # asks first, nothing changed yet
     page.wait_for_selector("#plansRoot button:has-text('Yes, retry')")
@@ -792,8 +804,8 @@ def test_learned_preferences_view_confirm_correct_and_forget_from_the_phone(brow
     assert page.locator("#tabbtn-prefs").is_hidden()                    # least privilege: no scope, no tab
     assert call(page, "GET", "/api/m/prefs", None, token(page))["status"] == 403
     _grant(p, page, "prefs")
-    page.wait_for_selector("#tabbtn-prefs:not([hidden])")
-    page.tap("[data-tab=prefs]")
+    page.wait_for_selector("#tabbtn-prefs:not([hidden])", state="attached")
+    go(page, "prefs")
     page.wait_for_selector("#prefsRoot .pref-text")
     body = page.inner_text("#prefsRoot")
     assert "I like short answers in the morning" in body and "Play jazz while cooking" in body and "I love jazz when I cook" in body
@@ -832,7 +844,7 @@ def test_indicator_and_note_layout_at_390px_in_english_and_hebrew(browser, phone
     page.wait_for_selector(".notice", timeout=12000)
     until(page, "document.querySelector('#audioBar.hot')", 12000)
     audit(page, lang)                                                   # hot strip + a note card
-    page.tap("[data-tab=voice]")
+    go(page, "voice")
     until(page, "!document.getElementById('ptt').disabled")
     page.dispatch_event("#ptt", "pointerdown")
     page.wait_for_selector("#audioBar button")
@@ -849,7 +861,7 @@ def test_goal_plans_layout_at_390px_in_english_and_hebrew(browser, phone, lang, 
     page = new_page(browser, locale=locale)
     ui_pair(page, p)
     _grant_tasks(p, page)
-    page.tap("[data-tab=plans]")
+    go(page, "plans")
     page.wait_for_selector("#plansRoot .plan-title")
     audit(page, lang)
     page.tap("#plansRoot summary")
@@ -868,7 +880,7 @@ def test_learned_preferences_layout_at_390px_in_english_and_hebrew(browser, phon
     page = new_page(browser, locale=locale)
     ui_pair(page, p)
     _grant(p, page, "prefs")
-    page.tap("[data-tab=prefs]")
+    go(page, "prefs")
     page.wait_for_selector("#prefsRoot .pref-text")
     audit(page, lang)
     page.tap("#prefsRoot li:has-text('short') button >> nth=0")                        # open the edit form: input + buttons
@@ -911,11 +923,11 @@ def test_drive_tab_is_hidden_and_refused_until_the_owner_grants_the_scope(browse
     page = new_page(browser)
     ui_pair(page, p)
     page.wait_for_timeout(600)
-    assert page.locator("#tabbtn-drive").is_hidden()                    # least privilege: no scope, no tab
+    assert page.get_attribute("#tabbtn-drive", "hidden") is not None     # least privilege: no scope, no tab (not even in the drawer)
     assert call(page, "GET", "/api/m/drive", None, token(page))["status"] == 403
     _grant(p, page, "drive")
-    page.wait_for_selector("#tabbtn-drive:not([hidden])")
-    page.tap("[data-tab=drive]")
+    page.wait_for_selector("#tabbtn-drive:not([hidden])", state="attached")
+    go(page, "drive")
     page.wait_for_selector("#driveRoot .drive-state")
     body = page.inner_text("#driveRoot")
     assert "Drive mode" in body and "On" in body and "Waiting for when you stop: 1" in body and "whatsapp_send" in body
@@ -930,7 +942,7 @@ def test_drive_briefing_answer_and_trip_links_are_buttons_the_owner_taps(browser
     page = new_page(browser)
     ui_pair(page, p)
     _grant(p, page, "drive")
-    page.tap("[data-tab=drive]")
+    go(page, "drive")
     page.wait_for_selector("#driveRoot button:has-text('I am alone')")
     page.tap("#driveRoot button:has-text('Someone is with me')")        # the phone answers the passenger question
     page.wait_for_selector("#driveRoot li:has-text('Sunny')")
@@ -954,7 +966,7 @@ def test_drive_tab_layout_at_390px_in_english_and_hebrew(browser, phone, fake_ro
     page = new_page(browser, locale=locale)
     ui_pair(page, p)
     _grant(p, page, "drive")
-    page.tap("[data-tab=drive]")
+    go(page, "drive")
     page.wait_for_selector("#driveRoot .drive-state")
     audit(page, lang)
     page.tap("#driveRoot button.big >> nth=0")                          # the briefing answer
