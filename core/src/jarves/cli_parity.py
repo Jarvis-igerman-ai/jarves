@@ -53,7 +53,7 @@ FEATURES: dict[str, object] = {
     "morning_briefing": "jobs", "home_assistant": "home", "conversation_recall": "recall",
     "self_diagnostics_2": "health", "client_delegation": "budget",
     "whatsapp_bridge": "whatsapp", "whatsapp_send": "whatsapp", "whatsapp_archive": "whatsapp",   # SW-V4 F: jarvis whatsapp ...
-    "agent_orchestrator": "agents", "project_manager": "project",
+    "agent_orchestrator": "agents", "agent_opencode": "agents", "project_manager": "project",
     "assisted_dialing": "dial", "self_manage": "manage",
     "self_tests": "selftest", "text_chat": "chat", "setup_tour": "tour",
     "issue_reports": "issues", "web_chat": "web", "anydo": "anydo", "anydo_update": "anydo",

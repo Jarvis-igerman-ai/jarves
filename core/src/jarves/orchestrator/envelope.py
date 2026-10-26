@@ -22,14 +22,15 @@ KINDS = ("hello", "status_snapshot", "status_request", "status_response", "progr
          "approval_requested", "approval_decision", "command", "command_ack", "command_result", "completed", "error",
          "heartbeat", "goodbye", "usage")
 SEVERITIES = ("info", "notice", "warning", "critical")
-PROVIDERS = ("claude", "codex")
+PROVIDERS = ("claude", "codex", "opencode")
 STATES = ("DISCOVERED", "RUNNING", "IDLE", "WAITING_INPUT", "WAITING_APPROVAL", "PAUSED", "STOPPED", "DISCONNECTED",
           "UNKNOWN")
 LIVE_STATES = ("RUNNING", "IDLE", "WAITING_INPUT", "WAITING_APPROVAL", "PAUSED", "DISCOVERED")
 # explicit result codes (#49 section 6 + package E acceptance): each is tested and has an English + Hebrew sentence
 CODES = ("NO_LIVE_CHANNEL", "SESSION_CLOSED", "WAITING_FOR_APPROVAL", "AUTH_REQUIRED", "UNSUPPORTED_ATTACH",
          "BUDGET_REACHED", "AMBIGUOUS_SESSION", "NO_SUCH_SESSION", "NOT_ALLOWED_PROJECT", "SECOND_WRITER",
-         "HOP_LIMIT", "CORE_NOT_RUNNING", "PROVIDER_MISSING", "NOT_APPROVED", "EXPIRED", "QUEUED", "SENT", "ok")
+         "HOP_LIMIT", "CORE_NOT_RUNNING", "PROVIDER_MISSING", "NOT_APPROVED", "EXPIRED", "QUEUED", "SENT", "NOT_LOOPBACK",
+         "SERVER_ERROR", "ok")
 MAX_HOPS = 2
 DEFAULT_TTL_S = 6 * 3600
 TEXT_CAP = 1200                     # one payload string
@@ -228,6 +229,10 @@ TEXTS: dict[str, tuple[str, str]] = {
     "EXPIRED": ("The message expired before it was delivered.", "ההודעה פגה לפני שנמסרה."),
     "QUEUED": ("Queued; it will get it at its next safe stop.", "נשמר בתור; הוא יקבל את זה בעצירה הבטוחה הבאה."),
     "SENT": ("Sent to the session.", "נשלח לסשן."),
+    "NOT_LOOPBACK": ("The OpenCode server address must be this computer (127.0.0.1); I did not connect.",
+                     "כתובת שרת OpenCode חייבת להיות המחשב הזה (127.0.0.1); לא התחברתי."),
+    "SERVER_ERROR": ("The OpenCode server answered with an error or something unexpected.",
+                     "שרת OpenCode ענה בשגיאה או בתשובה לא צפויה."),
     "ok": ("Done.", "בוצע."),
 }
 
