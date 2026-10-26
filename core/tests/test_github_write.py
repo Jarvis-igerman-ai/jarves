@@ -257,3 +257,25 @@ def test_payload_changed_during_approval_is_refused(tmp_path):
         return await orig(prompt, **kw)
     ap.ask = mutate
     assert run(w.execute(a, origin="user")).code == "GITHUB_WRITE_DENIED"
+
+
+def test_batch_slot_is_released_when_a_granted_action_is_refused_later(tmp_path):
+    """#497: a granted action refused by a gate (or the duplicate guard) closes its reserved slot at once."""
+    w, ap, _ = mk(tmp_path, limit=(3, 600.0))
+    acts = [act(payload={"title": f"t{i}"}) for i in range(3)]
+    assert run(w.approve_batch(acts, origin="user")).ok and w._used() == 3
+    w.feats.on = False                                                         # switch turned off after the approval
+    for a in acts:
+        assert run(w.execute(a, origin="user")).code == "GITHUB_WRITE_OFF"
+    assert w._used() == 0                                                      # every reserved slot is free again
+
+
+def test_identical_action_in_flight_is_refused_before_a_second_popup(tmp_path):
+    """#497: the duplicate check runs under the reservation lock, so two identical calls cannot both reach the popup."""
+    w, ap, _ = mk(tmp_path)
+    a = act()
+    first = w._reserve([a], "user", dup_check=True)
+    assert isinstance(first, list)                                             # the first call holds the slot (owner being asked)
+    r = run(w.execute(a, origin="user"))
+    assert r.code == "GITHUB_WRITE_DUPLICATE" and "already waiting" in r.message and ap.asked == []
+    assert isinstance(w._reserve([act(payload={"title": "other"})], "user", dup_check=True), list)   # a different action is fine
