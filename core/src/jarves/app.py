@@ -1541,12 +1541,23 @@ class Core:
         await self.link.broadcast("status", self.snapshot())
         for task in (self.tasks.unannounced() if self.tasks is not None else []):
             self._spawn(self._task_finished(task))     # finished while no conversation was open
+        if ack and greeting and hasattr(live, "wait_ready"):
+            self._spawn(self._wake_greeting_watch(live))     # nudge/retry also for wake sessions (nobody awaits them)
         if ack:
             await self.link.send_face("assistant.activity", {"kind": "done", "text": "", "detail": ""})
             self._spawn(self._chime("ready"))
             await self.set_face("listening")
         if not hold_output and self.cfg.voice.activation == "conversation":
             self._startup_stage("running", "Voice ready")
+
+    async def _wake_greeting_watch(self, live) -> None:
+        try:
+            await live.wait_ready()
+        except asyncio.CancelledError:
+            raise
+        except Exception as e:
+            logs.warn("voice", "LIVE_GREETING_MISSED", "no greeting audio on a wake session; continuing without it",
+                      error_type=type(e).__name__)
 
     async def _tasks_changed(self, views: list[dict]) -> None:
         """Background task list for the screen (tasks.py docstring: message shape)."""
@@ -1975,7 +1986,15 @@ class Core:
                 self._spawn(self._chime("wake"))
                 await self.set_face("listening")
                 await self.link.send_face("assistant.activity", {"kind": "connecting", "text": "מתחבר…", "detail": ""})
-                await self._start_live(ack=True)
+                # #179: every wake session opens with a short spoken cue (the greeting was once per Core start only)
+                await self._start_live(ack=True, greeting=self.wake_greeting())
+
+    def wake_greeting(self) -> str | None:
+        """Short cue for a wake-opened live session; None when the greeting feature is off."""
+        if not self.cfg.voice.greeting:
+            return None
+        self._greeted = True              # the wake session greets: no second start-greeting when the face connects later
+        return "אני מקשיב."
 
     # ------------------------------------------------------------------ feature switches (features.py)
     def _health_components(self) -> dict:
