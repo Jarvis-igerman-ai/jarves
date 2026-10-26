@@ -15,6 +15,7 @@ import json
 import sys
 
 from . import clilang
+from . import features as feat
 
 
 def _budget(cfg, home):
@@ -114,7 +115,11 @@ def cmd_budget(a, cfg, home) -> int:
         if a.mode:
             from .cli import _cli_features
             f = _cli_features(cfg, home)
-            f.set("client_delegation", a.mode == "client", by="cli")
+            try:
+                f.set("client_delegation", a.mode == "client", by="cli")
+            except feat.BetaLocked:                # #469: one plain message, no traceback
+                print(clilang.fmt(feat.BETA_MSG_HE, feat.BETA_MSG), file=sys.stderr)
+                return 2
             print(clilang.fmt(f"מצב העברה: {a.mode} (מהשיחה הבאה)", f"delegation mode: {a.mode} (from the next conversation)"))
         if not upd and not a.mode:
             print(clilang.fmt("לא ניתן מה לשנות (ראו --help)", "nothing to change (see --help)"), file=sys.stderr)

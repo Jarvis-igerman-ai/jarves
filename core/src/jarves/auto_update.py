@@ -98,7 +98,10 @@ def choose_channel(cfg, home: Path, channel: str, auto: bool | None = None) -> d
     from . import features
     updates.set_channel(home, cfg, channel)                        # also marks the choice as made
     if auto is not None and auto != (channel == "beta"):
-        features.Features(cfg, home).set(FEATURE, bool(auto), by="user")
+        try:
+            features.Features(cfg, home).set(FEATURE, bool(auto), by="user")
+        except features.BetaLocked:                                # #469: the channel stays chosen; auto-update stays off
+            pass
     mark_channel_chosen(home)
     return {"channel": channel, "auto_update": is_enabled(cfg, home)}
 

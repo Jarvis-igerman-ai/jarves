@@ -103,9 +103,15 @@ def enable_reading(home: Path, *, by: str, features=None, cfg=None) -> dict:
     """The ONE 'yes, switch on read-only' backend (dashboard page, Connect row, `jarvis whatsapp setup`): bridge mode
     read AND the `whatsapp_bridge` feature switch, through the same `switch()` as `jarvis features on`. Only called
     after the owner's explicit yes. Never touches `whatsapp_send`; sending stays off."""
-    from .features import switch
+    from .features import BETA_MSG, BetaLocked, switch
+    feats = features or _features(home, cfg)
+    if feats.locked(wab.FEATURE):                       # a locked beta feature: nothing half-done, one plain message (#469)
+        raise wab.BridgeError(BetaLocked.code, BETA_MSG, 403)
     r = set_mode(home, "read", by=by)
-    s = switch(features or _features(home, cfg), wab.FEATURE, True, by=by)
+    try:
+        s = switch(feats, wab.FEATURE, True, by=by)
+    except BetaLocked as e:
+        raise wab.BridgeError(e.code, BETA_MSG, 403) from e
     logs.info("whatsapp", "WA_READING_SWITCH_ON", "WhatsApp reading switch turned on with read-only mode", by=by)
     return {**r, "mode": r.get("mode", "read"), "feature": wab.FEATURE, "feature_on": bool(s.get("enabled")),
             "message": READ_ON_EN, "message_he": READ_ON_HE}
@@ -500,6 +506,7 @@ def _arch_enabled(cfg, home) -> bool:
 
 def _archive_cli(home: Path, cfg, a, args: list[str]) -> int:
     from .cli import _cli_features
+    from .features import BETA_MSG, BETA_MSG_HE, BetaLocked
     op = args[0] if args else "status"
     f = _cli_features(cfg, home)
     if op not in ("on", "off", "status", "sync", "wipe"):
@@ -510,7 +517,11 @@ def _archive_cli(home: Path, cfg, a, args: list[str]) -> int:
         if not a.yes and not _confirm(clilang.fmt("להפעיל את הארכיון? [y/N] ", "Turn the archive on? [y/N] ")):
             print("not changed")
             return 1
-        st = f.set(arc.FEATURE, True, by="cli")
+        try:
+            st = f.set(arc.FEATURE, True, by="cli")
+        except BetaLocked:                           # #469: one plain message, no traceback
+            print(clilang.fmt(BETA_MSG_HE, BETA_MSG), file=sys.stderr)
+            return 2
         print(f"archive: {'on' if st.get('enabled') else 'off'}"
               + ("" if st.get("active") else f" (not ready: {st.get('reason')})"))
         print("Choose how long: jarvis whatsapp retention 90|year|forever")
@@ -908,10 +919,13 @@ def dashboard_routes(register) -> None:
                              archive_on=_ctx_features(ctx).enabled(arc.FEATURE), by="dashboard")
 
     def archive_(ctx, b):
-        from .features import _ctx_features, switch
+        from .features import BETA_MSG, BetaLocked, _ctx_features, switch
         op = str(b.get("op") or "")
         if op in ("on", "off"):
-            st = switch(_ctx_features(ctx), arc.FEATURE, op == "on", by="dashboard")
+            try:
+                st = switch(_ctx_features(ctx), arc.FEATURE, op == "on", by="dashboard")
+            except BetaLocked as e:                     # #469: the plain beta message, not a raw error
+                raise BridgeError(e.code, BETA_MSG, 403) from e
             return {"ok": True, "feature": st, "archive": arc.get(ctx.home).stats()}
         if op == "wipe":
             if b.get("confirm") is not True:

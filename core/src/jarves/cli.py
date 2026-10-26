@@ -502,7 +502,7 @@ def cmd_talk(a, cfg, home) -> int:
 
 def cmd_autostart(a, cfg, home) -> int:
     """jarvis autostart on | off | status: start JARVES invisibly at login (the user's choice; default off)."""
-    from .features import Features
+    from .features import BETA_MSG, BETA_MSG_HE, BetaLocked, Features
     from .runtime import autostart as au
     import jarves.runtime  # noqa: F401  (registers the autostart feature)
     ad = au.adapter()
@@ -522,7 +522,12 @@ def cmd_autostart(a, cfg, home) -> int:
         return 2
     feats, want = Features(cfg, home), a.action == "on"
     if feats.enabled("autostart") != want:       # an unchanged switch is not rewritten (the uninstaller runs `off`: user data stays byte-for-byte)
-        feats.set("autostart", want, by="cli")   # the dashboard shows the same choice
+        try:
+            feats.set("autostart", want, by="cli")   # the dashboard shows the same choice
+        except BetaLocked:                       # #469: one plain message, no traceback
+            from . import clilang
+            print(clilang.fmt(BETA_MSG_HE, BETA_MSG), file=sys.stderr)
+            return 2
     return 0
 
 

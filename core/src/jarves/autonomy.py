@@ -77,7 +77,11 @@ def _feature_apply(a: "Autonomy", p: dict) -> tuple[str, dict]:
 
 
 def _feature_revert(a: "Autonomy", r: dict) -> str:
-    a.features.set(r["feature"], bool(r["was"]), by="autonomy-revert")
+    from .features import BETA_MSG, BetaLocked
+    try:
+        a.features.set(r["feature"], bool(r["was"]), by="autonomy-revert")
+    except BetaLocked as e:                     # #469: the plain beta message instead of a raw PermissionError
+        raise ValueError(BETA_MSG) from e
     return f"feature {r['feature']} back {'on' if r['was'] else 'off'}"
 
 

@@ -522,7 +522,11 @@ def cmd_drive(a, cfg, home) -> int:
     def p(code: str, **kw) -> None:
         print(clilang.fmt(say(code, "he", **kw), say(code, "en", **kw)))
     if act in ("on", "off"):
-        f.set(FEATURE, act == "on", by="cli")
+        try:
+            f.set(FEATURE, act == "on", by="cli")
+        except feat.BetaLocked:                     # #469: one plain message, no traceback
+            print(clilang.fmt(feat.BETA_MSG_HE, feat.BETA_MSG), file=sys.stderr)
+            return 2
         if act == "off" and q.items():
             p("DRIVE_STOPPED", n=len(q.items()))
     if act in ("queue", "stopped"):

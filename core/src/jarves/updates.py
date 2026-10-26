@@ -357,7 +357,10 @@ def set_channel(home: Path, cfg, channel: str) -> str:
         raise UpdateError("UPDATE_BAD_CHANNEL", f"channel must be one of {', '.join(CHANNELS)}")
     from . import features
     from .config import Config
-    features.Features(cfg if cfg is not None else Config(), home).set("beta_channel", channel == "beta")
+    try:
+        features.Features(cfg if cfg is not None else Config(), home).set("beta_channel", channel == "beta")
+    except features.BetaLocked as e:                       # #469: one plain message, no traceback
+        raise UpdateError(e.code, f"{features.BETA_MSG_HE} / {features.BETA_MSG}") from e
     logs.info("updates", "UPDATE_CHANNEL_SET", "update channel changed", channel=channel)
     try:
         from . import auto_update

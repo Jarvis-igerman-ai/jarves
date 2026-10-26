@@ -409,7 +409,12 @@ def cmd_prefs(a, cfg, home) -> int:
             from .cli import _cli_features
             from .preferences import FEATURE, prompt_block
             if a.state in ("on", "off"):
-                switch(_cli_features(cfg, home), FEATURE, a.state == "on", by="cli")
+                from .features import BETA_MSG, BETA_MSG_HE, BetaLocked
+                try:
+                    switch(_cli_features(cfg, home), FEATURE, a.state == "on", by="cli")
+                except BetaLocked:                      # #469: one plain message, no traceback
+                    print(clilang.fmt(BETA_MSG_HE, BETA_MSG), file=sys.stderr)
+                    return 2
             on = _cli_features(cfg, home).enabled(FEATURE)
             print(clilang.fmt("שימוש בהעדפות בשיחות: " + ("פעיל" if on else "כבוי"),
                               "preferences in conversations: " + ("on" if on else "off")))

@@ -901,7 +901,10 @@ def make_skill(features: feat.Features, gstate: GuideState, registry=None, *, op
                 return ToolResult(True, f"בסדר, אזכיר שוב בעוד {a.days:g} ימים.", {"guide": g.id, "days": a.days})
 
             async def stop(a: OnArgs):
-                features.set("proactive_help", bool(a.on), by="voice")     # OFF always allowed; ON is low risk
+                try:
+                    features.set("proactive_help", bool(a.on), by="voice")     # OFF always allowed; ON is low risk
+                except feat.BetaLocked as e:                                   # #469: honest beta message
+                    return ToolResult(False, f"{feat.BETA_MSG_HE} / {feat.BETA_MSG}", {"proactive_help": False}, e.code)
                 return ToolResult(True, "בסדר, לא אציע יותר הגדרות מעצמי." if not a.on else "אחזור להציע מדי פעם.",
                                   {"proactive_help": bool(a.on)})
 
@@ -1060,7 +1063,10 @@ def api_guide_step(ctx, m, body):
         gs.set_progress(g.id, max(gs.progress(g.id), i + 1))
         return 200, {"done": True, "progress": gs.progress(g.id)}
     if kind == "feature_on" and arg in feat.CATALOG:
-        return 200, {"feature": f.set(arg, True, by="dashboard")}
+        try:
+            return 200, {"feature": f.set(arg, True, by="dashboard")}
+        except feat.BetaLocked as e:                       # #469: the plain beta message, not a 500
+            return 403, {"error": feat.BETA_MSG, "error_he": feat.BETA_MSG_HE, "code": e.code}
     if kind == "set_budget":
         return 200, {"api_monthly_budget_usd": set_budget(ctx.home, (body or {}).get("usd") or arg)}
     if kind == "test":

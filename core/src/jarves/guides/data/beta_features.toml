@@ -34,6 +34,10 @@ he = "ערוץ העדכונים (jarvis update --channel beta) הוא עניין
 en = "The update channel (jarvis update --channel beta) is separate: it decides which builds of the software you get, not which features are active."
 action = "open:#/updates"
 
+[[steps]]
+he = "למפעילים ותמיכה: משתנה הסביבה JARVES_BETA_FEATURES=1 מפעיל את המתג רק כשעוד לא נרשמה בחירה ואין התקנה קיימת."
+en = "For installers and support: the environment variable JARVES_BETA_FEATURES=1 turns the switch on only when no choice is recorded yet and there is no existing install."
+
 [[problems]]
 he = "כתוב 'יכולת בטא: קודם מפעילים את יכולות הבטא'"
 en = "It says 'beta feature: turn on beta features first'"

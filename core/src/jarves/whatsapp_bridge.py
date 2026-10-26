@@ -57,6 +57,7 @@ PHONE_STALE_DAYS = 10
 TAINT_LABEL = ("הודעת וואטסאפ", "a WhatsApp message")
 
 HE = {   # Hebrew answers for bridge codes (fixed strings)
+    "BETA_LOCKED": "יכולת בטא: קודם מפעילים את יכולות הבטא",
     "WA_BRIDGE_DOWN": "גשר הוואטסאפ לא פועל. במחשב: jarvis whatsapp start.",
     "WA_NOT_INSTALLED": "רכיב הגשר של וואטסאפ לא מותקן במחשב הזה. לוחצים על הכפתור \"הורדת גשר הוואטסאפ\" (jarvis whatsapp install), או מתקינים מחדש את JARVES, או בונים אותו מהקוד (scripts/build_whatsapp_bridge.ps1).",
     "WA_NOT_SET_UP": "וואטסאפ עוד לא מחובר. במחשב: jarvis whatsapp link.",

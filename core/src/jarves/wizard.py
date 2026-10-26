@@ -821,6 +821,8 @@ def dashboard_routes(register) -> None:
             return 200, switch_on(ctx.home, _fx(ctx), m.group(1), bool((body or {}).get("confirmed")))
         except KeyError:
             return 404, {"error": "no such topic"}
+        except feat.BetaLocked as e:                 # #469: the plain beta message (EN + HE)
+            return 403, {"error": feat.BETA_MSG, "error_he": feat.BETA_MSG_HE, "code": e.code}
         except PermissionError as e:
             return 403, {"error": str(e)}
 

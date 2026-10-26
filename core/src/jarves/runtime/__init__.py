@@ -337,7 +337,10 @@ def api_runtime_set(ctx, m, body):
         if not isinstance(body["autostart"], bool):
             return 400, {"error": "autostart must be true or false"}
         f = feat.Features(ctx.cfg, ctx.home)
-        f.set("autostart", body["autostart"], by="dashboard")
+        try:
+            f.set("autostart", body["autostart"], by="dashboard")
+        except feat.BetaLocked as e:                       # #469: the plain beta message, not a 500
+            return 403, {"error": feat.BETA_MSG, "error_he": feat.BETA_MSG_HE, "code": e.code}
         from . import autostart as au
         a = au.adapter()
         try:

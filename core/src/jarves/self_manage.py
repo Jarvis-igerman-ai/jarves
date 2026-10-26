@@ -681,7 +681,10 @@ class SelfManager:
                             kind=r.get("kind") or "fact")
         elif kind == "feature":
             if u.get("explicit"):
-                feat.switch(self.features, u["id"], bool(u["prev"]), by=by)
+                try:
+                    feat.switch(self.features, u["id"], bool(u["prev"]), by=by)
+                except feat.BetaLocked as e:             # #469: the plain beta message instead of a raw error
+                    raise Refused(e.code, f"{feat.BETA_MSG_HE} / {feat.BETA_MSG}") from e
             else:
                 self.features.reset(u["id"])
         elif kind == "skill":
