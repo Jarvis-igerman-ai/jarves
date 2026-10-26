@@ -1,7 +1,7 @@
 """One simple release flow (docs/plans/SIMPLE_RELEASES_2026-10-26.md): `jarvis release status` and `jarvis release sheet`.
 
-`status` runs every automatable gate (main green, nightly fresh and green, open P0-P2 issues from live labels, the owner
-sheet, the SIGNED file) and says exactly what remains for the owner. `sheet` writes the reduced owner sheet: a tiny smoke
+`status` runs every automatable gate (main green, open P0-P2 issues from live labels, the owner
+sheet: its one signature) and says exactly what remains for the owner. `sheet` writes the reduced owner sheet: a tiny smoke
 set stays `pending`, every other row is recorded `accepted-blocked` with an "accepted by automation" note naming its
 evidence, so the existing gate (release_gate.py) and sign-off file format work unchanged. Pure functions; the network is
 injected (`fetch`), so the tests need none. Standard library only.
@@ -13,13 +13,12 @@ import os
 import re
 import urllib.request
 from dataclasses import dataclass
-from datetime import date, datetime, timedelta, timezone
+from datetime import date, datetime
 from pathlib import Path
 
 from . import release_signoff as so
 
 REPO = "Jarvis-igerman-ai/jarves"
-NIGHT_MAX_AGE = timedelta(days=2)
 _LATER = re.compile(r"(?i)^(enhancement|v[5-9])$")
 AUTOMATION_NOTE = "accepted by automation: {ev}"
 
@@ -34,7 +33,7 @@ SMOKE = (
 )
 SMOKE_IDS = tuple(s[0] for s in SMOKE)
 EVIDENCE = ("CI jarves-checks on main (tests, guides, CLI parity, dashboard in a real browser, installer install/upgrade/"
-            "uninstall smoke) and the latest nightly")
+            "uninstall smoke)")
 
 
 @dataclass
@@ -60,20 +59,6 @@ def check_main(runs: list[dict], head: str | None) -> Check:
     return Check("main green", ok, f"jarves-checks {str(last.get('head_sha', ''))[:10]}: {last.get('conclusion')}")
 
 
-def check_nightly(runs: list[dict], now: datetime | None = None) -> Check:
-    now = now or datetime.now(timezone.utc)
-    done = [r for r in runs if r.get("status", "completed") == "completed"]
-    if not done:
-        return Check("nightly green", False, "no completed nightly run; run the nightly workflow on main")
-    last = max(done, key=lambda r: _when(r["created_at"]))
-    day = _when(last["created_at"]).date()
-    if last.get("conclusion") != "success":
-        return Check("nightly green", False, f"{day} {last.get('conclusion')}")
-    if now - _when(last["created_at"]) > NIGHT_MAX_AGE:
-        return Check("nightly green", False, f"latest green nightly is from {day}; run a fresh one")
-    return Check("nightly green", True, f"{day} success")
-
-
 def check_issues(issues: list[dict]) -> Check:
     bad = []
     for i in issues:
@@ -81,7 +66,7 @@ def check_issues(issues: list[dict]) -> Check:
             continue
         labels = [str(l.get("name", "")) if isinstance(l, dict) else str(l) for l in i.get("labels", [])]
         sev = next((l.upper() for l in labels if re.fullmatch(r"(?i)P[0-2]", l)), None)
-        if sev and not any(_LATER.match(l) for l in labels):
+        if sev and not any(_LATER.match(l) for l in labels) or any(l.lower() == "bug" for l in labels):
             bad.append(f"#{i.get('number')} {sev}")
     return Check("zero open P0-P2", not bad, "none open" if not bad else "open: " + ", ".join(bad))
 
@@ -99,23 +84,17 @@ def check_sheet(root: Path, version: str) -> Check:
     return Check("owner sheet", True, f"signed, beta {sh.beta}")
 
 
-def check_signed(root: Path, version: str) -> Check:
-    p = Path(root) / "docs" / "release" / f"SIGNED_{version}"
-    return Check("SIGNED file", p.is_file(), "present" if p.is_file() else f"missing docs/release/SIGNED_{version}")
-
-
 def collect(root: Path, version: str, fetch=None, head: str | None = None, now: datetime | None = None) -> list[Check]:
-    """`fetch(kind)` returns API-shaped lists for 'checks', 'nightly', 'issues' (default: GitHub)."""
+    """`fetch(kind)` returns API-shaped lists for 'checks', 'issues' (default: GitHub)."""
     fetch = fetch or github_fetch
     out: list[Check] = []
     for name, fn in (("main green", lambda: check_main(fetch("checks"), head)),
-                     ("nightly green", lambda: check_nightly(fetch("nightly"), now)),
                      ("zero open P0-P2", lambda: check_issues(fetch("issues")))):
         try:
             out.append(fn())
         except Exception as e:                                    # network or API trouble is a TODO, never a pass
             out.append(Check(name, False, f"could not read GitHub ({type(e).__name__})"))
-    out += [check_sheet(root, version), check_signed(root, version)]
+    out.append(check_sheet(root, version))
     return out
 
 
@@ -125,7 +104,7 @@ def remaining(checks: list[Check]) -> list[str]:
     for c in checks:
         if c.ok:
             continue
-        who = "you" if c.name in ("owner sheet", "SIGNED file") else "CI / agents"
+        who = "you" if c.name == "owner sheet" else "CI / agents"
         todo.append(f"[{who}] {c.name}: {c.detail}")
     return todo
 
@@ -148,7 +127,7 @@ def reduced_sheet(version: str, full: so.Sheet | None = None) -> so.Sheet:
             rows.append(so.Row(r.id, r.area, r.todo, r.expected, "accepted-blocked", AUTOMATION_NOTE.format(ev=EVIDENCE)))
     else:
         rows.append(so.Row("A1", "Automation", "Everything that changed since the last stable (changelog items, guides, "
-                           "dashboard pages, installer, approvals logic)", "Proven by CI and the nightly",
+                           "dashboard pages, installer, approvals logic)", "Proven by CI",
                            "accepted-blocked", AUTOMATION_NOTE.format(ev=EVIDENCE)))
     intro = (f"Reduced owner sheet: {len(SMOKE)} smoke rows on your PC; the other rows are accepted by automation with "
              "their evidence. Install the LATEST beta first, then sign off.")
@@ -177,8 +156,6 @@ def github_fetch(kind: str) -> list[dict]:
     base = f"https://api.github.com/repos/{REPO}"
     if kind == "checks":
         return get(f"{base}/actions/workflows/jarves-checks.yml/runs?per_page=30&branch=main&event=push&status=completed")["workflow_runs"]
-    if kind == "nightly":
-        return get(f"{base}/actions/workflows/nightly.yml/runs?per_page=10&branch=main&status=completed")["workflow_runs"]
     out: list[dict] = []
     for label in ("P0", "P1", "P2"):
         out += get(f"{base}/issues?state=open&labels={label}&per_page=100")

@@ -11,22 +11,18 @@ from jarves.config import Config
 NOW = datetime(2026, 10, 26, 12, 0, tzinfo=timezone.utc)
 SHA = "a" * 40
 GREEN = {"head_sha": SHA, "conclusion": "success", "status": "completed", "event": "push", "created_at": "2026-10-26T10:00:00Z"}
-NIGHT = {"conclusion": "success", "status": "completed", "created_at": "2026-10-26T01:00:00Z"}
 
 
-def fetcher(checks=(GREEN,), nightly=(NIGHT,), issues=()):
-    data = {"checks": list(checks), "nightly": list(nightly), "issues": list(issues)}
+def fetcher(checks=(GREEN,), issues=()):
+    data = {"checks": list(checks), "issues": list(issues)}
     return lambda kind: data[kind]
 
 
-def test_main_and_nightly():
+def test_main_green_and_no_nightly_check():
     assert rf.check_main([GREEN], SHA).ok
     assert not rf.check_main([{**GREEN, "conclusion": "failure"}], SHA).ok
     assert not rf.check_main([GREEN], "b" * 40).ok
-    assert rf.check_nightly([NIGHT], NOW).ok
-    assert not rf.check_nightly([{**NIGHT, "created_at": "2026-10-20T01:00:00Z"}], NOW).ok
-    assert not rf.check_nightly([{**NIGHT, "conclusion": "failure"}], NOW).ok
-    assert not rf.check_nightly([], NOW).ok
+    assert not hasattr(rf, "check_nightly")
 
 
 def test_issues_use_live_labels_only():
@@ -68,7 +64,7 @@ def test_write_sheet_refuses_to_clobber_results(tmp_path):
 def test_status_lists_what_remains_then_ready(tmp_path):
     checks = rf.collect(tmp_path, "4.1.0", fetch=fetcher(), head=SHA, now=NOW)
     todo = rf.remaining(checks)
-    assert [c.name for c in checks if c.ok] == ["main green", "nightly green", "zero open P0-P2"]
+    assert [c.name for c in checks if c.ok] == ["main green", "zero open P0-P2"]
     assert any("owner sheet" in t and t.startswith("[you]") for t in todo)
     assert "## What remains" in rf.report("4.1.0", checks, today="2026-10-26")
     rf.write_sheet(tmp_path, "4.1.0")
@@ -78,7 +74,6 @@ def test_status_lists_what_remains_then_ready(tmp_path):
     sh.sign("4.1.0-beta.3", SHA, today="2026-10-26")
     so.save(tmp_path, sh)
     (tmp_path / "docs" / "release").mkdir(parents=True)
-    (tmp_path / "docs" / "release" / "SIGNED_4.1.0").write_text("owner: x\n")
     assert rf.remaining(rf.collect(tmp_path, "4.1.0", fetch=fetcher(), head=SHA, now=NOW)) == []
 
 
@@ -86,7 +81,7 @@ def test_network_failure_is_a_todo_never_a_pass(tmp_path):
     def boom(kind):
         raise OSError("offline")
     checks = rf.collect(tmp_path, "4.1.0", fetch=boom, now=NOW)
-    assert not any(c.ok for c in checks[:3])
+    assert not any(c.ok for c in checks[:2])
 
 
 def test_cli_sheet_and_status(tmp_path, home, monkeypatch, capsys):
