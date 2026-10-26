@@ -135,7 +135,8 @@
       pv.msg && REFUSAL[pv.msg] ? line(t2(REFUSAL[pv.msg])) : null);
     const e = v.error;
     const prov = v.provider || {};
-    $m.replaceChildren(
+    // replaceChildren turns a null argument into the visible text "null" (#355): drop the empty ones
+    $m.replaceChildren(...[
       el("div", { class: "card" },
         el("div", { class: "row", style: "align-items:center;gap:10px;flex-wrap:wrap" },
           pill(st[0], tx(st[1], st[2])), el("strong", { dir: "auto" }, tx(st[3], st[4]))),
@@ -152,7 +153,7 @@
       err ? el("div", { class: "card", role: "alert" }, err) : null,
       tests, preview,
       line(tx("מילות הפעלה: \"מה אתה רואה\", \"מה אני מחזיק\", \"תקרא את זה\". החיישן נפתח רק אז.",
-        "Say: \"what do you see\", \"what am I holding\", \"read this\". The sensor opens only then.")));
+        "Say: \"what do you see\", \"what am I holding\", \"read this\". The sensor opens only then."))].filter((n) => n));
   }
 
   async function refresh() {
