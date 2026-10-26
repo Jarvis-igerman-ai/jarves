@@ -1,0 +1,66 @@
+order = 75
+category = "everyday"
+features = ["task_triage"]
+suggest = false
+aliases = ["משימות מהודעות", "משימות מוואטסאפ", "מה אני צריך לעשות", "tasks from messages", "triage", "what should I do"]
+links = ["smart_chat", "anydo"]
+error_codes = ["TRIAGE_TOO_MANY", "TRIAGE_NONE", "UI_ACTION_STALE", "UI_ACTION_EXPIRED"]
+title_he = "משימות מההודעות"
+title_en = "Tasks from messages"
+what_he = "אחרי שביקשתם מג'ארביס לקרוא הודעות וואטסאפ, אפשר לומר \"תעשה מזה משימות\". ג'ארביס מציע עד 10 משימות אפשריות (לא מאושרות), כרטיס אחד בכל פעם: הוסיפו, ערכו את השם, או דלגו. משימה שנראית כמו משימה שכבר ב-Any.do או כפולה בקבוצה מסומנת מראש לדילוג. בסוף יש אישור אחד עם הכותרות המדויקות, ורק אחריו המשימות נכנסות ל-Any.do. משימה שדילגתם עליה מוסתרת 90 יום וניתנת לשחזור."
+what_en = "After you asked JARVES to read WhatsApp messages you can say \"make tasks from these\". JARVES proposes up to 10 possible tasks (not confirmed), one card at a time: Add, Edit the title, or Skip. A task that looks like one already in Any.do, or a repeat inside the batch, is preset to Skip. At the end there is ONE approval with the exact titles, and only after it do the tasks go to Any.do. A task you skipped stays hidden for 90 days and can be restored."
+say = [["תעשה מההודעות האלה משימות", "Make tasks from these messages"], ["מה אני צריך לעשות מההודעות?", "What should I do from these messages?"]]
+expect_he = "כרטיסים בשיחה בדשבורד במחשב (בטרמינל: רשימה ממוספרת, מקלידים 1,3 או all). בכל כרטיס כתוב מאיפה הוא ומתי, בלי טקסט ההודעה. זה פועל רק כש-Any.do מחובר והתכונה דלוקה (היא בטא וכבויה כברירת מחדל)."
+expect_en = "Cards in the dashboard chat on the computer (in the terminal: a numbered list, type 1,3 or all). Each card shows where and when it is from, without the message text. It works only when Any.do is connected and the feature is on (it is beta and off by default)."
+test_he = "בקשו ג'ארביס לקרוא הודעות, ואז \"תעשה מזה משימות\". עברו על הכרטיסים עם המקלדת (Tab, Enter, Escape בעריכה), שלחו, ובדקו שהאישור מציג בדיוק את הכותרות שבחרתם."
+test_en = "Ask JARVES to read messages, then \"make tasks from these\". Go through the cards with the keyboard (Tab, Enter, Escape while editing), send, and check that the approval shows exactly the titles you chose."
+cost_he = "חינם. ג'ארביס כבר קרא את ההודעות ואין שליחה חדשה החוצה."
+cost_en = "Free. JARVES already read the messages, and nothing new is sent out."
+privacy_he = "ביומנים נרשמים רק מספרים וקודים, בלי כותרות או טקסט הודעות. המודל לא מקבל בחזרה את הכותרות כשהרשימה באה מהודעות של אחרים. הזיכרון של משימות שדילגתם עליהן שומר רק גיבוב, בלי כותרת."
+privacy_en = "Logs hold counts and codes only, never titles or message text. The model does not get the titles back when the list came from other people's messages. The memory of skipped tasks keeps only a hash, no title."
+
+[parity.features]
+task_triage = "tasks"
+
+[parity.tool_groups]
+triage = "tasks"
+
+[[steps]]
+he = "הפעילו את התכונה: jarvis features on task_triage (דורש Any.do מחובר: jarvis anydo start)."
+en = "Switch the feature on: jarvis features on task_triage (needs Any.do connected: jarvis anydo start)."
+
+[[steps]]
+he = "בקשו מג'ארביס לקרוא הודעות, ואז אמרו \"תעשה מזה משימות\"."
+en = "Ask JARVES to read messages, then say \"make tasks from these\"."
+
+[[steps]]
+he = "בכל כרטיס: הוסיפו, ערכו את השם, או דלגו. בסוף לחצו \"שלחו את הבחירה\" ואשרו או דחו את הבקשה. דחייה לא משנה כלום."
+en = "On each card: Add, Edit the title, or Skip. At the end press \"Send my choices\" and approve or deny. Denying changes nothing."
+
+[[steps]]
+he = "לראות או לשחזר משימות שדילגתם עליהן: jarvis tasks skipped list, ואז jarvis tasks skipped restore <מזהה או all>."
+en = "To see or restore skipped tasks: jarvis tasks skipped list, then jarvis tasks skipped restore <id or all>."
+
+[[problems]]
+he = "כתוב שאי אפשר ליצור משימות"
+en = "It says tasks cannot be created"
+fix_he = "בדקו ש-Any.do מחובר (jarvis anydo status) ושהתכונה דלוקה. הכרטיסים עובדים גם בלי Any.do, אבל ההוספה לא."
+fix_en = "Check that Any.do is connected (jarvis anydo status) and that the feature is on. The cards work without Any.do, but adding does not."
+
+[[problems]]
+he = "הכרטיסים פגו או \"כבר נשלחו\""
+en = "The cards expired or were \"already sent\""
+fix_he = "הכרטיסים תקפים כחצי שעה ונשלחים פעם אחת. בקשו מג'ארביס לעשות משימות מההודעות שוב."
+fix_en = "Cards work for about half an hour and are sent once. Ask JARVES to make tasks from the messages again."
+
+[[problems]]
+he = "משימה לא מוצעת שוב"
+en = "A task is not offered again"
+fix_he = "כנראה דילגתם עליה: היא מוסתרת 90 יום. שחזרו אותה עם jarvis tasks skipped restore."
+fix_en = "You probably skipped it: it is hidden for 90 days. Restore it with jarvis tasks skipped restore."
+
+[platform]
+windows = "implemented_unverified"
+windows_note_en = "tested with fakes and a headless browser only; never used with a real WhatsApp or Any.do account"
+pi = "implemented_unverified"
+pi_note_en = "same code; not run on a Raspberry Pi"

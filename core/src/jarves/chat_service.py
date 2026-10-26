@@ -215,7 +215,7 @@ class ChatService:
             await self.send(client, "chat.error", {"id": tid, "code": "CORE_STOPPING", "message": "shutting down"})
             return
         try:
-            taken = self.blocks.take(p.get("block"), p.get("selected"))
+            taken = self.blocks.take(p.get("block"), p.get("selected"), p.get("edits"), p.get("skipped"))
         except ub.ActionError as e:
             logs.warn("ui_blocks", "UI_ACTION_REFUSED", "ui action refused", reason=e.code)
             await self.send(client, "chat.error", {"id": tid, "code": e.code, "message": "that selection was refused"})

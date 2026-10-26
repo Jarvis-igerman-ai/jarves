@@ -203,11 +203,73 @@
       u.msg.textContent = state === "used" ? tx("נשלח. ממתין לאישור שלכם.", "Sent. Waiting for your approval.")
         : state === "expired" ? tx("הרשימה פגה. בקשו רשימה חדשה.", "This list has expired. Ask for a new one.") : "";
     }
+    // #446 (S3): candidate tasks from messages, one card at a time. Add / Edit / Skip, then ONE send with the ids, the owner's
+    // own edited titles and the skipped ids; the computer checks them against its record and asks for ONE approval. Text nodes only.
+    function cardsView(b, m, wrap) {
+      const cards = Array.isArray(b.cards) ? b.cards : [], dec = cards.map((c) => (c.skip ? "skip" : "")), edits = {};
+      let at = 0, editing = false, locked = false, drawn = false;
+      const body = h("div"), status = h("div", { class: "jc-small", role: "status", "aria-live": "polite" });
+      const msg = h("div", { class: "jc-small", role: "alert" });
+      const title = (i) => edits[cards[i].id] || cards[i].title;
+      const btn = (label, fn, cls) => h("button", { type: "button", class: cls || "", disabled: locked, onclick: fn }, label);
+      const decide = (v) => { dec[at] = v; at += 1; editing = false; draw(); };
+      const send = async () => {
+        const ids = (v) => cards.filter((_c, i) => dec[i] === v).map((c) => c.id);
+        const sent = { block: b.id, selected: ids("add"), lang: lang() };
+        const ed = {}; sent.selected.forEach((id) => { if (edits[id]) ed[id] = edits[id]; });
+        if (Object.keys(ed).length) sent.edits = ed;
+        if (ids("skip").length) sent.skipped = ids("skip");
+        if (!sent.selected.length && !sent.skipped) { msg.textContent = tx("לא נבחר כלום.", "Nothing is chosen."); return; }
+        locked = true; msg.textContent = ""; draw();
+        try { await api.uiAction(sent); setBlockState(b.id, "used"); }
+        catch (e) { locked = false; draw(); msg.textContent = word(e.code, e.message || tx("הבקשה נדחתה.", "The request was refused.")); }
+      };
+      function draw() {
+        body.replaceChildren();
+        if (at < cards.length) {
+          const c = cards[at], meta = [c.due ? tx("לתאריך ", "due ") + c.due : "", c.person || ""].filter(Boolean).join(" · ");
+          const src = c.ref || c.when ? tx("מתוך וואטסאפ", "from WhatsApp") + [c.when, c.ref].filter(Boolean).map((x) => " · " + x).join("") : "";
+          body.append(h("div", { class: "jc-small" }, tx(`כרטיס ${at + 1} מתוך ${cards.length} · משימה אפשרית, לא מאושרת`,
+            `Card ${at + 1} of ${cards.length} · possible task, not confirmed`)));
+          if (editing) {
+            const inp = h("input", { type: "text", maxlength: "120", value: title(at), dir: "auto", "aria-label": tx("שם המשימה", "Task title"), class: "jc-card-in",
+              onkeydown: (ev) => { if (ev.key === "Escape" || ev.key === "Enter") ev.preventDefault(); if (ev.key === "Escape") { editing = false; draw(); } else if (ev.key === "Enter") save(); } });
+            const save = () => { const v = inp.value.replace(/\s+/g, " ").trim(); if (!v) return; edits[c.id] = v.slice(0, 120); decide("add"); };
+            body.append(inp, h("div", { class: "jc-row jc-cardbtns" }, btn(tx("שמרו והוסיפו", "Save and add"), save, "primary"),
+              btn(tx("ביטול", "Cancel"), () => { editing = false; draw(); })));
+            if (drawn) inp.focus();
+          } else {
+            body.append(...[h("div", { class: "jc-card-t", dir: "auto" }, title(at)), meta ? h("div", { class: "jc-small", dir: "auto" }, meta) : null,
+              src ? h("div", { class: "jc-small", dir: "auto" }, src) : null,
+              c.skip ? h("div", { class: "jc-small", dir: "auto" }, tx("נראית כמו משימה שכבר קיימת: מסומנת לדילוג.", "Looks like a task that already exists: set to Skip.")) : null,
+              dec[at] ? h("div", { class: "jc-small" }, dec[at] === "add" ? tx("נבחר: להוסיף", "Chosen: add") : tx("נבחר: לדלג", "Chosen: skip")) : null,
+              h("div", { class: "jc-row jc-cardbtns" }, btn(tx("הוסיפו", "Add"), () => decide("add"), "primary"),
+                btn(tx("ערכו", "Edit"), () => { editing = true; draw(); }), btn(tx("דלגו", "Skip"), () => decide("skip")),
+                at > 0 ? btn(tx("הקודם", "Back"), () => { at -= 1; draw(); }) : null, dec[at] ? btn(tx("הבא", "Next"), () => { at += 1; draw(); }) : null)].filter(Boolean));
+          }
+        } else {
+          const adds = cards.map((_c, i) => i).filter((i) => dec[i] === "add");
+          const fs = h("fieldset", { class: "jc-fs", tabindex: "-1" }, h("legend", { dir: "auto" }, tx(`${adds.length} להוספה, ${dec.filter((x) => x === "skip").length} לדילוג`,
+            `${adds.length} to add, ${dec.filter((x) => x === "skip").length} skipped`)));
+          adds.forEach((i, n) => fs.append(h("div", { dir: "auto" }, `${n + 1}) ${title(i)}`)));
+          body.append(fs, h("div", { class: "jc-small" }, tx("אחרי השליחה תקבלו אישור אחד עם הכותרות המדויקות.", "After you send, you get ONE approval with the exact titles.")),
+            h("div", { class: "jc-row jc-cardbtns" }, btn(tx("שלחו את הבחירה", "Send my choices"), send, "primary"), btn(tx("חזרה לכרטיסים", "Back to the cards"), () => { at = 0; draw(); })));
+        }
+        status.textContent = at < cards.length ? "" : tx("סיימתם את הכרטיסים.", "All cards done.");
+        if (drawn && !editing) { const f = at < cards.length ? body.querySelector("button") : body.querySelector("fieldset"); if (f) f.focus(); }
+        drawn = true;
+      }
+      wrap.append(h("b", { dir: "auto" }, b.title || tx("משימות אפשריות", "Possible tasks")), body, status, msg); draw();
+      blockUis.set(b.id, { btn: { set disabled(v) { locked = !!v; draw(); } }, boxes: [], msg });
+      if (m.state && m.state !== "open") setBlockState(b.id, m.state);
+    }
     function blockView(m) {
       const b = m.block;
-      if (!b || b.v !== 1 || (b.kind !== "text" && b.kind !== "checklist")) return;     // unknown block: dropped, text stays
+      if (!b || b.v !== 1 || (b.kind !== "text" && b.kind !== "checklist" && b.kind !== "cards")) return;     // unknown block: dropped, text stays
       const wrap = h("div", { class: "jc-msg jc-block", dir: b.dir === "rtl" || b.dir === "ltr" ? b.dir : "auto", "data-kind": b.kind });
-      if (b.kind === "text") {
+      if (b.kind === "cards") {
+        cardsView(b, m, wrap);
+      } else if (b.kind === "text") {
         if (b.title) wrap.append(h("b", { dir: "auto" }, b.title));
         String(b.text || "").split(String.fromCharCode(10)).forEach((ln) => wrap.append(h("div", { dir: "auto", style: "white-space:pre-wrap" }, ln)));
       } else {

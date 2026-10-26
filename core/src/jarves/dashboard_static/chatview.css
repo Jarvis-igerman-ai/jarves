@@ -89,3 +89,7 @@
 .jc-chk-row input { inline-size: 24px; block-size: 24px; margin: 0; margin-block-start: 2px; flex: none; }
 .jc-chk-row input:focus-visible { outline: 3px solid currentColor; outline-offset: 2px; }
 .jc-chk-row small { display: block; }
+.jc-card-t { font-weight: 600; padding-block: 4px; overflow-wrap: anywhere; }
+.jc-cardbtns button { min-block-size: 44px; min-inline-size: 44px; }
+.jc-card-in { inline-size: 100%; box-sizing: border-box; min-block-size: 44px; margin-block: 4px; font: inherit; }
+.jc-cardbtns button:focus-visible, .jc-card-in:focus-visible { outline: 3px solid currentColor; outline-offset: 2px; }

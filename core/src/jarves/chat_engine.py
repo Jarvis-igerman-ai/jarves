@@ -420,14 +420,14 @@ class WebChat:
             if self._busy:                                   # checked first: a busy refusal must not burn the block
                 return 409, {"error": "the previous message is still being answered", "code": "CHAT_BUSY"}
             try:
-                taken = self.blocks.take(body.get("block"), body.get("selected"))
+                taken = self.blocks.take(body.get("block"), body.get("selected"), body.get("edits"), body.get("skipped"))
             except ub.ActionError as e:
                 logs.warn("ui_blocks", "UI_ACTION_REFUSED", "ui action refused", reason=e.code)
                 return e.status, {"error": "that selection was refused", "code": e.code}
             self._turn_n += 1
             tid = f"t{self._turn_n}"
             self._busy = tid
-            shown = "; ".join(" ".join(t.split()) for t in taken.titles)[:600]
+            shown = ("; ".join(" ".join(t.split()) for t in taken.titles) or f"0 / {len(taken.skipped)}")[:600]
             self._add_message({"role": "user", "text": (f"נבחרו: {shown}" if lang == "he" else f"Selected: {shown}"),
                                "turn": tid, "client": "owner"})
             self.events.add("user", turn=tid, text=self.messages[-1]["text"], client="owner")
