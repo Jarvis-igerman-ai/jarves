@@ -831,7 +831,8 @@ class Orchestrator:
         self.db.audit(by, "start", session_id=sid, decision="approved", result="started", detail=f"claude {proj.name}")
         logs.info("agents", "AGENTS_SESSION_STARTED", "managed coding session started", provider="claude")
         return {"ok": True, "code": "ok", "session": self.view(self.db.session(sid), lang),
-                "text": ("Started Claude in " if lang == "en" else "הפעלתי את קלוד בפרויקט ") + proj.name + "."}
+                "text": (("Started Claude in " if lang == "en" else "הפעלתי את קלוד בפרויקט ") + proj.name
+                         + (f" (session {sid[:8]})." if lang == "en" else f" (סשן {sid[:8]})."))}
 
     def _managed_claude_event(self, holder: dict, kind: str, d: dict, started: threading.Event) -> None:
         now = self.clock()
