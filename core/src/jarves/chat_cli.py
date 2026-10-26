@@ -275,6 +275,12 @@ class ChatSession:
                         self.say()
                         streamed = False
                     self.say(str(p.get("text", "")))                    # read-only owner display (#363)
+                elif t == "chat.ui_block" and p.get("id") == tid:
+                    if streamed:
+                        self.say()
+                        streamed = False
+                    from .ui_blocks import numbered                      # #444: plain numbered list, no widgets in the terminal
+                    self.say(numbered(p["block"]) if isinstance(p.get("block"), dict) else "")
                 elif t == "chat.approval_request":
                     if streamed:
                         self.say()

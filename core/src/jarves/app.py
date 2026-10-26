@@ -21,6 +21,7 @@ from .link import GodotLink, load_token
 from .memory import MemoryStore
 from .skills import SkillRegistry
 from .skills.builtin import CalcSkill, ClockSkill, MemorySkill, StatusSkill
+from .ui_blocks import UiBlocksSkill
 from .skills.music import MusicSkill, PearDesktopPlayer
 from .skills.settings import Settings, SettingsSkill
 from . import workspace as wsp
@@ -316,6 +317,7 @@ class Core:
         from . import drive_mode                         # V6 #216: off by default; never approves, only defers
         drive_mode.attach(self.registry, self.features, self.home, self.memory)
         self.registry.register(ClockSkill())
+        self.registry.register(UiBlocksSkill())
         self.registry.register(CalcSkill())
         self.registry.register(MemorySkill(self.memory))
         from .skills.local_contacts import LocalContactsSkill

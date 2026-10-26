@@ -211,6 +211,9 @@ class ChatService:
 
             def display(_s, text):          # #363: read-only owner text from a tool result (e.g. WhatsApp messages)
                 asyncio.get_running_loop().create_task(svc.send(client, "chat.display", {"id": tid, "text": text}))
+
+            def ui_block(_s, block):         # #444: validated UI block for the owner
+                asyncio.get_running_loop().create_task(svc.send(client, "chat.ui_block", {"id": tid, "block": block}))
         TOOL_SINK.set(_Sink())
         sent = [False]
 

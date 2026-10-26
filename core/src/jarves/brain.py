@@ -666,6 +666,7 @@ class Brain:
     async def respond(self, text: str, *, spoken: bool = True, on_delta=None) -> Reply:
         """on_delta(str): optional, called with answer text as it is produced (terminal text chat); backends that do
         not stream simply never call it and the caller shows the final text."""
+        self.registry.open_lazy(text)      # on-demand tools (ui_show) only when the words ask for them
         self.registry.new_turn()           # WP-G: a new user turn (untrusted mail/calendar text no longer blocks actions)
         intent = match_intent(text)
         if intent and self.registry.get(intent.tool):
@@ -686,3 +687,4 @@ class Brain:
             return Reply(msg, "offline", ok=False, code=e.code)
         finally:
             ROUTE.reset(token)
+            self.registry.open_lazy("")     # the on-demand tools close with the turn (voice sessions never inherit them)

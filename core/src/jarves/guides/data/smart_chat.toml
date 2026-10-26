@@ -1,0 +1,42 @@
+order = 74
+category = "everyday"
+features = []
+suggest = false
+aliases = ["רשימה בצ'אט", "תיבת סימון", "בלוקים בצ'אט", "chat checklist", "chat blocks", "smart chat"]
+links = ["web_chat"]
+title_he = "רשימות לסימון בשיחה"
+title_en = "Checklists in the chat"
+what_he = "ג'ארביס יכול להציג בשיחה בדפדפן רשימה קצרה עם תיבות סימון, או הודעת טקסט מסודרת. הכול טקסט רגיל, בלי קישורים ובלי כפתורי פעולה. בגרסה הזאת הסימון רק לצפייה: הוא לא נשלח לשום מקום ולא יוצר משימות."
+what_en = "JARVES can show a short checklist with tick boxes, or a tidy text block, in the browser chat. Everything is plain text: no links and no action buttons. In this version ticking is only for you to look at: it is sent nowhere and creates no tasks."
+say = [["תראה לי רשימה קצרה לסימון", "Show me a short checklist"]]
+expect_he = "רשימה עם תיבות סימון בשיחה. בטרמינל מודפסת אותה רשימה כמספרים. אין מתג: זה פועל רק כשהמודל בוחר להציג רשימה."
+expect_en = "A list with tick boxes in the chat. In the terminal the same list is printed with numbers. There is no switch: it only appears when the model chooses to show a list."
+test_he = "בקשו \"תראה לי רשימה קצרה לסימון\" ובדקו שאפשר לסמן עם העכבר ועם מקש הרווח."
+test_en = "Ask \"Show me a short checklist\" and check that you can tick with the mouse and with the Space key."
+cost_he = "חינם. הכול מקומי."
+cost_en = "Free. All local."
+privacy_he = "הרשימה נשמרת בהיסטוריית השיחה כמו כל הודעה. היא לא נשלחת לטלפונים. ביומנים נרשמים רק מספרים."
+privacy_en = "The list is kept in the chat history like any message. It is not sent to phones. Logs hold counts only."
+
+[parity.tool_groups]
+ui_blocks = ["voice", "chat only: the terminal prints the same list with numbers"]
+
+[[steps]]
+he = "פתחו את השיחה בדשבורד (jarvis dashboard) וביקשו רשימה לסימון."
+en = "Open the chat in the dashboard (jarvis dashboard) and ask for a checklist."
+
+[[steps]]
+he = "סמנו פריטים עם העכבר, או עברו עם Tab וסמנו עם רווח."
+en = "Tick items with the mouse, or move with Tab and tick with Space."
+
+[[problems]]
+he = "לא רואים תיבות סימון, רק טקסט"
+en = "I see only text, no tick boxes"
+fix_he = "רענו את הדף (Ctrl+F5). בטרמינל וגם בטלפון מוצגת רשימה ממוספרת או טקסט בלבד, וזה תקין."
+fix_en = "Refresh the page (Ctrl+F5). The terminal and phones show a numbered list or plain text only, which is normal."
+
+[platform]
+windows = "implemented_unverified"
+windows_note_en = "tested in a headless browser with a fake chat only"
+pi = "implemented_unverified"
+pi_note_en = "same code; not run on a Raspberry Pi"

@@ -27,6 +27,7 @@ from __future__ import annotations
 import asyncio
 import contextvars
 import json
+import re
 import threading
 import time
 import weakref
@@ -86,6 +87,16 @@ def _tool_seen(name: str, ok: bool, code: str, message: str = "") -> None:
             pass                                       # a display problem never changes a tool result
 
 
+def _blocks_seen(blocks: list) -> None:
+    fn = getattr(TOOL_SINK.get(), "ui_block", None)
+    if blocks and callable(fn):
+        for b in blocks:
+            try:
+                fn(b)
+            except Exception:
+                pass
+
+
 def _display_seen(text: str) -> None:
     fn = getattr(TOOL_SINK.get(), "display", None)
     if text and callable(fn):
@@ -135,6 +146,7 @@ class ToolResult:
     # Owner-facing DISPLAY text (#363): printed by the chat UIs straight from the result, read-only. It is never put
     # in to_model(), so it cannot reach the model as instructions and never lifts the untrusted-turn rule.
     display: str = ""
+    ui_blocks: list = field(default_factory=list)      # #444: validated UI blocks for the owner; never in to_model()
 
     def to_model(self) -> str:
         out = {"ok": self.ok, "message": self.message, "code": self.code, **self.data}
@@ -192,6 +204,9 @@ class Tool:
     # stamped by SkillRegistry.register from the owning Skill (a tool never sets it): "builtin" | "generated"
     origin: str = "unknown"
     skill_id: str = ""
+    # on-demand exposure (like voice/lazy_tools): a tool with a `lazy` pattern is left out of tools() unless the user's
+    # words this turn match it (SkillRegistry.open_lazy). Execution never depends on it (call() does not check).
+    lazy: str = ""
 
     @property
     def side_effect(self) -> bool:     # read-only view of the old flag
@@ -282,6 +297,7 @@ class SkillRegistry:
         self.skills: dict[str, Skill] = {}
         self._tools: dict[str, tuple[Skill, Tool]] = {}
         self.disabled = disabled or set()
+        self._lazy_open: set[str] = set()      # on-demand tools opened by the current turn's words
         self.allowed_actions = set(DEFAULT_ALLOWED_ACTIONS if allowed_actions is None else allowed_actions)
         self.confirm: ConfirmFn = _deny       # replaced by the Core (asks the user via Godot/voice)
         # feature switches (features.py): (skill, tool) -> None to offer/run it, or why the feature is not active
@@ -331,6 +347,10 @@ class SkillRegistry:
         # V4-VC-3: only a repeat inside the turn of the approval answer is replayed; a later turn runs it anew
         now = self.clock()
         self._recent_ok = {k: v for k, v in self._recent_ok.items() if k[0] != key or now - v[0] < UNTRUSTED_GRACE_S}
+
+    def open_lazy(self, text: str) -> None:
+        """Per user turn: offer the on-demand tools whose trigger pattern occurs in the user's words."""
+        self._lazy_open = {n for n, (_, t) in self._tools.items() if t.lazy and re.search(t.lazy, text or "", re.IGNORECASE)}
 
     def clear_taint(self, route: str) -> None:
         """The owner explicitly resumed work on `route` (a goal plan): the untrusted-content block is lifted there."""
@@ -429,7 +449,8 @@ class SkillRegistry:
     def tools(self) -> list[Tool]:
         """Tools offered to the model: disabled Skills and inactive features are left out (read at each call, so a
         switch flipped mid-conversation shows on the next tool list)."""
-        return [t for s, t in self._tools.values() if s.name not in self.disabled and self._gated(s, t) is None]
+        return [t for s, t in self._tools.values() if s.name not in self.disabled and self._gated(s, t) is None
+                and (not t.lazy or t.name in self._lazy_open)]
 
     def get(self, name: str) -> Tool | None:
         st = self._tools.get(name)
@@ -586,6 +607,7 @@ class SkillRegistry:
         log("skills", "TOOL_RESULT", "tool finished", tool=name, ok=res.ok, result_code=res.code, origin=origin,
             ms=round(max(0.0, time.monotonic() - t_run - (self.confirm_elapsed() - approval_wait)) * 1000))
         _tool_seen(name, res.ok, res.code, res.message)   # terminal + web chat: one line per call (TOOL_SINK)
+        _blocks_seen(res.ui_blocks)                       # #444: validated UI blocks, owner-facing only
         _display_seen(res.display)                        # #363: read-only owner text (e.g. WhatsApp messages)
         if not res.ok and self.on_failure is not None:
             try:
