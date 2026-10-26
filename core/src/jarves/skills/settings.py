@@ -77,7 +77,10 @@ class Settings:
             if value == "on" and self.features.feature(fid).risk != "low":
                 raise WorkspaceError(f"{key} is the feature switch {fid}: turning it on needs the user's approval "
                                      f"(use feature_set, or the dashboard Features page)")
-            self.features.set(fid, value == "on", by="voice")
+            try:
+                self.features.set(fid, value == "on", by="voice")
+            except PermissionError as e:             # BetaLocked: the one beta-gate message
+                raise WorkspaceError(str(e)) from e
             return value
         self.memory.set_setting(f"override:{key}", value)
         return value

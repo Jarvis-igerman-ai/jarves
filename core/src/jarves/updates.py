@@ -937,7 +937,7 @@ def _register_feature() -> None:
         return
     import inspect
     kw = {"targets": PLATFORMS["update_check"]} if "targets" in inspect.signature(features.register).parameters else {}
-    features.register("update_check", "בדיקת עדכונים", "Update check", True, risk="low",
+    features.register("update_check", "בדיקת עדכונים", "Update check", True, risk="low", stage="stable",
                       about="looks for a newer JARVES once a day (GitHub, or the signed release folder in "
                             "update.base_url; read-only); installs only after you approve, and one command or "
                             "button goes back to the previous version", **kw)
@@ -950,6 +950,7 @@ def _register_beta_feature() -> None:
     import inspect
     kw = {"targets": PLATFORMS["beta_channel"]} if "targets" in inspect.signature(features.register).parameters else {}
     features.register("beta_channel", "ערוץ בטא (גרסאות מוקדמות)", "Beta channel (early builds)", False, risk="medium",
+                      stage="stable",     # the update CHANNEL is separate from the beta-features gate and must stay switchable
                       about="gets every green main build automatically as a signed beta (latest-beta.json) instead "
                             "of waiting for a tested stable release; one command or button goes back to stable, "
                             "and the previous version can always be restored", **kw)

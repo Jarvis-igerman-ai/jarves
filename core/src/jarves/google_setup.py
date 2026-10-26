@@ -281,9 +281,14 @@ def enable_features(home: Path, cfg, *, gmail: bool, send: bool) -> list[str]:
     from .features import Features
     f = Features(cfg, home)
     on = ["google_calendar"] + (["gmail_read"] if gmail else []) + (["gmail_send"] if send else [])
+    done = []
     for fid in on:
-        f.set(fid, True, by="google_setup")
-    return on
+        try:
+            f.set(fid, True, by="google_setup")
+            done.append(fid)
+        except PermissionError:                  # BetaLocked: left off until the beta opt-in is on
+            pass
+    return done
 
 
 def testing_days_left(connected_at: float, now: float | None = None) -> float | None:

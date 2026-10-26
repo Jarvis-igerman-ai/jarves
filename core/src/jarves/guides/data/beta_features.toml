@@ -1,0 +1,41 @@
+order = 64
+category = "system"
+pages = ["features"]
+features = []
+aliases = ["יכולות בטא", "תכונות בטא", "beta features", "beta gate", "experimental features", "unverified features"]
+links = ["beta_channel", "setup_tour", "auto_update"]
+title_he = "יכולות בטא (יכולות חדשות שעוד לא נבדקו)"
+title_en = "Beta features (new, not yet verified)"
+what_he = "כל יכולת מסומנת יציבה או בטא. יציבה = נבדקה על מכשיר אמיתי. בטא = חדשה, עדיין לא נבדקה עד הסוף, ועלולה להיכשל. יכולות בטא כבויות כברירת מחדל ואי אפשר להפעיל אותן (לא בשורת הפקודה, לא בלוח הבקרה, לא מהטלפון, לא בקול ולא במאשף ההגדרה) עד שמפעילים מתג אחד כללי: יכולות בטא. זה עניין נפרד מערוץ העדכונים (גרסאות בטא)."
+what_en = "Every feature is labelled stable or beta. Stable = verified on a real device. Beta = new, not fully verified yet, and it may fail. Beta features are OFF by default and cannot be switched on (not from the command line, the dashboard, the phone, by voice, or in the setup wizard) until you turn on one global switch: beta features. This is separate from the update channel (beta builds)."
+say = [["תפעיל יכולות בטא", "Turn on beta features"]]
+expect_he = "בעמוד Features יש מתג 'יכולות בטא' וליד כל יכולת תווית 'יציב' או 'בטא'. כשהמתג כבוי, יכולת בטא מציגה 'יכולת בטא: קודם מפעילים את יכולות הבטא'. בהתקנה קיימת המתג מופעל אוטומטית פעם אחת, כך שמה שכבר עבד ממשיך לעבוד (מסומן בטא)."
+expect_en = "The Features page has a Beta features switch and a stable or beta label next to every feature. While the switch is off, a beta feature says 'beta feature: turn on beta features first'. On an existing install the switch is turned on once automatically, so whatever already worked keeps working (labelled beta)."
+cost_he = "חינם."
+cost_en = "Free."
+privacy_he = "המתג שמור רק במחשב הזה (features.json). שום דבר לא נשלח."
+privacy_en = "The switch is stored on this computer only (features.json). Nothing is sent."
+
+[[steps]]
+he = "הפעלה: jarvis features beta on. כיבוי: jarvis features beta off. מצב: jarvis features beta status. אפשר גם בעמוד Features (מתג 'יכולות בטא') ובשלב 'יכולות בטא' במאשף ההגדרה."
+en = "Turn on: jarvis features beta on. Turn off: jarvis features beta off. State: jarvis features beta status. Also on the Features page (Beta features switch) and in the Beta features step of the setup wizard."
+action = "command:jarvis features beta status"
+
+[[steps]]
+he = "אזהרה: יכולות בטא חדשות ועדיין לא נבדקו עד הסוף על המכשיר שלך. הן עלולות להיכשל או להתנהג לא צפוי. הפעילו אותן רק אם אתם מוכנים לזה."
+en = "Warning: beta features are new and not yet fully verified on your device. They may fail or behave unexpectedly. Turn them on only if you are ready for that."
+
+[[steps]]
+he = "כיבוי המתג מכבה את כל יכולות הבטא בצורה נקייה. הבחירה של כל יכולת נשמרת, ולכן הפעלה מחדש מחזירה אותן כמו שהיו."
+en = "Turning the switch off switches every beta feature off cleanly. Each feature's own choice is kept, so turning it on again brings them back as they were."
+
+[[steps]]
+he = "ערוץ העדכונים (jarvis update --channel beta) הוא עניין נפרד: הוא קובע אילו גרסאות של התוכנה מתקבלות, לא אילו יכולות פעילות."
+en = "The update channel (jarvis update --channel beta) is separate: it decides which builds of the software you get, not which features are active."
+action = "open:#/updates"
+
+[[problems]]
+he = "כתוב 'יכולת בטא: קודם מפעילים את יכולות הבטא'"
+en = "It says 'beta feature: turn on beta features first'"
+fix_he = "היכולת מסומנת בטא והמתג הכללי כבוי. אם אתם מוכנים לסיכון: jarvis features beta on, ואז מפעילים את היכולת."
+fix_en = "The feature is labelled beta and the global switch is off. If you accept the risk: jarvis features beta on, then turn the feature on."

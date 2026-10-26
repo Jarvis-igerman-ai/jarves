@@ -17,6 +17,22 @@
 
   // ------------------------------------------------------------------ Features: capability matrix
   const FILTERS = [["all", "All"], ["enabled", "Enabled"], ["not_ready_on_pi", "Not ready on Pi"], ["needs_attention", "Needs attention"]];
+  // the ONE global opt-in for every beta feature (#463); the update channel is a separate switch on the Updates page
+  function betaCard(d) {
+    const msg = el("span", { class: "muted small" });
+    const on = !!d.beta_features;
+    const sw = el("button", { type: "button", class: "switch", id: "beta-features-switch", "aria-pressed": on ? "true" : "false",
+      "aria-label": tx("יכולות בטא", "Beta features") + ": " + (on ? tx("פועל", "On") : tx("כבוי", "Off")), onclick: async () => {
+        if (!on && !confirm(tx("יכולות בטא חדשות ועדיין לא נבדקו עד הסוף על המכשיר שלך. הן עלולות להיכשל או להתנהג לא צפוי. להפעיל?",
+          "Beta features are new and not yet fully verified on your device. They may fail or behave unexpectedly. Turn them on?"))) return;
+        try { await api("/api/beta-features", { method: "POST", body: JSON.stringify({ enabled: !on }) }); route(true); }
+        catch (e) { msg.textContent = tx("לא שונה: ", "Not changed: ") + e.message; }
+      } }, on ? tx("פועל", "On") : tx("כבוי", "Off"));
+    return el("div", { class: "card", style: "margin-bottom:8px" }, el("b", {}, tx("יכולות בטא", "Beta features")), " ", sw, " ", msg,
+      el("div", { class: "muted small" }, tx("יכולות בטא הן חדשות ועדיין לא נבדקו עד הסוף. הן כבויות כברירת מחדל ואי אפשר להפעיל אותן לפני שמפעילים את המתג הזה. זה נפרד מערוץ העדכונים (גרסאות בטא).",
+        "Beta features are new and not fully verified yet. They are off by default and cannot be switched on until you turn this on. This is separate from the update channel (beta builds).")),
+      d.beta_enabled && d.beta_enabled.length ? el("div", { class: "muted small" }, tx("בטא פעילות: ", "Beta features on: ") + d.beta_enabled.length + " / " + d.beta_count) : null);
+  }
   async function pageFeatures(filter) {
     filter = FILTERS.some(([k]) => k === filter) ? filter : "all";
     const d = await api("/api/features");
@@ -45,7 +61,8 @@
       const perm = (x) => { const m = /^(read|action|destructive)(?=$|[ ,(])(.*)$/.exec(x); const k = m && PERM[m[1]]; return k ? tx(k[0], k[1]) + (m[2].trim() ? " " + JL.t(m[2].trim()) : "") : JL.t(x); };
       const age = f.check === "stale" && f.checked_s_ago != null ? el("div", { class: "muted small" }, tx(`נבדק לפני ${Math.round(f.checked_s_ago)} שנ׳, בודק שוב`, `checked ${Math.round(f.checked_s_ago)} s ago, re-checking`)) : null;
       return el("tr", { class: f.needs_attention ? "m4-attn" : null },
-        el("td", { "data-label": "Feature" }, el("b", {}, txo(f, "title")),
+        el("td", { "data-label": "Feature" }, el("b", {}, txo(f, "title")), " ",
+          pill(f.stage === "beta" ? "medium" : "ok", f.stage === "beta" ? tx("בטא", "beta") : tx("יציב", "stable")),
           el("div", { class: "muted small" }, txh(f, "about")),
           f.requested ? el("div", { class: "small" }, tx("ביקשו מ-JARVES להפעיל את זה: מאשרים כאן.", "JARVES was asked to turn this on: approve here.")) : null),
         el("td", { "data-label": "Enabled" }, sw, msg),
@@ -62,7 +79,7 @@
     render(header(tx("יכולות ומתגים", "Features"), tx("מה JARVES רשאי לעשות, האם זה עובד עכשיו, והמצב האמיתי ב-Windows וב-Raspberry Pi. "
         + "'נבנה, לא אומת' אומר שזה מעולם לא הורץ במכשיר הזה. ", "What JARVES may do, whether it works now, and its real status on Windows and on the Raspberry Pi. "
         + "'Built, not verified' means it was never run on that device. ") + txh(d, "note")),
-      tabs, el("div", { style: "height:12px" }),
+      betaCard(d), tabs, el("div", { style: "height:12px" }),
       el("div", { class: "card m4-scroll" }, rows.length ? el("table", { class: "m4-matrix" },
         el("thead", {}, el("tr", {}, [tx("יכולת", "Feature"), tx("מופעל", "Enabled"), tx("תקינות", "Health"), tx("הגדרות", "Settings"), tx("הרשאות", "Permissions"), "Windows", "Pi", tx("חסם", "Blocker"), tx("תוכנית", "Roadmap")]
           .map((h) => el("th", {}, h)))), el("tbody", {}, rows)) : el("div", { class: "empty" }, tx("אין יכולות בסינון הזה.", "Nothing in this filter."))),

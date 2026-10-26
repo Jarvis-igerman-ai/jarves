@@ -108,6 +108,9 @@ def _feature_on_apply(a: "Autonomy", p: dict) -> tuple[str, dict]:
         raise ValueError("feature switches unavailable")
     if fid in SAFE_OFF:
         raise ValueError(f"{fid} is privacy-sensitive: switch it on yourself on the Features page")
+    if a.features.locked(fid):
+        from .features import BETA_MSG
+        raise ValueError(BETA_MSG)
     from .feature_setup import prepare
     ok, detail = prepare(fid, a.features, a.home)
     if not ok:

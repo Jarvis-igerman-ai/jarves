@@ -120,7 +120,10 @@ async def on_link(core, t: str, p: dict, client) -> None:
 async def _enable_after_confirm(core, client) -> None:
     if await core.ask_confirm(ENABLE_PROMPT, title="Camera on / הדלקת המצלמה", risk="high", kind="camera",
                               source="user", why="the camera button on the face was pressed"):
-        core.features.set("camera", True, by="face")
+        try:
+            core.features.set("camera", True, by="face")
+        except PermissionError:                  # BetaLocked: camera is a beta feature and the opt-in is off
+            core.features.request("camera", by="face")
     else:
         core.features.request("camera", by="face")       # the dashboard shows it for approval
         logs.info("camera", "CAMERA_ENABLE_DECLINED", "camera switch not turned on: not confirmed on the screen")

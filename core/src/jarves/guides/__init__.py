@@ -837,6 +837,9 @@ def make_skill(features: feat.Features, gstate: GuideState, registry=None, *, op
                             features.request(arg, by="voice")
                             return ToolResult(False, f"{f0.title_he} צריכה אישור על המסך או בלוח הבקרה.",
                                               {"guide": g.id, "feature": arg, "risk": f0.risk}, "FEATURE_NEEDS_APPROVAL")
+                    if features.locked(arg):
+                        return ToolResult(False, feat.BETA_MSG_HE + " / " + feat.BETA_MSG,
+                                          {"guide": g.id, "feature": arg, "stage": "beta"}, feat.BetaLocked.code)
                     st_ = features.set(arg, True, by="voice")
                     msg = f"הפעלתי את {f0.title_he}." + ("" if st_["available"] else f" אבל עוד חסר: {st_['reason']}")
                     return ToolResult(True, msg, {"guide": g.id, "step": i + 1, **st_})

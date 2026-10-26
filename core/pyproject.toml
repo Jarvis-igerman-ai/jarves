@@ -49,6 +49,7 @@ dev = ["pytest>=8", "pytest-asyncio>=1.0", "pyyaml>=6.0.2"]   # pyyaml: test_ci_
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
+markers = ["beta_gate: runs with the real default (beta features opt-in OFF)"]
 testpaths = ["tests"]
 
 [build-system]

@@ -35,7 +35,7 @@ MAX_TEXT = 8000                       # a pasted multi-line message; the face li
 RESUME_LIMIT = 8
 RESUME_MAX_TURNS = 60
 
-feat.register("text_chat", "שיחת טקסט בטרמינל", "Terminal text chat", True,
+feat.register("text_chat", "שיחת טקסט בטרמינל", "Terminal text chat", True, stage="stable",
               about="silent text chat with JARVES in the terminal (`jarvis chat`): no microphone, no speech, "
                     "approvals answered in the terminal",
               targets={"windows": {"status": "implemented_unverified",

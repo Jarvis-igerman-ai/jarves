@@ -1678,6 +1678,18 @@ def cmd_features(a, cfg, home) -> int:
     """jarvis features [list | on ID | off ID | reset ID]: the user's switches (the running Core follows them)."""
     from .features import CATALOG
     f = _cli_features(cfg, home)
+    if a.action == "beta":
+        mode = (a.id or "status").lower()
+        if mode not in ("on", "off", "status"):
+            print("usage: jarvis features beta on|off|status", file=sys.stderr)
+            return 2
+        if mode != "status":
+            f.set_beta(mode == "on", by="cli")
+        b = f.beta_status()
+        print(clilang.fmt("יכולות בטא: " + ("פועלות" if b["beta_features"] else "כבויות"),
+                          "beta features: " + ("ON" if b["beta_features"] else "OFF"))
+              + f" ({len(b['beta_enabled'])}/{b['beta_count']} beta features on)")
+        return 0
     if a.action != "list":
         if not a.id or a.id not in CATALOG:
             print(f"unknown feature {a.id!r}. Known: {', '.join(CATALOG)}", file=sys.stderr)
@@ -1688,12 +1700,17 @@ def cmd_features(a, cfg, home) -> int:
             ok, detail = prepare(a.id, f, home)
             if not ok:                      # best effort: the switch is still saved (same rule as the dashboard)
                 print(f"{a.id}: {detail}", file=sys.stderr)
-        s = f.reset(a.id) if a.action == "reset" else switch(f, a.id, a.action == "on", by="cli")
+        from .features import BetaLocked
+        try:
+            s = f.reset(a.id) if a.action == "reset" else switch(f, a.id, a.action == "on", by="cli")
+        except BetaLocked as e:
+            print(f"{a.id}: {e} (jarvis features beta on)", file=sys.stderr)
+            return 1
         print(f"{a.id}: {state_text(s, reason=clilang.reason)} (saved; takes effect {APPLIES_EN[s['applies']]})")
         return 0
     for s in f.list(wait=True):
         state = "ACTIVE" if s["active"] else ("off" if not s["enabled"] else "unavailable")
-        print(f"{s['id']:<22} {state:<12} {s['risk']:<7} {s['title_en']}"
+        print(f"{s['id']:<22} {state:<12} {s['risk']:<7} {s['stage']:<7} {s['title_en']}"
               + (f"  - {clilang.reason(s['reason'])}" if s["reason"] and not s["active"] else "")
               + (f"  [from {s['source']}]" if s["source"] != "default" else ""))
     try:                                   # R-01: not a switch; the OS limits the helper runs under
@@ -2235,8 +2252,8 @@ def main(argv: list[str] | None = None) -> int:
                                                                   "phone may use the microphone")
     fe = sub.add_parser("features", help="feature switches: list / on ID / off ID / reset ID; on installs supported "
                                         "locked prerequisites before enabling (stop Core for dependency installation)")
-    fe.add_argument("action", nargs="?", default="list", choices=["list", "on", "off", "reset"])
-    fe.add_argument("id", nargs="?")
+    fe.add_argument("action", nargs="?", default="list", choices=["list", "on", "off", "reset", "beta"])
+    fe.add_argument("id", nargs="?", help="a feature id; with `beta`: on | off | status (the global beta-features opt-in)")
     hp = sub.add_parser("help", help="explain a topic: jarvis help timers / google / music (no topic = the list)")
     hp.add_argument("topic", nargs="*", help="a topic id or a word in Hebrew or English")
     dg = sub.add_parser("diagnose", help="self-diagnosis: find problems in recent conversations")

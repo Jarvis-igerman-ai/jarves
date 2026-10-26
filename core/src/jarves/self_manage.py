@@ -631,7 +631,10 @@ class SelfManager:
                     ok, detail = False, f"prerequisite check failed ({type(e).__name__})"
                 if not ok:
                     note = f" Prerequisite not ready: {logs.redact(str(detail))[:200]}."
-            st = feat.switch(self.features, p.target, d["on"], by="voice" if by == "voice" else by)
+            try:
+                st = feat.switch(self.features, p.target, d["on"], by="voice" if by == "voice" else by)
+            except feat.BetaLocked as e:
+                raise Refused(e.code, f"{e} / {feat.BETA_MSG_HE}") from None
             undo = {"id": p.target, "prev": d["prev"], "explicit": d["explicit"]}
             msg = f"{feat.CATALOG[p.target].title_en} is now {feat.state_text(st, 'en')}.{note}"
         elif p.what == "skill":
