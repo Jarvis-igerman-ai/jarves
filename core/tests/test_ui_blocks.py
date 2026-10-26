@@ -85,3 +85,16 @@ def test_webchat_hides_blocks_from_phones():
     from jarves.chat_engine import WebChat
     src = Path(__file__).resolve().parents[1].joinpath("src/jarves/chat_engine.py").read_text(encoding="utf-8")
     assert '("display", "ui_block")' in src and WebChat is not None
+
+
+def test_ui_show_is_offered_only_when_the_words_ask_for_a_list():
+    reg = SkillRegistry()
+    reg.register(ub.UiBlocksSkill())
+    assert [t.name for t in reg.tools()] == []
+    reg.open_lazy("what is the weather")
+    assert reg.tools() == []
+    for words in ("show me a checklist", "תן לי רשימה לסימון"):
+        reg.open_lazy(words)
+        assert [t.name for t in reg.tools()] == ["ui_show"]
+    reg.open_lazy("hello")
+    assert reg.tools() == []

@@ -21,6 +21,8 @@ SCHEMA_VERSION = 1
 KINDS = ("text", "checklist")                 # S1; cards / table / choices / form arrive in later slices
 MAX_BLOCKS_PER_MESSAGE = 4
 MAX_BYTES = 16 * 1024
+# offered to the model only when the owner's words ask for a list (keeps the always-on prompt small, like lazy_tools)
+LAZY = r"check-?list|tick|to-?do list|list of|רשימ|סמן|סימון|תיבות"
 # control characters and bidi overrides (U+202A-202E, U+2066-2069); zero-width joiners stay for Hebrew
 _BAD = re.compile("[\\x00-\\x08\\x0b\\x0c\\x0e-\\x1f\\x7f-\\x9f\\u202a-\\u202e\\u2066-\\u2069]")
 
@@ -112,8 +114,7 @@ def numbered(block: dict) -> str:
 
 class UiShowArgs(BaseModel):
     blocks: list[dict] = Field(..., min_length=1, max_length=MAX_BLOCKS_PER_MESSAGE,
-                               description="UI blocks, v=1: kind 'text' {text} or 'checklist' {items[{label,detail?,checked?}], "
-                                           "actions[{label}]}. Plain text only; shown to the owner, not returned to you.")
+                               description="v=1 blocks: {kind:'checklist',title?,items:[{label,detail?,checked?}]} or {kind:'text',text}")
 
 
 class UiBlocksSkill(Skill):
@@ -128,5 +129,5 @@ class UiBlocksSkill(Skill):
                                   code="UI_BLOCK_INVALID")
             return ToolResult(True, "Shown to the owner. Wait for the owner's reply.", {"shown_to_owner": True},
                               ui_blocks=good)
-        return [Tool("ui_show", "Show the owner a checklist or text block in the chat (plain text only, max 4 blocks). "
-                     "Use it for a short list the owner can look at.", ui_show, UiShowArgs, permission="read")]
+        return [Tool("ui_show", "Show a checklist in chat: 'show a checklist', 'תציג רשימה לסימון'.", ui_show, UiShowArgs,
+                     permission="read", lazy=LAZY)]
