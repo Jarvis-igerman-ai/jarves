@@ -148,12 +148,10 @@ def test_gate_refuses_without_manual_sign_off(tmp_path):
 
 
 def test_gate_requires_tested_beta_sha_equals_tag_or_docs_only(tmp_path):
+    """#539: the tag commit (sha) differs from the tested commit (verified_sha = the sheet's commit)."""
     other = "b" * 40
-    assert any("code changed" in p for p in _gate(tmp_path, sha=other, verified_sha=other,
-                                                  checks_runs=[{"head_sha": other, "conclusion": "success"}],
-                                                  changed_files=lambda a, b: ["core/a.py"]))
-    assert _gate(tmp_path, sha=other, verified_sha=other, checks_runs=[{"head_sha": other, "conclusion": "success"}],
-                 changed_files=lambda a, b: ["docs/x.md"]) == []
+    assert any("code changed" in p for p in _gate(tmp_path, sha=other, changed_files=lambda a, b: ["core/a.py"]))
+    assert _gate(tmp_path, sha=other, changed_files=lambda a, b: ["docs/x.md"]) == []
 
 
 def test_gate_blocks_on_sha_mismatch_open_p0_p2_and_tag_shape(tmp_path):

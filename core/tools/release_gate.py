@@ -9,7 +9,8 @@
      An open P0-P2 labelled `known-issue-4.5` (owner-only label) is an accepted known issue: not a blocker, printed in the report
   5. the owner's manual test sign-off exists for this version (docs/reviews/MANUAL_TEST_<version>.md): every row pass
      or accepted-blocked with a note, signed, and the tested beta commit is the tag commit or an ancestor with only
-     documentation changes since. This ONE signature is the owner's release signature (owner 26 Oct 2026: no nightly
+     documentation changes since (docs/, docs/release/, root *.md; git failures refuse). The installer commit must equal
+     the sheet's commit; the tag commit is NOT required to equal it (#539: the tag commit contains the signed sheet). This ONE signature is the owner's release signature (owner 26 Oct 2026: no nightly
      requirement, no second SIGNED file)
 
 Main green is item 2 (the jarves-checks run of the tagged SHA); the dry run is this tool without a tag push.
@@ -55,11 +56,13 @@ def check_tag(tag: str, build_version: str | None = None) -> tuple[str | None, l
     return v, []
 
 
-def check_sha(sha: str, verified: str | None) -> list[str]:
+def check_sha(installer: str | None, verified: str | None) -> list[str]:
+    """The commit the published installer was built from must be the verified (signed-off) commit. The TAG commit is
+    judged separately by the sign-off check (equal to it, or a docs-only descendant): #539."""
     if not verified:
         return ["no verified SHA given (--verified-sha or --candidate-dir with build-info.json)"]
-    if sha.strip().lower() != verified.strip().lower():
-        return [f"the SHA to publish {sha[:12]} differs from the verified SHA {verified[:12]}"]
+    if installer is not None and installer.strip().lower() != verified.strip().lower():
+        return [f"the installer commit {installer[:12]} differs from the verified SHA {verified[:12]}"]
     return []
 
 
@@ -166,14 +169,20 @@ def legacy_report(checklist_text: str | None, bug_tables: list) -> list[str]:
     return out
 
 
-def signoff_problems(root: Path, version: str, tag_sha: str, is_ancestor, changed_files) -> list[str]:
+def signoff_problems(root: Path, version: str, tag_sha: str, is_ancestor, changed_files,
+                     verified: str | None = None) -> list[str]:
     try:
         sheet = so.load(root, version)
     except so.SheetError as e:
         return [str(e)]
     probs = [f"sign-off: {p}" for p in sheet.problems()]
+    if verified and sheet.commit and sheet.commit != verified.strip().lower():
+        probs.append(f"sign-off: the sheet commit {sheet.commit[:12]} differs from the verified SHA {verified[:12]}")
     if sheet.commit and so.SHA_RE.match(sheet.commit):
-        why = so.tested_sha_ok(sheet.commit, tag_sha, is_ancestor, changed_files)
+        try:
+            why = so.tested_sha_ok(sheet.commit, tag_sha, is_ancestor, changed_files)
+        except Exception as e:                      # shallow clone, unknown sha, git failed: refuse, never pass blind
+            why = f"cannot compare the tested commit with the tag commit ({type(e).__name__}); fetch full history"
         if why:
             probs.append(f"sign-off: {why}")
     return probs
@@ -231,15 +240,16 @@ def find_checklist(root: Path, version: str, explicit: str | None) -> Path | Non
 # ---------------------------------------------------------------------- the gate
 def run_gate(*, tag: str, sha: str, verified_sha: str | None, build_version: str | None, root: Path,
              checklist_text: str | None, bug_tables: list, checks_runs: list[dict],
-             is_ancestor, changed_files, now: datetime | None = None, issues: list[dict] | None = None) -> list[str]:
+             is_ancestor, changed_files, now: datetime | None = None, issues: list[dict] | None = None,
+             installer_sha: str | None = None) -> list[str]:
     version, problems = check_tag(tag, build_version)
-    problems += check_sha(sha, verified_sha)
+    problems += check_sha(installer_sha, verified_sha)
     if verified_sha:
         problems += checks_green(checks_runs, verified_sha)
     # checklist_text / bug_tables are accepted for compatibility but no longer gate (see legacy_report)
     problems += issue_problems(issues or [])
     if version:
-        problems += signoff_problems(root, version, sha, is_ancestor, changed_files)
+        problems += signoff_problems(root, version, sha, is_ancestor, changed_files, verified_sha)
     return problems
 
 
@@ -269,10 +279,10 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--issues-json", type=Path, help="open issues (API shape) instead of asking GitHub")
     ap.add_argument("--repo", default=REPO)
     a = ap.parse_args(argv)
-    verified, build_version = a.verified_sha, None
+    verified, build_version, installer = a.verified_sha, None, None
     if a.candidate_dir:
         info = json.loads((a.candidate_dir / "build-info.json").read_text(encoding="utf-8-sig"))
-        verified, build_version = verified or info.get("commit"), info.get("version")
+        verified, build_version, installer = verified or info.get("commit"), info.get("version"), info.get("commit") or ""
     root = a.repo_root.resolve()
     version = (TAG_RE.match(a.tag) or [None, "0.0.0"])[1]
     if a.bug_tables:
@@ -292,7 +302,7 @@ def main(argv: list[str] | None = None) -> int:
     problems = run_gate(tag=a.tag, sha=a.sha, verified_sha=verified, build_version=build_version, root=root,
                         checklist_text=cl.read_text(encoding="utf-8") if cl else None, bug_tables=tables,
                         checks_runs=checks, is_ancestor=git_is_ancestor(root),
-                        changed_files=git_changed(root), issues=issues)
+                        changed_files=git_changed(root), issues=issues, installer_sha=installer)
     if problems:
         print(f"RELEASE GATE FAILED for {a.tag} ({len(problems)} problem(s)):")
         for p in problems:

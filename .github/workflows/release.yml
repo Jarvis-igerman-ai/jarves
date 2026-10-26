@@ -3,7 +3,8 @@ name: jarves-release
 # the tested commit has a green jarves-checks run, no open P0-P2 (live GitHub labels; legacy bug tables and checklist are
 # printed as information only, not gating), and the owner's manual test sign-off
 # docs/reviews/MANUAL_TEST_<X.Y.Z>.md (recorded with `jarvis release signoff`) names the tested beta commit = this
-# tag's commit (or only documentation changed since). Only then is the tested installer published as the stable release.
+# tag's commit (or only documentation changed since: the tag commit contains the signed sheet, so it is normally a docs-only
+# descendant of the tested commit; fetch-depth 0 below gives the gate the full history, a failed lookup refuses, #539). Only then is the tested installer published as the stable release.
 on:
   push:
     tags: ["v[0-9]+.[0-9]+.[0-9]+"]
@@ -67,7 +68,7 @@ jobs:
           python3 packaging/release.py stamp --dir dist --commit "${{ steps.find.outputs.sha }}" --tree "${{ steps.find.outputs.tree }}"
       - name: Release gate (sign-off, SHA, live P0-P2 issues)
         working-directory: core
-        run: uv run python tools/release_gate.py --tag "$TAG" --sha "$(git rev-parse HEAD)" --verified-sha "${{ steps.find.outputs.sha }}" --candidate-dir ../dist
+        run: uv run python tools/release_gate.py --tag "$TAG" --sha "$(git rev-parse HEAD)" --verified-sha "${{ steps.find.outputs.sha }}" --candidate-dir ../dist   # --sha = tag commit, --verified-sha = tested commit (ancestor, docs-only change allowed)
       - name: Plan (dry run)
         if: ${{ env.DRY_RUN == 'true' }}
         run: python3 packaging/release.py public-publish --dir dist --dry-run

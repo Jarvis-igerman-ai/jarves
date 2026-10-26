@@ -42,7 +42,11 @@ Every green `main` is already a beta (layer 2). A stable release promotes a beta
 All of these must hold, else the tag is refused:
 
 - the tag is `vX.Y.Z` and the installer is `X.Y.Z.<build>`;
-- the SHA being published is the verified SHA and its `jarves-checks` run on `main` is green;
+- the installer being published was built from the verified SHA (the Commit line of the signed sheet) and that commit's
+  `jarves-checks` run on `main` is green. The tag commit itself is NOT required to equal it: it contains the signed sheet, so
+  it is the tested commit or a descendant of it whose only changes are documentation (`docs/`, `docs/release/`, root `*.md`);
+  any code, workflow, packaging, tool or test change after signing, a verified SHA that is not an ancestor of the tag, or a
+  git lookup that fails (shallow clone, unknown SHA) refuses. `release.yml` checks out the full history (`fetch-depth: 0`);
 - (retired 26 Oct 2026, owner decision, simple-releases OD-S2) the release checklist rows and the bug tables
   `docs/reviews/*BUG_TABLE*.md` do NOT gate: the gate prints their open rows as "legacy, not gating" so nothing is hidden. The
   `--bug-tables` option is still accepted for compatibility, warns once and never gates. The live issue check below is the single
@@ -62,7 +66,7 @@ Run it yourself: `python core/tools/release_gate.py --tag v4.1.0 --sha <tag sha>
 3. Record each result: `jarvis release signoff --version 4.1.0 --row C1 --result pass` (or `fail`, `blocked`,
    `accepted-blocked --note "why"`), or use the dashboard page **Release sign-off** (English and Hebrew).
 4. When every row is `pass` or `accepted-blocked` with a note: `jarvis release signoff --version 4.1.0 --finish`. This writes
-   the tested beta version, its commit SHA and the date into the sheet. Commit it (docs only), then tag.
+   the tested beta version, its commit SHA and the date into the sheet. Commit it (docs only), then tag that commit (it is allowed to differ from the tested beta commit by documentation only).
 
 Any later change to a row voids the signature.
 
