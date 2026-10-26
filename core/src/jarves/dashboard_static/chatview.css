@@ -82,3 +82,10 @@
 .jc-msg[data-time]:not(.streaming)::after { content: attr(data-time); display: block; margin-block-start: 4px; font-size: 11px; line-height: 1.2; text-align: end; unicode-bidi: plaintext; }
 .jc-assistant[data-time]:not(.streaming)::after { margin-block-start: 6px; }
 .jc-display { align-self: flex-start; max-inline-size: 96%; padding: 8px 10px; border-radius: 10px; border: 1px solid var(--jc-line); font-size: 14px; }
+.jc-block { align-self: flex-start; max-inline-size: 96%; padding: 8px 10px; border-radius: 10px; border: 1px solid var(--jc-line); font-size: 14px; min-inline-size: 0; overflow-wrap: anywhere; }
+.jc-block .jc-fs { border: 0; margin: 0; padding: 0; min-inline-size: 0; }
+.jc-block legend { font-weight: 600; padding: 0 0 4px; }
+.jc-chk-row { display: flex; gap: 10px; align-items: flex-start; min-block-size: 44px; padding-block: 6px; cursor: pointer; }
+.jc-chk-row input { inline-size: 24px; block-size: 24px; margin: 0; margin-block-start: 2px; flex: none; }
+.jc-chk-row input:focus-visible { outline: 3px solid currentColor; outline-offset: 2px; }
+.jc-chk-row small { display: block; }

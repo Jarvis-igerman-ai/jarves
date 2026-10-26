@@ -256,6 +256,9 @@ class _ToolSink:
     def display(self, text: str) -> None:       # #363: read-only owner text from a tool result
         self.chat._display(self.turn, str(text))
 
+    def ui_block(self, block: dict) -> None:       # #444: validated UI block for the owner (dashboard renders it)
+        self.chat._ui_block(self.turn, block)
+
 
 class WebChat:
     """One shared conversation for every web client. Thread-safe: the HTTP threads call submit / state / poll, the turns
@@ -329,7 +332,7 @@ class WebChat:
     # ------------------------------------------------------------------ views
     def state(self, *, device: bool = False) -> dict:
         with self._lock:
-            msgs = [dict(m) for m in self.messages if not (device and m.get("role") == "display")]   # #363: owner only
+            msgs = [dict(m) for m in self.messages if not (device and m.get("role") in ("display", "ui_block"))]   # #363: owner only
             busy = self._busy
         return {"available": True, "cursor": self.events.last, "busy": busy, "messages": msgs,
                 "silent": self.silent_state(), "can_speak": (not device) and self.can_speak(),
@@ -344,8 +347,8 @@ class WebChat:
                 evs, resync = [], True               # the server restarted or the client fell far behind
             else:
                 evs, resync = self.events.since(after), False
-            if device and any(e.get("type") == "display" for e in evs):     # #363: a phone never gets WhatsApp text
-                kept = [e for e in evs if e.get("type") != "display"]
+            if device and any(e.get("type") in ("display", "ui_block") for e in evs):     # #363: a phone never gets WhatsApp text
+                kept = [e for e in evs if e.get("type") not in ("display", "ui_block")]
                 if not kept:
                     after = evs[-1]["id"]
                 evs = kept
@@ -434,6 +437,11 @@ class WebChat:
         line = {"role": "display", "turn": tid, "text": text}
         self._add_message(line)
         self.events.add("display", **line)
+
+    def _ui_block(self, tid: str, block: dict) -> None:
+        line = {"role": "ui_block", "turn": tid, "block": block}
+        self._add_message(line)
+        self.events.add("ui_block", **line)
 
     async def _run(self, tid: str, text: str, speak: bool, device: bool) -> None:
         silent = self.silent_state()["on"]

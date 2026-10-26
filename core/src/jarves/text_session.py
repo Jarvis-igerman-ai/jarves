@@ -10,6 +10,7 @@ from .budget import Budget
 from .memory import MemoryStore
 from .skills import Skill, SkillRegistry
 from .skills.builtin import ClockSkill, MemorySkill, StatusSkill
+from .ui_blocks import UiBlocksSkill
 from .skills.local_contacts import LocalContactsSkill
 from .skills.settings import Settings, SettingsSkill
 
@@ -65,6 +66,7 @@ def build(cfg, home: Path, confirm, *, agent_factory=None, transport=None, note:
     from . import drive_mode                     # V6 #216: off by default; never approves, only defers
     drive_mode.attach(registry, features, home, memory)
     registry.register(ClockSkill())
+    registry.register(UiBlocksSkill())
     registry.register(MemorySkill(memory))
     registry.register(LocalContactsSkill(memory))
     registry.allowed_actions.add("contact_remember")

@@ -86,6 +86,16 @@ def _tool_seen(name: str, ok: bool, code: str, message: str = "") -> None:
             pass                                       # a display problem never changes a tool result
 
 
+def _blocks_seen(blocks: list) -> None:
+    fn = getattr(TOOL_SINK.get(), "ui_block", None)
+    if blocks and callable(fn):
+        for b in blocks:
+            try:
+                fn(b)
+            except Exception:
+                pass
+
+
 def _display_seen(text: str) -> None:
     fn = getattr(TOOL_SINK.get(), "display", None)
     if text and callable(fn):
@@ -135,6 +145,7 @@ class ToolResult:
     # Owner-facing DISPLAY text (#363): printed by the chat UIs straight from the result, read-only. It is never put
     # in to_model(), so it cannot reach the model as instructions and never lifts the untrusted-turn rule.
     display: str = ""
+    ui_blocks: list = field(default_factory=list)      # #444: validated UI blocks for the owner; never in to_model()
 
     def to_model(self) -> str:
         out = {"ok": self.ok, "message": self.message, "code": self.code, **self.data}
@@ -586,6 +597,7 @@ class SkillRegistry:
         log("skills", "TOOL_RESULT", "tool finished", tool=name, ok=res.ok, result_code=res.code, origin=origin,
             ms=round(max(0.0, time.monotonic() - t_run - (self.confirm_elapsed() - approval_wait)) * 1000))
         _tool_seen(name, res.ok, res.code, res.message)   # terminal + web chat: one line per call (TOOL_SINK)
+        _blocks_seen(res.ui_blocks)                       # #444: validated UI blocks, owner-facing only
         _display_seen(res.display)                        # #363: read-only owner text (e.g. WhatsApp messages)
         if not res.ok and self.on_failure is not None:
             try:

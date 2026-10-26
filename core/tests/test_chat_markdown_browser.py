@@ -90,3 +90,38 @@ def test_messages_show_their_time_and_none_without_one(page):
     assert old.get_attribute("data-time") is None                                   # a resumed message has no time
     assert page.evaluate("getComputedStyle(document.querySelectorAll('.jc-msg')[1], '::after').content").strip('"') == \
         assistant.get_attribute("data-time")
+
+
+# ---- #444 S1: UI blocks (checklist / text) render as text nodes, keyboard accessible, RTL-safe
+BLOCKS = [
+    {"role": "ui_block", "turn": "t1", "block": {"v": 1, "id": "blk_1", "kind": "checklist", "title": "<img src=x onerror=\"window.__xss=1\">", "dir": "auto",
+     "items": [{"id": "i1", "label": "<script>window.__xss=1</script>", "detail": "<b>d</b>", "checked": False},
+               {"id": "i2", "label": "לקנות חלב", "detail": "", "checked": True}], "actions": []}},
+    {"role": "ui_block", "turn": "t1", "block": {"v": 1, "id": "blk_2", "kind": "text", "title": "", "dir": "auto", "text": "<i onclick=\"window.__xss=1\">hi</i>"}},
+    {"role": "ui_block", "turn": "t1", "block": {"v": 9, "id": "blk_3", "kind": "cards"}},
+]
+
+
+def test_ui_blocks_render_as_text_and_work_with_keyboard(browser):
+    p = browser.new_page(viewport={"width": 320, "height": 700})
+    errs: list[str] = []
+    p.on("pageerror", lambda e: errs.append(str(e)))
+    p.set_content(PAGE)
+    p.add_style_tag(path=str(STATIC / "chatview.css"))
+    p.add_script_tag(path=str(STATIC / "chatview.js"))
+    p.evaluate(BOOT.replace("messages: [", "messages: " + json.dumps(BLOCKS) + ".concat([") .replace("turn: '' }] }),", "turn: '' }]) }),") % json.dumps("x"))
+    p.wait_for_selector(".jc-block")
+    assert p.evaluate("window.__xss") is None and p.locator(".jc-block img, .jc-block script, .jc-block b, .jc-block i").count() == 0
+    assert p.locator(".jc-block").count() == 2                                  # the unknown kind is dropped
+    assert "window.__xss=1" in p.inner_text(".jc-block[data-kind=checklist]") and "<b>d</b>" in p.inner_text(".jc-block")
+    boxes = p.locator(".jc-block input[type=checkbox]")
+    assert boxes.count() == 2 and boxes.nth(1).is_checked() and not boxes.nth(0).is_checked()
+    assert p.locator(".jc-block fieldset > legend").count() == 1
+    assert p.locator(".jc-block label[dir=auto]").count() == 2
+    assert p.inner_text(".jc-block [role=status]").strip() == "1 of 2 marked"
+    boxes.nth(0).focus(); p.keyboard.press("Space")
+    assert boxes.nth(0).is_checked() and p.inner_text(".jc-block [role=status]").strip() == "2 of 2 marked"
+    assert p.locator(".jc-block label").first.bounding_box()["height"] >= 44
+    assert p.evaluate("document.documentElement.scrollWidth <= window.innerWidth")
+    assert errs == []
+    p.close()

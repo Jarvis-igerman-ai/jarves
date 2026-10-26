@@ -185,6 +185,32 @@
       String(m.text || "").split(String.fromCharCode(10)).forEach((ln) => d.append(h("div", { dir: "auto", style: "white-space:pre-wrap" }, ln)));
       log.append(d); scroll(true);
     }
+    // #444 (S1): owner-facing UI block from the server (text / checklist). Text nodes only, no HTML parsing; ids are
+    // server-assigned. Selection is local for now: no event leaves the page (S2 wires actions).
+    function blockView(m) {
+      const b = m.block;
+      if (!b || b.v !== 1 || (b.kind !== "text" && b.kind !== "checklist")) return;     // unknown block: dropped, text stays
+      const wrap = h("div", { class: "jc-msg jc-block", dir: b.dir === "rtl" || b.dir === "ltr" ? b.dir : "auto", "data-kind": b.kind });
+      if (b.kind === "text") {
+        if (b.title) wrap.append(h("b", { dir: "auto" }, b.title));
+        String(b.text || "").split(String.fromCharCode(10)).forEach((ln) => wrap.append(h("div", { dir: "auto", style: "white-space:pre-wrap" }, ln)));
+      } else {
+        const items = Array.isArray(b.items) ? b.items : [];
+        const status = h("div", { class: "jc-small", role: "status", "aria-live": "polite" });
+        const paint = () => { status.textContent = tx(`${wrap.querySelectorAll("input:checked").length} מתוך ${items.length} סומנו`,
+          `${wrap.querySelectorAll("input:checked").length} of ${items.length} marked`); };
+        const fs = h("fieldset", { class: "jc-fs" }, h("legend", { dir: "auto" }, b.title || tx("רשימה", "List")));
+        items.forEach((it) => {
+          const id = uidp + "c" + b.id + it.id;
+          const box = h("input", { type: "checkbox", id, onchange: paint });
+          box.checked = !!it.checked;
+          fs.append(h("label", { class: "jc-chk-row", for: id, dir: "auto" }, box,
+            h("span", { dir: "auto" }, it.label, it.detail ? h("small", { class: "jc-small", dir: "auto" }, it.detail) : null)));
+        });
+        wrap.append(fs, status); paint();
+      }
+      log.append(wrap); scroll(true);
+    }
     function toolLine(m) {
       const safety = !m.ok && m.code === "TOOL_UNTRUSTED_TURN";
       const label = `${m.name} · ${m.ok ? tx("הצליח", "ok") : safety ? tx("דולג (כלל בטיחות)", "skipped (safety rule)") : tx("נכשל", "failed")}${m.code && m.code !== "ok" ? " · " + m.code : ""}`;
@@ -196,6 +222,7 @@
     function renderMessage(m) {
       if (m.role === "tool") return toolLine(m);
       if (m.role === "display") return displayBlock(m);
+      if (m.role === "ui_block") return blockView(m);
       if (m.role === "notice") return bubble("notice", noticeText(m));
       return bubble(m.role === "user" ? "user" : "assistant", m.text, m.turn, m.ts);
     }
@@ -219,6 +246,7 @@
         turns.delete(e.turn);
       } else if (e.type === "tool") toolLine(e);
       else if (e.type === "display") displayBlock(e);
+      else if (e.type === "ui_block") blockView(e);
       else if (e.type === "notice") bubble("notice", noticeText(e));
       else if (e.type === "reset") api.state(lang()).then(load).catch(() => {});
       else if (e.type === "error") note(word(e.code, e.message || e.code), "err");
