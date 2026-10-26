@@ -63,8 +63,13 @@ ADDON_MODULES = ("jarves.telegram_channel", "jarves.instagram_channel", "jarves.
 # Privacy-sensitive or outward-acting: OFF on the first run whatever else says; ON only after an explicit yes.
 SAFE_OFF = frozenset({"camera", "face_recognition", "camera_when_away", "gmail_send", "calendar_write",
                       "dashboard_lan", "mobile_access", "browser", "telegram", "home_assistant", "instagram", "helper",
+<<<<<<< HEAD
                       "helper_readonly_auto", "whatsapp_bridge", "whatsapp_send", "whatsapp_archive", "agent_orchestrator",
                       "assisted_dialing", "drive_briefing", "anydo", "anydo_update", "github", "skills_manifest2"})
+=======
+                      "helper_readonly_auto", "whatsapp_bridge", "whatsapp_send", "whatsapp_archive", "agent_orchestrator", "agent_opencode",
+                      "assisted_dialing", "drive_briefing", "anydo", "anydo_update", "skills_manifest2"})
+>>>>>>> jarves/main
 # Registered and grouped (so coverage checks see them) but never offered by the wizard: the owner decided (20 Oct)
 # that the Helper asks for EVERY command; the read-only allow-list exists only as `jarvis features on ...`.
 WIZARD_HIDDEN = frozenset({"helper_readonly_auto", "whatsapp_archive",     # archive: explained and confirmed on its own
@@ -93,7 +98,7 @@ GROUPS: tuple[tuple[str, str, str, tuple[str, ...]], ...] = (
     ("updates", "עדכונים וגיבוי", "Updates & backup", ("update_check", "beta_channel", "auto_update", "release_signoff", "setup_tour", "backup", "self_awareness", "security_scans", "hotfix")),
     ("profiles", "פרופילים", "Profiles", ("profiles",)),
     ("helper", "עזרה במחשב (פקודות והתקנות)", "Computer helper (commands & installs)", ("helper", "helper_readonly_auto")),
-    ("agents", "סוכני קוד", "Coding agents", ("agent_orchestrator", "project_manager")),
+    ("agents", "סוכני קוד", "Coding agents", ("agent_orchestrator", "agent_opencode", "project_manager")),
 )
 ANSWER_KEYS = {"language", "connection", "api_key_from_env", "display_name", "spoken_name", "address_me",
                "wake_model", "voice", "approve_voice_cost", "features", "privacy_mode", "monthly_budget_usd",
@@ -1143,6 +1148,7 @@ BUNDLE: dict[str, list[Callable[[], tuple[bool, str]]]] = {
                            _mod("jarves.orchestrator.hook"), _mod("jarves.orchestrator.channel"),
                            _data("jarves", "dashboard_static/agents.js"),
                            _data("jarves.guides", "data/agent_orchestrator.toml")],
+    "agent_opencode": [_mod("jarves.orchestrator.opencode"), _data("jarves.guides", "data/agent_opencode.toml")],
     "conversation_recall": [_mod("jarves.recall"), _mod("jarves.recall_text"), _fts5(),
                             _data("jarves", "dashboard_static/recall.js"), _data("jarves.guides", "data/recall.toml")],
     "workspace_agent_edit": [_mod("jarves.workspace"), _data("jarves", "setup_guide.md")],

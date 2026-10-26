@@ -325,6 +325,11 @@ def _preview_call(ctx, msg: dict):
 
 
 def api_runtime_set(ctx, m, body):
+    """Mic mute, alerts, window, talk, autostart: local principal only (the dashboard allowlist already refuses a paired
+    phone; re-checked here like start/stop, #369)."""
+    who = getattr(ctx, "principal", None)
+    if who is not None and who.get("kind") != "local":
+        return 403, {"error": "these controls can be changed only from this computer"}
     body = body or {}
     change = {k: body[k] for k in ("display", "mic_muted", "alerts_paused", "talk") if k in body}
     out: dict = {}

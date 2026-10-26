@@ -1,0 +1,67 @@
+order = 73
+category = "system"
+pages = ["agents"]
+features = ["agent_opencode"]
+aliases = ["אופןקוד", "opencode", "open code", "opencode sessions"]
+links = ["agent_orchestrator", "privacy"]
+title_he = "OpenCode (קריאה בלבד)"
+title_en = "OpenCode (read-only)"
+what_he = "ג'ארביס יכול להסתכל על סשני OpenCode שרצים אצלכם דרך השרת המקומי שלו: אילו סשנים יש, מה המצב שלהם ואילו אירועים קרו לאחרונה. הוא רק קורא. הוא לא מפעיל סשנים, לא שולח הוראות ולא משנה כלום ב-OpenCode."
+what_en = "JARVES can look at the OpenCode sessions on this computer through OpenCode's local server: which sessions exist, their state and recent events. It only reads. It does not start sessions, send prompts or change anything in OpenCode."
+say = [
+  ["אילו סשנים של OpenCode פועלים?", "Which OpenCode sessions are running?"],
+  ["תראה לי את הסשנים של OpenCode", "Show me the OpenCode sessions"],
+]
+expect_he = "רשימה קצרה של סשנים עם מצב (עובד או ממתין). סשנים מתיקיות מותרות מופיעים גם ברשימת סוכני הקוד, לצפייה בלבד."
+expect_en = "A short list of sessions with their state (working or idle). Sessions in allow-listed folders also show in the coding-agents list, view only."
+cost_he = "אין עלות: קריאות מקומיות בלבד, בלי מודל ובלי API בתשלום."
+cost_en = "No cost: local reads only, no model call and no paid API."
+privacy_he = "הכתובת חייבת להיות מקומית (127.0.0.1) והסיסמה נלקחת ממשתנה סביבה, לא נשמרת בקובץ ולא נרשמת ביומן. כותרות סשן ואירועים הם טקסט לא מהימן: מנוקים, ולא מפעילים שום פעולה."
+privacy_en = "The address must be local (127.0.0.1) and the password comes from an environment variable: never saved in a file, never logged. Session titles and events are untrusted text: cleaned, and they never trigger an action."
+
+[[steps]]
+he = "בטרמינל שלכם הפעילו את שרת OpenCode עם סיסמה: הגדירו OPENCODE_SERVER_PASSWORD והריצו opencode serve (כתובת ברירת מחדל 127.0.0.1:4096). ג'ארביס לא מתקין ולא מפעיל אותו."
+en = "In your own terminal start the OpenCode server with a password: set OPENCODE_SERVER_PASSWORD and run opencode serve (default 127.0.0.1:4096). JARVES does not install or start it."
+
+[[steps]]
+he = "הגדירו את אותו משתנה OPENCODE_SERVER_PASSWORD גם לג'ארביס (אפשר לשנות את שם המשתנה ב-agents.opencode_password_env)."
+en = "Set the same OPENCODE_SERVER_PASSWORD variable for JARVES too (the variable name can be changed in agents.opencode_password_env)."
+
+[[steps]]
+he = "הדליקו את המתג \"OpenCode (קריאה בלבד)\". הוא כבוי כברירת מחדל."
+en = "Switch on \"OpenCode (read-only)\". It is off by default."
+action = "feature_on:agent_opencode"
+check = "enabled:agent_opencode"
+
+[[steps]]
+he = "בדקו את החיבור: jarvis agents opencode status, ואז jarvis agents opencode sessions או events."
+en = "Check the connection: jarvis agents opencode status, then jarvis agents opencode sessions or events."
+action = "command:jarvis agents opencode status"
+
+[[steps]]
+he = "לכיבוי: כבו את המתג (jarvis features off agent_opencode). ג'ארביס מפסיק לפנות לשרת מיד."
+en = "To turn it off: switch it off (jarvis features off agent_opencode). JARVES stops contacting the server at once."
+
+[[problems]]
+he = "AUTH_REQUIRED: צריך סיסמה"
+en = "AUTH_REQUIRED: a password is needed"
+fix_he = "משתנה הסביבה OPENCODE_SERVER_PASSWORD לא מוגדר לג'ארביס, או שהסיסמה שגויה. הגדירו אותה זהה לשרת והפעילו את ג'ארביס מחדש."
+fix_en = "The OPENCODE_SERVER_PASSWORD variable is not set for JARVES, or the password is wrong. Set it equal to the server's and restart JARVES."
+
+[[problems]]
+he = "NOT_LOOPBACK: הכתובת לא מקומית"
+en = "NOT_LOOPBACK: the address is not local"
+fix_he = "agents.opencode_url חייב להיות http://127.0.0.1:PORT (או localhost). כתובת ברשת או באינטרנט נדחית בכוונה."
+fix_en = "agents.opencode_url must be http://127.0.0.1:PORT (or localhost). A LAN or internet address is refused on purpose."
+
+[[problems]]
+he = "PROVIDER_MISSING: אין שרת"
+en = "PROVIDER_MISSING: no server"
+fix_he = "שרת OpenCode לא רץ על הכתובת. הפעילו אותו בעצמכם (opencode serve) ובדקו שהפורט זהה."
+fix_en = "No OpenCode server answers at that address. Start it yourself (opencode serve) and check the port matches."
+
+[[problems]]
+he = "SERVER_ERROR: תשובה לא צפויה"
+en = "SERVER_ERROR: unexpected answer"
+fix_he = "השרת ענה בשגיאה או בפורמט שלא מוכר, כנראה גרסה אחרת של OpenCode. עדכנו את OpenCode והריצו jarvis agents opencode status."
+fix_en = "The server answered with an error or an unknown shape, probably another OpenCode version. Update OpenCode and run jarvis agents opencode status."
