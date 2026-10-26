@@ -1986,6 +1986,7 @@ _EXT_LATE = (
     ("release_cmd", ("release",), {"release": "cmd_release"}),        # jarvis release signoff
     ("release_notes", ("release-notes",), "COMMANDS"),                # what changed per version, HTML page
     ("cli_parity", ("timers", "lists", "goals", "prefs", "proactive", "dev", "notes", "jobs", "reports"), "COMMANDS"),
+    ("model_lab", ("modellab",), "COMMANDS"),                          # V7 M3: jarvis modellab status | run | report
     ("budget_cli", ("budget",), "COMMANDS"),                          # SW-V4 D (#14)
     ("privacy", ("privacy",), "COMMANDS"),                            # OD-12: jarvis privacy status | full-text on|off
     ("phone_cli", ("phone",), "COMMANDS"),                            # V5: jarvis phone status | approvals | ...
