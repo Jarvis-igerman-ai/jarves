@@ -42,7 +42,7 @@ def mk(tmp_path, *, on=True, answer=True, repos=(REPO,), fake=None, resolution="
     return w, ap, fake
 
 
-def act(kind="pr.open", repo=REPO, target="", payload=None, preview="open an issue"):
+def act(kind="merge.enqueue", repo=REPO, target="", payload=None, preview="open an issue"):
     return gw.WriteAction(kind=kind, repo=repo, target=target, payload=payload or {"title": "t"}, preview=preview)
 
 
@@ -61,7 +61,7 @@ def test_passing_every_gate_is_not_implemented_and_nothing_is_written(tmp_path):
     assert (r.ok, r.code) == (False, "GITHUB_WRITE_NOT_IMPLEMENTED")
     assert len(ap.asked) == 1 and {m for m, _ in fake.calls} == {"GET"}      # only the read probe
     p, kw = ap.asked[0]
-    assert "pr.open" in p and "octo/r" in p and '"title": "t"' in p and kw["risk"] == "high"
+    assert "merge.enqueue" in p and "octo/r" in p and '"title": "t"' in p and kw["risk"] == "high"
     assert kw["details"]["action_hashes"] == act().hash()[:16]
 
 
@@ -216,7 +216,7 @@ def test_token_never_in_results_or_status(tmp_path, caplog):
 def test_handler_path_and_no_write_verbs(tmp_path, monkeypatch):
     async def h(a, client):
         return {"number": 7}
-    monkeypatch.setitem(gw.HANDLERS, "pr.open", h)
+    monkeypatch.setitem(gw.HANDLERS, "merge.enqueue", h)
     w, ap, _ = mk(tmp_path)
     r = run(w.execute(act(), origin="user"))
     assert r.ok and r.data == {"number": 7} and audit(tmp_path)[-1]["result"] == "OK"

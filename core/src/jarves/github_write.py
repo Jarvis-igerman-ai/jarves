@@ -529,9 +529,9 @@ def _probe(c: feat.ProbeCtx) -> tuple[bool, str]:
 
 feat.register(FEATURE, "GitHub: כתיבה באישור", "GitHub: writes with approval", False, probe=_probe, needs=["github"],
               risk="high",
-              about="change GitHub (create or edit issues, comment, add or remove labels) only after you approve the exact text, only on repos you list, never merge directly",
-              targets=targets("UNIT test_github_write.py, test_github_issues.py (fake GitHub API and approvals, no network)",
-                              "never touched the real GitHub API; the owner creates the token with Issues write for the chosen repos"),
+              about="change GitHub (issues, comments, labels, pull requests, reviews, CI re-run) only after you approve the exact text, only on repos you list, never merge directly",
+              targets=targets("UNIT test_github_write.py, test_github_issues.py, test_github_prs.py (fake GitHub API and approvals, no network)",
+                              "never touched the real GitHub API; the owner creates the token with Issues, Pull requests and Actions write for the chosen repos"),
               permissions=["writes approved each time"], settings="jarvis github write status")
 
 
@@ -563,3 +563,4 @@ def cmd_github_write(a, cfg, home) -> int:
 
 
 from . import github_issues  # noqa: E402,F401  (registers the G3 kinds: HANDLERS and VALIDATORS)
+from . import github_prs  # noqa: E402,F401  (registers the G4 kinds)

@@ -55,7 +55,7 @@ CONTINUE_IN_TERMINAL = -1          # a browser action returns this when it could
 KEEP_SKIPPED = ("names", "wake", "voice", "beta", "addons", "privacy", "budget")      # "keep my settings": never asked
 STEPS = ("language", "connection", "names", "wake", "voice", "beta", "addons", "privacy", "budget", "google", "connect")
 # Modules that register add-ons in jarves.features at import (the dashboard imports the same ones).
-ADDON_MODULES = ("jarves.telegram_channel", "jarves.instagram_channel", "jarves.whatsapp", "jarves.briefing", "jarves.homeassistant", "jarves.anydo", "jarves.github_client", "jarves.openrouter", "jarves.github_write", "jarves.github_issues", "jarves.model_lab",
+ADDON_MODULES = ("jarves.telegram_channel", "jarves.instagram_channel", "jarves.whatsapp", "jarves.briefing", "jarves.homeassistant", "jarves.anydo", "jarves.github_client", "jarves.openrouter", "jarves.github_write", "jarves.github_issues", "jarves.github_prs", "jarves.model_lab",
                  "jarves.appearance", "jarves.backup", "jarves.usage", "jarves.updates", "jarves.runtime",
                  "jarves.operations", "jarves.guides", "jarves.skills.generated", "jarves.browser", "jarves.browser_pilot", "jarves.profiles",
                  "jarves.selfcheck", "jarves.connect", "jarves.skills.helper", "jarves.context_trace",
@@ -1251,7 +1251,7 @@ BUNDLE: dict[str, list[Callable[[], tuple[bool, str]]]] = {
     "github": [_mod("jarves.github_client"), _mod("httpx"), _data("jarves.guides", "data/github.toml")],
     "model_lab": [_mod("jarves.model_lab"), _mod("jarves.model_policy"), _data("jarves.guides", "data/model_lab.toml")],
     "provider_openrouter": [_mod("jarves.openrouter"), _mod("httpx"), _data("jarves.guides", "data/provider_openrouter.toml")],
-    "github_write": [_mod("jarves.github_write"), _mod("jarves.github_issues"), _mod("jarves.github_client"), _mod("httpx"), _data("jarves.guides", "data/github_write.toml")],
+    "github_write": [_mod("jarves.github_write"), _mod("jarves.github_issues"), _mod("jarves.github_prs"), _mod("jarves.github_client"), _mod("httpx"), _data("jarves.guides", "data/github_write.toml")],
     "profiles": [_mod("jarves.profiles"), _data("jarves", "dashboard_static/profiles.js"),
                  _data("jarves.guides", "data/profiles.toml")],
     "helper": [_mod("jarves.skills.helper"), _mod("jarves.approvals"), _mod("jarves.approval_popup"), _win(_mod("tkinter")),
