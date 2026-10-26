@@ -59,6 +59,24 @@ def test_page_scope(url, scope):
     assert bp.page_scope(url) == scope
 
 
+@pytest.mark.parametrize("url,scope", [
+    # numeric hosts a browser reads as IPv4 (octal, hex, shortened, percent-encoded, full-width): never 'public'
+    ("http://0177.0.0.1/", ""), ("http://127.1/", ""), ("http://10.1/", ""), ("http://0xa9.0xfe.0xa9.0xfe/", ""),
+    ("http://2130706433/", ""), ("http://10.0.0.%31/", ""), ("http://１０.０.０.１/", ""),
+    ("http://169.254.169.254./", ""),
+    # trailing dot: same host for the browser
+    ("http://claude.ai./", ""), ("http://printer.local./", ""), ("http://metadata.google.internal./", ""),
+    ("http://localhost./", "local"), ("http://host.home.arpa/", ""),
+    # IPv6 forms that embed a private IPv4
+    ("http://[::ffff:192.168.1.1]/", ""), ("http://[64:ff9b::c0a8:101]/", ""), ("http://[fd00::1]/", ""),
+    ("http://[::ffff:8.8.8.8]/", "public"), ("http://[::1]/", "local"),
+    # userinfo never changes the host
+    ("http://public@127.0.0.1/", "local"), ("http://127.0.0.1@example.com/", "public"),
+    ("http://user@192.168.0.1/", "")])
+def test_page_scope_bypasses(url, scope):
+    assert bp.page_scope(url) == scope
+
+
 def test_read_redacts_and_marks_untrusted(tmp_path):
     s, d, _ = mk(tmp_path)
     assert s.open("https://example.com/")["scope"] == "public"
