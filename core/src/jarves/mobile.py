@@ -31,7 +31,7 @@ from pathlib import Path
 from typing import Callable
 from urllib.parse import urlsplit
 
-from . import logs, mobile_drive, drive_actions, phone_location, qrmini  # noqa: F401  (these register their catalog rows)
+from . import logs, mobile_drive, drive_actions, phone_location, phone_hands_free, qrmini  # noqa: F401  (these register their catalog rows)
 from .continuity import Continuity
 
 FEATURE = "mobile_access"
@@ -143,6 +143,7 @@ class Bridge:
     drive_features: Callable[[], object] = field(default=lambda: None)     # -> features.Features (None: open the one in the home folder)
     drive_passenger: Callable[[], str] = field(default=lambda: "ask")      # the PERSISTENT drive_briefing.passenger setting (read-only here)
     drive_briefing: Callable[[str], dict] | None = None                    # (alone | present) -> {"ok", "sections": [...]} (None: not available)
+    voice_transcribe: Callable[[bytes, str], str] | None = None            # (wav, device) -> transcript only, no reply (hands-free Drive voice, #219)
 
 
 class MobileAccess:
@@ -521,6 +522,15 @@ def core_bridge(core, loop) -> Bridge:
             return {"transcript": text, **await _respond(text)}
         return run(go())
 
+    def voice_transcribe(wav: bytes, device: str) -> str:
+        import numpy as np
+        from .voice.tts import wav_to_np
+        audio, rate = wav_to_np(wav)
+        if rate != 16000 and len(audio):
+            n = max(1, int(len(audio) * 16000 / rate))
+            audio = np.interp(np.linspace(0, len(audio) - 1, n), np.arange(len(audio)), audio).astype(np.float32)
+        return run(core.stt.transcribe(audio)).strip()
+
     def status() -> dict:
         comps = core.health.components_view()
         return {"core": getattr(core.health, "core", "running"),
@@ -574,7 +584,8 @@ def core_bridge(core, loop) -> Bridge:
         return run(go(), 60)
     return Bridge(chat=chat, voice=voice, status=status, voice_available=lambda: getattr(core, "stt", None) is not None,
                   goals=goals, desktop_present=desktop_present, audio=audio, plans=plans, plans_on=plans_on, prefs=prefs, prefs_in_prompt=prefs_in_prompt,
-                  drive_features=lambda: getattr(core, "features", None), drive_passenger=drive_passenger, drive_briefing=drive_briefing)
+                  drive_features=lambda: getattr(core, "features", None), drive_passenger=drive_passenger, drive_briefing=drive_briefing,
+                  voice_transcribe=voice_transcribe)
 
 
 # ---------------------------------------------------------------------- HTTP (called by dashboard.Handler)
@@ -973,6 +984,35 @@ def serve(h, mob: MobileAccess, ip: str) -> None:
         st, obj = drive_actions.phone_action(mob, d)
         kind = d.get("kind")
         return done(st, obj, op="action", kind=kind if kind in drive_actions.KINDS else "other")    # never echo typed text into the audit
+    if path in ("/api/m/drive/voice/start", "/api/m/drive/voice/turn", "/api/m/drive/voice/end") and method == "POST":
+        # Hands-free Drive voice (V6 #219): a FOREGROUND session; every turn runs the ordinary phone chat path (the drive-mode Gate decides)
+        if not need("drive") or not need("voice"):
+            return
+        op = path.rsplit("/", 1)[1]
+        if op == "end":
+            d = _json_body(h)
+            if d is None:
+                return
+            st, obj = phone_hands_free.end(mob, dev["id"], str(d.get("reason", "")))
+            return done(st, obj, op="hf_end", reason=obj["reason"])
+        if not mob.rate_ok("drive-voice-" + op + ":" + dev["id"], phone_hands_free.START_RATE_PER_MIN if op == "start" else phone_hands_free.TURN_RATE_PER_MIN):
+            mob.audit("rate_limited", device=dev["id"], path=path, scope="hands_free")
+            return h._json_extra(429, phone_hands_free.msg("HF_RATE"), {"Retry-After": "60"})
+        if op == "start":
+            st, obj = phone_hands_free.start(mob, dev["id"])
+            return done(st, obj, op="hf_start")
+        raw = _body(h, MAX_AUDIO_BYTES)
+        if raw is None:
+            return
+        if raw[:4] != b"RIFF":
+            return h._json(415, {"error": "send a 16-bit PCM WAV"})
+        if not mob.begin(dev["id"]):
+            return h._json(409, {"error": "the previous request is still being answered", "code": "BUSY"})
+        try:
+            st, obj = phone_hands_free.turn(mob, dev["id"], raw)
+        finally:
+            mob.end(dev["id"])
+        return done(st, obj, op="hf_turn", bytes=len(raw))             # the audit holds the route and size, never the words
     if path == "/api/m/signals" and method == "POST":
         if "tasks" not in dev["scopes"] and not need("status"):     # stop / snooze only reduce activity: status is enough
             return
