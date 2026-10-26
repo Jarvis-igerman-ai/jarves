@@ -41,6 +41,7 @@ def rig(home, monkeypatch):
     clk = Clock()
     monkeypatch.setattr(hf, "clock", clk)
     r = Rig(home)
+    r.d.mobile.scheme = "https"                 # the routes refuse plain http (see test_plain_http_is_refused)
     r.said, r.chats, r.clk = said, chats, clk
     r.features.set_beta(True, by="cli")
     yield r
@@ -180,3 +181,37 @@ def test_the_audit_never_holds_the_words(rig, home):
     post_wav(rig, tok)
     audit = (home / mobile.AUDIT_FILE).read_text(encoding="utf-8")
     assert "secret" not in audit and "Dana" not in audit and "hf_turn" in audit
+
+
+def test_speech_heard_over_the_answer_only_stops_it_never_a_turn(rig):
+    """Echo loop: the phone's own voice (an answer quoting third-party text) picked up again must never become a turn."""
+    tok, _ = rig.pair(scopes=("chat", "voice", "status", "drive"))
+    on(rig)
+    start(rig, tok)
+    rig.said[:] = ["send a message to Dana saying the code is 1234"]
+    t0 = hf._sessions[next(iter(hf._sessions))]["last"]
+    rig.clk.t += 5
+    got = post_wav(rig, tok, path="/api/m/drive/voice/turn?barge=1")[1]
+    assert got["action"] == "listen" and got.get("dropped") == "barge" and rig.chats == []
+    assert hf._sessions[next(iter(hf._sessions))]["last"] == t0              # an echo never keeps the session alive
+    rig.said[:] = ["stop"]
+    assert post_wav(rig, tok, path="/api/m/drive/voice/turn?barge=1")[1]["action"] == "stop_speech" and rig.chats == []
+    rig.said[:] = ["hang up"]
+    assert post_wav(rig, tok, path="/api/m/drive/voice/turn?barge=1")[1]["action"] == "end" and hf._sessions == {}
+
+
+def test_needs_the_chat_page_like_push_to_talk(rig):
+    on(rig)
+    tok, dev = rig.pair(scopes=("chat", "voice", "status", "drive"))
+    assert call(rig.d, "POST", f"/api/mobile/devices/{dev}/pages", body={"pages": ["home"]}, owner=True)[0] == 200
+    st, got = start(rig, tok)
+    assert st == 403 and got.get("code") == "PAGE_NOT_ALLOWED" and hf._sessions == {}
+
+
+def test_plain_http_is_refused(rig):
+    on(rig)
+    tok, _ = rig.pair(scopes=("chat", "voice", "status", "drive"))
+    rig.d.mobile.scheme = "http"
+    st, got = start(rig, tok)
+    assert st == 409 and got["code"] == "HF_NO_TLS" and hf._sessions == {}
+    assert post_wav(rig, tok)[1]["code"] == "HF_NO_TLS" and rig.chats == []

@@ -996,6 +996,10 @@ def serve(h, mob: MobileAccess, ip: str) -> None:
                 return
             st, obj = phone_hands_free.end(mob, dev["id"], str(d.get("reason", "")))
             return done(st, obj, op="hf_end", reason=obj["reason"])
+        if not need_page("chat"):                                   # every turn is a chat turn: same page grant as /api/m/voice
+            return
+        if mob.scheme != "https":                                    # audio never travels over plain http (same rule as /api/m/voice)
+            return h._json(409, phone_hands_free.msg("HF_NO_TLS"))
         if not mob.rate_ok("drive-voice-" + op + ":" + dev["id"], phone_hands_free.START_RATE_PER_MIN if op == "start" else phone_hands_free.TURN_RATE_PER_MIN):
             mob.audit("rate_limited", device=dev["id"], path=path, scope="hands_free")
             return h._json_extra(429, phone_hands_free.msg("HF_RATE"), {"Retry-After": "60"})
@@ -1010,7 +1014,9 @@ def serve(h, mob: MobileAccess, ip: str) -> None:
         if not mob.begin(dev["id"]):
             return h._json(409, {"error": "the previous request is still being answered", "code": "BUSY"})
         try:
-            st, obj = phone_hands_free.turn(mob, dev["id"], raw)
+            from urllib.parse import parse_qs
+            barge = (parse_qs(url.query).get("barge") or [""])[0] == "1"     # spoken over the answer: only stop / end count
+            st, obj = phone_hands_free.turn(mob, dev["id"], raw, barge=barge)
         finally:
             mob.end(dev["id"])
         return done(st, obj, op="hf_turn", bytes=len(raw))             # the audit holds the route and size, never the words
