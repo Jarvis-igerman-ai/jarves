@@ -39,3 +39,7 @@ he = "כתוב 'יכולת בטא: קודם מפעילים את יכולות ה�
 en = "It says 'beta feature: turn on beta features first'"
 fix_he = "היכולת מסומנת בטא והמתג הכללי כבוי. אם אתם מוכנים לסיכון: jarvis features beta on, ואז מפעילים את היכולת."
 fix_en = "The feature is labelled beta and the global switch is off. If you accept the risk: jarvis features beta on, then turn the feature on."
+
+[[steps]]
+he = "מנהלים מערכת או סביבת בדיקות יכולים להפעיל את המתג הכללי עם משתנה הסביבה JARVES_BETA_FEATURES=1 (שווה להפעלה בקובץ)."
+en = "An administrator or a test environment can turn the global switch on with the environment variable JARVES_BETA_FEATURES=1 (equal to turning it on in the file)."

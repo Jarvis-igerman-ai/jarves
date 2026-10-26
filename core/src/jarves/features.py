@@ -566,6 +566,8 @@ class Features:
             self._refresh()
             v = self._state.get("beta_features")
             if v is None:
+                if os.environ.get(BETA_ENV) == "1":
+                    return True                      # env opt-in: no migration write (a read must not touch the file)
                 if self._existing_install():
                     self._state["beta_features"] = True
                     self._state.setdefault("changed", {})["beta_features"] = {"by": "migration", "ts": time.time()}

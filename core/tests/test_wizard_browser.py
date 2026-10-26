@@ -23,7 +23,7 @@ FIRST_CARD_MS = 2000          # V4.5 workstream F: first actionable card within 
 @pytest.fixture(scope="module")
 def site():
     from playwright.sync_api import sync_playwright
-    keep = {k: os.environ.get(k) for k in ("JARVES_HOME", "OPENAI_API_KEY", "JARVES_TEST_OFFLINE")}
+    keep = {k: os.environ.get(k) for k in ("JARVES_HOME", "OPENAI_API_KEY", "JARVES_TEST_OFFLINE", "JARVES_BETA_FEATURES")}
     with tempfile.TemporaryDirectory() as tmp:
         d, _sid = apc.start_dashboard(Path(tmp))
         try:

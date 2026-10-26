@@ -614,7 +614,10 @@ def set_switch(cfg, home: Path, on: bool, by: str) -> dict:
     f = features.Features(cfg, home)
     if on and not f.enabled("update_check"):
         raise updates.UpdateError("AUTO_UPDATE_NEEDS_CHECK", "turn the update check on first: jarvis features on update_check")
-    f.set(FEATURE, on, by=by)
+    try:
+        f.set(FEATURE, on, by=by)
+    except features.BetaLocked as e:                      # one friendly message, no traceback (#469)
+        raise updates.UpdateError(e.code, f"{features.BETA_MSG_HE} / {features.BETA_MSG}") from e
     return {"enabled": on}
 
 
