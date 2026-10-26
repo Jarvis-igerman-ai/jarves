@@ -81,3 +81,38 @@ def diagnose(*, floor_db: float, speech_db: float | None, best_score: float, att
     return "PHRASE_NOT_MATCHED", ("Speech was heard at a good level but it did not sound like the wake phrase "
                                   f"(best score {best_score:.2f}). Say \"Hey Jarvis\" (or \"Hi Jarvis\"), with "
                                   f"a short pause before the next words. {attempts} speech burst(s) heard.")
+
+
+MIC_CLIP_FIX = ("mic level too high: set Microphone Array to ~50 and boost 0 dB in Windows Sound > Recording "
+                "(Sound settings > Recording > Microphone Array > Properties > Levels), then run `jarvis wake test` again")
+
+
+class ClipMonitor:
+    """Live clipping detector for the wake mic (a too-high Windows mic level distorts every wake phrase and every
+    speech-to-text result: the owner's 24 wake samples were all rejected as 'clipped'). Counts int16 samples at or
+    near full scale; `clipping()` is True when a loud burst has a clearly clipped share of samples. Pure, no I/O."""
+
+    FULL = 32000                 # |sample| >= this counts as clipped (full scale is 32767)
+    BURST_FRAC = 0.002           # same share the sample checker uses (wake_prod.check_samples)
+    NEED_FRAMES = 3              # clipped frames before it is reported (a single pop is not enough)
+
+    def __init__(self) -> None:
+        self.frames = self.clipped_frames = 0
+        self.peak = 0.0
+
+    def feed(self, chunk: bytes) -> bool:
+        import numpy as np
+        a = np.frombuffer(chunk, "<i2")
+        if not a.size:
+            return False
+        self.frames += 1
+        self.peak = max(self.peak, float(np.abs(a.astype(np.int32)).max()) / 32768.0)
+        hit = float((np.abs(a.astype(np.int32)) >= self.FULL).mean()) > self.BURST_FRAC
+        self.clipped_frames += hit
+        return hit
+
+    def clipping(self) -> bool:
+        return self.clipped_frames >= self.NEED_FRAMES
+
+    def advice(self) -> str | None:
+        return MIC_CLIP_FIX if self.clipping() else None
