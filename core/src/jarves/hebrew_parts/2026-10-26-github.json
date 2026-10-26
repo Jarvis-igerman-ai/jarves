@@ -1,0 +1,5 @@
+{
+ "read your GitHub repos, issues, pull requests, checks and merge queue with a read-only token kept on this computer only (no writes)": "קורא את המאגרים, ה-issues, ה-pull requests, הבדיקות ותור המיזוג שלך ב-GitHub עם אסימון לקריאה בלבד השמור במחשב הזה בלבד (בלי כתיבה)",
+ "never connected to the real GitHub API; the owner creates the read-only token": "מעולם לא חובר ל-GitHub האמיתי; הבעלים יוצר את האסימון לקריאה בלבד",
+ "UNIT test_github_client.py (fake GitHub API, no network)": "בדיקות יחידה test_github_client.py (GitHub מדומה, בלי רשת)"
+}
