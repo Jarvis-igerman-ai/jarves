@@ -50,7 +50,6 @@ fix_en = "Check that Any.do is connected (jarvis anydo status) and that the feat
 [[problems]]
 he = "הכרטיסים פגו או \"כבר נשלחו\""
 en = "The cards expired or were \"already sent\""
-codes = ["UI_ACTION_STALE", "UI_ACTION_EXPIRED"]
 fix_he = "הכרטיסים תקפים כחצי שעה ונשלחים פעם אחת. בקשו מג'ארביס לעשות משימות מההודעות שוב."
 fix_en = "Cards work for about half an hour and are sent once. Ask JARVES to make tasks from the messages again."
 
