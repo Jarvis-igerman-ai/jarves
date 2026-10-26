@@ -2037,8 +2037,14 @@ class Core:
         """Short cue for a wake-opened live session; None when the greeting feature is off."""
         if not self.cfg.voice.greeting:
             return None
+        try:
+            from . import drive_mode
+            if self.features.active(drive_mode.FEATURE):
+                return None                # drive mode: no spoken cue (and no start-greeting claim) on a wake
+        except Exception:
+            pass
         self._greeted = True              # the wake session greets: no second start-greeting when the face connects later
-        return "אני מקשיב."
+        return "אני מקשיב." if self.cfg.voice.language == "he" else "I'm listening."
 
     # ------------------------------------------------------------------ feature switches (features.py)
     def _health_components(self) -> dict:

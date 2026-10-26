@@ -396,8 +396,8 @@ def test_vq4_cli_wake_reset_tune(tmp_path, capsys):
 def test_vq5_configured_wake_threshold_is_honoured():
     from jarves.config import VoiceConfig
     from jarves.voice.wakeword import make_wake_detector
-    v = VoiceConfig(wake_threshold=0.25, wake_confirm=True)
-    assert make_wake_detector(v).accept == 0.25
+    d = make_wake_detector(VoiceConfig(wake_threshold=0.25, wake_confirm=True))
+    assert d.gate == 0.25 and d.accept == 0.5      # #519: owner threshold starts the speech confirm; instant stays 0.5
     assert make_wake_detector(VoiceConfig(wake_confirm=True)).accept == 0.5     # unset: unchanged default
     from jarves import app
     assert app.WAKE_START_HOLD_S <= 10
