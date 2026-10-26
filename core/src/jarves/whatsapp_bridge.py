@@ -214,8 +214,10 @@ def bridge_command(home: Path) -> list[str] | None:
         return [sys.executable, str(p)] if p.suffix == ".py" else [str(p)]
     here = Path(__file__).resolve()
     exe = "whatsapp_bridge.exe" if sys.platform == "win32" else "whatsapp_bridge"
-    for cand in (here.parents[3] / "bridge" / exe,                       # installed payload: <root>/bridge/
-                 here.parents[3] / "bridge" / "whatsapp" / "dist" / exe):  # a source checkout after the build script
+    # installed: <root>/python/Lib/site-packages/jarves/ -> <root> is parents[4]; source checkout: core/src/jarves -> parents[3]
+    root = here.parents[4] if here.parents[1].name.lower() == "site-packages" else here.parents[3]
+    for cand in (root / "bridge" / exe,                                  # installed payload: <root>/bridge/ (what hotfix replaces)
+                 root / "bridge" / "whatsapp" / "dist" / exe):           # a source checkout after the build script
         if cand.is_file():
             return [str(cand)]
     from . import whatsapp_bridge_install as wbi          # the owner-downloaded one (<home>/bridge), signed manifest beside it

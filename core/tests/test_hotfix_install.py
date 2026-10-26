@@ -138,12 +138,12 @@ def test_build_only_repo_changes_are_listed_not_refused(tree, path):
     assert (inst / "a.py").read_text() == "A=2\n" and m["pending_installer"] == [path]
 
 
-@pytest.mark.parametrize("path,code", [("core/uv.lock", "HOTFIX_DEP_UNVERIFIED"), ("core/requirements.txt", "HOTFIX_NEEDS_SLICE2"),
-                                       ("packaging/bridge_pin.json", "HOTFIX_BRIDGE_UNVERIFIED"),
-                                       ("bridge/whatsapp/main.go", "HOTFIX_BRIDGE_UNVERIFIED")])
+@pytest.mark.parametrize("path,code", [("core/uv.lock", "HOTFIX_UNTRUSTED_SOURCE"), ("core/requirements.txt", "HOTFIX_NEEDS_SLICE2"),
+                                       ("packaging/bridge_pin.json", "HOTFIX_UNTRUSTED_SOURCE"),
+                                       ("bridge/whatsapp/main.go", "HOTFIX_UNTRUSTED_SOURCE")])
 def test_dependency_and_bridge_changes_are_verified_or_refused(tree, path, code):
-    """Slice 2 (#460): a lock/bridge change that cannot be verified (no readable lock/pin in this fake source) is refused
-    with its own code; other dependency files keep the slice-2 refusal. Nothing is touched."""
+    """Slice 2 (#460): a lock/bridge change from a folder (not a commit on jarves main, review #465) is refused before any
+    verification; other dependency files keep the slice-2 refusal. Nothing is touched."""
     inst, src, home = tree
     write(src, "a.py", "A=2\n")
     with pytest.raises(hf.Refused) as e:
@@ -383,9 +383,9 @@ def test_git_skips_binary_and_installer_code_inside_the_package(po):
         shutil.rmtree(s.cleanup, ignore_errors=True)
 
 
-@pytest.mark.parametrize("path,code", [("core/uv.lock", "HOTFIX_DEP_UNVERIFIED"), ("core/requirements.txt", "HOTFIX_NEEDS_SLICE2"),
-                                       ("packaging/bridge_pin.json", "HOTFIX_BRIDGE_UNVERIFIED"),
-                                       ("bridge/whatsapp/bridge.exe", "HOTFIX_BRIDGE_UNVERIFIED")])
+@pytest.mark.parametrize("path,code", [("core/uv.lock", "HOTFIX_UNTRUSTED_SOURCE"), ("core/requirements.txt", "HOTFIX_NEEDS_SLICE2"),
+                                       ("packaging/bridge_pin.json", "HOTFIX_UNTRUSTED_SOURCE"),
+                                       ("bridge/whatsapp/bridge.exe", "HOTFIX_UNTRUSTED_SOURCE")])
 def test_git_source_refuses_unverifiable_dependency_and_bridge_changes(po, path, code):
     inst, home, commit, repo, base = po
     s = commit({"core/src/jarves/a.py": "A=2\n", path: "changed\n"})

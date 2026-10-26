@@ -29,6 +29,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import time
 import tomllib
 import urllib.parse
 import urllib.request
@@ -42,7 +43,16 @@ from .hotfix import HotfixError, Refused, sha256
 DEP_FILES = ("pyproject.toml", "uv.lock")
 LOCK_NAMES = ("core/uv.lock", "uv.lock")
 PIN_PATH = "packaging/bridge_pin.json"
-BRIDGE_DEST_OK = re.compile(r"^bridge/[A-Za-z0-9_.-]+$")
+BRIDGE_DEST_OK = re.compile(r"^bridge/whatsapp_bridge(\.exe)?$")   # the file whatsapp_bridge.bridge_command starts, nothing else
+# Review #465: hosts are an allow-list, never taken from the (target-controlled) lock.
+REGISTRY_HOSTS = {"pypi.org"}
+WHEEL_HOSTS = {"files.pythonhosted.org", "pypi.org"}
+TEST_HOSTS = {"127.0.0.1"}                              # only with allow_insecure_urls (tests)
+SAFE_NAME = re.compile(r"^[a-z0-9]([a-z0-9-]*[a-z0-9])?$")
+SAFE_VERSION = re.compile(r"^[A-Za-z0-9][A-Za-z0-9.+!_-]*$")
+SAFE_WHEEL_FILE = re.compile(r"^[A-Za-z0-9_.+!-]+\.whl$")
+MAX_UNPACKED_BYTES = 3 * 1024 * 1024 * 1024
+STARTUP_HOOKS = ("sitecustomize.py", "usercustomize.py")
 EXTRAS = ("voice", "camera", "tray", "browser")        # what packaging/build_windows.ps1 installs (no dev)
 MAX_WHEEL_BYTES = 600 * 1024 * 1024
 HEX64 = re.compile(r"^[0-9a-f]{64}$")
@@ -285,9 +295,13 @@ def select_wheel(pkg: Pkg, env: dict, allow_insecure: bool) -> DepItem:
     if not reg:
         raise Refused(UNVERIFIED, f"{pkg.name} {pkg.version} does not come from a package registry "
                       f"({', '.join(pkg.source) or 'no source'}): only hash-pinned registry wheels are installed")
-    allowed_hosts = {urllib.parse.urlparse(reg).hostname or ""}
-    if "pypi.org" in allowed_hosts:
-        allowed_hosts.add("files.pythonhosted.org")
+    if not SAFE_NAME.match(pkg.name) or not SAFE_VERSION.match(pkg.version):
+        raise Refused(UNVERIFIED, f"{pkg.name!r} {pkg.version!r}: not a plain package name/version")
+    reg_u = urllib.parse.urlparse(reg)
+    if reg_u.scheme != "https" or (reg_u.hostname or "") not in REGISTRY_HOSTS:
+        raise Refused(UNVERIFIED, f"{pkg.name} {pkg.version}: the registry {reg_u.hostname or reg[:40]} is not on the allow-list "
+                      f"({', '.join(sorted(REGISTRY_HOSTS))})")
+    allowed_hosts = set(WHEEL_HOSTS)
     scored = []
     for w in pkg.wheels:
         url = str(w.get("url") or "")
@@ -305,13 +319,15 @@ def select_wheel(pkg: Pkg, env: dict, allow_insecure: bool) -> DepItem:
         raise Refused(UNVERIFIED, f"{pkg.name} {pkg.version}: the wheel {fn} has no sha256 hash in the lock")
     url = str(w["url"])
     u = urllib.parse.urlparse(url)
-    if not (u.scheme == "https" or (allow_insecure and u.scheme in ("http", "file"))):
+    if not (u.scheme == "https" or (allow_insecure and u.scheme == "http" and (u.hostname or "") in TEST_HOSTS)):
         raise Refused(UNVERIFIED, f"{pkg.name} {pkg.version}: the wheel URL is not https ({u.scheme or 'none'})")
+    if not SAFE_WHEEL_FILE.match(fn):
+        raise Refused(UNVERIFIED, f"{pkg.name} {pkg.version}: unsafe wheel file name {fn[:80]!r}")
     if u.scheme == "https" and (u.hostname or "") not in allowed_hosts:
         raise Refused(UNVERIFIED, f"{pkg.name} {pkg.version}: the wheel host {u.hostname} is not the lock's index host "
                       f"({', '.join(sorted(allowed_hosts))})")
     parsed = _parse_wheel_name(fn)
-    if parsed and (norm(parsed[0]) != pkg.name or parsed[1].replace("_", "-") != pkg.version.replace("_", "-")):
+    if not parsed or (norm(parsed[0]) != pkg.name or parsed[1].replace("_", "-") != pkg.version.replace("_", "-")):
         raise Refused(UNVERIFIED, f"{pkg.name} {pkg.version}: the wheel file name {fn} names a different package or version")
     size = w.get("size")
     return DepItem(pkg.name, pkg.version, None, fn, url, h[7:], int(size) if isinstance(size, int) else None)
@@ -366,8 +382,9 @@ def build_dep_plan(base_lock_text: str | None, target_lock_text: str, env: dict,
 # ---------------------------------------------------------------------- download + verify (before anything is touched)
 class _HttpsOnly(urllib.request.HTTPRedirectHandler):
     def redirect_request(self, req, fp, code, msg, headers, newurl):
-        if urllib.parse.urlparse(newurl).scheme != "https":
-            raise Refused(UNVERIFIED, f"a download was redirected to a non-https address: {newurl[:80]}")
+        u = urllib.parse.urlparse(newurl)
+        if u.scheme != "https" or (u.hostname or "") not in WHEEL_HOSTS:
+            raise Refused(UNVERIFIED, f"a download was redirected to a non-allow-listed address: {newurl[:80]}")
         return super().redirect_request(req, fp, code, msg, headers, newurl)
 
 
@@ -428,6 +445,8 @@ def wheel_paths(whl: Path) -> tuple[list[str], str]:
         if len(records) != 1:
             raise Refused(UNVERIFIED, f"{whl.name}: not a normal wheel (no single RECORD)")
         dist = records[0].split("/")[0]
+        if sum(i.file_size for i in z.infolist()) > MAX_UNPACKED_BYTES or len(names) != len(set(names)):
+            raise Refused(UNVERIFIED, f"{whl.name}: unpacked size too large or duplicate member names")
         ep = f"{dist}/entry_points.txt"
         if ep in names:
             txt = z.read(ep).decode("utf-8", "replace")
@@ -475,8 +494,15 @@ def _checked_members(whl: Path):
             yield n, rel, data
 
 
-def verify_wheel(whl: Path) -> None:
-    """Everything checkable without writing: member paths, no scripts/data outside site-packages, RECORD hashes."""
+def verify_wheel(whl: Path, sp: Path | None = None) -> None:
+    """Everything checkable without writing: member paths, no scripts/data outside site-packages, RECORD hashes, and (with
+    `sp`) no NEW interpreter start-up hook (*.pth at the top of site-packages, sitecustomize/usercustomize) that is not
+    already installed: such a file runs code in every Python process, not only when the package is imported."""
+    paths = wheel_paths(whl)[0]
+    if sp is not None:
+        for rel in paths:
+            if "/" not in rel and (rel.lower().endswith(".pth") or rel.lower() in STARTUP_HOOKS) and not (sp / rel).is_file():
+                raise Refused(UNVERIFIED, f"{whl.name}: adds the start-up hook {rel} (runs in every Python process)")
     for _ in _checked_members(whl):
         pass
 
@@ -486,8 +512,8 @@ def extract_wheel(whl: Path, sp: Path) -> list[str]:
     wheel's RECORD hash first."""
     written = []
     dist = wheel_paths(whl)[1]
-    members = list(_checked_members(whl))                      # all checks before the first write
-    for _, rel, data in members:
+    verify_wheel(whl)                                          # all checks before the first write (streamed, not held in memory)
+    for _, rel, data in _checked_members(whl):                 # re-checked member by member while writing
         dst = sp / rel
         dst.parent.mkdir(parents=True, exist_ok=True)
         tmp = dst.with_name(dst.name + ".hotfix-tmp")
@@ -568,6 +594,18 @@ def remove_dep_files(sp: Path, entry: dict, *, new: bool) -> None:
 def install_deps(plan: DepPlan, wheels: dict[str, Path], entries: list[dict], sp: Path, py: Path, opts: S2Options,
                  tmp: Path, log: Callable[[str], None] = print) -> str:
     """Remove the old versions (already backed up), install the new wheels. Returns the method used."""
+    for it in plan.items:                                      # the SAME verified file, re-hashed right before use
+        if sha256(wheels[it.filename]) != it.sha256:
+            raise HotfixError(UNVERIFIED, f"{it.filename} changed after it was verified")
+    for e in entries:                                          # a .pyd/.dll loaded by another Python process cannot be removed:
+        for rel in e["old_paths"] + [b["path"] for b in e["backed_up"]]:   # stop here, before anything is removed
+            f = sp / rel
+            if f.suffix.lower() in (".pyd", ".dll") and f.is_file():
+                try:
+                    open(f, "r+b").close()
+                except OSError as ex:
+                    raise HotfixError("HOTFIX_DEP_LOCKED", f"{rel} is in use by a running program ({ex.__class__.__name__}); "
+                                      "close JARVES (tray, dashboard) and retry") from ex
     for e in entries:
         if e["old_version"]:
             remove_dep_files(sp, e, new=False)
@@ -582,7 +620,7 @@ def install_deps(plan: DepPlan, wheels: dict[str, Path], entries: list[dict], sp
         req = tmp / "requirements.txt"
         req.write_text(plan.requirements(), encoding="utf-8")
         wd = next(iter(wheels.values())).parent
-        cmd = [str(py), "-I", "-m", "pip", "install", "--require-hashes", "--no-deps", "--no-index", "--only-binary", ":all:",
+        cmd = [str(py), "-I", "-m", "pip", "--isolated", "install", "--require-hashes", "--no-deps", "--no-index", "--only-binary", ":all:",
                "--find-links", str(wd), "--disable-pip-version-check", "--no-input", "-r", str(req)]
         rc, out = run(cmd)
         if rc != 0:
@@ -671,11 +709,19 @@ def plan_bridge(pin_text: str | None, install_root: Path, opts: S2Options) -> Br
     return BridgeAction(exe, dest, pin["sha256"], pin["version"], old)
 
 
-def _atomic_replace_file(src: Path, dst: Path) -> None:
+def _atomic_replace_file(src: Path, dst: Path, tries: int = 20) -> None:
     dst.parent.mkdir(parents=True, exist_ok=True)
     tmp = dst.with_name(dst.name + ".hotfix-tmp")
     shutil.copyfile(src, tmp)
-    os.replace(tmp, dst)
+    for n in range(tries):                     # a just-stopped exe stays locked for a moment on Windows
+        try:
+            os.replace(tmp, dst)
+            return
+        except PermissionError:
+            if n == tries - 1:
+                tmp.unlink(missing_ok=True)
+                raise
+            time.sleep(0.5)
 
 
 def bridge_backup(act: BridgeAction, backup_dir: Path) -> dict:
@@ -743,6 +789,18 @@ def install_root_of(installed_pkg: Path) -> Path:
 def default_python(installed_pkg: Path) -> Path:
     root = install_root_of(installed_pkg)
     return root / "python" / ("python.exe" if sys.platform == "win32" else "bin/python3")
+
+
+def resolve_python(installed_pkg: Path, given: Path | None) -> Path:
+    """The interpreter used for pip and the platform probe: the installed one. `--python` may only name a file inside the
+    install root (review #465: never an arbitrary interpreter)."""
+    if given is None:
+        return default_python(installed_pkg)
+    root = install_root_of(installed_pkg).resolve()
+    p = Path(given).resolve()
+    if root not in p.parents:
+        raise Refused(UNVERIFIED, f"--python {given} is not inside the install ({root})", "omit --python to use the installed one")
+    return p
 
 
 def make_tmp() -> Path:

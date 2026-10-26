@@ -36,6 +36,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -345,10 +346,37 @@ def _is_bridge_change(r: str) -> bool:
     return "bridge_pin" in low or "bridge-pin" in low or low.startswith("bridge/")
 
 
+JARVES_REMOTE = re.compile(r"github\.com[/:](jarvis-igerman-ai|igalgerman)/jarves(\.git)?/?$", re.I)
+
+
+def require_trusted_target(src: Source) -> None:
+    """Review #465: slice 2 installs an exe and wheels whose ONLY trust anchors (bridge pin, uv.lock hashes) come from the
+    target itself, so the target must be a commit the project published: a git ref reachable from `main` of the jarves
+    remote. A folder or a working tree (anything can be put there) or a branch that is not on main is refused for the
+    dependency and bridge categories; plain code fixes from such sources are unchanged."""
+    if src.reader is not None:                          # tests inject the repository texts; the CLI never sets a reader
+        return
+    if src.checkout is not None or not src.git_root or not src.commit:
+        raise Refused("HOTFIX_UNTRUSTED_SOURCE", "dependency and bridge changes are applied only from a git ref (a folder "
+                      "or working tree is not a published commit)", "jarvis hotfix apply --from <a commit on jarves main>")
+    names = set()
+    for ln in _git(src.git_root, "remote", "-v", check=False).splitlines():
+        parts = ln.split()
+        if len(parts) >= 2 and JARVES_REMOTE.search(parts[1]):
+            names.add(parts[0])
+    for r in sorted(names):
+        rc = subprocess.run(["git", "-c", "core.fsmonitor=false", "-C", str(src.git_root), "merge-base", "--is-ancestor",
+                             src.commit, f"refs/remotes/{r}/main"], capture_output=True, text=True, timeout=120).returncode
+        if rc == 0:
+            return
+    raise Refused("HOTFIX_UNTRUSTED_SOURCE", f"commit {src.commit[:12]} is not on main of the jarves remote: dependency and "
+                  "bridge changes are applied only from published commits", "merge first (and git fetch), or use the full installer")
+
+
 def _s2_dependencies(ctx: Slice2Ctx, lock_files: list[str]):
     from . import hotfix_slice2 as s2
     opts = ctx.opts
-    py = Path(opts.python) if opts.python else s2.default_python(ctx.installed_pkg)
+    py = s2.resolve_python(ctx.installed_pkg, opts.python)
     env = opts.py_env or s2.probe_env(py, opts.runner)
     lock_rel = next((x for x in lock_files if x.endswith("uv.lock")), None)
     target = read_repo_file(ctx.src, lock_rel, "target") if lock_rel else None
@@ -389,6 +417,8 @@ def classify(plan: Plan, repo_changes: list[str] | None, ctx: Slice2Ctx | None =
             parts.append("bridge pin/binary changed (" + ", ".join(bridge[:4]) + ")")
         raise Refused("HOTFIX_NEEDS_SLICE2", "; ".join(parts) + ": " + SLICE2, "use the full installer for this change")
     ok = Plan(removed_in_source=plan.removed_in_source)
+    if (deps and any(x.endswith("uv.lock") for x in deps)) or bridge:
+        require_trusted_target(ctx.src)
     if deps:
         if any(x.endswith("uv.lock") for x in deps):
             dp = _s2_dependencies(ctx, deps)
@@ -544,7 +574,7 @@ def apply(installed_pkg: Path, src: Source, home: Path, hooks: Hooks, *, dry_run
             stage = s2.make_tmp()
             wheels = s2.download_wheels(plan.deps, stage / "wheels", opts)
             for whl in wheels.values():
-                s2.verify_wheel(whl)                       # paths, scripts, RECORD hashes: all before the first write
+                s2.verify_wheel(whl, installed_pkg.parent)  # paths, scripts, start-up hooks, RECORD hashes: before the first write
             if missing:
                 provided = {p.split("/")[0].removesuffix(".py").lower() for w in wheels.values() for p in s2.wheel_paths(w)[0]}
                 still = [m for m in missing if m.split(" ")[0].lower() not in provided]
@@ -641,7 +671,7 @@ def _apply_locked(installed_pkg: Path, src: Source, home: Path, hooks: Hooks, pl
 
 def _s2_python(installed_pkg: Path, opts) -> Path:
     from . import hotfix_slice2 as s2
-    return Path(opts.python) if opts.python else s2.default_python(installed_pkg)
+    return s2.resolve_python(installed_pkg, opts.python)
 
 
 def _mark_build(installed_pkg: Path, info: dict, manifest: dict, plan: Plan) -> None:
@@ -800,6 +830,9 @@ def cmd_hotfix(a, cfg, home) -> int:
             hf = s["hotfix"]
             print(_say("גרסה", "version") + f" {s['version']}" + (f" +hotfix.{hf['n']} ({hf.get('commit') or '?'})" if hf else ""))
             print(_say("תיקון מהיר אחרון", "latest hotfix") + f": {s['latest'] or '-'}")
+            if s["latest"] and s["latest"].get("status") in ("applying", "revert-failed"):
+                print(_say("תיקון מהיר נקטע באמצע: הריצו  jarvis hotfix revert  (או התקינו גרסה מלאה)",
+                           "a hotfix was interrupted half way: run  jarvis hotfix revert  (or use the full installer)"), file=sys.stderr)
             _print_pending(s["pending_installer"])
             return 0
         if a.action == "apply":

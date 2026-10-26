@@ -448,3 +448,96 @@ def test_builtin_extractor_checks_record_hashes(world, tmp_path):
     with pytest.raises(hf.Refused) as e:
         s2.extract_wheel(whl, w.sp)
     assert "RECORD" in e.value.message
+
+
+# ---------------------------------------------------------------------- review #465 hardening
+def _git(repo, *a):
+    import subprocess
+    subprocess.run(["git", "-C", str(repo), "-c", "user.name=t", "-c", "user.email=t@t", "-c", "commit.gpgsign=false", *a],
+                   check=True, capture_output=True)
+
+
+def test_slice2_needs_a_published_commit_not_a_folder_or_side_branch(tmp_path):
+    import subprocess
+    repo = tmp_path / "r"
+    repo.mkdir()
+    _git(repo, "init", "-q", "-b", "main")
+    write(repo, "f.txt", "1")
+    _git(repo, "add", ".")
+    _git(repo, "commit", "-qm", "c1")
+    on_main = subprocess.run(["git", "-C", str(repo), "rev-parse", "HEAD"], capture_output=True, text=True).stdout.strip()
+    _git(repo, "remote", "add", "jarves", "https://github.com/Jarvis-igerman-ai/jarves.git")
+    _git(repo, "update-ref", "refs/remotes/jarves/main", on_main)
+    write(repo, "f.txt", "2")
+    _git(repo, "commit", "-qam", "c2")                          # a side commit: not on jarves/main
+    side = subprocess.run(["git", "-C", str(repo), "rev-parse", "HEAD"], capture_output=True, text=True).stdout.strip()
+    hf.require_trusted_target(hf.Source(tmp_path, None, on_main, git_root=repo, base=on_main))
+    for src in (hf.Source(tmp_path, None, side, git_root=repo, base=on_main),                     # branch not merged
+                hf.Source(tmp_path, ["core/uv.lock"], side, git_root=repo, checkout=repo),        # working tree folder
+                hf.Source(tmp_path, None, None)):                                                  # bare folder
+        with pytest.raises(hf.Refused) as e:
+            hf.require_trusted_target(src)
+        assert e.value.code == "HOTFIX_UNTRUSTED_SOURCE"
+    _git(repo, "remote", "set-url", "jarves", "https://github.com/someone-else/jarves.git")       # look-alike remote
+    with pytest.raises(hf.Refused):
+        hf.require_trusted_target(hf.Source(tmp_path, None, on_main, git_root=repo, base=on_main))
+
+
+def test_registry_and_wheel_hosts_are_an_allow_list_not_the_lock():
+    w = [{"url": "https://evil.example.com/foo-2.0-py3-none-any.whl", "hash": "sha256:" + "a" * 64, "size": 5}]
+    with pytest.raises(hf.Refused) as e:                       # a lock that names its own index cannot widen the hosts
+        s2.select_wheel(s2.Pkg("foo", "2.0", {"registry": "https://evil.example.com/simple"}, w, False, [], {}), ENV, False)
+    assert "allow-list" in e.value.message
+    with pytest.raises(hf.Refused):                            # http to anything but 127.0.0.1 even in test mode
+        s2.select_wheel(s2.Pkg("foo", "2.0", {"registry": "https://pypi.org/simple"},
+                               [dict(w[0], url="http://example.com/foo-2.0-py3-none-any.whl")], False, [], {}), ENV, True)
+    with pytest.raises(hf.Refused):
+        s2._HttpsOnly().redirect_request(None, None, 302, "", {}, "https://evil.example.com/x.whl")
+
+
+def test_traversal_in_lock_names_and_wheel_file_names_is_refused():
+    h = "sha256:" + "a" * 64
+    for name, url in (("../../x", "https://files.pythonhosted.org/..%2F..%2Fx-1-py3-none-any.whl"),
+                      ("x", "https://files.pythonhosted.org/..%5Cx-1-py3-none-any.whl")):
+        with pytest.raises(hf.Refused):
+            s2.select_wheel(s2.Pkg(s2.norm(name), "1", {"registry": "https://pypi.org/simple"},
+                                   [{"url": url, "hash": h, "size": 1}], False, [], {}), ENV, False)
+    with pytest.raises(hf.Refused):                            # option injection through the version into requirements.txt
+        s2.select_wheel(s2.Pkg("x", "1\n--index-url https://evil", {"registry": "https://pypi.org/simple"},
+                               [{"url": "https://files.pythonhosted.org/x-1-py3-none-any.whl", "hash": h, "size": 1}], False, [], {}), ENV, False)
+
+
+def test_new_pth_or_sitecustomize_is_refused_unless_already_installed(world, tmp_path):
+    w = world
+    for hook in ("evil.pth", "sitecustomize.py"):
+        fn, data = make_wheel("zed", "1.0", {"zed.py": "Z=1\n", hook: "import os\n"})
+        whl = tmp_path / fn
+        whl.write_bytes(data)
+        with pytest.raises(hf.Refused) as e:
+            s2.verify_wheel(whl, w.sp)
+        assert "start-up hook" in e.value.message
+        write(w.sp, hook, "old\n")                            # an upgrade of a package that already ships it is fine
+        s2.verify_wheel(whl, w.sp)
+
+
+def test_python_flag_only_inside_the_install_and_bridge_pin_only_the_started_file(world, tmp_path):
+    w = world
+    with pytest.raises(hf.Refused):
+        s2.resolve_python(w.inst, tmp_path / "elsewhere" / "python.exe")
+    assert s2.resolve_python(w.inst, w.root / "python" / "python.exe") == (w.root / "python" / "python.exe").resolve()
+    for bad in ("bridge/..", "bridge/other.exe"):
+        with pytest.raises(hf.Refused):
+            s2.read_pin(json.dumps({"path": bad, "sha256": "a" * 64}))
+
+
+def test_installed_core_starts_the_bridge_the_hotfix_replaces(tmp_path, monkeypatch):
+    import sys
+    from jarves import whatsapp_bridge as wab
+    root = tmp_path / "JARVES"
+    fake = root / "python" / "Lib" / "site-packages" / "jarves" / "whatsapp_bridge.py"
+    exe = root / ("bridge/whatsapp_bridge.exe" if sys.platform == "win32" else "bridge/whatsapp_bridge")
+    write(root, exe.relative_to(root).as_posix(), b"x")
+    monkeypatch.delenv(wab.BRIDGE_ENV, raising=False)
+    monkeypatch.setattr(wab, "__file__", str(fake))
+    assert wab.bridge_command(tmp_path / "home") == [str(exe.resolve())]
+    assert s2.install_root_of(fake.parent) / s2.read_pin(json.dumps({"path": "bridge/" + exe.name, "sha256": "a" * 64}))["path"] == exe
