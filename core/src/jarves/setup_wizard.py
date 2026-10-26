@@ -59,7 +59,7 @@ ADDON_MODULES = ("jarves.telegram_channel", "jarves.instagram_channel", "jarves.
                  "jarves.appearance", "jarves.backup", "jarves.usage", "jarves.updates", "jarves.runtime",
                  "jarves.operations", "jarves.guides", "jarves.skills.generated", "jarves.browser", "jarves.browser_pilot", "jarves.profiles",
                  "jarves.selfcheck", "jarves.connect", "jarves.skills.helper", "jarves.context_trace",
-                 "jarves.recall", "jarves.diag.service", "jarves.whatsapp_bridge", "jarves.orchestrator", "jarves.dialing", "jarves.self_manage", "jarves.drive_briefing", "jarves.skills.manifest2", "jarves.hotfix") + plugin_registry.names("addons")
+                 "jarves.recall", "jarves.diag.service", "jarves.whatsapp_bridge", "jarves.orchestrator", "jarves.dialing", "jarves.self_manage", "jarves.drive_briefing", "jarves.skills.manifest2", "jarves.hotfix", "jarves.triage") + plugin_registry.names("addons")
 # Privacy-sensitive or outward-acting: OFF on the first run whatever else says; ON only after an explicit yes.
 SAFE_OFF = frozenset({"camera", "face_recognition", "camera_when_away", "gmail_send", "calendar_write",
                       "dashboard_lan", "mobile_access", "browser", "browser_pilot", "telegram", "home_assistant", "instagram", "helper",
