@@ -399,3 +399,22 @@ async def test_plan_and_step_approvals_are_asked_pc_only(env):
     await env.runner.tick()
     titles = {m["title"]: m for m in env.metas}
     assert titles["goal_plan"]["pc_only"] is True and titles["goal_plan_step"]["pc_only"] is True
+
+
+async def test_step_popup_shows_the_arguments_in_full_and_never_cuts_silently(env):
+    """#206 H1: the owner sees what runs. A long argument is shown in full and every cut in the plan text is marked."""
+    prompts = []
+    real = env.reg.confirm
+
+    async def spy(prompt, **meta):
+        prompts.append(prompt)
+        return await real(prompt, **meta)
+    spy.accepts_meta = True
+    env.reg.confirm = spy
+    long_text = "x" * 700 + "TAIL-MARK"
+    p = env.store.propose("long", steps(("fake_act", {"text": long_text})))
+    env.store.approve(p["id"])
+    await env.runner.tick()
+    assert "TAIL-MARK" in prompts[0] and env.ran == [("act", long_text)]
+    shown = gp.describe(env.store.get(p["id"]))
+    assert "more characters not shown" in shown                 # the plan text marks every cut
