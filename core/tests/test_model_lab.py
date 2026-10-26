@@ -137,3 +137,18 @@ def test_cli_off_and_no_live_provider(tmp_path, capsys):
         assert ml.cmd_modellab(NS(action="report"), None, tmp_path) == 0
     finally:
         cli._cli_features = orig
+
+
+def test_hardening_529_max_tokens_clamp_csv_scrub_and_unique_archive(tmp_path):
+    clk = Clock()
+    aws = "AKIA" + "IOSFODNN7EXAMPLE"
+    prov = ml.FakeProvider({("free-a", "he-1"): f"\tcell {aws}", ("free-a", "he-2"): "\rcell"}, clock=clk, tokens=(-5, -7))
+    rep = ml.run_eval(REG, SpendPolicy("free-only"), prov, ["free-a"], tasks=ml.TASKS[:2], clock=clk)
+    assert prov.max_tokens == ml.MAX_OUT_TOKENS                                   # item 1: the limit is passed to the call
+    assert all(r["tokens_in"] == 0 and r["tokens_out"] == 0 and r["cost_usd"] >= 0 for r in rep["rows"])
+    p1 = ml.archive(tmp_path, rep, wall=lambda: 0)
+    p2 = ml.archive(tmp_path, rep, wall=lambda: 0)                                # item 4: same second, no overwrite
+    assert p1 != p2 and p1.exists() and p2.exists()
+    csv_text = p1.with_suffix(".csv").open(encoding="utf-8", newline="").read()      # keep the raw CR
+    assert aws not in csv_text and "[redacted]" in csv_text
+    assert "'" + chr(9) + "cell" in csv_text and "'" + chr(13) + "cell" in csv_text   # item 2: tab and CR cells are guarded too

@@ -31,6 +31,7 @@ class FakeDriver:
 def mk(tmp_path, on=True, **kw):
     t = [1000.0]
     d = FakeDriver()
+    kw.setdefault("resolver", lambda host: ["93.184.216.34"])          # hermetic: no real DNS
     return bp.PilotSession(tmp_path, d, enabled=lambda: on, clock=lambda: t[0], **kw), d, t
 
 
@@ -151,3 +152,53 @@ def test_action_cap_stops(tmp_path):
     with pytest.raises(bp.PilotError) as e:
         s.read()
     assert e.value.code == "BROWSER_PILOT_CAP" and s.state == bp.STOPPED
+
+
+@pytest.mark.parametrize("answer", [["10.0.0.1"], ["169.254.169.254"], ["127.0.0.1"], ["100.64.0.1"], ["93.184.216.34", "192.168.1.5"],
+                                    ["::1"], ["::ffff:10.0.0.1"], []])
+def test_public_name_resolving_to_a_private_address_is_refused(tmp_path, answer):
+    """#527: nip.io style names and rebinding answers."""
+    s, d, _ = mk(tmp_path, resolver=lambda host: answer)
+    with pytest.raises(bp.PilotError) as e:
+        s.open("https://10.0.0.1.nip.io/")
+    assert e.value.code == "BROWSER_PILOT_URL" and d.opened == []
+    assert s.request_allowed("https://img.example.com/x.png") is False
+
+
+def test_unresolvable_host_fails_closed_and_local_needs_no_dns(tmp_path):
+    def boom(host):
+        raise OSError("no dns")
+    s, d, _ = mk(tmp_path, resolver=boom)
+    with pytest.raises(bp.PilotError):
+        s.open("https://example.com/")
+    assert s.open("http://localhost:8000/")["scope"] == "local" and d.opened == ["http://localhost:8000/"]
+
+
+def test_redirect_to_a_private_address_stops_the_session(tmp_path):
+    s, d, _ = mk(tmp_path, resolver=lambda host: ["10.0.0.9"] if host == "evil.example.com" else ["93.184.216.34"])
+    d.current_url = lambda: "https://evil.example.com/inside"
+    with pytest.raises(bp.PilotError) as e:
+        s.open("https://example.com/")
+    assert e.value.code == "BROWSER_PILOT_REDIRECT" and d.closed and s.state == bp.STOPPED
+    assert s.request_allowed("https://example.com/a") is True
+
+
+def test_audit_kind_is_never_a_caller_string(tmp_path):
+    """#528 item 1: a URL or secret passed as the kind lands as 'other' in the audit and the receipts."""
+    s, d, _ = mk(tmp_path)
+    with pytest.raises(bp.PilotError):
+        s.act("https://evil.example.com/?k=" + SECRET)
+    blob = (tmp_path / bp.AUDIT_FILE).read_text(encoding="utf-8")
+    assert SECRET not in blob and "evil.example.com" not in blob and '"kind": "other"' in blob
+
+
+def test_read_cuts_before_redacting_and_default_clock_is_monotonic(tmp_path, monkeypatch):
+    """#528 items 2 and 3."""
+    seen = []
+    real = bp.logs.redact
+    monkeypatch.setattr(bp.logs, "redact", lambda t: seen.append(len(t)) or real(t))
+    s, d, _ = mk(tmp_path)
+    d.text = lambda: "x" * 10 ** 6
+    assert len(s.read()["untrusted_text"]) == bp.MAX_TEXT and max(seen) == 2 * bp.MAX_TEXT
+    import inspect
+    assert inspect.signature(bp.PilotSession).parameters["clock"].default is bp.time.monotonic
