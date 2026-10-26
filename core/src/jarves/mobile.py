@@ -978,7 +978,7 @@ def serve(h, mob: MobileAccess, ip: str) -> None:
             return
         if not mob.rate_ok("drive-action:" + dev["id"], drive_actions.RATE_PER_MIN):
             mob.audit("rate_limited", device=dev["id"], path=path, scope="drive-action")
-            return h._json_extra(429, {"error": "too many requests: wait a minute"}, {"Retry-After": "60"})
+            return h._json_extra(429, dict(drive_actions.RATE_LIMITED), {"Retry-After": "60"})
         d = _json_body(h)
         if d is None:
             return
