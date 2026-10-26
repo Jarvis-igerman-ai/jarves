@@ -353,3 +353,9 @@ def test_main_baseline_without_resolvable_since_lists_tree_and_since_adds_rows(t
     ids = [r.id for r in sh.rows]
     assert "G1" in ids and "X01" in ids and "baseline run" in so.sheet_path(tmp_path, "5.0.0").read_text(encoding="utf-8")
     assert "2 changed guide(s)" in next(r.todo for r in sh.rows if r.id == "G1")
+
+
+def test_signed_file_empty_field_does_not_borrow_the_next_line(tmp_path):
+    root = _signed_root(tmp_path)
+    (root / "docs" / "release" / "SIGNED_4.1.0").write_text("owner:\ndate: 2026-10-21\ncommit: " + SHA + "\n", encoding="utf-8")
+    assert any("'owner:'" in p for p in gate.signed_problems(root, "4.1.0", SHA, lambda a, b: True, lambda a, b: []))
