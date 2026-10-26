@@ -6,6 +6,7 @@ from __future__ import annotations
 import base64
 import json
 import threading
+import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 PASSWORD = "test-pass-not-a-secret"
@@ -25,6 +26,7 @@ EVENTS = [{"type": "server.connected", "properties": {}},
 
 class FakeOpenCode:
     def __init__(self, directory: str = "C:/proj") -> None:
+        self.keepalive = False
         self.requests: list[tuple[str, str]] = []
         self.sessions = json.loads(json.dumps(SESSIONS).replace("{DIR}", directory.replace("\\", "/")))
         outer = self
@@ -45,6 +47,17 @@ class FakeOpenCode:
                     self.send_response(405)
                     self.send_header("Content-Length", "0")
                     self.end_headers()
+                    return
+                if self.path == "/event" and outer.keepalive:
+                    self.send_response(200)
+                    self.end_headers()
+                    try:
+                        for _ in range(200):          # only keepalive comments, never an event
+                            self.wfile.write(b": keepalive\n\n")
+                            self.wfile.flush()
+                            time.sleep(0.05)
+                    except OSError:
+                        pass
                     return
                 if self.path == "/event":
                     self.send_response(200)

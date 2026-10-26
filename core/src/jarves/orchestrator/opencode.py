@@ -13,6 +13,7 @@ import ipaddress
 import json
 import os
 import socket
+import time
 from typing import Any, Iterator
 from urllib.parse import urlsplit
 
@@ -24,6 +25,8 @@ DEFAULT_PASSWORD_ENV = "OPENCODE_SERVER_PASSWORD"
 DEFAULT_USER = "opencode"
 TIMEOUT_S = 10.0
 MAX_BODY = 2_000_000
+MAX_EVENTS = 100
+MAX_LINES = 1000                    # SSE lines read per call, data or keepalive
 STATE_MAP = {"idle": "IDLE", "busy": "RUNNING", "retry": "RUNNING"}     # SessionStatus.type (docs: /session/status)
 
 
@@ -45,7 +48,7 @@ def check_loopback(url: str) -> tuple[str, int]:
         ok = False
     if u.scheme != "http" or not ok or u.username or u.password:
         raise OpenCodeError("NOT_LOOPBACK", "the OpenCode server must be plain http on 127.0.0.1 / localhost / ::1")
-    return host, u.port or 4096
+    return ("127.0.0.1" if host == "localhost" else host.strip("[]")), u.port or 4096   # never resolve a name
 
 
 class Client:
@@ -62,8 +65,15 @@ class Client:
     def _open(self, path: str, timeout: float | None = None) -> tuple[http.client.HTTPConnection, http.client.HTTPResponse]:
         conn = http.client.HTTPConnection(self.host, self.port, timeout=timeout or self.timeout)
         try:
+            conn.connect()
+            peer = ipaddress.ip_address(conn.sock.getpeername()[0].split("%")[0])
+            if not peer.is_loopback:                                  # re-verify the connected peer
+                raise OpenCodeError("NOT_LOOPBACK", "the connected address is not loopback")
             conn.request("GET", path, headers=self._headers)          # GET only: this adapter never writes
             r = conn.getresponse()
+        except OpenCodeError:
+            conn.close()
+            raise
         except (OSError, http.client.HTTPException) as e:
             conn.close()
             raise OpenCodeError("PROVIDER_MISSING", f"no OpenCode server answers on {self.host}:{self.port}"
@@ -107,6 +117,7 @@ class Client:
     def events(self, limit: int = 20, timeout: float | None = None) -> list[dict]:
         """Up to `limit` events of the SSE stream (`GET /event`), then closes; stops at `timeout` seconds."""
         out: list[dict] = []
+        limit = max(1, min(int(limit), MAX_EVENTS))
         try:
             for ev in self.stream(timeout=timeout or self.timeout):
                 out.append(ev)
@@ -118,8 +129,11 @@ class Client:
 
     def stream(self, timeout: float) -> Iterator[dict]:
         conn, r = self._open("/event", timeout)
+        deadline = time.monotonic() + timeout            # overall: keepalive lines cannot hold the stream open
+        lines = 0
         try:
-            while True:
+            while time.monotonic() < deadline and lines < MAX_LINES:
+                lines += 1
                 line = r.readline(65536)
                 if not line:
                     return

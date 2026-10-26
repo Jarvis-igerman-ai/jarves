@@ -123,3 +123,24 @@ def test_password_never_in_results_or_logs(tmp_path, server, monkeypatch, caplog
     r = o.call("opencode", action="status")
     assert r["code"] == "AUTH_REQUIRED" and "hunter2-planted" not in repr(r) + caplog.text
     o.db.close()
+
+
+def test_localhost_is_mapped_to_127_and_peer_is_verified(server, monkeypatch):
+    assert oc.check_loopback("http://localhost:9")[0] == "127.0.0.1" and oc.check_loopback("http://[::1]:9")[0] == "::1"
+    c = oc.Client(f"http://localhost:{server.port}")
+    assert c.host == "127.0.0.1" and c.health()["healthy"]
+    import ipaddress
+    monkeypatch.setattr(ipaddress.IPv4Address, "is_loopback", property(lambda self: False))
+    with pytest.raises(oc.OpenCodeError) as e:                          # connected peer re-checked
+        oc.Client(server.url).health()
+    assert e.value.code == "NOT_LOOPBACK"
+
+
+def test_events_have_an_overall_deadline_and_cap(server):
+    import time
+    server.keepalive = True
+    t0 = time.monotonic()
+    assert oc.Client(server.url).events(5, timeout=1.0) == []
+    assert time.monotonic() - t0 < 3
+    server.keepalive = False
+    assert len(oc.Client(server.url).events(10_000, timeout=3)) == 3 and oc.MAX_EVENTS == 100
