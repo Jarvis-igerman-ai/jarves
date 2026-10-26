@@ -1,7 +1,7 @@
 order = 60
 category = "system"
 pages = ["runtime"]
-features = ["background_core", "display_control", "tray_icon", "autostart"]
+features = ["background_core", "display_control", "tray_icon", "listening_dot", "autostart"]
 aliases = ["רקע", "מגש", "הפעלה אוטומטית", "תופיע", "תיעלם", "tray", "autostart", "start at login", "show yourself", "hide yourself", "background"]
 links = ["appearance", "updates"]
 title_he = "פועל ברקע, סמל במגש והפעלה עם המחשב"
@@ -39,6 +39,14 @@ check = "enabled:background_core"
 he = "חפשו את הסמל של ג'ארביס ליד השעון (אולי מתחת לחץ ^)."
 en = "Look for JARVES's icon by the clock (maybe under the ^ arrow)."
 check = "available:tray_icon"
+
+[[steps]]
+he = "החלון סגור ואתם לא בטוחים אם ג'ארביס מקשיב? הסמל במגש מראה את המצב: טבעת כחולה = ממתין ל\"היי ג'ארוויס\" (שום דבר לא יוצא מהמחשב), עיגול ירוק = שיחה פתוחה ומקשיב, שלוש נקודות כתומות = חושב, גלים תכולים = מדבר, עיגול אדום עם קו = מושתק, איקס אדום = תקלה. ריחוף על הסמל מציג את המצב במילים. כשיש שיחה פתוחה מופיעה גם נקודה קטנה ליד פינת המסך (לא תופסת עכבר או מקלדת). מכבים אותה במתג \"נקודת האזנה\" (jarvis features). שומעים צליל קצר אחד כששומעים אותך, וצליל רך יורד כשהשיחה נסגרת מרוב שקט."
+en = "Window closed and unsure whether JARVES is listening? The tray icon shows the state: blue ring = waiting for \"Hey Jarvis\" (nothing leaves this computer), green disc = a conversation is open and listening, three amber dots = thinking, cyan waves = speaking, red disc with a slash = muted, red cross = problem. Hover the icon for the state in words. While a conversation is open a tiny dot also appears near a screen corner (it never takes the mouse or keyboard); switch it off with Listening dot in jarvis features. You hear exactly one short pip when you are heard, and a soft falling cue when the conversation closes after quiet."
+
+[[steps]]
+he = "כשהחלון מוסתר והשיחה שקטה, ג'ארביס מפסיק להקשיב אחרי 45 שניות וחוזר לחכות ל\"היי ג'ארוויס\". לא באמצע תשובה, כלי או אישור, ולא באמצע דיבור שלכם. לשינוי: jarvis config set voice.idle_stop_s 90 (15 עד 300, 0 = אף פעם)."
+en = "With the window hidden and a quiet conversation, JARVES stops listening after 45 seconds and goes back to waiting for \"Hey Jarvis\". Never in the middle of an answer, a tool, an approval or while you are speaking. To change it: jarvis config set voice.idle_stop_s 90 (15 to 300, 0 = never). With the window shown, the normal 180 s idle limit applies."
 
 [[steps]]
 he = "רוצים שיעלה לבד כשנכנסים למחשב? הדליקו \"הפעלה עם הכניסה למחשב\" בעמוד השליטה (Controls)."

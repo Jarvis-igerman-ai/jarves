@@ -70,7 +70,7 @@ def current() -> "Runtime | None":
 
 
 class Runtime:
-    def __init__(self, core, *, mode: str = "foreground", launcher=None, tray_factory=None,
+    def __init__(self, core, *, mode: str = "foreground", launcher=None, tray_factory=None, dot_backend=None,
                  autostart=None) -> None:
         self.core, self.home, self.mode = core, core.home, mode
         rc = core.cfg.runtime
@@ -85,6 +85,8 @@ class Runtime:
             self.viewer.adopt(pre)
         self._display_lock = asyncio.Lock()      # show / hide never interleave (tray + CLI + voice + dashboard)
         self._tray_factory = tray_factory
+        self._dot_backend = dot_backend             # tests inject a fake; None = the real Tk dot (hidden mode only)
+        self.dot = None
         self.tray = None
         self.tray_state, self.tray_reason = "off", ""
         self.autostart = autostart if autostart is not None else autostart_mod.adapter()
@@ -146,6 +148,10 @@ class Runtime:
         core._bg.append(asyncio.create_task(self._refresh_loop()))
         if self.mode in ("background", "desktop") and core.features.enabled("tray_icon"):
             self._start_tray()
+        if self.mode in ("background", "desktop") and (self._dot_backend is not None or desktop_session()[0]):
+            from .indicator import ListeningDot, TkDotBackend
+            self.dot = ListeningDot(self._dot_backend or TkDotBackend(),
+                                    lambda: core.features.enabled("listening_dot"))
         self.save()
         logs.info("runtime", "RUNTIME_STARTED", "runtime started", mode=self.mode,
                   keep_running=self.keep_running, tray=self.tray_state, alerts_paused=self.prefs["alerts_paused"])
@@ -159,6 +165,9 @@ class Runtime:
         if self.tray is not None:
             await asyncio.to_thread(self.tray.stop)
             self.tray = None
+        if self.dot is not None:
+            self.dot.stop()
+            self.dot = None
         self.state = "stopped"
         self.save()
         if _current is self:
@@ -192,6 +201,8 @@ class Runtime:
             await asyncio.sleep(1.0)
             try:
                 v = self.view()
+                if self.dot is not None:
+                    self.dot.update(v)
                 key = json.dumps({k: x for k, x in v.items() if k != "ts"}, sort_keys=True, default=str)
                 changed = key != last
                 if changed or time.monotonic() - saved_at >= HEARTBEAT_S:
@@ -222,6 +233,25 @@ class Runtime:
         except Exception:
             return []
 
+    def _voice_activity(self) -> dict:
+        """speaking / thinking / error for the tray state (runtime/indicator.py); read-only, never raises."""
+        core = self.core
+        live = core.live
+        out = {"speaking": False, "thinking": False, "error": False}
+        try:
+            if live is not None:
+                out["speaking"] = time.monotonic() < float(getattr(live, "_speaking_until", 0.0))
+                out["thinking"] = bool(getattr(live, "_backend_busy", False) or getattr(live, "_tools_running", 0))
+            comps = getattr(getattr(core, "health", None), "components", {}) or {}
+            for name in ("audio", "wake_word"):
+                c = comps.get(name)
+                if c is not None and getattr(c, "status", "") in ("unavailable", "degraded") and (
+                        name == "audio" or core.wake is not None):
+                    out["error"] = True
+        except Exception:
+            pass
+        return out
+
     def view(self) -> dict:
         core = self.core
         dev = getattr(core, "dev", None)
@@ -241,9 +271,12 @@ class Runtime:
             "alerts": {"paused": self.prefs["alerts_paused"]},
             "voice": {"mode": core.voice_mode, "wake_listening": bool(getattr(core, "_wake_mic_active", False)),
                       "live_session": live, "connecting": bool(core._voice_connecting),
+                      **self._voice_activity(),
                       # idle = no cloud voice connection: the wake word runs on this device only
                       "cloud_connection_open": live or bool(core._voice_connecting),
                       "detail": "wake word off" if core.wake is None else ""},
+            "locale": "he" if str(getattr(getattr(getattr(core, "cfg", None), "voice", None), "language", "he")
+                                  ).startswith("he") else "en",
             "limits": [v for v in self._limit_views() if v["level"] != "ok"],
             "tray": {"state": self.tray_state, "reason": self.tray_reason},
             "dashboard": {"enabled": core.features.enabled("dashboard"),
