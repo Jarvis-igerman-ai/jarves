@@ -259,11 +259,14 @@ async def _dashboard_attempt(env: Env) -> str:
                 async def load(name: str) -> int:
                     await page.goto("about:blank")           # a hash-only goto is a same-document jump: force a real load
                     t = time.perf_counter()
-                    await page.goto(d.url + "#/" + name)
-                    await page.wait_for_load_state("networkidle", timeout=30000)
+                    await page.goto(d.url + "#/" + name, wait_until="domcontentloaded", timeout=90000)
+                    try:                                     # best effort: the real readiness wait is the #main poll below;
+                        await page.wait_for_load_state("networkidle", timeout=20000)  # a loaded runner may never be idle (#472)
+                    except Exception:
+                        pass
                     # Poll through a locator, not wait_for_function: a string function is eval'd in the page and a CSP
                     # without 'unsafe-eval' turns a page that broke into an EvalError instead of its real pageerror (#277).
-                    deadline = time.monotonic() + 30
+                    deadline = time.monotonic() + 60
                     while True:
                         try:
                             if len((await page.locator("#main").inner_text(timeout=2000)).strip()) > 20:
@@ -273,7 +276,7 @@ async def _dashboard_attempt(env: Env) -> str:
                         if errs:                                     # a recorded page error is the answer: stop waiting
                             break
                         if time.monotonic() > deadline:
-                            raise AssertionError(f"{name}: #main stayed empty for 30 s")
+                            raise AssertionError(f"{name}: #main stayed empty for 60 s")
                         await asyncio.sleep(0.1)
                     return round((time.perf_counter() - t) * 1000)
 
@@ -290,6 +293,7 @@ async def _dashboard_attempt(env: Env) -> str:
         dashboard_auth.RATE_PER_MIN = rate
         await asyncio.to_thread(d.stop)
     slow = {k: v for k, v in times.items() if v > DASHBOARD_BUDGET_MS}
+    errs.sort(key=lambda e: not e.startswith("pageerror"))      # a thrown page script is never cut off by earlier noise (#471)
     if errs or slow:
         raise AssertionError("; ".join(errs[:3] + [f"{k} {v} ms > budget" for k, v in slow.items()]))
     return ", ".join(f"{k} {v} ms" for k, v in times.items())
