@@ -1375,6 +1375,13 @@ def _wake_train(a, cfg, home) -> int:
         print(f"  WOULD WAKE on \"{w['text']}\" ({w['voice']}, score {w['score']})")
     for line in rep["next"]:
         print("  " + line)
+    if not a.apply and (why := wake_prod.gate(rep)):
+        print("\nNot applied, and NOT recommended:")
+        for w in why:
+            print(f"  - {w}")
+        print("Next step: keep the current model. Record 20+ clean, short recordings of the phrase (quiet room, "
+              "one phrase per file) and train again; --apply refuses this one unless you add --accept-risk.")
+        return 0
     if not a.apply:
         print(f"\nNot applied. The active wake model is unchanged. Use it with: "
               f"jarvis wake train {' '.join(a.phrase)} --apply   (undo later with: jarvis wake train --revert)")

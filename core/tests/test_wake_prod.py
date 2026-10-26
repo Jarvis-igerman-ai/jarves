@@ -222,3 +222,45 @@ def test_owner_samples_folder_is_used_by_default_and_checked(home, fast_cli, cap
 def test_check_samples_without_recordings_says_where_to_put_them(home, capsys):
     assert cli.main(["wake", "train", "--check-samples"]) == 1
     assert "samples" in capsys.readouterr().err
+
+
+# ---------------------------------------------------------------------- own recordings must become POSITIVE windows
+def noisy_fixed_length_clip(rng, secs=2.6, sr=16000):
+    """A real-room recording: fixed length, a noise floor above 1 % of the peak, the phrase in the middle."""
+    a = 0.004 * rng.standard_normal(int(secs * sr)).astype(np.float32)
+    v = phrase_audio(rng, amp=0.2, floor=0.0, pad=0.0)
+    s = int(1.0 * sr)
+    a[s:s + len(v)] += v
+    return a
+
+
+def test_trim_speech_cuts_a_fixed_length_room_clip_down_to_the_phrase(rng):
+    a = noisy_fixed_length_clip(rng)
+    assert len(wt.trim(a)) > 2.4 * wt.SR                     # the old trim kept the whole 2.6 s clip
+    b = wt.trim_speech(a)
+    assert 0.6 * wt.SR <= len(b) <= wt.MAX_PHRASE_S * wt.SR and np.abs(b).max() > 0.1
+
+
+def test_own_recording_gives_positive_windows_only_after_trim_speech(rng):
+    """Regression: untrimmed 2.6 s clips never fit a window, so they were all labelled negative and the head learned
+    that the owner's voice is not the wake phrase (own-voice recall 0 %)."""
+    for trimmer, expect_positive in ((wt.trim, False), (wt.trim_speech, True)):
+        items = [(wt.augment(trimmer(noisy_fixed_length_clip(rng)), rng), True) for _ in range(6)]
+        audio, events = wt.build_stream(items, rng)
+        embs, last = fake_embedder(audio)
+        _, y, _ = wt.windows(embs, last, events)
+        assert bool(y.sum() > 0) is expect_positive
+
+
+def test_gate_blocks_a_head_that_does_not_fit_and_names_the_next_step_inputs():
+    rep = {"near_miss": {"false_wakes": []}, "eval": {"recall": 0.375},
+           "owner": {"recordings": 19, "held_out_indices": [3, 7], "held_out_recall_at_threshold": 0.0,
+                     "recall_at_threshold": 0.0}}
+    why = wp.gate(rep)
+    assert any("held-out" in w for w in why) and any("synthetic" in w for w in why)
+    ok = {"near_miss": {"false_wakes": []}, "eval": {"recall": 0.9},
+          "owner": {"recordings": 19, "held_out_indices": [], "held_out_recall_at_threshold": None,
+                    "recall_at_threshold": 0.4}}
+    assert any("your recordings wake it only 40%" in w for w in wp.gate(ok))
+    ok["owner"]["recall_at_threshold"] = 0.9
+    assert wp.gate(ok) == []

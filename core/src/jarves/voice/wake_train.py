@@ -239,6 +239,36 @@ def trim(a: np.ndarray, floor: float = 0.01) -> np.ndarray:
     return a[idx[0]: idx[-1] + 1] if len(idx) else a
 
 
+MAX_PHRASE_S = 1.5           # a positive clip longer than this can never fill a ~2 s window (see windows())
+
+
+def trim_speech(a: np.ndarray, sr: int = SR, pad_s: float = 0.1) -> np.ndarray:
+    """Trim a REAL recording to the spoken phrase. `trim` alone keeps everything above 1 % of the peak, which on a
+    room recording with a noise floor keeps the whole fixed-length clip (all of a 19-clip set stayed 2.6 s): such a
+    clip is never labelled positive, so training taught the head that the owner's own voice is NEGATIVE
+    (own-voice recall 0 %). Here: frame energy against the clip's own noise floor, tightened until the phrase fits."""
+    fr = int(sr * 0.02)
+    n = len(a) // fr
+    if n < 5:
+        return trim(a)
+    e = np.sqrt((a[: n * fr].reshape(n, fr) ** 2).mean(1)) + 1e-9
+    noise_lvl, top = float(np.percentile(e, 10)), float(np.percentile(e, 95))
+    if top <= noise_lvl * 1.5:
+        return trim(a)
+    thr = max(noise_lvl * 3.0, top * 0.1)
+    out = a
+    for _ in range(8):
+        idx = np.flatnonzero(e > thr)
+        if not len(idx):
+            break
+        pad = int(pad_s * sr)
+        out = a[max(0, idx[0] * fr - pad): min(len(a), (idx[-1] + 1) * fr + pad)]
+        if len(out) <= MAX_PHRASE_S * sr:
+            break
+        thr *= 1.5
+    return out
+
+
 def noise(kind: str, n: int, rng: np.random.Generator) -> np.ndarray:
     w = rng.standard_normal(n).astype(np.float32)
     if kind == "white":
@@ -415,9 +445,15 @@ def train_phrase(phrase: str, out: Path, *, say: list[str] | None = None, sample
                 if a is not None:
                     # the held-out stream gets 3 augmented copies: more negative minutes for the false-wake rate
                     sets[part] += [(augment(a, rng), False) for _ in range(3 if part == "test" else 1)]
-    own = read_samples(samples, sample_files) if samples else []
+    own = [trim_speech(a) for a in (read_samples(samples, sample_files) if samples else [])]
+    too_long = [i for i, a in enumerate(own) if len(a) > (MAX_PHRASE_S + 0.3) * SR]
+    if own and len(too_long) == len(own):
+        raise RuntimeError("none of your recordings could be cut down to just the phrase (all longer than "
+                           f"{MAX_PHRASE_S + 0.3:.1f} s after trimming): record one short phrase per file in a quiet "
+                           "room, nothing else in the clip")
     for i, a in enumerate(own):                      # every 4th own recording is kept for the test
-        a = trim(a)
+        if i in too_long:
+            continue                                  # would never be a positive window: leave it out, say so
         part = "test" if i % 4 == 3 else "train"
         sets[part] += [(augment(a, rng), True) for _ in range(copies * 3)]
     for part in sets:                                # noise-only stretches
@@ -444,7 +480,7 @@ def train_phrase(phrase: str, out: Path, *, say: list[str] | None = None, sample
     head = train_head(x, y, seed=seed)
     audio, events, embs, last = data["test"]
     from . import wake_prod                          # production loop: owner-calibrated curve + near-miss check
-    own_trim = [trim(a) for a in own]
+    own_trim = own
     own_peaks = [wake_prod.stream_peak(head, embed, a, np.random.default_rng(seed + 100 + i))
                  for i, a in enumerate(own_trim)]
     held_idx = [i for i in range(len(own_trim)) if i % 4 == 3]
@@ -452,7 +488,7 @@ def train_phrase(phrase: str, out: Path, *, say: list[str] | None = None, sample
     near = wake_prod.near_miss_check(head, threshold, voices, synth, embed, seed=seed)
     report = {"phrase": phrase, "texts": texts, "model": str(out), "threshold": threshold, "held_out_voice": held,
               "voices": [f"{v.engine}:{v.id}" for v in voices], "own_recordings": len(own),
-              "seed": seed, "curve": curve, "target_false_per_hour": 0.5,
+              "own_skipped_too_long": len(too_long), "seed": seed, "curve": curve, "target_false_per_hour": 0.5,
               "owner": {"recordings": len(own), "peak_scores": [round(float(x), 3) for x in own_peaks],
                         "held_out_indices": held_idx,
                         "recall_at_threshold": wake_prod.recall_at(own_peaks, threshold),
