@@ -1,0 +1,57 @@
+order = 30
+category = "system"
+features = ["provider_openrouter"]
+aliases = ["אופן רוטר", "openrouter", "מודלים חינמיים", "free models", "ספק מודלים", "model provider"]
+error_codes = ["OPENROUTER_NOT_CONNECTED", "OPENROUTER_AUTH", "OPENROUTER_CREDITS", "OPENROUTER_RATE_LIMIT", "OPENROUTER_BAD_REQUEST", "OPENROUTER_OFFLINE", "OPENROUTER_PROVIDER_ERROR", "OPENROUTER_REDIRECT", "OPENROUTER_UNEXPECTED_CHARGE"]
+title_he = "ספק OpenRouter (מודלים חינמיים)"
+title_en = "OpenRouter provider (free models)"
+what_he = "מאפשר לג'ארביס לשלוח טקסט לא פרטי למודלים חינמיים ב-OpenRouter, תחת מדיניות הוצאה קשיחה: רק מודלים בלי מחיר, אף פעם לא תשלום בשקט. כבוי מראש (בטא)."
+what_en = "Lets JARVES send non-private text to free OpenRouter models under a hard spend policy: price-0 models only, never a silent paid call. Off by default (beta)."
+say = [["אילו מודלים זמינים?", "Which models are available?"]]
+expect_he = "במצב חינם בלבד רק מודלים עם סיומת :free או הנתב openrouter/free מותרים; כל מודל אחר נעצר ומבקש אישור שלכם. הנתב בוחר מודל חינמי אקראי, ולכן התוצאה נרשמת עם המודל שנבחר בפועל."
+expect_en = "In free-only mode only models ending in :free, or the openrouter/free router, are allowed; anything else stops and asks you. The router picks a random free model, so each result records the model actually used."
+test = "feature"
+test_he = "הבדיקה רק בודקת שיש מפתח שמור. היא לא פונה ל-OpenRouter ולא משנה כלום."
+test_en = "The check only sees that a saved key exists. It does not contact OpenRouter and changes nothing."
+cost_he = "חינם: מודלים חינמיים בלבד. אם נרשם חיוב במצב חינם בלבד, זה מדווח כשגיאה."
+cost_en = "Free: free models only. A charge seen in free-only mode is reported as an error."
+privacy_he = "לא פרטי: הטקסט יוצא מהמחשב אל OpenRouter ואל מי שמפעיל את המודל. קוד ונתונים פרטיים לא נשלחים לשם, אלא אם הפרויקט מאשר זאת במפורש. המפתח נשמר רק במחשב הזה."
+privacy_en = "Not private: the text leaves this computer for OpenRouter and whoever runs the model. Private code and data are not sent unless the project allows it explicitly. The key stays on this computer only."
+
+[[steps]]
+he = "הפעילו קודם את יכולות הבטא (jarvis features beta on), ואז את \"ספק OpenRouter\" (כבוי מראש)."
+en = "Turn on beta features first (jarvis features beta on), then \"OpenRouter provider\" (off by default)."
+action = "feature_on:provider_openrouter"
+check = "active:provider_openrouter"
+
+[[steps]]
+he = "צרו מפתח באתר OpenRouter ושמרו אותו: jarvis models key (נשאל בהסתרה ונשמר רק במחשב הזה)."
+en = "Create a key on the OpenRouter site and save it: jarvis models key (asked privately, stored on this computer only)."
+
+[[steps]]
+he = "לרשימת המודלים והמצב: jarvis models list, jarvis models status. לכיבוי: jarvis features off provider_openrouter. למחיקת המפתח: jarvis models key-off."
+en = "For the model list and the state: jarvis models list, jarvis models status. To turn off: jarvis features off provider_openrouter. To delete the key: jarvis models key-off."
+
+[[problems]]
+he = "הוא אומר שהמפתח חסר או נדחה"
+en = "He says the key is missing or was rejected"
+fix_he = "הריצו jarvis models key והדביקו מפתח חדש."
+fix_en = "Run jarvis models key and paste a new key."
+
+[[problems]]
+he = "הוא מסרב לשלוח, ואומר שמודל או תוכן לא מותרים"
+en = "He refuses to send and says a model or content is not allowed"
+fix_he = "זו המדיניות: מודל בתשלום או תוכן פרטי לא יוצאים בשקט. אשרו חריגה בעצמכם או השתמשו במודל חינמי/מקומי."
+fix_en = "That is the policy: paid models and private content never go out silently. Approve an exception yourself, or use a free or local model."
+
+[[problems]]
+he = "הגבלת קצב, או שאין חיבור"
+en = "Rate limit, or no connection"
+fix_he = "מודלים חינמיים מוגבלים בקצב. חכו מעט ונסו שוב; בדקו שיש אינטרנט."
+fix_en = "Free models are rate limited. Wait a little and try again; check the internet."
+
+[platform]
+windows = "implemented_unverified"
+windows_note_en = "core/tests/test_openrouter.py (fake server); never connected to the real OpenRouter"
+pi = "implemented_unverified"
+pi_note_en = "pure Python; not run on a Pi yet"

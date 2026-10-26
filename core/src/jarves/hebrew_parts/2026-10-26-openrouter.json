@@ -1,0 +1,5 @@
+{
+ "never connected to the real OpenRouter; the owner creates the key": "מעולם לא חובר ל-OpenRouter האמיתי; הבעלים יוצר את המפתח",
+ "send non-private text to free OpenRouter models under a hard spend policy (free-only by default); private code and data never go there unless the project allows it": "שולח טקסט לא פרטי למודלים חינמיים ב-OpenRouter תחת מדיניות הוצאה קשיחה (חינם בלבד כברירת מחדל); קוד ונתונים פרטיים לא נשלחים לשם אלא אם הפרויקט מאשר",
+ "UNIT test_openrouter.py (fake OpenRouter server on 127.0.0.1, no network, no key)": "בדיקות יחידה test_openrouter.py (שרת OpenRouter מדומה ב-127.0.0.1, בלי רשת ובלי מפתח)"
+}

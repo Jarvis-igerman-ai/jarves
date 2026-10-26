@@ -24,9 +24,14 @@ class ModelConfigError(ValueError):
 
 def _num(v, name: str) -> float:
     """Finite, non-negative real number (bool, str, NaN, inf, negative all rejected)."""
-    if isinstance(v, bool) or not isinstance(v, (int, float)) or not math.isfinite(v) or v < 0:
-        raise ModelConfigError(f"{name} must be a finite number >= 0, got {v!r}")
-    return float(v)
+    try:
+        ok = not isinstance(v, bool) and isinstance(v, (int, float)) and math.isfinite(v) and v >= 0
+        out = float(v) if ok else 0.0                  # float(10**400) raises OverflowError (#449)
+    except (OverflowError, ValueError):
+        ok = False
+    if not ok:
+        raise ModelConfigError(f"{name} must be a finite number >= 0, got {str(v)[:40]!r}")
+    return out
 
 
 MODES = ("balanced", "best-quality", "cheap", "free-only", "local-only")
@@ -82,6 +87,8 @@ class ModelInfo:
 DEFAULT_MODELS = (
     ModelInfo("local-small", "local", local=True, paid=False, languages="Hebrew: weak", context=8192, quality=3),
     ModelInfo("free-remote", "openrouter", paid=False, languages="Hebrew: untested", context=32768, quality=5),
+    ModelInfo("openrouter/free", "openrouter", paid=False, languages="Hebrew: untested (random free model)",
+              context=32768, quality=4),     # M2: the free router picks a free model at random: experiment mode only
     ModelInfo("gpt-6-luna", "openai", languages="Hebrew: good", context=400000, input_per_1m=0.10,
               output_per_1m=0.50, quality=6),
     ModelInfo("gpt-6-sol", "openai", languages="Hebrew: good", context=400000, input_per_1m=2.0,
@@ -157,6 +164,9 @@ class SpendPolicy:
         self.mode = mode
         self.daily_cap_usd = _num(daily_cap_usd, "daily_cap_usd")      # 0 = no paid at all
         self.task_cap_usd = _num(task_cap_usd, "task_cap_usd")
+        for n, v in (("agent_cap_usd", agent_cap_usd), ("allowed_providers", allowed_providers)):
+            if v is not None and not isinstance(v, dict):
+                raise ModelConfigError(f"{n} must be a table (name -> value), not {type(v).__name__} (#449)")
         self.agent_cap_usd = {str(k): _num(v, f"agent cap {k}") for k, v in (agent_cap_usd or {}).items()}
         self.allowed_providers = dict(allowed_providers or {})        # project -> list/set of provider names
         for v in self.allowed_providers.values():

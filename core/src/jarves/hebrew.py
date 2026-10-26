@@ -657,6 +657,7 @@ RULES: list[tuple[re.Pattern, object]] = [(re.compile(p, re.S), f) for p, f in [
     (r"^UNIT (\S+\.py)$", _s("בדיקות יחידה: {1}")),
     (r"^(core/tests/\S+\.py(?:, core/tests/\S+\.py)*) \(unit tests: real SQLite, fake clock, no network\)$",
      _s("{1} (בדיקות יחידה: SQLite אמיתי, שעון מדומה, בלי רשת)")),
+    (r"^OpenRouter key missing; (tell the user: .*|run: .*)$", lambda m: "חסר מפתח OpenRouter; מריצים במחשב jarvis models key"),
     (r"^no Telegram bot token; tell the user: .*$", lambda m: "אין טוקן לבוט טלגרם; מריצים במחשב jarvis telegram start"),
     (r"^Any\.do not connected; tell the user: .*$", lambda m: "Any.do לא מחובר; מריצים במחשב jarvis anydo start"),
     (r"^no Instagram token; tell the user: .*$", lambda m: "אין טוקן לאינסטגרם; מריצים במחשב jarvis instagram start"),
