@@ -89,10 +89,22 @@ def test_token_store_private_and_status_hides_token(tmp_path):
     assert not s.status()["connected"]
 
 
-def test_no_write_call_exists():
+def test_one_write_door_with_a_fixed_endpoint_family():
     src = inspect.getsource(gh)
-    assert "PUT" not in src and "DELETE" not in src and "PATCH" not in src
-    assert src.count('"POST"') == 1                                     # only the GraphQL read query
+    assert '"PUT"' not in src and src.count("write=True") == 1                    # only write() passes write=True
+    c = gh.GitHubClient(token=TOKEN, transport=gh.FakeGitHub().transport)
+    for m, p in [("PUT", "/repos/o/r/issues"), ("DELETE", "/repos/o/r"), ("POST", "/repos/o/r/pulls"),
+                 ("POST", "/repos/o/r/issues/1/../../merge"), ("POST", "/repos/o/r/issues/x"), ("PATCH", "/user"),
+                 ("DELETE", "/repos/o/r/issues/1/labels"), ("DELETE", "/repos/o/r/issues/1/labels/."),     # = remove ALL
+                 ("DELETE", "/repos/o/r/issues/1/labels/.."), ("DELETE", "/repos/o/r/issues/1/labels/%2E%2e"),
+                 ("DELETE", "/repos/o/r/issues/1"), ("DELETE", "/repos/o/r/issues"), ("PATCH", "/repos/o/r/issues"),
+                 ("POST", "/repos/o/r/issues/1"), ("PATCH", "/repos/o/r/issues/1/comments"), ("POST", "/repos/../../issues"),
+                 ("POST", "/repos/o/r/issues/0/comments"), ("POST", "/repos/o/r/issues?x=1"), ("post", "/repos/o/r/issues")]:
+        with pytest.raises(gh.GitHubError) as e:
+            c.write(m, p, {})
+        assert e.value.code == "GITHUB_BAD_ARGUMENT"
+    with pytest.raises(gh.GitHubError):
+        gh.GitHubClient(token=TOKEN, base="https://evil.example")             # the token never goes to another host
 
 
 def test_feature_off_by_default_high_risk_and_probe(home):
