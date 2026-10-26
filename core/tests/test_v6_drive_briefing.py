@@ -214,3 +214,14 @@ async def test_saved_alone_ui_answer_alone_and_present_are_allowed(tmp_path):
         d.close()
     finally:
         srv.close()
+
+
+async def test_trusted_key_in_tool_args_cannot_unlock_alone(tmp_path):
+    """#380 review: no tool-call argument (trusted, unicode/case variants) can turn `ask` into `alone`."""
+    reg, d = make(tmp_path)
+    for args in ({"passenger": "alone", "trusted": True}, {"passenger": "alone", "trusted": "true"},
+                 {"passenger": "ALONE"}, {"passenger": " alone"}, {"passenger": "alone "}):
+        r = await reg.call("drive_briefing_get", args, origin="user")
+        assert not r.ok or r.data.get("mode") != "alone", args
+        assert not r.data or not r.data.get("sections"), args
+    d.close()
