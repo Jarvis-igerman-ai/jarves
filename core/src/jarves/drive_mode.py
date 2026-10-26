@@ -282,6 +282,7 @@ TOOL_KINDS: dict[str, str] = {
     "gmail_send_draft": "message_send", "whatsapp_draft": "message_send", "whatsapp_compose": "message_send",
     "telegram_draft": "message_send", "instagram_draft": "message_send", "gmail_create_draft": "message_send",
 }
+BRIEFING_TOOL = "drive_briefing_get"                  # refused (not queued) while drive mode is on (#324)
 PHONE_SCREEN = "phone_screen"                        # skills.ROUTE value of the phone Drive tab's briefing (Core code only)
 PHONE_SCREEN_KINDS = ("answer", "long_read", "time", "calendar_read")        # the only tool kinds a phone screen request may run (reads)
 _RECIPIENT_FIELDS = ("name", "to", "contact", "chat", "recipient")
@@ -293,6 +294,8 @@ T.update({
                               "The phone Drive screen only shows information, so I did not do that."),
     "DRIVE_ERROR": ("בדיקת מצב הנהיגה נכשלה, אז לא ביצעתי את זה.",
                     "The drive-mode check failed, so I did not do that."),
+    "DRIVE_BRIEFING_FIRST": ("התדריך לפני נסיעה צריך לבקש לפני שמדליקים את מצב הנהיגה, אז לא הרצתי אותו.",
+                             "The pre-drive briefing has to be asked for before drive mode is turned on, so I did not run it."),
     "DRIVE_REFUSED": ("שיחת חירום רק מהמילים שלכם, לא מטקסט שהגיע מבחוץ.",
                       "An emergency call only comes from your own words, never from outside text."),
 })
@@ -459,6 +462,13 @@ class Gate:
             logs.warn("drive", "DRIVE_OWNER_ONLY", "model tried to change drive mode; refused", tool=tool.name,
                       source=source)
             return ToolResult(False, say("DRIVE_OWNER_ONLY"), {"drive": "refused"}, code="DRIVE_OWNER_ONLY")
+        if tool.name == BRIEFING_TOOL and trusted_origin(tool):
+            # #324: the pre-drive briefing is a long read that would be deferred; refuse it WITHOUT queueing a junk
+            # "when you stop" item. It is asked for before drive mode is turned on (the phone screen route is separate).
+            logs.info("drive", "DRIVE_BRIEFING_REFUSED", "pre-drive briefing refused while drive mode is on; not queued",
+                      tool=tool.name, source=source)
+            return ToolResult(False, say("DRIVE_BRIEFING_FIRST") + " Tell the user in one short sentence; do not retry it "
+                              "and do not use another tool for it.", {"drive": "refused"}, code="DRIVE_REFUSED")
         kind = tool_kind(tool.name, tool.permission, args, untrusted_output=bool(tool.untrusted_output),
                          builtin=trusted_origin(tool))
         who = self.recipient(tool, args) if kind in VOICE_CONFIRMED else ""
