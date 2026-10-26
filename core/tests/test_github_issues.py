@@ -577,6 +577,9 @@ def test_owner_reset_keeps_the_evidence_and_starts_a_new_chain(tmp_path, monkeyp
     monkeypatch.setattr(gw, "agent_session_reason", lambda *x, **k: "")
     from jarves import cli
     monkeypatch.setattr(cli, "_cli_features", lambda cfg, home: Feats())
+    monkeypatch.setattr(gw, "_confirm_reset", lambda cfg, home: False)                           # #497: no popup click, no reset
+    assert gw.cmd_github_write(NS(write_action="reset-audit"), Config(), tmp_path) == 1 and f.exists()
+    monkeypatch.setattr(gw, "_confirm_reset", lambda cfg, home: True)
     assert gw.cmd_github_write(NS(write_action="reset-audit"), Config(), tmp_path) == 0
     assert list((tmp_path / "github").glob("write_audit.tampered-*.jsonl")) and not f.exists()
     assert go(w, "issue.comment", "7", body="c").ok and w.status()["audit"] == "ok"

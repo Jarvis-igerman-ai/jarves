@@ -159,3 +159,28 @@ PR stop qualifying (only if `autolabel.yml` added it: marker label `automerge-au
 
 Switch: `gh variable set ENABLE_AUTOLABEL --body all` (also bugfix PRs), `--body false` (off), unset or `true` (default:
 docs, tests, guides). Dependabot has its own switch `DEPENDABOT_AUTOMERGE=false`. The workflow never checks out PR code.
+
+## Owner settings for the stable release (issues #543, #544)
+
+These are GitHub settings only the repo owner can change; agents never change them. Until they are done, no stable tag is
+created without the coordinator checking `git log` of the sign-off sheet. Each step is done in the browser on
+`https://github.com/Jarvis-igerman-ai/jarves` (Settings), about 10 minutes in all.
+
+1. **Code owners (reads `.github/CODEOWNERS`).** Settings, Rules, Rulesets (or Branches), the rule for `main`: tick
+   "Require a pull request before merging", then "Require review from Code Owners". The file lists the sign-off sheets, the
+   release tooling and the workflows under `@igalgerman`. Save. A PR cannot be approved by its own author: while every agent PR is opened under your account, a PR that touches these owner paths will wait until you add yourself to the ruleset's bypass list ("Bypass list" of the rule for `main`) or a second code owner exists. Add the bypass, or name a second code owner in `.github/CODEOWNERS`, before turning the rule on.
+2. **Only the owner can create stable tags.** Settings, Rules, Rulesets, New ruleset, New tag ruleset. Name: `stable tags`.
+   Enforcement: Active. Target pattern: `v*.*.*`. Rules: tick "Restrict creations", "Restrict updates" and "Restrict
+   deletions". Bypass list: add only yourself (the repository owner or an organization admin). Save.
+3. **A protected environment for the release secrets.** Settings, Environments, New environment, name it exactly
+   `stable-release`. Under "Deployment branches and tags" choose "Selected branches and tags", add a TAG rule `v*.*.*` (no
+   branch rule). Tick "Required reviewers" and add yourself. Save.
+4. **Move the two secrets into that environment.** In the same page, "Environment secrets", add `RELEASES_TOKEN` and
+   `JARVES_UPDATE_SIGNING_KEY` with the same values. Then in Settings, Secrets and variables, Actions, delete the two
+   repository secrets of the same names. (The publish job must name `environment: stable-release` first: tracked in #544;
+   do step 4 only after that change is merged, or the next publish cannot read the secrets.)
+5. **Check.** Ask a non-owner account (or an agent session) to try `git push origin v9.9.9`: it must be refused. Try a
+   workflow run from a side branch: the `stable-release` environment must ask for your approval, or refuse the branch.
+
+Safe default while these are not done: the coordinator does not create or accept a stable tag, and docs-only PRs that touch
+the owner paths above carry `no-automerge`.

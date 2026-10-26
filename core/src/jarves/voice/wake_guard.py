@@ -20,9 +20,11 @@ from pathlib import Path
 from typing import Callable
 
 WINDOW_S = 24 * 3600
+HALF_LIFE_S = 3 * 3600      # a false wake older than this counts half, older than 2x only a quarter (decay)
 MIN_FALSE = 3               # false wakes in the window before anything changes
 STEP = 0.08
-MAX_LEVEL = 4
+MAX_LEVEL = 2               # ceiling: at most +0.16 (it was 4 = +0.32, which shut the owner's real wakes out)
+ACCEPT_CEILING = 0.55       # the accept threshold is never pushed above max(its configured value, this)
 MAX_ENTRIES = 200
 SINGLE_STAGE_MIN = 0.25     # threshold floor when the wake model is the ONLY stage (no local speech check)
 SHORT_NO_SPEECH_S = 6.0
@@ -78,8 +80,15 @@ class WakeOutcomeLog:
     def counts(self) -> tuple[int, int]:
         """(good wakes, false wakes) in the last 24 hours."""
         self._prune()
-        good = sum(1 for _, k in self._items if k == "g")
-        return good, len(self._items) - good
+        now = self.clock()
+        good = false = 0.0
+        for t, k in self._items:
+            w = 0.5 ** (max(0.0, now - t) // HALF_LIFE_S)         # decay: old outcomes fade, a quiet spell relaxes it
+            if k == "g":
+                good += w
+            else:
+                false += w
+        return int(round(good)), int(round(false))
 
     def level(self) -> int:
         good, false = self.counts()
@@ -141,7 +150,7 @@ def apply_to_detector(det, bump: float, always_confirm: bool, single_stage_min: 
         base = getattr(det, "_guard_base_accept", None)
         if base is None:
             base = det._guard_base_accept = float(det.accept)
-        det.accept = round(min(0.95, base + bump), 3)
+        det.accept = round(min(max(base, ACCEPT_CEILING), base + bump), 3)
         det.threshold = det.accept
         det.always_confirm = bool(always_confirm)
         return {"stage": 2, "accept": det.accept, "always_confirm": det.always_confirm}
@@ -151,7 +160,7 @@ def apply_to_detector(det, bump: float, always_confirm: bool, single_stage_min: 
     base = getattr(det, "_guard_base_thr", None)
     if base is None:
         base = det._guard_base_thr = float(det.threshold)
-    thr = round(min(0.95, max(base, single_stage_min) + bump), 3)
+    thr = round(min(max(base, single_stage_min, ACCEPT_CEILING), max(base, single_stage_min) + bump), 3)
     det.threshold = thr
     if inner is not None and hasattr(inner, "threshold"):
         inner.threshold = thr

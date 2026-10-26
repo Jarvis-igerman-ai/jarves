@@ -42,7 +42,7 @@ class AutoGain:
     envelope (fast attack, ~4 s release). gain = target / speech level, limited to [1, max_gain] and so that the
     noise floor stays below `max_floor_db`; changes are smoothed (no pumping inside a word)."""
 
-    def __init__(self, target_db: float = -24.0, max_gain_db: float = 24.0, max_floor_db: float = -50.0,
+    def __init__(self, target_db: float = -24.0, max_gain_db: float = 12.0, max_floor_db: float = -50.0,
                  initial_gain_db: float = 0.0) -> None:
         self.target_db, self.max_gain_db, self.max_floor_db = target_db, max_gain_db, max_floor_db
         self.floor_db = -70.0
@@ -234,6 +234,16 @@ class ConfirmingDetector:
             await self.base.load()
         if hasattr(self.confirm, "load"):
             await asyncio.to_thread(self.confirm.load)
+            # keep the confirmer warm in the background (the first real ask took 1.5-5 s on a cold model); the
+            # listener starts first and never waits for it
+            self._warm_task = asyncio.create_task(self._warm())
+
+    async def _warm(self) -> None:
+        import asyncio
+        try:
+            await asyncio.to_thread(self.confirm, np.zeros(SR, np.float32))
+        except Exception:
+            pass
 
     def check(self) -> tuple[bool, str]:
         ok, msg = self.base.check() if hasattr(self.base, "check") else (True, "")

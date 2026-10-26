@@ -31,7 +31,7 @@ from pathlib import Path
 from typing import Callable
 from urllib.parse import urlsplit
 
-from . import logs, mobile_drive, drive_actions, phone_location, phone_hands_free, qrmini  # noqa: F401  (these register their catalog rows)
+from . import logs, mobile_drive, drive_actions, phone_location, phone_hands_free, qrmini, mobile_companion  # noqa: F401  (these register their catalog rows)
 from .continuity import Continuity
 
 FEATURE = "mobile_access"
@@ -75,7 +75,8 @@ STATIC_FILES = {"index.html": "text/html; charset=utf-8", "app.js": "text/javasc
                 "plans.js": "text/javascript; charset=utf-8",
                 "prefs.js": "text/javascript; charset=utf-8",
                 "drive.js": "text/javascript; charset=utf-8",
-                "hands_free.js": "text/javascript; charset=utf-8"}
+                "hands_free.js": "text/javascript; charset=utf-8",
+                "m_shell.js": "text/javascript; charset=utf-8", "m_theme.css": "text/css; charset=utf-8"}   # redesign #511
 SHARED_FILES = ("chatview.js", "chatview.css")      # one chat view for the dashboard and the phone page (dashboard_static/)
 
 
@@ -758,6 +759,8 @@ def serve(h, mob: MobileAccess, ip: str) -> None:
         return h._json(200, {"device": dev["id"], "name": dev["name"], "scopes": dev["scopes"], "pages": dev["pages"],
                              "phone_approvals": mob.settings()["phone_approvals"],
                              "voice": bool(mob.bridge and mob.bridge.voice_available() and mob.scheme == "https")})
+    if path == mobile_companion.INFO_PATH and method == "GET":      # Companion API v1 (V7-A1): read-only, any paired device
+        return h._json_extra(200, mobile_companion.info(mob, dev), {mobile_companion.API_HEADER: str(mobile_companion.API_VERSION)})
     if path == "/api/m/unpair" and method == "POST":
         mob.revoke(dev["id"], by=dev["id"])
         return h._json(200, {"ok": True})

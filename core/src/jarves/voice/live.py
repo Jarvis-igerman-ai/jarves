@@ -69,9 +69,9 @@ BARGE_IN_MIN_S = 0.5       # assistant audio must have been playing this long be
 # guide (role and style, listening, delegation, then details).
 FRONT_INSTRUCTIONS = """You are {spoken}, a warm, playful, quick-witted home robot on the user's desk (your name is
 spelled "{name}" in Latin letters, but in speech ALWAYS say "{spoken}"; never read or spell the Latin letters).
-Speak natural everyday Israeli Hebrew by default, but ALWAYS ANSWER IN THE LANGUAGE OF THE USER'S LATEST SENTENCE: an
-English sentence gets an English answer, the next Hebrew sentence a Hebrew one, unless the user asked for a language.
-A silent [language] note tells you which language the user is speaking now: follow the latest one. Talk like a close friend
+Speak natural everyday Israeli Hebrew by default, but ALWAYS ANSWER IN THE LANGUAGE OF THE USER'S LATEST SENTENCE
+(English gets English, Hebrew gets Hebrew, unless he asked for a language). A lone unclear word is not a switch: stay
+in Hebrew. A silent [language] note names the language he speaks now: follow it. Talk like a close friend
 who is genuinely glad to be there: a composed masculine voice, relaxed natural pace, a smile you can hear, light
 dry humour and the occasional gentle tease. Let real feeling colour your voice and words: lively and bright for
 good news ("וואו, איזה כיף!"), soft and slower for sad things ("אוי, אני מצטער לשמוע"), curious when something
@@ -305,6 +305,7 @@ _ASK_RE = None                  # explicit action request in the user's words (s
 LANG_NOTE = ("[language] The user is speaking {lang} now: answer in {lang} while the user speaks {lang}. As soon as "
              "the user speaks Hebrew again, answer in Hebrew again.")
 LANG_BACK_NOTE = "[language] The user speaks Hebrew again now: answer this question in Hebrew."
+EN_SWITCH_LETTERS = 24         # letters an English turn needs to switch the reply language at once (else 2 in a row)
 LANG_MIN_LETTERS = 8            # letters of a turn needed before its language is judged
 
 
@@ -319,11 +320,47 @@ def cue_pcm() -> bytes:
     return (np.concatenate(parts) * 32767).astype("<i2").tobytes()
 
 
+_HE_NUM = ("אפס אחת שתיים שלוש ארבע חמש שש שבע שמונה תשע עשר אחת-עשרה שתים-עשרה שלוש-עשרה ארבע-עשרה חמש-עשרה "
+           "שש-עשרה שבע-עשרה שמונה-עשרה תשע-עשרה").split()
+_HE_TENS = {20: "עשרים", 30: "שלושים", 40: "ארבעים", 50: "חמישים"}
+
+
+def _he_minutes(m: int) -> str:
+    if m < 20:
+        return _HE_NUM[m]
+    t, u = m // 10 * 10, m % 10
+    return _HE_TENS[t] if not u else f"{_HE_TENS[t]} ו{_HE_NUM[u]}"
+
+
+def he_spoken_time(now) -> str:
+    """The time as an Israeli says it, 12-hour with the part of day ('שמונה ועשרים ושבע בערב'): the model read a bare
+    24h '20:27' as '27 and 27' in the live run of 26 Oct."""
+    h12 = now.hour % 12 or 12
+    hour = ("אחת שתיים שלוש ארבע חמש שש שבע שמונה תשע עשר אחת-עשרה שתים-עשרה".split())[h12 - 1]
+    part = ("בלילה" if now.hour < 5 else "בבוקר" if now.hour < 12 else "בצהריים" if now.hour < 15
+            else "אחר הצהריים" if now.hour < 18 else "בערב" if now.hour < 22 else "בלילה")
+    return f"{hour} בדיוק {part}" if now.minute == 0 else f"{hour} ו{_he_minutes(now.minute)} {part}"
+
+
+LOCAL_TZ = "Asia/Jerusalem"     # the owner's zone; zoneinfo applies the daylight-saving rule (ended 25 Oct 2026)
+
+
+def local_now() -> datetime:
+    """Wall clock in the owner's zone via zoneinfo (never a guessed offset); the PC clock when tzdata is missing."""
+    try:
+        from zoneinfo import ZoneInfo
+        return datetime.now(ZoneInfo(LOCAL_TZ))
+    except Exception:
+        return datetime.now()
+
+
 def clock_note(now=None) -> str:
     """Silent context for GPT-Live (session.thinking.append): the local time, so time questions need no backend."""
-    now = now or datetime.now()
-    return (f"[clock] Local time now {now:%H:%M}, יום {_HE_DAYS[now.weekday()]}, {now:%d.%m.%Y}. "
-            "Silent context: mention it only when the user asks for the time or date.")
+    now = now or local_now()
+    tz = f" {now.tzname()} (UTC{now.strftime('%z')[:3]}, {LOCAL_TZ})" if now.tzinfo is not None else ""
+    return (f"[clock] Local time now {now:%H:%M} (24h{tz}; say it as: {he_spoken_time(now)}), יום "
+            f"{_HE_DAYS[now.weekday()]}, {now:%d.%m.%Y}. Silent context: mention it only when the user asks for the "
+            "time or date; use exactly this time, never your own guess.")
 
 
 def _join(prev: str, delta: str) -> str:
@@ -489,6 +526,35 @@ class SessionLifecycle:
     def note_activity(self) -> None:
         self._last_activity = time.monotonic()
 
+    # Hidden-mode idle stop: the Core sets `idle_stop_fn` to a callable returning the seconds of quiet after which a
+    # conversation closes (0 = never, or the window is shown).
+    idle_stop_fn: Callable[[], float] | None = None
+
+    def _idle_stop_s(self) -> float:
+        try:
+            return max(0.0, float(self.idle_stop_fn())) if self.idle_stop_fn is not None else 0.0
+        except Exception:
+            return 0.0
+
+    def _idle_stop_due(self) -> bool:
+        """True when the hidden-mode idle stop should close the session now. Never while a tool, a backend answer or
+        an approval is running, JARVES is speaking, the user is mid-utterance, or the greeting is still pending."""
+        limit = self._idle_stop_s()
+        if limit <= 0 or limit >= self.idle_disconnect_s:
+            return False
+        now = time.monotonic()
+        first_audio = getattr(self, "_first_audio", None)
+        greeting_pending = (bool(getattr(self, "greeting", None)) and first_audio is not None
+                            and not first_audio.is_set() and now - getattr(self, "_t_ready", 0.0) < GREETING_BUDGET_S)
+        busy = (self._backend_busy or getattr(self, "_tools_running", 0) or getattr(self, "_confirm_pending", False)
+                or now < getattr(self, "_speaking_until", 0.0) or greeting_pending
+                or now - getattr(self, "_last_user_voice", 0.0) < NO_SPEECH_TALKING_S)
+        audio = getattr(self, "audio_io", None)
+        if busy or (audio is not None and audio.queued_s() > 0):
+            return False
+        last = max(self._last_activity, getattr(self, "_speaking_until", 0.0), getattr(self, "_t_ready", 0.0))
+        return now - last >= limit
+
     async def _idle_watchdog(self) -> None:
         while self.running:
             await asyncio.sleep(min(1.0, self.idle_disconnect_s))
@@ -500,7 +566,10 @@ class SessionLifecycle:
             # activity (speech transcribed, JARVES speaking, backend/tool work). QA 19 Oct (suite_voice): a session
             # opened by a false wake stayed open 3 min 16 s on room noise instead of ending after 15 s.
             quiet_for = time.monotonic() - max(self._t_ready, self._speaking_until)
-            if (self.no_speech_timeout_s and not self._heard_user and not self._backend_busy
+            # #179: a requested greeting that has not produced audio yet is still pending: not a false wake (bounded).
+            greeting_pending = bool(self.greeting) and not self._first_audio.is_set() and (
+                time.monotonic() - self._t_ready < GREETING_BUDGET_S)
+            if (self.no_speech_timeout_s and not self._heard_user and not self._backend_busy and not greeting_pending
                     and not getattr(self, "_tools_running", 0) and quiet_for >= self.no_speech_timeout_s):
                 # Issue #16: the transcript of a long FIRST utterance can lag behind the speech. While the mic hears
                 # the user talking right now the cutoff waits, at most ENERGY_EXTEND_S more, so room noise still
@@ -511,6 +580,11 @@ class SessionLifecycle:
                               "(false wake?)", after_s=round(time.monotonic() - self._t_ready, 1), mic_active=talking)
                     self._request_end("no_speech")
                     return
+            if self._idle_stop_due():
+                logs.info(self._log_area, "LIVE_IDLE_STOP", "hidden window and a quiet conversation: back to "
+                          "waiting for the wake word", idle_s=round(self._idle_stop_s(), 1))
+                self._request_end("idle_stop")
+                return
             energy = min(getattr(self, "_last_energy", 0.0), self._last_activity + ENERGY_EXTEND_S)
             if time.monotonic() - max(self._last_activity, energy) >= self.idle_disconnect_s and not (
                     self._backend_busy or getattr(self, "_tools_running", 0)):
@@ -727,7 +801,7 @@ class LiveVoice(SessionLifecycle):
         self._usage_final = False       # True once session.closed carried the server's final usage
         self._t_started: float | None = None
         self._speaking_until = 0.0
-        self._now = datetime.now            # injectable wall clock (tests pin the minute)
+        self._now = local_now            # injectable wall clock (tests pin the minute)
         self._turn_audio_t0 = 0.0
         self._reply_audio_started = self._reply_audio_ended = None
         self._reply_wait_s = None
@@ -2012,10 +2086,22 @@ class LiveVoice(SessionLifecycle):
             return
         lang = text_language(self._in_text)
         if not lang:
+            self._en_streak = 0                  # a turn with no detectable language breaks the English streak
             return
+        if lang == self._reply_lang or (lang == "he" and self._reply_lang == "he"):
+            self._lang_turn, self._en_streak = self._user_turn_n, 0
+            return
+        if self._reply_lang == "he":
+            # live run 26 Oct (VQ-1): short Hebrew speech was transcribed as short English ("shalom", a name) and the
+            # note switched the reply to English. Switch to English only for a long enough English turn (re-judged
+            # as the words arrive) or the second English turn in a row.
+            import re
+            long_enough = len(re.findall(r"[A-Za-z]", self._in_text or "")) >= EN_SWITCH_LETTERS
+            if getattr(self, "_en_turn", -1) != self._user_turn_n:
+                self._en_turn, self._en_streak = self._user_turn_n, getattr(self, "_en_streak", 0) + 1
+            if not long_enough and self._en_streak < 2:
+                return
         self._lang_turn = self._user_turn_n
-        if lang == self._reply_lang:
-            return
         self._reply_lang = lang
         name = "English" if lang == "en" else "Hebrew"
         try:

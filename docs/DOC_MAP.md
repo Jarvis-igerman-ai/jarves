@@ -50,6 +50,8 @@ Smart chat blocks and task triage design (26 Oct, #364 #365): [design](plans/SMA
 | [SWV4_RELEASE_CHECKLIST](reviews/SWV4_RELEASE_CHECKLIST.md) | 4.0.0 checklist state and evidence | V4 | current | [V4 package section 10](JARVES_SW_V4_WORK_PACKAGE.md#10-release-checklist) defines the rows |
 | [RELEASE_CHECKLIST_4.0.1](reviews/RELEASE_CHECKLIST_4.0.1.md) | 4.0.1 stable release checklist (read by the release gate) | 4.0.1 | current | [RELEASING](RELEASING.md) |
 | [SIGN_OFF_4.0.1](release/SIGN_OFF_4.0.1.md) | 4.0.1 owner sign-off sheet (what is auto-checked, manual rows with times, one signature, gate dry run) | 4.0.1 | current | [RELEASING](RELEASING.md) |
+| [EVIDENCE_4.0.1](release/EVIDENCE_4.0.1.md) | 4.0.1 final evidence: bug-table and checklist statuses with proof | 4.0.1 | current | [SIGN_OFF_4.0.1](release/SIGN_OFF_4.0.1.md) |
+| [OWNER_REVIEW_4.0.1](release/OWNER_REVIEW_4.0.1.md) | 4.0.1 owner review summary before sign-off | 4.0.1 | current | [SIGN_OFF_4.0.1](release/SIGN_OFF_4.0.1.md) |
 | [RELEASE_CHECKLIST_5.0.0](reviews/RELEASE_CHECKLIST_5.0.0.md) | 5.0.0 stable release checklist, draft (read by the release gate) | 5.0 | draft | [RELEASING](RELEASING.md) |
 | [ENGINEERING_REVIEW_GATES](ENGINEERING_REVIEW_GATES.md) | Standing review and challenge gates | general | current | itself |
 | [CI_PERFORMANCE](CI_PERFORMANCE.md) | CI speed, shards and the fast release path | general | current | [RELEASING](RELEASING.md) |
@@ -85,7 +87,9 @@ Smart chat blocks and task triage design (26 Oct, #364 #365): [design](plans/SMA
 | [JARVES_SW_V4_WORK_PACKAGE](JARVES_SW_V4_WORK_PACKAGE.md) | V4 packages A-O, test scripts (sections 6-9), release checklist, owner decisions | V4 | current for plan and test scripts; delivery state lives in ROADMAP and HANDOFF | ROADMAP for status |
 | [JARVES_SW_V5_WORK_PACKAGE](JARVES_SW_V5_WORK_PACKAGE.md) | V5 phone-access package (security model, PWA) | V5 | current; the other V5 pillars are in ROADMAP | ROADMAP |
 | [plans/V7_PROPOSAL_2026-10-21](plans/V7_PROPOSAL_2026-10-21.md) | V7 research proposal | V7 | proposal | ROADMAP |
+| [plans/PHONE_APP_REDESIGN_2026-10-26](plans/PHONE_APP_REDESIGN_2026-10-26.md) | Phone app redesign (#511, #509): ChatGPT-like chat as home, side drawer, design tokens, RTL, 390 px audits, real-phone test | V5 phone | slice 1 in progress | Owner order 26 Oct |
 | [plans/ANDROID_DAILY_COMPANION_ADR_2026-10-26](plans/ANDROID_DAILY_COMPANION_ADR_2026-10-26.md) | ADR (A0, #388): PC-hosted Core first, PWA plus thin native shell, offline basics, FGS/mic limits, push without a cloud server, permissions, security | V7 (track A) | proposed, docs only | V7 work package (26 Oct) |
+| [api/companion_v1](api/companion_v1.md) | Companion API v1 contract (A1, #389): phone API routes, scopes, errors, versioning (JSON twin: api/companion_v1.json) | V7 (track A) | implemented, unverified | ADR A0 |
 | [plans/R1_OPENCLAW_AND_ALTERNATIVES_2026-10-26](plans/R1_OPENCLAW_AND_ALTERNATIVES_2026-10-26.md) | Research (R1, #402): OpenClaw, nanobot, IronClaw; adopt/adapt/reject table, Python Core stays | V7 (track R) | research note, docs only | V7 work package (26 Oct) |
 | [plans/R2_BUZZ_BLOCK_INVESTIGATION_2026-10-26](plans/R2_BUZZ_BLOCK_INVESTIGATION_2026-10-26.md) | Research (R2, #403): Buzz by Block, licence, maturity, patterns, risks; reject adoption, adapt patterns | V7 (track R) | research note, docs only | V7 work package (26 Oct) |
 | [plans/V7_WORK_PACKAGE_2026-10-26](plans/V7_WORK_PACKAGE_2026-10-26.md) | V7 work package: tracks, slices and issues, gates, caps, owner needs, hard stops | V7 | approved plan, execution gated | NOW |
