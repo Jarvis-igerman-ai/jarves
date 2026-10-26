@@ -382,8 +382,8 @@ def add_cli(sub) -> None:
                                        "token (asked privately); `off` deletes it. Switch on: `jarvis features on github`")
     h.add_argument("action", choices=["status", "token", "off", "write", "issue"])
     h.add_argument("write_action", nargs="?", default=None,
-                   choices=["status", "on", "off", "create", "edit", "comment", "labels-add", "labels-remove"],
-                   help="with `write`: status|on|off (the GitHub write switch); with `issue`: create|edit|comment|"
+                   choices=["status", "on", "off", "reset-audit", "create", "edit", "comment", "labels-add", "labels-remove"],
+                   help="with `write`: status|on|off (the GitHub write switch)|reset-audit (owner: after a tamper alarm); with `issue`: create|edit|comment|"
                         "labels-add|labels-remove (each asks your approval, shows the exact text)")
     h.add_argument("number", nargs="?", default=None, help="with `issue`: the issue or pull request number")
     h.add_argument("--repo", default="", help="owner/repo from github_repos (default: the only one listed)")
