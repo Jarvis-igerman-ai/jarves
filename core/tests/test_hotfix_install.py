@@ -453,3 +453,68 @@ def test_git_refuses_when_base_is_not_an_ancestor_or_source_is_not_git(po, tmp_p
     finally:
         shutil.rmtree(s.cleanup, ignore_errors=True)
 
+
+
+# ---- installed libraries kept in a zip loaded by a .pth (jarves-libraries.zip layout)
+def _mkzip(path, names):
+    import zipfile
+    with zipfile.ZipFile(path, "w") as z:
+        for n in names:
+            z.writestr(n, "x=1\n")
+
+
+def _imports_tree(tmp_path, mods):
+    inst = tmp_path / "sp" / "jarves"
+    new = tmp_path / "new" / "jarves"
+    write(inst, "a.py", "A=1\n")
+    write(new, "a.py", "".join(f"import {m}\n" for m in mods))
+    return inst, new
+
+
+def test_zipped_libraries_via_pth_are_found(tmp_path):
+    inst, new = _imports_tree(tmp_path, ["httpx", "pydantic", "typing_extensions"])
+    sp = inst.parent
+    _mkzip(sp / "jarves-libraries.zip", ["httpx/__init__.py", "pydantic/main.py", "typing_extensions.py"])
+    (sp / "jarves-libraries.pth").write_text("jarves-libraries.zip\n", encoding="utf-8")
+    assert hf.scan_new_imports(new, ["a.py"], inst, [sp]) == []
+
+
+def test_module_absent_from_zip_is_refused(tmp_path):
+    inst, new = _imports_tree(tmp_path, ["httpx", "nope_zz"])
+    sp = inst.parent
+    _mkzip(sp / "jarves-libraries.zip", ["httpx/__init__.py"])
+    (sp / "jarves-libraries.pth").write_text("jarves-libraries.zip\n", encoding="utf-8")
+    assert hf.scan_new_imports(new, ["a.py"], inst, [sp]) == ["nope_zz (in a.py)"]
+
+
+def test_corrupt_zip_fails_closed(tmp_path):
+    inst, new = _imports_tree(tmp_path, ["httpx"])
+    sp = inst.parent
+    (sp / "jarves-libraries.zip").write_bytes(b"not a zip at all")
+    (sp / "jarves-libraries.pth").write_text("jarves-libraries.zip\n", encoding="utf-8")
+    assert hf.scan_new_imports(new, ["a.py"], inst, [sp]) == ["httpx (in a.py)"]
+
+
+def test_zip_not_named_by_a_pth_does_not_count(tmp_path):
+    inst, new = _imports_tree(tmp_path, ["httpx"])
+    sp = inst.parent
+    _mkzip(sp / "stray.zip", ["httpx/__init__.py"])
+    assert hf.scan_new_imports(new, ["a.py"], inst, [sp]) == ["httpx (in a.py)"]
+
+
+def test_pth_extra_directory_and_import_lines(tmp_path):
+    inst, new = _imports_tree(tmp_path, ["extra_zz"])
+    sp = inst.parent
+    (sp / "libs").mkdir()
+    (sp / "libs" / "extra_zz").mkdir()
+    (sp / "x.pth").write_text("# comment\nimport os\nlibs\n", encoding="utf-8")
+    assert hf.scan_new_imports(new, ["a.py"], inst, [sp]) == []
+
+
+def test_zip_traversal_names_are_ignored(tmp_path):
+    inst, new = _imports_tree(tmp_path, ["evil_zz", "abs_zz", "good_zz"])
+    sp = inst.parent
+    _mkzip(sp / "jarves-libraries.zip", ["../evil_zz/__init__.py", "/abs_zz/__init__.py", "a/../evil_zz/x.py",
+                                         "good_zz/__init__.py"])
+    (sp / "jarves-libraries.pth").write_text("jarves-libraries.zip\n", encoding="utf-8")
+    assert hf.scan_new_imports(new, ["a.py"], inst, [sp]) == ["abs_zz (in a.py)", "evil_zz (in a.py)"]
