@@ -258,12 +258,21 @@ class PlanStore:
 MAX_ATTEMPTS = 3
 
 
+STEP_SHOW_CHARS = MAX_ARGS_CHARS + 200   # the step popup shows the arguments in full (propose() caps them at MAX_ARGS_CHARS); a longer step is not run
+
+
+def _args_text(args, n: int) -> str:
+    """The arguments as the owner sees them. A cut is marked with the number of hidden characters (H1: never silent)."""
+    t = json.dumps(args, ensure_ascii=False)
+    return t if len(t) <= n else t[:n] + f" ... [+{len(t) - n} more characters not shown here]"
+
+
 def describe(plan: dict) -> str:
     """The text the owner approves: every step with its tool, arguments and whether it asks again."""
     lines = [f"{plan['title']} ({len(plan['steps'])} steps, up to {int(plan['timeout_s'] // 60)} min, "
              f"{plan['max_ai']} AI requests)"]
     for s in plan["steps"]:
-        lines.append(f"{s['idx'] + 1}. {s['tool']} {_short(json.dumps(s['args'], ensure_ascii=False), 120)}"
+        lines.append(f"{s['idx'] + 1}. {s['tool']} {_args_text(s['args'], 200)}"
                      + (f"  - {s['why']}" if s["why"] else ""))
     return "\n".join(lines)
 
@@ -372,9 +381,12 @@ class PlanRunner:
                 self._block(pid, step, "text written by others was read earlier in this plan: resume to continue")
                 return st.get(pid)
             if consequential and not tool.confirm and tool.permission != "destructive":
+                if len(json.dumps(step["args"], ensure_ascii=False)) > STEP_SHOW_CHARS:
+                    self._block(pid, step, "the arguments are too long to show in full for your approval; shorten the step")
+                    return st.get(pid)
                 ok = await self.registry.ask(
                     f"Plan '{p['title']}', step {step['idx'] + 1}/{len(st.steps(pid))}: {step['tool']} "
-                    f"{_short(json.dumps(step['args'], ensure_ascii=False), 160)}\nRun this step?",
+                    f"{_args_text(step['args'], STEP_SHOW_CHARS)}\nRun this step?",
                     title="goal_plan_step", risk="medium", kind="tool", pc_only=True,
                     why=step["why"] or "A step of a plan you approved.")
                 if not ok:

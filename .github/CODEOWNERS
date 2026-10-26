@@ -1,0 +1,11 @@
+# Owner-only paths (issues #543, #544). The release sign-off, the release tooling and the CI workflows must be reviewed
+# by the repo owner. This file only takes effect once the owner turns on "Require review from Code Owners" in the
+# branch rule of main (steps: docs/RELEASING.md, "Owner settings for the stable release").
+/docs/release/                       @igalgerman
+/docs/reviews/MANUAL_TEST_*.md       @igalgerman
+/docs/reviews/RELEASE_CHECKLIST_*.md @igalgerman
+/.github/workflows/                  @igalgerman
+/.github/CODEOWNERS                  @igalgerman
+/core/tools/release_gate.py          @igalgerman
+/core/src/jarves/release_*.py        @igalgerman
+/packaging/release.py                @igalgerman

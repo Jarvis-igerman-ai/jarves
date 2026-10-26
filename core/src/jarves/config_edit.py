@@ -26,6 +26,7 @@ BACKUPS = 10
 EDITABLE: dict[str, tuple[str, str]] = {
     "voice.backend_deadline_s": ("Conversation", "Give up on a stuck lookup after (s), then retry once"),
     "voice.idle_disconnect_s": ("Conversation", "End a quiet conversation after (s)"),
+    "voice.idle_stop_s": ("Conversation", "Hidden mode: stop listening after quiet (s, 0 = never)"),
     "voice.greeting_delay_s": ("Conversation", "Pause before the hello (s)"),
     "voice.progress_after_s": ("Conversation", "Say \"still checking\" after (s) of a silent lookup (0 = never)"),
     "voice.session_max_s": ("Conversation", "Longest single conversation (s)"),

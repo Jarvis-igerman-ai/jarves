@@ -1,0 +1,614 @@
+{
+ "contract": "jarves-companion-api",
+ "version": 1,
+ "header": {
+  "request": "X-Jarves-Api",
+  "value": "1",
+  "note": "Optional on requests; the server answers /api/m/companion/info with X-Jarves-Api: 1. Changes within v1 are additive only (new routes, new optional fields); a breaking change is v2 with the old routes kept."
+ },
+ "base": "/api/m",
+ "auth": {
+  "type": "bearer",
+  "header": "Authorization: Bearer <token>",
+  "pair": "POST /api/m/pair",
+  "writes_need": "X-Jarves: 1 header and a same-origin or absent Origin"
+ },
+ "scopes": {
+  "default": [
+   "chat",
+   "voice",
+   "status",
+   "approvals"
+  ],
+  "optional": [
+   "tasks",
+   "prefs",
+   "drive"
+  ]
+ },
+ "rate_limits": {
+  "per_address_per_min": 120,
+  "per_device_per_min": 120,
+  "chat_per_min": 20,
+  "voice_per_min": 10,
+  "bad_tokens_per_min": 10,
+  "chat_events_per_min": 600,
+  "retry_after": "429 carries Retry-After: 60"
+ },
+ "errors": [
+  {
+   "status": 400,
+   "meaning": "bad body or missing command id"
+  },
+  {
+   "status": 401,
+   "meaning": "not paired or revoked: pair again"
+  },
+  {
+   "status": 403,
+   "meaning": "scope, page or PC-only refusal; body may carry code",
+   "codes": [
+    "PAGE_NOT_ALLOWED",
+    "PAGE_PC_ONLY",
+    "PHONE_APPROVALS_OFF",
+    "PC_ONLY",
+    "TYPED_PC_ONLY",
+    "PLAN_PC_ONLY"
+   ]
+  },
+  {
+   "status": 404,
+   "meaning": "unknown route"
+  },
+  {
+   "status": 409,
+   "meaning": "approval already answered or expired"
+  },
+  {
+   "status": 429,
+   "meaning": "rate limited"
+  },
+  {
+   "status": 503,
+   "meaning": "Core part unavailable"
+  }
+ ],
+ "not_available": {
+  "pc_only_segments": [
+   "backup",
+   "config",
+   "connect",
+   "dashboard",
+   "device",
+   "devices",
+   "features",
+   "files",
+   "google",
+   "identity",
+   "keys",
+   "logs",
+   "memory",
+   "mobile",
+   "profiles",
+   "revoke",
+   "secrets",
+   "settings",
+   "skills",
+   "telegram",
+   "updates",
+   "whatsapp",
+   "workspace"
+  ],
+  "plan_ops": [
+   "approve",
+   "skip",
+   "delete"
+  ],
+  "approvals": [
+   "typed-code approvals",
+   "approvals flagged pc_only",
+   "GitHub approvals (local only)",
+   "any approval while phone approvals are off (default)"
+  ],
+  "other": [
+   "no file, memory, secret, settings, device, backup or update access",
+   "no always-listening: push-to-talk only",
+   "no push registration route yet (placeholder in a later version)",
+   "no new write capability in A1"
+  ]
+ },
+ "push": {
+  "status": "placeholder",
+  "note": "Registration is not implemented; the app polls /api/m/sync."
+ },
+ "audit": "Audit records the device, route and status only (kind-only for approvals), never message text or coordinates.",
+ "routes": [
+  {
+   "method": "POST",
+   "path": "/api/m/pair",
+   "scope": null,
+   "page": null,
+   "write": true,
+   "app": true,
+   "summary": "Exchange the one-time 8-digit code (5 min, single use) for a device token. No auth header.",
+   "request": {
+    "required": [
+     "code"
+    ],
+    "types": {
+     "code": "string",
+     "name": "string"
+    }
+   }
+  },
+  {
+   "method": "GET",
+   "path": "/api/m/companion/info",
+   "scope": null,
+   "page": null,
+   "write": false,
+   "app": true,
+   "summary": "Companion API info: api version, Core version, PC online/offline, server time, features.",
+   "response": {
+    "required": [
+     "api",
+     "api_min",
+     "core_version",
+     "server_time",
+     "pc",
+     "scopes_supported",
+     "scopes",
+     "phone_approvals",
+     "beta_features",
+     "features"
+    ],
+    "types": {
+     "api": "integer",
+     "api_min": "integer",
+     "core_version": "string",
+     "server_time": "number",
+     "pc": "object",
+     "scopes_supported": "array",
+     "scopes": "array",
+     "phone_approvals": "boolean",
+     "beta_features": "boolean",
+     "features": "object"
+    }
+   },
+   "probe": true
+  },
+  {
+   "method": "GET",
+   "path": "/api/m/me",
+   "scope": null,
+   "page": null,
+   "write": false,
+   "app": true,
+   "summary": "This device: id, name, granted scopes and pages.",
+   "response": {
+    "required": [
+     "device",
+     "name",
+     "scopes",
+     "pages",
+     "phone_approvals",
+     "voice"
+    ],
+    "types": {
+     "device": "string",
+     "name": "string",
+     "scopes": "array",
+     "pages": "array",
+     "phone_approvals": "boolean",
+     "voice": "boolean"
+    }
+   },
+   "probe": true
+  },
+  {
+   "method": "POST",
+   "path": "/api/m/unpair",
+   "scope": null,
+   "page": null,
+   "write": true,
+   "app": true,
+   "summary": "Revoke this device's own token."
+  },
+  {
+   "method": "GET",
+   "path": "/api/m/pages",
+   "scope": null,
+   "page": null,
+   "write": false,
+   "app": true,
+   "summary": "Pages this device may use, remote pages and PC-only pages.",
+   "response": {
+    "required": [
+     "allowed",
+     "remote_pages",
+     "pc_only"
+    ],
+    "types": {
+     "allowed": "array",
+     "remote_pages": "array",
+     "pc_only": "array"
+    }
+   },
+   "probe": true
+  },
+  {
+   "method": "GET",
+   "path": "/api/m/pages/{name}",
+   "scope": null,
+   "page": null,
+   "write": false,
+   "app": false,
+   "summary": "Page grant check (PWA navigation)."
+  },
+  {
+   "method": "GET",
+   "path": "/api/m/home",
+   "scope": null,
+   "page": "home",
+   "write": false,
+   "app": false,
+   "summary": "PWA home card."
+  },
+  {
+   "method": "GET",
+   "path": "/api/m/health",
+   "scope": null,
+   "page": "health",
+   "write": false,
+   "app": true,
+   "summary": "Component status plus latest self-test / speed-test sentences."
+  },
+  {
+   "method": "GET",
+   "path": "/api/m/status",
+   "scope": "status",
+   "page": "health",
+   "write": false,
+   "app": true,
+   "summary": "Core status: {core, components, tls}.",
+   "response": {
+    "required": [
+     "core",
+     "components",
+     "tls"
+    ],
+    "types": {
+     "core": "string",
+     "components": "object",
+     "tls": "boolean"
+    }
+   },
+   "probe": true
+  },
+  {
+   "method": "GET",
+   "path": "/api/m/sync",
+   "scope": "status",
+   "page": null,
+   "write": false,
+   "app": true,
+   "summary": "One poll: chat turns, notices, active goals (tasks scope), approvals waiting, signals.",
+   "response": {
+    "required": [
+     "head",
+     "turns",
+     "notices",
+     "desktop_here",
+     "goals",
+     "approvals_waiting"
+    ],
+    "types": {
+     "turns": "array",
+     "notices": "array",
+     "desktop_here": "boolean",
+     "goals": "array",
+     "approvals_waiting": "integer"
+    }
+   },
+   "probe": true
+  },
+  {
+   "method": "POST",
+   "path": "/api/m/notices/{id}/ack",
+   "scope": "status",
+   "page": null,
+   "write": true,
+   "app": true,
+   "summary": "Acknowledge a notice."
+  },
+  {
+   "method": "POST",
+   "path": "/api/m/chat",
+   "scope": "chat",
+   "page": "chat",
+   "write": true,
+   "app": true,
+   "summary": "Text chat turn (client message id makes a resend safe). Max 1000 chars.",
+   "request": {
+    "required": [
+     "text"
+    ],
+    "types": {
+     "text": "string",
+     "id": "string"
+    }
+   },
+   "command_id": true
+  },
+  {
+   "method": "GET",
+   "path": "/api/m/chat/state",
+   "scope": "chat",
+   "page": "chat",
+   "write": false,
+   "app": true,
+   "summary": "Streaming chat state."
+  },
+  {
+   "method": "GET",
+   "path": "/api/m/chat/events",
+   "scope": "chat",
+   "page": "chat",
+   "write": false,
+   "app": true,
+   "summary": "Chat long-poll (own, larger rate bucket)."
+  },
+  {
+   "method": "POST",
+   "path": "/api/m/chat/send",
+   "scope": "chat",
+   "page": "chat",
+   "write": true,
+   "app": true,
+   "summary": "Streaming chat send."
+  },
+  {
+   "method": "POST",
+   "path": "/api/m/voice",
+   "scope": "voice",
+   "page": "chat",
+   "write": true,
+   "app": true,
+   "summary": "Push-to-talk audio (WAV, <= 2 MB, HTTPS only). Push-to-talk only: no always-listening."
+  },
+  {
+   "method": "GET",
+   "path": "/api/m/audio",
+   "scope": "status",
+   "page": null,
+   "write": false,
+   "app": true,
+   "summary": "Mic / cloud-audio indicator, read-only.",
+   "probe": true
+  },
+  {
+   "method": "GET",
+   "path": "/api/m/approvals",
+   "scope": "approvals",
+   "page": "approvals",
+   "write": false,
+   "app": true,
+   "summary": "Pending approvals (title, kind, risk, flags; never details).",
+   "response": {
+    "required": [
+     "pending",
+     "phone_approvals",
+     "note"
+    ],
+    "types": {
+     "pending": "array",
+     "phone_approvals": "boolean",
+     "note": "string"
+    }
+   },
+   "probe": true
+  },
+  {
+   "method": "POST",
+   "path": "/api/m/approvals/{id}",
+   "scope": "approvals",
+   "page": "approvals",
+   "write": true,
+   "app": true,
+   "summary": "Answer {approved: bool}. 403 PHONE_APPROVALS_OFF unless the owner turned phone approvals on; PC_ONLY / TYPED_PC_ONLY approvals are never approved from a phone.",
+   "request": {
+    "required": [
+     "approved"
+    ],
+    "types": {
+     "approved": "boolean",
+     "id": "string"
+    }
+   },
+   "command_id": true
+  },
+  {
+   "method": "POST",
+   "path": "/api/m/goals/op",
+   "scope": "tasks",
+   "page": null,
+   "write": true,
+   "app": true,
+   "summary": "Goal action: status (active|paused|dropped|done) or step_set. No delete, edit or add.",
+   "request": {
+    "required": [
+     "id",
+     "op"
+    ],
+    "types": {
+     "id": "string",
+     "op": "string"
+    }
+   },
+   "command_id": true
+  },
+  {
+   "method": "GET",
+   "path": "/api/m/plans",
+   "scope": "tasks",
+   "page": null,
+   "write": false,
+   "app": true,
+   "summary": "Goal plans: steps and status; tool arguments and results are never sent.",
+   "response": {
+    "required": [
+     "enabled",
+     "plans",
+     "pc_only"
+    ],
+    "types": {
+     "enabled": "boolean",
+     "plans": "array",
+     "pc_only": "array"
+    }
+   },
+   "probe": true
+  },
+  {
+   "method": "POST",
+   "path": "/api/m/plans/op",
+   "scope": "tasks",
+   "page": null,
+   "write": true,
+   "app": true,
+   "summary": "pause | cancel | resume | retry a plan. approve, skip and delete are PC only (PLAN_PC_ONLY).",
+   "request": {
+    "required": [
+     "id",
+     "op",
+     "plan"
+    ],
+    "types": {
+     "id": "string",
+     "op": "string",
+     "plan": "string"
+    }
+   },
+   "command_id": true
+  },
+  {
+   "method": "POST",
+   "path": "/api/m/signals",
+   "scope": "tasks",
+   "page": null,
+   "write": true,
+   "app": true,
+   "summary": "Proactive stop / snooze only (status scope is enough).",
+   "request": {
+    "required": [
+     "id",
+     "op"
+    ],
+    "types": {
+     "id": "string",
+     "op": "string"
+    }
+   },
+   "command_id": true
+  },
+  {
+   "method": "GET",
+   "path": "/api/m/prefs",
+   "scope": "prefs",
+   "page": null,
+   "write": false,
+   "app": false,
+   "summary": "Learned preferences, read."
+  },
+  {
+   "method": "POST",
+   "path": "/api/m/prefs/op",
+   "scope": "prefs",
+   "page": null,
+   "write": true,
+   "app": false,
+   "summary": "Learned preferences actions (PWA)."
+  },
+  {
+   "method": "GET",
+   "path": "/api/m/drive",
+   "scope": "drive",
+   "page": null,
+   "write": false,
+   "app": true,
+   "summary": "Drive tab: drive mode read-only, queue count and tool names."
+  },
+  {
+   "method": "POST",
+   "path": "/api/m/drive/briefing",
+   "scope": "drive",
+   "page": null,
+   "write": true,
+   "app": true,
+   "summary": "Pre-drive briefing question; nothing stored."
+  },
+  {
+   "method": "POST",
+   "path": "/api/m/drive/journey",
+   "scope": "drive",
+   "page": null,
+   "write": true,
+   "app": true,
+   "summary": "Typed places in, estimate and Maps/Waze links out."
+  },
+  {
+   "method": "POST",
+   "path": "/api/m/drive/location",
+   "scope": "drive",
+   "page": null,
+   "write": true,
+   "app": true,
+   "summary": "Opt-in rounded position, RAM only."
+  },
+  {
+   "method": "POST",
+   "path": "/api/m/drive/where",
+   "scope": "drive",
+   "page": null,
+   "write": true,
+   "app": true,
+   "summary": "Where am I: one reverse lookup."
+  },
+  {
+   "method": "POST",
+   "path": "/api/m/drive/action",
+   "scope": "drive",
+   "page": null,
+   "write": true,
+   "app": true,
+   "summary": "Tap-only tel:/Maps/Waze/Music link; nothing is done."
+  },
+  {
+   "method": "POST",
+   "path": "/api/m/drive/voice/start",
+   "scope": "drive",
+   "page": "chat",
+   "write": true,
+   "app": true,
+   "summary": "Hands-free voice session start (HTTPS)."
+  },
+  {
+   "method": "POST",
+   "path": "/api/m/drive/voice/turn",
+   "scope": "drive",
+   "page": "chat",
+   "write": true,
+   "app": true,
+   "summary": "Hands-free voice turn."
+  },
+  {
+   "method": "POST",
+   "path": "/api/m/drive/voice/end",
+   "scope": "drive",
+   "page": "chat",
+   "write": true,
+   "app": true,
+   "summary": "Hands-free voice session end."
+  }
+ ]
+}

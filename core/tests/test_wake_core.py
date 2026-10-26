@@ -227,7 +227,8 @@ async def test_connected_mode_wake_word_is_the_way_back_in_after_the_session_end
         assert len(sessions) == 2                                            # "Hey Jarvis" opened a new conversation
         assert sessions[1].kw.get("greeting") is None                       # no spoken "yes?": talk right away
         await asyncio.sleep(0.6)
-        assert [n for n, _ in audio.played][:2] == [2400, 4800]              # wake chime (0.10 s), ready chime (0.20 s)
+        assert [n for n, _ in audio.played][:1] == [2400]                    # ONE wake chime (0.10 s)
+        assert 4800 not in [n for n, _ in audio.played]                      # one-pip rule: no second ready pip
     finally:
         await c.stop()
 

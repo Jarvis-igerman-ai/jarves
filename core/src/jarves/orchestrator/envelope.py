@@ -223,7 +223,9 @@ TEXTS: dict[str, tuple[str, str]] = {
     "SECOND_WRITER": ("Another agent is already working there; I can open a new worktree instead.",
                       "סוכן אחר כבר עובד שם; אפשר לפתוח worktree חדש במקום."),
     "HOP_LIMIT": ("Not forwarded: that would make agents talk in a loop.", "לא הועבר: זה היה יוצר לולאה בין סוכנים."),
-    "CORE_NOT_RUNNING": ("JARVES is not running; start it first.", "ג'רוויס לא פועל; צריך להפעיל אותו קודם."),
+    "CORE_NOT_RUNNING": ("JARVES is not running; start it first (jarvis start). If a second JARVES already uses the port, set "
+                         "[link] port in the config.",
+                         "ג'רוויס לא פועל; צריך להפעיל אותו קודם (jarvis start). אם ג'רוויס נוסף כבר תופס את הפורט, מגדירים [link] port בהגדרות."),
     "PROVIDER_MISSING": ("That coding agent is not installed here.", "סוכן הקוד הזה לא מותקן כאן."),
     "NOT_APPROVED": ("Not done: it was not approved.", "לא בוצע: לא אושר."),
     "EXPIRED": ("The message expired before it was delivered.", "ההודעה פגה לפני שנמסרה."),

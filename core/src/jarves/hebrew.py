@@ -280,6 +280,8 @@ TEXT: dict[str, str] = {
     "lets a short list of read-only commands (dir, git status, python --version) run without the approval popup; still logged; everything else still asks":
         "מאפשר לרשימה קצרה של פקודות קריאה בלבד (dir, git status, python --version) לרוץ בלי חלון האישור; עדיין נרשם ביומן; כל השאר עדיין שואל",
     # --- platform blockers
+    "state mapping, tray icon and dot logic tested with fakes; the real corner dot (click-through, no focus steal) and the tray icons are the owner's check":
+        "מיפוי המצבים, סמל המגש והנקודה נבדקו עם תחליפים; הנקודה האמיתית בפינה (שקופה ללחיצות, בלי גניבת מיקוד) וסמלי המגש הם בדיקה של הבעלים",
     "never run on a Raspberry Pi 5 (no device yet)": "טרם הורץ על Raspberry Pi 5 (אין עדיין מכשיר)",
     "Pi audio output not tested": "פלט השמע ב-Pi לא נבדק",
     "no real background run checked": "לא נבדקה הרצה אמיתית ברקע",
@@ -352,6 +354,10 @@ TEXT: dict[str, str] = {
     "systemd user unit generated and tested as a file only": "יחידת systemd נוצרה ונבדקה כקובץ בלבד",
     "the check works, but there is no Pi package to install": "הבדיקה עובדת, אבל אין עדיין חבילה להתקנה ב-Pi",
     # --- platform evidence
+    "a tiny click-through dot near a screen corner while a conversation is open and the window is hidden":
+        "נקודה קטנה שקופה ללחיצות ליד פינת המסך כשיש שיחה פתוחה והחלון מוסתר",
+    "core/tests/test_hidden_indicator.py": "בדיקות יחידה: core/tests/test_hidden_indicator.py",
+    "Hidden mode: stop listening after quiet (s, 0 = never)": "מצב מוסתר: להפסיק להקשיב אחרי שקט (שניות, 0 = אף פעם)",
     "talk to this computer's JARVES from a paired phone on your home Wi-Fi or over Tailscale (detected, never installed by JARVES): chat, push-to-talk voice (needs TLS), approvals, status. Pairing by QR + one-time code, per-phone tokens you can revoke. Off = this computer only":
         "מדברים עם JARVES של המחשב הזה מטלפון מצומד ברשת הביתית או דרך Tailscale (JARVES רק מזהה אותו ולא מתקין): שיחה, דיבור בלחיצה (דורש TLS), אישורים ומצב. צימוד בקוד QR וקוד חד-פעמי, ואסימון נפרד לכל טלפון שאפשר לבטל. כבוי = המחשב הזה בלבד",
     "talk to this computer's JARVES from a paired phone on your home Wi-Fi: chat, push-to-talk voice (needs TLS), approvals list, status. Pairing by QR + one-time code, per-phone tokens you can revoke. Off = this computer only":
