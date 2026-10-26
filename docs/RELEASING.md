@@ -170,7 +170,7 @@ created without the coordinator checking `git log` of the sign-off sheet. Each s
 
 1. **Code owners (reads `.github/CODEOWNERS`).** Settings, Rules, Rulesets (or Branches), the rule for `main`: tick
    "Require a pull request before merging", then "Require review from Code Owners". The file lists the sign-off sheets, the
-   release tooling and the workflows under `@igalgerman`. Save.
+   release tooling and the workflows under `@igalgerman`. Save. A PR cannot be approved by its own author: while every agent PR is opened under your account, a PR that touches these owner paths will wait until you add yourself to the ruleset's bypass list ("Bypass list" of the rule for `main`) or a second code owner exists. Add the bypass, or name a second code owner in `.github/CODEOWNERS`, before turning the rule on.
 2. **Only the owner can create stable tags.** Settings, Rules, Rulesets, New ruleset, New tag ruleset. Name: `stable tags`.
    Enforcement: Active. Target pattern: `v*.*.*`. Rules: tick "Restrict creations", "Restrict updates" and "Restrict
    deletions". Bypass list: add only yourself (the repository owner or an organization admin). Save.
