@@ -500,7 +500,10 @@ class SessionLifecycle:
             # activity (speech transcribed, JARVES speaking, backend/tool work). QA 19 Oct (suite_voice): a session
             # opened by a false wake stayed open 3 min 16 s on room noise instead of ending after 15 s.
             quiet_for = time.monotonic() - max(self._t_ready, self._speaking_until)
-            if (self.no_speech_timeout_s and not self._heard_user and not self._backend_busy
+            # #179: a requested greeting that has not produced audio yet is still pending: not a false wake (bounded).
+            greeting_pending = bool(self.greeting) and not self._first_audio.is_set() and (
+                time.monotonic() - self._t_ready < GREETING_BUDGET_S)
+            if (self.no_speech_timeout_s and not self._heard_user and not self._backend_busy and not greeting_pending
                     and not getattr(self, "_tools_running", 0) and quiet_for >= self.no_speech_timeout_s):
                 # Issue #16: the transcript of a long FIRST utterance can lag behind the speech. While the mic hears
                 # the user talking right now the cutoff waits, at most ENERGY_EXTEND_S more, so room noise still
