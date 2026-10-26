@@ -63,7 +63,7 @@ async def test_alone_gives_event_weather_and_message_count_without_senders_or_pl
     try:
         os.environ[briefing.WEATHER_BASE_ENV] = srv.url
         reg, d = make(tmp_path)
-        r = await reg.call("drive_briefing_get", {"passenger": "alone"}, origin="user")
+        r = await reg.skills["drive_briefing"].run("alone", trusted=True)      # the owner's own UI answer
         assert r.ok and r.code == "DRIVE_BRIEFING_OK" and r.data["location_used"] is False
         ids = [s["id"] for s in r.data["sections"]]
         assert ids == ["calendar", "weather", "messages"]
@@ -101,7 +101,7 @@ async def test_setting_drives_default_and_argument_overrides_it(tmp_path):
     d.set_setting("drive_briefing.passenger", "alone")
     assert sk.mode() == "alone" and sk.mode("present") == "present" and sk.mode("bogus") == "alone"
     d.set_setting("drive_briefing.passenger", "ask")
-    assert sk.mode("alone") == "alone" and sk.mode("present") == "present"          # answering the question is fine
+    assert sk.mode("alone") == "ask" and sk.mode("alone", trusted=True) == "alone" and sk.mode("present") == "present"   # #380
     d.set_setting("drive_briefing.passenger", "present")
     d.set_setting("drive_briefing.passenger", "garbage")
     assert sk.mode() == "ask"
@@ -111,7 +111,8 @@ async def test_setting_drives_default_and_argument_overrides_it(tmp_path):
 async def test_sections_fail_independently_and_never_invent(tmp_path):
     os.environ[briefing.WEATHER_BASE_ENV] = "http://127.0.0.1:1"
     reg, d = make(tmp_path, cal_ok=False)
-    r = await reg.call("drive_briefing_get", {"passenger": "alone"}, origin="user")
+    d.set_setting("drive_briefing.passenger", "alone")
+    r = await reg.call("drive_briefing_get", {}, origin="user")
     assert r.ok and r.data["partial"]
     by = {s["id"]: s for s in r.data["sections"]}
     assert by["messages"]["ok"] and not by["calendar"]["ok"] and not by["weather"]["ok"]
@@ -182,6 +183,34 @@ async def test_model_cannot_relax_a_saved_present_to_alone(tmp_path):
         blob = repr(r.data) + r.message
         for secret in (SECRET_TITLE, "הסוד", "דנה", "הבנק", "הודעות", "untrusted_title"):
             assert secret not in blob
+        d.close()
+    finally:
+        srv.close()
+
+
+async def test_model_alone_at_ask_is_refused_and_reads_nothing(tmp_path):
+    """#380: at the default `ask` a tool-call passenger=alone is refused (EN+HE); nothing is read."""
+    reg, d = make(tmp_path)
+    r = await reg.call("drive_briefing_get", {"passenger": "alone"}, origin="user")
+    assert not r.ok and r.code == "DRIVE_BRIEFING_OWNER_ONLY" and r.data["sections"] == []
+    assert "בטלפון" in r.message and "phone" in r.message
+    assert SECRET_TITLE not in r.message and "דנה" not in r.message
+    d.close()
+
+
+async def test_saved_alone_ui_answer_alone_and_present_are_allowed(tmp_path):
+    srv = weather_server()
+    try:
+        os.environ[briefing.WEATHER_BASE_ENV] = srv.url
+        reg, d = make(tmp_path)
+        sk = reg.skills["drive_briefing"]
+        r = await sk.run("alone", trusted=True)                               # UI answer event
+        assert r.ok and r.data["mode"] == "alone" and "messages" in [s["id"] for s in r.data["sections"]]
+        r = await reg.call("drive_briefing_get", {"passenger": "present"}, origin="user")   # present is always allowed
+        assert r.ok and r.data["mode"] == "present"
+        d.set_setting("drive_briefing.passenger", "alone")                    # the owner's saved setting
+        r = await reg.call("drive_briefing_get", {}, origin="user")
+        assert r.ok and r.data["mode"] == "alone"
         d.close()
     finally:
         srv.close()

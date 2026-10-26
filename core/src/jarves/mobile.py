@@ -558,9 +558,7 @@ def core_bridge(core, loop) -> Bridge:
 
     def drive_briefing(mode: str) -> dict:
         """The Core's own pre-drive briefing tool, called directly (read-only; the passenger filter lives in the skill)."""
-        from .drive_briefing import DriveBriefingArgs
         skill = core.registry.skills["drive_briefing"]
-        tool = skill.tools()[0]
 
         async def go() -> dict:
             from .drive_mode import PHONE_SCREEN
@@ -568,7 +566,7 @@ def core_bridge(core, loop) -> Bridge:
             token = ROUTE.set(PHONE_SCREEN)        # Core code sets the route: the Gate allows plain reads here, nothing else
             try:
                 core.registry.new_turn(PHONE_SCREEN)
-                r = await tool.handler(DriveBriefingArgs(passenger=mode))
+                r = await skill.run(mode, trusted=True)   # the owner's own phone answer (#380)
                 return {"ok": bool(r.ok), "text": r.message, "sections": (r.data or {}).get("sections") or []}
             finally:
                 core.registry.clear_taint(PHONE_SCREEN)
