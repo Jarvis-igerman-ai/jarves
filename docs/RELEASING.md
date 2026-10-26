@@ -49,7 +49,7 @@ All of these must hold, else the tag is refused:
   a status starting with fixed, closed, accepted, wontfix, duplicate, done, resolved, verified or pass is closed. Tables
   without a severity column are ignored, and every problem names its file. A new bug table must keep these columns
   (`test_every_bug_table_in_the_repo_has_a_status_the_gate_can_read`);
-- no open GitHub issue labelled P0-P2 (planned work labelled `enhancement`, `v5` to `v9` or `4.5.1` is not a defect, but only when the issue is not also labelled `bug`);
+- no open GitHub issue labelled P0-P2 (planned work labelled `enhancement`, `v5` to `v9` or `4.5.1` is not a defect, but only when the issue is not also labelled `bug`). The ONE exception is the owner-only label `known-issue-4.5`: an open P0-P2 carrying it is an accepted known issue for the 4.5 stable, not a blocker even when labelled `bug`; the gate prints each as "accepted known issues" (number + title) and the owner applies the label only by his own decision. If GitHub cannot be read the gate refuses;
 - the owner's **manual test sign-off** `docs/reviews/MANUAL_TEST_<X.Y.Z>.md` is complete and signed, and the tested beta
   commit equals the tag commit, or is an ancestor with **only documentation changes** since.
 

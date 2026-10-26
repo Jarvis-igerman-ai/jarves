@@ -10,7 +10,7 @@ A stable tag needs: main green, the release-gate dry run green, zero open P0-P2,
 | `jarves-checks` green on the tagged commit | gate | checked at tag time |
 | Release checklist `docs/reviews/RELEASE_CHECKLIST_4.0.1.md`: rows 9 to 12 are still `open` | gate | NOT clear |
 | Bug tables (`docs/reviews/*BUG_TABLE*.md`): open P0-P2 rows | gate | 32 open rows (V4.5 table 25, V5.0 table 4, V6.0 table 3). The V4.5 table is a 24 Oct snapshot; rows fixed since need their status updated |
-| Open GitHub issues labelled P0-P2 (planned work `enhancement`, `v5`-`v9` or `4.5.1` skipped unless also `bug`) | gate | 5 open: #160 (P1 CI reliability), #179, #261, #441, #447 (P2). 35 carry a P0-P2 label in all |
+| Open GitHub issues labelled P0-P2 (planned work `enhancement`, `v5`-`v9` or `4.5.1` skipped unless also `bug`; the owner-only label `known-issue-4.5` marks an accepted known issue: not a blocker, listed by the gate) | gate | 5 open: #160 (P1 CI reliability), #179, #261, #441, #447 (P2). 35 carry a P0-P2 label in all |
 | Installer install / upgrade / rollback / uninstall smoke | CI | green on every code PR |
 | `jarvis selftest`, `doctor`, `speedtest` on the newest beta | agent | re-run on the beta you sign |
 

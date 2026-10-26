@@ -188,6 +188,29 @@ def test_gate_blocks_on_open_p0_p2_github_issues_but_not_planned_work(tmp_path):
     assert [p for p in probs if "open P" in p] == ["open P0 issue #5: t5", "open P2 issue #6: t6"]
 
 
+def test_known_issue_label_skips_only_with_exact_label_and_is_listed(tmp_path, capsys):
+    acc = [_issue(1, "P2", "bug", "known-issue-4.5"), _issue(2, "P1", "bug", " Known-Issue-4.5 ")]
+    assert [p for p in _gate(tmp_path, issues=acc) if "open P" in p] == []
+    assert gate.accepted_issues(acc) == ["#1 (P2): t1", "#2 (P1): t2"]
+    # a bug without it counts; planned-work labels alone never skip a bug; near-miss labels do not skip
+    rest = [_issue(3, "P1", "bug"), _issue(4, "P1", "bug", "v5"), _issue(5, "P2", "bug", "4.5.1"),
+            _issue(6, "P2", "bug", "known-issue-4.5.1"), _issue(7, "P2", "bug", "known-issue")]
+    assert [p for p in _gate(tmp_path, issues=acc + rest) if "open P" in p] == [
+        f"open {s} issue #{n}: t{n}" for n, s in ((3, "P1"), (4, "P1"), (5, "P2"), (6, "P2"), (7, "P2"))]
+    assert gate.accepted_issues(rest) == []
+    gate._print_accepted(gate.accepted_issues(acc))
+    assert "accepted known issues (2" in capsys.readouterr().out
+
+
+def test_gate_refuses_when_gh_issues_cannot_be_read(tmp_path, monkeypatch, capsys):
+    def boom(repo):
+        raise OSError("gh down")
+    monkeypatch.setattr(gate, "gh_issues", boom)
+    monkeypatch.setattr(gate, "gh_runs", lambda *a: [])
+    rc = gate.main(["--tag", "v4.5.0", "--sha", SHA, "--repo-root", str(tmp_path)])
+    assert rc == 1 and "cannot read open issues" in capsys.readouterr().out
+
+
 def test_one_signature_the_signed_sheet_is_enough_and_unsigned_is_refused(tmp_path):
     """Owner 26 Oct: ONE signature. There is no SIGNED_<version> file any more; the signed manual sheet is the signature."""
     assert not hasattr(gate, "signed_problems")

@@ -4,7 +4,8 @@
   2. the SHA being published is exactly the SHA that was verified (candidate commit; its jarves-checks run is green)
   3. the release checklist has no open P0-P2 (and every row done), and optional bug tables list none
   4. no open GitHub issue labelled P0-P2. Planned work (label enhancement, v5-v9 or 4.5.1) is not a defect and is
-     skipped ONLY when the issue is not also labelled bug
+     skipped ONLY when the issue is not also labelled bug.
+     An open P0-P2 labelled `known-issue-4.5` (owner-only label) is an accepted known issue: not a blocker, printed in the report
   5. the owner's manual test sign-off exists for this version (docs/reviews/MANUAL_TEST_<version>.md): every row pass
      or accepted-blocked with a note, signed, and the tested beta commit is the tag commit or an ancestor with only
      documentation changes since. This ONE signature is the owner's release signature (owner 26 Oct 2026: no nightly
@@ -139,6 +140,7 @@ def bug_table_open(text: str, name: str = "") -> list[str]:
 
 
 _LATER = re.compile(r"(?i)^(enhancement|v[5-9]|4\.5\.1)$")
+ACCEPTED_LABEL = "known-issue-4.5"   # OWNER-ONLY label: the owner accepts an open P0-P2 as a known issue for the 4.5 stable
 
 
 def issue_problems(issues: list[dict]) -> list[str]:
@@ -148,10 +150,26 @@ def issue_problems(issues: list[dict]) -> list[str]:
         if "pull_request" in i or str(i.get("state", "open")) != "open":
             continue
         labels = [str(l.get("name", "")) if isinstance(l, dict) else str(l) for l in i.get("labels", [])]
+        labels = [l.strip() for l in labels]
         sev = next((l.upper() for l in labels if re.fullmatch(r"(?i)P[0-2]", l)), None)
         is_bug = any(l.lower() == "bug" for l in labels)
+        if any(l.lower() == ACCEPTED_LABEL for l in labels):
+            continue                                        # accepted by the owner; listed by accepted_issues()
         if sev and (is_bug or not any(_LATER.match(l) for l in labels)):
             out.append(f"open {sev} issue #{i.get('number')}: {str(i.get('title', ''))[:70]}")
+    return out
+
+
+def accepted_issues(issues: list[dict]) -> list[str]:
+    """Open P0-P2 issues the owner accepted for this stable (label `known-issue-4.5`, exact, case-insensitive). Only this label skips a bug."""
+    out = []
+    for i in issues:
+        if "pull_request" in i or str(i.get("state", "open")) != "open":
+            continue
+        labels = [(str(l.get("name", "")) if isinstance(l, dict) else str(l)).strip() for l in i.get("labels", [])]
+        sev = next((l.upper() for l in labels if re.fullmatch(r"(?i)P[0-2]", l)), None)
+        if sev and any(l.lower() == ACCEPTED_LABEL for l in labels):
+            out.append(f"#{i.get('number')} ({sev}): {str(i.get('title', ''))[:70]}")
     return out
 
 
@@ -237,6 +255,13 @@ def run_gate(*, tag: str, sha: str, verified_sha: str | None, build_version: str
     return problems
 
 
+def _print_accepted(accepted: list[str]) -> None:
+    if accepted:
+        print(f"accepted known issues ({len(accepted)}, label {ACCEPTED_LABEL}, owner decision):")
+        for a in accepted:
+            print(f"  - {a}")
+
+
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(prog="release_gate.py", description=__doc__.split("\n\n")[0])
     ap.add_argument("--tag", required=True)
@@ -261,7 +286,12 @@ def main(argv: list[str] | None = None) -> int:
               for p in sorted(glob.glob(str(root / a.bug_tables)))] if a.bug_tables else []
     load = lambda p, fn: json.loads(p.read_text(encoding="utf-8")) if p else fn()   # noqa: E731
     checks = load(a.checks_json, lambda: gh_runs(a.repo, "jarves-checks.yml", "branch=main&event=push&status=completed"))
-    issues = load(a.issues_json, lambda: gh_issues(a.repo))
+    try:
+        issues = load(a.issues_json, lambda: gh_issues(a.repo))
+    except Exception as e:                                  # cannot read the issues: refuse, never pass blind
+        print(f"RELEASE GATE FAILED for {a.tag}: cannot read open issues from GitHub ({type(e).__name__}: {e})")
+        return 1
+    accepted = accepted_issues(issues)
     problems = run_gate(tag=a.tag, sha=a.sha, verified_sha=verified, build_version=build_version, root=root,
                         checklist_text=cl.read_text(encoding="utf-8") if cl else None, bug_tables=tables,
                         checks_runs=checks, is_ancestor=git_is_ancestor(root),
@@ -270,9 +300,11 @@ def main(argv: list[str] | None = None) -> int:
         print(f"RELEASE GATE FAILED for {a.tag} ({len(problems)} problem(s)):")
         for p in problems:
             print(f"  - {p}")
+        _print_accepted(accepted)
         return 1
     print(f"RELEASE GATE PASSED for {a.tag} at {a.sha[:12]}: SHA verified, checklist clear, "
           "no open P0-P2, manual sign-off complete and signed")
+    _print_accepted(accepted)
     return 0
 
 
