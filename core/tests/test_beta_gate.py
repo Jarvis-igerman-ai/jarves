@@ -82,8 +82,10 @@ def test_opt_in_default_is_off_on_a_fresh_install(home):
 
 def test_existing_install_is_migrated_on_once(home):
     (home / "features.json").write_text('{"version": 1, "enabled": {"music": true}, "changed": {}, "requests": {}}')
+    before = (home / "features.json").read_bytes()
     f = make(home)
     assert f.beta_on()
+    assert (home / "features.json").read_bytes() == before     # reading never rewrites the file (installer smoke: byte-identical)
     assert f.enabled("music")                      # still on, now labelled beta
     f.set_beta(False)
     assert not make(home).beta_on()                # the owner's later choice is not migrated again

@@ -569,13 +569,8 @@ class Features:
                 if os.environ.get(BETA_ENV) == "1":
                     return True                      # env opt-in: no migration write (a read must not touch the file)
                 if self._existing_install():
-                    self._state["beta_features"] = True
-                    self._state.setdefault("changed", {})["beta_features"] = {"by": "migration", "ts": time.time()}
-                    try:
-                        self._save()
-                    except OSError:
-                        pass
-                    return True
+                    return True                      # migrated ON in memory only: a read never touches features.json (the
+                                                     # installer smoke checks it byte for byte); the next real save records it
                 return os.environ.get(BETA_ENV) == "1"
             return bool(v)
 
