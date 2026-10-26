@@ -158,12 +158,13 @@ def test_gate_requires_tested_beta_sha_equals_tag_or_docs_only(tmp_path):
 
 def test_gate_blocks_on_sha_mismatch_open_p0_p2_and_tag_shape(tmp_path):
     assert any("differs from the verified" in p for p in _gate(tmp_path, verified_sha="c" * 40))
-    assert any("open P0-P2" in p for p in _gate(tmp_path, checklist_text="- P1 bug still open\n"))
-    assert _gate(tmp_path, checklist_text="- zero open P0-P2\n") == []
-    assert any("checklist row 2" in p for p in _gate(tmp_path, checklist_text="| 2 | thing | pending |\n"))
-    assert any("bug B1" in p for p in _gate(tmp_path, bug_tables=["| B1 | P2 | open | x |\n"]))
-    named = _gate(tmp_path, bug_tables=[("X_BUG_TABLE.md", "| id | sev | status |\n|---|---|---|\n| B2 | P1 | open |\n")])
-    assert any(p.startswith("X_BUG_TABLE.md: bug B2 (P1)") for p in named)
+    # legacy checklist and bug-table rows are retired from the gate (owner 26 Oct, OD-S2): information only
+    assert _gate(tmp_path, checklist_text="- P1 bug still open\n| 2 | thing | pending |\n") == []
+    assert _gate(tmp_path, checklist_text=None) == []
+    named = ("X_BUG_TABLE.md", "| id | sev | status |\n|---|---|---|\n| B2 | P1 | open |\n")
+    assert _gate(tmp_path, bug_tables=["| B1 | P2 | open | x |\n", named]) == []
+    shown = gate.legacy_report("| 2 | thing | pending |\n", [named])
+    assert any("checklist row 2" in x for x in shown) and any(x.startswith("X_BUG_TABLE.md: bug B2 (P1)") for x in shown)
     assert any("not a stable tag" in p for p in _gate(tmp_path, tag="v4.1.0-beta.1"))
     assert any("no green jarves-checks" in p for p in _gate(tmp_path, checks_runs=[]))
 
@@ -275,7 +276,7 @@ def test_a_later_version_needs_its_own_checklist_not_the_4_0_0_one(tmp_path):
     assert gate.find_checklist(tmp_path, "4.0.1", None) is None
     (rev / "RELEASE_CHECKLIST_4.0.1.md").write_text("| 1 | thing | done |\n", encoding="utf-8")
     assert gate.find_checklist(tmp_path, "4.0.1", None) == rev / "RELEASE_CHECKLIST_4.0.1.md"
-    assert any("RELEASE_CHECKLIST_4.1.0.md" in p for p in _gate(tmp_path, checklist_text=None))
+    assert _gate(tmp_path, checklist_text=None) == []          # a missing checklist no longer gates (retired)
 
 
 def test_manual_sheet_is_one_row_per_entry_and_skips_what_the_app_cannot_show():
@@ -364,3 +365,17 @@ def test_main_baseline_without_resolvable_since_lists_tree_and_since_adds_rows(t
     ids = [r.id for r in sh.rows]
     assert "G1" in ids and "X01" in ids and "baseline run" in so.sheet_path(tmp_path, "5.0.0").read_text(encoding="utf-8")
     assert "2 changed guide(s)" in next(r.todo for r in sh.rows if r.id == "G1")
+
+
+def test_cli_bug_tables_option_warns_and_legacy_never_gates(tmp_path, monkeypatch, capsys):
+    """Slice 3: legacy rows are printed as 'legacy, not gating'; live issues are the only issue source."""
+    (tmp_path / "docs" / "reviews").mkdir(parents=True)
+    (tmp_path / "docs" / "reviews" / "X_BUG_TABLE.md").write_text("| id | sev | status |\n|---|---|---|\n| B2 | P1 | open |\n")
+    monkeypatch.setattr(gate, "gh_issues", lambda repo: [_issue(1, "P2", "bug", "known-issue-4.5")])
+    monkeypatch.setattr(gate, "gh_runs", lambda *a: [])
+    rc = gate.main(["--tag", "v4.5.0", "--sha", SHA, "--repo-root", str(tmp_path), "--bug-tables", "docs/reviews/*BUG_TABLE*.md"])
+    out = capsys.readouterr().out
+    assert rc == 1                                            # no sheet and no green run still gate
+    assert "--bug-tables no longer gates" in out and "legacy, not gating" in out and "bug B2 (P1)" in out
+    assert "accepted known issues (1" in out
+    assert "open P1 issue" not in out

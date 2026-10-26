@@ -1,5 +1,8 @@
 # Release checklist: JARVES 4.0.1 (stable)
 
+> RETIRED from the release gate (owner 26 Oct 2026, simple releases): this checklist is printed by `release_gate.py` as "legacy, not gating".
+> The gate decides on main green, the live open P0-P2 GitHub issues and the owner's signed manual sheet only.
+
 Prepared 23 Oct 2026 (#89), refreshed 24 Oct 2026 against `jarves/main` 04ff433. Read by `core/tools/release_gate.py` when the
 tag `v4.0.1` is pushed: every row must be `done`, `n/a` or `accepted`. Rows marked "checked by the gate" are verified
 automatically at tag time, not here. Rows that are not `done` are honest: they stay red until the work is finished or the owner
