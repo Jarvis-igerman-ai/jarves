@@ -4,10 +4,17 @@
   1. compares the source package (core/src/jarves) with the installed one, file by file (sha256);
   2. classifies the change (issue #459, owner rule "a hotfix is any hotfix"). Applied: Python source and plain data
      inside the jarves package. SKIPPED and listed as "only affects the next full installer" (output, manifest,
-     `hotfix status`): build-time files that are not part of the installed tree (packaging/, CI, godot/). REFUSED with "needs slice 2" (these categories
-     will become verified slices: bridge exe by pin sha256, dependencies from the hashed lock): a binary, unknown-type or installer-code file inside the package, a dependency file
-     change (pyproject, lock, requirements), a bridge pin or bridge change, an updated Python file importing a
-     third-party module that is not installed. Always refused (fail closed): unsafe path, symlink, case clash, a base
+     `hotfix status`): build-time files that are not part of the installed tree (packaging/, CI, docs, tools) and
+     package files this tool cannot place (binaries, installer code). SLICE 2 (issue #460, module hotfix_slice2): VERIFIED
+     categories plugged into `classify`: a bridge pin/code change delivers the exe given with `--bridge-exe` only if its
+     sha256 equals the pin in the target commit (bridge stopped via the admin shutdown path, replaced atomically with a
+     backup, restarted only if it ran); a pyproject/uv.lock change installs the base->target lock delta as hash-pinned
+     binary wheels (`pip install --require-hashes --no-deps --no-index` from a generated requirements file, backup of
+     every touched site-packages file, revert restores them and removes new packages). Any hash/size mismatch, missing
+     hash, sdist, non-registry source: HOTFIX_DEP_UNVERIFIED / HOTFIX_BRIDGE_UNVERIFIED, nothing changed. Still REFUSED
+     (HOTFIX_NEEDS_SLICE2): other dependency files (requirements*.txt, setup.py...). An updated Python file importing a
+     third-party module is allowed only when the locked wheels deliver it (HOTFIX_NEW_DEPENDENCY otherwise).
+     Always refused (fail closed): unsafe path, symlink, case clash, a base
      commit that is not an ancestor of the target. When the source is a git checkout the whole repository change
      since the installed commit is checked, not just the package;
   3. `jarvis backup` first, then copies ONLY the changed files (temp file + atomic replace). The originals go to
@@ -29,6 +36,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -123,6 +131,8 @@ class Plan:
     replace: list[str] = field(default_factory=list)      # exist in both, content differs
     add: list[str] = field(default_factory=list)          # only in the source
     removed_in_source: list[str] = field(default_factory=list)   # only installed: left alone (reported)
+    bridge: object = None                                         # slice 2: hotfix_slice2.BridgeAction (verified) or None
+    deps: object = None                                           # slice 2: hotfix_slice2.DepPlan (verified) or None
 
     @property
     def files(self) -> list[str]:
@@ -169,6 +179,8 @@ class Source:
     cleanup: Path | None = None
     base: str | None = None                    # commit the installed build was made from (for the ancestor check)
     git_root: Path | None = None               # repository holding base and commit (None = not checkable)
+    checkout: Path | None = None               # working tree the target files are read from (a checkout folder source)
+    reader: Callable[[str, str], str | None] | None = None   # tests: (repo path, "base"|"target") -> text
 
 
 def resolve_source(spec: str | None, installed_commit: str | None, *, repo: Path | None = None,
@@ -189,7 +201,7 @@ def resolve_source(spec: str | None, installed_commit: str | None, *, repo: Path
                 changes = [x for x in _git(p, "diff", "--name-only", base).splitlines() if x]
             return Source(p / PACKAGE_PREFIX.rstrip("/"), changes, commit,
                           "" if changes is not None else "plain folder: only the package files are compared",
-                          base=base, git_root=p if commit else None)
+                          base=base, git_root=p if commit else None, checkout=p)
         if (p / "__init__.py").is_file():                              # bare package folder
             return Source(p, None, None, "bare package folder: only its files are compared")
         raise Refused("HOTFIX_BAD_SOURCE", f"{p} is neither a repository checkout nor a jarves package folder")
@@ -216,6 +228,22 @@ def resolve_source(spec: str | None, installed_commit: str | None, *, repo: Path
     return Source(tmp / "x" / "core" / "src" / "jarves", changes, commit, cleanup=tmp, base=base, git_root=root)
 
 
+def read_repo_file(src: Source, rel: str, which: str) -> str | None:
+    """Text of a repository file at the installed build's commit ("base") or in the target ("target"); None = absent or
+    not readable. Slice 2 reads the lock and the bridge pin through this, never from the network."""
+    if src.reader is not None:
+        return src.reader(rel, which)
+    if which == "target" and src.checkout is not None:
+        f = src.checkout / rel
+        return f.read_text(encoding="utf-8") if f.is_file() and not f.is_symlink() else None
+    rev = src.base if which == "base" else src.commit
+    if not src.git_root or not rev:
+        return None
+    r = subprocess.run(["git", "-c", "core.fsmonitor=false", "-C", str(src.git_root), "show", f"{rev}:{rel}"],
+                       capture_output=True, text=True, encoding="utf-8", timeout=120)
+    return r.stdout if r.returncode == 0 else None
+
+
 # ---------------------------------------------------------------------- hooks (real ones; tests pass fakes)
 @dataclass
 class Hooks:
@@ -225,6 +253,9 @@ class Hooks:
     backup: Callable[[], str]
     doctor: Callable[[], int]
     log: Callable[[str], None] = print
+    bridge_running: Callable[[], bool] | None = None     # slice 2: the existing bridge status/stop/start path
+    stop_bridge: Callable[[], None] | None = None
+    start_bridge: Callable[[], None] | None = None
 
 
 def default_hooks(cfg, home: Path, installed_pkg: Path) -> Hooks:
@@ -261,12 +292,48 @@ def default_hooks(cfg, home: Path, installed_pkg: Path) -> Hooks:
         (home / HOTFIX_DIR / "last-doctor.txt").write_text((r.stdout or "") + (r.stderr or ""), encoding="utf-8")
         return r.returncode
 
-    return Hooks(running, stop, start, lambda: str(backup_mod.create(home, "manual", note="before a hotfix")), doctor)
+    def bridge_running() -> bool:
+        from . import whatsapp_bridge as wab
+        return wab.status_or_none(home) is not None
+
+    def stop_bridge() -> None:
+        from . import whatsapp_bridge as wab                   # the same admin /shutdown the CLI `whatsapp stop` uses
+        try:
+            wab.BridgeClient(home, admin=True, timeout=5.0).call("POST", "/shutdown")
+        except wab.BridgeError:
+            pass
+        deadline = time.monotonic() + 30
+        while time.monotonic() < deadline and bridge_running():
+            time.sleep(0.5)
+        if bridge_running():
+            raise HotfixError("HOTFIX_BRIDGE_STOP", "the WhatsApp bridge did not stop within 30 s")
+
+    def start_bridge() -> None:
+        from . import whatsapp_bridge as wab
+        ok, msg = wab.start_bridge(home)
+        if not ok:
+            raise HotfixError("HOTFIX_BRIDGE_START", f"the WhatsApp bridge did not start: {msg}")
+
+    return Hooks(running, stop, start, lambda: str(backup_mod.create(home, "manual", note="before a hotfix")), doctor,
+                 bridge_running=bridge_running, stop_bridge=stop_bridge, start_bridge=start_bridge)
 
 
 # ---------------------------------------------------------------------- classification (#459)
 DEPENDENCY_NAMES = ("pyproject.toml", "uv.lock", "poetry.lock", "pipfile", "pipfile.lock", "setup.py", "setup.cfg")
-SLICE2 = "needs slice 2 (will be supported: run again after it ships; until then use the full installer)"
+SLICE2 = ("is not covered by the verified hotfix (slice 2 delivers pyproject.toml/uv.lock dependency changes and the pinned "
+          "bridge exe only); use the full installer")
+
+
+@dataclass
+class Slice2Ctx:
+    """What classify needs to verify dependency and bridge changes (no network here)."""
+    src: Source
+    installed_pkg: Path
+    opts: object                                   # hotfix_slice2.S2Options
+
+    @property
+    def site(self) -> Path:
+        return Path(self.installed_pkg).parent
 
 
 def _is_dependency_file(r: str) -> bool:
@@ -279,16 +346,65 @@ def _is_bridge_change(r: str) -> bool:
     return "bridge_pin" in low or "bridge-pin" in low or low.startswith("bridge/")
 
 
-def classify(plan: Plan, repo_changes: list[str] | None) -> tuple[Plan, list[str]]:
-    """Split the change into what is applied and what 'only affects the next full installer'. Raises Refused
-    (HOTFIX_NEEDS_SLICE2) for dependency and bridge changes: detected, never skipped silently."""
+JARVES_REMOTE = re.compile(r"github\.com[/:](jarvis-igerman-ai|igalgerman)/jarves(\.git)?/?$", re.I)
+
+
+def require_trusted_target(src: Source) -> None:
+    """Review #465: slice 2 installs an exe and wheels whose ONLY trust anchors (bridge pin, uv.lock hashes) come from the
+    target itself, so the target must be a commit the project published: a git ref reachable from `main` of the jarves
+    remote. A folder or a working tree (anything can be put there) or a branch that is not on main is refused for the
+    dependency and bridge categories; plain code fixes from such sources are unchanged."""
+    if src.reader is not None:                          # tests inject the repository texts; the CLI never sets a reader
+        return
+    if src.checkout is not None or not src.git_root or not src.commit:
+        raise Refused("HOTFIX_UNTRUSTED_SOURCE", "dependency and bridge changes are applied only from a git ref (a folder "
+                      "or working tree is not a published commit)", "jarvis hotfix apply --from <a commit on jarves main>")
+    names = set()
+    for ln in _git(src.git_root, "remote", "-v", check=False).splitlines():
+        parts = ln.split()
+        if len(parts) >= 2 and JARVES_REMOTE.search(parts[1]):
+            names.add(parts[0])
+    for r in sorted(names):
+        rc = subprocess.run(["git", "-c", "core.fsmonitor=false", "-C", str(src.git_root), "merge-base", "--is-ancestor",
+                             src.commit, f"refs/remotes/{r}/main"], capture_output=True, text=True, timeout=120).returncode
+        if rc == 0:
+            return
+    raise Refused("HOTFIX_UNTRUSTED_SOURCE", f"commit {src.commit[:12]} is not on main of the jarves remote: dependency and "
+                  "bridge changes are applied only from published commits", "merge first (and git fetch), or use the full installer")
+
+
+def _s2_dependencies(ctx: Slice2Ctx, lock_files: list[str]):
+    from . import hotfix_slice2 as s2
+    opts = ctx.opts
+    py = s2.resolve_python(ctx.installed_pkg, opts.python)
+    env = opts.py_env or s2.probe_env(py, opts.runner)
+    lock_rel = next((x for x in lock_files if x.endswith("uv.lock")), None)
+    target = read_repo_file(ctx.src, lock_rel, "target") if lock_rel else None
+    if target is None:
+        raise Refused(s2.UNVERIFIED, f"the dependency lock ({lock_rel}) cannot be read from the target", "use the full installer")
+    base = read_repo_file(ctx.src, lock_rel, "base")
+    return s2.build_dep_plan(base, target, env, ctx.site, opts)
+
+
+def _s2_bridge(ctx: Slice2Ctx):
+    from . import hotfix_slice2 as s2
+    pin = read_repo_file(ctx.src, s2.PIN_PATH, "target")
+    return s2.plan_bridge(pin, s2.install_root_of(ctx.installed_pkg), ctx.opts)
+
+
+def classify(plan: Plan, repo_changes: list[str] | None, ctx: Slice2Ctx | None = None) -> tuple[Plan, list[str]]:
+    """Split the change into what is applied and what 'only affects the next full installer'. Dependency (pyproject.toml,
+    uv.lock) and bridge (pin / code) changes are VERIFIED categories (slice 2, issue #460): they become `ok.deps` /
+    `ok.bridge` or a Refused with its own code (HOTFIX_DEP_UNVERIFIED, HOTFIX_BRIDGE_UNVERIFIED). Without a context
+    (nothing to verify against) or for other dependency files: Refused(HOTFIX_NEEDS_SLICE2). Never skipped silently."""
     deps: list[str] = []
+    other_deps: list[str] = []
     bridge: list[str] = []
     pending: list[str] = []
     for rel in repo_changes or []:
         r = rel.replace("\\", "/")
         if _is_dependency_file(r):
-            deps.append(r)
+            (deps if r.rsplit("/", 1)[-1].lower() in ("pyproject.toml", "uv.lock") else other_deps).append(r)
         elif _is_bridge_change(r):
             bridge.append(r)
         elif r.lower().startswith(FULL_INSTALLER_PREFIXES):      # case-insensitive: Windows paths
@@ -299,17 +415,30 @@ def classify(plan: Plan, repo_changes: list[str] | None) -> tuple[Plan, list[str
         if (suffix in BINARY_SUFFIXES or suffix not in DATA_SUFFIXES
                 or (suffix == ".py" and any(Path(rel).stem.startswith(n) for n in INSTALLER_CODE_NAMES))):
             unplaceable.append(PACKAGE_PREFIX + rel)           # inside the installed package: runtime, never skipped
-    if deps or bridge or unplaceable:
+    if other_deps or unplaceable or ((deps or bridge) and ctx is None):
         parts = []
         if unplaceable:
             parts.append("package files that cannot be hot-patched (binary, unknown type or installer code: "
                          + ", ".join(unplaceable[:4]) + ")")
-        if deps:
-            parts.append("dependencies changed (" + ", ".join(deps[:4]) + ")")
+        if deps or other_deps:
+            parts.append("dependencies changed (" + ", ".join((other_deps + deps)[:4]) + ")")
         if bridge:
             parts.append("bridge pin/binary changed (" + ", ".join(bridge[:4]) + ")")
         raise Refused("HOTFIX_NEEDS_SLICE2", "; ".join(parts) + ": " + SLICE2, "use the full installer for this change")
     ok = Plan(removed_in_source=plan.removed_in_source)
+    if (deps and any(x.endswith("uv.lock") for x in deps)) or bridge:
+        require_trusted_target(ctx.src)
+    if deps:
+        if any(x.endswith("uv.lock") for x in deps):
+            dp = _s2_dependencies(ctx, deps)
+            ok.deps = dp                                 # may be empty (everything already installed): reported
+        else:
+            pending.extend(deps)                         # pyproject metadata without a lock change: nothing to install
+    if bridge:
+        act = _s2_bridge(ctx)
+        ok.bridge = act
+        if act is None:
+            pending.extend(bridge)                       # the installed exe already is the pinned one
     for rel in plan.files:
         if rel in plan.replace:
             ok.replace.append(rel)
@@ -412,25 +541,71 @@ def _restart(hooks: Hooks, was_running: bool) -> None:
         hooks.start_core()
 
 
+def _s2_active(plan: Plan) -> tuple[bool, bool]:
+    return bool(plan.deps is not None and plan.deps.items), plan.bridge is not None
+
+
 def apply(installed_pkg: Path, src: Source, home: Path, hooks: Hooks, *, dry_run: bool = False,
-          restart: bool = True, python_only: bool = False, site_dirs: list[Path] | None = None) -> dict:
+          restart: bool = True, python_only: bool = False, site_dirs: list[Path] | None = None,
+          s2opts=None) -> dict:
     """Returns the manifest. Raises Refused before touching anything; after the first write any failure restores
-    the originals and raises HotfixError('HOTFIX_REVERTED')."""
+    the originals and raises HotfixError('HOTFIX_REVERTED'). `s2opts` (hotfix_slice2.S2Options) carries --bridge-exe,
+    --python and the test fakes for the dependency/bridge slice."""
+    from . import hotfix_slice2 as s2
     installed_pkg, home = Path(installed_pkg), Path(home)
     if not (installed_pkg / "__init__.py").is_file():
         raise Refused("HOTFIX_NO_INSTALL", f"{installed_pkg} is not a jarves package folder")
+    opts = s2opts or s2.S2Options()
     plan = build_plan(src.pkg, installed_pkg)
     check_ancestor(src)
-    plan, pending = classify(plan, src.repo_changes)
-    bad = scan_new_imports(src.pkg, plan.files, installed_pkg, site_dirs) if plan.files else []
-    if bad:
+    plan, pending = classify(plan, src.repo_changes, Slice2Ctx(src, installed_pkg, opts))
+    has_deps, has_bridge = _s2_active(plan)
+    missing = scan_new_imports(src.pkg, plan.files, installed_pkg, site_dirs) if plan.files else []
+    if missing and not has_deps:
         raise Refused("HOTFIX_NEW_DEPENDENCY", "an updated Python file imports a module that is not installed: "
-                      + "; ".join(bad[:6]) + ": " + SLICE2, "use the full installer (it brings new dependencies)")
-    if not plan.files:
-        return {"status": "nothing", "files": [], "pending_installer": pending}
+                      + "; ".join(missing[:6]) + ": " + SLICE2, "change uv.lock in the same commit so the dependency is "
+                      "delivered, or use the full installer")
+    if not plan.files and not has_deps and not has_bridge:
+        return {"status": "nothing", "files": [], "pending_installer": pending,
+                "deps_already_installed": list(plan.deps.already_installed) if plan.deps else []}
     if dry_run:
-        return {"status": "dry-run", "files": plan.files, "replace": plan.replace, "add": plan.add,
-                "pending_installer": pending}
+        out = {"status": "dry-run", "files": plan.files, "replace": plan.replace, "add": plan.add, "pending_installer": pending}
+        if plan.deps is not None:
+            out["deps"] = plan.deps.describe()
+            out["deps_already_installed"] = list(plan.deps.already_installed)
+            out["deps_not_removed"] = list(plan.deps.removed_in_target)
+            out["deps_requirements"] = plan.deps.requirements()
+        if has_bridge:
+            out["bridge"] = {"version": plan.bridge.version, "sha256": plan.bridge.sha256[:12], "dest": str(plan.bridge.dest),
+                             "replaces": (plan.bridge.old_sha256 or "none")[:12]}
+        if missing:
+            out["imports_to_check_after_download"] = missing
+        return out
+    stage = None
+    wheels: dict[str, Path] = {}
+    try:
+        if has_deps:                                  # network ONLY here: the locked wheels, verified before any write
+            stage = s2.make_tmp()
+            wheels = s2.download_wheels(plan.deps, stage / "wheels", opts)
+            for whl in wheels.values():
+                s2.verify_wheel(whl, installed_pkg.parent)  # paths, scripts, start-up hooks, RECORD hashes: before the first write
+            if missing:
+                provided = {p.split("/")[0].removesuffix(".py").lower() for w in wheels.values() for p in s2.wheel_paths(w)[0]}
+                still = [m for m in missing if m.split(" ")[0].lower() not in provided]
+                if still:
+                    raise Refused("HOTFIX_NEW_DEPENDENCY", "an updated Python file imports a module that neither is installed "
+                                  "nor comes with the locked dependencies: " + "; ".join(still[:6]), "use the full installer")
+        return _apply_locked(installed_pkg, src, home, hooks, plan, pending, restart, opts, wheels, stage)
+    finally:
+        if stage is not None:
+            shutil.rmtree(stage, ignore_errors=True)
+
+
+def _apply_locked(installed_pkg: Path, src: Source, home: Path, hooks: Hooks, plan: Plan, pending: list[str],
+                  restart: bool, opts, wheels: dict[str, Path], stage: Path | None) -> dict:
+    from . import hotfix_slice2 as s2
+    has_deps, has_bridge = _s2_active(plan)
+    sp = installed_pkg.parent
     info = installed_info(installed_pkg)
     prev_hotfix = info.get("hotfix") if isinstance(info.get("hotfix"), dict) else {}
     hid = _now_id()
@@ -457,11 +632,28 @@ def apply(installed_pkg: Path, src: Source, home: Path, hooks: Hooks, *, dry_run
     if bi.is_file():
         shutil.copyfile(bi, d / "originals" / BUILD_INFO_NAME)
         manifest["build_info_original"] = sha256(d / "originals" / BUILD_INFO_NAME)
+    if has_deps:
+        manifest["deps"] = s2.begin_dep_backup(plan.deps, wheels, sp, d / "deps_originals")
+    if has_bridge:
+        manifest["bridge"] = s2.bridge_backup(plan.bridge, d / "bridge_original")
+        manifest["bridge"]["was_running"] = bool(hooks.bridge_running and hooks.bridge_running())
     _write_json(d / "manifest.json", manifest)
     try:
+        if (has_deps or has_bridge) and was_running:
+            hooks.stop_core()                           # releases locked .pyd/.dll files; restarted below
+        if has_bridge:
+            if manifest["bridge"]["was_running"] and hooks.stop_bridge:
+                hooks.stop_bridge()
+            s2.bridge_install(plan.bridge)
+        if has_deps:
+            tmp = stage or s2.make_tmp()
+            manifest["dep_method"] = s2.install_deps(plan.deps, wheels, manifest["deps"], sp, _s2_python(installed_pkg, opts),
+                                                     opts, tmp, hooks.log)
         for rel in plan.files:
             _atomic_copy(src.pkg / rel, installed_pkg / rel)
         _mark_build(installed_pkg, info, manifest, plan)
+        if has_bridge and manifest["bridge"]["was_running"] and hooks.start_bridge:
+            hooks.start_bridge()
         if restart:
             _restart(hooks, was_running)
         rc = hooks.doctor()
@@ -473,7 +665,9 @@ def apply(installed_pkg: Path, src: Source, home: Path, hooks: Hooks, *, dry_run
         return manifest
     except BaseException as e:
         try:
-            _revert_dir(installed_pkg, d, manifest)
+            if has_deps and hooks.core_running():
+                hooks.stop_core()
+            _revert_dir(installed_pkg, d, manifest, hooks, bridge_was_running=bool(manifest.get("bridge", {}).get("was_running")))
             if restart:
                 _restart(hooks, was_running)
         except Exception as e2:                     # the revert itself failed: say so loudly, keep the manifest
@@ -489,12 +683,21 @@ def apply(installed_pkg: Path, src: Source, home: Path, hooks: Hooks, *, dry_run
         raise HotfixError("HOTFIX_REVERTED", f"hotfix failed and was reverted automatically: {e}") from e
 
 
+def _s2_python(installed_pkg: Path, opts) -> Path:
+    from . import hotfix_slice2 as s2
+    return s2.resolve_python(installed_pkg, opts.python)
+
+
 def _mark_build(installed_pkg: Path, info: dict, manifest: dict, plan: Plan) -> None:
     prev = info.get("hotfix") if isinstance(info.get("hotfix"), dict) else {}
     new = dict(info)
     new["hotfix"] = {"id": manifest["id"], "n": int(prev.get("n", 0)) + 1, "base_version": manifest["base_version"],
                      "base_commit": manifest["base_commit"], "commit": manifest["source_commit"],
                      "applied": manifest["id"], "files": len(plan.files)}
+    if plan.bridge is not None:
+        new["hotfix"]["bridge"] = {"version": plan.bridge.version, "sha256": plan.bridge.sha256}
+    if plan.deps is not None and plan.deps.items:
+        new["hotfix"]["deps"] = [f"{i.name}=={i.version}" for i in plan.deps.items]
     if manifest["source_commit"]:
         new["commit"] = manifest["source_commit"]
     hashes = new.get("payload_sha256")
@@ -505,14 +708,28 @@ def _mark_build(installed_pkg: Path, info: dict, manifest: dict, plan: Plan) -> 
     _write_json(installed_pkg / BUILD_INFO_NAME, new)
 
 
-def _revert_dir(installed_pkg: Path, d: Path, manifest: dict) -> list[str]:
-    """Put back every original, delete every added file, restore the build info. Verifies the saved originals first."""
+def _revert_dir(installed_pkg: Path, d: Path, manifest: dict, hooks: Hooks | None = None, *,
+                bridge_was_running: bool = False) -> list[str]:
+    """Put back every original, delete every added file, restore the build info. Verifies the saved originals first.
+    Slice 2: the dependency files and the bridge exe are restored too (the bridge is stopped through the hooks first and
+    restarted only if it ran)."""
+    from . import hotfix_slice2 as s2
     orig = d / "originals"
     for item in manifest.get("replaced", []):
         saved = orig / item["path"]
         if not saved.is_file() or sha256(saved) != item["sha256_original"]:
             raise HotfixError("HOTFIX_ORIGINAL_BAD", f"saved original of {item['path']} is missing or changed")
     done = []
+    if manifest.get("bridge"):
+        if hooks and hooks.bridge_running and hooks.stop_bridge and hooks.bridge_running():
+            hooks.stop_bridge()
+        s2.bridge_revert(manifest["bridge"], d / "bridge_original")
+        done.append("bridge")
+        if bridge_was_running and hooks and hooks.start_bridge:
+            hooks.start_bridge()
+    if manifest.get("deps"):
+        s2.revert_deps(manifest["deps"], installed_pkg.parent, d / "deps_originals")
+        done.extend(f"{e['name']}=={e['old_version'] or '(removed)'}" for e in manifest["deps"])
     for item in manifest.get("replaced", []):
         _atomic_copy(orig / item["path"], installed_pkg / item["path"])
         done.append(item["path"])
@@ -543,7 +760,10 @@ def revert(installed_pkg: Path, home: Path, hooks: Hooks, *, restart: bool = Tru
         raise Refused("HOTFIX_REPLACED", "a normal update already replaced this hotfix; nothing to revert",
                       "reverting now would downgrade the build")
     was_running = bool(hooks.core_running())
-    done = _revert_dir(installed_pkg, d, man)
+    if man.get("deps") and was_running:
+        hooks.stop_core()                              # locked files; restarted below
+    bridge_was_running = bool(man.get("bridge") and hooks.bridge_running and hooks.bridge_running())
+    done = _revert_dir(installed_pkg, d, man, hooks, bridge_was_running=bridge_was_running)
     if restart:
         _restart(hooks, was_running)
     man["status"] = "reverted"
@@ -582,6 +802,9 @@ def add_cli(sub) -> None:
     p.add_argument("--install", help="site-packages folder of another install (default: this installed build)")
     p.add_argument("--dry-run", action="store_true", help="show what would change; touch nothing")
     p.add_argument("--no-restart", action="store_true", help="never restart the Core")
+    p.add_argument("--bridge-exe", help="slice 2: a locally built or CI-artifact whatsapp_bridge.exe; used ONLY if its sha256 equals "
+                   "packaging/bridge_pin.json of the target commit")
+    p.add_argument("--python", help="slice 2: the installed python.exe (default: <install>/python/python.exe) used to install the locked wheels")
     p.add_argument("--python-only", action="store_true", help="alias of the default: files that only affect the next full installer are skipped "
                    "and listed, never a reason to refuse")
 
@@ -596,6 +819,22 @@ def _print_pending(files: list[str]) -> None:
               + ", ".join(files[:20]) + (" ..." if len(files) > 20 else ""))
 
 
+def _print_s2(r: dict) -> None:
+    for x in r.get("deps") or []:
+        print(_say("היה מותקן גלגל", "would install wheel") + f": {x['name']} {x['old_version'] or '-'} -> {x['version']}  sha256 {x['sha256']}...  "
+              f"{x['size'] if x['size'] is not None else '?'} bytes  {x['host']}  {x['file']}")
+    if r.get("deps_already_installed"):
+        print(_say("כבר מותקן", "already installed") + ": " + ", ".join(r["deps_already_installed"]))
+    if r.get("deps_not_removed"):
+        print(_say("הוסרו מהנעילה ולא נמחקו", "dropped from the lock, left installed") + ": " + ", ".join(r["deps_not_removed"]))
+    b = r.get("bridge")
+    if b:
+        print(_say("גשר וואטסאפ יוחלף", "bridge exe would be replaced") + f": {b['replaces']}... -> {b['sha256']}... (v{b['version']}) {b['dest']}")
+    if r.get("imports_to_check_after_download"):
+        print(_say("ייבוא שייבדק מול הגלגלים אחרי ההורדה", "imports checked against the wheels after the download")
+              + ": " + ", ".join(r["imports_to_check_after_download"]))
+
+
 def cmd_hotfix(a, cfg, home) -> int:
     home = Path(home)
     try:
@@ -605,6 +844,9 @@ def cmd_hotfix(a, cfg, home) -> int:
             hf = s["hotfix"]
             print(_say("גרסה", "version") + f" {s['version']}" + (f" +hotfix.{hf['n']} ({hf.get('commit') or '?'})" if hf else ""))
             print(_say("תיקון מהיר אחרון", "latest hotfix") + f": {s['latest'] or '-'}")
+            if s["latest"] and s["latest"].get("status") in ("applying", "revert-failed"):
+                print(_say("תיקון מהיר נקטע באמצע: הריצו  jarvis hotfix revert  (או התקינו גרסה מלאה)",
+                           "a hotfix was interrupted half way: run  jarvis hotfix revert  (or use the full installer)"), file=sys.stderr)
             _print_pending(s["pending_installer"])
             return 0
         if a.action == "apply":
@@ -619,16 +861,26 @@ def cmd_hotfix(a, cfg, home) -> int:
         info = installed_info(installed)
         src = resolve_source(a.source, info.get("commit"), repo=Path(a.repo) if a.repo else None, base=a.base)
         try:
+            from . import hotfix_slice2 as s2
+            be, py = getattr(a, "bridge_exe", None), getattr(a, "python", None)
             r = apply(installed, src, home, hooks, dry_run=a.dry_run, restart=not a.no_restart,
-                      python_only=bool(getattr(a, "python_only", False)))
+                      python_only=bool(getattr(a, "python_only", False)),
+                      s2opts=s2.S2Options(bridge_exe=Path(be) if be else None, python=Path(py) if py else None))
         finally:
             if src.cleanup:
                 shutil.rmtree(src.cleanup, ignore_errors=True)
+        if r["status"] in ("dry-run", "nothing"):
+            _print_s2(r)
         if r["status"] == "nothing":
             print(_say("אין מה לעדכן: הקוד המותקן זהה", "nothing to do: the installed code is identical"))
         elif r["status"] == "dry-run":
             print(_say("היה משתנה", "would change") + f" ({len(r['files'])}): " + ", ".join(r["files"][:20]))
         else:
+            if r.get("deps"):
+                print(_say("תלויות הותקנו", "dependencies installed") + ": " + ", ".join(f"{e['name']}=={e['new_version']}" for e in r["deps"])
+                      + f" ({r.get('dep_method')})")
+            if r.get("bridge"):
+                print(_say("גשר וואטסאפ הוחלף", "bridge exe replaced") + f": {r['bridge']['sha256_new'][:12]}... v{r['bridge']['version']}")
             print(_say("התיקון המהיר הותקן", "hotfix applied") + f": {len(r['replaced']) + len(r['added'])} file(s), "
                   + _say("הקור הופעל מחדש" if r["core_was_running"] and not a.no_restart else "הקור לא הופעל מחדש",
                          "core restarted" if r["core_was_running"] and not a.no_restart else "core not restarted")
@@ -653,10 +905,10 @@ EVIDENCE = "UNIT test_hotfix.py (fake install tree and fake hooks); never run ag
 BLOCKER = "no real installed-build hotfix recorded yet (owner PC run pending)"
 ABOUT = ("puts a code-only fix into the installed build in about a minute: backs up first, copies only the changed "
          "Python files, restarts the Core only if it ran, runs doctor, and one command reverts it. Build-only files are "
-         "listed as affecting only the next installer; bridge and dependency changes are detected and wait for a later slice")
+         "listed as affecting only the next installer; a pinned bridge exe and locked dependency wheels are delivered only after their sha256 hashes are verified")
 hebrew.TEXT.update({
     ABOUT: "מכניס תיקון קוד בלבד לגרסה המותקנת תוך כדקה: מגבה קודם, מעתיק רק קבצי פייתון ששונו, מפעיל מחדש את הליבה רק "
-           "אם רצה, מריץ doctor, ופקודה אחת מבטלת. קבצי בנייה בלבד מדווחים כמשפיעים רק על המתקין הבא; שינוי בגשר או בתלויות מזוהה וממתין לשלב הבא",
+           "אם רצה, מריץ doctor, ופקודה אחת מבטלת. קבצי בנייה בלבד מדווחים כמשפיעים רק על המתקין הבא; קובץ גשר מנועץ וגלגלי תלויות נעולים מותקנים רק אחרי אימות sha256",
     EVIDENCE: "בדיקות יחידה test_hotfix.py (עץ התקנה מזויף וקרסים מזויפים); הבדיקות אף פעם לא רצות על התקנה אמיתית",
     BLOCKER: "עוד לא תועד תיקון מהיר אמיתי בגרסה מותקנת (הרצה במחשב הבעלים ממתינה)",
     "rewrites the installed program files": "משכתב את קבצי התוכנה המותקנים",

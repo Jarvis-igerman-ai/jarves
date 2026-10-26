@@ -1,0 +1,1 @@
+- Added: `jarvis hotfix apply` now also delivers a pinned bridge exe (`--bridge-exe PATH`, only if its sha256 equals the pin) and dependency changes from `uv.lock` (hash-locked wheels only, with a backup and `jarvis hotfix revert`); `--dry-run` lists exactly what would be installed (#460).

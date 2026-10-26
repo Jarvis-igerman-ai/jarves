@@ -6,15 +6,15 @@ aliases = ["תיקון מהיר", "הוטפיקס", "תיקון קוד מהיר"
 links = ["backup", "updates"]
 title_he = "תיקון מהיר (hotfix)"
 title_en = "Hot-patch (hotfix)"
-what_he = "מכניס כל תיקון קוד לגרסה המותקנת תוך כדקה, בלי מתקין של רבע שעה. מגבה קודם, מעתיק רק קבצים ששונו, מפעיל מחדש את הליבה רק אם רצה, בודק עם doctor, ופקודה אחת מבטלת. קבצי בנייה בלבד (אריזה, CI, מסמכים) מדולגים ומופיעים כ\"משפיעים רק על המתקין המלא הבא\". שינוי בגשר או בתלויות מזוהה ועדיין צריך את המתקין המלא (יתמוך בשלב הבא)."
-what_en = "Puts any code fix into the installed build in about a minute instead of a 15 minute installer. It backs up first, copies only the changed files, restarts the Core only if it was running, checks with doctor, and one command undoes it. Build-only files (packaging, CI, docs) are skipped and listed as \"only affects the next full installer\". A bridge or dependency change is detected and still needs the full installer (a later slice will support it)."
+what_he = "מכניס כל תיקון קוד לגרסה המותקנת תוך כדקה, בלי מתקין של רבע שעה. מגבה קודם, מעתיק רק קבצים ששונו, מפעיל מחדש את הליבה רק אם רצה, בודק עם doctor, ופקודה אחת מבטלת. קבצי בנייה בלבד (אריזה, CI, מסמכים) מדולגים ומופיעים כ\"משפיעים רק על המתקין המלא הבא\". גם שינוי בגשר או בתלויות נתמך, אך רק מאומת: קובץ הגשר חייב להתאים ל-sha256 שבנעיצה, וגלגלי התלויות מותקנים רק מהקובץ הנעול עם sha256, עם גיבוי וביטול."
+what_en = "Puts any code fix into the installed build in about a minute instead of a 15 minute installer. It backs up first, copies only the changed files, restarts the Core only if it was running, checks with doctor, and one command undoes it. Build-only files (packaging, CI, docs) are skipped and listed as \"only affects the next full installer\". A bridge or dependency change is supported too, but only verified: the bridge exe must match the pinned sha256, and dependency wheels are installed only from the lock with their sha256, with a backup and an undo."
 say = [["יש תיקון קוד מהיר?", "Is there a quick code fix to install?"]]
 expect_he = "מוצגת רשימת הקבצים ששונו, ואחרי ההתקנה הגרסה מסומנת \"+hotfix.N\" ב-jarvis version. עדכון רגיל מחליף את התיקון המהיר."
 expect_en = "You see the list of changed files, and afterwards jarvis version shows \"+hotfix.N\". A normal update replaces the hotfix."
 test_he = "הריצו  jarvis hotfix apply --dry-run  כדי לראות מה היה משתנה, בלי לשנות כלום."
 test_en = "Run  jarvis hotfix apply --dry-run  to see what would change without touching anything."
-cost_he = "חינם. בלי רשת."
-cost_en = "Free. No network."
+cost_he = "חינם. בלי רשת, חוץ מהורדת גלגלי תלויות נעולים (sha256) כשהתלויות השתנו."
+cost_en = "Free. No network, except downloading hash-locked dependency wheels when dependencies changed."
 privacy_he = "הכול מקומי. הגיבוי לא כולל מפתחות. אין שליחה החוצה."
 privacy_en = "Everything is local. The backup holds no keys. Nothing is sent out."
 
@@ -37,6 +37,16 @@ en = "Packaging, CI, docs and installer files are not part of the installed buil
 action = "command:jarvis hotfix status"
 
 [[steps]]
+he = "שינוי בגשר (נעיצה או קוד): בנו או הורידו את whatsapp_bridge.exe הנעוץ והריצו  jarvis hotfix apply --from <קומיט ב-main> --bridge-exe <נתיב>. הקובץ מותקן רק אם ה-sha256 שלו שווה לנעיצה בגרסת היעד; הגשר נעצר, הקובץ מוחלף עם גיבוי, והגשר מופעל מחדש רק אם רץ. --dry-run מראה מה יוחלף."
+en = "Bridge change (pin or code): build or download the pinned whatsapp_bridge.exe and run  jarvis hotfix apply --from <commit on main> --bridge-exe <path>. It is installed only if its sha256 equals the pin in the target version; the bridge is stopped, the file is replaced with a backup, and the bridge restarts only if it was running. --dry-run shows what would be replaced."
+action = "command:jarvis hotfix apply --dry-run"
+
+[[steps]]
+he = "שינוי בתלויות (pyproject או uv.lock): jarvis hotfix apply --dry-run מציג בדיוק אילו חבילות יותקנו (שם, גרסה, תחילת sha256, גודל) בלי רשת. ההתקנה בפועל מורידה רק את הגלגלים הנעולים (https, רק מ-PyPI), בודקת sha256 וגודל לפני כל שינוי, מתקינה עם pip --require-hashes --no-deps ומגבה את הקבצים שנגעו בהם. אין התקנה מקוד מקור ואין חבילה בלי sha256. --python מצביע על python.exe בתוך תיקיית ההתקנה אם הוא לא בנתיב הרגיל. שינוי בגשר או בתלויות מותקן רק מקומיט שנמצא ב-main של jarves (לא מתיקייה ולא מענף שלא מוזג)."
+en = "Dependency change (pyproject or uv.lock): jarvis hotfix apply --dry-run lists exactly which packages would be installed (name, version, sha256 prefix, size) with no network. The real run downloads only the locked wheels (https, PyPI only), checks sha256 and size before any change, installs with pip --require-hashes --no-deps and backs up every file it touches. Never from source, never a package without a sha256. --python points to the python.exe inside the install folder if it is not in the usual place. Bridge and dependency changes are applied only from a commit that is on jarves main (never from a folder or an unmerged branch)."
+action = "command:jarvis hotfix apply --dry-run"
+
+[[steps]]
 he = "לביטול: jarvis hotfix revert. הקבצים המקוריים חוזרים ממה ששמור בתיקיית hotfix בנתונים."
 en = "To undo: jarvis hotfix revert. The original files come back from the hotfix folder in your data folder."
 action = "command:jarvis hotfix revert"
@@ -44,8 +54,8 @@ action = "command:jarvis hotfix revert"
 [[problems]]
 he = "כתוב REFUSED"
 en = "It says REFUSED"
-fix_he = "תלויות השתנו (pyproject, lock), נעיצת גשר או קוד גשר השתנו, קובץ פייתון מייבא ספרייה שלא מותקנת, נתיב לא בטוח, או שהגרסה המותקנת אינה אב קדמון של היעד. התקינו גרסה מלאה; התמיכה בתלויות ובגשר תתווסף בשלב הבא."
-fix_en = "Dependencies changed (pyproject, lock), a bridge pin or bridge code changed, a Python file imports a library that is not installed, an unsafe path, or the installed build is not an ancestor of the target. Use the full installer; bridge and dependency support is a later slice."
+fix_he = "HOTFIX_DEP_UNVERIFIED: חבילה בלי sha256, אי התאמת sha256 או גודל, גלגל לא מתאים או מקור בלבד (sdist), חבילה שאינה מרישום, או גלגל שמתקין סקריפטים מחוץ ל-site-packages. HOTFIX_BRIDGE_UNVERIFIED: ה-sha256 של --bridge-exe אינו שווה לנעיצה (או שלא נמסר קובץ). HOTFIX_UNTRUSTED_SOURCE: שינוי גשר או תלויות שלא מקומיט ב-main של jarves (מזגו, git fetch, ונסו שוב). HOTFIX_NEEDS_SLICE2: קובץ תלויות אחר (requirements, setup.py). HOTFIX_NEW_DEPENDENCY: קובץ פייתון מייבא ספרייה שלא מותקנת ושאינה מגיעה עם הגלגלים הנעולים. וגם: נתיב לא בטוח, או גרסה מותקנת שאינה אב קדמון של היעד. התקינו גרסה מלאה. שום דבר לא שונה."
+fix_en = "HOTFIX_DEP_UNVERIFIED: a package without a sha256, a sha256 or size mismatch, no fitting wheel or only a source distribution, a package not from a registry, or a wheel that installs scripts outside site-packages. HOTFIX_BRIDGE_UNVERIFIED: the sha256 of --bridge-exe does not equal the pin (or no file was given). HOTFIX_UNTRUSTED_SOURCE: a bridge or dependency change not from a commit on jarves main (merge, git fetch, retry). HOTFIX_NEEDS_SLICE2: another dependency file (requirements, setup.py). HOTFIX_NEW_DEPENDENCY: a Python file imports a library that is not installed and not delivered by the locked wheels. Also: an unsafe path, or an installed build that is not an ancestor of the target. Use the full installer. Nothing was changed."
 [[problems]]
 he = "כתוב \"הוחזר אוטומטית\""
 en = "It says it was reverted automatically"
