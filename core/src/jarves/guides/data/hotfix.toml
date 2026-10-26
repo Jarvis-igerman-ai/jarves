@@ -6,8 +6,8 @@ aliases = ["תיקון מהיר", "הוטפיקס", "תיקון קוד מהיר"
 links = ["backup", "updates"]
 title_he = "תיקון מהיר (hotfix)"
 title_en = "Hot-patch (hotfix)"
-what_he = "מכניס תיקון קוד בלבד לגרסה המותקנת תוך כדקה, בלי מתקין של רבע שעה. מגבה קודם, מעתיק רק קבצים ששונו, מפעיל מחדש את הליבה רק אם רצה, בודק עם doctor, ופקודה אחת מבטלת. שינוי במתקין, בגשר או בתלויות נדחה ואז צריך את המתקין המלא."
-what_en = "Puts a code-only fix into the installed build in about a minute instead of a 15 minute installer. It backs up first, copies only the changed files, restarts the Core only if it was running, checks with doctor, and one command undoes it. A change to the installer, the bridge or dependencies is refused: use the full installer then."
+what_he = "מכניס כל תיקון קוד לגרסה המותקנת תוך כדקה, בלי מתקין של רבע שעה. מגבה קודם, מעתיק רק קבצים ששונו, מפעיל מחדש את הליבה רק אם רצה, בודק עם doctor, ופקודה אחת מבטלת. קבצי בנייה בלבד (אריזה, CI, מסמכים) מדולגים ומופיעים כ\"משפיעים רק על המתקין המלא הבא\". שינוי בגשר או בתלויות מזוהה ועדיין צריך את המתקין המלא (יתמוך בשלב הבא)."
+what_en = "Puts any code fix into the installed build in about a minute instead of a 15 minute installer. It backs up first, copies only the changed files, restarts the Core only if it was running, checks with doctor, and one command undoes it. Build-only files (packaging, CI, docs) are skipped and listed as \"only affects the next full installer\". A bridge or dependency change is detected and still needs the full installer (a later slice will support it)."
 say = [["יש תיקון קוד מהיר?", "Is there a quick code fix to install?"]]
 expect_he = "מוצגת רשימת הקבצים ששונו, ואחרי ההתקנה הגרסה מסומנת \"+hotfix.N\" ב-jarvis version. עדכון רגיל מחליף את התיקון המהיר."
 expect_en = "You see the list of changed files, and afterwards jarvis version shows \"+hotfix.N\". A normal update replaces the hotfix."
@@ -22,8 +22,8 @@ privacy_en = "Everything is local. The backup holds no keys. Nothing is sent out
 hotfix = "hotfix"
 
 [[steps]]
-he = "הריצו  jarvis hotfix apply --from <ענף או תיקייה> --dry-run  וראו אילו קבצים ישתנו. אם כתוב REFUSED, צריך את המתקין המלא."
-en = "Run  jarvis hotfix apply --from <branch or folder> --dry-run  and see which files would change. If it says REFUSED, use the full installer."
+he = "הריצו  jarvis hotfix apply --from <ענף או תיקייה> --dry-run  וראו אילו קבצים ישתנו. אם כתוב REFUSED, ראו את הסיבה (צריך את המתקין המלא)."
+en = "Run  jarvis hotfix apply --from <branch or folder> --dry-run  and see which files would change. If it says REFUSED, read the reason (use the full installer)."
 action = "command:jarvis hotfix apply --dry-run"
 
 [[steps]]
@@ -32,9 +32,9 @@ en = "Run  jarvis hotfix apply --from <branch or folder>. It backs up, copies th
 action = "command:jarvis hotfix apply"
 
 [[steps]]
-he = "לתיקון אוטומטי בטוח: jarvis hotfix apply --from <ענף> --python-only  (אחרי --dry-run). קבצי אריזה, גשר, אפליקציית הפנים והתקנה מדולגים ומופיעים כ\"ממתינים למתקין המלא הבא\" גם ב-jarvis hotfix status. שינוי בתלויות, נעיצת גשר או ייבוא של ספרייה שלא מותקנת עדיין נדחים."
-en = "For the safe automatic fix: jarvis hotfix apply --from <branch> --python-only  (after --dry-run). Packaging, bridge, face app and installer files are skipped and listed as \"pending for the next full installer\", also in jarvis hotfix status. A dependency change, a bridge pin change or an import of a library that is not installed are still refused."
-action = "command:jarvis hotfix apply --python-only"
+he = "קבצי אריזה, CI, מסמכים והתקנה אינם חלק מהגרסה המותקנת: הם מדולגים ומופיעים כ\"משפיעים רק על המתקין המלא הבא\" (גם ב-jarvis hotfix status). אין צורך בדגל; --python-only נשאר כשם נוסף לתיקון האוטומטי."
+en = "Packaging, CI, docs and installer files are not part of the installed build: they are skipped and listed as \"only affects the next full installer\" (also in jarvis hotfix status). No flag needed; --python-only stays as an alias for the automatic hotfix."
+action = "command:jarvis hotfix status"
 
 [[steps]]
 he = "לביטול: jarvis hotfix revert. הקבצים המקוריים חוזרים ממה ששמור בתיקיית hotfix בנתונים."
@@ -42,15 +42,10 @@ en = "To undo: jarvis hotfix revert. The original files come back from the hotfi
 action = "command:jarvis hotfix revert"
 
 [[problems]]
-he = "כתוב REFUSED: צריך את המתקין המלא"
-en = "It says REFUSED: use the full installer"
-fix_he = "השינוי נוגע במתקין, בגשר, בתלויות או בקובץ שאינו קוד. זה בכוונה: התקינו גרסה מלאה."
-fix_en = "The change touches the installer, the bridge, dependencies or a non-source file. On purpose: install a full build."
-[[problems]]
-he = "כתוב REFUSED גם עם --python-only"
-en = "It says REFUSED even with --python-only"
-fix_he = "שינוי בתלויות (pyproject, lock), נעיצת גשר או קובץ בינארי שלו, ספרייה חדשה שלא מותקנת, או שהגרסה המותקנת אינה אב קדמון של היעד. התקינו גרסה מלאה."
-fix_en = "A dependency change (pyproject, lock), a bridge pin or binary, a new library that is not installed, or an installed build that is not an ancestor of the target. Install a full build."
+he = "כתוב REFUSED"
+en = "It says REFUSED"
+fix_he = "תלויות השתנו (pyproject, lock), נעיצת גשר או קוד גשר השתנו, קובץ פייתון מייבא ספרייה שלא מותקנת, נתיב לא בטוח, או שהגרסה המותקנת אינה אב קדמון של היעד. התקינו גרסה מלאה; התמיכה בתלויות ובגשר תתווסף בשלב הבא."
+fix_en = "Dependencies changed (pyproject, lock), a bridge pin or bridge code changed, a Python file imports a library that is not installed, an unsafe path, or the installed build is not an ancestor of the target. Use the full installer; bridge and dependency support is a later slice."
 [[problems]]
 he = "כתוב \"הוחזר אוטומטית\""
 en = "It says it was reverted automatically"
