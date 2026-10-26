@@ -138,7 +138,20 @@ class GitHubClient:
                 break
         return out
 
-    # ---- reads (no write call exists in this slice)
+    # ---- reads (no write call exists in this module; the write framework is github_write.py)
+    def write_probe(self, owner: str, repo: str) -> dict:
+        """What this token may do on one repo, from read calls only: `scopes` = the classic token's X-OAuth-Scopes
+        (None for a fine-grained token: GitHub sends none) and `push` = the repo's permissions.push for this token."""
+        _name(owner, "owner"), _name(repo, "repo")
+        r = self._request("GET", f"/repos/{owner}/{repo}")
+        raw = r.headers.get("x-oauth-scopes")
+        try:
+            perms = (r.json() or {}).get("permissions") or {}
+        except ValueError:
+            perms = {}
+        return {"scopes": None if raw is None else [x.strip() for x in raw.split(",") if x.strip()],
+                "push": bool(perms.get("push")) if isinstance(perms, dict) and "push" in perms else None}
+
     def me(self) -> dict:
         return {"login": self._json("GET", "/user").get("login")}
 
@@ -193,6 +206,8 @@ class FakeGitHub:
         self.calls: list[tuple[str, str]] = []
         self.auth: list[str] = []
         self.fail: tuple[int, dict] | None = None
+        self.scopes: str | None = "repo"        # X-OAuth-Scopes of a classic token; None = a fine-grained token
+        self.push: bool | None = True           # permissions.push the repo reports for this token
         self.transport = httpx.MockTransport(self._handle)
 
     def _handle(self, req: httpx.Request) -> httpx.Response:
@@ -204,6 +219,11 @@ class FakeGitHub:
         hdr = {"x-ratelimit-remaining": "4999", "x-ratelimit-reset": "1790000000"}
         if p == "/user":
             return httpx.Response(200, headers=hdr, json={"login": "octo"})
+        if re.fullmatch(r"/repos/[^/]+/[^/]+", p):        # the repo itself: scopes header + permissions (write_probe)
+            h = dict(hdr)
+            if self.scopes is not None:
+                h["x-oauth-scopes"] = self.scopes
+            return httpx.Response(200, headers=h, json={"permissions": {"push": self.push}} if self.push is not None else {})
         if p == "/user/repos":
             return httpx.Response(200, headers=hdr, json=[{"full_name": f"octo/r{page}-{i}", "private": True,
                                                            "default_branch": "main"} for i in range(PER_PAGE)])
@@ -245,10 +265,15 @@ feat.register("github", "GitHub (קריאה בלבד)", "GitHub (read only)", Fa
 def add_cli(sub) -> None:
     h = sub.add_parser("github", help="GitHub (read only): `status` shows the connection; `token` saves a read-only "
                                        "token (asked privately); `off` deletes it. Switch on: `jarvis features on github`")
-    h.add_argument("action", choices=["status", "token", "off"])
+    h.add_argument("action", choices=["status", "token", "off", "write"])
+    h.add_argument("write_action", nargs="?", choices=["status", "on", "off"], default=None,
+                   help="with `write`: the GitHub write switch (V7 G2; nothing is written yet)")
 
 
 def cmd_github(a, cfg, home) -> int:
+    if a.action == "write":
+        from .github_write import cmd_github_write
+        return cmd_github_write(a, cfg, home)
     store = TokenStore(home)
     if a.action == "status":
         st = store.status()
