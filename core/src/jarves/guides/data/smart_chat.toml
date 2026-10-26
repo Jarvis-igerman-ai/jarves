@@ -6,20 +6,20 @@ aliases = ["רשימה בצ'אט", "תיבת סימון", "בלוקים בצ'א�
 links = ["web_chat"]
 title_he = "רשימות לסימון בשיחה"
 title_en = "Checklists in the chat"
-what_he = "ג'ארביס יכול להציג בשיחה בדפדפן רשימה קצרה עם תיבות סימון, או הודעת טקסט מסודרת. הכול טקסט רגיל, בלי קישורים ובלי כפתורי פעולה. בגרסה הזאת הסימון רק לצפייה: הוא לא נשלח לשום מקום ולא יוצר משימות."
-what_en = "JARVES can show a short checklist with tick boxes, or a tidy text block, in the browser chat. Everything is plain text: no links and no action buttons. In this version ticking is only for you to look at: it is sent nowhere and creates no tasks."
+what_he = "ג'ארביס יכול להציג בשיחה בדפדפן רשימה קצרה עם תיבות סימון, או הודעת טקסט מסודרת. הכול טקסט רגיל, בלי קישורים. ברשימה של משימות יש כפתור \"שלחו את הסימון\": הוא שולח רק את מה שסימנתם, ג'ארביס שואל אישור עם הכותרות המדויקות, ורק אחרי שאישרתם הוא מוסיף אותן ל-Any.do (עד 10 בבת אחת)."
+what_en = "JARVES can show a short checklist with tick boxes, or a tidy text block, in the browser chat. Everything is plain text: no links. A task list has a \"Send my selection\" button: it sends only what you ticked, JARVES asks for your approval showing the exact titles, and only after you approve does it add them to Any.do (up to 10 at once)."
 say = [["תראה לי רשימה קצרה לסימון", "Show me a short checklist"]]
-expect_he = "רשימה עם תיבות סימון בשיחה. בטרמינל מודפסת אותה רשימה כמספרים. אין מתג: זה פועל רק כשהמודל בוחר להציג רשימה."
-expect_en = "A list with tick boxes in the chat. In the terminal the same list is printed with numbers. There is no switch: it only appears when the model chooses to show a list."
-test_he = "בקשו \"תראה לי רשימה קצרה לסימון\" ובדקו שאפשר לסמן עם העכבר ועם מקש הרווח."
-test_en = "Ask \"Show me a short checklist\" and check that you can tick with the mouse and with the Space key."
+expect_he = "רשימה עם תיבות סימון בשיחה. בטרמינל מודפסת אותה רשימה כמספרים: מקלידים 1,3 או all כדי לבחור. הכפתור עובד רק בדשבורד במחשב עצמו, לא בטלפון. אין מתג: זה פועל רק כשהמודל בוחר להציג רשימה."
+expect_en = "A list with tick boxes in the chat. In the terminal the same list is printed with numbers: type 1,3 or all to choose. The button works only in the dashboard on the computer itself, not on a phone. There is no switch: it only appears when the model chooses to show a list."
+test_he = "בקשו \"תראה לי רשימה קצרה לסימון\" ובדקו שאפשר לסמן עם העכבר ועם מקש הרווח. לרשימת משימות: סמנו, לחצו \"שלחו את הסימון\" ובדקו שהאישור מציג בדיוק את מה שסימנתם."
+test_en = "Ask \"Show me a short checklist\" and check that you can tick with the mouse and with the Space key. For a task list: tick, press \"Send my selection\" and check that the approval shows exactly what you ticked."
 cost_he = "חינם. הכול מקומי."
 cost_en = "Free. All local."
-privacy_he = "הרשימה נשמרת בהיסטוריית השיחה כמו כל הודעה. היא לא נשלחת לטלפונים. ביומנים נרשמים רק מספרים."
-privacy_en = "The list is kept in the chat history like any message. It is not sent to phones. Logs hold counts only."
+privacy_he = "הרשימה נשמרת בהיסטוריית השיחה כמו כל הודעה. היא לא נשלחת לטלפונים. ביומנים נרשמים רק מספרים וקודים, בלי כותרות. הלחיצה נבדקת מול הרשימה ששמורה במחשב, והמודל מקבל את הכותרות משם ולא מהדפדפן."
+privacy_en = "The list is kept in the chat history like any message. It is not sent to phones. Logs hold counts and codes only, never titles. The click is checked against the list the computer kept, and the model gets the titles from there, not from the browser."
 
 [parity.tool_groups]
-ui_blocks = ["voice", "chat only: the terminal prints the same list with numbers"]
+ui_blocks = ["voice", "chat only: the terminal prints the same list with numbers and takes 1,3 or all"]
 
 [[steps]]
 he = "פתחו את השיחה בדשבורד (jarvis dashboard) וביקשו רשימה לסימון."
@@ -29,11 +29,27 @@ en = "Open the chat in the dashboard (jarvis dashboard) and ask for a checklist.
 he = "סמנו פריטים עם העכבר, או עברו עם Tab וסמנו עם רווח."
 en = "Tick items with the mouse, or move with Tab and tick with Space."
 
+[[steps]]
+he = "ברשימת משימות: לחצו \"שלחו את הסימון\" (בטרמינל: הקלידו מספרים כמו 1,3 או all). ג'ארביס יציג אישור עם הכותרות המדויקות והרשימה ב-Any.do. אשרו או דחו: דחייה לא משנה כלום."
+en = "On a task list: press \"Send my selection\" (in the terminal: type numbers like 1,3 or all). JARVES shows an approval with the exact titles and the Any.do list. Approve or deny: denying changes nothing."
+
 [[problems]]
 he = "לא רואים תיבות סימון, רק טקסט"
 en = "I see only text, no tick boxes"
 fix_he = "רענו את הדף (Ctrl+F5). בטרמינל וגם בטלפון מוצגת רשימה ממוספרת או טקסט בלבד, וזה תקין."
 fix_en = "Refresh the page (Ctrl+F5). The terminal and phones show a numbered list or plain text only, which is normal."
+
+[[problems]]
+he = "כתוב \"הרשימה פגה\" או \"כבר נשלחה\""
+en = "It says \"expired\" or \"already sent\""
+fix_he = "רשימה תקפה כחצי שעה ונשלחת פעם אחת. בקשו מג'ארביס רשימה חדשה. אחרי הפעלה מחדש של ג'ארביס רשימות ישנות לא פועלות."
+fix_en = "A list works for about half an hour and is sent once. Ask JARVES for a new list. After JARVES restarts, old lists no longer work."
+
+[[problems]]
+he = "הכפתור חסר בטלפון"
+en = "The button is missing on my phone"
+fix_he = "זה בכוונה: שליחת הסימון מותרת רק מהדשבורד במחשב עצמו. בטלפון לא מוצגות רשימות עם טקסט הודעות."
+fix_en = "On purpose: sending the selection is allowed only from the dashboard on the computer itself. Phones do not get lists that hold message text."
 
 [platform]
 windows = "implemented_unverified"

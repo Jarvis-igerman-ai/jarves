@@ -40,6 +40,7 @@ from pathlib import Path
 from . import approvals as appr
 from . import features as feat
 from . import logs
+from . import ui_blocks as ub
 from .capabilities import PI_ROADMAP
 from .skills import TOOL_SINK
 
@@ -277,6 +278,7 @@ class WebChat:
         self._turn_n = 0
         self._future: concurrent.futures.Future | None = None
         self._quiet: tuple[float, bool] = (0.0, False)
+        self.blocks = ub.BlockStore(clock=clock)           # S2: server-side record of the checklists that were shown
         self.closed = False
         svc = getattr(core, "approvals", None)
         self._svc = svc
@@ -334,6 +336,9 @@ class WebChat:
         with self._lock:
             msgs = [dict(m) for m in self.messages if not (device and m.get("role") in ("display", "ui_block"))]   # #363: owner only
             busy = self._busy
+        for m in msgs:
+            if m.get("role") == "ui_block" and (m.get("block") or {}).get("on"):
+                m["state"] = self.blocks.state(m["block"].get("id"))      # open | used | expired: the page disables the rest
         return {"available": True, "cursor": self.events.last, "busy": busy, "messages": msgs,
                 "silent": self.silent_state(), "can_speak": (not device) and self.can_speak(),
                 "commands": [{"name": c[0], "en": c[1], "he": c[2]} for c in COMMANDS]}
@@ -404,6 +409,52 @@ class WebChat:
             return 503, {"error": "the chat engine is not running", "code": "CHAT_STOPPING"}
         return 200, out
 
+    def ui_action(self, body: dict) -> tuple[int, dict]:
+        """The owner's click on a checklist (S2). `body` carries ONLY the block id and the server-assigned item ids; the
+        titles are resolved from the server record. The next step is the block's registered action, which asks for approval."""
+        body = body if isinstance(body, dict) else {}
+        if self.closed or getattr(self.core, "stopping", False):
+            return 503, {"error": "shutting down", "code": "CHAT_STOPPING"}
+        lang = "he" if str(body.get("lang") or "").lower().startswith("he") else "en"
+        with self._lock:
+            if self._busy:                                   # checked first: a busy refusal must not burn the block
+                return 409, {"error": "the previous message is still being answered", "code": "CHAT_BUSY"}
+            try:
+                taken = self.blocks.take(body.get("block"), body.get("selected"))
+            except ub.ActionError as e:
+                logs.warn("ui_blocks", "UI_ACTION_REFUSED", "ui action refused", reason=e.code)
+                return e.status, {"error": "that selection was refused", "code": e.code}
+            self._turn_n += 1
+            tid = f"t{self._turn_n}"
+            self._busy = tid
+            shown = "; ".join(" ".join(t.split()) for t in taken.titles)[:600]
+            self._add_message({"role": "user", "text": (f"נבחרו: {shown}" if lang == "he" else f"Selected: {shown}"),
+                               "turn": tid, "client": "owner"})
+            self.events.add("user", turn=tid, text=self.messages[-1]["text"], client="owner")
+            self.events.add("ui_state", block=taken.block, state="used")
+        try:
+            self._future = asyncio.run_coroutine_threadsafe(self._run_action(tid, taken), self.loop)
+        except RuntimeError:
+            self.blocks.reopen(taken.block)
+            self.events.add("ui_state", block=taken.block, state="open")
+            self._release(tid)
+            return 503, {"error": "the chat engine is not running", "code": "CHAT_STOPPING"}
+        return 200, {"ok": True, "turn": tid, "cursor": self.events.last}
+
+    async def _run_action(self, tid: str, taken: "ub.Taken") -> None:
+        silent = self.silent_state()["on"]
+        appr.CHAT_TURN.set({"client": "web", "silent": silent})
+        TOOL_SINK.set(_ToolSink(self, tid))
+        try:
+            text = await ub.run_action(self.core, taken, self.blocks)
+        except asyncio.CancelledError:
+            self.blocks.reopen(taken.block)
+            self._finish(tid, "", False, "CANCELLED", silent, False)
+            raise
+        if self.blocks.state(taken.block) == "open":
+            self.events.add("ui_state", block=taken.block, state="open")      # not done (denied, no answer): try again
+        await self._run(tid, text, False, False, utterance="<ui action>")
+
     def _release(self, tid: str) -> None:
         with self._lock:
             if self._busy == tid:
@@ -438,12 +489,20 @@ class WebChat:
         self._add_message(line)
         self.events.add("display", **line)
 
+    def _untrusted_turn(self) -> bool:
+        reg = getattr(self.core, "registry", None)
+        try:
+            return bool(reg is not None and reg._untrusted_at is not None)    # third-party text was read in this turn
+        except Exception:
+            return True                                                      # unknown = the careful answer
+
     def _ui_block(self, tid: str, block: dict) -> None:
+        self.blocks.add(block, untrusted=self._untrusted_turn())     # creating a block never runs anything
         line = {"role": "ui_block", "turn": tid, "block": block}
         self._add_message(line)
         self.events.add("ui_block", **line)
 
-    async def _run(self, tid: str, text: str, speak: bool, device: bool) -> None:
+    async def _run(self, tid: str, text: str, speak: bool, device: bool, utterance: str | None = None) -> None:
         silent = self.silent_state()["on"]
         appr.CHAT_TURN.set({"client": "web", "silent": silent})
         TOOL_SINK.set(_ToolSink(self, tid))
@@ -451,7 +510,8 @@ class WebChat:
         fresh, self._fresh = self._fresh, False
         t0 = time.monotonic()
         try:
-            reply = await self.core.respond_remote(text, on_delta=on_delta, fresh=fresh)
+            reply = await (self.core.respond_remote(text, on_delta=on_delta, fresh=fresh) if utterance is None else
+                           self.core.respond_remote(text, on_delta=on_delta, fresh=fresh, utterance=utterance))
         except asyncio.CancelledError:
             self._finish(tid, "", False, "CANCELLED", silent, False)
             raise
@@ -680,6 +740,22 @@ def api_events(ctx, m, body, q=None):
     return _gate(ctx) or handle_events(_chat(ctx), q or {}, device=False, home=ctx.home)
 
 
+def api_ui_action(ctx, m, body):
+    """POST /api/chat/ui_action {block, selected:[ids]}: the owner's own click, from this computer's dashboard only.
+    dashboard.py has already required the loopback address, the dashboard session and a same-origin request; a paired
+    phone or LAN device never reaches this (not on its allowlist) and is refused here again."""
+    who = getattr(getattr(ctx, "_tl", None), "who", None) or {}
+    if who.get("kind") != "local":
+        return 403, {"error": "only the computer itself can do this", "code": "UI_ACTION_FORBIDDEN"}
+    gated = _gate(ctx)
+    if gated:
+        return gated
+    chat = _chat(ctx)
+    if chat is None:
+        return 503, {"error": "chat is not running here", "code": "CHAT_UNAVAILABLE"}
+    return chat.ui_action(body)
+
+
 def api_silent(ctx, m, body):
     chat = _chat(ctx)
     if chat is None:
@@ -695,3 +771,4 @@ def dashboard_routes(register) -> None:
     register("POST", r"/api/chat/send", api_send)
     register("GET", r"/api/chat/events", api_events)
     register("POST", r"/api/chat/silent", api_silent)
+    register("POST", r"/api/chat/ui_action", api_ui_action)

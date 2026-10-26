@@ -1,0 +1,15 @@
+{
+ "dict": {
+  "Nothing is ticked.": "לא סומן כלום.",
+  "Send my selection": "שלחו את הסימון",
+  "Sent. Waiting for your approval.": "נשלח. ממתין לאישור שלכם.",
+  "That selection is not valid.": "הבחירה לא תקינה.",
+  "The request was refused.": "הבקשה נדחתה.",
+  "This can only be done in the dashboard on the computer itself.": "את זה אפשר לעשות רק בדשבורד של המחשב עצמו.",
+  "This list has expired. Ask for a new one.": "הרשימה פגה. בקשו רשימה חדשה.",
+  "This list is not known (maybe after a restart). Ask for a new one.": "הרשימה לא מוכרת (אולי אחרי הפעלה מחדש). בקשו רשימה חדשה.",
+  "This list was already sent.": "הרשימה הזאת כבר נשלחה.",
+  "Too many clicks. Try again in a minute.": "יותר מדי לחיצות. נסו עוד דקה.",
+  "You can send at most 10 items at once.": "אפשר לשלוח עד 10 פריטים בבת אחת."
+ }
+}

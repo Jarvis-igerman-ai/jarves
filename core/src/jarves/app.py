@@ -1198,7 +1198,7 @@ class Core:
         self._owner_answer(text, "voice")           # nothing waits here (talk_up routes those): a new turn
         await self.handle_utterance(text, typed=False)
 
-    async def respond_remote(self, text: str, *, on_delta=None, fresh: bool = False):
+    async def respond_remote(self, text: str, *, on_delta=None, fresh: bool = False, utterance: str | None = None):
         """A typed turn from a paired phone (V5-G): the SAME Brain, memory and conversation context as a Windows
         turn, logged as a typed exchange so it appears in the desktop history and joins the open typed conversation
         (TYPED_GAP_S). The answer goes back to the phone only: no face update, no speaker, and never the spoken-approval
@@ -1209,8 +1209,10 @@ class Core:
                        else self.brain.respond(text, spoken=False))
         logs.info("core", "REPLY", "reply sent", source=reply.source, tool=reply.tool, ok=reply.ok, result_code=reply.code,
                   ms=round((time.monotonic() - t0) * 1000), text=reply.text, typed=True,
-                  utterance=f"<{len(text)} chars>" if SENSITIVE_TEXT.search(text) else text)
-        self.curator.observe("user", text)
+                  utterance=utterance if utterance is not None else (    # a UI-action turn: item titles never reach the log
+                      f"<{len(text)} chars>" if SENSITIVE_TEXT.search(text) else text))
+        if utterance is None:
+            self.curator.observe("user", text)
         self.curator.observe("assistant", reply.text, idle=self.live is None)
         return reply
 

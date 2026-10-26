@@ -25,6 +25,7 @@
     send: (body) => post("/api/chat/send", body),
     answer: (id, approved, typed) => post("/api/approvals/" + encodeURIComponent(id), { approved, typed }),
     silent: (on) => post("/api/chat/silent", { on }),
+    uiAction: (body) => post("/api/chat/ui_action", body),       // S2: block id + ticked item ids only
   };
 
   function destroy() { if (view) { view.destroy(); view = null; } }

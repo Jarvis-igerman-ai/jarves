@@ -55,13 +55,14 @@ class TextCore:
     def snapshot(self) -> dict:
         return {"core": "text session (JARVES itself is not running)", "components": {}}
 
-    async def respond_remote(self, text: str, *, on_delta=None, fresh: bool = False):
+    async def respond_remote(self, text: str, *, on_delta=None, fresh: bool = False, utterance: str | None = None):
         t0 = time.monotonic()
         reply = await (self.brain.respond(text, spoken=False, on_delta=on_delta) if on_delta is not None
                        else self.brain.respond(text, spoken=False))
         from .curator import _SENSITIVE
         private = logs.privacy()
-        user = f"<{len(text)} chars>" if private or _SENSITIVE.search(text) else text
+        user = utterance if utterance is not None else (  # a UI-action turn: its item titles are never stored in the history
+            f"<{len(text)} chars>" if private or _SENSITIVE.search(text) else text)
         said = f"<{len(reply.text)} chars>" if private else reply.text
         await asyncio.to_thread(self.store.record_typed, user, said, time.time(),
                                 ms=round((time.monotonic() - t0) * 1000), fresh=fresh)
