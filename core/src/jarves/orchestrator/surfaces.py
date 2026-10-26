@@ -221,14 +221,14 @@ def attach(core) -> None:
 
 # ====================================================================== CLI
 ACTIONS = ("list", "status", "ask", "tell", "continue", "pause", "interrupt", "stop", "start", "resume", "approvals",
-           "approve", "deny", "log", "digest", "install-plugin", "doctor", "projects", "reply")
+           "approve", "deny", "log", "digest", "install-plugin", "doctor", "projects", "reply", "opencode")
 
 
 def add_cli(sub) -> None:
     p = sub.add_parser("agents", help="coding agents (Claude Code / Codex): list | status ID | ask ID \"q\" | tell ID "
                                       "\"msg\" | continue | pause | stop | start PROVIDER PROJECT \"task\" | resume | "
                                       "approvals | approve REQ | deny REQ | log | digest | install-plugin claude|codex "
-                                      "| doctor | projects")
+                                      "| doctor | projects | opencode status|sessions|events (read-only)")
     p.add_argument("action", choices=ACTIONS)
     p.add_argument("args", nargs="*", help="session id / project / provider and text, by action")
     p.add_argument("--json", action="store_true", help="machine-readable output")
@@ -303,12 +303,13 @@ def _print(r: dict, a) -> None:
 def cmd_agents(a, cfg, home) -> int:
     from .. import features as feat
     if a.action not in ("doctor", "projects", "install-plugin"):
+        gate = "agent_opencode" if a.action == "opencode" else FEATURE
         try:
-            on = feat.Features(cfg, Path(home)).enabled(FEATURE)
+            on = feat.Features(cfg, Path(home)).enabled(gate)
         except Exception:
             on = True
         if not on:
-            print(f"{FEATURE} is off: jarvis features on {FEATURE}", file=sys.stderr)
+            print(f"{gate} is off: jarvis features on {gate}", file=sys.stderr)
             return 2
     args = list(a.args)
     act = a.action
@@ -351,6 +352,8 @@ def cmd_agents(a, cfg, home) -> int:
         sub = args[0] if args else "list"
         kw.update(action=sub, path=args[1] if len(args) > 1 else "", name=a.name or
                   (args[1] if sub == "remove" and len(args) > 1 else ""), aliases=a.alias, no_start=a.no_start)
+    elif act == "opencode":      # read-only: status | sessions | events
+        kw.update(action=args[0] if args else "status", limit=a.n)
     elif act == "list":
         kw.update(all=a.all, force=True)
     elif act == "reply":

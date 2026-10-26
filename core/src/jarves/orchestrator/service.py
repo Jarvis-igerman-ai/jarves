@@ -31,7 +31,7 @@ from typing import Any, Callable
 
 from .. import logs
 from . import bridge as br
-from . import claude, codex, policy
+from . import claude, codex, opencode, policy
 from .db import AgentDB, session_key
 from .envelope import (LIVE_STATES, Envelope, EnvelopeError, clean, make, say, summary, validate, wrap_for_agent)
 
@@ -209,7 +209,51 @@ class Orchestrator:
                         self.db.add_event(s["id"], "ended", "the session is no longer running")
         if codex_too and self.codex_cmd and self.acfg.codex_observe:
             out["codex"] = self._refresh_codex()
+        if codex_too and self._opencode_on():
+            out["opencode"] = self._refresh_opencode()
         return out
+
+    # ---- OpenCode (V7 D1): read-only, switch agent_opencode (off by default), sessions land in the same registry
+    def _opencode_on(self) -> bool:
+        from .. import features
+        try:
+            return features.Features(self.cfg, self.home).enabled(opencode.FEATURE)
+        except Exception:
+            return False
+
+    def _opencode_client(self) -> opencode.Client:
+        return opencode.Client(self.acfg.opencode_url, password_env=self.acfg.opencode_password_env)
+
+    def _refresh_opencode(self) -> int | str:
+        try:
+            rows = self._opencode_client().sessions()
+        except opencode.OpenCodeError as e:
+            return e.code
+        now = self.clock()
+        for v in rows:
+            sid = session_key("opencode", v["provider_session_id"])
+            cur = self.db.session(sid) or {}
+            fields = {"cwd": v["cwd"], "name": v["name"] or cur.get("name"), "kind": v["kind"], "state": v["state"],
+                      "started_at": v["started_at"], "last_seen_at": now, "origin": cur.get("origin") or "manual",
+                      "last_progress_at": v["updated_at"] or cur.get("last_progress_at"), "attachable": 0,
+                      "auth": "password", "status_source": "opencode_http"}
+            self._place(fields)
+            self.db.upsert_session(sid, **fields)
+        return len(rows)
+
+    def opencode_op(self, action: str = "status", limit: int = 20, lang: str = "en") -> dict:
+        """`jarvis agents opencode status|sessions|events`: three GET calls, nothing else."""
+        if not self._opencode_on():
+            return {"ok": False, "code": "error", "text": f"{opencode.FEATURE} is off: jarvis features on {opencode.FEATURE}"}
+        try:
+            c = self._opencode_client()
+            if action == "events":
+                return {"ok": True, "events": c.events(max(1, min(int(limit), 100)), timeout=5.0)}
+            if action == "sessions":
+                return {"ok": True, "sessions": c.sessions()}
+            return {"ok": True, "health": c.health()}
+        except opencode.OpenCodeError as e:
+            return {"ok": False, "code": e.code, "text": say(e.code, lang), "detail": e.detail}
 
     def _place(self, fields: dict) -> None:
         proj = self.projects.for_path(fields.get("cwd"))
@@ -276,10 +320,11 @@ class Orchestrator:
             caps.append("approve")
         if s["provider"] == "codex" and managed:
             caps.append("approve")
-        if s["state"] in ("STOPPED", "DISCONNECTED") or (s["provider"] == "codex" and not managed):
+        if s["provider"] != "opencode" and (s["state"] in ("STOPPED", "DISCONNECTED")
+                                            or (s["provider"] == "codex" and not managed)):
             caps.append("resume")
         attach = "managed" if managed else ("live_channel" if ch else ("plugin" if s.get("plugin") else
-                                                                          ("observe_only" if s["provider"] == "claude"
+                                                                          ("observe_only" if s["provider"] != "codex"
                                                                            else "UNSUPPORTED_ATTACH")))
         last = s.get("last_progress_at") or s.get("last_seen_at")
         return {"id": s["id"], "provider": s["provider"], "session": s["provider_session_id"],
@@ -507,7 +552,7 @@ class Orchestrator:
             self.db.audit(by, kind, session_id=sid, result="queued", detail="next safe stop")
             return {"ok": True, "code": "QUEUED", "delivery": "stop_hook", "text": say("QUEUED", lang),
                     "message_id": env.message_id}
-        if s["provider"] == "codex":
+        if s["provider"] in ("codex", "opencode"):
             return {"ok": False, "code": "UNSUPPORTED_ATTACH", "text": say("UNSUPPORTED_ATTACH", lang)}
         return {"ok": False, "code": "NO_LIVE_CHANNEL", "text": say("NO_LIVE_CHANNEL", lang) +
                 (" Install the JARVES plugin: jarvis agents install-plugin claude" if lang == "en" else
@@ -1412,6 +1457,10 @@ class Orchestrator:
                              "detail": "shared daemon" if srv.argv[-1] == "proxy" else "own app-server (stdio)"})
             except (LookupError, codex.RpcError, OSError) as e:
                 rows.append({"check": "codex_auth", "ok": False, "detail": clean(e, 120)})
+        if self._opencode_on():
+            r = self.opencode_op("status")
+            rows.append({"check": "opencode_server", "ok": r["ok"], "detail": (r.get("health") or {}).get("version")
+                         or f"{r.get('code')}: {r.get('detail', '')}"})
         view = br.safe_view(self.home)
         rows.append({"check": "bridge", "ok": self.bridge is not None or br.try_request(self.home, "ping", 5) is not None,
                      "detail": f"{view['transport']} {view['address']}"})
@@ -1504,6 +1553,8 @@ class Orchestrator:
                 return self.digest(a.get("since"), lang=lang)
             if op == "doctor":
                 return self.doctor()
+            if op == "opencode":
+                return self.opencode_op(a.get("action", "status"), int(a.get("limit") or 20), lang=lang)
             if op == "projects":
                 return self.projects_op(a.get("action", "list"), a.get("path", ""), a.get("name", ""),
                                         a.get("aliases"), bool(a.get("no_start")))
@@ -1550,7 +1601,7 @@ def current() -> Orchestrator | None:
 
 
 REMOTE_OPS = ("start", "resume", "tell", "continue", "pause", "interrupt", "stop", "ask", "reply", "approve", "deny",
-              "approvals", "list", "status", "digest", "log", "doctor", "session", "install_plugin", "projects")
+              "approvals", "list", "status", "digest", "log", "doctor", "session", "install_plugin", "projects", "opencode")
 
 
 def call(home: Path, cfg, op: str, **args) -> dict:

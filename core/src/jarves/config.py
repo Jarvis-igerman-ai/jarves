@@ -282,6 +282,8 @@ class AgentsConfig(_Strict):
     codex_observe: bool = True                             # list the owner's Codex threads (starts `codex app-server`)
     channel_permission_relay: bool = False                 # also take approvals through the live channel
     allow_api_billing: bool = False                        # never: an API-key session is refused (AUTH_REQUIRED)
+    opencode_url: str = "http://127.0.0.1:4096"            # V7 D1, read-only; loopback only (anything else: NOT_LOOPBACK)
+    opencode_password_env: str = "OPENCODE_SERVER_PASSWORD"   # NAME of the env var that holds the server password
 
 
 class ProjectsConfig(_Strict):
