@@ -193,7 +193,7 @@ def save(root: Path | str, sheet: Sheet) -> Path:
     return path
 
 
-DOCS_ONLY = re.compile(r"^(docs/|[^/]+\.md$|LICENSE|\.gitignore)")
+DOCS_ONLY = re.compile(r"^(docs/|[^/]+\.md$|LICENSE$|\.gitignore$)")   # anchored: LICENSE_x/y.py is code
 
 
 def docs_only(files: list[str]) -> bool:

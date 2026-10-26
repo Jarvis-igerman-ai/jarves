@@ -105,6 +105,24 @@ def test_ancestor_with_code_change_after_signing_refuses(repo):
         git(r, "reset", "-q", "--hard", tested)
 
 
+def test_move_out_of_code_and_prefix_lookalikes_refuse(repo):
+    """A code file moved into docs/ (rename detection would list only docs/...) and top-level paths that merely start
+    with LICENSE or .gitignore are code changes, not documentation."""
+    r, tested = repo
+    git(r, "mv", "core/a.py", "docs/a.py")
+    commit(r, sign(r, tested))
+    probs = run(r, git(r, "rev-parse", "HEAD"), tested)
+    assert any("code changed" in p and "core/a.py" in p for p in probs), probs
+    git(r, "reset", "-q", "--hard", tested)
+    for rel in ("LICENSE_x/evil.py", ".gitignored.py"):
+        commit(r, {rel: "x\n", **sign(r, tested)})
+        probs = run(r, git(r, "rev-parse", "HEAD"), tested)
+        assert any("code changed" in p and rel in p for p in probs), (rel, probs)
+        git(r, "reset", "-q", "--hard", tested)
+    commit(r, {"LICENSE": "mit\n", ".gitignore": "x\n", **sign(r, tested)})
+    assert run(r, git(r, "rev-parse", "HEAD"), tested) == []
+
+
 def test_non_ancestor_refuses(repo):
     r, tested = repo
     git(r, "checkout", "-q", "-b", "side")

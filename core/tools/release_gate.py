@@ -197,7 +197,10 @@ def git_is_ancestor(root: Path):
 
 def git_changed(root: Path):
     def f(a: str, b: str) -> list[str]:
-        r = subprocess.run(["git", "-C", str(root), "diff", "--name-only", f"{a}..{b}"], capture_output=True, text=True, check=True)
+        # --no-renames: a move out of code (core/x.py -> docs/x.py) must list the old path too, not only docs/x.py
+        r = subprocess.run(["git", "-C", str(root), "-c", "core.quotepath=off", "diff", "--no-renames", "--no-ext-diff",
+                            "--name-only", f"{a}..{b}"], capture_output=True, text=True, encoding="utf-8",
+                           errors="replace", check=True)
         return [x for x in r.stdout.splitlines() if x]
     return f
 
