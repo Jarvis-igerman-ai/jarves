@@ -75,7 +75,8 @@ KINDS = ("tool", "feature", "camera", "message", "shell", "install", "schedule",
 HASHED_DETAILS = ("number",)       # SW-V4 H: a phone number is never written to the audit file, only a keyed hash
 PC_ONLY_MSG = "this approval can only be answered on the computer"
 CHANNELS = ("popup", "tray", "face", "dashboard", "voice", "typed", "cli", "terminal", "phone")
-LOCAL_CHANNELS = ("popup", "tray", "terminal")        # V7 G3b: a `local_only` approval is answered ONLY here (not CLI, phone, dashboard, voice)
+LOCAL_CHANNELS = ("popup",)    # V7 G3b: a `local_only` approval is approved ONLY in the popup window. Not "terminal": that is
+#                                 chat.approval_answer on the link, which any process holding the link token can send.
 LOCAL_ONLY_MSG = "this approval can only be answered in the JARVES popup on the computer"
 FILE_CHANNELS = ("dashboard", "cli", "phone")          # what an answers/<id>.json file may claim to be
 
@@ -730,11 +731,11 @@ def submit_answer(home: Path, aid: str, approved: bool, *, channel: str, typed: 
     with the profile key (the Core ignores unsigned or wrongly signed files)."""
     if _in_tool():
         return False, "approvals cannot be answered from a tool"
+    if channel not in FILE_CHANNELS:          # also in-process: a caller (the orchestrator bridge) cannot claim "popup"
+        return False, f"channel {channel} cannot answer through a file"
     svc = _current
     if svc is not None and svc.home.resolve() == Path(home).resolve():
         return svc.answer(aid, approved, channel=channel, typed=typed)
-    if channel not in FILE_CHANNELS:
-        return False, f"channel {channel} cannot answer through a file"
     if not re.fullmatch(r"[0-9a-f]{16}", str(aid)):
         return False, "bad id"
     rows = {r["id"]: r for r in read_pending_file(home, reveal=False)}

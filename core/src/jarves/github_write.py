@@ -56,8 +56,9 @@ VALIDATORS: dict[str, Callable[["WriteAction"], str]] = {}      # kind -> "" or 
 MAX_APPROVAL_CHARS = 1700                  # ApprovalService.ask cuts a prompt at 2000: never cut what the owner must see
 _NOT_APPROVED = frozenset({"GITHUB_WRITE_FORBIDDEN", "GITHUB_WRITE_OFF", "GITHUB_WRITE_UNTRUSTED", "GITHUB_WRITE_REPO",
                            "GITHUB_WRITE_SCOPE", "GITHUB_WRITE_RATE_LIMIT", "GITHUB_WRITE_BAD_ARGUMENT", "GITHUB_WRITE_DUPLICATE",
-                           "GITHUB_WRITE_DENIED", "GITHUB_WRITE_TIMEOUT"})   # every other audited result = the owner approved it
+                           "GITHUB_WRITE_DENIED", "GITHUB_WRITE_TIMEOUT", "GITHUB_WRITE_UNREADABLE"})   # every other audited result = the owner approved it
 DUP_WINDOW_S = 600.0                       # the same approved action is not executed twice within this time
+_TOGGLES = frozenset({"issue.edit", "labels.add", "labels.remove"})   # a state: only the latest write on the target counts
 _XREF = re.compile(r"(?<![\w/.-])[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+#\d+")
 _LINK = re.compile(r"https?://|www\.|\b[a-z0-9-]+\.(?:com|org|net|io|dev)\b", re.I)
 
@@ -73,12 +74,11 @@ class WriteAction(BaseModel):
     preview: str = Field(max_length=600)
 
     def normalised(self) -> dict:
-        """The payload as GitHub sees it: text trimmed, label / assignee sets sorted and lower-cased (order has no meaning)."""
+        """The payload with label / assignee sets sorted and lower-cased (order and case have no meaning on GitHub). Text
+        is NOT trimmed: the hash binds batch grants, so it must cover exactly the text that is sent."""
         out: dict = {}
         for k, v in self.payload.items():
-            if isinstance(v, str):
-                v = v.strip()
-            elif isinstance(v, list) and k in ("labels", "assignees"):
+            if isinstance(v, list) and k in ("labels", "assignees"):
                 v = sorted(str(x).strip().lower() for x in v)
             out[k] = v
         return out
@@ -216,9 +216,18 @@ class GitHubWriter:
     def _rows(self) -> list[dict]:
         try:
             lines = (self.home / "github" / "write_audit.jsonl").read_text(encoding="utf-8").splitlines()[-500:]
-            return [r for r in (json.loads(x) for x in lines if x.strip()) if isinstance(r, dict)]
         except (OSError, ValueError):
             return []
+        out = []
+        for x in lines:                          # one torn line must not switch off the rate limit and duplicate guard
+            try:
+                r = json.loads(x)
+                if isinstance(r, dict):
+                    r["ts"] = float(r.get("ts") or 0)
+                    out.append(r)
+            except (ValueError, TypeError):
+                continue
+        return out
 
     def _used(self) -> int:
         """Writes in the window: audited successes (and lost answers) plus approved-but-unspent batch grants."""
@@ -277,6 +286,9 @@ class GitHubWriter:
             return r
         if not granted:
             extra = await self._extra(a)
+            if extra is None:                          # never a partial preview of what an edit replaces
+                return self._refuse(a, "GITHUB_WRITE_UNREADABLE", "could not read the issue on GitHub to show what the "
+                                    "edit replaces; try again", origin)
             if len(a.approval_text(extra)) > MAX_APPROVAL_CHARS:
                 return self._refuse(a, "GITHUB_WRITE_BAD_ARGUMENT", "action too large to show in full to the owner", origin)
             why = await self._ask([a], origin, [extra])
@@ -298,23 +310,26 @@ class GitHubWriter:
         self._audit(a, "OK", origin)
         return WriteResult(ok=True, code="OK", data=data)
 
-    async def _extra(self, a: WriteAction) -> str:
-        """Lines the owner must see that need a READ of the current state (what an edit REPLACES). Never raises."""
+    async def _extra(self, a: WriteAction) -> str | None:
+        """Lines the owner must see that need a READ of the current state (what an edit REPLACES, a PR). None = the read
+        failed (the caller refuses). Never raises."""
         fn = EXTRAS.get(a.kind.strip().lower())
         if fn is None:
             return ""
         try:
             return await asyncio.to_thread(fn, a, self.client())
-        except Exception:                          # noqa: BLE001  (the approval still shows the whole payload)
-            return "WARNING: could not read the current state on GitHub; an edit REPLACES whole label / assignee sets"
+        except Exception:                          # noqa: BLE001
+            return None
 
     def _duplicate(self, a: WriteAction) -> str:
         """Idempotency: the audit holds the action hash; a retry of an action that already succeeded (or whose answer was
         lost) within DUP_WINDOW_S is refused, so a retried approved action never posts twice."""
         now, h, tk = self.clock(), a.hash(), a.target_key()
         same = [r for r in self._rows() if r.get("tkey") == tk and r.get("result") in ("OK", "GITHUB_WRITE_UNKNOWN")]
-        for r in same[-1:]:                      # only the LATEST write on this thing: open -> closed -> open is allowed
-            if r.get("hash") == h[:16] and now - float(r.get("ts") or 0) < DUP_WINDOW_S:
+        # an edit / label change is a state: only the LATEST write on it counts (open -> closed -> open is allowed). A
+        # create or comment adds something each time: any copy in the window counts (a lost answer is never re-posted)
+        for r in (same[-1:] if a.kind.strip().lower() in _TOGGLES else same):
+            if r.get("hash") == h[:16] and now - r["ts"] < DUP_WINDOW_S:
                 return ("this exact action was already done (or its answer was lost); check on GitHub, "
                         f"or change the text, or wait {int(DUP_WINDOW_S // 60)} minutes")
         return ""
@@ -340,8 +355,10 @@ class GitHubWriter:
 # ------------------------------------------------------------------------------------------ feature + CLI
 def terminal_confirm(texts: list[str], hashes: list[str], *, ask=input, tty=None) -> bool:
     """The CLI's owner confirmation, in the terminal that runs the command: show the exact action and require the typed
-    first 6 characters of its hash. Not a terminal (a pipe, a script) = refused. `jarvis approvals approve` cannot answer
-    a GitHub approval at all (local_only), so a program with a shell cannot approve its own write."""
+    first 6 characters of its hash. Not a terminal (a pipe, a plain script) = refused. HONEST LIMIT: this stops a typo, a
+    pipe and an agent shell without a terminal; it does NOT stop a program that runs this command in a pseudo-terminal
+    it controls (the hash is shown in the output and can be computed from the action). Approvals of the RUNNING JARVES
+    (model writes) are popup-only (local_only)."""
     interactive = (sys.stdin.isatty() and sys.stdout.isatty()) if tty is None else tty
     if not interactive or len(hashes) != 1:
         print("GITHUB_WRITE_DENIED: a GitHub write needs your typed confirmation in an interactive terminal")

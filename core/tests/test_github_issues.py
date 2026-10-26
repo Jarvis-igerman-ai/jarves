@@ -401,8 +401,9 @@ def test_cli_write_asks_in_its_own_terminal_not_the_approval_service(tmp_path):
 def test_hash_ignores_preview_and_order_but_not_state_or_text():
     def mkact(preview="p", **pl):
         return gw.WriteAction(kind="issue.edit", repo=REPO, target="7", payload=pl, preview=preview)
-    a = mkact("one", labels=["Bug", "p1"], title=" T ")
+    a = mkact("one", labels=["Bug", "p1"], title="T")
     assert a.hash() == mkact("completely different", labels=["p1", "bug"], title="T").hash()
+    assert a.hash() != mkact("one", labels=["Bug", "p1"], title=" T ").hash()     # the hash covers the exact text sent
     assert a.hash() != mkact(labels=["bug"], title="T").hash() and mkact(state="open").hash() != mkact(state="closed").hash()
 
 
@@ -435,8 +436,8 @@ def test_edit_approval_says_what_it_replaces_and_that_a_pr_closes(tmp_path):
     assert ap.asked[0][1]["local_only"] is True
     assert go(w, "issue.edit", "2", state="closed").ok                  # 2 is a pull request in FakeGitHub
     assert "this is a pull request: closing it closes the PR" in ap.asked[1][0]
-    fake.fail = (500, {})                                               # the read fails: the owner is told, not blocked blind
-    assert "could not read the current state" in run(w._extra(gi.action("issue.edit", REPO, "7", labels=["bug"])))
+    fake.fail = (500, {})                                               # the read fails: no partial preview (refused)
+    assert run(w._extra(gi.action("issue.edit", REPO, "7", labels=["bug"]))) is None
 
 
 def test_label_is_re_verified_with_a_fresh_list_and_sent_with_the_repos_spelling(tmp_path):
@@ -458,3 +459,76 @@ def test_crossref_and_assignment_warnings(tmp_path):
     assert go(w, "issue.create", title="t", assignees=["octocat", "hubot"]).ok
     assert "assigns octocat, hubot: GitHub notifies each assignee" in ap.asked[1][0]
     assert go(w, "issue.comment", "7", body="plain #3 only").ok and "mention" not in ap.asked[2][0] and "owner/repo#N" not in ap.asked[2][0]
+
+
+def test_a_link_cli_client_cannot_approve_a_github_write_as_terminal(tmp_path):
+    """Security review #493: any process holding the link token can connect with role "cli" and send
+    chat.approval_answer (answered as channel "terminal"), with the id read from approvals/pending.json. That is
+    exactly a program with a shell, so it must not approve a local_only (GitHub) approval; denying still works."""
+    from types import SimpleNamespace
+    from jarves import chat_service
+
+    async def go_():
+        w, svc, pop, fake = _real_writer(tmp_path)
+        chat = chat_service.ChatService(SimpleNamespace(approvals=svc, link=None))
+        task, a = await _shown(w, pop)
+        rows = json.loads((tmp_path / "approvals" / "pending.json").read_text(encoding="utf-8"))["pending"]
+        assert [r["id"] for r in rows] == [a.id] and rows[0]["local_only"] is True    # what another process can read
+        await chat.handle("chat.approval_answer", {"id": a.id, "approved": True}, SimpleNamespace(id="x"))
+        assert svc.answer(a.id, True, channel="terminal")[0] is False
+        assert not task.done() and not writes(fake)
+        assert svc.answer(a.id, False, channel="terminal")[0]                      # a denial from the terminal is fine
+        return await task
+    assert run(go_()).code == "GITHUB_WRITE_DENIED"
+
+
+def test_submit_answer_never_carries_a_popup_or_terminal_channel(tmp_path):
+    """Security review #493: submit_answer (CLI, dashboard, phone, the orchestrator bridge) passed any channel name to
+    the in-process service, so a caller could claim channel "popup". Only file channels pass, in-process too."""
+    async def go_():
+        w, svc, pop, fake = _real_writer(tmp_path)
+        ap_mod._current = svc
+        try:
+            task, a = await _shown(w, pop)
+            for ch in ("popup", "tray", "terminal", "face", "voice", "typed"):
+                ok, why = ap_mod.submit_answer(tmp_path, a.id, True, channel=ch)
+                assert not ok and "cannot answer" in why
+            assert not task.done() and not writes(fake)
+            assert svc.answer(a.id, True, channel="popup") == (True, "")
+            return await task
+        finally:
+            ap_mod._current = None
+    assert run(go_()).ok
+
+
+def test_one_broken_audit_line_does_not_switch_off_the_rate_limit_or_duplicate_guard(tmp_path):
+    t, fake = [1000.0], gc.FakeGitHub()
+    w = mk(tmp_path, fake=fake, clock=lambda: t[0], limit=(2, 60.0))[0]
+    assert go(w, "issue.comment", "7", body="a").ok
+    with open(tmp_path / "github" / "write_audit.jsonl", "a", encoding="utf-8") as f:
+        f.write('{"ts": 1000.0, "result": "OK", "hash"\n')                 # a torn line (crash / two writers)
+    assert go(w, "issue.comment", "7", body="a").code == "GITHUB_WRITE_DUPLICATE"
+    assert go(w, "issue.comment", "7", body="b").ok
+    assert go(w, "issue.comment", "7", body="c").code == "GITHUB_WRITE_RATE_LIMIT"
+
+
+def test_a_lost_create_or_comment_is_not_repeated_after_another_one(tmp_path):
+    """The toggle rule (only the latest write counts) is for edits; a create or comment whose answer was lost must
+    not be posted again just because another create / comment happened in between."""
+    w, _, fake = mk(tmp_path)
+    assert go(w, "issue.comment", "7", body="first").ok
+    assert go(w, "issue.comment", "7", body="second").ok
+    assert go(w, "issue.comment", "7", body="first").code == "GITHUB_WRITE_DUPLICATE"
+    assert go(w, "issue.create", title="A").ok and go(w, "issue.create", title="B").ok
+    assert go(w, "issue.create", title="A").code == "GITHUB_WRITE_DUPLICATE"
+
+
+def test_edit_is_refused_when_the_current_state_cannot_be_read(tmp_path, monkeypatch):
+    """The REPLACES / pull-request lines need a READ; when it fails the owner is not shown a partial preview."""
+    w, ap, fake = mk(tmp_path)
+
+    def boom(*_a, **_k):
+        raise gc.GitHubError("GITHUB_PROVIDER_ERROR", "network")
+    monkeypatch.setattr(gc.GitHubClient, "issue", boom)
+    r = go(w, "issue.edit", "2", state="closed")
+    assert not r.ok and r.code == "GITHUB_WRITE_UNREADABLE" and not ap.asked and not writes(fake)
