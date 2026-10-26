@@ -1,0 +1,52 @@
+order = 67
+category = "system"
+features = ["phone_location"]
+suggest = false
+aliases = ["מיקום הטלפון בנהיגה", "איפה אני", "זמן הגעה מהמיקום שלי", "phone location", "where am I", "eta from here", "share location while driving"]
+links = ["phone_drive", "drive_mode", "journey", "drive_actions"]
+title_he = "מיקום הטלפון בנהיגה"
+title_en = "Phone location while driving"
+what_he = "אם תדליקו, לשונית הנהיגה בטלפון יכולה לשתף את מיקום הטלפון, רק כשמצב נהיגה דלוק ורק לנסיעה הנוכחית: \"איפה אני?\" ותכנון נסיעה \"מכאן\" עם זמן הגעה. כבוי כברירת מחדל. הטלפון עצמו (אנדרואיד) שואל אתכם אם לאשר, ורק לחיצה שלכם על \"שתפו את המיקום שלי\" מתחילה."
+what_en = "When you turn it on, the phone's Drive tab can share the phone's position, only while drive mode is on and only for the current trip: \"Where am I?\" and a trip planned \"from here\" with an arrival time. Off by default. The phone itself (Android) asks you to allow it, and nothing starts until you tap \"Share my location\"."
+say = [["איפה אני?", "Where am I?"]]
+expect_he = "אחרי שיתוף, \"איפה אני?\" מחזיר שם מקום (רחוב או אזור), ו\"תכננו מכאן\" מחזיר זמן נסיעה מהמיקום שלכם ליעד שהקלדתם. בלי הרשאה, בלי מצב נהיגה או בלי מיקום עדכני לא מתקבל מיקום והודעה פשוטה מסבירה למה."
+expect_en = "After sharing, \"Where am I?\" returns a place name (street or area), and \"Plan from here\" returns the trip time from your position to the destination you typed. Without permission, without drive mode or without a fresh position there is no location and a plain message says why."
+test_he = "הריצו  jarvis features on phone_location  ו-jarvis drive on. בטלפון, בלשונית נהיגה לחצו \"שתפו את המיקום שלי\", אשרו בחלון של אנדרואיד ולחצו \"איפה אני?\". כבו את מצב הנהיגה ובדקו שהשיתוף נעצר."
+test_en = "Run  jarvis features on phone_location  and  jarvis drive on. On the phone, in the Drive tab tap \"Share my location\", allow it in the Android prompt and tap \"Where am I?\". Turn drive mode off and check sharing stops."
+cost_he = "חינם. נעשית פנייה אחת לשירות OpenStreetMap החינמי (מסלול או שם מקום) עם מיקום מעוגל בלבד, ורק כשאתם לוחצים."
+cost_en = "Free. One call to the free OpenStreetMap services (route or place name) with the rounded position only, and only when you tap."
+privacy_he = "המיקום מעוגל לכ-100 מטר, נשמר בזיכרון בלבד ואף פעם לא בדיסק, ביומן, בזיכרון של JARVES או בהיסטוריה; היומן הביטחוני מכיל רק את סוג הפעולה. הוא נמחק כשמצב הנהיגה נגמר, כשמפסיקים לשתף או אחרי שתי דקות בלי עדכון. הוא לא נשלח לשום ספק חוץ מהקריאה החינמית למסלול או לשם המקום, ושום כלי, מודל או הודעת טקסט לא יכולים לקרוא אותו. הוא לא משנה את הכללים של מצב הנהיגה או האישורים."
+privacy_en = "The position is rounded to about 100 m, kept in memory only and never on disk, in logs, in JARVES memory or in history; the audit holds only the kind of action. It is deleted when drive mode ends, when you stop sharing or after two minutes without an update. It goes to no provider except the free route or place-name call, and no tool, model or text message can read it. It changes no drive-mode or approval rule."
+
+[parity.features]
+phone_location = "phone"
+
+[[steps]]
+he = "ודאו שמסך הנהיגה בטלפון עובד (ראו \"מסך נהיגה בטלפון\") ושלטלפון יש הרשאת drive."
+en = "Make sure the phone Drive screen works (see \"Drive screen on the phone\") and the phone has the drive permission."
+
+[[steps]]
+he = "במחשב: jarvis features on phone_location, ו-jarvis drive on. לכיבוי: jarvis features off phone_location."
+en = "On the computer: jarvis features on phone_location, and jarvis drive on. To turn it off: jarvis features off phone_location."
+
+[[steps]]
+he = "בטלפון, בלשונית \"נהיגה\" תחת \"המיקום שלי\": לחצו \"שתפו את המיקום שלי\" ואשרו בחלון של אנדרואיד. לעצירה: \"הפסיקו לשתף\"."
+en = "On the phone, in the \"Drive\" tab under \"My location\": tap \"Share my location\" and allow it in the Android prompt. To stop: \"Stop sharing\"."
+
+[[problems]]
+he = "המיקום כבוי או לא זמין בלשונית"
+en = "The location card says it is off or unavailable"
+fix_he = "הריצו jarvis features on phone_location ו-jarvis drive on במחשב. המיקום עובד רק כשמצב נהיגה דלוק."
+fix_en = "Run jarvis features on phone_location and jarvis drive on on the computer. Location works only while drive mode is on."
+
+[[problems]]
+he = "אנדרואיד לא שאל או שהמיקום נדחה"
+en = "Android did not ask, or location was denied"
+fix_he = "בכרום: סמל האתר ליד הכתובת, הרשאות, מיקום, אפשר. ודאו שהמיקום של הטלפון דלוק. אחרת שום דבר לא משותף, בכוונה."
+fix_en = "In Chrome: the site icon by the address, Permissions, Location, Allow. Make sure the phone's location is on. Otherwise nothing is shared, on purpose."
+
+[[problems]]
+he = "\"אין מיקום עדכני\""
+en = "\"No current position\""
+fix_he = "השיתוף נעצר אחרי שתי דקות בלי עדכון או כשמצב הנהיגה כבה. לחצו שוב \"שתפו את המיקום שלי\"."
+fix_en = "Sharing stops after two minutes without an update or when drive mode goes off. Tap \"Share my location\" again."

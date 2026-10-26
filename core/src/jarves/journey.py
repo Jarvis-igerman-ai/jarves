@@ -134,8 +134,10 @@ def parse_hhmm(text: str, today: datetime) -> datetime:
 
 # ---------------------------------------------------------------------- links
 def maps_link(origin: str, destination: str) -> str:
-    """Google Maps directions URL (https://developers.google.com/maps/documentation/urls/get-started, api=1)."""
-    q = urlencode({"api": 1, "origin": origin, "destination": destination, "travelmode": "driving"}, quote_via=quote)
+    """Google Maps directions URL (https://developers.google.com/maps/documentation/urls/get-started, api=1).
+    An empty origin is left out: the Maps app then starts from where the phone is."""
+    args = {"api": 1, "origin": origin, "destination": destination, "travelmode": "driving"}
+    q = urlencode({k: v for k, v in args.items() if v != ""}, quote_via=quote)
     return "https://www.google.com/maps/dir/?" + q
 
 
@@ -182,6 +184,9 @@ class OsrmProvider:
     always False. Base URLs can be changed with JARVES_GEOCODE_API_BASE / JARVES_ROUTE_API_BASE (tests and self-hosting)."""
     name = "OpenStreetMap (Nominatim + OSRM)"
 
+    def __init__(self, origin_fix: tuple[float, float] | None = None) -> None:
+        self.origin_fix = origin_fix          # (lat, lon) ROUNDED by phone_location (#339): only the start; never stored here
+
     def _geocode(self, place: str, client: httpx.Client) -> tuple[float, float]:
         key = place.casefold()
         cached = GEOCODER.get(key)
@@ -199,7 +204,8 @@ class OsrmProvider:
         return got
 
     def estimate(self, origin: str, destination: str, client: httpx.Client, now: datetime) -> RouteEstimate:
-        a, b = self._geocode(origin, client), self._geocode(destination, client)
+        a = (self.origin_fix[1], self.origin_fix[0]) if self.origin_fix else self._geocode(origin, client)
+        b = self._geocode(destination, client)
         base = os.environ.get(OSRM_ENV, "https://router.project-osrm.org")
         r = client.get(f"{base}/route/v1/driving/{a[0]:.6f},{a[1]:.6f};{b[0]:.6f},{b[1]:.6f}", params={"overview": "false"},
                        headers={"User-Agent": USER_AGENT})
@@ -237,15 +243,16 @@ class TripPlan:
 
 
 def plan(origin: str, destination: str, *, providers=None, client: httpx.Client | None = None, now: datetime | None = None,
-         depart_at: datetime | None = None) -> TripPlan:
-    """Plan one trip from two typed places. Provider failures never raise: the plan falls back to links only."""
-    o, d = clean_place(origin), clean_place(destination)
+         depart_at: datetime | None = None, origin_fix: tuple[float, float] | None = None) -> TripPlan:
+    """Plan one trip from two typed places. Provider failures never raise: the plan falls back to links only.
+    `origin_fix` (rounded phone position, #339) replaces the typed origin; the Maps link then has no origin (the app uses the phone's)."""
+    o, d = ("here" if origin_fix else clean_place(origin)), clean_place(destination)
     now = now or datetime.now(timezone.utc)
     own = client is None
     client = client or httpx.Client(timeout=HTTP_TIMEOUT_S)
     est, notes = None, []
     try:
-        for p in (providers if providers is not None else [OsrmProvider()]):
+        for p in (providers if providers is not None else [OsrmProvider(origin_fix)]):
             try:
                 est = p.estimate(o, d, client, now)
                 break
@@ -259,7 +266,7 @@ def plan(origin: str, destination: str, *, providers=None, client: httpx.Client 
         if own:
             client.close()
     arrive = (depart_at + timedelta(seconds=est.duration_s)) if est and depart_at else None
-    return TripPlan(o, d, est, maps_link(o, d), waze_link(d), depart_at if est else None, arrive, notes)
+    return TripPlan(o, d, est, maps_link("" if origin_fix else o, d), waze_link(d), depart_at if est else None, arrive, notes)
 
 
 # ---------------------------------------------------------------------- CLI: jarvis journey plan --from A --to B [--depart HH:MM] [--links-only]
