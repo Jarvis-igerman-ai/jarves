@@ -17,18 +17,23 @@ privacy_he = "הגיליון נשמר בקובץ בפרויקט ולא מכיל 
 privacy_en = "The sheet is a file in the project and holds no personal data."
 
 [[steps]]
-he = "צרו גיליון לגרסה: python tools/manual_test_sheet.py --version X.Y.Z (בתיקיית core)."
-en = "Create the sheet for the version: python tools/manual_test_sheet.py --version X.Y.Z (in the core folder)."
-action = "command:python tools/manual_test_sheet.py --version X.Y.Z"
+he = "בדקו מה מוכן: jarvis release status. הפקודה מריצה כל בדיקה אוטומטית (main ירוק, לילה ירוק, אפס P0-P2 פתוחים) ואומרת מה נשאר לכם. הוסיפו --report לכתיבת דוח ראיות."
+en = "See what is ready: jarvis release status. It runs every automatic check (main green, nightly green, zero open P0-P2) and says what remains for you. Add --report to write an evidence report."
+action = "command:jarvis release status"
 
 [[steps]]
-he = "עברו על השורות מול הבטא המותקנת ורשמו כל תוצאה: בעמוד אישור גרסה, או jarvis release signoff --version X.Y.Z --row ID --result pass."
-en = "Go through the rows with the installed beta and record each result: on the Release sign-off page, or jarvis release signoff --version X.Y.Z --row ID --result pass."
+he = "צרו את הגיליון הקצר: jarvis release sheet --version X.Y.Z. חמש שורות בדיקה על המחשב שלכם; כל השאר נרשם כמאושר-אוטומטית עם הראיות."
+en = "Create the short sheet: jarvis release sheet --version X.Y.Z. Five smoke rows on your PC; everything else is recorded as accepted by automation with its evidence."
+action = "command:jarvis release sheet"
+
+[[steps]]
+he = "עברו על חמש השורות מול הבטא המותקנת ורשמו כל תוצאה: בעמוד אישור גרסה, או jarvis release signoff --version X.Y.Z --row ID --result pass."
+en = "Go through the five rows with the installed beta and record each result: on the Release sign-off page, or jarvis release signoff --version X.Y.Z --row ID --result pass."
 action = "open:#/signoff"
 
 [[steps]]
-he = "כשכל שורה pass (או accepted-blocked עם הערה): jarvis release signoff --version X.Y.Z --finish. עכשיו אפשר לתייג vX.Y.Z."
-en = "When every row is pass (or accepted-blocked with a note): jarvis release signoff --version X.Y.Z --finish. Now you can tag vX.Y.Z."
+he = "כשכל שורה pass: jarvis release signoff --version X.Y.Z --finish. עכשיו אפשר לתייג vX.Y.Z."
+en = "When every row is pass: jarvis release signoff --version X.Y.Z --finish. Now you can tag vX.Y.Z."
 action = "command:jarvis release signoff --finish"
 
 [[problems]]

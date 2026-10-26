@@ -847,7 +847,7 @@ def serve(h, mob: MobileAccess, ip: str) -> None:
         c.beat(dev["id"], "phone")
         goals = mob.bridge.goals() if mob.bridge else None
         want_goals = "tasks" in dev["scopes"] and goals is not None
-        return h._json(200, {"head": c.head(), "turns": c.turns(since, 50) if "chat" in dev["scopes"] else [],
+        return h._json(200, {"head": c.head(), "turns": c.turns(since, 50) if ("chat" in dev["scopes"] and "chat" in dev["pages"]) else [],
                              "notices": c.fetch_notices(dev["id"]), "desktop_here": bool(mob.bridge and mob.bridge.desktop_present()),
                              "goals": [_goal_brief(g) for g in goals.list("active")] if want_goals else [],
                              "approvals_waiting": len(approvals_view(mob)["pending"]) if "approvals" in dev["scopes"] else 0,
@@ -978,7 +978,7 @@ def serve(h, mob: MobileAccess, ip: str) -> None:
             return
         if not mob.rate_ok("drive-action:" + dev["id"], drive_actions.RATE_PER_MIN):
             mob.audit("rate_limited", device=dev["id"], path=path, scope="drive-action")
-            return h._json_extra(429, {"error": "too many requests: wait a minute"}, {"Retry-After": "60"})
+            return h._json_extra(429, dict(drive_actions.RATE_LIMITED), {"Retry-After": "60"})
         d = _json_body(h)
         if d is None:
             return
