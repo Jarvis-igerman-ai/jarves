@@ -4,9 +4,8 @@
   1. compares the source package (core/src/jarves) with the installed one, file by file (sha256);
   2. classifies the change (issue #459, owner rule "a hotfix is any hotfix"). Applied: Python source and plain data
      inside the jarves package. SKIPPED and listed as "only affects the next full installer" (output, manifest,
-     `hotfix status`): build-time files that are not part of the installed tree (packaging/, CI, docs, tools) and
-     package files this tool cannot place (binaries, installer code). REFUSED with "needs slice 2" (these categories
-     will become verified slices: bridge exe by pin sha256, dependencies from the hashed lock): a dependency file
+     `hotfix status`): build-time files that are not part of the installed tree (packaging/, CI, godot/). REFUSED with "needs slice 2" (these categories
+     will become verified slices: bridge exe by pin sha256, dependencies from the hashed lock): a binary, unknown-type or installer-code file inside the package, a dependency file
      change (pyproject, lock, requirements), a bridge pin or bridge change, an updated Python file importing a
      third-party module that is not installed. Always refused (fail closed): unsafe path, symlink, case clash, a base
      commit that is not an ancestor of the target. When the source is a git checkout the whole repository change
@@ -292,10 +291,19 @@ def classify(plan: Plan, repo_changes: list[str] | None) -> tuple[Plan, list[str
             deps.append(r)
         elif _is_bridge_change(r):
             bridge.append(r)
-        elif r.startswith(FULL_INSTALLER_PREFIXES):
+        elif r.lower().startswith(FULL_INSTALLER_PREFIXES):      # case-insensitive: Windows paths
             pending.append(r)
-    if deps or bridge:
+    unplaceable: list[str] = []
+    for rel in plan.files:
+        suffix = Path(rel).suffix.lower()
+        if (suffix in BINARY_SUFFIXES or suffix not in DATA_SUFFIXES
+                or (suffix == ".py" and any(Path(rel).stem.startswith(n) for n in INSTALLER_CODE_NAMES))):
+            unplaceable.append(PACKAGE_PREFIX + rel)           # inside the installed package: runtime, never skipped
+    if deps or bridge or unplaceable:
         parts = []
+        if unplaceable:
+            parts.append("package files that cannot be hot-patched (binary, unknown type or installer code: "
+                         + ", ".join(unplaceable[:4]) + ")")
         if deps:
             parts.append("dependencies changed (" + ", ".join(deps[:4]) + ")")
         if bridge:
@@ -303,12 +311,7 @@ def classify(plan: Plan, repo_changes: list[str] | None) -> tuple[Plan, list[str
         raise Refused("HOTFIX_NEEDS_SLICE2", "; ".join(parts) + ": " + SLICE2, "use the full installer for this change")
     ok = Plan(removed_in_source=plan.removed_in_source)
     for rel in plan.files:
-        suffix = Path(rel).suffix.lower()
-        blocked = (suffix in BINARY_SUFFIXES or suffix not in DATA_SUFFIXES
-                   or (suffix == ".py" and any(Path(rel).stem.startswith(n) for n in INSTALLER_CODE_NAMES)))
-        if blocked:
-            pending.append(PACKAGE_PREFIX + rel)
-        elif rel in plan.replace:
+        if rel in plan.replace:
             ok.replace.append(rel)
         else:
             ok.add.append(rel)
@@ -348,6 +351,16 @@ def scan_new_imports(pkg: Path, rels: list[str], installed_pkg: Path, site_dirs:
         except (SyntaxError, ValueError, OSError):
             missing.setdefault("<unparseable>", rel)
             continue
+        known: set[str] = set()                          # modules the installed copy already imports: not new
+        try:
+            old = ast.parse((installed_pkg / rel).read_text(encoding="utf-8"))
+            for n0 in ast.walk(old):
+                if isinstance(n0, ast.Import):
+                    known.update(a.name.split(".")[0] for a in n0.names)
+                elif isinstance(n0, ast.ImportFrom) and n0.level == 0 and n0.module:
+                    known.add(n0.module.split(".")[0])
+        except (SyntaxError, ValueError, OSError):
+            pass
         for node in ast.walk(tree):
             names: list[str] = []
             if isinstance(node, ast.Import):
@@ -356,7 +369,7 @@ def scan_new_imports(pkg: Path, rels: list[str], installed_pkg: Path, site_dirs:
                 names = [node.module]
             for n in names:
                 top = n.split(".")[0]
-                if top in std or top == "jarves" or top in missing:
+                if top in std or top == "jarves" or top in missing or top in known:
                     continue
                 if not _module_present(top, dirs):
                     missing[top] = rel
