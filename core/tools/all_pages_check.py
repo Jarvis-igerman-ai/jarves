@@ -124,6 +124,7 @@ def start_dashboard(tmp: Path):
     os.environ["JARVES_HOME"] = str(home)
     os.environ.pop("OPENAI_API_KEY", None)
     os.environ["JARVES_TEST_OFFLINE"] = "1"      # updates/GitHub/OpenAI/Google stubbed: pages render deterministic content
+    os.environ["JARVES_BETA_FEATURES"] = "1"     # the page audit exercises every feature as an opted-in install does
     import netguard
     netguard.install()
     import v3_dashboard_screens

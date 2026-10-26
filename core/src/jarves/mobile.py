@@ -1195,9 +1195,11 @@ def dashboard_routes(register) -> None:
         nxt = "Close this dashboard, then run: jarvis features on mobile_access  and  jarvis dashboard --mobile --tls-selfsigned"
         if dash is None:
             return 409, {"error": "this dashboard cannot turn phone access on by itself", "next": nxt, "code": "NEEDS_RESTART"}
-        from .features import _ctx_features
+        from .features import BETA_MSG_HE, BetaLocked, _ctx_features
         try:
             return 200, dash.enable_phone(_ctx_features(ctx))
+        except BetaLocked as e:
+            return 403, {"error": str(e), "error_he": BETA_MSG_HE, "code": e.code}
         except (OSError, ImportError) as e:
             return 409, {"error": str(e) or "phone access could not start", "next": nxt, "code": "NEEDS_RESTART"}
 

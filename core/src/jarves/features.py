@@ -47,6 +47,11 @@ from urllib.parse import urlsplit
 from . import capabilities, locales, logs
 
 Risk = Literal["low", "medium", "high"]
+Stage = Literal["stable", "beta"]
+STAGES = ("stable", "beta")
+BETA_MSG = "beta feature: turn on beta features first"
+BETA_MSG_HE = "יכולת בטא: קודם מפעילים את יכולות הבטא"
+BETA_ENV = "JARVES_BETA_FEATURES"        # "1" = the global opt-in is on (CI / tests / a managed install); the file wins otherwise
 Applies = Literal["live", "next_session", "restart"]
 RISKS = ("low", "medium", "high")
 PROBE_TTL_S = 15.0
@@ -102,6 +107,32 @@ class Feature:
     # per-platform support (spec SW-V2 section 5): {"windows": {"status", "evidence"|"blocker"}, "linux_arm64_pi": ...}
     # status: verified_on_device | implemented_unverified | planned | blocked | not_applicable
     targets: dict = field(default_factory=dict)
+    # release stage, ONE field for the whole registry: "stable" (verified on the owner's device, capabilities.py) or
+    # "beta" (no recorded verification: ships OFF until the global opt-in `beta_features` is on). None = derived from
+    # the capabilities table (windows verified_on_device -> stable, anything else -> beta); see stage_of().
+    stage: str | None = None
+
+
+class BetaLocked(PermissionError):
+    """A beta feature was asked to switch ON while the global opt-in is off (the one message for every path)."""
+    code = "BETA_LOCKED"
+
+    def __init__(self, fid: str = "") -> None:
+        super().__init__(BETA_MSG)
+        self.fid = fid
+
+
+def stage_of(fid: str) -> str:
+    """The stage of a registered feature: its explicit `stage`, else derived from the capabilities table. A feature
+    with no recorded verification is ALWAYS beta (the safe default for anything new)."""
+    f = CATALOG[fid]
+    if f.stage in STAGES:
+        return f.stage
+    try:
+        win = capabilities.get(fid).targets["windows"]
+        return "stable" if win.status == "verified_on_device" else "beta"
+    except Exception:
+        return "beta"
 
 
 CATALOG: dict[str, Feature] = {}
@@ -111,17 +142,19 @@ def register(id: str, title_he: str, title_en: str, default_enabled: bool, *, pr
              needs: list[str] | None = None, risk: Risk = "low", skills: list[str] | None = None,
              tools: list[str] | None = None, config: str | None = None, applies: Applies = "live",
              about: str = "", targets: dict | None = None, permissions: list[str] | None = None,
-             settings: str = "", slow: bool = False) -> Feature:
+             settings: str = "", slow: bool = False, stage: str | None = None) -> Feature:
     """Add (or replace) a feature in the catalog every Features instance uses. `targets` = its Windows / Pi status
     (capabilities.py: {"windows": {...}, "linux_arm64_pi": {...}}); without it the dashboard shows "not declared".
     `slow` = the probe may block (subprocess, PATH scan, localhost HTTP): an expired result is re-checked off-thread."""
     if risk not in RISKS:
         raise ValueError(f"risk must be one of {RISKS}")
+    if stage is not None and stage not in STAGES:
+        raise ValueError(f"stage must be one of {STAGES}")
     if targets is not None:
         capabilities.declare(id, windows=targets["windows"], linux_arm64_pi=targets["linux_arm64_pi"],
                              permissions=permissions, settings=settings)
     f = Feature(id, title_he, title_en, bool(default_enabled), probe or _always, list(needs or []), risk,
-                list(skills or []), list(tools or []), config, applies, about, dict(targets or {}))
+                list(skills or []), list(tools or []), config, applies, about, dict(targets or {}), stage)
     CATALOG[id] = f
     if slow:
         SLOW_PROBES.add(id)
@@ -318,7 +351,7 @@ register("wake_word", "מילת הפעלה", "Wake word \"Hey Jarvis\"", True, p
 register("greeting", "ברכת פתיחה", "Greeting", True, config="voice.greeting", about="says hello when the face starts")
 register("chimes", "צלילי התראה", "Chimes", True, probe=_probe_speaker, needs=["speaker"], config="voice.chime",
          about="soft sound when \"Hey Jarvis\" is heard and when the conversation is ready")
-register("dashboard", "לוח בקרה", "Dashboard", True, applies="restart",
+register("dashboard", "לוח בקרה", "Dashboard", True, applies="restart", stage="stable",
          about="local web dashboard (`jarvis dashboard`)")
 register("workspace_agent_edit", "עריכת האופי והקבצים שלי", "Edit my own persona files", True, risk="medium",
          tools=["workspace_edit", "workspace_undo"],
@@ -446,6 +479,8 @@ class Features:
             return
         self._state = {"version": 1, "enabled": {k: bool(v) for k, v in raw.get("enabled", {}).items()},
                        "changed": dict(raw.get("changed") or {}), "requests": dict(raw.get("requests") or {})}
+        if isinstance(raw.get("beta_features"), bool):
+            self._state["beta_features"] = raw["beta_features"]
         self._mtime = st.st_mtime
 
     def _refresh(self) -> None:
@@ -468,6 +503,8 @@ class Features:
     def _save(self) -> None:
         if self.path is None:
             return
+        if "beta_features" not in self._state and os.environ.get(BETA_ENV) != "1":
+            self._state["beta_features"] = self._existing_install()     # decide ONCE: fresh = OFF, an old install = ON
         self.path.parent.mkdir(parents=True, exist_ok=True)
         tmp = self.path.with_suffix(".tmp")
         tmp.write_text(json.dumps(self._state, ensure_ascii=False, indent=1), encoding="utf-8")
@@ -518,7 +555,63 @@ class Features:
         with self._lock:
             self._refresh()
             v = self._state["enabled"].get(fid)
-        return self.default(fid)[0] if v is None else v
+        on = self.default(fid)[0] if v is None else v
+        return on and not self.locked(fid)
+
+    # --- beta gate (#463): ONE stage per feature + ONE global opt-in, read by every surface
+    def beta_on(self) -> bool:
+        """The global opt-in `beta_features`. Off by default; an install that already had features (features.json or
+        setup_done in the data dir) is migrated ON once, so nothing the owner uses stops working (labelled beta)."""
+        with self._lock:
+            self._refresh()
+            v = self._state.get("beta_features")
+            if v is None:
+                if os.environ.get(BETA_ENV) == "1":
+                    return True                      # env opt-in: no migration write (a read must not touch the file)
+                if self._existing_install():
+                    return True                      # migrated ON in memory only: a read never touches features.json (the
+                                                     # installer smoke checks it byte for byte); the next real save records it
+                return os.environ.get(BETA_ENV) == "1"
+            return bool(v)
+
+    def _existing_install(self) -> bool:
+        return bool(self.home is not None and self.path is not None
+                    and (self.path.exists() or (self.home / "setup_done").exists()))
+
+    def beta_recorded(self) -> bool:
+        """True once the opt-in was decided and written down (the wizard records it on a fresh install)."""
+        with self._lock:
+            self._refresh()
+            return isinstance(self._state.get("beta_features"), bool) or os.environ.get(BETA_ENV) == "1"
+
+    def stage(self, fid: str) -> str:
+        self.feature(fid)
+        return stage_of(fid)
+
+    def locked(self, fid: str) -> bool:
+        """True = a beta feature while the opt-in is off: cannot be on, cannot be switched on."""
+        return fid in CATALOG and stage_of(fid) == "beta" and not self.beta_on()
+
+    def set_beta(self, on: bool, *, by: str = "user") -> dict:
+        """Flip the global opt-in. OFF switches every beta feature off cleanly (their saved state is kept, so ON
+        brings them back as they were); listeners hear about each feature whose effective state changed."""
+        with self._lock:
+            self._load()
+            before = {fid: self.enabled(fid) for fid in list(CATALOG)}
+            self._state["beta_features"] = bool(on)
+            self._state["changed"]["beta_features"] = {"by": by, "ts": time.time()}
+            self._save()
+            after = {fid: self.enabled(fid) for fid in before}
+        logs.info("features", "BETA_FEATURES_SET", "beta features opt-in changed", on=bool(on), by=by)
+        for fid in before:
+            if before[fid] != after[fid]:
+                self._notify(fid)
+        return self.beta_status()
+
+    def beta_status(self) -> dict:
+        beta = [fid for fid in list(CATALOG) if stage_of(fid) == "beta"]
+        return {"beta_features": self.beta_on(), "beta_count": len(beta),
+                "beta_enabled": [fid for fid in beta if self.enabled(fid)]}
 
     def is_slow(self, fid: str) -> bool:
         return fid in SLOW_PROBES or fid in self._slow
@@ -645,7 +738,7 @@ class Features:
             changed = self._state["changed"].get(fid) or {}
             req = self._state["requests"].get(fid)
         dflt, src = self.default(fid)
-        on = dflt if user is None else user
+        on = (dflt if user is None else user) and not self.locked(fid)
         ok, why = self.available(fid)
         hit = self._probe_cache.get(fid)
         age = None if hit is None else round(time.monotonic() - hit[0], 1)
@@ -654,7 +747,8 @@ class Features:
         cap = capabilities.view(fid)
         health = "off" if not on else "ok" if ok else "checking" if check == "checking" else "unavailable"
         return _with_he({"id": fid, "title_he": f.title_he, "title_en": f.title_en, "about": f.about, "risk": f.risk,
-                "enabled": on, "default": f.default_enabled, "source": "user" if user is not None else src,
+                "enabled": on, "default": f.default_enabled, "stage": stage_of(fid), "locked": self.locked(fid),
+                "saved_on": bool(dflt if user is None else user), "source": "user" if user is not None else src,
                 "available": ok, "reason": why, "active": on and ok, "needs": f.needs, "applies": f.applies,
                 "config": f.config, "skills": f.skills, "tools": f.tools,
                 "changed_by": changed.get("by"), "changed_at": changed.get("ts"), "requested": req,
@@ -683,6 +777,8 @@ class Features:
     def set(self, fid: str, on: bool, *, by: str = "user") -> dict:
         """Switch a feature (by = user | cli | dashboard | voice). Policy for the model lives in FeatureSkill."""
         self.feature(fid)
+        if on and self.locked(fid):             # the one gate every path goes through (CLI, dashboard, phone, voice...)
+            raise BetaLocked(fid)
         with self._lock:
             self._load()
             before = self.enabled(fid)
@@ -858,13 +954,15 @@ def make_skill(features: Features, registry=None):
                 text = "; ".join(f"{s['id']}: {'on' if s['active'] else ('off' if not s['enabled'] else 'unavailable')}"
                                  + (f" ({s['reason']})" if s["reason"] and not s["active"] else "") for s in items)
                 return ToolResult(True, text, {"features": [{k: s[k] for k in (
-                    "id", "title_he", "enabled", "available", "active", "reason", "risk")} for s in items]})
+                    "id", "title_he", "enabled", "available", "active", "reason", "risk", "stage")} for s in items]})
 
             async def set_(a: SetArgs):
                 fid = a.id.strip().lower()
                 if fid not in CATALOG:
                     return ToolResult(False, f"אין תכונה בשם {a.id}.", {"ids": list(CATALOG)}, "FEATURE_UNKNOWN")
                 f = CATALOG[fid]
+                if a.on and features.locked(fid):       # the beta gate comes before any approval prompt
+                    return ToolResult(False, f"{BETA_MSG_HE} / {BETA_MSG}", {"id": fid, "stage": "beta"}, BetaLocked.code)
                 if features.enabled(fid) == a.on:
                     st = features.status(fid)
                     return ToolResult(True, f"{f.title_he} כבר {'מופעלת' if a.on else 'כבויה'}. "
@@ -961,7 +1059,7 @@ def api_features(ctx, m, body):
         iso = isolation.row(ctx.cfg, f.ctx.components())
     except Exception as e:
         iso = {"state": "unavailable", "reason": f"could not check ({type(e).__name__})", "status": "unavailable"}
-    return 200, {"features": f.list(), "note": note, **locales.siblings("note", note), "helper_isolation": iso,
+    return 200, {"features": f.list(), **f.beta_status(), "note": note, **locales.siblings("note", note), "helper_isolation": iso,
                  "statuses": list(capabilities.STATUSES), "targets": list(capabilities.TARGETS),
                  "filters": ["all", "enabled", "not_ready_on_pi", "needs_attention"],
                  "pi_roadmap": capabilities.PI_ROADMAP}
@@ -977,9 +1075,32 @@ def api_feature_set(ctx, m, body):
         return 200, f.reset(fid)
     if not isinstance(body.get("enabled"), bool):
         return 400, {"error": "body needs {\"enabled\": true|false}"}
-    return 200, switch(f, fid, body["enabled"], by="dashboard")     # the dashboard IS the user's approval
+    try:
+        return 200, switch(f, fid, body["enabled"], by="dashboard")     # the dashboard IS the user's approval
+    except BetaLocked as e:
+        return 403, {"error": str(e), "error_he": BETA_MSG_HE, "code": e.code}
+
+
+def api_beta_set(ctx, m, body):
+    """POST /api/beta-features {"enabled": bool}: the global opt-in (the Features page toggle)."""
+    f = _ctx_features(ctx)
+    if not isinstance((body or {}).get("enabled"), bool):
+        return 400, {"error": "body needs {\"enabled\": true|false}"}
+    return 200, f.set_beta(body["enabled"], by="dashboard")
 
 
 def dashboard_routes(register_route) -> None:
     register_route("GET", r"/api/features", api_features)
+    register_route("POST", r"/api/beta-features", api_beta_set)
     register_route("POST", r"/api/features/([a-z0-9_]+)", api_feature_set)
+
+
+# the global opt-in is not a feature (it has no switch of its own in the registry): its capability row
+capabilities.declare(
+    "beta_features",
+    windows={"status": "implemented_unverified",
+             "evidence": "core/tests/test_beta_gate.py (every registered feature x every enable path: CLI, dashboard, "
+                         "phone enable, voice tool, wizard bundle, Features.set); never run on the owner's PC"},
+    linux_arm64_pi={"status": "planned", "blocker": "there is no Pi package to install",
+                    "roadmap_issue": capabilities.PI_ROADMAP},
+    permissions=["action"], settings="Features page switch / jarvis features beta on|off")

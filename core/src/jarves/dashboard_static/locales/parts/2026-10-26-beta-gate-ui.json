@@ -1,0 +1,10 @@
+{
+ "dict": {
+  "beta": "בטא",
+  "Beta features": "יכולות בטא",
+  "Beta features are new and not fully verified yet. They are off by default and cannot be switched on until you turn this on. This is separate from the update channel (beta builds).": "יכולות בטא הן חדשות ועדיין לא נבדקו עד הסוף. הן כבויות כברירת מחדל ואי אפשר להפעיל אותן לפני שמפעילים את המתג הזה. זה נפרד מערוץ העדכונים (גרסאות בטא).",
+  "Beta features are new and not yet fully verified on your device. They may fail or behave unexpectedly. Turn them on?": "יכולות בטא חדשות ועדיין לא נבדקו עד הסוף על המכשיר שלך. הן עלולות להיכשל או להתנהג לא צפוי. להפעיל?",
+  "Beta features on: ": "יכולות בטא פעילות: ",
+  "stable": "יציב"
+ }
+}

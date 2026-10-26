@@ -1165,6 +1165,9 @@ class Dashboard:
     def _enable_phone(self, features, tailnet_only, _m, _tn) -> dict:
         if self.phone_httpd is not None:
             return self.phone_info()
+        if features.locked("mobile_access"):           # the beta gate, before any port is opened
+            from .features import BetaLocked
+            raise BetaLocked("mobile_access")
         tail = _tn.detect()
         tail_ip = tail.get("ip") if tail.get("present") else None
         only_tail = bool(tailnet_only or self.mobile.settings()["bind_tailnet_only"]) and bool(tail_ip)

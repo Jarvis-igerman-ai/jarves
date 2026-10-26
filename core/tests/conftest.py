@@ -381,3 +381,13 @@ def _close_memory_stores(monkeypatch):
             m.close()
         except Exception:
             pass
+
+
+@pytest.fixture(autouse=True)
+def _beta_features_opt_in(request, monkeypatch):
+    """Legacy tests exercise features as the owner's install does (opt-in ON). test_beta_gate.py (marker beta_gate)
+    runs with the real default: opt-in OFF unless a test turns it on."""
+    if request.node.get_closest_marker("beta_gate") is not None:
+        monkeypatch.delenv("JARVES_BETA_FEATURES", raising=False)
+    else:
+        monkeypatch.setenv("JARVES_BETA_FEATURES", "1")

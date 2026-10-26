@@ -539,7 +539,7 @@ def test_dashboard_connections_checklist_and_run_button(dash, monkeypatch):
 
 def test_first_run_wizard_ends_by_offering_jarvis_connect(env):
     started = []
-    w, out = wizard(env, lines=["2"] + [""] * 9 + ["n", "y"], actions={"connect_start": lambda: started.append(1) or 0})
+    w, out = wizard(env, lines=["2"] + [""] * 10 + ["n", "y"], actions={"connect_start": lambda: started.append(1) or 0})
     assert w.run() == 0 and started == [1]
     w2, out2 = wizard(env, answers={}, actions={"connect_start": lambda: started.append(2) or 0})
     assert w2.run() == 0 and started == [1]                  # never from a silent / answers-file run ...

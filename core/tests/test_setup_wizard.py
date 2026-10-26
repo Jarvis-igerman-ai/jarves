@@ -184,7 +184,7 @@ def test_interactive_all_enter_is_hebrew_and_safe(env, monkeypatch):
 
 
 def test_interactive_english_and_one_by_one_high_risk_needs_yes(env):
-    lines = ["2", "", "", "", "", "", "",                   # en; connection, names x3, wake, voice
+    lines = ["2", "", "", "", "", "", "", "",                 # en; connection, names x3, wake, voice, beta
              "n"]                                           # not the recommended set: one by one
     order = [fid for _, _, _, ids in sw.groups() for fid in ids]
     for fid in order:
@@ -222,7 +222,7 @@ def test_stop_and_resume(env):
 
 def test_google_offered_only_interactively(env):
     started = []
-    w, _ = wizard(env, lines=["2"] + [""] * 9 + ["y"], actions={"google_start": lambda: started.append(1) or 0})
+    w, _ = wizard(env, lines=["2"] + [""] * 10 + ["y"], actions={"google_start": lambda: started.append(1) or 0})
     # the final "y" lands on the Google question (all other answers are Enter)
     assert w.run() == 0 and started == [1]
     w2, out = wizard(env, answers={"connect_google_now": True}, actions={"google_start": lambda: started.append(2)})

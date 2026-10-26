@@ -52,8 +52,8 @@ from . import hebrew, logs, plugin_registry
 STATE_FILE = "setup_state.json"
 PEAR_URL = "https://github.com/pear-devs/pear-desktop/releases"
 CONTINUE_IN_TERMINAL = -1          # a browser action returns this when it could not start: setup goes on in the terminal
-KEEP_SKIPPED = ("names", "wake", "voice", "addons", "privacy", "budget")      # "keep my settings": never asked
-STEPS = ("language", "connection", "names", "wake", "voice", "addons", "privacy", "budget", "google", "connect")
+KEEP_SKIPPED = ("names", "wake", "voice", "beta", "addons", "privacy", "budget")      # "keep my settings": never asked
+STEPS = ("language", "connection", "names", "wake", "voice", "beta", "addons", "privacy", "budget", "google", "connect")
 # Modules that register add-ons in jarves.features at import (the dashboard imports the same ones).
 ADDON_MODULES = ("jarves.telegram_channel", "jarves.instagram_channel", "jarves.whatsapp", "jarves.briefing", "jarves.homeassistant", "jarves.anydo", "jarves.github_client",
                  "jarves.appearance", "jarves.backup", "jarves.usage", "jarves.updates", "jarves.runtime",
@@ -95,7 +95,7 @@ GROUPS: tuple[tuple[str, str, str, tuple[str, ...]], ...] = (
     ("helper", "עזרה במחשב (פקודות והתקנות)", "Computer helper (commands & installs)", ("helper", "helper_readonly_auto")),
     ("agents", "סוכני קוד", "Coding agents", ("agent_orchestrator", "agent_opencode", "project_manager")),
 )
-ANSWER_KEYS = {"language", "connection", "api_key_from_env", "display_name", "spoken_name", "address_me",
+ANSWER_KEYS = {"beta_features", "language", "connection", "api_key_from_env", "display_name", "spoken_name", "address_me",
                "wake_model", "voice", "approve_voice_cost", "features", "privacy_mode", "monthly_budget_usd",
                "connect_google_now", "connect_now", "tour_now"}
 ADDRESS_MARK = "איך לפנות אליי / How to address me:"
@@ -137,6 +137,14 @@ T: dict[str, tuple[str, str]] = {
     "voice_other": ("קולות של מודל אחר (משנה מחיר)", "Voices of another model (changes the price)"),
     "voice_cost": ("זה משנה את המחיר. לאשר?", "This changes the price. Approve?"),
     "addons": ("תוספים", "Add-ons"),
+    "beta_title": ("יכולות בטא", "Beta features"),
+    "beta_note": ("יכולות בטא הן יכולות חדשות שעדיין לא נבדקו עד הסוף על המכשיר שלך. הן עלולות להיכשל או להתנהג "
+                  "לא צפוי. הן כבויות כברירת מחדל, ואפשר להפעיל אותן רק אחרי שמסמנים כאן. אפשר לשנות בכל רגע: "
+                  "jarvis features beta on|off. ערוץ העדכונים (גרסאות בטא) הוא עניין נפרד.",
+                  "Beta features are new abilities not yet fully verified on your device. They may fail or behave "
+                  "unexpectedly. They are OFF by default and can only be switched on after you opt in here. Change it "
+                  "any time: jarvis features beta on|off. The update channel (beta builds) is a separate thing."),
+    "beta_q": ("להפעיל יכולות בטא?", "Allow beta features?"),
     "addons_rec": ("להשתמש בבחירות המומלצות לכל התוספים? (לא = לבחור אחד-אחד)",
                    "Use the recommended choices for all add-ons? (no = choose one by one)"),
     "risk_yes": ("זו יכולת רגישה. להפעיל? הקלד כן / yes", "This is a sensitive feature. Turn it on? Type yes / כן"),
@@ -206,16 +214,17 @@ def load_addons() -> list[str]:
     return missing
 
 
-def groups() -> list[tuple[str, str, str, list[str]]]:
-    """GROUPS restricted to registered features, plus "other" for anything registered but not grouped."""
+def groups(beta: bool = True) -> list[tuple[str, str, str, list[str]]]:
+    """GROUPS restricted to registered features, plus "other" for anything registered but not grouped.
+    beta=False (the global opt-in is off) hides every beta feature: ONE registry rule, no per-feature list."""
     load_addons()
     seen, out = set(), []
     for gid, he, en, ids in GROUPS:
-        have = [i for i in ids if i in feat.CATALOG and i not in WIZARD_HIDDEN]
+        have = [i for i in ids if i in feat.CATALOG and i not in WIZARD_HIDDEN and (beta or feat.stage_of(i) != "beta")]
         seen.update(ids)
         if have:
             out.append((gid, he, en, have))
-    rest = [i for i in feat.CATALOG if i not in seen]
+    rest = [i for i in feat.CATALOG if i not in seen and (beta or feat.stage_of(i) != "beta")]
     if rest:
         out.append(("other", "אחר", "Other", rest))
     return out
@@ -307,12 +316,12 @@ def view(cfg, home: Path, f: feat.Features | None = None) -> dict:
         f = feat.Features(cfg, home)
     first = first_run(home)
     out = []
-    for gid, he, en, ids in groups():
+    for gid, he, en, ids in groups(f.beta_on()):
         rows = []
         for fid in ids:
             s = f.status(fid)
             rows.append({**{k: s[k] for k in ("id", "title_he", "title_en", "about", "about_he", "risk", "enabled",
-                                              "available", "reason", "reason_he", "active", "needs", "applies", "source")
+                                              "available", "reason", "reason_he", "active", "needs", "applies", "source", "stage")
                                 if k in s},
                          "recommended": recommended(fid, f, first), "safe_off": fid in SAFE_OFF,
                          "hint": hint(fid, s["available"], s["reason"]), **_guide_notes(fid)})
@@ -743,10 +752,22 @@ class Wizard:
         parts.append("    " + (self.t("ready") if ok else (h.get(self.lang) or why)))
         return "\n".join(parts)
 
+    def step_beta(self) -> None:
+        """The ONE global opt-in for beta features (#463). Default OFF on a fresh install; an existing install was
+        migrated ON, and a re-run shows the current choice."""
+        self.say("\n== " + self.t("beta_title") + " ==")
+        self.say(self.t("beta_note"))
+        cur = self.f.beta_on()
+        on = self.yesno("beta_features", self.t("beta_q"), cur)
+        if on != cur or not self.f.beta_recorded():          # the choice is written down, so setup_done never migrates it
+            self.f.set_beta(on, by="setup")
+        if on != cur:
+            self.changed.append(f"beta_features={'on' if on else 'off'}")
+
     def step_addons(self) -> None:
         self.say("\n== " + self.t("addons") + " ==")
         want: dict[str, bool] = {}
-        for gid, he, en, ids in groups():
+        for gid, he, en, ids in groups(self.f.beta_on()):
             for fid in ids:
                 want[fid] = recommended(fid, self.f, self.first)
         if self.scripted:
@@ -757,18 +778,21 @@ class Wizard:
                 if fid not in feat.CATALOG or fid in WIZARD_HIDDEN:
                     self.say(f"(feature {fid!r} not offered here; skipped)")
                     continue
+                if given[fid] is True and self.f.locked(fid):
+                    self.say(f"({fid}: {feat.BETA_MSG}; skipped)")
+                    continue
                 if not isinstance(on, bool):
                     raise AnswerError(f"features.{fid} must be true or false")
                 want[fid] = on
         else:
-            for gid, he, en, ids in groups():
+            for gid, he, en, ids in groups(self.f.beta_on()):
                 ons = [feat.CATALOG[i].title_he if self.lang == "he" else feat.CATALOG[i].title_en
                        for i in ids if want[i]]
                 offs = [feat.CATALOG[i].title_he if self.lang == "he" else feat.CATALOG[i].title_en
                         for i in ids if not want[i]]
                 self.say(f"{self.L(he, en)}: {self.t('on')}: {', '.join(ons) or '-'}; {self.t('off')}: {', '.join(offs) or '-'}")
             if not self.yesno("addons_rec", self.t("addons_rec"), True):
-                for gid, he, en, ids in groups():
+                for gid, he, en, ids in groups(self.f.beta_on()):
                     self.say(f"\n-- {self.L(he, en)} --")
                     for fid in ids:
                         parent = next((d for d in feat.CATALOG[fid].needs if d in want and not want[d]), None)
@@ -798,7 +822,11 @@ class Wizard:
                 except (NotImplementedError, OSError) as e:
                     self.notes.append(f"autostart: {e}")
                     continue
-            self.f.set(fid, on, by="setup")
+            try:
+                self.f.set(fid, on, by="setup")
+            except feat.BetaLocked as e:
+                self.notes.append(f"{fid}: {e}")
+                continue
             self.changed.append(f"{fid}={'on' if on else 'off'}")
         for fid, on in want.items():
             dep = next((d for d in feat.CATALOG[fid].needs if d in feat.CATALOG and not self.f.enabled(d)), None)
