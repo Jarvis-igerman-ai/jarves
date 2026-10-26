@@ -54,7 +54,9 @@ _CODE_HEAD = re.compile(r"([A-Z][A-Z0-9_]{2,40}): .+", re.S)
 def _phone_error(s: object) -> str:
     """F12 #206: a failed step's error is 'CODE: tool message'; the phone gets the code only, never the tool's own text."""
     m = _CODE_HEAD.fullmatch(" ".join(str(s or "").split()))
-    return m.group(1) if m else _short(s)
+    if m:
+        return m.group(1)
+    return "STEP_FAILED" if str(s or "").strip() else ""      # never the tool's free text
 
 
 def _clean(p: dict) -> bool:

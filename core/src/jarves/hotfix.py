@@ -301,6 +301,10 @@ def bridge_process_state(home: Path, *, pid_of: Callable[[], int] | None = None,
     if not image:
         out["state"] = "not-running"
         return out
+    names = {Path(str(expected)).name.lower()} if expected else {"whatsapp_bridge.exe", "whatsapp_bridge"}
+    if Path(str(image).replace("\\", "/")).name.lower() not in names:
+        out["state"] = "not-running"            # a stale endpoint.json pid that the OS reused for another program
+        return out
     out.update(pid=pid, running_image=str(image))
     if not expected or not Path(expected).is_file():
         return out
@@ -736,11 +740,16 @@ def apply(installed_pkg: Path, src: Source, home: Path, hooks: Hooks, *, dry_run
         raise Refused("HOTFIX_NEW_DEPENDENCY", "an updated Python file imports a module that is not installed: "
                       + "; ".join(missing[:6]) + ": " + SLICE2, "change uv.lock in the same commit so the dependency is "
                       "delivered, or use the full installer (an unreadable libraries archive also counts as missing)")
+    if dry_run and not plan.files and not has_deps and not has_bridge:
+        out = {"status": "dry-run", "files": [], "replace": [], "add": [], "pending_installer": pending,
+               "deps_already_installed": list(plan.deps.already_installed) if plan.deps else []}
+        _bridge_report(out, hooks)                # read-only: a dry run never stops or starts anything
+        return out
     if not plan.files and not has_deps and not has_bridge:
         out = {"status": "nothing", "files": [], "pending_installer": pending,
                "deps_already_installed": list(plan.deps.already_installed) if plan.deps else []}
         _bridge_report(out, hooks)
-        if restart_bridge and (out.get("bridge_process") or {}).get("state") == "restart-needed":
+        if restart_bridge and restart and (out.get("bridge_process") or {}).get("state") == "restart-needed":
             out["bridge_restart"] = restart_owned_bridge(hooks)       # nothing else changed: no files to revert
             _bridge_report(out, hooks)
         return out
