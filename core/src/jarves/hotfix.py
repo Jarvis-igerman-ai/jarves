@@ -828,7 +828,7 @@ def _revert_dir(installed_pkg: Path, d: Path, manifest: dict, hooks: Hooks | Non
     return done
 
 
-def revert(installed_pkg: Path, home: Path, hooks: Hooks, *, restart: bool = True) -> dict:
+def revert(installed_pkg: Path, home: Path, hooks: Hooks, *, restart: bool = True, dry_run: bool = False) -> dict:
     installed_pkg, home = Path(installed_pkg), Path(home)
     found = latest_manifest(home)
     if not found:
@@ -840,6 +840,15 @@ def revert(installed_pkg: Path, home: Path, hooks: Hooks, *, restart: bool = Tru
     if man.get("status") == "applied" and cur.get("id") != man.get("id"):
         raise Refused("HOTFIX_REPLACED", "a normal update already replaced this hotfix; nothing to revert",
                       "reverting now would downgrade the build")
+    if dry_run:                                        # #515: read-only; verify the saved originals, list, touch nothing
+        for item in man.get("replaced", []):
+            saved = d / "originals" / item["path"]
+            if not saved.is_file() or sha256(saved) != item["sha256_original"]:
+                raise HotfixError("HOTFIX_ORIGINAL_BAD", f"saved original of {item['path']} is missing or changed")
+        files = ([i["path"] for i in man.get("replaced", [])] + [i["path"] for i in man.get("added", [])]
+                 + (["bridge"] if man.get("bridge") else [])
+                 + [f"{e['name']}=={e['old_version'] or '(removed)'}" for e in man.get("deps") or []])
+        return {"status": "dry-run", "id": man["id"], "files": files, "backup": str(d)}
     was_running = bool(hooks.core_running())
     if man.get("deps") and was_running:
         hooks.stop_core()                              # locked files; restarted below
@@ -937,7 +946,11 @@ def cmd_hotfix(a, cfg, home) -> int:
                 raise Refused("HOTFIX_OFF", "the hot-patch feature is switched off", "jarvis features on hotfix")
         hooks = default_hooks(cfg, home, installed)
         if a.action == "revert":
-            r = revert(installed, home, hooks, restart=not a.no_restart)
+            r = revert(installed, home, hooks, restart=not a.no_restart, dry_run=bool(a.dry_run))
+            if r["status"] == "dry-run":
+                print(_say("היו משוחזרים", "would restore") + f" ({len(r['files'])}, {r['id']}, backup {r['backup']}): "
+                      + ", ".join(r["files"][:20]) + _say(" (לא שונה דבר)", " (nothing changed)"))
+                return 0
             print(_say("שוחזרו הקבצים המקוריים", "restored the original files") + f": {len(r['files'])} ({r['id']})")
             return 0
         info = installed_info(installed)
