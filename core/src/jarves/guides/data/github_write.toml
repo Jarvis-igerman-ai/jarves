@@ -1,0 +1,59 @@
+order = 30
+category = "system"
+features = ["github_write"]
+aliases = ["כתיבה ל-github", "github write", "github writes", "הרשאת כתיבה", "אישור כתיבה"]
+error_codes = ["GITHUB_WRITE_OFF", "GITHUB_WRITE_FORBIDDEN", "GITHUB_WRITE_UNTRUSTED", "GITHUB_WRITE_REPO", "GITHUB_WRITE_SCOPE", "GITHUB_WRITE_RATE_LIMIT", "GITHUB_WRITE_DENIED", "GITHUB_WRITE_TIMEOUT", "GITHUB_WRITE_NOT_IMPLEMENTED"]
+title_he = "GitHub: כתיבה באישור"
+title_en = "GitHub: writes with approval"
+what_he = "זו התשתית לשינויים ב-GitHub (issues, pull requests, בדיקות). כל שינוי מוצג לכם בדיוק כפי שהוא, ורק אחרי אישור שלכם הוא יתבצע. כרגע התשתית לא כותבת שום דבר: סוגי הכתיבה יתווספו בהמשך."
+what_en = "This is the framework for changing GitHub (issues, pull requests, CI). Every change is shown to you exactly as it is, and happens only after you approve. For now it writes nothing: the kinds of writes are added later."
+say = [["מה מצב הכתיבה ל-GitHub?", "What is the state of GitHub writes?"]]
+expect_he = "כבוי כברירת מחדל. עובד רק במאגרים שרשמתם ב-github_repos, בלי מיזוג ישיר, בלי force push ובלי שינוי הגדרות, סודות, הרשאות או הגנת ענפים. מגבלת קצב, ויומן ביקורת בלי טקסט ובלי אסימון."
+expect_en = "Off by default. Works only on repositories you list in github_repos, with no direct merge, no force push and no change of settings, secrets, permissions or branch protection. Rate limited, with an audit log that holds no text and no token."
+test = "feature"
+test_he = "הבדיקה רק בודקת שיש אסימון שמור. היא לא פונה ל-GitHub ולא כותבת כלום."
+test_en = "The check only sees that a saved token exists. It does not contact GitHub and writes nothing."
+cost_he = "חינם."
+cost_en = "Free."
+privacy_he = "יומן הביקורת (github/write_audit.jsonl) שומר סוג, מאגר, יעד ותוצאה בלבד. האסימון לא נכתב לשום יומן."
+privacy_en = "The audit log (github/write_audit.jsonl) keeps only kind, repository, target and result. The token is never written to any log."
+
+[[steps]]
+he = "קודם חברו את GitHub לקריאה (המדריך GitHub). הפעילו יכולות בטא: jarvis features beta on."
+en = "First connect GitHub for reading (the GitHub guide). Turn on beta features: jarvis features beta on."
+
+[[steps]]
+he = "ב-config.toml הוסיפו שורה כמו github_repos = [\"בעלים/מאגר\"]. ברירת המחדל ריקה: שום מאגר לא מותר."
+en = "In config.toml add a line like github_repos = [\"owner/repo\"]. The default is empty: no repository is allowed."
+
+[[steps]]
+he = "בהמשך, בטוקן ב-GitHub הוסיפו רק את הרשאות הכתיבה של הסוג שאתם רוצים: Issues write (issues, תגובות, תוויות), Pull requests write (בקשות מיזוג, ביקורות, העברה לתור המיזוג), Actions write (הרצה מחדש של בדיקות). אל תוסיפו Contents, Administration או Secrets."
+en = "Later, add to the token on GitHub only the write permissions for the class you want: Issues write (issues, comments, labels), Pull requests write (pull requests, reviews, entering the merge queue), Actions write (re-run checks). Do not add Contents, Administration or Secrets."
+
+[[steps]]
+he = "הדליקו: jarvis github write on. מצב: jarvis github write status."
+en = "Switch on: jarvis github write on. State: jarvis github write status."
+action = "feature_on:github_write"
+check = "active:github_write"
+
+[[steps]]
+he = "לכיבוי: jarvis github write off. כל כתיבה תבקש את אישורכם בחלון, עם הפעולה המדויקת."
+en = "To turn off: jarvis github write off. Every write asks for your approval in a window, with the exact action."
+
+[[problems]]
+he = "הוא אומר שהכתיבה כבויה או שהמאגר לא ברשימה"
+en = "He says writes are off or the repository is not in the list"
+fix_he = "הריצו jarvis github write on והוסיפו את המאגר ל-github_repos ב-config.toml."
+fix_en = "Run jarvis github write on and add the repository to github_repos in config.toml."
+
+[[problems]]
+he = "חסרה הרשאת כתיבה בטוקן"
+en = "The token lacks a write permission"
+fix_he = "ב-GitHub הוסיפו לטוקן את הרשאת הכתיבה של הסוג הדרוש (ראו הרשימה למעלה), ורק למאגרים שבחרתם."
+fix_en = "On GitHub add the write permission of the needed class to the token (see the list above), for the chosen repositories only."
+
+[[problems]]
+he = "אמר שעדיין לא מומש"
+en = "He says it is not implemented yet"
+fix_he = "נכון: התשתית מוכנה, וסוגי הכתיבה (issues, pull requests, תור מיזוג) יתווספו בגרסאות הבאות."
+fix_en = "Correct: the framework is ready; the kinds of writes (issues, pull requests, merge queue) come in later versions."

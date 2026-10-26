@@ -321,6 +321,8 @@ class HelperConfig(_Strict):
 
 class Config(_Strict):
     assistant_name: str = "JARVES"
+    # V7 G2: GitHub writes are allowed ONLY on these "owner/repo" names (default empty = nothing). See github_write.py.
+    github_repos: list[str] = Field(default_factory=list)
     # how the name is SAID (and written in Hebrew speech/greetings): the voice read the Latin "JARVES" letter by
     # letter / wrongly in the 19 Oct session. Written forms (logs, window titles) keep assistant_name.
     assistant_name_spoken: str = "ג'ארוויס"

@@ -1,0 +1,6 @@
+{
+ "framework for changing GitHub (issues, pull requests, CI) only after you approve the exact action, only on repos you list, never merge directly (nothing is written yet)": "תשתית לשינויים ב-GitHub (issues, pull requests, בדיקות) רק אחרי שאישרת את הפעולה המדויקת, רק במאגרים שרשמת, בלי מיזוג ישיר (עדיין לא נכתב דבר)",
+ "GitHub: writes with approval": "GitHub: כתיבה באישור",
+ "no write kind exists yet and it never touched the real GitHub API; the owner sets the token permissions": "עדיין אין סוג כתיבה ומעולם לא פנה ל-GitHub האמיתי; הבעלים קובע את הרשאות האסימון",
+ "UNIT test_github_write.py (fake GitHub API and approvals, no network)": "בדיקות יחידה test_github_write.py (GitHub ואישורים מדומים, בלי רשת)"
+}
