@@ -31,7 +31,7 @@ from pathlib import Path
 from typing import Callable
 from urllib.parse import urlsplit
 
-from . import logs, mobile_drive, drive_actions, phone_location, phone_hands_free, qrmini, mobile_companion  # noqa: F401  (these register their catalog rows)
+from . import logs, mobile_drive, drive_actions, phone_location, phone_hands_free, phone_trust, qrmini, mobile_companion  # noqa: F401  (these register their catalog rows)
 from .continuity import Continuity
 
 FEATURE = "mobile_access"
@@ -173,7 +173,7 @@ class MobileAccess:
         self.host: str | None = None
         self.port = 0
         self.tailnet: dict = {}                  # tailnet.detect() result of THIS run (empty = Tailscale not used)
-        self.tls_source = "none"                 # tailscale | selfsigned | none
+        self.tls_source = "none"                 # tailscale | localca | selfsigned | none
         self.bind: str | None = None             # the address the server listens on
 
     @property
@@ -761,6 +761,13 @@ def serve(h, mob: MobileAccess, ip: str) -> None:
                              "voice": bool(mob.bridge and mob.bridge.voice_available() and mob.scheme == "https")})
     if path == mobile_companion.INFO_PATH and method == "GET":      # Companion API v1 (V7-A1): read-only, any paired device
         return h._json_extra(200, mobile_companion.info(mob, dev), {mobile_companion.API_HEADER: str(mobile_companion.API_VERSION)})
+    if path == phone_trust.CA_ROUTE and method == "GET":      # #513: the PUBLIC CA certificate, only to a paired phone
+        pem = phone_trust.ca_certificate_pem(mob.home) if phone_trust.trust_on(mob.home) else None
+        if pem is None:
+            return h._json(404, {"error": "no trusted-connection certificate: turn on phone_trust and run jarvis phone trust enable"})
+        mob.audit("trust_ca_downloaded", device=dev["id"])
+        return h._send(200, pem, "application/x-x509-ca-cert",
+                       {"Content-Disposition": 'attachment; filename="jarves-local-ca.crt"'})
     if path == "/api/m/unpair" and method == "POST":
         mob.revoke(dev["id"], by=dev["id"])
         return h._json(200, {"ok": True})
