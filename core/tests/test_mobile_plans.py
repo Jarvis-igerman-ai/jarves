@@ -257,3 +257,12 @@ def test_a_phone_never_lifts_the_taint_guard_and_waits_for_a_running_step(srv, s
     s.pause(pid)
     s.resume(pid)                                                                      # the computer's resume still lifts it
     assert s.get(pid)["tainted"] == 0
+
+
+def test_a_failed_step_error_shows_only_the_code_on_the_phone():
+    """F12 #206: 'CODE: tool message' must not carry the tool's own text to the phone."""
+    from jarves import mobile_plans
+    assert mobile_plans._phone_error("TOOL_FAILED: could not open the private file dana-secret") == "TOOL_FAILED"
+    assert mobile_plans._phone_error("the step timed out") == "the step timed out"
+    assert mobile_plans._phone_error("the owner did not approve this step") == "the owner did not approve this step"
+    assert mobile_plans._phone_error(None) == ""
