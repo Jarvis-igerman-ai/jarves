@@ -66,8 +66,16 @@ def fake():
     f.close()
 
 
+class Pub(orx.OpenRouterClient):
+    """Tests send public text unless they say otherwise (the production default is private = refused)."""
+
+    def chat(self, messages, model=orx.FREE_ROUTER, **kw):
+        kw.setdefault("content_class", "public")
+        return super().chat(messages, model, **kw)
+
+
 def client(fake, policy=None):
-    return orx.OpenRouterClient(policy or SpendPolicy(), REG, key=KEY, base=fake.base, _test_base=True)
+    return Pub(policy or SpendPolicy(), REG, key=KEY, base=fake.base, _test_base=True)
 
 
 MSG = [{"role": "user", "content": "hello"}]
@@ -160,7 +168,7 @@ def test_offline_and_missing_key(fake):
     nokey = orx.OpenRouterClient(SpendPolicy(), REG, base="http://127.0.0.1:9/api/v1", _test_base=True)
     os.environ.pop(orx.KEY_ENV, None)
     with pytest.raises(orx.OpenRouterError) as e:
-        nokey.chat(MSG, FREE)
+        nokey.chat(MSG, FREE, content_class="public")
     assert e.value.code == "OPENROUTER_NOT_CONNECTED"
 
 
@@ -172,6 +180,21 @@ def test_host_allow_list_and_key_never_in_text(fake):
     assert orx.OpenRouterClient(SpendPolicy(), REG, key=KEY).base == orx.API
     assert KEY not in repr(client(fake)) and KEY not in orx.redact(f"Authorization: Bearer {KEY}")
     assert KEY not in str(orx.OpenRouterError("X", f"bad {KEY}"))
+
+
+def test_default_class_is_private_and_free_only_sends_price_ceiling(fake):
+    with pytest.raises(orx.PolicyBlocked):
+        orx.OpenRouterClient(SpendPolicy(), REG, key=KEY, base=fake.base, _test_base=True).chat(MSG, FREE)
+    assert fake.reqs == []
+    client(fake).chat(MSG, FREE)
+    assert fake.reqs[0][1]["provider"] == {"max_price": {"prompt": 0, "completion": 0}, "allow_fallbacks": False}
+
+
+def test_understated_cost_is_raised_to_the_computed_one(fake):
+    p = SpendPolicy(mode="balanced", daily_cap_usd=1, task_cap_usd=1, allowed_providers={"p": ["openrouter"]})
+    fake.resolved, fake.cost = "vendor/paid-1", 0
+    r = client(fake, p).chat(MSG, "vendor/paid-1", project="p")
+    assert r.cost_usd > 0 and p.spent_today == pytest.approx(r.cost_usd)
 
 
 def test_bad_arguments(fake):

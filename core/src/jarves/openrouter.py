@@ -14,7 +14,9 @@ Rules (a safety control; changes need independent review):
 """
 from __future__ import annotations
 
+import dataclasses
 import json
+import math
 import os
 import re
 from dataclasses import dataclass
@@ -148,7 +150,7 @@ class OpenRouterClient:
         return d.model
 
     def chat(self, messages: list[dict], model: str = FREE_ROUTER, *, agent: str = "default", project: str = "",
-             content_class: str = "public", max_tokens: int = 1024) -> Result:
+             content_class: str = "private", max_tokens: int = 1024) -> Result:
         if not isinstance(messages, list) or not messages or not all(
                 isinstance(x, dict) and isinstance(x.get("content"), str) and x.get("role") in ("system", "user", "assistant")
                 for x in messages):
@@ -162,6 +164,8 @@ class OpenRouterClient:
             raise OpenRouterError("OPENROUTER_NOT_CONNECTED", f"OpenRouter is not connected; run {START_COMMAND}")
         body = {"model": m.id, "messages": [{"role": x["role"], "content": x["content"]} for x in messages],
                 "max_tokens": max_tokens, "usage": {"include": True}}
+        if self.policy.mode == "free-only":       # price ceiling 0 BEFORE the call: the router can never pick a paid model
+            body["provider"] = {"max_price": {"prompt": 0, "completion": 0}, "allow_fallbacks": False}
         headers = {"Authorization": f"Bearer {key}", "Content-Type": "application/json", "X-Title": "JARVES"}
         try:
             with httpx.Client(timeout=TIMEOUT, transport=self.transport, follow_redirects=False) as c:
@@ -178,6 +182,9 @@ class OpenRouterClient:
             res = parse_response(r.json(), m.id)
         except ValueError:
             raise OpenRouterError("OPENROUTER_PROVIDER_ERROR", "OpenRouter sent an unreadable answer") from None
+        est = m.cost_usd(res.tokens_in, res.tokens_out)       # never trust a lower reported cost for a priced model
+        if math.isfinite(est) and est > res.cost_usd:
+            res = dataclasses.replace(res, cost_usd=est)
         if res.cost_usd:
             self.policy.record(agent, res.cost_usd)
         if self.policy.mode == "free-only" and (res.cost_usd > 0 or not is_free_id(res.resolved_model)):
