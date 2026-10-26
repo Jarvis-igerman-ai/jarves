@@ -55,6 +55,7 @@
 
   async function load() {
     try { state = await cx.api("/api/m/drive"); note = ""; } catch (e) { note = e.message; state = null; }
+    if (window.JarvesHandsFree && state) window.JarvesHandsFree.update(state);
     paint();
   }
   async function getBrief(answer) {

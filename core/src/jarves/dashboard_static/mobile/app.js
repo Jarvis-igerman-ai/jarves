@@ -105,6 +105,7 @@
     if (tab === "plans") mountPlans();
     if (tab === "prefs") mountPrefs();
     if (tab === "drive") mountDrive();
+    else if (window.JarvesHandsFree) window.JarvesHandsFree.unmount();      // hands-free Drive voice never runs behind another tab
     tick();
   }
   function allowTabs() {
@@ -129,7 +130,10 @@
   }
   function mountPlans() { if (window.JarvesPlans) window.JarvesPlans.mount($("plansRoot"), { api, post, lang: () => lang }); }
   function mountPrefs() { if (window.JarvesPrefs) window.JarvesPrefs.mount($("prefsRoot"), { api, post, lang: () => lang }); }
-  function mountDrive() { if (window.JarvesDrive) window.JarvesDrive.mount($("driveRoot"), { api, post, lang: () => lang }); }
+  function mountDrive() {
+    if (window.JarvesHandsFree) window.JarvesHandsFree.mount($("hfRoot"), { api, lang: () => lang });
+    if (window.JarvesDrive) window.JarvesDrive.mount($("driveRoot"), { api, post, lang: () => lang });
+  }
   function unmountChat() { if (chatView) { chatView.destroy(); chatView = null; } }
 
   // ---- voice (push to talk): record, encode 16 kHz mono WAV, send
