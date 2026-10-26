@@ -1071,11 +1071,13 @@ async def _wake_listen_test(det, *, mic_factory, seconds: float, phrase: str, th
     import time as _t
     import numpy as np
     from .voice.audio import AudioUnavailable
-    from .voice.wake_calib import diagnose
+    from .voice.wake_calib import ClipMonitor, diagnose
     from .voice.wake_confirm import AutoGain, SpeechMonitor, name_match
     from .voice.wakeword import level_meter
     agc = AutoGain(initial_gain_db=v.wake_gain_db) if v.wake_agc else None
     mon = SpeechMonitor(min_score=0.0)
+    clip = ClipMonitor()
+    clip_said = False
     ring = np.zeros(int(16000 * 2.5), np.int16)
     gate = v.wake_gate if confirm is not None else threshold
     attempts: list[dict] = []
@@ -1088,7 +1090,10 @@ async def _wake_listen_test(det, *, mic_factory, seconds: float, phrase: str, th
         async for chunk in mic.mic_chunks(16000, 2560):
             t_end = t_end or _t.monotonic() + seconds
             n += 1
-            raw = np.frombuffer(chunk, "<i2")
+            clip.feed(chunk)
+            if clip.clipping() and not clip_said:        # live, before the verdict: say the exact fix once
+                clip_said = True
+                out("\n WARNING: " + clip.advice() + "\n")
             nonzero = nonzero or bool(np.abs(raw).max() > 2) if raw.size else nonzero
             fed = agc.process(chunk) if agc is not None else chunk
             a = np.frombuffer(fed, "<i2")
@@ -1134,7 +1139,9 @@ async def _wake_listen_test(det, *, mic_factory, seconds: float, phrase: str, th
         + f", {len(attempts)} attempt(s), best wake score {best:.2f} (instant wake at {threshold}"
         + (f", local speech check from {gate}" if confirm is not None else "") + f"), near misses {near}.")
     out(f"{verdict}: {advice}")
-    return {"verdict": verdict, "advice": advice, "floor_db": mon.floor_db, "speech_db": speech_db, "best": best,
+    if clip.clipping():
+        out(f"CLIPPING: {clip.advice()}")
+    return {"clipping": clip.clipping(), "clip_advice": clip.advice(), "verdict": verdict, "advice": advice, "floor_db": mon.floor_db, "speech_db": speech_db, "best": best,
             "attempts": attempts, "peaks": peaks, "near_misses": near}
 
 
@@ -1159,6 +1166,11 @@ def cmd_wake(a, cfg, home) -> int:
         return _wake_train(a, cfg, home)
     if a.action == "eval":
         return _wake_eval(a, cfg, home)
+    if a.action == "reset-tune":
+        from .voice.wake_guard import WakeOutcomeLog
+        WakeOutcomeLog(home).reset()
+        print("Learned wake tuning cleared (wake/outcomes.json). Restart JARVES (or wait for the next wake) to apply.")
+        return 0
     if getattr(a, "list_mics", False):
         import sounddevice as sd
         from .app import _mic_name
@@ -2183,9 +2195,9 @@ def main(argv: list[str] | None = None) -> int:
         if entry[0] == "early":
             entry[1].add_cli(sub)
     wk = sub.add_parser("wake", help="calibrate the wake word to your voice and mic, or train a new wake phrase")
-    wk.add_argument("action", choices=["test", "train", "eval"],
+    wk.add_argument("action", choices=["test", "train", "eval", "reset-tune"],
                     help="test = live check of your voice + mic with an exact fix; train = new phrase (candidate; --apply to use, --revert to undo); "
-                         "eval = measured detection rate / false wakes per hour on a synthetic corpus")
+                         "eval = measured detection rate / false wakes per hour on a synthetic corpus; reset-tune = forget the learned false-wake tightening")
     wk.add_argument("--list-mics", action="store_true", help="test: list the input devices and exit")
     wk.add_argument("--openai", action="store_true", help="eval: add OpenAI TTS voices (metered once, cached)")
     wk.add_argument("--minutes", type=float, default=24.0, help="eval: minutes of non-wake audio (default 24)")

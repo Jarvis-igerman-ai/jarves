@@ -223,8 +223,11 @@ def make_wake_detector(v) -> WakeWordDetector:
     agc = AutoGain(initial_gain_db=getattr(v, "wake_gain_db", 0.0) or 0.0) if getattr(v, "wake_agc", False) else None
     if getattr(v, "wake_confirm", False):
         base = make_detector(v.wake_word, 1.01)          # the gate: only its raw score is read
-        return ConfirmingDetector(base, WhisperConfirm(v.wake_confirm_model), accept=max(v.wake_threshold,
-                                  v.wake_accept), gate=v.wake_gate, agc=agc)
+        # An owner-set wake_threshold (config.toml / `wake test --apply`) IS the instant-accept level (floor 0.25);
+        # only an unset one falls back to wake_accept. It used to be max(threshold, wake_accept): 0.25 became 0.5.
+        explicit = "wake_threshold" in getattr(v, "model_fields_set", ())
+        accept = max(v.wake_threshold, 0.25) if explicit else max(v.wake_threshold, v.wake_accept)
+        return ConfirmingDetector(base, WhisperConfirm(v.wake_confirm_model, cpu_threads=4), accept=accept, gate=v.wake_gate, agc=agc)
     det = make_detector(v.wake_word, v.wake_threshold)
     return GainDetector(det, agc) if agc is not None else det
 

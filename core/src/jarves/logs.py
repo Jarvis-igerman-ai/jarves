@@ -201,7 +201,7 @@ FIELD_CLASS: dict[str, str] = {
         turn route history_items reserved_usd spent_usd actual_usd requests deleg_s scope err_code daily_usd turn_usd
         transport plugin provider handler tailnet tls_source hours bind_tailnet_only
         tasks waited_s false_wakes good_wakes signal backend_busy tools_running delegations_open mic_level echo_level
-        rejected times accept always_confirm tune_level
+        rejected times accept always_confirm tune_level peak fix since_start_s configured_threshold effective_threshold
         trust refused
         dropped duplicates already_skipped any_do_checked
         """),
