@@ -1,4 +1,4 @@
-"""Read-only GitHub client (V7 slice G1, issue #408; umbrella #50). READ ONLY: no write call exists in this slice (G2+).
+"""GitHub client (V7 G1 #408 reads; G3 #410 adds ONE write door, `write()`, used only by github_write handlers; umbrella #50).
 
 - OFF by default (feature `github`, high risk). Official GitHub REST API v3 + GraphQL (merge queue), nothing else.
 - Token: a fine-grained personal access token the owner creates. Stored ONLY on this PC at <state_dir>/github/token.json
@@ -41,6 +41,49 @@ class GitHubError(Exception):
     def __init__(self, code: str, message: str) -> None:
         super().__init__(redact(message))
         self.code, self.message = code, redact(message)
+
+
+def _write_status(r: httpx.Response) -> None:
+    """Map a write answer to a clear code (the provider's own text is never passed on)."""
+    c, h = r.status_code, r.headers
+    if c < 300:
+        return
+    limited = h.get("x-ratelimit-remaining") == "0" or h.get("retry-after") or c == 429 or "rate limit" in r.text.lower()
+    if c in (403, 429) and limited:
+        reset = "".join(ch for ch in str(h.get("x-ratelimit-reset", ""))[:12] if ch.isdigit()) or "?"
+        raise GitHubError("GITHUB_RATE_LIMIT", f"GitHub limit (or abuse protection) hit; wait, resets at {reset}")
+    table = {401: ("GITHUB_AUTH", "GitHub rejected the token (expired or revoked)"),
+             403: ("GITHUB_WRITE_PERMISSION", "GitHub refused: the token has no write permission for this"),
+             404: ("GITHUB_NOT_FOUND", "not found (wrong number, or the token cannot see it)"),
+             410: ("GITHUB_NOT_FOUND", "gone (issues are disabled or the item was deleted)"),
+             422: ("GITHUB_WRITE_INVALID", "GitHub rejected the content (validation failed)")}
+    if c >= 500:                    # a server error after a write may still have executed: never retry blindly
+        raise GitHubError("GITHUB_WRITE_UNKNOWN", f"GitHub answered {c}; the change may have happened, check on GitHub first")
+    if c in (301, 302, 307, 308):
+        raise GitHubError("GITHUB_WRITE_REDIRECT", "the repo was renamed or moved; update github_repos")
+    code, msg = table.get(c, ("GITHUB_PROVIDER_ERROR", f"GitHub answered {c}"))
+    raise GitHubError(code, msg)
+
+
+def broad_scopes(scopes: list[str] | None) -> list[str]:
+    """Classic-token scopes that give far more than issue/PR work (repo is needed for private repos but is broad)."""
+    return sorted(s for s in scopes or [] if s in ("repo", "delete_repo", "workflow", "write:packages", "delete:packages")
+                  or s.startswith("admin:"))
+
+
+_SEG = r"(?!\.\.?/)[A-Za-z0-9_.-]{1,100}"            # owner / repo; never a "." or ".." segment
+_WRITE_PATHS = {                                       # each verb only on its own endpoint templates (issues family)
+    "POST": re.compile(rf"^/repos/{_SEG}/{_SEG}/issues(/[1-9]\d{{0,8}}/(comments|labels))?$"),
+    "PATCH": re.compile(rf"^/repos/{_SEG}/{_SEG}/issues/[1-9]\d{{0,8}}$"),
+    "DELETE": re.compile(rf"^/repos/{_SEG}/{_SEG}/issues/[1-9]\d{{0,8}}/labels/(?!\.\.?$)[^/?#]{{1,300}}$"),
+}
+_WRITE_VERBS = tuple(_WRITE_PATHS)
+
+
+def _write_allowed(method: str, path: str) -> bool:
+    """Verb bound to its endpoint template; no dot segment (httpx would collapse `labels/.` to `labels` = remove ALL)."""
+    rx = _WRITE_PATHS.get(method)
+    return bool(rx and rx.match(path) and "%2e" not in path.lower())
 
 
 class TokenStore:
@@ -92,7 +135,7 @@ class GitHubClient:
         self.transport, self.base = transport, base.rstrip("/")
         self.rate: dict = {"remaining": None, "reset": None}
 
-    def _request(self, method: str, path: str, **kw) -> httpx.Response:
+    def _request(self, method: str, path: str, *, write: bool = False, **kw) -> httpx.Response:
         if not self._token:
             raise GitHubError("GITHUB_NOT_CONNECTED", f"GitHub is not connected; run {START_COMMAND}")
         headers = {"Authorization": f"Bearer {self._token}", "Accept": "application/vnd.github+json",
@@ -101,9 +144,13 @@ class GitHubClient:
             with httpx.Client(timeout=TIMEOUT, transport=self.transport, follow_redirects=False) as c:
                 r = c.request(method, self.base + path, headers=headers, **kw)
         except httpx.HTTPError as e:
+            if write:       # the request may have been executed: never retry blindly
+                raise GitHubError("GITHUB_WRITE_UNKNOWN", f"no answer ({type(e).__name__}); check on GitHub before retrying") from None
             raise GitHubError("GITHUB_OFFLINE", f"cannot reach GitHub ({type(e).__name__})") from None
         h = r.headers
         self.rate = {"remaining": h.get("x-ratelimit-remaining"), "reset": h.get("x-ratelimit-reset")}
+        if write:
+            _write_status(r)
         if r.status_code == 401:
             raise GitHubError("GITHUB_AUTH", "GitHub rejected the token (expired or revoked)")
         if r.status_code in (403, 429):
@@ -138,7 +185,7 @@ class GitHubClient:
                 break
         return out
 
-    # ---- reads (no write call exists in this module; the write framework is github_write.py)
+    # ---- reads (the only write door is write() below; the framework is github_write.py)
     def write_probe(self, owner: str, repo: str) -> dict:
         """What this token may do on one repo, from read calls only: `scopes` = the classic token's X-OAuth-Scopes
         (None for a fine-grained token: GitHub sends none) and `push` = the repo's permissions.push for this token."""
@@ -149,8 +196,32 @@ class GitHubClient:
             perms = (r.json() or {}).get("permissions") or {}
         except ValueError:
             perms = {}
-        return {"scopes": None if raw is None else [x.strip() for x in raw.split(",") if x.strip()],
+        try:
+            full = str((r.json() or {}).get("full_name") or "")
+        except ValueError:
+            full = ""
+        return {"scopes": None if raw is None else [x.strip() for x in raw.split(",") if x.strip()], "full_name": full,
                 "push": bool(perms.get("push")) if isinstance(perms, dict) and "push" in perms else None}
+
+    def family_probe(self, owner: str, repo: str) -> None:
+        """A harmless authenticated GET on the issues endpoint family; raises if the token cannot even read it."""
+        _name(owner, "owner"), _name(repo, "repo")
+        self._request("GET", f"/repos/{owner}/{repo}/issues", params={"per_page": 1})
+
+    def repo_labels(self, owner: str, repo: str) -> list[str]:
+        _name(owner, "owner"), _name(repo, "repo")
+        return [str(x.get("name")) for x in self._pages(f"/repos/{owner}/{repo}/labels") if isinstance(x, dict)]
+
+    def write(self, method: str, path: str, body: dict | None = None):
+        """THE write door (G3): POST/PATCH/DELETE on the issues family of ONE repo, api.github.com only, no redirects.
+        Callers pass a repo already checked against the owner's allow-list by github_write.execute()."""
+        if not _write_allowed(method, path):
+            raise GitHubError("GITHUB_BAD_ARGUMENT", "this endpoint is not an allowed write")
+        r = self._request(method, path, write=True, **({"json": body} if body is not None else {}))
+        try:
+            return r.json() if r.content else {}
+        except ValueError:
+            return {}
 
     def me(self) -> dict:
         return {"login": self._json("GET", "/user").get("login")}
@@ -208,6 +279,10 @@ class FakeGitHub:
         self.fail: tuple[int, dict] | None = None
         self.scopes: str | None = "repo"        # X-OAuth-Scopes of a classic token; None = a fine-grained token
         self.push: bool | None = True           # permissions.push the repo reports for this token
+        self.rename = ""                        # full_name the repo API reports (a renamed/transferred repo); "" = as asked
+        self.write_fail: tuple[int, dict] | None = None   # forces this answer for POST/PATCH/DELETE only (reads still pass)
+        self.bodies: list = []                  # JSON bodies of the writes, in order
+        self.labels = ["bug", "P1"]             # labels that exist on the repo
         self.transport = httpx.MockTransport(self._handle)
 
     def _handle(self, req: httpx.Request) -> httpx.Response:
@@ -217,13 +292,20 @@ class FakeGitHub:
             return httpx.Response(self.fail[0], headers=self.fail[1], json={"message": "x"})
         p, page = req.url.path, int(req.url.params.get("page", "1"))
         hdr = {"x-ratelimit-remaining": "4999", "x-ratelimit-reset": "1790000000"}
+        if req.method != "GET" and p != "/graphql":
+            return self._write(req, p, hdr)
+        if p.endswith("/labels"):
+            return httpx.Response(200, headers=hdr, json=[{"name": n} for n in self.labels])
         if p == "/user":
             return httpx.Response(200, headers=hdr, json={"login": "octo"})
         if re.fullmatch(r"/repos/[^/]+/[^/]+", p):        # the repo itself: scopes header + permissions (write_probe)
             h = dict(hdr)
             if self.scopes is not None:
                 h["x-oauth-scopes"] = self.scopes
-            return httpx.Response(200, headers=h, json={"permissions": {"push": self.push}} if self.push is not None else {})
+            j = {"full_name": self.rename or p[len("/repos/"):]}
+            if self.push is not None:
+                j["permissions"] = {"push": self.push}
+            return httpx.Response(200, headers=h, json=j)
         if p == "/user/repos":
             return httpx.Response(200, headers=hdr, json=[{"full_name": f"octo/r{page}-{i}", "private": True,
                                                            "default_branch": "main"} for i in range(PER_PAGE)])
@@ -246,6 +328,19 @@ class FakeGitHub:
         return httpx.Response(404, json={"message": "Not Found"})
 
 
+    def _write(self, req: httpx.Request, p: str, hdr: dict) -> httpx.Response:
+        if self.write_fail:
+            return httpx.Response(self.write_fail[0], headers={**hdr, **self.write_fail[1]}, json={"message": "x"})
+        self.bodies.append(json.loads(req.content) if req.content else None)
+        if req.method == "POST" and p.endswith("/issues"):
+            return httpx.Response(201, headers=hdr, json={"number": 7, "html_url": "https://github.com/octo/r/issues/7"})
+        if req.method == "POST" and p.endswith("/comments"):
+            return httpx.Response(201, headers=hdr, json={"id": 55, "html_url": "https://github.com/octo/r/issues/7#c55"})
+        if req.method == "PATCH":
+            return httpx.Response(200, headers=hdr, json={"number": int(p.rsplit("/", 1)[1]), "state": "open"})
+        return httpx.Response(200, headers=hdr, json=[{"name": n} for n in self.labels])
+
+
 # ------------------------------------------------------------------------------------------ feature + CLI
 def _probe(c: feat.ProbeCtx) -> tuple[bool, str]:
     if not connected(c.home):
@@ -265,12 +360,24 @@ feat.register("github", "GitHub (קריאה בלבד)", "GitHub (read only)", Fa
 def add_cli(sub) -> None:
     h = sub.add_parser("github", help="GitHub (read only): `status` shows the connection; `token` saves a read-only "
                                        "token (asked privately); `off` deletes it. Switch on: `jarvis features on github`")
-    h.add_argument("action", choices=["status", "token", "off", "write"])
-    h.add_argument("write_action", nargs="?", choices=["status", "on", "off"], default=None,
-                   help="with `write`: the GitHub write switch (V7 G2; nothing is written yet)")
+    h.add_argument("action", choices=["status", "token", "off", "write", "issue"])
+    h.add_argument("write_action", nargs="?", default=None,
+                   choices=["status", "on", "off", "create", "edit", "comment", "labels-add", "labels-remove"],
+                   help="with `write`: status|on|off (the GitHub write switch); with `issue`: create|edit|comment|"
+                        "labels-add|labels-remove (each asks your approval, shows the exact text)")
+    h.add_argument("number", nargs="?", default=None, help="with `issue`: the issue or pull request number")
+    h.add_argument("--repo", default="", help="owner/repo from github_repos (default: the only one listed)")
+    h.add_argument("--title", default=None)
+    h.add_argument("--body", default=None)
+    h.add_argument("--state", default=None, choices=["open", "closed"])
+    h.add_argument("--label", action="append", default=None, help="an existing label (repeatable)")
+    h.add_argument("--assignee", action="append", default=None, help="a GitHub login (repeatable)")
 
 
 def cmd_github(a, cfg, home) -> int:
+    if a.action == "issue":
+        from .github_issues import cmd_github_issue
+        return cmd_github_issue(a, cfg, home)
     if a.action == "write":
         from .github_write import cmd_github_write
         return cmd_github_write(a, cfg, home)
