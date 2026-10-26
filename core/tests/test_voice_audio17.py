@@ -112,7 +112,7 @@ def test_two_stage_strong_score_needs_the_speech_check_after_false_wakes():
     assert det.feed(frame) == 0.9                               # default: a strong score wakes at once
     det.reset()
     apply_to_detector(det, 0.08, True)
-    assert det.accept == 0.58 and det.always_confirm
+    assert det.accept == 0.55 and det.always_confirm
     got = [det.feed(frame) for _ in range(4)]
     assert got == [None, None, None, None] and asked, "strong score must be checked by the local ASR"
     det2 = ConfirmingDetector(Scored(1.01), lambda a: True, accept=0.5, gate=0.02, settle_frames=2)

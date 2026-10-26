@@ -13,6 +13,8 @@ The audit log holds the device, the action and the plan number only.
 """
 from __future__ import annotations
 
+import re
+
 from . import logs
 from .goal_plans import MAX_ATTEMPTS
 
@@ -46,6 +48,17 @@ def _short(s: object) -> str:
     return " ".join(str(s or "").split())[:SHORT]
 
 
+_CODE_HEAD = re.compile(r"([A-Z][A-Z0-9_]{2,40}): .+", re.S)
+
+
+def _phone_error(s: object) -> str:
+    """F12 #206: a failed step's error is 'CODE: tool message'; the phone gets the code only, never the tool's own text."""
+    m = _CODE_HEAD.fullmatch(" ".join(str(s or "").split()))
+    if m:
+        return m.group(1)
+    return "STEP_FAILED" if str(s or "").strip() else ""      # never the tool's free text
+
+
 def _clean(p: dict) -> bool:
     """Only an untainted plan with no blocked or unknown step may be continued from the phone."""
     return not p.get("tainted") and not any(s["status"] in ("blocked", "unknown", "running") for s in p.get("steps", []))
@@ -67,7 +80,7 @@ def _can(p: dict) -> list[str]:
 
 def brief(p: dict) -> dict:
     steps = [{"n": int(s["idx"]) + 1, "tool": str(s["tool"])[:64], "why": _short(s.get("why")), "status": s["status"],
-              "consequential": bool(s.get("consequential")), "error": _short(s.get("error"))} for s in p.get("steps", [])]
+              "consequential": bool(s.get("consequential")), "error": _phone_error(s.get("error"))} for s in p.get("steps", [])]
     can = _can(p)
     return {"id": p["id"], "title": _short(p["title"]), "state": p["state"], "progress": p.get("progress", 0),
             "goal": p.get("goal_id") or None, "note": _short(p.get("note")), "steps": steps, "can": can,

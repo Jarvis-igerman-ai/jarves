@@ -30,8 +30,8 @@ Every green `main` is already a beta (layer 2). A stable release promotes a beta
    (dashboard texts, `locales/parts`) and `python core/tools/changelog_build.py --write` (`changelog.d` into CHANGELOG.md).
 3. Make the sign-off sheet (`manual_test_sheet.py`, below), install the newest beta, test it and sign it off
    (`jarvis release signoff ... --finish`); commit the signed sheet.
-4. Check that `main` is green and the latest `nightly` run is green (no five-nights rule, owner 26 Oct 2026). Fill and sign
-   `docs/release/SIGN_OFF_<version>.md`, then create the `docs/release/SIGNED_<version>` file (owner, date, commit lines).
+4. Check that `main` is green. There is no nightly requirement and no five-nights rule (owner 26 Oct 2026). Fill and sign
+   `docs/release/SIGN_OFF_<version>.md`. That one signed sheet is the only owner signature: there is no second SIGNED file.
 5. Dry run: Actions > `jarves-release` > Run workflow with the tag and `dry_run` ticked (or
    `python core/tools/release_gate.py --tag v<version> --sha <commit>`); it lists everything still missing.
 6. Tag the signed-off commit and push the tag (`git tag v<version> <sha> && git push origin v<version>`):
@@ -49,11 +49,7 @@ All of these must hold, else the tag is refused:
   a status starting with fixed, closed, accepted, wontfix, duplicate, done, resolved, verified or pass is closed. Tables
   without a severity column are ignored, and every problem names its file. A new bug table must keep these columns
   (`test_every_bug_table_in_the_repo_has_a_status_the_gate_can_read`);
-- the latest completed `nightly` run on `main` is green and at most 2 days old (one run is enough; the nightly report stays as
-  information);
-- no open GitHub issue labelled P0-P2 (planned work labelled `enhancement` or `v5` to `v9` is not a defect);
-- the owner's `docs/release/SIGNED_<X.Y.Z>` file exists (`owner:`, `date:` and `commit:` lines; the commit is the tested one and
-  follows the same "tag commit or docs-only ancestor" rule). Without it the gate refuses the tag;
+- no open GitHub issue labelled P0-P2 (planned work labelled `enhancement`, `v5` to `v9` or `4.5.1` is not a defect, but only when the issue is not also labelled `bug`). The ONE exception is the owner-only label `known-issue-4.5`: an open P0-P2 carrying it is an accepted known issue for the 4.5 stable, not a blocker even when labelled `bug`; the gate prints each as "accepted known issues" (number + title) and the owner applies the label only by his own decision. If GitHub cannot be read the gate refuses;
 - the owner's **manual test sign-off** `docs/reviews/MANUAL_TEST_<X.Y.Z>.md` is complete and signed, and the tested beta
   commit equals the tag commit, or is an ancestor with **only documentation changes** since.
 
@@ -165,3 +161,28 @@ PR stop qualifying (only if `autolabel.yml` added it: marker label `automerge-au
 
 Switch: `gh variable set ENABLE_AUTOLABEL --body all` (also bugfix PRs), `--body false` (off), unset or `true` (default:
 docs, tests, guides). Dependabot has its own switch `DEPENDABOT_AUTOMERGE=false`. The workflow never checks out PR code.
+
+## Owner settings for the stable release (issues #543, #544)
+
+These are GitHub settings only the repo owner can change; agents never change them. Until they are done, no stable tag is
+created without the coordinator checking `git log` of the sign-off sheet. Each step is done in the browser on
+`https://github.com/Jarvis-igerman-ai/jarves` (Settings), about 10 minutes in all.
+
+1. **Code owners (reads `.github/CODEOWNERS`).** Settings, Rules, Rulesets (or Branches), the rule for `main`: tick
+   "Require a pull request before merging", then "Require review from Code Owners". The file lists the sign-off sheets, the
+   release tooling and the workflows under `@igalgerman`. Save.
+2. **Only the owner can create stable tags.** Settings, Rules, Rulesets, New ruleset, New tag ruleset. Name: `stable tags`.
+   Enforcement: Active. Target pattern: `v*.*.*`. Rules: tick "Restrict creations", "Restrict updates" and "Restrict
+   deletions". Bypass list: add only yourself (the repository owner or an organization admin). Save.
+3. **A protected environment for the release secrets.** Settings, Environments, New environment, name it exactly
+   `stable-release`. Under "Deployment branches and tags" choose "Selected branches and tags", add a TAG rule `v*.*.*` (no
+   branch rule). Tick "Required reviewers" and add yourself. Save.
+4. **Move the two secrets into that environment.** In the same page, "Environment secrets", add `RELEASES_TOKEN` and
+   `JARVES_UPDATE_SIGNING_KEY` with the same values. Then in Settings, Secrets and variables, Actions, delete the two
+   repository secrets of the same names. (The publish job must name `environment: stable-release` first: tracked in #544;
+   do step 4 only after that change is merged, or the next publish cannot read the secrets.)
+5. **Check.** Ask a non-owner account (or an agent session) to try `git push origin v9.9.9`: it must be refused. Try a
+   workflow run from a side branch: the `stable-release` environment must ask for your approval, or refuse the branch.
+
+Safe default while these are not done: the coordinator does not create or accept a stable tag, and docs-only PRs that touch
+the owner paths above carry `no-automerge`.

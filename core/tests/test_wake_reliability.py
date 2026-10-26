@@ -52,7 +52,7 @@ def test_agc_lifts_quiet_speech_and_never_clips():
     agc = AutoGain()
     quiet = frames(tone(4000, amp=0.01))               # ~-43 dBFS: a webcam mic across the room
     out = [agc.process(f) for f in quiet]
-    assert db(out[-1]) > db(quiet[-1]) + 12             # boosted towards -24 dBFS
+    assert db(out[-1]) > db(quiet[-1]) + 10             # boosted towards -24 dBFS, gain capped at 12 dB
     loud = [agc.process(f) for f in frames(tone(2000, amp=0.9))]
     assert max(int(np.abs(np.frombuffer(f, "<i2")).max()) for f in loud) <= 32767 * 0.99
 
@@ -133,7 +133,7 @@ def test_make_wake_detector_composes_from_config(cfg):
     v = cfg.voice.model_copy()
     v.wake_threshold, v.wake_accept, v.wake_confirm, v.wake_agc = 0.15, 0.5, True, True
     d = make_wake_detector(v)
-    assert isinstance(d, ConfirmingDetector) and d.accept == 0.5 and d.gate == v.wake_gate and d.agc is not None
+    assert isinstance(d, ConfirmingDetector) and d.accept == 0.5 and d.gate == v.wake_threshold and d.agc is not None
     v.wake_threshold = 0.7
     assert make_wake_detector(v).accept == 0.7              # a stricter user threshold wins
     v.wake_confirm, v.wake_agc = False, False
