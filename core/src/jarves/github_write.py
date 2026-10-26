@@ -41,6 +41,7 @@ from . import github_client as gc
 from .channels_common import targets
 
 FEATURE = "github_write"
+APPROVE_FEATURE = "github_approve_reviews"      # a SEPARATE owner switch for review event APPROVE (#578): default OFF, beta
 MAX_WRITES, WINDOW_S = 10, 600.0
 GRANT_TTL_S = 300.0
 # kind -> token permission class the owner must grant (classic tokens: scope `repo`). Reserved names for G3-G5.
@@ -62,10 +63,10 @@ MAX_APPROVAL_CHARS = 1700                  # ApprovalService.ask cuts a prompt a
 _NOT_APPROVED = frozenset({"GITHUB_WRITE_FORBIDDEN", "GITHUB_WRITE_OFF", "GITHUB_WRITE_UNTRUSTED", "GITHUB_WRITE_REPO",
                            "GITHUB_WRITE_SCOPE", "GITHUB_WRITE_RATE_LIMIT", "GITHUB_WRITE_BAD_ARGUMENT", "GITHUB_WRITE_DUPLICATE",
                            "GITHUB_WRITE_DENIED", "GITHUB_WRITE_TIMEOUT", "GITHUB_WRITE_UNREADABLE", "GITHUB_WRITE_AUDIT_TAMPERED",
-                           "GITHUB_WRITE_AGENT_SESSION"})   # every other audited result = the owner approved it
+                           "GITHUB_WRITE_AGENT_SESSION", "GITHUB_WRITE_APPROVE_OFF"})   # every other audited result = the owner approved it
 RESERVED = "GITHUB_WRITE_RESERVED"          # a slot taken before the approval; the final row with the same rid replaces it
 DUP_WINDOW_S = 600.0                       # the same approved action is not executed twice within this time
-_TOGGLES = frozenset({"issue.edit", "labels.add", "labels.remove"})   # a state: only the latest write on the target counts
+_TOGGLES = frozenset({"issue.edit", "labels.add", "labels.remove", "pr.update"})   # a state: only the latest write on the target counts
 _XREF = re.compile(r"(?<![\w/.-])[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+#\d+")
 _LINK = re.compile(r"https?://|www\.|\b[a-z0-9-]+\.(?:com|org|net|io|dev)\b", re.I)
 
@@ -351,6 +352,14 @@ class GitHubWriter:
             return self._refuse(a, "GITHUB_WRITE_BAD_ARGUMENT", "action too large to show in full to the owner", origin)
         if not self.feats.active(FEATURE):
             return self._refuse(a, "GITHUB_WRITE_OFF", "GitHub writes are off (owner: jarvis github write on)", origin)
+        kind = a.kind.strip().lower()
+        if (kind.startswith("pr.") or kind.startswith("ci.")) and origin != "user":     # CLI only: held HERE, not by a source scan
+            return self._refuse(a, "GITHUB_WRITE_FORBIDDEN", "pull request and CI actions are command line only: no model or other route",
+                                origin)
+        if kind == "pr.review" and str(a.payload.get("event")) == "APPROVE" and not self.feats.active(APPROVE_FEATURE):
+            return self._refuse(a, "GITHUB_WRITE_APPROVE_OFF", "approving a pull request needs its own owner switch "
+                                f"(jarvis features on {APPROVE_FEATURE}); comments and change requests need only the normal approval",
+                                origin)
         if untrusted or origin not in ("user", "model"):
             return self._refuse(a, "GITHUB_WRITE_UNTRUSTED", "untrusted text was read this turn; no write now", origin)
         if a.repo.strip().lower() not in self.repos:
@@ -454,6 +463,10 @@ class GitHubWriter:
             if e.code == "GITHUB_WRITE_PERMISSION":        # the answer after approval is authoritative
                 msg += f" (needs {KIND_PERMS.get(a.kind.strip().lower(), 'write access')} on this repo)"
             return self._refuse(a, e.code, msg, origin, rid)
+        except Exception as e:                         # noqa: BLE001 - e.g. httpx.InvalidURL / a transport error after approval:
+            # the slot gets a final row (the answer is unknown, so it counts and the duplicate guard applies); no traceback (#578)
+            return self._refuse(a, "GITHUB_WRITE_UNKNOWN", f"the write could not be confirmed ({type(e).__name__}); "
+                                "check GitHub before trying again", origin, rid)
         self._audit(a, "OK", origin, rid)
         return WriteResult(ok=True, code="OK", data=data)
 

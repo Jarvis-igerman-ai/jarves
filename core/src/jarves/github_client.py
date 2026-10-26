@@ -27,8 +27,8 @@ START_COMMAND = "jarvis github token"
 API_VERSION = "2022-11-28"
 TIMEOUT = 15.0
 PER_PAGE, MAX_PAGES = 30, 3
-_NAME = re.compile(r"^(?!\.)[A-Za-z0-9_.-]{1,100}$")
-_REF = re.compile(r"^(?!/)(?!.*\.\.)(?!.*//)(?!.*/$)[A-Za-z0-9_./-]{1,200}$")
+_NAME = re.compile(r"(?!\.)[A-Za-z0-9_.-]{1,100}")
+_REF = re.compile(r"(?!/)(?!.*\.\.)(?!.*//)(?!.*/$)[A-Za-z0-9_./-]{1,200}")
 _TOKEN = re.compile(r"(github_pat_[A-Za-z0-9_]+|gh[pousr]_[A-Za-z0-9]+|(?i:bearer|token|basic)\s+[A-Za-z0-9._~+/=-]{8,}|\b[0-9a-f]{40}\b)")
 READ_SCOPES = ["Metadata", "Issues", "Pull requests", "Actions", "Checks", "Commit statuses"]   # all read-only
 
@@ -73,10 +73,10 @@ def broad_scopes(scopes: list[str] | None) -> list[str]:
 
 _SEG = r"(?!\.\.?/)[A-Za-z0-9_.-]{1,100}"            # owner / repo; never a "." or ".." segment
 _WRITE_PATHS = {                                       # each verb only on its own endpoint templates (issues family)
-    "POST": re.compile(rf"^/repos/{_SEG}/{_SEG}/(issues(/[1-9]\d{{0,8}}/(comments|labels))?|pulls|pulls/[1-9]\d{{0,8}}/reviews"
-                       rf"|actions/runs/[1-9]\d{{0,14}}/(rerun|rerun-failed-jobs))$"),         # G4: pulls family + CI re-run only
-    "PATCH": re.compile(rf"^/repos/{_SEG}/{_SEG}/(issues|pulls)/[1-9]\d{{0,8}}$"),
-    "DELETE": re.compile(rf"^/repos/{_SEG}/{_SEG}/issues/[1-9]\d{{0,8}}/labels/(?!\.\.?$)[^/?#]{{1,300}}$"),
+    "POST": re.compile(rf"/repos/{_SEG}/{_SEG}/(issues(/[1-9]\d{{0,8}}/(comments|labels))?|pulls|pulls/[1-9]\d{{0,8}}/reviews"
+                       rf"|actions/runs/[1-9]\d{{0,14}}/(rerun|rerun-failed-jobs))", re.ASCII),         # G4: pulls family + CI re-run only
+    "PATCH": re.compile(rf"/repos/{_SEG}/{_SEG}/(issues|pulls)/[1-9]\d{{0,8}}", re.ASCII),
+    "DELETE": re.compile(rf"/repos/{_SEG}/{_SEG}/issues/[1-9]\d{{0,8}}/labels/(?!\.\.?$)[^/?#\r\n]{{1,300}}", re.ASCII),
 }
 _WRITE_VERBS = tuple(_WRITE_PATHS)
 
@@ -84,7 +84,7 @@ _WRITE_VERBS = tuple(_WRITE_PATHS)
 def _write_allowed(method: str, path: str) -> bool:
     """Verb bound to its endpoint template; no dot segment (httpx would collapse `labels/.` to `labels` = remove ALL)."""
     rx = _WRITE_PATHS.get(method)
-    return bool(rx and rx.match(path) and "%2e" not in path.lower())
+    return bool(rx and rx.fullmatch(path) and "%2e" not in path.lower())
 
 
 class TokenStore:
@@ -114,7 +114,7 @@ def connected(home: Path | None) -> bool:
 
 
 def _name(v: str, what: str) -> str:
-    if not isinstance(v, str) or not _NAME.match(v):
+    if not isinstance(v, str) or not _NAME.fullmatch(v):
         raise GitHubError("GITHUB_BAD_ARGUMENT", f"bad {what}")
     return v
 
@@ -224,6 +224,18 @@ class GitHubClient:
                 "labels": [str(x.get("name")) for x in j.get("labels") or [] if isinstance(x, dict)],
                 "assignees": [str(x.get("login")) for x in j.get("assignees") or [] if isinstance(x, dict)]}
 
+    def workflow_run(self, owner: str, repo: str, run_id: str) -> dict:
+        """One workflow run (a READ) for the CI re-run popup: workflow name, event, branch, head repo, fork flag, actor."""
+        _name(owner, "owner"), _name(repo, "repo")
+        if not re.fullmatch(r"[1-9][0-9]{0,14}", str(run_id), re.ASCII):
+            raise GitHubError("GITHUB_BAD_ARGUMENT", "bad run id")
+        j = self._json("GET", f"/repos/{owner}/{repo}/actions/runs/{int(run_id)}")
+        j = j if isinstance(j, dict) else {}
+        hr = j.get("head_repository") if isinstance(j.get("head_repository"), dict) else {}
+        return {"name": str(j.get("name") or ""), "event": str(j.get("event") or ""), "branch": str(j.get("head_branch") or ""),
+                "head_repo": str(hr.get("full_name") or ""), "fork": bool(hr.get("fork")),
+                "actor": str((j.get("actor") or {}).get("login") or "") if isinstance(j.get("actor"), dict) else ""}
+
     def write(self, method: str, path: str, body: dict | None = None):
         """THE write door (G3): POST/PATCH/DELETE on the issues family of ONE repo, api.github.com only, no redirects.
         Callers pass a repo already checked against the owner's allow-list by github_write.execute()."""
@@ -256,7 +268,7 @@ class GitHubClient:
 
     def check_runs(self, owner: str, repo: str, ref: str) -> list[dict]:
         _name(owner, "owner"), _name(repo, "repo")
-        if not _REF.match(ref or ""):
+        if not _REF.fullmatch(ref or ""):
             raise GitHubError("GITHUB_BAD_ARGUMENT", "bad ref")
         return [{"name": c.get("name"), "status": c.get("status"), "conclusion": c.get("conclusion")}
                 for c in self._pages(f"/repos/{owner}/{repo}/commits/{ref}/check-runs", "check_runs")]
@@ -297,7 +309,13 @@ class FakeGitHub:
         self.labels = ["bug", "P1"]             # labels that exist on the repo
         self.issue_labels, self.issue_assignees = ["bug"], ["octocat"]   # what issue N has now (GET /issues/N)
         self.pr_numbers: set[str] = {"2"}       # issue numbers that are really pull requests
+        self.run_info: dict = {}                # overrides for GET /actions/runs/N (name, event, head_branch, head_repository, actor)
         self.transport = httpx.MockTransport(self._handle)
+
+    def run_json(self, repo: str, run_id: str) -> dict:
+        base = {"id": int(run_id), "name": "CI", "event": "pull_request", "head_branch": "feature-x",
+                "head_repository": {"full_name": repo, "fork": False}, "actor": {"login": "octo"}}
+        return {**base, **self.run_info}
 
     def _handle(self, req: httpx.Request) -> httpx.Response:
         self.calls.append((req.method, req.url.path))
@@ -317,6 +335,9 @@ class FakeGitHub:
             if m.group(1) in self.pr_numbers:
                 j["pull_request"] = {}
             return httpx.Response(200, headers=hdr, json=j)
+        m = re.fullmatch(r"/repos/([^/]+/[^/]+)/actions/runs/(\d+)", p)
+        if m:
+            return httpx.Response(200, headers=hdr, json=self.run_json(m.group(1), m.group(2)))
         if p == "/user":
             return httpx.Response(200, headers=hdr, json={"login": "octo"})
         if re.fullmatch(r"/repos/[^/]+/[^/]+", p):        # the repo itself: scopes header + permissions (write_probe)

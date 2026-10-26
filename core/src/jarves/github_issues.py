@@ -18,8 +18,8 @@ from . import github_client as gc
 from . import github_write as gw
 
 TITLE_MAX, BODY_MAX, LABEL_MAX, LABELS_MAX, ASSIGNEES_MAX = 200, 800, 50, 10, 5
-_NUM = re.compile(r"^[1-9][0-9]{0,8}$")
-_LOGIN = re.compile(r"^[A-Za-z0-9](?:[A-Za-z0-9-]{0,38})$")
+_NUM = re.compile(r"[1-9][0-9]{0,8}", re.ASCII)   # always .fullmatch: "$" would accept a trailing newline (#578)
+_LOGIN = re.compile(r"[A-Za-z0-9](?:[A-Za-z0-9-]{0,38})")
 _CTRL = re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f-\x9f­؜᠎​-‏ -‮⁠-⁯"
                    r"﻿￹-￻]")      # controls (C0, C1/ANSI) and invisible / bidi marks: the approval must show it all
 _BROAD_MENTION = re.compile(r"(?<![\w@`])@(?:all|everyone|channel|here)\b|(?<![\w@`])@[A-Za-z0-9][\w-]*/[\w.-]+", re.I)
@@ -44,7 +44,7 @@ def _names(v, cap_n: int, cap_len: int, what: str, login: bool = False) -> str:
     if not isinstance(v, list) or not 1 <= len(v) <= cap_n or len({str(x).lower() for x in v}) != len(v):
         return f"{what} must be a list of 1 to {cap_n} different names"
     for x in v:
-        if login and not (isinstance(x, str) and _LOGIN.match(x)):
+        if login and not (isinstance(x, str) and _LOGIN.fullmatch(x)):
             return f"bad {what} name"
         why = _text(x, cap_len, what)
         if why or (not login and (x.strip(".") == "" or "/" in x or "?" in x or "#" in x or "%" in x or x != x.strip())):
@@ -57,7 +57,7 @@ def validate(a: gw.WriteAction) -> str:
     kind, p = a.kind.strip().lower(), a.payload
     if not isinstance(p, dict) or kind not in FIELDS or set(p) - FIELDS[kind] or not p:
         return "payload fields are not allowed for this kind"
-    if (a.target == "") != (kind == "issue.create") or (a.target and not _NUM.match(a.target)):
+    if (a.target == "") != (kind == "issue.create") or (a.target and not _NUM.fullmatch(a.target)):
         return "target must be the issue number (empty only for a new issue)"
     checks = {"title": lambda v: _text(v, TITLE_MAX, "title"), "body": lambda v: _text(v, BODY_MAX, "body"),
               "state": lambda v: "" if v in ("open", "closed") else "state must be open or closed",

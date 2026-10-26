@@ -1,8 +1,8 @@
 order = 30
 category = "system"
-features = ["github_write"]
+features = ["github_write", "github_approve_reviews"]
 aliases = ["פתח issue", "תגובה ב-github", "open an issue", "comment on github", "כתיבה ל-github", "github write", "github writes", "הרשאת כתיבה", "אישור כתיבה"]
-error_codes = ["GITHUB_WRITE_OFF", "GITHUB_WRITE_FORBIDDEN", "GITHUB_WRITE_UNTRUSTED", "GITHUB_WRITE_REPO", "GITHUB_WRITE_SCOPE", "GITHUB_WRITE_RATE_LIMIT", "GITHUB_WRITE_DENIED", "GITHUB_WRITE_TIMEOUT", "GITHUB_WRITE_NOT_IMPLEMENTED", "GITHUB_WRITE_BAD_ARGUMENT", "GITHUB_WRITE_DUPLICATE", "GITHUB_WRITE_PERMISSION", "GITHUB_WRITE_INVALID", "GITHUB_WRITE_REDIRECT", "GITHUB_WRITE_UNKNOWN", "GITHUB_WRITE_AUDIT_TAMPERED", "GITHUB_WRITE_AGENT_SESSION", "GITHUB_RATE_LIMIT", "GITHUB_NOT_FOUND", "GITHUB_BAD_ARGUMENT"]
+error_codes = ["GITHUB_WRITE_OFF", "GITHUB_WRITE_FORBIDDEN", "GITHUB_WRITE_UNTRUSTED", "GITHUB_WRITE_REPO", "GITHUB_WRITE_SCOPE", "GITHUB_WRITE_RATE_LIMIT", "GITHUB_WRITE_DENIED", "GITHUB_WRITE_TIMEOUT", "GITHUB_WRITE_NOT_IMPLEMENTED", "GITHUB_WRITE_BAD_ARGUMENT", "GITHUB_WRITE_DUPLICATE", "GITHUB_WRITE_PERMISSION", "GITHUB_WRITE_INVALID", "GITHUB_WRITE_REDIRECT", "GITHUB_WRITE_UNKNOWN", "GITHUB_WRITE_AUDIT_TAMPERED", "GITHUB_WRITE_AGENT_SESSION", "GITHUB_WRITE_APPROVE_OFF", "GITHUB_RATE_LIMIT", "GITHUB_NOT_FOUND", "GITHUB_BAD_ARGUMENT"]
 title_he = "GitHub: כתיבה באישור"
 title_en = "GitHub: writes with approval"
 what_he = "אפשר לבקש ממני לפתוח או לערוך issue, להגיב ולהוסיף או להסיר תוויות ב-GitHub. כל שינוי מוצג לכם בדיוק כפי שהוא (גם אם יש בו @ או קישור, עם אזהרה), ורק אחרי אישור שלכם הוא יתבצע. אפשר גם לפתוח או לעדכן בקשת מיזוג (PR), להגיב עליה, לכתוב ביקורת ולהריץ שוב בדיקת CI. מיזוג עצמו לא נעשה כאן (בהמשך, רק דרך תור המיזוג)."
@@ -115,3 +115,7 @@ he = "הפקודה אומרת שהיא נדחתה כי רץ סוכן או שאי
 en = "The command says it was refused because an agent runs it or there is no interactive terminal (GITHUB_WRITE_AGENT_SESSION)"
 fix_he = "פתחו טרמינל רגיל בעצמכם והריצו שם את הפקודה; החלון הקופץ יופיע במחשב."
 fix_en = "Open a normal terminal yourself and run the command there; the popup appears on the computer."
+
+[[steps]]
+he = "אישור בקשת מיזוג (APPROVE) מוגן במתג נפרד, כבוי כברירת מחדל ובטא: jarvis features on github_approve_reviews. בלעדיו jarvis github pr review עם APPROVE נדחה (GITHUB_WRITE_APPROVE_OFF). הערות ובקשת שינויים (COMMENT, REQUEST_CHANGES) לא צריכות אותו. חלון האישור של APPROVE מזהיר שהוא יכול למלא ביקורת נדרשת למיזוג. כל הפעולות על בקשות מיזוג ובדיקות (pr, ci) עובדות רק משורת הפקודה שלכם, לא דרך המודל. לפני הרצה חוזרת של CI החלון מציג את שם ה-workflow, הענף, ואם ההרצה באה מ-fork."
+en = "Approving a pull request (APPROVE) has its own switch, off by default and beta: jarvis features on github_approve_reviews. Without it, jarvis github pr review with APPROVE is refused (GITHUB_WRITE_APPROVE_OFF). Comments and change requests (COMMENT, REQUEST_CHANGES) do not need it. The APPROVE window warns that it can satisfy a required review for merging. All pull request and CI actions (pr, ci) work only from your own command line, never through the model. Before a CI re-run the window shows the workflow name, the branch and whether the run came from a fork."
