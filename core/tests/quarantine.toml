@@ -8,3 +8,15 @@
 # issue  = the showstopper issue number
 # since  = date quarantined (UTC)
 # reason = one line: what flakes and where
+
+[[test]]
+id = "test_mobile_phone_e2e.py::test_qr_payload_decodes_and_pairing_is_single_use"
+issue = 555
+since = "2026-10-26"
+reason = "dashboard load timeout in the Windows real-browser job (ERR_NO_BUFFER_SPACE family, #547)"
+
+[[test]]
+id = "test_runtime.py::test_hide_terminates_a_window_that_does_not_close"
+issue = 556
+since = "2026-10-26"
+reason = "2 s wall-clock bound fails on a loaded Windows runner (2.53 s)"
