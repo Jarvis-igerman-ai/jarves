@@ -458,9 +458,89 @@ def _site_dirs(installed_pkg: Path) -> list[Path]:
     return [d for d in dirs if d.is_dir()]
 
 
-def _module_present(top: str, dirs: list[Path]) -> bool:
+_ZIP_TOPS: dict[tuple[str, int, int], set[str] | None] = {}      # per run: (path, size, mtime) -> top-level names
+_ZIP_MAX_ENTRIES = 200_000
+_ARCHIVE_EXT = (".zip", ".egg", ".whl")
+
+
+def _zip_tops(zp: Path) -> set[str] | None:
+    """Top-level module/package names inside a zip archive (what the interpreter's zipimport would find), or None when
+    the archive is unreadable/corrupt/too big (fail closed: nothing in it counts as present). Names with absolute paths,
+    drive letters or '..' parts are ignored."""
+    import zipfile
+    try:
+        st = zp.stat()
+        key = (str(zp), st.st_size, int(st.st_mtime))
+    except OSError:
+        return None
+    if key in _ZIP_TOPS:
+        return _ZIP_TOPS[key]
+    tops: set[str] | None
+    try:
+        with zipfile.ZipFile(zp) as z:
+            names = z.namelist()
+        if len(names) > _ZIP_MAX_ENTRIES:
+            raise ValueError("too many entries")
+        tops = set()
+        for n in names:
+            n = n.replace("\\", "/")
+            parts = n.split("/")
+            if n.startswith("/") or ".." in parts or ":" in parts[0] or not parts[0]:
+                continue
+            first = parts[0]
+            if len(parts) > 1:
+                tops.add(first)
+            elif first.endswith(".py"):
+                tops.add(first[:-3])
+            elif "." in first and first.rsplit(".", 1)[1] in ("pyd", "so", "pyc"):
+                tops.add(first.split(".")[0])
+    except Exception:
+        tops = None
+    _ZIP_TOPS[key] = tops
+    return tops
+
+
+def _expand_pth(dirs: list[Path]) -> tuple[list[Path], list[Path]]:
+    """Honour *.pth files like site.py: plain lines name extra directories or zip archives (relative to the .pth's
+    folder); 'import' lines are never executed. Returns (directories, zip archives)."""
+    out_dirs = list(dirs)
+    zips: list[Path] = []
     for d in dirs:
+        try:
+            pths = sorted(d.glob("*.pth"))[:200]
+        except OSError:
+            continue
+        for pth in pths:
+            try:
+                lines = pth.read_text(encoding="utf-8-sig", errors="replace").splitlines()[:1000]
+            except OSError:
+                continue
+            for line in lines:
+                line = line.strip()
+                if not line or line.startswith("#") or line.startswith("import"):
+                    continue
+                t = d / line
+                if t.is_dir():
+                    if t not in out_dirs:
+                        out_dirs.append(t)
+                elif t.is_file() and t.suffix.lower() in _ARCHIVE_EXT:
+                    zips.append(t)
+    return out_dirs, zips
+
+
+def _module_present(top: str, dirs: list[Path]) -> bool:
+    """True when the interpreter would find `top` in these site folders: a package folder, a module file, or a top-level
+    entry of a zip archive named by a .pth file (or an extra .pth directory). Unreadable zips count as missing."""
+    import re
+    if not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", top):
+        return False
+    all_dirs, zips = _expand_pth(dirs)
+    for d in all_dirs:
         if (d / top).is_dir() or (d / (top + ".py")).is_file() or any(d.glob(top + ".*")):
+            return True
+    for zp in zips:
+        tops = _zip_tops(zp)
+        if tops is not None and top in tops:
             return True
     return False
 
@@ -564,7 +644,7 @@ def apply(installed_pkg: Path, src: Source, home: Path, hooks: Hooks, *, dry_run
     if missing and not has_deps:
         raise Refused("HOTFIX_NEW_DEPENDENCY", "an updated Python file imports a module that is not installed: "
                       + "; ".join(missing[:6]) + ": " + SLICE2, "change uv.lock in the same commit so the dependency is "
-                      "delivered, or use the full installer")
+                      "delivered, or use the full installer (an unreadable libraries archive also counts as missing)")
     if not plan.files and not has_deps and not has_bridge:
         return {"status": "nothing", "files": [], "pending_installer": pending,
                 "deps_already_installed": list(plan.deps.already_installed) if plan.deps else []}
