@@ -35,6 +35,14 @@ he = "פקודות (כל אחת מבקשת אישור ומציגה את הטקס
 en = "Commands (each asks your approval and shows the exact text): jarvis github issue create --repo owner/repo --title Title --body Text; jarvis github issue comment 12 --body Text; jarvis github issue edit 12 --state closed; jarvis github issue labels-add 12 --label bug; jarvis github issue labels-remove 12 --label bug. Limits: title up to 200 characters, text up to 800, up to 10 labels, up to 5 assignees. A mention of everyone or of a team (@all, @org/team) is refused."
 
 [[steps]]
+he = "מי מאשר: כתיבה ל-GitHub מאושרת רק בחלון הקופץ של JARVES במחשב. הפקודה jarvis approvals approve, הטלפון ולוח הבקרה מרחוק לא יכולים לאשר (הם רק יכולים לדחות). כשאתם מריצים jarvis github issue ... בטרמינל, תתבקשו להקליד שם 6 תווים ראשונים של מזהה הפעולה (Ref) כדי לאשר; בלי טרמינל אינטראקטיבי (צינור או סקריפט) הכתיבה נדחית. האישור קשור לפעולה המדויקת: שינוי כלשהו בטקסט מחייב אישור חדש."
+en = "Who approves: a GitHub write is approved only in the JARVES popup on the computer. The command jarvis approvals approve, the phone and the remote dashboard cannot approve (they can only deny). When you run jarvis github issue ... in a terminal you are asked to type the first 6 characters of the action's Ref there; without an interactive terminal (a pipe or script) the write is refused. The approval is bound to the exact action: any change of text needs a new approval."
+
+[[steps]]
+he = "מה החלון מזהיר עליו: עריכה (edit) מחליפה את כל התוויות או האחראים ולא מוסיפה: החלון מראה 'REPLACES labels: ישן -> חדש'. אם המספר הוא בקשת מיזוג, סגירה שלה סוגרת אותה. הפניה owner/repo#N, @אזכור וקישור מסומנים, ושיוך אחראי שולח לו התראה. קצב: עד 10 כתיבות ב-10 דקות, נספר מיומן הביקורת (גם אחרי הפעלה מחדש). ביקשתם אותה פעולה פעמיים תוך 10 דקות: השנייה נדחית, אבל מעבר בין מצבים (סגור, פתוח, סגור) מותר."
+en = "What the window warns about: an edit REPLACES the whole set of labels or assignees, it does not add: the window shows 'REPLACES labels: old -> new'. If the number is a pull request, closing it closes the PR. A reference owner/repo#N, an @mention and a link are flagged, and assigning someone sends them a notification. Rate: up to 10 writes per 10 minutes, counted from the audit log (also after a restart). The same action twice within 10 minutes: the second is refused, but a toggle (closed, open, closed) is allowed."
+
+[[steps]]
 he = "הדליקו: jarvis github write on. מצב: jarvis github write status."
 en = "Switch on: jarvis github write on. State: jarvis github write status."
 action = "feature_on:github_write"
@@ -71,8 +79,14 @@ fix_en = "Check on GitHub whether the issue or comment exists before trying agai
 [[problems]]
 he = "הוא אומר שהתווית לא קיימת או שהטקסט נדחה (GITHUB_WRITE_BAD_ARGUMENT)"
 en = "He says the label does not exist or the text was refused (GITHUB_WRITE_BAD_ARGUMENT)"
-fix_he = "תוויות לא נוצרות בידי: צרו אותה ב-GitHub. קצרו טקסט ארוך, והוציאו אזכור של כולם או של צוות."
-fix_en = "I never create labels: create it on GitHub. Shorten long text and remove mentions of everyone or a team."
+fix_he = "תוויות לא נוצרות בידי: צרו אותה ב-GitHub (ל-GitHub אין דגל שמונע יצירה: אני בודק רשימה עדכנית רגע לפני הכתיבה, ונשאר חלון של אלפיות שנייה). קצרו טקסט ארוך, והוציאו אזכור של כולם או של צוות."
+fix_en = "I never create labels: create it on GitHub (GitHub has no flag that forbids creating one: I re-read the list right before the write, which leaves a window of milliseconds). Shorten long text and remove mentions of everyone or a team."
+
+[[problems]]
+he = "ניסיתי לאשר מ-jarvis approvals approve או מהטלפון וזה נדחה"
+en = "I tried to approve from jarvis approvals approve or the phone and it was refused"
+fix_he = "זה במכוון: אשרו בחלון הקופץ של JARVES במחשב (או הקלידו את ה-Ref בטרמינל שהריץ את הפקודה)."
+fix_en = "This is by design: approve in the JARVES popup on the computer (or type the Ref in the terminal that ran the command)."
 
 [[problems]]
 he = "אמר שעדיין לא מומש"
