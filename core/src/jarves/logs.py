@@ -203,6 +203,7 @@ FIELD_CLASS: dict[str, str] = {
         tasks waited_s false_wakes good_wakes signal backend_busy tools_running delegations_open mic_level echo_level
         rejected times accept always_confirm tune_level
         trust refused
+        dropped duplicates already_skipped any_do_checked
         """),
     **_reg(SECRET, """
         token access_token refresh_token id_token id_token_hint api_key apikey secret secrets client_secret
