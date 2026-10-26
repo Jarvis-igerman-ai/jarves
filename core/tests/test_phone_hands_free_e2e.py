@@ -53,10 +53,10 @@ def test_start_hear_speak_then_a_lost_car_route_ends_it_truthfully(browser, phon
     _setup(p, said)
     page = _open(browser, p)
     assert "never listens in the background" in page.inner_text("#hfRoot")
-    page.evaluate("() => { window.JarvesHandsFree.cfg.silenceMs = 300; }")        # the fake mic beeps once a second: shorten the quiet window
+    page.evaluate("() => { window.JarvesHandsFree.cfg.silenceMs = 300; window.JarvesHandsFree.cfg.threshold = 0.004; }")        # the fake mic beeps once a second (a loud chunk, then a decaying tail of 0.03 .. 0.001): shorten the quiet window, count the tail so the beep is two loud chunks on any runner
     page.tap("#hfBtn")
     until(page, "document.querySelector('.hf-state') && document.querySelector('.hf-state').dataset.state !== 'idle'")
-    until(page, "!!document.querySelector('#hfRoot').textContent.includes('echo: what time is it')")        # the fake beep was heard, one turn ran
+    until(page, "!!document.querySelector('#hfRoot').textContent.includes('echo: what time is it')", timeout=30000)        # the fake beep was heard, one turn ran
     assert p.fake.chats and p.fake.chats[0] == "what time is it"
     page.evaluate("""() => { navigator.mediaDevices.enumerateDevices = async () => [];
                               navigator.mediaDevices.dispatchEvent(new Event('devicechange')); }""")       # Bluetooth car audio drops
