@@ -45,7 +45,7 @@ FEATURES: dict[str, object] = {
     "dev_manager": "dev", "dev_status": "dev", "files": (D, "the file workspace is browsed on the My files page"),
     "proactive_alerts": (D, "alerts are read and answered on the Alerts page"),
     "autonomy": (D, "autonomy proposals are approved on the Autonomy page"),
-    "background_core": "start", "display_control": "show", "tray_icon": "start", "autostart": "autostart",
+    "background_core": "start", "display_control": "show", "tray_icon": "start", "listening_dot": (D, "a pure switch; change it with `jarvis features`"), "autostart": "autostart",
     "update_check": "update", "beta_channel": "update", "auto_update": "update","release_signoff": "release", "proactive_help": (D, "a pure switch; change it with `jarvis features`"),
     "profiles": "profile", "context_trace": (D, "the context trace is a dashboard view of one conversation"),
     "browser": "browser", "browser_pilot": "browser", "helper": "approvals", "helper_readonly_auto": (D, "a pure switch; `jarvis features`"),

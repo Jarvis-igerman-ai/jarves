@@ -223,8 +223,14 @@ def make_wake_detector(v) -> WakeWordDetector:
     agc = AutoGain(initial_gain_db=getattr(v, "wake_gain_db", 0.0) or 0.0) if getattr(v, "wake_agc", False) else None
     if getattr(v, "wake_confirm", False):
         base = make_detector(v.wake_word, 1.01)          # the gate: only its raw score is read
-        return ConfirmingDetector(base, WhisperConfirm(v.wake_confirm_model), accept=max(v.wake_threshold,
-                                  v.wake_accept), gate=v.wake_gate, agc=agc)
+        # wake_threshold (owner: `wake test --apply`, or raised by autonomy after false wakes) is the level that
+        # STARTS the local speech confirm. The instant-accept level (no ASR confirm) is max(wake_threshold,
+        # wake_accept): only the separate owner-only key wake_accept can change it, and a lower wake_threshold or an
+        # autonomy change can never make it easier (privacy: issue #519).
+        explicit = "wake_threshold" in getattr(v, "model_fields_set", ())
+        accept = max(v.wake_threshold, v.wake_accept)
+        gate = min(max(v.wake_gate, v.wake_threshold), accept) if explicit else v.wake_gate
+        return ConfirmingDetector(base, WhisperConfirm(v.wake_confirm_model, cpu_threads=4), accept=accept, gate=gate, agc=agc)
     det = make_detector(v.wake_word, v.wake_threshold)
     return GainDetector(det, agc) if agc is not None else det
 
