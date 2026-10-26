@@ -9,6 +9,7 @@ The owner switch `browser_pilot` is OFF by default (beta: needs the global beta 
 from __future__ import annotations
 
 import ipaddress
+import re
 import time
 from pathlib import Path
 from typing import Callable
@@ -35,9 +36,38 @@ class PilotError(Exception):
         self.code, self.message = code, message
 
 
+_NUMERIC_LABEL = re.compile(r"^(0x[0-9a-f]*|[0-9]+)$")
+_NAT64 = ipaddress.ip_network("64:ff9b::/96")
+
+
+def _canonical_host(host: str) -> str:
+    """The host as a browser resolves it, or '' when unsure. Browsers map full-width digits and dots (IDNA), drop one
+    trailing dot ('claude.ai.' = claude.ai) and read a host whose last label is numeric as IPv4 in decimal, octal or
+    hex, also shortened ('0177.0.0.1', '127.1', '0xa9.0xfe.0xa9.0xfe' = 169.254.169.254). Anything ambiguous is
+    refused rather than guessed."""
+    if not host or ":" in host:              # an IPv6 literal (urlsplit drops the brackets): checked by ipaddress
+        return host
+    if "%" in host:
+        return ""
+    if not host.isascii():
+        try:
+            host = host.encode("idna").decode("ascii").lower()
+        except UnicodeError:
+            return ""
+    host = host[:-1] if host.endswith(".") else host
+    if not host or host.endswith(".") or ".." in host:
+        return ""
+    if _NUMERIC_LABEL.match(host.rsplit(".", 1)[-1]):
+        try:
+            return str(ipaddress.IPv4Address(host))     # only the canonical dotted quad; other numeric forms: refused
+        except ValueError:
+            return ""
+    return host
+
+
 def page_scope(url: str) -> str:
     """'local' (loopback), 'public', or '' (refused: not http(s), blocked AI account pages, private or odd hosts)."""
-    host = url_host(url)
+    host = _canonical_host(url_host(url))
     if not host or blocked(host):
         return ""
     try:
@@ -45,8 +75,10 @@ def page_scope(url: str) -> str:
     except ValueError:
         if host == "localhost" or host.endswith(".localhost"):
             return "local"
-        odd = host.endswith((".local", ".internal", ".lan", ".home"))
+        odd = host.endswith((".local", ".internal", ".lan", ".home", ".arpa"))
         return "public" if "." in host and not odd else ""
+    if ip.version == 6 and (ip.ipv4_mapped or ip in _NAT64):
+        ip = ip.ipv4_mapped or ipaddress.IPv4Address(int(ip) & 0xFFFFFFFF)
     if ip.is_loopback:
         return "local"
     return "public" if ip.is_global else ""
