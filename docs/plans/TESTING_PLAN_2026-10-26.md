@@ -48,7 +48,7 @@ Everything owner-only goes to `OWNER_OPENS.md` with a safe default; the pipeline
 
 | Version | Gate | Evidence |
 |---|---|---|
-| 4.0.1 stable | all rows of `RELEASE_CHECKLIST_4.0.1.md` done/n/a/accepted; no open P0-P2, P3 listed with reason; **5 green nightly runs in a row on `main`**; owner-**signed** `MANUAL_TEST_4.0.1.md` (`jarvis release signoff ... --finish`); `release_gate.py` dry run clean | [RELEASING](../RELEASING.md) "Stable release, step by step" |
+| 4.0.1 stable | all rows of `RELEASE_CHECKLIST_4.0.1.md` done/n/a/accepted; no open P0-P2, P3 listed with reason; **latest nightly run on `main` green (no five-nights rule, owner 26 Oct)**; owner-**signed** `MANUAL_TEST_4.0.1.md` (`jarvis release signoff ... --finish`); `release_gate.py` dry run clean | [RELEASING](../RELEASING.md) "Stable release, step by step" |
 | 5.0 | **stays beta** until the owner's real-phone sheet ([SWV5_ACCEPTANCE](../reviews/SWV5_ACCEPTANCE.md)) is signed; all CI gates green, installer upgrade/rollback smoke, bug table triaged; then the same stable steps as 4.0.1 | `RELEASE_CHECKLIST_5.0.0.md`, signed sheet |
 | 6.0 | **stays beta** until the owner's phone and car sheets are signed (voice in the car, Android Auto path); V5 must already be stable | V6 sheets, [V6 plan](V6_INVENTORY_AND_PLAN_2026-10-25.md) |
 | V7 | tracks only (proposal, issue #50): no gate until authorized; each track writes its test list before code | [V7 proposal](V7_PROPOSAL_2026-10-21.md) |

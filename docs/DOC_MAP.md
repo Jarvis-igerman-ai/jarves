@@ -49,6 +49,7 @@ Smart chat blocks and task triage design (26 Oct, #364 #365): [design](plans/SMA
 | [RELEASE_NOTES_4.0](RELEASE_NOTES_4.0.md) | What V4 changed for users | V4 | current | itself; [CHANGELOG](../CHANGELOG.md) is the short per-version list |
 | [SWV4_RELEASE_CHECKLIST](reviews/SWV4_RELEASE_CHECKLIST.md) | 4.0.0 checklist state and evidence | V4 | current | [V4 package section 10](JARVES_SW_V4_WORK_PACKAGE.md#10-release-checklist) defines the rows |
 | [RELEASE_CHECKLIST_4.0.1](reviews/RELEASE_CHECKLIST_4.0.1.md) | 4.0.1 stable release checklist (read by the release gate) | 4.0.1 | current | [RELEASING](RELEASING.md) |
+| [SIGN_OFF_4.0.1](release/SIGN_OFF_4.0.1.md) | 4.0.1 owner sign-off sheet (what is auto-checked, manual rows with times, `SIGNED_4.0.1` convention, gate dry run) | 4.0.1 | current | [RELEASING](RELEASING.md) |
 | [RELEASE_CHECKLIST_5.0.0](reviews/RELEASE_CHECKLIST_5.0.0.md) | 5.0.0 stable release checklist, draft (read by the release gate) | 5.0 | draft | [RELEASING](RELEASING.md) |
 | [ENGINEERING_REVIEW_GATES](ENGINEERING_REVIEW_GATES.md) | Standing review and challenge gates | general | current | itself |
 | [CI_PERFORMANCE](CI_PERFORMANCE.md) | CI speed, shards and the fast release path | general | current | [RELEASING](RELEASING.md) |

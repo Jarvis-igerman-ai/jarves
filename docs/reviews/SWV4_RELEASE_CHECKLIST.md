@@ -7,7 +7,7 @@ Legend: **done** = finished in code/docs here, evidence given. **needs-owner** =
 | # | Item | Status | Evidence / exact owner action |
 |---|---|---|---|
 | 1 | `jarves-checks` green on the exact SHA | needs-owner | Owner: after the draft PR is ready and merged, open the `jarves-checks` run of the final main SHA, confirm all jobs green and paste the run URL here. |
-| 2 | Nightly green 5 nights | needs-owner | Owner: wait for 5 green `nightly` runs on main after the merge, then record the URLs here. |
+| 2 | Latest nightly green | needs-owner | Owner 26 Oct: no five-nights rule; the newest `nightly` run on main must be green (record the URL here). |
 | 3 | Offline suite 3x identical | needs-owner | Run 1 of 3 done here: 2402 passed, 6 failed, 7 deselected (52 min; see "Gates run here"), 0 skipped. Owner: run `pytest -q` in `core` two more times on the final SHA (same numbers, 0 skipped/failed). |
 | 4 | `suite_system.py` all PASS | needs-owner | Owner: `uv run --no-sync python tools/suite_system.py --skip-pytest --soak-min 10` in `core` on the final SHA (needs a real Core, Godot and 10 min of soak); report goes to `docs/reviews/PRE_USE_TEST_REPORT_SYSTEM.md`. |
 | 5 | Voice suites 1-96 PASS, cost report | needs-owner | Owner: top up the OpenAI balance (it ran out 20 Oct) and say OD-05 yes/no (scenario 62), then run `python tools/suite_v3_voice.py --only 1-96` and `--cost-report`. Last campaign: 89 PASS, 2 FAIL (22, 23 wake near-misses, P3), 1 BLOCKED ([SWV4_CAMPAIGN_VOICE](SWV4_CAMPAIGN_VOICE.md)). |

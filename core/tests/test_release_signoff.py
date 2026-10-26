@@ -115,12 +115,18 @@ def _nights(n=5, bad=None):
              "created_at": (NOW - timedelta(days=i, hours=10)).isoformat()} for i in range(n)]
 
 
+SIGNED = "owner: Igal\ndate: 2026-10-21\ncommit: " + SHA + "\n"
+
+
 def _signed_root(tmp_path, sha=SHA):
     s = _sheet()
     s.set_result("C1", "pass")
     s.set_result("OI-02", "pass")
     s.sign("4.1.0-beta.3", sha, "2026-10-21")
     so.save(tmp_path, s)
+    d = tmp_path / "docs" / "release"
+    d.mkdir(parents=True, exist_ok=True)
+    (d / "SIGNED_4.1.0").write_text(SIGNED, encoding="utf-8")
     return tmp_path
 
 
@@ -161,10 +167,44 @@ def test_gate_blocks_on_sha_mismatch_open_p0_p2_nightly_and_tag_shape(tmp_path):
     assert any("bug B1" in p for p in _gate(tmp_path, bug_tables=["| B1 | P2 | open | x |\n"]))
     named = _gate(tmp_path, bug_tables=[("X_BUG_TABLE.md", "| id | sev | status |\n|---|---|---|\n| B2 | P1 | open |\n")])
     assert any(p.startswith("X_BUG_TABLE.md: bug B2 (P1)") for p in named)
-    assert any("nightly not green" in p for p in _gate(tmp_path, nightly_runs=_nights(bad=2)))
-    assert any("only 3" in p for p in _gate(tmp_path, nightly_runs=_nights(3)))
+    assert any("latest nightly is not green" in p for p in _gate(tmp_path, nightly_runs=_nights(bad=0)))
     assert any("not a stable tag" in p for p in _gate(tmp_path, tag="v4.1.0-beta.1"))
     assert any("no green jarves-checks" in p for p in _gate(tmp_path, checks_runs=[]))
+
+
+def test_nightly_needs_only_the_latest_run_green_and_fresh(tmp_path):
+    """Owner 26 Oct: no five-green-nights rule. One fresh green run is enough, even after red nights or a short history."""
+    assert _gate(tmp_path, nightly_runs=_nights(1)) == []
+    assert _gate(tmp_path, nightly_runs=_nights(3, bad=1)) == []                       # an older red night is history
+    assert any("not green" in p for p in _gate(tmp_path, nightly_runs=_nights(3, bad=0)))
+    assert any("fresh one" in p for p in _gate(tmp_path, now=NOW + timedelta(days=5)))
+    assert any("no completed nightly" in p for p in _gate(tmp_path, nightly_runs=[]))
+    running = [{"status": "in_progress", "created_at": NOW.isoformat()}] + _nights(1)
+    assert _gate(tmp_path, nightly_runs=running) == []                                 # in-progress runs are ignored
+
+
+def _issue(n, *labels, **kw):
+    return {"number": n, "title": f"t{n}", "state": "open", "labels": [{"name": x} for x in labels], **kw}
+
+
+def test_gate_blocks_on_open_p0_p2_github_issues_but_not_planned_work(tmp_path):
+    assert _gate(tmp_path, issues=[_issue(1, "P3", "bug"), _issue(2, "P1", "v7"), _issue(3, "P2", "enhancement"),
+                                   _issue(4, "P1", "bug", pull_request={})]) == []
+    probs = _gate(tmp_path, issues=[_issue(5, "P0", "bug"), _issue(6, "P2", "ci")])
+    assert [p for p in probs if "open P" in p] == ["open P0 issue #5: t5", "open P2 issue #6: t6"]
+
+
+def test_gate_refuses_a_tag_without_the_signed_file(tmp_path):
+    root = _signed_root(tmp_path)
+    check = lambda: gate.signed_problems(root, "4.1.0", SHA, lambda a, b: True, lambda a, b: [])  # noqa: E731
+    assert check() == []
+    f = root / "docs" / "release" / "SIGNED_4.1.0"
+    f.write_text("owner: Igal\n", encoding="utf-8")
+    assert len(check()) == 2                                                           # date and commit missing
+    f.write_text("owner: Igal\ndate: 2026-10-21\ncommit: abc\n", encoding="utf-8")
+    assert any("full SHA" in p for p in check())
+    f.unlink()
+    assert any("owner signature missing" in p for p in check())
 
 
 # The bug tables in docs/reviews use different column orders. A fixed `| id | sev | status |` position read the area,
