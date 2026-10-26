@@ -404,6 +404,7 @@ def load_config(path: Path | None = None) -> tuple[Config, Path]:
 
 
 SECRET_ENV = ("OPENAI_API_KEY", "OPENAI_ADMIN_KEY",   # admin key: optional, read-only Costs API (usage.py)
+              "OPENROUTER_API_KEY",   # V7 M2: provider_openrouter (secrets.env, never the config)
               "TELEGRAM_BOT_TOKEN", "HOME_ASSISTANT_TOKEN",
               "INSTAGRAM_ACCESS_TOKEN", "INSTAGRAM_APP_SECRET", "INSTAGRAM_VERIFY_TOKEN")   # V3 P1 channels: private secrets.env, never the config
 
