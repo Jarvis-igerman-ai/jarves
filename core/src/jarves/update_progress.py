@@ -67,7 +67,7 @@ def write(home, stage: str, *, state: str = "running", fresh: bool = False, **ex
         tmp = p.with_name(p.name + ".tmp")
         tmp.write_text(json.dumps(d, ensure_ascii=False), encoding="utf-8")
         os.replace(tmp, p)
-    except OSError:
+    except Exception:                    # progress is cosmetic: whatever goes wrong, the update itself goes on
         pass
 
 
@@ -118,6 +118,8 @@ def read(home, current: str | None = None, now: float | None = None) -> dict:
 
 def line(s: dict, hebrew: bool = False) -> str:
     """One CLI line: '[3/8  40%] Backing up your data'."""
+    if not s.get("active"):
+        return ""                        # no progress file (e.g. it could not be written): print nothing, never crash
     t = s.get("text_he" if hebrew else "text_en") or ""
     h = s.get("hint_he" if hebrew else "hint_en")
     return f"[{s.get('step')}/{s.get('steps')} {s.get('percent'):>3}%] {t}" + (f"\n    {h}" if h else "")

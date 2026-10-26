@@ -150,3 +150,9 @@ def test_updates_js_parses_and_uses_the_progress_api():
     node = subprocess.run(["node", "--version"], capture_output=True) if sys.platform else None
     if node and node.returncode == 0:
         assert subprocess.run(["node", "--check", str(js)], capture_output=True).returncode == 0
+
+
+def test_line_of_an_idle_state_is_empty_and_a_write_failure_never_raises(home, monkeypatch):
+    assert up.line(up.read(home)) == ""                    # no file: the CLI prints nothing instead of crashing
+    monkeypatch.setattr(up.os, "replace", lambda *a: (_ for _ in ()).throw(ValueError("boom")))
+    up.write(home, "installing", fresh=True, to=NEW)       # must not raise

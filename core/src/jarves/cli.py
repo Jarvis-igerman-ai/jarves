@@ -1808,7 +1808,8 @@ def cmd_update(a, cfg, home) -> int:
     print(version_line(home) + f"; update channel {u.channel}")
     if a.action == "status":
         from . import update_progress as up
-        ps = up.read(home)
+        from .updates import build_info
+        ps = up.read(home, build_info()["version"])
         if ps.get("active"):
             print(up.line(ps, False))
     if getattr(a, "rollback", False):
@@ -1843,7 +1844,8 @@ def cmd_update(a, cfg, home) -> int:
         return 1
     from . import update_progress as up
     heb = clilang.current() == "he"
-    print(up.line(up.read(home), heb))
+    if up.line(up.read(home), heb):
+        print(up.line(up.read(home), heb))
     print(f"Verified {Path(r['installer']).name}; backup in {r['backup']}")
     from . import runmarks
     from .updates import record_was_running
@@ -1855,7 +1857,8 @@ def cmd_update(a, cfg, home) -> int:
         pass
     if core_up:
         up.write(home, "stopping")
-        print(up.line(up.read(home), heb))
+        if up.line(up.read(home), heb):
+            print(up.line(up.read(home), heb))
         cmd_stop(a, cfg, home)
     try:
         launch_installer(r["installer"], verified=r, silent=a.silent, restart=a.silent, was_running=was)
