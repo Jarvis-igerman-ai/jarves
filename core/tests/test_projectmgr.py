@@ -1040,3 +1040,30 @@ def test_github_mode_config_and_status_op(env, fake_gh):
     assert m.call("configure", project="demo", github="nope")["code"] == "BAD_GITHUB"
     g = m.call("github", project="demo", by="voice")
     assert g["ok"] and g["mode"] == "write" and g["repo"] == "o/r"
+
+
+def _rule_matches(rule: str, cmd: str) -> bool:
+    """Tiny model of Claude Code Bash rules: `X:*` = prefix, `*` = glob, otherwise exact."""
+    import fnmatch
+    body = rule[len("Bash("):-1]
+    if body.endswith(":*"):
+        return cmd == body[:-2] or cmd.startswith(body[:-2] + " ")
+    return fnmatch.fnmatchcase(cmd, body)
+
+
+@pytest.mark.parametrize("read_only", [True, False])
+@pytest.mark.parametrize("cmd", ["git log -1 --output=/x/evil.pth", "git diff --output=evil.bat", "git log --oneline --output=a",
+                                 "git -c core.pager=calc log", "git diff -o x", "git log --stat --ext-diff"])
+def test_f6_git_output_forms_cannot_write_outside_the_worktree(read_only, cmd):
+    allow = [r for r in runners._tools(read_only, None) if r.startswith("Bash(")]
+    deny = [r for r in runners.DENY if r.startswith("Bash(")]
+    assert any(_rule_matches(r, cmd) for r in deny), cmd              # denied explicitly ...
+    bare = [r for r in allow if r.endswith(":*") and r[:-3] in ("Bash(git log", "Bash(git diff")]
+    assert not bare                                                    # ... and no bare log/diff prefix is allowed
+
+
+def test_f6_read_only_git_still_works():
+    allow = runners._tools(True, None)
+    for cmd in ("git status", "git diff", "git diff --stat", "git log --oneline -5"):
+        assert any(_rule_matches(r, cmd) for r in allow if r.startswith("Bash(")), cmd
+    assert not any(r.startswith(("Edit", "Write")) for r in allow)

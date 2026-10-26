@@ -20,8 +20,14 @@ from . import gitops
 
 _NOWIN = getattr(subprocess, "CREATE_NO_WINDOW", 0) if os.name == "nt" else 0
 OUT_CAP = 200_000
-SAFE_BASH = ("Bash(git status:*)", "Bash(git diff:*)", "Bash(git log:*)", "Bash(git add:*)", "Bash(git commit:*)")
-DENY = ("Bash(git push:*)", "Bash(git rebase:*)", "Bash(git reset:*)", "Bash(git checkout:*)", "Bash(git branch:*)",
+# Read-only git: exact commands or fixed-flag prefixes, never a bare `git diff:*` / `git log:*` prefix (F6, #205: `git log
+# --output=<path>` writes a file anywhere). The `--output` and `-c` forms are also in DENY (defence in depth).
+READ_GIT = ("Bash(git status)", "Bash(git status --short)", "Bash(git status -sb)", "Bash(git diff)",
+            "Bash(git diff --stat)", "Bash(git diff --name-only)", "Bash(git diff --cached)", "Bash(git diff HEAD)",
+            "Bash(git log --oneline:*)", "Bash(git log -n:*)", "Bash(git log --stat)")
+SAFE_BASH = (*READ_GIT, "Bash(git add:*)", "Bash(git commit:*)")
+DENY = ("Bash(git * --output*)", "Bash(git * -o *)", "Bash(git -c:*)", "Bash(git * -c *)", "Bash(git * --ext-diff*)",
+        "Bash(git * --upload-pack*)", "Bash(git * --exec*)", "Bash(git push:*)", "Bash(git rebase:*)", "Bash(git reset:*)", "Bash(git checkout:*)", "Bash(git branch:*)",
         "Bash(rm:*)", "Bash(curl:*)", "Bash(wget:*)", "Bash(sudo:*)", "WebFetch",
         # agent and sub-agent definitions/settings: an agent must not widen its own (or its sub-agents') permissions
         "Edit(.claude/**)", "Write(.claude/**)", "Edit(.codex/**)", "Write(.codex/**)", "Edit(.opencode/**)",
@@ -150,7 +156,7 @@ def kill_tree(p: subprocess.Popen) -> None:
 def _tools(read_only: bool, check_argv: list[str] | None, team: bool = False) -> list[str]:
     t = ["Read", "Glob", "Grep"]
     if read_only:
-        return t + ["Bash(git status:*)", "Bash(git diff:*)", "Bash(git log:*)"]
+        return t + list(READ_GIT)
     t += ["Edit", "Write", *SAFE_BASH]
     if team:
         t += ["Task", "Agent"]                    # Claude Code's own sub-agents; their definitions under .claude/ are
