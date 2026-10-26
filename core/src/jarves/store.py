@@ -116,6 +116,7 @@ class Store:
     def __init__(self, path: Path | str, *, tier: str = "", backend_model: str = "") -> None:
         self.path = str(path)
         self._lock = threading.RLock()
+        self._closed = False
         self._db = sqlite3.connect(self.path, check_same_thread=False, timeout=5)
         self._db.row_factory = sqlite3.Row
         if self.path != ":memory:":
@@ -140,9 +141,14 @@ class Store:
         self._last_user_ts: float | None = None
         self._typed: tuple[str, float, str] | None = None   # open typed conversation (id, last reply ts, kind)
 
+    @property
+    def closed(self) -> bool:
+        return self._closed
+
     def close(self) -> None:
         with self._lock:
-            self._db.close()
+            self._closed = True
+            self._db.close()                       # idempotent (sqlite3 allows a second close)
 
     def x(self, sql: str, args: tuple = ()) -> sqlite3.Cursor:
         with self._lock:
