@@ -687,7 +687,7 @@ class AnyDoSkill(Skill):
         raise AnyDoError("ANYDO_NO_LIST", "Any.do returned no list to add to", "ל-Any.do אין רשימה להוסיף אליה. פתחו רשימה באפליקציה.")
 
     async def _create_impact(self, a: CreateArgs) -> tuple[int | None, str]:
-        lines = "\n".join(f"- {_clip(t.title, 80)}" + (f" ({t.due})" if t.due else "") for t in a.tasks)
+        lines = "\n".join(f"- {_clip(t.title, 200)}" + (f" ({t.due})" if t.due else "") for t in a.tasks)
         # show the list the write will really use, named by Any.do itself: never the model-supplied list_name
         try:
             lid, lname = (_id_ok(a.list_id), "") if a.list_id else await self._default_list()
