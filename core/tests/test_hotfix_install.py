@@ -120,25 +120,34 @@ def test_revert_refused_after_a_normal_update_replaced_the_hotfix(tree):
 
 
 @pytest.mark.parametrize("rel,text", [("tool.exe", "x"), ("lib.pyd", "x"), ("blob.dat", "x"), ("installer_state.py", "x=1")])
-def test_refuses_binaries_unknown_types_and_installer_code(tree, rel, text):
+def test_package_binaries_unknown_types_and_installer_code_are_refused_not_skipped(tree, rel, text):
     inst, src, home = tree
     write(src, "a.py", "A=2\n")
     write(src, rel, text)
     with pytest.raises(hf.Refused) as e:
         hf.apply(inst, source(src), home, FakeHooks().hooks())
-    assert e.value.code == "HOTFIX_NEEDS_INSTALLER" and "full installer" in e.value.action
+    assert e.value.code == "HOTFIX_NEEDS_SLICE2" and rel in e.value.message
     assert (inst / "a.py").read_text() == "A=1\n" and not (home / "hotfix").exists()      # nothing touched, no backup
 
 
-@pytest.mark.parametrize("path", ["packaging/build_windows.ps1", "packaging/bridge_pin.json", "core/pyproject.toml",
-                                  "core/uv.lock", "bridge/whatsapp/main.go", "godot/project.godot"])
-def test_refuses_when_the_repo_change_touches_packaging_bridge_or_dependencies(tree, path):
+@pytest.mark.parametrize("path", ["packaging/build_windows.ps1", "packaging/windows/jarves.iss", "godot/project.godot",
+                                  ".github/workflows/ci.yml"])
+def test_build_only_repo_changes_are_listed_not_refused(tree, path):
+    inst, src, home = tree
+    write(src, "a.py", "A=2\n")
+    m = hf.apply(inst, source(src, ["core/src/jarves/a.py", path]), home, FakeHooks().hooks())
+    assert (inst / "a.py").read_text() == "A=2\n" and m["pending_installer"] == [path]
+
+
+@pytest.mark.parametrize("path", ["core/pyproject.toml", "core/uv.lock", "core/requirements.txt", "packaging/bridge_pin.json",
+                                  "bridge/whatsapp/main.go"])
+def test_dependency_and_bridge_changes_are_detected_and_refused_with_slice2(tree, path):
     inst, src, home = tree
     write(src, "a.py", "A=2\n")
     with pytest.raises(hf.Refused) as e:
         hf.apply(inst, source(src, ["core/src/jarves/a.py", path]), home, FakeHooks().hooks())
-    assert e.value.code == "HOTFIX_NEEDS_INSTALLER"
-    assert (inst / "a.py").read_text() == "A=1\n"
+    assert e.value.code == "HOTFIX_NEEDS_SLICE2" and "slice 2" in e.value.message and path in e.value.message
+    assert (inst / "a.py").read_text() == "A=1\n" and not (home / "hotfix").exists()
 
 
 def test_docs_and_tests_changes_in_the_repo_do_not_block(tree):
@@ -278,8 +287,7 @@ def test_git_ref_on_a_throwaway_repo(tmp_path):
     s2 = hf.resolve_source("HEAD", None, repo=repo, base=base)
     try:
         assert "packaging/p.ps1" in s2.repo_changes
-        with pytest.raises(hf.Refused):
-            hf.check_policy(hf.Plan(replace=["a.py"]), s2.repo_changes)
+        assert hf.classify(hf.Plan(replace=["a.py"]), s2.repo_changes)[1] == ["packaging/p.ps1"]
     finally:
         shutil.rmtree(s2.cleanup, ignore_errors=True)
     with pytest.raises(hf.Refused) as e:                          # no base commit known: fail closed
@@ -304,3 +312,130 @@ def test_symlink_in_source_is_ignored_and_case_clash_refused(tree, tmp_path):
     (src / "guides/data/X.toml").write_text("k=2", encoding="utf-8")  # case-only difference
     with pytest.raises(hf.Refused):
         hf.build_plan(src, inst)
+
+
+# ---------------------------------------------------------------------- #459 --python-only
+def _git(repo, *a):
+    return subprocess.run(["git", "-C", str(repo), "-c", "user.email=t@t", "-c", "user.name=t", *a],
+                          capture_output=True, text=True, check=True).stdout.strip()
+
+
+@pytest.fixture
+def po(tmp_path):
+    """A throwaway git repo (base commit) plus an installed tree identical to the base."""
+    repo = tmp_path / "repo"
+    pkg = repo / "core/src/jarves"
+    write(pkg, "__init__.py", "__version__='4.5.0'\n")
+    write(pkg, "a.py", "A=1\n")
+    write(repo, "packaging/windows/jarves.iss", "1\n")
+    write(repo, "core/pyproject.toml", "[project]\ndependencies=[]\n")
+    subprocess.run(["git", "init", "-q", str(repo)], check=True)
+    _git(repo, "add", "-A")
+    _git(repo, "commit", "-qm", "base")
+    base = _git(repo, "rev-parse", "HEAD")
+    inst = tmp_path / "site-packages" / "jarves"
+    write(inst, "__init__.py", "__version__='4.5.0'\n")
+    write(inst, "a.py", "A=1\n")
+    write(inst, hf.BUILD_INFO_NAME, json.dumps({"version": "4.5.0", "commit": base}))
+
+    def commit(files):
+        for rel, text in files.items():
+            write(repo, rel, text)
+        _git(repo, "add", "-A")
+        _git(repo, "commit", "-qm", "change")
+        return hf.resolve_source("HEAD", None, repo=repo, base=base)
+
+    return inst, tmp_path / "home", commit, repo, base
+
+
+def test_git_skips_packaging_lists_it_and_applies_python(po):
+    inst, home, commit, repo, base = po
+    s = commit({"core/src/jarves/a.py": "A=2\n", "packaging/windows/jarves.iss": "2\n",
+                "packaging/smoke_windows.ps1": "x\n", "docs/NOW.md": "d\n"})
+    try:
+        r = hf.apply(inst, s, home, FakeHooks().hooks(), dry_run=True)
+        assert r["status"] == "dry-run" and r["files"] == ["a.py"]
+        assert r["pending_installer"] == ["packaging/smoke_windows.ps1", "packaging/windows/jarves.iss"]
+        assert (inst / "a.py").read_text() == "A=1\n" and not (home / "hotfix").exists()
+        f = FakeHooks()
+        m = hf.apply(inst, s, home, f.hooks())
+        assert (inst / "a.py").read_text() == "A=2\n" and f.calls[0] == "backup"
+        man = json.loads((home / "hotfix" / m["id"] / "manifest.json").read_text())
+        assert "packaging/windows/jarves.iss" in man["pending_installer"]
+        st = hf.status(inst, home)                                          # status shows the pending installer files
+        assert st["pending_installer"] == man["pending_installer"]
+        hf.revert(inst, home, FakeHooks().hooks())
+        assert (inst / "a.py").read_text() == "A=1\n" and hf.status(inst, home)["pending_installer"] == []
+    finally:
+        shutil.rmtree(s.cleanup, ignore_errors=True)
+
+
+def test_git_refuses_binary_and_installer_code_inside_the_package(po):
+    inst, home, commit, repo, base = po
+    s = commit({"core/src/jarves/a.py": "A=2\n", "core/src/jarves/installer_x.py": "x=1\n", "core/src/jarves/t.pyd": "b"})
+    try:
+        with pytest.raises(hf.Refused) as e:
+            hf.apply(inst, s, home, FakeHooks().hooks())
+        assert e.value.code == "HOTFIX_NEEDS_SLICE2" and (inst / "a.py").read_text() == "A=1\n"
+    finally:
+        shutil.rmtree(s.cleanup, ignore_errors=True)
+
+
+def test_build_only_prefix_is_case_insensitive_and_known_optional_import_is_not_new(po):
+    inst, home, commit, repo, base = po
+    assert hf.classify(hf.Plan(replace=["a.py"]), ["Packaging/Windows/x.iss"])[1] == ["Packaging/Windows/x.iss"]
+    opt = "try:\n    import optional_mod_zz\nexcept ImportError:\n    pass\n"
+    (inst / "a.py").write_text(opt + "A=1\n", encoding="utf-8")
+    new = inst.parent / "newsrc"
+    new.mkdir()
+    (new / "a.py").write_text(opt + "A=2\n", encoding="utf-8")
+    assert hf.scan_new_imports(new, ["a.py"], inst, []) == []                  # already imported by the installed copy
+    (new / "a.py").write_text("import brand_new_zz\n", encoding="utf-8")
+    assert hf.scan_new_imports(new, ["a.py"], inst, []) == ["brand_new_zz (in a.py)"]
+
+
+@pytest.mark.parametrize("path", ["core/pyproject.toml", "core/uv.lock", "core/requirements.txt",
+                                  "packaging/bridge_pin.json", "bridge/whatsapp/bridge.exe"])
+def test_git_source_refuses_dependency_and_bridge_pin_or_binary(po, path):
+    inst, home, commit, repo, base = po
+    s = commit({"core/src/jarves/a.py": "A=2\n", path: "changed\n"})
+    try:
+        with pytest.raises(hf.Refused) as e:
+            hf.apply(inst, s, home, FakeHooks().hooks())
+        assert e.value.code == "HOTFIX_NEEDS_SLICE2"
+        assert (inst / "a.py").read_text() == "A=1\n" and not (home / "hotfix").exists()
+    finally:
+        shutil.rmtree(s.cleanup, ignore_errors=True)
+
+
+def test_git_refuses_a_new_third_party_import_but_allows_installed_and_stdlib(po):
+    inst, home, commit, repo, base = po
+    s = commit({"core/src/jarves/a.py": "import json\nfrom jarves import b\nimport okmod.sub\n",
+                "core/src/jarves/b.py": "def f():\n    import zzz_not_installed_mod\n"})
+    try:
+        (inst.parent / "okmod").mkdir()
+        with pytest.raises(hf.Refused) as e:
+            hf.apply(inst, s, home, FakeHooks().hooks())
+        assert e.value.code == "HOTFIX_NEW_DEPENDENCY" and "zzz_not_installed_mod" in e.value.message
+        assert "okmod" not in e.value.message and (inst / "a.py").read_text() == "A=1\n"
+        (inst.parent / "zzz_not_installed_mod.py").write_text("", encoding="utf-8")       # now it is installed
+        hf.apply(inst, s, home, FakeHooks().hooks())
+        assert "okmod" in (inst / "a.py").read_text()
+    finally:
+        shutil.rmtree(s.cleanup, ignore_errors=True)
+
+
+def test_git_refuses_when_base_is_not_an_ancestor_or_source_is_not_git(po, tmp_path):
+    inst, home, commit, repo, base = po
+    _git(repo, "checkout", "-q", "--orphan", "other")
+    write(repo, "core/src/jarves/a.py", "A=2\n")
+    _git(repo, "add", "-A")
+    _git(repo, "commit", "-qm", "unrelated")
+    s = hf.resolve_source("HEAD", None, repo=repo, base=base)
+    try:
+        with pytest.raises(hf.Refused) as e:
+            hf.apply(inst, s, home, FakeHooks().hooks())
+        assert e.value.code == "HOTFIX_BASE_NOT_ANCESTOR" and (inst / "a.py").read_text() == "A=1\n"
+    finally:
+        shutil.rmtree(s.cleanup, ignore_errors=True)
+

@@ -2,9 +2,13 @@
 
 `jarvis hotfix apply [--from <git ref | folder>]`
   1. compares the source package (core/src/jarves) with the installed one, file by file (sha256);
-  2. REFUSES (and says "use the full installer") unless the change is only Python source plus plain data files inside
-     the jarves package: nothing under packaging/, bridge/, godot/, no dependency files (pyproject, lock), no
-     installer code, no binaries (.exe/.dll/.pyd ...). When the source is a git checkout the whole repository change
+  2. classifies the change (issue #459, owner rule "a hotfix is any hotfix"). Applied: Python source and plain data
+     inside the jarves package. SKIPPED and listed as "only affects the next full installer" (output, manifest,
+     `hotfix status`): build-time files that are not part of the installed tree (packaging/, CI, godot/). REFUSED with "needs slice 2" (these categories
+     will become verified slices: bridge exe by pin sha256, dependencies from the hashed lock): a binary, unknown-type or installer-code file inside the package, a dependency file
+     change (pyproject, lock, requirements), a bridge pin or bridge change, an updated Python file importing a
+     third-party module that is not installed. Always refused (fail closed): unsafe path, symlink, case clash, a base
+     commit that is not an ancestor of the target. When the source is a git checkout the whole repository change
      since the installed commit is checked, not just the package;
   3. `jarvis backup` first, then copies ONLY the changed files (temp file + atomic replace). The originals go to
      <home>/hotfix/<id>/originals/ and manifest.json records the sha256 of every original and of every new file;
@@ -14,6 +18,7 @@
   5. restarts the Core ONLY if it ran before (recorded first), silently (no window, no sound), then runs `jarvis doctor`
      in a fresh process;
   6. fail closed: any error (copy, restart, doctor worse than before) restores the originals automatically.
+  7. `--python-only` is kept as an alias (the default behaviour; the automatic hotfix passes it after a dry-run).
 `jarvis hotfix revert` restores the originals from the manifest (refused when a normal update already replaced the
 hotfix, so it can never downgrade). `jarvis hotfix status` shows the current mark.
 
@@ -47,7 +52,7 @@ BINARY_SUFFIXES = {".exe", ".dll", ".pyd", ".so", ".dylib", ".whl", ".zip", ".pa
 INSTALLED_ONLY = {BUILD_INFO_NAME, "_google_app_client.json"}
 SKIP_DIRS = {"__pycache__", ".pytest_cache"}
 # Repository paths whose change always needs the full installer.
-FULL_INSTALLER_PREFIXES = ("packaging/", "bridge/", "godot/", "core/pyproject.toml", "core/uv.lock", "uv.lock",
+FULL_INSTALLER_PREFIXES = (".github/", "packaging/", "bridge/", "godot/", "core/pyproject.toml", "core/uv.lock", "uv.lock",
                            "pyproject.toml", "core/run_core.cmd", "jarvis.cmd")
 PACKAGE_PREFIX = "core/src/jarves/"
 INSTALLER_CODE_NAMES = ("installer", "uninstall", "rollback_windows")
@@ -145,27 +150,6 @@ def build_plan(src_pkg: Path, installed_pkg: Path) -> Plan:
     return plan
 
 
-def check_policy(plan: Plan, repo_changes: list[str] | None = None) -> None:
-    """Raise Refused('use the full installer') unless the change is code-only. Fail closed."""
-    why: list[str] = []
-    for rel in plan.files:
-        suffix = Path(rel).suffix.lower()
-        if suffix in BINARY_SUFFIXES:
-            why.append(f"{rel}: binary file")
-        elif suffix not in DATA_SUFFIXES:
-            why.append(f"{rel}: file type {suffix or '(none)'} is not plain source or data")
-        elif suffix == ".py" and any(Path(rel).stem.startswith(n) for n in INSTALLER_CODE_NAMES):
-            why.append(f"{rel}: installer code")
-    for rel in repo_changes or []:
-        r = rel.replace("\\", "/")
-        if r.startswith(FULL_INSTALLER_PREFIXES):
-            why.append(f"{r}: packaging, bridge, face app or dependencies")
-    if why:
-        shown = "; ".join(why[:6]) + (f" (+{len(why) - 6} more)" if len(why) > 6 else "")
-        raise Refused("HOTFIX_NEEDS_INSTALLER", f"this change cannot be hot-patched: {shown}",
-                      "use the full installer for this change")
-
-
 # ---------------------------------------------------------------------- source resolution
 def _git(repo: Path, *args: str, check: bool = True) -> str:
     # local only, and no code from the (possibly untrusted) repo config: no fsmonitor, no hooks
@@ -183,6 +167,8 @@ class Source:
     commit: str | None
     note: str = ""
     cleanup: Path | None = None
+    base: str | None = None                    # commit the installed build was made from (for the ancestor check)
+    git_root: Path | None = None               # repository holding base and commit (None = not checkable)
 
 
 def resolve_source(spec: str | None, installed_commit: str | None, *, repo: Path | None = None,
@@ -202,7 +188,8 @@ def resolve_source(spec: str | None, installed_commit: str | None, *, repo: Path
                                   "cannot be checked", "pass --base <commit the installed build was made from>")
                 changes = [x for x in _git(p, "diff", "--name-only", base).splitlines() if x]
             return Source(p / PACKAGE_PREFIX.rstrip("/"), changes, commit,
-                          "" if changes is not None else "plain folder: only the package files are compared")
+                          "" if changes is not None else "plain folder: only the package files are compared",
+                          base=base, git_root=p if commit else None)
         if (p / "__init__.py").is_file():                              # bare package folder
             return Source(p, None, None, "bare package folder: only its files are compared")
         raise Refused("HOTFIX_BAD_SOURCE", f"{p} is neither a repository checkout nor a jarves package folder")
@@ -226,7 +213,7 @@ def resolve_source(spec: str | None, installed_commit: str | None, *, repo: Path
     import tarfile
     with tarfile.open(tar) as t:
         t.extractall(tmp / "x", filter="data")
-    return Source(tmp / "x" / "core" / "src" / "jarves", changes, commit, cleanup=tmp)
+    return Source(tmp / "x" / "core" / "src" / "jarves", changes, commit, cleanup=tmp, base=base, git_root=root)
 
 
 # ---------------------------------------------------------------------- hooks (real ones; tests pass fakes)
@@ -277,6 +264,129 @@ def default_hooks(cfg, home: Path, installed_pkg: Path) -> Hooks:
     return Hooks(running, stop, start, lambda: str(backup_mod.create(home, "manual", note="before a hotfix")), doctor)
 
 
+# ---------------------------------------------------------------------- classification (#459)
+DEPENDENCY_NAMES = ("pyproject.toml", "uv.lock", "poetry.lock", "pipfile", "pipfile.lock", "setup.py", "setup.cfg")
+SLICE2 = "needs slice 2 (will be supported: run again after it ships; until then use the full installer)"
+
+
+def _is_dependency_file(r: str) -> bool:
+    name = r.rsplit("/", 1)[-1].lower()
+    return name in DEPENDENCY_NAMES or (name.startswith("requirements") and name.endswith((".txt", ".in")))
+
+
+def _is_bridge_change(r: str) -> bool:
+    low = r.lower()
+    return "bridge_pin" in low or "bridge-pin" in low or low.startswith("bridge/")
+
+
+def classify(plan: Plan, repo_changes: list[str] | None) -> tuple[Plan, list[str]]:
+    """Split the change into what is applied and what 'only affects the next full installer'. Raises Refused
+    (HOTFIX_NEEDS_SLICE2) for dependency and bridge changes: detected, never skipped silently."""
+    deps: list[str] = []
+    bridge: list[str] = []
+    pending: list[str] = []
+    for rel in repo_changes or []:
+        r = rel.replace("\\", "/")
+        if _is_dependency_file(r):
+            deps.append(r)
+        elif _is_bridge_change(r):
+            bridge.append(r)
+        elif r.lower().startswith(FULL_INSTALLER_PREFIXES):      # case-insensitive: Windows paths
+            pending.append(r)
+    unplaceable: list[str] = []
+    for rel in plan.files:
+        suffix = Path(rel).suffix.lower()
+        if (suffix in BINARY_SUFFIXES or suffix not in DATA_SUFFIXES
+                or (suffix == ".py" and any(Path(rel).stem.startswith(n) for n in INSTALLER_CODE_NAMES))):
+            unplaceable.append(PACKAGE_PREFIX + rel)           # inside the installed package: runtime, never skipped
+    if deps or bridge or unplaceable:
+        parts = []
+        if unplaceable:
+            parts.append("package files that cannot be hot-patched (binary, unknown type or installer code: "
+                         + ", ".join(unplaceable[:4]) + ")")
+        if deps:
+            parts.append("dependencies changed (" + ", ".join(deps[:4]) + ")")
+        if bridge:
+            parts.append("bridge pin/binary changed (" + ", ".join(bridge[:4]) + ")")
+        raise Refused("HOTFIX_NEEDS_SLICE2", "; ".join(parts) + ": " + SLICE2, "use the full installer for this change")
+    ok = Plan(removed_in_source=plan.removed_in_source)
+    for rel in plan.files:
+        if rel in plan.replace:
+            ok.replace.append(rel)
+        else:
+            ok.add.append(rel)
+    return ok, sorted(set(pending))
+
+
+def _site_dirs(installed_pkg: Path) -> list[Path]:
+    dirs = [installed_pkg.parent]
+    try:
+        if installed_pkg.resolve() == Path(__file__).resolve().parent:      # patching the running build: its environment
+            import site
+            dirs += [Path(x) for x in site.getsitepackages() + [site.getusersitepackages()]]
+    except Exception:
+        pass
+    return [d for d in dirs if d.is_dir()]
+
+
+def _module_present(top: str, dirs: list[Path]) -> bool:
+    for d in dirs:
+        if (d / top).is_dir() or (d / (top + ".py")).is_file() or any(d.glob(top + ".*")):
+            return True
+    return False
+
+
+def scan_new_imports(pkg: Path, rels: list[str], installed_pkg: Path, site_dirs: list[Path] | None = None) -> list[str]:
+    """Third-party top-level modules imported by the given Python files (any import statement, anywhere in the file:
+    conservative) that are not in the installed environment. Unparseable files are reported too."""
+    import ast
+    dirs = site_dirs if site_dirs is not None else _site_dirs(installed_pkg)
+    std = set(getattr(sys, "stdlib_module_names", ())) | {"__future__"}
+    missing: dict[str, str] = {}
+    for rel in rels:
+        if not rel.endswith(".py"):
+            continue
+        try:
+            tree = ast.parse((pkg / rel).read_text(encoding="utf-8"), filename=rel)
+        except (SyntaxError, ValueError, OSError):
+            missing.setdefault("<unparseable>", rel)
+            continue
+        known: set[str] = set()                          # modules the installed copy already imports: not new
+        try:
+            old = ast.parse((installed_pkg / rel).read_text(encoding="utf-8"))
+            for n0 in ast.walk(old):
+                if isinstance(n0, ast.Import):
+                    known.update(a.name.split(".")[0] for a in n0.names)
+                elif isinstance(n0, ast.ImportFrom) and n0.level == 0 and n0.module:
+                    known.add(n0.module.split(".")[0])
+        except (SyntaxError, ValueError, OSError):
+            pass
+        for node in ast.walk(tree):
+            names: list[str] = []
+            if isinstance(node, ast.Import):
+                names = [a.name for a in node.names]
+            elif isinstance(node, ast.ImportFrom) and node.level == 0 and node.module:
+                names = [node.module]
+            for n in names:
+                top = n.split(".")[0]
+                if top in std or top == "jarves" or top in missing or top in known:
+                    continue
+                if not _module_present(top, dirs):
+                    missing[top] = rel
+    return [f"{m} (in {r})" for m, r in sorted(missing.items())]
+
+
+def check_ancestor(src: Source) -> None:
+    """For a git source the installed build's commit must be an ancestor of the target commit (fail closed)."""
+    if not src.git_root or not src.base or not src.commit:
+        return                                          # not a git source: only the package files can be compared
+    r = subprocess.run(["git", "-c", "core.fsmonitor=false", "-C", str(src.git_root), "merge-base", "--is-ancestor",
+                        src.base, src.commit], capture_output=True, text=True, timeout=120)
+    if r.returncode != 0:
+        raise Refused("HOTFIX_BASE_NOT_ANCESTOR", f"the installed build's commit {src.base[:12]} is not an ancestor of "
+                      f"{src.commit[:12]}", "use the full installer, or pass the right --base")
+
+
 # ---------------------------------------------------------------------- apply / revert
 def hotfix_root(home: Path) -> Path:
     return Path(home) / HOTFIX_DIR
@@ -303,18 +413,24 @@ def _restart(hooks: Hooks, was_running: bool) -> None:
 
 
 def apply(installed_pkg: Path, src: Source, home: Path, hooks: Hooks, *, dry_run: bool = False,
-          restart: bool = True) -> dict:
+          restart: bool = True, python_only: bool = False, site_dirs: list[Path] | None = None) -> dict:
     """Returns the manifest. Raises Refused before touching anything; after the first write any failure restores
     the originals and raises HotfixError('HOTFIX_REVERTED')."""
     installed_pkg, home = Path(installed_pkg), Path(home)
     if not (installed_pkg / "__init__.py").is_file():
         raise Refused("HOTFIX_NO_INSTALL", f"{installed_pkg} is not a jarves package folder")
     plan = build_plan(src.pkg, installed_pkg)
+    check_ancestor(src)
+    plan, pending = classify(plan, src.repo_changes)
+    bad = scan_new_imports(src.pkg, plan.files, installed_pkg, site_dirs) if plan.files else []
+    if bad:
+        raise Refused("HOTFIX_NEW_DEPENDENCY", "an updated Python file imports a module that is not installed: "
+                      + "; ".join(bad[:6]) + ": " + SLICE2, "use the full installer (it brings new dependencies)")
     if not plan.files:
-        return {"status": "nothing", "files": []}
-    check_policy(plan, src.repo_changes)
+        return {"status": "nothing", "files": [], "pending_installer": pending}
     if dry_run:
-        return {"status": "dry-run", "files": plan.files, "replace": plan.replace, "add": plan.add}
+        return {"status": "dry-run", "files": plan.files, "replace": plan.replace, "add": plan.add,
+                "pending_installer": pending}
     info = installed_info(installed_pkg)
     prev_hotfix = info.get("hotfix") if isinstance(info.get("hotfix"), dict) else {}
     hid = _now_id()
@@ -327,7 +443,8 @@ def apply(installed_pkg: Path, src: Source, home: Path, hooks: Hooks, *, dry_run
                       "core_was_running": was_running, "doctor_before": baseline, "source_commit": src.commit,
                       "base_version": prev_hotfix.get("base_version") or info.get("version"),
                       "base_commit": prev_hotfix.get("base_commit") or info.get("commit"),
-                      "replaced": [], "added": [], "build_info_original": None}
+                      "replaced": [], "added": [], "build_info_original": None,
+                      "pending_installer": pending}
     # originals first (a full copy of what will be replaced), then the manifest, then the first write
     for rel in plan.replace:
         dst = d / "originals" / rel
@@ -437,8 +554,10 @@ def revert(installed_pkg: Path, home: Path, hooks: Hooks, *, restart: bool = Tru
 def status(installed_pkg: Path, home: Path) -> dict:
     info = installed_info(installed_pkg)
     found = latest_manifest(home)
+    pending = found[1].get("pending_installer") if found and found[1].get("status") == "applied" else None
     return {"version": info.get("version"), "hotfix": info.get("hotfix"),
-            "latest": ({"id": found[1].get("id"), "status": found[1].get("status")} if found else None)}
+            "latest": ({"id": found[1].get("id"), "status": found[1].get("status")} if found else None),
+            "pending_installer": list(pending or [])}
 
 
 # ---------------------------------------------------------------------- CLI
@@ -455,7 +574,7 @@ def locate_installed(override: str | None) -> Path:
 
 def add_cli(sub) -> None:
     p = sub.add_parser("hotfix", help="hot-patch a code-only fix into the installed build in ~1 minute: "
-                                      "apply [--from <git ref|folder>] | revert | status (refuses what needs the installer)")
+                                      "apply [--from <git ref|folder>] [--python-only] | revert | status (any code fix; build-only files are listed, not refused)")
     p.add_argument("action", nargs="?", default="status", choices=["apply", "revert", "status"])
     p.add_argument("--from", dest="source", help="git ref (default HEAD) or a folder: a checkout or a jarves package")
     p.add_argument("--repo", help="repository for a git ref (default: the current folder's)")
@@ -463,10 +582,18 @@ def add_cli(sub) -> None:
     p.add_argument("--install", help="site-packages folder of another install (default: this installed build)")
     p.add_argument("--dry-run", action="store_true", help="show what would change; touch nothing")
     p.add_argument("--no-restart", action="store_true", help="never restart the Core")
+    p.add_argument("--python-only", action="store_true", help="alias of the default: files that only affect the next full installer are skipped "
+                   "and listed, never a reason to refuse")
 
 
 def _say(he: str, en: str) -> str:
     return clilang.fmt(he, en)
+
+
+def _print_pending(files: list[str]) -> None:
+    if files:
+        print(_say("משפיעים רק על המתקין המלא הבא", "only affects the next full installer") + f" ({len(files)}): "
+              + ", ".join(files[:20]) + (" ..." if len(files) > 20 else ""))
 
 
 def cmd_hotfix(a, cfg, home) -> int:
@@ -478,6 +605,7 @@ def cmd_hotfix(a, cfg, home) -> int:
             hf = s["hotfix"]
             print(_say("גרסה", "version") + f" {s['version']}" + (f" +hotfix.{hf['n']} ({hf.get('commit') or '?'})" if hf else ""))
             print(_say("תיקון מהיר אחרון", "latest hotfix") + f": {s['latest'] or '-'}")
+            _print_pending(s["pending_installer"])
             return 0
         if a.action == "apply":
             from .cli import _cli_features
@@ -491,7 +619,8 @@ def cmd_hotfix(a, cfg, home) -> int:
         info = installed_info(installed)
         src = resolve_source(a.source, info.get("commit"), repo=Path(a.repo) if a.repo else None, base=a.base)
         try:
-            r = apply(installed, src, home, hooks, dry_run=a.dry_run, restart=not a.no_restart)
+            r = apply(installed, src, home, hooks, dry_run=a.dry_run, restart=not a.no_restart,
+                      python_only=bool(getattr(a, "python_only", False)))
         finally:
             if src.cleanup:
                 shutil.rmtree(src.cleanup, ignore_errors=True)
@@ -504,6 +633,7 @@ def cmd_hotfix(a, cfg, home) -> int:
                   + _say("הקור הופעל מחדש" if r["core_was_running"] and not a.no_restart else "הקור לא הופעל מחדש",
                          "core restarted" if r["core_was_running"] and not a.no_restart else "core not restarted")
                   + f". {_say('לביטול', 'undo with')}: jarvis hotfix revert")
+        _print_pending(r.get("pending_installer") or [])
         if src.note:
             print("note: " + src.note)
         return 0
@@ -522,11 +652,11 @@ COMMANDS = {"hotfix": cmd_hotfix}
 EVIDENCE = "UNIT test_hotfix.py (fake install tree and fake hooks); never run against a real install by the tests"
 BLOCKER = "no real installed-build hotfix recorded yet (owner PC run pending)"
 ABOUT = ("puts a code-only fix into the installed build in about a minute: backs up first, copies only the changed "
-         "Python files, restarts the Core only if it ran, runs doctor, and one command reverts it. Anything that touches "
-         "the installer, the bridge or dependencies is refused")
+         "Python files, restarts the Core only if it ran, runs doctor, and one command reverts it. Build-only files are "
+         "listed as affecting only the next installer; bridge and dependency changes are detected and wait for a later slice")
 hebrew.TEXT.update({
     ABOUT: "מכניס תיקון קוד בלבד לגרסה המותקנת תוך כדקה: מגבה קודם, מעתיק רק קבצי פייתון ששונו, מפעיל מחדש את הליבה רק "
-           "אם רצה, מריץ doctor, ופקודה אחת מבטלת. כל שינוי שנוגע במתקין, בגשר או בתלויות נדחה",
+           "אם רצה, מריץ doctor, ופקודה אחת מבטלת. קבצי בנייה בלבד מדווחים כמשפיעים רק על המתקין הבא; שינוי בגשר או בתלויות מזוהה וממתין לשלב הבא",
     EVIDENCE: "בדיקות יחידה test_hotfix.py (עץ התקנה מזויף וקרסים מזויפים); הבדיקות אף פעם לא רצות על התקנה אמיתית",
     BLOCKER: "עוד לא תועד תיקון מהיר אמיתי בגרסה מותקנת (הרצה במחשב הבעלים ממתינה)",
     "rewrites the installed program files": "משכתב את קבצי התוכנה המותקנים",
