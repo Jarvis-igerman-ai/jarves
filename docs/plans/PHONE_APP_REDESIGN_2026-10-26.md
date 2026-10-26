@@ -136,7 +136,7 @@ All in `m_theme.css` on `:root`, light by default with a dark set under `prefers
 - Show smart-chat task cards (ui_blocks) on the phone, read-only? Needs a change to the #363 rule (owner-only text on a
   phone). Default: no, keep #363; tasks are seen on the Plans page.
 
-## 10. Status (26 Oct 2026, slice 1)
+## 10. Status (26 Oct 2026, slice 1; superseded by section 12)
 
 - Done on branch `phone-redesign`: tokens (`m_theme.css`), app bar + drawer + history + composer mic + thinking + copy +
   per-message retry (`m_shell.js`, chatview hooks), chat as home, tests moved to the drawer (`go()` helper), guide step
@@ -147,3 +147,63 @@ All in `m_theme.css` on `:root`, light by default with a dark set under `prefers
 - Open: a re-shoot on the real phone after the final CSS (the PC's adb server from 22 Oct hangs and holds the device;
   it needs a restart by the owner or a permitted agent). Slice 2 (approvals/plans/learned/health as cards, dated history)
   follows. `phone-ui` (#510 PWA icons) merges independently.
+
+## 11. Design v2: critique and visual spec (26 Oct 2026, design lead)
+
+### 11.1 Honest critique of slice 1 (screenshots `browser/`, `real-phone/real-*`)
+
+| Area | Finding (before) | v2 answer |
+|---|---|---|
+| Hierarchy | Every page was a stack of same-weight grey boxes; the privacy strip, notices and chat all shouted equally. Brand + "connected" pill competed with the menu. | One neutral surface family, accent only on actions (Send, Approve, links). Bar: menu, brand with a quiet status line under it, New chat, language. |
+| Type | Body 16 but meta, chips and pills at random 12-14 sizes; headings in the chat as large as the brand. | Scale 12 / 13 / 15 / 16 / 17 / 22-24 (`--fs-*`), line-height 1.55-1.6 for reading, tabular numbers for times and counters. |
+| Colour + contrast | Slice-1 blue-black dark theme read "dashboard", not "chat"; muted text close to 4.5:1 on surfaces. | Neutral greys (`#111113` / `#ffffff`), muted `#a2a2ad` / `#5b5b66` (>= 4.5:1 on bg and surface), one accent `#2f5bea` / `#3a68ee` fill with white text; red only for risk and live microphones. |
+| Spacing | Mixed 6/10/14 px gaps. | 4 px rhythm (`--s1..--s7`), 24 px between turns, cards 16 px padding, radius 10 / 16 / 22 / 28. |
+| Icons | Text glyphs and emoji. | One inline SVG set (1.8 stroke, round caps) in `m_shell.js`, no library, no requests; every page in the drawer has its own icon. |
+| Motion | None or abrupt. | Drawer slides in and out (160-200 ms), messages rise 8 px, three breathing thinking dots, a breathing streaming dot instead of a block caret, Send pops in when there is text, the mic pulses red while recording; all only under `prefers-reduced-motion: no-preference`. |
+| Composer | Square field with Send and mic always both visible; keyboard covered it on the real phone. | One floating 28 px pill; mic while empty, Send once there is text (ChatGPT behaviour); 44 px round buttons; stays above the keyboard. |
+| Empty / loading / error | Blank log; a page showed nothing until its answer came. | Empty chat: mark, "How can I help?", one-time install / secure-connection tip, a sideways row of the main commands with the server's own descriptions. Skeleton lines in the chat and skeleton cards on Health / This phone / Approvals until the first answer. Failed send: per-message Retry. |
+| Dark mode | Partial (some hard-coded colours). | Every colour is a token with a dark value; screenshots in both schemes. |
+| Hebrew RTL | Mostly right; drawer opened from the wrong side; slash commands flipped; health values English. | Drawer from the inline start (right in Hebrew), logical properties only, slash commands always LTR, code LTR, health values and component names in Hebrew. |
+| Next to ChatGPT / Claude mobile | Felt like a settings app with a chat tab. | Chat is home; answers are plain full-width text, the user has a soft bubble; history grouped by day in the drawer; the other pages are calm cards. |
+
+### 11.2 Real-phone findings (test device, `adb reverse`, test persona) and fixes
+
+1. **Keyboard hid the conversation**: with the keyboard open only one line of chat was left under the three-line strip.
+   Fix: `m_shell.js` watches `visualViewport`; while a text field has focus and the visible height shrank by a quarter the
+   root gets `.kb`: the idle strip, the tip, the mark and the empty-state hint step aside (a listening microphone, `.hot`,
+   always stays) and the newest message is scrolled into view. Plus the `max-height: 520px` fallback.
+2. **Streaming stopped following** in a short log (keyboard open): the reader was "not near the end" after the first
+   lines. Fix (chatview.js, shared): a `stick` flag set by the reader's own scrolling; while stuck the view follows every
+   delta, the Copy row and log resizes (ResizeObserver); scrolling up stops it, the jump button brings it back.
+3. **Empty state overflowed** at the owner's large font size (suggestions cut off): suggestions became one sideways row
+   of cards above the composer, the mark and the tip hide below 760 px height, the tip's actions moved under its text.
+4. **"connected" pill on the pairing screen** (nothing is paired yet): hidden until the app view shows.
+5. Health page said `running`, `ok`, `audio` in Hebrew: translated (unknown values stay as sent). "This phone" showed the
+   approvals count as "Waiting for the connection…" (duplicate `waiting` key): now "Waiting for approval".
+6. Approvals page: one card per request, risk chip + time chip, Deny / Approve as equal 48 px buttons.
+
+### 11.3 Tokens v2 (in `m_theme.css` `:root`, dark under `prefers-color-scheme: dark`)
+
+| Token | Light | Dark |
+|---|---|---|
+| `--bg` / `--bg-2` | `#ffffff` / `#f7f7f8` | `#111113` / `#161619` |
+| `--surface` / `--surface-2` | `#f3f3f5` / `#e8e8ec` | `#1c1c20` / `#27272c` |
+| `--fg` / `--muted` | `#18181b` / `#5b5b66` | `#ececef` / `#a2a2ad` |
+| `--line` / `--line-2` | `#e4e4e9` / `#cfcfd6` | `#2a2a30` / `#3b3b43` |
+| `--accent` (text/rings) / `--accent-fill` (buttons) | `#2f5bea` / `#2f5bea` | `#8ab0ff` / `#3a68ee` |
+| `--ok` / `--warn` / `--bad` | `#0d7a4c` / `#9a5b00` / `#c0213c` | `#46d197` / `#f0b354` / `#ff7a88` |
+| `--user` (user bubble) | `#ececf1` | `#2a2a30` |
+
+Space `--s1..--s7` = 4, 8, 12, 16, 24, 32, 48. Radius chip 10, card 16, bubble 22, field 28. Motion `--t1` 120 ms,
+`--t2` 200 ms, ease `cubic-bezier(.2,.8,.2,1)`. Bar 56 px + safe-area top; composer pads safe-area bottom.
+
+Budget: no framework, no external request, icons inline SVG; `m_theme.css` + `m_shell.js` ~ 30 KB uncompressed.
+
+## 12. Status (26 Oct 2026, design v2 = slices 1 + 2)
+
+- Branch `phone-design` (from `phone-redesign` cb225ef1). Done: tokens v2, chat + composer + drawer polish, dated
+  history (Today / Yesterday / Previous 7 days / Earlier), approvals / plans / learned / health as cards, skeletons,
+  reduced motion, install / trusted-connection tip, keyboard handling, follow-while-streaming, Hebrew health words.
+- Screenshots: `docs/reviews/PHONE_REDESIGN_SCREENSHOTS/browser-v2/` (390x844, EN/HE, light/dark; `browser/` = before)
+  and `real-phone/v3-*` (test device, test persona; `real-*` and `v2-*` = before).
+- Not in this slice: the PWA icons / manifest (#510, branch `phone-ui`), companion info (#495), attachments (no API).

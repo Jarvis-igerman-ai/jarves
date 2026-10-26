@@ -147,7 +147,7 @@
     if (chatView || !window.JarvesChat) return;
     const S = window.JarvesShell;
     chatView = window.JarvesChat.mount($("chatRoot"), { api: chatApi, tx, device: true,
-      phone: { icon: S ? S.icon : null, ...composer(), onEvent: (e) => { if (S) S.onChatEvent(e); } } });
+      phone: { icon: S ? S.icon : null, hint: S ? S.hint : null, ...composer(), onEvent: (e) => { if (S) S.onChatEvent(e); } } });
   }
   function mountPlans() { if (window.JarvesPlans) window.JarvesPlans.mount($("plansRoot"), { api, post, lang: () => lang }); }
   function mountPrefs() { if (window.JarvesPrefs) window.JarvesPrefs.mount($("prefsRoot"), { api, post, lang: () => lang }); }
@@ -280,20 +280,35 @@
     $("apprNote").textContent = a.phone_approvals ? t("phone_ap_on") : t("phone_ap_off");
     const ul = $("apprList"); ul.replaceChildren();
     if (!a.pending.length) { li(ul, t("nothing")); return; }
-    a.pending.forEach((p) => {
-      const row = li(ul, `${p.title} (${p.seconds_left}${t("sec")})`);
+    a.pending.forEach((p) => {                        // one card per request: title, risk + time left, a note, the answers
+      const row = li(ul, p.title); row.classList.add("appr", "risk-" + (p.risk || "low"));
+      const meta = document.createElement("div"); meta.className = "appr-meta";
+      const chip = (text, cls) => { const c = document.createElement("span"); c.className = "chip " + (cls || ""); c.textContent = text; meta.appendChild(c); };
+      if (p.risk) chip(tx("סיכון ", "Risk ") + ({ low: tx("נמוך", "low"), medium: tx("בינוני", "medium"), high: tx("גבוה", "high") }[p.risk] || p.risk), "risk");
+      chip(`${p.seconds_left} ${t("sec")}`, "time");
+      row.appendChild(meta);
       if (!a.phone_approvals) return;
+      const acts = document.createElement("div"); acts.className = "appr-acts";
       const mk = (label, ok, primary) => { const b = document.createElement("button"); b.type = "button"; b.textContent = label; if (primary) b.className = "primary";
-        b.addEventListener("click", async () => { b.disabled = true; try { await post("/api/m/approvals/" + p.id, { approved: ok, id: "appr-" + p.id + (ok ? "-yes" : "-no") }); } catch (e) { row.firstChild.textContent = e.message; } tick(); }); row.appendChild(b); };
-      if (p.typed) { const s = document.createElement("span"); s.className = "muted"; s.textContent = t("typed_pc"); row.appendChild(s); mk(t("deny"), false, false); }
-      else if (p.pc_only) { const s = document.createElement("span"); s.className = "muted"; s.textContent = t("pc_only"); row.appendChild(s); mk(t("deny"), false, false); }
-      else { mk(t("approve"), true, true); mk(t("deny"), false, false); }
+        b.addEventListener("click", async () => { b.disabled = true; try { await post("/api/m/approvals/" + p.id, { approved: ok, id: "appr-" + p.id + (ok ? "-yes" : "-no") }); } catch (e) { row.firstChild.textContent = e.message; } tick(); }); acts.appendChild(b); };
+      const why = (text) => { const s = document.createElement("span"); s.className = "muted appr-why"; s.textContent = text; row.appendChild(s); };
+      if (p.typed) { why(t("typed_pc")); mk(t("deny"), false, false); }
+      else if (p.pc_only) { why(t("pc_only")); mk(t("deny"), false, false); }
+      else { mk(t("deny"), false, false); mk(t("approve"), true, true); }
+      row.appendChild(acts);
     });
   }
+  // health values and component names come from the computer in English: say them in Hebrew too (unknown ones stay as sent)
+  const HV = { running: "רצה", stopped: "עצורה", ok: "תקין", down: "לא פעיל", off: "כבוי", on: "פועל", idle: "לא פעיל", error: "שגיאה", unknown: "לא ידוע", ready: "מוכן" };
+  const HK = { audio: "שמע", core: "ליבה", model: "מודל", voice: "קול", wake: "מילת הפעלה", tts: "הקראה", stt: "תמלול", bridge: "גשר" };
+  const hv = (v) => (lang === "he" && HV[String(v).toLowerCase()]) || v;
+  const hk = (k) => (lang === "he" && HK[k]) || (k.charAt(0).toUpperCase() + k.slice(1));
   function renderHealth(s) {
     const ul = $("statusList"); ul.replaceChildren();
-    li(ul, `${t("core")}: ${s.core}`); li(ul, `${t("tls")}: ${s.tls ? t("yes") : t("no")}`);
-    Object.keys(s.components || {}).sort().forEach((k) => li(ul, `${k}: ${s.components[k]}`));
+    const st = (row, v) => { const x = String(v).toLowerCase(); row.classList.add(/^(ok|running|ready|yes|true|on|pass(ed)?)$/.test(x) ? "st-ok"
+      : /(fail|error|down|unreach|stopped|missing|bad)/.test(x) ? "st-bad" : "st-idle"); return row; };
+    st(li(ul, `${t("core")}: ${hv(s.core)}`), s.core); st(li(ul, `${t("tls")}: ${s.tls ? t("yes") : t("no")}`), s.tls ? "ok" : "idle");
+    Object.keys(s.components || {}).sort().forEach((k) => st(li(ul, `${hk(k)}: ${hv(s.components[k])}`), s.components[k]));
     const tl = $("testList"); tl.replaceChildren();
     const kinds = Object.keys(s.tests || {});
     if (!kinds.length) li(tl, t("no_tests"));
@@ -301,7 +316,7 @@
   }
   function renderHome(s) {
     const ul = $("homeList"); ul.replaceChildren();
-    li(ul, `${t("core")}: ${s.core}`); li(ul, `${t("waiting")}: ${s.waiting}`);
+    li(ul, `${t("core")}: ${hv(s.core)}`); li(ul, `${tx("ממתינים לאישור", "Waiting for approval")}: ${s.waiting}`);
     li(ul, `${t("pages_you_have")}: ${s.pages.map((x) => ({ home: tx("בית", "Home"), chat: tx("שיחה", "Chat"), approvals: tx("אישורים", "Approvals"), health: tx("תקינות ומהירות", "Health & speed") }[x] || x)).join(", ")}`);
   }
   $("unpair").addEventListener("click", async () => { try { await post("/api/m/unpair"); } catch (e) { /* already gone */ } forget(); });

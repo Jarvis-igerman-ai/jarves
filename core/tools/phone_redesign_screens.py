@@ -21,7 +21,7 @@ from types import SimpleNamespace
 ROOT = Path(__file__).resolve().parents[1]
 os.environ.setdefault("JARVES_BETA_FEATURES", "1")         # as the tests: the owner install has the opt-in on
 sys.path[:0] = [str(ROOT / "src"), str(ROOT / "tests"), str(ROOT / "tools")]
-OUT = ROOT.parent / "docs" / "reviews" / "PHONE_REDESIGN_SCREENSHOTS" / "browser"
+OUT = ROOT.parent / "docs" / "reviews" / "PHONE_REDESIGN_SCREENSHOTS" / "browser-v2"      # design v2; browser/ = slice 1 (before)
 
 ANSWERS = {
     "plan": ("Here is a plan for **Saturday**:\n\n1. Groceries at 10:00\n2. Call the garage about the service\n3. Gym at 17:30\n\n"
@@ -99,12 +99,23 @@ def screens() -> None:
                     page.tap("#menuBtn")
                     page.wait_for_selector("#drawer:not([hidden])")
                     shoot(page, f"04-drawer-{tag}")
+                    page.tap("#histLoad")                          # recent conversations, grouped by day
+                    page.wait_for_selector("#drawer.closing", state="detached")
+                    page.wait_for_timeout(1500)
+                    page.tap("#menuBtn")
+                    page.wait_for_selector("#drawer:not([hidden])")
+                    shoot(page, f"04-drawer-history-{tag}")
                     page.tap("#drawerClose")
+                    page.wait_for_selector("#drawer.closing", state="detached")
                     fut = p.ask("Send the test message" if lang == "en" else "שליחת הודעת בדיקה")
                     page.wait_for_selector(".jc-card", timeout=15000)
                     shoot(page, f"05-chat-approval-{tag}")
                     for tab in ("approvals", "voice", "health", "home"):
+                        page.wait_for_selector("#drawer.closing", state="detached")
                         e2e.go(page, tab)
+                        full = {"approvals": "#apprList li", "health": "#statusList li", "home": "#homeList li"}.get(tab)
+                        if full:                                   # the page's first answer, not its loading skeleton
+                            page.wait_for_selector(full, timeout=15000)
                         page.wait_for_timeout(900)
                         shoot(page, f"06-{tab}-{tag}")
                     from jarves import approvals as appr

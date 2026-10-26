@@ -208,7 +208,9 @@ def ui_pair(page, p: Phone, name="Pixel test"):
 
 
 def go(page, tab):
-    """Open a page from the side drawer (redesign #511): the menu button first when the drawer is closed."""
+    """Open a page from the side drawer (redesign #511): the menu button first when the drawer is closed (after its
+    slide-out finished: a closing drawer is still visible for 160 ms)."""
+    page.wait_for_selector("#drawer.closing", state="detached")
     if not page.is_visible(f"[data-tab={tab}]"):
         page.tap("#menuBtn")
         page.wait_for_selector("#drawer:not([hidden])")
@@ -538,6 +540,7 @@ def audit(page, lang):
     assert metrics["small"] == [], metrics["small"]                                          # tap targets >= 44 px
     r = page.evaluate(apc.RULES, {"lang": lang, "width": 390, "reduced": False})
     issues = [i for i in r["issues"] if i["rule"] in RULES_THAT_APPLY and i["where"] != "button#lang"
+              and not (i["where"].startswith("ul#apprList>li") and i["where"].endswith(">span.grow"))     # a request title (card)
               and not i["where"].startswith(("div#log>", "div.jc-log", "ul#apprList>li>span.grow", "div#noticeBox>div.notice>div.notice-text", "ul.list>li.pref>div.grow>div.pref-text", "ul.list>li.pref>div.grow>div.muted", "li.plan>div.grow>div.plan-head>s", "details>ol.plan-steps>"))]     # chat text and request titles are user DATA     # the language button names its language by design
     assert issues == [], issues
 
@@ -976,4 +979,42 @@ def test_drive_tab_layout_at_390px_in_english_and_hebrew(browser, phone, fake_ro
     page.tap("#driveRoot button.primary >> nth=-1")
     page.wait_for_selector("#driveRoot a.btn")
     audit(page, lang)                                                   # state, answers, trip result and two link buttons
+    assert page.errors == []
+
+
+# ------------------------------------------------------------------ design v2 (#511): the real-phone fixes, in a browser
+def test_open_keyboard_keeps_the_conversation_in_view_and_the_pair_screen_has_no_connection_pill(browser, phone):
+    p = phone(tls=True)
+    page = new_page(browser, scheme="dark")
+    page.goto(f"{p.base}/m/")
+    page.wait_for_selector("#pairView:not([hidden])")
+    assert page.is_visible("#conn") is False                  # not paired: nothing to be "connected" to yet
+    page.goto("about:blank")
+    ui_pair(page, p)
+    page.wait_for_selector(".jc-in")
+    until(page, "!document.getElementById('audioBar').hidden")
+    page.focus(".jc-in")
+    page.set_viewport_size({"width": 390, "height": 420})     # the on-screen keyboard takes the lower half
+    until(page, "document.documentElement.classList.contains('kb')", 5000)
+    assert page.is_visible("#audioBar") is False and page.is_visible(".jc-in")
+    box = page.evaluate("(() => { const r = document.querySelector('.jc-form').getBoundingClientRect(); return [r.bottom, innerHeight]; })()")
+    assert box[0] <= box[1]                                   # the composer stays above the keyboard
+    page.evaluate("document.activeElement.blur()")
+    page.set_viewport_size({"width": 390, "height": 844})
+    until(page, "!document.documentElement.classList.contains('kb')", 5000)
+    assert page.is_visible("#audioBar")
+    assert page.errors == []
+
+
+def test_a_long_answer_streaming_into_a_short_log_keeps_following_until_the_owner_scrolls_up(browser, phone):
+    p = phone(tls=True)
+    page = new_page(browser)
+    page.set_viewport_size({"width": 390, "height": 420})
+    ui_pair(page, p)
+    for i in range(3):
+        say(page, f"line {i} " + "word " * 60)
+        until(page, f"[...document.querySelectorAll('.jc-msg')].some(m => m.textContent.includes('echo: line {i}'))")
+    at_end = "(() => { const l = document.querySelector('.jc-log'); return l.scrollHeight - l.scrollTop - l.clientHeight < 4; })()"
+    until(page, at_end, 5000)                                  # the newest text is in view, also after the Copy row arrived
+    assert page.is_hidden(".jc-jump")
     assert page.errors == []

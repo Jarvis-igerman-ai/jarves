@@ -146,14 +146,35 @@
       input.setAttribute("aria-activedescendant", uidp + "o" + popSel);
       pop.hidden = false;
     }
-    root.replaceChildren(h("div", { class: "jchat" }, h("div", { class: "jc-bar" }, status, opts2), h("div", { class: "jc-wrap" }, log, jump), apprBox, cmds, h("div", { class: "jc-formwrap" }, pop, form)));
+    // phone: a ChatGPT-like empty state (heading, an optional hint from the page, the main commands with the server's own
+    // descriptions) and skeleton lines until the first state arrives. Both are client only.
+    const empty = phone ? h("div", { class: "jc-empty" }) : null;
+    function paintEmpty() {
+      if (!empty) return;
+      const want = ["/status", "/resume", "/help"], all = (state && state.commands) || [];
+      const sugg = want.map((n) => all.find((c) => c.name === n) || { name: n });
+      const say = (c) => (lang() === "he" ? c.he : c.en) || "";
+      empty.replaceChildren(h("div", { class: "jc-mark", "aria-hidden": "true" }),
+        h("h2", { class: "jc-empty-h", dir: "auto" }, tx("במה אפשר לעזור?", "How can I help?")),
+        (typeof phone.hint === "function" && phone.hint()) || null,
+        h("div", { class: "jc-sugg", role: "group", "aria-label": tx("פקודות", "Commands") }, sugg.map((c) =>
+          h("button", { type: "button", class: "jc-sug", onclick: () => submit(c.name) }, h("b", { dir: "ltr" }, c.name),
+            say(c) ? h("span", { dir: "auto" }, say(c)) : null))),
+        h("p", { class: "jc-empty-tip", dir: "auto" }, tx("הקלידו / לכל הפקודות", "Type / for all commands")));
+    }
+    root.replaceChildren(h("div", { class: "jchat" + (phone ? " jc-phone" : "") }, h("div", { class: "jc-bar" }, status, opts2), h("div", { class: "jc-wrap" }, log, jump, empty), apprBox, cmds, h("div", { class: "jc-formwrap" }, pop, form)));
+    if (phone) { log.append(...[0, 1, 2].map((i) => h("div", { class: "jc-skel jc-skel" + i, "aria-hidden": "true" }))); paintEmpty(); }
     if (silentBox) silentBox.addEventListener("change", async () => {
       try { const r = await api.silent(silentBox.checked); paintSilent(r.silent); } catch (e) { note(e.message); }
     });
     const grow = () => { input.style.height = "auto"; input.style.height = Math.min(input.scrollHeight + 2, 180) + "px"; sendBtn.disabled = !input.value.trim(); };
     input.addEventListener("input", () => { grow(); popSel = 0; paintPop(); });
     input.addEventListener("blur", () => setTimeout(closePop, 120));
-    log.addEventListener("scroll", () => { jump.hidden = nearEnd(); });
+    // follow the newest text while the reader is at the end (also while a long answer streams into a short log, e.g. with the
+    // phone keyboard open); stop following once they scroll up, until they come back down or press the jump button
+    let stick = true;
+    log.addEventListener("scroll", () => { stick = nearEnd(); jump.hidden = stick; });
+    if (window.ResizeObserver) new ResizeObserver(() => { if (stick) log.scrollTop = log.scrollHeight; }).observe(log);
     input.addEventListener("keydown", (ev) => {
       if (!pop.hidden && popItems.length) {
         if (ev.key === "ArrowDown" || ev.key === "ArrowUp") { ev.preventDefault(); popSel = (popSel + (ev.key === "ArrowDown" ? 1 : popItems.length - 1)) % popItems.length; paintPop(); return; }
@@ -175,17 +196,21 @@
     function addCopy(d, text) {         // phone: a Copy button under a finished answer (the clipboard of this phone only)
       if (!phone || !text || d.nextSibling && d.nextSibling.classList && d.nextSibling.classList.contains("jc-acts")) return;
       const label = tx("העתקה", "Copy");
-      const b = h("button", { type: "button", class: "jc-act", "aria-label": label, title: label }, phone.icon ? phone.icon("copy") : label);
+      const ic = (n) => (phone.icon ? phone.icon(n) : label);
+      const b = h("button", { type: "button", class: "jc-act", "aria-label": label, title: label }, ic("copy"));
       b.addEventListener("click", async () => {
         let ok = true; try { await navigator.clipboard.writeText(text); } catch (e) { ok = false; }
         b.setAttribute("aria-label", ok ? tx("הועתק", "Copied") : tx("ההעתקה נכשלה", "Copy failed")); b.classList.toggle("done", ok);
-        setTimeout(() => { b.setAttribute("aria-label", label); b.classList.remove("done"); }, 1500);
+        if (ok && phone.icon) b.replaceChildren(ic("check"));
+        setTimeout(() => { b.setAttribute("aria-label", label); b.classList.remove("done"); if (phone.icon) b.replaceChildren(ic("copy")); }, 1500);
       });
-      d.after(h("div", { class: "jc-acts" }, b));
+      const when = d.dataset.time ? h("span", { class: "jc-time", title: d.title || null }, d.dataset.time) : null;
+      if (when) d.classList.add("has-acts");
+      d.after(h("div", { class: "jc-acts" }, b, when)); scroll();
     }
     function note(text, cls) { const d = h("div", { class: "jc-msg jc-notice " + (cls || ""), dir: "auto" }, text); log.append(d); scroll(); return d; }
     function nearEnd() { return log.scrollHeight - log.scrollTop - log.clientHeight < 80; }
-    function scroll(force) { if (force === true || nearEnd()) { log.scrollTop = log.scrollHeight; jump.hidden = true; } else jump.hidden = false; }
+    function scroll(force) { if (force === true || stick || nearEnd()) { stick = true; log.scrollTop = log.scrollHeight; jump.hidden = true; } else jump.hidden = false; }
     function paintSilent(s) {
       if (!s) return;
       const why = s.quiet_hours ? tx("שעות שקט", "quiet hours") : s.setting ? tx("מתג השקט", "silent switch") : "";
@@ -352,7 +377,7 @@
     function load(s) {
       state = s; log.replaceChildren(); turns.clear(); blockUis.clear();
       (s.messages || []).forEach(renderMessage); scroll(true);
-      after = s.cursor || 0; busy = s.busy || ""; phoneAp = s.phone_approvals !== false;
+      after = s.cursor || 0; busy = s.busy || ""; phoneAp = s.phone_approvals !== false; paintEmpty();
       paintSilent(s.silent); paintAppr(s.approvals || []); paintThink();
     }
     function onEvent(e) {
