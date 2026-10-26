@@ -1,0 +1,5 @@
+# Backend prompt budget: same number locally and in CI (#307) - 26 Oct 2026
+
+- Cause: not the prompt text. The feature probes `display_control` (needs a Godot viewer on PATH/`GODOT_EXE`), `tray_icon`, `wake_word` and `chimes` depend on the machine, and a feature whose probe fails offers no tools. The owner PC has Godot, so it offered 461 chars of show/hide tools (+55 tray, +134 wake word, +138 chimes) that CI runners never offer. Home, `OPENAI_API_KEY`, Pear (`_tcp_open` is stubbed), guides and user data were already hermetic.
+- Numbers (tools JSON + rules): this PC before 48807 (over the 48400 cap); CI Linux about 48346 (48807 minus the Godot tools); hermetic fixture on this PC 48260 (tools 38855 + rules 9405), identical everywhere. Budget unchanged (48400, 140 chars of headroom); no prompt text changed, no raise needed.
+- Change: fixture `hermetic_features` used by `test_backend_prompt_does_not_grow` and `test_backend_prompt_ceiling_and_per_tool_cap`; `prepush.py` drops `GODOT_EXE` from the child env so it runs the same way as CI.

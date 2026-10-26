@@ -15,6 +15,10 @@ Run `python core/tools/prepush.py` before every push and never push on a red loc
 
 Options: `--fast` skips the slower checks (`locales`, `ci`, `net`); `--changed-only` runs only the checks the files changed against `main` can affect (mapped with `core/tools/ci_affected.py`; a workflow or CI tool change selects everything); `--only perf dash` picks checks; `--base REF` sets the comparison ref. The output is a PASS/FAIL table with the first error line per failure and the exact re-run command; the exit code is non-zero on any failure.
 
+## Hermetic size budget (#307)
+
+The `perf` check measures the backend prompt (tools JSON + rules) with the `hermetic_features` fixture (`core/tests/conftest.py`): the environment probes `display_control` (Godot viewer found), `tray_icon` (desktop session + pystray), `wake_word` and `chimes` are pinned to "not available", `GODOT_EXE` is removed, and the home is an empty temp dir. Before, a PC with Godot installed offered the show/hide tools and measured 48807 chars against the 48400 cap while CI (no Godot) measured 48346 and passed. Now the number is 48260 on every machine. If you add a probe-gated tool, pin its probe in that fixture. See [handoff](handoff/2026-10-26-perf-hermetic-307.md).
+
 ## Optional pre-push hook
 
 `python core/tools/prepush.py --install-hook` writes `.git/hooks/pre-push` (runs `--changed-only --fast`). It is never installed automatically and never overwrites a hook that is not ours. Bypass once with `git push --no-verify` (or `JARVES_PREPUSH_SKIP=1`). Remove it with `--uninstall-hook`.
