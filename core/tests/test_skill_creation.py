@@ -477,3 +477,31 @@ async def test_a_draft_with_crlf_line_endings_can_be_approved(tmp_path):
     assert rep["ok"], rep["errors"]
     assert mgr.draft("tea_coach")["report"]["sha256"] == rep["sha256"]
     assert mgr.approve("tea_coach", rep["sha256"], by="dashboard")["version"] == 1
+
+
+async def test_failed_run_does_not_undo_a_change_made_while_it_ran(tmp_path, monkeypatch):
+    """#564: a revoke made while the sandbox ran stays revoked; only last_error is added; a new version keeps its state."""
+    reg, mgr = setup(tmp_path)
+    rep = mgr.propose(MD_SHOP, py_shop(), by="voice")
+    mgr.approve("shopping", rep["sha256"], by="dashboard")
+    mgr.set_enabled("shopping", True, by="dashboard")
+    mgr.grant("shopping", ["storage"], True, by="dashboard")
+
+    async def failing(code, tool, args, broker, timeout_s=0):
+        mgr.grant("shopping", [], False, by="dashboard")            # the owner revokes while the call runs
+        return {"ok": False, "error": "boom"}
+    monkeypatch.setattr(gen, "run_sandboxed", failing)
+    r = await mgr.run("shopping", "shopping_list", {})
+    assert r.code == "SKILL_RUN_FAILED"
+    st = mgr.state("shopping")
+    assert st["grants"] == {"capabilities": [], "actions": False} and st["last_error"]["error"] == "boom"
+
+    async def failing_new_version(code, tool, args, broker, timeout_s=0):
+        cur = mgr.state("shopping")
+        mgr._set_state("shopping", {**cur, "version": cur["version"] + 1, "last_error": None})   # a new version was approved
+        return {"ok": False, "error": "late"}
+    monkeypatch.setattr(gen, "run_sandboxed", failing_new_version)
+    mgr.grant("shopping", ["storage"], True, by="dashboard")
+    await mgr.run("shopping", "shopping_list", {})
+    st = mgr.state("shopping")
+    assert st["version"] == 2 and st["last_error"] is None          # the old call's error is not written onto the new version
