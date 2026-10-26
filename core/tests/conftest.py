@@ -207,6 +207,19 @@ def _network_guard(request):
 
 
 @pytest.fixture(autouse=True)
+def _crash_hooks_do_not_leak():
+    """logs.install_crash_hooks() replaces sys/threading excepthook for the whole process, once. Without this, a
+    thread of an EARLIER test on the same xdist worker that dies late is logged as "unhandled exception" into the
+    test that happens to run then (flake #474, #473). Restoring them per test hands such a death back to pytest."""
+    import threading
+
+    from jarves import logs
+    saved = (sys.excepthook, threading.excepthook, logs._hooks_installed)
+    yield
+    sys.excepthook, threading.excepthook, logs._hooks_installed = saved
+
+
+@pytest.fixture(autouse=True)
 def _update_keys_are_hermetic(monkeypatch):
     """The shipped public key must not change what update tests expect; tests pass their own keys explicitly."""
     from jarves import updates

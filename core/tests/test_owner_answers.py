@@ -150,14 +150,17 @@ def test_clear_denied_by_owner_keeps_the_list_and_approved_clears_it(home):
         ctx.close()
 
 
-async def test_dashboard_request_waits_on_the_running_core_service(home):
+async def test_dashboard_request_waits_on_the_running_core_service(home, monkeypatch):
     """With a Core service attached (its loop running), the HTTP thread asks THAT service and waits for the answer."""
+    # The "dashboard page is open" marker goes stale after 15 s; a loaded Windows runner can take longer than that to
+    # start the request thread, and then the service sees nobody to ask and refuses at once (#473). Not what is tested.
+    monkeypatch.setattr(appr, "DASHBOARD_FRESH_S", 3600.0)
     svc = appr.attach(appr.ApprovalService(home, timeout_s=10))
     svc.loop = asyncio.get_running_loop()
     appr.api_approvals(SimpleNamespace(home=home), None, None)      # the dashboard page is open (a place to answer)
     ctx = _list_ctx(home)
     try:
-        call =asyncio.create_task(asyncio.to_thread(
+        call = asyncio.create_task(asyncio.to_thread(
             lists_mod.api_list_op, ctx, None, {"op": "clear", "list_name": "shopping", "only_done": False}))
         deadline = time.monotonic() + 60                 # a loaded Windows runner needs seconds to start the thread (#242)
         while not svc.pending() and not call.done() and time.monotonic() < deadline:
@@ -175,7 +178,8 @@ async def test_dashboard_request_waits_on_the_running_core_service(home):
         ctx.close()
 
 
-async def test_dashboard_request_times_out_to_a_refusal(home):
+async def test_dashboard_request_times_out_to_a_refusal(home, monkeypatch):
+    monkeypatch.setattr(appr, "DASHBOARD_FRESH_S", 3600.0)          # same reason as above (#473)
     svc = appr.attach(appr.ApprovalService(home, timeout_s=1))
     svc.loop = asyncio.get_running_loop()
     appr.api_approvals(SimpleNamespace(home=home), None, None)
