@@ -333,6 +333,28 @@ async def core(home, cfg):
         await c.stop()
 
 
+def close_leftover_browser_contexts(browser) -> int:
+    """Close every context a test left open on a (module-scoped) browser; returns how many. A leaked context keeps its
+    pages, SSE streams and polling timers running, so on the Windows runner the sockets pile up until Chromium fails
+    with ERR_NO_BUFFER_SPACE and a later page load times out (#546, #547, #549, #555)."""
+    n = 0
+    for ctx in list(getattr(browser, "contexts", None) or []):
+        try:
+            ctx.close()
+            n += 1
+        except Exception:                      # already closed / browser gone: nothing left to free
+            pass
+    return n
+
+
+@pytest.fixture(autouse=True)
+def _close_browser_contexts_after_each_test(request):
+    yield
+    browser = request.node.funcargs.get("browser") if hasattr(request.node, "funcargs") else None
+    if browser is not None:
+        close_leftover_browser_contexts(browser)
+
+
 @pytest.fixture(autouse=True)
 def _helper_not_elevated(monkeypatch):
     """CI runners (Windows) run as administrator, where the helper correctly refuses everything. Tests assume a normal
