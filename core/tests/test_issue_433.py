@@ -80,13 +80,13 @@ def test_stop_after_update_is_its_own_kind_and_other_stops_stay_crashes():
 
 
 def test_expiry_semantics_untouched(reg):
-    reg.record("tools", "TOOL_A_FAIL", "P2")
-    reg.record("health", "FINDING_log:WARNING:WAKE_MIC_QUIET", "P2", {"finding": "log:WARNING:WAKE_MIC_QUIET"})
+    reg.record("tools", "TOOL_A_FAIL", "P3")
+    reg.record("health", "FINDING_log:WARNING:WAKE_MIC_QUIET", "P3", {"finding": "log:WARNING:WAKE_MIC_QUIET"})
     reg.clock.t += (ir.EXPIRE_DAYS + 1) * 86400
     reg.tidy("")
     assert reg.counts()["open"] == 0 and reg.counts()["info"] == 0
     assert reg.get(ir.issue_id("tools", "TOOL_A_FAIL"))["closed_reason"] == "expired"
-    reg.record("tools", "TOOL_A_FAIL", "P2")
+    reg.record("tools", "TOOL_A_FAIL", "P3")
     assert reg.counts()["open"] == 1
 
 
