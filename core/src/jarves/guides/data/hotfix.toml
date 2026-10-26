@@ -47,6 +47,11 @@ en = "Dependency change (pyproject or uv.lock): jarvis hotfix apply --dry-run li
 action = "command:jarvis hotfix apply --dry-run"
 
 [[steps]]
+he = "אחרי תיקון מהיר, תהליך הגשר שכבר רץ ממשיך להשתמש בקובץ הישן עד שהגשר עצמו מופעל מחדש. jarvis hotfix status (והדוח של apply) משווה את הקובץ שהתהליך הרץ באמת עם קובץ הגשר הנעוץ, ואומר במפורש \"bridge restart needed\" כשהם שונים. כדי להפעיל מחדש בבטחה: jarvis hotfix apply --restart-bridge. רק תהליך הגשר שהליבה מנהלת מופעל מחדש (לפי ה-pid ונתיב הקובץ המדויק שלו, עצירה מסודרת, בלי הריגה לפי שורת פקודה), ורק אחרי שהקובץ החדש אומת. אם ההפעלה נכשלת, הכול מבוטל אוטומטית והגשר חוזר."
+en = "After a hotfix, a bridge process that was already running keeps using the old exe until the bridge itself restarts. jarvis hotfix status (and the apply report) compares the exe the running process really uses with the pinned bridge exe and says plainly \"bridge restart needed\" when they differ. To restart it safely: jarvis hotfix apply --restart-bridge. Only the bridge process Core owns is restarted (by its pid and exact image path, graceful stop, never killed by command-line pattern), and only after the new exe is verified. If the restart fails, everything is reverted automatically and the bridge comes back."
+action = "command:jarvis hotfix status"
+
+[[steps]]
 he = "לביטול: jarvis hotfix revert. הקבצים המקוריים חוזרים ממה ששמור בתיקיית hotfix בנתונים."
 en = "To undo: jarvis hotfix revert. The original files come back from the hotfix folder in your data folder."
 action = "command:jarvis hotfix revert"
