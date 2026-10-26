@@ -105,3 +105,8 @@ en = "Free disk space check: first of all (even before JARVES is stopped), setup
 [[steps]]
 he = "אחרי עדכון אוטומטי מופעל מחדש רק מה שרץ לפני כן: הליבה (רק אם רצה), החלון (רק אם היה פתוח) ולוח הבקרה (רק אם היה פתוח, עם אותן אפשרויות רשת: --lan, --mobile, --tls-selfsigned, --tailnet-only). אם לא רץ כלום, לא מופעל כלום; רק אם ההתקנה לא הצליחה לבדוק מה רץ, הליבה מופעלת כמו קודם. לוח בקרה עם פורט או עמוד מיוחדים חוזר בפורט הרגיל, וליבות של פרופילים אחרים לא מופעלות לבד. להפעלה ידנית: jarvis start, jarvis show, jarvis dashboard."
 en = "After an automatic update only what was running before starts again: the Core (only if it ran), the window (only if it was open) and the dashboard (only if it was open, with the same network options: --lan, --mobile, --tls-selfsigned, --tailnet-only). If nothing was running, nothing is started; only when setup could not tell what was running is the Core started, as before. A dashboard with a custom port or page comes back on the normal port, and Cores of other profiles are not started by themselves. To start by hand: jarvis start, jarvis show, jarvis dashboard."
+
+[[steps]]
+he = "בזמן עדכון עמוד Updates מציג התקדמות (הורדה, בדיקת חתימה, גיבוי, עצירה, התקנה, בדיקת תקינות) וכך גם jarvis update install ו-jarvis update status. ההודעה \"הסתיים\" מופיעה רק אחרי שהגרסה החדשה עלתה ועברה בדיקת תקינות; אם נכשל, מוצג מה לעשות."
+en = "During an update the Updates page shows progress (download, signature check, backup, stop, install, health check), and so do jarvis update install and jarvis update status. Done appears only after the new version started and passed its health check; on failure it says what to do."
+action = "open:#/updates"

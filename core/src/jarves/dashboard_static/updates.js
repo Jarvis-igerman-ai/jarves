@@ -29,12 +29,42 @@ function updateError(e) {
   return m;
 }
 
+// #168: the install progress. Reads /api/updates/progress (a small file written by the update steps), so it also shows the
+// right stage after the dashboard or the Core restarted. "Done" is shown only when the Core says the new version is healthy.
+function updateProgressCard() {
+  const text = el("div", { class: "v", role: "status", "aria-live": "polite" });
+  const hint = el("div", { class: "muted small" });
+  const bar = el("progress", { max: "100", value: "0", style: "width:100%", "aria-label": "Update progress" });
+  const card = el("div", { class: "card", style: "display:none", "data-update-progress": "1" },
+    el("h2", {}, "Update progress"), bar, text, hint);
+  let timer = null;
+  const apply = (s) => {
+    if (!s || !s.active) { card.style.display = "none"; return false; }
+    card.style.display = "";
+    bar.value = s.percent || 0;
+    card.dataset.state = s.state; card.dataset.stage = s.stage;
+    text.textContent = "(" + s.step + "/" + s.steps + ") " + tx(s.text_he, s.text_en);
+    hint.textContent = s.hint_en ? tx(s.hint_he, s.hint_en) : "";
+    return s.state === "running";
+  };
+  const poll = async () => {
+    if (!card.isConnected) { return; }             // the page changed: stop
+    let again = true;
+    try { again = apply(await api("/api/updates/progress")); }
+    catch (e) { card.style.display = ""; text.textContent = tx("ג'ארביס מופעל מחדש… ממתין לו", "JARVES is restarting… waiting for it"); }
+    if (again) { timer = setTimeout(poll, 2000); }
+  };
+  card.start = () => { clearTimeout(timer); setTimeout(poll, 0); };
+  return card;
+}
+
 PAGES.updates = async function () {
   const d = await api("/api/updates");
   const rb = d.rollback || {};
   const out = el("div", { class: "muted small", role: "status", "aria-live": "polite" });
   const post = (path, body) => api(path, { method: "POST", body: JSON.stringify(body || {}) });
   const busy = (b, on) => { b.disabled = on; };
+  const progress = updateProgressCard();
 
   const check = el("button", { type: "button", class: "ghost", onclick: async (ev) => {
     busy(ev.currentTarget, true); out.textContent = tx("בודק…", "Checking…");
@@ -46,8 +76,10 @@ PAGES.updates = async function () {
     busy(ev.currentTarget, true);
     out.textContent = tx("מוריד ובודק את החתימה, ה-SHA256 והגודל…", "Downloading and checking the signature, SHA256 and size…");
     try {
+      progress.start();
       const r = await post("/api/updates/install", { approve: true, silent: true });
       out.textContent = r.note;
+      progress.start();
     } catch (e) { out.textContent = tx("לא הותקן (הגרסה הנוכחית ממשיכה לעבוד): ", "Not installed (the current version keeps working): ") + e.message; }
     busy(ev.currentTarget, false);
   } }, "Install update") : null;
@@ -133,7 +165,7 @@ PAGES.updates = async function () {
   const latest = d.latest ? (d.latest.display || d.latest.version) : null;
   render(header("Updates", "Install, update and go back to the previous version. JARVES asks before it installs anything and keeps your data.",
       check),
-    out,
+    out, progress,
     d.error ? el("div", { class: "card" }, pill("degraded", tx("בדיקה לא זמינה", "Check unavailable")), " ", el("span", { class: "small" }, updateError(d.error))) : null,
     el("div", { class: "card" }, el("div", { class: "kv" },
       el("div", { class: "k" }, "Current version"), el("div", { class: "v" }, el("code", {}, d.beta_build || d.current), d.beta_build ? " " : "", d.beta_build ? pill("degraded", "BETA") : ""),
@@ -159,6 +191,7 @@ PAGES.updates = async function () {
     el("div", { class: "muted small", style: "margin-top:10px" },
       "The installer is not code-signed yet. Windows SmartScreen may say Windows protected your PC: choose More info, then Run anyway."),
     el("div", { class: "muted small" }, "Starting JARVES when you sign in stays off unless you turn it on (jarvis autostart on)."));
+  progress.start();
 };
 
 // Release sign-off page: the owner's manual test sheet for one stable version (docs/reviews/MANUAL_TEST_<version>.md).

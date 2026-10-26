@@ -1806,6 +1806,11 @@ def cmd_update(a, cfg, home) -> int:
         return _update_auto(a, cfg, home)
     u = UpdateChecker(home, cfg=cfg)
     print(version_line(home) + f"; update channel {u.channel}")
+    if a.action == "status":
+        from . import update_progress as up
+        ps = up.read(home)
+        if ps.get("active"):
+            print(up.line(ps, False))
     if getattr(a, "rollback", False):
         return _update_rollback(a, cfg, home)
     if a.action == "status":
@@ -1836,6 +1841,9 @@ def cmd_update(a, cfg, home) -> int:
     except UpdateError as e:
         print(f"{e.code}: {e.message}")
         return 1
+    from . import update_progress as up
+    heb = clilang.current() == "he"
+    print(up.line(up.read(home), heb))
     print(f"Verified {Path(r['installer']).name}; backup in {r['backup']}")
     from . import runmarks
     from .updates import record_was_running
@@ -1846,15 +1854,22 @@ def cmd_update(a, cfg, home) -> int:
     except OSError:
         pass
     if core_up:
+        up.write(home, "stopping")
+        print(up.line(up.read(home), heb))
         cmd_stop(a, cfg, home)
     try:
         launch_installer(r["installer"], verified=r, silent=a.silent, restart=a.silent, was_running=was)
     except UpdateError as e:
+        up.fail(home, e.code)
         print(f"{e.code}: {e.message}")
         return 1
     if a.silent:
         print("Setup runs silently and starts JARVES again at the end. If it fails to start, "
               "`jarvis update --rollback` goes back to the previous version.")
+        end = up.watch(home, print, hebrew=heb)
+        if end == "timeout":
+            print("Still running. Check later with:  jarvis update status")
+        return 0 if end != "failed" else 1
     else:
         print("Setup is open. Follow it; JARVES can start again at the end.")
     return 0

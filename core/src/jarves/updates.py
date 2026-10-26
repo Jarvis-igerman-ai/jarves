@@ -547,8 +547,12 @@ class UpdateChecker:
         return want or gh
 
     def download(self, rel: dict) -> Path:
+        from . import update_progress as up
+        up.write(self.home, "downloading", fresh=True, to=rel.get("version"), total=rel["asset"].get("size"),
+                 **{"from": self.current})
         want = self.expected_sha256(rel)
         data = self._fetch(rel["asset"])
+        up.write(self.home, "verifying")
         got = hashlib.sha256(data).hexdigest()
         if got != want:
             raise UpdateError("UPDATE_CHECKSUM_MISMATCH", "the downloaded installer does not match its SHA256")
@@ -591,8 +595,14 @@ class UpdateChecker:
             if rel is None:
                 raise UpdateError("UPDATE_NONE", "the update server no longer offers a newer version")
         refuse_downgrade(rel["version"], self.current)
-        exe = self.download(rel)
-        bak = backup_before_update(self.home, f"pre-update-{self.current}-to-{rel['version']}")
+        from . import update_progress as up
+        try:
+            exe = self.download(rel)
+            up.write(self.home, "backing_up")
+            bak = backup_before_update(self.home, f"pre-update-{self.current}-to-{rel['version']}")
+        except UpdateError as e:
+            up.fail(self.home, e.code)
+            raise
         keep_previous(self.home, self.current, rel["version"], bak, rel.get("previous"), signed, keep=exe.name)
         d = self._load()                     # remembered so status/dashboard can say "beta" after the restart
         remember_build(d, {"version": rel["version"], "display": rel.get("display") or rel["version"],
@@ -659,6 +669,9 @@ def launch_installer(path: str | Path, verified: dict | None = None, *, silent: 
     (popen or subprocess.Popen)(installer_args(path, silent=silent, rollback=rollback, restart=restart,
                                                was_running=was_running),
                                 creationflags=flags, close_fds=True)
+    if not rollback:                        # the installer lives in <home>/updates/: the progress file is next to it
+        from . import update_progress as up
+        up.write(Path(path).parent.parent, "installing", to=(verified or {}).get("version"))
     logs.info("updates", "UPDATE_INSTALLER_STARTED", "installer started after user approval", installer=Path(path).name,
               mode="silent" if silent else "window")
 
@@ -1020,7 +1033,8 @@ def dashboard_routes(register_route) -> None:
     register_route("POST", r"/api/updates/check", api_updates_check)
     register_route("POST", r"/api/updates/install", api_updates_install)
     register_route("POST", r"/api/updates/rollback", api_updates_rollback)
-    from . import auto_update
+    from . import auto_update, update_progress
+    update_progress.dashboard_routes(register_route)
     auto_update.dashboard_routes(register_route)
 
 
