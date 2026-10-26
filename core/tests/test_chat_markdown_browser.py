@@ -175,3 +175,70 @@ def test_checklist_send_refusal_reopens_and_names_the_reason(browser):
     p.wait_for_function("document.querySelector('.jc-block [role=alert]').textContent.includes('already sent')")
     assert errs == []
     p.close()
+
+
+# ---- #446 S3: task cards (Add / Edit / Skip), one at a time, text nodes only, ONE send with ids + edits + skipped
+CARDS = [{"role": "ui_block", "turn": "t1", "block": {"v": 1, "id": "blk_c", "kind": "cards", "title": "Possible tasks", "dir": "auto", "on": "anydo_create_tasks",
+          "cards": [{"id": "i1", "title": "<img src=x onerror=\"window.__xss=1\">", "due": "2099-01-02", "person": "Dana", "ref": "m1", "when": "14:10", "skip": False},
+                    {"id": "i2", "title": "לקנות חלב", "due": "", "person": "", "ref": "", "when": "", "skip": True},
+                    {"id": "i3", "title": "pay rent", "due": "", "person": "", "ref": "", "when": "", "skip": False}]}}]
+
+
+def _cards_page(browser, ui_action_js, rtl=False):
+    p = browser.new_page(viewport={"width": 360, "height": 800})
+    errs: list[str] = []
+    p.on("pageerror", lambda e: errs.append(str(e)))
+    p.set_content(PAGE.replace('lang="en"', 'lang="he" dir="rtl"') if rtl else PAGE)
+    p.add_style_tag(path=str(STATIC / "chatview.css"))
+    p.add_script_tag(path=str(STATIC / "chatview.js"))
+    boot = (BOOT.replace("messages: [", "messages: " + json.dumps(CARDS) + ".concat([")
+            .replace("turn: '' }] }),", "turn: '' }]) }),")
+            .replace("silent: async () => ({}),", "silent: async () => ({}), uiAction: " + ui_action_js + ","))
+    p.evaluate((boot.replace("tx: (h, e) => e", "tx: (h, e) => h") if rtl else boot) % json.dumps("x"))
+    p.wait_for_selector(".jc-block button")
+    return p, errs
+
+
+def test_cards_add_edit_skip_with_keyboard_and_one_send(browser):
+    p, errs = _cards_page(browser, "async (b) => { window.__act = (window.__act || []).concat([b]); return { ok: true }; }")
+    blk = p.locator(".jc-block[data-kind=cards]")
+    assert p.evaluate("window.__xss") is None and p.locator(".jc-block img").count() == 0
+    assert "onerror" in blk.inner_text() and "Card 1 of 3" in blk.inner_text() and "not confirmed" in blk.inner_text()
+    assert "from WhatsApp · 14:10 · m1" in blk.inner_text() and "m1" in blk.inner_text() and "due 2099-01-02" in blk.inner_text()
+    for b in blk.locator("button").all():
+        assert b.bounding_box()["height"] >= 44 and b.bounding_box()["width"] >= 44
+    blk.get_by_role("button", name="Add", exact=True).press("Enter")                  # card 1: add
+    assert "Card 2 of 3" in blk.inner_text() and "already exists" in blk.inner_text() and "Chosen: skip" in blk.inner_text()
+    assert p.evaluate("document.activeElement.tagName") == "BUTTON"                    # focus follows the flow
+    blk.get_by_role("button", name="Next", exact=True).click()                         # keep the preselected Skip
+    blk.get_by_role("button", name="Edit", exact=True).click()                         # card 3: edit
+    inp = blk.locator("input[type=text]")
+    assert inp.input_value() == "pay rent" and inp.get_attribute("maxlength") == "120"
+    inp.press("Escape")
+    assert blk.locator("input[type=text]").count() == 0 and "Card 3 of 3" in blk.inner_text()
+    blk.get_by_role("button", name="Edit", exact=True).click()
+    blk.locator("input[type=text]").fill("pay the <b>rent</b> on Sunday")
+    blk.locator("input[type=text]").press("Enter")
+    assert "2 to add, 1 skipped" in blk.inner_text() and "2) pay the <b>rent</b> on Sunday" in blk.inner_text() and blk.locator("b").count() == 1   # the one <b> is the block title
+    assert p.evaluate("window.__act") is None                                         # nothing was sent before the final click
+    blk.get_by_role("button", name="Send my choices").click()
+    p.wait_for_function("window.__act && window.__act.length === 1")
+    sent = p.evaluate("window.__act[0]")
+    assert sent == {"block": "blk_c", "selected": ["i1", "i3"], "lang": "en", "edits": {"i3": "pay the <b>rent</b> on Sunday"}, "skipped": ["i2"]}
+    assert blk.locator("button").first.is_disabled() and "approval" in blk.inner_text()
+    assert p.evaluate("document.documentElement.scrollWidth <= window.innerWidth") and errs == []
+    p.close()
+
+
+def test_cards_skip_all_refusal_and_rtl(browser):
+    p, errs = _cards_page(browser, "async () => { const e = new Error('x'); e.code = 'UI_ACTION_STALE'; throw e; }", rtl=True)
+    blk = p.locator(".jc-block[data-kind=cards]")
+    assert blk.locator(".jc-card-t").get_attribute("dir") == "auto" and "כרטיס 1 מתוך 3" in blk.inner_text()
+    for _ in range(3):
+        blk.get_by_role("button", name="דלגו").click()
+    assert "0 להוספה, 3 לדילוג" in blk.inner_text()
+    blk.get_by_role("button", name="שלחו את הבחירה").click()
+    p.wait_for_function("document.querySelector('.jc-block [role=alert]').textContent.includes('already sent') || document.querySelector('.jc-block [role=alert]').textContent.includes('נשלחה')")
+    assert not blk.get_by_role("button", name="שלחו את הבחירה").is_disabled()          # refusal reopens it
+    assert errs == []
+    p.close()

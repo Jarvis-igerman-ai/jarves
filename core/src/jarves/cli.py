@@ -1974,6 +1974,7 @@ _EXT_EARLY = (
     ("telegram_channel", ("telegram",), {"telegram": "cmd_telegram"}),       # V3 P1
     ("homeassistant", ("home",), {"home": "cmd_home"}),               # V3 P1: jarvis home start / status / ...
     ("anydo", ("anydo",), {"anydo": "cmd_anydo"}),                    # #140: jarvis anydo start / status / off
+    ("triage", ("tasks",), {"tasks": "cmd_tasks"}),                   # S3 #446: jarvis tasks skipped list / restore
     ("github_client", ("github",), {"github": "cmd_github"}),         # V7 G1: jarvis github status / token / off (read only)
     ("connect", ("connect",), {"connect": "cmd_connect"}),            # owner request 20 Oct: guided account setup
     ("approvals", ("approvals",), {"approvals": "cmd_approvals"}),    # V3: jarvis approvals list / approve / deny

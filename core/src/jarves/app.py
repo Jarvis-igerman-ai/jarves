@@ -362,6 +362,8 @@ class Core:
         register_home(self.registry, self.home, self.health)
         from .anydo import register_anydo           # #140: tools stay hidden until the switch is on
         register_anydo(self.registry, self.home, self.health)
+        from .triage import TriageSkill             # S3 #446: tasks from messages (lazy, read-only; the write is S2's approval)
+        self.registry.register(TriageSkill(self.home, registry=self.registry))
         self.workspace.listeners.append(lambda name: self._spawn(wsp.note_live(self.live, self.workspace, name)))
 
         self.budget = Budget(self.memory, c.ai)

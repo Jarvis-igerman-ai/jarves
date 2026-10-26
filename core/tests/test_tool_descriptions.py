@@ -17,6 +17,7 @@ from jarves.voice.live import live_tools
 # (utterance, expected tool). Each utterance contains a phrase quoted in the expected tool's description (EN or HE).
 ROUTES = [
     ("please show a checklist of what to pack", "ui_show"), ("תציג רשימה לסימון של מה לארוז", "ui_show"),
+    ("can you make tasks from these messages", "tasks_from_messages"), ("תעשה לי משימות מההודעות", "tasks_from_messages"),
     # V5 tools (goals, plans, preferences, proactive, development, issues, self-management)
     ("please set a goal to run a 10k by March", "goal_add"), ("אני רוצה לרוץ 10 ק\"מ עד מרץ", "goal_add"),
     ("what are my goals this week", "goal_show"), ("מה היעדים שלי", "goal_show"),
@@ -165,7 +166,7 @@ SAFETY = {
     "briefing_get": ["third-party"], "run_guide_step": ["risky"],
 }
 
-ENV_GATED = ("show_yourself", "hide_yourself", "ui_show")      # display_control: the probe fails on a runner without the Godot face
+ENV_GATED = ("show_yourself", "hide_yourself", "ui_show", "tasks_from_messages")      # display_control: the probe fails on a runner without the Godot face
 
 # chars: the model-facing text of the backend call in the test Core (all built-in skills, nothing connected).
 # V3/V4 baseline 59.4k; package P 52.1k; this change: tools JSON ~29.9k + rules ~9.4k. A hard ceiling: it only shrinks.
