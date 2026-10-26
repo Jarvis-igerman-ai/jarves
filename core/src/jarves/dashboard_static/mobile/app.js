@@ -6,7 +6,7 @@
   const T = {
     en: { pair_title: "Pair this phone", pair_help: "On the computer open the JARVES dashboard, go to Phone and press Pair a phone. Scan the QR code, or type the 8-digit code here.",
       code: "Pairing code", name: "Name for this phone", pair: "Pair", pair_net: "Works on your home network only. Nothing here is reachable from the internet.",
-      tab_home: "Home", tab_chat: "Chat", tab_voice: "Voice", tab_approvals: "Approvals", tab_plans: "Plans", tab_prefs: "Learned", tab_drive: "Drive", tab_health: "Health & speed", send: "Send", type_here: "Type a message",
+      tab_home: "This phone", tab_chat: "Chat", tab_voice: "Voice", tab_approvals: "Approvals", tab_plans: "Plans", tab_prefs: "Learned", tab_drive: "Drive", tab_health: "Health & speed", send: "Send", type_here: "Type a message",
       waiting: "Waiting for approval", pages_you_have: "Pages on this device", no_tests: "No self-test or speed test has run yet.", chat_off: "Chat is not running on the computer.",
       hold: "Hold to talk", release: "Release to send", unpair: "Un-pair this phone", online: "connected", offline: "computer unreachable",
       pairing: "Pairing…", bad_code: "Wrong or expired code. Make a new one on the computer.", unpaired: "This phone is no longer paired. Pair again.",
@@ -21,7 +21,7 @@
       sig_snoozed: "Notes snoozed for one hour.", sig_stopped: "Notes stopped. Turn them on again on the computer.", from_pc: "computer", no_goals: "No active goals." },
     he: { pair_title: "צימוד הטלפון", pair_help: "במחשב פתחו את לוח הבקרה של JARVES, עברו אל טלפון ולחצו על צימוד טלפון. סרקו את קוד ה-QR או הקלידו כאן את הקוד בן 8 הספרות.",
       code: "קוד צימוד", name: "שם לטלפון", pair: "לצמד", pair_net: "עובד ברשת הביתית בלבד. שום דבר כאן לא נגיש מהאינטרנט.",
-      tab_home: "בית", tab_chat: "שיחה", tab_voice: "קול", tab_approvals: "אישורים", tab_plans: "תוכניות", tab_prefs: "למדתי", tab_drive: "נהיגה", tab_health: "תקינות ומהירות", send: "שליחה", type_here: "כתבו הודעה",
+      tab_home: "הטלפון הזה", tab_chat: "שיחה", tab_voice: "קול", tab_approvals: "אישורים", tab_plans: "תוכניות", tab_prefs: "למדתי", tab_drive: "נהיגה", tab_health: "תקינות ומהירות", send: "שליחה", type_here: "כתבו הודעה",
       waiting: "ממתינים לאישור", pages_you_have: "דפים במכשיר הזה", no_tests: "עוד לא רצה בדיקה עצמית או בדיקת מהירות.", chat_off: "השיחה לא פועלת במחשב.",
       hold: "לחצו והחזיקו לדיבור", release: "שחררו לשליחה", unpair: "ניתוק הטלפון", online: "מחובר", offline: "המחשב לא זמין",
       pairing: "מצמיד…", bad_code: "קוד שגוי או שפג תוקפו. הפיקו קוד חדש במחשב.", unpaired: "הטלפון כבר לא מצומד. צמדו מחדש.",
@@ -94,7 +94,7 @@
   });
 
   // ---- tabs: only the pages the owner gave this device (the server refuses the others anyway: PAGE_NOT_ALLOWED)
-  let tab = "home", chatView = null;
+  let tab = "chat", chatView = null;
   const TABS = { home: "home", chat: "chat", voice: "chat", approvals: "approvals", plans: "scope:tasks", prefs: "scope:prefs", drive: "scope:drive", health: "health" };
   const allowed = (n) => (TABS[n].startsWith("scope:") ? ((me && me.scopes) || []).includes(TABS[n].slice(6)) : ((me && me.pages) || []).includes(TABS[n]));
   function setTab(name) {
@@ -111,7 +111,8 @@
   function allowTabs() {
     const pages = (me && me.pages) || [];
     Object.keys(TABS).forEach((n) => { $("tabbtn-" + n).hidden = !allowed(n); });
-    if (!allowed(tab)) setTab(pages.includes("home") ? "home" : (pages[0] ? Object.keys(TABS).find((n) => TABS[n] === pages[0]) : "home"));
+    if (!allowed(tab)) setTab(pages.includes("chat") ? "chat" : pages.includes("home") ? "home" : (pages[0] ? Object.keys(TABS).find((n) => TABS[n] === pages[0]) : "home"));
+    else setTab(tab);
   }
   document.querySelectorAll("[data-tab]").forEach((b) => b.addEventListener("click", () => setTab(b.dataset.tab)));
 
@@ -124,9 +125,29 @@
     answer: (id, approved, typed) => post("/api/m/approvals/" + id, { approved }),
     silent: () => Promise.reject(new Error("computer only")),
   };
+  // The composer (redesign #511): attachments placeholder + push-to-talk mic beside Send (chatview.js `phone` option)
+  let micBtn = null;
+  function composer() {
+    const S = window.JarvesShell, ic = (n) => (S ? S.icon(n) : document.createTextNode(n));
+    const attach = document.createElement("button"); attach.type = "button"; attach.className = "jc-icon jc-attach";
+    attach.setAttribute("aria-label", tx("צירוף קובץ", "Attach a file")); attach.title = attach.getAttribute("aria-label"); attach.appendChild(ic("plus"));
+    attach.addEventListener("click", () => { if (S) S.toast(tx("צירוף קבצים עוד לא זמין בטלפון.", "Attaching files is not available on the phone yet.")); });
+    micBtn = document.createElement("button"); micBtn.type = "button"; micBtn.className = "jc-icon jc-mic";
+    micBtn.setAttribute("aria-label", t("hold")); micBtn.title = t("hold"); micBtn.appendChild(ic("mic"));
+    micBtn.addEventListener("pointerdown", (e) => {
+      e.preventDefault();
+      if (!(window.isSecureContext && me && me.voice)) { if (S) S.toast(t("voice_tls")); return; }
+      startRec("chat");
+    });
+    ["pointerup", "pointercancel", "pointerleave"].forEach((n) => micBtn.addEventListener(n, () => { if (rec && rec.target === "chat") stopRec(); }));
+    micBtn.addEventListener("contextmenu", (e) => e.preventDefault());
+    return { start: [attach], end: [micBtn] };
+  }
   function mountChat() {
     if (chatView || !window.JarvesChat) return;
-    chatView = window.JarvesChat.mount($("chatRoot"), { api: chatApi, tx, device: true });
+    const S = window.JarvesShell;
+    chatView = window.JarvesChat.mount($("chatRoot"), { api: chatApi, tx, device: true,
+      phone: { icon: S ? S.icon : null, hint: S ? S.hint : null, ...composer(), onEvent: (e) => { if (S) S.onChatEvent(e); } } });
   }
   function mountPlans() { if (window.JarvesPlans) window.JarvesPlans.mount($("plansRoot"), { api, post, lang: () => lang }); }
   function mountPrefs() { if (window.JarvesPrefs) window.JarvesPrefs.mount($("prefsRoot"), { api, post, lang: () => lang }); }
@@ -155,7 +176,12 @@
     for (let i = 0; i < len; i++) res[i] = all[Math.floor(i * ratio)];
     return res;
   }
-  async function startRec() {
+  function recUi(target, on) {                                              // the button that is recording shows it
+    if (target === "chat") { if (micBtn) { micBtn.classList.toggle("rec", on); micBtn.setAttribute("aria-label", on ? t("release") : t("hold")); micBtn.setAttribute("aria-pressed", String(on)); } return; }
+    $("ptt").classList.toggle("rec", on); $("ptt").textContent = on ? t("release") : t("hold");
+  }
+  async function startRec(target) {
+    target = target === "chat" ? "chat" : "voice";
     if (rec) return;
     let stream = null, ctx = null;
     const closeAll = () => { try { if (stream) stream.getTracks().forEach((x) => x.stop()); } catch (e) { /* ignore */ } try { if (ctx) ctx.close(); } catch (e) { /* ignore */ } };
@@ -167,34 +193,36 @@
       ctx = new (window.AudioContext || window.webkitAudioContext)(); const src = ctx.createMediaStreamSource(stream);
       const proc = ctx.createScriptProcessor(4096, 1, 1); const chunks = [];
       proc.onaudioprocess = (e) => chunks.push(new Float32Array(e.inputBuffer.getChannelData(0)));
-      src.connect(proc); proc.connect(ctx.destination); rec = { stream, ctx, proc, src, chunks };
-      $("ptt").classList.add("rec"); $("ptt").textContent = t("release");
+      src.connect(proc); proc.connect(ctx.destination); rec = { stream, ctx, proc, src, chunks, target };
+      recUi(target, true);
     } catch (e) {
-      rec = null; closeAll(); $("ptt").classList.remove("rec"); $("ptt").textContent = t("hold");
+      rec = null; closeAll(); recUi(target, false);
       if (window.JarvesAudio) window.JarvesAudio.phoneMic(false);
-      $("voiceOut").textContent = t("voice_nomic");
+      if (target === "chat") { if (window.JarvesShell) window.JarvesShell.toast(t("voice_nomic")); } else $("voiceOut").textContent = t("voice_nomic");
     }
   }
   function discardRec() {                                                    // close the microphone and send nothing
     if (!rec) return; const r = rec; rec = null;
     r.proc.disconnect(); r.src.disconnect(); r.stream.getTracks().forEach((x) => x.stop()); r.ctx.close();
-    $("ptt").classList.remove("rec"); $("ptt").textContent = t("hold"); $("voiceOut").textContent = "";
+    recUi(r.target, false); if (r.target !== "chat") $("voiceOut").textContent = "";
     if (window.JarvesAudio) window.JarvesAudio.phoneMic(false);
   }
   async function stopRec() {
     if (!rec) return; const r = rec; rec = null;
     r.proc.disconnect(); r.src.disconnect(); r.stream.getTracks().forEach((x) => x.stop()); const rate = r.ctx.sampleRate; r.ctx.close();
-    $("ptt").classList.remove("rec"); $("ptt").textContent = t("hold");
+    recUi(r.target, false);
     if (window.JarvesAudio) window.JarvesAudio.phoneMic(false);
     if (!r.chunks.length) return;
-    $("voiceOut").textContent = t("sending");
+    const inChat = r.target === "chat" && chatView;
+    if (inChat) { if (window.JarvesShell) window.JarvesShell.toast(t("sending")); } else $("voiceOut").textContent = t("sending");
     try {
       const d = await api("/api/m/voice", { method: "POST", headers: { "Content-Type": "audio/wav" }, body: wav(down(r.chunks, rate, 16000), 16000) });
-      $("voiceOut").textContent = d.transcript ? `${t("heard")}: ${d.transcript}\n\n${d.reply}` : (d.reply || "");
-    } catch (e) { $("voiceOut").textContent = e.message; }
+      if (inChat) { if (d.transcript) chatView.local("user", d.transcript); if (d.reply) chatView.local("assistant", d.reply); }
+      else $("voiceOut").textContent = d.transcript ? `${t("heard")}: ${d.transcript}\n\n${d.reply}` : (d.reply || "");
+    } catch (e) { if (inChat) { if (window.JarvesShell) window.JarvesShell.toast(e.message); } else $("voiceOut").textContent = e.message; }
   }
   const ptt = $("ptt");
-  ptt.addEventListener("pointerdown", (e) => { e.preventDefault(); startRec(); });
+  ptt.addEventListener("pointerdown", (e) => { e.preventDefault(); startRec("voice"); });
   ["pointerup", "pointercancel", "pointerleave"].forEach((n) => ptt.addEventListener(n, () => stopRec()));
 
   // ---- approvals + status polling
@@ -252,20 +280,35 @@
     $("apprNote").textContent = a.phone_approvals ? t("phone_ap_on") : t("phone_ap_off");
     const ul = $("apprList"); ul.replaceChildren();
     if (!a.pending.length) { li(ul, t("nothing")); return; }
-    a.pending.forEach((p) => {
-      const row = li(ul, `${p.title} (${p.seconds_left}${t("sec")})`);
+    a.pending.forEach((p) => {                        // one card per request: title, risk + time left, a note, the answers
+      const row = li(ul, p.title); row.classList.add("appr", "risk-" + (p.risk || "low"));
+      const meta = document.createElement("div"); meta.className = "appr-meta";
+      const chip = (text, cls) => { const c = document.createElement("span"); c.className = "chip " + (cls || ""); c.textContent = text; meta.appendChild(c); };
+      if (p.risk) chip(tx("סיכון ", "Risk ") + ({ low: tx("נמוך", "low"), medium: tx("בינוני", "medium"), high: tx("גבוה", "high") }[p.risk] || p.risk), "risk");
+      chip(`${p.seconds_left} ${t("sec")}`, "time");
+      row.appendChild(meta);
       if (!a.phone_approvals) return;
+      const acts = document.createElement("div"); acts.className = "appr-acts";
       const mk = (label, ok, primary) => { const b = document.createElement("button"); b.type = "button"; b.textContent = label; if (primary) b.className = "primary";
-        b.addEventListener("click", async () => { b.disabled = true; try { await post("/api/m/approvals/" + p.id, { approved: ok, id: "appr-" + p.id + (ok ? "-yes" : "-no") }); } catch (e) { row.firstChild.textContent = e.message; } tick(); }); row.appendChild(b); };
-      if (p.typed) { const s = document.createElement("span"); s.className = "muted"; s.textContent = t("typed_pc"); row.appendChild(s); mk(t("deny"), false, false); }
-      else if (p.pc_only) { const s = document.createElement("span"); s.className = "muted"; s.textContent = t("pc_only"); row.appendChild(s); mk(t("deny"), false, false); }
-      else { mk(t("approve"), true, true); mk(t("deny"), false, false); }
+        b.addEventListener("click", async () => { b.disabled = true; try { await post("/api/m/approvals/" + p.id, { approved: ok, id: "appr-" + p.id + (ok ? "-yes" : "-no") }); } catch (e) { row.firstChild.textContent = e.message; } tick(); }); acts.appendChild(b); };
+      const why = (text) => { const s = document.createElement("span"); s.className = "muted appr-why"; s.textContent = text; row.appendChild(s); };
+      if (p.typed) { why(t("typed_pc")); mk(t("deny"), false, false); }
+      else if (p.pc_only) { why(t("pc_only")); mk(t("deny"), false, false); }
+      else { mk(t("deny"), false, false); mk(t("approve"), true, true); }
+      row.appendChild(acts);
     });
   }
+  // health values and component names come from the computer in English: say them in Hebrew too (unknown ones stay as sent)
+  const HV = { running: "רצה", stopped: "עצורה", ok: "תקין", down: "לא פעיל", off: "כבוי", on: "פועל", idle: "לא פעיל", error: "שגיאה", unknown: "לא ידוע", ready: "מוכן" };
+  const HK = { audio: "שמע", core: "ליבה", model: "מודל", voice: "קול", wake: "מילת הפעלה", tts: "הקראה", stt: "תמלול", bridge: "גשר" };
+  const hv = (v) => (lang === "he" && HV[String(v).toLowerCase()]) || v;
+  const hk = (k) => (lang === "he" && HK[k]) || (k.charAt(0).toUpperCase() + k.slice(1));
   function renderHealth(s) {
     const ul = $("statusList"); ul.replaceChildren();
-    li(ul, `${t("core")}: ${s.core}`); li(ul, `${t("tls")}: ${s.tls ? t("yes") : t("no")}`);
-    Object.keys(s.components || {}).sort().forEach((k) => li(ul, `${k}: ${s.components[k]}`));
+    const st = (row, v) => { const x = String(v).toLowerCase(); row.classList.add(/^(ok|running|ready|yes|true|on|pass(ed)?)$/.test(x) ? "st-ok"
+      : /(fail|error|down|unreach|stopped|missing|bad)/.test(x) ? "st-bad" : "st-idle"); return row; };
+    st(li(ul, `${t("core")}: ${hv(s.core)}`), s.core); st(li(ul, `${t("tls")}: ${s.tls ? t("yes") : t("no")}`), s.tls ? "ok" : "idle");
+    Object.keys(s.components || {}).sort().forEach((k) => st(li(ul, `${hk(k)}: ${hv(s.components[k])}`), s.components[k]));
     const tl = $("testList"); tl.replaceChildren();
     const kinds = Object.keys(s.tests || {});
     if (!kinds.length) li(tl, t("no_tests"));
@@ -273,13 +316,14 @@
   }
   function renderHome(s) {
     const ul = $("homeList"); ul.replaceChildren();
-    li(ul, `${t("core")}: ${s.core}`); li(ul, `${t("waiting")}: ${s.waiting}`);
+    li(ul, `${t("core")}: ${hv(s.core)}`); li(ul, `${tx("ממתינים לאישור", "Waiting for approval")}: ${s.waiting}`);
     li(ul, `${t("pages_you_have")}: ${s.pages.map((x) => ({ home: tx("בית", "Home"), chat: tx("שיחה", "Chat"), approvals: tx("אישורים", "Approvals"), health: tx("תקינות ומהירות", "Health & speed") }[x] || x)).join(", ")}`);
   }
   $("unpair").addEventListener("click", async () => { try { await post("/api/m/unpair"); } catch (e) { /* already gone */ } forget(); });
-  $("lang").addEventListener("click", () => { lang = lang === "he" ? "en" : "he"; try { localStorage.setItem(LANG, lang); } catch (e) { /* ignore */ } applyLang(); if (window.JarvesAudio) window.JarvesAudio.repaint(); voiceNote(); info(); unmountChat(); if (tab === "chat") mountChat(); if (tab === "plans") mountPlans(); if (tab === "prefs") mountPrefs(); if (tab === "drive") mountDrive(); tick(); });
+  $("lang").addEventListener("click", () => { lang = lang === "he" ? "en" : "he"; try { localStorage.setItem(LANG, lang); } catch (e) { /* ignore */ } applyLang(); if (window.JarvesShell) window.JarvesShell.repaint(); if (window.JarvesAudio) window.JarvesAudio.repaint(); voiceNote(); info(); unmountChat(); if (tab === "chat") mountChat(); if (tab === "plans") mountPlans(); if (tab === "prefs") mountPrefs(); if (tab === "drive") mountDrive(); tick(); });
   document.addEventListener("visibilitychange", () => { if (document.hidden) discardRec(); tick(); });      // never keep the mic open in the background
   window.addEventListener("online", tick);
   if ("serviceWorker" in navigator && window.isSecureContext) navigator.serviceWorker.register("/m/sw.js", { scope: "/m/" }).catch(() => {});
+  if (window.JarvesShell) window.JarvesShell.init({ tx, go: setTab, chat: () => chatView });
   applyLang(); show();
 })();

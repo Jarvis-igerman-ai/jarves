@@ -326,3 +326,14 @@ def test_a_read_error_gives_a_clean_error_without_a_path(srv, monkeypatch, exc, 
     r, body = get(srv, "/m/index.html")
     assert r.status == status
     assert b"private" not in body and b"install" not in body and b"index.html" not in body and b"boom" not in body
+
+
+def test_design_v2_health_words_in_hebrew_keyboard_watch_and_follow_mode():
+    js = (MOBILE_DIR / "app.js").read_text(encoding="utf-8")
+    assert "hv(s.core)" in js and "hk(k)" in js and 'tx("ממתינים לאישור", "Waiting for approval")' in js     # health words in Hebrew; the approvals count named right
+    shell = (MOBILE_DIR / "m_shell.js").read_text(encoding="utf-8")
+    assert "visualViewport" in shell and 'classList.toggle("kb"' in shell          # the open keyboard is detected
+    css = (MOBILE_DIR / "m_theme.css").read_text(encoding="utf-8")
+    assert ".kb #audioBar:not(.hot)" in css                                          # a listening microphone still shows
+    view = (Path(mobile.__file__).parent / "dashboard_static" / "chatview.js").read_text(encoding="utf-8")
+    assert "let stick = true" in view and "ResizeObserver" in view
