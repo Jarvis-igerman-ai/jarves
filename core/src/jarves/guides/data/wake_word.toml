@@ -46,8 +46,19 @@ en = "To test whether voice works at all, without the wake word: jarvis talk ope
 action = "command:jarvis talk"
 
 [[steps]]
+he = "לתקן את מילת ההפעלה (המיקרופון הוא כמעט תמיד הבעיה): jarvis wake record. הוא עוצר את ג'ארביס (הוא מציע jarvis stop), בודק כל מיקרופון 2.5 שניות של שקט ומסמן רווי / רועש / טוב, ממליץ על הטוב ביותר, ואז מקליט 20 קטעים שלכם ומריץ את בדיקת ההקלטות. הקלטות ישנות עוברות ל-wake\\samples_old ולא נמחקות. אחרי זה: jarvis wake train \"hey jarvis\" --samples."
+en = "To fix the wake word (the microphone is almost always the problem): jarvis wake record. It stops JARVES (it offers jarvis stop), tests each microphone for 2.5 s of silence and labels it saturated / noisy / good, recommends the best, then records 20 clips of you and runs the sample check. Old recordings move to wake\\samples_old, never deleted. Then: jarvis wake train \"hey jarvis\" --samples."
+action = "command:jarvis wake record"
+
+[[steps]]
 he = "ב-V4 אפשר לאמן שכבת זיהוי קטנה על ההקלטות שלכם: jarvis wake train. אם הוא לא משפר, jarvis wake train --revert מחזיר למודל הרגיל."
 en = "In V4 you can train a head on your own recordings: jarvis wake train. If it does not help, jarvis wake train --revert goes back to the standard model."
+
+[[problems]]
+he = "תקנו את מילת ההפעלה: ההקלטות נפסלות או שהוא לא שומע אותי"
+en = "Fix the wake word: recordings are rejected or he does not hear me"
+fix_he = "הצעדים שעבדו: 1) הפסיקו את ג'ארביס (jarvis stop), הוא תופס את המיקרופון. 2) הגדירו כמיקרופון ברירת המחדל של Windows את מערך המיקרופונים של Realtek (הגדרות Sound > Input), ולא מיקרופון של מצלמת רשת: מיקרופון USB של מצלמה רווי גם בחדר שקט והמחוון של Windows לא משפיע עליו. 3) הריצו jarvis wake record. הוא בוחר מיקרופון עובד ומכוון את עוצמת הכניסה של Windows לבד, רק אחרי שתי קריאות רעות זהות, ומדפיס את העוצמה הישנה והחדשה (jarvis wake record --no-auto-level כדי שלא ישנה). 4) עוצמת כניסה סביב 0.8, ישיבה במרחק כ-30 ס\"מ, קול רגיל. 5) אחרי ההקלטה: jarvis wake train \"hey jarvis\" --samples ואז jarvis start. בנוסף jarvis wake test ולוח הבקרה אומרים כשהמיקרופון חם מדי, שקט, רווי או של מצלמת רשת."
+fix_en = "The steps that worked: 1) Stop JARVES (jarvis stop): it holds the microphone. 2) Make the Realtek microphone array the Windows default input (Settings > Sound > Input), not a webcam microphone: a USB webcam mic is saturated even in a silent room and the Windows slider has no effect on it. 3) Run jarvis wake record. It picks a working microphone and sets the Windows input level itself, only after two identical bad readings, and prints the old and new level (jarvis wake record --no-auto-level stops it changing anything). 4) Input level about 0.8, sit about 30 cm away, normal voice. 5) After recording: jarvis wake train \"hey jarvis\" --samples, then jarvis start. jarvis wake test and the dashboard also say when the mic is too hot, too quiet, saturated or a webcam."
 
 [[problems]]
 he = "הוא לא מגיב"

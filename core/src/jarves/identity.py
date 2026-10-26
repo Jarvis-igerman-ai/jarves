@@ -54,7 +54,7 @@ def _clean_name(v: str, what: str) -> str:
 def _wake_capability() -> dict:
     """capabilities.WAKE_PHRASE as a copy with Hebrew evidence / blocker next to the English ones."""
     cap = copy.deepcopy(capabilities.WAKE_PHRASE)
-    for group in (cap["targets"], cap["custom"]):
+    for group in (cap["targets"], cap["custom"], cap["recorder"]):
         for t in group.values():
             locales.attach(t, "evidence", "blocker")
     return cap

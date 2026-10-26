@@ -1094,7 +1094,8 @@ async def _wake_listen_test(det, *, mic_factory, seconds: float, phrase: str, th
             if clip.clipping() and not clip_said:        # live, before the verdict: say the exact fix once
                 clip_said = True
                 out("\n WARNING: " + clip.advice() + "\n")
-            nonzero = nonzero or bool(np.abs(raw).max() > 2) if raw.size else nonzero
+            raw = np.frombuffer(chunk, "<i2")
+            nonzero = nonzero or bool(raw.size and np.abs(raw.astype(np.int32)).max() > 2)
             fed = agc.process(chunk) if agc is not None else chunk
             a = np.frombuffer(fed, "<i2")
             ring = np.roll(ring, -len(a))
@@ -1141,7 +1142,15 @@ async def _wake_listen_test(det, *, mic_factory, seconds: float, phrase: str, th
     out(f"{verdict}: {advice}")
     if clip.clipping():
         out(f"CLIPPING: {clip.advice()}")
-    return {"clipping": clip.clipping(), "clip_advice": clip.advice(), "verdict": verdict, "advice": advice, "floor_db": mon.floor_db, "speech_db": speech_db, "best": best,
+    from .voice.wake_record import mic_diagnosis
+    try:
+        from .app import _mic_name
+        mic_note = mic_diagnosis(_mic_name(v.input_device), mon.floor_db, clip.clipping())
+    except Exception:                                   # advice only
+        mic_note = ""
+    if mic_note:
+        out(f"MIC: {mic_note}")
+    return {"mic_note": mic_note, "clipping": clip.clipping(), "clip_advice": clip.advice(), "verdict": verdict, "advice": advice, "floor_db": mon.floor_db, "speech_db": speech_db, "best": best,
             "attempts": attempts, "peaks": peaks, "near_misses": near}
 
 
@@ -1166,6 +1175,9 @@ def cmd_wake(a, cfg, home) -> int:
         return _wake_train(a, cfg, home)
     if a.action == "eval":
         return _wake_eval(a, cfg, home)
+    if a.action == "record":
+        from .voice.wake_record import cmd_record
+        return cmd_record(a, cfg, home)
     if a.action == "reset-tune":
         from .voice.wake_guard import WakeOutcomeLog
         WakeOutcomeLog(home).reset()
@@ -2195,9 +2207,12 @@ def main(argv: list[str] | None = None) -> int:
         if entry[0] == "early":
             entry[1].add_cli(sub)
     wk = sub.add_parser("wake", help="calibrate the wake word to your voice and mic, or train a new wake phrase")
-    wk.add_argument("action", choices=["test", "train", "eval", "reset-tune"],
+    wk.add_argument("action", choices=["test", "train", "eval", "reset-tune", "record"],
                     help="test = live check of your voice + mic with an exact fix; train = new phrase (candidate; --apply to use, --revert to undo); "
-                         "eval = measured detection rate / false wakes per hour on a synthetic corpus; reset-tune = forget the learned false-wake tightening")
+                         "eval = measured detection rate / false wakes per hour on a synthetic corpus; reset-tune = forget the learned false-wake tightening; "
+                         "record = guided recorder: picks a working microphone, coaches the level, records 20 clips of you")
+    wk.add_argument("--no-auto-level", action="store_true", help="record: never change the Windows microphone level (only tell me what to change)")
+    wk.add_argument("--mic", help="record: prefer the microphone whose name contains this text")
     wk.add_argument("--list-mics", action="store_true", help="test: list the input devices and exit")
     wk.add_argument("--openai", action="store_true", help="eval: add OpenAI TTS voices (metered once, cached)")
     wk.add_argument("--minutes", type=float, default=24.0, help="eval: minutes of non-wake audio (default 24)")

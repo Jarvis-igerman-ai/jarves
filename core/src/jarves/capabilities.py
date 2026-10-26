@@ -266,6 +266,14 @@ WAKE_PHRASE = {
         "linux_arm64_pi": asdict(Target("implemented_unverified", blocker="numpy head + espeak-ng voices; never "
                                         "trained or run on a Pi", roadmap_issue=PI_ROADMAP)),
     },
+    # `jarvis wake record` (voice/wake_record.py): the guided recorder; the owner's original script gave 19/20 usable clips.
+    "recorder": {
+        "windows": asdict(Target("implemented_unverified", evidence="UNIT test_wake_record.py (fake devices, frozen clock); "
+                                 "the owner's script it was ported from recorded 19/20 usable clips on his PC 2026-10-26",
+                                 blocker="the ported recorder and its ctypes mic-level control are not yet run on a real microphone")),
+        "linux_arm64_pi": asdict(Target("implemented_unverified", blocker="no Windows level control on Linux: the recorder "
+                                        "only coaches; never run on a Pi", roadmap_issue=PI_ROADMAP)),
+    },
 }
 
 
