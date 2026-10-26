@@ -489,6 +489,35 @@ class SessionLifecycle:
     def note_activity(self) -> None:
         self._last_activity = time.monotonic()
 
+    # Hidden-mode idle stop: the Core sets `idle_stop_fn` to a callable returning the seconds of quiet after which a
+    # conversation closes (0 = never, or the window is shown).
+    idle_stop_fn: Callable[[], float] | None = None
+
+    def _idle_stop_s(self) -> float:
+        try:
+            return max(0.0, float(self.idle_stop_fn())) if self.idle_stop_fn is not None else 0.0
+        except Exception:
+            return 0.0
+
+    def _idle_stop_due(self) -> bool:
+        """True when the hidden-mode idle stop should close the session now. Never while a tool, a backend answer or
+        an approval is running, JARVES is speaking, the user is mid-utterance, or the greeting is still pending."""
+        limit = self._idle_stop_s()
+        if limit <= 0 or limit >= self.idle_disconnect_s:
+            return False
+        now = time.monotonic()
+        first_audio = getattr(self, "_first_audio", None)
+        greeting_pending = (bool(getattr(self, "greeting", None)) and first_audio is not None
+                            and not first_audio.is_set() and now - getattr(self, "_t_ready", 0.0) < GREETING_BUDGET_S)
+        busy = (self._backend_busy or getattr(self, "_tools_running", 0) or getattr(self, "_confirm_pending", False)
+                or now < getattr(self, "_speaking_until", 0.0) or greeting_pending
+                or now - getattr(self, "_last_user_voice", 0.0) < NO_SPEECH_TALKING_S)
+        audio = getattr(self, "audio_io", None)
+        if busy or (audio is not None and audio.queued_s() > 0):
+            return False
+        last = max(self._last_activity, getattr(self, "_speaking_until", 0.0), getattr(self, "_t_ready", 0.0))
+        return now - last >= limit
+
     async def _idle_watchdog(self) -> None:
         while self.running:
             await asyncio.sleep(min(1.0, self.idle_disconnect_s))
@@ -514,6 +543,11 @@ class SessionLifecycle:
                               "(false wake?)", after_s=round(time.monotonic() - self._t_ready, 1), mic_active=talking)
                     self._request_end("no_speech")
                     return
+            if self._idle_stop_due():
+                logs.info(self._log_area, "LIVE_IDLE_STOP", "hidden window and a quiet conversation: back to "
+                          "waiting for the wake word", idle_s=round(self._idle_stop_s(), 1))
+                self._request_end("idle_stop")
+                return
             energy = min(getattr(self, "_last_energy", 0.0), self._last_activity + ENERGY_EXTEND_S)
             if time.monotonic() - max(self._last_activity, energy) >= self.idle_disconnect_s and not (
                     self._backend_busy or getattr(self, "_tools_running", 0)):

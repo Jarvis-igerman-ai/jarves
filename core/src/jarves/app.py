@@ -1332,12 +1332,14 @@ class Core:
         await self._start_live()
 
     async def _chime(self, kind: str) -> None:
-        """Short soft chime: "wake" = heard you, "ready" = connected, talk now."""
+        """Short soft chime: "wake" = heard you, "ready" = connected, talk now (not after a wake: ONE pip per wake),
+        "close" = the conversation closed after hidden-mode idle."""
         if not self.cfg.voice.chime or self.dev.audio is None:
             return
         import numpy as _np
         rate = 24000
-        notes = {"wake": [(880, 0.10)], "ready": [(660, 0.08), (990, 0.12)]}.get(kind, [])
+        notes = {"wake": [(880, 0.10)], "ready": [(660, 0.08), (990, 0.12)],
+                 "close": [(660, 0.12), (440, 0.22)]}.get(kind, [])          # close = soft falling "closing" cue
         parts = []
         for hz, dur in notes:
             t = _np.arange(int(rate * dur)) / rate
@@ -1394,7 +1396,7 @@ class Core:
                     if self.wake is not None:
                         self.wake.note_false_trigger()
                     self._wake_tune()
-                elif reason in ("user", "idle", "timeout", "remote_closed", "budget"):
+                elif reason in ("user", "idle", "idle_stop", "timeout", "remote_closed", "budget"):
                     self.wake_log.record(False)
                     self._wake_tune()
             if self.live is live_ref[0]:
@@ -1414,6 +1416,8 @@ class Core:
                     else "conversation reached its maximum length (voice.session_max_s); reconnecting")}))
                 await self._voice_limit_notice("VOICE_SESSION_MAX", f"{self.cfg.voice.session_max_s:g} s",
                                                self.cfg.voice.session_max_s)
+            elif reason == "idle_stop" and not self.stopping:
+                self._spawn(self._chime("close"))       # soft distinct closing cue; the tray goes back to "waiting"
             elif reason in ("idle", "no_speech") and not self.stopping:
                 self._spawn(self.link.send_face("assistant.activity", {"kind": "limit", "detail": "", "text": (
                     "השיחה נסגרה בגלל שקט (voice.idle_disconnect_s)" if he_
@@ -1490,6 +1494,8 @@ class Core:
                                  v.language, v.realtime_voice, v.half_duplex, audio_io, max_session_s=max_s,
                                  idle_disconnect_s=v.idle_disconnect_s, **common, **extra)
         live_ref[0] = live
+        if hasattr(live, "idle_stop_fn"):
+            live.idle_stop_fn = self._idle_stop_s
         wsp.attach_live(live, self.workspace, self.memory)   # persona files + known facts in the voice instructions
         if getattr(self, "ops", None) is not None:            # V5: the owner's confirmed preferences (small budget)
             from . import preferences as prefs_mod
@@ -1545,7 +1551,7 @@ class Core:
             self._spawn(self._wake_greeting_watch(live))     # nudge/retry also for wake sessions (nobody awaits them)
         if ack:
             await self.link.send_face("assistant.activity", {"kind": "done", "text": "", "detail": ""})
-            self._spawn(self._chime("ready"))
+            # no second pip: a wake session already pipped once (_chime("wake")); the owner heard two
             await self.set_face("listening")
         if not hold_output and self.cfg.voice.activation == "conversation":
             self._startup_stage("running", "Voice ready")
@@ -1784,6 +1790,17 @@ class Core:
             return bool(ops is not None and calm.quiet_hours_now(ops.db, time.time()))
         except Exception:
             return False
+
+    def _idle_stop_s(self) -> float:
+        """Hidden-mode idle stop (voice.idle_stop_s): only while the window is hidden; 0 = never."""
+        try:
+            from .runtime import service as rt_service
+            rt = rt_service.current()
+            if rt is None or rt.view().get("display", {}).get("state") in ("shown", "starting"):
+                return 0.0
+        except Exception:
+            return 0.0
+        return float(self.cfg.voice.idle_stop_s)
 
     def _cue_allowed(self) -> bool:
         """The soft "working on it" cue (voice/live.py _dead_air_cue): the chime switch is on, not quiet hours."""

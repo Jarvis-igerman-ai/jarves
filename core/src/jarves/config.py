@@ -87,6 +87,17 @@ class VoiceConfig(_Strict):
     voice: str = "vesper"
     realtime_voice: str = "cedar"          # Realtime has a different supported voice list from Live
     idle_disconnect_s: int = Field(180, ge=30, le=600)
+    # Hidden mode (window closed, tray only): a live conversation with no speech for this long closes and the Core goes
+    # back to waiting for "Hey Jarvis". 0 = never; otherwise 15-300. With the window shown idle_disconnect_s rules.
+    idle_stop_s: int = Field(45, ge=0, le=300)
+
+    @field_validator("idle_stop_s")
+    @classmethod
+    def _idle_stop_range(cls, v: int) -> int:
+        if 0 < v < 15:
+            raise ValueError("voice.idle_stop_s must be 0 (never) or 15-300")
+        return v
+
     half_duplex: bool = True               # mic gated while JARVES speaks (laptop speakers); False with headphones/AEC mic
     echo_tail_s: float = Field(0.4, ge=0, le=2)    # half-duplex: mic stays gated this long after JARVES stops (room echo)
     # GPT-Live gets the local time as silent context once a minute (session.thinking.append), so "what time is it"
@@ -242,6 +253,7 @@ class RuntimeConfig(_Strict):
     `autostart` (jarvis features / dashboard) win over keep_running / tray once the user sets them."""
     keep_running: bool = True             # closing the window only hides it; Quit (tray) / `jarvis stop` stop the Core
     tray: bool = True                     # notification-area icon in background/desktop mode
+    listening_dot: bool = True            # click-through corner dot while a conversation is open and the window is hidden
     viewer_exe: str = ""                  # Godot executable for the window ("" = GODOT_EXE / WinGet / PATH)
     resume_gap_s: float = Field(30, ge=5, le=3600)   # wall-clock jump this large = the computer slept
     mic_stall_s: float = Field(6, ge=0, le=60)       # wake mic silent (no frames at all) this long = re-open; 0 = off
