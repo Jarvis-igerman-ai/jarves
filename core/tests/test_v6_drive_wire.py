@@ -351,6 +351,11 @@ async def test_the_phone_bridge_sets_the_route_for_the_briefing_only(tmp_path):
     class Brief(Skill):
         name = "drive_briefing"
 
+        async def run(self, passenger, *, trusted=False):
+            assert trusted and passenger == "alone"          # the phone bridge passes the owner's own answer (#380)
+            seen.append(ROUTE.get())
+            return ToolResult(True, "ok", {"sections": []})
+
         def tools(self):
             async def run(_a):
                 seen.append(ROUTE.get())
