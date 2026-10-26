@@ -198,7 +198,7 @@ def test_audit_has_codes_not_payload_or_token(tmp_path):
     run(w.execute(act(payload={"body": secret}, preview="comment"), origin="user"))
     run(w.execute(act(kind="repo.delete"), origin="user"))
     rows = audit(tmp_path)
-    assert [r["result"] for r in rows] == ["GITHUB_WRITE_NOT_IMPLEMENTED", "GITHUB_WRITE_FORBIDDEN"]
+    assert [r["result"] for r in rows] == ["GITHUB_WRITE_RESERVED", "GITHUB_WRITE_NOT_IMPLEMENTED", "GITHUB_WRITE_FORBIDDEN"]
     assert {"ts", "kind", "repo", "target", "hash", "origin", "result"} <= set(rows[0]) and rows[0]["repo"] == REPO
     raw = (tmp_path / "github" / "write_audit.jsonl").read_text(encoding="utf-8")
     assert secret not in raw and TOKEN not in raw

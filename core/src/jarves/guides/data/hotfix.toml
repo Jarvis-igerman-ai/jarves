@@ -51,6 +51,11 @@ he = "לביטול: jarvis hotfix revert. הקבצים המקוריים חוזר
 en = "To undo: jarvis hotfix revert. The original files come back from the hotfix folder in your data folder."
 action = "command:jarvis hotfix revert"
 
+[[steps]]
+he = "אם התיקון נקטע ו-jarvis לא עולה (חבילה שבורה): סגרו את JARVES מהמגש והריצו  jarvis recover-hotfix  (או  python -I -m jarves.hotfix_recover --latest  עם הפייתון המותקן). זה לא טוען את הליבה, בודק כל מקור שמור לפי sha256 לפני שינוי, ומשחזר קבצים, גשר ותלויות. --list מציג גיבויים, --dry-run רק בודק."
+en = "If a hotfix was interrupted and jarvis cannot start (a damaged package): quit JARVES from the tray and run  jarvis recover-hotfix  (or  python -I -m jarves.hotfix_recover --latest  with the installed Python). It does not load the Core, checks every saved original by sha256 before changing anything, and restores files, the bridge and dependencies. --list shows the backups, --dry-run only checks."
+action = "command:jarvis recover-hotfix --dry-run"
+
 [[problems]]
 he = "כתוב REFUSED"
 en = "It says REFUSED"
@@ -61,3 +66,9 @@ he = "כתוב \"הוחזר אוטומטית\""
 en = "It says it was reverted automatically"
 fix_he = "משהו נכשל (העתקה, הפעלה מחדש או doctor). הקבצים המקוריים כבר חזרו. ראו את ההודעה ואת hotfix/last-doctor.txt בתיקיית הנתונים."
 fix_en = "Something failed (copy, restart or doctor). The originals are already back. Read the message and hotfix/last-doctor.txt in your data folder."
+
+[[problems]]
+he = "jarvis hotfix revert לא עולה אחרי תיקון מהיר שנקטע"
+en = "jarvis hotfix revert cannot start after an interrupted hotfix"
+fix_he = "הריצו  jarvis recover-hotfix  (פייתון בלבד, בלי הליבה). אם jarvis.cmd עצמו לא עובד: python -I -m jarves.hotfix_recover --latest עם python.exe שבתיקיית ההתקנה. RECOVER_ORIGINAL_BAD: הגיבוי פגום, התקינו גרסה מלאה."
+fix_en = "Run  jarvis recover-hotfix  (standard library only, no Core). If jarvis.cmd itself does not work: python -I -m jarves.hotfix_recover --latest with the python.exe in the install folder. RECOVER_ORIGINAL_BAD: the backup itself is damaged, use the full installer."

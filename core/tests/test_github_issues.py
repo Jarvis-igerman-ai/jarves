@@ -22,7 +22,7 @@ class Feats:
 
 class Approvals:
     def __init__(self, answer=True):
-        self.answer, self.asked, self.last_resolution = answer, [], ""
+        self.answer, self.asked, self.last_resolution, self.channels = answer, [], "", []
 
     async def ask(self, prompt, **kw):
         self.asked.append((prompt, kw))
@@ -272,7 +272,8 @@ def test_cli_usage_and_run(tmp_path, monkeypatch, capsys):
     monkeypatch.setattr(gc.GitHubClient, "__init__", lambda s, home=None, **k: gc.GitHubClient.__dict__["__init__"].__wrapped__(s)
                         if False else _init(s, fake))
     monkeypatch.setattr("jarves.approvals.ApprovalService", lambda home: Approvals(True))
-    monkeypatch.setattr(gw, "terminal_confirm", lambda texts, hashes: True)       # the typed confirmation is tested below
+    monkeypatch.setattr("jarves.approvals.PopupChannel", lambda svc, **kw: "popup")
+    monkeypatch.setattr(gw, "agent_session_reason", lambda *a, **k: "")           # the agent refusal is tested below
     assert gc.cmd_github(NS(action="issue", **vars(a)), Config(github_repos=[REPO]), tmp_path) == 0
     assert json.loads(capsys.readouterr().out.strip().splitlines()[-1])["number"] == 7 and fake.bodies == [{"title": "t"}]
 
@@ -375,27 +376,31 @@ def test_file_answer_for_a_local_only_row_is_refused(tmp_path):
     assert ap_mod.submit_answer(tmp_path, "a" * 16, False, channel="cli") == (True, "")      # a denial is fine
 
 
-def test_terminal_confirm_needs_the_typed_hash_prefix(capsys):
-    h = gi.action("issue.comment", REPO, "7", body="hi").hash()
-
-    def conf(ans, tty=True):
-        return gw.terminal_confirm(["TEXT"], [h], ask=lambda _p: ans, tty=tty)
-    assert conf(h[:6]) and conf(h[:6].upper())
-    wrong = ("0" if h[0] != "0" else "1") + h[1:6]
-    assert not conf("") and not conf("yes") and not conf(wrong)           # hash mismatch / anything else cancels
-    assert not conf(h[:6], tty=False)                                      # a pipe or script is refused
-    assert "interactive terminal" in capsys.readouterr().out
+def test_agent_or_non_interactive_session_is_detected_conservatively():
+    assert gw.agent_session_reason({}, tty=True) == ""                                # a person at a terminal
+    assert "not an interactive terminal" in gw.agent_session_reason({}, tty=False)    # a pipe / agent shell
+    for var in ("CLAUDECODE", "CODEX_HOME", "CI", "JARVES_AGENT_SESSION"):
+        assert var in gw.agent_session_reason({var: "1"}, tty=True)                  # a pty does not make it a person
 
 
-def test_cli_write_asks_in_its_own_terminal_not_the_approval_service(tmp_path):
-    fake, asked, svc = gc.FakeGitHub(), [], Approvals(True)
-
-    def mkw(home, answer):
-        return gw.GitHubWriter(home, Feats(), svc, repos=[REPO], client=lambda: gc.GitHubClient(token=TOKEN, transport=fake.transport),
-                               terminal_confirm=lambda texts, hashes: asked.append((texts, hashes)) or answer)
-    act_ = gi.action("issue.comment", REPO, "7", body="hi")
-    assert run(mkw(tmp_path, True).execute(act_, origin="user")).ok and not svc.asked and asked[0][1] == [act_.hash()]
-    assert run(mkw(tmp_path / "b", False).execute(act_, origin="user")).code == "GITHUB_WRITE_DENIED"
+def test_cli_refuses_in_an_agent_session_and_asks_only_the_popup_otherwise(tmp_path, monkeypatch, capsys):
+    from jarves import cli
+    from jarves.config import Config
+    a = NS(action="issue", write_action="create", number=None, repo="", title="t", body=None, state=None, label=None,
+           assignee=None)
+    fake, svc = gc.FakeGitHub(), Approvals(True)
+    monkeypatch.setattr(cli, "_cli_features", lambda cfg, home: Feats())
+    monkeypatch.setattr(gc.GitHubClient, "__init__", lambda s, home=None, **k: _init(s, fake))
+    monkeypatch.setattr("jarves.approvals.ApprovalService", lambda home: svc)
+    monkeypatch.setattr("jarves.approvals.PopupChannel", lambda s_, **kw: "popup-channel")
+    monkeypatch.setattr(gw, "agent_session_reason", lambda *x, **k: "an agent or automation session is running this command")
+    assert gc.cmd_github(a, Config(github_repos=[REPO]), tmp_path) == 1
+    out = json.loads(capsys.readouterr().out.strip().splitlines()[-1])
+    assert out["code"] == "GITHUB_WRITE_AGENT_SESSION" and not svc.asked and not writes(fake)
+    monkeypatch.setattr(gw, "agent_session_reason", lambda *x, **k: "")
+    assert gc.cmd_github(a, Config(github_repos=[REPO]), tmp_path) == 0
+    assert svc.channels == ["popup-channel"] and svc.asked[0][1]["local_only"] is True   # popup only, no typed hash anywhere
+    assert not hasattr(gw, "terminal_confirm")
 
 
 def test_hash_ignores_preview_and_order_but_not_state_or_text():
@@ -501,15 +506,145 @@ def test_submit_answer_never_carries_a_popup_or_terminal_channel(tmp_path):
     assert run(go_()).ok
 
 
-def test_one_broken_audit_line_does_not_switch_off_the_rate_limit_or_duplicate_guard(tmp_path):
+def _audit_lines(tmp_path):
+    return (tmp_path / "github" / "write_audit.jsonl").read_text(encoding="utf-8").splitlines()
+
+
+def _tamper_then_write_is_refused(tmp_path, mutate, w, fake):
+    f = tmp_path / "github" / "write_audit.jsonl"
+    mutate(f)
+    n = len(writes(fake))
+    r = go(w, "issue.comment", "7", body="after tamper")
+    assert (r.ok, r.code) == (False, "GITHUB_WRITE_AUDIT_TAMPERED") and len(writes(fake)) == n
+    assert "reset-audit" in r.message and w.status()["audit"] != "ok"
+
+
+def _two_writes(tmp_path):
     t, fake = [1000.0], gc.FakeGitHub()
-    w = mk(tmp_path, fake=fake, clock=lambda: t[0], limit=(2, 60.0))[0]
-    assert go(w, "issue.comment", "7", body="a").ok
-    with open(tmp_path / "github" / "write_audit.jsonl", "a", encoding="utf-8") as f:
-        f.write('{"ts": 1000.0, "result": "OK", "hash"\n')                 # a torn line (crash / two writers)
-    assert go(w, "issue.comment", "7", body="a").code == "GITHUB_WRITE_DUPLICATE"
-    assert go(w, "issue.comment", "7", body="b").ok
-    assert go(w, "issue.comment", "7", body="c").code == "GITHUB_WRITE_RATE_LIMIT"
+    w = mk(tmp_path, fake=fake, clock=lambda: t[0], limit=(10, 60.0))[0]
+    assert go(w, "issue.comment", "7", body="a").ok and go(w, "issue.comment", "7", body="b").ok
+    assert w.status()["audit"] == "ok"
+    return w, fake
+
+
+def test_audit_is_a_hash_chain_and_an_edited_row_is_detected(tmp_path):
+    w, fake = _two_writes(tmp_path)
+    rows = [json.loads(x) for x in _audit_lines(tmp_path)]
+    assert rows[0]["p"] == "" and rows[1]["p"] == rows[0]["h"] and all("rid" in r for r in rows)
+
+    def edit(f):
+        f.write_text(f.read_text(encoding="utf-8").replace('"result": "OK"', '"result": "GITHUB_WRITE_DENIED"', 1), encoding="utf-8")
+    _tamper_then_write_is_refused(tmp_path, edit, w, fake)
+
+
+def test_truncated_audit_lowering_the_count_is_detected(tmp_path):
+    w, fake = _two_writes(tmp_path)
+    _tamper_then_write_is_refused(
+        tmp_path, lambda f: f.write_text("\n".join(_audit_lines(tmp_path)[:-1]) + "\n", encoding="utf-8"), w, fake)
+
+
+def test_deleted_audit_or_head_file_is_detected(tmp_path):
+    w, fake = _two_writes(tmp_path)
+    _tamper_then_write_is_refused(tmp_path, lambda f: f.unlink(), w, fake)
+    w2, fake2 = _two_writes(tmp_path / "b")
+    _tamper_then_write_is_refused(tmp_path / "b", lambda f: f.with_suffix(".head").unlink(), w2, fake2)
+
+
+def test_torn_or_unchained_line_after_the_chain_started_is_detected(tmp_path):
+    w, fake = _two_writes(tmp_path)
+
+    def torn(f):
+        with open(f, "a", encoding="utf-8") as fh:
+            fh.write('{"ts": 1000.0, "result": "OK", "hash"\n')
+    _tamper_then_write_is_refused(tmp_path, torn, w, fake)
+    w2, fake2 = _two_writes(tmp_path / "b")
+
+    def forged(f):
+        with open(f, "a", encoding="utf-8") as fh:
+            fh.write(json.dumps({"ts": 1000.0, "result": "GITHUB_WRITE_DENIED", "hash": "x"}) + "\n")
+    _tamper_then_write_is_refused(tmp_path / "b", forged, w2, fake2)
+
+
+def test_owner_reset_keeps_the_evidence_and_starts_a_new_chain(tmp_path, monkeypatch, capsys):
+    w, fake = _two_writes(tmp_path)
+    f = tmp_path / "github" / "write_audit.jsonl"
+    f.write_text("garbage\n", encoding="utf-8")
+    assert go(w, "issue.comment", "7", body="c").code == "GITHUB_WRITE_AUDIT_TAMPERED"
+    from jarves.config import Config
+    monkeypatch.setattr(gw, "agent_session_reason", lambda *x, **k: "an agent or automation session is running this command")
+    assert gw.cmd_github_write(NS(write_action="reset-audit"), Config(), tmp_path) == 1          # an agent cannot reset it
+    assert "GITHUB_WRITE_AGENT_SESSION" in capsys.readouterr().out and f.exists()
+    monkeypatch.setattr(gw, "agent_session_reason", lambda *x, **k: "")
+    from jarves import cli
+    monkeypatch.setattr(cli, "_cli_features", lambda cfg, home: Feats())
+    assert gw.cmd_github_write(NS(write_action="reset-audit"), Config(), tmp_path) == 0
+    assert list((tmp_path / "github").glob("write_audit.tampered-*.jsonl")) and not f.exists()
+    assert go(w, "issue.comment", "7", body="c").ok and w.status()["audit"] == "ok"
+
+
+def test_legacy_unchained_rows_before_the_chain_are_accepted(tmp_path):
+    f = tmp_path / "github" / "write_audit.jsonl"
+    f.parent.mkdir(parents=True)
+    f.write_text(json.dumps({"ts": 1.0, "kind": "issue.comment", "result": "OK", "hash": "x", "tkey": "y"}) + "\n", encoding="utf-8")
+    w = mk(tmp_path, clock=lambda: 1000.0)[0]
+    assert go(w, "issue.comment", "7", body="a").ok and w.status()["audit"] == "ok"
+
+
+def test_rate_slot_is_reserved_before_the_owner_is_asked(tmp_path):
+    """Two calls race while the first waits for the owner: with a limit of 1 the second must be refused, not both pass."""
+    fake, gate = gc.FakeGitHub(), {}
+
+    class SlowApprovals(Approvals):
+        async def ask(self, prompt, **kw):
+            self.asked.append((prompt, kw))
+            gate.setdefault("first", asyncio.Event())
+            if len(self.asked) == 1:
+                await gate["release"].wait()
+            return True
+
+    async def race():
+        gate["release"] = asyncio.Event()
+        ap = SlowApprovals()
+        w = gw.GitHubWriter(tmp_path, Feats(), ap, repos=[REPO], limit=(1, 60.0), clock=lambda: 1000.0,
+                            client=lambda: gc.GitHubClient(token=TOKEN, transport=fake.transport))
+        t1 = asyncio.create_task(w.execute(gi.action("issue.comment", REPO, "7", body="a"), origin="user"))
+        for _ in range(300):
+            if ap.asked:
+                break
+            await asyncio.sleep(0.01)
+        r2 = await w.execute(gi.action("issue.comment", REPO, "7", body="b"), origin="user")   # another call / process
+        gate["release"].set()
+        return await t1, r2, len(ap.asked)
+    r1, r2, asked = run(race())
+    assert r1.ok and r2.code == "GITHUB_WRITE_RATE_LIMIT" and asked == 1 and len(writes(fake)) == 1
+
+
+def test_denied_reservation_is_released_and_a_batch_reserves_one_slot_per_action(tmp_path):
+    t, fake = [1000.0], gc.FakeGitHub()
+    w, ap, _ = mk(tmp_path, answer=False, fake=fake, clock=lambda: t[0], limit=(2, 60.0))
+    for body in "abc":                                  # three denials do not use up the limit of 2
+        assert go(w, "issue.comment", "7", body=body).code == "GITHUB_WRITE_DENIED"
+    assert w._used() == 0
+    ap.answer = True
+    acts = [gi.action("issue.comment", REPO, "7", body=x) for x in ("x", "y")]
+    assert run(w.approve_batch(acts, origin="user")).ok and w._used() == 2
+    assert go(w, "issue.comment", "8", body="z").code == "GITHUB_WRITE_RATE_LIMIT"       # both slots are taken
+    assert run(w.execute(acts[0], origin="user")).ok and run(w.execute(acts[1], origin="user")).ok and w._used() == 2
+
+
+def test_concurrent_reservations_from_threads_never_exceed_the_limit(tmp_path):
+    import threading
+    w = mk(tmp_path, clock=lambda: 1000.0, limit=(3, 60.0))[0]
+    a = gi.action("issue.comment", REPO, "7", body="a")
+    got, bar = [], threading.Barrier(8)
+
+    def worker():
+        bar.wait()
+        got.append(w._reserve([a], "user"))
+    ts = [threading.Thread(target=worker) for _ in range(8)]
+    [t.start() for t in ts]
+    [t.join() for t in ts]
+    assert sum(1 for g in got if g) == 3 and w._used() == 3 and w.status()["audit"] == "ok"
 
 
 def test_a_lost_create_or_comment_is_not_repeated_after_another_one(tmp_path):
@@ -532,3 +667,23 @@ def test_edit_is_refused_when_the_current_state_cannot_be_read(tmp_path, monkeyp
     monkeypatch.setattr(gc.GitHubClient, "issue", boom)
     r = go(w, "issue.edit", "2", state="closed")
     assert not r.ok and r.code == "GITHUB_WRITE_UNREADABLE" and not ap.asked and not writes(fake)
+
+
+def test_a_line_separator_in_a_model_chosen_kind_does_not_fake_a_tamper_alarm(tmp_path):
+    w = mk(tmp_path, clock=lambda: 1000.0)[0]
+    for k in ("x y", "x\u0085y", "x y"):         # str.splitlines() would split the row: a fake tamper alarm
+        r = run(w.execute(gw.WriteAction(kind=k, repo=REPO, target="7", payload={}, preview="p"), origin="model"))
+        assert not r.ok
+    assert w.status()["audit"] == "ok" and go(w, "issue.comment", "7", body="legit").ok
+
+
+def test_head_lagging_one_row_after_a_crash_is_not_a_tamper_alarm(tmp_path):
+    w, fake = _two_writes(tmp_path)
+    f = tmp_path / "github" / "write_audit.jsonl"
+    rows = [json.loads(x) for x in _audit_lines(tmp_path)]
+    f.with_suffix(".head").write_text(json.dumps({"n": len(rows) - 1, "h": rows[-2]["h"]}), encoding="utf-8")
+    assert w.status()["audit"] == "ok" and go(w, "issue.comment", "7", body="c").ok    # crash between append and head
+    head = json.loads(f.with_suffix(".head").read_text(encoding="utf-8"))
+    assert head["n"] == len(_audit_lines(tmp_path))                                      # and it heals on the next row
+    _tamper_then_write_is_refused(                                                       # a removed row is still caught
+        tmp_path, lambda p: p.write_text("\n".join(_audit_lines(tmp_path)[:-1]) + "\n", encoding="utf-8"), w, fake)

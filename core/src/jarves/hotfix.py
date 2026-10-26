@@ -754,7 +754,8 @@ def _apply_locked(installed_pkg: Path, src: Source, home: Path, hooks: Hooks, pl
             manifest["status"] = "revert-failed"
             _write_json(d / "manifest.json", manifest)
             raise HotfixError("HOTFIX_REVERT_FAILED", f"hotfix failed ({e}) and the automatic revert also failed ({e2}); "
-                              f"originals are in {d / 'originals'}", "run: jarvis hotfix revert") from e
+                              f"originals are in {d / 'originals'}", "run: jarvis hotfix revert; if that cannot start: "
+                              "jarvis recover-hotfix (hotfix_recover.py, standard library only)") from e
         manifest["status"] = "reverted"
         manifest["error"] = str(e)
         _write_json(d / "manifest.json", manifest)
@@ -926,7 +927,8 @@ def cmd_hotfix(a, cfg, home) -> int:
             print(_say("תיקון מהיר אחרון", "latest hotfix") + f": {s['latest'] or '-'}")
             if s["latest"] and s["latest"].get("status") in ("applying", "revert-failed"):
                 print(_say("תיקון מהיר נקטע באמצע: הריצו  jarvis hotfix revert  (או התקינו גרסה מלאה)",
-                           "a hotfix was interrupted half way: run  jarvis hotfix revert  (or use the full installer)"), file=sys.stderr)
+                           "a hotfix was interrupted half way: run  jarvis hotfix revert  (or use the full installer). "
+                           "If jarvis cannot start: jarvis recover-hotfix"), file=sys.stderr)
             _print_pending(s["pending_installer"])
             return 0
         if a.action == "apply":
@@ -981,7 +983,8 @@ COMMANDS = {"hotfix": cmd_hotfix}
 
 
 # ---------------------------------------------------------------------- catalog
-EVIDENCE = "UNIT test_hotfix.py (fake install tree and fake hooks); never run against a real install by the tests"
+EVIDENCE = ("UNIT test_hotfix.py and test_hotfix_recover.py (fake install tree and fake hooks); "
+            "never run against a real install by the tests")
 BLOCKER = "no real installed-build hotfix recorded yet (owner PC run pending)"
 ABOUT = ("puts a code-only fix into the installed build in about a minute: backs up first, copies only the changed "
          "Python files, restarts the Core only if it ran, runs doctor, and one command reverts it. Build-only files are "
@@ -989,7 +992,7 @@ ABOUT = ("puts a code-only fix into the installed build in about a minute: backs
 hebrew.TEXT.update({
     ABOUT: "מכניס תיקון קוד בלבד לגרסה המותקנת תוך כדקה: מגבה קודם, מעתיק רק קבצי פייתון ששונו, מפעיל מחדש את הליבה רק "
            "אם רצה, מריץ doctor, ופקודה אחת מבטלת. קבצי בנייה בלבד מדווחים כמשפיעים רק על המתקין הבא; קובץ גשר מנועץ וגלגלי תלויות נעולים מותקנים רק אחרי אימות sha256",
-    EVIDENCE: "בדיקות יחידה test_hotfix.py (עץ התקנה מזויף וקרסים מזויפים); הבדיקות אף פעם לא רצות על התקנה אמיתית",
+    EVIDENCE: "בדיקות יחידה test_hotfix.py ו-test_hotfix_recover.py (עץ התקנה מזויף וקרסים מזויפים); הבדיקות אף פעם לא רצות על התקנה אמיתית",
     BLOCKER: "עוד לא תועד תיקון מהיר אמיתי בגרסה מותקנת (הרצה במחשב הבעלים ממתינה)",
     "rewrites the installed program files": "משכתב את קבצי התוכנה המותקנים",
     "the Pi runs from a git checkout, not an installed build": "ה-Pi רץ מ-git checkout ולא מגרסה מותקנת",
