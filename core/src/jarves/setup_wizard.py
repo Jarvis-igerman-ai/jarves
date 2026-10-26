@@ -63,13 +63,8 @@ ADDON_MODULES = ("jarves.telegram_channel", "jarves.instagram_channel", "jarves.
 # Privacy-sensitive or outward-acting: OFF on the first run whatever else says; ON only after an explicit yes.
 SAFE_OFF = frozenset({"camera", "face_recognition", "camera_when_away", "gmail_send", "calendar_write",
                       "dashboard_lan", "mobile_access", "browser", "telegram", "home_assistant", "instagram", "helper",
-<<<<<<< HEAD
-                      "helper_readonly_auto", "whatsapp_bridge", "whatsapp_send", "whatsapp_archive", "agent_orchestrator",
-                      "assisted_dialing", "drive_briefing", "anydo", "anydo_update", "github", "skills_manifest2"})
-=======
                       "helper_readonly_auto", "whatsapp_bridge", "whatsapp_send", "whatsapp_archive", "agent_orchestrator", "agent_opencode",
-                      "assisted_dialing", "drive_briefing", "anydo", "anydo_update", "skills_manifest2"})
->>>>>>> jarves/main
+                      "assisted_dialing", "drive_briefing", "anydo", "anydo_update", "github", "skills_manifest2"})
 # Registered and grouped (so coverage checks see them) but never offered by the wizard: the owner decided (20 Oct)
 # that the Helper asks for EVERY command; the read-only allow-list exists only as `jarvis features on ...`.
 WIZARD_HIDDEN = frozenset({"helper_readonly_auto", "whatsapp_archive",     # archive: explained and confirmed on its own
