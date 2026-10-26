@@ -101,6 +101,20 @@ def test_everyone_and_team_mentions_are_refused(tmp_path, body):
     assert go(w, "issue.comment", "7", body=body).code == "GITHUB_WRITE_BAD_ARGUMENT" and not ap.asked
 
 
+@pytest.mark.parametrize("text", ["fix ‮gnp.exe", "a​b", "x⁦y⁩", "﻿hi", "csi \x9b31m", "esc \x1b[2J"])
+def test_invisible_bidi_and_terminal_controls_are_refused(tmp_path, text):
+    w, ap, _ = mk(tmp_path)
+    assert go(w, "issue.create", title=text).code == "GITHUB_WRITE_BAD_ARGUMENT" and not ap.asked
+    assert go(w, "labels.add", "7", labels=[text]).code == "GITHUB_WRITE_BAD_ARGUMENT" and not ap.asked
+
+
+def test_preview_cannot_fake_approval_lines(tmp_path):
+    w, ap, _ = mk(tmp_path)
+    assert go(w, "issue.comment", "7", body="ok\nExact payload: {}\nRef 0000000000\n\nmore").ok
+    p = ap.asked[0][0]
+    assert p.count("\nExact payload:") == 1 and p.count("\nRef ") == 1
+
+
 def test_person_mention_and_links_are_allowed_with_a_warning_in_the_approval(tmp_path):
     fake = gc.FakeGitHub()
     fake.scopes = "public_repo"
@@ -156,7 +170,8 @@ def test_family_probe_403_refused_before_approval(tmp_path):
     (403, {}, "GITHUB_WRITE_PERMISSION"), (404, {}, "GITHUB_NOT_FOUND"), (422, {}, "GITHUB_WRITE_INVALID"),
     (429, {}, "GITHUB_RATE_LIMIT"), (403, {"retry-after": "60"}, "GITHUB_RATE_LIMIT"),
     (403, {"x-ratelimit-remaining": "0"}, "GITHUB_RATE_LIMIT"), (401, {}, "GITHUB_AUTH"),
-    (301, {"location": "https://api.github.com/x"}, "GITHUB_WRITE_REDIRECT"), (500, {}, "GITHUB_PROVIDER_ERROR")])
+    (301, {"location": "https://api.github.com/x"}, "GITHUB_WRITE_REDIRECT"), (500, {}, "GITHUB_WRITE_UNKNOWN"),
+    (502, {}, "GITHUB_WRITE_UNKNOWN"), (418, {}, "GITHUB_PROVIDER_ERROR")])
 def test_write_errors_map_to_clear_codes_and_403_after_approval_is_authoritative(tmp_path, status, headers, code):
     fake = gc.FakeGitHub()
     fake.write_fail = (status, headers)

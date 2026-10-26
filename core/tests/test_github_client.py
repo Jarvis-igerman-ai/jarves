@@ -94,7 +94,12 @@ def test_one_write_door_with_a_fixed_endpoint_family():
     assert '"PUT"' not in src and src.count("write=True") == 1                    # only write() passes write=True
     c = gh.GitHubClient(token=TOKEN, transport=gh.FakeGitHub().transport)
     for m, p in [("PUT", "/repos/o/r/issues"), ("DELETE", "/repos/o/r"), ("POST", "/repos/o/r/pulls"),
-                 ("POST", "/repos/o/r/issues/1/../../merge"), ("POST", "/repos/o/r/issues/x"), ("PATCH", "/user")]:
+                 ("POST", "/repos/o/r/issues/1/../../merge"), ("POST", "/repos/o/r/issues/x"), ("PATCH", "/user"),
+                 ("DELETE", "/repos/o/r/issues/1/labels"), ("DELETE", "/repos/o/r/issues/1/labels/."),     # = remove ALL
+                 ("DELETE", "/repos/o/r/issues/1/labels/.."), ("DELETE", "/repos/o/r/issues/1/labels/%2E%2e"),
+                 ("DELETE", "/repos/o/r/issues/1"), ("DELETE", "/repos/o/r/issues"), ("PATCH", "/repos/o/r/issues"),
+                 ("POST", "/repos/o/r/issues/1"), ("PATCH", "/repos/o/r/issues/1/comments"), ("POST", "/repos/../../issues"),
+                 ("POST", "/repos/o/r/issues/0/comments"), ("POST", "/repos/o/r/issues?x=1"), ("post", "/repos/o/r/issues")]:
         with pytest.raises(gh.GitHubError) as e:
             c.write(m, p, {})
         assert e.value.code == "GITHUB_BAD_ARGUMENT"

@@ -50,12 +50,15 @@ def _write_status(r: httpx.Response) -> None:
         return
     limited = h.get("x-ratelimit-remaining") == "0" or h.get("retry-after") or c == 429 or "rate limit" in r.text.lower()
     if c in (403, 429) and limited:
-        raise GitHubError("GITHUB_RATE_LIMIT", f"GitHub limit (or abuse protection) hit; wait, resets at {h.get('x-ratelimit-reset', '?')}")
+        reset = "".join(ch for ch in str(h.get("x-ratelimit-reset", ""))[:12] if ch.isdigit()) or "?"
+        raise GitHubError("GITHUB_RATE_LIMIT", f"GitHub limit (or abuse protection) hit; wait, resets at {reset}")
     table = {401: ("GITHUB_AUTH", "GitHub rejected the token (expired or revoked)"),
              403: ("GITHUB_WRITE_PERMISSION", "GitHub refused: the token has no write permission for this"),
              404: ("GITHUB_NOT_FOUND", "not found (wrong number, or the token cannot see it)"),
              410: ("GITHUB_NOT_FOUND", "gone (issues are disabled or the item was deleted)"),
              422: ("GITHUB_WRITE_INVALID", "GitHub rejected the content (validation failed)")}
+    if c >= 500:                    # a server error after a write may still have executed: never retry blindly
+        raise GitHubError("GITHUB_WRITE_UNKNOWN", f"GitHub answered {c}; the change may have happened, check on GitHub first")
     if c in (301, 302, 307, 308):
         raise GitHubError("GITHUB_WRITE_REDIRECT", "the repo was renamed or moved; update github_repos")
     code, msg = table.get(c, ("GITHUB_PROVIDER_ERROR", f"GitHub answered {c}"))
@@ -68,8 +71,19 @@ def broad_scopes(scopes: list[str] | None) -> list[str]:
                   or s.startswith("admin:"))
 
 
-_WRITE_PATH = re.compile(r"^/repos/[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+/issues(/\d{1,9}(/comments|/labels(/[^/?#]{1,300})?)?)?$")
-_WRITE_VERBS = ("POST", "PATCH", "DELETE")
+_SEG = r"(?!\.\.?/)[A-Za-z0-9_.-]{1,100}"            # owner / repo; never a "." or ".." segment
+_WRITE_PATHS = {                                       # each verb only on its own endpoint templates (issues family)
+    "POST": re.compile(rf"^/repos/{_SEG}/{_SEG}/issues(/[1-9]\d{{0,8}}/(comments|labels))?$"),
+    "PATCH": re.compile(rf"^/repos/{_SEG}/{_SEG}/issues/[1-9]\d{{0,8}}$"),
+    "DELETE": re.compile(rf"^/repos/{_SEG}/{_SEG}/issues/[1-9]\d{{0,8}}/labels/(?!\.\.?$)[^/?#]{{1,300}}$"),
+}
+_WRITE_VERBS = tuple(_WRITE_PATHS)
+
+
+def _write_allowed(method: str, path: str) -> bool:
+    """Verb bound to its endpoint template; no dot segment (httpx would collapse `labels/.` to `labels` = remove ALL)."""
+    rx = _WRITE_PATHS.get(method)
+    return bool(rx and rx.match(path) and "%2e" not in path.lower())
 
 
 class TokenStore:
@@ -201,7 +215,7 @@ class GitHubClient:
     def write(self, method: str, path: str, body: dict | None = None):
         """THE write door (G3): POST/PATCH/DELETE on the issues family of ONE repo, api.github.com only, no redirects.
         Callers pass a repo already checked against the owner's allow-list by github_write.execute()."""
-        if method not in _WRITE_VERBS or not _WRITE_PATH.match(path):
+        if not _write_allowed(method, path):
             raise GitHubError("GITHUB_BAD_ARGUMENT", "this endpoint is not an allowed write")
         r = self._request(method, path, write=True, **({"json": body} if body is not None else {}))
         try:

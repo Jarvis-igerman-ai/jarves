@@ -84,7 +84,7 @@ class WriteAction(BaseModel):
         body = json.dumps(self.payload, ensure_ascii=False, sort_keys=True, default=str)
         warn = "".join(w + "\n" for w in [*self.warnings(), *([extra] if extra else [])])
         return (f"GitHub write: {self.kind} on {self.repo}" + (f" ({self.target})" if self.target else "")
-                + f"\n{warn}{self.preview}\nExact payload: {body[:1200]}\nRef {self.hash()[:10]}")
+                + f"\n{warn}{' '.join(self.preview.split())}\nExact payload: {body[:1200]}\nRef {self.hash()[:10]}")
 
 
 class WriteResult(BaseModel):

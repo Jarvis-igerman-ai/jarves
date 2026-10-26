@@ -20,7 +20,8 @@ from . import github_write as gw
 TITLE_MAX, BODY_MAX, LABEL_MAX, LABELS_MAX, ASSIGNEES_MAX = 200, 800, 50, 10, 5
 _NUM = re.compile(r"^[1-9][0-9]{0,8}$")
 _LOGIN = re.compile(r"^[A-Za-z0-9](?:[A-Za-z0-9-]{0,38})$")
-_CTRL = re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]")
+_CTRL = re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f-\x9f­؜᠎​-‏ -‮⁠-⁯"
+                   r"﻿￹-￻]")      # controls (C0, C1/ANSI) and invisible / bidi marks: the approval must show it all
 _BROAD_MENTION = re.compile(r"(?<![\w@`])@(?:all|everyone|channel|here)\b|(?<![\w@`])@[A-Za-z0-9][\w-]*/[\w.-]+", re.I)
 FIELDS = {"issue.create": {"title", "body", "labels", "assignees"},
           "issue.edit": {"title", "body", "state", "labels", "assignees"},
@@ -33,7 +34,7 @@ def _text(v, cap: int, what: str, empty_ok: bool = False) -> str:
     if len(v) > cap:
         return f"{what} is longer than {cap} characters"
     if _CTRL.search(v):
-        return f"{what} has control characters"
+        return f"{what} has control or invisible characters (bidi, zero-width)"
     if _BROAD_MENTION.search(v):
         return f"{what} mentions everyone or a team; not allowed"
     return ""
