@@ -297,6 +297,7 @@ if (Test-Path $bridgePin) {
 
 # ---------------------------------------------------------------- launcher, notices, payload check
 Copy-Item (Join-Path $PSScriptRoot "windows\jarvis.cmd") $Stage
+Copy-Item (Join-Path $PSScriptRoot "windows\jarvis-rollback.cmd") $Stage
 Copy-Item (Join-Path $PSScriptRoot "installer_state.py") $Stage
 Copy-Item (Join-Path $PSScriptRoot "rollback_windows.ps1") $Stage
 Copy-Item (Join-Path $PSScriptRoot "windows\THIRD_PARTY_NOTICES.txt") $Stage

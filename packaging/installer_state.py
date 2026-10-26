@@ -292,6 +292,75 @@ def note_rollback(home: Path, status: str) -> dict:
     return rec
 
 
+RECOVER_PARTS = ("python", "face", "bridge", "jarvis.cmd")
+RECOVER_CODES = {"recovered": 0, "needs_approval": 6, "not_needed": 7, "no_previous_program": 8}
+
+
+def program_dead(app: Path, *, run=None, timeout_s: float = 60.0) -> bool:
+    """True when the program in {app} cannot start (a missing DLL, a broken package): `python -I -c "import jarves"`
+    fails, crashes or hangs. `run` is injectable (tests use a fake process). Standard library only."""
+    import subprocess
+    run = run or subprocess.run
+    exe = Path(app) / "python" / "python.exe"
+    try:
+        r = run([str(exe), "-I", "-c", "import jarves"], capture_output=True, timeout=timeout_s)
+    except (OSError, subprocess.SubprocessError):
+        return True
+    return getattr(r, "returncode", 1) != 0
+
+
+def recover_program(app: Path, home: Path, state: Path, *, approved: bool = False, run=None, restore=None,
+                    stamp=None) -> dict:
+    """#261: after an update the new program is dead (health.json says health_failed because the data schema changed, or
+    the new python no longer starts). Put back the kept previous program (rollback folder in the app folder) AND the
+    verified data backup together, so the old program never meets newer data. Runs under the OLD python
+    (rollback/python), never needs the new Core. Data is touched only with `approved` (the owner's OK); without it this
+    only reports what it would do. Order: verify, restore data (it verifies every backup first), swap the program,
+    record the notice. The new program is moved aside to failed-upgrade-recover-*, never deleted."""
+    app, home, state = Path(app), safe_home(Path(home)), Path(state)
+    previous = app / "rollback"
+    health_file = _read_json(home / "updates" / HEALTH_FILE)
+    dead = program_dead(app, run=run)
+    if not dead and health_file.get("status") != "health_failed":
+        return {"status": "not_needed", "message": "The new program starts; nothing to recover."}
+    for path in (app, previous, app / "python", previous / "python"):
+        if path.is_symlink() or path.is_junction():
+            raise ValueError("linked program directories are not supported")
+    if not state.is_file() or not (previous / "python").is_dir() or not (previous / "jarvis.cmd").is_file():
+        return {"status": "no_previous_program",
+                "message": "No previous program is kept, so it cannot be put back automatically."}
+    reason = "the new program does not start" if dead else "the data schema changed and the new version never became ready"
+    if not approved:
+        return {"status": "needs_approval", "reason": reason,
+                "message": f"The new JARVES is not working ({reason}). Approve to put back the previous program and your "
+                           "data from before the update. Your data is only changed after you approve."}
+    (restore or restore_data)(home, state)               # raises before any program change if a backup does not verify
+    failed = app / f"failed-upgrade-recover-{(stamp or time.time_ns)()}"
+    failed.mkdir()
+    done: list[str] = []
+    try:
+        for part in RECOVER_PARTS:
+            src, dst = previous / part, app / part
+            if not src.exists():
+                continue
+            if dst.exists():
+                dst.rename(failed / part)
+            src.rename(dst)
+            done.append(part)
+    except OSError:
+        for part in reversed(done):                      # best effort: leave the program as it was
+            try:
+                (app / part).rename(previous / part)
+                (failed / part).rename(app / part)
+            except OSError:
+                pass
+        raise
+    note_rollback(home, "rolled_back")
+    return {"status": "recovered", "reason": reason, "failed_dir": str(failed), "parts": done,
+            "message": "The previous JARVES program and your data from before the update are back. "
+                       f"The new program was kept in {failed.name}. Start JARVES again."}
+
+
 MB = 1024 * 1024
 # What the verified backup leaves out (backup.EXCLUDE_DIRS, a superset kept here so this runs under ANY old python).
 _NOT_BACKED_UP = {"backups", "logs", "chatgpt", "google", "cache", "caches", "models", "tmp", "temp", "__pycache__", "voice_cache", "whatsapp_bridge"}
@@ -349,7 +418,7 @@ def disk_check(home: Path, app: Path, *, reserve_mb: int = 0, usage=None) -> dic
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("action", choices=("prepare", "complete", "open-setup", "restore-shims", "restore-data", "health",
-                                       "note-rollback", "can-program-rollback", "diskcheck"))
+                                       "note-rollback", "can-program-rollback", "diskcheck", "recover-program"))
     ap.add_argument("--home", type=Path, required=True)
     ap.add_argument("--state", type=Path)
     ap.add_argument("--fresh", action="store_true")
@@ -359,6 +428,7 @@ def main(argv=None) -> int:
     ap.add_argument("--app", type=Path)
     ap.add_argument("--reserve-mb", type=int, default=0)
     ap.add_argument("--out", type=Path)
+    ap.add_argument("--approve", action="store_true", help="recover-program: the owner approved restoring data + program")
     ap.add_argument("--language", choices=("en", "he"), default="en")
     args = ap.parse_args(argv)
     try:
@@ -374,6 +444,10 @@ def main(argv=None) -> int:
         if args.action == "can-program-rollback":
             # exit code: 0 = the program alone may be put back, 5 = the data schema changed (or unknown): do not swap
             return 0 if can_program_rollback(args.state) else 5
+        if args.action == "recover-program":
+            r = recover_program(args.app or args.state.parent, args.home, args.state, approved=args.approve)
+            print(r["message"])
+            return RECOVER_CODES[r["status"]]
         if args.action == "note-rollback":
             note_rollback(args.home, args.status)
             return 0

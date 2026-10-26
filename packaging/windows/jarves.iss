@@ -118,6 +118,8 @@ Name: "{group}\JARVES setup"; Filename: "{app}\python\pythonw.exe"; Parameters: 
 Name: "{group}\JARVES dashboard"; Filename: "{app}\jarvis.cmd"; Parameters: "dashboard"; WorkingDir: "{app}"
 Name: "{group}\JARVES doctor"; Filename: "{cmd}"; Parameters: "/k """"{app}\jarvis.cmd"" doctor"""; WorkingDir: "{app}"
 Name: "{group}\Check for JARVES updates"; Filename: "{cmd}"; Parameters: "/k """"{app}\jarvis.cmd"" update"""; WorkingDir: "{app}"
+; #261: recovery when the new program does not start (asks first, then puts back the previous program and the data)
+Name: "{group}\Recover previous JARVES"; Filename: "{app}\jarvis-rollback.cmd"; Parameters: """{code:GetDataDir}"""; WorkingDir: "{app}"
 Name: "{group}\Uninstall JARVES"; Filename: "{uninstallexe}"
 Name: "{userdesktop}\JARVES"; Filename: "{app}\jarvis.cmd"; WorkingDir: "{app}"; IconFilename: "{app}\face\JARVES Face.exe"; Tasks: desktopicon
 
@@ -938,7 +940,8 @@ begin
       ExpandConstant('{app}\install-state.json') + '"', '', SW_HIDE, ewWaitUntilTerminated, Code) or (Code <> 0) then begin
     Log('Health check failed, and the data schema changed in this update (or could not be compared): the previous ' +
         'program is NOT put back (it would not start on the upgraded data). The owner is offered the approval-gated ' +
-        'jarvis update --rollback, which restores data and program together.');
+        'jarvis update --rollback, which restores data and program together. If the new program cannot start at all: ' +
+        'Start menu, JARVES, Recover previous JARVES (jarvis-rollback.cmd, asks first).');
     NoteHealth('health_failed');
     exit;
   end;

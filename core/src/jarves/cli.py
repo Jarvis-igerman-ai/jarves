@@ -1997,6 +1997,7 @@ _EXT_LATE = (
     ("web_cli", ("web",), "COMMANDS"),                                # owner request 21 Oct: jarvis web
     ("camera.cli", ("camera",), "COMMANDS"),                          # V4.5 D: jarvis camera status | test | preview
     ("hotfix", ("hotfix",), "COMMANDS"),                              # #348: jarvis hotfix apply | revert | status
+    ("update_recover", ("recover-update",), "COMMANDS"),               # #261: jarvis recover-update (plan only)
     ("journey", ("journey",), "COMMANDS"),                            # V6: jarvis journey plan
     ("drive_mode", ("drive",), "COMMANDS"),                            # V6: jarvis drive status / mode
     ("skills.platform2", ("skills",), "COMMANDS"),                     # V6 #220: jarvis skills list|update|rollback

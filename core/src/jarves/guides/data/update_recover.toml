@@ -1,0 +1,48 @@
+order = 55
+category = "system"
+features = ["update_recover"]
+suggest = false
+aliases = ["החזרה אחרי עדכון", "העדכון שבר", "לא עולה אחרי עדכון", "update recovery", "recover previous", "jarvis-rollback", "update broke"]
+links = ["backup", "updates", "hotfix"]
+title_he = "החזרה אחרי עדכון שבור"
+title_en = "Update recovery"
+what_he = "אם אחרי עדכון הגרסה החדשה לא עולה בכלל (למשל קובץ חסר בפייתון, אחרי שהנתונים כבר הותאמו לגרסה החדשה), אפשר להחזיר את התוכנה הקודמת ואת הנתונים שלפני העדכון יחד, בלי שהגרסה השבורה תעבוד. זה נעשה רק אחרי שאתם מאשרים."
+what_en = "If after an update the new version does not start at all (for example a missing file in its Python, after your data was already adapted to it), you can put back the previous program and your data from before the update together, without the broken version working. It happens only after you approve."
+say = [["העדכון שבר את ג'ארביס", "The update broke JARVES"]]
+expect_he = "נפתח חלון שמסביר מה לא עובד ושואל אם להחזיר. אחרי Y: הנתונים והתוכנה הקודמת חוזרים, והגרסה השבורה נשמרת בתיקייה failed-upgrade-recover-*. אחרי זה הפעילו את JARVES."
+expect_en = "A window explains what is not working and asks whether to put things back. After Y: your data and the previous program come back, and the broken version is kept in a failed-upgrade-recover-* folder. Then start JARVES."
+test = "feature"
+test_he = "הבדיקה רק מוודאת שהרכיב מותקן. שום דבר לא משתנה בלי אישור."
+test_en = "The check only sees that the component is installed. Nothing changes without your approval."
+cost_he = "חינם. בלי רשת."
+cost_en = "Free. No network."
+privacy_he = "הכול מקומי. שום דבר לא נשלח החוצה."
+privacy_en = "Everything is local. Nothing is sent out."
+
+[parity.features]
+update_recover = "recover-update"
+
+[[steps]]
+he = "סגרו את JARVES מהמגש. בתפריט התחל: JARVES, ואז  Recover previous JARVES  (הקובץ jarvis-rollback.cmd בתיקיית ההתקנה)."
+en = "Quit JARVES from the tray. In the Start menu: JARVES, then  Recover previous JARVES  (the file jarvis-rollback.cmd in the install folder)."
+action = "command:jarvis recover-update"
+
+[[steps]]
+he = "קראו מה נמצא ולחצו Y כדי להחזיר את התוכנה הקודמת ואת הנתונים שלפני העדכון. כל תשובה אחרת לא משנה כלום."
+en = "Read what it found and press Y to put back the previous program and your data from before the update. Any other answer changes nothing."
+
+[[steps]]
+he = "הפעילו את JARVES שוב. הגרסה השבורה נשמרה בתיקייה failed-upgrade-recover-* ואפשר לשלוח אותה לבדיקה."
+en = "Start JARVES again. The broken version was kept in a failed-upgrade-recover-* folder and can be sent for inspection."
+
+[[problems]]
+he = "הוא אומר שאין תוכנה קודמת"
+en = "It says no previous program is kept"
+fix_he = "ההתקנה לא שמרה עותק קודם. התקינו מחדש את הגרסה הקודמת עם המתקין, הגיבויים נשארים ב-jarvis backup list."
+fix_en = "The install kept no earlier copy. Install the previous version again with its installer; your backups stay listed in jarvis backup list."
+
+[[problems]]
+he = "הוא אומר שהגיבוי לא מאומת"
+en = "It says the backup does not verify"
+fix_he = "שום דבר לא שונה. אל תמחקו את התיקיות הישנות ופנו לעזרה, כדי לשחזר ידנית."
+fix_en = "Nothing was changed. Do not delete the old folders and ask for help to restore by hand."
