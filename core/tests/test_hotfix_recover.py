@@ -134,7 +134,7 @@ def test_bridge_dest_outside_install_is_refused(tree, tmp_path):
     inst, home, hid = applied(tree)
     d = home / "hotfix" / hid
     write(d / "bridge_original", "exe", "OLD")
-    victim = tmp_path.parent.parent / "victim_outside.exe"
+    victim = tmp_path.parents[3] / "victim_outside.exe"
     man = json.loads((d / "manifest.json").read_text())
     man["bridge"] = {"dest": str(victim), "sha256_original": hf.sha256(d / "bridge_original" / "exe"), "had_sidecar": False}
     (d / "manifest.json").write_text(json.dumps(man))
