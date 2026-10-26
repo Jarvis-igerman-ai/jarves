@@ -212,6 +212,10 @@ def _check_code(src: str, skill_id: str, caps: set[str]) -> tuple[list[dict], li
     return out, errs, warns
 
 
+def _lf(text: str) -> str:
+    return (text or "").replace(chr(13) + chr(10), chr(10)).replace(chr(13), chr(10))
+
+
 def _sha(md: str, py: str | None) -> str:
     h = hashlib.sha256(md.encode("utf-8"))
     h.update(b"\0")
@@ -428,6 +432,8 @@ class GeneratedSkills:
         """Write a draft and validate it. Never installs, never runs, never touches an installed version."""
         if len(md or "") > MAX_MD * 2 or len(py or "") > MAX_PY * 2:
             return {"ok": False, "errors": ["draft too large"], "warnings": [], "id": None}
+        md = _lf(md)                      # #314 item 4: the draft is read back with LF endings, so hash what is stored
+        py = _lf(py) if py is not None else None
         try:
             meta, _ = parse_skill_md(md)
             sid = self._id(str(meta.get("name", "")))

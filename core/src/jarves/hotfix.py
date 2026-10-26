@@ -256,6 +256,100 @@ class Hooks:
     bridge_running: Callable[[], bool] | None = None     # slice 2: the existing bridge status/stop/start path
     stop_bridge: Callable[[], None] | None = None
     start_bridge: Callable[[], None] | None = None
+    bridge_state: Callable[[], dict] | None = None       # #466: running bridge image vs the exe Core starts (bridge_process_state)
+
+
+def _image_of_pid(pid: int) -> str | None:
+    """Full image path of a running process (None = not running / not readable). Read-only, no command-line scan."""
+    if pid <= 0:
+        return None
+    if sys.platform == "win32":
+        import ctypes
+        from ctypes import wintypes
+        k = ctypes.WinDLL("kernel32", use_last_error=True)
+        k.OpenProcess.restype = wintypes.HANDLE
+        h = k.OpenProcess(0x1000, False, pid)              # PROCESS_QUERY_LIMITED_INFORMATION
+        if not h:
+            return None
+        try:
+            buf = ctypes.create_unicode_buffer(32768)
+            n = wintypes.DWORD(len(buf))
+            return buf.value if k.QueryFullProcessImageNameW(h, 0, buf, ctypes.byref(n)) else None
+        finally:
+            k.CloseHandle(h)
+    try:
+        return os.readlink(f"/proc/{pid}/exe")
+    except OSError:
+        return None
+
+
+def bridge_process_state(home: Path, *, pid_of: Callable[[], int] | None = None,
+                         image_of: Callable[[int], str | None] | None = None, expected: Path | str | None = None) -> dict:
+    """#466: compare the RUNNING bridge (pid from its own endpoint.json, image path from the OS) with the exe Core would
+    start now. state: 'ok' | 'restart-needed' | 'not-running' | 'unknown'. Read-only; nothing is started or stopped."""
+    from . import whatsapp_bridge as wab
+    if expected is None:
+        cmd = wab.bridge_command(home)
+        expected = cmd[0] if cmd and not str(cmd[0]).lower().endswith(".py") else None
+    out: dict = {"state": "unknown", "pid": None, "running_image": None, "expected_image": str(expected) if expected else None,
+                 "running_sha256": None, "expected_sha256": None}
+    try:
+        pid = int((pid_of() if pid_of else wab.endpoint(home).get("pid")) or 0)
+    except (TypeError, ValueError):
+        pid = 0
+    image = (image_of or _image_of_pid)(pid) if pid else None
+    if not image:
+        out["state"] = "not-running"
+        return out
+    names = {Path(str(expected)).name.lower()} if expected else {"whatsapp_bridge.exe", "whatsapp_bridge"}
+    if Path(str(image).replace("\\", "/")).name.lower() not in names:
+        out["state"] = "not-running"            # a stale endpoint.json pid that the OS reused for another program
+        return out
+    out.update(pid=pid, running_image=str(image))
+    if not expected or not Path(expected).is_file():
+        return out
+    try:
+        out["expected_sha256"] = sha256(Path(expected))
+        out["running_sha256"] = sha256(Path(image)) if Path(image).is_file() else None
+    except OSError:
+        return out
+    if out["running_sha256"] is None:
+        return out
+    out["state"] = "ok" if out["running_sha256"] == out["expected_sha256"] else "restart-needed"
+    return out
+
+
+def bridge_state_lines(st: dict | None) -> list[str]:
+    """Plain words for status and the apply report."""
+    if not st or st.get("state") not in ("ok", "restart-needed"):
+        return []
+    if st["state"] == "restart-needed":
+        return [f"bridge restart needed: the running bridge (pid {st['pid']}, {st['running_image']}, sha256 "
+                f"{(st['running_sha256'] or '')[:12]}...) is not the pinned exe ({st['expected_image']}, sha256 "
+                f"{(st['expected_sha256'] or '')[:12]}...)"]
+    return ["bridge: the running process is the pinned exe"]
+
+
+def restart_owned_bridge(hooks: "Hooks") -> dict:
+    """#466: restart ONLY the bridge process Core owns, when it runs a stale exe. It is identified by the pid in its own
+    endpoint.json AND its exact image path, re-checked right before the stop; stopped through the admin /shutdown (never
+    killed by name or command line), started again by Core's own start path, and the result is verified."""
+    if not (hooks.bridge_state and hooks.stop_bridge and hooks.start_bridge):
+        raise HotfixError("HOTFIX_BRIDGE_RESTART", "no bridge restart path is available")
+    before = hooks.bridge_state()
+    if before.get("state") != "restart-needed":
+        return {"restarted": False, "state": before.get("state")}
+    again = hooks.bridge_state()
+    if again.get("state") != "restart-needed" or (again.get("pid"), again.get("running_image")) != (
+            before.get("pid"), before.get("running_image")):
+        raise HotfixError("HOTFIX_BRIDGE_RESTART", "the bridge process changed while checking; not touching it")
+    hooks.stop_bridge()
+    hooks.start_bridge()
+    after = hooks.bridge_state()
+    if after.get("state") != "ok":
+        raise HotfixError("HOTFIX_BRIDGE_RESTART", "the bridge restarted but still does not run the pinned exe")
+    return {"restarted": True, "old_pid": before.get("pid"), "new_pid": after.get("pid"),
+            "old_sha256": (before.get("running_sha256") or "")[:12], "new_sha256": (after.get("expected_sha256") or "")[:12]}
 
 
 def default_hooks(cfg, home: Path, installed_pkg: Path) -> Hooks:
@@ -315,7 +409,8 @@ def default_hooks(cfg, home: Path, installed_pkg: Path) -> Hooks:
             raise HotfixError("HOTFIX_BRIDGE_START", f"the WhatsApp bridge did not start: {msg}")
 
     return Hooks(running, stop, start, lambda: str(backup_mod.create(home, "manual", note="before a hotfix")), doctor,
-                 bridge_running=bridge_running, stop_bridge=stop_bridge, start_bridge=start_bridge)
+                 bridge_running=bridge_running, stop_bridge=stop_bridge, start_bridge=start_bridge,
+                 bridge_state=lambda: bridge_process_state(home))
 
 
 # ---------------------------------------------------------------------- classification (#459)
@@ -627,7 +722,7 @@ def _s2_active(plan: Plan) -> tuple[bool, bool]:
 
 def apply(installed_pkg: Path, src: Source, home: Path, hooks: Hooks, *, dry_run: bool = False,
           restart: bool = True, python_only: bool = False, site_dirs: list[Path] | None = None,
-          s2opts=None) -> dict:
+          s2opts=None, restart_bridge: bool = False) -> dict:
     """Returns the manifest. Raises Refused before touching anything; after the first write any failure restores
     the originals and raises HotfixError('HOTFIX_REVERTED'). `s2opts` (hotfix_slice2.S2Options) carries --bridge-exe,
     --python and the test fakes for the dependency/bridge slice."""
@@ -645,9 +740,19 @@ def apply(installed_pkg: Path, src: Source, home: Path, hooks: Hooks, *, dry_run
         raise Refused("HOTFIX_NEW_DEPENDENCY", "an updated Python file imports a module that is not installed: "
                       + "; ".join(missing[:6]) + ": " + SLICE2, "change uv.lock in the same commit so the dependency is "
                       "delivered, or use the full installer (an unreadable libraries archive also counts as missing)")
+    if dry_run and not plan.files and not has_deps and not has_bridge:
+        out = {"status": "dry-run", "files": [], "replace": [], "add": [], "pending_installer": pending,
+               "deps_already_installed": list(plan.deps.already_installed) if plan.deps else []}
+        _bridge_report(out, hooks)                # read-only: a dry run never stops or starts anything
+        return out
     if not plan.files and not has_deps and not has_bridge:
-        return {"status": "nothing", "files": [], "pending_installer": pending,
-                "deps_already_installed": list(plan.deps.already_installed) if plan.deps else []}
+        out = {"status": "nothing", "files": [], "pending_installer": pending,
+               "deps_already_installed": list(plan.deps.already_installed) if plan.deps else []}
+        _bridge_report(out, hooks)
+        if restart_bridge and restart and (out.get("bridge_process") or {}).get("state") == "restart-needed":
+            out["bridge_restart"] = restart_owned_bridge(hooks)       # nothing else changed: no files to revert
+            _bridge_report(out, hooks)
+        return out
     if dry_run:
         out = {"status": "dry-run", "files": plan.files, "replace": plan.replace, "add": plan.add, "pending_installer": pending}
         if plan.deps is not None:
@@ -660,6 +765,7 @@ def apply(installed_pkg: Path, src: Source, home: Path, hooks: Hooks, *, dry_run
                              "replaces": (plan.bridge.old_sha256 or "none")[:12]}
         if missing:
             out["imports_to_check_after_download"] = missing
+        _bridge_report(out, hooks)
         return out
     stage = None
     wheels: dict[str, Path] = {}
@@ -675,14 +781,14 @@ def apply(installed_pkg: Path, src: Source, home: Path, hooks: Hooks, *, dry_run
                 if still:
                     raise Refused("HOTFIX_NEW_DEPENDENCY", "an updated Python file imports a module that neither is installed "
                                   "nor comes with the locked dependencies: " + "; ".join(still[:6]), "use the full installer")
-        return _apply_locked(installed_pkg, src, home, hooks, plan, pending, restart, opts, wheels, stage)
+        return _apply_locked(installed_pkg, src, home, hooks, plan, pending, restart, opts, wheels, stage, restart_bridge)
     finally:
         if stage is not None:
             shutil.rmtree(stage, ignore_errors=True)
 
 
 def _apply_locked(installed_pkg: Path, src: Source, home: Path, hooks: Hooks, plan: Plan, pending: list[str],
-                  restart: bool, opts, wheels: dict[str, Path], stage: Path | None) -> dict:
+                  restart: bool, opts, wheels: dict[str, Path], stage: Path | None, restart_bridge: bool = False) -> dict:
     from . import hotfix_slice2 as s2
     has_deps, has_bridge = _s2_active(plan)
     sp = installed_pkg.parent
@@ -740,6 +846,13 @@ def _apply_locked(installed_pkg: Path, src: Source, home: Path, hooks: Hooks, pl
         manifest["doctor_rc"] = rc
         if rc != 0 and baseline == 0:         # worse than before the hotfix (a problem that was already there is not ours)
             raise HotfixError("HOTFIX_DOCTOR", f"jarvis doctor reported problems after the hotfix (exit {rc})")
+        if restart_bridge and restart:
+            st = hooks.bridge_state() if hooks.bridge_state else None
+            if st and st.get("state") == "restart-needed":
+                manifest["bridge_restart_attempted"] = True
+                _write_json(d / "manifest.json", manifest)
+                manifest["bridge_restart"] = restart_owned_bridge(hooks)   # a failure raises: the revert below runs
+        _bridge_report(manifest, hooks)
         manifest["status"] = "applied"
         _write_json(d / "manifest.json", manifest)
         return manifest
@@ -750,6 +863,9 @@ def _apply_locked(installed_pkg: Path, src: Source, home: Path, hooks: Hooks, pl
             _revert_dir(installed_pkg, d, manifest, hooks, bridge_was_running=bool(manifest.get("bridge", {}).get("was_running")))
             if restart:
                 _restart(hooks, was_running)
+            if manifest.get("bridge_restart_attempted") and hooks.bridge_running and hooks.start_bridge \
+                    and not hooks.bridge_running():
+                hooks.start_bridge()                  # our restart took it down: bring it back (Core's own start path)
         except Exception as e2:                     # the revert itself failed: say so loudly, keep the manifest
             manifest["status"] = "revert-failed"
             _write_json(d / "manifest.json", manifest)
@@ -762,6 +878,14 @@ def _apply_locked(installed_pkg: Path, src: Source, home: Path, hooks: Hooks, pl
         if isinstance(e, (KeyboardInterrupt, SystemExit)):
             raise
         raise HotfixError("HOTFIX_REVERTED", f"hotfix failed and was reverted automatically: {e}") from e
+
+
+def _bridge_report(out: dict, hooks: Hooks) -> None:
+    """Add the plain 'bridge restart needed' verdict to a report (dry-run, nothing, applied)."""
+    st = hooks.bridge_state() if hooks.bridge_state else None
+    if st is not None:
+        out["bridge_process"] = st
+        out["bridge_restart_needed"] = st.get("state") == "restart-needed"
 
 
 def _s2_python(installed_pkg: Path, opts) -> Path:
@@ -861,13 +985,14 @@ def revert(installed_pkg: Path, home: Path, hooks: Hooks, *, restart: bool = Tru
     return {"status": "reverted", "id": man["id"], "files": done}
 
 
-def status(installed_pkg: Path, home: Path) -> dict:
+def status(installed_pkg: Path, home: Path, bridge_state: Callable[[], dict] | None = None) -> dict:
     info = installed_info(installed_pkg)
     found = latest_manifest(home)
     pending = found[1].get("pending_installer") if found and found[1].get("status") == "applied" else None
     return {"version": info.get("version"), "hotfix": info.get("hotfix"),
             "latest": ({"id": found[1].get("id"), "status": found[1].get("status")} if found else None),
-            "pending_installer": list(pending or [])}
+            "pending_installer": list(pending or []),
+            "bridge_process": (bridge_state() if bridge_state else bridge_process_state(home))}
 
 
 # ---------------------------------------------------------------------- CLI
@@ -895,6 +1020,8 @@ def add_cli(sub) -> None:
     p.add_argument("--bridge-exe", help="slice 2: a locally built or CI-artifact whatsapp_bridge.exe; used ONLY if its sha256 equals "
                    "packaging/bridge_pin.json of the target commit")
     p.add_argument("--python", help="slice 2: the installed python.exe (default: <install>/python/python.exe) used to install the locked wheels")
+    p.add_argument("--restart-bridge", action="store_true", help="#466: after the new exe is verified, restart ONLY the bridge process "
+                   "Core owns (by its pid and exact image path, graceful /shutdown) if it still runs an older exe; auto-revert on failure")
     p.add_argument("--python-only", action="store_true", help="alias of the default: files that only affect the next full installer are skipped "
                    "and listed, never a reason to refuse")
 
@@ -907,6 +1034,14 @@ def _print_pending(files: list[str]) -> None:
     if files:
         print(_say("משפיעים רק על המתקין המלא הבא", "only affects the next full installer") + f" ({len(files)}): "
               + ", ".join(files[:20]) + (" ..." if len(files) > 20 else ""))
+
+
+def _print_bridge(st: dict | None) -> None:
+    for line in bridge_state_lines(st):
+        if st and st.get("state") == "restart-needed":
+            print(_say("נדרשת הפעלה מחדש של הגשר: התהליך הרץ אינו קובץ הגשר הנעוץ. הריצו  jarvis hotfix apply --restart-bridge",
+                       "bridge restart needed: run  jarvis hotfix apply --restart-bridge"))
+        print(line)
 
 
 def _print_s2(r: dict) -> None:
@@ -938,6 +1073,7 @@ def cmd_hotfix(a, cfg, home) -> int:
                 print(_say("תיקון מהיר נקטע באמצע: הריצו  jarvis hotfix revert  (או התקינו גרסה מלאה)",
                            "a hotfix was interrupted half way: run  jarvis hotfix revert  (or use the full installer). "
                            "If jarvis cannot start: jarvis recover-hotfix"), file=sys.stderr)
+            _print_bridge(s.get("bridge_process"))
             _print_pending(s["pending_installer"])
             return 0
         if a.action == "apply":
@@ -959,7 +1095,7 @@ def cmd_hotfix(a, cfg, home) -> int:
             from . import hotfix_slice2 as s2
             be, py = getattr(a, "bridge_exe", None), getattr(a, "python", None)
             r = apply(installed, src, home, hooks, dry_run=a.dry_run, restart=not a.no_restart,
-                      python_only=bool(getattr(a, "python_only", False)),
+                      python_only=bool(getattr(a, "python_only", False)), restart_bridge=bool(getattr(a, "restart_bridge", False)),
                       s2opts=s2.S2Options(bridge_exe=Path(be) if be else None, python=Path(py) if py else None))
         finally:
             if src.cleanup:
@@ -980,6 +1116,10 @@ def cmd_hotfix(a, cfg, home) -> int:
                   + _say("הקור הופעל מחדש" if r["core_was_running"] and not a.no_restart else "הקור לא הופעל מחדש",
                          "core restarted" if r["core_was_running"] and not a.no_restart else "core not restarted")
                   + f". {_say('לביטול', 'undo with')}: jarvis hotfix revert")
+        if r.get("bridge_restart", {}).get("restarted"):
+            print(_say("הגשר הופעל מחדש עם הקובץ הנעוץ", "bridge restarted with the pinned exe")
+                  + f" (pid {r['bridge_restart']['old_pid']} -> {r['bridge_restart']['new_pid']})")
+        _print_bridge(r.get("bridge_process"))
         _print_pending(r.get("pending_installer") or [])
         if src.note:
             print("note: " + src.note)
