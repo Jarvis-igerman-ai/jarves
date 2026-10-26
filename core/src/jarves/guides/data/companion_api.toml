@@ -1,0 +1,34 @@
+order = 65
+category = "system"
+features = ["companion_api"]
+suggest = false
+aliases = ["אפליקציית אנדרואיד", "ממשק אפליקציה", "companion", "android app", "companion api", "phone api"]
+links = ["mobile_access"]
+title_he = "ממשק לאפליקציית הטלפון"
+title_en = "Phone companion API"
+what_he = "חוזה מתועד לאפליקציית אנדרואיד עתידית: היא מצטמדת כמו הטלפון היום ויכולה לשוחח, לראות משימות ואישורים ולהשהות או לבטל תוכניות. המחשב נשאר המוח. אישורים מהטלפון כבויים כברירת מחדל, ואישורי GitHub וצעדי תוכנית של המחשב בלבד נשארים במחשב."
+what_en = "A documented contract for a future Android app: it pairs like the phone page does today and can chat, see tasks and approvals, and pause or cancel plans. The PC stays the brain. Phone approvals are off by default, and GitHub approvals and PC-only plan steps stay on the computer."
+say = [["איך מצמידים את אפליקציית הטלפון?", "How do I pair the phone app?"]]
+expect_he = "אחרי הצימוד האפליקציה קוראת את /api/m/companion/info ורואה גרסת ממשק, מצב המחשב (מחובר או לא) והרשאות. עדיין אין אפליקציית אנדרואיד: הממשק מוכן ומתועד בלבד."
+expect_en = "After pairing, the app reads /api/m/companion/info and sees the API version, whether the PC is online and its permissions. There is no Android app yet: the interface is ready and documented only."
+test_he = "הצמידו טלפון, ובדפדפן הטלפון (או בכלי בדיקה) קראו /api/m/companion/info עם האסימון: צריכה לחזור גרסת ממשק 1."
+test_en = "Pair a phone and read /api/m/companion/info with its token: it should return API version 1."
+cost_he = "חינם."
+cost_en = "Free."
+privacy_he = "רק קריאה. רשת הבית בלבד, בלי שרת בענן. הרישום מכיל מכשיר, נתיב וסטטוס, בלי תוכן הודעות."
+privacy_en = "Read-only. Home network only, no cloud server. The audit holds the device, route and status, never message text."
+
+[parity.features]
+companion_api = "dashboard"
+
+[[steps]]
+he = "הפעילו קודם את הגישה מהטלפון (ראו המדריך \"דיבור עם JARVES מהטלפון\"). זה תכונה בטא: היא עובדת רק אם הפעלתם תכונות בטא."
+en = "Turn on phone access first (see the guide \"Talk to JARVES from your phone\"). This is a beta feature: it works only when beta features are on."
+
+[[steps]]
+he = "בלוח הבקרה, בעמוד \"טלפון\", לחצו \"צימוד טלפון\" והצמידו את המכשיר בקוד QR או בקוד בן 8 ספרות (תקף 5 דקות)."
+en = "In the dashboard, on the Phone page, press Pair a phone and pair the device with the QR or the 8-digit code (valid 5 minutes)."
+
+[[steps]]
+he = "את החוזה המלא תמצאו ב-docs/api/companion_v1.md. כיבוי: בטלו את הצימוד בעמוד \"טלפון\" או כבו את הגישה מהטלפון."
+en = "The full contract is in docs/api/companion_v1.md. To turn it off: revoke the pairing on the Phone page or turn phone access off."

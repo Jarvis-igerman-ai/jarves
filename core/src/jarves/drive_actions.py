@@ -17,6 +17,7 @@ from . import dialing, journey as jn
 FEATURE = "drive_actions"
 KINDS = ("call", "navigate", "music")
 RATE_PER_MIN = 10
+RATE_LIMITED = {"error": "too many requests: wait a minute", "error_he": "יותר מדי בקשות: חכו דקה", "code": "ACTION_RATE_LIMITED"}
 MAX_TEXT = 120
 LINK_PREFIXES = ("tel:+", "https://www.google.com/maps/dir/?", "https://waze.com/ul?", "https://music.youtube.com/search?q=")
 

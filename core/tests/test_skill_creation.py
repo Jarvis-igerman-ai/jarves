@@ -468,3 +468,12 @@ def test_cli_and_dashboard_managers_know_the_builtin_names(tmp_path):
     rep = other.propose(_md(name="music"), None, by="dashboard")
     assert not rep["ok"]
     assert gen.GeneratedSkills(tmp_path / "fresh").taken() == (set(), set())     # no snapshot yet: as before
+
+
+async def test_a_draft_with_crlf_line_endings_can_be_approved(tmp_path):
+    """#314 item 4: the draft is read back with LF endings, so the sha256 shown to the owner must be of the LF text."""
+    reg, mgr = setup(tmp_path)
+    rep = mgr.propose(MD_ONLY.replace("\n", "\r\n"), by="voice")
+    assert rep["ok"], rep["errors"]
+    assert mgr.draft("tea_coach")["report"]["sha256"] == rep["sha256"]
+    assert mgr.approve("tea_coach", rep["sha256"], by="dashboard")["version"] == 1

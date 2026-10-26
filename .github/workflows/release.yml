@@ -1,6 +1,6 @@
 name: jarves-release
 # STABLE release, tag-driven (docs/RELEASING.md). Push a tag vX.Y.Z. The gate (core/tools/release_gate.py) must pass:
-# the tested commit has a green jarves-checks run, no open P0-P2, nightly green, and the owner's manual test sign-off
+# the tested commit has a green jarves-checks run, no open P0-P2, and the owner's manual test sign-off
 # docs/reviews/MANUAL_TEST_<X.Y.Z>.md (recorded with `jarvis release signoff`) names the tested beta commit = this
 # tag's commit (or only documentation changed since). Only then is the tested installer published as the stable release.
 on:
@@ -64,7 +64,7 @@ jobs:
         run: |
           python3 packaging/release.py verify --dir dist --commit "${{ steps.find.outputs.sha }}" --tree "${{ steps.find.outputs.tree }}"
           python3 packaging/release.py stamp --dir dist --commit "${{ steps.find.outputs.sha }}" --tree "${{ steps.find.outputs.tree }}"
-      - name: Release gate (sign-off, SHA, checklist, nightly)
+      - name: Release gate (sign-off, SHA, checklist)
         working-directory: core
         run: uv run python tools/release_gate.py --tag "$TAG" --sha "$(git rev-parse HEAD)" --verified-sha "${{ steps.find.outputs.sha }}" --candidate-dir ../dist --bug-tables 'docs/reviews/*BUG_TABLE*.md'
       - name: Plan (dry run)
