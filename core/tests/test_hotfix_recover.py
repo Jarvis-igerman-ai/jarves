@@ -128,3 +128,16 @@ def test_recover_restores_dependency_files_and_bridge(tree):
     rec.recover(inst, home)
     assert (sp / "dep" / "__init__.py").read_text() == "V=1\n" and not (sp / "dep" / "new_mod.py").exists()
     assert not (sp / "dep-2.0.dist-info").exists() and bridge.read_text() == "OLD"
+
+
+def test_bridge_dest_outside_install_is_refused(tree, tmp_path):
+    inst, home, hid = applied(tree)
+    d = home / "hotfix" / hid
+    write(d / "bridge_original", "exe", "OLD")
+    victim = tmp_path.parent.parent / "victim_outside.exe"
+    man = json.loads((d / "manifest.json").read_text())
+    man["bridge"] = {"dest": str(victim), "sha256_original": hf.sha256(d / "bridge_original" / "exe"), "had_sidecar": False}
+    (d / "manifest.json").write_text(json.dumps(man))
+    with pytest.raises(rec.Recover) as e:
+        rec.recover(inst, home)
+    assert e.value.code == "RECOVER_UNSAFE_PATH" and not victim.exists() and (inst / "a.py").read_text() == "A=2\n"

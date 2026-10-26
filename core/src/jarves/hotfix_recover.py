@@ -94,6 +94,9 @@ def _verify(d: Path, man: dict, install: Path) -> None:
     for item in man.get("added", []):
         _inside(install, item["path"])
     b = man.get("bridge")
+    if b:
+        root = install.parents[3] if len(install.parents) > 3 else install.parent
+        _inside(root, os.path.relpath(b["dest"], root))
     if b and b.get("sha256_original"):
         saved = d / "bridge_original" / "exe"
         if not saved.is_file() or _sha(saved) != b["sha256_original"]:
@@ -106,6 +109,8 @@ def _verify(d: Path, man: dict, install: Path) -> None:
                 raise Recover("RECOVER_ORIGINAL_BAD", f"saved original of {item['path']} ({e['name']}) is missing or changed")
         for rel in e["new_paths"]:
             _inside(install.parent, rel)
+        if e.get("new_dist"):
+            _inside(install.parent, e["new_dist"])
 
 
 def _prune(sp: Path, rel: str) -> None:
