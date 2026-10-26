@@ -42,6 +42,7 @@ T = {
     "HF_ENDED": ("שיחת הנהיגה הסתיימה. המיקרופון סגור.", "The Drive voice session ended. The microphone is closed."),
     "HF_NO_STT": ("זיהוי הדיבור לא זמין כרגע.", "Speech recognition is not available right now."),
     "HF_RATE": ("יותר מדי בקשות: חכו דקה", "too many requests: wait a minute"),
+    "HF_NO_TLS": ("קול נהיגה דורש חיבור מאובטח (https).", "Drive voice needs a secure (https) connection."),
 }
 _END_CODE = {"route_lost": "HF_ROUTE_LOST", "wake_lock_lost": "HF_WAKE_LOST", "hidden": "HF_HIDDEN", "mic_lost": "HF_MIC_LOST"}
 clock = time.monotonic                  # tests replace this
@@ -105,7 +106,7 @@ def start(mob, dev: str) -> tuple[int, dict]:
                  "note_he": "בחזית בלבד: השאירו את העמוד פתוח ואת המסך דלוק. שום דבר לא מקשיב ברקע."}
 
 
-def turn(mob, dev: str, wav: bytes) -> tuple[int, dict]:
+def turn(mob, dev: str, wav: bytes, *, barge: bool = False) -> tuple[int, dict]:
     from . import drive_mode, mobile_drive
     s, why = _live(mobile_drive._features(mob), dev)
     if s is None:
@@ -120,9 +121,13 @@ def turn(mob, dev: str, wav: bytes) -> tuple[int, dict]:
         return 503, msg("HF_NO_STT")
     if not text:
         return 200, {"heard": False, "action": "listen"}         # silence or noise: not a turn, the idle clock keeps running
-    s["last"] = clock()
     kind = classify(text)
-    if kind == "stop":                                           # 'stop' always stops speech: no model call, nothing else happens
+    if barge and not kind:
+        # heard while JARVES was speaking: it may be the phone's own voice (an answer that quoted a calendar title, a web
+        # page...) picked up again by the microphone. Only 'stop' / 'hang up' count; anything else is dropped, never a turn.
+        return 200, {"heard": True, "action": "listen", "dropped": "barge"}
+    s["last"] = clock()
+    if kind == "stop":                                          # 'stop' always stops speech: no model call, nothing else happens
         return 200, {"heard": True, "action": "stop_speech", "transcript": text[:200]}
     if kind == "end":
         _sessions.pop(dev, None)
