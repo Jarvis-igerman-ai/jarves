@@ -94,7 +94,7 @@ def validate_blocks(raws: Any) -> list[dict]:
         except ValueError:
             dropped += 1
     if dropped:
-        logs.warn("ui_blocks", "UI_BLOCK_INVALID", "ui blocks dropped", dropped=dropped, kept=len(good))
+        logs.warn("ui_blocks", "UI_BLOCK_INVALID", "ui blocks dropped", rejected=dropped, shown=len(good))
     for b in good:
         logs.info("ui_blocks", "UI_BLOCK_SHOWN", "ui block shown", kind=b["kind"], n=len(b.get("items", [])))
     return good
