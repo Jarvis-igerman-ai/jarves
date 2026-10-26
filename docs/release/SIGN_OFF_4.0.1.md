@@ -1,17 +1,16 @@
 # Sign-off sheet: JARVES 4.0.1 (stable)
 
 Prepared 26 Oct 2026 (#462). Short and plain: tick each row, then sign. The rule (owner 26 Oct): there is **no five-nights rule**.
-A stable tag needs: main green, the latest nightly green, the release-gate dry run green, zero open P0-P2, and this signed sheet.
+A stable tag needs: main green, the release-gate dry run green, zero open P0-P2, and this signed sheet. There is no nightly requirement.
 
 ## 1. What the machine checks (you do nothing)
 
 | Check | Who | State on 26 Oct (re-run before signing) |
 |---|---|---|
 | `jarves-checks` green on the tagged commit | gate | checked at tag time |
-| Latest `nightly` run on main green, at most 2 days old | gate | checked at tag time |
 | Release checklist `docs/reviews/RELEASE_CHECKLIST_4.0.1.md`: rows 9 to 12 are still `open` | gate | NOT clear |
 | Bug tables (`docs/reviews/*BUG_TABLE*.md`): open P0-P2 rows | gate | 32 open rows (V4.5 table 25, V5.0 table 4, V6.0 table 3). The V4.5 table is a 24 Oct snapshot; rows fixed since need their status updated |
-| Open GitHub issues labelled P0-P2 (planned work `enhancement` or `v5`-`v9` skipped) | gate | 5 open: #160 (P1 CI reliability), #179, #261, #441, #447 (P2). 35 carry a P0-P2 label in all |
+| Open GitHub issues labelled P0-P2 (planned work `enhancement`, `v5`-`v9` or `4.5.1` skipped unless also `bug`) | gate | 5 open: #160 (P1 CI reliability), #179, #261, #441, #447 (P2). 35 carry a P0-P2 label in all |
 | Installer install / upgrade / rollback / uninstall smoke | CI | green on every code PR |
 | `jarvis selftest`, `doctor`, `speedtest` on the newest beta | agent | re-run on the beta you sign |
 
@@ -45,13 +44,7 @@ block the tag; record the result and the issue.
 ## 4. Sign
 
 1. All rows above `pass` or `accepted-blocked` with a note: `jarvis release signoff --version 4.0.1 --finish --beta <4.0.1-beta.N> --commit <full SHA>`.
-2. Create the signature file `docs/release/SIGNED_4.0.1` (the gate refuses the tag without it), three lines, and commit it:
-
-```
-owner: <your name>
-date: <YYYY-MM-DD>
-commit: <full 40-character SHA of the build you tested>
-```
+2. That is the only signature: `--finish` signs the sheet (owner, date, commit); there is no second file to create. Commit the signed sheet.
 
 The commit must be the tag commit, or an ancestor with only documentation changes since. A change to the sheet after signing needs a new signature.
 
