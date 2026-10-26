@@ -45,7 +45,8 @@ ALLOWED: dict[str, frozenset[str]] = {
                       "ui.open_dashboard",                 # `jarvis web`: open the Chat page of the running Core
                       # terminal text chat (chat_service.py): `jarvis chat`
                       "talk.start", "talk.stop",           # `jarvis talk`: live conversation without the wake word
-                      "chat.hello", "chat.turn", "chat.cancel", "chat.command", "chat.approval_answer"}),
+                      "chat.hello", "chat.turn", "chat.cancel", "chat.command", "chat.approval_answer",
+                      "chat.ui_action"}),
 }
 KNOWN_TYPES = frozenset().union(*ALLOWED.values())
 

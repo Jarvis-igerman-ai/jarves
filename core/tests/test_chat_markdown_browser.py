@@ -125,3 +125,53 @@ def test_ui_blocks_render_as_text_and_work_with_keyboard(browser):
     assert p.evaluate("document.documentElement.scrollWidth <= window.innerWidth")
     assert errs == []
     p.close()
+
+
+# ---- #445 S2: the send button posts the block id and the ticked item ids only, then locks the list
+ACTION_BLOCK = [{"role": "ui_block", "turn": "t1", "block": {"v": 1, "id": "blk_a", "kind": "checklist", "title": "Tasks", "dir": "auto",
+                 "items": [{"id": "i1", "label": "buy milk", "detail": "", "checked": False},
+                           {"id": "i2", "label": "<b>x</b>", "detail": "", "checked": False},
+                           {"id": "i3", "label": "call Dana", "detail": "", "checked": False}],
+                 "actions": [], "on": "anydo_create_tasks"}}]
+
+
+def _action_page(browser, ui_action_js):
+    p = browser.new_page(viewport={"width": 360, "height": 700})
+    errs: list[str] = []
+    p.on("pageerror", lambda e: errs.append(str(e)))
+    p.set_content(PAGE)
+    p.add_style_tag(path=str(STATIC / "chatview.css"))
+    p.add_script_tag(path=str(STATIC / "chatview.js"))
+    boot = (BOOT.replace("messages: [", "messages: " + json.dumps(ACTION_BLOCK) + ".concat([")
+            .replace("turn: '' }] }),", "turn: '' }]) }),")
+            .replace("silent: async () => ({}),", "silent: async () => ({}), uiAction: " + ui_action_js + ","))
+    p.evaluate(boot % json.dumps("x"))
+    p.wait_for_selector(".jc-block button")
+    return p, errs
+
+
+def test_checklist_send_posts_ids_only_and_locks(browser):
+    p, errs = _action_page(browser, "async (b) => { window.__act = (window.__act || []).concat([b]); return { ok: true }; }")
+    boxes = p.locator(".jc-block input[type=checkbox]")
+    p.locator(".jc-block button").click()                                      # nothing ticked: no request
+    assert p.evaluate("window.__act") is None and "Nothing is ticked" in p.inner_text(".jc-block [role=alert]")
+    boxes.nth(2).focus(); p.keyboard.press("Space")
+    boxes.nth(0).check()
+    p.locator(".jc-block button").click()
+    p.wait_for_function("window.__act && window.__act.length === 1")
+    sent = p.evaluate("window.__act[0]")
+    assert sent["block"] == "blk_a" and sent["selected"] == ["i1", "i3"] and set(sent) == {"block", "selected", "lang"}
+    assert p.locator(".jc-block button").is_disabled() and boxes.nth(0).is_disabled()      # no second click
+    assert "approval" in p.inner_text(".jc-block [role=alert]")
+    assert p.locator(".jc-block button").bounding_box()["height"] >= 40
+    assert errs == []
+    p.close()
+
+
+def test_checklist_send_refusal_reopens_and_names_the_reason(browser):
+    p, errs = _action_page(browser, "async () => { const e = new Error('x'); e.code = 'UI_ACTION_STALE'; throw e; }")
+    p.locator(".jc-block input[type=checkbox]").first.check()
+    p.locator(".jc-block button").click()
+    p.wait_for_function("document.querySelector('.jc-block [role=alert]').textContent.includes('already sent')")
+    assert errs == []
+    p.close()

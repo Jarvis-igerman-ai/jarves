@@ -818,6 +818,20 @@ class AnyDoSkill(Skill):
         ]
 
 
+async def _ui_create_tasks(core, titles: list[str]) -> ToolResult:
+    """The next step of a chat checklist the owner ticked (ui_blocks, on="anydo_create_tasks"). It never writes by itself:
+    it calls the normal anydo_create tool as the owner (origin="user"), which asks for approval showing the exact titles
+    and the list read back from Any.do (the first list: no list is chosen here). Max 10, enforced by the block store."""
+    from .ui_blocks import MAX_BATCH
+    if not 1 <= len(titles) <= MAX_BATCH:
+        return ToolResult(False, "too many items", code="UI_ACTION_TOO_MANY")
+    return await core.registry.call("anydo_create", {"tasks": [{"title": str(t)[:200]} for t in titles]}, origin="user")
+
+
+from . import ui_blocks as _ui  # noqa: E402  (after the tool code; ui_blocks imports skills only)
+_ui.ACTIONS["anydo_create_tasks"] = _ui_create_tasks
+
+
 def register_anydo(registry, home: Path, health=None, transport=None, auth_transport=None) -> AnyDoSkill:
     skill = AnyDoSkill(home, transport, auth_transport)
     registry.register(skill)          # no allowed_actions: every write tool is "destructive" = approved each time

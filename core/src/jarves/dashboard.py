@@ -908,6 +908,16 @@ class Handler(BaseHTTPRequestHandler):
         page = (REOPEN_OK if opened else REOPEN_FAIL).encode()
         return self._send(200 if opened else 404, page, "text/html; charset=utf-8")
 
+    def _own_click(self, who: dict, ip: str) -> bool:
+        """A chat checklist click (ui_action) must be the owner's own browser on THIS computer: loopback address, the
+        dashboard session cookie (not a paired device), and a request the page itself made (same origin, stated)."""
+        if self.command != "POST" or who.get("kind") != "local" or not is_loopback(ip):
+            return False
+        site = (self.headers.get("Sec-Fetch-Site") or "").lower()
+        origin = (self.headers.get("Origin") or "").lower()
+        host = (self.headers.get("Host") or "").lower()
+        return site == "same-origin" or (not site and origin in (f"http://{host}", f"https://{host}"))
+
     def _handle(self) -> None:
         a, ip = self.access, self.client_address[0]
         mob = self.ctx.mobile
@@ -955,6 +965,10 @@ class Handler(BaseHTTPRequestHandler):
             a.audit("refused_csrf", principal=who["id"], method=self.command, path=url.path)
             return self._json(403, {"error": "missing or wrong CSRF token (reload the page)"})
         self.ctx._tl.who = who
+        if url.path == "/api/chat/ui_action" and not self._own_click(who, ip):
+            a.audit("refused_privilege", principal=who["id"], method=self.command, path=url.path)
+            return self._json(403, {"error": "only a click in this computer's own dashboard can do this",
+                                    "code": "UI_ACTION_FORBIDDEN"})
         if url.path == "/" or url.path.startswith("/static/"):
             if self.command not in ("GET", "HEAD"):
                 return self._send(405, b"", "text/plain")

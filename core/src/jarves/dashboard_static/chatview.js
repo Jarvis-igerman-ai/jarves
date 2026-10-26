@@ -25,6 +25,13 @@
   const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
   const WORDS = {
     CHAT_BUSY: ["התשובה הקודמת עדיין נכתבת. המתינו רגע.", "The previous answer is still being written. Wait a moment."],
+    UI_ACTION_STALE: ["הרשימה הזאת כבר נשלחה.", "This list was already sent."],
+    UI_ACTION_EXPIRED: ["הרשימה פגה. בקשו רשימה חדשה.", "This list has expired. Ask for a new one."],
+    UI_ACTION_UNKNOWN: ["הרשימה לא מוכרת (אולי אחרי הפעלה מחדש). בקשו רשימה חדשה.", "This list is not known (maybe after a restart). Ask for a new one."],
+    UI_ACTION_INVALID: ["הבחירה לא תקינה.", "That selection is not valid."],
+    UI_ACTION_TOO_MANY: ["אפשר לשלוח עד 10 פריטים בבת אחת.", "You can send at most 10 items at once."],
+    UI_ACTION_RATE: ["יותר מדי לחיצות. נסו עוד דקה.", "Too many clicks. Try again in a minute."],
+    UI_ACTION_FORBIDDEN: ["את זה אפשר לעשות רק בדשבורד של המחשב עצמו.", "This can only be done in the dashboard on the computer itself."],
     CHAT_UNAVAILABLE: ["השיחה לא פועלת כאן. הריצו jarvis web או הפעילו את JARVES.", "Chat is not running here. Run jarvis web or start JARVES."],
     CHAT_FEATURE_OFF: ["השיחה כבויה: jarvis features on web_chat", "Chat is switched off: jarvis features on web_chat"],
     CHAT_TOO_LONG: ["ההודעה ארוכה מדי.", "The message is too long."],
@@ -186,7 +193,16 @@
       log.append(d); scroll(true);
     }
     // #444 (S1): owner-facing UI block from the server (text / checklist). Text nodes only, no HTML parsing; ids are
-    // server-assigned. Selection is local for now: no event leaves the page (S2 wires actions).
+    // server-assigned. S2: a checklist that names a next step (b.on) gets a send button; the click posts ONLY the block id and
+    // the ticked item ids to the computer, which checks them against its own record and asks for approval before any write.
+    const blockUis = new Map();
+    function setBlockState(id, state) {
+      const u = blockUis.get(id); if (!u) return;
+      const open = state === "open";
+      u.btn.disabled = !open; u.boxes.forEach((x) => { x.disabled = !open; });
+      u.msg.textContent = state === "used" ? tx("נשלח. ממתין לאישור שלכם.", "Sent. Waiting for your approval.")
+        : state === "expired" ? tx("הרשימה פגה. בקשו רשימה חדשה.", "This list has expired. Ask for a new one.") : "";
+    }
     function blockView(m) {
       const b = m.block;
       if (!b || b.v !== 1 || (b.kind !== "text" && b.kind !== "checklist")) return;     // unknown block: dropped, text stays
@@ -208,6 +224,20 @@
             h("span", { dir: "auto" }, it.label, it.detail ? h("small", { class: "jc-small", dir: "auto" }, it.detail) : null)));
         });
         wrap.append(fs, status); paint();
+        if (b.on && typeof api.uiAction === "function" && !device) {
+          const boxes = Array.from(fs.querySelectorAll("input"));
+          const msg = h("div", { class: "jc-small", role: "alert" });
+          const btn = h("button", { type: "button", class: "primary", onclick: async () => {
+            const selected = items.filter((_it, n) => boxes[n].checked).map((it) => it.id);
+            if (!selected.length) { msg.textContent = tx("לא סומן כלום.", "Nothing is ticked."); return; }
+            btn.disabled = true; msg.textContent = "";
+            try { await api.uiAction({ block: b.id, selected, lang: lang() }); setBlockState(b.id, "used"); }
+            catch (e) { setBlockState(b.id, "open"); msg.textContent = word(e.code, e.message || tx("הבקשה נדחתה.", "The request was refused.")); }
+          } }, tx("שלחו את הסימון", "Send my selection"));
+          wrap.append(h("div", { class: "jc-row" }, btn), msg);
+          blockUis.set(b.id, { btn, boxes, msg });
+          if (m.state && m.state !== "open") setBlockState(b.id, m.state);
+        }
       }
       log.append(wrap); scroll(true);
     }
@@ -227,7 +257,7 @@
       return bubble(m.role === "user" ? "user" : "assistant", m.text, m.turn, m.ts);
     }
     function load(s) {
-      state = s; log.replaceChildren(); turns.clear();
+      state = s; log.replaceChildren(); turns.clear(); blockUis.clear();
       (s.messages || []).forEach(renderMessage); scroll(true);
       after = s.cursor || 0; busy = s.busy || ""; phoneAp = s.phone_approvals !== false;
       paintSilent(s.silent); paintAppr(s.approvals || []);
@@ -247,6 +277,7 @@
       } else if (e.type === "tool") toolLine(e);
       else if (e.type === "display") displayBlock(e);
       else if (e.type === "ui_block") blockView(e);
+      else if (e.type === "ui_state") setBlockState(e.block, e.state);
       else if (e.type === "notice") bubble("notice", noticeText(e));
       else if (e.type === "reset") api.state(lang()).then(load).catch(() => {});
       else if (e.type === "error") note(word(e.code, e.message || e.code), "err");

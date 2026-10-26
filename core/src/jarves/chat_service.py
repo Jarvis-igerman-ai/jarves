@@ -28,9 +28,10 @@ from pathlib import Path
 from . import approvals as appr
 from . import features as feat
 from . import logs
+from . import ui_blocks as ub
 from .skills import ROUTE, TOOL_SINK
 
-CHAT_TYPES = ("chat.hello", "chat.turn", "chat.cancel", "chat.command", "chat.approval_answer")
+CHAT_TYPES = ("chat.hello", "chat.turn", "chat.cancel", "chat.command", "chat.approval_answer", "chat.ui_action")
 MAX_TEXT = 8000                       # a pasted multi-line message; the face limit (1000) is for the small input box
 RESUME_LIMIT = 8
 RESUME_MAX_TURNS = 60
@@ -79,6 +80,7 @@ class ChatService:
         self.turns: dict[str, asyncio.Task] = {}              # client id -> its running turn
         self.approval_client: dict[str, object] = {}
         self.channel = TerminalApprovalChannel(self)
+        self.blocks = ub.BlockStore()                         # S2: server record of the checklists shown in terminals
 
     # ------------------------------------------------------------------ plumbing
     async def send(self, client, t: str, payload: dict) -> bool:
@@ -152,6 +154,8 @@ class ChatService:
             await self.send(client, "chat.state", self.state(client))
         elif t == "chat.turn":
             await self._start_turn(client, p)
+        elif t == "chat.ui_action":
+            await self._start_action(client, p)
         elif t == "chat.cancel":
             task = self.turns.get(client.id)
             if task is not None and not task.done():
@@ -199,7 +203,28 @@ class ChatService:
         voice = bool(p.get("voice")) and not silent
         self.turns[client.id] = asyncio.create_task(self._turn(client, tid, text, voice, silent))
 
-    async def _turn(self, client, tid: str, text: str, voice: bool, silent: bool) -> None:
+    async def _start_action(self, client, p: dict) -> None:
+        """The owner typed `1,3` or `all` after a numbered checklist: the same event as the dashboard click (S2). Only the
+        block id and the server item ids come in; the titles are resolved from the server record."""
+        tid = str(p.get("id") or "")[:32]
+        running = self.turns.get(client.id)
+        if running is not None and not running.done():
+            await self.send(client, "chat.error", {"id": tid, "code": "CHAT_BUSY", "message": "an answer is still being written"})
+            return
+        if self.core.stopping:
+            await self.send(client, "chat.error", {"id": tid, "code": "CORE_STOPPING", "message": "shutting down"})
+            return
+        try:
+            taken = self.blocks.take(p.get("block"), p.get("selected"))
+        except ub.ActionError as e:
+            logs.warn("ui_blocks", "UI_ACTION_REFUSED", "ui action refused", reason=e.code)
+            await self.send(client, "chat.error", {"id": tid, "code": e.code, "message": "that selection was refused"})
+            return
+        self.clients[client.id] = client
+        silent = bool(p.get("silent")) or self.quiet_now()
+        self.turns[client.id] = asyncio.create_task(self._turn(client, tid, "", False, silent, action=taken))
+
+    async def _turn(self, client, tid: str, text: str, voice: bool, silent: bool, action=None) -> None:
         core = self.core
         appr.CHAT_TURN.set({"client": client.id, "silent": silent})
         svc = self
@@ -213,6 +238,12 @@ class ChatService:
                 asyncio.get_running_loop().create_task(svc.send(client, "chat.display", {"id": tid, "text": text}))
 
             def ui_block(_s, block):         # #444: validated UI block for the owner
+                try:
+                    reg = core.registry
+                    untrusted = reg._untrusted_at is not None
+                except Exception:
+                    untrusted = True
+                svc.blocks.add(block, untrusted=untrusted)       # creating a block never runs anything
                 asyncio.get_running_loop().create_task(svc.send(client, "chat.ui_block", {"id": tid, "block": block}))
         TOOL_SINK.set(_Sink())
         sent = [False]
@@ -229,6 +260,12 @@ class ChatService:
         try:
             if voice:
                 await core.set_face("thinking")
+            if action is not None:
+                try:
+                    text = await ub.run_action(core, action, self.blocks)      # asks for approval first (exact titles)
+                except asyncio.CancelledError:
+                    self.blocks.reopen(action.block)                           # cancelled while waiting: nothing happened
+                    raise
             reply = await core.brain.respond(text, spoken=voice, on_delta=on_delta)
         except asyncio.CancelledError:
             await self.send(client, "chat.done", {"id": tid, "cancelled": True, "ok": False, "code": "CANCELLED",
@@ -245,10 +282,12 @@ class ChatService:
         from .app import SENSITIVE_TEXT
         logs.info("core", "REPLY", "text chat reply", tool=reply.tool, ok=reply.ok, result=reply.code,
                   ms=round((time.monotonic() - t0) * 1000), text=reply.text, typed=True,
-                  utterance=f"<{len(text)} chars>" if SENSITIVE_TEXT.search(text) else text)
-        core.curator.observe("user", text)
+                  utterance="<ui action>" if action is not None else (       # item titles never reach the log
+                      f"<{len(text)} chars>" if SENSITIVE_TEXT.search(text) else text))
+        if action is None:
+            core.curator.observe("user", text)
         core.curator.observe("assistant", reply.text, idle=core.live is None)
-        await asyncio.sleep(0)                           # deltas already queued go out before the final message
+        await asyncio.sleep(0)                         # deltas already queued go out before the final message
         await self.send(client, "chat.done", {"id": tid, "ok": reply.ok, "code": reply.code, "source": reply.source,
                                               "tool": reply.tool, "text": reply.text, "silent": silent,
                                               "streamed": sent[0], "spoken": bool(voice)})

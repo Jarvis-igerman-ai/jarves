@@ -171,6 +171,7 @@ class ChatSession:
         self._get: asyncio.Future | None = None
         self._pump_task: asyncio.Task | None = None
         self.exit_code = 0
+        self.pending_block: dict | None = None     # the last numbered checklist that has a next step (S2)
 
     # -------------------------------------------------------------- output
     @property
@@ -281,6 +282,8 @@ class ChatSession:
                         streamed = False
                     from .ui_blocks import numbered                      # #444: plain numbered list, no widgets in the terminal
                     self.say(numbered(p["block"]) if isinstance(p.get("block"), dict) else "")
+                    if isinstance(p.get("block"), dict) and p["block"].get("on"):
+                        self.pending_block = p["block"]                 # S2: "1,3" or "all" now chooses from it
                 elif t == "chat.approval_request":
                     if streamed:
                         self.say()
@@ -578,6 +581,23 @@ class ChatSession:
                         break
                     continue
                 tid = uuid.uuid4().hex[:8]
+                if self.pending_block is not None:
+                    from .ui_blocks import parse_numbers
+                    try:
+                        ids = parse_numbers(msg, self.pending_block)
+                    except ValueError:
+                        self.say(T("מספר לא נכון. הקלידו מספרים מהרשימה, למשל 1,3 או all.",
+                                   "No such number. Type numbers from the list, e.g. 1,3 or all."))
+                        continue
+                    if ids is not None:                                 # S2: the same event as a click in the dashboard
+                        block_id, self.pending_block = self.pending_block["id"], None
+                        await self.t.send("chat.ui_action", {"id": tid, "block": block_id, "selected": ids,
+                                                             "silent": self.silent})
+                        t, p = await self.wait_for({"chat.done", "chat.error"}, tid)
+                        if t == "__closed__":
+                            break
+                        self.finish_turn(p)
+                        continue
                 await self.t.send("chat.turn", {"id": tid, "text": msg, "voice": self.voice and not self.silent,
                                                 "silent": self.silent})
                 t, p = await self.wait_for({"chat.done", "chat.error"}, tid)
