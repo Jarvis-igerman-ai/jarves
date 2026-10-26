@@ -27,6 +27,7 @@ import secrets
 import time
 from datetime import datetime
 from pathlib import Path
+from typing import Literal
 from urllib.parse import parse_qs, urlencode, urlparse
 from zoneinfo import ZoneInfo
 
@@ -497,9 +498,12 @@ class ListArgs(BaseModel):
     limit: int = Field(20, ge=1, le=100)
 
 
+TaskType = Literal["personal_task", "workspace_task"]    # #346: validated, not a free string
+
+
 class TaskArgs(BaseModel):
     task_id: str = Field(..., max_length=100)
-    task_type: str = Field("personal_task", max_length=30, description="'type' from anydo_tasks (personal_task or workspace_task)")
+    task_type: TaskType = Field("personal_task", description="'type' from anydo_tasks (personal_task or workspace_task)")
 
 
 class NewTask(BaseModel):
@@ -515,14 +519,14 @@ class CreateArgs(BaseModel):
 
 class RemindArgs(BaseModel):
     task_id: str = Field(..., max_length=100)
-    task_type: str = Field("personal_task", max_length=30)
+    task_type: TaskType = Field("personal_task")
     task_title: str = Field("", max_length=200, description="the task's title, shown in the approval")
     when: str = Field(..., max_length=40, description="ISO date-time, e.g. 2026-10-25T09:00 (Israel time without offset)")
 
 
 class UpdateArgs(BaseModel):
     task_id: str = Field(..., max_length=100)
-    task_type: str = Field("personal_task", max_length=30)
+    task_type: TaskType = Field("personal_task")
     task_title: str = Field("", max_length=200, description="the task's current title, shown in the approval")
     done: bool | None = Field(None, description="true = mark completed")
     new_title: str | None = Field(None, max_length=200)
@@ -751,14 +755,22 @@ class AnyDoSkill(Skill):
         return None, (f"לשנות ב-Any.do את \"{_clip(a.task_title or a.task_id, 80)}\"? / Change \"{_clip(a.task_title or a.task_id, 80)}\" in Any.do? "
                       + "; ".join(ch))
 
-    async def _update(self, a: UpdateArgs) -> ToolResult:
+    @staticmethod
+    def _update_precheck(a: UpdateArgs) -> ToolResult | None:
+        """Runs BEFORE the approval popup: never ask the owner to approve a change that is refused anyway (#346)."""
         if a.done is None and not a.new_title and not a.due:
             return ToolResult(False, "מה לשנות במשימה?", code="ANYDO_NOTHING_TO_DO")
+        if a.due:
+            return ToolResult(False, "Any.do לא מאפשר לשנות מועד במשימה קיימת; אפשר להגדיר תזכורת במקום.",
+                              code="ANYDO_UNSUPPORTED")
+        return None
+
+    async def _update(self, a: UpdateArgs) -> ToolResult:
+        refused = self._update_precheck(a)         # also when the handler is called without the registry
+        if refused is not None:
+            return refused
         try:
             tid = _id_ok(a.task_id)
-            if a.due:
-                return ToolResult(False, "Any.do לא מאפשר לשנות מועד במשימה קיימת; אפשר להגדיר תזכורת במקום.",
-                                  code="ANYDO_UNSUPPORTED")
             change: dict = {"task_id": tid, "task_type": a.task_type}
             if a.done is not None:
                 change["status"] = "checked" if a.done else "unchecked"
@@ -802,7 +814,7 @@ class AnyDoSkill(Skill):
             Tool("anydo_remind", "Set an Any.do reminder on a task ('remind me tomorrow at 9 to call Max'): create the task first if needed. Time in Israel time unless it has an offset. The owner approves the exact time first.",
                  self._remind, RemindArgs, permission="destructive", timeout_s=60, impact=self._remind_impact),
             Tool("anydo_update", "Complete or change ONE Any.do task by id ('mark plastic chair done'). The owner approves the exact change first; there is no delete.",
-                 self._update, UpdateArgs, permission="destructive", timeout_s=90, impact=self._update_impact),
+                 self._update, UpdateArgs, permission="destructive", timeout_s=90, impact=self._update_impact, precheck=self._update_precheck),
         ]
 
 

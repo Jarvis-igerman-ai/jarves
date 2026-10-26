@@ -750,3 +750,22 @@ def test_dashboard_start_route_is_registered():
     routes = []
     rt_mod.dashboard_routes(lambda method, rx, fn: routes.append((method, rx, fn)))
     assert ("POST", r"/api/runtime/start", rt_mod.api_core_start) in routes
+
+
+def test_runtime_set_refuses_a_paired_phone_inside_the_handler(home, cfg, monkeypatch):
+    # #369: like start/stop, POST /api/runtime re-checks the local principal (belt and braces)
+    from jarves.dashboard import Ctx
+    asked = []
+    monkeypatch.setattr(rt_mod, "_ask_core", lambda ctx, msg, expect: asked.append(msg) or {"runtime": {}})
+    ctx = Ctx(home, cfg)
+    try:
+        ctx._tl.who = {"kind": "device", "id": "d1"}                               # a paired phone
+        st, body = rt_mod.api_runtime_set(ctx, None, {"mic_muted": True})
+        assert st == 403 and not asked
+        st, _ = rt_mod.api_runtime_set(ctx, None, {"autostart": False})
+        assert st == 403
+        ctx._tl.who = {"kind": "local"}
+        st, _ = rt_mod.api_runtime_set(ctx, None, {"mic_muted": True})
+        assert st == 200 and asked
+    finally:
+        ctx.close()
