@@ -1,6 +1,5 @@
-"""GitHub WRITE FRAMEWORK (V7 slice G2, issue #409; umbrella #50). NOTHING IS WRITTEN HERE: no kind is implemented yet
-(G3 issues/comments/labels, G4 pull requests/CI, G5 merge queue add handlers to HANDLERS). Every kind that passes the
-gates returns GITHUB_WRITE_NOT_IMPLEMENTED, so the framework is testable without touching GitHub.
+"""GitHub WRITE FRAMEWORK (V7 G2 #409; umbrella #50). G3 (github_issues.py) implements issues/comments/labels; G4 pull
+requests/CI and G5 merge queue add handlers to HANDLERS. A kind without a handler returns GITHUB_WRITE_NOT_IMPLEMENTED.
 
 `execute(action)` is the ONLY path. In this order it refuses on:
   1. a FORBIDDEN kind (forever): delete repo, visibility/settings/secrets/org/permissions/branch protection/rulesets,
@@ -8,7 +7,9 @@ gates returns GITHUB_WRITE_NOT_IMPLEMENTED, so the framework is testable without
   2. the switch `github_write` off (default OFF, high risk, beta gate, needs `github`)   -> GITHUB_WRITE_OFF
   3. an untrusted turn (text written by others was read this turn)                       -> GITHUB_WRITE_UNTRUSTED
   4. a repo not in `github_repos` of config.toml (default empty = nothing)               -> GITHUB_WRITE_REPO
-  5. a token without write rights, probed with READ calls; fail closed                    -> GITHUB_WRITE_SCOPE
+  5. a token without write rights, probed with READ calls (canonical repo name, issues-family GET); fail closed
+                                                                                          -> GITHUB_WRITE_SCOPE
+     (a retry of the same action within 10 minutes -> GITHUB_WRITE_DUPLICATE; a 403 after approval is authoritative)
   6. the rate limit (MAX_WRITES per WINDOW_S)                                             -> GITHUB_WRITE_RATE_LIMIT
   7. the owner's approval of the EXACT action (ApprovalService; answered only by the owner's channels, never by the
      model or text), bound to the action hash: an approval for A never covers B          -> GITHUB_WRITE_DENIED/TIMEOUT
@@ -38,7 +39,7 @@ GRANT_TTL_S = 300.0
 # kind -> token permission class the owner must grant (classic tokens: scope `repo`). Reserved names for G3-G5.
 KIND_PERMS: dict[str, str] = {
     "issue.create": "Issues: write", "issue.edit": "Issues: write", "issue.comment": "Issues: write",
-    "issue.labels": "Issues: write", "pr.open": "Pull requests: write", "pr.update": "Pull requests: write",
+    "labels.add": "Issues: write", "labels.remove": "Issues: write", "pr.open": "Pull requests: write", "pr.update": "Pull requests: write",
     "pr.comment": "Pull requests: write", "pr.review": "Pull requests: write", "ci.rerun": "Actions: write",
     "merge.enqueue": "Pull requests: write"}
 _FORBIDDEN_TOKENS = frozenset({"secret", "secrets", "org", "orgs", "organization", "permission", "permissions", "protection",
@@ -48,6 +49,10 @@ _FORBIDDEN_KINDS = frozenset({"repo.delete", "delete.repo", "repo.archive", "pr.
                               "merge.squash", "push.force", "branch.delete", "release.delete"})
 _REPO = re.compile(r"^[A-Za-z0-9_.-]{1,100}/[A-Za-z0-9_.-]{1,100}$")
 HANDLERS: dict[str, Callable[["WriteAction", gc.GitHubClient], Awaitable[dict]]] = {}     # filled by G3+
+VALIDATORS: dict[str, Callable[["WriteAction"], str]] = {}      # kind -> "" or why the payload is refused (G3+)
+MAX_APPROVAL_CHARS = 1700                  # ApprovalService.ask cuts a prompt at 2000: never cut what the owner must see
+DUP_WINDOW_S = 600.0                       # the same approved action is not executed twice within this time
+_LINK = re.compile(r"https?://|www\.|\b[a-z0-9-]+\.(?:com|org|net|io|dev)\b", re.I)
 
 
 class WriteAction(BaseModel):
@@ -65,10 +70,21 @@ class WriteAction(BaseModel):
                           sort_keys=True, ensure_ascii=False, default=str)
         return hashlib.sha256(blob.encode()).hexdigest()
 
-    def approval_text(self) -> str:
+    def warnings(self) -> list[str]:
+        """Mentions and links in the text notify or lead real people: say so, at the top of the approval."""
+        text = json.dumps(self.payload, ensure_ascii=False, default=str)
+        out = []
+        if "@" in text:
+            out.append("WARNING: the text contains @ : a mention notifies that person or team on GitHub")
+        if _LINK.search(text):
+            out.append("WARNING: the text contains a link or address")
+        return out
+
+    def approval_text(self, extra: str = "") -> str:
         body = json.dumps(self.payload, ensure_ascii=False, sort_keys=True, default=str)
+        warn = "".join(w + "\n" for w in [*self.warnings(), *([extra] if extra else [])])
         return (f"GitHub write: {self.kind} on {self.repo}" + (f" ({self.target})" if self.target else "")
-                + f"\n{self.preview}\nExact payload: {body[:1200]}\nRef {self.hash()[:10]}")
+                + f"\n{warn}{self.preview}\nExact payload: {body[:1200]}\nRef {self.hash()[:10]}")
 
 
 class WriteResult(BaseModel):
@@ -99,6 +115,7 @@ class GitHubWriter:
         self.client = client or (lambda: gc.GitHubClient(self.home))
         self.clock, self.limit = clock, limit
         self._recent: list[float] = []
+        self._token_warn = ""
         self._grants: dict[str, float] = {}          # action hash -> expiry, single use (batch approvals)
 
     def _refuse(self, a: WriteAction, code: str, msg: str, origin: str) -> WriteResult:
@@ -119,6 +136,17 @@ class GitHubWriter:
         except gc.GitHubError as e:
             return f"could not verify the token's write permission ({e.code})"
         perm = KIND_PERMS.get(a.kind.strip().lower(), "write access")
+        if (p.get("full_name") or "").lower() != a.repo.strip().lower():   # renamed / transferred / forged answer
+            return "the repo's real name on GitHub differs from the github_repos entry (renamed or moved); update the list"
+        self._token_warn = ""
+        broad = gc.broad_scopes(p["scopes"])
+        if broad:
+            self._token_warn = ("WARNING: this classic token has broad scopes (" + ", ".join(broad)
+                                + "); a fine-grained token limited to the chosen repos is safer")
+        try:                                           # a harmless authenticated read of the endpoint family
+            self.client().family_probe(owner, repo)
+        except gc.GitHubError as e:
+            return f"the token cannot read the issues of this repo ({e.code})"
         if p["scopes"] is not None:                                    # classic token: X-OAuth-Scopes
             if p["push"] is False:                                    # a scope does not give write on THIS repo
                 return f"the token has no write permission on the repo ({perm})"
@@ -132,6 +160,11 @@ class GitHubWriter:
             return self._refuse(a, "GITHUB_WRITE_FORBIDDEN", "unknown kind of change", origin)
         if len(json.dumps(a.payload, ensure_ascii=False, sort_keys=True, default=str)) > MAX_PAYLOAD_CHARS:
             return self._refuse(a, "GITHUB_WRITE_BAD_ARGUMENT", "payload too large to show in full to the owner", origin)
+        bad = (VALIDATORS.get(a.kind.strip().lower()) or (lambda _a: ""))(a)
+        if bad:
+            return self._refuse(a, "GITHUB_WRITE_BAD_ARGUMENT", bad, origin)
+        if len(a.approval_text()) > MAX_APPROVAL_CHARS:
+            return self._refuse(a, "GITHUB_WRITE_BAD_ARGUMENT", "action too large to show in full to the owner", origin)
         if not self.feats.active(FEATURE):
             return self._refuse(a, "GITHUB_WRITE_OFF", "GitHub writes are off (owner: jarvis github write on)", origin)
         if untrusted or origin not in ("user", "model"):
@@ -155,7 +188,7 @@ class GitHubWriter:
         a = actions[0]
         title = f"GitHub: {a.kind} on {a.repo}" if len(actions) == 1 else f"GitHub: {len(actions)} actions on {a.repo}"
         ok = await self.approvals.ask(
-            "\n---\n".join(x.approval_text() for x in actions), title=title[:120], risk="high", kind="tool",
+            "\n---\n".join(x.approval_text(self._token_warn) for x in actions)[:1990], title=title[:120], risk="high", kind="tool",
             why="a change on GitHub; the exact action is shown", source=origin,
             details={"action_hashes": ",".join(x.hash()[:16] for x in actions), "repo": a.repo, "kind": a.kind})
         return "" if ok else ("timeout" if getattr(self.approvals, "last_resolution", "") == "timeout" else "denied")
@@ -169,6 +202,8 @@ class GitHubWriter:
             r = await self._gates(a, origin, untrusted)
             if r is not None:
                 return r
+        if sum(len(x.approval_text(self._token_warn)) + 5 for x in actions) > MAX_APPROVAL_CHARS:
+            return WriteResult(ok=False, code="GITHUB_WRITE_BAD_ARGUMENT", message="the batch is too long to show in full")
         why = await self._ask(actions, origin)
         if why:
             return self._refuse(actions[0], "GITHUB_WRITE_TIMEOUT" if why == "timeout" else "GITHUB_WRITE_DENIED",
@@ -184,6 +219,9 @@ class GitHubWriter:
         granted = h in self._grants                    # a batch approval of exactly this action
         if granted:                                    # (the gates still run: switch, repo, scope, rate)
             self._grants.pop(h)
+        dup = self._duplicate(h)
+        if dup:
+            return self._refuse(a, "GITHUB_WRITE_DUPLICATE", dup, origin)
         r = await self._gates(a, origin, untrusted, rate=not granted)
         if r is not None:
             return r
@@ -200,15 +238,44 @@ class GitHubWriter:
         try:
             data = await handler(a, self.client())
         except gc.GitHubError as e:
-            return self._refuse(a, e.code, e.message, origin)
+            msg = e.message
+            if e.code == "GITHUB_WRITE_PERMISSION":        # the answer after approval is authoritative
+                msg += f" (needs {KIND_PERMS.get(a.kind.strip().lower(), 'write access')} on this repo)"
+            return self._refuse(a, e.code, msg, origin)
         self._audit(a, "OK", origin)
         return WriteResult(ok=True, code="OK", data=data)
+
+    def _duplicate(self, h: str) -> str:
+        """Idempotency: the audit holds the action hash; a retry of an action that already succeeded (or whose answer was
+        lost) within DUP_WINDOW_S is refused, so a retried approved action never posts twice."""
+        f, now = self.home / "github" / "write_audit.jsonl", self.clock()
+        try:
+            rows = [json.loads(x) for x in f.read_text(encoding="utf-8").splitlines()[-200:] if x.strip()]
+        except (OSError, ValueError):
+            return ""
+        for r in rows:
+            if isinstance(r, dict) and r.get("hash") == h[:16] and r.get("result") in ("OK", "GITHUB_WRITE_UNKNOWN") \
+                    and now - float(r.get("ts") or 0) < DUP_WINDOW_S:
+                return ("this exact action was already done (or its answer was lost); check on GitHub, "
+                        f"or change the text, or wait {int(DUP_WINDOW_S // 60)} minutes")
+        return ""
+
+    def token_warnings(self) -> list[str]:
+        """Broad classic-token scopes, from one harmless read on the first allowed repo (never raises)."""
+        if not self.repos or not gc.connected(self.home):
+            return []
+        o, _, r = self.repos[0].partition("/")
+        try:
+            return [f"classic token with broad scopes: {', '.join(b)}; prefer a fine-grained token for the chosen repos"
+                    for b in [gc.broad_scopes(self.client().write_probe(o, r)["scopes"])] if b]
+        except gc.GitHubError:
+            return []
 
     def status(self) -> dict:
         return {"switch_on": bool(self.feats.active(FEATURE)), "allowed_repos": list(self.repos),
                 "implemented_kinds": sorted(HANDLERS), "reserved_kinds": sorted(KIND_PERMS),
                 "token_permissions_per_class": sorted(set(KIND_PERMS.values())),
-                "limit": f"{self.limit[0]} per {int(self.limit[1])} s"}
+                "limit": f"{self.limit[0]} per {int(self.limit[1])} s", "token_warnings": self.token_warnings()}
 
 
 # ------------------------------------------------------------------------------------------ feature + CLI
@@ -220,10 +287,9 @@ def _probe(c: feat.ProbeCtx) -> tuple[bool, str]:
 
 feat.register(FEATURE, "GitHub: כתיבה באישור", "GitHub: writes with approval", False, probe=_probe, needs=["github"],
               risk="high",
-              about="framework for changing GitHub (issues, pull requests, CI) only after you approve the exact action, "
-                    "only on repos you list, never merge directly (nothing is written yet)",
-              targets=targets("UNIT test_github_write.py (fake GitHub API and approvals, no network)",
-                              "no write kind exists yet and it never touched the real GitHub API; the owner sets the token permissions"),
+              about="change GitHub (create or edit issues, comment, add or remove labels) only after you approve the exact text, only on repos you list, never merge directly",
+              targets=targets("UNIT test_github_write.py, test_github_issues.py (fake GitHub API and approvals, no network)",
+                              "never touched the real GitHub API; the owner creates the token with Issues write for the chosen repos"),
               permissions=["writes approved each time"], settings="jarvis github write status")
 
 
@@ -243,3 +309,6 @@ def cmd_github_write(a, cfg, home) -> int:
     print(json.dumps(GitHubWriter(home, f, None, repos=list(getattr(cfg, "github_repos", []) or [])).status(),
                      ensure_ascii=False))
     return 0
+
+
+from . import github_issues  # noqa: E402,F401  (registers the G3 kinds: HANDLERS and VALIDATORS)
