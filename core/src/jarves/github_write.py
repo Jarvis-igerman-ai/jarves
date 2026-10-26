@@ -10,7 +10,10 @@ requests/CI and G5 merge queue add handlers to HANDLERS. A kind without a handle
   5. a token without write rights, probed with READ calls (canonical repo name, issues-family GET); fail closed
                                                                                           -> GITHUB_WRITE_SCOPE
      (a retry of the same action within 10 minutes -> GITHUB_WRITE_DUPLICATE; a 403 after approval is authoritative)
-  6. the rate limit (MAX_WRITES per WINDOW_S)                                             -> GITHUB_WRITE_RATE_LIMIT
+  6. the rate limit (MAX_WRITES per WINDOW_S): the slot is RESERVED under a file lock before the owner is asked
+                                                                                          -> GITHUB_WRITE_RATE_LIMIT
+  0. (first of all) the audit file is a hash chain; a broken chain or a truncation refuses every write until the
+     owner resets it (`jarvis github write reset-audit`)                                  -> GITHUB_WRITE_AUDIT_TAMPERED
   7. the owner's approval of the EXACT action (ApprovalService; answered only by the owner's channels, never by the
      model or text), bound to the action hash: an approval for A never covers B          -> GITHUB_WRITE_DENIED/TIMEOUT
   then the handler, or GITHUB_WRITE_NOT_IMPLEMENTED. Every outcome is audited (kind, repo, target, hash, result code:
@@ -19,11 +22,14 @@ requests/CI and G5 merge queue add handlers to HANDLERS. A kind without a handle
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import hashlib
 import json
+import os
 import re
 import sys
 import time
+import uuid
 from collections.abc import Awaitable, Callable
 from pathlib import Path
 
@@ -32,7 +38,6 @@ from pydantic import BaseModel, ConfigDict, Field
 from . import clilang, logs
 from . import features as feat
 from . import github_client as gc
-from .approvals import append_audit
 from .channels_common import targets
 
 FEATURE = "github_write"
@@ -56,11 +61,129 @@ VALIDATORS: dict[str, Callable[["WriteAction"], str]] = {}      # kind -> "" or 
 MAX_APPROVAL_CHARS = 1700                  # ApprovalService.ask cuts a prompt at 2000: never cut what the owner must see
 _NOT_APPROVED = frozenset({"GITHUB_WRITE_FORBIDDEN", "GITHUB_WRITE_OFF", "GITHUB_WRITE_UNTRUSTED", "GITHUB_WRITE_REPO",
                            "GITHUB_WRITE_SCOPE", "GITHUB_WRITE_RATE_LIMIT", "GITHUB_WRITE_BAD_ARGUMENT", "GITHUB_WRITE_DUPLICATE",
-                           "GITHUB_WRITE_DENIED", "GITHUB_WRITE_TIMEOUT", "GITHUB_WRITE_UNREADABLE"})   # every other audited result = the owner approved it
+                           "GITHUB_WRITE_DENIED", "GITHUB_WRITE_TIMEOUT", "GITHUB_WRITE_UNREADABLE", "GITHUB_WRITE_AUDIT_TAMPERED",
+                           "GITHUB_WRITE_AGENT_SESSION"})   # every other audited result = the owner approved it
+RESERVED = "GITHUB_WRITE_RESERVED"          # a slot taken before the approval; the final row with the same rid replaces it
 DUP_WINDOW_S = 600.0                       # the same approved action is not executed twice within this time
 _TOGGLES = frozenset({"issue.edit", "labels.add", "labels.remove"})   # a state: only the latest write on the target counts
 _XREF = re.compile(r"(?<![\w/.-])[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+#\d+")
 _LINK = re.compile(r"https?://|www\.|\b[a-z0-9-]+\.(?:com|org|net|io|dev)\b", re.I)
+
+
+# ------------------------------------------------------------------------------------------ audit: lock + hash chain
+@contextlib.contextmanager
+def _locked(path: Path):
+    """An exclusive cross-process lock (a sidecar file): the rate-limit check and the slot reservation are one step."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with open(path.with_suffix(".lock"), "ab") as f:
+        if sys.platform == "win32":
+            import msvcrt
+            f.seek(0)
+            msvcrt.locking(f.fileno(), msvcrt.LK_LOCK, 1)          # retries ~10 s, then OSError (the caller fails closed)
+        else:
+            import fcntl
+            fcntl.flock(f.fileno(), fcntl.LOCK_EX)
+        try:
+            yield
+        finally:
+            if sys.platform == "win32":
+                f.seek(0)
+                msvcrt.locking(f.fileno(), msvcrt.LK_UNLCK, 1)
+            else:
+                fcntl.flock(f.fileno(), fcntl.LOCK_UN)
+
+
+def _link(prev: str, rec: dict) -> str:
+    return hashlib.sha256((prev + json.dumps(rec, sort_keys=True, ensure_ascii=False)).encode()).hexdigest()
+
+
+def _lines(path: Path) -> list[str]:
+    """Audit lines split on "\n" ONLY: str.splitlines() also splits on U+2028/U+0085, which a model-chosen kind or
+    target could carry into a row and so fake a tamper alarm that stops every write."""
+    return [x for x in path.read_text(encoding="utf-8").split("\n") if x.strip()] if path.exists() else []
+
+
+def _scan(path: Path) -> tuple[list[dict], str, list[str]]:
+    head_p = path.with_suffix(".head")
+    try:
+        lines = _lines(path)
+    except (OSError, ValueError):
+        return [], "the audit file cannot be read", []
+    rows: list[dict] = []
+    hashes: list[str] = []
+    for i, x in enumerate(lines, 1):
+        try:
+            r = json.loads(x)
+            if not isinstance(r, dict):
+                raise ValueError
+        except (ValueError, TypeError):
+            return [], f"audit line {i} is not valid", []
+        prev = hashes[-1] if hashes else ""
+        if "h" in r:
+            h = r.pop("h")
+            if r.get("p") != prev or _link(prev, r) != h:
+                return [], f"the audit chain is broken at line {i}", []
+            hashes.append(h)
+        elif hashes:
+            return [], f"audit line {i} is not chained", []
+        r["ts"] = float(r["ts"]) if isinstance(r.get("ts"), (int, float)) else 0.0
+        rows.append(r)
+    try:
+        head = json.loads(head_p.read_text(encoding="utf-8")) if head_p.exists() else None
+    except (OSError, ValueError):
+        return [], "the audit head file is not valid", []
+    n = len(hashes)
+    # the head may LAG by exactly one row (a crash, or on Windows a reader holding the head open, between the fsynced
+    # append and the head replace): appending a row is never hidden by this, a removed row still is detected
+    lag_ok = (head is None and n == 1) or (isinstance(head, dict) and n >= 2 and head.get("n") == n - 1
+                                           and head.get("h") == hashes[-2])
+    if head is None:
+        return (rows, "", hashes) if not n or lag_ok else ([], "the audit head file is missing", [])
+    if lag_ok:
+        return rows, "", hashes
+    if not isinstance(head, dict) or head.get("n") != n or head.get("h") != (hashes[-1] if hashes else ""):
+        return [], "the audit file was shortened or replaced", []
+    return rows, "", hashes
+
+
+def read_chain(path: Path) -> tuple[list[dict], str]:
+    """(rows, problem). Every row after a legacy (un-chained) prefix carries `p` (the previous hash) and `h` =
+    sha256(p + the row without h). A wrong link, an un-chained or torn line, or fewer rows than the head file recorded
+    (truncation) = a problem text; the caller refuses writes. HONEST LIMIT: a program running as the same user that
+    rewrites BOTH the audit and its head file consistently (or deletes both) is not detected."""
+    rows, bad, _ = _scan(path)
+    return rows, bad
+
+
+def _append_chained(path: Path, rec: dict) -> None:
+    """Caller holds the lock. Verifies the chain first: a tampered file is never extended."""
+    _, bad, hashes = _scan(path)
+    if bad:
+        logs.warn("github", "GITHUB_AUDIT_TAMPERED", "audit chain broken; not appended", why=bad[:80])
+        return
+    prev, n = (hashes[-1] if hashes else ""), len(hashes)
+    rec = {**logs.redact_deep(rec), "p": prev}
+    h = _link(prev, rec)
+    with open(path, "a", encoding="utf-8") as f:
+        f.write(json.dumps({**rec, "h": h}, ensure_ascii=True) + "\n")     # ASCII: no character can split the line
+        f.flush()
+        os.fsync(f.fileno())
+    tmp = path.with_suffix(".head.tmp")
+    tmp.write_text(json.dumps({"n": n + 1, "h": h}), encoding="utf-8")
+    os.replace(tmp, path.with_suffix(".head"))
+
+
+def reset_audit(home: Path) -> str:
+    """Owner action after a tamper alarm: the old file is kept as evidence (renamed) and a new chain starts. Returns the
+    name of the kept file ("" when there was nothing)."""
+    path = Path(home) / "github" / "write_audit.jsonl"
+    with _locked(path):
+        kept = ""
+        if path.exists():
+            kept = f"write_audit.tampered-{uuid.uuid4().hex[:8]}.jsonl"
+            os.replace(path, path.with_name(kept))
+        path.with_suffix(".head").unlink(missing_ok=True)
+    return kept
 
 
 class WriteAction(BaseModel):
@@ -139,25 +262,33 @@ class GitHubWriter:
 
     def __init__(self, home: Path, feats, approvals, *, repos: list[str] | None = None,
                  client: Callable[[], gc.GitHubClient] | None = None, clock: Callable[[], float] = time.time,
-                 limit: tuple[int, float] = (MAX_WRITES, WINDOW_S),
-                 terminal_confirm: Callable[[list[str], list[str]], bool] | None = None) -> None:
+                 limit: tuple[int, float] = (MAX_WRITES, WINDOW_S)) -> None:
         self.home, self.feats, self.approvals = Path(home), feats, approvals
         self.repos = [r.strip().lower() for r in (repos or []) if isinstance(r, str) and _REPO.match(r.strip())]
         self.client = client or (lambda: gc.GitHubClient(self.home))
         self.clock, self.limit = clock, limit
-        # CLI path: the owner's typed confirmation in THIS terminal replaces the popup (see terminal_confirm()).
-        self.terminal_confirm = terminal_confirm
         self._token_warn = ""
-        self._grants: dict[str, float] = {}          # action hash -> expiry, single use (batch approvals)
+        self._grants: dict[str, tuple[float, str]] = {}   # action hash -> (expiry, reserved slot id), single use (batch)
 
-    def _refuse(self, a: WriteAction, code: str, msg: str, origin: str) -> WriteResult:
-        self._audit(a, code, origin)
+    def _refuse(self, a: WriteAction, code: str, msg: str, origin: str, rid: str = "") -> WriteResult:
+        self._audit(a, code, origin, rid)
         return WriteResult(ok=False, code=code, message=msg)
 
-    def _audit(self, a: WriteAction, code: str, origin: str) -> None:
-        append_audit(self.home / "github" / "write_audit.jsonl", {
-            "ts": round(self.clock(), 3), "kind": str(a.kind)[:60], "repo": str(a.repo)[:201], "target": a.target[:100],
-            "hash": a.hash()[:16], "tkey": a.target_key(), "origin": origin, "result": code})
+    @property
+    def _path(self) -> Path:
+        return self.home / "github" / "write_audit.jsonl"
+
+    def _rec(self, a: WriteAction, code: str, origin: str, rid: str = "") -> dict:
+        return {"ts": round(self.clock(), 3), "kind": str(a.kind)[:60], "repo": str(a.repo)[:201], "target": a.target[:100],
+                "hash": a.hash()[:16], "tkey": a.target_key(), "origin": origin, "result": code,
+                **({"rid": rid} if rid else {})}
+
+    def _audit(self, a: WriteAction, code: str, origin: str, rid: str = "") -> None:
+        try:
+            with _locked(self._path):
+                _append_chained(self._path, self._rec(a, code, origin, rid))
+        except OSError:
+            logs.warn("github", "AUDIT_WRITE_FAILED", "could not append to the write audit file")
         logs.info("github", "GITHUB_WRITE", "github write attempt", kind=a.kind[:60], result=code, origin=origin)
 
     def _scope_problem(self, a: WriteAction) -> str:
@@ -185,7 +316,28 @@ class GitHubWriter:
             return "" if {"repo", "public_repo"} & set(p["scopes"]) else f"the token lacks the 'repo' scope ({perm})"
         return "" if p["push"] is True else f"the token has no write permission on the repo ({perm})"
 
-    async def _gates(self, a: WriteAction, origin: str, untrusted: bool, rate: bool = True, reserve: int = 1) -> WriteResult | None:
+    def _reserve(self, actions: list[WriteAction], origin: str) -> list[str] | None:
+        """Check the rate limit AND take the slots in ONE locked step (another call or process cannot slip in between).
+        Returns the slot ids, or None (limit reached, audit tampered or lock unavailable: fail closed)."""
+        try:
+            with _locked(self._path):
+                if self._tampered() or self._used() + len(actions) > self.limit[0]:
+                    return None
+                rids = [uuid.uuid4().hex[:12] for _ in actions]
+                for a, rid in zip(actions, rids):
+                    _append_chained(self._path, self._rec(a, RESERVED, origin, rid))
+                return rids
+        except OSError:
+            return None
+
+    def _rate_refusal(self, a: WriteAction, origin: str) -> WriteResult:
+        n, window = self.limit
+        return self._refuse(a, "GITHUB_WRITE_RATE_LIMIT", f"more than {n} writes in {int(window)} s", origin)
+
+    async def _gates(self, a: WriteAction, origin: str, untrusted: bool) -> WriteResult | None:
+        if self._tampered():
+            return self._refuse(a, "GITHUB_WRITE_AUDIT_TAMPERED", "the write audit file was changed or shortened: all GitHub "
+                                "writes are stopped until the owner runs: jarvis github write reset-audit", origin)
         if forbidden(a.kind):
             return self._refuse(a, "GITHUB_WRITE_FORBIDDEN", "this kind of change is never allowed", origin)
         if a.kind.strip().lower() not in KIND_PERMS:          # fail closed: an unknown kind is refused, not allowed
@@ -206,46 +358,33 @@ class GitHubWriter:
         why = self._scope_problem(a)
         if why:
             return self._refuse(a, "GITHUB_WRITE_SCOPE", why, origin)
-        if not rate:                                   # a batch action was counted when the batch was approved
-            return None
-        n, window = self.limit
-        if self._used() + reserve > n:                 # counted from the AUDIT file: a new CLI process cannot reset it
-            return self._refuse(a, "GITHUB_WRITE_RATE_LIMIT", f"more than {n} writes in {int(window)} s", origin)
         return None
 
+    def _tampered(self) -> str:
+        return read_chain(self._path)[1]
+
     def _rows(self) -> list[dict]:
-        try:
-            lines = (self.home / "github" / "write_audit.jsonl").read_text(encoding="utf-8").splitlines()[-500:]
-        except (OSError, ValueError):
-            return []
-        out = []
-        for x in lines:                          # one torn line must not switch off the rate limit and duplicate guard
-            try:
-                r = json.loads(x)
-                if isinstance(r, dict):
-                    r["ts"] = float(r.get("ts") or 0)
-                    out.append(r)
-            except (ValueError, TypeError):
-                continue
-        return out
+        return read_chain(self._path)[0][-500:]       # a broken chain gives no rows; _gates refuses before that matters
 
     def _used(self) -> int:
-        """Writes in the window: audited successes (and lost answers) plus approved-but-unspent batch grants."""
+        """Slots in the window, counted from the AUDIT file (a new CLI process cannot reset it): successes (and lost
+        answers) and still-open reservations. A reservation with a final row (same rid) counts once, by that row; a
+        denied one is released."""
         now, window = self.clock(), self.limit[1]
-        done = sum(1 for r in self._rows() if r.get("result") not in _NOT_APPROVED and now - float(r.get("ts") or 0) < window)
-        return done + len(self._grants)
+        rows = self._rows()
+        closed = {r.get("rid") for r in rows if r.get("rid") and r.get("result") != RESERVED}
+        return sum(1 for r in rows if now - float(r.get("ts") or 0) < window and (
+            (r.get("result") == RESERVED and r.get("rid") not in closed)
+            or (r.get("result") != RESERVED and r.get("result") not in _NOT_APPROVED)))
 
     async def _ask(self, actions: list[WriteAction], origin: str, extras: list[str] | None = None) -> str:
         """"" = approved, else "denied" / "timeout". The prompt shows every exact action; details carry the hashes.
-        local_only: only the JARVES popup on the computer can approve (not `jarvis approvals approve`, phone, dashboard);
-        the CLI path asks in its own terminal instead (terminal_confirm)."""
+        local_only: only the JARVES popup on the computer can approve (not `jarvis approvals approve`, phone, dashboard,
+        a typed code). The CLI uses the same popup (cmd_github_issue attaches a PopupChannel)."""
         a = actions[0]
         title = f"GitHub: {a.kind} on {a.repo}" if len(actions) == 1 else f"GitHub: {len(actions)} actions on {a.repo}"
         ex = list(extras or []) + [""] * len(actions)
         texts = [x.approval_text(" ".join(filter(None, [self._token_warn, ex[i]]))) for i, x in enumerate(actions)]
-        if self.terminal_confirm is not None:
-            ok = await asyncio.to_thread(self.terminal_confirm, texts, [x.hash() for x in actions])
-            return "" if ok else "denied"
         ok = await self.approvals.ask(
             "\n---\n".join(texts)[:1990], title=title[:120], risk="high", kind="tool", local_only=True,
             why="a change on GitHub; the exact action is shown", source=origin,
@@ -258,30 +397,34 @@ class GitHubWriter:
         if not 1 <= len(actions) <= 10 or len({x.repo.lower() for x in actions}) != 1:
             return WriteResult(ok=False, code="GITHUB_WRITE_BAD_ARGUMENT", message="a batch is 1 to 10 actions on one repo")
         for a in actions:                     # the same gates as execute(), BEFORE the owner is asked
-            r = await self._gates(a, origin, untrusted, reserve=len(actions))
+            r = await self._gates(a, origin, untrusted)
             if r is not None:
                 return r
         if sum(len(x.approval_text(self._token_warn)) + 5 for x in actions) > MAX_APPROVAL_CHARS:
             return WriteResult(ok=False, code="GITHUB_WRITE_BAD_ARGUMENT", message="the batch is too long to show in full")
+        rids = self._reserve(actions, origin)          # atomic: check + take one slot per action
+        if rids is None:
+            return self._rate_refusal(actions[0], origin)
         why = await self._ask(actions, origin)
         if why:
-            return self._refuse(actions[0], "GITHUB_WRITE_TIMEOUT" if why == "timeout" else "GITHUB_WRITE_DENIED",
-                                "the owner did not approve the batch", origin)
-        for a in actions:
-            self._grants[a.hash()] = self.clock() + GRANT_TTL_S
+            code = "GITHUB_WRITE_TIMEOUT" if why == "timeout" else "GITHUB_WRITE_DENIED"
+            for a, rid in zip(actions[1:], rids[1:]):                  # release every slot (a final row with the same rid)
+                self._audit(a, code, origin, rid)
+            return self._refuse(actions[0], code, "the owner did not approve the batch", origin, rids[0])
+        for a, rid in zip(actions, rids):
+            self._grants[a.hash()] = (self.clock() + GRANT_TTL_S, rid)
         return WriteResult(ok=True, code="GITHUB_WRITE_APPROVED", message=f"{len(actions)} actions approved")
 
     async def execute(self, a: WriteAction, *, origin: str = "model", untrusted: bool = False) -> WriteResult:
         """The ONE write path. `untrusted` = text written by others was read in this turn."""
         now, h = self.clock(), a.hash()
-        self._grants = {k: v for k, v in self._grants.items() if v > now}
+        self._grants = {k: v for k, v in self._grants.items() if v[0] > now}
         granted = h in self._grants                    # a batch approval of exactly this action
-        if granted:                                    # (the gates still run: switch, repo, scope, rate)
-            self._grants.pop(h)
+        rid = self._grants.pop(h)[1] if granted else ""   # (the gates still run: switch, repo, scope; the slot is reserved)
         dup = self._duplicate(a)
         if dup:
             return self._refuse(a, "GITHUB_WRITE_DUPLICATE", dup, origin)
-        r = await self._gates(a, origin, untrusted, rate=not granted)
+        r = await self._gates(a, origin, untrusted)
         if r is not None:
             return r
         if not granted:
@@ -291,23 +434,27 @@ class GitHubWriter:
                                     "edit replaces; try again", origin)
             if len(a.approval_text(extra)) > MAX_APPROVAL_CHARS:
                 return self._refuse(a, "GITHUB_WRITE_BAD_ARGUMENT", "action too large to show in full to the owner", origin)
+            slots = self._reserve([a], origin)         # atomic check + reserve BEFORE the owner is asked
+            if slots is None:
+                return self._rate_refusal(a, origin)
+            rid = slots[0]
             why = await self._ask([a], origin, [extra])
             if why:
                 return self._refuse(a, "GITHUB_WRITE_TIMEOUT" if why == "timeout" else "GITHUB_WRITE_DENIED",
-                                    "the owner did not approve this exact action", origin)
+                                    "the owner did not approve this exact action", origin, rid)
         if a.hash() != h:                              # the payload changed while the owner was asked (TOCTOU)
-            return self._refuse(a, "GITHUB_WRITE_DENIED", "the action changed after approval", origin)
+            return self._refuse(a, "GITHUB_WRITE_DENIED", "the action changed after approval", origin, rid)
         handler = HANDLERS.get(a.kind.strip().lower())
         if handler is None:
-            return self._refuse(a, "GITHUB_WRITE_NOT_IMPLEMENTED", "this kind of write is not implemented yet", origin)
+            return self._refuse(a, "GITHUB_WRITE_NOT_IMPLEMENTED", "this kind of write is not implemented yet", origin, rid)
         try:
             data = await handler(a, self.client())
         except gc.GitHubError as e:
             msg = e.message
             if e.code == "GITHUB_WRITE_PERMISSION":        # the answer after approval is authoritative
                 msg += f" (needs {KIND_PERMS.get(a.kind.strip().lower(), 'write access')} on this repo)"
-            return self._refuse(a, e.code, msg, origin)
-        self._audit(a, "OK", origin)
+            return self._refuse(a, e.code, msg, origin, rid)
+        self._audit(a, "OK", origin, rid)
         return WriteResult(ok=True, code="OK", data=data)
 
     async def _extra(self, a: WriteAction) -> str | None:
@@ -349,27 +496,29 @@ class GitHubWriter:
         return {"switch_on": bool(self.feats.active(FEATURE)), "allowed_repos": list(self.repos),
                 "implemented_kinds": sorted(HANDLERS), "reserved_kinds": sorted(KIND_PERMS),
                 "token_permissions_per_class": sorted(set(KIND_PERMS.values())),
-                "limit": f"{self.limit[0]} per {int(self.limit[1])} s", "token_warnings": self.token_warnings()}
+                "limit": f"{self.limit[0]} per {int(self.limit[1])} s", "token_warnings": self.token_warnings(),
+                "audit": self._tampered() or "ok"}
 
 
 # ------------------------------------------------------------------------------------------ feature + CLI
-def terminal_confirm(texts: list[str], hashes: list[str], *, ask=input, tty=None) -> bool:
-    """The CLI's owner confirmation, in the terminal that runs the command: show the exact action and require the typed
-    first 6 characters of its hash. Not a terminal (a pipe, a plain script) = refused. HONEST LIMIT: this stops a typo, a
-    pipe and an agent shell without a terminal; it does NOT stop a program that runs this command in a pseudo-terminal
-    it controls (the hash is shown in the output and can be computed from the action). Approvals of the RUNNING JARVES
-    (model writes) are popup-only (local_only)."""
+# Environment markers set by coding agents / their shells. A pty (ConPTY, winpty, script) makes isatty() true for a program
+# that controls it, so a terminal is NOT proof of a person: the popup is the real protection; this refuses early and clearly.
+_AGENT_ENV = ("CLAUDECODE", "CLAUDE_CODE_ENTRYPOINT", "CLAUDE_CODE_SSE_PORT", "CODEX_HOME", "CODEX_SANDBOX", "CODEX_CI",
+              "AIDER_MODEL", "CURSOR_TRACE_ID", "CURSOR_AGENT", "GEMINI_CLI", "OPENCODE", "CLINE_TASK", "GOOSE_SESSION",
+              "AGENT_SESSION", "JARVES_AGENT_SESSION", "CI", "GITHUB_ACTIONS")
+
+
+def agent_session_reason(env=None, tty: bool | None = None) -> str:
+    """"" = looks like a person at a real terminal; else why a GitHub write from the CLI is refused (conservative:
+    any doubt refuses). The owner's own terminal sets none of these variables."""
+    env = os.environ if env is None else env
     interactive = (sys.stdin.isatty() and sys.stdout.isatty()) if tty is None else tty
-    if not interactive or len(hashes) != 1:
-        print("GITHUB_WRITE_DENIED: a GitHub write needs your typed confirmation in an interactive terminal")
-        return False
-    print(texts[0])
-    want = hashes[0][:6]
-    try:
-        got = ask(f"Type {want} to approve this exact action (anything else cancels): ")
-    except (EOFError, KeyboardInterrupt):
-        return False
-    return str(got).strip().lower() == want
+    if not interactive:
+        return "this is not an interactive terminal (a pipe, script or agent shell)"
+    hit = [k for k in _AGENT_ENV if str(env.get(k, "")).strip()]
+    if hit:
+        return "an agent or automation session is running this command (" + ", ".join(hit[:3]) + ")"
+    return ""
 
 
 def _probe(c: feat.ProbeCtx) -> tuple[bool, str]:
@@ -391,6 +540,15 @@ def cmd_github_write(a, cfg, home) -> int:
     from .cli import _cli_features
     f = _cli_features(cfg, home)
     mode = getattr(a, "write_action", None) or "status"
+    if mode == "reset-audit":
+        why = agent_session_reason()
+        if why:
+            print(f"GITHUB_WRITE_AGENT_SESSION: refused: {why}; the owner resets the audit in his own terminal")
+            return 1
+        kept = reset_audit(home)
+        print(clilang.bi("יומן הביקורת אופס; הקובץ הישן נשמר כראיה. / The audit was reset; the old file is kept as evidence.")
+              + (f" ({kept})" if kept else ""))
+        mode = "status"
     if mode in ("on", "off"):
         try:
             f.set(FEATURE, mode == "on", by="cli")
